@@ -104,7 +104,7 @@ public static class Iso8601Duration
             duration = TimeSpan.FromSeconds(totalSeconds);
             return true;
         }
-        catch (OverflowException)
+        catch (Exception ex) when (ex is OverflowException or ArgumentOutOfRangeException)
         {
             duration = TimeSpan.Zero;
             return false;
@@ -187,6 +187,10 @@ public sealed class GrantValidityPolicy : IGrantValidityPolicy
             : Iso8601Duration.ParseOrThrow(value.DeclarativeMaxDuration, nameof(GrantValidityOptions.DeclarativeMaxDuration));
     }
 
+    /// <summary>
+    /// Test/unit default (<see cref="GrantValidityOptions.CreateDefault"/>) for construction without dependency injection.
+    /// Production composition never uses it: the maximum validity must be configured.
+    /// </summary>
     public static GrantValidityPolicy CreateDefault() =>
         new(Options.Create(GrantValidityOptions.CreateDefault()));
 
@@ -195,7 +199,7 @@ public sealed class GrantValidityPolicy : IGrantValidityPolicy
         if (!Iso8601Duration.TryParse(options.MaxDuration, out var maxDuration))
         {
             return ValidateOptionsResult.Fail(
-                $"'{GrantValidityOptions.SectionName}:{nameof(GrantValidityOptions.MaxDuration)}' must be a positive ISO-8601 duration (for example, 'P2M').");
+                $"'{GrantValidityOptions.SectionName}:{nameof(GrantValidityOptions.MaxDuration)}' must be a positive ISO-8601 duration (for example, 'P5Y').");
         }
 
         if (!Iso8601Duration.TryParse(options.DefaultDuration, out var defaultDuration))
@@ -241,7 +245,7 @@ public sealed class GrantValidityPolicy : IGrantValidityPolicy
                 throw new GrantValidityException("VALIDATION_ERROR", $"Requested duration '{requestedDuration}' is not a valid positive ISO-8601 duration.");
             }
 
-            target = effectiveStart.Add(parsed);
+            target = GrantTimeMath.AddSaturating(effectiveStart, parsed);
         }
         else if (durationDays.HasValue)
         {
@@ -250,11 +254,11 @@ public sealed class GrantValidityPolicy : IGrantValidityPolicy
                 throw new GrantValidityException("VALIDATION_ERROR", "Duration must be at least 1 day.");
             }
 
-            target = effectiveStart.AddDays(durationDays.Value);
+            target = GrantTimeMath.AddSaturating(effectiveStart, GrantTimeMath.DaysToSpan(durationDays.Value));
         }
         else
         {
-            target = effectiveStart.Add(DefaultDuration);
+            target = GrantTimeMath.AddSaturating(effectiveStart, DefaultDuration);
         }
 
         if (target <= now || target <= effectiveStart)
@@ -287,7 +291,7 @@ public sealed class GrantValidityPolicy : IGrantValidityPolicy
                 statusCode: 409);
         }
 
-        var maxAllowed = now.Add(MaxDuration);
+        var maxAllowed = GrantTimeMath.AddSaturating(now, MaxDuration);
         if (approverValidTo.HasValue)
         {
             if (approverValidTo.Value <= now)
@@ -342,7 +346,7 @@ public sealed class GrantValidityPolicy : IGrantValidityPolicy
                     "The expiry of the declarative grant must lie in the future."));
         }
 
-        var maxValidTo = now.Add(DeclarativeMaxDuration);
+        var maxValidTo = GrantTimeMath.AddSaturating(now, DeclarativeMaxDuration);
         if (validUntil.Value > maxValidTo)
         {
             throw new GrantPolicyViolationException(
@@ -360,7 +364,7 @@ public sealed class GrantValidityPolicy : IGrantValidityPolicy
             throw new GrantValidityException("VALIDATION_ERROR", "Duration must be at least 1 day.");
         }
 
-        if (TimeSpan.FromDays(days) > MaxDuration)
+        if (GrantTimeMath.DaysToSpan(days) > MaxDuration)
         {
             throw new GrantValidityException(
                 ValidityExceedsMaximumCode,

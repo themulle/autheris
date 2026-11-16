@@ -9,12 +9,14 @@ public sealed class GrantValidityOptions
     public const string SectionName = "Gateway:Governance:Grants";
 
     /// <summary>
-    /// Maximum allowed ISO-8601 duration for consent requests and active grants (for example, <c>P2M</c>).
+    /// Maximum allowed ISO-8601 duration for consent requests and active grants (for example, <c>P5Y</c>). Required operator
+    /// configuration with no compiled-in value; there is no built-in ceiling, so any positive duration (multi-year included)
+    /// can be configured.
     /// </summary>
     public string MaxDuration { get; set; } = string.Empty;
 
     /// <summary>
-    /// Default ISO-8601 duration applied when a consent request omits an explicit validity window or timestamp (for example, <c>P2W</c>).
+    /// Default ISO-8601 duration applied when a consent request omits an explicit validity window or timestamp (for example, <c>P1Y</c>). Must not exceed <see cref="MaxDuration"/>.
     /// </summary>
     public string DefaultDuration { get; set; } = string.Empty;
 
@@ -24,12 +26,13 @@ public sealed class GrantValidityOptions
     public string? DeclarativeMaxDuration { get; set; }
 
     /// <summary>
-    /// Built-in default values used by unit-level service construction without dependency injection.
+    /// Test/unit default (multi-year) for service construction without dependency injection. It is NOT a production
+    /// fallback: production requires explicit configuration and startup validation fails when <see cref="MaxDuration"/> is missing.
     /// </summary>
     public static GrantValidityOptions CreateDefault() => new()
     {
-        DefaultDuration = "P2W",
-        MaxDuration = "P2M",
-        DeclarativeMaxDuration = "P2M"
+        DefaultDuration = "P1Y",
+        MaxDuration = "P5Y",
+        DeclarativeMaxDuration = "P5Y"
     };
 }

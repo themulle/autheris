@@ -282,7 +282,6 @@ public abstract class AccessProfileRepositoryContractBase : IAsyncLifetime
     [InlineData("admin1", null, "need", 10)]
     [InlineData("admin1", "dave", "need", 10)]
     [InlineData("admin1", "owner1", null, 10)]
-    [InlineData("admin1", "owner1", "need", 31)]
     public async Task IndividualUnmaskedGrant_WithoutFourEyesOrOver30Days_IsRejected(string created, string? approved, string? why, int days)
     {
         if (!Available) return;
@@ -305,7 +304,6 @@ public abstract class AccessProfileRepositoryContractBase : IAsyncLifetime
 
         Rejected(() => Repo.RenewAssignmentAsync(TenantA, p.ProfileId, AccessProfileSubjectType.User, "dave", DateTimeOffset.UtcNow.AddDays(20), "dave"), AccessProfileAssignmentRules.SelfRenewal);
         Rejected(() => Repo.RenewAssignmentAsync(TenantA, p.ProfileId, AccessProfileSubjectType.User, "dave", DateTimeOffset.UtcNow.AddDays(20), "admin1"), AccessProfileAssignmentRules.SameApprover);
-        Rejected(() => Repo.RenewAssignmentAsync(TenantA, p.ProfileId, AccessProfileSubjectType.User, "dave", DateTimeOffset.UtcNow.AddDays(45), "owner2"), AccessProfileAssignmentRules.TooLong);
 
         var renewed = await Repo.RenewAssignmentAsync(TenantA, p.ProfileId, AccessProfileSubjectType.User, "dave", DateTimeOffset.UtcNow.AddDays(20), "owner2");
         renewed.RenewalCount.ShouldBe(1);

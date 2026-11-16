@@ -64,7 +64,7 @@ public sealed class ConsentRequestService : IConsentRequestService
     {
         _materializationGuard = materializationGuard;
         _policyDependencyIndex = policyDependencyIndex;
-        _grantPolicy = grantPolicy ?? new GrantPolicy();
+        _grantPolicy = grantPolicy ?? new GrantPolicy(validityPolicy: grantValidityPolicy);
         _grantValidityPolicy = grantValidityPolicy ?? GrantValidityPolicy.CreateDefault();
         _timeProvider = timeProvider ?? TimeProvider.System;
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
@@ -178,7 +178,7 @@ public sealed class ConsentRequestService : IConsentRequestService
             var resolution = await _workflowRouter.ResolveForTableAsync(tenantId, tableId, ct).ConfigureAwait(false);
             workflowMode = resolution.Mode;
             externalSystemId = workflowMode == ConsentWorkflowMode.External ? resolution.ExternalSystemId : null;
-            var routeMaxEnd = (command.RequestedValidFrom ?? now).AddDays(Math.Max(1, resolution.MaxDurationDays));
+            var routeMaxEnd = GrantTimeMath.AddSaturating(command.RequestedValidFrom ?? now, GrantTimeMath.DaysToSpan(Math.Max(1, resolution.MaxDurationDays)));
             if (resolvedValidTo > routeMaxEnd)
             {
                 if (command.RequestedValidTo.HasValue || command.RequestedDuration is not null || command.DurationDays > 0)

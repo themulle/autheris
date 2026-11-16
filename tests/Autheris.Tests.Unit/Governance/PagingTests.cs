@@ -15,8 +15,14 @@ using Xunit;
 namespace Autheris.Tests.Unit.Governance;
 
 /// <summary>WP-SC-10 / SEC-SC-16: keyset cursors, tenant-bound paged audit and consent listings, clamped-grant report.</summary>
-public sealed class PagingTests
+[Collection("IndividualGrantLimits")]
+public sealed class PagingTests : IDisposable
 {
+    // The read-time clamp exists only for operator-configured limits (no compiled-in ceilings); these tests exercise a 180/30/365 day profile.
+    public PagingTests() => IndividualGrantLimits.Configure(TimeSpan.FromDays(180), TimeSpan.FromDays(30), TimeSpan.FromDays(365));
+
+    public void Dispose() => IndividualGrantLimits.Reset();
+
     private static readonly DateTimeOffset Now = new(2026, 10, 16, 12, 0, 0, TimeSpan.Zero);
     private static readonly TableIdentifier Orders = new("default", "sales", "orders");
 

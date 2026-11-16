@@ -590,8 +590,8 @@ public sealed class AccessProfileTests
     [Theory]
     [InlineData(0)]
     [InlineData(-1)]
-    [InlineData(181)]
-    [InlineData(365)]
+    [InlineData(5 * 365 + 1)]
+    [InlineData(int.MaxValue)]
     public async Task BulkConsent_InvalidValidDays_FailsValidation(int days)
     {
         var repo = new InMemoryAccessProfileRepository();

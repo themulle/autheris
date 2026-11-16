@@ -27,6 +27,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
+[Collection("IndividualGrantLimits")]
 public sealed class CrossChannelIntegrationFixesTests
 {
     [Fact]
@@ -167,7 +168,10 @@ public sealed class CrossChannelIntegrationFixesTests
     [Fact]
     public void ConsentResolutionService_ResolveAccess_ClampedExpiredConsent_ReturnsClearDiagnosticDenial()
     {
-        // Arrange
+        // Arrange: the clamp only exists when the operator configured a limit (there is no compiled-in ceiling).
+        IndividualGrantLimits.Configure(TimeSpan.FromDays(180), null, null);
+        try
+        {
         var resolver = new ConsentResolutionService();
         var table = new TableIdentifier("sales", "public", "orders");
         var userSid = new Sid("user-alice");
@@ -193,6 +197,11 @@ public sealed class CrossChannelIntegrationFixesTests
         decision.DeniedReasons[0].ShouldContain("Zero Trust: No active ALLOW consent granted to subject (consent expired on");
         decision.DeniedReasons[0].ShouldContain("due to maximum duration clamp).");
         decision.DeniedReasons[0].ShouldContain(clampedConsent.EffectiveValidTo.ToString("yyyy-MM-dd"));
+        }
+        finally
+        {
+            IndividualGrantLimits.Reset();
+        }
     }
 
     // =========================================================================

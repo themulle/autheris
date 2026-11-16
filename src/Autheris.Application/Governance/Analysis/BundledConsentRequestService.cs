@@ -29,6 +29,7 @@ public sealed class BundledConsentRequestService : IBundledConsentRequestService
 
     [Microsoft.Extensions.DependencyInjection.ActivatorUtilitiesConstructor]
     private readonly IGrantPolicy _grantPolicy;
+    private readonly IGrantValidityPolicy _grantValidityPolicy;
     private readonly IConsentMaterializationGuard? _materializationGuard;
 
     public BundledConsentRequestService(
@@ -38,10 +39,12 @@ public sealed class BundledConsentRequestService : IBundledConsentRequestService
         IConsentApprovalRepository? approvalRepository = null,
         IDataOwnershipRepository? dataOwnershipRepository = null,
         IGrantPolicy? grantPolicy = null,
-        IConsentMaterializationGuard? materializationGuard = null)
+        IConsentMaterializationGuard? materializationGuard = null,
+        IGrantValidityPolicy? grantValidityPolicy = null)
     {
         _materializationGuard = materializationGuard;
-        _grantPolicy = grantPolicy ?? new GrantPolicy();
+        _grantValidityPolicy = grantValidityPolicy ?? GrantValidityPolicy.CreateDefault();
+        _grantPolicy = grantPolicy ?? new GrantPolicy(validityPolicy: _grantValidityPolicy);
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
         _auditLogRepository = auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository));
@@ -55,10 +58,12 @@ public sealed class BundledConsentRequestService : IBundledConsentRequestService
         IConsentApprovalRepository? approvalRepository = null,
         IDataOwnershipRepository? dataOwnershipRepository = null,
         IGrantPolicy? grantPolicy = null,
-        IConsentMaterializationGuard? materializationGuard = null)
+        IConsentMaterializationGuard? materializationGuard = null,
+        IGrantValidityPolicy? grantValidityPolicy = null)
     {
         _materializationGuard = materializationGuard;
-        _grantPolicy = grantPolicy ?? new GrantPolicy();
+        _grantValidityPolicy = grantValidityPolicy ?? GrantValidityPolicy.CreateDefault();
+        _grantPolicy = grantPolicy ?? new GrantPolicy(validityPolicy: _grantValidityPolicy);
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
         _approvalRepository = approvalRepository;
@@ -262,14 +267,15 @@ public sealed class BundledConsentRequestService : IBundledConsentRequestService
                     ? request.Purpose
                     : item.SuggestedPurpose;
 
-                // bundled requests are individual grants for the requester; the default duration (90 days) and any
-                // requested expiry must respect the class maximum of the table.
+                // bundled requests are individual grants for the requester; the configured default duration and any
+                // requested expiry must respect the maximum of the grant class and of the tenant.
                 var bundledNow = DateTimeOffset.UtcNow;
+                var bundledDefaultValidTo = GrantTimeMath.AddSaturating(bundledNow, _grantValidityPolicy.DefaultDuration);
                 GrantPolicyViolationException.ThrowIfDenied(_grantPolicy.Evaluate(new GrantRequest(
                     GranteeType.User,
                     requesterSid.Value.Value,
                     GrantKind.Consent,
-                    request.RequestedUntilUtc ?? bundledNow.AddDays(Math.Min(90, (int)IndividualGrantLimits.RegularMax.TotalDays)),
+                    request.RequestedUntilUtc ?? bundledDefaultValidTo,
                     bundledNow,
                     GrantClassifier.Classify([table]),
                     Requester: requesterSid.Value.Value,
@@ -288,7 +294,7 @@ public sealed class BundledConsentRequestService : IBundledConsentRequestService
                         : $"[Ref:{request.ConsumerReference}] {effectivePurpose}",
                     Status = "PENDING",
                     RequestedAt = DateTimeOffset.UtcNow,
-                    RequestedValidTo = request.RequestedUntilUtc ?? bundledNow.AddDays(Math.Min(90, (int)IndividualGrantLimits.RegularMax.TotalDays)),
+                    RequestedValidTo = request.RequestedUntilUtc ?? bundledDefaultValidTo,
                     ItsmTicketId = request.ConsumerReference ?? ticketId.ToString("N"),
                     TenantId = tenantId,
                     ApprovalSteps = bucket.PrimaryOwnerSid is { } approverSid

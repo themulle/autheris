@@ -371,7 +371,8 @@ public sealed class ConsentDecisionResolverTests : IDisposable
     [Fact]
     public async Task W5_GrantPolicyDenial_AnswersBeforeAnyWrite_AndTheRequestStaysRejectable()
     {
-        using var services = DecisionServices.Build();
+        // No compiled-in ceilings: the denial comes from an operator-configured class limit.
+        using var services = DecisionServices.Build(grantOptions: new IndividualGrantOptions { RegularMaxDays = 180 });
         var req = await NewRequestAsync(validDays: 400);
 
         await ShouldBeDeniedAsync(() => ApproveAsync(req.Id, DecisionPrincipals.Basic(OwnerSid), services), GrantErrorCodes.ExceedsMaximum);
@@ -384,9 +385,9 @@ public sealed class ConsentDecisionResolverTests : IDisposable
     [Fact]
     public async Task W5_TableSensitivityRaisedAfterSubmission_IsDeniedBeforeTheStep()
     {
-        using var services = DecisionServices.Build();
+        using var services = DecisionServices.Build(grantOptions: new IndividualGrantOptions { SensitiveMaxDays = 90 });
         var table = await NewTableAsync(fourEyes: false);
-        var req = await NewRequestAsync(table, validDays: 120); // fine for a regular table (180 days), too long for a sensitive one (90 days)
+        var req = await NewRequestAsync(table, validDays: 120); // fine for a regular table (no class limit), too long for the configured sensitive limit (90 days)
         var meta = await _repository.GetTableMetadataAsync(table);
         GrantClassifier.Classify([meta]).ShouldBe(GrantSensitivity.Regular, "the precondition: the table is regular at submission");
 
@@ -400,12 +401,12 @@ public sealed class ConsentDecisionResolverTests : IDisposable
     [Fact]
     public async Task W5_UnknownMetadata_StaysSensitive_SoTheSensitiveMaximumApplies()
     {
-        using var services = DecisionServices.Build();
+        using var services = DecisionServices.Build(grantOptions: new IndividualGrantOptions { SensitiveMaxDays = 90 });
         var table = await NewTableAsync(fourEyes: false);
         var req = await NewRequestAsync(table, validDays: 120);
         var accessor = DecisionServices.Accessor(DecisionPrincipals.Basic(AdminSid), services);
 
-        // No metadata repository: GrantClassifier.Classify([null]) is Sensitive (90 days), so 120 days is refused.
+        // No metadata repository: GrantClassifier.Classify([null]) is Sensitive (configured limit 90 days), so 120 days is refused.
         await ShouldBeDeniedAsync(() => _mutation.ApproveConsentRequestAsync(
             req.Id, null, _repository, _repository, _repository, null!, accessor, null!, default), GrantErrorCodes.ExceedsMaximum);
 
@@ -418,7 +419,7 @@ public sealed class ConsentDecisionResolverTests : IDisposable
         using var first = DecisionServices.Build();
         using var tightened = DecisionServices.Build(grantOptions: new IndividualGrantOptions { SensitiveMaxDays = 30 });
         var table = await NewTableAsync(fourEyes: true);
-        var req = await NewRequestAsync(table, validDays: 60); // four-eyes tables are sensitive (90 days): fine for step 1
+        var req = await NewRequestAsync(table, validDays: 60); // four-eyes tables are sensitive: no class limit configured for step 1
 
         var step1 = await ApproveAsync(req.Id, DecisionPrincipals.Basic("S-1-5-21-FE-APPROVER-A"), first);
         step1.Status.ShouldBe("PENDING_SECOND_APPROVAL");
@@ -464,16 +465,40 @@ public sealed class ConsentDecisionResolverTests : IDisposable
         });
     }
 
-    [Theory]
-    [InlineData(GranteeType.Group)]
-    public async Task W5_GroupGrantees_StillSkipThePolicy(GranteeType grantee)
+    [Fact]
+    public async Task W5_GroupGrantees_AreBoundedByTheTenantMaximumLikeEveryone()
     {
         using var services = DecisionServices.Build();
-        var req = await NewRequestAsync(grantee: grantee, validDays: 400);
 
-        var result = await ApproveAsync(req.Id, DecisionPrincipals.Basic(OwnerSid), services);
+        // 400 days is within the configured maximum (P5Y test default): approved.
+        var within = await NewRequestAsync(grantee: GranteeType.Group, validDays: 400);
+        (await ApproveAsync(within.Id, DecisionPrincipals.Basic(OwnerSid), services)).Status.ShouldBe("APPROVED");
 
-        result.Status.ShouldBe("APPROVED");
+        // Above the configured maximum a group grantee is refused too (groups do not skip the validity rule).
+        var beyond = await NewRequestAsync(grantee: GranteeType.Group, validDays: 5 * 365 + 60);
+        var ex = await Should.ThrowAsync<GraphQLException>(() => ApproveAsync(beyond.Id, DecisionPrincipals.Basic(OwnerSid), services));
+        ex.Errors.ShouldContain(e => e.Code == "VALIDITY_EXCEEDS_MAXIMUM" || e.Code == GrantErrorCodes.ExceedsMaximum);
+        await AssertUntouchedAsync(beyond.Id);
+    }
+
+    [Fact]
+    public async Task W5_ThreeYearGrant_IsApprovedForRegularData_UnderTheConfiguredMaximum()
+    {
+        using var services = DecisionServices.Build();
+        var req = await NewRequestAsync(validDays: 3 * 365);
+
+        (await ApproveAsync(req.Id, DecisionPrincipals.Basic(OwnerSid), services)).Status.ShouldBe("APPROVED");
+    }
+
+    [Fact]
+    public async Task W5_RequestAboveTheConfiguredMaximum_IsRefused_ForUsers()
+    {
+        using var services = DecisionServices.Build();
+        var req = await NewRequestAsync(validDays: 5 * 365 + 60);
+
+        var ex = await Should.ThrowAsync<GraphQLException>(() => ApproveAsync(req.Id, DecisionPrincipals.Basic(OwnerSid), services));
+        ex.Errors.ShouldContain(e => e.Code == "VALIDITY_EXCEEDS_MAXIMUM" || e.Code == GrantErrorCodes.ExceedsMaximum);
+        await AssertUntouchedAsync(req.Id);
     }
 
     [Fact]

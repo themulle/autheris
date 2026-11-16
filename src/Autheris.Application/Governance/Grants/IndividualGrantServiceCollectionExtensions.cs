@@ -11,7 +11,7 @@ public static class IndividualGrantServiceCollectionExtensions
 {
     /// <summary>
     /// registers<see cref="IGrantPolicy"/> and <see cref="IIndividualGrantLimits"/>;
-    /// the host binds <see cref="IndividualGrantOptions"/> (a realm profile can only shorten the built-in maxima).
+    /// the host binds <see cref="IndividualGrantOptions"/> (optional operator limits; no compiled-in ceilings).
     /// The read-time clamp limits of <see cref="IndividualGrantLimits"/> follow the same options.
     /// </summary>
     public static IServiceCollection AddIndividualGrantPolicy(this IServiceCollection services)
@@ -27,7 +27,7 @@ public static class IndividualGrantServiceCollectionExtensions
             IndividualGrantLimits.Current = service;
         });
 
-        services.TryAddSingleton<IGrantPolicy>(sp => new GrantPolicy(sp.GetRequiredService<IOptions<IndividualGrantOptions>>()));
+        services.TryAddSingleton<IGrantPolicy>(sp => new GrantPolicy(sp.GetRequiredService<IOptions<IndividualGrantOptions>>(), sp.GetService<IGrantValidityPolicy>()));
         return services;
     }
 }

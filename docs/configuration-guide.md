@@ -1035,17 +1035,16 @@ Steuert die Verwaltung und Cluster-Synchronisation relationsbasierter Zeilenfilt
 
 ### 2.21 `Governance:IndividualGrants` (Time-Bound Individual Grants)
 
-Maxima of individual grants (`User` / `ServicePrincipal` grantees and individual access profile assignments). Every value can only **shorten** the built-in ceiling; a value above the ceiling or below 1 aborts startup. Group and role grants are standing and not affected. Details and error codes: [F-GOV-22](features/f-gov-22-time-bound-individual-grants.md).
+Optional operator limits of individual grants (`User` / `ServicePrincipal` grantees and individual access profile assignments). There are **no compiled-in ceilings**: grants may be valid for multiple years. The overall maximum validity comes from the required `Governance:Grants:MaxDuration` setting (ISO-8601, for example `P5Y`; startup fails without it, `DefaultDuration` must not exceed it). A per-class value below can only **shorten** that maximum for its class; unset (`null`) means no class-specific limit, and a value below 1 aborts startup. Group and role grants take no class limit, but an explicit expiry is bounded by `MaxDuration` too. Details and error codes: [F-GOV-22](features/f-gov-22-time-bound-individual-grants.md).
 
 | Key | Type | Range | Default | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `RegularMaxDays` | `int` | `1 .. 180` | `180` | Regular data. Also the read-time clamp of user consents. |
-| `SensitiveMaxDays` | `int` | `1 .. 90` | `90` | Sensitive / PII tables (unclassifiable tables count as sensitive). |
-| `UnmaskedMaxDays` | `int` | `1 .. 30` | `30` | Individual `Unmasked` access. |
-| `PrivilegedMaxDays` | `int` | `1 .. 7` | `7` | Individual privileged functional rights. |
-| `BreakGlassMaxHours` | `int` | `1 .. 72` | `72` | Break-glass exceptions. |
-| `ServicePrincipalMaxDays` | `int` | `1 .. 365` | `365` | Service principals as direct grantees. Also their read-time clamp. |
-| `CustomerRegularMaxDays` | `int` | `1 .. 90` | `90` | Regular data for customer-realm users. |
+| `RegularMaxDays` | `int?` | `>= 1` | unset | Regular data. Also the read-time clamp of user consents when set. |
+| `SensitiveMaxDays` | `int?` | `>= 1` | unset | Sensitive / PII tables (unclassifiable tables count as sensitive). |
+| `UnmaskedMaxDays` | `int?` | `>= 1` | unset | Individual `Unmasked` access. |
+| `PrivilegedMaxDays` | `int?` | `>= 1` | unset | Individual privileged functional rights. |
+| `ServicePrincipalMaxDays` | `int?` | `>= 1` | unset | Service principals as direct grantees. Also their read-time clamp when set. |
+| `CustomerRegularMaxDays` | `int?` | `>= 1` | unset | Regular data for customer-realm users. |
 | `AllowCustomerUnmasked` | `bool` | | `false` | Allows individual `Unmasked` grants in customer realms. |
 | `AllowCustomerPrivileged` | `bool` | | `false` | Allows individual privileged grants in customer realms. |
 | `RoleConversionHintAfterRenewals` | `int` | `1 .. 10` | `2` | Renewals after which a conversion to a group/role mapping is suggested. |
@@ -1053,13 +1052,14 @@ Maxima of individual grants (`User` / `ServicePrincipal` grantees and individual
 
 ```json
 "Governance": {
+  "Grants": {
+    "DefaultDuration": "P1Y",
+    "MaxDuration": "P5Y",
+    "DeclarativeMaxDuration": "P5Y"
+  },
   "IndividualGrants": {
-    "RegularMaxDays": 180,
-    "SensitiveMaxDays": 90,
-    "UnmaskedMaxDays": 30,
-    "PrivilegedMaxDays": 7,
-    "BreakGlassMaxHours": 72,
-    "ServicePrincipalMaxDays": 365
+    "SensitiveMaxDays": 365,
+    "UnmaskedMaxDays": 180
   }
 }
 ```
