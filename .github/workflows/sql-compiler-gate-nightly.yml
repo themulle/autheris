@@ -41,7 +41,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Setup .NET 10
+      - name: Setup .NET 11
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
@@ -102,10 +102,12 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Setup .NET 10
+      - name: Setup .NET 11
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
+          # dotnet-stryker is pinned with rollForward false and runs on the .NET 10 runtime; remove this line once a Stryker release targets .NET 11.
+          dotnet-version: '10.0.x'
 
       - name: Restore with Locked Mode
         run: dotnet restore Autheris.sln --locked-mode
@@ -209,7 +211,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Setup .NET 10
+      - name: Setup .NET 11
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
