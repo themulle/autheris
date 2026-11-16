@@ -3,7 +3,6 @@ namespace Autheris.Tests.Unit.VirtualFilters;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
-using System.IO;
 using System.Linq;
 using System.Security.Claims;
 using System.Text.RegularExpressions;
@@ -16,7 +15,6 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Shouldly;
@@ -28,7 +26,7 @@ using Xunit;
 /// the data source, allowed functions, translatable into the data source's dialect) and rendered per dialect with the
 /// Trino date functions translated; time values are never baked into the SQL.
 /// </summary>
-public sealed class SqlFilterDefinitionTests : IDisposable
+public sealed class SqlFilterDefinitionTests
 {
     private const string DavidLastDay = """
         from conf.client client
@@ -143,36 +141,10 @@ public sealed class SqlFilterDefinitionTests : IDisposable
         Regex.IsMatch(first, @"\d{4}-\d{2}-\d{2}").ShouldBeFalse();
     }
 
-    // ------------------------------------------------------------------ real SQLite
-
-    private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"autheris-vf-sql-{Guid.NewGuid():N}.db");
-
-    public void Dispose()
-    {
-        SqliteConnection.ClearAllPools();
-        try { File.Delete(_dbPath); } catch { /* best effort */ }
-    }
-
     [Fact]
-    public async Task Sqlite_LastDayWindow_IsEvaluatedByTheDatabase()
+    public void PostgreSql_LastDayWindow_RendersDateAddAndQualifiedTables()
     {
-        string Ts(TimeSpan ago) => DateTime.UtcNow.Subtract(ago).ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
-        using (var conn = new SqliteConnection($"Data Source={_dbPath}"))
-        {
-            conn.Open();
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = $"""
-                CREATE TABLE client (client_id INTEGER PRIMARY KEY, crane_serial_number TEXT);
-                CREATE TABLE crane (serial_number TEXT PRIMARY KEY, is_delivered INTEGER);
-                CREATE TABLE air1 (id INTEGER PRIMARY KEY, client_id INTEGER, ts TEXT);
-                INSERT INTO crane VALUES ('S1', 1), ('S2', NULL);
-                INSERT INTO client VALUES (1, 'S1'), (2, 'S2');
-                INSERT INTO air1 VALUES (10, 1, '{Ts(TimeSpan.FromHours(2))}'), (11, 2, '{Ts(TimeSpan.FromHours(2))}'), (12, 2, '{Ts(TimeSpan.FromDays(2))}');
-                """;
-            cmd.ExecuteNonQuery();
-        }
-
-        const string sqliteDefinition = """
+        const string definition = """
             from main.client client
             join main.crane crane on crane.serial_number = client.crane_serial_number
             where crane.is_delivered is null
@@ -181,31 +153,20 @@ public sealed class SqlFilterDefinitionTests : IDisposable
             """;
         var catalog = new List<TableMetadata>
         {
-            Catalogued("main", "client", DatabaseDialect.Sqlite), Catalogued("main", "crane", DatabaseDialect.Sqlite)
+            Catalogued("main", "client", DatabaseDialect.PostgreSql), Catalogued("main", "crane", DatabaseDialect.PostgreSql)
         };
-        var filter = SqlFilterCompiler.Validate(SqlFilter(sqliteDefinition), catalog);
-        var air1 = Catalogued("main", "air1", DatabaseDialect.Sqlite) with
+        var filter = SqlFilterCompiler.Validate(SqlFilter(definition), catalog);
+        var air1 = Catalogued("main", "air1", DatabaseDialect.PostgreSql) with
         {
             Identifier = new TableIdentifier("erp", "main", "air1"),
-            Table = new Table { SourceName = "erp", SchemaName = "main", TableName = "air1", SourceType = "Sqlite", DataSourceType = DataSourceType.Sql },
+            Table = new Table { SourceName = "erp", SchemaName = "main", TableName = "air1", SourceType = "PostgreSql", DataSourceType = DataSourceType.Sql },
             Columns = [new TableColumn { ColumnName = "id" }, new TableColumn { ColumnName = "client_id" }, new TableColumn { ColumnName = "ts" }]
         };
-        var predicate = new StructuredFilterSqlBuilder().Build(filter, new FilterBinding { FilterName = filter.Name }, air1, DatabaseDialect.Sqlite);
-        // The generated predicate text is executed as a text consumer splices it (reserved alias on the filtered table).
-        await using var readConn = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={_dbPath}");
-        await readConn.OpenAsync();
-        await using var readCmd = readConn.CreateCommand();
-        readCmd.CommandText = $"SELECT id FROM air1 AS autheris_target WHERE ({predicate})";
-        var rows = new List<long>();
-        await using (var reader = await readCmd.ExecuteReaderAsync())
-        {
-            while (await reader.ReadAsync())
-            {
-                rows.Add(reader.GetInt64(0));
-            }
-        }
+        var predicate = new StructuredFilterSqlBuilder().Build(filter, new FilterBinding { FilterName = filter.Name }, air1, DatabaseDialect.PostgreSql);
 
-        rows.ShouldBe([11L]);   // undelivered crane, within the last day
+        predicate.ShouldContain("\"main\".\"client\"");
+        predicate.ShouldContain("\"main\".\"crane\"");
+        predicate.ShouldContain("INTERVAL '1 day'");
     }
 
     [Fact]

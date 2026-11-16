@@ -151,7 +151,17 @@ public sealed class StepSqlLintTests
                 (9, "write_grants"),
                 (10, "table_column_ordinal"),
                 (11, "role_grantee_and_profile_assignment_retirement"),
-                (12, "dbt_unique_id")
+                (12, "dbt_unique_id"),
+                (13, "scim_identity_correlation"),
+                (14, "catalog_discovery"),
+                (15, "consent_api"),
+                (16, "policy_epochs_change_version"),
+                (17, "usage_accounting"),
+                (18, "consent_row_scopes"),
+                (19, "pattern_grants"),
+                (20, "data_classifications"),
+                (21, "consent_classification_access"),
+                (22, "docs_store")
             ]);
         }
     }

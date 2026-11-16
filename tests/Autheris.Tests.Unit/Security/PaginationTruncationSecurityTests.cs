@@ -11,6 +11,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class PaginationTruncationSecurityTests
 {
     public sealed class TestPaginationQuery

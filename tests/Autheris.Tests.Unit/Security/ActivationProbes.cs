@@ -13,7 +13,7 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;
 using Autheris.Infrastructure.Persistence.Catalog;
-using Microsoft.Data.Sqlite;
+using Autheris.Tests.Common.Fakes;
 using Microsoft.Extensions.Options;
 using NSubstitute;
 using TrinoSqlEngine;
@@ -50,36 +50,53 @@ internal static class ActivationProbes
         // ---- X0k: MaxAffectedRows, commit order and the binder factory (SEC-X1-07) --------------------------------------------
         yield return new("CheckedExecutor_InTransaction_RollsBackWhenMaxAffectedRowsIsExceeded", "checked-max-rows", () =>
         {
-            using var connection = OpenTable();
+            var committed = false;
+            var rolledBack = false;
+            using var connection = new CallbackDbConnection(
+                executeReader: (_, _) => new StubDbDataReader([], []),
+                executeNonQuery: (_, _) => 2,
+                onCommit: () => committed = true,
+                onRollback: () => rolledBack = true);
+            connection.Open();
             using var transaction = connection.BeginTransaction();
             var compiled = Compiled("INSERT INTO t (a) SELECT 1 UNION ALL SELECT 2", expected: null);
             var executor = CompiledSqlBinders.CheckedExecutorFor(TargetSqlDialect.DuckDb);
             Assert.ThrowsAsync<DmlAffectedRowsLimitException>(() =>
                 executor.ExecuteInTransactionAsync(transaction, compiled, new Dictionary<string, object?>(), new CheckedDmlLimits(0, 1))).GetAwaiter().GetResult();
-            Assert.Equal(0, Count(connection));
+            Assert.False(committed);
+            Assert.True(rolledBack);
         });
 
         yield return new("CheckedExecutor_InTransaction_NeverCommitsBeforeTheCountIsChecked", "checked-commit-order", () =>
         {
-            using var connection = OpenTable();
+            var committed = false;
+            var rolledBack = false;
+            using var connection = new CallbackDbConnection(
+                executeReader: (_, _) => new StubDbDataReader([], []),
+                executeNonQuery: (_, _) => 2,
+                onCommit: () => committed = true,
+                onRollback: () => rolledBack = true);
+            connection.Open();
             using var transaction = connection.BeginTransaction();
             var compiled = Compiled("INSERT INTO t (a) SELECT 1 UNION ALL SELECT 2", expected: 1);   // writes 2 rows, 1 expected
             var executor = CompiledSqlBinders.CheckedExecutorFor(TargetSqlDialect.DuckDb);
             Assert.ThrowsAsync<DmlCheckOptionViolationException>(() =>
                 executor.ExecuteInTransactionAsync(transaction, compiled, new Dictionary<string, object?>(), new CheckedDmlLimits(0, 0))).GetAwaiter().GetResult();
-            Assert.Equal(0, Count(connection));
+            Assert.False(committed);
+            Assert.True(rolledBack);
         });
 
         foreach (var dialect in new[]
         {
             TargetSqlDialect.SqlServer, TargetSqlDialect.DuckDb, TargetSqlDialect.PostgreSql,
-            TargetSqlDialect.Oracle, TargetSqlDialect.Databricks, TargetSqlDialect.Sqlite
+            TargetSqlDialect.Oracle, TargetSqlDialect.Databricks
         })
         {
             var d = dialect;
             yield return new($"BinderFactory_For_RefusesACheckedStatement[{d}]", "binder-factory", () =>
             {
-                using var command = new SqliteCommand();
+                using var connection = new CallbackDbConnection((_, _) => new StubDbDataReader([], []));
+                using var command = connection.CreateCommand();
                 var compiled = Compiled("INSERT INTO t (a) SELECT 1", expected: 1, d);
                 Assert.Throws<CheckedExecutionRequiredException>(() => CompiledSqlBinders.For(d).Bind(command, compiled, new Dictionary<string, object?>()));
             });
@@ -153,21 +170,4 @@ internal static class ActivationProbes
         {
             ExpectedAffectedRows = expected
         };
-
-    private static SqliteConnection OpenTable()
-    {
-        var connection = new SqliteConnection("Data Source=:memory:");
-        connection.Open();
-        using var create = connection.CreateCommand();
-        create.CommandText = "CREATE TABLE t (a INTEGER)";
-        create.ExecuteNonQuery();
-        return connection;
-    }
-
-    private static long Count(SqliteConnection connection)
-    {
-        using var command = connection.CreateCommand();
-        command.CommandText = "SELECT COUNT(*) FROM t";
-        return (long)command.ExecuteScalar()!;
-    }
 }

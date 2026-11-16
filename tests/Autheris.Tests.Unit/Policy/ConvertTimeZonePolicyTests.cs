@@ -69,18 +69,17 @@ public sealed class ConvertTimeZonePolicyTests
     [Fact]
     public void PolicyLint_ReportsAPredicateWithTheFunction()
     {
-        var profile = new AccessProfile
+        var filter = new VirtualFilter
         {
-            ProfileId = "p-tz",
-            Name = "p-tz",
             TenantId = Autheris.Tests.Common.TestTenants.Default,
-            TargetTables = ["erp.main.events"],
-            RowFilterPredicate = Predicate
+            Name = "p_tz",
+            Source = "erp",
+            Sql = $"from erp.main.events e where {Predicate}"
         };
-        var input = new PolicyLintInput([Events()], [profile], [], []);
+        var input = new PolicyLintInput([Events()], [], [filter]);
 
         var report = new PolicyPredicateLinter().Lint(input);
 
-        report.Findings.Single().PolicyId.ShouldBe("p-tz");
+        report.Findings.Single().PolicyId.ShouldBe("p_tz");
     }
 }

@@ -66,15 +66,6 @@ public sealed class GroupingSetsEmissionTests
     }
 
     [Theory]
-    [InlineData("SELECT dept, SUM(amount) FROM orders GROUP BY ROLLUP (dept)")]
-    [InlineData("SELECT dept, SUM(amount) FROM orders GROUP BY CUBE (dept)")]
-    [InlineData("SELECT dept, SUM(amount) FROM orders GROUP BY GROUPING SETS ((dept), ())")]
-    public void Sqlite_HasNoGroupingSets_IsRejected(string sql)
-    {
-        Assert.Throws<AstBuildException>(() => Generate(sql, TargetSqlDialect.Sqlite));
-    }
-
-    [Theory]
     [InlineData(TargetSqlDialect.PostgreSql, "GROUPING(\"dept\")")]
     [InlineData(TargetSqlDialect.SqlServer, "GROUPING([dept])")]
     public void GroupingOperation_SingleColumn(TargetSqlDialect dialect, string expected)

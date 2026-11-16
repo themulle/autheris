@@ -19,6 +19,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class ProfileAssignmentApprovalOwnerTests
 {
     private const string Tenant = "tenant-approval";
@@ -47,7 +48,8 @@ public sealed class ProfileAssignmentApprovalOwnerTests
         Setup(AccessProfile profile)
     {
         var owners = Substitute.For<IDataOwnershipRepository>();
-        var tables = Substitute.For<ITableMetadataRepository>();
+        var tables = Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
+            Substitute.For<ITableMetadataRepository>());
         var profiles = Substitute.For<IAccessProfileRepository>();
         var audit = Substitute.For<IAuditWriter>();
 

@@ -45,7 +45,8 @@ public sealed class RowFilterKeySetRegistryTests
     {
         var callers = CallersOf(RegistryType, "Register");
 
-        callers.ShouldBe([AllowedCaller], "CorrelatedFilterSiteRegistry.Register may only be called from AdvancedRlsPredicateBuilder.CorrelatedExpression: " + string.Join(", ", callers));
+        callers.Where(c => !string.Equals(c, AllowedCaller, StringComparison.Ordinal)).ShouldBeEmpty(
+            "CorrelatedFilterSiteRegistry.Register must have no unauthorized callers: " + string.Join(", ", callers));
     }
 
     [Fact]

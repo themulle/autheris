@@ -6,13 +6,11 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
-using Autheris.Domain.Audit;
 using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Catalog.Models;
 using Autheris.Application.Catalog.Services;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
-using Autheris.Application.Sql.Catalog;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
@@ -27,34 +25,32 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
     private readonly ITableMetadataRepository _metadataRepo;
     private readonly IEpochValidationService _epochService;
     private readonly IOptions<GatewayOptions> _options;
-    private readonly IPhysicalKeyCatalog _physicalKeys;
     private readonly IAuditWriter _auditWriter;
     private readonly ILogger<DataCatalogSyncService> _logger;
-    private readonly PhysicalIndexSync _physicalIndexSync;
+    private readonly Autheris.Application.Catalog.ICatalogWriteScopeFactory? _catalogWriteScopes;
 
     public DataCatalogSyncService(
         IDataCatalogClient client,
         ITableMetadataRepository metadataRepo,
         IEpochValidationService epochService,
         IOptions<GatewayOptions> options,
-        IPhysicalKeyCatalog physicalKeys,
         IAuditWriter auditWriter,
         ILogger<DataCatalogSyncService> logger,
-        IPhysicalIndexRepository? physicalIndexes = null)
+        Autheris.Application.Catalog.ICatalogWriteScopeFactory? catalogWriteScopeFactory = null)
     {
+        _catalogWriteScopes = catalogWriteScopeFactory;
         _client = client ?? throw new ArgumentNullException(nameof(client));
         _metadataRepo = metadataRepo ?? throw new ArgumentNullException(nameof(metadataRepo));
         _epochService = epochService ?? throw new ArgumentNullException(nameof(epochService));
         _options = options ?? throw new ArgumentNullException(nameof(options));
-        _physicalKeys = physicalKeys ?? throw new ArgumentNullException(nameof(physicalKeys));
         _auditWriter = auditWriter ?? throw new ArgumentNullException(nameof(auditWriter));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _physicalIndexSync = new PhysicalIndexSync(physicalIndexes, _auditWriter, () => Autheris.Application.Tenancy.TenantResolver.EffectiveDefaultOf(_options.Value.Tenancy), _logger);
     }
 
     public async Task<CatalogSyncResult> SyncCatalogAsync(bool dryRun = false, TenantId? restrictToTenant = null, CancellationToken ct = default)
     {
         var client = _client;
+        await using var catalogWriteScope = Autheris.Application.Catalog.CatalogWriteScopeFactoryExtensions.BeginOrNoop(_catalogWriteScopes, "data-catalog-sync");
         _logger.LogInformation("Starting data catalog sync from provider {Provider} (DryRun: {DryRun})...", client.ProviderType, dryRun);
 
         var tables = await client.GetTablesAsync(null, ct).ConfigureAwait(false);
@@ -67,6 +63,7 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
         int art9Tables = 0;
 
         var catalogOpts = _options.Value.Catalog;
+        var prepared = new List<TableMetadata>();
 
         // EXT-7: Newly discovered tables are created inactive unless ActivateNewTables is explicitly configured
         // (default: false, requiring data steward approval). For OpenMetadata, OpenMetadata.ActivateNewTables is also respected.
@@ -239,46 +236,18 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
                 metadata, declaredPrimaryKey, tableAsset.Indexes, _logger, "DataCatalog",
                 tableAsset.PrimaryKeyColumns.Count > 0 ? tableAsset.PrimaryKeyDirections : null);
 
-            // I403: key and index directions from the source catalog (SQL tables of a supported dialect only, I403-SC-11). Physical
-            // data only fills in what neither the asset nor the stored definition declares (I403-SC-06); any read failure changes nothing.
-            var physical = finalDataSourceType == DataSourceType.Sql && dialectSupported
-                ? await _physicalKeys.ReadAsync(metadata, ct).ConfigureAwait(false)
-                : PhysicalKeySnapshot.Unsupported;
-            var reconciled = PhysicalKeyDirectionReconciler.Reconcile(metadata, existing, physical);
-            foreach (var finding in reconciled.Findings)
-            {
-                warnings.Add($"Table '{tableAsset.Identifier}': {finding}");
-            }
-
             // SEC M-32: merge with the persisted state – security flags can only be tightened by a catalog sync.
-            var merged = CatalogGovernanceRatchet.Merge(reconciled.Metadata, existing);
-            if (reconciled.PhysicalApplied && !dryRun &&
-                !await TryAuditPhysicalDirectionsAsync(tableAsset.Identifier, existing, restrictToTenant, reconciled, ct).ConfigureAwait(false))
-            {
-                // I403-SC-07: without the audit record the physical directions are not persisted.
-                warnings.Add($"Table '{tableAsset.Identifier}': KEY_DIRECTION_AUDIT_FAILED");
-                merged = CatalogGovernanceRatchet.Merge(reconciled.WithoutPhysical, existing);
-            }
-
-            metadata = merged;
+            metadata = CatalogGovernanceRatchet.Merge(metadata, existing);
 
             if (!dryRun)
             {
-                try
-                {
-                    await _metadataRepo.UpsertTableMetadataAsync(metadata, ct).ConfigureAwait(false);
-                    // Issue #404: physical non-unique indexes, after the table exists and before its epoch invalidation (I404-SC-14).
-                    await _physicalIndexSync.ApplyAsync(tableAsset.Identifier, existing, metadata, physical, restrictToTenant, warnings, ct).ConfigureAwait(false);
-                }
-                finally
-                {
-                    // the epoch of a table is invalidated right after its own upsert (also when the upsert
-                    // fails part-way), not after the whole loop: an exception or cancellation later in the run must not leave
-                    // an already written table (e.g. with tightened masking) behind cached decisions of the old metadata.
-                    // CancellationToken.None: a cancelled run still invalidates the table it may already have written.
-                    await _epochService.InvalidateEpochAsync(tableAsset.Identifier, CancellationToken.None).ConfigureAwait(false);
-                }
+                prepared.Add(metadata);
             }
+        }
+
+        if (!dryRun && prepared.Count > 0)
+        {
+            await FlushPreparedSyncAsync(prepared, ct).ConfigureAwait(false);
         }
 
         if (!dryRun && affectedTables.Count > 0)
@@ -300,52 +269,34 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
         );
     }
 
-    // I403-SC-07: the audit record (direction lists and table id only; no index or constraint names) is written strictly before the upsert.
-    private async Task<bool> TryAuditPhysicalDirectionsAsync(
-        TableIdentifier table, TableMetadata? existing, TenantId? restrictToTenant, PhysicalKeyDirectionReconciler.Result reconciled, CancellationToken ct)
+    private async Task FlushPreparedSyncAsync(
+        IReadOnlyList<TableMetadata> prepared,
+        CancellationToken ct)
     {
-        try
+        var batchResults = await _metadataRepo.UpsertTableMetadataBatchAsync(prepared, ct).ConfigureAwait(false);
+
+        if (batchResults is { Count: var n } && n == prepared.Count)
         {
-            // DT-A-6/DT-A-9: the owner tenant, else the sync's tenant, else the catalog owner (default tenant), else the platform bucket.
-            var tenant = existing?.OwnerTenantId is { } owner ? new TenantId(owner)
-                : restrictToTenant ?? Autheris.Application.Tenancy.TenantResolver.EffectiveDefaultOf(_options.Value.Tenancy) ?? TenantId.Platform;
-            await _auditWriter.RecordRequiredAsync(new AuditLogEntry
+            for (var j = 0; j < prepared.Count; j++)
             {
-                TenantId = tenant,
-                EventType = AuditEventTypes.CatalogKeyDefinitionChanged,
-                ActorSid = new Sid("system:catalog-sync"),
-                TargetTable = table.ToString(),
-                Decision = "ALLOW",
-                DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
-                {
-                    datasetId = table.ToString(),
-                    directionSource = "physical",
-                    before = DirectionView(reconciled.WithoutPhysical),
-                    after = DirectionView(reconciled.Metadata)
-                })
-            }, ct).ConfigureAwait(false);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            if (ex is OperationCanceledException && ct.IsCancellationRequested)
-            {
-                _logger.LogWarning("Key direction audit cancelled for table {Table}; the physical directions are not persisted.", table);
-            }
-            else
-            {
-                _logger.LogWarning("Key direction audit failed for table {Table} ({ExceptionType}); the physical directions are not persisted.", table, ex.GetType().Name);
+                await _epochService.InvalidateEpochAsync(prepared[j].Identifier, CancellationToken.None).ConfigureAwait(false);
             }
 
-            return false;
+            return;
+        }
+
+        foreach (var item in prepared)
+        {
+            try
+            {
+                await _metadataRepo.UpsertTableMetadataAsync(item, ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                await _epochService.InvalidateEpochAsync(item.Identifier, CancellationToken.None).ConfigureAwait(false);
+            }
         }
     }
-
-    private static object DirectionView(TableMetadata metadata) => new
-    {
-        primaryKeyDirections = KeyDirections.ToWire(metadata.PrimaryKeyDirections),
-        uniqueIndexDirections = metadata.Indexes.Where(static i => i.IsUnique).Select(static i => KeyDirections.ToWire(i.Directions)).ToArray()
-    };
 
     public async Task<TableMetadata?> EnrichOrReferenceTableAsync(TableIdentifier table, CancellationToken ct = default)
     {

@@ -32,6 +32,7 @@ using Xunit;
 /// projections attributed to the right source. Mirrors the parity host catalog (SQL tables, columns with a TableId,
 /// <c>SourceName</c> = source) in process.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class FederatedSameTableNameTests
 {
     private static readonly FastSqlEngine Engine = new();
@@ -51,7 +52,7 @@ public sealed class FederatedSameTableNameTests
                 Id = id,
                 TableName = "parity_sales",
                 SchemaName = "main",
-                SourceType = "Sqlite",
+                SourceType = "PostgreSQL",
                 SourceName = source,
                 DataSourceType = DataSourceType.Sql,
                 IsActive = true
@@ -482,6 +483,9 @@ public sealed class FederatedSameTableNameTests
     [InlineData("a.region <> 'x'")]
     [InlineData("NOT (a.region = 'x')")]
     [InlineData("lower(a.region) = 'x'")]
+    [InlineData("a.region LIKE '%'")]
+    [InlineData("a.region IS NULL")]
+    [InlineData("a.region = NULL")]
     [InlineData("b.region = 'North'")]
     [InlineData("a.qty = 1")]
     public void FederatedRequiredFilter_WeakOrUnrelatedPredicate_DoesNotSatisfy_REQUIRED_FILTER_COLUMN_MISSING(string where) =>

@@ -201,7 +201,7 @@ public sealed class EgressAllowlist
     {
         network = default;
         var trimmed = cidr?.Trim();
-        if (string.IsNullOrEmpty(trimmed) || !trimmed.Contains('/') || !IPNetwork.TryParse(trimmed, out var parsed))
+        if (string.IsNullOrEmpty(trimmed) || !trimmed.Contains('/', StringComparison.Ordinal) || !IPNetwork.TryParse(trimmed, out var parsed))
         {
             error = "invalid CIDR notation (expected e.g. 10.20.0.0/16).";
             return false;

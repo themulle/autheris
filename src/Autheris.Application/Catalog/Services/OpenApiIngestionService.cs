@@ -24,13 +24,16 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
     private readonly ILogger<OpenApiIngestionService> _logger;
     private readonly IOptions<GatewayOptions>? _options;
     private readonly IKeyVaultSecretProvider? _secretProvider;
+    private readonly Autheris.Application.Catalog.ICatalogWriteScopeFactory? _catalogWriteScopes;
 
     public OpenApiIngestionService(
         ITableMetadataRepository metadataRepository,
         ILogger<OpenApiIngestionService> logger,
         IOptions<GatewayOptions>? options = null,
-        IKeyVaultSecretProvider? secretProvider = null)
+        IKeyVaultSecretProvider? secretProvider = null,
+        Autheris.Application.Catalog.ICatalogWriteScopeFactory? catalogWriteScopeFactory = null)
     {
+        _catalogWriteScopes = catalogWriteScopeFactory;
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _options = options;
@@ -78,6 +81,7 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(openApiJson);
+        await using var catalogWriteScope = Autheris.Application.Catalog.CatalogWriteScopeFactoryExtensions.BeginOrNoop(_catalogWriteScopes, "openapi-ingestion");
 
         using var doc = JsonDocument.Parse(openApiJson);
         var root = doc.RootElement;
@@ -256,6 +260,7 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
 
         if (schemasFound)
         {
+            var pendingUpserts = new List<TableMetadata>();
             foreach (var schemaProp in schemasObj.EnumerateObject())
             {
                 ct.ThrowIfCancellationRequested();
@@ -395,10 +400,15 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
 
                 if (!dryRun)
                 {
-                    await _metadataRepository.UpsertTableMetadataAsync(tableMetadata, ct).ConfigureAwait(false);
+                    pendingUpserts.Add(tableMetadata);
                 }
 
                 ingestedTableNames.Add(tableName);
+            }
+
+            if (!dryRun && pendingUpserts.Count > 0)
+            {
+                await _metadataRepository.UpsertBatchWithFallbackAsync(pendingUpserts, ct).ConfigureAwait(false);
             }
         }
         else

@@ -606,7 +606,7 @@ public sealed partial class RobinScenarios
                 throw new XunitException($"offset above the cap: expected 400 INVALID_QUERY, got HTTP {r.Status} with {r.Rows.Count} rows.");
             }
 
-            Denied(r, "offset above the cap", "INVALID_QUERY");
+            Denied(r, "offset above the cap", channel == "GraphQl" ? "INVALID_QUERY_OPTION" : "INVALID_QUERY");
             return;
         }
 

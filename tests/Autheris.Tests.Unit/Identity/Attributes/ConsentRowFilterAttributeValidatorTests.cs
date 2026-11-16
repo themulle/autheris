@@ -87,7 +87,6 @@ public sealed class ConsentRowFilterAttributeValidatorTests
     }
 
     [Theory]
-    [InlineData(RowFilterType.SubqueryCorrelated)]
     [InlineData(RowFilterType.CrossSourceSetFilter)]
     public void CorrelatedAndCrossSourceFilters_CannotCarryAnAttribute(RowFilterType type) =>
         Should.Throw<InvalidOperationException>(() => ConsentRowFilterAttributeValidator.ValidateShape([Attr(type: type)]));
@@ -225,20 +224,22 @@ public sealed class ConsentRowFilterAttributeValidatorTests
         var seam = (IConsentDescriptionRepository)repo;
         var updates = new List<ConsentDescriptionUpdate> { new(Guid.NewGuid(), Autheris.Tests.Common.TestTenants.Default, "text") };
 
-        await Should.ThrowAsync<InvalidOperationException>(() => seam.ReplaceConsentsAsync([], [ConsentOf(Attr(name: "unknown"))], new Sid("S-1"), "r", null, updates, default));
-        await ((IConsentDescriptionRepository)inner).DidNotReceive().ReplaceConsentsAsync(default!, default!, default, default!, default, default, default);
+        var authority = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null);
+        await Should.ThrowAsync<InvalidOperationException>(() => seam.ReplaceConsentsAsync([], [ConsentOf(Attr(name: "unknown"))], new Sid("S-1"), "r", authority, null, updates, default));
+        await ((IConsentDescriptionRepository)inner).DidNotReceive().ReplaceConsentsAsync(default!, default!, default, default!, default!, default, default, default);
 
-        await seam.ReplaceConsentsAsync([], [ConsentOf(Attr("IN"))], new Sid("S-1"), "r", null, updates, default);
+        await seam.ReplaceConsentsAsync([], [ConsentOf(Attr("IN"))], new Sid("S-1"), "r", authority, null, updates, default);
         await ((IConsentDescriptionRepository)inner).Received(1).ReplaceConsentsAsync(
-            Arg.Any<IReadOnlyList<Guid>>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<Sid>(), Arg.Any<string>(), Arg.Any<IReadOnlyList<AuditLogEntry>?>(), updates, Arg.Any<CancellationToken>());
+            Arg.Any<IReadOnlyList<Guid>>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<Sid>(), Arg.Any<string>(), Arg.Any<Autheris.Domain.Security.ConsentRevocationAuthority>(), Arg.Any<IReadOnlyList<AuditLogEntry>?>(), updates, Arg.Any<CancellationToken>());
     }
 
     [Fact]
     public async Task Decorator_Replace_ValidatesEveryNewConsent()
     {
         var (repo, inner) = Decorator();
-        await Should.ThrowAsync<InvalidOperationException>(() => repo.ReplaceConsentsAsync([], [ConsentOf(Attr("IN")), ConsentOf(Attr("LT"))], new Sid("S-1"), "r"));
-        await inner.DidNotReceive().ReplaceConsentsAsync(Arg.Any<IReadOnlyList<Guid>>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<Sid>(), Arg.Any<string>(), Arg.Any<IReadOnlyList<AuditLogEntry>?>(), Arg.Any<CancellationToken>());
+        var authority = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null);
+        await Should.ThrowAsync<InvalidOperationException>(() => repo.ReplaceConsentsAsync([], [ConsentOf(Attr("IN")), ConsentOf(Attr("LT"))], new Sid("S-1"), "r", authority));
+        await inner.DidNotReceive().ReplaceConsentsAsync(Arg.Any<IReadOnlyList<Guid>>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<Sid>(), Arg.Any<string>(), Arg.Any<Autheris.Domain.Security.ConsentRevocationAuthority>(), Arg.Any<IReadOnlyList<AuditLogEntry>?>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]

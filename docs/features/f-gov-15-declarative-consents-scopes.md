@@ -8,7 +8,6 @@ Modern enterprise data architectures require governance systems that integrate s
 2. **Access Introspection Blindspots for AI Agents:** Autonomous agents invoking MCP tools or issuing GraphQL queries cannot predict whether a query will fail due to column denies or row filters. Providing a self-service introspection mechanism (`describe_my_access` in MCP, `myAccess` in GraphQL) allows agents to proactively construct compliant queries without trial-and-error failures.
 3. **Approver & Requester Visibility Gaps:** Requesters lack self-service visibility into their active and pending consent requests, and data stewards need a dedicated inbox query (`pendingApprovalsForMe`) to inspect pending approvals assigned directly or via data owner delegations.
 4. **Scope Privilege Bleed & Monotonic Hardening:** When an end user possesses broad permissions (e.g., clear access to sensitive columns in a web application), an AI agent acting on their behalf with an `Agent.Read` or `App.Read` scope must not inherit full unmasked access. Security rules must apply monotonic hardening: permissions can only be tightened when delegated scopes are present.
-5. **FinOps Per-Scope Quotas:** Organizations need to budget and enforce monthly spend limits partitioned not only by tenant, but specifically by OAuth scope (e.g., limiting monthly token spend for `Agent.Read`).
 
 `F-GOV-15` provides an integrated suite addressing these challenges, delivering declarative GitOps synchronization, introspection endpoints, requester/approver inboxes, and monotonic scope-based access hardening in .NET 10.
 
@@ -52,9 +51,8 @@ flowchart TD
 - **Monotonic Scope Hardening (`ConsentResolutionService`):**
   - `ConsentColumnRule.ApplicableScopes`: Associates masking or denial rules with specific delegated scopes.
   - Resolves permissions by evaluating base rules first, then applying scope-specific rules as monotonic tightenings (i.e. permissions can only decrease from `Clear` -> `Mask` -> `Deny`, never escalate).
-- **FinOps Scope Quotas & Read-Only Defaults (`GatewayOptions`):**
+- **Read-Only Scope Defaults (`GatewayOptions`):**
   - `GatewayOptions.Authentication.EntraId.ReadOnlyScopes`: Defaults to `["Agent.Read", "App.Read"]`.
-  - `FinOpsOptions.ScopeMonthlyBudgets`: Enables setting monthly compute and token expenditure limits per OAuth scope.
 
 ---
 

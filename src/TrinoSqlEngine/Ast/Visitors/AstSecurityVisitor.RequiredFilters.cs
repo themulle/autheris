@@ -32,41 +32,65 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
             if (entry == null || (entry.RequiredFilterColumns.Length == 0 && entry.RequiredFilterColumnGroups.Length == 0))
                 continue;
 
-            if (entry.RequiredFilterColumnGroups.Length > 0)
+            EnsureTableRequiredFiltersSatisfied(entry, target, scope, node.Where, onPredicates);
+        }
+    }
+
+    private void EnsureDmlRequiredFiltersSatisfied(NamedTableSource targetTable, TableCatalogEntry entry, Expression? where)
+    {
+        if (entry.RequiredFilterColumns.Length == 0 && entry.RequiredFilterColumnGroups.Length == 0)
+            return;
+
+        var columns = new HashSet<string>(entry.Columns.Select(static c => c.Name), StringComparer.OrdinalIgnoreCase);
+        var dmlTarget = new FromScopeEntry(
+            targetTable,
+            entry.Identity.ToQualifiedName().NormalizedName,
+            targetTable.Alias?.Value ?? entry.Identity.Table,
+            columns);
+        EnsureTableRequiredFiltersSatisfied(entry, dmlTarget, [dmlTarget], where, Array.Empty<Expression>());
+    }
+
+    private void EnsureTableRequiredFiltersSatisfied(
+        TableCatalogEntry entry,
+        FromScopeEntry target,
+        List<FromScopeEntry> scope,
+        Expression? where,
+        IReadOnlyList<Expression> onPredicates)
+    {
+        if (entry.RequiredFilterColumnGroups.Length > 0)
+        {
+            bool anyGroupSatisfied = false;
+            foreach (var group in entry.RequiredFilterColumnGroups)
             {
-                bool anyGroupSatisfied = false;
-                foreach (var group in entry.RequiredFilterColumnGroups)
+                if (group.Length == 0) continue;
+                bool groupAllSatisfied = true;
+                foreach (var reqCol in group)
                 {
-                    if (group.Length == 0) continue;
-                    bool groupAllSatisfied = true;
-                    foreach (var reqCol in group)
+                    if (!IsRequiredFilterSatisfied(entry, reqCol, target, scope, where, onPredicates))
                     {
-                        if (!IsRequiredFilterSatisfied(entry, reqCol, target, scope, node.Where, onPredicates))
-                        {
-                            groupAllSatisfied = false;
-                            break;
-                        }
-                    }
-                    if (groupAllSatisfied)
-                    {
-                        anyGroupSatisfied = true;
+                        groupAllSatisfied = false;
                         break;
                     }
                 }
-                if (!anyGroupSatisfied)
+                if (groupAllSatisfied)
                 {
-                    throw new RequiredFilterColumnMissingException(_typed.Capabilities.Dialect);
+                    anyGroupSatisfied = true;
+                    break;
                 }
             }
-            else
+            if (!anyGroupSatisfied)
             {
-                foreach (var reqCol in entry.RequiredFilterColumns)
-                {
-                    if (IsRequiredFilterSatisfied(entry, reqCol, target, scope, node.Where, onPredicates))
-                        continue;
+                throw new RequiredFilterColumnMissingException(_typed.Capabilities.Dialect);
+            }
+        }
+        else
+        {
+            foreach (var reqCol in entry.RequiredFilterColumns)
+            {
+                if (IsRequiredFilterSatisfied(entry, reqCol, target, scope, where, onPredicates))
+                    continue;
 
-                    throw new RequiredFilterColumnMissingException(_typed.Capabilities.Dialect);
-                }
+                throw new RequiredFilterColumnMissingException(_typed.Capabilities.Dialect);
             }
         }
     }
@@ -165,7 +189,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         FromScopeEntry target,
         List<FromScopeEntry> scope,
         Expression? where,
-        List<Expression> onPredicates)
+        IReadOnlyList<Expression> onPredicates)
     {
         // 1. Check active Tenant policy
         if (entry.TenantColumn != null &&
@@ -213,26 +237,58 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         switch (expr)
         {
             case BinaryExpression b when b.Operator == BinaryOperator.And:
-                return IsColumnConstrained(b.Left, target, scope, col) || IsColumnConstrained(b.Right, target, scope, col);
+            {
+                Expression cur = b;
+                var rights = new List<Expression>();
+                while (cur is BinaryExpression { Operator: BinaryOperator.And } a)
+                {
+                    rights.Add(a.Right);
+                    cur = a.Left;
+                }
+
+                if (IsColumnConstrained(cur, target, scope, col)) return true;
+                for (int i = rights.Count - 1; i >= 0; i--)
+                {
+                    if (IsColumnConstrained(rights[i], target, scope, col)) return true;
+                }
+
+                return false;
+            }
 
             case BinaryExpression b when b.Operator == BinaryOperator.Or:
-                return IsColumnConstrained(b.Left, target, scope, col) && IsColumnConstrained(b.Right, target, scope, col);
+            {
+                Expression cur = b;
+                var rights = new List<Expression>();
+                while (cur is BinaryExpression { Operator: BinaryOperator.Or } o)
+                {
+                    rights.Add(o.Right);
+                    cur = o.Left;
+                }
+
+                if (!IsColumnConstrained(cur, target, scope, col)) return false;
+                for (int i = rights.Count - 1; i >= 0; i--)
+                {
+                    if (!IsColumnConstrained(rights[i], target, scope, col)) return false;
+                }
+
+                return true;
+            }
 
             case BinaryExpression b when b.Operator is BinaryOperator.Equal
                                       or BinaryOperator.LessThan
                                       or BinaryOperator.LessThanOrEqual
                                       or BinaryOperator.GreaterThan
                                       or BinaryOperator.GreaterThanOrEqual:
-                if (MatchesTargetColumn(b.Left, target, scope, col) && !ContainsColumnReference(b.Right))
+                if (MatchesTargetColumn(b.Left, target, scope, col) && !ContainsColumnReference(b.Right) && !IsNullLiteral(b.Right))
                     return true;
-                if (MatchesTargetColumn(b.Right, target, scope, col) && !ContainsColumnReference(b.Left))
+                if (MatchesTargetColumn(b.Right, target, scope, col) && !ContainsColumnReference(b.Left) && !IsNullLiteral(b.Left))
                     return true;
                 return false;
 
             case BetweenExpression bt when !bt.IsNotBetween:
                 if (MatchesTargetColumn(bt.Operand, target, scope, col) &&
-                    !ContainsColumnReference(bt.Lower) &&
-                    !ContainsColumnReference(bt.Upper))
+                    !ContainsColumnReference(bt.Lower) && !IsNullLiteral(bt.Lower) &&
+                    !ContainsColumnReference(bt.Upper) && !IsNullLiteral(bt.Upper))
                 {
                     return true;
                 }
@@ -240,7 +296,8 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
 
             case InListExpression inList when !inList.IsNotIn && inList.Items.Count > 0:
                 if (MatchesTargetColumn(inList.Operand, target, scope, col) &&
-                    !inList.Items.Any(ContainsColumnReference))
+                    !inList.Items.Any(ContainsColumnReference) &&
+                    inList.Items.Any(static item => !IsNullLiteral(item)))
                 {
                     return true;
                 }
@@ -253,21 +310,82 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
                 }
                 return false;
 
-            case LikeExpression lk when !lk.IsNotLike:
-                if (MatchesTargetColumn(lk.Operand, target, scope, col) &&
-                    !ContainsColumnReference(lk.Pattern) &&
-                    (lk.Escape == null || !ContainsColumnReference(lk.Escape)))
-                {
-                    return true;
-                }
-                return false;
-
-            case UnaryExpression u when u.Operator == UnaryOperator.IsNull:
-                return MatchesTargetColumn(u.Operand, target, scope, col);
-
             default:
                 return false;
         }
+    }
+
+    public static bool IsNullLiteral(Expression expr)
+    {
+        while (true)
+        {
+            switch (expr)
+            {
+                case ParenthesizedExpression p:
+                    expr = p.Expression;
+                    break;
+                case CastExpression c:
+                    expr = c.Operand;
+                    break;
+                default:
+                    return expr is LiteralExpression { Type: LiteralType.Null };
+            }
+        }
+    }
+
+    /// <summary>
+    /// Extracts catalog columns strictly constrained by a single-table Trino predicate expression using the AST rules of
+    /// <see cref="IsColumnConstrained"/>. Fails closed (empty list) when blank or unparseable.
+    /// </summary>
+    public static IReadOnlyList<string> ExtractSingleTableConstrainedColumns(
+        string? trinoPredicate,
+        IEnumerable<string> catalogColumns)
+    {
+        ArgumentNullException.ThrowIfNull(catalogColumns);
+        if (string.IsNullOrWhiteSpace(trinoPredicate))
+        {
+            return Array.Empty<string>();
+        }
+
+        var cols = catalogColumns as IReadOnlyList<string> ?? catalogColumns.ToList();
+        if (cols.Count == 0)
+        {
+            return Array.Empty<string>();
+        }
+
+        Expression expr;
+        try
+        {
+            var (tree, _) = FastSqlEngine.Default.ParseExpression(trinoPredicate.AsMemory(), SqlTokenSecurityOptions.Strict);
+            expr = new Builder.SqlAstBuilder(new Builder.AstBuilderOptions
+            {
+                EnforceReadOnlyQueries = true,
+                RejectTimeTravelQueries = true
+            }).BuildStandaloneExpression(tree);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            return Array.Empty<string>();
+        }
+
+        var outputCols = new HashSet<string>(cols, StringComparer.OrdinalIgnoreCase);
+        var target = new FromScopeEntry(
+            new NamedTableSource(new SqlQualifiedName("single_table"), null),
+            "single_table",
+            "single_table",
+            outputCols);
+        var scope = new List<FromScopeEntry> { target };
+
+        var constrained = new List<string>();
+        foreach (var col in cols)
+        {
+            if (IsColumnConstrained(expr, target, scope, col))
+            {
+                constrained.Add(col);
+            }
+        }
+
+        return constrained;
     }
 
     private static bool MatchesTargetColumn(Expression expr, FromScopeEntry target, List<FromScopeEntry> scope, string col)

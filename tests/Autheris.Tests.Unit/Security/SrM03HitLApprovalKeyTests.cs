@@ -11,6 +11,7 @@ using NSubstitute.ExceptionExtensions;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public class SrM03HitLApprovalKeyTests
 {
     private const string KeyRef = "kv://autheris/hmac-master";

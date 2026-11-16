@@ -348,7 +348,7 @@
       "Group": "select",
       "Sql": "SELECT a FROM t WHERE a LIKE 'x%'",
       "Outcome": "ok",
-      "Expected": "SELECT [a] FROM [t] WHERE [a] LIKE @p0",
+      "Expected": "SELECT [a] FROM [t] WHERE [a] LIKE @p0 ESCAPE '\\'",
       "Parameters": [
         {
           "Marker": "@p0",
@@ -365,7 +365,7 @@
       "Group": "select",
       "Sql": "SELECT a FROM t WHERE a NOT LIKE '%x'",
       "Outcome": "ok",
-      "Expected": "SELECT [a] FROM [t] WHERE [a] NOT LIKE @p0",
+      "Expected": "SELECT [a] FROM [t] WHERE [a] NOT LIKE @p0 ESCAPE '\\'",
       "Parameters": [
         {
           "Marker": "@p0",
@@ -1261,9 +1261,9 @@
       "Id": "operator-025",
       "Group": "operator",
       "Sql": "SELECT a LIKE b AS r FROM t",
-      "Outcome": "ok",
-      "Expected": "SELECT CASE WHEN [a] LIKE [b] THEN 1 ELSE 0 END AS [r] FROM [t]",
-      "Parameters": []
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "operator-026",
@@ -2056,7 +2056,7 @@
       "Group": "fn-string",
       "Sql": "SELECT strpos(a, 'x') AS r FROM t",
       "Outcome": "ok",
-      "Expected": "SELECT CHARINDEX(@p0, [a]) AS [r] FROM [t]",
+      "Expected": "SELECT CHARINDEX((@p0) COLLATE Latin1_General_BIN2, ([a]) COLLATE Latin1_General_BIN2) AS [r] FROM [t]",
       "Parameters": [
         {
           "Marker": "@p0",
@@ -6295,7 +6295,7 @@
       "Group": "dml-update",
       "Sql": "UPDATE orders SET status = 'it''s' WHERE region LIKE 'E%'",
       "Outcome": "ok",
-      "Expected": "UPDATE [dbo].[Orders] SET [Status] = @p0 WHERE ([region] LIKE @p1) AND ([TenantId] = @p2 AND CAST(CAST([TenantId] AS nvarchar(max)) AS varbinary(max)) = CAST(CAST(@p2 AS nvarchar(max)) AS varbinary(max)) AND DATALENGTH(CAST([TenantId] AS nvarchar(max))) = DATALENGTH(CAST(@p2 AS nvarchar(max))))",
+      "Expected": "UPDATE [dbo].[Orders] SET [Status] = @p0 WHERE ([region] LIKE @p1 ESCAPE '\\') AND ([TenantId] = @p2 AND CAST(CAST([TenantId] AS nvarchar(max)) AS varbinary(max)) = CAST(CAST(@p2 AS nvarchar(max)) AS varbinary(max)) AND DATALENGTH(CAST([TenantId] AS nvarchar(max))) = DATALENGTH(CAST(@p2 AS nvarchar(max))))",
       "Parameters": [
         {
           "Marker": "@p0",
@@ -6538,7 +6538,7 @@
       "Group": "dml-delete",
       "Sql": "DELETE FROM orders WHERE email LIKE 'x%'",
       "Outcome": "ok",
-      "Expected": "DELETE FROM [dbo].[Orders] WHERE ([email] LIKE @p0) AND ([TenantId] = @p1 AND CAST(CAST([TenantId] AS nvarchar(max)) AS varbinary(max)) = CAST(CAST(@p1 AS nvarchar(max)) AS varbinary(max)) AND DATALENGTH(CAST([TenantId] AS nvarchar(max))) = DATALENGTH(CAST(@p1 AS nvarchar(max))))",
+      "Expected": "DELETE FROM [dbo].[Orders] WHERE ([email] LIKE @p0 ESCAPE '\\') AND ([TenantId] = @p1 AND CAST(CAST([TenantId] AS nvarchar(max)) AS varbinary(max)) = CAST(CAST(@p1 AS nvarchar(max)) AS varbinary(max)) AND DATALENGTH(CAST([TenantId] AS nvarchar(max))) = DATALENGTH(CAST(@p1 AS nvarchar(max))))",
       "Parameters": [
         {
           "Marker": "@p0",
@@ -6767,7 +6767,7 @@
       "Group": "complex",
       "Sql": "SELECT upper(a) || '-' || CAST(b AS varchar) AS k, coalesce(c, 0) + 1 AS n FROM t WHERE lower(a) LIKE 'x%' AND b BETWEEN 1 AND 5",
       "Outcome": "ok",
-      "Expected": "SELECT UPPER([a]) + @p0 + CAST([b] AS nvarchar(max)) AS [k], COALESCE([c], @p1) + @p2 AS [n] FROM [t] WHERE LOWER([a]) LIKE @p3 AND ([b] BETWEEN @p2 AND @p4)",
+      "Expected": "SELECT UPPER([a]) + @p0 + CAST([b] AS nvarchar(max)) AS [k], COALESCE([c], @p1) + @p2 AS [n] FROM [t] WHERE LOWER([a]) LIKE @p3 ESCAPE '\\' AND ([b] BETWEEN @p2 AND @p4)",
       "Parameters": [
         {
           "Marker": "@p0",

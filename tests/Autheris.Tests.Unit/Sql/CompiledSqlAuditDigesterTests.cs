@@ -184,7 +184,7 @@ public sealed class CompiledSqlAuditDigesterTests
         var digester = new CompiledSqlAuditDigester(Options(auditRef: null), Secrets(), Env("Production"));
 
         Should.Throw<InvalidOperationException>(() => digester.Anonymize("SELECT 1"));
-        Should.Throw<InvalidOperationException>(() => digester.Compute(new CompiledSql("SELECT 1", ImmutableArray<BoundParameter>.Empty, TargetSqlDialect.Sqlite, SqlStatementClass.Select, ImmutableArray<SecurityPredicateId>.Empty, "v")));
+        Should.Throw<InvalidOperationException>(() => digester.Compute(new CompiledSql("SELECT 1", ImmutableArray<BoundParameter>.Empty, TargetSqlDialect.PostgreSql, SqlStatementClass.Select, ImmutableArray<SecurityPredicateId>.Empty, "v")));
     }
 
     [Theory]

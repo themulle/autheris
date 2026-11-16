@@ -116,12 +116,6 @@ public sealed class PolicyKeyQueryCompilerTests
             Compile(Request(Example1(), TargetSqlDialect.Oracle)).Sql);
 
     [Fact]
-    public void Example1_Sqlite_Golden() =>
-        Assert.Equal(
-            "SELECT DISTINCT \"c\".\"id\" FROM (SELECT \"id\" AS \"id\", \"tenant_id\" AS \"tenant_id\", \"country\" AS \"country\", \"tier\" AS \"tier\" FROM \"conf\".\"client\" WHERE (\"tenant_id\" = ?1 AND CAST(\"tenant_id\" AS BLOB) = CAST(?1 AS BLOB))) AS \"c\" INNER JOIN (SELECT \"id\" AS \"id\", \"client_id\" AS \"client_id\", \"tenant_id\" AS \"tenant_id\", \"kind\" AS \"kind\" FROM \"md\".\"crane\" WHERE (\"tenant_id\" = ?1 AND CAST(\"tenant_id\" AS BLOB) = CAST(?1 AS BLOB))) AS \"cr\" ON \"c\".\"id\" = \"cr\".\"client_id\" WHERE \"c\".\"id\" IS NOT NULL AND \"cr\".\"kind\" = ?2 ORDER BY \"c\".\"id\" ASC LIMIT ?3",
-            Compile(Request(Example1(), TargetSqlDialect.Sqlite)).Sql);
-
-    [Fact]
     public void Example2_SqlServer_Golden() =>
         Assert.Equal(
             "SELECT DISTINCT [cr].[id] FROM (SELECT [id] AS [id], [client_id] AS [client_id], [tenant_id] AS [tenant_id], [kind] AS [kind] FROM [md].[crane] WHERE ([tenant_id] = @p0 AND CAST(CAST([tenant_id] AS nvarchar(max)) AS varbinary(max)) = CAST(CAST(@p0 AS nvarchar(max)) AS varbinary(max)) AND DATALENGTH(CAST([tenant_id] AS nvarchar(max))) = DATALENGTH(CAST(@p0 AS nvarchar(max))))) AS [cr] WHERE [cr].[id] IS NOT NULL AND [cr].[kind] = @p1 ORDER BY [cr].[id] ASC OFFSET 0 ROWS FETCH NEXT 2001 ROWS ONLY",
@@ -138,12 +132,6 @@ public sealed class PolicyKeyQueryCompilerTests
         Assert.Equal(
             "SELECT DISTINCT \"cr\".\"id\" FROM (SELECT \"id\" AS \"id\", \"client_id\" AS \"client_id\", \"tenant_id\" AS \"tenant_id\", \"kind\" AS \"kind\" FROM \"md\".\"crane\" WHERE (\"tenant_id\" = :p1 AND \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(\"tenant_id\" AS VARCHAR2(4000))) = \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(:p1 AS VARCHAR2(4000))))) \"cr\" WHERE \"cr\".\"id\" IS NOT NULL AND \"cr\".\"kind\" = :p2 ORDER BY \"cr\".\"id\" ASC FETCH FIRST 2001 ROWS ONLY",
             Compile(Request(Example2(), TargetSqlDialect.Oracle, target: EngineEntry())).Sql);
-
-    [Fact]
-    public void Example2_Sqlite_Golden() =>
-        Assert.Equal(
-            "SELECT DISTINCT \"cr\".\"id\" FROM (SELECT \"id\" AS \"id\", \"client_id\" AS \"client_id\", \"tenant_id\" AS \"tenant_id\", \"kind\" AS \"kind\" FROM \"md\".\"crane\" WHERE (\"tenant_id\" = ?1 AND CAST(\"tenant_id\" AS BLOB) = CAST(?1 AS BLOB))) AS \"cr\" WHERE \"cr\".\"id\" IS NOT NULL AND \"cr\".\"kind\" = ?2 ORDER BY \"cr\".\"id\" ASC LIMIT ?3",
-            Compile(Request(Example2(), TargetSqlDialect.Sqlite, target: EngineEntry())).Sql);
 
     // ---- result shape ----
 
@@ -162,7 +150,6 @@ public sealed class PolicyKeyQueryCompilerTests
     [InlineData(TargetSqlDialect.SqlServer, "WHERE [c].[id] IS NOT NULL AND [cr].[kind] = @p1 ORDER BY")]
     [InlineData(TargetSqlDialect.PostgreSql, "WHERE \"c\".\"id\" IS NOT NULL AND \"cr\".\"kind\" = $2 ORDER BY")]
     [InlineData(TargetSqlDialect.Oracle, "WHERE \"c\".\"id\" IS NOT NULL AND \"cr\".\"kind\" = :p2 ORDER BY")]
-    [InlineData(TargetSqlDialect.Sqlite, "WHERE \"c\".\"id\" IS NOT NULL AND \"cr\".\"kind\" = ?2 ORDER BY")]
     public void KeyQuery_AlwaysCarriesTheIsNotNullConjunct_SEC_RF107_06d(TargetSqlDialect dialect, string fragment) =>
         Assert.Contains(fragment, Compile(Request(Example1(), dialect)).Sql);
 
@@ -191,7 +178,6 @@ public sealed class PolicyKeyQueryCompilerTests
     [InlineData(TargetSqlDialect.SqlServer)]
     [InlineData(TargetSqlDialect.PostgreSql)]
     [InlineData(TargetSqlDialect.Oracle)]
-    [InlineData(TargetSqlDialect.Sqlite)]
     public void EmitsSingleSelect(TargetSqlDialect dialect)   // SEC-RF107-11
     {
         var sql = Compile(Request(Example1(), dialect)).Sql;
@@ -246,7 +232,7 @@ public sealed class PolicyKeyQueryCompilerTests
         const string hostile = "x' OR '1'='1' --; DROP TABLE t;\0/*";
         var values = new Dictionary<string, PolicyValue> { ["__gql_rls_0"] = new(hostile, SqlParameterType.String) };
 
-        foreach (var dialect in new[] { TargetSqlDialect.SqlServer, TargetSqlDialect.PostgreSql, TargetSqlDialect.Oracle, TargetSqlDialect.Sqlite })
+        foreach (var dialect in new[] { TargetSqlDialect.SqlServer, TargetSqlDialect.PostgreSql, TargetSqlDialect.Oracle })
         {
             var key = Compile(Request(Example1(), dialect, parameters: values));
 

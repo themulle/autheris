@@ -16,32 +16,31 @@ internal static class ConsentApprovalPolicy
     public const string Withdrawn = "WITHDRAWN";
     public const string RequestStatusWithdrawn = "WITHDRAWN";
 
-    /// <summary>The approver already recorded a step of this request (four-eyes needs two different people).</summary>
-    public const string SameApproverViolationMessage = "Vier-Augen-Prinzip verletzt: Genehmiger hat diesen Antrag bereits genehmigt.";
+    /// <summary>The approver already recorded a step of this request (four-eyes requires two different people).</summary>
+    public const string SameApproverViolationMessage = "FOUR_EYES_SAME_APPROVER: Four-eyes principle violated; this approver has already approved this request.";
 
     /// <summary>
     /// Security review (four-eyes on the atomic path): the final approval with consent creation was called for a step that does not
     /// complete the four-eyes requirement (e.g. the first step of a four-eyes request). Nothing is written.
     /// </summary>
     public static string FourEyesNotSatisfiedMessage(Guid requestId) =>
-        $"Vier-Augen-Prinzip verletzt: Request {requestId} requires a second, independent approval before it can be approved and the consent created.";
+        $"Four-eyes principle violated: Request {requestId} requires a second, independent approval before it can be approved and the consent created.";
 
     /// <summary>
-    /// Identity of an approver independent of the actor prefix: the part after the last ':' (e.g. the ITSM-reported account in
-    /// <c>ITSM_SNOW:instance:alice@corp</c>), or an explicitly passed ITSM account.
+    /// Canonical identity of an approver normalized by trimming and extracting any trailing identity segment after ':'.
     /// </summary>
-    public static string NormalizeApprover(string? value, string? itsmApproverAccount = null)
+    public static string NormalizeApprover(string? value)
     {
-        var candidate = string.IsNullOrWhiteSpace(itsmApproverAccount) ? (value ?? string.Empty) : itsmApproverAccount.Trim();
+        var candidate = value ?? string.Empty;
         var idx = candidate.LastIndexOf(':');
         return (idx >= 0 ? candidate[(idx + 1)..] : candidate).Trim();
     }
 
     /// <summary>
-    /// Review R4-4 (rest): identifiers under which one person can appear (raw actor, account part, ITSM account) and that are
+    /// Identifiers under which one person can appear (raw actor and normalized identifier) that are
     /// resolved to a stable DATA_OWNERS id by the repositories, so that four-eyes does not depend on string spelling alone.
     /// </summary>
-    public static IReadOnlyList<string> IdentifierCandidates(string? value, string? itsmApproverAccount = null)
+    public static IReadOnlyList<string> IdentifierCandidates(string? value)
     {
         var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         void Add(string? v)
@@ -54,12 +53,6 @@ internal static class ConsentApprovalPolicy
 
         Add(value);
         Add(NormalizeApprover(value));
-        Add(itsmApproverAccount);
-        if (!string.IsNullOrWhiteSpace(itsmApproverAccount))
-        {
-            Add(NormalizeApprover(value, itsmApproverAccount));
-        }
-
         return set.ToList();
     }
 
@@ -67,18 +60,12 @@ internal static class ConsentApprovalPolicy
     public static bool ShareOwnerId(IReadOnlyCollection<string> left, IReadOnlyCollection<string> right) =>
         left.Count > 0 && right.Count > 0 && left.Intersect(right, StringComparer.OrdinalIgnoreCase).Any();
 
-    /// <summary>True when the approver is the requester (by SID, by account part or by any known identifier).</summary>
-    public static bool IsSelfApproval(ConsentRequest req, Sid approverSid, string? itsmApproverAccount = null)
+    /// <summary>True when the approver is the requester (by SID, normalized identifier, or any known identifier).</summary>
+    public static bool IsSelfApproval(ConsentRequest req, Sid approverSid)
     {
         ArgumentNullException.ThrowIfNull(req);
 
         var candidates = new List<string> { approverSid.Value ?? string.Empty, NormalizeApprover(approverSid.Value) };
-        if (!string.IsNullOrWhiteSpace(itsmApproverAccount))
-        {
-            candidates.Add(itsmApproverAccount.Trim());
-            candidates.Add(NormalizeApprover(approverSid.Value, itsmApproverAccount));
-        }
-
         var requesterIds = new List<string> { req.RequesterSid.Value };
         if (req.RequesterIdentifiers != null)
         {
@@ -91,7 +78,7 @@ internal static class ConsentApprovalPolicy
     }
 
     /// <summary>True when a recorded approval step (stored approver SID) was made by the same person as the current approver.</summary>
-    public static bool IsSameApprover(string storedApproverSid, Sid approverSid, string? itsmApproverAccount = null)
+    public static bool IsSameApprover(string storedApproverSid, Sid approverSid)
     {
         if (!string.IsNullOrWhiteSpace(storedApproverSid) &&
             string.Equals(storedApproverSid, approverSid.Value, StringComparison.OrdinalIgnoreCase))
@@ -105,16 +92,13 @@ internal static class ConsentApprovalPolicy
             return false;
         }
 
-        return string.Equals(stored, NormalizeApprover(approverSid.Value, itsmApproverAccount), StringComparison.OrdinalIgnoreCase) ||
-               string.Equals(stored, NormalizeApprover(approverSid.Value), StringComparison.OrdinalIgnoreCase);
+        return string.Equals(stored, NormalizeApprover(approverSid.Value), StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
-    ///  (P-3 part 2): the guarded status transition of the approve step and the reject path on every engine.<c>@expected</c>
-    /// is the status read under the row lock of the same transaction (never a literal), so <c>PENDING_SECOND_APPROVAL</c> and the ITSM
-    /// <c>PENDING_EXTERNAL_APPROVAL</c> step keep working and a status changed in between matches no row.
+    /// Guarded status and version transition for consent request decision steps on every database engine.
     /// </summary>
-    public const string GuardedStatusUpdateSql = "UPDATE CONSENT_REQUESTS SET status = @st WHERE id = @id AND status = @expected";
+    public const string GuardedStatusUpdateSql = "UPDATE CONSENT_REQUESTS SET status = @st, version = version + 1, updated_at = @updatedAt WHERE id = @id AND status = @expected";
 
     /// <summary>Zero affected rows: the caller rolls the transaction back (step, audit, status) and the decision answers ACCESS_REQUEST_NOT_PENDING.</summary>
     public static void EnsureTransitionApplied(int affectedRows, Guid requestId)
@@ -125,17 +109,22 @@ internal static class ConsentApprovalPolicy
         }
     }
 
-    public static void EnsureApprovableStatus(Guid requestId, string? status, bool isExternalItsmApproval)
+    public static void EnsureApprovableStatus(Guid requestId, string? status, ConsentWorkflowMode channelMode = ConsentWorkflowMode.Internal)
     {
-        bool isExternal = string.Equals(status, PendingExternal, StringComparison.OrdinalIgnoreCase);
-        bool isInternal = string.Equals(status, Pending, StringComparison.OrdinalIgnoreCase) ||
-                          string.Equals(status, PendingSecond, StringComparison.OrdinalIgnoreCase);
+        bool isExternalStatus = string.Equals(status, PendingExternal, StringComparison.OrdinalIgnoreCase);
+        bool isInternalStatus = string.Equals(status, Pending, StringComparison.OrdinalIgnoreCase) ||
+                                string.Equals(status, PendingSecond, StringComparison.OrdinalIgnoreCase);
 
-        if (isExternalItsmApproval ? !isExternal : !isInternal)
+        if (channelMode == ConsentWorkflowMode.External ? !isExternalStatus : !isInternalStatus)
         {
-            if (isExternal)
+            if (isExternalStatus && channelMode == ConsentWorkflowMode.Internal)
             {
-                throw new InvalidOperationException($"Request {requestId} waits for the external ITSM approval and can only be approved by the ITSM system.");
+                throw new InvalidOperationException($"Request {requestId} is in external workflow mode and cannot be approved through internal channels.");
+            }
+
+            if (isInternalStatus && channelMode == ConsentWorkflowMode.External)
+            {
+                throw new InvalidOperationException($"Request {requestId} is in internal workflow mode and cannot be approved through external channels.");
             }
 
             // The request left the approvable states (a concurrent decision won): the loser's outcome is ACCESS_REQUEST_NOT_PENDING.
@@ -157,16 +146,20 @@ internal static class ConsentApprovalPolicy
     public static bool RequiresFourEyesApproval(bool requiresFourEyes, string? sensitivity = null) =>
         requiresFourEyes || IsHighSensitivity(sensitivity);
 
-    /// <summary>Review E-9: an ITSM-governed request stays with the change board for its second step as well.</summary>
-    public static string StatusAfterApproval(bool requiresFourEyes, int stepNumber, bool isExternalItsmApproval, string? sensitivity = null) =>
+    public static string StatusAfterApproval(bool requiresFourEyes, int stepNumber, ConsentWorkflowMode mode = ConsentWorkflowMode.Internal, string? sensitivity = null) =>
         RequiresFourEyesApproval(requiresFourEyes, sensitivity) && stepNumber < 2
-            ? (isExternalItsmApproval ? PendingExternal : PendingSecond)
+            ? (mode == ConsentWorkflowMode.External ? PendingExternal : PendingSecond)
             : Approved;
 
-    public static bool IsItsmActor(Sid sid) => sid.Value.StartsWith("ITSM_", StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>Review E-10: approval steps and rejections belong in the hash chain, not only in the mutable APPROVAL_STEPS table.</summary>
-    public static AuditLogEntry BuildStepAudit(ConsentRequest req, Sid approver, string eventType, string decision, string? newStatus, string? itsmAccount, string? reason)
+    public static AuditLogEntry BuildStepAudit(
+        ConsentRequest req,
+        Sid approver,
+        string eventType,
+        string decision,
+        string? newStatus,
+        string? reason,
+        string? externalReference = null,
+        string? correlationId = null)
     {
         string? trimmedReason = reason is { Length: > 500 } ? reason[..500] : reason;
         return new AuditLogEntry
@@ -176,13 +169,13 @@ internal static class ConsentApprovalPolicy
             ActorSid = approver,
             TargetTable = req.TableIdentifier.ToString(),
             Decision = decision,
-            TraceId = Guid.NewGuid().ToString("N"),
+            TraceId = string.IsNullOrWhiteSpace(correlationId) ? Guid.NewGuid().ToString("N") : correlationId,
             DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
             {
                 RequestId = req.Id,
                 Requester = req.RequesterSid.Value,
                 NewStatus = newStatus,
-                ItsmApprover = itsmAccount,
+                ExternalReference = externalReference,
                 Reason = trimmedReason
             })
         };

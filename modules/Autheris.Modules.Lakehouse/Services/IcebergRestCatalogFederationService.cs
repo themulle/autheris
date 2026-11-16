@@ -99,11 +99,14 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
             return Array.Empty<TableMetadata>();
         }
 
-        var allTables = await _metadataRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
-        var tenantTables = allTables
-            .Where(t => string.Equals(t.Identifier.Domain, tenantId, StringComparison.OrdinalIgnoreCase))
-            .Where(t => t.Table.DataSourceType == DataSourceType.LakehouseIceberg || t.Table.DataSourceType == DataSourceType.LakehouseDelta)
-            .ToList();
+        var tenantTables = await Autheris.Application.Catalog.CatalogTablePageReader.ReadAllAsync(
+            _metadataRepo,
+            new Autheris.Application.Catalog.CatalogTableQuery(
+                DataSource: tenantId,
+                Limit: Autheris.Application.Catalog.CatalogTableQuery.MaxLimit),
+            t => string.Equals(t.Identifier.Domain, tenantId, StringComparison.OrdinalIgnoreCase) &&
+                 (t.Table.DataSourceType == DataSourceType.LakehouseIceberg || t.Table.DataSourceType == DataSourceType.LakehouseDelta),
+            ct: ct).ConfigureAwait(false);
 
         var visible = await CatalogVisibility.VisibleTablesAsync(
             tenantTables,

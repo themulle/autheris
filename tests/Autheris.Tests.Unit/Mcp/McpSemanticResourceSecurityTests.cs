@@ -65,6 +65,7 @@ public sealed class McpSemanticResourceSecurityTests
     {
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(tables));
+        Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(repo);
         return new SemanticMcpCompiler(
             repo, NullLogger<SemanticMcpCompiler>.Instance, golden, AllowAll(tables.Select(t => t.Identifier)),
             catalogVisibility: visibility);

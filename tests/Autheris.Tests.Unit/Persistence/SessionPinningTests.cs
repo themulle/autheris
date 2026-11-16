@@ -111,8 +111,6 @@ public sealed class SessionPinningTests
     {
         Should.NotThrow(() => GatewayStartupValidator.ValidateDefaultSchemas(
             Gateway(new DataSourceConnectionOptions { Provider = "SqlServer", ConnectionString = "Server=x;Database=y" })));
-        Should.NotThrow(() => GatewayStartupValidator.ValidateDefaultSchemas(
-            Gateway(new DataSourceConnectionOptions { Provider = "Sqlite", ConnectionString = "Data Source=:memory:" })));
     }
 
     [Fact]

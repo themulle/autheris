@@ -2,6 +2,7 @@
 
 namespace Autheris.Tests.Unit.Security;
 
+using Autheris.Tests.Unit.Catalog;
 using Autheris.Application.Audit;
 using Autheris.Tests.Unit.TestDoubles;
 using System;
@@ -40,6 +41,7 @@ using Xunit;
 /// Regression tests for Remediation Round 3 of repeated security review findings
 /// (RR-L6-01, RR-L6-02, RR-L6-03, RR-L3-01, RR-L3-02, RR-L3-04, RR-L3-05, RR-L3-06).
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class DynamicMaskingAndConnectorGuardTests
 {
     // =========================================================================
@@ -130,12 +132,12 @@ public sealed class DynamicMaskingAndConnectorGuardTests
             secretProvider: secretProvider,
             logger: NullLogger<GovernedSqlExecutionService>.Instance);
 
-        var user = new ClaimsPrincipal(new ClaimsIdentity(new[]
+        var user = Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(new ClaimsPrincipal(new ClaimsIdentity(new[]
         {
             new Claim("sub", "S-1-USER-1"),
             new Claim(ClaimTypes.PrimarySid, "S-1-USER-1"),
             new Claim("tenant_id", "tenant-alpha")
-        }, "Bearer"));
+        }, "Bearer")));
 
         var compiled = await service.CompileAsync("SELECT id, ssn FROM hr.employees", user, new TenantId("tenant-alpha"));
 
@@ -199,6 +201,7 @@ public sealed class DynamicMaskingAndConnectorGuardTests
     public async Task RR_L3_04_DuckDbOlap_InProduction_HidesTableOracleAndDeniedReasons()
     {
         var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        metadataRepo.StubTables([]);
         metadataRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<TableMetadata?>(null));
 

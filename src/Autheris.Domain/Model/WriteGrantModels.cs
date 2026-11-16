@@ -85,9 +85,9 @@ public sealed record AccessProfileWriteRule(
         if (string.IsNullOrWhiteSpace(TableIdentifier.Domain) ||
             string.IsNullOrWhiteSpace(TableIdentifier.Schema) ||
             string.IsNullOrWhiteSpace(TableIdentifier.TableName) ||
-            TableIdentifier.Domain.Contains('*') || TableIdentifier.Domain.Contains('?') ||
-            TableIdentifier.Schema.Contains('*') || TableIdentifier.Schema.Contains('?') ||
-            TableIdentifier.TableName.Contains('*') || TableIdentifier.TableName.Contains('?'))
+            TableIdentifier.Domain.Contains('*', StringComparison.Ordinal) || TableIdentifier.Domain.Contains('?', StringComparison.Ordinal) ||
+            TableIdentifier.Schema.Contains('*', StringComparison.Ordinal) || TableIdentifier.Schema.Contains('?', StringComparison.Ordinal) ||
+            TableIdentifier.TableName.Contains('*', StringComparison.Ordinal) || TableIdentifier.TableName.Contains('?', StringComparison.Ordinal))
         {
             throw new InvalidOperationException($"Profile write rule {Id}: Wildcard table identifiers are not permitted.");
         }

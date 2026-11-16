@@ -1,0 +1,1 @@
+SELECT id, name FROM employees WHERE salary > 50000

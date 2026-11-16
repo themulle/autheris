@@ -88,7 +88,7 @@ public static class McpAdminTools
                     "required": ["principal", "columns"],
                     "properties": {
                       "principal": { "type": "string" },
-                      "columns": { "type": "object" },
+                      "columns": { "type": "object", "additionalProperties": true },
                       "rowFilter": { "type": "string" },
                       "validUntil": { "type": "string" }
                     }
@@ -130,7 +130,7 @@ public static class McpAdminTools
                 "specContent": { "type": "string" },
                 "specUrl": { "type": "string" },
                 "baseUrl": { "type": "string" },
-                "auth": { "type": "object" },
+                "auth": { "type": "object", "additionalProperties": true },
                 "dryRun": { "type": "boolean" },
                 "planId": { "type": "string", "description": "Plan identifier returned by the first (planning) call." },
                 "confirmationToken": { "type": "string", "description": "HMAC-signed confirmation token of the TOTP-confirmed plan." }

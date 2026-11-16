@@ -16,8 +16,8 @@ using Xunit.Abstractions;
 /// SQLA-06 follow-up: a typed row policy with a correlated subquery runs in the tree compiler through the secured source (the engine pipeline)
 /// and exposes exactly the rows of the WebSQL compile path on the same database. The tenant wrapper of the engine applies inside the subquery.
 /// </summary>
-public sealed class TreeTypedSubqueryParityTests(ParityFixture<SqliteGateDatabase> fixture, ITestOutputHelper output)
-    : IClassFixture<ParityFixture<SqliteGateDatabase>>
+public sealed class TreeTypedSubqueryParityTests(ParityFixture<PostgreSqlGateDatabase> fixture, ITestOutputHelper output)
+    : IClassFixture<ParityFixture<PostgreSqlGateDatabase>>
 {
     private static SqlIdentifier Id(string name) => new(name, true);
 
@@ -65,6 +65,8 @@ public sealed class TreeTypedSubqueryParityTests(ParityFixture<SqliteGateDatabas
     [Fact]
     public async Task SQLA_06_TreeSqlCompiler_TypedSubqueryFilter_MatchesWebSqlRows()
     {
+        if (!fixture.DatabaseReady(output)) return;
+
         var filter = CustomerExists(fixture.Env.Context, namer =>
         {
             var name = namer.Add(new PolicyValue("customers-A-1", SqlParameterType.String));
@@ -90,6 +92,8 @@ public sealed class TreeTypedSubqueryParityTests(ParityFixture<SqliteGateDatabas
     [Trait("Category", "Security")]
     public async Task SQLA_06_TreeSqlCompiler_TypedSubqueryFilter_NeverReturnsForeignTenantRows()
     {
+        if (!fixture.DatabaseReady(output)) return;
+
         // SQLA06F-C1/C3: tenant B owns customers 1001..1004. Without the engine's tenant wrapper inside the subquery this uncorrelated EXISTS
         // would hold for every tenant-A order; with it, tenant A sees no such customer and no row is admitted. Neither path returns a B row.
         // (tenant-A customers above that id are region US; the tenant-B EU customers 1001 and 1003 are the only match)

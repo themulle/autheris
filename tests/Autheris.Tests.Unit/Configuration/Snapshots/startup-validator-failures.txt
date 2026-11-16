@@ -13,14 +13,6 @@ WebhookSubscriptions_MissingId [Production]: ValidationException: Gateway:Webhoo
 QueryCost_FailureFeeRange [Production]: ValidationException: The field FailureFee must be between 1 and 1000.
 QueryCost_Null [Production]: ValidationException: The QueryCost field is required.
 Egress_TooBroadNetwork [Production]: ValidationException: Egress allowlist configuration error (Gateway:Egress): IPv4 networks at least /8, IPv6 at least /32, no overlap with loopback/link-local/metadata/CGNAT/multicast/IPv4-mapped ranges:\n  - Egress.TrustedInternalNetworks '10.0.0.0/4': Network too large (prefix /4); at least /8 required for IPv4.
-CasbinModel_FileNotFound [Production]: ValidationException: Casbin model file '<tmp>/missing.conf' was not found.
-CasbinModel_FileEmpty [Production]: ValidationException: Casbin Model-Datei '<tmp>/model-empty.conf' ist leer.
-CasbinModel_ContractViolation [Production]: ValidationException: Casbin-Modell '<tmp>/model-invalid.conf' does not satisfy the gateway contract: M1: model could not be evaluated (FormatException: Unrecognized line format: 'this is not a casbin model'.); M2: model could not be evaluated (FormatException: Unrecognized line format: 'this is not a casbin model'.); M3: model could not be evaluated (FormatException: Unrecognized line format: 'this is not a casbin model'.); M4: model could not be evaluated (FormatException: Unrecognized line format: 'this is not a casbin model'.); M5: model could not be evaluated (FormatException: Unrecognized line format: 'this is not a casbin model'.); M6: model could not be evaluated (FormatException: Unrecognized line format: 'this is not a casbin model'.); M7: model could not be evaluated (FormatException: Unrecognized line format: 'this is not a casbin model'.); M8: model could not be evaluated (FormatException: Unrecognized line format: 'this is not a casbin model'.); W1: model could not be evaluated (FormatException: Unrecognized line format: 'this is not a casbin model'.)
-CasbinPolicy_PathNotConfigured [Production]: ValidationException: Casbin is enabled (Gateway:Casbin:Enabled = true), but Casbin:PolicyPath is not configured.
-CasbinPolicy_FileNotFound [Production]: ValidationException: Casbin is enabled, but policy file '<tmp>/missing.csv' was not found.
-CasbinPolicy_FileEmpty [Production]: ValidationException: Casbin is enabled, but policy file '<tmp>/policy-empty.csv' is empty.
-CasbinPolicy_NoRules [Production]: ValidationException: Casbin is enabled, but policy file '<tmp>/policy-norules.csv' contains no valid 'p' rules.
-CasbinPolicy_InvalidFile [Production]: ValidationException: Casbin is enabled, but policy file '<tmp>/policy-invalid.csv' is invalid: Casbin policy line 1: 'p' rules require 4 to 8 fields.
 ReverseProxy_InvalidNetwork [Production]: ValidationException: Configuration error ReverseProxy.KnownNetworks: invalid IP network 'not-a-network'.
 ReverseProxy_WildcardNetwork [Production]: ValidationException: Sicherheitsverletzung: ReverseProxy.KnownNetworks '0.0.0.0/0' ist ein Wildcard-Netzwerk (/0). Wildcard-Proxies sind verboten!
 ReverseProxy_InvalidProxy [Production]: ValidationException: Configuration error ReverseProxy.KnownProxies: invalid IP address 'not-an-ip'.
@@ -35,7 +27,6 @@ FederationSigning_KeyTooShort [Production]: InvalidOperationException: Security 
 FederationSigning_KeyMissingAllowedInDevelopment [Development]: OK
 SecuritySwitchReport_WebSqlBypassFlag [Development]: OK
 SecuritySwitchReport_WarnFlagsAndVirtualFilters [Production]: OK
-OperationalInvariants_DmlWithoutRoles [Production]: ValidationException: Configuration error: WebSql.AllowDml=true requires at least one role in WebSql.DmlWriterRoles (SEC M-20: DML is allowed only for explicitly authorized roles).
 OperationalInvariants_QuickstartInProduction [Production]: ValidationException: Security violation: The GettingStarted profile 'Quickstart' may be active ONLY in the Development environment.
 OperationalInvariants_ShutdownTimeout [Production]: ValidationException: NF-HA-01 violation: ShutdownTimeoutSeconds must be at least 10s greater than QueryTimeoutSeconds.
 OperationalInvariants_TerminationGrace [Production]: ValidationException: NF-HA-01 violation: TerminationGracePeriodSeconds must be greater than DrainDelay + ShutdownTimeout + 10s.
@@ -62,7 +53,7 @@ ProductionTransport_AllCors [Production]: ValidationException: Security violatio
 ProductionTransport_McpDeveloperCors [Production]: ValidationException: Security violation: Mcp.EnableDeveloperCors is strictly prohibited outside Development and cannot be bypassed.
 ProductionTransport_HmacReferenceMissing [Production]: ValidationException: NF-SEC-03 violation: Outside Development, HmacSecretKeyVaultRef must be a valid Key Vault secret reference.
 ProductionTransport_OpenMetadataPlainHttp [Production]: ValidationException: Security violation: Outside Development, OpenMetadata.ServerUrl must use HTTPS.
-ProductionTransport_DataSourceWithoutTls [Production]: ValidationException: Sicherheitsverletzung: DataSources:Connections:pg: PostgreSQL connections must use 'SSL Mode=VerifyFull' (or 'VerifyCA') outside Development.
+ProductionTransport_DataSourceWithoutTls [Production]: ValidationException: Sicherheitsverletzung: DataSources:Connections:pg: PostgreSQL connections must use 'SSL Mode=VerifyFull' outside Development.
 ProductionTransport_WildcardOrigin [Production]: ValidationException: Security violation: TrustedOrigins '*' (wildcard CORS) is prohibited outside the Development environment for security reasons (CSRF protection).
 ProductionTransport_PlainHttpOrigin [Production]: ValidationException: Security violation: Outside Development, TrustedOrigins must contain only HTTPS URLs.
 ProductionTransport_ReplicasWithoutRedis [Production]: ValidationException: NF-HA-02 violation: In MultiNodeClusterMode or with more than one replica (PG-6), cluster-wide cache and epoch invalidation requires Caching.Redis.Enabled = true.

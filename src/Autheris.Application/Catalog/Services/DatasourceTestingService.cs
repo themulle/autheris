@@ -10,6 +10,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
+using Autheris.Application.Catalog;
 using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Security;
@@ -96,34 +97,37 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
         }
 
         // 1. Resolve Datasource Metadata
-        var allTables = await _metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
-        if (restrictToTenant is { } callerTenant)
-        {
-            // GHSA-9229: a tenant-confined caller only ever probes datasources of its own tenant.
-            allTables = allTables.Where(t => string.Equals(t.OwnerTenantId, callerTenant.Value, StringComparison.OrdinalIgnoreCase)).ToList();
-        }
-
-        TableMetadata? matchedTable = null;
-
-        foreach (var t in allTables)
-        {
-            var domain = t.Identifier.Domain;
-            var endpoint = t.Table.HttpEndpoint;
-            var compositeKey = endpoint != null && !string.IsNullOrWhiteSpace(endpoint.BaseUrl)
-                ? $"{domain}:{endpoint.BaseUrl}"
-                : $"{domain}:{t.Table.DataSourceType}";
-
-            if (string.Equals(t.Identifier.ToString(), datasourceId, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(compositeKey, datasourceId, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(t.Identifier.TableName, datasourceId, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(domain, datasourceId, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(endpoint?.Name, datasourceId, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(endpoint?.Id.ToString(), datasourceId, StringComparison.OrdinalIgnoreCase))
+        var matchedTable = await CatalogTablePageReader.FindFirstAsync(
+            _metadataRepository,
+            new CatalogTableQuery(IncludeInactive: false),
+            t =>
             {
-                matchedTable = t;
-                break;
-            }
-        }
+                if (!t.Table.IsActive)
+                {
+                    return false;
+                }
+
+                if (restrictToTenant is { } callerTenant &&
+                    !string.Equals(t.OwnerTenantId, callerTenant.Value, StringComparison.OrdinalIgnoreCase))
+                {
+                    // GHSA-9229: a tenant-confined caller only ever probes datasources of its own tenant.
+                    return false;
+                }
+
+                var domain = t.Identifier.Domain;
+                var endpoint = t.Table.HttpEndpoint;
+                var compositeKey = endpoint != null && !string.IsNullOrWhiteSpace(endpoint.BaseUrl)
+                    ? $"{domain}:{endpoint.BaseUrl}"
+                    : $"{domain}:{t.Table.DataSourceType}";
+
+                return string.Equals(t.Identifier.ToString(), datasourceId, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(compositeKey, datasourceId, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(t.Identifier.TableName, datasourceId, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(domain, datasourceId, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(endpoint?.Name, datasourceId, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(endpoint?.Id.ToString(), datasourceId, StringComparison.OrdinalIgnoreCase);
+            },
+            ct: ct).ConfigureAwait(false);
 
         if (matchedTable != null)
         {
@@ -338,7 +342,7 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
                     }
 
                     // CRLF injection prevention
-                    if (k.Contains('\r') || k.Contains('\n') || (v != null && (v.Contains('\r') || v.Contains('\n'))))
+                    if (k.Contains('\r', StringComparison.Ordinal) || k.Contains('\n', StringComparison.Ordinal) || (v != null && (v.Contains('\r', StringComparison.Ordinal) || v.Contains('\n', StringComparison.Ordinal))))
                     {
                         continue;
                     }

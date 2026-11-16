@@ -36,4 +36,19 @@ public partial class GovernanceRepository
 
         return rows;
     }
+
+    public async Task<IReadOnlyList<RevokedRowFilterConsent>> GetRevokedRowFilterConsentsAsync(CancellationToken ct = default)
+    {
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT id, tenant_id, table_id, revoke_reason FROM CONSENTS WHERE is_revoked = 1 AND revoke_reason = 'OD38_ROW_FILTER_NOT_CONVERTIBLE' ORDER BY tenant_id, id";
+        var rows = new List<RevokedRowFilterConsent>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            rows.Add(new RevokedRowFilterConsent(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3)));
+        }
+
+        return rows;
+    }
 }

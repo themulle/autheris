@@ -11,11 +11,12 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;
 using Autheris.Infrastructure.Persistence.Migrations;
+using Autheris.Tests.Common;
 using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Npgsql;
-using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -150,13 +151,11 @@ public sealed class PostgreSqlTableDbtUniqueIdContractTests : TableDbtUniqueIdCo
 
     protected override IGovernanceRepository CreateRepository(string connectionString)
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
         var options = Options.Create(new GatewayOptions
         {
             GovernanceDb = new GovernanceDbOptions { Provider = "PostgreSql", ConnectionString = connectionString, SeedDemoData = false }
         });
-        return GovernanceStoreFactory.CreatePostgreSql(Substitute.For<IEpochValidationService>(), options, env);
+        return GovernanceStoreFactory.CreatePostgreSql(new FakeEpochValidationService(), options, new StubHostEnvironment());
     }
 
     protected override DbConnection OpenRaw(string connectionString)
@@ -194,13 +193,11 @@ public sealed class SqlServerTableDbtUniqueIdContractTests : TableDbtUniqueIdCon
 
     protected override IGovernanceRepository CreateRepository(string connectionString)
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
         var options = Options.Create(new GatewayOptions
         {
             GovernanceDb = new GovernanceDbOptions { Provider = "SqlServer", ConnectionString = connectionString, SeedDemoData = false }
         });
-        return GovernanceStoreFactory.CreateSqlServer(Substitute.For<IEpochValidationService>(), options, env);
+        return GovernanceStoreFactory.CreateSqlServer(new FakeEpochValidationService(), options, new StubHostEnvironment());
     }
 
     protected override DbConnection OpenRaw(string connectionString)
@@ -216,4 +213,12 @@ public sealed class SqlServerTableDbtUniqueIdContractTests : TableDbtUniqueIdCon
         using var repository = GovernanceSchemaTestSupport.UnmigratedSqlServer(options);
         await new SqlServerGovernanceMigrationRunner(repository, options) { StepVersionCapOverride = stepVersionCap }.RunAsync();
     }
+}
+
+file sealed class StubHostEnvironment : IHostEnvironment
+{
+    public string EnvironmentName { get; set; } = Environments.Development;
+    public string ApplicationName { get; set; } = "Autheris.Tests";
+    public string ContentRootPath { get; set; } = AppContext.BaseDirectory;
+    public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
 }

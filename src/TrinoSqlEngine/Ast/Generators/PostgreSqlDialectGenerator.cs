@@ -28,21 +28,39 @@ public sealed class PostgreSqlDialectGenerator : SqlDialectGeneratorBase
         _ => StandardTypeName(type)
     };
 
-    /// <summary>Trino <c>replace(s, search)</c> removes the search string; PostgreSQL <c>replace</c> needs the replacement (an empty bound string).</summary>
+    /// <summary>Trino <c>replace(s, search)</c> removes the search string; <c>substr</c>/<c>substring</c> match Trino <c>start &lt;= 0</c> rules.</summary>
     protected override void GenerateFunctionCall(FunctionCallExpression fn, ref ValueStringBuilder builder, SqlEmitterContext context)
     {
-        if (fn.Name.Parts.Count == 1 && !fn.Name.Parts[0].IsQuoted && fn.Window == null && fn.Filter == null && !fn.Distinct && fn.Arguments.Count == 2 &&
-            fn.Name.Parts[0].Value.Equals("replace", StringComparison.OrdinalIgnoreCase))
+        if (fn.Name.Parts.Count == 1 && !fn.Name.Parts[0].IsQuoted && fn.Window == null && fn.Filter == null && !fn.Distinct)
         {
-            base.GenerateFunctionCall(fn with
+            switch (fn.Name.Parts[0].Value.ToLowerInvariant())
             {
-                Arguments = new[] { fn.Arguments[0], fn.Arguments[1], new LiteralExpression(string.Empty, LiteralType.String) }
-            }, ref builder, context);
-            return;
+                case "substr" or "substring" when fn.Arguments.Count is 2 or 3:
+                    string functionName = fn.Name.Parts[0].Value.Equals("substr", StringComparison.OrdinalIgnoreCase)
+                        ? "SUBSTR"
+                        : SubstringFunctionName;
+                    FormatTrinoSubstring(
+                        ref builder,
+                        new SubstringExpression(fn.Arguments[0], fn.Arguments[1], fn.Arguments.Count == 3 ? fn.Arguments[2] : null),
+                        functionName,
+                        "CHAR_LENGTH",
+                        requireLength: false,
+                        context);
+                    return;
+                case "replace" when fn.Arguments.Count == 2:
+                    base.GenerateFunctionCall(fn with
+                    {
+                        Arguments = new[] { fn.Arguments[0], fn.Arguments[1], new LiteralExpression(string.Empty, LiteralType.String) }
+                    }, ref builder, context);
+                    return;
+            }
         }
 
         base.GenerateFunctionCall(fn, ref builder, context);
     }
+
+    protected override void FormatSubstring(ref ValueStringBuilder builder, SubstringExpression substring, SqlEmitterContext context) =>
+        FormatTrinoSubstring(ref builder, substring, SubstringFunctionName, "CHAR_LENGTH", requireLength: false, context);
 
     // The inline structural positions of this generator are registered with the emitter context.
     protected override bool BindLiterals => true;
@@ -81,6 +99,29 @@ public sealed class PostgreSqlDialectGenerator : SqlDialectGeneratorBase
     /// <summary>Virtual filters (phase 7b): <c>(x + (n) * INTERVAL '1 unit')</c>; on the governed path the amount is bound.</summary>
     protected override void FormatDateAdd(ref ValueStringBuilder builder, DateUnit unit, long amount, Expression source, SqlEmitterContext context)
     {
+        if (unit == DateUnit.Quarter)
+        {
+            // INTERVAL '1 quarter' does not exist: three calendar months, the amount and the source are each emitted once.
+            builder.Append('(');
+            GenerateExpression(source, ref builder, context);
+            builder.Append(" + MAKE_INTERVAL(months => ");
+            if (context.IsBound)
+            {
+                builder.Append("CAST(");
+                builder.Append(BindInteger(amount, context));
+                builder.Append(" AS int)");
+            }
+            else
+            {
+                builder.Append('(');
+                builder.Append(amount.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                builder.Append(')');
+            }
+
+            AppendStructural(ref builder, context, " * 3))");
+            return;
+        }
+
         if (context.IsBound)
         {
             builder.Append('(');
@@ -305,10 +346,90 @@ public sealed class PostgreSqlDialectGenerator : SqlDialectGeneratorBase
                 break;
             }
 
+            case TrinoSqlEngine.Governance.MaskKind.TruncateDate:
+            {
+                string unitFrag = (args.TruncateUnit ?? throw MissingArgument(mask, "TruncateUnit")) switch
+                {
+                    TrinoSqlEngine.Governance.MaskDateTruncateUnit.Year => "'year'",
+                    TrinoSqlEngine.Governance.MaskDateTruncateUnit.Month => "'month'",
+                    TrinoSqlEngine.Governance.MaskDateTruncateUnit.Day => "'day'",
+                    _ => throw UnsupportedConstruct($"column mask {mask.Kind}", TargetDialect)
+                };
+                builder.Append("CAST(DATE_TRUNC(");
+                AppendConstantFragment(ref builder, context, unitFrag);
+                Put(ref builder, ", ", column, ")");
+                AppendStructural(ref builder, context, " AS " + type + ")");
+                break;
+            }
+
+            case TrinoSqlEngine.Governance.MaskKind.BucketNumber:
+            {
+                string width = context.BindPolicy(args.BucketWidth ?? throw MissingArgument(mask, "BucketWidth"));
+                string calc = IsFloatingType(type) ? "double precision" : "numeric";
+                Put(ref builder, "CAST(FLOOR(CAST(", column, " AS ", calc, ") / CAST(", width, " AS ", calc, ")) * CAST(", width, " AS ", calc, ")");
+                AppendStructural(ref builder, context, ") AS " + type + ")");
+                break;
+            }
+
+            case TrinoSqlEngine.Governance.MaskKind.RoundNumber:
+            {
+                string digits = context.BindPolicy(args.RoundDigits ?? throw MissingArgument(mask, "RoundDigits"));
+                Put(ref builder, "CAST(ROUND(CAST(", column, " AS numeric), CAST(", digits, " AS integer))");
+                AppendStructural(ref builder, context, " AS " + type + ")");
+                break;
+            }
+
+            case TrinoSqlEngine.Governance.MaskKind.EmailDomain:
+            {
+                Put(ref builder, "CASE WHEN ", column, " IS NULL THEN ");
+                AppendStructural(ref builder, context, "CAST(NULL AS text)");
+                builder.Append(" WHEN POSITION(");
+                AppendConstantFragment(ref builder, context, "'@'");
+                Put(ref builder, " IN ", text, ") > ");
+                AppendInlineInteger(ref builder, 1, context);
+                builder.Append(" AND POSITION(");
+                AppendConstantFragment(ref builder, context, "'@'");
+                Put(ref builder, " IN ", text, ") < length(", text, ") THEN concat(");
+                AppendConstantFragment(ref builder, context, "'***@'");
+                Put(ref builder, ", substring(", text, " FROM POSITION(");
+                AppendConstantFragment(ref builder, context, "'@'");
+                Put(ref builder, " IN ", text, ") + ");
+                AppendInlineInteger(ref builder, 1, context);
+                builder.Append(")) ELSE ");
+                AppendConstantFragment(ref builder, context, "'***@***'");
+                builder.Append(" END");
+                break;
+            }
+
+            case TrinoSqlEngine.Governance.MaskKind.Tokenize:
+            {
+                string domain = context.BindPolicy(args.TokenDomain ?? throw MissingArgument(mask, "TokenDomain"));
+                string key = context.BindPolicy(args.HmacKey ?? throw MissingArgument(mask, "HmacKey"));
+                Put(ref builder, "CASE WHEN ", column, " IS NULL THEN ");
+                AppendStructural(ref builder, context, "CAST(NULL AS text)");
+                builder.Append(" ELSE concat(");
+                AppendConstantFragment(ref builder, context, "'TOK_'");
+                Put(ref builder, ", CAST(", domain, " AS text), ");
+                AppendConstantFragment(ref builder, context, "'_'");
+                Put(ref builder, ", left(ENCODE(HMAC(", text, ", CAST(", key, " AS text), ");
+                AppendConstantFragment(ref builder, context, "'sha256'");
+                builder.Append("), ");
+                AppendConstantFragment(ref builder, context, "'hex'");
+                builder.Append("), ");
+                AppendInlineInteger(ref builder, 8, context);
+                builder.Append(")) END");
+                break;
+            }
+
             default:
                 throw UnsupportedConstruct($"column mask {mask.Kind}", TargetDialect);
         }
     }
+
+    private static bool IsFloatingType(string nativeType) =>
+        nativeType.StartsWith("real", StringComparison.Ordinal) ||
+        nativeType.StartsWith("double", StringComparison.Ordinal) ||
+        nativeType.StartsWith("float", StringComparison.Ordinal);
 
     private static System.Security.SecurityException MissingArgument(MaskExpression mask, string argument) =>
         new($"The {mask.Kind} mask requires the {argument} argument.");

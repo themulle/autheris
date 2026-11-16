@@ -68,7 +68,7 @@ public partial class GovernanceRepository
                 await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
                 if (await reader.ReadAsync(ct).ConfigureAwait(false))
                 {
-                    tableEntity = ReadTableEntity(reader, _logger);
+                    tableEntity = CatalogRowHydrator.ReadTableEntity(reader, _logger);
                     tableId = tableEntity.Id;
                 }
             }
@@ -93,7 +93,7 @@ public partial class GovernanceRepository
             {
                 cmd.CommandText = SelectTableColumnsSql;
                 cmd.AddBound("@tableId", tableId.Value.ToString());
-                (columns, maskingRules) = await LoadTableColumnsAsync(cmd, _logger, ct).ConfigureAwait(false);
+                (columns, maskingRules) = await CatalogRowHydrator.LoadTableColumnsAsync(cmd, _logger, ct).ConfigureAwait(false);
             }
 
             IReadOnlyList<string> pkColumns;
@@ -111,9 +111,6 @@ public partial class GovernanceRepository
                 throw;
             }
 
-            var physicalIndexes = await CatalogPhysicalIndexStore.ReadAsync(
-                conn, null, KeyDialect, tableId.Value, columns, ct).ConfigureAwait(false);
-
             var rowFilterEvaluation = await RowFilterEvaluationStore.ReadObjectAsync(
                 conn, null, KeyDialect, tableId.Value, ct).ConfigureAwait(false);
 
@@ -126,7 +123,6 @@ public partial class GovernanceRepository
                 PrimaryKeyColumns = pkColumns,
                 PrimaryKeyDirections = pkDirections,
                 Indexes = indexes,
-                PhysicalIndexes = physicalIndexes,
                 RowFilterEvaluation = rowFilterEvaluation
             };
             result.ValidateRequiredFilterColumns();
@@ -162,29 +158,8 @@ public partial class GovernanceRepository
 
     public async Task<IReadOnlyList<TableMetadata>> GetAllTablesAsync(CancellationToken ct = default)
     {
-        var tables = new List<(Guid Id, TableIdentifier Identifier)>();
-
-        await using (var conn = await OpenConnectionAsync(ct).ConfigureAwait(false))
-        {
-            await using (var cmd = conn.CreateCommand())
-            {
-                cmd.CommandText = CatalogSql.SelectActiveTableSummariesSql;
-                await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-                while (await reader.ReadAsync(ct).ConfigureAwait(false))
-                {
-                    try
-                    {
-                        tables.Add((Guid.Parse(reader.GetString(0)), new TableIdentifier(reader.GetString(1), reader.GetString(2), reader.GetString(3))));
-                    }
-                    catch (ArgumentException)
-                    {
-                        LogCatalogNotice("Catalog table has an invalid identifier and was skipped.");
-                    }
-                }
-            }
-        }
-
-        // PERS-17: all epochs in one query; a cached entry is valid only while its epoch is unchanged (unreadable epochs bypass the cache).
+        // PERS-17 / epoch-before-data: read all table epochs before reading any table summary or metadata so a
+        // concurrent write can only make a newly populated cache entry look stale, never falsely fresh.
         Dictionary<Guid, long>? epochs = null;
         try
         {
@@ -194,6 +169,25 @@ public partial class GovernanceRepository
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             LogCatalogNotice("The table epochs could not be read; the metadata cache is bypassed (fail-closed).");
+        }
+
+        var tables = new List<(Guid Id, TableIdentifier Identifier)>();
+        await using (var conn = await OpenConnectionAsync(ct).ConfigureAwait(false))
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = CatalogSql.SelectActiveTableSummariesSql;
+            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                try
+                {
+                    tables.Add((Guid.Parse(reader.GetString(0)), new TableIdentifier(reader.GetString(1), reader.GetString(2), reader.GetString(3))));
+                }
+                catch (ArgumentException)
+                {
+                    LogCatalogNotice("Catalog table has an invalid identifier and was skipped.");
+                }
+            }
         }
 
         bool TryGetValidCached(Guid tableId, string key, out TableMetadata? metadata)
@@ -212,126 +206,141 @@ public partial class GovernanceRepository
             return false;
         }
 
-        var uncached = tables
-            .Where(t => !TryGetValidCached(t.Id, t.Identifier.ToString().ToLowerInvariant(), out _))
-            .Select(t => t.Id)
-            .ToList();
-
-        List<TableMetadata> result;
-        if (uncached.Count == 0)
+        var result = new List<TableMetadata>(tables.Count);
+        var uncachedIds = new List<Guid>();
+        foreach (var (tid, identifier) in tables)
         {
-            result = new List<TableMetadata>(tables.Count);
-            foreach (var (tid, t) in tables)
+            if (TryGetValidCached(tid, identifier.ToString().ToLowerInvariant(), out var cachedMetadata))
             {
-                if (TryGetValidCached(tid, t.ToString().ToLowerInvariant(), out var cachedMetadata))
-                {
-                    result.Add(cachedMetadata!);
-                }
+                result.Add(cachedMetadata!);
             }
-        }
-        else
-        {
-            await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-
-            List<(Guid Id, TableIdentifier Identifier, Table Table)> activeTables;
-            await using (var cmd = conn.CreateCommand())
+            else
             {
-                cmd.CommandText = CatalogSql.SelectActiveTableEntitiesSql;
-                activeTables = await LoadActiveTablesAsync(cmd, ct).ConfigureAwait(false);
-            }
-
-            Dictionary<Guid, List<TableColumn>> columnsByTable;
-            Dictionary<Guid, Dictionary<string, MaskingRule>> maskingRulesByTable;
-            HashSet<Guid> corruptedTableIds;
-
-            await using (var cmd = conn.CreateCommand())
-            {
-                cmd.CommandText = SelectActiveBatchTableColumnsSql;
-                (columnsByTable, maskingRulesByTable, corruptedTableIds) = await LoadBatchTableColumnsAsync(cmd, ct).ConfigureAwait(false);
-            }
-
-            Dictionary<Guid, CatalogKeyDefinitionStore.TableKeyRows>? prefetchedKeys = null;
-            Dictionary<Guid, List<CatalogPhysicalIndexStore.Row>>? prefetchedPhysical = null;
-            var allActiveTableIds = activeTables.Select(t => t.Id).ToList();
-            if (await CatalogKeyDefinitionStore.TablesExistAsync(conn, null, KeyDialect, ct, _keyTables).ConfigureAwait(false))
-            {
-                prefetchedKeys = await CatalogKeyDefinitionStore.ReadBatchAsync(conn, null, KeyDialect, allActiveTableIds, ct).ConfigureAwait(false);
-                prefetchedPhysical = await CatalogPhysicalIndexStore.ReadBatchAsync(conn, null, KeyDialect, allActiveTableIds, ct).ConfigureAwait(false);
-            }
-
-            var rowFilterStrategies = await RowFilterEvaluationStore.ReadBatchObjectAsync(
-                conn, null, KeyDialect, ct).ConfigureAwait(false);
-
-            result = new List<TableMetadata>(activeTables.Count);
-            foreach (var (tid, identifier, tableEntity) in activeTables)
-            {
-                if (corruptedTableIds.Contains(tid))
-                {
-                    LogCatalogNotice("A catalog table was omitted: its column or masking rule definition is invalid (fail-closed).");
-                    continue;
-                }
-
-                var cacheKey = identifier.ToString().ToLowerInvariant();
-                if (TryGetValidCached(tid, cacheKey, out var cachedMetadata))
-                {
-                    result.Add(cachedMetadata!);
-                    continue;
-                }
-
-                var columns = columnsByTable.TryGetValue(tid, out var cols) ? cols : new List<TableColumn>();
-                var maskingRules = maskingRulesByTable.TryGetValue(tid, out var rules)
-                    ? rules
-                    : new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase);
-
-                IReadOnlyList<string> pkColumns;
-                IReadOnlyList<KeyColumnDirection> pkDirections;
-                IReadOnlyList<TableIndexDefinition> indexes;
-                try
-                {
-                    (pkColumns, pkDirections, indexes) = await CatalogKeyDefinitionStore.ReadAsync(
-                        conn, null, KeyDialect, identifier, tid, columns, ct,
-                        _keyTables, prefetchedKeys is not null && prefetchedKeys.TryGetValue(tid, out var keyRows) ? keyRows : null).ConfigureAwait(false);
-                }
-                catch (TableMetadataUnavailableException)
-                {
-                    LogCatalogNotice("A catalog table was omitted: its declared key or index definition is invalid.");
-                    continue;
-                }
-
-                rowFilterStrategies.TryGetValue(tid, out var rowFilterEvaluation);
-
-                var meta = new TableMetadata
-                {
-                    Identifier = identifier,
-                    Table = tableEntity,
-                    Columns = columns,
-                    ColumnMaskingRules = maskingRules,
-                    PrimaryKeyColumns = pkColumns,
-                    PrimaryKeyDirections = pkDirections,
-                    Indexes = indexes,
-                    PhysicalIndexes = prefetchedPhysical is not null && prefetchedPhysical.TryGetValue(tid, out var physicalRows) ? CatalogPhysicalIndexStore.Assemble(columns, physicalRows) : Array.Empty<PhysicalIndexDefinition>(),
-                    RowFilterEvaluation = rowFilterEvaluation
-                };
-
-                try
-                {
-                    meta.ValidateRequiredFilterColumns();
-                }
-                catch (CatalogValidationException)
-                {
-                    LogCatalogNotice("A catalog table was omitted: its required filter column definition is invalid.");
-                    continue;
-                }
-
-                if (epochs != null)
-                {
-                    _metadataCache[cacheKey] = (meta, TimeProvider.System.GetUtcNow().UtcTicks, epochs.TryGetValue(tid, out var loaded) ? loaded : -1);
-                }
-
-                result.Add(meta);
+                uncachedIds.Add(tid);
             }
         }
 
+        if (uncachedIds.Count > 0)
+        {
+            var loaded = await CatalogDeltaQueryHelper.LoadTablesByIdsAsync(this, uncachedIds, epochs, ct).ConfigureAwait(false);
+            result.AddRange(loaded);
+        }
+
+        return await ApplyDatasetCatalogOverlayAsync(result, ct).ConfigureAwait(false);
+    }
+
+    public Task<IReadOnlyList<TableIdentifier>> GetTablesChangedSinceAsync(long sinceVersion, CancellationToken ct = default)
+        => CatalogDeltaQueryHelper.GetTablesChangedSinceAsync(this, sinceVersion, ct);
+
+    public Task<IReadOnlyList<TableMetadata>> GetTablesAsync(IReadOnlyCollection<TableIdentifier> identifiers, CancellationToken ct = default)
+        => CatalogDeltaQueryHelper.GetTablesAsync(this, identifiers, ct);
+
+    public Task<CatalogTablePage> QueryTablesAsync(CatalogTableQuery query, CancellationToken ct = default)
+        => CatalogDeltaQueryHelper.QueryTablesAsync(this, query, ct);
+
+    internal async Task<List<TableMetadata>> AssembleTableMetadataListAsync(
+        DbConnection conn,
+        List<(Guid Id, TableIdentifier Identifier, Table Table)> activeTables,
+        Dictionary<Guid, List<TableColumn>> columnsByTable,
+        Dictionary<Guid, Dictionary<string, MaskingRule>> maskingRulesByTable,
+        HashSet<Guid> corruptedTableIds,
+        Dictionary<Guid, long>? epochs,
+        Func<Guid, string, (bool Hit, TableMetadata? Metadata)>? tryGetCached,
+        CancellationToken ct,
+        Dictionary<Guid, RowFilterEvaluationSettings>? prefetchedRowFilterStrategies = null)
+    {
+        Dictionary<Guid, CatalogKeyDefinitionStore.TableKeyRows>? prefetchedKeys = null;
+        var allActiveTableIds = activeTables.Select(t => t.Id).ToList();
+        if (allActiveTableIds.Count > 0 && await CatalogKeyDefinitionStore.TablesExistAsync(conn, null, KeyDialect, ct, _keyTables).ConfigureAwait(false))
+        {
+            prefetchedKeys = await CatalogKeyDefinitionStore.ReadBatchAsync(conn, null, KeyDialect, allActiveTableIds, ct).ConfigureAwait(false);
+        }
+
+        var rowFilterStrategies = prefetchedRowFilterStrategies
+            ?? await RowFilterEvaluationStore.ReadBatchObjectAsync(conn, null, KeyDialect, ct).ConfigureAwait(false);
+
+        if (epochs != null && AfterMetadataSnapshotForTesting is { } hook)
+        {
+            await hook(ct).ConfigureAwait(false);
+        }
+
+        var result = new List<TableMetadata>(activeTables.Count);
+        foreach (var (tid, identifier, tableEntity) in activeTables)
+        {
+            if (corruptedTableIds.Contains(tid))
+            {
+                LogCatalogNotice("A catalog table was omitted: its column or masking rule definition is invalid (fail-closed).");
+                continue;
+            }
+
+            var cacheKey = identifier.ToString().ToLowerInvariant();
+            if (tryGetCached is not null)
+            {
+                var (hit, cachedMetadata) = tryGetCached(tid, cacheKey);
+                if (hit)
+                {
+                    result.Add(cachedMetadata!);
+                    continue;
+                }
+            }
+
+            var columns = columnsByTable.TryGetValue(tid, out var cols) ? cols : new List<TableColumn>();
+            var maskingRules = maskingRulesByTable.TryGetValue(tid, out var rules)
+                ? rules
+                : new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase);
+
+            IReadOnlyList<string> pkColumns;
+            IReadOnlyList<KeyColumnDirection> pkDirections;
+            IReadOnlyList<TableIndexDefinition> indexes;
+            try
+            {
+                (pkColumns, pkDirections, indexes) = await CatalogKeyDefinitionStore.ReadAsync(
+                    conn, null, KeyDialect, identifier, tid, columns, ct,
+                    _keyTables, prefetchedKeys is not null && prefetchedKeys.TryGetValue(tid, out var keyRows) ? keyRows : null).ConfigureAwait(false);
+            }
+            catch (TableMetadataUnavailableException)
+            {
+                LogCatalogNotice("A catalog table was omitted: its declared key or index definition is invalid.");
+                continue;
+            }
+
+            rowFilterStrategies.TryGetValue(tid, out var rowFilterEvaluation);
+
+            var meta = new TableMetadata
+            {
+                Identifier = identifier,
+                Table = tableEntity,
+                Columns = columns,
+                ColumnMaskingRules = maskingRules,
+                PrimaryKeyColumns = pkColumns,
+                PrimaryKeyDirections = pkDirections,
+                Indexes = indexes,
+                RowFilterEvaluation = rowFilterEvaluation
+            };
+
+            try
+            {
+                meta.ValidateRequiredFilterColumns();
+            }
+            catch (CatalogValidationException)
+            {
+                LogCatalogNotice("A catalog table was omitted: its required filter column definition is invalid.");
+                continue;
+            }
+
+            if (epochs != null)
+            {
+                _metadataCache[cacheKey] = (meta, TimeProvider.System.GetUtcNow().UtcTicks, epochs.TryGetValue(tid, out var loaded) ? loaded : -1);
+            }
+
+            result.Add(meta);
+        }
+
+        return result;
+    }
+
+    internal async Task<List<TableMetadata>> ApplyDatasetCatalogOverlayAsync(List<TableMetadata> result, CancellationToken ct)
+    {
         if (result.Count == 0)
         {
             return result;
@@ -351,125 +360,13 @@ public partial class GovernanceRepository
         return result;
     }
 
-    public async Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default)
+    public async Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default) =>
+        (await UpsertTableMetadataWithResultAsync(metadata, ct).ConfigureAwait(false)).Metadata;
+
+    public async Task<CatalogTableUpsertResult> UpsertTableMetadataWithResultAsync(TableMetadata metadata, CancellationToken ct = default)
     {
-        Autheris.Application.Catalog.Services.CatalogSourceNameValidator.Validate(metadata);
-        metadata.ValidateRequiredFilterColumns();
-        Autheris.Application.Catalog.Semantic.SemanticVirtualTables.EnsureNamespaceRespected(metadata);
-        // Only a replacing write validates (and later persists) the definition; any other upsert never reads or rewrites it.
-        if (metadata.ReplaceKeyDefinition)
-        {
-            metadata = TableKeyDefinitionValidator.Validate(metadata);
-        }
-
-        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
-        try
-        {
-            var tableId = metadata.Table.Id == Guid.Empty ? Guid.NewGuid() : metadata.Table.Id;
-            var tableExisted = false;
-            var structuralChange = false;
-            var docs = new TableDocumentation(metadata.Table.Description, metadata.Table.LongDescription, metadata.Table.DocumentationSource);
-
-            await using (var cmd = conn.CreateCommand())
-            {
-                cmd.Transaction = tx;
-                cmd.CommandText = SelectTableForUpdateSql;
-                cmd.AddBound("@domain", metadata.Identifier.Domain);
-                cmd.AddBound("@schema", metadata.Identifier.Schema);
-                cmd.AddBound("@table", metadata.Identifier.TableName);
-
-                await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-                if (await reader.ReadAsync(ct).ConfigureAwait(false))
-                {
-                    tableId = Guid.Parse(reader.GetString(0));
-                    tableExisted = true;
-                    (structuralChange, docs) = ReadExistingTableForUpsert(reader, metadata.Table, _options?.Catalog?.DocumentationSourcePrecedence);
-                }
-                else
-                {
-                    structuralChange = true;
-                }
-            }
-
-            var httpEndpointJson = metadata.Table.HttpEndpoint != null
-                ? JsonSerializer.Serialize(metadata.Table.HttpEndpoint)
-                : null;
-
-            await using (var upsertCmd = conn.CreateCommand())
-            {
-                upsertCmd.Transaction = tx;
-                upsertCmd.CommandText = UpsertTableSql;
-                upsertCmd.AddBound("@id", tableId.ToString());
-                upsertCmd.AddBound("@sourceType", metadata.Table.SourceType);
-                upsertCmd.AddBound("@domain", metadata.Identifier.Domain);
-                upsertCmd.AddBound("@schema", metadata.Identifier.Schema);
-                upsertCmd.AddBound("@tableName", metadata.Identifier.TableName);
-                upsertCmd.AddBound("@displayName", metadata.Table.DisplayName);
-                upsertCmd.AddBound("@sensitivity", metadata.Table.Sensitivity);
-                upsertCmd.AddBound("@fourEyes", metadata.Table.RequiresFourEyes ? 1 : 0);
-                upsertCmd.AddBound("@active", metadata.Table.IsActive ? 1 : 0);
-                upsertCmd.AddBound("@dst", (int)metadata.Table.DataSourceType);
-                upsertCmd.AddBound("@httpJson", (object?)httpEndpointJson ?? DBNull.Value);
-                upsertCmd.AddBound("@plugin", (object?)metadata.Table.PluginName ?? DBNull.Value);
-                upsertCmd.AddBound("@desc", (object?)docs.Description ?? DBNull.Value);
-                upsertCmd.AddBound("@longDesc", (object?)docs.LongDescription ?? DBNull.Value);
-                upsertCmd.AddBound("@docSource", (object?)docs.Source ?? DBNull.Value);
-                upsertCmd.AddBound("@requiredFilterColumnsJson", metadata.RequiredFilterColumns.IsDefaultOrEmpty ? (object)DBNull.Value : JsonSerializer.Serialize(metadata.RequiredFilterColumns));
-                upsertCmd.AddBound("@textsJson", (object?)CatalogLocalizationPersistence.SerializeLocalizedTexts(metadata.Table.Texts) ?? DBNull.Value);
-                upsertCmd.AddBound("@minGroupSize", (object?)metadata.Table.MinGroupSize ?? DBNull.Value);
-                upsertCmd.AddBound("@nonPersonal", metadata.Table.NonPersonal);
-                upsertCmd.AddBound("@dbtUniqueId", (object?)metadata.Table.DbtUniqueId ?? DBNull.Value);
-                await upsertCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-            }
-
-            // Issue #111 (A-10): the configured default tier is given to a NEW table only; the Hidden default writes no row.
-            if (!tableExisted && _options?.Catalog?.DefaultVisibility == DatasetVisibility.Summary)
-            {
-                await DatasetCatalogStore.InsertDefaultAsync(conn, tx, KeyDialect, tableId, DatasetVisibility.Summary, ct).ConfigureAwait(false);
-            }
-
-            var (existingColsByName, existingMaskingRules, colIdByName) = await LoadExistingColumnsAndMaskingRulesAsync(conn, tx, tableId, ct).ConfigureAwait(false);
-            if (HasMaskingRulesChanged(existingMaskingRules, metadata.ColumnMaskingRules))
-            {
-                structuralChange = true;
-            }
-
-            if (await UpsertColumnsAndMaskingRulesAsync(conn, tx, InsertColumnSql, tableId, metadata, existingColsByName, colIdByName, ct, (existing, incoming) => ShouldOverwriteDocumentation(_options?.Catalog?.DocumentationSourcePrecedence, existing, incoming)).ConfigureAwait(false))
-            {
-                structuralChange = true;
-            }
-
-            if (metadata.ReplaceKeyDefinition)
-            {
-                structuralChange = true;
-                await CatalogKeyDefinitionStore.ReplaceAsync(conn, tx, KeyDialect, tableId, metadata, colIdByName, ct).ConfigureAwait(false);
-            }
-
-            await IncrementTableEpochInternalAsync(conn, tx, metadata.Identifier, ct).ConfigureAwait(false);
-            var structureDelta = structuralChange ? 1L : 0L;
-            var contentDelta = structuralChange ? 0L : 1L;
-            var newVersion = await BumpCatalogVersionInternalAsync(conn, tx, structureDelta, contentDelta, ct).ConfigureAwait(false);
-            await tx.CommitAsync(ct).ConfigureAwait(false);
-            await PublishCatalogChangedEventAsync(newVersion, ct).ConfigureAwait(false);
-        }
-        catch
-        {
-            await tx.RollbackAsync(ct).ConfigureAwait(false);
-            throw;
-        }
-
-        await InvalidateTableEpochAsync(metadata.Identifier, ct).ConfigureAwait(false);
-
-        try
-        {
-            return await GetTableMetadataAsync(metadata.Identifier, ct).ConfigureAwait(false) ?? metadata;
-        }
-        catch (TableMetadataUnavailableException)
-        {
-            // The stored definition is invalid and this write did not replace it: the upsert itself succeeded and stays untouched by it.
-            return metadata;
-        }
+        ArgumentNullException.ThrowIfNull(metadata);
+        return (await UpsertTableMetadataBatchAsync([metadata], ct).ConfigureAwait(false))[0];
     }
 
     public async Task<TableKeyDefinitionChange?> ReplaceTableKeyDefinitionAsync(
@@ -495,8 +392,10 @@ public partial class GovernanceRepository
                 }
 
                 var newVersion = await BumpCatalogVersionInternalAsync(conn, tx, 1, 0, ct).ConfigureAwait(false);
+                await SetTableEpochChangeVersionInternalAsync(conn, tx, table, newVersion.StructureVersion + newVersion.ContentVersion, ct).ConfigureAwait(false);
                 await tx.CommitAsync(ct).ConfigureAwait(false);
                 await PublishCatalogChangedEventAsync(newVersion, ct).ConfigureAwait(false);
+                await FlushScopePendingAsync(ct).ConfigureAwait(false);
             }
             catch
             {
@@ -528,8 +427,10 @@ public partial class GovernanceRepository
                 }
 
                 var newVersion = await BumpCatalogVersionInternalAsync(conn, tx, 1, 0, ct).ConfigureAwait(false);
+                await SetTableEpochChangeVersionInternalAsync(conn, tx, table, newVersion.StructureVersion + newVersion.ContentVersion, ct).ConfigureAwait(false);
                 await tx.CommitAsync(ct).ConfigureAwait(false);
                 await PublishCatalogChangedEventAsync(newVersion, ct).ConfigureAwait(false);
+                await FlushScopePendingAsync(ct).ConfigureAwait(false);
             }
             catch
             {
@@ -576,6 +477,29 @@ public partial class GovernanceRepository
             DatasetCatalogStore.SetPrivacyAsync(conn, tx, KeyDialect, table, minGroupSize, nonPersonal, actor, ct), ct);
 
     /// <summary>Issue #111: one transaction (locked before read, write, after read); no epoch (tags are not policy inputs); the local metadata entry is dropped after the commit.</summary>
+    public Task<DatasetCatalogChange?> SetDatasetDiscoveryAsync(
+        TableIdentifier table, bool? discoveryHidden, bool? samplesDisabled, IReadOnlyList<string>? hiddenColumns, Sid actor, CancellationToken ct = default) =>
+        WriteCatalogSettingsAsync(table, (conn, tx) =>
+            DatasetCatalogStore.SetDiscoveryFlagsAsync(conn, tx, KeyDialect, table, discoveryHidden, samplesDisabled, hiddenColumns, actor, ct), ct);
+
+    public async Task<DiscoveryArtifacts?> GetDiscoveryArtifactsAsync(Guid tableId, CancellationToken ct = default)
+    {
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        return await DiscoveryArtifactStore.GetAsync(conn, null, KeyDialect, tableId, ct).ConfigureAwait(false);
+    }
+
+    public async Task<bool> UpsertDiscoveryArtifactsAsync(DiscoveryArtifacts artifacts, Sid actor, CancellationToken ct = default)
+    {
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        return await DiscoveryArtifactStore.UpsertAsync(conn, null, KeyDialect, artifacts, actor, ct).ConfigureAwait(false);
+    }
+
+    public async Task<bool> DeleteDiscoveryArtifactsAsync(Guid tableId, Sid actor, CancellationToken ct = default)
+    {
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        return await DiscoveryArtifactStore.DeleteAsync(conn, null, KeyDialect, tableId, actor, ct).ConfigureAwait(false);
+    }
+
     private async Task<DatasetCatalogChange?> WriteCatalogSettingsAsync(
         TableIdentifier table, Func<DbConnection, DbTransaction, Task<DatasetCatalogChange?>> write, CancellationToken ct)
     {
@@ -596,12 +520,15 @@ public partial class GovernanceRepository
                 if (change.Changed)
                 {
                     newVersion = await BumpCatalogVersionInternalAsync(conn, tx, 0, 1, ct).ConfigureAwait(false);
+                    var changeVersion = newVersion.Value.StructureVersion + newVersion.Value.ContentVersion;
+                    await IncrementTableEpochInternalAsync(conn, tx, table, ct, changeVersion).ConfigureAwait(false);
                 }
 
                 await tx.CommitAsync(ct).ConfigureAwait(false);
                 if (change.Changed && newVersion.HasValue)
                 {
                     await PublishCatalogChangedEventAsync(newVersion.Value, ct).ConfigureAwait(false);
+                    await FlushScopePendingAsync(ct).ConfigureAwait(false);
                 }
             }
             catch
@@ -613,7 +540,7 @@ public partial class GovernanceRepository
 
         if (change.Changed)
         {
-            InvalidateTableMetadata(table.ToString().ToLowerInvariant());
+            await InvalidateTableEpochAsync(table, ct).ConfigureAwait(false);
         }
 
         return change;
@@ -622,7 +549,7 @@ public partial class GovernanceRepository
     public async Task<TableIdentifier?> GetActiveTableIdentifierAsync(TableIdentifier table, CancellationToken ct = default)
     {
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        return await GetActiveTableIdentifierAsync(conn, CatalogSql.ActiveTableIdentifierSql, table, ct).ConfigureAwait(false);
+        return await CatalogRowHydrator.GetActiveTableIdentifierAsync(conn, CatalogSql.ActiveTableIdentifierSql, table, ct).ConfigureAwait(false);
     }
 
     public async Task<TableIdentifier?> GetActiveTableIdentifierByIdAsync(Guid tableId, CancellationToken ct = default)
@@ -634,7 +561,7 @@ public partial class GovernanceRepository
     public async Task<long> GetTableEpochAsync(TableIdentifier table, CancellationToken ct = default)
     {
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        return await GetTableEpochAsync(conn, CatalogSql.TableEpochSql, table, ct).ConfigureAwait(false);
+        return await CatalogRowHydrator.GetTableEpochAsync(conn, CatalogSql.TableEpochSql, table, ct).ConfigureAwait(false);
     }
 
     public async Task<long> IncrementTableEpochAsync(TableIdentifier table, CancellationToken ct = default)
@@ -656,165 +583,5 @@ public partial class GovernanceRepository
         }
     }
 
-    public async Task<IReadOnlyList<TableRelation>> GetRelationsForTableAsync(TableIdentifier parentTable, CancellationToken ct = default)
-    {
-        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        return await GetRelationsForTableAsync(conn, RelationsForParentTableSql, parentTable, _logger, ct).ConfigureAwait(false);
-    }
-
-    public async Task<RelationWriteResult> CreateRelationAsync(TableRelation relation, CancellationToken ct = default)
-    {
-        // Rule check before any connection is opened.
-        RelationWriteSupport.ValidateKeysOrThrow(relation);
-
-        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        // One connection, one explicit transaction; disposing it uncommitted (failure or cancellation) rolls back all rows.
-        await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
-
-        var parentTableId = await ResolveActiveTableIdAsync(conn, tx, relation.RelationName, relation.ParentTableIdentifier, ct).ConfigureAwait(false);
-        var childTableId = await ResolveActiveTableIdAsync(conn, tx, relation.RelationName, relation.ChildTableIdentifier, ct).ConfigureAwait(false);
-        var parentKeys = RelationWriteSupport.Canonicalize(relation.RelationName, "parent", relation.JoinKeysParent, await LoadColumnNamesAsync(conn, tx, parentTableId, ct).ConfigureAwait(false));
-        var childKeys = RelationWriteSupport.Canonicalize(relation.RelationName, "child", relation.JoinKeysChild, await LoadColumnNamesAsync(conn, tx, childTableId, ct).ConfigureAwait(false));
-
-        string storedId;
-        bool created;
-        // Natural-key upsert: only discovery-owned columns are in the update list (I-18 keeps allow_cross_data_source out of it).
-        await using (var cmd = conn.CreateCommand())
-        {
-            cmd.Transaction = tx;
-            cmd.CommandText = InsertRelationSql;
-            cmd.AddBound("@id", relation.Id.ToString());
-            cmd.AddBound("@pId", parentTableId);
-            cmd.AddBound("@cId", childTableId);
-            cmd.AddBound("@relName", relation.RelationName);
-            cmd.AddBound("@card", relation.Cardinality.ToString());
-            cmd.AddBound("@allowCross", IsPostgreSql ? relation.AllowCrossDataSource : (relation.AllowCrossDataSource ? 1 : 0));
-            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-            await reader.ReadAsync(ct).ConfigureAwait(false);
-            storedId = reader.GetString(0);
-            created = IsPostgreSql ? reader.GetBoolean(1) : string.Equals(reader.GetString(1), "INSERT", StringComparison.OrdinalIgnoreCase);
-        }
-
-        var keysChanged = await ReplaceRelationKeysAsync(conn, tx, storedId, created, parentKeys, childKeys, ct).ConfigureAwait(false);
-
-        ct.ThrowIfCancellationRequested();
-        var newVersion = await BumpCatalogVersionInternalAsync(conn, tx, 1, 0, ct).ConfigureAwait(false);
-        await tx.CommitAsync(ct).ConfigureAwait(false);
-        await PublishCatalogChangedEventAsync(newVersion, ct).ConfigureAwait(false);
-        return new RelationWriteResult(Guid.Parse(storedId), created, keysChanged);
-    }
-
-    /// <summary>Resolves an active table id from its identifier: zero or several matches throw (no LIMIT 1).</summary>
-    private static Task<string> ResolveActiveTableIdAsync(DbConnection conn, DbTransaction tx, string relationName, TableIdentifier table, CancellationToken ct)
-        => ResolveActiveTableIdAsync(conn, tx, CatalogSql.ResolveActiveTableIdSql, relationName, table, ct);
-
-    public async Task<IReadOnlyList<DataOwner>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default)
-    {
-        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        return await GetDataOwnersForTableAsync(conn, CatalogSql.DataOwnersForTableSql, table, ct).ConfigureAwait(false);
-    }
-
-    public Task<bool> IsAuthorizedApproverForTableAsync(TableIdentifier table, Sid approverSid, CancellationToken ct = default) =>
-        IsAuthorizedApproverForTableInternalAsync(table, approverSid, null, ct);
-
-    public Task<bool> IsAuthorizedApproverForTableAsync(TableIdentifier table, Sid approverSid, string? itsmApproverAccount, CancellationToken ct = default) =>
-        IsAuthorizedApproverForTableInternalAsync(table, approverSid, itsmApproverAccount, ct);
-
-    public async Task<IReadOnlySet<string>> GetTransitiveRolesAsync(Sid subjectSid, CancellationToken ct = default)
-    {
-        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        return await GetTransitiveRolesAsync(conn, subjectSid, ct).ConfigureAwait(false);
-    }
-
-    public async Task<DataOwnerDelegation> DelegateDataOwnershipAsync(DataOwnerDelegation delegation, CancellationToken ct = default)
-    {
-        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
-        try
-        {
-            await using var cmd = conn.CreateCommand();
-            cmd.Transaction = tx;
-            cmd.CommandText = InsertDelegationSql;
-            cmd.AddBound("@id", delegation.Id.ToString());
-            cmd.AddBound("@ownerId", delegation.DataOwnerId.ToString());
-            cmd.AddBound("@delegateSid", delegation.DelegateSid.Value);
-            cmd.AddBound("@validFrom", delegation.ValidFrom.ToString("O"));
-            cmd.AddBound("@validTo", delegation.ValidTo.ToString("O"));
-            cmd.AddBound("@reason", delegation.Reason);
-            await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-
-            var newVersion = await BumpCatalogVersionInternalAsync(conn, tx, 0, 1, ct).ConfigureAwait(false);
-            await tx.CommitAsync(ct).ConfigureAwait(false);
-            await PublishCatalogChangedEventAsync(newVersion, ct).ConfigureAwait(false);
-            return delegation;
-        }
-        catch
-        {
-            await tx.RollbackAsync(ct).ConfigureAwait(false);
-            throw;
-        }
-    }
-
-    public async Task<bool> SetRelationCrossDataSourceOptInAsync(Guid relationId, bool allowCrossDataSource, CancellationToken ct = default)
-    {
-        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
-        try
-        {
-            var updated = await UpdateRelationCrossDataSourceAsync(conn, tx, relationId, IsPostgreSql ? allowCrossDataSource : (allowCrossDataSource ? 1 : 0), ct).ConfigureAwait(false);
-            if (updated)
-            {
-                var newVersion = await BumpCatalogVersionInternalAsync(conn, tx, 1, 0, ct).ConfigureAwait(false);
-                await tx.CommitAsync(ct).ConfigureAwait(false);
-                await PublishCatalogChangedEventAsync(newVersion, ct).ConfigureAwait(false);
-                return true;
-            }
-
-            await tx.RollbackAsync(ct).ConfigureAwait(false);
-            return false;
-        }
-        catch
-        {
-            await tx.RollbackAsync(ct).ConfigureAwait(false);
-            throw;
-        }
-    }
-
-    public async Task<Autheris.Application.Catalog.CatalogVersion> GetCatalogVersionAsync(CancellationToken ct = default)
-    {
-        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        return await GetCatalogVersionAsync(conn, CatalogVersionSql, ct).ConfigureAwait(false);
-    }
-
-    public async Task<IReadOnlyList<TableRelation>> GetAllRelationsAsync(CancellationToken ct = default)
-    {
-        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        return await GetAllRelationsAsync(conn, AllRelationsSql, _logger, ct).ConfigureAwait(false);
-    }
-
-    private async Task<Autheris.Application.Catalog.CatalogVersion> BumpCatalogVersionInternalAsync(
-        DbConnection conn,
-        DbTransaction tx,
-        long structureDelta,
-        long contentDelta,
-        CancellationToken ct)
-    {
-        ValidateVersionDeltas(structureDelta, contentDelta);
-
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
-        cmd.CommandText = BumpCatalogVersionSql;
-        cmd.AddBound("@structureDelta", structureDelta);
-        cmd.AddBound("@contentDelta", contentDelta);
-        cmd.AddBound("@now", TimeProvider.System.GetUtcNow(), System.Data.DbType.DateTimeOffset);
-
-        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        if (await reader.ReadAsync(ct).ConfigureAwait(false))
-        {
-            return new Autheris.Application.Catalog.CatalogVersion(reader.GetInt64(0), reader.GetInt64(1));
-        }
-        return new Autheris.Application.Catalog.CatalogVersion(1, 1);
-    }
-
-    private void LogCatalogNotice(string message) => _logger?.LogWarning("Catalog notice: {Notice}", message);
+    internal void LogCatalogNotice(string message) => _logger?.LogWarning("Catalog notice: {Notice}", message);
 }

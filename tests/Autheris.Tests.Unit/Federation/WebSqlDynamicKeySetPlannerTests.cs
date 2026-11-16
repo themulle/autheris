@@ -228,9 +228,6 @@ public sealed class WebSqlDynamicKeySetPlannerTests
         KeyBatcher.ResolveBatchSize(DatabaseDialect.SqlServer, 3000).ShouldBe(2090);
         KeyBatcher.ResolveBatchSize(DatabaseDialect.SqlServer, 500).ShouldBe(500);
 
-        // SQLite clamped to 999
-        KeyBatcher.ResolveBatchSize(DatabaseDialect.Sqlite, 1500).ShouldBe(999);
-
         // Oracle clamped to 1000
         KeyBatcher.ResolveBatchSize(DatabaseDialect.Oracle, 1500).ShouldBe(1000);
     }

@@ -1,5 +1,7 @@
 namespace Autheris.Tests.Unit.Sql;
 
+using Autheris.Tests.Unit.Catalog;
+using Autheris.Application.Catalog;
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
@@ -31,6 +33,7 @@ using Xunit;
 /// values of the current request and revalidates the table dependencies; it never serves another principal's, tenant's or catalog
 /// version's compilation. All tests share one engine instance, so each compile can hit what the previous one inserted.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class GovernedPipelineCachePoisoningTests
 {
     private const string Tenant = "acme";
@@ -46,7 +49,8 @@ public sealed class GovernedPipelineCachePoisoningTests
     };
 
     private static ClaimsPrincipal User(string sid) =>
-        new(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, sid), new Claim("tenant_id", Tenant), new Claim(ClaimTypes.Role, "Writer"), new Claim("scp", "Sql.Write")], "Test"));
+        Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(
+            new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, sid), new Claim("tenant_id", Tenant), new Claim(ClaimTypes.Role, "Writer"), new Claim("scp", "Sql.Write")], "Test")));
 
     private static Consent RegionConsent(string sid, string region, TableMetadata table) => new()
     {
@@ -64,17 +68,33 @@ public sealed class GovernedPipelineCachePoisoningTests
     private GovernedSqlExecutionService CreateService(
         Func<TableMetadata> table, Func<IReadOnlyList<Consent>>? consents = null, bool allowDml = false, FastSqlEngine? engine = null, bool grantWritePermit = true)
     {
-        // Test-only seam: the production write decision denies every DML target.
-        Autheris.Application.Policy.DmlWriteDecisionTestSeam.EnablePermissiveWrite();
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(ci => Task.FromResult<TableMetadata?>(OrdersId.Equals(ci.Arg<TableIdentifier>()) ? table() : null));
+        repo.QueryTablesAsync(Arg.Any<CatalogTableQuery>(), Arg.Any<CancellationToken>())
+            .Returns(ci => Task.FromResult(CatalogRepositoryStubs.Page([table()], ci.Arg<CatalogTableQuery>())));
+        var defaultConsents = new List<Consent>();
+        if (allowDml && consents is null)
+        {
+            defaultConsents.Add(new Consent
+            {
+                TableIdentifier = OrdersId,
+                TenantId = new TenantId(Tenant),
+                GranteeType = GranteeType.User,
+                GranteeSid = new Sid("S-W"),
+                Effect = ConsentEffect.Allow,
+                ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
+                ValidTo = DateTimeOffset.UtcNow.AddDays(1),
+                WriteRules = [new WriteRule(Guid.NewGuid(), WriteOperation.Delete, [], WriteRowScope.AllRows)]
+            });
+        }
         var consentRepository = Substitute.For<IConsentRepository>();
         consentRepository.GetActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
             .Returns(ci =>
             {
                 var subjects = ci.Arg<IEnumerable<Sid>>().ToHashSet();
-                return Task.FromResult<IReadOnlyList<Consent>>((consents?.Invoke() ?? []).Where(c => c.GranteeSid is { } g && subjects.Contains(g)).ToList());
+                var source = consents?.Invoke() ?? defaultConsents;
+                return Task.FromResult<IReadOnlyList<Consent>>(source.Where(c => c.GranteeSid is { } g && subjects.Contains(g)).ToList());
             });
         IConsentResolutionService resolution;
         if (consents is null)
@@ -88,12 +108,23 @@ public sealed class GovernedPipelineCachePoisoningTests
             resolution = new ConsentResolutionService();
         }
 
+        var gatewayOptions = Options.Create(new GatewayOptions { WebSql = new WebSqlOptions { Enabled = true, AllowDml = allowDml, DefaultMaxRows = 100, MaxAllowedRows = 500 } });
+        var typedPolicies = GovernedTestSupport.TypedPolicies();
+        var pdp = new Autheris.Application.Policy.Pdp.AccessDecisionPoint(
+            gatewayOptions,
+            resolution,
+            consentRepository,
+            Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
+            typedPolicies: typedPolicies,
+            writeGrantEvaluator: new Autheris.Application.Policy.WriteGrants.WriteGrantEvaluator(consentRepository, allowDeleteGrants: grantWritePermit));
+
         return global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
-            Options.Create(new GatewayOptions { WebSql = new WebSqlOptions { Enabled = true, AllowDml = allowDml, DmlWriterRoles = ["Writer"], DefaultMaxRows = 100, MaxAllowedRows = 500 } }), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard,
+            gatewayOptions, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard,
             consentResolution: resolution,
-            tableRepository: repo, policyFactory: GovernedTestSupport.PolicyFactory(repo), typedPolicies: GovernedTestSupport.TypedPolicies(),
-            sqlEngine: grantWritePermit ? new global::Autheris.Tests.Unit.TestDoubles.TestWritePermitSqlEngine(engine ?? _engine) : engine ?? _engine,
-            logger: NullLogger<GovernedSqlExecutionService>.Instance, consentRepository: consentRepository);
+            tableRepository: repo, policyFactory: GovernedTestSupport.PolicyFactory(repo), typedPolicies: typedPolicies,
+            sqlEngine: engine ?? _engine,
+            logger: NullLogger<GovernedSqlExecutionService>.Instance, consentRepository: consentRepository,
+            accessDecisionPoint: pdp);
     }
 
     [Fact]
@@ -213,14 +244,24 @@ public sealed class GovernedPipelineCachePoisoningTests
         // never served to a compile of the same text and statements that carries none.
         var table = Orders("id", "tenant_id");
         var permitted = CreateService(() => table, allowDml: true);
-        var unpermitted = CreateService(() => table, allowDml: true, grantWritePermit: false);
         const string Sql = "DELETE FROM orders WHERE id = 1";
 
         var first = await permitted.CompileAsync(Sql, User("S-W"), new TenantId(Tenant));
         first.StatementClass.ShouldBe(SqlStatementClass.Delete);
         long hits = _engine.CompileCache.Stats.Hits;
 
-        var ex = await Should.ThrowAsync<System.Security.SecurityException>(() => unpermitted.CompileAsync(Sql, User("S-W"), new TenantId(Tenant)));
+        var policyWithoutWrite = await new GovernancePolicyFactory(new StubCatalogProvider(table), new Autheris.Application.Governance.Services.NullTableMetadataRepository(), Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions())).CreateAsync(
+            new GovernedPolicyInput("default", new TenantId(Tenant),
+                new Dictionary<TableIdentity, TableAccessDecision>
+                {
+                    [new TableIdentity("public", "orders")] = TableAccessDecision.Allowed(OrdersId, new Dictionary<string, ColumnAccessLevel>(), null, hasUnconstrainedColumnAllow: true)
+                },
+                new HashSet<TableIdentity> { new("public", "orders") }, GovernedSubqueryStrategy.Correlated)
+            { Metadata = new Dictionary<TableIdentity, TableMetadata> { [new TableIdentity("public", "orders")] = table } },
+            CancellationToken.None);
+        var unpermitted = CompileRequestFactory.Create(policyWithoutWrite, TargetSqlDialect.PostgreSql, new WebSqlOptions { AllowDml = true }, isDml: true, 100, new HashSet<string>());
+
+        var ex = Should.Throw<System.Security.SecurityException>(() => _engine.Compile(Sql.AsMemory(), unpermitted, CancellationToken.None));
 
         ex.Message.ShouldContain("A write permit is required for DML operations.");
         _engine.CompileCache.Stats.Hits.ShouldBe(hits);   // not served from the permitted writer's template

@@ -31,10 +31,6 @@ public static class GatewayDiagnostics
     public static readonly Counter<long> EventBusHandlerFailedCounter =
         Meter.CreateCounter<long>("autheris_event_bus_handler_failed_total", description: "Redis event bus subscriber handlers that failed");
 
-    /// <summary>A-14: a local policy change could not be propagated to the cluster policy epoch (other nodes converge via cache TTL).</summary>
-    public static readonly Counter<long> PolicyEpochPropagationFailedCounter =
-        Meter.CreateCounter<long>("autheris_policy_epoch_propagation_failed_total", description: "Casbin policy epoch increments that failed or found the cluster state unavailable");
-
     public static readonly Counter<long> UnroutedRequestCounter =
         Meter.CreateCounter<long>("autheris_unrouted_requests_total", description: "Requests answered by the router without a matching endpoint (404/405/400); not written to the audit chain");
 
@@ -62,11 +58,17 @@ public static class GatewayDiagnostics
     public static readonly Counter<long> TransportDenied =
         Meter.CreateCounter<long>("autheris_transport_denied_total", description: "Requests refused because the data source does not allow the ingress transport");
 
+    public static readonly Counter<long> MaskTypeFallbackCounter =
+        Meter.CreateCounter<long>("autheris_mask_type_fallback_total", description: "Classification masks that fell back to TYPE_SAFE_REDACT due to incompatible column type");
+
     public static readonly Counter<long> AuditWriteFailedCounter =
         Meter.CreateCounter<long>("autheris_audit_write_failed_total", description: "Audit writes that failed, by tier (required or best_effort)");
 
     public static readonly Counter<long> AuditDeadLetterCounter =
         Meter.CreateCounter<long>("autheris_audit_dead_letter_total", description: "Total number of audit events diverted to dead-letter storage");
+
+    public static readonly Counter<long> AuditLostOnShutdownCounter =
+        Meter.CreateCounter<long>("autheris_audit_lost_on_shutdown_total", description: "Audit events lost when persistence and dead-letter fallback both fail");
 
     public static readonly Counter<long> DmlAuditFailedCounter =
         Meter.CreateCounter<long>("autheris_dml_audit_failed_total", description: "Number of committed WebSQL DML statements whose audit record could not be written");
@@ -80,9 +82,6 @@ public static class GatewayDiagnostics
     public static readonly Counter<long> GatewayEventBusHandlerTimeoutCounter =
         Meter.CreateCounter<long>("autheris_event_bus_handler_timeout_total", description: "Gateway event handler invocations that exceeded the per-handler timeout");
 
-    public static readonly Histogram<double> PolicyEvaluationDuration =
-        Meter.CreateHistogram<double>("autheris_policy_evaluation_duration_ms", "ms", description: "Duration of Casbin ABAC policy evaluation");
-
     public static readonly Histogram<double> LineageTraversalDuration =
         Meter.CreateHistogram<double>("autheris_lineage_traversal_duration_ms", "ms", description: "Duration of cycle-safe lineage traversal");
 
@@ -91,6 +90,9 @@ public static class GatewayDiagnostics
 
     public static readonly Counter<long> RowFilterKeySetMisses =
         Meter.CreateCounter<long>("autheris.rowfilter.keyset.misses", description: "Correlated row-filter sites whose key set was loaded for the statement");
+
+    public static readonly Counter<long> DiscoveryFailuresCounter =
+        Meter.CreateCounter<long>("discovery_failures_total", description: "Catalog discovery evaluations that failed closed and returned empty or null");
 
     public static readonly Counter<long> RowFilterKeySetFallbacks =
         Meter.CreateCounter<long>("autheris.rowfilter.keyset.fallbacks", description: "Correlated row-filter sites that kept the exact EXISTS form, by reason");
@@ -120,7 +122,6 @@ public static class GatewayDiagnostics
     private static readonly FrozenDictionary<string, FrozenSet<string>> SpanTagAllowList = new Dictionary<string, FrozenSet<string>>
     {
         ["Governance.EvaluateConsent"] = (FrozenSet<string>)new[] { "user.sid", "tenant.id", "decision", "table.id", "policy.epoch" }.ToFrozenSet(),
-        ["Governance.CasbinAbacEnforcement"] = (FrozenSet<string>)new[] { "user.sid", "tenant.id", "policy.match", "rule.count", "latency.ms" }.ToFrozenSet(),
         ["SqlExecution.Pushdown"] = (FrozenSet<string>)new[] { "db.system", "db.statement", "tenant.id", "rows.affected" }.ToFrozenSet(),
         ["AuditLog.AppendHmacEntry"] = (FrozenSet<string>)new[] { "audit.entry_id", "tenant.id", "chain.height" }.ToFrozenSet(),
         ["Lineage.Traverse"] = (FrozenSet<string>)new[] { "tenant.id", "root.node_id", "nodes.visited", "cycle.detected" }.ToFrozenSet()

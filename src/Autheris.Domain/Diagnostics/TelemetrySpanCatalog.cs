@@ -139,7 +139,7 @@ public static class TelemetrySpanCatalog
         }
 
         // Database client command spans: operation name starts with or contains SQL verb e.g. "SELECT", "INSERT", "UPDATE"
-        if (spanName.Contains(' ') && DataCommandAllowlist.Contains(key))
+        if (spanName.Contains(' ', StringComparison.Ordinal) && DataCommandAllowlist.Contains(key))
         {
             return true;
         }

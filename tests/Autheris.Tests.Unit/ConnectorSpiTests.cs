@@ -18,7 +18,6 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Connectors;
 using Autheris.Infrastructure.Persistence;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -268,36 +267,11 @@ public class ConnectorSpiTests
     [Fact]
     public async Task SQL202_SqlConnector_RespectsSessionLimitBeyond5000()
     {
-        var memConnStr = $"Data Source=sql202_{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
-        using var masterConn = new SqliteConnection(memConnStr);
-        masterConn.Open();
-
-        using (var cmd = masterConn.CreateCommand())
-        {
-            cmd.CommandText = "CREATE TABLE orders (id INT, tenant_id TEXT);";
-            cmd.ExecuteNonQuery();
-
-            using var tx = masterConn.BeginTransaction();
-            using var insertCmd = masterConn.CreateCommand();
-            insertCmd.Transaction = tx;
-            insertCmd.CommandText = "INSERT INTO orders VALUES ($id, 'tenant-1');";
-            var p = insertCmd.CreateParameter();
-            p.ParameterName = "$id";
-            insertCmd.Parameters.Add(p);
-
-            for (int i = 1; i <= 6000; i++)
-            {
-                p.Value = i;
-                insertCmd.ExecuteNonQuery();
-            }
-            tx.Commit();
-        }
-
         var table = new TableIdentifier("sales", "main", "orders");
         var meta = new TableMetadata
         {
             Identifier = table,
-            Table = new Table { SchemaName = "main", TableName = "orders", SourceName = "sqlite_ds", SourceType = "Sqlite" },
+            Table = new Table { SchemaName = "main", TableName = "orders", SourceName = "pg_ds", SourceType = "PostgreSql" },
             Columns = [new TableColumn { ColumnName = "id", DataType = "int" }, new TableColumn { ColumnName = "tenant_id", DataType = "text" }]
         };
 
@@ -306,9 +280,10 @@ public class ConnectorSpiTests
             DuckDbOlap = new DuckDbOlapOptions { MaxStagedRowsPerTable = 25000 }
         });
 
-        var env = new Autheris.Tests.Unit.Sql.TestCompileEnv(TrinoSqlEngine.TargetSqlDialect.Sqlite)
-            .Table("orders", "tenant_id", "id:INT", "tenant_id");
-        var governed = new Autheris.Tests.Unit.TestDoubles.SqliteGovernedSqlService(masterConn, env);
+        var syntheticRows = Enumerable.Range(1, 6000)
+            .Select(i => (IReadOnlyDictionary<string, object?>)new Dictionary<string, object?> { ["id"] = i })
+            .ToList();
+        var governed = new RecordingGovernedSqlService(syntheticRows);
         var sqlConnector = NewSqlConnector("default-sql", new FakeMetadataRepository([meta]), governed, options);
 
         var decision = TableAccessDecision.Allowed(table, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true);
@@ -327,6 +302,32 @@ public class ConnectorSpiTests
         // After fix: batch.Count is 6000!
         batch.Count.ShouldBe(6000);
         governed.Requests.Single().Sql.ShouldContain("LIMIT 6000");
+    }
+
+    private sealed class RecordingGovernedSqlService(IReadOnlyList<IReadOnlyDictionary<string, object?>> rows) : IGovernedSqlExecutionService
+    {
+        public List<GovernedSqlQueryRequest> Requests { get; } = [];
+
+        public Task ExecuteGovernedQueryAsync(
+            GovernedSqlQueryRequest request,
+            ClaimsPrincipal user,
+            TenantId tenantId,
+            Func<System.Data.Common.DbDataReader, CancellationToken, Task> rowWriter,
+            CancellationToken ct = default) =>
+            throw new NotSupportedException();
+
+        public Task ValidateAsync(string rawSql, ClaimsPrincipal user, TenantId tenantId, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+
+        public Task<GovernedSqlResult> ExecuteQueryBufferedAsync(
+            GovernedSqlQueryRequest request,
+            ClaimsPrincipal user,
+            TenantId tenantId,
+            CancellationToken ct = default)
+        {
+            Requests.Add(request);
+            return Task.FromResult(new GovernedSqlResult(request.Sql, ["id"], rows, rows.Count, 0));
+        }
     }
 
     private sealed class FakeSqlExecutor : IDataSourceExecutor

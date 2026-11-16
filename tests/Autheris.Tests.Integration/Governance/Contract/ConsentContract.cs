@@ -17,7 +17,8 @@ namespace Autheris.Tests.Integration.Governance.Contract;
 
 /// <summary>
 /// Engine-agnostic contract suite for <c>IConsentRepository</c>, <c>IConsentApprovalRepository</c>,
-/// and <c>IConsentDescriptionRepository</c> (including grants, revocations, decisions, and keyset paging).
+/// <c>IConsentDescriptionRepository</c>, <c>IOwnerGrantStore</c>, and <c>IProfileAssignmentStore</c>
+/// (including grants, revocations, decisions, profile assignment items, owner grants, and keyset paging).
 /// </summary>
 public abstract class ConsentContract : GovernanceContractBase
 {
@@ -166,7 +167,8 @@ public abstract class ConsentContract : GovernanceContractBase
         var pageA = await Store.Consents.GetConsentPageAsync(new ConsentPageQuery(Store.TenantA));
         pageA.Items.Should().OnlyContain(c => c.TenantId == Store.TenantA);
 
-        var sharedTicket = "INC-" + Guid.NewGuid().ToString("N")[..8];
+        var extSysId = Guid.NewGuid();
+        var sharedRef = "EXT-" + Guid.NewGuid().ToString("N")[..8];
         var reqA = await Store.ConsentApprovals.CreateConsentRequestAsync(new ConsentRequest
         {
             Id = Guid.NewGuid(),
@@ -176,7 +178,9 @@ public abstract class ConsentContract : GovernanceContractBase
             RequestedGranteeRef = GranteeSid.Value,
             BusinessJustification = "Tenant A request",
             RequestedValidTo = now.AddDays(5),
-            ItsmTicketId = sharedTicket,
+            WorkflowMode = ConsentWorkflowMode.External,
+            ExternalSystemId = extSysId,
+            ExternalReference = sharedRef,
             TenantId = Store.TenantA
         });
         _ = await Store.ConsentApprovals.CreateConsentRequestAsync(new ConsentRequest
@@ -188,11 +192,13 @@ public abstract class ConsentContract : GovernanceContractBase
             RequestedGranteeRef = GranteeSid.Value,
             BusinessJustification = "Tenant B request",
             RequestedValidTo = now.AddDays(5),
-            ItsmTicketId = sharedTicket,
+            WorkflowMode = ConsentWorkflowMode.External,
+            ExternalSystemId = extSysId,
+            ExternalReference = sharedRef,
             TenantId = Store.TenantB
         });
 
-        var lookedUpA = await Store.ConsentApprovals.GetConsentRequestByTicketIdAsync(sharedTicket, Store.TenantA);
+        var lookedUpA = await Store.ConsentApprovals.GetConsentRequestByExternalReferenceAsync(extSysId, sharedRef, Store.TenantA);
         lookedUpA.Should().NotBeNull();
         lookedUpA!.Id.Should().Be(reqA.Id);
     }
@@ -399,7 +405,8 @@ public abstract class ConsentContract : GovernanceContractBase
         var consent = await Store.Consents.CreateConsentAsync(NewConsent(table.Identifier, Store.TenantA, GranteeSid));
 
         Store.SetCaller(new CallerContext("contract-test", "1.0", "revoke"));
-        await Store.Consents.RevokeConsentAsync(consent.Id, Owner1Sid, "Revoked in contract test");
+        var none = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null);
+        await Store.Consents.RevokeConsentAsync(consent.Id, Owner1Sid, "Revoked in contract test", none);
 
         var activeBySubj = await Store.Consents.GetActiveConsentsForSubjectsAsync([GranteeSid], table.Identifier, now, Store.TenantA);
         activeBySubj.Should().BeEmpty();
@@ -432,10 +439,11 @@ public abstract class ConsentContract : GovernanceContractBase
         var c1 = await Store.Consents.CreateConsentAsync(NewConsent(table.Identifier, Store.TenantA, GranteeSid, requestId: syncMarker));
         var c2 = await Store.Consents.CreateConsentAsync(NewConsent(table.Identifier, Store.TenantA, new Sid("S-1-5-21-900-55")));
 
+        var none = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null);
         var unauthorizedSid = new Sid("S-1-5-21-999-999");
         Store.SetCaller(new CallerContext("stranger-app", "1.0", "revoke"));
-        var unauthAct = () => Store.Consents.RevokeConsentAsync(c2.Id, unauthorizedSid, "Unauthorized attempt");
-        await unauthAct.Should().ThrowAsync<UnauthorizedAccessException>();
+        var unauthAct = () => Store.Consents.RevokeConsentAsync(c2.Id, unauthorizedSid, "Unauthorized attempt", none);
+        await unauthAct.Should().ThrowAsync<Autheris.Domain.Exceptions.ConsentRevocationForbiddenException>();
 
         var wrongMarkerRevoked = await Store.Consents.RevokeSystemConsentAsync(c1.Id, Guid.NewGuid(), new Sid("system:sync"), "Wrong marker");
         wrongMarkerRevoked.Should().BeFalse();
@@ -445,7 +453,7 @@ public abstract class ConsentContract : GovernanceContractBase
 
         var replacement = NewConsent(table.Identifier, Store.TenantA, new Sid("S-1-5-21-900-77"));
         var epochBefore = await Store.PolicyEpochs.GetTableEpochAsync(table.Identifier);
-        await Store.Consents.ReplaceConsentsAsync([c2.Id], [replacement], Owner1Sid, "Declarative replace");
+        await Store.Consents.ReplaceConsentsAsync([c2.Id], [replacement], Owner1Sid, "Declarative replace", none);
         var epochAfter = await Store.PolicyEpochs.GetTableEpochAsync(table.Identifier);
         epochAfter.Should().BeGreaterThan(epochBefore);
 
@@ -574,16 +582,6 @@ public abstract class ConsentContract : GovernanceContractBase
         await Store.ConsentApprovals.ActivateConsentAsync(req2.Id, Owner2Sid);
         var active = await Store.Consents.GetActiveConsentsForSubjectsAsync([GranteeSid], table.Identifier, DateTimeOffset.UtcNow, Store.TenantA);
         active.Should().ContainSingle();
-
-        var consent = active[0];
-        var shortenAct = () => Store.Consents.ExtendConsentExpiryAsync(consent.Id, consent.ValidTo.AddHours(-1));
-        await shortenAct.Should().ThrowAsync<ConsentNotExtendableException>();
-
-        var extendedValidTo = consent.ValidTo.AddDays(10);
-        await Store.Consents.ExtendConsentExpiryAsync(consent.Id, extendedValidTo);
-        var afterExtend = await Store.Consents.GetConsentByIdAsync(consent.Id);
-        afterExtend!.ValidTo.Should().BeCloseTo(extendedValidTo, TimeSpan.FromSeconds(1));
-        afterExtend.RenewalCount.Should().Be(1);
     }
 }
 

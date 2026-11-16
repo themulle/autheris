@@ -35,6 +35,7 @@ using Shouldly;
 using TrinoSqlEngine.Ast.Emit;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class AuthPluginSecurityTests
 {
     private sealed class StubHostEnvironment : IHostEnvironment

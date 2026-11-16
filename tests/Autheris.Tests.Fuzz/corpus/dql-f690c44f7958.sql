@@ -1,0 +1,1 @@
+SELECT id, txt, bin FROM lob

@@ -18,10 +18,6 @@ public sealed class KeySetKeyTypesTests
     [InlineData(TargetSqlDialect.Oracle, "VARCHAR2(20)", "VARCHAR2(40)")]
     [InlineData(TargetSqlDialect.Oracle, "VARCHAR2(20)", "NVARCHAR2(40)")]
     [InlineData(TargetSqlDialect.Oracle, "NVARCHAR2(20)", "NVARCHAR2(40)")]
-    [InlineData(TargetSqlDialect.Sqlite, "INTEGER", "INTEGER")]
-    [InlineData(TargetSqlDialect.Sqlite, "INTEGER", "BIGINT")]
-    [InlineData(TargetSqlDialect.Sqlite, "BIGINT", "INT")]
-    [InlineData(TargetSqlDialect.Sqlite, "VARCHAR(20)", "VARCHAR(20)")]
     public void AllowedPairs(TargetSqlDialect dialect, string key, string fk) =>
         Assert.True(KeySetKeyTypes.IsBindablePair(dialect, key, fk, "Latin1_General_CI_AS", "Latin1_General_CI_AS"));
 
@@ -39,9 +35,6 @@ public sealed class KeySetKeyTypesTests
     [InlineData(TargetSqlDialect.Oracle, "RAW(16)", "RAW(16)")]
     [InlineData(TargetSqlDialect.Oracle, "DATE", "DATE")]
     [InlineData(TargetSqlDialect.Oracle, "FLOAT", "FLOAT")]
-    [InlineData(TargetSqlDialect.Sqlite, "TEXT", "TEXT")]
-    [InlineData(TargetSqlDialect.Sqlite, "BLOB", "BLOB")]
-    [InlineData(TargetSqlDialect.Sqlite, "", "")]
     [InlineData(TargetSqlDialect.SqlServer, "decimal(10,0)", "int")]
     [InlineData(TargetSqlDialect.SqlServer, "int", "numeric(10,0)")]
     [InlineData(TargetSqlDialect.SqlServer, "nvarchar(", "nvarchar(10)")]

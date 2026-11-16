@@ -68,7 +68,7 @@ public sealed class ConsentSqlCoreGoldenTests
 
         await ConsentSqlCore.HydrateConsentsBatchAsync(conn, list, CancellationToken.None);
 
-        conn.Commands.Count.ShouldBe(2);
+        conn.Commands.Count.ShouldBe(5);
         conn.Commands[0].CommandText.ShouldStartWith(ConsentSqlCore.SelectColumnRulesPrefix);
         conn.Commands[0].Parameters.Select(p => p.Name).ShouldBe(["@cid0"]);
         conn.Commands[0].Parameters[0].Value.ShouldBe(c1.Id.ToString());
@@ -76,6 +76,16 @@ public sealed class ConsentSqlCoreGoldenTests
         conn.Commands[1].CommandText.ShouldStartWith(ConsentSqlCore.SelectRowFiltersPrefix);
         conn.Commands[1].Parameters.Select(p => p.Name).ShouldBe(["@cid0"]);
         conn.Commands[1].Parameters[0].Value.ShouldBe(c1.Id.ToString());
+
+        conn.Commands[2].CommandText.ShouldStartWith(ConsentWriteRulesSql.SelectWriteRulesPrefix);
+        conn.Commands[2].Parameters.Select(p => p.Name).ShouldBe(["@cid0"]);
+        conn.Commands[2].Parameters[0].Value.ShouldBe(c1.Id.ToString());
+
+        conn.Commands[3].CommandText.ShouldStartWith(ConsentSqlCore.SelectRowScopesPrefix);
+        conn.Commands[3].Parameters.Select(p => p.Name).ShouldBe(["@cid0"]);
+        conn.Commands[3].Parameters[0].Value.ShouldBe(c1.Id.ToString());
+
+        conn.Commands[4].CommandText.ShouldStartWith(GovernanceRepository.ClassificationAccessSql.SelectBatchPrefixAll);
     }
 
     [Theory]
@@ -92,10 +102,10 @@ public sealed class ConsentSqlCoreGoldenTests
         conn.Commands.Count.ShouldBe(1);
         var cmd = conn.Commands[0];
         cmd.CommandText.ShouldBe(ConsentApprovalPolicy.GuardedStatusUpdateSql);
-        cmd.Parameters.Select(p => p.Name).ShouldBe(["@st", "@id", "@expected"]);
+        cmd.Parameters.Select(p => p.Name).ShouldBe(["@st", "@updatedAt", "@id", "@expected"]);
         cmd.Parameters[0].Value.ShouldBe("APPROVED");
-        cmd.Parameters[1].Value.ShouldBe(reqId.ToString());
-        cmd.Parameters[2].Value.ShouldBe("PENDING");
+        cmd.Parameters[2].Value.ShouldBe(reqId.ToString());
+        cmd.Parameters[3].Value.ShouldBe("PENDING");
     }
 
     [Theory]

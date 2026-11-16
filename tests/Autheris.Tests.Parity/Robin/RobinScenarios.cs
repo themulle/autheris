@@ -357,8 +357,8 @@ public sealed partial class RobinScenarios(ParityHostFixture host) : ParityTestB
         switch (channel)
         {
             case "GraphQl":
-                // A page size above MaxAllowedLimit is a stable INVALID_QUERY (never a silent cut).
-                (await GqlList($"first: {requested}, orderBy: [{{ id: ASC }}]", "id", ParitySeed.BigTable)).Rejected("INVALID_QUERY");
+                // A page size above MaxAllowedLimit is a stable INVALID_QUERY_OPTION (never a silent cut).
+                (await GqlList($"first: {requested}, orderBy: [{{ id: ASC }}]", "id", ParitySeed.BigTable)).Rejected("INVALID_QUERY_OPTION");
                 break;
             case "Rest":
                 var rest = await _robin.RestAsync($"/api/v1/data/default/main/{ParitySeed.BigTable}?select=id&orderBy=id&limit={requested}");
@@ -527,8 +527,8 @@ public sealed partial class RobinScenarios(ParityHostFixture host) : ParityTestB
                 Denied(await Sql("SELECT * FROM pragma_table_info('parity_sales')"), "pragma_table_info", "SQL_SYNTAX_ERROR");
                 break;
             default:
-                var restProbe = Denied(await _robin.RestAsync("/api/v1/data/default/main/sqlite_master?select=name"), "sqlite_master", "RESOURCE_NOT_FOUND");
-                var restUnknown = Denied(await _robin.RestAsync("/api/v1/data/default/main/parity_nope?select=name"), "unknown table", "RESOURCE_NOT_FOUND");
+                var restProbe = Denied(await _robin.RestAsync("/api/v1/data/default/main/sqlite_master?select=name"), "sqlite_master", "ACCESS_DENIED");
+                var restUnknown = Denied(await _robin.RestAsync("/api/v1/data/default/main/parity_nope?select=name"), "unknown table", "ACCESS_DENIED");
                 restProbe.Status.ShouldBe(restUnknown.Status);
                 BodyShape(restProbe.RawBody).ShouldBe(BodyShape(restUnknown.RawBody));
                 break;

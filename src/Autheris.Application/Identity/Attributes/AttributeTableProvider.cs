@@ -83,7 +83,7 @@ public sealed class AttributeTableProvider : ICallerAttributeProvider
         if (dataSources?.Connections is null || !dataSources.Connections.TryGetValue(spec.DataSource, out var connection) ||
             !connection.CallerAttributeLookupAllowed || string.IsNullOrWhiteSpace(connection.ConnectionString) ||
             !DataSourceProvider.TryResolveDialect(connection.Provider, out var dialect) ||
-            dialect is not (DatabaseDialect.SqlServer or DatabaseDialect.PostgreSql or DatabaseDialect.Sqlite) ||
+            dialect is not (DatabaseDialect.SqlServer or DatabaseDialect.PostgreSql) ||
             !HasDedicatedLogin(connection))
         {
             return CallerAttributeResult.Failed("SourceNotAllowed");
@@ -221,9 +221,9 @@ public sealed class AttributeTableDefinitionValidator : ICallerAttributeDefiniti
         if (dataSources?.Connections is null || !dataSources.Connections.TryGetValue(spec!.DataSource, out var connection) ||
             !connection.CallerAttributeLookupAllowed ||
             !DataSourceProvider.TryResolveDialect(connection.Provider, out var dialect) ||
-            dialect is not (DatabaseDialect.SqlServer or DatabaseDialect.PostgreSql or DatabaseDialect.Sqlite))
+            dialect is not (DatabaseDialect.SqlServer or DatabaseDialect.PostgreSql))
         {
-            throw new CallerAttributeAdminException("InvalidProvider", "The data source does not allow the caller attribute lookup (CallerAttributeLookupAllowed, SQL Server, PostgreSQL or SQLite).");
+            throw new CallerAttributeAdminException("InvalidProvider", "The data source does not allow the caller attribute lookup (CallerAttributeLookupAllowed, SQL Server or PostgreSQL).");
         }
 
         if (spec.TenantColumn is null)

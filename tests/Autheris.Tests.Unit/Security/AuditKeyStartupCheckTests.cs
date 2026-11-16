@@ -12,6 +12,7 @@ using Shouldly;
 using Xunit;
 
 /// <summary>L-2: the audit digest key is validated at startup outside Development and Test.</summary>
+[Trait("Category", "Security")]
 public sealed class AuditKeyStartupCheckTests
 {
     private static IHostEnvironment Env(string name)

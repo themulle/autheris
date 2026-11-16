@@ -1,0 +1,78 @@
+{
+  "ops": [
+    {
+      "op": "addTable",
+      "table": "DOC_OFFICIAL_DOCUMENTS",
+      "newTable": {
+        "name": "DOC_OFFICIAL_DOCUMENTS",
+        "columns": [
+          { "name": "app_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "category", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "doc_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "title", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "content", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "content_sha256", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "byte_count", "type": "INT", "family": "integer", "nullable": false },
+          { "name": "metadata_json", "type": "NVARCHAR", "family": "string", "nullable": true },
+          { "name": "version", "type": "BIGINT", "family": "integer", "nullable": false },
+          { "name": "updated_at", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": false },
+          { "name": "deleted_at", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": true }
+        ],
+        "primaryKey": ["app_id", "category", "doc_id"],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addIndex",
+      "table": "DOC_OFFICIAL_DOCUMENTS",
+      "name": "idx_doc_official_updated",
+      "unique": false,
+      "columns": ["updated_at"]
+    },
+    {
+      "op": "addTable",
+      "table": "DOC_TENANT_DOCUMENTS",
+      "newTable": {
+        "name": "DOC_TENANT_DOCUMENTS",
+        "columns": [
+          { "name": "tenant_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "app_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "category", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "doc_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "title", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "content", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "content_sha256", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "byte_count", "type": "INT", "family": "integer", "nullable": false },
+          { "name": "metadata_json", "type": "NVARCHAR", "family": "string", "nullable": true },
+          { "name": "version", "type": "BIGINT", "family": "integer", "nullable": false },
+          { "name": "updated_at", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": false },
+          { "name": "deleted_at", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": true }
+        ],
+        "primaryKey": ["tenant_id", "app_id", "category", "doc_id"],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addIndex",
+      "table": "DOC_TENANT_DOCUMENTS",
+      "name": "idx_doc_tenant_updated",
+      "unique": false,
+      "columns": ["updated_at"]
+    },
+    {
+      "op": "addTable",
+      "table": "DOC_TENANT_USAGE",
+      "newTable": {
+        "name": "DOC_TENANT_USAGE",
+        "columns": [
+          { "name": "tenant_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "doc_count", "type": "INT", "family": "integer", "nullable": false },
+          { "name": "total_bytes", "type": "BIGINT", "family": "integer", "nullable": false },
+          { "name": "updated_at", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": false }
+        ],
+        "primaryKey": ["tenant_id"],
+        "indexes": []
+      }
+    }
+  ]
+}

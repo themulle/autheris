@@ -7,7 +7,7 @@ using Xunit;
 
 namespace Autheris.Tests.Unit.Governance.Grants;
 
-/// <summary>WP-SC-16 / SEC-SC-20: time-bound individual grant policy (class x duration x four-eyes matrix).</summary>
+/// <summary>WP-SC-16 / SEC-SC-20: time-bound individual grant policy (class x duration x four-eyes matrix); no compiled-in ceilings.</summary>
 public sealed class GrantPolicyTests
 {
     private static readonly DateTimeOffset Now = new(2026, 10, 16, 12, 0, 0, TimeSpan.Zero);
@@ -27,29 +27,85 @@ public sealed class GrantPolicyTests
         new(type, "S-1-5-21-ALICE", kind, validFor is null ? null : Now + validFor.Value, Now, sens, mask, privileged, customer,
             "S-1-5-21-REQ", approvers, Justification: justification);
 
+    // Owner decision 2026-11-16: no compiled-in ceilings. The maximum comes from configuration only (test default P5Y here).
+    private static GrantPolicy PolicyWithMax(string max, IndividualGrantOptions? o = null) =>
+        new(Options.Create(o ?? new IndividualGrantOptions()),
+            new GrantValidityPolicy(Options.Create(new GrantValidityOptions { MaxDuration = max, DefaultDuration = "P1D" })));
+
+    private static readonly TimeSpan ThreeYears = TimeSpan.FromDays(3 * 365);
+
     [Theory]
-    [InlineData(180, GrantSensitivity.Regular, MaskingPolicyMode.Default, false)]
-    [InlineData(90, GrantSensitivity.Sensitive, MaskingPolicyMode.Default, false)]
-    [InlineData(30, GrantSensitivity.Regular, MaskingPolicyMode.Unmasked, false)]
-    [InlineData(7, GrantSensitivity.Regular, MaskingPolicyMode.Default, true)]
-    public void SEC_SC_20_ClassMaximum_IsAllowed_AndOneSecondOverIsRejected(int days, GrantSensitivity sens, MaskingPolicyMode mask, bool priv)
+    [InlineData(GrantSensitivity.Regular, MaskingPolicyMode.Default, false, GranteeType.User, false)]
+    [InlineData(GrantSensitivity.Sensitive, MaskingPolicyMode.Default, false, GranteeType.User, false)]
+    [InlineData(GrantSensitivity.Regular, MaskingPolicyMode.Unmasked, false, GranteeType.User, false)]
+    [InlineData(GrantSensitivity.Regular, MaskingPolicyMode.Default, true, GranteeType.User, false)]
+    [InlineData(GrantSensitivity.Regular, MaskingPolicyMode.Default, false, GranteeType.ServicePrincipal, false)]
+    [InlineData(GrantSensitivity.Regular, MaskingPolicyMode.Default, false, GranteeType.User, true)]
+    public void SEC_SC_20_MultiYearGrant_IsAllowedForEveryClass_UnderTheConfiguredMaximum(GrantSensitivity sens, MaskingPolicyMode mask, bool priv, GranteeType type, bool customer)
     {
-        var p = Policy();
+        // Unmasked/privileged in a customer realm stay disabled by default; the customer case here is regular data.
+        var d = Policy().Evaluate(Req(ThreeYears, sens, mask, priv, type, customer: customer));
 
-        p.Evaluate(Req(TimeSpan.FromDays(days), sens, mask, priv)).Allowed.ShouldBeTrue();
+        d.Allowed.ShouldBeTrue();
+        d.MaxValidTo.ShouldBe(Now + TimeSpan.FromDays(5 * 365));
+    }
 
-        var over = p.Evaluate(Req(TimeSpan.FromDays(days) + TimeSpan.FromSeconds(1), sens, mask, priv));
+    [Theory]
+    [InlineData(GrantSensitivity.Regular, MaskingPolicyMode.Default, false, GranteeType.User)]
+    [InlineData(GrantSensitivity.Sensitive, MaskingPolicyMode.Default, false, GranteeType.User)]
+    [InlineData(GrantSensitivity.Regular, MaskingPolicyMode.Unmasked, false, GranteeType.User)]
+    [InlineData(GrantSensitivity.Regular, MaskingPolicyMode.Default, true, GranteeType.User)]
+    [InlineData(GrantSensitivity.Regular, MaskingPolicyMode.Default, false, GranteeType.ServicePrincipal)]
+    public void SEC_SC_20_ConfiguredMaximum_IsTheOnlyCeiling_AndOneSecondOverIsRejected(GrantSensitivity sens, MaskingPolicyMode mask, bool priv, GranteeType type)
+    {
+        var p = PolicyWithMax("P5Y");
+        var max = TimeSpan.FromDays(5 * 365);
+
+        p.Evaluate(Req(max, sens, mask, priv, type)).Allowed.ShouldBeTrue();
+
+        var over = p.Evaluate(Req(max + TimeSpan.FromSeconds(1), sens, mask, priv, type));
         over.Allowed.ShouldBeFalse();
         over.ErrorCode.ShouldBe(GrantErrorCodes.ExceedsMaximum);
-        over.MaxValidTo.ShouldBe(Now + TimeSpan.FromDays(days));
+        over.MaxValidTo.ShouldBe(Now + max);
+    }
+
+    [Theory]
+    [InlineData(GrantSensitivity.Sensitive, MaskingPolicyMode.Default, false, GranteeType.User)]
+    [InlineData(GrantSensitivity.Regular, MaskingPolicyMode.Unmasked, false, GranteeType.User)]
+    [InlineData(GrantSensitivity.Regular, MaskingPolicyMode.Default, true, GranteeType.User)]
+    [InlineData(GrantSensitivity.Regular, MaskingPolicyMode.Default, false, GranteeType.ServicePrincipal)]
+    [InlineData(GrantSensitivity.Regular, MaskingPolicyMode.Default, false, GranteeType.User)]
+    public void SEC_SC_20_OperatorConfiguredClassLimit_StillShortensTheClass(GrantSensitivity sens, MaskingPolicyMode mask, bool priv, GranteeType type)
+    {
+        var p = Policy(new IndividualGrantOptions
+        {
+            SensitiveMaxDays = 20, UnmaskedMaxDays = 20, PrivilegedMaxDays = 20, ServicePrincipalMaxDays = 20, RegularMaxDays = 20,
+        });
+
+        p.Evaluate(Req(TimeSpan.FromDays(20), sens, mask, priv, type)).Allowed.ShouldBeTrue();
+        var over = p.Evaluate(Req(TimeSpan.FromDays(21), sens, mask, priv, type));
+        over.ErrorCode.ShouldBe(GrantErrorCodes.ExceedsMaximum);
+        over.MaxValidTo.ShouldBe(Now + TimeSpan.FromDays(20));
     }
 
     [Fact]
-    public void SEC_SC_20_ServicePrincipal_Maximum_Is365Days()
+    public void SEC_SC_20_ClassLimit_NeverLengthensTheTenantMaximum()
     {
-        var p = Policy();
-        p.Evaluate(Req(TimeSpan.FromDays(365), type: GranteeType.ServicePrincipal)).Allowed.ShouldBeTrue();
-        p.Evaluate(Req(TimeSpan.FromDays(366), type: GranteeType.ServicePrincipal)).ErrorCode.ShouldBe(GrantErrorCodes.ExceedsMaximum);
+        var p = PolicyWithMax("P1Y", new IndividualGrantOptions { RegularMaxDays = 4000 });
+
+        p.Evaluate(Req(TimeSpan.FromDays(365))).Allowed.ShouldBeTrue();
+        p.Evaluate(Req(TimeSpan.FromDays(366))).ErrorCode.ShouldBe(GrantErrorCodes.ExceedsMaximum);
+    }
+
+    [Fact]
+    public void SEC_SC_20_AbsurdlyLargeMaximum_DoesNotOverflow()
+    {
+        var p = PolicyWithMax("P20000Y", new IndividualGrantOptions { RegularMaxDays = int.MaxValue });
+
+        var d = p.Evaluate(Req(TimeSpan.FromDays(365 * 100)));
+
+        d.Allowed.ShouldBeTrue();
+        d.MaxValidTo.ShouldBe(DateTimeOffset.MaxValue);
     }
 
     [Theory]
@@ -86,19 +142,6 @@ public sealed class GrantPolicyTests
     }
 
     [Fact]
-    public void SEC_SC_20_RealmProfile_CanOnlyShorten()
-    {
-        var shortened = Policy(new IndividualGrantOptions { RegularMaxDays = 30 });
-        shortened.Evaluate(Req(TimeSpan.FromDays(30))).Allowed.ShouldBeTrue();
-        shortened.Evaluate(Req(TimeSpan.FromDays(31))).ErrorCode.ShouldBe(GrantErrorCodes.ExceedsMaximum);
-
-        // A value above the built-in ceiling can never lengthen the maximum (also bypassing the options validator).
-        var lengthened = Policy(new IndividualGrantOptions { RegularMaxDays = 1000, UnmaskedMaxDays = 365 });
-        lengthened.Evaluate(Req(TimeSpan.FromDays(181))).ErrorCode.ShouldBe(GrantErrorCodes.ExceedsMaximum);
-        lengthened.Evaluate(Req(TimeSpan.FromDays(31), mask: MaskingPolicyMode.Unmasked)).ErrorCode.ShouldBe(GrantErrorCodes.ExceedsMaximum);
-    }
-
-    [Fact]
     public void SEC_SC_20_NonPositiveConfiguration_FailsClosedToShortestSpan()
     {
         var p = Policy(new IndividualGrantOptions { RegularMaxDays = 0 });
@@ -106,16 +149,19 @@ public sealed class GrantPolicyTests
     }
 
     [Fact]
-    public void SEC_SC_20_CustomerRealm_RegularIs90Days_UnmaskedAndPrivilegedDisabled()
+    public void SEC_SC_20_CustomerRealm_MultiYearRegular_Allowed_UnmaskedAndPrivilegedDisabled()
     {
         var p = Policy();
-        p.Evaluate(Req(TimeSpan.FromDays(90), customer: true)).Allowed.ShouldBeTrue();
-        p.Evaluate(Req(TimeSpan.FromDays(91), customer: true)).ErrorCode.ShouldBe(GrantErrorCodes.ExceedsMaximum);
+        p.Evaluate(Req(ThreeYears, customer: true)).Allowed.ShouldBeTrue();
         p.Evaluate(Req(TimeSpan.FromDays(7), mask: MaskingPolicyMode.Unmasked, customer: true)).ErrorCode.ShouldBe(GrantErrorCodes.DisabledForRealm);
         p.Evaluate(Req(TimeSpan.FromDays(1), privileged: true, customer: true)).ErrorCode.ShouldBe(GrantErrorCodes.DisabledForRealm);
 
+        var limited = Policy(new IndividualGrantOptions { CustomerRegularMaxDays = 90 });
+        limited.Evaluate(Req(TimeSpan.FromDays(90), customer: true)).Allowed.ShouldBeTrue();
+        limited.Evaluate(Req(TimeSpan.FromDays(91), customer: true)).ErrorCode.ShouldBe(GrantErrorCodes.ExceedsMaximum);
+
         var enabled = Policy(new IndividualGrantOptions { AllowCustomerUnmasked = true });
-        enabled.Evaluate(Req(TimeSpan.FromDays(7), mask: MaskingPolicyMode.Unmasked, customer: true, approvers: ["A", "B"])).Allowed.ShouldBeTrue();
+        enabled.Evaluate(Req(ThreeYears, mask: MaskingPolicyMode.Unmasked, customer: true, approvers: ["A", "B"])).Allowed.ShouldBeTrue();
     }
 
     [Fact]
@@ -187,10 +233,22 @@ public sealed class GrantPolicyTests
     }
 
     [Fact]
-    public void SEC_SC_20_RenewalNewValidTo_IsCappedByTheClassMaximum()
+    public void SEC_SC_20_RenewalNewValidTo_IsCappedByTheConfiguredMaximum()
     {
-        var r = Req(TimeSpan.FromDays(181), kind: GrantKind.Renewal) with { Renewer = "OWNER" };
+        var r = Req(TimeSpan.FromDays(5 * 365 + 1), kind: GrantKind.Renewal) with { Renewer = "OWNER" };
         Policy().Evaluate(r).ErrorCode.ShouldBe(GrantErrorCodes.ExceedsMaximum);
+        Policy().Evaluate(r with { ValidTo = Now + ThreeYears }).Allowed.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void SEC_SC_20_GroupGrantee_IsBoundedByTheTenantMaximumLikeEveryone()
+    {
+        var p = PolicyWithMax("P1Y");
+
+        p.Evaluate(Req(TimeSpan.FromDays(365), type: GranteeType.Group)).Allowed.ShouldBeTrue();
+        var over = p.Evaluate(Req(TimeSpan.FromDays(366), type: GranteeType.Group));
+        over.Allowed.ShouldBeFalse();
+        over.ErrorCode.ShouldBe(GrantErrorCodes.ExceedsMaximum);
     }
 
     [Fact]

@@ -181,7 +181,17 @@ public static partial class VirtualFilterEndpoints
             }
         }
 
-        var recorded = service.RecordWebhookTrigger(deliveryId, DateTimeOffset.UtcNow);
+        // Dedupe key is computed from body SHA-256 and persisted ONLY after HMAC verification succeeds.
+        var bodyHash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(payload)));
+        bool recorded;
+        try
+        {
+            recorded = await service.RecordWebhookTriggerAsync(bodyHash, deliveryId, DateTimeOffset.UtcNow, context.RequestAborted).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return ApiProblems.ServiceUnavailable(detail: "Webhook deduplication store is unavailable.", httpContext: context);
+        }
 
         return Results.Json(new
         {

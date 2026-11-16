@@ -104,10 +104,9 @@ src/Autheris.Application/DataSources/Connectors/  @themulle
 src/Autheris.Application/Events/  @themulle
 src/Autheris.Application/Extensibility/  @themulle
 src/Autheris.Application/Federation/  @themulle
-src/Autheris.Application/FinOps/  @themulle
 src/Autheris.Application/Governance/Caching/  @themulle
 src/Autheris.Application/Governance/Diagnostics/  @themulle
-src/Autheris.Application/Governance/Workflows/  @themulle
+src/Autheris.Application/Governance/Grants/  @themulle
 src/Autheris.Application/Identity/Caching/  @themulle
 src/Autheris.Application/Mcp/Diagnostics/  @themulle
 src/Autheris.Application/Mesh/  @themulle

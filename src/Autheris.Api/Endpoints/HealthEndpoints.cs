@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Options;
+using Autheris.Api.Endpoints.Health;
 using Autheris.Api.Extensions;
 using Autheris.Api.Hosting.Warmup;
 using Microsoft.AspNetCore.Builder;
@@ -51,78 +52,86 @@ public static class HealthEndpoints
             });
         }).AllowAnonymous().WithAuditExemption("Operational health probe");
 
-        app.MapGet("/health/ready", async (
+        app.MapGet("/health/ready", (
             ITrafficDrainController controller,
-            IGatewayHealthCheckService? healthCheckService,
+            [FromServices] ReadinessProbe? readinessProbe,
             [FromServices] IGraphQlExecutorGate? executorGate,
             [FromServices] IStartupWarmupState? warmupState,
-            CancellationToken ct) =>
+            CancellationToken ct) => HandleReadyAsync(controller, readinessProbe, executorGate, warmupState, gatewayOptions, environment, ct))
+        .AllowAnonymous().WithAuditExemption("Operational health probe");
+
+        return app;
+    }
+
+    internal static async Task<IResult> HandleReadyAsync(
+        ITrafficDrainController controller,
+        ReadinessProbe? readinessProbe,
+        IGraphQlExecutorGate? executorGate,
+        IStartupWarmupState? warmupState,
+        GatewayOptions gatewayOptions,
+        IHostEnvironment environment,
+        CancellationToken ct)
+    {
+        if (controller.IsDraining)
         {
-            if (controller.IsDraining)
-            {
-                return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
-            }
+            return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+        }
 
-            if (healthCheckService != null)
+        if (readinessProbe != null)
+        {
+            var report = await readinessProbe.CheckHealthAsync(ct).ConfigureAwait(false);
+            if (!report.IsHealthy)
             {
-                var report = await healthCheckService.CheckHealthAsync(ct).ConfigureAwait(false);
-                if (!report.IsHealthy)
+                if (environment.IsDevelopment())
                 {
-                    if (environment.IsDevelopment())
-                    {
-                        return Results.Json(new
-                        {
-                            status = "Unhealthy",
-                            timestamp = DateTimeOffset.UtcNow,
-                            securityMode = GetSecurityMode(gatewayOptions),
-                            activeBypasses = gatewayOptions.GetAllActiveBypasses(),
-                            activeWarnings = gatewayOptions.GetActiveWarnings(),
-                            components = report.Components
-                        }, statusCode: StatusCodes.Status503ServiceUnavailable);
-                    }
-
                     return Results.Json(new
                     {
                         status = "Unhealthy",
-                        timestamp = DateTimeOffset.UtcNow
+                        timestamp = DateTimeOffset.UtcNow,
+                        securityMode = GetSecurityMode(gatewayOptions),
+                        activeBypasses = gatewayOptions.GetAllActiveBypasses(),
+                        activeWarnings = gatewayOptions.GetActiveWarnings(),
+                        components = report.Components
                     }, statusCode: StatusCodes.Status503ServiceUnavailable);
                 }
-            }
 
-            // 150 D-150-2: executor gate (required, positive proof, missing or unknown means 503), then the best-effort
-            // warm-up state. Both are read live (no cache). Production bodies carry status and timestamp only.
-            var gateState = executorGate?.State ?? ExecutorGateState.Pending;
-            if (gateState != ExecutorGateState.Ready)
-            {
-                return NotReady(gateState == ExecutorGateState.Pending ? "Warming" : "Unhealthy", gateState, warmupState?.Phase);
-            }
-
-            var phase = warmupState?.Phase ?? WarmupPhase.Pending;
-            if (phase != WarmupPhase.Ready)
-            {
-                return NotReady("Warming", gateState, phase);
-            }
-
-            if (environment.IsDevelopment())
-            {
-                return Results.Ok(new
+                return Results.Json(new
                 {
-                    status = "Ready",
-                    timestamp = DateTimeOffset.UtcNow,
-                    securityMode = GetSecurityMode(gatewayOptions),
-                    activeBypasses = gatewayOptions.GetAllActiveBypasses(),
-                    activeWarnings = gatewayOptions.GetActiveWarnings()
-                });
+                    status = "Unhealthy",
+                    timestamp = DateTimeOffset.UtcNow
+                }, statusCode: StatusCodes.Status503ServiceUnavailable);
             }
+        }
 
+        var gateState = executorGate?.State ?? ExecutorGateState.Pending;
+        if (gateState != ExecutorGateState.Ready)
+        {
+            return NotReady(gateState == ExecutorGateState.Pending ? "Warming" : "Unhealthy", gateState, warmupState?.Phase);
+        }
+
+        var phase = warmupState?.Phase ?? WarmupPhase.Pending;
+        if (phase != WarmupPhase.Ready)
+        {
+            return NotReady("Warming", gateState, phase);
+        }
+
+        if (environment.IsDevelopment())
+        {
             return Results.Ok(new
             {
                 status = "Ready",
-                timestamp = DateTimeOffset.UtcNow
+                timestamp = DateTimeOffset.UtcNow,
+                securityMode = GetSecurityMode(gatewayOptions),
+                activeBypasses = gatewayOptions.GetAllActiveBypasses(),
+                activeWarnings = gatewayOptions.GetActiveWarnings()
             });
-        }).AllowAnonymous().WithAuditExemption("Operational health probe");
+        }
 
-        return app;
+        return Results.Ok(new
+        {
+            status = "Ready",
+            timestamp = DateTimeOffset.UtcNow
+        });
 
         IResult NotReady(string status, ExecutorGateState gate, WarmupPhase? phase)
         {

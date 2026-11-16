@@ -13,7 +13,6 @@ using Autheris.Domain.Options;
 public static class KeyBatcher
 {
     public const int SqlServerParameterLimit = 2090;
-    public const int SqliteParameterLimit = 999;
     public const int OracleParameterLimit = 1000;
     public const int DefaultMaxKeys = 2000;
     public const int DefaultMaxBatches = 10;
@@ -62,7 +61,6 @@ public static class KeyBatcher
         int dialectCeiling = dialect switch
         {
             DatabaseDialect.SqlServer => SqlServerParameterLimit,
-            DatabaseDialect.Sqlite => SqliteParameterLimit,
             DatabaseDialect.Oracle => OracleParameterLimit,
             _ => SqlServerParameterLimit // Safe default ceiling across all dialects
         };

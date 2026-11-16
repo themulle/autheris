@@ -95,7 +95,8 @@ internal static partial class DbtCatalogTableFactory
                 TableId = table.Id,
                 ColumnName = column.Name,
                 DataType = string.IsNullOrWhiteSpace(column.DataType) ? "string" : column.DataType.Trim(),
-                Description = column.Description
+                Description = column.Description,
+                Meta = column.Meta.Count > 0 ? new Dictionary<string, string>(column.Meta, StringComparer.OrdinalIgnoreCase) : new Dictionary<string, string>()
             });
         }
 

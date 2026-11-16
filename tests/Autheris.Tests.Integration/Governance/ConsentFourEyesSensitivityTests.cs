@@ -60,15 +60,22 @@ public sealed class ConsentFourEyesSensitivityTests
         {
             var adminRoleId = Guid.NewGuid().ToString();
             cmd.CommandText = @"
-                INSERT INTO ROLES (id, role_name, description) VALUES (@rid, 'GovernanceAdmin', 'Governance Administrator') ON CONFLICT DO NOTHING;
-                INSERT INTO ROLE_MEMBERS (id, role_id, member_type, member_sid)
-                SELECT @m1, id, 'User', 'S-1-5-21-APPROVER-1' FROM ROLES WHERE role_name = 'GovernanceAdmin' ON CONFLICT DO NOTHING;
-                INSERT INTO ROLE_MEMBERS (id, role_id, member_type, member_sid)
-                SELECT @m2, id, 'User', 'S-1-5-21-APPROVER-2' FROM ROLES WHERE role_name = 'GovernanceAdmin' ON CONFLICT DO NOTHING;
+                INSERT INTO DATA_OWNERS (id, ad_sid, ad_account, display_name, email, is_active)
+                SELECT @o1, 'S-1-5-21-APPROVER-1', 'CORP\\S-1-5-21-APPROVER-1', 'Owner 1', 'S-1-5-21-APPROVER-1@corp.example', 1
+                WHERE NOT EXISTS (SELECT 1 FROM DATA_OWNERS WHERE ad_sid = 'S-1-5-21-APPROVER-1');
+                INSERT INTO TABLE_OWNERS (id, table_id, data_owner_id, owner_role)
+                SELECT @to1, @tid, id, 'PRIMARY' FROM DATA_OWNERS WHERE ad_sid = 'S-1-5-21-APPROVER-1';
+                INSERT INTO DATA_OWNERS (id, ad_sid, ad_account, display_name, email, is_active)
+                SELECT @o2, 'S-1-5-21-APPROVER-2', 'CORP\\S-1-5-21-APPROVER-2', 'Owner 2', 'S-1-5-21-APPROVER-2@corp.example', 1
+                WHERE NOT EXISTS (SELECT 1 FROM DATA_OWNERS WHERE ad_sid = 'S-1-5-21-APPROVER-2');
+                INSERT INTO TABLE_OWNERS (id, table_id, data_owner_id, owner_role)
+                SELECT @to2, @tid, id, 'PRIMARY' FROM DATA_OWNERS WHERE ad_sid = 'S-1-5-21-APPROVER-2';
             ";
-            cmd.Parameters.AddWithValue("@rid", adminRoleId);
-            cmd.Parameters.AddWithValue("@m1", Guid.NewGuid().ToString());
-            cmd.Parameters.AddWithValue("@m2", Guid.NewGuid().ToString());
+            cmd.Parameters.AddWithValue("@o1", Guid.NewGuid().ToString());
+            cmd.Parameters.AddWithValue("@to1", Guid.NewGuid().ToString());
+            cmd.Parameters.AddWithValue("@o2", Guid.NewGuid().ToString());
+            cmd.Parameters.AddWithValue("@to2", Guid.NewGuid().ToString());
+            cmd.Parameters.AddWithValue("@tid", meta.Table.Id.ToString());
             await cmd.ExecuteNonQueryAsync();
         }
 
@@ -99,7 +106,7 @@ public sealed class ConsentFourEyesSensitivityTests
             // Re-approval by Approver 1 must fail due to four-eyes principle
             var ex = await Should.ThrowAsync<InvalidOperationException>(() =>
                 repo.ApproveConsentRequestStepAsync(request.Id, approver1));
-            ex.Message.ShouldContain("Vier-Augen-Prinzip");
+            ex.Message.ShouldContain("FOUR_EYES_SAME_APPROVER");
 
             // Step 2: Approver 2 approves
             var step2Result = await repo.ApproveConsentRequestStepAsync(request.Id, approver2);
@@ -165,7 +172,11 @@ public sealed class ConsentFourEyesSensitivityTests
         string sensitivity,
         string expectedStatus)
     {
-        var status = ConsentApprovalPolicy.StatusAfterApproval(requiresFourEyes, stepNumber, isExternalItsm, sensitivity);
+        var status = ConsentApprovalPolicy.StatusAfterApproval(
+            requiresFourEyes,
+            stepNumber,
+            isExternalItsm ? ConsentWorkflowMode.External : ConsentWorkflowMode.Internal,
+            sensitivity);
         status.ShouldBe(expectedStatus);
     }
 }

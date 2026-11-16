@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Security;
 
+using Autheris.Tests.Unit.Catalog;
 using System;
 using System.Collections.Generic;
 using System.Data.Common;
@@ -162,7 +163,7 @@ public sealed partial class AdvisoryRegressionTests
         if (bullet.StartsWith("datasource_test", StringComparison.Ordinal))
         {
             // The pre-flight case has no catalog table at all: only the operator-configured connection could match, and a confined caller never reaches it.
-            repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(bullet.Contains("preflight", StringComparison.Ordinal) ? Array.Empty<TableMetadata>() : new[] { Table("tenant-b") });
+            repo.StubTables(bullet.Contains("preflight", StringComparison.Ordinal) ? Array.Empty<TableMetadata>() : new[] { Table("tenant-b") });
             var factory = Substitute.For<ISqlConnectionFactory>();
             var gateway = new GatewayOptions { DataSources = new SqlDataSourceOptions() };
             gateway.DataSources.Connections["src_b"] = new DataSourceConnectionOptions { Provider = "SqlServer", ConnectionString = "Server=h;Database=d;" };
@@ -206,7 +207,7 @@ public sealed partial class AdvisoryRegressionTests
         var catalog = new CatalogFederatedMaskingCatalog(repo, Options.Create(new GatewayOptions()));
 
         void Returns(params TableMetadata[] tables) =>
-            repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(tables));
+            repo.StubTables(tables);
 
         if (bullet.StartsWith("rule_change", StringComparison.Ordinal))
         {

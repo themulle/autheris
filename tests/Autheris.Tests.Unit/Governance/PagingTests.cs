@@ -15,8 +15,14 @@ using Xunit;
 namespace Autheris.Tests.Unit.Governance;
 
 /// <summary>WP-SC-10 / SEC-SC-16: keyset cursors, tenant-bound paged audit and consent listings, clamped-grant report.</summary>
-public sealed class PagingTests
+[Collection("IndividualGrantLimits")]
+public sealed class PagingTests : IDisposable
 {
+    // The read-time clamp exists only for operator-configured limits (no compiled-in ceilings); these tests exercise a 180/30/365 day profile.
+    public PagingTests() => IndividualGrantLimits.Configure(TimeSpan.FromDays(180), TimeSpan.FromDays(30), TimeSpan.FromDays(365));
+
+    public void Dispose() => IndividualGrantLimits.Reset();
+
     private static readonly DateTimeOffset Now = new(2026, 10, 16, 12, 0, 0, TimeSpan.Zero);
     private static readonly TableIdentifier Orders = new("default", "sales", "orders");
 
@@ -73,16 +79,15 @@ public sealed class PagingTests
             return Task.FromResult(new ConsentPage(page, rest.Count > page.Count ? page[^1].Id : null));
         }
 
-        public Task ReplaceConsentsAsync(IReadOnlyList<Guid> revokeConsentIds, IReadOnlyList<Consent> create, Sid actor, string reason, IReadOnlyList<AuditLogEntry>? auditEntries = null, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task ReplaceConsentsAsync(IReadOnlyList<Guid> revokeConsentIds, IReadOnlyList<Consent> create, Sid actor, string reason, Autheris.Domain.Security.ConsentRevocationAuthority authority, IReadOnlyList<AuditLogEntry>? auditEntries = null, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, TenantId? tenantId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? roles = null, DateTimeOffset? atTime = null, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? roles, DateTimeOffset? atTime, TenantId? tenantId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<Consent> CreateConsentAsync(Consent consent, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<Consent?> GetConsentByIdAsync(Guid consentId, CancellationToken ct = default) => throw new NotImplementedException();
-        public Task RevokeConsentAsync(Guid consentId, Sid revokedBySid, string reason, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task RevokeConsentAsync(Guid consentId, Sid revokedBySid, string reason, Autheris.Domain.Security.ConsentRevocationAuthority authority, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<Consent>> GetExpiringConsentsAsync(DateTimeOffset threshold, int maxResults = 1000, CancellationToken ct = default) => throw new NotImplementedException();
-        public Task ExtendConsentExpiryAsync(Guid consentId, DateTimeOffset newValidTo, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<Consent>> GetActiveConsentsByConsentRequestIdAsync(Guid consentRequestId, DateTimeOffset atTime, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<bool> RevokeSystemConsentAsync(Guid consentId, Guid consentRequestId, Sid revokedBySid, string reason, CancellationToken ct = default) => throw new NotImplementedException();
     }

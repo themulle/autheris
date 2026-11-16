@@ -4,40 +4,35 @@ using System;
 using System.Threading;
 
 /// <summary>
-/// 16 rule 5: read-time clamp of legacy individual grants. The effective expiry of an individual grant is
-/// <c>min(ValidTo, ValidFrom + max)</c>; nothing is rewritten in storage. The class of a stored grant is not known at read time,
-/// so the clamp uses the largest class maximum as a backstop (regular data for users, 365 days for service principals); the write
-/// paths enforce the exact class maximum through the grant policy. Group and role grants are standing and never clamped.
+/// Read-time clamp of individual grants. The effective expiry of an individual grant is <c>min(ValidTo, ValidFrom + max)</c>
+/// for every operator-configured limit; nothing is rewritten in storage. There are no compiled-in ceilings: without a configured
+/// limit nothing is clamped (the write paths bound validity through the required grant validity configuration). The class of a
+/// stored grant is not known at read time, so the regular limit applies to users, the service principal limit to service
+/// principals and the unmasked limit to unmasked profiles. Group and role grants are standing and never clamped.
 /// </summary>
 public static class IndividualGrantLimits
 {
-    public static readonly TimeSpan DefaultRegularMax = TimeSpan.FromDays(180);
-    public static readonly TimeSpan DefaultUnmaskedMax = TimeSpan.FromDays(30);
-    public static readonly TimeSpan DefaultServicePrincipalMax = TimeSpan.FromDays(365);
+    private static readonly IIndividualGrantLimits Unbounded = new ConfiguredLimits(null, null, null);
+    private static IIndividualGrantLimits _current = Unbounded;
 
-    private static readonly IIndividualGrantLimits BuiltIn = new DefaultBuiltInLimits();
-    private static IIndividualGrantLimits _current = BuiltIn;
-
-    /// <summary>
-    /// The active <see cref="IIndividualGrantLimits"/> provider. Defaults to fail-closed built-in defaults.
-    /// </summary>
+    /// <summary>The active <see cref="IIndividualGrantLimits"/> provider. Defaults to no limits.</summary>
     public static IIndividualGrantLimits Current
     {
         get => Volatile.Read(ref _current);
-        set => Volatile.Write(ref _current, value ?? BuiltIn);
+        set => Volatile.Write(ref _current, value ?? Unbounded);
     }
 
-    public static TimeSpan RegularMax => Current.RegularMax;
-    public static TimeSpan UnmaskedMax => Current.UnmaskedMax;
-    public static TimeSpan ServicePrincipalMax => Current.ServicePrincipalMax;
+    public static TimeSpan? RegularMax => Current.RegularMax;
+    public static TimeSpan? UnmaskedMax => Current.UnmaskedMax;
+    public static TimeSpan? ServicePrincipalMax => Current.ServicePrincipalMax;
 
-    /// <summary>Applies realm-profile maxima. Values can only shorten the built-in ceilings; a non-positive value fails closed to one day.</summary>
-    public static void Configure(TimeSpan regular, TimeSpan unmasked, TimeSpan servicePrincipal)
+    /// <summary>Applies operator limits (<c>null</c> = none); a non-positive value fails closed to one day.</summary>
+    public static void Configure(TimeSpan? regular, TimeSpan? unmasked, TimeSpan? servicePrincipal)
     {
-        Current = new DelegatingConfiguredLimits(regular, unmasked, servicePrincipal);
+        Current = new ConfiguredLimits(regular, unmasked, servicePrincipal);
     }
 
-    public static void Reset() => Current = BuiltIn;
+    public static void Reset() => Current = Unbounded;
 
     /// <summary>Effective expiry of a consent grant. A default <paramref name="validFrom"/> (never stored by a writer) is not clamped.</summary>
     public static DateTimeOffset EffectiveConsentValidTo(GranteeType granteeType, DateTimeOffset validFrom, DateTimeOffset validTo, ConsentEffect effect = ConsentEffect.Allow) =>
@@ -45,74 +40,60 @@ public static class IndividualGrantLimits
 
     /// <summary>
     /// Effective expiry of an access profile. Only <see cref="MaskingPolicyMode.Unmasked"/> widens access (Default and Strict only
-    /// tighten), so only it is bounded: <c>min(ValidTo ?? never, CreatedAt + unmasked max)</c>.
+    /// tighten), so only it is bounded, and only when an unmasked limit is configured.
     /// </summary>
     public static DateTimeOffset? EffectiveProfileValidTo(MaskingPolicyMode mode, DateTimeOffset createdAt, DateTimeOffset? validTo) =>
         Current.EffectiveProfileValidTo(mode, createdAt, validTo);
 
-    private sealed class DefaultBuiltInLimits : IIndividualGrantLimits
+    /// <summary>Normalizes a configured limit: <c>null</c> stays unlimited, a non-positive value fails closed to one day.</summary>
+    public static TimeSpan? Normalize(TimeSpan? configured) =>
+        configured is { } v && v <= TimeSpan.Zero ? TimeSpan.FromDays(1) : configured;
+
+    /// <summary>Shared clamp arithmetic of every provider.</summary>
+    public static DateTimeOffset ClampConsent(TimeSpan? regular, TimeSpan? servicePrincipal, GranteeType granteeType, DateTimeOffset validFrom, DateTimeOffset validTo, ConsentEffect effect)
     {
-        public TimeSpan RegularMax => DefaultRegularMax;
-        public TimeSpan UnmaskedMax => DefaultUnmaskedMax;
-        public TimeSpan ServicePrincipalMax => DefaultServicePrincipalMax;
-
-        public DateTimeOffset EffectiveConsentValidTo(GranteeType granteeType, DateTimeOffset validFrom, DateTimeOffset validTo, ConsentEffect effect = ConsentEffect.Allow)
+        if (effect == ConsentEffect.Deny || validFrom == default)
         {
-            if (effect == ConsentEffect.Deny || validFrom == default) return validTo;
-            TimeSpan max = granteeType switch
-            {
-                GranteeType.User => DefaultRegularMax,
-                GranteeType.ServicePrincipal => DefaultServicePrincipalMax,
-                _ => TimeSpan.Zero,
-            };
-            if (max == TimeSpan.Zero) return validTo;
-            var cap = validFrom + max;
-            return validTo < cap ? validTo : cap;
+            return validTo;
         }
 
-        public DateTimeOffset? EffectiveProfileValidTo(MaskingPolicyMode mode, DateTimeOffset createdAt, DateTimeOffset? validTo)
+        var max = granteeType switch
         {
-            if (mode != MaskingPolicyMode.Unmasked || createdAt == default) return validTo;
-            var cap = createdAt + DefaultUnmaskedMax;
-            return validTo is { } v && v < cap ? v : cap;
+            GranteeType.User => regular,
+            GranteeType.ServicePrincipal => servicePrincipal,
+            _ => null,
+        };
+        if (max is null)
+        {
+            return validTo;
         }
+
+        var cap = GrantTimeMath.AddSaturating(validFrom, max.Value);
+        return validTo < cap ? validTo : cap;
     }
 
-    private sealed class DelegatingConfiguredLimits : IIndividualGrantLimits
+    /// <summary>Shared clamp arithmetic of every provider for access profiles.</summary>
+    public static DateTimeOffset? ClampProfile(TimeSpan? unmasked, MaskingPolicyMode mode, DateTimeOffset createdAt, DateTimeOffset? validTo)
     {
-        public TimeSpan RegularMax { get; }
-        public TimeSpan UnmaskedMax { get; }
-        public TimeSpan ServicePrincipalMax { get; }
-
-        public DelegatingConfiguredLimits(TimeSpan regular, TimeSpan unmasked, TimeSpan servicePrincipal)
+        if (mode != MaskingPolicyMode.Unmasked || createdAt == default || unmasked is null)
         {
-            RegularMax = Shorten(regular, DefaultRegularMax);
-            UnmaskedMax = Shorten(unmasked, DefaultUnmaskedMax);
-            ServicePrincipalMax = Shorten(servicePrincipal, DefaultServicePrincipalMax);
+            return validTo;
         }
 
-        public DateTimeOffset EffectiveConsentValidTo(GranteeType granteeType, DateTimeOffset validFrom, DateTimeOffset validTo, ConsentEffect effect = ConsentEffect.Allow)
-        {
-            if (effect == ConsentEffect.Deny || validFrom == default) return validTo;
-            TimeSpan max = granteeType switch
-            {
-                GranteeType.User => RegularMax,
-                GranteeType.ServicePrincipal => ServicePrincipalMax,
-                _ => TimeSpan.Zero,
-            };
-            if (max == TimeSpan.Zero) return validTo;
-            var cap = validFrom + max;
-            return validTo < cap ? validTo : cap;
-        }
+        var cap = GrantTimeMath.AddSaturating(createdAt, unmasked.Value);
+        return validTo is { } v && v < cap ? v : cap;
+    }
 
-        public DateTimeOffset? EffectiveProfileValidTo(MaskingPolicyMode mode, DateTimeOffset createdAt, DateTimeOffset? validTo)
-        {
-            if (mode != MaskingPolicyMode.Unmasked || createdAt == default) return validTo;
-            var cap = createdAt + UnmaskedMax;
-            return validTo is { } v && v < cap ? v : cap;
-        }
+    private sealed class ConfiguredLimits(TimeSpan? regular, TimeSpan? unmasked, TimeSpan? servicePrincipal) : IIndividualGrantLimits
+    {
+        public TimeSpan? RegularMax { get; } = Normalize(regular);
+        public TimeSpan? UnmaskedMax { get; } = Normalize(unmasked);
+        public TimeSpan? ServicePrincipalMax { get; } = Normalize(servicePrincipal);
 
-        private static TimeSpan Shorten(TimeSpan configured, TimeSpan ceiling) =>
-            configured <= TimeSpan.Zero ? TimeSpan.FromDays(1) : configured > ceiling ? ceiling : configured;
+        public DateTimeOffset EffectiveConsentValidTo(GranteeType granteeType, DateTimeOffset validFrom, DateTimeOffset validTo, ConsentEffect effect = ConsentEffect.Allow) =>
+            ClampConsent(RegularMax, ServicePrincipalMax, granteeType, validFrom, validTo, effect);
+
+        public DateTimeOffset? EffectiveProfileValidTo(MaskingPolicyMode mode, DateTimeOffset createdAt, DateTimeOffset? validTo) =>
+            ClampProfile(UnmaskedMax, mode, createdAt, validTo);
     }
 }

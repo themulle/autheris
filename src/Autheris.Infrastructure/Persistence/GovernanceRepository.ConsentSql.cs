@@ -28,28 +28,28 @@ internal static class ConsentSqlCore
 
     public const string SelectRowFiltersPrefix = @"SELECT id, consent_id, filter_group, table_column_id, column_name,
                                    operator, value_type, value_json, value_source, user_attribute,
-                                   filter_type, dependent_table, dependent_table_alias, foreign_key_column,
-                                   primary_key_column, subquery_predicate_json, target_temporal_column,
-                                   dependent_valid_from_column, dependent_valid_to_column, target_table_alias,
-                                   additional_hops_json, key_set_strategy, key_set_duration_seconds, key_set_max_keys
+                                   filter_type
                             FROM CONSENT_ROW_FILTERS WHERE consent_id IN (";
+
+    public const string SelectRowScopesPrefix = "SELECT consent_id, policy_name, parameters_json, column_map_json, uncovered FROM CONSENT_ROW_SCOPES WHERE consent_id IN (";
 
     public const string InsertColumnRuleSql = "INSERT INTO CONSENT_COLUMN_RULES (id, consent_id, table_column_id, column_name, access_level, applicable_scopes) VALUES (@id, @consentId, @colId, @colName, @level, @scopes)";
 
     public const string InsertRowFilterSql = @"INSERT INTO CONSENT_ROW_FILTERS (
                                         id, consent_id, filter_group, table_column_id, column_name, operator, value_type, value_json, value_source, user_attribute,
-                                        filter_type, dependent_table, dependent_table_alias, foreign_key_column, primary_key_column,
-                                        subquery_predicate_json, target_temporal_column, dependent_valid_from_column, dependent_valid_to_column,
-                                        target_table_alias, additional_hops_json, key_set_strategy, key_set_duration_seconds, key_set_max_keys
+                                        filter_type
                                     ) VALUES (
                                         @id, @consentId, @fg, @colId, @colName, @op, @vType, @vJson, @vSource, @uAttr,
-                                        @ft, @dt, @dta, @fk, @pk, @sqp, @ttc, @dvfc, @dvtc, @tta, @hops, @ksStrategy, @ksDuration, @ksMax)";
+                                        @ft)";
+
+    public const string InsertRowScopeSql = "INSERT INTO CONSENT_ROW_SCOPES (tenant_id, consent_id, entry_no, policy_name, parameters_json, column_map_json, uncovered) VALUES (@tenantId, @consentId, @entryNo, @policyName, @paramsJson, @columnMapJson, @uncovered)";
 
     public const string InsertConsentRequestSql = @"INSERT INTO CONSENT_REQUESTS (
                                     id, table_id, requester_sid, requested_grantee_type, requested_grantee_ref,
                                     business_justification, status, requested_at, requested_valid_to,
-                                    itsm_ticket_id, tenant_id, requester_identifiers_json, context_json
-                                ) VALUES (@id, @tid, @sid, @gType, @gRef, @just, @status, @reqAt, @reqTo, @ticket, @tenantId, @reqIds, @ctx)";
+                                    itsm_ticket_id, tenant_id, requester_identifiers_json, context_json, requested_write_rules_json,
+                                    version, workflow_mode, external_system_id, external_reference, requested_valid_from, updated_at, request_kind, profile_id
+                                ) VALUES (@id, @tid, @sid, @gType, @gRef, @just, @status, @reqAt, @reqTo, @ticket, @tenantId, @reqIds, @ctx, @reqWriteRules, @version, @workflowMode, @externalSystemId, @externalReference, @reqValidFrom, @updatedAt, @requestKind, @profileId)";
 
     public const string SelectApprovalStepsSql = "SELECT step_number, approver_sid, decision, rejection_reason, decided_at FROM APPROVAL_STEPS WHERE consent_request_id = @id ORDER BY step_number ASC";
 
@@ -80,22 +80,22 @@ internal static class ConsentSqlCore
             var id = Guid.Parse(reader.GetString(0));
             if (!seen.Add(id)) continue;
 
-            consents.Add(new Consent
-            {
-                Id = id,
-                TableId = Guid.Parse(reader.GetString(1)),
-                TableIdentifier = table,
-                ConsentRequestId = reader.IsDBNull(2) ? null : Guid.Parse(reader.GetString(2)),
-                Effect = Enum.Parse<ConsentEffect>(gEffectStr, true),
-                GranteeType = granteeType,
-                GranteeSid = granteeSidStr != null ? new Sid(granteeSidStr) : (Sid?)null,
-                RoleId = reader.IsDBNull(6) ? null : Guid.Parse(reader.GetString(6)),
-                RoleName = reader.IsDBNull(7) ? null : reader.GetString(7),
-                ValidFrom = validFrom,
-                ValidTo = validTo,
-                IsRevoked = reader.GetInt32(10) == 1,
-                TenantId = StoredTenant.Parse(reader.IsDBNull(14) ? null : reader.GetString(14))
-            });
+            consents.Add(ConsentWorkflowSql.BuildConsent(
+                id,
+                Guid.Parse(reader.GetString(1)),
+                table,
+                reader.IsDBNull(2) ? null : Guid.Parse(reader.GetString(2)),
+                Enum.Parse<ConsentEffect>(gEffectStr, true),
+                granteeType,
+                granteeSidStr != null ? new Sid(granteeSidStr) : (Sid?)null,
+                reader.IsDBNull(6) ? null : Guid.Parse(reader.GetString(6)),
+                reader.IsDBNull(7) ? null : reader.GetString(7),
+                validFrom,
+                validTo,
+                reader.GetInt32(10) == 1,
+                StoredTenant.Parse(reader.IsDBNull(14) ? null : reader.GetString(14)),
+                reader,
+                15));
         }
     }
 
@@ -122,22 +122,22 @@ internal static class ConsentSqlCore
             var id = Guid.Parse(reader.GetString(0));
             if (!seen.Add(id)) continue;
 
-            consents.Add(new Consent
-            {
-                Id = id,
-                TableId = Guid.Parse(reader.GetString(1)),
-                TableIdentifier = new TableIdentifier(reader.GetString(11), reader.GetString(12), reader.GetString(13)),
-                ConsentRequestId = reader.IsDBNull(2) ? null : Guid.Parse(reader.GetString(2)),
-                Effect = Enum.Parse<ConsentEffect>(reader.GetString(3), true),
-                GranteeType = granteeType,
-                GranteeSid = granteeSidStr != null ? new Sid(granteeSidStr) : (Sid?)null,
-                RoleId = reader.IsDBNull(6) ? null : Guid.Parse(reader.GetString(6)),
-                RoleName = reader.IsDBNull(7) ? null : reader.GetString(7),
-                ValidFrom = validFrom,
-                ValidTo = validTo,
-                IsRevoked = reader.GetInt32(10) == 1,
-                TenantId = StoredTenant.Parse(reader.IsDBNull(14) ? null : reader.GetString(14))
-            });
+            consents.Add(ConsentWorkflowSql.BuildConsent(
+                id,
+                Guid.Parse(reader.GetString(1)),
+                new TableIdentifier(reader.GetString(11), reader.GetString(12), reader.GetString(13)),
+                reader.IsDBNull(2) ? null : Guid.Parse(reader.GetString(2)),
+                Enum.Parse<ConsentEffect>(reader.GetString(3), true),
+                granteeType,
+                granteeSidStr != null ? new Sid(granteeSidStr) : (Sid?)null,
+                reader.IsDBNull(6) ? null : Guid.Parse(reader.GetString(6)),
+                reader.IsDBNull(7) ? null : reader.GetString(7),
+                validFrom,
+                validTo,
+                reader.GetInt32(10) == 1,
+                StoredTenant.Parse(reader.IsDBNull(14) ? null : reader.GetString(14)),
+                reader,
+                15));
         }
     }
 
@@ -148,7 +148,7 @@ internal static class ConsentSqlCore
         cmd.CommandText = @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
                                    c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to,
                                    c.is_revoked, t.source_name, t.schema_name, t.table_name,
-                                   c.tenant_id
+                                   c.tenant_id, c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at
                             FROM CONSENTS c
                             JOIN TABLES t ON c.table_id = t.id
                             WHERE c.is_revoked = 0 AND c.consent_request_id = @reqId";
@@ -162,22 +162,22 @@ internal static class ConsentSqlCore
             if (atTime >= validTo || (!includeNotYetValid && atTime < validFrom)) continue;
 
             var granteeSidStr = reader.IsDBNull(5) ? null : reader.GetString(5);
-            consents.Add(new Consent
-            {
-                Id = Guid.Parse(reader.GetString(0)),
-                TableId = Guid.Parse(reader.GetString(1)),
-                TableIdentifier = new TableIdentifier(reader.GetString(11), reader.GetString(12), reader.GetString(13)),
-                ConsentRequestId = reader.IsDBNull(2) ? null : Guid.Parse(reader.GetString(2)),
-                Effect = Enum.Parse<ConsentEffect>(reader.GetString(3), true),
-                GranteeType = Enum.Parse<GranteeType>(reader.GetString(4), true),
-                GranteeSid = granteeSidStr != null ? new Sid(granteeSidStr) : (Sid?)null,
-                RoleId = reader.IsDBNull(6) ? null : Guid.Parse(reader.GetString(6)),
-                RoleName = reader.IsDBNull(7) ? null : reader.GetString(7),
-                ValidFrom = validFrom,
-                ValidTo = validTo,
-                IsRevoked = reader.GetInt32(10) == 1,
-                TenantId = StoredTenant.Parse(reader.IsDBNull(14) ? null : reader.GetString(14))
-            });
+            consents.Add(ConsentWorkflowSql.BuildConsent(
+                Guid.Parse(reader.GetString(0)),
+                Guid.Parse(reader.GetString(1)),
+                new TableIdentifier(reader.GetString(11), reader.GetString(12), reader.GetString(13)),
+                reader.IsDBNull(2) ? null : Guid.Parse(reader.GetString(2)),
+                Enum.Parse<ConsentEffect>(reader.GetString(3), true),
+                Enum.Parse<GranteeType>(reader.GetString(4), true),
+                granteeSidStr != null ? new Sid(granteeSidStr) : (Sid?)null,
+                reader.IsDBNull(6) ? null : Guid.Parse(reader.GetString(6)),
+                reader.IsDBNull(7) ? null : reader.GetString(7),
+                validFrom,
+                validTo,
+                reader.GetInt32(10) == 1,
+                StoredTenant.Parse(reader.IsDBNull(14) ? null : reader.GetString(14)),
+                reader,
+                15));
         }
 
         return consents;
@@ -189,7 +189,8 @@ internal static class ConsentSqlCore
         cmd.CommandText = @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
                                    c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to,
                                    c.is_revoked, c.revoked_by_sid, c.revoked_at, c.revoke_reason,
-                                   t.source_name, t.schema_name, t.table_name, c.tenant_id, c.renewal_count
+                                   t.source_name, t.schema_name, t.table_name, c.tenant_id, c.renewal_count,
+                                   c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at
                             FROM CONSENTS c
                             JOIN TABLES t ON c.table_id = t.id
                             WHERE c.id = @id";
@@ -199,26 +200,26 @@ internal static class ConsentSqlCore
         if (!await reader.ReadAsync(ct).ConfigureAwait(false)) return null;
 
         var granteeSidStr = reader.IsDBNull(5) ? null : reader.GetString(5);
-        return new Consent
-        {
-            Id = Guid.Parse(reader.GetString(0)),
-            TableId = Guid.Parse(reader.GetString(1)),
-            TableIdentifier = new TableIdentifier(reader.GetString(14), reader.GetString(15), reader.GetString(16)),
-            ConsentRequestId = reader.IsDBNull(2) ? null : Guid.Parse(reader.GetString(2)),
-            Effect = Enum.Parse<ConsentEffect>(reader.GetString(3), true),
-            GranteeType = Enum.Parse<GranteeType>(reader.GetString(4), true),
-            GranteeSid = granteeSidStr != null ? new Sid(granteeSidStr) : (Sid?)null,
-            RoleId = reader.IsDBNull(6) ? null : Guid.Parse(reader.GetString(6)),
-            RoleName = reader.IsDBNull(7) ? null : reader.GetString(7),
-            ValidFrom = DateTimeOffset.Parse(reader.GetString(8), CultureInfo.InvariantCulture),
-            ValidTo = DateTimeOffset.Parse(reader.GetString(9), CultureInfo.InvariantCulture),
-            IsRevoked = reader.GetInt32(10) == 1,
-            RevokedBySid = reader.IsDBNull(11) ? (Sid?)null : new Sid(reader.GetString(11)),
-            RevokedAt = reader.IsDBNull(12) ? null : DateTimeOffset.Parse(reader.GetString(12), CultureInfo.InvariantCulture),
-            RevokeReason = reader.IsDBNull(13) ? null : reader.GetString(13),
-            TenantId = StoredTenant.Parse(reader.IsDBNull(17) ? null : reader.GetString(17)),
-            RenewalCount = reader.GetInt32(18)
-        };
+        return ConsentWorkflowSql.BuildConsent(
+            Guid.Parse(reader.GetString(0)),
+            Guid.Parse(reader.GetString(1)),
+            new TableIdentifier(reader.GetString(14), reader.GetString(15), reader.GetString(16)),
+            reader.IsDBNull(2) ? null : Guid.Parse(reader.GetString(2)),
+            Enum.Parse<ConsentEffect>(reader.GetString(3), true),
+            Enum.Parse<GranteeType>(reader.GetString(4), true),
+            granteeSidStr != null ? new Sid(granteeSidStr) : (Sid?)null,
+            reader.IsDBNull(6) ? null : Guid.Parse(reader.GetString(6)),
+            reader.IsDBNull(7) ? null : reader.GetString(7),
+            DateTimeOffset.Parse(reader.GetString(8), CultureInfo.InvariantCulture),
+            DateTimeOffset.Parse(reader.GetString(9), CultureInfo.InvariantCulture),
+            reader.GetInt32(10) == 1,
+            StoredTenant.Parse(reader.IsDBNull(17) ? null : reader.GetString(17)),
+            reader,
+            19,
+            renewalCount: reader.GetInt32(18),
+            revokedBySid: reader.IsDBNull(11) ? (Sid?)null : new Sid(reader.GetString(11)),
+            revokedAt: reader.IsDBNull(12) ? null : DateTimeOffset.Parse(reader.GetString(12), CultureInfo.InvariantCulture),
+            revokeReason: reader.IsDBNull(13) ? null : reader.GetString(13));
     }
 
     public static async Task<List<Consent>> ReadExpiringConsentRowsAsync(DbConnection conn, string sql, DateTimeOffset now, DateTimeOffset threshold, int maxResults, CancellationToken ct)
@@ -234,23 +235,23 @@ internal static class ConsentSqlCore
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
             var granteeSidStr = reader.IsDBNull(5) ? null : reader.GetString(5);
-            consents.Add(new Consent
-            {
-                Id = Guid.Parse(reader.GetString(0)),
-                TableId = Guid.Parse(reader.GetString(1)),
-                TableIdentifier = new TableIdentifier(reader.GetString(11), reader.GetString(12), reader.GetString(13)),
-                ConsentRequestId = reader.IsDBNull(2) ? null : Guid.Parse(reader.GetString(2)),
-                Effect = Enum.Parse<ConsentEffect>(reader.GetString(3), true),
-                GranteeType = Enum.Parse<GranteeType>(reader.GetString(4), true),
-                GranteeSid = granteeSidStr != null ? new Sid(granteeSidStr) : (Sid?)null,
-                RoleId = reader.IsDBNull(6) ? null : Guid.Parse(reader.GetString(6)),
-                RoleName = reader.IsDBNull(7) ? null : reader.GetString(7),
-                ValidFrom = DateTimeOffset.Parse(reader.GetString(8), CultureInfo.InvariantCulture),
-                ValidTo = DateTimeOffset.Parse(reader.GetString(9), CultureInfo.InvariantCulture),
-                IsRevoked = reader.GetInt32(10) == 1,
-                TenantId = StoredTenant.Parse(reader.IsDBNull(14) ? null : reader.GetString(14)),
-                RenewalCount = reader.GetInt32(15)
-            });
+            consents.Add(ConsentWorkflowSql.BuildConsent(
+                Guid.Parse(reader.GetString(0)),
+                Guid.Parse(reader.GetString(1)),
+                new TableIdentifier(reader.GetString(11), reader.GetString(12), reader.GetString(13)),
+                reader.IsDBNull(2) ? null : Guid.Parse(reader.GetString(2)),
+                Enum.Parse<ConsentEffect>(reader.GetString(3), true),
+                Enum.Parse<GranteeType>(reader.GetString(4), true),
+                granteeSidStr != null ? new Sid(granteeSidStr) : (Sid?)null,
+                reader.IsDBNull(6) ? null : Guid.Parse(reader.GetString(6)),
+                reader.IsDBNull(7) ? null : reader.GetString(7),
+                DateTimeOffset.Parse(reader.GetString(8), CultureInfo.InvariantCulture),
+                DateTimeOffset.Parse(reader.GetString(9), CultureInfo.InvariantCulture),
+                reader.GetInt32(10) == 1,
+                StoredTenant.Parse(reader.IsDBNull(14) ? null : reader.GetString(14)),
+                reader,
+                16,
+                renewalCount: reader.GetInt32(15)));
         }
 
         return consents;
@@ -304,6 +305,10 @@ internal static class ConsentSqlCore
             .ToDictionary(g => g.Key, _ => new List<ConsentColumnRule>(), StringComparer.OrdinalIgnoreCase);
         var filtersMap = consents.GroupBy(c => c.Id.ToString(), StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, _ => new List<ConsentRowFilter>(), StringComparer.OrdinalIgnoreCase);
+        var writeRulesMap = consents.GroupBy(c => c.Id.ToString(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, _ => new List<WriteRule>(), StringComparer.OrdinalIgnoreCase);
+        var rowScopesMap = consents.GroupBy(c => c.Id.ToString(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, _ => new List<GrantRowScopeEntry>(), StringComparer.OrdinalIgnoreCase);
 
         for (int offset = 0; offset < consentIds.Count; offset += ConsentHydrateBatchSize)
         {
@@ -329,6 +334,28 @@ internal static class ConsentSqlCore
                     if (filtersMap.TryGetValue(cId, out var filterList)) filterList.Add(ReadRowFilter(reader, cId));
                 }
             }
+
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = ConsentWriteRulesSql.SelectWriteRulesPrefix + BindIdInClause(cmd, "cid", batch) + ")";
+                await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                while (await reader.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    var cId = reader.GetString(1);
+                    if (writeRulesMap.TryGetValue(cId, out var writeRuleList)) writeRuleList.Add(ConsentWriteRulesSql.ReadWriteRule(reader));
+                }
+            }
+
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = SelectRowScopesPrefix + BindIdInClause(cmd, "cid", batch) + ") ORDER BY consent_id, entry_no";
+                await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                while (await reader.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    var cId = reader.GetString(0);
+                    if (rowScopesMap.TryGetValue(cId, out var scopeList)) scopeList.Add(ReadRowScope(reader));
+                }
+            }
         }
 
         foreach (var c in consents)
@@ -336,7 +363,11 @@ internal static class ConsentSqlCore
             var key = c.Id.ToString();
             c.ColumnRules = rulesMap[key];
             c.RowFilters = filtersMap[key];
+            c.WriteRules = writeRulesMap[key];
+            c.RowScope = rowScopesMap[key];
         }
+
+        await GovernanceRepository.HydrateConsentClassificationAccessBatchAsync(conn, consents, ct).ConfigureAwait(false);
     }
 
     public static ConsentColumnRule ReadColumnRule(DbDataReader reader, string consentIdStr)
@@ -347,13 +378,16 @@ internal static class ConsentSqlCore
             ? Array.Empty<string>()
             : scopesRaw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
+        var parsedLevel = (ColumnAccessLevel)rawLevel;
         return new ConsentColumnRule
         {
             Id = Guid.Parse(reader.GetString(0)),
             ConsentId = Guid.Parse(consentIdStr),
             TableColumnId = Guid.Parse(reader.GetString(2)),
             ColumnName = reader.GetString(3),
-            AccessLevel = Enum.IsDefined((ColumnAccessLevel)rawLevel) ? (ColumnAccessLevel)rawLevel : ColumnAccessLevel.Deny,
+            AccessLevel = parsedLevel is ColumnAccessLevel.Deny or ColumnAccessLevel.Mask or ColumnAccessLevel.Clear
+                ? parsedLevel
+                : ColumnAccessLevel.Deny,
             ApplicableScopes = scopes
         };
     }
@@ -361,16 +395,6 @@ internal static class ConsentSqlCore
     public static ConsentRowFilter ReadRowFilter(DbDataReader reader, string consentIdStr)
     {
         var ftInt = reader.IsDBNull(10) ? 0 : reader.GetInt32(10);
-        TableIdentifier? depTable = !reader.IsDBNull(11) && TableIdentifier.TryParse(reader.GetString(11), out var dt) ? dt : null;
-
-        IReadOnlyList<SubqueryJoinHop>? hops = null;
-        var hopsJson = reader.IsDBNull(20) ? null : reader.GetString(20);
-        if (!string.IsNullOrWhiteSpace(hopsJson))
-        {
-            try { hops = JsonSerializer.Deserialize<List<SubqueryJoinHop>>(hopsJson); }
-            catch (JsonException ex) { throw new InvalidOperationException("Malformed additional hops JSON detected in consent row filter.", ex); }
-        }
-
         return new ConsentRowFilter
         {
             Id = Guid.Parse(reader.GetString(0)),
@@ -383,21 +407,25 @@ internal static class ConsentSqlCore
             ValueJson = reader.GetString(7),
             ValueSource = reader.GetString(8),
             UserAttribute = reader.IsDBNull(9) ? null : reader.GetString(9),
-            FilterType = (RowFilterType)ftInt,
-            DependentTable = depTable,
-            DependentTableAlias = reader.IsDBNull(12) ? null : reader.GetString(12),
-            ForeignKeyColumn = reader.IsDBNull(13) ? null : reader.GetString(13),
-            PrimaryKeyColumn = reader.IsDBNull(14) ? null : reader.GetString(14),
-            SubqueryFilterPredicateJson = reader.IsDBNull(15) ? null : reader.GetString(15),
-            TargetTemporalColumn = reader.IsDBNull(16) ? null : reader.GetString(16),
-            DependentValidFromColumn = reader.IsDBNull(17) ? null : reader.GetString(17),
-            DependentValidToColumn = reader.IsDBNull(18) ? null : reader.GetString(18),
-            TargetTableAlias = reader.IsDBNull(19) ? null : reader.GetString(19),
-            AdditionalHops = hops,
-            KeySetStrategy = reader.IsDBNull(21) ? null : (RowFilterEvaluationStrategy)reader.GetInt32(21),
-            KeySetDurationSeconds = reader.IsDBNull(22) ? null : reader.GetInt32(22),
-            KeySetMaxKeys = reader.IsDBNull(23) ? null : reader.GetInt32(23)
+            FilterType = (RowFilterType)ftInt
         };
+    }
+
+    public static GrantRowScopeEntry ReadRowScope(DbDataReader reader)
+    {
+        var policyName = reader.GetString(1);
+        var paramsJson = reader.IsDBNull(2) ? "{}" : reader.GetString(2);
+        var parameters = string.IsNullOrWhiteSpace(paramsJson)
+            ? new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+            : JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(paramsJson) ?? new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        var columnMap = reader.IsDBNull(3) || string.IsNullOrWhiteSpace(reader.GetString(3))
+            ? null
+            : JsonSerializer.Deserialize<Dictionary<string, string>>(reader.GetString(3));
+        var uncoveredRaw = reader.IsDBNull(4) ? "DENY" : reader.GetString(4);
+        var uncovered = string.Equals(uncoveredRaw, "SKIP", StringComparison.OrdinalIgnoreCase)
+            ? UncoveredPolicy.Skip
+            : UncoveredPolicy.Deny;
+        return new GrantRowScopeEntry(policyName, parameters, columnMap, uncovered);
     }
 
     public static async Task InsertColumnRulesAndRowFiltersAsync(DbConnection conn, DbTransaction tx, Consent consent, CancellationToken ct)
@@ -420,7 +448,6 @@ internal static class ConsentSqlCore
         foreach (var filter in consent.RowFilters)
         {
             var filterId = filter.Id == Guid.Empty ? Guid.NewGuid() : filter.Id;
-            var hopsJson = filter.AdditionalHops != null && filter.AdditionalHops.Count > 0 ? JsonSerializer.Serialize(filter.AdditionalHops) : null;
 
             await using var filterCmd = conn.CreateCommand();
             filterCmd.Transaction = tx;
@@ -436,21 +463,27 @@ internal static class ConsentSqlCore
             filterCmd.AddBound("@vSource", filter.ValueSource);
             filterCmd.AddBound("@uAttr", (object?)filter.UserAttribute ?? DBNull.Value);
             filterCmd.AddBound("@ft", (int)filter.FilterType);
-            filterCmd.AddBound("@dt", filter.DependentTable.HasValue ? (object)filter.DependentTable.Value.ToString() : DBNull.Value);
-            filterCmd.AddBound("@dta", (object?)filter.DependentTableAlias ?? DBNull.Value);
-            filterCmd.AddBound("@fk", (object?)filter.ForeignKeyColumn ?? DBNull.Value);
-            filterCmd.AddBound("@pk", (object?)filter.PrimaryKeyColumn ?? DBNull.Value);
-            filterCmd.AddBound("@sqp", (object?)filter.SubqueryFilterPredicateJson ?? DBNull.Value);
-            filterCmd.AddBound("@ttc", (object?)filter.TargetTemporalColumn ?? DBNull.Value);
-            filterCmd.AddBound("@dvfc", (object?)filter.DependentValidFromColumn ?? DBNull.Value);
-            filterCmd.AddBound("@dvtc", (object?)filter.DependentValidToColumn ?? DBNull.Value);
-            filterCmd.AddBound("@tta", (object?)filter.TargetTableAlias ?? DBNull.Value);
-            filterCmd.AddBound("@hops", (object?)hopsJson ?? DBNull.Value);
-            filterCmd.AddBound("@ksStrategy", filter.KeySetStrategy is { } ksStrategy ? (object)(int)ksStrategy : DBNull.Value);
-            filterCmd.AddBound("@ksDuration", (object?)filter.KeySetDurationSeconds ?? DBNull.Value);
-            filterCmd.AddBound("@ksMax", (object?)filter.KeySetMaxKeys ?? DBNull.Value);
             await filterCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         }
+
+        for (int i = 0; i < consent.RowScope.Count; i++)
+        {
+            var scope = consent.RowScope[i];
+            await using var scopeCmd = conn.CreateCommand();
+            scopeCmd.Transaction = tx;
+            scopeCmd.CommandText = InsertRowScopeSql;
+            scopeCmd.AddBound("@tenantId", StoredTenant.RequireWritable(consent.TenantId));
+            scopeCmd.AddBound("@consentId", consent.Id.ToString());
+            scopeCmd.AddBound("@entryNo", i);
+            scopeCmd.AddBound("@policyName", scope.PolicyName);
+            scopeCmd.AddBound("@paramsJson", JsonSerializer.Serialize(scope.Parameters ?? new Dictionary<string, JsonElement>(StringComparer.Ordinal)));
+            scopeCmd.AddBound("@columnMapJson", scope.ColumnMap is { Count: > 0 } ? JsonSerializer.Serialize(scope.ColumnMap) : DBNull.Value);
+            scopeCmd.AddBound("@uncovered", scope.Uncovered == UncoveredPolicy.Skip ? "SKIP" : "DENY");
+            await scopeCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+
+        await ConsentWriteRulesSql.InsertWriteRulesAsync(conn, tx, consent, ct).ConfigureAwait(false);
+        await GovernanceRepository.InsertConsentClassificationAccessAsync(conn, tx, consent, ct).ConfigureAwait(false);
     }
 
     public static async Task<Guid> ResolveTableIdOrThrowAsync(DbConnection conn, DbTransaction? tx, string? findTableIdSql, Guid existingTableId, TableIdentifier table, string operationLabel, CancellationToken ct)
@@ -469,7 +502,7 @@ internal static class ConsentSqlCore
         return Guid.Parse(idObj.ToString()!);
     }
 
-    public static async Task<(TableIdentifier? Table, string? RawTenant)> ReadSystemRevokeTargetAsync(DbConnection conn, DbTransaction? tx, string selectSql, Guid consentId, Guid consentRequestId, CancellationToken ct)
+    public static async Task<(TableIdentifier? Table, string? RawTenant, Consent? Consent)> ReadSystemRevokeTargetAsync(DbConnection conn, DbTransaction? tx, string selectSql, Guid consentId, Guid consentRequestId, CancellationToken ct)
     {
         await using var getCmd = conn.CreateCommand();
         getCmd.Transaction = tx;
@@ -478,11 +511,36 @@ internal static class ConsentSqlCore
         getCmd.AddBound("@reqId", consentRequestId.ToString());
 
         await using var reader = await getCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        if (!await reader.ReadAsync(ct).ConfigureAwait(false)) return (null, null);
+        if (!await reader.ReadAsync(ct).ConfigureAwait(false)) return (null, null, null);
 
         var tableId = new TableIdentifier(reader.GetString(0), reader.GetString(1), reader.GetString(2));
         var rawTenant = reader.IsDBNull(3) ? null : reader.GetString(3);
-        return (tableId, rawTenant);
+        var tableGuid = reader.FieldCount > 4 && !reader.IsDBNull(4) ? Guid.Parse(reader.GetString(4)) : Guid.Empty;
+        var effect = reader.FieldCount > 5 && !reader.IsDBNull(5) ? Enum.Parse<ConsentEffect>(reader.GetString(5), true) : ConsentEffect.Allow;
+        var granteeType = reader.FieldCount > 6 && !reader.IsDBNull(6) ? Enum.Parse<GranteeType>(reader.GetString(6), true) : GranteeType.User;
+        var granteeSidStr = ConsentWorkflowSql.ReadOptionalString(reader, 7);
+        var roleName = ConsentWorkflowSql.ReadOptionalString(reader, 8);
+        var grantSource = ConsentWorkflowSql.ReadGrantSource(reader, 9);
+        var profileAssignmentId = ConsentWorkflowSql.ReadOptionalGuid(reader, 10);
+        var validFrom = ConsentWorkflowSql.ReadOptionalTimestamp(reader, 11) ?? DateTimeOffset.MinValue;
+        var validTo = ConsentWorkflowSql.ReadOptionalTimestamp(reader, 12) ?? DateTimeOffset.MaxValue;
+        var consent = new Consent
+        {
+            Id = consentId,
+            TableId = tableGuid,
+            TableIdentifier = tableId,
+            ConsentRequestId = consentRequestId,
+            Effect = effect,
+            TenantId = TenantId.TryParse(rawTenant, out var parsedTenant) ? parsedTenant : default,
+            GranteeType = granteeType,
+            GranteeSid = !string.IsNullOrWhiteSpace(granteeSidStr) ? new Sid(granteeSidStr) : (Sid?)null,
+            RoleName = roleName,
+            ValidFrom = validFrom,
+            ValidTo = validTo,
+            GrantSource = grantSource,
+            ProfileAssignmentId = profileAssignmentId
+        };
+        return (tableId, rawTenant, consent);
     }
 
     public static async Task<int> ExecuteSystemRevokeUpdateAsync(DbConnection conn, DbTransaction? tx, string updateSql, Guid consentId, Guid consentRequestId, Sid revokedBySid, DateTimeOffset now, string reason, bool bindReqId, CancellationToken ct)
@@ -498,58 +556,11 @@ internal static class ConsentSqlCore
         return await updateCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
-    public static async Task<(TableIdentifier? Table, TenantId ExtendTenant, DateTimeOffset NewValidFrom)> ReadAndExtendConsentExpiryAsync(DbConnection conn, DbTransaction? tx, string selectSql, Guid consentId, DateTimeOffset newValidTo, DateTimeOffset now, CancellationToken ct)
-    {
-        TableIdentifier? tableId = null;
-        TenantId extendTenant = default;
-        var newValidFrom = now;
-
-        await using (var getCmd = conn.CreateCommand())
-        {
-            getCmd.Transaction = tx;
-            getCmd.CommandText = selectSql;
-            getCmd.AddBound("@id", consentId.ToString());
-            await using var reader = await getCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-            if (await reader.ReadAsync(ct).ConfigureAwait(false))
-            {
-                tableId = new TableIdentifier(reader.GetString(0), reader.GetString(1), reader.GetString(2));
-                extendTenant = ConsentGrantSqlCore.ResolveConsentTenant(reader.IsDBNull(3) ? null : reader.GetString(3), consentId, tableId.Value.ToString());
-                newValidFrom = ConsentSubjectFilter.RenewalPeriodStart(reader.GetString(4), now);
-            }
-        }
-
-        await using (var cmd = conn.CreateCommand())
-        {
-            cmd.Transaction = tx;
-            cmd.CommandText = "UPDATE CONSENTS SET valid_to = @validTo, valid_from = @validFrom, renewal_count = renewal_count + 1 WHERE id = @id AND is_revoked = 0 AND valid_to > @now AND @validTo > valid_to";
-            cmd.AddBound("@id", consentId.ToString());
-            cmd.AddBound("@validTo", newValidTo.ToUniversalTime().ToString("O"));
-            cmd.AddBound("@validFrom", newValidFrom.ToUniversalTime().ToString("O"));
-            cmd.AddBound("@now", now.ToString("O"));
-            if (await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false) != 1)
-            {
-                throw new ConsentNotExtendableException(consentId);
-            }
-        }
-
-        return (tableId, extendTenant, newValidFrom);
-    }
-
-    public static AuditLogEntry BuildExpiryExtendedAudit(TenantId extendTenant, TableIdentifier? tableId, Guid consentId, DateTimeOffset newValidTo) =>
-        new()
-        {
-            TenantId = extendTenant,
-            EventType = "CONSENT_EXPIRY_EXTENDED",
-            ActorSid = new Sid("SYSTEM"),
-            TargetTable = tableId?.ToString() ?? "unknown",
-            Decision = "EXTENDED",
-            TraceId = Guid.NewGuid().ToString("N"),
-            DetailsJson = JsonSerializer.Serialize(new { ConsentId = consentId, NewValidTo = newValidTo })
-        };
-
     public static async Task<ConsentRequest> CreateConsentRequestAsync(DbConnection conn, string? findTableIdSql, ConsentRequest request, CancellationToken ct)
     {
-        var tableGuid = await ResolveTableIdOrThrowAsync(conn, null, findTableIdSql, request.TableId, request.TableIdentifier, "consent request", ct).ConfigureAwait(false);
+        var tableGuid = request.RequestKind == ConsentRequestKind.ProfileAssignment && request.TableId == Guid.Empty && string.IsNullOrWhiteSpace(request.TableIdentifier.TableName)
+            ? Guid.Empty
+            : await ResolveTableIdOrThrowAsync(conn, null, findTableIdSql, request.TableId, request.TableIdentifier, "consent request", ct).ConfigureAwait(false);
         var reqId = request.Id == Guid.Empty ? Guid.NewGuid() : request.Id;
         var reqIdentifiersJson = request.RequesterIdentifiers != null && request.RequesterIdentifiers.Count > 0 ? JsonSerializer.Serialize(request.RequesterIdentifiers) : null;
 
@@ -569,27 +580,12 @@ internal static class ConsentSqlCore
             cmd.AddBound("@tenantId", request.TenantId.Value);
             cmd.AddBound("@reqIds", (object?)reqIdentifiersJson ?? DBNull.Value);
             cmd.AddBound("@ctx", (object?)request.ContextJson ?? DBNull.Value);
+            cmd.AddBound("@reqWriteRules", (object?)ConsentWriteRulesSql.SerializeRequestedWriteRules(request) ?? DBNull.Value);
+            ConsentWorkflowSql.BindRequestParameters(cmd, request);
             await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         }
 
-        return new ConsentRequest
-        {
-            Id = reqId,
-            TableId = tableGuid,
-            TableIdentifier = request.TableIdentifier,
-            RequesterSid = request.RequesterSid,
-            RequestedGranteeType = request.RequestedGranteeType,
-            RequestedGranteeRef = request.RequestedGranteeRef,
-            BusinessJustification = request.BusinessJustification,
-            Status = request.Status,
-            RequestedAt = request.RequestedAt,
-            RequestedValidTo = request.RequestedValidTo,
-            ItsmTicketId = request.ItsmTicketId,
-            TenantId = request.TenantId,
-            RequesterIdentifiers = request.RequesterIdentifiers ?? new List<string>(),
-            ApprovalSteps = request.ApprovalSteps ?? new List<ApprovalStep>(),
-            ContextJson = request.ContextJson
-        };
+        return ConsentWorkflowSql.BuildCreatedRequest(request, reqId, tableGuid);
     }
 
     public static async Task<ConsentRequest?> ReadConsentRequestAsync(DbConnection conn, DbTransaction? tx, string selectRequestSql, Guid requestId, bool loadSteps, CancellationToken ct)
@@ -631,41 +627,54 @@ internal static class ConsentSqlCore
     {
         var reqIdsJson = reader.IsDBNull(14) ? null : reader.GetString(14);
         var reqIds = !string.IsNullOrWhiteSpace(reqIdsJson) ? JsonSerializer.Deserialize<List<string>>(reqIdsJson) : null;
+        var (writeRules, includeRead) = ConsentWriteRulesSql.DeserializeRequestedWriteRules(
+            reader.FieldCount > 16 && !reader.IsDBNull(16) ? reader.GetString(16) : null);
 
-        return new ConsentRequest
-        {
-            Id = Guid.Parse(reader.GetString(0)),
-            TableId = Guid.Parse(reader.GetString(1)),
-            RequesterSid = new Sid(reader.GetString(2)),
-            RequestedGranteeType = Enum.Parse<GranteeType>(reader.GetString(3), true),
-            RequestedGranteeRef = reader.GetString(4),
-            BusinessJustification = reader.GetString(5),
-            Status = reader.GetString(6),
-            RequestedAt = DateTimeOffset.Parse(reader.GetString(7)),
-            RequestedValidTo = DateTimeOffset.Parse(reader.GetString(8)),
-            TableIdentifier = new TableIdentifier(reader.GetString(9), reader.GetString(10), reader.GetString(11)),
-            ItsmTicketId = reader.IsDBNull(12) ? null : reader.GetString(12),
-            TenantId = StoredTenant.Parse(reader.IsDBNull(13) ? null : reader.GetString(13)),
-            RequesterIdentifiers = reqIds ?? new List<string>(),
-            ContextJson = reader.FieldCount > 15 && !reader.IsDBNull(15) ? reader.GetString(15) : null
-        };
+        return ConsentWorkflowSql.BuildConsentRequest(
+            reader,
+            Guid.Parse(reader.GetString(0)),
+            Guid.Parse(reader.GetString(1)),
+            new Sid(reader.GetString(2)),
+            Enum.Parse<GranteeType>(reader.GetString(3), true),
+            reader.GetString(4),
+            reader.GetString(5),
+            reader.GetString(6),
+            DateTimeOffset.Parse(reader.GetString(7)),
+            DateTimeOffset.Parse(reader.GetString(8)),
+            reader.IsDBNull(9) ? default : new TableIdentifier(reader.GetString(9), reader.GetString(10), reader.GetString(11)),
+            reader.IsDBNull(12) ? null : reader.GetString(12),
+            StoredTenant.Parse(reader.IsDBNull(13) ? null : reader.GetString(13)),
+            reqIds ?? new List<string>(),
+            reader.FieldCount > 15 && !reader.IsDBNull(15) ? reader.GetString(15) : null,
+            writeRules,
+            includeRead,
+            17);
     }
 
-    public static ConsentRequest ReadSummaryConsentRequestRow(DbDataReader reader) =>
-        new()
-        {
-            Id = Guid.Parse(reader.GetString(0)),
-            TableId = Guid.Parse(reader.GetString(1)),
-            RequesterSid = new Sid(reader.GetString(2)),
-            RequestedGranteeType = Enum.Parse<GranteeType>(reader.GetString(3), true),
-            RequestedGranteeRef = reader.GetString(4),
-            BusinessJustification = reader.GetString(5),
-            Status = reader.GetString(6),
-            RequestedAt = DateTimeOffset.Parse(reader.GetString(7)),
-            RequestedValidTo = DateTimeOffset.Parse(reader.GetString(8)),
-            TableIdentifier = new TableIdentifier(reader.GetString(9), reader.GetString(10), reader.GetString(11)),
-            ContextJson = reader.FieldCount > 12 && !reader.IsDBNull(12) ? reader.GetString(12) : null
-        };
+    public static ConsentRequest ReadSummaryConsentRequestRow(DbDataReader reader)
+    {
+        var (writeRules, includeRead) = ConsentWriteRulesSql.DeserializeRequestedWriteRules(
+            reader.FieldCount > 13 && !reader.IsDBNull(13) ? reader.GetString(13) : null);
+        return ConsentWorkflowSql.BuildConsentRequest(
+            reader,
+            Guid.Parse(reader.GetString(0)),
+            Guid.Parse(reader.GetString(1)),
+            new Sid(reader.GetString(2)),
+            Enum.Parse<GranteeType>(reader.GetString(3), true),
+            reader.GetString(4),
+            reader.GetString(5),
+            reader.GetString(6),
+            DateTimeOffset.Parse(reader.GetString(7)),
+            DateTimeOffset.Parse(reader.GetString(8)),
+            reader.IsDBNull(9) ? default : new TableIdentifier(reader.GetString(9), reader.GetString(10), reader.GetString(11)),
+            null,
+            default,
+            new List<string>(),
+            reader.FieldCount > 12 && !reader.IsDBNull(12) ? reader.GetString(12) : null,
+            writeRules,
+            includeRead,
+            14);
+    }
 
     public static async Task<IReadOnlyList<ConsentRequest>> GetRequestsByRequesterSidAsync(DbConnection conn, string baseSelectSql, Sid requesterSid, string? status, CancellationToken ct)
     {
@@ -711,7 +720,7 @@ internal static class ConsentSqlCore
     }
 
     public static async Task<(bool RequiresFourEyes, string? Sensitivity, bool SameApprover, int NextStepNumber)> ReadApprovalStateAsync(
-        DbConnection conn, DbTransaction? tx, Guid requestId, Sid approverSid, string? itsmApproverAccount,
+        DbConnection conn, DbTransaction? tx, Guid requestId, Sid approverSid,
         IReadOnlyCollection<string> approverOwnerIds, Func<IReadOnlyList<string>, Task<IReadOnlyCollection<string>>> resolveOwnerIdsAsync, CancellationToken ct)
     {
         bool requiresFourEyes = false;
@@ -739,7 +748,7 @@ internal static class ConsentSqlCore
             while (await reader.ReadAsync(ct).ConfigureAwait(false)) existingApprovers.Add(reader.GetString(0));
         }
 
-        bool sameApprover = existingApprovers.Any(s => ConsentApprovalPolicy.IsSameApprover(s, approverSid, itsmApproverAccount));
+        bool sameApprover = existingApprovers.Any(s => ConsentApprovalPolicy.IsSameApprover(s, approverSid));
         for (int i = 0; !sameApprover && i < existingApprovers.Count; i++)
         {
             var storedOwnerIds = await resolveOwnerIdsAsync(ConsentApprovalPolicy.IdentifierCandidates(existingApprovers[i])).ConfigureAwait(false);
@@ -781,7 +790,15 @@ internal static class ConsentSqlCore
         await stepInsert.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
-    public static async Task ApplyGuardedStatusAsync(DbConnection conn, DbTransaction tx, Func<DbConnection, DbTransaction, CancellationToken, Task>? seam, Guid requestId, string newStatus, string expectedStatus, CancellationToken ct)
+    public static async Task ApplyGuardedStatusAsync(
+        DbConnection conn,
+        DbTransaction tx,
+        Func<DbConnection, DbTransaction, CancellationToken, Task>? seam,
+        Guid requestId,
+        string newStatus,
+        string expectedStatus,
+        CancellationToken ct,
+        DateTimeOffset? updatedAt = null)
     {
         if (seam is not null) await seam(conn, tx, ct).ConfigureAwait(false);
 
@@ -789,6 +806,7 @@ internal static class ConsentSqlCore
         cmd.Transaction = tx;
         cmd.CommandText = ConsentApprovalPolicy.GuardedStatusUpdateSql;
         cmd.AddBound("@st", newStatus);
+        cmd.AddBoundTimestamp("@updatedAt", updatedAt ?? TimeProvider.System.GetUtcNow());
         cmd.AddBound("@id", requestId.ToString());
         cmd.AddBound("@expected", expectedStatus);
         ConsentApprovalPolicy.EnsureTransitionApplied(await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false), requestId);
@@ -798,7 +816,7 @@ internal static class ConsentSqlCore
     {
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
-        cmd.CommandText = "UPDATE CONSENT_REQUESTS SET status = 'WITHDRAWN' WHERE id = @id AND requester_sid = @sid AND status IN ('PENDING', 'PENDING_SECOND_APPROVAL')";
+        cmd.CommandText = "UPDATE CONSENT_REQUESTS SET status = 'WITHDRAWN' WHERE id = @id AND requester_sid = @sid AND status IN ('PENDING', 'PENDING_SECOND_APPROVAL', 'PENDING_EXTERNAL_APPROVAL')";
         cmd.AddBound("@id", requestId.ToString());
         cmd.AddBound("@sid", requesterSid.Value);
         return await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false) == 1;
@@ -815,18 +833,25 @@ internal static class ConsentSqlCore
         return result != null && result != DBNull.Value && Convert.ToInt64(result) > 0;
     }
 
-    public static async Task<Guid?> FindRequestIdByTicketIdAsync(DbConnection conn, string selectIdByTicketSql, string ticketId, TenantId? tenantId, CancellationToken ct)
+    public static async Task<Guid?> FindRequestIdByExternalReferenceAsync(
+        DbConnection conn,
+        Guid externalSystemId,
+        string externalReference,
+        TenantId tenantId,
+        CancellationToken ct)
     {
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = selectIdByTicketSql;
-        cmd.AddBound("@ticket", ticketId);
-        if (tenantId.HasValue) cmd.AddBound("@tenant", tenantId.Value.Value);
+        cmd.CommandText = "SELECT id FROM CONSENT_REQUESTS WHERE external_system_id = @sysId AND external_reference = @extRef AND tenant_id = @tenant ORDER BY requested_at, id";
+        cmd.AddBound("@sysId", externalSystemId.ToString());
+        cmd.AddBound("@extRef", externalReference);
+        cmd.AddBound("@tenant", tenantId.Value);
 
-        var idObj = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
-        return idObj == null ? null : Guid.Parse(idObj.ToString()!);
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        return await reader.ReadAsync(ct).ConfigureAwait(false) ? Guid.Parse(reader.GetString(0)) : null;
     }
 
-    public static async Task<(bool Activated, Guid ConsentId)> TryActivateConsentRowsAsync(DbConnection conn, DbTransaction tx, ConsentRequest req, bool allowPendingAutoApprove, string effectLiteral, DateTimeOffset now, CancellationToken ct)
+    public static async Task<(bool Claimed, Guid ConsentId, Consent? DraftConsent)> TryClaimConsentRequestActivationAsync(
+        DbConnection conn, DbTransaction tx, ConsentRequest req, bool allowPendingAutoApprove, string effectLiteral, DateTimeOffset now, CancellationToken ct)
     {
         await using (var updateReq = conn.CreateCommand())
         {
@@ -837,7 +862,7 @@ internal static class ConsentSqlCore
                 : @"UPDATE CONSENT_REQUESTS SET status = 'APPROVED'
                     WHERE id = @id AND status = 'APPROVED'";
             updateReq.AddBound("@id", req.Id.ToString());
-            if (await updateReq.ExecuteNonQueryAsync(ct).ConfigureAwait(false) != 1) return (false, Guid.Empty);
+            if (await updateReq.ExecuteNonQueryAsync(ct).ConfigureAwait(false) != 1) return (false, Guid.Empty, null);
         }
 
         await using (var existsCmd = conn.CreateCommand())
@@ -845,65 +870,87 @@ internal static class ConsentSqlCore
             existsCmd.Transaction = tx;
             existsCmd.CommandText = "SELECT COUNT(1) FROM CONSENTS WHERE consent_request_id = @reqId";
             existsCmd.AddBound("@reqId", req.Id.ToString());
-            if (Convert.ToInt64(await existsCmd.ExecuteScalarAsync(ct).ConfigureAwait(false)) > 0) return (false, Guid.Empty);
+            if (Convert.ToInt64(await existsCmd.ExecuteScalarAsync(ct).ConfigureAwait(false)) > 0) return (false, Guid.Empty, null);
         }
 
         var consentId = Guid.NewGuid();
         var granteeSid = req.RequestedGranteeType != GranteeType.Role ? new Sid(req.RequestedGranteeRef) : (Sid?)null;
         var roleName = req.RequestedGranteeType == GranteeType.Role ? req.RequestedGranteeRef : null;
+        var grantSource = req.RequestKind == ConsentRequestKind.ProfileAssignment
+            ? ConsentGrantSource.AccessProfile
+            : ConsentGrantSource.ConsentRequest;
+        Guid? profileAssignmentId = req.RequestKind == ConsentRequestKind.ProfileAssignment ? req.Id : null;
 
-        await using (var cmd = conn.CreateCommand())
+        var draft = new Consent
         {
-            cmd.Transaction = tx;
-            cmd.CommandText = @"INSERT INTO CONSENTS (id, table_id, consent_request_id, effect, grantee_type, grantee_sid, grantee_sid_norm, role_name, valid_from, valid_to, is_revoked, tenant_id)
-                                VALUES (@id, @tid, @reqId, @effect, @granteeType, @granteeSid, @sidNorm, @roleName, @validFrom, @validTo, 0, @tenantId)";
-            cmd.AddBound("@id", consentId.ToString());
-            cmd.AddBound("@tid", req.TableId.ToString());
-            cmd.AddBound("@reqId", req.Id.ToString());
-            cmd.AddBound("@effect", effectLiteral);
-            cmd.AddBound("@granteeType", req.RequestedGranteeType.ToString());
-            cmd.AddBound("@granteeSid", (object?)granteeSid?.Value ?? DBNull.Value);
-            cmd.AddBound("@sidNorm", ConsentSubjectFilter.NormalizeParameter((object?)granteeSid?.Value ?? DBNull.Value));
-            cmd.AddBound("@roleName", (object?)roleName ?? DBNull.Value);
-            cmd.AddBound("@validFrom", now.ToString("O"));
-            cmd.AddBound("@validTo", req.RequestedValidTo.ToUniversalTime().ToString("O"));
-            cmd.AddBound("@tenantId", req.TenantId.Value);
-            await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-        }
+            Id = consentId,
+            TableId = req.TableId,
+            TableIdentifier = req.TableIdentifier,
+            ConsentRequestId = req.Id,
+            Effect = string.Equals(effectLiteral, "DENY", StringComparison.OrdinalIgnoreCase) ? ConsentEffect.Deny : ConsentEffect.Allow,
+            TenantId = req.TenantId,
+            GranteeType = req.RequestedGranteeType,
+            GranteeSid = granteeSid,
+            CreatedBySid = req.RequesterSid,
+            RoleName = roleName,
+            ValidFrom = now,
+            ValidTo = req.RequestedValidTo.ToUniversalTime(),
+            GrantSource = grantSource,
+            ProfileAssignmentId = profileAssignmentId
+        };
+        return (true, consentId, draft);
+    }
 
-        var columnRules = new List<(Guid Id, Guid ColId, string ColName, int AccessLevel)>();
-        await using (var colCmd = conn.CreateCommand())
+    public static async Task InsertActivatedColumnAndWriteRulesAsync(
+        DbConnection conn, DbTransaction tx, ConsentRequest req, Guid consentId, CancellationToken ct)
+    {
+        if (req.ShouldGrantReadColumns)
         {
-            colCmd.Transaction = tx;
-            colCmd.CommandText = SelectColumnSnapshotSql;
-            colCmd.AddBound("@tid", req.TableId.ToString());
-            await using var reader = await colCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            var columnRules = new List<(Guid Id, Guid ColId, string ColName, int AccessLevel)>();
+            await using (var colCmd = conn.CreateCommand())
             {
-                var colId = Guid.Parse(reader.GetString(0));
-                var colName = reader.GetString(1);
-                var isSensitive = Convert.ToInt32(reader.GetValue(2)) == 1;
-                var hasMask = Convert.ToInt32(reader.GetValue(3)) == 1;
-                int accessLevel = (int)ConsentColumnSnapshot.AccessLevelFor(isSensitive, hasMask);
-                columnRules.Add((Guid.NewGuid(), colId, colName, accessLevel));
+                colCmd.Transaction = tx;
+                colCmd.CommandText = SelectColumnSnapshotSql;
+                colCmd.AddBound("@tid", req.TableId.ToString());
+                await using var reader = await colCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                while (await reader.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    var colId = Guid.Parse(reader.GetString(0));
+                    var colName = reader.GetString(1);
+                    var isSensitive = Convert.ToInt32(reader.GetValue(2)) == 1;
+                    var hasMask = Convert.ToInt32(reader.GetValue(3)) == 1;
+                    int accessLevel = (int)ConsentColumnSnapshot.AccessLevelFor(isSensitive, hasMask);
+                    columnRules.Add((Guid.NewGuid(), colId, colName, accessLevel));
+                }
+            }
+
+            foreach (var (ruleId, colId, colName, accessLevel) in columnRules)
+            {
+                await using var ruleCmd = conn.CreateCommand();
+                ruleCmd.Transaction = tx;
+                ruleCmd.CommandText = InsertColumnRuleSql;
+                ruleCmd.AddBound("@id", ruleId.ToString());
+                ruleCmd.AddBound("@consentId", consentId.ToString());
+                ruleCmd.AddBound("@colId", colId.ToString());
+                ruleCmd.AddBound("@colName", colName);
+                ruleCmd.AddBound("@level", accessLevel);
+                ruleCmd.AddBound("@scopes", string.Empty);
+                await ruleCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
         }
 
-        foreach (var (ruleId, colId, colName, accessLevel) in columnRules)
+        if (req.RequestedWriteRules.Count > 0)
         {
-            await using var ruleCmd = conn.CreateCommand();
-            ruleCmd.Transaction = tx;
-            ruleCmd.CommandText = InsertColumnRuleSql;
-            ruleCmd.AddBound("@id", ruleId.ToString());
-            ruleCmd.AddBound("@consentId", consentId.ToString());
-            ruleCmd.AddBound("@colId", colId.ToString());
-            ruleCmd.AddBound("@colName", colName);
-            ruleCmd.AddBound("@level", accessLevel);
-            ruleCmd.AddBound("@scopes", string.Empty);
-            await ruleCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            var writeConsent = new Consent
+            {
+                Id = consentId,
+                TableId = req.TableId,
+                TableIdentifier = req.TableIdentifier,
+                TenantId = req.TenantId,
+                WriteRules = req.RequestedWriteRules
+            };
+            await ConsentWriteRulesSql.InsertWriteRulesAsync(conn, tx, writeConsent, ct).ConfigureAwait(false);
         }
-
-        return (true, consentId);
     }
 
     public static async Task DeleteConsentRequestRowsAsync(DbConnection conn, DbTransaction? tx, Guid requestId, CancellationToken ct)
@@ -923,14 +970,5 @@ internal static class ConsentSqlCore
             cmd.AddBound("@id", requestId.ToString());
             await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         }
-    }
-
-    public static async Task UpdateConsentRequestTicketIdAsync(DbConnection conn, Guid requestId, string ticketId, CancellationToken ct)
-    {
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "UPDATE CONSENT_REQUESTS SET itsm_ticket_id = @ticket WHERE id = @id";
-        cmd.AddBound("@id", requestId.ToString());
-        cmd.AddBound("@ticket", ticketId);
-        await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 }

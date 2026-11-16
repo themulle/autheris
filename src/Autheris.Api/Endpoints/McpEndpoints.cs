@@ -192,6 +192,9 @@ public static class McpEndpoints
                             // SR-M-08: raw role/group claims ("roles", "groups", "wids", ...) stay out; the session carries the vetted ones.
                             Autheris.Application.Mcp.Services.McpProtocolHandler.IsAllowedAdditionalClaimType(c.Type))
                 .GroupBy(c => c.Type, StringComparer.Ordinal)
+                // Token claim order is IdP-controlled, so first-wins could widen an attribute policy. A scalar attribute
+                // with several different values is treated as Ambiguous (same as REST/GraphQL): unavailable, never an arbitrary pick.
+                .Where(g => g.Select(c => c.Value).Distinct(StringComparer.Ordinal).Count() == 1)
                 .ToDictionary(g => g.Key, g => g.First().Value, StringComparer.Ordinal)
             : null;
         if (additionalClaims is not null && CallerAttributeSchemeGate.HasAllowedOriginalScheme(principal, attributeOptions ?? new CallerAttributeOptions()))

@@ -55,7 +55,8 @@ public sealed class Issue143ScopeBlindPathTests
             claims.Add(new Claim("scp", scp));
         }
 
-        return new ClaimsPrincipal(new ClaimsIdentity(claims, "Bearer"));
+        return global::Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(
+            new ClaimsPrincipal(new ClaimsIdentity(claims, "Bearer")));
     }
 
     /// <summary>The Iceberg service over one consent; <paramref name="seen"/> records the scope set the resolver was given.</summary>
@@ -148,8 +149,9 @@ public sealed class Issue143ScopeBlindPathTests
         // SEC-GOV143-15: the claims overload also reads a plain 'scope' claim (GetScopes would not); an empty set maps to null.
         var seen = new List<IReadOnlySet<string>?>();
         var service = IcebergWith(seen, sensitive: false);
-        var plainScope = new ClaimsPrincipal(new ClaimsIdentity(
-            [new Claim(ClaimTypes.Name, "analyst@corp.com"), new Claim(ClaimTypes.PrimarySid, "analyst@corp.com"), new Claim("scope", Restricted)], "Bearer"));
+        var plainScope = global::Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(
+            new ClaimsPrincipal(new ClaimsIdentity(
+                [new Claim(ClaimTypes.Name, "analyst@corp.com"), new Claim(ClaimTypes.PrimarySid, "analyst@corp.com"), new Claim("scope", Restricted)], "Bearer")));
 
         await LoadAsync(service, plainScope);
         await LoadAsync(service, Analyst());
@@ -180,7 +182,11 @@ public sealed class Issue143ScopeBlindPathTests
                 .Returns(Task.FromResult<IReadOnlyList<Consent>>(consents));
             var masking = Substitute.For<IColumnMaskingProvider>();
             masking.MaskValue(default!, default, default!).ReturnsForAnyArgs("MASKED");
-            var policy = Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll();
+            // The decision point answers like the real one for these consents: the columns the consent grants in clear stay clear.
+            var policy = Autheris.Tests.Unit.TestSupport.PdpTestDoubles.From(request => TableAccessDecision.Allowed(
+                request.Object.Identifier,
+                new Dictionary<string, ColumnAccessLevel> { ["id"] = ColumnAccessLevel.Clear, ["grade"] = ColumnAccessLevel.Clear },
+                hasUnconstrainedColumnAllow: true));
 
             // A key/value cache keyed by the context hash, like the real one: a hit of a foreign key would show up as a wrong level.
             var store = new Dictionary<string, TableAccessDecision>();

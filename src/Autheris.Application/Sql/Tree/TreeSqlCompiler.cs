@@ -27,7 +27,7 @@ public static partial class TreeSqlCompiler
     public const int MaxParameters = 2_000;
     public const int MaxFilterDepth = 15;
 
-    /// <summary>Key/value pairs per JSON object function call (PostgreSQL allows 100 arguments, SQLite 127).</summary>
+    /// <summary>Key/value pairs per JSON object function call (PostgreSQL allows 100 arguments).</summary>
     private const int ObjectChunkSize = 50;
 
     private static readonly string TargetAlias = TrinoSqlEngine.RowFilterAliases.Target;
@@ -38,7 +38,7 @@ public static partial class TreeSqlCompiler
     /// as flat tables through the governed compile path but offer no nested relation fields.
     /// </summary>
     public static bool SupportsTreeCompile(DatabaseDialect dialect) =>
-        dialect is DatabaseDialect.SqlServer or DatabaseDialect.PostgreSql or DatabaseDialect.Sqlite;
+        dialect is DatabaseDialect.SqlServer or DatabaseDialect.PostgreSql;
 
     [GeneratedRegex("^[A-Za-z_][A-Za-z0-9_]{0,127}$")]
     private static partial Regex SafeNameRegex();
@@ -568,44 +568,8 @@ public static partial class TreeSqlCompiler
         }
     }
 
-    private static bool ComparisonRestrictsRows(TreeComparison comp)
-    {
-        switch (comp.Operator)
-        {
-            case TreeFilterOperator.IsNull:
-                return comp.Value is true;   // isNull:false does not restrict rows
-            case TreeFilterOperator.Eq or TreeFilterOperator.Gt or TreeFilterOperator.Gte or TreeFilterOperator.Lt or TreeFilterOperator.Lte:
-                return comp.Value is not null;
-            case TreeFilterOperator.Contains or TreeFilterOperator.StartsWith or TreeFilterOperator.EndsWith:
-                return comp.Value is string { Length: > 0 };
-            case TreeFilterOperator.In:
-                return comp.Value is not string && comp.Value is IEnumerable list && list.Cast<object?>().Any(static item => item is not null);
-            default:
-                return false;
-        }
-    }
-
-    private static bool IsColumnConstrained(TreeFilter? filter, string column)
-    {
-        if (filter == null) return false;
-
-        return filter switch
-        {
-            // SQLA-02: only a comparison that really restricts rows counts; any value shape that is not recognised is "not constrained".
-            TreeComparison comp =>
-                string.Equals(comp.Column, column, StringComparison.OrdinalIgnoreCase) && ComparisonRestrictsRows(comp),
-
-            TreeAndFilter andFilter =>
-                andFilter.Items.Any(item => IsColumnConstrained(item, column)),
-
-            TreeOrFilter orFilter =>
-                orFilter.Items.Count > 0 && orFilter.Items.All(item => IsColumnConstrained(item, column)),
-
-            TreeNotFilter => false,
-
-            _ => false
-        };
-    }
+    private static bool IsColumnConstrained(TreeFilter? filter, string column) =>
+        TreeFilterClauseBuilder.ExtractConstrainedColumns(filter).Contains(column);
 
     private static string Echo(string? name) =>
         name != null && SafeNameRegex().IsMatch(name.Trim()) ? name.Trim() : "(invalid name)";
@@ -616,15 +580,15 @@ public static partial class TreeSqlCompiler
     {
         if (string.IsNullOrWhiteSpace(dataType)) return true;
         var dt = dataType.Trim().ToLowerInvariant();
-        if (dt.Contains("interval") || dt.Contains("point") || dt.Contains("polygon") ||
-            dt.Contains("geometry") || dt.Contains("geography") || dt.Contains("line") ||
-            dt.Contains("json") || dt.Contains("xml") || dt.Contains("uuid") || dt.Contains("guid"))
+        if (dt.Contains("interval", StringComparison.Ordinal) || dt.Contains("point", StringComparison.Ordinal) || dt.Contains("polygon", StringComparison.Ordinal) ||
+            dt.Contains("geometry", StringComparison.Ordinal) || dt.Contains("geography", StringComparison.Ordinal) || dt.Contains("line", StringComparison.Ordinal) ||
+            dt.Contains("json", StringComparison.Ordinal) || dt.Contains("xml", StringComparison.Ordinal) || dt.Contains("uuid", StringComparison.Ordinal) || dt.Contains("guid", StringComparison.Ordinal))
         {
             return true;
         }
 
         var baseType = dt.Split('(', '[', ' ')[0].Trim();
-        if (baseType.StartsWith("bit") || baseType.StartsWith("bool")) return false;
+        if (baseType.StartsWith("bit", StringComparison.Ordinal) || baseType.StartsWith("bool", StringComparison.Ordinal)) return false;
         if (baseType is "bigint" or "int8" or "long" or "int" or "integer" or "int4" or "smallint" or "int2" or "tinyint") return false;
         if (baseType is "decimal" or "numeric" or "money" or "smallmoney" or "float" or "double" or "real" or "float4" or "float8") return false;
 
@@ -799,7 +763,6 @@ public static partial class TreeSqlCompiler
             {
                 DatabaseDialect.SqlServer => $"{quoted}.STAsText()",
                 DatabaseDialect.PostgreSql => $"ST_AsGeoJSON({quoted})",
-                DatabaseDialect.Sqlite => $"AsGeoJSON({quoted})",
                 _ => quoted
             };
         }
@@ -810,10 +773,6 @@ public static partial class TreeSqlCompiler
         if (dataType is "bytea" && context.Dialect == DatabaseDialect.PostgreSql)
         {
             return $"encode({quoted}, 'base64')";
-        }
-        if (dataType is "blob" && context.Dialect == DatabaseDialect.Sqlite)
-        {
-            return $"hex({quoted})";
         }
         return quoted;
     }
@@ -859,8 +818,7 @@ public static partial class TreeSqlCompiler
                 " FOR JSON PATH, INCLUDE_NULL_VALUES), N'[]')",
             DatabaseDialect.PostgreSql =>
                 $"SELECT coalesce(jsonb_agg({PostgresObject(plan, context)}{(order.Length > 0 ? " ORDER BY " + order : string.Empty)}), '[]'::jsonb)::text FROM ({inner}) AS {alias}",
-            _ =>
-                $"SELECT json_group_array(json({SqliteObject(plan, context)}){(order.Length > 0 ? " ORDER BY " + order : string.Empty)}) FROM ({inner}) AS {alias}"
+            _ => throw new NotSupportedException($"Tree SQL compiler does not support dialect '{context.Dialect}'.")
         };
     }
 
@@ -887,10 +845,7 @@ public static partial class TreeSqlCompiler
                     : $"(SELECT {PostgresObject(plan, context)} FROM ({inner}) AS {alias})";
 
             default:
-                // SQLite: values of scalar subqueries lose the JSON subtype; json() restores it.
-                return relation.IsList
-                    ? $"json((SELECT json_group_array(json({SqliteObject(plan, context)}){(order.Length > 0 ? " ORDER BY " + order : string.Empty)}) FROM ({inner}) AS {alias}))"
-                    : $"json((SELECT {SqliteObject(plan, context)} FROM ({inner}) AS {alias}))";
+                throw new NotSupportedException($"Tree SQL compiler does not support dialect '{context.Dialect}'.");
         }
     }
 
@@ -904,23 +859,6 @@ public static partial class TreeSqlCompiler
             .Select(chunk => "jsonb_build_object(" + string.Join(", ", chunk.Select(p => $"'{p.Key}', {p.Expression}")) + ")")
             .ToList();
         return chunks.Count == 0 ? "'{}'::jsonb" : string.Join(" || ", chunks);
-    }
-
-    private static string SqliteObject(NodePlan plan, CompileContext context)
-    {
-        var chunks = ObjectPairs(plan, context).Chunk(ObjectChunkSize).ToList();
-        if (chunks.Count == 0)
-        {
-            return "json_object()";
-        }
-
-        // json_set instead of json_patch: a merge patch would drop keys whose value is null.
-        var expression = "json_object(" + string.Join(", ", chunks[0].Select(p => $"'{p.Key}', {p.Expression}")) + ")";
-        foreach (var chunk in chunks.Skip(1))
-        {
-            expression = $"json_set({expression}, " + string.Join(", ", chunk.Select(p => $"'$.\"{p.Key}\"', {p.Expression}")) + ")";
-        }
-        return expression;
     }
 
     // ---------------------------------------------------------------- filters

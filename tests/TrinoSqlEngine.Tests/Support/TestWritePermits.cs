@@ -35,6 +35,7 @@ internal static class TestWritePermits
         SqlStatement statement;
         try
         {
+            using var _ = CompilerHooks.Use(NoOpCompilerHooks.Instance);
             var (tree, _) = ParseEngine.Parse(sql.AsMemory(), SqlTokenSecurityOptions.None);
             statement = new SqlAstBuilder(new AstBuilderOptions { EnforceReadOnlyQueries = false, EnforceFunctionPolicy = false }).BuildStatement(tree);
         }

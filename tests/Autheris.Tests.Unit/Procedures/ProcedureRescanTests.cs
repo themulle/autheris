@@ -39,7 +39,7 @@ public sealed class ProcedureRescanTests : IDisposable
                 Procedures = new ProcedureEndpointsOptions
                 {
                     Enabled = true, Directory = _dir, AllowedSchemas = ["api"], AllowedDataSources = ["ora"],
-                    AllowDeclaredValidation = true, RequireDdlHashForDeclared = false
+                    RequireDdlHashForDeclared = false
                 }
             }
         });
@@ -167,7 +167,7 @@ public sealed class ProcedureRescanTests : IDisposable
     [Fact]
     public async Task Revalidation_RescansDirectory_PicksUpNewAndRemovedFiles()
     {
-        string declared = "name: d\nprocedure: api.usp_D\nvalidation: declared\nresult_table: sales.orders\noutputs:\n  - order_id\n";
+        string declared = "name: d\nprocedure: api.usp_D\nresult_table: sales.orders\ntables:\n  - sales.orders\noutputs:\n  - order_id\n";
         string file = Write("d.proc.yaml", declared);
         _loader.LoadFromDirectory().ShouldBe(1);
 

@@ -322,7 +322,7 @@ public sealed class DocRestScopingAndResourceGuardTests : IDisposable
             guardrail,
             NullLogger<McpProtocolHandler>.Instance,
             compiler);
-        return (handler, guardrail, compiler, handler.CreateSession("agent", "tenant-a").SessionId);
+        return (handler, guardrail, compiler, handler.CreateSession("agent", "tenant-a", userSid: null).SessionId);
     }
 
     private static string Read(string uri) =>

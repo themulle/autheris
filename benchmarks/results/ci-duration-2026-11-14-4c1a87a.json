@@ -1,0 +1,25 @@
+{
+  "metric": "ci-duration",
+  "date": "2026-11-14",
+  "sha": "4c1a87a",
+  "host": {
+    "hostname": "828220cbae0d",
+    "os": "Linux",
+    "kernel": "6.18.33.2-microsoft-standard-WSL2",
+    "arch": "x86_64",
+    "cpu": "AMD Ryzen 7 8840U w/ Radeon 780M Graphics"
+  },
+  "values": {
+    "ciPrWallClockMedianMinutes": 35.32,
+    "pr_median_minutes": 35.32,
+    "main_median_minutes": 34.62,
+    "pr_p90_minutes": 61.17,
+    "main_p90_minutes": 58.13
+  },
+  "sample": {
+    "since": null,
+    "pr_runs": 10,
+    "main_runs": 10
+  },
+  "method": "bash benchmarks/scripts/ci-duration.sh"
+}

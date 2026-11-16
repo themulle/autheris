@@ -8,8 +8,10 @@ using Antlr4.Runtime.Tree;
 public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
 {
     private SqlStatementType _statementType = SqlStatementType.Other;
+    private bool _isMerge;
     private readonly List<TableAccessTarget> _referencedTables = new();
     private readonly List<string> _projectedColumns = new();
+    private readonly List<string> _writtenColumns = new();
     private readonly HashSet<string> _seenTableKeys = new(StringComparer.Ordinal);
     private readonly List<JoinColumnReference> _joinColumnReferences = new();
     private readonly List<FilterColumnReference> _filterColumnReferences = new();
@@ -111,15 +113,19 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
             HasRootOrderBy = _hasRootOrderBy,
             HasRootOffset = _hasRootOffset,
             CrossJoins = _crossJoins.ToArray(),
-            GroupByColumnReferences = _groupByColumnReferences.Count > 0 ? _groupByColumnReferences.ToArray() : null
+            GroupByColumnReferences = _groupByColumnReferences.Count > 0 ? _groupByColumnReferences.ToArray() : null,
+            WrittenColumns = _writtenColumns.Count > 0 ? _writtenColumns.ToArray() : null,
+            IsMerge = _isMerge
         };
     }
 
     private void Reset()
     {
         _statementType = SqlStatementType.Other;
+        _isMerge = false;
         _referencedTables.Clear();
         _projectedColumns.Clear();
+        _writtenColumns.Clear();
         _seenTableKeys.Clear();
         _joinColumnReferences.Clear();
         _filterColumnReferences.Clear();
@@ -155,6 +161,7 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
         var stmt = context.statement();
         if (stmt == null) return;
 
+        _isMerge = stmt is SqlBaseParser.MergeContext;
         _statementType = stmt switch
         {
             SqlBaseParser.StatementDefaultContext => SqlStatementType.Select,
@@ -638,6 +645,13 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
     public override void EnterUpdate(SqlBaseParser.UpdateContext context)
     {
         RecordTableAccess(context.qualifiedName(), null);
+        foreach (var assignment in context.updateAssignment())
+        {
+            if (assignment?.identifier() is { } colId)
+            {
+                _writtenColumns.Add(SqlIdentifierHelper.NormalizeIdentifier(colId.GetText()));
+            }
+        }
         if (context.where != null)
         {
             ExtractFilterColumnReferences(context.where, _filterColumnReferences);
@@ -647,6 +661,16 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
     public override void EnterInsertInto(SqlBaseParser.InsertIntoContext context)
     {
         RecordTableAccess(context.qualifiedName(), null);
+        if (context.columnAliases()?.identifier() is { } colIds)
+        {
+            foreach (var colId in colIds)
+            {
+                if (colId != null)
+                {
+                    _writtenColumns.Add(SqlIdentifierHelper.NormalizeIdentifier(colId.GetText()));
+                }
+            }
+        }
     }
 
     private void RecordTableAccess(SqlBaseParser.QualifiedNameContext qualifiedNameContext, SqlBaseParser.AliasedRelationContext? aliasedRelation)

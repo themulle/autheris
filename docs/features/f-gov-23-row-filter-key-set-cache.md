@@ -174,10 +174,10 @@ These components exist as library code with their own tests. **No statement-exec
 
 ### 8.1 Correlated filter sites
 
-The typed row-filter builder for correlated filters (`AdvancedRlsPredicateBuilder.CorrelatedExpression`) registers every `EXISTS` node it creates in `CorrelatedFilterSiteRegistry`, for both sources: consent row filters (`CorrelatedFilterSource.Consent`) and Casbin rules (`CorrelatedFilterSource.Casbin`, through the `IRlsFilterGenerator.BuildCorrelatedPredicate` overload that takes the source).
+The typed row-filter builder for correlated filters (`AdvancedRlsPredicateBuilder.CorrelatedExpression`) registers every `EXISTS` node it creates in `CorrelatedFilterSiteRegistry`, for consent row filters (`CorrelatedFilterSource.Consent`).
 
 - The registry is internal, keyed by node **reference** in a `ConditionalWeakTable`: it never keeps a node alive, an entry disappears with its node, and a node that was not registered (user AST, a node re-created by a rewriter) is not found. `Register` has exactly one caller (guarded by an architecture test), so no other code can mark an arbitrary node as a site.
-- A site (`CorrelatedFilterSite`) holds the rule id, the source, the rule-level settings of a consent filter (`null` for Casbin: no rule level) and `StructurallyEligible`, which is `false` for a temporal filter (target temporal column and dependent valid-from column set). The two Casbin sites are shared immutable instances.
+- A site (`CorrelatedFilterSite`) holds the rule id, the source, the rule-level settings of the consent filter and `StructurallyEligible`, which is `false` for a temporal filter (target temporal column and dependent valid-from column set).
 
 ### 8.2 Key query derivation
 

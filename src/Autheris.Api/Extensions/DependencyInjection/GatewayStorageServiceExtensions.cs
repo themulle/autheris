@@ -2,6 +2,7 @@ namespace Autheris.Api.Extensions.DependencyInjection;
 
 using System;
 using System.Linq;
+using Autheris.Api.Endpoints.Health;
 using Autheris.Application.State.Caching.Interfaces;
 using Autheris.Application.State.Caching.Services;
 using Autheris.Application.Common.Interfaces;
@@ -52,6 +53,10 @@ public static class GatewayStorageServiceExtensions
             services.AddSingleton<IEventBus, RedisEventBus>();
             services.AddSingleton<IRateLimiterService, RedisRateLimiterService>();
             services.AddSingleton<IIdempotencyStore, RedisIdempotencyStore>();
+            services.AddSingleton<Autheris.Application.Policy.WriteGrants.IWriteBudgetStore>(sp =>
+                sp.GetService<Microsoft.Extensions.Caching.Distributed.IDistributedCache>() is { } distributedCache
+                    ? new DistributedCacheWriteBudgetStore(distributedCache, sp.GetService<TimeProvider>())
+                    : new DistributedCacheWriteBudgetStore(sp.GetRequiredService<IConnectionMultiplexer>(), sp.GetService<TimeProvider>()));
             services.AddSingleton<ITokenRevocationService, RedisTokenRevocationService>(); // SEC M-14 (GAP-B)
             services.AddClusterState(ClusterStateMode.External);
         }
@@ -60,13 +65,15 @@ public static class GatewayStorageServiceExtensions
             services.AddSingleton<IEventBus, InProcessChannelEventBus>();
             services.AddSingleton<IRateLimiterService, InMemoryRateLimiterService>();
             services.AddSingleton<IIdempotencyStore, InMemoryIdempotencyStore>();
+            services.AddSingleton<Autheris.Application.Policy.WriteGrants.IWriteBudgetStore, InMemoryWriteBudgetStore>();
             services.AddSingleton<ITokenRevocationService, InMemoryTokenRevocationService>(); // SEC M-14 (GAP-B)
             services.AddClusterState(ClusterStateMode.InMemory);
         }
 
         services.AddSingleton<ITableSensitivityLookup>(sp => new TableMetadataSensitivityLookup(
             () => sp.GetService<ITableMetadataRepository>(),
-            sp.GetService<Microsoft.Extensions.Logging.ILogger<TableMetadataSensitivityLookup>>()));
+            sp.GetService<Microsoft.Extensions.Logging.ILogger<TableMetadataSensitivityLookup>>(),
+            () => sp.GetService<IClassificationRepository>()));
         services.AddSingleton<EpochValidationService>();
         services.AddSingleton<IEpochValidationService>(sp => sp.GetRequiredService<EpochValidationService>());
         services.AddSingleton<IParameterBudgetProvider, DatabaseParameterBudgetProvider>();
@@ -77,27 +84,24 @@ public static class GatewayStorageServiceExtensions
         services.AddDatabricksStatementExecution();
         services.AddSingleton<ISqlConnectionFactory, SqlConnectionFactory>();
         services.AddSingleton<ISqlSourceDescriber, Autheris.Infrastructure.Persistence.SqlSourceDescriber>();
-        // SQLite statements are interrupted at the execution timeout and on cancellation.
-        services.AddSingleton<Autheris.Application.Sql.Interfaces.IProviderExecutionGuard, SqliteProviderExecutionGuard>();
+        services.AddSingleton<Autheris.Application.Sql.Interfaces.IProviderExecutionGuard>(
+            Autheris.Application.Sql.Interfaces.PassThroughExecutionGuard.Instance);
 
         // WP-X0c (CR-ADG-47): column types and collations from database metadata. The TTL is validated here, so a value above
         // the 300 s maximum fails the startup. Nothing consumes the provider before X1.
         var catalogOptions = new GovernedCatalogOptions { CacheTtlSeconds = gatewayOptions.DataSources.CatalogCacheTtlSeconds };
         catalogOptions.Validate();
         services.AddSingleton(catalogOptions);
-        // I403: key and index column direction. Only SQL Server and PostgreSQL expose a direction; no other dialect has a reader.
-        services.AddSingleton<IKeyIndexMetadataReader, PostgreSqlKeyIndexMetadataReader>();
-        services.AddSingleton<IKeyIndexMetadataReader, SqlServerKeyIndexMetadataReader>();
         services.AddSingleton<GovernedCatalogProvider>();
         services.AddSingleton<IGovernedCatalogProvider>(sp => sp.GetRequiredService<GovernedCatalogProvider>());
-        services.AddSingleton<IPhysicalKeyCatalog>(sp => sp.GetRequiredService<GovernedCatalogProvider>());
         services.AddSingleton<AuditChainIntegrityMonitor>();
         services.AddHostedService(sp => sp.GetRequiredService<AuditChainIntegrityMonitor>());
         services.AddHostedService<Autheris.Api.Configuration.Validation.DmlIdempotencyStoreStartupCheck>();
-        // SEC R3-4: anonymous /health/ready must not drive the DB probe per request -> cached, single-flight decorator.
+        // Anonymous /health/ready uses ReadinessProbe (2 s single-flight cache + 5 s shared timeout) over GatewayHealthCheckService.
         services.AddSingleton<GatewayHealthCheckService>();
         services.AddSingleton<IGatewayHealthCheckService>(sp =>
-            new CachedGatewayHealthCheckService(sp.GetRequiredService<GatewayHealthCheckService>()));
+            sp.GetRequiredService<GatewayHealthCheckService>());
+        services.AddSingleton<ReadinessProbe>();
 
         return services;
     }

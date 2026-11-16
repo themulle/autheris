@@ -210,17 +210,12 @@ public static class DefaultReadOrdering
 
     /// <summary>
     /// #398 allow-list of the column types a typed aggregation may group by. Unlike <see cref="IsOrderableType"/> an unknown, blank or
-    /// unparsable type is refused (fail-closed) on every dialect except SQLite, which compares every value. <c>varchar(max)</c> and
+    /// unparsable type is refused (fail-closed). <c>varchar(max)</c> and
     /// <c>nvarchar(max)</c> are groupable on SQL Server only; <c>text</c> only on PostgreSQL and Databricks. Binary, XML, JSON, spatial,
     /// structured and legacy LOB types (text/ntext/image, CLOB) stay refused.
     /// </summary>
     public static bool IsGroupableType(string? dataType, DatabaseDialect dialect)
     {
-        if (dialect == DatabaseDialect.Sqlite)
-        {
-            return true;
-        }
-
         if (string.IsNullOrWhiteSpace(dataType))
         {
             return false;

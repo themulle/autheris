@@ -25,16 +25,15 @@ public sealed partial class GovernedTableReadPlanner
         "alter", "create", "truncate", "union", "intersect", "except", "where", "from", "into", "exec", "execute"
     };
 
-    private readonly IKeysetCursorEncoder _cursorEncoder;
+    private readonly IKeysetCursorEncoder? _cursorEncoder;
 
     /// <summary>
     /// Creates the planner. <paramref name="cursorEncoder"/> must be the DI <see cref="IKeysetCursorEncoder"/> (keyed by
-    /// <c>RestApi:BulkStream:SigningKey</c>) — the same instance the streaming endpoint issues cursors with. The fallback
-    /// (a process-local key) exists only for direct construction in tests and in non-streaming planner uses.
+    /// <c>RestApi:BulkStream:SigningKey</c>) when decoding keyset stream cursors.
     /// </summary>
     public GovernedTableReadPlanner(IKeysetCursorEncoder? cursorEncoder = null)
     {
-        _cursorEncoder = cursorEncoder ?? new KeysetCursorEncoder();
+        _cursorEncoder = cursorEncoder;
     }
 
     public PlannedTableRead PlanKeysetStream(
@@ -120,7 +119,7 @@ public sealed partial class GovernedTableReadPlanner
             // MISC-04: the row filter text counts only through whole identifiers (shared rule); the typed client filter keeps its own check.
             bool IsSatisfied(string req) =>
                 (request.Filter != null && IsColumnConstrained(request.Filter, req)) ||
-                RequiredFilterColumnRule.IsColumnSatisfied(req, metadata, decision, clientFilterColumns: null, tenantColumnCounts: false);
+                RequiredFilterColumnRule.IsColumnSatisfied(req, metadata, decision, clientConstrainedColumns: null, tenantColumnCounts: false);
 
             if (metadata.RequiredFilterColumnGroups.Length > 0)
             {
@@ -168,6 +167,11 @@ public sealed partial class GovernedTableReadPlanner
         string? seekSql = null;
         if (!string.IsNullOrWhiteSpace(request.Cursor))
         {
+            if (_cursorEncoder is null)
+            {
+                throw new InvalidOperationException("An IKeysetCursorEncoder must be provided to decode keyset cursors.");
+            }
+
             // The context is built by the same factory the endpoint issues cursors with (tenant, caller, table, key,
             // direction, filter and projection), and verified with the same DI encoder; any mismatch fails closed.
             var cursorContext = KeysetCursorContextFactory.ForBulkStream(tenantId, metadata, pkCols, callerSid, request, streamKey.Directions);
@@ -415,9 +419,9 @@ public sealed partial class GovernedTableReadPlanner
         }
 
         var trimmed = identifier.Trim();
-        if (trimmed.Contains('.') || trimmed.Contains(';') || trimmed.Contains('/') ||
-            trimmed.Contains('\\') || trimmed.Contains('\'') || trimmed.Contains('"') ||
-            trimmed.Contains("/*") || trimmed.Contains("--") || trimmed.Contains(' '))
+        if (trimmed.Contains('.', StringComparison.Ordinal) || trimmed.Contains(';', StringComparison.Ordinal) || trimmed.Contains('/', StringComparison.Ordinal) ||
+            trimmed.Contains('\\', StringComparison.Ordinal) || trimmed.Contains('\'', StringComparison.Ordinal) || trimmed.Contains('"', StringComparison.Ordinal) ||
+            trimmed.Contains("/*", StringComparison.Ordinal) || trimmed.Contains("--", StringComparison.Ordinal) || trimmed.Contains(' ', StringComparison.Ordinal))
         {
             throw new ArgumentException($"Identifier '{identifier}' contains invalid characters or dots. Joins and dotted table identifiers are strictly prohibited.", paramName);
         }
@@ -428,20 +432,30 @@ public sealed partial class GovernedTableReadPlanner
         }
     }
 
-    private static bool IsColumnConstrained(TypedFilterNode node, string columnName)
+    private static bool IsColumnConstrained(TypedFilterNode? node, string columnName)
     {
-        if (node == null) return false;
+        if (node == null || node.Not != null)
+        {
+            return false;
+        }
 
         if (!string.IsNullOrWhiteSpace(node.Field))
         {
-            // VF-06: a tautology ({op: notin, value: []} renders "1 = 1") constrains nothing.
-            if (string.Equals(node.Op?.Trim(), "notin", StringComparison.OrdinalIgnoreCase) &&
-                node.Value is { ValueKind: JsonValueKind.Array } list && list.GetArrayLength() == 0)
+            if (!string.Equals(node.Field, columnName, StringComparison.OrdinalIgnoreCase))
             {
                 return false;
             }
 
-            return string.Equals(node.Field, columnName, StringComparison.OrdinalIgnoreCase);
+            var op = (node.Op ?? "eq").Trim().ToLowerInvariant();
+            return op switch
+            {
+                "eq" or "=" or "gt" or ">" or "gte" or "ge" or ">=" or "lt" or "<" or "lte" or "le" or "<=" =>
+                    IsNonNullJsonScalar(node.Value),
+                "in" => node.Value is { ValueKind: JsonValueKind.Array } list &&
+                        list.GetArrayLength() > 0 &&
+                        list.EnumerateArray().Any(IsNonNullJsonScalar),
+                _ => false
+            };
         }
 
         if (node.And is { Count: > 0 })
@@ -456,6 +470,12 @@ public sealed partial class GovernedTableReadPlanner
 
         return false;
     }
+
+    private static bool IsNonNullJsonScalar(JsonElement? element) =>
+        element.HasValue && IsNonNullJsonScalar(element.Value);
+
+    private static bool IsNonNullJsonScalar(JsonElement element) =>
+        element.ValueKind is JsonValueKind.String or JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False;
 
     private static object? ExtractJsonPrimitive(JsonElement? elementNullable, TableColumn column)
     {

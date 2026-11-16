@@ -67,6 +67,9 @@ public sealed class RemovedConfigKeysTests
     [InlineData("Gateway:Extensibility:JustificationHeader", "X-Access-Justification")]
     [InlineData("Gateway:AccessProfiles:MaxBreakGlassDurationHours", "72")]
     [InlineData("Gateway:IndividualGrants:BreakGlassMaxHours", "72")]
+    [InlineData("Gateway:Casbin:Enabled", "true")]
+    [InlineData("Gateway:Casbin:PolicyPath", "/policies/policy.csv")]
+    [InlineData("Gateway:Casbin:DecisionCache:Enabled", "true")]
     public void Every_removed_key_fails_startup(string key, string value)
     {
         var configuration = Config(key, value);
@@ -150,6 +153,25 @@ public sealed class RemovedConfigKeysTests
     }
 
     [Theory]
+    [InlineData("Gateway:Casbin:Enabled", "true")]
+    [InlineData("Gateway:Casbin:Enabled", "false")]
+    [InlineData("Gateway:Casbin:Enabled", "")]
+    [InlineData("Gateway:Casbin:PolicyPath", "")]
+    [InlineData("Gateway:Casbin:ModelPath", "/policies/model.conf")]
+    [InlineData("Gateway:Casbin:WatchPolicyFile", "false")]
+    [InlineData("Gateway:Casbin:EnforceInQueryPipeline", "false")]
+    [InlineData("Gateway:Casbin:DecisionCache:ShareAcrossUsers", "false")]
+    [InlineData("Gateway:Casbin", "")]
+    public void Casbin_keys_fail_startup(string key, string value)
+    {
+        var ex = Should.Throw<InvalidOperationException>(() =>
+            UnknownGatewayKeyGuard.ThrowIfUnknownKeys(Config(key, value)));
+
+        ex.Message.ShouldContain("Gateway:Casbin");
+        ex.Message.ShouldContain("grant records (consents), column rules and virtual filters");
+    }
+
+    [Theory]
     [InlineData("Gateway:Backstage:Enabled", "true")]
     [InlineData("Gateway:Backstage:Enabled", "false")]
     [InlineData("Gateway:Backstage:SystemName", "autheris")]
@@ -212,5 +234,25 @@ public sealed class RemovedConfigKeysTests
         ex.Message.ShouldContain("SqlEndpoints:Procedures:EnableHotReload (removed (WP-SIMPL-39); definitions are re-scanned each interval)");
         UnknownGatewayKeyGuard.FindUnknownKeys(config).Count.ShouldBe(1);
         UnknownGatewayKeyGuard.FindUnknownKeys(Config("Gateway:SqlEndpoints:Procedures:Enabled", "false")).ShouldBeEmpty();
+    }
+
+    [Theory]
+    [InlineData("Gateway:FinOps", "")]
+    [InlineData("Gateway:FinOps:Enabled", "true")]
+    [InlineData("Gateway:FinOps:Enabled", "false")]
+    [InlineData("Gateway:FinOps:Enabled", "")]
+    [InlineData("Gateway:FinOps:DefaultMonthlyBudget", "1000")]
+    [InlineData("Gateway:FinOps:SoftCapRatio", "0.8")]
+    [InlineData("Gateway:FinOps:PricePerThousandPromptTokens", "0.003")]
+    [InlineData("Gateway:FinOps:PricePerThousandCompletionTokens", "0.015")]
+    [InlineData("Gateway:FinOps:PricePerComputeSecond", "0.0001")]
+    [InlineData("Gateway:FinOps:TenantMonthlyBudgets:tenant-a", "500")]
+    [InlineData("Gateway:FinOps:ScopeMonthlyBudgets:Agent.Read", "100")]
+    public void FinOps_keys_fail_startup(string key, string value)
+    {
+        var ex = Should.Throw<InvalidOperationException>(() =>
+            UnknownGatewayKeyGuard.ThrowIfUnknownKeys(Config(key, value)));
+
+        ex.Message.ShouldContain("Gateway:FinOps was removed; usage is tracked by Gateway:UsageAccounting; quotas: Gateway:UsageAccounting:Quotas");
     }
 }

@@ -10,6 +10,7 @@ using Shouldly;
 using Xunit;
 
 /// <summary>SR-L-04: malformed role values can never resolve to a role; the evaluators agree.</summary>
+[Trait("Category", "Security")]
 public class GatewayRoleParsingTests
 {
     private readonly IGatewayRoleEvaluator _evaluator = new GatewayRoleEvaluator();

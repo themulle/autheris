@@ -145,7 +145,7 @@ public sealed partial class CallerAttributeArchitectureTests
         var allowlist = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["src/Autheris.Api/Endpoints/VirtualFilterEndpoints.cs"] = "effective-filters explanation for administrators: shows the constant",
-            ["src/Autheris.Application/Analytics/NoisyCacheKey.cs"] = "noisy cache key (#112 SEC-112-12/-26): hashes the predicate text with the bound caller-attribute values and the Generation; an unresolved attribute skips the cache",
+            ["src/Autheris.Application/Catalog/Discovery/DiscoveryAccessMapper.cs"] = "discovery catalog visibility projection: boolean presence check only (HasRowPredicate); evaluates no caller attributes or row filters",
             ["src/Autheris.Application/DataSources/Changes/GovernedChangeDetectionService.Cursors.cs"] = "known-key disclosure check only (presence of a filter); row evaluation goes through InMemoryRowFilterEvaluator.RowPassesDecision",
             ["src/Autheris.Application/DataSources/Relations/CrossSourceRelationResolver.cs"] = "cross-source child read: an applying Virtual Filter refuses the request (VF-02, presence check; no row evaluation of the text)",
             ["src/Autheris.Application/Mesh/Services/EnvoyExtAuthzService.cs"] = "an applying Virtual Filter denies (ext_authz cannot enforce row filters)",
@@ -179,7 +179,7 @@ public sealed partial class CallerAttributeArchitectureTests
 
     /// <summary>
     /// The client-asserted flag marks header labels for audit and usage reading only: no authorization, grant, filter, mask, rate-limit or Envoy
-    /// decision may read it. The only readers are its definition, the factory that sets it and the audit details writer.
+    /// decision may read it. The only readers are its definition, the factory that sets it, the audit sink scrubber, and the audit/usage writers.
     /// </summary>
     [Fact]
     public void Client_asserted_flag_is_read_by_audit_only()
@@ -188,7 +188,13 @@ public sealed partial class CallerAttributeArchitectureTests
         {
             "src/Autheris.Domain/Security/CallerContext.cs",
             "src/Autheris.Api/Security/SecurityContextFactory.cs",
-            "src/Autheris.Domain/Model/GovernanceModels.cs"
+            "src/Autheris.Domain/Model/GovernanceModels.cs",
+            "src/Autheris.Domain/Model/GovernanceV2Models.cs",
+            "src/Autheris.Application/Audit/AuditGroupCommitSink.cs",
+            "src/Autheris.Application/Usage/UsageAggregator.cs",
+            "src/Autheris.Application/Lineage/ConsumerFolding.cs",
+            "src/Autheris.Application/Lineage/LineageImpactAnalyzerService.cs",
+            "src/Autheris.Infrastructure/Persistence/ConsumerAggregationStore.cs"
         };
 
         var readers = Sources("src")

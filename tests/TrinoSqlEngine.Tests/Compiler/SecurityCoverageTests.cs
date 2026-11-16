@@ -12,6 +12,7 @@ using static TrinoSqlEngine.Ast.Nodes.BinaryOperator;
 namespace TrinoSqlEngine.Tests.Compiler;
 
 [Trait("Category", "SqlGate")]
+[Trait("Category", "Security")]
 public class SecurityCoverageTests
 {
     private static readonly SecurityPredicateId RootId = new("dbo.t", 0);
@@ -391,7 +392,7 @@ public class SecurityCoverageTests
     public void Verifier_DeepTree_ThrowsTypedLimit_NoCrash()
     {
         Expression deep = Int(1);
-        for (int i = 0; i < 200_000; i++) deep = new BinaryExpression(deep, Or, Col("a"));
+        for (int i = 0; i < 200_000; i++) deep = new BinaryExpression(Col("a"), Or, deep);
         var ex = Assert.Throws<SqlLimitExceededException>(() => Verify(Select(Secured("t", "t", Pred(RootId, SecurityScope.Root)), deep)));
         Assert.True(ex.Kind is SqlLimitKind.NestingDepth or SqlLimitKind.AstDepth);
     }
@@ -441,7 +442,7 @@ public class SecurityCoverageTests
         {
             if (type == typeof(AstSecurityVisitor)) continue; // creates the nodes; never re-enters them (tested below)
             // Producers that run before an expression is wrapped in a SecurityPredicateExpression need constructor arguments.
-            if (type.Name is "PolicySubqueryTenantRewriter" or "PolicyShaper" or "PolicyColumnTypeAnnotator" or "LiteralColumnTypeAnnotator" or "ClientListExpander" or "TimeZoneCallValidator" or "PostCompileTableTargetAssertionVisitor") continue;
+            if (type.Name is "PolicySubqueryTenantRewriter" or "PolicyShaper" or "PolicyColumnTypeAnnotator" or "LiteralColumnTypeAnnotator" or "IntegralOperandClassifier" or "ClientListExpander" or "TimeZoneCallValidator" or "PostCompileTableTargetAssertionVisitor") continue;
             var rewriter = (SqlAstRewriter)Activator.CreateInstance(type, BindingFlags.Default | BindingFlags.OptionalParamBinding, null, Array.Empty<object>(), null)!;
             var result = rewriter.Visit(stmt);
             Assert.True(ContainsStatementPredicate(result, injected), $"{type.Name} rewrote an injected security predicate");
@@ -457,6 +458,17 @@ public class SecurityCoverageTests
 
         var result = new TrinoSqlEngine.Ast.Security.LiteralColumnTypeAnnotator(new TrinoSqlEngine.Governance.InMemoryTableCatalog(Array.Empty<TrinoSqlEngine.Governance.TableCatalogEntry>(), "dbo")).Visit(stmt);
         Assert.True(ContainsStatementPredicate(result, injected), "the annotator rewrote an injected security predicate");
+    }
+
+    [Fact]
+    public void IntegralOperandClassifier_DoesNotDescendIntoSecurityPredicate()
+    {
+        var inner = new BinaryExpression(Int(5), BinaryOperator.Divide, Int(2));
+        var injected = Pred(RootId, SecurityScope.Root, inner);
+        var stmt = WithInjected(injected, new BinaryExpression(Col("a"), Equal, Int(1)));
+
+        var result = new TrinoSqlEngine.Ast.Visitors.IntegralOperandClassifier(new TrinoSqlEngine.Governance.InMemoryTableCatalog(Array.Empty<TrinoSqlEngine.Governance.TableCatalogEntry>(), "dbo")).Visit(stmt);
+        Assert.True(ContainsStatementPredicate(result, injected), "the classifier rewrote an injected security predicate");
     }
 
     [Fact]

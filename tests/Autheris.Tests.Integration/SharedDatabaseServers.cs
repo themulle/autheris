@@ -22,7 +22,7 @@ internal static class SharedDatabaseServers
 {
     private static readonly bool Reuse = !string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>TLS material of the shared PostgreSQL server (ssl=on); the CA file is what <c>SSL Mode=VerifyCA</c> clients trust.</summary>
+    /// <summary>TLS material of the shared PostgreSQL server (ssl=on); the CA file is what <c>SSL Mode=VerifyFull</c> clients trust.</summary>
     private static readonly Lazy<TestTlsMaterial> PostgreSqlTls = new(TestTlsMaterial.Create);
 
     private static readonly Lazy<Task<PostgreSqlContainer>> PostgreSql =

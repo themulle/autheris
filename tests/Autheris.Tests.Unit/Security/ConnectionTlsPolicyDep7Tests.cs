@@ -14,19 +14,20 @@ using Xunit;
 /// <summary>
 /// DEP-7 / INF-6: outside Development database connections must encrypt and verify the server certificate.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class ConnectionTlsPolicyDep7Tests
 {
     [Theory]
     [InlineData("PostgreSql", "Host=db;Database=x;SSL Mode=Require", false)]
     [InlineData("PostgreSql", "Host=db;Database=x;SSL Mode=Prefer", false)]
     [InlineData("PostgreSql", "Host=db;Database=x", false)]
-    [InlineData("PostgreSql", "Host=db;Database=x;SSL Mode=VerifyCA", true)]
+    [InlineData("PostgreSql", "Host=db;Database=x;SSL Mode=VerifyCA", false)]
     [InlineData("PostgreSql", "Host=db;Database=x;SSL Mode=VerifyFull", true)]
     [InlineData("SqlServer", "Server=db;Database=x;TrustServerCertificate=True", false)]
     [InlineData("SqlServer", "Server=db;Database=x;Encrypt=False", false)]
     [InlineData("SqlServer", "Server=db;Database=x;Encrypt=Mandatory", true)]
     [InlineData("SqlServer", "Server=db;Database=x;Encrypt=Strict", true)]
-    [InlineData("Sqlite", "Data Source=/app/data/x.db", true)]
+    [InlineData("Sqlite", "Data Source=/app/data/x.db", false)]
     public void Validate_RequiresCertificateVerification(string provider, string connectionString, bool expectedValid)
     {
         (ConnectionTlsPolicy.Validate(provider, connectionString) == null).ShouldBe(expectedValid);

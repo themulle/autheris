@@ -13,17 +13,15 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
-using static Autheris.Tests.Unit.VirtualFilters.Federation.KeySourceSqliteFixture;
+using static Autheris.Tests.Unit.VirtualFilters.Federation.KeySourceStubFixture;
 
 /// <summary>
 /// F-GOV-14 WI-5 (ST-19, SEC-10): the key set provider from the production wiring works next to the shared, size-limited
 /// <see cref="IMemoryCache"/>: it caches in its own size-limited cache with an entry size, so neither cache throws.
 /// </summary>
-public sealed class VirtualFilterKeySetProviderWiringTests : IDisposable
+public sealed class VirtualFilterKeySetProviderWiringTests
 {
-    private readonly KeySourceSqliteFixture _db = new();
-
-    public void Dispose() => _db.Dispose();
+    private readonly KeySourceStubFixture _db = new();
 
     [Fact]
     public async Task ProductionWiring_TwoCalls_SecondIsCacheHit_EntryHasSize()
@@ -43,6 +41,7 @@ public sealed class VirtualFilterKeySetProviderWiringTests : IDisposable
         services.AddLogging();
         services.AddHttpContextAccessor();
         services.AddGatewayInfrastructure(options);
+        services.AddSingleton(_db.CreateFactory());
         services.AddSingleton(_db.Catalog);
         await using var provider = services.BuildServiceProvider();
 

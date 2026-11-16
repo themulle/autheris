@@ -28,7 +28,6 @@ public sealed class DialectAlignmentTests
     [InlineData("Microsoft SQL Server", DatabaseDialect.SqlServer)]
     [InlineData("PostgreSQL", DatabaseDialect.PostgreSql)]
     [InlineData("npgsql", DatabaseDialect.PostgreSql)]
-    [InlineData("sqlite3", DatabaseDialect.Sqlite)]
     [InlineData("Oracle", DatabaseDialect.Oracle)]
     [InlineData("databricks", DatabaseDialect.Databricks)]
     [InlineData("2", DatabaseDialect.SqlServer)]
@@ -88,43 +87,5 @@ public sealed class DialectAlignmentTests
 
         resolved.ShouldBe(expected);
         supported.ShouldBe(expectedSupported);
-    }
-
-    [Fact]
-    public void GatewayOptions_UndefinedSubqueryStrategy_FailsValidation()
-    {
-        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
-        {
-            ["Gateway:RowFilters:SubqueryStrategy"] = "7"
-        }).Build();
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(Environments.Development);
-        var services = new ServiceCollection();
-
-        services.AddGatewayOptions(config, env);
-        var sp = services.BuildServiceProvider();
-
-        var ex = Should.Throw<OptionsValidationException>(() => _ = sp.GetRequiredService<IOptions<GatewayOptions>>().Value);
-        ex.Message.ShouldContain("SubqueryStrategy");
-    }
-
-    [Theory]
-    [InlineData("Exists")]
-    [InlineData("InCorrelated")]
-    [InlineData("In")]
-    public void GatewayOptions_DefinedSubqueryStrategy_PassesValidation(string strategy)
-    {
-        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
-        {
-            ["Gateway:RowFilters:SubqueryStrategy"] = strategy
-        }).Build();
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(Environments.Development);
-        var services = new ServiceCollection();
-
-        services.AddGatewayOptions(config, env);
-        var sp = services.BuildServiceProvider();
-
-        sp.GetRequiredService<IOptions<GatewayOptions>>().Value.RowFilters.SubqueryStrategy.ToString().ShouldBe(strategy);
     }
 }

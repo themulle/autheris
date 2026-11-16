@@ -1,0 +1,29 @@
+{
+  "ops": [
+    {
+      "op": "addTable",
+      "table": "consent_classification_access",
+      "newTable": {
+        "name": "consent_classification_access",
+        "columns": [
+          { "name": "tenant_id", "type": "CHARACTER VARYING(128)", "family": "string", "nullable": false },
+          { "name": "consent_id", "type": "TEXT", "family": "string", "nullable": false },
+          { "name": "code", "type": "CHARACTER VARYING(64)", "family": "string", "nullable": false },
+          { "name": "access_level", "type": "SMALLINT", "family": "integer", "nullable": false },
+          { "name": "valid_until", "type": "TIMESTAMP WITH TIME ZONE", "family": "datetime", "nullable": true },
+          { "name": "approved_by_sid", "type": "CHARACTER VARYING(256)", "family": "string", "nullable": true },
+          { "name": "approved_at", "type": "TIMESTAMP WITH TIME ZONE", "family": "datetime", "nullable": false }
+        ],
+        "primaryKey": ["tenant_id", "consent_id", "code"],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addIndex",
+      "table": "consent_classification_access",
+      "name": "ix_consent_classification_access_consent",
+      "unique": false,
+      "columns": ["consent_id"]
+    }
+  ]
+}

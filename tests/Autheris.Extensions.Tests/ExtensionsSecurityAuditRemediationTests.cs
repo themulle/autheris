@@ -21,6 +21,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class ExtensionsSecurityAuditRemediationTests
 {
     [Fact]
@@ -28,21 +29,27 @@ public sealed class ExtensionsSecurityAuditRemediationTests
     {
         // CRIT-05: Unauthenticated access to OData metadata or service doc must return empty/restricted tables
         var metaMock = Substitute.For<ITableMetadataRepository>();
+        var metaTables = new List<TableMetadata>
+        {
+            new()
+            {
+                Identifier = new TableIdentifier("corp", "sales", "invoices"),
+                Table = new Table { SchemaName = "sales", TableName = "invoices" },
+                Columns = [new TableColumn { ColumnName = "id", DataType = "integer" }]
+            },
+            new()
+            {
+                Identifier = new TableIdentifier("secret", "hr", "salaries"),
+                Table = new Table { SchemaName = "hr", TableName = "salaries" },
+                Columns = [new TableColumn { ColumnName = "id", DataType = "integer" }]
+            }
+        };
         metaMock.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([
-                new TableMetadata
-                {
-                    Identifier = new TableIdentifier("corp", "sales", "invoices"),
-                    Table = new Table { SchemaName = "sales", TableName = "invoices" },
-                    Columns = [new TableColumn { ColumnName = "id", DataType = "integer" }]
-                },
-                new TableMetadata
-                {
-                    Identifier = new TableIdentifier("secret", "hr", "salaries"),
-                    Table = new Table { SchemaName = "hr", TableName = "salaries" },
-                    Columns = [new TableColumn { ColumnName = "id", DataType = "integer" }]
-                }
-            ]));
+            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(metaTables));
+        metaMock.QueryTablesAsync(
+                Arg.Any<Autheris.Application.Catalog.CatalogTableQuery>(),
+                Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new Autheris.Application.Catalog.CatalogTablePage(metaTables, null)));
 
         var execMock = Substitute.For<IGatewayExecutionService>();
         // SR-M-16: a missing decision is a deny, so the access check must answer explicitly.
@@ -65,22 +72,17 @@ public sealed class ExtensionsSecurityAuditRemediationTests
     }
 
     [Fact]
-    public async Task Dbt_ValidateSafeFilePath_RejectsPathTraversalAndRestrictedPaths()
+    public async Task Dbt_ValidateContractsStreamAsync_RejectsNullOrMalformedManifest()
     {
-        // CRIT-06: dbt file validation must reject null bytes, invalid extensions, and restricted paths
         var metaMock = Substitute.For<ITableMetadataRepository>();
         var validator = new DbtContractValidator(metaMock, NullLogger<DbtContractValidator>.Instance);
 
-        // Path with null byte
-        await Should.ThrowAsync<SecurityException>(() => validator.ValidateContractsFileAsync("manifest.json\0.txt"));
+        await Should.ThrowAsync<ArgumentNullException>(() => validator.ValidateContractsStreamAsync(null!));
 
-        // Non-json extension
-        await Should.ThrowAsync<SecurityException>(() => validator.ValidateContractsFileAsync("/tmp/manifest.yaml"));
-
-        // Restricted system paths
-        await Should.ThrowAsync<SecurityException>(() => validator.ValidateContractsFileAsync("/etc/shadow.json"));
-        await Should.ThrowAsync<SecurityException>(() => validator.ValidateContractsFileAsync("/var/run/secrets/token.json"));
-        await Should.ThrowAsync<SecurityException>(() => validator.ValidateContractsFileAsync("/proc/self/environ.json"));
+        using var badStream = new System.IO.MemoryStream(Encoding.UTF8.GetBytes("{not-json"));
+        var result = await validator.ValidateContractsStreamAsync(badStream);
+        result.IsCompatible.ShouldBeFalse();
+        result.Warnings.ShouldNotBeEmpty();
     }
 
     [Fact]

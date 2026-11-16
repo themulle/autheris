@@ -30,6 +30,7 @@ public sealed class CustomQueryPollerServiceTests
     private readonly IDistributedClusterStateProvider _clusterState = Substitute.For<IDistributedClusterStateProvider>();
     private readonly ICdcStreamCrypto _crypto;
     private readonly ICdcPayloadCodec _codec;
+    private readonly IOptionsMonitor<GatewayOptions> _gatewayOpt;
     private readonly CdcChangeEventBuilder _builder;
 
     public CustomQueryPollerServiceTests()
@@ -48,10 +49,16 @@ public sealed class CustomQueryPollerServiceTests
 
         _codec = Autheris.Application.Streaming.Crypto.CdcPayloadCodec.Instance;
 
-        var gatewayOpt = Substitute.For<IOptionsMonitor<GatewayOptions>>();
-        gatewayOpt.CurrentValue.Returns(new GatewayOptions());
+        var gateway = new GatewayOptions();
+        gateway.DataSources.Connections["crm_db"] = new DataSourceConnectionOptions
+        {
+            Provider = "PostgreSql",
+            ConnectionString = "Host=localhost"
+        };
+        _gatewayOpt = Substitute.For<IOptionsMonitor<GatewayOptions>>();
+        _gatewayOpt.CurrentValue.Returns(gateway);
 
-        _builder = new CdcChangeEventBuilder(_streamStore, _crypto, _codec, gatewayOpt);
+        _builder = new CdcChangeEventBuilder(_streamStore, _crypto, _codec, _gatewayOpt);
     }
 
     private static CustomQueryPollerStreamOptions SamplePoller() => new()
@@ -115,7 +122,7 @@ public sealed class CustomQueryPollerServiceTests
         var factory = Substitute.For<IDataSourceConnectionFactory>();
         factory.CreateConnectionAsync(poller.DataSource, Arg.Any<CancellationToken>()).Returns(conn);
 
-        var service = new CustomQueryPollerService(monitor, _streamStore, _builder, factory, _signal, _clusterState, NullLogger<CustomQueryPollerService>.Instance, _crypto, _codec);
+        var service = new CustomQueryPollerService(monitor, _streamStore, _builder, factory, _signal, _clusterState, NullLogger<CustomQueryPollerService>.Instance, _crypto, _codec, gatewayOptions: _gatewayOpt);
 
         var count = await service.PollStreamBatchAsync(poller, fencingToken: 1);
 
@@ -143,7 +150,7 @@ public sealed class CustomQueryPollerServiceTests
         var factory = Substitute.For<IDataSourceConnectionFactory>();
         factory.CreateConnectionAsync(poller.DataSource, Arg.Any<CancellationToken>()).Returns(conn);
 
-        var service = new CustomQueryPollerService(monitor, _streamStore, _builder, factory, _signal, _clusterState, NullLogger<CustomQueryPollerService>.Instance, _crypto, _codec);
+        var service = new CustomQueryPollerService(monitor, _streamStore, _builder, factory, _signal, _clusterState, NullLogger<CustomQueryPollerService>.Instance, _crypto, _codec, gatewayOptions: _gatewayOpt);
 
         var count = await service.PollStreamBatchAsync(poller, fencingToken: 1);
 
@@ -167,7 +174,7 @@ public sealed class CustomQueryPollerServiceTests
         var factory = Substitute.For<IDataSourceConnectionFactory>();
         factory.CreateConnectionAsync(poller.DataSource, Arg.Any<CancellationToken>()).Returns(conn1);
 
-        var service = new CustomQueryPollerService(monitor, _streamStore, _builder, factory, _signal, _clusterState, NullLogger<CustomQueryPollerService>.Instance, _crypto, _codec);
+        var service = new CustomQueryPollerService(monitor, _streamStore, _builder, factory, _signal, _clusterState, NullLogger<CustomQueryPollerService>.Instance, _crypto, _codec, gatewayOptions: _gatewayOpt);
         var count1 = await service.PollStreamBatchAsync(poller, fencingToken: 1);
         count1.ShouldBe(1);
 
@@ -205,7 +212,7 @@ public sealed class CustomQueryPollerServiceTests
         var factory = Substitute.For<IDataSourceConnectionFactory>();
         factory.CreateConnectionAsync(poller.DataSource, Arg.Any<CancellationToken>()).Returns(new FakeDbConnection(rows1));
 
-        var service = new CustomQueryPollerService(monitor, _streamStore, _builder, factory, _signal, _clusterState, NullLogger<CustomQueryPollerService>.Instance, _crypto, _codec);
+        var service = new CustomQueryPollerService(monitor, _streamStore, _builder, factory, _signal, _clusterState, NullLogger<CustomQueryPollerService>.Instance, _crypto, _codec, gatewayOptions: _gatewayOpt);
         await service.PollStreamBatchAsync(poller, fencingToken: 5);
 
         // Poll 2 at stale token 3 with advanced updated_at

@@ -38,18 +38,19 @@ public sealed class RowFilterKeySetStageTests : IDisposable
         return h;
     }
 
-    private static ConsentRowFilter Correlated(
+    private static TestCorrelatedRule Correlated(
         string fk = "client_id", Guid? id = null, RowFilterEvaluationStrategy? strategy = null, int? duration = null, int? maxKeys = null,
         int group = 0, string? temporal = null, string? validFrom = null) => new()
     {
         Id = id ?? Guid.NewGuid(),
+        IsCorrelated = true,
         FilterGroup = group,
-        FilterType = RowFilterType.SubqueryCorrelated,
         DependentTable = new TableIdentifier("erp", "main", "customers"),
         DependentTableAlias = "c",
         ForeignKeyColumn = fk,
         PrimaryKeyColumn = "id",
-        SubqueryFilterPredicateJson = "{\"c.country\": \"CH\"}",
+        WhereColumn = "c.country",
+        WhereValue = "CH",
         KeySetStrategy = strategy,
         KeySetDurationSeconds = duration,
         KeySetMaxKeys = maxKeys,
@@ -57,14 +58,14 @@ public sealed class RowFilterKeySetStageTests : IDisposable
         DependentValidFromColumn = validFrom
     };
 
-    private static ConsentRowFilter Simple() => new() { FilterGroup = 0, ColumnName = "region", Operator = "EQ", ValueJson = "\"EU\"" };
+    private static TestCorrelatedRule Simple() => TestCorrelatedRule.Simple("region", "\"EU\"", 0);
 
-    private static Consent Allow(params ConsentRowFilter[] filters) => new() { TenantId = Autheris.Tests.Common.TestTenants.Default, Effect = ConsentEffect.Allow, RowFilters = filters };
+    private static TestConsent Allow(params TestCorrelatedRule[] filters) => new(ConsentEffect.Allow, filters);
 
-    private static Consent Deny(params ConsentRowFilter[] filters) => new() { TenantId = Autheris.Tests.Common.TestTenants.Default, Effect = ConsentEffect.Deny, RowFilters = filters };
+    private static TestConsent Deny(params TestCorrelatedRule[] filters) => new(ConsentEffect.Deny, filters);
 
-    private static PolicyPredicate Predicate(TableIdentity table, params ConsentRowFilter[] filters) =>
-        new TypedRowFilterBuilder().BuildCombined([Allow(filters)], [], table)!;
+    private static PolicyPredicate Predicate(TableIdentity table, params TestCorrelatedRule[] filters) =>
+        new TestCorrelatedPredicateBuilder().BuildCombined([Allow(filters)], [], table)!;
 
     private static Dictionary<TableIdentity, PolicyPredicate?> Preds(params (TableIdentity Table, PolicyPredicate Predicate)[] items) =>
         items.ToDictionary(i => i.Table, i => (PolicyPredicate?)i.Predicate);
@@ -298,7 +299,7 @@ public sealed class RowFilterKeySetStageTests : IDisposable
     public async Task SharedInstance_ReportsDeny_Shared_NotDeny_Negated_SEC_RF107_06()
     {
         var h = Harness();
-        var built = new TypedRowFilterBuilder().Build([Correlated()], StageHarness.Orders);
+        var built = new TestCorrelatedPredicateBuilder().Build([Correlated()], StageHarness.Orders);
         var exists = (ExistsExpression)built.Expression;
         var twice = PolicyPredicate.Create(new BinaryExpression(exists, BinaryOperator.Or, exists), built.Parameters);
         var preds = Preds((StageHarness.Orders, twice));
@@ -442,7 +443,7 @@ public sealed class RowFilterKeySetStageTests : IDisposable
         int epochCalls = h.Epochs.Calls, compileCalls = h.Compiler.Calls;
 
         // The consent is revoked: the next statement's decision carries a different predicate, which has no key-set site at all.
-        var revoked = Preds((StageHarness.Orders, new TypedRowFilterBuilder().BuildCombined([Allow(Simple())], [], StageHarness.Orders)!));
+        var revoked = Preds((StageHarness.Orders, new TestCorrelatedPredicateBuilder().BuildCombined([Allow(Simple())], [], StageHarness.Orders)!));
         var (result, report) = await Apply(h, StageHarness.Context(), revoked);
 
         result.ShouldBeSameAs(revoked);
@@ -724,7 +725,7 @@ public sealed class RowFilterKeySetStageTests : IDisposable
         var h = Harness(strategy: RowFilterEvaluationStrategy.Exists);
         var denyRule = Correlated(strategy: RowFilterEvaluationStrategy.KeySetCache, duration: 7654321);
         var temporalRule = Correlated(strategy: RowFilterEvaluationStrategy.KeySetCache, duration: 8765432, temporal: "created_at", validFrom: "valid_from");
-        var negated = new TypedRowFilterBuilder().BuildCombined([Allow(Simple())], [Deny(denyRule)], StageHarness.Orders)!;
+        var negated = new TestCorrelatedPredicateBuilder().BuildCombined([Allow(Simple())], [Deny(denyRule)], StageHarness.Orders)!;
         var temporal = Predicate(StageHarness.Invoices, temporalRule);
         var preds = Preds((StageHarness.Orders, negated), (StageHarness.Invoices, temporal));
         var context = StageHarness.Context([StageHarness.Orders, StageHarness.Invoices]);

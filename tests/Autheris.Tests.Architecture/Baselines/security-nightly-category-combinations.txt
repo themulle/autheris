@@ -1,0 +1,4 @@
+# SEC-OI-522-1 / Q-SEC8-1: Shrink-only baseline of integration test classes that carry both Category=Security
+# and a nightly/path-triggered category (Spark, Parity, Oracle, Stress).
+# Do not add new entries; either drop the extra category or add an unconditional PR lane.
+Autheris.Tests.Integration.DatabricksTransportParityTests|Spark

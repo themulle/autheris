@@ -43,7 +43,36 @@ public partial class GovernanceRepository : IDataOwnerAssignmentRepository
         var result = await RunDataOwnerAssignmentCoreAsync(conn, tx, tableLookupSql, request, ct).ConfigureAwait(false);
         if (result.Success && !request.DryRun)
         {
+            try
+            {
+                await SyncOwnerGrantsInTransactionAsync(conn, tx, request, result.Changes, ct).ConfigureAwait(false);
+            }
+            catch (Autheris.Application.Governance.Grants.OwnerGrantException ex)
+                when (string.Equals(ex.Code, "SELF_GRANT_FORBIDDEN", StringComparison.Ordinal))
+            {
+                await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
+                return DataOwnerAssignmentResult.Failure("dbt_owner_self_assignment_denied", ex.Message);
+            }
+
+            Autheris.Application.Catalog.CatalogVersion? newVersion = null;
+            if (result.Changes.Count > 0)
+            {
+                newVersion = await BumpCatalogVersionInternalAsync(conn, tx, 0, 1, ct).ConfigureAwait(false);
+            }
+
             await CommitTransactionAsync(tx, ct).ConfigureAwait(false);
+            foreach (var table in result.Changes
+                .Where(static c => c.Kind == DataOwnerChangeKind.OwnerAssigned || c.Kind == DataOwnerChangeKind.OwnerRemoved)
+                .Select(static c => c.Table)
+                .Distinct())
+            {
+                await InvalidateTableEpochAsync(table, ct).ConfigureAwait(false);
+            }
+
+            if (newVersion is { } bumpedVersion)
+            {
+                await PublishCatalogChangedEventAsync(bumpedVersion, ct).ConfigureAwait(false);
+            }
         }
         else
         {

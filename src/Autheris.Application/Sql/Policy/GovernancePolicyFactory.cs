@@ -44,6 +44,11 @@ public sealed record GovernedPolicyInput(
     /// assembly is byte-identical to the one without the feature (AC-8).
     /// </summary>
     public RowFilterKeySetStatement? KeySetStatement { get; init; }
+
+    /// <summary>
+    /// Governed DML write permit produced by the access decision point when compiling a write statement.
+    /// </summary>
+    public DmlWritePermit? WritePermit { get; init; }
 }
 
 /// <summary>
@@ -95,9 +100,7 @@ public sealed class GovernancePolicyFactory(
         // compiler resolves those names against the same catalog, so the provider is asked for them too: it verifies them like any
         // other table (an unverifiable table is simply absent, and the policy that needs it denies its own table below).
         var policyTables = input.Decisions.Values
-            .Select(static d => d.RowPolicy)
-            .OfType<PolicyPredicateRowPolicy>()
-            .SelectMany(static p => PolicySubqueryTables.Names(p.Predicate))
+            .SelectMany(static d => CollectDecisionSubqueryNames(d))
             .Distinct()
             .ToList();
         var requested = new List<TableIdentifier>(tables);
@@ -127,6 +130,7 @@ public sealed class GovernancePolicyFactory(
 
         var rowPredicates = new Dictionary<TableIdentity, PolicyPredicate?>();
         var masks = new Dictionary<TableIdentity, ColumnMaskPolicy>();
+        var perCellPolicies = new Dictionary<TableIdentity, PerCellTablePolicy>();
         var consentFiltered = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var masked = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         TargetSqlDialect? dialect = null;
@@ -134,7 +138,7 @@ public sealed class GovernancePolicyFactory(
         foreach (var (identity, decision) in input.Decisions)
         {
             var metadata = input.Metadata is { } all && all.TryGetValue(identity, out var m) ? m : null;
-            if (!TryAdmit(catalog, unusableDependents, identity, decision, metadata, input.TablesWithoutRls.Contains(identity), out var rowPolicy, out var tableMasks))
+            if (!TryAdmit(catalog, unusableDependents, identity, decision, metadata, input.TablesWithoutRls.Contains(identity), out var rowPolicy, out var tableMasks, out var perCellPolicy))
             {
                 continue;
             }
@@ -147,11 +151,23 @@ public sealed class GovernancePolicyFactory(
                 }
 
                 dialect = rowPolicy.Dialect;
-                consentFiltered.Add(identity.ToString());
+                if (input.WritePermit is null || PolicySubqueryTables.Names(rowPolicy.Predicate).Any())
+                {
+                    consentFiltered.Add(identity.ToString());
+                }
             }
 
             // No row policy and not declared without one: deny-all for this table (never "no policy").
-            rowPredicates[identity] = rowPolicy?.Predicate ?? (input.TablesWithoutRls.Contains(identity) ? null : PolicyPredicate.DenyAll);
+            rowPredicates[identity] = rowPolicy?.Predicate ?? (input.TablesWithoutRls.Contains(identity) || perCellPolicy?.AnySignatureUnfiltered == true ? null : PolicyPredicate.DenyAll);
+            if (perCellPolicy is not null)
+            {
+                perCellPolicies[identity] = perCellPolicy;
+                if (perCellPolicy.Signatures.Any(static s => PolicySubqueryTables.Names(s.Scope).Any()))
+                {
+                    consentFiltered.Add(identity.ToString());
+                }
+            }
+
             if (tableMasks is not null)
             {
                 masks[identity] = tableMasks;
@@ -165,9 +181,9 @@ public sealed class GovernancePolicyFactory(
         var dependents = new HashSet<TableIdentity>();
         foreach (var decision in input.Decisions)
         {
-            if (admitted.Contains(decision.Key) && decision.Value.RowPolicy is PolicyPredicateRowPolicy policy)
+            if (admitted.Contains(decision.Key))
             {
-                foreach (var name in PolicySubqueryTables.Names(policy.Predicate))
+                foreach (var name in CollectDecisionSubqueryNames(decision.Value))
                 {
                     if (catalog.Resolve(name) is { } entry)
                     {
@@ -203,11 +219,13 @@ public sealed class GovernancePolicyFactory(
         {
             RowFilters = new DecisionRowPolicyProvider(finalPredicates, dialect),
             Masks = new DecisionColumnMaskProvider(masks),
+            PerCellColumns = new DecisionPerCellColumnProvider(perCellPolicies),
             Catalog = new AdmittedTableCatalog(catalog, admitted, dependents),
             Tenant = new TenantBinding(RowPolicyFactory.TenantParameterName, input.Tenant.Value, SqlParameterType.String),
             TablesWithConsentRowFilter = consentFiltered.ToFrozenSet(StringComparer.OrdinalIgnoreCase),
             TablesWithMaskedColumns = masked.ToFrozenSet(StringComparer.OrdinalIgnoreCase),
-            SubqueryStrategy = input.SubqueryStrategy
+            SubqueryStrategy = input.SubqueryStrategy,
+            Write = input.WritePermit
         };
 
         return new GovernedPolicyAssembly(policyResult, keySets);
@@ -423,10 +441,12 @@ public sealed class GovernancePolicyFactory(
         TableMetadata? metadata,
         bool declaredWithoutRls,
         out PolicyPredicateRowPolicy? rowPolicy,
-        out ColumnMaskPolicy? masks)
+        out ColumnMaskPolicy? masks,
+        out PerCellTablePolicy? perCell)
     {
         rowPolicy = null;
         masks = null;
+        perCell = null;
         if (!decision.IsAllowed)
         {
             return false;
@@ -466,7 +486,60 @@ public sealed class GovernancePolicyFactory(
             rowPolicy = predicateRowPolicy;
         }
 
+        if (typed.PerCellColumns is Autheris.Application.Policy.RowScopes.PerCellColumnPolicy perCellPolicy)
+        {
+            foreach (var name in CollectPerCellSubqueryNames(perCellPolicy.TypedPolicy))
+            {
+                if (catalog.Resolve(name) is not { } dependent || unusableDependents.Contains(dependent.Identity))
+                {
+                    rowPolicy = null;
+                    perCell = null;
+                    return false;
+                }
+            }
+
+            perCell = perCellPolicy.TypedPolicy;
+        }
+
         return TryBuildMasks(entry, typed, metadata, out masks);
+    }
+
+    private static IEnumerable<TrinoSqlEngine.Ast.Nodes.SqlQualifiedName> CollectDecisionSubqueryNames(TableAccessDecision decision)
+    {
+        if (decision.RowPolicy is PolicyPredicateRowPolicy policy)
+        {
+            foreach (var name in PolicySubqueryTables.Names(policy.Predicate))
+            {
+                yield return name;
+            }
+        }
+
+        if (decision.PerCellColumns is Autheris.Application.Policy.RowScopes.PerCellColumnPolicy perCell)
+        {
+            foreach (var name in CollectPerCellSubqueryNames(perCell.TypedPolicy))
+            {
+                yield return name;
+            }
+        }
+    }
+
+    private static IEnumerable<TrinoSqlEngine.Ast.Nodes.SqlQualifiedName> CollectPerCellSubqueryNames(PerCellTablePolicy policy)
+    {
+        foreach (var sig in policy.Signatures)
+        {
+            foreach (var name in PolicySubqueryTables.Names(sig.Scope))
+            {
+                yield return name;
+            }
+        }
+
+        if (policy.NarrowingPredicate is not null)
+        {
+            foreach (var name in PolicySubqueryTables.Names(policy.NarrowingPredicate))
+            {
+                yield return name;
+            }
+        }
     }
 
     /// <summary>
@@ -614,4 +687,10 @@ internal sealed class DecisionRowPolicyProvider(IReadOnlyDictionary<TableIdentit
 
     public PolicyPredicate GetPredicate(TableIdentity table) =>
         predicates.TryGetValue(table, out var predicate) && predicate is not null ? predicate : PolicyPredicate.DenyAll;
+}
+
+internal sealed class DecisionPerCellColumnProvider(IReadOnlyDictionary<TableIdentity, PerCellTablePolicy> policies) : IPerCellColumnProvider
+{
+    public PerCellTablePolicy? GetPolicy(TableIdentity table) =>
+        policies.TryGetValue(table, out var policy) ? policy : null;
 }

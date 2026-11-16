@@ -38,7 +38,7 @@ public sealed class McpUnderlyingTableFourEyesTests
 
     private static ITableMetadataRepository MetadataRepo()
     {
-        var repo = Substitute.For<ITableMetadataRepository>();
+        var repo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(ci =>
             {

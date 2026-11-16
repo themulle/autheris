@@ -1,13 +1,16 @@
 namespace Autheris.Tests.Integration;
 
 using System;
+using System.Collections.Generic;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Hosting;
 using Autheris.Tests.Integration.Governance;
 
 /// <summary>
@@ -15,21 +18,29 @@ using Autheris.Tests.Integration.Governance;
 /// callers on every path variant of the admin API (case, trailing slash, encoded slash, double slash). There is no fallback
 /// route that could answer 2xx for these paths.
 /// </summary>
-public sealed class AdminPathVariantRejectionTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class AdminPathVariantRejectionTests : IClassFixture<AdminPathVariantRejectionTests.HostFixture>
 {
     private readonly WebApplicationFactory<Program> _factory;
 
-    public AdminPathVariantRejectionTests(WebApplicationFactory<Program> factory)
+    public AdminPathVariantRejectionTests(HostFixture factory)
     {
-        _factory = factory.WithWebHostBuilder(builder =>
+        _factory = factory;
+    }
+
+    public sealed class HostFixture : IntegrationHost<HostFixture>
+    {
+        protected override void ConfigureHostConfiguration(IConfigurationBuilder config)
         {
-            builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            // The routes are mapped only while app-scoped trusted documents are enabled; without this every path would 404 vacuously.
-            builder.UseSetting("Gateway:GraphQL:AppScopedTrustedDocuments:Enabled", "true");
-            builder.UseSetting("Gateway:GraphQL:PersistedQueriesOnly", "true");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("AdminPathVariantRejectionTests"));
-        });
+            config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Gateway:Authentication:EnableTestAuthHandler"] = "true",
+                // The routes are mapped only while app-scoped trusted documents are enabled; without this every path would 404 vacuously.
+                ["Gateway:GraphQL:AppScopedTrustedDocuments:Enabled"] = "true",
+                ["Gateway:GraphQL:PersistedQueriesOnly"] = "true",
+                ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
+                ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.Create("AdminPathVariantRejectionTests"),
+            });
+        }
     }
 
     private HttpClient CreateClient(string? roles, string? scope = null)

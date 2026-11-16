@@ -220,10 +220,17 @@ public sealed class WebSqlDmlIdempotencyTests
     public async Task Replayed_key_is_refused_with_conflict_before_execution()
     {
         var store = new InMemoryIdempotencyStore();
-        await Run(Ctx(Insert, store, "k-1"));
-        var (status, sql) = await Run(Ctx(Insert, store, "k-1"));
-        status.ShouldBe(409);
-        ExecutorCalls(sql).ShouldBe(0);
+        var (firstStatus, firstSql) = await Run(Ctx(Insert, store, "k-1"));
+        firstStatus.ShouldBe(200);
+        ExecutorCalls(firstSql).ShouldBe(1);
+
+        var (replayStatus, replaySql) = await Run(Ctx(Insert, store, "k-1"));
+        replayStatus.ShouldBe(200);
+        ExecutorCalls(replaySql).ShouldBe(0);
+
+        var (conflictStatus, conflictSql) = await Run(Ctx("UPDATE t SET a = 2 WHERE id = 1", store, "k-1"));
+        conflictStatus.ShouldBe(409);
+        ExecutorCalls(conflictSql).ShouldBe(0);
     }
 
     [Fact]

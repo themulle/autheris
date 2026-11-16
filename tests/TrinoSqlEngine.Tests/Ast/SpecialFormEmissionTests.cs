@@ -25,8 +25,6 @@ public sealed class SpecialFormEmissionTests
     [InlineData(TargetSqlDialect.SqlServer, "current_date", "CAST(SYSDATETIME() AS date)")]
     [InlineData(TargetSqlDialect.SqlServer, "current_timestamp", "SYSDATETIMEOFFSET()")]
     [InlineData(TargetSqlDialect.SqlServer, "localtimestamp", "SYSDATETIME()")]
-    [InlineData(TargetSqlDialect.Sqlite, "current_date", "CURRENT_DATE")]
-    [InlineData(TargetSqlDialect.Sqlite, "localtimestamp", "datetime('now', 'localtime')")]
     [InlineData(TargetSqlDialect.Oracle, "current_date", "TRUNC(CURRENT_DATE)")]
     public void CurrentDateTime(TargetSqlDialect dialect, string function, string expected)
     {
@@ -56,7 +54,6 @@ public sealed class SpecialFormEmissionTests
     [Theory]
     [InlineData(TargetSqlDialect.PostgreSql, "SUBSTRING(\"name\", 2, 3)", "SUBSTRING(\"name\", 2)")]
     [InlineData(TargetSqlDialect.SqlServer, "SUBSTRING([name], 2, 3)", "SUBSTRING([name], 2, 2147483647)")]
-    [InlineData(TargetSqlDialect.Sqlite, "SUBSTR(\"name\", 2, 3)", "SUBSTR(\"name\", 2)")]
     [InlineData(TargetSqlDialect.Oracle, "SUBSTR(\"NAME\", 2, 3)", "SUBSTR(\"NAME\", 2)")]
     public void Substring_FromFor(TargetSqlDialect dialect, string withLength, string withoutLength)
     {
@@ -72,9 +69,6 @@ public sealed class SpecialFormEmissionTests
     [InlineData(TargetSqlDialect.SqlServer, "trim(LEADING FROM name)", "LTRIM([name])")]
     [InlineData(TargetSqlDialect.SqlServer, "trim(TRAILING FROM name)", "RTRIM([name])")]
     [InlineData(TargetSqlDialect.SqlServer, "trim(BOTH 'x' FROM name)", "TRIM(N'x' FROM [name])")]
-    [InlineData(TargetSqlDialect.Sqlite, "trim(name)", "TRIM(\"name\")")]
-    [InlineData(TargetSqlDialect.Sqlite, "trim(LEADING 'x' FROM name)", "LTRIM(\"name\", 'x')")]
-    [InlineData(TargetSqlDialect.Sqlite, "trim(name, 'x')", "TRIM(\"name\", 'x')")]
     public void Trim(TargetSqlDialect dialect, string call, string expected)
     {
         Assert.Contains(expected, Generate($"SELECT {call} FROM orders", dialect));
@@ -90,7 +84,6 @@ public sealed class SpecialFormEmissionTests
     [Theory]
     [InlineData(TargetSqlDialect.PostgreSql, "POSITION('a' IN \"name\")")]
     [InlineData(TargetSqlDialect.SqlServer, "CHARINDEX(N'a', [name])")]
-    [InlineData(TargetSqlDialect.Sqlite, "INSTR(\"name\", 'a')")]
     [InlineData(TargetSqlDialect.Oracle, "INSTR(\"NAME\", 'a')")]
     public void Position(TargetSqlDialect dialect, string expected)
     {

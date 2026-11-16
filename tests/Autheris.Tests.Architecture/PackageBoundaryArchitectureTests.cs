@@ -1,6 +1,5 @@
 using System;
 using System.Linq;
-using Autheris.Api.Mcp;
 using Autheris.Extensions;
 using Autheris.Infrastructure.Docs;
 using NetArchTest.Rules;
@@ -39,12 +38,6 @@ public sealed class PackageBoundaryArchitectureTests
     }
 
     [Fact]
-    public void McpStdioRunner_ShouldResideInApiAssembly()
-    {
-        typeof(McpStdioRunner).Assembly.ShouldBe(typeof(Autheris.Api.Extensions.GatewayServiceCollectionExtensions).Assembly);
-    }
-
-    [Fact]
     public void FileSystemUniversalDocStore_ShouldResideInInfrastructureAssembly()
     {
         typeof(FileSystemUniversalDocStore).Assembly.ShouldBe(typeof(Autheris.Infrastructure.Persistence.GovernanceRepository).Assembly);
@@ -67,6 +60,27 @@ public sealed class PackageBoundaryArchitectureTests
         }
 
         violations.ShouldBeEmpty("Microsoft.Garnet package is prohibited across all projects.");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void No_casbin_package()
+    {
+        // Casbin was removed (ADR-020): no project may reference it again, directly or through a lock file.
+        var files = RepositoryScan.EnumerateFiles("", "*.csproj")
+            .Concat(RepositoryScan.EnumerateFiles("", "packages.lock.json"));
+        var violations = new System.Collections.Generic.List<string>();
+
+        foreach (var relativePath in files)
+        {
+            var content = System.IO.File.ReadAllText(System.IO.Path.Combine(RepositoryScan.RepoRoot, relativePath));
+            if (content.Contains("\"Casbin", StringComparison.OrdinalIgnoreCase))
+            {
+                violations.Add($"{relativePath}: references a Casbin package");
+            }
+        }
+
+        violations.ShouldBeEmpty("Casbin packages are prohibited across all projects.");
     }
 
     [Fact]
@@ -152,5 +166,28 @@ public sealed class PackageBoundaryArchitectureTests
 
         accessDecisionPointCallers.ShouldNotBeEmpty(
             "Positive control: IcebergRestCatalogFederationService in Autheris.Modules.Lakehouse must invoke IAccessDecisionPoint.DecideAsync.");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void No_Microsoft_Data_Sqlite_reference()
+    {
+        var files = RepositoryScan.EnumerateFiles("", "*.csproj")
+            .Concat(RepositoryScan.EnumerateFiles("", "packages.lock.json"))
+            .Where(path => path.StartsWith("src/", StringComparison.Ordinal) ||
+                           path.StartsWith("modules/", StringComparison.Ordinal));
+        var violations = new System.Collections.Generic.List<string>();
+
+        foreach (var relativePath in files)
+        {
+            var content = System.IO.File.ReadAllText(System.IO.Path.Combine(RepositoryScan.RepoRoot, relativePath));
+            if (content.Contains("Microsoft.Data.Sqlite", StringComparison.OrdinalIgnoreCase) ||
+                content.Contains("SQLitePCLRaw", StringComparison.OrdinalIgnoreCase))
+            {
+                violations.Add($"{relativePath}: references Microsoft.Data.Sqlite");
+            }
+        }
+
+        violations.ShouldBeEmpty("Production projects under src/ and modules/ must not reference Microsoft.Data.Sqlite.");
     }
 }

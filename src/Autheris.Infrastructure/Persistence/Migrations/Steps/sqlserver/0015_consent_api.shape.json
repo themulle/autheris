@@ -1,0 +1,197 @@
+{
+  "ops": [
+    { "op": "addColumn", "table": "CONSENT_REQUESTS", "column": { "name": "version", "type": "INT", "family": "integer", "nullable": false } },
+    { "op": "addColumn", "table": "CONSENT_REQUESTS", "column": { "name": "workflow_mode", "type": "NVARCHAR", "family": "string", "nullable": false } },
+    { "op": "addColumn", "table": "CONSENT_REQUESTS", "column": { "name": "external_system_id", "type": "NVARCHAR", "family": "string", "nullable": true } },
+    { "op": "addColumn", "table": "CONSENT_REQUESTS", "column": { "name": "external_reference", "type": "NVARCHAR", "family": "string", "nullable": true } },
+    { "op": "addColumn", "table": "CONSENT_REQUESTS", "column": { "name": "requested_valid_from", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": false } },
+    { "op": "addColumn", "table": "CONSENT_REQUESTS", "column": { "name": "updated_at", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": false } },
+    { "op": "addColumn", "table": "CONSENT_REQUESTS", "column": { "name": "request_kind", "type": "NVARCHAR", "family": "string", "nullable": false } },
+    { "op": "addColumn", "table": "CONSENT_REQUESTS", "column": { "name": "profile_id", "type": "NVARCHAR", "family": "string", "nullable": true } },
+    { "op": "addIndex", "table": "CONSENT_REQUESTS", "name": "IX_CONSENT_REQUESTS_TENANT_UPDATED", "unique": false, "columns": ["tenant_id", "updated_at", "id"] },
+    { "op": "addColumn", "table": "CONSENTS", "column": { "name": "expiry_notice_sent_at", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": true } },
+    { "op": "addColumn", "table": "CONSENTS", "column": { "name": "grant_record_seq", "type": "BIGINT", "family": "integer", "nullable": false } },
+    { "op": "addColumn", "table": "CONSENTS", "column": { "name": "grant_source", "type": "NVARCHAR", "family": "string", "nullable": false } },
+    { "op": "addColumn", "table": "CONSENTS", "column": { "name": "profile_assignment_id", "type": "NVARCHAR", "family": "string", "nullable": true } },
+    { "op": "addIndex", "table": "CONSENTS", "name": "IX_CONSENTS_TENANT_GRANT_SOURCE", "unique": false, "columns": ["tenant_id", "grant_source"] },
+    {
+      "op": "addTable",
+      "table": "PROFILE_ASSIGNMENT_ITEMS",
+      "newTable": {
+        "name": "PROFILE_ASSIGNMENT_ITEMS",
+        "columns": [
+          { "name": "tenant_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "request_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "item_no", "type": "INT", "family": "integer", "nullable": false },
+          { "name": "object_ref", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "owner_sid", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "owner_decision", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "decided_by", "type": "NVARCHAR", "family": "string", "nullable": true },
+          { "name": "decided_at", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": true }
+        ],
+        "primaryKey": ["tenant_id", "request_id", "item_no", "owner_sid"],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addTable",
+      "table": "CONSENT_WORKFLOW_ROUTES",
+      "newTable": {
+        "name": "CONSENT_WORKFLOW_ROUTES",
+        "columns": [
+          { "name": "tenant_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "scope_kind", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "scope_ref", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "mode", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "external_system_id", "type": "NVARCHAR", "family": "string", "nullable": true },
+          { "name": "max_duration_days", "type": "INT", "family": "integer", "nullable": false },
+          { "name": "request_timeout_days", "type": "INT", "family": "integer", "nullable": false },
+          { "name": "expiry_notice_lead_hours", "type": "INT", "family": "integer", "nullable": false },
+          { "name": "require_resolvable_approver", "type": "BIT", "family": "boolean", "nullable": false },
+          { "name": "updated_by", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "updated_at", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": false }
+        ],
+        "primaryKey": ["tenant_id", "scope_kind", "scope_ref"],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addTable",
+      "table": "EXTERNAL_WORKFLOW_SYSTEMS",
+      "newTable": {
+        "name": "EXTERNAL_WORKFLOW_SYSTEMS",
+        "columns": [
+          { "name": "id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "tenant_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "name", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "client_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "webhook_url", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "webhook_secret_protected", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "enabled", "type": "BIT", "family": "boolean", "nullable": false },
+          { "name": "created_by", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "created_at", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": false },
+          { "name": "disabled_at", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": true }
+        ],
+        "primaryKey": ["id"],
+        "indexes": []
+      }
+    },
+    { "op": "addIndex", "table": "EXTERNAL_WORKFLOW_SYSTEMS", "name": "UX_EXTERNAL_WORKFLOW_SYSTEMS_TENANT_CLIENT", "unique": true, "columns": ["tenant_id", "client_id"] },
+    {
+      "op": "addTable",
+      "table": "GRANT_RECORDS",
+      "newTable": {
+        "name": "GRANT_RECORDS",
+        "columns": [
+          { "name": "tenant_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "seq", "type": "BIGINT", "family": "integer", "nullable": false },
+          { "name": "id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "record_type", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "consent_id", "type": "NVARCHAR", "family": "string", "nullable": true },
+          { "name": "request_id", "type": "NVARCHAR", "family": "string", "nullable": true },
+          { "name": "grant_source", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "profile_assignment_id", "type": "NVARCHAR", "family": "string", "nullable": true },
+          { "name": "grantee_type", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "grantee_ref", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "object_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "scope_json", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "valid_from", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": true },
+          { "name": "valid_until", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": true },
+          { "name": "requested_by", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "decision_json", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "decided_at", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": false },
+          { "name": "recorded_at", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": false },
+          { "name": "prev_hash", "type": "CHAR", "family": "string", "nullable": false },
+          { "name": "record_hash", "type": "CHAR", "family": "string", "nullable": false },
+          { "name": "signature", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "key_id", "type": "NVARCHAR", "family": "string", "nullable": false }
+        ],
+        "primaryKey": ["tenant_id", "seq"],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addTable",
+      "table": "GRANT_RECORD_HEADS",
+      "newTable": {
+        "name": "GRANT_RECORD_HEADS",
+        "columns": [
+          { "name": "tenant_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "last_seq", "type": "BIGINT", "family": "integer", "nullable": false },
+          { "name": "last_hash", "type": "CHAR", "family": "string", "nullable": false }
+        ],
+        "primaryKey": ["tenant_id"],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addTable",
+      "table": "CONSENT_EVENTS",
+      "newTable": {
+        "name": "CONSENT_EVENTS",
+        "columns": [
+          { "name": "tenant_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "seq", "type": "BIGINT", "family": "integer", "nullable": false },
+          { "name": "id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "type", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "subject_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "payload_json", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "created_at", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": false }
+        ],
+        "primaryKey": ["tenant_id", "seq"],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addTable",
+      "table": "CONSENT_EVENT_DELIVERIES",
+      "newTable": {
+        "name": "CONSENT_EVENT_DELIVERIES",
+        "columns": [
+          { "name": "event_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "external_system_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "attempts", "type": "INT", "family": "integer", "nullable": false },
+          { "name": "next_attempt_at", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": false },
+          { "name": "delivered_at", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": true },
+          { "name": "dead_lettered_at", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": true },
+          { "name": "lease_owner", "type": "NVARCHAR", "family": "string", "nullable": true },
+          { "name": "lease_until", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": true }
+        ],
+        "primaryKey": ["event_id", "external_system_id"],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addTable",
+      "table": "CATALOG_OBJECT_VERSIONS",
+      "newTable": {
+        "name": "CATALOG_OBJECT_VERSIONS",
+        "columns": [
+          { "name": "tenant_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "object_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "content_hash", "type": "CHAR", "family": "string", "nullable": false },
+          { "name": "seq", "type": "BIGINT", "family": "integer", "nullable": false },
+          { "name": "removed", "type": "BIT", "family": "boolean", "nullable": false }
+        ],
+        "primaryKey": ["tenant_id", "object_id"],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addTable",
+      "table": "CATALOG_CHANGES",
+      "newTable": {
+        "name": "CATALOG_CHANGES",
+        "columns": [
+          { "name": "tenant_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "seq", "type": "BIGINT", "family": "integer", "nullable": false },
+          { "name": "object_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "kind", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "changed_at", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": false }
+        ],
+        "primaryKey": ["tenant_id", "seq"],
+        "indexes": []
+      }
+    }
+  ]
+}

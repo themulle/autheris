@@ -598,7 +598,8 @@ public sealed partial class GovernedAggregationService
         TableIdentifier table,
         bool allowed,
         object details,
-        CancellationToken ct)
+        CancellationToken ct,
+        IReadOnlyList<Autheris.Domain.Interfaces.DecisionGrantRef>? grants = null)
     {
         if (_auditWriter == null)
         {
@@ -614,7 +615,8 @@ public sealed partial class GovernedAggregationService
             details,
             ct,
             AuditTier.Required,
-            AuditEventTypes.GovernedAggregation);
+            AuditEventTypes.GovernedAggregation,
+            grants: grants);
     }
 
     private static object? GetRowValue(IReadOnlyDictionary<string, object?> row, string column)

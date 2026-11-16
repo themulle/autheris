@@ -64,33 +64,6 @@ public class TenantPredicateFactoryTests
         Assert.True(part.IsQuoted);
     }
 
-    [Theory]
-    [InlineData("INTEGER")]
-    [InlineData("NUMERIC")]
-    [InlineData("BLOB")]
-    [InlineData("REAL")]
-    [InlineData(null)]
-    public void Build_Sqlite_NonTextAffinityColumn_FailsClosed(string? columnType)
-    {
-        var ex = Assert.Throws<SecurityException>(() => TenantPredicateFactory.Build(Caps(TargetSqlDialect.Sqlite), "TenantId", "p", SqlParameterType.String, columnType));
-        Assert.Equal("The tenant column of a SQLite table must have TEXT affinity.", ex.Message);
-    }
-
-    [Fact]
-    public void Build_Sqlite_TextAffinityColumn_BuildsTheBlobComparison()
-    {
-        var predicate = TenantPredicateFactory.Build(Caps(TargetSqlDialect.Sqlite), "TenantId", "p", SqlParameterType.String, "VARCHAR(20)");
-        var binary = Conjunct(predicate, 1);
-        Assert.Equal("blob", Assert.IsType<CastExpression>(binary.Left).TargetType);
-        Assert.Equal("blob", Assert.IsType<CastExpression>(binary.Right).TargetType);
-    }
-
-    [Fact]
-    public void Build_NonSqlite_DoesNotRequireATextColumnType()
-    {
-        TenantPredicateFactory.Build(Caps(TargetSqlDialect.PostgreSql), "TenantId", "p", SqlParameterType.String, "integer");
-    }
-
     [Fact]
     public void ExactEquals_NullArguments_ThrowArgumentNull()
     {

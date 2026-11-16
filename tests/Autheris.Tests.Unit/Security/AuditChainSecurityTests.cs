@@ -12,6 +12,7 @@ using Shouldly;
 using Xunit;
 
 /// <summary>SEC-SIMPL-12: the audit chain anchor store exists only for PostgreSQL and SQL Server; there is no file, in-memory or SQLite fallback.</summary>
+[Trait("Category", "Security")]
 public sealed class AuditChainSecurityTests
 {
     private static IHostEnvironment Env(string name = "Development")

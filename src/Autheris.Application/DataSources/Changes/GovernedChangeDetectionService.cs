@@ -298,7 +298,8 @@ public sealed partial class GovernedChangeDetectionService : IGovernedChangeDete
                 ["upserted_count"] = upserted.Count,
                 ["removed_count"] = removed.Count
             },
-            ct).ConfigureAwait(false);
+            ct,
+            grants: decision.Grants).ConfigureAwait(false);
 
         return new ChangesSinceResponse(
             Dataset: request.Table.ToString(),

@@ -107,7 +107,6 @@ public sealed class SqlDialectRegistry : ISqlDialectRegistry
     [
         SqlServerDialectProvider.Instance,
         PostgreSqlDialectProvider.Instance,
-        SqliteDialectProvider.Instance,
         OracleDialectProvider.Instance,
         DatabricksDialectProvider.Instance
     ];

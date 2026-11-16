@@ -148,6 +148,112 @@ public sealed class AuditGroupCommitSinkTests
         }
     }
 
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Shutdown_mid_flush_completes_every_waiter()
+    {
+        var firstBatchStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirstBatch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var repository = new MidFlushBlockingAuditRepository(firstBatchStarted, releaseFirstBatch.Task);
+        await using var sink = new AuditGroupCommitSink(
+            repository,
+            new AuditGroupCommitOptions { MaxBatchSize = 1, MaxBatchDelayMs = 5000 });
+
+        var waiter1 = sink.RecordAuditEventAsync(Entry("mid-flush-1"));
+        await firstBatchStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var waiter2 = sink.RecordAuditEventAsync(Entry("mid-flush-2"));
+        var disposeTask = sink.DisposeAsync().AsTask();
+
+        releaseFirstBatch.TrySetResult();
+
+        await disposeTask.WaitAsync(TimeSpan.FromSeconds(5));
+        await Task.WhenAll(waiter1, waiter2).WaitAsync(TimeSpan.FromSeconds(5));
+
+        repository.PersistedTraces.OrderBy(t => t).ShouldBe(["mid-flush-1", "mid-flush-2"]);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Shutdown_mid_flush_persists_held_batch()
+    {
+        var firstBatchStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirstBatch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var repository = new MidFlushBlockingAuditRepository(firstBatchStarted, releaseFirstBatch.Task);
+        await using var sink = new AuditGroupCommitSink(
+            repository,
+            new AuditGroupCommitOptions { MaxBatchSize = 2, MaxBatchDelayMs = 5000 });
+
+        var waiter1 = sink.RecordAuditEventAsync(Entry("held-1"));
+        var waiter2 = sink.RecordAuditEventAsync(Entry("held-2"));
+        await firstBatchStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var queuedWaiter = sink.RecordAuditEventAsync(Entry("queued-3"));
+        var disposeTask = sink.DisposeAsync().AsTask();
+
+        releaseFirstBatch.TrySetResult();
+
+        await disposeTask.WaitAsync(TimeSpan.FromSeconds(5));
+        await Task.WhenAll(waiter1, waiter2, queuedWaiter).WaitAsync(TimeSpan.FromSeconds(5));
+
+        repository.SawCancelableToken.ShouldBeFalse();
+        repository.PersistedTraces.OrderBy(t => t).ShouldBe(["held-1", "held-2", "queued-3"]);
+    }
+
+    private sealed class MidFlushBlockingAuditRepository(
+        TaskCompletionSource firstBatchStarted,
+        Task releaseFirstBatch) : IAuditLogRepository
+    {
+        private readonly object _gate = new();
+        private readonly List<string> _traces = new();
+        private int _callCount;
+
+        public bool SawCancelableToken { get; private set; }
+
+        public IReadOnlyList<string> PersistedTraces
+        {
+            get { lock (_gate) { return _traces.ToArray(); } }
+        }
+
+        public Task RecordAuditEventAsync(AuditLogEntry entry, CancellationToken ct = default) =>
+            RecordAuditEventsAsync([entry], ct);
+
+        public Task RecordAuditEventAsync(AuditLogEntry entry, System.Data.Common.DbTransaction existingTx, CancellationToken ct = default) =>
+            Task.CompletedTask;
+
+        public async Task RecordAuditEventsAsync(IReadOnlyList<AuditLogEntry> entries, CancellationToken ct = default)
+        {
+            if (ct.CanBeCanceled)
+            {
+                SawCancelableToken = true;
+            }
+
+            if (Interlocked.Increment(ref _callCount) == 1)
+            {
+                firstBatchStarted.TrySetResult();
+                await releaseFirstBatch.ConfigureAwait(false);
+            }
+
+            ct.ThrowIfCancellationRequested();
+
+            lock (_gate)
+            {
+                foreach (var entry in entries)
+                {
+                    _traces.Add(entry.TraceId);
+                }
+            }
+        }
+
+        public Task<IReadOnlyList<AuditLogEntry>> GetAuditLogEntriesAsync(int limit = 100, TenantId? tenantId = null, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<AuditLogEntry>>([]);
+
+        public Task<IReadOnlyList<AuditLogEntry>> QueryAuditLogsAsync(string? targetTable = null, Sid? actorSid = null, DateTimeOffset? since = null, int limit = 1000, TenantId? tenantId = null, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<AuditLogEntry>>([]);
+
+        public Task<bool> VerifyAuditHashChainAsync(CancellationToken ct = default) => Task.FromResult(true);
+    }
+
     private sealed class RecordingBatchAuditRepository(int delayMs) : IAuditLogRepository
     {
         private readonly object _gate = new();

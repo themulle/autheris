@@ -7,8 +7,8 @@ using Xunit;
 namespace TrinoSqlEngine.Tests.Compiler;
 
 /// <summary>
-/// Mutation gate (M-12) tests for <see cref="DmlMaskedReadGuard"/>, <see cref="MergeAliasGuard"/>, <see cref="InsertCheckOption"/> and
-/// <see cref="SqliteTypeAffinity"/>: the typed violation texts, the first violation wins, injected predicates and masks are not reads.
+/// Mutation gate (M-12) tests for <see cref="DmlMaskedReadGuard"/>, <see cref="MergeAliasGuard"/> and <see cref="InsertCheckOption"/>:
+/// the typed violation texts, the first violation wins, injected predicates and masks are not reads.
 /// </summary>
 [Trait("Category", "SqlGate")]
 public class DmlGuardHelperTests
@@ -174,18 +174,5 @@ public class DmlGuardHelperTests
         Assert.Null(InsertCheckOption.ExpectedRows(Insert(Check(SecurityScope.Root), Row())));
         Assert.Null(InsertCheckOption.ExpectedRows(Insert(null, Row())));
         Assert.Null(InsertCheckOption.ExpectedRows(Insert(Check(), Row(), new SqlIdentifier("other", IsQuoted: true))));
-    }
-
-    // ---- SqliteTypeAffinity ----
-
-    [Theory]
-    [InlineData(SqliteTypeAffinity.Kind.Text, "TEXT")]
-    [InlineData(SqliteTypeAffinity.Kind.Whole, "INTEGER")]
-    [InlineData(SqliteTypeAffinity.Kind.Real, "REAL")]
-    [InlineData(SqliteTypeAffinity.Kind.Blob, "BLOB")]
-    [InlineData(SqliteTypeAffinity.Kind.Numeric, "NUMERIC")]
-    public void CastKeyword_IsTheClosedSetOfAffinityKeywords(SqliteTypeAffinity.Kind kind, string keyword)
-    {
-        Assert.Equal(keyword, SqliteTypeAffinity.Keyword(kind));
     }
 }

@@ -20,7 +20,6 @@ using Autheris.Application.Streaming.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Application.VirtualFilters;
 using Autheris.Application.Webhooks;
-using Autheris.Application.Governance.Workflows;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Options;
@@ -84,6 +83,7 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<TrinoSqlEngine.Governance.IPolicyExpressionParser, TrinoSqlEngine.Governance.PolicyExpressionParser>();
         services.AddSingleton<Autheris.Application.Policy.RowPolicyFactory>();
         services.AddSingleton<Autheris.Application.Sql.Masking.SqlDataMaskingProvider>();
+        services.AddSingleton<Autheris.Application.Policy.Classification.ClassificationAccessResolver>();
         services.AddSingleton<Autheris.Application.Policy.ColumnMaskPolicyFactory>();
         services.AddSingleton<Autheris.Application.Plugins.Auth.AuthPluginRoleEscalationGuard>(sp =>
             new Autheris.Application.Plugins.Auth.AuthPluginRoleEscalationGuard(
@@ -94,6 +94,7 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<Autheris.Application.Plugins.Auth.IAuthPluginHost, Autheris.Infrastructure.Plugins.Auth.AuthPluginHost>();
         services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<GatewayOptions>, Autheris.Application.Plugins.Auth.AuthPluginOptionsValidator>();
         services.AddSingleton<Autheris.Application.Policy.TypedPolicySources>();
+        services.AddSingleton<Autheris.Application.Policy.RowScopes.RowScopeCompiler>();
         // WP-X0l: assembles the typed GovernancePolicy of a statement (no caller until X1). The catalog provider is registered with the storage.
         services.AddSingleton<Autheris.Application.Sql.Policy.GovernancePolicyFactory>();
         services.AddSingleton<IRlsFilterGenerator, RlsFilterGenerator>();

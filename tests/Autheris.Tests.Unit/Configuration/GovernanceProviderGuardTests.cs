@@ -120,11 +120,11 @@ public sealed class GovernanceProviderGuardTests
 
     [Theory]
     [Trait("Category", "Security")]
-    [InlineData("PostgreSql", "Host=localhost;Database=autheris;Username=postgres;Password=secret")]
-    [InlineData(" postgresql ", "Host=localhost;Database=autheris;Username=postgres;Password=secret")]
+    [InlineData("PostgreSql", "Host=localhost;Database=autheris;Username=postgres;Password=secret;SSL Mode=VerifyFull")]
+    [InlineData(" postgresql ", "Host=localhost;Database=autheris;Username=postgres;Password=secret;SSL Mode=VerifyFull")]
     [InlineData("SqlServer", "Server=localhost;Database=autheris;User Id=sa;Password=secret")]
     [InlineData("SQLSERVER", "Server=localhost;Database=autheris;User Id=sa;Password=secret")]
-    [InlineData(null, "Host=localhost;Database=autheris;Username=postgres;Password=secret")]
+    [InlineData(null, "Host=localhost;Database=autheris;Username=postgres;Password=secret;SSL Mode=VerifyFull")]
     public void PostgreSql_and_SqlServer_pass(string? provider, string connectionString)
     {
         var settings = new Dictionary<string, string?>
@@ -168,7 +168,7 @@ public sealed class GovernanceProviderGuardTests
     {
         var cfg = BuildConfig(new Dictionary<string, string?>
         {
-            ["GovernanceDb:ConnectionString"] = "Host=localhost;Database=autheris;Username=postgres;Password=secret"
+            ["GovernanceDb:ConnectionString"] = "Host=localhost;Database=autheris;Username=postgres;Password=secret;SSL Mode=VerifyFull"
         });
 
         Should.NotThrow(() => GovernanceProviderGuard.ThrowIfUnsupported(cfg, new StubHostEnvironment(Environments.Production)));
@@ -215,7 +215,7 @@ public sealed class GovernanceProviderGuardTests
         var cfg = BuildConfig(new Dictionary<string, string?>
         {
             ["GovernanceDb:Provider"] = provider,
-            ["GovernanceDb:ConnectionString"] = "Host=localhost;Database=autheris;Username=postgres;Password=secret"
+            ["GovernanceDb:ConnectionString"] = "Host=localhost;Database=autheris;Username=postgres;Password=secret;SSL Mode=VerifyFull"
         });
 
         // the guard is strict for the runtime aliases; only exact family names (trim, ignore case) pass.
@@ -257,6 +257,162 @@ public sealed class GovernanceProviderGuardTests
         });
         Should.Throw<InvalidOperationException>(() =>
             GovernanceProviderGuard.ThrowIfUnsupported(cfg, new StubHostEnvironment(Environments.Development)));
+    }
+
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData("PostgreSql", "Host=db.internal;Database=autheris;Username=postgres;Password=SecretCanary_991;SSL Mode=Disable", "SSL Mode=VerifyFull")]
+    [InlineData("PostgreSql", "Host=db.internal;Database=autheris;Username=postgres;Password=SecretCanary_991;SSL Mode=Require", "SSL Mode=VerifyFull")]
+    [InlineData("PostgreSql", "Host=db.internal;Database=autheris;Username=postgres;Password=SecretCanary_991;SSL Mode=VerifyCA", "SSL Mode=VerifyFull")]
+    [InlineData("PostgreSql", "Host=db.internal;Database=autheris;Username=postgres;Password=SecretCanary_991;SSL Mode=VerifyFull;Trust Server Certificate=true", "TrustServerCertificate")]
+    [InlineData("SqlServer", "Server=db.internal;Database=autheris;User Id=sa;Password=SecretCanary_991;Encrypt=Optional", "Encrypt=Mandatory")]
+    [InlineData("SqlServer", "Server=db.internal;Database=autheris;User Id=sa;Password=SecretCanary_991;Encrypt=Mandatory;TrustServerCertificate=true", "TrustServerCertificate=true")]
+    public void Governance_connection_without_tls_fails_startup_outside_development(string provider, string connectionString, string expectedMention)
+    {
+        foreach (var environmentName in new[] { Environments.Production, Environments.Staging, "Test" })
+        {
+            var cfg = BuildConfig(new Dictionary<string, string?>
+            {
+                ["Gateway:GovernanceDb:Provider"] = provider,
+                ["Gateway:GovernanceDb:ConnectionString"] = connectionString
+            });
+
+            var ex = Should.Throw<InvalidOperationException>(() =>
+                GovernanceProviderGuard.ThrowIfUnsupported(cfg, new StubHostEnvironment(environmentName)));
+            ex.Message.ShouldContain(expectedMention);
+            ex.Message.ShouldContain("ConnectionString");
+            ex.Message.ShouldNotContain("SecretCanary_991");
+            ex.Message.ShouldNotContain("db.internal");
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Null_environment_is_treated_as_production()
+    {
+        var cfg = BuildConfig(new Dictionary<string, string?>
+        {
+            ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
+            ["Gateway:GovernanceDb:ConnectionString"] = "Host=db.internal;Database=autheris;Username=postgres;Password=SecretCanary_991;SSL Mode=VerifyCA"
+        });
+
+        var ex = Should.Throw<InvalidOperationException>(() =>
+            GovernanceProviderGuard.ThrowIfUnsupported(cfg, env: null));
+        ex.Message.ShouldContain("SSL Mode=VerifyFull");
+        ex.Message.ShouldNotContain("SecretCanary_991");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Development_allows_plain_connection()
+    {
+        var cfg = BuildConfig(new Dictionary<string, string?>
+        {
+            ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
+            ["Gateway:GovernanceDb:ConnectionString"] = "Host=localhost;Database=autheris;Username=postgres;Password=dev",
+            ["Gateway:GovernanceDb:MigrationConnectionString"] = "Host=localhost;Database=autheris;Username=migrator;Password=dev"
+        });
+
+        Should.NotThrow(() =>
+            GovernanceProviderGuard.ThrowIfUnsupported(cfg, new StubHostEnvironment(Environments.Development)));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Governance_empty_provider_is_postgresql_and_checked()
+    {
+        // Absent provider uses PostgreSql default and enforces VerifyFull outside Development.
+        var absentProviderWeakTls = BuildConfig(new Dictionary<string, string?>
+        {
+            ["Gateway:GovernanceDb:ConnectionString"] = "Host=db.internal;Database=autheris;Username=postgres;Password=SecretCanary_991;SSL Mode=Require"
+        });
+
+        Should.Throw<InvalidOperationException>(() =>
+            GovernanceProviderGuard.ThrowIfUnsupported(absentProviderWeakTls, new StubHostEnvironment(Environments.Production)));
+
+        // Explicit empty provider is rejected even when the connection string has VerifyFull.
+        var explicitEmptyProvider = BuildConfig(new Dictionary<string, string?>
+        {
+            ["Gateway:GovernanceDb:Provider"] = "",
+            ["Gateway:GovernanceDb:ConnectionString"] = "Host=db.internal;Database=autheris;Username=postgres;Password=SecretCanary_991;SSL Mode=VerifyFull"
+        });
+
+        Should.Throw<InvalidOperationException>(() =>
+            GovernanceProviderGuard.ThrowIfUnsupported(explicitEmptyProvider, new StubHostEnvironment(Environments.Production)));
+    }
+
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData("GovernanceDb:MigrationConnectionString", "Host=db.internal;Database=autheris;Username=ddl;Password=SecretCanary_991;SSL Mode=VerifyCA")]
+    [InlineData("Gateway:GovernanceDb:MigrationConnectionString", "Host=db.internal;Database=autheris;Username=ddl;Password=SecretCanary_991;SSL Mode=Require")]
+    public void Governance_migration_connection_without_verifyfull_rejected(string migrationKey, string migrationConnectionString)
+    {
+        var cfg = BuildConfig(new Dictionary<string, string?>
+        {
+            ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
+            ["Gateway:GovernanceDb:ConnectionString"] = "Host=db.internal;Database=autheris;Username=app;Password=app-pw;SSL Mode=VerifyFull",
+            [migrationKey] = migrationConnectionString
+        });
+
+        var ex = Should.Throw<InvalidOperationException>(() =>
+            GovernanceProviderGuard.ThrowIfUnsupported(cfg, new StubHostEnvironment(Environments.Production)));
+        ex.Message.ShouldContain("MigrationConnectionString");
+        ex.Message.ShouldContain("SSL Mode=VerifyFull");
+        ex.Message.ShouldNotContain("SecretCanary_991");
+        ex.Message.ShouldNotContain("db.internal");
+
+        var validCfg = BuildConfig(new Dictionary<string, string?>
+        {
+            ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
+            ["Gateway:GovernanceDb:ConnectionString"] = "Host=db.internal;Database=autheris;Username=app;Password=app-pw;SSL Mode=VerifyFull",
+            [migrationKey] = "Host=db.internal;Database=autheris;Username=ddl;Password=ddl-pw;SSL Mode=VerifyFull"
+        });
+
+        Should.NotThrow(() =>
+            GovernanceProviderGuard.ThrowIfUnsupported(validCfg, new StubHostEnvironment(Environments.Production)));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Conflicting_provider_aliases_fail_startup()
+    {
+        var providerConflict = BuildConfig(new Dictionary<string, string?>
+        {
+            ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
+            ["GovernanceDb:Provider"] = "SqlServer",
+            ["Gateway:GovernanceDb:ConnectionString"] = "Host=db.internal;Database=autheris;SSL Mode=VerifyFull"
+        });
+
+        var ex = Should.Throw<InvalidOperationException>(() =>
+            GovernanceProviderGuard.ThrowIfUnsupported(providerConflict, new StubHostEnvironment(Environments.Production)));
+        ex.Message.ShouldContain("Provider");
+
+        var connConflict = BuildConfig(new Dictionary<string, string?>
+        {
+            ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
+            ["Gateway:GovernanceDb:ConnectionString"] = "Host=db1.internal;Database=autheris;Password=SecretCanary_1;SSL Mode=VerifyFull",
+            ["GovernanceDb:ConnectionString"] = "Host=db2.internal;Database=autheris;Password=SecretCanary_2;SSL Mode=VerifyFull"
+        });
+
+        var connEx = Should.Throw<InvalidOperationException>(() =>
+            GovernanceProviderGuard.ThrowIfUnsupported(connConflict, new StubHostEnvironment(Environments.Production)));
+        connEx.Message.ShouldContain("ConnectionString");
+        connEx.Message.ShouldNotContain("SecretCanary_1");
+        connEx.Message.ShouldNotContain("SecretCanary_2");
+
+        var migConflict = BuildConfig(new Dictionary<string, string?>
+        {
+            ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
+            ["Gateway:GovernanceDb:ConnectionString"] = "Host=db1.internal;Database=autheris;SSL Mode=VerifyFull",
+            ["Gateway:GovernanceDb:MigrationConnectionString"] = "Host=db1.internal;Database=autheris;Password=SecretCanary_1;SSL Mode=VerifyFull",
+            ["GovernanceDb:MigrationConnectionString"] = "Host=db2.internal;Database=autheris;Password=SecretCanary_2;SSL Mode=VerifyFull"
+        });
+
+        var migEx = Should.Throw<InvalidOperationException>(() =>
+            GovernanceProviderGuard.ThrowIfUnsupported(migConflict, new StubHostEnvironment(Environments.Production)));
+        migEx.Message.ShouldContain("MigrationConnectionString");
+        migEx.Message.ShouldNotContain("SecretCanary_1");
+        migEx.Message.ShouldNotContain("SecretCanary_2");
     }
 
     private static IConfiguration BuildConfig(Dictionary<string, string?> values) =>

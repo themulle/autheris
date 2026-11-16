@@ -82,7 +82,6 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         "AGGREGATION_NOT_SUPPORTED",
         "UNKNOWN_METRIC",
         "METRIC_FILTER_INVALID",
-        "PRIVACY_BUDGET_EXHAUSTED",
         // ConsentRequestException codes the removed Development passthrough used to expose; fixed messages only.
         "INVALID_STATE",
         "CONSENT_ON_ATTRIBUTE_SOURCE",
@@ -102,7 +101,12 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         // Relay keyset pagination
         "KEYSET_PAGINATION_UNAVAILABLE",
         // Issue #447: fixed text without the data source name.
-        "TRANSPORT_NOT_ALLOWED"
+        "TRANSPORT_NOT_ALLOWED",
+        // Consent decision pipeline outcomes raised through GraphQL (unknown or foreign request, stale version, wrong channel); fixed text.
+        "CONSENT_REQUEST_NOT_FOUND",
+        "PRECONDITION_FAILED",
+        "WORKFLOW_MODE_MISMATCH",
+        "FOUR_EYES_SAME_APPROVER"
     };
 
     /// <summary>
@@ -113,6 +117,10 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
     {
         ["KEYSET_PAGINATION_UNAVAILABLE"] = "Keyset pagination is unavailable for this table or caller.",
         ["TRANSPORT_NOT_ALLOWED"] = "Access to the data source is not allowed over this transport.",
+        ["CONSENT_REQUEST_NOT_FOUND"] = "The consent request was not found.",
+        ["PRECONDITION_FAILED"] = "The consent request was changed in the meantime.",
+        ["WORKFLOW_MODE_MISMATCH"] = "The consent request cannot be decided through this channel.",
+        ["FOUR_EYES_SAME_APPROVER"] = "A different approver is required for the next approval step.",
         ["GRAPHQL_VALIDATION_FAILED"] = ValidationMessage,
         ["GRAPHQL_VARIABLE_INVALID"] = VariableMessage,
         ["GRAPHQL_PARSE_FAILED"] = ParseMessage,
@@ -137,7 +145,6 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         ["AGGREGATION_NOT_SUPPORTED"] = "The requested aggregation is not supported for this dataset.",
         ["UNKNOWN_METRIC"] = "The metric is not available.",
         ["METRIC_FILTER_INVALID"] = "The metric filter does not fit the dimension type.",
-        ["PRIVACY_BUDGET_EXHAUSTED"] = "Privacy budget exhausted.",
         ["INVALID_STATE"] = "The consent request is not in a state that allows this operation.",
         ["CONSENT_ON_ATTRIBUTE_SOURCE"] = "A consent on this table is not possible.",
         ["CONSENT_NOT_EXTENDABLE"] = "The consent cannot be extended. Create a new consent.",
@@ -186,7 +193,7 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
     {
         if (string.IsNullOrWhiteSpace(message)) return false;
         var lower = message.ToLowerInvariant();
-        return SensitivePatterns.Any(pattern => lower.Contains(pattern));
+        return SensitivePatterns.Any(pattern => lower.Contains(pattern, StringComparison.Ordinal));
     }
 
     public IError OnError(IError error)

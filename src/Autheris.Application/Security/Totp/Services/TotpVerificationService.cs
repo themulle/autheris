@@ -72,7 +72,7 @@ public sealed class TotpVerificationService : ITotpVerificationService
 
         var safeIssuer = issuer.Trim();
         var safeUser = user.Trim();
-        var safeSecret = secretBase32.Trim().Replace(" ", "").Replace("-", "").ToUpperInvariant();
+        var safeSecret = secretBase32.Trim().Replace(" ", "", StringComparison.Ordinal).Replace("-", "", StringComparison.Ordinal).ToUpperInvariant();
 
         var label = $"{Uri.EscapeDataString(safeIssuer)}:{Uri.EscapeDataString(safeUser)}";
         return $"otpauth://totp/{label}?secret={safeSecret}&issuer={Uri.EscapeDataString(safeIssuer)}&algorithm=SHA1&digits=6&period=30";
@@ -242,7 +242,7 @@ public sealed class TotpVerificationService : ITotpVerificationService
             return false;
         }
 
-        var cleanCode = totpCode.Trim().Replace(" ", "").Replace("-", "");
+        var cleanCode = totpCode.Trim().Replace(" ", "", StringComparison.Ordinal).Replace("-", "", StringComparison.Ordinal);
         if (cleanCode.Length != 6 || !int.TryParse(cleanCode, out _))
         {
             return false;
@@ -381,7 +381,7 @@ public sealed class TotpVerificationService : ITotpVerificationService
             return Array.Empty<byte>();
         }
 
-        var clean = base32.Trim().TrimEnd('=').Replace(" ", "").Replace("-", "").ToUpperInvariant();
+        var clean = base32.Trim().TrimEnd('=').Replace(" ", "", StringComparison.Ordinal).Replace("-", "", StringComparison.Ordinal).ToUpperInvariant();
         var result = new List<byte>((clean.Length * 5) / 8);
         int buffer = 0;
         int bitsLeft = 0;

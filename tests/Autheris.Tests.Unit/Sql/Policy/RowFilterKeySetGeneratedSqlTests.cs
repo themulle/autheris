@@ -3,7 +3,6 @@ using Autheris.Application.Sql.Policy;
 using Autheris.Application.Sql.Policy.RowFilterKeySets;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
-using Microsoft.Data.Sqlite;
 using Shouldly;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Capabilities;
@@ -25,7 +24,7 @@ public sealed class RowFilterKeySetGeneratedSqlTests
     private static readonly TableIdentity Air1 = new("fms", "air1");
     private static readonly TableIdentity Engine = new("md", "engine");
     private static readonly TenantBinding Tenant = new("__autheris_tenant", "acme", SqlParameterType.String);
-    private readonly TypedRowFilterBuilder _builder = new();
+    private readonly TestCorrelatedPredicateBuilder _builder = new();
     private static readonly FastSqlEngine Compiler = new();
 
     // ---- catalog and policies ----
@@ -43,39 +42,38 @@ public sealed class RowFilterKeySetGeneratedSqlTests
     ], "dbo");
 
     /// <summary>Issue example 1: <c>fms.air1</c> through <c>conf.client</c> and the hop <c>md.crane</c>.</summary>
-    private static ConsentRowFilter Example1(string kind = "crane", int group = 0) => new()
+    private static TestCorrelatedRule Example1(string kind = "crane", int group = 0) => new()
     {
         FilterGroup = group,
-        FilterType = RowFilterType.SubqueryCorrelated,
+        IsCorrelated = true,
         DependentTable = new TableIdentifier("ds", "conf", "client"),
         DependentTableAlias = "c",
         ForeignKeyColumn = "client_id",
         PrimaryKeyColumn = "id",
-        AdditionalHops =
-        [
-            new SubqueryJoinHop { Table = new TableIdentifier("ds", "md", "crane"), TableAlias = "cr", LeftJoinColumn = "c.id", RightJoinColumn = "cr.client_id" }
-        ],
-        SubqueryFilterPredicateJson = $"{{\"cr.kind\": \"{kind}\"}}"
+        Hop = (new TableIdentifier("ds", "md", "crane"), "cr", "c.id", "cr.client_id"),
+        WhereColumn = "cr.kind",
+        WhereValue = kind
     };
 
     /// <summary>Issue example 2: <c>md.engine</c> through <c>md.crane</c>.</summary>
-    private static ConsentRowFilter Example2() => new()
+    private static TestCorrelatedRule Example2() => new()
     {
-        FilterType = RowFilterType.SubqueryCorrelated,
+        IsCorrelated = true,
         DependentTable = new TableIdentifier("ds", "md", "crane"),
         DependentTableAlias = "cr",
         ForeignKeyColumn = "crane_id",
         PrimaryKeyColumn = "id",
-        SubqueryFilterPredicateJson = "{\"cr.kind\": \"crane\"}"
+        WhereColumn = "cr.kind",
+        WhereValue = "crane"
     };
 
-    private static ConsentRowFilter Simple(string column = "region", string value = "\"US\"") => new() { ColumnName = column, Operator = "EQ", ValueJson = value };
+    private static TestCorrelatedRule Simple(string column = "region", string value = "\"US\"") => TestCorrelatedRule.Simple(column, value);
 
-    private static Consent Allow(params ConsentRowFilter[] filters) => new() { TenantId = Autheris.Tests.Common.TestTenants.Default, Effect = ConsentEffect.Allow, RowFilters = filters };
+    private static TestConsent Allow(params TestCorrelatedRule[] filters) => new(ConsentEffect.Allow, filters);
 
-    private static Consent Deny(params ConsentRowFilter[] filters) => new() { TenantId = Autheris.Tests.Common.TestTenants.Default, Effect = ConsentEffect.Deny, RowFilters = filters };
+    private static TestConsent Deny(params TestCorrelatedRule[] filters) => new(ConsentEffect.Deny, filters);
 
-    private PolicyPredicate Policy(Consent[] allow, Consent[]? deny = null, TableIdentity? table = null) =>
+    private PolicyPredicate Policy(TestConsent[] allow, TestConsent[]? deny = null, TableIdentity? table = null) =>
         _builder.BuildCombined(allow, deny ?? [], table ?? Air1)!;
 
     private static PolicyKeyQueryRequest KeyRequest(ExistsExpression exists, PolicyPredicate predicate, ITableCatalog catalog, TableIdentity target, TargetSqlDialect dialect, int limit = 2001) =>
@@ -360,161 +358,4 @@ public sealed class RowFilterKeySetGeneratedSqlTests
 
     private static IReadOnlyList<LiteralExpression> AstReflectionCollect(PolicyPredicate predicate) =>
         TrinoSqlEngine.Ast.Security.AstReflection.Collect<LiteralExpression>(predicate.Expression);
-
-    // ---- SEC-RF107-06 (f): parity of EXISTS and key set, executed on SQLite ----
-
-    private static readonly TableIdentity SAir1 = new("main", "air1");
-
-    private static InMemoryTableCatalog SqliteCatalog() => new(
-    [
-        new TableCatalogEntry(SAir1, ImmutableArray.Create(
-            new CatalogColumn("id", "INTEGER"), new CatalogColumn("client_id", "INTEGER"), new CatalogColumn("region", "TEXT"), new CatalogColumn("tenant_id", "TEXT")), "tenant_id", 1),
-        new TableCatalogEntry(new TableIdentity("main", "client"), ImmutableArray.Create(
-            new CatalogColumn("id", "INTEGER"), new CatalogColumn("country", "TEXT"), new CatalogColumn("tenant_id", "TEXT")), "tenant_id", 1),
-        new TableCatalogEntry(new TableIdentity("main", "crane"), ImmutableArray.Create(
-            new CatalogColumn("id", "INTEGER"), new CatalogColumn("client_id", "INTEGER"), new CatalogColumn("kind", "TEXT"), new CatalogColumn("tenant_id", "TEXT")), "tenant_id", 1)
-    ], "main");
-
-    private static ConsentRowFilter SqliteExample1(string kind, int group = 0) => new()
-    {
-        FilterGroup = group,
-        FilterType = RowFilterType.SubqueryCorrelated,
-        DependentTable = new TableIdentifier("ds", "main", "client"),
-        DependentTableAlias = "c",
-        ForeignKeyColumn = "client_id",
-        PrimaryKeyColumn = "id",
-        AdditionalHops = [new SubqueryJoinHop { Table = new TableIdentifier("ds", "main", "crane"), TableAlias = "cr", LeftJoinColumn = "c.id", RightJoinColumn = "cr.client_id" }],
-        SubqueryFilterPredicateJson = $"{{\"cr.kind\": \"{kind}\"}}"
-    };
-
-    private static SqliteConnection Seed()
-    {
-        var connection = new SqliteConnection("Data Source=:memory:");
-        connection.Open();
-        using var cmd = connection.CreateCommand();
-        cmd.CommandText = """
-            CREATE TABLE air1 (id INTEGER, client_id INTEGER NULL, region TEXT, tenant_id TEXT);
-            CREATE TABLE client (id INTEGER, country TEXT, tenant_id TEXT);
-            CREATE TABLE crane (id INTEGER, client_id INTEGER, kind TEXT, tenant_id TEXT);
-            INSERT INTO client VALUES (1,'CH','acme'), (2,'DE','acme'), (3,'CH','other'), (4,'CH','acme');
-            INSERT INTO crane VALUES (10,1,'crane','acme'), (11,2,'tower','acme'), (12,3,'crane','other'), (13,4,'crane','acme'), (14,2,'crane','other');
-            INSERT INTO air1 VALUES (1,1,'EU','acme'), (2,2,'EU','acme'), (3,NULL,'EU','acme'), (4,3,'EU','acme'),
-                                    (5,4,'US','acme'), (6,99,'US','acme'), (7,NULL,'US','acme'), (8,1,'EU','other');
-            """;
-        cmd.ExecuteNonQuery();
-        return connection;
-    }
-
-    private static List<long> Run(SqliteConnection connection, CompiledSql compiled)
-    {
-        using var command = connection.CreateCommand();
-        new SqliteCompiledSqlBinder().Bind(command, compiled, new Dictionary<string, object?>());
-        var rows = new List<long>();
-        using var reader = command.ExecuteReader();
-        while (reader.Read()) rows.Add(Convert.ToInt64(reader.GetValue(0)));
-        rows.Sort();
-        return rows;
-    }
-
-    private static List<long> LoadKeys(SqliteConnection connection, ExistsExpression node, PolicyPredicate predicate, ITableCatalog catalog, out CompiledKeyQuery key)
-    {
-        key = ((IPolicyKeyQueryCompiler)Compiler).CompileKeyQuery(KeyRequest(node, predicate, catalog, SAir1, TargetSqlDialect.Sqlite), CancellationToken.None);
-        return Run(connection, new CompiledSql(key.Sql, key.Parameters, TargetSqlDialect.Sqlite, SqlStatementClass.Select, [], key.CompilerVersion));
-    }
-
-    /// <summary>Runs the statement with the EXISTS predicate and with every positive site replaced by the keys of its key query; both must agree.</summary>
-    private static (List<long> Exists, List<long> KeySet) Parity(SqliteConnection connection, PolicyPredicate predicate, int expectedSites)
-    {
-        var catalog = SqliteCatalog();
-        const string sql = "SELECT id FROM main.air1";
-        var viaExists = Run(connection, Compile(sql, TargetSqlDialect.Sqlite, catalog, (SAir1, predicate)));
-
-        var sites = CorrelatedKeySetSubstitution.FindSites(predicate);
-        sites.Count.ShouldBe(expectedSites);
-        var map = new List<(ExistsExpression, KeySetReplacement)>();
-        for (int i = 0; i < sites.Count; i++)
-        {
-            var keys = LoadKeys(connection, sites[i].Node, predicate, catalog, out var key);
-            map.Add((sites[i].Node, new KeySetReplacement(key.ForeignKeyColumn,
-                keys.Select(k => new PolicyValue(k, SqlParameterType.Int64)).ToList(), KeySetPadding.Bucket(keys.Count, 2000), i)));
-        }
-
-        var substituted = CorrelatedKeySetSubstitution.Substitute(predicate, map, TargetSqlDialect.Sqlite);
-        var viaKeys = Run(connection, Compile(sql, TargetSqlDialect.Sqlite, catalog, (SAir1, substituted)));
-        return (viaExists, viaKeys);
-    }
-
-    private PolicyPredicate SqlitePolicy(Consent[] allow, Consent[]? deny = null) => _builder.BuildCombined(allow, deny ?? [], SAir1)!;
-
-    [Fact]
-    public void KeyQuery_ReturnsTheDistinctTenantScopedKeys_WithoutNull()
-    {
-        using var connection = Seed();
-        var predicate = SqlitePolicy([Allow(SqliteExample1("crane"))]);
-
-        var keys = LoadKeys(connection, CorrelatedKeySetSubstitution.FindSites(predicate).Single().Node, predicate, SqliteCatalog(), out var key);
-
-        keys.ShouldBe([1L, 4L]);   // client 3 and crane 12/14 belong to another tenant; client 2 has no crane
-        key.ForeignKeyColumn.ShouldBe("client_id");
-    }
-
-    [Fact]
-    public void Parity_SingleSite_WithNullForeignKeys()
-    {
-        using var connection = Seed();
-
-        var (viaExists, viaKeys) = Parity(connection, SqlitePolicy([Allow(SqliteExample1("crane"))]), 1);
-
-        viaExists.ShouldBe([1L, 5L]);   // rows with a NULL foreign key (3, 7), a foreign tenant (8) and unknown keys (6) are out
-        viaKeys.ShouldBe(viaExists);
-    }
-
-    [Fact]
-    public void Parity_AllowOrSimpleFilter()
-    {
-        using var connection = Seed();
-
-        var (viaExists, viaKeys) = Parity(connection, SqlitePolicy([Allow(SqliteExample1("crane")), Allow(Simple("region", "\"US\""))]), 1);
-
-        viaExists.ShouldBe([1L, 5L, 6L, 7L]);
-        viaKeys.ShouldBe(viaExists);
-    }
-
-    [Fact]
-    public void Parity_DenyConsentOnTheSameTable_StaysExists_AndKeepsNullForeignKeyRows()
-    {
-        using var connection = Seed();
-        var predicate = SqlitePolicy([Allow(SqliteExample1("crane")), Allow(Simple("region", "\"EU\""))], [Deny(SqliteExample1("tower"))]);
-
-        var (viaExists, viaKeys) = Parity(connection, predicate, 1);
-
-        // row 3 has a NULL foreign key: NOT EXISTS is true for it, so the DENY must not exclude it (NOT (fk IN ...) would be UNKNOWN)
-        viaExists.ShouldBe([1L, 3L, 4L, 5L]);
-        viaKeys.ShouldBe(viaExists);
-    }
-
-    [Fact]
-    public void Parity_EmptyKeySet_IsOneEqualsZero()
-    {
-        using var connection = Seed();
-
-        var alone = Parity(connection, SqlitePolicy([Allow(SqliteExample1("nonexistent"))]), 1);
-        var orSimple = Parity(connection, SqlitePolicy([Allow(SqliteExample1("nonexistent")), Allow(Simple("region", "\"US\""))]), 1);
-
-        alone.Exists.ShouldBeEmpty();
-        alone.KeySet.ShouldBeEmpty();
-        orSimple.Exists.ShouldBe([5L, 6L, 7L]);
-        orSimple.KeySet.ShouldBe(orSimple.Exists);
-    }
-
-    [Fact]
-    public void Parity_AndGroup_OfASiteAndASimpleFilter()
-    {
-        using var connection = Seed();
-
-        var (viaExists, viaKeys) = Parity(connection, SqlitePolicy([Allow(SqliteExample1("crane", 0), Simple("region", "\"EU\""))]), 1);
-
-        viaExists.ShouldBe([1L]);
-        viaKeys.ShouldBe(viaExists);
-    }
 }

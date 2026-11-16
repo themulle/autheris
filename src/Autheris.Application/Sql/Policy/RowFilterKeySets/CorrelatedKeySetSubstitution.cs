@@ -162,9 +162,30 @@ internal static class CorrelatedKeySetSubstitution
 
             case BinaryExpression { Operator: BinaryOperator.And or BinaryOperator.Or } binary:
             {
-                var left = Rewrite(binary.Left, chosen, parameters, limit);
-                var right = Rewrite(binary.Right, chosen, parameters, limit);
-                return ReferenceEquals(left, binary.Left) && ReferenceEquals(right, binary.Right) ? binary : binary with { Left = left, Right = right };
+                Expression cur = binary;
+                var spine = new List<BinaryExpression>();
+                while (cur is BinaryExpression cb && cb.Operator == binary.Operator)
+                {
+                    if (spine.Count > 0)
+                    {
+                        ExecutionStackGuard.Ensure();
+                    }
+
+                    spine.Add(cb);
+                    cur = cb.Left;
+                }
+
+                var acc = Rewrite(cur, chosen, parameters, limit);
+                for (int i = spine.Count - 1; i >= 0; i--)
+                {
+                    var original = spine[i];
+                    var right = Rewrite(original.Right, chosen, parameters, limit);
+                    acc = ReferenceEquals(acc, original.Left) && ReferenceEquals(right, original.Right)
+                        ? original
+                        : original with { Left = acc, Right = right };
+                }
+
+                return acc;
             }
 
             default:

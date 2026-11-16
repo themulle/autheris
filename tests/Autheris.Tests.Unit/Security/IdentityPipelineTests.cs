@@ -209,4 +209,43 @@ public sealed class IdentityPipelineTests
 
         result.Claims.Where(c => c.Type is "access_token" or "id_token" or "authorization" or "token").ShouldBeEmpty();
     }
+
+    [Fact]
+    public async Task Scim_principal_keeps_the_realm_of_its_route_and_is_not_moved_to_the_default_realm()
+    {
+        var registry = Registry();
+        var scimRealm = new IdentityRealm(
+            "scim-realm",
+            IdentityRealmKind.EntraWorkforce,
+            new TenantBindingSpecification(TenantBindingKind.Fixed, FixedTenantId: new TenantId("tenant-s")),
+            groupSource: RealmGroupSource.Token);
+        registry.GetRealm("scim-realm").Returns(scimRealm);
+        var pipeline = TestIdentityPipeline.Create(registry);
+        var raw = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim("sub", "scim-client:scim-realm"), new Claim("autheris:realm", "scim-realm"), new Claim(ClaimTypes.Role, GatewayPolicies.ScimProvisionerRole)],
+            GatewayAuthSchemes.Scim));
+
+        var result = await pipeline.ProcessAsync(raw, GatewayAuthSchemes.Scim, null, CancellationToken.None);
+
+        result.FindAll("autheris:realm").Select(c => c.Value).ShouldBe(["scim-realm"]);
+        result.GetTenantId().Value.ShouldBe("tenant-s");
+        GatewayPolicies.IsScimProvisioner(result).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Realm_claim_of_a_non_scim_identity_never_selects_the_realm()
+    {
+        var registry = Registry();
+        var other = new IdentityRealm(
+            "scim-realm",
+            IdentityRealmKind.EntraWorkforce,
+            new TenantBindingSpecification(TenantBindingKind.Fixed, FixedTenantId: new TenantId("tenant-s")),
+            groupSource: RealmGroupSource.Token);
+        registry.GetRealm("scim-realm").Returns(other);
+        var pipeline = TestIdentityPipeline.Create(registry);
+
+        var result = await pipeline.ProcessAsync(Raw("Bearer", new Claim("autheris:realm", "scim-realm")), "Bearer", null, CancellationToken.None);
+
+        result.FindAll("autheris:realm").Select(c => c.Value).ShouldBe(["test-realm"]);
+    }
 }

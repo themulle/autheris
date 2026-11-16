@@ -107,18 +107,14 @@ public sealed class ColumnLevelParityTests
             r.ColumnName == "grade" &&
             (r.ApplicableScopes.Count == 0 || r.ApplicableScopes.Any(scopes.Contains)));
 
-    /// <summary>Observation class of a level on the profile channel: Deny = no profile or column, Mask = no values, Clear = values.</summary>
-    private static ColumnAccessLevel Observe(McpDatasetColumn? column)
-    {
-        var profile = column?.ValueProfile;
-        if (profile == null)
+    /// <summary>Observation class of a level on the catalog channel: Deny = no column or no access, Mask = masked, Clear = clear.</summary>
+    private static ColumnAccessLevel Observe(McpDatasetColumn? column) =>
+        column?.Access switch
         {
-            return ColumnAccessLevel.Deny;
-        }
-
-        // A catalog-sensitive column never exposes values, so Clear and Mask look alike there.
-        return profile.AllowedValues == null ? ColumnAccessLevel.Mask : ColumnAccessLevel.Clear;
-    }
+            "clear" => ColumnAccessLevel.Clear,
+            "mask" => ColumnAccessLevel.Mask,
+            _ => ColumnAccessLevel.Deny
+        };
 
     [Fact]
     public async Task Catalog_And_Analysis_Equal_DataPath_ForEveryCombination()

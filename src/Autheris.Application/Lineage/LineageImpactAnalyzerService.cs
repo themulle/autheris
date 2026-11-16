@@ -7,6 +7,7 @@ using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Usage;
 using Autheris.Domain.Common;
 using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Exceptions;
@@ -20,7 +21,7 @@ public sealed class LineageImpactAnalyzerService : ILineageImpactAnalyzerService
     private readonly ILineageGraphStore _graphStore;
     private readonly IAuditLogRepository? _auditRepo;
     private readonly ITableMetadataRepository? _tableMetadataRepo;
-    private readonly IConsumerAggregationRepository? _consumerAggregationRepo;
+    private readonly IUsageRepository? _usageRepo;
     private readonly ILogger<LineageImpactAnalyzerService> _logger;
 
     public LineageImpactAnalyzerService(
@@ -30,7 +31,7 @@ public sealed class LineageImpactAnalyzerService : ILineageImpactAnalyzerService
         IAuditLogRepository auditRepo,
         ITableMetadataRepository tableMetadataRepo,
         ILogger<LineageImpactAnalyzerService> logger,
-        IConsumerAggregationRepository? consumerAggregationRepo = null)
+        IUsageRepository? usageRepo = null)
     {
         _consentRepo = consentRepo ?? throw new ArgumentNullException(nameof(consentRepo));
         _ownershipRepo = ownershipRepo ?? throw new ArgumentNullException(nameof(ownershipRepo));
@@ -38,7 +39,7 @@ public sealed class LineageImpactAnalyzerService : ILineageImpactAnalyzerService
         _auditRepo = auditRepo;
         _tableMetadataRepo = tableMetadataRepo;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _consumerAggregationRepo = consumerAggregationRepo;
+        _usageRepo = usageRepo;
     }
 
     public LineageImpactAnalyzerService(
@@ -353,23 +354,24 @@ public sealed class LineageImpactAnalyzerService : ILineageImpactAnalyzerService
         IReadOnlyList<CallingApplicationUsage>? applicationUsages = null;
         bool suppressedSmallGroups = false;
 
-        if (_consumerAggregationRepo != null && callerContext is not null)
+        if (_usageRepo != null && callerContext is not null)
         {
             var window = Math.Clamp(timeWindowDays, 1, 400);
             var since = DateTimeOffset.UtcNow.AddDays(-window);
             var tenantId = callerContext.TenantId;
 
-            var summaries = await _consumerAggregationRepo.QueryConsumerAppDailyAsync(
+            var summaries = await _usageRepo.QueryConsumerAppDailyAsync(
                 table, tenantId, since, DateTimeOffset.UtcNow, ct).ConfigureAwait(false);
-            var actorCounts = await _consumerAggregationRepo.QueryDistinctActorCountsAsync(
+            var actorCounts = await _usageRepo.QueryDistinctActorCountsAsync(
                 table, tenantId, since, DateTimeOffset.UtcNow, ct).ConfigureAwait(false);
 
             if (canViewRuntimeConsumers)
             {
                 // Privileged Tier: Data Owner, Delegate, GovernanceAdmin
                 // Expose personal breakdown (ActorSids), exact query names, no folding
+                var groupedSummaries = ConsumerFolding.GroupByClient(summaries);
                 var privilegedUsages = new List<CallingApplicationUsage>();
-                foreach (var s in summaries)
+                foreach (var s in groupedSummaries)
                 {
                     int actorCount = s.DistinctActors;
                     if (actorCounts.TryGetValue(s.Application, out var count))
@@ -389,7 +391,9 @@ public sealed class LineageImpactAnalyzerService : ILineageImpactAnalyzerService
                         Versions: s.Versions,
                         QueryNames: s.QueryNames,
                         DistinctActors: actorCount,
-                        ActorSids: matchingSids
+                        ActorSids: matchingSids,
+                        ClientId: s.ClientId,
+                        IsClientAsserted: s.IsClientAsserted ?? false
                     ));
                 }
                 applicationUsages = privilegedUsages;

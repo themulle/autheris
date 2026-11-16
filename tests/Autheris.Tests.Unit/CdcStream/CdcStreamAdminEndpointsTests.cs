@@ -14,9 +14,9 @@ using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Tests.Common.Fakes;
 using Autheris.Tests.Unit.TestDoubles;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Routing;
@@ -288,15 +288,13 @@ public sealed class CdcStreamAdminEndpointsTests : IDisposable
     [InlineData("POST", "/api/v1/cdc/streams/{id}/rotate-image-key")]
     public void Routes_RequireGovernanceAdmin_NeverAnonymous(string method, string pattern)
     {
-        var builder = WebApplication.CreateBuilder();
-        builder.Services.AddRouting();
-        builder.Services.AddAuthorization();
-        builder.Services.AddSingleton(Service());
-        builder.Services.AddSingleton(Substitute.For<IAuditWriter>());
-        var app = builder.Build();
-        app.MapCdcStreamAdminEndpoints();
+        using var routes = new TestEndpointRouteBuilder(services =>
+        {
+            services.AddSingleton(Service());
+        }, permissiveServices: true);
+        routes.MapCdcStreamAdminEndpoints();
 
-        var endpoint = ((IEndpointRouteBuilder)app).DataSources
+        var endpoint = routes.DataSources
             .SelectMany(d => d.Endpoints)
             .OfType<RouteEndpoint>()
             .Single(e => e.RoutePattern.RawText == pattern && e.Metadata.GetMetadata<HttpMethodMetadata>()!.HttpMethods.Contains(method));

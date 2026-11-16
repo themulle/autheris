@@ -19,12 +19,12 @@ public sealed class DialectAdmissionTests
     [Fact]
     public void Admission_ExactSet()
     {
-        // The admitted set is exactly these five. DuckDB and Ansi are not admitted: a change of this list is a
+        // The admitted set is exactly these four. DuckDB and Ansi are not admitted: a change of this list is a
         // security decision (CODEOWNERS on DialectCapabilityTable.cs) and must change this test in the same commit.
         Enum.GetValues<DatabaseDialect>().Where(SqlDialectMapper.IsExecutable)
-            .ShouldBe([DatabaseDialect.PostgreSql, DatabaseDialect.SqlServer, DatabaseDialect.Sqlite, DatabaseDialect.Oracle, DatabaseDialect.Databricks], ignoreOrder: true);
+            .ShouldBe([DatabaseDialect.PostgreSql, DatabaseDialect.SqlServer, DatabaseDialect.Oracle, DatabaseDialect.Databricks], ignoreOrder: true);
         SqlDialectMapper.AdmittedDialects.ShouldBe(
-            [DatabaseDialect.Oracle, DatabaseDialect.PostgreSql, DatabaseDialect.SqlServer, DatabaseDialect.Sqlite, DatabaseDialect.Databricks], ignoreOrder: true);
+            [DatabaseDialect.Oracle, DatabaseDialect.PostgreSql, DatabaseDialect.SqlServer, DatabaseDialect.Databricks], ignoreOrder: true);
 
         // The target dialects that no database dialect maps to are not admitted by construction.
         foreach (var target in new[] { TargetSqlDialect.DuckDb, TargetSqlDialect.Ansi })
@@ -45,7 +45,6 @@ public sealed class DialectAdmissionTests
 
         // ... and an admitted dialect that loses its tier is no longer admitted.
         SqlDialectMapper.IsExecutable(DatabaseDialect.Oracle, new TierOverride(table, TargetSqlDialect.Oracle, DialectSupportTier.Experimental)).ShouldBeFalse();
-        SqlDialectMapper.IsExecutable(DatabaseDialect.Sqlite, new TierOverride(table, TargetSqlDialect.Sqlite, DialectSupportTier.Internal)).ShouldBeFalse();
     }
 
     [Fact]

@@ -79,16 +79,31 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
 
                     builder.Append(" ESCAPE ");
                     int escapeStart = builder.Length;
-                    builder.Append("'\\'");
+                    builder.Append(LikeEscapeLiteral());
                     context.RegisterConstantFragment(escapeStart, builder.Length - escapeStart);
                     break;
                 }
 
-                GeneratePredicateOperand(lk.Pattern, ref builder, context);
-                if (lk.Escape != null)
+                var normalized = LikePatternEscaper.NormalizeUserLike(lk, TargetDialect, maxQueryLength: null);
+                GeneratePredicateOperand(normalized.Pattern, ref builder, context);
+                if (normalized.Escape != null)
                 {
                     builder.Append(" ESCAPE ");
-                    GeneratePredicateOperand(lk.Escape, ref builder, context);
+                    GeneratePredicateOperand(normalized.Escape, ref builder, context);
+                }
+                else if (TargetDialect is TargetSqlDialect.PostgreSql or TargetSqlDialect.Databricks)
+                {
+                    builder.Append(" ESCAPE ");
+                    int escapeStart = builder.Length;
+                    builder.Append(normalized.Pattern is LiteralExpression { Type: LiteralType.String } || TargetDialect == TargetSqlDialect.Databricks ? LikeEscapeLiteral() : "''");
+                    context.RegisterConstantFragment(escapeStart, builder.Length - escapeStart);
+                }
+                else if (TargetDialect == TargetSqlDialect.SqlServer)
+                {
+                    builder.Append(" ESCAPE ");
+                    int escapeStart = builder.Length;
+                    builder.Append(LikeEscapeLiteral());
+                    context.RegisterConstantFragment(escapeStart, builder.Length - escapeStart);
                 }
                 break;
             case InListExpression inL:
@@ -252,7 +267,90 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
         }
     }
 
+    protected virtual bool RequiresCustomBinaryFormat(BinaryExpression b) => false;
+
+    protected void FormatStandardBinary(
+        ref ValueStringBuilder builder,
+        BinaryExpression b,
+        SqlEmitterContext context,
+        string? operatorOverride = null)
+    {
+        bool parensLeft = NeedsParentheses(b.Left, b.Operator, isLeft: true);
+        bool parensRight = NeedsParentheses(b.Right, b.Operator, isLeft: false);
+
+        if (parensLeft) builder.Append('(');
+        GenerateExpression(b.Left, ref builder, context);
+        if (parensLeft) builder.Append(')');
+
+        builder.Append(' ');
+        builder.Append(operatorOverride ?? GetBinaryOperatorString(b.Operator));
+        builder.Append(' ');
+
+        if (parensRight) builder.Append('(');
+        GenerateExpression(b.Right, ref builder, context);
+        if (parensRight) builder.Append(')');
+    }
+
+    /// <summary>The ESCAPE literal for the backslash escape character. Spark interprets backslash escapes inside quoted literals, so it needs the doubled form.</summary>
+    private string LikeEscapeLiteral() => TargetDialect == TargetSqlDialect.Databricks ? "'\\\\'" : "'\\'";
+
     protected virtual void FormatBinaryExpression(ref ValueStringBuilder builder, BinaryExpression b, SqlEmitterContext context)
+    {
+        if (b.Left is not BinaryExpression)
+        {
+            if (TryAppendCanonicalConstant(ref builder, b, context))
+            {
+                return;
+            }
+
+            FormatStandardBinary(ref builder, b, context);
+            return;
+        }
+
+        var frames = new List<(BinaryExpression Node, bool ParensLeft, bool ParensRight)>();
+        Expression cur = b;
+        while (cur is BinaryExpression cb && !RequiresCustomBinaryFormat(cb))
+        {
+            if (frames.Count > 0)
+            {
+                ExecutionStackGuard.Ensure();
+                context.Tick();
+            }
+
+            if (TryAppendCanonicalConstant(ref builder, cb, context))
+            {
+                cur = null!;
+                break;
+            }
+
+            bool parensLeft = NeedsParentheses(cb.Left, cb.Operator, isLeft: true);
+            bool parensRight = NeedsParentheses(cb.Right, cb.Operator, isLeft: false);
+            if (parensLeft) builder.Append('(');
+            frames.Add((cb, parensLeft, parensRight));
+            cur = cb.Left;
+        }
+
+        if (cur is not null)
+        {
+            GenerateExpression(cur, ref builder, context);
+        }
+
+        for (int i = frames.Count - 1; i >= 0; i--)
+        {
+            var (node, parensLeft, parensRight) = frames[i];
+            if (parensLeft) builder.Append(')');
+
+            builder.Append(' ');
+            builder.Append(GetBinaryOperatorString(node.Operator));
+            builder.Append(' ');
+
+            if (parensRight) builder.Append('(');
+            GenerateExpression(node.Right, ref builder, context);
+            if (parensRight) builder.Append(')');
+        }
+    }
+
+    private bool TryAppendCanonicalConstant(ref ValueStringBuilder builder, BinaryExpression b, SqlEmitterContext context)
     {
         // The canonical tautology and deny-all (1 = 1, 1 = 0) are the only constants emitted as text (plan 3.4).
         if (context.IsBound && BindLiterals && b.Operator == BinaryOperator.Equal &&
@@ -262,23 +360,10 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
             Convert.ToInt64(right.Value, CultureInfo.InvariantCulture) is 0 or 1)
         {
             AppendStructural(ref builder, context, Convert.ToInt64(right.Value, CultureInfo.InvariantCulture) == 1 ? "1 = 1" : "1 = 0");
-            return;
+            return true;
         }
 
-        bool parensLeft = NeedsParentheses(b.Left, b.Operator, isLeft: true);
-        bool parensRight = NeedsParentheses(b.Right, b.Operator, isLeft: false);
-
-        if (parensLeft) builder.Append('(');
-        GenerateExpression(b.Left, ref builder, context);
-        if (parensLeft) builder.Append(')');
-
-        builder.Append(' ');
-        builder.Append(GetBinaryOperatorString(b.Operator));
-        builder.Append(' ');
-
-        if (parensRight) builder.Append('(');
-        GenerateExpression(b.Right, ref builder, context);
-        if (parensRight) builder.Append(')');
+        return false;
     }
 
     private static readonly Regex SafeParamIdentifierRegex = new(
@@ -300,7 +385,6 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
                 switch (context.Dialect)
                 {
                     case TargetSqlDialect.SqlServer:
-                    case TargetSqlDialect.Sqlite:
                         builder.Append('@');
                         builder.Append(rawName);
                         return;
@@ -412,6 +496,15 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
 
     private bool NeedsParentheses(Expression child, BinaryOperator parentOp, bool isLeft)
     {
+        // Concatenation operands that are arithmetic or unary are always parenthesized, in every dialect: the operand keeps its
+        // own evaluation order and type coercion whatever the target ranks '||' (or SQL Server '+') against the arithmetic operators.
+        if (parentOp == BinaryOperator.Concat
+            && (child is UnaryExpression
+                || child is BinaryExpression { Operator: BinaryOperator.Add or BinaryOperator.Subtract or BinaryOperator.Multiply or BinaryOperator.Divide or BinaryOperator.Modulo }))
+        {
+            return true;
+        }
+
         if (child is BinaryExpression childBinary)
         {
             int parentPrec = GetPrecedence(parentOp);

@@ -93,7 +93,7 @@ public class ProcedureRowBudgetAndScanCapTests
         }
     }
 
-    private static ClaimsPrincipal User() => new(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "S-1-5-21-LWE-DAVID")], "test"));
+    private static ClaimsPrincipal User() => Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(new ClaimsPrincipal(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "S-1-5-21-LWE-DAVID")], "test")));
 
     private static Fixture Active(bool scoped, int total, int maxRows = 10, int? maxScanRows = null, ProcedureMode mode = ProcedureMode.Read, IReadOnlyList<ProcedureErrorCode>? errorCodes = null)
     {
@@ -706,7 +706,7 @@ public class ProcedureRowBudgetAndScanCapTests
     [Trait("Category", "Security")]
     public void T_PROC152I2_10_Parser_Yaml_ParameterNamedLimit_Rejected(string fragment)
     {
-        string yaml = "name: x\nprocedure: tem.p\nvalidation: declared\nresult_table: md.crane\n" + fragment + "\n";
+        string yaml = "name: x\nprocedure: tem.p\nresult_table: md.crane\n" + fragment + "\n";
 
         var ex = Should.Throw<FormatException>(() => ProcedureDefinitionParser.ParseYaml(yaml, "x", false, 30));
 
@@ -718,63 +718,18 @@ public class ProcedureRowBudgetAndScanCapTests
     [InlineData("@Limit")]
     [InlineData("LIMIT")]
     [Trait("Category", "Security")]
-    public void T_PROC152I2_10_Catalog_ParameterNamedLimit_Rejected(string dbParameterName)
+    public void T_PROC152I2_10_ReservedLimitParameter_Rejected(string dbParameterName)
     {
-        var errors = StoredProcedureCatalogValidator.ReservedParameterErrors([dbParameterName]);
-
-        errors.ShouldBe(["Procedure parameter '@limit' uses the reserved name 'limit'."]);
+        ProcedureDefinitionParser.IsReservedName(dbParameterName.TrimStart('@')).ShouldBeTrue();
     }
 
     [Fact]
-    public void Catalog_OtherParameterNames_NotRejected()
+    public void OtherParameterNames_NotRejected()
     {
-        StoredProcedureCatalogValidator.ReservedParameterErrors(["limits", "p_limit", "CustomerId"]).ShouldBeEmpty();
-    }
-
-    [Fact]
-    [Trait("Category", "Security")]
-    public async Task T_PROC152I2_10_Catalog_ValidateAsync_ParameterNamedLimit_RejectedAndNotRegisteredActive()
-    {
-        var options = Options.Create(new GatewayOptions
+        foreach (var name in new[] { "limits", "p_limit", "CustomerId" })
         {
-            SqlEndpoints = new SqlEndpointsOptions
-            {
-                Procedures = new ProcedureEndpointsOptions { Enabled = true, AllowedSchemas = ["tem"], ConnectionName = "proc" }
-            },
-            DataSources = new SqlDataSourceOptions
-            {
-                Connections = new Dictionary<string, DataSourceConnectionOptions>
-                {
-                    ["proc"] = new() { Provider = "SqlServer", ConnectionString = "Server=x" }
-                }
-            }
-        });
-        var factory = Substitute.For<ISqlConnectionFactory>();
-        factory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
-            .Returns(_ => Task.FromResult<DbConnection>(new ScriptedCatalogConnection("@limit")));
-        var validator = new StoredProcedureCatalogValidator(new ProcedureConnectionProvider(factory, options), options);
-        var def = TestProcedureYaml.Definition(UnscopedHeader, "x", false, 60);
-
-        var result = await validator.ValidateAsync(def, CancellationToken.None);
-
-        result.IsValid.ShouldBeFalse();
-        result.Errors.ShouldContain("Procedure parameter '@limit' uses the reserved name 'limit'.");
-
-        // The registration service never promotes the failed validation to Active.
-        var registry = new InMemoryProcedureRegistry();
-        registry.Register(def);
-        var scopeFactory = Substitute.For<IServiceScopeFactory>();
-        var scope = Substitute.For<IServiceScope>();
-        var sp = Substitute.For<IServiceProvider>();
-        scopeFactory.CreateScope().Returns(scope);
-        scope.ServiceProvider.Returns(sp);
-        sp.GetService(typeof(StoredProcedureCatalogValidator)).Returns(validator);
-        var svc = new ProcedureRegistrationService(new ProcedureDefinitionLoader(registry, options), registry, scopeFactory, options, null);
-
-        await svc.ValidateDueAsync(CancellationToken.None);
-
-        registry.TryGet("get_cranes", out var registered).ShouldBeTrue();
-        registered!.State.ShouldNotBe(ProcedureState.Active);
+            ProcedureDefinitionParser.IsReservedName(name).ShouldBeFalse();
+        }
     }
 
     // ---------- WP-B: OpenAPI ----------
@@ -1153,9 +1108,8 @@ public class ProcedureRowBudgetAndScanCapTests
         }
     }
 
-    private const string DeclaredYamlNoHash = "name: x\nprocedure: api.usp_X\nvalidation: declared\nresult_table: md.crane\noutputs:\n  - {name: a, type: int}\n";
+    private const string DeclaredYamlNoHash = "name: x\nprocedure: api.usp_X\nresult_table: md.crane\ntables:\n  - md.crane\noutputs:\n  - {name: a, type: int}\n";
     private const string DeclaredYamlWithHash = DeclaredYamlNoHash + "integrity:\n  ddl_hash: \"sha256:abc12345\"\n";
-    private const string CatalogYamlNoHash = "name: x\nprocedure: api.usp_X\nresult_table: md.crane\n";
 
     private static (ProcedureDefinitionLoader Loader, InMemoryProcedureRegistry Registry, CapturingLogger<ProcedureDefinitionLoader> Log, string Dir) CreateDdlLoader(
         string? environmentName, bool? requireDdlHash = null)
@@ -1172,7 +1126,6 @@ public class ProcedureRowBudgetAndScanCapTests
                     Enabled = true,
                     Directory = dir,
                     AllowedSchemas = ["api"],
-                    AllowDeclaredValidation = true,
                     RequireDdlHashForDeclared = requireDdlHash
                 }
             }
@@ -1201,7 +1154,7 @@ public class ProcedureRowBudgetAndScanCapTests
             loader.TryLoadFile(file, dir).ShouldBeTrue();
 
             registry.GetAll().Count.ShouldBe(1);
-            log.Entries.Count(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning && e.Message.Contains("Procedure 'x' uses validation: declared without integrity.ddl_hash")).ShouldBe(1);
+            log.Entries.Count(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning && e.Message.Contains("Procedure 'x' without integrity.ddl_hash")).ShouldBe(1);
         }
         finally
         {
@@ -1249,13 +1202,13 @@ public class ProcedureRowBudgetAndScanCapTests
     }
 
     [Fact]
-    public void Catalog_NoDdlHash_NoWarning()
+    public void Declared_WithDdlHash_NoWarning()
     {
         var (loader, registry, log, dir) = CreateDdlLoader("Production", requireDdlHash: true);
         try
         {
             string file = Path.Combine(dir, "x.proc.yaml");
-            File.WriteAllText(file, CatalogYamlNoHash);
+            File.WriteAllText(file, DeclaredYamlWithHash);
 
             loader.TryLoadFile(file, dir).ShouldBeTrue();
 

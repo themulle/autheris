@@ -20,7 +20,6 @@ public sealed class PaginationWithTiesTests
     }
 
     [Theory]
-    [InlineData(TargetSqlDialect.Sqlite)]
     [InlineData(TargetSqlDialect.DuckDb)]
     public void WithTies_UnsupportedDialects_ThrowAstBuildException(TargetSqlDialect dialect)
     {

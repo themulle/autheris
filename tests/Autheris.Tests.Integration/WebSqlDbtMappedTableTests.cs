@@ -71,7 +71,7 @@ public sealed class WebSqlDbtMappedTableTests : IAsyncLifetime
         }
     }
 
-    private async Task<WebApplicationFactory<Program>?> HostAsync(string? webSqlMappingTarget, bool withSqliteConnection = false)
+    private async Task<WebApplicationFactory<Program>?> HostAsync(string? webSqlMappingTarget, bool withOtherDialectConnection = false)
     {
         if (_db is null || !_db.IsAvailable)
         {
@@ -94,10 +94,11 @@ public sealed class WebSqlDbtMappedTableTests : IAsyncLifetime
                 builder.UseSetting($"Gateway:WebSql:DataSourceMappings:{Logical}", webSqlMappingTarget);
             }
 
-            if (withSqliteConnection)
+            if (withOtherDialectConnection)
             {
-                builder.UseSetting("Gateway:DataSources:Connections:litedata:Provider", "Sqlite");
-                builder.UseSetting("Gateway:DataSources:Connections:litedata:ConnectionString", "Data Source=:memory:");
+                builder.UseSetting("Gateway:DataSources:Connections:litedata:Provider", "SqlServer");
+                builder.UseSetting("Gateway:DataSources:Connections:litedata:ConnectionString", "Server=localhost;Database=litedata;Integrated Security=true;TrustServerCertificate=true");
+                builder.UseSetting("Gateway:DataSources:Connections:litedata:DefaultSchema", "dbo");
             }
 
             builder.UseSetting($"Gateway:DataSources:Connections:{Connection}:Provider", "PostgreSql");
@@ -133,7 +134,13 @@ public sealed class WebSqlDbtMappedTableTests : IAsyncLifetime
         using var scope = host.Services.CreateScope();
         scope.ServiceProvider.GetRequiredService<IIngressTransportContext>().Set(DataSourceTransportFlags.WebSql);
         var service = scope.ServiceProvider.GetRequiredService<IGovernedSqlExecutionService>();
-        var user = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-668"), new Claim("tenant_id", "acme")], "Test"));
+        var user = new ClaimsPrincipal(new ClaimsIdentity(
+        [
+            new Claim(ClaimTypes.PrimarySid, "S-1-5-21-668"),
+            new Claim("tenant_id", "acme"),
+            Autheris.Domain.Identity.GroupResolutionClaims.CreateMarker(),
+            Autheris.Domain.Identity.GroupResolutionClaims.CreateStatus(Autheris.Domain.Identity.GroupResolutionStatus.Complete)
+        ], "Test"));
         return await service.ExecuteQueryBufferedAsync(new GovernedSqlQueryRequest(sql, null, Logical), user, new TenantId("acme"));
     }
 
@@ -151,7 +158,7 @@ public sealed class WebSqlDbtMappedTableTests : IAsyncLifetime
     [Trait("Category", "Security")]
     public async Task Query_MappingToConnectionOfOtherDialect_Denied()
     {
-        if (await HostAsync("litedata", withSqliteConnection: true) is not { } host) return;
+        if (await HostAsync("litedata", withOtherDialectConnection: true) is not { } host) return;
 
         var ex = await Should.ThrowAsync<WebSqlPolicyException>(() => QueryAsync(host, "SELECT id FROM salesdb.public.orders"));
 

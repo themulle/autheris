@@ -24,6 +24,7 @@ using Xunit;
 /// <summary>
 /// Security review 2026-10-02, work package C (policy core): H-05, H-09, H-11, H-12, M-18, M-19, M-21 and low findings.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class PolicyCoreConsentUnionAndRlsSecurityTests
 {
     private static readonly TableIdentifier HrTable = new("hr", "dbo", "employees");
@@ -139,133 +140,7 @@ public sealed class PolicyCoreConsentUnionAndRlsSecurityTests
     }
 
     // =====================================================================================
-    // H-12 / M-18 / M-19: Casbin
-    // =====================================================================================
-
-    private static SecurityEvaluationContext CasbinContext(TableIdentifier table, Dictionary<string, object?>? attributes = null, IReadOnlyCollection<Sid>? groups = null) =>
-        new(
-            UserSid: UserSid,
-            GroupSids: groups ?? Array.Empty<Sid>(),
-            Tenant: TenantA,
-            TargetTable: table,
-            RequestedColumns: ["id"],
-            ClientIp: IPAddress.Parse("10.1.2.3"),
-            Timestamp: DateTimeOffset.UtcNow,
-            PurposeId: "AUDIT",
-            Attributes: attributes);
-
-    [Fact]
-    public async Task H12_KeyMatch2SegmentParameter_AllowRule_ContributesItsRlsFilter()
-    {
-        // Previously: Casbin allowed via keyMatch2 ('finance.dbo.:table'), but the gateway matcher did not match -> no filter (all regions).
-        using var casbin = new CasbinEnforcementService();
-        casbin.AddPolicy(TenantA, UserSid.Value, "finance.dbo.:table", "read", "true", "allow", rlsFilter: "region = 'EU'");
-
-        var decision = await casbin.EvaluatePolicyAsync(CasbinContext(new TableIdentifier("finance", "dbo", "invoices")));
-
-        decision.IsAllowed.ShouldBeTrue();
-        decision.CombinedRowFilterSql.ShouldBe("region = 'EU'");
-    }
-
-    [Fact]
-    public async Task H12_M18_CasbinOnlyMatchAcrossSegmentBoundary_IsDeniedFailClosed()
-    {
-        // keyMatch2 treats '.' as regex wildcard: 'finance.dbo.*' matches 'finance.dbo_hr.salaries' in Casbin.
-        // The gateway matcher does not match, so no filter could be collected -> must be denied.
-        using var casbin = new CasbinEnforcementService();
-        casbin.AddPolicy(TenantA, UserSid.Value, "finance.dbo.*", "read", "true", "allow", rlsFilter: "region = 'EU'");
-
-        var decision = await casbin.EvaluatePolicyAsync(CasbinContext(new TableIdentifier("finance", "dbo_hr", "salaries")));
-
-        decision.IsAllowed.ShouldBeFalse();
-        decision.CombinedRowFilterSql.ShouldBeNull();
-    }
-
-    [Fact]
-    public async Task M18_SegmentWildcard_StillMatchesTablesInsideSchema()
-    {
-        using var casbin = new CasbinEnforcementService();
-        casbin.AddPolicy(TenantA, UserSid.Value, "finance.dbo.*", "read", "true", "allow", rlsFilter: "region = 'EU'");
-
-        var decision = await casbin.EvaluatePolicyAsync(CasbinContext(new TableIdentifier("finance", "dbo", "invoices")));
-
-        decision.IsAllowed.ShouldBeTrue();
-        decision.CombinedRowFilterSql.ShouldBe("region = 'EU'");
-    }
-
-    [Fact]
-    public async Task H12_DenyRuleWithUnevaluableSubRule_FailsClosed()
-    {
-        using var casbin = new CasbinEnforcementService();
-        var table = new TableIdentifier("finance", "dbo", "invoices");
-        casbin.AddPolicy(TenantA, UserSid.Value, table.ToString(), "read", "true", "allow");
-        casbin.AddPolicy(TenantA, UserSid.Value, table.ToString(), "read", "r.ctx.NoSuchProperty == 'x'", "deny");
-
-        var decision = await casbin.EvaluatePolicyAsync(CasbinContext(table));
-
-        decision.IsAllowed.ShouldBeFalse();
-    }
-
-    [Fact]
-    public async Task H12_GroupMatchedAllowRule_ContributesFilter()
-    {
-        using var casbin = new CasbinEnforcementService();
-        var table = new TableIdentifier("finance", "dbo", "invoices");
-        var group = new Sid("S-1-5-21-FINANCE-GROUP");
-        casbin.AddPolicy(TenantA, "role:finance", table.ToString(), "read", "true", "allow", rlsFilter: "region = 'DE'");
-        casbin.AddRoleForUser(TenantA, group.Value, "role:finance");
-
-        var decision = await casbin.EvaluatePolicyAsync(CasbinContext(table, groups: [group]));
-
-        decision.IsAllowed.ShouldBeTrue();
-        decision.CombinedRowFilterSql.ShouldBe("region = 'DE'");
-    }
-
-    [Fact]
-    public async Task M19_UnquotedTemplate_ClaimWithSqlKeywords_IsEmittedAsQuotedLiteral()
-    {
-        using var casbin = new CasbinEnforcementService();
-        var table = new TableIdentifier("finance", "dbo", "costs");
-        casbin.AddPolicy(TenantA, UserSid.Value, table.ToString(), "read", "true", "allow", rlsFilter: "cost_center = ${attr.cost_center}");
-
-        var decision = await casbin.EvaluatePolicyAsync(CasbinContext(table, new Dictionary<string, object?>
-        {
-            ["cost_center"] = "0 OR tenant_id IS NOT NULL"
-        }));
-
-        decision.IsAllowed.ShouldBeTrue();
-        decision.CombinedRowFilterSql.ShouldBe("cost_center = '0 OR tenant_id IS NOT NULL'");
-    }
-
-    [Fact]
-    public async Task M19_QuotedAndPartiallyQuotedTemplates_AreNotDoubleQuoted()
-    {
-        using var casbin = new CasbinEnforcementService();
-        var table = new TableIdentifier("finance", "dbo", "costs");
-        casbin.AddPolicy(TenantA, UserSid.Value, table.ToString(), "read", "true", "allow", rlsFilter: "dept = '${department}' AND code LIKE '${department}%'");
-
-        var decision = await casbin.EvaluatePolicyAsync(CasbinContext(table, new Dictionary<string, object?>
-        {
-            ["department"] = "HR"
-        }));
-
-        decision.IsAllowed.ShouldBeTrue();
-        decision.CombinedRowFilterSql.ShouldBe("dept = 'HR' AND code LIKE 'HR%'");
-    }
-
-    [Fact]
-    public async Task M19_UnresolvedAttributePlaceholder_FailsClosed()
-    {
-        using var casbin = new CasbinEnforcementService();
-        var table = new TableIdentifier("finance", "dbo", "costs");
-        casbin.AddPolicy(TenantA, UserSid.Value, table.ToString(), "read", "true", "allow", rlsFilter: "cost_center = ${attr.cost_center}");
-
-        await Should.ThrowAsync<System.Security.SecurityException>(async () =>
-            await casbin.EvaluatePolicyAsync(CasbinContext(table, new Dictionary<string, object?>())));
-    }
-
-    // =====================================================================================
-    // H-09: Streaming uses consent -> Casbin -> catalog masking
+    // H-09: Streaming uses consent -> decision point -> catalog masking
     // =====================================================================================
 
     private sealed class StreamFixture

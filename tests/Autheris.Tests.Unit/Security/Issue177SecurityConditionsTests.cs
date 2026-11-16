@@ -24,6 +24,7 @@ using Shouldly;
 using Xunit;
 
 [Collection("CatalogRelation")]
+[Trait("Category", "Security")]
 public sealed class Issue177SecurityConditionsTests : IDisposable
 {
     public sealed class Address

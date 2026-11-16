@@ -189,7 +189,7 @@ public static class McpDatasetTools
               "required": ["query"],
               "properties": {
                 "query": { "type": "string", "description": "One GraphQL query operation, e.g. query { sales_public_orders(where: { status: { eq: \"open\" } }, first: 20) { id amount } }." },
-                "variables": { "type": "object", "description": "Optional values for the variables of the query." }
+                "variables": { "type": "object", "additionalProperties": true, "description": "Optional values for the variables of the query." }
               }
             }
             """,
@@ -233,15 +233,14 @@ public static class McpDatasetTools
 
         yield return new McpToolDefinition(
             Name: SampleRows,
-            Description: "Returns a few rows of a dataset, with your row filters and column masking applied, or deterministic synthetic rows when synthetic is true.",
+            Description: "Returns a few rows of a dataset, with your row filters and column masking applied.",
             InputJsonSchema: $$"""
             {
               "type": "object",
               "required": ["dataset"],
               "properties": {
                 "dataset": { "type": "string", "description": "Dataset id as returned by list_datasets (domain.schema.table)." },
-                "count": { "type": "integer", "minimum": 1, "maximum": {{McpDatasetCatalog.MaxSampleRows}}, "description": "Number of rows (default {{McpDatasetCatalog.DefaultSampleRows}})." },
-                "synthetic": { "type": "boolean", "description": "When true, generates profile-conforming synthetic rows without reading real data from the source (default false)." }
+                "count": { "type": "integer", "minimum": 1, "description": "Number of rows (default {{McpDatasetCatalog.DefaultSampleRows}}, at most {{McpDatasetCatalog.MaxSampleRows}}; larger values are capped)." }
               }
             }
             """,
@@ -411,8 +410,8 @@ public static class McpDatasetTools
               "properties": {
                 "endpoint": { "type": "string", "description": "API route path (e.g. '/api/v1/catalog/datasets')." },
                 "method": { "type": "string", "description": "HTTP method (GET, POST, PUT, DELETE)." },
-                "parameters": { "type": "object", "description": "Optional query or route parameters." },
-                "body": { "type": "object", "description": "Optional request body payload." }
+                "parameters": { "type": "object", "additionalProperties": true, "description": "Optional query or route parameters." },
+                "body": { "type": "object", "additionalProperties": true, "description": "Optional request body payload." }
               }
             }
             """,
@@ -427,7 +426,7 @@ public static class McpDatasetTools
               "required": ["procedure_name"],
               "properties": {
                 "procedure_name": { "type": "string", "description": "Stored procedure identifier (with or without 'procedure:' prefix)." },
-                "arguments": { "type": "object", "description": "Key-value map of parameter names to argument values." },
+                "arguments": { "type": "object", "additionalProperties": true, "description": "Key-value map of parameter names to argument values." },
                 "max_rows": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Maximum rows to return (default 100, maximum 1000)." }
               }
             }
@@ -730,32 +729,16 @@ public static class McpDatasetTools
     }
 
     /// <summary>
-    /// Issue #80: <c>sample_rows(synthetic: true)</c> generates synthetic rows from metadata and does not read real rows.
-    /// </summary>
-    public static bool ReadsRows(string? toolName, string? argumentsJson)
-    {
-        if (string.Equals(toolName, SampleRows, StringComparison.OrdinalIgnoreCase) &&
-            TryGetBooleanArgument(argumentsJson, "synthetic", out var isSynthetic) &&
-            isSynthetic)
-        {
-            return false;
-        }
-
-        return ReadsRows(toolName);
-    }
-
-    /// <summary>
-    /// Issue #80: Invokes the <c>sample_rows</c> MCP dataset tool with optional <paramref name="synthetic"/> generation.
+    /// Invokes the <c>sample_rows</c> MCP dataset tool.
     /// </summary>
     public static System.Threading.Tasks.Task<McpDatasetSample> sample_rows(
         Autheris.Application.Mcp.Interfaces.IMcpDatasetCatalog catalog,
         System.Security.Claims.ClaimsPrincipal principal,
         string dataset,
         int? count = null,
-        bool synthetic = false,
         System.Threading.CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(catalog);
-        return catalog.SampleRowsAsync(principal, dataset, count, synthetic, ct);
+        return catalog.SampleRowsAsync(principal, dataset, count, ct);
     }
 }

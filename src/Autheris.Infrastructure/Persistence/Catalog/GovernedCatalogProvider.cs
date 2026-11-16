@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
-using System.Data.Common;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Catalog;
@@ -25,7 +24,7 @@ namespace Autheris.Infrastructure.Persistence.Catalog;
 /// re-validated against a fingerprint of the security-relevant governance inputs (data source, provider, dialect, governed columns,
 /// tenant column), so a governance change takes effect on the next compile and not only after the TTL.
 /// </summary>
-public sealed partial class GovernedCatalogProvider : IGovernedCatalogProvider, IPhysicalKeyCatalog
+public sealed partial class GovernedCatalogProvider : IGovernedCatalogProvider
 {
     private readonly IGovernanceRepository _governance;
     private readonly IOptions<GatewayOptions> _gateway;
@@ -35,13 +34,6 @@ public sealed partial class GovernedCatalogProvider : IGovernedCatalogProvider, 
     private readonly ConcurrentDictionary<(string DataSource, string ConnectionKey, string Schema, string Table), CacheItem> _cache = new();
 
     private readonly record struct CacheItem(TableCatalogEntry Entry, DateTimeOffset ExpiresAt, string Fingerprint);
-
-    internal ISqlConnectionFactory? ConnectionFactory { get; init; }
-    internal IReadOnlyDictionary<TargetSqlDialect, IKeyIndexMetadataReader>? KeyReaders { get; init; }
-
-    private ISqlConnectionFactory? _connectionFactory => ConnectionFactory;
-    private IReadOnlyDictionary<TargetSqlDialect, IKeyIndexMetadataReader> _keyReaders =>
-        KeyReaders ?? ImmutableDictionary<TargetSqlDialect, IKeyIndexMetadataReader>.Empty;
 
     public GovernedCatalogProvider(
         IGovernanceRepository governance,
@@ -59,21 +51,6 @@ public sealed partial class GovernedCatalogProvider : IGovernedCatalogProvider, 
         _ttl = TimeSpan.FromSeconds(options.CacheTtlSeconds);
         _time = time ?? TimeProvider.System;
         _logger = logger ?? NullLogger<GovernedCatalogProvider>.Instance;
-    }
-
-    public GovernedCatalogProvider(
-        IGovernanceRepository governance,
-        IOptions<GatewayOptions> gateway,
-        ISqlConnectionFactory connectionFactory,
-        object? _ignoredReaders,
-        GovernedCatalogOptions options,
-        TimeProvider? time = null,
-        ILogger<GovernedCatalogProvider>? logger = null,
-        IEnumerable<IKeyIndexMetadataReader>? keyReaders = null)
-        : this(governance, gateway, options, time, logger)
-    {
-        ConnectionFactory = connectionFactory;
-        KeyReaders = (keyReaders ?? []).ToDictionary(static r => r.Dialect);
     }
 
     /// <summary>Drops the cached entries of one data source, or of all when <paramref name="dataSourceName"/> is null (metadata reload).</summary>
@@ -298,13 +275,6 @@ public sealed partial class GovernedCatalogProvider : IGovernedCatalogProvider, 
             if (tenantCol is null)
             {
                 LogAdmissionDenied(dataSourceName, table, $"The tenant column '{governedTenant}' is not present in declared columns.");
-                return (null, string.Empty);
-            }
-
-            // With NUMERIC or INTEGER affinity '007' and '7' compare equal: such a column cannot isolate tenants.
-            if (dialect == DatabaseDialect.Sqlite && SqliteTypeAffinity.Of(tenantCol.DataType) != SqliteAffinity.TextAffinity)
-            {
-                LogAdmissionDenied(dataSourceName, table, $"The tenant column '{governedTenant}' in SQLite must have text affinity.");
                 return (null, string.Empty);
             }
 

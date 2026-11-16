@@ -7,8 +7,13 @@ namespace Autheris.Tests.Unit.AccessProfiles;
 
 /// <summary>WP-SC-03 / SEC-SC-04 / SEC-SC-20: the matrix of the assignment rules (write validation, read-time effectiveness, precedence).</summary>
 [Trait("Category", "Security")]
-public sealed class AccessProfileAssignmentRulesTests
+[Collection("IndividualGrantLimits")]
+public sealed class AccessProfileAssignmentRulesTests : IDisposable
 {
+    public AccessProfileAssignmentRulesTests() => IndividualGrantLimits.Reset();
+
+    public void Dispose() => IndividualGrantLimits.Reset();
+
     private static readonly DateTimeOffset Now = new(2026, 10, 16, 12, 0, 0, TimeSpan.Zero);
     private static readonly TenantId Tenant = new("tenant-a");
 
@@ -40,8 +45,18 @@ public sealed class AccessProfileAssignmentRulesTests
         Rejected(() => AccessProfileAssignmentRules.ValidateForAssignment(Profile(MaskingPolicyMode.Default), User(days: -1), Now), AccessProfileAssignmentRules.ExpiryInThePast);
 
     [Fact]
-    public void RegularIndividualGrant_IsLimitedTo180Days()
+    public void IndividualGrant_WithoutConfiguredLimit_IsNotCappedByACompiledInCeiling()
     {
+        foreach (var mode in Enum.GetValues<MaskingPolicyMode>())
+        {
+            AccessProfileAssignmentRules.ValidateForAssignment(Profile(mode), User(days: 3 * 365), Now);
+        }
+    }
+
+    [Fact]
+    public void RegularIndividualGrant_IsLimitedToTheConfiguredLimit()
+    {
+        IndividualGrantLimits.Configure(TimeSpan.FromDays(180), null, null);
         AccessProfileAssignmentRules.ValidateForAssignment(Profile(MaskingPolicyMode.Strict), User(days: 180), Now);
         Rejected(() => AccessProfileAssignmentRules.ValidateForAssignment(Profile(MaskingPolicyMode.Strict), User(days: 181), Now), AccessProfileAssignmentRules.TooLong);
     }
@@ -60,8 +75,9 @@ public sealed class AccessProfileAssignmentRulesTests
             AccessProfileAssignmentRules.FourEyesRequired);
 
     [Fact]
-    public void IndividualUnmasked_IsLimitedTo30Days()
+    public void IndividualUnmasked_IsLimitedToTheConfiguredLimit()
     {
+        IndividualGrantLimits.Configure(null, TimeSpan.FromDays(30), null);
         AccessProfileAssignmentRules.ValidateForAssignment(Profile(MaskingPolicyMode.Unmasked), User(days: 30), Now);
         Rejected(() => AccessProfileAssignmentRules.ValidateForAssignment(Profile(MaskingPolicyMode.Unmasked), User(days: 31), Now), AccessProfileAssignmentRules.TooLong);
     }
@@ -103,6 +119,7 @@ public sealed class AccessProfileAssignmentRulesTests
     [Fact]
     public void LegacyIndividualAssignmentWithoutExpiry_IsClampedAndInactiveAfterTheClamp()
     {
+        IndividualGrantLimits.Configure(TimeSpan.FromDays(180), null, null);
         var regular = Profile(MaskingPolicyMode.Default);
         var legacy = User(days: null, created: null, approved: null, why: null);
 
@@ -114,6 +131,7 @@ public sealed class AccessProfileAssignmentRulesTests
     [Fact]
     public void LegacyIndividualAssignmentOverTheLimit_IsClampedToTheMaximum()
     {
+        IndividualGrantLimits.Configure(null, TimeSpan.FromDays(30), null);
         var unmasked = Profile(MaskingPolicyMode.Unmasked);
         var longGrant = User(days: 300);
 
@@ -166,6 +184,7 @@ public sealed class AccessProfileAssignmentRulesTests
     [Fact]
     public void ProfileClamp_AppliesToLegacyProfilesOnly_AssignmentBackedProfilesAreBoundedPerAssignment()
     {
+        IndividualGrantLimits.Configure(null, TimeSpan.FromDays(30), null);
         var legacy = Profile(MaskingPolicyMode.Unmasked);
         legacy.IsActive(Now).ShouldBeFalse(); // created 400 days ago, no assignments: clamped to 30 days
 

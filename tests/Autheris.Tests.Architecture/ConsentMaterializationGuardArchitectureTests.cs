@@ -13,10 +13,16 @@ namespace Autheris.Tests.Architecture;
 [Trait("Category", "Security")]
 public sealed class ConsentMaterializationGuardArchitectureTests
 {
-    private static readonly string[] RepositoryFiles = ["GovernanceRepository.Consent.cs"];
+    private static readonly string[] RepositoryFiles =
+    [
+        "GovernanceRepository.Consent.cs",
+        "GovernanceRepository.ConsentWorkflow.cs",
+        "GovernanceRepository.ConsentGrants.cs"
+    ];
 
-    // Shared insert helper used by CreateConsentAsync / the atomic approval; the seam (decorator or the atomic method) guards it.
+    // Shared insert helper used by CreateConsentAsync / ReplaceConsentsCoreAsync / atomic approvals; the seam (decorator or the atomic method) guards it.
     private const string SharedInsert = "InsertConsentCoreAsync";
+    private const string GrantWriterInsert = "InsertAndGrantAsync";
 
     private static readonly Regex MemberStart = new(@"^    (?:public|private|internal|protected)[^=;(]*\s(\w+)\(", RegexOptions.Compiled);
 
@@ -61,34 +67,63 @@ public sealed class ConsentMaterializationGuardArchitectureTests
     public void EveryConsentInsertSiteCallsMaterializationGuard()
     {
         var root = FindRepositoryRoot();
+        var persistenceDir = Path.Combine(root, "src", "Autheris.Infrastructure", "Persistence");
         var violations = new List<string>();
+
+        // 1. All raw INSERT INTO CONSENTS SQL is centralized in GrantRecordSqlCore.cs and executed only by InsertConsentRowAsync.
+        var nonMigrationFiles = Directory.EnumerateFiles(persistenceDir, "*.cs", SearchOption.AllDirectories)
+            .Where(p => !p.Replace('\\', '/').Contains("/Migrations/", StringComparison.Ordinal))
+            .ToList();
+        var rawInsertFiles = nonMigrationFiles
+            .Where(f => File.ReadAllText(f).Contains("INSERT INTO CONSENTS", StringComparison.Ordinal))
+            .Select(f => Path.GetFileName(f))
+            .ToList();
+        rawInsertFiles.ShouldBe(["GrantRecordSqlCore.cs"]);
+
+        var grantCoreMethods = Methods(Path.Combine(persistenceDir, "GrantRecordSqlCore.cs"));
+        var rowInsertCallers = grantCoreMethods
+            .Where(kv => kv.Value.Contains("InsertConsentSql", StringComparison.Ordinal))
+            .Select(kv => kv.Key)
+            .ToList();
+        rowInsertCallers.ShouldBe(["InsertConsentRowAsync"]);
+
+        // 2. GrantWriter.InsertAndGrantAsync is the single Application-layer caller of InsertConsentRowAsync.
+        var grantWriterMethods = Methods(Path.Combine(root, "src", "Autheris.Application", "Governance", "Grants", "Records", "GrantWriter.cs"));
+        var writerCallers = grantWriterMethods
+            .Where(kv => kv.Value.Contains("InsertConsentRowAsync", StringComparison.Ordinal))
+            .Select(kv => kv.Key)
+            .ToList();
+        writerCallers.ShouldBe([GrantWriterInsert]);
+
+        // 3. In the governance consent repositories, every method reaching InsertAndGrantAsync or InsertConsentCoreAsync
+        // (outside the AttributeValidatingConsentRepository-decorated CreateConsentAsync / ReplaceConsentsCoreAsync)
+        // must call EnsureMayMaterializeAsync.
+        var decoratedEntries = new HashSet<string>(StringComparer.Ordinal) { "CreateConsentAsync", "ReplaceConsentsCoreAsync" };
+        bool foundSharedInsert = false;
 
         foreach (var repoFile in RepositoryFiles)
         {
-            var file = Path.Combine(root, "src", "Autheris.Infrastructure", "Persistence", repoFile);
+            var file = Path.Combine(persistenceDir, repoFile);
             var methods = Methods(file);
-
-            var insertSites = methods.Where(kv => kv.Value.Contains("INSERT INTO CONSENTS", StringComparison.Ordinal)).Select(kv => kv.Key).ToList();
-            insertSites.ShouldContain(SharedInsert, $"{repoFile}: the shared consent insert helper was not found (rename the architecture rule together with it).");
-
-            foreach (var site in insertSites.Where(s => s != SharedInsert))
+            if (methods.ContainsKey(SharedInsert))
             {
-                if (!methods[site].Contains("EnsureMayMaterializeAsync(", StringComparison.Ordinal))
-                {
-                    violations.Add($"{repoFile}: {site} inserts into CONSENTS without calling the materialisation guard");
-                }
+                foundSharedInsert = true;
             }
 
-            // Entry points that reach the shared insert while bypassing the IConsentRepository decorator.
-            foreach (var entry in methods.Where(kv => kv.Value.Contains(SharedInsert + "(", StringComparison.Ordinal) && kv.Key != SharedInsert && kv.Key != "CreateConsentAsync"))
+            foreach (var entry in methods.Where(kv =>
+                         kv.Key != SharedInsert &&
+                         !decoratedEntries.Contains(kv.Key) &&
+                         (kv.Value.Contains(SharedInsert + "(", StringComparison.Ordinal) ||
+                          kv.Value.Contains(GrantWriterInsert + "(", StringComparison.Ordinal))))
             {
                 if (!entry.Value.Contains("EnsureMayMaterializeAsync(", StringComparison.Ordinal))
                 {
-                    violations.Add($"{repoFile}: {entry.Key} reaches {SharedInsert} without calling the materialisation guard");
+                    violations.Add($"{repoFile}: {entry.Key} reaches consent insert without calling the materialisation guard");
                 }
             }
         }
 
+        foundSharedInsert.ShouldBeTrue($"The shared consent insert helper '{SharedInsert}' was not found.");
         violations.ShouldBeEmpty(string.Join(Environment.NewLine, violations));
     }
 }

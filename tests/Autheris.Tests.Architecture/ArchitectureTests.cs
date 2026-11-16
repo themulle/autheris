@@ -382,7 +382,7 @@ public class ArchitectureTests
             .Count.ShouldBe(2);
     }
 
-    /// <summary>Mutation check of 12.1 #7: a dummy Sqlite governance type is flagged, the data-source guards are not.</summary>
+    /// <summary>Mutation check of 12.1 #7: a dummy Sqlite governance type is flagged, and data-source SQLite guards are removed.</summary>
     [Fact]
     [Trait("Category", "Security")]
     public void No_Sqlite_governance_types_detector_flags_a_dummy_type_and_spares_data_source_guards()
@@ -391,9 +391,8 @@ public class ArchitectureTests
         var guards = infrastructure.GetTypes()
             .Where(t => t.Name is "SqliteExecutionGuard" or "SqliteProviderExecutionGuard")
             .ToList();
-        guards.Count.ShouldBe(2, "the data-source SQLite guards stay (WP-SIMPL-31)");
+        guards.ShouldBeEmpty("the data-source SQLite guards were removed (WP-SIMPL-31)");
 
-        FindSqliteGovernanceTypes(guards).ShouldBeEmpty();
         FindSqliteGovernanceTypes([typeof(SqliteMutationGovernanceStoreDummy)]).ShouldHaveSingleItem();
         FindSqliteGovernanceTypes([typeof(SqliteBaselineSchema), typeof(SqliteSchemaCatalogReader)]).Count.ShouldBe(2);
     }

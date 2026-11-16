@@ -21,6 +21,7 @@ using Shouldly;
 using Xunit;
 
 /// <summary>Issue #447 WP-4 (REQ-ATR-08, SEC-ATR-08): the GraphQL catalog schema omits tables whose source does not allow GraphQL.</summary>
+[Collection("CatalogRelation")]
 [Trait("Category", "Security")]
 public sealed class CatalogTransportDiscoveryTests
 {

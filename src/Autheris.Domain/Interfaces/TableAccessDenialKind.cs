@@ -16,6 +16,6 @@ public enum TableAccessDenialKind
     /// <summary>An active DENY consent applies. Final.</summary>
     ConsentDeny = 2,
 
-    /// <summary>A policy stage denied (Casbin, contract, virtual filter, plugin, profile, tenant, inactive table). Final.</summary>
+    /// <summary>A policy stage denied (contract, virtual filter, plugin, profile, tenant, inactive table). Final.</summary>
     Policy = 3
 }

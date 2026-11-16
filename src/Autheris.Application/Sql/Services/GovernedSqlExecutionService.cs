@@ -99,7 +99,8 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
             execution.AuditDigester,
             execution.TransportGate,
             execution.CostQuota,
-            execution.PageTokenCodec);
+            execution.PageTokenCodec,
+            execution.WriteBudgetStore);
     }
 
     /// <summary>Fail-closed: a cross-source query without a federated executor is rejected, never executed locally.</summary>
@@ -315,7 +316,10 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
         {
             var lvl = decision.GetEffectiveColumnAccess(col.ColumnName, tableMeta);
             bool isEffectiveHmac = false;
-            if (lvl == ColumnAccessLevel.Mask && tableMeta.ColumnMaskingRules != null && tableMeta.ColumnMaskingRules.TryGetValue(col.ColumnName, out var rule))
+            if (lvl == ColumnAccessLevel.Mask &&
+                decision.GetColumnAccess(col.ColumnName) != ColumnAccessLevel.RowDependent &&
+                tableMeta.ColumnMaskingRules != null &&
+                tableMeta.ColumnMaskingRules.TryGetValue(col.ColumnName, out var rule))
             {
                 if (string.Equals(rule.RuleType, "HMAC", StringComparison.OrdinalIgnoreCase))
                 {
@@ -549,7 +553,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         replacedNames = names;
         bool hasGateway = gatewayParameters is { Count: > 0 };
-        if ((!hasGateway && (parameters == null || parameters.Count == 0)) || sql.IndexOf('@') < 0)
+        if ((!hasGateway && (parameters == null || parameters.Count == 0)) || sql.IndexOf('@', StringComparison.Ordinal) < 0)
         {
             return sql;
         }

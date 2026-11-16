@@ -1,5 +1,7 @@
+using System.Collections.Generic;
 using Autheris.Application.Policy;
 using Autheris.Application.Sql.Policy;
+using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using TrinoSqlEngine;
@@ -23,7 +25,7 @@ internal static class TypedTreeRowPolicy
         var namer = new PolicyParameterNamer("__rf_");
         var parameter = namer.Add(new PolicyValue(value, type));
         var expression = new BinaryExpression(PolicyParameterNamer.Column(column), op, parameter);
-        return new PolicyPredicateRowPolicy(PolicyPredicate.Create(expression, namer.Values), TargetSqlDialect.Sqlite, Renderer);
+        return new PolicyPredicateRowPolicy(PolicyPredicate.Create(expression, namer.Values), TargetSqlDialect.PostgreSql, Renderer);
     }
 
     public static IRowPolicy Int(string column, BinaryOperator op, long value) => Where(column, op, value, SqlParameterType.Int64);

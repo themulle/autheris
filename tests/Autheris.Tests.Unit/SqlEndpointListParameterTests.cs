@@ -54,7 +54,7 @@ public sealed class SqlEndpointListParameterTests
     public async Task Post_ArrayBody_IsAList_StoredUnderBothSpellings()
     {
         var (service, captured) = Service(null, ListOf(typeof(int)));
-        await service.ExecuteEndpointAsync("q", new Dictionary<string, object?> { ["ids"] = Json("[3, 1, 3, 2]") }, User, Tenant);
+        await service.ExecuteEndpointAsync("q", new Dictionary<string, object?> { ["ids"] = Json("[3, 1, 3, 2]") }, User, Tenant, SqlEndpointInvocation.Post);
 
         var request = captured()!;
         Elements(Captured(request)).ShouldBe(new object[] { 3, 1, 2 });
@@ -66,7 +66,7 @@ public sealed class SqlEndpointListParameterTests
     public async Task Get_RepeatedKey_AsClrList_IsAList_ElementsAreCoerced()
     {
         var (service, captured) = Service(null, ListOf(typeof(long)));
-        await service.ExecuteEndpointAsync("q", new Dictionary<string, object?> { ["ids"] = new List<object?> { "10", "20" } }, User, Tenant);
+        await service.ExecuteEndpointAsync("q", new Dictionary<string, object?> { ["ids"] = new List<object?> { "10", "20" } }, User, Tenant, SqlEndpointInvocation.Get);
         Elements(Captured(captured()!)).ShouldBe(new object[] { 10L, 20L });
     }
 
@@ -74,14 +74,14 @@ public sealed class SqlEndpointListParameterTests
     public async Task SingleValue_IsAOneElementList_AndACommaSeparatedValueIsOneString()
     {
         var (service, captured) = Service(null, ListOf(typeof(string)));
-        await service.ExecuteEndpointAsync("q", new Dictionary<string, object?> { ["ids"] = "a,b,c" }, User, Tenant);
+        await service.ExecuteEndpointAsync("q", new Dictionary<string, object?> { ["ids"] = "a,b,c" }, User, Tenant, SqlEndpointInvocation.Get);
         Elements(Captured(captured()!)).ShouldBe(new object[] { "a,b,c" });
 
-        await service.ExecuteEndpointAsync("q", new Dictionary<string, object?> { ["ids"] = Json("\"x\"") }, User, Tenant);
+        await service.ExecuteEndpointAsync("q", new Dictionary<string, object?> { ["ids"] = Json("\"x\"") }, User, Tenant, SqlEndpointInvocation.Post);
         Elements(Captured(captured()!)).ShouldBe(new object[] { "x" });
 
         var (intService, intCaptured) = Service(null, ListOf(typeof(int)));
-        await intService.ExecuteEndpointAsync("q", new Dictionary<string, object?> { ["ids"] = Json("7") }, User, Tenant);
+        await intService.ExecuteEndpointAsync("q", new Dictionary<string, object?> { ["ids"] = Json("7") }, User, Tenant, SqlEndpointInvocation.Post);
         Elements(Captured(intCaptured()!)).ShouldBe(new object[] { 7 });
     }
 
@@ -89,7 +89,7 @@ public sealed class SqlEndpointListParameterTests
     public async Task GuidList_IsBoundAsCanonicalText()
     {
         var (service, captured) = Service(null, ListOf(typeof(Guid)));
-        await service.ExecuteEndpointAsync("q", new Dictionary<string, object?> { ["ids"] = Json("[\"0F8FAD5B-D9CB-469F-A165-70867728950E\"]") }, User, Tenant);
+        await service.ExecuteEndpointAsync("q", new Dictionary<string, object?> { ["ids"] = Json("[\"0F8FAD5B-D9CB-469F-A165-70867728950E\"]") }, User, Tenant, SqlEndpointInvocation.Post);
         var list = Captured(captured()!);
         list.ElementType.ShouldBe(SqlParameterType.String);
         list[0].ShouldBe("0f8fad5b-d9cb-469f-a165-70867728950e");
@@ -99,7 +99,7 @@ public sealed class SqlEndpointListParameterTests
     public async Task DateList_WithoutOffset_UsesUtc()
     {
         var (service, captured) = Service(null, ListOf(typeof(DateTimeOffset)));
-        await service.ExecuteEndpointAsync("q", new Dictionary<string, object?> { ["ids"] = Json("[\"2026-03-04T05:06:07\"]") }, User, Tenant);
+        await service.ExecuteEndpointAsync("q", new Dictionary<string, object?> { ["ids"] = Json("[\"2026-03-04T05:06:07\"]") }, User, Tenant, SqlEndpointInvocation.Post);
         ((DateTimeOffset)Captured(captured()!)[0]).Offset.ShouldBe(TimeSpan.Zero);
     }
 
@@ -107,15 +107,15 @@ public sealed class SqlEndpointListParameterTests
     public async Task Default_IsUsedWhenAbsent_AndMissingRequiredListIsRefused()
     {
         var (service, captured) = Service(null, ListOf(typeof(string), required: false, @default: new List<object?> { "a", "b" }));
-        await service.ExecuteEndpointAsync("q", new Dictionary<string, object?>(), User, Tenant);
+        await service.ExecuteEndpointAsync("q", new Dictionary<string, object?>(), User, Tenant, SqlEndpointInvocation.Get);
         Elements(Captured(captured()!)).ShouldBe(new object[] { "a", "b" });
 
         var (emptyDefault, emptyCaptured) = Service(null, ListOf(typeof(string), required: false, @default: new List<object?>()));
-        await emptyDefault.ExecuteEndpointAsync("q", new Dictionary<string, object?>(), User, Tenant);
+        await emptyDefault.ExecuteEndpointAsync("q", new Dictionary<string, object?>(), User, Tenant, SqlEndpointInvocation.Get);
         Captured(emptyCaptured()!).Count.ShouldBe(0);
 
         var (required, _) = Service(null, ListOf(typeof(string)));
-        await Should.ThrowAsync<ArgumentException>(() => required.ExecuteEndpointAsync("q", new Dictionary<string, object?>(), User, Tenant));
+        await Should.ThrowAsync<ArgumentException>(() => required.ExecuteEndpointAsync("q", new Dictionary<string, object?>(), User, Tenant, SqlEndpointInvocation.Get));
     }
 
     [Theory]
@@ -127,7 +127,7 @@ public sealed class SqlEndpointListParameterTests
     {
         var (service, _) = Service(null, ListOf(typeof(int)));
         var ex = await Should.ThrowAsync<ClientListException>(() =>
-            service.ExecuteEndpointAsync("q", new Dictionary<string, object?> { ["ids"] = Json(json) }, User, Tenant));
+            service.ExecuteEndpointAsync("q", new Dictionary<string, object?> { ["ids"] = Json(json) }, User, Tenant, SqlEndpointInvocation.Post));
         ex.Code.ShouldBe(code);
     }
 
@@ -137,7 +137,7 @@ public sealed class SqlEndpointListParameterTests
         var options = Options.Create(new GatewayOptions { WebSql = new WebSqlOptions { MaxListParameterValues = 3 } });
         var (service, _) = Service(options, ListOf(typeof(int)));
         var ex = await Should.ThrowAsync<ClientListException>(() =>
-            service.ExecuteEndpointAsync("q", new Dictionary<string, object?> { ["ids"] = Json("[1,2,3,4]") }, User, Tenant));
+            service.ExecuteEndpointAsync("q", new Dictionary<string, object?> { ["ids"] = Json("[1,2,3,4]") }, User, Tenant, SqlEndpointInvocation.Post));
         ex.Code.ShouldBe("SQL_LIST_PARAM_TOO_LARGE");
     }
 
@@ -148,7 +148,7 @@ public sealed class SqlEndpointListParameterTests
     {
         var (service, _) = Service(null, ListOf(typeof(int)));
         var ex = await Should.ThrowAsync<ClientListException>(() =>
-            service.ExecuteEndpointAsync("q", new Dictionary<string, object?> { ["ids"] = Json("[\"super-secret\"]") }, User, Tenant));
+            service.ExecuteEndpointAsync("q", new Dictionary<string, object?> { ["ids"] = Json("[\"super-secret\"]") }, User, Tenant, SqlEndpointInvocation.Post));
         ex.Message.ShouldNotContain("secret");
         ex.ToString().ShouldNotContain("secret");
     }
@@ -161,7 +161,7 @@ public sealed class SqlEndpointListParameterTests
     {
         var (service, _) = Service(null, new SqlEndpointParameter("note", "@note", typeof(string)), ListOf(typeof(int), required: false));
         var ex = await Should.ThrowAsync<ClientListException>(() =>
-            service.ExecuteEndpointAsync("q", new Dictionary<string, object?> { ["note"] = Json(json) }, User, Tenant));
+            service.ExecuteEndpointAsync("q", new Dictionary<string, object?> { ["note"] = Json(json) }, User, Tenant, SqlEndpointInvocation.Post));
         ex.Code.ShouldBe("SQL_LIST_PARAM_TYPE");
         ex.Message.ShouldBe(GovernedSqlErrorCodes.FixedMessage("SQL_LIST_PARAM_TYPE"));
     }
@@ -172,14 +172,14 @@ public sealed class SqlEndpointListParameterTests
     {
         var (service, _) = Service(null, new SqlEndpointParameter("note", "@note", typeof(string)), ListOf(typeof(int), required: false));
         await Should.ThrowAsync<ClientListException>(() =>
-            service.ExecuteEndpointAsync("q", new Dictionary<string, object?> { ["note"] = new List<object?> { "x", "y" } }, User, Tenant));
+            service.ExecuteEndpointAsync("q", new Dictionary<string, object?> { ["note"] = new List<object?> { "x", "y" } }, User, Tenant, SqlEndpointInvocation.Get));
     }
 
     [Fact]
     public async Task ExistingScalarCoercion_IsUnchanged()
     {
         var (service, captured) = Service(null, new SqlEndpointParameter("note", "@note", typeof(int)), ListOf(typeof(int), required: false));
-        await service.ExecuteEndpointAsync("q", new Dictionary<string, object?> { ["note"] = "5" }, User, Tenant);
+        await service.ExecuteEndpointAsync("q", new Dictionary<string, object?> { ["note"] = "5" }, User, Tenant, SqlEndpointInvocation.Get);
         captured()!.Parameters!["note"].ShouldBe(5);
     }
 
@@ -196,7 +196,7 @@ public sealed class SqlEndpointListParameterTests
         context.User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1"), new Claim("tenant_id", "tenant-1")], "Test"));
         var execution = Substitute.For<ISqlEndpointExecutionService>();
         IReadOnlyDictionary<string, object?>? inputs = null;
-        execution.ExecuteEndpointAsync(Arg.Any<string>(), Arg.Do<IReadOnlyDictionary<string, object?>?>(i => inputs = i), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+        execution.ExecuteEndpointAsync(Arg.Any<string>(), Arg.Do<IReadOnlyDictionary<string, object?>?>(i => inputs = i), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<SqlEndpointInvocation>(), Arg.Any<CancellationToken>())
             .Returns(new GovernedSqlResult("q", ["id"], [], 0, 0));
         return (context, execution, () => inputs);
     }
@@ -242,7 +242,7 @@ public sealed class SqlEndpointListParameterTests
         string body = await new StreamReader(context.Response.Body).ReadToEndAsync();
         body.ShouldContain("SQL_LIST_PARAM_TYPE");
         body.ShouldNotContain("secret");
-        await execution.DidNotReceiveWithAnyArgs().ExecuteEndpointAsync(default!, default, default!, default, default);
+        await execution.DidNotReceiveWithAnyArgs().ExecuteEndpointAsync(default!, default, default!, default, default, default);
     }
 
     [Theory]
@@ -265,7 +265,7 @@ public sealed class SqlEndpointListParameterTests
         await SqlEndpointRoutes.HandleGetEndpoint("customers", context, execution, Options.Create(new GatewayOptions()), NullLoggerFactory.Instance);
 
         context.Response.StatusCode.ShouldBe(500);
-        await execution.DidNotReceiveWithAnyArgs().ExecuteEndpointAsync(default!, default, default!, default, default);
+        await execution.DidNotReceiveWithAnyArgs().ExecuteEndpointAsync(default!, default, default!, default, default, default);
         context.Response.Body.Seek(0, SeekOrigin.Begin);
         (await new StreamReader(context.Response.Body).ReadToEndAsync()).ShouldNotContain("a,b");
     }
@@ -275,7 +275,7 @@ public sealed class SqlEndpointListParameterTests
     public async Task Rest_ListError_IsMappedWithAStableCode_AndFixedMessage()
     {
         var (context, execution, _) = RouteContext("");
-        execution.ExecuteEndpointAsync(Arg.Any<string>(), Arg.Any<IReadOnlyDictionary<string, object?>?>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+        execution.ExecuteEndpointAsync(Arg.Any<string>(), Arg.Any<IReadOnlyDictionary<string, object?>?>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<SqlEndpointInvocation>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromException<GovernedSqlResult>(new ClientListException("SQL_LIST_PARAM_TOO_LARGE")));
 
         await SqlEndpointRoutes.HandleGetEndpoint("customers", context, execution, Options.Create(new GatewayOptions()), NullLoggerFactory.Instance);
@@ -297,7 +297,7 @@ public sealed class SqlEndpointListParameterTests
         context.RequestServices = new ServiceCollection().AddSingleton(env).BuildServiceProvider();
         context.Request.Body = new MemoryStream(System.Text.Encoding.UTF8.GetBytes("{\"ids\":[1,2]}"));
         context.Request.ContentLength = 13;
-        execution.ExecuteEndpointAsync(Arg.Any<string>(), Arg.Any<IReadOnlyDictionary<string, object?>?>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+        execution.ExecuteEndpointAsync(Arg.Any<string>(), Arg.Any<IReadOnlyDictionary<string, object?>?>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<SqlEndpointInvocation>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromException<GovernedSqlResult>(new ClientListException("SQL_LIST_PARAM_POSITION")));
 
         await SqlEndpointRoutes.HandlePostEndpoint("customers", context, execution, Options.Create(new GatewayOptions()), NullLoggerFactory.Instance);

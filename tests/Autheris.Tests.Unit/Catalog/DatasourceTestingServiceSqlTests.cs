@@ -9,7 +9,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;
-using Microsoft.Data.Sqlite;
+using Autheris.Tests.Common.Fakes;
 using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
@@ -19,7 +19,8 @@ public sealed class DatasourceTestingServiceSqlTests
 {
     private const string Source = "gateway_lwe";
 
-    private readonly ITableMetadataRepository _metadataRepo = Substitute.For<ITableMetadataRepository>();
+    private readonly ITableMetadataRepository _metadataRepo =
+        global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
     private readonly IAuditLogRepository _auditRepo = Substitute.For<IAuditLogRepository>();
     private readonly ISqlConnectionFactory _factory = Substitute.For<ISqlConnectionFactory>();
 
@@ -53,7 +54,7 @@ public sealed class DatasourceTestingServiceSqlTests
     public async Task OpenSucceeds_ReportsRealHostPortAndAuthPath()
     {
         _factory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
-            .Returns(_ => Task.FromResult<DbConnection>(new SqliteConnection()));
+            .Returns(_ => Task.FromResult<DbConnection>(new StubJsonDbConnection("[]")));
 
         var result = await CreateService().TestDatasourceAsync(Source, new DatasourceTestRequest(), Admin());
 

@@ -9,11 +9,16 @@ using Autheris.Application.Audit;
 using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Catalog.Semantic;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.ConsentRequests;
+using Autheris.Application.ConsentRequests.Events;
+using Autheris.Application.ConsentRequests.Routing;
 using Autheris.Application.Events.Interfaces;
+using Autheris.Application.Governance.Grants;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Lineage;
 using Autheris.Application.Policy.Interfaces;
 using Autheris.Application.Streaming.Interfaces;
+using Autheris.Application.Usage;
 using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -81,6 +86,7 @@ public sealed class GovernanceTestStore : IAsyncDisposable
         _serviceProvider ?? throw new InvalidOperationException($"GovernanceTestStore ({Engine}) is not available.");
 
     public IGovernanceRepository Repository => Services.GetRequiredService<IGovernanceRepository>();
+    public IUsageRepository Usage => Services.GetRequiredService<IUsageRepository>();
     public IGovernanceStoreInitializer StoreInitializer => Services.GetRequiredService<IGovernanceStoreInitializer>();
     public IGovernanceMigrationRunner MigrationRunner => Services.GetRequiredService<IGovernanceMigrationRunner>();
     public ITableMetadataRepository TableMetadata => Services.GetRequiredService<ITableMetadataRepository>();
@@ -94,7 +100,6 @@ public sealed class GovernanceTestStore : IAsyncDisposable
     public IPolicyEpochRepository PolicyEpochs => Services.GetRequiredService<IPolicyEpochRepository>();
     public IDataOwnershipRepository DataOwnership => Services.GetRequiredService<IDataOwnershipRepository>();
     public IDataOwnerAssignmentRepository DataOwnerAssignments => Services.GetRequiredService<IDataOwnerAssignmentRepository>();
-    public IPhysicalIndexRepository PhysicalIndexes => Services.GetRequiredService<IPhysicalIndexRepository>();
     public ITableRelationRepository TableRelations => Services.GetRequiredService<ITableRelationRepository>();
     public IVirtualFilterRepository VirtualFilters => Services.GetRequiredService<IVirtualFilterRepository>();
     public ICallerAttributeRepository CallerAttributes => Services.GetRequiredService<ICallerAttributeRepository>();
@@ -109,6 +114,10 @@ public sealed class GovernanceTestStore : IAsyncDisposable
     public ICdcStreamStore CdcStreams => Services.GetRequiredService<ICdcStreamStore>();
     public ICdcStreamKeyStore CdcStreamKeys => Services.GetRequiredService<ICdcStreamKeyStore>();
     public ICloudEventSubscriptionStore CloudEventSubscriptions => Services.GetRequiredService<ICloudEventSubscriptionStore>();
+    public IConsentWorkflowConfigRepository ConsentWorkflowConfig => Services.GetRequiredService<IConsentWorkflowConfigRepository>();
+    public IConsentWorkflowAdminRepository ConsentWorkflowAdmin => Services.GetRequiredService<IConsentWorkflowAdminRepository>();
+    public IConsentEventOutbox ConsentEventOutbox => Services.GetRequiredService<IConsentEventOutbox>();
+    public IGrantExpiryStore GrantExpiry => Services.GetRequiredService<IGrantExpiryStore>();
 
     public void SetCaller(CallerContext? caller) => _callerProvider.Current = caller;
 
@@ -222,7 +231,10 @@ public sealed class GovernanceTestStore : IAsyncDisposable
             {
                 ["Gateway:GovernanceDb:Provider"] = gatewayOptions.GovernanceDb.Provider,
                 ["Gateway:GovernanceDb:ConnectionString"] = gatewayOptions.GovernanceDb.ConnectionString,
-                ["Gateway:CdcWebhooks:Enabled"] = "true"
+                ["Gateway:CdcWebhooks:Enabled"] = "true",
+                ["Gateway:Governance:Grants:DefaultDuration"] = "P2W",
+                ["Gateway:Governance:Grants:MaxDuration"] = "P2M",
+                ["Gateway:Governance:Grants:DeclarativeMaxDuration"] = "P2M"
             })
             .Build();
 

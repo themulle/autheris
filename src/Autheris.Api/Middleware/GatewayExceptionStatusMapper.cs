@@ -43,6 +43,7 @@ internal static class GatewayExceptionStatusMapper
         GatewayInvalidQueryException => StatusCodes.Status400BadRequest,
         GatewayThrottledException => StatusCodes.Status429TooManyRequests,
         Autheris.Application.Audit.AuditUnavailableException => StatusCodes.Status503ServiceUnavailable,
+        Autheris.Application.Governance.Grants.Records.GrantRecordUnavailableException => StatusCodes.Status503ServiceUnavailable,
         GatewayNotImplementedException => StatusCodes.Status501NotImplemented,
         GatewayUnsupportedColumnTypeException => StatusCodes.Status501NotImplemented,
         NotSupportedException => StatusCodes.Status501NotImplemented,

@@ -108,16 +108,21 @@ public sealed class ScimAuthenticationHandler : AuthenticationHandler<Authentica
             return Task.FromResult(AuthenticateResult.Fail(InvalidCredentialsMessage));
         }
 
-        // Security review: the secret holder gets only the dedicated provisioner role, never ClusterAdmin.
-        var claims = new[]
+        // Security review: the secret holder gets only the dedicated provisioner role, never ClusterAdmin,
+        // and tenant binding comes exclusively from the realm configuration (never client headers like X-Tenant-ID).
+        var claims = new System.Collections.Generic.List<Claim>
         {
-            new Claim(ClaimTypes.Name, $"scim-client:{realmId}"),
-            new Claim(ClaimTypes.NameIdentifier, $"scim-client:{realmId}"),
-            new Claim(ClaimTypes.PrimarySid, $"scim-client:{realmId}"),
-            new Claim("sub", $"scim-client:{realmId}"),
-            new Claim("autheris:realm", realmId),
-            new Claim(ClaimTypes.Role, GatewayPolicies.ScimProvisionerRole)
+            new(ClaimTypes.Name, $"scim-client:{realmId}"),
+            new(ClaimTypes.NameIdentifier, $"scim-client:{realmId}"),
+            new(ClaimTypes.PrimarySid, $"scim-client:{realmId}"),
+            new("sub", $"scim-client:{realmId}"),
+            new("autheris:realm", realmId),
+            new(ClaimTypes.Role, GatewayPolicies.ScimProvisionerRole)
         };
+        if (!string.IsNullOrWhiteSpace(realmConfig.FixedTenantId))
+        {
+            claims.Add(new Claim("tenant_id", realmConfig.FixedTenantId));
+        }
 
         var identity = new ClaimsIdentity(claims, GatewayAuthSchemes.Scim);
         var principal = new ClaimsPrincipal(identity);

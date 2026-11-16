@@ -87,7 +87,7 @@ public sealed class AnalyticsPrivacyOptions
     /// or primary key column) on a column that is not a group-by column is rejected.
     /// </summary>
     public bool RestrictNegatedFilters { get; set; } = true;
-    public bool ExposeSuppressedGroupsCount { get; set; } = true;
+    public bool ExposeSuppressedGroupsCount { get; set; } = false;
     public Dictionary<string, DatasetPrivacyOverrideOptions> Datasets { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 

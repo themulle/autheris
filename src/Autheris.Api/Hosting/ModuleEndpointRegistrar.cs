@@ -233,7 +233,7 @@ public sealed class ModuleEndpointRegistrar : IModuleEndpointRegistrar
         foreach (var candidate in RouteCandidates(prefix))
         {
             if (candidate.Contains("//", StringComparison.Ordinal) ||
-                candidate.Contains('\\') ||
+                candidate.Contains('\\', StringComparison.Ordinal) ||
                 candidate.Split('/').Any(segment => segment is "." or ".."))
             {
                 throw new ModuleLoadException(moduleId, $"Module route '{prefix}' contains an empty, dot or encoded segment.");

@@ -145,7 +145,7 @@ public sealed class RowFilterKeySetStage : IRowFilterKeySetStage
         CancellationToken ct)
     {
         // 01 c / dialect: the same for every site of the statement.
-        if (context.Dialect is not (TargetSqlDialect.SqlServer or TargetSqlDialect.PostgreSql or TargetSqlDialect.Oracle or TargetSqlDialect.Sqlite))
+        if (context.Dialect is not (TargetSqlDialect.SqlServer or TargetSqlDialect.PostgreSql or TargetSqlDialect.Oracle))
         {
             FallbackAll(report, candidates, KeySetFallbackReason.DialectUnsupported);
             return predicates;
@@ -478,7 +478,7 @@ public sealed class RowFilterKeySetStage : IRowFilterKeySetStage
         }
 
         // No values; the rule id (a guid) is the only identifier and is part of the dedupe key, not of the message template data of other sites.
-        _logger?.LogWarning("{Message} Key={Key}", message, key[(key.IndexOf(':') + 1)..]);
+        _logger?.LogWarning("{Message} Key={Key}", message, key[(key.IndexOf(':', StringComparison.Ordinal) + 1)..]);
     }
 
     private static void FallbackAll(RowFilterKeySetReport report, IEnumerable<Site> candidates, KeySetFallbackReason reason)
@@ -518,7 +518,6 @@ public sealed class RowFilterKeySetStage : IRowFilterKeySetStage
         TargetSqlDialect.SqlServer => DatabaseDialect.SqlServer,
         TargetSqlDialect.PostgreSql => DatabaseDialect.PostgreSql,
         TargetSqlDialect.Oracle => DatabaseDialect.Oracle,
-        TargetSqlDialect.Sqlite => DatabaseDialect.Sqlite,
         _ => throw new NotSupportedException("The key-set cache has no loader for this dialect.")
     };
 

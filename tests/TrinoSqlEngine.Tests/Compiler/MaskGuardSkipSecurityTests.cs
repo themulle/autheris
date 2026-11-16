@@ -20,6 +20,7 @@ namespace TrinoSqlEngine.Tests.Compiler;
 /// guard always runs); every decision of the real visitor must equal it.
 /// </summary>
 [Trait("Category", "SqlGate")]
+[Trait("Category", "Security")]
 public class MaskGuardSkipSecurityTests
 {
     // ---- configuration under test: the caller-supplied set and the typed provider can disagree ----

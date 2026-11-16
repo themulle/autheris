@@ -160,6 +160,9 @@ public sealed record Table
     public string? PluginName { get; init; }
     public IReadOnlyList<string> Tags { get; init; } = Array.Empty<string>();
     public DatasetVisibility Visibility { get; init; } = DatasetVisibility.Hidden;
+    public bool DiscoveryHidden { get; init; }
+    public bool SamplesDisabled { get; init; }
+    public DiscoveryObjectKind ObjectKind { get; init; } = DiscoveryObjectKind.Table;
     public string? RlsExpression { get; init; }
     public int? MinGroupSize { get; init; }
     public bool NonPersonal { get; init; } = false;
@@ -224,6 +227,7 @@ public sealed class TableColumn
     public string? LengthSemantics { get; init; }
     public bool IsSensitive { get; init; }
     public bool WriteProtected { get; init; }
+    public bool DiscoveryHidden { get; init; }
     public string? Description { get; init; }
     public string? LongDescription { get; init; }
     public LocalizedTexts Texts { get; init; } = LocalizedTexts.Empty;
@@ -331,35 +335,6 @@ public sealed record TableIndexDefinition(
     [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     IReadOnlyList<KeyColumnDirection>? Directions = null);
 
-/// <summary>
-/// Issue #404: a physical (source-observed), non-unique index. Advisory metadata refreshed by the catalog sync; never an operator
-/// declaration and never an input to read ordering, keysets or policy. It carries no name (I404-SC-01). <see cref="Directions"/> is empty
-/// (canonical) when every column is ascending, otherwise one entry per column.
-/// </summary>
-public sealed record PhysicalIndexDefinition(IReadOnlyList<string> Columns, IReadOnlyList<KeyColumnDirection> Directions)
-{
-    /// <summary>True when both lists describe the same ordered columns (ignoring case) and directions.</summary>
-    public bool Matches(PhysicalIndexDefinition other)
-    {
-        ArgumentNullException.ThrowIfNull(other);
-        if (Columns.Count != other.Columns.Count)
-        {
-            return false;
-        }
-
-        for (var i = 0; i < Columns.Count; i++)
-        {
-            if (!string.Equals(Columns[i], other.Columns[i], StringComparison.OrdinalIgnoreCase)
-                || KeyDirections.IsDescending(Directions, i) != KeyDirections.IsDescending(other.Directions, i))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-}
-
 /// <summary>The declared key definition of a table: ordered primary key (with optional directions) and indexes (identifiers only, no data).</summary>
 public sealed record TableKeyDefinition(
     IReadOnlyList<string> PrimaryKey,
@@ -368,16 +343,6 @@ public sealed record TableKeyDefinition(
 
 /// <summary>Result of a narrow key definition replacement (audit before/after). <c>BeforeUnavailable</c>: the stored definition was invalid and is not reported.</summary>
 public sealed record TableKeyDefinitionChange(TableKeyDefinition Before, TableKeyDefinition After, bool BeforeUnavailable = false);
-
-/// <summary>Issue #80: Controls how much of a column's value profile is published when active row filters apply to a table.</summary>
-public enum DatasetProfilePublicationPolicy
-{
-    /// <summary>Default when row filters apply: exposes only FormatPattern, TypicalLength and coarsened EmptyShare.</summary>
-    FormatAndEmptyShareOnly = 0,
-
-    /// <summary>Data owner opt-in: exposes the full coarsened value profile even when row filters apply.</summary>
-    FullCoarsenedProfile = 1
-}
 
 public sealed record TableMetadata
 {
@@ -388,6 +353,14 @@ public sealed record TableMetadata
     public string? OwnerTenantId { get; init; }
     public IReadOnlyList<TableColumn> Columns { get; init; } = Array.Empty<TableColumn>();
     public IReadOnlyDictionary<string, MaskingRule> ColumnMaskingRules { get; init; } = new Dictionary<string, MaskingRule>();
+
+    /// <summary>Persisted global column classifications keyed by column name.</summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<ColumnClassification>> ColumnClassifications { get; init; } =
+        new Dictionary<string, IReadOnlyList<ColumnClassification>>();
+
+    /// <summary>Persisted global per-column mask overrides keyed by column name.</summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<ColumnMaskOverride>> ColumnMaskOverrides { get; init; } =
+        new Dictionary<string, IReadOnlyList<ColumnMaskOverride>>();
     /// <summary>Declared primary key (ordered). Empty when none was declared; no key is ever inferred.</summary>
     public IReadOnlyList<string> PrimaryKeyColumns { get; init; } = Array.Empty<string>();
 
@@ -396,9 +369,6 @@ public sealed record TableMetadata
 
     /// <summary>Declared secondary and unique indexes (used for default ordering). Empty when none was declared.</summary>
     public IReadOnlyList<TableIndexDefinition> Indexes { get; init; } = Array.Empty<TableIndexDefinition>();
-
-    /// <summary>Issue #404: physical non-unique indexes observed on the source (advisory, name-less). Empty when none are known; never a policy input.</summary>
-    public IReadOnlyList<PhysicalIndexDefinition> PhysicalIndexes { get; init; } = Array.Empty<PhysicalIndexDefinition>();
 
     /// <summary>Issue #107: object-level row filter evaluation settings (loaded from TABLE_ROW_FILTER_STRATEGIES, never written by the metadata upsert). Null = inherit global.</summary>
     public RowFilterEvaluationSettings? RowFilterEvaluation { get; init; }
@@ -414,15 +384,6 @@ public sealed record TableMetadata
 
     /// <summary>Write intent: the upsert replaces stored columns atomically (deleting columns not in Columns) when true.</summary>
     public bool ReplaceColumns { get; init; }
-
-    /// <summary>Issue #80: When true, callers with Full catalog visibility may view coarsened value profiles and request synthetic sample rows without an active table consent.</summary>
-    public bool ReleaseProfileToCatalogViewers { get; init; }
-
-    /// <summary>Issue #80: Controls whether full coarsened ranges/distinct counts or only format + empty share are published when row filters apply.</summary>
-    public DatasetProfilePublicationPolicy ProfilePublicationPolicy { get; init; } = DatasetProfilePublicationPolicy.FormatAndEmptyShareOnly;
-
-    /// <summary>Predefined synthetic sample rows (e.g. from dbt meta.synthetic_samples). Kept unmasked at runtime.</summary>
-    public IReadOnlyList<IReadOnlyDictionary<string, object?>> PredefinedSyntheticSamples { get; init; } = Array.Empty<IReadOnlyDictionary<string, object?>>();
 
     /// <summary>Issue #80: Optional estimated row count of the table used for small-table privacy coarsening.</summary>
     public long? EstimatedRowCount { get; init; }
@@ -551,7 +512,7 @@ public sealed record TableMetadata
             }
 
             return Columns.FirstOrDefault(c =>
-                string.Equals(c.ColumnName.Replace("_", string.Empty).Replace("-", string.Empty), "tenantid", StringComparison.OrdinalIgnoreCase))?.ColumnName;
+                string.Equals(c.ColumnName.Replace("_", string.Empty, StringComparison.Ordinal).Replace("-", string.Empty, StringComparison.Ordinal), "tenantid", StringComparison.OrdinalIgnoreCase))?.ColumnName;
         }
         init => _tenantColumnName = value;
     }

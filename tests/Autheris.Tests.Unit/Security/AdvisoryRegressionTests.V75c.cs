@@ -21,6 +21,7 @@ using Microsoft.Extensions.Options;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed partial class AdvisoryRegressionTests
 {
     private sealed class FakeSqlExecutionService : IGovernedSqlExecutionService
@@ -65,13 +66,13 @@ public sealed partial class AdvisoryRegressionTests
         var store = new InMemoryIdempotencyStore();
         var sql = new FakeSqlExecutionService();
 
-        async Task<int> Send(string? key)
+        async Task<int> Send(string? key, string sqlText = "INSERT INTO t (a) VALUES (1)")
         {
             var services = new ServiceCollection().AddSingleton<Autheris.Application.Common.Interfaces.IIdempotencyStore>(store).BuildServiceProvider();
             var ctx = new DefaultHttpContext { RequestServices = services };
             ctx.Request.Path = "/api/v1/sql";
             ctx.Request.ContentType = "application/json";
-            var body = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { sql = "INSERT INTO t (a) VALUES (1)" }));
+            var body = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { sql = sqlText }));
             ctx.Request.Body = new MemoryStream(body);
             ctx.Request.ContentLength = body.Length;
             if (key != null)
@@ -86,9 +87,10 @@ public sealed partial class AdvisoryRegressionTests
         }
 
         (await Send(null)).ShouldBe(400);
-        (await Send("retry-1")).ShouldNotBe(409);
+        (await Send("retry-1")).ShouldBe(200);
         var callsAfterFirst = sql.CallCount;
-        (await Send("retry-1")).ShouldBe(409);
+        (await Send("retry-1")).ShouldBe(200);
+        (await Send("retry-1", "INSERT INTO t (a) VALUES (2)")).ShouldBe(409);
         sql.CallCount.ShouldBe(callsAfterFirst);
     }
 }

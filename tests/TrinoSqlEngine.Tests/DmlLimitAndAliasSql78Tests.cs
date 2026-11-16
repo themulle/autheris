@@ -15,7 +15,6 @@ public sealed class DmlLimitAndAliasSql78Tests
 {
     [Theory]
     [InlineData(TargetSqlDialect.PostgreSql)]
-    [InlineData(TargetSqlDialect.Sqlite)]
     [InlineData(TargetSqlDialect.SqlServer)]
     public void AstCompiler_DmlSubquery_HasNoRowLimit(TargetSqlDialect dialect)
     {
@@ -41,16 +40,5 @@ public sealed class DmlLimitAndAliasSql78Tests
         var compiled = env.Engine.Compile("SELECT id FROM orders".AsMemory(), env.Request(enforcedMaxRows: 100), CancellationToken.None);
 
         Assert.Contains(expected, compiled.Sql, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void AstCompiler_Sqlite_RootSelect_HasABoundRowLimit()
-    {
-        var env = new ProbeEnv(TargetSqlDialect.Sqlite);
-
-        var compiled = env.Engine.Compile("SELECT id FROM orders".AsMemory(), env.Request(enforcedMaxRows: 100), CancellationToken.None);
-
-        Assert.Contains("LIMIT ?", compiled.Sql, StringComparison.Ordinal);
-        Assert.Contains(compiled.Parameters, p => p.Value is not string && p.Value is not null && Convert.ToInt64(p.Value) == 100L);
     }
 }

@@ -1,19 +1,9 @@
 namespace Autheris.Tests.Unit.Data;
 
 using System;
-using System.Collections.Generic;
-using System.Data.Common;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 using Autheris.Application.DataSources.Relations;
-using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
-using Autheris.Domain.Options;
-using Microsoft.Data.Sqlite;
-using Microsoft.Extensions.Options;
-using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -85,46 +75,5 @@ public sealed class GovernedCrossSourceRowReaderTests
 
         sql.ShouldNotContain("*");
         sql.ShouldStartWith("SELECT \"Name\", \"CustomerId\", \"tenant_id\" FROM");
-    }
-
-    private sealed class SharedConnectionFactory(string connectionString) : ISqlConnectionFactory
-    {
-        public Task<DbConnection> CreateOpenConnectionAsync(DataSourceConnectionOptions options, CancellationToken ct = default)
-        {
-            var connection = new SqliteConnection(connectionString);
-            connection.Open();
-            return Task.FromResult<DbConnection>(connection);
-        }
-    }
-
-    [Fact]
-    public async Task ReadByKeys_InitializesSessionWithTenantAndUser_AndReturnsOnlyOwnTenantRows()
-    {
-        const string cs = "Data Source=VfCrossSourceReader;Mode=Memory;Cache=Shared";
-        await using var keeper = new SqliteConnection(cs);
-        keeper.Open();
-        await using (var setup = keeper.CreateCommand())
-        {
-            setup.CommandText = "CREATE TABLE \"Customers\" (\"CustomerId\" INTEGER, \"Name\" TEXT, \"tenant_id\" TEXT);" +
-                                "INSERT INTO \"Customers\" VALUES (7, 'own', 'tenant-a'), (7, 'foreign', 'tenant-b'), (7, 'none', NULL);";
-            await setup.ExecuteNonQueryAsync();
-        }
-
-        var initializer = Substitute.For<IDbSessionContextInitializer>();
-        var options = Options.Create(new GatewayOptions
-        {
-            DataSources = new SqlDataSourceOptions
-            {
-                Connections = new Dictionary<string, DataSourceConnectionOptions> { ["crm"] = new() { ConnectionString = cs } }
-            }
-        });
-        var reader = new GovernedCrossSourceRowReader(new SharedConnectionFactory(cs), options, initializer);
-        var target = Target("Sqlite") with { Identifier = new TableIdentifier("crm", "main", "Customers") };
-
-        var rows = await reader.ReadRowsByKeysAsync(Request(target));
-
-        rows.Select(r => r["Name"]).ShouldBe(new object?[] { "own" });
-        await initializer.Received(1).InitializeSessionAsync(
-            Arg.Any<DbConnection>(), Arg.Any<DbTransaction?>(), DatabaseDialect.Sqlite, Tenant, "S-1-5-1", null, Arg.Any<CancellationToken>());
     }
 }

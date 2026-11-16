@@ -124,7 +124,17 @@ public sealed class SemanticMcpCompiler(
             return [];
         }
 
-        var allTables = await _metadataRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
+        var scopeFilter = string.IsNullOrWhiteSpace(domainScope) ||
+                          domainScope.Length > Autheris.Application.Catalog.CatalogTableQuery.MaxFilterLength ||
+                          domainScope.AsSpan().IndexOfAny('\0', '\r', '\n') >= 0
+            ? null
+            : domainScope;
+        var allTables = await Autheris.Application.Catalog.CatalogTablePageReader.ReadAllAsync(
+            _metadataRepo,
+            new Autheris.Application.Catalog.CatalogTableQuery(
+                DataSource: scopeFilter,
+                Limit: Autheris.Application.Catalog.CatalogTableQuery.MaxLimit),
+            ct: ct).ConfigureAwait(false);
         var visible = await VisibleTablesAsync(allTables, principal, ct).ConfigureAwait(false);
 
         var filtered = string.IsNullOrWhiteSpace(domainScope)
@@ -171,7 +181,10 @@ public sealed class SemanticMcpCompiler(
         }
 
         pageSize = Math.Clamp(pageSize, 1, MaxPageSize);
-        var allTables = await _metadataRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
+        var allTables = await Autheris.Application.Catalog.CatalogTablePageReader.ReadAllAsync(
+            _metadataRepo,
+            new Autheris.Application.Catalog.CatalogTableQuery(Limit: Autheris.Application.Catalog.CatalogTableQuery.MaxLimit),
+            ct: ct).ConfigureAwait(false);
         var visible = await VisibleTablesAsync(allTables, principal, ct).ConfigureAwait(false);
 
         // Descriptor items only (no Text): nothing is rendered and no golden query is loaded to list the URIs.
@@ -222,10 +235,24 @@ public sealed class SemanticMcpCompiler(
         }
 
         // Only the requested table is checked and rendered; unknown and invisible tables answer alike (null).
-        var allTables = await _metadataRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
-        var candidates = allTables.Where(t =>
-            string.Equals(t.Identifier.TableName, table, StringComparison.OrdinalIgnoreCase) &&
-            (domain is null || string.Equals(t.Identifier.Domain, domain, StringComparison.OrdinalIgnoreCase))).ToList();
+        if (string.IsNullOrWhiteSpace(table) ||
+            table.Length > Autheris.Application.Catalog.CatalogTableQuery.MaxFilterLength ||
+            table.AsSpan().IndexOfAny('\0', '\r', '\n') >= 0 ||
+            (domain is not null && (domain.Length > Autheris.Application.Catalog.CatalogTableQuery.MaxFilterLength ||
+                                    domain.AsSpan().IndexOfAny('\0', '\r', '\n') >= 0)))
+        {
+            return null;
+        }
+
+        var candidates = await Autheris.Application.Catalog.CatalogTablePageReader.ReadAllAsync(
+            _metadataRepo,
+            new Autheris.Application.Catalog.CatalogTableQuery(
+                DataSource: domain,
+                NamePrefix: table,
+                Limit: Autheris.Application.Catalog.CatalogTableQuery.MaxLimit),
+            t => string.Equals(t.Identifier.TableName, table, StringComparison.OrdinalIgnoreCase) &&
+                 (domain is null || string.Equals(t.Identifier.Domain, domain, StringComparison.OrdinalIgnoreCase)),
+            ct: ct).ConfigureAwait(false);
         if (candidates.Count == 0)
         {
             return null;
@@ -318,18 +345,19 @@ public sealed class SemanticMcpCompiler(
             return allTables;
         }
 
+        // Fail closed when caller identity is missing; only the explicit (production-blocked) auth bypass above opens the catalog.
+        if (principal is null)
+        {
+            return Array.Empty<TableMetadata>();
+        }
+
         if (_consentRepo != null)
         {
             return await McpCatalogVisibility.VisibleTablesAsync(allTables, principal, _consentRepo, _options?.Value, _catalogVisibility, ct).ConfigureAwait(false);
         }
 
-        if (principal != null)
-        {
-            return Array.Empty<TableMetadata>();
-        }
-
-        // No principal and no consent repository (tests and tools without a caller); a visibility service never opens this case.
-        return _catalogVisibility is null ? allTables : Array.Empty<TableMetadata>();
+        // A principal without a consent repository sees nothing; a visibility service never opens this case.
+        return Array.Empty<TableMetadata>();
     }
 
     private static List<TableColumn> VisibleColumns(TableMetadata t) => t.Columns.Where(col =>
@@ -358,7 +386,7 @@ public sealed class SemanticMcpCompiler(
                            $"* **Columns**:\n" +
                            string.Join("\n", visibleColumns.Select(c =>
                            {
-                               var sensitivityTag = c.IsSensitive ? " [SENSITIVE/MASKED]" : "";
+                               var sensitivityTag = ClassificationMetadata.IsColumnSensitive(t, c) ? " [SENSITIVE/MASKED]" : "";
                                var descTag = !string.IsNullOrWhiteSpace(c.Description) ? $": {c.Description}" : "";
                                return $"  - `{c.ColumnName}` ({c.DataType}){sensitivityTag}{descTag}";
                            }));
@@ -409,7 +437,7 @@ public sealed class SemanticMcpCompiler(
         sb.AppendLine($"* **Table**: {table}");
         sb.AppendLine($"* **Column**: `{col.ColumnName}`");
         sb.AppendLine($"* **Data Type**: `{col.DataType}`");
-        sb.AppendLine($"* **Sensitivity**: {(col.IsSensitive ? "Sensitive/Masked" : "Standard")}");
+        sb.AppendLine($"* **Sensitivity**: {(ClassificationMetadata.IsColumnSensitive(t, col) ? "Sensitive/Masked" : "Standard")}");
         sb.AppendLine();
 
         if (hasDesc)
@@ -496,9 +524,9 @@ public sealed class SemanticMcpCompiler(
     {
         if (string.IsNullOrWhiteSpace(dataType)) return "string";
         var dt = dataType.Trim().ToLowerInvariant();
-        if (dt.Contains("int") || dt.Contains("long") || dt.Contains("serial")) return "integer";
-        if (dt.Contains("float") || dt.Contains("double") || dt.Contains("decimal") || dt.Contains("numeric") || dt.Contains("money")) return "number";
-        if (dt.Contains("bool")) return "boolean";
+        if (dt.Contains("int", StringComparison.Ordinal) || dt.Contains("long", StringComparison.Ordinal) || dt.Contains("serial", StringComparison.Ordinal)) return "integer";
+        if (dt.Contains("float", StringComparison.Ordinal) || dt.Contains("double", StringComparison.Ordinal) || dt.Contains("decimal", StringComparison.Ordinal) || dt.Contains("numeric", StringComparison.Ordinal) || dt.Contains("money", StringComparison.Ordinal)) return "number";
+        if (dt.Contains("bool", StringComparison.Ordinal)) return "boolean";
         return "string";
     }
 }

@@ -83,7 +83,7 @@ public sealed class FederationTests
     }
 
     [Fact]
-    public void SubgraphResultMasker_MasksSensitiveFields_Recursively()
+    public async Task SubgraphResultMasker_MasksSensitiveFields_Recursively()
     {
         var maskingProvider = new ColumnMaskingProvider();
         var options = Options.Create(new GatewayOptions
@@ -123,7 +123,7 @@ public sealed class FederationTests
             new Claim(ClaimTypes.Role, "StandardReader")
         ], "Test"));
 
-        var masked = masker.MaskResultData(rawData, principal) as IReadOnlyDictionary<string, object?>;
+        var masked = await masker.MaskResultDataAsync(rawData, principal, null) as IReadOnlyDictionary<string, object?>;
         masked.ShouldNotBeNull();
 
         masked["id"].ShouldBe("CUST-99");
@@ -145,7 +145,7 @@ public sealed class FederationTests
     }
 
     [Fact]
-    public void SubgraphResultMasker_GovernanceAdmin_BypassesMasking()
+    public async Task SubgraphResultMasker_GovernanceAdmin_BypassesMasking()
     {
         var maskingProvider = new ColumnMaskingProvider();
         var options = Options.Create(new GatewayOptions
@@ -170,14 +170,14 @@ public sealed class FederationTests
             new Claim(ClaimTypes.Role, "GovernanceAdmin")
         ], "Test"));
 
-        var result = masker.MaskResultData(rawData, adminPrincipal) as IReadOnlyDictionary<string, object?>;
+        var result = await masker.MaskResultDataAsync(rawData, adminPrincipal, null) as IReadOnlyDictionary<string, object?>;
         result.ShouldNotBeNull();
         result["email"].ShouldBe("admin@corp.local");
         result["salary"].ShouldBe("150000");
     }
 
     [Fact]
-    public void POL_13_SubgraphResultMasker_EvaluatesAdminRolesViaRoleEvaluator_BeforeBypassingMask()
+    public async Task POL_13_SubgraphResultMasker_EvaluatesAdminRolesViaRoleEvaluator_BeforeBypassingMask()
     {
         var maskingProvider = new ColumnMaskingProvider();
         var options = Options.Create(new GatewayOptions
@@ -208,7 +208,7 @@ public sealed class FederationTests
             new Claim(ClaimTypes.Role, "GovernanceAdmin")
         ], "Test"));
 
-        var result = masker.MaskResultData(rawData, principal) as IReadOnlyDictionary<string, object?>;
+        var result = await masker.MaskResultDataAsync(rawData, principal, null) as IReadOnlyDictionary<string, object?>;
         result.ShouldNotBeNull();
         // Since role evaluator rejected admin, email must be masked, NOT cleartext!
         result["email"]!.ToString().ShouldNotBe("admin@corp.local");

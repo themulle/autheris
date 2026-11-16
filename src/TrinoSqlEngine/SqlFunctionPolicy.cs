@@ -109,7 +109,7 @@ public static class SqlFunctionPolicy
         }
 
         // Check each dot-separated segment (e.g. package.function in Oracle, schema.function in SQL Server / PG)
-        if (full.Contains('.'))
+        if (full.Contains('.', StringComparison.Ordinal))
         {
             var parts = full.Split('.');
             foreach (var part in parts)

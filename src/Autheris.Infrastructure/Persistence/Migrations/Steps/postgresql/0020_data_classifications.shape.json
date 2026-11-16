@@ -1,0 +1,91 @@
+{
+  "ops": [
+    {
+      "op": "addTable",
+      "table": "data_classifications",
+      "newTable": {
+        "name": "data_classifications",
+        "columns": [
+          { "name": "scope", "type": "CHARACTER VARYING(64)", "family": "string", "nullable": false },
+          { "name": "code", "type": "CHARACTER VARYING(64)", "family": "string", "nullable": false },
+          { "name": "display_name", "type": "CHARACTER VARYING(256)", "family": "string", "nullable": false },
+          { "name": "description", "type": "CHARACTER VARYING(1024)", "family": "string", "nullable": true },
+          { "name": "parent_code", "type": "CHARACTER VARYING(64)", "family": "string", "nullable": true },
+          { "name": "restriction_rank", "type": "SMALLINT", "family": "integer", "nullable": false },
+          { "name": "clear_grantable", "type": "BOOLEAN", "family": "boolean", "nullable": false },
+          { "name": "separate_approval", "type": "BOOLEAN", "family": "boolean", "nullable": false },
+          { "name": "approver_mode", "type": "CHARACTER VARYING(24)", "family": "string", "nullable": false },
+          { "name": "steward_group_sid", "type": "CHARACTER VARYING(256)", "family": "string", "nullable": true },
+          { "name": "max_clear_days", "type": "INTEGER", "family": "integer", "nullable": true },
+          { "name": "is_active", "type": "BOOLEAN", "family": "boolean", "nullable": false },
+          { "name": "version", "type": "INTEGER", "family": "integer", "nullable": false },
+          { "name": "updated_by", "type": "CHARACTER VARYING(256)", "family": "string", "nullable": false },
+          { "name": "updated_at", "type": "TIMESTAMP WITH TIME ZONE", "family": "datetime", "nullable": false }
+        ],
+        "primaryKey": ["scope", "code"],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addTable",
+      "table": "classification_mask_rules",
+      "newTable": {
+        "name": "classification_mask_rules",
+        "columns": [
+          { "name": "scope", "type": "CHARACTER VARYING(64)", "family": "string", "nullable": false },
+          { "name": "code", "type": "CHARACTER VARYING(64)", "family": "string", "nullable": false },
+          { "name": "mask_function", "type": "CHARACTER VARYING(32)", "family": "string", "nullable": false },
+          { "name": "params_json", "type": "TEXT", "family": "string", "nullable": true },
+          { "name": "key_ref", "type": "CHARACTER VARYING(128)", "family": "string", "nullable": true },
+          { "name": "catalog_text", "type": "CHARACTER VARYING(8)", "family": "string", "nullable": false },
+          { "name": "version", "type": "INTEGER", "family": "integer", "nullable": false },
+          { "name": "updated_by", "type": "CHARACTER VARYING(256)", "family": "string", "nullable": false },
+          { "name": "updated_at", "type": "TIMESTAMP WITH TIME ZONE", "family": "datetime", "nullable": false }
+        ],
+        "primaryKey": ["scope", "code"],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addTable",
+      "table": "column_classifications",
+      "newTable": {
+        "name": "column_classifications",
+        "columns": [
+          { "name": "scope", "type": "CHARACTER VARYING(64)", "family": "string", "nullable": false },
+          { "name": "table_column_id", "type": "TEXT", "family": "string", "nullable": false },
+          { "name": "code", "type": "CHARACTER VARYING(64)", "family": "string", "nullable": false },
+          { "name": "source", "type": "CHARACTER VARYING(16)", "family": "string", "nullable": false },
+          { "name": "assigned_by", "type": "CHARACTER VARYING(256)", "family": "string", "nullable": false },
+          { "name": "assigned_at", "type": "TIMESTAMP WITH TIME ZONE", "family": "datetime", "nullable": false }
+        ],
+        "primaryKey": ["scope", "table_column_id", "code"],
+        "indexes": []
+      }
+    },
+    { "op": "addIndex", "table": "column_classifications", "name": "ix_column_classifications_col", "unique": false, "columns": ["table_column_id"] },
+    {
+      "op": "addTable",
+      "table": "column_mask_overrides",
+      "newTable": {
+        "name": "column_mask_overrides",
+        "columns": [
+          { "name": "id", "type": "UUID", "family": "string", "nullable": false },
+          { "name": "scope", "type": "CHARACTER VARYING(64)", "family": "string", "nullable": false },
+          { "name": "table_column_id", "type": "TEXT", "family": "string", "nullable": false },
+          { "name": "code", "type": "CHARACTER VARYING(64)", "family": "string", "nullable": true },
+          { "name": "mask_function", "type": "CHARACTER VARYING(32)", "family": "string", "nullable": false },
+          { "name": "params_json", "type": "TEXT", "family": "string", "nullable": true },
+          { "name": "key_ref", "type": "CHARACTER VARYING(128)", "family": "string", "nullable": true },
+          { "name": "catalog_text", "type": "CHARACTER VARYING(8)", "family": "string", "nullable": false },
+          { "name": "updated_by", "type": "CHARACTER VARYING(256)", "family": "string", "nullable": false },
+          { "name": "updated_at", "type": "TIMESTAMP WITH TIME ZONE", "family": "datetime", "nullable": false }
+        ],
+        "primaryKey": ["id"],
+        "indexes": []
+      }
+    },
+    { "op": "addIndex", "table": "column_mask_overrides", "name": "ux_column_mask_overrides_code", "unique": true, "columns": ["scope", "table_column_id", "code"] },
+    { "op": "addIndex", "table": "column_mask_overrides", "name": "ux_column_mask_overrides_all", "unique": true, "columns": ["scope", "table_column_id"] }
+  ]
+}

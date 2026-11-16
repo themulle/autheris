@@ -4,8 +4,6 @@ tests/Autheris.Tests.Common/Eventually.cs|1
 tests/Autheris.Tests.Common/WaitHelper.cs|1
 tests/Autheris.Tests.Integration/AstCompilerSqliteExecutionTests.cs|1
 tests/Autheris.Tests.Integration/CdcWebhookEndToEndTests.cs|2
-tests/Autheris.Tests.Integration/FinOpsEndToEndSqliteTests.cs|1
-tests/Autheris.Tests.Integration/FinOpsIntegrationTests.cs|1
 tests/Autheris.Tests.Integration/GovernedDialectEndToEndTests.cs|1
 tests/Autheris.Tests.Integration/GovernedEntryPointsEndToEndTests.cs|1
 tests/Autheris.Tests.Integration/ReadPathSwitchIntegrationTests.cs|1
@@ -48,13 +46,11 @@ tests/Autheris.Tests.Unit/Security/WebSqlHeterogeneousJoinTests.cs|1
 tests/Autheris.Tests.Unit/SecurityReviewG5Tests.cs|3
 tests/Autheris.Tests.Unit/Services/BackgroundServiceLockTests.cs|3
 tests/Autheris.Tests.Unit/Sql/Policy/RowFilterKeySetStageTests.cs|2
-tests/Autheris.Tests.Unit/SqliteExecutionHardeningTests.cs|1
 tests/Autheris.Tests.Unit/Startup/X1StartupTests.cs|1
 tests/Autheris.Tests.Unit/State/DistributedLeaseTests.cs|1
 tests/Autheris.Tests.Unit/State/RedisLeaseTests.cs|2
 tests/Autheris.Tests.Unit/Streaming/CdcWebhookDeliveryServiceTests.cs|2
 tests/Autheris.Tests.Unit/VirtualFilters/Federation/FakeKeySetProvider.cs|1
-tests/Autheris.Tests.Unit/VirtualFilters/Federation/KeySourceSqliteFixture.cs|1
 tests/Autheris.Tests.Unit/VirtualFilters/Federation/PathLookupConnectorTests.cs|3
 tests/Autheris.Tests.Unit/Webhooks/WebhookDeliveryClientTests.cs|1
 tests/TrinoSqlEngine.Tests/Compiler/CheckedDmlExecutorTransactionTests.cs|1

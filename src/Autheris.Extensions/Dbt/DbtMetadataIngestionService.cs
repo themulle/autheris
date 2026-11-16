@@ -14,7 +14,6 @@ using Autheris.Application.Catalog.Semantic;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Lineage;
 using Autheris.Application.Policy;
-using Autheris.Application.Sql.Catalog;
 using Autheris.Application.Tenancy;
 using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Audit;
@@ -35,15 +34,17 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
     private readonly ITableRelationRepository? _relationRepository;
     private readonly VirtualFilterAdministrationService? _virtualFilterAdmin;
     private readonly Autheris.Application.Governance.Interfaces.IDatasetTagImportService? _tagImport;
-    private readonly Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator? _syntheticRowGenerator;
+    private readonly Autheris.Application.Catalog.Discovery.IDiscoveryArtifactStore? _artifactStore;
+    private readonly Microsoft.Extensions.Options.IOptions<Autheris.Application.Catalog.Services.CatalogDiscoveryOptions>? _discoveryOptions;
+    private readonly TimeProvider _timeProvider = TimeProvider.System;
     private readonly IDbtTestTargetMap? _testTargetMap;
     private readonly IDataOwnerAssignmentRepository? _ownerAssignments;
     private readonly IAuditLogRepository? _auditLog;
     private readonly Autheris.Application.Governance.IDataOwnerIdentityVerifier? _ownerIdentityVerifier;
-    private readonly IPhysicalKeyCatalog? _physicalKeys;
     private readonly IAuditWriter? _auditWriter;
     private readonly IDataOwnershipRepository? _ownershipRepo;
     private readonly ILogger<DbtMetadataIngestionService> _logger;
+    private readonly Autheris.Application.Catalog.ICatalogWriteScopeFactory? _catalogWriteScopes;
 
     public DbtMetadataIngestionService(
         IDbtProposalRepository proposalRepository,
@@ -61,7 +62,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         ILineageGraphStore lineageGraphStore,
         IAuditWriter? auditWriter,
         ILogger<DbtMetadataIngestionService> logger)
-        : this(proposalRepository, metadataRepository, lineageGraphStore, null, null, null, null, null, null, null, null, null, auditWriter, logger)
+        : this(proposalRepository, metadataRepository, lineageGraphStore, null, null, null, null, null, null, null, null, auditWriter, logger)
     {
     }
 
@@ -160,9 +161,9 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         ITableRelationRepository? relationRepository,
         VirtualFilterAdministrationService? virtualFilterAdmin,
         Autheris.Application.Governance.Interfaces.IDatasetTagImportService? tagImport,
-        Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator? syntheticRowGenerator,
+        Autheris.Application.Catalog.Discovery.IDiscoveryArtifactStore? artifactStore,
         ILogger<DbtMetadataIngestionService> logger)
-        : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, gatewayOptions, sqlEndpointLoader, relationRepository, virtualFilterAdmin, tagImport, syntheticRowGenerator, null, logger)
+        : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, gatewayOptions, sqlEndpointLoader, relationRepository, virtualFilterAdmin, tagImport, artifactStore, null, logger)
     {
     }
 
@@ -176,10 +177,10 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         ITableRelationRepository? relationRepository,
         VirtualFilterAdministrationService? virtualFilterAdmin,
         Autheris.Application.Governance.Interfaces.IDatasetTagImportService? tagImport,
-        Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator? syntheticRowGenerator,
+        Autheris.Application.Catalog.Discovery.IDiscoveryArtifactStore? artifactStore,
         IDbtTestTargetMap? testTargetMap,
         ILogger<DbtMetadataIngestionService> logger)
-        : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, gatewayOptions, sqlEndpointLoader, relationRepository, virtualFilterAdmin, tagImport, syntheticRowGenerator, testTargetMap, null, null, logger)
+        : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, gatewayOptions, sqlEndpointLoader, relationRepository, virtualFilterAdmin, tagImport, artifactStore, testTargetMap, null, logger)
     {
     }
 
@@ -215,55 +216,6 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         return string.Equals(id.Domain, caller.Tenant.Value, StringComparison.OrdinalIgnoreCase);
     }
 
-    public async Task<DbtSyncResult> IngestManifestFileAsync(string filePath, DbtGovernanceImportCaller caller, bool dryRun = false, CancellationToken ct = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
-        ArgumentNullException.ThrowIfNull(caller);
-        ValidateSafeFilePath(filePath);
-        var fullPath = Path.GetFullPath(filePath);
-        ValidateSafeFilePath(fullPath);
-
-        if (!File.Exists(fullPath))
-        {
-            return new DbtSyncResult(false, 0, 0, 0, [], $"Dbt manifest file not found at: {fullPath}");
-        }
-
-        await using var stream = File.OpenRead(fullPath);
-        return await IngestManifestStreamAsync(stream, caller, dryRun, ct).ConfigureAwait(false);
-    }
-
-    private static void ValidateSafeFilePath(string fullPath)
-    {
-        if (fullPath.Contains('\0'))
-        {
-            throw new System.Security.SecurityException("File path must not contain null bytes.");
-        }
-
-        var ext = Path.GetExtension(fullPath);
-        if (!string.Equals(ext, ".json", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new System.Security.SecurityException($"Invalid file extension '{ext}'. Only JSON dbt artifacts (.json) are permitted.");
-        }
-
-        var normalized = fullPath.Replace('\\', '/').ToLowerInvariant();
-        if (normalized.StartsWith("/etc") ||
-            normalized.StartsWith("/proc") ||
-            normalized.StartsWith("/sys") ||
-            normalized.StartsWith("/dev") ||
-            normalized.StartsWith("/var") ||
-            normalized.StartsWith("/run") ||
-            normalized.StartsWith("/root") ||
-            normalized.StartsWith("/bin") ||
-            normalized.StartsWith("/sbin") ||
-            normalized.StartsWith("/usr") ||
-            normalized.Contains("/.ssh") ||
-            normalized.Contains("/appsettings") ||
-            normalized.Contains("windows/system32"))
-        {
-            throw new System.Security.SecurityException($"Access to restricted path '{fullPath}' is strictly forbidden.");
-        }
-    }
-
     public Task<DbtSyncResult> IngestManifestStreamAsync(Stream manifestStream, bool dryRun = false, TenantId? tenant = null, CancellationToken ct = default)
     {
         // DT-A-9: a tenant-less sync runs for the configured default tenant; without one it is refused (no legacy fallback).
@@ -276,6 +228,9 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
     {
         ArgumentNullException.ThrowIfNull(manifestStream);
         ArgumentNullException.ThrowIfNull(caller);
+
+        // One catalog version bump and one catalog:changed event per sync chunk instead of one per table (and per relation).
+        await using var catalogWriteScope = Autheris.Application.Catalog.CatalogWriteScopeFactoryExtensions.BeginOrNoop(_catalogWriteScopes, "dbt-manifest-sync");
 
         var warnings = new List<string>();
         var rejectedModels = new List<string>();
@@ -421,6 +376,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
             }
         }
 
+        var pendingModelUpdates = new List<(TableMetadata Metadata, IReadOnlyList<string> Tags, IReadOnlyList<IReadOnlyDictionary<string, object?>>? SyntheticSamples)>();
         foreach (var model in models)
         {
             ct.ThrowIfCancellationRequested();
@@ -533,7 +489,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                 // Column-level RLS filter auto-sync (F-DBT-6)
                 if (colDef.Meta.TryGetValue("rls_filter", out var colRls) && !string.IsNullOrWhiteSpace(colRls))
                 {
-                    if (!existingPending.Any(p => string.Equals(p.ColumnName, colName, StringComparison.OrdinalIgnoreCase) && p.SuggestedRuleType.StartsWith("RLS_FILTER:")))
+                    if (!existingPending.Any(p => string.Equals(p.ColumnName, colName, StringComparison.OrdinalIgnoreCase) && p.SuggestedRuleType.StartsWith("RLS_FILTER:", StringComparison.Ordinal)))
                     {
                         var proposal = new DbtMetadataProposal(
                             Id: Guid.NewGuid(),
@@ -558,34 +514,9 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
             }
 
             // Model-level Policy & RLS auto-sync (F-DBT-6)
-            if (model.Meta.TryGetValue("casbin_roles", out var casbinRoles) && !string.IsNullOrWhiteSpace(casbinRoles))
-            {
-                if (!existingPending.Any(p => string.Equals(p.ColumnName, "*", StringComparison.OrdinalIgnoreCase) && p.SuggestedRuleType.StartsWith("CASBIN_ROLES:")))
-                {
-                    var proposal = new DbtMetadataProposal(
-                        Id: Guid.NewGuid(),
-                        Table: tableId,
-                        ColumnName: "*",
-                        SuggestedRuleType: $"CASBIN_ROLES:{casbinRoles}",
-                        SuggestedSensitivity: "HIGH",
-                        SuggestedOwnerTeam: ownerTeam,
-                        SourceDbtTag: "meta.casbin_roles",
-                        Status: DbtProposalStatus.PendingReview,
-                        CreatedAt: DateTimeOffset.UtcNow
-                    );
-
-                    if (!dryRun)
-                    {
-                        await _proposalRepository.AddProposalAsync(proposal, ct).ConfigureAwait(false);
-                    }
-
-                    generatedProposals++;
-                }
-            }
-
             if (model.Meta.TryGetValue("rls_filter", out var modelRls) && !string.IsNullOrWhiteSpace(modelRls))
             {
-                if (!existingPending.Any(p => string.Equals(p.ColumnName, "*", StringComparison.OrdinalIgnoreCase) && p.SuggestedRuleType.StartsWith("RLS_FILTER:")))
+                if (!existingPending.Any(p => string.Equals(p.ColumnName, "*", StringComparison.OrdinalIgnoreCase) && p.SuggestedRuleType.StartsWith("RLS_FILTER:", StringComparison.Ordinal)))
                 {
                     var proposal = new DbtMetadataProposal(
                         Id: Guid.NewGuid(),
@@ -722,13 +653,6 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                         });
                     }
 
-                    var mergedSamples = DbtManifestRatchet.MergeSyntheticSamples(
-                        existingMeta.Identifier,
-                        existingMeta.PredefinedSyntheticSamples,
-                        model.SyntheticSamples,
-                        suppressedRelaxations,
-                        _logger);
-
                     var updatedMetadata = new TableMetadata
                     {
                         Table = updatedTableObj,
@@ -738,8 +662,6 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                         PrimaryKeyColumns = existingMeta.PrimaryKeyColumns,
                         PrimaryKeyDirections = existingMeta.PrimaryKeyDirections,
                         Indexes = existingMeta.Indexes,
-                        PhysicalIndexes = existingMeta.PhysicalIndexes,
-                        PredefinedSyntheticSamples = mergedSamples,
                         MinGroupSize = existingMeta.MinGroupSize,
                         NonPersonal = existingMeta.NonPersonal,
                         SmallGroupStrategy = existingMeta.SmallGroupStrategy,
@@ -747,24 +669,15 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                         ExpectedRows = existingMeta.ExpectedRows
                     };
 
-                    // Issue #94 (D-8): primary_key / unique constraints and unique tests of the manifest replace the stored definition.
+                    // Issue #94 (D-8): primary_key / unique constraints, unique tests, and meta.indexes replace the stored definition.
                     if (model.DeclaredKeys is { } declared)
                     {
                         updatedMetadata = DbtDeclaredKeysImport.Apply(updatedMetadata, declared, _logger);
                     }
 
-                    // Issue #427: Reconcile physical key directions for SQL tables
-                    updatedMetadata = await ReconcilePhysicalDirectionsIfApplicableAsync(updatedMetadata, existingMeta, warnings, ct).ConfigureAwait(false);
-
                     if (!dryRun)
                     {
-                        if (mergedSamples != null)
-                        {
-                            _syntheticRowGenerator?.RegisterSyntheticSamples(updatedMetadata.Identifier, mergedSamples);
-                        }
-
-                        await _metadataRepository.UpsertTableMetadataAsync(updatedMetadata, ct).ConfigureAwait(false);
-                        await ImportModelTagsAsync(updatedMetadata.Identifier, model.Tags, warnings, ct).ConfigureAwait(false);
+                        pendingModelUpdates.Add((updatedMetadata, model.Tags, model.SyntheticSamples));
                     }
                 }
             }
@@ -804,6 +717,8 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                 autoSyncSkipped++;
             }
         }
+
+        await FlushPendingModelUpdatesAsync(pendingModelUpdates, warnings, ct).ConfigureAwait(false);
 
         if (autoSyncFailed)
         {
@@ -876,57 +791,6 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         public HashSet<string> Seen { get; } = new(StringComparer.OrdinalIgnoreCase);
         public HashSet<string> RejectedIds { get; } = new(StringComparer.Ordinal);
         public int SkippedTotal { get; set; }
-    }
-
-    private static bool IsAliased(DbtModelDefinition model) =>
-        !string.Equals(model.PhysicalName, model.Name, StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>
-    /// Issue #666: an entry is updated by the node whose unique id it records; an entry without a recorded id only by a node
-    /// without alias or identifier (the identity the sync used before), which then records its id. Anything else is another origin.
-    /// </summary>
-    private static bool OwnsEntry(Table entry, DbtModelDefinition model) =>
-        entry.DbtUniqueId is { } owner
-            ? string.Equals(owner, model.UniqueId, StringComparison.Ordinal)
-            : !IsAliased(model);
-
-    private void RejectCollision(CatalogCreationRun run, DbtModelDefinition model, List<string> warnings)
-    {
-        var id = DbtIdentifierSanitizer.ForLog(model.UniqueId);
-        var kind = string.Equals(model.Materialization, "source", StringComparison.OrdinalIgnoreCase) ? "source" : "model";
-        run.RejectedIds.Add(model.UniqueId);
-        run.SkippedTotal++;
-        if (run.Skipped.Count < MaxSkippedItemsReported)
-        {
-            run.Skipped.Add(new DbtSyncSkippedItem(id, kind, DbtSyncSkipReasons.PhysicalNameCollision));
-        }
-
-        warnings.Add($"{DbtSyncSkipReasons.PhysicalNameCollision}: dbt {kind} '{id}' was not imported, its physical table name is already taken.");
-        _logger.LogWarning("dbt sync skipped {Kind} '{Name}': {Reason}", kind, id, DbtSyncSkipReasons.PhysicalNameCollision);
-    }
-
-    /// <summary>Issue #666: an entry registered under the logical name stays as it is; the sync now registers the physical name.</summary>
-    private async Task WarnIfPhysicalNameChangedAsync(DbtModelDefinition model, List<string> warnings, CancellationToken ct)
-    {
-        if (!IsAliased(model) || !TableIdentifier.TryCreate(model.Database, model.Schema, model.Name, out var logical))
-        {
-            return;
-        }
-
-        TableMetadata? old;
-        try
-        {
-            old = await _metadataRepository.GetTableMetadataAsync(logical, ct).ConfigureAwait(false);
-        }
-        catch (TableMetadataUnavailableException)
-        {
-            return;
-        }
-
-        if (old != null && (old.Table.DbtUniqueId is null || string.Equals(old.Table.DbtUniqueId, model.UniqueId, StringComparison.Ordinal)))
-        {
-            warnings.Add($"PHYSICAL_NAME_CHANGED: dbt node '{DbtIdentifierSanitizer.ForLog(model.Name)}' now registers '{DbtIdentifierSanitizer.ForLog(model.PhysicalName)}'; the entry for the logical name is left unchanged.");
-        }
     }
 
     /// <summary>
@@ -1204,23 +1068,6 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
 
     private static string NormalizeMaskingRuleType(string raw) => DbtMaskingRuleAliases.Normalize(raw);
 
-    public async Task<DbtGovernanceSyncResult> IngestGovernanceFileAsync(string filePath, DbtGovernanceImportCaller caller, bool dryRun = false, bool replace = false, CancellationToken ct = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
-        ArgumentNullException.ThrowIfNull(caller);
-        ValidateSafeFilePath(filePath);
-        var fullPath = Path.GetFullPath(filePath);
-        ValidateSafeFilePath(fullPath);
-
-        if (!File.Exists(fullPath))
-        {
-            return new DbtGovernanceSyncResult(false, 0, 0, 0, 0, 0, [], $"Dbt governance file not found at: {fullPath}");
-        }
-
-        await using var stream = File.OpenRead(fullPath);
-        return await IngestGovernanceStreamAsync(stream, caller, dryRun, replace, ct).ConfigureAwait(false);
-    }
-
     /// <summary>
     /// Direct governance import (R-24). Fail closed: the import may only tighten. Removing or weakening a stored masking rule
     /// (ratchet as in <see cref="ApproveProposalAsync"/>) or lowering a table / column sensitivity rejects the whole import before
@@ -1237,6 +1084,8 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
             // The sync actor skips the approval workflow and the managed-resource lock; a direct import never runs as the sync.
             throw new ArgumentException("The dbt governance import must run as the calling user, not as the sync actor.", nameof(caller));
         }
+
+        await using var catalogWriteScope = Autheris.Application.Catalog.CatalogWriteScopeFactoryExtensions.BeginOrNoop(_catalogWriteScopes, "dbt-governance-import");
 
         var warnings = new List<string>();
         var rejections = new List<string>();
@@ -1685,7 +1534,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                     ColumnMaskingRules = updatedMaskingRules,
                     PrimaryKeyColumns = existingMeta.PrimaryKeyColumns,
                     PrimaryKeyDirections = existingMeta.PrimaryKeyDirections,
-                    Indexes = existingMeta.Indexes, PhysicalIndexes = existingMeta.PhysicalIndexes
+                    Indexes = existingMeta.Indexes
                 };
 
                 pendingUpserts.Add(updatedMetadata);
@@ -1732,12 +1581,9 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
             ownerPlan = plan;
         }
 
-        if (!dryRun)
+        if (!dryRun && pendingUpserts.Count > 0)
         {
-            foreach (var updatedMetadata in pendingUpserts)
-            {
-                await _metadataRepository.UpsertTableMetadataAsync(updatedMetadata, ct).ConfigureAwait(false);
-            }
+            await _metadataRepository.UpsertBatchWithFallbackAsync(pendingUpserts, ct).ConfigureAwait(false);
         }
 
         // R-50: virtual filters and access profiles are saved as the calling user (never as the sync), so the approval
@@ -1799,54 +1645,6 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         );
     }
 
-    private static bool IsRoutine(string tableName, JsonElement item)
-    {
-        if (tableName.StartsWith("sp_", StringComparison.OrdinalIgnoreCase) ||
-            tableName.StartsWith("fn_", StringComparison.OrdinalIgnoreCase) ||
-            tableName.StartsWith("usp_", StringComparison.OrdinalIgnoreCase) ||
-            tableName.StartsWith("ufn_", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        if (item.TryGetProperty("type", out var typeProp) &&
-            typeProp.GetString() is string typeStr &&
-            (string.Equals(typeStr, "routine", StringComparison.OrdinalIgnoreCase) ||
-             string.Equals(typeStr, "procedure", StringComparison.OrdinalIgnoreCase) ||
-             string.Equals(typeStr, "function", StringComparison.OrdinalIgnoreCase)))
-        {
-            return true;
-        }
-
-        if (item.TryGetProperty("materialization", out var matProp) &&
-            matProp.GetString() is string matStr &&
-            (string.Equals(matStr, "routine", StringComparison.OrdinalIgnoreCase) ||
-             string.Equals(matStr, "procedure", StringComparison.OrdinalIgnoreCase) ||
-             string.Equals(matStr, "function", StringComparison.OrdinalIgnoreCase)))
-        {
-            return true;
-        }
-
-        return false;
-    }
-
-    private static TableIdentifier ParseTableIdentifier(string raw, string? explicitSchema = null, string? explicitDatabase = null)
-    {
-        var parts = raw.Split('.');
-        if (parts.Length == 1)
-        {
-            var db = !string.IsNullOrWhiteSpace(explicitDatabase) ? explicitDatabase : "default";
-            var sc = !string.IsNullOrWhiteSpace(explicitSchema) ? explicitSchema : "public";
-            return new TableIdentifier(db, sc, parts[0]);
-        }
-        if (parts.Length == 2)
-        {
-            var db = !string.IsNullOrWhiteSpace(explicitDatabase) ? explicitDatabase : "default";
-            return new TableIdentifier(db, parts[0], parts[1]);
-        }
-        return new TableIdentifier(parts[0], parts[1], parts[2]);
-    }
-
     public async Task<DbtMetadataProposal> ApproveProposalAsync(Guid proposalId, string reviewedBy, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(reviewedBy);
@@ -1862,15 +1660,13 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         }
 
         // R-EXT-1: every check runs before the status changes, so "Approved" always means "applied".
-        // RLS filter and Casbin role proposals have no column masking equivalent; they must be implemented through
-        // consent row filters or the Casbin policy file and are rejected here instead of being marked Approved.
-        bool isPolicyOrRls = proposal.SuggestedRuleType.StartsWith("RLS_FILTER:", StringComparison.OrdinalIgnoreCase)
-            || proposal.SuggestedRuleType.StartsWith("CASBIN_ROLES:", StringComparison.OrdinalIgnoreCase);
-        if (isPolicyOrRls)
+        // Structured proposals ("KIND:payload", e.g. RLS filters) have no column masking equivalent; they must be implemented
+        // as consent row filters or virtual filters and are rejected here instead of being marked Approved.
+        if (proposal.SuggestedRuleType.Contains(':', StringComparison.Ordinal))
         {
             throw new InvalidOperationException(
                 $"Dbt proposal '{proposalId}' ({proposal.SuggestedRuleType.Split(':')[0]}) cannot be applied automatically. " +
-                "Implement it as a consent row filter or Casbin policy and reject the proposal.");
+                "Implement it as a consent row filter or a virtual filter and reject the proposal.");
         }
 
         var tableMeta = await _metadataRepository.GetTableMetadataAsync(proposal.Table, ct).ConfigureAwait(false)

@@ -20,10 +20,8 @@ public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
     /// </summary>
     public CancellationToken CancellationToken { get; set; }
 
-    public virtual SqlNode Visit(SqlNode node)
+    protected void TickVisit()
     {
-        ArgumentNullException.ThrowIfNull(node);
-
         // a StackOverflowException cannot be caught and would end the process for every tenant. Deep trees raise
         // InsufficientExecutionStackException here, which the compiler maps to a typed limit error.
         ExecutionStackGuard.Ensure();
@@ -31,6 +29,13 @@ public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
         {
             CancellationToken.ThrowIfCancellationRequested();
         }
+    }
+
+    public virtual SqlNode Visit(SqlNode node)
+    {
+        ArgumentNullException.ThrowIfNull(node);
+
+        TickVisit();
 
         return node switch
         {
@@ -343,13 +348,43 @@ public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
 
     public virtual SqlNode VisitBinaryExpression(BinaryExpression node)
     {
-        var left = (Expression)Visit(node.Left);
-        var right = (Expression)Visit(node.Right);
+        if (!Builder.SqlAstBuilder.CanUnrollLeftSpine(node.Operator)
+            || node.Left is not BinaryExpression lb
+            || !Builder.SqlAstBuilder.SameChainFamily(node.Operator, lb.Operator))
+        {
+            var left = (Expression)Visit(node.Left);
+            var right = (Expression)Visit(node.Right);
 
-        if (left == node.Left && right == node.Right)
-            return node;
+            if (left == node.Left && right == node.Right)
+                return node;
 
-        return node with { Left = left, Right = right };
+            return node with { Left = left, Right = right };
+        }
+
+        var spine = new List<BinaryExpression>();
+        Expression cur = node;
+        while (cur is BinaryExpression cb && Builder.SqlAstBuilder.SameChainFamily(node.Operator, cb.Operator))
+        {
+            if (spine.Count > 0)
+            {
+                TickVisit();
+            }
+
+            spine.Add(cb);
+            cur = cb.Left;
+        }
+
+        var acc = (Expression)Visit(cur);
+        for (int i = spine.Count - 1; i >= 0; i--)
+        {
+            var original = spine[i];
+            var right = (Expression)Visit(original.Right);
+            acc = acc == original.Left && right == original.Right
+                ? original
+                : original with { Left = acc, Right = right };
+        }
+
+        return acc;
     }
 
     public virtual SqlNode VisitUnaryExpression(UnaryExpression node)

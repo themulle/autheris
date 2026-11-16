@@ -37,21 +37,14 @@ public sealed class DateCoercionRGql10Tests
     }
 
     [Theory]
-    [InlineData(DatabaseDialect.Sqlite, "2026-10-07T10:00:00Z")]
-    [InlineData(DatabaseDialect.PostgreSql, null)]
-    public void SqliteDates_AreBoundAsIso8601Utc(DatabaseDialect dialect, string? expected)
+    [InlineData(DatabaseDialect.PostgreSql)]
+    [InlineData(DatabaseDialect.SqlServer)]
+    public void SupportedDialects_ReceiveTypedDateTimeOffset(DatabaseDialect dialect)
     {
         var dto = new DateTimeOffset(2026, 10, 7, 12, 0, 0, TimeSpan.FromHours(2));
 
         var bound = GovernedTreeQueryService.ToProviderValue(dto, dialect);
 
-        if (expected != null)
-        {
-            bound.ShouldBe(expected);
-        }
-        else
-        {
-            bound.ShouldBe(dto);
-        }
+        bound.ShouldBe(dto);
     }
 }

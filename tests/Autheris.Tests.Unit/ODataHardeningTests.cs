@@ -47,14 +47,14 @@ public sealed class ODataHardeningTests
     };
 
     private static ClaimsPrincipal CreateUser(string sid = "S-1-5-21-LWE-DAVID") =>
-        new(new ClaimsIdentity(
+        Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(new ClaimsPrincipal(new ClaimsIdentity(
         [
             new Claim(ClaimTypes.PrimarySid, sid),
             new Claim(ClaimTypes.NameIdentifier, sid),
             new Claim("objectSid", sid),
             new Claim(ClaimTypes.Name, "david"),
             new Claim("tenant_id", "lwetem_prod")
-        ], "TestAuth", ClaimTypes.Name, ClaimTypes.Role));
+        ], "TestAuth", ClaimTypes.Name, ClaimTypes.Role)));
 
     private sealed class CapturingExecutor : IDataSourceExecutor
     {

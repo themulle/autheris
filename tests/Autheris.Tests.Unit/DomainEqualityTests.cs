@@ -64,8 +64,6 @@ public class DomainEqualityTests
     [InlineData("mssql", DatabaseDialect.SqlServer)]
     [InlineData("SqlServer", DatabaseDialect.SqlServer)]
     [InlineData("sql_server", DatabaseDialect.SqlServer)]
-    [InlineData("sqlite", DatabaseDialect.Sqlite)]
-    [InlineData("sqlite3", DatabaseDialect.Sqlite)]
     [InlineData("postgresql", DatabaseDialect.PostgreSql)]
     [InlineData("postgres", DatabaseDialect.PostgreSql)]
     [InlineData("pgsql", DatabaseDialect.PostgreSql)]
@@ -73,7 +71,7 @@ public class DomainEqualityTests
     [InlineData("spark", DatabaseDialect.Databricks)]
     [InlineData("oracle", DatabaseDialect.Oracle)]
     [InlineData("oracledb", DatabaseDialect.Oracle)]
-    public void DialectParsing_SupportsAllFiveBackends(string sourceType, DatabaseDialect expectedDialect)
+    public void DialectParsing_SupportsAllFourBackends(string sourceType, DatabaseDialect expectedDialect)
     {
         DatabaseDialectExtensions.ParseDialect(sourceType).ShouldBe(expectedDialect);
 

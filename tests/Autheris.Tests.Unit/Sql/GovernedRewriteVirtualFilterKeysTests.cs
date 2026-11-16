@@ -47,7 +47,8 @@ public sealed class GovernedRewriteVirtualFilterKeysTests
         var rewriter = new GovernedSqlRewriter(
             options, consentResolution: resolution, tableRepository: repo, consentRepository: consents,
             policyFactory: GovernedTestSupport.PolicyFactory(repo), typedPolicies: GovernedTestSupport.TypedPolicies());
-        var user = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-L5"), new Claim("tenant_id", Tenant)], "Test"));
+        var user = Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(
+            new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-L5"), new Claim("tenant_id", Tenant)], "Test")));
 
         var rewrite = await rewriter.RewriteCoreAsync(sql, user, new TenantId(Tenant), dataSourceName: null, dmlContext: null, CancellationToken.None);
 

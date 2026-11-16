@@ -19,6 +19,7 @@ Autheris.GraphQL->Autheris.Domain
 Autheris.Infrastructure->Autheris.Application
 Autheris.Infrastructure->Autheris.Domain
 Autheris.Modules.Abstractions->Autheris.Domain
+Autheris.ModuleSigner->Autheris.Infrastructure
 Autheris.Sim.ApiHost->Autheris.Api
 Autheris.Tests.Architecture->Autheris.Api
 Autheris.Tests.Architecture->Autheris.Application
@@ -29,6 +30,7 @@ Autheris.Tests.Architecture->Autheris.Infrastructure
 Autheris.Tests.Architecture->Autheris.Modules.Abstractions
 Autheris.Tests.Architecture->Autheris.Modules.Lakehouse
 Autheris.Tests.Architecture->TrinoSqlEngine
+Autheris.Tests.Common->Autheris.Api
 Autheris.Tests.Common->Autheris.Application
 Autheris.Tests.Fuzz->TrinoSqlEngine
 Autheris.Tests.Integration->Autheris.Api
@@ -53,7 +55,7 @@ Autheris.Tests.Unit->Autheris.GraphQL
 Autheris.Tests.Unit->Autheris.Infrastructure
 Autheris.Tests.Unit->Autheris.Modules.Abstractions
 Autheris.Tests.Unit->Autheris.Modules.Lakehouse
+Autheris.Tests.Unit->Autheris.ModuleSigner
 Autheris.Tests.Unit->Autheris.Tests.Common
 Autheris.Tests.Unit->TrinoSqlEngine
 TrinoSqlEngine.Tests->TrinoSqlEngine
-casbin-policy-lint->Autheris.Application

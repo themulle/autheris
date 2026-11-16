@@ -402,7 +402,7 @@ public class CompileApiTests
 
         var changes = new Dictionary<string, CompileRequest>
         {
-            [nameof(CompileRequest.TargetDialect)] = baseRequest with { TargetDialect = TargetSqlDialect.Sqlite },
+            [nameof(CompileRequest.TargetDialect)] = baseRequest with { TargetDialect = TargetSqlDialect.PostgreSql },
             [nameof(CompileRequest.TokenGuards)] = baseRequest with { TokenGuards = SqlTokenSecurityOptions.None },
             [nameof(CompileRequest.Statements)] = baseRequest with { Statements = StatementPermissions.Insert },
             [nameof(CompileRequest.EnforcedMaxRows)] = baseRequest with { EnforcedMaxRows = 7 },
@@ -444,7 +444,7 @@ public class CompileApiTests
             [nameof(GovernancePolicy.Write)] = policy with { Write = new DmlWritePermit(DmlWriteOperation.Insert, new HashSet<string> { "x" }, new HashSet<string>()) },
             [nameof(GovernancePolicy.Tenant)] = policy with { Tenant = new TenantBinding("other_param", "acme", SqlParameterType.String) }
         };
-        var validatedPerTable = new HashSet<string> { nameof(GovernancePolicy.RowFilters), nameof(GovernancePolicy.Masks), nameof(GovernancePolicy.Catalog) };
+        var validatedPerTable = new HashSet<string> { nameof(GovernancePolicy.RowFilters), nameof(GovernancePolicy.Masks), nameof(GovernancePolicy.Catalog), nameof(GovernancePolicy.PerCellColumns) };
         foreach (var property in typeof(GovernancePolicy).GetProperties(BindingFlags.Public | BindingFlags.Instance))
         {
             Assert.True(policyChanges.ContainsKey(property.Name) || validatedPerTable.Contains(property.Name), property.Name);

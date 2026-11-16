@@ -1,0 +1,2 @@
+# Shrink-only baseline of security-folder or security-named test classes exempt from [Trait("Category", "Security")].
+# Format: <TypeFullName>\t<Reason>

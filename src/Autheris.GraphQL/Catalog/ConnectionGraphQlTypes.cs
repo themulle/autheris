@@ -14,6 +14,8 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Security;
+using Autheris.Domain.Tenancy;
 using HotChocolate;
 using HotChocolate.Execution.Processing;
 using HotChocolate.Language;
@@ -141,16 +143,19 @@ internal static class ConnectionGraphQlTypes
         CatalogSchemaModel schemaModel)
     {
         var treeService = ctx.Service<IGovernedTreeQueryService>();
-        var cursorEncoder = ctx.Services.GetService<IKeysetCursorEncoder>() ?? new KeysetCursorEncoder();
+        var cursorEncoder = ctx.Service<IKeysetCursorEncoder>();
         var httpContext = ctx.Service<IHttpContextAccessor>()?.HttpContext;
         var principal = (ctx.ContextData.TryGetValue(nameof(ClaimsPrincipal), out var cp) && cp is ClaimsPrincipal p)
             ? p
             : httpContext?.User;
 
-        if (principal == null)
+        if (principal?.Identity?.IsAuthenticated != true ||
+            principal.GetUserSid() is not { } userSid ||
+            string.IsNullOrWhiteSpace(userSid.Value) ||
+            string.Equals(userSid.Value, "S-1-5-21-ANONYMOUS", StringComparison.OrdinalIgnoreCase))
         {
             throw new GraphQLException(ErrorBuilder.New()
-                .SetMessage("Authentication required.")
+                .SetMessage("Authentication with a valid subject identifier is required.")
                 .SetCode("UNAUTHORIZED")
                 .Build());
         }
@@ -299,27 +304,9 @@ internal static class ConnectionGraphQlTypes
 
         string? after = ctx.ArgumentValue<string?>("after");
 
-        // 3. Resolve Tenant and Caller SID
-        TenantId tenantId;
-        if (Autheris.Domain.Tenancy.TenantClaimReader.Read(principal) is { Kind: Autheris.Domain.Tenancy.ClaimTenantKind.Valid } claimTenant)
-        {
-            tenantId = claimTenant.Tenant;
-        }
-        else if (ctx.ContextData.TryGetValue("TenantId", out var tObj) && tObj is string tStr && TenantId.TryParse(tStr, out var ctxTenant))
-        {
-            tenantId = ctxTenant;
-        }
-        else
-        {
-            throw new GraphQLException(ErrorBuilder.New()
-                .SetMessage("Access denied: The caller has no resolvable tenant.")
-                .SetCode("TENANT_UNRESOLVED")
-                .Build());
-        }
-
-        string callerSid = principal.FindFirst(ClaimTypes.NameIdentifier)?.Value
-            ?? principal.Identity?.Name
-            ?? string.Empty;
+        // 3. Resolve Tenant (request tenant / validated claim; client-writable ContextData is never used) and Caller SID
+        TenantId tenantId = ResolveVerifiedTenant(principal, httpContext);
+        string callerSid = userSid.Value;
 
         // 4. Collect requested selected column names for RequestHash
         var selectedColumns = CollectSelectedNodeColumns(ctx);
@@ -344,10 +331,10 @@ internal static class ConnectionGraphQlTypes
                 var pkValues = cursorEncoder.DecodeCursor(after, table.Metadata, cursorContext);
                 seekPredicate = BuildSeekPredicate(table.Metadata, pkCols, effectiveDirections, pkValues);
             }
-            catch (InvalidCursorException ex)
+            catch (InvalidCursorException)
             {
                 deferredError ??= new GraphQLException(ErrorBuilder.New()
-                    .SetMessage(ex.Message)
+                    .SetMessage("The supplied cursor is invalid.")
                     .SetCode("INVALID_QUERY")
                     .Build());
             }
@@ -623,6 +610,58 @@ internal static class ConnectionGraphQlTypes
         }
 
         return orBranches.Count == 1 ? orBranches[0] : new TreeOrFilter(orBranches);
+    }
+
+    private static TenantId ResolveVerifiedTenant(ClaimsPrincipal principal, HttpContext? httpContext)
+    {
+        var claimResult = TenantClaimReader.Read(principal);
+        if (claimResult.Kind == ClaimTenantKind.Invalid)
+        {
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetMessage("Access denied: The caller has an invalid tenant claim.")
+                .SetCode("FORBIDDEN")
+                .Build());
+        }
+
+        TenantId? claimTenant = claimResult.Kind == ClaimTenantKind.Valid ? claimResult.Tenant : (TenantId?)null;
+        TenantId? requestTenant = null;
+
+        if (httpContext?.Items.TryGetValue(SecurityPrincipalContext.ItemKey, out var secCtxObj) == true &&
+            secCtxObj is SecurityPrincipalContext secCtx)
+        {
+            if (secCtx.ResolvedTenant is { } resolvedTenant && !string.IsNullOrWhiteSpace(resolvedTenant.Value))
+            {
+                requestTenant = resolvedTenant;
+            }
+            else if (!string.IsNullOrWhiteSpace(secCtx.TenantId.Value))
+            {
+                requestTenant = secCtx.TenantId;
+            }
+        }
+        else if (httpContext?.Items.TryGetValue(SecurityPrincipalContext.TenantIdItemKey, out var tidObj) == true &&
+                 tidObj is TenantId itemTenant &&
+                 !string.IsNullOrWhiteSpace(itemTenant.Value))
+        {
+            requestTenant = itemTenant;
+        }
+
+        if (claimTenant is { } ct && requestTenant is { } rt && ct != rt)
+        {
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetMessage("Access denied: Tenant claim does not match request tenant.")
+                .SetCode("FORBIDDEN")
+                .Build());
+        }
+
+        if ((requestTenant ?? claimTenant) is { } resolved)
+        {
+            return resolved;
+        }
+
+        throw new GraphQLException(ErrorBuilder.New()
+            .SetMessage("Access denied: The caller has no resolvable tenant.")
+            .SetCode("TENANT_UNRESOLVED")
+            .Build());
     }
 
     private static object? ReadElementValue(JsonElement elem) => elem.ValueKind switch

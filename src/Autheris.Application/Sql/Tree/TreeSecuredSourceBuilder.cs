@@ -54,7 +54,7 @@ public sealed class TreeSecuredSourceBuilder(
         }
 
         if (!SqlDialectMapper.TryToTargetDialect(dialect, out var target)
-            || target is not (TargetSqlDialect.Sqlite or TargetSqlDialect.SqlServer or TargetSqlDialect.PostgreSql))
+            || target is not (TargetSqlDialect.SqlServer or TargetSqlDialect.PostgreSql))
         {
             throw TreeSecuredSourceMarkers.Denied();
         }

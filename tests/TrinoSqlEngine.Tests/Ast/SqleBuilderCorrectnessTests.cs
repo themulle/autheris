@@ -34,22 +34,6 @@ public sealed class SqleBuilderCorrectnessTests
     }
 
     [Fact]
-    public void UnaryPlus_Column_InSelect_Sqlite()
-    {
-        var compiled = CompilerTestHelpers.Generate(TargetSqlDialect.Sqlite, "SELECT +amount FROM t");
-
-        Assert.DoesNotContain("NOT", compiled.Sql, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public void UnaryPlus_InDeleteWhere_Sqlite_NoNot()
-    {
-        var compiled = CompilerTestHelpers.Generate(TargetSqlDialect.Sqlite, Build("DELETE FROM t WHERE id = +5"));
-
-        Assert.DoesNotContain("NOT", compiled.Sql, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
     public void UnaryMinus_Unchanged()
     {
         var statement = Assert.IsType<SelectStatement>(Build("SELECT -amount FROM t"));
@@ -95,7 +79,7 @@ public sealed class SqleBuilderCorrectnessTests
     [InlineData("IS NOT FALSE")]
     public void BooleanTest_IsExpandedToCase_WithoutBooleanLiteral(string test)
     {
-        foreach (var dialect in new[] { TargetSqlDialect.SqlServer, TargetSqlDialect.Oracle, TargetSqlDialect.Sqlite })
+        foreach (var dialect in new[] { TargetSqlDialect.SqlServer, TargetSqlDialect.Oracle })
         {
             var compiled = CompilerTestHelpers.Generate(dialect, $"SELECT id FROM t WHERE (flag = 1) {test}");
 

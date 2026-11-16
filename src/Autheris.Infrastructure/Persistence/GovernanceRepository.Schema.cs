@@ -206,8 +206,8 @@ public partial class GovernanceRepository
                     using (var cmd = conn.CreateCommand())
                     {
                         cmd.Transaction = trans;
-                        cmd.CommandText = @"INSERT INTO POLICY_EPOCHS (table_id, domain, schema_name, table_name, epoch, updated_at)
-                                            VALUES (@id, @domain, @schema, @name, 1, @now)
+                        cmd.CommandText = @"INSERT INTO POLICY_EPOCHS (table_id, domain, schema_name, table_name, epoch, change_version, updated_at)
+                                            VALUES (@id, @domain, @schema, @name, 1, 1, @now)
                                             ON CONFLICT (table_id) DO NOTHING;";
                         cmd.AddBound("@id", tableId);
                         cmd.AddBound("@domain", domain);
@@ -298,8 +298,8 @@ public partial class GovernanceRepository
             using (var cmd = conn.CreateCommand())
             {
                 cmd.Transaction = trans;
-                cmd.CommandText = @"INSERT INTO POLICY_EPOCHS (table_id, domain, schema_name, table_name, epoch, updated_at)
-                                    VALUES (@id, 'finance', 'dbo', 'finance_items', 1, @now)
+                cmd.CommandText = @"INSERT INTO POLICY_EPOCHS (table_id, domain, schema_name, table_name, epoch, change_version, updated_at)
+                                    VALUES (@id, 'finance', 'dbo', 'finance_items', 1, 1, @now)
                                     ON CONFLICT DO NOTHING;";
                 cmd.AddBound("@id", childTableId);
                 cmd.AddBound("@now", TimeProvider.System.GetUtcNow().ToString("O"));
@@ -382,39 +382,6 @@ public partial class GovernanceRepository
                                     JOIN TABLES tp ON tp.id = r.parent_table_id
                                     WHERE r.relation_name = 'items' AND tp.schema_name = 'dbo' AND tp.table_name = 'finance_table_1'
                                     ON CONFLICT DO NOTHING;";
-                cmd.ExecuteNonQuery();
-            }
-
-            var adminRoleId = Guid.NewGuid().ToString();
-            using (var cmd = conn.CreateCommand())
-            {
-                cmd.Transaction = trans;
-                cmd.CommandText = @"INSERT INTO ROLES (id, role_name, description)
-                                    VALUES (@id, 'GovernanceAdmin', 'Platform governance administrators')
-                                    ON CONFLICT (role_name) DO NOTHING;";
-                cmd.AddBound("@id", adminRoleId);
-                cmd.ExecuteNonQuery();
-            }
-
-            using (var idCmd = conn.CreateCommand())
-            {
-                idCmd.Transaction = trans;
-                idCmd.CommandText = "SELECT id FROM ROLES WHERE role_name = 'GovernanceAdmin' LIMIT 1";
-                var actualRoleId = idCmd.ExecuteScalar()?.ToString();
-                if (!string.IsNullOrEmpty(actualRoleId))
-                {
-                    adminRoleId = actualRoleId;
-                }
-            }
-
-            using (var cmd = conn.CreateCommand())
-            {
-                cmd.Transaction = trans;
-                cmd.CommandText = @"INSERT INTO ROLE_MEMBERS (id, role_id, member_type, member_sid)
-                                    VALUES (@id, @rid, 'User', 'S-1-5-21-GOVERNANCEADMIN')
-                                    ON CONFLICT DO NOTHING;";
-                cmd.AddBound("@id", Guid.NewGuid().ToString());
-                cmd.AddBound("@rid", adminRoleId);
                 cmd.ExecuteNonQuery();
             }
 
@@ -529,8 +496,8 @@ public partial class GovernanceRepository
                     using (var cmd = conn.CreateCommand())
                     {
                         cmd.Transaction = trans;
-                        cmd.CommandText = @"INSERT INTO POLICY_EPOCHS (table_id, domain, schema_name, table_name, epoch, updated_at)
-                                            SELECT @id, @domain, @schema, @name, 1, @now
+                        cmd.CommandText = @"INSERT INTO POLICY_EPOCHS (table_id, domain, schema_name, table_name, epoch, change_version, updated_at)
+                                            SELECT @id, @domain, @schema, @name, 1, 1, @now
                                             WHERE NOT EXISTS (SELECT 1 FROM POLICY_EPOCHS WHERE table_id = @id)
                                               AND NOT EXISTS (SELECT 1 FROM POLICY_EPOCHS WHERE domain = @domain AND schema_name = @schema AND table_name = @name);";
                         cmd.AddBound("@id", tableId);
@@ -589,36 +556,6 @@ public partial class GovernanceRepository
                         }
                     }
                 }
-            }
-
-            using (var cmd = conn.CreateCommand())
-            {
-                cmd.Transaction = trans;
-                cmd.CommandText = @"INSERT INTO ROLES (id, role_name, description)
-                                    SELECT @id, 'GovernanceAdmin', 'Platform governance administrators'
-                                    WHERE NOT EXISTS (SELECT 1 FROM ROLES WHERE role_name = 'GovernanceAdmin');";
-                cmd.AddBound("@id", Guid.NewGuid().ToString());
-                cmd.ExecuteNonQuery();
-            }
-
-            string? adminRoleId;
-            using (var idCmd = conn.CreateCommand())
-            {
-                idCmd.Transaction = trans;
-                idCmd.CommandText = "SELECT TOP (1) id FROM ROLES WHERE role_name = 'GovernanceAdmin'";
-                adminRoleId = idCmd.ExecuteScalar()?.ToString();
-            }
-
-            if (!string.IsNullOrEmpty(adminRoleId))
-            {
-                using var cmd = conn.CreateCommand();
-                cmd.Transaction = trans;
-                cmd.CommandText = @"INSERT INTO ROLE_MEMBERS (id, role_id, member_type, member_sid)
-                                    SELECT @id, @rid, 'User', 'S-1-5-21-GOVERNANCEADMIN'
-                                    WHERE NOT EXISTS (SELECT 1 FROM ROLE_MEMBERS WHERE role_id = @rid AND member_sid = 'S-1-5-21-GOVERNANCEADMIN');";
-                cmd.AddBound("@id", Guid.NewGuid().ToString());
-                cmd.AddBound("@rid", adminRoleId);
-                cmd.ExecuteNonQuery();
             }
 
             trans.Commit();

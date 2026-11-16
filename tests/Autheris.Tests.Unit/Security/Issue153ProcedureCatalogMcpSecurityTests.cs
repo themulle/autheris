@@ -35,6 +35,7 @@ using Xunit;
 /// Security Verification Suite for Issue #153: Governed Stored Procedures in Catalog and MCP.
 /// Covers binding guardrails SEC-GOV153-01..05 and conditions T_SEC_GOV153_01..08.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class Issue153ProcedureCatalogMcpSecurityTests
 {
     private const string TenantA = "tenant-a";
@@ -144,7 +145,7 @@ public sealed class Issue153ProcedureCatalogMcpSecurityTests
             Substitute.For<IRequestExecutorProvider>(),
             gatewayExec,
             NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100),
-            datasetCatalog: catalog);
+            datasetCatalog: catalog, persistedToolValidator: new Autheris.Application.Mcp.Services.PersistedToolValidator());
 
         var tool = McpDatasetTools.Definitions().First(t => t.Name == McpDatasetTools.DescribeDataset);
         var session = CreateSession();

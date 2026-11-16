@@ -1,104 +1,140 @@
 ---
 name: project-manager
 description: >-
-  Lead delivery project manager and workflow orchestrator. Manages the 5-phase implementation
-  lifecycle: (1) Product Manager qualification/PRD, (2) Solution Architect implementation plan,
-  (3) Security Expert review & hardening, (4) C# TDD Developer(s) Red-Green-Refactor execution,
-  and (5) Code Reviewer inspection, followed by a tracker update. No documentation phase (owner rule).
+  Senior Delivery Project Manager and Lead Workflow Orchestrator running on Orchestrator (Argon).
+  Follows the implementation plan, prepares self-contained, bite-sized task briefs for Gemini 4
+  Hydrogen TDD developers, enforces local filtered-unit-test-only constraints, offloads full
+  and integration test suites to GitHub Actions, and drives the 5-phase lifecycle (no documentation phase).
 ---
 
-# Delivery Project Manager & Workflow Orchestrator Skill
+# Senior Delivery Project Manager & Workflow Orchestrator Skill (Argon)
 
-This skill equips an agent to act as the **Delivery Project Manager and Lead Workflow Orchestrator** for the Autheris ecosystem.
+This skill equips the **Senior Delivery Project Manager / Lead Orchestrator** running on **Orchestrator (Argon)** (`gemini-pro-orchestrator-argon` / `gemini-4-argon-high`) to direct **Gemini 4 Hydrogen** (`gemini-4-hydrogen-high`) junior execution developers quickly and cost-efficiently.
+
+> **Owner rule (2026-10-17, permanent):** No documentation phase. No feature docs in `docs/features/`, no README registration, no release notes. After Phase 5, only update the delivery tracker / master plan in `docs/plans/`, commit, push, and verify GitHub Actions.
 
 ---
 
-> **Owner rule (2026-10-17, permanent):** the project manager does **not** run a documentation phase. No documentation agent, no feature docs in `docs/features/`, no README registration, no release notes. After Phase 5 the project manager only updates the delivery tracker in `docs/plans/` (status row and resume instruction), commits and pushes.
+## 1. Senior–Junior Pairing (Argon + Hydrogen) & Cost-Efficiency
 
-## 1. The 5-Phase Implementation Lifecycle
+To maximize delivery speed and minimize cost on Gemini 4 without sacrificing correctness:
+
+- **Senior (`Orchestrator (Argon)`):**
+  - Follows the active implementation roadmap (`docs/plans/00-master-plan-overview.md`, `docs/plans/2026-11-14-handover-agent-continuation.md`, and step-specific plans in `docs/plans/`).
+  - Pre-reads target interfaces, call sites, Phase 3 binding `SEC-*` / `Q-SEC*` security conditions, and potential integration-test impact areas **before** spawning Phase 4 developers.
+  - Translates complex work packages into **bite-sized, self-contained Senior-to-Junior Task Briefs**.
+  - Runs Phase 5 code review gating, updates the tracker, pushes the branch, and monitors **GitHub Actions** for full-suite and integration verification.
+- **Junior (`Gemini 4 Hydrogen` — `gemini-4-hydrogen-high`):**
+  - Executes Phase 4 strict Red-Green-Refactor TDD inside an isolated `/work/wt/<name>` worktree.
+  - Runs **only** filtered local unit tests and touched architecture ratchet tests, proactively adapts affected integration tests, and compile-checks `tests/Autheris.Tests.Integration` locally.
+- **Cost-Efficient, Not Token-Starved:**
+  - Never starve Hydrogen of context to "save" prompt tokens. Underspecified briefs force expensive exploration, wrong assumptions, and multi-round fix loops.
+  - Invest upfront tokens in Argon's brief (exact files, line numbers, signatures, security IDs, test filters, and integration pointers) so Hydrogen succeeds in **one clean pass**.
+  - Save cost structurally by keeping CLI build/test logs quiet (`-v q --nologo`, `--logger "console;verbosity=minimal"`), avoiding full local test runs, and using one Hydrogen worker per independent work package.
+
+---
+
+## 2. The 5-Phase Implementation Lifecycle
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor User as User / Stakeholder
-    participant PM as 1. Product Manager
+    actor Owner as Owner / Stakeholder
+    participant PM as Senior Lead (Argon)
     participant Arch as 2. Solution Architect
     participant Sec as 3. Security Expert
-    participant Dev as 4. C# TDD Developer(s)
+    participant Dev as 4. TDD Junior (Hydrogen)
     participant Rev as 5. Code Reviewer
+    participant CI as GitHub Actions CI
 
-    User->>PM: New Feature Request / Initiative
-    PM->>PM: Deduplicate (docs/features/), Benchmark (OWASP/RFC), Enrich PRD
-    PM->>Arch: Hand off approved PRD (docs/plans/YYYY-MM-DD-req-*.md)
-    Arch->>Arch: Design architecture & Implementation Plan (docs/plans/YYYY-MM-DD-plan-*.md)
-    Arch->>Sec: Hand off Implementation Plan
-    Sec->>Sec: Audit security controls, Fail-Closed, add threat mitigations
-    Sec->>Dev: Approved Implementation Plan with security specs
-    Dev->>Dev: Strict TDD (Red -> Green -> Refactor), full test suite green
-    Dev->>Rev: Hand off completed code & test suite
-    Rev->>Rev: Inspect C# idioms, allocations, test coverage
-    alt Rework Needed
-        Rev-->>Dev: Request fixes for flagged issues
+    Owner->>PM: Plan / Handover Execution
+    PM->>Arch: Draft or Rebase Plan (docs/plans/)
+    Arch->>Sec: Audit & Issue Binding SEC-* Conditions
+    Sec->>PM: Approved Plan + Owner Decisions
+    PM->>PM: Pre-analyze targets, ratchets & integration impact
+    PM->>Dev: Bite-sized Senior-to-Junior Task Brief
+    Dev->>Dev: Strict TDD + Filtered Unit Tests + Integration Compile-Check
+    Dev->>Rev: Hand off worktree branch & summary
+    Rev->>Rev: Review diff, C# 13 idioms, SEC-* compliance
+    alt Changes Required
+        Rev-->>Dev: Concrete fix list (via Argon)
     else Approved
-        Rev->>Rev: Approve verified feature
-        Rev-->>User: Feature complete (tracker updated, pushed)
+        PM->>PM: Update tracker in docs/plans/, commit & push
+        PM->>CI: Verify full unit, integration & parity suites on GitHub
+        CI-->>Owner: Green checks ready for merge
     end
+```
+
+### Phase Directives & Model Assignment
+1. **Phase 1: Product Management (`product-manager`)** — Qualify new requests, deduplicate against `docs/features/`, write compact PRDs in `docs/plans/YYYY-MM-DD-req-*.md`.
+2. **Phase 2: Solution Architect (`csharp-architect`)** — Design contracts and implementation plans in `docs/plans/YYYY-MM-DD-plan-*.md` (Argon / High-reasoning tier).
+3. **Phase 3: Security Expert (`csharp-security-expert`)** — Audit Fail-Closed, Casbin ABAC, HMAC audit, and append binding `SEC-*` conditions and mandatory `[Trait("Category", "Security")]` test specs.
+4. **Phase 4: TDD Developer (`csharp-tdd-developer` on `gemini-4-hydrogen-high`)** — Execute Argon's prepared brief via strict Red-Green-Refactor, filtered local unit tests, and integration-test adaptation + compile check.
+5. **Phase 5: Code Reviewer (`csharp-code-reviewer`)** — Read-only inspection of branch diff for correctness, fail-closed security, C# 13 idioms, allocations, and integration test updates.
+6. **Tracker Update & GitHub CI Verification (no documentation phase)** — Update tracker row/resume note in `docs/plans/`, commit, push branch, and verify full CI suites on GitHub Actions.
+
+---
+
+## 3. Mandatory Senior-to-Junior Task Brief Template (Argon -> Hydrogen)
+
+Every Phase 4 brief dispatched to a Hydrogen TDD developer **must** include all five sections so the agent never has to guess:
+
+```markdown
+### 1. Worktree & Environment
+- Worktree: `/work/wt/<lane-name>` (create from `origin/main` first; never edit `/root/autheris` directly)
+- Branch: `<feat/...>`
+- NuGet cache: `NUGET_PACKAGES=/work/nuget`
+
+### 2. Exact Code Targets & Pre-Analyzed Context
+- Goal: <1-2 sentence deliverable from the plan>
+- Target files & line ranges:
+  - `src/<Project>/<File.cs>#Lxx-Lyy`: <existing signature / current behavior -> required change>
+- Design constraints & invariants: <signatures, DI lifetimes, CancellationToken, fail-closed rules>
+
+### 3. Binding Security Conditions & Repository Ratchets
+- Phase 3 conditions: `<SEC-xxxx / Q-SECx-y>` -> mandatory `[Trait("Category", "Security")]` test names: `<TestMethodNames>`
+- Traceability: <whether a row in SecurityRegressionTraceabilityTests is required>
+- Ratchet guardrails:
+  - NO `WP-`, `SEC-`, or `OD-` identifiers in comments inside `src/Autheris.Api` or `src/Autheris.Application`.
+  - Keep endpoint-count baseline intact unless explicitly approved (`tests/Autheris.Tests.Architecture/Baselines/endpoint-count.txt`).
+
+### 4. Local Unit Test Command (Filtered Only)
+- Run ONLY targeted unit tests locally (CPU/RAM constrained):
+  `NUGET_PACKAGES=/work/nuget dotnet test tests/Autheris.Tests.Unit/Autheris.Tests.Unit.csproj -c Release -p:AutherisIncludeTestAuth=true --filter "FullyQualifiedName~<TestClassName>" --logger "console;verbosity=minimal" -v q --nologo -m:2 -nodeReuse:false`
+- Touched architecture ratchet test (if applicable):
+  `NUGET_PACKAGES=/work/nuget dotnet test tests/Autheris.Tests.Architecture/Autheris.Tests.Architecture.csproj -c Release --filter "FullyQualifiedName~<RatchetClassName>" --logger "console;verbosity=minimal" -v q --nologo -m:2 -nodeReuse:false`
+
+### 5. Integration Test Impact Pointers (Inspect, Adapt, Compile-Only)
+- Inspect these candidate files + run `git grep -n "<ChangedSymbol>" tests/`:
+  - `tests/Autheris.Tests.Integration/<CandidateFile.cs>`
+  - `tests/Autheris.Tests.Parity/<CandidateFile.cs>` (if applicable)
+- Update fixtures/mocks/assertions if signatures, options, DI, or authz behavior changed.
+- Verify compilation ONLY (do NOT run integration tests locally):
+  `NUGET_PACKAGES=/work/nuget dotnet build tests/Autheris.Tests.Integration/Autheris.Tests.Integration.csproj -c Release -p:AutherisIncludeTestAuth=true --no-dependencies -v q --nologo -m:2 -nodeReuse:false`
 ```
 
 ---
 
-## 2. Gatekeeper Quality Checklist per Phase
+## 4. Local Resource Limits vs. GitHub Actions CI Offloading
 
-### Gate 1: Product Management Gate (`product-manager`)
-- [ ] Checked against existing catalog in [`docs/features/README.md`](../../../docs/features/README.md).
-- [ ] Validated fit for Autheris (Zero-Trust, High-Perf .NET 10, Hot Chocolate GraphQL, Casbin ABAC).
-- [ ] Benchmarked against industry standards (OWASP API Top 10, RFCs, GraphQL Foundation).
-- [ ] If anti-pattern detected: **Blocked with explicit warning & safe architectural alternative**.
-- [ ] PRD authored in [`docs/plans/YYYY-MM-DD-req-<topic>.md`](../../../docs/plans/) and registered in [`docs/plans/00-master-plan-overview.md`](../../../docs/plans/00-master-plan-overview.md).
-
-### Gate 2: Architecture Planning Gate (`csharp-architect`)
-- [ ] Clean Architecture layers respected: Domain (pure) -> Application -> Infrastructure -> Api/GraphQL.
-- [ ] Zero-allocation patterns considered for hot query execution paths (`ReadOnlySpan<T>`, memory pooling).
-- [ ] Concrete implementation steps drafted in [`docs/plans/YYYY-MM-DD-plan-<topic>.md`](../../../docs/plans/).
-- [ ] Decomposed into parallel subtasks if suitable for multiple developers.
-
-### Gate 3: Security & Compliance Gate (`csharp-security-expert`)
-- [ ] Fail-Closed defaults verified: Deny by default when tokens, consents, or rules are missing.
-- [ ] Input validation and SQL injection guards in place (AST visitor, parameterization).
-- [ ] Tamper-evident HMAC-SHA256 audit logging verified for state changes.
-- [ ] Mandatory security test cases appended to the implementation plan.
-
-### Gate 4: Development Gate (`csharp-tdd-developer`)
-- [ ] Strict TDD followed: 🔴 RED (failing test first) -> 🟢 GREEN (minimal code) -> 🔵 REFACTOR.
-- [ ] Edge cases, boundary values, and negative cases tested.
-- [ ] `dotnet build Autheris.sln` succeeds with **0 warnings and 0 errors**.
-- [ ] `dotnet test` passes 100% across the solution.
-
-### Gate 5: Code Review Gate (`csharp-code-reviewer`)
-- [ ] Modern C# 13 / .NET 10 idioms utilized (primary constructors, pattern matching, collection expressions).
-- [ ] No hidden memory leaks, un-disposed resources, or discarded cancellation tokens.
-- [ ] Clean exception handling without losing stack traces (`throw;` instead of `throw ex;`).
-- [ ] If issues are found: developer iteration loop initiated.
-
-### After Gate 5: Tracker Bookkeeping (no documentation phase)
-- [ ] Delivery tracker status row updated in `docs/plans/`.
-- [ ] Resume instruction for the next step or run written.
-- [ ] Committed and pushed.
+- **Local Machine Constraints (Strict):**
+  - CPU and RAM are limited; parallel lanes share system memory.
+  - **NEVER** run `dotnet test Autheris.sln`, unfiltered `Autheris.Tests.Unit`, `Autheris.Tests.Integration`, Testcontainers, Spark/Oracle/Databricks tests, or Parity tests locally.
+  - Cap local MSBuild parallelism: `-m:2 -nodeReuse:false`, one build at a time.
+  - Check disk space (`df -h`) before creating worktrees; `/work` is non-persistent, so commit, push, and clean up worktrees/`bin`/`obj` upon step completion.
+- **GitHub Actions CI Offloading:**
+  - Full unit suite, Testcontainers integration suites, SQL Compiler Gate, Parity, and nightlies run exclusively on **GitHub Actions**.
+  - After pushing a reviewed branch, inspect CI status using:
+    - `gh run list --branch <branch>`
+    - `gh pr checks <pr>` (when a PR exists; owner opens PRs unless instructed)
+    - `gh run view <run-id> --log-failed`
+  - If a workflow only triggers on `pull_request`, record the locally verified filtered suites and explicitly list the suites awaiting GitHub Actions verification on PR creation.
 
 ---
 
-## 3. Task Decomposition & Parallelization Rules
+## 5. Governance & Parallelization Rules
 
-When a feature is large, the Project Manager splits Phase 4 across specialized developer streams:
-1. **Stream A (Domain & Application):** Core models, value objects, interfaces, and business validators.
-2. **Stream B (Infrastructure & Connectors):** Persistence repositories, database drivers, and network clients.
-3. **Stream C (API & Endpoints):** GraphQL resolvers, REST controllers, and MCP tool bindings.
-
-The Project Manager ensures interface contracts from Phase 2 are established before parallel streams commence.
-
----
-
-## 4. Language & Repository Governance
-
-- **English Standard:** All plans, code, tests, reviews, and documentation must be in **English**.
-- **No Progress in `docs/`:** Progress tracking resides strictly in [`docs/plans/`](../../../docs/plans/).
+- **Language:** All plans, code, tests, reviews, and commits strictly in **English**.
+- **Documentation Separation:** Progress notes and plans live exclusively in `docs/plans/`, never in `docs/` outside `docs/plans/`.
+- **Independent Lanes Only:** Parallelize Hydrogen workers only across disjoint file sets (no shared files; DDL migrations merge serially).
+- **Protected Artifacts:** Never modify `.github/workflows/*`, `.trivyignore`, or Dockerfiles unless explicitly instructed by the owner.

@@ -31,83 +31,28 @@ public static partial class CatalogApiEndpoints
     {
         var group = app.MapGroup("/api/v1/catalog").WithIngressTransport(DataSourceTransportFlags.Rest);
 
-        group.MapGet("/datasets", async (
+        group.MapGet("/datasets", (
             ICatalogDiscoveryService discoveryService,
             HttpContext httpContext,
             CancellationToken ct) =>
-        {
-            var targetLang = ApplyCatalogLanguageAndVary(httpContext);
-            var context = CreateRequestContext(httpContext, targetLang);
-            var datasets = await discoveryService.ListDatasetsAsync(context, ct);
-            return Results.Ok(datasets);
-        })
+            CatalogDiscoveryApiHelpers.ListDatasetsAsync(discoveryService, httpContext, ApplyCatalogLanguageAndVary, CreateRequestContext, ct))
         .RequireAuthorization()
         .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
-        group.MapGet("/datasets/{*datasetId}", async (
+        group.MapGet("/datasets/{*datasetId}", (
             string datasetId,
             ICatalogDiscoveryService discoveryService,
             HttpContext httpContext,
             CancellationToken ct) =>
-        {
-            if (!TableIdentifier.TryParse(datasetId.Replace('/', '.'), out var tableId))
-            {
-                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The dataset identifier is invalid.", httpContext);
-            }
-
-            var targetLang = ApplyCatalogLanguageAndVary(httpContext);
-            var context = CreateRequestContext(httpContext, targetLang);
-            var detail = await discoveryService.GetDatasetDetailAsync(tableId, context, ct);
-            if (detail is null)
-            {
-                return Results.NotFound();
-            }
-
-            var isBrief = httpContext.Request.Query.TryGetValue("brief", out var briefVal) &&
-                          bool.TryParse(briefVal.ToString(), out var b) && b;
-            if (isBrief)
-            {
-                var briefDetail = new
-                {
-                    dataset = detail.DatasetId,
-                    domain = detail.Domain,
-                    schema = detail.Schema,
-                    table = detail.Table,
-                    description = detail.Description,
-                    sensitivity = detail.Sensitivity,
-                    primaryKeys = detail.PrimaryKeys,
-                    size = detail.Size,
-                    columns = detail.Columns.Select(c => new
-                    {
-                        name = c.Name,
-                        type = c.Type,
-                        description = c.Description,
-                        isPrimaryKey = c.IsPrimaryKey,
-                        isSensitive = c.Sensitivity != "Public" && c.Sensitivity != "NORMAL" && !string.IsNullOrEmpty(c.Sensitivity)
-                    })
-                };
-                return Results.Ok(briefDetail);
-            }
-
-            return Results.Ok(detail);
-        })
+            CatalogDiscoveryApiHelpers.GetDatasetDetailAsync(datasetId, discoveryService, httpContext, ApplyCatalogLanguageAndVary, CreateRequestContext, ct))
         .RequireAuthorization()
         .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
-        group.MapGet("/domains", async (
+        group.MapGet("/domains", (
             ICatalogDiscoveryService discoveryService,
             HttpContext httpContext,
             CancellationToken ct) =>
-        {
-            var context = CreateRequestContext(httpContext);
-            var datasets = await discoveryService.ListDatasetsAsync(context, ct);
-            var domains = datasets
-                .GroupBy(d => d.Domain, StringComparer.OrdinalIgnoreCase)
-                .Select(g => new { domain = g.Key, tableCount = g.Count() })
-                .OrderByDescending(d => d.tableCount)
-                .ToList();
-            return Results.Ok(new { totalTables = datasets.Count, totalDomains = domains.Count, domains });
-        })
+            CatalogDiscoveryApiHelpers.ListDomainsAsync(discoveryService, httpContext, CreateRequestContext, ct))
         .RequireAuthorization()
         .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
@@ -148,7 +93,7 @@ public static partial class CatalogApiEndpoints
         .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
         .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
-        group.MapGet("/search", async (
+        group.MapGet("/search", (
             string? q,
             string? domain,
             int? limit,
@@ -156,26 +101,7 @@ public static partial class CatalogApiEndpoints
             ICatalogDiscoveryService discoveryService,
             HttpContext httpContext,
             CancellationToken ct) =>
-        {
-            var targetLang = ApplyCatalogLanguageAndVary(httpContext);
-            var context = CreateRequestContext(httpContext, targetLang);
-            var searchMode = mode?.ToLowerInvariant() switch
-            {
-                "semantic" => CatalogSearchMode.SemanticVector,
-                "keyword" => CatalogSearchMode.KeywordBm25,
-                _ => CatalogSearchMode.Hybrid
-            };
-
-            var query = new CatalogSearchQuery(
-                QueryText: q ?? string.Empty,
-                DomainFilter: domain,
-                Limit: Math.Clamp(limit ?? 10, 1, 50),
-                Mode: searchMode,
-                Language: targetLang);
-
-            var hits = await discoveryService.SearchCatalogDetailedAsync(query, context, ct);
-            return Results.Ok(hits);
-        })
+            CatalogDiscoveryApiHelpers.SearchAsync(q, domain, limit, mode, discoveryService, httpContext, ApplyCatalogLanguageAndVary, CreateRequestContext, ct))
         .RequireAuthorization()
         .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
@@ -229,15 +155,6 @@ public static partial class CatalogApiEndpoints
         .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
         .WithAudit(AuditLevel.Delegated, AuditEventTypes.DatasourceTested);
 
-        // Issue #427: POST /api/v1/catalog/datasources/{id}/refresh-physical-keys
-        group.MapPost("/datasources/{id}/refresh-physical-keys", RefreshDatasourcePhysicalKeysHandler)
-        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
-        .WithAudit(AuditLevel.Full, AuditEventTypes.CatalogKeyDefinitionChanged);
-
-        app.MapPost("/api/governance/datasources/{id}/refresh-physical-keys", RefreshDatasourcePhysicalKeysHandler)
-        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
-        .WithAudit(AuditLevel.Full, AuditEventTypes.CatalogKeyDefinitionChanged);
-
         // B-15: PUT /api/v1/catalog/datasets/{id}/state
         group.MapPut("/datasets/{id}/state", SetDatasetStateHandler)
         .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
@@ -267,22 +184,19 @@ public static partial class CatalogApiEndpoints
         .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
         .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
-        // Predefined Synthetic Samples
-        group.MapPut("/datasets/{id}/synthetic-samples", SetDatasetSyntheticSamplesHandler)
-        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
-        .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
+        // Discovery Artifacts (samples + column/table statistics)
+        group.MapPut("/datasets/{id}/discovery-artifacts", PutDiscoveryArtifactsHandler)
+        .WithRequestBodyLimit(Autheris.Application.Catalog.Services.CatalogDiscoverySettings.HardMaxArtifactBytes)
+        .RequireAuthorization()
+        .WithAudit(AuditLevel.Delegated, AuditEventTypes.CatalogDiscoveryArtifactsChanged);
 
-        app.MapPut("/api/catalog/datasets/{id}/synthetic-samples", SetDatasetSyntheticSamplesHandler)
-        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
-        .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
+        group.MapDelete("/datasets/{id}/discovery-artifacts", DeleteDiscoveryArtifactsHandler)
+        .RequireAuthorization()
+        .WithAudit(AuditLevel.Delegated, AuditEventTypes.CatalogDiscoveryArtifactsChanged);
 
-        group.MapGet("/datasets/{id}/synthetic-samples", GetDatasetSyntheticSamplesHandler)
-        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
-        .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
-
-        app.MapGet("/api/catalog/datasets/{id}/synthetic-samples", GetDatasetSyntheticSamplesHandler)
-        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
-        .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
+        group.MapGet("/datasets/{id}/samples", GetDiscoverySamplesHandler)
+        .RequireAuthorization()
+        .WithAudit(AuditLevel.Delegated, AuditEventTypes.MetadataSampleRead);
 
         // Issue #111: dataset tags and catalog visibility tier. RequireAuthorization() only: owners must reach the routes, so the
         // decision (admin class, owner or delegate, Full only for administrators) is taken inside DatasetCatalogAdminService.
@@ -344,7 +258,7 @@ public static partial class CatalogApiEndpoints
         .RequireAuthorization()
         .WithAudit(AuditLevel.Full, AuditEventTypes.CatalogTagsChanged);
 
-        group.MapPut("/datasets/{id}/visibility", PutDatasetVisibilityHandler)
+        group.MapPut("/datasets/{id}/discovery", PutDatasetDiscoveryHandler)
         .RequireAuthorization()
         .WithAudit(AuditLevel.Full, AuditEventTypes.CatalogVisibilityChanged);
 
@@ -399,16 +313,16 @@ public static partial class CatalogApiEndpoints
         return MapCatalogResult(await service.ApplyAsync(httpContext.User, id, edit, "admin", ct).ConfigureAwait(false));
     }
 
-    internal static async Task<IResult> PutDatasetVisibilityHandler(
+    internal static async Task<IResult> PutDatasetDiscoveryHandler(
         string id,
-        SetDatasetVisibilityDto? request,
+        SetDatasetDiscoveryDto? request,
         [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Governance.Interfaces.IDatasetCatalogAdminService service,
         HttpContext httpContext,
         CancellationToken ct)
     {
-        var edit = request?.Visibility is null
+        var edit = request is null || (!request.Hidden.HasValue && request.HiddenColumns is null && !request.SamplesDisabled.HasValue)
             ? new Autheris.Application.Governance.Interfaces.DatasetCatalogEdit(null, null, null, null) { Malformed = true }
-            : new Autheris.Application.Governance.Interfaces.DatasetCatalogEdit(null, null, null, request.Visibility);
+            : new Autheris.Application.Governance.Interfaces.DatasetCatalogEdit(null, null, null, null, null, null, request.Hidden, request.HiddenColumns, request.SamplesDisabled);
         return MapCatalogResult(await service.ApplyAsync(httpContext.User, id, edit, "admin", ct).ConfigureAwait(false));
     }
 
@@ -436,6 +350,8 @@ public static partial class CatalogApiEndpoints
                 return ApiProblems.BadRequest(ApiErrorCodes.TagLimitExceeded, "The tag limit is exceeded.");
             case Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.InvalidVisibility:
                 return ApiProblems.BadRequest(ApiErrorCodes.InvalidVisibility, "The visibility is invalid.");
+            case Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.InvalidColumns:
+                return ApiProblems.BadRequest(ApiErrorCodes.InvalidColumns, "One or more column names are invalid.");
             case Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.InvalidRequest:
                 return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The request is invalid.");
             case Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.Unavailable:
@@ -478,49 +394,6 @@ public static partial class CatalogApiEndpoints
             : null;
 
         return null;
-    }
-
-    internal static async Task<IResult> RefreshDatasourcePhysicalKeysHandler(
-        string id,
-        PhysicalKeyRefreshRequest? request,
-        [Microsoft.AspNetCore.Mvc.FromServices] IPhysicalKeyRefreshService refreshService,
-        HttpContext httpContext,
-        CancellationToken ct)
-    {
-        if (httpContext.User.GetUserSid() is not { } actorSid)
-        {
-            return Results.StatusCode(StatusCodes.Status403Forbidden);
-        }
-
-        if (ResolveTenantRestriction(httpContext, out var restrictToTenant) is { } denied)
-        {
-            return denied;
-        }
-
-        if (string.IsNullOrWhiteSpace(id) || !DatasourceTestingService.IsValidDatasourceId(id))
-        {
-            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The datasource identifier is invalid.", httpContext);
-        }
-
-        if (!string.IsNullOrWhiteSpace(request?.TableFilter))
-        {
-            var filter = request.TableFilter;
-            if (filter.Length > 256 || filter.IndexOfAny(['\0', '\r', '\n', '/', '\\']) >= 0 || filter.Contains("..", StringComparison.Ordinal))
-            {
-                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The table filter contains invalid characters.", httpContext);
-            }
-        }
-
-        try
-        {
-            var effectiveRequest = request ?? new PhysicalKeyRefreshRequest();
-            var result = await refreshService.RefreshDatasourceKeysAsync(id, effectiveRequest, actorSid, restrictToTenant, ct);
-            return Results.Ok(result);
-        }
-        catch (KeyNotFoundException)
-        {
-            return ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "The datasource was not found.", httpContext);
-        }
     }
 
     internal static async Task<IResult> SetDatasetKeysHandler(
@@ -766,101 +639,115 @@ public static partial class CatalogApiEndpoints
         });
     }
 
-    internal static async Task<IResult> SetDatasetSyntheticSamplesHandler(
+    internal static async Task<IResult> PutDiscoveryArtifactsHandler(
         string id,
-        System.Collections.Generic.IReadOnlyList<System.Collections.Generic.Dictionary<string, object?>>? request,
-        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Common.Interfaces.ITableMetadataRepository metadataRepository,
-        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator generator,
+        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Catalog.Discovery.IDiscoveryArtifactService artifactService,
+        [Microsoft.AspNetCore.Mvc.FromServices] Microsoft.Extensions.Options.IOptions<Autheris.Application.Catalog.Services.CatalogDiscoveryOptions>? discoveryOptions,
         HttpContext httpContext,
         CancellationToken ct)
     {
-        var tableId = await ResolveActiveDatasetAsync(id, metadataRepository, ct).ConfigureAwait(false);
-        if (tableId is null)
+        var configuredMax = discoveryOptions?.Value.Discovery.MaxArtifactBytes ?? Autheris.Application.Catalog.Services.CatalogDiscoverySettings.HardMaxArtifactBytes;
+        var hardCap = Math.Clamp(configuredMax, 1L, Autheris.Application.Catalog.Services.CatalogDiscoverySettings.HardMaxArtifactBytes);
+        var (rawBytes, limitExceeded) = await ReadBoundedBodyAsync(httpContext.Request.Body, hardCap, ct).ConfigureAwait(false);
+        if (limitExceeded)
         {
-            return DatasetKeysNotFound();
+            return ApiProblems.BadRequest(
+                ApiErrorCodes.InvalidArtifact,
+                $"Artifact payload exceeds the configured limit of {hardCap} bytes.",
+                httpContext,
+                new Dictionary<string, object?> { ["violation"] = "BODY_TOO_LARGE" });
         }
 
-        var samples = request != null
-            ? System.Linq.Enumerable.ToList(request.Select(r => (System.Collections.Generic.IReadOnlyDictionary<string, object?>)r))
-            : (System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyDictionary<string, object?>>)System.Array.Empty<System.Collections.Generic.IReadOnlyDictionary<string, object?>>();
-
-        if (samples.Count > Autheris.Application.Catalog.Profiling.SyntheticSampleRowGenerator.MaxPredefinedSampleRows)
-        {
-            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The number of synthetic sample rows exceeds the allowed maximum.", httpContext);
-        }
-
-        generator.RegisterSyntheticSamples(tableId.Value, samples);
-
-        var existingMeta = await metadataRepository.GetTableMetadataAsync(tableId.Value, ct).ConfigureAwait(false);
-        if (existingMeta != null)
-        {
-            await metadataRepository.UpsertTableMetadataAsync(existingMeta with
-            {
-                PredefinedSyntheticSamples = samples
-            }, ct).ConfigureAwait(false);
-        }
-
-        return Results.Ok(new { dataset = id, registeredRows = samples.Count });
+        var result = await artifactService.UpsertAsync(httpContext.User, id, rawBytes, source: "rest", ct).ConfigureAwait(false);
+        return MapArtifactWriteResult(result, httpContext);
     }
 
-    /// <summary>
-    /// MCP-01: curation counterpart of the PUT. Governance administrators only; the dataset is resolved through the
-    /// visibility service (tenant confinement, tier) and rows are projected onto the table's own columns.
-    /// Invisible, other-tenant and unknown datasets answer identically.
-    /// </summary>
-    internal static async Task<IResult> GetDatasetSyntheticSamplesHandler(
+    internal static async Task<IResult> DeleteDiscoveryArtifactsHandler(
         string id,
-        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Common.Interfaces.ITableMetadataRepository metadataRepository,
-        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator generator,
-        [Microsoft.AspNetCore.Mvc.FromServices] ICatalogVisibilityService visibility,
+        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Catalog.Discovery.IDiscoveryArtifactService artifactService,
         HttpContext httpContext,
         CancellationToken ct)
     {
-        var tableId = await ResolveActiveDatasetAsync(id, metadataRepository, ct).ConfigureAwait(false);
-        if (tableId is null)
-        {
-            return DatasetKeysNotFound();
-        }
-
-        var caller = new CatalogCaller(httpContext.User, EndpointSecurity.GetRequestTenant(httpContext), CatalogChannel.Rest);
-        var visible = await visibility.FindVisibleAsync(caller, tableId.Value, ct).ConfigureAwait(false);
-        if (visible is not { } row)
-        {
-            return DatasetKeysNotFound();
-        }
-
-        var table = row.Table;
-        var samples = table.PredefinedSyntheticSamples is { Count: > 0 } p
-            ? p
-            : generator.GetRegisteredSyntheticSamples(tableId.Value) ?? (System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyDictionary<string, object?>>)System.Array.Empty<System.Collections.Generic.IReadOnlyDictionary<string, object?>>();
-
-        var projected = ProjectSamplesOntoColumns(samples, table);
-        return Results.Ok(new { dataset = id, count = projected.Count, rows = projected });
+        var result = await artifactService.DeleteAsync(httpContext.User, id, source: "rest", ct).ConfigureAwait(false);
+        return MapArtifactWriteResult(result, httpContext);
     }
 
-    /// <summary>Keeps only keys that are columns of the table (case-insensitive), so a sample can never carry foreign fields.</summary>
-    private static System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyDictionary<string, object?>> ProjectSamplesOntoColumns(
-        System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyDictionary<string, object?>> samples,
-        TableMetadata table)
+    internal static async Task<IResult> GetDiscoverySamplesHandler(
+        string id,
+        [Microsoft.AspNetCore.Mvc.FromQuery] int? limit,
+        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Catalog.Discovery.IDiscoveryArtifactService artifactService,
+        HttpContext httpContext,
+        CancellationToken ct)
     {
-        var columns = new System.Collections.Generic.HashSet<string>(
-            table.Columns.Select(c => c.ColumnName), StringComparer.OrdinalIgnoreCase);
-        var result = new System.Collections.Generic.List<System.Collections.Generic.IReadOnlyDictionary<string, object?>>(samples.Count);
-        foreach (var sample in samples)
+        var result = await artifactService.GetSamplesAsync(
+            httpContext.User,
+            id,
+            limit,
+            Autheris.Application.Catalog.Discovery.DiscoverySurface.Rest,
+            ct).ConfigureAwait(false);
+
+        return result.Outcome switch
         {
-            var projected = new System.Collections.Generic.Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-            foreach (var kvp in sample)
+            Autheris.Application.Catalog.Discovery.DiscoveryArtifactOutcome.Unauthenticated =>
+                ApiProblems.Unauthorized(result.ErrorCode ?? ApiErrorCodes.Unauthorized, result.Message ?? "Authentication is required.", httpContext),
+            Autheris.Application.Catalog.Discovery.DiscoveryArtifactOutcome.Forbidden =>
+                ApiProblems.Forbidden(result.ErrorCode ?? ApiErrorCodes.DiscoveryNotPermitted, result.Message ?? "Catalog discovery is not permitted.", httpContext),
+            Autheris.Application.Catalog.Discovery.DiscoveryArtifactOutcome.Unavailable =>
+                ApiProblems.ServiceUnavailable(result.ErrorCode ?? ApiErrorCodes.ServiceUnavailable, result.Message ?? "Catalog discovery is temporarily unavailable.", httpContext),
+            _ => Results.Ok(result.Payload ?? new Autheris.Application.Catalog.Discovery.DiscoverySamplesResponse(false, []))
+        };
+    }
+
+    private static IResult MapArtifactWriteResult(
+        Autheris.Application.Catalog.Discovery.DiscoveryArtifactWriteResult result,
+        HttpContext httpContext) => result.Outcome switch
+    {
+        Autheris.Application.Catalog.Discovery.DiscoveryArtifactOutcome.Ok => Results.Ok(new
+        {
+            dataset = result.DatasetId,
+            contentSha256 = result.ContentSha256,
+            sampleRowCount = result.SampleRowCount,
+            statisticsColumnCount = result.StatisticsColumnCount
+        }),
+        Autheris.Application.Catalog.Discovery.DiscoveryArtifactOutcome.NoContent => Results.NoContent(),
+        Autheris.Application.Catalog.Discovery.DiscoveryArtifactOutcome.Unauthenticated =>
+            ApiProblems.Unauthorized(ApiErrorCodes.Unauthorized, result.Message ?? "Authentication is required.", httpContext),
+        Autheris.Application.Catalog.Discovery.DiscoveryArtifactOutcome.NotFound => DatasetKeysNotFound(),
+        Autheris.Application.Catalog.Discovery.DiscoveryArtifactOutcome.Forbidden =>
+            ApiProblems.Forbidden(ApiErrorCodes.AccessDenied, result.Message ?? "Access denied.", httpContext),
+        Autheris.Application.Catalog.Discovery.DiscoveryArtifactOutcome.InvalidArtifact =>
+            ApiProblems.BadRequest(
+                ApiErrorCodes.InvalidArtifact,
+                result.Message ?? "Artifact payload is invalid.",
+                httpContext,
+                string.IsNullOrEmpty(result.ViolationCode) ? null : new Dictionary<string, object?> { ["violation"] = result.ViolationCode }),
+        _ => ApiProblems.ServiceUnavailable(ApiErrorCodes.ServiceUnavailable, result.Message ?? "The service is temporarily unavailable.", httpContext)
+    };
+
+    private static async Task<(byte[] Bytes, bool LimitExceeded)> ReadBoundedBodyAsync(
+        System.IO.Stream body,
+        long maxBytes,
+        CancellationToken ct)
+    {
+        using var ms = new System.IO.MemoryStream();
+        var buffer = new byte[Math.Min(16384, (int)Math.Min(maxBytes + 1, int.MaxValue))];
+        long total = 0;
+        while (true)
+        {
+            var read = await body.ReadAsync(buffer, ct).ConfigureAwait(false);
+            if (read == 0)
             {
-                if (columns.Contains(kvp.Key))
-                {
-                    projected[kvp.Key] = kvp.Value;
-                }
+                return (ms.ToArray(), false);
             }
 
-            result.Add(projected);
-        }
+            total += read;
+            if (total > maxBytes)
+            {
+                return ([], true);
+            }
 
-        return result;
+            ms.Write(buffer, 0, read);
+        }
     }
 
     internal static async Task<IResult> SetDatasetStateHandler(

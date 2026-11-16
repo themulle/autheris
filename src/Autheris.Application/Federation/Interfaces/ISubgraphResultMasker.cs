@@ -13,14 +13,10 @@ public interface ISubgraphResultMasker
 {
     /// <summary>
     /// Recursively traverses a GraphQL response object or list and applies data masking
-    /// to sensitive fields (e.g. Email, IBAN, SSN, salary) for principals without clear consent.
+    /// to sensitive fields (e.g. Email, IBAN, SSN, salary) for principals without clear consent,
+    /// consulting the catalog classification (tenant-scoped) without blocking.
     /// <paramref name="aliasToFieldMap"/> maps the response path of an aliased field (chain of response keys joined
     /// with '.', list indices omitted, e.g. <c>customer.contact</c>) to the real field name.
-    /// </summary>
-    object? MaskResultData(object? data, ClaimsPrincipal? principal, IReadOnlyDictionary<string, string>? aliasToFieldMap = null);
-
-    /// <summary>
-    /// SR-L-12: same as <see cref="MaskResultData"/> but consults the catalog classification (tenant-scoped) without blocking.
     /// </summary>
     ValueTask<object?> MaskResultDataAsync(object? data, ClaimsPrincipal? principal, IReadOnlyDictionary<string, string>? aliasToFieldMap, CancellationToken cancellationToken = default);
 

@@ -20,7 +20,6 @@ using Autheris.Application.Streaming.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Application.VirtualFilters;
 using Autheris.Application.Webhooks;
-using Autheris.Application.Governance.Workflows;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Options;
@@ -56,47 +55,59 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddScoped<ILineageImpactAnalyzerService, LineageImpactAnalyzerService>();
         services.AddScoped<IGdprDisclosureReportService, GdprDisclosureReportService>();
         services.AddSingleton<IGdprAuditReportExporter, GdprAuditReportPdfExporter>();
-        services.AddSingleton<Autheris.Infrastructure.Observability.ConsumerUsageRecorder>(sp =>
+        services.AddOptions<Autheris.Domain.Options.UsageAccountingOptions>()
+            .BindConfiguration(Autheris.Domain.Options.GatewaySections.UsageAccounting)
+            .ValidateOnStart();
+        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Autheris.Domain.Options.UsageAccountingOptions>, Autheris.Application.Usage.UsageAccountingOptionsValidator>();
+        services.AddSingleton<Autheris.Application.Usage.IUsageAggregator>(sp =>
+            new Autheris.Application.Usage.UsageAggregator(
+                sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.UsageAccountingOptions>>(),
+                expectedCostUnitResolver: BuildExpectedCostUnitResolver(sp),
+                timeProvider: sp.GetService<TimeProvider>()));
+        services.AddSingleton<Autheris.Application.Usage.IUsageRecorder, Autheris.Application.Usage.UsageRecorder>();
+        services.AddSingleton<Autheris.Application.Usage.IUsageTariffService>(sp =>
         {
-            var env = sp.GetService<Microsoft.AspNetCore.Hosting.IWebHostEnvironment>();
-            var isDev = env?.EnvironmentName == Microsoft.Extensions.Hosting.Environments.Development;
-            var gatewayOptions = sp.GetService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>()?.Value;
-            var entraIdOptions = gatewayOptions?.Authentication?.EntraId;
-            var config = sp.GetService<Microsoft.Extensions.Configuration.IConfiguration>();
-
-            string? secret = config?["Gateway:Audit:ActorPseudonymizationKey"]
-                ?? config?["Gateway:GovernanceDb:AuditHmacKey"]
-                ?? config?["Gateway:Audit:AuditHmacKey"]
-                ?? config?["Gateway:Cluster:Secret"];
-
-            if (string.IsNullOrWhiteSpace(secret))
-            {
-                var secretProvider = sp.GetService<Autheris.Application.Common.Interfaces.IKeyVaultSecretProvider>();
-                var auditRef = gatewayOptions?.GovernanceDb?.AuditHmacKeyVaultRef ?? gatewayOptions?.DataMasking?.HmacSecretKeyVaultRef;
-                if (secretProvider != null && !string.IsNullOrWhiteSpace(auditRef))
-                {
-                    try
-                    {
-                        var bytes = secretProvider.GetSecretBytes(auditRef);
-                        if (bytes != null && bytes.Length > 0)
-                        {
-                            secret = Convert.ToHexString(bytes);
-                        }
-                    }
-                    catch { }
-                }
-            }
-
-            if (string.IsNullOrWhiteSpace(secret))
-            {
-                secret = isDev
-                    ? "autheris-default-cluster-telemetry-secret-key-2026"
-                    : Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
-            }
-            var callerProvider = sp.GetService<ICallerContextProvider>();
-            return new Autheris.Infrastructure.Observability.ConsumerUsageRecorder(secret, callerProvider);
+            var gateway = sp.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<Autheris.Domain.Options.GatewayOptions>>();
+            return new Autheris.Application.Usage.UsageTariffService(
+                sp.GetRequiredService<Autheris.Application.Usage.IUsageRepository>(),
+                sp.GetRequiredService<Autheris.Application.Audit.IAuditWriter>(),
+                sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.UsageAccountingOptions>>(),
+                sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<Autheris.Application.Usage.UsageTariffService>>(),
+                sp.GetService<TimeProvider>(),
+                dataSource => gateway.CurrentValue.DataSources.Connections.ContainsKey(dataSource),
+                BuildExpectedCostUnitResolver(sp));
         });
-        services.AddSingleton<IConsumerUsageRecorder>(sp => sp.GetRequiredService<Autheris.Infrastructure.Observability.ConsumerUsageRecorder>());
-        services.AddHostedService<Autheris.Infrastructure.Observability.ConsumerUsageFlushWorker>();
+        services.AddSingleton<Autheris.Application.Usage.IUsageGroupNameResolver>(sp =>
+            new Autheris.Application.Usage.UsageGroupNameResolver(
+                sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.UsageAccountingOptions>>(),
+                sp.GetService<Autheris.Domain.Interfaces.IScimGroupStore>(),
+                sp.GetService<TimeProvider>()));
+        services.AddSingleton<Autheris.Application.Usage.IUsageReportService>(sp =>
+            new Autheris.Application.Usage.UsageReportService(
+                sp.GetRequiredService<Autheris.Application.Usage.IUsageRepository>(),
+                sp.GetRequiredService<Autheris.Application.Usage.IUsageGroupNameResolver>(),
+                sp.GetRequiredService<Autheris.Application.Audit.IAuditWriter>(),
+                sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.UsageAccountingOptions>>(),
+                sp.GetService<TimeProvider>()));
+        services.AddSingleton<Autheris.Application.Usage.IUsageQuotaService>(sp =>
+            new Autheris.Application.Usage.UsageQuotaService(
+                sp.GetRequiredService<Autheris.Application.Usage.IUsageRepository>(),
+                sp.GetRequiredService<Autheris.Application.Usage.IUsageAggregator>(),
+                sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.UsageAccountingOptions>>(),
+                timeProvider: sp.GetService<TimeProvider>(),
+                logger: sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<Autheris.Application.Usage.UsageQuotaService>>()));
+        services.AddHostedService<Autheris.Infrastructure.Usage.UsageFlushWorker>();
+        services.AddHostedService<Autheris.Infrastructure.Usage.SourceCostCollectorWorker>();
+        services.AddHostedService<Autheris.Infrastructure.Usage.UsageInitialTariffSeedService>();
+    }
+
+    private static Func<string, string?> BuildExpectedCostUnitResolver(IServiceProvider sp)
+    {
+        var gateway = sp.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<Autheris.Domain.Options.GatewayOptions>>();
+        var collectors = sp.GetServices<Autheris.Application.Usage.ISourceCostCollector>().ToArray();
+        return dataSource =>
+            Autheris.Application.Usage.SourceCostCollectorResolver
+                .FindForDataSource(dataSource, gateway.CurrentValue, collectors)?
+                .CostUnit;
     }
 }

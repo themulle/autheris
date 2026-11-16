@@ -2,7 +2,6 @@
 src/Autheris.Api/Endpoints/AuthEndpoints.cs|1
 src/Autheris.Api/Endpoints/CallerAttributeAdminEndpoints.cs|1
 src/Autheris.Api/Endpoints/DocIngestionEndpoints.cs|1
-src/Autheris.Api/Endpoints/FinOpsEndpoints.cs|2
 src/Autheris.Api/Endpoints/GovernanceClassificationEndpoints.cs|1
 src/Autheris.Api/Endpoints/GovernanceEndpoints.Access.cs|1
 src/Autheris.Api/Endpoints/HealthEndpoints.cs|8
@@ -33,7 +32,6 @@ src/Autheris.Application/ConsentRequests/ConsentRequestService.cs|1
 src/Autheris.Application/DataSources/Changes/GovernedChangeDetectionService.Cursors.cs|2
 src/Autheris.Application/Docs/Services/MarkdownDocIngestor.cs|1
 src/Autheris.Application/Federation/Services/SubgraphContextPropagationService.cs|1
-src/Autheris.Application/FinOps/Services/FocusCostAccountingService.cs|2
 src/Autheris.Application/Governance/Analysis/BundledConsentRequestService.cs|4
 src/Autheris.Application/Governance/Analysis/QueryAnalysisService.cs|2
 src/Autheris.Application/Governance/Recertification/RecertificationGovernorHostedService.cs|1
@@ -47,7 +45,6 @@ src/Autheris.Application/Governance/Services/EuAiActAuditExporter.cs|1
 src/Autheris.Application/Governance/Services/InMemoryDataContractEngine.cs|2
 src/Autheris.Application/Governance/Services/SchemaSunsettingService.cs|1
 src/Autheris.Application/Governance/Services/WormConfigurationAuditService.cs|1
-src/Autheris.Application/Governance/Workflows/ConsentRecertificationWorkflowService.cs|6
 src/Autheris.Application/Identity/Caching/RoleResolverCache.cs|1
 src/Autheris.Application/Identity/Providers/GraphRoleProvider.cs|4
 src/Autheris.Application/Identity/RoleResolver.cs|1
@@ -63,7 +60,7 @@ src/Autheris.Application/Mcp/Services/McpProvenanceEnricher.cs|1
 src/Autheris.Application/Mcp/Services/McpSessionStore.cs|2
 src/Autheris.Application/Mesh/Services/EnvoyExtAuthzService.cs|1
 src/Autheris.Application/Observability/GatewaySystemMetricsService.cs|1
-src/Autheris.Application/Policy/TableAccessPolicy.Consent.cs|3
+src/Autheris.Application/Policy/TableAccessPolicy.Consent.cs|2
 src/Autheris.Application/Policy/TableAccessPolicy.Rls.cs|1
 src/Autheris.Application/Procedures/Services/InMemoryProcedureRegistry.cs|4
 src/Autheris.Application/Procedures/Services/ProcedureRegistrationService.cs|1
@@ -109,7 +106,6 @@ src/Autheris.GraphQL/Types/Query.Consent.cs|1
 src/Autheris.Infrastructure/Caching/TableCache/DuckDbPersistentTableCacheStore.cs|1
 src/Autheris.Infrastructure/Caching/TableCache/InMemoryTableCacheStore.cs|1
 src/Autheris.Infrastructure/Idempotency/InMemoryIdempotencyStore.cs|3
-src/Autheris.Infrastructure/Observability/ConsumerUsageRecorder.cs|1
 src/Autheris.Infrastructure/Persistence/AccessProfileStore.cs|2
 src/Autheris.Infrastructure/Persistence/AuditChainAnchorStores.cs|2
 src/Autheris.Infrastructure/Persistence/AuditWormExportService.cs|4

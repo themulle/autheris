@@ -35,6 +35,14 @@ public static class GatewayPolicies
     public const string AuthenticatedCaller = "AuthenticatedCaller";
     public const string MetricsScraper = "MetricsScraper";
     public const string McpCaller = "McpCaller";
+    public const string UsageAdmin = "UsageAdmin";
+    public const string CatalogRead = "CatalogRead";
+    public const string CatalogReadAdmin = "CatalogReadAdmin";
+    public const string ConsentRead = "ConsentRead";
+    public const string ConsentDecide = "ConsentDecide";
+    public const string GrantRevoke = "GrantRevoke";
+    public const string GrantVerify = "GrantVerify";
+    public const string CatalogArtifactUploader = "CatalogArtifactUploader";
 
     /// <summary>
     /// Security review: SCIM provisioning endpoints. Authenticates only with the SCIM secret scheme and requires the
@@ -56,7 +64,9 @@ public static class GatewayPolicies
     public static readonly string[] AuditorOrAboveRoles = ["SecurityAuditor", "Auditor", "PrivacyAdmin", "DataProtectionOfficer", "GovernanceAdmin", "TenantAdmin", "SecurityAdmin", "ClusterAdmin"];
     public static readonly string[] DataStewardOrAdminRoles = ["DataSteward", "DataOwner", "GovernanceAdmin", "TenantAdmin", "ClusterAdmin"];
     public static readonly string[] McpCallerRoles = ["AiAgent", "McpCaller", "Developer", "Consumer", "DataSteward", "DataOwner", "GovernanceAdmin", "TenantAdmin", "ClusterAdmin"];
+    public static readonly string[] UsageAdminRoles = ["TenantAdmin", "ClusterAdmin"];
     public static readonly string[] ScimProvisionerRoles = [ScimProvisionerRole];
+    public static readonly string[] CatalogArtifactUploaderRoles = ["CatalogArtifactUploader", "GovernanceAdmin", "ClusterAdmin"];
 
     /// <summary>
     /// K-K10: Checks if principal satisfies any of the strongly-typed GatewayRole requirements,
@@ -116,10 +126,47 @@ public static class GatewayPolicies
         AddRolePolicy(options, AuditorOrAbove, AuditorOrAboveRoles);
         AddRolePolicy(options, DataStewardOrAdmin, DataStewardOrAdminRoles);
         AddRolePolicy(options, MetricsScraper, MetricsScrapeRoles);
+        AddRolePolicy(options, UsageAdmin, UsageAdminRoles);
         options.AddPolicy(AuthenticatedCaller, policy => policy.RequireAuthenticatedUser());
         options.AddPolicy(McpCaller, policy => policy
             .RequireAuthenticatedUser()
             .RequireAssertion(ctx => ctx.User.Identity?.IsAuthenticated == true));
+        options.AddPolicy(CatalogRead, policy => policy
+            .RequireAuthenticatedUser()
+            .RequireAssertion(ctx => ExternalApiPermissions.AllowsCatalogRead(ctx.User)));
+        options.AddPolicy(CatalogReadAdmin, policy => policy
+            .RequireAuthenticatedUser()
+            .RequireAssertion(ctx => ExternalApiPermissions.AllowsCatalogReadAdmin(ctx.User)));
+        options.AddPolicy(ConsentRead, policy => policy
+            .RequireAuthenticatedUser()
+            .RequireAssertion(ctx => ExternalApiPermissions.AllowsConsentRead(ctx.User)));
+        options.AddPolicy(ConsentDecide, policy =>
+        {
+            policy.RequireAuthenticatedUser();
+            policy.Requirements.Add(new ExternalSystemRequirement(ExternalSystemOperation.ConsentDecide));
+        });
+        options.AddPolicy(GrantRevoke, policy =>
+        {
+            policy.RequireAuthenticatedUser();
+            policy.Requirements.Add(new ExternalSystemRequirement(ExternalSystemOperation.GrantRevoke));
+        });
+        options.AddPolicy(GrantVerify, policy => policy
+            .RequireAuthenticatedUser()
+            .RequireAssertion(ctx => ExternalApiPermissions.AllowsGrantVerify(ctx.User)));
+
+        options.AddPolicy(CatalogArtifactUploader, policy => policy
+            .RequireAuthenticatedUser()
+            .RequireAssertion(ctx =>
+            {
+                var claim = Autheris.Domain.Tenancy.TenantClaimReader.Read(ctx.User);
+                if (claim.Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Invalid)
+                {
+                    return false;
+                }
+
+                var tenantId = claim.Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Valid ? claim.Tenant.Value : null;
+                return Evaluator.HasRole(ctx.User, GatewayRole.CatalogArtifactUploader, tenantId);
+            }));
 
         // Security review: previously RequireAuthorization(GatewayAuthSchemes.Scim) referenced a non-existent policy.
         // Only an identity issued by the SCIM scheme carrying the provisioner role is accepted, so a user token with a
@@ -174,7 +221,9 @@ public static class GatewayPolicies
             AuditorOrAbove => AuditorOrAboveRoles,
             DataStewardOrAdmin => DataStewardOrAdminRoles,
             McpCaller => McpCallerRoles,
+            UsageAdmin => UsageAdminRoles,
             Scim => ScimProvisionerRoles,
+            CatalogArtifactUploader => CatalogArtifactUploaderRoles,
             _ => []
         };
         return roles.Length > 0;

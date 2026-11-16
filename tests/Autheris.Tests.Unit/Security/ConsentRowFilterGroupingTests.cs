@@ -14,6 +14,7 @@ using Xunit;
 /// consents whose USER_ATTRIBUTE leaves all render as <c>1 = 0</c> and compared literals case-insensitively, so the maximum column level of
 /// one consent applied to the rows granted only by another.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class ConsentRowFilterGroupingTests
 {
     private static readonly TableIdentifier HrTable = new("hr", "dbo", "employees");
@@ -139,7 +140,6 @@ public sealed class ConsentRowFilterGroupingTests
     public void Fingerprint_IsNullForAttributeAndAdvancedFilters_AndOrdinalForLiterals()
     {
         ConsentResolutionService.RowFilterFingerprint([AttributeFilter("region", "region")]).ShouldBeNull();
-        ConsentResolutionService.RowFilterFingerprint([new ConsentRowFilter { ColumnName = "id", FilterType = RowFilterType.SubqueryCorrelated }]).ShouldBeNull();
         ConsentResolutionService.RowFilterFingerprint([new ConsentRowFilter { ColumnName = "id", FilterType = RowFilterType.CrossSourceSetFilter }]).ShouldBeNull();
         ConsentResolutionService.RowFilterFingerprint([]).ShouldBeNull();
 

@@ -274,8 +274,6 @@ public static class SimApiHostMain
             b.ConfigureTestServices(s => s.AddSingleton<Autheris.Application.Common.Interfaces.IIdempotencyStore, ClusterWideTestIdempotencyStore>());
             if (options.Profile == SimApiProfile.Write)
             {
-                // SEC M-20: DML needs explicitly authorized roles; only the throwaway write-phase host allows it.
-                b.UseSetting("Gateway:WebSql:DmlWriterRoles:0", "GovernanceAdmin");
                 b.UseSetting("Gateway:DataSources:RequireTenantColumn", "true");
             }
 

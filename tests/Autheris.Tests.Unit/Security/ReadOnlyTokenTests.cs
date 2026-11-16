@@ -18,6 +18,7 @@ namespace Autheris.Tests.Unit.Security;
 /// <summary>
 /// Finding 3.3 / R13: agent scopes and app-only tokens can be limited to reading.
 /// </summary>
+[Trait("Category", "Security")]
 public class ReadOnlyTokenTests
 {
     private const string MappedScopeClaimType = "http://schemas.microsoft.com/identity/claims/scope";

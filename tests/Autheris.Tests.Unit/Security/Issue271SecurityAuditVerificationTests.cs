@@ -27,6 +27,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class Issue271SecurityAuditVerificationTests
 {
     private static string FindRepositoryRoot()
@@ -210,7 +211,7 @@ public sealed class Issue271SecurityAuditVerificationTests
             ]
         };
 
-        var metaRepo = Substitute.For<ITableMetadataRepository>();
+        var metaRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
         metaRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([meta]);
 
         var consentRepo = Substitute.For<IConsentRepository>();

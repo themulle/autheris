@@ -60,6 +60,50 @@ internal static class RowFilterEvaluationStore
         return result;
     }
 
+    /// <summary>Chunked batch read of stored settings from <c>TABLE_ROW_FILTER_STRATEGIES</c> for specific table ids.</summary>
+    internal static async Task<Dictionary<Guid, RowFilterEvaluationSettings>> ReadBatchObjectByIdsAsync(
+        DbConnection conn, DbTransaction? tx, KeyDefinitionDialect dialect, IReadOnlyList<Guid> tableIds, CancellationToken ct)
+    {
+        var result = new Dictionary<Guid, RowFilterEvaluationSettings>();
+        if (tableIds.Count == 0)
+        {
+            return result;
+        }
+
+        const int ChunkSize = 500;
+        try
+        {
+            for (var offset = 0; offset < tableIds.Count; offset += ChunkSize)
+            {
+                var count = Math.Min(ChunkSize, tableIds.Count - offset);
+                var idStrings = new string[count];
+                for (var i = 0; i < count; i++)
+                {
+                    idStrings[i] = tableIds[offset + i].ToString();
+                }
+
+                await using var cmd = conn.CreateCommand();
+                Enlist(cmd, tx);
+                cmd.CommandText = $"SELECT table_id, strategy, duration_seconds, max_keys FROM {dialect.Prefix}{StrategyTable} WHERE table_id IN ({ConsentSqlCore.BindIdInClause(cmd, "tid", idStrings)})";
+                await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                while (await reader.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    var idObj = reader.GetValue(0);
+                    if (idObj is not null && Guid.TryParse(Convert.ToString(idObj, CultureInfo.InvariantCulture), out var tid))
+                    {
+                        result[tid] = ReadSettings(reader, 1);
+                    }
+                }
+            }
+        }
+        catch (DbException)
+        {
+            // Table may not exist in unmigrated or testing environments; fail safely with empty result.
+        }
+
+        return result;
+    }
+
     /// <summary>
     /// Replaces the object-level settings of one table (null or all-null deletes the row) and bumps the table epoch through
     /// <paramref name="bumpEpoch"/> inside the caller's transaction. Null when the table is unknown.
@@ -98,9 +142,7 @@ internal static class RowFilterEvaluationStore
         }
         else
         {
-            var now = ReferenceEquals(dialect, CatalogKeyDefinitionStore.Sqlite)
-                ? (object)DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture)
-                : DateTimeOffset.UtcNow;
+            var now = DateTimeOffset.UtcNow;
             var parameters = new (string, object)[]
             {
                 ("@tid", tableId.ToString()),
@@ -127,19 +169,17 @@ internal static class RowFilterEvaluationStore
 
     /// <summary>The identity-relevant part of one stored rule row.</summary>
     internal sealed record RuleRow(
-        ConsentRowFilter Filter, ConsentEffect Effect, TenantId Tenant, TableIdentifier Table);
+        ConsentRowFilter Filter, ConsentEffect Effect, TenantId Tenant, TableIdentifier Table, RowFilterEvaluationSettings Settings);
 
     /// <summary>
-    /// One row filter with the fields the admin validation needs (type, temporal columns, key-set settings), its consent effect, tenant and
-    /// target table; null when it does not exist.
+    /// One row filter, its consent effect, tenant, target table, and stored key-set settings; null when it does not exist.
     /// </summary>
     internal static async Task<RuleRow?> ReadRuleAsync(
         DbConnection conn, DbTransaction? tx, KeyDefinitionDialect dialect, Guid rowFilterId, CancellationToken ct)
     {
         await using var cmd = conn.CreateCommand();
         Enlist(cmd, tx);
-        cmd.CommandText = $@"SELECT f.id, f.consent_id, f.filter_group, f.column_name, f.filter_type, f.dependent_table,
-                                    f.target_temporal_column, f.dependent_valid_from_column, f.dependent_valid_to_column,
+        cmd.CommandText = $@"SELECT f.id, f.consent_id, f.filter_group, f.column_name, f.filter_type,
                                     f.key_set_strategy, f.key_set_duration_seconds, f.key_set_max_keys,
                                     c.effect, c.tenant_id, t.source_name, t.schema_name, t.table_name
                              FROM {dialect.Prefix}CONSENT_ROW_FILTERS f
@@ -153,32 +193,24 @@ internal static class RowFilterEvaluationStore
             return null;
         }
 
-        TableIdentifier? dependent = !reader.IsDBNull(5) && TableIdentifier.TryParse(reader.GetString(5), out var parsed) ? parsed : null;
-        var settings = ReadSettings(reader, 9);
+        var settings = ReadSettings(reader, 5);
         var filter = new ConsentRowFilter
         {
             Id = Guid.Parse(reader.GetString(0)),
             ConsentId = Guid.Parse(reader.GetString(1)),
             FilterGroup = Convert.ToInt32(reader.GetValue(2), CultureInfo.InvariantCulture),
             ColumnName = reader.GetString(3),
-            FilterType = (RowFilterType)(reader.IsDBNull(4) ? 0 : Convert.ToInt32(reader.GetValue(4), CultureInfo.InvariantCulture)),
-            DependentTable = dependent,
-            TargetTemporalColumn = reader.IsDBNull(6) ? null : reader.GetString(6),
-            DependentValidFromColumn = reader.IsDBNull(7) ? null : reader.GetString(7),
-            DependentValidToColumn = reader.IsDBNull(8) ? null : reader.GetString(8),
-            KeySetStrategy = settings.Strategy,
-            KeySetDurationSeconds = settings.DurationSeconds,
-            KeySetMaxKeys = settings.MaxKeys
+            FilterType = (RowFilterType)(reader.IsDBNull(4) ? 0 : Convert.ToInt32(reader.GetValue(4), CultureInfo.InvariantCulture))
         };
 
         // Fail closed: an unreadable effect is treated as DENY, which the admin validation rejects for key-set settings.
-        var effect = Enum.TryParse<ConsentEffect>(reader.GetString(12), true, out var e) ? e : ConsentEffect.Deny;
-        if (!TenantId.TryParse(reader.GetString(13), out var tenant))
+        var effect = Enum.TryParse<ConsentEffect>(reader.GetString(8), true, out var e) ? e : ConsentEffect.Deny;
+        if (!TenantId.TryParse(reader.GetString(9), out var tenant))
         {
             return null;
         }
 
-        return new RuleRow(filter, effect, tenant, new TableIdentifier(reader.GetString(14), reader.GetString(15), reader.GetString(16)));
+        return new RuleRow(filter, effect, tenant, new TableIdentifier(reader.GetString(10), reader.GetString(11), reader.GetString(12)), settings);
     }
 
     /// <summary>
@@ -201,7 +233,7 @@ internal static class RowFilterEvaluationStore
             return null;
         }
 
-        var before = new RowFilterEvaluationSettings(row.Filter.KeySetStrategy, row.Filter.KeySetDurationSeconds, row.Filter.KeySetMaxKeys);
+        var before = row.Settings;
         await ExecAsync(conn, tx,
             $"UPDATE {dialect.Prefix}CONSENT_ROW_FILTERS SET key_set_strategy = @strategy, key_set_duration_seconds = @duration, key_set_max_keys = @maxkeys WHERE id = @id",
             ct,

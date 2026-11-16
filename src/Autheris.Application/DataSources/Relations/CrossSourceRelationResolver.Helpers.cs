@@ -304,7 +304,8 @@ public sealed partial class CrossSourceRelationResolver
         bool allowed,
         int batchesExecuted,
         int rowsMaterialized,
-        CancellationToken ct)
+        CancellationToken ct,
+        IReadOnlyList<DecisionGrantRef>? grants = null)
     {
         var actorSid = user.GetUserSid() ?? new Sid(user.Identity?.Name ?? "anonymous");
         var details = new Dictionary<string, object?>(StringComparer.Ordinal)
@@ -325,6 +326,7 @@ public sealed partial class CrossSourceRelationResolver
             allowed,
             details,
             ct,
-            eventType: AuditEventTypes.WebSqlCrossSourceSourceRead);
+            eventType: AuditEventTypes.WebSqlCrossSourceSourceRead,
+            grants: grants);
     }
 }

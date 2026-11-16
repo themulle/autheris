@@ -8,12 +8,18 @@ using Microsoft.Extensions.Options;
 
 /// <summary>
 /// 16 time-bound individual grant policy. Individual grants (<see cref="GranteeType.User"/>, <see cref="GranteeType.ServicePrincipal"/>)
-/// always need an explicit <c>ValidTo</c> within the maximum of their class; group and role grants are standing and unaffected.
+/// always need an explicit <c>ValidTo</c> within their effective maximum: the minimum of the operator-configured class limit
+/// (<see cref="IndividualGrantOptions"/>, optional) and the required tenant maximum of <see cref="IGrantValidityPolicy"/>. There
+/// are no compiled-in ceilings. Group and role grants are standing and take no class limit (the validity policy bounds them).
 /// Renewal is a new approval, never by the grantee. Any unexpected state denies.
 /// </summary>
-public sealed class GrantPolicy(IOptions<IndividualGrantOptions>? options = null) : IGrantPolicy
+public sealed class GrantPolicy(IOptions<IndividualGrantOptions>? options = null, IGrantValidityPolicy? validityPolicy = null) : IGrantPolicy
 {
     private readonly IndividualGrantOptions _options = options?.Value ?? new IndividualGrantOptions();
+
+    // Unit-level construction without DI falls back to the test default; production composition always supplies the
+    // configured (required) validity options.
+    private readonly IGrantValidityPolicy _validity = validityPolicy ?? GrantValidityPolicy.CreateDefault();
 
     public GrantDecision Evaluate(GrantRequest request)
     {
@@ -42,18 +48,26 @@ public sealed class GrantPolicy(IOptions<IndividualGrantOptions>? options = null
 
         if (r.GranteeType is GranteeType.Group or GranteeType.Role)
         {
+            // Standing grants take no class limit, but an explicit expiry is bounded by the tenant maximum like everyone else.
+            var tenantMax = GrantTimeMath.AddSaturating(r.Now, TenantMaximum(r.Kind));
+            if (r.ValidTo is { } standingTo && standingTo > tenantMax)
+            {
+                return GrantDecision.Deny(GrantErrorCodes.ExceedsMaximum,
+                    $"The requested expiry exceeds the maximum of {FormatSpan(TenantMaximum(r.Kind))}.", GrantClass.Standing, tenantMax);
+            }
+
             return new GrantDecision(true, null, false, GrantRecertClass.None, GrantClass.Standing, "Standing group/role grant.");
         }
 
         var cls = Classify(r);
-        var (maxSpan, recert, fourEyes) = Limits(cls);
+        var (maxSpan, recert, fourEyes) = Limits(cls, r.Kind);
         var disabled = CustomerDisabled(r, cls);
         if (disabled != null)
         {
             return GrantDecision.Deny(GrantErrorCodes.DisabledForRealm, disabled, cls);
         }
 
-        var maxValidTo = r.Now + maxSpan;
+        var maxValidTo = MaxValidTo(r.Now, maxSpan);
 
         // Rule 3: renewal is a new approval by someone else, capped per class and handed to a campaign from the Nth renewal.
         var suggest = false;
@@ -85,7 +99,7 @@ public sealed class GrantPolicy(IOptions<IndividualGrantOptions>? options = null
             return GrantDecision.Deny(GrantErrorCodes.ExpiryInPast, "The expiry of the grant must lie in the future.", cls, maxValidTo);
         }
 
-        // Rule 2: maximum duration per class (a realm profile can only shorten it).
+        // Rule 2: maximum duration = min(configured class limit, tenant maximum).
         if (r.ValidTo.Value > maxValidTo)
         {
             return GrantDecision.Deny(GrantErrorCodes.ExceedsMaximum,
@@ -146,16 +160,35 @@ public sealed class GrantPolicy(IOptions<IndividualGrantOptions>? options = null
         return r.CustomerRealm ? GrantClass.CustomerRegular : GrantClass.Regular;
     }
 
-    private (TimeSpan Max, GrantRecertClass Recert, bool FourEyes) Limits(GrantClass cls) => cls switch
+    private (TimeSpan Max, GrantRecertClass Recert, bool FourEyes) Limits(GrantClass cls, GrantKind kind)
     {
-        GrantClass.Regular => (Days(_options.RegularMaxDays, IndividualGrantCeilings.RegularDays), GrantRecertClass.Campaign365, false),
-        GrantClass.CustomerRegular => (Days(_options.CustomerRegularMaxDays, IndividualGrantCeilings.CustomerRegularDays), GrantRecertClass.CustomerAdminAttestation, false),
-        GrantClass.Sensitive => (Days(_options.SensitiveMaxDays, IndividualGrantCeilings.SensitiveDays), GrantRecertClass.Campaign90, true),
-        GrantClass.IndividualUnmasked => (Days(_options.UnmaskedMaxDays, IndividualGrantCeilings.UnmaskedDays), GrantRecertClass.Campaign90, true),
-        GrantClass.IndividualPrivileged => (Days(_options.PrivilegedMaxDays, IndividualGrantCeilings.PrivilegedDays), GrantRecertClass.Campaign90, true),
-        GrantClass.ServicePrincipal => (Days(_options.ServicePrincipalMaxDays, IndividualGrantCeilings.ServicePrincipalDays), GrantRecertClass.Campaign90, false),
-        _ => throw new InvalidOperationException("Unhandled grant class.")
-    };
+        var (configured, recert, fourEyes) = cls switch
+        {
+            GrantClass.Regular => (_options.RegularMaxDays, GrantRecertClass.Campaign365, false),
+            GrantClass.CustomerRegular => (_options.CustomerRegularMaxDays, GrantRecertClass.CustomerAdminAttestation, false),
+            GrantClass.Sensitive => (_options.SensitiveMaxDays, GrantRecertClass.Campaign90, true),
+            GrantClass.IndividualUnmasked => (_options.UnmaskedMaxDays, GrantRecertClass.Campaign90, true),
+            GrantClass.IndividualPrivileged => (_options.PrivilegedMaxDays, GrantRecertClass.Campaign90, true),
+            GrantClass.ServicePrincipal => (_options.ServicePrincipalMaxDays, GrantRecertClass.Campaign90, false),
+            _ => throw new InvalidOperationException("Unhandled grant class.")
+        };
+
+        // Effective maximum = min over the configured limits only: the optional class limit (a non-positive value fails closed
+        // to one day) and the required tenant maximum.
+        var classLimit = configured is { } d ? GrantTimeMath.DaysToSpan(d) : (TimeSpan?)null;
+        if (classLimit is { } c && c <= TimeSpan.Zero)
+        {
+            classLimit = TimeSpan.FromDays(1);
+        }
+
+        return (GrantTimeMath.MinLimit(classLimit, TenantMaximum(kind))!.Value, recert, fourEyes);
+    }
+
+    // Declarative manifests are bounded by their own configured maximum; every other path by the tenant maximum.
+    private TimeSpan TenantMaximum(GrantKind kind) =>
+        kind == GrantKind.ManifestPolicy ? _validity.DeclarativeMaxDuration : _validity.MaxDuration;
+
+    private static DateTimeOffset MaxValidTo(DateTimeOffset now, TimeSpan maxSpan) => GrantTimeMath.AddSaturating(now, maxSpan);
 
     private string? CustomerDisabled(GrantRequest r, GrantClass cls)
     {
@@ -171,9 +204,6 @@ public sealed class GrantPolicy(IOptions<IndividualGrantOptions>? options = null
             _ => null
         };
     }
-
-    // A realm profile can only shorten: clamp into [1, ceiling]; a non-positive value fails closed to the shortest span.
-    private static TimeSpan Days(int configured, int ceiling) => TimeSpan.FromDays(Math.Clamp(configured, 1, ceiling));
 
     private static string FormatSpan(TimeSpan s) => s.TotalHours < 24 * 2 ? $"{s.TotalHours:0} hours" : $"{s.TotalDays:0} days";
 }

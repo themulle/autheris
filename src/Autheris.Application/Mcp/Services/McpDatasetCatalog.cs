@@ -23,7 +23,7 @@ using Autheris.Application.Catalog.Interfaces;
 /// <summary>
 /// MCP dataset tools (list_datasets, describe_dataset, sample_rows). Visibility follows the GraphQL catalog
 /// (<see cref="McpCatalogVisibility"/>); rows are read only through <see cref="IGatewayExecutionService"/>, so consent,
-/// Casbin, row filters and masking apply exactly as for REST and GraphQL.
+/// Grants, row filters and masking apply exactly as for REST and GraphQL.
 /// </summary>
 public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
 {
@@ -41,8 +41,6 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
     private readonly Autheris.Application.Governance.Interfaces.IEffectiveAccessExplanationService? explanationService;
     private readonly IDataOwnershipRepository? dataOwnershipRepository;
     private readonly IConsentApprovalRepository? approvalRepository;
-    private readonly Autheris.Application.Catalog.Profiling.IColumnValueProfileService? profileService;
-    private readonly Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator? syntheticRowGenerator;
     private readonly IAuditLogRepository? auditLogRepository;
     private readonly Autheris.Application.Governance.Interfaces.ISchemaSunsettingService? sunsettingService;
     private readonly Autheris.Domain.Interfaces.IConsentResolutionService consentResolution;
@@ -53,6 +51,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
     private readonly IOptions<CatalogLocalizationOptions>? _localizationOptions;
     private readonly Autheris.Application.DataSources.IDataSourceTransportGate _transportGate;
     private readonly McpAccessHints _hints;
+    private readonly Autheris.Application.Catalog.Discovery.IDiscoveryService? _discoveryService;
 
     [Microsoft.Extensions.DependencyInjection.ActivatorUtilitiesConstructor]
     public McpDatasetCatalog(
@@ -66,8 +65,6 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         Autheris.Application.Governance.Interfaces.IEffectiveAccessExplanationService? explanationService = null,
         IDataOwnershipRepository? dataOwnershipRepository = null,
         IConsentApprovalRepository? approvalRepository = null,
-        Autheris.Application.Catalog.Profiling.IColumnValueProfileService? profileService = null,
-        Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator? syntheticRowGenerator = null,
         Autheris.Application.Governance.Interfaces.ISchemaSunsettingService? sunsettingService = null,
         Autheris.Domain.Interfaces.IConsentResolutionService? consentResolution = null,
         ILogger<McpDatasetCatalog>? logger = null,
@@ -76,7 +73,8 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         Autheris.Application.Catalog.Localization.ILanguageNegotiator? languageNegotiator = null,
         IOptions<CatalogLocalizationOptions>? localizationOptions = null,
         Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null,
-        IReadPathSwitches? switches = null)
+        IReadPathSwitches? switches = null,
+        Autheris.Application.Catalog.Discovery.IDiscoveryService? discoveryService = null)
     {
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
@@ -88,8 +86,6 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         this.explanationService = explanationService;
         this.dataOwnershipRepository = dataOwnershipRepository;
         this.approvalRepository = approvalRepository;
-        this.profileService = profileService;
-        this.syntheticRowGenerator = syntheticRowGenerator;
         this.sunsettingService = sunsettingService;
         // The default is the production resolver (stateless), never a weaker one (issue #127).
         this.consentResolution = consentResolution ?? new ConsentResolutionService();
@@ -100,6 +96,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         this._localizationOptions = localizationOptions;
         this._transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
         _hints = new McpAccessHints(switches, options?.Value.Mcp.Enabled ?? false);
+        _discoveryService = discoveryService;
     }
 
     public McpDatasetCatalog(
@@ -112,8 +109,6 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         Autheris.Application.Governance.Interfaces.IEffectiveAccessExplanationService? explanationService = null,
         IDataOwnershipRepository? dataOwnershipRepository = null,
         IConsentApprovalRepository? approvalRepository = null,
-        Autheris.Application.Catalog.Profiling.IColumnValueProfileService? profileService = null,
-        Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator? syntheticRowGenerator = null,
         Autheris.Application.Governance.Interfaces.ISchemaSunsettingService? sunsettingService = null,
         Autheris.Domain.Interfaces.IConsentResolutionService? consentResolution = null,
         ILogger<McpDatasetCatalog>? logger = null,
@@ -122,7 +117,8 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         Autheris.Application.Catalog.Localization.ILanguageNegotiator? languageNegotiator = null,
         IOptions<CatalogLocalizationOptions>? localizationOptions = null,
         Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null,
-        IReadPathSwitches? switches = null)
+        IReadPathSwitches? switches = null,
+        Autheris.Application.Catalog.Discovery.IDiscoveryService? discoveryService = null)
     {
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
@@ -133,8 +129,6 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         this.explanationService = explanationService;
         this.dataOwnershipRepository = dataOwnershipRepository;
         this.approvalRepository = approvalRepository;
-        this.profileService = profileService;
-        this.syntheticRowGenerator = syntheticRowGenerator;
         this.sunsettingService = sunsettingService;
         // The default is the production resolver (stateless), never a weaker one (issue #127).
         this.consentResolution = consentResolution ?? new ConsentResolutionService();
@@ -145,6 +139,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         this._localizationOptions = localizationOptions;
         this._transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
         _hints = new McpAccessHints(switches, options?.Value.Mcp.Enabled ?? false);
+        _discoveryService = discoveryService;
     }
 
     public Task<McpDatasetList> ListDatasetsAsync(
@@ -196,6 +191,11 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         string? format,
         CancellationToken ct = default)
     {
+        if (_discoveryService != null && !IsBypassed)
+        {
+            return await ListDatasetsWithDiscoveryAsync(principal, search, domain, offset, limit, tag, language, overview, format, ct).ConfigureAwait(false);
+        }
+
         // F-C11: the service has already dropped every row the shaping rule maps to NotFound; the check below is the second line of
         // defence so such a row never reaches the filters, the total or the paging.
         var (allVisible, isAdminView) = await VisibleSetAsync(principal, ct).ConfigureAwait(false);
@@ -393,6 +393,11 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
             return await DescribeProcedureDatasetAsync(principal, dataset.Trim(), ct).ConfigureAwait(false);
         }
 
+        if (_discoveryService != null && !IsBypassed)
+        {
+            return await DescribeDatasetWithDiscoveryAsync(principal, dataset, language, brief, ct).ConfigureAwait(false);
+        }
+
         var (table, shape) = await FindVisibleAsync(principal, dataset, ct).ConfigureAwait(false);
         var id = table.Identifier;
 
@@ -406,13 +411,8 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
             return await BuildSummaryDescriptionAsync(table, accessStatus, negotiatedLanguage, language, ct).ConfigureAwait(false);
         }
 
-        // Positive check (fail closed): the catalog-viewer release applies to a tier-Full row only, never to an unmarked or consent row.
-        bool canViewProfile = CanViewProfile(table, accessStatus);
-
         var columnAccessLevels = ResolveColumnLevels(principal, table, activeConsents, isAdmin, isGranted: options?.Value.IsMcpAuthBypassed != true && string.Equals(accessStatus, "GRANTED", StringComparison.OrdinalIgnoreCase),
             bypass: options?.Value.IsMcpAuthBypassed == true);
-        var hasActiveRowFilters = HasActiveRowFilters(table, activeConsents);
-        var effectiveProfileService = profileService ?? new Autheris.Application.Catalog.Profiling.ColumnValueProfileService();
         var sunsetRules = await LoadSunsettingRulesAsync(ct).ConfigureAwait(false);
 
         var graphQl = graphQlMap == null ? null : await graphQlMap.GetTableAsync(id, ct).ConfigureAwait(false);
@@ -432,7 +432,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
                     c.ColumnName,
                     c.DataType,
                     colResolved?.Description ?? c.Description,
-                    c.IsSensitive,
+                    ClassificationMetadata.IsColumnSensitive(table, c),
                     primaryKeys.Contains(c.ColumnName),
                     DisplayName: colResolved?.Title ?? c.DisplayName);
             }).ToList();
@@ -467,33 +467,32 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
             {
                 graphQlColumns.TryGetValue(c.ColumnName, out var field);
                 var deprecation = ResolveFieldDeprecation(id, c, sunsetRules);
-                ColumnValueProfile? valueProfile = null;
-                // ResolveColumnLevels is complete; a missing entry is denied (fail closed).
-                var effectiveLevel = columnAccessLevels.TryGetValue(c.ColumnName, out var lvl)
-                    ? lvl
-                    : Autheris.Domain.Interfaces.ColumnAccessLevel.Deny;
-                if (canViewProfile)
-                {
-                    valueProfile = KnownProfileOrNull(
-                        effectiveProfileService.GetColumnProfile(table, c, effectiveLevel, hasActiveRowFilters),
-                        emptyShareKnown: effectiveProfileService.GetStoredSnapshot(id, c.ColumnName) != null || c.Meta?.ContainsKey("empty_share") == true);
-                }
 
                 var colResolved = negotiatedLanguage != null ? c.Texts.Resolve(negotiatedLanguage) : null;
                 var colDisplayName = colResolved?.Title ?? c.DisplayName;
                 var colDescription = colResolved?.Description ?? c.Description;
 
+                var accessLabel = columnAccessLevels.TryGetValue(c.ColumnName, out var lvl)
+                    ? lvl switch
+                    {
+                        Autheris.Domain.Interfaces.ColumnAccessLevel.Clear when !ClassificationMetadata.IsColumnSensitive(table, c) => "clear",
+                        Autheris.Domain.Interfaces.ColumnAccessLevel.Clear or Autheris.Domain.Interfaces.ColumnAccessLevel.Mask => "mask",
+                        _ => null
+                    }
+                    : null;
+
                 return new McpDatasetColumn(
                     c.ColumnName,
                     c.DataType,
                     colDescription,
-                    c.IsSensitive,
+                    ClassificationMetadata.IsColumnSensitive(table, c),
                     primaryKeys.Contains(c.ColumnName),
                     field?.Field,
                     field?.GraphQlType,
-                    RestrictSemantics(c, canViewProfile ? effectiveLevel : Autheris.Domain.Interfaces.ColumnAccessLevel.Deny, valueProfile),
+                    RestrictSemantics(c),
                     Deprecation: deprecation,
-                    ValueProfile: valueProfile,
+                    ValueProfile: null,
+                    Access: accessLabel,
                     DisplayName: colDisplayName);
             })
             .ToList();
@@ -674,12 +673,12 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
                 continue; // completely omitted!
             }
 
-            var access = level == ColumnAccessLevel.Mask ? "mask" : "clear";
+            var access = level is ColumnAccessLevel.Mask or ColumnAccessLevel.RowDependent ? "mask" : "clear";
             projectedColumns.Add(new McpDatasetColumn(
                 Name: col.ColumnName,
                 Type: col.DataType,
                 Description: col.Description,
-                Sensitive: col.IsSensitive,
+                Sensitive: ClassificationMetadata.IsColumnSensitive(resMeta, col),
                 PrimaryKey: false,
                 Access: access));
         }
@@ -832,18 +831,12 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
     };
 
     /// <summary>
-    /// Issue #127: the raw column meta is value-bearing (for example <c>accepted_values</c>). It is returned in full only for a
-    /// <see cref="Autheris.Domain.Interfaces.ColumnAccessLevel.Clear"/> column that is not sensitive and whose value profile publishes
-    /// values (the profile layer applies row filter, publication policy and small-table coarsening); in every other case only
-    /// <see cref="DescriptiveMetaKeys"/> remain (fail closed).
+    /// Strips value-bearing column meta keys so only <see cref="DescriptiveMetaKeys"/> remain (fail closed).
     /// </summary>
-    private static ColumnSemantics RestrictSemantics(TableColumn column, Autheris.Domain.Interfaces.ColumnAccessLevel level, ColumnValueProfile? profile)
+    private static ColumnSemantics RestrictSemantics(TableColumn column)
     {
         var semantics = column.Semantics;
-        var publishesValues = level == Autheris.Domain.Interfaces.ColumnAccessLevel.Clear &&
-                              !column.IsSensitive &&
-                              profile is { AllowedValues: not null } or { MinValue: not null } or { MaxValue: not null } or { SampleValues: not null };
-        if (publishesValues || column.Meta == null || column.Meta.Count == 0)
+        if (column.Meta == null || column.Meta.Count == 0)
         {
             return semantics;
         }
@@ -860,14 +853,8 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         return semantics with { RawMeta = descriptive };
     }
 
-    private static bool HasActiveRowFilters(TableMetadata table, IReadOnlyList<Consent> activeConsents) =>
-        !string.IsNullOrWhiteSpace(table.Table.RlsExpression) ||
-        activeConsents.Any(c => c.TableIdentifier == table.Identifier &&
-                                c.Effect == ConsentEffect.Allow &&
-                                (c.RowFilters is { Count: > 0 } || !string.IsNullOrWhiteSpace(c.RowFilterCondition)));
-
     /// <summary>
-    /// Issue #127: the only producer of column levels for value profiles and synthetic samples. The level is the one the
+    /// Issue #127: the only producer of column levels for MCP dataset description. The level is the one the
     /// data path resolves for the same caller: token scopes from the claims overload (as <c>TableAccessPolicy</c>), consents
     /// of the caller's tenant, <see cref="Autheris.Domain.Interfaces.IConsentResolutionService"/> and
     /// <c>GetEffectiveColumnAccess</c>. A caller with an access status other than GRANTED (feature
@@ -939,31 +926,6 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         TableIdentifier table, IReadOnlyList<Consent> activeConsents, IReadOnlyList<ConsentRequest> pendingRequests, bool isAdmin, bool authBypassed) =>
         authBypassed ? "GRANTED" : CatalogVisibility.ComputeAccessStatus(table, activeConsents, pendingRequests, isAdmin);
 
-    /// <summary>
-    /// Issue #702: a profile that carries nothing (no stored snapshot, no declared empty share, no other member set) is not
-    /// emitted; its empty share of 0 would read as "no empty values" although nothing is known.
-    /// </summary>
-    internal static ColumnValueProfile? KnownProfileOrNull(ColumnValueProfile? profile, bool emptyShareKnown) =>
-        emptyShareKnown || profile is not
-        {
-            FormatPattern: null, MinValue: null, MaxValue: null, TypicalLength: null, ApproximateDistinctCount: null,
-            AllowedValues: null, DistinctCountBucket: null, SampleValues: null
-        }
-            ? profile
-            : null;
-
-    /// <summary>Positive check (fail closed): the catalog-viewer release applies to a tier-Full row only, never to an unmarked or consent row.</summary>
-    internal static bool CanViewProfile(TableMetadata table, string accessStatus) =>
-        string.Equals(accessStatus, "GRANTED", StringComparison.OrdinalIgnoreCase) ||
-        (table.CatalogView == CatalogView.Full && table.ReleaseProfileToCatalogViewers);
-
-    /// <summary>
-    /// Whether describe_dataset emits column value profiles (allowed values, ranges, samples) or the raw value-bearing column meta:
-    /// never for the brief or the summary shape, otherwise exactly when <see cref="CanViewProfile"/> holds.
-    /// </summary>
-    internal static bool EmitsValueProfile(CatalogOutputShape shape, TableMetadata table, string accessStatus, bool brief) =>
-        !brief && shape != CatalogOutputShape.Summary && CanViewProfile(table, accessStatus);
-
     public async Task<EffectiveTableAccessDto> DescribeMyAccessAsync(ClaimsPrincipal principal, string dataset, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(principal);
@@ -980,10 +942,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         throw new InvalidOperationException("EffectiveAccessExplanationService is not configured.");
     }
 
-    public Task<McpDatasetSample> SampleRowsAsync(ClaimsPrincipal principal, string dataset, int? count, CancellationToken ct = default) =>
-        SampleRowsAsync(principal, dataset, count, synthetic: false, ct);
-
-    public async Task<McpDatasetSample> SampleRowsAsync(ClaimsPrincipal principal, string dataset, int? count, bool synthetic, CancellationToken ct = default)
+    public async Task<McpDatasetSample> SampleRowsAsync(ClaimsPrincipal principal, string dataset, int? count, CancellationToken ct = default)
     {
         var (table, shape) = await FindVisibleAsync(principal, dataset, ct).ConfigureAwait(false);
         if (shape != CatalogOutputShape.Full)
@@ -993,55 +952,6 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         }
 
         var rowCount = Math.Clamp(count ?? DefaultSampleRows, 1, MaxSampleRows);
-
-        if (synthetic)
-        {
-            var (activeConsents, pendingRequests, isAdmin) = await GetCallerConsentsAndRequestsAsync(principal, ct).ConfigureAwait(false);
-            var accessStatus = options?.Value.IsMcpAuthBypassed == true
-                ? "GRANTED"
-                : CatalogVisibility.ComputeAccessStatus(table.Identifier, activeConsents, pendingRequests, isAdmin);
-
-            bool isGranted = string.Equals(accessStatus, "GRANTED", StringComparison.OrdinalIgnoreCase);
-
-            // Positive guard (fail closed): administrator view, an active table consent, or a tier-Full row explicitly released to
-            // catalog viewers (DENY columns excluded by the level resolution). Summary, Unmarked and every other value stay refused.
-            var releasedFull = table.CatalogView == CatalogView.Full && table.ReleaseProfileToCatalogViewers;
-            if (!(isAdmin || isGranted || releasedFull))
-            {
-                throw new GatewayForbiddenException("Synthetic sample rows require an active table consent.");
-            }
-
-            var columnAccessLevels = ResolveColumnLevels(principal, table, activeConsents, isAdmin, isGranted: options?.Value.IsMcpAuthBypassed != true && isGranted, bypass: options?.Value.IsMcpAuthBypassed == true);
-            var hasActiveRowFilters = HasActiveRowFilters(table, activeConsents);
-            var generator = syntheticRowGenerator ?? new Autheris.Application.Catalog.Profiling.SyntheticSampleRowGenerator(profileService);
-            var syntheticRows = generator.GenerateRows(table, rowCount, columnAccessLevels, hasActiveRowFilters);
-            var datasetId = DatasetId(table.Identifier);
-            var queryText = $"sample_rows(dataset={datasetId}, count={rowCount}, synthetic=true)";
-
-            if (auditLogRepository != null)
-            {
-                var actorSid = principal.GetUserSid() ?? new Sid(principal.Identity?.Name ?? "anonymous");
-                await auditLogRepository.RecordAuditEventAsync(new AuditLogEntry
-                {
-                    TenantId = principal.GetTenantId(),
-                    OccurredAt = DateTimeOffset.UtcNow,
-                    EventType = Autheris.Domain.Audit.AuditEventTypes.MetadataSyntheticSample,
-                    ActorSid = actorSid,
-                    TargetTable = datasetId,
-                    Query = queryText,
-                    Decision = "ALLOW",
-                    DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
-                    {
-                        query = queryText,
-                        dataset = datasetId,
-                        count = rowCount,
-                        synthetic = true
-                    })
-                }, ct).ConfigureAwait(false);
-            }
-
-            return new McpDatasetSample(datasetId, syntheticRows.Count, syntheticRows, IsSynthetic: true);
-        }
 
         var (rows, decision) = await _gatewayExecutionService.ExecuteTableQueryAsync(
             principal,
@@ -1190,8 +1100,8 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
             return false;
         }
 
-        id = new TableIdentifier(parts[0], parts[1], parts[2]);
-        return true;
+        // TryCreate answers false for control characters and newlines instead of throwing.
+        return TableIdentifier.TryCreate(parts[0], parts[1], parts[2], out id);
     }
 
     private bool IsBypassed => options?.Value.IsMcpAuthBypassed == true;
@@ -1260,47 +1170,5 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         return row is { Shape: not CatalogOutputShape.NotFound } visible
             ? (visible.Table, visible.Shape)
             : throw new TableNotFoundException(requested);
-    }
-
-    private static bool Matches(TableMetadata table, string search)
-    {
-        var id = table.Identifier;
-        if (id.TableName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
-            id.Domain.Contains(search, StringComparison.OrdinalIgnoreCase) ||
-            id.Schema.Contains(search, StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        if (search.Contains('.') && DatasetId(id).Contains(search, StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        if (table.Table.Description != null && table.Table.Description.Contains(search, StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        if (table.Table.Texts.Entries.Count > 0 && table.Table.Texts.Entries.Values.Any(e => e.Description?.Contains(search, StringComparison.OrdinalIgnoreCase) == true))
-        {
-            return true;
-        }
-
-        // A Summary row matches on identifier and description only; Full rows carry no DENY-masked column (removed by the engine).
-        if (table.CatalogView != CatalogView.Summary && table.Columns.Count > 0)
-        {
-            foreach (var c in table.Columns)
-            {
-                if (c.ColumnName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
-                    (c.Description?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                    (c.Texts.Entries.Count > 0 && c.Texts.Entries.Values.Any(e => e.Description?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false)))
-                {
-                    return true;
-                }
-            }
-        }
-
-        return false;
     }
 }

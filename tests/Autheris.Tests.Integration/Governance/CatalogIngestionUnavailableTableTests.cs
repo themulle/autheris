@@ -89,7 +89,7 @@ public sealed class CatalogIngestionUnavailableTableTests : IDisposable
             new() { Identifier = id, Columns = [new() { ColumnName = "id" }, new() { ColumnName = "ssn" }], PrimaryKeyColumns = ["id"] }
         });
         var sut = new DataCatalogSyncService(client, _repo, Substitute.For<IEpochValidationService>(),
-            Options.Create(new GatewayOptions()), Substitute.For<IPhysicalKeyCatalog>(), Substitute.For<IAuditWriter>(), NullLogger<DataCatalogSyncService>.Instance);
+            Options.Create(new GatewayOptions()), Substitute.For<IAuditWriter>(), NullLogger<DataCatalogSyncService>.Instance);
 
         var result = await sut.SyncCatalogAsync(dryRun: false);
 

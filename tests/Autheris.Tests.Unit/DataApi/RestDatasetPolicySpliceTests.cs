@@ -51,7 +51,8 @@ public sealed class RestDatasetPolicySpliceTests
             new("purpose", "marketing")
         };
         claims.AddRange(extra);
-        return new ClaimsPrincipal(new ClaimsIdentity(claims, "Test"));
+        return global::Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(
+            new ClaimsPrincipal(new ClaimsIdentity(claims, "Test")));
     }
 
     private static TableMetadata CustomersMeta() => new()

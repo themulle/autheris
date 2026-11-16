@@ -64,17 +64,18 @@ public static class ApiErrorCodes
     public const string CatalogReservedSourceName = "CATALOG_RESERVED_SOURCE_NAME";
     public const string OlapQueryFailed = "OLAP_QUERY_FAILED";
     public const string OlapResultTooLarge = "OLAP_RESULT_TOO_LARGE";
-    public const string PrivacyBudgetExhausted = "PRIVACY_BUDGET_EXHAUSTED";
     public const string GovernancePlanInvalid = "GOVERNANCE_PLAN_INVALID";
     public const string ProcedureArgumentInvalid = "PROCEDURE_ARGUMENT_INVALID";
     public const string VirtualFilterConflict = "VIRTUAL_FILTER_CONFLICT";
     public const string ResourceLocked = "RESOURCE_LOCKED";
+    public const string GrantRecordUnavailable = "GRANT_RECORD_UNAVAILABLE";
     public const string VirtualFilterInvalid = "VIRTUAL_FILTER_INVALID";
 
     // O-5b step 2: codes of the migrated bare error bodies. Registered here once so no later work package touches this file.
     public const string ProcedureRejected = "PROCEDURE_REJECTED";
     public const string InvalidTag = "INVALID_TAG";
     public const string InvalidVisibility = "INVALID_VISIBILITY";
+    public const string InvalidColumns = "INVALID_COLUMNS";
     public const string TagLimitExceeded = "TAG_LIMIT_EXCEEDED";
     public const string OffsetNotSupported = "OFFSET_NOT_SUPPORTED";
     public const string KeysetStreamingUnavailable = "KEYSET_STREAMING_UNAVAILABLE";
@@ -109,7 +110,6 @@ public static class ApiErrorCodes
     public const string TenantUnknown = "TENANT_UNKNOWN";
     public const string TenantRegistrationRateLimited = "TENANT_REGISTRATION_RATE_LIMITED";
     public const string TokenRevocationUnavailable = "TOKEN_REVOCATION_UNAVAILABLE";
-    public const string FinOpsBudgetExceeded = "FINOPS_BUDGET_EXCEEDED";
     public const string IncrementalStreamLimitExceeded = "INCREMENTAL_STREAM_LIMIT_EXCEEDED";
     public const string InvalidSchemaContract = "INVALID_SCHEMA_CONTRACT";
     public const string PersistentConnectionLimitExceeded = "PERSISTENT_CONNECTION_LIMIT_EXCEEDED";
@@ -127,6 +127,19 @@ public static class ApiErrorCodes
     public const string TotpCodeInvalid = "TOTP_CODE_INVALID";
     public const string TokenRevoked = "TOKEN_REVOKED";
     public const string CdcRestrictedScopeForbidden = "CDC_RESTRICTED_SCOPE_FORBIDDEN";
+    public const string DiscoveryNotPermitted = "DISCOVERY_NOT_PERMITTED";
+    public const string UsageAuditUnavailable = "USAGE_AUDIT_UNAVAILABLE";
+    public const string UsageReportInvalidRange = "USAGE_REPORT_INVALID_RANGE";
+    public const string UsageQuotaExceeded = "USAGE_QUOTA_EXCEEDED";
+    public const string UsageQuotaUnavailable = "USAGE_QUOTA_UNAVAILABLE";
+    public const string IdempotencyKeyRequired = "IDEMPOTENCY_KEY_REQUIRED";
+    public const string PreconditionRequired = "PRECONDITION_REQUIRED";
+    public const string IdempotencyKeyReused = "IDEMPOTENCY_KEY_REUSED";
+    public const string CursorExpired = "CURSOR_EXPIRED";
+    public const string GrantAlreadyEnded = "GRANT_ALREADY_ENDED";
+    public const string RateLimited = "RATE_LIMITED";
+    public const string DecisionExceedsRequest = "DECISION_EXCEEDS_REQUEST";
+    public const string InvalidArtifact = "INVALID_ARTIFACT";
 
     private static readonly Regex CodeFormat = new("^[A-Z][A-Z0-9_]{2,63}$", RegexOptions.CultureInvariant | RegexOptions.Compiled, TimeSpan.FromMilliseconds(50));
 
@@ -176,7 +189,8 @@ public static class ApiErrorCodes
             typeof(Autheris.Application.DataSources.Changes.ChangeDetectionErrorCodes),
             typeof(Autheris.Application.VirtualFilters.Federation.VirtualFilterErrorCodes),
             typeof(Autheris.Application.Analytics.AggregationErrorCodes),
-            typeof(Autheris.Domain.Model.AccessProfileAssignmentRules)
+            typeof(Autheris.Domain.Model.AccessProfileAssignmentRules),
+            typeof(Autheris.Application.ConsentRequests.ConsentDecisionErrorCodes)
         })
         {
             foreach (var field in type.GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static))

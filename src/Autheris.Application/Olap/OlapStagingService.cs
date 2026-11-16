@@ -289,17 +289,11 @@ public sealed class OlapStagingService(
                 // The denial of the first failing table (request order) is returned with today's text.
                 var resolved = new List<ResolvedTable>(requested.Count);
                 Denial? firstDenial = null;
-                IReadOnlyList<TableMetadata>? catalog = null;
+                var bareCache = new Dictionary<string, TableMetadata?>(StringComparer.OrdinalIgnoreCase);
                 foreach (var rawName in requested)
                 {
                     var (table, denial) = await ResolveAsync(
-                        user, tenantId, rawName, isDev, catalog, token).ConfigureAwait(false);
-                    if (denial == null && table == null)
-                    {
-                        // bare name: the catalog was loaded for the first time
-                        catalog = await metadataRepository.GetAllTablesAsync(token).ConfigureAwait(false);
-                        (table, denial) = await ResolveAsync(user, tenantId, rawName, isDev, catalog, token).ConfigureAwait(false);
-                    }
+                        user, tenantId, rawName, isDev, bareCache, token).ConfigureAwait(false);
 
                     if (denial != null)
                     {
@@ -594,15 +588,64 @@ public sealed class OlapStagingService(
         crossSourceValue > 0 ? Math.Min(configured, crossSourceValue) : configured;
 
     /// <summary>
-    /// Resolves and authorizes one requested table. Returns <c>(null, null)</c> when a bare name needs the catalog list first
-    /// (<paramref name="catalog"/> is null); the caller loads it once and calls again.
+    /// Resolves and authorizes one requested table using point lookup for 3-part names or bounded filtered paging for bare/2-part names.
     /// </summary>
+    private async Task<TableMetadata?> ResolveUniqueUnqualifiedTableAsync(string rawTableName, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(rawTableName) ||
+            rawTableName.AsSpan().IndexOfAny('\0', '\r', '\n') >= 0)
+        {
+            return null;
+        }
+
+        string? schema = null;
+        string namePrefix;
+        var dotIndex = rawTableName.IndexOf('.', StringComparison.Ordinal);
+        if (dotIndex >= 0)
+        {
+            if (rawTableName.IndexOf('.', dotIndex + 1) >= 0)
+            {
+                return null;
+            }
+
+            schema = rawTableName[..dotIndex];
+            namePrefix = rawTableName[(dotIndex + 1)..];
+            if (string.IsNullOrWhiteSpace(schema) ||
+                string.IsNullOrWhiteSpace(namePrefix) ||
+                schema.Length > Autheris.Application.Catalog.CatalogTableQuery.MaxFilterLength ||
+                namePrefix.Length > Autheris.Application.Catalog.CatalogTableQuery.MaxFilterLength)
+            {
+                return null;
+            }
+        }
+        else
+        {
+            if (rawTableName.Length > Autheris.Application.Catalog.CatalogTableQuery.MaxFilterLength)
+            {
+                return null;
+            }
+
+            namePrefix = rawTableName;
+        }
+
+        var matches = await Autheris.Application.Catalog.CatalogTablePageReader.ReadAllAsync(
+            metadataRepository,
+            new Autheris.Application.Catalog.CatalogTableQuery(
+                Schema: schema,
+                NamePrefix: namePrefix,
+                Limit: Autheris.Application.Catalog.CatalogTableQuery.MaxLimit),
+            t => string.Equals(t.Identifier.TableName, rawTableName, StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(t.Identifier.ToQualifiedName(), rawTableName, StringComparison.OrdinalIgnoreCase),
+            ct: ct).ConfigureAwait(false);
+        return matches.Count == 1 ? matches[0] : null;
+    }
+
     private async Task<(ResolvedTable? Table, Denial? Denial)> ResolveAsync(
         ClaimsPrincipal user,
         TenantId tenantId,
         string rawTableName,
         bool isDev,
-        IReadOnlyList<TableMetadata>? catalog,
+        Dictionary<string, TableMetadata?> bareCache,
         CancellationToken ct)
     {
         TableMetadata? meta = null;
@@ -610,18 +653,11 @@ public sealed class OlapStagingService(
         {
             meta = await metadataRepository.GetTableMetadataAsync(parsedId, ct).ConfigureAwait(false);
         }
-        else
+        else if (!bareCache.TryGetValue(rawTableName, out meta))
         {
-            if (catalog == null)
-            {
-                return (null, null);
-            }
-
-            // BC-OLAP-05: a bare name that matches more than one table is as good as unknown (never first-match).
-            var matches = catalog.Where(t =>
-                string.Equals(t.Identifier.TableName, rawTableName, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(t.Identifier.ToQualifiedName(), rawTableName, StringComparison.OrdinalIgnoreCase)).ToList();
-            meta = matches.Count == 1 ? matches[0] : null;
+            // BC-OLAP-05: a bare or schema.table name that matches more than one table is as good as unknown (never first-match).
+            meta = await ResolveUniqueUnqualifiedTableAsync(rawTableName, ct).ConfigureAwait(false);
+            bareCache[rawTableName] = meta;
         }
 
         if (meta == null || !meta.Table.IsActive)
@@ -645,7 +681,7 @@ public sealed class OlapStagingService(
             return (null, new Denial(new OlapStagingOutcome(403, $"Access denied to table '{rawTableName}'.")));
         }
 
-        // 05 / RR-L3-04 / Architecture 1: one access decision (consents, Casbin, RLS)
+        // 05 / RR-L3-04 / Architecture 1: one access decision (consents, RLS)
         // without leaking internal policy details.
         var decision = await accessResolver.ResolveAccessAsync(user, meta.Identifier, meta, tenantId, ct).ConfigureAwait(false);
         if (!decision.IsAllowed)
@@ -663,7 +699,7 @@ public sealed class OlapStagingService(
         // counts; only the tenant column, the typed row policy and whole identifiers of the decision's row filter do.
         try
         {
-            Autheris.Application.DataSources.Services.RequiredFilterColumnRule.Enforce(meta, decision, clientFilterColumns: null, tenantColumnCounts: true);
+            Autheris.Application.DataSources.Services.RequiredFilterColumnRule.Enforce(meta, decision, clientConstrainedColumns: null, tenantColumnCounts: true);
         }
         catch (TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException ex)
         {

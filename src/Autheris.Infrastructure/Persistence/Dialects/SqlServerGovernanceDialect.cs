@@ -154,6 +154,89 @@ public sealed class SqlServerGovernanceDialect : IGovernanceSqlDialect
         return sb.ToString();
     }
 
+    public string UpsertAccumulate(
+        GovernanceTable table,
+        ReadOnlySpan<string> keyColumns,
+        ReadOnlySpan<string> setOnInsertColumns,
+        ReadOnlySpan<string> counterColumns)
+    {
+        if (keyColumns.IsEmpty)
+        {
+            throw new ArgumentException("Key columns cannot be empty for upsert.", nameof(keyColumns));
+        }
+
+        string tableName = Quote(table.ToSqlName());
+        var sb = new StringBuilder();
+        sb.Append("MERGE INTO ").Append(tableName).Append(" WITH (HOLDLOCK) AS target USING (VALUES (");
+        AppendParameterColumns(sb, keyColumns, prependComma: false);
+        AppendParameterColumns(sb, setOnInsertColumns, prependComma: true);
+        AppendParameterColumns(sb, counterColumns, prependComma: true);
+        sb.Append(")) AS source (");
+        AppendQuotedColumns(sb, keyColumns, prependComma: false);
+        AppendQuotedColumns(sb, setOnInsertColumns, prependComma: true);
+        AppendQuotedColumns(sb, counterColumns, prependComma: true);
+        sb.Append(") ON (");
+
+        for (int i = 0; i < keyColumns.Length; i++)
+        {
+            if (i > 0) sb.Append(" AND ");
+            string col = Quote(keyColumns[i]);
+            sb.Append("target.").Append(col).Append(" = source.").Append(col);
+        }
+
+        sb.Append(')');
+
+        if (!counterColumns.IsEmpty)
+        {
+            sb.Append(" WHEN MATCHED THEN UPDATE SET ");
+            for (int i = 0; i < counterColumns.Length; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                string col = Quote(counterColumns[i]);
+                sb.Append("target.").Append(col).Append(" = target.").Append(col).Append(" + source.").Append(col);
+            }
+        }
+
+        sb.Append(" WHEN NOT MATCHED THEN INSERT (");
+        AppendQuotedColumns(sb, keyColumns, prependComma: false);
+        AppendQuotedColumns(sb, setOnInsertColumns, prependComma: true);
+        AppendQuotedColumns(sb, counterColumns, prependComma: true);
+        sb.Append(") VALUES (");
+        AppendSourceColumns(sb, keyColumns, prependComma: false);
+        AppendSourceColumns(sb, setOnInsertColumns, prependComma: true);
+        AppendSourceColumns(sb, counterColumns, prependComma: true);
+        sb.Append(");");
+
+        return sb.ToString();
+
+        static void AppendQuotedColumns(StringBuilder builder, ReadOnlySpan<string> columns, bool prependComma)
+        {
+            for (int i = 0; i < columns.Length; i++)
+            {
+                if (prependComma || i > 0) builder.Append(", ");
+                builder.Append(Quote(columns[i]));
+            }
+        }
+
+        static void AppendParameterColumns(StringBuilder builder, ReadOnlySpan<string> columns, bool prependComma)
+        {
+            for (int i = 0; i < columns.Length; i++)
+            {
+                if (prependComma || i > 0) builder.Append(", ");
+                builder.Append('@').Append(GovernanceSqlInput.Identifier(columns[i], nameof(columns)));
+            }
+        }
+
+        static void AppendSourceColumns(StringBuilder builder, ReadOnlySpan<string> columns, bool prependComma)
+        {
+            for (int i = 0; i < columns.Length; i++)
+            {
+                if (prependComma || i > 0) builder.Append(", ");
+                builder.Append("source.").Append(Quote(columns[i]));
+            }
+        }
+    }
+
     internal static void AssertQuotedIdentifier(DbConnection connection)
     {
         using var cmd = connection.CreateCommand();

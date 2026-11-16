@@ -1,7 +1,14 @@
+using System.Collections.Generic;
+using System.Text;
+using Autheris.Application.Usage;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
-using Autheris.Infrastructure.Observability;
+using Autheris.Domain.Options;
+using Autheris.Domain.Options.DataSources;
+using Autheris.Domain.Security;
 using Autheris.Infrastructure.Persistence;
+using Autheris.Infrastructure.Persistence.Migrations;
+using Microsoft.Extensions.Options;
 using Npgsql;
 using Shouldly;
 using Xunit;
@@ -9,8 +16,7 @@ using Xunit;
 namespace Autheris.Tests.Integration.Governance;
 
 /// <summary>
-/// Issue #286 / WP-SIMPL-11: the CONSUMER_APP_* counter store on the migrated PostgreSQL governance schema. Replaces the SQLite
-/// baseline variants of <c>ConsumerAggregationSecurityTests</c> and <c>ConsumerAggregationSqlTests</c>.
+/// Issue #286 / WP-SIMPL-11: the usage & query-name counter stores on the migrated PostgreSQL governance schema.
 /// </summary>
 public sealed class ConsumerAggregationPostgreSqlTests
 {
@@ -23,22 +29,47 @@ public sealed class ConsumerAggregationPostgreSqlTests
         return conn;
     }
 
+    private static async Task<(PostgreSqlGovernanceRepository Repo, string ConnStr)> OpenRepoAsync()
+    {
+        var connStr = await GovernanceTestDatabase.CreateAsync("consumer_agg_" + Guid.NewGuid().ToString("N")[..12]);
+        var repo = GovernanceSchemaTestSupport.UnmigratedPostgreSql(GovernanceSchemaTestSupport.PostgreSqlOptions(connStr, GovernanceMigrationMode.Verify));
+        await repo.InitializeAsync();
+        return (repo, connStr);
+    }
+
     [Fact]
     [Trait("Category", "Security")]
     public async Task T_SEC_AUD114_07_ActorHash_IsStoredVerbatimAndNeverTheRawSid()
     {
-        // Enforces SEC-AUD114-04 on PostgreSQL: the counter table keeps only the supplied HMAC value.
-        await using var conn = await OpenCloneAsync();
-        var recorder = new ConsumerUsageRecorder(clusterSecret: "test-cluster-secret-key-12345");
+        // Enforces SEC-AUD114-04 on PostgreSQL: when PseudonymizeUsers is enabled, USAGE_DAILY keeps only the supplied HMAC value.
+        var (repo, connStr) = await OpenRepoAsync();
+        using var disposable = repo;
+        byte[] hmacKey = Encoding.UTF8.GetBytes("test-cluster-secret-key-12345");
+        var aggregator = new UsageAggregator(
+            Options.Create(new UsageAccountingOptions { PseudonymizeUsers = true }),
+            hmacKey);
+        var recorder = new UsageRecorder(aggregator);
+        var tenant = new TenantId("tenant-1");
         const string rawSid = "S-1-5-21-3623811015-3361044348-30300820-1013";
-        var hash = recorder.ComputeActorHmac(rawSid);
+        var sid = new Sid(rawSid);
+        string expectedKey = UsageAttribution.ComputeUserKey(sid, pseudonymizeUsers: true, hmacKey);
 
-        await ConsumerAggregationStore.RecordActorSampleAsync(conn, ConsumerAggregationDialect.PostgreSql, null, Table, new TenantId("tenant-1"), "2026-10-18", "powerbi", hash);
+        using (var scope = UsageRequestScope.Begin(new UsageIdentity(tenant, sid, new HashSet<Sid>()), DataSourceTransportFlags.Rest, new CallerContext("powerbi"), aggregator))
+        {
+            recorder.Record(new UsageFact(Table, "sales", UsageOutcome.Allow, 10, true, 0, Array.Empty<GrantRef>(), default), tenant, sid);
+            scope.Complete(5, 64, 200);
+        }
 
+        await repo.AccumulateAsync(aggregator.Swap());
+
+        await using var conn = new NpgsqlConnection(connStr);
+        await conn.OpenAsync();
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT actor_hash FROM CONSUMER_APP_ACTOR_DAILY";
+        cmd.CommandText = "SELECT user_key FROM USAGE_DAILY WHERE tenant_id = @t AND table_id = @id";
+        cmd.Parameters.AddWithValue("@t", tenant.Value);
+        cmd.Parameters.AddWithValue("@id", Table.ToString());
         var stored = (string?)await cmd.ExecuteScalarAsync();
-        stored.ShouldBe(hash);
+        stored.ShouldBe(expectedKey);
         stored!.ShouldNotContain(rawSid);
     }
 
@@ -47,31 +78,47 @@ public sealed class ConsumerAggregationPostgreSqlTests
     public async Task TenantA_CannotSeeOrAccumulateInto_TenantB_AfterBaselineOnly()
     {
         // Enforces SEC-286-3/SEC-286-4: tenant_id is part of every key and every read; no runtime DDL involved.
-        await using var conn = await OpenCloneAsync();
+        var (repo, _) = await OpenRepoAsync();
+        using var disposable = repo;
         var tenantA = new TenantId("tenant-a");
         var tenantB = new TenantId("tenant-b");
-        string day = DateTimeOffset.UtcNow.ToString("yyyy-MM-dd");
+        var sidA = new Sid("S-1-5-21-A");
+        var sidB = new Sid("S-1-5-21-B");
+        var aggregator = new UsageAggregator();
+        var recorder = new UsageRecorder(aggregator);
+        var caller = new CallerContext("powerbi", ClientId: "c");
 
-        await ConsumerAggregationStore.RecordDailyUsageAsync(conn, ConsumerAggregationDialect.PostgreSql, null, Table, tenantA, day, "powerbi", "c", "1", 7, 70, 7, 0, 0, 0, 0);
-        await ConsumerAggregationStore.RecordDailyUsageAsync(conn, ConsumerAggregationDialect.PostgreSql, null, Table, tenantB, day, "powerbi", "c", "1", 1, 10, 1, 0, 0, 0, 0);
-        await ConsumerAggregationStore.RecordActorSampleAsync(conn, ConsumerAggregationDialect.PostgreSql, null, Table, tenantA, day, "powerbi", new string('b', 64));
+        using (var scope = UsageRequestScope.Begin(new UsageIdentity(tenantA, sidA, new HashSet<Sid>()), DataSourceTransportFlags.Rest, caller, aggregator))
+        {
+            for (int i = 0; i < 7; i++)
+            {
+                recorder.Record(new UsageFact(Table, "sales", UsageOutcome.Allow, 10, true, 0, Array.Empty<GrantRef>(), default), tenantA, sidA);
+            }
+            scope.Complete(5, 64, 200);
+        }
+
+        using (var scope = UsageRequestScope.Begin(new UsageIdentity(tenantB, sidB, new HashSet<Sid>()), DataSourceTransportFlags.Rest, caller, aggregator))
+        {
+            recorder.Record(new UsageFact(Table, "sales", UsageOutcome.Allow, 10, true, 0, Array.Empty<GrantRef>(), default), tenantB, sidB);
+            scope.Complete(5, 64, 200);
+        }
+
+        await repo.AccumulateAsync(aggregator.Swap());
 
         var from = DateTimeOffset.UtcNow.AddDays(-1);
         var to = DateTimeOffset.UtcNow.AddDays(1);
-        var a = await ConsumerAggregationStore.QueryConsumerAppDailyAsync(conn, null, Table, tenantA, from, to);
-        var b = await ConsumerAggregationStore.QueryConsumerAppDailyAsync(conn, null, Table, tenantB, from, to);
-        var actorsB = await ConsumerAggregationStore.QueryDistinctActorCountsAsync(conn, null, Table, tenantB, from, to);
+        var a = await repo.QueryConsumerAppDailyAsync(Table, tenantA, from, to);
+        var b = await repo.QueryConsumerAppDailyAsync(Table, tenantB, from, to);
 
         a.ShouldHaveSingleItem().Calls.ShouldBe(7);
         b.ShouldHaveSingleItem().Calls.ShouldBe(1);
-        actorsB.ShouldBeEmpty();
     }
 
     [Fact]
     [Trait("Category", "Security")]
     public async Task T_SEC_AUD114_09_DecoupledPurge_DoesNotAffectAuditHashChain()
     {
-        // Enforces SEC-AUD114-05: purging consumer counter tables leaves the audit log rows untouched.
+        // Enforces SEC-AUD114-05: purging query-name counter tables leaves the audit log rows untouched.
         await using var conn = await OpenCloneAsync();
         var tenant = new TenantId("tenant-1");
 
@@ -84,10 +131,10 @@ public sealed class ConsumerAggregationPostgreSqlTests
             await cmd.ExecuteNonQueryAsync();
         }
 
-        await ConsumerAggregationStore.RecordDailyUsageAsync(
-            conn, ConsumerAggregationDialect.PostgreSql, null, Table, tenant, "2024-01-01", "powerbi", "client1", "1.0", 10, 100, 10, 0, 0, 0, 0);
-        await ConsumerAggregationStore.RecordDailyUsageAsync(
-            conn, ConsumerAggregationDialect.PostgreSql, null, Table, tenant, DateTimeOffset.UtcNow.ToString("yyyy-MM-dd"), "powerbi", "client1", "1.0", 5, 50, 5, 0, 0, 0, 0);
+        await ConsumerAggregationStore.RecordQueryNameAsync(
+            conn, ConsumerAggregationDialect.PostgreSql, null, Table, tenant, "2024-01-01", "powerbi", "Q_old", 10);
+        await ConsumerAggregationStore.RecordQueryNameAsync(
+            conn, ConsumerAggregationDialect.PostgreSql, null, Table, tenant, DateTimeOffset.UtcNow.ToString("yyyy-MM-dd"), "powerbi", "Q_new", 5);
 
         int deleted = await ConsumerAggregationStore.PurgeExpiredConsumerMetricsAsync(conn, null, retentionDays: 400, asOfUtc: DateTimeOffset.UtcNow);
         deleted.ShouldBe(1);
@@ -104,23 +151,36 @@ public sealed class ConsumerAggregationPostgreSqlTests
     [Fact]
     public async Task RecordAndQuery_PostgreSql_RoundTripsAfterBaselineOnly()
     {
-        await using var conn = await OpenCloneAsync();
+        var (repo, _) = await OpenRepoAsync();
+        using var disposable = repo;
         var tenant = new TenantId("tenant-1");
         string day = DateTimeOffset.UtcNow.ToString("yyyy-MM-dd");
+        var aggregator = new UsageAggregator();
+        var recorder = new UsageRecorder(aggregator);
+        var caller = new CallerContext("powerbi", "1.0", ClientId: "c1");
+        var sid = new Sid("S-1-5-21-a");
 
-        await ConsumerAggregationStore.RecordDailyUsageAsync(conn, ConsumerAggregationDialect.PostgreSql, null, Table, tenant, day, "powerbi", "c1", "1.0", 2, 20, 2, 0, 0, 0, 0);
-        await ConsumerAggregationStore.RecordDailyUsageAsync(conn, ConsumerAggregationDialect.PostgreSql, null, Table, tenant, day, "powerbi", "c1", "1.0", 3, 30, 3, 1, 0, 0, 0);
-        await ConsumerAggregationStore.RecordActorSampleAsync(conn, ConsumerAggregationDialect.PostgreSql, null, Table, tenant, day, "powerbi", new string('a', 64));
-        await ConsumerAggregationStore.RecordActorSampleAsync(conn, ConsumerAggregationDialect.PostgreSql, null, Table, tenant, day, "powerbi", new string('a', 64));
-        await ConsumerAggregationStore.RecordQueryNameAsync(conn, ConsumerAggregationDialect.PostgreSql, null, Table, tenant, day, "powerbi", "GetOrders", 5);
+        using (var scope = UsageRequestScope.Begin(new UsageIdentity(tenant, sid, new HashSet<Sid>()), DataSourceTransportFlags.Rest, caller, aggregator))
+        {
+            recorder.Record(new UsageFact(Table, "sales", UsageOutcome.Allow, 20, true, 0, Array.Empty<GrantRef>(), default), tenant, sid);
+            recorder.Record(new UsageFact(Table, "sales", UsageOutcome.Allow, 30, true, 0, Array.Empty<GrantRef>(), default), tenant, sid);
+            recorder.Record(new UsageFact(Table, "sales", UsageOutcome.DenyAccess, 0, false, 0, Array.Empty<GrantRef>(), default), tenant, sid);
+            recorder.Record(new UsageFact(Table, "sales", UsageOutcome.Allow, 0, false, 0, Array.Empty<GrantRef>(), default), tenant, sid);
+            recorder.Record(new UsageFact(Table, "sales", UsageOutcome.Allow, 0, false, 0, Array.Empty<GrantRef>(), default), tenant, sid);
+            scope.Complete(10, 100, 200);
+        }
 
-        var rows = await ConsumerAggregationStore.QueryConsumerAppDailyAsync(conn, null, Table, tenant, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
+        await repo.AccumulateAsync(aggregator.Swap());
+        await repo.RecordQueryNameAsync(Table, tenant, day, "powerbi", "GetOrders", 5);
+
+        var rows = await repo.QueryConsumerAppDailyAsync(Table, tenant, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
+        var actors = await repo.QueryDistinctActorCountsAsync(Table, tenant, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
 
         var row = rows.ShouldHaveSingleItem();
         row.Calls.ShouldBe(5);
         row.RowsReturned.ShouldBe(50);
         row.Rejections.Access.ShouldBe(1);
-        row.DistinctActors.ShouldBe(1);
+        actors["powerbi"].ShouldBe(1);
         row.QueryNames.ShouldBe(["GetOrders"]);
     }
 

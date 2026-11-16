@@ -73,7 +73,7 @@ public sealed class CatalogTierShapingTests
         summary.Columns.ShouldBeEmpty();
         summary.Description.ShouldBe("Short sum_t");
         summary.Tags.ShouldBe(["finance"]);
-        result.Single(r => r.TableName == "full_t").Columns.ShouldBe(["id", "secret_col"]);
+        result.Single(r => r.TableName == "full_t").ColumnNames.ShouldBe(["id", "secret_col"]);
         (await Catalog(Subject(), Opts(TenancyShape.Multi), tag: "FINANCE")).Select(r => r.TableName).ShouldBe(["sum_t"]);
     }
 

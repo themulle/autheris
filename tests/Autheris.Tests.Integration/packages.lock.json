@@ -38,6 +38,17 @@
           "System.Threading.RateLimiting": "9.0.18"
         }
       },
+      "Microsoft.Data.Sqlite": {
+        "type": "Direct",
+        "requested": "[10.0.14, )",
+        "resolved": "10.0.14",
+        "contentHash": "muyroan6rKrf0omZL8UF7Kw5uOGp/yBg1L/XWvkFN3WhKaNtK2IWqRZw93nIwVqjhTVDO0l4CEGhHIh+mb+sKg==",
+        "dependencies": {
+          "Microsoft.Data.Sqlite.Core": "10.0.14",
+          "SQLitePCLRaw.bundle_e_sqlite3": "2.1.13",
+          "SQLitePCLRaw.core": "2.1.13"
+        }
+      },
       "Microsoft.Extensions.TimeProvider.Testing": {
         "type": "Direct",
         "requested": "[10.11.0, )",
@@ -175,18 +186,6 @@
         "resolved": "2.7.0",
         "contentHash": "U+12df8UEWHgBi04YVf/Lgi2dy3SItlIYvHjjEVa/BngCQIzDCDRBk50DDByCfDvSbe5pRNFr3b7UrVK2kMcLw=="
       },
-      "Casbin.NET": {
-        "type": "Transitive",
-        "resolved": "2.21.3",
-        "contentHash": "K17VAOGfYm6JOGw/QDnahOblsj2gP8En6RQ35v/5BrBMvPBl/cXzIiSXXzYWG6Ju7OkM+CVjBu3wisQ7j/tctg==",
-        "dependencies": {
-          "CsvHelper": "32.0.3",
-          "DotNet.Glob": "3.1.3",
-          "DynamicExpresso.Core": "2.16.1",
-          "Microsoft.Extensions.Configuration.Ini": "9.0.0-preview.4.24266.19",
-          "Microsoft.Extensions.Logging": "9.0.0-preview.4.24266.19"
-        }
-      },
       "Castle.Core": {
         "type": "Transitive",
         "resolved": "5.1.1",
@@ -207,11 +206,6 @@
         "type": "Transitive",
         "resolved": "8.4.2",
         "contentHash": "2hmtrrU18x6NL3mbuAqwy0KpnoEEJOuK6sH5RKQfD/jHijn2pqvqBUC7WGy9dgNBL9BDA7eOC0kirsNPMp2f4Q=="
-      },
-      "CsvHelper": {
-        "type": "Transitive",
-        "resolved": "32.0.3",
-        "contentHash": "JNDkd4Wc2Tim5IuyL8Ai13RhzRvaHItseEvlJ2YRkx2SMBFrIsW8a5+/o4/O1jsb6mlviihR6Hfyn+nqY6CurA=="
       },
       "DiffEngine": {
         "type": "Transitive",
@@ -283,11 +277,6 @@
           "Docker.DotNet.Enhanced.Handler.Abstractions": "4.3.3"
         }
       },
-      "DotNet.Glob": {
-        "type": "Transitive",
-        "resolved": "3.1.3",
-        "contentHash": "hOfHw7MLJw/tbXaFwR1oiDb+dIXDp8URTxp5Pco42OOhiw77wrUNx6v6syNygHZbWwYdXQocL2Mo1l5FnfDVjg=="
-      },
       "DuckDB.NET.Bindings.Full": {
         "type": "Transitive",
         "resolved": "1.5.6.1",
@@ -301,11 +290,6 @@
           "Apache.Arrow": "23.0.0",
           "DuckDB.NET.Bindings.Full": "1.5.6.1"
         }
-      },
-      "DynamicExpresso.Core": {
-        "type": "Transitive",
-        "resolved": "2.16.1",
-        "contentHash": "RQxI6Ov/cfOcbTEQ8tLBJH5J7/W2uWvZjDCMTLAUZa91Z39Vj31wapSy6dyuEsw1FCZVqTipqoWw+t5qMi2ljA=="
       },
       "EmptyFiles": {
         "type": "Transitive",
@@ -882,16 +866,6 @@
         "resolved": "7.1.0",
         "contentHash": "rWunOb6Dby0lcI82PohARcRbF+4x4wNKxnKRSHXhuwZMu8/cCS68DCfhceq4bv1gUEfoL5dWXHYnfxVvLQUN+Q=="
       },
-      "Microsoft.Data.Sqlite": {
-        "type": "Transitive",
-        "resolved": "10.0.14",
-        "contentHash": "muyroan6rKrf0omZL8UF7Kw5uOGp/yBg1L/XWvkFN3WhKaNtK2IWqRZw93nIwVqjhTVDO0l4CEGhHIh+mb+sKg==",
-        "dependencies": {
-          "Microsoft.Data.Sqlite.Core": "10.0.14",
-          "SQLitePCLRaw.bundle_e_sqlite3": "2.1.13",
-          "SQLitePCLRaw.core": "2.1.13"
-        }
-      },
       "Microsoft.Data.Sqlite.Core": {
         "type": "Transitive",
         "resolved": "10.0.14",
@@ -979,17 +953,6 @@
           "Microsoft.Extensions.FileProviders.Abstractions": "10.0.14",
           "Microsoft.Extensions.FileProviders.Physical": "10.0.14",
           "Microsoft.Extensions.Primitives": "10.0.14"
-        }
-      },
-      "Microsoft.Extensions.Configuration.Ini": {
-        "type": "Transitive",
-        "resolved": "9.0.0-preview.4.24266.19",
-        "contentHash": "uRwBzwLMdjxytL70M+wtvFThfOuSgMLAQL+Fyide4ShcOLorT9NLBvCToFbB4zTU+RKEK02e8zGq+ejlhEoq5w==",
-        "dependencies": {
-          "Microsoft.Extensions.Configuration": "9.0.0-preview.4.24266.19",
-          "Microsoft.Extensions.Configuration.Abstractions": "9.0.0-preview.4.24266.19",
-          "Microsoft.Extensions.Configuration.FileExtensions": "9.0.0-preview.4.24266.19",
-          "Microsoft.Extensions.FileProviders.Abstractions": "9.0.0-preview.4.24266.19"
         }
       },
       "Microsoft.Extensions.Configuration.Json": {
@@ -1639,7 +1602,6 @@
           "Apache.Arrow": "[23.0.0, )",
           "Autheris.Domain": "[0.0.0-dev, )",
           "BitFaster.Caching": "[2.6.1, )",
-          "Casbin.NET": "[2.21.3, )",
           "DuckDB.NET.Data.Full": "[1.5.6.1, )",
           "FastSqlEngine": "[0.0.0-dev, )",
           "FluentValidation": "[12.2.0, )",
@@ -1693,7 +1655,6 @@
           "Autheris.Domain": "[0.0.0-dev, )",
           "MemoryPack": "[1.21.4, )",
           "Microsoft.Data.SqlClient": "[7.1.1, )",
-          "Microsoft.Data.Sqlite": "[10.0.14, )",
           "Microsoft.Extensions.Caching.Memory": "[10.0.14, )",
           "Npgsql": "[10.0.3, )",
           "OpenTelemetry": "[1.20.1, )",
@@ -1721,7 +1682,10 @@
       "autheris.tests.common": {
         "type": "Project",
         "dependencies": {
+          "Autheris.Api": "[0.0.0-dev, )",
           "Autheris.Application": "[0.0.0-dev, )",
+          "Microsoft.AspNetCore.Mvc.Testing": "[10.0.14, )",
+          "Microsoft.Data.Sqlite": "[10.0.14, )",
           "xunit.extensibility.core": "[2.9.3, )"
         }
       },

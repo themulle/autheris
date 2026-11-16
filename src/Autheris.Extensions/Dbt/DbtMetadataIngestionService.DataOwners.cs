@@ -12,7 +12,6 @@ using Autheris.Application.Governance;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Lineage;
 using Autheris.Application.Policy;
-using Autheris.Application.Sql.Catalog;
 using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -41,22 +40,62 @@ public sealed partial class DbtMetadataIngestionService
         ITableRelationRepository? relationRepository,
         VirtualFilterAdministrationService? virtualFilterAdmin,
         Autheris.Application.Governance.Interfaces.IDatasetTagImportService? tagImport,
-        Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator? syntheticRowGenerator,
+        Autheris.Application.Catalog.Discovery.IDiscoveryArtifactStore? artifactStore,
         IDbtTestTargetMap? testTargetMap,
         ILogger<DbtMetadataIngestionService> logger,
         IAuditLogRepository auditLog,
         IDataOwnerAssignmentRepository? ownerAssignments = null,
         IDataOwnerIdentityVerifier? ownerIdentityVerifier = null,
-        IPhysicalKeyCatalog? physicalKeys = null,
         IAuditWriter? auditWriter = null,
-        IDataOwnershipRepository? ownershipRepo = null)
+        IDataOwnershipRepository? ownershipRepo = null,
+        Autheris.Application.Catalog.ICatalogWriteScopeFactory? catalogWriteScopeFactory = null,
+        IClassificationRepository? classificationRepository = null,
+        Microsoft.Extensions.Options.IOptions<Autheris.Application.Catalog.Services.CatalogDiscoveryOptions>? discoveryOptions = null,
+        TimeProvider? timeProvider = null)
         : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, gatewayOptions, sqlEndpointLoader, relationRepository,
-            virtualFilterAdmin, tagImport, syntheticRowGenerator, testTargetMap, physicalKeys, auditWriter, logger)
+            virtualFilterAdmin, tagImport, artifactStore, testTargetMap, auditWriter, logger)
     {
         _auditLog = auditLog ?? throw new ArgumentNullException(nameof(auditLog));
         _ownerAssignments = ownerAssignments;
         _ownerIdentityVerifier = ownerIdentityVerifier;
         _ownershipRepo = ownershipRepo;
+        _catalogWriteScopes = catalogWriteScopeFactory;
+        _classificationRepository = classificationRepository;
+        _discoveryOptions = discoveryOptions;
+        if (timeProvider is not null)
+        {
+            _timeProvider = timeProvider;
+        }
+    }
+
+    public DbtMetadataIngestionService(
+        IDbtProposalRepository proposalRepository,
+        ITableMetadataRepository metadataRepository,
+        ILineageGraphStore lineageGraphStore,
+        IPolicyEpochRepository? epochRepository,
+        Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>? gatewayOptions,
+        Autheris.Application.Sql.Endpoints.Services.SqlEndpointLoader? sqlEndpointLoader,
+        ITableRelationRepository? relationRepository,
+        VirtualFilterAdministrationService? virtualFilterAdmin,
+        Autheris.Application.Governance.Interfaces.IDatasetTagImportService? tagImport,
+        Autheris.Application.Catalog.Discovery.IDiscoveryArtifactStore? artifactStore,
+        IDbtTestTargetMap? testTargetMap,
+        Autheris.Application.Audit.IAuditWriter? auditWriter,
+        ILogger<DbtMetadataIngestionService> logger)
+    {
+        _tagImport = tagImport;
+        _artifactStore = artifactStore;
+        _testTargetMap = testTargetMap;
+        _proposalRepository = proposalRepository ?? throw new ArgumentNullException(nameof(proposalRepository));
+        _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
+        _lineageGraphStore = lineageGraphStore ?? throw new ArgumentNullException(nameof(lineageGraphStore));
+        _epochRepository = epochRepository;
+        _gatewayOptions = gatewayOptions;
+        _sqlEndpointLoader = sqlEndpointLoader;
+        _relationRepository = relationRepository;
+        _virtualFilterAdmin = virtualFilterAdmin;
+        _auditWriter = auditWriter;
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     private const int MaxOwnerAssignmentsPerImport = 5000;

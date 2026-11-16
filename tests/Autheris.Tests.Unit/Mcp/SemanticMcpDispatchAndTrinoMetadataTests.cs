@@ -111,10 +111,7 @@ public sealed class SemanticMcpDispatchAndTrinoMetadataTests
         queryExecutor.ExecuteOperationAsync(Arg.Any<McpToolDefinition>(), Arg.Any<string>(), Arg.Any<McpSessionContext>(), Arg.Any<CancellationToken>())
             .Returns(ci => handler.ExecuteToolAsync(ci.Arg<McpToolDefinition>(), ci.Arg<string>(), ci.Arg<McpSessionContext>(), ci.Arg<CancellationToken>()));
 
-        var options = Options.Create(new GatewayOptions
-        {
-            Casbin = new CasbinOptions { Enabled = false }
-        });
+        var options = Options.Create(new GatewayOptions());
 
         var guardrail = new AiDataGuardrailService(
             new McpToolRegistry(),
@@ -256,6 +253,7 @@ public sealed class SemanticMcpDispatchAndTrinoMetadataTests
         var tableRepo = Substitute.For<ITableMetadataRepository>();
         tableRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
             .Returns(new IReadOnlyList<TableMetadata>[] { [visibleTable, hiddenTable] }[0]);
+        Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(tableRepo);
 
         var tenantId = new TenantId("tenant-a");
         var userSid = new Sid("S-1-5-21-200");

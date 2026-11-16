@@ -677,12 +677,12 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
     private static DocCategory ResolveCategoryFromPath(string relativePath)
     {
         var lower = relativePath.ToLowerInvariant();
-        if (lower.Contains("runbook")) return DocCategory.Runbook;
-        if (lower.Contains("architecture") || lower.Contains("arc42")) return DocCategory.Architecture;
-        if (lower.Contains("adr")) return DocCategory.Adr;
-        if (lower.Contains("error")) return DocCategory.ErrorCode;
-        if (lower.Contains("api") || lower.Contains("openapi")) return DocCategory.ApiEndpoint;
-        if (lower.Contains("config")) return DocCategory.Configuration;
+        if (lower.Contains("runbook", StringComparison.Ordinal)) return DocCategory.Runbook;
+        if (lower.Contains("architecture", StringComparison.Ordinal) || lower.Contains("arc42", StringComparison.Ordinal)) return DocCategory.Architecture;
+        if (lower.Contains("adr", StringComparison.Ordinal)) return DocCategory.Adr;
+        if (lower.Contains("error", StringComparison.Ordinal)) return DocCategory.ErrorCode;
+        if (lower.Contains("api", StringComparison.Ordinal) || lower.Contains("openapi", StringComparison.Ordinal)) return DocCategory.ApiEndpoint;
+        if (lower.Contains("config", StringComparison.Ordinal)) return DocCategory.Configuration;
         return DocCategory.Guide;
     }
 
@@ -705,6 +705,6 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
             return string.Empty;
         }
 
-        return input.Replace("\r", "_").Replace("\n", "_");
+        return input.Replace("\r", "_", StringComparison.Ordinal).Replace("\n", "_", StringComparison.Ordinal);
     }
 }

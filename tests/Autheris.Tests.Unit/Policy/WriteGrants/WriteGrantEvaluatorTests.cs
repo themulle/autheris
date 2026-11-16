@@ -671,14 +671,11 @@ public sealed class WriteGrantEvaluatorTests
         public Task<Consent?> GetConsentByIdAsync(Guid consentId, CancellationToken ct = default) =>
             Task.FromResult(_consents.FirstOrDefault(c => c.Id == consentId));
 
-        public Task RevokeConsentAsync(Guid consentId, Sid revokedBySid, string reason, CancellationToken ct = default) =>
+        public Task RevokeConsentAsync(Guid consentId, Sid revokedBySid, string reason, Autheris.Domain.Security.ConsentRevocationAuthority authority, CancellationToken ct = default) =>
             Task.CompletedTask;
 
         public Task<IReadOnlyList<Consent>> GetExpiringConsentsAsync(DateTimeOffset threshold, int maxResults = 1000, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<Consent>>([]);
-
-        public Task ExtendConsentExpiryAsync(Guid consentId, DateTimeOffset newValidTo, CancellationToken ct = default) =>
-            Task.CompletedTask;
 
         public Task<IReadOnlyList<Consent>> GetActiveConsentsByConsentRequestIdAsync(Guid consentRequestId, DateTimeOffset atTime, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<Consent>>([]);
@@ -695,6 +692,7 @@ public sealed class WriteGrantEvaluatorTests
             IReadOnlyList<Consent> create,
             Sid actor,
             string reason,
+            Autheris.Domain.Security.ConsentRevocationAuthority authority,
             IReadOnlyList<AuditLogEntry>? auditEntries = null,
             CancellationToken ct = default) =>
             throw new NotImplementedException();

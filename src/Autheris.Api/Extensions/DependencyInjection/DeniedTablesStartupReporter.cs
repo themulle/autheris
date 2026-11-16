@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Catalog;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy.Lint;
 using Autheris.Application.Security;
@@ -21,7 +22,7 @@ using Microsoft.Extensions.Options;
 /// 26 (X1): at startup, lists the tables that the governed SQL pipeline denies (unparsable stored row predicates, dialects that
 /// WebSQL does not admit) so that an operator sees a deny at scale before the first request. It reads the access profiles of the configured
 /// tenants and the virtual filters; it logs table and policy ids and stable codes only. It runs as background work (the host never waits for the store). A store that cannot be read is a warning, never a
-/// failed start (the request path stays fail closed on its own). Correlated consent filters (Casbin) are not part of this report.
+/// failed start (the request path stays fail closed on its own). Correlated consent filters are not part of this report.
 /// </summary>
 public sealed class DeniedTablesStartupReporter(
     ITableMetadataRepository tables,
@@ -37,7 +38,11 @@ public sealed class DeniedTablesStartupReporter(
         await Task.Yield();
         try
         {
-            var catalog = (await tables.GetAllTablesAsync(stoppingToken).ConfigureAwait(false)).Where(static t => t.Table.IsActive).ToList();
+            var catalog = await CatalogTablePageReader.ReadAllAsync(
+                tables,
+                new CatalogTableQuery(IncludeInactive: false),
+                static t => t.Table.IsActive,
+                ct: stoppingToken).ConfigureAwait(false);
 
             var accessProfiles = new List<AccessProfile>();
             if (profiles is not null)
@@ -58,7 +63,7 @@ public sealed class DeniedTablesStartupReporter(
                 ? []
                 : (await virtualFilters.LoadSnapshotAsync(stoppingToken).ConfigureAwait(false)).Filters.ToList();
 
-            GatewayStartupValidator.ListDeniedTables(new PolicyLintInput(catalog, accessProfiles, filters, []), logger, options.Value.DataSources);
+            GatewayStartupValidator.ListDeniedTables(new PolicyLintInput(catalog, accessProfiles, filters), logger, options.Value.DataSources);
         }
         catch (OperationCanceledException)
         {

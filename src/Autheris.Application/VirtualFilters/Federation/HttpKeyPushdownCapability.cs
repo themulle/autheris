@@ -143,8 +143,8 @@ public readonly record struct HttpKeyPushdownCapability(HttpKeyPushdownKind Kind
 
         return Kind switch
         {
-            HttpKeyPushdownKind.QueryParameterList => !value.Contains(','),
-            HttpKeyPushdownKind.PathLookup => !value.Contains('/') && !value.Contains('\\') && !value.Contains("..", StringComparison.Ordinal),
+            HttpKeyPushdownKind.QueryParameterList => !value.Contains(',', StringComparison.Ordinal),
+            HttpKeyPushdownKind.PathLookup => !value.Contains('/', StringComparison.Ordinal) && !value.Contains('\\', StringComparison.Ordinal) && !value.Contains("..", StringComparison.Ordinal),
             HttpKeyPushdownKind.JsonBodyArray => true,
             _ => false
         };

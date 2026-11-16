@@ -9,37 +9,16 @@ namespace Autheris.Application.Services;
 
 public sealed class RlsFilterGenerator : IRlsFilterGenerator
 {
-    private readonly RowFilterSubqueryStrategy _defaultStrategy;
-
     public static readonly RlsFilterGenerator Instance = new();
 
     public RlsFilterGenerator(IOptions<GatewayOptions>? options = null)
     {
-        _defaultStrategy = options?.Value.RowFilters?.SubqueryStrategy ?? RowFilterSubqueryStrategy.Exists;
-    }
-
-    public string BuildCorrelatedSubquery(
-        ConsentRowFilter filter,
-        DatabaseDialect dialect = DatabaseDialect.SqlServer,
-        RowFilterSubqueryStrategy? strategy = null,
-        bool isDeny = false)
-    {
-        return AdvancedRlsFilterGenerator.BuildCorrelatedSubquery(filter, dialect, strategy ?? _defaultStrategy, isDeny);
+        _ = options;
     }
 
     public string BuildCrossSourceSetFilter(ConsentRowFilter filter, int maxBatchSize = 500, DatabaseDialect dialect = DatabaseDialect.SqlServer)
     {
         return AdvancedRlsFilterGenerator.BuildCrossSourceSetFilter(filter, maxBatchSize, dialect);
-    }
-
-    public PolicyPredicate BuildCorrelatedPredicate(ConsentRowFilter filter, string parameterPrefix = "__gql_rls_")
-    {
-        return AdvancedRlsFilterGenerator.BuildCorrelatedPredicate(filter, parameterPrefix);
-    }
-
-    public PolicyPredicate BuildCorrelatedPredicate(ConsentRowFilter filter, string parameterPrefix, Autheris.Application.Sql.Policy.RowFilterKeySets.CorrelatedFilterSource source)
-    {
-        return AdvancedRlsFilterGenerator.BuildCorrelatedPredicate(filter, parameterPrefix, source);
     }
 
     public PolicyPredicate BuildCrossSourceSetPredicate(ConsentRowFilter filter, DatabaseDialect dialect, string parameterPrefix = "__gql_rls_")

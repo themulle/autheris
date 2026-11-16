@@ -3,31 +3,36 @@ namespace Autheris.Tests.Integration;
 using System.Net;
 using System.Net.Http;
 using System.Threading.Tasks;
+using Autheris.Tests.Common.Hosting;
 using Autheris.Tests.Integration.Governance;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Shouldly;
 using Xunit;
 
-public sealed class LakehouseModuleAbsentSecurityTests : IClassFixture<WebApplicationFactory<Program>>
+[Trait("Category", "Security")]
+public sealed class LakehouseModuleAbsentSecurityTests : IClassFixture<LakehouseModuleAbsentSecurityTests.HostFixture>
 {
     private readonly WebApplicationFactory<Program> _factory;
 
-    public LakehouseModuleAbsentSecurityTests(WebApplicationFactory<Program> factory) => _factory = factory;
+    public LakehouseModuleAbsentSecurityTests(HostFixture factory) => _factory = factory;
 
-    [Fact]
-    [Trait("Category", "Security")]
-    public async Task Iceberg_routes_404_when_absent()
+    public sealed class HostFixture : IntegrationHost
     {
-        await using var host = _factory.WithWebHostBuilder(builder =>
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseEnvironment("Development");
             builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
             GovernanceTestDatabase.Apply(builder, "LakehouseAbsent");
             builder.UseSetting("Gateway:Tenancy:DefaultTenantId", "tenant-1");
-        });
+        }
+    }
 
-        using var client = host.CreateClient();
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Iceberg_routes_404_when_absent()
+    {
+        using var client = _factory.CreateClient();
         var routes = new (HttpMethod Method, string Path)[]
         {
             (HttpMethod.Get, "/modules/lakehouse/iceberg/v1/tenant-1/namespaces"),

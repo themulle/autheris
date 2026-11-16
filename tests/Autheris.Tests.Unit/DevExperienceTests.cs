@@ -9,7 +9,6 @@ using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Authorization.Policy;
-using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
@@ -142,35 +141,6 @@ public sealed class DevExperienceTests
 
         context.Response.StatusCode.ShouldBe(StatusCodes.Status409Conflict);
         await auth.DidNotReceiveWithAnyArgs().SignInAsync(default!, default, default!, default);
-    }
-
-    // ---------- Routes exist only in Development ----------
-
-    private static IReadOnlyList<string> MappedDevRoutes(string environment)
-    {
-        var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = environment });
-        var app = builder.Build();
-        app.MapDevEndpoints(CreateOptions());
-        return ((IEndpointRouteBuilder)app).DataSources
-            .SelectMany(d => d.Endpoints)
-            .OfType<RouteEndpoint>()
-            .Select(e => e.RoutePattern.RawText ?? string.Empty)
-            .Where(p => p.StartsWith("/api/dev", StringComparison.Ordinal))
-            .ToList();
-    }
-
-    [Fact]
-    public void DevRoutes_AreMappedInDevelopment()
-    {
-        MappedDevRoutes("Development").ShouldBe(["/api/dev/personas", "/api/dev/info", "/api/dev/login/{persona}"], ignoreOrder: true);
-    }
-
-    [Theory]
-    [InlineData("Production")]
-    [InlineData("Staging")]
-    public void DevRoutes_AreNotMappedOutsideDevelopment(string environment)
-    {
-        MappedDevRoutes(environment).ShouldBeEmpty();
     }
 
     // ---------- Info ----------

@@ -8,6 +8,7 @@ namespace Autheris.Tests.Architecture;
 /// Robin-100 rework v2 (WP-V2a), binding conditions SEC-R100-11 and SEC-R100-15 that can be checked on the test sources.
 /// The scanners fail closed: a missing file, method or dictionary is a failure, never a vacuous pass.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed partial class Robin100V2aSecurityTests
 {
     private const string RobinDir = "tests/Autheris.Tests.Parity/Robin";

@@ -73,14 +73,19 @@ public sealed class ConsentAuditAnchorAckTests : IDisposable
     {
         await EnsureTableAsync();
         var consent = await _repo.CreateConsentAsync(UserConsent("S-1-5-21-Alice"));
-        // PERS-04: the extend needs its own active consent; the revoke below leaves Alice's consent revoked (not extendable).
-        var extendable = await _repo.CreateConsentAsync(UserConsent("S-1-5-21-Dave"));
+
+        var adminAuth = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(new System.Security.Claims.ClaimsPrincipal(
+            new System.Security.Claims.ClaimsIdentity(
+            [
+                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, Admin.Value),
+                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Role, "GovernanceAdmin"),
+                new System.Security.Claims.Claim("tenant_id", Tenant.Value)
+            ], "test")));
 
         _anchors.FailSave = true;
         await Should.ThrowAsync<AuditUnavailableException>(() => _repo.CreateConsentAsync(UserConsent("S-1-5-21-Bob")));
-        await Should.ThrowAsync<AuditUnavailableException>(() => _repo.RevokeConsentAsync(consent.Id, Admin, "test"));
-        await Should.ThrowAsync<AuditUnavailableException>(() => _repo.ReplaceConsentsAsync([], [UserConsent("S-1-5-21-Carl")], Admin, "apply"));
-        await Should.ThrowAsync<AuditUnavailableException>(() => _repo.ExtendConsentExpiryAsync(extendable.Id, DateTimeOffset.UtcNow.AddDays(60)));
+        await Should.ThrowAsync<AuditUnavailableException>(() => _repo.RevokeConsentAsync(consent.Id, Admin, "test", adminAuth));
+        await Should.ThrowAsync<AuditUnavailableException>(() => _repo.ReplaceConsentsAsync([], [UserConsent("S-1-5-21-Carl")], Admin, "apply", adminAuth));
 
         // the chain stays linear and re-anchors once the store is back
         _anchors.FailSave = false;
@@ -116,11 +121,19 @@ public sealed class ConsentAuditAnchorAckTests : IDisposable
             ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(5), CreatedBySid = Admin
         };
 
-        await Should.ThrowAsync<Exception>(() => _repo.ReplaceConsentsAsync([old.Id], [clash], Admin, "apply", [Applied("faulted")]));
+        var adminAuth = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(new System.Security.Claims.ClaimsPrincipal(
+            new System.Security.Claims.ClaimsIdentity(
+            [
+                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, Admin.Value),
+                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Role, "GovernanceAdmin"),
+                new System.Security.Claims.Claim("tenant_id", Tenant.Value)
+            ], "test")));
+
+        await Should.ThrowAsync<Exception>(() => _repo.ReplaceConsentsAsync([old.Id], [clash], Admin, "apply", adminAuth, [Applied("faulted")]));
 
         (await _repo.GetAuditLogEntriesAsync(200)).ShouldNotContain(e => e.TraceId == "faulted");
         // L3: the rolled-back transaction restored the in-memory chain state, so the chain verifies and the next writes link correctly
-        await _repo.ReplaceConsentsAsync([old.Id], [duplicate], Admin, "apply", [Applied("committed")]);
+        await _repo.ReplaceConsentsAsync([old.Id], [duplicate], Admin, "apply", adminAuth, [Applied("committed")]);
         (await _repo.GetAuditLogEntriesAsync(200)).ShouldContain(e => e.TraceId == "committed" && e.EventType == "GITOPS_CONSENT_APPLY");
         (await _repo.VerifyAuditHashChainAsync()).ShouldBeTrue();
     }

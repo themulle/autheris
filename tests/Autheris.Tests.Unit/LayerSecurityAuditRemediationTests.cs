@@ -29,6 +29,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class LayerSecurityAuditRemediationTests
 {
     [Fact]
@@ -73,86 +74,6 @@ public sealed class LayerSecurityAuditRemediationTests
 
         var valid = new TableIdentifier("corp", "sales", "invoices_2026");
         valid.Domain.ShouldBe("corp");
-    }
-
-    [Fact]
-    public async Task Application_Casbin_EnforcesSubRuleOnRlsFilters()
-    {
-        // CRIT-01: sub_rule must be evaluated during RLS filter collection
-        var tenant = new TenantId("tenant-corp");
-        var table = new TableIdentifier("sales", "public", "orders");
-        var service = new CasbinEnforcementService();
-
-        // Rule with sub_rule checking department == 'HR'
-        service.AddPolicy(
-            tenant,
-            "role:analyst",
-            table.ToString(),
-            "read",
-            "r.ctx.Department == 'HR'",
-            "allow",
-            rlsFilter: "dept = 'HR'");
-
-        // Context 1: User in Finance department -> subRule does NOT match
-        var financeCtx = new SecurityEvaluationContext(
-            UserSid: new Sid("S-1-5-21-FINANCE"),
-            GroupSids: [new Sid("role:analyst")],
-            Tenant: tenant,
-            TargetTable: table,
-            RequestedColumns: ["id", "amount"],
-            ClientIp: System.Net.IPAddress.Loopback,
-            Timestamp: DateTimeOffset.UtcNow,
-            PurposeId: null,
-            Attributes: new Dictionary<string, object?> { ["department"] = "Finance" });
-
-        var financeDecision = await service.EvaluatePolicyAsync(financeCtx);
-        financeDecision.IsAllowed.ShouldBeFalse();
-        financeDecision.CombinedRowFilterSql.ShouldBeNull();
-
-        // Context 2: User in HR department -> subRule DOES match
-        var hrCtx = new SecurityEvaluationContext(
-            UserSid: new Sid("S-1-5-21-HR"),
-            GroupSids: [new Sid("role:analyst")],
-            Tenant: tenant,
-            TargetTable: table,
-            RequestedColumns: ["id", "amount"],
-            ClientIp: System.Net.IPAddress.Loopback,
-            Timestamp: DateTimeOffset.UtcNow,
-            PurposeId: null,
-            Attributes: new Dictionary<string, object?> { ["department"] = "HR" });
-
-        var hrDecision = await service.EvaluatePolicyAsync(hrCtx);
-        hrDecision.IsAllowed.ShouldBeTrue();
-        hrDecision.CombinedRowFilterSql.ShouldNotBeNull();
-        hrDecision.CombinedRowFilterSql.ShouldContain("dept = 'HR'");
-    }
-
-    [Fact]
-    public async Task Application_Casbin_DenyTakesPrecedenceOverGroupAllow()
-    {
-        // FINDING-06: Explicit user deny must not be bypassed by group fallback
-        var tenant = new TenantId("tenant-corp");
-        var table = new TableIdentifier("sales", "public", "orders");
-        var service = new CasbinEnforcementService();
-
-        // Group has allow
-        service.AddPolicy(tenant, "group:all_users", table.ToString(), "read", "true", "allow");
-
-        // Specific user has deny
-        service.AddPolicy(tenant, "S-1-5-21-BLOCKED-USER", table.ToString(), "read", "true", "deny");
-
-        var blockedCtx = new SecurityEvaluationContext(
-            UserSid: new Sid("S-1-5-21-BLOCKED-USER"),
-            GroupSids: [new Sid("group:all_users")],
-            Tenant: tenant,
-            TargetTable: table,
-            RequestedColumns: ["id"],
-            ClientIp: System.Net.IPAddress.Loopback,
-            Timestamp: DateTimeOffset.UtcNow,
-            PurposeId: null);
-
-        var decision = await service.EvaluatePolicyAsync(blockedCtx);
-        decision.IsAllowed.ShouldBeFalse();
     }
 
     [Fact]
@@ -233,7 +154,7 @@ public sealed class LayerSecurityAuditRemediationTests
     }
 
     [Fact]
-    public void Application_SubgraphResultMasker_MasksAliasesAndNumbers()
+    public async Task Application_SubgraphResultMasker_MasksAliasesAndNumbers()
     {
         // CRIT-04 & SEC-APP-04: Masking must work with GraphQL aliases and non-string types
         var maskingProviderMock = Substitute.For<IColumnMaskingProvider>();
@@ -261,7 +182,7 @@ public sealed class LayerSecurityAuditRemediationTests
         };
 
         var principal = new ClaimsPrincipal(new ClaimsIdentity([new Claim("role", "User")], "BasicAuth"));
-        var masked = masker.MaskResultData(payload, principal, aliasMap) as Dictionary<string, object?>;
+        var masked = await masker.MaskResultDataAsync(payload, principal, aliasMap) as Dictionary<string, object?>;
 
         masked.ShouldNotBeNull();
         masked["customerName"].ShouldBe("Alice");

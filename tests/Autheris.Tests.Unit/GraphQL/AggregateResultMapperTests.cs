@@ -275,7 +275,7 @@ public sealed class AggregateResultMapperTests
     public void Map_CarriesCountersAndFlags_AndNeverTheSuppressedRowCount()
     {
         var meta = new AggregationMetadata(5, SmallGroupStrategy.Suppress, Suppressed: true, SuppressedGroupsCount: 3, SuppressedRowsCount: 7,
-            MergedIntoOther: false, Truncated: true, NoiseApplied: true);
+            MergedIntoOther: false, Truncated: true);
 
         var dto = AggregateResultMapper.Map(Result([], 12, meta), TableOf(Col("id", CatalogFieldType.Int)), [], [Agg("count", AggregateFunction.Count, null)]);
 
@@ -283,7 +283,6 @@ public sealed class AggregateResultMapperTests
         dto.SuppressedGroupsCount.ShouldBe(3);
         dto.MinimumGroupSize.ShouldBe(5);
         dto.Truncated.ShouldBeTrue();
-        dto.NoiseApplied.ShouldBeTrue();
         dto.Count.ShouldBe(12L);
         typeof(AggregateResultDto).GetProperties().Select(p => p.Name).ShouldNotContain("SuppressedRowsCount");
     }

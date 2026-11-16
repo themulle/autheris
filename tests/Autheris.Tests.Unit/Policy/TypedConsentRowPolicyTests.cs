@@ -24,7 +24,7 @@ public sealed class TypedConsentRowPolicyTests
     private static readonly Sid User = new("S-1");
     private static readonly TableIdentifier Orders = new("d", "main", "orders");
 
-    private static TableMetadata Meta(string sourceType = "SQLite", DataSourceType type = DataSourceType.Sql) => new()
+    private static TableMetadata Meta(string sourceType = "PostgreSql", DataSourceType type = DataSourceType.Sql) => new()
     {
         Identifier = Orders,
         Table = new Table { SourceName = "ds", SchemaName = "main", TableName = "orders", SourceType = sourceType, DataSourceType = type },
@@ -174,7 +174,7 @@ public sealed class TypedConsentRowPolicyTests
                     PolicyParameterNamer.Column("id"), TrinoSqlEngine.Ast.Nodes.BinaryOperator.Equal,
                     new TrinoSqlEngine.Ast.Nodes.PolicyParameterExpression("__gql_vf_0_0", TrinoSqlEngine.Ast.Emit.SqlParameterType.Int64)),
                 new Dictionary<string, TrinoSqlEngine.Governance.PolicyValue> { ["__gql_vf_0_0"] = new(7L, TrinoSqlEngine.Ast.Emit.SqlParameterType.Int64) }),
-            DatabaseDialect.Sqlite);
+            DatabaseDialect.PostgreSql);
         vf.ResolveAsync(Arg.Any<MandatoryFilterQuery>(), Arg.Any<CancellationToken>()).Returns(
             new MandatoryFilterOutcome(false, null, vfPolicy.Project().Sql, ["vf"]) { TypedPredicate = ((PolicyPredicateRowPolicy)vfPolicy).Predicate });
         var policy = new TableAccessPolicy(Repo(Consent(ConsentEffect.Allow, Region("EU"))), new ConsentResolutionService(),
@@ -189,26 +189,22 @@ public sealed class TypedConsentRowPolicyTests
     }
 
     [Fact]
-    public void Recipe_RoundTripsThroughJson_IncludingCorrelatedFilters()
+    public void Recipe_RoundTripsThroughJson_IncludingCrossSourceFilters()
     {
-        var correlated = new ConsentRowFilter
+        var crossSource = new ConsentRowFilter
         {
-            FilterType = RowFilterType.SubqueryCorrelated,
-            DependentTable = new TableIdentifier("d", "main", "grants"),
-            DependentTableAlias = "g",
-            ForeignKeyColumn = "order_id",
-            PrimaryKeyColumn = "id",
-            SubqueryFilterPredicateJson = "{\"user\":\"x\"}",
-            AdditionalHops = [new SubqueryJoinHop { Table = new TableIdentifier("d", "main", "teams"), TableAlias = "t", LeftJoinColumn = "a", RightJoinColumn = "b" }]
+            FilterType = RowFilterType.CrossSourceSetFilter,
+            ColumnName = "customer_id",
+            ValueJson = "[1, 2]"
         };
-        var recipe = new ConsentRowFilterRecipe([[Region("EU"), correlated], []], [[Region("DE", 1)]]);
+        var recipe = new ConsentRowFilterRecipe([[Region("EU"), crossSource], []], [[Region("DE", 1)]]);
 
         ConsentRowFilterRecipe.TryParse(recipe.ToJson(), out var parsed).ShouldBeTrue();
 
         parsed!.Allow.Count.ShouldBe(2);
         parsed.Allow[0][0].ValueJson.ShouldBe("\"EU\"");
-        parsed.Allow[0][1].DependentTable!.Value.TableName.ShouldBe("grants");
-        parsed.Allow[0][1].AdditionalHops![0].Table.TableName.ShouldBe("teams");
+        parsed.Allow[0][1].FilterType.ShouldBe(RowFilterType.CrossSourceSetFilter);
+        parsed.Allow[0][1].ColumnName.ShouldBe("customer_id");
         parsed.Allow[1].ShouldBeEmpty();
         parsed.Deny[0][0].FilterGroup.ShouldBe(1);
     }

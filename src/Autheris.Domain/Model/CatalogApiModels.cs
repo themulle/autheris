@@ -25,7 +25,9 @@ public sealed record CatalogColumnDetail(
     bool IsPrimaryKey,
     bool IsPiiIndicator,
     string? DisplayName = null,
-    string? Description = null);
+    string? Description = null,
+    IReadOnlyList<DiscoveryColumnClassification>? Classifications = null,
+    IReadOnlyList<string>? ClearRequestable = null);
 
 public sealed record CatalogDatasetDetail(
     string DatasetId,

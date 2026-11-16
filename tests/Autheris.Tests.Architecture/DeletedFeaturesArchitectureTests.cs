@@ -27,6 +27,7 @@ public sealed class DeletedFeaturesArchitectureTests
     [InlineData("Autheris.Extensions.Backstage")]
     [InlineData("Autheris.Infrastructure.Itsm")]
     [InlineData("Autheris.Application.Integrations.Backstage")]
+    [InlineData("Autheris.Application.FinOps")]
     public void Deleted_feature_namespaces_have_no_types(string deletedNamespace)
     {
         var typesInNamespace = ProductionAssemblies
@@ -45,6 +46,7 @@ public sealed class DeletedFeaturesArchitectureTests
     [InlineData("Autheris.Extensions.Backstage", "src/Autheris.Extensions/Backstage")]
     [InlineData("Autheris.Infrastructure.Itsm", "src/Autheris.Infrastructure/Itsm")]
     [InlineData("Autheris.Application.Integrations.Backstage", "src/Autheris.Application/Integrations/Backstage")]
+    [InlineData("Autheris.Application.FinOps", "src/Autheris.Application/FinOps")]
     public void Deleted_feature_directories_do_not_exist(string featureName, string relativeDirectory)
     {
         var fullPath = Path.Combine(RepositoryScan.RepoRoot, relativeDirectory);
@@ -62,6 +64,13 @@ public sealed class DeletedFeaturesArchitectureTests
     [InlineData("IDataCatalogClientFactory")]
     [InlineData("IDataCatalogWebhookHandler")]
     [InlineData("JustificationAndBreakGlassInterceptor")]
+    [InlineData("FinOpsEndpoints")]
+    [InlineData("FinOpsBudgetMiddleware")]
+    [InlineData("IFinOpsAccountingService")]
+    [InlineData("FocusCostAccountingService")]
+    [InlineData("FinOpsOptions")]
+    [InlineData("FocusCostRecord")]
+    [InlineData("BudgetStatus")]
     public void Deleted_Types_Do_Not_Exist_In_Production_Assemblies(string typeName)
     {
         foreach (var assembly in ProductionAssemblies)
@@ -70,6 +79,16 @@ public sealed class DeletedFeaturesArchitectureTests
             found.ShouldBeFalse($"Type {typeName} was found in {assembly.GetName().Name}, but should have been deleted.");
         }
     }
+
+    [Theory]
+    [InlineData("CasbinEnforcementService")]
+    [InlineData("IPolicyEnforcementService")]
+    [InlineData("CasbinModelContract")]
+    [InlineData("CasbinDecisionCache")]
+    [InlineData("CasbinOptions")]
+    [InlineData("CasbinDecisionCacheOptions")]
+    public void Deleted_Casbin_Types_Do_Not_Exist_In_Production_Assemblies(string typeName) =>
+        Deleted_Types_Do_Not_Exist_In_Production_Assemblies(typeName);
 
     [Theory]
     [InlineData("Purview")]
@@ -136,5 +155,71 @@ public sealed class DeletedFeaturesArchitectureTests
             }
         }
         srcViolations.ShouldBeEmpty($"Found ITSM references in cleaned source files: {string.Join(", ", srcViolations)}");
+    }
+
+    [Fact]
+    public void No_differential_privacy_members()
+    {
+        typeof(Autheris.Application.Analytics.AggregationMetadata).GetProperty("NoiseApplied").ShouldBeNull();
+        typeof(Autheris.Application.Analytics.AggregationMetadata).GetProperty("EpsilonConsumed").ShouldBeNull();
+        typeof(Autheris.Application.Analytics.AggregationMetadata).GetProperty("RemainingEpsilon").ShouldBeNull();
+        typeof(Autheris.Application.Analytics.AggregationResult).GetProperty("NoiseApplied").ShouldBeNull();
+
+        var appAssembly = typeof(Autheris.Application.Analytics.GovernedAggregationService).Assembly;
+        appAssembly.GetType("Autheris.Application.Analytics.NoisyCacheKey").ShouldBeNull();
+
+        typeof(Autheris.Api.Errors.ApiErrorCodes).GetField("PrivacyBudgetExhausted").ShouldBeNull();
+
+        var filterText = RepositoryScan.ReadText("src/Autheris.Api/Middleware/ErrorSanitizingFilter.cs");
+        filterText.ShouldNotContain("PRIVACY_BUDGET_EXHAUSTED");
+
+        var graphQlAssembly = typeof(Autheris.GraphQL.Types.DataCatalogSyncPayload).Assembly;
+        foreach (var typeName in new[]
+        {
+            "Autheris.GraphQL.Catalog.AutherisTypedAggregationResult",
+            "Autheris.GraphQL.Catalog.AggregateResultDto",
+            "Autheris.GraphQL.Catalog.MetricResultDto"
+        })
+        {
+            var type = graphQlAssembly.GetType(typeName);
+            type.ShouldNotBeNull();
+            type!.GetProperty("NoiseApplied").ShouldBeNull();
+        }
+    }
+
+    [Fact]
+    public void No_physical_key_chain_types_or_refresh_routes()
+    {
+        foreach (var typeName in new[]
+        {
+            "IPhysicalKeyRefreshService",
+            "PhysicalKeyRefreshService",
+            "IPhysicalIndexRepository",
+            "IKeyIndexMetadataReader",
+            "IPhysicalKeyCatalog",
+            "PhysicalNonUniqueIndexResolver",
+            "CatalogPhysicalIndexStore",
+            "PhysicalKeyDirectionReconciler",
+            "PhysicalIndexSync",
+            "PostgreSqlKeyIndexMetadataReader",
+            "SqlServerKeyIndexMetadataReader",
+            "PhysicalIndexDefinition"
+        })
+        {
+            Deleted_Types_Do_Not_Exist_In_Production_Assemblies(typeName);
+        }
+
+        typeof(Autheris.Domain.Model.TableMetadata).GetProperty("PhysicalIndexes").ShouldBeNull();
+
+        var endpointsText = RepositoryScan.ReadText("src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs");
+        endpointsText.ShouldNotContain("refresh-physical-keys");
+    }
+
+    [Fact]
+    public void No_finops_members_remain()
+    {
+        typeof(Autheris.Domain.Options.GatewayOptions).GetProperty("FinOps").ShouldBeNull();
+        typeof(Autheris.Domain.Options.GatewaySections).GetField("FinOps").ShouldBeNull();
+        typeof(Autheris.Api.Errors.ApiErrorCodes).GetField("FinOpsBudgetExceeded").ShouldBeNull();
     }
 }

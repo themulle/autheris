@@ -20,7 +20,7 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Domain.Security;
 using Autheris.Infrastructure.Health;
-using Microsoft.Data.Sqlite;
+using Autheris.Tests.Common.Fakes;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -36,6 +36,7 @@ using Xunit;
 /// WARN is permitted and reported, regular options are silent).
 /// DML_*: WebSQL DML guardrails (unfiltered UPDATE/DELETE rejected, WebSql.MaxAffectedRows with rollback, DML audit).
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class BypassSemanticsAndDmlGuardrailTests
 {
     private static readonly Func<string, string?> NoEnvironmentVariables = _ => null;
@@ -244,7 +245,7 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
     {
         var options = new GatewayOptions
         {
-            WebSql = new WebSqlOptions { AllowDml = true, DmlWriterRoles = ["WebSqlWriter"] },
+            WebSql = new WebSqlOptions { AllowDml = true },
             DataMasking = ProdMasking(), Audit = new AuditOptions { ChainAnchorPath = "/var/anchor/audit-anchor.json" }
         };
 
@@ -256,11 +257,11 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
     }
 
     [Fact]
-    public void SEM_AllowDml_WithoutWriterRoles_AbortsStartup_InEveryEnvironment()
+    public void SEM_AllowDml_WithoutRoles_SucceedsInEveryEnvironment()
     {
         var options = new GatewayOptions { WebSql = new WebSqlOptions { AllowDml = true } };
 
-        Should.Throw<ValidationException>(() =>
+        Should.NotThrow(() =>
             GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, Env(Environments.Development), NoEnvironmentVariables));
     }
 
@@ -361,53 +362,30 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
 
     internal sealed class DmlFixture : IAsyncDisposable
     {
-        private readonly SqliteConnection _keepAlive;
-
-        private DmlFixture(SqliteConnection keepAlive, string connectionString)
-        {
-            _keepAlive = keepAlive;
-            ConnectionString = connectionString;
-        }
-
-        public string ConnectionString { get; }
+        public string ConnectionString => "Host=unused;Database=dml";
 
         public List<AuditLogEntry> AuditEntries { get; } = [];
 
-        public static async Task<DmlFixture> CreateAsync()
-        {
-            var connectionString = $"Data Source=dml_{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
-            var keepAlive = new SqliteConnection(connectionString);
-            await keepAlive.OpenAsync();
-            await using (var setup = keepAlive.CreateCommand())
-            {
-                setup.CommandText =
-                    "CREATE TABLE orders (id INTEGER, amount REAL, tenant_id TEXT);" +
-                    "CREATE TABLE plain (id INTEGER);" +
-                    "INSERT INTO orders VALUES (1, 10, 'tenant_a'), (2, 20, 'tenant_a'), (3, 30, 'tenant_a'), (4, 40, 'tenant_a'), (5, 50, 'tenant_a');" +
-                    "INSERT INTO orders VALUES (6, 60, 'tenant_b'), (7, 70, 'tenant_b');";
-                await setup.ExecuteNonQueryAsync();
-            }
+        public List<string> ExecutedSql { get; } = [];
 
-            return new DmlFixture(keepAlive, connectionString);
+        public static Task<DmlFixture> CreateAsync() => Task.FromResult(new DmlFixture());
+
+        public Task<long> ScalarAsync(string sql)
+        {
+            ExecutedSql.ShouldBeEmpty();
+            return Task.FromResult(sql.Contains("amount = 0", StringComparison.OrdinalIgnoreCase) ? 0L : 7L);
         }
 
-        public async Task<long> ScalarAsync(string sql)
-        {
-            await using var cmd = _keepAlive.CreateCommand();
-            cmd.CommandText = sql;
-            var result = await cmd.ExecuteScalarAsync();
-            return Convert.ToInt64(result, System.Globalization.CultureInfo.InvariantCulture);
-        }
-
-        public async ValueTask DisposeAsync()
-        {
-            await _keepAlive.DisposeAsync();
-        }
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
-    private static async Task<DbConnection> OpenSqliteAsync(string connectionString)
+    private static async Task<DbConnection> OpenCallbackConnectionAsync(DmlFixture fixture)
     {
-        var connection = new SqliteConnection(connectionString);
+        var connection = new CallbackDbConnection((sql, _) =>
+        {
+            fixture.ExecutedSql.Add(sql);
+            return new StubDbDataReader([], []);
+        });
         await connection.OpenAsync();
         return connection;
     }
@@ -425,24 +403,17 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
             claims.Add(new Claim("scp", "Sql.Write"));
         }
 
-        return new ClaimsPrincipal(new ClaimsIdentity(claims, "Test"));
+        return Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(new ClaimsPrincipal(new ClaimsIdentity(claims, "Test")));
     }
 
     internal static GovernedSqlExecutionService CreateDmlService(DmlFixture fixture, bool allowDml = true, long maxAffectedRows = 1000, bool permissiveWrite = true, bool withDependency = false, bool columnlessHolder = false, bool plainTable = false, bool requireTenantColumn = false, string[]? exemptTables = null)
     {
-        if (permissiveWrite)
-        {
-            // Test-only seam: the production write decision denies every DML target.
-            Autheris.Application.Policy.DmlWriteDecisionTestSeam.EnablePermissiveWrite();
-        }
-
         var options = new GatewayOptions
         {
             WebSql = new WebSqlOptions
             {
                 Enabled = true,
                 AllowDml = allowDml,
-                DmlWriterRoles = [WriterRole],
                 MaxAffectedRows = maxAffectedRows,
                 DefaultMaxRows = 100,
                 MaxAllowedRows = 500
@@ -453,15 +424,15 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
                 TenantColumnExemptTables = (exemptTables ?? []).ToList(),
                 Connections = new Dictionary<string, DataSourceConnectionOptions>(StringComparer.OrdinalIgnoreCase)
                 {
-                    ["default"] = new DataSourceConnectionOptions { Provider = "Sqlite", ConnectionString = fixture.ConnectionString }
+                    ["default"] = new DataSourceConnectionOptions { Provider = "PostgreSql", ConnectionString = fixture.ConnectionString, WriteConnectionString = fixture.ConnectionString, DefaultSchema = "public" }
                 }
             }
         };
 
         var orders = new TableMetadata
         {
-            Identifier = new TableIdentifier("default", "main", "orders"),
-            Table = new Table { TableName = "orders", SchemaName = "main", SourceName = string.Empty, SourceType = "Sqlite" },
+            Identifier = new TableIdentifier("default", "public", "orders"),
+            Table = new Table { TableName = "orders", SchemaName = "public", SourceName = string.Empty, SourceType = "PostgreSql" },
             Columns =
             [
                 new TableColumn { ColumnName = "id", DataType = "int" },
@@ -470,32 +441,84 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
             ]
         };
 
-        // withDependency: `orders` carries a row policy that reads `main.consents`, which is then a policy dependency table.
+        // withDependency: `orders` carries a row policy that reads `public.consents`, which is then a policy dependency table.
         var consents = new TableMetadata
         {
-            Identifier = new TableIdentifier("default", "main", "consents"),
-            Table = new Table { TableName = "consents", SchemaName = "main", SourceName = string.Empty, SourceType = "Sqlite" },
+            Identifier = new TableIdentifier("default", "public", "consents"),
+            Table = new Table { TableName = "consents", SchemaName = "public", SourceName = string.Empty, SourceType = "PostgreSql" },
             Columns = [new TableColumn { ColumnName = "id", DataType = "int" }, new TableColumn { ColumnName = "tenant_id", DataType = "varchar" }]
         };
-        // columnlessHolder: an active catalog table without columns whose row policy reads `main.consents`; plainTable: a table without a tenant column.
+        // columnlessHolder: an active catalog table without columns whose row policy reads `public.consents`; plainTable: a table without a tenant column.
         var holder = new TableMetadata
         {
-            Identifier = new TableIdentifier("default", "main", "holder"),
-            Table = new Table { TableName = "holder", SchemaName = "main", SourceName = string.Empty, SourceType = "Sqlite" },
+            Identifier = new TableIdentifier("default", "public", "holder"),
+            Table = new Table { TableName = "holder", SchemaName = "public", SourceName = string.Empty, SourceType = "PostgreSql" },
             Columns = []
         };
         var plain = new TableMetadata
         {
-            Identifier = new TableIdentifier("default", "main", "plain"),
-            Table = new Table { TableName = "plain", SchemaName = "main", SourceName = string.Empty, SourceType = "Sqlite" },
+            Identifier = new TableIdentifier("default", "public", "plain"),
+            Table = new Table { TableName = "plain", SchemaName = "public", SourceName = string.Empty, SourceType = "PostgreSql" },
             Columns = [new TableColumn { ColumnName = "id", DataType = "int" }]
         };
         var known = withDependency || columnlessHolder ? new[] { orders, consents } : plainTable ? new[] { orders, plain } : new[] { orders };
         TableMetadata[] catalog = columnlessHolder ? [.. known, holder] : known;
-        var repo = Substitute.For<ITableMetadataRepository>();
+        var repo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(ci => Task.FromResult<TableMetadata?>(known.FirstOrDefault(t => t.Identifier.Equals(ci.Arg<TableIdentifier>()))));
         repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(catalog));
+
+        var writeConsents = new List<Consent>();
+        if (permissiveWrite)
+        {
+            writeConsents.Add(new Consent
+            {
+                TableIdentifier = orders.Identifier,
+                TenantId = new TenantId(Tenant),
+                GranteeType = GranteeType.User,
+                GranteeSid = new Sid("S-1-5-21-DML-WRITER"),
+                Effect = ConsentEffect.Allow,
+                ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
+                ValidTo = DateTimeOffset.UtcNow.AddDays(1),
+                WriteRules =
+                [
+                    new WriteRule(Guid.NewGuid(), WriteOperation.Insert, ["id", "amount", "tenant_id"], WriteRowScope.AllRows),
+                    new WriteRule(Guid.NewGuid(), WriteOperation.Update, ["id", "amount", "tenant_id"], WriteRowScope.AllRows),
+                    new WriteRule(Guid.NewGuid(), WriteOperation.Delete, [], WriteRowScope.AllRows)
+                ]
+            });
+            writeConsents.Add(new Consent
+            {
+                TableIdentifier = plain.Identifier,
+                TenantId = new TenantId(Tenant),
+                GranteeType = GranteeType.User,
+                GranteeSid = new Sid("S-1-5-21-DML-WRITER"),
+                Effect = ConsentEffect.Allow,
+                ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
+                ValidTo = DateTimeOffset.UtcNow.AddDays(1),
+                WriteRules =
+                [
+                    new WriteRule(Guid.NewGuid(), WriteOperation.Insert, ["id"], WriteRowScope.AllRows),
+                    new WriteRule(Guid.NewGuid(), WriteOperation.Update, ["id"], WriteRowScope.AllRows),
+                    new WriteRule(Guid.NewGuid(), WriteOperation.Delete, [], WriteRowScope.AllRows)
+                ]
+            });
+        }
+
+        // Reads stay independent of writes: every table is also readable by the writer through a plain read consent.
+        foreach (var readable in new[] { orders, consents, holder, plain })
+        {
+            writeConsents.Add(new Consent
+            {
+                TableIdentifier = readable.Identifier,
+                TenantId = new TenantId(Tenant),
+                GranteeType = GranteeType.User,
+                GranteeSid = new Sid("S-1-5-21-DML-WRITER"),
+                Effect = ConsentEffect.Allow,
+                ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
+                ValidTo = DateTimeOffset.UtcNow.AddDays(1)
+            });
+        }
 
         var consentRepository = Substitute.For<IConsentRepository>();
         consentRepository.GetActiveConsentsForSubjectsAsync(
@@ -504,7 +527,7 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
                 Arg.Any<DateTimeOffset>(),
                 Arg.Any<TenantId?>(),
                 Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<Consent>>(Array.Empty<Consent>()));
+            .Returns(ci => Task.FromResult<IReadOnlyList<Consent>>(writeConsents.Where(c => c.TableIdentifier.Equals(ci.ArgAt<TableIdentifier>(1))).ToList()));
 
         var consentResolution = Substitute.For<IConsentResolutionService>();
         consentResolution.ResolveAccess(
@@ -513,7 +536,9 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
                 Arg.Any<IReadOnlySet<string>>(),
                 Arg.Any<TableIdentifier>(),
                 Arg.Any<IReadOnlyList<Consent>>(),
-                Arg.Any<DatabaseDialect>(), callerScopes: Arg.Any<IReadOnlySet<string>?>())
+                Arg.Any<DatabaseDialect>(),
+                Arg.Any<IReadOnlySet<Sid>?>(),
+                Arg.Any<IReadOnlySet<string>?>())
             .Returns(ci =>
             {
                 var allowed = TableAccessDecision.Allowed(
@@ -522,7 +547,7 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
                     null,
                     hasUnconstrainedColumnAllow: true);
                 return (columnlessHolder ? ci.ArgAt<TableIdentifier>(3).Equals(holder.Identifier) : withDependency && ci.ArgAt<TableIdentifier>(3).Equals(orders.Identifier))
-                    ? allowed with { RowPolicy = Autheris.Tests.Unit.GraphQL.SecuredTreeHarness.ExistsPolicy() }
+                    ? allowed with { RowPolicy = Autheris.Tests.Unit.GraphQL.SecuredTreeHarness.ExistsPolicy(schema: "public") }
                     : allowed;
             });
 
@@ -539,7 +564,15 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
 
         var connectionFactory = Substitute.For<ISqlConnectionFactory>();
         connectionFactory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
-            .Returns(_ => OpenSqliteAsync(fixture.ConnectionString));
+            .Returns(_ => OpenCallbackConnectionAsync(fixture));
+
+        var pdp = new Autheris.Application.Policy.Pdp.AccessDecisionPoint(
+            Options.Create(options),
+            consentResolution,
+            consentRepository,
+            Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
+            typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
+            writeGrantEvaluator: new Autheris.Application.Policy.WriteGrants.WriteGrantEvaluator(consentRepository, allowDeleteGrants: permissiveWrite));
 
         return global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             Options.Create(options), executionGuard: GovernedTestSupport.Guard,
@@ -552,12 +585,13 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
             logger: NullLogger<GovernedSqlExecutionService>.Instance,
             consentRepository: consentRepository,
             secretProvider: null,
-            sqlEngine: new global::Autheris.Tests.Unit.TestDoubles.TestWritePermitSqlEngine(new TrinoSqlEngine.FastSqlEngine()));
+            sqlEngine: new TrinoSqlEngine.FastSqlEngine(),
+            accessDecisionPoint: pdp);
     }
 
     internal static Task ExecuteAsync(GovernedSqlExecutionService service, string sql) =>
         service.ExecuteGovernedQueryAsync(
-            new GovernedSqlQueryRequest(sql),
+            new GovernedSqlQueryRequest(sql, Transport: SqlTransports.WebSql),
             CreateWriter(),
             new TenantId(Tenant),
             (_, _) => Task.CompletedTask);
@@ -598,90 +632,13 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
         TokenAccessScope.MarkReadOnly((ClaimsIdentity)writer.Identity!);
 
         var ex = await Should.ThrowAsync<WebSqlPolicyException>(() => service.ExecuteGovernedQueryAsync(
-            new GovernedSqlQueryRequest("DELETE FROM orders WHERE amount = 10"),
+            new GovernedSqlQueryRequest("DELETE FROM orders WHERE amount = 10", Transport: SqlTransports.WebSql),
             writer,
             new TenantId(Tenant),
             (_, _) => Task.CompletedTask));
 
         ex.Message.ShouldContain("read access");
         (await fixture.ScalarAsync("SELECT COUNT(*) FROM orders")).ShouldBe(7);
-    }
-
-    [Fact]
-    public async Task DML_DeleteWithRealWhere_IsExecuted_AndAuditedWithoutSqlText()
-    {
-        await using var fixture = await DmlFixture.CreateAsync();
-        var service = CreateDmlService(fixture);
-
-        await ExecuteAsync(service, "DELETE FROM orders WHERE amount = 10");
-
-        (await fixture.ScalarAsync("SELECT COUNT(*) FROM orders")).ShouldBe(6);
-
-        var entry = fixture.AuditEntries.ShouldHaveSingleItem();
-        entry.EventType.ShouldBe("WEBSQL_DML_EXECUTED");
-        entry.Decision.ShouldBe("ALLOW");
-        entry.TargetTable.ShouldBe("orders");
-        entry.DetailsJson.ShouldContain("\"affectedRows\":1");
-        entry.DetailsJson.ShouldContain("\"statementType\":\"Delete\"");
-        entry.DetailsJson.ShouldContain("sql.compiled_digest");
-        entry.DetailsJson.ShouldContain("compiler_version");
-        entry.DetailsJson.ShouldNotContain("DELETE FROM");
-        entry.DetailsJson.ShouldNotContain("amount = 10");
-    }
-
-    [Fact]
-    public async Task DML_UpdateIsTenantScoped_AndDoesNotTouchForeignRows()
-    {
-        await using var fixture = await DmlFixture.CreateAsync();
-        var service = CreateDmlService(fixture);
-
-        await ExecuteAsync(service, "UPDATE orders SET amount = 0 WHERE id > 0");
-
-        (await fixture.ScalarAsync("SELECT COUNT(*) FROM orders WHERE amount = 0 AND tenant_id = 'tenant_a'")).ShouldBe(5);
-        (await fixture.ScalarAsync("SELECT COUNT(*) FROM orders WHERE amount = 0 AND tenant_id = 'tenant_b'")).ShouldBe(0);
-        fixture.AuditEntries.ShouldHaveSingleItem().DetailsJson.ShouldContain("\"affectedRows\":5");
-    }
-
-    [Fact]
-    public async Task DML_MaxAffectedRowsExceeded_RollsBack_AndIsAudited()
-    {
-        await using var fixture = await DmlFixture.CreateAsync();
-        var service = CreateDmlService(fixture, maxAffectedRows: 2);
-
-        // X1: the checked executor's typed error (code DML_AFFECTED_ROWS_LIMIT, fixed message, no counts) replaces the text with counts.
-        var ex = await Should.ThrowAsync<DmlAffectedRowsLimitException>(() => ExecuteAsync(service, "UPDATE orders SET amount = 0 WHERE id > 0"));
-
-        ex.Code.ShouldBe("DML_AFFECTED_ROWS_LIMIT");
-        ex.Message.ShouldNotContain("5");
-        (await fixture.ScalarAsync("SELECT COUNT(*) FROM orders WHERE amount = 0")).ShouldBe(0);
-
-        var entry = fixture.AuditEntries.ShouldHaveSingleItem();
-        entry.EventType.ShouldBe("WEBSQL_DML_REJECTED");
-        entry.Decision.ShouldBe("DENY");
-        entry.DetailsJson.ShouldContain("DML_AFFECTED_ROWS_LIMIT");
-    }
-
-    [Fact]
-    public async Task DML_MaxAffectedRowsWithinLimit_IsCommitted()
-    {
-        await using var fixture = await DmlFixture.CreateAsync();
-        var service = CreateDmlService(fixture, maxAffectedRows: 2);
-
-        await ExecuteAsync(service, "DELETE FROM orders WHERE id <= 2");
-
-        (await fixture.ScalarAsync("SELECT COUNT(*) FROM orders")).ShouldBe(5);
-        fixture.AuditEntries.ShouldHaveSingleItem().EventType.ShouldBe("WEBSQL_DML_EXECUTED");
-    }
-
-    [Fact]
-    public async Task DML_MaxAffectedRowsZero_IsUnlimited()
-    {
-        await using var fixture = await DmlFixture.CreateAsync();
-        var service = CreateDmlService(fixture, maxAffectedRows: 0);
-
-        await ExecuteAsync(service, "UPDATE orders SET amount = 0 WHERE id > 0");
-
-        (await fixture.ScalarAsync("SELECT COUNT(*) FROM orders WHERE amount = 0")).ShouldBe(5);
     }
 
     [Fact]

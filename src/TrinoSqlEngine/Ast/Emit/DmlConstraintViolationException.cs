@@ -102,8 +102,6 @@ public static class DmlErrorSanitizer
         TargetSqlDialect.SqlServer => Number(error) == 207 || ErrorsContain(error, 207),
         TargetSqlDialect.Oracle => Number(error) == 904 || ErrorsContain(error, 904),
         TargetSqlDialect.PostgreSql => (error is DbException db ? db.SqlState : StringProperty(error, "SqlState")) == "42703",
-        TargetSqlDialect.Sqlite => IntProperty(error, "SqliteErrorCode") == 1 &&
-                                   error.Message.Contains("no such column", StringComparison.OrdinalIgnoreCase),
         TargetSqlDialect.DuckDb => error.Message.Contains("Binder Error", StringComparison.Ordinal) &&
                                    (error.Message.Contains("Referenced column", StringComparison.Ordinal) ||
                                     error.Message.Contains("does not have a column named", StringComparison.Ordinal)),
@@ -123,8 +121,6 @@ public static class DmlErrorSanitizer
         // 42601 is the generic syntax_error: only the parser routine of the set-operation check counts (a gateway emitter defect stays a 502).
         TargetSqlDialect.PostgreSql => (error is DbException db ? db.SqlState : StringProperty(error, "SqlState")) == "42601" &&
                                        StringProperty(error, "Routine") == "transformSetOperationTree",
-        TargetSqlDialect.Sqlite => IntProperty(error, "SqliteErrorCode") == 1 &&
-                                   error.Message.Contains("do not have the same number of result columns", StringComparison.OrdinalIgnoreCase),
         TargetSqlDialect.DuckDb => error.Message.Contains("Binder Error", StringComparison.Ordinal) &&
                                    error.Message.Contains("same number of result columns", StringComparison.Ordinal),
         TargetSqlDialect.Databricks => error.Message.Contains("NUM_COLUMNS_MISMATCH", StringComparison.Ordinal),
@@ -166,8 +162,6 @@ public static class DmlErrorSanitizer
         // SQLSTATE class 22: data exception
         TargetSqlDialect.PostgreSql => (error is DbException db ? db.SqlState : StringProperty(error, "SqlState")) is { Length: 5 } state &&
                                        state.StartsWith("22", StringComparison.Ordinal),
-        // SQLITE_TOOBIG, SQLITE_MISMATCH
-        TargetSqlDialect.Sqlite => IntProperty(error, "SqliteErrorCode") is 18 or 20,
         TargetSqlDialect.DuckDb => error.Message.Contains("Conversion Error", StringComparison.OrdinalIgnoreCase) ||
                                    error.Message.Contains("Out of Range", StringComparison.OrdinalIgnoreCase) ||
                                    error.Message.Contains("Could not convert", StringComparison.OrdinalIgnoreCase),
@@ -209,15 +203,6 @@ public static class DmlErrorSanitizer
             _ => null
         },
         TargetSqlDialect.DuckDb => ClassifyMessage(error.Message),
-        // SQLITE_CONSTRAINT_* extended result codes (the provider exposes them without driver text)
-        TargetSqlDialect.Sqlite => IntProperty(error, "SqliteExtendedErrorCode") switch
-        {
-            1555 or 2067 => DmlConstraintKind.Unique,       // PRIMARYKEY, UNIQUE
-            787 => DmlConstraintKind.ForeignKey,
-            1299 => DmlConstraintKind.NotNull,
-            275 => DmlConstraintKind.Check,
-            _ => null
-        },
         TargetSqlDialect.Databricks => ClassifyDelta(error.Message),
         _ => null
     };

@@ -20,6 +20,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class DeltaLakeSecurityAndMetadataTests
 {
     private readonly ILakehouseStorageProvider _storageProvider = Substitute.For<ILakehouseStorageProvider>();

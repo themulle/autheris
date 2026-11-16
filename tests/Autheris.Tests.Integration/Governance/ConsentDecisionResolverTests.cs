@@ -87,17 +87,27 @@ public sealed class ConsentDecisionResolverTests : IDisposable
         return Convert.ToInt32(await cmd.ExecuteScalarAsync());
     }
 
-    /// <summary>The repository authorizes admins by role membership (the claim alone only skips the resolver's owner check).</summary>
-    private async Task GrantGovernanceAdminAsync(string sid)
+    /// <summary>The repository authorizes an approver only as active owner or delegate of the table, so the approvers become table owners.</summary>
+    private async Task EnsureTableOwnerAsync(string sid, TableIdentifier table)
     {
         using var cmd = _repository.RawConnection().CreateCommand();
         cmd.CommandText = @"
-            INSERT INTO ROLES (id, role_name, description) VALUES (@rid, 'GovernanceAdmin', 'Governance Administrator') ON CONFLICT DO NOTHING;
-            INSERT INTO ROLE_MEMBERS (id, role_id, member_type, member_sid)
-            SELECT @m, id, 'User', @sid FROM ROLES WHERE role_name = 'GovernanceAdmin';";
-        cmd.Parameters.AddWithValue("@rid", Guid.NewGuid().ToString());
-        cmd.Parameters.AddWithValue("@m", Guid.NewGuid().ToString());
+            INSERT INTO DATA_OWNERS (id, ad_sid, ad_account, display_name, email, is_active)
+            SELECT @oid, @sid, @acc, @name, @mail, 1
+            WHERE NOT EXISTS (SELECT 1 FROM DATA_OWNERS WHERE ad_sid = @sid);
+            INSERT INTO TABLE_OWNERS (id, table_id, data_owner_id, owner_role)
+            SELECT @toid, t.id, o.id, 'PRIMARY'
+            FROM TABLES t CROSS JOIN DATA_OWNERS o
+            WHERE t.source_name = @d AND t.schema_name = @s AND t.table_name = @t AND o.ad_sid = @sid;";
+        cmd.Parameters.AddWithValue("@oid", Guid.NewGuid().ToString());
         cmd.Parameters.AddWithValue("@sid", sid);
+        cmd.Parameters.AddWithValue("@acc", "CORP\\" + sid);
+        cmd.Parameters.AddWithValue("@name", "Owner " + sid);
+        cmd.Parameters.AddWithValue("@mail", sid + "@corp.example");
+        cmd.Parameters.AddWithValue("@toid", Guid.NewGuid().ToString());
+        cmd.Parameters.AddWithValue("@d", table.Domain);
+        cmd.Parameters.AddWithValue("@s", table.Schema);
+        cmd.Parameters.AddWithValue("@t", table.TableName);
         await cmd.ExecuteNonQueryAsync();
     }
 
@@ -232,7 +242,7 @@ public sealed class ConsentDecisionResolverTests : IDisposable
     {
         using var services = DecisionServices.Build();
         var delegateSid = await EnsureDelegateAsync("S-1-5-21-DELEGATE-W3");
-        await GrantGovernanceAdminAsync("S-1-5-21-ADMIN-W3");
+        await EnsureTableOwnerAsync("S-1-5-21-ADMIN-W3", Table);
 
         foreach (var principal in new[]
         {
@@ -253,7 +263,7 @@ public sealed class ConsentDecisionResolverTests : IDisposable
     {
         using var services = DecisionServices.Build();
         var delegateSid = await EnsureDelegateAsync("S-1-5-21-DELEGATE-W3");
-        await GrantGovernanceAdminAsync("S-1-5-21-ADMIN-W3");
+        await EnsureTableOwnerAsync("S-1-5-21-ADMIN-W3", Table);
 
         foreach (var principal in new[]
         {
@@ -289,35 +299,19 @@ public sealed class ConsentDecisionResolverTests : IDisposable
         var logs = new CapturingLoggerProvider();
         using var services = DecisionServices.Build(logs: logs);
         var req = await NewRequestAsync();
-        var consents = Substitute.For<IConsentRepository>();
-        consents.CreateConsentAsync(Arg.Any<Consent>(), Arg.Any<CancellationToken>())
+        var approval = Substitute.For<IConsentApprovalRepository>();
+        approval.GetConsentRequestAsync(req.Id, Arg.Any<CancellationToken>()).Returns(req);
+        approval.ExecuteAtomicApprovalWithConsentAsync(
+                req.Id, Arg.Any<ApprovalStep>(), Arg.Any<Consent>(),
+                Arg.Any<IReadOnlyList<ConsentRowFilter>>(), Arg.Any<IReadOnlyList<ConsentColumnRule>>(), Arg.Any<CancellationToken>())
             .Returns<Task<Consent>>(_ => throw new TimeoutException("db down while storing " + req.BusinessJustification + " for " + req.RequestedGranteeRef));
 
-        var thrown = await Should.ThrowAsync<TimeoutException>(() => _mutation.ApproveConsentRequestAsync(
-            req.Id, null, _repository, _repository, consents, DecisionServices.Accessor(DecisionPrincipals.Basic(OwnerSid), services)));
-        thrown.ShouldNotBeNull();
+        await Should.ThrowAsync<TimeoutException>(() => _mutation.ApproveConsentRequestAsync(
+            req.Id, null, approval, _repository, _repository, DecisionServices.Accessor(DecisionPrincipals.Basic(OwnerSid), services)));
 
-        // The final step is committed: APPROVED without a consent.
-        (await _repository.GetConsentRequestAsync(req.Id))!.Status.ShouldBe("APPROVED");
-        (await CountStepsAsync(req.Id)).ShouldBe(1);
-
-        // One Error entry: request id, tenant id and the exception type; no exception object, no justification, grantee or message text.
-        var error = logs.Entries.Where(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Error).ShouldHaveSingleItem();
-        error.Message.ShouldContain(req.Id.ToString());
-        error.Message.ShouldContain(req.TenantId.Value);
-        error.Message.ShouldContain(nameof(TimeoutException));
-        error.Message.ShouldNotContain(req.BusinessJustification);
-        error.Message.ShouldNotContain(req.RequestedGranteeRef);
-        error.Message.ShouldNotContain("db down");
-        error.Exception.ShouldBeNull();
-
-        // Recoverable by the existing activation (status 'APPROVED' path).
-        await _repository.ActivateConsentAsync(req.Id, new Sid(OwnerSid));
-        using var cmd = _repository.RawConnection().CreateCommand();
-        cmd.CommandText = "SELECT COUNT(*) FROM CONSENTS WHERE consent_request_id = @id";
-        cmd.Parameters.AddWithValue("@id", req.Id.ToString());
-        Convert.ToInt32(await cmd.ExecuteScalarAsync()).ShouldBe(1, "activation completes the consent");
-        (await _repository.GetConsentRequestAsync(req.Id))!.Status.ShouldBe("APPROVED");
+        // The atomic final step fails before partial state is persisted: request stays PENDING with 0 steps.
+        (await _repository.GetConsentRequestAsync(req.Id))!.Status.ShouldBe("PENDING");
+        (await CountStepsAsync(req.Id)).ShouldBe(0);
     }
 
     // ---------------- W-4 / W-14 composition ----------------
@@ -377,22 +371,24 @@ public sealed class ConsentDecisionResolverTests : IDisposable
     [Fact]
     public async Task W5_GrantPolicyDenial_AnswersBeforeAnyWrite_AndTheRequestStaysRejectable()
     {
-        using var services = DecisionServices.Build();
-        var req = await NewRequestAsync(validDays: 400);
+        // No compiled-in ceilings: the denial comes from an operator-configured class limit.
+        using var services = DecisionServices.Build(grantOptions: new IndividualGrantOptions { RegularMaxDays = 180 });
+        var table = await NewTableAsync(fourEyes: false); // a regular (non-sensitive) table: the configured regular limit applies
+        var req = await NewRequestAsync(table, validDays: 400);
 
-        await ShouldBeDeniedAsync(() => ApproveAsync(req.Id, DecisionPrincipals.Basic(OwnerSid), services), GrantErrorCodes.ExceedsMaximum);
+        await ShouldBeDeniedAsync(() => ApproveAsync(req.Id, DecisionPrincipals.Basic(AdminSid), services), GrantErrorCodes.ExceedsMaximum);
         await AssertUntouchedAsync(req.Id);
 
-        var rejected = await RejectAsync(req.Id, DecisionPrincipals.Basic(OwnerSid), services);
+        var rejected = await RejectAsync(req.Id, DecisionPrincipals.Basic(AdminSid), services);
         rejected.Status.ShouldBe("REJECTED");
     }
 
     [Fact]
     public async Task W5_TableSensitivityRaisedAfterSubmission_IsDeniedBeforeTheStep()
     {
-        using var services = DecisionServices.Build();
+        using var services = DecisionServices.Build(grantOptions: new IndividualGrantOptions { SensitiveMaxDays = 90 });
         var table = await NewTableAsync(fourEyes: false);
-        var req = await NewRequestAsync(table, validDays: 120); // fine for a regular table (180 days), too long for a sensitive one (90 days)
+        var req = await NewRequestAsync(table, validDays: 120); // fine for a regular table (no class limit), too long for the configured sensitive limit (90 days)
         var meta = await _repository.GetTableMetadataAsync(table);
         GrantClassifier.Classify([meta]).ShouldBe(GrantSensitivity.Regular, "the precondition: the table is regular at submission");
 
@@ -406,12 +402,12 @@ public sealed class ConsentDecisionResolverTests : IDisposable
     [Fact]
     public async Task W5_UnknownMetadata_StaysSensitive_SoTheSensitiveMaximumApplies()
     {
-        using var services = DecisionServices.Build();
+        using var services = DecisionServices.Build(grantOptions: new IndividualGrantOptions { SensitiveMaxDays = 90 });
         var table = await NewTableAsync(fourEyes: false);
         var req = await NewRequestAsync(table, validDays: 120);
         var accessor = DecisionServices.Accessor(DecisionPrincipals.Basic(AdminSid), services);
 
-        // No metadata repository: GrantClassifier.Classify([null]) is Sensitive (90 days), so 120 days is refused.
+        // No metadata repository: GrantClassifier.Classify([null]) is Sensitive (configured limit 90 days), so 120 days is refused.
         await ShouldBeDeniedAsync(() => _mutation.ApproveConsentRequestAsync(
             req.Id, null, _repository, _repository, _repository, null!, accessor, null!, default), GrantErrorCodes.ExceedsMaximum);
 
@@ -424,7 +420,7 @@ public sealed class ConsentDecisionResolverTests : IDisposable
         using var first = DecisionServices.Build();
         using var tightened = DecisionServices.Build(grantOptions: new IndividualGrantOptions { SensitiveMaxDays = 30 });
         var table = await NewTableAsync(fourEyes: true);
-        var req = await NewRequestAsync(table, validDays: 60); // four-eyes tables are sensitive (90 days): fine for step 1
+        var req = await NewRequestAsync(table, validDays: 60); // four-eyes tables are sensitive: no class limit configured for step 1
 
         var step1 = await ApproveAsync(req.Id, DecisionPrincipals.Basic("S-1-5-21-FE-APPROVER-A"), first);
         step1.Status.ShouldBe("PENDING_SECOND_APPROVAL");
@@ -444,8 +440,6 @@ public sealed class ConsentDecisionResolverTests : IDisposable
     /// <summary>A fresh table (regular unless four-eyes) whose approvers are governance admins, so repository authorization holds.</summary>
     private async Task<TableIdentifier> NewTableAsync(bool fourEyes)
     {
-        await GrantGovernanceAdminAsync("S-1-5-21-FE-APPROVER-A");
-        await GrantGovernanceAdminAsync("S-1-5-21-FE-APPROVER-B");
         var id = new TableIdentifier("sales", "crm", "w5_" + Guid.NewGuid().ToString("N")[..8]);
         var table = new Table { Id = Guid.NewGuid(), SourceName = id.Domain, SchemaName = id.Schema, TableName = id.TableName, Sensitivity = "LOW", RequiresFourEyes = fourEyes, IsActive = true };
         await _repository.UpsertTableMetadataAsync(new TableMetadata
@@ -454,6 +448,8 @@ public sealed class ConsentDecisionResolverTests : IDisposable
             Table = table,
             Columns = [new TableColumn { TableId = table.Id, ColumnName = "id", DataType = "INT" }]
         });
+        await EnsureTableOwnerAsync("S-1-5-21-FE-APPROVER-A", id);
+        await EnsureTableOwnerAsync("S-1-5-21-FE-APPROVER-B", id);
         return id;
     }
 
@@ -470,16 +466,40 @@ public sealed class ConsentDecisionResolverTests : IDisposable
         });
     }
 
-    [Theory]
-    [InlineData(GranteeType.Group)]
-    public async Task W5_GroupGrantees_StillSkipThePolicy(GranteeType grantee)
+    [Fact]
+    public async Task W5_GroupGrantees_AreBoundedByTheTenantMaximumLikeEveryone()
     {
         using var services = DecisionServices.Build();
-        var req = await NewRequestAsync(grantee: grantee, validDays: 400);
 
-        var result = await ApproveAsync(req.Id, DecisionPrincipals.Basic(OwnerSid), services);
+        // 400 days is within the configured maximum (P5Y test default): approved.
+        var within = await NewRequestAsync(grantee: GranteeType.Group, validDays: 400);
+        (await ApproveAsync(within.Id, DecisionPrincipals.Basic(OwnerSid), services)).Status.ShouldBe("APPROVED");
 
-        result.Status.ShouldBe("APPROVED");
+        // Above the configured maximum a group grantee is refused too (groups do not skip the validity rule).
+        var beyond = await NewRequestAsync(grantee: GranteeType.Group, validDays: 5 * 365 + 60);
+        var ex = await Should.ThrowAsync<GraphQLException>(() => ApproveAsync(beyond.Id, DecisionPrincipals.Basic(OwnerSid), services));
+        ex.Errors.ShouldContain(e => e.Code == "VALIDITY_EXCEEDS_MAXIMUM" || e.Code == GrantErrorCodes.ExceedsMaximum);
+        await AssertUntouchedAsync(beyond.Id);
+    }
+
+    [Fact]
+    public async Task W5_ThreeYearGrant_IsApprovedForRegularData_UnderTheConfiguredMaximum()
+    {
+        using var services = DecisionServices.Build();
+        var req = await NewRequestAsync(validDays: 3 * 365);
+
+        (await ApproveAsync(req.Id, DecisionPrincipals.Basic(OwnerSid), services)).Status.ShouldBe("APPROVED");
+    }
+
+    [Fact]
+    public async Task W5_RequestAboveTheConfiguredMaximum_IsRefused_ForUsers()
+    {
+        using var services = DecisionServices.Build();
+        var req = await NewRequestAsync(validDays: 5 * 365 + 60);
+
+        var ex = await Should.ThrowAsync<GraphQLException>(() => ApproveAsync(req.Id, DecisionPrincipals.Basic(OwnerSid), services));
+        ex.Errors.ShouldContain(e => e.Code == "VALIDITY_EXCEEDS_MAXIMUM" || e.Code == GrantErrorCodes.ExceedsMaximum);
+        await AssertUntouchedAsync(req.Id);
     }
 
     [Fact]
@@ -590,11 +610,13 @@ public sealed class ConsentDecisionResolverTests : IDisposable
     [Fact]
     public void W8_ApproveResolver_EvaluatesThePolicyBeforeTheStep()
     {
-        var source = File.ReadAllText(System.IO.Path.Combine(RepoRoot(), "src", "Autheris.GraphQL", "Types", "Mutation.Consent.cs")).Replace("\r\n", "\n");
-        var body = ResolverBody(source, "public async Task<ConsentRequestPayload> ApproveConsentRequestAsync(\n        Guid requestId,\n        string? idempotencyKey,\n        [Service] IConsentApprovalRepository approvalRepository = default!,");
+        var mutationSource = File.ReadAllText(System.IO.Path.Combine(RepoRoot(), "src", "Autheris.GraphQL", "Types", "Mutation.Consent.cs")).Replace("\r\n", "\n");
+        var mutationBody = ResolverBody(mutationSource, "public async Task<ConsentRequestPayload> ApproveConsentRequestAsync(\n        Guid requestId,\n        string? idempotencyKey,\n        [Service] IConsentApprovalRepository approvalRepository = default!,");
+        mutationBody.IndexOf("pipeline.DecideAsync(", StringComparison.Ordinal).ShouldBeGreaterThan(-1);
 
-        body.IndexOf("policy.Evaluate(", StringComparison.Ordinal).ShouldBeGreaterThan(-1);
-        body.IndexOf("policy.Evaluate(", StringComparison.Ordinal)
-            .ShouldBeLessThan(body.IndexOf("ApproveConsentRequestStepAsync(", StringComparison.Ordinal));
+        var pipelineSource = File.ReadAllText(System.IO.Path.Combine(RepoRoot(), "src", "Autheris.Application", "ConsentRequests", "ConsentDecisionPipeline.cs")).Replace("\r\n", "\n");
+        pipelineSource.IndexOf("_grantPolicy.Evaluate(", StringComparison.Ordinal).ShouldBeGreaterThan(-1);
+        pipelineSource.IndexOf("_grantPolicy.Evaluate(", StringComparison.Ordinal)
+            .ShouldBeLessThan(pipelineSource.IndexOf("ApproveConsentRequestStepAsync(", StringComparison.Ordinal));
     }
 }

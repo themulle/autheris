@@ -15,7 +15,7 @@ CSRF Protection: Mandatory for GraphQL; required for REST when browser indicator
 | **Authentication & Session** | `/api/auth/login` (GET/POST), `/session`, `/logout` | Basic / ForwardAuth / Session | Always active | `WalkingSkeleton`, `BasicAuthOptimizationTests` |
 | **Developer Hub** | `/`, `/getting-started`, `/api/dev/info`, `/personas`, `/login/{persona}` | Anonymous | `Development` environment only | `InsecureGettingStarted` |
 | **System & Monitoring** | `/api/governance/system/{metrics,health,resource-groups}` | Role-gated | `SystemMetrics.Enabled` | Unit tests |
-| **Governed WebSQL** | `POST /api/v1/sql`, `/api/sql` | Authenticated (DML requires `WebSql.DmlWriterRoles`) | `WebSql.Enabled` | `GovernedWebSql`, `EndToEndSqlite` |
+| **Governed WebSQL** | `POST /api/v1/sql`, `/api/sql` | Authenticated (DML requires explicit approved `WriteRules`) | `WebSql.Enabled` | `GovernedWebSql`, `EndToEndSqlite` |
 | **Declarative SQL Endpoints** | `/api/v1/queries/`, `/openapi.json`, `/{name}` (GET/POST) | Authenticated | `SqlEndpoints.Enabled` + `WebSql.Enabled` | `EndToEndSqlite`, Unit tests |
 | **Stored Procedures** | `/api/v1/procedures/*` | Authenticated | `SqlEndpoints.Procedures.Enabled` (SQL Server) | Unit tests (`ProcedureYamlGeneratorTests`) |
 | **OData v4 & OpenAPI 3.1** | `/odata/v4`, `$metadata`, `$openapi`, `/{domain}/{schema}/{table}`, `/ui/swagger`, `/docs` | Authenticated (or Development) | Always active | `ODataIntegration`, `OpenApiDocsEndToEnd` |
@@ -34,7 +34,7 @@ CSRF Protection: Mandatory for GraphQL; required for REST when browser indicator
 | **Human-in-the-Loop (HITL)** | `/api/governance/hitl/{pending,approve,reject}` | Approver roles | `HitLStepUp.Enabled` | Unit tests |
 | **Token Revocation** | `POST /api/admin/tokens/revoke` | `GovernanceAdmin` | Always active | Unit tests |
 | **Trusted GraphQL Documents (app-scoped)** | `PUT/DELETE /api/admin/trusted-documents/{appId}/{version}`, `GET /api/admin/trusted-documents/{appId}` | `ClusterAdmin` + scope `trusted-documents:write` (GET: `read` or `write`) | `GraphQL.AppScopedTrustedDocuments.Enabled` | `TrustedDocumentAdminEndpointsTests`, `TrustedDocumentsOnlyMiddlewareAppScopeTests` |
-| **FOCUS FinOps Accounting** | `/api/v1/finops/{focus,budget/{tenant}}` | `FinOpsAdmin` | `FinOps.Enabled` | `FinOpsIntegration`, `FinOpsEndToEndSqlite` |
+| **Usage Accounting & Tariffs** | `GET /api/v1/usage/{me,users,groups,tenant,tables/{tableId},sources,applications,grants/{grantId},tariffs,tariffs/{dataSource}/versions}`, `POST /api/v1/usage/tariffs/{dataSource}/versions`, `DELETE /api/v1/usage/users/{userSid}` | `/me`: Authenticated; `tables/{tableId}`: UsageAdmin or DataOwner; `grants/{grantId}`: UsageAdmin or grantee; admin/erasure/tariffs: `TenantAdmin`, `ClusterAdmin` | `UsageAccounting.Enabled` | `UsageReportAuthorizationTests`, `UsageReportEndpointsTests`, `UsageTariffSecurityTests` |
 | **ReBAC (Zanzibar / OpenFGA)** | `/api/v1/rebac/{tuples,check,batch-check}` | Authenticated | Always active | `ZanzibarRebacTests` |
 | **DuckDB In-Memory OLAP** | `POST /api/v1/olap/query` | Authenticated | `DuckDbOlap.Enabled` | Unit tests |
 | **Apache Iceberg Lakehouse** | `/modules/lakehouse/iceberg/v1/{prefix}/namespaces/...` | Authenticated | `Lakehouse:Enabled` | `LakehouseIntegration` |

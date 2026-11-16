@@ -1,0 +1,91 @@
+{
+  "ops": [
+    {
+      "op": "addTable",
+      "table": "DATA_CLASSIFICATIONS",
+      "newTable": {
+        "name": "DATA_CLASSIFICATIONS",
+        "columns": [
+          { "name": "scope", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "code", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "display_name", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "description", "type": "NVARCHAR", "family": "string", "nullable": true },
+          { "name": "parent_code", "type": "NVARCHAR", "family": "string", "nullable": true },
+          { "name": "restriction_rank", "type": "SMALLINT", "family": "integer", "nullable": false },
+          { "name": "clear_grantable", "type": "BIT", "family": "boolean", "nullable": false },
+          { "name": "separate_approval", "type": "BIT", "family": "boolean", "nullable": false },
+          { "name": "approver_mode", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "steward_group_sid", "type": "NVARCHAR", "family": "string", "nullable": true },
+          { "name": "max_clear_days", "type": "INT", "family": "integer", "nullable": true },
+          { "name": "is_active", "type": "BIT", "family": "boolean", "nullable": false },
+          { "name": "version", "type": "INT", "family": "integer", "nullable": false },
+          { "name": "updated_by", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "updated_at", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": false }
+        ],
+        "primaryKey": ["scope", "code"],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addTable",
+      "table": "CLASSIFICATION_MASK_RULES",
+      "newTable": {
+        "name": "CLASSIFICATION_MASK_RULES",
+        "columns": [
+          { "name": "scope", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "code", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "mask_function", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "params_json", "type": "NVARCHAR", "family": "string", "nullable": true },
+          { "name": "key_ref", "type": "NVARCHAR", "family": "string", "nullable": true },
+          { "name": "catalog_text", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "version", "type": "INT", "family": "integer", "nullable": false },
+          { "name": "updated_by", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "updated_at", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": false }
+        ],
+        "primaryKey": ["scope", "code"],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addTable",
+      "table": "COLUMN_CLASSIFICATIONS",
+      "newTable": {
+        "name": "COLUMN_CLASSIFICATIONS",
+        "columns": [
+          { "name": "scope", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "table_column_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "code", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "source", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "assigned_by", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "assigned_at", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": false }
+        ],
+        "primaryKey": ["scope", "table_column_id", "code"],
+        "indexes": []
+      }
+    },
+    { "op": "addIndex", "table": "COLUMN_CLASSIFICATIONS", "name": "IX_COLUMN_CLASSIFICATIONS_COL", "unique": false, "columns": ["table_column_id"] },
+    {
+      "op": "addTable",
+      "table": "COLUMN_MASK_OVERRIDES",
+      "newTable": {
+        "name": "COLUMN_MASK_OVERRIDES",
+        "columns": [
+          { "name": "id", "type": "UNIQUEIDENTIFIER", "family": "string", "nullable": false },
+          { "name": "scope", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "table_column_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "code", "type": "NVARCHAR", "family": "string", "nullable": true },
+          { "name": "mask_function", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "params_json", "type": "NVARCHAR", "family": "string", "nullable": true },
+          { "name": "key_ref", "type": "NVARCHAR", "family": "string", "nullable": true },
+          { "name": "catalog_text", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "updated_by", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "updated_at", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": false }
+        ],
+        "primaryKey": ["id"],
+        "indexes": []
+      }
+    },
+    { "op": "addIndex", "table": "COLUMN_MASK_OVERRIDES", "name": "UX_COLUMN_MASK_OVERRIDES_CODE", "unique": true, "columns": ["scope", "table_column_id", "code"] },
+    { "op": "addIndex", "table": "COLUMN_MASK_OVERRIDES", "name": "UX_COLUMN_MASK_OVERRIDES_ALL", "unique": true, "columns": ["scope", "table_column_id"] }
+  ]
+}

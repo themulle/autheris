@@ -92,6 +92,10 @@ public sealed class GatewayExceptionHandler(ILogger<GatewayExceptionHandler> log
             {
                 code = ApiErrorCodes.ConsentTenantInvalid;
             }
+            else if (exception is Autheris.Application.Governance.Grants.Records.GrantRecordUnavailableException)
+            {
+                code = ApiErrorCodes.GrantRecordUnavailable;
+            }
         }
 
         if (status >= StatusCodes.Status500InternalServerError)
@@ -143,6 +147,7 @@ public sealed class GatewayExceptionHandler(ILogger<GatewayExceptionHandler> log
         GatewayInvalidQueryException => (StatusCodes.Status400BadRequest, "The query is invalid.", null),
         GatewayThrottledException e => (StatusCodes.Status429TooManyRequests, "Too many concurrent requests. Retry later.", e.RetryAfterSeconds),
         Autheris.Application.Audit.AuditUnavailableException => (StatusCodes.Status503ServiceUnavailable, "The audit store is temporarily unavailable. Retry later.", UnavailableRetryAfterSeconds),
+        Autheris.Application.Governance.Grants.Records.GrantRecordUnavailableException => (StatusCodes.Status503ServiceUnavailable, "The grant record store is temporarily unavailable. Retry later.", UnavailableRetryAfterSeconds),
         // migrations still pending: fail closed with a retryable 503 instead of a 500 plus error log.
         Autheris.Infrastructure.Persistence.Migrations.GovernanceStoreNotReadyException => (StatusCodes.Status503ServiceUnavailable, "The governance store is not ready yet. Retry later.", UnavailableRetryAfterSeconds),
         GatewayNotImplementedException => (StatusCodes.Status501NotImplemented, "The requested feature or data source capability is not implemented.", null),

@@ -25,8 +25,14 @@ using static Autheris.Tests.Unit.Mcp.ScopeLevelTestKit;
 /// allow grants that apply to the caller (same predicate as the access decision). SEC-GOV158-01..07.
 /// </summary>
 [Trait("Category", "Security")]
-public sealed class Issue158ExplainAccessMatchingTests
+[Collection("IndividualGrantLimits")]
+public sealed class Issue158ExplainAccessMatchingTests : IDisposable
 {
+    // The read-time clamp exists only for operator-configured limits (no compiled-in ceilings); these tests exercise a 180/30/365 day profile.
+    public Issue158ExplainAccessMatchingTests() => IndividualGrantLimits.Configure(TimeSpan.FromDays(180), TimeSpan.FromDays(30), TimeSpan.FromDays(365));
+
+    public void Dispose() => IndividualGrantLimits.Reset();
+
     private const string RoleA = "role-analyst";
     private const string RoleB = "role-FOREIGN-secret";
     private const string GroupMember = "S-1-5-21-1-2-3-1104";

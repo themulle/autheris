@@ -33,7 +33,6 @@ public static class GatewayConfigurationSchema
         ("Gateway:Catalog", typeof(CatalogLocalizationOptions)),
         ("Gateway:CatalogSearch", typeof(CatalogSearchOptions)),
         ("Gateway:CdcWebhooks", typeof(CdcWebhooksOptions)),
-        ("Gateway:Casbin:DecisionCache", typeof(CasbinDecisionCacheOptions)),
         ("Gateway:DataSources:Configuration", typeof(DataSourceConfigurationOptions)),
         ("Gateway:Events", typeof(EventBusOptions)),
         ("Gateway:ExtensibilityPipeline", typeof(ExtensibilityPipelineOptions)),
@@ -41,7 +40,11 @@ public static class GatewayConfigurationSchema
         ("Gateway:Governance:AccessPlanning", typeof(AccessPlanOptions)),
         ("Gateway:Governance:QueryAnalysis", typeof(GovernanceQueryAnalysisOptions)),
         ("Gateway:Governance:IndividualGrants", typeof(IndividualGrantOptions)),
+        (ExternalApiSettings.SectionName, typeof(ExternalApiSettings)),
+        (GrantValidityOptions.SectionName, typeof(GrantValidityOptions)),
+        (ConsentEventsOptions.SectionName, typeof(ConsentEventsOptions)),
         ("Gateway:Governance:RestrictedScopes", typeof(RestrictedScopeOptions)),
+        (Autheris.Application.Governance.Grants.Records.GrantRecordSigningSettings.SectionName, typeof(Autheris.Application.Governance.Grants.Records.GrantRecordSigningSettings)),
         ("Gateway:Plugins:Auth", typeof(AuthPluginOptions)),
         ("Gateway:Telemetry", typeof(TelemetryOptions)),
         ("Gateway:Subscriptions", typeof(RevocationWatchOptions)),
@@ -51,7 +54,8 @@ public static class GatewayConfigurationSchema
         ("Gateway:TableCache", typeof(TableCacheOptions)),
         ("Gateway:AsyncJobs", typeof(AsyncJobOptions)),
         ("Gateway:Tenancy", typeof(TenancyOptions)),
-        ("Gateway:CustomQueryPoller", typeof(CustomQueryPollerOptions))
+        ("Gateway:CustomQueryPoller", typeof(CustomQueryPollerOptions)),
+        ("Gateway:UsageAccounting", typeof(UsageAccountingOptions))
     ];
 
     /// <summary>

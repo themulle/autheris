@@ -1,1 +1,0 @@
-SELECT * FROM range(1000000000)

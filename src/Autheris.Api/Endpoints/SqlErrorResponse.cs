@@ -61,6 +61,12 @@ internal static class SqlErrorResponse
             ext ??= new Dictionary<string, object?>();
             ext["retryAfterSeconds"] = quotaEx.RetryAfterSeconds;
         }
+        else if (ex is Autheris.Application.Policy.WriteGrants.WriteBudgetExhaustedException budgetEx)
+        {
+            httpContext.Response.Headers.RetryAfter = budgetEx.RetryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            ext ??= new Dictionary<string, object?>();
+            ext["retryAfterSeconds"] = budgetEx.RetryAfterSeconds;
+        }
         await ApiProblems.WriteAsync(httpContext, mapped.Status, mapped.Code, mapped.Title, ct, ext).ConfigureAwait(false);
     }
 }

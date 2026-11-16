@@ -9,6 +9,7 @@ using Shouldly;
 using Xunit;
 
 /// <summary>Security review 2026-10-04 deep dive: E-5 (tenant column spellings) and E-6 (in-memory RLS as strict as SQL).</summary>
+[Trait("Category", "Security")]
 public sealed class TenantIsolationReviewTests
 {
     private static readonly TableIdentifier Table = new("crm", "dbo", "customers");

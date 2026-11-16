@@ -75,7 +75,7 @@ public sealed class McpRowCapTests
             });
 
         var catalog = Substitute.For<IMcpDatasetCatalog>();
-        catalog.SampleRowsAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<bool>(), Arg.Any<CancellationToken>())
+        catalog.SampleRowsAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<CancellationToken>())
             .Returns(ci => new McpDatasetSample("a.b.c", producedRows,
                 Enumerable.Range(0, producedRows).Select(i => (IReadOnlyDictionary<string, object?>)new Dictionary<string, object?> { ["id"] = i }).ToList()));
 
@@ -85,7 +85,7 @@ public sealed class McpRowCapTests
 
         var executor = new GatewayMcpQueryExecutor(provider, Substitute.For<IGatewayExecutionService>(),
             NullLogger<GatewayMcpQueryExecutor>.Instance, datasetCatalog: catalog, toolExecutionHandler: handler,
-            gatewayOptions: Options(maxRows));
+            gatewayOptions: Options(maxRows), persistedToolValidator: new Autheris.Application.Mcp.Services.PersistedToolValidator());
         return new Fixture(executor, handler, catalog);
     }
 
@@ -173,7 +173,7 @@ public sealed class McpRowCapTests
 
         root.GetProperty("error").GetProperty("code").GetString().ShouldBe("INVALID_PARAMS");
         await f.Handler.DidNotReceiveWithAnyArgs().ExecuteToolAsync(default!, default!, default!, default);
-        await f.Catalog.DidNotReceiveWithAnyArgs().SampleRowsAsync(default!, default!, default, default, default);
+        await f.Catalog.DidNotReceiveWithAnyArgs().SampleRowsAsync(default!, default!, default, default);
     }
 
     [Fact]
@@ -225,7 +225,7 @@ public sealed class McpRowCapTests
 
         await RunAsync(f, "sample_rows", ArgsFor("sample_rows", "2"));
 
-        await f.Catalog.Received(1).SampleRowsAsync(Arg.Any<ClaimsPrincipal>(), "a.b.c", 2, Arg.Any<bool>(), Arg.Any<CancellationToken>());
+        await f.Catalog.Received(1).SampleRowsAsync(Arg.Any<ClaimsPrincipal>(), "a.b.c", 2, Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -330,7 +330,7 @@ public sealed class McpRowCapTests
         handler.ExecuteToolAsync(Arg.Any<McpToolDefinition>(), Arg.Any<string>(), Arg.Any<McpSessionContext>(), Arg.Any<CancellationToken>())
             .Returns(RowsJson("rows", Produced, "rowCount"));
         var executor = new GatewayMcpQueryExecutor(Substitute.For<IRequestExecutorProvider>(), Substitute.For<IGatewayExecutionService>(),
-            logger, Options(Cap), toolExecutionHandler: handler);
+            logger, Options(Cap), toolExecutionHandler: handler, persistedToolValidator: new Autheris.Application.Mcp.Services.PersistedToolValidator());
 
         await executor.ExecuteOperationAsync(Tool("query_sql"), ArgsFor("query_sql"), Session());
 
@@ -367,6 +367,7 @@ public sealed class McpRowCapTests
         handler.ExecuteToolAsync(Arg.Any<McpToolDefinition>(), Arg.Any<string>(), Arg.Any<McpSessionContext>(), Arg.Any<CancellationToken>())
             .Returns(RowsJson("rows", Produced, "rowCount"));
         services.AddSingleton(handler);
+        services.AddSingleton<IPersistedToolValidator, Autheris.Application.Mcp.Services.PersistedToolValidator>();
         services.AddScoped<IMcpQueryExecutor, GatewayMcpQueryExecutor>();
         using var provider = services.BuildServiceProvider();
         using var scope = provider.CreateScope();
@@ -382,6 +383,6 @@ public sealed class McpRowCapTests
     {
         Should.Throw<ArgumentNullException>(() => new GatewayMcpQueryExecutor(
             Substitute.For<IRequestExecutorProvider>(), Substitute.For<IGatewayExecutionService>(),
-            NullLogger<GatewayMcpQueryExecutor>.Instance, null!));
+            NullLogger<GatewayMcpQueryExecutor>.Instance, null!, persistedToolValidator: new Autheris.Application.Mcp.Services.PersistedToolValidator()));
     }
 }

@@ -38,7 +38,7 @@ public sealed class ManifestFourEyesAndSelfGrantTests
         new("default", "sales", "orders", type, granteeRef, effect,
             ColumnRules: clearColumn is null ? null : [new DeclarativeColumnRule(clearColumn, "Clear")],
             Description: "analytics access",
-            ValidUntil: type is "User" or "ServicePrincipal" ? DateTimeOffset.UtcNow.AddDays(10) : null);
+            ValidUntil: DateTimeOffset.UtcNow.AddDays(10));
 
     private static Task<DeclarativeApplyResult> ApplyAsync(
         FakeConsentRepository repo,

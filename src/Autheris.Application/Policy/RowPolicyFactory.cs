@@ -56,6 +56,12 @@ public sealed class RowPolicyFactory
         return new PolicyPredicateRowPolicy(predicate, PolicyParameterNamer.ToTargetDialect(dialect), _renderer);
     }
 
+    internal IRowPolicy FromPredicate(PolicyPredicate predicate, TargetSqlDialect dialect)
+    {
+        ArgumentNullException.ThrowIfNull(predicate);
+        return new PolicyPredicateRowPolicy(predicate, dialect, _renderer);
+    }
+
     /// <summary>The typed row policy of a consent decision; null when the recipe restricts no rows.</summary>
     /// <exception cref="InvalidOperationException">A filter is invalid (unsafe column, unknown operator); the caller keeps the decision string-only.</exception>
     public IRowPolicy? FromConsentFilters(
@@ -70,24 +76,7 @@ public sealed class RowPolicyFactory
     }
 
     /// <summary>
-    /// Parses an access-profile row filter (canonical Trino syntax) once into a typed policy.
-    /// </summary>
-    /// <exception cref="PolicyParseException">The predicate is invalid (the caller denies; the message never echoes the text).</exception>
-    /// <exception cref="InvalidOperationException">No parser is registered.</exception>
-    public IRowPolicy FromAccessProfile(string predicate, TableMetadata metadata)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(predicate);
-        ArgumentNullException.ThrowIfNull(metadata);
-        var parsed = ParseAdminPredicate(
-            predicate,
-            new TableIdentity(metadata.Identifier.Schema, metadata.Identifier.TableName),
-            metadata.Columns.Select(c => c.ColumnName).ToList(),
-            metadata.Dialect);
-        return new PolicyPredicateRowPolicy(parsed, PolicyParameterNamer.ToTargetDialect(metadata.Dialect), _renderer);
-    }
-
-    /// <summary>
-    /// Parses admin-authored predicate text (canonical Trino syntax, for example a Casbin row filter after claim interpolation) into a typed
+    /// Parses admin-authored predicate text (canonical Trino syntax) into a typed
     /// predicate: every literal becomes a bound policy parameter, columns must be in <paramref name="columns"/>, functions must be allow-listed.
     /// </summary>
     /// <exception cref="PolicyParseException">The predicate is invalid (the message never echoes the text).</exception>

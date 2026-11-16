@@ -1,0 +1,121 @@
+-- Usage accounting schema: daily aggregates, grant attribution, group sets, tariffs, and retirement of legacy consumer daily tables.
+
+IF OBJECT_ID(N'dbo.USAGE_DAILY', N'U') IS NULL
+CREATE TABLE dbo.USAGE_DAILY (
+    day DATE NOT NULL,
+    series_hash BINARY(32) NOT NULL,
+    tenant_id NVARCHAR(128) NOT NULL,
+    user_key NVARCHAR(184) NOT NULL,
+    group_set_id CHAR(32) NOT NULL,
+    billing_group NVARCHAR(184) NOT NULL,
+    transport SMALLINT NOT NULL,
+    application NVARCHAR(64) NOT NULL,
+    client_id NVARCHAR(64) NOT NULL,
+    data_source NVARCHAR(128) NOT NULL,
+    table_id NVARCHAR(128) NOT NULL,
+    requests BIGINT NOT NULL CONSTRAINT DF_USAGE_DAILY_requests DEFAULT 0,
+    queries BIGINT NOT NULL CONSTRAINT DF_USAGE_DAILY_queries DEFAULT 0,
+    rows_returned BIGINT NOT NULL CONSTRAINT DF_USAGE_DAILY_rows_returned DEFAULT 0,
+    rows_measured BIGINT NOT NULL CONSTRAINT DF_USAGE_DAILY_rows_measured DEFAULT 0,
+    bytes BIGINT NOT NULL CONSTRAINT DF_USAGE_DAILY_bytes DEFAULT 0,
+    duration_ms BIGINT NOT NULL CONSTRAINT DF_USAGE_DAILY_duration_ms DEFAULT 0,
+    analysis_cost BIGINT NOT NULL CONSTRAINT DF_USAGE_DAILY_analysis_cost DEFAULT 0,
+    source_compute_ms BIGINT NOT NULL CONSTRAINT DF_USAGE_DAILY_source_compute_ms DEFAULT 0,
+    source_compute_measured BIGINT NOT NULL CONSTRAINT DF_USAGE_DAILY_source_compute_measured DEFAULT 0,
+    source_cost_micros BIGINT NOT NULL CONSTRAINT DF_USAGE_DAILY_source_cost_micros DEFAULT 0,
+    source_cost_measured BIGINT NOT NULL CONSTRAINT DF_USAGE_DAILY_source_cost_measured DEFAULT 0,
+    allow_count BIGINT NOT NULL CONSTRAINT DF_USAGE_DAILY_allow_count DEFAULT 0,
+    deny_access BIGINT NOT NULL CONSTRAINT DF_USAGE_DAILY_deny_access DEFAULT 0,
+    deny_rate_limit BIGINT NOT NULL CONSTRAINT DF_USAGE_DAILY_deny_rate_limit DEFAULT 0,
+    deny_cost BIGINT NOT NULL CONSTRAINT DF_USAGE_DAILY_deny_cost DEFAULT 0,
+    deny_quota BIGINT NOT NULL CONSTRAINT DF_USAGE_DAILY_deny_quota DEFAULT 0,
+    deny_other BIGINT NOT NULL CONSTRAINT DF_USAGE_DAILY_deny_other DEFAULT 0,
+    errors BIGINT NOT NULL CONSTRAINT DF_USAGE_DAILY_errors DEFAULT 0,
+    CONSTRAINT PK_USAGE_DAILY PRIMARY KEY (day, series_hash)
+);
+-- batch
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_USAGE_DAILY_TENANT_DAY' AND object_id = OBJECT_ID(N'dbo.USAGE_DAILY'))
+CREATE INDEX IX_USAGE_DAILY_TENANT_DAY ON dbo.USAGE_DAILY (tenant_id, day);
+-- batch
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_USAGE_DAILY_TENANT_USER_DAY' AND object_id = OBJECT_ID(N'dbo.USAGE_DAILY'))
+CREATE INDEX IX_USAGE_DAILY_TENANT_USER_DAY ON dbo.USAGE_DAILY (tenant_id, user_key, day);
+-- batch
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_USAGE_DAILY_TENANT_TABLE_DAY' AND object_id = OBJECT_ID(N'dbo.USAGE_DAILY'))
+CREATE INDEX IX_USAGE_DAILY_TENANT_TABLE_DAY ON dbo.USAGE_DAILY (tenant_id, table_id, day);
+-- batch
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_USAGE_DAILY_TENANT_SOURCE_DAY' AND object_id = OBJECT_ID(N'dbo.USAGE_DAILY'))
+CREATE INDEX IX_USAGE_DAILY_TENANT_SOURCE_DAY ON dbo.USAGE_DAILY (tenant_id, data_source, day);
+-- batch
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_USAGE_DAILY_TENANT_GROUP_SET_DAY' AND object_id = OBJECT_ID(N'dbo.USAGE_DAILY'))
+CREATE INDEX IX_USAGE_DAILY_TENANT_GROUP_SET_DAY ON dbo.USAGE_DAILY (tenant_id, group_set_id, day);
+-- batch
+IF OBJECT_ID(N'dbo.USAGE_GRANT_DAILY', N'U') IS NULL
+CREATE TABLE dbo.USAGE_GRANT_DAILY (
+    day DATE NOT NULL,
+    tenant_id NVARCHAR(128) NOT NULL,
+    grant_id VARCHAR(128) NOT NULL,
+    data_source NVARCHAR(128) NOT NULL,
+    table_id NVARCHAR(128) NOT NULL,
+    accesses BIGINT NOT NULL CONSTRAINT DF_USAGE_GRANT_DAILY_accesses DEFAULT 0,
+    queries BIGINT NOT NULL CONSTRAINT DF_USAGE_GRANT_DAILY_queries DEFAULT 0,
+    rows_returned BIGINT NOT NULL CONSTRAINT DF_USAGE_GRANT_DAILY_rows_returned DEFAULT 0,
+    bytes BIGINT NOT NULL CONSTRAINT DF_USAGE_GRANT_DAILY_bytes DEFAULT 0,
+    analysis_cost BIGINT NOT NULL CONSTRAINT DF_USAGE_GRANT_DAILY_analysis_cost DEFAULT 0,
+    source_compute_ms BIGINT NOT NULL CONSTRAINT DF_USAGE_GRANT_DAILY_source_compute_ms DEFAULT 0,
+    source_cost_micros BIGINT NOT NULL CONSTRAINT DF_USAGE_GRANT_DAILY_source_cost_micros DEFAULT 0,
+    CONSTRAINT PK_USAGE_GRANT_DAILY PRIMARY KEY (day, tenant_id, grant_id, data_source, table_id)
+);
+-- batch
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_USAGE_GRANT_DAILY_TENANT_GRANT_DAY' AND object_id = OBJECT_ID(N'dbo.USAGE_GRANT_DAILY'))
+CREATE INDEX IX_USAGE_GRANT_DAILY_TENANT_GRANT_DAY ON dbo.USAGE_GRANT_DAILY (tenant_id, grant_id, day);
+-- batch
+IF OBJECT_ID(N'dbo.USAGE_GROUP_SET', N'U') IS NULL
+CREATE TABLE dbo.USAGE_GROUP_SET (
+    tenant_id NVARCHAR(128) NOT NULL,
+    group_set_id CHAR(32) NOT NULL,
+    group_sid VARCHAR(184) NOT NULL,
+    first_seen DATE NOT NULL,
+    CONSTRAINT PK_USAGE_GROUP_SET PRIMARY KEY (tenant_id, group_set_id, group_sid)
+);
+-- batch
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_USAGE_GROUP_SET_TENANT_SID' AND object_id = OBJECT_ID(N'dbo.USAGE_GROUP_SET'))
+CREATE INDEX IX_USAGE_GROUP_SET_TENANT_SID ON dbo.USAGE_GROUP_SET (tenant_id, group_sid);
+-- batch
+IF OBJECT_ID(N'dbo.USAGE_GRANT_REF', N'U') IS NULL
+CREATE TABLE dbo.USAGE_GRANT_REF (
+    tenant_id NVARCHAR(128) NOT NULL,
+    grant_id VARCHAR(128) NOT NULL,
+    valid_from DATETIMEOFFSET NULL,
+    valid_until DATETIMEOFFSET NULL,
+    first_seen DATE NOT NULL,
+    last_seen DATE NOT NULL,
+    CONSTRAINT PK_USAGE_GRANT_REF PRIMARY KEY (tenant_id, grant_id)
+);
+-- batch
+IF OBJECT_ID(N'dbo.USAGE_TARIFF', N'U') IS NULL
+CREATE TABLE dbo.USAGE_TARIFF (
+    tenant_id NVARCHAR(128) NOT NULL,
+    data_source NVARCHAR(128) NOT NULL,
+    version INT NOT NULL,
+    valid_from DATE NOT NULL,
+    valid_until DATE NULL,
+    base_per_query DECIMAL(19,9) NOT NULL CONSTRAINT DF_USAGE_TARIFF_base_per_query DEFAULT 0,
+    per_row DECIMAL(19,9) NOT NULL CONSTRAINT DF_USAGE_TARIFF_per_row DEFAULT 0,
+    per_mib DECIMAL(19,9) NOT NULL CONSTRAINT DF_USAGE_TARIFF_per_mib DEFAULT 0,
+    per_compute_second DECIMAL(19,9) NOT NULL CONSTRAINT DF_USAGE_TARIFF_per_compute_second DEFAULT 0,
+    per_analysis_cost DECIMAL(19,9) NOT NULL CONSTRAINT DF_USAGE_TARIFF_per_analysis_cost DEFAULT 0,
+    source_cost_factor DECIMAL(19,9) NOT NULL CONSTRAINT DF_USAGE_TARIFF_source_cost_factor DEFAULT 0,
+    source_cost_unit NVARCHAR(32) NULL,
+    unit_label NVARCHAR(32) NOT NULL,
+    compute_basis SMALLINT NOT NULL CONSTRAINT DF_USAGE_TARIFF_compute_basis DEFAULT 0,
+    created_by NVARCHAR(184) NOT NULL,
+    created_at DATETIMEOFFSET NOT NULL,
+    reason NVARCHAR(512) NOT NULL,
+    CONSTRAINT PK_USAGE_TARIFF PRIMARY KEY (tenant_id, data_source, version)
+);
+-- batch
+IF OBJECT_ID(N'dbo.CONSUMER_APP_DAILY', N'U') IS NOT NULL
+DROP TABLE dbo.CONSUMER_APP_DAILY;
+-- batch
+IF OBJECT_ID(N'dbo.CONSUMER_APP_ACTOR_DAILY', N'U') IS NOT NULL
+DROP TABLE dbo.CONSUMER_APP_ACTOR_DAILY;

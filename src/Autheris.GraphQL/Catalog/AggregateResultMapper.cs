@@ -39,7 +39,6 @@ internal record AutherisTypedAggregationResult(
     int MinimumGroupSize,
     bool MergedIntoOther,
     bool Truncated,
-    bool NoiseApplied,
     string MinimumGroupSizeSource = "default");
 
 internal sealed record AggregateResultDto(
@@ -50,8 +49,7 @@ internal sealed record AggregateResultDto(
     int MinimumGroupSize,
     bool MergedIntoOther,
     bool Truncated,
-    bool NoiseApplied,
-    string MinimumGroupSizeSource = "default") : AutherisTypedAggregationResult(Groups, Count, Suppressed, SuppressedGroupsCount, MinimumGroupSize, MergedIntoOther, Truncated, NoiseApplied, MinimumGroupSizeSource);
+    string MinimumGroupSizeSource = "default") : AutherisTypedAggregationResult(Groups, Count, Suppressed, SuppressedGroupsCount, MinimumGroupSize, MergedIntoOther, Truncated, MinimumGroupSizeSource);
 
 /// <summary>
 /// #112 A-4: pure mapping of an engine result to the typed GraphQL shape. Kinds are static (function and column type), conversion is
@@ -160,7 +158,6 @@ internal static class AggregateResultMapper
             result.MinimumGroupSize,
             result.MergedIntoOther,
             result.Truncated,
-            result.NoiseApplied,
             result.Metadata.MinimumGroupSizeSource.ToString().ToLowerInvariant());
     }
 

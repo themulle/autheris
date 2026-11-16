@@ -47,6 +47,19 @@ public sealed class ConsentRequest
     public string? ContextJson { get; set; }
     public List<string> RequesterIdentifiers { get; init; } = new();
     public List<ApprovalStep> ApprovalSteps { get; init; } = new();
+    public IReadOnlyList<WriteRule> RequestedWriteRules { get; init; } = [];
+    public bool IncludeReadAccess { get; init; }
+    public int Version { get; init; } = 1;
+    public ConsentWorkflowMode WorkflowMode { get; init; } = ConsentWorkflowMode.Internal;
+    public Guid? ExternalSystemId { get; init; }
+    public string? ExternalReference { get; init; }
+    public DateTimeOffset? RequestedValidFrom { get; init; }
+    public DateTimeOffset? UpdatedAt { get; init; }
+    public ConsentRequestKind RequestKind { get; init; } = ConsentRequestKind.Consent;
+    public Guid? ProfileId { get; init; }
+
+    public bool ShouldGrantReadColumns => RequestedWriteRules.Count == 0 || IncludeReadAccess;
+    public bool IsWriteOnlyRequest => RequestedWriteRules.Count > 0 && !IncludeReadAccess;
 }
 
 public sealed class ApprovalStep

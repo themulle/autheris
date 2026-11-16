@@ -60,6 +60,11 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         var scope = CurrentScope;
         typed.RecordDependency(node.Name, entry);
 
+        if (typed.PerCellColumns.GetPolicy(tid) is { } perCell)
+        {
+            return SecureTypedPerCell(node, entry, perCell, typed, scope);
+        }
+
         var conjuncts = new List<Expression>(2);
         var tenant = typed.BuildTenantPredicate(entry);
         if (tenant != null)
@@ -112,6 +117,126 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
             new QuerySpecification(false, projections, new NamedTableSource(canonical, innerAlias), where, null, null),
             null, null);
         // An unquoted user name stays unquoted, so the dialect folds the alias and the user's references the same way.
+        return new SubqueryTableSource(inner, node.Alias ?? new SqlIdentifier(node.Name.SimpleName, IsQuoted: node.Name.Parts[^1].IsQuoted));
+    }
+
+    private SubqueryTableSource SecureTypedPerCell(
+        NamedTableSource node,
+        TableCatalogEntry entry,
+        PerCellTablePolicy perCell,
+        TypedPolicyContext typed,
+        SecurityScope scope)
+    {
+        var tid = entry.Identity;
+        foreach (var sig in perCell.Signatures)
+        {
+            typed.AddValues(sig.Scope.Parameters);
+        }
+
+        if (perCell.NarrowingPredicate is not null)
+        {
+            typed.AddValues(perCell.NarrowingPredicate.Parameters);
+        }
+
+        var decomposed = PerCellFlagDecomposition.Decompose(
+            perCell,
+            entry,
+            expr => (Expression)new PolicySubqueryTenantRewriter(typed).Visit(expr),
+            stmt => (SelectStatement)new PolicySubqueryTenantRewriter(typed).Visit(stmt));
+
+        var conjuncts = new List<Expression>(2);
+        var tenant = typed.BuildTenantPredicate(entry);
+        if (tenant != null)
+        {
+            conjuncts.Add(new SecurityPredicateExpression(tenant, new SecurityPredicateId(tid.ToString(), 0), scope));
+        }
+
+        Expression? narrowingExpr = null;
+        if (perCell.NarrowingPredicate is not null)
+        {
+            narrowingExpr = (Expression)new PolicySubqueryTenantRewriter(typed).Visit(perCell.NarrowingPredicate.Expression);
+            narrowingExpr = (Expression)new PolicyColumnTypeAnnotator(entry).Visit(narrowingExpr);
+        }
+
+        Expression? rowFilterExpr = decomposed.GrantUnionPredicate switch
+        {
+            null => narrowingExpr,
+            var grantUnion when narrowingExpr is null => grantUnion,
+            var grantUnion => new BinaryExpression(grantUnion, BinaryOperator.And, narrowingExpr)
+        };
+
+        if (rowFilterExpr is not null)
+        {
+            conjuncts.Add(new SecurityPredicateExpression(rowFilterExpr, new SecurityPredicateId(tid.ToString(), 1), scope));
+        }
+
+        Expression? where = null;
+        foreach (var conjunct in conjuncts)
+        {
+            where = where is null ? conjunct : new BinaryExpression(where, BinaryOperator.And, conjunct);
+        }
+
+        var plain = CatalogProjectionNodes.For(entry);
+        var projections = new List<SelectItem>(entry.Columns.Length);
+        var branchPredicateId = new SecurityPredicateId(tid.ToString(), 2);
+
+        for (int i = 0; i < entry.Columns.Length; i++)
+        {
+            var column = entry.Columns[i];
+            var nodes = plain[i];
+            if (decomposed.Columns.TryGetValue(column.Name, out var branches))
+            {
+                var whenClauses = new List<WhenClause>(2);
+                if (branches.ClearCondition is not null)
+                {
+                    whenClauses.Add(new WhenClause(
+                        new SecurityPredicateExpression(branches.ClearCondition, branchPredicateId, scope),
+                        nodes.ColumnRef));
+                }
+
+                if (branches.MaskCondition is not null)
+                {
+                    var spec = typed.GetMaskSpec(tid, column.Name);
+                    typed.AddValues(spec.Parameters);
+                    var maskExpr = new MaskExpression(spec.Kind, nodes.ColumnRef, spec.Arguments, column.DataType);
+                    whenClauses.Add(new WhenClause(
+                        new SecurityPredicateExpression(branches.MaskCondition, branchPredicateId, scope),
+                        maskExpr));
+                }
+
+                var caseExpr = new CaseExpression(
+                    Operand: null,
+                    whenClauses,
+                    new LiteralExpression(null, LiteralType.Null));
+                projections.Add(new ColumnSelectItem(caseExpr, nodes.Identifier));
+            }
+            else if (typed.Masks.HasMask(tid, column.Name))
+            {
+                var spec = typed.GetMaskSpec(tid, column.Name);
+                typed.AddValues(spec.Parameters);
+                projections.Add(new ColumnSelectItem(new MaskExpression(spec.Kind, nodes.ColumnRef, spec.Arguments, column.DataType), nodes.Identifier));
+            }
+            else
+            {
+                projections.Add(nodes.Item);
+            }
+        }
+
+        var canonical = tid.ToQualifiedName();
+        var innerAlias = decomposed.ReferencesTarget ? new SqlIdentifier(RowFilterAliases.Target) : null;
+        TableSource from = new NamedTableSource(canonical, innerAlias);
+        foreach (var flagJoin in decomposed.FlagJoins)
+        {
+            from = new JoinedTableSource(
+                from,
+                JoinType.LeftOuter,
+                new SubqueryTableSource(flagJoin.Subquery, flagJoin.Alias),
+                flagJoin.OnCondition);
+        }
+
+        var inner = new SelectStatement(null,
+            new QuerySpecification(false, projections, from, where, null, null),
+            null, null);
         return new SubqueryTableSource(inner, node.Alias ?? new SqlIdentifier(node.Name.SimpleName, IsQuoted: node.Name.Parts[^1].IsQuoted));
     }
 }

@@ -44,6 +44,12 @@ internal static class Wp0
 
         claims.AddRange((roles ?? []).Select(r => new Claim(ClaimTypes.Role, r)));
         claims.AddRange(extra);
+        if (!extra.Any(c => c.Type is Autheris.Domain.Identity.GroupResolutionClaims.StatusClaimType or Autheris.Domain.Identity.GroupResolutionClaims.MarkerClaimType))
+        {
+            claims.Add(Autheris.Domain.Identity.GroupResolutionClaims.CreateMarker());
+            claims.Add(Autheris.Domain.Identity.GroupResolutionClaims.CreateStatus(Autheris.Domain.Identity.GroupResolutionStatus.Complete));
+        }
+
         return new ClaimsPrincipal(new ClaimsIdentity(claims, authType));
     }
 
@@ -93,6 +99,42 @@ internal static class Wp0
         repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(tables));
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(ci => Task.FromResult<TableMetadata?>(tables.FirstOrDefault(t => t.Identifier == ci.Arg<TableIdentifier>())));
+        repo.GetTablesAsync(Arg.Any<IReadOnlyCollection<TableIdentifier>>(), Arg.Any<CancellationToken>())
+            .Returns(ci =>
+            {
+                var wanted = ci.Arg<IReadOnlyCollection<TableIdentifier>>().ToHashSet();
+                return Task.FromResult<IReadOnlyList<TableMetadata>>(tables.Where(t => wanted.Contains(t.Identifier)).ToList());
+            });
+        repo.GetTablesForRequestAsync(Arg.Any<IReadOnlyCollection<TableIdentifier>>(), Arg.Any<CancellationToken>())
+            .Returns(ci =>
+            {
+                var ids = ci.Arg<IReadOnlyCollection<TableIdentifier>>();
+                Autheris.Application.Catalog.CatalogTableQuery.ValidateRequestIdentifiers(ids);
+                var wanted = ids.ToHashSet();
+                return Task.FromResult<IReadOnlyList<TableMetadata>>(tables.Where(t => wanted.Contains(t.Identifier)).ToList());
+            });
+        repo.QueryTablesAsync(Arg.Any<Autheris.Application.Catalog.CatalogTableQuery>(), Arg.Any<CancellationToken>())
+            .Returns(ci =>
+            {
+                var query = ci.Arg<Autheris.Application.Catalog.CatalogTableQuery>();
+                query.EnsureValid(out var domain, out var schema, out var namePrefix, out var after);
+                var limit = query.EffectiveLimit;
+                var matched = tables
+                    .Where(t => query.IncludeInactive || t.Table.IsActive)
+                    .Where(t => domain is null || string.Equals(t.Identifier.Domain, domain, StringComparison.OrdinalIgnoreCase))
+                    .Where(t => schema is null || string.Equals(t.Identifier.Schema, schema, StringComparison.OrdinalIgnoreCase))
+                    .Where(t => namePrefix is null || t.Identifier.TableName.StartsWith(namePrefix, StringComparison.OrdinalIgnoreCase))
+                    .Where(t => after is null || Autheris.Application.Catalog.CatalogTableCursor.Compare(t.Identifier, after.Value) > 0)
+                    .OrderBy(t => t.Identifier.Domain, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(t => t.Identifier.Schema, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(t => t.Identifier.TableName, StringComparer.OrdinalIgnoreCase)
+                    .Take(limit + 1)
+                    .ToList();
+                var hasMore = matched.Count > limit;
+                var items = hasMore ? matched.Take(limit).ToList() : matched;
+                var nextAfter = hasMore ? Autheris.Application.Catalog.CatalogTableCursor.Encode(items[^1].Identifier) : null;
+                return Task.FromResult(new Autheris.Application.Catalog.CatalogTablePage(items, nextAfter));
+            });
         return repo;
     }
 

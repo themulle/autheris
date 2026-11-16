@@ -15,9 +15,6 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
-using Autheris.Tests.Unit.Sql;
-using Autheris.Tests.Unit.TestDoubles;
-using Microsoft.Data.Sqlite;
 using NSubstitute;
 using Shouldly;
 using Xunit;
@@ -245,35 +242,6 @@ public sealed class SqlTableReadExecutorTests
         var ex = await Should.ThrowAsync<GatewayForbiddenException>(() => executor.ExecuteAsync(context));
 
         ex.Message.ShouldBe("Invalid tenant identity.");
-    }
-
-    [Fact]
-    public async Task Execute_OverSqlite_AppliesTheCompilerRowPolicyAndMask()
-    {
-        await using var connection = new SqliteConnection("Data Source=:memory:");
-        await connection.OpenAsync();
-        await using (var setup = connection.CreateCommand())
-        {
-            setup.CommandText = """
-                CREATE TABLE orders (id INTEGER PRIMARY KEY, status TEXT, email TEXT, shape TEXT);
-                INSERT INTO orders VALUES (1, 'open', 'a@x.example', NULL), (2, 'closed', 'b@x.example', NULL), (3, 'open', 'c@x.example', NULL);
-                """;
-            await setup.ExecuteNonQueryAsync();
-        }
-
-        var env = new TestCompileEnv(TrinoSqlEngine.TargetSqlDialect.Sqlite)
-            .Table("orders", null, "id:INTEGER", "status", "email", "shape")
-            .Policy("orders", SqliteGovernedSqlService.RowPolicy("status", "open"))
-            .Mask("orders", "email", SqliteGovernedSqlService.Redact("email", "***"));
-        var executor = new SqliteGovernedSqlService(connection, env).Executor();
-        var context = Context(fields: ["id", "email"], items: new Dictionary<string, object?> { [TableQueryItems.CountTotal] = true });
-
-        var rows = await executor.ExecuteAsync(context);
-
-        rows.Select(r => Convert.ToInt64(r["id"])).ShouldBe([1L, 3L]);
-        rows.ShouldAllBe(r => (string?)r["email"] == "***");
-        context.Items[TableQueryItems.TotalCount].ShouldBe(2L);
-        context.Items["InDbColumnMaskingExecuted"].ShouldBe(true);
     }
 
     [Fact]

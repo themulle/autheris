@@ -17,7 +17,7 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Tests.Unit.Databricks;
-using Microsoft.Data.Sqlite;
+using Autheris.Tests.Common.Fakes;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -28,6 +28,7 @@ using Xunit;
 /// Round 4 (Nachprüfung 2026-10-02): WebSQL gateway side of P-01, P-02/SQ-06, P-05, P-06/SQ-11/SQ-13 and SQ-15.
 /// Parser-level tests live in gql_sqlparser/SecurityRemediationTests.cs (R4_*).
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class WebSqlParserGatewaySecurityTests
 {
     private const string Tenant = "tenant_a";
@@ -40,7 +41,9 @@ public sealed class WebSqlParserGatewaySecurityTests
         new(new ClaimsIdentity(
             [
                 new Claim(ClaimTypes.PrimarySid, "S-1-5-21-R4-USER"),
-                new Claim("tenant_id", Tenant)
+                new Claim("tenant_id", Tenant),
+                Autheris.Domain.Identity.GroupResolutionClaims.CreateMarker(),
+                Autheris.Domain.Identity.GroupResolutionClaims.CreateStatus(Autheris.Domain.Identity.GroupResolutionStatus.Complete)
             ],
             "Test"));
 
@@ -296,8 +299,7 @@ public sealed class WebSqlParserGatewaySecurityTests
         GovernedSqlExecutionService.TryMapProviderToDialect("npgsql", out _).ShouldBeTrue();
         GovernedSqlExecutionService.TryMapProviderToDialect("mssql", out var mssql).ShouldBeTrue();
         mssql.ShouldBe(DatabaseDialect.SqlServer);
-        GovernedSqlExecutionService.TryMapProviderToDialect("Sqlite", out var sqlite).ShouldBeTrue();
-        sqlite.ShouldBe(DatabaseDialect.Sqlite);
+        GovernedSqlExecutionService.TryMapProviderToDialect("Sqlite", out _).ShouldBeFalse();
         GovernedSqlExecutionService.TryMapProviderToDialect("Oracle", out var oracle).ShouldBeTrue();
         oracle.ShouldBe(DatabaseDialect.Oracle);
         GovernedSqlExecutionService.TryMapProviderToDialect("Databricks", out var databricks).ShouldBeTrue();
@@ -307,12 +309,27 @@ public sealed class WebSqlParserGatewaySecurityTests
     [Fact]
     public async Task P05_PostgreSqlConnection_ExecutesStandardConformingStringsBeforeTheQuery()
     {
-        // The factory hands out a SQLite connection although the data source is configured as PostgreSQL: the first
-        // statement sent must be the session initialization, which SQLite rejects with a syntax error near "SET". The caller only
-        // sees the sanitized provider error (X1.2); the original is in the server-side log.
+        // The first statement sent on a PostgreSQL connection must be the session initialization (SET ...);
+        // throwing on that non-query verifies the caller only sees the sanitized provider error (X1.2)
+        // while the original failure stays in the server-side log.
         var factory = Substitute.For<ISqlConnectionFactory>();
         factory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
-            .Returns(_ => OpenSqliteAsync("Data Source=:memory:"));
+            .Returns(async _ =>
+            {
+                var conn = new CallbackDbConnection(
+                    executeReader: (_, _) => new StubDbDataReader([], []),
+                    executeNonQuery: (sql, _) =>
+                    {
+                        if (sql.StartsWith("SET", StringComparison.OrdinalIgnoreCase))
+                        {
+                            throw new StubDbException($"Simulated syntax error near \"SET\" for: {sql}");
+                        }
+
+                        return 0;
+                    });
+                await conn.OpenAsync();
+                return (DbConnection)conn;
+            });
         var options = CreateOptions(defaultConnection: new DataSourceConnectionOptions { Provider = "PostgreSql", ConnectionString = "Host=unused" });
         var log = new CapturingLogger<GovernedSqlExecutionService>();
         var service = CreateService(options, CreateRepository(CreateTable("employees", "PostgreSQL")), factory, log);
@@ -322,39 +339,7 @@ public sealed class WebSqlParserGatewaySecurityTests
 
         ex.Code.ShouldBe("SQL_PROVIDER_ERROR");
         ex.Message.ShouldNotContain("SET");
-        log.Lines.ShouldContain(l => l.Contains("SqliteException") && l.Contains("SET"));
-    }
-
-    [Fact]
-    public async Task P05_SqliteConnection_ExecutesWithoutSessionInitialization()
-    {
-        var connectionString = $"Data Source=r4_{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
-        await using var keepAlive = new SqliteConnection(connectionString);
-        await keepAlive.OpenAsync();
-        await using (var setup = keepAlive.CreateCommand())
-        {
-            setup.CommandText =
-                "CREATE TABLE orders (id INTEGER, name TEXT, region TEXT, tenant_id TEXT);" +
-                "INSERT INTO orders VALUES (1, 'a', 'eu', 'tenant_a'), (2, 'b', 'us', 'tenant_b');";
-            await setup.ExecuteNonQueryAsync();
-        }
-
-        var factory = Substitute.For<ISqlConnectionFactory>();
-        factory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
-            .Returns(_ => OpenSqliteAsync(connectionString));
-        var options = CreateOptions(defaultConnection: new DataSourceConnectionOptions { Provider = "Sqlite", ConnectionString = connectionString });
-        var service = CreateService(options, CreateRepository(CreateTable("orders", "Sqlite")), factory);
-
-        var result = await service.ExecuteQueryBufferedAsync(new GovernedSqlQueryRequest("SELECT id FROM orders"), CreateUser(), new TenantId(Tenant));
-
-        result.RowCount.ShouldBe(1);
-    }
-
-    private static async Task<DbConnection> OpenSqliteAsync(string connectionString)
-    {
-        var connection = new SqliteConnection(connectionString);
-        await connection.OpenAsync();
-        return connection;
+        log.Lines.ShouldContain(l => l.Contains("StubDbException") && l.Contains("SET"));
     }
 
     // =========================================================================
@@ -370,14 +355,6 @@ public sealed class WebSqlParserGatewaySecurityTests
         var service = CreatePostgreSqlService();
 
         await Should.ThrowAsync<ArgumentException>(() => RewriteAsync(service, sql));
-    }
-
-    [Fact]
-    public async Task P06_DollarQuoting_IsRejectedForSqliteTargets()
-    {
-        var service = CreateService(CreateOptions(), CreateRepository(CreateTable("orders", "Sqlite")));
-
-        await Should.ThrowAsync<ArgumentException>(() => RewriteAsync(service, "SELECT $$x$$, id FROM orders"));
     }
 
     // =========================================================================

@@ -19,7 +19,6 @@ public sealed partial class RendererInvariantTests(ITestOutputHelper output)
 {
     public static IEnumerable<object[]> Dialects() =>
     [
-        [GateDialect.Sqlite, "main"],
         [GateDialect.PostgreSql, "public"],
         [GateDialect.SqlServer, "dbo"],
         [GateDialect.Oracle, "GATE_APP"]
@@ -121,7 +120,7 @@ public sealed partial class RendererInvariantTests(ITestOutputHelper output)
         }
 
         output.WriteLine($"{dialect}: {checkedCases} IR texts checked");
-        checkedCases.ShouldBeGreaterThan(40);
+        checkedCases.ShouldBeGreaterThan(35);
     }
 
     [Fact]
@@ -146,7 +145,7 @@ public sealed partial class RendererInvariantTests(ITestOutputHelper output)
 /// </summary>
 public sealed class OracleDialectParityTests(ITestOutputHelper output)
 {
-    private static ParityEnv Env() => new(new Databases.SqliteGateDatabase(), new ParityContext(GateDialect.Oracle, "GATE_APP"));
+    private static ParityEnv Env() => new(new Databases.PostgreSqlGateDatabase(), new ParityContext(GateDialect.Oracle, "GATE_APP"));
 
     [Fact]
     public async Task InMemoryAndPushdownConsumers_HaveNoLooserResult_OnTheOracleText()

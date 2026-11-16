@@ -20,7 +20,7 @@ using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
@@ -280,8 +280,8 @@ public sealed class RowFilterChannelParityTests : IClassFixture<RowFilterChannel
         /// <summary>Issue #107: the key-set cache strategy is the global default and the data source carries the operator attestation.</summary>
         protected virtual bool UseKeySetCache => false;
 
-        /// <summary>Hook for variants: more tables and rows in the SQLite source (called after the base data was written).</summary>
-        protected virtual void SeedExtraData(SqliteConnection connection) { }
+        /// <summary>Hook for variants: more tables and rows in the PostgreSQL data source (called after the base data was written).</summary>
+        protected virtual void SeedExtraData(NpgsqlConnection connection) { }
 
         /// <summary>Hook for variants: more host settings (called after the base settings were applied).</summary>
         protected virtual void ConfigureHost(IWebHostBuilder builder) { }
@@ -317,9 +317,8 @@ public sealed class RowFilterChannelParityTests : IClassFixture<RowFilterChannel
         {
             var queriesDir = Path.Combine(_workDir, "queries");
             Directory.CreateDirectory(queriesDir);
-            var dbPath = Path.Combine(_workDir, "data.db");
-            SeedData(dbPath);
-            using (var extra = new SqliteConnection($"Data Source={dbPath}"))
+            var dbPath = SeedData();
+            using (var extra = new NpgsqlConnection(dbPath))
             {
                 extra.Open();
                 SeedExtraData(extra);
@@ -328,7 +327,7 @@ public sealed class RowFilterChannelParityTests : IClassFixture<RowFilterChannel
             ExpectedIds = ComputeExpected(dbPath);
 
             File.WriteAllText(Path.Combine(queriesDir, "air1_ids.sql"),
-                "-- @name air1_ids\n-- @datasource default\n-- @summary air1 ids\n-- @method GET\n\nSELECT id FROM air1");
+                "-- @name air1_ids\n-- @datasource default\n-- @summary air1 ids\n-- @method GET\n\nSELECT id FROM default.main.air1");
 
             _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
             {
@@ -338,8 +337,9 @@ public sealed class RowFilterChannelParityTests : IClassFixture<RowFilterChannel
                 b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
                 b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("run"));
 
-                b.UseSetting("Gateway:DataSources:Connections:default:Provider", "Sqlite");
-                b.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", $"Data Source={dbPath}");
+                b.UseSetting("Gateway:DataSources:Connections:default:Provider", "PostgreSql");
+                b.UseSetting("Gateway:DataSources:Connections:default:DefaultSchema", "main");
+                b.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", dbPath);
 
                 if (UseKeySetCache)
                 {
@@ -349,6 +349,7 @@ public sealed class RowFilterChannelParityTests : IClassFixture<RowFilterChannel
 
                 b.UseSetting("Gateway:WebSql:Enabled", "true");
                 b.UseSetting("Gateway:WebSql:DefaultDataSourceName", "default");
+                b.UseSetting("Gateway:DuckDbOlap:Enabled", "true");
 
                 b.UseSetting("Gateway:SqlEndpoints:Enabled", "true");
                 b.UseSetting("Gateway:SqlEndpoints:Directory", queriesDir);
@@ -368,7 +369,7 @@ public sealed class RowFilterChannelParityTests : IClassFixture<RowFilterChannel
         public Task DisposeAsync()
         {
             _factory?.Dispose();
-            SqliteConnection.ClearAllPools();
+            NpgsqlConnection.ClearAllPools();
             try { Directory.Delete(_workDir, true); } catch { /* best effort */ }
             return Task.CompletedTask;
         }
@@ -403,27 +404,21 @@ public sealed class RowFilterChannelParityTests : IClassFixture<RowFilterChannel
             return doc;
         }
 
-        private static void SeedData(string path)
-        {
-            using var conn = new SqliteConnection($"Data Source={path}");
-            conn.Open();
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = @"
-CREATE TABLE crane (serial_number TEXT PRIMARY KEY, is_delivered INTEGER);
-CREATE TABLE client (client_id INTEGER PRIMARY KEY, crane_serial_number TEXT);
-CREATE TABLE air1 (id INTEGER PRIMARY KEY, client_id INTEGER, value REAL);
-INSERT INTO crane VALUES ('C1', 1), ('C2', 1), ('C3', NULL), ('C4', NULL), ('C5', NULL);
-INSERT INTO client VALUES (1, 'C1'), (2, 'C2'), (3, 'C3'), (4, 'C4'), (5, 'C5'), (6, 'NO-CRANE');
-INSERT INTO air1 VALUES
-  (1, 1, 1.0), (2, 1, 1.5), (3, 2, 2.0), (4, 2, 2.5),
-  (5, 3, 3.0), (6, 3, 3.5), (7, 4, 4.0), (8, 4, 4.5), (9, 5, 5.0), (10, 5, 5.5),
-  (11, 6, 6.0), (12, 6, 6.5), (13, NULL, 7.0);";
-            cmd.ExecuteNonQuery();
-        }
+        private static string SeedData() => PostgresDataSource.Create("parity", """
+            CREATE TABLE crane (serial_number TEXT PRIMARY KEY, is_delivered INTEGER);
+            CREATE TABLE client (client_id INTEGER PRIMARY KEY, crane_serial_number TEXT);
+            CREATE TABLE air1 (id INTEGER PRIMARY KEY, client_id INTEGER, value REAL);
+            INSERT INTO crane VALUES ('C1', 1), ('C2', 1), ('C3', NULL), ('C4', NULL), ('C5', NULL);
+            INSERT INTO client VALUES (1, 'C1'), (2, 'C2'), (3, 'C3'), (4, 'C4'), (5, 'C5'), (6, 'NO-CRANE');
+            INSERT INTO air1 VALUES
+              (1, 1, 1.0), (2, 1, 1.5), (3, 2, 2.0), (4, 2, 2.5),
+              (5, 3, 3.0), (6, 3, 3.5), (7, 4, 4.0), (8, 4, 4.5), (9, 5, 5.0), (10, 5, 5.5),
+              (11, 6, 6.0), (12, 6, 6.5), (13, NULL, 7.0);
+            """);
 
         private static HashSet<long> ComputeExpected(string path)
         {
-            using var conn = new SqliteConnection($"Data Source={path}");
+            using var conn = new NpgsqlConnection(path);
             conn.Open();
             using var cmd = conn.CreateCommand();
             cmd.CommandText = @"
@@ -434,7 +429,7 @@ WHERE EXISTS (SELECT 1 FROM client c JOIN crane k ON k.serial_number = c.crane_s
             using var reader = cmd.ExecuteReader();
             while (reader.Read())
             {
-                ids.Add(reader.GetInt64(0));
+                ids.Add(Convert.ToInt64(reader.GetValue(0)));
             }
 
             return ids;
@@ -444,7 +439,7 @@ WHERE EXISTS (SELECT 1 FROM client c JOIN crane k ON k.serial_number = c.crane_s
         {
             await repo.UpsertTableMetadataAsync(new TableMetadata
             {
-                Table = new Table { Id = Guid.NewGuid(), DisplayName = id.TableName, TableName = id.TableName, SchemaName = id.Schema, SourceType = "Sqlite", SourceName = "default" },
+                Table = new Table { Id = Guid.NewGuid(), DisplayName = id.TableName, TableName = id.TableName, SchemaName = id.Schema, SourceType = "PostgreSql", SourceName = "default" },
                 Identifier = id,
                 Columns = columns.Select(c => new TableColumn { ColumnName = c.Name, DataType = c.Type }).ToList()
             });
@@ -462,7 +457,7 @@ WHERE EXISTS (SELECT 1 FROM client c JOIN crane k ON k.serial_number = c.crane_s
             {
                 await repo.UpsertTableMetadataAsync(new TableMetadata
                 {
-                    Table = new Table { Id = Guid.NewGuid(), DisplayName = id.TableName, TableName = id.TableName, SchemaName = id.Schema, SourceType = "Sqlite", SourceName = "default" },
+                    Table = new Table { Id = Guid.NewGuid(), DisplayName = id.TableName, TableName = id.TableName, SchemaName = id.Schema, SourceType = "PostgreSql", SourceName = "default" },
                     Identifier = id,
                     Columns = columns.Select(c => new TableColumn { ColumnName = c.Name, DataType = c.Type }).ToList()
                 });
@@ -510,9 +505,23 @@ WHERE EXISTS (SELECT 1 FROM client c JOIN crane k ON k.serial_number = c.crane_s
             var crane = (await repo.GetTableMetadataAsync(Crane))!;
             await repo.CreateConsentAsync(Consent(crane, Crane, []));
 
-            using var scope = _factory!.Services.CreateScope();
-            var admin = scope.ServiceProvider.GetRequiredService<Autheris.Application.VirtualFilters.VirtualFilterAdministrationService>();
-            var actor = new Autheris.Application.VirtualFilters.VirtualFilterActor(new Sid("S-1-5-21-FILTER-ADMIN"), IsSync: false);
+            await SeedDavidVirtualFilterAsync("default.main.*", UncoveredPolicy.Deny, "default.*.*.client_id");
+        }
+
+        private async Task SeedConsentRowFilterAsync(IGovernanceRepository repo, TableMetadata air1, TableMetadata client)
+        {
+            await repo.CreateConsentAsync(Consent(air1, Air1, []));
+            // The client table is readable without filter: it is the parent of the nested GraphQL query.
+            await repo.CreateConsentAsync(Consent(client, ClientTable, []));
+
+            await SeedDavidVirtualFilterAsync("default.main.air1", UncoveredPolicy.Skip, "default.main.air1.client_id");
+        }
+
+        private async Task SeedDavidVirtualFilterAsync(string scope, UncoveredPolicy uncovered, string targetPattern)
+        {
+            using var scopeContainer = _factory!.Services.CreateScope();
+            var admin = scopeContainer.ServiceProvider.GetRequiredService<Autheris.Application.VirtualFilters.VirtualFilterAdministrationService>();
+            var actor = new Autheris.Application.VirtualFilters.VirtualFilterActor(new Sid("S-1-5-21-FILTER-ADMIN"), IsSync: UseSqlDefinition);
             await admin.SaveFilterAsync(UseSqlDefinition
                 ? new VirtualFilter
                 {
@@ -545,34 +554,10 @@ WHERE EXISTS (SELECT 1 FROM client c JOIN crane k ON k.serial_number = c.crane_s
                 Name = "david",
                 GranteeType = GranteeType.User,
                 GranteeSid = new Sid(DavidSid),
-                Scope = "default.main.*",
-                Uncovered = UncoveredPolicy.Deny,
-                Bindings = [new FilterBinding { FilterName = "nicht_ausgelieferte_krane", TargetPattern = "default.*.*.client_id" }]
+                Scope = scope,
+                Uncovered = uncovered,
+                Bindings = [new FilterBinding { FilterName = "nicht_ausgelieferte_krane", TargetPattern = targetPattern }]
             }, actor);
-        }
-
-        private static async Task SeedConsentRowFilterAsync(IGovernanceRepository repo, TableMetadata air1, TableMetadata client)
-        {
-            // The David case as a consent row filter: air1 rows of clients whose crane is not delivered yet.
-            await repo.CreateConsentAsync(Consent(air1, Air1,
-            [
-                new ConsentRowFilter
-                {
-                    FilterType = RowFilterType.SubqueryCorrelated,
-                    DependentTable = ClientTable,
-                    DependentTableAlias = "client",
-                    PrimaryKeyColumn = "client_id",
-                    ForeignKeyColumn = "client_id",
-                    AdditionalHops =
-                    [
-                        new SubqueryJoinHop { Table = Crane, TableAlias = "crane", LeftJoinColumn = "crane.serial_number", RightJoinColumn = "client.crane_serial_number" }
-                    ],
-                    SubqueryFilterPredicateJson = "{\"crane.is_delivered\": null}"
-                }
-            ]));
-
-            // The client table is readable without filter: it is the parent of the nested GraphQL query.
-            await repo.CreateConsentAsync(Consent(client, ClientTable, []));
         }
 
         protected static Consent Consent(TableMetadata meta, TableIdentifier id, IReadOnlyList<ConsentRowFilter> rowFilters, ConsentEffect effect = ConsentEffect.Allow) => new()

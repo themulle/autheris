@@ -21,7 +21,8 @@ using Xunit;
 
 public sealed class DatasourceTestingServiceTests
 {
-    private readonly ITableMetadataRepository _metadataRepo = Substitute.For<ITableMetadataRepository>();
+    private readonly ITableMetadataRepository _metadataRepo =
+        global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
     private readonly IHttpClientFactory _httpClientFactory = Substitute.For<IHttpClientFactory>();
     private readonly IAuditLogRepository _auditRepo = Substitute.For<IAuditLogRepository>();
     private readonly IKeyVaultSecretProvider _secretProvider = Substitute.For<IKeyVaultSecretProvider>();

@@ -21,7 +21,7 @@ namespace TrinoSqlEngine.Tests.Properties;
 internal sealed record CaseCtx(TargetSqlDialect Dialect, bool StrictGuards, string TenantValue, string PolicyValue)
 {
     public static readonly TargetSqlDialect[] Governed =
-        [TargetSqlDialect.SqlServer, TargetSqlDialect.PostgreSql, TargetSqlDialect.DuckDb, TargetSqlDialect.Databricks, TargetSqlDialect.Oracle, TargetSqlDialect.Sqlite];
+        [TargetSqlDialect.SqlServer, TargetSqlDialect.PostgreSql, TargetSqlDialect.DuckDb, TargetSqlDialect.Databricks, TargetSqlDialect.Oracle];
 
     public static Gen<CaseCtx> Gen() =>
         from dialect in FsCheck.Fluent.Gen.Frequency(

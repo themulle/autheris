@@ -137,7 +137,7 @@ public sealed class BorderlineRemovalTests : IClassFixture<BorderlineRemovalTest
         {
             Factory.Dispose();
             _root.Dispose();
-            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            Npgsql.NpgsqlConnection.ClearAllPools();
         }
     }
 }

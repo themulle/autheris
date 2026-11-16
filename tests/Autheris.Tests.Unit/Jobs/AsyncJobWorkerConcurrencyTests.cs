@@ -28,6 +28,7 @@ using Shouldly;
 using Xunit;
 
 /// <summary>WP-ARC-A-12: worker/queue contract, parallel scheduling, sticky terminal states and sweeper.</summary>
+[Trait("Category", "Security")]
 public sealed class AsyncJobWorkerConcurrencyTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "autheris-a12-" + Guid.NewGuid().ToString("N"));

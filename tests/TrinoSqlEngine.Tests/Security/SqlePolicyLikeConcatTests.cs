@@ -50,15 +50,6 @@ public class SqlePolicyLikeConcatTests
         Assert.Contains(compiled.Parameters, p => Equals(p.Value, "sales\\_eu"));
     }
 
-    [Fact]
-    public void PolicyLike_ConcatPrefix_Sqlite_Rejected()
-    {
-        var predicate = Parse("email LIKE :org || '%'");
-        var caps = DialectCapabilityTable.Default.Get(TargetSqlDialect.Sqlite);
-
-        Assert.Throws<SqlCompileNotSupportedException>(() => DialectCapabilityValidator.Validate(Where(predicate.Expression), caps));
-    }
-
     [Theory]
     [InlineData("email LIKE UPPER(:org)")]
     [InlineData("email LIKE CASE WHEN region = 'a' THEN :org ELSE '%' END")]

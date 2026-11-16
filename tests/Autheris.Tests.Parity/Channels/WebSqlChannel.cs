@@ -66,7 +66,7 @@ public sealed class WebSqlChannel(ParityHostFixture host) : IParityChannel
             var root = doc.RootElement;
             if (status == 200 && root.ValueKind == JsonValueKind.Object && root.TryGetProperty("columns", out var cols))
             {
-                var names = cols.EnumerateArray().Select(c => c.GetString() ?? string.Empty).ToArray();
+                var names = cols.EnumerateArray().Select(ColumnName).ToArray();
                 var rows = new List<IReadOnlyDictionary<string, object?>>();
                 foreach (var row in root.GetProperty("rows").EnumerateArray())
                 {
@@ -107,4 +107,11 @@ public sealed class WebSqlChannel(ParityHostFixture host) : IParityChannel
             return new ChannelResult(status, null, ChannelResult.NoRows, body);
         }
     }
+
+    private static string ColumnName(JsonElement c) =>
+        c.ValueKind == JsonValueKind.Object && c.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String
+            ? n.GetString() ?? string.Empty
+            : c.ValueKind == JsonValueKind.String
+                ? c.GetString() ?? string.Empty
+                : string.Empty;
 }

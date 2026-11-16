@@ -42,7 +42,8 @@ public sealed class RestMcpHitlGovernanceTests
             Columns = [new TableColumn { TableId = table.Id, ColumnName = "email", DataType = "VARCHAR" }]
         });
 
-        var ticketId = $"H06-{Guid.NewGuid():N}";
+        var extSysId = Guid.NewGuid();
+        var extRef = $"H06-{Guid.NewGuid():N}";
         var created = await repo.CreateConsentRequestAsync(new ConsentRequest
         {
             TableId = meta.Table.Id,
@@ -54,11 +55,13 @@ public sealed class RestMcpHitlGovernanceTests
             RequestedValidTo = DateTimeOffset.UtcNow.AddDays(1),
             Status = "PENDING_EXTERNAL_APPROVAL",
             TenantId = new TenantId("tenant-a"),
-            ItsmTicketId = ticketId
+            WorkflowMode = ConsentWorkflowMode.External,
+            ExternalSystemId = extSysId,
+            ExternalReference = extRef
         });
 
-        (await repo.GetConsentRequestByTicketIdAsync(ticketId, new TenantId("tenant-b"))).ShouldBeNull();
-        (await repo.GetConsentRequestByTicketIdAsync(ticketId, new TenantId("tenant-a"))).ShouldNotBeNull();
+        (await repo.GetConsentRequestByExternalReferenceAsync(extSysId, extRef, new TenantId("tenant-b"))).ShouldBeNull();
+        (await repo.GetConsentRequestByExternalReferenceAsync(extSysId, extRef, new TenantId("tenant-a"))).ShouldNotBeNull();
 
         await repo.ActivateConsentForAutoApproveAsync(created.Id);
         await repo.ActivateConsentForAutoApproveAsync(created.Id);

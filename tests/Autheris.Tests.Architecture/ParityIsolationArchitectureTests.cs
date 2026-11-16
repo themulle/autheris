@@ -105,7 +105,7 @@ public sealed partial class ParityIsolationArchitectureTests
         var bad = new List<string>();
         if (!lines.Contains(RestoreLine)) bad.Add("locked-mode restore line missing");
         if (!lines.Contains(BuildLine)) bad.Add("build line missing");
-        if (lines.Any(l => l.StartsWith("if:", StringComparison.Ordinal))) bad.Add("the step must not be conditional");
+        if (lines.Any(l => l.StartsWith("if:", StringComparison.Ordinal) && l != "if: ${{ !cancelled() }}")) bad.Add("the step must not be conditional");
         if (lines.Any(l => l.StartsWith("continue-on-error", StringComparison.Ordinal))) bad.Add("the step must not continue on error");
         return bad;
     }
@@ -349,9 +349,11 @@ public sealed partial class ParityIsolationArchitectureTests
         // negative self-checks: the guard cannot be dropped, skipped, softened or moved to another job
         var good = $"jobs:\n  build-and-test:\n    steps:\n      - name: Test\n        run: dotnet test x\n      - name: Compile-only guard\n        run: |\n          {RestoreLine}\n          {BuildLine}\n  other:\n    steps: []\n";
         CompileGuardViolations(good).ShouldBeEmpty();
+        CompileGuardViolations(good.Replace("        run: |", "        if: ${{ !cancelled() }}\n        run: |", StringComparison.Ordinal)).ShouldBeEmpty();
         CompileGuardViolations(good.Replace($"          {BuildLine}\n", string.Empty, StringComparison.Ordinal)).ShouldNotBeEmpty();
         CompileGuardViolations(good.Replace(" --locked-mode", string.Empty, StringComparison.Ordinal)).ShouldNotBeEmpty();
         CompileGuardViolations(good.Replace("        run: |", "        if: github.event_name == 'push'\n        run: |", StringComparison.Ordinal)).ShouldNotBeEmpty();
+        CompileGuardViolations(good.Replace("        run: |", "        if: always()\n        run: |", StringComparison.Ordinal)).ShouldNotBeEmpty();
         CompileGuardViolations(good.Replace("        run: |", "        continue-on-error: true\n        run: |", StringComparison.Ordinal)).ShouldNotBeEmpty();
         CompileGuardViolations(good.Replace("  build-and-test:", "  build:", StringComparison.Ordinal)).ShouldNotBeEmpty();
     }
@@ -562,11 +564,11 @@ public sealed partial class ParityIsolationArchitectureTests
         var text = ReadWorkflow(NightlyWorkflow);
         text.ShouldContain("^[A-Za-z0-9_.~=\\!\\&\\|\\(\\)]*$");
         text.ShouldContain("^[0-9]{0,10}$");
-        text.ShouldContain("FILTER=\"Category=Parity&Dialect!=Container\"");
+        text.ShouldContain("FILTER=\"Category=Parity&Dialect=Container\"");
         text.ShouldContain("FILTER=\"$FILTER&($PARITY_FILTER_INPUT)\"");
         text.ShouldContain("--filter \"$FILTER\"");
         text.ShouldNotContain("eval ");
-        text.IndexOf("Validate inputs", StringComparison.Ordinal).ShouldBeLessThan(text.IndexOf("Parity tests (SQLite)", StringComparison.Ordinal));
+        text.IndexOf("Validate inputs", StringComparison.Ordinal).ShouldBeLessThan(text.IndexOf("Parity tests (container dialects)", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -670,33 +672,28 @@ public sealed partial class ParityIsolationArchitectureTests
     {
         // SEC-PAR-01, SEC-PAR-02 for the WP4 job
         var workflow = ReadWorkflow(NightlyWorkflow);
-        var sqlite = JobBlock(workflow, "parity-sqlite");
         var dialects = JobBlock(workflow, "parity-dialects");
 
-        sqlite.ShouldContain("FILTER=\"Category=Parity&Dialect!=Container\"");
-        sqlite.ShouldNotContain("Dialect=Container");
+        workflow.ShouldNotContain("parity-sqlite");
         dialects.ShouldContain("FILTER=\"Category=Parity&Dialect=Container\"");
         dialects.ShouldNotContain("Dialect!=Container");
 
-        foreach (var job in new[] { sqlite, dialects })
-        {
-            job.ShouldContain("FILTER=\"$FILTER&($PARITY_FILTER_INPUT)\"");
-            job.ShouldContain("--filter \"$FILTER\"");
-            job.ShouldContain("^[A-Za-z0-9_.~=\\!\\&\\|\\(\\)]*$");
-            job.ShouldContain("^[0-9]{0,10}$");
-            job.ShouldContain("permissions:\n      contents: read");
-            job.ShouldContain("persist-credentials: false");
-            job.IndexOf("Validate inputs", StringComparison.Ordinal).ShouldBeGreaterThan(-1);
-            job.IndexOf("Validate inputs", StringComparison.Ordinal).ShouldBeLessThan(job.IndexOf("dotnet test", StringComparison.Ordinal));
-            job.ShouldNotContain("secrets.");
-            job.ShouldNotContain("eval ");
-            JoinedLines(job).Where(l => l.TrimStart().StartsWith("run:", StringComparison.Ordinal) && l.Contains("${{", StringComparison.Ordinal)).ShouldBeEmpty();
-        }
+        dialects.ShouldContain("FILTER=\"$FILTER&($PARITY_FILTER_INPUT)\"");
+        dialects.ShouldContain("--filter \"$FILTER\"");
+        dialects.ShouldContain("^[A-Za-z0-9_.~=\\!\\&\\|\\(\\)]*$");
+        dialects.ShouldContain("^[0-9]{0,10}$");
+        dialects.ShouldContain("permissions:\n      contents: read");
+        dialects.ShouldContain("persist-credentials: false");
+        dialects.IndexOf("Validate inputs", StringComparison.Ordinal).ShouldBeGreaterThan(-1);
+        dialects.IndexOf("Validate inputs", StringComparison.Ordinal).ShouldBeLessThan(dialects.IndexOf("dotnet test", StringComparison.Ordinal));
+        dialects.ShouldNotContain("secrets.");
+        dialects.ShouldNotContain("eval ");
+        JoinedLines(dialects).Where(l => l.TrimStart().StartsWith("run:", StringComparison.Ordinal) && l.Contains("${{", StringComparison.Ordinal)).ShouldBeEmpty();
 
         dialects.ShouldContain("parity-baseline-dialects.json");
         dialects.ShouldContain("AUTHERIS_PARITY_RUN: '1'");
         dialects.ShouldContain("retention-days: 14");
-        Regex.Count(workflow, @"^  parity-[a-z]+:\s*$", RegexOptions.Multiline).ShouldBe(2);
+        Regex.Count(workflow, @"^  parity-[a-z]+:\s*$", RegexOptions.Multiline).ShouldBe(1);
     }
 
     [Fact]

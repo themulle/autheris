@@ -16,7 +16,7 @@ using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
-using Microsoft.Data.Sqlite;
+using Autheris.Tests.Common.Fakes;
 using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
@@ -26,28 +26,14 @@ using Xunit;
 /// Mandatory Phase 3 security tests for REQ-DATA-75 / Issue #75 Addendum:
 /// SEC-DATA75-01..05 cross-source GraphQL relations wiring and security guardrails.
 /// </summary>
-public sealed class CrossSourceRelationsSecurityTests : IDisposable
+[Trait("Category", "Security")]
+public sealed class CrossSourceRelationsSecurityTests
 {
-    private static readonly TableIdentifier OrdersTableId = new("sales", "dbo", "orders");
+    private static readonly TableIdentifier OrdersTableId = new("sales", "public", "orders");
     private static readonly TableIdentifier CustomersTableId = new("crm", "public", "customers");
     private static readonly TenantId DefaultTenant = new("tenant-gold");
 
-    private readonly string _connectionString = $"Data Source=file:crosstree{Guid.NewGuid():N}?mode=memory&cache=shared";
-    private readonly SqliteConnection _keepAlive;
-
-    public CrossSourceRelationsSecurityTests()
-    {
-        _keepAlive = new SqliteConnection(_connectionString);
-        _keepAlive.Open();
-        using var cmd = _keepAlive.CreateCommand();
-        cmd.CommandText = """
-            CREATE TABLE orders (order_id INTEGER PRIMARY KEY, customer_id INTEGER, total DECIMAL);
-            INSERT INTO orders VALUES (1, 10, 100.50), (2, 20, 250.00);
-            """;
-        cmd.ExecuteNonQuery();
-    }
-
-    public void Dispose() => _keepAlive.Dispose();
+    private readonly string _connectionString = "Host=unused;Database=orders";
 
     private static ClaimsPrincipal CreatePrincipal(string sid = "S-1-5-21-USER", string tenant = "tenant-gold")
     {
@@ -68,9 +54,9 @@ public sealed class CrossSourceRelationsSecurityTests : IDisposable
         Table = new Table
         {
             SourceName = "OrdersSource",
-            SchemaName = "dbo",
+            SchemaName = "public",
             TableName = "orders",
-            SourceType = "Sqlite",
+            SourceType = "PostgreSQL",
             DataSourceType = DataSourceType.Sql,
             IsActive = true
         },
@@ -103,11 +89,16 @@ public sealed class CrossSourceRelationsSecurityTests : IDisposable
         ]
     };
 
-    private sealed class CountingFactory(string connectionString) : ISqlConnectionFactory
+    private sealed class CountingFactory(string connectionString, string? json = null) : ISqlConnectionFactory
     {
+        private const string TwoOrdersJson =
+            """[{"order_id":1,"customer_id":10,"total":100.50},{"order_id":2,"customer_id":20,"total":250.00}]""";
+
         public Task<DbConnection> CreateOpenConnectionAsync(DataSourceConnectionOptions options, CancellationToken ct = default)
         {
-            var connection = new SqliteConnection(connectionString);
+            _ = connectionString;
+            var payload = json ?? TwoOrdersJson;
+            var connection = new CallbackDbConnection((_, _) => new StubDbDataReader(["json"], [[payload]]));
             connection.Open();
             return Task.FromResult<DbConnection>(connection);
         }
@@ -197,7 +188,7 @@ public sealed class CrossSourceRelationsSecurityTests : IDisposable
             {
                 Connections = new Dictionary<string, DataSourceConnectionOptions>
                 {
-                    ["OrdersSource"] = new() { Provider = "Sqlite", ConnectionString = _connectionString }
+                    ["OrdersSource"] = new() { Provider = "PostgreSQL", ConnectionString = _connectionString }
                 }
             }
         };
@@ -215,7 +206,7 @@ public sealed class CrossSourceRelationsSecurityTests : IDisposable
         var resolver = Substitute.For<ICrossSourceRelationResolver>();
         var service = new GovernedTreeQueryService(
             accessResolver,
-            new CountingFactory(_connectionString),
+            new CountingFactory(_connectionString, """[{"order_id":1,"customer_id":10,"total":100.50}]"""),
             new FakeAuditLogRepository(),
             Substitute.For<IColumnMaskingProvider>(),
             Options.Create(options),
@@ -272,7 +263,7 @@ public sealed class CrossSourceRelationsSecurityTests : IDisposable
             {
                 Connections = new Dictionary<string, DataSourceConnectionOptions>
                 {
-                    ["OrdersSource"] = new() { Provider = "Sqlite", ConnectionString = _connectionString }
+                    ["OrdersSource"] = new() { Provider = "PostgreSQL", ConnectionString = _connectionString }
                 }
             }
         };
@@ -290,7 +281,7 @@ public sealed class CrossSourceRelationsSecurityTests : IDisposable
         var resolver = Substitute.For<ICrossSourceRelationResolver>();
         var service = new GovernedTreeQueryService(
             accessResolver,
-            new CountingFactory(_connectionString),
+            new CountingFactory(_connectionString, """[{"order_id":1,"customer_id":10,"total":100.50}]"""),
             new FakeAuditLogRepository(),
             Substitute.For<IColumnMaskingProvider>(),
             Options.Create(options),
@@ -347,7 +338,7 @@ public sealed class CrossSourceRelationsSecurityTests : IDisposable
             {
                 Connections = new Dictionary<string, DataSourceConnectionOptions>
                 {
-                    ["OrdersSource"] = new() { Provider = "Sqlite", ConnectionString = _connectionString }
+                    ["OrdersSource"] = new() { Provider = "PostgreSQL", ConnectionString = _connectionString }
                 }
             }
         };
@@ -365,7 +356,7 @@ public sealed class CrossSourceRelationsSecurityTests : IDisposable
         var resolver = Substitute.For<ICrossSourceRelationResolver>();
         var service = new GovernedTreeQueryService(
             accessResolver,
-            new CountingFactory(_connectionString),
+            new CountingFactory(_connectionString, """[{"order_id":1,"customer_id":10,"total":100.50}]"""),
             new FakeAuditLogRepository(),
             Substitute.For<IColumnMaskingProvider>(),
             Options.Create(options),
@@ -422,7 +413,7 @@ public sealed class CrossSourceRelationsSecurityTests : IDisposable
             {
                 Connections = new Dictionary<string, DataSourceConnectionOptions>
                 {
-                    ["OrdersSource"] = new() { Provider = "Sqlite", ConnectionString = _connectionString }
+                    ["OrdersSource"] = new() { Provider = "PostgreSQL", ConnectionString = _connectionString }
                 }
             }
         };
@@ -440,7 +431,7 @@ public sealed class CrossSourceRelationsSecurityTests : IDisposable
         var resolver = Substitute.For<ICrossSourceRelationResolver>();
         var service = new GovernedTreeQueryService(
             accessResolver,
-            new CountingFactory(_connectionString),
+            new CountingFactory(_connectionString, """[{"order_id":1,"customer_id":10,"total":100.50}]"""),
             new FakeAuditLogRepository(),
             Substitute.For<IColumnMaskingProvider>(),
             Options.Create(options),
@@ -498,7 +489,7 @@ public sealed class CrossSourceRelationsSecurityTests : IDisposable
             {
                 Connections = new Dictionary<string, DataSourceConnectionOptions>
                 {
-                    ["OrdersSource"] = new() { Provider = "Sqlite", ConnectionString = _connectionString }
+                    ["OrdersSource"] = new() { Provider = "PostgreSQL", ConnectionString = _connectionString }
                 }
             }
         };
@@ -524,7 +515,7 @@ public sealed class CrossSourceRelationsSecurityTests : IDisposable
                 QueryCost: 1.0)));
         var service = new GovernedTreeQueryService(
             accessResolver,
-            new CountingFactory(_connectionString),
+            new CountingFactory(_connectionString, """[{"order_id":1,"customer_id":10,"total":100.50}]"""),
             new FakeAuditLogRepository(),
             Substitute.For<IColumnMaskingProvider>(),
             Options.Create(options),
@@ -587,7 +578,7 @@ public sealed class CrossSourceRelationsSecurityTests : IDisposable
             {
                 Connections = new Dictionary<string, DataSourceConnectionOptions>
                 {
-                    ["OrdersSource"] = new() { Provider = "Sqlite", ConnectionString = _connectionString }
+                    ["OrdersSource"] = new() { Provider = "PostgreSQL", ConnectionString = _connectionString }
                 }
             }
         };
@@ -678,7 +669,7 @@ public sealed class CrossSourceRelationsSecurityTests : IDisposable
             {
                 Connections = new Dictionary<string, DataSourceConnectionOptions>
                 {
-                    ["OrdersSource"] = new() { Provider = "Sqlite", ConnectionString = _connectionString }
+                    ["OrdersSource"] = new() { Provider = "PostgreSQL", ConnectionString = _connectionString }
                 }
             }
         };

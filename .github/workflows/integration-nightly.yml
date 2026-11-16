@@ -1,0 +1,110 @@
+name: Integration nightly
+
+# WP-OI-CI-5 (#522): nightly execution of Oracle, Stress, and Spark integration suites (SEC-OI-522-4, SEC-OI-522-5).
+# Triggers on schedule (0 1 * * *) and workflow_dispatch only; never on pull_request, pull_request_target, workflow_run, or issue_comment.
+# Top-level permissions are empty; the test job has contents: read only, and report-failure opens/updates one rolling
+# nightly-failure / ci-nightly-failure issue with only the run URL and failed job ids.
+on:
+  schedule:
+    - cron: '0 1 * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  integration-nightly:
+    name: Nightly Integration Tests (Oracle, Stress, Spark)
+    if: github.event.repository.fork == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    env:
+      # WP-OI-CI-4: use the pre-pulled, digest-pinned Ryuk image (TestImages.Ryuk).
+      TESTCONTAINERS_RYUK_CONTAINER_IMAGE: testcontainers/ryuk:0.14.0@sha256:7c1a8a9a47c780ed0f983770a662f80deb115d95cce3e2daa3d12115b8cd28f0
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - name: Restore with Locked Mode
+        run: dotnet restore Autheris.sln --locked-mode
+
+      - name: Pre-pull Testcontainers images (background)
+        run: |
+          : > "$RUNNER_TEMP/prepull.log"
+          setsid bash -c '
+            while IFS= read -r image; do
+              [ -n "$image" ] || continue
+              ( docker pull --quiet "$image" >> "$RUNNER_TEMP/prepull.log" 2>&1 || echo "PREPULL-FAILED: $image" >> "$RUNNER_TEMP/prepull.log" ) &
+            done < tests/test-images.txt
+            wait
+            echo "PREPULL-DONE" >> "$RUNNER_TEMP/prepull.log"
+          ' > /dev/null 2>&1 &
+
+      - name: Build integration tests
+        run: dotnet build tests/Autheris.Tests.Integration -c Release --no-restore -p:AutherisIncludeTestAuth=true
+
+      - name: Wait for image pre-pull
+        run: |
+          for _ in $(seq 1 120); do
+            grep -q '^PREPULL-DONE$' "$RUNNER_TEMP/prepull.log" && break
+            sleep 5
+          done
+          cat "$RUNNER_TEMP/prepull.log"
+          grep -q '^PREPULL-DONE$' "$RUNNER_TEMP/prepull.log" || echo "::warning::Image pre-pull did not finish; tests pull on demand"
+          if grep -q '^PREPULL-FAILED:' "$RUNNER_TEMP/prepull.log"; then
+            echo "::warning::Some images failed to pre-pull; tests pull on demand and fail on their own if the registry is unavailable"
+          fi
+
+      - name: Test Oracle, Stress, and Spark Integration Suites
+        timeout-minutes: 85
+        run: dotnet test tests/Autheris.Tests.Integration -c Release --no-build -p:AutherisIncludeTestAuth=true --filter "Category=Oracle|Category=Stress|Category=Spark" --logger "trx" --results-directory ${{ runner.temp }}/test-results --blame-hang-timeout 5m --blame-hang-dump-type mini --blame-crash
+
+      - name: Upload nightly integration test results (TRX)
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-results-integration-nightly
+          path: ${{ runner.temp }}/test-results
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Upload nightly integration crash/hang diagnostics
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: diagnostics-integration-nightly
+          path: |
+            **/Sequence_*.xml
+            **/*.dmp
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # Opens or updates one issue per workflow when a scheduled run fails (only the run URL and failed job ids are posted).
+  report-failure:
+    name: Report scheduled failure
+    needs: [integration-nightly]
+    if: failure() && github.event_name == 'schedule' && github.event.repository.fork == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+      - name: Open or update the failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: bash .github/scripts/report-scheduled-failure.sh

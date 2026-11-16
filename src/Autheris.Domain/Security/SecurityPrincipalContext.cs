@@ -91,7 +91,7 @@ public sealed record SecurityPrincipalContext
     public System.Security.Claims.ClaimsPrincipal? Principal { get; init; }
 
     /// <summary>Cluster-level administrator authorized to perform cross-tenant operations.</summary>
-    public bool IsClusterAdmin => ClusterRoles.Any(r => !r.Contains(':') && string.Equals(r, "ClusterAdmin", StringComparison.Ordinal));
+    public bool IsClusterAdmin => ClusterRoles.Any(r => !r.Contains(':', StringComparison.Ordinal) && string.Equals(r, "ClusterAdmin", StringComparison.Ordinal));
 
     /// <summary>Returns true if the principal possesses any of the specified roles in either tenant or cluster scope.</summary>
     public bool HasAnyRole(params string[] roles)
@@ -122,7 +122,7 @@ public sealed record SecurityPrincipalContext
         // Cluster roles can satisfy any role (global scope), but roles containing ':' are tenant-scoped and must be ignored for global checks
         foreach (var r in ClusterRoles)
         {
-            if (r.Contains(':')) continue;
+            if (r.Contains(':', StringComparison.Ordinal)) continue;
             if (GatewayRoleExtensions.TryParseGlobalRole(r, out var parsed) && parsed.Implies(role))
             {
                 return true;
@@ -138,7 +138,7 @@ public sealed record SecurityPrincipalContext
         // Tenant-scoped roles can only satisfy domain/tenant-scoped roles; ignore prefixed roles containing ':'
         foreach (var r in TenantRoles)
         {
-            if (r.Contains(':')) continue;
+            if (r.Contains(':', StringComparison.Ordinal)) continue;
             if (GatewayRoleExtensions.TryParseGlobalRole(r, out var parsed))
             {
                 if (parsed is GatewayRole.ClusterAdmin or GatewayRole.GovernanceAdmin)

@@ -150,6 +150,7 @@ public static class SecurityContextFactory
             TenantSelectedByHeader = selectedByHeader,
             ClientIp = clientIp,
             Caller = caller,
+            Claims = user.Claims,
             Principal = user
         };
     }
@@ -159,9 +160,12 @@ public static class SecurityContextFactory
         string? app = GetRawHeader(context, CallerAppHeaderName, CallerAppHeaderNameAlt);
         string? ver = GetRawHeader(context, CallerVersionHeaderName, CallerVersionHeaderNameAlt);
         string? qry = GetRawHeader(context, CallerQueryHeaderName, CallerQueryHeaderNameAlt);
-        string? clientId = context.User.FindFirst("azp")?.Value
-            ?? context.User.FindFirst("appid")?.Value
-            ?? context.User.FindFirst("client_id")?.Value;
+        bool isAuthenticated = context.User.Identity?.IsAuthenticated == true;
+        string? clientId = isAuthenticated
+            ? context.User.FindFirst("azp")?.Value
+                ?? context.User.FindFirst("appid")?.Value
+                ?? context.User.FindFirst("client_id")?.Value
+            : null;
 
         if (app == null && ver == null && qry == null && clientId == null) return null;
 

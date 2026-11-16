@@ -30,6 +30,7 @@ using Xunit;
 /// <summary>
 /// Security review 2026-10-02, work package D2: REST endpoints, MCP sessions, HitL and ITSM webhooks.
 /// </summary>
+[Trait("Category", "Security")]
 public class RestMcpHitlAndWebhookSecurityTests
 {
     // =========================================================================
@@ -409,14 +410,8 @@ public class RestMcpHitlAndWebhookSecurityTests
             return request;
         }
 
-        public Task<ConsentRequest?> GetConsentRequestByTicketIdAsync(string ticketId, CancellationToken ct = default)
-        {
-            UnscopedLookups++;
-            return Task.FromResult(_requests.FirstOrDefault(r => r.ItsmTicketId == ticketId));
-        }
-
-        public Task<ConsentRequest?> GetConsentRequestByTicketIdAsync(string ticketId, TenantId tenantId, CancellationToken ct = default)
-            => Task.FromResult(_requests.FirstOrDefault(r => r.ItsmTicketId == ticketId && r.TenantId == tenantId));
+        public Task<ConsentRequest?> GetConsentRequestByExternalReferenceAsync(Guid externalSystemId, string externalReference, TenantId tenantId, CancellationToken ct = default)
+            => Task.FromResult(_requests.FirstOrDefault(r => r.ExternalSystemId == externalSystemId && r.ExternalReference == externalReference && r.TenantId == tenantId));
 
         public Task ActivateConsentAsync(Guid requestId, CancellationToken ct = default)
             => ActivateConsentAsync(requestId, null, ct);
@@ -473,6 +468,141 @@ public class RestMcpHitlAndWebhookSecurityTests
         public Task<ConsentRequest?> GetConsentRequestAsync(Guid requestId, CancellationToken ct = default) => Task.FromResult(_requests.FirstOrDefault(r => r.Id == requestId));
         public Task<IReadOnlyList<ConsentRequest>> GetPendingRequestsForApproverAsync(Sid approverSid, CancellationToken ct = default) => throw new NotSupportedException();
         public Task DeleteConsentRequestAsync(Guid requestId, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task UpdateConsentRequestTicketIdAsync(Guid requestId, string ticketId, CancellationToken ct = default) => throw new NotSupportedException();
+    }
+
+    // =========================================================================
+    // C11 / SEC-50-13: Config-sync webhook body SHA-256 deduplication
+    // =========================================================================
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task ConfigSyncWebhook_replayed_body_with_new_delivery_id_is_not_retriggered()
+    {
+        var store = new RecordingClusterStateProvider();
+        var service = CreateWebhookService(store);
+        const string secret = "webhook-secret-key-for-test";
+        const string payload = """{"ref":"refs/heads/main","after":"abc123"}""";
+        var opts = WebhookOptions(secret);
+
+        var firstContext = CreateWebhookHttpContext(payload, secret, "delivery-1");
+        var firstResult = await VirtualFilterEndpoints.HandleConfigSyncWebhookAsync(firstContext, service, opts);
+
+        var firstStatus = firstResult.ShouldBeAssignableTo<IStatusCodeHttpResult>();
+        firstStatus!.StatusCode.ShouldBe(StatusCodes.Status202Accepted);
+        service.LastWebhookDeliveryId.ShouldBe("delivery-1");
+        var firstTriggerAt = service.LastWebhookTriggerAt;
+        firstTriggerAt.ShouldNotBeNull();
+        store.SetKeys.Count.ShouldBe(1);
+        store.SetKeys[0].Key.ShouldStartWith("vf:webhook:");
+        store.SetKeys[0].Ttl.ShouldBe(TimeSpan.FromHours(24));
+
+        var replayContext = CreateWebhookHttpContext(payload, secret, "delivery-2");
+        var replayResult = await VirtualFilterEndpoints.HandleConfigSyncWebhookAsync(replayContext, service, opts);
+
+        var replayStatus = replayResult.ShouldBeAssignableTo<IStatusCodeHttpResult>();
+        replayStatus!.StatusCode.ShouldBe(StatusCodes.Status202Accepted);
+        service.LastWebhookDeliveryId.ShouldBe("delivery-1");
+        service.LastWebhookTriggerAt.ShouldBe(firstTriggerAt);
+        store.SetKeys.Count.ShouldBe(1);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task ConfigSyncWebhook_invalid_signature_does_not_store_hash()
+    {
+        var store = new RecordingClusterStateProvider();
+        var service = CreateWebhookService(store);
+        const string payload = """{"ref":"refs/heads/main","after":"abc123"}""";
+        var opts = WebhookOptions("correct-secret");
+
+        var context = CreateWebhookHttpContext(payload, "wrong-secret", "delivery-bad-sig");
+        var result = await VirtualFilterEndpoints.HandleConfigSyncWebhookAsync(context, service, opts);
+
+        var status = result.ShouldBeAssignableTo<IStatusCodeHttpResult>();
+        status!.StatusCode.ShouldBe(StatusCodes.Status401Unauthorized);
+        store.SetKeys.ShouldBeEmpty();
+        service.LastWebhookDeliveryId.ShouldBeNull();
+        service.LastWebhookTriggerAt.ShouldBeNull();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task ConfigSyncWebhook_store_failure_returns_503()
+    {
+        var store = new RecordingClusterStateProvider { FailOperations = true };
+        var service = CreateWebhookService(store);
+        const string secret = "webhook-secret-key-for-test";
+        const string payload = """{"ref":"refs/heads/main","after":"abc123"}""";
+
+        var context = CreateWebhookHttpContext(payload, secret, "delivery-outage");
+        var result = await VirtualFilterEndpoints.HandleConfigSyncWebhookAsync(context, service, WebhookOptions(secret));
+
+        var status = result.ShouldBeAssignableTo<IStatusCodeHttpResult>();
+        status!.StatusCode.ShouldBe(StatusCodes.Status503ServiceUnavailable);
+        service.LastWebhookDeliveryId.ShouldBeNull();
+        service.LastWebhookTriggerAt.ShouldBeNull();
+    }
+
+    private static IOptions<GatewayOptions> WebhookOptions(string secret) =>
+        Options.Create(new GatewayOptions { VirtualFilters = new VirtualFilterOptions { WebhookSecret = secret } });
+
+    private static Autheris.Application.VirtualFilters.VirtualFilterAdministrationService CreateWebhookService(
+        Autheris.Application.State.IDistributedClusterStateProvider clusterState) =>
+        new(
+            new EmptyVirtualFilterRepository(),
+            new Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository(),
+            Options.Create(new GatewayOptions()),
+            clusterState: clusterState);
+
+    private static DefaultHttpContext CreateWebhookHttpContext(string payload, string signingSecret, string deliveryId)
+    {
+        var bodyBytes = Encoding.UTF8.GetBytes(payload);
+        var mac = HMACSHA256.HashData(Encoding.UTF8.GetBytes(signingSecret), bodyBytes);
+        var context = new DefaultHttpContext();
+        context.Request.Method = HttpMethods.Post;
+        context.Request.Body = new MemoryStream(bodyBytes);
+        context.Request.ContentLength = bodyBytes.Length;
+        context.Request.Headers["X-GitHub-Delivery"] = deliveryId;
+        context.Request.Headers["X-Hub-Signature-256"] = "sha256=" + Convert.ToHexStringLower(mac);
+        return context;
+    }
+
+    private sealed class EmptyVirtualFilterRepository : Autheris.Application.VirtualFilters.IVirtualFilterRepository
+    {
+        public Task<Autheris.Application.VirtualFilters.VirtualFilterSnapshot> LoadSnapshotAsync(CancellationToken ct = default)
+            => Task.FromResult(new Autheris.Application.VirtualFilters.VirtualFilterSnapshot(1, [], []));
+        public Task<long> GetGenerationAsync(CancellationToken ct = default) => Task.FromResult(1L);
+        public Task ApplyAsync(Autheris.Application.VirtualFilters.VirtualFilterChangeSet changes, CancellationToken ct = default) => Task.CompletedTask;
+    }
+
+    private sealed class RecordingClusterStateProvider : Autheris.Application.State.IDistributedClusterStateProvider
+    {
+        private readonly Autheris.Application.State.InMemoryClusterStateProvider _inner = new();
+        public bool FailOperations { get; init; }
+        public List<(string Key, TimeSpan Ttl)> SetKeys { get; } = [];
+
+        public ValueTask<T?> GetAsync<T>(string key, CancellationToken ct = default)
+        {
+            if (FailOperations) throw new Autheris.Application.State.ClusterStateUnavailableException("Simulated store outage.");
+            return _inner.GetAsync<T>(key, ct);
+        }
+
+        public ValueTask SetAsync<T>(string key, T value, TimeSpan ttl, CancellationToken ct = default)
+        {
+            if (FailOperations) throw new Autheris.Application.State.ClusterStateUnavailableException("Simulated store outage.");
+            SetKeys.Add((key, ttl));
+            return _inner.SetAsync(key, value, ttl, ct);
+        }
+
+        public ValueTask<bool> RemoveAsync(string key, CancellationToken ct = default) => _inner.RemoveAsync(key, ct);
+        public ValueTask<long?> IncrementAsync(string key, long delta, TimeSpan ttl, CancellationToken ct = default) => _inner.IncrementAsync(key, delta, ttl, ct);
+        public ValueTask<(Autheris.Application.State.BudgetConsumeOutcome Outcome, long ConsumedAfter)> TryConsumeBudgetAsync(string key, long cost, long limit, TimeSpan ttl, CancellationToken ct = default) => _inner.TryConsumeBudgetAsync(key, cost, limit, ttl, ct);
+        public ValueTask PublishEventAsync<T>(string channel, T payload, CancellationToken ct = default) => _inner.PublishEventAsync(channel, payload, ct);
+        public IAsyncDisposable SubscribeAsync<T>(string channel, Func<T, ValueTask> handler, CancellationToken ct = default) => _inner.SubscribeAsync(channel, handler, ct);
+        public ValueTask<IAsyncDisposable?> TryAcquireLockAsync(string resourceKey, TimeSpan expiry, CancellationToken ct = default) => _inner.TryAcquireLockAsync(resourceKey, expiry, ct);
+        public ValueTask<Autheris.Application.State.IDistributedLease?> TryAcquireLeaseAsync(string resourceKey, TimeSpan ttl, CancellationToken ct = default) => _inner.TryAcquireLeaseAsync(resourceKey, ttl, ct);
+        public ValueTask<bool?> TryAcquireSlotAsync(string setKey, string member, int limit, TimeSpan ttl, CancellationToken ct = default) => _inner.TryAcquireSlotAsync(setKey, member, limit, ttl, ct);
+        public ValueTask<bool> RenewSlotAsync(string setKey, string member, TimeSpan ttl, CancellationToken ct = default) => _inner.RenewSlotAsync(setKey, member, ttl, ct);
+        public ValueTask ReleaseSlotAsync(string setKey, string member, CancellationToken ct = default) => _inner.ReleaseSlotAsync(setKey, member, ct);
     }
 }

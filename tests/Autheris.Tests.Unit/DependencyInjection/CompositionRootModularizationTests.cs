@@ -69,9 +69,9 @@ public sealed class CompositionRootModularizationTests
     }
 
     [Fact]
-    public void ProviderExecutionGuard_IsResolvedFromTheHost_AsTheSqliteGuard()
+    public void ProviderExecutionGuard_IsResolvedFromTheHost_AsThePassThroughGuard()
     {
-        // L-A3: the governed executor requires the guard; the host must register the real (SQLite interrupting) one, never pass-through.
+        // SQLite execution guard was removed; the host registers the stateless pass-through guard.
         var (services, options, env) = CreateTestSetup();
         services.AddAutherisStorage(options, env);
         services.AddAutherisSqlEngine(options);
@@ -79,7 +79,7 @@ public sealed class CompositionRootModularizationTests
 
         var guard = services.BuildServiceProvider().GetRequiredService<IProviderExecutionGuard>();
 
-        guard.ShouldBeOfType<Autheris.Infrastructure.Persistence.SqliteProviderExecutionGuard>();
+        guard.ShouldBeOfType<PassThroughExecutionGuard>();
     }
 
     [Fact]

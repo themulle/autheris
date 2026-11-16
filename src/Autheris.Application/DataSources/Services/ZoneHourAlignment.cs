@@ -2,7 +2,6 @@ namespace Autheris.Application.DataSources.Services;
 
 using System;
 using System.Collections.Concurrent;
-using System.Globalization;
 
 internal static class ZoneHourAlignment
 {
@@ -12,30 +11,32 @@ internal static class ZoneHourAlignment
     {
         var (constant, minutePart) = Cache.GetOrAdd(zoneId, id =>
         {
-            var zoneArms = SqliteZoneOffsetTable.Get(id);
-            var baseMinutes = ParseMinutePart(zoneArms.BaseOffset);
-            foreach (var arm in zoneArms.Arms)
+            if (!TimeZoneInfo.TryFindSystemTimeZoneById(id, out var tz))
             {
-                if (ParseMinutePart(arm.Offset) != baseMinutes)
+                throw new ArgumentException($"Time zone '{id}' is unknown.", nameof(id));
+            }
+
+            var baseMinutes = (int)Math.Abs(tz.BaseUtcOffset.TotalMinutes) % 60;
+            foreach (var rule in tz.GetAdjustmentRules())
+            {
+                // Ignore historical pre-1970 LMT/offset rules so modern zones align with Unix-epoch calendar buckets.
+                if (rule.DateEnd.Year < 1970)
+                {
+                    continue;
+                }
+
+                var stdMinutes = (int)Math.Abs((tz.BaseUtcOffset + rule.BaseUtcOffsetDelta).TotalMinutes) % 60;
+                var dstMinutes = (int)Math.Abs((tz.BaseUtcOffset + rule.BaseUtcOffsetDelta + rule.DaylightDelta).TotalMinutes) % 60;
+                if (stdMinutes != baseMinutes || dstMinutes != baseMinutes)
                 {
                     return (false, 0);
                 }
             }
+
             return (true, baseMinutes);
         });
 
         m = minutePart;
         return constant;
-    }
-
-    private static int ParseMinutePart(string offsetStr)
-    {
-        // offsetStr is e.g. "+02:00", "-05:00", "+05:30"
-        if (TimeSpan.TryParse(offsetStr.TrimStart('+'), CultureInfo.InvariantCulture, out var ts))
-        {
-            var totalMin = (int)Math.Abs(ts.TotalMinutes);
-            return totalMin % 60;
-        }
-        return 0;
     }
 }

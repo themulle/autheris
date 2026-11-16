@@ -7,7 +7,6 @@ using System.Security.Claims;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Catalog.Profiling;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Mcp.Services;
 using Autheris.Domain.Common;
@@ -40,7 +39,6 @@ internal static class ScopeLevelTestKit
     /// </summary>
     public static TableMetadata CreateTable(
         DatasetVisibility visibility = DatasetVisibility.Hidden,
-        bool releaseProfileToCatalogViewers = false,
         bool gradeSensitive = false,
         IReadOnlyDictionary<string, MaskingRule>? maskingRules = null) => new()
     {
@@ -67,9 +65,6 @@ internal static class ScopeLevelTestKit
         ],
         ColumnMaskingRules = maskingRules ?? new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase),
         PrimaryKeyColumns = ["id"],
-        ReleaseProfileToCatalogViewers = releaseProfileToCatalogViewers,
-        // Row filters (parity shapes) must not strip the profile values the tests look for.
-        ProfilePublicationPolicy = DatasetProfilePublicationPolicy.FullCoarsenedProfile,
         EstimatedRowCount = 5000
     };
 
@@ -155,7 +150,7 @@ internal static class ScopeLevelTestKit
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([table]));
         repo.GetTableMetadataAsync(table.Identifier, Arg.Any<CancellationToken>()).Returns(Task.FromResult<TableMetadata?>(table));
-        return repo;
+        return Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(repo);
     }
 
     public static McpDatasetCatalog CreateCatalog(
@@ -166,7 +161,6 @@ internal static class ScopeLevelTestKit
         GatewayOptions? gatewayOptions = null,
         IAuditLogRepository? auditLogRepository = null)
     {
-        var profileService = new ColumnValueProfileService();
         var tableRepo = MetadataRepository(table);
         var consentRepo = ConsentRepository(consents);
         var effectiveOptions = gatewayOptions ?? new GatewayOptions { Catalog = new Autheris.Domain.Options.DataCatalogOptions { SharedTables = [table.Identifier.ToString()] } };
@@ -177,8 +171,6 @@ internal static class ScopeLevelTestKit
             auditLogRepository: auditLogRepository ?? Substitute.For<IAuditLogRepository>(),
             // Persisted tiers (issue #111) apply on shared tables in Multi mode: the table under test is shared so tier fixtures stay meaningful.
             options: Options.Create(effectiveOptions),
-            profileService: profileService,
-            syntheticRowGenerator: new SyntheticSampleRowGenerator(profileService),
             consentResolution: resolver,
             logger: logger,
             visibilityService: Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(tableRepo, consentRepo, effectiveOptions));

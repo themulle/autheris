@@ -14,15 +14,15 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
 using Autheris.Tests.Integration.Governance;
 
 /// <summary>
-/// End-to-End: HTTP -> ASP.NET-Pipeline (CSRF, Auth, Governance) -> Governed SQL / Endpoints -> echte SQLite-Datei.
-/// Jedes Feature wird einmal durchlaufen. Die Datenquelle "default" ist eine temporaere SQLite-Datei mit
+/// End-to-End: HTTP -> ASP.NET-Pipeline (CSRF, Auth, Governance) -> Governed SQL / Endpoints -> echte PostgreSQL-Datenbank.
+/// Jedes Feature wird einmal durchlaufen. Die Datenquelle "default" ist eine temporaere PostgreSQL-Datenbank mit
 /// bekannten Kran-Daten, damit echte (nicht synthetische) Zeilen geprueft werden koennen.
 /// Lauf: dotnet test tests/Autheris.Tests.Integration --filter "FullyQualifiedName~EndToEndSqlite"
 /// </summary>
@@ -51,9 +51,10 @@ public sealed class EndToEndSqliteTests : IClassFixture<EndToEndSqliteTests.Fixt
             _workDir = Path.Combine(Path.GetTempPath(), "autheris-e2e-" + Guid.NewGuid().ToString("N"));
             var queriesDir = Path.Combine(_workDir, "queries");
             Directory.CreateDirectory(queriesDir);
-            DbPath = Path.Combine(_workDir, "data.db");
-
-            SeedSqlite(DbPath);
+            DbPath = PostgresDataSource.Create("e2e", """
+                CREATE TABLE e2e_cranes (id INTEGER PRIMARY KEY, serial_number TEXT NOT NULL, crane_type TEXT NOT NULL, tonnage INTEGER NOT NULL);
+                INSERT INTO e2e_cranes VALUES (1,'LTM-1100','Mobilkran',100),(2,'LTM-1230','Mobilkran',230),(3,'LR-1600','Raupenkran',600),(4,'EC-B 125','Turmkran',12);
+                """, "public");
 
             File.WriteAllText(Path.Combine(queriesDir, "cranes_by_type.sql"),
                 "-- @name cranes_by_type\n-- @datasource default\n-- @summary Krane nach Typ\n-- @method GET\n\n" +
@@ -69,9 +70,10 @@ public sealed class EndToEndSqliteTests : IClassFixture<EndToEndSqliteTests.Fixt
                 b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("Fixture"));
                 b.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
 
-                // Echte Datenquelle: SQLite-Datei
-                b.UseSetting("Gateway:DataSources:Connections:default:Provider", "Sqlite");
-                b.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", $"Data Source={dbPath}");
+                // Echte Datenquelle: PostgreSQL-Datenbank
+                b.UseSetting("Gateway:DataSources:Connections:default:Provider", "PostgreSql");
+                b.UseSetting("Gateway:DataSources:Connections:default:DefaultSchema", "public");
+                b.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", dbPath);
 
                 b.UseSetting("Gateway:WebSql:Enabled", "true");
                 b.UseSetting("Gateway:WebSql:AllowDml", "false");
@@ -97,8 +99,8 @@ public sealed class EndToEndSqliteTests : IClassFixture<EndToEndSqliteTests.Fixt
             var repo = scope.ServiceProvider.GetRequiredService<ITableMetadataRepository>();
             await repo.UpsertTableMetadataAsync(new TableMetadata
             {
-                Table = new Table { Id = Guid.NewGuid(), DisplayName = "e2e_cranes", TableName = "e2e_cranes", SchemaName = "main", SourceType = "Sqlite", SourceName = "default" },
-                Identifier = new TableIdentifier("default", "main", "e2e_cranes"),
+                Table = new Table { Id = Guid.NewGuid(), DisplayName = "e2e_cranes", TableName = "e2e_cranes", SchemaName = "public", SourceType = "PostgreSql", SourceName = "default" },
+                Identifier = new TableIdentifier("default", "public", "e2e_cranes"),
                 Columns = new List<TableColumn>
                 {
                     new() { ColumnName = "id", DataType = "integer" },
@@ -114,20 +116,9 @@ public sealed class EndToEndSqliteTests : IClassFixture<EndToEndSqliteTests.Fixt
         {
             Factory.Dispose();
             _root.Dispose();
-            SqliteConnection.ClearAllPools();
+            NpgsqlConnection.ClearAllPools();
             try { Directory.Delete(_workDir, true); } catch { /* best effort */ }
         }
-    }
-
-    private static void SeedSqlite(string path)
-    {
-        using var conn = new SqliteConnection($"Data Source={path}");
-        conn.Open();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = @"
-CREATE TABLE e2e_cranes (id INTEGER PRIMARY KEY, serial_number TEXT NOT NULL, crane_type TEXT NOT NULL, tonnage INTEGER NOT NULL);
-INSERT INTO e2e_cranes VALUES (1,'LTM-1100','Mobilkran',100),(2,'LTM-1230','Mobilkran',230),(3,'LR-1600','Raupenkran',600),(4,'EC-B 125','Turmkran',12);";
-        cmd.ExecuteNonQuery();
     }
 
     private Task RegisterCatalogAsync() => _fixture.EnsureCatalogRegisteredAsync();
@@ -199,7 +190,7 @@ INSERT INTO e2e_cranes VALUES (1,'LTM-1100','Mobilkran',100),(2,'LTM-1230','Mobi
         (await c.PostAsJsonAsync("/api/v1/sql", new { sql = "DROP TABLE e2e_cranes" })).StatusCode.ShouldBe(HttpStatusCode.Forbidden);
         (await c.PostAsJsonAsync("/api/v1/sql", new { sql = "DELETE FROM e2e_cranes" })).StatusCode.ShouldBe(HttpStatusCode.Forbidden);
 
-        using var conn = new SqliteConnection($"Data Source={_dbPath}");
+        using var conn = new NpgsqlConnection(_dbPath);
         conn.Open();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT COUNT(*) FROM e2e_cranes";
@@ -226,7 +217,7 @@ INSERT INTO e2e_cranes VALUES (1,'LTM-1100','Mobilkran',100),(2,'LTM-1230','Mobi
     public async Task RestDataset_Pagination_WorksAgainstSqliteSource()
     {
         await RegisterCatalogAsync();
-        var r = await Client().GetAsync("/api/v1/data/default/main/e2e_cranes?select=id,serial_number&orderBy=id&limit=2&offset=1");
+        var r = await Client().GetAsync("/api/v1/data/default/public/e2e_cranes?select=id,serial_number&orderBy=id&limit=2&offset=1");
         var body = await r.Content.ReadAsStringAsync();
         r.StatusCode.ShouldBe(HttpStatusCode.OK, body);
         using var doc = JsonDocument.Parse(body);

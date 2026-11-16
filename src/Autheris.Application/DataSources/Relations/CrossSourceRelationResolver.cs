@@ -261,7 +261,8 @@ public sealed partial class CrossSourceRelationResolver : ICrossSourceRelationRe
             allowed: true,
             batchesExecuted,
             totalMaterialized,
-            ct).ConfigureAwait(false);
+            ct,
+            childDecision.Grants).ConfigureAwait(false);
 
         return new CrossSourceRelationResult(
             Relation: relation,

@@ -30,7 +30,8 @@ public sealed record AsyncJobDescriptor(
     string? ResultFilePath = null,
     long? RowsProduced = null,
     long? BytesProduced = null,
-    string? ErrorMessage = null);
+    string? ErrorMessage = null,
+    System.Collections.Generic.IReadOnlyList<string>? SubmittedByGroupSids = null);
 
 public sealed record AsyncJobStatusResponse(
     string JobId,

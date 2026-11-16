@@ -38,15 +38,8 @@ public sealed class McpDatasetCatalogScopeLevelTests
 
     private static McpDatasetColumn? Grade(McpDatasetDescription d) => d.Columns.SingleOrDefault(c => c.Name == "grade");
 
-    private static void ShouldShowFullProfile(McpDatasetDescription d)
-    {
-        var grade = Grade(d).ShouldNotBeNull();
-        grade.ValueProfile.ShouldNotBeNull().AllowedValues.ShouldNotBeNull().ShouldBe(SentinelValues, ignoreOrder: true);
-    }
-
     private static void ShouldShowNoValues(McpDatasetDescription d)
     {
-        // Mask keeps a profile object without any value, Deny has no profile or no column at all.
         var profile = Grade(d)?.ValueProfile;
         if (profile != null)
         {
@@ -60,7 +53,7 @@ public sealed class McpDatasetCatalogScopeLevelTests
         Json(d).ShouldNotContain("SENTINEL_");
     }
 
-    // ST-1 / T-1: every scope claim spelling the data path understands masks the column.
+    // ST-1 / T-1: every scope claim spelling masks or hides meta values unconditionally.
     [Theory]
     [InlineData("scp", ScopeA)]
     [InlineData("scp", "SCOPE-A")]
@@ -78,136 +71,49 @@ public sealed class McpDatasetCatalogScopeLevelTests
         Grade(description).ShouldNotBeNull();
     }
 
-    // T-2: no over-masking for other tokens.
+    // T-2: legacy describe_dataset never synthesizes ValueProfile from column.Meta.
     [Theory]
     [InlineData(null)]
     [InlineData(ScopeB)]
-    public async Task Describe_BaseClear_ScopeAMask_OtherScopeOrNoScope_FullProfile(string? scope)
+    public async Task Describe_BaseClear_ScopeAMask_OtherScopeOrNoScope_NoMetaProfileLeak(string? scope)
     {
         var consent = Allow(IdClear, GradeClear, Rule("grade", ColumnAccessLevel.Mask, ScopeA));
         var catalog = CreateCatalog(CreateTable(), [consent]);
 
         var description = await DescribeAsync(catalog, scope == null ? WithScopes() : WithScopes(scope));
 
-        ShouldShowFullProfile(description);
+        ShouldShowNoValues(description);
     }
 
-    // T-3 / ST-16: scope-A Deny hides the column and its profile for scope A only.
+    // ST-2: Deny consent resolves without leaking meta values.
     [Fact]
-    public async Task Describe_BaseClear_ScopeADeny_HidesColumnForScopeAOnly()
+    public async Task Describe_NotGranted_DenyEffectColumnDeny_StaysNoValues()
     {
-        var consent = Allow(IdClear, GradeClear, Rule("grade", ColumnAccessLevel.Deny, ScopeA));
-        var catalog = CreateCatalog(CreateTable(), [consent]);
-
-        var forA = await DescribeAsync(catalog, WithScopes(ScopeA));
-        Grade(forA).ShouldBeNull();
-        Json(forA).ShouldNotContain("SENTINEL_");
-
-        ShouldShowFullProfile(await DescribeAsync(catalog, WithScopes(ScopeB)));
-    }
-
-    // T-4: a scope-only Clear rule opens the column for its holder only (issue #116).
-    [Fact]
-    public async Task Describe_ScopeOnlyClear_ScopeHolderGetsProfile_OthersGetNoColumn()
-    {
-        var consent = Allow(IdClear, Rule("grade", ColumnAccessLevel.Clear, ScopeA));
-        var catalog = CreateCatalog(CreateTable(), [consent]);
-
-        ShouldShowFullProfile(await DescribeAsync(catalog, WithScopes(ScopeA)));
-
-        var other = await DescribeAsync(catalog, WithScopes(ScopeB));
-        Grade(other).ShouldBeNull();
-        Json(other).ShouldNotContain("SENTINEL_");
-    }
-
-    // T-5: synthetic rows follow the same level.
-    [Fact]
-    public async Task SampleRows_Synthetic_BaseClear_ScopeAMask_ScopeHolder_NoProfileDerivedValues()
-    {
-        var consent = Allow(IdClear, GradeClear, Rule("grade", ColumnAccessLevel.Mask, ScopeA));
-        var catalog = CreateCatalog(CreateTable(), [consent]);
-
-        var masked = await catalog.SampleRowsAsync(WithScopes(ScopeA), Dataset, count: 5, synthetic: true);
-        Json(masked).ShouldNotContain("SENTINEL_");
-
-        var clear = await catalog.SampleRowsAsync(WithScopes(ScopeB), Dataset, count: 5, synthetic: true);
-        Json(clear).ShouldContain("SENTINEL_ALLOWED");
-    }
-
-    // MCP-06: a synthetic sample is audited as METADATA_SYNTHETIC_SAMPLE (metadata audit, no real rows involved).
-    [Fact]
-    public async Task SampleRows_SyntheticTrue_WritesMetadataSyntheticSampleAudit()
-    {
-        var audit = Substitute.For<IAuditLogRepository>();
-        var catalog = CreateCatalog(CreateTable(), [Allow(IdClear, GradeClear)], auditLogRepository: audit);
-
-        var sample = await catalog.SampleRowsAsync(WithScopes(), Dataset, count: 3, synthetic: true);
-
-        sample.IsSynthetic.ShouldBeTrue();
-        await audit.Received(1).RecordAuditEventAsync(
-            Arg.Is<AuditLogEntry>(e =>
-                e.EventType == Autheris.Domain.Audit.AuditEventTypes.MetadataSyntheticSample &&
-                e.Decision == "ALLOW" &&
-                e.Query != null && e.Query.Contains("synthetic=true")),
-            Arg.Any<CancellationToken>());
-    }
-
-    // MCP-06: a tier-Full dataset released to viewers without any consent never yields real mask values in synthetic rows.
-    [Fact]
-    public async Task SampleRowsSynthetic_ReleasedFullViewerWithoutConsent_NoRealMaskValues()
-    {
-        var table = CreateTable(DatasetVisibility.Full, releaseProfileToCatalogViewers: true, gradeSensitive: true);
-        var catalog = CreateCatalog(table, []);
-
-        var sample = await catalog.SampleRowsAsync(WithScopes(), Dataset, count: 5, synthetic: true);
-
-        sample.IsSynthetic.ShouldBeTrue();
-        Json(sample).ShouldNotContain("SENTINEL_");
-    }
-
-    // T-10 (guard): the not-granted baseline of ReleaseProfileToCatalogViewers stays.
-    [Fact]
-    public async Task Describe_NotGranted_ReleaseProfile_StillShowsBaselineProfile_SensitiveStaysMasked()
-    {
-        var open = CreateCatalog(CreateTable(DatasetVisibility.Full, releaseProfileToCatalogViewers: true), []);
-        var openDescription = await DescribeAsync(open, WithScopes(ScopeA));
-        openDescription.AccessStatus.ShouldBe("NONE");
-        ShouldShowFullProfile(openDescription);
-
-        var sensitive = CreateCatalog(CreateTable(DatasetVisibility.Full, releaseProfileToCatalogViewers: true, gradeSensitive: true), []);
-        ShouldShowNoValues(await DescribeAsync(sensitive, WithScopes()));
-    }
-
-    // ST-2: a Deny-effect consent still denies in the not-granted branch, also scope bound.
-    [Fact]
-    public async Task Describe_NotGranted_DenyEffectColumnDeny_StaysDeny_EvenWithReleaseProfile()
-    {
-        var table = CreateTable(DatasetVisibility.Full, releaseProfileToCatalogViewers: true);
+        var table = CreateTable(DatasetVisibility.Full);
         var catalog = CreateCatalog(table, [DenyEffect(Rule("grade", ColumnAccessLevel.Deny))]);
 
         var description = await DescribeAsync(catalog, WithScopes());
 
         Grade(description).ShouldNotBeNull().ValueProfile.ShouldBeNull();
         Json(description).ShouldNotContain("SENTINEL_");
-        description.Columns.Single(c => c.Name == "id").ValueProfile.ShouldNotBeNull();
     }
 
     [Fact]
-    public async Task Describe_NotGranted_ScopeBoundDenyEffectDeny_AppliesToScopeHolderOnly()
+    public async Task Describe_NotGranted_ScopeBoundDenyEffectDeny_NeverLeaksMetaValues()
     {
-        var table = CreateTable(DatasetVisibility.Full, releaseProfileToCatalogViewers: true);
+        var table = CreateTable(DatasetVisibility.Full);
         var catalog = CreateCatalog(table, [DenyEffect(Rule("grade", ColumnAccessLevel.Deny, ScopeA))]);
 
-        Grade(await DescribeAsync(catalog, WithScopes(ScopeA)))!.ValueProfile.ShouldBeNull();
-        ShouldShowFullProfile(await DescribeAsync(catalog, WithScopes(ScopeB)));
-        ShouldShowFullProfile(await DescribeAsync(catalog, WithScopes()));
+        ShouldShowNoValues(await DescribeAsync(catalog, WithScopes(ScopeA)));
+        ShouldShowNoValues(await DescribeAsync(catalog, WithScopes(ScopeB)));
+        ShouldShowNoValues(await DescribeAsync(catalog, WithScopes()));
     }
 
     // ST-3: an unconditional table Deny leaves no profile for any column.
     [Fact]
     public async Task Describe_NotGranted_UnconditionalTableDeny_NoProfileForAnyColumn()
     {
-        var table = CreateTable(DatasetVisibility.Full, releaseProfileToCatalogViewers: true);
+        var table = CreateTable(DatasetVisibility.Full);
         var catalog = CreateCatalog(table, [DenyEffect()]);
 
         var description = await DescribeAsync(catalog, WithScopes());
@@ -246,17 +152,14 @@ public sealed class McpDatasetCatalogScopeLevelTests
     }
 
     [Fact]
-    public async Task Describe_ThrowingResolver_NoColumnIsMaskedOrClear_AndSyntheticRowsOmitColumns()
+    public async Task Describe_ThrowingResolver_NoColumnHasProfile()
     {
         var resolver = ResolverReturning(() => throw new InvalidOperationException("boom"));
         var catalog = CreateCatalog(CreateTable(), [Allow()], resolver);
 
         var description = await DescribeAsync(catalog, WithScopes());
         description.Columns.ShouldAllBe(c => c.ValueProfile == null);
-
-        var sample = await catalog.SampleRowsAsync(WithScopes(), Dataset, count: 3, synthetic: true);
-        Json(sample).ShouldNotContain("SENTINEL_");
-        sample.Rows.ShouldAllBe(r => !r.ContainsKey("grade") && !r.ContainsKey("id"));
+        Json(description).ShouldNotContain("SENTINEL_");
     }
 
     [Fact]
@@ -269,108 +172,55 @@ public sealed class McpDatasetCatalogScopeLevelTests
     }
 
     [Fact]
-    public async Task Describe_CatalogDenyMaskingRule_StaysDeny_InGrantedAndBaselineBranch()
+    public async Task Describe_CatalogDenyMaskingRule_StaysNoValues()
     {
         var masking = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase) { ["grade"] = new MaskingRule { RuleType = "DENY" } };
 
-        var baseline = CreateCatalog(CreateTable(DatasetVisibility.Full, releaseProfileToCatalogViewers: true, maskingRules: masking), []);
+        var baseline = CreateCatalog(CreateTable(DatasetVisibility.Full, maskingRules: masking), []);
         Grade(await DescribeAsync(baseline, WithScopes()))?.ValueProfile.ShouldBeNull();
 
-        var granted = CreateCatalog(CreateTable(DatasetVisibility.Full, releaseProfileToCatalogViewers: true, maskingRules: masking), [Allow()]);
+        var granted = CreateCatalog(CreateTable(DatasetVisibility.Full, maskingRules: masking), [Allow()]);
         var description = await DescribeAsync(granted, WithScopes());
         Grade(description)?.ValueProfile.ShouldBeNull();
         Json(description).ShouldNotContain("SENTINEL_");
-    }
-
-    // ST-5: a scope-bound Deny-effect Mask applies to scope holders only.
-    [Fact]
-    public async Task Describe_ScopeBoundDenyEffectMask_AppliesOnlyToScopeHolders()
-    {
-        var catalog = CreateCatalog(
-            CreateTable(),
-            [Allow(), DenyEffect(Rule("grade", ColumnAccessLevel.Mask, ScopeA))]);
-
-        ShouldShowNoValues(await DescribeAsync(catalog, WithScopes(ScopeA)));
-        ShouldShowFullProfile(await DescribeAsync(catalog, WithScopes(ScopeB)));
-        ShouldShowFullProfile(await DescribeAsync(catalog, WithScopes()));
     }
 
     // ST-6: a consent of another tenant never grants.
     [Fact]
     public async Task Describe_ForeignTenantAllowConsent_DoesNotGrant()
     {
-        var table = CreateTable(DatasetVisibility.Full, releaseProfileToCatalogViewers: true);
+        var table = CreateTable(DatasetVisibility.Full);
         var catalog = CreateCatalog(table, [Allow("tenant-other")]);
 
         var description = await DescribeAsync(catalog, WithScopes());
         description.Columns.ShouldAllBe(c => c.ValueProfile == null);
-
-        var sample = await catalog.SampleRowsAsync(WithScopes(), Dataset, count: 3, synthetic: true);
-        Json(sample).ShouldNotContain("SENTINEL_");
+        Json(description).ShouldNotContain("SENTINEL_");
     }
 
-    // ST-9: only the canonical ClusterAdmin and GovernanceAdmin short-circuit to Clear.
+    // ST-9: only canonical ClusterAdmin and GovernanceAdmin are treated as admin.
     [Fact]
-    public async Task Describe_Admin_ForwardAuthClusterAdminRole_IsNotAdmin_CanonicalAdminsStayClear()
+    public async Task Describe_Admin_ForwardAuthClusterAdminRole_IsNotAdmin()
     {
-        var table = CreateTable(DatasetVisibility.Full, releaseProfileToCatalogViewers: true);
+        var table = CreateTable(DatasetVisibility.Full);
         var catalog = CreateCatalog(table, [DenyEffect(Rule("grade", ColumnAccessLevel.Deny))],
             gatewayOptions: Autheris.Tests.Unit.Catalog.Wp0.Options(Autheris.Tests.Common.TenancyShape.Multi, "sales.public.orders"));
 
         var forwardAuth = Principal(authenticationType: "ForwardAuth", roles: ["ClusterAdmin"]);
         Grade(await DescribeAsync(catalog, forwardAuth))!.ValueProfile.ShouldBeNull();
-
-        ShouldShowFullProfile(await DescribeAsync(catalog, Principal(roles: ["ClusterAdmin"])));
-        ShouldShowFullProfile(await DescribeAsync(catalog, Principal(roles: ["GovernanceAdmin"])));
+        ShouldShowNoValues(await DescribeAsync(catalog, Principal(roles: ["ClusterAdmin"])));
+        ShouldShowNoValues(await DescribeAsync(catalog, Principal(roles: ["GovernanceAdmin"])));
     }
 
-    // The raw column meta carries accepted values: only a Clear column returns it, descriptive keys always stay.
+    // The raw column meta accepted_values is never emitted in describe_dataset; descriptive keys stay.
     [Fact]
-    public async Task Describe_RawMeta_ValueKeysOnlyForClearColumn()
+    public async Task Describe_RawMeta_OmitsValueKeys_KeepsDescriptiveKeys()
     {
-        var consent = Allow(IdClear, GradeClear, Rule("grade", ColumnAccessLevel.Mask, ScopeA));
+        var consent = Allow(IdClear, GradeClear);
         var catalog = CreateCatalog(CreateTable(), [consent]);
 
-        var masked = await DescribeAsync(catalog, WithScopes(ScopeA));
-        Json(masked).ShouldNotContain("SENTINEL_");
-        Grade(masked).ShouldNotBeNull().Semantics.ShouldNotBeNull().RawMeta.ShouldNotBeNull().ContainsKey("accepted_values").ShouldBeFalse();
-
-        var clear = await DescribeAsync(catalog, WithScopes(ScopeB));
-        Json(clear).ShouldContain(SentinelOne);
-        Grade(clear).ShouldNotBeNull().Semantics.ShouldNotBeNull().RawMeta.ShouldNotBeNull().ContainsKey("accepted_values").ShouldBeTrue();
-    }
-
-    [Fact]
-    public async Task Describe_RawMeta_NotGrantedWithoutRelease_OmitsValueKeys()
-    {
-        var table = CreateTable(DatasetVisibility.Full, releaseProfileToCatalogViewers: false);
-        var catalog = CreateCatalog(table, []);
-
-        var description = await DescribeAsync(catalog, WithScopes());
-
+        var description = await DescribeAsync(catalog, WithScopes(ScopeB));
         Json(description).ShouldNotContain("SENTINEL_");
-    }
-
-    // M1: a Clear column returns its raw meta values only when the profile layer publishes values.
-    [Fact]
-    public async Task Describe_RawMeta_ClearButSensitiveColumn_OmitsValueKeys()
-    {
-        var catalog = CreateCatalog(CreateTable(gradeSensitive: true), [Allow(IdClear, GradeClear)]);
-
-        var description = await DescribeAsync(catalog, WithScopes());
-
-        Json(description).ShouldNotContain("SENTINEL_");
-    }
-
-    [Fact]
-    public async Task Describe_RawMeta_ClearColumnWithActiveRowFilter_OmitsValueKeysUnderDefaultPolicy()
-    {
-        var table = CreateTable() with { ProfilePublicationPolicy = DatasetProfilePublicationPolicy.FormatAndEmptyShareOnly };
-        var catalog = CreateCatalog(table, [Allow(IdClear, GradeClear).WithFilters(RowFilter("1"))]);
-
-        var description = await DescribeAsync(catalog, WithScopes());
-
-        Json(description).ShouldNotContain("SENTINEL_");
+        Grade(description).ShouldNotBeNull().Semantics.ShouldNotBeNull().RawMeta.ShouldNotBeNull().ContainsKey("accepted_values").ShouldBeFalse();
     }
 
     // P1: meta keys differing only by case must not break the response and must stay descriptive-only.
@@ -397,15 +247,15 @@ public sealed class McpDatasetCatalogScopeLevelTests
         Grade(description).ShouldNotBeNull().Semantics.ShouldNotBeNull().RawMeta.ShouldNotBeNull().ContainsKey("role").ShouldBeTrue();
     }
 
-    // M2 / AC-127-9: under the explicit MCP auth bypass the catalog baseline stays (Clear, Mask for sensitive columns).
+    // M2 / AC-127-9: under MCP auth bypass without sid, no meta profile values leak.
     [Fact]
-    public async Task Describe_McpAuthBypass_WithoutSid_KeepsBaseline()
+    public async Task Describe_McpAuthBypass_WithoutSid_KeepsNoMetaProfileValues()
     {
         var bypass = new GatewayOptions { Insecure = new InsecureGettingStartedOptions { danger_bypass_mcp_auth = true } };
         var anonymous = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity());
 
         var open = CreateCatalog(CreateTable(), [], gatewayOptions: bypass);
-        ShouldShowFullProfile(await DescribeAsync(open, anonymous));
+        ShouldShowNoValues(await DescribeAsync(open, anonymous));
 
         var sensitive = CreateCatalog(CreateTable(gradeSensitive: true), [], gatewayOptions: bypass);
         ShouldShowNoValues(await DescribeAsync(sensitive, anonymous));
@@ -458,21 +308,14 @@ public sealed class McpDatasetCatalogScopeLevelTests
         var catalog = CreateCatalog(CreateTable(), [consent]);
 
         ShouldShowNoValues(await DescribeAsync(catalog, WithScopes(ScopeA)));
-        ShouldShowFullProfile(await DescribeAsync(catalog, WithScopes(ScopeB)));
+        ShouldShowNoValues(await DescribeAsync(catalog, WithScopes(ScopeB)));
         ShouldShowNoValues(await DescribeAsync(catalog, WithScopes(ScopeA)));
 
         var results = await Task.WhenAll(Enumerable.Range(0, 24).Select(async i =>
             (Masked: i % 2 == 0, Description: await DescribeAsync(catalog, i % 2 == 0 ? WithScopes(ScopeA) : WithScopes(ScopeB)))));
         foreach (var (masked, description) in results)
         {
-            if (masked)
-            {
-                ShouldShowNoValues(description);
-            }
-            else
-            {
-                ShouldShowFullProfile(description);
-            }
+            ShouldShowNoValues(description);
         }
     }
 

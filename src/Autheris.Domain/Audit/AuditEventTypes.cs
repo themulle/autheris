@@ -13,6 +13,8 @@ public static class AuditEventTypes
     public const string AuthzEndpointDenied = "AUTHZ_ENDPOINT_DENIED";
     public const string AuthzExplain = "AUTHZ_EXPLAIN";
     public const string AuthzGrantsList = "AUTHZ_GRANTS_LIST";
+    public const string AuthzEffectiveAccessReport = "AUTHZ_EFFECTIVE_ACCESS_REPORT";
+    public const string AuthzEffectPreview = "AUTHZ_EFFECT_PREVIEW";
     public const string RateLimitExceeded = "RATE_LIMIT_EXCEEDED";
     public const string TokenRevoked = "TOKEN_REVOKED";
     public const string TokenRevokedHit = "TOKEN_REVOKED_HIT";
@@ -67,9 +69,6 @@ public static class AuditEventTypes
     // Catalog definition changes (Tier A, issue #94 06): declared primary key / index replacement with before and after.
     public const string CatalogKeyDefinitionChanged = "CATALOG_KEY_DEFINITION_CHANGED";
 
-    /// <summary>Issue #404: the sync replaced the physical non-unique index list of a table (table id and counts only).</summary>
-    public const string CatalogPhysicalIndexesChanged = "CATALOG_PHYSICAL_INDEXES_CHANGED";
-
     // Catalog visibility and tag changes (Tier A, issue #111): before/after, actor and source.
     public const string CatalogVisibilityChanged = "CATALOG_VISIBILITY_CHANGED";
     public const string CatalogTagsChanged = "CATALOG_TAGS_CHANGED";
@@ -95,7 +94,15 @@ public static class AuditEventTypes
     public const string ConsentWithdrawn = "CONSENT_WITHDRAWN";
     public const string ConsentApplied = "CONSENT_APPLIED";
     public const string ConsentDescriptionChanged = "CONSENT_DESCRIPTION_CHANGED";
+    public const string PatternCoverageChanged = "PATTERN_COVERAGE_CHANGED";
     public const string ConsentRecertificationRequired = "CONSENT_RECERTIFICATION_REQUIRED";
+    public const string ConsentWorkflowConfigChanged = "CONSENT_WORKFLOW_CONFIG_CHANGED";
+    public const string ConsentRouteConflict = "CONSENT_ROUTE_CONFLICT";
+    public const string ConsentRequestRerouted = "CONSENT_REQUEST_REROUTED";
+    public const string ConsentRequestExpired = "CONSENT_REQUEST_EXPIRED";
+    public const string GrantExpiringNoticeSent = "GRANT_EXPIRING_NOTICE_SENT";
+    public const string GrantExpired = "GRANT_EXPIRED";
+    public const string WriteGrantChanged = "WRITE_GRANT_CHANGED";
     public const string ProfileInvalidationFailed = "PROFILE_INVALIDATION_FAILED";
 
     // Plan 9: Datasources & Async Jobs
@@ -133,9 +140,10 @@ public static class AuditEventTypes
     public const string GovernedAggregation = AggregateQuery;
     public const string MetricQuery = "METRIC_QUERY";
 
-    // Zero-Read Query Analysis & Metadata Synthetic Sample (#79, #80)
-    public const string MetadataSyntheticSample = "METADATA_SYNTHETIC_SAMPLE";
+    // Zero-Read Query Analysis & Metadata Sample Read (#79, #80)
+    public const string MetadataSampleRead = "METADATA_SYNTHETIC_SAMPLE";
     public const string QueryAnalysisEvaluated = "QUERY_ANALYSIS_EVALUATED";
+    public const string CatalogDiscoveryArtifactsChanged = "CATALOG_DISCOVERY_ARTIFACTS_CHANGED";
 
     // MCP output inspection: a tool or resource result carried a suspected prompt injection and was withheld (MCP-09)
     public const string McpOutputInjectionSuspected = "MCP_OUTPUT_INJECTION_SUSPECTED";
@@ -158,5 +166,19 @@ public static class AuditEventTypes
 
     // Issue #447: a data source refused the ingress transport of the request (fail-closed gate)
     public const string TransportNotAllowed = "TRANSPORT_NOT_ALLOWED";
+
+    // SCIM 2.0 Provisioning & Identity Correlation (Tier A — Required Audit)
+    public const string ScimUserProvisioned = "SCIM_USER_PROVISIONED";
+    public const string ScimUserUpdated = "SCIM_USER_UPDATED";
+    public const string ScimUserDeprovisioned = "SCIM_USER_DEPROVISIONED";
+    public const string ScimGroupProvisioned = "SCIM_GROUP_PROVISIONED";
+    public const string ScimGroupDeleted = "SCIM_GROUP_DELETED";
+    public const string ScimGroupMembershipChanged = "SCIM_GROUP_MEMBERSHIP_CHANGED";
+    public const string IdentityCorrelationAmbiguous = "IDENTITY_CORRELATION_AMBIGUOUS";
+
+    // Usage Accounting & Tariffs (Tier A — Required Audit)
+    public const string UsageTariffVersionAdded = "USAGE_TARIFF_VERSION_ADDED";
+    public const string UsageReportRead = "USAGE_REPORT_READ";
+    public const string UsageDataErased = "USAGE_DATA_ERASED";
 }
 

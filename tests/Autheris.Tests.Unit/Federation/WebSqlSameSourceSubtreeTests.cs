@@ -254,7 +254,7 @@ public sealed class WebSqlSameSourceSubtreeTests
         var itemsTable = CreateTable("sales", "public", "order_items", DataSourceType.Sql, ["id", "order_id", "item_name", "item_id"], DatabaseDialect.PostgreSql);
         var stocksTable = CreateTable("inventory", "dbo", "stocks", DataSourceType.Sql, ["id", "status"], DatabaseDialect.SqlServer);
 
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
         metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
             .Returns(new[] { ordersTable, itemsTable, stocksTable });
 

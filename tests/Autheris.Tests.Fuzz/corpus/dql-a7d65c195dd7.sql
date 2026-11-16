@@ -1,1 +1,0 @@
-SELECT id, customer_name, total_amount FROM orders ORDER BY id OFFSET 1 LIMIT 2

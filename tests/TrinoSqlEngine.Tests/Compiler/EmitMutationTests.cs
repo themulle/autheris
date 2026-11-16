@@ -198,9 +198,9 @@ public class EmitMutationTests
     [Fact]
     public void TheTypedGovernedExceptions_CarryTheirCode()
     {
-        Assert.Equal(GovernedSqlErrorCodes.CheckOptionViolation, new DmlCheckOptionViolationException(TargetSqlDialect.Sqlite).Code);
-        Assert.Equal(GovernedSqlErrorCodes.CheckedExecutionRequired, new CheckedExecutionRequiredException(TargetSqlDialect.Sqlite).Code);
-        Assert.Equal(GovernedSqlErrorCodes.AffectedRowsLimit, new DmlAffectedRowsLimitException(TargetSqlDialect.Sqlite).Code);
+        Assert.Equal(GovernedSqlErrorCodes.CheckOptionViolation, new DmlCheckOptionViolationException(TargetSqlDialect.PostgreSql).Code);
+        Assert.Equal(GovernedSqlErrorCodes.CheckedExecutionRequired, new CheckedExecutionRequiredException(TargetSqlDialect.PostgreSql).Code);
+        Assert.Equal(GovernedSqlErrorCodes.AffectedRowsLimit, new DmlAffectedRowsLimitException(TargetSqlDialect.PostgreSql).Code);
     }
 
     // ---- cache key and audit digest ----
@@ -220,10 +220,10 @@ public class EmitMutationTests
     {
         byte[] key = Encoding.UTF8.GetBytes("audit-key");
         var compiled = new CompiledSql("SELECT 1", ImmutableArray.Create(
-                new BoundParameter("?1", "?1", 0, "secret", SqlParameterType.String, ParameterOrigin.Tenant),
-                new BoundParameter("?2", "?2", 1, 5, SqlParameterType.Int32, ParameterOrigin.QueryLiteral)),
-            TargetSqlDialect.Sqlite, SqlStatementClass.Select, ImmutableArray<SecurityPredicateId>.Empty, "ast-compiler/1.0");
-        string expected = Convert.ToHexString(HMACSHA256.HashData(key, Encoding.UTF8.GetBytes("ast-compiler/1.0|Sqlite|SELECT 1|0:String:Tenant;1:Int32:QueryLiteral;")));
+                new BoundParameter("$1", "$1", 0, "secret", SqlParameterType.String, ParameterOrigin.Tenant),
+                new BoundParameter("$2", "$2", 1, 5, SqlParameterType.Int32, ParameterOrigin.QueryLiteral)),
+            TargetSqlDialect.PostgreSql, SqlStatementClass.Select, ImmutableArray<SecurityPredicateId>.Empty, "ast-compiler/1.0");
+        string expected = Convert.ToHexString(HMACSHA256.HashData(key, Encoding.UTF8.GetBytes("ast-compiler/1.0|PostgreSql|SELECT 1|0:String:Tenant;1:Int32:QueryLiteral;")));
         Assert.Equal(expected, CompiledSqlDigest.Compute(key, compiled));
 
         var changed = compiled with { Parameters = ImmutableArray.Create(compiled.Parameters[0]) };
@@ -268,7 +268,7 @@ public class EmitMutationTests
     public void CheckOptionEnforce_RequiresAStatement_AndComparesTheExpectedCount()
     {
         Assert.Equal("compiled", Assert.Throws<ArgumentNullException>(() => DmlCheckOption.Enforce(null!, 1)).ParamName);
-        var insert = new CompiledSql("INSERT INTO t SELECT 1", NoParams, TargetSqlDialect.Sqlite, SqlStatementClass.Insert, ImmutableArray<SecurityPredicateId>.Empty, "v")
+        var insert = new CompiledSql("INSERT INTO t SELECT 1", NoParams, TargetSqlDialect.PostgreSql, SqlStatementClass.Insert, ImmutableArray<SecurityPredicateId>.Empty, "v")
         {
             ExpectedAffectedRows = 2
         };
@@ -276,7 +276,7 @@ public class EmitMutationTests
         Assert.Throws<DmlCheckOptionViolationException>(() => DmlCheckOption.Enforce(insert, 1));
         Assert.Throws<DmlCheckOptionViolationException>(() => DmlCheckOption.Enforce(insert, 3));
         DmlCheckOption.Enforce(insert with { }, 2);
-        DmlCheckOption.Enforce(new CompiledSql("UPDATE t SET a = 1", NoParams, TargetSqlDialect.Sqlite, SqlStatementClass.Update, ImmutableArray<SecurityPredicateId>.Empty, "v"), 99);
+        DmlCheckOption.Enforce(new CompiledSql("UPDATE t SET a = 1", NoParams, TargetSqlDialect.PostgreSql, SqlStatementClass.Update, ImmutableArray<SecurityPredicateId>.Empty, "v"), 99);
     }
 
     [Theory]

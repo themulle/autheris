@@ -17,7 +17,6 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Extensions.Dbt;
 using Microsoft.Extensions.Logging.Abstractions;
-using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -108,37 +107,89 @@ public sealed class DbtPhysicalNameTests : IDisposable
         public Dictionary<string, TableMetadata> Store { get; } = new(StringComparer.OrdinalIgnoreCase);
         public List<TableMetadata> Upserts { get; } = [];
         public List<TableRelation> Written { get; } = [];
-        public IDbtProposalRepository Proposals { get; } = Substitute.For<IDbtProposalRepository>();
+        public FakeProposalRepository Proposals { get; } = new();
         public DbtMetadataIngestionService Service { get; }
 
         public Harness(GatewayOptions options)
         {
-            var repo = Substitute.For<ITableMetadataRepository>();
-            repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-                .Returns(call => Task.FromResult(Store.GetValueOrDefault(call.Arg<TableIdentifier>().ToString())));
-            repo.UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>())
-                .Returns(call =>
-                {
-                    var m = call.Arg<TableMetadata>();
-                    Upserts.Add(m);
-                    Store[m.Identifier.ToString()] = m;
-                    return Task.FromResult(m);
-                });
-            Proposals.GetPendingProposalsAsync(Arg.Any<TableIdentifier?>(), Arg.Any<CancellationToken>())
-                .Returns(Task.FromResult<IReadOnlyList<DbtMetadataProposal>>([]));
-            var relations = Substitute.For<ITableRelationRepository>();
-            relations.CreateRelationAsync(Arg.Any<TableRelation>(), Arg.Any<CancellationToken>())
-                .Returns(call =>
-                {
-                    var r = call.Arg<TableRelation>();
-                    Written.Add(r);
-                    return Task.FromResult(new RelationWriteResult(r.Id, true, false));
-                });
+            var repo = new FakeTableMetadataRepository(Store, Upserts);
+            var relations = new FakeTableRelationRepository(Written);
             Service = new DbtMetadataIngestionService(
-                Proposals, repo, Substitute.For<ILineageGraphStore>(), null,
+                Proposals, repo, new FakeLineageGraphStore(), null,
                 Microsoft.Extensions.Options.Options.Create(options),
                 new SqlEndpointLoader(new InMemorySqlEndpointRegistry(), NullLogger<SqlEndpointLoader>.Instance),
                 relations, null, null, NullLogger<DbtMetadataIngestionService>.Instance);
+        }
+
+        public sealed class FakeProposalRepository : IDbtProposalRepository
+        {
+            public List<DbtMetadataProposal> Added { get; } = [];
+
+            public Task<DbtMetadataProposal> AddProposalAsync(DbtMetadataProposal proposal, CancellationToken ct = default)
+            {
+                Added.Add(proposal);
+                return Task.FromResult(proposal);
+            }
+
+            public Task<IReadOnlyList<DbtMetadataProposal>> GetPendingProposalsAsync(TableIdentifier? table = null, CancellationToken ct = default) =>
+                Task.FromResult<IReadOnlyList<DbtMetadataProposal>>([]);
+
+            public Task<DbtMetadataProposal?> GetProposalByIdAsync(Guid proposalId, CancellationToken ct = default) =>
+                Task.FromResult<DbtMetadataProposal?>(null);
+
+            public Task<DbtMetadataProposal> UpdateProposalStatusAsync(Guid proposalId, DbtProposalStatus status, string reviewedBy, CancellationToken ct = default) =>
+                throw new NotSupportedException();
+        }
+
+        private sealed class FakeTableMetadataRepository(Dictionary<string, TableMetadata> store, List<TableMetadata> upserts) : ITableMetadataRepository
+        {
+            public Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default) =>
+                Task.FromResult(store.GetValueOrDefault(table.ToString()));
+
+            public Task<IReadOnlyList<TableMetadata>> GetAllTablesAsync(CancellationToken ct = default) =>
+                Task.FromResult<IReadOnlyList<TableMetadata>>(store.Values.ToList());
+
+            public Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default)
+            {
+                upserts.Add(metadata);
+                store[metadata.Identifier.ToString()] = metadata;
+                return Task.FromResult(metadata);
+            }
+
+            public Task<TableKeyDefinitionChange?> ReplaceTableKeyDefinitionAsync(
+                TableIdentifier table,
+                IReadOnlyList<string> primaryKey,
+                IReadOnlyList<TableIndexDefinition> indexes,
+                IReadOnlyList<KeyColumnDirection>? primaryKeyDirections = null,
+                CancellationToken ct = default) =>
+                throw new NotSupportedException();
+        }
+
+        private sealed class FakeTableRelationRepository(List<TableRelation> written) : ITableRelationRepository
+        {
+            public Task<IReadOnlyList<TableRelation>> GetRelationsForTableAsync(TableIdentifier parentTable, CancellationToken ct = default) =>
+                Task.FromResult<IReadOnlyList<TableRelation>>([]);
+
+            public Task<IReadOnlyList<TableRelation>> GetAllRelationsAsync(CancellationToken ct = default) =>
+                Task.FromResult<IReadOnlyList<TableRelation>>([]);
+
+            public Task<RelationWriteResult> CreateRelationAsync(TableRelation relation, CancellationToken ct = default)
+            {
+                written.Add(relation);
+                return Task.FromResult(new RelationWriteResult(relation.Id, true, false));
+            }
+
+            public Task<bool> SetRelationCrossDataSourceOptInAsync(Guid relationId, bool allowCrossDataSource, CancellationToken ct = default) =>
+                Task.FromResult(false);
+        }
+
+        private sealed class FakeLineageGraphStore : ILineageGraphStore
+        {
+            public LineageNode? GetNode(string nodeId) => null;
+            public bool ContainsNode(string nodeId) => false;
+            public void UpdateGraph(IEnumerable<LineageNode> nodes) { }
+            public IReadOnlyCollection<LineageNode> GetAllNodes() => [];
+            public int Count => 0;
         }
 
         /// <summary>An entry as another origin (or an administrator) registered it; <paramref name="uniqueId"/> null means none recorded.</summary>
@@ -251,7 +302,7 @@ public sealed class DbtPhysicalNameTests : IDisposable
         h.Upserts.ShouldBeEmpty();
         h.Store[Key("orders")].Table.Description.ShouldBe("kept");
         h.Store[Key("orders")].Table.DbtUniqueId.ShouldBe("model.other.orders");
-        await h.Proposals.DidNotReceiveWithAnyArgs().AddProposalAsync(default!, default);
+        h.Proposals.Added.ShouldBeEmpty();
     }
 
     [Fact]

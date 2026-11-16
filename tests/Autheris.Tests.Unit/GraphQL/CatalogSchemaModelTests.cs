@@ -204,8 +204,8 @@ public sealed class CatalogSchemaModelTests
         var parentId = new TableIdentifier("sales", "dbo", "customers");
         var childId = new TableIdentifier("sales", "dbo", "orders");
 
-        var parentTable = CreateTable(parentId, dialect: "Sqlite", columns: [new TableColumn { ColumnName = "id", DataType = "int" }]);
-        var childTable = CreateTable(childId, dialect: "Sqlite", columns:
+        var parentTable = CreateTable(parentId, dialect: "PostgreSql", columns: [new TableColumn { ColumnName = "id", DataType = "int" }]);
+        var childTable = CreateTable(childId, dialect: "PostgreSql", columns:
         [
             new TableColumn { ColumnName = "order_id", DataType = "int" },
             new TableColumn { ColumnName = "customer_id", DataType = "int" }

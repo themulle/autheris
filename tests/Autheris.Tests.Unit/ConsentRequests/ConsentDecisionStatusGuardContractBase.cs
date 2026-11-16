@@ -28,6 +28,15 @@ public abstract class ConsentDecisionStatusGuardContractBase : IAsyncLifetime
     /// <summary>Makes <paramref name="sid"/> a member of the GovernanceAdmin role (an authorized approver of every table).</summary>
     protected abstract Task GrantGovernanceAdminAsync(string sid);
 
+    /// <summary>
+    /// Makes <paramref name="sid"/> an active data owner of <paramref name="table"/> (creating the owner row when missing). The repository
+    /// authorizes an approver only as owner or delegate of the table; the admin role is checked by the service in front of it.
+    /// </summary>
+    protected abstract Task EnsureTableOwnerAsync(string sid, TableIdentifier table);
+
+    private readonly List<string> _approvers = [];
+    private readonly List<TableIdentifier> _tables = [];
+
     /// <summary>Number of APPROVAL_STEPS rows of the request (the SQLite read model does not populate <c>ApprovalSteps</c>).</summary>
     protected abstract Task<int> CountApprovalStepsAsync(Guid requestId);
 
@@ -59,6 +68,12 @@ public abstract class ConsentDecisionStatusGuardContractBase : IAsyncLifetime
     {
         var sid = "S-1-5-21-APPROVER-" + Guid.NewGuid().ToString("N")[..10];
         await GrantGovernanceAdminAsync(sid);
+        _approvers.Add(sid);
+        foreach (var table in _tables)
+        {
+            await EnsureTableOwnerAsync(sid, table);
+        }
+
         return sid;
     }
 
@@ -76,6 +91,12 @@ public abstract class ConsentDecisionStatusGuardContractBase : IAsyncLifetime
             Identifier = id, Table = table,
             Columns = [new TableColumn { TableId = table.Id, ColumnName = "id", DataType = "INT" }]
         });
+        _tables.Add(id);
+        foreach (var approver in _approvers)
+        {
+            await EnsureTableOwnerAsync(approver, id);
+        }
+
         var requester = "S-1-5-21-REQ-" + suffix;
         return await Repo.CreateConsentRequestAsync(new ConsentRequest
         {
@@ -87,7 +108,10 @@ public abstract class ConsentDecisionStatusGuardContractBase : IAsyncLifetime
             RequestedGranteeRef = requester,
             BusinessJustification = "WP-0 status guard",
             RequestedValidTo = DateTimeOffset.UtcNow.AddDays(7),
-            Status = status ?? "PENDING"
+            Status = status ?? "PENDING",
+            WorkflowMode = string.Equals(status, "PENDING_EXTERNAL_APPROVAL", StringComparison.OrdinalIgnoreCase)
+                ? ConsentWorkflowMode.External
+                : ConsentWorkflowMode.Internal
         });
     }
 
@@ -192,18 +216,21 @@ public abstract class ConsentDecisionStatusGuardContractBase : IAsyncLifetime
         await AssertNothingPersistedAsync(req.Id, "APPROVED", 1);
     }
 
-    // ---------------- W-7 (ITSM step keeps working, guard uses the locked status) ----------------
+    // ---------------- W-7 (external workflow step keeps working, guard uses the locked status) ----------------
 
     [RuntimeSkippableFact]
     public async Task W7_ItsmStep_OnPendingExternalApproval_StillApproves_AndStaleStatusRollsBack()
     {
         RequireAvailable();
         var staleReq = await NewRequestAsync(fourEyes: false, status: "PENDING_EXTERNAL_APPROVAL");
+        var attr1 = new ExternalDecisionAttribution(
+            Guid.NewGuid(), "EXT-1", "APPROVED",
+            new AssertedApprover("board-1", ResolvedSid: "S-1-5-21-EXT-BOARD1"), DateTimeOffset.UtcNow);
         SetStatusUpdateSeam(ForceStatus(staleReq.Id, "REJECTED"));
         try
         {
             await Should.ThrowAsync<ConsentRequestStatusConflictException>(
-                () => Repo.ApproveConsentRequestStepAsync(staleReq.Id, new Sid("ITSM_SNOW:inst:changeboard"), isExternalItsmApproval: true));
+                () => Repo.ApproveExternalConsentRequestStepAsync(staleReq.Id, attr1, new Sid("S-1-5-21-EXT-BOARD1")));
         }
         finally
         {
@@ -213,7 +240,10 @@ public abstract class ConsentDecisionStatusGuardContractBase : IAsyncLifetime
         await AssertNothingPersistedAsync(staleReq.Id, "PENDING_EXTERNAL_APPROVAL", 0);
 
         var req = await NewRequestAsync(fourEyes: false, status: "PENDING_EXTERNAL_APPROVAL");
-        var approved = await Repo.ApproveConsentRequestStepAsync(req.Id, new Sid("ITSM_SNOW:inst:changeboard"), isExternalItsmApproval: true);
+        var attr2 = new ExternalDecisionAttribution(
+            Guid.NewGuid(), "EXT-2", "APPROVED",
+            new AssertedApprover("board-1", ResolvedSid: "S-1-5-21-EXT-BOARD1"), DateTimeOffset.UtcNow);
+        var approved = await Repo.ApproveExternalConsentRequestStepAsync(req.Id, attr2, new Sid("S-1-5-21-EXT-BOARD1"));
         approved.Status.ShouldBe("APPROVED");
     }
 
@@ -222,10 +252,17 @@ public abstract class ConsentDecisionStatusGuardContractBase : IAsyncLifetime
     {
         RequireAvailable();
         var req = await NewRequestAsync(fourEyes: true, status: "PENDING_EXTERNAL_APPROVAL");
+        var sysId = Guid.NewGuid();
+        var attrA = new ExternalDecisionAttribution(
+            sysId, "EXT-A", "APPROVED",
+            new AssertedApprover("board-a", ResolvedSid: "S-1-5-21-EXT-BOARDA"), DateTimeOffset.UtcNow);
+        var attrB = new ExternalDecisionAttribution(
+            sysId, "EXT-B", "APPROVED",
+            new AssertedApprover("board-b", ResolvedSid: "S-1-5-21-EXT-BOARDB"), DateTimeOffset.UtcNow);
 
-        var step1 = await Repo.ApproveConsentRequestStepAsync(req.Id, new Sid("ITSM_SNOW:inst:board-a"), isExternalItsmApproval: true);
+        var step1 = await Repo.ApproveExternalConsentRequestStepAsync(req.Id, attrA, new Sid("S-1-5-21-EXT-BOARDA"));
         step1.Status.ShouldBe("PENDING_EXTERNAL_APPROVAL");
-        var step2 = await Repo.ApproveConsentRequestStepAsync(req.Id, new Sid("ITSM_SNOW:inst:board-b"), isExternalItsmApproval: true);
+        var step2 = await Repo.ApproveExternalConsentRequestStepAsync(req.Id, attrB, new Sid("S-1-5-21-EXT-BOARDB"));
         step2.Status.ShouldBe("APPROVED");
     }
 

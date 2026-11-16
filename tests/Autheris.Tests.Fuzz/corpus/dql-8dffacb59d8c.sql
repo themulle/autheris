@@ -1,0 +1,1 @@
+SELECT id, amount, active_tenant FROM active_invoices WHERE id = 1

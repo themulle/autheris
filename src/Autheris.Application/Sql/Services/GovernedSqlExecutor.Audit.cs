@@ -71,26 +71,6 @@ public sealed partial class GovernedSqlExecutor
         }, CancellationToken.None).ConfigureAwait(false);
     }
 
-    /// <summary>
-    /// The audit of a DML that is already committed. An audit failure here is never a request failure (the client would retry and
-    /// duplicate the write): it is logged as Critical and counted for the operators.
-    /// </summary>
-    private async Task RecordCommittedDmlAuditAsync(
-        TenantId tenantId, ClaimsPrincipal user, string dsName, DmlAuditContext dmlContext, CompiledSql compiled, int affectedRows)
-    {
-        try
-        {
-            await RecordDmlAuditAsync(tenantId, user, dsName, dmlContext, AuditEventTypes.WebSqlDmlExecuted, "ALLOW", compiled, affectedRows, reason: null, synthetic: false).ConfigureAwait(false);
-        }
-        catch (Exception auditEx)
-        {
-            GatewayDiagnostics.DmlAuditFailedCounter.Add(1);
-            _logger?.LogCritical(auditEx,
-                "WebSQL DML on data source {DataSource} is committed but its audit record could not be written. TraceId={TraceId}",
-                dsName, Activity.Current?.TraceId.ToString());
-        }
-    }
-
     [System.Text.RegularExpressions.GeneratedRegex("^[A-Za-z_][A-Za-z0-9_]{0,63}$")]
     private static partial System.Text.RegularExpressions.Regex AuditListNameRegex();
 

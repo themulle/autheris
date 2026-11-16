@@ -5,6 +5,7 @@ using Xunit;
 namespace Autheris.Tests.Unit.Security;
 
 /// <summary>PLAN-GOV-158-INC1 decision 2, SEC-GOV158I1-01/02: untrusted free text is normalised and rejected by Unicode category.</summary>
+[Trait("Category", "Security")]
 public sealed class UntrustedTextTests
 {
     [Fact]
@@ -135,6 +136,7 @@ public sealed class UntrustedTextTests
     }
 }
 
+[Trait("Category", "Security")]
 public sealed class ConsentDescriptionTextTests
 {
     [Fact]

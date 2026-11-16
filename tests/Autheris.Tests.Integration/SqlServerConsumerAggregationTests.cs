@@ -1,11 +1,15 @@
 namespace Autheris.Tests.Integration;
 
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Autheris.Application.Usage;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Options.DataSources;
+using Autheris.Domain.Security;
 using Autheris.Infrastructure.Persistence.Migrations;
 using Shouldly;
 using Xunit;
@@ -55,11 +59,28 @@ public sealed class SqlServerConsumerAggregationTests : IClassFixture<SqlServerC
         var tenant = new TenantId("tenant-ss");
         string day = DateTimeOffset.UtcNow.ToString("yyyy-MM-dd");
 
-        await repo.RecordDailyUsageAsync(table, tenant, day, "powerbi", "c1", "1.0", 2, 20, 2, 1, 0, 0, 0);
-        await repo.RecordDailyUsageAsync(table, tenant, day, "powerbi", "c1", "1.0", 3, 30, 3, 0, 1, 0, 0);
-        await repo.RecordActorSampleAsync(table, tenant, day, "powerbi", new string('a', 64));
-        await repo.RecordActorSampleAsync(table, tenant, day, "powerbi", new string('a', 64));
-        await repo.RecordActorSampleAsync(table, tenant, day, "powerbi", new string('b', 64));
+        var aggregator = new UsageAggregator();
+        var recorder = new UsageRecorder(aggregator);
+        var caller = new CallerContext("powerbi", "1.0", ClientId: "c1");
+        var actor1 = new Sid("S-1-5-21-a");
+        var actor2 = new Sid("S-1-5-21-b");
+
+        using (var scope = UsageRequestScope.Begin(new UsageIdentity(tenant, actor1, new HashSet<Sid>()), DataSourceTransportFlags.Rest, caller, aggregator))
+        {
+            recorder.Record(new UsageFact(table, "src", UsageOutcome.Allow, 20, true, 0, Array.Empty<GrantRef>(), default), tenant, actor1);
+            recorder.Record(new UsageFact(table, "src", UsageOutcome.DenyRateLimit, 0, false, 0, Array.Empty<GrantRef>(), default), tenant, actor1);
+            recorder.Record(new UsageFact(table, "src", UsageOutcome.Allow, 30, true, 0, Array.Empty<GrantRef>(), default), tenant, actor1);
+            scope.Complete(10, 100, 200);
+        }
+
+        using (var scope = UsageRequestScope.Begin(new UsageIdentity(tenant, actor2, new HashSet<Sid>()), DataSourceTransportFlags.Rest, caller, aggregator))
+        {
+            recorder.Record(new UsageFact(table, "src", UsageOutcome.DenyAccess, 0, false, 0, Array.Empty<GrantRef>(), default), tenant, actor2);
+            recorder.Record(new UsageFact(table, "src", UsageOutcome.Allow, 0, false, 0, Array.Empty<GrantRef>(), default), tenant, actor2);
+            scope.Complete(10, 100, 200);
+        }
+
+        await repo.AccumulateAsync(aggregator.Swap());
         await repo.RecordQueryNameAsync(table, tenant, day, "powerbi", "GetReadings", 2);
         await repo.RecordQueryNameAsync(table, tenant, day, "powerbi", "GetReadings", 3);
 
@@ -71,7 +92,6 @@ public sealed class SqlServerConsumerAggregationTests : IClassFixture<SqlServerC
         row.RowsReturned.ShouldBe(50);
         row.Rejections.Access.ShouldBe(1);
         row.Rejections.RateLimit.ShouldBe(1);
-        row.DistinctActors.ShouldBe(2);
         row.QueryNames.ShouldBe(["GetReadings"]);
         actors["powerbi"].ShouldBe(2);
 
@@ -83,7 +103,7 @@ public sealed class SqlServerConsumerAggregationTests : IClassFixture<SqlServerC
     [Trait("Category", "Security")]
     public async Task ConcurrentActorInsert_SameKey_NoPkViolation()
     {
-        // SEC-286-8: insert-if-absent with HOLDLOCK serialises the same key; no PK violation, exactly one row.
+        // SEC-286-8: concurrent MERGE upserts with HOLDLOCK serialise the same key; no PK violation, exact total.
         if (!_shared.Db.IsAvailable)
         {
             return;
@@ -94,11 +114,7 @@ public sealed class SqlServerConsumerAggregationTests : IClassFixture<SqlServerC
         var tenant = new TenantId("tenant-ss");
         string day = DateTimeOffset.UtcNow.ToString("yyyy-MM-dd");
 
-        await Task.WhenAll(Enumerable.Range(0, 24).Select(_ => repo.RecordActorSampleAsync(table, tenant, day, "powerbi", new string('c', 64))));
         await Task.WhenAll(Enumerable.Range(0, 24).Select(_ => repo.RecordQueryNameAsync(table, tenant, day, "powerbi", "Q", 1)));
-
-        var actors = await repo.QueryDistinctActorCountsAsync(table, tenant, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
-        actors["powerbi"].ShouldBe(1);
 
         // No lost update: one query-name row whose counter is the sum of all 24 concurrent increments.
         await using var conn = new Microsoft.Data.SqlClient.SqlConnection(_shared.Db.ConnectionString);

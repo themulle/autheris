@@ -26,6 +26,7 @@ using Xunit;
 /// SR-H-01: Four-Eyes / ABAC / inactive checks must run on every table a query_sql / invoke_api call really reads.
 /// SR-H-02 (+ SR-M-09): the MCP admin tools are cluster-admin only and unavailable to read-only sessions.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class SecurityReviewMcpHighTests
 {
     private static readonly TableIdentifier Secret = new("sales", "public", "secret");

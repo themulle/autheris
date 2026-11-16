@@ -191,14 +191,17 @@ public class AccessPlanningService : IAccessPlanningService
             foreach (var (column, requestedLevel) in grant.Columns)
             {
                 var colMeta = meta?.Columns.FirstOrDefault(c => string.Equals(c.ColumnName, column, StringComparison.OrdinalIgnoreCase));
-                bool isPii = (colMeta?.IsSensitive ?? false) ||
+                bool isPii = ClassificationMetadata.IsColumnSensitive(meta, colMeta, column) ||
                              PiiKeywords.Any(k => column.Contains(k, StringComparison.OrdinalIgnoreCase)) ||
                              (meta?.Table.IsHighlySensitive ?? false);
 
                 string beforeState = "none";
-                if (meta?.ColumnMaskingRules.TryGetValue(column, out var rule) == true)
+                if (meta is not null && ClassificationMetadata.IsColumnSensitive(meta, colMeta, column))
                 {
-                    beforeState = string.Equals(rule.RuleType, "CLEAR", StringComparison.OrdinalIgnoreCase) ? "clear" : "mask";
+                    beforeState = meta.ColumnMaskingRules.TryGetValue(column, out var rule) &&
+                                  string.Equals(rule.RuleType, "CLEAR", StringComparison.OrdinalIgnoreCase)
+                        ? "clear"
+                        : "mask";
                 }
 
                 diffs.Add(new AccessPlanDiffItem(

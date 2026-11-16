@@ -87,10 +87,10 @@ public sealed class SqlEndpointGetSelectOnlyTests
     public async Task Register_GetDefinitionWithNonSelect_IsRejected(string sql)
     {
         var registry = new InMemorySqlEndpointRegistry();
-        var context = CreateContext(new ServiceCollection(), "ClusterAdmin");
+        var context = CreateContext(new ServiceCollection().AddAuditWriterOver(Substitute.For<IAuditLogRepository>()), "ClusterAdmin");
         var loader = new SqlEndpointLoader(registry, NullLogger<SqlEndpointLoader>.Instance);
 
-        var result = await SqlEndpointRoutes.HandleRegisterEndpoint(new RegisterSqlEndpointRequest(Name: "ep", Sql: sql), registry, context, loader);
+        var result = await SqlEndpointRoutes.HandleRegisterEndpoint(new RegisterSqlEndpointRequest(Name: "ep", Sql: sql, HttpMethod: "GET"), registry, context, loader);
 
         result.ShouldNotBeOfType<Created<object>>();
         registry.TryGet("ep", out _).ShouldBeFalse();

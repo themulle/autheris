@@ -42,6 +42,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
     private readonly IHttpClientFactory? _httpClientFactory;
     private readonly Autheris.Application.Procedures.Interfaces.IProcedureCatalog? _procedureCatalog;
     private readonly Autheris.Application.Mcp.Interfaces.IGraphQlCatalogMap? _graphQlMap;
+    private readonly Autheris.Application.Catalog.Discovery.IDiscoveryService? _discovery;
 
     /// <summary>
     /// The gateway options are required: the caller class and the visible set depend on them, so a
@@ -63,8 +64,10 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         IConsentRepository? consentRepository = null,
         TimeProvider? timeProvider = null,
         Autheris.Application.DataSources.IDataSourceOptionsResolver? transportResolver = null,
-        Autheris.Application.Mcp.Interfaces.IGraphQlCatalogMap? graphQlMap = null)
+        Autheris.Application.Mcp.Interfaces.IGraphQlCatalogMap? graphQlMap = null,
+        Autheris.Application.Catalog.Discovery.IDiscoveryService? discoveryService = null)
     {
+        _discovery = discoveryService;
         _transportResolver = transportResolver;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _consentResolution = consentResolution;
@@ -90,6 +93,18 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
     {
         ArgumentNullException.ThrowIfNull(context);
         ct.ThrowIfCancellationRequested();
+
+        if (_discovery != null)
+        {
+            var page = await _discovery.ListAsync(
+                new Autheris.Application.Catalog.Discovery.DiscoveryQuery(
+                    Language: context.Language,
+                    First: Autheris.Application.Catalog.Discovery.DiscoveryService.MaxPageSize,
+                    Surface: Autheris.Application.Catalog.Discovery.DiscoverySurface.Rest),
+                CallerOf(context),
+                ct).ConfigureAwait(false);
+            return page.Items.Select(o => Autheris.Application.Catalog.Discovery.CatalogDiscoveryProjection.ToDatasetSummary(o, context.Language)).ToList();
+        }
 
         var (permitted, _) = await VisibleForAsync(context, ct).ConfigureAwait(false);
         return permitted.Select(t => ToSummary(t, t.Table.DataSourceType.ToString(), context.Language)).ToList();
@@ -134,6 +149,14 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
                 Sensitivity: "NORMAL",
                 IsActive: true,
                 Indexes: []);
+        }
+
+        if (_discovery != null)
+        {
+            var found = await _discovery.GetAsync(table, CallerOf(context), ct).ConfigureAwait(false);
+            return found == null
+                ? null
+                : Autheris.Application.Catalog.Discovery.CatalogDiscoveryProjection.ToDatasetDetail(found, context.Language);
         }
 
         // An unknown table and one the caller may not see (consent, tier) take the same path and answer null (404): no existence oracle.
@@ -191,17 +214,21 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         var columnDetails = metadata.Columns.Select(c =>
         {
             var maskingState = MaskingStateOf(metadata, c);
+            var (pii, _, classifications, clearRequestable) = Autheris.Application.Catalog.Discovery.DiscoveryAccessMapper
+                .ResolveColumnClassifications(metadata, c, metadata.Table.DiscoveryHidden, context.TenantId.Value);
 
             var colResolved = !string.IsNullOrWhiteSpace(lang) ? c.Texts.Resolve(lang) : null;
             return new CatalogColumnDetail(
                 Name: c.ColumnName,
                 Type: c.DataType,
-                Sensitivity: c.IsSensitive ? "Sensitive" : "Public",
+                Sensitivity: pii || ClassificationMetadata.IsColumnSensitive(metadata, c) ? "Sensitive" : "Public",
                 MaskingState: maskingState,
                 IsPrimaryKey: pkSet.Contains(c.ColumnName),
-                IsPiiIndicator: CatalogPiiDetector.IsPii(c.ColumnName, c.IsSensitive),
+                IsPiiIndicator: pii,
                 DisplayName: colResolved?.Title ?? c.DisplayName ?? c.ColumnName,
-                Description: colResolved?.Description ?? c.Description
+                Description: colResolved?.Description ?? c.Description,
+                Classifications: classifications,
+                ClearRequestable: clearRequestable
             );
         }).ToList();
 
@@ -276,7 +303,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
             return rule.RuleType;
         }
 
-        return c.IsSensitive ? "Masked" : "Clear";
+        return ClassificationMetadata.IsColumnSensitive(metadata, c) ? "Masked" : "Clear";
     }
 
     private async Task<IReadOnlyList<RegisteredProcedure>> GetVisibleProceduresAsync(RequestContext context, CancellationToken ct)
@@ -294,6 +321,22 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
     {
         ArgumentNullException.ThrowIfNull(context);
         ct.ThrowIfCancellationRequested();
+
+        if (_discovery != null)
+        {
+            var visibleProcs = await GetVisibleProceduresAsync(context, ct).ConfigureAwait(false);
+            var trimmed = query?.Trim();
+            var procList = Autheris.Application.Catalog.Discovery.CatalogDiscoveryProjection.FilterProcedureSummaries(visibleProcs, domain, trimmed);
+            var objs = await _discovery.SearchAsync(
+                trimmed ?? string.Empty,
+                new Autheris.Application.Catalog.Discovery.DiscoverySearchOptions(domain, Limit: 25, Mode: null, Language: context.Language, Surface: Autheris.Application.Catalog.Discovery.DiscoverySurface.Search),
+                CallerOf(context),
+                ct).ConfigureAwait(false);
+            return objs
+                .Select(o => Autheris.Application.Catalog.Discovery.CatalogDiscoveryProjection.ToDatasetSummary(o, context.Language))
+                .Concat(procList)
+                .ToList();
+        }
 
         var (permitted, all) = await VisibleForAsync(context, ct).ConfigureAwait(false);
         var visibleProcedures = await GetVisibleProceduresAsync(context, ct).ConfigureAwait(false);
@@ -368,6 +411,11 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         ArgumentNullException.ThrowIfNull(query);
         ArgumentNullException.ThrowIfNull(context);
         ct.ThrowIfCancellationRequested();
+
+        if (_discovery != null)
+        {
+            return await SearchDetailedWithDiscoveryAsync(query, context, ct).ConfigureAwait(false);
+        }
 
         var (permitted, all) = await VisibleForAsync(context, ct).ConfigureAwait(false);
         var permittedById = permitted.ToDictionary(t => t.Identifier);
@@ -446,6 +494,25 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
     /// from the id (the root field includes the schema and is sanitized). Null for a table without a root field, for a Summary
     /// row and when no GraphQL map is registered.
     /// </summary>
+    private async Task<IReadOnlyList<CatalogSearchHit>> SearchDetailedWithDiscoveryAsync(CatalogSearchQuery query, RequestContext context, CancellationToken ct)
+    {
+        var trimmed = query.QueryText?.Trim() ?? string.Empty;
+        var mode = query.Mode.ToString();
+        var lang = query.Language ?? context.Language;
+        var searchOpts = new Autheris.Application.Catalog.Discovery.DiscoverySearchOptions(query.DomainFilter, query.Limit, mode, lang, Autheris.Application.Catalog.Discovery.DiscoverySurface.Search);
+        var objs = await _discovery!.SearchAsync(trimmed, searchOpts, CallerOf(context), ct).ConfigureAwait(false);
+        var hits = new List<CatalogSearchHit>(objs.Count);
+        foreach (var obj in objs)
+        {
+            var hit = Autheris.Application.Catalog.Discovery.CatalogDiscoveryProjection.ToSearchHit(obj, mode, lang);
+            if (_graphQlMap != null && obj.Columns.Count > 0)
+                hit = hit with { SuggestedGraphQlField = await _graphQlMap.GetRootFieldAsync(hit.TableIdentifier, ct).ConfigureAwait(false) };
+            hits.Add(hit);
+        }
+        var visibleProcs = await GetVisibleProceduresAsync(context, ct).ConfigureAwait(false);
+        return hits.Concat(Autheris.Application.Catalog.Discovery.CatalogDiscoveryProjection.FilterProcedureHits(visibleProcs, query.DomainFilter, trimmed)).Take(query.Limit).ToList();
+    }
+
     private async Task<List<CatalogSearchHit>> WithGraphQlFieldsAsync(
         IEnumerable<CatalogSearchHit> hits,
         IReadOnlyDictionary<TableIdentifier, TableMetadata> permitted,
@@ -656,6 +723,13 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
             {
                 return null;
             }
+
+            // Include caller-visible query terms (e.g. visible column names omitted from column-restricted BM25F scoring)
+            // so RelevantColumns and visibleRatio still reflect visible matches without exposing hidden columns.
+            matchedTerms = matchedTerms
+                .Concat(queryTerms.Where(t => !string.IsNullOrWhiteSpace(t) && text.Contains(t)))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
 
             // When all query terms came from a single underscore-joined identifier (e.g. a column name like tier_secret_col),
             // every query term must be present in the visible text so a shared prefix (like "tier" in table description)

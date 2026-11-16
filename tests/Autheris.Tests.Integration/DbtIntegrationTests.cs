@@ -1,17 +1,20 @@
 namespace Autheris.Tests.Integration;
 
+using System.Collections.Generic;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Hosting;
 using Autheris.Tests.Integration.Governance;
 
-public class DbtIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
+public class DbtIntegrationTests : IClassFixture<DbtIntegrationTests.HostFixture>
 {
     private readonly WebApplicationFactory<Program> _factory;
 
@@ -49,15 +52,28 @@ public class DbtIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
     }
     """;
 
-    public DbtIntegrationTests(WebApplicationFactory<Program> factory)
+    public DbtIntegrationTests(HostFixture factory)
     {
-        _factory = factory.WithWebHostBuilder(builder =>
+        _factory = factory;
+    }
+
+    public sealed class HostFixture : IntegrationHost<HostFixture>
+    {
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseEnvironment("Development");
-            builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("DbtIntegrationTests"));
-        });
+            base.ConfigureWebHost(builder);
+        }
+
+        protected override void ConfigureHostConfiguration(IConfigurationBuilder config)
+        {
+            config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Gateway:Authentication:EnableTestAuthHandler"] = "true",
+                ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
+                ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.Create("DbtIntegrationTests"),
+            });
+        }
     }
 
     [Fact]
@@ -77,7 +93,9 @@ public class DbtIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-ADMIN-SID");
         client.DefaultRequestHeaders.Add("X-Test-Roles", "GovernanceAdmin");
 
-        var content = new StringContent(SampleDbtManifest, Encoding.UTF8, "application/json");
+        // The catalog is shared by the tests of this class: a model of its own keeps its PII proposal from being "already pending".
+        var ownManifest = SampleDbtManifest.Replace("monthly_revenue", "monthly_revenue_ingest", StringComparison.Ordinal);
+        var content = new StringContent(ownManifest, Encoding.UTF8, "application/json");
         var response = await client.PostAsync("/api/extensions/dbt/sync", content);
 
         response.StatusCode.ShouldBe(HttpStatusCode.OK);

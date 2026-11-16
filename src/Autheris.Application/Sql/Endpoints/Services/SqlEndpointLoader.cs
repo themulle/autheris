@@ -198,14 +198,14 @@ public sealed class SqlEndpointLoader : IDisposable
     /// <summary>
     /// Parses raw SQL content with annotations into a SqlEndpointDefinition.
     /// </summary>
-    public SqlEndpointDefinition ParseSqlContent(string content, string defaultName)
+    public SqlEndpointDefinition ParseSqlContent(string content, string defaultName, string? httpMethodOverride = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(content);
 
         string name = defaultName;
         string summary = string.Empty;
         string? dataSource = null;
-        string httpMethod = "GET";
+        string? configuredHttpMethod = null;
         int? timeoutSeconds = null;
         var headerParams = new Dictionary<string, (Type Type, bool IsRequired, object? DefaultVal, string? Desc, bool IsList)>(StringComparer.OrdinalIgnoreCase);
 
@@ -227,7 +227,7 @@ public sealed class SqlEndpointLoader : IDisposable
                     dataSource = val;
                     break;
                 case "method" or "http_method":
-                    httpMethod = val.ToUpperInvariant();
+                    configuredHttpMethod = val.Trim().ToUpperInvariant();
                     break;
                 case "timeout" when int.TryParse(val, out int t):
                     timeoutSeconds = t > 0
@@ -270,6 +270,17 @@ public sealed class SqlEndpointLoader : IDisposable
 
         var analyzer = new SqlQueryAnalyzer();
         var metadata = analyzer.Analyze(tree);
+
+        var statementClass = tree.statement() is SqlBaseParser.MergeContext
+            ? RequestStatementClass.Write
+            : metadata.StatementType switch
+            {
+                SqlStatementType.Select => RequestStatementClass.Read,
+                SqlStatementType.Insert or SqlStatementType.Update or SqlStatementType.Delete => RequestStatementClass.Write,
+                _ => RequestStatementClass.Other
+            };
+        string? requestedMethod = string.IsNullOrWhiteSpace(httpMethodOverride) ? configuredHttpMethod : httpMethodOverride;
+        string httpMethod = NormalizeAndValidateMethod(requestedMethod, statementClass);
 
         // Build parameters
         var finalParams = new List<SqlEndpointParameter>();
@@ -342,6 +353,37 @@ public sealed class SqlEndpointLoader : IDisposable
             ReferencedTables: referencedTableNames,
             HttpMethod: httpMethod,
             TimeoutSeconds: timeoutSeconds);
+    }
+
+    public static string NormalizeAndValidateMethod(string? rawMethod, RequestStatementClass statementClass)
+    {
+        if (statementClass == RequestStatementClass.Unparsable)
+        {
+            throw new ArgumentException("The SQL statement could not be parsed as a valid single statement.");
+        }
+
+        if (string.IsNullOrWhiteSpace(rawMethod))
+        {
+            return statementClass switch
+            {
+                RequestStatementClass.Read => "GET",
+                RequestStatementClass.Write => "POST",
+                _ => throw new ArgumentException("Non-SELECT statements must be registered with HTTP method POST or a supported write statement.")
+            };
+        }
+
+        string normalized = rawMethod.Trim().ToUpperInvariant();
+        if (rawMethod.Any(char.IsControl) || normalized is not ("GET" or "POST"))
+        {
+            throw new ArgumentException("Unsupported HTTP method. Only GET and POST are permitted.");
+        }
+
+        if (string.Equals(normalized, "GET", StringComparison.Ordinal) && statementClass != RequestStatementClass.Read)
+        {
+            throw new ArgumentException("Non-SELECT SQL endpoints cannot be registered with HTTP method GET.");
+        }
+
+        return normalized;
     }
 
     /// <summary>

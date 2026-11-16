@@ -9,7 +9,7 @@ using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 using Shouldly;
 using Xunit;
 
@@ -32,7 +32,7 @@ public sealed class TypedAggregationParityEndToEndTests : IClassFixture<TypedAgg
         protected override IReadOnlyCollection<string> RequiredGraphQlFields =>
             [.. base.RequiredGraphQlFields, "default_main_air1_aggregate", "default_main_masked_t", "default_main_masked_t_aggregate"];
 
-        protected override void SeedExtraData(SqliteConnection connection)
+        protected override void SeedExtraData(NpgsqlConnection connection)
         {
             using var cmd = connection.CreateCommand();
             cmd.CommandText = @"

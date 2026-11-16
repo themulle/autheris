@@ -126,6 +126,114 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
         builder.Append(')');
     }
 
+    /// <summary>
+    /// Emits Trino <c>substr(str, start[, length])</c> semantics on dialects whose native substring diverges for <c>start &lt;= 0</c>:
+    /// <c>start == 0</c> yields <c>''</c>, positive <c>start</c> emits the direct call with zero expansion, and negative literal
+    /// <c>start</c> clamps from the end only for simple operands so compound AST subtrees are never duplicated.
+    /// </summary>
+    protected void FormatTrinoSubstring(
+        ref ValueStringBuilder builder,
+        SubstringExpression substring,
+        string functionName,
+        string lengthFunctionName,
+        bool requireLength,
+        SqlEmitterContext context)
+    {
+        var effectiveLength = substring.Length ?? (requireLength ? new LiteralExpression(2147483647L, LiteralType.Integer) : null);
+
+        if (!TryGetIntegerLiteral(substring.Start, out long start) || start >= 1)
+        {
+            builder.Append(functionName);
+            builder.Append('(');
+            GenerateExpression(substring.Source, ref builder, context);
+            builder.Append(", ");
+            GenerateExpression(substring.Start, ref builder, context);
+            if (effectiveLength != null)
+            {
+                builder.Append(", ");
+                GenerateExpression(effectiveLength, ref builder, context);
+            }
+            builder.Append(')');
+            return;
+        }
+
+        if (start == 0)
+        {
+            AppendConstantFragment(ref builder, context, "''");
+            return;
+        }
+
+        if (!IsSimpleSubstringOperand(substring.Source))
+        {
+            throw new SqlCompileNotSupportedException(
+                SqlCompileNotSupportedReason.Construct,
+                "substr with negative start on a compound expression");
+        }
+
+        builder.Append("CASE WHEN ");
+        AppendNegativeSubstringOffset(ref builder, substring.Source, start, lengthFunctionName, context);
+        builder.Append(" >= ");
+        AppendInlineInteger(ref builder, 1, context);
+        builder.Append(" THEN ");
+        builder.Append(functionName);
+        builder.Append('(');
+        GenerateExpression(substring.Source, ref builder, context);
+        builder.Append(", ");
+        AppendNegativeSubstringOffset(ref builder, substring.Source, start, lengthFunctionName, context);
+        if (effectiveLength != null)
+        {
+            builder.Append(", ");
+            GenerateExpression(effectiveLength, ref builder, context);
+        }
+        builder.Append(") ELSE ");
+        AppendConstantFragment(ref builder, context, "''");
+        builder.Append(" END");
+    }
+
+    private void AppendNegativeSubstringOffset(
+        ref ValueStringBuilder builder,
+        Expression source,
+        long start,
+        string lengthFunctionName,
+        SqlEmitterContext context)
+    {
+        builder.Append(lengthFunctionName);
+        builder.Append('(');
+        GenerateExpression(source, ref builder, context);
+        builder.Append(") + ");
+        if (context.IsBound && BindLiterals)
+        {
+            builder.Append(BindInteger(start, context));
+        }
+        else
+        {
+            builder.Append('(');
+            builder.Append(start.ToString(CultureInfo.InvariantCulture));
+            builder.Append(')');
+        }
+        builder.Append(" + ");
+        AppendInlineInteger(ref builder, 1, context);
+    }
+
+    private static bool TryGetIntegerLiteral(Expression expression, out long value)
+    {
+        switch (expression)
+        {
+            case LiteralExpression { Type: LiteralType.Integer, Value: long direct }:
+                value = direct;
+                return true;
+            case UnaryExpression { Operator: UnaryOperator.Negate, Operand: LiteralExpression { Type: LiteralType.Integer, Value: long negated } } when negated != long.MinValue:
+                value = -negated;
+                return true;
+            default:
+                value = 0;
+                return false;
+        }
+    }
+
+    private static bool IsSimpleSubstringOperand(Expression expression) =>
+        expression is ColumnReference or LiteralExpression or ParameterReference;
+
     /// <summary>Wunsch 4: ANSI <c>TRIM(BOTH|LEADING|TRAILING [chars] FROM x)</c>.</summary>
     protected virtual void FormatTrim(ref ValueStringBuilder builder, TrimExpression trim, SqlEmitterContext context)
     {

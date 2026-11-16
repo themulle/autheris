@@ -6,21 +6,18 @@ using Xunit;
 public sealed class TimeZoneAllowlistTests
 {
     private static readonly TargetSqlDialect[] All =
-        [TargetSqlDialect.Ansi, TargetSqlDialect.PostgreSql, TargetSqlDialect.SqlServer, TargetSqlDialect.Sqlite, TargetSqlDialect.DuckDb, TargetSqlDialect.Oracle, TargetSqlDialect.Databricks];
+        [TargetSqlDialect.Ansi, TargetSqlDialect.PostgreSql, TargetSqlDialect.SqlServer, TargetSqlDialect.DuckDb, TargetSqlDialect.Oracle, TargetSqlDialect.Databricks];
 
     private static readonly string[] Unlisted = ["timezone", "at_timezone", "with_timezone", "switchoffset", "todatetimeoffset", "timezone_hour", "timezone_minute"];
 
     [Fact]
     public void T7_ConvertTimezoneIsInEveryDialectAllowlist()
     {
-        // GAP-019: SQLite has no zone database, so it does not advertise the function (a 403 policy violation).
-        foreach (var dialect in All.Where(d => d != TargetSqlDialect.Sqlite))
+        foreach (var dialect in All)
         {
             Assert.Contains("convert_timezone", SqlFunctionAllowlists.Build(dialect, null));
             Assert.Contains("convert_timezone", SqlFunctionAllowlists.GetDefault(dialect));
         }
-
-        Assert.DoesNotContain("convert_timezone", SqlFunctionAllowlists.Build(TargetSqlDialect.Sqlite, null));
 
         foreach (var dialect in new[] { TargetSqlDialect.PostgreSql, TargetSqlDialect.SqlServer, TargetSqlDialect.DuckDb, TargetSqlDialect.Oracle, TargetSqlDialect.Databricks })
         {

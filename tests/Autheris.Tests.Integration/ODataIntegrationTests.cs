@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Integration;
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -12,50 +13,55 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Data.Sqlite;
+using Npgsql;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Hosting;
 using Autheris.Tests.Integration.Governance;
 
-public class ODataIntegrationTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
+public class ODataIntegrationTests : IClassFixture<ODataIntegrationTests.HostFixture>
 {
     /// <summary>A real SQLite table behind the default data source (entity sets read real rows; there is no synthetic data).</summary>
     private static readonly TableIdentifier RowsTable = new("default", "main", "odata_rows");
 
     private readonly WebApplicationFactory<Program> _factory;
-    private readonly string _dataDbPath = Path.Combine(Path.GetTempPath(), $"odata-rows-{Guid.NewGuid():N}.db");
 
-    public ODataIntegrationTests(WebApplicationFactory<Program> factory)
+    public ODataIntegrationTests(HostFixture factory)
     {
-        SeedRowsDatabase(_dataDbPath);
+        _factory = factory;
+    }
 
-        // WebSql:Enabled stays off: it switches the client SQL endpoints, not the table reads OData plans itself.
-        _factory = factory.WithWebHostBuilder(builder =>
+    public sealed class HostFixture : IntegrationHost<HostFixture>
+    {
+        private readonly string _dataDbPath;
+
+        public HostFixture()
         {
-            builder.UseSetting("Gateway:Tenancy:DefaultTenantId", Autheris.Tests.Common.TestTenants.Default.Value);
-            builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("ODataIntegrationTests"));
-            builder.UseSetting("Gateway:DataSources:Connections:default:Provider", "Sqlite");
-            builder.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", $"Data Source={_dataDbPath}");
-        });
-    }
+            _dataDbPath = PostgresDataSource.Create("odatarows", "CREATE TABLE odata_rows (id INTEGER PRIMARY KEY, name TEXT); INSERT INTO odata_rows VALUES (1, 'alpha'), (2, 'beta');");
+        }
 
-    public void Dispose()
-    {
-        _factory.Dispose();
-        SqliteConnection.ClearAllPools();
-        try { File.Delete(_dataDbPath); } catch (IOException) { }
-    }
+        protected override void ConfigureHostConfiguration(IConfigurationBuilder config)
+        {
+            // WebSql:Enabled stays off: it switches the client SQL endpoints, not the table reads OData plans itself.
+            config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Gateway:Tenancy:DefaultTenantId"] = Autheris.Tests.Common.TestTenants.Default.Value,
+                ["Gateway:Authentication:EnableTestAuthHandler"] = "true",
+                ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
+                ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.Create("ODataIntegrationTests"),
+                ["Gateway:DataSources:Connections:default:Provider"] = "PostgreSql",
+                ["Gateway:DataSources:Connections:default:DefaultSchema"] = "main",
+                ["Gateway:DataSources:Connections:default:ConnectionString"] = _dataDbPath,
+            });
+        }
 
-    private static void SeedRowsDatabase(string path)
-    {
-        using var conn = new SqliteConnection($"Data Source={path}");
-        conn.Open();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = "CREATE TABLE odata_rows (id INTEGER PRIMARY KEY, name TEXT); INSERT INTO odata_rows VALUES (1, 'alpha'), (2, 'beta');";
-        cmd.ExecuteNonQuery();
+        protected override void Dispose(bool disposing)
+        {
+            base.Dispose(disposing);
+            NpgsqlConnection.ClearAllPools();
+        }
     }
 
     /// <summary>Registers <see cref="RowsTable"/> in the catalog and grants the user a clear consent on every column.</summary>
@@ -65,7 +71,7 @@ public class ODataIntegrationTests : IClassFixture<WebApplicationFactory<Program
         var repo = scope.ServiceProvider.GetRequiredService<IGovernanceRepository>();
         await repo.UpsertTableMetadataAsync(new TableMetadata
         {
-            Table = new Table { Id = Guid.NewGuid(), DisplayName = RowsTable.TableName, TableName = RowsTable.TableName, SchemaName = RowsTable.Schema, SourceType = "Sqlite", SourceName = "default" },
+            Table = new Table { Id = Guid.NewGuid(), DisplayName = RowsTable.TableName, TableName = RowsTable.TableName, SchemaName = RowsTable.Schema, SourceType = "PostgreSql", SourceName = "default" },
             Identifier = RowsTable,
             Columns = [new TableColumn { ColumnName = "id", DataType = "integer" }, new TableColumn { ColumnName = "name", DataType = "varchar" }]
         });
@@ -97,7 +103,7 @@ public class ODataIntegrationTests : IClassFixture<WebApplicationFactory<Program
     [Fact]
     public async Task ODataServiceDocument_WhenAuthenticated_Returns200WithEntitySets()
     {
-        var userSid = new Sid("S-1-5-21-USER-1");
+        var userSid = new Sid("S-1-5-21-USER-SERVICEDOC");
         await GrantRowsTableAsync(userSid);
 
         var client = _factory.CreateClient();

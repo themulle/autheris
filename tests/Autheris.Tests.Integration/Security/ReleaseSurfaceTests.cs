@@ -5,6 +5,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Threading.Tasks;
+using Autheris.Tests.Common.Hosting;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.Routing;
@@ -14,17 +15,21 @@ using Xunit;
 using Autheris.Tests.Integration.Governance;
 
 [Trait("Category", "Security")]
-public sealed class ReleaseSurfaceTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
+public sealed class ReleaseSurfaceTests : IClassFixture<ReleaseSurfaceTests.HostFixture>
 {
     private readonly WebApplicationFactory<Program> _factory;
-    private readonly string _tempDbPath;
-    private readonly string _tempAnchorPath;
 
-    public ReleaseSurfaceTests(WebApplicationFactory<Program> factory)
+    public ReleaseSurfaceTests(HostFixture factory)
     {
-        _tempDbPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"gov-{GetType().Name}-{Guid.NewGuid():N}.db");
-        _tempAnchorPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "anchor-" + Guid.NewGuid().ToString("N"));
-        _factory = factory.WithWebHostBuilder(builder =>
+        _factory = factory;
+    }
+
+    public sealed class HostFixture : IntegrationHost
+    {
+        private readonly string _tempDbPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"gov-ReleaseSurfaceTests-{Guid.NewGuid():N}.db");
+        private readonly string _tempAnchorPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "anchor-" + Guid.NewGuid().ToString("N"));
+
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseEnvironment("Production");
             builder.UseSetting("Gateway:Hosting:AllowedHosts:0", "localhost");
@@ -35,6 +40,7 @@ public sealed class ReleaseSurfaceTests : IClassFixture<WebApplicationFactory<Pr
             builder.UseSetting("Gateway:DataMasking:HmacSecretKeyVaultRef", "kv://masking-hmac");
             builder.UseSetting("Gateway:Audit:ChainAnchorPath", _tempAnchorPath);
             builder.UseSetting("Gateway:RestApi:BulkStream:SigningKey", "0123456789012345678901234567890123456789");
+            builder.UseSetting("Gateway:Governance:GrantRecords:SigningKey", GovernanceStoreFactory.GrantSigningKeyPem);
             builder.UseSetting("Gateway:DuckDbOlap:MemoryBudgetBytes", "2147483648");
             // Mode=Direct requires one enabled direct scheme outside Development.
             builder.UseSetting("Gateway:Authentication:Adfs:Enabled", "true");
@@ -48,15 +54,15 @@ public sealed class ReleaseSurfaceTests : IClassFixture<WebApplicationFactory<Pr
                     FixedTenantId = "tenant_release",
                     Provisioning = Autheris.Domain.Identity.RealmProvisioningMode.None
                 }));
-        });
-    }
+        }
 
-    public void Dispose()
-    {
-        _factory.Dispose();
-        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-        try { if (System.IO.File.Exists(_tempDbPath)) System.IO.File.Delete(_tempDbPath); } catch { }
-        try { if (System.IO.File.Exists(_tempAnchorPath)) System.IO.File.Delete(_tempAnchorPath); } catch { }
+        protected override void Dispose(bool disposing)
+        {
+            base.Dispose(disposing);
+            Npgsql.NpgsqlConnection.ClearAllPools();
+            try { if (System.IO.File.Exists(_tempDbPath)) System.IO.File.Delete(_tempDbPath); } catch { }
+            try { if (System.IO.File.Exists(_tempAnchorPath)) System.IO.File.Delete(_tempAnchorPath); } catch { }
+        }
     }
 
     [Theory]

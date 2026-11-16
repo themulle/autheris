@@ -4,12 +4,13 @@ using System;
 using System.Security;
 using Autheris.Domain.Common;
 using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.Logging;
 using Npgsql;
 using Oracle.ManagedDataAccess.Client;
 
 public static class ConnectionSecretPolicy
 {
-    public static bool HasPlaintextPassword(DatabaseDialect dialect, string connectionString)
+    public static bool HasPlaintextPassword(DatabaseDialect dialect, string connectionString, ILogger? logger = null)
     {
         if (string.IsNullOrWhiteSpace(connectionString)) return false;
         try
@@ -24,7 +25,11 @@ public static class ConnectionSecretPolicy
         }
         catch (Exception ex) when (ex is not SecurityException)
         {
-            throw new SecurityException("Failed to parse connection string for secret policy evaluation.", ex);
+            logger?.LogWarning(
+                "Failed to parse {Dialect} connection string for secret policy evaluation ({ExceptionType}).",
+                dialect,
+                ex.GetType().Name);
+            throw new SecurityException("Failed to parse connection string for secret policy evaluation.");
         }
     }
 

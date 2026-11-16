@@ -2,7 +2,10 @@ using Autheris.Tests.Unit;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net;
+using System.Net.Http;
 using System.Security.Claims;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Governance.Interfaces;
@@ -17,6 +20,7 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Domain.Security;
 using Autheris.Infrastructure.Persistence;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -118,7 +122,8 @@ public sealed class DeclarativeConsentAndAccessIntrospectionTests
                     "orders",
                     "Group",
                     "S-1-5-21-DATA-SCIENTISTS",
-                    "Allow"
+                    "Allow",
+                    ValidUntil: DateTimeOffset.UtcNow.AddDays(30)
                 )
             ]);
 
@@ -142,6 +147,7 @@ public sealed class DeclarativeConsentAndAccessIntrospectionTests
                 l[0].Effect == ConsentEffect.Allow),
             Arg.Any<Sid>(),
             Arg.Any<string>(),
+            Arg.Any<Autheris.Domain.Security.ConsentRevocationAuthority>(),
             Arg.Is<IReadOnlyList<AuditLogEntry>?>(a => a != null && a.Count == 1 && a[0].EventType == "GITOPS_CONSENT_APPLY"),
             Arg.Any<CancellationToken>());
 
@@ -384,5 +390,36 @@ public sealed class DeclarativeConsentAndAccessIntrospectionTests
         // Assert
         options.Authentication.EntraId.GetEffectiveReadOnlyScopes().ShouldContain("Agent.Read");
         options.Authentication.EntraId.GetEffectiveReadOnlyScopes().ShouldContain("App.Read");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Apply_GovernanceAdminOnly_Returns200()
+    {
+        using var host = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
+            GovernanceTestDatabase.Apply(builder, "DeclarativeConsentApplyGovernanceAdminOnly");
+        });
+
+        const string manifestJson = "{ \"version\": \"1.0\", \"policies\": [] }";
+
+        using var legacyClient = host.CreateClient();
+        legacyClient.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-ADMIN-1");
+        legacyClient.DefaultRequestHeaders.Add("X-Test-Roles", "GOVERNANCE_ADMIN");
+        legacyClient.DefaultRequestHeaders.Add("X-Test-Tenant", DefaultTenantCaller.Claim.Value);
+        var legacyResponse = await legacyClient.PostAsync(
+            "/api/v1/governance/consents/apply",
+            new StringContent(manifestJson, Encoding.UTF8, "application/json"));
+        legacyResponse.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+
+        using var adminClient = host.CreateClient();
+        adminClient.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-ADMIN-1");
+        adminClient.DefaultRequestHeaders.Add("X-Test-Roles", "GovernanceAdmin");
+        adminClient.DefaultRequestHeaders.Add("X-Test-Tenant", DefaultTenantCaller.Claim.Value);
+        var adminResponse = await adminClient.PostAsync(
+            "/api/v1/governance/consents/apply",
+            new StringContent(manifestJson, Encoding.UTF8, "application/json"));
+        adminResponse.StatusCode.ShouldBe(HttpStatusCode.OK);
     }
 }

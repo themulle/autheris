@@ -14,8 +14,8 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// JSON-RPC 2.0 Protocol Handler implementing the Model Context Protocol (MCP) specification (2024-11-05), used by the
-/// standard I/O runner (<see cref="IMcpStdioRunner"/>). The HTTP endpoint runs on the official MCP SDK (Autheris.Api.Mcp.GatewayMcpServer).
+/// JSON-RPC 2.0 Protocol Handler implementing the Model Context Protocol (MCP) specification (2024-11-05).
+/// The HTTP endpoint runs on the official MCP SDK (Autheris.Api.Mcp.GatewayMcpServer).
 /// </summary>
 public sealed class McpProtocolHandler : IMcpProtocolHandler
 {
@@ -45,13 +45,10 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
         _options = options?.Value ?? new GatewayOptions();
     }
 
-    public McpSessionContext CreateSession(string servicePrincipalId, string tenantId)
-        => CreateSession(servicePrincipalId, tenantId, null, null, null, null, false, null);
-
     public McpSessionContext CreateSession(
         string servicePrincipalId,
         string tenantId,
-        string? userSid = null,
+        string? userSid,
         IReadOnlyList<string>? roles = null,
         IReadOnlyList<string>? groupSids = null,
         string? clientIp = null,
@@ -516,7 +513,7 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
             return CreateErrorResponse(id, -32004, $"Resource '{uri}' not found.");
         }
 
-        // Same guardrail as the HTTP server (GatewayMcpServer.ReadGuardedSemanticResourceAsync): Casbin ABAC on the semantic catalog,
+        // Same guardrail as the HTTP server (GatewayMcpServer.ReadGuardedSemanticResourceAsync): the access decision point on the semantic catalog,
         // PII scrubbing, token budget and the MCP_TOOL_EXECUTION audit. The resource list is consent-filtered for the caller; a URI
         // outside it, a denied read and a failed guardrail all answer alike (no existence oracle).
         ISemanticMcpCompiler compiler = _semanticCompiler;

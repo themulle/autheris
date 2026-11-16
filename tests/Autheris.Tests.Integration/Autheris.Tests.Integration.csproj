@@ -13,6 +13,7 @@
     <PackageReference Include="coverlet.collector" Version="10.1.0" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.14" />
     <PackageReference Include="Microsoft.Data.SqlClient" Version="7.1.1" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.14" />
     <PackageReference Include="ModelContextProtocol.Core" Version="2.3.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
     <PackageReference Include="Npgsql" Version="10.0.3" />
@@ -60,10 +61,13 @@
     <Compile Include="..\Autheris.Tests.Unit\Cdc\CdcStreamStoreContractTests.cs" Link="Cdc\CdcStreamStoreContractTests.cs" />
     <Compile Include="..\Autheris.Tests.Unit\VirtualFilters\VirtualFilterTestData.cs" Link="VirtualFilterTestData.cs" />
     <Compile Include="..\Autheris.Tests.Unit\Catalog\Wp0CatalogFixtures.cs" Link="Catalog\Wp0CatalogFixtures.cs" />
+    <Compile Include="..\Autheris.Tests.Unit\Catalog\CatalogRepositoryStubs.cs" Link="Catalog\CatalogRepositoryStubs.cs" />
     <Compile Include="..\Autheris.Tests.Unit\Identity\Attributes\CallerAttributeTestSupport.cs" Link="Identity\CallerAttributeTestSupport.cs" />
     <Compile Include="..\Autheris.Tests.Unit\TestDoubles\AuditWriterTestServices.cs" Link="TestDoubles\AuditWriterTestServices.cs" />
-    <Compile Include="..\Autheris.Tests.Unit\TestDoubles\NullPolicyEnforcementService.cs" Link="TestDoubles\NullPolicyEnforcementService.cs" />
+    <Compile Include="..\Autheris.Tests.Unit\Sql\Policy\TestCorrelatedPredicateBuilder.cs" Link="Sql\Policy\TestCorrelatedPredicateBuilder.cs" />
     <Compile Include="..\Autheris.Tests.Unit\DefaultTenantCaller.cs" Link="DefaultTenantCaller.cs" />
+    <Compile Include="..\Autheris.Tests.Unit\Masking\MaskSemanticsCorpus.cs" Link="Masking\MaskSemanticsCorpus.cs" />
+    <Compile Include="..\Autheris.Tests.Unit\GraphQL\TypedTreeRowPolicy.cs" Link="GraphQL\TypedTreeRowPolicy.cs" />
     <Compile Include="..\Autheris.Tests.Unit\ConsentRequests\DecisionTestSupport.cs" Link="ConsentRequests\DecisionTestSupport.cs" />
     <Compile Include="..\Autheris.Tests.Unit\Webhooks\WebhookTestSupport.cs" Link="Webhooks\WebhookTestSupport.cs" />
   </ItemGroup>

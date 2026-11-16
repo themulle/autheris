@@ -1,0 +1,92 @@
+namespace Autheris.Domain.Model;
+
+public enum DiscoveryObjectKind { Table, View, Procedure }
+public enum DiscoveryAccessState { None, Requested, Granted, Expired }
+public enum DiscoveryRowScope { Full, RowRestricted }
+public enum DiscoveryColumnState { NoAccess, Masked, Clear }
+
+public sealed record DiscoveryOwner(string DisplayName, string? Email);
+
+public sealed record DiscoveryWriteState(
+    bool CanInsert,
+    bool CanUpdate,
+    bool CanDelete,
+    WriteRowScope? UpdateRowScope,
+    IReadOnlyList<string> InsertColumns,
+    IReadOnlyList<string> UpdateColumns,
+    bool Requestable)
+{
+    public static readonly DiscoveryWriteState None = new(
+        CanInsert: false,
+        CanUpdate: false,
+        CanDelete: false,
+        UpdateRowScope: null,
+        InsertColumns: [],
+        UpdateColumns: [],
+        Requestable: false);
+}
+
+public sealed record DiscoveryColumnClassification(string Code, string DisplayName);
+
+public sealed record DiscoveryColumn(
+    string Name,
+    string? DisplayName,
+    string DataType,
+    string? Description,
+    bool Pii,
+    bool ClearAccessRequiresSeparateApproval,
+    DiscoveryColumnState State,
+    DiscoveryColumnStatistics? Statistics,
+    bool ClearInSomeRows = false,
+    bool WriteProtected = false,
+    IReadOnlyList<DiscoveryColumnClassification>? Classifications = null,
+    IReadOnlyList<string>? ClearRequestable = null)
+{
+    public IReadOnlyList<DiscoveryColumnClassification> Classifications { get; init; } = Classifications ?? [];
+    public IReadOnlyList<string> ClearRequestable { get; init; } = ClearRequestable ?? [];
+}
+
+public sealed record DiscoveryObject(
+    DiscoveryObjectKind Kind,
+    string Domain,
+    string Schema,
+    string Name,
+    string? DisplayName,
+    string? Description,
+    string Sensitivity,
+    IReadOnlyList<string> Tags,
+    IReadOnlyList<DiscoveryOwner> Owners,
+    DiscoveryAccessState Access,
+    DiscoveryRowScope? RowScope,
+    IReadOnlyList<DiscoveryColumn> Columns,
+    DiscoveryTableStatistics? Statistics,
+    bool SamplesAvailable,
+    bool IsHidden,
+    DiscoveryWriteState? Write = null);
+
+public sealed record DiscoveryTableStatistics(
+    long? ApproxRowCount,
+    long? SizeBytes,
+    DateTimeOffset? LastUpdatedAt,
+    IReadOnlyList<string>? PartitionColumns,
+    DateTimeOffset UploadedAt);
+
+public sealed record DiscoveryColumnStatistics(
+    bool? Nullable,
+    double? NullRatio,
+    long? ApproxDistinctCount,
+    int? MinLength,
+    int? MaxLength,
+    string? MinValue,
+    string? MaxValue,
+    IReadOnlyList<string>? TopValues);
+
+public sealed record DiscoveryArtifacts(
+    Guid TableId,
+    string TenantId,
+    string? SamplesJson,
+    string? StatisticsJson,
+    string ContentSha256,
+    string UploadedBy,
+    DateTimeOffset UploadedAt,
+    int SchemaVersion = 1);

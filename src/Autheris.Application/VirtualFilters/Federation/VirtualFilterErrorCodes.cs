@@ -61,17 +61,38 @@ public static class VirtualFilterErrorCodes
     /// <summary>A binding's <c>max_pushdown_keys</c> is outside <c>1..1000</c> or above the gateway-wide <c>MaxPushdownKeys</c>; rejected when the profile is written (HTTP 400).</summary>
     public const string PushdownKeyBudgetInvalid = "VF_PUSHDOWN_KEY_BUDGET_INVALID";
 
+    /// <summary>Named parameter on a row policy is unknown, missing, mistyped, or exceeds max_values.</summary>
+    public const string RowPolicyParameterInvalid = "ROW_POLICY_PARAMETER_INVALID";
+
+    /// <summary>A policy whose tables/targets span different data sources must evaluate in KeySet mode.</summary>
+    public const string RowPolicyCrossSourceRequiresKeySet = "ROW_POLICY_CROSS_SOURCE_REQUIRES_KEYSET";
+
     private static readonly HashSet<string> GovernedCodes = new(StringComparer.Ordinal)
     {
         PatternEvaluationFailed, EnforcementIncomplete, KeyTypeMismatch, KeySourceUnsupported, KeySetTooLarge, BindingMisconfigured,
         SourceUnavailable, EnforcementUnavailable, ScanNotPermitted, PushdownUnavailable, PushdownLimitExceeded,
-        PushdownArgumentConflict, PathTemplateUnfillable, BindingInvalid, PushdownFormatUnsupported, PushdownKeyBudgetInvalid
+        PushdownArgumentConflict, PathTemplateUnfillable, BindingInvalid, PushdownFormatUnsupported, PushdownKeyBudgetInvalid,
+        RowPolicyParameterInvalid, RowPolicyCrossSourceRequiresKeySet
     };
 
     /// <summary>True when <paramref name="code"/> is one of the governed codes above (anything else must never reach a client).</summary>
     public static bool IsGoverned(string? code) => code != null && GovernedCodes.Contains(code);
 
     private static readonly IReadOnlyList<string> CodesInDenyReasons = [PatternEvaluationFailed, BindingMisconfigured];
+
+    /// <summary>True when <paramref name="code"/> is a Virtual Filter code that a decision carries as the code of a deny reason.</summary>
+    public static bool IsDenyReasonCode(string? code)
+    {
+        foreach (var candidate in CodesInDenyReasons)
+        {
+            if (string.Equals(candidate, code, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     /// <summary>The Virtual Filter error code a deny reason starts with (<c>CODE: ...</c>), if any.</summary>
     public static bool TryGetCode(string? denyReason, out string code)

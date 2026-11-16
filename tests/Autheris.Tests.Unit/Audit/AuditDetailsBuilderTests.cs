@@ -104,4 +104,125 @@ public sealed class AuditDetailsBuilderTests
         val.Length.ShouldBeLessThanOrEqualTo(100);
         val.ShouldEndWith("...[TRUNCATED]");
     }
+
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData("client_secret")]
+    [InlineData("x-api-key")]
+    [InlineData("connection_string")]
+    [InlineData("passwd")]
+    [InlineData("set-cookie")]
+    [InlineData("X-Authorization")]
+    public void Redacts_by_normalised_substring(string key)
+    {
+        var json = new AuditDetailsBuilder()
+            .WithField(key, "super_secret_value")
+            .Build();
+
+        json.ShouldNotContain("super_secret_value");
+        using var doc = JsonDocument.Parse(json);
+        doc.RootElement.GetProperty(key).GetString().ShouldBe("[REDACTED]");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Redacts_nested_dictionary_and_array_values()
+    {
+        var nested = new Dictionary<string, object?>
+        {
+            ["client_secret"] = "nested-secret-val",
+            ["items"] = new object?[]
+            {
+                new Dictionary<string, object?> { ["x-api-key"] = "array-secret-key", ["safe"] = "ok" }
+            }
+        };
+
+        var json = new AuditDetailsBuilder()
+            .WithField("payload", nested)
+            .Build();
+
+        json.ShouldNotContain("nested-secret-val");
+        json.ShouldNotContain("array-secret-key");
+        json.ShouldContain("ok");
+        using var doc = JsonDocument.Parse(json);
+        var payload = doc.RootElement.GetProperty("payload");
+        payload.GetProperty("client_secret").GetString().ShouldBe("[REDACTED]");
+        payload.GetProperty("items")[0].GetProperty("x-api-key").GetString().ShouldBe("[REDACTED]");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Keeps_allow_listed_non_secret_keys()
+    {
+        var json = new AuditDetailsBuilder()
+            .WithField("keyset", "cursor-1")
+            .WithField("primarykey", "user_id")
+            .WithField("primaryKeyDirections", new[] { "ASC", "DESC" })
+            .WithField("pushdownKeyCount", 7)
+            .WithField("upstreamKeysNotFound", 3)
+            .WithField("key_columns", new[] { "tenant_id", "id" })
+            .WithField("idempotency_key_hash", "hash-abc")
+            .WithField("idempotency_key", "raw-secret-idempotency")
+            .Build();
+
+        json.ShouldContain("cursor-1");
+        json.ShouldContain("user_id");
+        json.ShouldContain("\"primaryKeyDirections\":[\"ASC\",\"DESC\"]");
+        json.ShouldContain("\"pushdownKeyCount\":7");
+        json.ShouldContain("\"upstreamKeysNotFound\":3");
+        json.ShouldContain("tenant_id");
+        json.ShouldContain("hash-abc");
+        json.ShouldNotContain("raw-secret-idempotency");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Depth_beyond_limit_is_truncated()
+    {
+        var deep = new Dictionary<string, object?>
+        {
+            ["l2"] = new Dictionary<string, object?>
+            {
+                ["l3"] = new Dictionary<string, object?>
+                {
+                    ["l4"] = new Dictionary<string, object?>
+                    {
+                        ["l5"] = "too-deep-secret"
+                    }
+                }
+            }
+        };
+
+        var json = new AuditDetailsBuilder()
+            .WithField("l1", deep)
+            .Build();
+
+        json.ShouldNotContain("too-deep-secret");
+        json.ShouldContain("[TRUNCATED]");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Control_characters_in_nested_strings_are_replaced()
+    {
+        var nested = new Dictionary<string, object?>
+        {
+            ["bad\u0085key\u2028z"] = "hello\u0007world\u009f\u2028next\u2029end"
+        };
+
+        var json = new AuditDetailsBuilder()
+            .WithField("nested", nested)
+            .Build();
+
+        using var doc = JsonDocument.Parse(json);
+        var obj = doc.RootElement.GetProperty("nested");
+        var prop = obj.EnumerateObject().Single();
+        prop.Name.ShouldNotContain("\u0085");
+        prop.Name.ShouldNotContain("\u2028");
+        var val = prop.Value.GetString()!;
+        val.ShouldNotContain("\u0007");
+        val.ShouldNotContain("\u009f");
+        val.ShouldNotContain("\u2028");
+        val.ShouldNotContain("\u2029");
+    }
 }

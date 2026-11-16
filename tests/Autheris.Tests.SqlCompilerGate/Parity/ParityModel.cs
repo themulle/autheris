@@ -22,7 +22,7 @@ public sealed record ParityContext(GateDialect Dialect, string Schema)
 {
     public DatabaseDialect Database => Dialect switch
     {
-        GateDialect.Sqlite => DatabaseDialect.Sqlite,
+        GateDialect.Sqlite => throw new NotSupportedException("SQLite data-source dialect was removed (OD-2)."),
         GateDialect.PostgreSql => DatabaseDialect.PostgreSql,
         GateDialect.SqlServer => DatabaseDialect.SqlServer,
         GateDialect.Oracle => DatabaseDialect.Oracle,

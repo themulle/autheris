@@ -9,7 +9,6 @@ using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Tests.Unit.Identity.Attributes;
-using Microsoft.Data.Sqlite;
 using Shouldly;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Emit;
@@ -27,7 +26,7 @@ public sealed class SqlFilterCompilerCallerAttributeTests
     private static TableMetadata Catalogued(string schema, string table) => new()
     {
         Identifier = new TableIdentifier("lwetem_prod", schema, table),
-        Table = new Table { SourceName = "lwetem_prod", SchemaName = schema, TableName = table, SourceType = DatabaseDialect.Sqlite.ToString(), IsActive = true },
+        Table = new Table { SourceName = "lwetem_prod", SchemaName = schema, TableName = table, SourceType = DatabaseDialect.PostgreSql.ToString(), IsActive = true },
         Columns = [new TableColumn { ColumnName = "id" }]
     };
 
@@ -137,8 +136,8 @@ public sealed class SqlFilterCompilerCallerAttributeTests
     public void ST_129_05_AStoredDefinitionOfAForbiddenShape_IsRefusedAtCompileTyped_AndTheTextIsTheConstant(string sql)
     {
         var stored = SqlFilter(sql);   // bypassed Validate (a stored row, a direct DB write, a definition predating the feature)
-        Should.Throw<Exception>(() => SqlFilterCompiler.CompileTyped(stored, DatabaseDialect.Sqlite, Engine));
-        SqlFilterCompiler.Compile(stored, DatabaseDialect.Sqlite).ShouldBe(SqlFilterCompiler.CallerAttributeFilterText);
+        Should.Throw<Exception>(() => SqlFilterCompiler.CompileTyped(stored, DatabaseDialect.PostgreSql, Engine));
+        SqlFilterCompiler.Compile(stored, DatabaseDialect.PostgreSql).ShouldBe(SqlFilterCompiler.CallerAttributeFilterText);
     }
 
     [Theory]
@@ -147,7 +146,7 @@ public sealed class SqlFilterCompilerCallerAttributeTests
     [InlineData(NotIn)]
     public void ST_129_06_TheTextForm_IsTheDenyAllConstant_NeverASentinelOrValue(string sql)
     {
-        var text = SqlFilterCompiler.Compile(Validate(sql), DatabaseDialect.Sqlite);
+        var text = SqlFilterCompiler.Compile(Validate(sql), DatabaseDialect.PostgreSql);
         text.ShouldBe("(1 = 0)");
         text.ShouldNotContain("__autheris");
         text.ShouldNotContain("{{");
@@ -156,21 +155,21 @@ public sealed class SqlFilterCompilerCallerAttributeTests
     [Fact]
     public void CompileTyped_ProducesNullTypedSlots_WithTheReservedName()
     {
-        var typed = SqlFilterCompiler.CompileTyped(Validate(InList), DatabaseDialect.Sqlite, Engine);
+        var typed = SqlFilterCompiler.CompileTyped(Validate(InList), DatabaseDialect.PostgreSql, Engine);
         typed.Parameters.Keys.ShouldContain("__gql_caller_regions__0");
         typed.Parameters["__gql_caller_regions__0"].Type.ShouldBe(SqlParameterType.Null);
         typed.Parameters["__gql_caller_regions__0"].Value.ShouldBeNull();
         CallerAttributeBinder.SlotAttributes(typed).ShouldBe(["regions"]);
-        Renderer.Render(typed, TargetSqlDialect.Sqlite, RowFilterAliases.Target).Sql.ShouldNotContain("__autheris_caller__");
+        Renderer.Render(typed, TargetSqlDialect.PostgreSql, RowFilterAliases.Target).Sql.ShouldNotContain("__autheris_caller__");
     }
 
     [Fact]
     public void ADefinitionWithoutPlaceholders_IsUnchanged()
     {
         var filter = SqlFilter("from conf.client client where target.client_id = client.client_id and client.region = 'EU'");
-        var typed = SqlFilterCompiler.CompileTyped(filter, DatabaseDialect.Sqlite, Engine);
+        var typed = SqlFilterCompiler.CompileTyped(filter, DatabaseDialect.PostgreSql, Engine);
         CallerAttributeBinder.SlotAttributes(typed).ShouldBeEmpty();
-        SqlFilterCompiler.Compile(filter, DatabaseDialect.Sqlite).ShouldStartWith("EXISTS (");
+        SqlFilterCompiler.Compile(filter, DatabaseDialect.PostgreSql).ShouldStartWith("EXISTS (");
     }
 
     // ---- binder -------------------------------------------------------------------------------------------------------------------------
@@ -180,7 +179,7 @@ public sealed class SqlFilterCompilerCallerAttributeTests
         [name] = CallerAttributeResult.Resolved(new CallerAttributeValue(values.Cast<object>().ToList(), SqlParameterType.String))
     });
 
-    private static PolicyPredicate Typed(string sql) => SqlFilterCompiler.CompileTyped(Validate(sql), DatabaseDialect.Sqlite, Engine);
+    private static PolicyPredicate Typed(string sql) => SqlFilterCompiler.CompileTyped(Validate(sql), DatabaseDialect.PostgreSql, Engine);
 
     [Fact]
     public void Bind_Scalar_ReplacesTheSlotWithTheValue()
@@ -196,7 +195,7 @@ public sealed class SqlFilterCompilerCallerAttributeTests
     {
         var bound = CallerAttributeBinder.Bind(Typed(InList), Set("regions", "EU", "US", "APAC"), CallerAttributePadding.Default);
         bound.Parameters.Keys.Where(k => k.StartsWith("__gql_caller_regions__")).Count().ShouldBe(4);
-        Renderer.Render(bound, TargetSqlDialect.Sqlite, RowFilterAliases.Target).Sql.ShouldNotContain("EU");
+        Renderer.Render(bound, TargetSqlDialect.PostgreSql, RowFilterAliases.Target).Sql.ShouldNotContain("EU");
     }
 
     [Fact]
@@ -231,7 +230,7 @@ public sealed class SqlFilterCompilerCallerAttributeTests
     [Fact]
     public void Bind_APredicateWithoutSlots_IsReturnedAsIs()
     {
-        var plain = SqlFilterCompiler.CompileTyped(SqlFilter("from conf.client client where target.client_id = client.client_id and client.region = 'EU'"), DatabaseDialect.Sqlite, Engine);
+        var plain = SqlFilterCompiler.CompileTyped(SqlFilter("from conf.client client where target.client_id = client.client_id and client.region = 'EU'"), DatabaseDialect.PostgreSql, Engine);
         CallerAttributeBinder.Bind(plain, CallerAttributeSet.Empty, CallerAttributePadding.Default).ShouldBeSameAs(plain);
     }
 
@@ -239,65 +238,8 @@ public sealed class SqlFilterCompilerCallerAttributeTests
     public void ST_129_14_TheBinder_CannotReplaceTheTenantParameterOrAClientParameter()
     {
         // A predicate whose parameters carry a tenant value and a Null typed value under a non reserved name: neither is a slot.
-        var typed = SqlFilterCompiler.CompileTyped(SqlFilter("from conf.client client where target.client_id = client.client_id and client.region = 'EU'"), DatabaseDialect.Sqlite, Engine);
+        var typed = SqlFilterCompiler.CompileTyped(SqlFilter("from conf.client client where target.client_id = client.client_id and client.region = 'EU'"), DatabaseDialect.PostgreSql, Engine);
         var bound = CallerAttributeBinder.Bind(typed, Set("regions", "X"), CallerAttributePadding.Default);
         bound.Parameters.Values.Select(v => v.Value).ShouldBe(typed.Parameters.Values.Select(v => v.Value));
     }
-
-    // ---- executed on SQLite (tests 20, 22) ------------------------------------------------------------------------------------------------------
-
-    private static List<long> Run(PolicyPredicate predicate)
-    {
-        var rendered = Renderer.Render(predicate, TargetSqlDialect.Sqlite, RowFilterAliases.Target);
-        using var connection = new SqliteConnection("Data Source=:memory:");
-        connection.Open();
-        foreach (var sql in new[]
-        {
-            "ATTACH DATABASE ':memory:' AS conf",
-            "CREATE TABLE conf.client (client_id INTEGER, region TEXT, dept TEXT, level INTEGER)",
-            "CREATE TABLE fact (id INTEGER, client_id INTEGER)",
-            "INSERT INTO conf.client VALUES (1, 'EU', 'D1', 1), (2, 'US', 'D2', 2), (3, 'APAC', 'D1', 3), (4, 'LATAM', 'D3', 4)",
-            "INSERT INTO fact VALUES (10, 1), (20, 2), (30, 3), (40, 4)"
-        })
-        {
-            using var c = connection.CreateCommand();
-            c.CommandText = sql;
-            c.ExecuteNonQuery();
-        }
-
-        using var command = connection.CreateCommand();
-        command.CommandText = $"SELECT id FROM fact AS {RowFilterAliases.Target} WHERE {rendered.Sql} ORDER BY id";
-        foreach (var (name, value) in rendered.Parameters)
-        {
-            command.Parameters.AddWithValue(name, value ?? DBNull.Value);
-        }
-
-        var ids = new List<long>();
-        using var reader = command.ExecuteReader();
-        while (reader.Read()) ids.Add(reader.GetInt64(0));
-        return ids;
-    }
-
-    [Fact]
-    public void Executed_Scalar_FiltersByTheCallersValue() =>
-        Run(CallerAttributeBinder.Bind(Typed(Scalar), Set("dept", "D1"), CallerAttributePadding.Default)).ShouldBe([10L, 30L]);
-
-    [Fact]
-    public void ST_129_Executed_In_MatchesExactlyTheListedRows_IncludingPaddedDuplicates() =>
-        Run(CallerAttributeBinder.Bind(Typed(InList), Set("regions", "EU", "US", "LATAM"), CallerAttributePadding.Default)).ShouldBe([10L, 20L, 40L]);
-
-    [Fact]
-    public void ST_129_Executed_NotIn_ExcludesExactlyTheListedRows_PaddingIsNeutral() =>
-        Run(CallerAttributeBinder.Bind(Typed(NotIn), Set("regions", "EU", "US", "LATAM"), CallerAttributePadding.Default)).ShouldBe([30L]);
-
-    [Fact]
-    public void ST_129_Executed_NotIn_WithAMissingAttribute_MatchesNoRow_NeverEveryRow() =>
-        Run(CallerAttributeBinder.Bind(Typed(NotIn), CallerAttributeSet.Empty, CallerAttributePadding.Default)).ShouldBeEmpty();
-
-    [Theory]
-    [InlineData(Scalar)]
-    [InlineData(InList)]
-    [InlineData(NotIn)]
-    public void ST_129_22_AnUnboundSlot_MatchesNoRows_ByTheNullSemantics(string sql) =>
-        Run(Typed(sql)).ShouldBeEmpty();
 }

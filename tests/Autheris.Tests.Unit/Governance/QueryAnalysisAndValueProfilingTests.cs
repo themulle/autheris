@@ -6,7 +6,6 @@ using System.Linq;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Catalog.Profiling;
 using Autheris.Application.Governance.Analysis;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Mcp.Services;
@@ -47,8 +46,6 @@ public sealed class QueryAnalysisAndValueProfilingTests
         DatasetVisibility visibility,
         IReadOnlyList<TableColumn> columns,
         string? rlsExpression = null,
-        bool releaseProfileToCatalogViewers = false,
-        DatasetProfilePublicationPolicy publicationPolicy = DatasetProfilePublicationPolicy.FormatAndEmptyShareOnly,
         long? estimatedRowCount = 5000,
         IReadOnlyDictionary<string, MaskingRule>? maskingRules = null)
     {
@@ -71,8 +68,6 @@ public sealed class QueryAnalysisAndValueProfilingTests
             PrimaryKeyColumns = columns.Any(c => string.Equals(c.ColumnName, "id", StringComparison.OrdinalIgnoreCase))
                 ? new[] { "id" }
                 : Array.Empty<string>(),
-            ReleaseProfileToCatalogViewers = releaseProfileToCatalogViewers,
-            ProfilePublicationPolicy = publicationPolicy,
             EstimatedRowCount = estimatedRowCount
         };
     }
@@ -110,7 +105,7 @@ public sealed class QueryAnalysisAndValueProfilingTests
             },
             rlsExpression: "tenant_id = current_setting('app.tenant_id')");
 
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
         metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
             .Returns(new[] { ordersTable });
 
@@ -224,7 +219,7 @@ public sealed class QueryAnalysisAndValueProfilingTests
                 new TableColumn { ColumnName = "base_salary", DataType = "decimal", IsSensitive = true }
             });
 
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
         metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
             .Returns(new[] { customersTable, invoicesTable, secretSalariesTable });
 
@@ -309,7 +304,7 @@ public sealed class QueryAnalysisAndValueProfilingTests
                 new TableColumn { ColumnName = "actor_ssn", DataType = "varchar", IsSensitive = true }
             });
 
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
         metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
             .Returns(new[] { usersTable, auditTable });
 
@@ -394,9 +389,10 @@ public sealed class QueryAnalysisAndValueProfilingTests
             DatasetVisibility.Full,
             new[] { new TableColumn { ColumnName = "card_last4", DataType = "varchar", IsSensitive = true } });
 
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
         metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
             .Returns(new[] { ordersTable, shipmentsTable, paymentsTable });
+        Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(metadataRepo);
 
         var consentRepo = Substitute.For<IConsentRepository>();
         consentRepo.GetAllActiveConsentsForSubjectsAsync(
@@ -477,7 +473,7 @@ public sealed class QueryAnalysisAndValueProfilingTests
             DatasetVisibility.Full,
             new[] { new TableColumn { ColumnName = "id", DataType = "uuid" } });
 
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
         metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
             .Returns(new[] { ordersTable });
 
@@ -564,7 +560,7 @@ public sealed class QueryAnalysisAndValueProfilingTests
             DatasetVisibility.Full,
             new[] { new TableColumn { ColumnName = "id", DataType = "uuid" } });
 
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
         metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
             .Returns(new[] { ordersTable, customersTable });
 
@@ -624,237 +620,4 @@ public sealed class QueryAnalysisAndValueProfilingTests
             d.QueryName == "sp_orders_only_declared");
     }
 
-    // =========================================================================
-    // Issue #80 — Criteria 1, 2, 3, 4: Coarsened column value profiles,
-    // cardinality rules, sensitive suppression, small-table suppression,
-    // and row-filter publication policy
-    // =========================================================================
-
-    // MCP-16: an unreleased high-cardinality free-text column publishes neither samples nor string min/max.
-    [Fact]
-    public async Task ColumnValueProfileService_UnreleasedHighCardinalityText_PublishesNoRealValues()
-    {
-        var profileService = new ColumnValueProfileService();
-        var column = new TableColumn { ColumnName = "last_name", DataType = "varchar" };
-        var table = CreateCatalogTable("crm", "public", "contacts", DatasetVisibility.Summary, new[] { column },
-            releaseProfileToCatalogViewers: true, estimatedRowCount: 5000);
-        await profileService.ComputeAndStoreProfileAsync(table, "last_name",
-            Enumerable.Range(1, 120).Select(i => (object?)$"Name-{i:D4}").ToList());
-
-        var profile = profileService.GetColumnProfile(table, column, ColumnAccessLevel.Clear, hasActiveRowFilters: false);
-
-        profile.Should().NotBeNull();
-        profile!.SampleValues.Should().BeNull();
-        profile.MinValue.Should().BeNull();
-        profile.MaxValue.Should().BeNull();
-    }
-
-    [Fact]
-    public async Task ColumnValueProfileService_EnforcesCardinalitySensitiveSmallTableAndRowFilterPolicies()
-    {
-        var profileService = new ColumnValueProfileService();
-        var columns = new[]
-        {
-            new TableColumn
-            {
-                ColumnName = "status",
-                DataType = "varchar",
-                Meta = new Dictionary<string, string> { ["accepted_values"] = "[\"OPEN\",\"PAID\",\"CANCELLED\"]" }
-            },
-            new TableColumn { ColumnName = "order_code", DataType = "varchar", Meta = new Dictionary<string, string> { ["release_value_list"] = "true" } },
-            new TableColumn { ColumnName = "amount", DataType = "decimal" },
-            new TableColumn { ColumnName = "email", DataType = "varchar", IsSensitive = true }
-        };
-
-        var largeTable = CreateCatalogTable(
-            "sales",
-            "public",
-            "orders",
-            DatasetVisibility.Summary,
-            columns,
-            releaseProfileToCatalogViewers: true,
-            publicationPolicy: DatasetProfilePublicationPolicy.FormatAndEmptyShareOnly,
-            estimatedRowCount: 5000);
-
-        // Compute profile snapshots
-        var highCardValues = Enumerable.Range(1, 120).Select(i => (object?)$"ORD-{i:D4}").ToList();
-        await profileService.ComputeAndStoreProfileAsync(largeTable, "order_code", highCardValues);
-
-        var numericValues = Enumerable.Range(1, 120).Select(i => (object?)(decimal)(i * 12.34m)).ToList();
-        await profileService.ComputeAndStoreProfileAsync(largeTable, "amount", numericValues);
-
-        var sensitiveValues = Enumerable.Range(1, 120).Select(i => (object?)$"customer{i}@secret.example.com").ToList();
-        await profileService.ComputeAndStoreProfileAsync(largeTable, "email", sensitiveValues);
-
-        // Without row filters:
-        var lowCardProfile = profileService.GetColumnProfile(largeTable, columns[0], ColumnAccessLevel.Clear, hasActiveRowFilters: false);
-        lowCardProfile.Should().NotBeNull();
-        lowCardProfile!.AllowedValues.Should().BeEquivalentTo(new[] { "OPEN", "PAID", "CANCELLED" });
-        lowCardProfile.SampleValues.Should().BeNull();
-
-        var highCardProfile = profileService.GetColumnProfile(largeTable, columns[1], ColumnAccessLevel.Clear, hasActiveRowFilters: false);
-        highCardProfile.Should().NotBeNull();
-        highCardProfile!.AllowedValues.Should().BeNull();
-        highCardProfile.DistinctCountBucket.Should().Be("100-1k");
-        highCardProfile.SampleValues.Should().NotBeNull();
-        highCardProfile.SampleValues!.Count.Should().BeLessThanOrEqualTo(5);
-
-        var numericProfile = profileService.GetColumnProfile(largeTable, columns[2], ColumnAccessLevel.Clear, hasActiveRowFilters: false);
-        numericProfile.Should().NotBeNull();
-        numericProfile!.Min.Should().NotBeNull();
-        numericProfile.Max.Should().NotBeNull();
-
-        // Sensitive / masked column: never exposes AllowedValues, SampleValues, Min, or Max
-        var maskedProfile = profileService.GetColumnProfile(largeTable, columns[3], ColumnAccessLevel.Mask, hasActiveRowFilters: false);
-        maskedProfile.Should().NotBeNull();
-        maskedProfile!.AllowedValues.Should().BeNull();
-        maskedProfile.SampleValues.Should().BeNull();
-        maskedProfile.Min.Should().BeNull();
-        maskedProfile.Max.Should().BeNull();
-        maskedProfile.FormatPattern.Should().Be("email");
-
-        // With active row filters and default FormatAndEmptyShareOnly policy:
-        var rlsFilteredNumeric = profileService.GetColumnProfile(largeTable, columns[2], ColumnAccessLevel.Clear, hasActiveRowFilters: true);
-        rlsFilteredNumeric.Should().NotBeNull();
-        rlsFilteredNumeric!.Min.Should().BeNull();
-        rlsFilteredNumeric.Max.Should().BeNull();
-        rlsFilteredNumeric.AllowedValues.Should().BeNull();
-        rlsFilteredNumeric.SampleValues.Should().BeNull();
-        rlsFilteredNumeric.EmptyShare.Should().NotBeNull();
-
-        // With active row filters and FullCoarsenedProfile opt-in:
-        var optInTable = largeTable with { ProfilePublicationPolicy = DatasetProfilePublicationPolicy.FullCoarsenedProfile };
-        var optInNumeric = profileService.GetColumnProfile(optInTable, columns[2], ColumnAccessLevel.Clear, hasActiveRowFilters: true);
-        optInNumeric.Should().NotBeNull();
-        optInNumeric!.Min.Should().NotBeNull();
-        optInNumeric.Max.Should().NotBeNull();
-
-        // Small table (< 100 rows): suppresses Min, Max, and SampleValues
-        var smallTable = largeTable with { EstimatedRowCount = 42 };
-        await profileService.ComputeAndStoreProfileAsync(smallTable, "amount", Enumerable.Range(1, 42).Select(i => (object?)(decimal)i));
-        var smallNumericProfile = profileService.GetColumnProfile(smallTable, columns[2], ColumnAccessLevel.Clear, hasActiveRowFilters: false);
-        smallNumericProfile.Should().NotBeNull();
-        smallNumericProfile!.Min.Should().BeNull();
-        smallNumericProfile.Max.Should().BeNull();
-        smallNumericProfile.SampleValues.Should().BeNull();
-    }
-
-    // =========================================================================
-    // Issue #80 — Criteria 1, 5, 6: describe_dataset and sample_rows(synthetic: true)
-    // serve coarsened profiles and synthetic rows without querying the data source,
-    // audit METADATA_SYNTHETIC_SAMPLE, and never leak real sensitive values
-    // =========================================================================
-
-    [Fact]
-    public async Task McpDatasetCatalog_DescribeAndSyntheticSampleRows_NeverQueriesSourceAndNeverLeaksSensitiveValues()
-    {
-        var columns = new[]
-        {
-            new TableColumn { ColumnName = "id", DataType = "uuid" },
-            new TableColumn
-            {
-                ColumnName = "status",
-                DataType = "varchar",
-                Meta = new Dictionary<string, string> { ["accepted_values"] = "[\"ACTIVE\",\"ARCHIVED\"]" }
-            },
-            new TableColumn { ColumnName = "secret_email", DataType = "varchar", IsSensitive = true }
-        };
-
-        var summaryTable = CreateCatalogTable(
-            "crm",
-            "public",
-            "contacts",
-            DatasetVisibility.Full,
-            columns,
-            releaseProfileToCatalogViewers: true,
-            estimatedRowCount: 1000);
-
-        var profileService = new ColumnValueProfileService();
-        var realSensitiveEmails = new object?[]
-        {
-            "ceo.real.secret@autheris-private.io",
-            "cfo.real.secret@autheris-private.io",
-            "vp.real.secret@autheris-private.io"
-        };
-        await profileService.ComputeAndStoreProfileAsync(summaryTable, "secret_email", realSensitiveEmails);
-
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(new[] { summaryTable });
-
-        var consentRepo = Substitute.For<IConsentRepository>();
-        consentRepo.GetAllActiveConsentsForSubjectsAsync(
-                Arg.Any<IEnumerable<Sid>>(),
-                Arg.Any<IEnumerable<string>?>(),
-                Arg.Any<DateTimeOffset?>(),
-                Arg.Any<TenantId?>(),
-                Arg.Any<CancellationToken>())
-            .Returns(Array.Empty<Consent>());
-
-        var executionService = Substitute.For<IGatewayExecutionService>();
-
-        var recordedAudits = new List<AuditLogEntry>();
-        var auditRepo = Substitute.For<IAuditLogRepository>();
-        auditRepo.RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>())
-            .Returns(callInfo =>
-            {
-                recordedAudits.Add(callInfo.Arg<AuditLogEntry>());
-                return Task.CompletedTask;
-            });
-
-        var syntheticGenerator = new SyntheticSampleRowGenerator(profileService);
-        var catalog = new McpDatasetCatalog(
-            metadataRepo,
-            consentRepo,
-            executionService,
-            options: Options.Create(new GatewayOptions { Tenancy = new TenancyOptions { DefaultTenantId = "default-tenant" } }),
-            profileService: profileService,
-            syntheticRowGenerator: syntheticGenerator,
-            auditLogRepository: auditRepo,
-            visibilityService: Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(
-                Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeSingleReadsFromCatalog(metadataRepo), consentRepo, new GatewayOptions { Tenancy = new TenancyOptions { DefaultTenantId = "default-tenant" } }));
-
-        var viewer = CreatePrincipal("catalog-viewer-1");
-
-        // 1. describe_dataset returns ValueProfile on Summary dataset with ReleaseProfileToCatalogViewers = true
-        var description = await catalog.DescribeDatasetAsync(viewer, "crm.public.contacts");
-        description.AccessStatus.Should().Be("NONE");
-        var statusCol = description.Columns.Single(c => c.Name == "status");
-        statusCol.ValueProfile.Should().NotBeNull();
-        statusCol.ValueProfile!.AllowedValues.Should().BeEquivalentTo(new[] { "ACTIVE", "ARCHIVED" });
-
-        var emailCol = description.Columns.Single(c => c.Name == "secret_email");
-        emailCol.ValueProfile.Should().NotBeNull();
-        emailCol.ValueProfile!.AllowedValues.Should().BeNull();
-        emailCol.ValueProfile!.SampleValues.Should().BeNull();
-
-        // 2. sample_rows(synthetic: true) returns synthetic rows without calling IGatewayExecutionService
-        // Issue #111 (A-4): the consent-less branch is open only for a tier-Full row explicitly released to catalog viewers (this table); an
-        // administrator view or an active consent may always sample.
-        (await catalog.SampleRowsAsync(viewer, "crm.public.contacts", count: 5, synthetic: true)).IsSynthetic.Should().BeTrue();
-        var administrator = Autheris.Tests.Unit.Catalog.Wp0.User("catalog-admin-1", Autheris.Tests.Unit.Catalog.Wp0.SingleTenantClaim, ["GovernanceAdmin"]);
-        var sample = await catalog.SampleRowsAsync(administrator, "crm.public.contacts", count: 5, synthetic: true);
-        sample.IsSynthetic.Should().BeTrue();
-        sample.RowCount.Should().Be(5);
-        sample.Rows.Should().HaveCount(5);
-
-        foreach (var row in sample.Rows)
-        {
-            row["__synthetic"].Should().Be(true);
-            new[] { "ACTIVE", "ARCHIVED" }.Should().Contain(row["status"]?.ToString());
-
-            var generatedEmail = row["secret_email"]?.ToString() ?? string.Empty;
-            generatedEmail.Should().NotContain("autheris-private.io");
-            realSensitiveEmails.Select(e => e!.ToString()).Should().NotContain(generatedEmail);
-        }
-
-        // Verify METADATA_SYNTHETIC_SAMPLE audit event with Query populated
-        recordedAudits.Should().Contain(a =>
-            a.EventType == AuditEventTypes.MetadataSyntheticSample &&
-            a.TargetTable == "crm.public.contacts" &&
-            !string.IsNullOrWhiteSpace(a.Query) &&
-            a.Query!.Contains("synthetic=true"));
-
-        Assert.Empty(executionService.ReceivedCalls());
-    }
 }

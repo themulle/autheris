@@ -138,7 +138,7 @@ public sealed class WebSqlCoLocatedDataSourcesTests
         var meta1 = CreateTable("sales", "dbo", "Orders", "DB_Sales", "SqlServer", "finance");
         var meta2 = CreateTable("crm", "dbo", "Customers", "DB_CRM", "SqlServer", "finance");
 
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
         metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
             .Returns([meta1, meta2]);
 
@@ -206,7 +206,7 @@ public sealed class WebSqlCoLocatedDataSourcesTests
         var meta1 = CreateTable("sales", "dbo", "Orders", "DB_Sales", "SqlServer", "finance");
         var meta2 = CreateTable("crm", "dbo", "Customers", "DB_CRM", "SqlServer", "finance");
 
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
         metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
             .Returns([meta1, meta2]);
 

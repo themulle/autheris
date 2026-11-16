@@ -8,7 +8,6 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Catalog.Interfaces;
-using Autheris.Application.Catalog.Profiling;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.DataSources.Interfaces;
 using Autheris.Application.Lineage;
@@ -48,7 +47,6 @@ public sealed class McpResultEmptyMembersTests
     private readonly IConsentRepository _consents = Substitute.For<IConsentRepository>();
     private readonly IGoldenQueryService _golden = Substitute.For<IGoldenQueryService>();
     private readonly IGraphQlCatalogMap _graphQl = Substitute.For<IGraphQlCatalogMap>();
-    private readonly ColumnValueProfileService _profiles = new();
 
     private readonly ITestOutputHelper _output;
 
@@ -101,14 +99,13 @@ public sealed class McpResultEmptyMembersTests
     {
         var options = new GatewayOptions();
         return new McpDatasetCatalog(_metadata, _consents, Substitute.For<IGatewayExecutionService>(), _golden, Options.Create(options), _graphQl,
-            profileService: _profiles,
             visibilityService: CatalogVisibilityTestFactory.Create(_metadata.ServeSingleReadsFromCatalog(), _consents, options),
             switches: ReadPathSwitches.From(options));
     }
 
     private static GatewayMcpQueryExecutor Executor(IMcpDatasetCatalog catalog) => new(
         Substitute.For<IRequestExecutorProvider>(), Substitute.For<IGatewayExecutionService>(), NullLogger<GatewayMcpQueryExecutor>.Instance,
-        McpRowCapTests.Options(100), datasetCatalog: catalog);
+        McpRowCapTests.Options(100), datasetCatalog: catalog, persistedToolValidator: new Autheris.Application.Mcp.Services.PersistedToolValidator());
 
     private static McpToolDefinition Tool(string name) =>
         McpDatasetTools.Definitions().FirstOrDefault(t => t.Name == name)
@@ -187,17 +184,6 @@ public sealed class McpResultEmptyMembersTests
     }
 
     [Fact]
-    public async Task DescribeDataset_ColumnWithStoredSnapshot_KeepsItsValueProfile()
-    {
-        _profiles.StoreProfileSnapshot(new ColumnProfileSnapshot(Orders, "status", EmptyShare: 0.0, TableRowCount: 1_000));
-
-        var description = await Catalog().DescribeDatasetAsync(User(), "sales.public.orders");
-
-        description.Columns.Single(c => c.Name == "status").ValueProfile.ShouldNotBeNull();
-        description.Columns.Where(c => c.Name != "status").ShouldAllBe(c => c.ValueProfile == null);
-    }
-
-    [Fact]
     public async Task ListDatasets_EmptyResult_KeepsTheListsPresent()
     {
         var catalog = Substitute.For<IMcpDatasetCatalog>();
@@ -219,7 +205,7 @@ public sealed class McpResultEmptyMembersTests
     public async Task SampleRows_NullCell_StaysNull()
     {
         var catalog = Substitute.For<IMcpDatasetCatalog>();
-        catalog.SampleRowsAsync(Arg.Any<ClaimsPrincipal>(), "sales.public.orders", Arg.Any<int?>(), false, Arg.Any<CancellationToken>())
+        catalog.SampleRowsAsync(Arg.Any<ClaimsPrincipal>(), "sales.public.orders", Arg.Any<int?>(), Arg.Any<CancellationToken>())
             .Returns(new McpDatasetSample("sales.public.orders", 1, [new Dictionary<string, object?> { ["id"] = 1, ["note"] = null, ["meta"] = new Dictionary<string, object?>() }]));
 
         var json = await Executor(catalog).ExecuteOperationAsync(Tool("sample_rows"), """{"dataset":"sales.public.orders"}""", Session());

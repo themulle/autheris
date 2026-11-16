@@ -16,6 +16,7 @@ using System.Threading.Tasks;
 using Apache.Arrow.Ipc;
 using Autheris.Api.Errors;
 using Autheris.Api.Extensions;
+using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.State.Caching.Interfaces;
 using Autheris.Application.DataSources;
 using Autheris.Application.DataSources.Interfaces;
@@ -25,6 +26,7 @@ using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Common.Serialization;
 using Autheris.Application.Sql.Interfaces;
+using Autheris.Application.Usage;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
@@ -41,7 +43,7 @@ using Microsoft.Extensions.Options;
 /// <summary>
 /// Dedicated Governed Single-Table Bulk Keyset Streaming Endpoint.
 /// Strictly scoped to a single table, authorized for read-only callers, with monotonic keyset cursor seek,
-/// bounded zero-allocation chunked streaming, and two-phase token bucket FinOps metering.
+/// bounded zero-allocation chunked streaming, and two-phase token bucket usage metering.
 /// </summary>
 public static class TableStreamEndpoints
 {
@@ -102,9 +104,9 @@ public static class TableStreamEndpoints
 
         // 1. Validate route identifiers
         if (string.IsNullOrWhiteSpace(domain) || string.IsNullOrWhiteSpace(schema) || string.IsNullOrWhiteSpace(table) ||
-            domain.Contains('/') || schema.Contains('/') || table.Contains('/') ||
-            domain.Contains('\\') || schema.Contains('\\') || table.Contains('\\') ||
-            domain.Contains(';') || schema.Contains(';') || table.Contains(';'))
+            domain.Contains('/', StringComparison.Ordinal) || schema.Contains('/', StringComparison.Ordinal) || table.Contains('/', StringComparison.Ordinal) ||
+            domain.Contains('\\', StringComparison.Ordinal) || schema.Contains('\\', StringComparison.Ordinal) || table.Contains('\\', StringComparison.Ordinal) ||
+            domain.Contains(';', StringComparison.Ordinal) || schema.Contains(';', StringComparison.Ordinal) || table.Contains(';', StringComparison.Ordinal))
         {
             await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, "The domain, schema and table must be valid single segment identifiers.", ct).ConfigureAwait(false);
             return;
@@ -160,24 +162,26 @@ public static class TableStreamEndpoints
             metadata = null;
         }
 
-        // Non-existent or hidden tables return 404 anti-enumeration parity
-        if (metadata == null || (!metadata.Table.IsActive && !httpContext.User.IsInRole("admin")))
+        var rawCallerId = EndpointSecurity.GetCallerIdentity(httpContext);
+        if (string.IsNullOrWhiteSpace(rawCallerId))
         {
             await TableNotFound().ExecuteAsync(httpContext).ConfigureAwait(false);
             return;
         }
 
-        if (metadata.Table.Visibility == DatasetVisibility.Hidden && !httpContext.User.IsInRole("admin"))
+        var tenant = EndpointSecurity.GetRequestTenant(httpContext);
+        var userSid = new Sid(rawCallerId);
+        var callerSid = userSid.Value;
+
+        // Non-existent, inactive, or hidden tables return 404 anti-enumeration parity
+        if (metadata == null || !await IsTableVisibleForStreamAsync(httpContext, tableId, metadata, tenant, userSid, ct).ConfigureAwait(false))
         {
             await TableNotFound().ExecuteAsync(httpContext).ConfigureAwait(false);
             return;
         }
 
         // 4. Governance Authorization Stage (PDP)
-        var tenant = EndpointSecurity.GetRequestTenant(httpContext);
-        var userSid = new Sid(EndpointSecurity.GetCallerIdentity(httpContext) ?? "anonymous");
-        var callerSid = userSid.Value;
-        var usageRecorder = httpContext.RequestServices?.GetService<IConsumerUsageRecorder>();
+        var usageRecorder = httpContext.RequestServices?.GetService<IUsageRecorder>();
         var clientIp = httpContext.Connection.RemoteIpAddress?.ToString();
 
         TableAccessDecision decision;
@@ -195,7 +199,10 @@ public static class TableStreamEndpoints
         }
         catch (UnauthorizedAccessException)
         {
-            usageRecorder?.RecordUsage(tableId, tenant, userSid, ConsumerOutcome.DenyAccess, 0, false);
+            usageRecorder?.Record(
+                new UsageFact(tableId, metadata.Table.SourceName ?? string.Empty, UsageOutcome.DenyAccess, 0, false, 0, Array.Empty<GrantRef>(), default),
+                tenant,
+                userSid);
             // Anti-enumeration parity: unauthorized table returns 404
             await TableNotFound().ExecuteAsync(httpContext).ConfigureAwait(false);
             return;
@@ -322,7 +329,10 @@ public static class TableStreamEndpoints
             var reservation = await rateLimiter.ReserveCostQuotaAsync(subjectId, reservedCost, policy, ct).ConfigureAwait(false);
             if (!reservation.Allowed)
             {
-                usageRecorder?.RecordUsage(tableId, tenant, userSid, ConsumerOutcome.DenyRateLimit, 0, false);
+                usageRecorder?.Record(
+                    new UsageFact(tableId, metadata.Table.SourceName ?? string.Empty, UsageOutcome.DenyRateLimit, 0, false, reservedCost, Array.Empty<GrantRef>(), default),
+                    tenant,
+                    userSid);
                 if (!string.IsNullOrWhiteSpace(clientContext?.ResolvedScope))
                 {
                     httpContext.Response.Headers["X-RateLimit-Scope"] = clientContext.ResolvedScope;
@@ -336,11 +346,15 @@ public static class TableStreamEndpoints
         bool isArrow = string.Equals(request.Format, "arrow", StringComparison.OrdinalIgnoreCase) ||
             (httpContext.Request.Headers.Accept.ToString()?.Contains(IArrowExportService.ArrowStreamContentType, StringComparison.OrdinalIgnoreCase) == true);
 
+        SourceExecutionStats sourceStats = default;
         var queryRequest = new GovernedSqlQueryRequest(
             Sql: planned.Sql,
             Parameters: planned.Parameters,
             Transport: SqlTransports.Rest,
-            PlannedTableRead: true);
+            PlannedTableRead: true)
+        {
+            OnSourceStats = stats => sourceStats = stats
+        };
 
         int rowsEmitted = 0;
         bool hasMore = false;
@@ -626,7 +640,11 @@ public static class TableStreamEndpoints
             if (httpContext.Response.StatusCode != StatusCodes.Status429TooManyRequests)
             {
                 // 9. Post-Stream Settlement & Response Metadata
-                usageRecorder?.RecordUsage(tableId, tenant, userSid, ConsumerOutcome.Allow, rowsEmitted, rowsMeasured: true);
+                int actualCost = rateLimiter != null ? baseCost + (rowsEmitted * costPerRow) : 0;
+                usageRecorder?.Record(
+                    new UsageFact(tableId, metadata.Table.SourceName ?? string.Empty, UsageOutcome.Allow, rowsEmitted, RowsMeasured: true, actualCost, GovernedQueryStages.ToGrantRefs(decision), sourceStats),
+                    tenant,
+                    userSid);
                 SetResponseMetadata(httpContext.Response, "X-Rows-Streamed", rowsEmitted.ToString(CultureInfo.InvariantCulture));
                 if (!string.IsNullOrEmpty(nextCursor))
                 {
@@ -637,7 +655,6 @@ public static class TableStreamEndpoints
 
                 if (rateLimiter != null)
                 {
-                    int actualCost = baseCost + (rowsEmitted * costPerRow);
                     // CancellationToken.None: on a client abort the request token is already cancelled; settling with it
                     // would throw from this finally block, mask the original exception and never refund the reservation.
                     var settlement = await rateLimiter.SettleCostQuotaAsync(subjectId, reservedCost, actualCost, policy, CancellationToken.None).ConfigureAwait(false);
@@ -717,5 +734,58 @@ public static class TableStreamEndpoints
                 writer.WriteStringValue(val.ToString());
                 break;
         }
+    }
+
+    private static async Task<bool> IsTableVisibleForStreamAsync(
+        HttpContext httpContext,
+        TableIdentifier tableId,
+        TableMetadata metadata,
+        TenantId tenant,
+        Sid userSid,
+        CancellationToken ct)
+    {
+        if (!metadata.Table.IsActive)
+        {
+            return false;
+        }
+
+        var visibility = httpContext.RequestServices?.GetService<ICatalogVisibilityService>();
+        if (visibility is not null && VirtualSystemTables.Get(tableId) is null)
+        {
+            var caller = new CatalogCaller(httpContext.User, tenant, CatalogChannel.Rest);
+            if (await visibility.FindVisibleAsync(caller, tableId, ct).ConfigureAwait(false) is not null)
+            {
+                return true;
+            }
+
+            if (metadata.Table.Visibility != DatasetVisibility.Hidden)
+            {
+                return false;
+            }
+        }
+        else if (metadata.Table.Visibility != DatasetVisibility.Hidden)
+        {
+            return true;
+        }
+
+        if (EndpointSecurity.IsCanonicalClusterAdmin(httpContext.User))
+        {
+            return true;
+        }
+
+        var ownership = httpContext.RequestServices?.GetService<IDataOwnershipRepository>();
+        if (ownership is not null)
+        {
+            try
+            {
+                return await ownership.IsAuthorizedApproverForTableAsync(tableId, userSid, ct).ConfigureAwait(false);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        return false;
     }
 }

@@ -12,8 +12,7 @@ using Xunit;
 namespace Autheris.Tests.Integration.Governance.Contract;
 
 /// <summary>
-/// Engine-agnostic contract suite for <c>ITableMetadataRepository</c>, <c>IPolicyEpochRepository</c>,
-/// and <c>IPhysicalIndexRepository</c>.
+/// Engine-agnostic contract suite for <c>ITableMetadataRepository</c>, <c>ICatalogVersionFlusher</c>, <c>IPolicyEpochRepository</c>, and <c>ICatalogChangeStore</c>.
 /// </summary>
 public abstract class CatalogContract : GovernanceContractBase
 {
@@ -252,13 +251,6 @@ public abstract class CatalogContract : GovernanceContractBase
         var declaredAct = () => Store.TableMetadata.UpsertTableMetadataAsync(
             table with { Indexes = overCapDeclaredIndexes, ReplaceKeyDefinition = true });
         await declaredAct.Should().ThrowAsync<TableDefinitionException>();
-
-        var overCapIndexes = Enumerable.Range(0, TableKeyDefinitionValidator.MaxPhysicalIndexesPerTable + 1)
-            .Select(_ => new PhysicalIndexDefinition(["id"], [KeyColumnDirection.Ascending]))
-            .ToList();
-
-        var act = () => Store.PhysicalIndexes.ReplacePhysicalIndexesAsync(table.Identifier, overCapIndexes);
-        await act.Should().ThrowAsync<InvalidOperationException>();
     }
 
     [RequiresContainerRuntimeFact]
@@ -395,31 +387,48 @@ public abstract class CatalogContract : GovernanceContractBase
     }
 
     [RequiresContainerRuntimeFact]
-    public async Task Physical_indexes_and_policy_epochs_round_trip_atomically()
+    public async Task Flush_catalog_version_advances_structure_and_content_versions()
     {
         if (!Store.IsAvailable) return;
 
-        var table = await Store.TableMetadata.UpsertTableMetadataAsync(BuildTable("phys_epoch"));
-        var epoch0 = await Store.PolicyEpochs.GetTableEpochAsync(table.Identifier);
+        var before = await Store.TableMetadata.GetCatalogVersionAsync();
+        await Store.TableMetadata.FlushCatalogVersionAsync(2, 3);
+        var after = await Store.TableMetadata.GetCatalogVersionAsync();
 
-        var epoch1 = await Store.PolicyEpochs.IncrementTableEpochAsync(table.Identifier);
-        epoch1.Should().Be(epoch0 + 1);
+        after.StructureVersion.Should().BeGreaterOrEqualTo(before.StructureVersion + 2);
+        after.ContentVersion.Should().BeGreaterOrEqualTo(before.ContentVersion + 3);
+    }
 
-        var replaced = await Store.PhysicalIndexes.ReplacePhysicalIndexesAsync(
-            table.Identifier,
-            [
-                new PhysicalIndexDefinition(["tenant_code", "id"], [KeyColumnDirection.Ascending, KeyColumnDirection.Descending]),
-                new PhysicalIndexDefinition(["email"], [])
-            ]);
-        replaced.Should().BeTrue();
+    [RequiresContainerRuntimeFact]
+    public async Task CatalogChangeStore_RoundTripsVersionsAndFeed()
+    {
+        if (!Store.IsAvailable) return;
 
-        var epoch2 = await Store.PolicyEpochs.GetTableEpochAsync(table.Identifier);
-        epoch2.Should().Be(epoch1 + 1);
+        var changeStore = (Autheris.Application.Catalog.External.ICatalogChangeStore)Store.PolicyEpochs;
+        var objectId = $"catalog.dbo.chg_{Guid.NewGuid():N}";
+        var now = new DateTimeOffset(2026, 11, 15, 12, 0, 0, TimeSpan.Zero);
+        var hash1 = new string('a', 64);
+        var hash2 = new string('b', 64);
 
-        var loaded = await Store.TableMetadata.GetTableMetadataAsync(table.Identifier);
-        loaded!.PhysicalIndexes.Should().HaveCount(2);
-        loaded.PhysicalIndexes[0].Columns.Should().Equal("tenant_code", "id");
-        loaded.PhysicalIndexes[0].Directions.Should().Equal(KeyColumnDirection.Ascending, KeyColumnDirection.Descending);
+        var seq1 = await changeStore.ApplyVersionChangesAsync(
+            TestTenants.Default,
+            [new Autheris.Application.Catalog.External.CatalogVersionUpsert(objectId, hash1, Removed: false)],
+            now);
+        seq1.Should().BeGreaterThan(0);
+
+        var versions = await changeStore.GetObjectVersionsAsync(TestTenants.Default);
+        versions.Should().ContainKey(objectId);
+        versions[objectId].Removed.Should().BeFalse();
+
+        var seq2 = await changeStore.ApplyVersionChangesAsync(
+            TestTenants.Default,
+            [new Autheris.Application.Catalog.External.CatalogVersionUpsert(objectId, hash2, Removed: true)],
+            now.AddMinutes(1));
+        seq2.Should().BeGreaterThan(seq1);
+
+        var feed = await changeStore.ReadCatalogChangesAsync(TestTenants.Default, seq1 - 1, 10);
+        feed.Changes.Should().Contain(c => c.ObjectId == objectId && c.Kind == "UPSERT" && c.Seq == seq1);
+        feed.Changes.Should().Contain(c => c.ObjectId == objectId && c.Kind == "REMOVED" && c.Seq == seq2);
     }
 }
 

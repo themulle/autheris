@@ -120,6 +120,8 @@ public sealed class InMemoryAccessProfileRepository : IAccessProfileRepository
 
     public Task<IReadOnlyList<DeactivatedProfileAssignment>> GetDeactivatedAssignmentsAsync(CancellationToken ct = default) => Task.FromResult<IReadOnlyList<DeactivatedProfileAssignment>>([]);
 
+    public Task<IReadOnlyList<RevokedRowFilterConsent>> GetRevokedRowFilterConsentsAsync(CancellationToken ct = default) => Task.FromResult<IReadOnlyList<RevokedRowFilterConsent>>([]);
+
     public Task<bool> RemoveAssignmentAsync(TenantId tenantId, string profileId, AccessProfileSubjectType subjectType, string subject, CancellationToken ct = default)
     {
         var profile = RequireProfile(tenantId, profileId);

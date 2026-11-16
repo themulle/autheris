@@ -7,6 +7,12 @@ using System.Threading.Tasks;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Common;
 
+public enum SqlEndpointInvocation
+{
+    Get,
+    Post
+}
+
 public interface ISqlEndpointExecutionService
 {
     Task<GovernedSqlResult> ExecuteEndpointAsync(
@@ -14,5 +20,6 @@ public interface ISqlEndpointExecutionService
         IReadOnlyDictionary<string, object?>? rawInputs,
         ClaimsPrincipal user,
         TenantId tenantId,
+        SqlEndpointInvocation invocation,
         CancellationToken ct = default);
 }

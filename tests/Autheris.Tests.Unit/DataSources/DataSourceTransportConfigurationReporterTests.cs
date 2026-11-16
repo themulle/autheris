@@ -144,7 +144,7 @@ public sealed class DataSourceTransportConfigurationReporterTests
     [Fact]
     public async Task Reporter_ListsCatalogSourcesWithoutProfile_Sanitised()
     {
-        var repo = Substitute.For<ITableMetadataRepository>();
+        var repo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
         repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(
         [
             Wp0.Table("profiled", "a"),
@@ -169,7 +169,7 @@ public sealed class DataSourceTransportConfigurationReporterTests
     [Fact]
     public async Task Reporter_CatalogUnreadable_DoesNotFailStart()
     {
-        var repo = Substitute.For<ITableMetadataRepository>();
+        var repo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
         repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns<Task<IReadOnlyList<TableMetadata>>>(_ => throw new InvalidOperationException("db down"));
         var services = new ServiceCollection().AddSingleton(repo).BuildServiceProvider();
         using var reporter = Reporter(

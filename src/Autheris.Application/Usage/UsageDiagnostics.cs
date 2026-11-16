@@ -39,4 +39,39 @@ public static class UsageDiagnostics
         GatewayDiagnostics.Meter.CreateCounter<long>(
             "autheris_usage_source_unit_mismatch_total",
             description: "Facts whose source cost unit differs from the expected tariff unit");
+
+    public static readonly Counter<long> GrantValidityConflictCounter =
+        GatewayDiagnostics.Meter.CreateCounter<long>(
+            "autheris_usage_grant_validity_conflict_total",
+            description: "Accumulated grants whose validity window differs from the stored reference");
+
+    public static readonly Counter<long> UnattributedCounter =
+        GatewayDiagnostics.Meter.CreateCounter<long>(
+            "autheris_usage_unattributed_total",
+            description: "Anonymous or unauthenticated requests not attributed to a usage scope");
+
+    public static readonly Counter<long> SourceCostExpiredCounter =
+        GatewayDiagnostics.Meter.CreateCounter<long>(
+            "autheris_usage_source_cost_expired_total",
+            description: "Pending source queries dropped after exceeding the maximum collection age");
+
+    public static readonly Counter<long> SourceCostQueueOverflowCounter =
+        GatewayDiagnostics.Meter.CreateCounter<long>(
+            "autheris_usage_source_cost_queue_overflow_total",
+            description: "Pending source queries dropped because the collection queue reached capacity");
+
+    public static readonly Counter<long> SourceCostMalformedCounter =
+        GatewayDiagnostics.Meter.CreateCounter<long>(
+            "autheris_usage_source_cost_malformed_total",
+            description: "Source cost samples rejected due to invalid or out-of-bounds values");
+
+    public static readonly Counter<long> SourceCostCollectedCounter =
+        GatewayDiagnostics.Meter.CreateCounter<long>(
+            "autheris_usage_source_cost_collected_total",
+            description: "Delayed source cost samples successfully folded into usage counters");
+
+    public static readonly Counter<long> SourceCostErrorsCounter =
+        GatewayDiagnostics.Meter.CreateCounter<long>(
+            "autheris_usage_source_cost_errors_total",
+            description: "Source cost collection batches that failed and were scheduled for retry");
 }

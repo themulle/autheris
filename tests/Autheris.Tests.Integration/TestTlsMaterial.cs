@@ -8,7 +8,7 @@ using System.Security.Cryptography.X509Certificates;
 
 /// <summary>
 /// A throw-away CA and a PostgreSQL server certificate signed by it, generated in process for the shared test server. The Production-
-/// environment hosts need a governance connection with <c>SSL Mode=VerifyCA</c> (ConnectionTlsPolicy); the CA file is the root certificate
+/// environment hosts need a governance connection with <c>SSL Mode=VerifyFull</c> (ConnectionTlsPolicy); the CA file is the root certificate
 /// they trust. Nothing here is a secret: the material lives only for the test process.
 /// </summary>
 internal sealed class TestTlsMaterial

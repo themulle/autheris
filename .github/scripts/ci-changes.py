@@ -22,6 +22,35 @@ DENY = (
 )
 # Positive list of doc-only paths.
 DOC_ONLY = ("docs/*", "*.md", "benchmarks/*", "deploy/*", ".github/ISSUE_TEMPLATE/*", "LICENSE")
+# Positive path triggers for PR smoke suites (WP-OI-CI-5, #522). Unrecognized/empty/error states fail closed to True.
+ORACLE_PATTERNS = (
+    "**/*Oracle*",
+    "src/TrinoSqlEngine/Ast/Emit/*",
+    "src/TrinoSqlEngine/Ast/Generators/OracleDialectGenerator.cs",
+    "src/Autheris.Application/Sql/OracleBindByName.cs",
+    "src/Autheris.Infrastructure/Persistence/BindByNameOracleConnection.cs",
+    "src/Autheris.Infrastructure/Persistence/OracleConnectionSupport.cs",
+    "tests/Autheris.Tests.Integration/OracleTestFixtures.cs",
+    "tests/TrinoSqlEngine.Tests/Conformance/Fixtures/Oracle.json",
+)
+SPARK_PATTERNS = (
+    "**/*Spark*",
+    "**/*Databricks*",
+    "src/TrinoSqlEngine/Ast/Emit/*",
+    "src/TrinoSqlEngine/Ast/Generators/DatabricksDialectGenerator.cs",
+    "src/Autheris.Infrastructure/Databricks/*",
+    "src/Autheris.Domain/Options/DatabricksOptions.cs",
+    "tests/Autheris.Tests.Integration/Spark/*",
+    "tests/Autheris.Tests.Integration/Databricks/*",
+    "tests/TrinoSqlEngine.Tests/Conformance/Fixtures/Databricks.json",
+)
+SHARED_CI_PATTERNS = (
+    ".github/workflows/ci.yml",
+    ".github/scripts/ci-changes.py",
+    ".github/scripts/integration-shard-filter.py",
+    "tests/test-images.txt",
+    "tests/Autheris.Tests.Common/TestImages.cs",
+)
 
 ZERO_SHA = "0" * 40
 SHA = re.compile(r"^[0-9a-f]{40}$")
@@ -47,9 +76,18 @@ def is_doc_only(path):
 
 
 def _match_path(path, patterns):
-    # Directory-style globs ("docs/*") match the whole subtree; "*.md" and "Directory.*" match the file name at any depth.
+    # Directory-style globs ("docs/*") match the whole subtree; "**/*X*" matches any path segment or basename;
+    # "*.md" and "Directory.*" match the file name at any depth.
     for pattern in patterns:
-        if pattern.endswith("/*"):
+        if pattern.startswith("**/"):
+            sub = pattern[3:]
+            if (
+                fnmatch.fnmatchcase(path, sub)
+                or fnmatch.fnmatchcase(posixpath.basename(path), sub)
+                or any(fnmatch.fnmatchcase(part, sub) for part in path.split("/"))
+            ):
+                return True
+        elif pattern.endswith("/*"):
             if path.startswith(pattern[:-1]):
                 return True
         elif pattern.startswith("*.") or pattern.startswith("Directory."):
@@ -67,6 +105,30 @@ def classify(paths):
     if not paths or any(not p.strip() for p in paths):
         return True
     return not all(is_doc_only(p) for p in paths)
+
+
+def _classify_suite(paths, suite_patterns):
+    """Return True when the path-triggered smoke suite must run (fail-closed on empty or suspicious paths)."""
+    if paths is None:
+        return True
+    paths = [p for p in paths if p is not None]
+    if not paths or any(not p.strip() for p in paths):
+        return True
+    normalized = [_normalize(p) for p in paths]
+    if any(n is None for n in normalized):
+        return True
+    combined = suite_patterns + SHARED_CI_PATTERNS
+    return any(_match_path(n, combined) for n in normalized)
+
+
+def classify_oracle(paths):
+    """Return True when the Oracle smoke job must run."""
+    return _classify_suite(paths, ORACLE_PATTERNS)
+
+
+def classify_spark(paths):
+    """Return True when the Spark integration job must run."""
+    return _classify_suite(paths, SPARK_PATTERNS)
 
 
 def _git(*args):
@@ -100,17 +162,49 @@ def decide(event, base, head, diff=changed_paths):
         return True
 
 
+def decide_oracle(event, base, head, diff=changed_paths):
+    try:
+        paths = diff(event, base, head)
+        return True if paths is None else classify_oracle(paths)
+    except Exception:
+        return True
+
+
+def decide_spark(event, base, head, diff=changed_paths):
+    try:
+        paths = diff(event, base, head)
+        return True if paths is None else classify_spark(paths)
+    except Exception:
+        return True
+
+
+def decide_all(event, base, head, diff=changed_paths):
+    try:
+        paths = diff(event, base, head)
+        if paths is None:
+            return {"dotnet": True, "oracle": True, "spark": True}
+        return {
+            "dotnet": classify(paths),
+            "oracle": classify_oracle(paths),
+            "spark": classify_spark(paths),
+        }
+    except Exception:
+        return {"dotnet": True, "oracle": True, "spark": True}
+
+
 def main():
     event = os.environ.get("CI_EVENT", "")
     base = os.environ.get("CI_BASE", "")
     head = os.environ.get("CI_HEAD", "")
-    dotnet = decide(event, base, head)
-    line = f"dotnet={'true' if dotnet else 'false'}"
-    print(line)
+    decisions = decide_all(event, base, head)
+    lines = [f"{key}={'true' if val else 'false'}" for key, val in decisions.items()]
+    for line in lines:
+        print(line)
     out = os.environ.get("GITHUB_OUTPUT")
     if out:
         with open(out, "a", encoding="utf-8") as f:
-            f.write(line + "\n")
+            for line in lines:
+                f.write(line + "\n")
     return 0
 
 

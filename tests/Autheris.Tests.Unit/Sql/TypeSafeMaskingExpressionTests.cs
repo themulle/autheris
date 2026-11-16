@@ -98,7 +98,8 @@ public sealed class TypeSafeMaskingExpressionTests
             hasUnconstrainedColumnAllow: true);
 
         var service = CreateService(tableMeta, decision);
-        var user = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-1")], "Test"));
+        var user = Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(
+            new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-1")], "Test")));
 
         var compiled = await service.CompileAsync("SELECT id, secret_val FROM test_items", user, new TenantId("tenant_a"));
 

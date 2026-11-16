@@ -16,7 +16,6 @@ using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Data.SqlClient;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using Shouldly;
@@ -27,7 +26,7 @@ using Autheris.Tests.Integration.Governance;
 /// <summary>
 /// WP-X1 (M-7): the governed WebSQL pipeline end to end on every admitted dialect, through the real DI container
 /// (<c>WebApplicationFactory&lt;Program&gt;</c>): real catalog reader of the dialect, session pinning, compiler, binder, checked executor and
-/// error sanitizer against a real database. One scenario set, four dialects (PostgreSQL, SQL Server, Oracle, SQLite): tenant isolation
+/// error sanitizer against a real database. One scenario set, three dialects (PostgreSQL, SQL Server, Oracle): tenant isolation
 /// (an exact tenant comparison, <c>ACME</c> is another tenant than <c>acme</c>), client parameters bound by name, masks computed in the
 /// database, a provider error reduced to a stable code, and DML that is tenant scoped, limited by <c>MaxAffectedRows</c> and rolled back.
 /// </summary>
@@ -70,7 +69,6 @@ public abstract class GovernedDialectEndToEndBase : IDisposable
             builder.UseSetting("Gateway:WebSql:AllowDml", "true");
             builder.UseSetting("Gateway:DataSources:RequireTenantColumn", "true");
             builder.ConfigureTestServices(s => s.AddSingleton<Autheris.Application.Common.Interfaces.IIdempotencyStore, ClusterWideTestIdempotencyStore>());
-            builder.UseSetting("Gateway:WebSql:DmlWriterRoles:0", "Writer");
             builder.UseSetting("Gateway:WebSql:MaxAffectedRows", MaxAffectedRows.ToString());
             builder.UseSetting($"Gateway:DataSources:Connections:{Source}:Provider", target.Provider);
             builder.UseSetting($"Gateway:DataSources:Connections:{Source}:ConnectionString", target.ConnectionString);
@@ -113,7 +111,14 @@ public abstract class GovernedDialectEndToEndBase : IDisposable
 
     private static ClaimsPrincipal User(string tenant, params string[] roles) =>
         new(new ClaimsIdentity(
-            new[] { new Claim(ClaimTypes.PrimarySid, "S-1-5-21-X1-E2E"), new Claim("tenant_id", tenant) }
+            new[]
+            {
+                new Claim(ClaimTypes.PrimarySid, "S-1-5-21-X1-E2E"),
+                new Claim("tenant_id", tenant),
+                // an authenticated principal without a processed group resolution is Degraded (fail-closed); the test caller is a resolved one
+                Autheris.Domain.Identity.GroupResolutionClaims.CreateMarker(),
+                Autheris.Domain.Identity.GroupResolutionClaims.CreateStatus(Autheris.Domain.Identity.GroupResolutionStatus.Complete)
+            }
                 .Concat(roles.Select(r => new Claim(ClaimTypes.Role, r)))
                 .Concat(roles.Contains("Writer") ? [new Claim("scp", "Sql.Write")] : []), "Test"));
 
@@ -235,7 +240,9 @@ public abstract class GovernedDialectEndToEndBase : IDisposable
     {
         if (!await EnsureHostAsync()) return;
 
-        await Should.ThrowAsync<Autheris.Application.Sql.WebSqlTableDeniedException>(() => QueryAsync($"UPDATE {Ref} SET region = 'ZZ' WHERE id = 1", "acme", roles: ["Writer"]));
+        // fail-closed: the statement-level refusal (dml_transport_not_wired for a transport without a wired write path) is a plain WebSqlPolicyException
+        var refusal = await Should.ThrowAsync<Autheris.Application.Sql.WebSqlPolicyException>(() => QueryAsync($"UPDATE {Ref} SET region = 'ZZ' WHERE id = 1", "acme", roles: ["Writer"]));
+        refusal.Code.ShouldNotBeNullOrEmpty();
         Ids(await QueryAsync($"SELECT id FROM {Ref} WHERE region = 'ZZ'", "acme")).ShouldBeEmpty();
     }
 
@@ -250,43 +257,11 @@ public abstract class GovernedDialectEndToEndBase : IDisposable
     public virtual void Dispose()
     {
         _host?.Dispose();
-        SqliteConnection.ClearAllPools();
+        NpgsqlConnection.ClearAllPools();
     }
 }
 
-public sealed class SqliteGovernedEndToEndTests : GovernedDialectEndToEndBase
-{
-    private string? _dir;
-    private DialectTarget? _target;
-    protected override DialectTarget? Target => _target;
-
-    protected override Task<DialectTarget?> StartAsync()
-    {
-        _dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "autheris-x1sqlite-" + Guid.NewGuid().ToString("N"));
-        System.IO.Directory.CreateDirectory(_dir);
-        var connectionString = $"Data Source={System.IO.Path.Combine(_dir, "x1.db")}";
-        using (var conn = new SqliteConnection(connectionString))
-        {
-            conn.Open();
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = """
-                CREATE TABLE x1_orders (id INTEGER, tenant_id TEXT, region TEXT, email TEXT);
-                INSERT INTO x1_orders VALUES (1,'acme','EU','alice@x.example'),(2,'acme','US','bob@x.example'),(3,'acme','EU','cara@x.example'),(5,'other','EU','dan@x.example'),(6,'ACME','EU','eve@x.example');
-                """;
-            cmd.ExecuteNonQuery();
-        }
-
-        _target = new DialectTarget("Sqlite", "Sqlite", connectionString, null, "main", "x1_orders", ConversionFails: false);
-        return Task.FromResult<DialectTarget?>(_target);
-    }
-
-    public override void Dispose()
-    {
-        base.Dispose();
-        try { if (_dir is not null) System.IO.Directory.Delete(_dir, true); } catch { /* best effort */ }
-    }
-}
-
+[Trait("Category", "Security")]
 public sealed class PostgreSqlGovernedEndToEndTests : GovernedDialectEndToEndBase, IAsyncLifetime
 {
     private PostgreSqlTestDatabase? _db;
@@ -331,6 +306,7 @@ public sealed class PostgreSqlGovernedEndToEndTests : GovernedDialectEndToEndBas
     }
 }
 
+[Trait("Category", "Security")]
 public sealed class SqlServerGovernedEndToEndTests : GovernedDialectEndToEndBase, IAsyncLifetime
 {
     private SqlServerTestDatabase? _db;
@@ -369,6 +345,7 @@ public sealed class SqlServerGovernedEndToEndTests : GovernedDialectEndToEndBase
 }
 
 [Collection(OracleCollection.Name)]
+[Trait("Category", "Oracle")]
 public sealed class OracleGovernedEndToEndTests(AstCompilerOracleFixture fixture) : GovernedDialectEndToEndBase
 {
     protected override DialectTarget? Target { get; } = new("Oracle", "Oracle", fixture.AppConnectionString, AstCompilerOracleFixture.AppUser, AstCompilerOracleFixture.AppUser, "X1_ORDERS", ConversionFails: true);

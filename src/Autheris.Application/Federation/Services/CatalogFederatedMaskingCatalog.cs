@@ -5,6 +5,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Catalog;
 using Autheris.Application.Catalog.Services;
 using Autheris.Application.Federation.Interfaces;
 using Autheris.Application.Common.Interfaces;
@@ -57,7 +58,11 @@ public sealed class CatalogFederatedMaskingCatalog : IFederatedMaskingCatalog
             return entry.Map;
         }
 
-        var tables = await _repository.GetAllTablesAsync(ct).ConfigureAwait(false);
+        var tables = await CatalogTablePageReader.ReadAllAsync(
+            _repository,
+            new CatalogTableQuery(IncludeInactive: false),
+            static t => t.Table.IsActive,
+            ct: ct).ConfigureAwait(false);
         var map = new Dictionary<string, MaskingRule>(StringComparer.Ordinal);
         foreach (var table in tables)
         {
@@ -71,7 +76,7 @@ public sealed class CatalogFederatedMaskingCatalog : IFederatedMaskingCatalog
             foreach (var column in table.Columns)
             {
                 var hasRule = table.ColumnMaskingRules.TryGetValue(column.ColumnName, out var rule);
-                if (!column.IsSensitive && !hasRule)
+                if (!ClassificationMetadata.IsColumnSensitive(table, column))
                 {
                     continue;
                 }

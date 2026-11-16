@@ -1,1 +1,0 @@
-SELECT id, name FROM dbo.employees WHERE ssn = '123-45-6789'

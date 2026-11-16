@@ -77,7 +77,7 @@
     ]
    }
   },
-  "/api/catalog/datasets/{id}/synthetic-samples": {
+  "/api/v1/catalog/datasets/{id}/discovery-artifacts": {
    "put": {
     "requestBody": {
      "required": false,
@@ -93,6 +93,29 @@
     "responses": {
      "200": {
       "description": "OK"
+     },
+     "default": {
+      "description": "Any governed error"
+     }
+    },
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "minLength": 1,
+       "maxLength": 64,
+       "pattern": "^[A-Za-z0-9-]+$"
+      }
+     }
+    ]
+   },
+   "delete": {
+    "responses": {
+     "204": {
+      "description": "No Content"
      },
      "default": {
       "description": "Any governed error"

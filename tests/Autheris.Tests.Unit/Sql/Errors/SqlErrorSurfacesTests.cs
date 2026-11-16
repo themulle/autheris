@@ -195,7 +195,7 @@ public sealed class SqlErrorSurfacesTests
         root.GetProperty("limit").GetString().ShouldBe("QueryLength");
     }
 
-    private static McpToolDefinition Tool(string name) => new(name, name, "{}", "");
+    private static McpToolDefinition Tool(string name) => McpDatasetTools.Definitions().First(t => t.Name == name);
 
     private static McpSessionContext Session() =>
         new("s1", "spn-1", "tenant-1", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, Roles: ["Reader"]);
@@ -209,9 +209,9 @@ public sealed class SqlErrorSurfacesTests
             .Returns<Task<string>>(_ => throw new SqlLimitExceededException(SqlLimitKind.InListItems, TargetSqlDialect.Oracle, 7, 5));
         var executor = new GatewayMcpQueryExecutor(
             Substitute.For<IRequestExecutorProvider>(), Substitute.For<IGatewayExecutionService>(),
-            NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100), toolExecutionHandler: handler);
+            NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100), toolExecutionHandler: handler, persistedToolValidator: new Autheris.Application.Mcp.Services.PersistedToolValidator());
 
-        var json = await executor.ExecuteOperationAsync(Tool("query_sql"), "{}", Session());
+        var json = await executor.ExecuteOperationAsync(Tool("query_sql"), """{"query":"SELECT 1"}""", Session());
 
         var error = JsonDocument.Parse(json).RootElement.GetProperty("error");
         error.GetProperty("code").GetString().ShouldBe("SQL_LIMIT_EXCEEDED");
@@ -226,7 +226,7 @@ public sealed class SqlErrorSurfacesTests
             .Returns<Task<McpDatasetDescription>>(_ => throw new ArgumentException(HostileMarker));
         var executor = new GatewayMcpQueryExecutor(
             Substitute.For<IRequestExecutorProvider>(), Substitute.For<IGatewayExecutionService>(),
-            NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100), datasetCatalog: catalog);
+            NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100), datasetCatalog: catalog, persistedToolValidator: new Autheris.Application.Mcp.Services.PersistedToolValidator());
 
         var json = await executor.ExecuteOperationAsync(Tool(McpDatasetTools.DescribeDataset), """{"dataset":"a.b.c"}""", Session());
 

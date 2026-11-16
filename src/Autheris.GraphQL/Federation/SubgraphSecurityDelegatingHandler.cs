@@ -95,7 +95,7 @@ public sealed class SubgraphSecurityDelegatingHandler : DelegatingHandler
 
         // Forward Authorization Bearer token downstream ONLY if explicitly configured on the subgraph AND NOT an MCP request
         bool isMcp = httpContext?.Items.ContainsKey("IsMcpRequest") == true ||
-                     httpContext?.Request.Path.StartsWithSegments("/mcp") == true ||
+                     httpContext?.Request.Path.StartsWithSegments("/mcp", StringComparison.Ordinal) == true ||
                      principal?.HasClaim("mcp.tool", "true") == true;
 
         var subgraphConfig = _options?.Value.Federation.Subgraphs.Find(s => string.Equals(s.Name, _subgraphName, StringComparison.OrdinalIgnoreCase));

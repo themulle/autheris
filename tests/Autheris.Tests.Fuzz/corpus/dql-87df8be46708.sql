@@ -1,0 +1,1 @@
+SELECT * FROM api.ufn_GetCraneTelemetry(@crane_id, DEFAULT, @tenant_id)

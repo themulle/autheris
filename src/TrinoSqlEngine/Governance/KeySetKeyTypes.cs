@@ -46,10 +46,10 @@ public static class KeySetKeyTypes
 
         switch (name)
         {
-            case "tinyint" when args.Length == 0: return WholeNumber(dialect, 1);
-            case "smallint" or "int2" when args.Length == 0: return WholeNumber(dialect, 2);
-            case "int" or "integer" or "int4" or "mediumint" when args.Length == 0: return WholeNumber(dialect, 4);
-            case "bigint" or "int8" when args.Length == 0: return WholeNumber(dialect, 8);
+            case "tinyint" when args.Length == 0: return WholeNumber(1);
+            case "smallint" or "int2" when args.Length == 0: return WholeNumber(2);
+            case "int" or "integer" or "int4" or "mediumint" when args.Length == 0: return WholeNumber(4);
+            case "bigint" or "int8" when args.Length == 0: return WholeNumber(8);
             case "uniqueidentifier" when dialect == TargetSqlDialect.SqlServer && args.Length == 0:
             case "uuid" when dialect == TargetSqlDialect.PostgreSql && args.Length == 0:
                 return new KeyTypeInfo(KeyTypeClass.Uuid, 0);
@@ -102,8 +102,8 @@ public static class KeySetKeyTypes
         };
     }
 
-    private static KeyTypeInfo WholeNumber(TargetSqlDialect dialect, int rank) =>
-        new(KeyTypeClass.WholeNumber, dialect == TargetSqlDialect.Sqlite ? 8 : rank);   // SQLite stores every integer type the same way
+    private static KeyTypeInfo WholeNumber(int rank) =>
+        new(KeyTypeClass.WholeNumber, rank);
 
     private static bool IsExactNumeric(TargetSqlDialect dialect, string name, int[] args)
     {
@@ -137,7 +137,6 @@ public static class KeySetKeyTypes
             _ => null
         },
         TargetSqlDialect.PostgreSql => name is "varchar" or "character varying" or "char" or "character" ? KeyTypeClass.UnicodeText : null,
-        TargetSqlDialect.Sqlite => name is "varchar" or "character varying" or "char" or "character" or "nvarchar" or "nchar" ? KeyTypeClass.UnicodeText : null,
         _ => null
     };
 

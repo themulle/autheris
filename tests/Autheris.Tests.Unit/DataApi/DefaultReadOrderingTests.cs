@@ -289,8 +289,6 @@ public sealed class DefaultReadOrderingTests
     [InlineData(DatabaseDialect.PostgreSql, "jsonb", false)]
     [InlineData(DatabaseDialect.PostgreSql, "bytea", false)]
     [InlineData(DatabaseDialect.PostgreSql, "integer[]", false)]
-    [InlineData(DatabaseDialect.Sqlite, "TEXT", true)]
-    [InlineData(DatabaseDialect.Sqlite, "BLOB", false)]
     [InlineData(DatabaseDialect.Databricks, "ARRAY<INT>", false)]
     [InlineData(DatabaseDialect.Databricks, "MAP<STRING,INT>", false)]
     [InlineData(DatabaseDialect.Databricks, "string", true)]

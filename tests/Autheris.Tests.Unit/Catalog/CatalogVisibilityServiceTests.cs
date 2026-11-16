@@ -214,7 +214,8 @@ public sealed class CatalogVisibilityServiceTests
         var second = await service.GetVisibleAsync(caller);
 
         second.ShouldBeSameAs(first);
-        await tables.Received(1).GetAllTablesAsync(Arg.Any<CancellationToken>());
+        await tables.Received(1).QueryTablesAsync(Arg.Any<Autheris.Application.Catalog.CatalogTableQuery>(), Arg.Any<CancellationToken>());
+        await tables.DidNotReceiveWithAnyArgs().GetAllTablesAsync(default);
     }
 
     [Fact]
@@ -259,7 +260,8 @@ public sealed class CatalogVisibilityServiceTests
         await Svc(tables, consents).GetVisibleAsync(Caller(Subject()));
         await Svc(tables, consents).GetVisibleAsync(Caller(Subject()));
 
-        await tables.Received(2).GetAllTablesAsync(Arg.Any<CancellationToken>());
+        await tables.Received(2).QueryTablesAsync(Arg.Any<Autheris.Application.Catalog.CatalogTableQuery>(), Arg.Any<CancellationToken>());
+        await tables.DidNotReceiveWithAnyArgs().GetAllTablesAsync(default);
     }
 
     // ------------------------------------------------------------------------------------------------------------------------------

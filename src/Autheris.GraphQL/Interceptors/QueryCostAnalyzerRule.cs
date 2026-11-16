@@ -29,6 +29,8 @@ public sealed partial class QueryCostAnalyzerRule : IDocumentValidatorRule
     private readonly Func<string, string, RelationCardinality?>? _relationLookup;
     private readonly Func<string, TableMetadata?>? _tableMetadataLookup;
     private readonly ICatalogRelationRegistry? _relationRegistry;
+    private readonly Func<string, IReadOnlySet<string>?>? _visibleColumnsLookup;
+    private readonly List<GraphQlIndexHint>? _indexHints;
     private readonly double _aggregateFieldCostWeight;
     private readonly int _maxGroupByColumns;
     private readonly int _maxAggregates;
@@ -52,12 +54,16 @@ public sealed partial class QueryCostAnalyzerRule : IDocumentValidatorRule
         int maxAggregates = AggregationOptions.DefaultMaxAggregates,
         int maxAggregateFieldsPerOperation = GraphQLAggregationOptions.DefaultMaxFieldsPerOperation,
         Func<string, TableMetadata?>? tableMetadataLookup = null,
-        ICatalogRelationRegistry? relationRegistry = null)
+        ICatalogRelationRegistry? relationRegistry = null,
+        Func<string, IReadOnlySet<string>?>? visibleColumnsLookup = null,
+        List<GraphQlIndexHint>? indexHintsOut = null)
     {
         _costOptions = costOptions;
         _relationLookup = relationLookup;
         _tableMetadataLookup = tableMetadataLookup;
         _relationRegistry = relationRegistry;
+        _visibleColumnsLookup = visibleColumnsLookup;
+        _indexHints = indexHintsOut;
         _maxExecutionDepth = maxExecutionDepth > 0 ? maxExecutionDepth : 25;
         // #112 A-7: the three weights of the typed aggregate cost model (the same ones the engine's cost calculator uses).
         _aggregateFieldCostWeight = aggregateFieldCostWeight > 0 ? aggregateFieldCostWeight : AggregationOptions.DefaultAggregateFieldCostWeight;
@@ -94,7 +100,9 @@ public sealed partial class QueryCostAnalyzerRule : IDocumentValidatorRule
         AggregationOptions? aggregation = null,
         int maxExecutionDepth = 25,
         Func<string, TableMetadata?>? tableMetadataLookup = null,
-        ICatalogRelationRegistry? relationRegistry = null)
+        ICatalogRelationRegistry? relationRegistry = null,
+        Func<string, IReadOnlySet<string>?>? visibleColumnsLookup = null,
+        List<GraphQlIndexHint>? indexHintsOut = null)
     {
         var rule = new QueryCostAnalyzerRule(
             int.MaxValue,
@@ -107,7 +115,9 @@ public sealed partial class QueryCostAnalyzerRule : IDocumentValidatorRule
             maxGroupByColumns: aggregation?.MaxGroupByColumns ?? AggregationOptions.DefaultMaxGroupByColumns,
             maxAggregates: aggregation?.MaxAggregates ?? AggregationOptions.DefaultMaxAggregates,
             tableMetadataLookup: tableMetadataLookup,
-            relationRegistry: relationRegistry);
+            relationRegistry: relationRegistry,
+            visibleColumnsLookup: visibleColumnsLookup,
+            indexHintsOut: indexHintsOut);
         return rule.ComputeCost(document, schema, variableValues);
     }
 
@@ -417,7 +427,7 @@ public sealed partial class QueryCostAnalyzerRule : IDocumentValidatorRule
                 // (groups, key, aggregates) is not multiplied again because the field cost already models the whole result.
                 if (fieldDef != null && IsTypedAggregateField(field.Name.Value, fieldDef))
                 {
-                    cost = SafeAdd(cost, AggregateFieldCost(field, variableDefinitions, variableValues));
+                    cost = SafeAdd(cost, AggregateFieldCost(field, variableDefinitions, variableValues, currentDepth, currentType, schema));
                     continue;
                 }
 
@@ -630,20 +640,26 @@ public sealed partial class QueryCostAnalyzerRule : IDocumentValidatorRule
                     // Issue #421 ( of #417) / CRIT-02: Apply surcharge multiplier if root list plan has no usable index
                     if (isRootField && isPagedList && effectiveRows > 1 && _costOptions is not null && _costOptions.UnindexedRootListSurchargeMultiplier > 1.0)
                     {
-                        var tableMeta = _tableMetadataLookup?.Invoke(field.Name.Value)
-                            ?? (_tableMetadataLookup != null && field.Name.Value.EndsWith("Connection", StringComparison.Ordinal)
-                                ? _tableMetadataLookup.Invoke(field.Name.Value[..^10])
-                                : null)
-                            ?? CatalogGraphQlTypeModule.CurrentLookup?.Invoke(field.Name.Value);
+                        var connectionBase = field.Name.Value.EndsWith("Connection", StringComparison.Ordinal)
+                            ? field.Name.Value[..^10]
+                            : field.Name.Value;
+                        var tableMeta = ResolveTableMetadata(field.Name.Value, connectionBase);
 
                         if (tableMeta != null)
                         {
-                            var visibleColumns = tableMeta.Columns.Select(c => c.ColumnName).ToList();
+                            var visibleSet = ResolveVisibleColumns(connectionBase, tableMeta);
+                            var visibleColumns = visibleSet?.ToList();
                             var orderBy = IndexUsabilityEvaluator.ExtractOrderBy(field.Arguments.FirstOrDefault(a => a.Name.Value == "orderBy"), variableValues);
-                            var filterColumns = IndexUsabilityEvaluator.ExtractFilterColumns(field.Arguments.FirstOrDefault(a => a.Name.Value == "where"), variableValues);
+                            var filterColumns = IndexUsabilityEvaluator.ExtractFilterColumns(field.Arguments.FirstOrDefault(a => a.Name.Value == "where"), variableValues, variableDefinitions);
                             if (!IndexUsabilityEvaluator.HasUsableIndex(tableMeta, visibleColumns, orderBy, filterColumns))
                             {
                                 multiplier = (int)Math.Min((long)int.MaxValue, (long)Math.Ceiling(multiplier * _costOptions.UnindexedRootListSurchargeMultiplier));
+                                if (currentDepth == 1 && _indexHints is not null)
+                                {
+                                    var rootKey = field.Alias?.Value ?? field.Name.Value;
+                                    var helpfulCols = IndexUsabilityEvaluator.BuildHelpfulIndexColumns(tableMeta, visibleSet, filterColumns, orderBy);
+                                    _indexHints.Add(new GraphQlIndexHint(rootKey, GraphQlIndexHint.NoUsableIndexReason, helpfulCols));
+                                }
                             }
                         }
                     }

@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Analytics;
 
+using Autheris.Tests.Unit.Catalog;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -139,6 +140,7 @@ public sealed class AggregationPrivacyHardeningTests
         TableMetadata? metadata = null)
     {
         var metaRepo = Substitute.For<ITableMetadataRepository>();
+        metaRepo.StubTables([metadata ?? CreateOrdersMetadata()]);
         metaRepo.GetTableMetadataAsync(OrdersTableId, Arg.Any<CancellationToken>()).Returns(metadata ?? CreateOrdersMetadata());
         var executor = new RowExecutor(rows);
         var audit = new CapturingAuditLogRepository();
@@ -406,7 +408,7 @@ public sealed class AggregationPrivacyHardeningTests
     {
         var (service, _, _) = CreateService(
             DepartmentRows(("Big", 6, 1m), ("Tiny", 2, 1m)),
-            new AnalyticsOptions { Privacy = new AnalyticsPrivacyOptions { DefaultMinGroupSize = 5 } });
+            new AnalyticsOptions { Privacy = new AnalyticsPrivacyOptions { DefaultMinGroupSize = 5, ExposeSuppressedGroupsCount = true } });
 
         var result = await service.ExecuteAggregationAsync(CreatePrincipal(), new AggregationQuery(
             OrdersTableId, GroupBy: ["department"], PreEvaluatedDecision: CreateDecision().AsPdpEvaluated()));
@@ -595,7 +597,7 @@ public sealed class AggregationPrivacyHardeningTests
         await catalog.RegisterManifestAsync(new DbtSemanticManifest([model], [metric], "1.0"), new TenantId("tenant-a"));
 
         var metaRepo = Substitute.For<ITableMetadataRepository>();
-        metaRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(tablePresent ? [CreateOrdersMetadata()] : []);
+        metaRepo.StubTables(tablePresent ? new[] { CreateOrdersMetadata() } : Array.Empty<TableMetadata>());
         if (tablePresent)
         {
             metaRepo.GetTableMetadataAsync(OrdersTableId, Arg.Any<CancellationToken>()).Returns(CreateOrdersMetadata());

@@ -22,10 +22,19 @@ public static class CatalogKeyDefinitionImport
     public sealed class Collector
     {
         private readonly List<TableIndexDefinition> _indexes = new();
+        private readonly HashSet<string> _indexNames = new(StringComparer.OrdinalIgnoreCase);
         private IReadOnlyList<string>? _primaryKey;
         private IReadOnlyList<KeyColumnDirection>? _primaryKeyDirections;
 
         public bool Invalid { get; private set; }
+
+        public string? InvalidRule { get; private set; }
+
+        public void MarkInvalid(string ruleCode)
+        {
+            Invalid = true;
+            InvalidRule ??= ruleCode;
+        }
 
         public IReadOnlyList<string>? PrimaryKey => Invalid ? null : _primaryKey;
 
@@ -38,9 +47,15 @@ public static class CatalogKeyDefinitionImport
 
         public void AddPrimaryKey(IReadOnlyList<string>? columns, IReadOnlyList<KeyColumnDirection>? directions = null)
         {
-            if (!CapsHold(columns) || _primaryKey is not null || !DirectionsMatch(columns!, directions))
+            if (_primaryKey is not null)
             {
-                Invalid = true;
+                MarkInvalid("DUPLICATE_PRIMARY_KEY");
+                return;
+            }
+
+            if (!CapsHold(columns) || !HasDistinctColumns(columns!) || !DirectionsMatch(columns!, directions))
+            {
+                MarkInvalid("INVALID_PRIMARY_KEY");
                 return;
             }
 
@@ -48,28 +63,85 @@ public static class CatalogKeyDefinitionImport
             _primaryKeyDirections = KeyDirections.Canonical(directions?.ToArray());
         }
 
-        public void AddUnique(IReadOnlyList<string>? columns, IReadOnlyList<KeyColumnDirection>? directions = null)
+        public void AddUnique(IReadOnlyList<string>? columns, IReadOnlyList<KeyColumnDirection>? directions = null) =>
+            AddIndex(columns, isUnique: true, name: null, directions: directions);
+
+        public void AddIndex(IReadOnlyList<string>? columns, bool isUnique, string? name = null, IReadOnlyList<KeyColumnDirection>? directions = null)
         {
-            if (!CapsHold(columns) || _indexes.Count >= TableKeyDefinitionValidator.MaxIndexesPerTable || !DirectionsMatch(columns!, directions))
+            if (_indexes.Count >= TableKeyDefinitionValidator.MaxIndexesPerTable)
             {
-                Invalid = true;
+                MarkInvalid("INDEXES_TOO_MANY");
                 return;
+            }
+
+            if (!CapsHold(columns) || !HasDistinctColumns(columns!) || !DirectionsMatch(columns!, directions))
+            {
+                MarkInvalid("INVALID_INDEX_COLUMNS");
+                return;
+            }
+
+            if (name is not null)
+            {
+                if (!TableKeyDefinitionValidator.IsValidIndexName(name))
+                {
+                    MarkInvalid("INVALID_INDEX_NAME");
+                    return;
+                }
+
+                if (_indexNames.Contains(name))
+                {
+                    MarkInvalid("DUPLICATE_INDEX_NAME");
+                    return;
+                }
             }
 
             var canonicalDirections = KeyDirections.Canonical(directions?.ToArray());
-            if (_indexes.Any(i => i.Columns.SequenceEqual(columns!, StringComparer.OrdinalIgnoreCase) &&
-                                  KeyDirectionsEqual(i.Directions, canonicalDirections)))
+            if (name is null)
             {
-                return;
+                if (_indexes.Any(i => i.IsUnique == isUnique &&
+                                      i.Columns.SequenceEqual(columns!, StringComparer.OrdinalIgnoreCase) &&
+                                      KeyDirectionsEqual(i.Directions, canonicalDirections)))
+                {
+                    return;
+                }
+
+                if (isUnique && _primaryKey is not null && _primaryKey.SequenceEqual(columns!, StringComparer.OrdinalIgnoreCase) &&
+                    KeyDirectionsEqual(_primaryKeyDirections, canonicalDirections))
+                {
+                    return;
+                }
             }
 
-            if (_primaryKey is not null && _primaryKey.SequenceEqual(columns!, StringComparer.OrdinalIgnoreCase) &&
-                KeyDirectionsEqual(_primaryKeyDirections, canonicalDirections))
+            var effectiveName = name ?? NextGeneratedName(isUnique);
+            _indexNames.Add(effectiveName);
+            _indexes.Add(new TableIndexDefinition(effectiveName, columns!.ToArray(), isUnique, canonicalDirections));
+        }
+
+        private string NextGeneratedName(bool isUnique)
+        {
+            var pos = _indexes.Count + 1;
+            var candidate = isUnique ? UniqueIndexName(pos) : NonUniqueIndexName(pos);
+            while (_indexNames.Contains(candidate))
             {
-                return;
+                pos++;
+                candidate = isUnique ? UniqueIndexName(pos) : NonUniqueIndexName(pos);
             }
 
-            _indexes.Add(new TableIndexDefinition(UniqueIndexName(_indexes.Count + 1), columns!.ToArray(), true, canonicalDirections));
+            return candidate;
+        }
+
+        private static bool HasDistinctColumns(IReadOnlyList<string> columns)
+        {
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var col in columns)
+            {
+                if (string.IsNullOrWhiteSpace(col) || !seen.Add(col.Trim()))
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         private static bool KeyDirectionsEqual(IReadOnlyList<KeyColumnDirection>? left, IReadOnlyList<KeyColumnDirection>? right)
@@ -94,8 +166,8 @@ public static class CatalogKeyDefinitionImport
         if (collector.Invalid)
         {
             logger.LogWarning(
-                "{Source} declared an invalid key definition for table {Table} (size limit, ambiguous or empty constraint); the definition was dropped and the stored one kept.",
-                source, metadata.Identifier);
+                "{Source} declared an invalid key definition for table {Table} ({Rule}); the definition was dropped and the stored one kept.",
+                source, metadata.Identifier, collector.InvalidRule ?? "INVALID_KEY_DEFINITION");
             return metadata;
         }
 
@@ -104,6 +176,9 @@ public static class CatalogKeyDefinitionImport
 
     /// <summary>Name of the n-th (1-based) unnamed unique constraint of a source, e.g. OpenMetadata <c>UNIQUE</c> or dbt <c>unique</c>.</summary>
     public static string UniqueIndexName(int oneBasedPosition) => $"uq_{oneBasedPosition}";
+
+    /// <summary>Name of the n-th (1-based) unnamed non-unique index of a source.</summary>
+    public static string NonUniqueIndexName(int oneBasedPosition) => $"ix_{oneBasedPosition}";
 
     /// <summary>
     /// Returns <paramref name="metadata"/> carrying the declared definition and <c>ReplaceKeyDefinition = true</c>; or unchanged when the
@@ -146,7 +221,7 @@ public static class CatalogKeyDefinitionImport
         {
             logger.LogWarning(
                 "{Source} declared an invalid key definition for table {Table}; the definition was dropped and the stored one kept: {Rule}",
-                source, metadata.Identifier, ex.Message);
+                source, metadata.Identifier, ex.RuleCode);
             return metadata;
         }
     }

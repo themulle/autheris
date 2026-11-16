@@ -6,6 +6,7 @@ using System.Linq;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Catalog;
 using Autheris.Application.Common;
 using Autheris.Application.Common.Interfaces;
 using System.Text.RegularExpressions;
@@ -261,7 +262,11 @@ public sealed partial class ODataHandler(
         }
 
         var complete = true;
-        var allTables = await _metadataRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
+        var allTables = await CatalogTablePageReader.ReadAllAsync(
+            _metadataRepo,
+            new CatalogTableQuery(IncludeInactive: false),
+            static t => t.Table.IsActive,
+            ct: ct).ConfigureAwait(false);
         var candidateTables = CandidateTablesFor(principal, allTables);
 
         var authorizedTables = new List<Autheris.Domain.Model.TableMetadata>();

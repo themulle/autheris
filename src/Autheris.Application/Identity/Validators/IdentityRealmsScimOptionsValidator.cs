@@ -58,12 +58,20 @@ public class IdentityRealmsScimOptionsValidator : IValidateOptions<IdentityRealm
                 "SCIM mass-change protection is explicitly disabled (Authentication:Realms:Scim:MassChangeProtection:Enabled=false): a compromised IdP token can deprovision every user without throttling.");
         }
 
-        if (ranges.Count == 0
-            && _environment?.IsProduction() == true
-            && options.Realms.Values.Any(r => r.Provisioning == RealmProvisioningMode.Scim))
+        var hasScimRealm = options.Realms.Values.Any(r => r.Provisioning == RealmProvisioningMode.Scim);
+        var isDevelopment = _environment?.IsDevelopment() == true;
+
+        if (hasScimRealm && !isDevelopment && ranges.Count == 0)
         {
-            _logger?.LogWarning(
-                "SCIM provisioning is enabled without Authentication:Realms:Scim:AllowedIpRanges: any peer holding a SCIM secret is accepted. Restrict the callers by CIDR.");
+            return ValidateOptionsResult.Fail(
+                "Authentication:Realms:Scim:AllowedIpRanges must contain at least one CIDR range or IP address outside Development when SCIM provisioning is enabled.");
+        }
+
+        var defaultRpm = options.Scim?.RequestsPerMinute ?? ScimOptions.DefaultRequestsPerMinute;
+        if (defaultRpm is < ScimOptions.MinRequestsPerMinute or > ScimOptions.MaxRequestsPerMinute)
+        {
+            return ValidateOptionsResult.Fail(
+                $"Authentication:Realms:Scim:RequestsPerMinute must be between {ScimOptions.MinRequestsPerMinute} and {ScimOptions.MaxRequestsPerMinute}.");
         }
 
         var seenSecrets = new HashSet<string>(StringComparer.Ordinal);
@@ -76,6 +84,34 @@ public class IdentityRealmsScimOptionsValidator : IValidateOptions<IdentityRealm
             }
 
             var scim = config.Scim;
+            if (scim is not null)
+            {
+                if (scim.MaxSyncAgeMinutes is < ScimRealmSecretOptions.MinMaxSyncAgeMinutes or > ScimRealmSecretOptions.MaxMaxSyncAgeMinutes)
+                {
+                    return ValidateOptionsResult.Fail(
+                        $"Authentication:Realms:Realms:{realmId}:Scim:MaxSyncAgeMinutes must be between {ScimRealmSecretOptions.MinMaxSyncAgeMinutes} and {ScimRealmSecretOptions.MaxMaxSyncAgeMinutes}.");
+                }
+
+                if (scim.RequestsPerMinute is < ScimOptions.MinRequestsPerMinute or > ScimOptions.MaxRequestsPerMinute)
+                {
+                    return ValidateOptionsResult.Fail(
+                        $"Authentication:Realms:Realms:{realmId}:Scim:RequestsPerMinute must be between {ScimOptions.MinRequestsPerMinute} and {ScimOptions.MaxRequestsPerMinute}.");
+                }
+
+                if (!Enum.IsDefined(scim.StaleSyncBehavior))
+                {
+                    return ValidateOptionsResult.Fail(
+                        $"Authentication:Realms:Realms:{realmId}:Scim:StaleSyncBehavior is invalid.");
+                }
+
+                if (scim.StaleSyncBehavior == ScimStaleSyncBehavior.DropScimGroups)
+                {
+                    _logger?.LogWarning(
+                        "SCIM realm {RealmId} uses StaleSyncBehavior=DropScimGroups: grants assigned to SCIM-only groups will not be applied while SCIM sync is stale, whereas denies on SCIM-only groups still degrade and deny access.",
+                        realmId);
+                }
+            }
+
             var primary = scim?.PrimarySecret;
             var secondary = scim?.SecondarySecret;
 

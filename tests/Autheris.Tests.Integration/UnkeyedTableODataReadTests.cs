@@ -14,7 +14,7 @@ using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.SqlClient;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
@@ -46,6 +46,7 @@ public abstract class UnkeyedTableODataReadBase : IDisposable
             builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("UnkeyedTableODataReadBase"));
             builder.UseSetting($"Gateway:DataSources:Connections:{Source}:Provider", Provider);
             builder.UseSetting($"Gateway:DataSources:Connections:{Source}:ConnectionString", ConnectionString);
+            builder.UseSetting($"Gateway:DataSources:Connections:{Source}:DefaultSchema", Schema);
         });
 
         var identifier = new TableIdentifier(Source, Schema, "air1");
@@ -158,30 +159,25 @@ public abstract class UnkeyedTableODataReadBase : IDisposable
     public virtual void Dispose() => _host?.Dispose();
 }
 
-public sealed class UnkeyedTableODataReadSqliteTests : UnkeyedTableODataReadBase
+public sealed class UnkeyedTableODataReadPostgreSqlTests : UnkeyedTableODataReadBase
 {
-    private readonly string _path = Path.Combine(Path.GetTempPath(), $"unkeyed-{Guid.NewGuid():N}.db");
+    private readonly string _connectionString;
 
-    public UnkeyedTableODataReadSqliteTests()
+    public UnkeyedTableODataReadPostgreSqlTests()
     {
-        using var conn = new SqliteConnection($"Data Source={_path}");
-        conn.Open();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = "CREATE TABLE air1 (vehicle TEXT, seq INTEGER, pressure REAL); " + InsertRows();
-        cmd.ExecuteNonQuery();
+        _connectionString = PostgresDataSource.Create("unkeyed", "CREATE TABLE air1 (vehicle TEXT, seq INTEGER, pressure REAL); " + InsertRows());
     }
 
-    protected override string Provider => "Sqlite";
-    protected override string SourceType => "Sqlite";
-    protected override string ConnectionString => $"Data Source={_path}";
+    protected override string Provider => "PostgreSql";
+    protected override string SourceType => "PostgreSql";
+    protected override string ConnectionString => _connectionString;
     protected override string Schema => "main";
     protected override bool IsAvailable => true;
 
     public override void Dispose()
     {
         base.Dispose();
-        SqliteConnection.ClearAllPools();
-        try { File.Delete(_path); } catch (IOException) { }
+        NpgsqlConnection.ClearAllPools();
     }
 }
 

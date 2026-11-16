@@ -15,6 +15,7 @@ using Shouldly;
 using Xunit;
 
 /// <summary>Security review 2026-10-06 (E-10, E-11): runtime chain verification and audit entries of the approval workflow.</summary>
+[Trait("Category", "Security")]
 public sealed class AuditChainIntegrityMonitorTests
 {
     private static AuditChainIntegrityMonitor Monitor(IAuditLogRepository repo) =>
@@ -157,6 +158,7 @@ public sealed class AuditChainIntegrityMonitorTests
     public async Task Health_GovernanceDbFailure_DoesNotReturnExceptionText()
     {
         var governance = Substitute.For<IGovernanceRepository>();
+        global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(governance);
         governance.GetAllTablesAsync(Arg.Any<System.Threading.CancellationToken>())
             .Returns<Task<System.Collections.Generic.IReadOnlyList<TableMetadata>>>(_ => throw new InvalidOperationException("Server=db-internal;Password=secret"));
 
@@ -197,12 +199,12 @@ public sealed class AuditChainIntegrityMonitorTests
     {
         var req = new ConsentRequest { RequesterSid = new Sid("S-REQ"), TenantId = new TenantId("tenant-a") };
 
-        var entry = ConsentApprovalPolicy.BuildStepAudit(req, new Sid("S-APPROVER"), "CONSENT_APPROVAL_STEP", "APPROVED", "APPROVED", "alice@corp", null);
+        var entry = ConsentApprovalPolicy.BuildStepAudit(req, new Sid("S-APPROVER"), "CONSENT_APPROVAL_STEP", "APPROVED", "APPROVED", null, "EXT-123");
 
         entry.ActorSid.Value.ShouldBe("S-APPROVER");
         entry.TenantId.Value.ShouldBe("tenant-a");
         entry.EventType.ShouldBe("CONSENT_APPROVAL_STEP");
-        entry.DetailsJson.ShouldContain("alice@corp");
+        entry.DetailsJson.ShouldContain("EXT-123");
     }
 
     [Fact]
@@ -210,7 +212,7 @@ public sealed class AuditChainIntegrityMonitorTests
     {
         var req = new ConsentRequest { TenantId = Autheris.Tests.Common.TestTenants.Default, RequesterSid = new Sid("S-REQ") };
 
-        var entry = ConsentApprovalPolicy.BuildStepAudit(req, new Sid("S-A"), "CONSENT_REQUEST_REJECTED", "REJECTED", "REJECTED", null, new string('x', 5000));
+        var entry = ConsentApprovalPolicy.BuildStepAudit(req, new Sid("S-A"), "CONSENT_REQUEST_REJECTED", "REJECTED", "REJECTED", new string('x', 5000));
 
         entry.DetailsJson.Length.ShouldBeLessThan(1000);
     }

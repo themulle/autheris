@@ -8,7 +8,6 @@ using System.Text;
 using Autheris.Api.Endpoints;
 using Autheris.Api.Middleware;
 using Autheris.Application.Catalog.Services;
-using Autheris.Application.FinOps.Interfaces;
 using Autheris.Application.Governance;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Services;
@@ -33,6 +32,7 @@ using Xunit;
 
 namespace Autheris.Tests.Integration.Governance;
 
+[Trait("Category", "Security")]
 public sealed class SecurityReviewRemediationGovernanceTests
 {
     [Fact]

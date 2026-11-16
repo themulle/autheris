@@ -2,13 +2,14 @@ namespace Autheris.Application.Catalog.Search;
 
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Linq;
+using System.Runtime.ExceptionServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.State.Caching;
-using Autheris.Application.Security;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
@@ -21,25 +22,64 @@ using Microsoft.Extensions.Options;
 /// Hochperformante In-Process Hybrid Search Engine für den Datensatz- und Tabellenkatalog.
 /// Kombiniert Okapi BM25 mit SIMD-beschleunigter Vektorsuche über Reciprocal Rank Fusion (RRF).
 /// </summary>
-public sealed class CatalogSearchEngine : ICatalogSearchEngine
+public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchStatusRecorder
 {
     private readonly ILocalEmbeddingGenerator _embeddingGenerator;
     private readonly IOptions<CatalogSearchOptions> _options;
     private readonly ILogger<CatalogSearchEngine> _logger;
+    private readonly TimeProvider _timeProvider;
+    private readonly CatalogSearchEmbeddingCache _documentEmbeddingCache;
+    private readonly object _statusLock = new();
+    private readonly Lock _stateLock = new();
+
     /// <summary>Fallback when <see cref="CatalogSearchOptions.MaxQueryLength"/> is not a positive value.</summary>
     public const int DefaultMaxQueryLength = 256;
 
     /// <summary>Maximum number of cached query embeddings (LRU; a miss only recomputes the vector).</summary>
     public const int QueryEmbeddingCacheCapacity = 1024;
 
+    /// <summary>Delta-to-base ratio threshold above which a delta update compacts segments into a clean base snapshot.</summary>
+    public const double DeltaRebuildRatio = 0.10;
+
+    /// <summary>Maximum accumulated delta/tombstone entries before compacting segments into a clean base snapshot.</summary>
+    public const int MaxDeltaEntriesBeforeRebuild = 5_000;
+
+    /// <summary>Maximum accumulated base-segment tombstones before compacting into a clean base snapshot.</summary>
+    public const int MaxTombstonesBeforeRebuild = 5_000;
+
     // Bounded LRU: arbitrary distinct queries must not grow the process memory without limit.
     private readonly BoundedCache<string, ReadOnlyMemory<float>> _embeddingCache = new(QueryEmbeddingCacheCapacity, comparer: StringComparer.Ordinal);
 
-    private CatalogSearchSnapshot? _currentSnapshot;
+    private readonly Dictionary<long, long> _activeMergeVersions = new();
+    private readonly List<(long Version, PreparedDeltaBatch Batch)> _pendingReplayLog = [];
+    private long _mutationVersion;
+    private long _nextMergeOperationId;
+    private bool _compactionInProgress;
 
-    public bool IsIndexReady => _currentSnapshot != null;
-    public int IndexedTableCount => _currentSnapshot?.MetadataMap.Count ?? 0;
-    public DateTimeOffset? LastIndexedAt => _currentSnapshot?.CreatedAt;
+    private CatalogSearchSnapshot? _currentSnapshot;
+    private DateTimeOffset? _lastSuccessUtc;
+    private DateTimeOffset? _lastAttemptUtc;
+    private string? _lastErrorCode;
+    private (long StructureVersion, long ContentVersion)? _lastIndexedVersion;
+
+    /// <summary>Test hook invoked outside locks during segment compaction right before atomic replay and commit.</summary>
+    internal Func<CancellationToken, Task>? BeforeCompactionCommitForTesting { get; set; }
+
+    public bool IsIndexReady => Volatile.Read(ref _currentSnapshot) != null;
+    public int IndexedTableCount => Volatile.Read(ref _currentSnapshot)?.MetadataMap.Count ?? 0;
+    public DateTimeOffset? LastIndexedAt => Volatile.Read(ref _currentSnapshot)?.CreatedAt;
+    public int CachedDocumentEmbeddingCount => _documentEmbeddingCache.Count;
+
+    public (long StructureVersion, long ContentVersion)? LastIndexedVersion
+    {
+        get
+        {
+            lock (_statusLock)
+            {
+                return _lastIndexedVersion;
+            }
+        }
+    }
 
     /// <summary>Number of query embeddings currently cached (never above <see cref="QueryEmbeddingCacheCapacity"/>).</summary>
     public int CachedQueryEmbeddingCount => _embeddingCache.Count;
@@ -47,160 +87,521 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine
     public CatalogSearchEngine(
         ILocalEmbeddingGenerator embeddingGenerator,
         IOptions<CatalogSearchOptions> options,
-        ILogger<CatalogSearchEngine> logger)
+        ILogger<CatalogSearchEngine> logger,
+        TimeProvider? timeProvider = null,
+        CatalogSearchEmbeddingCache? documentEmbeddingCache = null)
     {
         _embeddingGenerator = embeddingGenerator ?? throw new ArgumentNullException(nameof(embeddingGenerator));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _timeProvider = timeProvider ?? TimeProvider.System;
+        _documentEmbeddingCache = documentEmbeddingCache ?? new CatalogSearchEmbeddingCache();
     }
+
+    public CatalogSearchIndexStatus GetStatus(DateTimeOffset? utcNow = null)
+    {
+        var now = utcNow ?? _timeProvider.GetUtcNow();
+        lock (_statusLock)
+        {
+            var lastSuccess = _lastSuccessUtc ?? Volatile.Read(ref _currentSnapshot)?.CreatedAt;
+            var indexAge = lastSuccess.HasValue ? now - lastSuccess.Value : (TimeSpan?)null;
+            return new CatalogSearchIndexStatus(lastSuccess, _lastAttemptUtc, _lastErrorCode, indexAge);
+        }
+    }
+
+    public void RecordRebuildOutcome(
+        DateTimeOffset? lastSuccessUtc,
+        DateTimeOffset lastAttemptUtc,
+        string? lastErrorCode,
+        (long StructureVersion, long ContentVersion)? indexedVersion)
+    {
+        lock (_statusLock)
+        {
+            if (lastSuccessUtc.HasValue)
+            {
+                _lastSuccessUtc = lastSuccessUtc;
+            }
+
+            _lastAttemptUtc = lastAttemptUtc;
+            _lastErrorCode = lastErrorCode;
+            if (indexedVersion.HasValue)
+            {
+                _lastIndexedVersion = indexedVersion;
+            }
+        }
+    }
+
+    internal CatalogSearchSnapshot? CurrentSnapshotForTesting => Volatile.Read(ref _currentSnapshot);
 
     public async Task RebuildIndexAsync(IReadOnlyList<TableMetadata> tables, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(tables);
         _logger.LogInformation("Starte Index-Neuaufbau für {Count} Katalog-Tabellen...", tables.Count);
 
-        var bm25Docs = new List<Bm25Document>(tables.Count);
-        var vectorTexts = new List<string>(tables.Count);
-        var metadataMap = new Dictionary<TableIdentifier, TableMetadata>(tables.Count);
-        var fkGraph = new Dictionary<TableIdentifier, List<TableRelationship>>();
+        var (opId, startVersion) = BeginMergeOperation();
+        try
+        {
+            var activeTables = tables.Where(static t => t != null && t.Table.IsActive && !t.Table.DiscoveryHidden).ToList();
+            var prepared = PrepareDocuments(activeTables, ct);
+            var vectors = await ResolveEmbeddingsWithCacheAsync(prepared, existingVectorIndex: null, ct).ConfigureAwait(false);
+            var baseSnapshot = BuildCleanSnapshot(prepared, vectors, _timeProvider.GetUtcNow());
 
-        // 1. Metadaten-Extraktion, Relation-Building & Pre-Scrubbing
-        foreach (var t in tables)
+            lock (_stateLock)
+            {
+                var finalSnapshot = ReplayPendingDeltasLocked(baseSnapshot, startVersion, _timeProvider.GetUtcNow());
+                _mutationVersion++;
+                Interlocked.Exchange(ref _currentSnapshot, finalSnapshot);
+            }
+
+            _logger.LogInformation("Katalog-Suchindex erfolgreich aktualisiert. {Count} Tabellen aktiv.", activeTables.Count);
+        }
+        finally
+        {
+            EndMergeOperation(opId);
+        }
+    }
+
+    /// <summary>
+    /// Atomically applies incremental table additions, updates, deactivations, visibility removals, and deletions
+    /// by publishing an immutable snapshot with tombstoned BM25/vector entries. Triggers segment compaction when
+    /// delta size exceeds configured thresholds.
+    /// </summary>
+    public async Task ApplyDeltaAsync(
+        IReadOnlyList<TableMetadata> upsertedTables,
+        IReadOnlyCollection<TableIdentifier> removedOrInactiveIds,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(upsertedTables);
+        ArgumentNullException.ThrowIfNull(removedOrInactiveIds);
+
+        if (upsertedTables.Count == 0 && removedOrInactiveIds.Count == 0)
+        {
+            return;
+        }
+
+        ct.ThrowIfCancellationRequested();
+
+        var explicitRemovals = new HashSet<TableIdentifier>(removedOrInactiveIds);
+        var activeCandidates = new List<TableMetadata>(upsertedTables.Count);
+        foreach (var table in upsertedTables)
+        {
+            ArgumentNullException.ThrowIfNull(table);
+            if (!table.Table.IsActive || table.Table.DiscoveryHidden || explicitRemovals.Contains(table.Identifier))
+            {
+                explicitRemovals.Add(table.Identifier);
+                continue;
+            }
+
+            activeCandidates.Add(table);
+        }
+
+        PreparedDocument[] preparedDocs;
+        ReadOnlyMemory<float>[] resolvedVectors;
+        try
+        {
+            preparedDocs = PrepareDocuments(activeCandidates, ct);
+            resolvedVectors = await ResolveEmbeddingsWithCacheAsync(preparedDocs, existingVectorIndex: null, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            RecordRebuildOutcome(lastSuccessUtc: null, _timeProvider.GetUtcNow(), CatalogSearchErrorCodes.EmbeddingFailed, indexedVersion: null);
+            ex.Data[CatalogSearchErrorCodes.ErrorCodeDataKey] = CatalogSearchErrorCodes.EmbeddingFailed;
+            ExceptionDispatchInfo.Capture(ex).Throw();
+            throw;
+        }
+
+        bool needsCompaction = false;
+        lock (_stateLock)
+        {
+            var current = _currentSnapshot;
+            var batch = BuildEffectiveBatch(current, preparedDocs, resolvedVectors, explicitRemovals);
+
+            var now = _timeProvider.GetUtcNow();
+            var nextSnapshot = current is null
+                ? ApplyBatchToEmptySnapshot(batch, now)
+                : ApplyBatchToSnapshot(current, batch, now);
+
+            _mutationVersion++;
+            var version = _mutationVersion;
+            if (_activeMergeVersions.Count > 0)
+            {
+                _pendingReplayLog.Add((version, batch));
+            }
+
+            Interlocked.Exchange(ref _currentSnapshot, nextSnapshot);
+            if (!_compactionInProgress && ShouldCompact(nextSnapshot))
+            {
+                _compactionInProgress = true;
+                needsCompaction = true;
+            }
+        }
+
+        if (needsCompaction)
+        {
+            await CompactSnapshotAsync(ct).ConfigureAwait(false);
+        }
+    }
+
+    private async Task CompactSnapshotAsync(CancellationToken ct)
+    {
+        CatalogSearchSnapshot? captured;
+        long capturedVersion;
+        long opId;
+
+        lock (_stateLock)
+        {
+            captured = _currentSnapshot;
+            if (captured is null)
+            {
+                _compactionInProgress = false;
+                return;
+            }
+
+            capturedVersion = _mutationVersion;
+            opId = ++_nextMergeOperationId;
+            _activeMergeVersions[opId] = capturedVersion;
+        }
+
+        try
+        {
+            if (BeforeCompactionCommitForTesting != null)
+            {
+                await BeforeCompactionCommitForTesting(ct).ConfigureAwait(false);
+            }
+
+            var activeTables = captured.MetadataMap.Values.Where(static t => t.Table.IsActive && !t.Table.DiscoveryHidden).ToList();
+            var prepared = PrepareDocuments(activeTables, ct);
+            var vectors = await ResolveEmbeddingsWithCacheAsync(prepared, captured.VectorIndex, ct).ConfigureAwait(false);
+            var compactedBase = BuildCleanSnapshot(prepared, vectors, _timeProvider.GetUtcNow());
+
+            lock (_stateLock)
+            {
+                var finalSnapshot = ReplayPendingDeltasLocked(compactedBase, capturedVersion, _timeProvider.GetUtcNow());
+                _mutationVersion++;
+                Interlocked.Exchange(ref _currentSnapshot, finalSnapshot);
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Keep existing base + delta + tombstones snapshot serving cleanly if compaction fails.
+            RecordRebuildOutcome(lastSuccessUtc: null, _timeProvider.GetUtcNow(), CatalogSearchErrorCodes.RebuildFailed, indexedVersion: null);
+            _logger.LogWarning(ex, "Catalog search segment compaction failed; continuing to serve existing base, delta, and tombstone snapshot.");
+        }
+        finally
+        {
+            lock (_stateLock)
+            {
+                _compactionInProgress = false;
+            }
+            EndMergeOperation(opId);
+        }
+    }
+
+    private static bool ShouldCompact(CatalogSearchSnapshot snapshot)
+    {
+        if (snapshot.TombstoneCount >= MaxTombstonesBeforeRebuild ||
+            snapshot.DeltaOperationCount > MaxDeltaEntriesBeforeRebuild)
+        {
+            return true;
+        }
+
+        return snapshot.BaseDocumentCount > 0 &&
+               (double)snapshot.DeltaOperationCount / snapshot.BaseDocumentCount > DeltaRebuildRatio;
+    }
+
+    private (long OperationId, long StartVersion) BeginMergeOperation()
+    {
+        lock (_stateLock)
+        {
+            var opId = ++_nextMergeOperationId;
+            var startVersion = _mutationVersion;
+            _activeMergeVersions[opId] = startVersion;
+            return (opId, startVersion);
+        }
+    }
+
+    private void EndMergeOperation(long opId)
+    {
+        lock (_stateLock)
+        {
+            _activeMergeVersions.Remove(opId);
+            if (_activeMergeVersions.Count == 0)
+            {
+                _pendingReplayLog.Clear();
+            }
+            else
+            {
+                long oldestActive = _activeMergeVersions.Values.Min();
+                _pendingReplayLog.RemoveAll(entry => entry.Version <= oldestActive);
+            }
+        }
+    }
+
+    private CatalogSearchSnapshot ReplayPendingDeltasLocked(CatalogSearchSnapshot snapshot, long sinceVersion, DateTimeOffset now)
+    {
+        var current = snapshot;
+        foreach (var (version, batch) in _pendingReplayLog)
+        {
+            if (version > sinceVersion)
+            {
+                current = ApplyBatchToSnapshot(current, batch, now);
+            }
+        }
+        return current;
+    }
+
+    private PreparedDocument[] PrepareDocuments(IReadOnlyList<TableMetadata> tables, CancellationToken ct)
+    {
+        var docs = new PreparedDocument[tables.Count];
+        for (int i = 0; i < tables.Count; i++)
         {
             ct.ThrowIfCancellationRequested();
-            metadataMap[t.Identifier] = t;
-
-            var fields = new StringBuilder[CatalogSearchFieldWeights.FieldCount];
-            for (int i = 0; i < fields.Length; i++) fields[i] = new StringBuilder(64);
-            var combined = new StringBuilder(1024);
-
-            void Add(Bm25Field field, string? text, bool scrub = true)
-            {
-                if (string.IsNullOrWhiteSpace(text)) return;
-                var value = scrub ? SecretScrubber.Redact(text) : text;
-                fields[(int)field].Append(value).Append(' ');
-                combined.Append(value).Append(' ');
-            }
-
-            // Technical names
-            Add(Bm25Field.TechnicalName, $"{t.Identifier.Domain} {t.Identifier.Schema} {t.Identifier.TableName}", scrub: false);
-
-            // Default language texts (scrubbed)
-            Add(Bm25Field.DisplayName, t.Table.DisplayName);
-            Add(Bm25Field.ShortDescription, t.Table.Description);
-            Add(Bm25Field.LongDescription, t.Table.LongDescription);
-
-            // All table translation texts (scrubbed), each in the field of its source text
-            foreach (var (_, entry) in t.Table.Texts.Entries)
-            {
-                Add(Bm25Field.DisplayName, entry.DisplayName);
-                Add(Bm25Field.ShortDescription, entry.Description);
-                Add(Bm25Field.LongDescription, entry.LongDescription);
-            }
-
-            // Columns: technical name, types and display names are names; descriptions are descriptions (scrubbed)
-            foreach (var c in t.Columns)
-            {
-                Add(Bm25Field.ColumnNames, $"{c.ColumnName} {c.DataType}", scrub: false);
-                Add(Bm25Field.ColumnNames, c.DisplayName);
-                Add(Bm25Field.ColumnDescriptions, c.Description);
-
-                foreach (var (_, colEntry) in c.Texts.Entries)
-                {
-                    Add(Bm25Field.ColumnNames, colEntry.DisplayName);
-                    Add(Bm25Field.ColumnDescriptions, colEntry.Description);
-                }
-            }
-
-            bm25Docs.Add(new Bm25Document(
-                t.Identifier,
-                TechnicalName: fields[(int)Bm25Field.TechnicalName].ToString(),
-                DisplayName: fields[(int)Bm25Field.DisplayName].ToString(),
-                TagsAndOwner: fields[(int)Bm25Field.TagsAndOwner].ToString(),
-                ShortDescription: fields[(int)Bm25Field.ShortDescription].ToString(),
-                LongDescription: fields[(int)Bm25Field.LongDescription].ToString(),
-                ColumnNames: fields[(int)Bm25Field.ColumnNames].ToString(),
-                ColumnDescriptions: fields[(int)Bm25Field.ColumnDescriptions].ToString()));
-            vectorTexts.Add(combined.ToString());
-
-            var declaredKey = t.PrimaryKeyColumns;
-
-            // Relationen registrieren via Meta oder Konvention (z.B. customer_id -> customers)
-            foreach (var col in t.Columns)
-            {
-                if (declaredKey.Contains(col.ColumnName, StringComparer.OrdinalIgnoreCase))
-                    continue;
-
-                string? targetTable = null;
-                string? targetCol = null;
-
-                if (col.Meta != null && col.Meta.TryGetValue("foreign_key_table", out var fkt))
-                {
-                    targetTable = fkt;
-                    col.Meta.TryGetValue("foreign_key_column", out targetCol);
-                }
-                else if (col.ColumnName.EndsWith("_id", StringComparison.OrdinalIgnoreCase) && 
-                         !string.Equals(col.ColumnName, "id", StringComparison.OrdinalIgnoreCase) &&
-                         !string.Equals(col.ColumnName, "tenant_id", StringComparison.OrdinalIgnoreCase))
-                {
-                    var entityName = col.ColumnName[..^3];
-                    targetTable = entityName.EndsWith('s') ? entityName : entityName + "s";
-                    targetCol = col.ColumnName;
-                }
-
-                if (string.IsNullOrWhiteSpace(targetTable) || 
-                    string.Equals(targetTable, t.Identifier.TableName, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-                {
-                    var refTable = new TableIdentifier(t.Identifier.Domain, t.Identifier.Schema, targetTable);
-                    var rel = new TableRelationship(
-                        FromTable: t.Identifier,
-                        FromColumn: col.ColumnName,
-                        ToTable: refTable,
-                        ToColumn: targetCol ?? col.ColumnName,
-                        Type: TableRelationshipType.ForeignKey);
-
-                    if (!fkGraph.TryGetValue(t.Identifier, out var list))
-                    {
-                        list = [];
-                        fkGraph[t.Identifier] = list;
-                    }
-                    list.Add(rel);
-                }
-            }
+            var table = tables[i];
+            var (bm25Doc, text) = CatalogSearchDocumentBuilder.BuildDocuments(table);
+            var sha256 = CatalogSearchEmbeddingCache.ComputeContentSha256Hex(text);
+            docs[i] = new PreparedDocument(table, bm25Doc, text, sha256);
         }
+        return docs;
+    }
 
-        // 2. Vektorisierung aller Tabellendokumente (falls Honest Embedding Provider aktiv)
-        bool vectorAvailable = _embeddingGenerator is not ICatalogEmbeddingGenerator ceg || ceg.IsAvailable;
-        if (_options.Value.EmbeddingProvider == CatalogEmbeddingProvider.None)
+    private async Task<ReadOnlyMemory<float>[]> ResolveEmbeddingsWithCacheAsync(
+        IReadOnlyList<PreparedDocument> docs,
+        VectorSearchIndex? existingVectorIndex,
+        CancellationToken ct)
+    {
+        var results = new ReadOnlyMemory<float>[docs.Count];
+        if (docs.Count == 0 || !IsVectorSearchAvailable())
         {
-            vectorAvailable = false;
+            return results;
         }
 
-        var vectorDocs = new List<(TableIdentifier, ReadOnlyMemory<float>)>(tables.Count);
-        if (vectorAvailable)
+        var (providerName, modelId, dimension) = ResolveModelIdentity();
+        _documentEmbeddingCache.ClearIfModelChanged(providerName, modelId, dimension);
+
+        var missesByHash = new Dictionary<string, int>(StringComparer.Ordinal);
+        var missTexts = new List<string>();
+        var missHashes = new List<string>();
+        var docMissSlot = new int[docs.Count];
+        Array.Fill(docMissSlot, -1);
+
+        for (int i = 0; i < docs.Count; i++)
         {
-            var texts = vectorTexts;
-            var vectors = await _embeddingGenerator.GenerateNormalizedEmbeddingsAsync(texts, ct).ConfigureAwait(false);
-            for (int i = 0; i < bm25Docs.Count; i++)
+            var doc = docs[i];
+            if (_documentEmbeddingCache.TryGet(providerName, modelId, dimension, doc.ContentSha256Hex, out var cached) &&
+                (dimension <= 0 || cached.Length == dimension))
             {
-                vectorDocs.Add((bm25Docs[i].TableId, vectors[i]));
+                results[i] = cached;
+                continue;
+            }
+
+            if (existingVectorIndex != null &&
+                existingVectorIndex.TryGetVector(doc.Table.Identifier, out var snapshotVec) &&
+                !snapshotVec.IsEmpty &&
+                (dimension <= 0 || snapshotVec.Length == dimension))
+            {
+                results[i] = snapshotVec;
+                _documentEmbeddingCache.Set(providerName, modelId, dimension, doc.ContentSha256Hex, snapshotVec);
+                continue;
+            }
+
+            if (!missesByHash.TryGetValue(doc.ContentSha256Hex, out int slot))
+            {
+                slot = missTexts.Count;
+                missesByHash[doc.ContentSha256Hex] = slot;
+                missTexts.Add(doc.ScrubbedText);
+                missHashes.Add(doc.ContentSha256Hex);
+            }
+
+            docMissSlot[i] = slot;
+        }
+
+        if (missTexts.Count > 0)
+        {
+            IReadOnlyList<ReadOnlyMemory<float>> computed;
+            try
+            {
+                computed = await _embeddingGenerator.GenerateNormalizedEmbeddingsAsync(missTexts, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                ex.Data[CatalogSearchErrorCodes.ErrorCodeDataKey] = CatalogSearchErrorCodes.EmbeddingFailed;
+                ExceptionDispatchInfo.Capture(ex).Throw();
+                throw;
+            }
+
+            if (computed.Count != missTexts.Count)
+            {
+                var mismatch = new InvalidOperationException(
+                    $"Embedding generator returned {computed.Count} vectors for {missTexts.Count} documents.");
+                mismatch.Data[CatalogSearchErrorCodes.ErrorCodeDataKey] = CatalogSearchErrorCodes.EmbeddingFailed;
+                throw mismatch;
+            }
+
+            for (int slot = 0; slot < computed.Count; slot++)
+            {
+                if (!computed[slot].IsEmpty)
+                {
+                    _documentEmbeddingCache.Set(providerName, modelId, dimension, missHashes[slot], computed[slot]);
+                }
+            }
+
+            for (int i = 0; i < docs.Count; i++)
+            {
+                int slot = docMissSlot[i];
+                if (slot >= 0)
+                {
+                    results[i] = computed[slot];
+                }
             }
         }
 
-        // 3. Atomarer Snapshot-Austausch (Zero-Downtime)
-        var newSnapshot = new CatalogSearchSnapshot(
+        return results;
+    }
+
+    private (string ProviderName, string ModelId, int Dimension) ResolveModelIdentity()
+    {
+        var providerName = _options.Value.EmbeddingProvider.ToString();
+        var modelId = !string.IsNullOrWhiteSpace(_options.Value.ModelSha256)
+            ? $"{_embeddingGenerator.ModelIdentifier}#{_options.Value.ModelSha256}"
+            : _embeddingGenerator.ModelIdentifier;
+        var dimension = _embeddingGenerator.EmbeddingDimensions > 0
+            ? _embeddingGenerator.EmbeddingDimensions
+            : _options.Value.EmbeddingDimensions;
+        return (providerName, modelId ?? string.Empty, dimension);
+    }
+
+    private static CatalogSearchSnapshot BuildCleanSnapshot(
+        PreparedDocument[] prepared,
+        ReadOnlyMemory<float>[] vectors,
+        DateTimeOffset now)
+    {
+        var bm25Docs = new List<Bm25Document>(prepared.Length);
+        var vectorDocs = new List<(TableIdentifier, ReadOnlyMemory<float>)>(prepared.Length);
+        var metadataBuilder = ImmutableDictionary.CreateBuilder<TableIdentifier, TableMetadata>();
+        var fkBuilder = ImmutableDictionary.CreateBuilder<TableIdentifier, List<TableRelationship>>();
+
+        for (int i = 0; i < prepared.Length; i++)
+        {
+            var doc = prepared[i];
+            metadataBuilder[doc.Table.Identifier] = doc.Table;
+            bm25Docs.Add(doc.Bm25Doc);
+
+            if (!vectors[i].IsEmpty)
+            {
+                vectorDocs.Add((doc.Table.Identifier, vectors[i]));
+            }
+
+            var fks = CatalogSearchDocumentBuilder.BuildForeignKeys(doc.Table);
+            if (fks is { Count: > 0 })
+            {
+                fkBuilder[doc.Table.Identifier] = fks;
+            }
+        }
+
+        return new CatalogSearchSnapshot(
             Bm25Index: new Bm25SearchIndex(bm25Docs),
             VectorIndex: new VectorSearchIndex(vectorDocs),
-            MetadataMap: metadataMap,
-            ForeignKeysGraph: fkGraph,
-            CreatedAt: DateTimeOffset.UtcNow);
-
-        Interlocked.Exchange(ref _currentSnapshot, newSnapshot);
-        _logger.LogInformation("Katalog-Suchindex erfolgreich aktualisiert. {Count} Tabellen aktiv.", tables.Count);
+            MetadataMap: metadataBuilder.ToImmutable(),
+            ForeignKeysGraph: fkBuilder.ToImmutable(),
+            CreatedAt: now);
     }
+
+    private static PreparedDeltaBatch BuildEffectiveBatch(
+        CatalogSearchSnapshot? current,
+        PreparedDocument[] candidates,
+        ReadOnlyMemory<float>[] vectors,
+        HashSet<TableIdentifier> explicitRemovals)
+    {
+        var removals = new HashSet<TableIdentifier>(explicitRemovals);
+        var upserts = new List<PreparedUpsert>(candidates.Length);
+
+        for (int i = 0; i < candidates.Length; i++)
+        {
+            var doc = candidates[i];
+            // If an existing non-hidden table transitioned to Hidden, treat it as removed from searchable segments.
+            if (doc.Table.Table.DiscoveryHidden ||
+                (current != null &&
+                 current.MetadataMap.TryGetValue(doc.Table.Identifier, out var existing) &&
+                 existing.Table.Visibility != DatasetVisibility.Hidden &&
+                 doc.Table.Table.Visibility == DatasetVisibility.Hidden))
+            {
+                removals.Add(doc.Table.Identifier);
+                continue;
+            }
+
+            upserts.Add(new PreparedUpsert(doc, vectors[i]));
+        }
+
+        return new PreparedDeltaBatch(upserts, removals.ToArray());
+    }
+
+    private static CatalogSearchSnapshot ApplyBatchToEmptySnapshot(PreparedDeltaBatch batch, DateTimeOffset now)
+    {
+        var prepared = batch.Upserts.Select(static u => u.Doc).ToArray();
+        var vectors = batch.Upserts.Select(static u => u.Vector).ToArray();
+        return BuildCleanSnapshot(prepared, vectors, now);
+    }
+
+    private static CatalogSearchSnapshot ApplyBatchToSnapshot(
+        CatalogSearchSnapshot current,
+        PreparedDeltaBatch batch,
+        DateTimeOffset now)
+    {
+        var bm25Upserts = batch.Upserts.Select(static u => u.Doc.Bm25Doc);
+        var nextBm25 = current.Bm25Index.ApplyDelta(bm25Upserts, batch.Removals);
+
+        var vecUpserts = batch.Upserts
+            .Where(static u => !u.Vector.IsEmpty)
+            .Select(static u => (u.Doc.Table.Identifier, u.Vector));
+        var vecRemovals = batch.Removals.Concat(
+            batch.Upserts.Where(static u => u.Vector.IsEmpty).Select(static u => u.Doc.Table.Identifier));
+        var nextVector = current.VectorIndex.ApplyDelta(vecUpserts, vecRemovals);
+
+        var metadataBuilder = ToImmutableBuilder(current.MetadataMap);
+        var fkBuilder = ToImmutableBuilder(current.ForeignKeysGraph);
+
+        foreach (var id in batch.Removals)
+        {
+            metadataBuilder.Remove(id);
+            fkBuilder.Remove(id);
+        }
+
+        foreach (var upsert in batch.Upserts)
+        {
+            var id = upsert.Doc.Table.Identifier;
+            metadataBuilder[id] = upsert.Doc.Table;
+            var fks = CatalogSearchDocumentBuilder.BuildForeignKeys(upsert.Doc.Table);
+            if (fks is { Count: > 0 })
+            {
+                fkBuilder[id] = fks;
+            }
+            else
+            {
+                fkBuilder.Remove(id);
+            }
+        }
+
+        return new CatalogSearchSnapshot(
+            Bm25Index: nextBm25,
+            VectorIndex: nextVector,
+            MetadataMap: metadataBuilder.ToImmutable(),
+            ForeignKeysGraph: fkBuilder.ToImmutable(),
+            CreatedAt: now);
+    }
+
+    private static ImmutableDictionary<TableIdentifier, TValue>.Builder ToImmutableBuilder<TValue>(
+        IReadOnlyDictionary<TableIdentifier, TValue> dict) =>
+        dict is ImmutableDictionary<TableIdentifier, TValue> imm
+            ? imm.ToBuilder()
+            : dict.ToImmutableDictionary().ToBuilder();
+
+    private sealed record PreparedDocument(TableMetadata Table, Bm25Document Bm25Doc, string ScrubbedText, string ContentSha256Hex);
+    private sealed record PreparedUpsert(PreparedDocument Doc, ReadOnlyMemory<float> Vector);
+    private sealed record PreparedDeltaBatch(IReadOnlyList<PreparedUpsert> Upserts, IReadOnlyCollection<TableIdentifier> Removals);
 
     public IReadOnlyList<CatalogSearchHit> Search(
         CatalogSearchQuery query,
@@ -251,6 +652,16 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine
         _options.Value.EmbeddingProvider != CatalogEmbeddingProvider.None &&
         (_embeddingGenerator is not ICatalogEmbeddingGenerator ceg || ceg.IsAvailable);
 
+    public string ResolveEffectiveMode(CatalogSearchMode requestedMode) =>
+        (requestedMode, IsVectorSearchAvailable()) switch
+        {
+            (CatalogSearchMode.KeywordBm25, _) => "keyword",
+            (_, false) => "keyword",
+            (CatalogSearchMode.SemanticVector, true) => "semantic",
+            (CatalogSearchMode.Hybrid, true) => "hybrid",
+            _ => "keyword"
+        };
+
     private IReadOnlyList<CatalogSearchHit> SearchCore(
         CatalogSearchQuery query,
         Func<TableIdentifier, bool> isVisiblePredicate,
@@ -269,26 +680,13 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine
         }
 
         bool isDomainMatch(TableIdentifier id) =>
-            string.IsNullOrWhiteSpace(query.DomainFilter) || 
+            string.IsNullOrWhiteSpace(query.DomainFilter) ||
             string.Equals(id.Domain, query.DomainFilter.Trim(), StringComparison.OrdinalIgnoreCase);
 
         bool isAllowed(TableIdentifier id) =>
             isDomainMatch(id) && isVisiblePredicate(id);
 
-        bool vectorAvailable = _embeddingGenerator is not ICatalogEmbeddingGenerator ceg || ceg.IsAvailable;
-        if (_options.Value.EmbeddingProvider == CatalogEmbeddingProvider.None)
-        {
-            vectorAvailable = false;
-        }
-
-        string effectiveMode = (query.Mode, vectorAvailable) switch
-        {
-            (CatalogSearchMode.KeywordBm25, _) => "keyword",
-            (_, false) => "keyword",
-            (CatalogSearchMode.SemanticVector, true) => "semantic",
-            (CatalogSearchMode.Hybrid, true) => "hybrid",
-            _ => "keyword"
-        };
+        string effectiveMode = ResolveEffectiveMode(query.Mode);
 
         int rrfK = _options.Value.RrfConstantK;
         int topK = Math.Max(query.Limit * 3, 50);
@@ -356,7 +754,7 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine
                 }
 
                 var matchedCols = meta?.Columns
-                    .Where(c => kvp.Value.Terms.Any(term =>
+                    .Where(c => !c.DiscoveryHidden && kvp.Value.Terms.Any(term =>
                         c.ColumnName.Contains(term, StringComparison.OrdinalIgnoreCase) ||
                         (!string.IsNullOrEmpty(c.DisplayName) && c.DisplayName.Contains(term, StringComparison.OrdinalIgnoreCase)) ||
                         (!string.IsNullOrEmpty(c.Description) && c.Description.Contains(term, StringComparison.OrdinalIgnoreCase)) ||

@@ -57,7 +57,7 @@ public sealed class CallerAttributeSecurityTests : IDisposable
     private static TableMetadata Meta() => new()
     {
         Identifier = Orders,
-        Table = new Table { SourceName = "ds", SchemaName = "main", TableName = "orders", SourceType = "SQLite", DataSourceType = DataSourceType.Sql },
+        Table = new Table { SourceName = "ds", SchemaName = "main", TableName = "orders", SourceType = "PostgreSql", DataSourceType = DataSourceType.Sql },
         Columns = [new TableColumn { ColumnName = "cost_center", DataType = "TEXT" }, new TableColumn { ColumnName = "id", DataType = "INTEGER" }]
     };
 
@@ -136,19 +136,6 @@ public sealed class CallerAttributeSecurityTests : IDisposable
 
     // ---- ST-129-18 -----------------------------------------------------------------------------------------------------------------
 
-    [Theory]
-    [InlineData("region = {{caller.dept}}")]
-    [InlineData("region = '{{caller.dept}}'")]
-    [InlineData("region = '__autheris_caller__dept'")]
-    public void ST_129_18_ACasbinRule_WithAPlaceholder_IsRefused_OnEveryEntryPoint(string rlsFilter)
-    {
-        var service = new CasbinEnforcementService();
-        var tenant = new TenantId("tenant-corp");
-        Should.Throw<ArgumentException>(() => service.AddPolicy(tenant, "role:analyst", "sales.public.orders", "read", "true", "allow", rlsFilter));
-        Should.Throw<ArgumentException>(() => service.AddPolicy(tenant, "role:analyst", "sales.public.orders", "read", rlsFilter, "allow"));
-        Should.Throw<ArgumentException>(() => service.AddPolicies(tenant, [new CasbinRuleInput("role:analyst", "sales.public.orders", "read", "true", "allow", rlsFilter)]));
-    }
-
     [Fact]
     public void ST_129_18_ARuleThatMentionsAPlaceholder_IsNeverShareableBetweenUsers()
     {
@@ -162,7 +149,7 @@ public sealed class CallerAttributeSecurityTests : IDisposable
     public void ST_129_19_ACallerSlot_AndABoundAttribute_AreNeverRegisteredAsACorrelatedKeySetSite()
     {
         var filter = new VirtualFilter { TenantId = Tenant, Name = "f", Source = "lwetem_prod", Sql = "from conf.client client where target.client_id = client.client_id and client.dept = {{caller.dept}}" };
-        var typed = SqlFilterCompiler.CompileTyped(filter, DatabaseDialect.Sqlite, new FastSqlEngine());
+        var typed = SqlFilterCompiler.CompileTyped(filter, DatabaseDialect.PostgreSql, new FastSqlEngine());
         typed.Expression.ShouldBeOfType<ExistsExpression>();
         CorrelatedFilterSiteRegistry.TryGet((ExistsExpression)typed.Expression, out _).ShouldBeFalse();
 
@@ -222,7 +209,7 @@ public sealed class CallerAttributeSecurityTests : IDisposable
         var predicate = new TypedRowFilterBuilder().BuildCombined(
             [new Consent { TenantId = Autheris.Tests.Common.TestTenants.Default, Effect = ConsentEffect.Allow, RowFilters = [new ConsentRowFilter { ColumnName = "c", Operator = "IN", ValueSource = "USER_ATTRIBUTE", UserAttribute = "cost_center" }] }], [],
             new TableIdentity("main", "orders"), null, set)!;
-        var rendered = new PolicyPredicateRenderer().Render(predicate, TargetSqlDialect.Sqlite, RowFilterAliases.Target);
+        var rendered = new PolicyPredicateRenderer().Render(predicate, TargetSqlDialect.PostgreSql, RowFilterAliases.Target);
 
         foreach (var text in new[] { rendered.Sql, value.ToString()!, set.ToString(), predicate.Parameters.First().Value.ToString() })
         {

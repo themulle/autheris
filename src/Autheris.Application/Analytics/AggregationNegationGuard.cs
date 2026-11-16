@@ -80,6 +80,118 @@ internal static partial class AggregationNegationGuard
         }
     }
 
+    /// <summary>
+    /// Extracts a sorted list of <c>column:operator</c> pairs describing the filter structure without any literal values or parameters.
+    /// </summary>
+    public static string[] ExtractFilterShape(TableFilterClause? where, TableMetadata metadata)
+    {
+        if (where == null)
+        {
+            return [];
+        }
+
+        var pairs = new List<string>();
+        if (where.PushdownPredicates is { Count: > 0 })
+        {
+            foreach (var predicate in where.PushdownPredicates)
+            {
+                var column = metadata.GetColumn(predicate.Column)?.ColumnName ?? predicate.Column;
+                pairs.Add($"{column}:{NormalizePushdownOperator(predicate.Operator)}");
+            }
+
+            pairs.Sort(StringComparer.Ordinal);
+            return [.. pairs];
+        }
+
+        if (string.IsNullOrWhiteSpace(where.SqlPredicate))
+        {
+            return [];
+        }
+
+        var tokens = Tokenize(where.SqlPredicate);
+        if (tokens == null)
+        {
+            foreach (var col in where.ReferencedColumns)
+            {
+                pairs.Add($"{metadata.GetColumn(col)?.ColumnName ?? col}:unknown");
+            }
+
+            pairs.Sort(StringComparer.Ordinal);
+            return [.. pairs];
+        }
+
+        for (var i = 0; i < tokens.Count; i++)
+        {
+            string? op = tokens[i].Type switch
+            {
+                SqlBaseLexer.EQ => "eq",
+                SqlBaseLexer.NEQ => "neq",
+                SqlBaseLexer.LT => "lt",
+                SqlBaseLexer.LTE => "lte",
+                SqlBaseLexer.GT => "gt",
+                SqlBaseLexer.GTE => "gte",
+                SqlBaseLexer.BETWEEN => i > 0 && tokens[i - 1].Type == SqlBaseLexer.NOT ? "not_between" : "between",
+                SqlBaseLexer.IN => i > 0 && tokens[i - 1].Type == SqlBaseLexer.NOT ? "not_in" : "in",
+                SqlBaseLexer.LIKE => i > 0 && tokens[i - 1].Type == SqlBaseLexer.NOT ? "not_like" : "like",
+                SqlBaseLexer.IS => IsOperatorName(tokens, i),
+                _ => null
+            };
+            if (op == null)
+            {
+                continue;
+            }
+
+            var (start, end) = AtomScope(tokens, i);
+            if (start < 0)
+            {
+                continue;
+            }
+
+            foreach (var col in ColumnsIn(tokens, start, end, metadata))
+            {
+                pairs.Add($"{col}:{op}");
+            }
+        }
+
+        pairs.Sort(StringComparer.Ordinal);
+        return [.. pairs];
+    }
+
+    private static string IsOperatorName(List<IToken> tokens, int isIndex)
+    {
+        if (IsIsNotNull(tokens, isIndex + 1))
+        {
+            return "is_not_null";
+        }
+
+        if (isIndex + 1 < tokens.Count && tokens[isIndex + 1].Type == SqlBaseLexer.NULL)
+        {
+            return "is_null";
+        }
+
+        return isIndex + 1 < tokens.Count && tokens[isIndex + 1].Type == SqlBaseLexer.NOT ? "is_not" : "is";
+    }
+
+    private static string NormalizePushdownOperator(string op) =>
+        op switch
+        {
+            "Equal" or "Equals" or "=" => "eq",
+            "NotEqual" or "NotEquals" or "<>" or "!=" => "neq",
+            "GreaterThan" or ">" => "gt",
+            "GreaterThanOrEqual" or ">=" => "gte",
+            "LessThan" or "<" => "lt",
+            "LessThanOrEqual" or "<=" => "lte",
+            "In" => "in",
+            "NotIn" => "not_in",
+            "Between" => "between",
+            "NotBetween" => "not_between",
+            "Like" => "like",
+            "NotLike" => "not_like",
+            "IsNull" => "is_null",
+            "IsNotNull" => "is_not_null",
+            _ => op.ToLowerInvariant()
+        };
+
     /// <summary>Primary-key columns and single-column unique-index columns: an equality on them can isolate one row.</summary>
     private static HashSet<string> IsolatingColumns(TableMetadata metadata)
     {

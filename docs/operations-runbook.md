@@ -118,7 +118,7 @@ If the Redis cluster becomes unavailable:
 ### 3.1.1 Cluster State Contract (absent vs unavailable)
 The shared cluster state (`IDistributedClusterStateProvider`) distinguishes "key absent" from "store unavailable":
 - A read of a missing key returns no value. An infrastructure failure (connection loss, timeout, Redis error) throws `ClusterStateUnavailableException` for reads, writes, deletes, event publishing and lock acquisition. A `null` lock lease only ever means "lock busy". Counters return `null` and budgets return `StoreUnavailable` when the store cannot be reached.
-- Consumers decide explicitly: TOTP secret reads and TOTP replay consumption fail closed (a valid code is rejected while the store is down), MCP session reads and HitL ticket reads treat the remote entry as not found, HitL locks honour `HitLStepUp:FailClosedOnClusterPartition`, FinOps budget enforcement fails closed, federation nonce replay checks reject requests when the topology is cluster-wide. Background singletons (catalog sync, CDC, ITSM) skip the cycle.
+- Consumers decide explicitly: TOTP secret reads and TOTP replay consumption fail closed (a valid code is rejected while the store is down), MCP session reads and HitL ticket reads treat the remote entry as not found, HitL locks honour `HitLStepUp:FailClosedOnClusterPartition`, federation nonce replay checks reject requests when the topology is cluster-wide. Background singletons (catalog sync, CDC, ITSM) skip the cycle.
 - Every store failure increments `autheris_cluster_state_failure_total{operation}`; failed event handlers increment `autheris_cluster_state_handler_failure_total`. Alert on a sustained rate of the first.
 - Cluster singletons (catalog sync, OpenMetadata sync, MSSQL change tracking) run under renewed, fenced leases (`TryAcquireLeaseAsync`). A replica that cannot confirm its lease for two thirds of the TTL cancels its job. Watch `autheris_scheduled_job_last_success_timestamp_seconds{job}`, `autheris_scheduled_job_skipped_total{job,reason}` and `autheris_cluster_lease_lost_total{reason}` (see F-OPS-02).
 - Multi-replica deployments require an external Redis with AOF persistence; without it a store restart drops leases and fence counters.
@@ -209,10 +209,6 @@ FROM CONSENT_REQUESTS WHERE itsm_ticket_id IS NOT NULL
 GROUP BY 1, 2 HAVING COUNT(*) > 1;
 ```
 
-### 4.z FinOps budget in multi-replica deployments (review E-14)
-
-The monthly FinOps budget is enforced against a cluster-wide counter in the shared state store (Redis when `Caching.Redis.Enabled`, otherwise in-memory = per process). Run Redis in every multi-replica deployment; without it each replica enforces the budget on its own. `ResetSpendAsync` clears the shared counter for the current month. Redis outages degrade to local accounting and are logged as `shared FinOps counter unavailable`.
-
 ### 4.aa Health probe caching (review R3-4)
 
 `/health/ready` is anonymous and answered from a 5 second cache shared by all callers. A state change (e.g. DB outage) is therefore visible after at most 5 seconds; size Kubernetes probe periods accordingly.
@@ -277,27 +273,6 @@ Reference: F-DATA-07, section 6.
 - **Cluster state outage.** Submits, and status/result/cancel requests for jobs of other replicas, answer `503` (`Retry-After: 5`). Restore Redis/Garnet; no manual job cleanup is needed.
 - **Node loss and rolling restarts.** Jobs are not resumed. Queued jobs of a stopping pod end `Cancelled` (`autheris_asyncjobs_discarded`); jobs of a crashed pod are reported `Failed` with `job owner node lost` once `MaxTimeoutSeconds + 60 s` have passed since submission. Clients resubmit. Leftover result files are removed by the startup sweeper and the purge loop.
 - **Watch:** `autheris_asyncjobs_running`, `autheris_asyncjobs_pending` (sustained growth means too few slots), `autheris_asyncjobs_cluster_write_failures`, `autheris_asyncjobs_tombstone_check_failures` and `autheris_asyncjobs_subscribe_failures` (remote cancels then take effect only at the owner's next state change).
-
-### 4.ah Casbin policy file distribution and the policy epoch (WP-ARC-A-14)
-
-Reference: F-SEC-06.
-
-- **Every replica must load the same policy file.** Distribute `Gateway:Casbin:PolicyPath` (and tenant policy files) identically to all pods, for example as one ConfigMap or a shared read-only volume, and keep `WatchPolicyFile` enabled. After a change on any node, every replica re-reads its *own* file, so a replica with an outdated file keeps enforcing the outdated policy.
-- **Do not rely on programmatic rule changes in multi-replica deployments.** Rules added at runtime through `AddPolicy` and related APIs exist only on the node that received them; the other replicas only discard their cached decisions. Persist rule changes in the policy file.
-- **Staleness.** After a change, other replicas stop serving cached decisions of the old policy within `min(TtlSeconds, EpochCheckSeconds + reload time)` (defaults 60 s and 5 s). Lower `Gateway:Casbin:DecisionCache:EpochCheckSeconds` for a tighter bound.
-- **Propagation failures.** `autheris_policy_epoch_propagation_failed_total` increasing: the changing node could not increment `policy:epoch:{tenant}` or `policy:epoch:*`; other replicas converge only after `TtlSeconds`. Check the cluster state store (`autheris_cluster_state_failure_total{operation="increment"}`).
-- **Cluster state outage.** The decision cache is bypassed on affected tenants (warning `Casbin policy epoch could not be read; decision cache bypassed.`). Decisions stay correct; expect higher policy evaluation latency until the store is back.
-- **Reload failures.** A missing or invalid policy file during a cluster-triggered reload keeps the last-known-good policy set and is retried at the next epoch check; check the gateway log for `Casbin policy reload after a cluster epoch change failed` or `policy file ... is missing`.
-
-### 4.ai Decision cache kill switch (shape-shared decisions)
-
-By default, users that match exactly the same Casbin rules share one cached decision when no candidate rule reads a user-specific input (decision cache shape sharing). If a shared decision is suspected to be wrong for a user (for example after adding a rule whose `sub_rule` uses an unusual construct):
-
-1. Set `Gateway:Casbin:DecisionCache:ShareAcrossUsers=false` (environment variable `Gateway__Casbin__DecisionCache__ShareAcrossUsers=false`) and roll the replicas. Every decision is keyed by user again; nothing else changes.
-2. Expect a lower hit ratio and more `sub_rule` evaluations per request until the cache warms up per user. Keep `Capacity` at the default `100000` or raise it.
-3. Re-enable sharing after the rule set was corrected. Decisions for delegated sources are never shared, regardless of the switch.
-
-A full decision cache flush is a policy publish or a restart; there is no flush endpoint.
 
 ### 4.aj Audit group commit
 
@@ -494,13 +469,12 @@ For high-throughput environments, configure ASP.NET Core Kestrel limits in `apps
 
 ### 9.4 Sizing for 5,000 Named Users
 
-Reference workload: 5,000 named users (plus about 50 service principals), 10% concurrently active, 1 request per 10 seconds per active user (about 50 rps steady), a peak factor of 10 plus about 100 rps of agents, ETL and MCP, giving a **design peak of about 600 rps cluster-wide** with about 2.5 tables per request; 20 to 50 group SIDs per token; 2,000 to 10,000 governed tables; 500 to 5,000 Casbin lines.
+Reference workload: 5,000 named users (plus about 50 service principals), 10% concurrently active, 1 request per 10 seconds per active user (about 50 rps steady), a peak factor of 10 plus about 100 rps of agents, ETL and MCP, giving a **design peak of about 600 rps cluster-wide** with about 2.5 tables per request; 20 to 50 group SIDs per token; 2,000 to 10,000 governed tables.
 
 | Resource | Recommendation |
 | :--- | :--- |
 | Gateway replicas | **3 × 4 vCPU / 8 GB** (2 would carry the load; 3 for HA). Expected hot-path CPU about 1.5 to 3 cores cluster-wide. |
 | Gateway memory | About 1.5 to 2.5 GB steady per replica with the bounded caches. Keep `Caching:L1MemoryCache:SizeLimitMb` at 512; leave headroom for buffered exports. |
-| Casbin decision cache | `Capacity` 100,000 (default) and `ShareAcrossUsers=true`. With mostly group-based rules the working set is per rule shape, not per user. |
 | Governance database | PostgreSQL (or SQL Server) with the consent indexes of the baseline ([F-GOV-12](features/f-gov-12-multi-engine-governance-storage.md)). Default pool of 100 connections per replica; verify `replicas × pool ≤ max_connections − headroom`. Audit load is about 5 to 10 batch commits per second at peak instead of one round trip per row. |
 | Redis | Standalone or Redis Cluster (epoch reads are single-key and Cluster-safe). About 2,000 ops/s at peak; the 150 ms staleness budget saves one round trip per request for non-sensitive tables. Enable AOF persistence (F-OPS-02). |
 | Basic-auth clients | Set `Authentication:BasicAuth:MarkerKeyRef` so BI tools pay the password hash once per cluster, not once per replica. |
@@ -513,7 +487,6 @@ Bounded in-process caches (BitFaster `ConcurrentLru`, eviction only produces a r
 | :--- | :--- |
 | Mandatory row filter memo (virtual filters) | 50,000 entries; object patterns 10,000 |
 | Repository table metadata (all engines) | 20,000 tables |
-| Casbin candidate rules per (tenant, table, action) | 20,000 |
 | Policy shape analysis | 20,000 rules |
 | Compiled `sub_rule` delegates | 20,000 expressions |
 | Governed SQL stage-1 analyses | 4,096 statements |
@@ -528,3 +501,10 @@ CDC webhook delivery is enabled by default (`Gateway:CdcWebhooks:Enabled`; chang
 * **Provisioning:** provide the secret `cdc-webhook-kek` of at least 32 bytes through the configured secret provider (environment variable `CDC_WEBHOOK_KEK`, a mounted `file:` secret or the vault). Without it, outside Development, `POST /api/v1/cdc/subscriptions` answers `503 CDC_SECRET_STORE_UNAVAILABLE` and the gateway logs a startup warning. Subscriptions are also rejected with `400 CDC_SECRET_REQUIRED` unless they carry a signing secret of 32 to 512 characters.
 * **Rotation:** v1 ciphertexts carry no key id. Provision the new KEK, restart the gateway, then delete and re-create every subscription (existing ones can no longer be decrypted and their deliveries are dead-lettered). All replicas must use the same KEK.
 * **Creator snapshot:** a subscription delivers events as the principal that created it (roles and groups are frozen at creation, `Gateway:CdcWebhooks:CreatorSnapshotMaxAgeDays`, default 90, then delivery stops). Delete and re-create it after the creator's group membership changes.
+
+## 11. Usage Accounting Retention, Purge & Erasure
+
+Usage accounting is configured under `Gateway:UsageAccounting` (`Enabled`, `FlushIntervalSeconds`, `MaxBuckets`, `IncludeGroupPrefixes`, `BillingGroups`, `GroupDisplayNames`, `RetentionDays`, `PurgeBatchSize`, `DefaultPageSize`, `MaxReportRangeDays`, `FailOpenOnStoreFailure`).
+
+* **Retention & automated purge:** daily aggregated rows older than `Gateway:UsageAccounting:RetentionDays` are purged in bounded batches (`Gateway:UsageAccounting:PurgeBatchSize`) by the background usage flush worker without holding long table locks.
+* **User erasure (GDPR Art. 17):** `TenantAdmin` and `ClusterAdmin` callers can erase a user's stored usage attribution records via `DELETE /api/v1/usage/users/{userSid}?tenant=<tenantId>` (cross-tenant requires canonical `ClusterAdmin`). Every erasure and every administrative report read is fail-closed audited (`USAGE_DATA_ERASED` / `USAGE_REPORT_READ`) before returning `204`/`200` (`503 USAGE_AUDIT_UNAVAILABLE` if the audit sink fails).

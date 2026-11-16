@@ -108,7 +108,23 @@ public sealed class UsageRequestScope : IDisposable
         }
     }
 
-    public void Complete(long durationMs, long bytes, int statusCode)
+    public void ApplyAnalysisCost(long analysisCost)
+    {
+        if (analysisCost <= 0)
+        {
+            return;
+        }
+
+        lock (_lock)
+        {
+            if (_factCount > 0 && _facts[0].AnalysisCost == 0)
+            {
+                _facts[0] = _facts[0] with { AnalysisCost = analysisCost };
+            }
+        }
+    }
+
+    public void Complete(long durationMs, long bytes, int statusCode, string? problemCode = null)
     {
         if (Interlocked.Exchange(ref _completed, 1) != 0)
         {
@@ -121,7 +137,7 @@ public sealed class UsageRequestScope : IDisposable
             factsSnapshot = _facts.Take(_factCount).ToArray();
         }
 
-        _aggregator?.Record(Identity, Transport, Caller, durationMs, bytes, statusCode, factsSnapshot);
+        _aggregator?.Record(Identity, Transport, Caller, durationMs, bytes, statusCode, factsSnapshot, problemCode);
     }
 
     public void Dispose()

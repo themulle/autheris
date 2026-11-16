@@ -23,7 +23,6 @@ using Xunit;
 /// </summary>
 [Trait("Category", "Security")]
 [Trait("Category", "Metamorphic")]
-[Trait("Category", "FinOps")]
 public sealed class GraphQlCostMetamorphicTests
 {
     #region Schema Definition for GraphQL Testing

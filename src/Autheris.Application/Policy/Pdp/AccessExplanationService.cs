@@ -141,7 +141,7 @@ public sealed class AccessExplanationService(
             return (ExplainOutcome.BadRequest, null, string.IsNullOrEmpty(sidText) || sidText.Length > MaxSubjectLength ? null : sidText);
         }
 
-        var (lookup, metadata) = await FindObjectAsync(caller, request.ObjectName, ct).ConfigureAwait(false);
+        var (lookup, visibleMetadata, rawMetadata) = await FindObjectAsync(caller, request.ObjectName, ct).ConfigureAwait(false);
         if (lookup != ExplainOutcome.Ok)
         {
             return (lookup, null, sidText);
@@ -151,11 +151,12 @@ public sealed class AccessExplanationService(
         {
             var tenant = caller.TenantId;
             var isSelf = IsSelf(caller, sidText, upnText);
-            if (!isSelf && !await IsPrivilegedAsync(caller, metadata!.Identifier, ct).ConfigureAwait(false))
+            if (!isSelf && !await IsPrivilegedAsync(caller, rawMetadata!.Identifier, ct).ConfigureAwait(false))
             {
                 return (ExplainOutcome.Forbidden, null, sidText);
             }
 
+            var targetMetadata = isSelf ? visibleMetadata! : rawMetadata!;
             var subject = isSelf ? caller : await subjectResolver.ResolveAsync(sidText, upnText, tenant, ct).ConfigureAwait(false);
             if (subject is null)
             {
@@ -163,10 +164,28 @@ public sealed class AccessExplanationService(
             }
 
             var explanation = await decisionPoint.ExplainAsync(
-                new AccessRequest(subject, metadata!, operation, request.Transport ?? AccessTransport.Rest, request.Columns, Trace: true),
+                new AccessRequest(subject, targetMetadata, operation, request.Transport ?? AccessTransport.Rest, request.Columns, Trace: true),
                 ct).ConfigureAwait(false);
-            var resolved = isSelf || subject.GroupResolutionStatus == Autheris.Domain.Identity.GroupResolutionStatus.Complete;
-            return (ExplainOutcome.Ok, explanation with { SubjectResolved = resolved }, subject.UserSid.Value);
+            var resolved = subject.GroupResolutionStatus == Autheris.Domain.Identity.GroupResolutionStatus.Complete;
+            var isNonPrivilegedSelf = isSelf
+                && !caller.HasRole(GatewayRole.GovernanceAdmin)
+                && !caller.HasRole(GatewayRole.SecurityAuditor);
+
+            if (isNonPrivilegedSelf)
+            {
+                explanation = explanation with
+                {
+                    Trace = explanation.Trace.Select(r => r with { SourceId = null }).ToList(),
+                    Grants = [],
+                    SubjectResolved = resolved
+                };
+            }
+            else
+            {
+                explanation = explanation with { SubjectResolved = resolved };
+            }
+
+            return (ExplainOutcome.Ok, explanation, subject.UserSid.Value);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -177,7 +196,7 @@ public sealed class AccessExplanationService(
 
     private async Task<(ExplainOutcome, IReadOnlyList<GrantRecordView>?, bool)> ListGrantsCoreAsync(SecurityPrincipalContext caller, string? objectName, CancellationToken ct)
     {
-        var (lookup, metadata) = await FindObjectAsync(caller, objectName, ct).ConfigureAwait(false);
+        var (lookup, _, metadata) = await FindObjectAsync(caller, objectName, ct).ConfigureAwait(false);
         if (lookup != ExplainOutcome.Ok)
         {
             return (lookup, null, false);
@@ -216,33 +235,35 @@ public sealed class AccessExplanationService(
     }
 
     /// <summary>Uniform NotFound for unknown, foreign-tenant, hidden or unresolvable objects (no existence oracle).</summary>
-    private async Task<(ExplainOutcome, TableMetadata?)> FindObjectAsync(SecurityPrincipalContext caller, string? objectName, CancellationToken ct)
+    private async Task<(ExplainOutcome Outcome, TableMetadata? VisibleMetadata, TableMetadata? RawMetadata)> FindObjectAsync(SecurityPrincipalContext caller, string? objectName, CancellationToken ct)
     {
         if (!TableIdentifier.TryParse(objectName, out var id))
         {
-            return (ExplainOutcome.BadRequest, null);
+            return (ExplainOutcome.BadRequest, null, null);
         }
 
         try
         {
             if (caller.ResolvedTenant is not { Value: not null } tenant)
             {
-                return (ExplainOutcome.NotFound, null);
+                return (ExplainOutcome.NotFound, null, null);
             }
 
             var metadata = await tables.GetTableMetadataAsync(id, ct).ConfigureAwait(false);
             if (metadata is null
                 || (metadata.OwnerTenantId is { } ownerTenant && !string.Equals(ownerTenant, tenant.Value, StringComparison.Ordinal)))
             {
-                return (ExplainOutcome.NotFound, null);
+                return (ExplainOutcome.NotFound, null, null);
             }
 
             var visible = await visibility.FindVisibleAsync(new CatalogCaller(caller.Principal, tenant, CatalogChannel.Rest), id, ct).ConfigureAwait(false);
-            return visible is null ? (ExplainOutcome.NotFound, null) : (ExplainOutcome.Ok, metadata);
+            return visible is { Table: { } visibleTable }
+                ? (ExplainOutcome.Ok, visibleTable, metadata)
+                : (ExplainOutcome.NotFound, null, null);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return (ExplainOutcome.NotFound, null);
+            return (ExplainOutcome.NotFound, null, null);
         }
     }
 

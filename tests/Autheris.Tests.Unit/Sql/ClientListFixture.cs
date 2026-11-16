@@ -16,7 +16,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
-using Microsoft.Data.Sqlite;
+using Autheris.Tests.Common.Fakes;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -45,12 +45,9 @@ internal sealed class ClientListFixture : IAsyncDisposable
     public const string TenantB = "tenant_b";
     public const string WriterRole = "WebSqlWriter";
 
-    private readonly SqliteConnection? _keepAlive;
-
-    private ClientListFixture(SqliteConnection? keepAlive, string connectionString, GovernedSqlExecutionService service, List<AuditLogEntry> entries)
+    private ClientListFixture(string connectionString, GovernedSqlExecutionService service, List<AuditLogEntry> entries)
     {
         _entries = entries;
-        _keepAlive = keepAlive;
         ConnectionString = connectionString;
         Service = service;
     }
@@ -59,27 +56,17 @@ internal sealed class ClientListFixture : IAsyncDisposable
 
     public GovernedSqlExecutionService Service { get; }
 
-    public static async Task<ClientListFixture> CreateAsync(
+    public static Task<ClientListFixture> CreateAsync(
         int? maxListValues = null,
         int? maxLists = null,
         ListCapturingLogger<GovernedSqlExecutionService>? logger = null,
         Func<DbConnection>? openConnection = null,
         IFederatedQueryExecutionService? federated = null,
         bool crossSourceCatalog = false,
-        string provider = "Sqlite",
+        string provider = "PostgreSql",
         Autheris.Application.Sql.TimeZones.ITimeZoneConversionState? timeZoneState = null)
     {
-        string connectionString = $"Data Source=list_{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
-        var keepAlive = new SqliteConnection(connectionString);
-        await keepAlive.OpenAsync();
-        await using (var setup = keepAlive.CreateCommand())
-        {
-            setup.CommandText =
-                "CREATE TABLE orders (id INTEGER, status TEXT, amount REAL, tenant_id TEXT);" +
-                "INSERT INTO orders VALUES (1, 'new', 10, 'tenant_a'), (2, 'new', 20, 'tenant_a'), (3, 'paid', 30, 'tenant_a'), (4, 'paid', 40, 'tenant_a'), (5, 'void', 50, 'tenant_a');" +
-                "INSERT INTO orders VALUES (6, 'new', 60, 'tenant_b'), (7, 'paid', 70, 'tenant_b');";
-            await setup.ExecuteNonQueryAsync();
-        }
+        const string connectionString = "Host=unused;Database=clientlist";
 
         var webSql = new WebSqlOptions
         {
@@ -88,7 +75,6 @@ internal sealed class ClientListFixture : IAsyncDisposable
             Enabled = true,
             AllowDml = true,
             CrossSource = new CrossSourceOptions { Enabled = crossSourceCatalog },
-            DmlWriterRoles = [WriterRole],
             DefaultMaxRows = 2000,
             MaxAllowedRows = 5000,
             MaxAffectedRows = 1000
@@ -100,7 +86,7 @@ internal sealed class ClientListFixture : IAsyncDisposable
             {
                 Connections = new Dictionary<string, DataSourceConnectionOptions>(StringComparer.OrdinalIgnoreCase)
                 {
-                    ["default"] = new DataSourceConnectionOptions { Provider = provider, ConnectionString = connectionString }
+                    ["default"] = new DataSourceConnectionOptions { Provider = provider, ConnectionString = connectionString, WriteConnectionString = connectionString, DefaultSchema = provider switch { "PostgreSql" => "public", "SqlServer" => "dbo", _ => "main" } }
                 }
             }
         };
@@ -123,9 +109,26 @@ internal sealed class ClientListFixture : IAsyncDisposable
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(ci => Task.FromResult<TableMetadata?>(ci.Arg<TableIdentifier>().Equals(orders.Identifier) ? orders : null));
 
+        var writeConsent = new Consent
+        {
+            TableIdentifier = orders.Identifier,
+            TenantId = new TenantId(TenantA),
+            GranteeType = GranteeType.User,
+            GranteeSid = new Sid("S-1-5-21-LIST-USER"),
+            Effect = ConsentEffect.Allow,
+            ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
+            ValidTo = DateTimeOffset.UtcNow.AddDays(1),
+            WriteRules =
+            [
+                new WriteRule(Guid.NewGuid(), WriteOperation.Insert, ["id", "status", "amount", "tenant_id"], WriteRowScope.AllRows),
+                new WriteRule(Guid.NewGuid(), WriteOperation.Update, ["id", "status", "amount", "tenant_id"], WriteRowScope.AllRows),
+                new WriteRule(Guid.NewGuid(), WriteOperation.Delete, [], WriteRowScope.AllRows)
+            ]
+        };
+
         var consentRepository = Substitute.For<IConsentRepository>();
         consentRepository.GetActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<Consent>>(Array.Empty<Consent>()));
+            .Returns(Task.FromResult<IReadOnlyList<Consent>>([writeConsent]));
 
         var consentResolution = Substitute.For<IConsentResolutionService>();
         consentResolution.ResolveAccess(Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>(), callerScopes: Arg.Any<IReadOnlySet<string>?>())
@@ -144,10 +147,18 @@ internal sealed class ClientListFixture : IAsyncDisposable
                     return openConnection();
                 }
 
-                var connection = new SqliteConnection(connectionString);
+                var connection = new CallbackDbConnection((_, _) => new StubDbDataReader([], []));
                 await connection.OpenAsync();
                 return (DbConnection)connection;
             });
+
+        var pdp = new Autheris.Application.Policy.Pdp.AccessDecisionPoint(
+            Options.Create(options),
+            consentResolution,
+            consentRepository,
+            Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
+            typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
+            writeGrantEvaluator: new Autheris.Application.Policy.WriteGrants.WriteGrantEvaluator(consentRepository, allowDeleteGrants: true));
 
         var service = global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             Options.Create(options), executionGuard: GovernedTestSupport.Guard,
@@ -162,8 +173,9 @@ internal sealed class ClientListFixture : IAsyncDisposable
             secretProvider: null,
             federatedExecutionService: federated,
             timeZoneState: timeZoneState,
-            sqlEngine: new global::Autheris.Tests.Unit.TestDoubles.TestWritePermitSqlEngine(new TrinoSqlEngine.FastSqlEngine()));
-        return new ClientListFixture(keepAlive, connectionString, service, fixtureEntries);
+            sqlEngine: new TrinoSqlEngine.FastSqlEngine(),
+            accessDecisionPoint: pdp);
+        return Task.FromResult(new ClientListFixture(connectionString, service, fixtureEntries));
     }
 
     private readonly List<AuditLogEntry> _entries;
@@ -172,16 +184,14 @@ internal sealed class ClientListFixture : IAsyncDisposable
 
     public static ClaimsPrincipal User(string tenant = TenantA, bool writer = true)
     {
-        // Test-only seam: the production write decision denies every DML target.
-        Autheris.Application.Policy.DmlWriteDecisionTestSeam.EnablePermissiveWrite();
-        return new(new ClaimsIdentity(
+        return Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(new ClaimsPrincipal(new ClaimsIdentity(
             [
                 new Claim(ClaimTypes.PrimarySid, "S-1-5-21-LIST-USER"),
                 new Claim("tenant_id", tenant),
                 new Claim(ClaimTypes.Role, writer ? WriterRole : "Reader"),
                 new Claim("scp", "Sql.Write")
             ],
-            "Test"));
+            "Test")));
     }
 
     public static JsonElement Json(string json) => JsonDocument.Parse(json).RootElement.Clone();
@@ -198,18 +208,5 @@ internal sealed class ClientListFixture : IAsyncDisposable
     public Task ExecuteAsync(string sql, IReadOnlyDictionary<string, object?>? parameters, string tenant = TenantA, string? transport = SqlTransports.WebSql) =>
         Service.ExecuteGovernedQueryAsync(Request(sql, parameters, transport), User(tenant), new TenantId(tenant), (_, _) => Task.CompletedTask);
 
-    public async Task<long> ScalarAsync(string sql)
-    {
-        await using var cmd = _keepAlive!.CreateCommand();
-        cmd.CommandText = sql;
-        return Convert.ToInt64(await cmd.ExecuteScalarAsync(), System.Globalization.CultureInfo.InvariantCulture);
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        if (_keepAlive is not null)
-        {
-            await _keepAlive.DisposeAsync();
-        }
-    }
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }

@@ -23,6 +23,7 @@ using Xunit;
 /// row filter / column masking are refused on the first step of a four-eyes request (they would be dropped and the second approver could
 /// approve unrestricted), and the atomic final approval carries the description.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class ApproveConsentRequestFourEyesMutationTests
 {
     private static readonly Sid Approver = new("S-1-5-21-APPROVER-1");
@@ -218,16 +219,16 @@ public sealed class ApproveConsentRequestFourEyesMutationTests
         var accessor = CreateAccessor(); // caller is tenant "default"
         var mutation = new Mutation();
 
-        // 1. Approve missing -> NOT_FOUND
+        // 1. Approve missing -> CONSENT_REQUEST_NOT_FOUND
         var missingEx = await Should.ThrowAsync<GraphQLException>(() =>
             mutation.ApproveConsentRequestAsync(missingRequestId, null, approval, ownership, consents, metadata, accessor, null!));
-        missingEx.Errors[0].Code.ShouldBe("NOT_FOUND");
+        missingEx.Errors[0].Code.ShouldBe("CONSENT_REQUEST_NOT_FOUND");
         missingEx.Errors[0].Message.ShouldBe($"Consent request '{missingRequestId}' was not found.");
 
-        // 2. Approve foreign tenant -> same NOT_FOUND error code and format as missing
+        // 2. Approve foreign tenant -> same CONSENT_REQUEST_NOT_FOUND error code and format as missing
         var foreignEx = await Should.ThrowAsync<GraphQLException>(() =>
             mutation.ApproveConsentRequestAsync(foreignRequestId, null, approval, ownership, consents, metadata, accessor, null!));
-        foreignEx.Errors[0].Code.ShouldBe("NOT_FOUND");
+        foreignEx.Errors[0].Code.ShouldBe("CONSENT_REQUEST_NOT_FOUND");
         foreignEx.Errors[0].Message.ShouldBe($"Consent request '{foreignRequestId}' was not found.");
 
         // 3. Revoke missing consent -> NOT_FOUND

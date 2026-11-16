@@ -27,13 +27,6 @@ public sealed class TimeZoneCallValidatorTests
         Assert.Equal(GovernedSqlErrorCodes.FunctionUnsupportedDialect, ex.Code);
     }
 
-    [Fact]
-    public void T8_Sqlite_IsAPolicyViolationBeforeAnyZoneCheck()
-    {
-        // GAP-019: convert_timezone is not on the SQLite allowlist, so the function policy answers first.
-        Assert.ThrowsAny<System.Security.SecurityException>(() => Compile(TargetSqlDialect.Sqlite, "SELECT convert_timezone('Mars/Base', 1) FROM dbo.Events", available: false));
-    }
-
     [Theory, MemberData(nameof(TimeZoneTestSupport.DialectData), MemberType = typeof(TimeZoneTestSupport))]
     public void T8_AvailabilityWinsOverShapeZoneAndTimestamp(TargetSqlDialect dialect) =>
         Assert.Equal(GovernedSqlErrorCodes.TimeZoneUnavailable, Rejected(dialect, "SELECT convert_timezone('Mars/Base', 1) FROM dbo.Events", available: false));

@@ -14,6 +14,7 @@ using Shouldly;
 using Xunit;
 
 /// <summary>SR-L-02 / G-4: host allow-list matcher, host filter middleware and the production startup requirement.</summary>
+[Trait("Category", "Security")]
 public sealed class HostFilteringTests
 {
     private static IHostEnvironment Env(string name)

@@ -16,6 +16,7 @@ using static Autheris.Tests.Unit.Configuration.StartupValidatorGoldenSupport;
 /// on the unchanged validator; a refactoring must never change them (ARCH-MNT-14-SC-01).
 /// </summary>
 [Collection(GoldenConsoleCollection.Name)]
+[Trait("Category", "Security")]
 public sealed class GatewayStartupValidatorGoldenTests : IDisposable
 {
     private readonly string _fixtureDir = CreateFixtureDirectory();
@@ -64,7 +65,7 @@ public sealed class GatewayStartupValidatorGoldenTests : IDisposable
             Prod("SqlServerWindowsAuth_InvalidConnectionString", ("DataSources:Connections:sql:Provider", "SqlServer"), ("DataSources:Connections:sql:ConnectionString", "this is not a connection string")),
             Prod("Databricks_MissingSection", ("DataSources:Connections:dbx:Provider", "Databricks")),
             Dev("ProcedureDialectAdmission_MissingConnection", ("SqlEndpoints:Procedures:Enabled", "true"), ("SqlEndpoints:Procedures:ConnectionName", "absent")),
-            Dev("DataSourceMappings_ChainedMapping", ("DataSources:Connections:a:Provider", "Sqlite"), ("DataSources:Connections:a:ConnectionString", "Data Source=a.db"), ("DataSources:Connections:b:Provider", "Sqlite"), ("DataSources:Connections:b:ConnectionString", "Data Source=b.db"), ("WebSql:DataSourceMappings:a", "b"), ("WebSql:DataSourceMappings:b", "a")),
+            Dev("DataSourceMappings_ChainedMapping", ("DataSources:Connections:a:Provider", "PostgreSql"), ("DataSources:Connections:a:ConnectionString", "Host=a;Database=a"), ("DataSources:Connections:b:Provider", "PostgreSql"), ("DataSources:Connections:b:ConnectionString", "Host=b;Database=b"), ("WebSql:DataSourceMappings:a", "b"), ("WebSql:DataSourceMappings:b", "a")),
             Prod("DefaultSchemas_InvalidSchema", ("DataSources:Connections:pg:Provider", "PostgreSql"), ("DataSources:Connections:pg:ConnectionString", "Host=h;Database=d"), ("DataSources:Connections:pg:DefaultSchema", "bad schema;")),
             Prod("TenantCollisions_StrictMode", ("TenantIsolation:StrictCollisionStartup", "true"), ("Authentication:ForwardAuth:AllowedTenantIds:0", "Acme"), ("Authentication:ForwardAuth:AllowedTenantIds:1", "ACME")),
             Prod("WebhookSubscriptions_MissingId", ("Webhooks:Subscriptions:0:Url", "https://example.org/hook")),
@@ -73,18 +74,6 @@ public sealed class GatewayStartupValidatorGoldenTests : IDisposable
 
             // 3 Egress
             Prod("Egress_TooBroadNetwork", ("Egress:TrustedInternalNetworks:0", "10.0.0.0/4")),
-
-            // 4 CasbinModel
-            Prod("CasbinModel_FileNotFound", ("Casbin:ModelPath", "{tmp}/missing.conf")),
-            Prod("CasbinModel_FileEmpty", ("Casbin:ModelPath", "{tmp}/model-empty.conf")),
-            Prod("CasbinModel_ContractViolation", ("Casbin:ModelPath", "{tmp}/model-invalid.conf")),
-
-            // 5 CasbinPolicy
-            Prod("CasbinPolicy_PathNotConfigured", ("Casbin:Enabled", "true"), ("Casbin:PolicyPath", "")),
-            Prod("CasbinPolicy_FileNotFound", ("Casbin:Enabled", "true"), ("Casbin:PolicyPath", "{tmp}/missing.csv")),
-            Prod("CasbinPolicy_FileEmpty", ("Casbin:Enabled", "true"), ("Casbin:PolicyPath", "{tmp}/policy-empty.csv")),
-            Prod("CasbinPolicy_NoRules", ("Casbin:Enabled", "true"), ("Casbin:PolicyPath", "{tmp}/policy-norules.csv")),
-            Prod("CasbinPolicy_InvalidFile", ("Casbin:Enabled", "true"), ("Casbin:PolicyPath", "{tmp}/policy-invalid.csv")),
 
             // 6 ReverseProxy
             Prod("ReverseProxy_InvalidNetwork", ("ReverseProxy:Enabled", "true"), ("ReverseProxy:KnownNetworks:0", "not-a-network")),
@@ -111,7 +100,6 @@ public sealed class GatewayStartupValidatorGoldenTests : IDisposable
             Prod("SecuritySwitchReport_WarnFlagsAndVirtualFilters", ("Insecure:warn_allow_all_cors_origins", "true"), ("AllowInsecureWarnFlagsInProduction", "true"), ("VirtualFilters:RequireApproval", "false")),
 
             // 11 OperationalInvariants
-            Prod("OperationalInvariants_DmlWithoutRoles", ("WebSql:AllowDml", "true")),
             Prod("OperationalInvariants_QuickstartInProduction", ("Dev:Preset", "Quickstart")),
             Prod("OperationalInvariants_ShutdownTimeout", ("HighAvailability:QueryTimeoutSeconds", "30"), ("HighAvailability:ShutdownTimeoutSeconds", "35")),
             Prod("OperationalInvariants_TerminationGrace", ("HighAvailability:TerminationGracePeriodSeconds", "20")),
@@ -186,7 +174,7 @@ public sealed class GatewayStartupValidatorGoldenTests : IDisposable
         Dev("Warnings_DevelopmentDangerBypassBanner", ("Insecure:danger_disable_column_masking", "true")),
         Dev("Warnings_DevelopmentDefaultTenantConfigured", ("Tenancy:DefaultTenantId", "default-tenant")),
         Dev("Warnings_DevelopmentCatalogDiscoveryDeprecated", ("Catalog:AllowAuthenticatedCatalogDiscovery", "true")),
-        Dev("Warnings_DevelopmentDbtMappedDatabaseWithoutWebSqlMapping", ("Dbt:DatabaseMappings:sales", "pgdata"), ("WebSql:AllowedDataSources:0", "sales"), ("DataSources:Connections:pgdata:Provider", "Sqlite"), ("DataSources:Connections:pgdata:ConnectionString", "Data Source=p.db")),
+        Dev("Warnings_DevelopmentDbtMappedDatabaseWithoutWebSqlMapping", ("Dbt:DatabaseMappings:sales", "pgdata"), ("WebSql:AllowedDataSources:0", "sales"), ("DataSources:Connections:pgdata:Provider", "PostgreSql"), ("DataSources:Connections:pgdata:ConnectionString", "Host=p;Database=p"), ("DataSources:Connections:pgdata:DefaultSchema", "public")),
         Prod("Warnings_ProductionDefault"),
         Prod("Warnings_ProductionWarnFlags", ("Insecure:warn_allow_all_cors_origins", "true"), ("AllowInsecureWarnFlagsInProduction", "true"), ("VirtualFilters:RequireApproval", "false")),
         Prod("Warnings_ProductionTenantCollisionLoggedCritical", ("Authentication:ForwardAuth:AllowedTenantIds:0", "Acme"), ("Authentication:ForwardAuth:AllowedTenantIds:1", "ACME")),

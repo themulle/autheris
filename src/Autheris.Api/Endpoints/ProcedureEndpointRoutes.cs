@@ -182,7 +182,7 @@ public static class ProcedureEndpointRoutes
     /// <summary>JSON schema fragment for a declared result column type (documentation only).</summary>
     private static Dictionary<string, object> SchemaForSqlType(string sqlType)
     {
-        string baseType = sqlType.Contains('(') ? sqlType[..sqlType.IndexOf('(')] : sqlType;
+        string baseType = sqlType.Contains('(', StringComparison.Ordinal) ? sqlType[..sqlType.IndexOf('(', StringComparison.Ordinal)] : sqlType;
         var schema = new Dictionary<string, object> { ["x-sql-type"] = sqlType };
         switch (baseType)
         {

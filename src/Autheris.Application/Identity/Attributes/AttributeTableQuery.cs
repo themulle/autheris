@@ -111,9 +111,9 @@ public static class AttributeTableQuery
         ArgumentException.ThrowIfNullOrEmpty(tenant);
         ArgumentException.ThrowIfNullOrEmpty(subjectKey);
         ArgumentOutOfRangeException.ThrowIfLessThan(maxValues, 1);
-        if (dialect is not (DatabaseDialect.SqlServer or DatabaseDialect.PostgreSql or DatabaseDialect.Sqlite))
+        if (dialect is not (DatabaseDialect.SqlServer or DatabaseDialect.PostgreSql))
         {
-            throw new NotSupportedException("Attribute tables support SQL Server, PostgreSQL and SQLite.");
+            throw new NotSupportedException("Attribute tables support SQL Server and PostgreSQL.");
         }
 
         string Q(string id) => dialect.QuoteIdentifier(id);
@@ -125,8 +125,12 @@ public static class AttributeTableQuery
         {
             DatabaseDialect.SqlServer => " COLLATE Latin1_General_100_BIN2",
             DatabaseDialect.PostgreSql => " COLLATE \"C\"",
-            _ => " COLLATE BINARY",
+            _ => throw new NotSupportedException($"Attribute tables do not support dialect '{dialect}'.")
         };
+
+        // PostgreSQL: tenant and issuer are compared and read as plain text, so a citext (or other extension type) column neither compares
+        // case-insensitively nor needs the type catalog of the connection to know the extension type.
+        string TextColumn(string id) => dialect == DatabaseDialect.PostgreSql ? $"CAST({Q(id)} AS text)" : Q(id);
 
         var select = new List<string> { Q(spec.ValueColumn) };
         int? tenantOrdinal = null;
@@ -136,8 +140,8 @@ public static class AttributeTableQuery
         if (spec.TenantColumn is not null)
         {
             tenantOrdinal = select.Count;
-            select.Add(Q(spec.TenantColumn));
-            where.Add($"{Q(spec.TenantColumn)}{Ordinal()} = {Marker(TenantParameter)}");
+            select.Add(TextColumn(spec.TenantColumn));
+            where.Add($"{TextColumn(spec.TenantColumn)}{Ordinal()} = {Marker(TenantParameter)}");
             parameters.Add(new(dialect.FormatParameterName(TenantParameter), tenant));
         }
 
@@ -149,8 +153,8 @@ public static class AttributeTableQuery
             }
 
             issuerOrdinal = select.Count;
-            select.Add(Q(spec.IssuerColumn));
-            where.Add($"{Q(spec.IssuerColumn)}{Ordinal()} = {Marker(IssuerParameter)}");
+            select.Add(TextColumn(spec.IssuerColumn));
+            where.Add($"{TextColumn(spec.IssuerColumn)}{Ordinal()} = {Marker(IssuerParameter)}");
             parameters.Add(new(dialect.FormatParameterName(IssuerParameter), issuer));
         }
 

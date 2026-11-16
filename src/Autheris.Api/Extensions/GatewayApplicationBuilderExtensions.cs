@@ -111,11 +111,12 @@ public static class GatewayApplicationBuilderExtensions
             return next(context);
         });
         app.UseAuthorization();
+        app.Use(Autheris.Api.Endpoints.ScimEndpointGuard.MiddlewareAsync);
         app.UseMiddleware<PostAuthSidRateLimitingMiddleware>();
         app.UseMiddleware<SecurityContextResolutionMiddleware>();
         app.UseMiddleware<SubjectLockoutMiddleware>();
         app.UseMiddleware<ResourceGroupMiddleware>();
-        app.UseMiddleware<FinOpsBudgetMiddleware>();
+        app.UseMiddleware<UsageMeteringMiddleware>();
         app.UseMiddleware<SchemaContractMiddleware>();
         app.UseMiddleware<IncrementalDeliveryMiddleware>();
         // F-DATA-01: Parquet output negotiation is the outermost output transformation around the governed JSON
@@ -230,10 +231,12 @@ public static class GatewayApplicationBuilderExtensions
         app.MapDbtEndpoints();
         app.MapGovernanceEndpoints();
         app.MapAuthorizationExplainEndpoints();
+        app.MapEffectiveAccessEndpoints();
         app.MapDataContractEndpoints();
         app.MapDocIngestionEndpoints();
         app.MapGovernanceClassificationEndpoints();
         app.MapCatalogEndpoints();
+        app.MapExternalCatalogApiEndpoints();
         app.MapSystemEndpoints();
         if (gatewayOptions.OData.Enabled)
         {
@@ -248,12 +251,15 @@ public static class GatewayApplicationBuilderExtensions
             mapQueryAnalysis: switches.QueryAnalysisEnabled);
         app.MapTokenRevocationEndpoints(); // SEC M-14 (GAP-B)
         app.MapAuthzMigrationReportEndpoints();
+        app.MapAdminWritePrivilegesEndpoints();
         app.MapTenantRegistryAdminEndpoints(); // M-A2: operator resolution of a tenant id collision
         app.MapTrustedDocumentAdminEndpointsWhenEnabled(gatewayOptions); // Issue #281
 
-        app.MapFinOpsEndpoints();
+        app.MapUsageEndpoints();
         app.MapVirtualFilterEndpoints();
         app.MapCallerAttributeAdminEndpoints();
+        app.MapConsentWorkflowAdminEndpoints();
+        app.MapConsentApiEndpoints();
         app.MapScimUsersEndpoints();
         app.MapScimGroupsEndpoints();
         app.MapScimDiscoveryEndpoints();
@@ -292,7 +298,10 @@ public static class GatewayApplicationBuilderExtensions
         {
             app.MapDevEndpoints(gatewayOptions); // F-AUTH-DX: Development only (no routes elsewhere)
         }
-        app.MapAsyncJobEndpoints();
+        if (switches.AsyncJobsEnabled)
+        {
+            app.MapAsyncJobEndpoints();
+        }
         app.Services.GetService<Autheris.Api.Hosting.ModuleLoadResult>()?.MapEndpoints(app);
 
         LoadSqlEndpoints(app.Services, gatewayOptions);

@@ -2,6 +2,7 @@
 
 namespace Autheris.Tests.Unit;
 
+using Autheris.Tests.Unit.Catalog;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -39,6 +40,7 @@ using Xunit;
 /// Regression tests for the WebSQL / SQL executor findings of the security review 2026-10-02
 /// (C-01, C-03, H-10, H-13, M-10, M-20).
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class WebSqlExecutorAndConnectorSecurityTests
 {
     private static Microsoft.Extensions.Hosting.IHostEnvironment CreateDevEnvironment()
@@ -69,7 +71,8 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
             claims.Add(new Claim(ClaimTypes.Role, role));
         }
 
-        return new ClaimsPrincipal(new ClaimsIdentity(claims, "Test"));
+        return Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(
+            new ClaimsPrincipal(new ClaimsIdentity(claims, "Test")));
     }
 
     private static TableMetadata CreateEmployeesMetadata(string? sourceName = null, string hmacRuleType = "REDACT")
@@ -117,6 +120,7 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
     private static ITableMetadataRepository CreateRepository(params TableMetadata[] tables)
     {
         var repo = Substitute.For<ITableMetadataRepository>();
+        repo.StubTables(tables);
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(ci =>
             {
@@ -173,7 +177,6 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
     private static GatewayOptions CreateOptions(
         bool enabled = true,
         bool allowDml = false,
-        List<string>? dmlWriterRoles = null,
         List<string>? allowedDataSources = null)
     {
         return new GatewayOptions
@@ -182,7 +185,6 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
             {
                 Enabled = enabled,
                 AllowDml = allowDml,
-                DmlWriterRoles = dmlWriterRoles ?? [],
                 AllowedDataSources = allowedDataSources ?? [],
                 DefaultMaxRows = 100,
                 MaxAllowedRows = 500
@@ -205,27 +207,57 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
         bool withConsentServices = true,
         bool permissiveWrite = true)
     {
-        if (permissiveWrite)
-        {
-            // Test-only seam: the production write decision denies every DML target.
-            Autheris.Application.Policy.DmlWriteDecisionTestSeam.EnablePermissiveWrite();
-        }
-
         var repo = repository ?? CreateRepository(CreateEmployeesMetadata(), CreateOrdersMetadata());
         var gatewayOptions = Options.Create(options ?? CreateOptions());
+        var effectiveConsentResolution = withConsentServices ? (consentResolution ?? CreateConsentResolution(t => UnconstrainedAllow(t))) : null;
+        var effectiveConsentRepo = withConsentServices ? (consentRepository ?? (permissiveWrite ? CreateWriteConsentRepository() : CreateConsentRepository())) : null;
+        var typedPolicies = global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(gatewayOptions, secretProvider);
+        var pdp = effectiveConsentRepo != null
+            ? new Autheris.Application.Policy.Pdp.AccessDecisionPoint(
+                gatewayOptions,
+                effectiveConsentResolution,
+                effectiveConsentRepo,
+                Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
+                typedPolicies: typedPolicies,
+                writeGrantEvaluator: new Autheris.Application.Policy.WriteGrants.WriteGrantEvaluator(effectiveConsentRepo, allowDeleteGrants: permissiveWrite))
+            : null;
+
         return global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             gatewayOptions, executionGuard: GovernedTestSupport.Guard,
-            consentResolution: withConsentServices ? (consentResolution ?? CreateConsentResolution(t => UnconstrainedAllow(t))) : null,
+            consentResolution: effectiveConsentResolution,
             tableRepository: repo,
-            policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(repo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(gatewayOptions, secretProvider),
+            policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(repo), typedPolicies: typedPolicies,
             auditLogRepository: auditLog ?? global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance,
             connectionFactory: null,
             clientIpResolver: null,
             environment: CreateDevEnvironment(),
             logger: NullLogger<GovernedSqlExecutionService>.Instance,
-            consentRepository: withConsentServices ? (consentRepository ?? CreateConsentRepository()) : null,
+            consentRepository: effectiveConsentRepo,
             secretProvider: secretProvider,
-            sqlEngine: new global::Autheris.Tests.Unit.TestDoubles.TestWritePermitSqlEngine(new TrinoSqlEngine.FastSqlEngine()));
+            sqlEngine: new TrinoSqlEngine.FastSqlEngine(),
+            accessDecisionPoint: pdp);
+    }
+
+    private static IConsentRepository CreateWriteConsentRepository()
+    {
+        var ordersMeta = CreateOrdersMetadata();
+        var consent = new Consent
+        {
+            TableIdentifier = ordersMeta.Identifier,
+            TenantId = new TenantId(Tenant),
+            GranteeType = GranteeType.User,
+            GranteeSid = new Sid("S-1-5-21-WEBSQL-USER"),
+            Effect = ConsentEffect.Allow,
+            ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
+            ValidTo = DateTimeOffset.UtcNow.AddDays(1),
+            WriteRules =
+            [
+                new WriteRule(Guid.NewGuid(), WriteOperation.Insert, ["id", "amount", "tenant_id"], WriteRowScope.AllRows),
+                new WriteRule(Guid.NewGuid(), WriteOperation.Update, ["id", "amount", "tenant_id"], WriteRowScope.AllRows),
+                new WriteRule(Guid.NewGuid(), WriteOperation.Delete, [], WriteRowScope.AllRows)
+            ]
+        };
+        return new SingleTableConsentRepository(ordersMeta.Identifier, consent);
     }
 
     // =========================================================================
@@ -610,25 +642,16 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
     [Fact]
     public async Task M20_Dml_WithoutWriteDecision_IsRejected_ForAnyRole()
     {
-        var service = CreateService(options: CreateOptions(allowDml: true, dmlWriterRoles: ["WebSqlWriter"]), permissiveWrite: false);
+        var service = CreateService(options: CreateOptions(allowDml: true), permissiveWrite: false);
 
         await Should.ThrowAsync<WebSqlTableDeniedException>(() =>
             service.RewriteSqlAsync("DELETE FROM orders WHERE id = 1", CreateUser("WebSqlWriter"), new TenantId(Tenant)));
     }
 
     [Fact]
-    public async Task M20_Dml_WithNoWriterRolesConfigured_IsRejected()
-    {
-        var service = CreateService(options: CreateOptions(allowDml: true), permissiveWrite: false);
-
-        await Should.ThrowAsync<WebSqlPolicyException>(() =>
-            service.RewriteSqlAsync("DELETE FROM orders WHERE id = 1", CreateUser("WebSqlWriter"), new TenantId(Tenant)));
-    }
-
-    [Fact]
     public async Task M20_Insert_IntoLibraryDefaultTenant42_IsRejected()
     {
-        var service = CreateService(options: CreateOptions(allowDml: true, dmlWriterRoles: ["WebSqlWriter"]));
+        var service = CreateService(options: CreateOptions(allowDml: true));
 
         // X1: a literal tenant value that is not the caller's is rejected by the compiler (typed SecurityException, SQL_POLICY_VIOLATION).
         var ex = await Should.ThrowAsync<System.Security.SecurityException>(() =>
@@ -640,7 +663,7 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
     [Fact]
     public async Task M20_Insert_WithoutTenantColumn_IsRejected()
     {
-        var service = CreateService(options: CreateOptions(allowDml: true, dmlWriterRoles: ["WebSqlWriter"]));
+        var service = CreateService(options: CreateOptions(allowDml: true));
 
         var ex = await Should.ThrowAsync<System.Security.SecurityException>(() =>
             service.RewriteSqlAsync("INSERT INTO orders (id, amount) VALUES (1, 10)", CreateUser("WebSqlWriter"), new TenantId(Tenant)));
@@ -651,7 +674,7 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
     [Fact]
     public async Task M20_Insert_IntoOwnTenant_WithWriterRole_IsAccepted()
     {
-        var service = CreateService(options: CreateOptions(allowDml: true, dmlWriterRoles: ["WebSqlWriter"]));
+        var service = CreateService(options: CreateOptions(allowDml: true));
 
         var compiled = await service.CompileAsync("INSERT INTO orders (id, amount, tenant_id) VALUES (1, 10, 'tenant_a')", CreateUser("WebSqlWriter"), new TenantId(Tenant));
 
@@ -777,6 +800,7 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
 
         var employeesMeta = CreateEmployeesMetadata("pg_ds");
         var tableRepo = Substitute.For<ITableMetadataRepository>();
+        tableRepo.StubTables([employeesMeta]);
         tableRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(ci => ci.Arg<TableIdentifier>().TableName == "employees" ? Task.FromResult<TableMetadata?>(employeesMeta) : Task.FromResult<TableMetadata?>(null));
 
@@ -805,10 +829,10 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
                 }
             });
 
-        // Assert
+        // Assert: user reads always roll back the read-only transaction after disposing the reader.
         rowsObserved.ShouldBeTrue();
         fakeConnection.CurrentTransaction.ShouldNotBeNull();
-        fakeConnection.CurrentTransaction.WasCommitted.ShouldBeTrue();
+        fakeConnection.CurrentTransaction.WasRolledBack.ShouldBeTrue();
         fakeConnection.CurrentTransaction.WasDisposed.ShouldBeTrue();
     }
 
@@ -897,11 +921,8 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
         public override string ServerVersion => "16.0";
         public override void Open() { }
 
-        protected override DbCommand CreateDbCommand()
-        {
-            using var sqliteCmd = new Microsoft.Data.Sqlite.SqliteCommand();
-            return new StrictDriverDbCommand(sqliteCmd, this);
-        }
+        protected override DbCommand CreateDbCommand() =>
+            new StrictDriverDbCommand(new Autheris.Tests.Unit.FakeDbCommand(), this);
     }
 
     private sealed class StrictDriverDbTransaction : DbTransaction
@@ -1209,5 +1230,31 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
     }
 
     #endregion
+
+    private sealed class SingleTableConsentRepository(TableIdentifier targetTable, Consent consent) : IConsentRepository
+    {
+        public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<Consent>>(targetTable.Equals(table) ? [consent] : []);
+
+        public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, TenantId? tenantId, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<Consent>>(targetTable.Equals(table) ? [consent] : []);
+
+        public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? roles = null, DateTimeOffset? atTime = null, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<Consent>>([consent]);
+
+        public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? roles, DateTimeOffset? atTime, TenantId? tenantId, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<Consent>>([consent]);
+
+        public Task<Consent> CreateConsentAsync(Consent newConsent, CancellationToken ct = default) => Task.FromResult(newConsent);
+        public Task<Consent?> GetConsentByIdAsync(Guid consentId, CancellationToken ct = default) => Task.FromResult<Consent?>(null);
+        public Task RevokeConsentAsync(Guid consentId, Sid revokedBySid, string reason, Autheris.Domain.Security.ConsentRevocationAuthority authority, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<IReadOnlyList<Consent>> GetExpiringConsentsAsync(DateTimeOffset threshold, int maxResults = 1000, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<Consent>>([]);
+        public Task<IReadOnlyList<Consent>> GetActiveConsentsByConsentRequestIdAsync(Guid consentRequestId, DateTimeOffset atTime, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<Consent>>([]);
+        public Task<bool> RevokeSystemConsentAsync(Guid consentId, Guid consentRequestId, Sid revokedBySid, string reason, CancellationToken ct = default) => Task.FromResult(false);
+        public Task<Autheris.Application.Governance.Paging.ConsentPage> GetConsentPageAsync(Autheris.Application.Governance.Paging.ConsentPageQuery query, CancellationToken ct = default) =>
+            Task.FromResult(new Autheris.Application.Governance.Paging.ConsentPage([], null));
+        public Task ReplaceConsentsAsync(IReadOnlyList<Guid> revokeConsentIds, IReadOnlyList<Consent> create, Sid actor, string reason, Autheris.Domain.Security.ConsentRevocationAuthority authority, IReadOnlyList<AuditLogEntry>? auditEntries = null, CancellationToken ct = default) =>
+            Task.CompletedTask;
+    }
 }
 

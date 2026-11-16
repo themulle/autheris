@@ -169,7 +169,8 @@ public sealed class TransportDiscoveryTests
 
     private static ODataHandler ODataHandlerFor(IDataSourceOptionsResolver resolver, DataSourceTransportFlags ingress, params TableMetadata[] tables)
     {
-        var repo = Substitute.For<ITableMetadataRepository>();
+        var repo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
+            Substitute.For<ITableMetadataRepository>());
         repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(tables));
         var exec = Substitute.For<IGatewayExecutionService>();
         exec.CheckTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableMetadata>(), false, Arg.Any<CancellationToken>())
@@ -210,7 +211,8 @@ public sealed class TransportDiscoveryTests
     public async Task Discovery_ODataOpenApiOmits()
     {
         using var resolver = NewResolver();
-        var repo = Substitute.For<ITableMetadataRepository>();
+        var repo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
+            Substitute.For<ITableMetadataRepository>());
         repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(
             [Row(SecretSource, "hidden_t"), Row(OpenSource, "visible_t")]));
         var generator = new DynamicOpenApiGenerator(repo, NullLogger<DynamicOpenApiGenerator>.Instance, transportResolver: resolver);

@@ -145,7 +145,7 @@ public sealed class GovernanceRepositoryConstructorArchitectureTests
     {
         public DirectOpenFixture()
         {
-            using var connection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:");
+            using var connection = new Npgsql.NpgsqlConnection("Host=localhost");
             connection.Open();
         }
     }

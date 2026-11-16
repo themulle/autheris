@@ -557,6 +557,10 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
             return MandatoryFilterOutcome.Deny(
                 $"{VirtualFilterErrorCodes.PatternEvaluationFailed}: the target pattern of the filter '{currentFilter}' could not be evaluated for '{table.ToString()}' ({ex.InnerException?.GetType().Name}).");
         }
+        catch (VirtualFilterBindingException ex)
+        {
+            return MandatoryFilterOutcome.Deny($"{ex.Code}: {ex.Message}");
+        }
         catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or NotSupportedException or RegexMatchTimeoutException)
         {
             return MandatoryFilterOutcome.Deny($"{VirtualFilterErrorCodes.BindingMisconfigured}: the filter '{currentFilter}' could not be evaluated for '{table.ToString()}' ({ex.Message}).");
@@ -580,6 +584,17 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
         bool isCrossSource = !string.Equals(table.Domain, filter.Source, StringComparison.OrdinalIgnoreCase);
         if (isCrossSource)
         {
+            if (filter.EvaluationMode == RowPolicyEvaluationMode.Live &&
+                query.Metadata.Table?.DataSourceType != DataSourceType.HttpDeclarative &&
+                binding.TargetPattern is { } explicitPattern &&
+                !TargetPatternMatcher.IsRegex(explicitPattern) &&
+                !explicitPattern.Contains('*', StringComparison.Ordinal) &&
+                !explicitPattern.Contains('?', StringComparison.Ordinal) &&
+                MatchesTarget(binding, table))
+            {
+                RowPolicyParameterBinder.EnsureCrossSourceAllowed(filter, table.Domain);
+            }
+
             if (query.Metadata.Table?.DataSourceType != DataSourceType.HttpDeclarative ||
                 binding.TargetPattern == null ||
                 !MatchesTarget(binding, table))

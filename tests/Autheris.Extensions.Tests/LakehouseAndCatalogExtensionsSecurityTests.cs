@@ -39,6 +39,7 @@ using Xunit;
 /// <summary>
 /// Regression tests for the extension findings of security review 2026-10-02 (H-18 .. H-20, M-32 .. M-35, low findings).
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class LakehouseAndCatalogExtensionsSecurityTests
 {
     private static readonly string AzureKey = Convert.ToBase64String(Encoding.UTF8.GetBytes("12345678901234567890123456789012"));
@@ -598,7 +599,7 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
         // SEC E-05: sync consents are revoked through the marker-bound system revocation.
         await consentRepo.Received(1).RevokeSystemConsentAsync(Arg.Is(staleSyncConsent.Id), Arg.Is(OpenMetadataSyncService.OpenMetadataSyncConsentMarker), Arg.Any<Sid>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
         await consentRepo.DidNotReceive().RevokeSystemConsentAsync(Arg.Is(manualConsent.Id), Arg.Any<Guid>(), Arg.Any<Sid>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
-        await consentRepo.DidNotReceive().RevokeConsentAsync(manualConsent.Id, Arg.Any<Sid>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await consentRepo.DidNotReceive().RevokeConsentAsync(manualConsent.Id, Arg.Any<Sid>(), Arg.Any<string>(), Arg.Any<Autheris.Domain.Security.ConsentRevocationAuthority>(), Arg.Any<CancellationToken>());
     }
 
     // ------------------------------------------------------------------ M-32
@@ -671,7 +672,7 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
             repo,
             Substitute.For<IEpochValidationService>(),
             Options.Create(new GatewayOptions { Catalog = new DataCatalogOptions { Provider = DataCatalogProviderType.OpenMetadata } }),
-            Substitute.For<IPhysicalKeyCatalog>(), Substitute.For<IAuditWriter>(), NullLogger<DataCatalogSyncService>.Instance);
+            Substitute.For<IAuditWriter>(), NullLogger<DataCatalogSyncService>.Instance);
 
         var result = await sut.SyncCatalogAsync();
 

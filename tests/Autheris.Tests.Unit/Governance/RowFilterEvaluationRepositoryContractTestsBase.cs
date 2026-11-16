@@ -53,27 +53,22 @@ public abstract class RowFilterEvaluationRepositoryContractTestsBase : IAsyncLif
         return (await Repo.GetTableMetadataAsync(id))!;
     }
 
-    private static ConsentRowFilter CorrelatedFilter(Guid columnId, RowFilterEvaluationSettings? settings = null) => new()
+    private static ConsentRowFilter SimpleFilter(Guid columnId) => new()
     {
         FilterGroup = 0,
         TableColumnId = columnId,
         ColumnName = "customer_id",
-        FilterType = RowFilterType.SubqueryCorrelated,
-        DependentTable = new TableIdentifier("Crm", "Dbo", "customers"),
-        ForeignKeyColumn = "customer_id",
-        PrimaryKeyColumn = "id",
-        SubqueryFilterPredicateJson = "[]",
-        KeySetStrategy = settings?.Strategy,
-        KeySetDurationSeconds = settings?.DurationSeconds,
-        KeySetMaxKeys = settings?.MaxKeys
+        FilterType = RowFilterType.SimpleColumnPredicate,
+        Operator = "EQ",
+        ValueJson = "1"
     };
 
     private async Task<(TableIdentifier Table, Consent Consent)> SeedConsentAsync(
-        TenantId tenant, ConsentEffect effect = ConsentEffect.Allow, RowFilterEvaluationSettings? settings = null, Func<ConsentRowFilter, ConsentRowFilter>? shape = null)
+        TenantId tenant, ConsentEffect effect = ConsentEffect.Allow, Func<ConsentRowFilter, ConsentRowFilter>? shape = null)
     {
         var id = NewTable("orders");
         var meta = await UpsertTableAsync(id);
-        var filter = CorrelatedFilter(meta.Columns[0].Id, settings);
+        var filter = SimpleFilter(meta.Columns[0].Id);
         var consent = await Repo.CreateConsentAsync(new Consent
         {
             TableId = meta.Table.Id, TableIdentifier = id, TenantId = tenant, GranteeType = GranteeType.User,
@@ -192,32 +187,6 @@ public abstract class RowFilterEvaluationRepositoryContractTestsBase : IAsyncLif
     // ---------------- rule level ----------------
 
     [Fact]
-    public async Task Rule_CreateConsent_RoundTripsTheThreeColumns()
-    {
-        if (!Available) return;
-        var (table, consent) = await SeedConsentAsync(TenantA, settings: new RowFilterEvaluationSettings(RowFilterEvaluationStrategy.KeySetCache, 90, 400));
-
-        var filter = await StoredFilterAsync(table, consent.Id);
-
-        filter.KeySetStrategy.ShouldBe(RowFilterEvaluationStrategy.KeySetCache);
-        filter.KeySetDurationSeconds.ShouldBe(90);
-        filter.KeySetMaxKeys.ShouldBe(400);
-    }
-
-    [Fact]
-    public async Task Rule_WithoutSettings_ReadsNulls()
-    {
-        if (!Available) return;
-        var (table, consent) = await SeedConsentAsync(TenantA);
-
-        var filter = await StoredFilterAsync(table, consent.Id);
-
-        filter.KeySetStrategy.ShouldBeNull();
-        filter.KeySetDurationSeconds.ShouldBeNull();
-        filter.KeySetMaxKeys.ShouldBeNull();
-    }
-
-    [Fact]
     public async Task Rule_Id_IsStableAcrossReads()
     {
         // The admin endpoint addresses a rule by id; a fresh id per read would make it unreachable.
@@ -235,7 +204,7 @@ public abstract class RowFilterEvaluationRepositoryContractTestsBase : IAsyncLif
     public async Task Rule_Get_ReturnsFilterEffectTenantAndTable()
     {
         if (!Available) return;
-        var (table, consent) = await SeedConsentAsync(TenantA, ConsentEffect.Deny, new RowFilterEvaluationSettings(null, 30, null));
+        var (table, consent) = await SeedConsentAsync(TenantA, ConsentEffect.Deny);
         var filter = await StoredFilterAsync(table, consent.Id);
 
         var found = await Repo.GetRowFilterAsync(filter.Id);
@@ -244,8 +213,7 @@ public abstract class RowFilterEvaluationRepositoryContractTestsBase : IAsyncLif
         found.Value.Effect.ShouldBe(ConsentEffect.Deny);
         found.Value.Tenant.ShouldBe(TenantA);
         found.Value.Table.ShouldBe(table);
-        found.Value.Filter.FilterType.ShouldBe(RowFilterType.SubqueryCorrelated);
-        found.Value.Filter.KeySetDurationSeconds.ShouldBe(30);
+        found.Value.Filter.FilterType.ShouldBe(RowFilterType.SimpleColumnPredicate);
     }
 
     [Fact]
@@ -260,8 +228,10 @@ public abstract class RowFilterEvaluationRepositoryContractTestsBase : IAsyncLif
     public async Task Rule_Update_PersistsAndReportsBeforeAfter_AndBumpsTheTargetEpoch()
     {
         if (!Available) return;
-        var (table, consent) = await SeedConsentAsync(TenantA, settings: new RowFilterEvaluationSettings(RowFilterEvaluationStrategy.Exists, 10, 10));
+        var (table, consent) = await SeedConsentAsync(TenantA);
         var filter = await StoredFilterAsync(table, consent.Id);
+        var initial = new RowFilterEvaluationSettings(RowFilterEvaluationStrategy.Exists, 10, 10);
+        await Repo.UpdateRowFilterEvaluationAsync(filter.Id, TenantA, initial);
         var epoch = await Repo.GetTableEpochAsync(table);
         var after = new RowFilterEvaluationSettings(RowFilterEvaluationStrategy.KeySetCache, 300, 800);
 
@@ -271,29 +241,26 @@ public abstract class RowFilterEvaluationRepositoryContractTestsBase : IAsyncLif
         change.TargetTable.ShouldBe(table);
         change.Tenant.ShouldBe(TenantA);
         change.RowFilterId.ShouldBe(filter.Id);
-        change.Before.ShouldBe(new RowFilterEvaluationSettings(RowFilterEvaluationStrategy.Exists, 10, 10));
+        change.Before.ShouldBe(initial);
         change.After.ShouldBe(after);
         change.NewEpoch.ShouldBeGreaterThan(epoch);
         (await Repo.GetTableEpochAsync(table)).ShouldBe(change.NewEpoch);
-        var stored = await StoredFilterAsync(table, consent.Id);
-        stored.KeySetStrategy.ShouldBe(RowFilterEvaluationStrategy.KeySetCache);
-        stored.KeySetDurationSeconds.ShouldBe(300);
-        stored.KeySetMaxKeys.ShouldBe(800);
     }
 
     [Fact]
     public async Task Rule_Update_WithInherit_ClearsAllThree()
     {
         if (!Available) return;
-        var (table, consent) = await SeedConsentAsync(TenantA, settings: new RowFilterEvaluationSettings(RowFilterEvaluationStrategy.KeySetCache, 10, 10));
+        var (table, consent) = await SeedConsentAsync(TenantA);
         var filter = await StoredFilterAsync(table, consent.Id);
+        var seed = new RowFilterEvaluationSettings(RowFilterEvaluationStrategy.KeySetCache, 10, 10);
+        await Repo.UpdateRowFilterEvaluationAsync(filter.Id, TenantA, seed);
 
-        await Repo.UpdateRowFilterEvaluationAsync(filter.Id, TenantA, RowFilterEvaluationSettings.Inherit);
+        var change = await Repo.UpdateRowFilterEvaluationAsync(filter.Id, TenantA, RowFilterEvaluationSettings.Inherit);
 
-        var stored = await StoredFilterAsync(table, consent.Id);
-        stored.KeySetStrategy.ShouldBeNull();
-        stored.KeySetDurationSeconds.ShouldBeNull();
-        stored.KeySetMaxKeys.ShouldBeNull();
+        change.ShouldNotBeNull();
+        change.Before.ShouldBe(seed);
+        change.After.ShouldBe(RowFilterEvaluationSettings.Inherit);
     }
 
     [Trait("Category", "Security")]
@@ -301,17 +268,18 @@ public abstract class RowFilterEvaluationRepositoryContractTestsBase : IAsyncLif
     public async Task Rule_Update_OtherTenant_ReturnsNull_AndChangesNothing_SEC_RF107_14a()
     {
         if (!Available) return;
-        var (table, consent) = await SeedConsentAsync(TenantA, settings: new RowFilterEvaluationSettings(RowFilterEvaluationStrategy.Exists, 10, 10));
+        var (table, consent) = await SeedConsentAsync(TenantA);
         var filter = await StoredFilterAsync(table, consent.Id);
+        var seed = new RowFilterEvaluationSettings(RowFilterEvaluationStrategy.Exists, 10, 10);
+        await Repo.UpdateRowFilterEvaluationAsync(filter.Id, TenantA, seed);
         var epoch = await Repo.GetTableEpochAsync(table);
 
         var change = await Repo.UpdateRowFilterEvaluationAsync(filter.Id, TenantB, new RowFilterEvaluationSettings(RowFilterEvaluationStrategy.KeySetCache, 99, 99));
 
         change.ShouldBeNull();
         (await Repo.GetTableEpochAsync(table)).ShouldBe(epoch);
-        var stored = await StoredFilterAsync(table, consent.Id);
-        stored.KeySetStrategy.ShouldBe(RowFilterEvaluationStrategy.Exists);
-        stored.KeySetDurationSeconds.ShouldBe(10);
+        var verify = await Repo.UpdateRowFilterEvaluationAsync(filter.Id, TenantA, seed);
+        verify!.Before.ShouldBe(seed);
     }
 
     [Fact]

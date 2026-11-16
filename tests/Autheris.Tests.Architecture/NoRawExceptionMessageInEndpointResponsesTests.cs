@@ -33,7 +33,7 @@ public sealed partial class NoRawExceptionMessageInEndpointResponsesTests
         scannedFiles.ShouldContain("GovernancePlanEndpoints.cs");
         scannedFiles.ShouldContain("VirtualFilterEndpoints.cs");
         scannedFiles.ShouldContain("IcebergRestCatalogEndpoints.cs");
-        scannedFiles.ShouldContain("McpStdioRunner.cs");
+        scannedFiles.ShouldContain("GatewayMcpServer.cs");
         scannedFiles.Count.ShouldBeGreaterThan(30);
 
         found.ShouldBeEmpty(

@@ -233,20 +233,61 @@ public sealed class OracleDialectGenerator : SqlDialectGeneratorBase
 
 
     /// <summary>
-    /// Virtual filters (phase 7b): <c>ADD_MONTHS</c> for month and year (calendar months), otherwise
+    /// Calendar-month addition with Trino semantics. <c>ADD_MONTHS</c> keeps an end-of-month source at the end of the target month
+    /// (<c>2026-02-28 + 1 month = 2026-03-31</c>), Trino keeps the day (<c>2026-03-28</c>). A simple operand is re-emitted to correct the
+    /// day; a compound operand is emitted once (plain <c>ADD_MONTHS</c>) so nested calls never multiply the operand text.
+    /// </summary>
+    private void AppendAddMonths(ref ValueStringBuilder builder, Expression source, long months, SqlEmitterContext context)
+    {
+        string Months() => context.IsBound ? BindInteger(months, context) : months.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+        void Added(ref ValueStringBuilder b)
+        {
+            b.Append("ADD_MONTHS(");
+            GenerateExpression(source, ref b, context);
+            b.Append(", ");
+            b.Append(Months());
+            b.Append(')');
+        }
+
+        if (!IsSimpleDateOperand(source))
+        {
+            Added(ref builder);
+            return;
+        }
+
+        // (r - (EXTRACT(DAY FROM r) - LEAST(EXTRACT(DAY FROM x), EXTRACT(DAY FROM LAST_DAY(r))))) with r = ADD_MONTHS(x, n)
+        builder.Append('(');
+        Added(ref builder);
+        builder.Append(" - (EXTRACT(DAY FROM ");
+        Added(ref builder);
+        builder.Append(") - LEAST(EXTRACT(DAY FROM ");
+        GenerateExpression(source, ref builder, context);
+        builder.Append("), EXTRACT(DAY FROM LAST_DAY(");
+        Added(ref builder);
+        builder.Append(")))))");
+    }
+
+    private static bool IsSimpleDateOperand(Expression source) => source switch
+    {
+        ColumnReference or LiteralExpression or ParameterReference or TypedLiteralExpression => true,
+        CastExpression cast => IsSimpleDateOperand(cast.Operand),
+        _ => false
+    };
+
+    /// <summary>
+    /// Virtual filters (phase 7b): <c>ADD_MONTHS</c> for month, quarter and year (calendar months), otherwise
     /// <c>(x + NUMTODSINTERVAL(n, 'UNIT'))</c>; a week is seven days.
     /// </summary>
     protected override void FormatDateAdd(ref ValueStringBuilder builder, DateUnit unit, long amount, Expression source, SqlEmitterContext context)
     {
         string Amount(long n) => context.IsBound ? BindInteger(n, context) : n.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
-        if (unit is DateUnit.Month or DateUnit.Year)
+        if (unit is DateUnit.Month or DateUnit.Quarter or DateUnit.Year)
         {
-            builder.Append("ADD_MONTHS(");
-            GenerateExpression(source, ref builder, context);
-            builder.Append(", ");
-            builder.Append(Amount(unit == DateUnit.Year ? amount * 12 : amount));
-            builder.Append(')');
+            // The amount is bounded by the AST builder, so the month count cannot overflow.
+            long months = unit == DateUnit.Year ? checked(amount * 12) : unit == DateUnit.Quarter ? checked(amount * 3) : amount;
+            AppendAddMonths(ref builder, source, months, context);
             return;
         }
 
@@ -421,8 +462,78 @@ public sealed class OracleDialectGenerator : SqlDialectGeneratorBase
                 break;
             }
 
+            case Governance.MaskKind.TruncateDate:
+            {
+                string fmt = (args.TruncateUnit ?? throw MissingArgument(mask, "TruncateUnit")) switch
+                {
+                    Governance.MaskDateTruncateUnit.Year => "'YYYY'",
+                    Governance.MaskDateTruncateUnit.Month => "'MM'",
+                    Governance.MaskDateTruncateUnit.Day => "'DD'",
+                    _ => throw UnsupportedConstruct($"column mask {mask.Kind}", TargetDialect)
+                };
+                builder.Append("CAST(TRUNC(");
+                builder.Append(column);
+                builder.Append(", ");
+                AppendConstantFragment(ref builder, context, fmt);
+                AppendStructural(ref builder, context, ") AS " + type + ")");
+                break;
+            }
+
+            case Governance.MaskKind.BucketNumber:
+            {
+                string width = context.BindPolicy(args.BucketWidth ?? throw MissingArgument(mask, "BucketWidth"));
+                string calc = type.StartsWith("BINARY_", StringComparison.Ordinal) || type.StartsWith("FLOAT", StringComparison.Ordinal)
+                    ? "BINARY_DOUBLE"
+                    : "NUMBER";
+                Put(ref builder, context, "CAST(FLOOR(CAST(", column, " AS ", calc, ") / CAST(", width, " AS ", calc, ")) * CAST(", width, " AS ", calc, ") AS ", type, ")");
+                break;
+            }
+
+            case Governance.MaskKind.RoundNumber:
+            {
+                string digits = context.BindPolicy(args.RoundDigits ?? throw MissingArgument(mask, "RoundDigits"));
+                builder.Append("CAST(ROUND(");
+                builder.Append(column);
+                builder.Append(", CAST(");
+                builder.Append(digits);
+                AppendStructural(ref builder, context, " AS NUMBER(10))) AS " + type + ")");
+                break;
+            }
+
+            case Governance.MaskKind.EmailDomain:
+            {
+                builder.Append("CASE WHEN ");
+                builder.Append(column);
+                builder.Append(" IS NULL THEN NULL WHEN INSTR(");
+                builder.Append(column);
+                builder.Append(", ");
+                AppendConstantFragment(ref builder, context, "'@'");
+                builder.Append(") > ");
+                AppendInlineInteger(ref builder, 1, context);
+                builder.Append(" AND INSTR(");
+                builder.Append(column);
+                builder.Append(", ");
+                AppendConstantFragment(ref builder, context, "'@'");
+                builder.Append(") < LENGTH(");
+                builder.Append(column);
+                builder.Append(") THEN ");
+                AppendConstantFragment(ref builder, context, "'***@'");
+                builder.Append(" || SUBSTR(");
+                builder.Append(column);
+                builder.Append(", INSTR(");
+                builder.Append(column);
+                builder.Append(", ");
+                AppendConstantFragment(ref builder, context, "'@'");
+                builder.Append(") + ");
+                AppendInlineInteger(ref builder, 1, context);
+                builder.Append(") ELSE ");
+                AppendConstantFragment(ref builder, context, "'***@***'");
+                builder.Append(" END");
+                break;
+            }
+
             default:
-                // HMAC needs DBMS_CRYPTO (InDbHmac = false by default): the compiler degrades HMAC to Redact before emission.
+                // HMAC and Tokenize need DBMS_CRYPTO (InDbHmac = false by default): the compiler degrades them to Redact before emission.
                 throw UnsupportedConstruct($"column mask {mask.Kind}", TargetDialect);
         }
     }
@@ -485,6 +596,32 @@ public sealed class OracleDialectGenerator : SqlDialectGeneratorBase
         }
 
         base.GenerateExpression(expression, ref builder, context);
+    }
+
+    protected override bool RequiresCustomBinaryFormat(BinaryExpression b) =>
+        b.Operator == BinaryOperator.Modulo || (b.Operator == BinaryOperator.Divide && b.IsIntegralDivision);
+
+    protected override void FormatBinaryExpression(ref ValueStringBuilder builder, BinaryExpression b, SqlEmitterContext context)
+    {
+        if (b.Operator == BinaryOperator.Modulo)
+        {
+            builder.Append("MOD(");
+            GenerateExpression(b.Left, ref builder, context);
+            builder.Append(", ");
+            GenerateExpression(b.Right, ref builder, context);
+            builder.Append(')');
+            return;
+        }
+
+        if (b.Operator == BinaryOperator.Divide && b.IsIntegralDivision)
+        {
+            builder.Append("TRUNC(");
+            FormatStandardBinary(ref builder, b, context);
+            builder.Append(')');
+            return;
+        }
+
+        base.FormatBinaryExpression(ref builder, b, context);
     }
 
     private static bool IsPredicateExpression(Expression expr) => expr switch

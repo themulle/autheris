@@ -43,7 +43,7 @@ public sealed class RowFilterEvaluationAdminService : IRowFilterEvaluationAdminS
             return null;
         }
 
-        var stored = StoredOf(row.Value.Filter);
+        var stored = RowFilterEvaluationSettings.Inherit;
         var meta = await _tables.GetTableMetadataAsync(row.Value.Table, ct).ConfigureAwait(false);
         return new RowFilterEvaluationView(stored, RowFilterEvaluationResolver.Resolve(stored, meta?.RowFilterEvaluation, Caps));
     }
@@ -58,8 +58,16 @@ public sealed class RowFilterEvaluationAdminService : IRowFilterEvaluationAdminS
             return null;
         }
 
-        ThrowIfInvalid(RowFilterEvaluationResolver.Validate(settings, Caps, row.Value.Filter, row.Value.Effect));
-        return new RowFilterEvaluationPreview(row.Value.Table, StoredOf(row.Value.Filter));
+        ThrowIfInvalid(RowFilterEvaluationResolver.Validate(settings, Caps));
+        if (settings.Strategy == RowFilterEvaluationStrategy.KeySetCache ||
+            settings.DurationSeconds.HasValue ||
+            settings.MaxKeys.HasValue)
+        {
+            throw new RowFilterEvaluationValidationException(
+                "Consent-level key-set cache settings are not supported; configure evaluation mode on a row policy.");
+        }
+
+        return new RowFilterEvaluationPreview(row.Value.Table, RowFilterEvaluationSettings.Inherit);
     }
 
     public async Task<RowFilterEvaluationChange?> SetRuleAsync(
@@ -96,7 +104,7 @@ public sealed class RowFilterEvaluationAdminService : IRowFilterEvaluationAdminS
     {
         if (settings is not null)
         {
-            ThrowIfInvalid(RowFilterEvaluationResolver.Validate(settings, Caps, null, null));
+            ThrowIfInvalid(RowFilterEvaluationResolver.Validate(settings, Caps));
         }
 
         var meta = await _tables.GetTableMetadataAsync(table, ct).ConfigureAwait(false);
@@ -108,7 +116,7 @@ public sealed class RowFilterEvaluationAdminService : IRowFilterEvaluationAdminS
     {
         if (settings is not null)
         {
-            ThrowIfInvalid(RowFilterEvaluationResolver.Validate(settings, Caps, null, null));
+            ThrowIfInvalid(RowFilterEvaluationResolver.Validate(settings, Caps));
         }
 
         var change = await _tables.SetRowFilterEvaluationAsync(table, settings, actor, ct).ConfigureAwait(false);
@@ -128,9 +136,6 @@ public sealed class RowFilterEvaluationAdminService : IRowFilterEvaluationAdminS
         var row = await _consents.GetRowFilterAsync(rowFilterId, ct).ConfigureAwait(false);
         return row is { } found && string.Equals(found.Tenant.Value, tenant.Value, StringComparison.Ordinal) ? found : null;
     }
-
-    private static RowFilterEvaluationSettings StoredOf(ConsentRowFilter filter)
-        => new(filter.KeySetStrategy, filter.KeySetDurationSeconds, filter.KeySetMaxKeys);
 
     private static void ThrowIfInvalid(string? reason)
     {

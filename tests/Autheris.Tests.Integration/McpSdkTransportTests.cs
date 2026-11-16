@@ -65,7 +65,7 @@ public sealed class McpSdkTransportTests : IClassFixture<McpSdkTransportTests.Fi
         {
             Factory.Dispose();
             _root.Dispose();
-            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            Npgsql.NpgsqlConnection.ClearAllPools();
         }
     }
 
@@ -217,6 +217,7 @@ public sealed class McpSdkTransportTests : IClassFixture<McpSdkTransportTests.Fi
                 b.UseSetting("Gateway:GovernanceDb:AuditHmacKeyVaultRef", "audit-hmac-key");
                 b.UseSetting("Gateway:GovernanceDb:AuditHmacKey", "0123456789012345678901234567890123456789");
                 b.UseSetting("Gateway:RestApi:BulkStream:SigningKey", "0123456789012345678901234567890123456789");
+                b.UseSetting("Gateway:Governance:GrantRecords:SigningKey", GovernanceStoreFactory.GrantSigningKeyPem);
                 b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "false");
                 // MISC-05: Production fails closed without a container memory limit or an explicit OLAP budget (CI runners have no cgroup limit).
                 b.UseSetting("Gateway:DuckDbOlap:MemoryBudgetBytes", "2147483648");

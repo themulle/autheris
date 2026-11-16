@@ -26,10 +26,10 @@ public sealed class BulkStreamOptions
     public bool? Enabled { get; init; }
 
     /// <summary>
-    /// HMAC key of the keyset cursors issued by the bulk stream endpoints (the same value must be configured on every node).
-    /// Outside Development it is required (at least 32 bytes) while the endpoints are enabled, otherwise the start fails
-    /// (<c>BulkStreamSigningKeyOptionsValidator</c>). In Development an unset key falls back to a random per-process key,
-    /// so cursors are only valid on this instance until restart.
+    /// HMAC key of the keyset cursors shared by the bulk stream endpoints and GraphQL connections (the same value must be configured on every node).
+    /// Outside Development a non-placeholder key of at least 32 UTF-8 bytes after trim is always required, otherwise startup fails
+    /// (<c>BulkStreamSigningKeyOptionsValidator</c>). In Development an unset key logs a warning and uses a per-instance ephemeral key,
+    /// so cursors are only valid on that instance until restart.
     /// </summary>
     public string? SigningKey { get; init; }
 }
@@ -89,16 +89,25 @@ public sealed class WebSqlOptions
     public Dictionary<string, List<string>> TenantDataSourceAllowlist { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// SEC M-20: Roles that are authorized to execute DML via WebSQL (in addition to AllowDml).
-    /// Consent and Casbin only evaluate read access, so DML is rejected unless the caller holds one of these roles.
-    /// </summary>
-    public List<string> DmlWriterRoles { get; init; } = [];
-
-    /// <summary>
     /// DML guardrail: maximum number of rows a single WebSQL DML statement may affect. The statement runs in a
     /// transaction; if more rows are affected it is rolled back and rejected. 0 = unlimited.
     /// </summary>
     public long MaxAffectedRows { get; init; } = 1000;
+
+    /// <summary>
+    /// Maximum number of DML write statements per minute allowed for a single tenant and caller identity when DML is enabled.
+    /// </summary>
+    public int WriteStatementsPerMinute { get; init; } = 60;
+
+    /// <summary>
+    /// Maximum cumulative number of rows affected per hour across DML write statements for a single tenant and caller identity when DML is enabled.
+    /// </summary>
+    public long WriteRowsPerHour { get; init; } = 10_000;
+
+    /// <summary>
+    /// Retention window in seconds for DML idempotency replay and conflict records.
+    /// </summary>
+    public int WriteIdempotencyTtlSeconds { get; init; } = 86_400;
 
     /// <summary>
     /// SQ-06 / SEC P-02: Additional SQL function names (unqualified, case-insensitive) permitted in WebSQL on top of the
@@ -300,15 +309,7 @@ public sealed class ProcedureEndpointsOptions
     [Range(1, 300)] public int MaxTimeoutSeconds { get; init; } = 60;
 
     /// <summary>
-    /// Review P-1: Declarations with <c>validation: declared</c> skip the catalog validation (no check of SECURITY POLICY,
-    /// permissions, dynamic SQL or write access). They are accepted outside the Development environment only when this
-    /// switch is set explicitly. Even then they need <c>result_table</c> and non-empty <c>outputs</c>, and the declared
-    /// outputs are governed with the consent column rules of the result table.
-    /// </summary>
-    public bool AllowDeclaredValidation { get; init; } = false;
-
-    /// <summary>
-    /// INC-2 D-8 / whether<c>validation: declared</c> declarations must carry <c>integrity.ddl_hash</c>.
+    /// Controls whether declared procedure contracts must carry <c>integrity.ddl_hash</c>.
     /// Null resolves to required in every environment except exactly <c>Development</c> (Staging, Production, unknown and
     /// missing environment names: required). A missing hash is then rejected; otherwise it only logs a warning on every (re)load.
     /// </summary>

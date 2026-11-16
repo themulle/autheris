@@ -56,13 +56,21 @@ public sealed class FootprintBudgetTests
         File.Exists(workflowPath).ShouldBeTrue(".github/workflows/footprint-budget.yml must exist.");
         var workflowText = File.ReadAllText(workflowPath);
 
-        workflowText.ShouldContain("schedule:");
-        workflowText.ShouldContain("cron:");
+        workflowText.ShouldNotContain("schedule:");
         workflowText.ShouldContain("workflow_dispatch:");
         workflowText.ShouldContain("workflow_call:");
         workflowText.ShouldContain("benchmarks/scripts/footprint.sh");
         workflowText.ShouldContain("benchmarks/scripts/ci-duration.sh");
         workflowText.ShouldContain("benchmarks/scripts/check-budgets.sh");
+
+        var nightlyPath = Path.Combine(RepositoryScan.RepoRoot, ".github", "workflows", "footprint-budget-nightly.yml");
+        File.Exists(nightlyPath).ShouldBeTrue(".github/workflows/footprint-budget-nightly.yml must exist.");
+        var nightlyText = File.ReadAllText(nightlyPath);
+        nightlyText.ShouldContain("schedule:");
+        nightlyText.ShouldContain("cron:");
+        nightlyText.ShouldContain("workflow_dispatch:");
+        nightlyText.ShouldContain("uses: ./.github/workflows/footprint-budget.yml");
+        nightlyText.ShouldContain("report-failure:");
 
         var releasePath = Path.Combine(RepositoryScan.RepoRoot, ".github", "workflows", "release.yml");
         File.Exists(releasePath).ShouldBeTrue();

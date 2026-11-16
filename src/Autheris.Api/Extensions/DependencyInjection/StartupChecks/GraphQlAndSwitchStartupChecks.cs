@@ -148,13 +148,6 @@ internal static class GraphQlAndSwitchStartupChecks
         var options = context.Options;
         var isDevEnvironment = context.IsDevelopment;
 
-        if (options.WebSql.AllowDml && options.WebSql.DmlWriterRoles.Count == 0)
-        {
-            throw new ValidationException(
-                "Configuration error: WebSql.AllowDml=true requires at least one role in WebSql.DmlWriterRoles " +
-                "(SEC M-20: DML is allowed only for explicitly authorized roles).");
-        }
-
         if (!context.IsDevelopment && options.IsQuickstartProfile)
         {
             throw new ValidationException("Security violation: The GettingStarted profile 'Quickstart' may be active ONLY in the Development environment.");
@@ -174,6 +167,41 @@ internal static class GraphQlAndSwitchStartupChecks
         if (devErrors.Count > 0)
         {
             throw new ValidationException(string.Join("\n", devErrors));
+        }
+
+        if (options.IsWebSqlDmlAllowed)
+        {
+            var webSql = options.WebSql;
+            if (webSql.MaxAffectedRows <= 0)
+            {
+                throw new ValidationException("Configuration error: WebSql:AllowDml requires WebSql:MaxAffectedRows greater than 0.");
+            }
+
+            if (webSql.WriteStatementsPerMinute <= 0)
+            {
+                throw new ValidationException("Configuration error: WebSql:AllowDml requires WebSql:WriteStatementsPerMinute greater than 0.");
+            }
+
+            if (webSql.WriteRowsPerHour <= 0)
+            {
+                throw new ValidationException("Configuration error: WebSql:AllowDml requires WebSql:WriteRowsPerHour greater than 0.");
+            }
+
+            if (webSql.WriteIdempotencyTtlSeconds <= 0)
+            {
+                throw new ValidationException("Configuration error: WebSql:AllowDml requires WebSql:WriteIdempotencyTtlSeconds greater than 0.");
+            }
+        }
+        else if (options.DataSources?.Connections is { Count: > 0 } connections)
+        {
+            foreach (var kvp in connections)
+            {
+                if (!string.IsNullOrWhiteSpace(kvp.Value?.WriteConnectionString))
+                {
+                    throw new ValidationException(
+                        $"Configuration error: DataSources:Connections:{kvp.Key}:WriteConnectionString must not be configured when WebSql:AllowDml is false.");
+                }
+            }
         }
     }
 }

@@ -128,14 +128,6 @@ internal sealed class BuiltInSqlDialectRegistry : ISqlDialectRegistry
             supportsCdc: true,
             maxParameterCount: 10000),
         new BuiltInDialectProvider(
-            DatabaseDialect.Sqlite,
-            TargetSqlDialect.Sqlite,
-            "Sqlite",
-            ["sqlite", "sqlite3"],
-            supportsTreeCompile: true,
-            supportsCdc: true,
-            maxParameterCount: 999),
-        new BuiltInDialectProvider(
             DatabaseDialect.Oracle,
             TargetSqlDialect.Oracle,
             "Oracle",

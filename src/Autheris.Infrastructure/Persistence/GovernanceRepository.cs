@@ -26,6 +26,8 @@ public partial class GovernanceRepository : IGovernanceRepository, IConsentDescr
 
     // Bounded (a 10k-table catalog must not grow the cache without limit); a miss just reloads the metadata.
     private readonly Autheris.Application.State.Caching.BoundedCache<string, (TableMetadata? Metadata, long CachedAtTicks, long Epoch)> _metadataCache = new(20_000, comparer: StringComparer.OrdinalIgnoreCase);
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<TableIdentifier, long> _deferredEpochTables = new();
+    private long _deferredEpochSeq;
     private readonly CatalogKeyDefinitionStore.KeyTableProbe _keyTables = new();
     private readonly IGovernanceSqlDialect _dialect;
     private readonly ILogger? _logger;
@@ -38,6 +40,7 @@ public partial class GovernanceRepository : IGovernanceRepository, IConsentDescr
     private readonly Action<DbTransaction>? _onTransactionCommitted;
     private readonly Action<DbTransaction>? _onTransactionRolledBack;
     private readonly Microsoft.Extensions.Hosting.IHostEnvironment? _environment;
+    private readonly Autheris.Application.Governance.Grants.Records.IGrantWriter? _grantWriter;
     private int _initialized;
     private volatile bool _ready;
 
@@ -55,7 +58,8 @@ public partial class GovernanceRepository : IGovernanceRepository, IConsentDescr
         ICallerContextProvider callerContextProvider,
         ILogger<GovernanceRepository>? logger = null,
         IEventBus? eventBus = null,
-        Autheris.Application.Identity.Attributes.IConsentMaterializationGuard? materializationGuard = null)
+        Autheris.Application.Identity.Attributes.IConsentMaterializationGuard? materializationGuard = null,
+        Autheris.Application.Governance.Grants.Records.IGrantWriter? grantWriter = null)
         : this(
             ResolveDialectForLegacyCtor(options),
             epochValidationService ?? throw new ArgumentNullException(nameof(epochValidationService)),
@@ -66,7 +70,8 @@ public partial class GovernanceRepository : IGovernanceRepository, IConsentDescr
             callerContextProvider ?? throw new ArgumentNullException(nameof(callerContextProvider)),
             logger,
             eventBus,
-            materializationGuard)
+            materializationGuard,
+            grantWriter)
     {
     }
 
@@ -89,7 +94,8 @@ public partial class GovernanceRepository : IGovernanceRepository, IConsentDescr
         ICallerContextProvider callerContextProvider,
         ILogger<GovernanceRepository>? logger = null,
         IEventBus? eventBus = null,
-        Autheris.Application.Identity.Attributes.IConsentMaterializationGuard? materializationGuard = null)
+        Autheris.Application.Identity.Attributes.IConsentMaterializationGuard? materializationGuard = null,
+        Autheris.Application.Governance.Grants.Records.IGrantWriter? grantWriter = null)
         : this(dialect,
                epochValidationService ?? throw new ArgumentNullException(nameof(epochValidationService)),
                options ?? throw new ArgumentNullException(nameof(options)),
@@ -103,7 +109,8 @@ public partial class GovernanceRepository : IGovernanceRepository, IConsentDescr
                auditAnchorStore ?? throw new ArgumentNullException(nameof(auditAnchorStore)),
                secretProvider ?? throw new ArgumentNullException(nameof(secretProvider)),
                environment ?? throw new ArgumentNullException(nameof(environment)),
-               callerContextProvider ?? throw new ArgumentNullException(nameof(callerContextProvider)))
+               callerContextProvider ?? throw new ArgumentNullException(nameof(callerContextProvider)),
+               grantWriter)
     {
     }
 
@@ -121,7 +128,8 @@ public partial class GovernanceRepository : IGovernanceRepository, IConsentDescr
         Autheris.Application.Audit.IAuditChainAnchorStore? auditAnchorStore = null,
         IKeyVaultSecretProvider? secretProvider = null,
         Microsoft.Extensions.Hosting.IHostEnvironment? environment = null,
-        ICallerContextProvider? callerContextProvider = null)
+        ICallerContextProvider? callerContextProvider = null,
+        Autheris.Application.Governance.Grants.Records.IGrantWriter? grantWriter = null)
     {
         _dialect = dialect ?? throw new ArgumentNullException(nameof(dialect));
         _eventBus = eventBus;
@@ -134,11 +142,18 @@ public partial class GovernanceRepository : IGovernanceRepository, IConsentDescr
         _onTransactionCommitted = onTransactionCommitted;
         _onTransactionRolledBack = onTransactionRolledBack;
         _environment = environment;
+        _grantWriter = grantWriter;
         _ready = environment == null;
         InitializeAuditFields(options, auditAnchorStore, secretProvider, environment, callerContextProvider);
     }
 
     internal IGovernanceSqlDialect Dialect => _dialect;
+
+    internal ILogger? CatalogLogger => _logger;
+
+    internal GatewayOptions? OptionsSnapshot => _options;
+
+    internal CatalogKeyDefinitionStore.KeyTableProbe KeyTableProbe => _keyTables;
 
     internal Autheris.Application.State.Caching.BoundedCache<string, (TableMetadata? Metadata, long CachedAtTicks, long Epoch)> MetadataCache => _metadataCache;
 
@@ -347,13 +362,18 @@ public partial class GovernanceRepository : IGovernanceRepository, IConsentDescr
         }
     }
 
-    private void InvalidateTableMetadata(string tableKey)
+    internal void InvalidateTableMetadata(string tableKey)
     {
         _metadataCache.TryRemove(tableKey, out _);
         _metadataInvalidator?.Invoke(tableKey);
     }
 
-    internal async Task<long> IncrementTableEpochInternalAsync(DbConnection conn, DbTransaction tx, TableIdentifier table, CancellationToken ct)
+    internal async Task<long> IncrementTableEpochInternalAsync(
+        DbConnection conn,
+        DbTransaction tx,
+        TableIdentifier table,
+        CancellationToken ct,
+        long? changeVersion = null)
     {
         InvalidateTableMetadata(table.ToString().ToLowerInvariant());
         await using (var cmd = conn.CreateCommand())
@@ -363,20 +383,25 @@ public partial class GovernanceRepository : IGovernanceRepository, IConsentDescr
             if (_dialect is PostgreSqlGovernanceDialect)
             {
                 cmd.CommandText = @"UPDATE POLICY_EPOCHS
-                                    SET epoch = epoch + 1, updated_at = @now
+                                    SET epoch = epoch + 1,
+                                        change_version = COALESCE(@changeVersion, change_version),
+                                        updated_at = @now
                                     WHERE LOWER(domain) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)
                                     RETURNING epoch";
             }
             else
             {
                 cmd.CommandText = @"UPDATE POLICY_EPOCHS
-                                    SET epoch = epoch + 1, updated_at = @now
+                                    SET epoch = epoch + 1,
+                                        change_version = COALESCE(@changeVersion, change_version),
+                                        updated_at = @now
                                     OUTPUT inserted.epoch
                                     WHERE LOWER(domain) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)";
             }
             cmd.AddBound("@domain", table.Domain);
             cmd.AddBound("@schema", table.Schema);
             cmd.AddBound("@table", table.TableName);
+            cmd.AddBound("@changeVersion", (object?)changeVersion ?? DBNull.Value, System.Data.DbType.Int64);
             cmd.AddBound("@now", TimeProvider.System.GetUtcNow().ToString("O"));
 
             var scalar = await ExecuteScalarAsync(cmd, "Epochs.IncrementExisting", ct).ConfigureAwait(false);
@@ -392,11 +417,11 @@ public partial class GovernanceRepository : IGovernanceRepository, IConsentDescr
             // Transitional: replace engine-type branch with dialect members once the epoch statements move into the dialect.
             if (_dialect is PostgreSqlGovernanceDialect)
             {
-                insertCmd.CommandText = @"INSERT INTO POLICY_EPOCHS (table_id, domain, schema_name, table_name, epoch, updated_at)
-                                          SELECT id, source_name, schema_name, table_name, 2, @now
+                insertCmd.CommandText = @"INSERT INTO POLICY_EPOCHS (table_id, domain, schema_name, table_name, epoch, change_version, updated_at)
+                                          SELECT id, source_name, schema_name, table_name, 2, COALESCE(@changeVersion, 0), @now
                                           FROM TABLES
                                           WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)
-                                          ON CONFLICT (table_id) DO UPDATE SET epoch = POLICY_EPOCHS.epoch + 1, updated_at = EXCLUDED.updated_at
+                                          ON CONFLICT (table_id) DO UPDATE SET epoch = POLICY_EPOCHS.epoch + 1, change_version = COALESCE(@changeVersion, POLICY_EPOCHS.change_version), updated_at = EXCLUDED.updated_at
                                           RETURNING epoch";
             }
             else
@@ -405,14 +430,15 @@ public partial class GovernanceRepository : IGovernanceRepository, IConsentDescr
                                           USING (SELECT id AS table_id, source_name AS domain, schema_name, table_name FROM TABLES
                                                  WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)) AS source
                                           ON target.table_id = source.table_id
-                                          WHEN MATCHED THEN UPDATE SET epoch = target.epoch + 1, updated_at = @now
-                                          WHEN NOT MATCHED THEN INSERT (table_id, domain, schema_name, table_name, epoch, updated_at)
-                                              VALUES (source.table_id, source.domain, source.schema_name, source.table_name, 2, @now)
+                                          WHEN MATCHED THEN UPDATE SET epoch = target.epoch + 1, change_version = COALESCE(@changeVersion, target.change_version), updated_at = @now
+                                          WHEN NOT MATCHED THEN INSERT (table_id, domain, schema_name, table_name, epoch, change_version, updated_at)
+                                              VALUES (source.table_id, source.domain, source.schema_name, source.table_name, 2, COALESCE(@changeVersion, 0), @now)
                                           OUTPUT inserted.epoch;";
             }
             insertCmd.AddBound("@domain", table.Domain);
             insertCmd.AddBound("@schema", table.Schema);
             insertCmd.AddBound("@table", table.TableName);
+            insertCmd.AddBound("@changeVersion", (object?)changeVersion ?? DBNull.Value, System.Data.DbType.Int64);
             insertCmd.AddBound("@now", TimeProvider.System.GetUtcNow().ToString("O"));
 
             var insScalar = await ExecuteScalarAsync(insertCmd, "Epochs.InsertOrIncrement", ct).ConfigureAwait(false);
@@ -425,7 +451,59 @@ public partial class GovernanceRepository : IGovernanceRepository, IConsentDescr
         return 0;
     }
 
-    private async Task InvalidateTableEpochAsync(TableIdentifier table, CancellationToken ct)
+    internal async Task SetTableEpochChangeVersionInternalAsync(
+        DbConnection conn,
+        DbTransaction tx,
+        TableIdentifier table,
+        long changeVersion,
+        CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = CatalogSql.UpdateTableEpochChangeVersionSql;
+        cmd.AddBound("@changeVersion", changeVersion, System.Data.DbType.Int64);
+        cmd.AddBound("@now", TimeProvider.System.GetUtcNow().ToString("O"));
+        cmd.AddBound("@domain", table.Domain);
+        cmd.AddBound("@schema", table.Schema);
+        cmd.AddBound("@table", table.TableName);
+        await ExecuteNonQueryAsync(cmd, "Epochs.SetChangeVersion", ct).ConfigureAwait(false);
+    }
+
+    internal void RecordDeferredEpochTable(TableIdentifier table)
+    {
+        var seq = Interlocked.Increment(ref _deferredEpochSeq);
+        _deferredEpochTables.AddOrUpdate(table, seq, (_, _) => seq);
+    }
+
+    internal void RecordDeferredEpochTables(IEnumerable<TableIdentifier> tables)
+    {
+        foreach (var table in tables)
+        {
+            RecordDeferredEpochTable(table);
+        }
+    }
+
+    internal List<(TableIdentifier Table, long Seq)> SnapshotDeferredEpochTables()
+    {
+        var list = new List<(TableIdentifier Table, long Seq)>();
+        foreach (var kv in _deferredEpochTables)
+        {
+            list.Add((kv.Key, kv.Value));
+        }
+
+        return list;
+    }
+
+    internal void ClearDeferredEpochTables(IReadOnlyList<(TableIdentifier Table, long Seq)> flushed)
+    {
+        for (var i = 0; i < flushed.Count; i++)
+        {
+            var entry = flushed[i];
+            _deferredEpochTables.TryRemove(new KeyValuePair<TableIdentifier, long>(entry.Table, entry.Seq));
+        }
+    }
+
+    internal async Task InvalidateTableEpochAsync(TableIdentifier table, CancellationToken ct)
     {
         InvalidateTableMetadata(table.ToString().ToLowerInvariant());
         if (_epochValidationService != null)
@@ -466,5 +544,23 @@ internal static class SqlCoreBinding
 
         cmd.Parameters.Add(parameter);
         return parameter;
+    }
+    /// <summary>
+    /// Binds an instant to a command. PostgreSQL columns added by later migrations are typed
+    /// TIMESTAMPTZ and reject text parameters, whereas the other engines keep ISO-8601 text.
+    /// </summary>
+    public static DbParameter AddBoundTimestamp(this DbCommand cmd, string name, DateTimeOffset? value)
+    {
+        if (cmd is Npgsql.NpgsqlCommand)
+        {
+            var pg = new Npgsql.NpgsqlParameter(name, NpgsqlTypes.NpgsqlDbType.TimestampTz)
+            {
+                Value = value.HasValue ? value.Value.UtcDateTime : DBNull.Value
+            };
+            cmd.Parameters.Add(pg);
+            return pg;
+        }
+
+        return cmd.AddBound(name, value?.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
     }
 }

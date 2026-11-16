@@ -1,4 +1,5 @@
 using System.Collections.Frozen;
+using System.Collections.Immutable;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 
@@ -35,15 +36,23 @@ public sealed class CatalogSnapshot
         IReadOnlyDictionary<Guid, IReadOnlyList<TableRelation>> relationsByChildTableId,
         int degradedEntityCount = 0)
     {
+        ArgumentNullException.ThrowIfNull(tables);
+        ArgumentNullException.ThrowIfNull(ordinalByKey);
+        ArgumentNullException.ThrowIfNull(ordinalById);
+        ArgumentNullException.ThrowIfNull(ordinalByIdentifier);
+        ArgumentNullException.ThrowIfNull(relations);
+        ArgumentNullException.ThrowIfNull(relationsByParentTableId);
+        ArgumentNullException.ThrowIfNull(relationsByChildTableId);
+
         Version = version;
         CapturedAt = capturedAt;
-        Tables = tables;
-        OrdinalByKey = ordinalByKey;
-        OrdinalById = ordinalById;
-        OrdinalByIdentifier = ordinalByIdentifier;
-        Relations = relations;
-        RelationsByParentTableId = relationsByParentTableId;
-        RelationsByChildTableId = relationsByChildTableId;
+        Tables = ToImmutable(tables);
+        OrdinalByKey = ToFrozen(ordinalByKey);
+        OrdinalById = ToFrozen(ordinalById);
+        OrdinalByIdentifier = ToFrozen(ordinalByIdentifier);
+        Relations = ToImmutable(relations);
+        RelationsByParentTableId = FreezeRelationMap(relationsByParentTableId);
+        RelationsByChildTableId = FreezeRelationMap(relationsByChildTableId);
         DegradedEntityCount = degradedEntityCount;
     }
 
@@ -57,14 +66,16 @@ public sealed class CatalogSnapshot
         ArgumentNullException.ThrowIfNull(tables);
         ArgumentNullException.ThrowIfNull(relations);
 
+        var immutableTables = ToImmutable(tables);
+        var immutableRelations = ToImmutable(relations);
         var timestamp = capturedAt ?? DateTimeOffset.UtcNow;
-        var keyOrdinals = new Dictionary<CatalogEntryKey, int>(tables.Count);
-        var idOrdinals = new Dictionary<Guid, int>(tables.Count);
-        var identOrdinals = new Dictionary<TableIdentifier, int>(tables.Count);
+        var keyOrdinals = new Dictionary<CatalogEntryKey, int>(immutableTables.Length);
+        var idOrdinals = new Dictionary<Guid, int>(immutableTables.Length);
+        var identOrdinals = new Dictionary<TableIdentifier, int>(immutableTables.Length);
 
-        for (int i = 0; i < tables.Count; i++)
+        for (int i = 0; i < immutableTables.Length; i++)
         {
-            var table = tables[i];
+            var table = immutableTables[i];
             var key = CatalogEntryKey.ForTable(table.Identifier);
             keyOrdinals.TryAdd(key, i);
             if (table.Table.Id != Guid.Empty)
@@ -78,7 +89,7 @@ public sealed class CatalogSnapshot
         var parentGroup = new Dictionary<Guid, List<TableRelation>>();
         var childGroup = new Dictionary<Guid, List<TableRelation>>();
 
-        foreach (var rel in relations)
+        foreach (var rel in immutableRelations)
         {
             if (!parentGroup.TryGetValue(rel.ParentTableId, out var pList))
             {
@@ -97,26 +108,75 @@ public sealed class CatalogSnapshot
 
         var frozenParentGroup = parentGroup.ToFrozenDictionary(
             kvp => kvp.Key,
-            kvp => (IReadOnlyList<TableRelation>)kvp.Value.AsReadOnly());
+            kvp => (IReadOnlyList<TableRelation>)kvp.Value.ToImmutableArray());
         var frozenChildGroup = childGroup.ToFrozenDictionary(
             kvp => kvp.Key,
-            kvp => (IReadOnlyList<TableRelation>)kvp.Value.AsReadOnly());
+            kvp => (IReadOnlyList<TableRelation>)kvp.Value.ToImmutableArray());
 
         return new CatalogSnapshot(
             version,
             timestamp,
-            tables,
+            immutableTables,
             keyOrdinals.ToFrozenDictionary(),
             idOrdinals.ToFrozenDictionary(),
             identOrdinals.ToFrozenDictionary(),
-            relations,
+            immutableRelations,
             frozenParentGroup,
             frozenChildGroup,
             degradedEntityCount);
     }
 
     public static CatalogSnapshot Empty(CatalogVersion? version = null) =>
-        Create(version ?? new CatalogVersion(1, 1), Array.Empty<TableMetadata>(), Array.Empty<TableRelation>());
+        Create(version ?? new CatalogVersion(1, 1), ImmutableArray<TableMetadata>.Empty, ImmutableArray<TableRelation>.Empty);
+
+    /// <summary>
+    /// Returns a new immutable <see cref="CatalogSnapshot"/> produced by removing or replacing
+    /// <paramref name="changedIdentifiers"/> and inserting active <paramref name="updatedTables"/>.
+    /// Existing snapshot collections and indices remain untouched for concurrent readers.
+    /// </summary>
+    public CatalogSnapshot WithDelta(
+        CatalogVersion version,
+        IReadOnlyCollection<TableIdentifier> changedIdentifiers,
+        IReadOnlyList<TableMetadata> updatedTables,
+        IReadOnlyList<TableRelation>? relations = null,
+        int degradedEntityCount = 0,
+        DateTimeOffset? capturedAt = null)
+    {
+        ArgumentNullException.ThrowIfNull(changedIdentifiers);
+        ArgumentNullException.ThrowIfNull(updatedTables);
+
+        var byIdentifier = new Dictionary<TableIdentifier, TableMetadata>(Tables.Count);
+        for (var i = 0; i < Tables.Count; i++)
+        {
+            var existing = Tables[i];
+            byIdentifier[existing.Identifier] = existing;
+        }
+
+        foreach (var changedId in changedIdentifiers)
+        {
+            byIdentifier.Remove(changedId);
+        }
+
+        for (var i = 0; i < updatedTables.Count; i++)
+        {
+            var updated = updatedTables[i];
+            if (updated.Table.IsActive)
+            {
+                byIdentifier[updated.Identifier] = updated;
+            }
+            else
+            {
+                byIdentifier.Remove(updated.Identifier);
+            }
+        }
+
+        return Create(
+            version,
+            byIdentifier.Values.ToList(),
+            relations ?? Relations,
+            degradedEntityCount,
+            capturedAt);
+    }
 
     public bool TryGetOrdinal(CatalogEntryKey key, out int ordinal) =>
         OrdinalByKey.TryGetValue(key, out ordinal);
@@ -146,8 +206,29 @@ public sealed class CatalogSnapshot
         TryGetOrdinal(identifier, out var ord) ? Tables[ord] : null;
 
     public IReadOnlyList<TableRelation> GetParentRelations(Guid parentTableId) =>
-        RelationsByParentTableId.TryGetValue(parentTableId, out var rels) ? rels : Array.Empty<TableRelation>();
+        RelationsByParentTableId.TryGetValue(parentTableId, out var rels) ? rels : ImmutableArray<TableRelation>.Empty;
 
     public IReadOnlyList<TableRelation> GetChildRelations(Guid childTableId) =>
-        RelationsByChildTableId.TryGetValue(childTableId, out var rels) ? rels : Array.Empty<TableRelation>();
+        RelationsByChildTableId.TryGetValue(childTableId, out var rels) ? rels : ImmutableArray<TableRelation>.Empty;
+
+    private static ImmutableArray<T> ToImmutable<T>(IReadOnlyList<T> source) =>
+        source is ImmutableArray<T> imm ? imm : ImmutableArray.CreateRange(source);
+
+    private static IReadOnlyDictionary<TKey, TValue> ToFrozen<TKey, TValue>(IReadOnlyDictionary<TKey, TValue> source)
+        where TKey : notnull =>
+        source is FrozenDictionary<TKey, TValue> frozen ? frozen : source.ToFrozenDictionary();
+
+    private static IReadOnlyDictionary<Guid, IReadOnlyList<TableRelation>> FreezeRelationMap(
+        IReadOnlyDictionary<Guid, IReadOnlyList<TableRelation>> source)
+    {
+        if (source is FrozenDictionary<Guid, IReadOnlyList<TableRelation>> frozen &&
+            frozen.Values.All(static v => v is ImmutableArray<TableRelation>))
+        {
+            return frozen;
+        }
+
+        return source.ToFrozenDictionary(
+            static kvp => kvp.Key,
+            static kvp => (IReadOnlyList<TableRelation>)ToImmutable(kvp.Value));
+    }
 }

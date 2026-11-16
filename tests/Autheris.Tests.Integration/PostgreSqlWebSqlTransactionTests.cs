@@ -127,7 +127,9 @@ public sealed class PostgreSqlWebSqlTransactionTests : IAsyncLifetime
         var claims = new ClaimsPrincipal(new ClaimsIdentity(
         [
             new Claim(ClaimTypes.PrimarySid, "S-1-5-21-PG-USER"),
-            new Claim("tenant_id", Tenant)
+            new Claim("tenant_id", Tenant),
+            Autheris.Domain.Identity.GroupResolutionClaims.CreateMarker(),
+            Autheris.Domain.Identity.GroupResolutionClaims.CreateStatus(Autheris.Domain.Identity.GroupResolutionStatus.Complete)
         ], "Test"));
 
         using var executionScope = host.Services.CreateScope();

@@ -111,7 +111,7 @@ public static class ClaimsNormalizer
                 existingRoles.Add(role);
             }
 
-            var colonIdx = role.IndexOf(':');
+            var colonIdx = role.IndexOf(':', StringComparison.Ordinal);
             if (colonIdx > 0)
             {
                 // Tenant-scoped role: "tenant-1:DataOwner"

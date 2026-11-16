@@ -21,19 +21,20 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class GovernedSqlExecutionTenantColumnTests
 {
     private const string Tenant = "tenant_test";
     private const string DataSource = "pg_source";
 
     private static ClaimsPrincipal CreateUser() =>
-        new(new ClaimsIdentity(
+        Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(new ClaimsPrincipal(new ClaimsIdentity(
             [
                 new Claim(ClaimTypes.PrimarySid, "S-1-5-21-USER-1"),
                 new Claim("tenant_id", Tenant),
                 new Claim(ClaimTypes.Role, "Admin")
             ],
-            "Test"));
+            "Test")));
 
     private static TableMetadata CreateTable(TableIdentifier id) => new()
     {
@@ -83,8 +84,7 @@ public sealed class GovernedSqlExecutionTenantColumnTests
             {
                 Enabled = true,
                 DefaultDataSourceName = DataSource,
-                AllowedDataSources = [DataSource],
-                DmlWriterRoles = ["Admin"]
+                AllowedDataSources = [DataSource]
             },
             DataSources = new SqlDataSourceOptions
             {

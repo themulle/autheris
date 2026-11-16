@@ -11,14 +11,9 @@ public class FastSqlEngineTokenTests
 {
     public static TheoryData<TargetSqlDialect, string> Literals => new()
     {
-        { TargetSqlDialect.Sqlite, "SELECT 'a--b' FROM orders" },
-        { TargetSqlDialect.Sqlite, "SELECT 'a/*b' FROM orders" },
-        { TargetSqlDialect.Sqlite, "SELECT 'a[b' FROM orders" },
-        { TargetSqlDialect.Sqlite, "SELECT 'a]b' FROM orders" },
         { TargetSqlDialect.SqlServer, "SELECT 'a--b' FROM orders" },
         { TargetSqlDialect.SqlServer, "SELECT \"a[b\" FROM orders" },
         { TargetSqlDialect.PostgreSql, "SELECT 'a\\b' FROM orders" },
-        { TargetSqlDialect.Sqlite, "SELECT 'a\\b' FROM orders" },
         { TargetSqlDialect.SqlServer, "SELECT x FROM orders WHERE y = 'q\\--'" }
     };
 
@@ -50,11 +45,8 @@ public class FastSqlEngineTokenTests
     }
 
     [Theory]
-    [InlineData(TargetSqlDialect.Sqlite, "SELECT [id] FROM orders")]
     [InlineData(TargetSqlDialect.SqlServer, "SELECT ARRAY[1,2][1] FROM orders")]
     [InlineData(TargetSqlDialect.PostgreSql, "SELECT U&'d!0061t' UESCAPE '!' FROM orders")]
-    [InlineData(TargetSqlDialect.Sqlite, "SELECT x FROM orders -- comment")]
-    [InlineData(TargetSqlDialect.Sqlite, "SELECT x FROM orders /* a /* b */")]
     [InlineData(TargetSqlDialect.PostgreSql, "SELECT $$x$$ FROM orders")]
     [Trait("Category", "Security")]
     public void OtherParseCanceled_StaysSyntaxError(TargetSqlDialect dialect, string sql)
@@ -65,8 +57,6 @@ public class FastSqlEngineTokenTests
 
     [Theory]
     [MemberData(nameof(Literals))]
-    [InlineData(TargetSqlDialect.Sqlite, "SELECT [id] FROM orders")]
-    [InlineData(TargetSqlDialect.Sqlite, "SELECT '[' || x || ']' FROM orders")]
     [InlineData(TargetSqlDialect.SqlServer, "SELECT 'a/*b' FROM orders")]
     [InlineData(TargetSqlDialect.PostgreSql, "SELECT E'a' FROM orders")]
     [Trait("Category", "Security")]
@@ -80,7 +70,7 @@ public class FastSqlEngineTokenTests
     [Trait("Category", "Security")]
     public void SEC_PG_08_PlainLiterals_StillCompile()
     {
-        var compiled = new ProbeEnv(TargetSqlDialect.Sqlite).Compile("SELECT 'abc' FROM orders");
+        var compiled = new ProbeEnv(TargetSqlDialect.PostgreSql).Compile("SELECT 'abc' FROM orders");
         Assert.Contains(compiled.Parameters, p => Equals(p.Value, "abc"));
     }
 }

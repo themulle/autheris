@@ -14,7 +14,7 @@ using Xunit;
 public sealed class CallerAttributeProviderErrorHygieneTests
 {
     private static CompiledSql Compiled(params BoundParameter[] parameters) =>
-        new("SELECT 1", [.. parameters], TargetSqlDialect.Sqlite, SqlStatementClass.Select, [], "test");
+        new("SELECT 1", [.. parameters], TargetSqlDialect.PostgreSql, SqlStatementClass.Select, [], "test");
 
     [Fact]
     public void BC_129_16_ABoundCallerAttributeValue_SuppressesTheDriverText()

@@ -8,6 +8,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Catalog;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.OData.Interfaces;
 using Autheris.Domain.Common;
@@ -50,7 +51,11 @@ public sealed class DynamicOpenApiGenerator : IDynamicOpenApiGenerator
     /// </summary>
     private async Task<IReadOnlyList<TableMetadata>> GetOpenApiTablesAsync(CancellationToken ct)
     {
-        var all = await _metadataRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
+        var all = await CatalogTablePageReader.ReadAllAsync(
+            _metadataRepo,
+            new CatalogTableQuery(IncludeInactive: false),
+            static t => t.Table.IsActive,
+            ct: ct).ConfigureAwait(false);
         return Autheris.Application.DataSources.TransportDiscoveryFilter.Apply(
             _transportResolver, Autheris.Domain.Options.DataSources.DataSourceTransportFlags.OData, all);
     }
@@ -338,7 +343,7 @@ public sealed class DynamicOpenApiGenerator : IDynamicOpenApiGenerator
 
         foreach (var col in table.Columns)
         {
-            var colProp = MapColumnToJsonSchema(col);
+            var colProp = MapColumnToJsonSchema(col, table);
             properties[col.ColumnName] = colProp;
 
             if (keyView.PrimaryKeyColumns.Contains(col.ColumnName, StringComparer.OrdinalIgnoreCase))
@@ -380,7 +385,7 @@ public sealed class DynamicOpenApiGenerator : IDynamicOpenApiGenerator
         };
     }
 
-    private static JsonObject MapColumnToJsonSchema(TableColumn col)
+    private static JsonObject MapColumnToJsonSchema(TableColumn col, TableMetadata table)
     {
         var node = new JsonObject();
         var dt = col.DataType.Trim().ToLowerInvariant();
@@ -453,7 +458,7 @@ public sealed class DynamicOpenApiGenerator : IDynamicOpenApiGenerator
             node["x-dbt-meta"] = metaObj;
         }
 
-        if (col.IsSensitive)
+        if (ClassificationMetadata.IsColumnSensitive(table, col))
         {
             node["x-sensitive"] = true;
         }

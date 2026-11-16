@@ -13,7 +13,7 @@ using HotChocolate.Language;
 /// based on catalog metadata (declared primary keys, secondary/unique indexes, and source physical indexes).
 /// Zero live stats, zero-allocation friendly, fail-closed anti-enumeration.
 /// </summary>
-public static class IndexUsabilityEvaluator
+public static partial class IndexUsabilityEvaluator
 {
     public const string UnresolvedVariableMarker = "__AUTHERIS_UNRESOLVED_VARIABLE__";
     public const string UnusableFilterMarker = "__AUTHERIS_UNUSABLE_FILTER__";
@@ -356,7 +356,8 @@ public static class IndexUsabilityEvaluator
     /// </summary>
     public static List<string>? ExtractFilterColumns(
         ArgumentNode? whereArg,
-        IReadOnlyDictionary<string, object?>? variableValues = null)
+        IReadOnlyDictionary<string, object?>? variableValues = null,
+        IReadOnlyList<VariableDefinitionNode>? variableDefinitions = null)
     {
         if (whereArg is null || whereArg.Value is null)
         {
@@ -371,12 +372,19 @@ public static class IndexUsabilityEvaluator
                 return ExtractFilterColumnsFromRuntimeValue(varVal);
             }
 
-            return new List<string> { UnresolvedVariableMarker };
+            if (TryGetDefaultVariableNode(varNode.Name.Value, variableDefinitions, out var defaultNode))
+            {
+                literal = defaultNode!;
+            }
+            else
+            {
+                return new List<string> { UnresolvedVariableMarker };
+            }
         }
 
         var columns = new List<string>();
         bool hadConditions = false;
-        CollectFilterColumnsFromNode(literal, columns, variableValues, ref hadConditions, orBranchIndex: null);
+        CollectFilterColumnsFromNode(literal, columns, variableValues, ref hadConditions, orBranchIndex: null, variableDefinitions);
         if (hadConditions && columns.Count == 0)
         {
             columns.Add(UnusableFilterMarker);
@@ -385,12 +393,35 @@ public static class IndexUsabilityEvaluator
         return columns.Count > 0 ? columns : null;
     }
 
+    private static bool TryGetDefaultVariableNode(
+        string variableName,
+        IReadOnlyList<VariableDefinitionNode>? variableDefinitions,
+        out IValueNode? defaultValue)
+    {
+        if (variableDefinitions is not null)
+        {
+            foreach (var def in variableDefinitions)
+            {
+                if (string.Equals(def.Variable.Name.Value, variableName, StringComparison.Ordinal) &&
+                    def.DefaultValue is { } val and not VariableNode)
+                {
+                    defaultValue = val;
+                    return true;
+                }
+            }
+        }
+
+        defaultValue = null;
+        return false;
+    }
+
     private static void CollectFilterColumnsFromNode(
         IValueNode node,
         List<string> columns,
         IReadOnlyDictionary<string, object?>? variableValues,
         ref bool hadConditions,
-        int? orBranchIndex)
+        int? orBranchIndex,
+        IReadOnlyList<VariableDefinitionNode>? variableDefinitions = null)
     {
         if (node is VariableNode vn)
         {
@@ -398,12 +429,16 @@ public static class IndexUsabilityEvaluator
             {
                 if (varVal is IValueNode ivn)
                 {
-                    CollectFilterColumnsFromNode(ivn, columns, variableValues, ref hadConditions, orBranchIndex);
+                    CollectFilterColumnsFromNode(ivn, columns, variableValues, ref hadConditions, orBranchIndex, variableDefinitions);
                 }
                 else if (varVal is not null)
                 {
                     CollectFilterColumnsFromDictionary(varVal, columns, ref hadConditions, orBranchIndex);
                 }
+            }
+            else if (TryGetDefaultVariableNode(vn.Name.Value, variableDefinitions, out var defNode))
+            {
+                CollectFilterColumnsFromNode(defNode!, columns, variableValues, ref hadConditions, orBranchIndex, variableDefinitions);
             }
             else
             {

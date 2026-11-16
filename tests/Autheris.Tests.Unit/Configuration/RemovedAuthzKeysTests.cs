@@ -5,7 +5,6 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using Autheris.Api.Configuration;
-using Autheris.Application.Policy;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Configuration;
 using Shouldly;

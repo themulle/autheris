@@ -21,11 +21,12 @@ using Microsoft.Extensions.DependencyInjection;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Hosting;
 using Autheris.Tests.Integration.Governance;
 
 namespace Autheris.Tests.Integration;
 
-public sealed class HttpDataSourceIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class HttpDataSourceIntegrationTests : IClassFixture<HttpDataSourceIntegrationTests.HostFixture>
 {
     private readonly WebApplicationFactory<Program> _factory;
 
@@ -69,9 +70,14 @@ public sealed class HttpDataSourceIntegrationTests : IClassFixture<WebApplicatio
         }
     }
 
-    public HttpDataSourceIntegrationTests(WebApplicationFactory<Program> factory)
+    public HttpDataSourceIntegrationTests(HostFixture factory)
     {
-        _factory = factory.WithWebHostBuilder(builder =>
+        _factory = factory;
+    }
+
+    public sealed class HostFixture : IntegrationHost
+    {
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseSetting("Gateway:Tenancy:DefaultTenantId", Autheris.Tests.Common.TestTenants.Default.Value);
             builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
@@ -105,7 +111,7 @@ public sealed class HttpDataSourceIntegrationTests : IClassFixture<WebApplicatio
                 clientFactory.CreateClient(Arg.Any<string>()).Returns(httpClient);
                 services.AddSingleton(clientFactory);
             });
-        });
+        }
     }
 
     private HttpClient CreateClient(Sid? userSid = null, string? roles = null)

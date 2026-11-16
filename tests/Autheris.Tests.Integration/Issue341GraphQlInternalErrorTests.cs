@@ -15,6 +15,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Hosting;
 using Autheris.Tests.Integration.Governance;
 
 /// <summary>
@@ -151,25 +152,24 @@ public sealed class Issue341GraphQlInternalErrorTests : IClassFixture<Issue341Gr
         // The catalog entry is backed (source "default") and exists, but the caller has no grant and consent checks are on.
         var dbFile = Path.Combine(Path.GetTempPath(), $"autheris-i341-pd-{Guid.NewGuid():N}.db");
         var dataFile = Path.Combine(Path.GetTempPath(), $"autheris-i341-pd-data-{Guid.NewGuid():N}.db");
-        using var root = new WebApplicationFactory<Program>();
         try
         {
             var id = new Autheris.Domain.Common.TableIdentifier("default", "main", "orders");
-            using (var seeding = Create(root, dbFile, dataFile, _fixture.Logs, bypassConsent: false))
+            using (var seeding = Create(dbFile, dataFile, _fixture.Logs, bypassConsent: false))
             {
                 using var scope = seeding.Services.CreateScope();
                 var repo = scope.ServiceProvider.GetRequiredService<Autheris.Application.Common.Interfaces.ITableMetadataRepository>();
                 var tableId = Guid.NewGuid();
                 await repo.UpsertTableMetadataAsync(new Autheris.Domain.Model.TableMetadata
                 {
-                    Table = new Autheris.Domain.Model.Table { Id = tableId, DisplayName = "orders", TableName = "orders", SchemaName = "main", SourceType = "Sqlite", SourceName = "default", IsActive = true },
+                    Table = new Autheris.Domain.Model.Table { Id = tableId, DisplayName = "orders", TableName = "orders", SchemaName = "main", SourceType = "PostgreSql", SourceName = "default", IsActive = true },
                     Identifier = id,
                     Columns = [new Autheris.Domain.Model.TableColumn { TableId = tableId, ColumnName = "id", DataType = "integer" }],
                 });
             }
 
-            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-            using var host = Create(root, dbFile, dataFile, _fixture.Logs, bypassConsent: false);
+            Npgsql.NpgsqlConnection.ClearAllPools();
+            using var host = Create(dbFile, dataFile, _fixture.Logs, bypassConsent: false);
             var denied = await SendAsync("{ default_main_orders(first: 1, offset: 0) { id } }", "Reader", host);
             var unbacked = await SendAsync("{ finance_dbo_finance_items(first: 1, offset: 0) { id } }", "Reader", host);
 
@@ -180,7 +180,7 @@ public sealed class Issue341GraphQlInternalErrorTests : IClassFixture<Issue341Gr
         }
         finally
         {
-            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            Npgsql.NpgsqlConnection.ClearAllPools();
             foreach (var f in Directory.GetFiles(Path.GetTempPath(), "autheris-i341-pd-*").Where(f => f.Contains(Path.GetFileName(dbFile)) || f.Contains(Path.GetFileName(dataFile))))
             {
                 try { File.Delete(f); } catch (IOException) { }
@@ -201,7 +201,7 @@ public sealed class Issue341GraphQlInternalErrorTests : IClassFixture<Issue341Gr
             {
                 Table = new Autheris.Domain.Model.Table
                 {
-                    Id = tableId, DisplayName = "lakeorders", TableName = "lakeorders", SchemaName = "main", SourceType = "Sqlite", SourceName = "default",
+                    Id = tableId, DisplayName = "lakeorders", TableName = "lakeorders", SchemaName = "main", SourceType = "PostgreSql", SourceName = "default",
                     IsActive = true, DataSourceType = (Autheris.Domain.Model.DataSourceType)99, // no executor registered for this type
                 },
                 Identifier = id,
@@ -218,20 +218,22 @@ public sealed class Issue341GraphQlInternalErrorTests : IClassFixture<Issue341Gr
         result.Body.ShouldNotContain("INTERNAL_SERVER_ERROR");
     }
 
-    private static WebApplicationFactory<Program> Create(WebApplicationFactory<Program> root, string dbFile, string dataFile, CapturingLoggerProvider logs, bool bypassConsent = true) =>
-        root.WithWebHostBuilder(b =>
-        {
-            b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "100000");
-            b.UseSetting("Gateway:RateLimiting:PostAuthSidRateLimit:TokenBucketCapacity", "100000");
-            b.UseSetting("Gateway:RateLimiting:PostAuthSidRateLimit:TokensPerSecond", "10000");
-            b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
-            b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.CreateStable(dbFile));
-            b.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", bypassConsent ? "true" : "false");
-            b.UseSetting("Gateway:DataSources:Connections:default:Provider", "Sqlite");
-            b.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", $"Data Source={dataFile}");
-            b.ConfigureLogging(l => l.AddProvider(logs));
-        });
+    private static IntegrationHost Create(string dbFile, string dataFile, CapturingLoggerProvider logs, bool bypassConsent = true) =>
+        new(
+            new Dictionary<string, string?>
+            {
+                ["Gateway:Authentication:EnableTestAuthHandler"] = "true",
+                ["Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit"] = "100000",
+                ["Gateway:RateLimiting:PostAuthSidRateLimit:TokenBucketCapacity"] = "100000",
+                ["Gateway:RateLimiting:PostAuthSidRateLimit:TokensPerSecond"] = "10000",
+                ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
+                ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.CreateStable(dbFile),
+                ["Gateway:Insecure:danger_bypass_consent_checks"] = bypassConsent ? "true" : "false",
+                ["Gateway:DataSources:Connections:default:Provider"] = "PostgreSql",
+                ["Gateway:DataSources:Connections:default:DefaultSchema"] = "main",
+                ["Gateway:DataSources:Connections:default:ConnectionString"] = PostgresDataSource.Create("i341"),
+            },
+            configureWebHost: b => b.ConfigureLogging(l => l.AddProvider(logs)));
 
     internal sealed class CapturingLoggerProvider : ILoggerProvider
     {
@@ -264,7 +266,6 @@ public sealed class Issue341GraphQlInternalErrorTests : IClassFixture<Issue341Gr
 
     public sealed class HostFixture : IDisposable
     {
-        private readonly WebApplicationFactory<Program> _root = new();
         private readonly string _dbFile = Path.Combine(Path.GetTempPath(), $"autheris-i341-{Guid.NewGuid():N}.db");
         private readonly string _dataFile = Path.Combine(Path.GetTempPath(), $"autheris-i341-data-{Guid.NewGuid():N}.db");
 
@@ -273,14 +274,13 @@ public sealed class Issue341GraphQlInternalErrorTests : IClassFixture<Issue341Gr
 
         public HostFixture()
         {
-            Factory = Create(_root, _dbFile, _dataFile, Logs, bypassConsent: true);
+            Factory = Create(_dbFile, _dataFile, Logs, bypassConsent: true);
         }
 
         public void Dispose()
         {
             Factory.Dispose();
-            _root.Dispose();
-            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            Npgsql.NpgsqlConnection.ClearAllPools();
             foreach (var f in Directory.GetFiles(Path.GetTempPath(), "autheris-i341-*").Where(f => f.Contains(Path.GetFileName(_dbFile)) || f.Contains(Path.GetFileName(_dataFile))))
             {
                 try { File.Delete(f); } catch (IOException) { }

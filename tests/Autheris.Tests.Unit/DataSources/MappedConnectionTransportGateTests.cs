@@ -4,7 +4,6 @@ using Autheris.Application.DataSources;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Options;
 using Autheris.Domain.Options.DataSources;
-using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -12,6 +11,11 @@ using Xunit;
 [Trait("Category", "Security")]
 public sealed class MappedConnectionTransportGateTests
 {
+    private sealed class NoopDenialRecorder : ITransportDenialRecorder
+    {
+        public Task RecordDenialAsync(TransportDenial denial, CancellationToken ct = default) => Task.CompletedTask;
+    }
+
     private static (DataSourceTransportGate Gate, HierarchicalDataSourceOptionsResolver Resolver) Build(
         DataSourceTransportFlags logicalProfile, DataSourceTransportFlags connectionProfile)
     {
@@ -30,7 +34,7 @@ public sealed class MappedConnectionTransportGateTests
             }));
         var context = new IngressTransportContext();
         context.Set(DataSourceTransportFlags.WebSql);
-        return (new DataSourceTransportGate(context, resolver, Substitute.For<ITransportDenialRecorder>()), resolver);
+        return (new DataSourceTransportGate(context, resolver, new NoopDenialRecorder()), resolver);
     }
 
     [Fact]

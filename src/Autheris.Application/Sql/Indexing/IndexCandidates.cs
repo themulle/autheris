@@ -12,7 +12,7 @@ public static class IndexCandidates
 {
     public static List<CandidateIndex> GetCandidateIndexes(TableMetadata metadata)
     {
-        var candidates = new List<CandidateIndex>(2 + metadata.Indexes.Count + metadata.PhysicalIndexes.Count);
+        var candidates = new List<CandidateIndex>(2 + metadata.Indexes.Count);
 
         if (metadata.PrimaryKeyColumns.Count > 0)
         {
@@ -28,16 +28,6 @@ public static class IndexCandidates
                 candidates.Add(new CandidateIndex(
                     idx.Columns,
                     KeyDirections.Canonical(idx.Directions) ?? Array.Empty<KeyColumnDirection>()));
-            }
-        }
-
-        foreach (var phys in metadata.PhysicalIndexes)
-        {
-            if (phys.Columns.Count > 0)
-            {
-                candidates.Add(new CandidateIndex(
-                    phys.Columns,
-                    KeyDirections.Canonical(phys.Directions) ?? Array.Empty<KeyColumnDirection>()));
             }
         }
 

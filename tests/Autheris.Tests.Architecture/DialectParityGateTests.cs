@@ -17,7 +17,6 @@ public sealed class DialectGateTests
         TargetSqlDialect.Ansi,
         TargetSqlDialect.PostgreSql,
         TargetSqlDialect.SqlServer,
-        TargetSqlDialect.Sqlite,
         TargetSqlDialect.DuckDb,
         TargetSqlDialect.Oracle,
         TargetSqlDialect.Databricks
@@ -27,7 +26,6 @@ public sealed class DialectGateTests
     [
         DatabaseDialect.PostgreSql,
         DatabaseDialect.SqlServer,
-        DatabaseDialect.Sqlite,
         DatabaseDialect.Databricks,
         DatabaseDialect.Oracle
     ];
@@ -61,7 +59,6 @@ public sealed class DialectParityGateTests
     [
         TargetSqlDialect.PostgreSql,
         TargetSqlDialect.SqlServer,
-        TargetSqlDialect.Sqlite,
         TargetSqlDialect.DuckDb,
         TargetSqlDialect.Oracle,
         TargetSqlDialect.Databricks

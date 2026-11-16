@@ -35,7 +35,8 @@ public class ODataCsdlCacheIsolationTests
 
     private static (ODataHandler Handler, IMemoryCache Cache) CreateHandler(TableMetadata table, Dictionary<string, HashSet<string>> userDeniedColumns)
     {
-        var repo = Substitute.For<ITableMetadataRepository>();
+        var repo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
+            Substitute.For<ITableMetadataRepository>());
         repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([table]));
 
         var exec = Substitute.For<IGatewayExecutionService>();

@@ -88,8 +88,7 @@ internal static class AccessGrantRecords
                     TableColumnId = table.Columns.FirstOrDefault(col => string.Equals(col.ColumnName, c.Key, StringComparison.OrdinalIgnoreCase))?.Id ?? Guid.NewGuid(),
                     ColumnName = c.Key,
                     AccessLevel = ParseAccessLevel(c.Value)
-                }).ToList(),
-                RowFilterCondition = string.IsNullOrWhiteSpace(grant.RowFilter) ? null : grant.RowFilter
+                }).ToList()
             });
         }
 

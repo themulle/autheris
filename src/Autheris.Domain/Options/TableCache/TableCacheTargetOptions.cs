@@ -21,6 +21,8 @@ public sealed class TableCacheTargetOptions
 
     public IReadOnlyList<string>? Columns { get; init; }
 
+    public IReadOnlyList<string>? PrimaryKeyColumns { get; init; }
+
     public string? FilterPredicate { get; init; }
 
     public int? TtlSeconds { get; init; }

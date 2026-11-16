@@ -272,11 +272,20 @@ public sealed class DatasetDataEndpointsTests
         capturedRequest.FilterExpression.ShouldBe("id eq '1001'");
     }
 
+    private sealed class DevelopmentHostEnvironment : Microsoft.Extensions.Hosting.IHostEnvironment
+    {
+        public string EnvironmentName { get; set; } = Microsoft.Extensions.Hosting.Environments.Development;
+        public string ApplicationName { get; set; } = "Autheris.Tests.Unit";
+        public string ContentRootPath { get; set; } = AppContext.BaseDirectory;
+        public Microsoft.Extensions.FileProviders.IFileProvider ContentRootFileProvider { get; set; } = new Microsoft.Extensions.FileProviders.NullFileProvider();
+    }
+
     [Fact]
     public void AddAutherisDataApi_RegistersRequiredServices()
     {
         var services = new ServiceCollection();
         services.AddLogging();
+        services.AddSingleton<Microsoft.Extensions.Hosting.IHostEnvironment>(new DevelopmentHostEnvironment());
         services.AddSingleton(Substitute.For<ITableMetadataRepository>());
         services.AddSingleton(Substitute.For<Autheris.Application.Policy.IUnifiedPolicyDecisionPoint>());
         services.AddSingleton(Substitute.For<Autheris.Application.Sql.Interfaces.IGovernedSqlExecutionService>());

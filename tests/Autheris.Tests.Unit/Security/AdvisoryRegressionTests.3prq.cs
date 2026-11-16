@@ -25,7 +25,7 @@ public sealed partial class AdvisoryRegressionTests
         foreach (var sql in new[] { "DELETE FROM plain WHERE id = 1", "DELETE FROM orders WHERE id IN (SELECT id FROM plain)" })
         {
             var ex = await Should.ThrowAsync<WebSqlPolicyException>(() =>
-                service.ExecuteGovernedQueryAsync(new GovernedSqlQueryRequest(sql), writer, tenant, (_, _) => Task.CompletedTask));
+                service.ExecuteGovernedQueryAsync(new GovernedSqlQueryRequest(sql, Transport: SqlTransports.WebSql), writer, tenant, (_, _) => Task.CompletedTask));
             ex.Code.ShouldBe(GovernedSqlErrorCodes.PolicyViolation);
         }
 

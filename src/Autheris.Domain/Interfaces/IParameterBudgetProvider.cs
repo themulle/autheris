@@ -10,6 +10,6 @@ public interface IParameterBudgetProvider
         int defaultChunkSize,
         int keyColumnCount,
         int contextParameterCount = 0,
-        DatabaseDialect dialect = DatabaseDialect.Sqlite,
+        DatabaseDialect dialect = DatabaseDialect.SqlServer,
         int safetyBuffer = 50);
 }

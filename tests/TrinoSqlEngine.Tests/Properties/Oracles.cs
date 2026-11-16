@@ -215,6 +215,18 @@ internal static class Oracles
             m = m[..^1];
         }
 
+        // Bound user/policy LIKE normalization emits compiler-controlled constant ESCAPE clauses ('\\' or '') on dialects
+        // with implicit escapes or bracket character classes; strip only those exact fixed clauses before scanning for stray quotes.
+        if (dialect is TargetSqlDialect.PostgreSql or TargetSqlDialect.Databricks or TargetSqlDialect.SqlServer)
+        {
+            m = m.Replace(" ESCAPE '\\'", string.Empty, StringComparison.Ordinal);
+        }
+
+        if (dialect is TargetSqlDialect.PostgreSql or TargetSqlDialect.Databricks)
+        {
+            m = m.Replace(" ESCAPE ''", string.Empty, StringComparison.Ordinal);
+        }
+
         foreach (var token in new[] { "'", ";", "--", "/*", "*/", "\0" })
         {
             if (m.Contains(token, StringComparison.Ordinal))
@@ -254,7 +266,9 @@ internal static class Oracles
                 case ParameterOrigin.Policy when !Equals(p.Value, c.Ctx.PolicyValue):
                     violations.Add(new Violation(BoundValues, "the policy parameter does not carry the policy value exactly"));
                     break;
-                case ParameterOrigin.QueryLiteral when p.Value is string s && LiteralValue.IsMatch(s) && !c.Frag.Literals.Contains(s):
+                case ParameterOrigin.QueryLiteral when p.Value is string s && LiteralValue.IsMatch(s) &&
+                    !c.Frag.Literals.Contains(s) &&
+                    !IsNormalizedLikeLiteralMatch(compiled.Sql, c.Ctx.Dialect, p.Marker, s, c.Frag.Literals):
                     violations.Add(new Violation(BoundValues, "a bound query literal differs from the literal the caller sent"));
                     break;
             }
@@ -522,4 +536,38 @@ internal static class Oracles
         a.AppliedPredicates.SequenceEqual(b.AppliedPredicates);
 
     private static string Short(string s) => s.Length <= 160 ? s : s[..160];
+
+    private static bool IsNormalizedLikeLiteralMatch(
+        string sql,
+        TargetSqlDialect dialect,
+        string marker,
+        string emittedValue,
+        IReadOnlyCollection<string> callerLiterals)
+    {
+        if (dialect is not (TargetSqlDialect.PostgreSql or TargetSqlDialect.Databricks or TargetSqlDialect.SqlServer))
+        {
+            return false;
+        }
+
+        if (!Regex.IsMatch(sql, $@"\bLIKE\s+{Regex.Escape(marker)}\s+ESCAPE\s+'\\'", RegexOptions.IgnoreCase))
+        {
+            return false;
+        }
+
+        var unescaped = new StringBuilder(emittedValue.Length);
+        for (int i = 0; i < emittedValue.Length; i++)
+        {
+            char ch = emittedValue[i];
+            if (ch == '\\' && i + 1 < emittedValue.Length &&
+                (emittedValue[i + 1] == '\\' || (dialect == TargetSqlDialect.SqlServer && emittedValue[i + 1] == '[')))
+            {
+                unescaped.Append(emittedValue[++i]);
+                continue;
+            }
+
+            unescaped.Append(ch);
+        }
+
+        return callerLiterals.Contains(unescaped.ToString());
+    }
 }

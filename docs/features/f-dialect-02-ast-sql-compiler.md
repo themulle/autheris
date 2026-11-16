@@ -139,7 +139,7 @@ For Databricks, `CheckedExecutorFor(Databricks)` is non-transactional: it refuse
 | DuckDB | yes | yes | yes | yes | yes |
 | Databricks (Delta) | yes | yes, without the INSERT check option | yes, no subquery in the condition | yes, no subquery in the condition | yes |
 
-DML needs `WebSql:AllowDml`, a role from `WebSql:DmlWriterRoles` and the matching bit in `CompileRequest.Statements` (default `ReadOnly`). Not supported on any dialect and rejected at parse time: `RETURNING`/`OUTPUT`, `UPDATE ... FROM`, `DELETE ... USING`, joins in `UPDATE`/`DELETE`, `MERGE ... BY SOURCE` and `BY TARGET`.
+DML needs `WebSql:AllowDml`, explicit approved `WriteRules` on consents/access profiles and the matching bit in `CompileRequest.Statements` (default `ReadOnly`). Not supported on any dialect and rejected at parse time: `RETURNING`/`OUTPUT`, `UPDATE ... FROM`, `DELETE ... USING`, joins in `UPDATE`/`DELETE`, `MERGE ... BY SOURCE` and `BY TARGET`.
 
 ### 3.3 Capability limits (capability table `cap-6`)
 
@@ -299,7 +299,7 @@ The client message is always the fixed message of the code; it never contains `E
 
 - `SQL_POLICY_DENIED` is the one code for "table not usable": not registered, inactive, no columns, case-spelling conflict, governance column missing in the database, catalog load failure, unparsable or conflicting policy, access-decision deny. A denied (hidden) column and a column that does not exist produce the same code and message, so a response never tells whether a table or column exists.
 - A recursive statement that is not stopped by a depth or cycle error ends at `Gateway:WebSql:ExecutionTimeoutSeconds` as 504 `SQL_TIMEOUT` (PostgreSQL, SQLite through the execution guard, Oracle when the database does not raise ORA-32044). The driver text of a 530 or ORA-32044 error is never part of the response, the audit record or the log message.
-- `SQL_POLICY_VIOLATION` is reserved for statement-level rules that do not depend on a table: DDL, a function that is not permitted, a read-only token, a missing writer role, a table-less statement.
+- `SQL_POLICY_VIOLATION` is reserved for statement-level rules that do not depend on a table: DDL, a function that is not permitted, a read-only token, a missing write grant or DML transport gate, a table-less statement.
 - `SQL_COMPILER_INVARIANT` and `DML_CHECKED_EXECUTION_REQUIRED` are counted by `autheris_sql_compiler_invariant_failures_total`.
 - Other codes of the tenant middleware: 403 `TENANT_UNKNOWN`, 429 `TENANT_REGISTRATION_RATE_LIMITED`, 503 `TENANT_REGISTRY_UNAVAILABLE`, 403 `CROSS_TENANT_ACCESS_FORBIDDEN`, 401 `UNAUTHORIZED_NO_SID`.
 - GitOps declaration endpoints (for example `/consents/apply`) answer a curated 400 without the JSON parser message.
@@ -350,7 +350,7 @@ The audit key is `GovernanceDb:AuditHmacKeyVaultRef`, otherwise the `Autheris:Au
 
 `DeniedTablesStartupReporter` (background service, registered with `WebSql:Enabled`) lists, after the start, every table that the governed pipeline denies: stored row predicates that the production parser rejects (access profiles of the configured tenants and the default tenant, virtual filters) and tables of a dialect that WebSQL does not admit (`DIALECT_NOT_ADMITTED`). It logs one warning per table with table id, policy id and a stable code, never a predicate or a value. A store that cannot be read is a warning, not a failed start; the request path stays fail closed on its own.
 
-Correlated consent filters (Casbin) are covered by the pre-deploy lint `tools/PolicyPredicateLint`, which reads the whole governance store and must report 0 unparsable production predicates before a deployment.
+Correlated consent filters and active row/virtual filters are checked at host startup by `PolicyPredicateLinter` (`DeniedTablesStartupReporter`), which logs a warning and fails closed on any unparsable production predicate.
 
 ### 6.4 Other startup rules
 
@@ -363,8 +363,7 @@ Correlated consent filters (Casbin) are covered by the pre-deploy lint `tools/Po
 | Key | Default | Effect |
 |---|---|---|
 | `Gateway:WebSql:Enabled` | `false` | Enables WebSQL and the startup checks of section 6 |
-| `Gateway:WebSql:AllowDml` | `false` | Permits DML (with `DmlWriterRoles`) |
-| `Gateway:WebSql:DmlWriterRoles` | empty | Roles allowed to run DML |
+| `Gateway:WebSql:AllowDml` | `false` | Permits DML (with explicit approved `WriteRules`) |
 | `Gateway:WebSql:MaxAffectedRows` | `1000` | Affected-row limit per DML statement, enforced in the transaction; `0` = unlimited (listed as a DANGER bypass when DML is enabled) |
 | `Gateway:WebSql:ExecutionTimeoutSeconds` | `30` | Command timeout; SQLite statements are interrupted at this time (504) |
 | `Gateway:WebSql:AllowRecursiveCte` | `false` | Permits `WITH RECURSIVE` in read statements. Requires `ExecutionTimeoutSeconds` between 1 and 300 (the start fails otherwise) and logs one startup warning that names the temp-space prerequisite below |
@@ -467,7 +466,7 @@ Reference for operators and API clients moving from a release with the legacy to
 | Admitted dialects are exactly PostgreSQL, SQL Server, SQLite and Oracle | Databricks sources are not executable through WebSQL; Snowflake is never executable |
 | SQLite statements are interrupted at `WebSql:ExecutionTimeoutSeconds` | Clients that relied on unbounded SQLite statements receive 504 |
 | `RowFilters.SubqueryStrategy` is ignored | Policy subqueries are always correlated |
-| Pre-deploy | Run `tools/PolicyPredicateLint` against the production governance store (0 unparsable predicates) and review the denied-tables startup report |
+| Startup | Review the `DeniedTablesStartupReporter` (`PolicyPredicateLinter`) startup report for any unparsable production predicates or denied tables |
 
 **API behavior**
 

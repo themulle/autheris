@@ -17,7 +17,6 @@ public static class GatewaySqlDialectServiceExtensions
 
         services.TryAddEnumerable(ServiceDescriptor.Singleton<ISqlDialectProvider, SqlServerDialectProvider>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<ISqlDialectProvider, PostgreSqlDialectProvider>());
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<ISqlDialectProvider, SqliteDialectProvider>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<ISqlDialectProvider, OracleDialectProvider>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<ISqlDialectProvider, DatabricksDialectProvider>());
         services.TryAddSingleton<ISqlDialectRegistry, SqlDialectRegistry>();

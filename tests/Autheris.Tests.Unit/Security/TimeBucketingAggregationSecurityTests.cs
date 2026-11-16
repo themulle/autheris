@@ -24,6 +24,7 @@ using Xunit;
 /// Mandatory Phase 3 security tests for REQ-DATA-112B / Issue #112 Addendum:
 /// SEC-DATA112B-01..05 time-bucketing aggregations and SQL pushdown security guardrails.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class TimeBucketingAggregationSecurityTests
 {
     private static readonly TableIdentifier TelemetryTableId = new("telemetry", "dbo", "metrics");

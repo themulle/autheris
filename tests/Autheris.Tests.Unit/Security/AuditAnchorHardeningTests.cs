@@ -14,6 +14,7 @@ using Xunit;
 namespace Autheris.Tests.Unit.Security;
 
 /// <summary>Review E-11 (WORM anchor on separate storage + asymmetric signature) and R2-3 (durable query audit).</summary>
+[Trait("Category", "Security")]
 public sealed class AuditAnchorHardeningTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "autheris-anchor-" + Guid.NewGuid().ToString("N"));

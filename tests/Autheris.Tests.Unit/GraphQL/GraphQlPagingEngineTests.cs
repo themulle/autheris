@@ -445,7 +445,7 @@ public sealed class GraphQlPagingEngineTests
         var meta = new TableMetadata
         {
             Identifier = Customers,
-            Table = new Table { SourceName = "sales", SchemaName = "dbo", TableName = "customers", SourceType = "Sqlite" },
+            Table = new Table { SourceName = "sales", SchemaName = "dbo", TableName = "customers", SourceType = "PostgreSql" },
             PrimaryKeyColumns = ["id"],
             Columns =
             [
@@ -463,7 +463,7 @@ public sealed class GraphQlPagingEngineTests
                 "tenant-1")
         };
 
-        var compiled = TreeSqlCompiler.Compile(node, access, Autheris.Domain.Common.DatabaseDialect.Sqlite);
+        var compiled = TreeSqlCompiler.Compile(node, access, Autheris.Domain.Common.DatabaseDialect.PostgreSql);
 
         compiled.Sql.ShouldContain("\"tenant_id\" = ");
         compiled.Parameters.Values.ShouldContain("tenant-1");

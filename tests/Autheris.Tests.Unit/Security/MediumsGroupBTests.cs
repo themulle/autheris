@@ -6,7 +6,6 @@ using System.Linq;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.FinOps.Services;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -22,68 +21,11 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
-/// <summary>Review E-14 (shared FinOps budget), E-15 (row-level lakehouse isolation), R3-4 (cached anonymous health probe).</summary>
+/// <summary>Review E-14 (cluster state atomic increment), E-15 (row-level lakehouse isolation), R3-4 (cached anonymous health probe).</summary>
+[Trait("Category", "Security")]
 public sealed class MediumsGroupBTests
 {
     // ---------------------------------------------------------------- E-14
-
-    private static FocusCostAccountingService NewFinOps(InMemoryClusterStateProvider shared, decimal budget) =>
-        new(
-            Options.Create(new GatewayOptions
-            {
-                FinOps = new FinOpsOptions { Enabled = true, DefaultMonthlyBudget = budget, PricePerComputeSecond = 1m }
-            }),
-            NullLogger<FocusCostAccountingService>.Instance,
-            shared);
-
-    [Fact]
-    public async Task E14_BudgetIsSharedAcrossReplicas()
-    {
-        var shared = new InMemoryClusterStateProvider();
-        var replicaA = NewFinOps(shared, budget: 10m);
-        var replicaB = NewFinOps(shared, budget: 10m);
-
-        await replicaA.RecordUsageAsync("t1", "p", "op", "HttpCompute", 0, 0, computeMs: 6000);
-        (await replicaB.CheckBudgetAsync("t1")).IsExceeded.ShouldBeFalse();
-
-        await replicaB.RecordUsageAsync("t1", "p", "op", "HttpCompute", 0, 0, computeMs: 6000);
-
-        // 6 + 6 = 12 > 10: both replicas see the cluster-wide total, neither only its own 6.
-        (await replicaA.CheckBudgetAsync("t1")).IsExceeded.ShouldBeTrue();
-        (await replicaB.CheckBudgetAsync("t1")).CurrentSpend.ShouldBe(12m);
-    }
-
-    [Fact]
-    public async Task E14_ResetClearsSharedSpend()
-    {
-        var shared = new InMemoryClusterStateProvider();
-        var replicaA = NewFinOps(shared, budget: 5m);
-        var replicaB = NewFinOps(shared, budget: 5m);
-
-        await replicaA.RecordUsageAsync("t1", "p", "op", "HttpCompute", 0, 0, computeMs: 6000);
-        (await replicaB.CheckBudgetAsync("t1")).IsExceeded.ShouldBeTrue();
-
-        await replicaB.ResetSpendAsync("t1");
-        (await replicaA.CheckBudgetAsync("t1")).IsExceeded.ShouldBeFalse();
-    }
-
-    [Fact]
-    public async Task E14_FallsBackToLocalAccountingWhenSharedStoreIsUnreachable()
-    {
-        var shared = Substitute.For<Autheris.Application.State.IDistributedClusterStateProvider>();
-        shared.IncrementAsync(Arg.Any<string>(), Arg.Any<long>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
-            .Returns(new ValueTask<long?>((long?)null));
-        shared.GetAsync<long>(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(new ValueTask<long>(0L));
-
-        var service = new FocusCostAccountingService(
-            Options.Create(new GatewayOptions { FinOps = new FinOpsOptions { Enabled = true, DefaultMonthlyBudget = 5m, PricePerComputeSecond = 1m } }),
-            NullLogger<FocusCostAccountingService>.Instance,
-            shared);
-
-        await service.RecordUsageAsync("t1", "p", "op", "HttpCompute", 0, 0, computeMs: 6000);
-
-        (await service.CheckBudgetAsync("t1")).IsExceeded.ShouldBeTrue();
-    }
 
     [Fact]
     public async Task E14_InMemoryIncrementIsAtomic()

@@ -109,8 +109,16 @@ public sealed class PostgreSqlConsentRevocationAndWithdrawTests : IDisposable
         await EnsureTableAsync();
         var consent = await _repo.CreateConsentAsync(UserConsent("S-1-5-21-GRANTEE"));
 
-        await _repo.RevokeConsentAsync(consent.Id, Admin, "first reason");
-        await _repo.RevokeConsentAsync(consent.Id, Admin, "second reason");
+        var adminAuth = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(new System.Security.Claims.ClaimsPrincipal(
+            new System.Security.Claims.ClaimsIdentity(
+            [
+                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, Admin.Value),
+                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Role, "GovernanceAdmin"),
+                new System.Security.Claims.Claim("tenant_id", Tenant.Value)
+            ], "test")));
+
+        await _repo.RevokeConsentAsync(consent.Id, Admin, "first reason", adminAuth);
+        await _repo.RevokeConsentAsync(consent.Id, Admin, "second reason", adminAuth);
 
         var stored = await _repo.GetConsentByIdAsync(consent.Id);
         stored.ShouldNotBeNull();
@@ -123,7 +131,7 @@ public sealed class PostgreSqlConsentRevocationAndWithdrawTests : IDisposable
     {
         await EnsureTableAsync();
 
-        await Should.ThrowAsync<KeyNotFoundException>(() => _repo.RevokeConsentAsync(Guid.NewGuid(), Admin, "missing"));
+        await Should.ThrowAsync<KeyNotFoundException>(() => _repo.RevokeConsentAsync(Guid.NewGuid(), Admin, "missing", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null)));
     }
 
     [Fact]

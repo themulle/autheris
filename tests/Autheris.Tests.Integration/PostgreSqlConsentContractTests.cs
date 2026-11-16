@@ -72,7 +72,7 @@ public sealed class PostgreSqlConsentContractTests : IAsyncLifetime
         await using var repo = NewRepository();
 
         await Should.ThrowAsync<KeyNotFoundException>(() =>
-            repo.RevokeConsentAsync(Guid.NewGuid(), new Sid("S-1-5-21-ADMIN"), "test"));
+            repo.RevokeConsentAsync(Guid.NewGuid(), new Sid("S-1-5-21-ADMIN"), "test", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null)));
     }
 
     [Fact]
@@ -137,16 +137,22 @@ public sealed class PostgreSqlConsentContractTests : IAsyncLifetime
         {
             await conn.OpenAsync();
             await using var roleCmd = new NpgsqlCommand(@"
-                INSERT INTO ROLES (id, role_name, description) VALUES (@rid, 'GovernanceAdmin', 'Governance Administrator')
-                ON CONFLICT (role_name) DO NOTHING;
-                INSERT INTO ROLE_MEMBERS (id, role_id, member_type, member_sid)
-                SELECT @m1, id, 'User', 'S-1-5-21-APP1' FROM ROLES WHERE role_name = 'GovernanceAdmin';
-                INSERT INTO ROLE_MEMBERS (id, role_id, member_type, member_sid)
-                SELECT @m2, id, 'User', 'S-1-5-21-APP2' FROM ROLES WHERE role_name = 'GovernanceAdmin';
+                INSERT INTO DATA_OWNERS (id, ad_sid, ad_account, display_name, email, is_active)
+                SELECT @o1, 'S-1-5-21-APP1', 'CORP\\S-1-5-21-APP1', 'Owner 1', 'S-1-5-21-APP1@corp.example', 1
+                WHERE NOT EXISTS (SELECT 1 FROM DATA_OWNERS WHERE ad_sid = 'S-1-5-21-APP1');
+                INSERT INTO TABLE_OWNERS (id, table_id, data_owner_id, owner_role)
+                SELECT @to1, @tid, id, 'PRIMARY' FROM DATA_OWNERS WHERE ad_sid = 'S-1-5-21-APP1';
+                INSERT INTO DATA_OWNERS (id, ad_sid, ad_account, display_name, email, is_active)
+                SELECT @o2, 'S-1-5-21-APP2', 'CORP\\S-1-5-21-APP2', 'Owner 2', 'S-1-5-21-APP2@corp.example', 1
+                WHERE NOT EXISTS (SELECT 1 FROM DATA_OWNERS WHERE ad_sid = 'S-1-5-21-APP2');
+                INSERT INTO TABLE_OWNERS (id, table_id, data_owner_id, owner_role)
+                SELECT @to2, @tid, id, 'PRIMARY' FROM DATA_OWNERS WHERE ad_sid = 'S-1-5-21-APP2';
             ", conn);
-            roleCmd.Parameters.AddWithValue("@rid", Guid.NewGuid().ToString());
-            roleCmd.Parameters.AddWithValue("@m1", Guid.NewGuid().ToString());
-            roleCmd.Parameters.AddWithValue("@m2", Guid.NewGuid().ToString());
+            roleCmd.Parameters.AddWithValue("@o1", Guid.NewGuid().ToString());
+            roleCmd.Parameters.AddWithValue("@to1", Guid.NewGuid().ToString());
+            roleCmd.Parameters.AddWithValue("@o2", Guid.NewGuid().ToString());
+            roleCmd.Parameters.AddWithValue("@to2", Guid.NewGuid().ToString());
+            roleCmd.Parameters.AddWithValue("@tid", meta.Table.Id.ToString());
             await roleCmd.ExecuteNonQueryAsync();
         }
 
@@ -206,10 +212,11 @@ public sealed class PostgreSqlConsentContractTests : IAsyncLifetime
         var (table, tableId) = await CreateRevokeTableAsync(repo);
         var consent = await repo.CreateConsentAsync(UserConsent(table, tableId, "S-1-5-21-ALICE", "tenant-a"));
 
-        await Should.ThrowAsync<UnauthorizedAccessException>(() =>
-            repo.RevokeConsentAsync(consent.Id, new Sid("S-1-5-21-MALLORY"), "nope"));
-        await Should.ThrowAsync<UnauthorizedAccessException>(() =>
-            repo.ReplaceConsentsAsync([consent.Id], [], new Sid("S-1-5-21-MALLORY"), "nope"));
+        var none = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null);
+        await Should.ThrowAsync<Autheris.Domain.Exceptions.ConsentRevocationForbiddenException>(() =>
+            repo.RevokeConsentAsync(consent.Id, new Sid("S-1-5-21-MALLORY"), "nope", none));
+        await Should.ThrowAsync<Autheris.Domain.Exceptions.ConsentRevocationForbiddenException>(() =>
+            repo.ReplaceConsentsAsync([consent.Id], [], new Sid("S-1-5-21-MALLORY"), "nope", none));
 
         (await repo.GetConsentByIdAsync(consent.Id))!.IsRevoked.ShouldBeFalse();
     }
@@ -227,7 +234,7 @@ public sealed class PostgreSqlConsentContractTests : IAsyncLifetime
         var mine = await repo.CreateConsentAsync(UserConsent(table, tableId, alice.Value, "tenant-a"));
         var foreign = await repo.CreateConsentAsync(UserConsent(table, tableId, alice.Value, "tenant-b"));
 
-        await repo.ReplaceConsentsAsync([mine.Id], [], alice, "self revoke of tenant-a only");
+        await repo.ReplaceConsentsAsync([mine.Id], [], alice, "self revoke of tenant-a only", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null));
 
         (await repo.GetConsentByIdAsync(mine.Id))!.IsRevoked.ShouldBeTrue();
         (await repo.GetConsentByIdAsync(foreign.Id))!.IsRevoked.ShouldBeFalse();

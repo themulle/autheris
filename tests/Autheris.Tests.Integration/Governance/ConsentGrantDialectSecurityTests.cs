@@ -10,6 +10,7 @@ namespace Autheris.Tests.Integration.Governance;
 /// ARCH-MNT-22 runtime security pins of the revoke path on PostgreSQL (the PostgreSQL and SQL Server variants run in the Integration contract
 /// tests of CI, which need containers): the refactored statement-level core must keep authorisation, atomicity and the row-locked revoke by id.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class ConsentGrantDialectSecurityTests : IDisposable
 {
     private static readonly TenantId TenantA = new("tenant-a");
@@ -62,8 +63,9 @@ public sealed class ConsentGrantDialectSecurityTests : IDisposable
         var epochBefore = await _repo.GetTableEpochAsync(_table);
         var auditBefore = (await _repo.GetAuditLogEntriesAsync(100)).Count(e => e.EventType == "CONSENT_REVOKED");
 
-        await Should.ThrowAsync<UnauthorizedAccessException>(() => _repo.RevokeConsentAsync(consent.Id, new Sid("S-1-5-21-MALLORY"), "nope"));
-        await Should.ThrowAsync<UnauthorizedAccessException>(() => _repo.ReplaceConsentsAsync([consent.Id], [], new Sid("S-1-5-21-MALLORY"), "nope"));
+        var none = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null);
+        await Should.ThrowAsync<Autheris.Domain.Exceptions.ConsentRevocationForbiddenException>(() => _repo.RevokeConsentAsync(consent.Id, new Sid("S-1-5-21-MALLORY"), "nope", none));
+        await Should.ThrowAsync<Autheris.Domain.Exceptions.ConsentRevocationForbiddenException>(() => _repo.ReplaceConsentsAsync([consent.Id], [], new Sid("S-1-5-21-MALLORY"), "nope", none));
 
         (await _repo.GetConsentByIdAsync(consent.Id))!.IsRevoked.ShouldBeFalse();
         (await _repo.GetTableEpochAsync(_table)).ShouldBe(epochBefore);
@@ -79,8 +81,15 @@ public sealed class ConsentGrantDialectSecurityTests : IDisposable
         await EnsureTableAsync();
         var mine = await _repo.CreateConsentAsync(UserConsent("S-1-5-21-Alice", TenantA));
         var foreign = await _repo.CreateConsentAsync(UserConsent("S-1-5-21-Alice", TenantB));
+        var tenantAAdmin = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(new System.Security.Claims.ClaimsPrincipal(
+            new System.Security.Claims.ClaimsIdentity(
+            [
+                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, Admin.Value),
+                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Role, "GovernanceAdmin"),
+                new System.Security.Claims.Claim("tenant_id", TenantA.Value)
+            ], "test")));
 
-        await _repo.ReplaceConsentsAsync([mine.Id], [], Admin, "revoke tenant-a only");
+        await _repo.ReplaceConsentsAsync([mine.Id], [], Admin, "revoke tenant-a only", tenantAAdmin);
 
         (await _repo.GetConsentByIdAsync(mine.Id))!.IsRevoked.ShouldBeTrue();
         (await _repo.GetConsentByIdAsync(foreign.Id))!.IsRevoked.ShouldBeFalse();
@@ -96,7 +105,7 @@ public sealed class ConsentGrantDialectSecurityTests : IDisposable
         await EnsureTableAsync();
         var consent = await _repo.CreateConsentAsync(UserConsent("S-1-5-21-Alice", TenantA));
 
-        await _repo.RevokeConsentAsync(consent.Id, new Sid("S-1-5-21-Alice"), "self");
+        await _repo.RevokeConsentAsync(consent.Id, new Sid("S-1-5-21-Alice"), "self", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null));
 
         (await _repo.GetConsentByIdAsync(consent.Id))!.IsRevoked.ShouldBeTrue();
         (await _repo.GetAuditLogEntriesAsync(100)).ShouldContain(e => e.EventType == "CONSENT_REVOKED" && e.Decision == "REVOKED");

@@ -63,6 +63,18 @@ public static class SqlTransports
         [WebSql, Trino, Rest, Mcp, ArrowExport, SqlEndpoints, AsyncJob, Olap];
 }
 
+/// <summary>
+/// Transports wired to governed write grant enforcement. Non-listed transports must reject DML fail-closed.
+/// </summary>
+public static class DmlTransports
+{
+    public static System.Collections.Frozen.FrozenSet<string> Allowed { get; } =
+        System.Collections.Frozen.FrozenSet.ToFrozenSet([SqlTransports.WebSql], StringComparer.OrdinalIgnoreCase);
+
+    public static bool IsAllowed(string? transport) =>
+        !string.IsNullOrWhiteSpace(transport) && Allowed.Contains(transport);
+}
+
 /// <param name="PlannedTableRead">
 /// True only for a table read whose SQL the gateway planned itself (OData, GraphQL, MCP, connectors). Such a read is not
 /// client SQL and is therefore not gated by <c>WebSql:Enabled</c>; it still runs through the full governed pipeline.
@@ -86,7 +98,8 @@ public sealed record GovernedSqlQueryRequest(
     SqlPageWindow? Page = null,
     string? NextToken = null,
     Action<GovernedSqlPageOutcome>? OnPageOutcome = null,
-    Action<IReadOnlyList<Autheris.Domain.Model.WebSqlIndexHint>>? OnIndexHints = null)
+    Action<IReadOnlyList<Autheris.Domain.Model.WebSqlIndexHint>>? OnIndexHints = null,
+    bool ReadOnlyRequired = false)
 {
     /// <summary>
     /// Issue #280: parameters whose names the gateway generated for a planned read (internal; never from client input). The setter is
@@ -100,6 +113,7 @@ public sealed record GovernedSqlQueryRequest(
     internal ResultByteBudget? ResultByteBudget { get; init; }
 
     internal Autheris.Application.Common.Quota.QueryCostAdmission? Admission { get; init; }
+    public Action<Autheris.Application.Usage.SourceExecutionStats>? OnSourceStats { get; init; }
     public int? PageOffset { get; init; }
     public bool IsPaged { get; init; }
 }
@@ -116,7 +130,8 @@ public sealed record GovernedSqlResult(
     GovernedSqlPageResponse? Page = null,
     string? Next = null,
     string? PagingUnavailable = null,
-    IReadOnlyList<Autheris.Domain.Model.WebSqlIndexHint>? IndexHints = null);
+    IReadOnlyList<Autheris.Domain.Model.WebSqlIndexHint>? IndexHints = null,
+    [property: System.Text.Json.Serialization.JsonIgnore] Autheris.Application.Usage.SourceExecutionStats SourceStats = default);
 
 public interface IGovernedSqlExecutionService
 {

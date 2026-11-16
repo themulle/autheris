@@ -16,7 +16,6 @@ public sealed class SqlDialectConsistencyTests
     [Theory]
     [InlineData(DatabaseDialect.SqlServer, TargetSqlDialect.SqlServer, true)]
     [InlineData(DatabaseDialect.PostgreSql, TargetSqlDialect.PostgreSql, true)]
-    [InlineData(DatabaseDialect.Sqlite, TargetSqlDialect.Sqlite, true)]
     [InlineData(DatabaseDialect.Oracle, TargetSqlDialect.Oracle, true)]
     public void SqlDialectMapper_MapsDialectsCorrectly(DatabaseDialect dialect, TargetSqlDialect expectedTarget, bool expectedExecutable)
     {
@@ -42,8 +41,8 @@ public sealed class SqlDialectConsistencyTests
         foreach (DatabaseDialect dialect in Enum.GetValues<DatabaseDialect>())
         {
             bool isExec = SqlDialectMapper.IsExecutable(dialect);
-            bool factorySupports = dialect is DatabaseDialect.SqlServer or DatabaseDialect.PostgreSql or DatabaseDialect.Sqlite or DatabaseDialect.Oracle or DatabaseDialect.Databricks;
-            isExec.ShouldBe(factorySupports, $"Mismatch for dialect {dialect}: IsExecutable={isExec}, Factory={factorySupports}");
+            bool expectedExec = dialect is DatabaseDialect.SqlServer or DatabaseDialect.PostgreSql or DatabaseDialect.Oracle or DatabaseDialect.Databricks;
+            isExec.ShouldBe(expectedExec, $"Mismatch for dialect {dialect}: IsExecutable={isExec}, Expected={expectedExec}");
         }
     }
 
@@ -52,12 +51,10 @@ public sealed class SqlDialectConsistencyTests
     [InlineData(DatabaseDialect.SqlServer, "a;--")]
     [InlineData(DatabaseDialect.PostgreSql, "a\"b")]
     [InlineData(DatabaseDialect.PostgreSql, "a;--")]
-    [InlineData(DatabaseDialect.Sqlite, "a\"b")]
-    [InlineData(DatabaseDialect.Sqlite, "a;--")]
     public void StrictIdentifierValidation_RejectsOrProperlyQuotes_MaliciousIdentifiers(DatabaseDialect dialect, string maliciousId)
     {
         // Security Invariant 3: strict identifier quoting parity & validation
-        dialect.ShouldBeOneOf(DatabaseDialect.SqlServer, DatabaseDialect.PostgreSql, DatabaseDialect.Sqlite);
+        dialect.ShouldBeOneOf(DatabaseDialect.SqlServer, DatabaseDialect.PostgreSql);
         Should.Throw<ArgumentException>(() => DatabaseDialectExtensions.ValidateIdentifier(maliciousId));
     }
 }

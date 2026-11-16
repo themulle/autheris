@@ -20,6 +20,7 @@ using Xunit;
 /// MCP-1: resources/list and resources/read must apply the same table and column visibility as the GraphQL catalog:
 /// unconditional Deny consents hide the table, denied or not granted columns appear in no resource.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class McpResourceColumnFilterMcp1Tests
 {
     private const string Tenant = "tenant-a";
@@ -51,6 +52,7 @@ public sealed class McpResourceColumnFilterMcp1Tests
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetAllTablesAsync(Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(new List<TableMetadata> { Table(Hr), Table(Payroll) }));
+        Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(repo);
 
         var consentRepo = Substitute.For<IConsentRepository>();
         consentRepo.GetAllActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<IEnumerable<string>?>(), Arg.Any<DateTimeOffset?>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
@@ -124,8 +126,9 @@ public sealed class McpResourceColumnFilterMcp1Tests
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetAllTablesAsync(Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(new List<TableMetadata> { tableWithDeny }));
+        Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(repo);
 
-        var compiler = new SemanticMcpCompiler(repo, NullLogger<SemanticMcpCompiler>.Instance);
+        var compiler = new SemanticMcpCompiler(repo, NullLogger<SemanticMcpCompiler>.Instance, options: Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions { Insecure = new Autheris.Domain.Options.InsecureGettingStartedOptions { danger_bypass_mcp_auth = true } }));
         var resources = await compiler.GetSemanticResourcesAsync("corp");
 
         var glossary = resources.FirstOrDefault(r => r.Uri.StartsWith("glossary://", StringComparison.Ordinal));
@@ -165,6 +168,7 @@ public sealed class McpResourceColumnFilterMcp1Tests
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetAllTablesAsync(Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(new List<TableMetadata> { Table(Hr) }));
+        Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(repo);
 
         var compiler = new SemanticMcpCompiler(repo, NullLogger<SemanticMcpCompiler>.Instance, null, null);
         var resources = await compiler.GetSemanticResourcesAsync(principal: User());

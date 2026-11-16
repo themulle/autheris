@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Catalog;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Sql.Policy;
@@ -56,8 +57,11 @@ internal sealed class DmlDependencyScan(
     string dataSource)
 {
     private readonly List<IRowPolicy?> _seen = [];
-    private IReadOnlyList<TableMetadata>? _tables;
+    private IReadOnlyList<TableMetadata> _pageItems = [];
     private int _next;
+    private string? _after;
+    private int _pagesRead;
+    private bool _exhausted;
 
     public async Task<bool> IsReadAsync(TableIdentifier target, CancellationToken ct)
     {
@@ -66,31 +70,64 @@ internal sealed class DmlDependencyScan(
             return true;
         }
 
-        _tables ??= await repository.GetAllTablesAsync(ct).ConfigureAwait(false);
-        while (_next < _tables.Count)
+        while (true)
         {
-            var table = _tables[_next++];
-
-            // Only an inactive table is skipped (not part of the catalog); a table without columns is decided like any other, and a denied
-            // decision carries no row policy the caller is subject to.
-            if (!table.Table.IsActive)
+            while (_next < _pageItems.Count)
             {
-                continue;
+                var table = _pageItems[_next++];
+
+                // Only an inactive table is skipped (not part of the catalog); a table without columns is decided like any other, and a denied
+                // decision carries no row policy the caller is subject to.
+                if (!table.Table.IsActive)
+                {
+                    continue;
+                }
+
+                var decision = await decide(table, table.Identifier, table.Columns.Select(c => c.ColumnName).ToList()).ConfigureAwait(false);
+                if (!decision.IsAllowed)
+                {
+                    continue;
+                }
+
+                _seen.Add(decision.RowPolicy);
+                if (DmlPolicyDependencyGuard.IsReadByRowPolicy([decision.RowPolicy], target, dataSource))
+                {
+                    return true;
+                }
             }
 
-            var decision = await decide(table, table.Identifier, table.Columns.Select(c => c.ColumnName).ToList()).ConfigureAwait(false);
-            if (!decision.IsAllowed)
+            if (_exhausted)
             {
-                continue;
+                return false;
             }
 
-            _seen.Add(decision.RowPolicy);
-            if (DmlPolicyDependencyGuard.IsReadByRowPolicy([decision.RowPolicy], target, dataSource))
+            if (_pagesRead >= CatalogTablePageReader.DefaultMaxPages)
             {
-                return true;
+                throw new InvalidOperationException($"Catalog table scan exceeded maximum page bound of {CatalogTablePageReader.DefaultMaxPages}.");
+            }
+
+            var page = await repository.QueryTablesAsync(
+                    new CatalogTableQuery(After: _after, Limit: CatalogTableQuery.DefaultLimit),
+                    ct).ConfigureAwait(false)
+                ?? throw new InvalidOperationException("Catalog repository returned a null page.");
+
+            _pagesRead++;
+            _pageItems = page.Items;
+            _next = 0;
+
+            if (!page.HasMore || string.IsNullOrEmpty(page.NextAfter))
+            {
+                _exhausted = true;
+            }
+            else
+            {
+                if (string.Equals(_after, page.NextAfter, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException("Catalog table keyset pagination failed to advance continuation cursor.");
+                }
+
+                _after = page.NextAfter;
             }
         }
-
-        return false;
     }
 }

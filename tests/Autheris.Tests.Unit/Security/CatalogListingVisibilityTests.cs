@@ -28,6 +28,7 @@ using Xunit;
 /// looking at consents. They now apply the same catalog visibility as the GraphQL <c>catalog</c> field and MCP:
 /// a table is listed only with an active Allow consent; GovernanceAdmin and ClusterAdmin see everything.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class CatalogListingVisibilityTests
 {
     private const string Tenant = "tenant-1";
@@ -66,7 +67,7 @@ public sealed class CatalogListingVisibilityTests
             .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([Lakehouse(OrdersId), Lakehouse(SalariesId)]));
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<TableMetadata?>(null));
-        return repo;
+        return Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(repo);
     }
 
     private static IConsentRepository Consents(params Consent[] consents)

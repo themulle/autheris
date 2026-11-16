@@ -1,5 +1,5 @@
 using System.Data;
-using Microsoft.Data.Sqlite;
+using Autheris.Tests.Unit;
 using Npgsql;
 using Shouldly;
 using Xunit;
@@ -31,7 +31,7 @@ public sealed class RecordingDbConnectionTests
     [Fact]
     public async Task RecordingDbConnection_ServesQueuedReadersAndHandsOutProviderParameters()
     {
-        using var conn = new RecordingDbConnection(() => new SqliteCommand());
+        using var conn = new RecordingDbConnection(() => new FakeDbCommand());
         var table = new DataTable();
         table.Columns.Add("id", typeof(string));
         table.Rows.Add("x");
@@ -39,7 +39,7 @@ public sealed class RecordingDbConnectionTests
 
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT id";
-        cmd.CreateParameter().ShouldBeOfType<SqliteParameter>();
+        cmd.CreateParameter().ShouldBeOfType<FakeDbParameter>();
         await using var reader = await cmd.ExecuteReaderAsync();
 
         (await reader.ReadAsync()).ShouldBeTrue();

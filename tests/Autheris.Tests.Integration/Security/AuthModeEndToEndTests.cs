@@ -134,7 +134,7 @@ public sealed class AuthModeEndToEndTests : IClassFixture<AuthModeEndToEndTests.
             {
                 await repo.UpsertTableMetadataAsync(new TableMetadata
                 {
-                    Table = new Table { Id = Guid.NewGuid(), DisplayName = id.TableName, TableName = id.TableName, SchemaName = id.Schema, SourceType = "Sqlite", SourceName = id.Domain, IsActive = true },
+                    Table = new Table { Id = Guid.NewGuid(), DisplayName = id.TableName, TableName = id.TableName, SchemaName = id.Schema, SourceType = "PostgreSql", SourceName = id.Domain, IsActive = true },
                     Identifier = id,
                     Columns =
                     [
@@ -273,7 +273,27 @@ public sealed class AuthModeEndToEndTests : IClassFixture<AuthModeEndToEndTests.
         return (await _fixture.Factory.CreateClient().SendAsync(request)).StatusCode;
     }
 
-    // Row filter and mask parity through the explain endpoint is pending #733 (explain answers 404 for the request context).
+    private async Task<HttpResponseMessage> PostExplainAsync(TableIdentifier table, Mode mode)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/authz/explain")
+        {
+            Content = new StringContent(
+                JsonSerializer.Serialize(new
+                {
+                    subject = new { sid = UserSid },
+                    @object = table.ToString(),
+                    operation = "Read"
+                }),
+                Encoding.UTF8,
+                "application/json")
+        };
+        Authenticate(request, mode);
+        using (request)
+        {
+            return await _fixture.Factory.CreateClient().SendAsync(request);
+        }
+    }
+
     [Theory]
     [MemberData(nameof(Modes))]
     public async Task Same_user_same_groups_identical_security_context_across_modes(Mode mode)
@@ -289,6 +309,46 @@ public sealed class AuthModeEndToEndTests : IClassFixture<AuthModeEndToEndTests.
         // Decision parity: the group grant allows the open table and the table without a grant is denied, in every mode.
         (await StatusAsync("/api/v1/envoy/check/api/v1/" + Open.TableName, mode)).ShouldBe(HttpStatusCode.OK);
         (await StatusAsync("/api/v1/envoy/check/api/v1/" + NoGrant.TableName, mode)).ShouldBe(HttpStatusCode.Forbidden);
+
+        // Explain parity across all authentication modes (restricted with row filter + mask, open unconstrained, no-grant 404).
+        using var restrictedResponse = await PostExplainAsync(Restricted, mode);
+        restrictedResponse.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var restrictedBody = await restrictedResponse.Content.ReadAsStringAsync();
+        restrictedBody.ShouldNotContain("\"EU\"");
+        using var restrictedJson = JsonDocument.Parse(restrictedBody);
+        restrictedJson.RootElement.GetProperty("allowed").GetBoolean().ShouldBeTrue();
+        restrictedJson.RootElement.GetProperty("subjectResolved").GetBoolean().ShouldBeTrue();
+        restrictedJson.RootElement.GetProperty("groups").GetProperty("groupSids").EnumerateArray().Select(g => g.GetString()).ShouldBe([GroupSid]);
+        restrictedJson.RootElement.GetProperty("groups").GetProperty("status").GetString().ShouldBe("Complete");
+        restrictedJson.RootElement.GetProperty("grants").GetArrayLength().ShouldBe(0);
+
+        var restrictedCols = restrictedJson.RootElement.GetProperty("columns").EnumerateArray()
+            .ToDictionary(c => c.GetProperty("columnName").GetString()!, c => c, StringComparer.OrdinalIgnoreCase);
+        restrictedCols.Keys.ShouldBe(["id", "region", "email"], ignoreOrder: true);
+        restrictedCols["email"].GetProperty("maskType").GetString().ShouldNotBeNullOrWhiteSpace();
+        restrictedCols["email"].GetProperty("level").GetRawText().ShouldNotBe(restrictedCols["id"].GetProperty("level").GetRawText());
+        if (restrictedCols["id"].TryGetProperty("maskType", out var idMask))
+        {
+            idMask.ValueKind.ShouldBe(JsonValueKind.Null);
+        }
+
+        foreach (var entry in restrictedJson.RootElement.GetProperty("trace").EnumerateArray())
+        {
+            if (entry.TryGetProperty("sourceId", out var sourceId))
+            {
+                sourceId.ValueKind.ShouldBe(JsonValueKind.Null);
+            }
+        }
+
+        using var openResponse = await PostExplainAsync(Open, mode);
+        openResponse.StatusCode.ShouldBe(HttpStatusCode.OK);
+        using var openJson = JsonDocument.Parse(await openResponse.Content.ReadAsStringAsync());
+        openJson.RootElement.GetProperty("allowed").GetBoolean().ShouldBeTrue();
+        openJson.RootElement.GetProperty("columns").EnumerateArray().Select(c => c.GetProperty("columnName").GetString())
+            .ShouldBe(["id", "region", "email"], ignoreOrder: true);
+
+        using var noGrantResponse = await PostExplainAsync(NoGrant, mode);
+        noGrantResponse.StatusCode.ShouldBe(HttpStatusCode.NotFound);
     }
 
     [Fact]

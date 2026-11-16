@@ -23,6 +23,11 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 10
+    ignore:
+      - dependency-name: "mcr.microsoft.com/dotnet/sdk"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "mcr.microsoft.com/dotnet/aspnet"
+        update-types: ["version-update:semver-major"]
 
   # WP-OI-CI-1 (Q-CI-2): one weekly group per ecosystem for deploy and benchmarks.
   - package-ecosystem: "docker"
@@ -35,6 +40,11 @@ updates:
     groups:
       docker-deploy-benchmarks:
         patterns: ["*"]
+    ignore:
+      - dependency-name: "mcr.microsoft.com/dotnet/sdk"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "mcr.microsoft.com/dotnet/aspnet"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "docker-compose"
     directory: "/"

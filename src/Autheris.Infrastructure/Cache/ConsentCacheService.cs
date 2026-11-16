@@ -27,6 +27,7 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, long>> _tableCacheKeys = new(StringComparer.OrdinalIgnoreCase);
     private static long _keySequence;
     private readonly TimeProvider _timeProvider;
+    private readonly Autheris.Application.Catalog.ICatalogVersionProvider? _catalogVersionProvider;
     private readonly IDisposable? _subscription;
 
     private readonly object _syncLock = new();
@@ -44,7 +45,7 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
     private static bool IsL2Failure(Exception ex) =>
         ex is RedisException or TimeoutException or CryptographicException or MemoryPack.MemoryPackSerializationException;
 
-    private sealed record CacheEntryEnvelope(TableAccessDecision Decision, long Epoch);
+    private sealed record CacheEntryEnvelope(TableAccessDecision Decision, long Epoch, DateTimeOffset ValidUntil);
 
     public ConsentCacheService(
         IMemoryCache memoryCache,
@@ -56,9 +57,11 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
         IKeyVaultSecretProvider? secretProvider = null,
         ILogger<ConsentCacheService>? logger = null,
         Autheris.Domain.Security.IRestrictedScopePolicy? restrictedScopes = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        Autheris.Application.Catalog.ICatalogVersionProvider? catalogVersionProvider = null)
     {
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _catalogVersionProvider = catalogVersionProvider;
         _memoryCache = memoryCache;
         _epochValidationService = epochValidationService;
         _serializer = serializer;
@@ -113,7 +116,9 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
             return result;
         }
 
-        var candidateEntries = new Dictionary<TableIdentifier, (string CacheKey, long Epoch, TableAccessDecision Decision, bool FromL2, TimeSpan? L1PromotionTtl, RedisKey? L2Key)>();
+        contextHash = await ResolveEffectiveContextHashAsync(contextHash, ct).ConfigureAwait(false);
+        var now = _timeProvider.GetUtcNow();
+        var candidateEntries = new Dictionary<TableIdentifier, (string CacheKey, long Epoch, TableAccessDecision Decision, DateTimeOffset ValidUntil, bool FromL2, TimeSpan? L1PromotionTtl, RedisKey? L2Key)>();
         var missingTables = new List<TableIdentifier>();
 
         foreach (var table in tables)
@@ -121,7 +126,16 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
             var cacheKey = BuildCacheKey(tenant, userSid, table, contextHash);
             if (_memoryCache.TryGetValue(cacheKey, out CacheEntryEnvelope? envelope) && envelope != null)
             {
-                candidateEntries[table] = (cacheKey, envelope.Epoch, envelope.Decision, false, null, null);
+                if (envelope.ValidUntil == default || now >= envelope.ValidUntil)
+                {
+                    _memoryCache.Remove(cacheKey);
+                    RemoveKeyFromTableIndex(table, cacheKey);
+                    missingTables.Add(table);
+                }
+                else
+                {
+                    candidateEntries[table] = (cacheKey, envelope.Epoch, envelope.Decision, envelope.ValidUntil, false, null, null);
+                }
             }
             else
             {
@@ -166,12 +180,22 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
                     }
 
                     TableAccessDecision? decision = null;
-                    if (payloadBytes != null && _serializer.TryDeserialize<CachedConsentEnvelope>(payloadBytes, out var l2Env) && l2Env != null && MatchesTable(l2Env, table)
-                        && (decision = l2Env.ToDecision(_restrictionFingerprint)) != null)
+                    CachedConsentEnvelope? l2Env = null;
+                    if (payloadBytes != null && _serializer.TryDeserialize<CachedConsentEnvelope>(payloadBytes, out l2Env) && l2Env != null && MatchesTable(l2Env, table))
                     {
-                        var remaining = l2ExpiresAt - _timeProvider.GetUtcNow();
+                        decision = l2Env.ToDecision(_restrictionFingerprint, now);
+                        if (decision == null)
+                        {
+                            await _redisDb.KeyDeleteAsync(l2Key).ConfigureAwait(false);
+                        }
+                    }
+
+                    if (decision != null && l2Env != null)
+                    {
+                        var envelopeExpiry = l2ExpiresAt < l2Env.ValidUntil ? l2ExpiresAt : l2Env.ValidUntil;
+                        var remaining = envelopeExpiry - now;
                         var l1Ttl = remaining < MaxL1PromotionTtl ? remaining : MaxL1PromotionTtl;
-                        candidateEntries[table] = (cacheKey, l2Env.Epoch, decision, true, l1Ttl > TimeSpan.Zero ? l1Ttl : null, l2Key);
+                        candidateEntries[table] = (cacheKey, l2Env.Epoch, decision, l2Env.ValidUntil, true, l1Ttl > TimeSpan.Zero ? l1Ttl : null, l2Key);
                     }
                     else
                     {
@@ -223,7 +247,7 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
             {
                 if (candidate.FromL2 && candidate.L1PromotionTtl.HasValue)
                 {
-                    SetL1Internal(table, candidate.CacheKey, new CacheEntryEnvelope(candidate.Decision, candidate.Epoch), candidate.L1PromotionTtl.Value);
+                    SetL1Internal(table, candidate.CacheKey, new CacheEntryEnvelope(candidate.Decision, candidate.Epoch, candidate.ValidUntil), candidate.L1PromotionTtl.Value);
                 }
 
                 RecordCacheHit();
@@ -262,9 +286,19 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
         string? contextHash = null,
         CancellationToken ct = default)
     {
+        contextHash = await ResolveEffectiveContextHashAsync(contextHash, ct).ConfigureAwait(false);
+        var now = _timeProvider.GetUtcNow();
         var cacheKey = BuildCacheKey(tenant, userSid, table, contextHash);
         if (_memoryCache.TryGetValue(cacheKey, out CacheEntryEnvelope? envelope) && envelope != null)
         {
+            if (envelope.ValidUntil == default || now >= envelope.ValidUntil)
+            {
+                RecordCacheMiss();
+                _memoryCache.Remove(cacheKey);
+                RemoveKeyFromTableIndex(table, cacheKey);
+                return null;
+            }
+
             // Validate epoch
             var isValid = await _epochValidationService.IsEpochValidAsync(table, envelope.Epoch, ct).ConfigureAwait(false);
             if (!isValid)
@@ -303,22 +337,23 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
                 if (payloadBytes != null && _serializer.TryDeserialize<CachedConsentEnvelope>(payloadBytes, out var l2Env) && l2Env != null && MatchesTable(l2Env, table))
                 {
                     var isL2EpochValid = await _epochValidationService.IsEpochValidAsync(table, l2Env.Epoch, ct).ConfigureAwait(false);
-                    // a legacy or foreign-fingerprint entry is a miss; L1 promotion only happens after this check.
-                    var decision = isL2EpochValid ? l2Env.ToDecision(_restrictionFingerprint) : null;
+                    // a legacy, foreign-fingerprint, or expired entry is a miss; L1 promotion only happens after this check.
+                    var decision = isL2EpochValid ? l2Env.ToDecision(_restrictionFingerprint, now) : null;
                     if (isL2EpochValid && decision != null)
                     {
                         // RR-L4-06: never extend the original (security-relevant) TTL on promotion.
-                        var remaining = l2ExpiresAt - _timeProvider.GetUtcNow();
+                        var envelopeExpiry = l2ExpiresAt < l2Env.ValidUntil ? l2ExpiresAt : l2Env.ValidUntil;
+                        var remaining = envelopeExpiry - now;
                         var l1Ttl = remaining < MaxL1PromotionTtl ? remaining : MaxL1PromotionTtl;
                         if (l1Ttl > TimeSpan.Zero)
                         {
-                            SetL1Internal(table, cacheKey, new CacheEntryEnvelope(decision, l2Env.Epoch), l1Ttl);
+                            SetL1Internal(table, cacheKey, new CacheEntryEnvelope(decision, l2Env.Epoch, l2Env.ValidUntil), l1Ttl);
                         }
 
                         RecordCacheHit();
                         return decision;
                     }
-                    else if (!isL2EpochValid)
+                    else
                     {
                         await _redisDb.KeyDeleteAsync(l2Key).ConfigureAwait(false);
                     }
@@ -364,6 +399,7 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
             return;
         }
 
+        contextHash = await ResolveEffectiveContextHashAsync(contextHash, ct).ConfigureAwait(false);
         var cacheKey = BuildCacheKey(tenant, userSid, table, contextHash);
         var currentEpoch = await _epochValidationService.GetCurrentEpochAsync(table, ct).ConfigureAwait(false);
 
@@ -376,7 +412,9 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
         }
 
         var storedEpoch = epochAtLoad ?? currentEpoch;
-        var envelope = new CacheEntryEnvelope(decision, storedEpoch);
+        var now = _timeProvider.GetUtcNow();
+        var validUntil = now.Add(ttl);
+        var envelope = new CacheEntryEnvelope(decision, storedEpoch, validUntil);
 
         SetL1Internal(table, cacheKey, envelope, ttl);
 
@@ -386,9 +424,9 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
             try
             {
                 var l2Key = (RedisKey)$"{_prefix}consent:l2:{cacheKey}";
-                var l2Dto = CachedConsentEnvelope.FromDecision(decision, storedEpoch, _restrictionFingerprint);
+                var l2Dto = CachedConsentEnvelope.FromDecision(decision, storedEpoch, _restrictionFingerprint, validUntil);
                 var binaryPayload = _serializer.Serialize(l2Dto);
-                var protectedPayload = ProtectL2Payload(l2Key.ToString(), binaryPayload, _timeProvider.GetUtcNow().Add(ttl));
+                var protectedPayload = ProtectL2Payload(l2Key.ToString(), binaryPayload, validUntil);
                 await _redisDb.StringSetAsync(l2Key, protectedPayload, ttl).ConfigureAwait(false);
             }
             catch (Exception ex) when (IsL2Failure(ex))
@@ -507,6 +545,18 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
 
     // INF-03: ':' is legal in table components, so each part is escaped to keep the key unambiguous.
     private static string EscapeTablePart(string part) => Uri.EscapeDataString(part.ToLowerInvariant());
+
+    private async ValueTask<string?> ResolveEffectiveContextHashAsync(string? contextHash, CancellationToken ct)
+    {
+        if (_catalogVersionProvider is null)
+        {
+            return contextHash;
+        }
+
+        var version = await _catalogVersionProvider.GetCatalogVersionAsync(ct).ConfigureAwait(false);
+        var baseContext = string.IsNullOrWhiteSpace(contextHash) ? "default" : contextHash;
+        return $"{baseContext}|cat:{version.StructureVersion}.{version.ContentVersion}";
+    }
 
     private static string BuildCacheKey(TenantId tenant, Sid userSid, TableIdentifier table, string? contextHash = null)
     {

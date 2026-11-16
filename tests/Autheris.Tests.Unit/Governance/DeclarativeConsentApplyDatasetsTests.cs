@@ -132,7 +132,7 @@ public sealed class DeclarativeConsentApplyDatasetsTests
         var tenantAdmin = new ClaimsPrincipal(new ClaimsIdentity(
         [
             new Claim(ClaimTypes.PrimarySid, "S-1-5-21-TA"), new Claim("tenant_id", "tenant-a"),
-            new Claim(ClaimTypes.Role, "GovernanceAdmin"), new Claim(ClaimTypes.Role, "GovernanceAdmin")
+            new Claim(ClaimTypes.Role, "GovernanceAdmin")
         ], "test"));
         var apply = new DeclarativeConsentApplyService(Substitute.For<ITableMetadataRepository>(), _consents, Substitute.For<IAuditLogRepository>(), null, service);
 

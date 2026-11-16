@@ -1,1 +1,0 @@
-SELECT id, mask(email) FROM sales.public.customers

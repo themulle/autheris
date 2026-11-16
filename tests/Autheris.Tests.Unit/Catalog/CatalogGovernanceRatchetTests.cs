@@ -10,6 +10,7 @@ using Xunit;
 namespace Autheris.Tests.Unit.Catalog;
 
 /// <summary>Issue #94 (SEC-94-11): the ratchet carries an incoming key definition only when it asks to replace it.</summary>
+[Trait("Category", "Security")]
 public sealed class CatalogGovernanceRatchetTests
 {
     private static TableMetadata Meta(IReadOnlyList<string> pk, IReadOnlyList<TableIndexDefinition> indexes, bool replace) => new()
@@ -100,7 +101,10 @@ public sealed class CatalogGovernanceRatchetTests
             NonPersonal = true,
             RequiredFilterColumns = ImmutableArray.Create("a"),
             RequiredFilterColumnGroups = ImmutableArray.Create(ImmutableArray.Create("a", "b")),
-            ExpectedRows = 1_000_000
+            ExpectedRows = 1_000_000,
+            DiscoveryHidden = true,
+            SamplesDisabled = true,
+            ObjectKind = DiscoveryObjectKind.View
         },
         Columns =
         [
@@ -115,7 +119,8 @@ public sealed class CatalogGovernanceRatchetTests
                 LongDescription = "persisted long a",
                 Texts = new LocalizedTexts(new Dictionary<string, LocalizedTextEntry> { ["de"] = new("Spalte A") }),
                 DocumentationSource = "Admin",
-                Meta = new Dictionary<string, string> { ["role"] = "dimension" }
+                Meta = new Dictionary<string, string> { ["role"] = "dimension" },
+                DiscoveryHidden = true
             },
             new TableColumn { Id = Guid.NewGuid(), ColumnName = "b", DisplayName = "Column B", DataType = "varchar" }
         ],
@@ -127,9 +132,6 @@ public sealed class CatalogGovernanceRatchetTests
         RowFilterEvaluation = new RowFilterEvaluationSettings(RowFilterEvaluationStrategy.KeySetCache, 60, 100),
         CatalogTags = ["dbt"],
         CatalogView = CatalogView.Summary,
-        ReleaseProfileToCatalogViewers = true,
-        ProfilePublicationPolicy = DatasetProfilePublicationPolicy.FullCoarsenedProfile,
-        PredefinedSyntheticSamples = [new Dictionary<string, object?> { ["a"] = 1 }],
         EstimatedRowCount = 42,
         ExpectedRows = 43,
         MinGroupSize = 7,
@@ -204,9 +206,6 @@ public sealed class CatalogGovernanceRatchetTests
         merged.PrimaryKeyColumns.ShouldBe(["a"]);
         merged.RowFilterEvaluation.ShouldBe(existing.RowFilterEvaluation);
         merged.CatalogTags.ShouldBe(["dbt"]);
-        merged.ReleaseProfileToCatalogViewers.ShouldBeTrue();
-        merged.ProfilePublicationPolicy.ShouldBe(DatasetProfilePublicationPolicy.FullCoarsenedProfile);
-        merged.PredefinedSyntheticSamples.Count.ShouldBe(1);
         merged.EstimatedRowCount.ShouldBe(42);
         merged.ExpectedRows.ShouldBe(43);
         merged.MinGroupSize.ShouldBe(7);
@@ -305,7 +304,7 @@ public sealed class CatalogGovernanceRatchetTests
     }
 
     [Fact]
-    public void Merge_KeepsOwnerTenantAndReleasePolicies()
+    public void Merge_KeepsOwnerTenantAndDeletedKeyPolicy()
     {
         var id = new TableIdentifier("d", "s", "t");
         var existing = FullyPopulatedExisting(id);
@@ -313,8 +312,6 @@ public sealed class CatalogGovernanceRatchetTests
         {
             Identifier = id,
             OwnerTenantId = "tenant-other",
-            ReleaseProfileToCatalogViewers = false,
-            ProfilePublicationPolicy = DatasetProfilePublicationPolicy.FormatAndEmptyShareOnly,
             DeletedKeyPolicy = DeletedKeyPolicy.KnownKeysOnly,
             Table = new Table { SourceName = "d", SchemaName = "s", TableName = "t" },
             Columns = [new TableColumn { ColumnName = "a" }]
@@ -323,8 +320,6 @@ public sealed class CatalogGovernanceRatchetTests
         var merged = CatalogGovernanceRatchet.Merge(incoming, existing);
 
         merged.OwnerTenantId.ShouldBe("tenant-a");
-        merged.ReleaseProfileToCatalogViewers.ShouldBeTrue();
-        merged.ProfilePublicationPolicy.ShouldBe(DatasetProfilePublicationPolicy.FullCoarsenedProfile);
         merged.DeletedKeyPolicy.ShouldBe(DeletedKeyPolicy.AllDeletedKeys);
     }
 
@@ -337,7 +332,7 @@ public sealed class CatalogGovernanceRatchetTests
         nameof(TableMetadata.PrimaryKeyColumns),
         nameof(TableMetadata.PrimaryKeyDirections),
         nameof(TableMetadata.Indexes),
-        nameof(TableMetadata.PhysicalIndexes), // issue #404: written only by the catalog sync seam (IPhysicalIndexRepository), never by an upsert
+        // Kept empty: PhysicalIndexes removed in WP-SIMPL-44 PR 4.
         nameof(TableMetadata.ReplaceKeyDefinition),
         nameof(TableMetadata.ReplaceColumns),
         nameof(TableMetadata.CatalogTags),

@@ -8,6 +8,7 @@ using System.Text.Json;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using Autheris.Tests.Common.Hosting;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
@@ -15,13 +16,18 @@ using Shouldly;
 using Xunit;
 using Autheris.Tests.Integration.Governance;
 
-public class InsecureGettingStartedIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
+public class InsecureGettingStartedIntegrationTests : IClassFixture<InsecureGettingStartedIntegrationTests.HostFixture>
 {
     private readonly WebApplicationFactory<Program> _factory;
 
-    public InsecureGettingStartedIntegrationTests(WebApplicationFactory<Program> factory)
+    public InsecureGettingStartedIntegrationTests(HostFixture factory)
     {
-        _factory = factory.WithWebHostBuilder(builder =>
+        _factory = factory;
+    }
+
+    public sealed class HostFixture : IntegrationHost
+    {
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseSetting("Gateway:Insecure:danger_allow_anonymous_access", "true");
             builder.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
@@ -36,7 +42,7 @@ public class InsecureGettingStartedIntegrationTests : IClassFixture<WebApplicati
 
             builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
             builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("InsecureGettingStartedIntegrationTests"));
-        });
+        }
     }
 
     [Fact]
@@ -59,7 +65,7 @@ public class InsecureGettingStartedIntegrationTests : IClassFixture<WebApplicati
     [Fact]
     public async Task AutoApprove_ImmediatelyApprovesConsentRequest()
     {
-        var autoApproveFactory = _factory.WithWebHostBuilder(b =>
+        using var autoApproveFactory = _factory.WithWebHostBuilder(b =>
         {
             b.UseSetting("Gateway:Insecure:warn_auto_approve_access_requests", "true");
         });

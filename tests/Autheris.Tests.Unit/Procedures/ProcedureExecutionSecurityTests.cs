@@ -25,6 +25,7 @@ using Xunit;
 namespace Autheris.Tests.Unit.Procedures;
 
 /// <summary>PLAN-PROC-152-INC1: governed procedures INC-1 security slice (SEC-PROC152-01..11).</summary>
+[Trait("Category", "Security")]
 public partial class ProcedureExecutionSecurityTests
 {
     private const string NotFound = "Procedure endpoint not found.";
@@ -114,7 +115,6 @@ public partial class ProcedureExecutionSecurityTests
         public CapturingLogger Logger { get; } = new();
         public GatewayOptions Options { get; set; } = new();
         public ProcedureDenialAuditLimiter? Limiter { get; set; }
-        public IPolicyEnforcementService PolicyEnforcement { get; set; } = global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance;
         public Func<string, ColumnAccessLevel, TableAccessDecision>? Decision { get; set; }
 
         private bool _auditWired;
@@ -141,7 +141,7 @@ public partial class ProcedureExecutionSecurityTests
     {
         var claims = new List<Claim> { new(claimType, value) };
         claims.AddRange(roles.Select(r => new Claim(ClaimTypes.Role, r)));
-        return new ClaimsPrincipal(new ClaimsIdentity(claims.Append(DefaultTenantCaller.Claim), "test"));
+        return Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(new ClaimsPrincipal(new ClaimsIdentity(claims.Append(DefaultTenantCaller.Claim), "test")));
     }
 
     private static ClaimsPrincipal Anonymous() => new(new ClaimsIdentity());
@@ -591,7 +591,8 @@ public partial class ProcedureExecutionSecurityTests
     public async Task T_PROC152_07_Lease_PrimarySidWinsOverSub()
     {
         var e = Active();
-        var user = new ClaimsPrincipal(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "S-1-5-21-1001"), new Claim("sub", "other")], "test"));
+        var user = Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(
+            new ClaimsPrincipal(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "S-1-5-21-1001"), new Claim("sub", "other")], "test")));
         await Run(e, user: user);
         e.Gate.Calls.Single().Key.ShouldBe("tenant-a|s-1-5-21-1001|sales.orders");
     }
@@ -663,8 +664,7 @@ public partial class ProcedureExecutionSecurityTests
 
     private static async Task<GovernedProcedureResult> RunCleared(
         Func<TableAccessDecision, TableAccessDecision> decision,
-        Func<TableMetadata, TableMetadata>? meta = null,
-        bool abac = false)
+        Func<TableMetadata, TableMetadata>? meta = null)
     {
         var e = Active(d => d with { ClearedResultColumns = ["salary"] });
         e.Tables.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(ci =>
@@ -678,14 +678,6 @@ public partial class ProcedureExecutionSecurityTests
         });
         e.Resolution.ResolveAccess(Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>())
             .Returns(ci => decision(TableAccessDecision.Allowed(ci.ArgAt<TableIdentifier>(3), new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase), hasUnconstrainedColumnAllow: true)));
-        if (abac)
-        {
-            var pe = Substitute.For<IPolicyEnforcementService>();
-            pe.HasPolicies(Arg.Any<TenantId>()).Returns(true);
-            pe.EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>())
-                .Returns(ci => ValueTask.FromResult(TableAccessDecision.Allowed(ci.Arg<SecurityEvaluationContext>().TargetTable, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)));
-            e.PolicyEnforcement = pe;
-        }
 
         return await Run(e);
     }
@@ -731,22 +723,6 @@ public partial class ProcedureExecutionSecurityTests
 
     [Fact]
     [Trait("Category", "Security")]
-    public async Task T_PROC152_10_ClearedColumns_WithAbacRewrite_SensitivityOnlyMaskStillLifted()
-    {
-        var r = await RunCleared(d => d, abac: true);
-        r.Rows[0]["salary"].ShouldBe(1000m);
-    }
-
-    [Fact]
-    [Trait("Category", "Security")]
-    public async Task T_PROC152_10_ClearedColumns_WithAbacRewrite_ExplicitMaskNotLifted()
-    {
-        var r = await RunCleared(d => WithColumn(d, ColumnAccessLevel.Mask), abac: true);
-        r.Rows[0]["salary"].ShouldBe("***");
-    }
-
-    [Fact]
-    [Trait("Category", "Security")]
     public async Task T_PROC152_11_ClearedColumns_SensitivitySetUnavailable_LiftsNothing()
     {
         // a catalog column without a name makes the sensitivity-only set impossible to compute (fail closed: nothing lifted)
@@ -757,17 +733,14 @@ public partial class ProcedureExecutionSecurityTests
     // ---------- zero tables, all modes ----------
 
     [Theory]
-    [InlineData("catalog")]
     [InlineData("declared")]
-    [InlineData("catalog-bypass")]
     [InlineData("declared-bypass")]
     [Trait("Category", "Security")]
     public async Task T_PROC152_12_ZeroTableProcedure_AllModes_InvisibleAndNeverInvoked(string mode)
     {
         var e = Active(d => d with
         {
-            ResultTable = null,
-            ValidationMode = mode.StartsWith("declared", StringComparison.Ordinal) ? ProcedureValidationMode.Declared : ProcedureValidationMode.Catalog
+            ResultTable = null
         }, tables: []);
         if (mode.EndsWith("bypass", StringComparison.Ordinal))
         {

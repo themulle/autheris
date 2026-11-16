@@ -33,6 +33,7 @@ using static Autheris.Tests.Unit.GraphQL.TypedAggregateTestHost;
 /// <summary>
 /// Mandatory Phase 3 security tests for Issue #112: SEC-112-01..12 and conditions C-1..C-11 (T_SEC_DATA112_*).
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class Issue112SecurityConditionsTests
 {
     private static readonly TableIdentifier OrdersTableId = new("sales", "dbo", "orders");
@@ -206,22 +207,6 @@ public sealed class Issue112SecurityConditionsTests
                 }
             }
         });
-    }
-
-    [Fact]
-    [Trait("Category", "Security")]
-    public void T_SEC_DATA112_08_NoisyCacheKeyParameterAndDecisionBinding()
-    {
-        // F-5 / SEC-112-12 / T-S-08: Cache key differentiates on parameter values and tenant
-        var query2024 = new AggregationQuery(OrdersTableId, ["region"], [new AggregateSelection(AggregateFunction.Count, Alias: "n")],
-            Where: new TableFilterClause("year = @p0", new Dictionary<string, object?> { ["@p0"] = 2024 }, ["year"]));
-        var query2025 = new AggregationQuery(OrdersTableId, ["region"], [new AggregateSelection(AggregateFunction.Count, Alias: "n")],
-            Where: new TableFilterClause("year = @p0", new Dictionary<string, object?> { ["@p0"] = 2025 }, ["year"]));
-
-        var key2024 = NoisyCacheKey.Build(new TenantId("tenant-1"), "user1", query2024, "fp1");
-        var key2025 = NoisyCacheKey.Build(new TenantId("tenant-1"), "user1", query2025, "fp1");
-
-        key2024.ShouldNotBe(key2025);
     }
 
     [Fact]

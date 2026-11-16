@@ -19,7 +19,6 @@ using Autheris.Infrastructure.Cache;
 using Autheris.Infrastructure.Persistence;
 using Autheris.Infrastructure.Persistence.Catalog;
 using Autheris.Tests.Common;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -30,6 +29,7 @@ using Xunit;
 /// Security Verification Suite for Multilingual Catalog Texts, Language Negotiation & Search (#146).
 /// Covers binding guardrails SEC-CAT146-01..07.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class MultilingualCatalogSecurityTests
 {
     /// <summary>

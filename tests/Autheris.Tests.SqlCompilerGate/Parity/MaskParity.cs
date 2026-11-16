@@ -42,7 +42,6 @@ public static class MaskParity
 
     private static TargetSqlDialect Target(DatabaseDialect d) => d switch
     {
-        DatabaseDialect.Sqlite => TargetSqlDialect.Sqlite,
         DatabaseDialect.PostgreSql => TargetSqlDialect.PostgreSql,
         DatabaseDialect.SqlServer => TargetSqlDialect.SqlServer,
         DatabaseDialect.Oracle => TargetSqlDialect.Oracle,

@@ -11,7 +11,7 @@ public sealed class AccessProfile
     public required TenantId TenantId { get; init; }
     public MaskingPolicyMode MaskingMode { get; init; } = MaskingPolicyMode.Default;
     public List<string> TargetTables { get; init; } = []; // z. B. ["*.*"] oder ["tem.gps_position", "md.*"]
-    public string? RowFilterPredicate { get; set; }      // z. B. "status != 'DELIVERED'"
+    public IReadOnlyList<GrantRowScopeEntry> RowScope { get; init; } = [];
     public IReadOnlyList<AccessProfileWriteRule> WriteRules { get; init; } = [];
     /// <summary>the typed assignments (users, groups, roles) with their approvals and expiry. They are the only source of who holds a profile (O-5d: plain subject lists were removed).</summary>
     public List<AccessProfileAssignment> Assignments { get; init; } = [];
@@ -24,7 +24,7 @@ public sealed class AccessProfile
     /// EP-01: True if any target table pattern contains a wildcard ('*' or '?').
     /// </summary>
     public bool HasWildcardPattern =>
-        TargetTables != null && TargetTables.Exists(p => p.Contains('*') || p.Contains('?'));
+        TargetTables != null && TargetTables.Exists(p => p.Contains('*', StringComparison.Ordinal) || p.Contains('?', StringComparison.Ordinal));
 
     /// <summary>
     /// expiry after the read-time clamp. A profile with typed assignments (as loaded for a caller: its effective, matched ones) stays active while ANY

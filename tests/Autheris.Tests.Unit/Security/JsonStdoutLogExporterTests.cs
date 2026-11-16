@@ -19,6 +19,7 @@ using Xunit;
 /// exporter thread, where an unhandled exception terminates the process) and must serialise only safe attribute
 /// value types. Everything else becomes a fixed type marker without calling ToString() on the value.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class JsonStdoutLogExporterTests
 {
     private sealed class Secret

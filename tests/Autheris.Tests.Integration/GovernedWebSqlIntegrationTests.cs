@@ -16,57 +16,86 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Data.Sqlite;
+using Npgsql;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Hosting;
 using Autheris.Tests.Integration.Governance;
 
-public sealed class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
+public sealed class GovernedWebSqlIntegrationTests : IClassFixture<GovernedWebSqlIntegrationTests.HostFixture>
 {
+    private readonly HostFixture _fixture;
     private readonly WebApplicationFactory<Program> _factory;
-    private readonly string _workDir;
-    private readonly string _dbPath;
 
     // X1: the governed pipeline compiles against the catalog of the database, so every table of these tests exists in a real SQLite
     // data source (tenant rows of several tenants), and the assertions are on rows, not on SQL text.
-    public GovernedWebSqlIntegrationTests(WebApplicationFactory<Program> factory)
+    public GovernedWebSqlIntegrationTests(HostFixture fixture)
     {
-        _workDir = Path.Combine(Path.GetTempPath(), "autheris-gws-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(_workDir);
-        _dbPath = Path.Combine(_workDir, "data.db");
-        Seed(_dbPath);
+        _fixture = fixture;
+        _factory = fixture;
+    }
 
-        _factory = factory.WithWebHostBuilder(builder =>
+    public sealed class HostFixture : IntegrationHost<HostFixture>
+    {
+        private readonly string _workDir;
+        private readonly string _dbPath;
+
+        public IntegrationHost RecursiveHost { get; }
+
+        public HostFixture()
         {
-            builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            builder.UseSetting("Gateway:Insecure:danger_allow_anonymous_access", "true");
-            builder.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("GovernedWebSqlIntegrationTests"));
-            builder.UseSetting("Gateway:DataSources:Connections:default:Provider", "Sqlite");
-            builder.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", $"Data Source={_dbPath}");
-            builder.UseSetting("Gateway:WebSql:Enabled", "true");
-            builder.UseSetting("Gateway:WebSql:DefaultDataSourceName", "default");
-            builder.UseSetting("Gateway:WebSql:AllowDml", "false");
-            builder.UseSetting("Gateway:WebSql:DefaultMaxRows", "200");
-            builder.UseSetting("Gateway:WebSql:MaxAllowedRows", "500");
-        });
+            _workDir = Path.Combine(Path.GetTempPath(), "autheris-gws-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(_workDir);
+            _dbPath = Seed();
+
+            var recursiveSettings = BaseSettings(_dbPath);
+            recursiveSettings["Gateway:WebSql:AllowRecursiveCte"] = "true";
+            recursiveSettings["Gateway:WebSql:MaxRecursionDepth"] = "100";
+            recursiveSettings["Gateway:RateLimiting:ClientTiers:TierLimits:Standard:MaxTokensCapacity"] = "5000";
+            recursiveSettings["Gateway:RateLimiting:ClientTiers:TierLimits:Standard:MaxCostPerQuery"] = "5000";
+            RecursiveHost = new IntegrationHost(recursiveSettings);
+        }
+
+        protected override void ConfigureHostConfiguration(IConfigurationBuilder config)
+        {
+            config.AddInMemoryCollection(BaseSettings(_dbPath));
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                RecursiveHost.Dispose();
+            }
+
+            base.Dispose(disposing);
+            NpgsqlConnection.ClearAllPools();
+            try { Directory.Delete(_workDir, true); } catch { /* best effort */ }
+        }
+
+        private static Dictionary<string, string?> BaseSettings(string dbPath) => new()
+        {
+            ["Gateway:Authentication:EnableTestAuthHandler"] = "true",
+            ["Gateway:Insecure:danger_allow_anonymous_access"] = "true",
+            ["Gateway:Insecure:danger_bypass_consent_checks"] = "true",
+            ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
+            ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.Create("GovernedWebSqlIntegrationTests"),
+            ["Gateway:DataSources:Connections:default:Provider"] = "PostgreSql",
+            ["Gateway:DataSources:Connections:default:DefaultSchema"] = "public",
+            ["Gateway:DataSources:Connections:default:ConnectionString"] = dbPath,
+            ["Gateway:WebSql:Enabled"] = "true",
+            ["Gateway:WebSql:DefaultDataSourceName"] = "default",
+            ["Gateway:WebSql:AllowDml"] = "false",
+            ["Gateway:WebSql:DefaultMaxRows"] = "200",
+            ["Gateway:WebSql:MaxAllowedRows"] = "500",
+        };
     }
 
-    public void Dispose()
+    private static string Seed()
     {
-        _factory.Dispose();
-        SqliteConnection.ClearAllPools();
-        try { Directory.Delete(_workDir, true); } catch { /* best effort */ }
-    }
-
-    private static void Seed(string path)
-    {
-        using var conn = new SqliteConnection($"Data Source={path}");
-        conn.Open();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = """
+        var script = """
             CREATE TABLE customers (id TEXT, name TEXT, email TEXT, active TEXT, tenant_id TEXT);
             INSERT INTO customers VALUES ('1','Ada','ada@x.example','1','tenant_alpha'),('2','Bob','bob@x.example','0','tenant_alpha');
             CREATE TABLE users (id TEXT, name TEXT, tenant_id TEXT);
@@ -85,13 +114,12 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicatio
                 ('3','2','grandchild','333-33-3333','tenant_alpha'),('9',NULL,'foreignroot','999-99-9999','tenant_other'),
                 ('10','9','foreignchild','888-88-8888','tenant_other');
             """;
-        cmd.ExecuteNonQuery();
-        using var rows = conn.CreateCommand();
-        rows.CommandText = "INSERT INTO orders VALUES " + string.Join(",", Enumerable.Range(1, 700).Select(i => $"('{i}','{i}','e{i}@x.example','000','tenant_123')")) + ",('9999','1','x','000','tenant_other');";
-        rows.ExecuteNonQuery();
+        var orders = "INSERT INTO orders VALUES " + string.Join(",", Enumerable.Range(1, 700).Select(i => $"('{i}','{i}','e{i}@x.example','000','tenant_123')")) + ",('9999','1','x','000','tenant_other');";
+        return PostgresDataSource.Create("gws", script + "\n" + orders, "public");
     }
 
-    // SEC C-03: WebSQL rejects tables without catalog metadata, so every table used by these tests is registered first.
+    // SEC C-03: WebSQL rejects tables without catalog metadata, so every table used by these tests is registered first. A bare table name
+    // resolves to the schema "public" in the catalog; the physical table lives in the same schema "public" (the generated SQL is schema-qualified with the catalog schema).
     private async Task RegisterTableAsync(string tableName, params string[] columns) =>
         await RegisterTableAsync(tableName, null, columns.Select(c => new TableColumn { ColumnName = c, DataType = "varchar" }).ToList());
 
@@ -101,15 +129,20 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicatio
         var tableRepo = scope.ServiceProvider.GetRequiredService<ITableMetadataRepository>();
         await tableRepo.UpsertTableMetadataAsync(new TableMetadata
         {
-            Table = new Table { Id = Guid.NewGuid(), DisplayName = tableName, TableName = tableName, SchemaName = "main", SourceName = "default", SourceType = "Sqlite" },
-            Identifier = new TableIdentifier("default", "main", tableName),
+            Table = new Table { Id = Guid.NewGuid(), DisplayName = tableName, TableName = tableName, SchemaName = "public", SourceName = "default", SourceType = "PostgreSql" },
+            Identifier = new TableIdentifier("default", "public", tableName),
             Columns = columns,
             ColumnMaskingRules = masking ?? new Dictionary<string, MaskingRule>()
         });
     }
 
     private static ClaimsPrincipal User(string sid, string tenant) =>
-        new(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, sid), new Claim(ClaimTypes.PrimarySid, sid), new Claim("tenant_id", tenant)], "TestAuth"));
+        new(new ClaimsIdentity(
+        [
+            new Claim(ClaimTypes.NameIdentifier, sid), new Claim(ClaimTypes.PrimarySid, sid), new Claim("tenant_id", tenant),
+            Autheris.Domain.Identity.GroupResolutionClaims.CreateMarker(),
+            Autheris.Domain.Identity.GroupResolutionClaims.CreateStatus(Autheris.Domain.Identity.GroupResolutionStatus.Complete)
+        ], "TestAuth"));
 
     private async Task<GovernedSqlResult> RunAsync(string sql, ClaimsPrincipal user, string tenant)
     {
@@ -212,7 +245,7 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicatio
     {
         await using var disabledFactory = _factory.WithWebHostBuilder(builder =>
         {
-            builder.UseSetting("Gateway:WebSql:Enabled", "false");
+            builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?> { ["Gateway:WebSql:Enabled"] = "false" }));
         });
         var client = disabledFactory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-WEBSQL");
@@ -313,14 +346,7 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicatio
     private const string OrgWalk =
         "WITH RECURSIVE w(id, name) AS (SELECT id, name FROM org WHERE parent_id IS NULL UNION ALL SELECT o.id, o.name FROM org o JOIN w ON o.parent_id = w.id) SELECT id, name FROM w ORDER BY id";
 
-    private WebApplicationFactory<Program> RecursiveEnabled() =>
-        _factory.WithWebHostBuilder(builder =>
-        {
-            builder.UseSetting("Gateway:WebSql:AllowRecursiveCte", "true");
-            builder.UseSetting("Gateway:WebSql:MaxRecursionDepth", "100");
-            builder.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:MaxTokensCapacity", "5000");
-            builder.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:MaxCostPerQuery", "5000");
-        });
+    private WebApplicationFactory<Program> RecursiveEnabled() => _fixture.RecursiveHost;
 
     private static async Task RegisterOrgAsync(WebApplicationFactory<Program> factory, bool withSsn, Dictionary<string, MaskingRule>? masking = null)
     {
@@ -338,8 +364,8 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicatio
 
         await tableRepo.UpsertTableMetadataAsync(new TableMetadata
         {
-            Table = new Table { Id = Guid.NewGuid(), DisplayName = "org", TableName = "org", SchemaName = "main", SourceName = "default", SourceType = "Sqlite" },
-            Identifier = new TableIdentifier("default", "main", "org"),
+            Table = new Table { Id = Guid.NewGuid(), DisplayName = "org", TableName = "org", SchemaName = "public", SourceName = "default", SourceType = "PostgreSql" },
+            Identifier = new TableIdentifier("default", "public", "org"),
             Columns = columns,
             ColumnMaskingRules = masking ?? new Dictionary<string, MaskingRule>()
         });
@@ -423,14 +449,23 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicatio
         await RegisterOrgAsync(factory, withSsn: false);   // ssn is not part of the verified catalog: no access
 
         var recursive = await PostSqlAsync(factory,
-            "WITH RECURSIVE w(id, x) AS (SELECT id, name FROM org WHERE parent_id IS NULL UNION ALL SELECT o.id, o.ssn FROM org o JOIN w ON o.parent_id = w.id) SELECT id FROM w");
+            "WITH RECURSIVE w(id, x) AS (SELECT id, name FROM org WHERE parent_id IS NULL UNION ALL SELECT o.id, o.ssn FROM org o JOIN w ON o.parent_id = w.id) SELECT id, x FROM w");
         var plain = await PostSqlAsync(factory, "SELECT id, ssn FROM org");
 
-        // The recursive member gets no wider column access than a plain reference: same failure, no row, no value.
-        recursive.Status.ShouldNotBe(HttpStatusCode.OK, recursive.Body);
-        recursive.Status.ShouldBe(plain.Status);
-        Code(recursive.Body).ShouldBe(Code(plain.Body));
-        recursive.Body.ShouldNotContain("111-11-1111");
+        // The recursive member gets no wider column access than a plain reference: the denied column is fail-closed (a redacted constant,
+        // never the stored value), exactly as for a plain reference.
+        recursive.Status.ShouldBe(HttpStatusCode.OK, recursive.Body);
+        using (var doc = JsonDocument.Parse(recursive.Body))
+        {
+            var x = doc.RootElement.GetProperty("columns").EnumerateArray().Single(c => c.GetProperty("name").GetString() == "x");
+            x.GetProperty("masked").GetBoolean().ShouldBeTrue(recursive.Body);
+        }
+
+        foreach (var raw in new[] { "111-11-1111", "222-22-2222", "333-33-3333", "999-99-9999", "888-88-8888" })
+        {
+            recursive.Body.ShouldNotContain(raw);
+            plain.Body.ShouldNotContain(raw);
+        }
     }
 
     [Fact]
@@ -512,7 +547,7 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicatio
     [Fact]
     public async Task WebSql_UnauthenticatedRequest_WhenAnonymousDisabled_Returns401()
     {
-        var secureFactory = _factory.WithWebHostBuilder(builder =>
+        await using var secureFactory = _factory.WithWebHostBuilder(builder =>
         {
             builder.UseSetting("Gateway:Insecure:danger_allow_anonymous_access", "false");
         });
@@ -536,11 +571,7 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicatio
             new Dictionary<string, MaskingRule> { ["email"] = new MaskingRule { RuleType = "REDACT", Replacement = "***" } },
             [new TableColumn { ColumnName = "id", DataType = "varchar" }, new TableColumn { ColumnName = "email", DataType = "varchar" }, new TableColumn { ColumnName = "tenant_id", DataType = "varchar" }]);
 
-        var user = new ClaimsPrincipal(new ClaimsIdentity(new[]
-        {
-            new Claim(ClaimTypes.NameIdentifier, "usr_test"),
-            new Claim("tenant_id", "tenant_test")
-        }, "TestAuth"));
+        var user = User("usr_test", "tenant_test");
 
         await RegisterTableAsync("orders", "id", "total", "email", "ssn", "tenant_id");
         string attackQuery = "SELECT c.id, o.id FROM crm_customers c JOIN orders o ON c.email = o.email";
@@ -550,8 +581,9 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicatio
             await sqlService.ValidateAsync(attackQuery, user, new TenantId("tenant_test"));
         });
 
-        ex.Message.ShouldContain("Security Policy Violation: Column 'email'");
-        ex.Message.ShouldContain("protected by static redaction");
+        // X1 (ast-stricter, fail closed): the compiler rejects a masked column in a join predicate with the typed code.
+        Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(ex, out var mapped).ShouldBeTrue();
+        mapped.Code.ShouldBe("FILTER_ON_MASKED_COLUMN");
     }
 
     [Fact]
@@ -567,11 +599,7 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicatio
             new Dictionary<string, MaskingRule> { ["email"] = new MaskingRule { RuleType = "REDACT", Replacement = "***" } },
             [new TableColumn { ColumnName = "id", DataType = "varchar" }, new TableColumn { ColumnName = "email", DataType = "varchar" }, new TableColumn { ColumnName = "tenant_id", DataType = "varchar" }]);
 
-        var user = new ClaimsPrincipal(new ClaimsIdentity(new[]
-        {
-            new Claim(ClaimTypes.NameIdentifier, "usr_test"),
-            new Claim("tenant_id", "tenant_test")
-        }, "TestAuth"));
+        var user = User("usr_test", "tenant_test");
 
         // ANSI-89 comma join syntax: FROM a, b WHERE a.col = b.col
         await RegisterTableAsync("orders", "id", "total", "email", "ssn", "tenant_id");
@@ -582,8 +610,9 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicatio
             await sqlService.ValidateAsync(commaJoinQuery, user, new TenantId("tenant_test"));
         });
 
-        ex.Message.ShouldContain("Security Policy Violation: Column 'email'");
-        ex.Message.ShouldContain("protected by static redaction");
+        // X1 (ast-stricter, fail closed): the compiler rejects a masked column in a join predicate with the typed code.
+        Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(ex, out var mapped).ShouldBeTrue();
+        mapped.Code.ShouldBe("FILTER_ON_MASKED_COLUMN");
     }
 
     [Fact]
@@ -622,11 +651,7 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicatio
             null,
             [new TableColumn { ColumnName = "id", DataType = "varchar" }, new TableColumn { ColumnName = "ssn", DataType = "varchar", IsSensitive = true }, new TableColumn { ColumnName = "tenant_id", DataType = "varchar" }]);
 
-        var user = new ClaimsPrincipal(new ClaimsIdentity(new[]
-        {
-            new Claim(ClaimTypes.NameIdentifier, "usr_test"),
-            new Claim("tenant_id", "tenant_test")
-        }, "TestAuth"));
+        var user = User("usr_test", "tenant_test");
 
         await RegisterTableAsync("payroll", "id", "ssn", "tenant_id");
         string joinQuery = "SELECT e.id, p.id FROM hr_employees e JOIN payroll p ON e.ssn = p.ssn";
@@ -636,8 +661,9 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicatio
             await sqlService.ValidateAsync(joinQuery, user, new TenantId("tenant_test"));
         });
 
-        ex.Message.ShouldContain("Security Policy Violation: Column 'ssn'");
-        ex.Message.ShouldContain("protected by static redaction");
+        // X1 (ast-stricter, fail closed): the compiler rejects a masked column in a join predicate with the typed code.
+        Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(ex, out var mapped).ShouldBeTrue();
+        mapped.Code.ShouldBe("FILTER_ON_MASKED_COLUMN");
     }
 
     [Fact]

@@ -60,7 +60,12 @@ public sealed class ConsentQueryEquivalenceTests : IDisposable
             });
             if (revoke)
             {
-                await _repo.RevokeConsentAsync(c.Id, new Sid(sid ?? "SYSTEM"), "test");
+                var auth = sid is null
+                    ? Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(
+                        new System.Security.Claims.ClaimsPrincipal(
+                            new System.Security.Claims.ClaimsIdentity([new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Role, "ClusterAdmin")], "test")))
+                    : Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null);
+                await _repo.RevokeConsentAsync(c.Id, new Sid(sid ?? "S-1-5-21-SYSTEM"), "test", auth);
             }
 
             _seeded.Add(c);

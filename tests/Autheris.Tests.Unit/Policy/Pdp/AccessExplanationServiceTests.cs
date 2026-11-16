@@ -11,8 +11,10 @@ using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Governance.Paging;
 using Autheris.Application.Policy.Pdp;
+using Autheris.Application.Services;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
+using Autheris.Domain.Identity;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -42,6 +44,7 @@ public sealed class AccessExplanationServiceTests
         UserSid = new Sid(sid),
         TenantId = new TenantId(tenant),
         GroupSids = new HashSet<Sid>(),
+        GroupResolutionStatus = GroupResolutionStatus.Complete,
         TenantRoles = new HashSet<string>(),
         ClusterRoles = new HashSet<string>(clusterRoles),
         AuthenticationScheme = "test"
@@ -58,7 +61,7 @@ public sealed class AccessExplanationServiceTests
     {
         _tables.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(meta);
         _visibility.FindVisibleAsync(Arg.Any<CatalogCaller>(), Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns(new ValueTask<CatalogVisibleRow?>(visible && meta is not null ? default(CatalogVisibleRow) : null));
+            .Returns(new ValueTask<CatalogVisibleRow?>(visible && meta is not null ? new CatalogVisibleRow(meta, CatalogOutputShape.Full) : null));
         _pdp.ExplainAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>()).Returns(
             new ValueTask<AccessExplanation>(new AccessExplanation(
                 true,

@@ -1,0 +1,608 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Autheris External Catalog and Consent API",
+    "version": "1.0.0",
+    "description": "Canonical v1 REST API for external catalog discovery, incremental catalog change feeds, consent workflows, grants, and cryptographic grant-record proofs."
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "paths": {
+    "/api/v1/catalog/objects": {
+      "get": {
+        "operationId": "listCatalogObjects",
+        "summary": "List catalog objects visible to the caller",
+        "parameters": [
+          { "name": "kind", "in": "query", "schema": { "type": "string", "enum": ["table", "view", "procedure"] } },
+          { "name": "domain", "in": "query", "schema": { "type": "string" } },
+          { "name": "schema", "in": "query", "schema": { "type": "string" } },
+          { "name": "owner", "in": "query", "schema": { "type": "string" } },
+          { "name": "tag", "in": "query", "schema": { "type": "string" } },
+          { "name": "sensitivity", "in": "query", "schema": { "type": "string" } },
+          { "name": "pii", "in": "query", "schema": { "type": "boolean" } },
+          { "name": "changedSince", "in": "query", "schema": { "type": "integer", "format": "int64" } },
+          { "name": "cursor", "in": "query", "schema": { "type": "string" } },
+          { "name": "pageSize", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 200 } },
+          { "name": "If-None-Match", "in": "header", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Catalog object page",
+            "headers": { "ETag": { "schema": { "type": "string" } } },
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ExternalCatalogPageDto" } } }
+          },
+          "304": { "description": "Not Modified" },
+          "400": { "description": "Invalid query or cursor", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/ProblemDetails" } } } },
+          "401": { "description": "Unauthorized" },
+          "403": { "description": "Forbidden", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/ProblemDetails" } } } }
+        }
+      }
+    },
+    "/api/v1/catalog/objects/{id}": {
+      "get": {
+        "operationId": "getCatalogObjectById",
+        "summary": "Get a single catalog object by domain.schema.table or GUID",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "If-None-Match", "in": "header", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Catalog object detail",
+            "headers": { "ETag": { "schema": { "type": "string" } } },
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ExternalCatalogObjectDto" } } }
+          },
+          "304": { "description": "Not Modified" },
+          "401": { "description": "Unauthorized" },
+          "403": { "description": "Forbidden", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/ProblemDetails" } } } },
+          "404": { "description": "Not Found", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/ProblemDetails" } } } }
+        }
+      }
+    },
+    "/api/v1/catalog/changes": {
+      "get": {
+        "operationId": "getCatalogChanges",
+        "summary": "Read incremental tenant catalog changes since sequence cursor",
+        "parameters": [
+          { "name": "since", "in": "query", "schema": { "type": "integer", "format": "int64", "default": 0 } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 500, "default": 100 } },
+          { "name": "If-None-Match", "in": "header", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Catalog changes feed page",
+            "headers": { "ETag": { "schema": { "type": "string" } } },
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ExternalCatalogChangesResponseDto" } } }
+          },
+          "304": { "description": "Not Modified" },
+          "401": { "description": "Unauthorized" },
+          "403": { "description": "Forbidden", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/ProblemDetails" } } } }
+        }
+      }
+    },
+    "/api/v1/openapi/external.json": {
+      "get": {
+        "operationId": "getExternalOpenApiSpec",
+        "summary": "Retrieve the OpenAPI v1 specification document",
+        "parameters": [
+          { "name": "If-None-Match", "in": "header", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "OpenAPI 3.0 document",
+            "headers": { "ETag": { "schema": { "type": "string" } } },
+            "content": { "application/json": { "schema": { "type": "object" } } }
+          },
+          "304": { "description": "Not Modified" },
+          "401": { "description": "Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/consent/requests": {
+      "get": {
+        "operationId": "listConsentRequests",
+        "parameters": [
+          { "name": "status", "in": "query", "schema": { "type": "string" } },
+          { "name": "externalSystemId", "in": "query", "schema": { "type": "string", "format": "uuid" } },
+          { "name": "updatedSince", "in": "query", "schema": { "type": "string", "format": "date-time" } },
+          { "name": "cursor", "in": "query", "schema": { "type": "string" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 50 } },
+          { "name": "domain", "in": "query", "schema": { "type": "string" } },
+          { "name": "schema", "in": "query", "schema": { "type": "string" } },
+          { "name": "table", "in": "query", "schema": { "type": "string" } },
+          { "name": "requester", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Consent request page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": { "type": "array", "items": { "$ref": "#/components/schemas/ConsentRequestDto" } },
+                    "nextCursor": { "type": "string", "nullable": true }
+                  }
+                }
+              }
+            }
+          },
+          "429": { "description": "Rate limited" }
+        }
+      },
+      "post": {
+        "operationId": "createConsentRequest",
+        "parameters": [
+          { "name": "Idempotency-Key", "in": "header", "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateConsentRequestBody" } } }
+        },
+        "responses": {
+          "201": {
+            "description": "Consent request created",
+            "headers": { "ETag": { "schema": { "type": "string" } } },
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ConsentRequestDto" } } }
+          },
+          "400": { "description": "Bad Request", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/ProblemDetails" } } } },
+          "403": { "description": "Forbidden" },
+          "404": { "description": "Table not found" },
+          "409": { "description": "Conflict" }
+        }
+      }
+    },
+    "/api/v1/consent/requests/{id}": {
+      "get": {
+        "operationId": "getConsentRequestById",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Consent request detail",
+            "headers": { "ETag": { "schema": { "type": "string" } } },
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ConsentRequestDto" } } }
+          },
+          "404": { "description": "Not Found" },
+          "429": { "description": "Rate limited" }
+        }
+      }
+    },
+    "/api/v1/consent/requests/{id}/decision": {
+      "post": {
+        "operationId": "decideConsentRequest",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } },
+          { "name": "Idempotency-Key", "in": "header", "schema": { "type": "string" } },
+          { "name": "If-Match", "in": "header", "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ConsentDecisionBody" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Consent decision applied",
+            "headers": { "ETag": { "schema": { "type": "string" } } },
+            "content": { "application/json": { "schema": { "type": "object" } } }
+          },
+          "400": { "description": "Invalid decision" },
+          "403": { "description": "Forbidden" },
+          "404": { "description": "Not Found" },
+          "409": { "description": "Conflict" },
+          "412": { "description": "Precondition Failed" },
+          "422": { "description": "Idempotency conflict" },
+          "429": { "description": "Rate limited" }
+        }
+      }
+    },
+    "/api/v1/consent/requests/{id}/withdraw": {
+      "post": {
+        "operationId": "withdrawConsentRequest",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } },
+          { "name": "If-Match", "in": "header", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Withdrawn" },
+          "404": { "description": "Not Found" },
+          "409": { "description": "Conflict" },
+          "412": { "description": "Precondition Failed" },
+          "429": { "description": "Rate limited" }
+        }
+      }
+    },
+    "/api/v1/consent/events": {
+      "get": {
+        "operationId": "getConsentEvents",
+        "parameters": [
+          { "name": "since", "in": "query", "schema": { "type": "integer", "format": "int64", "default": 0 } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 100 } }
+        ],
+        "responses": {
+          "200": { "description": "Consent events feed" },
+          "410": { "description": "Cursor expired" },
+          "429": { "description": "Rate limited" }
+        }
+      }
+    },
+    "/api/v1/consent/grants": {
+      "get": {
+        "operationId": "listConsentGrants",
+        "parameters": [
+          { "name": "table", "in": "query", "schema": { "type": "string" } },
+          { "name": "grantee", "in": "query", "schema": { "type": "string" } },
+          { "name": "cursor", "in": "query", "schema": { "type": "string" } },
+          { "name": "pageSize", "in": "query", "schema": { "type": "integer" } },
+          { "name": "includeInactive", "in": "query", "schema": { "type": "boolean" } },
+          { "name": "clamped", "in": "query", "schema": { "type": "boolean" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Consent grants page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": { "type": "array", "items": { "$ref": "#/components/schemas/ConsentGrantDto" } },
+                    "nextCursor": { "type": "string", "nullable": true },
+                    "totalCount": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          },
+          "429": { "description": "Rate limited" }
+        }
+      }
+    },
+    "/api/v1/consent/grants/{id}": {
+      "get": {
+        "operationId": "getConsentGrantById",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Consent grant detail",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ConsentGrantDto" } } }
+          },
+          "404": { "description": "Not Found" },
+          "429": { "description": "Rate limited" }
+        }
+      }
+    },
+    "/api/v1/consent/grants/{id}/revoke": {
+      "post": {
+        "operationId": "revokeConsentGrant",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } },
+          { "name": "Idempotency-Key", "in": "header", "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RevokeConsentGrantBody" } } }
+        },
+        "responses": {
+          "200": { "description": "Grant revoked" },
+          "403": { "description": "Forbidden" },
+          "404": { "description": "Not Found" },
+          "409": { "description": "Already ended" },
+          "422": { "description": "Idempotency conflict" },
+          "429": { "description": "Rate limited" }
+        }
+      }
+    },
+    "/api/v1/consent/profile-assignments/{id}/revoke": {
+      "post": {
+        "operationId": "revokeProfileAssignment",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } },
+          { "name": "Idempotency-Key", "in": "header", "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RevokeConsentGrantBody" } } }
+        },
+        "responses": {
+          "200": { "description": "Profile assignment grants revoked" },
+          "403": { "description": "Forbidden" },
+          "404": { "description": "Not Found" },
+          "409": { "description": "Already ended" },
+          "422": { "description": "Idempotency conflict" },
+          "429": { "description": "Rate limited" }
+        }
+      }
+    },
+    "/api/v1/consent/grant-records/proof": {
+      "get": {
+        "operationId": "evaluateGrantRecordProof",
+        "parameters": [
+          { "name": "grantee", "in": "query", "schema": { "type": "string" } },
+          { "name": "table", "in": "query", "schema": { "type": "string" } },
+          { "name": "scopeHash", "in": "query", "schema": { "type": "string" } },
+          { "name": "at", "in": "query", "schema": { "type": "string", "format": "date-time" } }
+        ],
+        "responses": {
+          "200": { "description": "Grant record proof bundle" },
+          "429": { "description": "Rate limited" }
+        }
+      }
+    },
+    "/api/v1/consent/grant-records/{seq}": {
+      "get": {
+        "operationId": "getGrantRecordBySeq",
+        "parameters": [
+          { "name": "seq", "in": "path", "required": true, "schema": { "type": "integer", "format": "int64" } }
+        ],
+        "responses": {
+          "200": { "description": "Signed grant record" },
+          "404": { "description": "Not Found" },
+          "429": { "description": "Rate limited" }
+        }
+      }
+    },
+    "/api/v1/consent/grant-records/verify": {
+      "post": {
+        "operationId": "verifyGrantRecordsRange",
+        "requestBody": {
+          "required": false,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/GrantRecordVerifyRequest" } } }
+        },
+        "responses": {
+          "200": { "description": "Verification result" },
+          "404": { "description": "Not Found" },
+          "429": { "description": "Rate limited" }
+        }
+      }
+    },
+    "/api/v1/consent/grant-records/keys": {
+      "get": {
+        "operationId": "getGrantRecordPublicKeys",
+        "responses": {
+          "200": { "description": "JWKS verification public keys" },
+          "429": { "description": "Rate limited" }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "schemas": {
+      "ProblemDetails": {
+        "type": "object",
+        "properties": {
+          "type": { "type": "string" },
+          "title": { "type": "string" },
+          "status": { "type": "integer" },
+          "detail": { "type": "string" },
+          "instance": { "type": "string" }
+        }
+      },
+      "ExternalCatalogOwnerDto": {
+        "type": "object",
+        "required": ["displayName"],
+        "properties": {
+          "displayName": { "type": "string" },
+          "email": { "type": "string", "nullable": true }
+        }
+      },
+      "ExternalCatalogCallerStateDto": {
+        "type": "object",
+        "required": ["access"],
+        "properties": {
+          "access": { "type": "string" },
+          "rowScope": { "type": "string", "nullable": true },
+          "write": { "type": "object", "nullable": true }
+        }
+      },
+      "ExternalCatalogColumnDto": {
+        "type": "object",
+        "required": ["name", "dataType", "tags", "sensitivity", "pii", "defaultMaskingState", "columnSecurity", "hidden", "writeProtected", "clearInSomeRows"],
+        "properties": {
+          "name": { "type": "string" },
+          "displayName": { "type": "string", "nullable": true },
+          "dataType": { "type": "string" },
+          "description": { "type": "string", "nullable": true },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "sensitivity": { "type": "string" },
+          "pii": { "type": "boolean" },
+          "defaultMaskingState": { "type": "string", "enum": ["clear", "masked", "pseudonymised"] },
+          "columnSecurity": { "type": "boolean" },
+          "hidden": { "type": "boolean" },
+          "writeProtected": { "type": "boolean" },
+          "accessState": { "type": "string", "nullable": true },
+          "classifications": { "type": "array", "nullable": true, "items": { "type": "object" } },
+          "clearInSomeRows": { "type": "boolean" },
+          "clearRequestable": { "type": "array", "nullable": true, "items": { "type": "string" } },
+          "statistics": { "type": "object", "nullable": true }
+        }
+      },
+      "ExternalCatalogObjectDto": {
+        "type": "object",
+        "required": ["objectId", "kind", "domain", "schema", "name", "tags", "sensitivity", "owners", "linkedDocuments", "write", "statisticsAvailable", "samplesAvailable", "hidden", "columns"],
+        "properties": {
+          "objectId": { "type": "string" },
+          "kind": { "type": "string", "enum": ["table", "view", "procedure"] },
+          "domain": { "type": "string" },
+          "schema": { "type": "string" },
+          "name": { "type": "string" },
+          "displayName": { "type": "string", "nullable": true },
+          "description": { "type": "string", "nullable": true },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "sensitivity": { "type": "string" },
+          "owners": { "type": "array", "items": { "$ref": "#/components/schemas/ExternalCatalogOwnerDto" } },
+          "linkedDocuments": { "type": "array", "items": { "type": "string" } },
+          "write": { "type": "object" },
+          "statisticsAvailable": { "type": "boolean" },
+          "statistics": { "type": "object", "nullable": true },
+          "samplesAvailable": { "type": "boolean" },
+          "hidden": { "type": "boolean" },
+          "callerState": { "$ref": "#/components/schemas/ExternalCatalogCallerStateDto", "nullable": true },
+          "columns": { "type": "array", "items": { "$ref": "#/components/schemas/ExternalCatalogColumnDto" } },
+          "changeSeq": { "type": "integer", "format": "int64", "nullable": true }
+        }
+      },
+      "ExternalCatalogPageDto": {
+        "type": "object",
+        "required": ["items", "totalCount"],
+        "properties": {
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/ExternalCatalogObjectDto" } },
+          "nextCursor": { "type": "string", "nullable": true },
+          "totalCount": { "type": "integer" }
+        }
+      },
+      "ExternalCatalogChangeDto": {
+        "type": "object",
+        "required": ["objectId", "kind", "seq", "changedAt"],
+        "properties": {
+          "objectId": { "type": "string" },
+          "kind": { "type": "string", "enum": ["upsert", "removed"] },
+          "seq": { "type": "integer", "format": "int64" },
+          "changedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "ExternalCatalogChangesResponseDto": {
+        "type": "object",
+        "required": ["changes", "nextSince"],
+        "properties": {
+          "changes": { "type": "array", "items": { "$ref": "#/components/schemas/ExternalCatalogChangeDto" } },
+          "nextSince": { "type": "integer", "format": "int64" }
+        }
+      },
+      "ApprovalEffectPreviewDto": {
+        "type": "object",
+        "properties": {
+          "matchedObjectCount": { "type": "integer" },
+          "includesFutureObjects": { "type": "boolean" },
+          "redundantGrant": { "type": "boolean" },
+          "emptyHardIntersection": { "type": "boolean" },
+          "redundantGrantIds": { "type": "array", "items": { "type": "string", "format": "uuid" } },
+          "flags": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "ConsentRequestDto": {
+        "type": "object",
+        "required": ["id", "tenantId", "table", "requesterSid", "granteeType", "granteeRef", "justification", "status", "version", "workflowMode", "requestedAt", "requestedValidTo", "requestKind"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "tenantId": { "type": "string" },
+          "table": { "type": "string" },
+          "requesterSid": { "type": "string" },
+          "granteeType": { "type": "string" },
+          "granteeRef": { "type": "string" },
+          "justification": { "type": "string" },
+          "status": { "type": "string" },
+          "version": { "type": "integer" },
+          "workflowMode": { "type": "string" },
+          "externalSystemId": { "type": "string", "format": "uuid", "nullable": true },
+          "externalReference": { "type": "string", "nullable": true },
+          "requestedAt": { "type": "string", "format": "date-time" },
+          "requestedValidFrom": { "type": "string", "format": "date-time", "nullable": true },
+          "requestedValidTo": { "type": "string", "format": "date-time" },
+          "updatedAt": { "type": "string", "format": "date-time", "nullable": true },
+          "requestKind": { "type": "string" },
+          "profileId": { "type": "string", "format": "uuid", "nullable": true },
+          "effectPreview": { "$ref": "#/components/schemas/ApprovalEffectPreviewDto", "nullable": true }
+        }
+      },
+      "ConsentGrantDto": {
+        "type": "object",
+        "required": ["id", "tenantId", "table", "effect", "granteeType", "validFrom", "validTo", "isRevoked", "grantSource", "grantRecordSeq"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "tenantId": { "type": "string" },
+          "table": { "type": "string" },
+          "consentRequestId": { "type": "string", "format": "uuid", "nullable": true },
+          "effect": { "type": "string" },
+          "granteeType": { "type": "string" },
+          "granteeSid": { "type": "string", "nullable": true },
+          "roleName": { "type": "string", "nullable": true },
+          "validFrom": { "type": "string", "format": "date-time" },
+          "validTo": { "type": "string", "format": "date-time" },
+          "isRevoked": { "type": "boolean" },
+          "revokedAt": { "type": "string", "format": "date-time", "nullable": true },
+          "revokeReason": { "type": "string", "nullable": true },
+          "grantSource": { "type": "string" },
+          "grantRecordSeq": { "type": "integer", "format": "int64" },
+          "profileAssignmentId": { "type": "string", "format": "uuid", "nullable": true },
+          "description": { "type": "string", "nullable": true }
+        }
+      },
+      "CreateConsentRequestBody": {
+        "type": "object",
+        "properties": {
+          "domain": { "type": "string", "nullable": true },
+          "schema": { "type": "string", "nullable": true },
+          "tableName": { "type": "string", "nullable": true },
+          "table": { "type": "string", "nullable": true },
+          "justification": { "type": "string", "nullable": true },
+          "durationDays": { "type": "integer", "nullable": true },
+          "idempotencyKey": { "type": "string", "nullable": true },
+          "context": { "type": "object", "nullable": true },
+          "requestedWriteRules": { "type": "array", "items": { "type": "object" }, "nullable": true },
+          "requestWriteOnly": { "type": "boolean", "nullable": true },
+          "requestedDuration": { "type": "string", "nullable": true },
+          "requestedValidFrom": { "type": "string", "format": "date-time", "nullable": true },
+          "requestedValidTo": { "type": "string", "format": "date-time", "nullable": true },
+          "kind": { "type": "string", "nullable": true },
+          "profileId": { "type": "string", "format": "uuid", "nullable": true },
+          "grantee": { "type": "string", "nullable": true },
+          "granteeType": { "type": "string", "nullable": true }
+        }
+      },
+      "ConsentDecisionBody": {
+        "type": "object",
+        "properties": {
+          "decision": { "type": "string", "nullable": true },
+          "approvedValidTo": { "type": "string", "format": "date-time", "nullable": true },
+          "reason": { "type": "string", "nullable": true },
+          "description": { "type": "string", "nullable": true },
+          "writeRules": { "type": "array", "items": { "type": "object" }, "nullable": true },
+          "columnMaskingJson": { "type": "string", "nullable": true },
+          "rowFilterJson": { "type": "string", "nullable": true },
+          "externalReference": { "type": "string", "nullable": true },
+          "correlationId": { "type": "string", "nullable": true },
+          "decidedAt": { "type": "string", "format": "date-time", "nullable": true },
+          "approverSid": { "type": "string", "nullable": true },
+          "approver": { "type": "object", "nullable": true },
+          "approvers": { "type": "array", "items": { "type": "object" }, "nullable": true },
+          "approvedItems": { "type": "array", "items": { "type": "integer" }, "nullable": true },
+          "approvedClearColumns": { "type": "array", "items": { "type": "string" }, "nullable": true }
+        }
+      },
+      "RevokeConsentGrantBody": {
+        "type": "object",
+        "properties": {
+          "reason": { "type": "string", "nullable": true }
+        }
+      },
+      "GrantRecordVerifyRequest": {
+        "type": "object",
+        "properties": {
+          "grantId": { "type": "string", "format": "uuid", "nullable": true },
+          "tenantId": { "type": "string", "nullable": true },
+          "records": { "type": "array", "items": { "type": "object" }, "nullable": true },
+          "fromSeq": { "type": "integer", "format": "int64", "nullable": true },
+          "toSeq": { "type": "integer", "format": "int64", "nullable": true }
+        }
+      }
+    }
+  }
+}

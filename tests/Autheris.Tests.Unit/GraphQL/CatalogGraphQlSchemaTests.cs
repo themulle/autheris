@@ -18,6 +18,7 @@ using Xunit;
 
 namespace Autheris.Tests.Unit.GraphQL;
 
+[Collection("CatalogRelation")]
 public sealed class CatalogGraphQlSchemaTests
 {
     private readonly ITableMetadataRepository _metadataRepo = Substitute.For<ITableMetadataRepository>();

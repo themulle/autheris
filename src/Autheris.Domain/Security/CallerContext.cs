@@ -1,7 +1,7 @@
 namespace Autheris.Domain.Security;
 
 /// <summary>
-/// Value object capturing caller application provenance for audit logs and FinOps attribution.
+/// Value object capturing caller application provenance for audit logs and usage attribution.
 /// Supplied via optional request headers (X-Caller-Application, X-Caller-Version, X-Caller-Query-Name).
 /// </summary>
 public sealed record CallerContext(string? Application = null, string? Version = null, string? QueryName = null, string? ClientId = null)

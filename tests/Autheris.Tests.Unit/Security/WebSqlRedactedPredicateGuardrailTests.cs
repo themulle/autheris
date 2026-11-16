@@ -23,17 +23,18 @@ using Xunit;
 /// replacement value (NULL or '***'): text comparisons silently returned 0 rows, numeric comparisons failed with 500.
 /// Such predicates are now rejected up front with a policy violation (403).
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class WebSqlRedactedPredicateGuardrailTests
 {
     private const string Tenant = "tenant_a";
 
     private static ClaimsPrincipal CreateUser() =>
-        new(new ClaimsIdentity(
+        Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(new ClaimsPrincipal(new ClaimsIdentity(
             [
                 new Claim(ClaimTypes.PrimarySid, "S-1-5-21-WEBSQL-USER"),
                 new Claim("tenant_id", Tenant)
             ],
-            "Test"));
+            "Test")));
 
     private static TableMetadata CreateTable(string table) => new()
     {

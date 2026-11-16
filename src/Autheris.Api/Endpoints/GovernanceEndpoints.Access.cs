@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Autheris.Api.Errors;
 using Autheris.Api.Endpoints.Support;
 using Autheris.Api.Security;
+using Autheris.Application.Catalog;
 using Autheris.Application.Governance.Grants;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.State;
@@ -138,10 +139,19 @@ public static partial class GovernanceEndpoints
             return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Justification is required and must be at least 15 characters long.", context);
         }
 
-        // ValidDays validation (1 to 180 days)
-        if (req.ValidDays < 1 || req.ValidDays > 180)
+        // ValidDays validation bounded by GrantValidityPolicy
+        var validityPolicy = context.RequestServices.GetService<IGrantValidityPolicy>() ?? GrantValidityPolicy.CreateDefault();
+        try
         {
-            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "validDays must be between 1 and 180.", context);
+            validityPolicy.ValidateDurationDays(req.ValidDays);
+        }
+        catch (GrantValidityException ex)
+        {
+            var code = ex.ErrorCode == "VALIDATION_ERROR" ? ApiErrorCodes.BadRequest : ex.ErrorCode;
+            var detail = ex.ErrorCode == "VALIDITY_EXCEEDS_MAXIMUM"
+                ? "Requested grant validity exceeds the configured maximum duration."
+                : "validDays must be a positive number of days within the configured maximum.";
+            return ApiProblems.BadRequest(code, detail, context);
         }
 
         // MaskingMode validation. Enum.TryParse also accepts any numeric string (e.g. "7"), so an undefined value is rejected explicitly:
@@ -176,33 +186,38 @@ public static partial class GovernanceEndpoints
                 context);
         }
 
-        // RowFilter sandbox AST validation
+        // Free-SQL row filters are rejected; use req.RowScope referencing active row policies instead.
         if (!string.IsNullOrWhiteSpace(req.RowFilter))
         {
-            var trimmedFilter = req.RowFilter.Trim();
-            if (trimmedFilter.Contains(';') || trimmedFilter.Contains("--") || trimmedFilter.Contains("/*") || trimmedFilter.Contains("*/"))
-            {
-                return ApiProblems.BadRequest(ApiErrorCodes.RowFilterSyntaxInvalid, "Row filter predicate contains prohibited SQL constructs (semicolons or comments).", context);
-            }
-
-            try
-            {
-                var parser = FastSqlEngine.Default;
-                _ = parser.ParseExpression(trimmedFilter.AsMemory(), SqlTokenSecurityOptions.None, ct);
-            }
-            catch (Exception ex)
-            {
-                SafeErrorResults.LogFailure(context, ex, ApiErrorCodes.RowFilterSyntaxInvalid);
-                return SafeErrorResults.BadRequest(
-                    ApiErrorCodes.RowFilterSyntaxInvalid,
-                    "The row filter predicate is not valid SQL.",
-                    context);
-            }
+            return ApiProblems.BadRequest(
+                ApiErrorCodes.RowFilterSyntaxInvalid,
+                "The row filter predicate is not valid SQL.",
+                context);
         }
 
         var tenantId = EndpointSecurity.GetRequestTenant(context);
+        var rowScope = req.RowScope ?? [];
+        if (rowScope.Count > 0)
+        {
+            var vfRepo = context.RequestServices.GetService<Autheris.Application.VirtualFilters.IVirtualFilterRepository>();
+            var snapshot = vfRepo is not null
+                ? await vfRepo.LoadSnapshotAsync(ct).ConfigureAwait(false)
+                : Autheris.Application.VirtualFilters.VirtualFilterSnapshot.Empty;
+            try
+            {
+                Autheris.Application.Policy.RowScopes.GrantRowScopeValidator.Validate(rowScope, tenantId, snapshot);
+            }
+            catch (Autheris.Application.Policy.RowScopes.RowScopeValidationException ex)
+            {
+                var logger = (context.RequestServices?.GetService(typeof(Microsoft.Extensions.Logging.ILoggerFactory)) as Microsoft.Extensions.Logging.ILoggerFactory)
+                    ?.CreateLogger("Autheris.Api.Endpoints.GovernanceEndpoints");
+                if (logger is not null) Microsoft.Extensions.Logging.LoggerExtensions.LogWarning(logger, ex, "Row scope validation failed ({Code}).", ex.Code);
+                return ApiProblems.BadRequest(ex.Code, "The row scope rule is invalid.", context);
+            }
+        }
+
         var now = DateTimeOffset.UtcNow;
-        var validTo = now.AddDays(req.ValidDays);
+        var validTo = GrantTimeMath.AddSaturating(now, GrantTimeMath.DaysToSpan(req.ValidDays));
         var profileId = $"prof-{trimmedSubject.ToLowerInvariant()}-{mode.ToString().ToLowerInvariant()}-{now:yyyyMMddHHmmss}-{Guid.NewGuid().ToString("N")[..6]}";
         var targetTables = req.Tables.Select(t => t.Trim()).ToList();
 
@@ -214,8 +229,11 @@ public static partial class GovernanceEndpoints
         {
             try
             {
-                var allTables = await metaRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
-                matchedTables = allTables.Where(t => targetTables.Any(pattern => AccessProfile.MatchesPattern(pattern, t.Identifier))).ToList();
+                matchedTables = (await CatalogTablePageReader.ReadAllAsync(
+                    metaRepo,
+                    new CatalogTableQuery(IncludeInactive: false),
+                    t => t.Table.IsActive && targetTables.Any(pattern => AccessProfile.MatchesPattern(pattern, t.Identifier)),
+                    ct: ct).ConfigureAwait(false)).ToList();
                 tablesMatched = matchedTables.Count;
             }
             catch
@@ -269,7 +287,7 @@ public static partial class GovernanceEndpoints
             Name = $"BulkConsent_{trimmedSubject}_{mode}",
             MaskingMode = mode,
             TargetTables = targetTables,
-            RowFilterPredicate = string.IsNullOrWhiteSpace(req.RowFilter) ? null : req.RowFilter.Trim(),
+            RowScope = rowScope,
             CreatedAt = now,
             ValidTo = validTo,
             Justification = req.Justification.Trim(),
@@ -323,7 +341,7 @@ public static partial class GovernanceEndpoints
                 subjectType,
                 maskingMode = mode.ToString(),
                 tables = targetTables,
-                rowFilter = profile.RowFilterPredicate,
+                rowScope = profile.RowScope,
                 validDays = req.ValidDays,
                 validTo,
                 justification = profile.Justification,
@@ -385,7 +403,7 @@ public static partial class GovernanceEndpoints
             subject = trimmedSubject,
             maskingMode = mode.ToString(),
             tablesMatched,
-            rowFilter = profile.RowFilterPredicate,
+            rowScope = profile.RowScope,
             validTo,
             auditEventId = auditEvent.Id,
             message
@@ -493,9 +511,11 @@ public static partial class GovernanceEndpoints
                 return Results.StatusCode(StatusCodes.Status503ServiceUnavailable); // fail closed: ownership cannot be verified
             }
 
-            var matched = (await metaRepo.GetAllTablesAsync(ct).ConfigureAwait(false))
-                .Where(t => profile.MatchesTable(t.Identifier))
-                .ToList();
+            var matched = await CatalogTablePageReader.ReadAllAsync(
+                metaRepo,
+                new CatalogTableQuery(IncludeInactive: false),
+                t => t.Table.IsActive && profile.MatchesTable(t.Identifier),
+                ct: ct).ConfigureAwait(false);
 
             // EP-01: At least one table must match
             if (matched.Count == 0)
@@ -686,7 +706,7 @@ public static partial class GovernanceEndpoints
         var reqTenant = EndpointSecurity.GetRequestTenant(context).Value;
         var isCanonicalClusterAdmin = EndpointSecurity.IsCanonicalClusterAdmin(context.User);
 
-        var colonIdx = clientId.IndexOf(':');
+        var colonIdx = clientId.IndexOf(':', StringComparison.Ordinal);
         if (colonIdx > 0)
         {
             var targetTenant = clientId[..colonIdx];

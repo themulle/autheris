@@ -23,6 +23,7 @@ using Xunit;
 
 namespace Autheris.Tests.Integration.Governance;
 
+[Trait("Category", "Security")]
 public class DataPathSecurityTests : IDisposable
 {
     private readonly PostgreSqlGovernanceRepository _repository;
@@ -119,6 +120,8 @@ public class DataPathSecurityTests : IDisposable
             }
         }
 
+        claims.Add(Autheris.Domain.Identity.GroupResolutionClaims.CreateMarker());
+        claims.Add(Autheris.Domain.Identity.GroupResolutionClaims.CreateStatus(Autheris.Domain.Identity.GroupResolutionStatus.Complete));
         var identity = new ClaimsIdentity(claims.Append(DefaultTenantCaller.Claim), "TestAuth", ClaimTypes.Name, ClaimTypes.Role);
         var principal = new ClaimsPrincipal(identity);
         var context = new DefaultHttpContext { User = principal };
@@ -273,8 +276,8 @@ public class DataPathSecurityTests : IDisposable
 
         var tableDto = catalog.FirstOrDefault(t => t.TableName == "finance_table_1");
         tableDto.ShouldNotBeNull();
-        tableDto.Columns.ShouldNotContain("email");
-        tableDto.Columns.ShouldContain("amount");
+        tableDto.ColumnNames.ShouldNotContain("email");
+        tableDto.ColumnNames.ShouldContain("amount");
     }
 
     [Fact]
@@ -494,7 +497,7 @@ public class DataPathSecurityTests : IDisposable
         financeTable.ShouldNotBeNull();
 
         // Under Zero Trust, non-admins should ONLY see columns that are granted!
-        financeTable.Columns.ShouldBe(new[] { "id" });
+        financeTable.ColumnNames.ShouldBe(new[] { "id" });
     }
 
     [Fact]

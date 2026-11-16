@@ -159,7 +159,7 @@ internal static class AggregateGraphQlTypes
         types.Add(new ObjectType(d =>
         {
             d.Name(names.Result);
-            d.Description("Governed aggregation result with k-anonymity and differential privacy metadata.");
+            d.Description("Governed aggregation result with k-anonymity metadata.");
             d.Field("groups").Type(NonNullList(names.Group)).Resolve(ctx => ctx.Parent<AggregateResultDto>().Groups);
             d.Field("count").Type(NonNull("Long")).Resolve(ctx => ctx.Parent<AggregateResultDto>().Count);
             d.Field("suppressed").Type(NonNull("Boolean")).Resolve(ctx => ctx.Parent<AggregateResultDto>().Suppressed);
@@ -168,7 +168,6 @@ internal static class AggregateGraphQlTypes
             d.Field("minimumGroupSizeSource").Type(NonNull("String")).Resolve(ctx => ctx.Parent<AggregateResultDto>().MinimumGroupSizeSource);
             d.Field("mergedIntoOther").Type(NonNull("Boolean")).Resolve(ctx => ctx.Parent<AggregateResultDto>().MergedIntoOther);
             d.Field("truncated").Type(NonNull("Boolean")).Resolve(ctx => ctx.Parent<AggregateResultDto>().Truncated);
-            d.Field("noiseApplied").Type(NonNull("Boolean")).Resolve(ctx => ctx.Parent<AggregateResultDto>().NoiseApplied);
         }));
     }
 
@@ -176,7 +175,7 @@ internal static class AggregateGraphQlTypes
     {
         var names = AggregateTypeNames.For(table.TypeName);
         query.Field(names.Field)
-            .Description($"Typed governed aggregation for {table.TypeName} with k-anonymity and differential privacy.")
+            .Description($"Typed governed aggregation for {table.TypeName} with k-anonymity.")
             .Type(NonNull(names.Result))
             .Argument("groupBy", a => a.Type(new ListTypeNode(NonNull(names.Column))))
             .Argument("timeBuckets", a => a.Type(new ListTypeNode(NonNull(names.TimeBucketInput))))

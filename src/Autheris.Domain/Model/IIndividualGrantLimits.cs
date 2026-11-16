@@ -4,14 +4,13 @@ using System;
 
 /// <summary>
 /// Provides read-time clamp bounds for individual grants and access profiles.
-/// Built-in ceilings: Regular User (180 days), Unmasked Profile (30 days), Service Principal (365 days).
-/// Realm configurations can only shorten these limits, never extend them.
+/// There are no compiled-in ceilings: a <c>null</c> limit means the operator configured none for that class.
 /// </summary>
 public interface IIndividualGrantLimits
 {
-    TimeSpan RegularMax { get; }
-    TimeSpan UnmaskedMax { get; }
-    TimeSpan ServicePrincipalMax { get; }
+    TimeSpan? RegularMax { get; }
+    TimeSpan? UnmaskedMax { get; }
+    TimeSpan? ServicePrincipalMax { get; }
 
     DateTimeOffset EffectiveConsentValidTo(
         GranteeType granteeType,

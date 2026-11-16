@@ -18,9 +18,9 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.GraphQL.Catalog;
 using Autheris.GraphQL.Types;
+using Autheris.Tests.Common.Fakes;
 using HotChocolate;
 using HotChocolate.Execution;
-using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
@@ -35,6 +35,7 @@ using Xunit;
 /// Gating queryMetrics (Gateway:GraphQL:Metrics:Enabled) and
 /// POST /api/v1/governance/queries/analyze (Gateway:Governance:QueryAnalysis:Enabled).
 /// </summary>
+[Collection("CatalogRelation")]
 public sealed class ReadPathSwitchesMetricsAndAnalyzeTests
 {
     private readonly ITableMetadataRepository _metadataRepo = Substitute.For<ITableMetadataRepository>();
@@ -179,26 +180,20 @@ public sealed class ReadPathSwitchesMetricsAndAnalyzeTests
         result.Errors.Any(e => e.Message.Contains("queryMetrics") || e.Code != null).ShouldBeTrue();
     }
 
-    private static WebApplication CreateEndpointApp(bool mapSampleRows, bool mapQueryAnalysis)
+    private static TestEndpointRouteBuilder CreateEndpointRoutes(bool mapSampleRows, bool mapQueryAnalysis)
     {
-        var builder = WebApplication.CreateBuilder();
-        builder.Services.AddRouting();
-        builder.Services.AddAuthorization();
-        builder.Services.AddSingleton(Substitute.For<IQueryAnalysisService>());
-        builder.Services.AddSingleton(Substitute.For<IBundledConsentRequestService>());
-        builder.Services.AddSingleton(Substitute.For<IMcpDatasetCatalog>());
-        var app = builder.Build();
-        app.MapQueryAnalysisAndProfilingEndpoints(mapSampleRows, mapQueryAnalysis);
-        return app;
+        var routes = new TestEndpointRouteBuilder(permissiveServices: true);
+        routes.MapQueryAnalysisAndProfilingEndpoints(mapSampleRows, mapQueryAnalysis);
+        return routes;
     }
 
     [Fact]
     [Trait("Category", "Security")]
     public void EndpointRouting_QueryAnalysisDisabled_AnalyzeRouteIsNotMapped()
     {
-        var app = CreateEndpointApp(mapSampleRows: true, mapQueryAnalysis: false);
+        using var routes = CreateEndpointRoutes(mapSampleRows: true, mapQueryAnalysis: false);
 
-        var endpoints = ((IEndpointRouteBuilder)app).DataSources
+        var endpoints = routes.DataSources
             .SelectMany(ds => ds.Endpoints)
             .OfType<RouteEndpoint>()
             .Select(e => e.RoutePattern.RawText)
@@ -213,9 +208,9 @@ public sealed class ReadPathSwitchesMetricsAndAnalyzeTests
     [Trait("Category", "Security")]
     public void EndpointRouting_QueryAnalysisEnabled_AnalyzeRouteIsMapped()
     {
-        var app = CreateEndpointApp(mapSampleRows: false, mapQueryAnalysis: true);
+        using var routes = CreateEndpointRoutes(mapSampleRows: false, mapQueryAnalysis: true);
 
-        var endpoints = ((IEndpointRouteBuilder)app).DataSources
+        var endpoints = routes.DataSources
             .SelectMany(ds => ds.Endpoints)
             .OfType<RouteEndpoint>()
             .Select(e => e.RoutePattern.RawText)

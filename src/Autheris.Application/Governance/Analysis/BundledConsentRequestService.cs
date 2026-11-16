@@ -29,6 +29,7 @@ public sealed class BundledConsentRequestService : IBundledConsentRequestService
 
     [Microsoft.Extensions.DependencyInjection.ActivatorUtilitiesConstructor]
     private readonly IGrantPolicy _grantPolicy;
+    private readonly IGrantValidityPolicy _grantValidityPolicy;
     private readonly IConsentMaterializationGuard? _materializationGuard;
 
     public BundledConsentRequestService(
@@ -38,10 +39,12 @@ public sealed class BundledConsentRequestService : IBundledConsentRequestService
         IConsentApprovalRepository? approvalRepository = null,
         IDataOwnershipRepository? dataOwnershipRepository = null,
         IGrantPolicy? grantPolicy = null,
-        IConsentMaterializationGuard? materializationGuard = null)
+        IConsentMaterializationGuard? materializationGuard = null,
+        IGrantValidityPolicy? grantValidityPolicy = null)
     {
         _materializationGuard = materializationGuard;
-        _grantPolicy = grantPolicy ?? new GrantPolicy();
+        _grantValidityPolicy = grantValidityPolicy ?? GrantValidityPolicy.CreateDefault();
+        _grantPolicy = grantPolicy ?? new GrantPolicy(validityPolicy: _grantValidityPolicy);
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
         _auditLogRepository = auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository));
@@ -55,14 +58,110 @@ public sealed class BundledConsentRequestService : IBundledConsentRequestService
         IConsentApprovalRepository? approvalRepository = null,
         IDataOwnershipRepository? dataOwnershipRepository = null,
         IGrantPolicy? grantPolicy = null,
-        IConsentMaterializationGuard? materializationGuard = null)
+        IConsentMaterializationGuard? materializationGuard = null,
+        IGrantValidityPolicy? grantValidityPolicy = null)
     {
         _materializationGuard = materializationGuard;
-        _grantPolicy = grantPolicy ?? new GrantPolicy();
+        _grantValidityPolicy = grantValidityPolicy ?? GrantValidityPolicy.CreateDefault();
+        _grantPolicy = grantPolicy ?? new GrantPolicy(validityPolicy: _grantValidityPolicy);
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
         _approvalRepository = approvalRepository;
         _dataOwnershipRepository = dataOwnershipRepository;
+    }
+
+    private async Task<Dictionary<string, TableMetadata>> ResolveRequestedTablesAsync(
+        IReadOnlyList<RequestableConsentItem> items,
+        CancellationToken ct)
+    {
+        var tableLookup = new Dictionary<string, TableMetadata>(StringComparer.OrdinalIgnoreCase);
+        var distinctDatasets = items
+            .Select(i => i.Dataset)
+            .Where(d => !string.IsNullOrWhiteSpace(d))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var parsedIdentifiers = new List<TableIdentifier>();
+        var unqualified = new List<string>();
+        foreach (var dataset in distinctDatasets)
+        {
+            if (TableIdentifier.TryParse(dataset, out var parsedId))
+            {
+                parsedIdentifiers.Add(parsedId);
+            }
+            else
+            {
+                unqualified.Add(dataset);
+            }
+        }
+
+        if (parsedIdentifiers.Count > 0)
+        {
+            var batch = await _metadataRepository.GetTablesForRequestAsync(
+                parsedIdentifiers.Distinct().ToArray(),
+                ct).ConfigureAwait(false);
+            foreach (var table in batch)
+            {
+                var fullId = QueryAnalysisService.FormatDatasetId(table.Identifier);
+                tableLookup[fullId] = table;
+            }
+        }
+
+        foreach (var dataset in unqualified)
+        {
+            if (dataset.AsSpan().IndexOfAny('\0', '\r', '\n') >= 0)
+            {
+                continue;
+            }
+
+            var dotIndex = dataset.IndexOf('.', StringComparison.Ordinal);
+            if (dotIndex >= 0)
+            {
+                if (dataset.IndexOf('.', dotIndex + 1) >= 0)
+                {
+                    continue;
+                }
+
+                var schema = dataset[..dotIndex];
+                var tableName = dataset[(dotIndex + 1)..];
+                if (string.IsNullOrWhiteSpace(schema) ||
+                    string.IsNullOrWhiteSpace(tableName) ||
+                    schema.Length > Autheris.Application.Catalog.CatalogTableQuery.MaxFilterLength ||
+                    tableName.Length > Autheris.Application.Catalog.CatalogTableQuery.MaxFilterLength)
+                {
+                    continue;
+                }
+
+                var match = await Autheris.Application.Catalog.CatalogTablePageReader.FindFirstAsync(
+                    _metadataRepository,
+                    new Autheris.Application.Catalog.CatalogTableQuery(
+                        Schema: schema,
+                        NamePrefix: tableName,
+                        Limit: Autheris.Application.Catalog.CatalogTableQuery.MaxLimit),
+                    t => string.Equals($"{t.Identifier.Schema}.{t.Identifier.TableName}", dataset, StringComparison.OrdinalIgnoreCase),
+                    ct: ct).ConfigureAwait(false);
+                if (match != null)
+                {
+                    tableLookup[dataset] = match;
+                }
+            }
+            else if (dataset.Length <= Autheris.Application.Catalog.CatalogTableQuery.MaxFilterLength)
+            {
+                var match = await Autheris.Application.Catalog.CatalogTablePageReader.FindFirstAsync(
+                    _metadataRepository,
+                    new Autheris.Application.Catalog.CatalogTableQuery(
+                        NamePrefix: dataset,
+                        Limit: Autheris.Application.Catalog.CatalogTableQuery.MaxLimit),
+                    t => string.Equals(t.Identifier.TableName, dataset, StringComparison.OrdinalIgnoreCase),
+                    ct: ct).ConfigureAwait(false);
+                if (match != null)
+                {
+                    tableLookup[dataset] = match;
+                }
+            }
+        }
+
+        return tableLookup;
     }
 
     public async Task<BundledConsentRequestResult> SubmitBundledRequestAsync(
@@ -84,15 +183,7 @@ public sealed class BundledConsentRequestService : IBundledConsentRequestService
             return new BundledConsentRequestResult(Array.Empty<OwnerConsentTicket>(), request.ConsumerReference);
         }
 
-        var allTables = await _metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
-        var tableLookup = new Dictionary<string, TableMetadata>(StringComparer.OrdinalIgnoreCase);
-        foreach (var table in allTables)
-        {
-            var fullId = QueryAnalysisService.FormatDatasetId(table.Identifier);
-            tableLookup[fullId] = table;
-            tableLookup.TryAdd($"{table.Identifier.Schema}.{table.Identifier.TableName}", table);
-            tableLookup.TryAdd(table.Identifier.TableName, table);
-        }
+        var tableLookup = await ResolveRequestedTablesAsync(request.Items, ct).ConfigureAwait(false);
 
         var isAdmin = QueryAnalysisService.IsAdminPrincipal(requester);
         var roles = requester.GetUserRoles();
@@ -176,14 +267,15 @@ public sealed class BundledConsentRequestService : IBundledConsentRequestService
                     ? request.Purpose
                     : item.SuggestedPurpose;
 
-                // bundled requests are individual grants for the requester; the default duration (90 days) and any
-                // requested expiry must respect the class maximum of the table.
+                // bundled requests are individual grants for the requester; the configured default duration and any
+                // requested expiry must respect the maximum of the grant class and of the tenant.
                 var bundledNow = DateTimeOffset.UtcNow;
+                var bundledDefaultValidTo = GrantTimeMath.AddSaturating(bundledNow, _grantValidityPolicy.DefaultDuration);
                 GrantPolicyViolationException.ThrowIfDenied(_grantPolicy.Evaluate(new GrantRequest(
                     GranteeType.User,
                     requesterSid.Value.Value,
                     GrantKind.Consent,
-                    request.RequestedUntilUtc ?? bundledNow.AddDays(Math.Min(90, (int)IndividualGrantLimits.RegularMax.TotalDays)),
+                    request.RequestedUntilUtc ?? bundledDefaultValidTo,
                     bundledNow,
                     GrantClassifier.Classify([table]),
                     Requester: requesterSid.Value.Value,
@@ -202,7 +294,7 @@ public sealed class BundledConsentRequestService : IBundledConsentRequestService
                         : $"[Ref:{request.ConsumerReference}] {effectivePurpose}",
                     Status = "PENDING",
                     RequestedAt = DateTimeOffset.UtcNow,
-                    RequestedValidTo = request.RequestedUntilUtc ?? bundledNow.AddDays(Math.Min(90, (int)IndividualGrantLimits.RegularMax.TotalDays)),
+                    RequestedValidTo = request.RequestedUntilUtc ?? bundledDefaultValidTo,
                     ItsmTicketId = request.ConsumerReference ?? ticketId.ToString("N"),
                     TenantId = tenantId,
                     ApprovalSteps = bucket.PrimaryOwnerSid is { } approverSid

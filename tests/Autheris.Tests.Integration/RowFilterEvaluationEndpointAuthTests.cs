@@ -14,9 +14,11 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Hosting;
 using Autheris.Tests.Integration.Governance;
 
 /// <summary>
@@ -25,20 +27,28 @@ using Autheris.Tests.Integration.Governance;
 /// checks on save and the epoch bump. The governance store is the in-memory SQLite database of the test host.
 /// </summary>
 [Trait("Category", "Security")]
-public sealed class RowFilterEvaluationEndpointAuthTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class RowFilterEvaluationEndpointAuthTests : IClassFixture<RowFilterEvaluationEndpointAuthTests.HostFixture>
 {
     private const string OwnTenant = "tenant-default";
     private const string OtherTenant = "tenant-other";
     private readonly WebApplicationFactory<Program> _factory;
 
-    public RowFilterEvaluationEndpointAuthTests(WebApplicationFactory<Program> factory)
+    public RowFilterEvaluationEndpointAuthTests(HostFixture factory)
     {
-        _factory = factory.WithWebHostBuilder(builder =>
+        _factory = factory;
+    }
+
+    public sealed class HostFixture : IntegrationHost<HostFixture>
+    {
+        protected override void ConfigureHostConfiguration(IConfigurationBuilder config)
         {
-            builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("RowFilterEvaluationEndpointAuthTests"));
-        });
+            config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Gateway:Authentication:EnableTestAuthHandler"] = "true",
+                ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
+                ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.Create("RowFilterEvaluationEndpointAuthTests"),
+            });
+        }
     }
 
     private HttpClient CreateClient(string? roles, string tenant = OwnTenant)
@@ -56,8 +66,7 @@ public sealed class RowFilterEvaluationEndpointAuthTests : IClassFixture<WebAppl
 
     private static StringContent Json(string json) => new(json, Encoding.UTF8, "application/json");
 
-    private async Task<(TableIdentifier Table, Guid RuleId)> SeedRuleAsync(
-        ConsentEffect effect = ConsentEffect.Allow, RowFilterType type = RowFilterType.SubqueryCorrelated, string? temporal = null)
+    private async Task<(TableIdentifier Table, Guid RuleId)> SeedRuleAsync(ConsentEffect effect = ConsentEffect.Allow)
     {
         _ = CreateClient(null); // starts the host
         var repo = _factory.Services.GetRequiredService<IGovernanceRepository>();
@@ -77,9 +86,8 @@ public sealed class RowFilterEvaluationEndpointAuthTests : IClassFixture<WebAppl
             [
                 new ConsentRowFilter
                 {
-                    TableColumnId = columnId, ColumnName = "customer_id", FilterType = type,
-                    DependentTable = new TableIdentifier("Crm", "Dbo", "customers"), ForeignKeyColumn = "customer_id", PrimaryKeyColumn = "id",
-                    SubqueryFilterPredicateJson = "[]", TargetTemporalColumn = temporal
+                    TableColumnId = columnId, ColumnName = "customer_id", FilterType = RowFilterType.SimpleColumnPredicate,
+                    Operator = "EQ", ValueJson = "1"
                 }
             ]
         });
@@ -130,16 +138,21 @@ public sealed class RowFilterEvaluationEndpointAuthTests : IClassFixture<WebAppl
         var (table, ruleId) = await SeedRuleAsync();
         var admin = CreateClient("GovernanceAdmin");
         var repo = _factory.Services.GetRequiredService<IGovernanceRepository>();
-        var epoch = await repo.GetTableEpochAsync(table);
 
-        var put = await admin.PutAsync(RuleUrl(ruleId), Json("""{"strategy":"KeySetCache","durationSeconds":120,"maxKeys":500}"""));
+        // Consent-level key-set cache settings are refused (400, fail closed): the evaluation mode is configured on a row policy.
+        var epochBeforeRefusal = await repo.GetTableEpochAsync(table);
+        var refused = await admin.PutAsync(RuleUrl(ruleId), Json("""{"strategy":"KeySetCache","durationSeconds":120,"maxKeys":500}"""));
+        refused.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        (await repo.GetTableEpochAsync(table)).ShouldBe(epochBeforeRefusal);
+
+        // The inherit form is accepted, round-trips and bumps the table epoch.
+        var epoch = await repo.GetTableEpochAsync(table);
+        var put = await admin.PutAsync(RuleUrl(ruleId), Json("{}"));
 
         put.StatusCode.ShouldBe(HttpStatusCode.OK);
         using var doc = JsonDocument.Parse(await put.Content.ReadAsStringAsync());
-        doc.RootElement.GetProperty("stored").GetProperty("strategy").GetString().ShouldBe("KeySetCache");
-        doc.RootElement.GetProperty("stored").GetProperty("durationSeconds").GetInt32().ShouldBe(120);
-        doc.RootElement.GetProperty("effective").GetProperty("strategySource").GetString().ShouldBe("Rule");
-        doc.RootElement.GetProperty("effective").GetProperty("maxKeys").GetInt32().ShouldBe(500);
+        doc.RootElement.GetProperty("stored").GetProperty("strategy").ValueKind.ShouldBe(JsonValueKind.Null);
+        doc.RootElement.GetProperty("effective").GetProperty("strategySource").GetString().ShouldBe("Global");
         (await repo.GetTableEpochAsync(table)).ShouldBeGreaterThan(epoch);
 
         var get = await admin.GetAsync(RuleUrl(ruleId));
@@ -187,10 +200,6 @@ public sealed class RowFilterEvaluationEndpointAuthTests : IClassFixture<WebAppl
         (await malformed.Content.ReadAsStringAsync()).ShouldBe(body);
         body.ShouldNotContain(ruleId.ToString("D"));
         body.ShouldNotContain(unknown.ToString("D"));
-
-        var repo = _factory.Services.GetRequiredService<IGovernanceRepository>();
-        var consents = await repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-alice")], table, DateTimeOffset.UtcNow);
-        consents.Single().RowFilters.Single().KeySetStrategy.ShouldBeNull();
     }
 
     [Theory]
@@ -220,8 +229,6 @@ public sealed class RowFilterEvaluationEndpointAuthTests : IClassFixture<WebAppl
 
         response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
         (await repo.GetTableEpochAsync(table)).ShouldBe(epoch);
-        var consents = await repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-alice")], table, DateTimeOffset.UtcNow);
-        consents.Single().RowFilters.Single().KeySetStrategy.ShouldBeNull();
     }
 
     [Fact]
@@ -246,7 +253,7 @@ public sealed class RowFilterEvaluationEndpointAuthTests : IClassFixture<WebAppl
     [Fact]
     public async Task Rule_Put_KeySetOnNonCorrelatedRule_Returns400_SEC_RF107_06e()
     {
-        var (_, ruleId) = await SeedRuleAsync(type: RowFilterType.SimpleColumnPredicate);
+        var (_, ruleId) = await SeedRuleAsync();
 
         (await CreateClient("GovernanceAdmin").PutAsync(RuleUrl(ruleId), Json("""{"strategy":"KeySetCache"}"""))).StatusCode.ShouldBe(HttpStatusCode.BadRequest);
     }
@@ -254,7 +261,7 @@ public sealed class RowFilterEvaluationEndpointAuthTests : IClassFixture<WebAppl
     [Fact]
     public async Task Rule_Put_KeySetOnTemporalRule_Returns400_SEC_RF107_06e()
     {
-        var (_, ruleId) = await SeedRuleAsync(temporal: "order_date");
+        var (_, ruleId) = await SeedRuleAsync();
 
         (await CreateClient("GovernanceAdmin").PutAsync(RuleUrl(ruleId), Json("""{"strategy":"KeySetCache"}"""))).StatusCode.ShouldBe(HttpStatusCode.BadRequest);
     }
@@ -342,7 +349,7 @@ public sealed class RowFilterEvaluationEndpointAuthTests : IClassFixture<WebAppl
     [Fact]
     public void Startup_WithInvalidKeySetCacheOptions_FailsValidation_ProvingTheValidatorIsWired()
     {
-        var factory = _factory.WithWebHostBuilder(builder =>
+        using var factory = _factory.WithWebHostBuilder(builder =>
         {
             builder.UseSetting("Gateway:RowFilters:KeySetCache:MaxConcurrentKeyQueries", "0");
             builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("RowFilterEvaluationEndpointAuthTests"));

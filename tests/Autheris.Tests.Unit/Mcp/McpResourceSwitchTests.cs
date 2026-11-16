@@ -215,8 +215,9 @@ public sealed class McpResourceSwitchTests
     {
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([Table()]));
+        Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(repo);
 
-        var open = new SemanticMcpCompiler(repo, NullLogger<SemanticMcpCompiler>.Instance, switches: Switches());
+        var open = new SemanticMcpCompiler(repo, NullLogger<SemanticMcpCompiler>.Instance, options: Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions { Insecure = new Autheris.Domain.Options.InsecureGettingStartedOptions { danger_bypass_mcp_auth = true } }), switches: Switches());
         (await open.GetSemanticResourcesAsync()).ShouldNotBeEmpty();
 
         repo.ClearReceivedCalls();
@@ -228,7 +229,7 @@ public sealed class McpResourceSwitchTests
         var registry = new McpToolRegistry();
         var guardrail = new AiDataGuardrailService(registry, Microsoft.Extensions.Options.Options.Create(new GatewayOptions()), NullLogger<AiDataGuardrailService>.Instance, Substitute.For<IAuditLogRepository>(), decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(), tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable());
         var handler = new McpProtocolHandler(new McpSessionStore(NullLogger<McpSessionStore>.Instance), registry, guardrail, NullLogger<McpProtocolHandler>.Instance, closed);
-        var sid = handler.CreateSession("agent", "t").SessionId;
+        var sid = handler.CreateSession("agent", "t", userSid: null).SessionId;
 
         var list = await handler.HandleMessageAsync(sid, """{"jsonrpc":"2.0","id":1,"method":"resources/list"}""");
         System.Text.Json.JsonDocument.Parse(list).RootElement.GetProperty("result").GetProperty("resources").GetArrayLength().ShouldBe(0);

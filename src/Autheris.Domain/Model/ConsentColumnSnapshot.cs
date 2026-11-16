@@ -19,7 +19,9 @@ public static class ConsentColumnSnapshot
             .Select(col => new ConsentColumnRule
             {
                 ColumnName = col.ColumnName,
-                AccessLevel = AccessLevelFor(col.IsSensitive, metadata.ColumnMaskingRules.ContainsKey(col.ColumnName))
+                AccessLevel = ClassificationMetadata.IsColumnSensitive(metadata, col)
+                    ? ColumnAccessLevel.Mask
+                    : ColumnAccessLevel.Clear
             })
             .ToList();
 }

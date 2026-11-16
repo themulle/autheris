@@ -106,9 +106,9 @@ public sealed class CachedConsentEnvelopeTests
     [Trait("Category", "Security")]
     public async Task T_GOV143_07_Envelope_LegacyLayoutAndForeignFingerprint_AreMiss_L1AndL2Paths()
     {
-        // Positive control: a current-layout entry with the matching fingerprint is served on both read paths.
+        // Positive control: a current-layout entry with the matching fingerprint and non-expired ValidUntil is served on both read paths.
         var (okCache, okDb) = Create(null);
-        ServeL2(okCache, okDb, CachedConsentEnvelope.FromDecision(Restricted(), 1, DefaultFingerprint));
+        ServeL2(okCache, okDb, CachedConsentEnvelope.FromDecision(Restricted(), 1, DefaultFingerprint, DateTimeOffset.UtcNow.AddMinutes(5)));
         (await okCache.GetCachedDecisionAsync(new TenantId("t1"), User, Table)).ShouldNotBeNull();
         (await okCache.GetCachedDecisionsAsync(new TenantId("t1"), User, [Table]))[Table].ShouldNotBeNull();
 
@@ -120,7 +120,7 @@ public sealed class CachedConsentEnvelopeTests
 
         // Entry written by an instance with another restricted list (rolling deploy), both paths.
         var (foreign, foreignDb) = Create(RestrictedScopePolicy.FromOptions(new RestrictedScopeOptions { Scopes = ["Data.Restricted"] }));
-        ServeL2(foreign, foreignDb, CachedConsentEnvelope.FromDecision(Restricted(), 1, DefaultFingerprint));
+        ServeL2(foreign, foreignDb, CachedConsentEnvelope.FromDecision(Restricted(), 1, DefaultFingerprint, DateTimeOffset.UtcNow.AddMinutes(5)));
         (await foreign.GetCachedDecisionAsync(new TenantId("t1"), User, Table)).ShouldBeNull();
         (await foreign.GetCachedDecisionsAsync(new TenantId("t1"), User, [Table]))[Table].ShouldBeNull();
     }

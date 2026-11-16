@@ -22,6 +22,7 @@ using Xunit;
 /// R-GQL-12: catalog changes reach the GraphQL schema without a restart, and an unreachable governance database at
 /// schema build time no longer takes down the GraphQL endpoint.
 /// </summary>
+[Collection("CatalogRelation")]
 public sealed class CatalogSchemaRefreshRGql12Tests
 {
     public sealed class PingQuery

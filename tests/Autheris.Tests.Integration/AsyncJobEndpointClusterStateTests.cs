@@ -13,30 +13,42 @@ using Autheris.Application.Runtime.Jobs.Services;
 using Autheris.Application.State;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using System.Collections.Generic;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Hosting;
 using Autheris.Tests.Integration.Governance;
 
 /// <summary>WP-ARC-A-12: an unavailable cluster state or a node-local result surfaces as HTTP 503, never as 404 or 500.</summary>
-public sealed class AsyncJobEndpointClusterStateTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class AsyncJobEndpointClusterStateTests : IClassFixture<AsyncJobEndpointClusterStateTests.HostFixture>
 {
     private readonly WebApplicationFactory<Program> _factory;
 
-    public AsyncJobEndpointClusterStateTests(WebApplicationFactory<Program> factory)
+    public AsyncJobEndpointClusterStateTests(HostFixture factory)
     {
-        _factory = factory.WithWebHostBuilder(builder =>
+        _factory = factory;
+    }
+
+    public sealed class HostFixture : IntegrationHost<HostFixture>
+    {
+        protected override void ConfigureHostConfiguration(IConfigurationBuilder config)
         {
-            builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("AsyncJobEndpointClusterStateTests"));
-            builder.ConfigureServices(services =>
+            config.AddInMemoryCollection(new Dictionary<string, string?>
             {
-                services.AddSingleton<IAsyncQueryJobManager, UnavailableJobManager>();
+                ["Gateway:Authentication:EnableTestAuthHandler"] = "true",
+                ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
+                ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.Create("AsyncJobEndpointClusterStateTests"),
             });
-        });
+        }
+
+        protected override void ConfigureHostServices(IServiceCollection services)
+        {
+            services.AddSingleton<IAsyncQueryJobManager, UnavailableJobManager>();
+        }
     }
 
     private sealed class UnavailableJobManager : IAsyncQueryJobManager

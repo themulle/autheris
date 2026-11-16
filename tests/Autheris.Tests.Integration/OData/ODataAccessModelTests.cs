@@ -14,7 +14,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
@@ -39,13 +39,13 @@ public sealed class ODataAccessModelTests : IClassFixture<ODataAccessModelTests.
     public sealed class Fixture : IDisposable
     {
         private readonly WebApplicationFactory<Program> _root = new();
-        private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"odata-access-{Guid.NewGuid():N}.db");
+        private readonly string _dbPath;
         public WebApplicationFactory<Program> Factory { get; }
         public bool Seeded { get; set; }
 
         public Fixture()
         {
-            SeedDatabase(_dbPath);
+            _dbPath = SeedDatabase();
 
             var dbPath = _dbPath;
             Factory = _root.WithWebHostBuilder(builder =>
@@ -55,8 +55,9 @@ public sealed class ODataAccessModelTests : IClassFixture<ODataAccessModelTests.
                 builder.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "5000");
                 builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
                 builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("Fixture"));
-                builder.UseSetting("Gateway:DataSources:Connections:erp:Provider", "Sqlite");
-                builder.UseSetting("Gateway:DataSources:Connections:erp:ConnectionString", $"Data Source={dbPath}");
+                builder.UseSetting("Gateway:DataSources:Connections:erp:Provider", "PostgreSql");
+                builder.UseSetting("Gateway:DataSources:Connections:erp:DefaultSchema", "main");
+                builder.UseSetting("Gateway:DataSources:Connections:erp:ConnectionString", dbPath);
                 builder.UseSetting("Gateway:WebSql:DefaultDataSourceName", "erp");
                 builder.UseSetting("Gateway:OData:Enabled", "true");
             });
@@ -66,17 +67,11 @@ public sealed class ODataAccessModelTests : IClassFixture<ODataAccessModelTests.
         {
             Factory.Dispose();
             _root.Dispose();
-            SqliteConnection.ClearAllPools();
-            try { File.Delete(_dbPath); } catch (IOException) { }
+            NpgsqlConnection.ClearAllPools();
         }
     }
 
-    private static void SeedDatabase(string path)
-    {
-        using var conn = new SqliteConnection($"Data Source={path}");
-        conn.Open();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = """
+    private static string SeedDatabase() => PostgresDataSource.Create("odataaccess", """
             CREATE TABLE customers (
                 id INTEGER PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -90,9 +85,7 @@ public sealed class ODataAccessModelTests : IClassFixture<ODataAccessModelTests.
                 (3, 'Charlie', 'EU', 'charlie@contoso.eu', 'VIP-EU-3'),
                 (4, 'Diana', 'APAC', 'diana@contoso.apac', 'VIP-APAC-4'),
                 (5, 'Erik', 'EU', 'erik@contoso.eu', 'VIP-EU-5');
-            """;
-        cmd.ExecuteNonQuery();
-    }
+            """);
 
     private async Task EnsureSeededAsync()
     {
@@ -114,7 +107,7 @@ public sealed class ODataAccessModelTests : IClassFixture<ODataAccessModelTests.
                 DisplayName = "customers",
                 TableName = "customers",
                 SchemaName = "main",
-                SourceType = "Sqlite",
+                SourceType = "PostgreSql",
                 SourceName = "erp",
                 IsActive = true
             },

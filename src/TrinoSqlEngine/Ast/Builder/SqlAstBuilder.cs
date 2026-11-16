@@ -15,7 +15,7 @@ using TrinoSqlEngine.Ast.Nodes;
 /// Transforms an ANTLR4 ParseTree (from SqlBase.g4) into the strongly-typed immutable AST Intermediate Representation.
 /// Applies fail-closed statement filtering, depth guards (Anti-DoS), and function/table policies.
 /// </summary>
-public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
+public sealed partial class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
 {
     private readonly AstBuilderOptions _options;
     private int _currentDepth;
@@ -865,21 +865,9 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         return new UnaryExpression(UnaryOperator.Not, operand);
     }
 
-    public override SqlNode VisitAnd(SqlBaseParser.AndContext context)
-    {
-        using var _ = EnterScope();
-        var left = (Expression)Visit(context.booleanExpression(0));
-        var right = (Expression)Visit(context.booleanExpression(1));
-        return new BinaryExpression(left, BinaryOperator.And, right);
-    }
+    public override SqlNode VisitAnd(SqlBaseParser.AndContext context) => VisitAndChain(context);
 
-    public override SqlNode VisitOr(SqlBaseParser.OrContext context)
-    {
-        using var _ = EnterScope();
-        var left = (Expression)Visit(context.booleanExpression(0));
-        var right = (Expression)Visit(context.booleanExpression(1));
-        return new BinaryExpression(left, BinaryOperator.Or, right);
-    }
+    public override SqlNode VisitOr(SqlBaseParser.OrContext context) => VisitOrChain(context);
 
     public override SqlNode VisitPredicated(SqlBaseParser.PredicatedContext context)
     {
@@ -1000,28 +988,7 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         };
     }
 
-    public override SqlNode VisitArithmeticBinary(SqlBaseParser.ArithmeticBinaryContext context)
-    {
-        using var _ = EnterScope();
-        var left = (Expression)Visit(context.left);
-        var right = (Expression)Visit(context.right);
-        var op = context.@operator.Type switch
-        {
-            SqlBaseLexer.PLUS => BinaryOperator.Add,
-            SqlBaseLexer.MINUS => BinaryOperator.Subtract,
-            SqlBaseLexer.ASTERISK => BinaryOperator.Multiply,
-            SqlBaseLexer.SLASH => BinaryOperator.Divide,
-            SqlBaseLexer.PERCENT => BinaryOperator.Modulo,
-            _ => throw new AstBuildException($"Unknown binary operator: {context.@operator.Text}")
-        };
-
-        if (_options.TranslateTrinoDateFunctions && (left is IntervalLiteralExpression || right is IntervalLiteralExpression))
-        {
-            return BuildIntervalArithmetic(left, op, right);
-        }
-
-        return new BinaryExpression(left, op, right);
-    }
+    public override SqlNode VisitArithmeticBinary(SqlBaseParser.ArithmeticBinaryContext context) => VisitArithmeticChain(context);
 
     /// <summary>Virtual filters (phase 7b): <c>x ± INTERVAL 'n' unit</c> and <c>INTERVAL 'n' unit + x</c> become date_add.</summary>
     private static DateFunctionExpression BuildIntervalArithmetic(Expression left, BinaryOperator op, Expression right)
@@ -1063,8 +1030,8 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         "week" => DateUnit.Week,
         "month" => DateUnit.Month,
         "year" => DateUnit.Year,
-        // #333: quarter is accepted for date_trunc only; date_add and INTERVAL keep rejecting it.
-        "quarter" when function == "date_trunc" => DateUnit.Quarter,
+        // #333: quarter is accepted for date_trunc and date_add (each dialect emits it as three months or a native quarter unit); INTERVAL keeps rejecting it.
+        "quarter" when function is "date_trunc" or "date_add" => DateUnit.Quarter,
         _ => throw Unsupported($"{function} unit '{unit}' (expected second, minute, hour, day, week, month or year)")
     };
 
@@ -1128,13 +1095,7 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         _ => throw Unsupported($"{function} amount that is not an integer literal")
     };
 
-    public override SqlNode VisitConcatenation(SqlBaseParser.ConcatenationContext context)
-    {
-        using var _ = EnterScope();
-        var left = (Expression)Visit(context.left);
-        var right = (Expression)Visit(context.right);
-        return new BinaryExpression(left, BinaryOperator.Concat, right);
-    }
+    public override SqlNode VisitConcatenation(SqlBaseParser.ConcatenationContext context) => VisitConcatenationChain(context);
 
     public override SqlNode VisitColumnReference(SqlBaseParser.ColumnReferenceContext context)
     {

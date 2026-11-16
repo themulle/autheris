@@ -11,6 +11,7 @@ using Shouldly;
 using Xunit;
 
 /// <summary>Oracle runtime hardening (WP-F1, F2, F3, F4; SEC-ADG-03, -14, -24).</summary>
+[Trait("Category", "Security")]
 public sealed class OracleRuntimeTests
 {
     private const string Tcps = "(DESCRIPTION=(ADDRESS=(PROTOCOL=TCPS)(HOST=db.example)(PORT=2484))(CONNECT_DATA=(SERVICE_NAME=APP)))";
@@ -73,7 +74,7 @@ public sealed class OracleRuntimeTests
     [InlineData(DatabaseDialect.Oracle, "gql_limit", ":gql_limit", "gql_limit")]
     [InlineData(DatabaseDialect.SqlServer, "gql_limit", "@gql_limit", "@gql_limit")]
     [InlineData(DatabaseDialect.PostgreSql, "gql_limit", "@gql_limit", "@gql_limit")]
-    [InlineData(DatabaseDialect.Sqlite, "gql_limit", "@gql_limit", "@gql_limit")]
+    [InlineData(DatabaseDialect.Databricks, "gql_limit", "@gql_limit", "@gql_limit")]
     public void ParameterMarker_IsDialectAware(DatabaseDialect dialect, string name, string marker, string parameterName)
     {
         dialect.FormatParameterMarker(name).ShouldBe(marker);

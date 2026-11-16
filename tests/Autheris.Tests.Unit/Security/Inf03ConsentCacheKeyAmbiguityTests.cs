@@ -16,6 +16,7 @@ using Xunit;
 /// <summary>
 /// INF-03: table components containing ':' must not collide on the L1 consent cache key.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class Inf03ConsentCacheKeyAmbiguityTests
 {
     [Fact]

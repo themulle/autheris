@@ -12,9 +12,8 @@ route /api/admin/tokens/revoke | admin route (tenant registry, token revocation)
 route /api/auth/login | auth, dev-persona or portal route; no governed data access
 route /api/auth/logout | auth, dev-persona or portal route; no governed data access
 route /api/auth/session | auth, dev-persona or portal route; no governed data access
-route /api/catalog/datasets/{id}/keys | direct catalog dataset metadata route (keys/required-filters/synthetic-samples); governance repositories only, no C1..C5 data read
-route /api/catalog/datasets/{id}/required-filters | direct catalog dataset metadata route (keys/required-filters/synthetic-samples); governance repositories only, no C1..C5 data read
-route /api/catalog/datasets/{id}/synthetic-samples | direct catalog dataset metadata route (keys/required-filters/synthetic-samples); governance repositories only, no C1..C5 data read
+route /api/catalog/datasets/{id}/keys | direct catalog dataset metadata route (keys/required-filters); governance repositories only, no C1..C5 data read
+route /api/catalog/datasets/{id}/required-filters | direct catalog dataset metadata route (keys/required-filters); governance repositories only, no C1..C5 data read
 route /api/dev/info | auth, dev-persona or portal route; no governed data access
 route /api/dev/login/{persona} | auth, dev-persona or portal route; no governed data access
 route /api/dev/personas | auth, dev-persona or portal route; no governed data access
@@ -42,7 +41,6 @@ route /api/governance/classification/proposals/{proposalId:guid}/reject | govern
 route /api/governance/classification/transition | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
 route /api/governance/consents/apply | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
 route /api/governance/datasources | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
-route /api/governance/datasources/{id}/refresh-physical-keys | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
 route /api/governance/eu-ai-act/article-10-certificate | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
 route /api/governance/gdpr/export-pdf | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
 route /api/governance/hitl/approve | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
@@ -60,6 +58,12 @@ route /api/governance/system/health | governance admin route (CatalogApiEndpoint
 route /api/governance/system/metrics | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
 route /api/governance/system/resource-groups | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
 route /api/lineage/openlineage/sync | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
+route /api/v1/admin/consent/routes/{scopeKind}/{scopeRef} | governance admin route; no C1..C5 choke point
+route /api/v1/admin/consent/external-systems/{id:guid} | governance admin route; no C1..C5 choke point
+route /api/v1/admin/consent/external-systems/{id:guid}:disable | governance admin route; no C1..C5 choke point
+route /api/v1/admin/consent/requests:reroute | governance admin route; no C1..C5 choke point
+route /api/v1/admin/consent/grant-records/{grantId:guid}/export | governance admin route; no C1..C5 choke point
+route /api/v1/admin/consent/grant-records:verify | governance admin route; no C1..C5 choke point
 route /api/v1/cdc/events | CDC ingestion: the caller pushes the event body and the response carries only an event id; no source is read (Streaming services have no source-reader dependency, CdcRoutesReachNoSourceReaderTests)
 route /api/v1/cdc/streams | CDC stream admin or change-detection route; reads governance/CDC state, no C1..C5 choke point
 route /api/v1/cdc/streams/{id}/reset-watermark | CDC stream admin or change-detection route; reads governance/CDC state, no C1..C5 choke point
@@ -67,6 +71,19 @@ route /api/v1/cdc/streams/{id}/resync | CDC stream restart (consumer restart and
 route /api/v1/cdc/streams/{id}/rotate-image-key | CDC stream admin or change-detection route; reads governance/CDC state, no C1..C5 choke point
 route /api/v1/cdc/subscriptions | CDC stream admin or change-detection route; reads governance/CDC state, no C1..C5 choke point
 route /api/v1/cdc/subscriptions/{id} | CDC stream admin or change-detection route; reads governance/CDC state, no C1..C5 choke point
+route /api/v1/consent/events | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
+route /api/v1/consent/grant-records/keys | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
+route /api/v1/consent/grant-records/proof | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
+route /api/v1/consent/grant-records/verify | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
+route /api/v1/consent/grant-records/{seq:long} | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
+route /api/v1/consent/grants | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
+route /api/v1/consent/grants/{id:guid} | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
+route /api/v1/consent/grants/{id:guid}/revoke | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
+route /api/v1/consent/profile-assignments/{id:guid}/revoke | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
+route /api/v1/consent/requests | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
+route /api/v1/consent/requests/{id:guid} | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
+route /api/v1/consent/requests/{id:guid}/decision | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
+route /api/v1/consent/requests/{id:guid}/withdraw | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/consents/bulk | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/docs/apps | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
 route /api/v1/docs/apps/{appId}/bundle | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
@@ -80,8 +97,6 @@ route /api/v1/docs/topics | catalog integration, lineage, schema-registry, webho
 route /api/v1/envoy/check/{**originalPath} | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/envoy/export/envoyfilter.yaml | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/envoy/export/wasmplugin.yaml | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
-route /api/v1/finops/budget/{tenantId} | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
-route /api/v1/finops/focus | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/authz/explain | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/authz/objects/{objectName}/grants | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/governance/2fa/enroll | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
@@ -146,15 +161,17 @@ route /ui/swagger/assets/{file} | static docs, swagger or Nitro portal page; no 
 
 # --- src files that create DI scopes or call Task.Run (copy = stamps/copies ingress; exempt = reviewed) ---
 scope src/Autheris.Api/Configuration/Validation/DataSourceTransportConfigurationReporter.cs | startup/reload advisory logging only: reads catalog source names once at start, reaches no data executor or connector (issue #447 WP-5; needs security approval, SEC-ATR-13)
+scope src/Autheris.Api/Endpoints/Health/ReadinessProbe.cs | exempt: health readiness probe Task.Run timeout check; reaches no governed data
 scope src/Autheris.Api/Extensions/DependencyInjection/DataApiServiceExtensions.cs | exempt: VirtualSystemTablesHostedService registration; reaches no governed data
 scope src/Autheris.Api/Hosting/Warmup/GraphQlExecutorGate.cs | exempt: GraphQL warmup probe/eviction Task.Run; reaches no governed data
 scope src/Autheris.Api/Hosting/Warmup/StartupWarmupService.cs | exempt: startup warmup Task.Run bound; no request ingress, reaches no governed data
 scope src/Autheris.Application/Audit/AuditGroupCommitSink.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Application/Audit/AuditRetentionPurgeWorker.cs | exempt: audit retention purge; reaches no governed data
+scope src/Autheris.Application/Catalog/CatalogSnapshotProvider.cs | exempt: infrastructure background work (catalog snapshot refresh); reaches no governed data
 scope src/Autheris.Application/Catalog/Search/OllamaEmbeddingGenerator.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Application/Events/InMemoryGatewayEventBus.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
-scope src/Autheris.Application/Governance/Caching/PolicyEpochGuard.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Application/Governance/Services/CatalogVisibilityMetrics.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
+scope src/Autheris.Application/Policy/RowScopes/PatternCoverageMonitor.cs | exempt: infrastructure background work (pattern grant catalog epoch monitor); governance repositories only, reaches no governed data
 scope src/Autheris.Application/Procedures/Services/ProcedureRegistrationService.cs | exempt: procedure registry sync; reaches no governed data
 scope src/Autheris.Application/Runtime/Hosting/ClusterPartitionedService.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Application/Runtime/Hosting/ClusterScheduledService.cs | exempt: cluster-scheduled lease runner; reaches no governed data
@@ -163,6 +180,7 @@ scope src/Autheris.Application/Runtime/Jobs/Services/AsyncQueryJobBackgroundWork
 scope src/Autheris.Application/Sql/Services/GovernedSqlExecutionService.cs | scoped IngressTransportContext captured through the injected gate; Task.Run creates no new scope
 scope src/Autheris.Application/Sql/Services/GovernedSqlExecutor.cs | scoped IngressTransportContext captured through the injected gate; Task.Run creates no new scope
 scope src/Autheris.Application/Sql/Services/WebSqlStatementManager.cs | copy: copies the ingress transport into the new scope (stamp site)
+scope src/Autheris.Application/State/Caching/BoundedCache.cs | exempt: infrastructure background work (single-flight cache fill); reaches no governed data
 scope src/Autheris.Application/State/Caching/SingleFlightKeySetCache.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Application/State/Caching/TableCache/TableCacheManager.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Application/Streaming/Services/CdcStreamTailHub.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
@@ -170,11 +188,9 @@ scope src/Autheris.Application/Streaming/Services/CdcWebhookDeliveryService.cs |
 scope src/Autheris.Application/Webhooks/WebhookDeliveryHostedService.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.GraphQL/Subscriptions/CdcSubscriptionGovernor.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Infrastructure/Connectors/SqlConnector.cs | copy: copies ConnectorSessionContext.Items into its scope
-scope src/Autheris.Infrastructure/Governance/ConsentRecertificationHostedService.cs | exempt: consent recertification; governance state only
 scope src/Autheris.Infrastructure/Health/CachedGatewayHealthCheckService.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Infrastructure/Messaging/InProcessChannelEventBus.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Infrastructure/Messaging/RedisEventBus.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
-scope src/Autheris.Infrastructure/Observability/ConsumerUsageFlushWorker.cs | exempt: usage flush; governance state only
 scope src/Autheris.Infrastructure/Persistence/GovernanceRepository.Audit.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Infrastructure/RateLimiting/InMemoryRateLimiterService.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 

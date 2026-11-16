@@ -263,6 +263,7 @@ public sealed class UnknownGatewayKeyGuardTests
         {
             "Gateway:Catalog:Alation:CustomFieldIdPii" => "Gateway:Catalog:Alation",
             "Gateway:Catalog:Collibra:CommunityId" => "Gateway:Catalog:Collibra",
+            "Gateway:FinOps:ScopeMonthlyBudgets" => "Gateway:FinOps",
             _ => key
         };
         foreach (var value in new[] { "false", "", "sample" })
@@ -329,7 +330,6 @@ public sealed class UnknownGatewayKeyGuardTests
         "Gateway:Classification:Workflow:Profiles:OwnerResolution:RuleBasedMappings",
         "Gateway:Dbt:DatabaseMappings",
         "Gateway:Federation:FieldClassifications",
-        "Gateway:FinOps:TenantMonthlyBudgets",
         "Gateway:OpenMetadata:RoleToGatewayRoleMap",
         "Gateway:OpenMetadata:ServiceDatabaseToDomainMap",
         "Gateway:OpenMetadata:ServiceDatabaseToTenantMap",
@@ -340,6 +340,7 @@ public sealed class UnknownGatewayKeyGuardTests
         "Gateway:RateLimiting:ClientTiers:ApiKeys",
         "Gateway:RateLimiting:ClientTiers:RoleTierMappings",
         "Gateway:RateLimiting:ClientTiers:ScopeTierMappings",
+        "Gateway:UsageAccounting:GroupDisplayNames",
         "Gateway:WebSql:DataSourceMappings"
     ];
 
@@ -356,5 +357,19 @@ public sealed class UnknownGatewayKeyGuardTests
 
         ex.Message.ShouldContain("Gateway:Foo");
         ex.Message.ShouldNotContain("Gateway:Lakehouse");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Null_valued_uninstalled_module_key_is_flagged()
+    {
+        using var json = new System.IO.MemoryStream(System.Text.Encoding.UTF8.GetBytes("""{"Gateway":{"Lakehouse":{"X":null}}}"""));
+        var configuration = new ConfigurationBuilder().AddJsonStream(json).Build();
+
+        var ex = Should.Throw<InvalidOperationException>(() =>
+            UnknownGatewayKeyGuard.ThrowIfUnknownKeys(configuration, Array.Empty<string>()));
+
+        ex.Message.ShouldContain("Gateway:Lakehouse");
+        ex.Message.ShouldContain("lakehouse");
     }
 }

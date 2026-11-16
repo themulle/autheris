@@ -88,7 +88,6 @@ public class DialectRegistryCompletenessTests
     [InlineData(TargetSqlDialect.SqlServer, "@p0")]
     [InlineData(TargetSqlDialect.PostgreSql, "$1")]
     [InlineData(TargetSqlDialect.DuckDb, "$1")]
-    [InlineData(TargetSqlDialect.Sqlite, "?1")]
     [InlineData(TargetSqlDialect.Oracle, ":p1")]
     [InlineData(TargetSqlDialect.Databricks, ":p1")]
     [InlineData(TargetSqlDialect.Ansi, "?1")]

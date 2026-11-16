@@ -8,7 +8,6 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Databricks;
 using Microsoft.Data.SqlClient;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -44,21 +43,23 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
     /// client (WP-X0j); without it a Databricks data source is refused (fail closed).
     /// </summary>
     public SqlConnectionFactory(IHostEnvironment? environment, IKeyVaultSecretProvider? secrets, IServiceProvider? services = null, TimeProvider? timeProvider = null)
+        : this(environment, secrets, services, timeProvider, requireOracleTcps: environment is null || !environment.IsDevelopment())
+    {
+    }
+
+    internal SqlConnectionFactory(IHostEnvironment? environment, IKeyVaultSecretProvider? secrets, IServiceProvider? services, TimeProvider? timeProvider, bool requireOracleTcps)
     {
         _environment = environment;
         _secrets = secrets;
         _services = services;
         _logger = services?.GetService<Microsoft.Extensions.Logging.ILogger<SqlConnectionFactory>>();
         _loginBreaker = new SqlLoginCircuitBreaker(timeProvider, _logger);
-        _requireOracleTcps = environment is null || !environment.IsDevelopment();
-        _productionSecrets = _requireOracleTcps;
+        _requireOracleTcps = requireOracleTcps;
+        _productionSecrets = environment is null || !environment.IsDevelopment();
     }
 
     /// <summary>RR-L5-01: Session settings required by the literal escaping in <c>DatabaseDialect.EscapeSqlLiteral</c>.</summary>
     public const string PostgreSqlSessionInitializationSql = "SET standard_conforming_strings = on";
-
-    /// <summary>WP-X0h: executed on every SQLite connection right after it is opened.</summary>
-    public const string SqliteTrustedSchemaOffSql = "PRAGMA trusted_schema = OFF";
 
     /// <summary>Dirty read for SQL Server sessions of data sources with <c>ReadUncommitted</c> (reads take no shared locks).</summary>
     public const string SqlServerReadUncommittedSql = "SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED";
@@ -118,9 +119,13 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
             connectionString = ResolvePassword(dialect, options, connectionString);
         }
 
+        if (_requireOracleTcps && ConnectionTlsPolicy.ValidateDialect(dialect, connectionString) is { } tlsError)
+        {
+            throw new InvalidOperationException(tlsError);
+        }
+
         DbConnection connection = dialect switch
         {
-            DatabaseDialect.Sqlite => new SqliteConnection(options.ConnectionString),
             DatabaseDialect.SqlServer => CreateSqlServerConnection(connectionString, sqlServerSspiProvider),
             DatabaseDialect.PostgreSql => new Npgsql.NpgsqlConnection(WithNoTypeLoading(connectionString)),
             // CR-ADG-07: the raw driver connection never leaves this factory; every command is created with BindByName = true.
@@ -204,32 +209,8 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
                 await isolationCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 
-            if (connection is SqliteConnection sqliteConn)
-            {
-                // WP-X0h: extension loading stays off and the schema is untrusted, so a view, trigger or default in the
-                // database cannot call a function that is not marked innocuous.
-                sqliteConn.EnableExtensions(false);
-                await using var hardenCmd = connection.CreateCommand();
-                hardenCmd.CommandText = SqliteTrustedSchemaOffSql;
-                await hardenCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-
-                // Phase 5 L8: read back, never assume. A pragma that did not take effect fails the rental closed.
-                await using var verifyTrustCmd = connection.CreateCommand();
-                verifyTrustCmd.CommandText = SessionPinning.SqliteTrustedSchemaReadBackSql;
-                SessionPinning.EnsureSqliteTrustedSchemaOff(await verifyTrustCmd.ExecuteScalarAsync(ct).ConfigureAwait(false));
-
-                sqliteConn.CreateFunction("gateway_hmac_sha256", (string? val, string? salt) =>
-                {
-                    if (val == null) return null;
-                    byte[] key = System.Text.Encoding.UTF8.GetBytes(salt ?? string.Empty);
-                    byte[] data = System.Text.Encoding.UTF8.GetBytes(val);
-                    byte[] hash = System.Security.Cryptography.HMACSHA256.HashData(key, data);
-                    return "hmac_" + Convert.ToHexStringLower(hash);
-                }, isDeterministic: true);
-            }
-
             // the raw driver connection never leaves this factory: every statement is checked for source metadata reads first.
-            return new MetadataGuardedConnection(connection, dialect, rule => ReportViolation(dialect, rule));
+            return WrapWithMetadataGuard(connection, dialect);
         }
         catch
         {
@@ -246,6 +227,10 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
         return new Npgsql.NpgsqlConnectionStringBuilder(connectionString) { ServerCompatibilityMode = Npgsql.ServerCompatibilityMode.NoTypeLoading }.ConnectionString;
 #pragma warning restore CS0618
     }
+
+    /// <summary>Wraps a driver connection in <see cref="MetadataGuardedConnection"/> wired to factory violation telemetry.</summary>
+    internal DbConnection WrapWithMetadataGuard(DbConnection connection, DatabaseDialect dialect) =>
+        new MetadataGuardedConnection(connection, dialect, rule => ReportViolation(dialect, rule));
 
     /// <summary>Warning and audit event for a blocked statement: dialect and rule id only, never the statement.</summary>
     private void ReportViolation(DatabaseDialect dialect, string rule)
@@ -321,7 +306,7 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
     /// </summary>
     private string ResolvePassword(DatabaseDialect dialect, DataSourceConnectionOptions options, string connectionString)
     {
-        bool plaintext = ConnectionSecretPolicy.HasPlaintextPassword(dialect, connectionString);
+        bool plaintext = ConnectionSecretPolicy.HasPlaintextPassword(dialect, connectionString, _logger);
         if (_productionSecrets && plaintext)
         {
             string message = dialect == DatabaseDialect.Oracle
@@ -366,7 +351,7 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
     }
 
     private static NotSupportedException UnsupportedProvider(string? provider) =>
-        new($"SQL provider '{provider}' is not supported. Supported providers are: 'Sqlite', 'SqlServer', 'PostgreSql', 'Oracle', 'Databricks'.");
+        new($"SQL provider '{provider}' is not supported. Supported providers are: 'SqlServer', 'PostgreSql', 'Oracle', 'Databricks'.");
 
     /// <summary>
     /// Issue #132: Verifies physical SQL Server instance identity

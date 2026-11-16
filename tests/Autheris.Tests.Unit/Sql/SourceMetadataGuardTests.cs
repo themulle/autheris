@@ -16,7 +16,6 @@ public sealed class SourceMetadataGuardTests
     [InlineData(DatabaseDialect.SqlServer)]
     [InlineData(DatabaseDialect.Oracle)]
     [InlineData(DatabaseDialect.Databricks)]
-    [InlineData(DatabaseDialect.Sqlite)]
     public void SEC_SIMPL_141_Rejects_InformationSchema_AllDialects(DatabaseDialect dialect)
     {
         Rule("SELECT column_name FROM information_schema.columns", dialect).ShouldBe("R1");

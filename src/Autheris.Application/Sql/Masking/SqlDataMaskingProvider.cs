@@ -9,6 +9,7 @@ using System.Text;
 using System.Threading;
 using Autheris.Application.Security;
 using Autheris.Domain.Common;
+using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
@@ -158,13 +159,6 @@ public sealed class SqlDataMaskingProvider
                     return Redact(names, new string(rule.MaskChar ?? '*', 5));
                 }
 
-                if (dialect == DatabaseDialect.Sqlite)
-                {
-                    // The legacy SQLite partial mask always produced five mask characters; the typed variable-length mask would
-                    // reveal the value length there, so SQLite redacts to the same constant length (never more than the legacy output).
-                    return Redact(names, new string(rule.MaskChar ?? '*', 5));
-                }
-
                 return PartialMask(names, rule.KeepPrefix ?? 1, rule.KeepSuffix ?? 0, rule.MaskChar ?? '*');
             case "MASK_EMAIL":
                 // A typed mask never reveals more than the legacy one, neither characters nor length: the legacy mask kept the first
@@ -201,6 +195,161 @@ public sealed class SqlDataMaskingProvider
             }.ToFrozenDictionary(StringComparer.Ordinal));
     }
 
+    public sealed record ClassificationMaskResolution(
+        bool IsDenied,
+        string? DenialReason,
+        MaskSpec? Spec,
+        MaskFunction EffectiveFunction,
+        bool TypeFallbackApplied)
+    {
+        public static ClassificationMaskResolution Deny(string reason, MaskFunction function) =>
+            new(true, reason, null, function, false);
+    }
+
+    public ClassificationMaskResolution ResolveClassificationMask(
+        string? maskFunctionCode,
+        string? paramsJson,
+        string columnName,
+        string? dataType,
+        TargetSqlDialect dialect,
+        TenantId tenantId,
+        string? explicitKeyRef = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(columnName);
+        if (!ClassificationMaskFunctions.TryParse(maskFunctionCode, out var requestedFunction))
+        {
+            return ClassificationMaskResolution.Deny("MASK_UNKNOWN_FUNCTION", default);
+        }
+
+        return ResolveClassificationMask(requestedFunction, paramsJson, columnName, dataType, dialect, tenantId, explicitKeyRef);
+    }
+
+    public ClassificationMaskResolution ResolveClassificationMask(
+        MaskFunction requestedFunction,
+        string? paramsJson,
+        string columnName,
+        string? dataType,
+        TargetSqlDialect dialect,
+        TenantId tenantId,
+        string? explicitKeyRef = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(columnName);
+        if (!Enum.IsDefined(requestedFunction))
+        {
+            return ClassificationMaskResolution.Deny("MASK_UNKNOWN_FUNCTION", requestedFunction);
+        }
+
+        if (!MaskFunctionCatalog.TryParseAndValidate(requestedFunction, paramsJson, out var parsed, out _, explicitKeyRef))
+        {
+            return ClassificationMaskResolution.Deny("MASK_INVALID_PARAMETERS", requestedFunction);
+        }
+
+        var family = MaskFunctionCatalog.ClassifyColumnType(dataType);
+        bool typeFallback = !MaskFunctionCatalog.IsCompatibleWithType(requestedFunction, family);
+        var effectiveFunction = typeFallback ? MaskFunction.TypeSafeRedact : requestedFunction;
+        if (typeFallback)
+        {
+            GatewayDiagnostics.MaskTypeFallbackCounter.Add(1,
+                new KeyValuePair<string, object?>("requested_function", ClassificationMaskFunctions.ToCode(requestedFunction)));
+        }
+
+        var names = new MaskParameterNames(columnName);
+        MaskSpec spec;
+        switch (effectiveFunction)
+        {
+            case MaskFunction.Nullify:
+                spec = new MaskSpec(MaskKind.Nullify, new MaskArguments(), FrozenDictionary<string, PolicyValue>.Empty);
+                break;
+
+            case MaskFunction.Redact:
+            case MaskFunction.TypeSafeRedact:
+                spec = Redact(names, parsed.Replacement ?? "***");
+                break;
+
+            case MaskFunction.Partial:
+                spec = PartialMask(names, parsed.KeepFirst, parsed.KeepLast, parsed.MaskChar);
+                break;
+
+            case MaskFunction.GeoJitter:
+                spec = new MaskSpec(MaskKind.GeoJitter, new MaskArguments(Decimals: parsed.GeoDecimals), FrozenDictionary<string, PolicyValue>.Empty);
+                break;
+
+            case MaskFunction.TruncateDate:
+                spec = new MaskSpec(MaskKind.TruncateDate, new MaskArguments(TruncateUnit: parsed.TruncateUnit), FrozenDictionary<string, PolicyValue>.Empty);
+                break;
+
+            case MaskFunction.BucketNumber:
+            {
+                var widthParam = names.Parameter("bw", SqlParameterType.Decimal);
+                spec = new MaskSpec(
+                    MaskKind.BucketNumber,
+                    new MaskArguments(BucketWidth: widthParam),
+                    new Dictionary<string, PolicyValue> { [widthParam.Name] = new PolicyValue(parsed.BucketWidth!.Value, SqlParameterType.Decimal) }
+                        .ToFrozenDictionary(StringComparer.Ordinal));
+                break;
+            }
+
+            case MaskFunction.RoundNumber:
+            {
+                var digitsParam = names.Parameter("rd", SqlParameterType.Int32);
+                spec = new MaskSpec(
+                    MaskKind.RoundNumber,
+                    new MaskArguments(RoundDigits: digitsParam),
+                    new Dictionary<string, PolicyValue> { [digitsParam.Name] = new PolicyValue(parsed.RoundDigits, SqlParameterType.Int32) }
+                        .ToFrozenDictionary(StringComparer.Ordinal));
+                break;
+            }
+
+            case MaskFunction.EmailDomain:
+                spec = new MaskSpec(MaskKind.EmailDomain, new MaskArguments(), FrozenDictionary<string, PolicyValue>.Empty);
+                break;
+
+            case MaskFunction.Hash:
+            case MaskFunction.Tokenize:
+            {
+                var masterKey = TryResolveClassificationKey(parsed.KeyRef);
+                if (masterKey is null)
+                {
+                    return new ClassificationMaskResolution(true, "MASK_KEY_UNAVAILABLE", null, effectiveFunction, typeFallback);
+                }
+
+                if (_options.Value.DataMasking.PreventInDbHmacKeyExposure || dialect is not (TargetSqlDialect.PostgreSql or TargetSqlDialect.SqlServer))
+                {
+                    spec = Redact(names, "***");
+                    effectiveFunction = MaskFunction.TypeSafeRedact;
+                    break;
+                }
+
+                var kind = effectiveFunction == MaskFunction.Tokenize ? MaskKind.Tokenize : MaskKind.Hmac;
+                spec = BuildHmacOrTokenizeSpec(names, dialect, masterKey, tenantId, parsed.KeyRef!, kind, parsed.TokenDomain);
+                break;
+            }
+
+            default:
+                return ClassificationMaskResolution.Deny("MASK_UNKNOWN_FUNCTION", effectiveFunction);
+        }
+
+        return new ClassificationMaskResolution(false, null, spec, effectiveFunction, typeFallback);
+    }
+
+    private byte[]? TryResolveClassificationKey(string? keyRef)
+    {
+        if (string.IsNullOrWhiteSpace(keyRef) || _secretProvider is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var fetched = _secretProvider.GetSecretBytes(keyRef);
+            return fetched is { Length: > 0 } ? fetched : null;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or KeyNotFoundException or NotSupportedException)
+        {
+            return null;
+        }
+    }
+
     private MaskSpec? TryBuildHmacSpec(MaskParameterNames names, DatabaseDialect dialect, string keyId, TenantId tenantId, string columnName)
     {
         if (_options.Value.DataMasking.PreventInDbHmacKeyExposure)
@@ -210,7 +359,7 @@ public sealed class SqlDataMaskingProvider
         }
 
         // no in-database HMAC on Oracle without a DBMS_CRYPTO grant; other dialects have no in-database HMAC either.
-        if (dialect is not (DatabaseDialect.PostgreSql or DatabaseDialect.SqlServer or DatabaseDialect.Sqlite))
+        if (dialect is not (DatabaseDialect.PostgreSql or DatabaseDialect.SqlServer))
         {
             return null;
         }
@@ -221,8 +370,28 @@ public sealed class SqlDataMaskingProvider
             return null;
         }
 
+        return BuildHmacOrTokenizeSpec(names, SqlDialectMapper.ToTargetDialect(dialect), masterKey, tenantId, keyId, MaskKind.Hmac, null);
+    }
+
+    private static MaskSpec BuildHmacOrTokenizeSpec(
+        MaskParameterNames names,
+        TargetSqlDialect dialect,
+        byte[] masterKey,
+        TenantId tenantId,
+        string keyId,
+        MaskKind kind,
+        string? tokenDomain)
+    {
         string hexKey = DeriveHexKey(masterKey, tenantId, keyId);
-        if (dialect == DatabaseDialect.SqlServer)
+        var parameters = new Dictionary<string, PolicyValue>(StringComparer.Ordinal);
+        PolicyParameterExpression? domainParam = null;
+        if (kind == MaskKind.Tokenize)
+        {
+            domainParam = names.Parameter("td", SqlParameterType.String);
+            parameters[domainParam.Name] = new PolicyValue(tokenDomain ?? "DEFAULT", SqlParameterType.String);
+        }
+
+        if (dialect == TargetSqlDialect.SqlServer)
         {
             // HMAC from two bound pads (inner, outer) derived from the same key.
             byte[] keyBytes = Encoding.ASCII.GetBytes(hexKey);
@@ -236,20 +405,19 @@ public sealed class SqlDataMaskingProvider
 
             var inner = names.Parameter("ki", SqlParameterType.Binary);
             var outer = names.Parameter("ko", SqlParameterType.Binary);
-            return new MaskSpec(MaskKind.Hmac, new MaskArguments(HmacKey: inner, HmacKeyOuter: outer),
-                new Dictionary<string, PolicyValue>
-                {
-                    [inner.Name] = new PolicyValue(innerPad, SqlParameterType.Binary),
-                    [outer.Name] = new PolicyValue(outerPad, SqlParameterType.Binary)
-                }.ToFrozenDictionary(StringComparer.Ordinal));
+            parameters[inner.Name] = new PolicyValue(innerPad, SqlParameterType.Binary);
+            parameters[outer.Name] = new PolicyValue(outerPad, SqlParameterType.Binary);
+            return new MaskSpec(kind, new MaskArguments(HmacKey: inner, HmacKeyOuter: outer, TokenDomain: domainParam),
+                parameters.ToFrozenDictionary(StringComparer.Ordinal));
         }
 
         var key = names.Parameter("k", SqlParameterType.String);
-        return new MaskSpec(MaskKind.Hmac, new MaskArguments(HmacKey: key),
-            new Dictionary<string, PolicyValue> { [key.Name] = new PolicyValue(hexKey, SqlParameterType.String) }.ToFrozenDictionary(StringComparer.Ordinal));
+        parameters[key.Name] = new PolicyValue(hexKey, SqlParameterType.String);
+        return new MaskSpec(kind, new MaskArguments(HmacKey: key, TokenDomain: domainParam),
+            parameters.ToFrozenDictionary(StringComparer.Ordinal));
     }
 
-    private static string DeriveHexKey(byte[] masterKey, TenantId tenantId, string keyId)
+    internal static string DeriveHexKey(byte[] masterKey, TenantId tenantId, string keyId)
     {
         byte[] derivedKey = HKDF.DeriveKey(
             HashAlgorithmName.SHA256,
@@ -306,7 +474,7 @@ public sealed class SqlDataMaskingProvider
     {
         if (string.IsNullOrWhiteSpace(dataType)) return false;
         var dt = dataType.Trim().ToLowerInvariant();
-        if (dt.Contains('(')) dt = dt[..dt.IndexOf('(')].Trim();
+        if (dt.Contains('(', StringComparison.Ordinal)) dt = dt[..dt.IndexOf('(', StringComparison.Ordinal)].Trim();
         return dt is "int" or "integer" or "bigint" or "smallint" or "tinyint" or "numeric" or "decimal"
             or "money" or "smallmoney" or "real" or "float" or "double precision" or "double"
             or "bit" or "bool" or "boolean" or "date" or "datetime" or "datetime2" or "smalldatetime"
@@ -323,9 +491,9 @@ public sealed class SqlDataMaskingProvider
         }
 
         var dt = col.DataType.Trim().ToLowerInvariant();
-        if (dt.Contains('('))
+        if (dt.Contains('(', StringComparison.Ordinal))
         {
-            dt = dt[..dt.IndexOf('(')].Trim();
+            dt = dt[..dt.IndexOf('(', StringComparison.Ordinal)].Trim();
         }
 
         return dt switch
@@ -344,21 +512,16 @@ public sealed class SqlDataMaskingProvider
     {
         if (dialect == DatabaseDialect.SqlServer)
         {
-            var col = $"[{columnName.Replace("]", "]]")}]";
+            var col = $"[{columnName.Replace("]", "]]", StringComparison.Ordinal)}]";
             return $"CASE WHEN CHARINDEX('@', CAST({col} AS NVARCHAR(MAX))) > 1 THEN SUBSTRING(CAST({col} AS NVARCHAR(MAX)), 1, 1) + '***@***' ELSE '***@***' END";
         }
 
-        var quotedCol = $"\"{columnName.Replace("\"", "\"\"")}\"";
+        var quotedCol = $"\"{columnName.Replace("\"", "\"\"", StringComparison.Ordinal)}\"";
         if (dialect == DatabaseDialect.Oracle)
         {
             // CR-ADG-18: Oracle has no TEXT type and no POSITION function (CAST ... AS TEXT failed on the executable Oracle path).
             string text = $"CAST({quotedCol} AS VARCHAR2(4000))";
             return $"CASE WHEN INSTR({text}, '@') > 1 THEN SUBSTR({text}, 1, 1) || '***@***' ELSE '***@***' END";
-        }
-
-        if (dialect == DatabaseDialect.Sqlite)
-        {
-            return $"CASE WHEN INSTR(CAST({quotedCol} AS TEXT), '@') > 1 THEN SUBSTR(CAST({quotedCol} AS TEXT), 1, 1) || '***@***' ELSE '***@***' END";
         }
 
         return $"CASE WHEN POSITION('@' IN CAST({quotedCol} AS TEXT)) > 1 THEN SUBSTR(CAST({quotedCol} AS TEXT), 1, 1) || '***@***' ELSE '***@***' END";
@@ -368,20 +531,15 @@ public sealed class SqlDataMaskingProvider
     {
         if (dialect == DatabaseDialect.SqlServer)
         {
-            var col = $"[{columnName.Replace("]", "]]")}]";
+            var col = $"[{columnName.Replace("]", "]]", StringComparison.Ordinal)}]";
             return $"CASE WHEN LEN(CAST({col} AS NVARCHAR(MAX))) >= 8 THEN SUBSTRING(CAST({col} AS NVARCHAR(MAX)), 1, 2) + '** **** **** ' + RIGHT(CAST({col} AS NVARCHAR(MAX)), 4) ELSE '****' END";
         }
 
-        var quotedCol = $"\"{columnName.Replace("\"", "\"\"")}\"";
+        var quotedCol = $"\"{columnName.Replace("\"", "\"\"", StringComparison.Ordinal)}\"";
         if (dialect == DatabaseDialect.Oracle)
         {
             string text = $"CAST({quotedCol} AS VARCHAR2(4000))";
             return $"CASE WHEN LENGTH({text}) >= 8 THEN SUBSTR({text}, 1, 2) || '** **** **** ' || SUBSTR({text}, -4) ELSE '****' END";
-        }
-
-        if (dialect == DatabaseDialect.Sqlite)
-        {
-            return $"CASE WHEN LENGTH(CAST({quotedCol} AS TEXT)) >= 8 THEN SUBSTR(CAST({quotedCol} AS TEXT), 1, 2) || '** **** **** ' || SUBSTR(CAST({quotedCol} AS TEXT), -4) ELSE '****' END";
         }
 
         return $"CASE WHEN LENGTH(CAST({quotedCol} AS TEXT)) >= 8 THEN SUBSTR(CAST({quotedCol} AS TEXT), 1, 2) || '** **** **** ' || SUBSTR(CAST({quotedCol} AS TEXT), LENGTH(CAST({quotedCol} AS TEXT)) - 3, 4) ELSE '****' END";
@@ -447,11 +605,9 @@ public sealed class SqlDataMaskingProvider
         return dialect switch
         {
             DatabaseDialect.PostgreSql =>
-                $"ENCODE(HMAC(CAST(\"{columnName.Replace("\"", "\"\"")}\" AS TEXT), CAST({keyMarker} AS TEXT), 'sha256'), 'hex')",
+                $"ENCODE(HMAC(CAST(\"{columnName.Replace("\"", "\"\"", StringComparison.Ordinal)}\" AS TEXT), CAST({keyMarker} AS TEXT), 'sha256'), 'hex')",
             DatabaseDialect.SqlServer =>
-                $"CONVERT(VARCHAR(64), HASHBYTES('SHA2_256', {outerMarker} + HASHBYTES('SHA2_256', {innerMarker} + CAST(CAST([{columnName.Replace("]", "]]")}] AS NVARCHAR(MAX)) AS VARBINARY(MAX)))), 2)",
-            DatabaseDialect.Sqlite =>
-                $"gateway_hmac_sha256(CAST(\"{columnName.Replace("\"", "\"\"")}\" AS TEXT), {keyMarker})",
+                $"CONVERT(VARCHAR(64), HASHBYTES('SHA2_256', {outerMarker} + HASHBYTES('SHA2_256', {innerMarker} + CAST(CAST([{columnName.Replace("]", "]]", StringComparison.Ordinal)}] AS NVARCHAR(MAX)) AS VARBINARY(MAX)))), 2)",
             _ => null
         };
     }

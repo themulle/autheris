@@ -196,6 +196,43 @@ public sealed class StreamRlsPolicyEnforcerTests
     }
 
     [Fact]
+    [Trait("Category", "Security")]
+    public async Task EvaluateAndMaskAsync_DecisionPointDeniesColumnTheConsentMasks_StripsColumn()
+    {
+        // An access profile (strict masking) is applied by the decision point only; the stricter column level must win.
+        var table = new TableIdentifier("sales", "crm", "customers");
+        var cdcEvent = new CdcEvent(
+            "evt-strict", table, CdcOperation.Insert, "tenant-a", null,
+            new Dictionary<string, object?> { ["id"] = 1, ["ssn"] = "123-45-6789" }, DateTimeOffset.UtcNow);
+        var subscriber = new ClaimsPrincipal(new ClaimsIdentity(new[]
+        {
+            new Claim("tenant_id", "tenant-a"),
+            new Claim(ClaimTypes.PrimarySid, "S-1-5-CHARLIE")
+        }));
+
+        SetupConsentDecision(new TableAccessDecision(
+            table, true,
+            new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase) { ["id"] = ColumnAccessLevel.Clear, ["ssn"] = ColumnAccessLevel.Mask },
+            null, Array.Empty<string>()));
+        SetupMetadata(table, ["id", "ssn"]);
+        _maskingProvider.MaskValue("ssn", Arg.Any<object?>(), Arg.Any<MaskingRule>()).Returns("[REDACTED]");
+
+        var pdp = TestSupport.PdpTestDoubles.From(_ => new TableAccessDecision(
+            table, true,
+            new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase) { ["id"] = ColumnAccessLevel.Clear, ["ssn"] = ColumnAccessLevel.Deny },
+            null, Array.Empty<string>()));
+        var sut = new StreamRlsPolicyEnforcer(
+            pdp, _metadataRepo, _maskingProvider, _epochService, NullLogger<StreamRlsPolicyEnforcer>.Instance, _consentRepo, _resolution, _cache);
+
+        var result = await sut.EvaluateAndMaskAsync(cdcEvent, subscriber);
+
+        result.IsAllowed.ShouldBeTrue();
+        result.MaskedPayload.ShouldNotBeNull();
+        result.MaskedPayload["id"].ShouldBe(1);
+        result.MaskedPayload.ContainsKey("ssn").ShouldBeFalse();
+    }
+
+    [Fact]
     public async Task EvaluateAndMaskAsync_DeleteOperation_UsesBeforePayload()
     {
         var table = new TableIdentifier("finance", "accounting", "invoices");

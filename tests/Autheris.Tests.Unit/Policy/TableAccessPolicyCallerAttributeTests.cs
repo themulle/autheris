@@ -16,7 +16,6 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
-using Microsoft.Data.Sqlite;
 using NSubstitute;
 using Shouldly;
 using TrinoSqlEngine.Ast.Emit;
@@ -56,7 +55,7 @@ public sealed class TableAccessPolicyCallerAttributeTests : IDisposable
     private static TableMetadata Meta() => new()
     {
         Identifier = Orders,
-        Table = new Table { SourceName = "ds", SchemaName = "main", TableName = "orders", SourceType = "SQLite", DataSourceType = DataSourceType.Sql },
+        Table = new Table { SourceName = "ds", SchemaName = "main", TableName = "orders", SourceType = "PostgreSql", DataSourceType = DataSourceType.Sql },
         Columns = [new TableColumn { ColumnName = "cost_center", DataType = "TEXT" }, new TableColumn { ColumnName = "id", DataType = "INTEGER" }]
     };
 
@@ -213,44 +212,6 @@ public sealed class TableAccessPolicyCallerAttributeTests : IDisposable
         var decision = await Decide(Policy(Repo(Consent(ConsentEffect.Allow, literal)), Resolver(provider)), Person(OidA));
         decision.RowFilterParameters!.Values.ShouldBe(["CC1"]);
         provider.Calls.ShouldBe(0);   // G8: no new work on a decision without attribute filters
-    }
-
-    [Fact]
-    public async Task ST_129_Sqlite_EndToEnd_EachPersonSeesOnlyTheirRows()
-    {
-        using var connection = new SqliteConnection("Data Source=:memory:");
-        connection.Open();
-        foreach (var sql in new[]
-        {
-            "CREATE TABLE orders (id INTEGER, cost_center TEXT)",
-            "INSERT INTO orders VALUES (1, 'CC100'), (2, 'CC200'), (3, 'CC100'), (4, 'CC300')"
-        })
-        {
-            using var c = connection.CreateCommand();
-            c.CommandText = sql;
-            c.ExecuteNonQuery();
-        }
-
-        var policy = Policy(Repo(Consent(ConsentEffect.Allow, Attr())), Resolver(Map()));
-        async Task<int[]> Rows(string oid)
-        {
-            var decision = await Decide(policy, Person(oid), oid);
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = $"SELECT id FROM orders AS {RowFilterAliases.Target} WHERE " + decision.CombinedRowFilterSql;
-            foreach (var (name, value) in decision.RowFilterParameters ?? new Dictionary<string, object?>())
-            {
-                cmd.Parameters.AddWithValue("@" + name.TrimStart('@'), value ?? DBNull.Value);
-            }
-
-            var ids = new List<int>();
-            using var reader = cmd.ExecuteReader();
-            while (reader.Read()) ids.Add(reader.GetInt32(0));
-            return ids.Order().ToArray();
-        }
-
-        (await Rows(OidA)).ShouldBe([1, 3]);
-        (await Rows(OidB)).ShouldBe([2]);
-        (await Rows(OidC)).ShouldBeEmpty();
     }
 
     [Fact]

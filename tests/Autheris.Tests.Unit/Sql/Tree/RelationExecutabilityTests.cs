@@ -23,19 +23,19 @@ public sealed class RelationExecutabilityTests
     }
 
     /// <summary>
-    /// One data table for the predicate, the schema and the tree service (parent root is always a Sqlite table):
+    /// One data table for the predicate, the schema and the tree service (parent root is always a PostgreSql table):
     /// case, parent source, child source, child source type, child data source type, executable, tree service outcome.
     /// </summary>
     public static TheoryData<string, string, string, string, DataSourceType, bool, TreeOutcome> Cases => new()
     {
-        { "same source", "blog", "blog", "Sqlite", DataSourceType.Sql, true, TreeOutcome.Runs },
-        { "case difference", "blog", "BLOG", "Sqlite", DataSourceType.Sql, true, TreeOutcome.Runs },
-        { "different source", "blog", "crm", "Sqlite", DataSourceType.Sql, false, TreeOutcome.AcrossSources },
+        { "same source", "blog", "blog", "PostgreSql", DataSourceType.Sql, true, TreeOutcome.Runs },
+        { "case difference", "blog", "BLOG", "PostgreSql", DataSourceType.Sql, true, TreeOutcome.Runs },
+        { "different source", "blog", "crm", "PostgreSql", DataSourceType.Sql, false, TreeOutcome.AcrossSources },
         { "same name different dialect", "blog", "blog", "SqlServer", DataSourceType.Sql, false, TreeOutcome.DialectMismatch },
-        { "empty on both sides", "", "", "Sqlite", DataSourceType.Sql, true, TreeOutcome.NoConnection },
-        { "empty versus non-empty", "", "blog", "Sqlite", DataSourceType.Sql, false, TreeOutcome.AcrossSources },
-        { "non-empty versus empty", "blog", "", "Sqlite", DataSourceType.Sql, false, TreeOutcome.AcrossSources },
-        { "different data source type", "blog", "blog", "Sqlite", DataSourceType.HttpDeclarative, false, TreeOutcome.NotSql }
+        { "empty on both sides", "", "", "PostgreSql", DataSourceType.Sql, true, TreeOutcome.NoConnection },
+        { "empty versus non-empty", "", "blog", "PostgreSql", DataSourceType.Sql, false, TreeOutcome.AcrossSources },
+        { "non-empty versus empty", "blog", "", "PostgreSql", DataSourceType.Sql, false, TreeOutcome.AcrossSources },
+        { "different data source type", "blog", "blog", "PostgreSql", DataSourceType.HttpDeclarative, false, TreeOutcome.NotSql }
     };
 
     internal static TableMetadata Meta(string sourceName, string sourceType, DataSourceType dataSourceType = DataSourceType.Sql, string domain = "d") => new()
@@ -52,7 +52,7 @@ public sealed class RelationExecutabilityTests
         _ = name;
         _ = outcome;
 
-        var parent = Meta(parentSource, "Sqlite");
+        var parent = Meta(parentSource, "PostgreSql");
         var child = Meta(childSource, childSourceType, childDsType);
 
         RelationExecutability.IsSameExecutionSource(parent, child).ShouldBe(executable);

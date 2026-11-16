@@ -23,12 +23,33 @@ public interface IColumnMaskProvider
     MaskSpec GetMask(TableIdentity table, string column);
 }
 
-public enum MaskKind { Nullify, Redact, PartialMask, Hmac, GeoJitter, Constant }
+public enum MaskKind
+{
+    Nullify,
+    Redact,
+    PartialMask,
+    Hmac,
+    GeoJitter,
+    Constant,
+    TruncateDate,
+    BucketNumber,
+    RoundNumber,
+    EmailDomain,
+    Tokenize
+}
+
+public enum MaskDateTruncateUnit
+{
+    Year,
+    Month,
+    Day
+}
 
 /// <summary>
-/// Mask arguments. Everything except <paramref name="Decimals"/> is a bound parameter (INV-4); <paramref name="Decimals"/> is a
-/// structural integer (a rounding scale) emitted inline. <paramref name="HmacKeyOuter"/> is the second HMAC pad of the SQL
-/// Server expression (the inner and outer pad are derived from the same key).
+/// Mask arguments. Everything except <paramref name="Decimals"/> and <paramref name="TruncateUnit"/> is a bound parameter
+/// (INV-4); <paramref name="Decimals"/> is a structural integer (a rounding scale) and <paramref name="TruncateUnit"/> is a
+/// closed enum emitted as a constant SQL unit. <paramref name="HmacKeyOuter"/> is the second HMAC pad of the SQL Server expression
+/// (the inner and outer pad are derived from the same key).
 /// </summary>
 public sealed record MaskArguments(
     PolicyParameterExpression? Constant = null,
@@ -37,6 +58,10 @@ public sealed record MaskArguments(
     PolicyParameterExpression? MaskChar = null,
     PolicyParameterExpression? HmacKey = null,
     int? Decimals = null,
-    PolicyParameterExpression? HmacKeyOuter = null);
+    PolicyParameterExpression? HmacKeyOuter = null,
+    MaskDateTruncateUnit? TruncateUnit = null,
+    PolicyParameterExpression? BucketWidth = null,
+    PolicyParameterExpression? RoundDigits = null,
+    PolicyParameterExpression? TokenDomain = null);
 
 public sealed record MaskSpec(MaskKind Kind, MaskArguments Arguments, FrozenDictionary<string, PolicyValue> Parameters);

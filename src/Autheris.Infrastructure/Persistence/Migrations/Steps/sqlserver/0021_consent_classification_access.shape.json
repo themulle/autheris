@@ -1,0 +1,29 @@
+{
+  "ops": [
+    {
+      "op": "addTable",
+      "table": "CONSENT_CLASSIFICATION_ACCESS",
+      "newTable": {
+        "name": "CONSENT_CLASSIFICATION_ACCESS",
+        "columns": [
+          { "name": "tenant_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "consent_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "code", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "access_level", "type": "SMALLINT", "family": "integer", "nullable": false },
+          { "name": "valid_until", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": true },
+          { "name": "approved_by_sid", "type": "NVARCHAR", "family": "string", "nullable": true },
+          { "name": "approved_at", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": false }
+        ],
+        "primaryKey": ["tenant_id", "consent_id", "code"],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addIndex",
+      "table": "CONSENT_CLASSIFICATION_ACCESS",
+      "name": "IX_CONSENT_CLASSIFICATION_ACCESS_CONSENT",
+      "unique": false,
+      "columns": ["consent_id"]
+    }
+  ]
+}

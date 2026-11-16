@@ -1,0 +1,3 @@
+# Allow-list of external production call sites of BoundedCache<,>.GetOrAddAsync.
+# Format: FullDeclaringType.MethodName | Rationale (why key covers caller and is pure)
+# Note: currently empty (0 external call sites in src/). Any new call site requires an entry here.

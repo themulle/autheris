@@ -6,14 +6,14 @@ using Autheris.Domain.Options;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Options-backed implementation of <see cref="IIndividualGrantLimits"/>.
-/// Enforces fail-closed ceilings where options can only shorten built-in durations.
+/// Options-backed implementation of <see cref="IIndividualGrantLimits"/>. Only operator-configured limits clamp; there are no
+/// compiled-in ceilings (a missing value means no class-specific limit).
 /// </summary>
 public sealed class IndividualGrantLimitsService : IIndividualGrantLimits
 {
-    public TimeSpan RegularMax { get; }
-    public TimeSpan UnmaskedMax { get; }
-    public TimeSpan ServicePrincipalMax { get; }
+    public TimeSpan? RegularMax { get; }
+    public TimeSpan? UnmaskedMax { get; }
+    public TimeSpan? ServicePrincipalMax { get; }
 
     public IndividualGrantLimitsService(IOptions<IndividualGrantOptions> options)
         : this(options?.Value)
@@ -21,62 +21,29 @@ public sealed class IndividualGrantLimitsService : IIndividualGrantLimits
     }
 
     internal IndividualGrantLimitsService(IndividualGrantOptions? options = null)
+        : this(Days(options?.RegularMaxDays), Days(options?.UnmaskedMaxDays), Days(options?.ServicePrincipalMaxDays))
     {
-        var opts = options ?? new IndividualGrantOptions();
-        RegularMax = Shorten(TimeSpan.FromDays(opts.RegularMaxDays), IndividualGrantLimits.DefaultRegularMax);
-        UnmaskedMax = Shorten(TimeSpan.FromDays(opts.UnmaskedMaxDays), IndividualGrantLimits.DefaultUnmaskedMax);
-        ServicePrincipalMax = Shorten(TimeSpan.FromDays(opts.ServicePrincipalMaxDays), IndividualGrantLimits.DefaultServicePrincipalMax);
     }
 
-    public IndividualGrantLimitsService(TimeSpan regular, TimeSpan unmasked, TimeSpan servicePrincipal)
+    public IndividualGrantLimitsService(TimeSpan? regular, TimeSpan? unmasked, TimeSpan? servicePrincipal)
     {
-        RegularMax = Shorten(regular, IndividualGrantLimits.DefaultRegularMax);
-        UnmaskedMax = Shorten(unmasked, IndividualGrantLimits.DefaultUnmaskedMax);
-        ServicePrincipalMax = Shorten(servicePrincipal, IndividualGrantLimits.DefaultServicePrincipalMax);
+        RegularMax = IndividualGrantLimits.Normalize(regular);
+        UnmaskedMax = IndividualGrantLimits.Normalize(unmasked);
+        ServicePrincipalMax = IndividualGrantLimits.Normalize(servicePrincipal);
     }
 
     public DateTimeOffset EffectiveConsentValidTo(
         GranteeType granteeType,
         DateTimeOffset validFrom,
         DateTimeOffset validTo,
-        ConsentEffect effect = ConsentEffect.Allow)
-    {
-        if (effect == ConsentEffect.Deny || validFrom == default)
-        {
-            return validTo;
-        }
-
-        TimeSpan max;
-        switch (granteeType)
-        {
-            case GranteeType.User:
-                max = RegularMax;
-                break;
-            case GranteeType.ServicePrincipal:
-                max = ServicePrincipalMax;
-                break;
-            default:
-                return validTo;
-        }
-
-        var cap = validFrom + max;
-        return validTo < cap ? validTo : cap;
-    }
+        ConsentEffect effect = ConsentEffect.Allow) =>
+        IndividualGrantLimits.ClampConsent(RegularMax, ServicePrincipalMax, granteeType, validFrom, validTo, effect);
 
     public DateTimeOffset? EffectiveProfileValidTo(
         MaskingPolicyMode mode,
         DateTimeOffset createdAt,
-        DateTimeOffset? validTo)
-    {
-        if (mode != MaskingPolicyMode.Unmasked || createdAt == default)
-        {
-            return validTo;
-        }
+        DateTimeOffset? validTo) =>
+        IndividualGrantLimits.ClampProfile(UnmaskedMax, mode, createdAt, validTo);
 
-        var cap = createdAt + UnmaskedMax;
-        return validTo is { } v && v < cap ? v : cap;
-    }
-
-    private static TimeSpan Shorten(TimeSpan configured, TimeSpan ceiling) =>
-        configured <= TimeSpan.Zero ? TimeSpan.FromDays(1) : configured > ceiling ? ceiling : configured;
+    private static TimeSpan? Days(int? days) => days is { } d ? GrantTimeMath.DaysToSpan(d) : null;
 }

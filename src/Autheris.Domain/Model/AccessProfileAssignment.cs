@@ -47,13 +47,10 @@ public sealed class AccessProfileAssignmentRejectedException(string code, string
 /// <summary>
 /// write-time validation, read-time effectiveness (fail closed) and deterministic precedence of profile assignments.
 /// <c>Unmasked</c> takes effect only through (a) a group/role mapping approved by a second administrator or (b) a time-bound individual grant
-/// (at most 30 days, requester, approver and grantee all different).
+/// (bounded only by the operator-configured limits, requester, approver and grantee all different).
 /// </summary>
 public static class AccessProfileAssignmentRules
 {
-    public static readonly TimeSpan MaxUnmaskedIndividual = TimeSpan.FromDays(30);
-    public static readonly TimeSpan MaxRegularIndividual = TimeSpan.FromDays(180);
-
     /// <summary>Recertification cadence of a standing <c>Unmasked</c> group/role mapping (C1 route (a), owner Q5): the approval lapses after this period.</summary>
     public static readonly TimeSpan UnmaskedMappingRecertification = TimeSpan.FromDays(90);
 
@@ -68,7 +65,7 @@ public static class AccessProfileAssignmentRules
 
     private static bool Same(string? a, string? b) => a != null && b != null && string.Equals(a.Trim(), b.Trim(), StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>The maximum duration of an assignment of this kind to this subject type; null for a standing group/role mapping.</summary>
+    /// <summary>The operator-configured maximum duration of an assignment of this kind to this subject type; null for a standing group/role mapping or when no limit is configured (there are no compiled-in ceilings).</summary>
     public static TimeSpan? MaxDuration(AccessProfile profile, AccessProfileAssignment a)
     {
         if (a.SubjectType != AccessProfileSubjectType.User)
@@ -76,7 +73,7 @@ public static class AccessProfileAssignmentRules
             return null;
         }
 
-        return profile.MaskingMode == MaskingPolicyMode.Unmasked ? MaxUnmaskedIndividual : MaxRegularIndividual;
+        return profile.MaskingMode == MaskingPolicyMode.Unmasked ? IndividualGrantLimits.UnmaskedMax : IndividualGrantLimits.RegularMax;
     }
 
     /// <summary>
@@ -85,7 +82,7 @@ public static class AccessProfileAssignmentRules
     /// </summary>
     public static DateTimeOffset? EffectiveExpiry(AccessProfile profile, AccessProfileAssignment a)
     {
-        var limit = MaxDuration(profile, a) is { } max ? a.AssignedAt + max : (DateTimeOffset?)null;
+        var limit = MaxDuration(profile, a) is { } max ? GrantTimeMath.AddSaturating(a.AssignedAt, max) : (DateTimeOffset?)null;
         if (a.ExpiresAt is not { } explicitExpiry)
         {
             return limit;
@@ -107,7 +104,7 @@ public static class AccessProfileAssignmentRules
 
         if (profile.MaskingMode == MaskingPolicyMode.Unmasked && a.SubjectType != AccessProfileSubjectType.User)
         {
-            return Earlier(until, a.ApprovedAt is { } at ? at + UnmaskedMappingRecertification : DateTimeOffset.MinValue);
+            return Earlier(until, a.ApprovedAt is { } at ? GrantTimeMath.AddSaturating(at, UnmaskedMappingRecertification) : DateTimeOffset.MinValue);
         }
 
         return until;
@@ -144,9 +141,9 @@ public static class AccessProfileAssignmentRules
             throw new AccessProfileAssignmentRejectedException(RequiresExpiry, "An individual grant requires an expiry.");
         }
 
-        if (MaxDuration(profile, a) is { } max && a.ExpiresAt is { } e && e > now + max)
+        if (MaxDuration(profile, a) is { } max && a.ExpiresAt is { } e && e > GrantTimeMath.AddSaturating(now, max))
         {
-            throw new AccessProfileAssignmentRejectedException(TooLong, $"The assignment exceeds the maximum duration of {max.TotalHours:0} hours.");
+            throw new AccessProfileAssignmentRejectedException(TooLong, $"The assignment exceeds the configured maximum duration of {max.TotalDays:0.#} days.");
         }
 
         var unmasked = profile.MaskingMode == MaskingPolicyMode.Unmasked;

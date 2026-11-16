@@ -19,7 +19,7 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 using Microsoft.Extensions.DependencyInjection;
 using Table = Autheris.Domain.Model.Table;
 using Xunit;
@@ -204,18 +204,16 @@ public sealed class FederatedVirtualFilterWebApiFixture : IAsyncLifetime
 
     public CountingCrmApiHandler Crm { get; } = new();
 
-    private readonly string _workDir = Path.Combine(Path.GetTempPath(), "autheris-fvf-" + Guid.NewGuid().ToString("N"));
     private WebApplicationFactory<Program>? _factory;
 
     public IServiceProvider Services => _factory!.Services;
 
     public async Task InitializeAsync()
     {
-        Directory.CreateDirectory(_workDir);
-        var authz = Path.Combine(_workDir, "authz.db");
-        var erp = Path.Combine(_workDir, "erp.db");
-        SeedAuthorization(authz);
-        SeedErp(erp);
+        var authz = SeedAuthorization();
+        var erp = SeedErp();
+        // An unreachable source: same server, a database that does not exist.
+        var authzDown = new Npgsql.NpgsqlConnectionStringBuilder(authz) { Database = "missing_db_" + Guid.NewGuid().ToString("N")[..8], Timeout = 3 }.ConnectionString;
 
         _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
         {
@@ -226,12 +224,15 @@ public sealed class FederatedVirtualFilterWebApiFixture : IAsyncLifetime
             b.UseSetting("Gateway:VirtualFilters:GenerationCheckSeconds", "0");
             b.UseSetting("Gateway:VirtualFilters:Federation:KeyCacheTtlSeconds", "1");
 
-            b.UseSetting("Gateway:DataSources:Connections:erp:Provider", "Sqlite");
-            b.UseSetting("Gateway:DataSources:Connections:erp:ConnectionString", $"Data Source={erp}");
-            b.UseSetting("Gateway:DataSources:Connections:authz:Provider", "Sqlite");
-            b.UseSetting("Gateway:DataSources:Connections:authz:ConnectionString", $"Data Source={authz}");
-            b.UseSetting("Gateway:DataSources:Connections:authz_down:Provider", "Sqlite");
-            b.UseSetting("Gateway:DataSources:Connections:authz_down:ConnectionString", $"Data Source={Path.Combine(_workDir, "missing-dir", "authz.db")};Mode=ReadOnly");
+            b.UseSetting("Gateway:DataSources:Connections:erp:Provider", "PostgreSql");
+            b.UseSetting("Gateway:DataSources:Connections:erp:DefaultSchema", "main");
+            b.UseSetting("Gateway:DataSources:Connections:erp:ConnectionString", erp);
+            b.UseSetting("Gateway:DataSources:Connections:authz:Provider", "PostgreSql");
+            b.UseSetting("Gateway:DataSources:Connections:authz:DefaultSchema", "main");
+            b.UseSetting("Gateway:DataSources:Connections:authz:ConnectionString", authz);
+            b.UseSetting("Gateway:DataSources:Connections:authz_down:Provider", "PostgreSql");
+            b.UseSetting("Gateway:DataSources:Connections:authz_down:DefaultSchema", "main");
+            b.UseSetting("Gateway:DataSources:Connections:authz_down:ConnectionString", authzDown);
 
             b.UseSetting("Gateway:WebSql:Enabled", "true");
             b.UseSetting("Gateway:WebSql:DefaultDataSourceName", "erp");
@@ -257,8 +258,7 @@ public sealed class FederatedVirtualFilterWebApiFixture : IAsyncLifetime
     public Task DisposeAsync()
     {
         _factory?.Dispose();
-        SqliteConnection.ClearAllPools();
-        try { Directory.Delete(_workDir, true); } catch { /* best effort */ }
+        NpgsqlConnection.ClearAllPools();
         return Task.CompletedTask;
     }
 
@@ -398,35 +398,23 @@ public sealed class FederatedVirtualFilterWebApiFixture : IAsyncLifetime
         return (await audit.GetAuditLogEntriesAsync(2000, Tenant)).Where(e => e.OccurredAt >= since).OrderBy(e => e.OccurredAt).ToList();
     }
 
-    private static void SeedAuthorization(string path)
-    {
-        using var conn = new SqliteConnection($"Data Source={path}");
-        conn.Open();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = @"
-CREATE TABLE client_authorization (client_id INTEGER, tenant_code TEXT, is_active INTEGER);
-INSERT INTO client_authorization VALUES
-  (101, 'T1', 1), (101, 'T1', 1),      -- duplicate
-  (102, 'T1', 1),
-  (105, 'T2', 1),
-  (103, 'T1', 0),                       -- inactive
-  (104, 'T2', 0),                       -- inactive
-  (NULL, 'T1', 1),                      -- NULL key
-  (201, 'T1', 3), (202, 'T1', 3), (203, 'T1', 3), (204, 'T1', 3), (205, 'T1', 3), (206, 'T1', 3),
-  (207, 'T1', 3), (208, 'T1', 3), (209, 'T1', 3), (210, 'T1', 3), (211, 'T1', 3), (212, 'T1', 3);   -- 12 keys: over the path-lookup budget";
-        cmd.ExecuteNonQuery();
-    }
+    private static string SeedAuthorization() => PostgresDataSource.Create("fvfauthz", """
+        CREATE TABLE client_authorization (client_id INTEGER, tenant_code TEXT, is_active INTEGER);
+        INSERT INTO client_authorization VALUES
+          (101, 'T1', 1), (101, 'T1', 1),      -- duplicate
+          (102, 'T1', 1),
+          (105, 'T2', 1),
+          (103, 'T1', 0),                       -- inactive
+          (104, 'T2', 0),                       -- inactive
+          (NULL, 'T1', 1),                      -- NULL key
+          (201, 'T1', 3), (202, 'T1', 3), (203, 'T1', 3), (204, 'T1', 3), (205, 'T1', 3), (206, 'T1', 3),
+          (207, 'T1', 3), (208, 'T1', 3), (209, 'T1', 3), (210, 'T1', 3), (211, 'T1', 3), (212, 'T1', 3);   -- 12 keys: over the path-lookup budget
+        """);
 
-    private static void SeedErp(string path)
-    {
-        using var conn = new SqliteConnection($"Data Source={path}");
-        conn.Open();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = @"
-CREATE TABLE orders (id INTEGER PRIMARY KEY, customer_id INTEGER);
-INSERT INTO orders VALUES (1, 101), (2, 102), (3, 103), (4, 105), (5, 999);";
-        cmd.ExecuteNonQuery();
-    }
+    private static string SeedErp() => PostgresDataSource.Create("fvferp", """
+        CREATE TABLE orders (id INTEGER PRIMARY KEY, customer_id INTEGER);
+        INSERT INTO orders VALUES (1, 101), (2, 102), (3, 103), (4, 105), (5, 999);
+        """);
 
     private async Task SeedGovernanceAsync()
     {
@@ -443,7 +431,7 @@ INSERT INTO orders VALUES (1, 101), (2, 102), (3, 103), (4, 105), (5, 999);";
                     DisplayName = id.TableName,
                     TableName = id.TableName,
                     SchemaName = id.Schema,
-                    SourceType = type == DataSourceType.HttpDeclarative ? "Http" : "Sqlite",
+                    SourceType = type == DataSourceType.HttpDeclarative ? "Http" : "PostgreSql",
                     SourceName = source,
                     DataSourceType = type,
                     HttpEndpoint = endpoint,

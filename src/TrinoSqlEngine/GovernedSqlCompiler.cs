@@ -128,7 +128,7 @@ internal sealed class GovernedSqlCompiler
         string keyMaterial = CompileCacheKey.Material(request, rawSql, caps, _engine.MaxQueryLength);
         var policy = request.Policy;
         var guards = EffectiveDmlGuards(policy.Dml);
-        var typed = new TypedPolicyContext(policy.Catalog, policy.RowFilters, policy.Masks, policy.Tenant, caps) { Dml = guards, Write = policy.Write };
+        var typed = new TypedPolicyContext(policy.Catalog, policy.RowFilters, policy.Masks, policy.Tenant, caps) { Dml = guards, Write = policy.Write, PerCellColumns = policy.PerCellColumns };
 
         string keyHash = CompiledSqlTemplateCache.HashOf(keyMaterial);
         var template = _cache.Find(keyMaterial, keyHash);
@@ -142,7 +142,7 @@ internal sealed class GovernedSqlCompiler
         if (template is not null)
         {
             // A rehydration attempt may have added values; start clean. A plain miss reuses the context (CR-ADG-12).
-            typed = new TypedPolicyContext(policy.Catalog, policy.RowFilters, policy.Masks, policy.Tenant, caps) { Dml = guards, Write = policy.Write };
+            typed = new TypedPolicyContext(policy.Catalog, policy.RowFilters, policy.Masks, policy.Tenant, caps) { Dml = guards, Write = policy.Write, PerCellColumns = policy.PerCellColumns };
         }
 
         // 3. token guards + parse
@@ -211,7 +211,8 @@ internal sealed class GovernedSqlCompiler
         // 6. typed security injection; user literals first learn the catalog type of the column they are compared with (16 item 2)
         Pass("inject");
         var typedLiterals = (SqlStatement)new LiteralColumnTypeAnnotator(policy.Catalog) { CancellationToken = token }.Visit(simplified);
-        var visitor = new AstSecurityVisitor(BuildOptions(request, typed), typed)
+        typedLiterals = (SqlStatement)new IntegralOperandClassifier(policy.Catalog) { CancellationToken = token }.Visit(typedLiterals);
+        var visitor = new AstSecurityVisitor(BuildOptions(request, typed, _engine.MaxQueryLength), typed)
         {
             CancellationToken = token
         };
@@ -258,6 +259,13 @@ internal sealed class GovernedSqlCompiler
         if (emitted > limit)
         {
             throw new SqlLimitExceededException(SqlLimitKind.PolicyExpansionFactor, request.TargetDialect, compiled.Sql.Length, limit);
+        }
+
+        // Enforce an absolute emitted length ceiling proportional to the engine query cap so dialect function wrappers cannot amplify unboundedly.
+        long hardCap = 4L * _engine.MaxQueryLength;
+        if (compiled.Sql.Length > hardCap)
+        {
+            throw new SqlLimitExceededException(SqlLimitKind.EmittedSqlLength, request.TargetDialect, compiled.Sql.Length, hardCap);
         }
 
         CheckBudget(request, clock, token);
@@ -388,7 +396,7 @@ internal sealed class GovernedSqlCompiler
         return null;
     }
 
-    private static AstSecurityVisitorOptions BuildOptions(CompileRequest request, TypedPolicyContext typed)
+    private static AstSecurityVisitorOptions BuildOptions(CompileRequest request, TypedPolicyContext typed, int maxQueryLength)
     {
         var guards = typed.Dml;
         return new AstSecurityVisitorOptions
@@ -400,6 +408,8 @@ internal sealed class GovernedSqlCompiler
             EnforcedMaxRows = request.EnforcedMaxRows,
             AllowRecursiveCte = request.AllowRecursiveCte,
             BindPageOffset = request.BindPageOffset,
+            TargetDialect = request.TargetDialect,
+            MaxQueryLength = maxQueryLength,
             TablesWithConsentRowFilter = CaseInsensitive(request.Policy.TablesWithConsentRowFilter),
             WritePermit = request.Policy.Write,
             RejectMaskedColumnsInPredicates = true,

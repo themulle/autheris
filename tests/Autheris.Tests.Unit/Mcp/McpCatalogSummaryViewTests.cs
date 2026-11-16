@@ -32,13 +32,12 @@ public sealed class McpCatalogSummaryViewTests
     private const string SharedId = "sales.dbo.shared_t";
     private static readonly string[] SharedList = [SharedId];
 
-    private static TableMetadata Tier(string name, DatasetVisibility visibility, bool release = false, params string[] tags)
+    private static TableMetadata Tier(string name, DatasetVisibility visibility, params string[] tags)
     {
         var t = Wp0.Table("sales", name, "Short text", ["id", "secret_col", "pii_col"]);
         return t with
         {
             Table = t.Table with { Visibility = visibility, LongDescription = "mentions secret_col and pii_col", Sensitivity = "CONFIDENTIAL", RequiresFourEyes = true },
-            ReleaseProfileToCatalogViewers = release,
             CatalogTags = tags
         };
     }
@@ -76,7 +75,7 @@ public sealed class McpCatalogSummaryViewTests
             new DataOwner { DisplayName = "Dan Delegate", Email = "dan@corp.example", AdAccount = "CORP\\dan" },
             new DataOwner { DisplayName = "", Email = "nameless@corp.example", AdAccount = "CORP\\nameless" }
         ]));
-        var catalog = Catalog(Opts(TenancyShape.Multi), [Tier("shared_t", DatasetVisibility.Summary, release: true, "finance", "pii")], owners);
+        var catalog = Catalog(Opts(TenancyShape.Multi), [Tier("shared_t", DatasetVisibility.Summary, "finance", "pii")], owners);
 
         var d = await catalog.DescribeDatasetAsync(Subject(), SharedId);
 
@@ -118,7 +117,7 @@ public sealed class McpCatalogSummaryViewTests
     [Fact]
     public async Task Summary_List_ReportsNoColumnsAndNoGraphQlField_AndTagsComeFromCatalogTags()
     {
-        var catalog = Catalog(Opts(TenancyShape.Multi), [Tier("shared_t", DatasetVisibility.Summary, false, "finance")]);
+        var catalog = Catalog(Opts(TenancyShape.Multi), [Tier("shared_t", DatasetVisibility.Summary, "finance")]);
 
         var list = await catalog.ListDatasetsAsync(Subject());
 
@@ -240,24 +239,4 @@ public sealed class McpCatalogSummaryViewTests
         }
     }
 
-    // --- sample_rows third term ---
-
-    [Theory]
-    [InlineData(DatasetVisibility.Full, true, true)]
-    [InlineData(DatasetVisibility.Full, false, false)]
-    [InlineData(DatasetVisibility.Summary, true, false)]
-    public async Task SampleRows_Synthetic_NoConsent_AllowedOnlyForFullWithRelease(DatasetVisibility tier, bool release, bool allowed)
-    {
-        var catalog = Catalog(Opts(TenancyShape.Multi), [Tier("shared_t", tier, release)]);
-
-        if (allowed)
-        {
-            var sample = await catalog.SampleRowsAsync(Subject(), SharedId, 2, synthetic: true);
-            sample.IsSynthetic.ShouldBeTrue();
-        }
-        else
-        {
-            await Should.ThrowAsync<GatewayForbiddenException>(() => catalog.SampleRowsAsync(Subject(), SharedId, 2, synthetic: true));
-        }
-    }
 }

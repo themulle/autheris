@@ -245,12 +245,12 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
         }
 
         // Strip query string and fragment
-        var qIdx = rawPath.IndexOf('?');
+        var qIdx = rawPath.IndexOf('?', StringComparison.Ordinal);
         var pathOnly = qIdx >= 0 ? rawPath[..qIdx] : rawPath;
-        var fIdx = pathOnly.IndexOf('#');
+        var fIdx = pathOnly.IndexOf('#', StringComparison.Ordinal);
         pathOnly = fIdx >= 0 ? pathOnly[..fIdx] : pathOnly;
 
-        if (pathOnly.Contains('\0'))
+        if (pathOnly.Contains('\0', StringComparison.Ordinal))
         {
             return null;
         }

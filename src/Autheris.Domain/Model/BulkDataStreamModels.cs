@@ -44,7 +44,12 @@ public sealed record KeysetCursorToken(
 public sealed class InvalidCursorException : ArgumentException
 {
     public const string ErrorCode = "INVALID_CURSOR";
+    public const string TypedErrorCode = "cursor.invalid";
+    public const string UniformMessage = "INVALID_CURSOR: cursor.invalid: The cursor is invalid.";
 
+    public string Code => TypedErrorCode;
+
+    public InvalidCursorException() : base(UniformMessage) { }
     public InvalidCursorException(string message) : base(message) { }
     public InvalidCursorException(string message, Exception innerException) : base(message, innerException) { }
     public InvalidCursorException(string message, string paramName) : base(message, paramName) { }

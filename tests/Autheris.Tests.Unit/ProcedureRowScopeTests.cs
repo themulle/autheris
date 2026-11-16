@@ -117,7 +117,7 @@ public class ProcedureRowScopeTests
     [InlineData("procedure: tem.usp_X\nrow_scope_key: serial_number\n")]                                          // no result_table
     [InlineData("procedure: tem.usp_X\nresult_table: md.crane\nrow_scope_key: [a, A]\n")]                          // duplicate
     [InlineData("procedure: tem.usp_X\nresult_table: md.crane\nrow_scope_key: 'a; DROP TABLE x'\n")]               // identifier
-    [InlineData("procedure: tem.usp_X\nresult_table: md.crane\nvalidation: declared\noutputs: [other]\nrow_scope_key: serial_number\n")] // not an output
+    [InlineData("procedure: tem.usp_X\nresult_table: md.crane\noutputs: [other]\nrow_scope_key: serial_number\n")] // not an output
     public void ParseYaml_InvalidRowScopeKey_Throws(string yaml)
     {
         Should.Throw<FormatException>(() => ProcedureDefinitionParser.ParseYaml(yaml, "x", false, 60));
@@ -158,8 +158,9 @@ public class ProcedureRowScopeTests
         Columns = [new TableColumn { ColumnName = "serial_number" }, new TableColumn { ColumnName = "name" }]
     };
 
-    private static ClaimsPrincipal User() => new(new ClaimsIdentity(
-        [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-LWE-DAVID")], "test"));
+    private static ClaimsPrincipal User() => Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(
+        new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-LWE-DAVID"), DefaultTenantCaller.Claim], "test")));
 
     private static Fixture Active(
         string header = Header,

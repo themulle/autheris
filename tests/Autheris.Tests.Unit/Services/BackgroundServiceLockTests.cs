@@ -8,6 +8,8 @@ using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Catalog.Models;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Catalog.OpenMetadata;
+using Autheris.Application.ConsentRequests.Routing;
+using Autheris.Application.Governance.Grants;
 using Autheris.Application.State;
 using Autheris.Application.Streaming.Interfaces;
 using Autheris.Domain.Common;
@@ -15,7 +17,6 @@ using Autheris.Domain.Options;
 using Autheris.Extensions.Cdc;
 using Autheris.Extensions.DataCatalog;
 using Autheris.Extensions.OpenMetadata;
-using Autheris.Infrastructure.Governance;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -177,23 +178,22 @@ public sealed class BackgroundServiceLockTests
     }
 
     [Fact]
-    public async Task ConsentRecertificationHostedService_WhenLockBusy_SkipsRecertification()
+    public async Task GrantExpiryHostedService_WhenLockBusy_SkipsSweep()
     {
         // Arrange
-        var recertService = Substitute.For<IConsentRecertificationService>();
+        var expiryStore = Substitute.For<IGrantExpiryStore>();
+        var workflowRouter = Substitute.For<IConsentWorkflowRouter>();
 
         var clusterState = Substitute.For<IDistributedClusterStateProvider>();
-        clusterState.TryAcquireLockAsync(Arg.Is<string>(s => s.Contains("recertification:scan")), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
+        clusterState.TryAcquireLockAsync(Arg.Is<string>(s => s.Contains("grant-expiry:scan")), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<IAsyncDisposable?>((IAsyncDisposable?)null));
 
-        var services = new ServiceCollection();
-        services.AddSingleton(recertService);
-        services.AddSingleton(clusterState);
-        var sp = services.BuildServiceProvider();
-
-        var service = new ConsentRecertificationHostedService(
-            sp,
-            NullLogger<ConsentRecertificationHostedService>.Instance,
+        var service = new GrantExpiryHostedService(
+            expiryStore,
+            workflowRouter,
+            NullLogger<GrantExpiryHostedService>.Instance,
+            clusterState,
+            TimeProvider.System,
             TimeSpan.FromMilliseconds(50));
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(150));
@@ -211,6 +211,6 @@ public sealed class BackgroundServiceLockTests
         }
 
         // Assert
-        await recertService.DidNotReceive().ScanAndTriggerExpiringConsentRecertificationsAsync(Arg.Any<TimeSpan?>(), Arg.Any<CancellationToken>());
+        await expiryStore.DidNotReceive().GetGrantsWithoutExpiryNoticeAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
     }
 }

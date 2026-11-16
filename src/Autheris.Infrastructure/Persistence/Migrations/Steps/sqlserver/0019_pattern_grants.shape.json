@@ -1,0 +1,26 @@
+{
+  "ops": [
+    { "op": "alterColumn", "table": "CONSENTS", "column": { "name": "table_id", "type": "NVARCHAR", "family": "string", "nullable": true } },
+    { "op": "addColumn", "table": "CONSENTS", "column": { "name": "object_pattern", "type": "NVARCHAR", "family": "string", "nullable": true } },
+    { "op": "addColumn", "table": "CONSENTS", "column": { "name": "data_source", "type": "NVARCHAR", "family": "string", "nullable": true } },
+    { "op": "addColumn", "table": "CONSENTS", "column": { "name": "column_set_mode", "type": "NVARCHAR", "family": "string", "nullable": false } },
+    { "op": "addColumn", "table": "CONSENTS", "column": { "name": "workflow_mode", "type": "NVARCHAR", "family": "string", "nullable": false } },
+    { "op": "addColumn", "table": "CONSENTS", "column": { "name": "profile_item_no", "type": "INT", "family": "integer", "nullable": true } },
+    { "op": "addIndex", "table": "CONSENTS", "name": "IX_CONSENTS_PATTERN", "unique": false, "columns": ["tenant_id", "data_source"] },
+    {
+      "op": "addTable",
+      "table": "CONSENT_APPROVING_OWNERS",
+      "newTable": {
+        "name": "CONSENT_APPROVING_OWNERS",
+        "columns": [
+          { "name": "tenant_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "consent_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "owner_sid", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "owner_sid_norm", "type": "NVARCHAR", "family": "string", "nullable": false }
+        ],
+        "primaryKey": ["tenant_id", "consent_id", "owner_sid_norm"],
+        "indexes": []
+      }
+    }
+  ]
+}

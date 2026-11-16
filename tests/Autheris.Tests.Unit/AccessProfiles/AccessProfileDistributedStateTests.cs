@@ -60,7 +60,8 @@ public sealed class AccessProfileDistributedStateTests
             Columns =
             [
                 new TableColumn { ColumnName = "crane_id", DataType = "VARCHAR(64)", IsSensitive = false },
-                new TableColumn { ColumnName = "status", DataType = "VARCHAR(32)", IsSensitive = false }
+                new TableColumn { ColumnName = "status", DataType = "VARCHAR(32)", IsSensitive = false },
+                new TableColumn { ColumnName = "latitude", DataType = "DOUBLE", IsSensitive = true }
             ]
         };
     }
@@ -77,7 +78,6 @@ public sealed class AccessProfileDistributedStateTests
             .ReturnsForAnyArgs(ci => TableAccessDecision.Allowed(
                 ci.ArgAt<TableIdentifier>(3), new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true));
         var cacheService = Substitute.For<IConsentCacheService>();
-        var policyEnforcementService = Substitute.For<IPolicyEnforcementService>();
         var clientIpResolver = Substitute.For<IClientIpResolver>();
         var mandatoryFilters = NullMandatoryRowFilterResolver.Instance;
         var options = new GatewayOptions();
@@ -129,8 +129,8 @@ public sealed class AccessProfileDistributedStateTests
             ProfileId = "prof-init",
             TenantId = TenantTest,
             Name = "InitialProfile",
+            MaskingMode = MaskingPolicyMode.Strict,
             TargetTables = ["tem.*"],
-            RowFilterPredicate = "status = 'INITIAL'",
             Assignments = TestAssign.Users(subject),
             ValidTo = DateTimeOffset.UtcNow.AddDays(1)
         };
@@ -141,10 +141,10 @@ public sealed class AccessProfileDistributedStateTests
 
         // Node A and Node B both load and cache initial profile
         var decisionA1 = await policyA.DecideAsync(query, CancellationToken.None);
-        decisionA1.CombinedRowFilterSql.ShouldBe("status = 'INITIAL'");
+        decisionA1.GetEffectiveColumnAccess("latitude", meta).ShouldBe(ColumnAccessLevel.Deny);
 
         var decisionB1 = await policyB.DecideAsync(query, CancellationToken.None);
-        decisionB1.CombinedRowFilterSql.ShouldBe("status = 'INITIAL'");
+        decisionB1.GetEffectiveColumnAccess("latitude", meta).ShouldBe(ColumnAccessLevel.Deny);
 
         // DB update with fresh profile
         var updatedProfile = new AccessProfile
@@ -152,8 +152,8 @@ public sealed class AccessProfileDistributedStateTests
             ProfileId = initialProfile.ProfileId,
             TenantId = TenantTest,
             Name = "UpdatedProfile",
+            MaskingMode = MaskingPolicyMode.Default,
             TargetTables = ["tem.*"],
-            RowFilterPredicate = "status = 'UPDATED'",
             Assignments = TestAssign.Users(subject),
             ValidTo = DateTimeOffset.UtcNow.AddDays(1)
         };
@@ -167,7 +167,7 @@ public sealed class AccessProfileDistributedStateTests
 
         // Node B now sees the new epoch from shared store, bypassing old L1 entry, and serves fresh DB profile!
         var decisionB2 = await policyB.DecideAsync(query, CancellationToken.None);
-        decisionB2.CombinedRowFilterSql.ShouldBe("status = 'UPDATED'");
+        decisionB2.GetEffectiveColumnAccess("latitude", meta).ShouldBe(ColumnAccessLevel.Mask);
     }
 
     [Fact]
@@ -187,8 +187,8 @@ public sealed class AccessProfileDistributedStateTests
             ProfileId = "prof-stale",
             TenantId = TenantTest,
             Name = "StaleProfile",
+            MaskingMode = MaskingPolicyMode.Strict,
             TargetTables = ["tem.*"],
-            RowFilterPredicate = "status = 'STALE'",
             Assignments = TestAssign.Users(subject),
             ValidTo = DateTimeOffset.UtcNow.AddDays(1)
         };
@@ -198,8 +198,8 @@ public sealed class AccessProfileDistributedStateTests
             ProfileId = "prof-fresh",
             TenantId = TenantTest,
             Name = "FreshProfile",
+            MaskingMode = MaskingPolicyMode.Default,
             TargetTables = ["tem.*"],
-            RowFilterPredicate = "status = 'FRESH'",
             Assignments = TestAssign.Users(subject),
             ValidTo = DateTimeOffset.UtcNow.AddDays(1)
         };
@@ -236,7 +236,7 @@ public sealed class AccessProfileDistributedStateTests
         // Follow-up Request 2 MUST NOT be served the stale result
         var result2 = await cache.GetProfilesAsync(TenantTest, subject, CancellationToken.None);
         result2.Count.ShouldBe(1);
-        result2[0].RowFilterPredicate.ShouldBe("status = 'FRESH'");
+        result2[0].Name.ShouldBe("FreshProfile");
     }
 
     [Fact]
@@ -320,7 +320,6 @@ public sealed class AccessProfileDistributedStateTests
             Subject = "david",
             MaskingMode = "Strict", // SR-M-10: Unmasked is rejected in bulk before invalidation runs
             Tables = ["tem.*"],
-            RowFilter = "1=1",
             Justification = "Maintenance exception approved by governance",
             ValidDays = 30
         };

@@ -162,9 +162,15 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
             var translated = DataApiFilterTranslator.TranslateFilterToTrino(request.FilterExpression, metadata);
             if (!string.IsNullOrWhiteSpace(translated))
             {
+                var knownColumns = metadata.Columns.Select(c => c.ColumnName).ToList();
                 filter = TableFilterClause.FromTrinoText(
                     translated,
-                    DataApiFilterTranslator.ExtractReferencedColumns(request.FilterExpression, metadata));
+                    DataApiFilterTranslator.ExtractReferencedColumns(request.FilterExpression, metadata))
+                    with
+                    {
+                        ConstrainedColumns = TrinoSqlEngine.Ast.Visitors.AstSecurityVisitor
+                            .ExtractSingleTableConstrainedColumns(translated, knownColumns)
+                    };
             }
         }
 

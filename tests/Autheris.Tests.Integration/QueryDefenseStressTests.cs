@@ -9,31 +9,27 @@ using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Hosting;
 using Autheris.Tests.Integration.Governance;
 
 namespace Autheris.Tests.Integration;
 
-public class QueryDefenseStressTests : IClassFixture<WebApplicationFactory<Program>>
+[Trait("Category", "Stress")]
+public class QueryDefenseStressTests : IClassFixture<QueryDefenseStressTests.HostFixture>
 {
+    private readonly HostFixture _fixture;
     private readonly WebApplicationFactory<Program> _factory;
 
-    public QueryDefenseStressTests(WebApplicationFactory<Program> factory)
+    public QueryDefenseStressTests(HostFixture fixture)
     {
-        _factory = factory.WithWebHostBuilder(builder =>
-        {
-            builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("QueryDefenseStressTests"));
-            builder.UseSetting("Gateway:GraphQL:MaxAllowedExecutionDepth", "6");
-            builder.UseSetting("Gateway:GraphQL:MaxAllowedComplexity", "250");
-            // The depth test walks a schema-introspection path; introspection is not a limit and stays unrelated to the defenses.
-            builder.UseSetting("Gateway:GraphQL:EnableIntrospection", "true");
-        });
+        _fixture = fixture;
+        _factory = fixture;
     }
 
     private HttpClient CreateClient()
@@ -267,8 +263,7 @@ public class QueryDefenseStressTests : IClassFixture<WebApplicationFactory<Progr
     [Fact]
     public async Task CatalogRootField_OverCostLimit_ReadableTableAndColumns_ReturnsQueryTooComplexWithoutNumbers()
     {
-        using var host = CreateCatalogAccessHost();
-        using var client = CreateClientFor(host);
+        using var client = CreateClientFor(_fixture.CatalogAccessHost);
 
         var response = await client.PostAsJsonAsync("/graphql", new
         {
@@ -294,8 +289,7 @@ public class QueryDefenseStressTests : IClassFixture<WebApplicationFactory<Progr
     [InlineData("{ finance_dbo_finance_table_1(first: 200) { id email } }")]
     public async Task CatalogRootField_OverCostLimit_UnknownOrUnauthorizedField_ReturnsGraphQlValidationFailed(string query)
     {
-        using var host = CreateCatalogAccessHost();
-        using var client = CreateClientFor(host);
+        using var client = CreateClientFor(_fixture.CatalogAccessHost);
 
         var response = await client.PostAsJsonAsync("/graphql", new { query });
 
@@ -310,70 +304,100 @@ public class QueryDefenseStressTests : IClassFixture<WebApplicationFactory<Progr
         content.ShouldNotContain("QUERY_TOO_COMPLEX");
     }
 
-    private WebApplicationFactory<Program> CreateCatalogAccessHost() =>
-        _factory.WithWebHostBuilder(builder =>
+    public sealed class HostFixture : IntegrationHost<HostFixture>
+    {
+        public IntegrationHost CatalogAccessHost { get; } = CreateCatalogAccessHost();
+
+        protected override void ConfigureHostConfiguration(IConfigurationBuilder config)
         {
-            builder.ConfigureServices(services =>
+            config.AddInMemoryCollection(BaseSettings());
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
             {
-                var access = Substitute.For<ITableAccessResolver>();
-                access.ResolveTableAccessAsync(
-                        Arg.Any<ClaimsPrincipal?>(),
-                        Arg.Any<TableIdentifier>(),
-                        Arg.Any<IReadOnlyList<string>?>(),
-                        Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
-                        Arg.Any<CancellationToken>())
-                    .Returns(call =>
-                    {
-                        var principal = call.ArgAt<ClaimsPrincipal?>(0) ?? new ClaimsPrincipal();
-                        var id = call.ArgAt<TableIdentifier>(1);
-                        var meta = new TableMetadata
+                CatalogAccessHost.Dispose();
+            }
+
+            base.Dispose(disposing);
+        }
+
+        private static Dictionary<string, string?> BaseSettings() => new()
+        {
+            ["Gateway:Authentication:EnableTestAuthHandler"] = "true",
+            ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
+            ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.Create("QueryDefenseStressTests"),
+            ["Gateway:GraphQL:MaxAllowedExecutionDepth"] = "6",
+            ["Gateway:GraphQL:MaxAllowedComplexity"] = "250",
+            // The depth test walks a schema-introspection path; introspection is not a limit and stays unrelated to the defenses.
+            ["Gateway:GraphQL:EnableIntrospection"] = "true",
+        };
+
+        private static IntegrationHost CreateCatalogAccessHost() =>
+            new(
+                BaseSettings(),
+                configureTestServices: services =>
+                {
+                    var access = Substitute.For<ITableAccessResolver>();
+                    access.ResolveTableAccessAsync(
+                            Arg.Any<ClaimsPrincipal?>(),
+                            Arg.Any<TableIdentifier>(),
+                            Arg.Any<IReadOnlyList<string>?>(),
+                            Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
+                            Arg.Any<CancellationToken>())
+                        .Returns(call =>
                         {
-                            Identifier = id,
-                            Table = new Table { IsActive = true, SourceName = id.Domain, SchemaName = id.Schema, TableName = id.TableName, SourceType = "SqlServer" },
-                            Columns =
-                            [
-                                new TableColumn { ColumnName = "id", DataType = "int" },
-                                new TableColumn { ColumnName = "name", DataType = "varchar" },
-                                new TableColumn { ColumnName = "amount", DataType = "decimal" },
-                                new TableColumn { ColumnName = "email", DataType = "varchar" },
-                                new TableColumn { ColumnName = "created_at", DataType = "datetime" },
-                            ]
-                        };
-                        if (string.Equals(id.Domain, "finance", StringComparison.OrdinalIgnoreCase) &&
-                            string.Equals(id.Schema, "dbo", StringComparison.OrdinalIgnoreCase) &&
-                            string.Equals(id.TableName, "finance_table_1", StringComparison.OrdinalIgnoreCase))
-                        {
+                            var principal = call.ArgAt<ClaimsPrincipal?>(0) ?? new ClaimsPrincipal();
+                            var id = call.ArgAt<TableIdentifier>(1);
+                            var meta = new TableMetadata
+                            {
+                                Identifier = id,
+                                Table = new Table { IsActive = true, SourceName = id.Domain, SchemaName = id.Schema, TableName = id.TableName, SourceType = "SqlServer" },
+                                Columns =
+                                [
+                                    new TableColumn { ColumnName = "id", DataType = "int" },
+                                    new TableColumn { ColumnName = "name", DataType = "varchar" },
+                                    new TableColumn { ColumnName = "amount", DataType = "decimal" },
+                                    new TableColumn { ColumnName = "email", DataType = "varchar" },
+                                    new TableColumn { ColumnName = "created_at", DataType = "datetime" },
+                                ]
+                            };
+                            if (string.Equals(id.Domain, "finance", StringComparison.OrdinalIgnoreCase) &&
+                                string.Equals(id.Schema, "dbo", StringComparison.OrdinalIgnoreCase) &&
+                                string.Equals(id.TableName, "finance_table_1", StringComparison.OrdinalIgnoreCase))
+                            {
+                                return new ResolvedTableAccess(
+                                    meta,
+                                    TableAccessDecision.Allowed(
+                                        id,
+                                        new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
+                                        {
+                                            ["id"] = ColumnAccessLevel.Clear,
+                                            ["name"] = ColumnAccessLevel.Clear,
+                                            ["amount"] = ColumnAccessLevel.Clear,
+                                            ["email"] = ColumnAccessLevel.Deny,
+                                            ["created_at"] = ColumnAccessLevel.Clear,
+                                        },
+                                        null,
+                                        hasUnconstrainedColumnAllow: false),
+                                    new TenantId("T1"),
+                                    new Sid("S-1-5-21-test-analyst"),
+                                    principal);
+                            }
+
                             return new ResolvedTableAccess(
                                 meta,
-                                TableAccessDecision.Allowed(
-                                    id,
-                                    new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
-                                    {
-                                        ["id"] = ColumnAccessLevel.Clear,
-                                        ["name"] = ColumnAccessLevel.Clear,
-                                        ["amount"] = ColumnAccessLevel.Clear,
-                                        ["email"] = ColumnAccessLevel.Deny,
-                                        ["created_at"] = ColumnAccessLevel.Clear,
-                                    },
-                                    null,
-                                    hasUnconstrainedColumnAllow: false),
+                                TableAccessDecision.Denied(id, ["Access denied."]),
                                 new TenantId("T1"),
                                 new Sid("S-1-5-21-test-analyst"),
                                 principal);
-                        }
+                        });
 
-                        return new ResolvedTableAccess(
-                            meta,
-                            TableAccessDecision.Denied(id, ["Access denied."]),
-                            new TenantId("T1"),
-                            new Sid("S-1-5-21-test-analyst"),
-                            principal);
-                    });
-
-                services.RemoveAll<ITableAccessResolver>();
-                services.AddSingleton(access);
-            });
-        });
+                    services.RemoveAll<ITableAccessResolver>();
+                    services.AddSingleton(access);
+                });
+    }
 
     private static HttpClient CreateClientFor(WebApplicationFactory<Program> factory)
     {

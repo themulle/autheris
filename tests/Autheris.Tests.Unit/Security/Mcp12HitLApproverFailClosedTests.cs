@@ -13,6 +13,7 @@ using Xunit;
 /// <summary>
 /// MCP-12: the table-approver ownership check must fail closed when the ticket cannot be resolved.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class Mcp12HitLApproverFailClosedTests
 {
     [Fact]

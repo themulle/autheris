@@ -1,0 +1,136 @@
+{
+  "ops": [
+    {
+      "op": "addTable",
+      "table": "USAGE_DAILY",
+      "newTable": {
+        "name": "USAGE_DAILY",
+        "columns": [
+          { "name": "day", "type": "DATE", "family": "datetime", "nullable": false },
+          { "name": "series_hash", "type": "BINARY", "family": "binary", "nullable": false },
+          { "name": "tenant_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "user_key", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "group_set_id", "type": "CHAR", "family": "string", "nullable": false },
+          { "name": "billing_group", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "transport", "type": "SMALLINT", "family": "integer", "nullable": false },
+          { "name": "application", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "client_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "data_source", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "table_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "requests", "type": "BIGINT", "family": "integer", "nullable": false },
+          { "name": "queries", "type": "BIGINT", "family": "integer", "nullable": false },
+          { "name": "rows_returned", "type": "BIGINT", "family": "integer", "nullable": false },
+          { "name": "rows_measured", "type": "BIGINT", "family": "integer", "nullable": false },
+          { "name": "bytes", "type": "BIGINT", "family": "integer", "nullable": false },
+          { "name": "duration_ms", "type": "BIGINT", "family": "integer", "nullable": false },
+          { "name": "analysis_cost", "type": "BIGINT", "family": "integer", "nullable": false },
+          { "name": "source_compute_ms", "type": "BIGINT", "family": "integer", "nullable": false },
+          { "name": "source_compute_measured", "type": "BIGINT", "family": "integer", "nullable": false },
+          { "name": "source_cost_micros", "type": "BIGINT", "family": "integer", "nullable": false },
+          { "name": "source_cost_measured", "type": "BIGINT", "family": "integer", "nullable": false },
+          { "name": "allow_count", "type": "BIGINT", "family": "integer", "nullable": false },
+          { "name": "deny_access", "type": "BIGINT", "family": "integer", "nullable": false },
+          { "name": "deny_rate_limit", "type": "BIGINT", "family": "integer", "nullable": false },
+          { "name": "deny_cost", "type": "BIGINT", "family": "integer", "nullable": false },
+          { "name": "deny_quota", "type": "BIGINT", "family": "integer", "nullable": false },
+          { "name": "deny_other", "type": "BIGINT", "family": "integer", "nullable": false },
+          { "name": "errors", "type": "BIGINT", "family": "integer", "nullable": false }
+        ],
+        "primaryKey": ["day", "series_hash"],
+        "indexes": []
+      }
+    },
+    { "op": "addIndex", "table": "USAGE_DAILY", "name": "IX_USAGE_DAILY_TENANT_DAY", "unique": false, "columns": ["tenant_id", "day"] },
+    { "op": "addIndex", "table": "USAGE_DAILY", "name": "IX_USAGE_DAILY_TENANT_USER_DAY", "unique": false, "columns": ["tenant_id", "user_key", "day"] },
+    { "op": "addIndex", "table": "USAGE_DAILY", "name": "IX_USAGE_DAILY_TENANT_TABLE_DAY", "unique": false, "columns": ["tenant_id", "table_id", "day"] },
+    { "op": "addIndex", "table": "USAGE_DAILY", "name": "IX_USAGE_DAILY_TENANT_SOURCE_DAY", "unique": false, "columns": ["tenant_id", "data_source", "day"] },
+    { "op": "addIndex", "table": "USAGE_DAILY", "name": "IX_USAGE_DAILY_TENANT_GROUP_SET_DAY", "unique": false, "columns": ["tenant_id", "group_set_id", "day"] },
+    {
+      "op": "addTable",
+      "table": "USAGE_GRANT_DAILY",
+      "newTable": {
+        "name": "USAGE_GRANT_DAILY",
+        "columns": [
+          { "name": "day", "type": "DATE", "family": "datetime", "nullable": false },
+          { "name": "tenant_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "grant_id", "type": "VARCHAR", "family": "string", "nullable": false },
+          { "name": "data_source", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "table_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "accesses", "type": "BIGINT", "family": "integer", "nullable": false },
+          { "name": "queries", "type": "BIGINT", "family": "integer", "nullable": false },
+          { "name": "rows_returned", "type": "BIGINT", "family": "integer", "nullable": false },
+          { "name": "bytes", "type": "BIGINT", "family": "integer", "nullable": false },
+          { "name": "analysis_cost", "type": "BIGINT", "family": "integer", "nullable": false },
+          { "name": "source_compute_ms", "type": "BIGINT", "family": "integer", "nullable": false },
+          { "name": "source_cost_micros", "type": "BIGINT", "family": "integer", "nullable": false }
+        ],
+        "primaryKey": ["day", "tenant_id", "grant_id", "data_source", "table_id"],
+        "indexes": []
+      }
+    },
+    { "op": "addIndex", "table": "USAGE_GRANT_DAILY", "name": "IX_USAGE_GRANT_DAILY_TENANT_GRANT_DAY", "unique": false, "columns": ["tenant_id", "grant_id", "day"] },
+    {
+      "op": "addTable",
+      "table": "USAGE_GROUP_SET",
+      "newTable": {
+        "name": "USAGE_GROUP_SET",
+        "columns": [
+          { "name": "tenant_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "group_set_id", "type": "CHAR", "family": "string", "nullable": false },
+          { "name": "group_sid", "type": "VARCHAR", "family": "string", "nullable": false },
+          { "name": "first_seen", "type": "DATE", "family": "datetime", "nullable": false }
+        ],
+        "primaryKey": ["tenant_id", "group_set_id", "group_sid"],
+        "indexes": []
+      }
+    },
+    { "op": "addIndex", "table": "USAGE_GROUP_SET", "name": "IX_USAGE_GROUP_SET_TENANT_SID", "unique": false, "columns": ["tenant_id", "group_sid"] },
+    {
+      "op": "addTable",
+      "table": "USAGE_GRANT_REF",
+      "newTable": {
+        "name": "USAGE_GRANT_REF",
+        "columns": [
+          { "name": "tenant_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "grant_id", "type": "VARCHAR", "family": "string", "nullable": false },
+          { "name": "valid_from", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": true },
+          { "name": "valid_until", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": true },
+          { "name": "first_seen", "type": "DATE", "family": "datetime", "nullable": false },
+          { "name": "last_seen", "type": "DATE", "family": "datetime", "nullable": false }
+        ],
+        "primaryKey": ["tenant_id", "grant_id"],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addTable",
+      "table": "USAGE_TARIFF",
+      "newTable": {
+        "name": "USAGE_TARIFF",
+        "columns": [
+          { "name": "tenant_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "data_source", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "version", "type": "INT", "family": "integer", "nullable": false },
+          { "name": "valid_from", "type": "DATE", "family": "datetime", "nullable": false },
+          { "name": "valid_until", "type": "DATE", "family": "datetime", "nullable": true },
+          { "name": "base_per_query", "type": "DECIMAL", "family": "decimal", "nullable": false },
+          { "name": "per_row", "type": "DECIMAL", "family": "decimal", "nullable": false },
+          { "name": "per_mib", "type": "DECIMAL", "family": "decimal", "nullable": false },
+          { "name": "per_compute_second", "type": "DECIMAL", "family": "decimal", "nullable": false },
+          { "name": "per_analysis_cost", "type": "DECIMAL", "family": "decimal", "nullable": false },
+          { "name": "source_cost_factor", "type": "DECIMAL", "family": "decimal", "nullable": false },
+          { "name": "source_cost_unit", "type": "NVARCHAR", "family": "string", "nullable": true },
+          { "name": "unit_label", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "compute_basis", "type": "SMALLINT", "family": "integer", "nullable": false },
+          { "name": "created_by", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "created_at", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": false },
+          { "name": "reason", "type": "NVARCHAR", "family": "string", "nullable": false }
+        ],
+        "primaryKey": ["tenant_id", "data_source", "version"],
+        "indexes": []
+      }
+    },
+    { "op": "dropTable", "table": "CONSUMER_APP_DAILY" },
+    { "op": "dropTable", "table": "CONSUMER_APP_ACTOR_DAILY" }
+  ]
+}

@@ -23,6 +23,7 @@ using Xunit;
 /// <c>WebSql:CrossSource:AllowedHttpAuthModes</c> is enforced fail-closed in staging, before any source is read:
 /// a federated read of an HTTP source whose auth mode is not listed is denied with a stable code (mapped to 403).
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class FederatedHttpAuthModeAllowlistTests
 {
     private const string Tenant = "tenant_test";

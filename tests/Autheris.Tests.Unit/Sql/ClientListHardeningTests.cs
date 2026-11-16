@@ -162,13 +162,4 @@ public sealed class ClientListHardeningTests
         body.ShouldContain(code);
         body.ShouldContain(GovernedSqlErrorCodes.FixedMessage(code));
     }
-
-    [Fact]
-    public async Task Trino_Route_AcceptsAListParameter_ThroughTheSharedExecutor()
-    {
-        await using var f = await CreateAsync();
-        var parameters = new Dictionary<string, object?> { ["ids"] = Json("[1,2,6]") };
-        var result = await f.QueryAsync("SELECT id FROM orders WHERE id IN (@ids) ORDER BY id", parameters, transport: SqlTransports.Trino);
-        result.Rows.Count.ShouldBe(2);
-    }
 }

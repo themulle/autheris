@@ -3,6 +3,7 @@ namespace Autheris.Application.Runtime.Jobs.Services;
 using System;
 using System.Collections.Concurrent;
 using System.IO;
+using System.Linq;
 using System.Security;
 using System.Security.Claims;
 using System.Text.Json;
@@ -200,7 +201,8 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
         d.BytesProduced,
         d.ErrorMessage,
         string.IsNullOrWhiteSpace(d.ResultFilePath) ? null : Path.GetFileName(d.ResultFilePath),
-        _node.NodeId);
+        _node.NodeId,
+        d.SubmittedByGroupSids);
 
     /// <summary>Writes the cluster record of a job (TTL is reset on every write). A failure is fatal only for the submit.</summary>
     private async ValueTask WriteRecordAsync(AsyncJobDescriptor descriptor, bool throwOnFailure, CancellationToken ct)
@@ -297,8 +299,12 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
                       ?? throw new Autheris.Domain.Exceptions.GatewaySecurityException("Async jobs require an authenticated principal with a resolvable user identity.", "ASYNC_JOB_OWNER_UNRESOLVABLE");
 
         var jobId = Guid.NewGuid().ToString("D");
-        var format = string.IsNullOrWhiteSpace(request.Format) ? "json" : request.Format.Trim().ToLowerInvariant();
+        if (!AsyncQueryJobFormat.TryNormalize(request.Format, out var format))
+        {
+            throw new AsyncJobInvalidFormatException();
+        }
 
+        var groupSids = Autheris.Domain.Security.SecurityPrincipalContext.FromPrincipal(user, tenantId).GroupSids.Select(s => s.Value).ToArray();
         var descriptor = new AsyncJobDescriptor(
             JobId: jobId,
             TenantId: tenantId.Value,
@@ -306,7 +312,8 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
             Query: request.Query,
             Format: format,
             State: AsyncJobState.Queued,
-            CreatedAt: _time.GetUtcNow());
+            CreatedAt: _time.GetUtcNow(),
+            SubmittedByGroupSids: groupSids);
 
         // Per-tenant, per-user and scratch quota backlog caps: counted and reserved under one gate so concurrent submits cannot overshoot them.
         var jobOpts = _jobOptions?.Value ?? _options?.Value?.AsyncJobs ?? new AsyncJobOptions();
@@ -494,7 +501,8 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
             ResultFilePath: null,
             record.RowsProduced,
             record.BytesProduced,
-            record.ErrorMessage);
+            record.ErrorMessage,
+            SubmittedByGroupSids: record.SubmittedByGroupSids);
 
         // The owner node vanished without a terminal write: computed, never persisted.
         var jobs = _jobOptions?.Value ?? _options?.Value?.AsyncJobs ?? new AsyncJobOptions();

@@ -83,7 +83,7 @@ public sealed class ConsentReplaceRepositoryTests : IDisposable
     {
         await EnsureTableAsync();
         var revoked = await _repo.CreateConsentAsync(RoleConsent("Analyst", TenantA));
-        await _repo.ReplaceConsentsAsync([revoked.Id], [], Admin, "revoke");
+        await _repo.ReplaceConsentsAsync([revoked.Id], [], Admin, "revoke", AdminAuth());
         var kept = await _repo.CreateConsentAsync(RoleConsent("ANALYST", TenantA));
         var upper = new TableIdentifier(_table.Domain.ToUpperInvariant(), _table.Schema.ToUpperInvariant(), _table.TableName.ToUpperInvariant());
 
@@ -100,7 +100,7 @@ public sealed class ConsentReplaceRepositoryTests : IDisposable
         var epochBefore = await _repo.GetTableEpochAsync(_table);
         var replacement = UserConsent("S-1-5-21-Alice");
 
-        await _repo.ReplaceConsentsAsync([old.Id], [replacement, UserConsent("S-1-5-21-Bob")], Admin, "manifest apply");
+        await _repo.ReplaceConsentsAsync([old.Id], [replacement, UserConsent("S-1-5-21-Bob")], Admin, "manifest apply", AdminAuth());
 
         var active = await _repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-Alice"), new Sid("S-1-5-21-Bob")], _table, DateTimeOffset.UtcNow, TenantA);
         active.Select(c => c.Id).ShouldNotContain(old.Id);
@@ -115,7 +115,7 @@ public sealed class ConsentReplaceRepositoryTests : IDisposable
         await EnsureTableAsync();
         var svc = new Autheris.Application.Governance.Services.DeclarativeConsentApplyService(_repo, _repo, _repo);
         var caller = ManifestAdmin(Admin.Value, TenantA.Value);
-        var policy = new DeclarativeConsentPolicy(_table.Domain, _table.Schema, _table.TableName, "Group", "S-1-5-21-MANIFEST-GROUP", "Allow");
+        var policy = new DeclarativeConsentPolicy(_table.Domain, _table.Schema, _table.TableName, "Group", "S-1-5-21-MANIFEST-GROUP", "Allow", ValidUntil: DateTimeOffset.UtcNow.AddDays(30));
         var epochBefore = await _repo.GetTableEpochAsync(_table);
 
         var first = await svc.ApplyManifestAsync(caller, new DeclarativeConsentManifest("1", [policy]));
@@ -133,6 +133,9 @@ public sealed class ConsentReplaceRepositoryTests : IDisposable
         (await _repo.GetTableEpochAsync(_table)).ShouldBe(epochAfterFirst + 1);
         (await _repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-MANIFEST-GROUP")], _table, DateTimeOffset.UtcNow, TenantA)).Count(c => c.GranteeType == GranteeType.Group).ShouldBe(1);
     }
+
+    private static Autheris.Domain.Security.ConsentRevocationAuthority AdminAuth() =>
+        Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(ManifestAdmin(Admin.Value, TenantA.Value));
 
     private static System.Security.Claims.ClaimsPrincipal ManifestAdmin(string sid, string tenant) => new(new System.Security.Claims.ClaimsIdentity(
     [
@@ -154,7 +157,7 @@ public sealed class ConsentReplaceRepositoryTests : IDisposable
             ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(5), CreatedBySid = Admin
         };
 
-        await Should.ThrowAsync<Exception>(() => _repo.ReplaceConsentsAsync([old.Id], [duplicateId], Admin, "manifest apply"));
+        await Should.ThrowAsync<Exception>(() => _repo.ReplaceConsentsAsync([old.Id], [duplicateId], Admin, "manifest apply", AdminAuth()));
 
         (await _repo.GetConsentByIdAsync(old.Id))!.IsRevoked.ShouldBeFalse();
         (await _repo.GetTableEpochAsync(_table)).ShouldBe(epochBefore);
@@ -167,8 +170,8 @@ public sealed class ConsentReplaceRepositoryTests : IDisposable
         await EnsureTableAsync();
         var old = await _repo.CreateConsentAsync(UserConsent("S-1-5-21-Alice"));
 
-        await Should.ThrowAsync<UnauthorizedAccessException>(() =>
-            _repo.ReplaceConsentsAsync([old.Id], [UserConsent("S-1-5-21-Bob")], new Sid("S-1-5-21-STRANGER"), "x"));
+        await Should.ThrowAsync<Autheris.Domain.Exceptions.ConsentRevocationForbiddenException>(() =>
+            _repo.ReplaceConsentsAsync([old.Id], [UserConsent("S-1-5-21-Bob")], new Sid("S-1-5-21-STRANGER"), "x", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null)));
 
         (await _repo.GetConsentByIdAsync(old.Id))!.IsRevoked.ShouldBeFalse();
         (await _repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-Bob")], _table, DateTimeOffset.UtcNow, TenantA)).ShouldBeEmpty();
@@ -180,7 +183,7 @@ public sealed class ConsentReplaceRepositoryTests : IDisposable
         await EnsureTableAsync();
 
         await Should.ThrowAsync<KeyNotFoundException>(() =>
-            _repo.ReplaceConsentsAsync([Guid.NewGuid()], [UserConsent("S-1-5-21-Bob")], Admin, "x"));
+            _repo.ReplaceConsentsAsync([Guid.NewGuid()], [UserConsent("S-1-5-21-Bob")], Admin, "x", AdminAuth()));
 
         (await _repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-Bob")], _table, DateTimeOffset.UtcNow, TenantA)).ShouldBeEmpty();
     }
@@ -191,7 +194,7 @@ public sealed class ConsentReplaceRepositoryTests : IDisposable
         await EnsureTableAsync();
         var old = await _repo.CreateConsentAsync(UserConsent("S-1-5-21-Alice"));
 
-        await _repo.ReplaceConsentsAsync([old.Id], [UserConsent("S-1-5-21-Bob")], Admin, "manifest apply");
+        await _repo.ReplaceConsentsAsync([old.Id], [UserConsent("S-1-5-21-Bob")], Admin, "manifest apply", AdminAuth());
 
         var audit = await _repo.GetAuditLogEntriesAsync(50);
         audit.ShouldContain(e => e.EventType == "CONSENT_REVOKED" && e.ActorSid == Admin);
@@ -201,175 +204,25 @@ public sealed class ConsentReplaceRepositoryTests : IDisposable
     [Fact]
     public async Task SEC_SC_20_LegacyPermanentDeny_StaysActive_WhileALegacyAllowIsClamped()
     {
-        await EnsureTableAsync();
-        var now = DateTimeOffset.UtcNow;
-        var deny = await _repo.CreateConsentAsync(UserConsent("S-1-5-21-Alice", ConsentEffect.Deny, -400, 365 * 50));
-        var allow = await _repo.CreateConsentAsync(UserConsent("S-1-5-21-Alice", ConsentEffect.Allow, -400, 365 * 50));
-
-        var active = await _repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-Alice")], _table, now, TenantA);
-
-        active.ShouldContain(c => c.Id == deny.Id);
-        active.ShouldNotContain(c => c.Id == allow.Id);
-    }
-
-    [Fact]
-    public async Task SEC_SC_20_Renewal_RestartsTheClampPeriod_AtDay150()
-    {
-        await EnsureTableAsync();
-        var now = DateTimeOffset.UtcNow;
-        var day150 = await _repo.CreateConsentAsync(UserConsent("S-1-5-21-Alice", ConsentEffect.Allow, -150, 10));
-
-        await _repo.ExtendConsentExpiryAsync(day150.Id, now.AddDays(170));
-
-        var renewed150 = (await _repo.GetConsentByIdAsync(day150.Id))!;
-        renewed150.IsActive(now.AddDays(100)).ShouldBeTrue("the renewal must not be cancelled by the original period start");
-        renewed150.IsActive(now.AddDays(171)).ShouldBeFalse();
-    }
-
-    private async Task<int> ExtendedAuditCountAsync() =>
-        (await _repo.GetAuditLogEntriesAsync(500)).Count(e => e.EventType == "CONSENT_EXPIRY_EXTENDED");
-
-    private async Task AssertRejectedAndUnchangedAsync(Consent consent, DateTimeOffset newValidTo)
-    {
-        var before = (await _repo.GetConsentByIdAsync(consent.Id))!;
-        var epochBefore = await _repo.GetTableEpochAsync(_table);
-        var auditBefore = await ExtendedAuditCountAsync();
-
-        var ex = await Should.ThrowAsync<ConsentNotExtendableException>(() => _repo.ExtendConsentExpiryAsync(consent.Id, newValidTo));
-
-        ex.Code.ShouldBe("CONSENT_NOT_EXTENDABLE");
-        ex.Message.ShouldNotContain(consent.Id.ToString());
-        var after = (await _repo.GetConsentByIdAsync(consent.Id))!;
-        after.ValidTo.ShouldBe(before.ValidTo);
-        after.ValidFrom.ShouldBe(before.ValidFrom);
-        after.RenewalCount.ShouldBe(before.RenewalCount);
-        (await _repo.GetTableEpochAsync(_table)).ShouldBe(epochBefore, "SEC-P4R-8: a rejected extension must not bump the epoch");
-        (await ExtendedAuditCountAsync()).ShouldBe(auditBefore);
-    }
-
-    [Fact]
-    public async Task PERS_04_Extend_ExpiredConsent_IsRejected_RowAndRenewalCountUnchanged()
-    {
-        await EnsureTableAsync();
-        var expired = await _repo.CreateConsentAsync(UserConsent("S-1-5-21-Bob", ConsentEffect.Allow, -200, -1));
-
-        await AssertRejectedAndUnchangedAsync(expired, DateTimeOffset.UtcNow.AddDays(60));
-    }
-
-    [Fact]
-    public async Task PERS_04_Extend_RevokedConsent_IsRejected()
-    {
-        await EnsureTableAsync();
-        var consent = await _repo.CreateConsentAsync(UserConsent("S-1-5-21-Carol"));
-        await _repo.RevokeConsentAsync(consent.Id, Admin, "no longer needed");
-
-        await AssertRejectedAndUnchangedAsync(consent, DateTimeOffset.UtcNow.AddDays(60));
-    }
-
-    [Fact]
-    public async Task PERS_04_Extend_UnknownId_IsRejected_NoAuditNoEpoch()
-    {
-        await EnsureTableAsync();
-        var epochBefore = await _repo.GetTableEpochAsync(_table);
-        var auditBefore = await ExtendedAuditCountAsync();
-
-        await Should.ThrowAsync<ConsentNotExtendableException>(() => _repo.ExtendConsentExpiryAsync(Guid.NewGuid(), DateTimeOffset.UtcNow.AddDays(60)));
-
-        (await _repo.GetTableEpochAsync(_table)).ShouldBe(epochBefore);
-        (await ExtendedAuditCountAsync()).ShouldBe(auditBefore);
-    }
-
-    [Theory]
-    [InlineData(0)]
-    [InlineData(-5)]
-    public async Task PERS_04_Extend_EqualOrEarlierValidTo_IsRejected(int deltaDays)
-    {
-        await EnsureTableAsync();
-        var consent = await _repo.CreateConsentAsync(UserConsent("S-1-5-21-Dave", ConsentEffect.Allow, -1, 30));
-
-        await AssertRejectedAndUnchangedAsync(consent, consent.ValidTo.AddDays(deltaDays));
-    }
-
-    [Fact]
-    public async Task PERS_04_Extend_Rejection_DoesNotBumpEpoch()
-    {
-        await EnsureTableAsync();
-        var consent = await _repo.CreateConsentAsync(UserConsent("S-1-5-21-Erin", ConsentEffect.Allow, -1, 30));
-        var epochBefore = await _repo.GetTableEpochAsync(_table);
-
-        await Should.ThrowAsync<ConsentNotExtendableException>(() => _repo.ExtendConsentExpiryAsync(consent.Id, consent.ValidTo.AddDays(-1)));
-
-        (await _repo.GetTableEpochAsync(_table)).ShouldBe(epochBefore);
-    }
-
-    [Fact]
-    public async Task PERS_04_Extend_UsesServerTimeInTheUpdatePredicate()
-    {
-        await EnsureTableAsync();
-        // The workflow pre-check is not the control: the UPDATE itself must reject a consent that expired a second ago.
-        var consent = await _repo.CreateConsentAsync(new Consent
+        // The read-time clamp exists only for an operator-configured limit (no compiled-in ceiling).
+        Autheris.Domain.Model.IndividualGrantLimits.Configure(TimeSpan.FromDays(180), null, null);
+        try
         {
-            TableId = _tableId, TableIdentifier = _table, TenantId = TenantA, GranteeType = GranteeType.User, GranteeSid = new Sid("S-1-5-21-Frank"),
-            ValidFrom = DateTimeOffset.UtcNow.AddDays(-5), ValidTo = DateTimeOffset.UtcNow.AddSeconds(-1), CreatedBySid = Admin
-        });
+            await EnsureTableAsync();
+            var now = DateTimeOffset.UtcNow;
+            var deny = await _repo.CreateConsentAsync(UserConsent("S-1-5-21-Alice", ConsentEffect.Deny, -400, 365 * 50));
+            var allow = await _repo.CreateConsentAsync(UserConsent("S-1-5-21-Alice", ConsentEffect.Allow, -400, 365 * 50));
 
-        await AssertRejectedAndUnchangedAsync(consent, DateTimeOffset.UtcNow.AddDays(60));
-    }
+            var active = await _repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-Alice")], _table, now, TenantA);
 
-    [Fact]
-    public async Task PERS_04_Extend_ExpiryAtExactNow_IsRejected()
-    {
-        await EnsureTableAsync();
-        // valid_to == the instant of creation is already <= the server time of the later UPDATE (boundary is valid_to > now).
-        var consent = await _repo.CreateConsentAsync(new Consent
+            active.ShouldContain(c => c.Id == deny.Id);
+            active.ShouldNotContain(c => c.Id == allow.Id);
+        }
+        finally
         {
-            TableId = _tableId, TableIdentifier = _table, TenantId = TenantA, GranteeType = GranteeType.User, GranteeSid = new Sid("S-1-5-21-Gina"),
-            ValidFrom = DateTimeOffset.UtcNow.AddDays(-5), ValidTo = DateTimeOffset.UtcNow, CreatedBySid = Admin
-        });
-
-        await AssertRejectedAndUnchangedAsync(consent, DateTimeOffset.UtcNow.AddDays(60));
+            Autheris.Domain.Model.IndividualGrantLimits.Reset();
+        }
     }
-
-    [Fact]
-    public async Task PERS_04_Extend_NonUtcStoredValidTo_ComparesCorrectly()
-    {
-        await EnsureTableAsync();
-        var plus14 = TimeSpan.FromHours(14);
-        var minus10 = TimeSpan.FromHours(-10);
-        // Active for one more hour but written with a +14:00 offset (a raw text compare would call it expired or still valid wrongly).
-        var active = await _repo.CreateConsentAsync(new Consent
-        {
-            TableId = _tableId, TableIdentifier = _table, TenantId = TenantA, GranteeType = GranteeType.User, GranteeSid = new Sid("S-1-5-21-Hank"),
-            ValidFrom = DateTimeOffset.UtcNow.AddDays(-1).ToOffset(plus14), ValidTo = DateTimeOffset.UtcNow.AddHours(1).ToOffset(plus14), CreatedBySid = Admin
-        });
-        // Expired one hour ago but written with a -10:00 offset (text sorts it after "now" without normalization).
-        var expired = await _repo.CreateConsentAsync(new Consent
-        {
-            TableId = _tableId, TableIdentifier = _table, TenantId = TenantA, GranteeType = GranteeType.User, GranteeSid = new Sid("S-1-5-21-Iris"),
-            ValidFrom = DateTimeOffset.UtcNow.AddDays(-2).ToOffset(minus10), ValidTo = DateTimeOffset.UtcNow.AddHours(-1).ToOffset(minus10), CreatedBySid = Admin
-        });
-
-        await _repo.ExtendConsentExpiryAsync(active.Id, DateTimeOffset.UtcNow.AddDays(10).ToOffset(plus14));
-        await AssertRejectedAndUnchangedAsync(expired, DateTimeOffset.UtcNow.AddDays(10));
-
-        (await _repo.GetConsentByIdAsync(active.Id))!.RenewalCount.ShouldBe(1);
-    }
-
-    [Fact]
-    public async Task SEC_SC_20_RenewalCount_StartsAtZero_AndIsIncrementedByEveryExtension()
-    {
-        await EnsureTableAsync();
-        var consent = await _repo.CreateConsentAsync(UserConsent("S-1-5-21-Alice"));
-        (await _repo.GetConsentByIdAsync(consent.Id))!.RenewalCount.ShouldBe(0);
-
-        await _repo.ExtendConsentExpiryAsync(consent.Id, DateTimeOffset.UtcNow.AddDays(60));
-        await _repo.ExtendConsentExpiryAsync(consent.Id, DateTimeOffset.UtcNow.AddDays(90));
-
-        (await _repo.GetConsentByIdAsync(consent.Id))!.RenewalCount.ShouldBe(2);
-        var expiring = await _repo.GetExpiringConsentsAsync(DateTimeOffset.UtcNow.AddDays(100));
-        expiring.Single(c => c.Id == consent.Id).RenewalCount.ShouldBe(2);
-    }
-
     [Fact]
     public async Task SEC_SC_16_ConsentPage_WalksTheTenantOnceByKeyset_AndNeverCrossesTenants()
     {
@@ -408,7 +261,7 @@ public sealed class ConsentReplaceRepositoryTests : IDisposable
         var alice = await _repo.CreateConsentAsync(UserConsent("S-1-5-21-Alice"));
         await _repo.CreateConsentAsync(UserConsent("S-1-5-21-Bob"));
         var role = await _repo.CreateConsentAsync(RoleConsent("Analyst", TenantA));
-        await _repo.RevokeConsentAsync(alice.Id, new Sid("S-1-5-21-Alice"), "self");
+        await _repo.RevokeConsentAsync(alice.Id, new Sid("S-1-5-21-Alice"), "self", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null));
         var tenant = new Autheris.Application.Governance.Paging.ConsentPageQuery(TenantA, Table: _table);
 
         (await _repo.GetConsentPageAsync(tenant with { GranteeType = GranteeType.Role })).Items.Select(c => c.Id).ShouldBe([role.Id]);

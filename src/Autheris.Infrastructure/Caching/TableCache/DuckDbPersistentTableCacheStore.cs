@@ -32,15 +32,18 @@ using Microsoft.Extensions.Options;
 /// </summary>
 public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposable
 {
-    private static readonly SearchValues<char> ValidIdentifierChars =
-        SearchValues.Create("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_");
-
     private readonly TableCacheOptions _options;
     private readonly ILogger<DuckDbPersistentTableCacheStore>? _logger;
+    private readonly ITableCacheCatalog? _catalog;
+    private readonly ITableCacheInvalidator? _invalidator;
     private readonly byte[]? _masterEncryptionKey;
     private readonly byte[] _metadataHmacKey;
     private readonly ConcurrentDictionary<TableIdentifier, TableCacheEntryMetadata> _metadata = new();
     private readonly ConcurrentDictionary<TableIdentifier, DuckDbConnectionPool> _connectionPools = new();
+    private readonly ConcurrentDictionary<TableIdentifier, IReadOnlyList<string>> _declaredColumns = new();
+    private readonly ConcurrentDictionary<TableIdentifier, IReadOnlyList<string>> _declaredPrimaryKeys = new();
+    private readonly ConcurrentDictionary<(TableIdentifier Table, long Epoch), IReadOnlyList<string>> _stagedColumns = new();
+    private readonly ConcurrentDictionary<TableIdentifier, string> _activeBackingTables = new();
     private readonly SemaphoreSlim _lock = new(1, 1);
     private bool _disposed;
 
@@ -50,10 +53,14 @@ public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposa
         IOptions<TableCacheOptions> options,
         IKeyVaultSecretProvider? secretProvider = null,
         ILogger<DuckDbPersistentTableCacheStore>? logger = null,
-        byte[]? customEncryptionKey = null)
+        byte[]? customEncryptionKey = null,
+        ITableCacheCatalog? catalog = null,
+        ITableCacheInvalidator? invalidator = null)
     {
         _options = (options ?? throw new ArgumentNullException(nameof(options))).Value;
         _logger = logger;
+        _catalog = catalog;
+        _invalidator = invalidator;
 
         if (_options.Encryption.Enabled)
         {
@@ -138,7 +145,7 @@ public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposa
                         using var testConn = new DuckDBConnection("DataSource=:memory:");
                         testConn.Open();
                         using var cmd = testConn.CreateCommand();
-                        cmd.CommandText = $"ATTACH '{dbFile.FullName.Replace("'", "''")}' AS test_g; DETACH test_g;";
+                        cmd.CommandText = $"ATTACH '{dbFile.FullName.Replace("'", "''", StringComparison.Ordinal)}' AS test_g; DETACH test_g;";
                         cmd.ExecuteNonQuery();
                         isUnencrypted = true;
                     }
@@ -161,22 +168,8 @@ public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposa
         }
     }
 
-    public static string SanitizeIdentifier(string identifier)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(identifier);
-        var trimmed = identifier.Trim();
-        if (trimmed.Length > 128)
-        {
-            throw new ArgumentException($"Identifier exceeds maximum length of 128 characters: '{identifier}'", nameof(identifier));
-        }
-
-        if (trimmed.AsSpan().ContainsAnyExcept(ValidIdentifierChars))
-        {
-            throw new ArgumentException($"Identifier contains invalid characters: '{identifier}'", nameof(identifier));
-        }
-
-        return trimmed;
-    }
+    public static string SanitizeIdentifier(string identifier) =>
+        TableCacheMutationHelper.SanitizeIdentifier(identifier);
 
     public static string GetSafeTableToken(TableIdentifier table)
     {
@@ -203,7 +196,7 @@ public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposa
 
     private string GetAttachSql(string dbPath, long epoch)
     {
-        var escapedPath = dbPath.Replace("'", "''");
+        var escapedPath = dbPath.Replace("'", "''", StringComparison.Ordinal);
         if (_options.Encryption.Enabled && _masterEncryptionKey != null)
         {
             var dek = TableCacheCryptoHelper.DeriveKey(_masterEncryptionKey, info: Encoding.UTF8.GetBytes("duckdb-gen-" + epoch));
@@ -217,11 +210,21 @@ public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposa
     public async Task InitializeTableAsync(TableCacheTargetOptions options, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(options);
-        var table = TableIdentifier.Parse(options.Table.Contains('.') ? options.Table : $"{options.DataSource}.default.{options.Table}");
+        var table = TableCacheMutationHelper.ResolveTableIdentifier(options);
         var dir = GetTableDirectory(table);
         if (!Directory.Exists(dir))
         {
             Directory.CreateDirectory(dir);
+        }
+
+        if (options.Columns is { Count: > 0 })
+        {
+            _declaredColumns[table] = options.Columns.Select(SanitizeIdentifier).ToArray();
+        }
+
+        if (options.PrimaryKeyColumns is { Count: > 0 })
+        {
+            _declaredPrimaryKeys[table] = options.PrimaryKeyColumns.Select(SanitizeIdentifier).ToArray();
         }
 
         await Task.CompletedTask;
@@ -261,21 +264,32 @@ public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposa
             cmd.CommandText = $"PRAGMA max_memory='{_options.DefaultMemoryLimitMb}MB';";
             await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
 
-            var colDefs = string.Join(", ", sanitizedCols.Select(c => $"\"{c}\" VARCHAR"));
-            cmd.CommandText = $"CREATE TABLE \"{shadowTable}\" ({colDefs});";
-            await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-
             var insertBase = $"INSERT INTO \"{shadowTable}\" ({string.Join(", ", sanitizedCols.Select(c => $"\"{c}\""))}) VALUES ";
             var batch = new List<IReadOnlyList<object?>>(1000);
+            bool tableCreated = false;
+            _declaredPrimaryKeys.TryGetValue(table, out var declaredPks);
 
             await foreach (var row in rows.WithCancellation(ct).ConfigureAwait(false))
             {
                 batch.Add(row);
                 if (batch.Count >= 1000)
                 {
+                    if (!tableCreated)
+                    {
+                        cmd.CommandText = TableCacheMutationHelper.BuildCreateTableSql(shadowTable, sanitizedCols, batch, declaredPks);
+                        await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                        tableCreated = true;
+                    }
+
                     await InsertBatchAsync(conn, insertBase, sanitizedCols.Count, batch, ct).ConfigureAwait(false);
                     batch.Clear();
                 }
+            }
+
+            if (!tableCreated)
+            {
+                cmd.CommandText = TableCacheMutationHelper.BuildCreateTableSql(shadowTable, sanitizedCols, batch, declaredPks);
+                await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 
             if (batch.Count > 0)
@@ -283,6 +297,8 @@ public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposa
                 await InsertBatchAsync(conn, insertBase, sanitizedCols.Count, batch, ct).ConfigureAwait(false);
                 batch.Clear();
             }
+
+            _stagedColumns[(table, epoch)] = sanitizedCols;
 
             cmd.CommandText = "CHECKPOINT g; DETACH g;";
             try { await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false); } catch { }
@@ -309,7 +325,7 @@ public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposa
 
                 var p = cmd.CreateParameter();
                 p.ParameterName = $"p{paramIndex}";
-                p.Value = val ?? DBNull.Value;
+                p.Value = TableCacheMutationHelper.NormalizeParameterValue(val);
                 cmd.Parameters.Add(p);
 
                 paramIndex++;
@@ -360,6 +376,22 @@ public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposa
                 try { await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false); } catch { }
             }
 
+            var cachedCols = _stagedColumns.TryRemove((table, epoch), out var stagedCols)
+                ? stagedCols
+                : existing?.CachedColumns is { Count: > 0 } prevCols
+                    ? prevCols
+                    : _declaredColumns.TryGetValue(table, out var dc)
+                        ? dc
+                        : [];
+            if (cachedCols.Count > 0)
+            {
+                _declaredColumns[table] = cachedCols;
+            }
+
+            var pkCols = _declaredPrimaryKeys.TryGetValue(table, out var declaredPks)
+                ? declaredPks
+                : existing?.PrimaryKeyColumns;
+
             var meta = new TableCacheEntryMetadata(
                 Table: table,
                 StorageTier: TableCacheStorageTier.DuckDbDisk,
@@ -373,11 +405,13 @@ public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposa
                 LastWatermarkOffset: null,
                 IsHealthy: true,
                 LastError: null,
-                CachedColumns: existing?.CachedColumns ?? [],
+                CachedColumns: cachedCols,
                 FilterPredicate: existing?.FilterPredicate,
-                OfflinePolicy: existing?.OfflinePolicy ?? TableCacheOfflinePolicy.FailClosed);
+                OfflinePolicy: existing?.OfflinePolicy ?? TableCacheOfflinePolicy.FailClosed,
+                PrimaryKeyColumns: pkCols);
 
             _metadata[table] = meta;
+            _activeBackingTables[table] = shadow;
 
             // Invalidate/replace connection pool for this table
             if (_connectionPools.TryRemove(table, out var oldPool))
@@ -423,71 +457,90 @@ public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposa
         IReadOnlyList<TableCacheMutation> mutations,
         CancellationToken ct = default)
     {
+        ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(mutations);
         if (mutations.Count == 0) return;
 
-        if (!_connectionPools.TryGetValue(table, out var pool))
+        if (!_connectionPools.TryGetValue(table, out var pool) || !_metadata.TryGetValue(table, out var meta))
         {
-            return;
+            var firstOp = mutations[0]?.Operation.ToString() ?? "Unknown";
+            _logger?.LogError(
+                "Table cache mutation batch rejected for table '{Table}' on operation {Operation} ({ErrorType}, count={MutationCount}): active connection pool missing.",
+                table,
+                firstOp,
+                nameof(InvalidOperationException),
+                mutations.Count);
+            await InvalidateTableOnFailureAsync(table, "Table cache connection pool unavailable during CDC mutation.", ct).ConfigureAwait(false);
+            throw new InvalidOperationException($"No active connection pool available for cached table '{table}'.");
         }
 
-        var activeView = GetActiveViewName(table);
+        var backingTable = _activeBackingTables.TryGetValue(table, out var bt)
+            ? bt
+            : GetShadowTableName(table, meta.GenerationEpoch);
+        var declaredCols = meta.CachedColumns is { Count: > 0 }
+            ? meta.CachedColumns
+            : _declaredColumns.TryGetValue(table, out var dc)
+                ? dc
+                : [];
+        var declaredPks = meta.PrimaryKeyColumns ?? (_declaredPrimaryKeys.TryGetValue(table, out var pks) ? pks : null);
+
+        IReadOnlyList<TableCacheMutationHelper.PlannedMutation> planned;
+        try
+        {
+            planned = TableCacheMutationHelper.ValidateAndPlanBatch(backingTable, mutations, declaredCols, declaredPks);
+        }
+        catch (Exception ex)
+        {
+            var firstOp = mutations[0]?.Operation.ToString() ?? "Unknown";
+            _logger?.LogError(
+                "Table cache mutation batch rejected for table '{Table}' on operation {Operation} ({ErrorType}, count={MutationCount}). Invalidating table.",
+                table,
+                firstOp,
+                ex.GetType().Name,
+                mutations.Count);
+            await InvalidateTableOnFailureAsync(table, "Table cache mutation validation failed.", ct).ConfigureAwait(false);
+            throw new InvalidOperationException("Table cache mutation validation failed; table invalidated.", ex);
+        }
+
+        bool failed = false;
+        string errorType = string.Empty;
+        CdcOperation failedOp = planned[0].Operation;
 
         using (await pool.AcquireWriterLockAsync(ct).ConfigureAwait(false))
         {
             var conn = await pool.LeaseReaderAsync(ct).ConfigureAwait(false);
             try
             {
-                foreach (var mut in mutations)
+                using var txCmd = conn.CreateCommand();
+                txCmd.CommandText = "BEGIN TRANSACTION;";
+                await txCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+
+                try
                 {
-                    using var cmd = conn.CreateCommand();
-                    switch (mut.Operation)
+                    foreach (var step in planned)
                     {
-                        case CdcOperation.Insert:
-                        case CdcOperation.Snapshot:
-                        {
-                            var cols = mut.RowValues.Keys.Select(SanitizeIdentifier).ToList();
-                            var vals = mut.RowValues.Values.Select(v => v == null ? "NULL" : $"'{v.ToString()?.Replace("'", "''")}'");
-                            cmd.CommandText = $"INSERT INTO \"{activeView}\" ({string.Join(", ", cols.Select(c => $"\"{c}\""))}) VALUES ({string.Join(", ", vals)});";
-                            try
-                            {
-                                await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-                            }
-                            catch (Exception ex)
-                            {
-                                _logger?.LogWarning(ex, "Failed applying insert mutation to persistent table '{Table}'", table);
-                            }
-                            break;
-                        }
-                        case CdcOperation.Update:
-                        {
-                            var setClauses = mut.RowValues.Select(kv => $"\"{SanitizeIdentifier(kv.Key)}\" = {(kv.Value == null ? "NULL" : $"'{kv.Value.ToString()?.Replace("'", "''")}'")}");
-                            var pkClauses = mut.PrimaryKeyValues.Select(kv => $"\"{SanitizeIdentifier(kv.Key)}\" = {(kv.Value == null ? "NULL" : $"'{kv.Value.ToString()?.Replace("'", "''")}'")}");
-                            cmd.CommandText = $"UPDATE \"{activeView}\" SET {string.Join(", ", setClauses)} WHERE {string.Join(" AND ", pkClauses)};";
-                            try
-                            {
-                                await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-                            }
-                            catch (Exception ex)
-                            {
-                                _logger?.LogWarning(ex, "Failed applying update mutation to persistent table '{Table}'", table);
-                            }
-                            break;
-                        }
-                        case CdcOperation.Delete:
-                        {
-                            var pkClauses = mut.PrimaryKeyValues.Select(kv => $"\"{SanitizeIdentifier(kv.Key)}\" = {(kv.Value == null ? "NULL" : $"'{kv.Value.ToString()?.Replace("'", "''")}'")}");
-                            cmd.CommandText = $"DELETE FROM \"{activeView}\" WHERE {string.Join(" AND ", pkClauses)};";
-                            try
-                            {
-                                await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-                            }
-                            catch (Exception ex)
-                            {
-                                _logger?.LogWarning(ex, "Failed applying delete mutation to persistent table '{Table}'", table);
-                            }
-                            break;
-                        }
+                        failedOp = step.Operation;
+                        using var cmd = conn.CreateCommand();
+                        cmd.CommandText = step.Sql;
+                        TableCacheMutationHelper.BindParameters(cmd, step.Parameters);
+                        await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                    }
+
+                    txCmd.CommandText = "COMMIT;";
+                    await txCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    failed = true;
+                    errorType = ex.GetType().Name;
+                    try
+                    {
+                        txCmd.CommandText = "ROLLBACK;";
+                        await txCmd.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        // Best-effort rollback prior to table eviction.
                     }
                 }
             }
@@ -496,6 +549,30 @@ public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposa
                 pool.ReturnReader(conn);
             }
         }
+
+        if (failed)
+        {
+            _logger?.LogError(
+                "Table cache mutation batch failed for table '{Table}' on operation {Operation} ({ErrorType}, count={MutationCount}). Invalidating table.",
+                table,
+                failedOp,
+                errorType,
+                mutations.Count);
+            await InvalidateTableOnFailureAsync(table, "Table cache mutation execution failed.", ct).ConfigureAwait(false);
+            throw new InvalidOperationException("Table cache mutation failed; table invalidated.");
+        }
+    }
+
+    private async Task InvalidateTableOnFailureAsync(TableIdentifier table, string reason, CancellationToken ct)
+    {
+        if (_invalidator is not null)
+        {
+            await _invalidator.InvalidateAsync(table, reason, ct).ConfigureAwait(false);
+            return;
+        }
+
+        _catalog?.Remove(table);
+        await EvictAsync(table, ct).ConfigureAwait(false);
     }
 
     public async Task<DbConnection> LeaseReaderConnectionAsync(TableIdentifier table, CancellationToken ct = default)
@@ -547,6 +624,7 @@ public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposa
                 pool.Dispose();
             }
             _metadata.TryRemove(table, out _);
+            _activeBackingTables.TryRemove(table, out _);
 
             var dir = GetTableDirectory(table);
             if (Directory.Exists(dir))

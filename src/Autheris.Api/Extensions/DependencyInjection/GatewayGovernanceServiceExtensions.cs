@@ -19,12 +19,10 @@ using Autheris.Application.Streaming.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Application.VirtualFilters;
 using Autheris.Application.Webhooks;
-using Autheris.Application.Governance.Workflows;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Cache;
-using Autheris.Infrastructure.Governance;
 using Autheris.Infrastructure.Lineage;
 using Autheris.Infrastructure.Persistence;
 using Autheris.Infrastructure.Persistence.Dialects;
@@ -135,7 +133,6 @@ public static partial class GatewayGovernanceServiceExtensions
             IConsentApprovalRepository,
             IDataOwnershipRepository,
             IDataOwnerAssignmentRepository,
-            IPhysicalIndexRepository,
             ITableRelationRepository,
             IWebhookOutbox,
             IVirtualFilterRepository,
@@ -148,9 +145,19 @@ public static partial class GatewayGovernanceServiceExtensions
             ICloudEventSubscriptionStore,
             Autheris.Application.Streaming.Interfaces.ICdcStreamStore,
             Autheris.Application.Streaming.Interfaces.ICdcStreamKeyStore,
+            Autheris.Application.ConsentRequests.IConsentWorkflowConfigRepository,
+            Autheris.Application.ConsentRequests.Routing.IConsentWorkflowAdminRepository,
+            Autheris.Application.ConsentRequests.Events.IConsentEventOutbox,
+            Autheris.Application.Governance.Grants.IGrantExpiryStore,
             IIdentityStoreRepository,
             IFunctionalRightRepository,
-            IRecertificationRepository
+            IRecertificationRepository,
+            Autheris.Application.Usage.IUsageRepository,
+            Autheris.Application.Catalog.External.ICatalogChangeStore,
+            IClassificationRepository,
+            Autheris.Application.Governance.Grants.IOwnerGrantStore,
+            Autheris.Application.ConsentRequests.ProfileAssignments.IProfileAssignmentStore,
+            Autheris.Application.Docs.Interfaces.IDocumentRepository
         where TMigrationRunner : class, IGovernanceMigrationRunner
     {
         services.AddSingleton<TRepository>();
@@ -174,10 +181,13 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<IAuditPurgeKeyProvider>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IPolicyEpochRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IConsentApprovalRepository>(sp => sp.GetRequiredService<TRepository>());
+        services.AddSingleton<Autheris.Application.ConsentRequests.IConsentWorkflowConfigRepository>(sp => sp.GetRequiredService<TRepository>());
+        services.AddSingleton<Autheris.Application.ConsentRequests.Routing.IConsentWorkflowAdminRepository>(sp => sp.GetRequiredService<TRepository>());
+        services.AddSingleton<Autheris.Application.ConsentRequests.Events.IConsentEventOutbox>(sp => sp.GetRequiredService<TRepository>());
+        services.AddSingleton<Autheris.Application.Governance.Grants.IGrantExpiryStore>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IConsentDescriptionRepository>(sp => sp.GetRequiredService<Autheris.Application.Identity.Attributes.AttributeValidatingConsentRepository>()); // INC1 (same validating decorator instance as IConsentRepository)
         services.AddSingleton<IDataOwnershipRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IDataOwnerAssignmentRepository>(sp => sp.GetRequiredService<TRepository>()); // issue #393 part b: dbt import owner write seam
-        services.AddSingleton<IPhysicalIndexRepository>(sp => sp.GetRequiredService<TRepository>()); // issue #404: physical non-unique index write seam
         services.AddSingleton<ITableRelationRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IWebhookOutbox>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IVirtualFilterRepository>(sp => sp.GetRequiredService<TRepository>());
@@ -186,11 +196,17 @@ public static partial class GatewayGovernanceServiceExtensions
         // every engine persists access profiles; the in-memory repository is a test double only.
         services.AddSingleton<IAccessProfileRepository>(sp => (IAccessProfileRepository)sp.GetRequiredService<TRepository>());
         services.AddSingleton<IIdentityStoreRepository>(sp => (IIdentityStoreRepository)sp.GetRequiredService<TRepository>());
+        services.AddSingleton<Autheris.Application.Governance.Grants.IOwnerGrantStore>(sp => sp.GetRequiredService<TRepository>());
+        services.AddSingleton<Autheris.Application.ConsentRequests.ProfileAssignments.IProfileAssignmentStore>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IFunctionalRightRepository>(sp => (IFunctionalRightRepository)sp.GetRequiredService<TRepository>());
         services.AddSingleton<IRecertificationRepository>(sp => (IRecertificationRepository)sp.GetRequiredService<TRepository>());
+        services.AddSingleton<Autheris.Application.Catalog.External.ICatalogChangeStore>(sp => sp.GetRequiredService<TRepository>());
+        services.AddSingleton<IClassificationRepository>(sp => sp.GetRequiredService<TRepository>());
+        services.AddSingleton<Autheris.Application.Docs.Interfaces.IDocumentRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IAuditChainExportSource>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<ICdcWatermarkRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IConsumerAggregationRepository>(sp => sp.GetRequiredService<TRepository>());
+        services.AddSingleton<Autheris.Application.Usage.IUsageRepository>(sp => sp.GetRequiredService<TRepository>());
         // #112 A-9: per-tenant persisted semantic manifest.
         services.AddSingleton<Autheris.Application.Catalog.Semantic.ISemanticManifestStore>(sp => sp.GetRequiredService<TRepository>());
         // register durable CDC stream store and key store from the governance repository

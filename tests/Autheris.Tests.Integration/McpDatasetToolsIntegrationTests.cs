@@ -6,6 +6,7 @@ using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Autheris.Tests.Common.Hosting;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Shouldly;
@@ -15,13 +16,18 @@ using Autheris.Tests.Integration.Governance;
 /// <summary>
 /// The dataset tools are reachable through the real MCP endpoint (DI, tool registry, guardrail and executor).
 /// </summary>
-public class McpDatasetToolsIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
+public class McpDatasetToolsIntegrationTests : IClassFixture<McpDatasetToolsIntegrationTests.HostFixture>
 {
     private readonly WebApplicationFactory<Program> _factory;
 
-    public McpDatasetToolsIntegrationTests(WebApplicationFactory<Program> factory)
+    public McpDatasetToolsIntegrationTests(HostFixture factory)
     {
-        _factory = factory.WithWebHostBuilder(builder =>
+        _factory = factory;
+    }
+
+    public sealed class HostFixture : IntegrationHost
+    {
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseSetting("Gateway:Mcp:Enabled", "true");
             builder.UseSetting("Gateway:Mcp:EndpointPath", "/mcp");
@@ -29,7 +35,7 @@ public class McpDatasetToolsIntegrationTests : IClassFixture<WebApplicationFacto
             builder.UseSetting("Gateway:Insecure:danger_allow_anonymous_access", "true");
             builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
             builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("McpDatasetToolsIntegrationTests"));
-        });
+        }
     }
 
     private static async Task<(bool IsError, JsonElement Payload)> CallAsync(HttpClient client, string tool, object arguments)

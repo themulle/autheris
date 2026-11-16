@@ -27,16 +27,29 @@ public sealed class ColumnMaskPolicyFactory
     /// A denied column carries no mask here (the assembly nullifies it, see <c>GovernancePolicyFactory</c>).
     /// </summary>
     /// <exception cref="System.Security.SecurityException">A mask cannot be expressed as a typed spec (the caller leaves the decision string-only).</exception>
-    public IColumnMaskPolicy? ForDecision(TableAccessDecision decision, TableMetadata metadata, TenantId tenant)
+    internal SqlDataMaskingProvider MaskProvider => _masks;
+
+    public IColumnMaskPolicy? ForDecision(
+        TableAccessDecision decision,
+        TableMetadata metadata,
+        TenantId tenant,
+        IColumnMaskPolicy? preResolved = null)
     {
         ArgumentNullException.ThrowIfNull(decision);
         ArgumentNullException.ThrowIfNull(metadata);
 
+        var preResolvedTyped = preResolved as ColumnMaskPolicy;
         var specs = new Dictionary<string, MaskSpec>(StringComparer.OrdinalIgnoreCase);
         foreach (var column in metadata.Columns)
         {
             if (decision.GetEffectiveColumnAccess(column.ColumnName, metadata) != ColumnAccessLevel.Mask)
             {
+                continue;
+            }
+
+            if (preResolvedTyped is not null && preResolvedTyped.TryGetSpec(column.ColumnName, out var preSpec))
+            {
+                specs[column.ColumnName] = preSpec;
                 continue;
             }
 
@@ -48,8 +61,14 @@ public sealed class ColumnMaskPolicyFactory
         // denied on the compiler path for a column that is never projected.
         foreach (var (name, level) in decision.ColumnAccess)
         {
-            if (level == ColumnAccessLevel.Mask && !specs.ContainsKey(name))
+            if (level is ColumnAccessLevel.Mask or ColumnAccessLevel.RowDependent && !specs.ContainsKey(name))
             {
+                if (preResolvedTyped is not null && preResolvedTyped.TryGetSpec(name, out var preSpec))
+                {
+                    specs[name] = preSpec;
+                    continue;
+                }
+
                 specs[name] = _masks.GetMaskSpec(null, name, null, metadata.Dialect, tenant);
             }
         }

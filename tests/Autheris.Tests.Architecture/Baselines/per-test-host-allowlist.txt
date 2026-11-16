@@ -1,0 +1,4 @@
+# Issue #520 (WP-OI-CI-3c): Shrink-only allow-list of integration test files that still use
+# IClassFixture<WebApplicationFactory<Program>> or call WithWebHostBuilder in a test class constructor.
+# New integration test classes must use a shared IntegrationHost / HostFixture instead.
+# Ceiling is now 0 — all integration test classes have been migrated.

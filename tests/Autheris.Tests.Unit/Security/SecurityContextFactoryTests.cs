@@ -16,6 +16,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class SecurityContextFactoryTests
 {
     [Fact]
@@ -233,5 +234,50 @@ public sealed class SecurityContextFactoryTests
         {
             (property.GetValue(ctx) as string).ShouldNotBe(Marker);
         }
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Http_context_security_context_matches_FromPrincipal()
+    {
+        var raw = new ClaimsPrincipal(new ClaimsIdentity(
+        [
+            new Claim("sub", "S-1-5-21-USER1"),
+            new Claim("tenant_id", "tenant-alpha"),
+            new Claim("groups", "S-1-5-21-GROUP1"),
+            new Claim(ClaimTypes.Role, "DataViewer")
+        ], "Bearer"));
+        var principal = Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(raw);
+
+        var httpContext = new DefaultHttpContext { User = principal };
+        var fromHttp = SecurityContextFactory.CreateFromHttpContext(httpContext);
+        var direct = Autheris.Domain.Security.SecurityPrincipalContext.FromPrincipal(principal);
+
+        fromHttp.UserSid.ShouldBe(direct.UserSid);
+        fromHttp.ResolvedTenant.ShouldBe(direct.ResolvedTenant);
+        fromHttp.GroupResolutionStatus.ShouldBe(Autheris.Domain.Identity.GroupResolutionStatus.Complete);
+        fromHttp.GroupResolutionStatus.ShouldBe(direct.GroupResolutionStatus);
+        fromHttp.GroupSids.ShouldBe(direct.GroupSids);
+        fromHttp.Principal.ShouldBeSameAs(principal);
+        fromHttp.Claims.ShouldNotBeNull();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Http_context_without_pipeline_marker_stays_degraded()
+    {
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+        [
+            new Claim("sub", "S-1-5-21-USER1"),
+            new Claim("tenant_id", "tenant-alpha"),
+            new Claim("groups", "S-1-5-21-GROUP1")
+        ], "Bearer"));
+
+        var httpContext = new DefaultHttpContext { User = principal };
+        var fromHttp = SecurityContextFactory.CreateFromHttpContext(httpContext);
+
+        fromHttp.GroupResolutionStatus.ShouldBe(Autheris.Domain.Identity.GroupResolutionStatus.Degraded);
+        fromHttp.Principal.ShouldBeSameAs(principal);
+        fromHttp.Claims.ShouldNotBeNull();
     }
 }

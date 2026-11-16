@@ -129,6 +129,13 @@ public static class SqlCompilerErrorMapper
     private static readonly Func<Exception, SqlErrorMapping?>[] Rules =
     [
         e => e is SqlCostExceededException ? Of(400, GovernedSqlErrorCodes.QueryCostExceeded) : null,
+        e => e is Autheris.Application.Policy.WriteGrants.WriteBudgetExhaustedException
+            or Autheris.Application.Sql.WebSqlPolicyException { Code: GovernedSqlErrorCodes.WriteBudgetExhausted }
+            ? Of(429, GovernedSqlErrorCodes.WriteBudgetExhausted)
+            : null,
+        e => e is Autheris.Application.Sql.WebSqlPolicyException { Code: GovernedSqlErrorCodes.DmlWriteConnectionMissing }
+            ? Of(403, GovernedSqlErrorCodes.DmlWriteConnectionMissing)
+            : null,
         e => e is SqlQuotaExhaustedException ? Of(429, GovernedSqlErrorCodes.RateLimitExceeded) : null,
         e => e is SqlQuotaUnavailableException ? Of(503, GovernedSqlErrorCodes.ServiceUnavailable) : null,
         e => e is SqlPagingUnsupportedException ? Of(400, GovernedSqlErrorCodes.PagingUnsupported) : null,
@@ -187,6 +194,7 @@ public static class SqlCompilerErrorMapper
             || (e is SecurityException sec && sec.Data.Contains(GovernedSqlErrorCodes.FilterOnMaskedColumn))
             ? Of(403, GovernedSqlErrorCodes.FilterOnMaskedColumn)
             : null,
+        e => e is WebSqlPolicyException { Code: GovernedSqlErrorCodes.MethodNotAllowed } ? Of(405, GovernedSqlErrorCodes.MethodNotAllowed) : null,
         e => e is WebSqlPolicyException { Code: GovernedSqlErrorCodes.EndpointDisabled } ? Of(403, GovernedSqlErrorCodes.EndpointDisabled) : null,
         e => e is WebSqlPolicyException { Code: GovernedSqlErrorCodes.StatementNotPermitted } ? Of(403, GovernedSqlErrorCodes.StatementNotPermitted) : null,
         e => e is RequiredFilterColumnMissingException ? Of(400, GovernedSqlErrorCodes.RequiredFilterColumnMissing) : null,
@@ -221,6 +229,7 @@ public static class SqlCompilerErrorMapper
         GovernedSqlErrorCodes.CheckOptionViolation => Of(403, code),
         GovernedSqlErrorCodes.FilterOnMaskedColumn => Of(403, code),
         GovernedSqlErrorCodes.EndpointDisabled => Of(403, code),
+        GovernedSqlErrorCodes.MethodNotAllowed => Of(405, code),
         GovernedSqlErrorCodes.StatementNotPermitted => Of(403, code),
         GovernedSqlErrorCodes.ConstraintViolation => Of(409, code),
         GovernedSqlErrorCodes.AffectedRowsLimit => Of(422, code),

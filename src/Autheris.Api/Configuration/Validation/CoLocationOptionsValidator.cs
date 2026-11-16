@@ -189,13 +189,13 @@ public sealed class CoLocationOptionsValidator : IValidateOptions<GatewayOptions
             ds = ds[4..].Trim();
         }
 
-        var commaIdx = ds.IndexOf(',');
+        var commaIdx = ds.IndexOf(',', StringComparison.Ordinal);
         if (commaIdx >= 0)
         {
             ds = ds[..commaIdx].Trim();
         }
 
-        var slashIdx = ds.IndexOf('\\');
+        var slashIdx = ds.IndexOf('\\', StringComparison.Ordinal);
         if (slashIdx >= 0)
         {
             ds = ds[..slashIdx].Trim();
@@ -212,7 +212,7 @@ public sealed class CoLocationOptionsValidator : IValidateOptions<GatewayOptions
             ds = ds[4..].Trim();
         }
 
-        var commaIdx = ds.IndexOf(',');
+        var commaIdx = ds.IndexOf(',', StringComparison.Ordinal);
         if (commaIdx >= 0)
         {
             return ds[(commaIdx + 1)..].Trim();
@@ -229,7 +229,7 @@ public sealed class CoLocationOptionsValidator : IValidateOptions<GatewayOptions
             ds = ds[4..].Trim();
         }
 
-        var slashIdx = ds.IndexOf('\\');
+        var slashIdx = ds.IndexOf('\\', StringComparison.Ordinal);
         if (slashIdx >= 0)
         {
             var end = ds.IndexOf(',', slashIdx);

@@ -19,7 +19,6 @@ using Autheris.Domain.Options;
 using Autheris.Application.OData;
 using Autheris.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -30,22 +29,14 @@ using Xunit;
 /// <summary>
 /// Befund 2.1 & 1.2: OData $filter pushdown with Zero-Trust security and Strict Content Negotiation.
 /// </summary>
-public sealed class ODataFilterPushdownTests : IDisposable
+public sealed class ODataFilterPushdownTests
 {
     private static readonly TableIdentifier Orders = new("sales", "main", "orders");
-    private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"autheris-filter-{Guid.NewGuid():N}.db");
-
-    public void Dispose()
-    {
-        _connection?.Dispose();
-        SqliteConnection.ClearAllPools();
-        try { File.Delete(_dbPath); } catch { /* best effort */ }
-    }
 
     private static TableMetadata OrderMetadata(DataSourceType type = DataSourceType.Sql) => new()
     {
         Identifier = Orders,
-        Table = new Table { SourceName = "sales", SchemaName = "main", TableName = "orders", DataSourceType = type, SourceType = "Sqlite" },
+        Table = new Table { SourceName = "sales", SchemaName = "main", TableName = "orders", DataSourceType = type, SourceType = "PostgreSql" },
         Columns =
         [
             new TableColumn { ColumnName = "id", DataType = "integer" },
@@ -62,86 +53,6 @@ public sealed class ODataFilterPushdownTests : IDisposable
         ["amount"] = ColumnAccessLevel.Clear,
         ["card_number"] = ColumnAccessLevel.Mask
     };
-
-    private void CreateDatabase()
-    {
-        using var conn = new SqliteConnection($"Data Source={_dbPath}");
-        conn.Open();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = @"
-CREATE TABLE orders (id INTEGER PRIMARY KEY, status TEXT NOT NULL, amount INTEGER NOT NULL, card_number TEXT);
-INSERT INTO orders VALUES (1, 'pending', 100, '4111-1111'), (2, 'completed', 250, '4222-2222'), (3, 'completed', 500, '4333-3333'), (4, 'cancelled', 50, '4444-4444');";
-        cmd.ExecuteNonQuery();
-    }
-
-    private SqliteConnection? _connection;
-
-    private SqlTableReadExecutor CreateSqliteExecutor()
-    {
-        _connection = new SqliteConnection($"Data Source={_dbPath}");
-        _connection.Open();
-        var env = new Autheris.Tests.Unit.Sql.TestCompileEnv(TrinoSqlEngine.TargetSqlDialect.Sqlite)
-            .Table("orders", null, "id:INTEGER", "status", "amount:INTEGER", "card_number");
-        return new Autheris.Tests.Unit.TestDoubles.SqliteGovernedSqlService(_connection, env).Executor();
-    }
-
-    private static DataSourceExecutionContext Context(TableFilterClause? filter, bool count = false)
-    {
-        var items = new Dictionary<string, object?>();
-        if (filter != null) items[TableQueryItems.Filter] = filter;
-        if (count) items[TableQueryItems.CountTotal] = true;
-        return new DataSourceExecutionContext(
-            SourceName: "sales",
-            Metadata: OrderMetadata(),
-            Principal: new ClaimsPrincipal(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "S-1-5-21-FILTER-TEST")], "Test")),
-            AccessDecision: TableAccessDecision.Allowed(Orders, Access),
-            Arguments: new Dictionary<string, object?>(),
-            RequestedFields: ["id", "status", "amount"],
-            Limit: 50,
-            Offset: 0,
-            Items: items);
-    }
-
-    [Fact]
-    public async Task SqlExecutor_PushesDownFilter_AndFiltersRowsInDatabase()
-    {
-        CreateDatabase();
-        var filter = ODataFilterParser.Parse("status eq 'completed' and amount gt 300", DatabaseDialect.Sqlite);
-        var context = Context(filter, count: true);
-
-        var rows = await CreateSqliteExecutor().ExecuteAsync(context);
-
-        // Only row 3 matches (amount 500 > 300 and completed)
-        rows.Count.ShouldBe(1);
-        Convert.ToInt64(rows[0]["id"]).ShouldBe(3L);
-        Convert.ToInt64(rows[0]["amount"]).ShouldBe(500L);
-        context.Items[TableQueryItems.TotalCount].ShouldBe(1L);
-    }
-
-    [Fact]
-    public async Task SqlExecutor_FilterWithContains_TranslatesToLike()
-    {
-        CreateDatabase();
-        var filter = ODataFilterParser.Parse("contains(status, 'com')", DatabaseDialect.Sqlite);
-        var context = Context(filter);
-
-        var rows = await CreateSqliteExecutor().ExecuteAsync(context);
-
-        // Rows 2 and 3 have 'completed'
-        rows.Count.ShouldBe(2);
-        rows.Select(r => Convert.ToInt64(r["id"])).ShouldBe([2L, 3L]);
-    }
-
-    [Fact]
-    public async Task SqlExecutor_FilteringOnMaskedColumn_ZeroTrust_ThrowsSecurityException()
-    {
-        CreateDatabase();
-        var filter = ODataFilterParser.Parse("card_number eq '4111-1111'", DatabaseDialect.Sqlite);
-        var context = Context(filter);
-
-        var ex = await Should.ThrowAsync<ArgumentException>(() => CreateSqliteExecutor().ExecuteAsync(context));
-        ex.Message.ShouldContain("Filtering on masked or denied column 'card_number'");
-    }
 
     // ------------------------------------------------------------------ Gateway
 
@@ -165,14 +76,14 @@ INSERT INTO orders VALUES (1, 'pending', 100, '4111-1111'), (2, 'completed', 250
         return (service, executor);
     }
 
-    private static ClaimsPrincipal User() => new(new ClaimsIdentity(
-        [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-FILTER-USER"), new Claim("tenant_id", "sales")], "Test"));
+    private static ClaimsPrincipal User() => Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(new ClaimsPrincipal(new ClaimsIdentity(
+        [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-FILTER-USER"), new Claim("tenant_id", "sales")], "Test")));
 
     [Fact]
     public async Task Gateway_PassesFilterToExecutor_WhenColumnIsClear()
     {
         var (service, executor) = Gateway();
-        var filter = ODataFilterParser.Parse("status eq 'completed'", DatabaseDialect.Sqlite);
+        var filter = ODataFilterParser.Parse("status eq 'completed'", DatabaseDialect.PostgreSql);
 
         await service.ExecuteTablePageAsync(User(), Orders,
             new TablePageRequest(First: 10, After: 0, Filter: filter));
@@ -186,7 +97,7 @@ INSERT INTO orders VALUES (1, 'pending', 100, '4111-1111'), (2, 'completed', 250
     public async Task Gateway_FilteringOnMaskedColumn_ZeroTrust_ThrowsGatewayInvalidQueryException()
     {
         var (service, executor) = Gateway();
-        var filter = ODataFilterParser.Parse("card_number eq '4111'", DatabaseDialect.Sqlite);
+        var filter = ODataFilterParser.Parse("card_number eq '4111'", DatabaseDialect.PostgreSql);
 
         var ex = await Should.ThrowAsync<GatewayInvalidQueryException>(() => service.ExecuteTablePageAsync(User(), Orders,
             new TablePageRequest(First: 10, After: 0, Filter: filter)));
@@ -199,7 +110,7 @@ INSERT INTO orders VALUES (1, 'pending', 100, '4111-1111'), (2, 'completed', 250
     public async Task Gateway_FilteringOnNonExistentColumn_ThrowsGatewayInvalidQueryException()
     {
         var (service, executor) = Gateway();
-        var filter = ODataFilterParser.Parse("non_existent eq 'foo'", DatabaseDialect.Sqlite);
+        var filter = ODataFilterParser.Parse("non_existent eq 'foo'", DatabaseDialect.PostgreSql);
 
         var ex = await Should.ThrowAsync<GatewayInvalidQueryException>(() => service.ExecuteTablePageAsync(User(), Orders,
             new TablePageRequest(First: 10, After: 0, Filter: filter)));
@@ -212,7 +123,7 @@ INSERT INTO orders VALUES (1, 'pending', 100, '4111-1111'), (2, 'completed', 250
     public async Task Gateway_NonSqlSource_ThrowsGatewayNotImplementedException()
     {
         var (service, _) = Gateway(DataSourceType.HttpDeclarative);
-        var filter = ODataFilterParser.Parse("status eq 'completed'", DatabaseDialect.Sqlite);
+        var filter = ODataFilterParser.Parse("status eq 'completed'", DatabaseDialect.PostgreSql);
 
         await Should.ThrowAsync<GatewayNotImplementedException>(() => service.ExecuteTablePageAsync(User(), Orders,
             new TablePageRequest(First: 10, After: 0, Filter: filter)));

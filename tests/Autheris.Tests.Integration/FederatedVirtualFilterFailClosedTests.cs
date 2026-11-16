@@ -54,8 +54,8 @@ public sealed class FederatedVirtualFilterFailClosedTests(FederatedVirtualFilter
         var (code, details) = await ExpectDeniedAsync(Query(Tables.QueryParameterList));
 
         code.ShouldBe("VIRTUAL_FILTER_SOURCE_UNAVAILABLE");
-        details.ShouldNotContain("missing-dir");     // the inner exception never reaches the audit store
-        details.ShouldNotContain("unable to open");
+        details.ShouldNotContain("missing_db_");     // the inner exception never reaches the audit store
+        details.ShouldNotContain("does not exist");
     }
 
     [Fact]

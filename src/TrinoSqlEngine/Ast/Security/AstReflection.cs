@@ -42,26 +42,58 @@ internal static class AstReflection
     public static bool StructurallyEqual(object? a, object? b)
     {
         if (ReferenceEquals(a, b)) return true;
-        if (a is null || b is null || a.GetType() != b.GetType()) return false;
-        ExecutionStackGuard.Ensure();
-        var type = a.GetType();
-        if (type.IsPrimitive || type.IsEnum || a is string || a is decimal) return a.Equals(b);
-        if (a is IEnumerable left)
+
+        var stack = new Stack<(object? Left, object? Right)>();
+        stack.Push((a, b));
+        while (stack.Count > 0)
         {
-            var right = ((IEnumerable)b).GetEnumerator();
-            foreach (var item in left)
+            var (curA, curB) = stack.Pop();
+            if (ReferenceEquals(curA, curB)) continue;
+            if (curA is null || curB is null || curA.GetType() != curB.GetType()) return false;
+
+            ExecutionStackGuard.Ensure();
+            var type = curA.GetType();
+            if (type.IsPrimitive || type.IsEnum || curA is string || curA is decimal)
             {
-                if (!right.MoveNext() || !StructurallyEqual(item, right.Current)) return false;
+                if (!curA.Equals(curB)) return false;
+                continue;
             }
 
-            return !right.MoveNext();
-        }
+            if (curA is IEnumerable left)
+            {
+                var leftItems = new List<object?>();
+                foreach (var item in left) leftItems.Add(item);
+                var rightEnum = ((IEnumerable)curB).GetEnumerator();
+                int count = 0;
+                var rightItems = new List<object?>(leftItems.Count);
+                while (rightEnum.MoveNext())
+                {
+                    if (count >= leftItems.Count) return false;
+                    rightItems.Add(rightEnum.Current);
+                    count++;
+                }
 
-        var properties = AccessorsOf(type);
-        if (properties.Length == 0) return a.Equals(b);
-        foreach (var property in properties)
-        {
-            if (!StructurallyEqual(property.Get(a), property.Get(b))) return false;
+                if (count != leftItems.Count) return false;
+                for (int i = leftItems.Count - 1; i >= 0; i--)
+                {
+                    stack.Push((leftItems[i], rightItems[i]));
+                }
+
+                continue;
+            }
+
+            var properties = AccessorsOf(type);
+            if (properties.Length == 0)
+            {
+                if (!curA.Equals(curB)) return false;
+                continue;
+            }
+
+            for (int i = properties.Length - 1; i >= 0; i--)
+            {
+                var prop = properties[i];
+                stack.Push((prop.Get(curA), prop.Get(curB)));
+            }
         }
 
         return true;
@@ -82,30 +114,41 @@ internal static class AstReflection
     public static void Walk(object? node, Func<object, bool> visit)
     {
         if (node is null || node is string) return;
-        ExecutionStackGuard.Ensure();
 
-        if (node is IList indexed)
+        var stack = new Stack<object?>();
+        stack.Push(node);
+        while (stack.Count > 0)
         {
-            for (int i = 0; i < indexed.Count; i++) Walk(indexed[i], visit);
-            return;
-        }
+            var current = stack.Pop();
+            if (current is null || current is string) continue;
+            ExecutionStackGuard.Ensure();
 
-        if (node is IEnumerable list)
-        {
-            foreach (var item in list) Walk(item, visit);
-            return;
-        }
+            if (current is IList indexed)
+            {
+                for (int i = indexed.Count - 1; i >= 0; i--) stack.Push(indexed[i]);
+                continue;
+            }
 
-        if (node is not SqlNode && node is not ITuple && !(node.GetType().IsValueType && node.GetType().Namespace?.StartsWith("TrinoSqlEngine", StringComparison.Ordinal) == true))
-        {
-            return;
-        }
+            if (current is IEnumerable list)
+            {
+                var items = new List<object?>();
+                foreach (var item in list) items.Add(item);
+                for (int i = items.Count - 1; i >= 0; i--) stack.Push(items[i]);
+                continue;
+            }
 
-        if (!visit(node)) return;
-        foreach (var property in AccessorsOf(node.GetType()))
-        {
-            if (!property.Descend) continue;
-            Walk(property.Get(node), visit);
+            if (current is not SqlNode && current is not ITuple && !(current.GetType().IsValueType && current.GetType().Namespace?.StartsWith("TrinoSqlEngine", StringComparison.Ordinal) == true))
+            {
+                continue;
+            }
+
+            if (!visit(current)) continue;
+            var accessors = AccessorsOf(current.GetType());
+            for (int i = accessors.Length - 1; i >= 0; i--)
+            {
+                if (!accessors[i].Descend) continue;
+                stack.Push(accessors[i].Get(current));
+            }
         }
     }
 
@@ -160,43 +203,54 @@ internal static class AstReflection
         return columns.ToImmutable();
     }
 
-    private static void Referenced(object? node, bool insideSubquery, ImmutableHashSet<string>.Builder columns)
+    private static void Referenced(object? root, bool insideSubquery, ImmutableHashSet<string>.Builder columns)
     {
-        if (node is null || node is string) return;
-        ExecutionStackGuard.Ensure();
-        if (node is IList indexed)
-        {
-            for (int i = 0; i < indexed.Count; i++) Referenced(indexed[i], insideSubquery, columns);
-            return;
-        }
+        if (root is null || root is string) return;
 
-        if (node is IEnumerable list)
+        var stack = new Stack<(object? Node, bool InsideSubquery)>();
+        stack.Push((root, insideSubquery));
+        while (stack.Count > 0)
         {
-            foreach (var item in list) Referenced(item, insideSubquery, columns);
-            return;
-        }
-
-        if (node is not SqlNode) return;
-        if (node is ColumnReference column)
-        {
-            var parts = column.Name.Parts;
-            if (!insideSubquery)
+            var (node, currentInsideSubquery) = stack.Pop();
+            if (node is null || node is string) continue;
+            ExecutionStackGuard.Ensure();
+            if (node is IList indexed)
             {
-                columns.Add(column.Name.SimpleName.ToLowerInvariant());
-            }
-            else if (parts.Count >= 2 && string.Equals(parts[^2].Value, RowFilterAliases.Target, StringComparison.OrdinalIgnoreCase))
-            {
-                columns.Add(column.Name.SimpleName.ToLowerInvariant());
+                for (int i = indexed.Count - 1; i >= 0; i--) stack.Push((indexed[i], currentInsideSubquery));
+                continue;
             }
 
-            return;
-        }
+            if (node is IEnumerable list)
+            {
+                var items = new List<object?>();
+                foreach (var item in list) items.Add(item);
+                for (int i = items.Count - 1; i >= 0; i--) stack.Push((items[i], currentInsideSubquery));
+                continue;
+            }
 
-        bool nowInside = insideSubquery || node is SelectStatement;
-        foreach (var property in AccessorsOf(node.GetType()))
-        {
-            if (!property.Descend) continue;
-            Referenced(property.Get(node), nowInside, columns);
+            if (node is not SqlNode) continue;
+            if (node is ColumnReference column)
+            {
+                var parts = column.Name.Parts;
+                if (!currentInsideSubquery)
+                {
+                    columns.Add(column.Name.SimpleName.ToLowerInvariant());
+                }
+                else if (parts.Count >= 2 && string.Equals(parts[^2].Value, RowFilterAliases.Target, StringComparison.OrdinalIgnoreCase))
+                {
+                    columns.Add(column.Name.SimpleName.ToLowerInvariant());
+                }
+
+                continue;
+            }
+
+            bool nowInside = currentInsideSubquery || node is SelectStatement;
+            var accessors = AccessorsOf(node.GetType());
+            for (int i = accessors.Length - 1; i >= 0; i--)
+            {
+                if (!accessors[i].Descend) continue;
+                stack.Push((accessors[i].Get(node), nowInside));
+            }
         }
     }
 
@@ -220,36 +274,73 @@ internal static class AstReflection
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sb.ToString())));
     }
 
-    private static void Serialize(object? value, StringBuilder sb)
+    private enum SerializeFrameKind
     {
-        ExecutionStackGuard.Ensure();
-        switch (value)
-        {
-            case null:
-                sb.Append('~');
-                return;
-            case string s:
-                sb.Append('"').Append(s.Length.ToString(CultureInfo.InvariantCulture)).Append(':').Append(s).Append('"');
-                return;
-            case bool or char or Enum or IConvertible:
-                sb.Append(Convert.ToString(value, CultureInfo.InvariantCulture)).Append(';');
-                return;
-            case IEnumerable list:
-                sb.Append('[');
-                foreach (var item in list) Serialize(item, sb);
-                sb.Append(']');
-                return;
-        }
+        Value,
+        AppendChar,
+        AppendPropPrefix
+    }
 
-        var type = value.GetType();
-        sb.Append(type.Name).Append('{');
-        foreach (var property in AccessorsOf(type))
+    private static void Serialize(object? rootValue, StringBuilder sb)
+    {
+        var stack = new Stack<(SerializeFrameKind Kind, object? Data, char Ch)>();
+        stack.Push((SerializeFrameKind.Value, rootValue, '\0'));
+        while (stack.Count > 0)
         {
-            sb.Append(property.Name).Append('=');
-            Serialize(property.Get(value), sb);
-        }
+            var (kind, data, ch) = stack.Pop();
+            if (kind == SerializeFrameKind.AppendChar)
+            {
+                sb.Append(ch);
+                continue;
+            }
 
-        sb.Append('}');
+            if (kind == SerializeFrameKind.AppendPropPrefix)
+            {
+                sb.Append((string)data!).Append('=');
+                continue;
+            }
+
+            ExecutionStackGuard.Ensure();
+            switch (data)
+            {
+                case null:
+                    sb.Append('~');
+                    break;
+                case string s:
+                    sb.Append('"').Append(s.Length.ToString(CultureInfo.InvariantCulture)).Append(':').Append(s).Append('"');
+                    break;
+                case bool or char or Enum or IConvertible:
+                    sb.Append(Convert.ToString(data, CultureInfo.InvariantCulture)).Append(';');
+                    break;
+                case IEnumerable list:
+                {
+                    sb.Append('[');
+                    stack.Push((SerializeFrameKind.AppendChar, null, ']'));
+                    var items = new List<object?>();
+                    foreach (var item in list) items.Add(item);
+                    for (int i = items.Count - 1; i >= 0; i--)
+                    {
+                        stack.Push((SerializeFrameKind.Value, items[i], '\0'));
+                    }
+
+                    break;
+                }
+                default:
+                {
+                    var type = data.GetType();
+                    sb.Append(type.Name).Append('{');
+                    stack.Push((SerializeFrameKind.AppendChar, null, '}'));
+                    var accessors = AccessorsOf(type);
+                    for (int i = accessors.Length - 1; i >= 0; i--)
+                    {
+                        stack.Push((SerializeFrameKind.Value, accessors[i].Get(data), '\0'));
+                        stack.Push((SerializeFrameKind.AppendPropPrefix, accessors[i].Name, '\0'));
+                    }
+
+                    break;
+                }
+            }
+        }
     }
 }
 

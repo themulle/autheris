@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Security;
 
+using Autheris.Tests.Unit.Catalog;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -25,6 +26,7 @@ using Shouldly;
 using Xunit;
 
 /// <summary>SR-H-03: client-supplied Auth.SecretRef must never be used verbatim as vault key.</summary>
+[Trait("Category", "Security")]
 public sealed class SrH03DatasourceSecretRefTests
 {
     private const string Spec = """{"openapi":"3.0.0","info":{"title":"T","version":"1"},"paths":{"/a":{"get":{"summary":"x"}}},"components":{"schemas":{"A":{"type":"object","properties":{"id":{"type":"string"}}}}}}""";
@@ -234,8 +236,7 @@ public sealed class SrH03DatasourceSecretRefTests
             }
         };
         var repo = Substitute.For<ITableMetadataRepository>();
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(
-            [new TableMetadata { Identifier = new TableIdentifier("crm", "dbo", "customers"), Table = table, Columns = [] }]);
+        repo.StubTables([new TableMetadata { Identifier = new TableIdentifier("crm", "dbo", "customers"), Table = table, Columns = [] }]);
         string? sentKey = null;
         var factory = Substitute.For<IHttpClientFactory>();
         factory.CreateClient("DeclarativeHttp").Returns(new HttpClient(new CapturingHandler(r => sentKey = r.Headers.TryGetValues("X-Api-Key", out var v) ? v.First() : null)));

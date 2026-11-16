@@ -11,7 +11,7 @@ public class SqleExpressionPrecedenceTests
     public static TheoryData<TargetSqlDialect> Dialects() => new()
     {
         TargetSqlDialect.SqlServer, TargetSqlDialect.DuckDb, TargetSqlDialect.PostgreSql,
-        TargetSqlDialect.Oracle, TargetSqlDialect.Databricks, TargetSqlDialect.Sqlite
+        TargetSqlDialect.Oracle, TargetSqlDialect.Databricks
     };
 
     [Theory]
@@ -51,7 +51,6 @@ public class SqleExpressionPrecedenceTests
 
     [Theory]
     [InlineData(TargetSqlDialect.PostgreSql)]
-    [InlineData(TargetSqlDialect.Sqlite)]
     [InlineData(TargetSqlDialect.SqlServer)]
     public void AndChain_NotParenthesized(TargetSqlDialect dialect)
     {

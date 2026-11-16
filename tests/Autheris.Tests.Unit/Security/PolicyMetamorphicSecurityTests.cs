@@ -6,7 +6,6 @@ using System.Linq;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Analytics;
 using Autheris.Application.Governance.Rights;
 using Autheris.Application.Identity;
 using Autheris.Domain.Common;
@@ -20,9 +19,9 @@ using Shouldly;
 using Xunit;
 
 /// <summary>
-/// Metamorphic security testing for policies, access rules, rights mapping, and FinOps costs.
+/// Metamorphic security testing for policies, access rules, and rights mapping.
 /// Validates mathematical invariants: Monotonicity on privilege drop, Group order commutativity,
-/// Claim type isomorphism, Customer realm ceiling invariance, and FinOps cost monotonicity.
+/// Claim type isomorphism, and Customer realm ceiling invariance.
 /// </summary>
 [Trait("Category", "Security")]
 [Trait("Category", "Metamorphic")]
@@ -149,102 +148,6 @@ public sealed class PolicyMetamorphicSecurityTests
         rights.ShouldNotContain(FunctionalRight.ClusterAdmin);
         rights.ShouldNotContain(FunctionalRight.GovernanceAdmin);
         rights.ShouldNotContain(FunctionalRight.GovernanceApprove);
-    }
-
-    #endregion
-
-    #region 3. FinOps Aggregation Cost Calculator Metamorphic Invariants
-
-    [Theory]
-    [InlineData(1, 2)]
-    [InlineData(2, 4)]
-    [InlineData(3, 6)]
-    public void M_FINOPS_01_CostMonotonicity_AddingDimensions_StrictlyIncreasesCost(int baseDims, int addedDims)
-    {
-        // Axiom: For any aggregation query Q, adding one or more GroupBy dimensions
-        // must strictly increase the calculated complexity cost: Cost(Q + D) > Cost(Q).
-        var table = TableIdentifier.Parse("core.orders");
-
-        var baseQuery = new AggregationQuery(
-            Table: table,
-            GroupBy: Enumerable.Range(1, baseDims).Select(i => $"dim_{i}").ToList(),
-            Aggregates: [new AggregateSelection(AggregateFunction.Sum, "amount")]);
-
-        var extendedQuery = new AggregationQuery(
-            Table: table,
-            GroupBy: Enumerable.Range(1, baseDims + addedDims).Select(i => $"dim_{i}").ToList(),
-            Aggregates: [new AggregateSelection(AggregateFunction.Sum, "amount")]);
-
-        double baseCost = AggregationCostCalculator.CalculateCost(baseQuery);
-        double extendedCost = AggregationCostCalculator.CalculateCost(extendedQuery);
-
-        // Metamorphic Monotonicity assertion
-        extendedCost.ShouldBeGreaterThan(baseCost,
-            $"Adding {addedDims} dimensions did not strictly increase cost! (base={baseCost}, extended={extendedCost})");
-
-        // Specific cost step verification: Each GroupBy dimension has exact weight 10.0
-        (extendedCost - baseCost).ShouldBe(addedDims * AggregationCostCalculator.GroupByColumnWeight);
-    }
-
-    [Fact]
-    public void M_FINOPS_02_CostMonotonicity_CountDistinct_CostlierThanStandardAggregation()
-    {
-        // Axiom: CountDistinct involves hyperloglog or hash sets and must be strictly
-        // costlier than standard selection/sum aggregations.
-        var table = TableIdentifier.Parse("core.analytics");
-
-        var sumQuery = new AggregationQuery(
-            Table: table,
-            GroupBy: ["country"],
-            Aggregates: [new AggregateSelection(AggregateFunction.Sum, "revenue")]);
-
-        var countDistinctQuery = new AggregationQuery(
-            Table: table,
-            GroupBy: ["country"],
-            Aggregates: [new AggregateSelection(AggregateFunction.CountDistinct, "user_id")]);
-
-        double sumCost = AggregationCostCalculator.CalculateCost(sumQuery);
-        double countDistinctCost = AggregationCostCalculator.CalculateCost(countDistinctQuery);
-
-        // Metamorphic assertion
-        countDistinctCost.ShouldBeGreaterThan(sumCost);
-        (countDistinctCost - sumCost).ShouldBe(
-            AggregationCostCalculator.CountDistinctWeight - AggregationCostCalculator.AggregateSelectionWeight);
-    }
-
-    [Fact]
-    public void M_FINOPS_03_CostSubAdditivity_UnionQuery_CostNeverExceedsSumOfParts()
-    {
-        // Axiom: In query complexity analysis, the cost of evaluating two independent sub-queries
-        // together in one combined query must satisfy sub-additivity: Cost(Q1 ∪ Q2) <= Cost(Q1) + Cost(Q2)
-        // (shared overhead is amortized).
-        var table = TableIdentifier.Parse("core.events");
-
-        var q1 = new AggregationQuery(
-            Table: table,
-            GroupBy: ["region"],
-            Aggregates: [new AggregateSelection(AggregateFunction.Sum, "bytes")]);
-
-        var q2 = new AggregationQuery(
-            Table: table,
-            GroupBy: ["device"],
-            Aggregates: [new AggregateSelection(AggregateFunction.Avg, "duration")]);
-
-        var combined = new AggregationQuery(
-            Table: table,
-            GroupBy: ["region", "device"],
-            Aggregates:
-            [
-                new AggregateSelection(AggregateFunction.Sum, "bytes"),
-                new AggregateSelection(AggregateFunction.Avg, "duration")
-            ]);
-
-        double cost1 = AggregationCostCalculator.CalculateCost(q1);
-        double cost2 = AggregationCostCalculator.CalculateCost(q2);
-        double combinedCost = AggregationCostCalculator.CalculateCost(combined);
-
-        // Sub-additivity
-        combinedCost.ShouldBeLessThanOrEqualTo(cost1 + cost2);
     }
 
     #endregion

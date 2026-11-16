@@ -92,24 +92,6 @@ public sealed class PostgreSqlDialectProvider : SqlDialectProviderBase
     }
 }
 
-public sealed class SqliteDialectProvider : SqlDialectProviderBase
-{
-    public static SqliteDialectProvider Instance { get; } = new();
-
-    public SqliteDialectProvider(IDialectCapabilityProvider? capabilityProvider = null)
-        : base(
-            DatabaseDialect.Sqlite,
-            TargetSqlDialect.Sqlite,
-            "Sqlite",
-            ["sqlite", "sqlite3"],
-            supportsTreeCompile: true,
-            supportsCdc: true,
-            maxParameterCount: 999,
-            capabilityProvider)
-    {
-    }
-}
-
 public sealed class OracleDialectProvider : SqlDialectProviderBase
 {
     public static OracleDialectProvider Instance { get; } = new();

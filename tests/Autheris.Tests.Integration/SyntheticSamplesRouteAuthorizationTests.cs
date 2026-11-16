@@ -6,6 +6,7 @@ using System.Net;
 using System.Net.Http;
 using System.Threading.Tasks;
 using Autheris.Api.Security;
+using Autheris.Tests.Common.Hosting;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -19,48 +20,86 @@ using Autheris.Tests.Integration.Governance;
 /// MCP-01: the GET synthetic-samples route returns predefined sample rows of a table, so it is a GovernanceAdmin route like the PUT.
 /// </summary>
 [Trait("Category", "Security")]
-public sealed class SyntheticSamplesRouteAuthorizationTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class SyntheticSamplesRouteAuthorizationTests : IClassFixture<SyntheticSamplesRouteAuthorizationTests.HostFixture>
 {
     private readonly WebApplicationFactory<Program> _factory;
 
-    public SyntheticSamplesRouteAuthorizationTests(WebApplicationFactory<Program> factory)
+    public SyntheticSamplesRouteAuthorizationTests(HostFixture factory)
     {
-        _factory = factory.WithWebHostBuilder(builder =>
+        _factory = factory;
+    }
+
+    public sealed class HostFixture : IntegrationHost
+    {
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseEnvironment("Development");
             builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
+            builder.UseSetting("Gateway:Tenancy:DefaultTenantId", Autheris.Tests.Common.TestTenants.Default.Value);
             builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
             builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("SyntheticSamplesRouteAuthorizationTests"));
-        });
+        }
     }
 
     [Theory]
-    [InlineData("/api/catalog/datasets/{id}/synthetic-samples")]
-    public void GetSyntheticSamples_RequiresGovernanceAdminPolicy(string pattern)
+    [InlineData("/api/v1/catalog/datasets/{id}/discovery-artifacts", "PUT")]
+    [InlineData("/api/v1/catalog/datasets/{id}/discovery-artifacts", "DELETE")]
+    public void DiscoveryArtifactMutation_RequiresAuthentication_AndTheServiceEnforcesUploaderOrOwner(string pattern, string method)
     {
-        // Creating a client starts the host so that all endpoint data sources are registered.
         using var client = _factory.CreateClient();
         var endpoints = _factory.Services.GetRequiredService<EndpointDataSource>().Endpoints.OfType<RouteEndpoint>();
 
         var matches = endpoints
             .Where(e => string.Equals(e.RoutePattern.RawText, pattern, StringComparison.OrdinalIgnoreCase) &&
-                        (e.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods.Contains("GET", StringComparer.OrdinalIgnoreCase) ?? false))
+                        (e.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods.Contains(method, StringComparer.OrdinalIgnoreCase) ?? false))
             .ToList();
 
         matches.ShouldNotBeEmpty();
-        matches.ShouldAllBe(e => e.Metadata.GetOrderedMetadata<IAuthorizeData>().Any(a => a.Policy == GatewayPolicies.GovernanceAdmin));
+        // Dataset owners may upload too, so the route only requires an authenticated caller; the uploader-or-owner decision is made in the
+        // service (see DiscoveryArtifactPut_NonUploader_IsForbidden).
+        matches.ShouldAllBe(e => e.Metadata.GetOrderedMetadata<IAuthorizeData>().Any());
     }
 
     [Fact]
-    public async Task GetSyntheticSamples_NonAdmin_IsForbidden()
+    public async Task DiscoveryArtifactPut_NonUploader_IsForbidden()
     {
+        // The dataset must exist in the caller's tenant scope: an unknown or out-of-scope dataset answers 404 for everybody.
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var repo = scope.ServiceProvider.GetRequiredService<Autheris.Application.Common.Interfaces.IGovernanceRepository>();
+            var id = new Autheris.Domain.Common.TableIdentifier("sales", "public", "orders");
+            await repo.UpsertTableMetadataAsync(new Autheris.Domain.Model.TableMetadata
+            {
+                Table = new Autheris.Domain.Model.Table { Id = Guid.NewGuid(), DisplayName = "orders", TableName = "orders", SchemaName = "public", SourceType = "PostgreSql", SourceName = "sales" },
+                Identifier = id,
+                Columns = [new() { ColumnName = "id", DataType = "integer" }]
+            });
+        }
+
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-USER");
         client.DefaultRequestHeaders.Add("X-Test-Roles", "AiAgent");
-        client.DefaultRequestHeaders.Add("X-Test-Tenant", "tenant-default");
+        client.DefaultRequestHeaders.Add("X-Test-Tenant", Autheris.Tests.Common.TestTenants.Default.Value);
 
-        var response = await client.GetAsync("/api/catalog/datasets/sales.public.orders/synthetic-samples");
+        using var content = new StringContent("""{"schemaVersion":1,"samples":[],"statistics":{}}""", System.Text.Encoding.UTF8, "application/json");
+        var response = await client.PutAsync("/api/v1/catalog/datasets/sales.public.orders/discovery-artifacts", content);
 
         response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+    }
+
+    [Theory]
+    [InlineData("/api/catalog/datasets/sales.public.orders/synthetic-samples")]
+    [InlineData("/api/v1/catalog/datasets/sales.public.orders/synthetic-samples")]
+    public async Task LegacySyntheticSamplesRoutes_AreRemoved(string route)
+    {
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-ADMIN");
+        client.DefaultRequestHeaders.Add("X-Test-Roles", "GovernanceAdmin");
+        client.DefaultRequestHeaders.Add("X-Test-Tenant", "tenant-default");
+
+        var response = await client.GetAsync(route);
+
+        // The route is gone: the dataset catch-all swallows the path and rejects it as an unknown or malformed dataset id.
+        response.StatusCode.ShouldBeOneOf(HttpStatusCode.NotFound, HttpStatusCode.BadRequest);
     }
 }

@@ -206,7 +206,7 @@ public sealed class McpCatalogChannelsWp0Tests
 
         (await h.Datasets.ListDatasetsAsync(adminB)).Datasets.Select(d => d.Id).ShouldBe(["sales.dbo.invoices_b"]);
         await Should.ThrowAsync<TableNotFoundException>(() => h.Datasets.DescribeDatasetAsync(adminB, "sales.dbo.orders_a"));
-        await Should.ThrowAsync<TableNotFoundException>(() => h.Datasets.SampleRowsAsync(adminB, "sales.dbo.orders_a", 3, synthetic: true));
+        await Should.ThrowAsync<TableNotFoundException>(() => h.Datasets.SampleRowsAsync(adminB, "sales.dbo.orders_a", 3));
 
         var resource = await ReadAsync(h, Session("S-B-ADMIN", "tenant-b", "GovernanceAdmin"), "autheris://catalog/summary");
         resource.ShouldContain("invoices_b");
@@ -241,29 +241,6 @@ public sealed class McpCatalogChannelsWp0Tests
 
         (await h.Datasets.ListDatasetsAsync(user, search: "secret_note", domain: null)).Datasets.ShouldBeEmpty();
         (await h.Datasets.ListDatasetsAsync(user, search: "amount", domain: null)).Datasets.Select(d => d.Id).ShouldBe(["sales.dbo.orders_a"]);
-    }
-
-    // T-W0-10: the synthetic sample_rows guard is positive: administrator view or an active table consent, nothing else.
-    [Fact]
-    public async Task SampleRowsSynthetic_ReleasedFlagWithoutConsent_IsRefused_ConsentAndAdminAreAllowed()
-    {
-        var released = OrdersA with
-        {
-            Table = OrdersA.Table with { Visibility = DatasetVisibility.Summary },
-            ReleaseProfileToCatalogViewers = true
-        };
-        var tables = Wp0.Tables(released);
-        var consents = Wp0.Consents(Wp0.Allow(released.Identifier, "S-GRANTED", Wp0.TenantA));
-        var options = Options.Create(Wp0.Options(TenancyShape.Multi, "sales.dbo.orders_a"));
-        var catalog = new McpDatasetCatalog(tables, consents, Substitute.For<IGatewayExecutionService>(), Substitute.For<IAuditLogRepository>(), options: options,
-            visibilityService: Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(tables, consents, options.Value));
-
-        // The tier branch of the visibility filter lists the table for a consent-less caller; the guard must still refuse it.
-        await Should.ThrowAsync<GatewayForbiddenException>(() =>
-            catalog.SampleRowsAsync(Wp0.User("S-NO-CONSENT", "tenant-a"), "sales.dbo.orders_a", 3, synthetic: true));
-
-        (await catalog.SampleRowsAsync(Wp0.User("S-GRANTED", "tenant-a"), "sales.dbo.orders_a", 3, synthetic: true)).IsSynthetic.ShouldBeTrue();
-        (await catalog.SampleRowsAsync(Wp0.User("S-ADM", "tenant-a", ["GovernanceAdmin"]), "sales.dbo.orders_a", 3, synthetic: true)).IsSynthetic.ShouldBeTrue();
     }
 
     // T-W0-15: a forward-auth identity claiming ClusterAdmin never becomes a cluster admin through the real MCP caller resolution.

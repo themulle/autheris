@@ -2,6 +2,7 @@ namespace Autheris.Application.Mcp.Services;
 
 using Autheris.Application.Tenancy;
 using System;
+using Autheris.Application.Catalog;
 using Autheris.Application.Catalog.Services;
 using System.Diagnostics;
 using System.Text.Json;
@@ -25,7 +26,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Enterprise Guardrail engine enforcing zero-trust data protection, Casbin ABAC enforcement,
+/// Enterprise Guardrail engine enforcing zero-trust data protection, access decision point enforcement,
 /// automated PII scrubbing, token budgeting, Four-Eyes justification gating, and SHA-256 tamper-evident
 /// audit logging on all data supplied to AI agents via the Model Context Protocol (MCP).
 /// </summary>
@@ -475,7 +476,9 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
                 try
                 {
                     var principal = McpProtocolHandler.BuildPrincipalFromSession(sessionContext);
-                    var allTables = _tableMetadataRepository != null ? await _tableMetadataRepository.GetAllTablesAsync(cancellationToken).ConfigureAwait(false) : Array.Empty<TableMetadata>();
+                    var allTables = _tableMetadataRepository != null
+                        ? await CatalogTablePageReader.ReadAllAsync(_tableMetadataRepository, new CatalogTableQuery(IncludeInactive: false), static t => t.Table.IsActive, ct: cancellationToken).ConfigureAwait(false)
+                        : Array.Empty<TableMetadata>();
                     var visibleTables = await McpCatalogVisibility.VisibleTablesAsync(allTables, principal, _consentRepository, _options.Value, _catalogVisibility, cancellationToken).ConfigureAwait(false);
                     visibleKeys = visibleTables?.Select(t => (Domain: t.Identifier.Domain.ToLowerInvariant(), Table: t.Identifier.TableName.ToLowerInvariant())).ToHashSet();
                 }

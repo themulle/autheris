@@ -13,6 +13,7 @@ namespace TrinoSqlEngine.Tests.Compiler;
 /// expression position that can hold a subquery, reject with the typed reason, and enforce its depth and stack limits.
 /// </summary>
 [Trait("Category", "SqlGate")]
+[Trait("Category", "Security")]
 public class SecurityCoverageVerifierMutationTests
 {
     private static readonly SecurityPredicateId RootId = new("dbo.t", 0);

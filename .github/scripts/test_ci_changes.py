@@ -71,7 +71,7 @@ class CiChangesTests(unittest.TestCase):
             try:
                 os.environ.update(CI_EVENT="schedule", CI_BASE="", CI_HEAD="", GITHUB_OUTPUT=out)
                 self.assertEqual(0, ci.main())
-                self.assertEqual("dotnet=true\n", open(out, encoding="utf-8").read())
+                self.assertEqual("dotnet=true\noracle=true\nspark=true\n", pathlib.Path(out).read_text(encoding="utf-8"))
             finally:
                 for k, v in saved.items():
                     if v is None:
@@ -82,15 +82,54 @@ class CiChangesTests(unittest.TestCase):
     def test_push_event_always_runs_dotnet(self):
         self.assertTrue(ci.changed_paths("push", "a" * 40, "b" * 40) is None)
         self.assertTrue(ci.decide("push", "a" * 40, "b" * 40))
+        self.assertEqual({"dotnet": True, "oracle": True, "spark": True}, ci.decide_all("push", "a" * 40, "b" * 40))
 
     def test_unknown_event_runs_dotnet(self):
         self.assertTrue(ci.changed_paths("schedule", "a", "b") is None)
         self.assertTrue(ci.decide("workflow_dispatch", "a", "b"))
         self.assertTrue(ci.changed_paths("push", ci.ZERO_SHA, "b") is None)
+        self.assertEqual({"dotnet": True, "oracle": True, "spark": True}, ci.decide_all("workflow_dispatch", "a", "b"))
 
     def test_path_traversal_or_unnormalized_runs_dotnet(self):
         for p in ["docs/../src/A.cs", "/docs/a.md", "docs\\a.md", "docs//a.md", "./docs/a.md", "docs/./a.md"]:
             self.assertTrue(ci.classify([p]), p)
+            self.assertTrue(ci.classify_oracle([p]), p)
+            self.assertTrue(ci.classify_spark([p]), p)
+
+    def test_oracle_and_spark_path_triggers(self):
+        # Unrelated .NET change skips oracle and spark smoke jobs on PRs
+        self.assertFalse(ci.classify_oracle(["src/Autheris.Api/Program.cs"]))
+        self.assertFalse(ci.classify_spark(["src/Autheris.Api/Program.cs"]))
+        self.assertFalse(ci.classify_oracle(["docs/plans/x.md"]))
+        self.assertFalse(ci.classify_spark(["docs/plans/x.md"]))
+
+        # Oracle paths trigger oracle
+        for p in (
+            "src/TrinoSqlEngine/Ast/Generators/OracleDialectGenerator.cs",
+            "src/TrinoSqlEngine/Ast/Emit/DialectEmitter.cs",
+            "src/Autheris.Application/Sql/OracleBindByName.cs",
+            "src/Autheris.Infrastructure/Persistence/OracleConnectionSupport.cs",
+            "tests/Autheris.Tests.Integration/OracleGatewayPathTests.cs",
+            "tests/TrinoSqlEngine.Tests/Conformance/Fixtures/Oracle.json",
+        ):
+            self.assertTrue(ci.classify_oracle([p]), p)
+
+        # Spark and Databricks paths trigger spark
+        for p in (
+            "src/TrinoSqlEngine/Ast/Generators/DatabricksDialectGenerator.cs",
+            "src/TrinoSqlEngine/Ast/Emit/DialectEmitter.cs",
+            "src/Autheris.Infrastructure/Databricks/DatabricksDbConnection.cs",
+            "src/Autheris.Domain/Options/DatabricksOptions.cs",
+            "tests/Autheris.Tests.Integration/Spark/runner.py",
+            "tests/Autheris.Tests.Integration/AstCompilerDatabricksSparkExecutionTests.cs",
+            "tests/TrinoSqlEngine.Tests/Conformance/Fixtures/Databricks.json",
+        ):
+            self.assertTrue(ci.classify_spark([p]), p)
+
+        # Empty or failed diff fails closed to True for both
+        self.assertTrue(ci.classify_oracle([]))
+        self.assertTrue(ci.classify_spark([]))
+        self.assertEqual({"dotnet": True, "oracle": True, "spark": True}, ci.decide_all("pull_request", "abc", "def", diff=lambda *a: None))
 
 
 if __name__ == "__main__":

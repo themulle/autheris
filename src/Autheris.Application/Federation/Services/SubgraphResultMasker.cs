@@ -262,33 +262,6 @@ public sealed class SubgraphResultMasker : ISubgraphResultMasker
         return _maskingProvider.MaskValue(responseName, value, rule);
     }
 
-    public object? MaskResultData(object? data, ClaimsPrincipal? principal)
-        => MaskResultData(data, principal, null);
-
-    public object? MaskResultData(object? data, ClaimsPrincipal? principal, IReadOnlyDictionary<string, string>? aliasToFieldMap)
-    {
-        if (data == null) return null;
-
-        var fedOptions = _options.Value.Federation;
-        if (!fedOptions.EnableResultMasking || _options.Value.IsColumnMaskingDisabled)
-        {
-            return data;
-        }
-
-        if (IsAdmin(principal))
-        {
-            return data;
-        }
-
-        // Synchronous entry point; the catalog lookup is only awaited when a catalog is configured (prefer MaskResultDataAsync).
-        if (_catalog == null)
-        {
-            return MaskRecursive(data, aliasToFieldMap, null, new MaskContext(new Dictionary<string, MaskingRule?>(), BuildConfigMap(), false));
-        }
-
-        return MaskResultDataAsync(data, principal, aliasToFieldMap).AsTask().GetAwaiter().GetResult();
-    }
-
     private static object? ToMaskableObject(object? node)
     {
         if (node is System.Text.Json.JsonElement je)

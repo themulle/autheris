@@ -19,8 +19,6 @@ public static class GatewaySections
     public const string ApiKey = "Gateway:ApiKey";
     public const string Totp = "Gateway:Totp";
     public const string HitLStepUp = "Gateway:HitLStepUp";
-    public const string Casbin = "Gateway:Casbin";
-    public const string CasbinDecisionCache = "Gateway:Casbin:DecisionCache";
     public const string RowFilters = "Gateway:RowFilters";
     public const string CallerAttributes = "Gateway:CallerAttributes";
     public const string VirtualFilters = "Gateway:VirtualFilters";
@@ -48,7 +46,6 @@ public static class GatewaySections
     public const string ResourceGroups = "Gateway:ResourceGroups";
     public const string RowLimits = "Gateway:RowLimits";
     public const string SystemMetrics = "Gateway:SystemMetrics";
-    public const string FinOps = "Gateway:FinOps";
     public const string Governance = "Gateway:Governance";
     public const string QueryAnalysis = "Gateway:Governance:QueryAnalysis";
     public const string QueryCost = "Gateway:QueryCost";

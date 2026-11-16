@@ -12,6 +12,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Endpoints;
 using Autheris.Api.Errors;
+using Autheris.Api.Middleware;
 using Autheris.Api.Mcp;
 using Autheris.Application.Audit;
 using Autheris.Application.Catalog.Interfaces;
@@ -21,6 +22,7 @@ using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Mcp.Services;
 using Autheris.Application.Olap;
 using Autheris.Application.Policy.Interfaces;
+using Autheris.Application.Policy.Pdp;
 using Autheris.Application.Procedures.Interfaces;
 using Autheris.Application.VirtualFilters;
 using Autheris.Application.VirtualFilters.Federation;
@@ -459,47 +461,56 @@ public sealed class RawExceptionMessageNeverReachesClientTests
         VirtualFilterErrorCodes.IsGoverned(null).ShouldBeFalse();
     }
 
-    // ---------------------------------------------------------------- MCP stdio (ruling 13)
+    // ---------------------------------------------------------------- MCP HTTP (replaces deleted MCP stdio tests)
 
-    private static async Task<string> RunMcpAsync(Exception ex, params string[] inputs)
+    [Fact]
+    public async Task McpHttp_GuardrailDecisionFailure_NeverLeaksRawExceptionMessage()
     {
-        var handler = Substitute.For<IMcpProtocolHandler>();
+        var registry = new McpToolRegistry();
+        var options = Options.Create(new GatewayOptions { Mcp = new McpOptions { Enabled = true } });
+        var pdp = Substitute.For<IAccessDecisionPoint>();
+        pdp.DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>())
+            .Returns<ValueTask<TableAccessDecision>>(_ => ValueTask.FromException<TableAccessDecision>(new InvalidOperationException(Sentinel)));
+        var guardrail = new AiDataGuardrailService(
+            registry,
+            options,
+            NullLogger<AiDataGuardrailService>.Instance,
+            global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance,
+            decisionPoint: pdp,
+            tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable());
+
         var now = DateTimeOffset.UtcNow;
-        handler.CreateSession(Arg.Any<string>(), Arg.Any<string>()).Returns(new McpSessionContext("s1", "cli", "default", now, now, "S-1", ["Developer"], []));
-#pragma warning disable CA2012
-        handler.HandleMessageAsync("s1", Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns<ValueTask<string>>(_ => throw ex);
-#pragma warning restore CA2012
-        var output = new StringWriter();
-        await new McpStdioRunner(handler).RunAsync(new StringReader(string.Join(Environment.NewLine, inputs) + Environment.NewLine), output, tenantId: "tenant-a");
-        return output.ToString();
+        var session = new McpSessionContext("http-s1", "client-1", "tenant-1", now, now, "S-1-5-21-CALLER", ["Developer"], []);
+
+        var result = await guardrail.ExecuteToolWithGuardrailAsync(
+            new McpToolCallRequest("query_customers", "{\"domain\":\"sales\",\"table\":\"customers\",\"sql\":\"SELECT 1\"}"),
+            session,
+            CancellationToken.None);
+
+        result.IsSuccess.ShouldBeFalse();
+        (result.ErrorMessage ?? string.Empty).ShouldNotContain(Sentinel);
+        (result.ErrorMessage ?? string.Empty).ShouldNotContain("InvalidOperationException");
+        result.ContentJson.ShouldNotContain(Sentinel);
+        result.ContentJson.ShouldNotContain("InvalidOperationException");
     }
 
     [Fact]
-    public async Task McpStdio_InternalError_IsGenericWithCorrelationId()
+    public async Task McpHttp_UnhandledException_OnMcpRoute_ReturnsGenericProblemWithoutExceptionText()
     {
-        var text = await RunMcpAsync(new InvalidOperationException(Sentinel), "{\"jsonrpc\":\"2.0\",\"method\":\"x\",\"id\":1}");
+        var ctx = Ctx(development: true);
+        ctx.Request.Path = "/mcp";
+        var handler = new GatewayExceptionHandler(NullLogger<GatewayExceptionHandler>.Instance);
 
-        text.ShouldNotContain(Sentinel);
-        using var doc = JsonDocument.Parse(text.Trim());
-        var root = doc.RootElement;
-        root.GetProperty("jsonrpc").GetString().ShouldBe("2.0");
-        root.GetProperty("id").ValueKind.ShouldBe(JsonValueKind.Null);
-        var error = root.GetProperty("error");
-        error.GetProperty("code").GetInt32().ShouldBe(-32603);
-        error.GetProperty("message").GetString().ShouldBe("Internal error");
-        Guid.TryParse(error.GetProperty("data").GetProperty("correlationId").GetString(), out _).ShouldBeTrue();
-    }
+        var handled = await handler.TryHandleAsync(ctx, new InvalidOperationException(Sentinel), CancellationToken.None);
 
-    [Fact]
-    public async Task McpStdio_NothingExceptJsonRpcOnStdout()
-    {
-        var text = await RunMcpAsync(new InvalidOperationException(Sentinel), "{\"a\":1}", "{\"b\":2}");
-
-        var lines = text.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);
-        lines.Length.ShouldBe(2);
-        lines.ShouldAllBe(l => JsonDocument.Parse(l).RootElement.GetProperty("jsonrpc").GetString() == "2.0");
-        text.ShouldNotContain(Sentinel);
-        text.ShouldNotContain("InvalidOperationException");
+        handled.ShouldBeTrue();
+        var c = Read(ctx);
+        c.Status.ShouldBe(500);
+        c.ContentType.ShouldStartWith("application/problem+json");
+        c.Json.GetProperty("code").GetString().ShouldBe(ApiErrorCodes.InternalError);
+        c.Json.TryGetProperty("traceId", out _).ShouldBeTrue();
+        c.Body.ShouldNotContain(Sentinel);
+        c.Body.ShouldNotContain("InvalidOperationException");
     }
 
     [Fact]

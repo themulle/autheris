@@ -23,6 +23,7 @@ using Microsoft.Extensions.Options;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public class HitLEndpointsTests
 {
     private readonly InMemoryClusterStateProvider _clusterState;

@@ -113,12 +113,15 @@ flowchart LR
    - Splits into parallel developer streams if applicable.
 3. **Phase 3: Security & Compliance Review (`csharp-security-expert`)**
    - Audits plan against Zero-Trust, Fail-Closed, Casbin ABAC, and HMAC audit requirements. Expands plan with security test criteria.
-4. **Phase 4: Test-Driven Development (`csharp-tdd-developer`)**
-   - Strictly applies Red-Green-Refactor with xUnit and FluentAssertions. Ensures full test suite is green.
+4. **Phase 4: Test-Driven Development (`csharp-tdd-developer`, Junior Execution on Gemini 4 Hydrogen)**
+   - Runs in a **Senior (`Orchestrator (Argon)`) + Junior (`Gemini 4 Hydrogen`)** pairing: the Senior Orchestrator/PM pre-analyzes the implementation plan and supplies a self-contained, context-rich work package brief (target files/lines, signatures, binding `SEC-*` conditions, unit `--filter`, and integration test pointers).
+   - Strictly applies Red-Green-Refactor with xUnit, Shouldly/FluentAssertions, and NSubstitute inside an isolated worktree.
+   - **Local CPU/RAM Constraint:** Runs **only** filtered local unit tests (`dotnet test tests/Autheris.Tests.Unit/Autheris.Tests.Unit.csproj --filter <TestClass> -m:2 -nodeReuse:false`) and touched architecture ratchet tests locally.
+   - **Proactive Integration Test Adaptation (Compile-Only Locally):** Inspects and updates any affected tests in `tests/Autheris.Tests.Integration` or `tests/Autheris.Tests.Parity` and verifies `tests/Autheris.Tests.Integration/Autheris.Tests.Integration.csproj` compiles cleanly without executing integration tests locally.
 5. **Phase 5: Code Review & Quality Gate (`csharp-code-reviewer`)**
-   - Audits code quality, C# 13 idioms, allocation efficiency, and test completeness. Loops back to developers if issues arise.
-6. **After Phase 5: Tracker update (no documentation phase)**
-   - Updates the progress tracker and `docs/plans/00-master-plan-overview.md` (status and links), commits and pushes. No feature documentation is written as part of the lifecycle.
+   - Audits code quality, C# 13 idioms, allocation efficiency, binding security test coverage, and proactive integration test updates. Loops back to Hydrogen developers if issues arise.
+6. **After Phase 5: Tracker update & GitHub Actions Verification (no documentation phase)**
+   - Updates the progress tracker and `docs/plans/00-master-plan-overview.md`, commits and pushes the branch, cleans the worktree, and verifies the full unit suite and all integration/parity suites on **GitHub Actions**. No feature documentation is written as part of the lifecycle.
 
 ---
 
@@ -142,4 +145,4 @@ flowchart LR
 * **Zero-Trust & Fail-Closed:** Everything is denied by default unless covered by an explicit Casbin ABAC rule or approved Data-Owner Consent.
 * **AST Pushdown First:** Row-level security and column masking must be rewritten directly into SQL/AST trees whenever possible, minimizing post-retrieval in-memory filtering.
 * **High Performance .NET 10:** Zero-allocation patterns, memory pooling, and `ReadOnlySpan<T>` usage in hot paths.
-* **Testing & Verification:** Every functional addition must include corresponding unit/integration tests under `tests/`. Always run `dotnet build Autheris.sln` before declaring tasks complete.
+* **Testing & Verification (Local Filtered Unit + Compile-Only Integration; Full & Integration on GitHub Actions):** Every functional addition must include corresponding unit tests (and integration test updates where affected) under `tests/`. Because local CPU and RAM are constrained, local verification runs **only** filtered relevant unit tests (`dotnet test tests/Autheris.Tests.Unit/Autheris.Tests.Unit.csproj --filter <TestClass> -m:2 -nodeReuse:false`), touched architecture ratchet tests, and a compile-only build check of `tests/Autheris.Tests.Integration/Autheris.Tests.Integration.csproj`. Full unit test suites and all Testcontainers/Spark/Oracle/Parity integration suites execute on **GitHub Actions**.

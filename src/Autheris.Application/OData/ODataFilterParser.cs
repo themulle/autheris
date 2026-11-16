@@ -17,6 +17,7 @@ public static class ODataFilterParser
 {
     public const int MaxFilterLength = 4096;
     public const int MaxRecursionDepth = 32;
+    public const int MaxChainOperands = 1_000;
 
     public static TableFilterClause Parse(string filterExpression, DatabaseDialect defaultDialect = DatabaseDialect.PostgreSql, string paramPrefix = "@p_od_")
     {
@@ -64,6 +65,7 @@ public static class ODataFilterParser
             Parameters: paramCtx.Parameters,
             ReferencedColumns: distinctCols)
         {
+            ConstrainedColumns = CollectConstrainedColumns(ast).ToList(),
             DialectSqlFactory = SqlBuilder,
             TrinoSqlFactory = TrinoBuilder
         };
@@ -198,7 +200,7 @@ public static class ODataFilterParser
 
                 // Suffix (L, M, F, D)
                 char suffix = '\0';
-                if (i < len && "lLmMfFdD".Contains(input[i]))
+                if (i < len && "lLmMfFdD".Contains(input[i], StringComparison.Ordinal))
                 {
                     suffix = input[i++];
                 }
@@ -412,13 +414,7 @@ public static class ODataFilterParser
             EnterRecursion();
             try
             {
-                var left = ParseAnd();
-                while (Match(TokenType.Or))
-                {
-                    var right = ParseAnd();
-                    left = new BinaryOpNode(left, "OR", right);
-                }
-                return left;
+                return ParseChain(TokenType.Or, "OR", ParseAnd);
             }
             finally
             {
@@ -427,15 +423,21 @@ public static class ODataFilterParser
         }
 
         // AndExpression := NotExpression ('and' NotExpression)*
-        private AstNode ParseAnd()
+        private AstNode ParseAnd() => ParseChain(TokenType.And, "AND", ParseNot);
+
+        private AstNode ParseChain(TokenType opToken, string sqlOp, Func<AstNode> parseOperand)
         {
-            var left = ParseNot();
-            while (Match(TokenType.And))
+            var operands = new List<AstNode> { parseOperand() };
+            while (Match(opToken))
             {
-                var right = ParseNot();
-                left = new BinaryOpNode(left, "AND", right);
+                operands.Add(parseOperand());
+                if (operands.Count > MaxChainOperands)
+                {
+                    throw new GatewayInvalidQueryException(
+                        $"OData $filter chain exceeds maximum operand count of {MaxChainOperands}.");
+                }
             }
-            return left;
+            return operands.Count == 1 ? operands[0] : new ChainNode(sqlOp, operands);
         }
 
         // NotExpression := ('not')? Comparison
@@ -517,7 +519,7 @@ public static class ODataFilterParser
                     {
                         return ParseFunctionCall(token.Text);
                     }
-                    if (token.Text.Contains('/'))
+                    if (token.Text.Contains('/', StringComparison.Ordinal))
                     {
                         // EXT-19: navigation paths are not supported; never reduce them to a base-table column.
                         throw new GatewayInvalidQueryException(
@@ -660,7 +662,7 @@ public static class ODataFilterParser
 
     internal sealed class ColumnNode(string name) : AstNode
     {
-        public string Name { get; } = name.Contains('/') ? name.Split('/')[^1] : name;
+        public string Name { get; } = name.Contains('/', StringComparison.Ordinal) ? name.Split('/')[^1] : name;
 
         public override string ToSql(SqlGenerationContext ctx) => ctx.QuoteColumn(Name);
 
@@ -780,6 +782,57 @@ public static class ODataFilterParser
         }
     }
 
+    internal sealed class ChainNode(string op, IReadOnlyList<AstNode> operands) : AstNode
+    {
+        public string Op { get; } = op;
+        public IReadOnlyList<AstNode> Operands { get; } = operands;
+
+        public override string ToSql(SqlGenerationContext ctx)
+        {
+            ctx.EnterDepth();
+            try
+            {
+                if (Operands.Count == 0)
+                {
+                    throw new InvalidOperationException("ChainNode requires at least one operand.");
+                }
+
+                var sqlOp = Op.ToUpperInvariant();
+                var sb = new StringBuilder();
+                for (int i = 0; i < Operands.Count - 1; i++)
+                {
+                    sb.Append('(');
+                }
+
+                sb.Append(Operands[0].ToSql(ctx));
+                for (int i = 1; i < Operands.Count; i++)
+                {
+                    sb.Append(' ').Append(sqlOp).Append(' ').Append(Operands[i].ToSql(ctx)).Append(')');
+                }
+
+                return sb.ToString();
+            }
+            finally
+            {
+                ctx.ExitDepth();
+            }
+        }
+
+        public override void CollectReferencedColumns(List<string> columns, int depth = 0)
+        {
+            if (depth > MaxRecursionDepth + 5)
+            {
+                throw new GatewayInvalidQueryException(
+                    $"AST recursion depth exceeds maximum limit of {MaxRecursionDepth}.");
+            }
+
+            foreach (var operand in Operands)
+            {
+                operand.CollectReferencedColumns(columns, depth + 1);
+            }
+        }
+    }
+
     internal sealed class FunctionCallNode(string name, IReadOnlyList<AstNode> args) : AstNode
     {
         public string Name { get; } = name;
@@ -870,6 +923,47 @@ public static class ODataFilterParser
             }
         }
     }
+
+    private static HashSet<string> CollectConstrainedColumns(AstNode node)
+    {
+        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        switch (node)
+        {
+            case GroupingNode g:
+                return CollectConstrainedColumns(g.Inner);
+            case BinaryOpNode b when b.Op.Equals("and", StringComparison.OrdinalIgnoreCase):
+                result.UnionWith(CollectConstrainedColumns(b.Left));
+                result.UnionWith(CollectConstrainedColumns(b.Right));
+                break;
+            case BinaryOpNode b when b.Op.Equals("or", StringComparison.OrdinalIgnoreCase):
+                result.UnionWith(CollectConstrainedColumns(b.Left));
+                result.IntersectWith(CollectConstrainedColumns(b.Right));
+                break;
+            case BinaryOpNode b when IsStrictComparison(b.Op):
+                if (UnwrapColumnName(b.Left) is { } lCol && IsNonNullLiteral(b.Right)) result.Add(lCol);
+                else if (UnwrapColumnName(b.Right) is { } rCol && IsNonNullLiteral(b.Left)) result.Add(rCol);
+                break;
+            case ChainNode c when c.Op.Equals("and", StringComparison.OrdinalIgnoreCase):
+                foreach (var op in c.Operands) result.UnionWith(CollectConstrainedColumns(op));
+                break;
+            case ChainNode c when c.Op.Equals("or", StringComparison.OrdinalIgnoreCase) && c.Operands.Count > 0:
+                result.UnionWith(CollectConstrainedColumns(c.Operands[0]));
+                for (int i = 1; i < c.Operands.Count && result.Count > 0; i++) result.IntersectWith(CollectConstrainedColumns(c.Operands[i]));
+                break;
+        }
+        return result;
+    }
+
+    private static bool IsStrictComparison(string op) =>
+        op.Equals("eq", StringComparison.OrdinalIgnoreCase) || op.Equals("gt", StringComparison.OrdinalIgnoreCase)
+        || op.Equals("ge", StringComparison.OrdinalIgnoreCase) || op.Equals("lt", StringComparison.OrdinalIgnoreCase)
+        || op.Equals("le", StringComparison.OrdinalIgnoreCase);
+
+    private static string? UnwrapColumnName(AstNode node) =>
+        node is GroupingNode g ? UnwrapColumnName(g.Inner) : node is ColumnNode col ? col.Name : null;
+
+    private static bool IsNonNullLiteral(AstNode node) =>
+        node is GroupingNode g ? IsNonNullLiteral(g.Inner) : node is LiteralNode { Value: not null };
 
     #endregion
 }

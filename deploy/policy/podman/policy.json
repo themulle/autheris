@@ -13,26 +13,7 @@
             "oidc-issuer": "https://token.actions.githubusercontent.com",
             "subject-regex": "^https://github\\.com/themulle/autheris/\\.github/workflows/docker-publish\\.yml@refs/(heads/main|tags/v.+)$"
           },
-          "rekorPublicKeyData": ""
-        }
-      ],
-      "": [
-        {
-          "type": "insecureAcceptAnything"
-        }
-      ]
-    },
-    "dir": {
-      "": [
-        {
-          "type": "insecureAcceptAnything"
-        }
-      ]
-    },
-    "tarball": {
-      "": [
-        {
-          "type": "insecureAcceptAnything"
+          "rekorPublicKeyData": "LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUZrd0V3WUhLb1pJemowQ0FRWUlLb1pJemowREFRY0RRZ0FFMkcyWSsydGFiZFRWNUJjR2lCSXgwYTlmQUZ3cgprQmJtTFNHdGtzNEwzcVg2eVlZMHp1ZkJuaEM4VXIvaXk1NUdoV1AvOUEvYlkyTGhDMzBNOStSWXR3PT0KLS0tLS1FTkQgUFVCTElDIEtFWS0tLS0tCg=="
         }
       ]
     }

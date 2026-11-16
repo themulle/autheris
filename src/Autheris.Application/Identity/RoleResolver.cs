@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Autheris.Application.Identity.Caching;
 using Autheris.Domain.Common;
 using Autheris.Domain.Identity;
+using Autheris.Domain.Interfaces;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Options;
 
@@ -16,6 +17,7 @@ public sealed class RoleResolver : IRoleResolver
     private readonly IEnumerable<IRoleProvider> _providers;
     private readonly IRoleResolverCache _cache;
     private readonly IIdentityRealmRegistry? _realmRegistry;
+    private readonly IScimProvisioningStore? _scimProvisioningStore;
     private readonly int _ttlMinutes;
     private readonly int _maxGroups;
 
@@ -23,11 +25,13 @@ public sealed class RoleResolver : IRoleResolver
         IEnumerable<IRoleProvider> providers,
         IRoleResolverCache cache,
         IIdentityRealmRegistry? realmRegistry = null,
-        IOptions<GatewayOptions>? options = null)
+        IOptions<GatewayOptions>? options = null,
+        IScimProvisioningStore? scimProvisioningStore = null)
     {
         _providers = providers ?? throw new ArgumentNullException(nameof(providers));
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         _realmRegistry = realmRegistry;
+        _scimProvisioningStore = scimProvisioningStore;
         var auth = options?.Value.Authentication;
         _ttlMinutes = auth?.GroupCacheTtlMinutes is >= 1 and <= 60 ? auth.GroupCacheTtlMinutes : 5;
         _maxGroups = auth?.MaxGroupSidsPerCaller is >= 1 and <= 4096 ? auth.MaxGroupSidsPerCaller : 1024;
@@ -37,8 +41,9 @@ public sealed class RoleResolver : IRoleResolver
         IIdentityRealmRegistry realmRegistry,
         IEnumerable<IRoleProvider> providers,
         IRoleResolverCache cache,
-        IOptions<GatewayOptions>? options = null)
-        : this(providers, cache, realmRegistry, options)
+        IOptions<GatewayOptions>? options = null,
+        IScimProvisioningStore? scimProvisioningStore = null)
+        : this(providers, cache, realmRegistry, options, scimProvisioningStore)
     {
     }
 
@@ -68,7 +73,8 @@ public sealed class RoleResolver : IRoleResolver
         ArgumentNullException.ThrowIfNull(realm);
 
         // 1. Check L1 / L2 Cache
-        var cached = await _cache.GetAsync(realm.Id, identity.UserKey, cancellationToken).ConfigureAwait(false);
+        var cacheKey = await BuildCacheKeyAsync(identity, realm, cancellationToken).ConfigureAwait(false);
+        var cached = await _cache.GetAsync(realm.Id, cacheKey, cancellationToken).ConfigureAwait(false);
         if (cached != null)
         {
             return cached;
@@ -183,9 +189,21 @@ public sealed class RoleResolver : IRoleResolver
         // GOV-08: an incomplete answer is never cached: the next request asks the providers again instead of serving "no groups".
         if (!degraded)
         {
-            await _cache.SetAsync(realm.Id, identity.UserKey, resolution, cancellationToken).ConfigureAwait(false);
+            await _cache.SetAsync(realm.Id, cacheKey, resolution, cancellationToken).ConfigureAwait(false);
         }
 
         return resolution;
+    }
+
+    private async Task<string> BuildCacheKeyAsync(ResolvedIdentity identity, IdentityRealm realm, CancellationToken ct)
+    {
+        if (realm.Provisioning != RealmProvisioningMode.Scim || _scimProvisioningStore is null)
+        {
+            return identity.UserKey;
+        }
+
+        var syncState = await _scimProvisioningStore.GetRealmSyncStateAsync(identity.TenantId, realm.Id, ct).ConfigureAwait(false);
+        var epoch = syncState?.DeprovisionEpoch ?? 0;
+        return $"e{epoch}:{identity.UserKey}";
     }
 }

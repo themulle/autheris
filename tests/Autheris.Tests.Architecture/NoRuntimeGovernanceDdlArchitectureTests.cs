@@ -43,8 +43,14 @@ public sealed class NoRuntimeGovernanceDdlArchitectureTests
     private static IEnumerable<(string Relative, string Text)> SourceFiles(string folder)
     {
         string root = RepositoryRoot();
+        string full = Path.Combine(root, folder);
+        if (!Directory.Exists(full))
+        {
+            return [];
+        }
+
         string sep = Path.DirectorySeparatorChar.ToString();
-        return Directory.EnumerateFiles(Path.Combine(root, folder), "*.cs", SearchOption.AllDirectories)
+        return Directory.EnumerateFiles(full, "*.cs", SearchOption.AllDirectories)
             .Where(p => !p.Contains($"{sep}obj{sep}") && !p.Contains($"{sep}bin{sep}"))
             .Select(p => (Relative: Path.GetRelativePath(root, p).Replace('\\', '/'), Path: p))
             .Select(x => (x.Relative, StripComments(File.ReadAllText(x.Path))));

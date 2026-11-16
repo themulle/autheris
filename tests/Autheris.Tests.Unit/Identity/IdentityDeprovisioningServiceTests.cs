@@ -16,6 +16,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class IdentityDeprovisioningServiceTests
 {
     private readonly IIdentityStoreRepository _storeRepo = Substitute.For<IIdentityStoreRepository>();

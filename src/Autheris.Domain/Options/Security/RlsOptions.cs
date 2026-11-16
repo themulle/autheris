@@ -4,14 +4,6 @@ using Autheris.Domain.Model;
 
 namespace Autheris.Domain.Options;
 
-public sealed class CasbinOptions
-{
-    public bool Enabled { get; init; } = false;
-    public string? ModelPath { get; init; }
-    public string? PolicyPath { get; init; }
-    public bool WatchPolicyFile { get; init; } = true;
-}
-
 /// <summary>Virtual filters (docs/plans/2026-10-08-virtuelle-filter.md).</summary>
 public sealed class VirtualFilterOptions
 {
@@ -64,8 +56,6 @@ public sealed class VirtualFilterOptions
 /// </summary>
 public sealed class RowFilterOptions
 {
-    public RowFilterSubqueryStrategy SubqueryStrategy { get; set; } = RowFilterSubqueryStrategy.Exists;
-
     /// <summary>Issue #107: key-set cache strategy for correlated row filters (<c>Gateway:RowFilters:KeySetCache</c>).</summary>
     public RowFilterKeySetCacheOptions KeySetCache { get; init; } = new();
 }

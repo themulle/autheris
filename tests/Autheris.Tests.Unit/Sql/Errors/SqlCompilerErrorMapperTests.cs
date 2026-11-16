@@ -25,7 +25,8 @@ public sealed class SqlCompilerErrorMapperTests
 
     private sealed class SqliteLikeProviderException(string message) : System.Data.Common.DbException(message)
     {
-        public int SqliteErrorCode => 1;
+        public override string? SqlState => "42601";
+        public string Routine => "transformSetOperationTree";
     }
 
     sealed class FakeNumberedDbException(int number, string message = "error") : System.Data.Common.DbException(message)
@@ -74,13 +75,13 @@ public sealed class SqlCompilerErrorMapperTests
         // #310 (SEC-PG-09)
         { "aggregate-type-invalid", () => new TrinoSqlEngine.Ast.Visitors.AggregateTypeInvalidException(), 400, "AGGREGATION_INVALID_FUNCTION_FOR_TYPE", null },
         // #312 (SEC-PG-10): the executor's classification of an unknown identifier answers like a denied column; an unrecognised provider error stays 502.
-        { "governed-policy-denied", () => new GovernedSqlException(GovernedSqlErrorCodes.PolicyDenied, TargetSqlDialect.Sqlite), 403, "SQL_POLICY_DENIED", null },
-        { "governed-provider-error", () => new GovernedSqlException(GovernedSqlErrorCodes.ProviderError, TargetSqlDialect.Sqlite), 502, "SQL_PROVIDER_ERROR", null },
+        { "governed-policy-denied", () => new GovernedSqlException(GovernedSqlErrorCodes.PolicyDenied, TargetSqlDialect.PostgreSql), 403, "SQL_POLICY_DENIED", null },
+        { "governed-provider-error", () => new GovernedSqlException(GovernedSqlErrorCodes.ProviderError, TargetSqlDialect.PostgreSql), 502, "SQL_PROVIDER_ERROR", null },
         { "governed-statement-rejected", () => new GovernedSqlException(GovernedSqlErrorCodes.StatementRejected, TargetSqlDialect.SqlServer), 400, "SQL_STATEMENT_REJECTED", null },
         { "governed-source-unavailable", () => new GovernedSqlException(GovernedSqlErrorCodes.SourceUnavailable, TargetSqlDialect.SqlServer), 503, "SQL_SOURCE_UNAVAILABLE", null },
         // #321 (SEC-RG-03): a set operation column-count mismatch (AST check and provider classification) is a 400, never a 502.
         { "set-operation-degree", () => new SetOperationDegreeMismatchException(), 400, "SQL_SYNTAX_ERROR", null },
-        { "governed-syntax-error", () => new GovernedSqlException(GovernedSqlErrorCodes.SyntaxError, TargetSqlDialect.Sqlite), 400, "SQL_SYNTAX_ERROR", null },
+        { "governed-syntax-error", () => new GovernedSqlException(GovernedSqlErrorCodes.SyntaxError, TargetSqlDialect.PostgreSql), 400, "SQL_SYNTAX_ERROR", null },
         { "timezone-unavailable", () => new SqlTimeZoneException(GovernedSqlErrorCodes.TimeZoneUnavailable), 503, "SQL_TIMEZONE_UNAVAILABLE", null },
         { "timezone-wrapped", () => new InvalidOperationException(HostileMarker, new SqlTimeZoneException(GovernedSqlErrorCodes.TimeZoneInvalid)), 400, "SQL_TIMEZONE_INVALID", null },
         { "timezone-unknown-code", () => new SqlTimeZoneException("SQL_SOMETHING_ELSE"), 500, "SQL_COMPILER_INVARIANT", null },
@@ -114,7 +115,7 @@ public sealed class SqlCompilerErrorMapperTests
     public void SetOperationColumnCountProviderError_Maps400_NoProviderText()
     {
         var provider = new SqliteLikeProviderException(HostileMarker + " SELECTs to the left and right of UNION do not have the same number of result columns");
-        var mapped = DmlErrorSanitizer.Map(TargetSqlDialect.Sqlite, provider);
+        var mapped = DmlErrorSanitizer.Map(TargetSqlDialect.PostgreSql, provider);
 
         SqlCompilerErrorMapper.TryMap(mapped, out var mapping).ShouldBeTrue();
 

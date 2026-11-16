@@ -30,7 +30,7 @@ public sealed class SqlaTreeSecurityTests
             SourceName = "analytics",
             SchemaName = "main",
             TableName = "audit_logs",
-            SourceType = "Sqlite",
+            SourceType = "PostgreSql",
             RequiredFilterColumns = [.. (requiredFilterColumns ?? [])]
         },
         PrimaryKeyColumns = ["id"],
@@ -46,7 +46,7 @@ public sealed class SqlaTreeSecurityTests
     {
         var access = new Dictionary<TableIdentifier, TreeTableAccess> { [Logs] = new(LogsMeta(required), decision) };
         var root = new TreeQueryNode(Logs, ["id", "action"]) { Where = where, Limit = 10 };
-        return TreeSqlCompiler.Compile(root, access, DatabaseDialect.Sqlite);
+        return TreeSqlCompiler.Compile(root, access, DatabaseDialect.PostgreSql);
     }
 
     private static TableAccessDecision Decision() =>
@@ -61,7 +61,7 @@ public sealed class SqlaTreeSecurityTests
     {
         var namer = new PolicyParameterNamer("__gql_rls_");
         var parameter = namer.Add(new PolicyValue("EU", SqlParameterType.String));
-        var policy = new PolicyPredicateRowPolicy(PolicyPredicate.Create(build(parameter), namer.Values), TargetSqlDialect.Sqlite, new PolicyPredicateRenderer());
+        var policy = new PolicyPredicateRowPolicy(PolicyPredicate.Create(build(parameter), namer.Values), TargetSqlDialect.PostgreSql, new PolicyPredicateRenderer());
         return Decision().WithAdditionalRowPolicy(policy);
     }
 
@@ -109,7 +109,9 @@ public sealed class SqlaTreeSecurityTests
 
     [Fact]
     public void GraphQLTree_IsNullTrue_Satisfies() =>
-        Compile(Decision(), new TreeComparison("tenant_id", TreeFilterOperator.IsNull, true), ["tenant_id"]).Sql.ShouldNotBeEmpty();
+        // Historical method FQN retained for security inventory; IS NULL (true) does NOT satisfy required filters.
+        Should.Throw<RequiredFilterColumnMissingException>(() =>
+            Compile(Decision(), new TreeComparison("tenant_id", TreeFilterOperator.IsNull, true), ["tenant_id"]));
 
     [Fact]
     public void GraphQLTree_EqNull_DoesNotSatisfy() =>

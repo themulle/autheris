@@ -16,10 +16,12 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Data.Sqlite;
+using Npgsql;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Hosting;
 using Autheris.Tests.Integration.Governance;
 
 /// <summary>
@@ -29,52 +31,65 @@ using Autheris.Tests.Integration.Governance;
 /// Index verlinkt tote URLs, $ref ins Leere, dokumentierter Endpunkt liefert 404.
 /// Swagger UI wird lokal ausgeliefert (/ui/swagger/assets/*) und ist damit auch ohne Internet/Proxy nutzbar.
 /// </summary>
-public sealed class OpenApiDocsEndToEndTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
+public sealed class OpenApiDocsEndToEndTests : IClassFixture<OpenApiDocsEndToEndTests.HostFixture>
 {
-    private readonly string _workDir;
     private readonly WebApplicationFactory<Program> _factory;
 
-    public OpenApiDocsEndToEndTests(WebApplicationFactory<Program> factory)
+    public OpenApiDocsEndToEndTests(HostFixture factory)
     {
-        _workDir = Path.Combine(Path.GetTempPath(), "autheris-openapi-e2e-" + Guid.NewGuid().ToString("N"));
-        var queriesDir = Path.Combine(_workDir, "queries");
-        Directory.CreateDirectory(queriesDir);
-        var dbPath = Path.Combine(_workDir, "data.db");
-        using (var conn = new SqliteConnection($"Data Source={dbPath}"))
-        {
-            conn.Open();
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = @"CREATE TABLE e2e_cranes (id INTEGER PRIMARY KEY, serial_number TEXT NOT NULL, crane_type TEXT NOT NULL);
-INSERT INTO e2e_cranes VALUES (1,'LTM-1100','Mobilkran'),(2,'LR-1600','Raupenkran');";
-            cmd.ExecuteNonQuery();
-        }
-        File.WriteAllText(Path.Combine(queriesDir, "cranes_by_type.sql"),
-            "-- @name cranes_by_type\n-- @datasource default\n-- @summary Krane nach Typ\n-- @method GET\n\n" +
-            "SELECT serial_number, crane_type FROM e2e_cranes WHERE crane_type = @crane_type ORDER BY serial_number");
-
-        _factory = factory.WithWebHostBuilder(b =>
-        {
-            b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "2000");
-            b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
-            b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("OpenApiDocsEndToEndTests"));
-            b.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
-            b.UseSetting("Gateway:DataSources:Connections:default:Provider", "Sqlite");
-            b.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", $"Data Source={dbPath}");
-            b.UseSetting("Gateway:WebSql:Enabled", "true");
-            b.UseSetting("Gateway:WebSql:DefaultDataSourceName", "default");
-            b.UseSetting("Gateway:SqlEndpoints:Enabled", "true");
-            b.UseSetting("Gateway:SqlEndpoints:Directory", queriesDir);
-            b.UseSetting("Gateway:SqlEndpoints:EnableHotReload", "false");
-            b.UseSetting("Gateway:SqlEndpoints:AutoSyncFromDbt", "false");
-        });
+        _factory = factory;
     }
 
-    public void Dispose()
+    public sealed class HostFixture : IntegrationHost<HostFixture>
     {
-        _factory.Dispose();
-        SqliteConnection.ClearAllPools();
-        try { Directory.Delete(_workDir, true); } catch { /* best effort */ }
+        private readonly string _workDir;
+        private readonly string _queriesDir;
+        private readonly string _dbPath;
+
+        public HostFixture()
+        {
+            _workDir = Path.Combine(Path.GetTempPath(), "autheris-openapi-e2e-" + Guid.NewGuid().ToString("N"));
+            _queriesDir = Path.Combine(_workDir, "queries");
+            Directory.CreateDirectory(_queriesDir);
+            _dbPath = PostgresDataSource.Create("openapie2e", """
+                CREATE TABLE e2e_cranes (id INTEGER PRIMARY KEY, serial_number TEXT NOT NULL, crane_type TEXT NOT NULL);
+                INSERT INTO e2e_cranes VALUES (1,'LTM-1100','Mobilkran'),(2,'LR-1600','Raupenkran');
+                """, "public");
+
+            File.WriteAllText(Path.Combine(_queriesDir, "cranes_by_type.sql"),
+                "-- @name cranes_by_type\n-- @datasource default\n-- @summary Krane nach Typ\n-- @method GET\n\n" +
+                "SELECT serial_number, crane_type FROM e2e_cranes WHERE crane_type = @crane_type ORDER BY serial_number");
+        }
+
+        protected override void ConfigureHostConfiguration(IConfigurationBuilder config)
+        {
+            config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                // A tenant-less principal is rejected (TENANT_UNRESOLVED) by the executable endpoint; the test principal belongs to the default tenant.
+                ["Gateway:Tenancy:DefaultTenantId"] = Autheris.Tests.Common.TestTenants.Default.Value,
+                ["Gateway:Authentication:EnableTestAuthHandler"] = "true",
+                ["Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit"] = "2000",
+                ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
+                ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.Create("OpenApiDocsEndToEndTests"),
+                ["Gateway:Insecure:danger_bypass_consent_checks"] = "true",
+                ["Gateway:DataSources:Connections:default:Provider"] = "PostgreSql",
+                ["Gateway:DataSources:Connections:default:DefaultSchema"] = "public",
+                ["Gateway:DataSources:Connections:default:ConnectionString"] = _dbPath,
+                ["Gateway:WebSql:Enabled"] = "true",
+                ["Gateway:WebSql:DefaultDataSourceName"] = "default",
+                ["Gateway:SqlEndpoints:Enabled"] = "true",
+                ["Gateway:SqlEndpoints:Directory"] = _queriesDir,
+                ["Gateway:SqlEndpoints:EnableHotReload"] = "false",
+                ["Gateway:SqlEndpoints:AutoSyncFromDbt"] = "false",
+            });
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            base.Dispose(disposing);
+            NpgsqlConnection.ClearAllPools();
+            try { Directory.Delete(_workDir, true); } catch { /* best effort */ }
+        }
     }
 
     private HttpClient Admin()
@@ -91,8 +106,8 @@ INSERT INTO e2e_cranes VALUES (1,'LTM-1100','Mobilkran'),(2,'LR-1600','Raupenkra
         var repo = scope.ServiceProvider.GetRequiredService<ITableMetadataRepository>();
         await repo.UpsertTableMetadataAsync(new TableMetadata
         {
-            Table = new Table { Id = Guid.NewGuid(), DisplayName = "e2e_cranes", TableName = "e2e_cranes", SchemaName = "main", SourceType = "Sqlite", SourceName = "default" },
-            Identifier = new TableIdentifier("default", "main", "e2e_cranes"),
+            Table = new Table { Id = Guid.NewGuid(), DisplayName = "e2e_cranes", TableName = "e2e_cranes", SchemaName = "public", SourceType = "PostgreSql", SourceName = "default" },
+            Identifier = new TableIdentifier("default", "public", "e2e_cranes"),
             Columns = new List<TableColumn>
             {
                 new() { ColumnName = "id", DataType = "integer" },
@@ -238,7 +253,7 @@ INSERT INTO e2e_cranes VALUES (1,'LTM-1100','Mobilkran'),(2,'LR-1600','Raupenkra
         ((int)call.StatusCode).ShouldBeLessThan(500);
 
         // Entity-Schema separat abrufbar
-        var schema = await client.GetAsync("/odata/v4/$openapi/schemas/default/main/e2e_cranes");
+        var schema = await client.GetAsync("/odata/v4/$openapi/schemas/default/public/e2e_cranes");
         schema.StatusCode.ShouldBe(HttpStatusCode.OK);
     }
 

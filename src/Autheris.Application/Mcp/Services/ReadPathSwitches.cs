@@ -25,15 +25,17 @@ public sealed class ReadPathSwitches : IReadPathSwitches
     private readonly bool _api;
     private readonly bool _access;
     private readonly bool _procedures;
+    private readonly bool _asyncJobs;
     private readonly FrozenSet<string> _disabledTools;
     private readonly ConcurrentDictionary<string, byte> _dropped = new(StringComparer.OrdinalIgnoreCase);
 
-    private ReadPathSwitches(bool restData, bool bulkStream, bool queryAnalysis, bool procedures, McpToolGroupOptions tools, IEnumerable<string> disabled)
+    private ReadPathSwitches(bool restData, bool bulkStream, bool queryAnalysis, bool procedures, bool asyncJobs, McpToolGroupOptions tools, IEnumerable<string> disabled)
     {
         RestDataEndpointEnabled = restData;
         BulkStreamEnabled = bulkStream;
         QueryAnalysisEnabled = queryAnalysis;
         _procedures = procedures;
+        _asyncJobs = asyncJobs;
         _catalog = tools.Catalog;
         _query = tools.Query;
         _api = tools.Api;
@@ -53,11 +55,13 @@ public sealed class ReadPathSwitches : IReadPathSwitches
         bool? bulkOption = options.BulkStream?.Enabled ?? options.RestApi?.BulkStream?.Enabled;
         bool bulkStream = bulkOption ?? restData;
         bool queryAnalysis = options.Governance?.QueryAnalysis?.Enabled ?? true;
+        bool asyncJobs = options.AsyncJobs?.Enabled ?? true;
         return new ReadPathSwitches(
             restData,
             bulkStream,
             queryAnalysis,
             options.SqlEndpoints?.Procedures?.Enabled == true,
+            asyncJobs,
             mcp.Tools ?? new McpToolGroupOptions(),
             disabled);
     }
@@ -66,6 +70,7 @@ public sealed class ReadPathSwitches : IReadPathSwitches
     public bool BulkStreamEnabled { get; }
     public bool QueryAnalysisEnabled { get; }
     public bool ProceduresEnabled => _procedures;
+    public bool AsyncJobsEnabled => _asyncJobs;
 
     /// <summary>Number of remembered dropped names (test and diagnostics aid).</summary>
     public int DroppedCount => _dropped.Count;
@@ -84,8 +89,20 @@ public sealed class ReadPathSwitches : IReadPathSwitches
         if (toolName is null) return false;
         var name = toolName.Trim();
         if (!ProceduresEnabled && string.Equals(name, McpDatasetTools.CallProcedure, StringComparison.Ordinal)) return false;
+        if (!AsyncJobsEnabled && IsAsyncJobToolName(name)) return false;
         return !_disabledTools.Contains(name) && IsGroupEnabled(McpToolGroups.Of(name));
     }
+
+    private static bool IsAsyncJobToolName(string name) =>
+        string.Equals(name, "submit_async_query", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(name, "async_query", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(name, "query_async", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(name, "get_async_job", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(name, "get_async_job_status", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(name, "get_async_job_result", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(name, "cancel_async_job", StringComparison.OrdinalIgnoreCase) ||
+        name.Contains("async_job", StringComparison.OrdinalIgnoreCase) ||
+        name.Contains("async_query", StringComparison.OrdinalIgnoreCase);
 
     public string? DisabledReason(string toolName)
     {

@@ -10,8 +10,8 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.GraphQL.Catalog;
+using Autheris.Tests.Common.Fakes;
 using Autheris.Tests.Unit.Sql.Tree;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
@@ -21,51 +21,33 @@ using BinaryOperator = TrinoSqlEngine.Ast.Nodes.BinaryOperator;
 namespace Autheris.Tests.Unit.GraphQL;
 
 /// <summary>
-/// G2/G3/G5 (docs/plans/rls-subquery-in-strategy.md): the service resolves access once per table and request, runs the
-/// whole tree in ONE database round trip, pseudonymizes HMAC columns in the gateway and writes one audit entry per table.
+/// G2/G3/G5 (docs/plans/rls-subquery-in-strategy.md): unit tests of <see cref="GovernedTreeQueryService"/> covering access
+/// resolution memoization, fail-closed checks, pseudonymization, response limits and audit recording using an in-memory DB stub.
+/// Real multi-table/composite-join SQL execution tests live in <c>GovernedTreeQueryServiceIntegrationTests</c>.
 /// </summary>
-public sealed class GovernedTreeQueryServiceTests : IDisposable
+public sealed class GovernedTreeQueryServiceTests
 {
     private static readonly TableIdentifier Authors = new("blog", "main", "authors");
     private static readonly TableIdentifier Articles = new("blog", "main", "articles");
     private static readonly TableIdentifier Elsewhere = new("crm", "main", "contacts");
 
-    private readonly string _connectionString = $"Data Source=file:tree{Guid.NewGuid():N}?mode=memory&cache=shared";
-    private readonly SqliteConnection _keepAlive;
+    private const string StubConnectionString = "Host=stub;Database=test;";
 
-    public GovernedTreeQueryServiceTests()
-    {
-        _keepAlive = new SqliteConnection(_connectionString);
-        _keepAlive.Open();
-        using var cmd = _keepAlive.CreateCommand();
-        cmd.CommandText = """
-            CREATE TABLE authors (id INTEGER PRIMARY KEY, name TEXT, email TEXT);
-            CREATE TABLE articles (id INTEGER PRIMARY KEY, author_id INTEGER, title TEXT);
-            INSERT INTO authors VALUES (1, 'Ann', 'ann@example.com'), (2, 'Bob', 'bob@example.com');
-            INSERT INTO articles VALUES (10, 1, 'A1'), (11, 1, 'A2'), (20, 2, 'B1');
-            """;
-        cmd.ExecuteNonQuery();
-    }
-
-    public void Dispose() => _keepAlive.Dispose();
-
-    private sealed class CountingFactory(string connectionString) : ISqlConnectionFactory
+    private sealed class CountingFactory(string? stubReaderJson = null) : ISqlConnectionFactory
     {
         public int Opened { get; private set; }
 
-        public async Task<DbConnection> CreateOpenConnectionAsync(DataSourceConnectionOptions options, CancellationToken ct = default)
+        public Task<DbConnection> CreateOpenConnectionAsync(DataSourceConnectionOptions options, CancellationToken ct = default)
         {
             Opened++;
-            var connection = new SqliteConnection(connectionString);
-            await connection.OpenAsync(ct);
-            return connection;
+            return Task.FromResult<DbConnection>(new StubJsonDbConnection(stubReaderJson ?? "[]"));
         }
     }
 
     private static TableMetadata Meta(TableIdentifier id, string sourceName, params (string Name, string Type)[] columns) => new()
     {
         Identifier = id,
-        Table = new Table { SourceName = sourceName, SchemaName = id.Schema, TableName = id.TableName, SourceType = "Sqlite" },
+        Table = new Table { SourceName = sourceName, SchemaName = id.Schema, TableName = id.TableName, SourceType = "PostgreSql" },
         PrimaryKeyColumns = ["id"],
         Columns = columns.Select(c => new TableColumn { ColumnName = c.Name, DataType = c.Type }).ToList()
     };
@@ -99,7 +81,9 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
         ITableReadConcurrencyGate? gate = null,
         IColumnMaskingProvider? masking = null,
         Microsoft.Extensions.Logging.ILogger<GovernedTreeQueryService>? logger = null,
-        bool unbackedBlogSource = false)
+        bool unbackedBlogSource = false,
+        string provider = "PostgreSql",
+        string? stubReaderJson = null)
     {
         var access = new Dictionary<TableIdentifier, ResolvedTableAccess>
         {
@@ -124,8 +108,8 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
                 MaxConcurrentReadsPerUserAndTable = options.DataSources.MaxConcurrentReadsPerUserAndTable,
                 Connections = new Dictionary<string, DataSourceConnectionOptions>(StringComparer.OrdinalIgnoreCase)
                 {
-                    ["blog"] = new() { Provider = "Sqlite", ConnectionString = _connectionString },
-                    ["crm"] = new() { Provider = "Sqlite", ConnectionString = _connectionString }
+                    ["blog"] = new() { Provider = provider, ConnectionString = StubConnectionString },
+                    ["crm"] = new() { Provider = provider, ConnectionString = StubConnectionString }
                 }
             }
         };
@@ -136,7 +120,7 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
         }
 
         var audit = Substitute.For<IAuditLogRepository>();
-        var factory = new CountingFactory(_connectionString);
+        var factory = new CountingFactory(stubReaderJson);
         var service = new GovernedTreeQueryService(
             resolver, factory, audit, masking ?? Substitute.For<IColumnMaskingProvider>(), Options.Create(effectiveOptions), gate, logger: logger);
         return new Fixture { Service = service, Resolver = resolver, Audit = audit, Factory = factory };
@@ -147,20 +131,6 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
         Relations = [new TreeRelationNode("articles", ["id"], ["author_id"], true, new TreeQueryNode(Articles, ["title"]) { OrderBy = [new TreeOrder("id")] })],
         OrderBy = [new TreeOrder("id")]
     };
-
-    [Fact]
-    public async Task NestedQuery_RunsInOneRoundTrip_AndReturnsJson()
-    {
-        var fixture = Create();
-
-        using var result = await fixture.ExecuteAsync(DefaultTenantCaller.Principal(), AuthorsWithArticles(), null);
-
-        fixture.Factory.Opened.ShouldBe(1);
-        var root = result.RootElement;
-        root.GetArrayLength().ShouldBe(2);
-        root[0].GetProperty("articles").EnumerateArray().Select(a => a.GetProperty("title").GetString()).ShouldBe(new[] { "A1", "A2" }, ignoreOrder: false);
-        root[1].GetProperty("articles").GetArrayLength().ShouldBe(1);
-    }
 
     [Fact]
     public async Task AccessIsResolvedOncePerTable_EvenWhenTheTableAppearsTwice()
@@ -272,7 +242,7 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
         RelationExecutabilityTests.TreeOutcome outcome)
     {
         _ = name;
-        var authors = MetaOf(Authors, parentSource, "Sqlite", DataSourceType.Sql, null, AuthorColumns);
+        var authors = MetaOf(Authors, parentSource, "PostgreSql", DataSourceType.Sql, null, AuthorColumns);
         var articles = MetaOf(Articles, childSource, childSourceType, childDsType, null, ArticleColumns);
 
         // Runtime: the tree service rejects exactly the cases the shared predicate rejects, with the unchanged errors.
@@ -280,7 +250,7 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
         {
             a[Authors] = Allowed(authors);
             a[Articles] = Allowed(articles);
-        });
+        }, provider: "PostgreSql", stubReaderJson: "[{\"id\":1,\"name\":\"Alice\",\"articles\":[]}]");
         var run = () => fixture.ExecuteAsync(DefaultTenantCaller.Principal(), AuthorsWithArticles(), null);
         switch (outcome)
         {
@@ -331,40 +301,6 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
         model.Tables.Single(t => t.Identifier == Authors).Relations.Any().ShouldBe(executable);
     }
 
-    [Fact]
-    public async Task Tree_MixedCaseSourceNames_ExecuteAsOneStatement_WithGovernancePerTable()
-    {
-        var titleMask = new Dictionary<string, MaskingRule> { ["title"] = new MaskingRule { RuleType = "REDACT" } };
-        var fixture = Create(a =>
-        {
-            a[Authors] = Allowed(MetaOf(Authors, "blog", "Sqlite", DataSourceType.Sql, null, AuthorColumns));
-            var articles = MetaOf(Articles, "BLOG", "Sqlite", DataSourceType.Sql, titleMask, ArticleColumns);
-            a[Articles] = Allowed(articles) with
-            {
-                Decision = TypedTreeRowPolicy.Allowed(
-                    Articles,
-                    new Dictionary<string, ColumnAccessLevel> { ["title"] = ColumnAccessLevel.Mask },
-                    TypedTreeRowPolicy.Int("author_id", BinaryOperator.Equal, 1))
-            };
-        });
-
-        using var result = await fixture.ExecuteAsync(DefaultTenantCaller.Principal(), AuthorsWithArticles(), null);
-
-        fixture.Factory.Opened.ShouldBe(1);
-        await fixture.Resolver.Received(1).ResolveTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), Authors, Arg.Any<IReadOnlyList<string>?>(),
-            Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<CancellationToken>());
-        await fixture.Resolver.Received(1).ResolveTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), Articles, Arg.Any<IReadOnlyList<string>?>(),
-            Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<CancellationToken>());
-        await fixture.Audit.Received(2).RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>());
-        var root = result.RootElement;
-        root.GetArrayLength().ShouldBe(2);
-        var firstArticles = root[0].GetProperty("articles").EnumerateArray().Select(x => x.GetProperty("title").GetString()).ToList();
-        firstArticles.Count.ShouldBe(2); // row filter keeps the articles of author 1
-        firstArticles.ShouldNotContain("A1"); // mask of the child table applies
-        firstArticles.ShouldNotContain("A2");
-        root[1].GetProperty("articles").GetArrayLength().ShouldBe(0); // row filter removes the articles of author 2
-    }
-
     private static readonly TableIdentifier CrmArticles = new("crm", "main", "articles");
 
     private static TreeQueryNode AuthorsWithCrmArticles() => new(Authors, ["id"])
@@ -378,7 +314,7 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
     {
         var fixture = Create(a =>
         {
-            var child = MetaOf(CrmArticles, "blog", "Sqlite", DataSourceType.Sql, null, ArticleColumns);
+            var child = MetaOf(CrmArticles, "blog", "PostgreSql", DataSourceType.Sql, null, ArticleColumns);
             a[CrmArticles] = Allowed(child) with { Decision = TableAccessDecision.Denied(CrmArticles, "no consent") };
         });
 
@@ -386,33 +322,6 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
 
         ex.Message.ShouldBe("Access denied.");
         fixture.Factory.Opened.ShouldBe(0);
-    }
-
-    [Fact]
-    public async Task Tree_CrossDomainSameSource_AppliesRowFilterAndMaskOfTheChild()
-    {
-        var titleMask = new Dictionary<string, MaskingRule> { ["title"] = new MaskingRule { RuleType = "REDACT" } };
-        var fixture = Create(a =>
-        {
-            var child = MetaOf(CrmArticles, "blog", "Sqlite", DataSourceType.Sql, titleMask, ArticleColumns);
-            a[CrmArticles] = Allowed(child) with
-            {
-                Decision = TypedTreeRowPolicy.Allowed(
-                    CrmArticles,
-                    new Dictionary<string, ColumnAccessLevel> { ["title"] = ColumnAccessLevel.Mask },
-                    TypedTreeRowPolicy.Int("author_id", BinaryOperator.Equal, 1))
-            };
-        });
-
-        using var result = await fixture.ExecuteAsync(DefaultTenantCaller.Principal(), AuthorsWithCrmArticles(), null);
-
-        fixture.Factory.Opened.ShouldBe(1);
-        var root = result.RootElement;
-        var titles = root[0].GetProperty("articles").EnumerateArray().Select(x => x.GetProperty("title").GetString()).ToList();
-        titles.Count.ShouldBe(2);
-        titles.ShouldNotContain("A1");
-        titles.ShouldNotContain("A2");
-        root[1].GetProperty("articles").GetArrayLength().ShouldBe(0);
     }
 
     [Fact]
@@ -472,7 +381,7 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
                     ColumnMaskingRules = new Dictionary<string, MaskingRule> { ["email"] = new MaskingRule { RuleType = "HMAC_SHA256" } }
                 }
             };
-        }, masking: masking);
+        }, masking: masking, stubReaderJson: """[{"id":10,"author":{"email":"ann@example.com"}}]""");
         var tree = new TreeQueryNode(Articles, ["id"])
         {
             Relations = [new TreeRelationNode("author", ["author_id"], ["id"], false, new TreeQueryNode(Authors, ["email"]))],
@@ -489,7 +398,9 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
     [Fact]
     public async Task ResponseAboveByteLimit_IsRejected()
     {
-        var fixture = Create(options: new GatewayOptions { GraphQL = new GraphQLOptions { MaxResponseBytes = 16 } });
+        var fixture = Create(
+            options: new GatewayOptions { GraphQL = new GraphQLOptions { MaxResponseBytes = 16 } },
+            stubReaderJson: """[{"id":1,"name":"Ann","articles":[{"title":"A1"}]}]""");
 
         var ex = await Should.ThrowAsync<GatewaySecurityException>(() => fixture.ExecuteAsync(DefaultTenantCaller.Principal(), AuthorsWithArticles(), null));
 
@@ -699,26 +610,12 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
     private static readonly (string, string)[] OrderColumns = [("id", "integer"), ("k1", "integer"), ("k2", "integer"), ("k3", "integer"), ("name", "text")];
     private static readonly (string, string)[] LineColumns = [("id", "integer"), ("p1", "integer"), ("p2", "integer"), ("p3", "integer"), ("label", "text")];
 
-    private void SeedComposite()
-    {
-        using var cmd = _keepAlive.CreateCommand();
-        cmd.CommandText = """
-            CREATE TABLE orders (id INTEGER PRIMARY KEY, k1 INTEGER, k2 INTEGER, k3 INTEGER, name TEXT);
-            CREATE TABLE lines (id INTEGER PRIMARY KEY, p1 INTEGER, p2 INTEGER, p3 INTEGER, label TEXT);
-            INSERT INTO orders VALUES (1, 1, 1, 1, 'o1'), (2, 1, 1, 2, 'o2'), (3, 1, 2, 1, 'o3');
-            INSERT INTO lines VALUES (10, 1, 1, 1, 'L10'), (11, 1, 1, 2, 'L11'), (12, 1, 2, 1, 'L12'), (13, 1, 2, 2, 'L13'), (14, 9, 9, 9, 'L14');
-            """;
-        cmd.ExecuteNonQuery();
-    }
-
     private Fixture CreateComposite(
         Dictionary<string, ColumnAccessLevel>? orderAccess = null,
         Dictionary<string, ColumnAccessLevel>? lineAccess = null,
         IRowPolicy? orderFilter = null,
-        IRowPolicy? lineFilter = null)
-    {
-        SeedComposite();
-        return Create(a =>
+        IRowPolicy? lineFilter = null) =>
+        Create(a =>
         {
             var orders = Meta(Orders, "blog", OrderColumns);
             var lines = Meta(Lines, "blog", LineColumns);
@@ -729,7 +626,6 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
                 TypedTreeRowPolicy.Allowed(Lines, lineAccess ?? new Dictionary<string, ColumnAccessLevel>(), lineFilter),
                 new TenantId("t1"), new Sid("S-1-5-21-DAVID"), DefaultTenantCaller.Principal());
         });
-    }
 
     private static TreeQueryNode OrdersWithLines(int keys) => new(Orders, ["id", "name"])
     {
@@ -737,64 +633,6 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
             new TreeQueryNode(Lines, ["label"]) { OrderBy = [new TreeOrder("id")] })],
         OrderBy = [new TreeOrder("id")]
     };
-
-    private static TreeQueryNode LinesWithOrder() => new(Lines, ["id"])
-    {
-        Relations = [new TreeRelationNode("order", ["p1", "p2", "p3"], ["k1", "k2", "k3"], false, new TreeQueryNode(Orders, ["name"]))],
-        OrderBy = [new TreeOrder("id")]
-    };
-
-    private static List<string?> Labels(JsonElement row) =>
-        row.GetProperty("lines").EnumerateArray().Select(x => x.GetProperty("label").GetString()).ToList();
-
-    [Fact]
-    public async Task CompositeRelation_JoinsOnAllColumns_BothDirections()
-    {
-        var fixture = CreateComposite();
-
-        using var down = await fixture.ExecuteAsync(DefaultTenantCaller.Principal(), OrdersWithLines(3), null);
-        Labels(down.RootElement[0]).ShouldBe(["L10"]);
-        Labels(down.RootElement[1]).ShouldBe(["L11"]);
-        Labels(down.RootElement[2]).ShouldBe(["L12"]);
-
-        using var up = await fixture.ExecuteAsync(DefaultTenantCaller.Principal(), LinesWithOrder(), null);
-        up.RootElement[0].GetProperty("order").GetProperty("name").GetString().ShouldBe("o1");
-        up.RootElement[1].GetProperty("order").GetProperty("name").GetString().ShouldBe("o2");
-        up.RootElement[2].GetProperty("order").GetProperty("name").GetString().ShouldBe("o3");
-        up.RootElement[3].GetProperty("order").ValueKind.ShouldBe(JsonValueKind.Null); // (1,2,2) has no parent
-        up.RootElement[4].GetProperty("order").ValueKind.ShouldBe(JsonValueKind.Null);
-    }
-
-    [Fact]
-    [Trait("Category", "Security")]
-    public async Task CompositeRelation_FirstKeyMatchOnly_ReturnsNoChildRows()
-    {
-        // SEC-REL151-01 / T-REL151-01: lines matching the parent on key 1 only must never be returned.
-        var fixture = CreateComposite();
-        using (var cmd = _keepAlive.CreateCommand())
-        {
-            cmd.CommandText = "INSERT INTO orders VALUES (4, 5, 5, 5, 'o4'); INSERT INTO lines VALUES (15, 5, 6, 6, 'L15'), (16, 5, 5, 6, 'L16');";
-            cmd.ExecuteNonQuery();
-        }
-
-        using var result = await fixture.ExecuteAsync(DefaultTenantCaller.Principal(), OrdersWithLines(3), null);
-
-        Labels(result.RootElement[3]).ShouldBeEmpty();
-    }
-
-    [Fact]
-    public async Task CompositeRelation_RowFilterAppliedPerLevel()
-    {
-        var fixture = CreateComposite(
-            orderFilter: TypedTreeRowPolicy.Text("name", BinaryOperator.NotEqual, "o3"),
-            lineFilter: TypedTreeRowPolicy.Text("label", BinaryOperator.NotEqual, "L10"));
-
-        using var result = await fixture.ExecuteAsync(DefaultTenantCaller.Principal(), OrdersWithLines(3), null);
-
-        result.RootElement.GetArrayLength().ShouldBe(2); // parent filter removed o3
-        Labels(result.RootElement[0]).ShouldBeEmpty(); // child filter removed L10
-        Labels(result.RootElement[1]).ShouldBe(["L11"]);
-    }
 
     [Theory]
     [Trait("Category", "Security")]

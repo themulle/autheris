@@ -1,12 +1,122 @@
 using Autheris.Domain.Audit;
+using Autheris.Domain.Security;
 
 namespace Autheris.Application.Common.Interfaces;
 
-public interface ITableMetadataRepository
+public interface ITableMetadataRepository : Autheris.Application.Catalog.ICatalogVersionFlusher
 {
     Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default);
     Task<IReadOnlyList<TableMetadata>> GetAllTablesAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns identifiers of tables whose persisted <c>POLICY_EPOCHS.change_version</c> is strictly greater than <paramref name="sinceVersion"/>.
+    /// </summary>
+    Task<IReadOnlyList<TableIdentifier>> GetTablesChangedSinceAsync(long sinceVersion, CancellationToken ct = default)
+        => throw new NotSupportedException($"{GetType().Name} does not implement delta table queries.");
+
+    /// <summary>
+    /// Unfiltered raw internal batch read for active table metadata matching <paramref name="identifiers"/>.
+    /// Intended strictly for internal Application and Infrastructure services; callers MUST NOT map results directly to
+    /// endpoint DTOs and MUST enforce tenant, visibility, masking, and consent filtering before returning data.
+    /// Unknown and hidden identifiers are omitted identically without raising existence errors. Internal callers may pass
+    /// arbitrarily sized batches (chunked by DB parameter budget); external request-derived lists must call
+    /// <see cref="GetTablesForRequestAsync"/> so the 500-item cap applies.
+    /// </summary>
+    async Task<IReadOnlyList<TableMetadata>> GetTablesAsync(IReadOnlyCollection<TableIdentifier> identifiers, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(identifiers);
+        if (identifiers.Count == 0)
+        {
+            return Array.Empty<TableMetadata>();
+        }
+
+        var wanted = identifiers as IReadOnlySet<TableIdentifier> ?? new HashSet<TableIdentifier>(identifiers);
+        var all = await GetAllTablesAsync(ct).ConfigureAwait(false);
+        return all.Where(t => wanted.Contains(t.Identifier)).ToList();
+    }
+
+    /// <summary>
+    /// Request-capped wrapper over <see cref="GetTablesAsync"/> for identifier lists derived from external request input
+    /// (enforces <see cref="Autheris.Application.Catalog.CatalogTableQuery.MaxRequestIdentifiers"/> = 500).
+    /// Unfiltered raw internal read; callers MUST apply tenant, visibility, masking, and consent filtering before returning DTOs.
+    /// </summary>
+    Task<IReadOnlyList<TableMetadata>> GetTablesForRequestAsync(IReadOnlyCollection<TableIdentifier> identifiers, CancellationToken ct = default)
+    {
+        Autheris.Application.Catalog.CatalogTableQuery.ValidateRequestIdentifiers(identifiers);
+        return GetTablesAsync(identifiers, ct);
+    }
+
+    /// <summary>
+    /// Unfiltered raw internal keyset-paged catalog table query for Application and Infrastructure services only.
+    /// Never map returned <see cref="TableMetadata"/> directly to endpoint DTOs; callers MUST apply tenant, visibility,
+    /// masking, and consent filtering before determining page boundaries, counts, or visible continuation cursors.
+    /// The repository has no tenant concept and clamps <see cref="Autheris.Application.Catalog.CatalogTableQuery.Limit"/> to 1..500.
+    /// </summary>
+    async Task<Autheris.Application.Catalog.CatalogTablePage> QueryTablesAsync(
+        Autheris.Application.Catalog.CatalogTableQuery query,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        query.EnsureValid(out var domain, out var schema, out var namePrefix, out var after);
+        var limit = query.EffectiveLimit;
+
+        var all = await GetAllTablesAsync(ct).ConfigureAwait(false);
+        var matched = all
+            .Where(t => query.IncludeInactive || t.Table.IsActive)
+            .Where(t => domain is null || string.Equals(t.Identifier.Domain, domain, StringComparison.OrdinalIgnoreCase))
+            .Where(t => schema is null || string.Equals(t.Identifier.Schema, schema, StringComparison.OrdinalIgnoreCase))
+            .Where(t => namePrefix is null || t.Identifier.TableName.StartsWith(namePrefix, StringComparison.OrdinalIgnoreCase))
+            .Where(t => after is null || Autheris.Application.Catalog.CatalogTableCursor.Compare(t.Identifier, after.Value) > 0)
+            .OrderBy(t => t.Identifier.Domain, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(t => t.Identifier.Schema, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(t => t.Identifier.TableName, StringComparer.OrdinalIgnoreCase)
+            .Take(limit + 1)
+            .ToList();
+
+        var hasMore = matched.Count > limit;
+        var items = hasMore ? matched.Take(limit).ToList() : matched;
+        var nextAfter = hasMore ? Autheris.Application.Catalog.CatalogTableCursor.Encode(items[^1].Identifier) : null;
+        return new Autheris.Application.Catalog.CatalogTablePage(items, nextAfter);
+    }
+
     Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default);
+
+    /// <summary>
+    /// Like <see cref="UpsertTableMetadataAsync"/>, and also reports whether the write created, changed or left the stored table
+    /// unchanged and how the change is classified for the version-bump decision. An implementation that cannot tell reports an update classified
+    /// <see cref="Autheris.Application.Catalog.CatalogWriteClassification.Restrictive"/> (fail closed).
+    /// </summary>
+    async Task<Autheris.Application.Catalog.CatalogTableUpsertResult> UpsertTableMetadataWithResultAsync(TableMetadata metadata, CancellationToken ct = default)
+    {
+        var stored = await UpsertTableMetadataAsync(metadata, ct).ConfigureAwait(false);
+        return new Autheris.Application.Catalog.CatalogTableUpsertResult(
+            stored,
+            Autheris.Application.Catalog.CatalogUpsertKind.Updated,
+            Autheris.Application.Catalog.CatalogWriteClassification.Restrictive);
+    }
+
+    /// <summary>
+    /// Validates and upserts a batch of table metadata entries using parameter-budget chunking, deterministic lock ordering,
+    /// per-chunk transactions, persisted-state change classification, and transient conflict retries.
+    /// </summary>
+    async Task<IReadOnlyList<Autheris.Application.Catalog.CatalogTableUpsertResult>> UpsertTableMetadataBatchAsync(
+        IReadOnlyList<TableMetadata> batch,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(batch);
+        if (batch.Count == 0)
+        {
+            return Array.Empty<Autheris.Application.Catalog.CatalogTableUpsertResult>();
+        }
+
+        var results = new Autheris.Application.Catalog.CatalogTableUpsertResult[batch.Count];
+        for (var i = 0; i < batch.Count; i++)
+        {
+            results[i] = await UpsertTableMetadataWithResultAsync(batch[i], ct).ConfigureAwait(false);
+        }
+
+        return results;
+    }
     Task<Autheris.Application.Catalog.CatalogVersion> GetCatalogVersionAsync(CancellationToken ct = default)
         => Task.FromResult(new Autheris.Application.Catalog.CatalogVersion(1, 1));
 
@@ -51,6 +161,23 @@ public interface ITableMetadataRepository
     Task<DatasetCatalogChange?> SetDatasetPrivacyAsync(
         TableIdentifier table, int? minGroupSize, bool? nonPersonal, Sid actor, CancellationToken ct = default)
         => throw new NotSupportedException($"{GetType().Name} does not implement dataset catalog settings.");
+
+    /// <summary>Sets discovery visibility flags and hidden columns in one transaction with the before read.</summary>
+    Task<DatasetCatalogChange?> SetDatasetDiscoveryAsync(
+        TableIdentifier table, bool? discoveryHidden, bool? samplesDisabled, IReadOnlyList<string>? hiddenColumns, Sid actor, CancellationToken ct = default)
+        => throw new NotSupportedException($"{GetType().Name} does not implement dataset catalog settings.");
+
+    /// <summary>Gets discovery artifacts for a table.</summary>
+    Task<DiscoveryArtifacts?> GetDiscoveryArtifactsAsync(Guid tableId, CancellationToken ct = default)
+        => throw new NotSupportedException($"{GetType().Name} does not implement discovery artifacts.");
+
+    /// <summary>Upserts discovery artifacts for a table.</summary>
+    Task<bool> UpsertDiscoveryArtifactsAsync(DiscoveryArtifacts artifacts, Sid actor, CancellationToken ct = default)
+        => throw new NotSupportedException($"{GetType().Name} does not implement discovery artifacts.");
+
+    /// <summary>Deletes discovery artifacts for a table.</summary>
+    Task<bool> DeleteDiscoveryArtifactsAsync(Guid tableId, Sid actor, CancellationToken ct = default)
+        => throw new NotSupportedException($"{GetType().Name} does not implement discovery artifacts.");
 
     /// <summary>
     /// Issue #94 (SD-5): replaces ONLY the declared primary key and indexes of a table. In one transaction the stored columns are read,
@@ -106,18 +233,12 @@ public interface IConsentRepository
     Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? roles, DateTimeOffset? atTime, TenantId? tenantId, CancellationToken ct = default);
     Task<Consent> CreateConsentAsync(Consent consent, CancellationToken ct = default);
     Task<Consent?> GetConsentByIdAsync(Guid consentId, CancellationToken ct = default);
-    Task RevokeConsentAsync(Guid consentId, Sid revokedBySid, string reason, CancellationToken ct = default);
+    Task RevokeConsentAsync(Guid consentId, Sid revokedBySid, string reason, ConsentRevocationAuthority authority, CancellationToken ct = default);
     /// <summary>
     /// Active (not revoked, not yet expired) consents that expire at or before <paramref name="threshold"/>, soonest first, capped at
     /// <paramref name="maxResults"/> (PERS-04: already expired consents are never returned, on every provider).
     /// </summary>
     Task<IReadOnlyList<Consent>> GetExpiringConsentsAsync(DateTimeOffset threshold, int maxResults = 1000, CancellationToken ct = default);
-    /// <summary>
-    /// PERS-04: extends only an active consent to a strictly later expiry. Throws <see cref="Autheris.Domain.Exceptions.ConsentNotExtendableException"/>
-    /// when the row does not exist, is revoked, is expired at server time, or <paramref name="newValidTo"/> is not later than the stored
-    /// <c>valid_to</c>; nothing is written (no epoch bump, no audit) in that case.
-    /// </summary>
-    Task ExtendConsentExpiryAsync(Guid consentId, DateTimeOffset newValidTo, CancellationToken ct = default);
 
     /// <summary>
     /// SEC E-05 / EX-02: All non-revoked, not yet expired consents carrying <paramref name="consentRequestId"/>
@@ -177,8 +298,40 @@ public interface IConsentRepository
         IReadOnlyList<Consent> create,
         Sid actor,
         string reason,
+        ConsentRevocationAuthority authority,
         IReadOnlyList<AuditLogEntry>? auditEntries = null,
         CancellationToken ct = default);
+
+    Task ReplaceConsentsAsync(
+        IReadOnlyList<Guid> revokeConsentIds,
+        IReadOnlyList<Consent> create,
+        Sid actor,
+        string reason,
+        ConsentRevocationAuthority authority,
+        IReadOnlyList<AuditLogEntry>? auditEntries,
+        IReadOnlySet<Guid>? prunedConsentIds,
+        string? pruneReason = null,
+        CancellationToken ct = default) =>
+        ReplaceConsentsAsync(revokeConsentIds, create, actor, reason, authority, auditEntries, ct);
+
+    /// <summary>
+    /// Returns the tables in <paramref name="tenantId"/> on which <paramref name="userSid"/> held a non-revoked
+    /// Allow consent whose validity window expired on or after <paramref name="since"/>. Used by discovery to mark
+    /// <c>Expired</c> vs <c>None</c>; never grants access.
+    /// </summary>
+    Task<IReadOnlySet<TableIdentifier>> GetRecentlyExpiredTableIdsAsync(
+        Sid userSid, TenantId tenantId, DateTimeOffset since, CancellationToken ct = default)
+        => Task.FromResult<IReadOnlySet<TableIdentifier>>(new HashSet<TableIdentifier>());
+
+    /// <summary>Returns all active non-revoked pattern grants in <paramref name="tenantId"/> at <paramref name="atTime"/>.</summary>
+    Task<IReadOnlyList<Consent>> GetActivePatternConsentsAsync(
+        TenantId tenantId, DateTimeOffset atTime, CancellationToken ct = default)
+        => Task.FromResult<IReadOnlyList<Consent>>([]);
+
+    /// <summary>Returns all active non-revoked Internal-workflow Allow pattern grants across tenants at <paramref name="atTime"/>.</summary>
+    Task<IReadOnlyList<Consent>> GetActiveInternalPatternConsentsAsync(
+        DateTimeOffset atTime, CancellationToken ct = default)
+        => Task.FromResult<IReadOnlyList<Consent>>([]);
 }
 
 
@@ -255,26 +408,10 @@ public interface IConsentApprovalRepository
         => Task.FromResult<IReadOnlyList<ConsentRequest>>(Array.Empty<ConsentRequest>());
     Task<IReadOnlyList<ConsentRequest>> GetPendingRequestsForApproverAsync(Sid approverSid, CancellationToken ct = default);
     Task<ConsentRequest> ApproveConsentRequestStepAsync(Guid requestId, Sid approverSid, CancellationToken ct = default);
-    Task<ConsentRequest> ApproveConsentRequestStepAsync(Guid requestId, Sid approverSid, bool isExternalItsmApproval, CancellationToken ct = default)
-        => ApproveConsentRequestStepAsync(requestId, approverSid, ct);
-
-    /// <summary>
-    /// Review R3-1: ITSM approval with the approver (account or e-mail) reported by the ITSM system, passed typed.
-    /// Implementations must check it against owners/delegates; the default keeps the previous behaviour.
-    /// </summary>
-    Task<ConsentRequest> ApproveConsentRequestStepAsync(Guid requestId, Sid approverSid, bool isExternalItsmApproval, string? itsmApproverAccount, CancellationToken ct = default)
-        => ApproveConsentRequestStepAsync(requestId, approverSid, isExternalItsmApproval, ct);
     Task<ConsentRequest> RejectConsentRequestAsync(Guid requestId, Sid approverSid, string reason, CancellationToken ct = default);
 
     /// <summary>
-    /// Review G5: rejection with an explicit flag for callers that act on behalf of the verified external ITSM system
-    /// (signed webhook). Authorization never infers this from the SID prefix. The default ignores the flag.
-    /// </summary>
-    Task<ConsentRequest> RejectConsentRequestAsync(Guid requestId, Sid approverSid, string reason, bool isExternalItsm, CancellationToken ct = default)
-        => RejectConsentRequestAsync(requestId, approverSid, reason, ct);
-
-    /// <summary>
-    /// Review G5: activation for the insecure getting-started auto-approve path (request still pending).
+    /// Activation for the insecure getting-started auto-approve path (request still pending).
     /// Regular activation (<see cref="ActivateConsentAsync(Guid, Sid?, CancellationToken)"/>) only accepts 'APPROVED'.
     /// </summary>
     Task ActivateConsentForAutoApproveAsync(Guid requestId, CancellationToken ct = default)
@@ -292,23 +429,48 @@ public interface IConsentApprovalRepository
         Guid rowFilterId, TenantId tenant, RowFilterEvaluationSettings settings, CancellationToken ct = default)
         => throw new NotSupportedException($"{GetType().Name} does not implement row filter evaluation updates.");
 
-    Task<ConsentRequest?> GetConsentRequestByTicketIdAsync(string ticketId, CancellationToken ct = default);
     Task ActivateConsentAsync(Guid requestId, CancellationToken ct = default);
     Task DeleteConsentRequestAsync(Guid requestId, CancellationToken ct = default);
-    Task UpdateConsentRequestTicketIdAsync(Guid requestId, string ticketId, CancellationToken ct = default);
 
     /// <summary>
-    /// SEC H-06: Tenant-bound ticket lookup (<c>WHERE itsm_ticket_id = @t AND tenant_id = @tenant</c>).
-    /// SR-M-24: there is no safe default (filtering the unscoped LIMIT 1 lookup lets one tenant's ticket shadow another's),
-    /// so every provider must override it with a scoped query; the default fails closed.
+    /// Tenant-bound external reference lookup (<c>WHERE external_system_id = @sysId AND external_reference = @ref AND tenant_id = @tenant</c>).
+    /// Fails closed when not overridden.
     /// </summary>
-    Task<ConsentRequest?> GetConsentRequestByTicketIdAsync(string ticketId, TenantId tenantId, CancellationToken ct = default)
+    Task<ConsentRequest?> GetConsentRequestByExternalReferenceAsync(
+        Guid externalSystemId,
+        string externalReference,
+        TenantId tenantId,
+        CancellationToken ct = default)
         => throw new NotSupportedException(
-            $"{GetType().Name} does not implement the tenant-scoped ticket lookup; refusing to fall back to an unscoped lookup.");
+            $"{GetType().Name} does not implement tenant-scoped external reference lookup.");
+
+    Task<ConsentRequest> ApproveExternalConsentRequestStepAsync(
+        Guid requestId,
+        ExternalDecisionAttribution attribution,
+        Sid effectiveApproverSid,
+        CancellationToken ct = default)
+        => throw new NotSupportedException($"{GetType().Name} does not implement external approval steps.");
+
+    Task<Consent> ExecuteExternalAtomicApprovalWithConsentAsync(
+        Guid requestId,
+        ExternalDecisionAttribution attribution,
+        ApprovalStep step,
+        Consent consent,
+        IReadOnlyList<ConsentRowFilter> rowFilters,
+        IReadOnlyList<ConsentColumnRule> columnRules,
+        CancellationToken ct = default)
+        => throw new NotSupportedException($"{GetType().Name} does not implement external atomic approval.");
+
+    Task<ConsentRequest> RejectExternalConsentRequestAsync(
+        Guid requestId,
+        ExternalDecisionAttribution attribution,
+        Sid effectiveApproverSid,
+        string reason,
+        CancellationToken ct = default)
+        => throw new NotSupportedException($"{GetType().Name} does not implement external rejection.");
 
     /// <summary>
-    /// SEC H-06: Activates a pending consent request and records <paramref name="approvedBy"/> as audit actor
-    /// (e.g. the ITSM instance/approver instead of the requester). Activation only happens from a pending status.
+    /// Activates a pending consent request and records <paramref name="approvedBy"/> as audit actor.
     /// </summary>
     Task ActivateConsentAsync(Guid requestId, Sid? approvedBy, CancellationToken ct = default)
         => ActivateConsentAsync(requestId, ct);
@@ -338,14 +500,96 @@ public interface IConsentApprovalRepository
         IReadOnlyList<ConsentColumnRule> columnRules,
         CancellationToken ct = default)
         => throw new NotSupportedException($"{GetType().Name} does not implement atomic approval.");
+
+    Task<ConsentRequestPage> QueryTenantConsentRequestsAsync(
+        ConsentRequestPageQuery query,
+        CancellationToken ct = default)
+        => Task.FromResult(new ConsentRequestPage(Array.Empty<ConsentRequest>(), null));
 }
+
+public sealed record ConsentRequestPageQuery(
+    TenantId TenantId,
+    string? Status = null,
+    Guid? ExternalSystemId = null,
+    DateTimeOffset? UpdatedSince = null,
+    string? Cursor = null,
+    int Limit = 50,
+    string? Domain = null,
+    string? Schema = null,
+    string? TableName = null,
+    string? RequesterSid = null);
+
+public sealed record ConsentRequestPage(
+    IReadOnlyList<ConsentRequest> Items,
+    string? NextCursor);
 
 public interface IDataOwnershipRepository
 {
     Task<DataOwnerDelegation> DelegateDataOwnershipAsync(DataOwnerDelegation delegation, CancellationToken ct = default);
     Task<IReadOnlyList<DataOwner>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default);
     Task<bool> IsAuthorizedApproverForTableAsync(TableIdentifier table, Sid approverSid, CancellationToken ct = default);
-    Task<IReadOnlySet<string>> GetTransitiveRolesAsync(Sid subjectSid, CancellationToken ct = default);
+
+    /// <summary>Batch-loads active data owners keyed by table identifier.</summary>
+    async Task<IReadOnlyDictionary<TableIdentifier, IReadOnlyList<DataOwner>>> GetDataOwnersForTablesAsync(
+        IReadOnlyCollection<TableIdentifier> tables, CancellationToken ct = default)
+    {
+        var result = new Dictionary<TableIdentifier, IReadOnlyList<DataOwner>>();
+        foreach (var table in tables)
+        {
+            var owners = await GetDataOwnersForTableAsync(table, ct).ConfigureAwait(false);
+            result[table] = owners.Where(static o => o.IsActive).ToList();
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Returns the subset of <paramref name="tables"/> on which <paramref name="actorSid"/> is an active owner
+    /// or active delegate at <paramref name="atTime"/>.
+    /// </summary>
+    async Task<IReadOnlySet<TableIdentifier>> GetOwnedOrDelegatedTablesAsync(
+        Sid actorSid, IReadOnlyCollection<TableIdentifier> tables, DateTimeOffset atTime, CancellationToken ct = default)
+    {
+        var owned = new HashSet<TableIdentifier>();
+        foreach (var table in tables)
+        {
+            if (await IsAuthorizedApproverForTableAsync(table, actorSid, ct).ConfigureAwait(false))
+            {
+                owned.Add(table);
+            }
+        }
+        return owned;
+    }
+
+    /// <summary>Returns active direct owner and active delegate SIDs for <paramref name="table"/> at <paramref name="atTime"/>.</summary>
+    async Task<IReadOnlySet<string>> GetAuthorizedApproverSidsForTableAsync(
+        TableIdentifier table, DateTimeOffset atTime, CancellationToken ct = default)
+    {
+        var owners = await GetDataOwnersForTableAsync(table, ct).ConfigureAwait(false);
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var owner in owners)
+        {
+            if (owner.IsActive && !string.IsNullOrWhiteSpace(owner.AdSid.Value))
+            {
+                set.Add(owner.AdSid.Value);
+            }
+        }
+        return set;
+    }
+
+    /// <summary>Returns true if any SID in <paramref name="ownerSids"/> is currently an active owner or active delegate for <paramref name="table"/>.</summary>
+    async Task<bool> IsAnyApproverAuthorizedForTableAsync(
+        TableIdentifier table, IReadOnlyCollection<string> ownerSids, DateTimeOffset atTime, CancellationToken ct = default)
+    {
+        foreach (var sid in ownerSids)
+        {
+            if (!string.IsNullOrWhiteSpace(sid) &&
+                await IsAuthorizedApproverForTableAsync(table, new Sid(sid), ct).ConfigureAwait(false))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
 }
 
 public interface ITableRelationRepository
@@ -402,7 +646,7 @@ public interface IConsentDescriptionRepository
     Task LoadDescriptionsAsync(IReadOnlyCollection<Consent> consents, CancellationToken ct = default);
 
     /// <summary>
-    /// Same contract as <see cref="IConsentRepository.ReplaceConsentsAsync(IReadOnlyList{Guid}, IReadOnlyList{Consent}, Sid, string, IReadOnlyList{AuditLogEntry}?, CancellationToken)"/>
+    /// Same contract as <see cref="IConsentRepository.ReplaceConsentsAsync(IReadOnlyList{Guid}, IReadOnlyList{Consent}, Sid, string, ConsentRevocationAuthority, IReadOnlyList{AuditLogEntry}?, CancellationToken)"/>
     /// plus in-place description updates of non-revoked consents in the SAME transaction. A description update changes no other column and bumps no epoch;
     /// a revoked, expired, unknown or foreign-tenant target changes nothing (no error, no resurrection). The attribute-validating decorator implements this
     /// interface too, so the create list is validated on this path as well.
@@ -412,7 +656,63 @@ public interface IConsentDescriptionRepository
         IReadOnlyList<Consent> create,
         Sid actor,
         string reason,
+        ConsentRevocationAuthority authority,
         IReadOnlyList<AuditLogEntry>? auditEntries,
         IReadOnlyList<ConsentDescriptionUpdate>? descriptionUpdates,
         CancellationToken ct);
+
+    Task ReplaceConsentsAsync(
+        IReadOnlyList<Guid> revokeConsentIds,
+        IReadOnlyList<Consent> create,
+        Sid actor,
+        string reason,
+        ConsentRevocationAuthority authority,
+        IReadOnlyList<AuditLogEntry>? auditEntries,
+        IReadOnlyList<ConsentDescriptionUpdate>? descriptionUpdates,
+        IReadOnlySet<Guid>? prunedConsentIds,
+        string? pruneReason = null,
+        CancellationToken ct = default) =>
+        ReplaceConsentsAsync(revokeConsentIds, create, actor, reason, authority, auditEntries, descriptionUpdates, ct);
+}
+
+/// <summary>
+/// Batch upsert helpers on <see cref="ITableMetadataRepository"/>.
+/// </summary>
+public static class TableMetadataRepositoryExtensions
+{
+    /// <summary>
+    /// Calls <see cref="ITableMetadataRepository.UpsertTableMetadataBatchAsync"/> and falls back to per-item
+    /// <see cref="ITableMetadataRepository.UpsertTableMetadataAsync"/> only when an unconfigured mock returns fewer
+    /// results than the batch count.
+    /// </summary>
+    public static async Task<IReadOnlyList<Autheris.Application.Catalog.CatalogTableUpsertResult>> UpsertBatchWithFallbackAsync(
+        this ITableMetadataRepository repository,
+        IReadOnlyList<TableMetadata> batch,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(repository);
+        ArgumentNullException.ThrowIfNull(batch);
+        if (batch.Count == 0)
+        {
+            return Array.Empty<Autheris.Application.Catalog.CatalogTableUpsertResult>();
+        }
+
+        var results = await repository.UpsertTableMetadataBatchAsync(batch, ct).ConfigureAwait(false);
+        if (results is { Count: var count } && count == batch.Count)
+        {
+            return results;
+        }
+
+        var fallback = new Autheris.Application.Catalog.CatalogTableUpsertResult[batch.Count];
+        for (var i = 0; i < batch.Count; i++)
+        {
+            var stored = await repository.UpsertTableMetadataAsync(batch[i], ct).ConfigureAwait(false);
+            fallback[i] = new Autheris.Application.Catalog.CatalogTableUpsertResult(
+                stored,
+                Autheris.Application.Catalog.CatalogUpsertKind.Updated,
+                Autheris.Application.Catalog.CatalogWriteClassification.Restrictive);
+        }
+
+        return fallback;
+    }
 }

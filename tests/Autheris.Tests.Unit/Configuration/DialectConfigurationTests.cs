@@ -2,8 +2,10 @@ namespace Autheris.Tests.Unit.Configuration;
 
 using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 using Autheris.Api.Extensions.DependencyInjection;
 using Autheris.Domain.Options;
+using Microsoft.Extensions.Hosting;
 using Shouldly;
 using Xunit;
 
@@ -30,6 +32,8 @@ public sealed class DialectConfigurationTests
     [InlineData("Ansi")]
     [InlineData("DuckDb")]
     [InlineData("Snowflake")]
+    [InlineData("Sqlite")]
+    [InlineData("sqlite3")]
     [InlineData("nonsense")]
     public void Unsupported_dialect_fails_validation(string provider)
     {
@@ -39,6 +43,8 @@ public sealed class DialectConfigurationTests
         ex.Provider.ShouldBe(provider);
         ex.Message.ShouldContain("test_source");
         ex.Message.ShouldContain(provider);
+        ex.Message.ShouldNotContain("Host=localhost");
+        ex.Message.ShouldNotContain("ConnectionString");
     }
 
     [Theory]
@@ -46,10 +52,31 @@ public sealed class DialectConfigurationTests
     [InlineData("Databricks")]
     [InlineData("PostgreSql")]
     [InlineData("SqlServer")]
-    [InlineData("Sqlite")]
     public void Oracle_and_Databricks_are_accepted(string provider)
     {
         var options = CreateOptions(provider);
         Should.NotThrow(() => DataSourceDialectValidator.Validate(options));
+    }
+
+    [Fact]
+    public void Null_connection_entry_fails_startup()
+    {
+        var options = new GatewayOptions
+        {
+            DataSources = new SqlDataSourceOptions
+            {
+                Connections = new Dictionary<string, DataSourceConnectionOptions>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["broken_source"] = null!
+                }
+            }
+        };
+
+        var dialectEx = Should.Throw<ValidationException>(() => DataSourceDialectValidator.Validate(options));
+        dialectEx.Message.ShouldContain("broken_source");
+
+        var secretsEx = Should.Throw<ValidationException>(() =>
+            GatewayStartupValidator.ValidateDataSourceSecrets(options, new Security.FakeHostEnvironment(Environments.Production)));
+        secretsEx.Message.ShouldContain("broken_source");
     }
 }

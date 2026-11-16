@@ -6,6 +6,7 @@ using Shouldly;
 using Xunit;
 
 /// <summary>Security review 2026-10-06 (recheck 4): R4-7 (empty roles, duplicate YAML keys).</summary>
+[Trait("Category", "Security")]
 public sealed class SecurityReviewRecheck4Block1Tests
 {
     [Theory]

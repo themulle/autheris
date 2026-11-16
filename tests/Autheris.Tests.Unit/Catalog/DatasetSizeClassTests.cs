@@ -16,6 +16,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Security;
 using Autheris.Tests.Unit.Governance;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -203,7 +204,7 @@ public sealed class DatasetSizeClassTests
                 ValidTo = DateTimeOffset.UtcNow.AddDays(1),
                 ColumnRules = [new ConsentColumnRule { ColumnName = "id", AccessLevel = ColumnAccessLevel.Clear }]
             }
-        ], new Sid("admin"), "test");
+        ], new Sid("admin"), "test", ConsentRevocationAuthority.FromPrincipal(user));
 
         var options = new GatewayOptions();
         var visibility = Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(

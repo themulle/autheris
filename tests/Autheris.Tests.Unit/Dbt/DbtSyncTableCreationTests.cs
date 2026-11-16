@@ -128,7 +128,7 @@ public sealed class DbtSyncTableCreationTests
             relationRepository: null,
             virtualFilterAdmin: null,
             tagImport: tags,
-            syntheticRowGenerator: null,
+            artifactStore: null,
             logger: NullLogger<DbtMetadataIngestionService>.Instance);
 
     private static Task<DbtSyncResult> Sync(DbtMetadataIngestionService service, string manifest, bool dryRun = false)

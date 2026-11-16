@@ -24,7 +24,6 @@ using Autheris.Application.Policy;
 using Autheris.Application.Security;
 using Autheris.Application.State;
 using Autheris.Application.Streaming.Interfaces;
-using Autheris.Application.Governance.Workflows;
 using Autheris.Application.Webhooks;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -45,6 +44,7 @@ using Shouldly;
 using Xunit;
 
 /// <summary>Security review G5: subscriptions, MCP, SSRF/outbound HTTP, webhooks, ITSM, Iceberg guard, audit anchors.</summary>
+[Trait("Category", "Security")]
 public sealed class SecurityReviewG5Tests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "g5-" + Guid.NewGuid().ToString("N"));
@@ -359,8 +359,8 @@ public sealed class SecurityReviewG5Tests : IDisposable
         return svc;
     }
 
-    private static ClaimsPrincipal Analyst() => new(new ClaimsIdentity(
-        [DefaultTenantCaller.Claim, new Claim(ClaimTypes.Name, "analyst@corp.com"), new Claim(ClaimTypes.PrimarySid, "analyst@corp.com")], "Bearer"));
+    private static ClaimsPrincipal Analyst() => Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(new ClaimsPrincipal(new ClaimsIdentity(
+        [DefaultTenantCaller.Claim, new Claim(ClaimTypes.Name, "analyst@corp.com"), new Claim(ClaimTypes.PrimarySid, "analyst@corp.com")], "Bearer")));
 
     [Fact]
     public async Task Iceberg_InactiveTable_IsNotServed()

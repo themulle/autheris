@@ -7,8 +7,6 @@ using Autheris.Application.DataSources.Connectors;
 using Autheris.Application.DataSources.Connectors.CrossDomain;
 using Autheris.Application.Events.Interfaces;
 using Autheris.Application.Events.Services;
-using Autheris.Application.FinOps.Interfaces;
-using Autheris.Application.FinOps.Services;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Olap;
 using Autheris.Application.Observability.IncrementalDelivery;
@@ -84,6 +82,7 @@ public static class GatewayExecutionServiceExtensions
             sp.GetRequiredService<IMandatoryRowFilterResolver>(),
             typedPolicies: sp.GetService<Autheris.Application.Policy.TypedPolicySources>(),
             auditWriter: sp.GetRequiredService<Autheris.Application.Audit.IAuditWriter>(),
+            usageRecorder: sp.GetService<Autheris.Application.Usage.IUsageRecorder>(),
             transportGate: sp.GetService<Autheris.Application.DataSources.IDataSourceTransportGate>()));
         services.AddScoped<IGatewayExecutionService>(sp => sp.GetRequiredService<GatewayExecutionService>());
         services.AddScoped<ITableAccessResolver>(sp => sp.GetRequiredService<GatewayExecutionService>());
@@ -93,6 +92,11 @@ public static class GatewayExecutionServiceExtensions
             sp.GetService<TrinoSqlEngine.ISqlEngine>(),
             sp.GetService<Microsoft.Extensions.Logging.ILogger<TreeSecuredSourceBuilder>>()));
         services.AddScoped<IGovernedTreeQueryService, GovernedTreeQueryService>();
+        services.AddScoped<Autheris.Application.Policy.WriteGrants.IWriteGrantEvaluator>(sp =>
+            new Autheris.Application.Policy.WriteGrants.WriteGrantEvaluator(
+                sp.GetRequiredService<IConsentRepository>(),
+                sp.GetService<Autheris.Application.Policy.WriteGrants.IRowPolicyDependencyIndex>(),
+                sp.GetService<TimeProvider>()));
         services.AddScoped<Autheris.Application.Policy.Pdp.IAccessDecisionPoint, Autheris.Application.Policy.Pdp.AccessDecisionPoint>();
         services.AddScoped<IUnifiedPolicyDecisionPoint, UnifiedPolicyDecisionPoint>();
 
@@ -147,9 +151,6 @@ public static class GatewayExecutionServiceExtensions
             services.AddHostedService<Autheris.Application.Streaming.Services.CdcWebhookDeliveryService>();
             services.AddHostedService<Autheris.Api.Hosting.CdcWebhookStartupCheck>();
         }
-
-        // FOCUS FinOps Accounting (F-AI-08)
-        services.AddSingleton<IFinOpsAccountingService, FocusCostAccountingService>();
 
         // Incremental Delivery (@defer & @stream) (F-PERF-12)
         services.AddSingleton<IIncrementalDeliveryFormatter, IncrementalDeliveryFormatter>();

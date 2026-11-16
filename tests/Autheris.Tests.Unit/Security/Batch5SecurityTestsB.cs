@@ -359,7 +359,6 @@ public sealed class Batch5SecurityTestsB : IDisposable
             metadataRepo,
             epochService,
             options,
-            Substitute.For<IPhysicalKeyCatalog>(),
             Substitute.For<IAuditWriter>(),
             NullLogger<DataCatalogSyncService>.Instance);
 
@@ -444,7 +443,6 @@ public sealed class Batch5SecurityTestsB : IDisposable
             auditLog: Substitute.For<IAuditLogRepository>(),
             ownerAssignments: null,
             ownerIdentityVerifier: null,
-            physicalKeys: null,
             auditWriter: auditWriter,
             ownershipRepo: ownershipRepo);
 

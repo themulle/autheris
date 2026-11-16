@@ -105,6 +105,18 @@ public sealed record TenantBindingSpecification(
     }
 }
 
+public enum ScimStaleSyncBehavior
+{
+    Degrade = 1,
+    DropScimGroups = 2
+}
+
+public sealed record RealmScimSettings(
+    bool AllowUpnCorrelation = false,
+    bool RequireCorrelation = true,
+    int MaxSyncAgeMinutes = 180,
+    ScimStaleSyncBehavior StaleSyncBehavior = ScimStaleSyncBehavior.Degrade);
+
 public sealed record IdentityRealm(
     string Id,
     IdentityRealmKind Kind,
@@ -122,6 +134,8 @@ public sealed record IdentityRealm(
     bool Delegable = false
 )
 {
+    public RealmScimSettings ScimSettings { get; init; } = new RealmScimSettings();
+
     public string RealmId => Id;
 
     public IdentityRealm(

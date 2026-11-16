@@ -27,7 +27,7 @@ public sealed class DeclarativeConsentApplyActorTests
     }
 
     private static DeclarativeConsentManifest Manifest() =>
-        new("1", [new DeclarativeConsentPolicy("default", "sales", "orders", "Group", "S-1-5-21-GROUP-DS", "Allow")]);
+        new("1", [new DeclarativeConsentPolicy("default", "sales", "orders", "Group", "S-1-5-21-GROUP-DS", "Allow", ValidUntil: DateTimeOffset.UtcNow.AddDays(30))]);
 
     [Fact]
     public async Task Declarative_Apply_Without_Caller_Sid_Is_Rejected()
@@ -40,7 +40,7 @@ public sealed class DeclarativeConsentApplyActorTests
 
         var ex = await Should.ThrowAsync<System.Security.SecurityException>(() => svc.ApplyManifestAsync(noSid, Manifest()));
 
-        ex.Message.ShouldNotContain("GOVERNANCE_ADMIN");
+        ex.Message.ShouldNotContain("GovernanceAdmin");
         repo.ReplaceCalls.ShouldBe(0);
         repo.DirectCreateCalls.ShouldBe(0);
         repo.ReplaceAuditEntries.ShouldBeEmpty();

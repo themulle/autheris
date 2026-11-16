@@ -10,8 +10,10 @@ using TrinoSqlEngine.Ast.Emit;
 
 /// <summary>
 /// MISC-03/MISC-04: the one definition of "a required filter column is satisfied" (RequiredFilterColumns / RequiredFilterColumnGroups).
-/// A column counts only through (a) the tenant column, (b) the typed row policy, (c) a whole identifier of the decision's row filter
-/// (never a substring, a string literal or a comment) or (d) a column the client filter constrains. An unanalysable row filter satisfies nothing.
+/// This check is a cost/DoS guard against unconstrained full-table scans, not an authorization boundary (row policies and tenant
+/// filters enforce access separately). A column counts through (a) the tenant column, (b) the typed row policy, (c) a whole
+/// identifier of the decision's row filter (accepted residual because row policies are operator-authored), or (d) a column strictly
+/// constrained by the client filter (<see cref="Common.Interfaces.TableFilterClause.ConstrainedColumns"/>). An unanalysable row filter satisfies nothing.
 /// </summary>
 internal static class RequiredFilterColumnRule
 {
@@ -19,10 +21,10 @@ internal static class RequiredFilterColumnRule
     public static void Enforce(
         TableMetadata metadata,
         TableAccessDecision decision,
-        IEnumerable<string>? clientFilterColumns,
+        IEnumerable<string>? clientConstrainedColumns,
         bool tenantColumnCounts)
     {
-        if (!IsSatisfied(metadata, decision, clientFilterColumns, tenantColumnCounts))
+        if (!IsSatisfied(metadata, decision, clientConstrainedColumns, tenantColumnCounts))
         {
             throw new TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException(
                 GovernedSqlErrorCodes.FixedMessage(GovernedSqlErrorCodes.RequiredFilterColumnMissing));
@@ -33,7 +35,7 @@ internal static class RequiredFilterColumnRule
     public static bool IsSatisfied(
         TableMetadata metadata,
         TableAccessDecision decision,
-        IEnumerable<string>? clientFilterColumns,
+        IEnumerable<string>? clientConstrainedColumns,
         bool tenantColumnCounts)
     {
         ArgumentNullException.ThrowIfNull(metadata);
@@ -44,7 +46,7 @@ internal static class RequiredFilterColumnRule
         }
 
         var rowFilterColumns = ReferencedIdentifiers(decision.CombinedRowFilterSql);
-        bool Column(string column) => IsColumnSatisfied(column, metadata, decision, rowFilterColumns, clientFilterColumns, tenantColumnCounts);
+        bool Column(string column) => IsColumnSatisfied(column, metadata, decision, rowFilterColumns, clientConstrainedColumns, tenantColumnCounts);
 
         if (metadata.RequiredFilterColumnGroups.Length > 0)
         {
@@ -72,16 +74,16 @@ internal static class RequiredFilterColumnRule
         string requiredColumn,
         TableMetadata metadata,
         TableAccessDecision decision,
-        IEnumerable<string>? clientFilterColumns,
+        IEnumerable<string>? clientConstrainedColumns,
         bool tenantColumnCounts) =>
-        IsColumnSatisfied(requiredColumn, metadata, decision, ReferencedIdentifiers(decision.CombinedRowFilterSql), clientFilterColumns, tenantColumnCounts);
+        IsColumnSatisfied(requiredColumn, metadata, decision, ReferencedIdentifiers(decision.CombinedRowFilterSql), clientConstrainedColumns, tenantColumnCounts);
 
     private static bool IsColumnSatisfied(
         string requiredColumn,
         TableMetadata metadata,
         TableAccessDecision decision,
         IReadOnlySet<string> rowFilterColumns,
-        IEnumerable<string>? clientFilterColumns,
+        IEnumerable<string>? clientConstrainedColumns,
         bool tenantColumnCounts)
     {
         if (tenantColumnCounts &&
@@ -102,8 +104,8 @@ internal static class RequiredFilterColumnRule
             return true;
         }
 
-        return clientFilterColumns != null &&
-               clientFilterColumns.Any(c => string.Equals(c, requiredColumn, StringComparison.OrdinalIgnoreCase));
+        return clientConstrainedColumns != null &&
+               clientConstrainedColumns.Any(c => string.Equals(c, requiredColumn, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>

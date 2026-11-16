@@ -310,10 +310,6 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
             }
         }
 
-        bool noiseApplied = false;
-        double? epsilonConsumed = null;
-        double? remainingEpsilon = null;
-
         var orderedBuckets = OrderBuckets(survivingBuckets, query.OrderBy, groupByColumns, resolvedAggregates);
         if (mergedOtherBucket != null)
         {
@@ -332,9 +328,10 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
         var totalsRow = ComputeDifferencingSafeTotals(orderedBuckets, resolvedAggregates, metadata);
 
         // the exact number of suppressed rows can be the exact size of a single group below k, so it is gated by the same
-        // option as the groups count and is never returned next to noised values. The true values stay in the audit entry below.
-        int exposedSuppressedGroups = _analyticsOptions.Privacy.ExposeSuppressedGroupsCount ? suppressedGroupsCount : 0;
-        long exposedSuppressedRows = _analyticsOptions.Privacy.ExposeSuppressedGroupsCount ? suppressedRowsCount : 0;
+        // option as the groups count. The true values stay in the audit entry below.
+        bool exposedSuppressedCounts = _analyticsOptions.Privacy.ExposeSuppressedGroupsCount;
+        int exposedSuppressedGroups = exposedSuppressedCounts ? suppressedGroupsCount : 0;
+        long exposedSuppressedRows = exposedSuppressedCounts ? suppressedRowsCount : 0;
         var resultMetadata = new AggregationMetadata(
             MinimumGroupSize: effectiveMinGroupSize,
             Strategy: effectiveStrategy,
@@ -343,9 +340,6 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
             SuppressedRowsCount: exposedSuppressedRows,
             MergedIntoOther: mergedIntoOther,
             Truncated: truncated,
-            NoiseApplied: noiseApplied,
-            EpsilonConsumed: epsilonConsumed,
-            RemainingEpsilon: remainingEpsilon,
             MinimumGroupSizeSource: effectiveMinGroup.Source);
 
         await RecordAuditAsync(tenantId, userSid, query.Table, allowed: true, new Dictionary<string, object?>
@@ -354,16 +348,17 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
             ["group_by"] = groupByColumns,
             ["aggregates"] = resolvedAggregates.Select(a => a.EffectiveAlias).ToArray(),
             ["filter"] = query.Where?.SqlPredicate,
+            ["filter_shape"] = AggregationNegationGuard.ExtractFilterShape(query.Where, metadata),
             ["minimum_group_size"] = effectiveMinGroupSize,
             ["min_group_size_source"] = effectiveMinGroup.Source.ToString().ToLowerInvariant(),
             ["strategy"] = effectiveStrategy.ToString(),
             ["suppressed"] = suppressed,
             ["suppressed_groups_count"] = suppressedGroupsCount,
             ["suppressed_rows_count"] = suppressedRowsCount,
+            ["exposed_suppressed_counts"] = exposedSuppressedCounts,
             ["merged_into_other"] = mergedIntoOther,
-            ["noise_applied"] = noiseApplied,
             ["returned_groups_count"] = visibleGroupRows.Count
-        }, ct).ConfigureAwait(false);
+        }, ct, decision.Grants).ConfigureAwait(false);
 
         return new AggregationResult(
             Table: query.Table,

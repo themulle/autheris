@@ -12,10 +12,13 @@ using System.Globalization;
 /// is sent. The command timeout comes from the data source (<c>CommandTimeoutSeconds</c>); the REST client enforces it and cancels
 /// the statement on the server.
 /// </summary>
-public sealed class DatabricksDbCommand : DbCommand
+public sealed class DatabricksDbCommand : DbCommand, Autheris.Application.Usage.ISourceExecutionStatsProvider
 {
     private readonly DatabricksDbParameterCollection _parameters = new();
     private CancellationTokenSource? _running;
+    private Autheris.Application.Usage.SourceExecutionStats? _lastExecutionStats;
+
+    Autheris.Application.Usage.SourceExecutionStats? Autheris.Application.Usage.ISourceExecutionStatsProvider.LastExecutionStats => _lastExecutionStats;
 
     [AllowNull]
     public override string CommandText { get; set; } = string.Empty;
@@ -121,7 +124,9 @@ public sealed class DatabricksDbCommand : DbCommand
         Volatile.Write(ref _running, cts);
         try
         {
-            return await connection.Client.ExecuteAsync(request, cts.Token).ConfigureAwait(false);
+            var result = await connection.Client.ExecuteAsync(request, cts.Token).ConfigureAwait(false);
+            _lastExecutionStats = new Autheris.Application.Usage.SourceExecutionStats(null, null, null, result.StatementId);
+            return result;
         }
         finally
         {

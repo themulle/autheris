@@ -38,9 +38,15 @@ public sealed partial class MaskSpecRenderer
         var generator = SqlDialectGeneratorFactory.GetGenerator(dialect);
         var source = new ParameterSource(spec.Parameters, new Dictionary<string, object?>());
 
-        CompiledSql Emit(Expression expression) => generator.Generate(new SelectStatement(null,
-            new QuerySpecification(false, [new ColumnSelectItem(expression, null)],
-                new NamedTableSource(new SqlQualifiedName("mask_probe"), null), null, null, null), null, null), source);
+        CompiledSql Emit(Expression expression)
+        {
+            var statement = new SelectStatement(null,
+                new QuerySpecification(false, [new ColumnSelectItem(expression, null)],
+                    new NamedTableSource(new SqlQualifiedName("mask_probe"), null), null, null, null), null, null);
+            return dialect == TargetSqlDialect.Ansi && generator is SqlDialectGeneratorBase baseGenerator
+                ? baseGenerator.Generate(statement, source, AnsiDialectGenerator.MaskRenderCapabilities, System.Threading.CancellationToken.None)
+                : generator.Generate(statement, source);
+        }
 
         ColumnReference Column(string name) => new(new SqlQualifiedName([new SqlIdentifier(name, IsQuoted: true)]));
 

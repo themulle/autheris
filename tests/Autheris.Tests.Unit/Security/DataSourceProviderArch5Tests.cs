@@ -14,14 +14,10 @@ using Xunit;
 /// factory, the TLS policy, WebSQL and the procedure path each had their own alias list ("pgsql" was PostgreSQL for
 /// procedures, unsupported for the factory and skipped by the TLS policy).
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class DataSourceProviderArch5Tests
 {
     [Theory]
-    [InlineData(null, DatabaseDialect.Sqlite)]
-    [InlineData("", DatabaseDialect.Sqlite)]
-    [InlineData("  ", DatabaseDialect.Sqlite)]
-    [InlineData("Sqlite", DatabaseDialect.Sqlite)]
-    [InlineData("sqlite3", DatabaseDialect.Sqlite)]
     [InlineData("SqlServer", DatabaseDialect.SqlServer)]
     [InlineData("mssql", DatabaseDialect.SqlServer)]
     [InlineData("Microsoft SQL Server", DatabaseDialect.SqlServer)]
@@ -29,6 +25,8 @@ public sealed class DataSourceProviderArch5Tests
     [InlineData("Postgres", DatabaseDialect.PostgreSql)]
     [InlineData("npgsql", DatabaseDialect.PostgreSql)]
     [InlineData("pgsql", DatabaseDialect.PostgreSql)]
+    [InlineData("Oracle", DatabaseDialect.Oracle)]
+    [InlineData("Databricks", DatabaseDialect.Databricks)]
     public void TryResolveDialect_KnownProviders(string? provider, DatabaseDialect expected)
     {
         DataSourceProvider.TryResolveDialect(provider, out var dialect).ShouldBeTrue();
@@ -36,10 +34,15 @@ public sealed class DataSourceProviderArch5Tests
     }
 
     [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("  ")]
+    [InlineData("Sqlite")]
+    [InlineData("sqlite3")]
     [InlineData("mysql")]
     [InlineData("SqlServer, Sqlite")]
     [InlineData("99")]
-    public void TryResolveDialect_UnknownProviders_AreRejected(string provider)
+    public void TryResolveDialect_UnknownProviders_AreRejected(string? provider)
     {
         DataSourceProvider.TryResolveDialect(provider, out _).ShouldBeFalse();
     }
@@ -48,7 +51,7 @@ public sealed class DataSourceProviderArch5Tests
     [InlineData("pgsql")]
     [InlineData("PostgreSql")]
     [InlineData("SqlServer")]
-    [InlineData("sqlite3")]
+    [InlineData("Oracle")]
     public void AllPaths_AgreeOnTheDialect(string provider)
     {
         DataSourceProvider.TryResolveDialect(provider, out _).ShouldBeTrue();

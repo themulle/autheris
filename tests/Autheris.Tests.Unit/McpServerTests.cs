@@ -183,9 +183,9 @@ public sealed class McpServerTests
             Substitute.For<IRequestExecutorProvider>(),
             Substitute.For<IGatewayExecutionService>(),
             NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100),
-            datasetCatalog: datasetCatalog);
+            datasetCatalog: datasetCatalog, persistedToolValidator: new Autheris.Application.Mcp.Services.PersistedToolValidator());
 
-        var tool = new McpToolDefinition("query_data_catalog", "Query data catalog", "{}", "query_data_catalog");
+        var tool = new McpToolDefinition("query_data_catalog", "Query data catalog", """{"type":"object","properties":{"tableName":{"type":"string"}}}""", "query_data_catalog");
         var session = new McpSessionContext("sess-cat", "agent-principal", "tenant-alpha", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
 
         // Act
@@ -197,6 +197,9 @@ public sealed class McpServerTests
         assets.GetArrayLength().ShouldBe(1);
         assets[0].GetProperty("tableName").GetString().ShouldBe("sales.public.orders");
         assets[0].GetProperty("classification").GetString().ShouldBe("Confidential");
+        assets[0].TryGetProperty("owner", out _).ShouldBeFalse();
+        assets[0].TryGetProperty("tags", out _).ShouldBeFalse();
+        json.ShouldNotContain("data-governance@autheris.local");
     }
 
     [Fact]
@@ -210,7 +213,7 @@ public sealed class McpServerTests
         var handler = new McpProtocolHandler(sessionStore, registry, guardrail, NullLogger<McpProtocolHandler>.Instance);
 
         // 1. Session creation
-        var session = handler.CreateSession("svc-ai-claude", "tenant-prod-1");
+        var session = handler.CreateSession("svc-ai-claude", "tenant-prod-1", userSid: null);
         session.SessionId.ShouldNotBeNullOrWhiteSpace();
         session.ServicePrincipalId.ShouldBe("svc-ai-claude");
         session.TenantId.ShouldBe("tenant-prod-1");
@@ -286,7 +289,7 @@ public sealed class McpServerTests
     public async Task AiDataGuardrailService_WhenPolicyDenies_ShouldReturnErrorAndRecordDenyAudit()
     {
         var registry = new McpToolRegistry();
-        var options = Options.Create(new GatewayOptions { Casbin = new CasbinOptions { Enabled = true }, Mcp = new McpOptions { Enabled = true } });
+        var options = Options.Create(new GatewayOptions { Mcp = new McpOptions { Enabled = true } });
         var auditRepo = Substitute.For<IAuditLogRepository>();
         var policyService = Autheris.Tests.Unit.TestSupport.PdpTestDoubles.From(r => TableAccessDecision.Denied(r.Object.Identifier, "not authorized"));
 
@@ -474,7 +477,7 @@ public sealed class McpServerTests
     public async Task McpSessionStore_RegisterAndSendSseEvent_ShouldDispatchEventToActiveStream()
     {
         var store = new McpSessionStore(NullLogger<McpSessionStore>.Instance);
-        var session = store.CreateSession("svc-ai", "tenant-1");
+        var session = store.CreateSession("svc-ai", "tenant-1", userSid: null);
 
         string? receivedEvent = null;
         string? receivedData = null;

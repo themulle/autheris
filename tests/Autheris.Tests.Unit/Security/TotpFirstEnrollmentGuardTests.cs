@@ -25,6 +25,7 @@ using Xunit;
 /// outside Development (JWT: auth_time only; Basic session cookie: iat = login time; ForwardAuth: denied); re-enrollment
 /// stays protected by the current code.
 /// </summary>
+[Trait("Category", "Security")]
 public class TotpFirstEnrollmentGuardTests
 {
     private const string Sid = "S-1-5-21-APPROVER";

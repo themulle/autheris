@@ -20,15 +20,14 @@ using Microsoft.Extensions.Logging;
 
 public partial class GovernanceRepository
 {
-    private bool IsPostgreSql => _dialect is PostgreSqlGovernanceDialect;
+    internal bool IsPostgreSql => _dialect is PostgreSqlGovernanceDialect;
 
-    private KeyDefinitionDialect KeyDialect => IsPostgreSql ? CatalogKeyDefinitionStore.PostgreSql : CatalogKeyDefinitionStore.SqlServer;
+    internal KeyDefinitionDialect KeyDialect => IsPostgreSql ? CatalogKeyDefinitionStore.PostgreSql : CatalogKeyDefinitionStore.SqlServer;
 
     private string SelectTableColumnsSql => IsPostgreSql ? CatalogSql.SelectTableColumnsSqlPg : CatalogSql.SelectTableColumnsSqlSs;
     private string SelectActiveBatchTableColumnsSql => IsPostgreSql ? CatalogSql.SelectActiveBatchTableColumnsSqlPg : CatalogSql.SelectActiveBatchTableColumnsSqlSs;
-    private string SelectTableForUpdateSql => IsPostgreSql ? CatalogSql.SelectTableForUpdateSqlPg : CatalogSql.SelectTableForUpdateSqlSs;
-    private string UpsertTableSql => IsPostgreSql ? CatalogSql.UpsertTableSqlPg : CatalogSql.UpsertTableSqlSs;
-    private string InsertColumnSql => IsPostgreSql ? CatalogSql.InsertColumnSqlPg : CatalogSql.InsertColumnSqlSs;
+    internal string UpsertTableSql => IsPostgreSql ? CatalogSql.UpsertTableSqlPg : CatalogSql.UpsertTableSqlSs;
+    internal string InsertColumnSql => IsPostgreSql ? CatalogSql.InsertColumnSqlPg : CatalogSql.InsertColumnSqlSs;
     private string RelationsForParentTableSql => IsPostgreSql ? CatalogSql.RelationsForParentTableSqlPg : CatalogSql.RelationsForParentTableSqlSs;
     private string AllRelationsSql => IsPostgreSql ? CatalogSql.AllRelationsSqlPg : CatalogSql.AllRelationsSqlSs;
     private string InsertRelationSql => IsPostgreSql ? CatalogSql.InsertRelationSqlPg : CatalogSql.InsertRelationSqlSs;
@@ -36,7 +35,7 @@ public partial class GovernanceRepository
     private string CatalogVersionSql => IsPostgreSql ? CatalogSql.CatalogVersionSqlPg : CatalogSql.CatalogVersionSqlSs;
     private string BumpCatalogVersionSql => IsPostgreSql ? CatalogSql.BumpCatalogVersionSqlPg : CatalogSql.BumpCatalogVersionSqlSs;
 
-    private static class CatalogSql
+    internal static class CatalogSql
     {
         public const string SelectTableEntitySql = @"SELECT id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json, min_group_size, non_personal, dbt_unique_id
 FROM TABLES
@@ -52,6 +51,40 @@ WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema
        min_group_size, non_personal, dbt_unique_id
 FROM TABLES
 WHERE is_active = 1";
+
+        public const string SelectTablesWherePrefix = @"SELECT id, source_type, source_name, schema_name, table_name,
+       display_name, sensitivity, requires_four_eyes, is_active,
+       data_source_type, http_endpoint_json, plugin_name,
+       description, long_description, doc_source,
+       required_filter_columns_json, texts_json,
+       min_group_size, non_personal, dbt_unique_id
+FROM TABLES
+WHERE ";
+
+        public const string SelectTablesWithUpdLockWherePrefix = @"SELECT id, source_type, source_name, schema_name, table_name,
+       display_name, sensitivity, requires_four_eyes, is_active,
+       data_source_type, http_endpoint_json, plugin_name,
+       description, long_description, doc_source,
+       required_filter_columns_json, texts_json,
+       min_group_size, non_personal, dbt_unique_id
+FROM TABLES WITH (UPDLOCK, ROWLOCK)
+WHERE ";
+
+        public const string SelectColumnsByTableIdsPrefixPg = @"SELECT c.id, c.table_id, c.column_name, c.data_type, c.is_sensitive,
+       m.id, m.rule_type, m.pattern_or_format, m.replacement, m.hmac_key_id,
+       c.description, c.long_description, c.meta_json, c.doc_source,
+       c.display_name, c.texts_json, c.""collation"", c.length_semantics
+FROM TABLE_COLUMNS c
+LEFT JOIN COLUMN_MASKING_RULES m ON c.id = m.table_column_id
+WHERE c.table_id IN (";
+
+        public const string SelectColumnsByTableIdsPrefixSs = @"SELECT c.id, c.table_id, c.column_name, c.data_type, c.is_sensitive,
+       m.id, m.rule_type, m.pattern_or_format, m.replacement, m.hmac_key_id,
+       c.description, c.long_description, c.meta_json, c.doc_source,
+       c.display_name, c.texts_json, c.[collation], c.length_semantics
+FROM TABLE_COLUMNS c
+LEFT JOIN COLUMN_MASKING_RULES m ON c.id = m.table_column_id
+WHERE c.table_id IN (";
 
         public const string SelectTableColumnsSqlPg = @"SELECT c.id, c.table_id, c.column_name, c.data_type, c.is_sensitive,
        m.id, m.rule_type, m.pattern_or_format, m.replacement, m.hmac_key_id,
@@ -90,27 +123,6 @@ LEFT JOIN COLUMN_MASKING_RULES m ON c.id = m.table_column_id
 INNER JOIN TABLES t ON c.table_id = t.id
 WHERE t.is_active = 1
 ORDER BY c.table_id, c.ordinal, c.column_name";
-
-        public const string SelectExistingColumnsSqlPg = @"SELECT c.id, c.column_name, c.data_type, c.is_sensitive, c.description, c.long_description, c.doc_source,
-                                   m.id, m.rule_type, m.pattern_or_format, m.replacement, m.hmac_key_id,
-                                   c.""collation"", c.length_semantics
-                            FROM TABLE_COLUMNS c
-                            LEFT JOIN COLUMN_MASKING_RULES m ON c.id = m.table_column_id
-                            WHERE c.table_id = @tableId";
-
-        public const string SelectExistingColumnsSqlSs = @"SELECT c.id, c.column_name, c.data_type, c.is_sensitive, c.description, c.long_description, c.doc_source,
-                                   m.id, m.rule_type, m.pattern_or_format, m.replacement, m.hmac_key_id,
-                                   c.[collation], c.length_semantics
-                            FROM TABLE_COLUMNS c
-                            LEFT JOIN COLUMN_MASKING_RULES m ON c.id = m.table_column_id
-                            WHERE c.table_id = @tableId";
-
-        public const string SelectTableForUpdateSqlPg = @"SELECT id, source_type, sensitivity, requires_four_eyes, is_active, data_source_type, description, long_description, doc_source FROM TABLES
-WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)
-FOR UPDATE";
-
-        public const string SelectTableForUpdateSqlSs = @"SELECT id, source_type, sensitivity, requires_four_eyes, is_active, data_source_type, description, long_description, doc_source FROM TABLES WITH (UPDLOCK, ROWLOCK)
-WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)";
 
         public const string UpsertTableSqlPg = @"INSERT INTO TABLES (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json, min_group_size, non_personal, dbt_unique_id)
 VALUES (@id, @sourceType, @domain, @schema, @tableName, @displayName, @sensitivity, @fourEyes, @active, @dst, @httpJson, @plugin, @desc, @longDesc, @docSource, @requiredFilterColumnsJson, @textsJson, @minGroupSize, @nonPersonal, @dbtUniqueId)
@@ -198,6 +210,22 @@ WHEN NOT MATCHED THEN INSERT (id, table_id, column_name, data_type, is_sensitive
         public const string TableEpochSql = @"SELECT epoch FROM POLICY_EPOCHS
 WHERE LOWER(domain) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)";
 
+        public const string SelectChangedTablesSinceSql = @"SELECT domain, schema_name, table_name
+FROM POLICY_EPOCHS
+WHERE change_version > @sinceVersion
+ORDER BY change_version, table_id";
+
+        public const string UpdateTableEpochChangeVersionSql = @"UPDATE POLICY_EPOCHS
+SET change_version = @changeVersion, updated_at = @now
+WHERE LOWER(domain) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)";
+
+        public const string SelectRelationTableIdentifiersSql = @"SELECT tp.source_name, tp.schema_name, tp.table_name,
+       tc.source_name, tc.schema_name, tc.table_name
+FROM TABLE_RELATIONS r
+JOIN TABLES tp ON r.parent_table_id = tp.id
+JOIN TABLES tc ON r.child_table_id = tc.id
+WHERE r.id = @id";
+
         public const string RelationsForParentTableSqlPg = @"SELECT r.id, r.parent_table_id, r.child_table_id, r.relation_name, r.cardinality,
        tp.source_name, tp.schema_name, tp.table_name,
        tc.source_name, tc.schema_name, tc.table_name,
@@ -244,6 +272,8 @@ JOIN TABLES tc ON r.child_table_id = tc.id
 LEFT JOIN TABLE_RELATION_KEYS k ON k.relation_id = r.id
 ORDER BY r.id, k.key_ordinal";
 
+        public const string SelectExistingRelationSql = "SELECT cardinality FROM TABLE_RELATIONS WHERE parent_table_id = @pId AND child_table_id = @cId AND relation_name = @relName";
+
         public const string InsertRelationSqlPg = @"INSERT INTO TABLE_RELATIONS (id, parent_table_id, child_table_id, relation_name, cardinality, allow_cross_data_source)
 VALUES (@id, @pId, @cId, @relName, @card, @allowCross)
 ON CONFLICT (parent_table_id, child_table_id, relation_name) DO UPDATE SET cardinality = EXCLUDED.cardinality
@@ -264,6 +294,29 @@ FROM DATA_OWNERS o
 JOIN TABLE_OWNERS tow ON o.id = tow.data_owner_id
 JOIN TABLES t ON tow.table_id = t.id
 WHERE LOWER(t.source_name) = LOWER(@domain) AND LOWER(t.schema_name) = LOWER(@schema) AND LOWER(t.table_name) = LOWER(@table) AND o.is_active = 1";
+
+        public const string AllActiveDataOwnersWithTableSql = @"SELECT t.source_name, t.schema_name, t.table_name, o.id, o.ad_sid, o.ad_account, o.display_name, o.email, o.is_active
+FROM DATA_OWNERS o
+JOIN TABLE_OWNERS tow ON o.id = tow.data_owner_id
+JOIN TABLES t ON tow.table_id = t.id
+WHERE t.is_active = 1 AND o.is_active = 1";
+
+        public const string OwnedOrDelegatedTablesForSidSql = @"SELECT DISTINCT t.source_name, t.schema_name, t.table_name
+FROM TABLES t
+JOIN TABLE_OWNERS tow ON t.id = tow.table_id
+JOIN DATA_OWNERS o ON tow.data_owner_id = o.id
+WHERE t.is_active = 1
+  AND o.is_active = 1
+  AND (
+      o.ad_sid = @sid
+      OR EXISTS (
+          SELECT 1 FROM DATA_OWNER_DELEGATIONS d
+          WHERE d.data_owner_id = o.id
+            AND d.delegate_sid = @sid
+            AND d.valid_from <= @now
+            AND d.valid_to > @now
+      )
+  )";
 
         public const string ResolveDataOwnerIdsSql = @"SELECT id FROM DATA_OWNERS
 WHERE LOWER(ad_sid) = LOWER(@p) OR LOWER(ad_account) = LOWER(@p) OR LOWER(email) = LOWER(@p)";

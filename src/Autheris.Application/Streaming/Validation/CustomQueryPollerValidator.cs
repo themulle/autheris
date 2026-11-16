@@ -3,9 +3,12 @@ namespace Autheris.Application.Streaming.Validation;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.RegularExpressions;
 using Antlr4.Runtime;
 using Autheris.Application.Streaming;
+using Autheris.Domain.Common;
 using Autheris.Domain.Options;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Analysis;
@@ -28,9 +31,74 @@ public sealed class CustomQueryPollerValidator
 
     private readonly ISqlEngine _sqlEngine;
 
-    public CustomQueryPollerValidator(ISqlEngine sqlEngine)
+    public CustomQueryPollerValidator() : this(FastSqlEngine.Default) { }
+
+    public CustomQueryPollerValidator(ISqlEngine? sqlEngine)
     {
-        _sqlEngine = sqlEngine ?? throw new ArgumentNullException(nameof(sqlEngine));
+        _sqlEngine = sqlEngine ?? FastSqlEngine.Default;
+    }
+
+    /// <summary>
+    /// Resolves and verifies that the configured data source provider maps to a supported relational dialect
+    /// for custom query polling. Databricks and unrecognized providers are rejected (fail closed).
+    /// </summary>
+    public static bool TryResolveSupportedDialect(string? provider, out DatabaseDialect dialect)
+    {
+        if (string.IsNullOrWhiteSpace(provider) || !DataSourceProvider.TryResolveDialect(provider, out dialect))
+        {
+            dialect = default;
+            return false;
+        }
+
+        return dialect is DatabaseDialect.PostgreSql
+            or DatabaseDialect.SqlServer
+            or DatabaseDialect.Oracle;
+    }
+
+    /// <summary>
+    /// Computes a deterministic SHA-256 signature over the query template and governed bindings
+    /// for cache invalidation across option reloads.
+    /// </summary>
+    public static string ComputeTemplateHash(CustomQueryPollerStreamOptions poller)
+    {
+        ArgumentNullException.ThrowIfNull(poller);
+
+        var sb = new StringBuilder(256);
+        sb.Append(poller.StreamName).Append('\0');
+        sb.Append(poller.Table).Append('\0');
+        sb.Append(poller.DataSource).Append('\0');
+        sb.Append(poller.OwnerTenantId).Append('\0');
+        sb.Append(poller.QueryTemplate).Append('\0');
+        if (poller.KeyColumns is not null)
+        {
+            foreach (var kc in poller.KeyColumns)
+            {
+                sb.Append(kc).Append('\u001f');
+            }
+        }
+        sb.Append('\0');
+        if (poller.Watermarks is not null)
+        {
+            foreach (var wm in poller.Watermarks)
+            {
+                sb.Append(wm.Name).Append(':')
+                  .Append((int)wm.Type).Append(':')
+                  .Append(wm.ParameterName).Append(':')
+                  .Append(wm.Column).Append(':')
+                  .Append(wm.InitialValue).Append('\u001f');
+            }
+        }
+        sb.Append('\0');
+        if (poller.SoftDelete is { } sd)
+        {
+            sb.Append(sd.Enabled ? '1' : '0').Append(':')
+              .Append((int)sd.Strategy).Append(':')
+              .Append(sd.Column).Append(':')
+              .Append(sd.DeletedValue);
+        }
+
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(sb.ToString()));
+        return Convert.ToHexString(hash);
     }
 
     public CustomQueryPollerValidationResult ValidatePollerOptions(CustomQueryPollerStreamOptions poller)
@@ -106,7 +174,7 @@ public sealed class CustomQueryPollerValidator
 
         // Multi-statement semicolon check in raw text
         var trimmedQuery = poller.QueryTemplate.Trim();
-        var semicolonIndex = trimmedQuery.IndexOf(';');
+        var semicolonIndex = trimmedQuery.IndexOf(';', StringComparison.Ordinal);
         if (semicolonIndex >= 0 && semicolonIndex < trimmedQuery.Length - 1)
         {
             var remainder = trimmedQuery[(semicolonIndex + 1)..].Trim();

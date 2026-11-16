@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Integration;
 
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
@@ -12,28 +13,38 @@ using Autheris.Domain.Audit;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Hosting;
 using Autheris.Tests.Integration.Governance;
 
 /// <summary>
 /// FR-02: routes marked AuditLevel.Delegated audit their successful path in the domain layer, but denials, failures and
 /// exceptions must still be audited by the central middleware.
 /// </summary>
-public sealed class DelegatedAuditRouteIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class DelegatedAuditRouteIntegrationTests : IClassFixture<DelegatedAuditRouteIntegrationTests.HostFixture>
 {
     private readonly WebApplicationFactory<Program> _factory;
 
-    public DelegatedAuditRouteIntegrationTests(WebApplicationFactory<Program> factory)
+    public DelegatedAuditRouteIntegrationTests(HostFixture factory)
     {
-        _factory = factory.WithWebHostBuilder(builder =>
+        _factory = factory;
+    }
+
+    public sealed class HostFixture : IntegrationHost<HostFixture>
+    {
+        protected override void ConfigureHostConfiguration(IConfigurationBuilder config)
         {
-            builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("DelegatedAuditRouteIntegrationTests"));
-        });
+            config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Gateway:Authentication:EnableTestAuthHandler"] = "true",
+                ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
+                ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.Create("DelegatedAuditRouteIntegrationTests"),
+            });
+        }
     }
 
     private HttpClient CreateClient(string? sid, string roles = "User")

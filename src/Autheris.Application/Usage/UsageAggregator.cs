@@ -14,26 +14,35 @@ using Microsoft.Extensions.Options;
 
 public sealed class UsageAggregator : IUsageAggregator
 {
+    public const int MaxPendingSourceQueries = 50_000;
+
     private readonly UsageAccountingOptions _options;
     private readonly byte[]? _hmacKey;
     private readonly Func<string, string?>? _expectedCostUnitResolver;
     private readonly TimeProvider _timeProvider;
+    private readonly int _maxPendingQueries;
+    private readonly ConcurrentQueue<PendingSourceQuery> _pendingQueue = new();
+    private int _pendingCount;
     private UsageGeneration _currentGeneration;
 
     public UsageAggregator(
         IOptions<UsageAccountingOptions>? options = null,
         byte[]? hmacKey = null,
         Func<string, string?>? expectedCostUnitResolver = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        int maxPendingQueries = MaxPendingSourceQueries)
     {
         _options = options?.Value ?? new UsageAccountingOptions();
         _hmacKey = hmacKey;
         _expectedCostUnitResolver = expectedCostUnitResolver;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _maxPendingQueries = maxPendingQueries > 0 ? maxPendingQueries : MaxPendingSourceQueries;
         int maxSeries = _options.MaxSeries > 0 ? _options.MaxSeries : UsageAccountingOptions.DefaultMaxSeries;
         _currentGeneration = new UsageGeneration(maxSeries);
         UsageRequestScope.DefaultAggregator ??= this;
     }
+
+    public int PendingSourceQueryCount => Math.Max(0, Volatile.Read(ref _pendingCount));
 
     public void Aggregate(
         in UsageSeriesKey key,
@@ -108,7 +117,8 @@ public sealed class UsageAggregator : IUsageAggregator
         long durationMs,
         long bytes,
         int statusCode,
-        IReadOnlyList<UsageFact> facts)
+        IReadOnlyList<UsageFact> facts,
+        string? problemCode = null)
     {
         ArgumentNullException.ThrowIfNull(identity);
 
@@ -119,7 +129,9 @@ public sealed class UsageAggregator : IUsageAggregator
             _options.IncludedGroupSidPrefixes,
             _options.MaxGroupsPerUser);
         var billingGroup = UsageAttribution.ResolveBillingGroup(identity.Tenant, filteredGroups, _options.BillingGroups);
-        var app = CallerLabelNormalizer.NormalizeApplication(caller?.Application);
+        var app = caller is { IsClientAsserted: true }
+            ? CallerLabelNormalizer.UnknownSentinel
+            : CallerLabelNormalizer.NormalizeApplication(caller?.Application);
         var clientId = CallerLabelNormalizer.NormalizeClientId(caller?.ClientId);
         var now = _timeProvider.GetUtcNow();
         var dayUtc = DateOnly.FromDateTime(now.UtcDateTime);
@@ -132,7 +144,7 @@ public sealed class UsageAggregator : IUsageAggregator
 
             if (facts == null || facts.Count == 0)
             {
-                var outcome = UsageAttribution.MapStatusCodeToOutcome(statusCode);
+                var outcome = UsageAttribution.MapStatusCodeToOutcome(statusCode, problemCode);
                 var key = new UsageSeriesKey(
                     identity.Tenant,
                     dayUtc,
@@ -208,80 +220,73 @@ public sealed class UsageAggregator : IUsageAggregator
                     costMicros,
                     fact.Outcome);
 
+                IReadOnlyList<string> recordedGrantIds = Array.Empty<string>();
                 if (fact.Outcome == UsageOutcome.Allow)
                 {
                     if (fact.Grants == null || fact.Grants.Count == 0)
                     {
-                        UsageDiagnostics.AllowWithoutGrantCounter.Add(1);
-                        gen.RecordGrantRef(identity.Tenant, GrantRef.Invalid);
-                        var grantKey = new UsageGrantSeriesKey(
+                        RecordGrantEntry(
+                            gen,
                             identity.Tenant,
                             dayUtc,
-                            GrantRef.Invalid.GrantId,
                             dataSource,
-                            tableId);
-
-                        gen.AddGrantSeries(
-                            grantKey,
-                            accesses: 1,
-                            queries: factQueries,
-                            rows: factRows,
-                            bytes: factBytes,
-                            analysisCost: factAnalysisCost,
-                            sourceComputeMs: computeMs,
-                            sourceCostMicros: costMicros);
+                            tableId,
+                            GrantRef.Invalid,
+                            isInvalid: true,
+                            factQueries,
+                            factRows,
+                            factBytes,
+                            factAnalysisCost,
+                            computeMs,
+                            costMicros);
+                        recordedGrantIds = [GrantRef.Invalid.GrantId];
                     }
                     else
                     {
-                        var grantNow = _timeProvider.GetUtcNow();
+                        var grantList = new List<string>(fact.Grants.Count);
                         foreach (var grant in fact.Grants)
                         {
-                            bool isExpired = (grant.ValidUntil.HasValue && grant.ValidUntil.Value < grantNow) ||
-                                             (grant.ValidFrom.HasValue && grant.ValidFrom.Value > grantNow);
+                            bool isInvalid =
+                                string.IsNullOrWhiteSpace(grant.GrantId) ||
+                                string.Equals(grant.GrantId, GrantRef.Invalid.GrantId, StringComparison.OrdinalIgnoreCase) ||
+                                (grant.ValidUntil.HasValue && grant.ValidUntil.Value < now) ||
+                                (grant.ValidFrom.HasValue && grant.ValidFrom.Value > now);
 
-                            if (isExpired)
-                            {
-                                UsageDiagnostics.AllowWithoutGrantCounter.Add(1);
-                                gen.RecordGrantRef(identity.Tenant, GrantRef.Invalid);
-                                var grantKey = new UsageGrantSeriesKey(
-                                    identity.Tenant,
-                                    dayUtc,
-                                    GrantRef.Invalid.GrantId,
-                                    dataSource,
-                                    tableId);
-
-                                gen.AddGrantSeries(
-                                    grantKey,
-                                    accesses: 1,
-                                    queries: factQueries,
-                                    rows: factRows,
-                                    bytes: factBytes,
-                                    analysisCost: factAnalysisCost,
-                                    sourceComputeMs: computeMs,
-                                    sourceCostMicros: costMicros);
-                            }
-                            else
-                            {
-                                gen.RecordGrantRef(identity.Tenant, grant);
-                                var grantKey = new UsageGrantSeriesKey(
-                                    identity.Tenant,
-                                    dayUtc,
-                                    grant.GrantId,
-                                    dataSource,
-                                    tableId);
-
-                                gen.AddGrantSeries(
-                                    grantKey,
-                                    accesses: 1,
-                                    queries: factQueries,
-                                    rows: factRows,
-                                    bytes: factBytes,
-                                    analysisCost: factAnalysisCost,
-                                    sourceComputeMs: computeMs,
-                                    sourceCostMicros: costMicros);
-                            }
+                            var effectiveGrant = isInvalid ? GrantRef.Invalid : grant;
+                            RecordGrantEntry(
+                                gen,
+                                identity.Tenant,
+                                dayUtc,
+                                dataSource,
+                                tableId,
+                                effectiveGrant,
+                                isInvalid,
+                                factQueries,
+                                factRows,
+                                factBytes,
+                                factAnalysisCost,
+                                computeMs,
+                                costMicros);
+                            grantList.Add(effectiveGrant.GrantId);
                         }
+
+                        recordedGrantIds = grantList;
                     }
+                }
+
+                if (!string.IsNullOrWhiteSpace(fact.Source.SourceQueryId) &&
+                    !string.IsNullOrWhiteSpace(dataSource) &&
+                    (!computeMs.HasValue || !costMicros.HasValue))
+                {
+                    TryEnqueuePendingSourceQuery(new PendingSourceQuery(
+                        identity.Tenant,
+                        dataSource,
+                        fact.Source.SourceQueryId,
+                        dayUtc,
+                        UsageSeriesHash.Compute(key),
+                        key,
+                        recordedGrantIds,
+                        now));
                 }
             }
         }
@@ -304,6 +309,45 @@ public sealed class UsageAggregator : IUsageAggregator
             facts: [fact]);
     }
 
+    private static void RecordGrantEntry(
+        UsageGeneration gen,
+        TenantId tenant,
+        DateOnly dayUtc,
+        string dataSource,
+        string tableId,
+        GrantRef grant,
+        bool isInvalid,
+        long factQueries,
+        long factRows,
+        long factBytes,
+        long factAnalysisCost,
+        long? computeMs,
+        long? costMicros)
+    {
+        if (isInvalid)
+        {
+            UsageDiagnostics.AllowWithoutGrantCounter.Add(1);
+        }
+
+        gen.RecordGrantRef(tenant, grant);
+        var grantKey = new UsageGrantSeriesKey(
+            tenant,
+            dayUtc,
+            grant.GrantId,
+            dataSource,
+            tableId);
+
+        gen.AddGrantSeries(
+            grantKey,
+            accesses: 1,
+            queries: factQueries,
+            rows: factRows,
+            bytes: factBytes,
+            analysisCost: factAnalysisCost,
+            sourceComputeMs: computeMs,
+            sourceCostMicros: costMicros);
+    }
+
     public UsageGenerationSnapshot Swap()
     {
         int maxSeries = _options.MaxSeries > 0 ? _options.MaxSeries : UsageAccountingOptions.DefaultMaxSeries;
@@ -319,6 +363,141 @@ public sealed class UsageAggregator : IUsageAggregator
 
         return old.ToSnapshot();
     }
+
+    public void CollectQuotaUsage(
+        TenantId tenant,
+        DateOnly fromUtc,
+        DateOnly toUtc,
+        ICollection<UsageQuotaSeriesEntry> destination,
+        IDictionary<string, IReadOnlyList<Sid>> groupSets)
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+        ArgumentNullException.ThrowIfNull(groupSets);
+        var gen = _currentGeneration;
+        gen.Enter();
+        try
+        {
+            gen.CollectQuotaUsage(tenant, fromUtc, toUtc, destination, groupSets);
+        }
+        finally
+        {
+            gen.Exit();
+        }
+    }
+
+    public void Merge(UsageGenerationSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        var gen = _currentGeneration;
+        gen.Enter();
+        try
+        {
+            foreach (var entry in snapshot.GroupSets)
+            {
+                gen.RecordGroupSet(entry.Key.Tenant, entry.Key.GroupSetId, entry.Value);
+            }
+
+            foreach (var entry in snapshot.GrantRefs)
+            {
+                gen.RecordGrantRef(entry.Key.Tenant, entry.Value);
+            }
+
+            foreach (var entry in snapshot.Series)
+            {
+                gen.MergeSeries(entry.Key, entry.Value);
+            }
+
+            foreach (var entry in snapshot.GrantSeries)
+            {
+                gen.MergeGrantSeries(entry.Key, entry.Value);
+            }
+        }
+        finally
+        {
+            gen.Exit();
+        }
+    }
+
+    public void AggregateSourceStats(
+        in UsageSeriesKey key,
+        IReadOnlyList<string>? grantIds,
+        long? sourceComputeMs,
+        long? sourceCostMicros)
+    {
+        if (!sourceComputeMs.HasValue && !sourceCostMicros.HasValue)
+        {
+            return;
+        }
+
+        var gen = _currentGeneration;
+        gen.Enter();
+        try
+        {
+            gen.AddSeriesSourceStats(key, sourceComputeMs, sourceCostMicros);
+            if (grantIds is { Count: > 0 })
+            {
+                foreach (var grantId in grantIds)
+                {
+                    if (string.IsNullOrWhiteSpace(grantId))
+                    {
+                        continue;
+                    }
+
+                    var grantKey = new UsageGrantSeriesKey(
+                        key.Tenant,
+                        key.DayUtc,
+                        grantId,
+                        key.DataSource,
+                        key.TableId);
+                    gen.AddGrantSeriesSourceStats(grantKey, sourceComputeMs, sourceCostMicros);
+                }
+            }
+        }
+        finally
+        {
+            gen.Exit();
+        }
+    }
+
+    public bool TryEnqueuePendingSourceQuery(PendingSourceQuery query)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        while (true)
+        {
+            int current = Volatile.Read(ref _pendingCount);
+            if (current >= _maxPendingQueries)
+            {
+                UsageDiagnostics.SourceCostQueueOverflowCounter.Add(1);
+                return false;
+            }
+
+            if (Interlocked.CompareExchange(ref _pendingCount, current + 1, current) == current)
+            {
+                _pendingQueue.Enqueue(query);
+                return true;
+            }
+        }
+    }
+
+    public IReadOnlyList<PendingSourceQuery> DrainPendingSourceQueries(int maxCount)
+    {
+        if (maxCount <= 0)
+        {
+            return Array.Empty<PendingSourceQuery>();
+        }
+
+        var drained = new List<PendingSourceQuery>();
+        while (drained.Count < maxCount && _pendingQueue.TryDequeue(out var item))
+        {
+            Interlocked.Decrement(ref _pendingCount);
+            drained.Add(item);
+        }
+
+        return drained;
+    }
+
+    public bool IsSourceCostUnitValid(string dataSource, string? sourceCostUnit) =>
+        IsSourceUnitValid(dataSource, sourceCostUnit);
 
     private bool IsSourceUnitValid(string dataSource, string? sourceCostUnit)
     {
@@ -367,20 +546,58 @@ public sealed class UsageAggregator : IUsageAggregator
             long? sourceCostMicros,
             UsageOutcome outcome)
         {
+            ResolveSeriesTarget(key, dropWeight: 1)?.Add(
+                requests,
+                queries,
+                rows,
+                rowsMeasured,
+                bytes,
+                durationMs,
+                analysisCost,
+                sourceComputeMs,
+                sourceCostMicros,
+                outcome);
+        }
+
+        public void MergeSeries(in UsageSeriesKey key, UsageSeriesCounters source)
+        {
+            long weight = Math.Max(1, source.Requests > 0 ? source.Requests : source.Queries);
+            ResolveSeriesTarget(key, dropWeight: weight)?.MergeFrom(source);
+        }
+
+        public void AddGrantSeries(
+            in UsageGrantSeriesKey key,
+            long accesses,
+            long queries,
+            long rows,
+            long bytes,
+            long analysisCost,
+            long? sourceComputeMs,
+            long? sourceCostMicros)
+        {
+            ResolveGrantSeriesTarget(key)?.Add(accesses, queries, rows, bytes, analysisCost, sourceComputeMs, sourceCostMicros);
+        }
+
+        public void AddSeriesSourceStats(in UsageSeriesKey key, long? sourceComputeMs, long? sourceCostMicros)
+        {
+            ResolveSeriesTarget(key, dropWeight: 1)?.AddSourceStats(sourceComputeMs, sourceCostMicros);
+        }
+
+        public void AddGrantSeriesSourceStats(in UsageGrantSeriesKey key, long? sourceComputeMs, long? sourceCostMicros)
+        {
+            ResolveGrantSeriesTarget(key)?.AddSourceStats(sourceComputeMs, sourceCostMicros);
+        }
+
+        public void MergeGrantSeries(in UsageGrantSeriesKey key, UsageGrantSeriesCounters source)
+        {
+            ResolveGrantSeriesTarget(key)?.MergeFrom(source);
+        }
+
+        private UsageSeriesCounters? ResolveSeriesTarget(in UsageSeriesKey key, long dropWeight)
+        {
             if (_series.TryGetValue(key, out var counters))
             {
-                counters.Add(
-                    requests,
-                    queries,
-                    rows,
-                    rowsMeasured,
-                    bytes,
-                    durationMs,
-                    analysisCost,
-                    sourceComputeMs,
-                    sourceCostMicros,
-                    outcome);
-                return;
+                return counters;
             }
 
             if (_series.Count >= _maxSeries)
@@ -395,71 +612,28 @@ public sealed class UsageAggregator : IUsageAggregator
                 if (_series.TryGetValue(foldedKey, out var foldedCounters))
                 {
                     UsageDiagnostics.SeriesOverflowCounter.Add(1);
-                    foldedCounters.Add(
-                        requests,
-                        queries,
-                        rows,
-                        rowsMeasured,
-                        bytes,
-                        durationMs,
-                        analysisCost,
-                        sourceComputeMs,
-                        sourceCostMicros,
-                        outcome);
-                    return;
+                    return foldedCounters;
                 }
 
                 int headroom = Math.Max(1, _maxSeries / 100);
                 if (_series.Count >= _maxSeries + headroom)
                 {
-                    UsageDiagnostics.DroppedCounter.Add(1);
-                    return;
+                    UsageDiagnostics.DroppedCounter.Add(dropWeight);
+                    return null;
                 }
 
                 UsageDiagnostics.SeriesOverflowCounter.Add(1);
-                foldedCounters = _series.GetOrAdd(foldedKey, _ => new UsageSeriesCounters());
-                foldedCounters.Add(
-                    requests,
-                    queries,
-                    rows,
-                    rowsMeasured,
-                    bytes,
-                    durationMs,
-                    analysisCost,
-                    sourceComputeMs,
-                    sourceCostMicros,
-                    outcome);
-                return;
+                return _series.GetOrAdd(foldedKey, _ => new UsageSeriesCounters());
             }
 
-            counters = _series.GetOrAdd(key, _ => new UsageSeriesCounters());
-            counters.Add(
-                requests,
-                queries,
-                rows,
-                rowsMeasured,
-                bytes,
-                durationMs,
-                analysisCost,
-                sourceComputeMs,
-                sourceCostMicros,
-                outcome);
+            return _series.GetOrAdd(key, _ => new UsageSeriesCounters());
         }
 
-        public void AddGrantSeries(
-            in UsageGrantSeriesKey key,
-            long accesses,
-            long queries,
-            long rows,
-            long bytes,
-            long analysisCost,
-            long? sourceComputeMs,
-            long? sourceCostMicros)
+        private UsageGrantSeriesCounters? ResolveGrantSeriesTarget(in UsageGrantSeriesKey key)
         {
             if (_grantSeries.TryGetValue(key, out var counters))
             {
-                counters.Add(accesses, queries, rows, bytes, analysisCost, sourceComputeMs, sourceCostMicros);
-                return;
+                return counters;
             }
 
             if (_grantSeries.Count >= _maxSeries)
@@ -468,25 +642,21 @@ public sealed class UsageAggregator : IUsageAggregator
                 if (_grantSeries.TryGetValue(foldedKey, out var foldedCounters))
                 {
                     UsageDiagnostics.SeriesOverflowCounter.Add(1);
-                    foldedCounters.Add(accesses, queries, rows, bytes, analysisCost, sourceComputeMs, sourceCostMicros);
-                    return;
+                    return foldedCounters;
                 }
 
                 int headroom = Math.Max(1, _maxSeries / 100);
                 if (_grantSeries.Count >= _maxSeries + headroom)
                 {
                     UsageDiagnostics.DroppedCounter.Add(1);
-                    return;
+                    return null;
                 }
 
                 UsageDiagnostics.SeriesOverflowCounter.Add(1);
-                foldedCounters = _grantSeries.GetOrAdd(foldedKey, _ => new UsageGrantSeriesCounters());
-                foldedCounters.Add(accesses, queries, rows, bytes, analysisCost, sourceComputeMs, sourceCostMicros);
-                return;
+                return _grantSeries.GetOrAdd(foldedKey, _ => new UsageGrantSeriesCounters());
             }
 
-            counters = _grantSeries.GetOrAdd(key, _ => new UsageGrantSeriesCounters());
-            counters.Add(accesses, queries, rows, bytes, analysisCost, sourceComputeMs, sourceCostMicros);
+            return _grantSeries.GetOrAdd(key, _ => new UsageGrantSeriesCounters());
         }
 
         public void RecordGroupSet(TenantId tenant, string groupSetId, IReadOnlyList<Sid> groups)
@@ -506,6 +676,45 @@ public sealed class UsageAggregator : IUsageAggregator
                 new Dictionary<UsageGrantSeriesKey, UsageGrantSeriesCounters>(_grantSeries),
                 new Dictionary<(TenantId Tenant, string GroupSetId), IReadOnlyList<Sid>>(_groupSets),
                 new Dictionary<(TenantId Tenant, string GrantId), GrantRef>(_grantRefs));
+        }
+
+        public void CollectQuotaUsage(
+            TenantId tenant,
+            DateOnly fromUtc,
+            DateOnly toUtc,
+            ICollection<UsageQuotaSeriesEntry> destination,
+            IDictionary<string, IReadOnlyList<Sid>> groupSets)
+        {
+            foreach (var (key, counters) in _series)
+            {
+                if (key.Tenant == tenant && key.DayUtc >= fromUtc && key.DayUtc <= toUtc)
+                {
+                    destination.Add(new UsageQuotaSeriesEntry(
+                        key.DayUtc,
+                        key.UserKey,
+                        key.GroupSetId,
+                        key.BillingGroup,
+                        key.DataSource,
+                        counters.Requests,
+                        counters.Queries,
+                        counters.Rows,
+                        counters.Bytes,
+                        counters.DurationMs,
+                        counters.AnalysisCost,
+                        counters.SourceComputeMs,
+                        counters.SourceComputeMeasured,
+                        counters.SourceCostMicros,
+                        counters.Allow));
+                }
+            }
+
+            foreach (var ((t, groupSetId), sids) in _groupSets)
+            {
+                if (t == tenant && !groupSets.ContainsKey(groupSetId))
+                {
+                    groupSets[groupSetId] = sids;
+                }
+            }
         }
     }
 }

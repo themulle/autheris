@@ -105,7 +105,7 @@ public class ProcedureEndpointTests
             DataSources = Autheris.Tests.Unit.Procedures.ProcedureTestData.SqlServerSources("procedures", "telemetry_db"),
             SqlEndpoints = new SqlEndpointsOptions
             {
-                Procedures = new ProcedureEndpointsOptions { Enabled = true, Directory = dir, AllowedSchemas = [.. allowedSchemas] }
+                Procedures = new ProcedureEndpointsOptions { Enabled = true, Directory = dir, AllowedSchemas = [.. allowedSchemas], RequireDdlHashForDeclared = false }
             }
         });
         var registry = new InMemoryProcedureRegistry();
@@ -213,7 +213,7 @@ public class ProcedureEndpointTests
     {
         var claims = new List<Claim> { new(ClaimTypes.PrimarySid, "S-1-5-21-1001") };
         claims.AddRange(roles.Select(r => new Claim(ClaimTypes.Role, r)));
-        return new ClaimsPrincipal(new ClaimsIdentity(claims.Append(DefaultTenantCaller.Claim), "test"));
+        return Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(new ClaimsPrincipal(new ClaimsIdentity(claims.Append(DefaultTenantCaller.Claim), "test")));
     }
 
     private static TableMetadata OrdersTable() => new()
@@ -497,19 +497,48 @@ public class ProcedureEndpointTests
         });
 
         var registry = new InMemoryProcedureRegistry();
-        var def = TestProcedureYaml.Definition(ValidHeader, "x", false, 60);
+        const string yaml = """
+            name: get_orders
+            procedure: api.usp_GetOrders
+            result_table: sales.orders
+            tables:
+              - sales.orders
+            outputs:
+              - order_id
+            """;
+        var def = TestProcedureYaml.Definition(yaml, "x", false, 60);
         registry.Register(def);
 
-        var connFactory = Substitute.For<ISqlConnectionFactory>();
-        var connProvider = new ProcedureConnectionProvider(connFactory, options);
-        var validator = new StoredProcedureCatalogValidator(connProvider, options);
+        var snapshot = new Autheris.Application.VirtualFilters.VirtualFilterSnapshot(
+            1,
+            [
+                new Autheris.Domain.Model.VirtualFilter
+                {
+                    TenantId = new TenantId("t1"),
+                    Name = "f1",
+                    Source = "default",
+                    KeyColumns = ["t.order_id"],
+                    Structured = new StructuredFilterDefinition { From = new TableIdentifier("default", "sales", "orders"), FromAlias = "t" }
+                }
+            ],
+            [
+                new Autheris.Domain.Model.VirtualFilterAccessProfile
+                {
+                    TenantId = new TenantId("t1"),
+                    Name = "p1",
+                    Scope = "default.sales.*",
+                    Uncovered = UncoveredPolicy.Skip,
+                    Bindings = [new Autheris.Domain.Model.FilterBinding { FilterName = "f1", TargetPattern = "default.sales.orders" }]
+                }
+            ]);
+        var filterProvider = new StubFilterSnapshotProvider(snapshot);
 
         var scopeFactory = Substitute.For<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>();
         var scope = Substitute.For<Microsoft.Extensions.DependencyInjection.IServiceScope>();
         var sp = Substitute.For<IServiceProvider>();
         scopeFactory.CreateScope().Returns(scope);
         scope.ServiceProvider.Returns(sp);
-        sp.GetService(typeof(StoredProcedureCatalogValidator)).Returns(validator);
+        sp.GetService(typeof(Autheris.Application.VirtualFilters.IVirtualFilterSnapshotProvider)).Returns(filterProvider);
 
         var logger = Substitute.For<Microsoft.Extensions.Logging.ILogger<ProcedureRegistrationService>>();
         logger.IsEnabled(Arg.Any<Microsoft.Extensions.Logging.LogLevel>()).Returns(true);
@@ -548,8 +577,9 @@ public class ProcedureEndpointTests
         procedure: api.usp_GetTelemetry
         data_source: telemetry_db
         mode: read
-        validation: declared
         result_table: api.telemetry
+        tables:
+          - api.telemetry
         timeout: 45
         summary: Retrieves device telemetry
         roles:
@@ -582,7 +612,6 @@ public class ProcedureEndpointTests
         def.ProcedureName.ShouldBe("api.usp_GetTelemetry");
         def.DataSource.ShouldBe("telemetry_db");
         def.Mode.ShouldBe(ProcedureMode.Read);
-        def.ValidationMode.ShouldBe(ProcedureValidationMode.Declared);
         def.TimeoutSeconds.ShouldBe(45);
         def.Summary.ShouldBe("Retrieves device telemetry");
         def.RequiredRoles.ShouldContain("telemetry-reader");
@@ -612,15 +641,13 @@ public class ProcedureEndpointTests
     }
 
     [Fact]
-    public void ParseYaml_WithDeclaredValidationAndOutputs_MapsCorrectly()
+    public void ParseYaml_WithDeclaredOutputs_MapsCorrectly()
     {
         const string sql = """
             procedure: api.usp_Custom
-            validation: declared
             outputs: [col_a, col_b]
             """;
         var def = TestProcedureYaml.Definition(sql, "custom", false, 30);
-        def.ValidationMode.ShouldBe(ProcedureValidationMode.Declared);
         def.DeclaredOutputs.ShouldBe(["col_a", "col_b"]);
     }
 
@@ -640,7 +667,6 @@ public class ProcedureEndpointTests
                     Directory = dir,
                     AllowedSchemas = ["api"],
                     AllowedDataSources = ["telemetry_db"],
-                    AllowDeclaredValidation = true,
                     RequireDdlHashForDeclared = false // fixture declares no ddl_hash (INC-2 D-8)
                 }
             }
@@ -654,8 +680,7 @@ public class ProcedureEndpointTests
             loader.LoadFromDirectory().ShouldBe(1);
 
             registry.TryGet("get_telemetry", out var reg).ShouldBeTrue();
-            reg!.Definition.ValidationMode.ShouldBe(ProcedureValidationMode.Declared);
-            reg.Definition.DeclaredOutputs.ShouldContain("temperature");
+            reg!.Definition.DeclaredOutputs.ShouldContain("temperature");
         }
         finally
         {
@@ -780,7 +805,6 @@ public class ProcedureEndpointTests
             name: get_crane_telemetry
             procedure: api.ufn_GetCraneTelemetry
             kind: tvf
-            validation: declared
             outputs:
               - crane_id
               - speed
@@ -836,7 +860,6 @@ public class ProcedureEndpointTests
             name: get_crane_telemetry
             procedure: api.ufn_GetCraneTelemetry
             kind: tvf
-            validation: declared
             parameters:
               - name: crane_id
                 type: int
@@ -905,7 +928,6 @@ public class ProcedureEndpointTests
             name: tvf_order
             procedure: api.fn_Telemetry
             kind: tvf
-            validation: declared
             result_table: api.telemetry
             parameters:
               - name: tenant_id
@@ -974,20 +996,20 @@ public class ProcedureEndpointTests
             SqlEndpoints = new SqlEndpointsOptions { Procedures = new ProcedureEndpointsOptions { Enabled = true, ConnectionName = "ds" } }
         });
         var provider2 = new ProcedureConnectionProvider(Substitute.For<ISqlConnectionFactory>(), options);
-        var def = TestProcedureYaml.Definition("procedure: api.usp_X\nvalidation: declared\noutputs: [a]", "x", false, 30);
+        var def = TestProcedureYaml.Definition("procedure: api.usp_X\noutputs: [a]", "x", false, 30);
 
         // P-6: no tenant context on these providers -> never run with rls: session-context.
         Should.Throw<InvalidOperationException>(() => provider2.Resolve(def));
     }
 
     [Fact]
-    public void Loader_DeclaredModeOutsideDevelopmentWithoutOptIn_IsRejected()
+    public void Loader_ValidationKeyInYaml_IsRejected()
     {
         var (loader, registry, dir) = CreateLoader("api");
         try
         {
-            File.WriteAllText(Path.Combine(dir, "get_telemetry.proc.yaml"), ValidYamlDefinition.Replace("data_source: telemetry_db\n", string.Empty, StringComparison.Ordinal));
-            loader.LoadFromDirectory().ShouldBe(0); // P-1
+            File.WriteAllText(Path.Combine(dir, "get_telemetry.proc.yaml"), "validation: declared\n" + ValidYamlDefinition.Replace("data_source: telemetry_db\n", string.Empty, StringComparison.Ordinal));
+            loader.LoadFromDirectory().ShouldBe(0);
             registry.GetAll().ShouldBeEmpty();
         }
         finally
@@ -997,7 +1019,7 @@ public class ProcedureEndpointTests
     }
 
     [Fact]
-    public void Loader_DeclaredModeWithoutResultTable_IsRejectedEvenWithOptIn()
+    public void Loader_WithoutDdlHashOutsideDevelopment_IsRejected()
     {
         string dir = Path.Combine(Path.GetTempPath(), "autheris-proc-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
@@ -1006,15 +1028,15 @@ public class ProcedureEndpointTests
             DataSources = Autheris.Tests.Unit.Procedures.ProcedureTestData.SqlServerSources("procedures", "telemetry_db"),
             SqlEndpoints = new SqlEndpointsOptions
             {
-                Procedures = new ProcedureEndpointsOptions { Enabled = true, Directory = dir, AllowedSchemas = ["api"], AllowDeclaredValidation = true }
+                Procedures = new ProcedureEndpointsOptions { Enabled = true, Directory = dir, AllowedSchemas = ["api"] }
             }
         });
         var registry = new InMemoryProcedureRegistry();
         var loader = new ProcedureDefinitionLoader(registry, options);
         try
         {
-            File.WriteAllText(Path.Combine(dir, "custom.proc.yaml"), "procedure: api.usp_Custom\nvalidation: declared\noutputs: [col_a]");
-            loader.LoadFromDirectory().ShouldBe(0); // P-1: no result table -> no consent -> rejected
+            File.WriteAllText(Path.Combine(dir, "custom.proc.yaml"), "procedure: api.usp_Custom\nresult_table: api.telemetry\ntables: [api.telemetry]\noutputs: [col_a]");
+            loader.LoadFromDirectory().ShouldBe(0);
         }
         finally
         {
@@ -1090,7 +1112,6 @@ public class ProcedureEndpointTests
         const string yaml = """
             name: typed
             procedure: tem.typed_proc
-            validation: declared
             result_table: md.crane
             outputs:
               - plain_column
@@ -1115,7 +1136,7 @@ public class ProcedureEndpointTests
     [InlineData("- {name: 'a b', type: int}")]          // invalid identifier
     public void ParseYaml_InvalidTypedOutput_Throws(string output)
     {
-        string yaml = "name: x\nprocedure: tem.p\nvalidation: declared\nresult_table: md.crane\noutputs:\n  " + output + "\n";
+        string yaml = "name: x\nprocedure: tem.p\nresult_table: md.crane\noutputs:\n  " + output + "\n";
         Should.Throw<FormatException>(() => ProcedureDefinitionParser.ParseYaml(yaml, "x", false, 30));
     }
 
@@ -1221,5 +1242,14 @@ public class ProcedureEndpointTests
         var ex = await Should.ThrowAsync<Autheris.Domain.Exceptions.GatewayForbiddenException>(() =>
             invoker.ExecuteReadAsync(def, new Dictionary<string, object?>(), security, 10, CancellationToken.None));
         ex.Message.ShouldBe("Invalid tenant identity.");
+    }
+
+    private sealed class StubFilterSnapshotProvider(Autheris.Application.VirtualFilters.VirtualFilterSnapshot snapshot)
+        : Autheris.Application.VirtualFilters.IVirtualFilterSnapshotProvider
+    {
+        public ValueTask<Autheris.Application.VirtualFilters.VirtualFilterSnapshot> GetAsync(CancellationToken ct)
+            => new(snapshot);
+
+        public void Invalidate() { }
     }
 }

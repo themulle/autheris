@@ -22,11 +22,6 @@ public class DmlErrorSanitizerSetOperationTests
         public string? Routine { get; } = routine;
     }
 
-    private sealed class SqliteLikeException(int code, string message) : DbException(message)
-    {
-        public int SqliteErrorCode { get; } = code;
-    }
-
     private sealed class PlainException(string message) : DbException(message);
 
     private const string Leaky = "VICTIM_SECRET_COLUMN";
@@ -39,11 +34,6 @@ public class DmlErrorSanitizerSetOperationTests
         Assert.DoesNotContain("VICTIM", mapped.Message, StringComparison.Ordinal);
         Assert.Null(mapped.InnerException);
     }
-
-    [Fact]
-    public void SqliteColumnCount_IsSyntaxError() =>
-        AssertSyntax(DmlErrorSanitizer.Map(TargetSqlDialect.Sqlite, new SqliteLikeException(1,
-            "SELECTs to the left and right of UNION do not have the same number of result columns")), TargetSqlDialect.Sqlite);
 
     [Fact]
     public void PostgreSqlSyntaxState_IsSyntaxError() =>
@@ -71,9 +61,6 @@ public class DmlErrorSanitizerSetOperationTests
     [Trait("Category", "Security")]
     public void SEC_RG_03_MessageTextAlone_DoesNotClassify()
     {
-        var sqlite = DmlErrorSanitizer.Map(TargetSqlDialect.Sqlite, new SqliteLikeException(19,
-            "SELECTs to the left and right of UNION do not have the same number of result columns"));
-        Assert.Equal(GovernedSqlErrorCodes.ProviderError, sqlite.Code);
         var pg = DmlErrorSanitizer.Map(TargetSqlDialect.PostgreSql, new SqlStateException("42P01", "each UNION query must have the same number of columns"));
         Assert.Equal(GovernedSqlErrorCodes.ProviderError, pg.Code);
         var otherRoutine = DmlErrorSanitizer.Map(TargetSqlDialect.PostgreSql, new SqlStateException("42601", "syntax error at or near", "scanner_yyerror"));

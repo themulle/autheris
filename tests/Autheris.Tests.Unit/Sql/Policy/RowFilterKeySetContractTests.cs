@@ -39,17 +39,17 @@ public sealed class RowFilterKeySetContractTests
     {
         var filter = new ConsentRowFilter
         {
-            KeySetStrategy = RowFilterEvaluationStrategy.KeySetCache,
-            KeySetDurationSeconds = 90,
-            KeySetMaxKeys = 500
+            ColumnName = "region",
+            Operator = "EQ",
+            ValueJson = "\"EU\""
         };
         var recipe = new ConsentRowFilterRecipe([[filter]], []);
 
         ConsentRowFilterRecipe.TryParse(recipe.ToJson(), out var parsed).ShouldBeTrue();
         var back = parsed!.Allow[0][0];
-        back.KeySetStrategy.ShouldBe(RowFilterEvaluationStrategy.KeySetCache);
-        back.KeySetDurationSeconds.ShouldBe(90);
-        back.KeySetMaxKeys.ShouldBe(500);
+        back.ColumnName.ShouldBe("region");
+        back.Operator.ShouldBe("EQ");
+        back.ValueJson.ShouldBe("\"EU\"");
     }
 
     [Fact]

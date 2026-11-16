@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Autheris.Application.Services;
 using Autheris.Application.Sql.Policy;
@@ -24,15 +25,13 @@ using TrinoSqlEngine.Governance;
 /// </summary>
 public sealed partial class StructuredFilterSqlBuilder : IVirtualFilterPredicateBuilder
 {
-    private readonly RowFilterSubqueryStrategy _strategy;
-
     private readonly ISqlEngine _engine;
 
-    /// <param name="options">Row filter options (the subquery strategy of the legacy string path).</param>
+    /// <param name="options">Optional gateway options.</param>
     /// <param name="engine">Parses sql-defined filters for the typed path; the shared <see cref="FastSqlEngine.Default"/> when none is injected.</param>
     public StructuredFilterSqlBuilder(IOptions<GatewayOptions>? options = null, ISqlEngine? engine = null)
     {
-        _strategy = options?.Value?.RowFilters?.SubqueryStrategy ?? RowFilterSubqueryStrategy.Exists;
+        _ = options;
         _engine = engine ?? FastSqlEngine.Default;
     }
 
@@ -63,6 +62,10 @@ public sealed partial class StructuredFilterSqlBuilder : IVirtualFilterPredicate
         }
 
         var definition = filter.Structured ?? throw new InvalidOperationException($"The virtual filter '{filter.Name}' has no definition.");
+        if (filter.Parameters.Count > 0 || definition.Where.Any(c => RowPolicyParameterBinder.TryExtractStructuredPlaceholder(c.Value, out _)))
+        {
+            return SqlFilterCompiler.CallerAttributeFilterText;
+        }
 
         string targetAlias = dialect.QuoteIdentifier(TrinoSqlEngine.RowFilterAliases.Target);
         string Target(string column) => $"{targetAlias}.{dialect.QuoteIdentifier(target.GetColumn(column)?.ColumnName ?? column)}";
@@ -102,20 +105,6 @@ public sealed partial class StructuredFilterSqlBuilder : IVirtualFilterPredicate
             }
         }
 
-        bool singleKeyIn = keys.Count == 1 && window.Count == 0 && dialect == DatabaseDialect.SqlServer &&
-                           _strategy is RowFilterSubqueryStrategy.In or RowFilterSubqueryStrategy.InCorrelated;
-        if (singleKeyIn)
-        {
-            var key = keys[0];
-            var where = new List<string>(conditions);
-            if (_strategy == RowFilterSubqueryStrategy.InCorrelated)
-            {
-                where.Add($"{key.Source} = {key.Target}");
-            }
-
-            return $"{key.Target} IN (SELECT {key.Source} {from}{Where(where)})";
-        }
-
         var existsWhere = conditions
             .Concat(keys.Select(k => $"{k.Source} = {k.Target}"))
             .Concat(window)
@@ -134,7 +123,13 @@ public sealed partial class StructuredFilterSqlBuilder : IVirtualFilterPredicate
 
     /// <summary>Typed variant of <see cref="Build(VirtualFilter, FilterBinding, TableMetadata, DatabaseDialect, VirtualFilterTenantContext?)"/>: the tenant is a bound policy parameter.</summary>
     public PolicyPredicate? BuildTyped(
-        VirtualFilter filter, FilterBinding binding, TableMetadata target, DatabaseDialect dialect, string parameterPrefix, VirtualFilterTenantContext? tenant)
+        VirtualFilter filter, FilterBinding binding, TableMetadata target, DatabaseDialect dialect, string parameterPrefix, VirtualFilterTenantContext? tenant) =>
+        BuildTyped(filter, binding, target, dialect, parameterPrefix, tenant, parameterValues: null);
+
+    /// <summary>Typed variant with bound grant-scoped <paramref name="parameterValues"/> (<c>:name</c>).</summary>
+    public PolicyPredicate? BuildTyped(
+        VirtualFilter filter, FilterBinding binding, TableMetadata target, DatabaseDialect dialect, string parameterPrefix,
+        VirtualFilterTenantContext? tenant, IReadOnlyDictionary<string, JsonElement>? parameterValues)
     {
         ArgumentNullException.ThrowIfNull(filter);
         ArgumentNullException.ThrowIfNull(binding);
@@ -146,10 +141,15 @@ public sealed partial class StructuredFilterSqlBuilder : IVirtualFilterPredicate
                 throw new NotSupportedException($"The virtual filter '{filter.Name}' is defined in sql; a column map or time column does not apply to it.");
             }
 
-            return SqlFilterCompiler.CompileTyped(filter, dialect, _engine, parameterPrefix, tenant);
+            return SqlFilterCompiler.CompileTyped(filter, dialect, _engine, parameterPrefix, tenant, parameterValues);
         }
 
         var definition = filter.Structured ?? throw new InvalidOperationException($"The virtual filter '{filter.Name}' has no definition.");
+        RowPolicyParameterBinder.ValidateFilterDeclarations(filter);
+        IReadOnlyDictionary<string, IReadOnlyList<PolicyValue>>? boundParams =
+            filter.Parameters.Count > 0 || parameterValues is { Count: > 0 }
+                ? RowPolicyParameterBinder.BindValues(filter, parameterValues)
+                : null;
         var namer = new PolicyParameterNamer(parameterPrefix);
 
         var innerAliases = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -167,14 +167,7 @@ public sealed partial class StructuredFilterSqlBuilder : IVirtualFilterPredicate
         {
             AdvancedRlsFilterGenerator.ValidateQualifiedIdentifier(condition.Column, "FilterCondition.Column");
             var column = Column(condition.Column);
-            conditions.Add(condition.Operator switch
-            {
-                FilterConditionOperator.IsNull => new UnaryExpression(UnaryOperator.IsNull, column),
-                FilterConditionOperator.IsNotNull => new UnaryExpression(UnaryOperator.IsNotNull, column),
-                FilterConditionOperator.Eq => new BinaryExpression(column, BinaryOperator.Equal, Value(namer, condition)),
-                FilterConditionOperator.NotEq => new BinaryExpression(column, BinaryOperator.NotEqual, Value(namer, condition)),
-                _ => throw new InvalidOperationException($"Unsupported condition operator {condition.Operator}.")
-            });
+            conditions.Add(BuildConditionExpression(namer, column, condition, boundParams));
         }
 
         if (tenant != null)
@@ -242,11 +235,27 @@ public sealed partial class StructuredFilterSqlBuilder : IVirtualFilterPredicate
             throw new InvalidOperationException($"Alias '{alias}' of the virtual filter collides with the target alias or another alias.");
         }
 
-        // Like the legacy FormatTableIdentifier: a SQLite table is addressed without its schema.
-        var name = dialect == DatabaseDialect.Sqlite
-            ? new SqlQualifiedName(new[] { new SqlIdentifier(table.TableName, true) })
-            : new SqlQualifiedName(new[] { new SqlIdentifier(table.Schema, true), new SqlIdentifier(table.TableName, true) });
+        var name = new SqlQualifiedName(new[] { new SqlIdentifier(table.Schema, true), new SqlIdentifier(table.TableName, true) });
         return new NamedTableSource(name, new SqlIdentifier(alias, true));
+    }
+
+    private static Expression BuildConditionExpression(PolicyParameterNamer namer, ColumnReference column, FilterCondition condition, IReadOnlyDictionary<string, IReadOnlyList<PolicyValue>>? boundParams)
+    {
+        if (condition.Operator is FilterConditionOperator.IsNull or FilterConditionOperator.IsNotNull)
+            return new UnaryExpression(condition.Operator == FilterConditionOperator.IsNull ? UnaryOperator.IsNull : UnaryOperator.IsNotNull, column);
+        if (boundParams != null && RowPolicyParameterBinder.TryExtractStructuredPlaceholder(condition.Value, out var paramName))
+        {
+            var values = boundParams[paramName];
+            return values.Count == 1
+                ? new BinaryExpression(column, condition.Operator == FilterConditionOperator.Eq ? BinaryOperator.Equal : BinaryOperator.NotEqual, namer.Add(values[0]))
+                : new InListExpression(column, values.Select(v => (Expression)namer.Add(v)).ToList(), IsNotIn: condition.Operator == FilterConditionOperator.NotEq);
+        }
+        return condition.Operator switch
+        {
+            FilterConditionOperator.Eq => new BinaryExpression(column, BinaryOperator.Equal, Value(namer, condition)),
+            FilterConditionOperator.NotEq => new BinaryExpression(column, BinaryOperator.NotEqual, Value(namer, condition)),
+            _ => throw new InvalidOperationException($"Unsupported condition operator {condition.Operator}.")
+        };
     }
 
     /// <summary>The value of an Eq / NotEq condition as a bound parameter; <c>NumericLiteral</c> values stay numbers like in <see cref="Literal"/>.</summary>

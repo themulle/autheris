@@ -16,7 +16,6 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Application.OData;
 using Autheris.Infrastructure.Persistence;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -28,22 +27,14 @@ using Xunit;
 /// Befund 4a.3: OData $orderby and $count. Ordering only by clear-text columns, the count is the total under the same
 /// row filter (not the rows of the page), and a source that cannot order or count answers 501 instead of ignoring it.
 /// </summary>
-public sealed class ODataOrderByCountTests : IDisposable
+public sealed class ODataOrderByCountTests
 {
     private static readonly TableIdentifier Invoices = new("erp", "main", "invoices");
-    private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"autheris-odata-{Guid.NewGuid():N}.db");
-
-    public void Dispose()
-    {
-        _connection?.Dispose();
-        SqliteConnection.ClearAllPools();
-        try { File.Delete(_dbPath); } catch { /* best effort */ }
-    }
 
     private static TableMetadata InvoiceMetadata(DataSourceType type = DataSourceType.Sql) => new()
     {
         Identifier = Invoices,
-        Table = new Table { SourceName = "erp", SchemaName = "main", TableName = "invoices", DataSourceType = type, SourceType = "Sqlite" },
+        Table = new Table { SourceName = "erp", SchemaName = "main", TableName = "invoices", DataSourceType = type, SourceType = "PostgreSql" },
         Columns =
         [
             new TableColumn { ColumnName = "id", DataType = "integer" },
@@ -60,76 +51,6 @@ public sealed class ODataOrderByCountTests : IDisposable
         ["amount"] = ColumnAccessLevel.Clear,
         ["iban"] = ColumnAccessLevel.Mask
     };
-
-    private void CreateDatabase()
-    {
-        using var conn = new SqliteConnection($"Data Source={_dbPath}");
-        conn.Open();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = @"
-CREATE TABLE invoices (id INTEGER PRIMARY KEY, region TEXT NOT NULL, amount INTEGER NOT NULL, iban TEXT);
-INSERT INTO invoices VALUES (1, 'CH', 300, 'CH01'), (2, 'DE', 100, 'DE02'), (3, 'CH', 200, 'CH03'), (4, 'CH', 50, 'CH04');";
-        cmd.ExecuteNonQuery();
-    }
-
-    private SqliteConnection? _connection;
-
-    private SqlTableReadExecutor CreateSqliteExecutor()
-    {
-        _connection = new SqliteConnection($"Data Source={_dbPath}");
-        _connection.Open();
-        // The row policy of the decision: only the CH rows are visible.
-        var env = new Autheris.Tests.Unit.Sql.TestCompileEnv(TrinoSqlEngine.TargetSqlDialect.Sqlite)
-            .Table("invoices", null, "id:INTEGER", "region", "amount:INTEGER", "iban")
-            .Policy("invoices", Autheris.Tests.Unit.TestDoubles.SqliteGovernedSqlService.RowPolicy("region", "CH"));
-        return new Autheris.Tests.Unit.TestDoubles.SqliteGovernedSqlService(_connection, env).Executor();
-    }
-
-    private static DataSourceExecutionContext Context(int limit, int offset, IReadOnlyList<TableOrderBy>? orderBy, bool count)
-    {
-        var items = new Dictionary<string, object?>();
-        if (orderBy != null) items[TableQueryItems.OrderBy] = orderBy;
-        if (count) items[TableQueryItems.CountTotal] = true;
-        return new DataSourceExecutionContext(
-            SourceName: "erp",
-            Metadata: InvoiceMetadata(),
-            Principal: new ClaimsPrincipal(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "S-1-5-21-TEST")], "Test")),
-            AccessDecision: TableAccessDecision.Allowed(Invoices, Access, rowFilterSql: "region = 'CH'"),
-            Arguments: new Dictionary<string, object?>(),
-            RequestedFields: ["id", "amount"],
-            Limit: limit,
-            Offset: offset,
-            Items: items);
-    }
-
-    [Fact]
-    public async Task SqlExecutor_OrdersAndCountsUnderTheRowFilter()
-    {
-        CreateDatabase();
-        var context = Context(limit: 2, offset: 0, [new TableOrderBy("amount", Descending: true)], count: true);
-
-        var rows = await CreateSqliteExecutor().ExecuteAsync(context);
-
-        rows.Select(r => Convert.ToInt64(r["id"])).ShouldBe([1L, 3L]);           // CH rows by amount desc: 300, 200 (50 on page 2)
-        context.Items[TableQueryItems.TotalCount].ShouldBe(3L);                  // DE row excluded by the row filter
-    }
-
-    [Fact]
-    public async Task SqlExecutor_SecondPage_FollowsTheSameOrder()
-    {
-        CreateDatabase();
-        var rows = await CreateSqliteExecutor().ExecuteAsync(Context(limit: 2, offset: 2, [new TableOrderBy("amount")], count: false));
-
-        rows.Select(r => Convert.ToInt64(r["id"])).ShouldBe([1L]);               // ascending 50, 200 | 300
-    }
-
-    [Fact]
-    public async Task SqlExecutor_OrderingByMaskedColumn_IsRejected()
-    {
-        CreateDatabase();
-        await Should.ThrowAsync<ArgumentException>(() =>
-            CreateSqliteExecutor().ExecuteAsync(Context(limit: 2, offset: 0, [new TableOrderBy("iban")], count: false)));
-    }
 
     // ------------------------------------------------------------------ gateway
 
@@ -171,8 +92,8 @@ INSERT INTO invoices VALUES (1, 'CH', 300, 'CH01'), (2, 'DE', 100, 'DE02'), (3, 
         return (service, executor);
     }
 
-    private static ClaimsPrincipal User() => new(new ClaimsIdentity(
-        [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-ANALYST"), new Claim("tenant_id", "erp")], "Test"));
+    private static ClaimsPrincipal User() => Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(new ClaimsPrincipal(new ClaimsIdentity(
+        [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-ANALYST"), new Claim("tenant_id", "erp")], "Test")));
 
     [Fact]
     public async Task Gateway_PassesOrderAndReturnsTheCountOfTheSource()

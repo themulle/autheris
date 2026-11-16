@@ -8,7 +8,6 @@ using System.Text;
 using Autheris.Api.Endpoints;
 using Autheris.Api.Middleware;
 using Autheris.Application.Catalog.Services;
-using Autheris.Application.FinOps.Interfaces;
 using Autheris.Application.Governance;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Services;
@@ -22,7 +21,6 @@ using Autheris.Extensions.Dbt;
 using Autheris.Infrastructure.Persistence;
 using Autheris.Infrastructure.Security;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -35,6 +33,7 @@ using Xunit;
 
 namespace Autheris.Tests.Unit.Security;
 
+[Trait("Category", "Security")]
 public sealed class SecurityReviewRemediationCoverageTests
 {
     // =========================================================================
@@ -113,7 +112,7 @@ public sealed class SecurityReviewRemediationCoverageTests
         var statusAfterFirstStep = ConsentApprovalPolicy.StatusAfterApproval(
             requiresFourEyes: false,
             stepNumber: 1,
-            isExternalItsmApproval: false,
+            mode: ConsentWorkflowMode.Internal,
             sensitivity: sensitivity);
 
         if (expectedFourEyes)
@@ -158,61 +157,6 @@ public sealed class SecurityReviewRemediationCoverageTests
     // =========================================================================
     // POL-3 (High): Column snapshot on consent activation & later column is Deny
     // =========================================================================
-
-    // =========================================================================
-    // API-4 / R-API-2: FinOps Anonymous & Invalid Tenant Handling
-    // =========================================================================
-
-    [Fact]
-    public async Task API_4_FinOpsBudgetMiddleware_AnonymousRequest_IsNotAccounted()
-    {
-        var accountingService = Substitute.For<IFinOpsAccountingService>();
-        accountingService.IsEnabled.Returns(true);
-
-        bool nextCalled = false;
-        var middleware = new FinOpsBudgetMiddleware(
-            next: ctx =>
-            {
-                nextCalled = true;
-                return Task.CompletedTask;
-            },
-            logger: NullLogger<FinOpsBudgetMiddleware>.Instance);
-
-        var context = new DefaultHttpContext();
-        context.User = new ClaimsPrincipal(new ClaimsIdentity()); // Unauthenticated / Anonymous
-
-        await middleware.InvokeAsync(context, accountingService);
-
-        nextCalled.ShouldBeTrue();
-        await accountingService.DidNotReceiveWithAnyArgs().CheckBudgetAsync(default!, default);
-    }
-
-    [Fact]
-    public async Task API_4_FinOpsBudgetMiddleware_InvalidTenantClaim_FailsClosed_NeverSkipsAccounting()
-    {
-        var accountingService = Substitute.For<IFinOpsAccountingService>();
-        accountingService.IsEnabled.Returns(true);
-
-        bool nextCalled = false;
-        var middleware = new FinOpsBudgetMiddleware(
-            next: ctx =>
-            {
-                nextCalled = true;
-                return Task.CompletedTask;
-            },
-            logger: NullLogger<FinOpsBudgetMiddleware>.Instance);
-
-        var context = new DefaultHttpContext();
-        // Claim with invalid tenant format (e.g. contains illegal characters / punctuation)
-        var identity = new ClaimsIdentity([new Claim("tenant_id", "invalid!tenant@name#bad")], "Bearer");
-        context.User = new ClaimsPrincipal(identity);
-
-        // DT-SC-03: an authenticated caller with an invalid tenant claim is rejected, the budget check is never skipped.
-        await Should.ThrowAsync<Autheris.Domain.Exceptions.TenantClaimInvalidException>(() => middleware.InvokeAsync(context, accountingService));
-
-        nextCalled.ShouldBeFalse();
-        await accountingService.DidNotReceiveWithAnyArgs().CheckBudgetAsync(default!, default);
-    }
 
     // =========================================================================
     // R-SQL-5: WebSql Throttling returns 429 with Retry-After header
@@ -260,56 +204,7 @@ public sealed class SecurityReviewRemediationCoverageTests
     }
 
     // =========================================================================
-    // R-POL-4 & R-POL-6: Casbin wildcard tenant event & IPolicyEnforcementService defaults
     // =========================================================================
-
-    [Fact]
-    public void R_POL_4_CasbinEnforcementService_WildcardTenantNotification_DoesNotThrow()
-    {
-        using var service = new CasbinEnforcementService();
-
-        string? failedTenant = null;
-        Exception? receivedException = null;
-        service.OnPolicyReloadFailed += (tenant, ex) =>
-        {
-            failedTenant = tenant;
-            receivedException = ex;
-        };
-
-        string? reloadedTenant = null;
-        service.OnPolicyReloaded += (tenant) =>
-        {
-            reloadedTenant = tenant;
-        };
-
-        // When a global/all-tenants reload notification occurs with "*", it must not throw ArgumentException
-        // (which would happen if TenantId("*") was constructed instead of using string).
-        Should.NotThrow(() =>
-        {
-            var fieldFailed = typeof(CasbinEnforcementService).GetField("OnPolicyReloadFailed", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public);
-            var delFailed = (Action<string, Exception>?)fieldFailed?.GetValue(service);
-            delFailed?.Invoke("*", new FileNotFoundException("Test reload error"));
-
-            var fieldReloaded = typeof(CasbinEnforcementService).GetField("OnPolicyReloaded", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public);
-            var delReloaded = (Action<string>?)fieldReloaded?.GetValue(service);
-            delReloaded?.Invoke("*");
-        });
-
-        failedTenant.ShouldBe("*");
-        receivedException.ShouldNotBeNull();
-        reloadedTenant.ShouldBe("*");
-    }
-
-    [Fact]
-    public void R_POL_6_IPolicyEnforcementService_DefaultLoadMethods_ThrowNotSupportedException()
-    {
-        IPolicyEnforcementService stub = new StubPolicyEnforcementService();
-
-        Should.Throw<NotSupportedException>(() => stub.LoadPolicyFromText(new TenantId("tenant-1"), "p, admin, data, read"));
-        Should.Throw<NotSupportedException>(() => stub.LoadPolicyFromText("p, admin, data, read"));
-        Should.Throw<NotSupportedException>(() => stub.LoadPolicyFromFile(new TenantId("tenant-1"), "dummy.csv"));
-        Should.Throw<NotSupportedException>(() => stub.LoadPolicyFromFile("dummy.csv"));
-    }
 
     // =========================================================================
     // EXT-1 (Medium): dbt proposals not saved as column masks & ratchet preserved
@@ -482,34 +377,6 @@ public sealed class SecurityReviewRemediationCoverageTests
     // =========================================================================
     // IDbSessionContextInitializer: Centralized session & rollback safety
     // =========================================================================
-
-    [Fact]
-    public async Task DbSessionContextInitializer_SqliteDialect_ReturnsNullTransaction()
-    {
-        using var connection = new SqliteConnection("Data Source=:memory:");
-        await connection.OpenAsync();
-
-        var initializer = new DbSessionContextInitializer();
-
-        // SQLite dialect returns null because SQLite does not use ambient session variables
-        var tx = await initializer.InitializeSessionAsync(
-            connection,
-            DatabaseDialect.Sqlite,
-            new TenantId("tenant-test"),
-            requireTransaction: true);
-
-        tx.ShouldBeNull();
-    }
-
-    private sealed class StubPolicyEnforcementService : IPolicyEnforcementService
-    {
-        public ValueTask<TableAccessDecision> EvaluatePolicyAsync(SecurityEvaluationContext context, CancellationToken ct = default) =>
-            ValueTask.FromResult(TableAccessDecision.Allowed(context.TargetTable, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true));
-
-        public bool HasPolicies(TenantId tenant) => true;
-
-        public Task ReloadPoliciesAsync(TenantId tenant, CancellationToken ct = default) => Task.CompletedTask;
-    }
 
     private sealed class FailingRollbackDbTransaction : DbTransaction
     {

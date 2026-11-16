@@ -24,17 +24,18 @@ using Xunit;
 /// identifiers, SQL Server with a case-sensitive collation); their policies would then overwrite each other.
 /// Such statements are rejected.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class WebSqlCaseCollisionSql2Tests
 {
     private const string Tenant = "tenant_a";
 
     private static ClaimsPrincipal CreateUser() =>
-        new(new ClaimsIdentity(
+        Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(new ClaimsPrincipal(new ClaimsIdentity(
             [
                 new Claim(ClaimTypes.PrimarySid, "S-1-5-21-WEBSQL-USER"),
                 new Claim("tenant_id", Tenant)
             ],
-            "Test"));
+            "Test")));
 
     private static TableMetadata CreateTable(string schema, string table, string sourceType) => new()
     {

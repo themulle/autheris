@@ -97,7 +97,8 @@ public sealed record PageOffsetParameterExpression : Expression;
 public sealed record BinaryExpression(
     Expression Left,
     BinaryOperator Operator,
-    Expression Right) : Expression;
+    Expression Right,
+    bool IsIntegralDivision = false) : Expression;
 
 public enum BinaryOperator
 {
@@ -136,7 +137,8 @@ public sealed record LikeExpression(
     Expression Operand,
     Expression Pattern,
     Expression? Escape = null,
-    bool IsNotLike = false) : Expression;
+    bool IsNotLike = false,
+    bool IsPatternNormalized = false) : Expression;
 
 public sealed record InListExpression(
     Expression Operand,

@@ -8,7 +8,11 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Options;
 
 /// <summary>Who changes virtual filters; <see cref="IsSync"/> is the file repository sync (the only writer of managed rows).</summary>
-public sealed record VirtualFilterActor(Sid Sid, bool IsSync, IReadOnlyCollection<string>? Identifiers = null)
+public sealed record VirtualFilterActor(
+    Sid Sid,
+    bool IsSync,
+    IReadOnlyCollection<string>? Identifiers = null,
+    IReadOnlySet<string>? Roles = null)
 {
     public string FormatAllIdentifiers()
     {
@@ -109,7 +113,10 @@ public sealed partial class VirtualFilterAdministrationService
     private readonly ITableMetadataRepository? _catalog;
     private readonly Autheris.Application.Identity.Attributes.ICallerAttributeRegistry? _callerAttributes;
     private readonly SqlDataSourceOptions? _dataSources;
+    private readonly IDataOwnershipRepository? _ownership;
     private readonly System.Collections.Concurrent.ConcurrentDictionary<TenantId, List<(DateTimeOffset Timestamp, int Count)>> _removalHistory = new();
+
+    private readonly Autheris.Application.State.IDistributedClusterStateProvider _clusterState;
 
     public VirtualFilterAdministrationService(
         IVirtualFilterRepository repository,
@@ -117,7 +124,9 @@ public sealed partial class VirtualFilterAdministrationService
         IOptions<GatewayOptions>? options = null,
         IVirtualFilterSnapshotProvider? snapshots = null,
         ITableMetadataRepository? catalog = null,
-        Autheris.Application.Identity.Attributes.ICallerAttributeRegistry? callerAttributes = null)
+        Autheris.Application.Identity.Attributes.ICallerAttributeRegistry? callerAttributes = null,
+        Autheris.Application.State.IDistributedClusterStateProvider? clusterState = null,
+        IDataOwnershipRepository? ownership = null)
     {
         _callerAttributes = options?.Value?.CallerAttributes?.Enabled == true ? callerAttributes : null;
         _catalog = catalog;
@@ -127,39 +136,33 @@ public sealed partial class VirtualFilterAdministrationService
         _options = options?.Value?.VirtualFilters ?? new VirtualFilterOptions();
         _federation = _options.Federation ?? new VirtualFilterFederationOptions();
         _snapshots = snapshots;
+        _clusterState = clusterState ?? new Autheris.Application.State.InMemoryClusterStateProvider();
+        _ownership = ownership;
     }
 
     public VirtualFilterOptions Options => _options;
 
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTimeOffset> _processedWebhookDeliveries = new(StringComparer.Ordinal);
+    internal const string WebhookDedupeKeyPrefix = "vf:webhook:";
+    private static readonly TimeSpan WebhookDedupeTtl = TimeSpan.FromHours(24);
     private DateTimeOffset? _lastWebhookTriggerAt;
     private string? _lastWebhookDeliveryId;
 
     public DateTimeOffset? LastWebhookTriggerAt => _lastWebhookTriggerAt;
     public string? LastWebhookDeliveryId => _lastWebhookDeliveryId;
 
-    public bool RecordWebhookTrigger(string deliveryId, DateTimeOffset timestamp)
+    public async Task<bool> RecordWebhookTriggerAsync(string bodyHashHex, string deliveryId, DateTimeOffset timestamp, CancellationToken ct = default)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(bodyHashHex);
         ArgumentException.ThrowIfNullOrWhiteSpace(deliveryId);
 
-        // Prune entries older than 1 hour to prevent unbounded memory growth
-        if (_processedWebhookDeliveries.Count > 100)
-        {
-            var cutoff = DateTimeOffset.UtcNow.AddHours(-1);
-            foreach (var kvp in _processedWebhookDeliveries)
-            {
-                if (kvp.Value < cutoff)
-                {
-                    _processedWebhookDeliveries.TryRemove(kvp.Key, out _);
-                }
-            }
-        }
-
-        if (!_processedWebhookDeliveries.TryAdd(deliveryId, timestamp))
+        var key = WebhookDedupeKeyPrefix + bodyHashHex;
+        var existing = await _clusterState.GetAsync<string>(key, ct).ConfigureAwait(false);
+        if (existing is not null)
         {
             return false;
         }
 
+        await _clusterState.SetAsync(key, deliveryId, WebhookDedupeTtl, ct).ConfigureAwait(false);
         _lastWebhookDeliveryId = deliveryId;
         _lastWebhookTriggerAt = timestamp;
         return true;
@@ -179,6 +182,12 @@ public sealed partial class VirtualFilterAdministrationService
     {
         ArgumentNullException.ThrowIfNull(filter);
         ArgumentNullException.ThrowIfNull(actor);
+        if (actor.Roles != null && filter.Sql != null && !actor.IsSync &&
+            !actor.Roles.Contains(nameof(Autheris.Domain.Security.GatewayRole.GovernanceAdmin)))
+        {
+            throw new UnauthorizedAccessException("Only GovernanceAdmin may author a SQL virtual filter.");
+        }
+
         filter = await ValidateDefinitionAsync(filter, ct).ConfigureAwait(false);
 
         var snapshot = await _repository.LoadSnapshotAsync(ct).ConfigureAwait(false);
@@ -186,7 +195,8 @@ public sealed partial class VirtualFilterAdministrationService
         EnsureWritable(existing?.ManagedBy, filter.ManagedBy, actor, $"virtual filter '{filter.Name}'");
         ValidateSupersedes(snapshot.Filters.Where(f => f.TenantId == filter.TenantId && f.Name != filter.Name).Append(filter).ToList());
 
-        if (_options.RequireApproval && !actor.IsSync)
+        bool needsApproval = !actor.IsSync && (_options.RequireApproval || filter.Sql != null);
+        if (needsApproval)
         {
             if (existing != null && existing.Status == FilterApprovalStatus.Active)
             {
@@ -298,6 +308,18 @@ public sealed partial class VirtualFilterAdministrationService
         if (!string.Equals(expectedHash, pendingHash, StringComparison.Ordinal))
         {
             throw new VirtualFilterConflictException($"Hash mismatch for virtual filter '{name}': expected '{expectedHash}' but pending definition hash is '{pendingHash}'.");
+        }
+
+        if (!existing.PendingDeletion && (existing.Draft ?? existing) is { Sql: not null } sqlPolicy)
+        {
+            var ownership = _ownership ?? throw new InvalidOperationException("Four-eyes SQL policy approval requires data ownership metadata.");
+            foreach (var table in SqlFilterCompiler.ReferencedTables(sqlPolicy).Distinct())
+            {
+                if (!await ownership.IsAuthorizedApproverForTableAsync(table, actor.Sid, ct).ConfigureAwait(false))
+                {
+                    throw new UnauthorizedAccessException($"Approver '{actor.Sid.Value}' is not an authorized data owner or delegate for table '{table}'.");
+                }
+            }
         }
 
         if (existing.PendingDeletion)

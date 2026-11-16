@@ -94,7 +94,7 @@ public static class TableIdentifierNormalizer
 
     /// <summary>
     /// Applies dialect-specific case folding rules.
-    /// PostgreSQL/Sqlite/Databricks unquoted identifiers fold to lower case.
+    /// PostgreSQL/Databricks unquoted identifiers fold to lower case.
     /// Oracle unquoted identifiers fold to upper case.
     /// SQL Server preserves case.
     /// </summary>
@@ -108,7 +108,6 @@ public static class TableIdentifierNormalizer
         return dialect switch
         {
             DatabaseDialect.PostgreSql => identifier.ToLowerInvariant(),
-            DatabaseDialect.Sqlite => identifier.ToLowerInvariant(),
             DatabaseDialect.Databricks => identifier.ToLowerInvariant(),
             DatabaseDialect.Oracle => identifier.ToUpperInvariant(),
             DatabaseDialect.SqlServer => identifier,

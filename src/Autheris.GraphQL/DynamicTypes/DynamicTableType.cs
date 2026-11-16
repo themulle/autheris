@@ -1,3 +1,4 @@
+using System;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -141,32 +142,32 @@ public sealed class DynamicTableType : ObjectType
         var lower = dataType.ToLowerInvariant();
 
         // MSSQL special case: timestamp / rowversion is an 8-byte binary counter, NOT a DateTime!
-        if (dialect == DatabaseDialect.SqlServer && (lower == "timestamp" || lower.Contains("rowversion")))
+        if (dialect == DatabaseDialect.SqlServer && (lower == "timestamp" || lower.Contains("rowversion", StringComparison.Ordinal)))
         {
             field.Type<StringType>();
             return;
         }
 
-        if (lower.Contains("byte") || lower.Contains("bin") || lower.Contains("blob") || lower.Contains("raw") ||
-            lower.Contains("geo") || lower.Contains("point") || lower.Contains("spatial"))
+        if (lower.Contains("byte", StringComparison.Ordinal) || lower.Contains("bin", StringComparison.Ordinal) || lower.Contains("blob", StringComparison.Ordinal) || lower.Contains("raw", StringComparison.Ordinal) ||
+            lower.Contains("geo", StringComparison.Ordinal) || lower.Contains("point", StringComparison.Ordinal) || lower.Contains("spatial", StringComparison.Ordinal))
         {
             field.Type<StringType>();
             return;
         }
 
-        if (lower.Contains("bigint") || lower.Contains("long"))
+        if (lower.Contains("bigint", StringComparison.Ordinal) || lower.Contains("long", StringComparison.Ordinal))
         {
             field.Type<LongType>();
         }
-        else if (lower.Contains("int"))
+        else if (lower.Contains("int", StringComparison.Ordinal))
         {
             field.Type<IntType>();
         }
-        else if (lower.Contains("decimal") || lower.Contains("numeric") || lower.Contains("money"))
+        else if (lower.Contains("decimal", StringComparison.Ordinal) || lower.Contains("numeric", StringComparison.Ordinal) || lower.Contains("money", StringComparison.Ordinal))
         {
             field.Type<DecimalType>();
         }
-        else if (lower.Contains("bool"))
+        else if (lower.Contains("bool", StringComparison.Ordinal))
         {
             field.Type<BooleanType>();
         }
@@ -178,7 +179,7 @@ public sealed class DynamicTableType : ObjectType
         {
             field.Type<LocalTimeType>();
         }
-        else if (lower.Contains("date") || lower.Contains("time"))
+        else if (lower.Contains("date", StringComparison.Ordinal) || lower.Contains("time", StringComparison.Ordinal))
         {
             field.Type<DateTimeType>();
         }

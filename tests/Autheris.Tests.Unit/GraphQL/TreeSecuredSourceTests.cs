@@ -20,12 +20,10 @@ using Xunit;
 namespace Autheris.Tests.Unit.GraphQL;
 
 /// <summary>SQLA-06 follow-up (SQLA06F-C1..C9): the secured source of a tree table, its marker remap and its fail-closed rules.</summary>
-public sealed class TreeSecuredSourceTests : IDisposable
+public sealed class TreeSecuredSourceTests
 {
     private static readonly TableIdentity Orders = new("main", "orders");
     private readonly SecuredTreeHarness _h = new();
-
-    public void Dispose() => _h.Dispose();
 
     private static BoundParameter Param(string marker, object? value, ParameterOrigin origin = ParameterOrigin.Policy) =>
         new(marker, marker.TrimStart('@', '$'), 0, value, SqlParameterType.String, origin);
@@ -43,7 +41,7 @@ public sealed class TreeSecuredSourceTests : IDisposable
             predicates.Add(new SecurityPredicateId(Orders.ToString(), 1));
         }
 
-        return new CompiledSql(sql, parameters, TargetSqlDialect.Sqlite, SqlStatementClass.Select, predicates.ToImmutable(), "test");
+        return new CompiledSql(sql, parameters, TargetSqlDialect.SqlServer, SqlStatementClass.Select, predicates.ToImmutable(), "test");
     }
 
     private TreeSecuredSourceBuilder BuilderReturning(CompiledSql compiled)
@@ -53,7 +51,7 @@ public sealed class TreeSecuredSourceTests : IDisposable
         return new TreeSecuredSourceBuilder(_h.Factory, engine);
     }
 
-    private static Task<TreeSecuredSource> Build(TreeSecuredSourceBuilder builder, string tenant = "t1", DatabaseDialect dialect = DatabaseDialect.Sqlite, CancellationToken ct = default)
+    private static Task<TreeSecuredSource> Build(TreeSecuredSourceBuilder builder, string tenant = "t1", DatabaseDialect dialect = DatabaseDialect.PostgreSql, CancellationToken ct = default)
     {
         var meta = SecuredTreeHarness.Meta(SecuredTreeHarness.OrdersId);
         var access = SecuredTreeHarness.Resolved(meta, SecuredTreeHarness.Decision(SecuredTreeHarness.OrdersId, SecuredTreeHarness.ExistsPolicy()), tenant);
@@ -71,10 +69,10 @@ public sealed class TreeSecuredSourceTests : IDisposable
     };
 
     private static CompiledTreeQuery CompileTree(TreeSecuredSource source, TreeQueryNode? root = null) =>
-        TreeSqlCompiler.Compile(root ?? new TreeQueryNode(SecuredTreeHarness.OrdersId, ["id"]) { Limit = 10 }, Access(source), DatabaseDialect.Sqlite);
+        TreeSqlCompiler.Compile(root ?? new TreeQueryNode(SecuredTreeHarness.OrdersId, ["id"]) { Limit = 10 }, Access(source), DatabaseDialect.PostgreSql);
 
     private static TreeSecuredSource Source(string sql, params BoundParameter[] parameters) =>
-        new(sql, [.. parameters], TargetSqlDialect.Sqlite);
+        new(sql, [.. parameters], TargetSqlDialect.SqlServer);
 
     // ---- splice and remap ------------------------------------------------------------------------------------------------
 
@@ -84,7 +82,7 @@ public sealed class TreeSecuredSourceTests : IDisposable
         var access = await _h.TreeAccessAsync(SecuredTreeHarness.OrdersId, SecuredTreeHarness.ExistsPolicy(), "t1");
         var map = new Dictionary<TableIdentifier, TreeTableAccess> { [SecuredTreeHarness.OrdersId] = access };
 
-        var compiled = TreeSqlCompiler.Compile(new TreeQueryNode(SecuredTreeHarness.OrdersId, ["id"]) { Limit = 10 }, map, DatabaseDialect.Sqlite);
+        var compiled = TreeSqlCompiler.Compile(new TreeQueryNode(SecuredTreeHarness.OrdersId, ["id"]) { Limit = 10 }, map, DatabaseDialect.PostgreSql);
 
         access.SecuredSource.ShouldNotBeNull();
         compiled.Sql.ShouldContain("FROM (SELECT");
@@ -129,7 +127,7 @@ public sealed class TreeSecuredSourceTests : IDisposable
                 b)
         };
 
-        var compiled = TreeSqlCompiler.Compile(root, access, DatabaseDialect.Sqlite);
+        var compiled = TreeSqlCompiler.Compile(root, access, DatabaseDialect.PostgreSql);
 
         compiled.Sql.ShouldNotContain("@p0");
         compiled.Parameters.Values.Count(v => Equals(v, "other")).ShouldBe(1);
@@ -157,7 +155,7 @@ public sealed class TreeSecuredSourceTests : IDisposable
     [InlineData("SELECT 1 -- @p0 here\nFROM t WHERE x = @p0", "SELECT 1 -- @p0 here\nFROM t WHERE x = @gq9")]
     public void SQLA06F_MarkerRemap_DoesNotTouchLiteralsOrQuotedIdentifiers(string sql, string expected)
     {
-        TreeSecuredSourceMarkers.Remap(sql, TargetSqlDialect.Sqlite, new Dictionary<string, string> { ["@p0"] = "@gq9" }).ShouldBe(expected);
+        TreeSecuredSourceMarkers.Remap(sql, TargetSqlDialect.SqlServer, new Dictionary<string, string> { ["@p0"] = "@gq9" }).ShouldBe(expected);
     }
 
     [Trait("Category", "Security")]
@@ -166,10 +164,10 @@ public sealed class TreeSecuredSourceTests : IDisposable
     {
         var map = new Dictionary<string, string> { ["?1"] = "@gq1", ["?10"] = "@gq10" };
 
-        TreeSecuredSourceMarkers.Remap("SELECT '?1' WHERE a = ?1 AND b = ?10 AND c = ?1", TargetSqlDialect.Sqlite, map)
+        TreeSecuredSourceMarkers.Remap("SELECT '?1' WHERE a = ?1 AND b = ?10 AND c = ?1", TargetSqlDialect.SqlServer, map)
             .ShouldBe("SELECT '?1' WHERE a = @gq1 AND b = @gq10 AND c = @gq1");
-        Should.Throw<GatewaySecurityException>(() => TreeSecuredSourceMarkers.Remap("SELECT 1 WHERE a = ?1 AND b = ?10 AND c = ?", TargetSqlDialect.Sqlite, map));
-        Should.Throw<GatewaySecurityException>(() => TreeSecuredSourceMarkers.Remap("SELECT 1 WHERE a = ?1 AND b = ?10 AND c = ?2", TargetSqlDialect.Sqlite, map));
+        Should.Throw<GatewaySecurityException>(() => TreeSecuredSourceMarkers.Remap("SELECT 1 WHERE a = ?1 AND b = ?10 AND c = ?", TargetSqlDialect.SqlServer, map));
+        Should.Throw<GatewaySecurityException>(() => TreeSecuredSourceMarkers.Remap("SELECT 1 WHERE a = ?1 AND b = ?10 AND c = ?2", TargetSqlDialect.SqlServer, map));
     }
 
     [Trait("Category", "Security")]
@@ -191,7 +189,7 @@ public sealed class TreeSecuredSourceTests : IDisposable
     public void SQLA06F_MarkerRemap_AnomalyDeniesTheRequest(string sql)
     {
         Should.Throw<GatewaySecurityException>(() =>
-            TreeSecuredSourceMarkers.Remap(sql, TargetSqlDialect.Sqlite, new Dictionary<string, string> { ["@p0"] = "@gq0" }))
+            TreeSecuredSourceMarkers.Remap(sql, TargetSqlDialect.SqlServer, new Dictionary<string, string> { ["@p0"] = "@gq0" }))
             .ErrorCode.ShouldBe("TREE_ROW_POLICY_UNSUPPORTED");
     }
 
@@ -210,7 +208,7 @@ public sealed class TreeSecuredSourceTests : IDisposable
                 Where = new TreeComparison("email", TreeFilterOperator.Eq, value)
             };
 
-            var compiled = TreeSqlCompiler.Compile(root, map, DatabaseDialect.Sqlite);
+            var compiled = TreeSqlCompiler.Compile(root, map, DatabaseDialect.PostgreSql);
 
             if (value != "@gq1")
             {
@@ -218,8 +216,6 @@ public sealed class TreeSecuredSourceTests : IDisposable
             }
 
             compiled.Parameters.Values.ShouldContain(value);
-            using var doc = JsonDocument.Parse(_h.RunTree(root, map));
-            doc.RootElement.GetArrayLength().ShouldBe(0);
         }
     }
 
@@ -298,30 +294,30 @@ public sealed class TreeSecuredSourceTests : IDisposable
                 new NamedTableSource(new SqlQualifiedName([new SqlIdentifier("main", true), new SqlIdentifier("consents", true)]), new SqlIdentifier("c", true)),
                 inner, null, null),
             null, null));
-        var policy = new PolicyPredicateRowPolicy(PolicyPredicate.Create(outer, new Dictionary<string, PolicyValue>()), TargetSqlDialect.Sqlite, new PolicyPredicateRenderer());
+        var policy = new PolicyPredicateRowPolicy(PolicyPredicate.Create(outer, new Dictionary<string, PolicyValue>()), TargetSqlDialect.PostgreSql, new PolicyPredicateRenderer());
         var access = SecuredTreeHarness.Resolved(SecuredTreeHarness.Meta(SecuredTreeHarness.OrdersId), SecuredTreeHarness.Decision(SecuredTreeHarness.OrdersId, policy), "t1");
 
-        await Should.ThrowAsync<GatewaySecurityException>(() => _h.Builder.BuildAsync(access, SecuredTreeHarness.DataSource, DatabaseDialect.Sqlite, CancellationToken.None));
+        await Should.ThrowAsync<GatewaySecurityException>(() => _h.Builder.BuildAsync(access, SecuredTreeHarness.DataSource, DatabaseDialect.PostgreSql, CancellationToken.None));
     }
 
     [Trait("Category", "Security")]
     [Fact]
     public async Task SQLA06F_UncatalogedSubqueryTable_DeniesRequest()
     {
-        using var h = new SecuredTreeHarness(catalogTables: ["orders"]);
+        var h = new SecuredTreeHarness(catalogTables: ["orders"]);
 
-        await Should.ThrowAsync<GatewaySecurityException>(() => h.TreeOrderIdsAsync(SecuredTreeHarness.ExistsPolicy(), "t1"));
+        await Should.ThrowAsync<GatewaySecurityException>(() => h.TreeAccessAsync(SecuredTreeHarness.OrdersId, SecuredTreeHarness.ExistsPolicy(), "t1"));
     }
 
     [Trait("Category", "Security")]
     [Fact]
     public async Task SQLA06F_DependentWithoutTenantColumn_DeniesRequest()
     {
-        using var h = new SecuredTreeHarness(
+        var h = new SecuredTreeHarness(
             new GatewayOptions { DataSources = new SqlDataSourceOptions { RequireTenantColumn = true } },
             id => SecuredTreeHarness.DependentMetadata(id, withTenant: false));
 
-        await Should.ThrowAsync<GatewaySecurityException>(() => h.TreeOrderIdsAsync(SecuredTreeHarness.ExistsPolicy(), "t1"));
+        await Should.ThrowAsync<GatewaySecurityException>(() => h.TreeAccessAsync(SecuredTreeHarness.OrdersId, SecuredTreeHarness.ExistsPolicy(), "t1"));
     }
 
     [Trait("Category", "Security")]
@@ -331,9 +327,9 @@ public sealed class TreeSecuredSourceTests : IDisposable
         var access = SecuredTreeHarness.Resolved(SecuredTreeHarness.Meta(SecuredTreeHarness.OrdersId), SecuredTreeHarness.Decision(SecuredTreeHarness.OrdersId, SecuredTreeHarness.ExistsPolicy()), "t1");
 
         await Should.ThrowAsync<GatewaySecurityException>(() =>
-            new TreeSecuredSourceBuilder(null, _h.Engine).BuildAsync(access, SecuredTreeHarness.DataSource, DatabaseDialect.Sqlite, CancellationToken.None));
+            new TreeSecuredSourceBuilder(null, _h.Engine).BuildAsync(access, SecuredTreeHarness.DataSource, DatabaseDialect.PostgreSql, CancellationToken.None));
         await Should.ThrowAsync<GatewaySecurityException>(() =>
-            new TreeSecuredSourceBuilder(_h.Factory, null).BuildAsync(access, SecuredTreeHarness.DataSource, DatabaseDialect.Sqlite, CancellationToken.None));
+            new TreeSecuredSourceBuilder(_h.Factory, null).BuildAsync(access, SecuredTreeHarness.DataSource, DatabaseDialect.PostgreSql, CancellationToken.None));
     }
 
     [Trait("Category", "Security")]
@@ -350,7 +346,7 @@ public sealed class TreeSecuredSourceTests : IDisposable
         var text = TableAccessDecision.Allowed(SecuredTreeHarness.OrdersId, new Dictionary<string, ColumnAccessLevel>(), "\"autheris_target\".\"id\" = 1", hasUnconstrainedColumnAllow: true);
         var access = SecuredTreeHarness.Resolved(SecuredTreeHarness.Meta(SecuredTreeHarness.OrdersId), text, "t1");
 
-        await Should.ThrowAsync<GatewaySecurityException>(() => _h.Builder.BuildAsync(access, SecuredTreeHarness.DataSource, DatabaseDialect.Sqlite, CancellationToken.None));
+        await Should.ThrowAsync<GatewaySecurityException>(() => _h.Builder.BuildAsync(access, SecuredTreeHarness.DataSource, DatabaseDialect.PostgreSql, CancellationToken.None));
     }
 
     [Trait("Category", "Security")]
@@ -414,12 +410,12 @@ public sealed class TreeSecuredSourceTests : IDisposable
         {
             ColumnMasks = new ColumnMaskPolicy(new Dictionary<string, MaskSpec>
             {
-                ["email"] = SqlDataMaskingProvider.BuildUnkeyedMaskSpec(null, "email", DatabaseDialect.Sqlite)
+                ["email"] = SqlDataMaskingProvider.BuildUnkeyedMaskSpec(null, "email", DatabaseDialect.PostgreSql)
             })
         };
         var access = SecuredTreeHarness.Resolved(meta, decision, "t1");
 
-        var source = await _h.Builder.BuildAsync(access, SecuredTreeHarness.DataSource, DatabaseDialect.Sqlite, CancellationToken.None);
+        var source = await _h.Builder.BuildAsync(access, SecuredTreeHarness.DataSource, DatabaseDialect.PostgreSql, CancellationToken.None);
 
         source.Parameters.ShouldNotContain(p => p.Origin == ParameterOrigin.Mask);
         source.Sql.ShouldNotContain("***");

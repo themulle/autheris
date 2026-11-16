@@ -1,4 +1,5 @@
 using Autheris.Api.Endpoints;
+using Autheris.Tests.Common.Hosting;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.Routing;
@@ -16,18 +17,23 @@ namespace Autheris.Tests.Integration;
 /// data-reaching endpoint cannot ship unstamped (the gate would deny it with TransportUnset).
 /// </summary>
 [Trait("Category", "Security")]
-public sealed class IngressTransportCoverageTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class IngressTransportCoverageTests : IClassFixture<IngressTransportCoverageTests.HostFixture>
 {
     private readonly WebApplicationFactory<Program> _factory;
 
-    public IngressTransportCoverageTests(WebApplicationFactory<Program> factory)
+    public IngressTransportCoverageTests(HostFixture factory)
     {
-        _factory = factory.WithWebHostBuilder(builder =>
+        _factory = factory;
+    }
+
+    public sealed class HostFixture : IntegrationHost
+    {
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
             builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
             builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("IngressTransportCoverageTests"));
-        });
+        }
     }
 
     [Fact]

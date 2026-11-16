@@ -23,14 +23,13 @@ public sealed partial class RowFilterSqlBuilder : IRowFilterSqlBuilder
     };
 
     private readonly IRlsFilterGenerator _rlsFilterGenerator;
-    private readonly RowFilterSubqueryStrategy _subqueryStrategy;
     private static readonly TypedRowFilterBuilder _typedBuilder = new();
     private static readonly PolicyPredicateRenderer _renderer = new();
 
     public RowFilterSqlBuilder(IRlsFilterGenerator? rlsFilterGenerator = null, IOptions<Autheris.Domain.Options.GatewayOptions>? options = null)
     {
         _rlsFilterGenerator = rlsFilterGenerator ?? RlsFilterGenerator.Instance;
-        _subqueryStrategy = options?.Value.RowFilters?.SubqueryStrategy ?? RowFilterSubqueryStrategy.Exists;
+        _ = options;
     }
 
     public string? BuildCombinedRowFilter(
@@ -129,11 +128,6 @@ public sealed partial class RowFilterSqlBuilder : IRowFilterSqlBuilder
         ref int paramIndex,
         bool isDeny = false)
     {
-        if (filter.FilterType == RowFilterType.SubqueryCorrelated)
-        {
-            return _rlsFilterGenerator.BuildCorrelatedSubquery(filter, dialect, _subqueryStrategy, isDeny);
-        }
-
         if (filter.FilterType == RowFilterType.CrossSourceSetFilter)
         {
             return _rlsFilterGenerator.BuildCrossSourceSetFilter(filter, 500, dialect);
@@ -270,11 +264,6 @@ public sealed partial class RowFilterSqlBuilder : IRowFilterSqlBuilder
 
     public string FormatCondition(ConsentRowFilter filter, DatabaseDialect dialect = DatabaseDialect.SqlServer, bool isDeny = false)
     {
-        if (filter.FilterType == RowFilterType.SubqueryCorrelated)
-        {
-            return _rlsFilterGenerator.BuildCorrelatedSubquery(filter, dialect, _subqueryStrategy, isDeny);
-        }
-
         if (filter.FilterType == RowFilterType.CrossSourceSetFilter)
         {
             return _rlsFilterGenerator.BuildCrossSourceSetFilter(filter, 500, dialect);

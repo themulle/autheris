@@ -222,6 +222,20 @@ public sealed class DatabricksDialectGenerator : SqlDialectGeneratorBase
         base.GenerateExpression(expression, ref builder, context);
     }
 
+    protected override bool RequiresCustomBinaryFormat(BinaryExpression b) =>
+        b.Operator == BinaryOperator.Divide && b.IsIntegralDivision;
+
+    protected override void FormatBinaryExpression(ref ValueStringBuilder builder, BinaryExpression b, SqlEmitterContext context)
+    {
+        if (b.Operator == BinaryOperator.Divide && b.IsIntegralDivision)
+        {
+            FormatStandardBinary(ref builder, b, context, "DIV");
+            return;
+        }
+
+        base.FormatBinaryExpression(ref builder, b, context);
+    }
+
     // ---- typed column masks ----
 
     private static readonly Regex NativeTypeRegex = new(
@@ -353,8 +367,69 @@ public sealed class DatabricksDialectGenerator : SqlDialectGeneratorBase
                 break;
             }
 
+            case Governance.MaskKind.TruncateDate:
+            {
+                string unitFrag = (args.TruncateUnit ?? throw MissingArgument(mask, "TruncateUnit")) switch
+                {
+                    Governance.MaskDateTruncateUnit.Year => "'year'",
+                    Governance.MaskDateTruncateUnit.Month => "'month'",
+                    Governance.MaskDateTruncateUnit.Day => "'day'",
+                    _ => throw UnsupportedConstruct($"column mask {mask.Kind}", TargetDialect)
+                };
+                builder.Append("CAST(DATE_TRUNC(");
+                AppendConstantFragment(ref builder, context, unitFrag);
+                Put(ref builder, ", ", column, ")");
+                AppendStructural(ref builder, context, " AS " + type + ")");
+                break;
+            }
+
+            case Governance.MaskKind.BucketNumber:
+            {
+                string width = context.BindPolicy(args.BucketWidth ?? throw MissingArgument(mask, "BucketWidth"));
+                string calc = type.StartsWith("DOUBLE", StringComparison.Ordinal) || type.StartsWith("FLOAT", StringComparison.Ordinal)
+                    ? "DOUBLE"
+                    : "DECIMAL(38, 10)";
+                Put(ref builder, "CAST(FLOOR(CAST(", column, " AS ");
+                AppendStructural(ref builder, context, calc);
+                Put(ref builder, ") / CAST(", width, " AS ");
+                AppendStructural(ref builder, context, calc);
+                Put(ref builder, ")) * CAST(", width, " AS ");
+                AppendStructural(ref builder, context, calc);
+                AppendStructural(ref builder, context, ") AS " + type + ")");
+                break;
+            }
+
+            case Governance.MaskKind.RoundNumber:
+            {
+                string digits = context.BindPolicy(args.RoundDigits ?? throw MissingArgument(mask, "RoundDigits"));
+                Put(ref builder, "CAST(ROUND(", column, ", CAST(", digits, " AS INT))");
+                AppendStructural(ref builder, context, " AS " + type + ")");
+                break;
+            }
+
+            case Governance.MaskKind.EmailDomain:
+            {
+                string text = "CAST(" + column + " AS STRING)";
+                Put(ref builder, "CASE WHEN ", column, " IS NULL THEN NULL WHEN LOCATE(");
+                AppendConstantFragment(ref builder, context, "'@'");
+                Put(ref builder, ", ", text, ") > ");
+                AppendInlineInteger(ref builder, 1, context);
+                builder.Append(" AND LOCATE(");
+                AppendConstantFragment(ref builder, context, "'@'");
+                Put(ref builder, ", ", text, ") < LENGTH(", text, ") THEN CONCAT(");
+                AppendConstantFragment(ref builder, context, "'***@'");
+                Put(ref builder, ", SUBSTRING(", text, ", LOCATE(");
+                AppendConstantFragment(ref builder, context, "'@'");
+                Put(ref builder, ", ", text, ") + ");
+                AppendInlineInteger(ref builder, 1, context);
+                builder.Append(")) ELSE ");
+                AppendConstantFragment(ref builder, context, "'***@***'");
+                builder.Append(" END");
+                break;
+            }
+
             default:
-                // Databricks has no keyed HMAC (InDbHmac = false): the compiler degrades HMAC to Redact before emission.
+                // Databricks has no keyed HMAC (InDbHmac = false): the compiler degrades HMAC and Tokenize to Redact before emission.
                 throw UnsupportedConstruct($"column mask {mask.Kind}", TargetDialect);
         }
     }

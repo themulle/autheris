@@ -10,6 +10,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class ClientTierResolverSecurityTests
 {
     private readonly ClientTierResolver _resolver = new(NullLogger<ClientTierResolver>.Instance);

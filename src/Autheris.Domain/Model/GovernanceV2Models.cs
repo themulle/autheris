@@ -5,46 +5,6 @@ using System.Collections.Generic;
 using System.Net;
 using Autheris.Domain.Common;
 
-public sealed record SecurityEvaluationContext(
-    Sid UserSid,
-    IReadOnlyCollection<Sid> GroupSids,
-    TenantId Tenant,
-    TableIdentifier TargetTable,
-    IReadOnlyCollection<string> RequestedColumns,
-    IPAddress ClientIp,
-    DateTimeOffset Timestamp,
-    string? PurposeId,
-    IReadOnlyDictionary<string, object?>? Attributes = null,
-    // SQL dialect of the target table; correlated row filters are generated with its quoting rules.
-    DatabaseDialect? TargetDialect = null
-)
-{
-    /// <summary>
-    /// The catalog columns of the target table (WP-X0l). A typed row filter parsed from a rule's admin text may reference only these;
-    /// without it, the requested columns bound the check.
-    /// </summary>
-    public IReadOnlyList<string>? TableColumns { get; init; }
-
-    /// <summary>
-    /// true when the data source evaluates access as the end user (delegated / OBO enforcement). Decisions for
-    /// such sources are never shared between users: the decision cache key always carries the user.
-    /// </summary>
-    public bool IsDelegatedSource { get; init; }
-
-    public string? Department => GetAttribute("department") ?? GetAttribute("dept");
-    public string? Region => GetAttribute("region") ?? GetAttribute("country");
-    public string? ClearanceLevel => GetAttribute("clearance") ?? GetAttribute("clearance_level");
-
-    public string? GetAttribute(string key)
-    {
-        if (Attributes != null && Attributes.TryGetValue(key, out var val) && val != null)
-        {
-            return val.ToString();
-        }
-        return null;
-    }
-}
-
 public enum LineageNodeType
 {
     Table = 0,
@@ -146,7 +106,9 @@ public sealed record CallingApplicationUsage(
     IReadOnlyList<string> Versions,
     IReadOnlyList<string> QueryNames,
     int DistinctActors = 0,
-    IReadOnlyList<string>? ActorSids = null
+    IReadOnlyList<string>? ActorSids = null,
+    string? ClientId = null,
+    bool IsClientAsserted = false
 );
 
 public sealed record ConsumerAppDailySummary(
@@ -162,6 +124,16 @@ public sealed record ConsumerAppDailySummary(
     IReadOnlyList<string>? ActorSids = null
 )
 {
+    /// <summary>
+    /// Token-derived OAuth client identifier (azp/appid/client_id), when present.
+    /// </summary>
+    public string? ClientId { get; init; }
+
+    /// <summary>
+    /// True when the application label is client-asserted from request headers rather than token-derived.
+    /// </summary>
+    public bool? IsClientAsserted { get; init; }
+
     /// <summary>
     /// MISC-17: HMAC-pseudonymised actor identifiers of this (day, application) cell, for internal k-anonymity decisions only
     /// (the union of folded cells must count true distinct actors). Never serialized.

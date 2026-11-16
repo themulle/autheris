@@ -76,6 +76,17 @@ public sealed class InMemoryProcedureRegistry : IProcedureRegistry
         });
     }
 
+    public bool TryMarkPending(ProcedureDefinition expected, string reason)
+    {
+        ArgumentNullException.ThrowIfNull(expected);
+        return TryUpdate(expected, current => current with
+        {
+            State = ProcedureState.Pending,
+            ValidatedAt = null,
+            DisabledReason = reason
+        });
+    }
+
     private bool TryUpdate(ProcedureDefinition expected, Func<RegisteredProcedure, RegisteredProcedure> update)
     {
         while (_items.TryGetValue(expected.Name, out var current))

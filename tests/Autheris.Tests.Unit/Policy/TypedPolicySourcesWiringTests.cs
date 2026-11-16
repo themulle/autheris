@@ -50,7 +50,7 @@ public sealed class TypedPolicySourcesWiringTests
     private static TableMetadata Meta() => new()
     {
         Identifier = Orders,
-        Table = new Table { SourceName = "sales", SchemaName = "main", TableName = "orders", SourceType = "SQLite", IsActive = true },
+        Table = new Table { SourceName = "sales", SchemaName = "main", TableName = "orders", SourceType = "PostgreSql", IsActive = true },
         Columns = [new TableColumn { ColumnName = "id", DataType = "INTEGER" }, new TableColumn { ColumnName = "region", DataType = "TEXT" }]
     };
 
@@ -75,7 +75,8 @@ public sealed class TypedPolicySourcesWiringTests
     }
 
     private static ClaimsPrincipal User() =>
-        new(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, UserSid.Value), new Claim("tenant_id", Tenant.Value)], "Bearer"));
+        Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(
+            new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, UserSid.Value), new Claim("tenant_id", Tenant.Value)], "Bearer")));
 
     private static void AssertTyped(TableAccessDecision decision)
     {
@@ -97,6 +98,7 @@ public sealed class TypedPolicySourcesWiringTests
             UserSid = UserSid,
             TenantId = Tenant,
             GroupSids = new HashSet<Sid>(),
+            GroupResolutionStatus = Autheris.Domain.Identity.GroupResolutionStatus.Complete,
             TenantRoles = new HashSet<string>(),
             ClusterRoles = new HashSet<string>(),
             AuthenticationScheme = "Bearer"
@@ -165,7 +167,7 @@ public sealed class TypedPolicySourcesWiringTests
     private static TableMetadata MetaWithSensitiveColumn() => new()
     {
         Identifier = Orders,
-        Table = new Table { SourceName = "sales", SchemaName = "main", TableName = "orders", SourceType = "SQLite", IsActive = true },
+        Table = new Table { SourceName = "sales", SchemaName = "main", TableName = "orders", SourceType = "PostgreSql", IsActive = true },
         Columns =
         [
             new TableColumn { ColumnName = "id", DataType = "INTEGER" },
@@ -202,6 +204,7 @@ public sealed class TypedPolicySourcesWiringTests
             UserSid = UserSid,
             TenantId = Tenant,
             GroupSids = new HashSet<Sid>(),
+            GroupResolutionStatus = Autheris.Domain.Identity.GroupResolutionStatus.Complete,
             TenantRoles = new HashSet<string>(),
             ClusterRoles = new HashSet<string>(),
             AuthenticationScheme = "Bearer"
@@ -352,13 +355,4 @@ public sealed class TypedPolicySourcesWiringTests
             .ShouldBeSameAs(provider.GetRequiredService<Autheris.Application.Policy.Interfaces.IAccessProfileCache>());
     }
 
-    [Fact]
-    public void CasbinService_GetsTheRowPolicyFactory()
-    {
-        using var provider = BuildProvider();
-
-        var casbin = provider.GetRequiredService<IPolicyEnforcementService>();
-
-        FieldsOf(casbin, typeof(RowPolicyFactory)).ShouldHaveSingleItem().ShouldNotBeNull();
-    }
 }

@@ -16,17 +16,6 @@ using System.Collections.Generic;
 /// </summary>
 public static class SqlFunctionAllowlists
 {
-    // Common (ANSI/Trino) functions that SQLite cannot execute and that no generator rule maps: advertising them made the provider
-    // answer 502 SQL_PROVIDER_ERROR. Without an entry the compiler rejects the call (fail closed, 4xx) before the database sees it.
-    // Declared before the allowlist properties: static initializers run in textual order.
-    private static readonly string[] SqliteUnsupportedCommonFunctions =
-    [
-        "stddev", "stddev_pop", "stddev_samp", "variance", "var_pop", "var_samp", "greatest", "least",
-        "lpad", "rpad", "reverse", "char_length", "character_length",
-        // GAP-019: SQLite has no time zone database; GraphQL timeBuckets with timeZone is the supported path.
-        "convert_timezone",
-    ];
-
     private static readonly string[] CommonFunctions =
     [
         // Aggregates
@@ -62,13 +51,6 @@ public static class SqlFunctionAllowlists
         "day", "isnull", "iif", "choose", "len", "datalength", "charindex", "patindex", "stuff",
         "string_agg", "concat_ws", "replicate", "str", "try_cast", "try_convert", "convert", "isnumeric",
         "square", "pi", "degrees", "radians", "count_big", "stdev", "stdevp", "var", "varp", "translate",
-    ];
-
-    // closed list. printf/format (unbounded padding width) are excluded, like every name of SqlFunctionPolicy.DefaultDeniedFunctions.
-    private static readonly string[] SqliteFunctions =
-    [
-        "date", "time", "datetime", "julianday", "strftime", "unixepoch", "ifnull", "iif", "instr",
-        "group_concat", "total", "unicode", "char", "trunc", "pi",
     ];
 
     private static readonly string[] OracleFunctions =
@@ -207,9 +189,6 @@ public static class SqlFunctionAllowlists
     /// <summary>SQL Server allowlist (ANSI + T-SQL date/string/conversion functions).</summary>
     public static IReadOnlySet<string> SqlServer { get; } = Create(CommonFunctions, SqlServerFunctions);
 
-    /// <summary>SQLite allowlist (ANSI + SQLite date/string/aggregate functions).</summary>
-    public static IReadOnlySet<string> Sqlite { get; } = Create(CommonFunctions, SqliteFunctions, except: SqliteUnsupportedCommonFunctions);
-
     /// <summary>Oracle allowlist (ANSI + Oracle date/string/null-handling functions).</summary>
     public static IReadOnlySet<string> Oracle { get; } = Create(CommonFunctions, OracleFunctions);
 
@@ -222,7 +201,6 @@ public static class SqlFunctionAllowlists
     {
         TargetSqlDialect.PostgreSql => PostgreSql,
         TargetSqlDialect.SqlServer => SqlServer,
-        TargetSqlDialect.Sqlite => Sqlite,
         TargetSqlDialect.Oracle => Oracle,
         TargetSqlDialect.DuckDb => DuckDb,
         TargetSqlDialect.Databricks => Databricks,

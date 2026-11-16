@@ -64,7 +64,7 @@ public sealed class MetadataGuardedConnectionTests
     public async Task SEC_SIMPL_141_SchemaOnlyAndKeyInfoBehavior_AreRejected()
     {
         var inner = new CountingConnection();
-        await using var connection = new MetadataGuardedConnection(inner, DatabaseDialect.Sqlite);
+        await using var connection = new MetadataGuardedConnection(inner, DatabaseDialect.PostgreSql);
         await using var command = connection.CreateCommand();
         command.CommandText = "SELECT 1";
 
@@ -78,7 +78,6 @@ public sealed class MetadataGuardedConnectionTests
     [InlineData(DatabaseDialect.SqlServer, "SELECT * FROM sys.objects")]
     [InlineData(DatabaseDialect.Oracle, "SELECT * FROM all_tab_columns")]
     [InlineData(DatabaseDialect.Databricks, "SHOW TABLES")]
-    [InlineData(DatabaseDialect.Sqlite, "SELECT * FROM information_schema.columns")]
     public async Task SEC_SIMPL_141_Guard_AppliesDialectRules_ForEveryDialect(DatabaseDialect dialect, string sql)
     {
         var inner = new CountingConnection();
@@ -94,10 +93,9 @@ public sealed class MetadataGuardedConnectionTests
     public async Task SEC_SIMPL_141_Factory_ReturnsGuardedConnection_AndSessionPinsRunOnRawConnection()
     {
         var factory = new SqlConnectionFactory();
-        await using var connection = await factory.CreateOpenConnectionAsync(
-            new DataSourceConnectionOptions { Provider = "Sqlite", ConnectionString = "Data Source=:memory:" });
+        var inner = new CountingConnection();
+        await using var connection = factory.WrapWithMetadataGuard(inner, DatabaseDialect.PostgreSql);
 
-        // the SQLite pins (PRAGMA trusted_schema and its read-back) ran on the raw connection while opening.
         connection.ShouldBeOfType<MetadataGuardedConnection>();
         await using var command = connection.CreateCommand();
         command.CommandText = "SELECT 1";
@@ -118,8 +116,7 @@ public sealed class MetadataGuardedConnectionTests
             .AddSingleton(audit)
             .BuildServiceProvider();
         var factory = new SqlConnectionFactory(null, null, services);
-        await using var connection = await factory.CreateOpenConnectionAsync(
-            new DataSourceConnectionOptions { Provider = "Sqlite", ConnectionString = "Data Source=:memory:" });
+        await using var connection = factory.WrapWithMetadataGuard(new CountingConnection(), DatabaseDialect.PostgreSql);
         await using var command = connection.CreateCommand();
         command.CommandText = Catalog;
 

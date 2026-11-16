@@ -939,6 +939,7 @@ public sealed class ParquetOutputNegotiationTests
                 Arg.Any<IReadOnlyDictionary<string, object?>?>(),
                 Arg.Any<ClaimsPrincipal>(),
                 Arg.Any<TenantId>(),
+                Arg.Any<Autheris.Application.Sql.Endpoints.Interfaces.SqlEndpointInvocation>(),
                 Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(result));
         return service;
@@ -981,6 +982,7 @@ public sealed class ParquetOutputNegotiationTests
             Arg.Any<IReadOnlyDictionary<string, object?>?>(),
             Arg.Any<ClaimsPrincipal>(),
             Arg.Any<TenantId>(),
+            Arg.Any<Autheris.Application.Sql.Endpoints.Interfaces.SqlEndpointInvocation>(),
             Arg.Any<CancellationToken>());
     }
 

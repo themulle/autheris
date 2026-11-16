@@ -11,6 +11,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class SubgraphCanarySecurityTests
 {
     private readonly SubgraphCanaryRouter _router = new(NullLogger<SubgraphCanaryRouter>.Instance);

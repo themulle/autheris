@@ -201,7 +201,7 @@ public static class GatewayMcpServer
     }
 
     /// <summary>
-    /// A native resource read through the guardrail (Casbin ABAC on the objects the resource discloses, PII scrubbing, token budget,
+    /// A native resource read through the guardrail (the access decision point on the objects the resource discloses, PII scrubbing, token budget,
     /// MCP_TOOL_EXECUTION audit), like the dataset template's describe_dataset call. Unknown, closed and denied resources answer alike.
     /// </summary>
     internal static async Task<ReadResourceResult> ReadGuardedNativeResourceAsync(IServiceProvider services, string uri, IMcpResourceProvider provider, CancellationToken ct)
@@ -323,7 +323,7 @@ public static class GatewayMcpServer
         new Prompt
         {
             Name = "audit_access_compliance",
-            Description = "Audits access permissions, column masking rules, and compliance requirements for a dataset and principal.",
+            Description = "Audits access permissions, column masking rules, and compliance requirements of the current caller for a dataset.",
             Arguments =
             [
                 new PromptArgument
@@ -331,12 +331,6 @@ public static class GatewayMcpServer
                     Name = "dataset",
                     Description = "Dataset identifier in domain.schema.table format",
                     Required = true
-                },
-                new PromptArgument
-                {
-                    Name = "principal",
-                    Description = "Optional user identity or role to audit (defaults to current caller)",
-                    Required = false
                 }
             ]
         }
@@ -350,10 +344,17 @@ public static class GatewayMcpServer
             throw new McpProtocolException($"Prompt '{promptName}' not found.", McpErrorCode.InvalidParams);
         }
 
-        var args = arguments ?? new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
-        if (string.Equals(promptName, "explore_dataset", StringComparison.OrdinalIgnoreCase))
+        var isExplore = string.Equals(promptName, "explore_dataset", StringComparison.OrdinalIgnoreCase);
+        var isAudit = string.Equals(promptName, "audit_access_compliance", StringComparison.OrdinalIgnoreCase);
+        if (!isExplore && !isAudit)
         {
-            var ds = args.TryGetValue("dataset", out var d) && !string.IsNullOrWhiteSpace(d) ? d : "{dataset}";
+            throw new McpProtocolException($"Prompt '{promptName}' not found.", McpErrorCode.InvalidParams);
+        }
+
+        // The prompt text never contains an unvalidated string. Invalid input answers a fixed message (no echo).
+        var ds = ValidatedPromptDataset(arguments);
+        if (isExplore)
+        {
             return new GetPromptResult
             {
                 Description = $"Dataset Exploration Workflow for {ds}",
@@ -374,31 +375,57 @@ public static class GatewayMcpServer
             };
         }
 
-        if (string.Equals(promptName, "audit_access_compliance", StringComparison.OrdinalIgnoreCase))
+        return new GetPromptResult
         {
-            var ds = args.TryGetValue("dataset", out var d) && !string.IsNullOrWhiteSpace(d) ? d : "{dataset}";
-            var principal = args.TryGetValue("principal", out var p) && !string.IsNullOrWhiteSpace(p) ? p : "current caller";
-            return new GetPromptResult
-            {
-                Description = $"Access and Compliance Audit for {ds} (Principal: {principal})",
-                Messages =
-                [
-                    new PromptMessage
+            Description = $"Access and Compliance Audit for {ds} (current caller)",
+            Messages =
+            [
+                new PromptMessage
+                {
+                    Role = ModelContextProtocol.Protocol.Role.User,
+                    Content = new TextContentBlock
                     {
-                        Role = ModelContextProtocol.Protocol.Role.User,
-                        Content = new TextContentBlock
-                        {
-                            Text = $"Perform an access and compliance audit on dataset '{ds}' for principal '{principal}':\n" +
-                                   $"1. Check effective authorization and row-level security constraints.\n" +
-                                   $"2. List all columns with their sensitivity classifications and masking states (clear, mask, deny).\n" +
-                                   $"3. Inspect data lineage via get_data_lineage to identify downstream consumers and potential compliance risks."
-                        }
+                        Text = $"Perform an access and compliance audit on dataset '{ds}' for the current caller:\n" +
+                               $"1. Check effective authorization and row-level security constraints.\n" +
+                               $"2. List all columns with their sensitivity classifications and masking states (clear, mask, deny).\n" +
+                               $"3. Inspect data lineage via get_data_lineage to identify downstream consumers and potential compliance risks."
                     }
-                ]
-            };
+                }
+            ]
+        };
+    }
+
+    private const int MaxPromptDatasetLength = 256;
+
+    /// <summary>
+    /// The only accepted prompt argument is <c>dataset</c>; it must be present, at most 256 characters, free of control
+    /// characters and newlines, and a valid <c>domain.schema.table</c> id. Anything else (including any principal override)
+    /// answers InvalidParams with a fixed message.
+    /// </summary>
+    private static string ValidatedPromptDataset(IReadOnlyDictionary<string, string?>? arguments)
+    {
+        static McpProtocolException Invalid() => new("Invalid prompt arguments.", McpErrorCode.InvalidParams);
+
+        if (arguments is null || arguments.Count != 1 || !arguments.TryGetValue("dataset", out var raw) ||
+            string.IsNullOrWhiteSpace(raw) || raw.Length > MaxPromptDatasetLength)
+        {
+            throw Invalid();
         }
 
-        throw new McpProtocolException($"Prompt '{promptName}' not found.", McpErrorCode.InvalidParams);
+        foreach (var c in raw)
+        {
+            if (char.IsControl(c))
+            {
+                throw Invalid();
+            }
+        }
+
+        if (!McpDatasetCatalog.TryParseDatasetId(raw, out var id))
+        {
+            throw Invalid();
+        }
+
+        return $"{id.Domain}.{id.Schema}.{id.TableName}";
     }
 
     private static async ValueTask<CallToolResult> CallGuardedToolAsync(IServiceProvider services, string toolName, string argumentsJson, CancellationToken ct)

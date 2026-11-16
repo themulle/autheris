@@ -165,12 +165,12 @@ public sealed class SourceCommandTelemetryTests
 
         var descriptor = new SourceCommandDescriptor(
             DataSourceName: "test_source",
-            DbSystemName: "sqlite",
+            DbSystemName: "postgresql",
             Namespace: null,
             OperationName: "SELECT",
             CollectionName: "users",
             CompiledSql: "SELECT 1;",
-            Dialect: DatabaseDialect.Sqlite);
+            Dialect: DatabaseDialect.PostgreSql);
 
         using (var scope = service.Start(descriptor))
         {

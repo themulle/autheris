@@ -11,8 +11,8 @@ using Autheris.Domain.Audit;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Tests.Common.Fakes;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Routing;
@@ -154,16 +154,15 @@ public sealed class TrustedDocumentAdminEndpointsTests
 
     private List<RouteEndpoint> Mapped(bool enabled)
     {
-        var builder = WebApplication.CreateBuilder();
-        builder.Services.AddRouting();
-        builder.Services.AddSingleton(Service());
-        builder.Services.AddAuthorization();
-        var app = builder.Build();
-        app.MapTrustedDocumentAdminEndpointsWhenEnabled(new GatewayOptions
+        using var routes = new TestEndpointRouteBuilder(services =>
+        {
+            services.AddSingleton(Service());
+        });
+        routes.MapTrustedDocumentAdminEndpointsWhenEnabled(new GatewayOptions
         {
             GraphQL = new GraphQLOptions { AppScopedTrustedDocuments = new AppScopedTrustedDocumentsOptions { Enabled = enabled } }
         });
-        return ((IEndpointRouteBuilder)app).DataSources.SelectMany(d => d.Endpoints).OfType<RouteEndpoint>().ToList();
+        return routes.DataSources.SelectMany(d => d.Endpoints).OfType<RouteEndpoint>().ToList();
     }
 
     [Fact]

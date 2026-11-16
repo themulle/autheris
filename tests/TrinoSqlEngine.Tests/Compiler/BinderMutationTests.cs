@@ -340,11 +340,11 @@ public class BinderMutationTests
     public void MissingClientParameter_MessageNamesTheParameter()
     {
         var ex = Assert.Throws<MissingClientParameterException>(() =>
-            new SqliteCompiledSqlBinder().Bind(new RecCommand(), Sql(TargetSqlDialect.Sqlite, Bp(null, SqlParameterType.String, ParameterOrigin.ClientNamed, null, "who")), NoClient));
+            new DuckDbCompiledSqlBinder().Bind(new RecCommand(), Sql(TargetSqlDialect.DuckDb, Bp(null, SqlParameterType.String, ParameterOrigin.ClientNamed, null, "who")), NoClient));
         Assert.Equal("No value was supplied for client parameter 'who'.", ex.Message);
 
         var noName = Assert.Throws<MissingClientParameterException>(() =>
-            new SqliteCompiledSqlBinder().Bind(new RecCommand(), Sql(TargetSqlDialect.Sqlite, Bp(null, SqlParameterType.String, ParameterOrigin.ClientNamed)), NoClient));
+            new DuckDbCompiledSqlBinder().Bind(new RecCommand(), Sql(TargetSqlDialect.DuckDb, Bp(null, SqlParameterType.String, ParameterOrigin.ClientNamed)), NoClient));
         Assert.Equal("No value was supplied for client parameter '?'.", noName.Message);
     }
 
@@ -352,7 +352,7 @@ public class BinderMutationTests
     public void PositionalClientParameter_IsRefused()
     {
         var ex = Assert.Throws<SecurityException>(() =>
-            new SqliteCompiledSqlBinder().Bind(new RecCommand(), Sql(TargetSqlDialect.Sqlite, Bp(null, SqlParameterType.String, ParameterOrigin.ClientPositional)), NoClient));
+            new DuckDbCompiledSqlBinder().Bind(new RecCommand(), Sql(TargetSqlDialect.DuckDb, Bp(null, SqlParameterType.String, ParameterOrigin.ClientPositional)), NoClient));
         Assert.Equal("Positional client parameters are not supported.", ex.Message);
     }
 
@@ -360,7 +360,7 @@ public class BinderMutationTests
     public void ClientValueOfAnUnsupportedType_IsRefusedByTypeName()
     {
         var ex = Assert.Throws<SecurityException>(() =>
-            new SqliteCompiledSqlBinder().Bind(new RecCommand(), Sql(TargetSqlDialect.Sqlite, Bp(null, SqlParameterType.String, ParameterOrigin.ClientNamed, null, "x")),
+            new DuckDbCompiledSqlBinder().Bind(new RecCommand(), Sql(TargetSqlDialect.DuckDb, Bp(null, SqlParameterType.String, ParameterOrigin.ClientNamed, null, "x")),
                 new Dictionary<string, object?> { ["x"] = new Uri("http://x") }));
         Assert.Equal("Unsupported client parameter value type 'Uri'.", ex.Message);
     }
@@ -369,27 +369,27 @@ public class BinderMutationTests
     public void UnsupportedParameterType_IsRefused()
     {
         var ex = Assert.Throws<SecurityException>(() =>
-            new SqliteCompiledSqlBinder().Bind(new RecCommand(), Sql(TargetSqlDialect.Sqlite, Bp("x", (SqlParameterType)999)), NoClient));
+            new DuckDbCompiledSqlBinder().Bind(new RecCommand(), Sql(TargetSqlDialect.DuckDb, Bp("x", (SqlParameterType)999)), NoClient));
         Assert.Equal("Unsupported parameter type '999'.", ex.Message);
     }
 
     [Fact]
     public void NullTypedParameter_IsBoundAsDbNull_EvenWithAValue()
     {
-        var p = Bind(new SqliteCompiledSqlBinder(), TargetSqlDialect.Sqlite, Bp("x", SqlParameterType.Null));
+        var p = Bind(new DuckDbCompiledSqlBinder(), TargetSqlDialect.DuckDb, Bp("x", SqlParameterType.Null));
         Assert.Equal(DbType.String, p.DbType);
         Assert.Same(DBNull.Value, p.Value);
-        var nullValue = Bind(new SqliteCompiledSqlBinder(), TargetSqlDialect.Sqlite, Bp(null, SqlParameterType.Int32));
+        var nullValue = Bind(new DuckDbCompiledSqlBinder(), TargetSqlDialect.DuckDb, Bp(null, SqlParameterType.Int32));
         Assert.Same(DBNull.Value, nullValue.Value);
-        var dbNull = Bind(new SqliteCompiledSqlBinder(), TargetSqlDialect.Sqlite, Bp(DBNull.Value, SqlParameterType.Int32));
+        var dbNull = Bind(new DuckDbCompiledSqlBinder(), TargetSqlDialect.DuckDb, Bp(DBNull.Value, SqlParameterType.Int32));
         Assert.Same(DBNull.Value, dbNull.Value);
     }
 
     [Fact]
     public void BinderArguments_AreNullChecked()
     {
-        var binder = new SqliteCompiledSqlBinder();
-        var compiled = Sql(TargetSqlDialect.Sqlite);
+        var binder = new DuckDbCompiledSqlBinder();
+        var compiled = Sql(TargetSqlDialect.DuckDb);
         Assert.Equal("compiled", Assert.Throws<ArgumentNullException>(() => binder.Bind(new RecCommand(), null!, NoClient)).ParamName);
         Assert.Equal("command", Assert.Throws<ArgumentNullException>(() => binder.Bind(null!, compiled, NoClient)).ParamName);
         Assert.Equal("clientParameterValues", Assert.Throws<ArgumentNullException>(() => binder.Bind(new RecCommand(), compiled, null!)).ParamName);
@@ -398,7 +398,7 @@ public class BinderMutationTests
     [Fact]
     public void BindForCheckedExecution_ChecksItsArguments()
     {
-        var binder = new SqliteCompiledSqlBinder();
+        var binder = new DuckDbCompiledSqlBinder();
         Assert.Equal("compiled", Assert.Throws<ArgumentNullException>(() => binder.BindForCheckedExecution(new RecCommand(), null!, NoClient)).ParamName);
     }
 
@@ -406,17 +406,17 @@ public class BinderMutationTests
     public void CompiledStatementForAnotherDialect_IsRefused()
     {
         var ex = Assert.Throws<InvalidOperationException>(() =>
-            new SqlServerCompiledSqlBinder().Bind(new RecCommand(), Sql(TargetSqlDialect.Sqlite), NoClient));
+            new SqlServerCompiledSqlBinder().Bind(new RecCommand(), Sql(TargetSqlDialect.DuckDb), NoClient));
         Assert.Equal("The compiled SQL was generated for another dialect.", ex.Message);
     }
 
     [Fact]
     public void CommandWithExistingParameters_IsRefused()
     {
-        var binder = new SqliteCompiledSqlBinder();
+        var binder = new DuckDbCompiledSqlBinder();
         var cmd = new RecCommand();
-        binder.Bind(cmd, Sql(TargetSqlDialect.Sqlite, Bp(1, SqlParameterType.Int32)), NoClient);
-        var ex = Assert.Throws<InvalidOperationException>(() => binder.Bind(cmd, Sql(TargetSqlDialect.Sqlite), NoClient));
+        binder.Bind(cmd, Sql(TargetSqlDialect.DuckDb, Bp(1, SqlParameterType.Int32)), NoClient);
+        var ex = Assert.Throws<InvalidOperationException>(() => binder.Bind(cmd, Sql(TargetSqlDialect.DuckDb), NoClient));
         Assert.Equal("The command already has parameters; the binder owns all parameters of a governed command.", ex.Message);
     }
 
@@ -424,7 +424,7 @@ public class BinderMutationTests
     public void Bind_SetsTheCommandTextAndTextType()
     {
         var cmd = new RecCommand();
-        new SqliteCompiledSqlBinder().Bind(cmd, Sql(TargetSqlDialect.Sqlite), NoClient);
+        new DuckDbCompiledSqlBinder().Bind(cmd, Sql(TargetSqlDialect.DuckDb), NoClient);
         Assert.Equal("SELECT 1", cmd.CommandText);
         Assert.Equal(CommandType.Text, cmd.CommandType);
     }
@@ -433,7 +433,6 @@ public class BinderMutationTests
     [InlineData(TargetSqlDialect.DuckDb, true)]
     [InlineData(TargetSqlDialect.PostgreSql, true)]
     [InlineData(TargetSqlDialect.SqlServer, false)]
-    [InlineData(TargetSqlDialect.Sqlite, false)]
     [InlineData(TargetSqlDialect.Databricks, false)]
     public void EmbeddedNul_IsRejectedOnlyWhereTheProviderTruncates(TargetSqlDialect dialect, bool rejects)
     {
@@ -513,7 +512,6 @@ public class BinderMutationTests
     [InlineData(TargetSqlDialect.PostgreSql)]
     [InlineData(TargetSqlDialect.Oracle)]
     [InlineData(TargetSqlDialect.Databricks)]
-    [InlineData(TargetSqlDialect.Sqlite)]
     public void FactoryRefusalSeam_ReturnsABinderOfTheDialectThatNeverRefuses(TargetSqlDialect dialect)
     {
         var compiled = new CompiledSql("INSERT INTO t (a) SELECT 1", ImmutableArray<BoundParameter>.Empty, dialect, SqlStatementClass.Insert,

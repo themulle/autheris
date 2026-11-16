@@ -8,6 +8,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Autheris.Api.Serialization;
+using Autheris.Application.Catalog;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Common.Serialization;
 using Autheris.Domain.Common;
@@ -30,25 +31,29 @@ public static partial class ODataEndpoints
         HttpMethods.IsDelete(method ?? string.Empty) ||
         string.Equals(method, "MERGE", StringComparison.OrdinalIgnoreCase);
 
+    internal static IResult HandleBatchMethodNotAllowed(HttpContext context)
+    {
+        context.Response.Headers["OData-Version"] = "4.0";
+        context.Response.Headers.Allow = "GET, HEAD, OPTIONS";
+        return ODataError(StatusCodes.Status405MethodNotAllowed, "MethodNotAllowed", "OData $batch requests are not permitted. The gateway OData surface is strictly read-only.");
+    }
+
     internal static async Task<IResult> HandleFlatEntitySetRequestAsync(
         string entitySetName,
         IODataHandler odataHandler,
         ITableMetadataRepository metadataRepo,
         HttpContext context)
     {
-        if (IsWriteMethod(context.Request.Method) || string.Equals(entitySetName, "$batch", StringComparison.OrdinalIgnoreCase))
-        {
-            context.Response.Headers["OData-Version"] = "4.0";
-            context.Response.Headers.Allow = "GET, HEAD, OPTIONS";
-            return ODataError(StatusCodes.Status405MethodNotAllowed, "MethodNotAllowed", "OData write operations and $batch write requests are not permitted. The gateway OData surface is strictly read-only.");
-        }
-
         if (entitySetName.StartsWith('$'))
         {
             return Results.NotFound();
         }
 
-        var tables = await metadataRepo.GetAllTablesAsync(context.RequestAborted).ConfigureAwait(false);
+        var tables = await CatalogTablePageReader.ReadAllAsync(
+            metadataRepo,
+            new CatalogTableQuery(IncludeInactive: false),
+            static t => t.Table.IsActive,
+            ct: context.RequestAborted).ConfigureAwait(false);
         // DT-A-7: the default tenant (catalog owner) may address every table by its flat name; every other tenant only its own domain and the
         // shared "default" domain. An unresolved tenant addresses nothing.
         var tenantResolver = context.RequestServices?.GetService<Autheris.Application.Tenancy.ITenantResolver>();
@@ -104,11 +109,6 @@ public static partial class ODataEndpoints
         HttpContext context)
     {
         context.Response.Headers["OData-Version"] = "4.0";
-        if (IsWriteMethod(context.Request.Method))
-        {
-            context.Response.Headers.Allow = "GET, HEAD, OPTIONS";
-            return ODataError(StatusCodes.Status405MethodNotAllowed, "MethodNotAllowed", "OData write operations and $batch write requests are not permitted. The gateway OData surface is strictly read-only.");
-        }
 
         var serviceRoot = ResolveServiceRoot(context);
         var tableId = new TableIdentifier(domain, schema, tableName);

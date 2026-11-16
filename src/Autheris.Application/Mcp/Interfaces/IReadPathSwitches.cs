@@ -20,6 +20,9 @@ public interface IReadPathSwitches
     /// <summary>the procedure kill switch (<c>SqlEndpoints:Procedures:Enabled</c>, default off). Off hides <c>call_procedure</c>.</summary>
     bool ProceduresEnabled { get; }
 
+    /// <summary>Async query job kill switch (<c>Gateway:AsyncJobs:Enabled</c>, default on).</summary>
+    bool AsyncJobsEnabled { get; }
+
     bool IsGroupEnabled(McpToolGroup group);
 
     /// <summary>False when the tool's group is off or the name is listed in <c>Mcp:DisabledTools</c>. Unknown (dynamic) names follow <see cref="McpToolGroup.Query"/>.</summary>

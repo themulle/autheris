@@ -26,11 +26,11 @@ public sealed class WebSqlDmlGuardTests
             claims.Add(new Claim(ClaimTypes.Role, role));
         }
 
-        return new ClaimsPrincipal(new ClaimsIdentity(claims, "Test"));
+        return Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(new ClaimsPrincipal(new ClaimsIdentity(claims, "Test")));
     }
 
     private static Task Run(GovernedSqlExecutionService service, ClaimsPrincipal user, string sql) =>
-        service.ExecuteGovernedQueryAsync(new GovernedSqlQueryRequest(sql), user, new TenantId(BypassSemanticsAndDmlGuardrailTests.Tenant), (_, _) => Task.CompletedTask);
+        service.ExecuteGovernedQueryAsync(new GovernedSqlQueryRequest(sql, Transport: SqlTransports.WebSql), user, new TenantId(BypassSemanticsAndDmlGuardrailTests.Tenant), (_, _) => Task.CompletedTask);
 
     [Theory]
     [InlineData("WebSqlWriter")]
@@ -133,9 +133,9 @@ public sealed class WebSqlDmlGuardTests
 
     [Theory]
     [InlineData("plain")]
-    [InlineData("other.main.plain")]
-    [InlineData("xmain.plain")]
-    [InlineData("main.plain2")]
+    [InlineData("other.public.plain")]
+    [InlineData("xpublic.plain")]
+    [InlineData("public.plain2")]
     public async Task SEC_36_SP3b_01_Exempt_entry_is_not_matched_by_suffix_or_bare_name(string entry)
     {
         await using var fixture = await BypassSemanticsAndDmlGuardrailTests.DmlFixture.CreateAsync();
@@ -147,8 +147,8 @@ public sealed class WebSqlDmlGuardTests
     }
 
     [Theory]
-    [InlineData("main.plain")]
-    [InlineData("MAIN.Plain")]
+    [InlineData("public.plain")]
+    [InlineData("PUBLIC.Plain")]
     public async Task SEC_36_SP3b_01_Exact_qualified_exempt_entry_passes_case_insensitively(string entry)
     {
         await using var fixture = await BypassSemanticsAndDmlGuardrailTests.DmlFixture.CreateAsync();
@@ -161,7 +161,7 @@ public sealed class WebSqlDmlGuardTests
     public async Task SEC_36_ORDER_01_Write_decision_is_the_last_check_for_an_exempt_table()
     {
         await using var fixture = await BypassSemanticsAndDmlGuardrailTests.DmlFixture.CreateAsync();
-        var service = BypassSemanticsAndDmlGuardrailTests.CreateDmlService(fixture, permissiveWrite: false, plainTable: true, exemptTables: ["main.plain"]);
+        var service = BypassSemanticsAndDmlGuardrailTests.CreateDmlService(fixture, permissiveWrite: false, plainTable: true, exemptTables: ["public.plain"]);
 
         await Should.ThrowAsync<WebSqlTableDeniedException>(() => Run(service, Principal("WebSqlWriter"), "DELETE FROM plain WHERE id = 1"));
     }

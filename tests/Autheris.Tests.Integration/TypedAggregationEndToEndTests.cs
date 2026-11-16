@@ -14,10 +14,12 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Data.Sqlite;
+using Npgsql;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Hosting;
 using Autheris.Tests.Integration.Governance;
 
 /// <summary>
@@ -26,82 +28,78 @@ using Autheris.Tests.Integration.Governance;
 /// are chosen to exercise k-anonymity (k = 5) and the honest <c>truncated</c> flag; the manifest import survives a host restart
 /// (a second host over the same governance database file).
 /// </summary>
-public sealed class TypedAggregationEndToEndTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
+public sealed class TypedAggregationEndToEndTests : IClassFixture<TypedAggregationEndToEndTests.HostFixture>
 {
     private const string Field = "default_main_agg_orders_aggregate";
 
-    private readonly string _workDir;
-    private readonly string _dataPath;
-    private readonly string _govPath;
-    private readonly WebApplicationFactory<Program> _baseFactory;
+    private readonly HostFixture _fixture;
 
-    public TypedAggregationEndToEndTests(WebApplicationFactory<Program> factory)
+    public TypedAggregationEndToEndTests(HostFixture fixture)
     {
-        _baseFactory = factory;
-        _workDir = Path.Combine(Path.GetTempPath(), "autheris-agg-e2e-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(_workDir);
-        _dataPath = Path.Combine(_workDir, "data.db");
-        _govPath = Path.Combine(_workDir, "gov.db");
-        Seed(_dataPath);
+        _fixture = fixture;
     }
 
-    public void Dispose()
+    public sealed class HostFixture : IntegrationHost<HostFixture>
     {
-        SqliteConnection.ClearAllPools();
-        try { Directory.Delete(_workDir, true); } catch { /* best effort */ }
+        private readonly string _workDir;
+        private readonly string _dataPath;
+        private readonly string _govPath;
+
+        public HostFixture()
+        {
+            _workDir = Path.Combine(Path.GetTempPath(), "autheris-agg-e2e-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(_workDir);
+            _govPath = Path.Combine(_workDir, "gov.db");
+            _dataPath = Seed();
+
+            using var seeding = NewHost();
+            RegisterCatalogAsync(seeding).GetAwaiter().GetResult();
+        }
+
+        public IntegrationHost NewHost() => new(Settings(_govPath, _dataPath));
+
+        protected override void ConfigureHostConfiguration(IConfigurationBuilder config)
+        {
+            config.AddInMemoryCollection(Settings(_govPath, _dataPath));
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            base.Dispose(disposing);
+            NpgsqlConnection.ClearAllPools();
+            try { Directory.Delete(_workDir, true); } catch { /* best effort */ }
+        }
+
+        private static Dictionary<string, string?> Settings(string govPath, string dataPath) => new()
+        {
+            ["Gateway:Authentication:EnableTestAuthHandler"] = "true",
+            ["Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit"] = "100000",
+            ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
+            ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.CreateStable(govPath),
+            ["Gateway:Insecure:danger_bypass_consent_checks"] = "true",
+            // The count of suppressed groups is not exposed by default (privacy); this test asserts it.
+            ["Analytics:Privacy:ExposeSuppressedGroupsCount"] = "true",
+            ["Gateway:DataSources:Connections:default:Provider"] = "PostgreSql",
+            ["Gateway:DataSources:Connections:default:DefaultSchema"] = "main",
+            ["Gateway:DataSources:Connections:default:ConnectionString"] = dataPath,
+        };
     }
 
     // Groups: A 99,991 rows, B 5, C 4, D 1 = 100,001 rows.
-    private static void Seed(string path)
-    {
-        using var conn = new SqliteConnection($"Data Source={path}");
-        conn.Open();
-        using var create = conn.CreateCommand();
-        create.CommandText = "CREATE TABLE agg_orders (id INTEGER PRIMARY KEY, region TEXT NOT NULL, amount INTEGER NOT NULL);";
-        create.ExecuteNonQuery();
-        using var tx = conn.BeginTransaction();
-        using var insert = conn.CreateCommand();
-        insert.Transaction = tx;
-        insert.CommandText = "INSERT INTO agg_orders (region, amount) VALUES ($r, 2);";
-        var region = insert.CreateParameter();
-        region.ParameterName = "$r";
-        insert.Parameters.Add(region);
-        foreach (var (name, count) in new[] { ("A", 99_981), ("B", 10), ("E", 5), ("C", 4), ("D", 1) })
-        {
-            region.Value = name;
-            for (var i = 0; i < count; i++)
-            {
-                insert.ExecuteNonQuery();
-            }
-        }
+    private static string Seed() => PostgresDataSource.Create("aggorders", """
+        CREATE TABLE agg_orders (id INTEGER PRIMARY KEY, region TEXT NOT NULL, amount INTEGER NOT NULL);
+        INSERT INTO agg_orders (id, region, amount)
+        SELECT row_number() OVER (), r, 2 FROM (
+            SELECT 'A' AS r FROM generate_series(1, 99981)
+            UNION ALL SELECT 'B' FROM generate_series(1, 10)
+            UNION ALL SELECT 'E' FROM generate_series(1, 5)
+            UNION ALL SELECT 'C' FROM generate_series(1, 4)
+            UNION ALL SELECT 'D' FROM generate_series(1, 1)) AS t;
+        """);
 
-        tx.Commit();
-    }
+    private WebApplicationFactory<Program> NewHost() => _fixture.NewHost();
 
-    private WebApplicationFactory<Program> NewHost() => _baseFactory.WithWebHostBuilder(b =>
-    {
-        b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-        b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "100000");
-        b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
-        b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.CreateStable(_govPath));
-        b.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
-        b.UseSetting("Gateway:DataSources:Connections:default:Provider", "Sqlite");
-        b.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", $"Data Source={_dataPath}");
-    });
-
-    /// <summary>
-    /// Registers the table in the governance database file with a first host and returns a second host over the same file: the GraphQL
-    /// schema is built from the catalog at start-up, so the table has to be there before the host that serves the test starts.
-    /// </summary>
-    private async Task<WebApplicationFactory<Program>> StartHostAsync()
-    {
-        using (var seeding = NewHost())
-        {
-            await RegisterCatalogAsync(seeding);
-        }
-
-        return NewHost();
-    }
+    private Task<WebApplicationFactory<Program>> StartHostAsync() => Task.FromResult<WebApplicationFactory<Program>>(_fixture);
 
     private static async Task RegisterCatalogAsync(WebApplicationFactory<Program> host)
     {
@@ -109,7 +107,7 @@ public sealed class TypedAggregationEndToEndTests : IClassFixture<WebApplication
         var repo = scope.ServiceProvider.GetRequiredService<ITableMetadataRepository>();
         await repo.UpsertTableMetadataAsync(new TableMetadata
         {
-            Table = new Table { Id = Guid.NewGuid(), DisplayName = "agg_orders", TableName = "agg_orders", SchemaName = "main", SourceType = "Sqlite", SourceName = "default" },
+            Table = new Table { Id = Guid.NewGuid(), DisplayName = "agg_orders", TableName = "agg_orders", SchemaName = "main", SourceType = "PostgreSql", SourceName = "default" },
             Identifier = new TableIdentifier("default", "main", "agg_orders"),
             Columns = new List<TableColumn>
             {
@@ -146,7 +144,7 @@ public sealed class TypedAggregationEndToEndTests : IClassFixture<WebApplication
     [Fact]
     public async Task Aggregate_OverMoreRowsThanTheInMemoryCap_ReturnsTheExactCount()
     {
-        using var host = await StartHostAsync();
+        var host = await StartHostAsync();
 
         using var doc = await GraphQlAsync(Client(host), $"{{ {Field}(aggregates: [{{ fn: COUNT, alias: \"n\" }}]) {{ count truncated groups {{ aggregates {{ alias kind intValue }} }} }} }}");
 
@@ -161,7 +159,7 @@ public sealed class TypedAggregationEndToEndTests : IClassFixture<WebApplication
     [Fact]
     public async Task Aggregate_SmallGroups_AreSuppressed_AndTheCountsCoverVisibleGroupsOnly()
     {
-        using var host = await StartHostAsync();
+        var host = await StartHostAsync();
 
         using var doc = await GraphQlAsync(Client(host),
             $"{{ {Field}(groupBy: [region], aggregates: [{{ fn: SUM, column: amount, alias: \"total\" }}], orderBy: [{{ column: region }}]) " +
@@ -182,7 +180,7 @@ public sealed class TypedAggregationEndToEndTests : IClassFixture<WebApplication
     [Fact]
     public async Task Aggregate_LimitBelowTheGroupCount_SetsTruncated()
     {
-        using var host = await StartHostAsync();
+        var host = await StartHostAsync();
 
         using var doc = await GraphQlAsync(Client(host),
             $"{{ {Field}(groupBy: [region], aggregates: [{{ fn: COUNT, alias: \"n\" }}], orderBy: [{{ column: region }}], limit: 1) {{ truncated groups {{ key {{ region }} }} }} }}");
@@ -195,7 +193,7 @@ public sealed class TypedAggregationEndToEndTests : IClassFixture<WebApplication
     [Fact]
     public async Task Aggregate_ColumnOutsideTheGeneratedEnum_IsRejectedByValidation()
     {
-        using var host = await StartHostAsync();
+        var host = await StartHostAsync();
 
         using var doc = await GraphQlAsync(Client(host), $"{{ {Field}(groupBy: [nope], aggregates: [{{ fn: COUNT, alias: \"n\" }}]) {{ count }} }}");
 
@@ -216,12 +214,10 @@ public sealed class TypedAggregationEndToEndTests : IClassFixture<WebApplication
     [Fact]
     public async Task Manifest_ImportedBeforeARestart_AnswersQueryMetricsAfterTheRestart()
     {
-        using (var first = await StartHostAsync())
-        {
-            var import = await Client(first, roles: "GovernanceAdmin,ClusterAdmin,DbtAdmin")
-                .PostAsync("/api/extensions/dbt/semantic-manifest", new StringContent(Manifest, Encoding.UTF8, "application/json"));
-            import.StatusCode.ShouldBe(HttpStatusCode.OK, await import.Content.ReadAsStringAsync());
-        }
+        var first = await StartHostAsync();
+        var import = await Client(first, roles: "GovernanceAdmin,ClusterAdmin,DbtAdmin")
+            .PostAsync("/api/extensions/dbt/semantic-manifest", new StringContent(Manifest, Encoding.UTF8, "application/json"));
+        import.StatusCode.ShouldBe(HttpStatusCode.OK, await import.Content.ReadAsStringAsync());
 
         using var restarted = NewHost();
         using var doc = await GraphQlAsync(Client(restarted),
@@ -240,7 +236,7 @@ public sealed class TypedAggregationEndToEndTests : IClassFixture<WebApplication
     [Fact]
     public async Task Metric_OfAnotherTenant_IsUnknown()
     {
-        using var host = await StartHostAsync();
+        var host = await StartHostAsync();
         (await Client(host, roles: "GovernanceAdmin,ClusterAdmin,DbtAdmin", tenant: "tenant_a")
             .PostAsync("/api/extensions/dbt/semantic-manifest", new StringContent(Manifest, Encoding.UTF8, "application/json")))
             .StatusCode.ShouldBe(HttpStatusCode.OK);

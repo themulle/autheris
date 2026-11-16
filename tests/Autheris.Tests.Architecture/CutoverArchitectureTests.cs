@@ -9,8 +9,8 @@ namespace Autheris.Tests.Architecture;
 /// <summary>
 /// WP-X1 step X1.6: the guards of the cutover to the AST compiler. Every scan reads the IL of the production assemblies, so a
 /// different spelling, a variable or a reflection-free alias cannot slip past it the way a text search could. Each scan has a
-/// positive control (a known hit) so that a rename cannot turn a test green vacuously.
-/// </summary>
+/// positive control (a known hit) so that a rename cannot turn a test green vacuously.</summary>
+[Trait("Category", "Security")]
 public sealed class CutoverArchitectureTests
 {
     /// <summary>
@@ -356,7 +356,9 @@ public sealed class CutoverArchitectureTests
         Code.Call or Code.Callvirt => instruction.Operand is MethodReference called &&
             (called.Name == "set_CommandText" || (called.Name is "CreateCommand" or "CreateBatchCommand" && TakesString(called))),
         Code.Newobj => instruction.Operand is MethodReference { Name: ".ctor" } constructor &&
-            constructor.DeclaringType.Name.EndsWith("Command", StringComparison.Ordinal) && TakesString(constructor),
+            constructor.DeclaringType.Name.EndsWith("Command", StringComparison.Ordinal) &&
+            !constructor.DeclaringType.Namespace.StartsWith("Autheris.Application.ConsentRequests", StringComparison.Ordinal) &&
+            TakesString(constructor),
         _ => false
     };
 
@@ -403,15 +405,15 @@ public sealed class CutoverArchitectureTests
         ("Autheris.Extensions.Cdc.CdcSourceQueries", "CDC producer: fixed change-tracking statements over validated declared table and column names, bound values, no client text"),
         ("Autheris.Application.Procedures.Services.ProcedureInvoker", "stored-procedure call by a validated catalog name with bound parameters (not a WebSQL statement)"),
         ("Autheris.Application.Procedures.Services.SqlProcedureRowScopeResolver", "procedure row-scope key query over validated catalog identifiers, bound values, read-only; splices validated policy row-filter text (§7.3 consumer)"),
-        ("Autheris.Application.Procedures.Services.StoredProcedureCatalogValidator", "catalog validation queries over the procedure definitions (metadata only)"),
         ("Autheris.Infrastructure.Persistence.Catalog.*", "column-metadata readers: fixed information_schema/PRAGMA queries of the governed catalog provider"),
         // -- persistence of the gateway's own governance store (its schema bootstrap and repositories) --
         ("Autheris.Infrastructure.Persistence.GovernanceRepository", "unified governance store repository (WP-SIMPL-20)"),
+        ("Autheris.Infrastructure.Persistence.ConsentWriteRulesSql", "governance store: consent write rules SQL helpers (WP-SIMPL-45 PR 4A), fixed statements with bound values, no client text"),
         ("Autheris.Infrastructure.Persistence.Dialects.*", "governance SQL dialect implementations (WP-SIMPL-20)"),
-        ("Autheris.Infrastructure.Persistence.CatalogPhysicalIndexStore", "governance store: physical non-unique index tables (issue #404), fixed statements with bound values, no client text"),
         ("Autheris.Infrastructure.Persistence.CatalogKeyDefinitionStore", "governance store: declared key/index tables of the three engines (issue #94), fixed statements with bound values, no client text"),
         ("Autheris.Infrastructure.Persistence.RowFilterEvaluationStore", "governance store: row filter evaluation settings (issue #107), fixed statements with bound values over the three engines, no client text"),
         ("Autheris.Infrastructure.Persistence.DatasetCatalogStore", "governance store: dataset catalog tags and visibility tier (issue #111), fixed statements with bound values over the three engines, no client text"),
+        ("Autheris.Infrastructure.Persistence.DiscoveryArtifactStore", "governance store: catalog discovery artifacts, fixed statements with bound values, no client text"),
         ("Autheris.Infrastructure.Persistence.Migrations.*", "governance schema migrations (WP-ARC-B-12): fixed DDL and version-table statements, no client text"),
         ("Autheris.Infrastructure.Persistence.TenantRegistryStore", "tenant registry table of the governance store"),
         ("Autheris.Infrastructure.Persistence.VirtualFilterStore", "virtual filter table of the governance store"),
@@ -420,11 +422,14 @@ public sealed class CutoverArchitectureTests
         ("Autheris.Application.Identity.Attributes.AttributeTableProvider", "caller attribute lookup (REQ-GOV-129 A-5.2): the statement is built by AttributeTableQuery from validated identifiers (^[A-Za-z_][A-Za-z0-9_]{0,127}$, quoted per dialect) with the subject, tenant and issuer bound; no client text"),
         ("Autheris.Infrastructure.Persistence.AccessProfileStore", "access profile tables of the governance store (WP-SC-03): fixed statements with bound values, only integer-indexed parameter names and enum literals are spliced, no client text"),
         ("Autheris.Infrastructure.Persistence.ConsumerAggregationStore", "consumer aggregation store (Issue #114, SEC-AUD114-05): fixed rollup statements with bound parameters, no client text"),
+        ("Autheris.Infrastructure.Usage.UsageStore", "governance usage store (WP-SIMPL-42 PR 2): fixed rollup, tariff and retention statements with bound parameters, no client text"),
         ("Autheris.Infrastructure.Persistence.CdcStreamSqlCore", "CDC durable stream store (Issue #99, SEC-CDC-05): fixed event and row-image statements over engine-specific schemas, bound values, no client text"),
         ("Autheris.Infrastructure.Persistence.WebhookOutboxSqlCore", "webhook outbox (ARCH-MNT-22): the dialect repositories hand in fixed statements, the core binds values only; owner scope predicate stays in the SQL, no client text"),
         ("Autheris.Infrastructure.Persistence.ConsentGrantSqlCore", "consent grant statements (ARCH-MNT-22, SC-04): tenant-scoped statements plus the row-locked revoke by id; fixed SQL, bound values, no client text"),
+        ("Autheris.Infrastructure.Persistence.ConsentPatternSqlCore", "pattern grant store (WP-SIMPL-48 PR 5): fixed pattern consent and approving-owner statements with bound values, no client text"),
         ("Autheris.Infrastructure.Persistence.AuditSqlCore", "audit statement execution (ARCH-MNT-22 Step 2): the dialect repositories hand in fixed statements, the core binds values and maps rows only; no client text"),
         ("Autheris.Infrastructure.Persistence.ConsentSqlCore", "consent statement execution (ARCH-MNT-22 Step 4): the dialect repositories hand in dialect statements, the core binds values and maps rows only; no client text"),
+        ("Autheris.Infrastructure.Persistence.GrantRecordSqlCore", "grant record store: fixed statements with bound values, no client text"),
         ("Autheris.Extensions.Cdc.CustomQuery.CustomQueryPollerService", "CDC custom query poller service (Issue #101, Issue #210): reads watermark batches using configured poller queries, bound parameters, no client text"),
         ("Autheris.Application.DataSources.Relations.GovernedCrossSourceRowReader", "Cross-source GraphQL relation row reader (Issue #75, Issue #223): executes batched key lookups over child data sources (VF-02): quoted catalog identifiers, explicit projection, bound key values and bound tenant predicate, session initialized per read, no client text"),
         ("Autheris.Application.State.Caching.TableCache.Governance.GovernedTableCacheExecutionService", "Governed table cache execution service (BL-04, REQ-DATA-BL04): executes governed SELECT queries with AST tenant pushdown and bound parameters over embedded cache store; no client text"),

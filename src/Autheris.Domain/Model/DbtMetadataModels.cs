@@ -21,7 +21,9 @@ public sealed record DbtDeclaredKeys(
     IReadOnlyList<IReadOnlyList<string>> UniqueConstraints,
     bool Invalid,
     IReadOnlyList<KeyColumnDirection>? PrimaryKeyDirections = null,
-    IReadOnlyList<IReadOnlyList<KeyColumnDirection>?>? UniqueDirections = null);
+    IReadOnlyList<IReadOnlyList<KeyColumnDirection>?>? UniqueDirections = null,
+    IReadOnlyList<TableIndexDefinition>? DeclaredIndexes = null,
+    string? InvalidRule = null);
 
 public sealed record DbtModelDefinition(
     string UniqueId,

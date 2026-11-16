@@ -11,7 +11,9 @@ public sealed class ConsentColumnRule
     public ColumnAccessLevel AccessLevel
     {
         get => _accessLevel;
-        init => _accessLevel = Enum.IsDefined(value) ? value : ColumnAccessLevel.Deny;
+        init => _accessLevel = value is ColumnAccessLevel.Deny or ColumnAccessLevel.Mask or ColumnAccessLevel.Clear
+            ? value
+            : ColumnAccessLevel.Deny;
     }
     public IReadOnlyList<string> ApplicableScopes { get; init; } = Array.Empty<string>();
 }
@@ -19,23 +21,7 @@ public sealed class ConsentColumnRule
 public enum RowFilterType
 {
     SimpleColumnPredicate = 0,   // Standard: Column = Value / IN (...)
-    SubqueryCorrelated = 1,      // Single-Source: Correlated EXISTS / Subquery
     CrossSourceSetFilter = 2     // Multi-Source: Two-Phase GraphQL / DataLoader Virtual Set
-}
-
-public enum RowFilterSubqueryStrategy
-{
-    Exists = 0,        // Standard: EXISTS (SELECT 1 FROM ... WHERE ...)
-    InCorrelated = 1,  // Correlated IN: target.fk IN (SELECT dep.pk FROM ... WHERE dep.pk = target.fk AND ...)
-    In = 2             // Uncorrelated IN: target.fk IN (SELECT dep.pk FROM ... WHERE ...)
-}
-
-public sealed class SubqueryJoinHop
-{
-    public TableIdentifier Table { get; init; }
-    public string TableAlias { get; init; } = string.Empty;
-    public string LeftJoinColumn { get; init; } = string.Empty;
-    public string RightJoinColumn { get; init; } = string.Empty;
 }
 
 public sealed class ConsentRowFilter
@@ -50,24 +36,7 @@ public sealed class ConsentRowFilter
     public string ValueJson { get; init; } = "[]";
     public string ValueSource { get; init; } = "LITERAL"; // LITERAL, USER_ATTRIBUTE
     public string? UserAttribute { get; init; }
-
-    // Advanced RLS: Correlated Subquery & Cross-Source Set Properties
     public RowFilterType FilterType { get; init; } = RowFilterType.SimpleColumnPredicate;
-    public TableIdentifier? DependentTable { get; init; }
-    public string? DependentTableAlias { get; init; }
-    public string? ForeignKeyColumn { get; init; }
-    public string? PrimaryKeyColumn { get; init; }
-    public string? SubqueryFilterPredicateJson { get; init; }
-    public string? TargetTemporalColumn { get; init; }
-    public string? DependentValidFromColumn { get; init; }
-    public string? DependentValidToColumn { get; init; }
-    public string? TargetTableAlias { get; init; }
-    public IReadOnlyList<SubqueryJoinHop>? AdditionalHops { get; init; }
-
-    // Issue #107: key-set cache evaluation settings of this rule (null = inherit object/global). Serialized in ConsentRowFilterRecipe.
-    public RowFilterEvaluationStrategy? KeySetStrategy { get; init; }
-    public int? KeySetDurationSeconds { get; init; }
-    public int? KeySetMaxKeys { get; init; }
 }
 
 /// <summary>an in-place description change of a non-revoked consent (applied inside<c>ReplaceConsentsAsync</c>; never touches validity, rules or the epoch).</summary>
@@ -78,6 +47,11 @@ public sealed class Consent
     public Guid Id { get; init; } = Guid.NewGuid();
     public Guid TableId { get; init; }
     public TableIdentifier TableIdentifier { get; init; }
+    public string? ObjectPattern { get; init; }
+    public string? DataSource { get; init; }
+    public ColumnSetMode ColumnSetMode { get; init; } = ColumnSetMode.Explicit;
+    public ConsentWorkflowMode WorkflowMode { get; init; } = ConsentWorkflowMode.Internal;
+    public int? ProfileItemNo { get; init; }
     public Guid? ConsentRequestId { get; init; }
     public ConsentEffect Effect { get; init; } = ConsentEffect.Allow;
     public TenantId TenantId { get; set; }
@@ -97,6 +71,10 @@ public sealed class Consent
 
     /// <summary>number of approved renewals (extensions) of this grant; persisted by the repositories.</summary>
     public int RenewalCount { get; init; }
+    public ConsentGrantSource GrantSource { get; init; } = ConsentGrantSource.ConsentRequest;
+    public long GrantRecordSeq { get; init; }
+    public Guid? ProfileAssignmentId { get; init; }
+    public DateTimeOffset? ExpiryNoticeSentAt { get; init; }
 
     /// <summary>
     /// owner-authored explanation of why this grant exists (persisted, normalised by<c>UntrustedText</c>). Settable because
@@ -107,11 +85,19 @@ public sealed class Consent
 
     public IReadOnlyList<ConsentColumnRule> ColumnRules { get; set; } = Array.Empty<ConsentColumnRule>();
     public IReadOnlyList<ConsentRowFilter> RowFilters { get; set; } = Array.Empty<ConsentRowFilter>();
-    public IReadOnlyList<WriteRule> WriteRules { get; init; } = [];
-    public string? RowFilterCondition { get; init; }
+    public IReadOnlyList<WriteRule> WriteRules { get; set; } = [];
+    public IReadOnlyList<GrantRowScopeEntry> RowScope { get; set; } = [];
+    public IReadOnlyList<string> ApprovingOwners { get; set; } = [];
+    public IReadOnlyList<ConsentClassificationAccess> ClassificationAccess { get; set; } = [];
 
-    /// <summary>expiry after the read-time clamp of legacy individual grants (never later than<see cref="ValidTo"/>).</summary>
-    public DateTimeOffset EffectiveValidTo => IndividualGrantLimits.EffectiveConsentValidTo(GranteeType, ValidFrom, ValidTo, Effect);
+    /// <summary>True when this grant targets objects dynamically via <see cref="ObjectPattern"/> rather than a fixed table.</summary>
+    public bool IsPatternGrant => !string.IsNullOrWhiteSpace(ObjectPattern);
+
+    /// <summary>expiry after the read-time clamp of legacy individual grants (never later than<see cref="ValidTo"/>); owner grants end only with ownership.</summary>
+    public DateTimeOffset EffectiveValidTo =>
+        GrantSource == ConsentGrantSource.Owner
+            ? ValidTo
+            : IndividualGrantLimits.EffectiveConsentValidTo(GranteeType, ValidFrom, ValidTo, Effect);
 
     public bool IsActive(DateTimeOffset atTime)
     {
@@ -154,5 +140,48 @@ public sealed class Consent
         }
 
         ConsentRowFilterShape.Validate(RowFilters);
+
+        foreach (var entry in RowScope)
+        {
+            if (string.IsNullOrWhiteSpace(entry.PolicyName))
+            {
+                throw new InvalidOperationException($"Consent {Id}: row-scope entry policy name must not be empty.");
+            }
+
+            if (!Enum.IsDefined(entry.Uncovered))
+            {
+                throw new InvalidOperationException($"Consent {Id}: invalid row-scope uncovered policy.");
+            }
+        }
+
+        if (!Enum.IsDefined(ColumnSetMode))
+        {
+            throw new InvalidOperationException($"Consent {Id}: invalid column set mode.");
+        }
+
+        if (!Enum.IsDefined(WorkflowMode))
+        {
+            throw new InvalidOperationException($"Consent {Id}: invalid workflow mode.");
+        }
+
+        if (IsPatternGrant)
+        {
+            if (TableId != Guid.Empty)
+            {
+                throw new InvalidOperationException($"Consent {Id}: pattern grant must not specify a concrete TableId.");
+            }
+
+            if (!ObjectPatternSpec.TryParse(ObjectPattern, out var spec, out var error))
+            {
+                throw new InvalidOperationException($"Consent {Id}: invalid object pattern ({error}).");
+            }
+
+            var effectiveSource = string.IsNullOrWhiteSpace(DataSource) ? spec!.DataSource : DataSource.Trim();
+            if (!string.Equals(effectiveSource, spec!.DataSource, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    $"Consent {Id}: DataSource '{effectiveSource}' must match the literal source segment '{spec.DataSource}' of ObjectPattern.");
+            }
+        }
     }
 }

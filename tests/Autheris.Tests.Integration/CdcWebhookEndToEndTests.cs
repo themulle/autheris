@@ -20,10 +20,12 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Data.Sqlite;
+using Npgsql;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Hosting;
 using Autheris.Tests.Integration.Governance;
 
 /// <summary>
@@ -32,7 +34,7 @@ using Autheris.Tests.Integration.Governance;
 /// allows loopback (private addresses are allowed in Development only).
 /// Run: dotnet test tests/Autheris.Tests.Integration --filter "FullyQualifiedName~CdcWebhookEndToEnd"
 /// </summary>
-public sealed class CdcWebhookEndToEndTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
+public sealed class CdcWebhookEndToEndTests : IClassFixture<CdcWebhookEndToEndTests.HostFixture>, IDisposable
 {
     private const string Tenant = "tenant_e2e";
     private static readonly string Secret = new('k', 40);
@@ -41,14 +43,45 @@ public sealed class CdcWebhookEndToEndTests : IClassFixture<WebApplicationFactor
     // Source timestamp after every subscription's creation time: events older than the subscription are skipped (history replay).
     private static readonly long EventMs = DateTimeOffset.UtcNow.AddMinutes(5).ToUnixTimeMilliseconds();
 
-    private readonly WebApplicationFactory<Program> _baseFactory;
+    private readonly HostFixture _fixture;
     private readonly string _workDir = Path.Combine(Path.GetTempPath(), "autheris-cdcwh-" + Guid.NewGuid().ToString("N"));
     private readonly List<IDisposable> _disposables = [];
 
-    public CdcWebhookEndToEndTests(WebApplicationFactory<Program> factory)
+    public CdcWebhookEndToEndTests(HostFixture fixture)
     {
-        _baseFactory = factory;
+        _fixture = fixture;
         Directory.CreateDirectory(_workDir);
+    }
+
+    public sealed class HostFixture : IntegrationHost<HostFixture>
+    {
+        private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"autheris-cdcwh-shared-{Guid.NewGuid():N}.db");
+
+        protected override void ConfigureHostConfiguration(IConfigurationBuilder config)
+        {
+            config.AddInMemoryCollection(Settings(_dbPath));
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            base.Dispose(disposing);
+            NpgsqlConnection.ClearAllPools();
+            try { File.Delete(_dbPath); } catch { /* best effort */ }
+        }
+
+        internal static Dictionary<string, string?> Settings(string dbPath) => new()
+        {
+            ["Gateway:Authentication:EnableTestAuthHandler"] = "true",
+            ["Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit"] = "1000",
+            ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
+            ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.CreateStable(dbPath),
+            ["Gateway:Insecure:danger_bypass_consent_checks"] = "true",
+            ["Gateway:CdcWebhooks:Enabled"] = "true",
+            ["Gateway:CdcWebhooks:SubscriptionCacheSeconds"] = "1",
+            ["Gateway:Webhooks:PollIntervalSeconds"] = "1",
+            // Operator-provisioned KEK of the secret protector (resolved by the default secret provider).
+            ["CDC_WEBHOOK_KEK"] = Kek,
+        };
     }
 
     public void Dispose()
@@ -58,7 +91,7 @@ public sealed class CdcWebhookEndToEndTests : IClassFixture<WebApplicationFactor
             try { d.Dispose(); } catch { /* best effort */ }
         }
 
-        SqliteConnection.ClearAllPools();
+        NpgsqlConnection.ClearAllPools();
         try { Directory.Delete(_workDir, true); } catch { /* best effort */ }
     }
 
@@ -131,19 +164,7 @@ public sealed class CdcWebhookEndToEndTests : IClassFixture<WebApplicationFactor
 
     private WebApplicationFactory<Program> NewHost(string dbPath)
     {
-        var host = _baseFactory.WithWebHostBuilder(b =>
-        {
-            b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "1000");
-            b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
-            b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.CreateStable(dbPath));
-            b.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
-            b.UseSetting("Gateway:CdcWebhooks:Enabled", "true");
-            b.UseSetting("Gateway:CdcWebhooks:SubscriptionCacheSeconds", "1");
-            b.UseSetting("Gateway:Webhooks:PollIntervalSeconds", "1");
-            // Operator-provisioned KEK of the secret protector (resolved by the default secret provider).
-            b.UseSetting("CDC_WEBHOOK_KEK", Kek);
-        });
+        var host = new IntegrationHost(HostFixture.Settings(dbPath));
         _disposables.Add(host);
         return host;
     }
@@ -164,7 +185,7 @@ public sealed class CdcWebhookEndToEndTests : IClassFixture<WebApplicationFactor
         var repo = scope.ServiceProvider.GetRequiredService<ITableMetadataRepository>();
         await repo.UpsertTableMetadataAsync(new TableMetadata
         {
-            Table = new Table { Id = Guid.NewGuid(), DisplayName = "customers", TableName = "customers", SchemaName = "crm", SourceType = "Sqlite", SourceName = "salesdb" },
+            Table = new Table { Id = Guid.NewGuid(), DisplayName = "customers", TableName = "customers", SchemaName = "crm", SourceType = "PostgreSql", SourceName = "salesdb" },
             Identifier = new TableIdentifier("salesdb", "crm", "customers"),
             Columns =
             [
@@ -262,7 +283,7 @@ public sealed class CdcWebhookEndToEndTests : IClassFixture<WebApplicationFactor
         await RegisterCatalogAsync(first);
         await CreateSubscriptionAsync(Client(first, "GovernanceAdmin", "S-1-5-E2E-ADMIN"), receiver.Url);
         first.Dispose();
-        SqliteConnection.ClearAllPools();
+        NpgsqlConnection.ClearAllPools();
 
         var second = NewHost(db);
         await RegisterCatalogAsync(second);

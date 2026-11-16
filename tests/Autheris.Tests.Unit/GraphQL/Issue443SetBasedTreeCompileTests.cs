@@ -22,7 +22,7 @@ public sealed class Issue443SetBasedTreeCompileTests
     private static TableMetadata ParentsMeta(bool withPk = true) => new()
     {
         Identifier = Parents,
-        Table = new Table { SourceName = "test", SchemaName = "main", TableName = "parents", SourceType = "Sqlite" },
+        Table = new Table { SourceName = "test", SchemaName = "main", TableName = "parents", SourceType = "PostgreSql" },
         PrimaryKeyColumns = withPk ? ["id"] : [],
         Columns =
         [
@@ -43,7 +43,7 @@ public sealed class Issue443SetBasedTreeCompileTests
         return new TableMetadata
         {
             Identifier = Children,
-            Table = new Table { SourceName = "test", SchemaName = "main", TableName = "children", SourceType = "Sqlite" },
+            Table = new Table { SourceName = "test", SchemaName = "main", TableName = "children", SourceType = "PostgreSql" },
             PrimaryKeyColumns = withPk ? ["id"] : [],
             Indexes = indexes,
             Columns =
@@ -65,7 +65,7 @@ public sealed class Issue443SetBasedTreeCompileTests
     private static TableMetadata GrandchildrenMeta() => new()
     {
         Identifier = Grandchildren,
-        Table = new Table { SourceName = "test", SchemaName = "main", TableName = "grandchildren", SourceType = "Sqlite" },
+        Table = new Table { SourceName = "test", SchemaName = "main", TableName = "grandchildren", SourceType = "PostgreSql" },
         PrimaryKeyColumns = ["id"],
         Columns =
         [
@@ -103,7 +103,6 @@ public sealed class Issue443SetBasedTreeCompileTests
     [Theory]
     [InlineData(DatabaseDialect.SqlServer)]
     [InlineData(DatabaseDialect.PostgreSql)]
-    [InlineData(DatabaseDialect.Sqlite)]
     public void IndexMatched_SqlIsByteIdenticalToBaseline(DatabaseDialect dialect)
     {
         var childNode = new TreeQueryNode(Children, ["id", "value"])
@@ -204,7 +203,6 @@ public sealed class Issue443SetBasedTreeCompileTests
     [Theory]
     [InlineData(DatabaseDialect.SqlServer)]
     [InlineData(DatabaseDialect.PostgreSql)]
-    [InlineData(DatabaseDialect.Sqlite)]
     public void NoMatch_EmitsPageCteAndRowNumber(DatabaseDialect dialect)
     {
         var childNode = new TreeQueryNode(Children, ["id", "value"])
@@ -380,7 +378,7 @@ public sealed class Issue443SetBasedTreeCompileTests
         var customMeta = new TableMetadata
         {
             Identifier = Children,
-            Table = new Table { SourceName = "test", SchemaName = "main", TableName = "children", SourceType = "Sqlite" },
+            Table = new Table { SourceName = "test", SchemaName = "main", TableName = "children", SourceType = "PostgreSql" },
             PrimaryKeyColumns = ["id"],
             Columns =
             [
@@ -468,7 +466,7 @@ public sealed class Issue443SetBasedTreeCompileTests
         var meta2 = new TableMetadata
         {
             Identifier = table2,
-            Table = new Table { SourceName = "test", SchemaName = "main", TableName = "children2", SourceType = "Sqlite" },
+            Table = new Table { SourceName = "test", SchemaName = "main", TableName = "children2", SourceType = "PostgreSql" },
             PrimaryKeyColumns = ["id"],
             Indexes = [new TableIndexDefinition("ix_c2", ["parent_id", "ts"], false, [KeyColumnDirection.Ascending, KeyColumnDirection.Descending])],
             Columns =
@@ -523,7 +521,7 @@ public sealed class Issue443SetBasedTreeCompileTests
         var meta = new TableMetadata
         {
             Identifier = compChildren,
-            Table = new Table { SourceName = "test", SchemaName = "main", TableName = "comp_children", SourceType = "Sqlite" },
+            Table = new Table { SourceName = "test", SchemaName = "main", TableName = "comp_children", SourceType = "PostgreSql" },
             PrimaryKeyColumns = ["id"],
             Columns =
             [

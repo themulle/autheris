@@ -67,17 +67,20 @@ public sealed class SqlConnector : IAutherisConnector
 
         public async Task<IReadOnlyList<string>> ListSchemasAsync(CancellationToken ct = default)
         {
-            var tables = await _repository.GetAllTablesAsync(ct);
+            var tables = await Autheris.Application.Catalog.CatalogTablePageReader.ReadAllAsync(
+                _repository,
+                new Autheris.Application.Catalog.CatalogTableQuery(Limit: Autheris.Application.Catalog.CatalogTableQuery.MaxLimit),
+                ct: ct).ConfigureAwait(false);
             return tables.Select(t => t.Table.SchemaName).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         }
 
         public async Task<IReadOnlyList<TableIdentifier>> ListTablesAsync(string? schema = null, CancellationToken ct = default)
         {
-            var tables = await _repository.GetAllTablesAsync(ct);
-            if (!string.IsNullOrWhiteSpace(schema))
-            {
-                tables = tables.Where(t => string.Equals(t.Table.SchemaName, schema, StringComparison.OrdinalIgnoreCase)).ToList();
-            }
+            var schemaFilter = string.IsNullOrWhiteSpace(schema) ? null : schema;
+            var tables = await Autheris.Application.Catalog.CatalogTablePageReader.ReadAllAsync(
+                _repository,
+                new Autheris.Application.Catalog.CatalogTableQuery(Schema: schemaFilter, Limit: Autheris.Application.Catalog.CatalogTableQuery.MaxLimit),
+                ct: ct).ConfigureAwait(false);
             return tables.Select(t => t.Identifier).ToList();
         }
 
@@ -157,7 +160,13 @@ public sealed class SqlConnector : IAutherisConnector
             CopyIngress(session, scope);
             var executor = scope.ServiceProvider.GetServices<IDataSourceExecutor>().FirstOrDefault(e => e.SupportedType == DataSourceType.Sql)
                 ?? throw new InvalidOperationException("No SQL table read executor is registered.");
-            return await executor.ExecuteAsync(dsContext, ct);
+            var rows = await executor.ExecuteAsync(dsContext, ct);
+            if (dsContext.Items.TryGetValue(Autheris.Application.Usage.ISourceExecutionStatsProvider.ItemKey, out var statsObj) &&
+                statsObj is Autheris.Application.Usage.SourceExecutionStats sourceStats)
+            {
+                session.Items[Autheris.Application.Usage.ISourceExecutionStatsProvider.ItemKey] = sourceStats;
+            }
+            return rows;
         }
 
         /// <summary>

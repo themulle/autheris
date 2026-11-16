@@ -31,6 +31,7 @@ using Xunit;
 /// object is never readable, and the base object is reachable only when it is registered itself. A synonym that cannot be used
 /// names its reason in the log (not registered, no declared columns, inactive) while the caller receives the same denial for all.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class WebSqlSqlServerSynonymTests : IAsyncLifetime, IDisposable
 {
     private const string Source = "synsrc";
@@ -215,7 +216,7 @@ public sealed class WebSqlSqlServerSynonymTests : IAsyncLifetime, IDisposable
         scope.ServiceProvider.GetRequiredService<IIngressTransportContext>().Set(DataSourceTransportFlags.WebSql);
         var service = scope.ServiceProvider.GetRequiredService<IGovernedSqlExecutionService>();
         var user = new ClaimsPrincipal(new ClaimsIdentity(
-            [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-SYN-E2E"), new Claim("tenant_id", Tenant)], "Test"));
+            [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-SYN-E2E"), new Claim("tenant_id", Tenant), Autheris.Domain.Identity.GroupResolutionClaims.CreateMarker(), Autheris.Domain.Identity.GroupResolutionClaims.CreateStatus(Autheris.Domain.Identity.GroupResolutionStatus.Complete)], "Test"));
         return await service.ExecuteQueryBufferedAsync(new GovernedSqlQueryRequest(sql), user, new TenantId(Tenant));
     }
 

@@ -1,3 +1,4 @@
+using Autheris.Application.Catalog;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Options;
@@ -19,6 +20,10 @@ public sealed class GatewayHealthCheckService : IGatewayHealthCheckService
     private readonly IHostEnvironment? _environment;
     private readonly AuditChainIntegrityMonitor? _auditChainMonitor;
     private readonly ICatalogSearchEngine? _catalogSearchEngine;
+    private readonly ICatalogVersionProvider? _catalogVersionProvider;
+    private readonly IOptions<CatalogSearchOptions>? _catalogSearchOptions;
+    private readonly TimeProvider _timeProvider;
+    private readonly ICatalogDirtyFlag? _catalogDirtyFlag;
 
     public GatewayHealthCheckService(
         IOptions<GatewayOptions> options,
@@ -27,8 +32,13 @@ public sealed class GatewayHealthCheckService : IGatewayHealthCheckService
         IConnectionMultiplexer? redisMultiplexer = null,
         IHostEnvironment? environment = null,
         AuditChainIntegrityMonitor? auditChainMonitor = null,
-        ICatalogSearchEngine? catalogSearchEngine = null)
+        ICatalogSearchEngine? catalogSearchEngine = null,
+        ICatalogVersionProvider? catalogVersionProvider = null,
+        IOptions<CatalogSearchOptions>? catalogSearchOptions = null,
+        TimeProvider? timeProvider = null,
+        ICatalogDirtyFlag? catalogDirtyFlag = null)
     {
+        _catalogDirtyFlag = catalogDirtyFlag;
         _auditChainMonitor = auditChainMonitor;
         _options = options;
         _logger = logger;
@@ -36,6 +46,9 @@ public sealed class GatewayHealthCheckService : IGatewayHealthCheckService
         _redisMultiplexer = redisMultiplexer;
         _environment = environment;
         _catalogSearchEngine = catalogSearchEngine;
+        _catalogVersionProvider = catalogVersionProvider;
+        _catalogSearchOptions = catalogSearchOptions;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     public async Task<GatewayHealthReport> CheckHealthAsync(CancellationToken ct = default)
@@ -65,7 +78,7 @@ public sealed class GatewayHealthCheckService : IGatewayHealthCheckService
             else if (_governanceRepository != null)
             {
                 // Fallback check: verify catalog is queryable
-                _ = await _governanceRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
+                _ = await _governanceRepository.QueryTablesAsync(new CatalogTableQuery(Limit: 1), ct).ConfigureAwait(false);
                 dbHealthy = true;
                 dbDesc = "Governance DB query succeeded.";
             }
@@ -115,7 +128,7 @@ public sealed class GatewayHealthCheckService : IGatewayHealthCheckService
             {
                 if (_redisMultiplexer != null && _redisMultiplexer.IsConnected)
                 {
-                    var ping = await _redisMultiplexer.GetDatabase().PingAsync().ConfigureAwait(false);
+                    var ping = await _redisMultiplexer.GetDatabase().PingAsync().WaitAsync(ct).ConfigureAwait(false);
                     redisHealthy = true;
                     redisDesc = $"Redis ping successful ({ping.TotalMilliseconds:F1}ms).";
                 }
@@ -176,18 +189,65 @@ public sealed class GatewayHealthCheckService : IGatewayHealthCheckService
             _logger.LogDebug("Health check: security-relevant settings active (permitted): {Warnings}", string.Join(", ", warnings));
         }
 
-        // 4. Catalog Search Index (Issue #458)
+        // 4. Catalog Search Index (Issue #458, #501)
         if (_catalogSearchEngine != null)
         {
-            var isReady = _catalogSearchEngine.IsIndexReady;
-            var tableCount = _catalogSearchEngine.IndexedTableCount;
-            var lastIndexed = _catalogSearchEngine.LastIndexedAt;
-            var searchDesc = isReady
-                ? $"Catalog search index ready: {tableCount} tables indexed at {lastIndexed:O}."
-                : "Catalog search index warming or not initialized.";
+            var searchDesc = await EvaluateCatalogSearchHealthAsync(ct).ConfigureAwait(false);
             components.Add(new HealthCheckComponentResult("CatalogSearchIndex", true, searchDesc));
         }
 
+        // 5. Catalog version sync: a failed catalog write scope flush leaves committed writes without a version bump until the
+        // snapshot poll repairs it. The component stays healthy (degraded only) and never carries exception text.
+        if (_catalogDirtyFlag is { IsDirty: true })
+        {
+            components.Add(new HealthCheckComponentResult(
+                "CatalogVersionSync", true, "degraded: catalog version bump pending repair (see gateway logs)."));
+        }
+
         return new GatewayHealthReport(overallHealthy, components);
+    }
+
+    private const int CatalogSearchStalenessMultiplier = 3;
+
+    private async Task<string> EvaluateCatalogSearchHealthAsync(CancellationToken ct)
+    {
+        var now = _timeProvider.GetUtcNow();
+        var status = _catalogSearchEngine!.GetStatus(now);
+        var lastErrorCode = status?.LastErrorCode;
+        var lastIndexed = status?.LastSuccessUtc ?? _catalogSearchEngine.LastIndexedAt;
+        var indexAge = status?.IndexAge ?? (lastIndexed.HasValue ? now - lastIndexed.Value : (TimeSpan?)null);
+
+        if (!string.IsNullOrEmpty(lastErrorCode))
+        {
+            return $"degraded: catalog search index rebuild failed ({lastErrorCode}; see gateway logs).";
+        }
+
+        var refreshSeconds = _catalogSearchOptions?.Value.RefreshSeconds ?? 15;
+        if (refreshSeconds > 0 &&
+            indexAge.HasValue &&
+            indexAge.Value > TimeSpan.FromSeconds((long)refreshSeconds * CatalogSearchStalenessMultiplier) &&
+            _catalogVersionProvider != null)
+        {
+            try
+            {
+                var currentVersion = await _catalogVersionProvider.GetCatalogVersionAsync(ct).ConfigureAwait(false);
+                var indexedVersion = (_catalogSearchEngine as ICatalogSearchStatusReader)?.LastIndexedVersion;
+                if (indexedVersion is null ||
+                    indexedVersion.Value != (currentVersion.StructureVersion, currentVersion.ContentVersion))
+                {
+                    return "degraded: catalog search index is stale (see gateway logs).";
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogDebug(ex, "Health check could not read catalog version for staleness check.");
+            }
+        }
+
+        var isReady = _catalogSearchEngine.IsIndexReady;
+        var tableCount = _catalogSearchEngine.IndexedTableCount;
+        return isReady
+            ? $"Catalog search index ready: {tableCount} tables indexed at {lastIndexed:O}."
+            : "Catalog search index warming or not initialized.";
     }
 }

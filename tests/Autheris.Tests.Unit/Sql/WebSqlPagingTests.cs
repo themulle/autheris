@@ -37,13 +37,13 @@ using Xunit;
 public sealed class WebSqlPagingTests
 {
     private static ClaimsPrincipal CreateUser(string sid = "user-1", string tenant = "tenant-1") =>
-        new(new ClaimsIdentity(
+        Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(new ClaimsPrincipal(new ClaimsIdentity(
             [
                 new Claim(ClaimTypes.PrimarySid, sid),
                 new Claim("sub", sid),
                 new Claim("tenant_id", tenant)
             ],
-            "TestAuth"));
+            "TestAuth")));
 
     private static TableMetadata CustomersTable(string schema = "crm") => new()
     {

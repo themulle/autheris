@@ -12,7 +12,6 @@ public sealed class TenantIngressArchitectureTests
     // caller context or be unresolved by construction (it then throws TenantUnresolvedException on tenant use), and be added here.
     private static readonly Dictionary<string, int> Allowlist = new Dictionary<string, int>(StringComparer.Ordinal)
     {
-        ["src/Autheris.Api/Endpoints/DuckDbOlapEndpoints.cs"] = 1,                      // empty fallback: unresolved
         ["src/Autheris.Api/Security/BasicAuthSession.cs"] = 1,                          // ingress (claims transformation stamps)
         ["src/Autheris.Api/Security/BasicAuthenticationHandler.cs"] = 1,                // ingress
         ["src/Autheris.Api/Security/ForwardAuthAuthenticationHandler.cs"] = 1,          // ingress
@@ -21,8 +20,10 @@ public sealed class TenantIngressArchitectureTests
         ["src/Autheris.Api/Security/ScimAuthenticationHandler.cs"] = 1,                 // ingress (realm binding)
         ["src/Autheris.Api/Security/TenantStamping.cs"] = 1,                            // wraps the identity the resolver reads (claims transformation helper)
         ["src/Autheris.Api/Security/TestAuthHandler.cs"] = 2,                           // test-host ingress
+        ["src/Autheris.Application/ConsentRequests/ConsentDecisionPipeline.cs"] = 1,   // external decision actor principal (stamped with request tenant)
         ["src/Autheris.Application/Events/Services/CdcSubscriptionPrincipal.cs"] = 1,   // stored subscription tenant (invalid fails closed)
         ["src/Autheris.Application/Governance/Analysis/QueryAnalysisService.cs"] = 1,   // simulated target: the analysed caller's tenant
+        ["src/Autheris.Application/Policy/Pdp/AccessDecisionPoint.WriteGrants.cs"] = 1, // write-grant fallback: resolved subject tenant or unresolved
         ["src/Autheris.Application/Runtime/Jobs/Services/AsyncQueryJobManager.cs"] = 4, // job audit principals: the captured job tenant
         ["src/Autheris.Application/Mcp/Services/McpProtocolHandler.cs"] = 1,            // MCP session: the session tenant
         ["src/Autheris.Application/Services/GatewayExecutionService.cs"] = 1,           // dev anonymous: default tenant or unresolved

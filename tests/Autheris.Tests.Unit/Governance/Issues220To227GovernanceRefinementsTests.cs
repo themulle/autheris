@@ -9,13 +9,14 @@ using Autheris.Application.DataSources.Services;
 using Autheris.Application.Governance.Analysis;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Security;
+using Autheris.Application.Usage;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Options.DataSources;
 using Autheris.Domain.Security;
 using Autheris.GraphQL.Interceptors;
 using Autheris.GraphQL.Types;
-using Autheris.Infrastructure.Observability;
 using HotChocolate;
 using HotChocolate.Language;
 using Microsoft.AspNetCore.Http;
@@ -35,21 +36,31 @@ public sealed class Issues220To227GovernanceRefinementsTests
     [Fact]
     public void Issue220_ConsumerUsageRecorder_RecordsUsageWithClientId()
     {
-        var recorder = new ConsumerUsageRecorder("cluster-secret");
+        var aggregator = new UsageAggregator();
+        var recorder = new UsageRecorder(aggregator);
         var tableId = new TableIdentifier("sales", "dbo", "orders");
         var tenantId = new TenantId("tenant-gold");
+        var userSid = new Sid("S-1-5-21-USER");
         var caller = new CallerContext(Application: "sales-app", Version: "1.0", ClientId: "client-app-99");
 
-        recorder.RecordUsage(
-            tableId,
-            tenantId,
-            new Sid("S-1-5-21-USER"),
-            ConsumerOutcome.Allow,
-            rowsReturned: 42,
-            rowsMeasured: true,
-            caller: caller);
+        using (var scope = UsageRequestScope.Begin(
+            new UsageIdentity(tenantId, userSid, new HashSet<Sid>()),
+            DataSourceTransportFlags.Rest,
+            caller,
+            aggregator))
+        {
+            recorder.Record(
+                new UsageFact(tableId, "sales", UsageOutcome.Allow, Rows: 42, RowsMeasured: true, AnalysisCost: 0, Grants: Array.Empty<GrantRef>(), Source: default),
+                tenantId,
+                userSid);
+            scope.Complete(durationMs: 12, bytes: 128, statusCode: 200);
+        }
 
-        recorder.ActiveSeriesCount.ShouldBeGreaterThan(0);
+        var snapshot = aggregator.Swap();
+        var entry = snapshot.Series.ShouldHaveSingleItem();
+        entry.Key.ClientId.ShouldBe("client-app-99");
+        entry.Value.Queries.ShouldBe(1);
+        entry.Value.Rows.ShouldBe(42);
         CallerLabelNormalizer.NormalizeClientId(caller.ClientId).ShouldBe("client-app-99");
     }
 

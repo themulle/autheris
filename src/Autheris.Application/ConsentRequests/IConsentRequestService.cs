@@ -1,6 +1,7 @@
 namespace Autheris.Application.ConsentRequests;
 
 using System;
+using System.Collections.Generic;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
@@ -13,11 +14,17 @@ using Autheris.Domain.Model;
 /// <param name="Schema">Schema of the requested table.</param>
 /// <param name="TableName">Name of the requested table.</param>
 /// <param name="Justification">Business justification (5 to 2000 characters).</param>
-/// <param name="DurationDays">Requested validity in days (1 to 365).</param>
+/// <param name="DurationDays">Requested validity in days (used when <paramref name="RequestedValidTo"/> and <paramref name="RequestedDuration"/> are omitted).</param>
 /// <param name="IdempotencyKey">Optional client idempotency key.</param>
 /// <param name="UserSid">Authenticated requester.</param>
 /// <param name="Principal">Authenticated principal (claims used for tenant and identity resolution).</param>
 /// <param name="ContextTenant">Tenant resolved for the current request/connection context, or the legacy single tenant.</param>
+/// <param name="Context">Optional operational context provided by the requester.</param>
+/// <param name="RequestedWriteRules">Optional requested write rules for insert/update grants.</param>
+/// <param name="RequestWriteOnly">Optional flag controlling whether write requests omit read column grants.</param>
+/// <param name="RequestedDuration">Optional ISO-8601 duration string (for example, <c>P2W</c>).</param>
+/// <param name="RequestedValidFrom">Optional start of the requested validity window.</param>
+/// <param name="RequestedValidTo">Optional explicit end of the requested validity window.</param>
 public sealed record ConsentRequestSubmission(
     string Domain,
     string Schema,
@@ -28,7 +35,12 @@ public sealed record ConsentRequestSubmission(
     Sid UserSid,
     ClaimsPrincipal? Principal,
     TenantId ContextTenant,
-    AccessRequestContextInput? Context = null);
+    AccessRequestContextInput? Context = null,
+    IReadOnlyList<WriteRule>? RequestedWriteRules = null,
+    bool? RequestWriteOnly = null,
+    string? RequestedDuration = null,
+    DateTimeOffset? RequestedValidFrom = null,
+    DateTimeOffset? RequestedValidTo = null);
 
 /// <summary>Outcome of a consent request submission.</summary>
 public sealed class SubmitConsentRequestResult

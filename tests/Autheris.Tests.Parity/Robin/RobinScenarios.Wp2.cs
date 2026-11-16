@@ -102,7 +102,11 @@ public sealed partial class RobinScenarios
         using var doc = JsonDocument.Parse(r.RawBody);
         return doc.RootElement.ValueKind == JsonValueKind.Object
                && doc.RootElement.TryGetProperty("columns", out var cols)
-               && cols.EnumerateArray().Any(c => string.Equals(c.GetString(), column, StringComparison.OrdinalIgnoreCase));
+               && cols.EnumerateArray().Any(c =>
+               {
+                   var name = c.ValueKind == JsonValueKind.Object && c.TryGetProperty("name", out var n) ? n.GetString() : c.GetString();
+                   return string.Equals(name, column, StringComparison.OrdinalIgnoreCase);
+               });
     }
 
     /// <summary>The sorted set of property paths of a JSON body without any value (SEC-R100-13 body shape).</summary>
@@ -649,11 +653,11 @@ public sealed partial class RobinScenarios
                 break;
         }
 
-        // Designed codes: WebSQL 403 SQL_POLICY_DENIED (no existence oracle), REST 404 RESOURCE_NOT_FOUND, GraphQL GRAPHQL_VALIDATION_FAILED.
+        // Designed codes: WebSQL 403 SQL_POLICY_DENIED (no existence oracle), REST 403 ACCESS_DENIED (no existence oracle), GraphQL GRAPHQL_VALIDATION_FAILED.
         var (expectedCode, expectedStatus) = channel switch
         {
             "WebSql" => ("SQL_POLICY_DENIED", 403),
-            "Rest" => ("RESOURCE_NOT_FOUND", 404),
+            "Rest" => ("ACCESS_DENIED", 403),
             _ => ("GRAPHQL_VALIDATION_FAILED", 400),
         };
         table.Rejected(expectedCode).Status.ShouldBe(expectedStatus);
@@ -778,7 +782,7 @@ public sealed partial class RobinScenarios
             "Rest" => await _robin.RestAsync(RestPath(Sales, "select=id&limit=-1")),
             _ => await Sql("SELECT id FROM parity_sales LIMIT -1"),
         };
-        r.Rejected(channel == "WebSql" ? "SQL_SYNTAX_ERROR" : "INVALID_QUERY");
+        r.Rejected(channel switch { "WebSql" => "SQL_SYNTAX_ERROR", "GraphQl" => "INVALID_QUERY_OPTION", _ => "INVALID_QUERY" });
         if (channel != "GraphQl")
         {
             r.Status.ShouldBe(400);

@@ -35,6 +35,7 @@ using Xunit;
 /// access through one <see cref="TableAccessPolicy"/>. Before, OLAP had no consent cache, WebSQL and procedures read consents without the decision cache, and each path merged Casbin
 /// restrictions differently.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class TableAccessPolicyArch1Tests
 {
     private const string Tenant = "tenant_a";
@@ -44,7 +45,10 @@ public sealed class TableAccessPolicyArch1Tests
     {
         var claims = new List<Claim> { new(ClaimTypes.PrimarySid, "S-1-5-21-USER"), new("tenant_id", Tenant) };
         claims.AddRange(extra);
-        return new ClaimsPrincipal(new ClaimsIdentity(claims, "Bearer"));
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, "Bearer"));
+        return extra.Any(c => c.Type is Autheris.Domain.Identity.GroupResolutionClaims.StatusClaimType or Autheris.Domain.Identity.GroupResolutionClaims.MarkerClaimType)
+            ? principal
+            : Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(principal);
     }
 
     private static TableMetadata Meta(bool isActive = true) => new()

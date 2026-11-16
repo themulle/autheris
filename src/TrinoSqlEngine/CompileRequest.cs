@@ -49,6 +49,7 @@ public sealed record GovernancePolicy
     public required IColumnMaskProvider Masks { get; init; }
     public required ITableCatalog Catalog { get; init; }
     public required TenantBinding Tenant { get; init; }
+    public IPerCellColumnProvider PerCellColumns { get; init; } = EmptyPerCellColumnProvider.Instance;
     public DmlGuardOptions Dml { get; init; } = DmlGuardOptions.Strict;
     public DmlWritePermit? Write { get; init; }
     public IReadOnlySet<string> TablesWithConsentRowFilter { get; init; } = FrozenSet<string>.Empty;

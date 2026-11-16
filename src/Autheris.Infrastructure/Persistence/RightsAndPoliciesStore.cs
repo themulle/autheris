@@ -11,7 +11,6 @@ using Autheris.Domain.Interfaces;
 
 internal enum RightsAndPoliciesDialect
 {
-    Sqlite,
     PostgreSql,
     SqlServer
 }
@@ -28,7 +27,6 @@ internal sealed class RightsAndPoliciesStore(
 {
     private SqlDialect Sql => dialect switch
     {
-        RightsAndPoliciesDialect.Sqlite => SqlDialect.Sqlite,
         RightsAndPoliciesDialect.PostgreSql => SqlDialect.PostgreSql,
         _ => SqlDialect.SqlServer
     };
@@ -122,7 +120,7 @@ internal sealed class RightsAndPoliciesStore(
     {
         await using var scope = await open(true, ct).ConfigureAwait(false);
         await using var cmd = scope.Connection.CreateCommand();
-        if (dialect == RightsAndPoliciesDialect.Sqlite || dialect == RightsAndPoliciesDialect.PostgreSql)
+        if (dialect == RightsAndPoliciesDialect.PostgreSql)
         {
             cmd.CommandText = @"INSERT INTO FUNCTIONAL_RIGHT_MAPPINGS (tenant_id, realm_id, group_or_role, functional_right, approved_by, approved_at, recert_class, created_by, created_at)
 VALUES (@tenantId, @realmId, @groupOrRole, @right, @approvedBy, @approvedAt, @recertClass, @createdBy, @createdAt)

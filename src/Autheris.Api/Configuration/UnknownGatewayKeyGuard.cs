@@ -21,6 +21,13 @@ public static class UnknownGatewayKeyGuard
 
     private const string RemovedProcedureHotReloadKey = GatewayConfigurationSchema.Root + ":SqlEndpoints:Procedures:EnableHotReload";
 
+    private static readonly (string Key, string Message)[] RemovedProcedureDeclaredKeys =
+    [
+        (GatewayConfigurationSchema.Root + ":SqlEndpoints:Procedures:AllowDeclaredValidation", "SqlEndpoints:Procedures:AllowDeclaredValidation (removed; declared-only procedure validation is always active)"),
+        (GatewayConfigurationSchema.Root + ":Procedures:AllowDeclaredValidation", "Procedures:AllowDeclaredValidation (removed; declared-only procedure validation is always active)"),
+        (GatewayConfigurationSchema.Root + ":Rest:AllowDeclaredValidation", "Rest:AllowDeclaredValidation (removed; declared-only procedure validation is always active)")
+    ];
+
     private const string RemovedAuthzReplacement = "removed by ADR-020; data access is granted by grant records";
 
     private static readonly string[] RemovedAuthzPrefixes =
@@ -28,6 +35,16 @@ public static class UnknownGatewayKeyGuard
         GatewayConfigurationSchema.Root + ":Rebac",
         GatewayConfigurationSchema.Root + ":Insecure:danger_bypass_rebac"
     ];
+
+    private const string RemovedCasbinPrefix = GatewayConfigurationSchema.Root + ":Casbin";
+
+    private const string RemovedCasbinReplacement =
+        "removed by ADR-020; data access is granted only by grant records (consents), column rules and virtual filters";
+
+    private const string RemovedFinOpsPrefix = GatewayConfigurationSchema.Root + ":FinOps";
+
+    private const string RemovedFinOpsMessage =
+        "Gateway:FinOps was removed; usage is tracked by Gateway:UsageAccounting; quotas: Gateway:UsageAccounting:Quotas";
 
     private static readonly string[] RemovedSimpl12Prefixes =
     [
@@ -105,7 +122,7 @@ public static class UnknownGatewayKeyGuard
 
         foreach (var entry in configuration.GetSection(GatewayConfigurationSchema.Root).AsEnumerable(makePathsRelative: true))
         {
-            if (string.IsNullOrEmpty(entry.Key) || entry.Value is null)
+            if (string.IsNullOrEmpty(entry.Key))
             {
                 continue;
             }
@@ -175,6 +192,14 @@ public static class UnknownGatewayKeyGuard
             unknown.Add("SqlEndpoints:Procedures:EnableHotReload (removed (WP-SIMPL-39); definitions are re-scanned each interval)");
         }
 
+        foreach (var (removedKey, message) in RemovedProcedureDeclaredKeys)
+        {
+            if (configuration.AsEnumerable().Any(kv => string.Equals(kv.Key, removedKey, StringComparison.OrdinalIgnoreCase)))
+            {
+                unknown.Add(message);
+            }
+        }
+
         foreach (var removedPrefix in RemovedAuthzPrefixes)
         {
             if (configuration.GetSection(removedPrefix).Exists() ||
@@ -185,6 +210,26 @@ public static class UnknownGatewayKeyGuard
             {
                 unknown.Add($"{removedPrefix} ({RemovedAuthzReplacement})");
             }
+        }
+
+        // Casbin is gone without a data-path successor: every key of the section fails startup with any value.
+        foreach (var key in configuration.AsEnumerable()
+                     .Select(kv => kv.Key)
+                     .Where(k => !string.IsNullOrEmpty(k) &&
+                                 (k.Equals(RemovedCasbinPrefix, StringComparison.OrdinalIgnoreCase) ||
+                                  k.StartsWith(RemovedCasbinPrefix + ":", StringComparison.OrdinalIgnoreCase)))
+                     .Order(StringComparer.OrdinalIgnoreCase))
+        {
+            unknown.Add($"{key} ({RemovedCasbinReplacement})");
+        }
+
+        if (configuration.GetSection(RemovedFinOpsPrefix).Exists() ||
+            configuration.AsEnumerable().Any(kv =>
+                !string.IsNullOrEmpty(kv.Key) &&
+                (kv.Key.Equals(RemovedFinOpsPrefix, StringComparison.OrdinalIgnoreCase) ||
+                 kv.Key.StartsWith(RemovedFinOpsPrefix + ":", StringComparison.OrdinalIgnoreCase))))
+        {
+            unknown.Add(RemovedFinOpsMessage);
         }
 
         // Removed sections and keys fail startup with any value (including false or empty).
@@ -208,7 +253,8 @@ public static class UnknownGatewayKeyGuard
             }
 
             var fullKey = GatewayConfigurationSchema.Root + ":" + entry.Key;
-            if (string.Equals(fullKey, RemovedProcedureHotReloadKey, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(fullKey, RemovedProcedureHotReloadKey, StringComparison.OrdinalIgnoreCase) ||
+                RemovedProcedureDeclaredKeys.Any(r => string.Equals(fullKey, r.Key, StringComparison.OrdinalIgnoreCase)))
             {
                 continue;
             }
@@ -218,7 +264,8 @@ public static class UnknownGatewayKeyGuard
                 continue;
             }
 
-            if (IsClaimedByLoadedModule(fullKey, RemovedAuthzPrefixes))
+            if (IsClaimedByLoadedModule(fullKey, RemovedAuthzPrefixes) ||
+                IsClaimedByLoadedModule(fullKey, [RemovedCasbinPrefix, RemovedFinOpsPrefix]))
             {
                 continue;
             }

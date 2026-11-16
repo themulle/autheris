@@ -68,6 +68,8 @@ public sealed class RemovedEndpointsTests : IClassFixture<RemovedEndpointsTests.
     [InlineData("POST", "/api/v1/governance/catalog/webhook/alation")]
     [InlineData("POST", "/api/v1/governance/catalog/webhook/datahub")]
     [InlineData("POST", "/api/webhooks/datahub")]
+    [InlineData("GET", "/api/v1/finops/focus")]
+    [InlineData("GET", "/api/v1/finops/budget/tenant-default")]
     public async Task Removed_routes_return_404_for_admin_and_anonymous(string method, string route)
     {
         using var admin = CreateAdminClient();
@@ -128,7 +130,8 @@ public sealed class RemovedEndpointsTests : IClassFixture<RemovedEndpointsTests.
             "/api/webhooks/jira",
             "/api/webhooks/catalog",
             "/api/v1/governance/catalog/webhook",
-            "/api/webhooks/datahub"
+            "/api/webhooks/datahub",
+            "/api/v1/finops"
         };
 
         foreach (var pattern in removedPatterns)
@@ -158,7 +161,7 @@ public sealed class RemovedEndpointsTests : IClassFixture<RemovedEndpointsTests.
         {
             Factory.Dispose();
             _root.Dispose();
-            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            Npgsql.NpgsqlConnection.ClearAllPools();
         }
     }
 }

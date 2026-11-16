@@ -9,19 +9,18 @@ public sealed class DatabaseParameterBudgetProvider : IParameterBudgetProvider
 
     public int GetMaxParameters(DatabaseDialect dialect) => dialect switch
     {
-        DatabaseDialect.Sqlite => 999,
         DatabaseDialect.Oracle => 1000,
         DatabaseDialect.SqlServer => 2100,
         DatabaseDialect.PostgreSql => 10000,
         DatabaseDialect.Databricks => 10000,
-        _ => 999
+        _ => 1000
     };
 
     public int CalculateEffectiveChunkSize(
         int defaultChunkSize,
         int keyColumnCount,
         int contextParameterCount = 0,
-        DatabaseDialect dialect = DatabaseDialect.Sqlite,
+        DatabaseDialect dialect = DatabaseDialect.SqlServer,
         int safetyBuffer = 50)
     {
         int maxEngineParams = GetMaxParameters(dialect);

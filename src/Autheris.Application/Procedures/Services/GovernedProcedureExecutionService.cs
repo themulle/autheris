@@ -30,7 +30,7 @@ using TableDecision = (Autheris.Domain.Interfaces.TableAccessDecision Decision, 
 /// consents on all referenced tables, column deny/mask on the result set (unknown columns are removed, fail-closed)
 /// and writes a synchronous audit entry before any data is returned.
 /// </summary>
-public sealed class GovernedProcedureExecutionService : IProcedureExecutionService
+public sealed partial class GovernedProcedureExecutionService : IProcedureExecutionService
 {
     /// <summary>The one message of every pre-visibility failure; never contains the name or the reason.</summary>
     public const string NotFoundMessage = "Procedure endpoint not found.";
@@ -60,6 +60,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
     private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache? _memoryCache;
     private readonly Autheris.Application.Policy.Interfaces.IAccessProfileCache? _accessProfileCache;
     private readonly Autheris.Application.Policy.Pdp.IAccessDecisionPoint? _accessDecisionPoint;
+    private readonly Autheris.Application.Usage.IUsageRecorder? _usageRecorder;
 
     public GovernedProcedureExecutionService(
         IProcedureRegistry registry,
@@ -83,7 +84,8 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         ITableReadConcurrencyGate? concurrencyGate = null,
         ProcedureDenialAuditLimiter? denialAuditLimiter = null,
         Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null,
-        Autheris.Application.Policy.Pdp.IAccessDecisionPoint? accessDecisionPoint = null)
+        Autheris.Application.Policy.Pdp.IAccessDecisionPoint? accessDecisionPoint = null,
+        Autheris.Application.Usage.IUsageRecorder? usageRecorder = null)
     {
         _accessDecisionPoint = accessDecisionPoint ?? new Autheris.Application.Policy.Pdp.AccessDecisionPoint(
             options,
@@ -113,6 +115,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         _consentCache = consentCache;
         _accessProfileRepository = accessProfileRepository;
         _memoryCache = memoryCache; _accessProfileCache = accessProfileCache;
+        _usageRecorder = usageRecorder;
     }
 
     public async Task<GovernedProcedureResult> ExecuteAsync(
@@ -129,6 +132,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         // return) and answered exactly like an invisible procedure (04).
         if (string.IsNullOrWhiteSpace(name) || !_registry.TryGet(name, out var registered) || registered == null)
         {
+            RecordUnknownProcedureUsage(name, user, tenantId);
             await AuditUnknownAsync(name, user, tenantId, traceId, ct).ConfigureAwait(false);
             throw new KeyNotFoundException(NotFoundMessage);
         }
@@ -140,6 +144,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         if (definition.Mode != ProcedureMode.Read)
         {
             var denyUser = user.GetUserSid() ?? new Sid("anonymous");
+            RecordProcedureUsage(definition, tenantId, denyUser, Autheris.Application.Usage.UsageOutcome.DenyAccess, 0, false);
             await AuditAsync("PROCEDURE_DENIED", "DENY", definition, tenantId, denyUser, new { reason = "write-mode" }, traceId, ct).ConfigureAwait(false);
             throw new KeyNotFoundException(NotFoundMessage);
         }
@@ -152,6 +157,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         var visibility = await EvaluateVisibilityAsync(registered, user, tenantId, traceId, ct).ConfigureAwait(false);
         if (!visibility.Visible)
         {
+            RecordProcedureUsage(definition, tenantId, userSid, Autheris.Application.Usage.UsageOutcome.DenyAccess, 0, false);
             await AuditAsync("PROCEDURE_DENIED", "DENY", definition, tenantId, userSid, new { reason = visibility.Reason }, traceId, ct).ConfigureAwait(false);
             throw new KeyNotFoundException(NotFoundMessage);
         }
@@ -172,6 +178,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         }
         catch (GatewayThrottledException)
         {
+            RecordProcedureUsage(definition, tenantId, userSid, Autheris.Application.Usage.UsageOutcome.DenyRateLimit, 0, false);
             await AuditAsync("PROCEDURE_THROTTLED", "DENY", definition, tenantId, userSid, new { reason = "concurrency" }, traceId, ct).ConfigureAwait(false);
             throw;
         }
@@ -216,6 +223,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
                 // D-7: resolve the operator-declared entry; the audit carries the mapped code only (never the message).
                 var mapped = definition.ErrorCodes.FirstOrDefault(e =>
                     (e.Number is not null && e.Number == bex.ErrorNumber) || (e.SqlState is not null && e.SqlState == bex.SqlState));
+                RecordProcedureUsage(definition, tenantId, userSid, Autheris.Application.Usage.UsageOutcome.DenyOther, 0, false);
                 await AuditAsync(
                     "PROCEDURE_REJECTED", "DENY", definition, tenantId, userSid,
                     new { reason = "business-error", number = bex.ErrorNumber, sqlState = bex.SqlState, mappedCode = mapped?.Code }, traceId, ct).ConfigureAwait(false);
@@ -227,6 +235,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
                 _logger?.LogError(
                     "Stored procedure endpoint '{Procedure}' failed with {ExceptionType} (number {Number}, trace {TraceId}).",
                     definition.ProcedureName, dbx.GetType().Name, DbErrorNumber(dbx), traceId);
+                RecordProcedureUsage(definition, tenantId, userSid, Autheris.Application.Usage.UsageOutcome.Error, 0, false);
                 await AuditAsync("PROCEDURE_FAILED", "DENY", definition, tenantId, userSid, new { reason = dbx.GetType().Name }, traceId, ct).ConfigureAwait(false);
                 throw;
             }
@@ -236,6 +245,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
                 _logger?.LogError(
                     "Stored procedure endpoint '{Procedure}' failed with {ExceptionType} (trace {TraceId}).",
                     definition.ProcedureName, ex.GetType().Name, traceId);
+                RecordProcedureUsage(definition, tenantId, userSid, Autheris.Application.Usage.UsageOutcome.Error, 0, false);
                 await AuditAsync("PROCEDURE_FAILED", "DENY", definition, tenantId, userSid, new { reason = ex.GetType().Name }, traceId, ct).ConfigureAwait(false);
                 throw;
             }
@@ -285,6 +295,14 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
                 traceId,
                 ct).ConfigureAwait(false);
 
+            RecordProcedureUsage(
+                definition,
+                tenantId,
+                userSid,
+                Autheris.Application.Usage.UsageOutcome.Allow,
+                governed.Rows.Count,
+                true,
+                ExtractDecisionGrants(decisions.Values.Select(d => d.Decision)));
             return new GovernedProcedureResult(governed.Columns, governed.Rows, governed.Rows.Count, truncated, sw.ElapsedMilliseconds);
         }
         finally
@@ -817,172 +835,6 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         return new RawProcedureResult(raw.Columns, kept, raw.MoreRowsAvailable);
     }
 
-    private (IReadOnlyList<string> Columns, IReadOnlyList<IReadOnlyDictionary<string, object?>> Rows) GovernResult(
-        ProcedureDefinition definition,
-        RawProcedureResult raw,
-        Dictionary<string, TableDecision> decisions,
-        IReadOnlyDictionary<string, ResultColumnSource>? sources,
-        TenantId tenantId)
-    {
-        TableDecision? mapped = null;
-        if (definition.ResultTable != null)
-        {
-            if (decisions.TryGetValue(definition.ResultTable, out var m))
-            {
-                mapped = m;
-            }
-            else
-            {
-                var rParts = definition.ResultTable.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                var rSchema = rParts.Length >= 2 ? rParts[^2] : "dbo";
-                var rTable = rParts[^1];
-                if (TryFindDecision(decisions, rSchema, rTable, out var fm))
-                {
-                    mapped = fm;
-                }
-            }
-        }
-
-        var cleared = new HashSet<string>(definition.ClearedResultColumns, StringComparer.OrdinalIgnoreCase);
-
-        // Plan per raw column: index, output name, action
-        var plan = new List<(int Index, string Name, ColumnAccessLevel Level, MaskingRule? Rule)>();
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        for (int i = 0; i < raw.Columns.Count; i++)
-        {
-            string col = raw.Columns[i];
-            if (string.IsNullOrWhiteSpace(col))
-            {
-                continue; // unnamed columns cannot be governed
-            }
-
-            if (!seen.Add(col))
-            {
-                throw new InvalidOperationException("The procedure returned duplicate column names; the result cannot be governed.");
-            }
-
-            // Review R4-6: the declared-output filter also applies to cleared columns.
-            // Review P-1: declared mode only narrows the result to the declared outputs; the columns are then governed
-            // exactly like in catalog mode (consent deny/mask of the result table, unknown columns removed).
-            if (definition.ValidationMode == ProcedureValidationMode.Declared &&
-                !definition.DeclaredOutputs.Contains(col, StringComparer.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            // SEC D-2: with browse-mode source information every result column is governed by the decision of ITS source table.
-            // Computed / ambiguous columns (no source) are removed unless declared clear; columns of tables other than the
-            // result table survive only with an explicit column-level Clear.
-            var (decision, meta, sourceColumn, foreign) = (default(TableAccessDecision)!, default(TableMetadata)!, col, false);
-            IReadOnlySet<string>? sensitivityOnly = null;
-            if (sources != null)
-            {
-                if (!sources.TryGetValue(col, out var src) || string.IsNullOrWhiteSpace(src.Table) || string.IsNullOrWhiteSpace(src.Column))
-                {
-                    // Computed / ambiguous column without source: only survives if declared clear AND result table is not denied
-                    if (!cleared.Contains(col) || mapped == null || !mapped.Value.Decision.IsAllowed)
-                    {
-                        continue;
-                    }
-                    plan.Add((i, col, ColumnAccessLevel.Clear, null));
-                    continue;
-                }
-
-                var schema = string.IsNullOrWhiteSpace(src.Schema) ? "dbo" : src.Schema;
-                if (!TryFindDecision(decisions, schema, src.Table, out var srcMapped) || !srcMapped.Meta.HasColumn(src.Column))
-                {
-                    continue; // source table not governed: fail closed
-                }
-
-                (decision, meta, sensitivityOnly) = srcMapped;
-                sourceColumn = src.Column;
-                var key = $"{schema}.{src.Table}";
-                foreign = definition.ResultTable == null ||
-                          (!string.Equals(key, definition.ResultTable, StringComparison.OrdinalIgnoreCase) &&
-                           !string.Equals(src.Table, definition.ResultTable, StringComparison.OrdinalIgnoreCase));
-            }
-            else
-            {
-                if (mapped == null || !mapped.Value.Meta.HasColumn(col))
-                {
-                    continue; // unknown column: removed (fail-closed)
-                }
-
-                (decision, meta, sensitivityOnly) = mapped.Value;
-            }
-
-            // If source table access is denied, fail closed
-            if (!decision.IsAllowed)
-            {
-                continue;
-            }
-
-            var level = decision.GetEffectiveColumnAccess(sourceColumn, meta);
-            // Zero-Trust: ClearedResultColumns lifts only a Mask that stems from catalog sensitivity alone; an explicit
-            // base or scope-specific Mask and any Deny stay; an unknown sensitivity set lifts nothing.
-            if (cleared.Contains(col) && level == ColumnAccessLevel.Mask && sensitivityOnly != null && sensitivityOnly.Contains(sourceColumn))
-            {
-                level = ColumnAccessLevel.Clear;
-            }
-
-            if (level == ColumnAccessLevel.Deny)
-            {
-                continue;
-            }
-
-            if (foreign && level != ColumnAccessLevel.Clear)
-            {
-                continue;
-            }
-
-            MaskingRule? rule = null;
-            if (level == ColumnAccessLevel.Mask)
-            {
-                var catalogColumn = meta.GetColumn(sourceColumn);
-                if (!meta.ColumnMaskingRules.TryGetValue(sourceColumn, out rule) && catalogColumn != null)
-                {
-                    meta.ColumnMaskingRules.TryGetValue(catalogColumn.ColumnName, out rule);
-                }
-
-                rule ??= new MaskingRule { RuleType = "REDACT" };
-
-                // SEC D-3: HMAC pseudonyms are tenant-scoped.
-                rule = Autheris.Application.Services.GatewayExecutionService.ScopeRuleForTenant(
-                    rule, tenantId.Value, _options.Value.DataMasking?.HmacKeyId);
-            }
-
-            plan.Add((i, col, level, rule));
-        }
-
-        if (plan.Count == 0 && raw.Columns.Count > 0)
-        {
-            _logger?.LogWarning(
-                "Procedure endpoint '{Endpoint}': all result columns were removed by governance. Declare @result-table / @result-column.",
-                definition.Name);
-        }
-
-        var rows = new List<IReadOnlyDictionary<string, object?>>(raw.Rows.Count);
-        foreach (var row in raw.Rows)
-        {
-            var output = new Dictionary<string, object?>(plan.Count, StringComparer.Ordinal);
-            foreach (var (index, colName, level, rule) in plan)
-            {
-                object? value = row[index];
-                if (level == ColumnAccessLevel.Mask)
-                {
-                    value = _masking != null && rule != null ? _masking.MaskValue(colName, value, rule) : null;
-                }
-
-                output[colName] = value;
-            }
-
-            rows.Add(output);
-        }
-
-        return (plan.Select(p => p.Name).ToList(), rows);
-    }
-
     private static Dictionary<string, string> HashParameters(IReadOnlyDictionary<string, object?> values)
     {
         var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -1058,40 +910,6 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
     private System.Net.IPAddress ResolveClientIp(ClaimsPrincipal user)
     {
         return _clientIpResolver?.ResolveClientIp() ?? System.Net.IPAddress.None;
-    }
-
-    private static bool TryFindDecision(
-        Dictionary<string, TableDecision> decisions,
-        string schema,
-        string table,
-        out TableDecision result)
-    {
-        var keyWithSchema = $"{(string.IsNullOrWhiteSpace(schema) ? "dbo" : schema)}.{table}";
-        if (decisions.TryGetValue(keyWithSchema, out result))
-        {
-            return true;
-        }
-
-        if (decisions.TryGetValue(table, out result))
-        {
-            return true;
-        }
-
-        foreach (var kvp in decisions)
-        {
-            if (string.Equals(kvp.Key, keyWithSchema, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(kvp.Key, table, StringComparison.OrdinalIgnoreCase) ||
-                (kvp.Value.Meta != null &&
-                 string.Equals(kvp.Value.Meta.Identifier.TableName, table, StringComparison.OrdinalIgnoreCase) &&
-                 (string.IsNullOrWhiteSpace(schema) || string.Equals(kvp.Value.Meta.Identifier.Schema, schema, StringComparison.OrdinalIgnoreCase))))
-            {
-                result = kvp.Value;
-                return true;
-            }
-        }
-
-        result = default;
-        return false;
     }
 }
 

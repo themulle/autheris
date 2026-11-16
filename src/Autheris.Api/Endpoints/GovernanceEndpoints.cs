@@ -60,6 +60,7 @@ public sealed class BulkConsentRequest
     public string? MaskingMode { get; set; }
     public List<string>? Tables { get; set; }
     public string? RowFilter { get; set; }
+    public IReadOnlyList<Autheris.Domain.Model.GrantRowScopeEntry>? RowScope { get; set; }
     public int ValidDays { get; set; }
     public string? Justification { get; set; }
 

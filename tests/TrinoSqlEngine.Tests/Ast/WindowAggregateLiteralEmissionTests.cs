@@ -20,7 +20,6 @@ public sealed class WindowAggregateLiteralEmissionTests
     [Theory]
     [InlineData(TargetSqlDialect.PostgreSql, "ROW_NUMBER() OVER (PARTITION BY \"dept\" ORDER BY \"amount\" DESC)")]
     [InlineData(TargetSqlDialect.SqlServer, "ROW_NUMBER() OVER (PARTITION BY [dept] ORDER BY [amount] DESC)")]
-    [InlineData(TargetSqlDialect.Sqlite, "ROW_NUMBER() OVER (PARTITION BY \"dept\" ORDER BY \"amount\" DESC)")]
     public void Window_OrderBy_IsKept(TargetSqlDialect dialect, string expected)
     {
         Assert.Contains(expected, Generate("SELECT row_number() OVER (PARTITION BY dept ORDER BY amount DESC) FROM orders", dialect));
@@ -37,7 +36,6 @@ public sealed class WindowAggregateLiteralEmissionTests
     [Theory]
     [InlineData(TargetSqlDialect.PostgreSql)]
     [InlineData(TargetSqlDialect.SqlServer)]
-    [InlineData(TargetSqlDialect.Sqlite)]
     [InlineData(TargetSqlDialect.Oracle)]
     public void Window_RowsFrame_IsKept(TargetSqlDialect dialect)
     {
@@ -70,7 +68,6 @@ public sealed class WindowAggregateLiteralEmissionTests
 
     [Theory]
     [InlineData(TargetSqlDialect.PostgreSql, "COUNT(*) FILTER (WHERE \"amount\" > 100)")]
-    [InlineData(TargetSqlDialect.Sqlite, "COUNT(*) FILTER (WHERE \"amount\" > 100)")]
     [InlineData(TargetSqlDialect.DuckDb, "COUNT(*) FILTER (WHERE \"amount\" > 100)")]
     [InlineData(TargetSqlDialect.SqlServer, "COUNT(CASE WHEN [amount] > 100 THEN 1 END)")]
     [InlineData(TargetSqlDialect.Oracle, "COUNT(CASE WHEN \"AMOUNT\" > 100 THEN 1 END)")]
@@ -103,7 +100,6 @@ public sealed class WindowAggregateLiteralEmissionTests
 
     [Theory]
     [InlineData(TargetSqlDialect.SqlServer)]
-    [InlineData(TargetSqlDialect.Sqlite)]
     [InlineData(TargetSqlDialect.Oracle)]
     public void OrderedAggregate_WithoutNativeSupport_IsRejected(TargetSqlDialect dialect)
     {
@@ -116,7 +112,6 @@ public sealed class WindowAggregateLiteralEmissionTests
     [InlineData(TargetSqlDialect.PostgreSql, "> DATE '2024-01-01'")]
     [InlineData(TargetSqlDialect.Oracle, "> DATE '2024-01-01'")]
     [InlineData(TargetSqlDialect.SqlServer, "> CAST(N'2024-01-01' AS date)")]
-    [InlineData(TargetSqlDialect.Sqlite, "> '2024-01-01'")]
     public void DateLiteral(TargetSqlDialect dialect, string expected)
     {
         Assert.Contains(expected, Generate("SELECT id FROM orders WHERE created_at > DATE '2024-01-01'", dialect));
@@ -125,7 +120,6 @@ public sealed class WindowAggregateLiteralEmissionTests
     [Theory]
     [InlineData(TargetSqlDialect.PostgreSql, "TIMESTAMP '2024-01-01 10:00:00'")]
     [InlineData(TargetSqlDialect.SqlServer, "CAST(N'2024-01-01 10:00:00' AS datetime2)")]
-    [InlineData(TargetSqlDialect.Sqlite, "'2024-01-01 10:00:00'")]
     public void TimestampLiteral(TargetSqlDialect dialect, string expected)
     {
         Assert.Contains(expected, Generate("SELECT id FROM orders WHERE created_at < TIMESTAMP '2024-01-01 10:00:00'", dialect));
@@ -149,7 +143,6 @@ public sealed class WindowAggregateLiteralEmissionTests
 
     [Theory]
     [InlineData(TargetSqlDialect.SqlServer)]
-    [InlineData(TargetSqlDialect.Sqlite)]
     public void IntervalLiteral_WithoutIntervalType_IsRejected(TargetSqlDialect dialect)
     {
         Assert.Throws<AstBuildException>(() => Generate("SELECT created_at + INTERVAL '1' DAY FROM orders", dialect));

@@ -3,6 +3,14 @@ namespace Autheris.Domain.Interfaces;
 using System;
 using System.Collections.Generic;
 using Autheris.Domain.Exceptions;
+using Autheris.Domain.Model;
+
+public sealed record TableWriteDecision(
+    WriteRowScope RowScope,
+    IReadOnlySet<string> WritableColumns,
+    long? MaxRowsPerStatement,
+    IReadOnlyList<string> GrantIds,
+    string? DenyCode = null);
 
 public record TableAccessDecision(
     TableIdentifier Table,
@@ -34,6 +42,9 @@ public record TableAccessDecision(
     /// <summary>129 (BC-129-15): the caller attributes resolved for this decision (audit only; ids, outcomes and reason codes, no values).</summary>
     public IReadOnlyList<Autheris.Domain.Model.CallerAttributeAuditEntry>? CallerAttributes { get; init; }
 
+    /// <summary>Catalog epoch (structure + content version) under which this access decision was evaluated.</summary>
+    public long? CatalogEpoch { get; init; }
+
     /// <summary>
     /// set for a caller that holds a restricted scope. A catalog-sensitive column is then only in clear when the clearance permits it
     /// (see <see cref="GetEffectiveColumnAccess"/>); <c>null</c> = unrestricted caller. Init-only, so <c>with</c> copies keep it.
@@ -53,10 +64,15 @@ public record TableAccessDecision(
     public IReadOnlyList<DecisionGrantRef> Grants { get; init; } = [];
 
     /// <summary>
-    /// MISC-06: set only by the unified policy decision point after the full pipeline ran (contract, Casbin, hooks, virtual filters,
+    /// MISC-06: set only by the unified policy decision point after the full pipeline ran (contract, hooks, virtual filters,
     /// profiles). A pre-evaluated decision without this marker is never trusted by the aggregation service.
     /// </summary>
     internal bool EvaluatedByPdp { get; init; }
+
+    /// <summary>
+    /// Populated by the unified policy decision point for DML write operations (INSERT / UPDATE / DELETE).
+    /// </summary>
+    public TableWriteDecision? WriteGrant { get; init; }
 
     /// <summary>The typed Virtual Filter policy behind <see cref="MandatoryRowPredicateSql"/> (null when it was added as text).</summary>
     public IRowPolicy? MandatoryRowPolicy { get; init; }
@@ -66,6 +82,28 @@ public record TableAccessDecision(
 
     /// <summary>Typed row policies added after the Virtual Filter policy, in order.</summary>
     public IReadOnlyList<IRowPolicy>? RowPoliciesAfterVirtualFilters { get; init; }
+
+    /// <summary>
+    /// Column names whose effective access varies per row (overlapping grants with different masking rules); discovery
+    /// projects these as <see cref="Autheris.Domain.Model.DiscoveryColumnState.Masked"/> with <c>ClearInSomeRows = true</c>.
+    /// </summary>
+    public IReadOnlySet<string>? RowDependentColumns { get; init; }
+
+    /// <summary>
+    /// Contributing grant signatures paired with their unioned row scopes when multiple distinct signatures apply.
+    /// </summary>
+    public IReadOnlyList<GrantSignatureScope>? ColumnSignatures { get; init; }
+
+    /// <summary>
+    /// Typed per-cell column state compiled from <see cref="ColumnSignatures"/> for SQL CASE compilation and streaming evaluation.
+    /// </summary>
+    public IPerCellColumnPolicy? PerCellColumns { get; init; }
+
+    /// <summary>Data-access audit entries for masked columns (column, classifications, maskFunction, keyRef — never key material).</summary>
+    public IReadOnlyList<MaskedColumnAuditEntry> MaskedColumnsAudit { get; init; } = [];
+
+    /// <summary>Data-access audit entries for classification levels applied per grant.</summary>
+    public IReadOnlyList<GrantClassificationAuditEntry> GrantClassificationsAudit { get; init; } = [];
 
     /// <summary>
     /// Typed variant of <see cref="WithAdditionalRowFilter"/>: AND-merges <paramref name="policy"/> into <see cref="RowPolicy"/> and
@@ -83,7 +121,7 @@ public record TableAccessDecision(
         }
 
         var next = RowPolicy == null ? policy : RowPolicy.And(policy);
-        var typed = WithPolicy(next);
+        var typed = WithPolicy(next) with { PerCellColumns = PerCellColumns?.WithNarrowing(policy) };
         return MandatoryRowPredicateSql == null
             ? typed
             : typed with
@@ -118,6 +156,7 @@ public record TableAccessDecision(
         var next = RowPolicy == null ? policy : RowPolicy.And(policy);
         return WithPolicy(next) with
         {
+            PerCellColumns = PerCellColumns?.WithNarrowing(policy),
             MandatoryRowPredicateSql = projection.Sql,
             MandatoryRowPolicy = policy,
             AppliedVirtualFilters = appliedFilters,
@@ -175,7 +214,7 @@ public record TableAccessDecision(
         var masked = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (column, level) in ColumnAccess)
         {
-            if (level == ColumnAccessLevel.Mask)
+            if (level is ColumnAccessLevel.Mask or ColumnAccessLevel.RowDependent)
             {
                 masked.Add(column);
             }
@@ -447,6 +486,11 @@ public record TableAccessDecision(
             return ColumnAccessLevel.Deny;
         }
 
+        if (access == ColumnAccessLevel.RowDependent)
+        {
+            return ColumnAccessLevel.Mask;
+        }
+
         // a restricted-scope caller also needs the scope-specific clearance, not only the base Clear.
         if (IsCatalogSensitive(columnName, metadata)
             && (!HasExplicitClear(columnName) || (ScopeClearance is { } clearance && !clearance.Permits(columnName))))
@@ -457,19 +501,9 @@ public record TableAccessDecision(
         return access;
     }
 
-    /// <summary>True when the catalog marks the column sensitive (<c>IsSensitive</c> or a column masking rule). The one definition used by the effective-access rule.</summary>
-    public static bool IsCatalogSensitive(string columnName, TableMetadata? metadata)
-    {
-        if (metadata == null)
-        {
-            return false;
-        }
-
-        var column = metadata.GetColumn(columnName);
-        return column?.IsSensitive == true ||
-               metadata.ColumnMaskingRules.ContainsKey(columnName) ||
-               (column != null && metadata.ColumnMaskingRules.ContainsKey(column.ColumnName));
-    }
+    /// <summary>True when the catalog marks the column sensitive via classifications (or legacy fallback when unclassified).</summary>
+    public static bool IsCatalogSensitive(string columnName, TableMetadata? metadata) =>
+        ClassificationMetadata.IsColumnSensitive(metadata, columnName);
 
     /// <summary>
     /// true when the column is catalog-sensitive with an explicit<c>Clear</c> that the restricted-scope clearance does not
@@ -524,4 +558,14 @@ public readonly record struct DecisionGrantRef(
     GrantSourceKind Source,
     DateTimeOffset ValidFrom,
     DateTimeOffset? ValidUntil = null);
+
+public sealed record MaskedColumnAuditEntry(
+    [property: System.Text.Json.Serialization.JsonPropertyName("column")] string Column,
+    [property: System.Text.Json.Serialization.JsonPropertyName("classifications")] IReadOnlyList<string> Classifications,
+    [property: System.Text.Json.Serialization.JsonPropertyName("maskFunction")] string MaskFunction,
+    [property: System.Text.Json.Serialization.JsonPropertyName("keyRef")] string? KeyRef = null);
+
+public sealed record GrantClassificationAuditEntry(
+    [property: System.Text.Json.Serialization.JsonPropertyName("grantId")] string GrantId,
+    [property: System.Text.Json.Serialization.JsonPropertyName("classificationLevels")] IReadOnlyDictionary<string, string> ClassificationLevels);
 

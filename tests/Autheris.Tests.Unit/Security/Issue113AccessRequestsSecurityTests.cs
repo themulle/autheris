@@ -25,6 +25,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public class Issue113AccessRequestsSecurityTests
 {
     private static TableMetadata CreateSampleMetadata(string domain = "finance", string schema = "dbo", string table = "orders")

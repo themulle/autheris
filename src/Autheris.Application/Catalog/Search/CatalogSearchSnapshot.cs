@@ -14,4 +14,11 @@ public sealed record CatalogSearchSnapshot(
     VectorSearchIndex VectorIndex,
     IReadOnlyDictionary<TableIdentifier, TableMetadata> MetadataMap,
     IReadOnlyDictionary<TableIdentifier, List<TableRelationship>> ForeignKeysGraph,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt)
+{
+    public int BaseDocumentCount => Bm25Index.BaseDocumentCount;
+
+    public int TombstoneCount => Math.Max(Bm25Index.TombstoneCount, VectorIndex.TombstoneCount);
+
+    public int DeltaOperationCount => Math.Max(Bm25Index.DeltaOperationCount, VectorIndex.DeltaOperationCount);
+}

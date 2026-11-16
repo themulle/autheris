@@ -9,7 +9,7 @@ internal sealed class ClientListHarness
 {
     public static readonly TargetSqlDialect[] Dialects =
     [
-        TargetSqlDialect.SqlServer, TargetSqlDialect.PostgreSql, TargetSqlDialect.Sqlite, TargetSqlDialect.Oracle, TargetSqlDialect.DuckDb
+        TargetSqlDialect.SqlServer, TargetSqlDialect.PostgreSql, TargetSqlDialect.Oracle, TargetSqlDialect.DuckDb
     ];
 
     public static IEnumerable<object[]> DialectData() => Dialects.Select(d => new object[] { d });

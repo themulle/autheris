@@ -9,7 +9,6 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-
 using Autheris.Application.State;
 
 namespace Autheris.Extensions.OpenMetadata;
@@ -23,6 +22,9 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService
     private readonly IOptions<GatewayOptions> _options;
     private readonly ILogger<OpenMetadataSyncService> _logger;
     private readonly IDistributedClusterStateProvider? _clusterState;
+    private readonly Autheris.Application.Catalog.ICatalogWriteScopeFactory? _catalogWriteScopes;
+    private readonly IClassificationRepository? _classificationRepo;
+    private readonly TimeProvider _timeProvider;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -46,8 +48,12 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService
         IOpenMetadataClient client, ITableMetadataRepository metadataRepo,
         IConsentRepository consentRepo, IPolicyEpochRepository epochRepo,
         IOptions<GatewayOptions> options, ILogger<OpenMetadataSyncService> logger,
-        IDistributedClusterStateProvider? clusterState = null)
+        IDistributedClusterStateProvider? clusterState = null,
+        Autheris.Application.Catalog.ICatalogWriteScopeFactory? catalogWriteScopeFactory = null,
+        IClassificationRepository? classificationRepo = null,
+        TimeProvider? timeProvider = null)
     {
+        _catalogWriteScopes = catalogWriteScopeFactory;
         _client = client;
         _metadataRepo = metadataRepo;
         _consentRepo = consentRepo;
@@ -55,6 +61,8 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService
         _options = options;
         _logger = logger;
         _clusterState = clusterState;
+        _classificationRepo = classificationRepo;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     private TenantId? DefaultTenant => Autheris.Application.Tenancy.TenantResolver.EffectiveDefaultOf(_options.Value.Tenancy);
@@ -69,6 +77,7 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService
 
         try
         {
+            await using var catalogWriteScope = Autheris.Application.Catalog.CatalogWriteScopeFactoryExtensions.BeginOrNoop(_catalogWriteScopes, "openmetadata-sync");
             var omOptions = _options.Value.OpenMetadata;
             var warnings = new List<string>();
             var affectedTables = new HashSet<TableIdentifier>();
@@ -124,6 +133,8 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService
 
             var tableMetadataMap = new Dictionary<TableIdentifier, TableMetadata>();
             var tableTenantMap = new Dictionary<TableIdentifier, TenantId>();
+            var pendingUpserts = new List<(string FullyQualifiedName, TableMetadata Metadata)>();
+            var classificationTargets = new List<(OpenMetadataTable Source, TableMetadata Target)>();
 
             foreach (var (omTable, resolved) in candidates)
             {
@@ -150,10 +161,10 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService
 
                     if (!dryRun)
                     {
-                        // SEC M-32: merge with persisted state – sync may only tighten governance flags.
                         var merged = Autheris.Application.Catalog.Services.CatalogGovernanceRatchet.Merge(tableMeta, existing);
                         tableMetadataMap[tableId] = merged;
-                        await _metadataRepo.UpsertTableMetadataAsync(merged, ct);
+                        pendingUpserts.Add((omTable.FullyQualifiedName, merged));
+                        classificationTargets.Add((omTable, merged));
                     }
                 }
                 catch (Autheris.Domain.Exceptions.TableMetadataUnavailableException)
@@ -171,6 +182,8 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService
                 }
             }
 
+            await FlushBatchUpsertsAsync(pendingUpserts, warnings, ct).ConfigureAwait(false);
+            await SyncColumnClassificationsForTablesAsync(classificationTargets, warnings, ct).ConfigureAwait(false);
             // 2. Consents (SEC E-05 / EX-02: fail-safe – a failure while reading OM principals or the persisted sync
             // consents neither creates nor revokes anything in this run and is reported as Success=false).
             bool success = true;
@@ -544,43 +557,19 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService
     }
 
     /// <summary>
-    /// PERS-04: an extension only ever moves an active consent to a later expiry. A consent that is already valid longer than the refresh
-    /// window is shortened by an audited revoke followed by a new consent (same marker, principal and tenant); when the extension is
-    /// rejected because the consent expired or was changed concurrently, exactly one new consent is created (no retry loop).
-    /// A failing create leaves the old consent revoked (fail closed); the next run recreates it.
+    /// Refreshes an OpenMetadata-synced consent via an audited fail-closed revoke followed by a new consent (same marker,
+    /// principal and tenant). A failing create leaves the old consent revoked (fail closed); the next run recreates it.
     /// </summary>
     private async Task RefreshSyncConsentAsync(
         Consent existing, DateTimeOffset newValidTo, Consent replacement, HashSet<TableIdentifier> affectedTables, CancellationToken ct)
     {
-        if (newValidTo > existing.ValidTo)
-        {
-            try
-            {
-                await _consentRepo.ExtendConsentExpiryAsync(existing.Id, newValidTo, ct);
-                return;
-            }
-            catch (ConsentNotExtendableException)
-            {
-                // a consent revoked concurrently by a user or admin must stay revoked; only an expired or changed consent is recreated.
-                var current = await _consentRepo.GetConsentByIdAsync(existing.Id, ct);
-                if (current is { IsRevoked: true })
-                {
-                    _logger.LogWarning("Extension of OpenMetadata-synced consent {ConsentId} was rejected and the consent is revoked; not recreating it.", existing.Id);
-                    return;
-                }
-
-                _logger.LogWarning("Extension of OpenMetadata-synced consent {ConsentId} was rejected; creating a new consent.", existing.Id);
-                await _consentRepo.CreateConsentAsync(replacement, ct);
-                affectedTables.Add(replacement.TableIdentifier);
-                return;
-            }
-        }
-
         var revoked = await _consentRepo.RevokeSystemConsentAsync(
             existing.Id,
             OpenMetadataSyncConsentMarker,
             SyncActorSid,
-            "OpenMetadata sync shortens this consent to the refresh window (revoked and recreated).",
+            newValidTo > existing.ValidTo
+                ? "OpenMetadata sync refreshes this consent to the extended window (revoked and recreated)."
+                : "OpenMetadata sync shortens this consent to the refresh window (revoked and recreated).",
             ct);
         if (!revoked)
         {
@@ -614,8 +603,7 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService
         return table.RequiresFourEyes ||
                table.IsHighlySensitive ||
                !AutoGrantableSensitivities.Contains(sensitivity) ||
-               metadata.Columns.Any(c => c.IsSensitive) ||
-               metadata.ColumnMaskingRules.Count > 0;
+               ClassificationMetadata.IsTableSensitive(metadata);
     }
 
     public async Task<bool> HandleWebhookEventAsync(string eventPayload, string? signatureHeader = null, CancellationToken ct = default)
@@ -858,6 +846,7 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService
                 var (tableMeta, _) = MapToTableMetadata(omTable, tableId, omOptions, isNewTable: existing == null, existingSourceType: existing?.Table.SourceType, existingSourceName: existing?.Table.SourceName);
                 var merged = Autheris.Application.Catalog.Services.CatalogGovernanceRatchet.Merge(tableMeta, existing);
                 await _metadataRepo.UpsertTableMetadataAsync(merged, ct);
+                await SyncColumnClassificationsForTablesAsync([(omTable, merged)], [], ct).ConfigureAwait(false);
                 await _epochRepo.IncrementTableEpochAsync(tableId, ct);
                 return true;
             }

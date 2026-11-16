@@ -127,7 +127,7 @@ public sealed class SqlServerGovernanceLeastPrivilegeTests : IClassFixture<SqlSe
         var tsColumn = new TableColumn { TableId = tableId, ColumnName = "ts", DataType = "datetime" };
         await repository.UpsertTableMetadataAsync(new TableMetadata
         {
-            Table = new Table { Id = tableId, DisplayName = "readings", TableName = "readings", SchemaName = "dbo", SourceType = "Sqlite", SourceName = "lpsource" },
+            Table = new Table { Id = tableId, DisplayName = "readings", TableName = "readings", SchemaName = "dbo", SourceType = "PostgreSql", SourceName = "lpsource" },
             Identifier = identifier,
             Columns = [idColumn, tsColumn],
             PrimaryKeyColumns = ["client_id", "ts"],
@@ -155,17 +155,32 @@ public sealed class SqlServerGovernanceLeastPrivilegeTests : IClassFixture<SqlSe
         var tenant = new TenantId("tenant-lp");
         var day = DateTimeOffset.UtcNow.ToString("yyyy-MM-dd");
 
-        await repository.RecordDailyUsageAsync(table, tenant, day, "powerbi", "c1", "1.0", 2, 20, 2, 0, 0, 0, 0);
-        await repository.RecordDailyUsageAsync(table, tenant, day, "powerbi", "c1", "1.0", 3, 30, 3, 1, 0, 0, 0);
-        await repository.RecordActorSampleAsync(table, tenant, day, "powerbi", new string('a', 64));
+        var aggregator = new Autheris.Application.Usage.UsageAggregator();
+        var recorder = new Autheris.Application.Usage.UsageRecorder(aggregator);
+        var caller = new Autheris.Domain.Security.CallerContext("powerbi", "1.0", ClientId: "c1");
+        var actor = new Sid("S-1-5-21-lp");
+        using (var scope = Autheris.Application.Usage.UsageRequestScope.Begin(
+            new Autheris.Application.Usage.UsageIdentity(tenant, actor, new System.Collections.Generic.HashSet<Sid>()),
+            Autheris.Domain.Options.DataSources.DataSourceTransportFlags.Rest, caller, aggregator))
+        {
+            recorder.Record(new Autheris.Application.Usage.UsageFact(table, "lpsource", Autheris.Application.Usage.UsageOutcome.Allow, 20, true, 0, Array.Empty<Autheris.Application.Usage.GrantRef>(), default), tenant, actor);
+            recorder.Record(new Autheris.Application.Usage.UsageFact(table, "lpsource", Autheris.Application.Usage.UsageOutcome.Allow, 30, true, 0, Array.Empty<Autheris.Application.Usage.GrantRef>(), default), tenant, actor);
+            recorder.Record(new Autheris.Application.Usage.UsageFact(table, "lpsource", Autheris.Application.Usage.UsageOutcome.DenyAccess, 0, false, 0, Array.Empty<Autheris.Application.Usage.GrantRef>(), default), tenant, actor);
+            recorder.Record(new Autheris.Application.Usage.UsageFact(table, "lpsource", Autheris.Application.Usage.UsageOutcome.Allow, 0, false, 0, Array.Empty<Autheris.Application.Usage.GrantRef>(), default), tenant, actor);
+            recorder.Record(new Autheris.Application.Usage.UsageFact(table, "lpsource", Autheris.Application.Usage.UsageOutcome.Allow, 0, false, 0, Array.Empty<Autheris.Application.Usage.GrantRef>(), default), tenant, actor);
+            scope.Complete(10, 100, 200);
+        }
+
+        await repository.AccumulateAsync(aggregator.Swap());
         await repository.RecordQueryNameAsync(table, tenant, day, "powerbi", "GetReadings", 4);
 
         var rows = await repository.QueryConsumerAppDailyAsync(table, tenant, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
+        var actors = await repository.QueryDistinctActorCountsAsync(table, tenant, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
         await repository.PurgeExpiredConsumerMetricsAsync(400, DateTimeOffset.UtcNow);
 
         var row = rows.ShouldHaveSingleItem();
         row.Calls.ShouldBe(5);
-        row.DistinctActors.ShouldBe(1);
+        actors["powerbi"].ShouldBe(1);
         row.QueryNames.ShouldBe(["GetReadings"]);
         (await RuntimeFailsAsync("CREATE TABLE dbo.CONSUMER_APP_RUNTIME_DDL (a INT)")).ShouldNotBeNull();
     }
@@ -185,7 +200,7 @@ public sealed class SqlServerGovernanceLeastPrivilegeTests : IClassFixture<SqlSe
         var column = new TableColumn { TableId = tableId, ColumnName = "customer_id", DataType = "int" };
         await repository.UpsertTableMetadataAsync(new TableMetadata
         {
-            Table = new Table { Id = tableId, DisplayName = "t", TableName = identifier.TableName, SchemaName = "dbo", SourceType = "Sqlite", SourceName = "lpsource" },
+            Table = new Table { Id = tableId, DisplayName = "t", TableName = identifier.TableName, SchemaName = "dbo", SourceType = "PostgreSql", SourceName = "lpsource" },
             Identifier = identifier,
             Columns = [column]
         });
@@ -195,8 +210,8 @@ public sealed class SqlServerGovernanceLeastPrivilegeTests : IClassFixture<SqlSe
         {
             TableId = tableId, TableIdentifier = identifier, TenantId = tenant, GranteeType = GranteeType.User, GranteeSid = new Sid("S-1-5-21-lp"),
             Effect = ConsentEffect.Allow, ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(5),
-            RowFilters = [new ConsentRowFilter { TableColumnId = columnId, ColumnName = "customer_id", FilterType = RowFilterType.SubqueryCorrelated,
-                DependentTable = new TableIdentifier("lpsource", "dbo", "customers"), ForeignKeyColumn = "customer_id", PrimaryKeyColumn = "id", SubqueryFilterPredicateJson = "[]" }]
+            RowFilters = [new ConsentRowFilter { TableColumnId = columnId, ColumnName = "customer_id", FilterType = RowFilterType.SimpleColumnPredicate,
+                Operator = "EQ", ValueJson = "1" }]
         });
         var ruleId = (await repository.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-lp")], identifier, DateTimeOffset.UtcNow, tenant))
             .Single(c => c.Id == consent.Id).RowFilters.Single().Id;
@@ -222,7 +237,7 @@ public sealed class SqlServerGovernanceLeastPrivilegeTests : IClassFixture<SqlSe
         var identifier = new TableIdentifier("lpsource", "dbo", "tags_" + Guid.NewGuid().ToString("N")[..8]);
         await repository.UpsertTableMetadataAsync(new TableMetadata
         {
-            Table = new Table { Id = Guid.NewGuid(), DisplayName = "t", TableName = identifier.TableName, SchemaName = "dbo", SourceType = "Sqlite", SourceName = "lpsource" },
+            Table = new Table { Id = Guid.NewGuid(), DisplayName = "t", TableName = identifier.TableName, SchemaName = "dbo", SourceType = "PostgreSql", SourceName = "lpsource" },
             Identifier = identifier,
             Columns = [new TableColumn { ColumnName = "id", DataType = "int" }]
         });

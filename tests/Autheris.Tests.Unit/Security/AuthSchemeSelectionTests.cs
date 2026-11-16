@@ -174,6 +174,11 @@ public sealed class AuthSchemeSelectionTests
     [InlineData(AuthenticationMode.Direct)]
     [InlineData(AuthenticationMode.Upstream)]
     [InlineData(AuthenticationMode.Both)]
-    public void Scim_path_selects_scim_in_every_mode(AuthenticationMode mode) =>
-        Select(Options(mode), "/scim/v2/Users", ("Authorization", "Bearer opaque"), ("X-Forwarded-User", "alice")).ShouldBe(GatewayAuthSchemes.Scim);
+    public void Scim_path_selects_scim_in_every_mode(AuthenticationMode mode)
+    {
+        Select(Options(mode), "/scim/v2/realm-1/Users").ShouldBe(GatewayAuthSchemes.Scim);
+        Select(Options(mode), "/scim/v2/realm-1/Users", ("Authorization", "Bearer opaque"), ("X-Forwarded-User", "alice")).ShouldBe(GatewayAuthSchemes.Scim);
+        Select(Options(mode), "/scim/v2/realm-1/Groups", ("X-Forwarded-User", "alice")).ShouldBe(GatewayAuthSchemes.Scim);
+        Select(Options(mode), "/scim/v2/realm-1/ServiceProviderConfig", ("Authorization", "Basic dTpw")).ShouldBe(GatewayAuthSchemes.Scim);
+    }
 }

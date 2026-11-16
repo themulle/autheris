@@ -32,6 +32,7 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
 
     internal const string RlsPushdownExecutedKey = "RlsPushdownExecuted";
     internal const string InDbColumnMaskingExecutedKey = "InDbColumnMaskingExecuted";
+    internal const string SourceExecutionStatsKey = Autheris.Application.Usage.ISourceExecutionStatsProvider.ItemKey;
 
     private static readonly HashSet<string> SpatialTypes = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -104,6 +105,10 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
 
             context.Items[InDbColumnMaskingExecutedKey] = true;
             context.Items[RlsPushdownExecutedKey] = true;
+            if (subtreeResult.SourceStats != default)
+            {
+                context.Items[SourceExecutionStatsKey] = subtreeResult.SourceStats;
+            }
             return subtreeResult.Rows;
         }
 
@@ -159,6 +164,10 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
         }
 
         context.Items[RlsPushdownExecutedKey] = true;
+        if (result.SourceStats != default)
+        {
+            context.Items[SourceExecutionStatsKey] = result.SourceStats;
+        }
         if (_options?.Value?.IsColumnMaskingDisabled != true &&
             planned.ColumnsToSelect.Any(c => decision.GetEffectiveColumnAccess(c, metadata) == ColumnAccessLevel.Mask))
         {
@@ -216,7 +225,10 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
             planned.Sql,
             planned.Parameters.Count > 0 ? planned.Parameters : null,
             Transport: intent.Transport,
-            PlannedTableRead: true);
+            PlannedTableRead: true)
+        {
+            OnSourceStats = s => context.Items[SourceExecutionStatsKey] = s
+        };
 
         await foreach (var source in service.StreamRowsAsync(request, context.Principal, tenant, ct).ConfigureAwait(false))
         {
@@ -358,6 +370,7 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
                 new Dictionary<string, object?> { [marker] = value },
                 new[] { name })
             {
+                ConstrainedColumns = new[] { name },
                 TrinoSqlFactory = resolve => $"{DataApiFilterTranslator.QuoteIdentifier(resolve(name))} = {marker}"
             });
         }
@@ -390,11 +403,19 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
             }
         }
 
+        IReadOnlyList<string>? constrainedColumns = clauses.Any(c => c.ConstrainedColumns is not null)
+            ? clauses.Where(c => c.ConstrainedColumns is not null)
+                .SelectMany(c => c.ConstrainedColumns!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList()
+            : null;
+
         return new TableFilterClause(
             string.Join(" AND ", clauses.Select(c => "(" + c.SqlPredicate + ")")),
             parameters,
             clauses.SelectMany(c => c.ReferencedColumns).Distinct(StringComparer.OrdinalIgnoreCase).ToList())
         {
+            ConstrainedColumns = constrainedColumns,
             TrinoSqlFactory = resolve => string.Join(" AND ", clauses.Select(c => "(" + c.GetTrinoPredicate(resolve) + ")")),
             PushdownPredicates = clauses.SelectMany(c => c.PushdownPredicates ?? Array.Empty<PushdownPredicateInfo>()).ToList()
         };
@@ -451,7 +472,7 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
         }
 
         // Defense in depth: normalize ISO strings from DB without explicit UTC indicator to canonical UTC 'Z'
-        if (rawValue is string s && s.Length >= 19 && s[10] == 'T' && !s.EndsWith('Z') && !s.Contains('+') && s.IndexOf('-', 11) == -1)
+        if (rawValue is string s && s.Length >= 19 && s[10] == 'T' && !s.EndsWith('Z') && !s.Contains('+', StringComparison.Ordinal) && s.IndexOf('-', 11) == -1)
         {
             return s + "Z";
         }

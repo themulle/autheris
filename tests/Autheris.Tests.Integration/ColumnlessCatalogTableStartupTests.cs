@@ -39,7 +39,7 @@ public sealed class ColumnlessCatalogTableStartupTests : IDisposable
 
     private void SqliteCleanup()
     {
-        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        Npgsql.NpgsqlConnection.ClearAllPools();
         foreach (var f in Directory.GetFiles(Path.GetTempPath(), Path.GetFileName(_dbFile) + "*"))
         {
             try { File.Delete(f); } catch (IOException) { }
@@ -58,7 +58,7 @@ public sealed class ColumnlessCatalogTableStartupTests : IDisposable
 
     private static TableMetadata Meta(TableIdentifier id, params TableColumn[] columns) => new()
     {
-        Table = new Table { Id = Guid.NewGuid(), DisplayName = id.TableName, TableName = id.TableName, SchemaName = id.Schema, SourceType = "Sqlite", SourceName = id.Domain },
+        Table = new Table { Id = Guid.NewGuid(), DisplayName = id.TableName, TableName = id.TableName, SchemaName = id.Schema, SourceType = "PostgreSql", SourceName = id.Domain },
         Identifier = id,
         Columns = columns.ToList()
     };
@@ -79,7 +79,7 @@ public sealed class ColumnlessCatalogTableStartupTests : IDisposable
             }
         }
 
-        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        Npgsql.NpgsqlConnection.ClearAllPools();
         return Create(systemMetricsEnabled);
     }
 

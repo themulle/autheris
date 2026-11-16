@@ -97,7 +97,7 @@ internal static class PolicyMarkerInliner
 
     private static string Literal(object? value) => value switch
     {
-        string s when s.Contains('\0') => throw new SecurityException("A row policy value has no safe literal form (fail-closed)."),
+        string s when s.Contains('\0', StringComparison.Ordinal) => throw new SecurityException("A row policy value has no safe literal form (fail-closed)."),
         string s => "'" + s.Replace("'", "''", StringComparison.Ordinal) + "'",
         bool b => b ? "true" : "false",
         long or int or short or byte or sbyte or ushort or uint or ulong => Convert.ToString(value, CultureInfo.InvariantCulture)!,

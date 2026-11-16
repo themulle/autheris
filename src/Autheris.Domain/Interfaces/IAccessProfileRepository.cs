@@ -47,6 +47,10 @@ public interface IAccessProfileRepository
 
     /// <summary>Profile assignments that the authorization migration deactivated, across tenants (report only).</summary>
     Task<IReadOnlyList<DeactivatedProfileAssignment>> GetDeactivatedAssignmentsAsync(CancellationToken ct = default);
+
+    /// <summary>Consents revoked by row-policy migration due to unconvertible row filters (report only).</summary>
+    Task<IReadOnlyList<RevokedRowFilterConsent>> GetRevokedRowFilterConsentsAsync(CancellationToken ct = default)
+        => Task.FromResult<IReadOnlyList<RevokedRowFilterConsent>>([]);
 }
 
 /// <summary>A consent with a role grantee that the authorization migration revoked.</summary>
@@ -54,3 +58,6 @@ public sealed record RevokedRoleConsent(string ConsentId, string TenantId, strin
 
 /// <summary>An access-profile assignment that the authorization migration deactivated.</summary>
 public sealed record DeactivatedProfileAssignment(string TenantId, string ProfileId, string Subject, string SubjectType, string Reason);
+
+/// <summary>A consent revoked because its legacy row filter could not be converted to a row policy.</summary>
+public sealed record RevokedRowFilterConsent(string ConsentId, string TenantId, string TableId, string RevokeReason);

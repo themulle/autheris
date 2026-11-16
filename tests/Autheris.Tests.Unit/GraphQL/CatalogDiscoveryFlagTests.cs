@@ -54,7 +54,7 @@ public sealed class CatalogDiscoveryFlagTests
 
         var table = catalog.ShouldHaveSingleItem();
         table.TableName.ShouldBe("orders");
-        table.Columns.ShouldBe(["id", "amount"]);
+        table.ColumnNames.ShouldBe(["id", "amount"]);
     }
 
     [Fact]

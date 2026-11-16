@@ -21,7 +21,8 @@ public static class ParityHostSettings
         b.UseSetting("Gateway:RateLimiting:PostAuthSidRateLimit:TokenBucketCapacity", "100000");
         b.UseSetting("Gateway:RateLimiting:PostAuthSidRateLimit:TokensPerSecond", "10000");
         b.UseSetting("Gateway:GraphQL:MaxAllowedComplexity", "5000");
-        b.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:MaxCostPerQuery", "5000");
+        b.UseSetting("Gateway:WebSql:Cost:MaxStatementCost", "10000");
+        b.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:MaxCostPerQuery", "10000");
         b.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:MaxTokensCapacity", "100000000");
         b.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:TokenRefillRatePerSecond", "1000000");
         // k-anonymity: governed aggregations hide groups below the minimum group size (default 5). Lifted here so that exact group

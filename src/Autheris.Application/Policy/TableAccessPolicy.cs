@@ -90,6 +90,11 @@ public sealed partial class TableAccessPolicy
     private readonly Autheris.Application.Policy.Interfaces.IAccessProfileCache? _accessProfileCache;
     private readonly IAuthPluginHost? _authPluginHost;
     private readonly Autheris.Application.Audit.IAuditWriter? _auditWriter;
+    private readonly Autheris.Application.Policy.RowScopes.RowScopeCompiler? _rowScopeCompiler;
+    private readonly Autheris.Application.Catalog.ICatalogVersionProvider? _catalogVersionProvider;
+    private readonly IDataOwnershipRepository? _ownershipRepository;
+    private readonly Autheris.Application.Policy.Classification.ClassificationAccessResolver? _classificationResolver;
+    private readonly TimeProvider _timeProvider;
 
     /// <param name="mandatoryFilters">
     /// Virtual filters; required on purpose: a decision point without it would silently skip them. Use
@@ -110,7 +115,12 @@ public sealed partial class TableAccessPolicy
         Autheris.Application.Identity.Attributes.ICallerAttributeResolver? callerAttributes = null,
         Autheris.Domain.Security.IRestrictedScopePolicy? restrictedScopes = null,
         IAuthPluginHost? authPluginHost = null,
-        Autheris.Application.Audit.IAuditWriter? auditWriter = null)
+        Autheris.Application.Audit.IAuditWriter? auditWriter = null,
+        Autheris.Application.Policy.RowScopes.RowScopeCompiler? rowScopeCompiler = null,
+        Autheris.Application.Catalog.ICatalogVersionProvider? catalogVersionProvider = null,
+        IDataOwnershipRepository? ownershipRepository = null,
+        TimeProvider? timeProvider = null,
+        Autheris.Application.Policy.Classification.ClassificationAccessResolver? classificationResolver = null)
     {
         _restrictedScopes = restrictedScopes ?? Autheris.Domain.Security.RestrictedScopePolicy.Default;
         _callerAttributes = callerAttributes;
@@ -118,6 +128,11 @@ public sealed partial class TableAccessPolicy
         _maskPolicyFactory = maskPolicyFactory;
         _authPluginHost = authPluginHost;
         _auditWriter = auditWriter;
+        _rowScopeCompiler = rowScopeCompiler;
+        _catalogVersionProvider = catalogVersionProvider;
+        _ownershipRepository = ownershipRepository;
+        _timeProvider = timeProvider ?? TimeProvider.System;
+        _classificationResolver = classificationResolver;
         _mandatoryFilters = mandatoryFilters ?? throw new ArgumentNullException(nameof(mandatoryFilters));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
         _resolutionService = resolutionService ?? throw new ArgumentNullException(nameof(resolutionService));
@@ -154,15 +169,20 @@ public sealed partial class TableAccessPolicy
     /// </summary>
     private TableAccessDecision AttachTypedMasks(TableAccessDecision decision, TableAccessQuery query)
     {
-        if (_maskPolicyFactory == null || !decision.IsAllowed || decision.ColumnMasks != null || query.Metadata.IsDelegatedSource)
+        if (_maskPolicyFactory == null || !decision.IsAllowed || query.Metadata.IsDelegatedSource)
+        {
+            return decision;
+        }
+
+        if (decision.ColumnMasks is not null && decision.ColumnMasks is not ColumnMaskPolicy)
         {
             return decision;
         }
 
         try
         {
-            var masks = _maskPolicyFactory.ForDecision(decision, query.Metadata, query.Tenant);
-            return masks == null ? decision : decision with { ColumnMasks = masks };
+            var masks = _maskPolicyFactory.ForDecision(decision, query.Metadata, query.Tenant, decision.ColumnMasks);
+            return masks == null ? (decision.ColumnMasks is null ? decision : decision with { ColumnMasks = null }) : decision with { ColumnMasks = masks };
         }
         catch (Exception ex) when (ex is System.Security.SecurityException or ArgumentException)
         {
@@ -199,60 +219,9 @@ public sealed partial class TableAccessPolicy
         }
 
         // SR15-51 / SG-16: Enforce schema contracts at query execution time
-        var contract = query.Contract;
-        if (contract == null && _contractManager != null && _contractManager.IsEnabled)
+        if (CheckSchemaContract(query, _contractManager) is { } contractDenial)
         {
-            var claimContract = query.Claims?.FirstOrDefault(c => string.Equals(c.Type, "contract", StringComparison.OrdinalIgnoreCase))?.Value?.Trim();
-            if (!string.IsNullOrWhiteSpace(claimContract))
-            {
-                if (!_contractManager.HasContract(claimContract))
-                {
-                    return TableAccessDecision.Denied(table,
-                        $"Schema Contract Denial: Unknown schema contract '{claimContract}' specified in caller token.");
-                }
-                contract = _contractManager.GetContract(claimContract);
-            }
-            else
-            {
-                var defaultContract = _contractManager.DefaultContract;
-                if (!string.IsNullOrWhiteSpace(defaultContract) && _contractManager.HasContract(defaultContract))
-                {
-                    contract = _contractManager.GetContract(defaultContract);
-                }
-            }
-        }
-
-        if (contract != null)
-        {
-            if (contract.AllowedTables.Count > 0 &&
-                !contract.AllowedTables.Contains(table.ToString()) &&
-                !contract.AllowedTables.Contains(table.TableName))
-            {
-                return TableAccessDecision.Denied(table,
-                    $"Schema Contract Denial: Table '{table.ToQualifiedName()}' is not permitted under contract '{contract.Name}'.");
-            }
-
-            var allTableTags = (query.Metadata.Table.Tags ?? Array.Empty<string>())
-                .Concat(string.IsNullOrWhiteSpace(query.Metadata.Table.Sensitivity) ? Array.Empty<string>() : [query.Metadata.Table.Sensitivity])
-                .Where(s => !string.IsNullOrWhiteSpace(s))
-                .ToList();
-
-            if (contract.ExcludedTags.Count > 0)
-            {
-                var matchedExcluded = allTableTags.FirstOrDefault(t => contract.ExcludedTags.Contains(t));
-                if (matchedExcluded != null)
-                {
-                    return TableAccessDecision.Denied(table,
-                        $"Schema Contract Denial: Table '{table.ToQualifiedName()}' with tag '{matchedExcluded}' is excluded under contract '{contract.Name}'.");
-                }
-            }
-
-            if (contract.IncludedTags.Count > 0 &&
-                (allTableTags.Count == 0 || !allTableTags.Any(t => contract.IncludedTags.Contains(t))))
-            {
-                return TableAccessDecision.Denied(table,
-                    $"Schema Contract Denial: Table '{table.ToQualifiedName()}' is not in included tags under contract '{contract.Name}'.");
-            }
+            return contractDenial;
         }
 
         var consentBypassed = _options?.IsConsentBypassed == true;
@@ -272,12 +241,33 @@ public sealed partial class TableAccessPolicy
             ? TableAccessDecision.Allowed(table, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true)
             : await ResolveConsentAsync(query, ct).ConfigureAwait(false);
 
+        if (!consentBypassed && decision.IsAllowed)
+        {
+            decision = await ApplyClassificationAccessAsync(decision, query, ct).ConfigureAwait(false);
+        }
+
         // 143 (-14): a query without any claims (absent, not merely without scp) has unknown token scopes and is treated as
         // holding every restricted scope with no clearance. Applied after the cache read and the rebuilds above; the cache holds the plain
         // decision of the (scope-less) key and never this copy. Claims without scp stay unrestricted (scope-less and app-only tokens).
         if (query.Claims is null && decision.IsAllowed && RestrictedScopeClearance.Unknown(_restrictedScopes) is { } unknown)
         {
             decision = decision with { ScopeClearance = unknown };
+            if (decision.PerCellColumns is { } perCell)
+            {
+                var restricted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var col in query.Metadata.Columns)
+                {
+                    if (ClassificationMetadata.IsColumnSensitive(query.Metadata, col) && !unknown.Permits(col.ColumnName))
+                    {
+                        restricted.Add(col.ColumnName);
+                    }
+                }
+
+                if (restricted.Count > 0)
+                {
+                    decision = NarrowPerCellDecision(decision, restricted);
+                }
+            }
         }
 
         if (profiles.Count > 0 && decision.IsAllowed)
@@ -289,51 +279,26 @@ public sealed partial class TableAccessPolicy
             {
                 return decision;
             }
+
+            if (!query.Metadata.IsDelegatedSource && profiles.Any(p => p.RowScope.Count > 0))
+            {
+                decision = await ApplyAccessProfileRowScopesAsync(decision, query, profiles, _rowScopeCompiler, _callerAttributes, ct).ConfigureAwait(false);
+                if (!decision.IsAllowed)
+                {
+                    return decision;
+                }
+            }
         }
 
-        // Virtual filters: restrictive, AND with the consent decision (after the consent cache, which stays free of them;
+        // Virtual filters / hard row policies: restrictive, AND with the consent decision (after the consent cache, which stays free of them;
         // also with the consent bypass, decision 1). They never turn a denial into an allow.
         if (decision.IsAllowed)
         {
-            var mandatory = await _mandatoryFilters.ResolveAsync(
-                new Autheris.Application.VirtualFilters.MandatoryFilterQuery(query.UserSid, query.GroupSids, query.Roles, query.Tenant, query.Metadata, query.ObjectKind, query.AllUserSids),
-                ct).ConfigureAwait(false);
-            if (mandatory.IsDenied)
-            {
-                return TableAccessDecision.Denied(table, mandatory.DenyReason ?? "Denied by virtual filters.");
-            }
-
-            if (mandatory.PredicateSql != null)
-            {
-                // WP-X0g: with a RowPolicyFactory the typed predicate is attached (values bound, passes RequireTypedRowPolicy);
-                // without one, or when a builder has no typed form, the legacy text path stays until X1.
-                if (mandatory.CallerAttributesTextConstant && (_rowPolicyFactory == null || mandatory.TypedPredicate == null))
-                {
-                    // 129 (BC-129-05): the text of a caller attribute filter is only a constant; without the typed predicate the table is denied,
-                    // whether or not a sibling filter has a typed form.
-                    return TableAccessDecision.Denied(table, "Denied by virtual filters.");
-                }
-
-                if (_rowPolicyFactory != null && mandatory.TypedPredicate != null)
-                {
-                    var typed = mandatory.TypedPredicate;
-                    IReadOnlyList<CallerAttributeAuditEntry>? audit = null;
-                    if (mandatory.CallerAttributes.Count > 0)
-                    {
-                        (typed, audit) = await BindVirtualFilterAttributesAsync(typed, mandatory.CallerAttributes, query, ct).ConfigureAwait(false);
-                    }
-
-                    decision = decision.WithMandatoryPredicate(_rowPolicyFactory.FromPredicate(typed, query.Metadata.Dialect), mandatory.AppliedFilters, mandatory.AppliedBindings);
-                    if (audit is { Count: > 0 })
-                    {
-                        decision = decision with { CallerAttributes = Merge(decision.CallerAttributes, audit) };
-                    }
-                }
-                else
-                {
-                    decision = decision.WithMandatoryPredicate(mandatory.PredicateSql, mandatory.AppliedFilters, mandatory.AppliedBindings);
-                }
-            }
+            bool useCompilerForHard = _rowScopeCompiler is { CanResolveHardPolicies: true } &&
+                _mandatoryFilters is Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver or Autheris.Application.VirtualFilters.MandatoryRowFilterResolver;
+            decision = useCompilerForHard
+                ? await ApplyCompiledHardRowPoliciesAsync(decision, query, _rowScopeCompiler!, _callerAttributes, ct).ConfigureAwait(false)
+                : await ApplyMandatoryVirtualFiltersAsync(decision, query, _mandatoryFilters, _rowPolicyFactory, _callerAttributes, ct).ConfigureAwait(false);
         }
 
         if (!decision.IsAllowed)
@@ -349,103 +314,236 @@ public sealed partial class TableAccessPolicy
             _authPluginHost != null &&
             _authPluginHost.HasAuthorizationHooks)
         {
-            var authzContext = new PluginAuthorizationContext
-            {
-                TenantId = query.Tenant,
-                UserSid = query.UserSid,
-                GroupSids = query.GroupSids,
-                Roles = query.Roles,
-                TableIdentifier = table,
-                RequestedColumns = query.RequestedColumns,
-                TableTags = query.Metadata.Table.Tags,
-                TableSensitivity = query.Metadata.Table.Sensitivity,
-                ClientIp = query.ClientIp,
-                ExtraAttributes = query.ExtraAttributes
-            };
+            decision = await ApplyAuthorizationHooksAsync(decision, query, _authPluginHost, ct).ConfigureAwait(false);
+        }
 
-            var hookResult = await _authPluginHost.EvaluateAuthorizationHooksAsync(authzContext, ct).ConfigureAwait(false);
-            if (hookResult.Outcome == PluginAuthorizationOutcome.Deny)
+        return decision;
+    }
+
+    internal static TableAccessDecision? CheckSchemaContract(TableAccessQuery query, ISchemaContractManager? contractManager)
+    {
+        var table = query.Metadata.Identifier;
+        var contract = query.Contract;
+        if (contract == null && contractManager != null && contractManager.IsEnabled)
+        {
+            var claimContract = query.Claims?.FirstOrDefault(c => string.Equals(c.Type, "contract", StringComparison.OrdinalIgnoreCase))?.Value?.Trim();
+            if (!string.IsNullOrWhiteSpace(claimContract))
+            {
+                if (!contractManager.HasContract(claimContract))
+                {
+                    return TableAccessDecision.Denied(table,
+                        $"Schema Contract Denial: Unknown schema contract '{claimContract}' specified in caller token.");
+                }
+                contract = contractManager.GetContract(claimContract);
+            }
+            else
+            {
+                var defaultContract = contractManager.DefaultContract;
+                if (!string.IsNullOrWhiteSpace(defaultContract) && contractManager.HasContract(defaultContract))
+                {
+                    contract = contractManager.GetContract(defaultContract);
+                }
+            }
+        }
+
+        if (contract == null)
+        {
+            return null;
+        }
+
+        if (contract.AllowedTables.Count > 0 &&
+            !contract.AllowedTables.Contains(table.ToString()) &&
+            !contract.AllowedTables.Contains(table.TableName))
+        {
+            return TableAccessDecision.Denied(table,
+                $"Schema Contract Denial: Table '{table.ToQualifiedName()}' is not permitted under contract '{contract.Name}'.");
+        }
+
+        var allTableTags = (query.Metadata.Table.Tags ?? Array.Empty<string>())
+            .Concat(string.IsNullOrWhiteSpace(query.Metadata.Table.Sensitivity) ? Array.Empty<string>() : [query.Metadata.Table.Sensitivity])
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .ToList();
+
+        if (contract.ExcludedTags.Count > 0)
+        {
+            var matchedExcluded = allTableTags.FirstOrDefault(t => contract.ExcludedTags.Contains(t));
+            if (matchedExcluded != null)
             {
                 return TableAccessDecision.Denied(table,
-                    $"Plugin Authorization Denial ({hookResult.HookName ?? "Unknown"}): {hookResult.ReasonCode ?? "Access denied by enterprise plugin."}");
+                    $"Schema Contract Denial: Table '{table.ToQualifiedName()}' with tag '{matchedExcluded}' is excluded under contract '{contract.Name}'.");
             }
-            else if (hookResult.Outcome == PluginAuthorizationOutcome.Restrict)
+        }
+
+        if (contract.IncludedTags.Count > 0 &&
+            (allTableTags.Count == 0 || !allTableTags.Any(t => contract.IncludedTags.Contains(t))))
+        {
+            return TableAccessDecision.Denied(table,
+                $"Schema Contract Denial: Table '{table.ToQualifiedName()}' is not in included tags under contract '{contract.Name}'.");
+        }
+
+        return null;
+    }
+
+    internal static async Task<TableAccessDecision> ApplyMandatoryVirtualFiltersAsync(
+        TableAccessDecision decision,
+        TableAccessQuery query,
+        Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver mandatoryFilters,
+        RowPolicyFactory? rowPolicyFactory,
+        Autheris.Application.Identity.Attributes.ICallerAttributeResolver? callerAttributes,
+        CancellationToken ct)
+    {
+        var table = query.Metadata.Identifier;
+        var mandatory = await mandatoryFilters.ResolveAsync(
+            new Autheris.Application.VirtualFilters.MandatoryFilterQuery(query.UserSid, query.GroupSids, query.Roles, query.Tenant, query.Metadata, query.ObjectKind, query.AllUserSids),
+            ct).ConfigureAwait(false);
+        if (mandatory.IsDenied)
+        {
+            return TableAccessDecision.Denied(table, mandatory.DenyReason ?? "Denied by virtual filters.");
+        }
+
+        if (mandatory.PredicateSql == null)
+        {
+            return decision;
+        }
+
+        if (mandatory.CallerAttributesTextConstant && (rowPolicyFactory == null || mandatory.TypedPredicate == null))
+        {
+            return TableAccessDecision.Denied(table, "Denied by virtual filters.");
+        }
+
+        if (rowPolicyFactory != null && mandatory.TypedPredicate != null)
+        {
+            var typed = mandatory.TypedPredicate;
+            IReadOnlyList<CallerAttributeAuditEntry>? audit = null;
+            if (mandatory.CallerAttributes.Count > 0)
             {
-                var restrictedColumns = new Dictionary<string, ColumnAccessLevel>(decision.ColumnAccess, StringComparer.OrdinalIgnoreCase);
-                if (hookResult.DeniedColumns != null)
+                (typed, audit) = await BindVirtualFilterAttributesCoreAsync(typed, mandatory.CallerAttributes, query, callerAttributes, ct).ConfigureAwait(false);
+            }
+
+            decision = decision.WithMandatoryPredicate(rowPolicyFactory.FromPredicate(typed, query.Metadata.Dialect), mandatory.AppliedFilters, mandatory.AppliedBindings);
+            if (audit is { Count: > 0 })
+            {
+                decision = decision with { CallerAttributes = Merge(decision.CallerAttributes, audit) };
+            }
+        }
+        else
+        {
+            decision = decision.WithMandatoryPredicate(mandatory.PredicateSql, mandatory.AppliedFilters, mandatory.AppliedBindings);
+        }
+
+        return decision;
+    }
+
+    internal static async Task<TableAccessDecision> ApplyAuthorizationHooksAsync(
+        TableAccessDecision decision,
+        TableAccessQuery query,
+        IAuthPluginHost authPluginHost,
+        CancellationToken ct)
+    {
+        var table = query.Metadata.Identifier;
+        var authzContext = new PluginAuthorizationContext
+        {
+            TenantId = query.Tenant,
+            UserSid = query.UserSid,
+            GroupSids = query.GroupSids,
+            Roles = query.Roles,
+            TableIdentifier = table,
+            RequestedColumns = query.RequestedColumns,
+            TableTags = query.Metadata.Table.Tags,
+            TableSensitivity = query.Metadata.Table.Sensitivity,
+            ClientIp = query.ClientIp,
+            ExtraAttributes = query.ExtraAttributes
+        };
+
+        var hookResult = await authPluginHost.EvaluateAuthorizationHooksAsync(authzContext, ct).ConfigureAwait(false);
+        if (hookResult.Outcome == PluginAuthorizationOutcome.Deny)
+        {
+            return TableAccessDecision.Denied(table,
+                $"Plugin Authorization Denial ({hookResult.HookName ?? "Unknown"}): {hookResult.ReasonCode ?? "Access denied by enterprise plugin."}");
+        }
+
+        if (hookResult.Outcome == PluginAuthorizationOutcome.Restrict)
+        {
+            var restrictedColumns = new Dictionary<string, ColumnAccessLevel>(decision.ColumnAccess, StringComparer.OrdinalIgnoreCase);
+            if (hookResult.DeniedColumns != null)
+            {
+                foreach (var col in hookResult.DeniedColumns)
                 {
-                    foreach (var col in hookResult.DeniedColumns)
-                    {
-                        // Invariant 3: Hook can only lower access to Deny, never elevate from Mask/Deny to Clear
-                        restrictedColumns[col] = ColumnAccessLevel.Deny;
-                    }
+                    restrictedColumns[col] = ColumnAccessLevel.Deny;
+                }
+            }
+
+            decision = decision with { ColumnAccess = restrictedColumns };
+
+            if (!string.IsNullOrWhiteSpace(hookResult.AdditionalRowFilterSql))
+            {
+                try
+                {
+                    Autheris.Application.Sql.SqlSecurityValidator.ValidatePredicateSql(
+                        hookResult.AdditionalRowFilterSql,
+                        nameof(hookResult.AdditionalRowFilterSql),
+                        allowSubqueries: false);
+                }
+                catch (Exception)
+                {
+                    return TableAccessDecision.Denied(table, "AUTH_HOOK_INVALID_FILTER: Additional row filter SQL failed validation.");
                 }
 
-                decision = decision with { ColumnAccess = restrictedColumns };
-
-                if (!string.IsNullOrWhiteSpace(hookResult.AdditionalRowFilterSql))
-                {
-                    // AST validation and parenthesis wrapping
-                    try
-                    {
-                        Autheris.Application.Sql.SqlSecurityValidator.ValidatePredicateSql(
-                            hookResult.AdditionalRowFilterSql,
-                            nameof(hookResult.AdditionalRowFilterSql),
-                            allowSubqueries: false);
-                    }
-                    catch (Exception)
-                    {
-                        return TableAccessDecision.Denied(table, "AUTH_HOOK_INVALID_FILTER: Additional row filter SQL failed validation.");
-                    }
-
-                    decision = decision.WithAdditionalRowFilter($"({hookResult.AdditionalRowFilterSql.Trim()})");
-                }
+                decision = decision.WithAdditionalRowFilter($"({hookResult.AdditionalRowFilterSql.Trim()})");
             }
         }
 
         return decision;
     }
 
-    /// <summary>
-    /// Evaluates whether the given principal has permission to perform write / DML operations on the specified table.
-    /// Interim decision: every write target is denied. No role, consent, policy, option or bypass mode can turn this true;
-    /// the decision is independent of the principal until a dedicated write decision replaces it.
-    /// </summary>
-    public Task<bool> CanWriteTableAsync(
-        TenantId tenant,
-        TableMetadata metadata,
-        CancellationToken ct = default)
+    private static TableAccessDecision NarrowPerCellDecision(TableAccessDecision decision, IReadOnlySet<string> restrictedToMask)
     {
-        ArgumentNullException.ThrowIfNull(metadata);
+        if (decision.PerCellColumns is null)
+        {
+            return decision;
+        }
 
-        return Task.FromResult(DmlWriteDecisionTestSeam.IsPermissive);
-    }
+        var narrowed = decision.PerCellColumns.Narrow(decision.ColumnAccess, restrictedToMask);
+        if (narrowed is null)
+        {
+            var flattened = new Dictionary<string, ColumnAccessLevel>(decision.ColumnAccess, StringComparer.OrdinalIgnoreCase);
+            foreach (var sig in decision.PerCellColumns.Signatures)
+            {
+                foreach (var (col, lvl) in sig.ColumnAccess)
+                {
+                    if (!flattened.TryGetValue(col, out var cur) || cur == ColumnAccessLevel.RowDependent)
+                    {
+                        flattened[col] = restrictedToMask.Contains(col) && lvl == ColumnAccessLevel.Clear
+                            ? ColumnAccessLevel.Mask
+                            : lvl;
+                    }
+                }
+            }
 
-    public Task<bool> CanWriteTableAsync(
-        ClaimsPrincipal user,
-        TenantId tenant,
-        TableMetadata metadata,
-        SchemaContractDefinition? contract = null,
-        CancellationToken ct = default)
-    {
-        ArgumentNullException.ThrowIfNull(user);
-        ArgumentNullException.ThrowIfNull(metadata);
+            return decision with
+            {
+                ColumnAccess = flattened,
+                RowDependentColumns = null,
+                ColumnSignatures = null,
+                PerCellColumns = null
+            };
+        }
 
-        return Task.FromResult(DmlWriteDecisionTestSeam.IsPermissive);
-    }
+        var updatedCols = new Dictionary<string, ColumnAccessLevel>(decision.ColumnAccess, StringComparer.OrdinalIgnoreCase);
+        foreach (var col in updatedCols.Keys.ToList())
+        {
+            if (updatedCols[col] == ColumnAccessLevel.RowDependent && !narrowed.RowDependentColumns.Contains(col))
+            {
+                updatedCols[col] = narrowed.Signatures[0].ColumnAccess.GetValueOrDefault(col, ColumnAccessLevel.Deny);
+            }
+        }
 
-    /// <summary>
-    /// Evaluates whether the given principal has permission to perform write / DML operations on the specified table identifier.
-    /// </summary>
-    public Task<bool> CanWriteTableAsync(
-        ClaimsPrincipal user,
-        TenantId tenant,
-        TableIdentifier table,
-        SchemaContractDefinition? contract = null,
-        CancellationToken ct = default)
-    {
-        ArgumentNullException.ThrowIfNull(user);
-
-        return Task.FromResult(DmlWriteDecisionTestSeam.IsPermissive);
+        return decision with
+        {
+            ColumnAccess = updatedCols,
+            RowDependentColumns = narrowed.RowDependentColumns,
+            ColumnSignatures = narrowed.Signatures,
+            PerCellColumns = narrowed
+        };
     }
 }

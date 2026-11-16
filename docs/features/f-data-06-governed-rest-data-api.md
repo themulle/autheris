@@ -51,7 +51,6 @@ REST reads of federated sources use the transport name `Rest`. Federation is onl
 Virtual system tables are mapped under `domain = "governance"`, providing metadata introspection:
 - `governance.system.consents`: Active, expired, and revoked consent grants and delegations.
 - `governance.system.audit`: Cryptographically chained HMAC-SHA256 audit entries.
-- `governance.system.costs`: FinOps compute, storage, and token accounting metrics.
 
 ## 3. Architecture & Implementation
 

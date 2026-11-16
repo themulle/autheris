@@ -22,7 +22,6 @@ using Autheris.Domain.Options;
 using Autheris.Domain.Security;
 using Autheris.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -80,7 +79,6 @@ public sealed class AccessProfileRuntimeResolutionTests
             .ReturnsForAnyArgs(ci => TableAccessDecision.Allowed(
                 ci.ArgAt<TableIdentifier>(3), new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true));
         var cacheService = Substitute.For<IConsentCacheService>();
-        var policyEnforcementService = Substitute.For<IPolicyEnforcementService>();
         var clientIpResolver = Substitute.For<IClientIpResolver>();
         var mandatoryFilters = NullMandatoryRowFilterResolver.Instance;
 

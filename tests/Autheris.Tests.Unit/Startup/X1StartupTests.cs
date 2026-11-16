@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using Autheris.Api.Extensions.DependencyInjection;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy.Lint;
+using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -150,9 +151,12 @@ public sealed class X1StartupTests
         Columns = [new TableColumn { ColumnName = "id", DataType = "int" }, new TableColumn { ColumnName = "region", DataType = "varchar" }, new TableColumn { ColumnName = "name", DataType = "varchar" }]
     };
 
-    private static AccessProfile Profile(string id, string predicate) => new()
+    private static VirtualFilter Filter(string name, string sql) => new()
     {
-        ProfileId = id, Name = id, TenantId = Autheris.Tests.Common.TestTenants.Default, TargetTables = ["erp.main.orders"], RowFilterPredicate = predicate
+        TenantId = Autheris.Tests.Common.TestTenants.Default,
+        Name = name,
+        Source = "erp",
+        Sql = sql
     };
 
     [Fact]
@@ -165,20 +169,20 @@ public sealed class X1StartupTests
                 Orders("Databricks") with { Table = new Table { SourceType = "Databricks", SourceName = "lake", SchemaName = "s", TableName = "events" }, Identifier = new TableIdentifier("lake", "s", "events") },
                 Orders("unsupported") with { Table = new Table { SourceType = "unsupported", SourceName = "ext", SchemaName = "s", TableName = "denied_table" }, Identifier = new TableIdentifier("ext", "s", "denied_table") }
             ],
-            [Profile("p-good", "region = 'EU'"), Profile("p-bad", $"region = '{SecretValue}' AND [name] = '{SecretValue}'")],
-            [], []);
+            [],
+            [Filter("p_good", "from main.orders o where o.id = target.id and o.region = 'EU'"), Filter("p_bad", $"from main.orders o where o.region = '{SecretValue}' AND [o].[name] = '{SecretValue}'")]);
 
         var report = GatewayStartupValidator.ListDeniedTables(input, log);
 
-        // the unparsable predicate denies its table; the table of a dialect that WebSQL does not admit is denied as well; Databricks is admitted (OD-36)
-        report.ShouldContain(d => d.Table == "erp.main.orders" && d.PolicyId == "p-bad");
+        // the unparsable predicate denies its source; the table of a dialect that WebSQL does not admit is denied as well; Databricks is admitted (OD-36)
+        report.ShouldContain(d => d.Table == "erp" && d.PolicyId == "p_bad");
         report.ShouldContain(d => d.Table == "ext.s.denied_table" && d.Code == GatewayStartupValidator.DeniedDialectNotAdmitted);
         report.ShouldNotContain(d => d.Table == "lake.s.events");
-        report.ShouldNotContain(d => d.PolicyId == "p-good");
+        report.ShouldNotContain(d => d.PolicyId == "p_good");
 
         var text = string.Join('\n', log.Lines);
-        text.ShouldContain("erp.main.orders");
-        text.ShouldContain("p-bad");
+        text.ShouldContain("erp");
+        text.ShouldContain("p_bad");
         text.ShouldContain("ext.s.denied_table");
         text.ShouldNotContain("lake.s.events");
         text.ShouldNotContain(SecretValue);   // ids only: never predicate text, parameter values or column names of a predicate
@@ -190,7 +194,7 @@ public sealed class X1StartupTests
     {
         var log = new CapturingLogger<X1StartupTests>();
 
-        var report = GatewayStartupValidator.ListDeniedTables(new PolicyLintInput([Orders()], [Profile("p-good", "region = 'EU'")], [], []), log);
+        var report = GatewayStartupValidator.ListDeniedTables(new PolicyLintInput([Orders()], [], [Filter("p_good", "from main.orders o where o.id = target.id and o.region = 'EU'")]), log);
 
         report.ShouldBeEmpty();
         string.Join('\n', log.Lines).ShouldNotContain("denied");
@@ -199,24 +203,30 @@ public sealed class X1StartupTests
     [Fact]
     public async Task DeniedTablesReporter_ReadsTheStoreAndLogsIdsOnly_AndNeverBlocksTheStart()
     {
-        var tables = Substitute.For<ITableMetadataRepository>();
+        var tables = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
         tables.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([Orders()]));
         var profiles = Substitute.For<IAccessProfileRepository>();
         profiles.GetAllProfilesAsync(Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<AccessProfile>>([Profile("p-bad", $"[name] = '{SecretValue}'")]));
+            .Returns(Task.FromResult<IReadOnlyList<AccessProfile>>([]));
+        var virtualFilters = Substitute.For<IVirtualFilterRepository>();
+        virtualFilters.LoadSnapshotAsync(Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new Autheris.Application.VirtualFilters.VirtualFilterSnapshot(
+                1,
+                [Filter("p_bad", $"from main.orders o where [o].[name] = '{SecretValue}'")],
+                [])));
         var log = new CapturingLogger<DeniedTablesStartupReporter>();
-        var reporter = new DeniedTablesStartupReporter(tables, profiles, null, Microsoft.Extensions.Options.Options.Create(new GatewayOptions { Tenancy = new TenancyOptions { DefaultTenantId = "tenant-a" } }), log);
+        var reporter = new DeniedTablesStartupReporter(tables, profiles, virtualFilters, Microsoft.Extensions.Options.Options.Create(new GatewayOptions { Tenancy = new TenancyOptions { DefaultTenantId = "tenant-a" } }), log);
 
         await reporter.StartAsync(CancellationToken.None);
         await reporter.ExecuteTask!;   // the listing runs in the background
 
-        string.Join('\n', log.Lines).ShouldContain("p-bad");
+        string.Join('\n', log.Lines).ShouldContain("p_bad");
         string.Join('\n', log.Lines).ShouldNotContain(SecretValue);
 
         // a store that cannot be read is a warning, not a failed start
         tables.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns<Task<IReadOnlyList<TableMetadata>>>(_ => throw new InvalidOperationException(SecretValue));
         var failing = new CapturingLogger<DeniedTablesStartupReporter>();
-        var failingReporter = new DeniedTablesStartupReporter(tables, profiles, null, Microsoft.Extensions.Options.Options.Create(new GatewayOptions()), failing);
+        var failingReporter = new DeniedTablesStartupReporter(tables, profiles, virtualFilters, Microsoft.Extensions.Options.Options.Create(new GatewayOptions()), failing);
         await failingReporter.StartAsync(CancellationToken.None);
         await failingReporter.ExecuteTask!;
         string.Join('\n', failing.Lines).ShouldNotContain(SecretValue);
@@ -227,7 +237,7 @@ public sealed class X1StartupTests
     {
         // a slow governance store must not delay the host start (the listing is background work, not part of StartAsync)
         var release = new TaskCompletionSource<IReadOnlyList<TableMetadata>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var tables = Substitute.For<ITableMetadataRepository>();
+        var tables = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
         tables.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(_ => release.Task);
         var reporter = new DeniedTablesStartupReporter(
             tables, Substitute.For<IAccessProfileRepository>(), null, Microsoft.Extensions.Options.Options.Create(new GatewayOptions()),

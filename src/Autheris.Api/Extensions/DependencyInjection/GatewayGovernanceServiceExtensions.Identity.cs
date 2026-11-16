@@ -19,7 +19,6 @@ using Autheris.Application.Streaming.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Application.VirtualFilters;
 using Autheris.Application.Webhooks;
-using Autheris.Application.Governance.Workflows;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Options;
@@ -61,6 +60,15 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<Autheris.Application.Identity.IRoleProvider>(sp => new Autheris.Application.Identity.Providers.LdapsRoleProvider(
             sp.GetService<Autheris.Application.Identity.Providers.ILdapDirectoryAdapter>(),
             maxGroups: sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>().Value.Authentication.MaxGroupSidsPerCaller));
+        services.AddSingleton<Autheris.Domain.Interfaces.IScimUserStore>(sp =>
+            sp.GetRequiredService<Autheris.Domain.Interfaces.IIdentityStoreRepository>());
+        services.AddSingleton<Autheris.Domain.Interfaces.IScimGroupStore>(sp =>
+            sp.GetRequiredService<Autheris.Domain.Interfaces.IIdentityStoreRepository>());
+        services.AddSingleton<Autheris.Domain.Interfaces.IScimProvisioningStore>(sp =>
+            sp.GetRequiredService<Autheris.Domain.Interfaces.IIdentityStoreRepository>());
+        services.AddSingleton<Autheris.Application.Identity.IScimIdentityCorrelator, Autheris.Application.Identity.ScimIdentityCorrelator>();
+        services.AddSingleton<Autheris.Application.Identity.IGroupDenyInspector, Autheris.Application.Identity.GovernanceGroupDenyInspector>();
+        services.AddSingleton<Autheris.Application.Identity.Services.IScimSyncStateTracker, Autheris.Application.Identity.Services.ScimSyncStateTracker>();
         services.AddSingleton<Autheris.Application.Identity.IGroupSidResolver, Autheris.Application.Identity.GroupSidResolver>();
         services.AddSingleton<Autheris.Application.Identity.IRoleResolver, Autheris.Application.Identity.RoleResolver>();
         services.AddSingleton<Autheris.Application.Identity.Services.IRedisLockPubSubChannel, Autheris.Infrastructure.Identity.Locks.RedisLockPubSubChannel>();

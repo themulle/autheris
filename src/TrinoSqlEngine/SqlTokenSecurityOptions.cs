@@ -93,7 +93,7 @@ public sealed record SqlTokenSecurityOptions
         RejectBackslashInStrings = true,
         RejectEscapedStringLiterals = true,
         RejectDollarQuoting = true,
-        RejectBracketLexerDifferentials = dialect is TargetSqlDialect.SqlServer or TargetSqlDialect.Sqlite,
+        RejectBracketLexerDifferentials = dialect is TargetSqlDialect.SqlServer,
         RejectNonAsciiIdentifiers = true,
         RejectDotsInQuotedIdentifiers = true,
         RejectTimeTravelQueries = true,

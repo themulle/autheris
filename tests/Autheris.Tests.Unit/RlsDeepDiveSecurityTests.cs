@@ -17,6 +17,7 @@ using Xunit;
 
 namespace Autheris.Tests.Unit;
 
+[Trait("Category", "Security")]
 public sealed class RlsDeepDiveSecurityTests
 {
     private readonly TableIdentifier _testTable = new("crm", "dbo", "customers");
@@ -119,38 +120,6 @@ public sealed class RlsDeepDiveSecurityTests
         // 'john.doe@x.de' should be excluded, 'other.user@x.de' should remain
         filtered.Count.ShouldBe(1);
         filtered[0]["email"].ShouldBe("other.user@x.de");
-    }
-
-    [Fact]
-    public async Task Test3_CasbinTemplate_MissingClaimAttribute_ThrowsSecurityExceptionFailClosed()
-    {
-        // RLS-4 Verification:
-        // Casbin RLS Template with ${department} when user lacks department claim MUST throw SecurityException
-        var rlsGen = RlsFilterGenerator.Instance;
-        var casbinService = new CasbinEnforcementService(null, rlsGen);
-
-        var policyText = $$"""
-        p, {{_userSid.Value}}, tenant-rls-test, crm.dbo.customers, read, true, allow, department LIKE '${department}%'
-        """;
-        casbinService.LoadPolicyFromText(_tenantId, policyText);
-
-        var contextWithoutDept = new SecurityEvaluationContext(
-            UserSid: _userSid,
-            GroupSids: Array.Empty<Sid>(),
-            Tenant: _tenantId,
-            TargetTable: _testTable,
-            RequestedColumns: new[] { "id", "name" },
-            ClientIp: System.Net.IPAddress.Loopback,
-            Timestamp: DateTimeOffset.UtcNow,
-            PurposeId: null,
-            Attributes: new Dictionary<string, object?>() // No department!
-        );
-
-        // Act & Assert
-        await Should.ThrowAsync<SecurityException>(async () =>
-        {
-            await casbinService.EvaluatePolicyAsync(contextWithoutDept);
-        });
     }
 
     [Fact]
@@ -292,26 +261,5 @@ public sealed class RlsDeepDiveSecurityTests
         // TTL must be approx 15 seconds, NOT 10 minutes
         computedTtl.TotalSeconds.ShouldBeLessThan(20);
         computedTtl.TotalSeconds.ShouldBeGreaterThan(5);
-    }
-
-    [Fact]
-    public void Test7_CasbinCorrelatedSubquery_InvalidPredicateStructure_FailsClosed()
-    {
-        // RLS-9 / RLS-6 Verification:
-        // Invalid subquery predicate JSON structure must throw InvalidOperationException (Fail-Closed)
-        var filter = new ConsentRowFilter
-        {
-            FilterType = RowFilterType.SubqueryCorrelated,
-            DependentTable = new TableIdentifier("crm", "dbo", "customers"),
-            TargetTableAlias = "i",
-            ForeignKeyColumn = "customer_id",
-            PrimaryKeyColumn = "id",
-            SubqueryFilterPredicateJson = "[123, 456]" // Invalid: array of non-objects
-        };
-
-        Should.Throw<InvalidOperationException>(() =>
-        {
-            AdvancedRlsFilterGenerator.BuildCorrelatedSubquery(filter, DatabaseDialect.SqlServer);
-        });
     }
 }

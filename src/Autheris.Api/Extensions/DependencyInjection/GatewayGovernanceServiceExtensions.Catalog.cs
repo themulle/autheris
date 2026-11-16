@@ -20,7 +20,6 @@ using Autheris.Application.Streaming.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Application.VirtualFilters;
 using Autheris.Application.Webhooks;
-using Autheris.Application.Governance.Workflows;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Options;
@@ -44,6 +43,7 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<IDatasetTagImportService, DatasetTagImportService>();
         services.AddSingleton<CatalogVisibilityMetrics>();
         services.AddSingleton<ICatalogVisibilityMetrics>(sp => sp.GetRequiredService<CatalogVisibilityMetrics>());
+        services.AddSingleton<Autheris.Application.Catalog.Discovery.IDiscoveryArtifactStore>(sp => new DiscoveryArtifactStore(sp.GetRequiredService<Autheris.Application.Common.Interfaces.IGovernanceRepository>()));
         services.AddHostedService<CatalogGovernanceHostedService>();
         services.AddSingleton<IDatasetCatalogAdminService>(sp => new DatasetCatalogAdminService(
             sp.GetRequiredService<Autheris.Application.Common.Interfaces.ITableMetadataRepository>(),
@@ -51,7 +51,8 @@ public static partial class GatewayGovernanceServiceExtensions
             sp.GetRequiredService<Autheris.Application.Audit.IAuditWriter>(),
             sp.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<GatewayOptions>>(),
             sp.GetService<TimeProvider>(),
-            sp.GetService<ICatalogVisibilityMetrics>()));
+            sp.GetService<ICatalogVisibilityMetrics>(),
+            sp.GetService<Autheris.Application.Common.Interfaces.IEventBus>()));
         services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<GatewayOptions>, Autheris.Application.Policy.RowFilterKeySetCacheOptionsValidator>();
         // Issue #107: the row-filter key-set cache runtime. The cache size and concurrency are read once (a size change needs a restart,
         // 16); every other option is read per statement by the stage through IOptionsMonitor.
@@ -87,6 +88,8 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<ISchemaSunsettingService, SchemaSunsettingService>();
         services.AddSingleton<Autheris.Application.Policy.Pdp.IExplainSubjectResolver, Autheris.Application.Policy.Pdp.DegradedExplainSubjectResolver>();
         services.AddScoped<Autheris.Application.Policy.Pdp.IAccessExplanationService, Autheris.Application.Policy.Pdp.AccessExplanationService>();
+        services.AddScoped<Autheris.Application.Policy.Pdp.IEffectiveAccessService, Autheris.Application.Policy.Pdp.EffectiveAccessService>();
+        services.AddScoped<Autheris.Application.Policy.Pdp.IGrantEffectPreview, Autheris.Application.Policy.Pdp.GrantEffectPreviewService>();
         services.AddSingleton<IEuAiActAuditExporter, EuAiActAuditExporter>();
         services.AddSingleton<Autheris.Application.Governance.Interfaces.IEffectiveAccessExplanationService, Autheris.Application.Governance.Services.EffectiveAccessExplanationService>();
         services.AddOptions<Autheris.Domain.Options.IndividualGrantOptions>() // 16
@@ -104,9 +107,6 @@ public static partial class GatewayGovernanceServiceExtensions
 
     private static void AddTriageAndContracts(IServiceCollection services)
     {
-        // AI Assisted Governance (Triage)
-        services.AddScoped<IJustificationTriageService, JustificationTriageService>();
-
         // Dynamic Schema Contracts (@tag / @inaccessible) (F-GOV-08)
         services.AddSingleton<ISchemaContractManager, SchemaContractManager>();
 

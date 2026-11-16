@@ -293,7 +293,8 @@ public static class CompileCacheKey
 
     private static readonly HashSet<string> ValidatedPerTable = new(StringComparer.Ordinal)
     {
-        nameof(GovernancePolicy.RowFilters), nameof(GovernancePolicy.Masks), nameof(GovernancePolicy.Catalog)
+        nameof(GovernancePolicy.RowFilters), nameof(GovernancePolicy.Masks), nameof(GovernancePolicy.Catalog),
+        nameof(GovernancePolicy.PerCellColumns)
     };
 
     public static string Material(CompileRequest request, string rawSql, DialectCapabilities capabilities, int engineMaxQueryLength = 0)
