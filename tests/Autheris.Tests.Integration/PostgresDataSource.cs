@@ -15,10 +15,10 @@ internal static class PostgresDataSource
     public const string Schema = "main";
 
     /// <summary>Creates an empty database with the <c>main</c> schema, runs <paramref name="script"/> inside it and returns the connection string.</summary>
-    public static string Create(string name, string? script = null) =>
-        Task.Run(() => CreateAsync(name, script)).GetAwaiter().GetResult();
+    public static string Create(string name, string? script = null, string schema = Schema) =>
+        Task.Run(() => CreateAsync(name, script, schema)).GetAwaiter().GetResult();
 
-    public static async Task<string> CreateAsync(string name, string? script = null)
+    public static async Task<string> CreateAsync(string name, string? script = null, string schema = Schema)
     {
         var server = await SharedDatabaseServers.PostgreSqlServerAsync().ConfigureAwait(false);
         var safe = new string(name.Where(char.IsLetterOrDigit).ToArray());
@@ -39,7 +39,7 @@ internal static class PostgresDataSource
         var connectionString = new NpgsqlConnectionStringBuilder(server)
         {
             Database = database,
-            SearchPath = Schema,
+            SearchPath = schema,
             MaxPoolSize = 10,
             ConnectionIdleLifetime = 10,
             ConnectionPruningInterval = 5
@@ -47,10 +47,10 @@ internal static class PostgresDataSource
 
         await using var conn = new NpgsqlConnection(connectionString);
         await conn.OpenAsync().ConfigureAwait(false);
-        await using (var schema = conn.CreateCommand())
+        await using (var schemaCmd = conn.CreateCommand())
         {
-            schema.CommandText = $"CREATE SCHEMA IF NOT EXISTS {Schema}";
-            await schema.ExecuteNonQueryAsync().ConfigureAwait(false);
+            schemaCmd.CommandText = $"CREATE SCHEMA IF NOT EXISTS {schema}";
+            await schemaCmd.ExecuteNonQueryAsync().ConfigureAwait(false);
         }
 
         if (!string.IsNullOrWhiteSpace(script))

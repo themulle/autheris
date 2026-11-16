@@ -216,7 +216,7 @@ public sealed class WebSqlSqlServerSynonymTests : IAsyncLifetime, IDisposable
         scope.ServiceProvider.GetRequiredService<IIngressTransportContext>().Set(DataSourceTransportFlags.WebSql);
         var service = scope.ServiceProvider.GetRequiredService<IGovernedSqlExecutionService>();
         var user = new ClaimsPrincipal(new ClaimsIdentity(
-            [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-SYN-E2E"), new Claim("tenant_id", Tenant)], "Test"));
+            [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-SYN-E2E"), new Claim("tenant_id", Tenant), Autheris.Domain.Identity.GroupResolutionClaims.CreateMarker(), Autheris.Domain.Identity.GroupResolutionClaims.CreateStatus(Autheris.Domain.Identity.GroupResolutionStatus.Complete)], "Test"));
         return await service.ExecuteQueryBufferedAsync(new GovernedSqlQueryRequest(sql), user, new TenantId(Tenant));
     }
 

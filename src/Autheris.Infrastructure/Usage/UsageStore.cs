@@ -730,10 +730,13 @@ internal static class UsageStore
             gb == UsageGroupBy.Application ? s : null,
             gb == UsageGroupBy.ClientId ? s : null,
             gb == UsageGroupBy.Grant ? s : null,
-            r.GetInt64(c), r.GetInt64(c + 1), r.GetInt64(c + 2), r.GetInt64(c + 3), r.GetInt64(c + 4), r.GetInt64(c + 5),
-            r.GetInt64(c + 6), r.GetInt64(c + 7), r.GetInt64(c + 8), r.GetInt64(c + 9), r.GetInt64(c + 10), r.GetInt64(c + 11),
-            r.GetInt64(c + 12), r.GetInt64(c + 13), r.GetInt64(c + 14), r.GetInt64(c + 15), r.GetInt64(c + 16), r.GetInt64(c + 17));
+            Int64At(r, c), Int64At(r, c + 1), Int64At(r, c + 2), Int64At(r, c + 3), Int64At(r, c + 4), Int64At(r, c + 5),
+            Int64At(r, c + 6), Int64At(r, c + 7), Int64At(r, c + 8), Int64At(r, c + 9), Int64At(r, c + 10), Int64At(r, c + 11),
+            Int64At(r, c + 12), Int64At(r, c + 13), Int64At(r, c + 14), Int64At(r, c + 15), Int64At(r, c + 16), Int64At(r, c + 17));
     }
+
+    // SQL Server sums int columns to int and the literal 0 is an int; the report counters are 64-bit regardless of the provider type.
+    private static long Int64At(DbDataReader r, int ordinal) => Convert.ToInt64(r.GetValue(ordinal), CultureInfo.InvariantCulture);
 
     private static string? EncodeCursor(UsageReportRow row, UsageGroupBy gb) => gb switch
     {

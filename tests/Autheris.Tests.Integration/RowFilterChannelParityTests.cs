@@ -327,7 +327,7 @@ public sealed class RowFilterChannelParityTests : IClassFixture<RowFilterChannel
             ExpectedIds = ComputeExpected(dbPath);
 
             File.WriteAllText(Path.Combine(queriesDir, "air1_ids.sql"),
-                "-- @name air1_ids\n-- @datasource default\n-- @summary air1 ids\n-- @method GET\n\nSELECT id FROM air1");
+                "-- @name air1_ids\n-- @datasource default\n-- @summary air1 ids\n-- @method GET\n\nSELECT id FROM default.main.air1");
 
             _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
             {
@@ -349,6 +349,7 @@ public sealed class RowFilterChannelParityTests : IClassFixture<RowFilterChannel
 
                 b.UseSetting("Gateway:WebSql:Enabled", "true");
                 b.UseSetting("Gateway:WebSql:DefaultDataSourceName", "default");
+                b.UseSetting("Gateway:DuckDbOlap:Enabled", "true");
 
                 b.UseSetting("Gateway:SqlEndpoints:Enabled", "true");
                 b.UseSetting("Gateway:SqlEndpoints:Directory", queriesDir);

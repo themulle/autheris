@@ -140,7 +140,9 @@ public abstract class GovernedAggregationWhereParamsBase : IDisposable
         new(new ClaimsIdentity(
             [
                 new Claim(ClaimTypes.PrimarySid, "S-1-5-21-AGG280-E2E"),
-                new Claim("tenant_id", tenant)
+                new Claim("tenant_id", tenant),
+                Autheris.Domain.Identity.GroupResolutionClaims.CreateMarker(),
+                Autheris.Domain.Identity.GroupResolutionClaims.CreateStatus(Autheris.Domain.Identity.GroupResolutionStatus.Complete)
             ],
             "Test"));
 
