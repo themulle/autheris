@@ -131,7 +131,8 @@ public sealed class IdentityPipeline : IIdentityPipeline
         var identity = Collapse(normalized);
 
         var issuer = identity.FindFirst("iss")?.Value;
-        IdentityRealm? realm = (!string.IsNullOrWhiteSpace(issuer) ? _realmRegistry?.ResolveRealmByIssuer(issuer) : null)
+        IdentityRealm? realm = ResolveScimRealm(raw, scheme)
+            ?? (!string.IsNullOrWhiteSpace(issuer) ? _realmRegistry?.ResolveRealmByIssuer(issuer) : null)
             ?? _realmRegistry?.ResolveRealmForScheme(issuer, identity.AuthenticationType)
             ?? _realmRegistry?.GetDefaultRealm();
         var realmId = realm?.RealmId ?? "workforce-entra";
@@ -182,7 +183,7 @@ public sealed class IdentityPipeline : IIdentityPipeline
             }
         }
 
-        if (degradedReason is null && realm is { GroupSource: RealmGroupSource.Resolver })
+        if (degradedReason is null && realm is { GroupSource: RealmGroupSource.Resolver } && !IsScimScheme(scheme))
         {
             degradedReason = await AddRolesAndRightsAsync(identity, normalized, realm, realmId, resolution.Tenant, groups, ct).ConfigureAwait(false);
         }
@@ -208,6 +209,22 @@ public sealed class IdentityPipeline : IIdentityPipeline
 
         identity.AddClaim(GroupResolutionClaims.CreateMarker());
         return new ClaimsPrincipal(identity);
+    }
+
+    private static bool IsScimScheme(string scheme) => string.Equals(scheme, GatewayAuthSchemes.Scim, StringComparison.Ordinal);
+
+    // The SCIM machine identity is bound to the realm of its route and secret (minted by the SCIM handler, whose identity alone carries the
+    // SCIM authentication type); it is never moved to the default realm, and it never receives resolver roles (the provisioner role stands alone).
+    private IdentityRealm? ResolveScimRealm(ClaimsPrincipal raw, string scheme)
+    {
+        if (!IsScimScheme(scheme)
+            || !string.Equals(raw.Identity?.AuthenticationType, GatewayAuthSchemes.Scim, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var realmId = raw.FindFirst("autheris:realm")?.Value;
+        return string.IsNullOrWhiteSpace(realmId) ? null : _realmRegistry?.GetRealm(realmId);
     }
 
     private static bool IsPrivilegedSubject(ClaimsPrincipal principal)

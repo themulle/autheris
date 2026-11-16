@@ -128,6 +128,10 @@ public static class AttributeTableQuery
             _ => throw new NotSupportedException($"Attribute tables do not support dialect '{dialect}'.")
         };
 
+        // PostgreSQL: tenant and issuer are compared and read as plain text, so a citext (or other extension type) column neither compares
+        // case-insensitively nor needs the type catalog of the connection to know the extension type.
+        string TextColumn(string id) => dialect == DatabaseDialect.PostgreSql ? $"CAST({Q(id)} AS text)" : Q(id);
+
         var select = new List<string> { Q(spec.ValueColumn) };
         int? tenantOrdinal = null;
         int? issuerOrdinal = null;
@@ -136,8 +140,8 @@ public static class AttributeTableQuery
         if (spec.TenantColumn is not null)
         {
             tenantOrdinal = select.Count;
-            select.Add(Q(spec.TenantColumn));
-            where.Add($"{Q(spec.TenantColumn)}{Ordinal()} = {Marker(TenantParameter)}");
+            select.Add(TextColumn(spec.TenantColumn));
+            where.Add($"{TextColumn(spec.TenantColumn)}{Ordinal()} = {Marker(TenantParameter)}");
             parameters.Add(new(dialect.FormatParameterName(TenantParameter), tenant));
         }
 
@@ -149,8 +153,8 @@ public static class AttributeTableQuery
             }
 
             issuerOrdinal = select.Count;
-            select.Add(Q(spec.IssuerColumn));
-            where.Add($"{Q(spec.IssuerColumn)}{Ordinal()} = {Marker(IssuerParameter)}");
+            select.Add(TextColumn(spec.IssuerColumn));
+            where.Add($"{TextColumn(spec.IssuerColumn)}{Ordinal()} = {Marker(IssuerParameter)}");
             parameters.Add(new(dialect.FormatParameterName(IssuerParameter), issuer));
         }
 

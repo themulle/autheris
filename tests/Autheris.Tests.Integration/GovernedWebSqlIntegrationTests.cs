@@ -452,11 +452,20 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<GovernedWebSq
             "WITH RECURSIVE w(id, x) AS (SELECT id, name FROM org WHERE parent_id IS NULL UNION ALL SELECT o.id, o.ssn FROM org o JOIN w ON o.parent_id = w.id) SELECT id, x FROM w");
         var plain = await PostSqlAsync(factory, "SELECT id, ssn FROM org");
 
-        // The recursive member gets no wider column access than a plain reference: same failure, no row, no value.
-        recursive.Status.ShouldNotBe(HttpStatusCode.OK, recursive.Body);
-        recursive.Status.ShouldBe(plain.Status);
-        Code(recursive.Body).ShouldBe(Code(plain.Body));
-        recursive.Body.ShouldNotContain("111-11-1111");
+        // The recursive member gets no wider column access than a plain reference: the denied column is fail-closed (a redacted constant,
+        // never the stored value), exactly as for a plain reference.
+        recursive.Status.ShouldBe(HttpStatusCode.OK, recursive.Body);
+        using (var doc = JsonDocument.Parse(recursive.Body))
+        {
+            var x = doc.RootElement.GetProperty("columns").EnumerateArray().Single(c => c.GetProperty("name").GetString() == "x");
+            x.GetProperty("masked").GetBoolean().ShouldBeTrue(recursive.Body);
+        }
+
+        foreach (var raw in new[] { "111-11-1111", "222-22-2222", "333-33-3333", "999-99-9999", "888-88-8888" })
+        {
+            recursive.Body.ShouldNotContain(raw);
+            plain.Body.ShouldNotContain(raw);
+        }
     }
 
     [Fact]
