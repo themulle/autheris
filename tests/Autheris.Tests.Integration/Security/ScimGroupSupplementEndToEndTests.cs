@@ -295,8 +295,10 @@ public sealed class ScimGroupSupplementEndToEndTests : IClassFixture<ScimGroupSu
         ], "Bearer"));
 
         var effective = await explain.ExplainMyAccessAsync(principal, FilteredTable);
+        // The group's row filter applies, but its definition is only shown to callers allowed to see it (#708): a plain caller gets the notice.
         effective.ActiveRowFilters.ShouldNotBeEmpty();
-        effective.ActiveRowFilters.Any(f => f.Contains("region", StringComparison.OrdinalIgnoreCase)).ShouldBeTrue();
+        effective.ActiveRowFilters.ShouldContain(f => f.StartsWith("Row filter applies", StringComparison.Ordinal));
+        effective.ActiveRowFilters.ShouldAllBe(f => !f.Contains("region", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
