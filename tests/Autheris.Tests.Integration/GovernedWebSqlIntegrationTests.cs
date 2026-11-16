@@ -83,7 +83,7 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<GovernedWebSq
             ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
             ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.Create("GovernedWebSqlIntegrationTests"),
             ["Gateway:DataSources:Connections:default:Provider"] = "PostgreSql",
-            ["Gateway:DataSources:Connections:default:DefaultSchema"] = "main",
+            ["Gateway:DataSources:Connections:default:DefaultSchema"] = "public",
             ["Gateway:DataSources:Connections:default:ConnectionString"] = dbPath,
             ["Gateway:WebSql:Enabled"] = "true",
             ["Gateway:WebSql:DefaultDataSourceName"] = "default",
@@ -115,11 +115,11 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<GovernedWebSq
                 ('10','9','foreignchild','888-88-8888','tenant_other');
             """;
         var orders = "INSERT INTO orders VALUES " + string.Join(",", Enumerable.Range(1, 700).Select(i => $"('{i}','{i}','e{i}@x.example','000','tenant_123')")) + ",('9999','1','x','000','tenant_other');";
-        return PostgresDataSource.Create("gws", script + "\n" + orders);
+        return PostgresDataSource.Create("gws", script + "\n" + orders, "public");
     }
 
     // SEC C-03: WebSQL rejects tables without catalog metadata, so every table used by these tests is registered first. A bare table name
-    // resolves to the schema "public" in the catalog; the physical table lives in the session schema "main" (search path of the data source).
+    // resolves to the schema "public" in the catalog; the physical table lives in the same schema "public" (the generated SQL is schema-qualified with the catalog schema).
     private async Task RegisterTableAsync(string tableName, params string[] columns) =>
         await RegisterTableAsync(tableName, null, columns.Select(c => new TableColumn { ColumnName = c, DataType = "varchar" }).ToList());
 

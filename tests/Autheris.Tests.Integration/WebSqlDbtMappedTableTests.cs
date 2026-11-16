@@ -96,8 +96,9 @@ public sealed class WebSqlDbtMappedTableTests : IAsyncLifetime
 
             if (withOtherDialectConnection)
             {
-                builder.UseSetting("Gateway:DataSources:Connections:litedata:Provider", "PostgreSql");
-                builder.UseSetting("Gateway:DataSources:Connections:litedata:ConnectionString", "Data Source=:memory:");
+                builder.UseSetting("Gateway:DataSources:Connections:litedata:Provider", "SqlServer");
+                builder.UseSetting("Gateway:DataSources:Connections:litedata:ConnectionString", "Server=localhost;Database=litedata;Integrated Security=true;TrustServerCertificate=true");
+                builder.UseSetting("Gateway:DataSources:Connections:litedata:DefaultSchema", "dbo");
             }
 
             builder.UseSetting($"Gateway:DataSources:Connections:{Connection}:Provider", "PostgreSql");

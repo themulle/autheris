@@ -59,7 +59,7 @@ public sealed class VirtualFilterChannelParityTests : IClassFixture<VirtualFilte
     [Fact]
     public async Task UncoveredObject_IsDenied()
     {
-        var response = await _fixture.Client().PostAsJsonAsync("/api/v1/sql", new { sql = "SELECT serial_number FROM crane" });
+        var response = await _fixture.Client().PostAsJsonAsync("/api/v1/sql", new { sql = "SELECT serial_number FROM default.main.crane" });
 
         response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
     }
