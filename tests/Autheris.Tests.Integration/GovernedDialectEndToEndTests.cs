@@ -111,7 +111,14 @@ public abstract class GovernedDialectEndToEndBase : IDisposable
 
     private static ClaimsPrincipal User(string tenant, params string[] roles) =>
         new(new ClaimsIdentity(
-            new[] { new Claim(ClaimTypes.PrimarySid, "S-1-5-21-X1-E2E"), new Claim("tenant_id", tenant) }
+            new[]
+            {
+                new Claim(ClaimTypes.PrimarySid, "S-1-5-21-X1-E2E"),
+                new Claim("tenant_id", tenant),
+                // an authenticated principal without a processed group resolution is Degraded (fail-closed); the test caller is a resolved one
+                Autheris.Domain.Identity.GroupResolutionClaims.CreateMarker(),
+                Autheris.Domain.Identity.GroupResolutionClaims.CreateStatus(Autheris.Domain.Identity.GroupResolutionStatus.Complete)
+            }
                 .Concat(roles.Select(r => new Claim(ClaimTypes.Role, r)))
                 .Concat(roles.Contains("Writer") ? [new Claim("scp", "Sql.Write")] : []), "Test"));
 
