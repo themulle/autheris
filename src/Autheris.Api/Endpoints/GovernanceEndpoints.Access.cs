@@ -217,7 +217,7 @@ public static partial class GovernanceEndpoints
         }
 
         var now = DateTimeOffset.UtcNow;
-        var validTo = now.AddDays(req.ValidDays);
+        var validTo = GrantTimeMath.AddSaturating(now, GrantTimeMath.DaysToSpan(req.ValidDays));
         var profileId = $"prof-{trimmedSubject.ToLowerInvariant()}-{mode.ToString().ToLowerInvariant()}-{now:yyyyMMddHHmmss}-{Guid.NewGuid().ToString("N")[..6]}";
         var targetTables = req.Tables.Select(t => t.Trim()).ToList();
 

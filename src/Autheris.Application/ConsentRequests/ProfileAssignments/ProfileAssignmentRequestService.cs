@@ -711,7 +711,7 @@ public sealed class ProfileAssignmentRequestService(
         }
 
         var resolution = await _workflowRouter.ResolveForTablesAsync(tenantId, tables, ct).ConfigureAwait(false);
-        var maxEnd = validFrom.AddDays(Math.Max(1, resolution.MaxDurationDays));
+        var maxEnd = GrantTimeMath.AddSaturating(validFrom, GrantTimeMath.DaysToSpan(Math.Max(1, resolution.MaxDurationDays)));
         if (validTo > maxEnd)
         {
             if (submission.RequestedValidTo.HasValue || submission.RequestedDuration is not null || submission.DurationDays > 0)

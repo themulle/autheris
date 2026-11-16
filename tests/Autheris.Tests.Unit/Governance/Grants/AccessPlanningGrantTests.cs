@@ -28,10 +28,18 @@ public sealed class AccessPlanningGrantTests
     [Fact]
     public async Task SEC_SC_20_PlanAccess_BeyondMaximum_IsRejected()
     {
-        // Metadata is unavailable here, so the grant is classified Sensitive (fail closed): max 90 days.
+        // Metadata is unavailable here, so the grant is classified Sensitive (fail closed); the only ceiling is the configured
+        // maximum (test default P5Y), not a compiled-in class limit.
         var ex = await Should.ThrowAsync<GrantPolicyViolationException>(() =>
-            Service().PlanAccessAsync(Plan(DateTimeOffset.UtcNow.AddDays(120)), "S-1-5-21-ADMIN"));
+            Service().PlanAccessAsync(Plan(DateTimeOffset.UtcNow.AddDays(5 * 365 + 30)), "S-1-5-21-ADMIN"));
         ex.ErrorCode.ShouldBe(GrantErrorCodes.ExceedsMaximum);
+    }
+
+    [Fact]
+    public async Task SEC_SC_20_PlanAccess_MultiYear_IsPlanned_UnderTheConfiguredMaximum()
+    {
+        var plan = await Service().PlanAccessAsync(Plan(DateTimeOffset.UtcNow.AddDays(3 * 365)), "S-1-5-21-ADMIN");
+        plan.PlanId.ShouldNotBeNullOrEmpty();
     }
 
     [Fact]

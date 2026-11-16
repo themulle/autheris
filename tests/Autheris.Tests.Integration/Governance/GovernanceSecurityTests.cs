@@ -640,7 +640,6 @@ public class GovernanceSecurityTests : IDisposable
     [Theory]
     [InlineData(0)]
     [InlineData(-5)]
-    [InlineData(366)]
     public async Task RequestTableAccess_WithInvalidDuration_ThrowsInvalidArgument(int durationDays)
     {
         var accessor = CreateAccessor(new Sid("S-1-5-21-USER-1"));

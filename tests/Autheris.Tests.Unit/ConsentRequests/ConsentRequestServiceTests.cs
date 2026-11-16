@@ -98,7 +98,7 @@ public sealed class ConsentRequestServiceTests
     [InlineData("", "dbo", "t", "Valid justification", 7, "VALIDATION_ERROR")]
     [InlineData("hr", "dbo", "t", "abc", 7, "VALIDATION_ERROR")]
     [InlineData("hr", "dbo", "t", "Valid justification", 0, "VALIDATION_ERROR")]
-    [InlineData("hr", "dbo", "t", "Valid justification", 366, "VALIDITY_EXCEEDS_MAXIMUM")]
+    [InlineData("hr", "dbo", "t", "Valid justification", 5 * 365 + 1, "VALIDITY_EXCEEDS_MAXIMUM")]
     public async Task Submit_InvalidArguments_ThrowsInvalidArgument(string domain, string schema, string table, string justification, int days, string expectedCode)
     {
         var (metadata, approvals, _) = Repositories();

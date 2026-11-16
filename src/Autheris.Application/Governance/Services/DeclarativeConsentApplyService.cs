@@ -52,7 +52,7 @@ public sealed class DeclarativeConsentApplyService(
     // Kept for constructor/DI compatibility: the APPLIED audit entries are written by ReplaceConsentsAsync inside its transaction, never separately.
     private readonly IAuditLogRepository _auditLogRepository = auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository));
 
-    private readonly IGrantPolicy _grantPolicy = grantPolicy ?? new GrantPolicy();
+    private readonly IGrantPolicy _grantPolicy = grantPolicy ?? new GrantPolicy(validityPolicy: grantValidityPolicy);
     private readonly IGrantValidityPolicy _grantValidityPolicy = grantValidityPolicy ?? GrantValidityPolicy.CreateDefault();
     private readonly IGatewayRoleEvaluator _roleEvaluator = roleEvaluator ?? new GatewayRoleEvaluator();
     private readonly IDataOwnershipRepository? _dataOwnershipRepository =

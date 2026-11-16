@@ -74,14 +74,19 @@ public sealed class ManifestIndividualGrantTests
     [Fact]
     public async Task SEC_SC_20_IndividualManifestGrant_BeyondClassMaximum_IsRejected_AlsoInDryRun()
     {
+        // No compiled-in class ceilings: only the configured (declarative) maximum bounds the manifest grant.
         var ex = await Should.ThrowAsync<GrantPolicyViolationException>(() =>
-            ApplyAsync(User(DateTimeOffset.UtcNow.AddDays(200)), dryRun: true));
+            ApplyAsync(User(DateTimeOffset.UtcNow.AddDays(5 * 365 + 30)), dryRun: true));
         ex.ErrorCode.ShouldBe(GrantErrorCodes.ExceedsMaximum);
 
-        // Sensitive tables are limited to 90 days.
+        var tight = new GrantValidityPolicy(Options.Create(new GrantValidityOptions { DefaultDuration = "P1D", MaxDuration = "P90D" }));
         var ex2 = await Should.ThrowAsync<GrantPolicyViolationException>(() =>
-            ApplyAsync(User(DateTimeOffset.UtcNow.AddDays(100)), sensitivity: "CONFIDENTIAL"));
+            ApplyAsync(User(DateTimeOffset.UtcNow.AddDays(100)), sensitivity: "CONFIDENTIAL", validityPolicy: tight));
         ex2.ErrorCode.ShouldBe(GrantErrorCodes.ExceedsMaximum);
+
+        // A multi-year manifest grant is fine under the default multi-year test maximum, also for sensitive tables.
+        var repo = await ApplyAsync(User(DateTimeOffset.UtcNow.AddDays(3 * 365)), sensitivity: "NORMAL");
+        repo.Active(DateTimeOffset.UtcNow).Count.ShouldBe(1);
     }
 
     [Fact]

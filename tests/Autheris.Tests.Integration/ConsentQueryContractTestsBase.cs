@@ -327,18 +327,26 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
     [Fact]
     public async Task SEC_SC_20_LegacyPermanentDeny_StaysActive_WhileALegacyAllowIsClamped()
     {
-        if (!Available) return;
-        var seed = await SeedAsync();
-        var sid = new Sid("S-1-5-21-Legacy");
-        var deny = await Repo.CreateConsentAsync(NewConsent(seed, GranteeType.User, sid.Value, null, TenantA, ConsentEffect.Deny, -400, 365 * 50));
-        var allow = await Repo.CreateConsentAsync(NewConsent(seed, GranteeType.User, sid.Value, null, TenantA, ConsentEffect.Allow, -400, 365 * 50));
+        // The read-time clamp exists only for an operator-configured limit (no compiled-in ceiling).
+        Autheris.Domain.Model.IndividualGrantLimits.Configure(TimeSpan.FromDays(180), null, null);
+        try
+        {
+            if (!Available) return;
+            var seed = await SeedAsync();
+            var sid = new Sid("S-1-5-21-Legacy");
+            var deny = await Repo.CreateConsentAsync(NewConsent(seed, GranteeType.User, sid.Value, null, TenantA, ConsentEffect.Deny, -400, 365 * 50));
+            var allow = await Repo.CreateConsentAsync(NewConsent(seed, GranteeType.User, sid.Value, null, TenantA, ConsentEffect.Allow, -400, 365 * 50));
 
-        var active = await Repo.GetActiveConsentsForSubjectsAsync([sid], seed.Table, seed.Now, TenantA);
+            var active = await Repo.GetActiveConsentsForSubjectsAsync([sid], seed.Table, seed.Now, TenantA);
 
-        active.ShouldContain(c => c.Id == deny.Id);
-        active.ShouldNotContain(c => c.Id == allow.Id);
+            active.ShouldContain(c => c.Id == deny.Id);
+            active.ShouldNotContain(c => c.Id == allow.Id);
+        }
+        finally
+        {
+            Autheris.Domain.Model.IndividualGrantLimits.Reset();
+        }
     }
-
     [Fact]
     public async Task Expiring_ExcludesAlreadyExpired()
     {

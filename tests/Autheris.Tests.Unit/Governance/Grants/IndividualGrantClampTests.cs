@@ -28,6 +28,7 @@ public sealed class IndividualGrantClampTests : IDisposable
     [Fact]
     public void SEC_SC_20_IndividualConsent_FarFuture_IsInactiveAfterTheClamp()
     {
+        IndividualGrantLimits.Configure(TimeSpan.FromDays(180), null, null);
         var c = C(GranteeType.User, DateTimeOffset.MaxValue);
 
         c.EffectiveValidTo.ShouldBe(From.AddDays(180));
@@ -89,6 +90,7 @@ public sealed class IndividualGrantClampTests : IDisposable
     [Fact]
     public void SEC_SC_20_DecisionCacheTtl_IsBoundedByTheClampedExpiry_NotByTheRawValidTo()
     {
+        IndividualGrantLimits.Configure(TimeSpan.FromDays(180), null, null);
         var now = DateTimeOffset.UtcNow;
         var clamped = new Consent
         {
@@ -110,8 +112,9 @@ public sealed class IndividualGrantClampTests : IDisposable
     }
 
     [Fact]
-    public void SEC_SC_20_ServicePrincipal_ClampIs365Days()
+    public void SEC_SC_20_ServicePrincipal_ClampFollowsTheConfiguredLimit()
     {
+        IndividualGrantLimits.Configure(null, null, TimeSpan.FromDays(365));
         var c = C(GranteeType.ServicePrincipal, DateTimeOffset.MaxValue);
         c.EffectiveValidTo.ShouldBe(From.AddDays(365));
     }
@@ -127,18 +130,43 @@ public sealed class IndividualGrantClampTests : IDisposable
     }
 
     [Fact]
-    public void SEC_SC_20_ClampMaximum_FollowsRealmProfile_ButOnlyShortens()
+    public void SEC_SC_20_NoConfiguredLimit_MeansNoClamp_NoCompiledInCeiling()
+    {
+        IndividualGrantLimits.RegularMax.ShouldBeNull();
+        IndividualGrantLimits.UnmaskedMax.ShouldBeNull();
+        IndividualGrantLimits.ServicePrincipalMax.ShouldBeNull();
+
+        var to = From.AddYears(3);
+        C(GranteeType.User, to).EffectiveValidTo.ShouldBe(to);
+        C(GranteeType.ServicePrincipal, to).EffectiveValidTo.ShouldBe(to);
+        C(GranteeType.User, to).IsActive(From.AddYears(2)).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void SEC_SC_20_ClampMaximum_FollowsTheConfiguredLimits_AndFailsClosedOnNonPositive()
     {
         IndividualGrantLimits.Configure(TimeSpan.FromDays(30), TimeSpan.FromDays(7), TimeSpan.FromDays(60));
         C(GranteeType.User, DateTimeOffset.MaxValue).EffectiveValidTo.ShouldBe(From.AddDays(30));
 
-        IndividualGrantLimits.Configure(TimeSpan.FromDays(9999), TimeSpan.FromDays(9999), TimeSpan.FromDays(9999));
-        C(GranteeType.User, DateTimeOffset.MaxValue).EffectiveValidTo.ShouldBe(From.AddDays(180));
+        IndividualGrantLimits.Configure(TimeSpan.FromDays(9999), null, null);
+        C(GranteeType.User, DateTimeOffset.MaxValue).EffectiveValidTo.ShouldBe(From.AddDays(9999));
+
+        IndividualGrantLimits.Configure(TimeSpan.Zero, null, null);
+        C(GranteeType.User, DateTimeOffset.MaxValue).EffectiveValidTo.ShouldBe(From.AddDays(1));
     }
 
     [Fact]
-    public void SEC_SC_20_PermanentUnmaskedProfile_IsClampedTo30DaysFromCreation()
+    public void SEC_SC_20_HugeConfiguredLimit_SaturatesInsteadOfOverflowing()
     {
+        IndividualGrantLimits.Configure(TimeSpan.MaxValue, null, null);
+
+        C(GranteeType.User, DateTimeOffset.MaxValue).EffectiveValidTo.ShouldBe(DateTimeOffset.MaxValue);
+    }
+
+    [Fact]
+    public void SEC_SC_20_PermanentUnmaskedProfile_IsClampedToTheConfiguredLimitFromCreation()
+    {
+        IndividualGrantLimits.Configure(null, TimeSpan.FromDays(30), null);
         var p = new AccessProfile { ProfileId = "p", Name = "n", TenantId = Autheris.Tests.Common.TestTenants.Default, MaskingMode = MaskingPolicyMode.Unmasked, CreatedAt = From, ValidTo = null };
 
         p.EffectiveValidTo.ShouldBe(From.AddDays(30));

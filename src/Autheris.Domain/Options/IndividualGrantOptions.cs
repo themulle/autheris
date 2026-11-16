@@ -3,37 +3,39 @@ namespace Autheris.Domain.Options;
 using System.ComponentModel.DataAnnotations;
 
 /// <summary>
-/// realm profile of the time-bound individual grant policy, bound to<c>Gateway:Governance:IndividualGrants</c>.
-/// Every value can only SHORTEN the built-in ceiling (<see cref="IndividualGrantCeilings"/>); the effective value is always
-/// <c>min(configured, ceiling)</c> and a value above the ceiling is rejected at startup.
+/// Operator limits of the time-bound individual grant policy, bound to <c>Gateway:Governance:IndividualGrants</c>.
+/// There are no compiled-in ceilings: a per-class value is an optional operator limit (<c>null</c> means no class-specific
+/// limit) and must be at least 1 day when set. The overall maximum validity of a grant always comes from the required
+/// <c>Gateway:Governance:Grants:MaxDuration</c> setting, so the effective maximum of a class is the minimum over the
+/// configured limits only.
 /// </summary>
 public sealed class IndividualGrantOptions
 {
     public const string SectionName = "Gateway:Governance:IndividualGrants";
 
-    /// <summary>Regular data (no sensitive columns, no PII tag).</summary>
-    [Range(1, IndividualGrantCeilings.RegularDays)]
-    public int RegularMaxDays { get; set; } = IndividualGrantCeilings.RegularDays;
+    /// <summary>Regular data (no sensitive columns, no PII tag). <c>null</c> = no class-specific limit.</summary>
+    [Range(1, int.MaxValue)]
+    public int? RegularMaxDays { get; set; }
 
-    /// <summary>Sensitive / PII tables, or clear text on a sensitive column.</summary>
-    [Range(1, IndividualGrantCeilings.SensitiveDays)]
-    public int SensitiveMaxDays { get; set; } = IndividualGrantCeilings.SensitiveDays;
+    /// <summary>Sensitive / PII tables, or clear text on a sensitive column. <c>null</c> = no class-specific limit.</summary>
+    [Range(1, int.MaxValue)]
+    public int? SensitiveMaxDays { get; set; }
 
-    /// <summary>Individual <c>Unmasked</c> access profile.</summary>
-    [Range(1, IndividualGrantCeilings.UnmaskedDays)]
-    public int UnmaskedMaxDays { get; set; } = IndividualGrantCeilings.UnmaskedDays;
+    /// <summary>Individual <c>Unmasked</c> access profile. <c>null</c> = no class-specific limit.</summary>
+    [Range(1, int.MaxValue)]
+    public int? UnmaskedMaxDays { get; set; }
 
-    /// <summary>Individual privileged functional right (just-in-time elevation).</summary>
-    [Range(1, IndividualGrantCeilings.PrivilegedDays)]
-    public int PrivilegedMaxDays { get; set; } = IndividualGrantCeilings.PrivilegedDays;
+    /// <summary>Individual privileged functional right (just-in-time elevation). <c>null</c> = no class-specific limit.</summary>
+    [Range(1, int.MaxValue)]
+    public int? PrivilegedMaxDays { get; set; }
 
-    /// <summary>Service principal (direct grantee).</summary>
-    [Range(1, IndividualGrantCeilings.ServicePrincipalDays)]
-    public int ServicePrincipalMaxDays { get; set; } = IndividualGrantCeilings.ServicePrincipalDays;
+    /// <summary>Service principal (direct grantee). <c>null</c> = no class-specific limit.</summary>
+    [Range(1, int.MaxValue)]
+    public int? ServicePrincipalMaxDays { get; set; }
 
-    /// <summary>Regular data for customer-realm users.</summary>
-    [Range(1, IndividualGrantCeilings.CustomerRegularDays)]
-    public int CustomerRegularMaxDays { get; set; } = IndividualGrantCeilings.CustomerRegularDays;
+    /// <summary>Regular data for customer-realm users. <c>null</c> = no class-specific limit.</summary>
+    [Range(1, int.MaxValue)]
+    public int? CustomerRegularMaxDays { get; set; }
 
     /// <summary>Customer realms: individual <c>Unmasked</c> access is disabled unless explicitly enabled.</summary>
     public bool AllowCustomerUnmasked { get; set; }
@@ -48,15 +50,4 @@ public sealed class IndividualGrantOptions
     /// <summary>From this many previous renewals onwards a campaign decision is required instead of a direct extension.</summary>
     [Range(1, 10)]
     public int CampaignRequiredAfterRenewals { get; set; } = 3;
-}
-
-/// <summary>Built-in maxima (best-practice defaults); realm profiles can only shorten them.</summary>
-public static class IndividualGrantCeilings
-{
-    public const int RegularDays = 180;
-    public const int SensitiveDays = 90;
-    public const int UnmaskedDays = 30;
-    public const int PrivilegedDays = 7;
-    public const int ServicePrincipalDays = 365;
-    public const int CustomerRegularDays = 90;
 }

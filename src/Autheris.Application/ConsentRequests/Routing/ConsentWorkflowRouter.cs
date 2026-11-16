@@ -23,7 +23,11 @@ public sealed class ConsentWorkflowRouter(
     ILogger<ConsentWorkflowRouter>? logger = null,
     TimeProvider? timeProvider = null) : IConsentWorkflowRouter
 {
-    public const int FallbackMaxDurationDays = 60;
+    /// <summary>
+    /// Route maximum when no route configures one: there is no compiled-in ceiling, so the route imposes no limit
+    /// (<see cref="int.MaxValue"/> days) and the tenant <c>Gateway:Governance:Grants:MaxDuration</c> alone bounds the grant.
+    /// </summary>
+    public const int FallbackMaxDurationDays = int.MaxValue;
     public const int FallbackRequestTimeoutDays = 30;
     public const int FallbackExpiryNoticeLeadHours = 72;
 
