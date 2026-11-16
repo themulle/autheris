@@ -13,7 +13,7 @@ public static class ScopeNames
     public static string ToBareName(string scope)
     {
         ArgumentNullException.ThrowIfNull(scope);
-        var slash = scope.LastIndexOf('/');
+        var slash = scope.LastIndexOf('/', StringComparison.Ordinal);
         return slash >= 0 && slash < scope.Length - 1 ? scope[(slash + 1)..] : scope;
     }
 }

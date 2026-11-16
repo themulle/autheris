@@ -144,7 +144,7 @@ public sealed class KeysetCursorEncoder : IKeysetCursorEncoder
             throw FailInvalidCursor("empty");
         }
 
-        var dotIndex = cursorBase64.LastIndexOf('.');
+        var dotIndex = cursorBase64.LastIndexOf('.', StringComparison.Ordinal);
         if (dotIndex <= 0 || dotIndex >= cursorBase64.Length - 1)
         {
             throw FailInvalidCursor("missing_signature");

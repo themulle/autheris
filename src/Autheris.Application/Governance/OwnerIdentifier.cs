@@ -29,7 +29,7 @@ public static class OwnerIdentifier
         }
 
         yield return normalized;
-        var idx = normalized.LastIndexOf(':');
+        var idx = normalized.LastIndexOf(':', StringComparison.Ordinal);
         if (idx >= 0 && idx < normalized.Length - 1)
         {
             yield return normalized[(idx + 1)..].Trim();

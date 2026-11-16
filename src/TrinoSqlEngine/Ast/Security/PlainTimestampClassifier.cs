@@ -51,7 +51,7 @@ internal static class PlainTimestampClassifier
             char c = text[i];
             if (c == '(')
             {
-                int close = text.IndexOf(')', i + 1);
+                int close = text.IndexOf(')', i + 1, StringComparison.Ordinal);
                 if (close < 0) return false;
                 for (int j = i + 1; j < close; j++)
                 {

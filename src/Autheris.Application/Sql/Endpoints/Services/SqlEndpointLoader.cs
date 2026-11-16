@@ -324,7 +324,7 @@ public sealed class SqlEndpointLoader : IDisposable
         foreach (var col in metadata.ProjectedColumns)
         {
             string cleanCol = col;
-            int dotIdx = col.LastIndexOf('.');
+            int dotIdx = col.LastIndexOf('.', StringComparison.Ordinal);
             if (dotIdx >= 0 && dotIdx + 1 < col.Length)
             {
                 cleanCol = col[(dotIdx + 1)..];
@@ -457,7 +457,7 @@ public sealed class SqlEndpointLoader : IDisposable
             Directory.CreateDirectory(fullDirectory);
         }
 
-        string normalizedDirectory = fullDirectory.EndsWith(Path.DirectorySeparatorChar)
+        string normalizedDirectory = fullDirectory.EndsWith(Path.DirectorySeparatorChar, StringComparison.Ordinal)
             ? fullDirectory
             : fullDirectory + Path.DirectorySeparatorChar;
 

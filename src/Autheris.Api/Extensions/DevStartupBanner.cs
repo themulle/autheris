@@ -62,7 +62,7 @@ public static class DevStartupBanner
             // Hashes (any recognized format starting with '$', e.g. $pbkdf2$, $argon2id$, bcrypt) are never printed.
             // Credentials never reach the banner (CodeQL cs/cleartext-storage): hashes print as <hashed>, plaintext as <hidden>.
             // Dev:ShowPasswords only changes the hint to point at the configuration source.
-            var isHashed = user.Password.StartsWith('$') ||
+            var isHashed = user.Password.StartsWith('$', StringComparison.Ordinal) ||
                            user.Password.StartsWith("$pbkdf2$", StringComparison.OrdinalIgnoreCase) ||
                            user.Password.StartsWith("$argon2id$", StringComparison.OrdinalIgnoreCase);
 

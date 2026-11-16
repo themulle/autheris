@@ -219,12 +219,12 @@ public sealed partial class GovernedTableReadPlanner
         var whereClauses = new List<string>();
         if (!string.IsNullOrWhiteSpace(clientFilterSql))
         {
-            whereClauses.Add(clientFilterSql.StartsWith('(') && clientFilterSql.EndsWith(')') ? clientFilterSql : $"({clientFilterSql})");
+            whereClauses.Add(clientFilterSql.StartsWith('(', StringComparison.Ordinal) && clientFilterSql.EndsWith(')', StringComparison.Ordinal) ? clientFilterSql : $"({clientFilterSql})");
         }
 
         if (!string.IsNullOrWhiteSpace(seekSql))
         {
-            whereClauses.Add(seekSql.StartsWith('(') && seekSql.EndsWith(')') ? seekSql : $"({seekSql})");
+            whereClauses.Add(seekSql.StartsWith('(', StringComparison.Ordinal) && seekSql.EndsWith(')', StringComparison.Ordinal) ? seekSql : $"({seekSql})");
         }
 
         // 7. Assemble Complete Single-Table SELECT Statement

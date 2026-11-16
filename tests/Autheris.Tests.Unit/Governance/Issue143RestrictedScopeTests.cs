@@ -324,8 +324,8 @@ public sealed class Issue143RestrictedScopeTests
         var policy = PolicyOf("api://app/Agent.Read", "");
 
         policy.Scopes.ShouldBe(["Agent.Read"], ignoreOrder: true);
-        policy.HeldBy(Scopes(tokenScope, "other")).Any().ShouldBe(restricted);
-        RestrictedScopePolicy.Default.HeldBy(Scopes(tokenScope)).Any().ShouldBe(restricted);
+        (policy.HeldBy(Scopes(tokenScope, "other")).Count > 0).ShouldBe(restricted);
+        (RestrictedScopePolicy.Default.HeldBy(Scopes(tokenScope)).Count > 0).ShouldBe(restricted);
     }
 
     [Fact]

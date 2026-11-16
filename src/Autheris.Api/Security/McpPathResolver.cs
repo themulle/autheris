@@ -32,7 +32,7 @@ public sealed class McpPathResolver : IMcpPathResolver
             return "/mcp";
         }
 
-        return path.StartsWith('/') ? path : "/" + path;
+        return path.StartsWith('/', StringComparison.Ordinal) ? path : "/" + path;
     }
 
     public static bool IsMcpRequest(PathString path, GatewayOptions? options)

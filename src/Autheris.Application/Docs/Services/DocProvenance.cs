@@ -74,7 +74,7 @@ public static class DocProvenance
         var pos = firstLineEnd + 1;
         while (pos < text.Length)
         {
-            var end = text.IndexOf('\n', pos);
+            var end = text.IndexOf('\n', pos, StringComparison.Ordinal);
             var line = (end < 0 ? text[pos..] : text[pos..end]).TrimEnd('\r');
             var next = end < 0 ? text.Length : end + 1;
 
@@ -124,13 +124,13 @@ public static class DocProvenance
 
         var normalized = sourceFile.Trim().Replace('\\', '/');
         var isRooted = Path.IsPathRooted(sourceFile) ||
-                       normalized.StartsWith('/') ||
+                       normalized.StartsWith('/', StringComparison.Ordinal) ||
                        (normalized.Length >= 2 && normalized[1] == ':');
         if (isRooted || normalized.Contains("..", StringComparison.Ordinal))
         {
-            var lastSlash = normalized.LastIndexOf('/');
+            var lastSlash = normalized.LastIndexOf('/', StringComparison.Ordinal);
             var name = lastSlash >= 0 ? normalized[(lastSlash + 1)..] : normalized;
-            var driveColon = name.LastIndexOf(':');
+            var driveColon = name.LastIndexOf(':', StringComparison.Ordinal);
             return driveColon >= 0 ? name[(driveColon + 1)..] : name;
         }
 

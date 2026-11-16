@@ -48,7 +48,7 @@ public sealed class ParquetGraphQLResponseMiddleware
         _parquetService = parquetService ?? throw new ArgumentNullException(nameof(parquetService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
-        _graphQlPath = _options.GraphQL.EndpointPath.StartsWith('/')
+        _graphQlPath = _options.GraphQL.EndpointPath.StartsWith('/', StringComparison.Ordinal)
             ? _options.GraphQL.EndpointPath
             : "/" + _options.GraphQL.EndpointPath;
         _mcpBasePath = Autheris.Api.Security.McpPathResolver.Resolve(_options);

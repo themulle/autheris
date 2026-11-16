@@ -259,7 +259,7 @@ public sealed class DefaultEnvironmentSecretProvider : IKeyVaultSecretProvider
             var suffixes = configuredSuffixes.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             foreach (var suffix in suffixes)
             {
-                var normalized = suffix.StartsWith('.') ? suffix : "." + suffix;
+                var normalized = suffix.StartsWith('.', StringComparison.Ordinal) ? suffix : "." + suffix;
                 if (host.EndsWith(normalized, StringComparison.OrdinalIgnoreCase) || string.Equals(host, suffix, StringComparison.OrdinalIgnoreCase))
                 {
                     return true;

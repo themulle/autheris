@@ -603,7 +603,7 @@ public sealed class OlapStagingService(
         var dotIndex = rawTableName.IndexOf('.', StringComparison.Ordinal);
         if (dotIndex >= 0)
         {
-            if (rawTableName.IndexOf('.', dotIndex + 1) >= 0)
+            if (rawTableName.IndexOf('.', dotIndex + 1, StringComparison.Ordinal) >= 0)
             {
                 return null;
             }

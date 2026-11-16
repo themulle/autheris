@@ -29,7 +29,7 @@ public sealed class RedisEventBus : IEventBus, IEventBusDeliveryFailures, IDispo
         _multiplexer = multiplexer;
         _logger = logger;
         _prefix = options.Value.Caching.Redis.InstanceName;
-        if (!_prefix.EndsWith(':'))
+        if (!_prefix.EndsWith(':', StringComparison.Ordinal))
         {
             _prefix += ":";
         }

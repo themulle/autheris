@@ -107,7 +107,7 @@ public readonly record struct HttpKeyPushdownCapability(HttpKeyPushdownKind Kind
                 continue;
             }
 
-            int close = template.IndexOf('}', i + 1);
+            int close = template.IndexOf('}', i + 1, StringComparison.Ordinal);
             if (close < 0)
             {
                 return true;

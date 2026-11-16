@@ -417,7 +417,7 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
             return;
         }
 
-        if (!string.IsNullOrWhiteSpace(param.Name) && param.Name != "?" && !param.Name.StartsWith('$') && !param.IsSynthetic)
+        if (!string.IsNullOrWhiteSpace(param.Name) && param.Name != "?" && !param.Name.StartsWith('$', StringComparison.Ordinal) && !param.IsSynthetic)
         {
             var rawName = param.Name.TrimStart('@', ':');
             if (SafeParamIdentifierRegex.IsMatch(rawName))

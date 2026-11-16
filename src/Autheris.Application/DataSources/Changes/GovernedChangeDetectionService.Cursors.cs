@@ -58,7 +58,7 @@ public sealed partial class GovernedChangeDetectionService
         }
 
         int dotIndex = cursor.IndexOf('.', StringComparison.Ordinal);
-        if (dotIndex <= 0 || dotIndex == cursor.Length - 1 || cursor.IndexOf('.', dotIndex + 1) >= 0)
+        if (dotIndex <= 0 || dotIndex == cursor.Length - 1 || cursor.IndexOf('.', dotIndex + 1, StringComparison.Ordinal) >= 0)
         {
             throw new GatewaySecurityException("Cursor format is invalid.", ChangeDetectionErrorCodes.CursorInvalid);
         }

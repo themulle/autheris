@@ -661,7 +661,7 @@ public static class GraphQlTreeBuilder
             case IntValueNode iv:
                 return long.TryParse(iv.Value, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var parsed)
                     ? new PageNumber(parsed, false)
-                    : new PageNumber(iv.Value.StartsWith('-') ? long.MinValue : long.MaxValue, false);
+                    : new PageNumber(iv.Value.StartsWith('-', StringComparison.Ordinal) ? long.MinValue : long.MaxValue, false);
             case VariableNode vn:
                 return ReadVariablePageNumber(vn.Name.Value, context);
             default:

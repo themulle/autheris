@@ -232,7 +232,7 @@ public sealed class CoLocationOptionsValidator : IValidateOptions<GatewayOptions
         var slashIdx = ds.IndexOf('\\', StringComparison.Ordinal);
         if (slashIdx >= 0)
         {
-            var end = ds.IndexOf(',', slashIdx);
+            var end = ds.IndexOf(',', slashIdx, StringComparison.Ordinal);
             return end >= 0 ? ds[(slashIdx + 1)..end].Trim().ToLowerInvariant() : ds[(slashIdx + 1)..].Trim().ToLowerInvariant();
         }
 

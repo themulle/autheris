@@ -69,7 +69,7 @@ public static class GatewayRoleExtensions
         }
 
         // Support tenant-prefixed roles: "tenant-id:DataOwner"
-        var colonIdx = roleName.LastIndexOf(':');
+        var colonIdx = roleName.LastIndexOf(':', StringComparison.Ordinal);
         var lookupName = colonIdx >= 0 ? roleName[(colonIdx + 1)..] : roleName;
 
         return NameToRole.TryGetValue(lookupName.Trim(), out role);
@@ -109,7 +109,7 @@ public static class GatewayRoleExtensions
         }
 
         var colonIdx = raw.IndexOf(':', StringComparison.Ordinal);
-        if (colonIdx <= 0 || colonIdx != raw.LastIndexOf(':'))
+        if (colonIdx <= 0 || colonIdx != raw.LastIndexOf(':', StringComparison.Ordinal))
         {
             return false;
         }

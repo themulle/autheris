@@ -135,7 +135,7 @@ public static class SidFormat
             return false;
         }
 
-        var rid = value.AsSpan(value.LastIndexOf('-') + 1);
+        var rid = value.AsSpan(value.LastIndexOf('-', StringComparison.Ordinal) + 1);
         return rid.SequenceEqual("500") || rid.SequenceEqual("512") || rid.SequenceEqual("516")
                || rid.SequenceEqual("518") || rid.SequenceEqual("519");
     }

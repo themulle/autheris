@@ -59,7 +59,7 @@ internal static class TreeSecuredSourceMarkers
                     continue;
                 case '-' when i + 1 < sql.Length && sql[i + 1] == '-':
                 {
-                    var end = sql.IndexOf('\n', i);
+                    var end = sql.IndexOf('\n', i, StringComparison.Ordinal);
                     end = end < 0 ? sql.Length : end + 1;
                     sb.Append(sql, i, end - i);
                     i = end;

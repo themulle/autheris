@@ -171,7 +171,7 @@ public static class KeySetKeyTypes
             return true;
         }
 
-        if (!t.EndsWith(')') || t.IndexOf(')', StringComparison.Ordinal) != t.Length - 1)
+        if (!t.EndsWith(')', StringComparison.Ordinal) || t.IndexOf(')', StringComparison.Ordinal) != t.Length - 1)
         {
             return false;
         }

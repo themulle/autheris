@@ -199,7 +199,7 @@ public static class UsageAttribution
 
     private static bool MatchesSidPrefix(string sidValue, string prefix)
     {
-        if (prefix.EndsWith('-'))
+        if (prefix.EndsWith('-', StringComparison.Ordinal))
         {
             return sidValue.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
         }

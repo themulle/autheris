@@ -298,7 +298,7 @@ public sealed class SqlParameterExtractor : SqlBaseBaseListener
                 string? targetTable = null;
                 string targetCol = normCol;
 
-                int dotIdx = normCol.LastIndexOf('.');
+                int dotIdx = normCol.LastIndexOf('.', StringComparison.Ordinal);
                 if (dotIdx > 0)
                 {
                     targetTable = normCol[..dotIdx];

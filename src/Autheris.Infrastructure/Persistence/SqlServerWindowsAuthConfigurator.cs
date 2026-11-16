@@ -439,14 +439,14 @@ public static class SqlServerWindowsAuthConfigurator
         for (int i = 0; i < lines.Length; i++)
         {
             string line = lines[i].TrimEnd('\r', '\n');
-            if (string.IsNullOrWhiteSpace(line) || line.StartsWith('#'))
+            if (string.IsNullOrWhiteSpace(line) || line.StartsWith('#', StringComparison.Ordinal))
             {
                 continue;
             }
 
             // Expected gss-ntlmssp format: DOMAIN:USER:PASSWORD (password itself may contain colons)
             int firstColon = line.IndexOf(':', StringComparison.Ordinal);
-            int secondColon = firstColon >= 0 ? line.IndexOf(':', firstColon + 1) : -1;
+            int secondColon = firstColon >= 0 ? line.IndexOf(':', firstColon + 1, StringComparison.Ordinal) : -1;
             if (firstColon < 0 || secondColon <= firstColon + 1 || secondColon == line.Length - 1)
             {
                 throw new SecurityException(

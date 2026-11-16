@@ -589,7 +589,7 @@ public static partial class StreamingRowFilterAstEvaluator
             return true;
         }
 
-        int dotIdx = colName.LastIndexOf('.');
+        int dotIdx = colName.LastIndexOf('.', StringComparison.Ordinal);
         if (dotIdx >= 0 && dotIdx + 1 < colName.Length)
         {
             string simple = colName[(dotIdx + 1)..];

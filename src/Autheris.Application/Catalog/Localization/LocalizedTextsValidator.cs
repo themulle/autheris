@@ -203,7 +203,7 @@ public sealed class LocalizedTextsValidator
         }
 
         int idx = 0;
-        while ((idx = text.IndexOf('<', idx)) != -1)
+        while ((idx = text.IndexOf('<', idx, StringComparison.Ordinal)) != -1)
         {
             int next = idx + 1;
             while (next < text.Length && char.IsWhiteSpace(text[next])) next++;
