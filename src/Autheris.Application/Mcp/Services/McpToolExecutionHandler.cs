@@ -250,7 +250,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
                 table = McpDatasetCatalog.DatasetIdOf(h),
                 domain = h.Domain,
                 display_name = DiscoveryTextSanitizer.SanitizeText(h.DisplayName, DiscoveryTextSanitizer.MaxDisplayNameRunes),
-                description = DiscoveryTextSanitizer.SanitizeText(h.Description, DiscoveryTextSanitizer.MaxDescriptionRunes),
+                description = DiscoveryTextSanitizer.Summarize(h.Description),
                 language = h.Language,
                 relevance_score = Math.Round(h.CombinedScore, 4),
                 matched_terms = h.MatchedTerms.Select(t => DiscoveryTextSanitizer.SanitizeRequiredText(t, string.Empty, DiscoveryTextSanitizer.MaxDisplayNameRunes)).ToList(),

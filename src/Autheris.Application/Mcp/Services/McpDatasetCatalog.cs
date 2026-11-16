@@ -19,6 +19,7 @@ using Autheris.Domain.Options;
 using static Autheris.Application.Mcp.Services.McpDatasetTools;
 using Autheris.Application.Catalog.Services;
 using Autheris.Application.Catalog.Interfaces;
+using Autheris.Application.Catalog.Discovery;
 
 /// <summary>
 /// MCP dataset tools (list_datasets, describe_dataset, sample_rows). Visibility follows the GraphQL catalog
@@ -309,7 +310,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
 
                 var resolved = negotiatedLanguage != null ? t.Table.Texts.Resolve(negotiatedLanguage) : null;
                 var displayName = McpCatalogText.DisplayName(resolved?.Title ?? t.Table.DisplayName, t.Identifier.TableName);
-                var description = resolved?.Description ?? t.Table.Description;
+                var description = DiscoveryTextSanitizer.Summarize(resolved?.Description ?? t.Table.Description);
 
                 pagedSummaries.Add(new McpDatasetSummary(
                     c.Id,
@@ -342,7 +343,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
                 pagedSummaries.Add(new McpDatasetSummary(
                     Id: c.Id,
                     DisplayName: McpCatalogText.DisplayName(def.Summary, def.Name),
-                    Description: def.Description ?? def.Summary,
+                    Description: DiscoveryTextSanitizer.Summarize(def.Description ?? def.Summary),
                     Sensitivity: sensitivity,
                     ColumnCount: columnCount,
                     GraphQlField: null,
