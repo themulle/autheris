@@ -114,4 +114,4 @@ then Phase 4 with filtered unit tests only; integration and parity run on GitHub
   MCP-2 (#704, #709: `McpDescribeNarrowing` with `include` allow-list, `columns`, `columnOffset`/`columnLimit`, `relations` term, applied to the
   authorized result so it only removes members), MCP-3 (#705: `McpBudgetShortening` keeps whole datasets and reports `_meta`) and MCP-4 (#714: column
   `longDescription` on the legacy catalog path, served only with `include: longDescription`). The discovery-service describe path does not yet carry
-  the column long description (the discovery column model has no such member). MCP-5..MCP-8 are not started.
+  the column long description (the discovery column model has no such member). MCP-5 (#712: `tag` on `search_catalog`, applied as a post-filter on authorized hits) and MCP-7 part B (#711: `graphQlField` on `get_table_schema` tables and columns; the caller's column state is not included) are implemented. MCP-6 (#710) and MCP-8 (#713) are not started.
