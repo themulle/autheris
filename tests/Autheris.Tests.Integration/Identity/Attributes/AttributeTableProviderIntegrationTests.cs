@@ -65,7 +65,8 @@ public sealed class AttributeTableProviderIntegrationTests
             }
         });
         return new AttributeTableProvider(
-            new SqlConnectionFactory(new StaticHostEnvironment("Production")),
+            // The throwaway test database is reached with a plaintext password, which only the Development secret policy accepts.
+            new SqlConnectionFactory(new StaticHostEnvironment("Development")),
             options,
             new StaticHostEnvironment("Production"),
             new CapturingLogger(captured));

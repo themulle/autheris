@@ -159,7 +159,10 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
 
         var list = await client.GetAsync("/api/v1/catalog/datasets");
         list.StatusCode.ShouldBe(HttpStatusCode.OK);
-        (await BodyAsync(list)).ShouldBe("[]");
+        // Authorized discovery: the caller's own tenant objects are listed without access (every column Deny), a foreign tenant's table is absent.
+        var listBody = await BodyAsync(list);
+        listBody.ShouldNotContain("orders_a");
+        MaskingStatesOf(await BodyAsync(await client.GetAsync("/api/v1/catalog/datasets/dom_b.main.invoices_b"))).Values.ShouldAllBe(state => state == "Deny");
         (await client.GetAsync("/api/v1/catalog/datasets/dom_a.main.orders_a")).StatusCode.ShouldBe(HttpStatusCode.NotFound);
         (await client.GetAsync("/api/v1/catalog/datasets/dom_a.main.does_not_exist")).StatusCode.ShouldBe(HttpStatusCode.NotFound);
         (await BodyAsync(await client.GetAsync("/api/v1/catalog/search?q=orders"))).ShouldBe("[]");
@@ -175,8 +178,10 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
         list.ShouldNotContain("invoices_b");
 
         var detail = await BodyAsync(await client.GetAsync("/api/v1/catalog/datasets/dom_a.main.orders_a"));
-        detail.ShouldContain("amount");
-        detail.ShouldNotContain("secret_note");
+        var states = MaskingStatesOf(detail);
+        states["id"].ShouldBe("Clear");
+        states["amount"].ShouldBe("Clear");
+        states["secret_note"].ShouldBe("Deny");
 
         var search = await BodyAsync(await client.GetAsync("/api/v1/catalog/search?q=secret_note"));
         search.ShouldNotContain("secret_note");
@@ -301,100 +306,36 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
         return (factory, await ClientAsync(sid, tenant, roles, factory));
     }
 
+    // Authorized discovery (OD-19): the persisted tier is ignored; an in-scope table (shared, owned by the caller's tenant or consented
+    // to it) is listed for every authenticated caller and a column the caller may not read carries the state Deny. A table outside the
+    // caller's tenant scope is absent and answers exactly like a nonexistent dataset.
     [Fact]
-    public async Task Rest_TierMatrix_SummaryNoColumns_FullColumns_HiddenAndUnsharedAbsent()
+    public async Task Rest_Discovery_SharedTablesAreListedWithDeniedColumns_UnsharedTableIsOutOfScope()
     {
         var (_, client) = await TierFactoryAsync();
 
         var list = await BodyAsync(await client.GetAsync("/api/v1/catalog/datasets"));
         list.ShouldContain("sum_t");
         list.ShouldContain("full_t");
-        list.ShouldNotContain("hid_t");
+        list.ShouldContain("hid_t");
         list.ShouldNotContain("unshared_full_t");
 
-        var summary = await client.GetAsync("/api/v1/catalog/datasets/dom_s.main.sum_t");
-        summary.StatusCode.ShouldBe(HttpStatusCode.OK);
-        (await BodyAsync(summary)).ShouldNotContain("tier_secret_col");
-        (await BodyAsync(await client.GetAsync("/api/v1/catalog/datasets/dom_s.main.full_t"))).ShouldContain("tier_secret_col");
-        (await client.GetAsync("/api/v1/catalog/datasets/dom_s.main.hid_t")).StatusCode.ShouldBe(HttpStatusCode.NotFound);
-        (await client.GetAsync("/api/v1/catalog/datasets/dom_s.main.unshared_full_t")).StatusCode.ShouldBe(HttpStatusCode.NotFound);
-        (await BodyAsync(await client.GetAsync("/api/v1/catalog/search?q=tier_secret_col"))).ShouldNotContain("sum_t");
-    }
+        foreach (var shared in new[] { "sum_t", "full_t", "hid_t" })
+        {
+            var detail = await client.GetAsync("/api/v1/catalog/datasets/dom_s.main." + shared);
+            detail.StatusCode.ShouldBe(HttpStatusCode.OK);
+            MaskingStatesOf(await BodyAsync(detail)).Values.ShouldAllBe(state => state == "Deny");
+        }
 
-    [Fact]
-    public async Task Mcp_TierMatrix_SummaryAllowListed_FullColumns_HiddenIsNotFound_TagsFromCatalogTags()
-    {
-        var (_, client) = await TierFactoryAsync();
-        await using var mcp = await McpTestClient.ConnectAsync(client);
-
-        var (listError, list) = await McpTestClient.CallJsonAsync(mcp, "list_datasets", new { });
-        listError.ShouldBeFalse(list.ToString());
-        var rows = list.GetProperty("datasets").EnumerateArray().ToList();
-        rows.Select(d => d.GetProperty("id").GetString()).Order().ShouldBe(["dom_s.main.full_t", "dom_s.main.sum_t"]);
-        var summaryRow = rows.Single(d => d.GetProperty("id").GetString() == "dom_s.main.sum_t");
-        summaryRow.GetProperty("columnCount").GetInt32().ShouldBe(0);
-        summaryRow.GetProperty("tags").EnumerateArray().Select(t => t.GetString()).ShouldBe(["finance"]);
-
-        var (_, summaryText) = await McpTestClient.CallAsync(mcp, "describe_dataset", new { dataset = "dom_s.main.sum_t" });
-        summaryText.ShouldContain("summary");
-        summaryText.ShouldNotContain("tier_secret_col");
-        var (_, fullText) = await McpTestClient.CallAsync(mcp, "describe_dataset", new { dataset = "dom_s.main.full_t" });
-        fullText.ShouldContain("tier_secret_col");
-        var (hiddenError, _) = await McpTestClient.CallAsync(mcp, "describe_dataset", new { dataset = "dom_s.main.hid_t" });
-        hiddenError.ShouldBeTrue();
-        var (unsharedError, _) = await McpTestClient.CallAsync(mcp, "describe_dataset", new { dataset = "dom_s.main.unshared_full_t" });
-        unsharedError.ShouldBeTrue();
-    }
-
-    [Fact]
-    public async Task GraphQl_TierMatrix_SummaryNoColumns_FullColumns_HiddenAbsent()
-    {
-        var (_, client) = await TierFactoryAsync();
-
-        client.DefaultRequestHeaders.Add("GraphQL-Preflight", "1");
-        var response = await client.PostAsJsonAsync("/graphql", new { query = "{ catalog(first: 3) { tableName columns } }" });
-        var text = await BodyAsync(response);
-        response.StatusCode.ShouldBe(HttpStatusCode.OK, text);
-
-        using var doc = JsonDocument.Parse(text);
-        var rows = doc.RootElement.GetProperty("data").GetProperty("catalog").EnumerateArray().ToList();
-        rows.Select(r => r.GetProperty("tableName").GetString()).Order().ShouldBe(["full_t", "sum_t"]);
-        rows.Single(r => r.GetProperty("tableName").GetString() == "sum_t").GetProperty("columns").GetArrayLength().ShouldBe(0);
-        rows.Single(r => r.GetProperty("tableName").GetString() == "full_t").GetProperty("columns").EnumerateArray().Select(c => c.GetString()).ShouldContain("tier_secret_col");
-        text.ShouldNotContain("hid_t");
-    }
-
-    [Fact]
-    public async Task HiddenTier_IsIndistinguishableFromANonexistentDataset_OnEveryChannel()
-    {
-        var (_, client) = await TierFactoryAsync();
-
-        // REST: status and body are identical.
-        var hidden = await client.GetAsync("/api/v1/catalog/datasets/dom_s.main.hid_t");
+        var unshared = await client.GetAsync("/api/v1/catalog/datasets/dom_s.main.unshared_full_t");
         var missing = await client.GetAsync("/api/v1/catalog/datasets/dom_s.main.nothing_t");
-        hidden.StatusCode.ShouldBe(HttpStatusCode.NotFound);
-        hidden.StatusCode.ShouldBe(missing.StatusCode);
-        (await BodyAsync(hidden)).ShouldBe(await BodyAsync(missing));
-
-        // MCP: the same tool error, apart from the echoed identifier.
-        await using var mcp = await McpTestClient.ConnectAsync(client);
-        var (hiddenError, hiddenText) = await McpTestClient.CallAsync(mcp, "describe_dataset", new { dataset = "dom_s.main.hid_t" });
-        var (missingError, missingText) = await McpTestClient.CallAsync(mcp, "describe_dataset", new { dataset = "dom_s.main.nothing_t" });
-        hiddenError.ShouldBeTrue();
-        missingError.ShouldBeTrue();
-        hiddenText.Replace("hid_t", "x").ShouldBe(missingText.Replace("nothing_t", "x"));
-
-        // GraphQL: a catalog search for either name answers the same empty page.
-        client.DefaultRequestHeaders.Add("GraphQL-Preflight", "1");
-        var gqlHidden = await BodyAsync(await client.PostAsJsonAsync("/graphql", new { query = "{ catalog(search: \"hid_t\", first: 3) { tableName } }" }));
-        var gqlMissing = await BodyAsync(await client.PostAsJsonAsync("/graphql", new { query = "{ catalog(search: \"nothing_t\", first: 3) { tableName } }" }));
-        // The cost extension carries a rate-limit counter; the data element is what must be identical.
-        JsonDocument.Parse(gqlHidden).RootElement.GetProperty("data").GetRawText().ShouldBe(JsonDocument.Parse(gqlMissing).RootElement.GetProperty("data").GetRawText());
-        gqlHidden.ShouldNotContain("hid_t");
+        unshared.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        unshared.StatusCode.ShouldBe(missing.StatusCode);
+        (await BodyAsync(unshared)).ShouldBe(await BodyAsync(missing));
     }
 
     [Fact]
-    public async Task ConsentedNonAdmin_OnAHiddenTier_GetsTheGrantedView_OnTheDiscoverySurface()
+    public async Task Rest_Discovery_ConsentedColumnIsClear_EveryOtherColumnStaysDeny_ForTheConsentedCallerOnly()
     {
         var (factory, client) = await TierFactoryAsync(sid: "S-T-CONSENTED");
         using (var scope = factory.Services.CreateScope())
@@ -402,18 +343,19 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
             await ConsentAsync(scope.ServiceProvider.GetRequiredService<IGovernanceRepository>(), HiddenT, "S-T-CONSENTED", TenantB, "id");
         }
 
-        // Granted view: the consented column only, never the whole table, and never for an unconsented caller.
-        var detail = await BodyAsync(await client.GetAsync("/api/v1/catalog/datasets/dom_s.main.hid_t"));
-        detail.ShouldContain("\"id\"");
-        detail.ShouldNotContain("tier_secret_col");
-
-        await using var mcp = await McpTestClient.ConnectAsync(client);
-        var (error, text) = await McpTestClient.CallAsync(mcp, "describe_dataset", new { dataset = "dom_s.main.hid_t" });
-        error.ShouldBeFalse(text);
-        text.ShouldNotContain("tier_secret_col");
+        var granted = MaskingStatesOf(await BodyAsync(await client.GetAsync("/api/v1/catalog/datasets/dom_s.main.hid_t")));
+        granted["id"].ShouldBe("Clear");
+        granted["tier_secret_col"].ShouldBe("Deny");
 
         var other = await ClientAsync("S-T-OTHER", TenantB, "Reader", factory);
-        (await other.GetAsync("/api/v1/catalog/datasets/dom_s.main.hid_t")).StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        MaskingStatesOf(await BodyAsync(await other.GetAsync("/api/v1/catalog/datasets/dom_s.main.hid_t"))).Values.ShouldAllBe(state => state == "Deny");
+    }
+
+    private static Dictionary<string, string> MaskingStatesOf(string detailJson)
+    {
+        using var doc = JsonDocument.Parse(detailJson);
+        return doc.RootElement.GetProperty("columns").EnumerateArray()
+            .ToDictionary(c => c.GetProperty("name").GetString()!, c => c.GetProperty("maskingState").GetString()!);
     }
 
     [Fact]
@@ -447,7 +389,7 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
         var list = await BodyAsync(await client.GetAsync("/api/v1/catalog/datasets"));
         list.ShouldContain("unshared_full_t");
         list.ShouldContain("sum_t");
-        list.ShouldNotContain("hid_t");
+        list.ShouldContain("hid_t");
     }
 
     [Fact]

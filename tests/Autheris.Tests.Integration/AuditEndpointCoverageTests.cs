@@ -37,6 +37,14 @@ public class AuditEndpointCoverageTests : IClassFixture<AuditEndpointCoverageTes
     /// Each such route must be reviewed and listed here with a justification; a new Delegated route fails CI until then.
     /// Key format: "METHOD pattern" (HTTP methods sorted, joined by ',', or "ANY").
     /// </summary>
+    private const string UsageReadJustification =
+        "UsageReportService writes the USAGE_REPORT_READ record for every report read; " +
+        "denials, failures and exceptions are finalized by AccessAuditMiddleware.";
+
+    private const string DiscoveryArtifactJustification =
+        "DiscoveryArtifactService writes the CATALOG_DISCOVERY_ARTIFACTS_CHANGED record with before/after hashes for every change; " +
+        "denials, failures and exceptions are finalized by AccessAuditMiddleware.";
+
     private static readonly Dictionary<string, string> ApprovedDelegatedRoutes = new(StringComparer.OrdinalIgnoreCase)
     {
         ["POST /api/v1/authz/explain"] =
@@ -63,6 +71,24 @@ public class AuditEndpointCoverageTests : IClassFixture<AuditEndpointCoverageTes
         ["POST /api/admin/tenant-registry/{tenantId}/resolve-collision"] =
             "TenantRegistryAdminEndpoints writes the TENANT_COLLISION_RESOLVED record itself after the resolution; " +
             "403/401/errors are finalized by AccessAuditMiddleware.",
+        ["GET /api/v1/authz/subjects/{subject}/effective-access"] =
+            "EffectiveAccessService writes the AUTHZ_EFFECTIVE_ACCESS_REPORT record (ALLOW or DENY per outcome) through the audit writer; " +
+            "HTTP denials, failures and exceptions are finalized by AccessAuditMiddleware.",
+        ["GET /api/v1/usage/users"] = UsageReadJustification,
+        ["GET /api/v1/usage/groups"] = UsageReadJustification,
+        ["GET /api/v1/usage/tenant"] = UsageReadJustification,
+        ["GET /api/v1/usage/tables/{tableId}"] = UsageReadJustification,
+        ["GET /api/v1/usage/sources"] = UsageReadJustification,
+        ["GET /api/v1/usage/applications"] = UsageReadJustification,
+        ["GET /api/v1/usage/grants/{grantId}"] = UsageReadJustification,
+        ["DELETE /api/v1/usage/users/{userSid}"] =
+            "UsageReportService writes the USAGE_DATA_ERASED record for the erasure; " +
+            "denials, failures and exceptions are finalized by AccessAuditMiddleware.",
+        ["PUT /api/v1/catalog/datasets/{id}/discovery-artifacts"] = DiscoveryArtifactJustification,
+        ["DELETE /api/v1/catalog/datasets/{id}/discovery-artifacts"] = DiscoveryArtifactJustification,
+        ["GET /api/v1/catalog/datasets/{id}/samples"] =
+            "DiscoveryArtifactService writes the METADATA_SAMPLE_READ record when samples are served; " +
+            "denials, failures and exceptions are finalized by AccessAuditMiddleware.",
         ["ANY /graphql/{**slug}"] =
             "GraphQL data access is audited by GatewayExecutionService, which records a per-table ALLOW/DENY decision for every table a query touches; " +
             "HTTP-level denials (401/403/429/5xx) and exceptions are finalized by AccessAuditMiddleware. " +

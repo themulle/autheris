@@ -46,6 +46,7 @@ public abstract class UnkeyedTableODataReadBase : IDisposable
             builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("UnkeyedTableODataReadBase"));
             builder.UseSetting($"Gateway:DataSources:Connections:{Source}:Provider", Provider);
             builder.UseSetting($"Gateway:DataSources:Connections:{Source}:ConnectionString", ConnectionString);
+            builder.UseSetting($"Gateway:DataSources:Connections:{Source}:DefaultSchema", Schema);
         });
 
         var identifier = new TableIdentifier(Source, Schema, "air1");
