@@ -29,6 +29,24 @@ public sealed class ParityFixture<TDatabase> : IAsyncLifetime
 
     public Task<IReadOnlyList<ParityResult>> GetResultsAsync() => _results.Value;
 
+    /// <summary>
+    /// True when the container database of this fixture is running. Without <c>SQLGATE_PROFILE</c> it is not started (the container
+    /// databases run in the sql-compiler-gate job); a required-but-unavailable database fails the test instead of skipping it.
+    /// </summary>
+    public bool DatabaseReady(ITestOutputHelper output)
+    {
+        if (!Enabled)
+        {
+            output.WriteLine("SKIPPED: SQLGATE_PROFILE is not set (the container databases run in the sql-compiler-gate job).");
+            return false;
+        }
+
+        if (Database.IsAvailable) return true;
+        if (GateProfile.DatabasesRequired) Assert.Fail(Database.UnavailableReason);
+        output.WriteLine("SKIPPED (local run): " + Database.UnavailableReason);
+        return false;
+    }
+
     private async Task<IReadOnlyList<ParityResult>> ComputeAsync()
     {
         var results = await ParityRunner.RunAllAsync(Env, ParityConsumers.RowConsumers(databaseBacked: true));

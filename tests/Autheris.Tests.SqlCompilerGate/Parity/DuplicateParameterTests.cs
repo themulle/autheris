@@ -30,6 +30,8 @@ public sealed class DuplicateParameterTests(ParityFixture<PostgreSqlGateDatabase
 
     private async Task AssertRejectedAsync(IParityConsumer consumer, FilterText filter, string scenario)
     {
+        // only the procedure resolver opens a database connection; the in-memory consumers need no container
+        if (consumer is ProcedureRowScopeConsumer && !fixture.DatabaseReady(output)) return;
         var outcome = await consumer.RunAsync(fixture.Env, filter);
         output.WriteLine($"{consumer.Name} / {scenario}: {GateProfile.Describe(outcome)}");
 
@@ -70,6 +72,7 @@ public sealed class DuplicateParameterTests(ParityFixture<PostgreSqlGateDatabase
     [Fact]
     public async Task TreeSqlCompiler_RenamesAFilterParameterThatCollidesWithItsTenantParameter_AndKeepsTenantIsolation()
     {
+        if (!fixture.DatabaseReady(output)) return;
         // @gq0 is the tree compiler's own tenant parameter ("A"). A row filter value of the same name ("B") must never replace it.
         // SQLA-06: the tree compiler only splices a typed policy, so the colliding names come from a typed predicate (prefix "gq": gq0 = "open", gq1 = "B").
         var namer = new Autheris.Application.Sql.Policy.PolicyParameterNamer("gq");
