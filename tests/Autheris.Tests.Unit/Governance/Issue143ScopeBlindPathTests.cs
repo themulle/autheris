@@ -182,7 +182,11 @@ public sealed class Issue143ScopeBlindPathTests
                 .Returns(Task.FromResult<IReadOnlyList<Consent>>(consents));
             var masking = Substitute.For<IColumnMaskingProvider>();
             masking.MaskValue(default!, default, default!).ReturnsForAnyArgs("MASKED");
-            var policy = Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll();
+            // The decision point answers like the real one for these consents: the columns the consent grants in clear stay clear.
+            var policy = Autheris.Tests.Unit.TestSupport.PdpTestDoubles.From(request => TableAccessDecision.Allowed(
+                request.Object.Identifier,
+                new Dictionary<string, ColumnAccessLevel> { ["id"] = ColumnAccessLevel.Clear, ["grade"] = ColumnAccessLevel.Clear },
+                hasUnconstrainedColumnAllow: true));
 
             // A key/value cache keyed by the context hash, like the real one: a hit of a foreign key would show up as a wrong level.
             var store = new Dictionary<string, TableAccessDecision>();
