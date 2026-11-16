@@ -12,7 +12,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-API_DIR="${API_DIR:-$ROOT/src/Autheris.Api/bin/Release/net10.0}"
+API_DIR="${API_DIR:-$ROOT/src/Autheris.Api/bin/Release/net11.0}"
 PORT="${PORT:-18080}"
 RESTARTS="${RESTARTS:-3}"
 WARM_REQUESTS="${WARM_REQUESTS:-20}"

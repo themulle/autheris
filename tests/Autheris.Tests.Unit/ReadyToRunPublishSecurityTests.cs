@@ -42,7 +42,7 @@ public sealed partial class ReadyToRunPublishSecurityTests
         project.Descendants("RuntimeIdentifier").ShouldHaveSingleItem()
             .Attribute("Condition")!.Value.ShouldContain("'$(SelfContained)' != 'true'");
 
-        LockFileTargets().ShouldContain("net10.0/linux-x64");
+        LockFileTargets().ShouldContain("net11.0/linux-x64");
     }
 
     [Fact]
@@ -75,8 +75,8 @@ public sealed partial class ReadyToRunPublishSecurityTests
     {
         // SEC-OPS150-13 / SEC-OPS150-19
         string root = FindRepoRoot();
-        LockFileTargets().ShouldContain("net10.0");
-        LockFileTargets().ShouldContain("net10.0/linux-x64");
+        LockFileTargets().ShouldContain("net11.0");
+        LockFileTargets().ShouldContain("net11.0/linux-x64");
 
         string props = File.ReadAllText(Path.Combine(root, "Directory.Build.props"));
         props.ShouldContain(
