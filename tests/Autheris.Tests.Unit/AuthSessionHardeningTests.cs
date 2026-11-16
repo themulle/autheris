@@ -102,6 +102,19 @@ public sealed class AuthSessionHardeningTests
     }
 
     [Fact]
+    [Trait("Category", "Security")]
+    public void AuthenticatedContext_CarriesRequestPrincipal_AnonymousDoesNot()
+    {
+        var principal = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, "S-1-5-21-1-2-3-1001")], "Bearer"));
+
+        var authenticated = SecurityContextFactory.CreateFromHttpContext(new DefaultHttpContext { User = principal });
+        var anonymous = SecurityContextFactory.CreateFromHttpContext(new DefaultHttpContext());
+
+        authenticated.Principal.ShouldBeSameAs(principal);
+        anonymous.Principal.ShouldBeNull();
+    }
+
+    [Fact]
     public void ValidateUsers_RejectsMalformedTenantId()
     {
         var basic = new BasicAuthOptions

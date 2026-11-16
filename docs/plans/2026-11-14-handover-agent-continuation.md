@@ -22,7 +22,7 @@ Open at handover:
 | Dependabot #697, #699, #700 | red checks | `@dependabot rebase`; if still red after rebase, read the failure; close if not fixable. Majors (.NET 11) stay closed |
 | Parity nightly | failing at test execution (run 43577249271, both jobs) | diagnose with `gh run view --log-failed` and TRX artifacts; likely authz changes (#717, #731) not mirrored in the parity fixtures |
 | Simulation nightly | API fuzz job now passes in run 43545597515; the parser fuzz job (SharpFuzz/AFL++) fails (11 of 18 historic failures) | diagnose the parser job, not yet analysed |
-| Issues #730, #733 | open | #733 is fixed together with WP-SIMPL-46 PR 6 |
+| Issues #730, #733 | open | #733 fixed on fix/issue-733-authz-explain-404 (request principal attached to the security context); PDP Degraded precondition stays with WP-SIMPL-46 PR 6 |
 
 Unmerged branches without PR to evaluate: `feat/simpl-41-pr2`, `feat/simpl-51-pr-3`, `feat/simpl-51-pr-4`, `lane-d/simpl-20a`,
 `feat/simpl-42-pr1` (diverged after merge). Compare each against `origin/main` before reusing.
