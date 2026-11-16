@@ -11,6 +11,7 @@ namespace TrinoSqlEngine.Tests.Security;
 
 /// <summary>SQLE-09: a policy LIKE pattern may combine literals and declared parameters with ||; every declared value is escaped.</summary>
 [Trait("Category", "Security")]
+[Trait("Category", "SqlGate")]
 public class SqlePolicyLikeConcatTests
 {
     private readonly FakeTimeProvider _time = new();

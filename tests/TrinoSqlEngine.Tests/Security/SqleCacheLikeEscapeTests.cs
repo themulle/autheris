@@ -10,6 +10,7 @@ namespace TrinoSqlEngine.Tests.Security;
 
 /// <summary>SQLE-10: the LIKE escaping of a policy parameter survives a template cache hit (rebind).</summary>
 [Trait("Category", "Security")]
+[Trait("Category", "SqlGate")]
 public class SqleCacheLikeEscapeTests
 {
     private static SelectStatement LikeStatement(Expression pattern) =>
