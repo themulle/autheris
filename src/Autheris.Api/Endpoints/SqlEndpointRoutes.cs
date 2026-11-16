@@ -163,6 +163,11 @@ public static class SqlEndpointRoutes
                 TimeoutSeconds: request.TimeoutSeconds);
         }
 
+        if (IsGetMethod(definition) && !IsSingleSelect(definition, Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance))
+        {
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "An endpoint exposed through GET must be a single SELECT statement.", context);
+        }
+
         bool overwrite = string.Equals(context.Request.Query["overwrite"], "true", StringComparison.OrdinalIgnoreCase) ||
                          request.Overwrite == true;
 
@@ -384,6 +389,16 @@ public static class SqlEndpointRoutes
         return "string";
     }
 
+    /// <summary>
+    /// A definition may be served by GET only when its method is GET and the parsed statement is a single SELECT
+    /// (the statement classifier of the WebSQL route; unparsable or multi-statement text is not safe).
+    /// </summary>
+    private static bool IsGetMethod(Autheris.Domain.Model.SqlEndpointDefinition definition) =>
+        string.IsNullOrWhiteSpace(definition.HttpMethod) || string.Equals(definition.HttpMethod, "GET", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsSingleSelect(Autheris.Domain.Model.SqlEndpointDefinition definition, ILogger logger) =>
+        WebSqlEndpoints.ClassifyStatement(definition.RawSql, logger) == WebSqlEndpoints.RequestStatementClass.Read;
+
     internal static async Task HandleGetEndpoint(
         string name,
         HttpContext httpContext,
@@ -398,6 +413,15 @@ public static class SqlEndpointRoutes
         var parquet = ResolveParquetService(httpContext);
         if (parquet.Requested && await ParquetResponseWriter.TryRejectUnavailableAsync(httpContext, parquet.Service, ct).ConfigureAwait(false))
         {
+            return;
+        }
+
+        // Fail closed: GET runs only a definition that is a GET endpoint and a single SELECT; anything else is 405 before execution.
+        if (httpContext.RequestServices?.GetService<ISqlEndpointRegistry>() is { } registry
+            && registry.TryGet(name, out var requested) && requested is not null && !(IsGetMethod(requested) && IsSingleSelect(requested, logger)))
+        {
+            httpContext.Response.Headers.Allow = "POST";
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status405MethodNotAllowed, ApiErrorCodes.BadRequest, "This SQL endpoint cannot be executed with GET.", ct).ConfigureAwait(false);
             return;
         }
 

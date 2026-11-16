@@ -17,6 +17,7 @@ Pushed feature branches on `origin` ready for rebase, conflict resolution, and C
 | `origin/feat/wave7-rollup-2026-11-15` | Full local `main` rollup (267+ local commits + reconciled `origin/main` + `WP-SIMPL-41 PR 4` + `#677 PR 4a` + updated `docs/plans/`) | Pushed to `origin` (`origin/main` enforces GH013 PR-only rule) | Verify `CI Build & Test` on the rollup PR (sync DI snapshots / `security-test-inventory.txt` if drifted) and merge into `origin/main` |
 | `origin/feat/simpl-40-pr40c-store-switch` | `WP-SIMPL-40 PR 40c` (`GovernanceDocStore` cutover) | Implemented & committed (`287dba9b9`), pushed to `origin` | Rebase onto rollup/main, resolve minor conflicts (`ApiErrorCodes.cs`, `endpoint-count.txt`, DI snapshots), verify & merge |
 | `origin/feat/simpl-52-pr4b-masked-catalog-text` | `WP-SIMPL-52 PR 4b` (`#571` masked catalog text) | Implemented & committed (`7f61c6db7`), pushed to `origin` | Rebase onto rollup/main (`GatewayCatalogServiceExtensions.cs`, `AiDataGuardrailService.cs`, `McpDatasetCatalog.cs`), verify & merge |
+| Issues #730, #733 | merged on `main` (PR #759, PR #758) | none; the rollup carries both (request principal attached to the security context; GET SQL endpoints select-only). The PDP Degraded precondition stays with WP-SIMPL-46 PR 6 |
 
 ## 2. Owner rules & local hardware constraints (binding)
 
