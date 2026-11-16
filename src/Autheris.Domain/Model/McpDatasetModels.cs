@@ -112,7 +112,8 @@ public sealed record McpDatasetColumn(
     string? Access = null,
     string? DisplayName = null,
     IReadOnlyList<DiscoveryColumnClassification>? Classifications = null,
-    IReadOnlyList<string>? ClearRequestable = null);
+    IReadOnlyList<string>? ClearRequestable = null,
+    string? LongDescription = null);
 
 /// <summary>A navigation from a dataset to a related dataset in the GraphQL API.</summary>
 /// <param name="Columns">Ordered join column pairs (catalog names); null when not disclosed (a join column is hidden from the caller).</param>
@@ -167,7 +168,8 @@ public sealed record McpDatasetDescription(
     string? Language = null,
     string? RequestedLanguage = null,
     IReadOnlyList<McpKeyColumn>? PrimaryKeyOrder = null,
-    McpDatasetSize? Size = null);
+    McpDatasetSize? Size = null,
+    int? ColumnTotal = null);
 
 /// <summary>Issue #390: one primary key column in key order with its declared sort direction (<c>ASC</c> or <c>DESC</c>).</summary>
 public sealed record McpKeyColumn(string Column, string Direction);
@@ -201,7 +203,8 @@ public sealed record McpTableBriefColumn(
     string Type,
     string? Description = null,
     bool PrimaryKey = false,
-    bool IsSensitive = false);
+    bool IsSensitive = false,
+    string? GraphQlField = null);
 
 /// <summary>Join relationship between datasets for automated query/report construction.</summary>
 public sealed record McpTableRelation(
@@ -217,7 +220,8 @@ public sealed record McpTableBriefSchema(
     IReadOnlyList<string> PrimaryKeys,
     IReadOnlyList<McpTableBriefColumn> Columns,
     IReadOnlyList<McpTableRelation> Relations,
-    string? AccessStatus = null);
+    string? AccessStatus = null,
+    string? GraphQlField = null);
 
 /// <summary>Result of get_table_schema.</summary>
 public sealed record McpTableSchemaResult(

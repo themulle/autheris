@@ -110,8 +110,36 @@ public sealed class McpGetTableSchemaRelationsTests
         var result = await GetTableSchemaAsync("""{"dataset":"sales.public.orders","include_relations":false}""");
 
         result.Tables.ShouldHaveSingleItem().Relations.ShouldBeEmpty();
-        await _map.DidNotReceiveWithAnyArgs().GetTableAsync(default, default);
+        await _map.DidNotReceive().GetTableAsync(Customers, Arg.Any<CancellationToken>());
         await _discovery.DidNotReceive().GetDatasetDetailAsync(Customers, Arg.Any<RequestContext>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task GraphQlFields_AreEmittedForTableAndVisibleColumns()
+    {
+        _map.GetTableAsync(Customers, Arg.Any<CancellationToken>()).Returns(Task.FromResult<GraphQlTableMapping?>(new GraphQlTableMapping(
+            Customers, "sales_public_customers", "T", "F", "O",
+            [new GraphQlColumnMapping("id", "id", "Int"), new GraphQlColumnMapping("name", "fullName", "String"), new GraphQlColumnMapping("hidden", "hiddenField", "String")],
+            [])));
+
+        var result = await GetTableSchemaAsync("""{"dataset":"sales.public.customers"}""");
+
+        var table = result.Tables.ShouldHaveSingleItem();
+        table.GraphQlField.ShouldBe("sales_public_customers");
+        table.Columns.Single(c => c.Name == "name").GraphQlField.ShouldBe("fullName");
+        table.Columns.ShouldNotContain(c => c.Name == "hidden");
+    }
+
+    [Fact]
+    public async Task WithoutGraphQlMapping_NoGraphQlFieldIsEmitted()
+    {
+        _map.GetTableAsync(Customers, Arg.Any<CancellationToken>()).Returns(Task.FromResult<GraphQlTableMapping?>(null));
+
+        var result = await GetTableSchemaAsync("""{"dataset":"sales.public.customers"}""");
+
+        var table = result.Tables.ShouldHaveSingleItem();
+        table.GraphQlField.ShouldBeNull();
+        table.Columns.ShouldAllBe(c => c.GraphQlField == null);
     }
 
     [Fact]
