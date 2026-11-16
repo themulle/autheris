@@ -113,7 +113,11 @@ public sealed record ParityExpectation(
     bool HasMandatoryFilter = false,
     bool SsnMasked = false,
     bool SsnDenied = false,
-    bool MatchesNoRows = false);
+    bool MatchesNoRows = false,
+    // The grant carries column rules (an allow list), so it is not an unconstrained column allow, even when every column ends up Clear.
+    bool ColumnConstrainedGrant = false,
+    // The table is a delegated source (enforcement is left to the native engine; the gateway holds only the coarse gate).
+    bool DelegatedSource = false);
 
 public sealed record ParityOutcome(
     bool Allowed,
@@ -181,10 +185,14 @@ internal sealed partial class CrossTransportParityHarness : IAsyncDisposable
     public static ParityExpectation ProjectFor(ParitySurface surface, ParityExpectation baseline) => surface switch
     {
         // Whole-request admission surfaces fail closed whenever row filters, mandatory filters, or column restrictions apply.
+        // Rule 'AdmissionDeniesColumnConstrainedGrant': both surfaces also deny a grant that is not an unconstrained column allow
+        // (HasUnconstrainedColumnAllow is false as soon as a consent carries column rules), even if every column of the table is cleared
+        // by those rules: they cannot enforce an allow list on the upstream response and do not try to prove that it is complete.
         ParitySurface.EnvoyExtAuthz or ParitySurface.Lakehouse =>
             baseline with
             {
-                Allowed = baseline.Allowed && !baseline.HasRowFilter && !baseline.HasMandatoryFilter && !baseline.SsnMasked && !baseline.SsnDenied,
+                Allowed = baseline.Allowed && !baseline.HasRowFilter && !baseline.HasMandatoryFilter && !baseline.SsnMasked && !baseline.SsnDenied
+                    && !baseline.ColumnConstrainedGrant,
                 HasRowFilter = false,
                 HasMandatoryFilter = false,
                 SsnMasked = false,
@@ -213,8 +221,18 @@ internal sealed partial class CrossTransportParityHarness : IAsyncDisposable
                 MatchesNoRows = false
             },
         // The SQL surfaces report the ssn level from the returned values; a filter that matches no row returns none to inspect.
+        // Rule 'SqlDeniedColumnIsRedactedConstant': the governed SQL compiler keeps a denied column in the projection as a typed NULL
+        // constant (GovernancePolicyFactory.TryBuildMasks, Nullify), so the column stays present while the other surfaces drop it. The
+        // harness observes that NULL as Denied (never the raw value); a masked column is a non-null redacted value.
+        // Rule 'SqlRejectsDelegatedSource': a delegated source has no typed column masks and a dialect that is not the one of the
+        // connection, so the governed SQL pipeline refuses it (fail closed); delegated reads are covered by DatabricksDelegated.
         ParitySurface.WebSql or ParitySurface.Trino or ParitySurface.SqlEndpointsGet =>
-            baseline with { SsnMasked = baseline.SsnMasked && !baseline.MatchesNoRows, MatchesNoRows = false },
+            baseline with
+            {
+                Allowed = baseline.Allowed && !baseline.DelegatedSource,
+                SsnMasked = baseline.SsnMasked && !baseline.MatchesNoRows,
+                MatchesNoRows = false
+            },
         // Coarse / discovery / admission-check surfaces expose binary allow/deny outcome without column/filter payload.
         ParitySurface.Discovery or ParitySurface.ArrowExport or ParitySurface.Mcp or ParitySurface.Analytics or ParitySurface.HttpApiSource =>
             new ParityExpectation(baseline.Allowed),
@@ -250,7 +268,7 @@ internal sealed partial class CrossTransportParityHarness : IAsyncDisposable
         var options = Options.Create(new GatewayOptions { WebSql = new WebSqlOptions { Enabled = true, DefaultDataSourceName = "default" } });
         var resolution = new ConsentResolutionService(new RowFilterSqlBuilder());
         var mandatoryResolver = scenario.VirtualFilters.Filters.Count > 0 || scenario.VirtualFilters.Profiles.Count > 0
-            ? new MandatoryRowFilterResolver(new FixedVirtualFilterSnapshot(scenario.VirtualFilters), new PlaceholderVirtualFilterPredicates())
+            ? new MandatoryRowFilterResolver(new FixedVirtualFilterSnapshot(scenario.VirtualFilters), new StructuredFilterSqlBuilder(options))
             : (IMandatoryRowFilterResolver)NullMandatoryRowFilterResolver.Instance;
 
         var callerAttributes = new FixedCallerAttributeResolver(scenario.FailCallerAttributeResolution);
@@ -353,10 +371,13 @@ internal sealed partial class CrossTransportParityHarness : IAsyncDisposable
                 logger: NullLogger<GovernedSqlExecutionService>.Instance);
             var req = new GovernedSqlQueryRequest("SELECT id, region, ssn FROM main.orders", DataSourceName: "default", Transport: transport, ReadOnlyRequired: readOnlyRequired);
             var result = await exec.ExecuteQueryBufferedAsync(req, s.Principal, tenant, ct);
-            var ssnMasked = result.Rows.Count > 0 &&
-                            result.Rows[0].TryGetValue("ssn", out var ssnVal) &&
+            object? ssnVal = null;
+            var ssnPresent = result.Rows.Count > 0 && result.Rows[0].TryGetValue("ssn", out ssnVal);
+            var ssnNull = ssnPresent && (ssnVal is null || ssnVal is DBNull);
+            // SqlDeniedColumnIsRedactedConstant: a typed NULL (or an absent column) is the denied column; any other non-raw value is a mask.
+            var ssnMasked = ssnPresent && !ssnNull &&
                             !string.Equals(ssnVal?.ToString(), "123-45-6789", StringComparison.Ordinal);
-            var ssnDenied = !result.Columns.Contains("ssn", StringComparer.OrdinalIgnoreCase);
+            var ssnDenied = !result.Columns.Contains("ssn", StringComparer.OrdinalIgnoreCase) || ssnNull;
             var hasRowFilter = s.Consents.Any(c => c.RowFilters.Count > 0) || s.Expected.HasRowFilter;
             return new ParityOutcome(true, HasRowFilter: hasRowFilter && s.Consents.Any(c => c.RowFilters.Count > 0), HasMandatoryFilter: s.Expected.HasMandatoryFilter, SsnMasked: ssnMasked, SsnDenied: ssnDenied);
         }

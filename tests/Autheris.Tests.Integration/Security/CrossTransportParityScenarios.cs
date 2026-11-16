@@ -63,8 +63,8 @@ internal sealed partial class CrossTransportParityHarness
             new(ParityScenarioId.S14_ColumnDenyRule, user, TenantA, table, [AllowUser(AliceSid, now, colRules: ColumnRulesWith(SsnRule(ColumnAccessLevel.Deny)))], [], VirtualFilterSnapshot.Empty, false, false, new(true, SsnDenied: true)),
             new(ParityScenarioId.S15_ClientIpIsNoCoreGrantDimension, user, TenantA, table, [AllowUser(AliceSid, now)], [], VirtualFilterSnapshot.Empty, false, true, new(true, SsnMasked: true)),
             new(ParityScenarioId.S16_RestrictedScopeDenied, user, TenantA, table, [AllowUser(AliceSid, now, colRules: ColumnRulesWith(SsnScopeRule("Agent.Read", ColumnAccessLevel.Clear)))], [], VirtualFilterSnapshot.Empty, false, false, new(true, SsnDenied: true)),
-            new(ParityScenarioId.S17_RestrictedScopeCleared, CompleteUser(AliceSid, scopes: ["Agent.Read"]), TenantA, table, [AllowUser(AliceSid, now, colRules: ColumnRulesWith(SsnScopeRule("Agent.Read", ColumnAccessLevel.Clear)))], [], VirtualFilterSnapshot.Empty, false, false, new(true)),
-            new(ParityScenarioId.S18_DelegatedEnforcementMode, user, TenantA, DelegatedTable(), [AllowUser(AliceSid, now, rowFilters: [RegionFilter()])], [], VirtualFilterSnapshot.Empty, false, false, new(true, SsnMasked: true)),
+            new(ParityScenarioId.S17_RestrictedScopeCleared, CompleteUser(AliceSid, scopes: ["Agent.Read"]), TenantA, table, [AllowUser(AliceSid, now, colRules: ColumnRulesWith(SsnScopeRule("Agent.Read", ColumnAccessLevel.Clear)))], [], VirtualFilterSnapshot.Empty, false, false, new(true, ColumnConstrainedGrant: true)),
+            new(ParityScenarioId.S18_DelegatedEnforcementMode, user, TenantA, DelegatedTable(), [AllowUser(AliceSid, now, rowFilters: [RegionFilter()])], [], VirtualFilterSnapshot.Empty, false, false, new(true, SsnMasked: true, DelegatedSource: true)),
             new(ParityScenarioId.S19_UnauthenticatedDenied, new ClaimsPrincipal(new ClaimsIdentity()), TenantA, table, [AllowUser(AliceSid, now)], [], VirtualFilterSnapshot.Empty, false, false, new(false)),
             new(ParityScenarioId.S20_InvalidTenantClaimDenied, InvalidTenantUser(AliceSid), TenantA, table, [AllowUser(AliceSid, now)], [], VirtualFilterSnapshot.Empty, false, false, new(false)),
             new(ParityScenarioId.S21_MissingUserSidDenied, MissingSidUser(), TenantA, table, [AllowUser(AliceSid, now)], [], VirtualFilterSnapshot.Empty, false, false, new(false)),
@@ -358,11 +358,6 @@ internal sealed partial class CrossTransportParityHarness
         public void Invalidate() { }
     }
 
-    private sealed class PlaceholderVirtualFilterPredicates : IVirtualFilterPredicateBuilder
-    {
-        public string Build(VirtualFilter filter, FilterBinding binding, TableMetadata target, DatabaseDialect dialect) => "region IS NOT NULL";
-    }
-
     private sealed class FixedCallerAttributeResolver(bool failResolution) : ICallerAttributeResolver
     {
         public bool IsEnabled => true;
@@ -398,10 +393,15 @@ internal sealed partial class CrossTransportParityHarness
         public DataSourceType SupportedType => DataSourceType.Sql;
 
         public Task<IReadOnlyList<IReadOnlyDictionary<string, object?>>> ExecuteAsync(DataSourceExecutionContext context, CancellationToken ct = default)
-            => Task.FromResult<IReadOnlyList<IReadOnlyDictionary<string, object?>>>(
+        {
+            // Like the SQL table executor, this source filters in the database and attests it; without the attestation the gateway refuses
+            // a mandatory Virtual Filter (an in-memory filter cannot evaluate its subquery).
+            context.Items["RlsPushdownExecuted"] = true;
+            return Task.FromResult<IReadOnlyList<IReadOnlyDictionary<string, object?>>>(
             [
                 new Dictionary<string, object?> { ["id"] = 1, ["region"] = "EMEA", ["ssn"] = "123-45-6789", ["tenant_id"] = "tenant-a" }
             ]);
+        }
     }
 
     private sealed class StubMcpQueryExecutor : IMcpQueryExecutor
