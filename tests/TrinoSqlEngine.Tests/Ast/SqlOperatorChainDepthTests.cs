@@ -361,7 +361,9 @@ public sealed class SqlOperatorChainDepthTests
                 var baseReq = env.Request();
                 var req = baseReq with
                 {
-                    Policy = baseReq.Policy with { Catalog = catalog }
+                    Policy = baseReq.Policy with { Catalog = catalog },
+                    // This test guards the stack, not the speed: a loaded CI runner must not trip the compile-time budget.
+                    CompileTimeout = TimeSpan.FromSeconds(30)
                 };
 
                 foreach (string sql in queries)
