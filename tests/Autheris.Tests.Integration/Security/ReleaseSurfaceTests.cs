@@ -40,6 +40,7 @@ public sealed class ReleaseSurfaceTests : IClassFixture<ReleaseSurfaceTests.Host
             builder.UseSetting("Gateway:DataMasking:HmacSecretKeyVaultRef", "kv://masking-hmac");
             builder.UseSetting("Gateway:Audit:ChainAnchorPath", _tempAnchorPath);
             builder.UseSetting("Gateway:RestApi:BulkStream:SigningKey", "0123456789012345678901234567890123456789");
+            builder.UseSetting("Gateway:Governance:GrantRecords:SigningKey", GovernanceStoreFactory.GrantSigningKeyPem);
             builder.UseSetting("Gateway:DuckDbOlap:MemoryBudgetBytes", "2147483648");
             // Mode=Direct requires one enabled direct scheme outside Development.
             builder.UseSetting("Gateway:Authentication:Adfs:Enabled", "true");

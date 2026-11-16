@@ -19,7 +19,16 @@ internal static class GovernanceStoreFactory
     private static readonly Lazy<IGrantRecordSigner> TestGrantSigner = new(() =>
         EcdsaGrantRecordSigner.CreateEphemeral("test-grant-key"));
 
-    private static IGrantWriter CreateGrantWriter(IGovernanceSqlDialect dialect) =>
+    private static readonly Lazy<string> TestGrantSigningKeyPem = new(() =>
+    {
+        using var ec = System.Security.Cryptography.ECDsa.Create(System.Security.Cryptography.ECCurve.NamedCurves.nistP256);
+        return ec.ExportPkcs8PrivateKeyPem();
+    });
+
+    /// <summary>Throwaway grant-record signing key for hosts that run outside Development/Test (production fails closed without one).</summary>
+    internal static string GrantSigningKeyPem => TestGrantSigningKeyPem.Value;
+
+    internal static IGrantWriter CreateGrantWriter(IGovernanceSqlDialect dialect) =>
         new GrantWriter(new GrantRecordSqlCore(dialect), TestGrantSigner.Value);
 
     public static PostgreSqlGovernanceRepository CreatePostgreSql(
