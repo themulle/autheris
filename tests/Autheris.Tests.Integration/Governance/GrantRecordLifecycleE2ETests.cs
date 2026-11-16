@@ -82,7 +82,8 @@ public sealed class GrantRecordLifecycleE2ETests(GovernancePostgresFixture fixtu
             MaxDurationDays: 30,
             RequestTimeoutDays: 14,
             ExpiryNoticeLeadHours: 24,
-            RequireResolvableApprover: true,
+            // The lifecycle test has no SCIM directory; approver resolution is covered by the ExternalDecisionGuard tests.
+            RequireResolvableApprover: false,
             UpdatedBy: "admin-e2e",
             UpdatedAt: now));
 

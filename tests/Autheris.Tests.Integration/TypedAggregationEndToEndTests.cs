@@ -77,6 +77,8 @@ public sealed class TypedAggregationEndToEndTests : IClassFixture<TypedAggregati
             ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
             ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.CreateStable(govPath),
             ["Gateway:Insecure:danger_bypass_consent_checks"] = "true",
+            // The count of suppressed groups is not exposed by default (privacy); this test asserts it.
+            ["Analytics:Privacy:ExposeSuppressedGroupsCount"] = "true",
             ["Gateway:DataSources:Connections:default:Provider"] = "PostgreSql",
             ["Gateway:DataSources:Connections:default:DefaultSchema"] = "main",
             ["Gateway:DataSources:Connections:default:ConnectionString"] = dataPath,

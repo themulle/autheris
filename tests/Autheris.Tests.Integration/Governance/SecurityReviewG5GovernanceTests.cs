@@ -51,8 +51,11 @@ public sealed class SecurityReviewG5GovernanceTests
         var (repo, request) = await PendingExternalRequestAsync();
         using (repo)
         {
-            await Should.ThrowAsync<UnauthorizedAccessException>(() =>
+            // An external-workflow request cannot be rejected through the internal channel at all, so an 'ITSM'-prefixed SID is not
+            // trusted as an approver (the guard now fires before the approver check) and the request stays pending.
+            await Should.ThrowAsync<InvalidOperationException>(() =>
                 repo.RejectConsentRequestAsync(request.Id, new Sid("ITSM_ATTACKER"), "no"));
+            (await repo.GetConsentRequestAsync(request.Id))!.Status.ShouldBe("PENDING_EXTERNAL_APPROVAL");
         }
     }
 

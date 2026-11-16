@@ -86,6 +86,9 @@ public sealed class Issue270GovernanceSecurityVerificationTests : IDisposable
             await insertCorruptCmd.ExecuteNonQueryAsync();
         }
 
+        // The direct update bypasses the table epoch; drop the repository's metadata cache so the next read hydrates from the corrupted row.
+        _repository.InvalidateMetadataCacheForTesting();
+
         // 3. Call GetAllTablesAsync() - must fail-closed: sensitive table is omitted rather than served unmasked
         var tables = await _repository.GetAllTablesAsync();
         tables.ShouldNotContain(t => t.Identifier == validTableId);

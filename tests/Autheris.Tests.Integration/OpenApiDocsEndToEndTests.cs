@@ -65,6 +65,8 @@ public sealed class OpenApiDocsEndToEndTests : IClassFixture<OpenApiDocsEndToEnd
         {
             config.AddInMemoryCollection(new Dictionary<string, string?>
             {
+                // A tenant-less principal is rejected (TENANT_UNRESOLVED) by the executable endpoint; the test principal belongs to the default tenant.
+                ["Gateway:Tenancy:DefaultTenantId"] = Autheris.Tests.Common.TestTenants.Default.Value,
                 ["Gateway:Authentication:EnableTestAuthHandler"] = "true",
                 ["Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit"] = "2000",
                 ["Gateway:GovernanceDb:Provider"] = "PostgreSql",

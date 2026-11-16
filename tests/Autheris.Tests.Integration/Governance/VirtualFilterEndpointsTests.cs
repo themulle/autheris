@@ -76,9 +76,10 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
         return context.Response.StatusCode;
     }
 
-    private static object DavidFilterBody(string? tenant = null) => new
+    private static object DavidFilterBody(string? tenant = null, string? evaluationMode = null) => new
     {
         tenant,
+        evaluation_mode = evaluationMode,
         source = "lwetem_prod",
         key_columns = new[] { "client.client_id" },
         from = new { table = "conf.client", alias = "client" },
@@ -431,9 +432,9 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
         bindings = new[] { binding }
     };
 
-    private async Task PutFilterAsync()
+    private async Task PutFilterAsync(string? evaluationMode = null)
     {
-        var put = Context(Tenant, DavidFilterBody(), "FilterAdmin");
+        var put = Context(Tenant, DavidFilterBody(evaluationMode: evaluationMode), "FilterAdmin");
         (await StatusAsync(await VirtualFilterEndpoints.PutFilterAsync("nicht_ausgelieferte_krane", put, _service), put)).ShouldBe(StatusCodes.Status200OK);
     }
 
@@ -730,7 +731,8 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
     [InlineData("post_batch", HttpBatchType.JsonBodyArray, StatusCodes.Status200OK)]
     public async Task PutProfile_FormatIsCheckedAgainstTheCapabilityOfAnExactTarget(string format, HttpBatchType batch, int expected)
     {
-        await PutFilterAsync();
+        // The filter reads 'lwetem_prod' while the target is the 'web_crm' endpoint: a cross-source binding is only allowed for key-set evaluation.
+        await PutFilterAsync("KeySet");
 
         var (status, body) = await PutBindingAsync(
             new { filter = "nicht_ausgelieferte_krane", target = "web_crm.public.customers", pushdown_format = format },
