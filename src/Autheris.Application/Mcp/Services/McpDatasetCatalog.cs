@@ -494,7 +494,8 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
                     Deprecation: deprecation,
                     ValueProfile: null,
                     Access: accessLabel,
-                    DisplayName: colDisplayName);
+                    DisplayName: colDisplayName,
+                    LongDescription: DiscoveryTextSanitizer.SanitizeText(colResolved?.LongDescription ?? c.LongDescription, DiscoveryTextSanitizer.MaxDescriptionRunes * 4, allowNewlinesAndTabs: true));
             })
             .ToList();
 

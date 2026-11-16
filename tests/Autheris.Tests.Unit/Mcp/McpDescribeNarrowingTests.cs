@@ -105,6 +105,30 @@ public sealed class McpDescribeNarrowingTests
         result.Columns.Select(c => c.Name).ShouldAllBe(n => description.Columns.Any(c => c.Name == n));
     }
 
+    private static McpDatasetDescription WithLongDescriptions()
+    {
+        var d = Sample(2);
+        return d with { Columns = d.Columns.Select(c => c with { LongDescription = "long " + c.Name }).ToList() };
+    }
+
+    [Fact]
+    public void Apply_WithoutLongDescriptionSection_RemovesColumnLongDescriptions()
+    {
+        var withoutInclude = McpDescribeNarrowing.Apply(WithLongDescriptions(), Parse());
+        var withOtherSections = McpDescribeNarrowing.Apply(WithLongDescriptions(), Parse(include: "columns,keys"));
+
+        withoutInclude.Columns.ShouldAllBe(c => c.LongDescription == null);
+        withOtherSections.Columns.ShouldAllBe(c => c.LongDescription == null);
+    }
+
+    [Fact]
+    public void Apply_LongDescriptionSection_KeepsColumnLongDescriptions()
+    {
+        var result = McpDescribeNarrowing.Apply(WithLongDescriptions(), Parse(include: "columns,longDescription"));
+
+        result.Columns.Select(c => c.LongDescription).ShouldBe(["long col_0", "long col_1"]);
+    }
+
     [Theory]
     [InlineData("secrets")]
     [InlineData("columns,secrets")]

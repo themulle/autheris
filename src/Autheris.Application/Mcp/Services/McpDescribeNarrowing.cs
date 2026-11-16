@@ -20,6 +20,9 @@ public static class McpDescribeNarrowing
     public const string SectionGraphQl = "graphql";
     public const string SectionAccess = "access";
 
+    /// <summary>Serves the long description of each returned column; absent by default.</summary>
+    public const string SectionLongDescription = "longDescription";
+
     /// <summary>Most columns one answer may carry when the caller pages through the columns.</summary>
     public const int MaxColumnLimit = 500;
 
@@ -28,7 +31,7 @@ public static class McpDescribeNarrowing
 
     private static readonly HashSet<string> Sections = new(StringComparer.OrdinalIgnoreCase)
     {
-        SectionColumns, SectionKeys, SectionIndexes, SectionRelations, SectionExamples, SectionGraphQl, SectionAccess
+        SectionColumns, SectionKeys, SectionIndexes, SectionRelations, SectionExamples, SectionGraphQl, SectionAccess, SectionLongDescription
     };
 
     /// <summary>Parsed narrowing request; every member is optional.</summary>
@@ -115,6 +118,11 @@ public static class McpDescribeNarrowing
     {
         ArgumentNullException.ThrowIfNull(description);
         ArgumentNullException.ThrowIfNull(request);
+        if (request.Include?.Contains(SectionLongDescription) != true && description.Columns.Any(static c => c.LongDescription is not null))
+        {
+            description = description with { Columns = description.Columns.Select(static c => c with { LongDescription = null }).ToList() };
+        }
+
         if (request.IsEmpty)
         {
             return description;

@@ -112,7 +112,8 @@ public sealed record McpDatasetColumn(
     string? Access = null,
     string? DisplayName = null,
     IReadOnlyList<DiscoveryColumnClassification>? Classifications = null,
-    IReadOnlyList<string>? ClearRequestable = null);
+    IReadOnlyList<string>? ClearRequestable = null,
+    string? LongDescription = null);
 
 /// <summary>A navigation from a dataset to a related dataset in the GraphQL API.</summary>
 /// <param name="Columns">Ordered join column pairs (catalog names); null when not disclosed (a join column is hidden from the caller).</param>
