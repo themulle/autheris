@@ -240,7 +240,9 @@ public abstract class GovernedDialectEndToEndBase : IDisposable
     {
         if (!await EnsureHostAsync()) return;
 
-        await Should.ThrowAsync<Autheris.Application.Sql.WebSqlTableDeniedException>(() => QueryAsync($"UPDATE {Ref} SET region = 'ZZ' WHERE id = 1", "acme", roles: ["Writer"]));
+        // fail-closed: the statement-level refusal (dml_transport_not_wired for a transport without a wired write path) is a plain WebSqlPolicyException
+        var refusal = await Should.ThrowAsync<Autheris.Application.Sql.WebSqlPolicyException>(() => QueryAsync($"UPDATE {Ref} SET region = 'ZZ' WHERE id = 1", "acme", roles: ["Writer"]));
+        refusal.Code.ShouldNotBeNullOrEmpty();
         Ids(await QueryAsync($"SELECT id FROM {Ref} WHERE region = 'ZZ'", "acme")).ShouldBeEmpty();
     }
 

@@ -118,7 +118,8 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<GovernedWebSq
         return PostgresDataSource.Create("gws", script + "\n" + orders);
     }
 
-    // SEC C-03: WebSQL rejects tables without catalog metadata, so every table used by these tests is registered first.
+    // SEC C-03: WebSQL rejects tables without catalog metadata, so every table used by these tests is registered first. A bare table name
+    // resolves to the schema "public" in the catalog; the physical table lives in the session schema "main" (search path of the data source).
     private async Task RegisterTableAsync(string tableName, params string[] columns) =>
         await RegisterTableAsync(tableName, null, columns.Select(c => new TableColumn { ColumnName = c, DataType = "varchar" }).ToList());
 
@@ -128,15 +129,20 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<GovernedWebSq
         var tableRepo = scope.ServiceProvider.GetRequiredService<ITableMetadataRepository>();
         await tableRepo.UpsertTableMetadataAsync(new TableMetadata
         {
-            Table = new Table { Id = Guid.NewGuid(), DisplayName = tableName, TableName = tableName, SchemaName = "main", SourceName = "default", SourceType = "PostgreSql" },
-            Identifier = new TableIdentifier("default", "main", tableName),
+            Table = new Table { Id = Guid.NewGuid(), DisplayName = tableName, TableName = tableName, SchemaName = "public", SourceName = "default", SourceType = "PostgreSql" },
+            Identifier = new TableIdentifier("default", "public", tableName),
             Columns = columns,
             ColumnMaskingRules = masking ?? new Dictionary<string, MaskingRule>()
         });
     }
 
     private static ClaimsPrincipal User(string sid, string tenant) =>
-        new(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, sid), new Claim(ClaimTypes.PrimarySid, sid), new Claim("tenant_id", tenant)], "TestAuth"));
+        new(new ClaimsIdentity(
+        [
+            new Claim(ClaimTypes.NameIdentifier, sid), new Claim(ClaimTypes.PrimarySid, sid), new Claim("tenant_id", tenant),
+            Autheris.Domain.Identity.GroupResolutionClaims.CreateMarker(),
+            Autheris.Domain.Identity.GroupResolutionClaims.CreateStatus(Autheris.Domain.Identity.GroupResolutionStatus.Complete)
+        ], "TestAuth"));
 
     private async Task<GovernedSqlResult> RunAsync(string sql, ClaimsPrincipal user, string tenant)
     {
@@ -239,7 +245,7 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<GovernedWebSq
     {
         await using var disabledFactory = _factory.WithWebHostBuilder(builder =>
         {
-            builder.UseSetting("Gateway:WebSql:Enabled", "false");
+            builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?> { ["Gateway:WebSql:Enabled"] = "false" }));
         });
         var client = disabledFactory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-WEBSQL");
@@ -358,8 +364,8 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<GovernedWebSq
 
         await tableRepo.UpsertTableMetadataAsync(new TableMetadata
         {
-            Table = new Table { Id = Guid.NewGuid(), DisplayName = "org", TableName = "org", SchemaName = "main", SourceName = "default", SourceType = "PostgreSql" },
-            Identifier = new TableIdentifier("default", "main", "org"),
+            Table = new Table { Id = Guid.NewGuid(), DisplayName = "org", TableName = "org", SchemaName = "public", SourceName = "default", SourceType = "PostgreSql" },
+            Identifier = new TableIdentifier("default", "public", "org"),
             Columns = columns,
             ColumnMaskingRules = masking ?? new Dictionary<string, MaskingRule>()
         });
