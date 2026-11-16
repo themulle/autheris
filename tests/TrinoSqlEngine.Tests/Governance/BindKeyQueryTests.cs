@@ -9,6 +9,7 @@ namespace TrinoSqlEngine.Tests.Governance;
 
 /// <summary>Issue #107 SEC-RF107-20 / D-WPC-8: the engine binder of a key query binds every parameter by ordinal and refuses client origins.</summary>
 [Trait("Category", "Security")]
+[Trait("Category", "SqlGate")]
 public sealed class BindKeyQueryTests
 {
     private static CompiledKeyQuery Query(params BoundParameter[] parameters) => new(

@@ -11,6 +11,7 @@ using static TrinoSqlEngine.Tests.TimeZones.TimeZoneTestSupport;
 
 /// <summary>SEC-130-01 (masked timestamp), SEC-130-05 (list zones), SEC-130-08 (caps), SEC-130-12 (every position): ST-130-9, ST-130-11 (compile part), ST-130-5, ST-130-17.</summary>
 [Trait("Category", "Security")]
+[Trait("Category", "SqlGate")]
 public sealed class TimeZoneValidatorCoverageTests
 {
     private static string Bad(string alias) => $"convert_timezone('Mars/Base', 'UTC', {alias}.OccurredAt)";

@@ -15,6 +15,7 @@ using Xunit;
 using static TrinoSqlEngine.Tests.Compiler.PolicyFixtures;
 
 [Trait("Category", "Security")]
+[Trait("Category", "SqlGate")]
 public sealed class UserLikeEscapeEmissionTests
 {
     private static readonly TableIdentity Orders = new("dbo", "Orders");

@@ -13,6 +13,7 @@ namespace TrinoSqlEngine.Tests.Compiler;
 /// reserved check alias exactly, not by substring. A user can therefore no longer trigger the binder's defect alarm with an innocent
 /// column name such as <c>autheris_insights</c>.
 /// </summary>
+[Trait("Category", "SqlGate")]
 public class ReservedIdentifierTests
 {
     private readonly FastSqlEngine _engine = new();

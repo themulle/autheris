@@ -11,6 +11,7 @@ using Xunit;
 using static TrinoSqlEngine.Tests.TimeZones.TimeZoneTestSupport;
 
 /// <summary>REQ-SQL-130 WP-2: the validator runs for every dialect on the user tree, in the fixed order of A-3, with fixed messages.</summary>
+[Trait("Category", "SqlGate")]
 public sealed class TimeZoneCallValidatorTests
 {
     private const string Good = "SELECT convert_timezone('UTC', 'Europe/Berlin', e.OccurredAt) FROM dbo.Events e";

@@ -5,6 +5,7 @@ using Xunit;
 using static TrinoSqlEngine.Tests.TimeZones.TimeZoneTestSupport;
 
 /// <summary>REQ-SQL-130 T-20: the compile cache keeps the zone slots and never skips a decision that depends on the request.</summary>
+[Trait("Category", "SqlGate")]
 public sealed class TimeZoneTemplateCacheTests
 {
     [Theory, MemberData(nameof(DialectData), MemberType = typeof(TimeZoneTestSupport))]

@@ -15,6 +15,7 @@ namespace TrinoSqlEngine.Tests.Governance;
 /// the compiler hooks and must fail.
 /// </summary>
 [Trait("Category", "Security")]
+[Trait("Category", "SqlGate")]
 public sealed class PolicyKeyQueryCompilerTests
 {
     private static readonly TableIdentity Air1 = new("fms", "air1");

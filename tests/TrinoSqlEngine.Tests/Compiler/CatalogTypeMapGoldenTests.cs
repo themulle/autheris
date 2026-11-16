@@ -8,6 +8,7 @@ namespace TrinoSqlEngine.Tests.Compiler;
 /// regex-based implementation before it was replaced by a deterministic parser. The result must not change for any entry, except the
 /// one documented tightening: only ASCII letters form a type name (the case-insensitive regex also accepted the Kelvin sign U+212A as 'k').
 /// </summary>
+[Trait("Category", "SqlGate")]
 public class CatalogTypeMapGoldenTests
 {
     private static readonly (TargetSqlDialect Dialect, string? Input, bool Ok, string Native, bool IsText)[] Golden =

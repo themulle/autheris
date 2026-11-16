@@ -5,6 +5,7 @@ namespace TrinoSqlEngine.Tests.Governance;
 
 /// <summary>SEC-RF107-07 (a), (c): the A-9 key type pair allowlist for every dialect that has a key loader.</summary>
 [Trait("Category", "Security")]
+[Trait("Category", "SqlGate")]
 public sealed class KeySetKeyTypesTests
 {
     [Theory]
