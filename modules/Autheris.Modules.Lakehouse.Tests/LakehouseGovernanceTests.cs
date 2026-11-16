@@ -39,7 +39,9 @@ public sealed class LakehouseGovernanceTests
         [
             new Claim(ClaimTypes.PrimarySid, sid),
             new Claim(ClaimTypes.Name, "analyst@corp.com"),
-            new Claim("tenant_id", tenant)
+            new Claim("tenant_id", tenant),
+            Autheris.Domain.Identity.GroupResolutionClaims.CreateMarker(),
+            Autheris.Domain.Identity.GroupResolutionClaims.CreateStatus(Autheris.Domain.Identity.GroupResolutionStatus.Complete)
         ], "Bearer"));
 
     [Fact]
