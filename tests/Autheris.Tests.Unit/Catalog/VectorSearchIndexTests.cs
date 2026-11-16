@@ -58,4 +58,46 @@ public sealed class VectorSearchIndexTests
 
         results.ShouldBeEmpty();
     }
+
+    [Fact]
+    public void Search_ZeroVectorQuery_ReturnsNoMatches()
+    {
+        var table = new TableIdentifier("sales", "public", "orders");
+        var index = new VectorSearchIndex([(table, new float[] { 1f, 0f, 0f, 0f })]);
+
+        // Cosine similarity of a zero vector is NaN: it must never pass the score threshold.
+        index.Search(new float[4], minScore: 0f, topK: 5).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Search_ZeroVectorInIndex_IsNeverReturned()
+    {
+        var zero = new TableIdentifier("sales", "public", "zero");
+        var real = new TableIdentifier("sales", "public", "orders");
+        var index = new VectorSearchIndex([(zero, new float[4]), (real, new float[] { 1f, 0f, 0f, 0f })]);
+
+        var results = index.Search(new float[] { 1f, 0f, 0f, 0f }, minScore: 0f, topK: 5);
+
+        results.Count.ShouldBe(1);
+        results[0].TableId.ShouldBe(real);
+    }
+
+    [Fact]
+    public void Search_DimensionMismatch_SkipsTheRecordInsteadOfThrowing()
+    {
+        var table = new TableIdentifier("sales", "public", "orders");
+        var index = new VectorSearchIndex([(table, new float[] { 1f, 0f, 0f, 0f })]);
+
+        Should.NotThrow(() => index.Search(new float[] { 1f, 0f }, minScore: 0f, topK: 5)).ShouldBeEmpty();
+        Should.NotThrow(() => index.Search(new float[] { 1f, 0f, 0f, 0f, 0f }, minScore: 0f, topK: 5)).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Search_NonFiniteQueryComponents_NeverMatch()
+    {
+        var table = new TableIdentifier("sales", "public", "orders");
+        var index = new VectorSearchIndex([(table, new float[] { 1f, 0f, 0f, 0f })]);
+
+        index.Search(new float[] { float.NaN, 0f, 0f, 0f }, minScore: 0f, topK: 5).ShouldBeEmpty();
+    }
 }
