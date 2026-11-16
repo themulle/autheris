@@ -117,6 +117,14 @@ public sealed record CompileRequest
     /// </summary>
     public bool BindPageOffset { get; init; }
 
+    /// <summary>
+    /// Names (without the marker prefix) of the gateway-owned bound parameters that may be a LIKE pattern on SQL Server. Only the
+    /// application sets it, from the parameters of a planned table read it generated itself; user SQL can never name one (the planned
+    /// read carries no client SQL). Default empty (fail closed): every other non-literal SQL Server LIKE pattern is rejected. Part of
+    /// the cache key like every public property.
+    /// </summary>
+    public IReadOnlySet<string> GatewayLikePatternParameters { get; init; } = FrozenSet<string>.Empty;
+
     internal long? PageOffset { get; init; }
     internal long MaxAllowedOffset { get; init; } = 1_000_000;
 }

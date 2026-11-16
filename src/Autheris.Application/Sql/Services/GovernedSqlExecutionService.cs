@@ -1,6 +1,7 @@
 namespace Autheris.Application.Sql.Services;
 
 using System;
+using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Data.Common;
 using System.Linq;
@@ -429,6 +430,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
                 trimmed.StartsWith("rls_", StringComparison.OrdinalIgnoreCase) ||
                 trimmed.StartsWith(ClientParameterPlaceholderPrefix, StringComparison.OrdinalIgnoreCase) ||
                 trimmed.StartsWith("p_pd_", StringComparison.OrdinalIgnoreCase) ||
+                trimmed.StartsWith(GatewayParameterAliasPrefix, StringComparison.OrdinalIgnoreCase) ||
                 trimmed.StartsWith("__rls_ks", StringComparison.OrdinalIgnoreCase))
             {
                 throw new WebSqlPolicyException("A request parameter uses a reserved gateway parameter name.");
@@ -523,6 +525,15 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
 
         return GatewayParameterAliasPrefix + suffix;
     }
+
+    /// <summary>
+    /// The aliases of the validated gateway parameters of a planned read: the only parameters that may be a SQL Server LIKE pattern
+    /// (<c>CompileRequest.GatewayLikePatternParameters</c>). Empty without a gateway map; throws for an invalid name like the alias itself.
+    /// </summary>
+    internal static IReadOnlySet<string> GatewayParameterAliases(IReadOnlyDictionary<string, object?>? gatewayParameters) =>
+        gatewayParameters is not { Count: > 0 }
+            ? FrozenSet<string>.Empty
+            : gatewayParameters.Keys.Select(GatewayParameterAlias).ToFrozenSet(StringComparer.Ordinal);
 
     private static bool IsGatewayScalar(object? value) =>
         value is null or string or decimal or Guid or DateTime or DateTimeOffset or DateOnly or TimeOnly or TimeSpan ||

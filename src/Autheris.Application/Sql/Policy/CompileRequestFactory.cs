@@ -24,6 +24,7 @@ public static class CompileRequestFactory
     /// <param name="options">The WebSQL options (validated here; the governed switches are not configurable per request).</param>
     /// <param name="clientLists">The value-free shapes of the client lists the statement references; part of the template cache key.</param>
     /// <param name="timeZoneConversionAvailable">the node proved the conversion for<paramref name="dialect"/>; the default is false (fail closed).</param>
+    /// <param name="gatewayLikePatternParameters">Aliases of the gateway-owned parameters of a planned read; the only non-literal SQL Server LIKE patterns admitted.</param>
     /// <param name="isDml">The statement is DML: the DML statement classes are permitted (the dialect capability entry still decides).</param>
     /// <param name="translateDateFunctions">governed WebSQL only; date_trunc, date_add, now and the date part functions become dialect-neutral date nodes (the caller widens<paramref name="allowedFunctions"/> with <c>SqlFunctionAllowlists.WithDateTranslation</c>).</param>
     /// <exception cref="SecurityException">The row policies of <paramref name="policy"/> were assembled for another dialect.</exception>
@@ -40,7 +41,8 @@ public static class CompileRequestFactory
         bool translateDateFunctions = false,
         bool bindPageOffset = false,
         long? pageOffset = null,
-        long maxOffset = 1_000_000)
+        long maxOffset = 1_000_000,
+        IReadOnlySet<string>? gatewayLikePatternParameters = null)
     {
         ArgumentNullException.ThrowIfNull(policy);
         ArgumentNullException.ThrowIfNull(options);
@@ -80,7 +82,8 @@ public static class CompileRequestFactory
             MaxRecursionDepth = options.MaxRecursionDepth,
             BindPageOffset = bindPageOffset,
             PageOffset = pageOffset,
-            MaxAllowedOffset = maxOffset
+            MaxAllowedOffset = maxOffset,
+            GatewayLikePatternParameters = gatewayLikePatternParameters ?? FrozenSet<string>.Empty
         };
     }
 }

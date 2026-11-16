@@ -85,7 +85,29 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
                 }
 
                 var normalized = LikePatternEscaper.NormalizeUserLike(lk, TargetDialect, maxQueryLength: null);
-                GeneratePredicateOperand(normalized.Pattern, ref builder, context);
+                if (normalized.IsGatewayOwnedPattern && normalized.Escape != null)
+                {
+                    // SQL Server: '[' in the bound value is a character class; prefixing it with the clause's escape character makes it literal.
+                    // REPLACE keeps the type of its first argument: CAST to nvarchar(max) so doubled brackets never truncate the value.
+                    builder.Append("REPLACE(CAST(");
+                    GeneratePredicateOperand(normalized.Pattern, ref builder, context);
+                    builder.Append(" AS nvarchar(max)), ");
+                    int bracketStart = builder.Length;
+                    builder.Append("'['");
+                    context.RegisterConstantFragment(bracketStart, builder.Length - bracketStart);
+                    builder.Append(", ");
+                    GeneratePredicateOperand(normalized.Escape, ref builder, context);
+                    builder.Append(" + ");
+                    bracketStart = builder.Length;
+                    builder.Append("'['");
+                    context.RegisterConstantFragment(bracketStart, builder.Length - bracketStart);
+                    builder.Append(')');
+                }
+                else
+                {
+                    GeneratePredicateOperand(normalized.Pattern, ref builder, context);
+                }
+
                 if (normalized.Escape != null)
                 {
                     builder.Append(" ESCAPE ");

@@ -138,7 +138,8 @@ public sealed record LikeExpression(
     Expression Pattern,
     Expression? Escape = null,
     bool IsNotLike = false,
-    bool IsPatternNormalized = false) : Expression;
+    bool IsPatternNormalized = false,
+    bool IsGatewayOwnedPattern = false) : Expression;
 
 public sealed record InListExpression(
     Expression Operand,
