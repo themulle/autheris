@@ -131,7 +131,10 @@ public class HitLEndpointsTests
         approver.ShouldNotBeNull();
 
         // Act: approve with wrong code
-        var result = await hitlService.ApproveStepUpRequestAsync(ticket.ApprovalId, approver, "000000");
+        // A fixed code such as "000000" is valid in a given window with a small probability: pick one that is invalid now, also one step ahead.
+        var wrongCode = Enumerable.Range(0, 10).Select(i => i.ToString("D6", System.Globalization.CultureInfo.InvariantCulture))
+            .First(code => !_totpService.VerifyTotp(enrollment.SecretBase32, code, toleranceSteps: 2));
+        var result = await hitlService.ApproveStepUpRequestAsync(ticket.ApprovalId, approver, wrongCode);
 
         // Assert
         result.IsApproved.ShouldBeFalse();
