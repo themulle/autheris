@@ -10,7 +10,46 @@ public class OpenTelemetryPiiScannerTests
 {
     private static readonly Regex EmailRegex = new(@"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,7}\b", RegexOptions.Compiled);
     private static readonly Regex IbanRegex = new(@"\b[A-Z]{2}[0-9]{2}[A-Z0-9]{4}[0-9]{7}([A-Z0-9]?){0,16}\b", RegexOptions.Compiled);
-    private static readonly Regex CreditCardRegex = new(@"\b(?:\d{4}[ -]?){3}\d{4}\b", RegexOptions.Compiled);
+    // A card number is a standalone 16-digit group that passes the Luhn check; digit runs inside a longer hyphenated identifier
+    // (a GUID such as 'audit-entry-0000-0000-0000-0000-...') are not card numbers.
+    private static readonly Regex CreditCardRegex = new(@"(?<![\w-])(?:\d{4}[ -]?){3}\d{4}(?![\w-])", RegexOptions.Compiled);
+
+    private static bool ContainsCardNumber(string value)
+    {
+        foreach (Match match in CreditCardRegex.Matches(value))
+        {
+            var sum = 0;
+            var alternate = false;
+            for (var i = match.Value.Length - 1; i >= 0; i--)
+            {
+                var c = match.Value[i];
+                if (!char.IsDigit(c))
+                {
+                    continue;
+                }
+
+                var digit = c - '0';
+                if (alternate)
+                {
+                    digit *= 2;
+                    if (digit > 9)
+                    {
+                        digit -= 9;
+                    }
+                }
+
+                sum += digit;
+                alternate = !alternate;
+            }
+
+            if (sum % 10 == 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     [Fact]
     public void SetSafeTag_AllowsWhitelistedKeysOnly()
@@ -89,7 +128,7 @@ public class OpenTelemetryPiiScannerTests
             var strVal = tag.Value?.ToString() ?? string.Empty;
             EmailRegex.IsMatch(strVal).ShouldBeFalse($"Tag '{tag.Key}' with value '{strVal}' contains an email address!");
             IbanRegex.IsMatch(strVal).ShouldBeFalse($"Tag '{tag.Key}' with value '{strVal}' contains an IBAN!");
-            CreditCardRegex.IsMatch(strVal).ShouldBeFalse($"Tag '{tag.Key}' with value '{strVal}' contains a Credit Card!");
+            ContainsCardNumber(strVal).ShouldBeFalse($"Tag '{tag.Key}' with value '{strVal}' contains a Credit Card!");
         }
     }
 }

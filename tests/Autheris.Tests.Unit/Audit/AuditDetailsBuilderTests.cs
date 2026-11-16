@@ -157,6 +157,9 @@ public sealed class AuditDetailsBuilderTests
         var json = new AuditDetailsBuilder()
             .WithField("keyset", "cursor-1")
             .WithField("primarykey", "user_id")
+            .WithField("primaryKeyDirections", new[] { "ASC", "DESC" })
+            .WithField("pushdownKeyCount", 7)
+            .WithField("upstreamKeysNotFound", 3)
             .WithField("key_columns", new[] { "tenant_id", "id" })
             .WithField("idempotency_key_hash", "hash-abc")
             .WithField("idempotency_key", "raw-secret-idempotency")
@@ -164,6 +167,9 @@ public sealed class AuditDetailsBuilderTests
 
         json.ShouldContain("cursor-1");
         json.ShouldContain("user_id");
+        json.ShouldContain("\"primaryKeyDirections\":[\"ASC\",\"DESC\"]");
+        json.ShouldContain("\"pushdownKeyCount\":7");
+        json.ShouldContain("\"upstreamKeysNotFound\":3");
         json.ShouldContain("tenant_id");
         json.ShouldContain("hash-abc");
         json.ShouldNotContain("raw-secret-idempotency");

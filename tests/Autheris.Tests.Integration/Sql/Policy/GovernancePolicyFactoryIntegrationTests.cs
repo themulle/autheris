@@ -135,6 +135,7 @@ public sealed class GovernancePolicyFactoryIntegrationTests
         {
             setup.CommandText = """
                 CREATE SCHEMA IF NOT EXISTS main;
+                DROP TABLE IF EXISTS main.orders, main.invoices;
                 CREATE TABLE main.orders (id integer, tenant_id text, region text, email text);
                 CREATE TABLE main.invoices (id integer, tenant_id text, region text, email text);
                 INSERT INTO main.orders VALUES (1, 'acme', 'EU', 'a@x'), (2, 'acme', 'US', 'b@x'), (3, 'other', 'EU', 'c@x'), (4, 'ACME', 'EU', 'd@x');

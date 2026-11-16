@@ -138,16 +138,21 @@ public sealed class RowFilterEvaluationEndpointAuthTests : IClassFixture<RowFilt
         var (table, ruleId) = await SeedRuleAsync();
         var admin = CreateClient("GovernanceAdmin");
         var repo = _factory.Services.GetRequiredService<IGovernanceRepository>();
-        var epoch = await repo.GetTableEpochAsync(table);
 
-        var put = await admin.PutAsync(RuleUrl(ruleId), Json("""{"strategy":"KeySetCache","durationSeconds":120,"maxKeys":500}"""));
+        // Consent-level key-set cache settings are refused (400, fail closed): the evaluation mode is configured on a row policy.
+        var epochBeforeRefusal = await repo.GetTableEpochAsync(table);
+        var refused = await admin.PutAsync(RuleUrl(ruleId), Json("""{"strategy":"KeySetCache","durationSeconds":120,"maxKeys":500}"""));
+        refused.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        (await repo.GetTableEpochAsync(table)).ShouldBe(epochBeforeRefusal);
+
+        // The inherit form is accepted, round-trips and bumps the table epoch.
+        var epoch = await repo.GetTableEpochAsync(table);
+        var put = await admin.PutAsync(RuleUrl(ruleId), Json("{}"));
 
         put.StatusCode.ShouldBe(HttpStatusCode.OK);
         using var doc = JsonDocument.Parse(await put.Content.ReadAsStringAsync());
-        doc.RootElement.GetProperty("stored").GetProperty("strategy").GetString().ShouldBe("KeySetCache");
-        doc.RootElement.GetProperty("stored").GetProperty("durationSeconds").GetInt32().ShouldBe(120);
-        doc.RootElement.GetProperty("effective").GetProperty("strategySource").GetString().ShouldBe("Rule");
-        doc.RootElement.GetProperty("effective").GetProperty("maxKeys").GetInt32().ShouldBe(500);
+        doc.RootElement.GetProperty("stored").GetProperty("strategy").ValueKind.ShouldBe(JsonValueKind.Null);
+        doc.RootElement.GetProperty("effective").GetProperty("strategySource").GetString().ShouldBe("Global");
         (await repo.GetTableEpochAsync(table)).ShouldBeGreaterThan(epoch);
 
         var get = await admin.GetAsync(RuleUrl(ruleId));

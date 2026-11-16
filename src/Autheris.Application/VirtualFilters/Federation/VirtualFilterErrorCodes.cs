@@ -80,6 +80,20 @@ public static class VirtualFilterErrorCodes
 
     private static readonly IReadOnlyList<string> CodesInDenyReasons = [PatternEvaluationFailed, BindingMisconfigured];
 
+    /// <summary>True when <paramref name="code"/> is a Virtual Filter code that a decision carries as the code of a deny reason.</summary>
+    public static bool IsDenyReasonCode(string? code)
+    {
+        foreach (var candidate in CodesInDenyReasons)
+        {
+            if (string.Equals(candidate, code, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>The Virtual Filter error code a deny reason starts with (<c>CODE: ...</c>), if any.</summary>
     public static bool TryGetCode(string? denyReason, out string code)
     {

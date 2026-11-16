@@ -255,8 +255,25 @@ public sealed partial class RowScopeCompiler
             ? TargetPatternMatcher.IsMatch(pattern, table)
             : ObjectPattern.Parse(pattern).MatchesObject(table);
 
-    private static bool MatchesTarget(FilterBinding binding, TableIdentifier table) =>
-        binding.TargetPattern == null || binding.MatchesTarget(table);
+    private static bool MatchesTarget(FilterBinding binding, TableIdentifier table)
+    {
+        if (binding.TargetPattern == null)
+        {
+            return true;
+        }
+
+        try
+        {
+            return binding.MatchesTarget(table);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or RegexMatchTimeoutException)
+        {
+            // A pattern that cannot be evaluated never means "binding does not apply": deny with the stable code (same as the mandatory filter resolver).
+            throw new VirtualFilterBindingException(
+                VirtualFilterErrorCodes.PatternEvaluationFailed,
+                $"The target pattern of the filter '{binding.FilterName}' could not be evaluated for '{table}' ({ex.GetType().Name}).");
+        }
+    }
 
     internal static List<(VirtualFilter Filter, FilterBinding Binding, VirtualFilterAccessProfile Profile)> ApplySupersedes(
         List<(VirtualFilter Filter, FilterBinding Binding, VirtualFilterAccessProfile Profile)> applying)

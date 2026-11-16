@@ -142,18 +142,21 @@ public class RealtimeStreamingSubscriptionTests : IClassFixture<RealtimeStreamin
         {
             await foreach (var evt in channel.SubscribeAsync("cdc_all", cts.Token))
             {
-                receivedEvents.Add(evt);
-                if (receivedEvents.Count >= 1)
+                // The channel replays recent history of the shared host (for example the Debezium event of the ingest test): only this test's event counts.
+                if (evt.EventId != "test-stream-1")
                 {
-                    break;
+                    continue;
                 }
+
+                receivedEvents.Add(evt);
+                break;
             }
         });
 
         // Publish event
         await channel.PublishAsync(cdcEvent, CancellationToken.None);
 
-        await Task.WhenAny(readTask, Task.Delay(2000));
+        await Task.WhenAny(readTask, Task.Delay(4000));
 
         receivedEvents.Count.ShouldBeGreaterThanOrEqualTo(1);
         receivedEvents[0].EventId.ShouldBe("test-stream-1");

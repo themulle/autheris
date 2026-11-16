@@ -625,6 +625,15 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
                     }
                 }
 
+                // The hard row policy compiler carries its stable code on the decision reason (the reason text has no code prefix).
+                foreach (var reason in decision.Reasons)
+                {
+                    if (VirtualFilterErrorCodes.IsDenyReasonCode(reason.Code))
+                    {
+                        throw new GatewaySecurityException($"WebSQL access denied to table '{resolved.Target.FullName}'.", reason.Code);
+                    }
+                }
+
                 throw new WebSqlTableDeniedException($"WebSQL access denied to table '{resolved.Target.FullName}'.");
             }
 

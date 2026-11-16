@@ -35,8 +35,12 @@ public sealed class ReadinessProbeTests
         Func<CancellationToken, Task<GatewayHealthReport>> handler) : IGatewayHealthCheckService
     {
         private int _calls;
+        private readonly TaskCompletionSource _firstCallStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public int Calls => Volatile.Read(ref _calls);
+
+        /// <summary>Completes when the first underlying probe has started (the probe runs on the thread pool).</summary>
+        public Task FirstCallStarted => _firstCallStarted.Task;
 
         public CancellationToken LastToken { get; private set; }
 
@@ -44,6 +48,7 @@ public sealed class ReadinessProbeTests
         {
             Interlocked.Increment(ref _calls);
             LastToken = ct;
+            _firstCallStarted.TrySetResult();
             return handler(ct);
         }
     }
@@ -191,8 +196,9 @@ public sealed class ReadinessProbeTests
             .Select(_ => probe.CheckHealthAsync(CancellationToken.None))
             .ToArray();
 
-        // Single-flight: only one underlying probe started while in-flight.
-        await Task.Yield();
+        // Single-flight: only one underlying probe started while in-flight. The probe is started on the thread pool, so wait for it
+        // deterministically instead of yielding; all 50 callers have already joined the in-flight probe (they were issued synchronously).
+        await health.FirstCallStarted.WaitAsync(TimeSpan.FromSeconds(30));
         health.Calls.ShouldBe(1);
 
         var expected = new GatewayHealthReport(true, [new HealthCheckComponentResult("GovernanceDb", true, "ok")]);

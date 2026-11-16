@@ -44,6 +44,9 @@ public sealed partial class AuditDetailsBuilder
         "keyset",
         "keyref",
         "primarykey",
+        "primarykeydirections",
+        "pushdownkeycount",
+        "upstreamkeysnotfound",
         "keycolumns",
         "idempotencykeyhash"
     };
