@@ -14,7 +14,7 @@ public partial class GovernanceRepository
        clear_grantable, separate_approval, approver_mode, steward_group_sid,
        max_clear_days, is_active, version, updated_by, updated_at
 FROM DATA_CLASSIFICATIONS
-WHERE scope = '*' AND is_active = 1
+WHERE scope = '*' AND is_active = @active
 ORDER BY restriction_rank ASC, code ASC, scope ASC";
 
         public const string SelectClassificationsAllGlobalOnlySql = @"SELECT scope, code, display_name, description, parent_code, restriction_rank,
@@ -28,7 +28,7 @@ ORDER BY restriction_rank ASC, code ASC, scope ASC";
        clear_grantable, separate_approval, approver_mode, steward_group_sid,
        max_clear_days, is_active, version, updated_by, updated_at
 FROM DATA_CLASSIFICATIONS
-WHERE (scope = '*' OR scope = @scope) AND is_active = 1
+WHERE (scope = '*' OR scope = @scope) AND is_active = @active
 ORDER BY restriction_rank ASC, code ASC, scope ASC";
 
         public const string SelectClassificationsAllScopedSql = @"SELECT scope, code, display_name, description, parent_code, restriction_rank,

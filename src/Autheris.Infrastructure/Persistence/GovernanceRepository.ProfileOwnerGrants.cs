@@ -457,7 +457,7 @@ WHERE c.tenant_id = @tenantId
             ValidFrom = ConsentWorkflowSql.ReadOptionalTimestamp(reader, 8) ?? DateTimeOffset.MinValue,
             ValidTo = ConsentWorkflowSql.ReadOptionalTimestamp(reader, 9) ?? DateTimeOffset.MaxValue,
             IsRevoked = Convert.ToInt32(reader.GetValue(10), CultureInfo.InvariantCulture) == 1,
-            TenantId = StoredTenant.Parse(ConsentWorkflowSql.ReadOptionalString(reader, 11)).Value,
+            TenantId = StoredTenant.ParseAudit(ConsentWorkflowSql.ReadOptionalString(reader, 11)).Value,
             RenewalCount = Convert.ToInt32(reader.GetValue(12), CultureInfo.InvariantCulture),
             GrantSource = ConsentWorkflowSql.ReadGrantSource(reader, 13),
             GrantRecordSeq = ConsentWorkflowSql.ReadInt64OrZero(reader, 14),

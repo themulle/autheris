@@ -531,6 +531,12 @@ public partial class GovernanceRepository : IClassificationRepository
             cmd.AddBound("@scope", validatedTenant);
         }
 
+        if (!includeInactive)
+        {
+            // Bound as a boolean: PostgreSQL has no boolean = integer operator, so the SQL must not compare is_active with a literal 1.
+            cmd.AddBound("@active", true);
+        }
+
         var list = new List<DataClassification>();
         await using var reader = await ExecuteReaderAsync(cmd, "Classifications.List", ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))

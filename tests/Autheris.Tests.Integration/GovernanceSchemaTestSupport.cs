@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;
+using Autheris.Infrastructure.Persistence.Dialects;
 using Autheris.Infrastructure.Persistence.Migrations;
 using Autheris.Infrastructure.Persistence.Migrations.Shape;
 using Microsoft.Extensions.Hosting;
