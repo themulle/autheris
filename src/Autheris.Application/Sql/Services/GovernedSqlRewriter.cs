@@ -45,6 +45,19 @@ using TrinoSqlEngine.Governance;
 /// </summary>
 public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
 {
+    /// <summary>
+    /// Rejects statements that name a reserved gateway identifier. "__rls_ks" is the reserved prefix of the key-set subquery parameters (07(e)).
+    /// A pure deny check in its own method: the statement text never decides whether later governance steps run.
+    /// </summary>
+    private static void ThrowIfReservedGatewayIdentifier(string rawSql)
+    {
+        if (rawSql.Contains(InternalParameterPrefix, StringComparison.OrdinalIgnoreCase) ||
+            rawSql.Contains("__rls_ks", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new WebSqlPolicyException("The SQL statement references a reserved gateway identifier.");
+        }
+    }
+
     private static readonly SqlTokenSecurityOptions AnalysisTokenOptions = ClientSqlTokenPolicy.Analysis;
 
     private const string InternalParameterPrefix = GovernedSqlExecutionService.InternalParameterPrefix;
@@ -180,12 +193,7 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
                 $"SQL query length ({rawSql.Length}) exceeds the maximum allowed limit of {webSqlOptions.MaxQueryLength} characters.");
         }
 
-        // 07(e): "__rls_ks" is the reserved prefix of the key-set subquery parameters.
-        if (rawSql.Contains(InternalParameterPrefix, StringComparison.OrdinalIgnoreCase) ||
-            rawSql.Contains("__rls_ks", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new WebSqlPolicyException("The SQL statement references a reserved gateway identifier.");
-        }
+        ThrowIfReservedGatewayIdentifier(rawSql);
 
         // -------------------------------------------------------------
         // Stage 1: Analyse & Statement-Policy (SEC C-01, SEC C-01/H-14)
