@@ -252,6 +252,10 @@ Integration and parity impact pointers: `tests/Autheris.Tests.Integration` (shar
 
 (Filled by WP-NET11-00 and WP-NET11-14: GO results, chosen SDK/runtime patch, image index digests, and .NET 10 rollback digests.)
 
+Exploratory branch `chore/dotnet-11-upgrade` (2026-11-16), started before GO-1..GO-4 hold; draft only, the merge decision is the owner's.
+
+- **WP-01 (2026-11-16):** `global.json` pinned to the exploratory SDK `11.0.100` (GA, `rollForward: latestPatch`); the 11.0.1xx servicing patch is not yet published (the releases index lists SDK 11.0.100 / runtime 11.0.0 as latest). The local SDK is installed side by side with `dotnet-install.sh --channel 11.0` into `/work/dotnet11` (no system change). Rollback reference: the .NET 10 pin was SDK `10.0.401`, runtime image `aspnet:10.0.15`.
+
 ## Sources
 
 - [S1] .NET release index (11.0: 11.0.0, SDK 11.0.100, `sts`, EOL 2028-11-14; 10.0: 10.0.15, SDK 10.0.404, `lts`, EOL 2028-11-14): https://github.com/dotnet/core/blob/main/release-notes/releases-index.json; policy https://aka.ms/dotnetcoresupport
