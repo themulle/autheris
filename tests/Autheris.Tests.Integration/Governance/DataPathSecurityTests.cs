@@ -120,6 +120,8 @@ public class DataPathSecurityTests : IDisposable
             }
         }
 
+        claims.Add(Autheris.Domain.Identity.GroupResolutionClaims.CreateMarker());
+        claims.Add(Autheris.Domain.Identity.GroupResolutionClaims.CreateStatus(Autheris.Domain.Identity.GroupResolutionStatus.Complete));
         var identity = new ClaimsIdentity(claims.Append(DefaultTenantCaller.Claim), "TestAuth", ClaimTypes.Name, ClaimTypes.Role);
         var principal = new ClaimsPrincipal(identity);
         var context = new DefaultHttpContext { User = principal };

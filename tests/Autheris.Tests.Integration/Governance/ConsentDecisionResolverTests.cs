@@ -87,17 +87,27 @@ public sealed class ConsentDecisionResolverTests : IDisposable
         return Convert.ToInt32(await cmd.ExecuteScalarAsync());
     }
 
-    /// <summary>The repository authorizes admins by role membership (the claim alone only skips the resolver's owner check).</summary>
-    private async Task GrantGovernanceAdminAsync(string sid)
+    /// <summary>The repository authorizes an approver only as active owner or delegate of the table, so the approvers become table owners.</summary>
+    private async Task EnsureTableOwnerAsync(string sid, TableIdentifier table)
     {
         using var cmd = _repository.RawConnection().CreateCommand();
         cmd.CommandText = @"
-            INSERT INTO ROLES (id, role_name, description) VALUES (@rid, 'GovernanceAdmin', 'Governance Administrator') ON CONFLICT DO NOTHING;
-            INSERT INTO ROLE_MEMBERS (id, role_id, member_type, member_sid)
-            SELECT @m, id, 'User', @sid FROM ROLES WHERE role_name = 'GovernanceAdmin';";
-        cmd.Parameters.AddWithValue("@rid", Guid.NewGuid().ToString());
-        cmd.Parameters.AddWithValue("@m", Guid.NewGuid().ToString());
+            INSERT INTO DATA_OWNERS (id, ad_sid, ad_account, display_name, email, is_active)
+            SELECT @oid, @sid, @acc, @name, @mail, 1
+            WHERE NOT EXISTS (SELECT 1 FROM DATA_OWNERS WHERE ad_sid = @sid);
+            INSERT INTO TABLE_OWNERS (id, table_id, data_owner_id, owner_role)
+            SELECT @toid, t.id, o.id, 'PRIMARY'
+            FROM TABLES t CROSS JOIN DATA_OWNERS o
+            WHERE t.source_name = @d AND t.schema_name = @s AND t.table_name = @t AND o.ad_sid = @sid;";
+        cmd.Parameters.AddWithValue("@oid", Guid.NewGuid().ToString());
         cmd.Parameters.AddWithValue("@sid", sid);
+        cmd.Parameters.AddWithValue("@acc", "CORP\\" + sid);
+        cmd.Parameters.AddWithValue("@name", "Owner " + sid);
+        cmd.Parameters.AddWithValue("@mail", sid + "@corp.example");
+        cmd.Parameters.AddWithValue("@toid", Guid.NewGuid().ToString());
+        cmd.Parameters.AddWithValue("@d", table.Domain);
+        cmd.Parameters.AddWithValue("@s", table.Schema);
+        cmd.Parameters.AddWithValue("@t", table.TableName);
         await cmd.ExecuteNonQueryAsync();
     }
 
@@ -232,7 +242,7 @@ public sealed class ConsentDecisionResolverTests : IDisposable
     {
         using var services = DecisionServices.Build();
         var delegateSid = await EnsureDelegateAsync("S-1-5-21-DELEGATE-W3");
-        await GrantGovernanceAdminAsync("S-1-5-21-ADMIN-W3");
+        await EnsureTableOwnerAsync("S-1-5-21-ADMIN-W3", Table);
 
         foreach (var principal in new[]
         {
@@ -253,7 +263,7 @@ public sealed class ConsentDecisionResolverTests : IDisposable
     {
         using var services = DecisionServices.Build();
         var delegateSid = await EnsureDelegateAsync("S-1-5-21-DELEGATE-W3");
-        await GrantGovernanceAdminAsync("S-1-5-21-ADMIN-W3");
+        await EnsureTableOwnerAsync("S-1-5-21-ADMIN-W3", Table);
 
         foreach (var principal in new[]
         {
@@ -428,8 +438,6 @@ public sealed class ConsentDecisionResolverTests : IDisposable
     /// <summary>A fresh table (regular unless four-eyes) whose approvers are governance admins, so repository authorization holds.</summary>
     private async Task<TableIdentifier> NewTableAsync(bool fourEyes)
     {
-        await GrantGovernanceAdminAsync("S-1-5-21-FE-APPROVER-A");
-        await GrantGovernanceAdminAsync("S-1-5-21-FE-APPROVER-B");
         var id = new TableIdentifier("sales", "crm", "w5_" + Guid.NewGuid().ToString("N")[..8]);
         var table = new Table { Id = Guid.NewGuid(), SourceName = id.Domain, SchemaName = id.Schema, TableName = id.TableName, Sensitivity = "LOW", RequiresFourEyes = fourEyes, IsActive = true };
         await _repository.UpsertTableMetadataAsync(new TableMetadata
@@ -438,6 +446,8 @@ public sealed class ConsentDecisionResolverTests : IDisposable
             Table = table,
             Columns = [new TableColumn { TableId = table.Id, ColumnName = "id", DataType = "INT" }]
         });
+        await EnsureTableOwnerAsync("S-1-5-21-FE-APPROVER-A", id);
+        await EnsureTableOwnerAsync("S-1-5-21-FE-APPROVER-B", id);
         return id;
     }
 

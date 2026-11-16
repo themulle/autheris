@@ -71,7 +71,7 @@ internal sealed partial class CrossTransportParityHarness
     private static TableMetadata DefaultOrdersTable() => new()
     {
         Identifier = OrdersId,
-        Table = new Table { Id = Guid.NewGuid(), SourceName = "default", SchemaName = "main", TableName = "orders", SourceType = "Sqlite", IsActive = true },
+        Table = new Table { Id = Guid.NewGuid(), SourceName = "default", SchemaName = "main", TableName = "orders", SourceType = "PostgreSql", IsActive = true },
         TenantColumnName = "tenant_id",
         Columns =
         [
@@ -181,7 +181,7 @@ internal sealed partial class CrossTransportParityHarness
         WriteRules = [new WriteRule(Guid.NewGuid(), WriteOperation.Insert, ["region"], WriteRowScope.AllRows)]
     };
 
-    private static ConsentRowFilter RegionFilter() => new() { ColumnName = "region", Operator = "EQ", ValueType = "string", ValueJson = "[\"EMEA\"]" };
+    private static ConsentRowFilter RegionFilter() => new() { ColumnName = "region", Operator = "EQ", ValueType = "string", ValueJson = "\"EMEA\"" };
     private static ConsentRowFilter AttributeFilter() => new() { ColumnName = "region", Operator = "EQ", ValueType = "string", ValueSource = "USER_ATTRIBUTE", UserAttribute = "department" };
     private static ConsentColumnRule SsnRule(ColumnAccessLevel level) => new() { ColumnName = "ssn", AccessLevel = level };
     private static ConsentColumnRule SsnScopeRule(string scope, ColumnAccessLevel level) => new() { ColumnName = "ssn", AccessLevel = level, ApplicableScopes = [scope] };

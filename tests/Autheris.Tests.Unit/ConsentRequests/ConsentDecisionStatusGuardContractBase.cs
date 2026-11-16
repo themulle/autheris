@@ -28,6 +28,15 @@ public abstract class ConsentDecisionStatusGuardContractBase : IAsyncLifetime
     /// <summary>Makes <paramref name="sid"/> a member of the GovernanceAdmin role (an authorized approver of every table).</summary>
     protected abstract Task GrantGovernanceAdminAsync(string sid);
 
+    /// <summary>
+    /// Makes <paramref name="sid"/> an active data owner of <paramref name="table"/> (creating the owner row when missing). The repository
+    /// authorizes an approver only as owner or delegate of the table; the admin role is checked by the service in front of it.
+    /// </summary>
+    protected abstract Task EnsureTableOwnerAsync(string sid, TableIdentifier table);
+
+    private readonly List<string> _approvers = [];
+    private readonly List<TableIdentifier> _tables = [];
+
     /// <summary>Number of APPROVAL_STEPS rows of the request (the SQLite read model does not populate <c>ApprovalSteps</c>).</summary>
     protected abstract Task<int> CountApprovalStepsAsync(Guid requestId);
 
@@ -59,6 +68,12 @@ public abstract class ConsentDecisionStatusGuardContractBase : IAsyncLifetime
     {
         var sid = "S-1-5-21-APPROVER-" + Guid.NewGuid().ToString("N")[..10];
         await GrantGovernanceAdminAsync(sid);
+        _approvers.Add(sid);
+        foreach (var table in _tables)
+        {
+            await EnsureTableOwnerAsync(sid, table);
+        }
+
         return sid;
     }
 
@@ -76,6 +91,12 @@ public abstract class ConsentDecisionStatusGuardContractBase : IAsyncLifetime
             Identifier = id, Table = table,
             Columns = [new TableColumn { TableId = table.Id, ColumnName = "id", DataType = "INT" }]
         });
+        _tables.Add(id);
+        foreach (var approver in _approvers)
+        {
+            await EnsureTableOwnerAsync(approver, id);
+        }
+
         var requester = "S-1-5-21-REQ-" + suffix;
         return await Repo.CreateConsentRequestAsync(new ConsentRequest
         {
