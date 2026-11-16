@@ -351,7 +351,7 @@ internal sealed partial class CrossTransportParityHarness : IAsyncDisposable
                 sqlOptions, new AuditWriter(auditRepo, NullLogger<AuditWriter>.Instance),
                 PassThroughExecutionGuard.Instance, rewriteDeps, execDeps,
                 logger: NullLogger<GovernedSqlExecutionService>.Instance);
-            var req = new GovernedSqlQueryRequest("SELECT id, region, ssn FROM orders", DataSourceName: "default", Transport: transport, ReadOnlyRequired: readOnlyRequired);
+            var req = new GovernedSqlQueryRequest("SELECT id, region, ssn FROM main.orders", DataSourceName: "default", Transport: transport, ReadOnlyRequired: readOnlyRequired);
             var result = await exec.ExecuteQueryBufferedAsync(req, s.Principal, tenant, ct);
             var ssnMasked = result.Rows.Count > 0 &&
                             result.Rows[0].TryGetValue("ssn", out var ssnVal) &&
