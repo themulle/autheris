@@ -85,6 +85,10 @@ public sealed class AttributeTableProviderIntegrationTests
             CREATE TABLE public.nocase_attributes (person_oid TEXT, cost_center TEXT, tenant_id CITEXT, issuer TEXT);
             """;
         await cmd.ExecuteNonQueryAsync();
+
+        // citext was created after the data source of this connection string loaded its type catalog; without a reload every other
+        // connection of the pool reads a citext column as an unknown type ("Reading as System.String is not supported").
+        await conn.ReloadTypesAsync();
         return conn;
     }
 

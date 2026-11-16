@@ -52,7 +52,7 @@ public sealed class VirtualFilterChannelParityTests : IClassFixture<VirtualFilte
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
         using var body = System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         body.RootElement.GetProperty("decision").GetString().ShouldBe("allow");
-        body.RootElement.GetProperty("sql").GetString()!.ShouldStartWith("EXISTS (SELECT 1 FROM \"client\" AS \"client\"");
+        body.RootElement.GetProperty("sql").GetString()!.ShouldStartWith("EXISTS (SELECT 1 FROM \"main\".\"client\" AS \"client\"");
         body.RootElement.GetProperty("applied_filters")[0].GetString().ShouldBe("nicht_ausgelieferte_krane");
     }
 

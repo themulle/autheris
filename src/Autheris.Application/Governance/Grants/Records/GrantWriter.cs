@@ -42,7 +42,17 @@ public sealed class GrantWriter(IGrantRecordStore store, IGrantRecordSigner sign
         if (string.IsNullOrWhiteSpace(draft.TenantId)) throw new ArgumentException("TenantId is required.", nameof(draft));
         _signer.EnsureSigningKeyAvailable();
         var (lastSeq, lastHash) = await _store.LockAndReadHeadAsync(transaction, draft.TenantId, ct).ConfigureAwait(false);
-        var baseRecord = draft with { Seq = lastSeq + 1, PrevHash = string.IsNullOrWhiteSpace(lastHash) ? GrantRecordChain.GenesisHash : lastHash, RecordedAt = _timeProvider.GetUtcNow() };
+        // Every hashed timestamp is cut to microseconds: PostgreSQL TIMESTAMPTZ stores no finer value, so a record hashed with 100 ns ticks
+        // would read back with another canonical form and fail chain verification.
+        var baseRecord = draft with
+        {
+            Seq = lastSeq + 1,
+            PrevHash = string.IsNullOrWhiteSpace(lastHash) ? GrantRecordChain.GenesisHash : lastHash,
+            RecordedAt = ToMicroseconds(_timeProvider.GetUtcNow()),
+            DecidedAt = ToMicroseconds(draft.DecidedAt),
+            ValidFrom = draft.ValidFrom is { } from ? ToMicroseconds(from) : null,
+            ValidUntil = draft.ValidUntil is { } until ? ToMicroseconds(until) : null
+        };
         var recordHash = GrantRecordChain.ComputeRecordHash(baseRecord);
 
         GrantSignatureResult sig;
@@ -54,6 +64,8 @@ public sealed class GrantWriter(IGrantRecordStore store, IGrantRecordSigner sign
         if (updateConsentId is { } cid) await _store.UpdateConsentGrantRecordSeqAsync(transaction, signed.TenantId, cid, signed.Seq, ct).ConfigureAwait(false);
         return signed;
     }
+
+    private static DateTimeOffset ToMicroseconds(DateTimeOffset value) => value.AddTicks(-(value.Ticks % 10));
 
     private GrantRecord BuildRecord(Consent? consent, GrantRecordInput? input, GrantRecordType recordType)
     {

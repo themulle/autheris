@@ -71,6 +71,39 @@ public sealed class GrantWriterCallSiteTests
     }
 
     [Fact]
+    public async Task InsertAndGrantAsync_HashesTimestampsAtMicrosecondPrecision_SoAStoreRoundTripStillVerifies()
+    {
+        // PostgreSQL TIMESTAMPTZ keeps microseconds: a record hashed with 100 ns ticks would no longer verify after it is read back.
+        var store = new RecordingGrantStore();
+        var writer = new GrantWriter(store, EcdsaGrantRecordSigner.CreateEphemeral("unit-key"));
+        using var conn = new StubDbConnection();
+        await using var tx = await conn.BeginTransactionAsync();
+        var precise = FixedNow.AddTicks(7);
+        var consent = new Consent
+        {
+            Id = Guid.NewGuid(),
+            TableId = Guid.NewGuid(),
+            TableIdentifier = OrdersTable,
+            TenantId = Tenant,
+            Effect = ConsentEffect.Allow,
+            GranteeType = GranteeType.Role,
+            RoleName = "Analysts",
+            ValidFrom = precise,
+            ValidTo = precise.AddDays(14),
+            GrantSource = ConsentGrantSource.Declarative
+        };
+
+        var record = await writer.InsertAndGrantAsync(tx, consent, new GrantRecordInput(
+            Tenant.Value, "{}", "approver", "{}", precise, GrantSource: ConsentGrantSource.Declarative, ValidFrom: precise, ValidUntil: precise.AddDays(14)));
+
+        (record.DecidedAt.Ticks % 10).ShouldBe(0);
+        (record.RecordedAt.Ticks % 10).ShouldBe(0);
+        (record.ValidFrom!.Value.Ticks % 10).ShouldBe(0);
+        (record.ValidUntil!.Value.Ticks % 10).ShouldBe(0);
+        record.RecordHash.ShouldBe(GrantRecordChain.ComputeRecordHash(record));
+    }
+
+    [Fact]
     public async Task GrantRecordSqlCore_InsertConsentRowAsync_BindsAssignedGrantRecordSeq()
     {
         using var conn = new StubDbConnection();

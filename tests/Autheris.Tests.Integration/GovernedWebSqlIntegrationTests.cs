@@ -449,7 +449,7 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<GovernedWebSq
         await RegisterOrgAsync(factory, withSsn: false);   // ssn is not part of the verified catalog: no access
 
         var recursive = await PostSqlAsync(factory,
-            "WITH RECURSIVE w(id, x) AS (SELECT id, name FROM org WHERE parent_id IS NULL UNION ALL SELECT o.id, o.ssn FROM org o JOIN w ON o.parent_id = w.id) SELECT id FROM w");
+            "WITH RECURSIVE w(id, x) AS (SELECT id, name FROM org WHERE parent_id IS NULL UNION ALL SELECT o.id, o.ssn FROM org o JOIN w ON o.parent_id = w.id) SELECT id, x FROM w");
         var plain = await PostSqlAsync(factory, "SELECT id, ssn FROM org");
 
         // The recursive member gets no wider column access than a plain reference: same failure, no row, no value.
@@ -562,11 +562,7 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<GovernedWebSq
             new Dictionary<string, MaskingRule> { ["email"] = new MaskingRule { RuleType = "REDACT", Replacement = "***" } },
             [new TableColumn { ColumnName = "id", DataType = "varchar" }, new TableColumn { ColumnName = "email", DataType = "varchar" }, new TableColumn { ColumnName = "tenant_id", DataType = "varchar" }]);
 
-        var user = new ClaimsPrincipal(new ClaimsIdentity(new[]
-        {
-            new Claim(ClaimTypes.NameIdentifier, "usr_test"),
-            new Claim("tenant_id", "tenant_test")
-        }, "TestAuth"));
+        var user = User("usr_test", "tenant_test");
 
         await RegisterTableAsync("orders", "id", "total", "email", "ssn", "tenant_id");
         string attackQuery = "SELECT c.id, o.id FROM crm_customers c JOIN orders o ON c.email = o.email";
@@ -576,8 +572,9 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<GovernedWebSq
             await sqlService.ValidateAsync(attackQuery, user, new TenantId("tenant_test"));
         });
 
-        ex.Message.ShouldContain("Security Policy Violation: Column 'email'");
-        ex.Message.ShouldContain("protected by static redaction");
+        // X1 (ast-stricter, fail closed): the compiler rejects a masked column in a join predicate with the typed code.
+        Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(ex, out var mapped).ShouldBeTrue();
+        mapped.Code.ShouldBe("FILTER_ON_MASKED_COLUMN");
     }
 
     [Fact]
@@ -593,11 +590,7 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<GovernedWebSq
             new Dictionary<string, MaskingRule> { ["email"] = new MaskingRule { RuleType = "REDACT", Replacement = "***" } },
             [new TableColumn { ColumnName = "id", DataType = "varchar" }, new TableColumn { ColumnName = "email", DataType = "varchar" }, new TableColumn { ColumnName = "tenant_id", DataType = "varchar" }]);
 
-        var user = new ClaimsPrincipal(new ClaimsIdentity(new[]
-        {
-            new Claim(ClaimTypes.NameIdentifier, "usr_test"),
-            new Claim("tenant_id", "tenant_test")
-        }, "TestAuth"));
+        var user = User("usr_test", "tenant_test");
 
         // ANSI-89 comma join syntax: FROM a, b WHERE a.col = b.col
         await RegisterTableAsync("orders", "id", "total", "email", "ssn", "tenant_id");
@@ -608,8 +601,9 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<GovernedWebSq
             await sqlService.ValidateAsync(commaJoinQuery, user, new TenantId("tenant_test"));
         });
 
-        ex.Message.ShouldContain("Security Policy Violation: Column 'email'");
-        ex.Message.ShouldContain("protected by static redaction");
+        // X1 (ast-stricter, fail closed): the compiler rejects a masked column in a join predicate with the typed code.
+        Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(ex, out var mapped).ShouldBeTrue();
+        mapped.Code.ShouldBe("FILTER_ON_MASKED_COLUMN");
     }
 
     [Fact]
@@ -648,11 +642,7 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<GovernedWebSq
             null,
             [new TableColumn { ColumnName = "id", DataType = "varchar" }, new TableColumn { ColumnName = "ssn", DataType = "varchar", IsSensitive = true }, new TableColumn { ColumnName = "tenant_id", DataType = "varchar" }]);
 
-        var user = new ClaimsPrincipal(new ClaimsIdentity(new[]
-        {
-            new Claim(ClaimTypes.NameIdentifier, "usr_test"),
-            new Claim("tenant_id", "tenant_test")
-        }, "TestAuth"));
+        var user = User("usr_test", "tenant_test");
 
         await RegisterTableAsync("payroll", "id", "ssn", "tenant_id");
         string joinQuery = "SELECT e.id, p.id FROM hr_employees e JOIN payroll p ON e.ssn = p.ssn";
@@ -662,8 +652,9 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<GovernedWebSq
             await sqlService.ValidateAsync(joinQuery, user, new TenantId("tenant_test"));
         });
 
-        ex.Message.ShouldContain("Security Policy Violation: Column 'ssn'");
-        ex.Message.ShouldContain("protected by static redaction");
+        // X1 (ast-stricter, fail closed): the compiler rejects a masked column in a join predicate with the typed code.
+        Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(ex, out var mapped).ShouldBeTrue();
+        mapped.Code.ShouldBe("FILTER_ON_MASKED_COLUMN");
     }
 
     [Fact]

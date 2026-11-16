@@ -108,6 +108,8 @@ public sealed class ScimGroupSupplementEndToEndTests : IClassFixture<ScimGroupSu
                             Audiences = [EntraClient],
                             GroupSource = RealmGroupSource.Token,
                             Provisioning = RealmProvisioningMode.Scim,
+                            // The SCIM secret principal takes its tenant only from the realm binding (never from a default tenant).
+                            FixedTenantId = RequestTenant,
                             Scim = new ScimRealmSecretOptions
                             {
                                 PrimarySecret = ScimSecret,
@@ -273,7 +275,7 @@ public sealed class ScimGroupSupplementEndToEndTests : IClassFixture<ScimGroupSu
             new Claim("oid", AliceOid),
             new Claim("onprem_sid", UserSid),
             new Claim("tid", RequestTenant),
-            new Claim(ClaimTypes.Role, "Group:" + ScimGroupSid)
+            Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim(ScimGroupSid)
         ], "Bearer"));
 
         var effective = await explain.ExplainMyAccessAsync(principal, FilteredTable);
@@ -302,8 +304,9 @@ public sealed class ScimGroupSupplementEndToEndTests : IClassFixture<ScimGroupSu
         var deniedResp = await client.SendAsync(deniedReq);
         deniedResp.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
 
-        // Refresh contact timestamp via authenticated SCIM GET
-        using var refreshReq = new HttpRequestMessage(HttpMethod.Get, $"/scim/v2/{RealmId}/Users");
+        // Refresh the contact timestamp via an authenticated SCIM write (a read contact is throttled for 30 s per realm).
+        var touch = new { schemas = new[] { ScimSchemaUris.PatchOp }, Operations = new[] { new { op = "replace", path = "displayName", value = "alice-e2e" } } };
+        using var refreshReq = new HttpRequestMessage(HttpMethod.Patch, $"/scim/v2/{RealmId}/Users/alice-e2e") { Content = JsonContent.Create(touch) };
         refreshReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ScimSecret);
         var refreshResp = await client.SendAsync(refreshReq);
         refreshResp.StatusCode.ShouldBe(HttpStatusCode.OK);

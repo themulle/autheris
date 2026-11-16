@@ -101,7 +101,12 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         // Relay keyset pagination
         "KEYSET_PAGINATION_UNAVAILABLE",
         // Issue #447: fixed text without the data source name.
-        "TRANSPORT_NOT_ALLOWED"
+        "TRANSPORT_NOT_ALLOWED",
+        // Consent decision pipeline outcomes raised through GraphQL (unknown or foreign request, stale version, wrong channel); fixed text.
+        "CONSENT_REQUEST_NOT_FOUND",
+        "PRECONDITION_FAILED",
+        "WORKFLOW_MODE_MISMATCH",
+        "FOUR_EYES_SAME_APPROVER"
     };
 
     /// <summary>
@@ -112,6 +117,10 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
     {
         ["KEYSET_PAGINATION_UNAVAILABLE"] = "Keyset pagination is unavailable for this table or caller.",
         ["TRANSPORT_NOT_ALLOWED"] = "Access to the data source is not allowed over this transport.",
+        ["CONSENT_REQUEST_NOT_FOUND"] = "The consent request was not found.",
+        ["PRECONDITION_FAILED"] = "The consent request was changed in the meantime.",
+        ["WORKFLOW_MODE_MISMATCH"] = "The consent request cannot be decided through this channel.",
+        ["FOUR_EYES_SAME_APPROVER"] = "A different approver is required for the next approval step.",
         ["GRAPHQL_VALIDATION_FAILED"] = ValidationMessage,
         ["GRAPHQL_VARIABLE_INVALID"] = VariableMessage,
         ["GRAPHQL_PARSE_FAILED"] = ParseMessage,

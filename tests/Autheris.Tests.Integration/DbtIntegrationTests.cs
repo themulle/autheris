@@ -93,7 +93,9 @@ public class DbtIntegrationTests : IClassFixture<DbtIntegrationTests.HostFixture
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-ADMIN-SID");
         client.DefaultRequestHeaders.Add("X-Test-Roles", "GovernanceAdmin");
 
-        var content = new StringContent(SampleDbtManifest, Encoding.UTF8, "application/json");
+        // The catalog is shared by the tests of this class: a model of its own keeps its PII proposal from being "already pending".
+        var ownManifest = SampleDbtManifest.Replace("monthly_revenue", "monthly_revenue_ingest", StringComparison.Ordinal);
+        var content = new StringContent(ownManifest, Encoding.UTF8, "application/json");
         var response = await client.PostAsync("/api/extensions/dbt/sync", content);
 
         response.StatusCode.ShouldBe(HttpStatusCode.OK);

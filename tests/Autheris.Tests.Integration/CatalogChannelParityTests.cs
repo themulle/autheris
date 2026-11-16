@@ -152,6 +152,14 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
 
     private static async Task<string> BodyAsync(HttpResponseMessage response) => await response.Content.ReadAsStringAsync();
 
+    private static string WithoutRequestIdentity(string problemJson)
+    {
+        using var doc = System.Text.Json.JsonDocument.Parse(problemJson);
+        return string.Join("|", doc.RootElement.EnumerateObject()
+            .Where(p => p.Name is not ("instance" or "correlationId" or "traceId"))
+            .Select(p => p.Name + "=" + p.Value));
+    }
+
     [Fact]
     public async Task Rest_ConsentlessCaller_SeesNothing_AndDetailIsA404()
     {
@@ -331,7 +339,8 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
         var missing = await client.GetAsync("/api/v1/catalog/datasets/dom_s.main.nothing_t");
         unshared.StatusCode.ShouldBe(HttpStatusCode.NotFound);
         unshared.StatusCode.ShouldBe(missing.StatusCode);
-        (await BodyAsync(unshared)).ShouldBe(await BodyAsync(missing));
+        // Same problem document; only the per-request identifiers (instance path, correlation and trace id) differ.
+        WithoutRequestIdentity(await BodyAsync(unshared)).ShouldBe(WithoutRequestIdentity(await BodyAsync(missing)));
     }
 
     [Fact]

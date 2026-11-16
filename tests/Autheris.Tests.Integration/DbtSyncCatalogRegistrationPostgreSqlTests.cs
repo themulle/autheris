@@ -87,11 +87,13 @@ public sealed class DbtSyncCatalogRegistrationPostgreSqlTests : IClassFixture<Po
         }
 
         // 2. A consent manifest (with a column mask rule) applies to the registered table; the response reports one applied policy.
-        const string consents = """
+        // Every declarative grant carries an explicit expiry (validUntil).
+        var validUntil = DateTimeOffset.UtcNow.AddDays(30).ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+        var consents = $$"""
         {
           "version": "v1",
           "policies": [
-            { "domain": "warehouse", "schema": "public", "tableName": "orders", "granteeType": "Group", "granteeRef": "S-1-5-21-1-2-3-2002", "effect": "ALLOW",
+            { "domain": "warehouse", "schema": "public", "tableName": "orders", "granteeType": "Group", "granteeRef": "S-1-5-21-1-2-3-2002", "effect": "ALLOW", "validUntil": "{{validUntil}}",
               "columnRules": [ { "columnName": "id", "accessLevel": "CLEAR" }, { "columnName": "email", "accessLevel": "MASKED" } ] }
           ]
         }

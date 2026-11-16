@@ -373,12 +373,13 @@ public sealed class ConsentDecisionResolverTests : IDisposable
     {
         // No compiled-in ceilings: the denial comes from an operator-configured class limit.
         using var services = DecisionServices.Build(grantOptions: new IndividualGrantOptions { RegularMaxDays = 180 });
-        var req = await NewRequestAsync(validDays: 400);
+        var table = await NewTableAsync(fourEyes: false); // a regular (non-sensitive) table: the configured regular limit applies
+        var req = await NewRequestAsync(table, validDays: 400);
 
-        await ShouldBeDeniedAsync(() => ApproveAsync(req.Id, DecisionPrincipals.Basic(OwnerSid), services), GrantErrorCodes.ExceedsMaximum);
+        await ShouldBeDeniedAsync(() => ApproveAsync(req.Id, DecisionPrincipals.Basic(AdminSid), services), GrantErrorCodes.ExceedsMaximum);
         await AssertUntouchedAsync(req.Id);
 
-        var rejected = await RejectAsync(req.Id, DecisionPrincipals.Basic(OwnerSid), services);
+        var rejected = await RejectAsync(req.Id, DecisionPrincipals.Basic(AdminSid), services);
         rejected.Status.ShouldBe("REJECTED");
     }
 

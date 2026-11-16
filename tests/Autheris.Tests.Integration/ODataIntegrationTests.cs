@@ -103,7 +103,7 @@ public class ODataIntegrationTests : IClassFixture<ODataIntegrationTests.HostFix
     [Fact]
     public async Task ODataServiceDocument_WhenAuthenticated_Returns200WithEntitySets()
     {
-        var userSid = new Sid("S-1-5-21-USER-1");
+        var userSid = new Sid("S-1-5-21-USER-SERVICEDOC");
         await GrantRowsTableAsync(userSid);
 
         var client = _factory.CreateClient();

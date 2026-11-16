@@ -54,7 +54,7 @@ public sealed class OpenApiDocsEndToEndTests : IClassFixture<OpenApiDocsEndToEnd
             _dbPath = PostgresDataSource.Create("openapie2e", """
                 CREATE TABLE e2e_cranes (id INTEGER PRIMARY KEY, serial_number TEXT NOT NULL, crane_type TEXT NOT NULL);
                 INSERT INTO e2e_cranes VALUES (1,'LTM-1100','Mobilkran'),(2,'LR-1600','Raupenkran');
-                """);
+                """, "public");
 
             File.WriteAllText(Path.Combine(_queriesDir, "cranes_by_type.sql"),
                 "-- @name cranes_by_type\n-- @datasource default\n-- @summary Krane nach Typ\n-- @method GET\n\n" +
@@ -73,7 +73,7 @@ public sealed class OpenApiDocsEndToEndTests : IClassFixture<OpenApiDocsEndToEnd
                 ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.Create("OpenApiDocsEndToEndTests"),
                 ["Gateway:Insecure:danger_bypass_consent_checks"] = "true",
                 ["Gateway:DataSources:Connections:default:Provider"] = "PostgreSql",
-                ["Gateway:DataSources:Connections:default:DefaultSchema"] = "main",
+                ["Gateway:DataSources:Connections:default:DefaultSchema"] = "public",
                 ["Gateway:DataSources:Connections:default:ConnectionString"] = _dbPath,
                 ["Gateway:WebSql:Enabled"] = "true",
                 ["Gateway:WebSql:DefaultDataSourceName"] = "default",
@@ -106,8 +106,8 @@ public sealed class OpenApiDocsEndToEndTests : IClassFixture<OpenApiDocsEndToEnd
         var repo = scope.ServiceProvider.GetRequiredService<ITableMetadataRepository>();
         await repo.UpsertTableMetadataAsync(new TableMetadata
         {
-            Table = new Table { Id = Guid.NewGuid(), DisplayName = "e2e_cranes", TableName = "e2e_cranes", SchemaName = "main", SourceType = "PostgreSql", SourceName = "default" },
-            Identifier = new TableIdentifier("default", "main", "e2e_cranes"),
+            Table = new Table { Id = Guid.NewGuid(), DisplayName = "e2e_cranes", TableName = "e2e_cranes", SchemaName = "public", SourceType = "PostgreSql", SourceName = "default" },
+            Identifier = new TableIdentifier("default", "public", "e2e_cranes"),
             Columns = new List<TableColumn>
             {
                 new() { ColumnName = "id", DataType = "integer" },
@@ -253,7 +253,7 @@ public sealed class OpenApiDocsEndToEndTests : IClassFixture<OpenApiDocsEndToEnd
         ((int)call.StatusCode).ShouldBeLessThan(500);
 
         // Entity-Schema separat abrufbar
-        var schema = await client.GetAsync("/odata/v4/$openapi/schemas/default/main/e2e_cranes");
+        var schema = await client.GetAsync("/odata/v4/$openapi/schemas/default/public/e2e_cranes");
         schema.StatusCode.ShouldBe(HttpStatusCode.OK);
     }
 

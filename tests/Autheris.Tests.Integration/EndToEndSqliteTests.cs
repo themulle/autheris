@@ -54,7 +54,7 @@ public sealed class EndToEndSqliteTests : IClassFixture<EndToEndSqliteTests.Fixt
             DbPath = PostgresDataSource.Create("e2e", """
                 CREATE TABLE e2e_cranes (id INTEGER PRIMARY KEY, serial_number TEXT NOT NULL, crane_type TEXT NOT NULL, tonnage INTEGER NOT NULL);
                 INSERT INTO e2e_cranes VALUES (1,'LTM-1100','Mobilkran',100),(2,'LTM-1230','Mobilkran',230),(3,'LR-1600','Raupenkran',600),(4,'EC-B 125','Turmkran',12);
-                """);
+                """, "public");
 
             File.WriteAllText(Path.Combine(queriesDir, "cranes_by_type.sql"),
                 "-- @name cranes_by_type\n-- @datasource default\n-- @summary Krane nach Typ\n-- @method GET\n\n" +
@@ -72,7 +72,7 @@ public sealed class EndToEndSqliteTests : IClassFixture<EndToEndSqliteTests.Fixt
 
                 // Echte Datenquelle: PostgreSQL-Datenbank
                 b.UseSetting("Gateway:DataSources:Connections:default:Provider", "PostgreSql");
-                b.UseSetting("Gateway:DataSources:Connections:default:DefaultSchema", "main");
+                b.UseSetting("Gateway:DataSources:Connections:default:DefaultSchema", "public");
                 b.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", dbPath);
 
                 b.UseSetting("Gateway:WebSql:Enabled", "true");
@@ -99,8 +99,8 @@ public sealed class EndToEndSqliteTests : IClassFixture<EndToEndSqliteTests.Fixt
             var repo = scope.ServiceProvider.GetRequiredService<ITableMetadataRepository>();
             await repo.UpsertTableMetadataAsync(new TableMetadata
             {
-                Table = new Table { Id = Guid.NewGuid(), DisplayName = "e2e_cranes", TableName = "e2e_cranes", SchemaName = "main", SourceType = "PostgreSql", SourceName = "default" },
-                Identifier = new TableIdentifier("default", "main", "e2e_cranes"),
+                Table = new Table { Id = Guid.NewGuid(), DisplayName = "e2e_cranes", TableName = "e2e_cranes", SchemaName = "public", SourceType = "PostgreSql", SourceName = "default" },
+                Identifier = new TableIdentifier("default", "public", "e2e_cranes"),
                 Columns = new List<TableColumn>
                 {
                     new() { ColumnName = "id", DataType = "integer" },
@@ -217,7 +217,7 @@ public sealed class EndToEndSqliteTests : IClassFixture<EndToEndSqliteTests.Fixt
     public async Task RestDataset_Pagination_WorksAgainstSqliteSource()
     {
         await RegisterCatalogAsync();
-        var r = await Client().GetAsync("/api/v1/data/default/main/e2e_cranes?select=id,serial_number&orderBy=id&limit=2&offset=1");
+        var r = await Client().GetAsync("/api/v1/data/default/public/e2e_cranes?select=id,serial_number&orderBy=id&limit=2&offset=1");
         var body = await r.Content.ReadAsStringAsync();
         r.StatusCode.ShouldBe(HttpStatusCode.OK, body);
         using var doc = JsonDocument.Parse(body);
