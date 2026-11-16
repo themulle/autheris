@@ -3,10 +3,12 @@ namespace Autheris.Tests.Integration.Security;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.DataSources.Connectors.CrossDomain;
+using Autheris.Application.Plugins.Auth;
 using Autheris.Application.Policy.Pdp;
 using Autheris.Application.Policy.Services;
 using Autheris.Application.Services;
@@ -15,6 +17,7 @@ using Autheris.Domain.Exceptions;
 using Autheris.Domain.Identity;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Plugins.Auth;
 using Autheris.Domain.Security;
 using Microsoft.Extensions.Options;
 using Shouldly;
@@ -97,7 +100,7 @@ public sealed class CrossTransportAuthorizationParityTests
 
         var degradedSubject = new SecurityPrincipalContext
         {
-            UserSid = new Sid("S-1-5-21-PARITY-BOB"),
+            UserSid = CrossTransportParityHarness.BobSid,
             TenantId = CrossTransportParityHarness.TenantA,
             GroupSids = new HashSet<Sid>(),
             GroupResolutionStatus = GroupResolutionStatus.Degraded,
@@ -123,6 +126,30 @@ public sealed class CrossTransportAuthorizationParityTests
             olap.ResolveAccessAsync(emptyPrincipal, table.Identifier, table, CrossTransportParityHarness.TenantA, CancellationToken.None));
     }
 
+    /// <summary>
+    /// The core grants (consents, profiles, virtual filters) have no client address dimension, so the matrix expects the same outcome for
+    /// every address (S15). A restriction by address is an authorization hook; it denies fail-closed, also for an unknown address.
+    /// </summary>
+    [Fact]
+    public async Task Client_ip_restriction_is_enforced_by_the_authorization_hook_and_fails_closed()
+    {
+        var scenario = ScenarioById[ParityScenarioId.S01_UserGrant];
+        var pdp = CrossTransportParityHarness.BuildPdpWithAuthorizationHook(scenario, new ClientIpPrefixHook("10."));
+
+        async Task<bool> AllowedFrom(IPAddress? ip)
+        {
+            var subject = ip is null
+                ? Autheris.Domain.Security.SecurityPrincipalContext.FromPrincipal(scenario.Principal, scenario.EffectiveTenant)
+                : CrossTransportParityHarness.SubjectWithClientIp(scenario, ip);
+            var decision = await pdp.DecideAsync(new AccessRequest(subject, scenario.Table, AccessOperation.Read, AccessTransport.GraphQl), CancellationToken.None);
+            return decision.IsAllowed;
+        }
+
+        (await AllowedFrom(IPAddress.Parse("10.1.2.3"))).ShouldBeTrue();
+        (await AllowedFrom(IPAddress.Parse("198.51.100.77"))).ShouldBeFalse();
+        (await AllowedFrom(null)).ShouldBeFalse();
+    }
+
     [Fact]
     public async Task Fail_closed_scenarios_S20_to_S22_deny_across_every_surface()
     {
@@ -143,6 +170,27 @@ public sealed class CrossTransportAuthorizationParityTests
                 outcome.Allowed.ShouldBeFalse($"Fail-closed scenario {id} must deny on {surface}.");
             }
         }
+    }
+
+    private sealed class ClientIpPrefixHook(string allowedPrefix) : IAuthPluginHost
+    {
+        public bool HasRoleProviders => false;
+        public bool HasCallerAttributeProviders => false;
+        public bool HasAuthorizationHooks => true;
+        public int LoadPluginsFromDirectory(string directoryPath) => 0;
+        public ValueTask<PluginRoleEnrichmentExecutionResult> EnrichRolesAsync(PluginSecurityContext context, CancellationToken ct) =>
+            throw new NotSupportedException();
+        public bool TryGetCallerAttributeProvider(string kind, out IPluginCallerAttributeProvider? provider)
+        {
+            provider = null;
+            return false;
+        }
+
+        public ValueTask<PluginAuthorizationResult> EvaluateAuthorizationHooksAsync(PluginAuthorizationContext context, CancellationToken ct) =>
+            ValueTask.FromResult(
+                context.ClientIp is { } ip && !IPAddress.None.Equals(ip) && ip.ToString().StartsWith(allowedPrefix, StringComparison.Ordinal)
+                    ? PluginAuthorizationResult.Allow("client-ip")
+                    : PluginAuthorizationResult.Deny("CLIENT_IP_NOT_ALLOWED", hookName: "client-ip"));
     }
 
     private sealed class DegradedConsentRepo(IReadOnlyList<Consent> consents) : Autheris.Application.Common.Interfaces.IConsentRepository

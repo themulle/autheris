@@ -49,9 +49,9 @@ using Autheris.Domain.Options.DataSources;
 using Autheris.Domain.Security;
 using Autheris.Extensions.Lakehouse.Interfaces;
 using Autheris.GraphQL.Interceptors;
+using Autheris.Infrastructure.Persistence;
 using Autheris.Extensions.Lakehouse.Services;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -97,7 +97,7 @@ public enum ParityScenarioId
     S12_UnresolvedCallerAttribute,
     S13_StrictProfileMasking,
     S14_ColumnDenyRule,
-    S15_IpRangeMismatchDenied,
+    S15_ClientIpIsNoCoreGrantDimension,
     S16_RestrictedScopeDenied,
     S17_RestrictedScopeCleared,
     S18_DelegatedEnforcementMode,
@@ -112,7 +112,8 @@ public sealed record ParityExpectation(
     bool HasRowFilter = false,
     bool HasMandatoryFilter = false,
     bool SsnMasked = false,
-    bool SsnDenied = false);
+    bool SsnDenied = false,
+    bool MatchesNoRows = false);
 
 public sealed record ParityOutcome(
     bool Allowed,
@@ -137,12 +138,18 @@ internal sealed partial class CrossTransportParityHarness : IAsyncDisposable
 {
     internal static readonly TenantId TenantA = new("tenant-a");
     internal static readonly TenantId TenantB = new("tenant-b");
-    internal static readonly Sid AliceSid = new("S-1-5-21-PARITY-ALICE");
-    internal static readonly Sid BobSid = new("S-1-5-21-PARITY-BOB");
-    internal static readonly Sid GroupSid = new("S-1-5-21-PARITY-GROUP-ENG");
+    // Group SIDs are only read from the claims when they are canonical (S-1-<authority>-<digits>...), so the fixtures must be numeric.
+    internal static readonly Sid AliceSid = new("S-1-5-21-9001-9002-9003-1001");
+    internal static readonly Sid BobSid = new("S-1-5-21-9001-9002-9003-1002");
+    internal static readonly Sid GroupSid = new("S-1-5-21-9001-9002-9003-2001");
     internal static readonly TableIdentifier OrdersId = new("default", "main", "orders");
 
-    private SqliteConnection? _keepAlive;
+    // One PostgreSQL database for the whole matrix: the SQL surfaces only read it, and the governed SQL pipeline compiles for the dialect of the
+    // catalog source type (PostgreSql), so the data has to live in a real PostgreSQL database.
+    private static readonly Lazy<Task<string>> ParityDatabase = new(() => PostgresDataSource.CreateAsync(
+        "paritymatrix",
+        "CREATE TABLE main.orders (id integer, region text, ssn text, tenant_id text); " +
+        "INSERT INTO main.orders VALUES (1, 'EMEA', '123-45-6789', 'tenant-a');"));
 
     public static IReadOnlyList<ParitySurface> AllSurfaces { get; } = Enum.GetValues<ParitySurface>();
 
@@ -189,15 +196,20 @@ internal sealed partial class CrossTransportParityHarness : IAsyncDisposable
                 SsnDenied = false
             },
         // Streaming cannot evaluate mandatory subquery filters on change events; it honors simple row filters and column masking/denial.
+        // A row filter that matches no row (unresolved caller attribute) drops every event, so nothing is delivered.
         ParitySurface.Streaming =>
             baseline with
             {
-                Allowed = baseline.Allowed && !baseline.HasMandatoryFilter,
+                Allowed = baseline.Allowed && !baseline.HasMandatoryFilter && !baseline.MatchesNoRows,
                 HasRowFilter = false,
                 HasMandatoryFilter = false,
-                SsnMasked = baseline.Allowed && !baseline.HasMandatoryFilter && baseline.SsnMasked,
-                SsnDenied = baseline.Allowed && !baseline.HasMandatoryFilter && baseline.SsnDenied
+                SsnMasked = baseline.Allowed && !baseline.HasMandatoryFilter && !baseline.MatchesNoRows && baseline.SsnMasked,
+                SsnDenied = baseline.Allowed && !baseline.HasMandatoryFilter && !baseline.MatchesNoRows && baseline.SsnDenied,
+                MatchesNoRows = false
             },
+        // The SQL surfaces report the ssn level from the returned values; a filter that matches no row returns none to inspect.
+        ParitySurface.WebSql or ParitySurface.Trino or ParitySurface.SqlEndpointsGet =>
+            baseline with { SsnMasked = baseline.SsnMasked && !baseline.MatchesNoRows, MatchesNoRows = false },
         // Coarse / discovery / admission-check surfaces expose binary allow/deny outcome without column/filter payload.
         ParitySurface.Discovery or ParitySurface.ArrowExport or ParitySurface.Mcp or ParitySurface.Analytics or ParitySurface.HttpApiSource =>
             new ParityExpectation(baseline.Allowed),
@@ -207,12 +219,21 @@ internal sealed partial class CrossTransportParityHarness : IAsyncDisposable
         _ => baseline
     };
 
-    public static ParityOutcome Normalize(TableAccessDecision decision) => new(
-        Allowed: decision.IsAllowed,
-        HasRowFilter: decision.IsAllowed && !string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql),
-        HasMandatoryFilter: decision.IsAllowed && !string.IsNullOrWhiteSpace(decision.MandatoryRowPredicateSql),
-        SsnMasked: decision.IsAllowed && decision.GetColumnAccess("ssn") == ColumnAccessLevel.Mask,
-        SsnDenied: decision.IsAllowed && decision.GetColumnAccess("ssn") == ColumnAccessLevel.Deny);
+    /// <summary>
+    /// The outcome of a decision as every projecting surface sees it: the column level is the effective one (a catalog-sensitive column is
+    /// masked unless an explicit Clear exists), and the combined row filter includes the mandatory predicate, so the consent-side filter is
+    /// the combined filter before the virtual filters were added.
+    /// </summary>
+    public static ParityOutcome Normalize(TableAccessDecision decision, TableMetadata metadata)
+    {
+        var consentRowFilter = decision.MandatoryRowPredicateSql is null ? decision.CombinedRowFilterSql : decision.RowFilterSqlBeforeVirtualFilters;
+        return new(
+            Allowed: decision.IsAllowed,
+            HasRowFilter: decision.IsAllowed && !string.IsNullOrWhiteSpace(consentRowFilter),
+            HasMandatoryFilter: decision.IsAllowed && !string.IsNullOrWhiteSpace(decision.MandatoryRowPredicateSql),
+            SsnMasked: decision.IsAllowed && decision.GetEffectiveColumnAccess("ssn", metadata) == ColumnAccessLevel.Mask,
+            SsnDenied: decision.IsAllowed && decision.GetEffectiveColumnAccess("ssn", metadata) == ColumnAccessLevel.Deny);
+    }
 
     public async Task<ParityOutcome> EvaluateAsync(ParitySurface surface, ParityScenario scenario, CancellationToken ct = default)
     {
@@ -245,16 +266,16 @@ internal sealed partial class CrossTransportParityHarness : IAsyncDisposable
 
         return surface switch
         {
-            ParitySurface.GraphQl => Normalize(await EvaluateGraphQlAsync(pdp, scenario, ct)),
-            ParitySurface.Rest => Normalize(await EvaluateRestAsync(pdp, metadataRepo, consentRepo, auditRepo, resolution, options, mandatoryResolver, profileRepo, typedPolicies, ipResolver, scenario, ct)),
-            ParitySurface.OData => Normalize(await EvaluateODataAsync(pdp, scenario, ct)),
+            ParitySurface.GraphQl => Normalize(await EvaluateGraphQlAsync(pdp, scenario, ct), scenario.Table),
+            ParitySurface.Rest => Normalize(await EvaluateRestAsync(pdp, metadataRepo, consentRepo, auditRepo, resolution, options, mandatoryResolver, profileRepo, typedPolicies, ipResolver, scenario, ct), scenario.Table),
+            ParitySurface.OData => Normalize(await EvaluateODataAsync(pdp, scenario, ct), scenario.Table),
             ParitySurface.WebSql => await EvaluateSqlAsync(pdp, metadataRepo, consentRepo, auditRepo, resolution, options, mandatoryResolver, profileRepo, typedPolicies, SqlTransports.WebSql, readOnlyRequired: false, scenario, ct),
             ParitySurface.Trino => await EvaluateSqlAsync(pdp, metadataRepo, consentRepo, auditRepo, resolution, options, mandatoryResolver, profileRepo, typedPolicies, SqlTransports.Trino, readOnlyRequired: false, scenario, ct),
             ParitySurface.SqlEndpointsGet => await EvaluateSqlAsync(pdp, metadataRepo, consentRepo, auditRepo, resolution, options, mandatoryResolver, profileRepo, typedPolicies, SqlTransports.SqlEndpoints, readOnlyRequired: true, scenario, ct),
             ParitySurface.Mcp => await EvaluateMcpAsync(pdp, metadataRepo, auditRepo, options, scenario, ct),
             ParitySurface.Procedure => await EvaluateProcedureAsync(pdp, metadataRepo, consentRepo, auditRepo, resolution, options, mandatoryResolver, profileRepo, typedPolicies, ipResolver, scenario, ct),
             ParitySurface.Analytics => await EvaluateAnalyticsAsync(pdp, metadataRepo, consentRepo, auditRepo, resolution, options, mandatoryResolver, profileRepo, typedPolicies, ipResolver, scenario, ct),
-            ParitySurface.Olap => Normalize(await EvaluateOlapAsync(consentRepo, resolution, options, mandatoryResolver, profileRepo, typedPolicies, ipResolver, scenario)),
+            ParitySurface.Olap => Normalize(await EvaluateOlapAsync(consentRepo, resolution, options, mandatoryResolver, profileRepo, typedPolicies, ipResolver, scenario), scenario.Table),
             ParitySurface.Federation => await EvaluateFederationAsync(pdp, metadataRepo, consentRepo, auditRepo, resolution, options, mandatoryResolver, profileRepo, typedPolicies, ipResolver, scenario, ct),
             ParitySurface.ArrowExport => await EvaluateArrowExportAsync(pdp, metadataRepo, scenario, ct),
             ParitySurface.Streaming => await EvaluateStreamingAsync(pdp, metadataRepo, consentRepo, resolution, options, mandatoryResolver, ipResolver, scenario, ct),
@@ -296,23 +317,36 @@ internal sealed partial class CrossTransportParityHarness : IAsyncDisposable
     {
         try
         {
-            await EnsureSqliteDbAsync(ct);
+            var tenant = s.Principal.GetTenantId();
+            var connectionString = await ParityDatabase.Value.ConfigureAwait(false);
+            var sqlOptions = Options.Create(new GatewayOptions
+            {
+                WebSql = new WebSqlOptions { Enabled = true, DefaultDataSourceName = "default" },
+                DataSources = new SqlDataSourceOptions
+                {
+                    Connections = new Dictionary<string, DataSourceConnectionOptions>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["default"] = new DataSourceConnectionOptions { Provider = "PostgreSql", ConnectionString = connectionString, DefaultSchema = "main" }
+                    }
+                }
+            });
             var catalog = new InMemoryCatalogProvider(metaRepo);
-            var policyFactory = new GovernancePolicyFactory(catalog, metaRepo, options);
+            var policyFactory = new GovernancePolicyFactory(catalog, metaRepo, sqlOptions);
             var rewriteDeps = new GovernedSqlRewriteDependencies(
                 resolution, metaRepo, null, consentRepo, FastSqlEngine.Default, policyFactory,
                 null, NullConsentCacheService.Instance, mandatory, null, profiles, null,
                 typed, null, pdp);
             var execDeps = new GovernedSqlExecutionDependencies(
-                ConnectionFactory: new InMemorySqliteConnectionFactory(),
+                ConnectionFactory: new SqlConnectionFactory(new DevelopmentEnvironment()),
                 TransportGate: AllowingTransportGate.Instance,
-                AuditDigester: new Autheris.Application.Sql.Services.CompiledSqlAuditDigester(options, null, new DevelopmentEnvironment()));
+                AuditDigester: new Autheris.Application.Sql.Services.CompiledSqlAuditDigester(sqlOptions, null, new DevelopmentEnvironment()),
+                ConcurrencyGate: new TableReadConcurrencyGate());
             var exec = new GovernedSqlExecutionService(
-                options, new AuditWriter(auditRepo, NullLogger<AuditWriter>.Instance),
+                sqlOptions, new AuditWriter(auditRepo, NullLogger<AuditWriter>.Instance),
                 PassThroughExecutionGuard.Instance, rewriteDeps, execDeps,
                 logger: NullLogger<GovernedSqlExecutionService>.Instance);
             var req = new GovernedSqlQueryRequest("SELECT id, region, ssn FROM orders", DataSourceName: "default", Transport: transport, ReadOnlyRequired: readOnlyRequired);
-            var result = await exec.ExecuteQueryBufferedAsync(req, s.Principal, s.EffectiveTenant, ct);
+            var result = await exec.ExecuteQueryBufferedAsync(req, s.Principal, tenant, ct);
             var ssnMasked = result.Rows.Count > 0 &&
                             result.Rows[0].TryGetValue("ssn", out var ssnVal) &&
                             !string.Equals(ssnVal?.ToString(), "123-45-6789", StringComparison.Ordinal);
@@ -359,11 +393,11 @@ internal sealed partial class CrossTransportParityHarness : IAsyncDisposable
         procReg.MarkActive("get_orders", new ProcedureValidationResult(true, [], [], [s.Table.Identifier.ToQualifiedName()], new Dictionary<string, string>()));
         var svc = new GovernedProcedureExecutionService(procReg, new StubProcedureInvoker(), options, auditRepo,
             metaRepo, consentRepo, resolution, new PassthroughMaskingProvider(), ipResolver, null, null,
-            NullConsentCacheService.Instance, mandatory, profiles, null, null, typed, null, null, null,
+            NullConsentCacheService.Instance, mandatory, profiles, null, null, typed, null, new TableReadConcurrencyGate(), null,
             AllowingTransportGate.Instance, pdp);
         try
         {
-            var res = await svc.ExecuteAsync("get_orders", null, s.Principal, s.EffectiveTenant, ct);
+            var res = await svc.ExecuteAsync("get_orders", null, s.Principal, s.Principal.GetTenantId(), ct);
             var ssnMasked = res.Columns.Contains("ssn", StringComparer.OrdinalIgnoreCase) &&
                             res.Rows.Count > 0 && res.Rows[0].TryGetValue("ssn", out var ssnVal) &&
                             string.Equals(ssnVal?.ToString(), "[REDACTED]", StringComparison.Ordinal);
@@ -382,7 +416,8 @@ internal sealed partial class CrossTransportParityHarness : IAsyncDisposable
     {
         var rest = new GatewayExecutionService(
             metaRepo, consentRepo, auditRepo, resolution, NullConsentCacheService.Instance, new PassthroughMaskingProvider(),
-            options, clientIpResolver: ipResolver, mandatoryFilters: mandatory, accessProfileRepository: profiles,
+            options, dataSourceExecutors: [new FixedRowsSqlExecutor()], clientIpResolver: ipResolver, concurrencyGate: new TableReadConcurrencyGate(),
+            mandatoryFilters: mandatory, accessProfileRepository: profiles,
             typedPolicies: typed, transportGate: AllowingTransportGate.Instance, accessDecisionPoint: pdp);
         var svc = new GovernedAggregationService(metaRepo, auditRepo, accessResolver: rest, gatewayExecutionService: rest,
             consentRepository: consentRepo, resolutionService: resolution, transportGate: AllowingTransportGate.Instance);
@@ -404,7 +439,7 @@ internal sealed partial class CrossTransportParityHarness : IAsyncDisposable
     {
         var olap = new DefaultCrossDomainAccessResolver(consentRepo, resolution, ipResolver, options,
             NullConsentCacheService.Instance, mandatory, typed, accessProfileRepository: profiles);
-        return SafeDecisionAsync(s.Table.Identifier, () => olap.ResolveAccessAsync(s.Principal, s.Table.Identifier, s.Table, s.EffectiveTenant));
+        return SafeDecisionAsync(s.Table.Identifier, () => olap.ResolveAccessAsync(s.Principal, s.Table.Identifier, s.Table, s.Principal.GetTenantId()));
     }
 
     private static async Task<ParityOutcome> EvaluateFederationAsync(
@@ -412,18 +447,39 @@ internal sealed partial class CrossTransportParityHarness : IAsyncDisposable
         IConsentResolutionService resolution, IOptions<GatewayOptions> options, IMandatoryRowFilterResolver mandatory,
         IAccessProfileRepository profiles, TypedPolicySources typed, IClientIpResolver? ipResolver, ParityScenario s, CancellationToken ct)
     {
-        var router = new CrossSourceQueryRouter(metaRepo, options);
+        // The federated executor only serves a cross-source read. The scenario table is joined with a copy that lives in a second data source,
+        // and the consents of the scenario are replicated for the copy, so both tables are authorized by the same grants.
+        var secondTable = SecondSourceTable(s.Table);
+        var federatedMeta = new InMemoryTableRepo([s.Table, secondTable]);
+        var federatedConsents = new InMemoryConsentRepo(
+            [.. s.Consents, .. s.Consents.Select(c => CopyForTable(c, secondTable.Identifier))]);
+        var federatedOptions = Options.Create(new GatewayOptions
+        {
+            WebSql = new WebSqlOptions
+            {
+                Enabled = true,
+                DefaultDataSourceName = "default",
+                CrossSource = new CrossSourceOptions { Enabled = true }
+            }
+        });
+        var federatedPdp = new AccessDecisionPoint(
+            federatedOptions, resolution, federatedConsents, NullConsentCacheService.Instance, ipResolver, mandatory,
+            accessProfileRepository: profiles, typedPolicies: typed);
+        var router = new CrossSourceQueryRouter(federatedMeta, federatedOptions);
         var planner = new CrossSourcePlanner(FastSqlEngine.Default);
-        var fed = new FederatedDuckDbExecutionService(options, auditRepo, router, planner,
-            new StubStagingService(), new StubDuckDbEngine(), FastSqlEngine.Default, resolution, consentRepo,
-            NullConsentCacheService.Instance, ipResolver, mandatory, null, profiles, null, null, null, typed, new CompiledSqlAuditDigester(options, null, new DevelopmentEnvironment()),
-            AllowingTransportGate.Instance, null, pdp);
+        var fed = new FederatedDuckDbExecutionService(federatedOptions, auditRepo, router, planner,
+            new StubStagingService(), new StubDuckDbEngine(), FastSqlEngine.Default, resolution, federatedConsents,
+            NullConsentCacheService.Instance, ipResolver, mandatory, null, profiles, null, null, null, typed,
+            new CompiledSqlAuditDigester(federatedOptions, null, new DevelopmentEnvironment()),
+            AllowingTransportGate.Instance, null, federatedPdp);
         try
         {
-            var req = new GovernedSqlQueryRequest("SELECT id, region, ssn FROM orders", DataSourceName: "default", Transport: SqlTransports.WebSql);
-            await fed.ExecuteQueryBufferedAsync(req, s.Principal, s.EffectiveTenant, ct);
-            var direct = await pdp.DecideAsync(new AccessRequest(SecurityContextOf(s), s.Table, AccessOperation.Read, AccessTransport.Federation), ct);
-            return Normalize(direct);
+            var tenant = s.Principal.GetTenantId();
+            var req = new GovernedSqlQueryRequest(
+                "SELECT a.id, a.region FROM orders a JOIN orders_ref b ON a.id = b.id", DataSourceName: "default", Transport: SqlTransports.WebSql);
+            await fed.ExecuteQueryBufferedAsync(req, s.Principal, tenant, ct);
+            var direct = await federatedPdp.DecideAsync(new AccessRequest(SecurityContextOf(s), s.Table, AccessOperation.Read, AccessTransport.Federation), ct);
+            return Normalize(direct, s.Table);
         }
         catch (Exception ex) when (IsAuthorizationFailure(ex))
         {
@@ -593,7 +649,7 @@ internal sealed partial class CrossTransportParityHarness : IAsyncDisposable
             return new ParityOutcome(false);
         }
 
-        var httpExec = new DeclarativeHttpDataSourceExecutor(new StubHttpClientFactory(), NullLogger<DeclarativeHttpDataSourceExecutor>.Instance);
+        var httpExec = new DeclarativeHttpDataSourceExecutor(new StubHttpClientFactory(), NullLogger<DeclarativeHttpDataSourceExecutor>.Instance, environment: new DevelopmentEnvironment());
         var rows = await httpExec.ExecuteAsync(
             new DataSourceExecutionContext("default", httpMeta, s.Principal, decision, new Dictionary<string, object?>(), ["id", "region"]), ct);
         return new ParityOutcome(rows.Count >= 0);
@@ -629,7 +685,9 @@ internal sealed partial class CrossTransportParityHarness : IAsyncDisposable
 
     private static SecurityPrincipalContext SecurityContextOf(ParityScenario s)
     {
-        TenantId? overrideTenant = string.IsNullOrEmpty(s.EffectiveTenant.Value) ? (TenantId?)null : s.EffectiveTenant;
+        // An invalid tenant claim is never replaced by the scenario tenant: the decision point must see it and deny.
+        var claimInvalid = SecurityPrincipalContext.FromPrincipal(s.Principal).TenantClaimInvalid;
+        TenantId? overrideTenant = claimInvalid || string.IsNullOrEmpty(s.EffectiveTenant.Value) ? (TenantId?)null : s.EffectiveTenant;
         return SecurityPrincipalContext.FromPrincipal(s.Principal, overrideTenant);
     }
 
@@ -656,16 +714,6 @@ internal sealed partial class CrossTransportParityHarness : IAsyncDisposable
             or WebSqlPolicyException
             or WebSqlTableDeniedException;
 
-    private async Task EnsureSqliteDbAsync(CancellationToken ct)
-    {
-        if (_keepAlive != null) return;
-        _keepAlive = new SqliteConnection("Data Source=ParityMatrixOrders;Mode=Memory;Cache=Shared");
-        await _keepAlive.OpenAsync(ct);
-        await using var cmd = _keepAlive.CreateCommand();
-        cmd.CommandText = "CREATE TABLE IF NOT EXISTS orders (id INT, region TEXT, ssn TEXT, tenant_id TEXT); DELETE FROM orders; INSERT INTO orders VALUES (1, 'EMEA', '123-45-6789', 'tenant-a');";
-        await cmd.ExecuteNonQueryAsync(ct);
-    }
-
     private static McpSessionContext BuildMcpSession(ParityScenario s)
     {
         var subject = SecurityContextOf(s);
@@ -677,5 +725,5 @@ internal sealed partial class CrossTransportParityHarness : IAsyncDisposable
             GroupsDegraded: subject.GroupResolutionStatus == GroupResolutionStatus.Degraded);
     }
 
-    public ValueTask DisposeAsync() => _keepAlive?.DisposeAsync() ?? ValueTask.CompletedTask;
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }
