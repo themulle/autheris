@@ -766,7 +766,7 @@ WHERE id = @id AND tenant_id = @tenant
         }
     }
 
-    private static async Task<IReadOnlyList<ExpiringGrantCandidate>> ReadExpiringGrantCandidatesAsync(
+    internal static async Task<IReadOnlyList<ExpiringGrantCandidate>> ReadExpiringGrantCandidatesAsync(
         DbCommand cmd,
         CancellationToken ct)
     {
@@ -788,7 +788,8 @@ WHERE id = @id AND tenant_id = @tenant
                 ConsentWorkflowSql.ReadOptionalTimestamp(reader, 8) ?? DateTimeOffset.UnixEpoch,
                 ConsentWorkflowSql.ReadOptionalTimestamp(reader, 9) ?? DateTimeOffset.MaxValue,
                 Convert.ToInt32(reader.GetValue(10), CultureInfo.InvariantCulture) != 0,
-                StoredTenant.Parse(reader.GetString(14)).Value,
+                // Owner grants of a catalog-wide assignment live in the platform bucket; the sweep reads every tenant.
+                StoredTenant.ParseAudit(reader.GetString(14)),
                 reader,
                 16,
                 Convert.ToInt32(reader.GetValue(15), CultureInfo.InvariantCulture));

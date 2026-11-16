@@ -228,7 +228,8 @@ public sealed class ScimGroupSupplementEndToEndTests : IClassFixture<ScimGroupSu
                 EntraObjectId: oid));
         }
 
-        if (await scim.GetGroupAsync(tenant, RealmId, "grp-scim-1") is null)
+        var existingGroup = await scim.GetGroupAsync(tenant, RealmId, "grp-scim-1");
+        if (existingGroup is null)
         {
             await scim.CreateGroupAsync(tenant, RealmId, new ScimGroup(
                 Id: "grp-scim-1",
@@ -239,6 +240,18 @@ public sealed class ScimGroupSupplementEndToEndTests : IClassFixture<ScimGroupSu
                 UpdatedAt: null,
                 ObjectSid: ScimGroupSid));
         }
+        else if (existingGroup.Members?.Any(m => m.Value == userKey) != true)
+        {
+            // The group is shared by the tests of this class: a user seeded later must still be a member.
+            await scim.UpdateGroupAsync(tenant, RealmId, "grp-scim-1", existingGroup with
+            {
+                Members = [.. existingGroup.Members ?? [], new ScimGroupMember(userKey, Type: ScimMemberTypes.User)]
+            });
+        }
+
+        // The sync state is shared as well (the stale test ages it): every test starts from a fresh contact.
+        var store = scope.ServiceProvider.GetRequiredService<IIdentityStoreRepository>();
+        await store.UpsertRealmSyncStateAsync(tenant, RealmId, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
     }
 
     [Fact]
