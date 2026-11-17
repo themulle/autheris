@@ -41,7 +41,7 @@ public class CheckedDmlExecutorTransactionTests
     }
 
     private static Task AssertCompletedAsync(DbTransaction transaction) =>
-        Assert.ThrowsAnyAsync<Exception>(() => transaction.CommitAsync());   // a completed transaction cannot be completed again
+        Assert.ThrowsAsync<InvalidOperationException>(() => transaction.CommitAsync());   // a completed transaction cannot be completed again
 
     // ---- real provider (DuckDB in-process): the caller's transaction is used, never a nested one ----
 
