@@ -124,20 +124,24 @@ internal sealed class GovernedSqlCompiler
         }
 
         // 2. cache: a hit still validates every table dependency and rebinds the current values (INV-12)
-        string rawSql = sql.ToString();
-        string keyMaterial = CompileCacheKey.Material(request, rawSql, caps, _engine.MaxQueryLength);
+        // The key stays in the thread-local builder on the hot (hit) path; the raw text and the key string exist only after a miss.
+        var keyBuilder = CompileCacheKey.Build(request, sql.Span, caps, _engine.MaxQueryLength);
         var policy = request.Policy;
         var guards = EffectiveDmlGuards(policy.Dml);
         var typed = new TypedPolicyContext(policy.Catalog, policy.RowFilters, policy.Masks, policy.Tenant, caps) { Dml = guards, Write = policy.Write, PerCellColumns = policy.PerCellColumns };
 
-        string keyHash = CompiledSqlTemplateCache.HashOf(keyMaterial);
-        var template = _cache.Find(keyMaterial, keyHash);
+        string keyHash = CompiledSqlTemplateCache.HashOf(keyBuilder);
+        var template = _cache.Find(keyBuilder, keyHash);
         if (template is not null && TryRehydrate(template, typed))
         {
+            CompileCacheKey.ReleaseBuilder(keyBuilder);
             _cache.CountHit();
             return template.Rebind(typed.PolicyValues, request.PageOffset, request.MaxAllowedOffset);
         }
 
+        string keyMaterial = keyBuilder.ToString();
+        CompileCacheKey.ReleaseBuilder(keyBuilder);
+        string rawSql = sql.ToString();
         _cache.CountMiss();
         if (template is not null)
         {
