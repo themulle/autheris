@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.8.4] - 2026-11-17
+
+### Fixed
+- The release footprint gate budgets the .NET 11 / Ubuntu 26.04 image at 440 MB uncompressed (measured 421 MB, was 360 MB on .NET 10); v1.8.3 was not published because the 340 MB budget failed. 1.8.4 is the first published release containing the .NET 11 platform, the module trust anchor rotation and the module container fixes listed under 1.8.3.
+
 ## [1.8.3] - 2026-11-17
 
 ### Changed
