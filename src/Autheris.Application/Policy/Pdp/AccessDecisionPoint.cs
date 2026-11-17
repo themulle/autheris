@@ -1,6 +1,7 @@
 namespace Autheris.Application.Policy.Pdp;
 
 using System;
+using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
@@ -164,7 +165,7 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
             return await DecideWriteAsync(request, ct).ConfigureAwait(false);
         }
 
-        var roles = new HashSet<string>(subject.TenantRoles.Concat(subject.ClusterRoles), StringComparer.OrdinalIgnoreCase);
+        var roles = MergeRoles(subject.TenantRoles, subject.ClusterRoles);
 
         if (_policy != null)
         {
@@ -246,6 +247,35 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
             Reasons = [new DecisionReason(DecisionStep.DefaultDeny, "POLICY_UNAVAILABLE", "Policy", null)],
             EvaluatedByPdp = true
         };
+    }
+
+    private static readonly IReadOnlySet<string> NoRoles =
+        Array.Empty<string>().ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Case-insensitive union of tenant and cluster roles without LINQ and without growth rehashing. A subject without roles shares one
+    /// immutable empty set (no allocation).
+    /// </summary>
+    internal static IReadOnlySet<string> MergeRoles(IReadOnlySet<string> tenantRoles, IReadOnlySet<string> clusterRoles)
+    {
+        int total = tenantRoles.Count + clusterRoles.Count;
+        if (total == 0)
+        {
+            return NoRoles;
+        }
+
+        var merged = new HashSet<string>(total, StringComparer.OrdinalIgnoreCase);
+        foreach (var role in tenantRoles)
+        {
+            merged.Add(role);
+        }
+
+        foreach (var role in clusterRoles)
+        {
+            merged.Add(role);
+        }
+
+        return merged;
     }
 
     private static TableAccessDecision PreconditionDenied(
