@@ -6,11 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.8.5] - 2026-11-17
+
 ### Added
 - `get_table_schema` columns carry `access` (`clear` or `mask`), the caller's own column state (#711).
 - The DML intent and executed audit records carry `sql.bound_values_digest`, a keyed HMAC-SHA256 over the client and literal values the statement binds, so a record is tied to the exact new values without storing any (#505).
 
 ### Changed
+- Dependency updates: coverlet.collector 10.1.1, dotnet-stryker 5.1.0, node 26.13.1 in the load benchmark image.
 - `docs/configuration-guide.md` is in English (#485).
 - The container image is 409 MB uncompressed (was 421 MB): the published `libduckdb.so` is stripped of its static symbol table (-11 MB) and the localized satellite resource assemblies of the dependencies are no longer published (`SatelliteResourceLanguages=en`). The footprint budget is lowered from 440 MB to 430 MB.
 - Governed SQL compile cache hits no longer allocate the cache key string: the key is built in a thread-local builder, hashed from a pooled buffer and compared chunk by chunk (allocation per cached compile 6.6 KB to 3.2 KB for a 0.5 KB statement, 13.9 KB to 3.2 KB for 4 KB; cache keys and hashes are unchanged).
@@ -25,7 +28,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - The footprint budget nightly workflow no longer fails at start-up: the reusable footprint workflow used the same concurrency group as its caller.
 - `describe_dataset` returns the column `longDescription` (when requested with `include`) on the discovery-service path too (#714); the GraphQL `DiscoveryColumn` type gains the nullable field `longDescription` (sanitized, visible columns only).
 - The native DuckDB library is no longer loaded at startup: the time zone conversion state runs the DuckDB ICU probe lazily on the first DuckDB conversion check instead of in the startup hosted service, so a node that never uses DuckDB does not map `libduckdb.so` (the footprint lazy-load check reports `lazy: true`).
-
 - Idle CPU and memory growth after a large catalog sync (#786): the GraphQL catalog module now gets the catalog version provider in the application composition, so an idle refresh tick exits on an unchanged version instead of rebuilding the whole candidate model every minute (a full check still runs every 10 minutes as a backstop); rebuild requests are coalesced (one running, one waiting with the newest model, instead of one full schema build per change line); a burst of changes rebuilds once it settles (at the latest after 5 minutes) while a single change still rebuilds at once; the refresh timer no longer overlaps a running check; the bulk relation read is authoritative (no per-table fallback reads) and reverse relations are found through an index (O(n) instead of O(n^2)); the log gains `schema build started` and `schema build finished` lines with the duration and a `phase=check|rebuild` field on progress lines (counts and durations only, no catalog names).
 - A retry that started right after a failed key-set load could receive the finished load's failure instead of starting its own load (the single-flight cache released its waiters before unregistering the load); the Virtual Filter key set cache and every other user of `SingleFlightKeySetCache` are fixed.
 
