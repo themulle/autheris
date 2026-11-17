@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.8.3] - 2026-11-17
+
+### Changed
+- The platform runs on .NET 11 (SDK 11.0.100, `net11.0` for all projects) and the container images use Ubuntu 26.04 (`aspnet:11.0.0-resolute`). `double` and `float` values are converted to `decimal` through `DecimalConversions` (15 and 7 significant digits) because .NET 11 converts exactly; quota thresholds, filter coercion, row filters, masking input and exports use it. An empty string for a boolean setting now fails startup with the key name; a ZIP entry with a wrong CRC raises `InvalidDataException`.
+- The module trust anchor (`module-release-pub.pem`) was rotated; release modules are signed with the matching key from the `AUTHERIS_MODULE_SIGNING_KEY_PEM` secret. The maximum size of a single module file is 256 MiB (was 64 MiB) so the DuckDB native library of the Lakehouse module can load.
+
+### Fixed
+- Module directories in the container image are read-only (0555/0444); production refused to load modules from the writable directory the image shipped with.
+- The signed-module container e2e runs against a PostgreSQL sidecar.
+
 ## [1.8.2] - 2026-11-17
 
 ### Fixed
