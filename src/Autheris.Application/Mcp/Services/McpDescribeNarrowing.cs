@@ -202,7 +202,7 @@ public static class McpDescribeNarrowing
 
         var trimmed = text.Trim();
         var list = new List<string>();
-        if (trimmed.StartsWith('['))
+        if (trimmed.StartsWith('[', StringComparison.Ordinal))
         {
             try
             {

@@ -1,5 +1,6 @@
 namespace Autheris.Application.Common.Serialization;
 
+using Autheris.Domain.Common;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -221,7 +222,7 @@ public sealed class ArrowExportService : IArrowExportService
                 {
                     if (row.TryGetValue(columnName, out var val) && val is not null and not DBNull)
                     {
-                        var d = Convert.ToDecimal(val, CultureInfo.InvariantCulture);
+                        var d = DecimalConversions.ToDecimal(val);
                         builder.Append(d);
                     }
                     else

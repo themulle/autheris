@@ -28,7 +28,7 @@ A governed 400 (validation error with a stable `code`), never a 5xx, for every r
 
 ```
 dotnet build tests/Autheris.Sim.ApiHost -c Release -p:AutherisIncludeTestAuth=true
-dotnet tests/Autheris.Sim.ApiHost/bin/Release/net10.0/Autheris.Sim.ApiHost.dll --port 5073 --data-dir "$TMPDIR/sim-data" --ready-file "$TMPDIR/ready" --profile write
+dotnet tests/Autheris.Sim.ApiHost/bin/Release/net11.0/Autheris.Sim.ApiHost.dll --port 5073 --data-dir "$TMPDIR/sim-data" --ready-file "$TMPDIR/ready" --profile write
 # then POST the body {} (Content-Type: application/json) to each path above, authenticated with the sim host's governance-admin test-auth identity
 # (the identity is documented in scripts/sim/run-api-fuzz.sh; no credentials are needed beyond it).
 ```

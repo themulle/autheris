@@ -42,7 +42,11 @@ public sealed class AutherisDistributedContextPropagatorTests
         Propagator.Inject(activity, carrier, (c, key, value) => ((Dictionary<string, string>)c!)[key] = value);
 
         carrier.ShouldContainKey("traceparent");
-        carrier["traceparent"].ShouldBe($"00-{activity.TraceId.ToHexString()}-{activity.SpanId.ToHexString()}-01");
+        // .NET 11 sets the W3C trace-context level 2 "random trace id" flag (0x02) on generated ids, so the flags are 01 or 03: the sampled bit is the contract.
+        var prefix = $"00-{activity.TraceId.ToHexString()}-{activity.SpanId.ToHexString()}-";
+        carrier["traceparent"].ShouldStartWith(prefix);
+        var flags = Convert.ToByte(carrier["traceparent"][prefix.Length..], 16);
+        (flags & 0x01).ShouldBe(0x01, "the sampled flag must be propagated");
         carrier.ShouldNotContainKey("tracestate");
         carrier.ShouldNotContainKey("baggage");
     }

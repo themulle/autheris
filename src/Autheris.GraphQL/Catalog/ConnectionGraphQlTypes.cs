@@ -533,7 +533,7 @@ internal static class ConnectionGraphQlTypes
             case IntValueNode iv:
                 return long.TryParse(iv.Value, System.Globalization.NumberStyles.AllowLeadingSign, System.Globalization.CultureInfo.InvariantCulture, out var parsed)
                     ? new PageNumber(parsed, false)
-                    : new PageNumber(iv.Value.StartsWith('-') ? long.MinValue : long.MaxValue, false);
+                    : new PageNumber(iv.Value.StartsWith('-', StringComparison.Ordinal) ? long.MinValue : long.MaxValue, false);
             case VariableNode vn:
                 var variables = context.Variables;
                 if (variables.TryGetValue<IValueNode>(vn.Name.Value, out var literal) && literal != null)

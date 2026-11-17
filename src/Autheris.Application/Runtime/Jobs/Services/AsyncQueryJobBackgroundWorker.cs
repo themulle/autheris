@@ -448,8 +448,8 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
         // OWASP CSV Formula Injection defense:
         // If the value starts with '=', '+', '-', '@', '\t', or '\r', prepend a single quote "'"
         // unless the value is a valid numeric literal (e.g. negative or positive number).
-        if (value.StartsWith('=') || value.StartsWith('+') || value.StartsWith('-') ||
-            value.StartsWith('@') || value.StartsWith('\t') || value.StartsWith('\r'))
+        if (value.StartsWith('=', StringComparison.Ordinal) || value.StartsWith('+', StringComparison.Ordinal) || value.StartsWith('-', StringComparison.Ordinal) ||
+            value.StartsWith('@', StringComparison.Ordinal) || value.StartsWith('\t', StringComparison.Ordinal) || value.StartsWith('\r', StringComparison.Ordinal))
         {
             if (!decimal.TryParse(value, NumberStyles.Number | NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint | NumberStyles.AllowExponent, CultureInfo.InvariantCulture, out _))
             {

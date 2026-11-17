@@ -109,7 +109,7 @@ public sealed partial class AuthPluginRoleEscalationGuard
                 return true;
             }
 
-            colon = trimmed.IndexOf(':', colon + 1);
+            colon = trimmed.IndexOf(':', colon + 1, StringComparison.Ordinal);
         }
 
         return false;

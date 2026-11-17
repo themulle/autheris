@@ -1,5 +1,6 @@
 namespace Autheris.Application.Sql.Masking;
 
+using Autheris.Domain.Common;
 using System;
 using System.Globalization;
 using System.Linq;
@@ -92,7 +93,7 @@ public static class MaskSpecEvaluator
             throw new InvalidOperationException($"The {spec.Kind} mask has no bound decimal parameter.");
         }
 
-        decimal d = Convert.ToDecimal(bound.Value, CultureInfo.InvariantCulture);
+        decimal d = DecimalConversions.ToDecimal(bound.Value);
         if (d <= 0m)
         {
             throw new InvalidOperationException($"The {spec.Kind} mask parameter must be positive.");
@@ -149,7 +150,7 @@ public static class MaskSpecEvaluator
             return (float)(Math.Floor(flt / w) * w);
         }
 
-        decimal d = Convert.ToDecimal(value, CultureInfo.InvariantCulture);
+        decimal d = DecimalConversions.ToDecimal(value);
         decimal bucket = Math.Floor(d / width) * width;
         return ConvertNumericResult(value, bucket);
     }
@@ -179,7 +180,7 @@ public static class MaskSpecEvaluator
             return (float)(Math.Round(flt / factor, 0, MidpointRounding.AwayFromZero) * factor);
         }
 
-        decimal d = Convert.ToDecimal(value, CultureInfo.InvariantCulture);
+        decimal d = DecimalConversions.ToDecimal(value);
         decimal rounded = digits >= 0
             ? Math.Round(d, Math.Min(digits, 28), MidpointRounding.AwayFromZero)
             : Math.Round(d / MaskFunctionCatalog.Pow10Decimal(-digits), 0, MidpointRounding.AwayFromZero) * MaskFunctionCatalog.Pow10Decimal(-digits);

@@ -17,7 +17,7 @@
 set -euo pipefail
 
 SEED_REGEX='^[0-9]{1,10}$'
-HOST_DLL="tests/Autheris.Sim.ApiHost/bin/Release/net10.0/Autheris.Sim.ApiHost.dll"
+HOST_DLL="tests/Autheris.Sim.ApiHost/bin/Release/net11.0/Autheris.Sim.ApiHost.dll"
 READ_CAP=1500   # 25 minutes
 WRITE_CAP=900   # 15 minutes
 HAR_CAP_BYTES=52428800  # must equal MAX_BYTES of sim-api-report.py

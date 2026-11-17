@@ -65,7 +65,7 @@ public static class PatternMatcher
         var trimmed = glob.Trim();
 
         // If already looks like an explicit regex anchor
-        if (trimmed.StartsWith('^') && trimmed.EndsWith('$'))
+        if (trimmed.StartsWith('^', StringComparison.Ordinal) && trimmed.EndsWith('$', StringComparison.Ordinal))
         {
             return trimmed;
         }

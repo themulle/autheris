@@ -96,7 +96,7 @@ public sealed class McpClusterStateMcp23Tests
             Options.Create(new GatewayOptions()), NullLogger<HitLStepUpApprovalService>.Instance, clusterState: state);
 
         var request = service.RequestStepUpApprovalAsync("tool", "tenant-a", "requester", new TableIdentifier("d", "s", "t"));
-        await WaitHelper.WaitUntil(() => service.GetPendingTickets("tenant-a").Any(), WaitHelper.HangGuard, "the approval ticket was never registered");
+        await WaitHelper.WaitUntil(() => service.GetPendingTickets("tenant-a").Count > 0, WaitHelper.HangGuard, "the approval ticket was never registered");
         var ticket = service.GetPendingTickets("tenant-a").ShouldHaveSingleItem();
 
         var result = await service.ApproveStepUpRequestAsync(ticket.ApprovalId, new HitLApproverContext("steward", ["steward"], "tenant-a")).WaitAsync(Fast);

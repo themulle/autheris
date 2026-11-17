@@ -98,7 +98,7 @@ end";
         }
 
         var prefix = options?.Value?.Caching?.Redis?.InstanceName ?? "autheris:";
-        _redisPrefix = prefix.EndsWith(':') ? prefix : prefix + ":";
+        _redisPrefix = prefix.EndsWith(':', StringComparison.Ordinal) ? prefix : prefix + ":";
     }
 
     /// <summary>

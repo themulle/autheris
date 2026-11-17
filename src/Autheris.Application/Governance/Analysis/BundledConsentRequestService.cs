@@ -117,7 +117,7 @@ public sealed class BundledConsentRequestService : IBundledConsentRequestService
             var dotIndex = dataset.IndexOf('.', StringComparison.Ordinal);
             if (dotIndex >= 0)
             {
-                if (dataset.IndexOf('.', dotIndex + 1) >= 0)
+                if (dataset.IndexOf('.', dotIndex + 1, StringComparison.Ordinal) >= 0)
                 {
                     continue;
                 }

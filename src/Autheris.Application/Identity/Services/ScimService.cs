@@ -519,7 +519,7 @@ public sealed class ScimService : IScimService
                 if (!string.IsNullOrWhiteSpace(op.Path) && op.Path.Contains("value eq", StringComparison.OrdinalIgnoreCase))
                 {
                     var start = op.Path.IndexOf('"', StringComparison.Ordinal);
-                    var end = op.Path.LastIndexOf('"');
+                    var end = op.Path.LastIndexOf('"', StringComparison.Ordinal);
                     if (start >= 0 && end > start)
                     {
                         var targetValue = op.Path.Substring(start + 1, end - start - 1);

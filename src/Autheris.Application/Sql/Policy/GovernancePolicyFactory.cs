@@ -151,7 +151,7 @@ public sealed class GovernancePolicyFactory(
                 }
 
                 dialect = rowPolicy.Dialect;
-                if (input.WritePermit is null || PolicySubqueryTables.Names(rowPolicy.Predicate).Any())
+                if (input.WritePermit is null || PolicySubqueryTables.Names(rowPolicy.Predicate).Count > 0)
                 {
                     consentFiltered.Add(identity.ToString());
                 }
@@ -162,7 +162,7 @@ public sealed class GovernancePolicyFactory(
             if (perCellPolicy is not null)
             {
                 perCellPolicies[identity] = perCellPolicy;
-                if (perCellPolicy.Signatures.Any(static s => PolicySubqueryTables.Names(s.Scope).Any()))
+                if (perCellPolicy.Signatures.Any(static s => PolicySubqueryTables.Names(s.Scope).Count > 0))
                 {
                     consentFiltered.Add(identity.ToString());
                 }

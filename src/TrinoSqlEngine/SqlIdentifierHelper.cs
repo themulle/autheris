@@ -34,7 +34,7 @@ public static class SqlIdentifierHelper
     public static string GetSimpleName(string fullName)
     {
         if (string.IsNullOrEmpty(fullName)) return string.Empty;
-        int lastDot = fullName.LastIndexOf('.');
+        int lastDot = fullName.LastIndexOf('.', StringComparison.Ordinal);
         return lastDot >= 0 && lastDot < fullName.Length - 1 ? fullName[(lastDot + 1)..] : fullName;
     }
 

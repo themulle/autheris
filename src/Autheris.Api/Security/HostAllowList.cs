@@ -119,7 +119,7 @@ public sealed class HostAllowList
             return true;
         }
 
-        if (colon != value.LastIndexOf(':') || colon == 0 || colon == value.Length - 1)
+        if (colon != value.LastIndexOf(':', StringComparison.Ordinal) || colon == 0 || colon == value.Length - 1)
         {
             return false;
         }

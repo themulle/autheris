@@ -3,7 +3,7 @@
 # Multi-protocol Enterprise GraphQL Gateway (Hardened Production Posture)
 # ==============================================================================
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0.15@sha256:bfd912c83295ce66d4b706ebb8541b9f14259b0e76fbb88b2751f58ce2399d2e AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:11.0.0-resolute@sha256:bc0d6653979efba491ab3d6f589d691f96c309c3c3ef81325efa6978e7b7f242 AS runtime
 WORKDIR /app
 
 # Production environment variables
@@ -20,6 +20,7 @@ EXPOSE 8080
 # Setup data volume for SQLite governance DB and install GSSAPI/NTLM/Kerberos runtime with non-root ownership (10001:10001)
 RUN mkdir -p /app/data && chown -R 10001:10001 /app/data
 RUN apt-get update \
+    && apt-get --only-upgrade install -y libc6 libc-bin perl-base \
     && apt-get install -y --no-install-recommends \
         libgssapi-krb5-2 \
         gss-ntlmssp \

@@ -208,7 +208,7 @@ public sealed class Batch5SecurityTestsA
             TableIdentifier.Parse("sales.orders"));
 
         await Autheris.Tests.Common.WaitHelper.WaitUntil(
-            () => service.GetPendingTickets("tenant-1").Any(),
+            () => service.GetPendingTickets("tenant-1").Count > 0,
             Autheris.Tests.Common.WaitHelper.HangGuard,
             "the step-up ticket was never registered");
 

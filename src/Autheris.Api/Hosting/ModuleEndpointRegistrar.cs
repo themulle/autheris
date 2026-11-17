@@ -224,7 +224,7 @@ public sealed class ModuleEndpointRegistrar : IModuleEndpointRegistrar
     /// </summary>
     internal static void ValidateRoutePrefix(string moduleId, string? prefix)
     {
-        if (string.IsNullOrWhiteSpace(prefix) || !prefix.StartsWith('/'))
+        if (string.IsNullOrWhiteSpace(prefix) || !prefix.StartsWith('/', StringComparison.Ordinal))
         {
             throw new ModuleLoadException(moduleId, $"Module endpoint group prefix '{prefix}' must start with '/'.");
         }

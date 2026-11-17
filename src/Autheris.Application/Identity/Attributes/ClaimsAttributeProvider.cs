@@ -104,7 +104,7 @@ public sealed class ClaimsAttributeProvider : ICallerAttributeProvider, INonCach
         foreach (var claim in matching)
         {
             var text = claim.Value.Trim();
-            if (text.StartsWith('['))
+            if (text.StartsWith('[', StringComparison.Ordinal))
             {
                 if (!TryParseArray(text, values))
                 {

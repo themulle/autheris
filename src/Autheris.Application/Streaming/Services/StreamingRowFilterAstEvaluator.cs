@@ -589,7 +589,7 @@ public static partial class StreamingRowFilterAstEvaluator
             return true;
         }
 
-        int dotIdx = colName.LastIndexOf('.');
+        int dotIdx = colName.LastIndexOf('.', StringComparison.Ordinal);
         if (dotIdx >= 0 && dotIdx + 1 < colName.Length)
         {
             string simple = colName[(dotIdx + 1)..];
@@ -696,8 +696,8 @@ public static partial class StreamingRowFilterAstEvaluator
         if (val is long l) { result = l; return true; }
         if (val is short s) { result = s; return true; }
         if (val is byte b) { result = b; return true; }
-        if (val is float f) { result = (decimal)f; return true; }
-        if (val is double db) { result = (decimal)db; return true; }
+        if (val is float f) { result = DecimalConversions.FromSingle(f); return true; }
+        if (val is double db) { result = DecimalConversions.FromDouble(db); return true; }
 
         // Review E-6: strings are never parsed into numbers.
         result = 0;

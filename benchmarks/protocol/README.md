@@ -15,7 +15,7 @@ Measurements must record host hardware and environment parameters to ensure repr
 | **RAM** | 11–16 GiB System RAM |
 | **Operating System** | Linux (Ubuntu 24.04 LTS / WSL2 Kernel 6.18+) |
 | **Architecture** | `x86_64` / `linux-x64` |
-| **.NET SDK** | .NET 10.0 (per `global.json`: `10.0.401`, roll-forward `latestPatch`) |
+| **.NET SDK** | .NET 11.0 (per `global.json`: `11.0.100`, roll-forward `latestPatch`) |
 | **Container Engine** | Docker 29.1+ / Podman 5.0+ |
 
 ---

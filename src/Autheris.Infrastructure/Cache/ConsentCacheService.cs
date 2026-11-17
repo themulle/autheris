@@ -71,7 +71,7 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
         _restrictionFingerprint = (restrictedScopes ?? Autheris.Domain.Security.RestrictedScopePolicy.Default).Fingerprint;
         _l2IntegrityKey = ResolveL2IntegrityKey(options?.Value, secretProvider, logger, multiplexer != null && serializer != null);
         _prefix = options?.Value?.Caching?.Redis?.InstanceName ?? "Autheris:";
-        if (!_prefix.EndsWith(':'))
+        if (!_prefix.EndsWith(':', StringComparison.Ordinal))
         {
             _prefix += ":";
         }

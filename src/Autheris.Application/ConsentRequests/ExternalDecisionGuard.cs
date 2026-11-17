@@ -379,7 +379,7 @@ public sealed class ExternalDecisionGuard(
     private static void AddNormalized(HashSet<string> set, string? value)
     {
         if (string.IsNullOrWhiteSpace(value)) return;
-        var idx = value.LastIndexOf(':');
+        var idx = value.LastIndexOf(':', StringComparison.Ordinal);
         if (idx >= 0 && idx + 1 < value.Length)
         {
             AddNonEmpty(set, value[(idx + 1)..]);

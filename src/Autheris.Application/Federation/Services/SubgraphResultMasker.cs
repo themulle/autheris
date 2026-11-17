@@ -76,7 +76,7 @@ public sealed class SubgraphResultMasker : ISubgraphResultMasker
         {
             if (string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(ruleType)) continue;
             var normalizedKey = FederatedFieldName.Normalize(key);
-            var lastDot = key.LastIndexOf('.');
+            var lastDot = key.LastIndexOf('.', StringComparison.Ordinal);
             var field = FederatedFieldName.Normalize(lastDot >= 0 ? key[(lastDot + 1)..] : key);
             if (field.Length == 0) continue;
 

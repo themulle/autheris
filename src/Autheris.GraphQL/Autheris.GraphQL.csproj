@@ -6,8 +6,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="HotChocolate.AspNetCore" Version="16.7.3" />
-    <PackageReference Include="HotChocolate.Data" Version="16.7.3" />
+    <PackageReference Include="HotChocolate.AspNetCore" Version="16.7.5" />
+    <PackageReference Include="HotChocolate.Data" Version="16.7.5" />
   </ItemGroup>
 
   <ItemGroup>
@@ -15,7 +15,6 @@
   </ItemGroup>
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>

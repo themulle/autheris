@@ -29,7 +29,7 @@ public sealed class SecurityHeadersMiddleware
         _options = options ?? throw new ArgumentNullException(nameof(options));
         ArgumentNullException.ThrowIfNull(env);
 
-        _nitroToolPath = options.GraphQL.BananaCakePopPath.StartsWith('/')
+        _nitroToolPath = options.GraphQL.BananaCakePopPath.StartsWith('/', StringComparison.Ordinal)
             ? options.GraphQL.BananaCakePopPath
             : "/" + options.GraphQL.BananaCakePopPath;
         _allowNitroToolCsp = env.IsDevelopment() && options.GraphQL.EnableBananaCakePop;

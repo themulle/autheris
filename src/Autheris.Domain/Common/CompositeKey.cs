@@ -75,7 +75,7 @@ public readonly struct CompositeKey : IEquatable<CompositeKey>, IComparable<Comp
             case float f:
                 if (!float.IsNaN(f) && !float.IsInfinity(f) && f >= (float)decimal.MinValue && f <= (float)decimal.MaxValue)
                 {
-                    result = (decimal)f;
+                    result = DecimalConversions.FromSingle(f);
                     return true;
                 }
                 result = 0;
@@ -83,7 +83,7 @@ public readonly struct CompositeKey : IEquatable<CompositeKey>, IComparable<Comp
             case double db:
                 if (!double.IsNaN(db) && !double.IsInfinity(db) && db >= (double)decimal.MinValue && db <= (double)decimal.MaxValue)
                 {
-                    result = (decimal)db;
+                    result = DecimalConversions.FromDouble(db);
                     return true;
                 }
                 result = 0;

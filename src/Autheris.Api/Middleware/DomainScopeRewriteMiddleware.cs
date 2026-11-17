@@ -36,7 +36,7 @@ public sealed partial class DomainScopeRewriteMiddleware
         _next = next ?? throw new ArgumentNullException(nameof(next));
         _graphQlEndpoint = string.IsNullOrWhiteSpace(graphQlEndpoint)
             ? "/graphql"
-            : (graphQlEndpoint.StartsWith('/') ? graphQlEndpoint.TrimEnd('/') : "/" + graphQlEndpoint.TrimEnd('/'));
+            : (graphQlEndpoint.StartsWith('/', StringComparison.Ordinal) ? graphQlEndpoint.TrimEnd('/') : "/" + graphQlEndpoint.TrimEnd('/'));
     }
 
     [GeneratedRegex(@"^[a-zA-Z0-9_-]{1,64}$", RegexOptions.CultureInvariant)]
@@ -93,6 +93,6 @@ public sealed partial class DomainScopeRewriteMiddleware
             return "/graphql";
         }
 
-        return ep.StartsWith('/') ? ep : "/" + ep;
+        return ep.StartsWith('/', StringComparison.Ordinal) ? ep : "/" + ep;
     }
 }

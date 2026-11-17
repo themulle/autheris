@@ -1,5 +1,6 @@
 namespace Autheris.Infrastructure.Databricks;
 
+using Autheris.Domain.Common;
 using System.Collections.Immutable;
 using System.Data;
 using System.Data.Common;
@@ -162,7 +163,7 @@ public sealed class DatabricksDbCommand : DbCommand, Autheris.Application.Usage.
             DbType.Int64 => new DatabricksParameter(name, Convert.ToInt64(value, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture), "BIGINT"),
             DbType.Double => new DatabricksParameter(name, Convert.ToDouble(value, CultureInfo.InvariantCulture).ToString("R", CultureInfo.InvariantCulture), "DOUBLE"),
             DbType.Boolean => new DatabricksParameter(name, Convert.ToBoolean(value, CultureInfo.InvariantCulture) ? "true" : "false", "BOOLEAN"),
-            DbType.Decimal => MapDecimal(name, Convert.ToDecimal(value, CultureInfo.InvariantCulture)),
+            DbType.Decimal => MapDecimal(name, DecimalConversions.ToDecimal(value)),
             DbType.Date => new DatabricksParameter(name, ToDateTime(value).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), "DATE"),
             DbType.DateTime or DbType.DateTime2 => new DatabricksParameter(name, FormatTimestamp(ToDateTime(value)), "TIMESTAMP"),
             DbType.DateTimeOffset => new DatabricksParameter(name, FormatTimestamp(((DateTimeOffset)value).UtcDateTime), "TIMESTAMP"),

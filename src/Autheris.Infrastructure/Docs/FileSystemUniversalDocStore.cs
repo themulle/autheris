@@ -114,7 +114,7 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
         }
 
         var safeAppId = Path.GetFileName(appId);
-        var rootWithSep = _rootPath.EndsWith(Path.DirectorySeparatorChar)
+        var rootWithSep = _rootPath.EndsWith(Path.DirectorySeparatorChar, StringComparison.Ordinal)
             ? _rootPath
             : _rootPath + Path.DirectorySeparatorChar;
 
@@ -222,7 +222,7 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
         ValidateSafeIdentifier(appId, nameof(appId));
 
         var safeAppId = Path.GetFileName(appId);
-        var rootWithSep = _rootPath.EndsWith(Path.DirectorySeparatorChar)
+        var rootWithSep = _rootPath.EndsWith(Path.DirectorySeparatorChar, StringComparison.Ordinal)
             ? _rootPath
             : _rootPath + Path.DirectorySeparatorChar;
 
@@ -232,7 +232,7 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
             throw new ArgumentException("Invalid target application directory.", nameof(appId));
         }
 
-        var targetDirWithSep = targetDir.EndsWith(Path.DirectorySeparatorChar)
+        var targetDirWithSep = targetDir.EndsWith(Path.DirectorySeparatorChar, StringComparison.Ordinal)
             ? targetDir
             : targetDir + Path.DirectorySeparatorChar;
 
@@ -615,7 +615,7 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
         var safeAppId = Path.GetFileName(request.AppId);
         var categoryName = Path.GetFileName(request.Category.ToString().ToLowerInvariant());
 
-        var rootWithSep = _rootPath.EndsWith(Path.DirectorySeparatorChar)
+        var rootWithSep = _rootPath.EndsWith(Path.DirectorySeparatorChar, StringComparison.Ordinal)
             ? _rootPath
             : _rootPath + Path.DirectorySeparatorChar;
 

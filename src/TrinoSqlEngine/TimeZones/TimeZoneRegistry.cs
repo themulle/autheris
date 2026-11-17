@@ -136,7 +136,7 @@ public static partial class TimeZoneRegistry
         {
             if (rawLine.Length == 0 || rawLine[0] == '#') continue;
             int separator = rawLine.IndexOf(';', StringComparison.Ordinal);
-            if (separator <= 0 || rawLine.IndexOf(';', separator + 1) >= 0) return Snapshot.Failed("format");
+            if (separator <= 0 || rawLine.IndexOf(';', separator + 1, StringComparison.Ordinal) >= 0) return Snapshot.Failed("format");
 
             string iana = rawLine[..separator];
             string windows = rawLine[(separator + 1)..];

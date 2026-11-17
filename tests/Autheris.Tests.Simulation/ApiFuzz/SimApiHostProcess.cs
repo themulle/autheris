@@ -39,7 +39,7 @@ public sealed class SimApiHostProcess : IDisposable
         }
     }
 
-    public static string HostDll => Path.Combine(RepoRoot, "tests", "Autheris.Sim.ApiHost", "bin", "Release", "net10.0", "Autheris.Sim.ApiHost.dll");
+    public static string HostDll => Path.Combine(RepoRoot, "tests", "Autheris.Sim.ApiHost", "bin", "Release", "net11.0", "Autheris.Sim.ApiHost.dll");
 
     public static int FreeLoopbackPort()
     {

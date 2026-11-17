@@ -136,12 +136,12 @@ public static class Bcp47LanguageTag
         if (string.IsNullOrWhiteSpace(tag)) yield break;
         yield return tag;
 
-        int dashIdx = tag.LastIndexOf('-');
+        int dashIdx = tag.LastIndexOf('-', StringComparison.Ordinal);
         while (dashIdx > 0)
         {
             tag = tag[..dashIdx];
             yield return tag;
-            dashIdx = tag.LastIndexOf('-');
+            dashIdx = tag.LastIndexOf('-', StringComparison.Ordinal);
         }
     }
 }

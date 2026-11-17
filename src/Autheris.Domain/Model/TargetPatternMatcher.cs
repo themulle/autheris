@@ -34,7 +34,7 @@ public static class TargetPatternMatcher
     /// <summary>True for the regex forms <c>^...</c> and <c>regex:...</c> (prefix case-insensitive).</summary>
     public static bool IsRegex(string? pattern) =>
         pattern != null &&
-        (pattern.StartsWith('^') || pattern.StartsWith(RegexPrefix, StringComparison.OrdinalIgnoreCase));
+        (pattern.StartsWith('^', StringComparison.Ordinal) || pattern.StartsWith(RegexPrefix, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>Write-time check: throws <see cref="ArgumentException"/> for an overlong, invalid or unsupported pattern.</summary>
     public static void Validate(string pattern)

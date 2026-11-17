@@ -20,7 +20,7 @@ This guide helps engineers run the gateway locally with zero external dependenci
 
 ## 1. Prerequisites
 
-- **.NET SDK**: 10.0 or higher (`net10.0`)
+- **.NET SDK**: 11.0 (`net11.0`)
 - **IDE**: Visual Studio 2026, VS Code with C# Dev Kit, or JetBrains Rider
 - **One external service required**: the governance store is PostgreSQL (or SQL Server). Start it with the compose stack or a local PostgreSQL container and set `Gateway:GovernanceDb:ConnectionString`; demo data (`GovernanceDb:SeedDemoData`) and configured test users need nothing else (no Redis, no SQL Server).
 - **WSL**: if many integration tests fail with an inotify limit error, run them with `DOTNET_USE_POLLING_FILE_WATCHER=true`.

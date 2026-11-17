@@ -50,7 +50,7 @@ public sealed class RedisTokenRevocationService : ITokenRevocationService
         {
             instance = "Autheris:";
         }
-        else if (!instance.EndsWith(':'))
+        else if (!instance.EndsWith(':', StringComparison.Ordinal))
         {
             instance += ":";
         }
@@ -83,13 +83,13 @@ public sealed class RedisTokenRevocationService : ITokenRevocationService
         key = string.Empty;
         revokedAt = default;
         until = default;
-        int last = payload.LastIndexOf('|');
+        int last = payload.LastIndexOf('|', StringComparison.Ordinal);
         if (last <= 0)
         {
             return false;
         }
 
-        int prev = payload.LastIndexOf('|', last - 1);
+        int prev = payload.LastIndexOf('|', last - 1, StringComparison.Ordinal);
         if (prev <= 0)
         {
             return false;

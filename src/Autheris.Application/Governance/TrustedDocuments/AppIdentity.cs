@@ -31,7 +31,7 @@ public readonly partial record struct AppIdentity(string AppId, string Version)
         }
 
         int slash = value.IndexOf('/', StringComparison.Ordinal);
-        if (slash <= 0 || slash != value.LastIndexOf('/'))
+        if (slash <= 0 || slash != value.LastIndexOf('/', StringComparison.Ordinal))
         {
             return false;
         }

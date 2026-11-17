@@ -87,7 +87,7 @@ internal static class ActorIdentifiers
 
         var v = value.Trim();
         set.Add(v);
-        var slash = v.LastIndexOf('\\');
+        var slash = v.LastIndexOf('\\', StringComparison.Ordinal);
         if (slash >= 0 && slash < v.Length - 1)
         {
             set.Add(v[(slash + 1)..]);

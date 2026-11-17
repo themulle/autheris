@@ -39,7 +39,7 @@ public sealed class RedisClusterStateProvider : IDistributedClusterStateProvider
         {
             instance = "Autheris:";
         }
-        else if (!instance.EndsWith(':'))
+        else if (!instance.EndsWith(':', StringComparison.Ordinal))
         {
             instance += ":";
         }

@@ -299,7 +299,7 @@ public sealed class ForwardAuthAuthenticationHandler : AuthenticationHandler<Aut
             foreach (var r in roles)
             {
                 // A tenant prefix is honoured only for the resolved, trusted header tenant.
-                var colonIdx = r.LastIndexOf(':');
+                var colonIdx = r.LastIndexOf(':', StringComparison.Ordinal);
                 var baseRole = colonIdx >= 0 ? r[(colonIdx + 1)..].Trim() : r;
                 if (colonIdx >= 0)
                 {
