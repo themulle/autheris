@@ -238,7 +238,7 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
             );
         }).ToList();
 
-        return new CatalogDatasetDetail(
+        return Autheris.Application.DataSources.Services.RequiredFilterColumnProjection.WithRequiredFilters(metadata, new CatalogDatasetDetail(
             DatasetId: metadata.Identifier.ToString(),
             Domain: metadata.Identifier.Domain,
             Schema: metadata.Identifier.Schema,
@@ -255,7 +255,7 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
             // Issue #390: parallel to PrimaryKeys; null unless a column is descending, and never for a key with a hidden column (Restrict drops it).
             PrimaryKeyDirections: KeyDirections.AnyDescending(keys.PrimaryKeyDirections) ? KeyDirections.ToWire(keys.PrimaryKeyDirections) : null,
             Size: DatasetSizeClassifier.Resolve(metadata)
-        );
+        ));
     }
 
     /// <summary>

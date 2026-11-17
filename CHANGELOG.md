@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- MCP `describe_dataset` and the REST catalog detail (`GET /api/v1/catalog/datasets/{id}`) report the declared primary key again (`primaryKey` per column, `primaryKeyOrder` with `ASC`/`DESC`, REST `primaryKeys` in key order with `primaryKeyDirections`) and the declared indexes with their column order and directions (#805). Since 1.8.0 the discovery-service path returned none of them. A key or index is reported only when every one of its columns is Clear for the caller, as before.
+- `describe_dataset` reports `requiredFilterColumns` and `requiredFilterColumnGroups` again; the REST catalog detail gains both members (omitted when the dataset has none). A required filter column is named only when the caller has at least masked access to it and it is not discovery-hidden (the REST detail lists columns without access with masking state `Deny`, but never names them as required filters); a group only when every member qualifies (#807).
+
 ## [1.8.5] - 2026-11-17
 
 ### Added

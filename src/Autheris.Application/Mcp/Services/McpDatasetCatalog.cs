@@ -519,6 +519,10 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
 
         var (dataOwner, dataOwnerDelegates) = await LoadOwnersAsync(id, displayNameOnly: false, ct).ConfigureAwait(false);
 
+        // Issue #807: required filters only over the columns this answer lists.
+        var requiredFilters = Autheris.Application.DataSources.Services.RequiredFilterColumnProjection.Project(
+            table, columns.Select(static c => c.Name).ToHashSet(StringComparer.OrdinalIgnoreCase));
+
         var tableResolved = negotiatedLanguage != null ? table.Table.Texts.Resolve(negotiatedLanguage) : null;
         var tableDisplayName = McpCatalogText.DisplayName(tableResolved?.Title ?? table.Table.DisplayName, id.TableName);
         var tableDescription = tableResolved?.Description ?? table.Table.Description;
@@ -543,8 +547,8 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
             DataOwnerDelegates: dataOwnerDelegates,
             AccessStatus: accessStatus,
             Indexes: keyView.Indexes,
-            RequiredFilterColumns: table.RequiredFilterColumns.Length > 0 ? table.RequiredFilterColumns : null,
-            RequiredFilterColumnGroups: table.RequiredFilterColumnGroups.Length > 0 ? table.RequiredFilterColumnGroups.Select(g => (IReadOnlyList<string>)g).ToList() : null,
+            RequiredFilterColumns: requiredFilters.Columns.Count > 0 ? requiredFilters.Columns : null,
+            RequiredFilterColumnGroups: requiredFilters.Groups.Count > 0 ? requiredFilters.Groups : null,
             Language: negotiatedLanguage,
             RequestedLanguage: language,
             PrimaryKeyOrder: keyView.PrimaryKeyOrder,
