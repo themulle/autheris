@@ -22,7 +22,7 @@ using Microsoft.Extensions.Options;
 /// </summary>
 public partial class GovernanceRepository : IGovernanceRepository, IConsentDescriptionRepository, Migrations.IGovernanceStoreInitializer, IAuditChainExportSource, IAuditPurgeKeyProvider
 {
-    private long MetadataCacheTtlTicks { get; }
+    internal long MetadataCacheTtlTicks { get; }
 
     // Bounded (a 10k-table catalog must not grow the cache without limit); a miss just reloads the metadata.
     private readonly Autheris.Application.State.Caching.BoundedCache<string, (TableMetadata? Metadata, long CachedAtTicks, long Epoch)> _metadataCache;
