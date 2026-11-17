@@ -27,6 +27,16 @@ public sealed class DocsOptions
     public int IndexRefreshSeconds { get; set; } = 30;
 
     public int TombstoneRetentionHours { get; set; } = 24;
+
+    public DocsLegacyImportOptions LegacyImport { get; set; } = new();
+}
+
+/// <summary>
+/// One-shot import of the former file layout; disabled while <see cref="SourcePath"/> is empty.
+/// </summary>
+public sealed class DocsLegacyImportOptions
+{
+    public string? SourcePath { get; set; }
 }
 
 /// <summary>

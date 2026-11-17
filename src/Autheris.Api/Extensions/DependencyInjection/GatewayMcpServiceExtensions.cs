@@ -57,6 +57,7 @@ public static class GatewayMcpServiceExtensions
         services.AddSingleton<Autheris.Application.Docs.Services.DocIndexRefreshService>();
         services.AddSingleton<Autheris.Application.Docs.Interfaces.IDocIndexReadiness>(sp => sp.GetRequiredService<Autheris.Application.Docs.Services.DocIndexRefreshService>());
         services.AddHostedService(sp => sp.GetRequiredService<Autheris.Application.Docs.Services.DocIndexRefreshService>());
+        services.AddHostedService<Autheris.Infrastructure.Docs.LegacyDocFileImporter>();
 
         // Human-in-the-Loop Step-Up Approval (F-AI-05)
         services.AddSingleton<IHitLStepUpApprovalService, HitLStepUpApprovalService>();
