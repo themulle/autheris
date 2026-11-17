@@ -365,7 +365,15 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
                     Description: c.Description,
                     PrimaryKey: c.IsPrimaryKey,
                     IsSensitive: !string.IsNullOrEmpty(c.Sensitivity) && !string.Equals(c.Sensitivity, "Public", StringComparison.OrdinalIgnoreCase) && !string.Equals(c.Sensitivity, "NORMAL", StringComparison.OrdinalIgnoreCase),
-                    GraphQlField: graphQlFields is not null && graphQlFields.TryGetValue(c.Name, out var columnField) ? columnField : null
+                    GraphQlField: graphQlFields is not null && graphQlFields.TryGetValue(c.Name, out var columnField) ? columnField : null,
+                    // The caller's own state, from the same filtered detail row as the column list: clear, or mask for any masking rule.
+                    Access: c.MaskingState switch
+                    {
+                        null or "" => null,
+                        var state when string.Equals(state, "Clear", StringComparison.OrdinalIgnoreCase) => "clear",
+                        var state when string.Equals(state, "Deny", StringComparison.OrdinalIgnoreCase) => null,
+                        _ => "mask"
+                    }
                 )).ToList();
 
                 // MCP-05: only declared relations are emitted, never guessed from column names.

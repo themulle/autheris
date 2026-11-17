@@ -320,7 +320,8 @@ public sealed partial class McpDatasetCatalog
                     ValueProfile: colProfile,
                     Access: c.State == DiscoveryColumnState.Clear ? "clear" : "mask",
                     DisplayName: DiscoveryTextSanitizer.SanitizeText(c.DisplayName, DiscoveryTextSanitizer.MaxDisplayNameRunes),
-                    Classifications: c.Classifications, ClearRequestable: c.ClearRequestable);
+                    Classifications: c.Classifications, ClearRequestable: c.ClearRequestable,
+                    LongDescription: c.LongDescription);
             })
             .ToList();
 

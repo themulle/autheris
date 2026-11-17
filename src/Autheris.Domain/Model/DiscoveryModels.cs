@@ -40,7 +40,8 @@ public sealed record DiscoveryColumn(
     bool ClearInSomeRows = false,
     bool WriteProtected = false,
     IReadOnlyList<DiscoveryColumnClassification>? Classifications = null,
-    IReadOnlyList<string>? ClearRequestable = null)
+    IReadOnlyList<string>? ClearRequestable = null,
+    string? LongDescription = null)
 {
     public IReadOnlyList<DiscoveryColumnClassification> Classifications { get; init; } = Classifications ?? [];
     public IReadOnlyList<string> ClearRequestable { get; init; } = ClearRequestable ?? [];

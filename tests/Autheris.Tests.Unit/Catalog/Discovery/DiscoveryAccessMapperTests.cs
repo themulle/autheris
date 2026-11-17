@@ -12,6 +12,23 @@ using Xunit;
 public sealed class DiscoveryAccessMapperTests
 {
     [Fact]
+    public void Map_CarriesTheColumnLongDescription_Sanitized()
+    {
+        var table = DiscoveryTestBuilder.MakeTable("sales", "orders", columns: [("id", false, false)]);
+        table = table with { Columns = [new TableColumn { ColumnName = "id", DataType = "varchar", LongDescription = "Line one\nLine two\u0007" }] };
+        var decision = TableAccessDecision.Allowed(
+            table.Identifier,
+            new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase) { ["id"] = ColumnAccessLevel.Clear });
+
+        var mapped = DiscoveryAccessMapper.Map(table, decision, [], false, false, null, language: null, isHidden: false);
+
+        var longDescription = mapped.Columns.ShouldHaveSingleItem().LongDescription;
+        longDescription.ShouldNotBeNull();
+        longDescription.ShouldContain("Line one\nLine two");
+        longDescription.ShouldNotContain("\u0007");
+    }
+
+    [Fact]
     public void Map_GrantedWithRowFilter_ProjectsRowRestricted_AndMasksRowDependentColumns()
     {
         var table = DiscoveryTestBuilder.MakeTable(

@@ -6,7 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- `get_table_schema` columns carry `access` (`clear` or `mask`), the caller's own column state (#711).
+- The DML intent and executed audit records carry `sql.bound_values_digest`, a keyed HMAC-SHA256 over the client and literal values the statement binds, so a record is tied to the exact new values without storing any (#505).
+
+### Changed
+- `docs/configuration-guide.md` is in English (#485).
+
+### Removed
+- The unused OpenJev client, `IOpenJevClient`, `JustificationTriageService`, `IJustificationTriageService` and the justification triage result types (#503).
+
 ### Fixed
+- `describe_dataset` returns the column `longDescription` (when requested with `include`) on the discovery-service path too (#714).
 - A retry that started right after a failed key-set load could receive the finished load's failure instead of starting its own load (the single-flight cache released its waiters before unregistering the load); the Virtual Filter key set cache and every other user of `SingleFlightKeySetCache` are fixed.
 
 ## [1.8.4] - 2026-11-17

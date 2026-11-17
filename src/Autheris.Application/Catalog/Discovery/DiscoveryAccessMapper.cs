@@ -67,6 +67,11 @@ public static class DiscoveryAccessMapper
                 colLocalized?.Description ?? col.Description,
                 DiscoveryTextSanitizer.MaxDescriptionRunes);
 
+            var colLongDescription = DiscoveryTextSanitizer.SanitizeText(
+                colLocalized?.LongDescription ?? col.LongDescription,
+                DiscoveryTextSanitizer.MaxDescriptionRunes * 4,
+                allowNewlinesAndTabs: true);
+
             DiscoveryColumnStatistics? stats = null;
             if (colState != DiscoveryColumnState.NoAccess &&
                 colStatsByName != null &&
@@ -87,7 +92,8 @@ public static class DiscoveryAccessMapper
                 ClearInSomeRows: clearInSomeRows,
                 WriteProtected: col.WriteProtected,
                 Classifications: classifications,
-                ClearRequestable: clearRequestable));
+                ClearRequestable: clearRequestable,
+                LongDescription: colLongDescription));
         }
 
         var tableLocalized = !string.IsNullOrWhiteSpace(language) ? table.Table.Texts.Resolve(language) : null;
