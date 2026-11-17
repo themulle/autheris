@@ -25,12 +25,6 @@ public interface IDelegationCapability
     /// <summary>The delegation mechanisms supported by this connector.</summary>
     IReadOnlySet<DelegationKind> SupportedDelegationKinds { get; }
 
-    /// <summary>True when the underlying data source natively evaluates row-level security.</summary>
-    bool SourceEnforcesRowSecurity { get; }
-
-    /// <summary>True when the underlying data source natively evaluates column masking.</summary>
-    bool SourceEnforcesMasking { get; }
-
     /// <summary>True if the connector supports correlation tags for audit trail linkage.</summary>
     bool SupportsCorrelationTag { get; }
 }

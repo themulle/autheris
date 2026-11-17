@@ -373,8 +373,6 @@ public sealed class DatabricksOboSecurityTests
         var provider = new DatabricksOboTokenProvider(http);
 
         provider.SupportedDelegationKinds.ShouldContain(DelegationKind.TokenDelegation);
-        provider.SourceEnforcesRowSecurity.ShouldBeTrue();
-        provider.SourceEnforcesMasking.ShouldBeTrue();
         provider.SupportsCorrelationTag.ShouldBeTrue();
     }
 

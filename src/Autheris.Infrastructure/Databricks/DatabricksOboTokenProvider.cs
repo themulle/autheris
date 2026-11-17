@@ -61,8 +61,6 @@ public sealed class DatabricksOboTokenProvider : IDatabricksCredentialProvider, 
     public IReadOnlySet<DelegationKind> SupportedDelegationKinds { get; } =
         new HashSet<DelegationKind> { DelegationKind.TokenDelegation };
 
-    public bool SourceEnforcesRowSecurity => true;
-    public bool SourceEnforcesMasking => true;
     public bool SupportsCorrelationTag => true;
 
     public async Task<string> AcquireTokenAsync(DatabricksDataSourceOptions db, DelegationContext? context, CancellationToken ct)
