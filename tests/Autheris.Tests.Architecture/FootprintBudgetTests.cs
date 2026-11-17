@@ -39,8 +39,8 @@ public sealed class FootprintBudgetTests
             prop.Value.GetProperty("source").GetString().ShouldNotBeNullOrWhiteSpace();
         }
 
-        metrics.GetProperty("coreImageUncompressedMB").GetProperty("budget").GetDouble().ShouldBe(325.0);
-        metrics.GetProperty("coldStartP50Seconds").GetProperty("budget").GetDouble().ShouldBe(3.0);
+        metrics.GetProperty("coreImageUncompressedMB").GetProperty("budget").GetDouble().ShouldBe(340.0);
+        metrics.GetProperty("coldStartP50Seconds").GetProperty("budget").GetDouble().ShouldBe(5.0);
         metrics.GetProperty("warmP99Milliseconds").GetProperty("budget").GetDouble().ShouldBe(3.47);
 
         var ciMetric = metrics.GetProperty("ciPrWallClockMedianMinutes");

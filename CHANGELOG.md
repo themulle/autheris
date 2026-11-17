@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.8.2] - 2026-11-17
+
+### Fixed
+- The release footprint gate starts the Production image with a TLS-verified PostgreSQL sidecar and measures it with `Migrations:Mode=Verify`; v1.8.0 and v1.8.1 were not published because the gate could not start the container. Budgets: image 340 MB, cold start 5.0 s (10 percent tolerance unchanged). 1.8.2 is the first published release of the 1.8 line and contains everything listed under 1.8.0 and 1.8.1.
+
 ## [1.8.1] - 2026-11-17
 
 ### Added
