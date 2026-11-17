@@ -1,0 +1,1 @@
+SELECT CAST(created_at AS date) AS d, COUNT(*) AS n FROM orders GROUP BY CAST(created_at AS date)

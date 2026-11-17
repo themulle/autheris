@@ -1,0 +1,1 @@
+SELECT COUNT(*) FILTER (WHERE email = 'anna@example.com') FROM dbo.people

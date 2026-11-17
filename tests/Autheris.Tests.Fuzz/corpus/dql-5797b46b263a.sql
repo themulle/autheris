@@ -1,0 +1,1 @@
+SELECT id FROM orders WHERE id = 1 OR id = 2

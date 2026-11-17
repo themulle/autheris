@@ -1,1 +1,0 @@
-SELECT id, name, ssn FROM employees

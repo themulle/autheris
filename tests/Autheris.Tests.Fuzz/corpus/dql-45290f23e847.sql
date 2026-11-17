@@ -1,0 +1,1 @@
+SELECT "QUERY_TO_XML"('SELECT 1', true, false, '')

@@ -1,0 +1,1 @@
+SELECT id, secret_val FROM test_items

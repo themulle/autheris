@@ -1,0 +1,1 @@
+WITH FUNCTION abc() RETURNS int RETURN 42, SESSION query_max_memory = '1GB' SELECT 1

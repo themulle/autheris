@@ -1,0 +1,1 @@
+SELECT a FROM t WHERE crane_type = @crane_type LIMIT 10

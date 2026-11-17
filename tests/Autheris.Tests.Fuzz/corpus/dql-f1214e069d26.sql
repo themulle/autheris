@@ -1,1 +1,0 @@
-SELECT * FROM orders JOIN public_info ON orders.id = public_info.id

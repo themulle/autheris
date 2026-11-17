@@ -1,0 +1,1 @@
+WITH c AS (SELECT id FROM crm_api.public.customers) SELECT c.id FROM c UNION ALL SELECT id FROM erp.public.orders

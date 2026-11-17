@@ -1,1 +1,0 @@
-SELECT o.id, s.tracking FROM crm.public.orders o JOIN logistics.v1.shipments s ON o.shipment_id = s.id

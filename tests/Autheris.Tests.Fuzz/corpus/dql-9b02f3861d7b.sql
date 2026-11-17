@@ -1,0 +1,1 @@
+SELECT setval('s', 1), id FROM employees

@@ -1,0 +1,1 @@
+WITH "dept_summary" AS (

@@ -1,1 +1,0 @@
-SELECT "dbo"."invoices"."id"

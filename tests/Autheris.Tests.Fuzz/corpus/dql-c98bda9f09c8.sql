@@ -1,0 +1,1 @@
+SELECT o.id, o.amount, s.carrier, s.status

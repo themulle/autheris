@@ -1,0 +1,1 @@
+SELECT id FROM orders WHERE tenant_id = 't1' AND tenant_id = 't2'

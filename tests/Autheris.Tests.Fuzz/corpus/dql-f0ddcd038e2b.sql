@@ -1,0 +1,1 @@
+SELECT id, amount FROM orders WHERE amount > 50

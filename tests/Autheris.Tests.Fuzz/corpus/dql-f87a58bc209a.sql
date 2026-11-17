@@ -1,1 +1,0 @@
-SELECT id FROM orders WHERE a IS DISTINCT FROM b

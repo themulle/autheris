@@ -1,1 +1,0 @@
-SELECT substring(name FROM 2 FOR 3) FROM t

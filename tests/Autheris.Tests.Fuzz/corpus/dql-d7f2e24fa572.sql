@@ -1,0 +1,1 @@
+SELECT CAST(created_at AS date), EXTRACT(YEAR FROM created_at) FROM t

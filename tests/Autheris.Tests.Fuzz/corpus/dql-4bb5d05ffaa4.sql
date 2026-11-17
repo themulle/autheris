@@ -1,1 +1,0 @@
-WITH recent AS (SELECT id, customer_id FROM erp.public.orders)

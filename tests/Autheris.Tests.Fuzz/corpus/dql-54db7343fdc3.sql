@@ -1,1 +1,0 @@
-SELECT some_extension_function(email) FROM orders

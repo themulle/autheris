@@ -1,1 +1,0 @@
-SELECT dept, COUNT(*) AS n FROM orders GROUP BY dept HAVING COUNT(*) > 5

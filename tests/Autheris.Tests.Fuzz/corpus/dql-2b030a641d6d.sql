@@ -1,1 +1,0 @@
-SELECT o.id, s.tracking FROM crm.public.orders o CROSS JOIN logistics.v1.shipments s

@@ -1,1 +1,0 @@
-SELECT COUNT(id) FILTER (WHERE amount > 100), COUNT(*) FILTER (WHERE dept = 'Sales') FROM orders

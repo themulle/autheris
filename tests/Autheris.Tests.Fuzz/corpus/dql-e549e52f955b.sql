@@ -1,1 +1,0 @@
-SELECT date_add('day', 3, d) AS a, date_trunc('month', d) AS t, d + INTERVAL '2' DAY AS i FROM t

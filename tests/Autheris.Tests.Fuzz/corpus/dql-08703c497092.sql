@@ -1,1 +1,0 @@
-SELECT dept, COUNT(id) FROM t GROUP BY dept HAVING COUNT(id) > 1

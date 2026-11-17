@@ -1,0 +1,1 @@
+SELECT COUNT(*) AS n FROM crm_api.public.customers c WHERE c.id = '2'

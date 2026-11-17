@@ -1,0 +1,1 @@
+SELECT id, email, salary FROM users

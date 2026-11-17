@@ -1,0 +1,1 @@
+SELECT strpos(a, 'x') FROM t

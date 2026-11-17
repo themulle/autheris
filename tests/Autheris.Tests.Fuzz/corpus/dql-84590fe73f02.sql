@@ -1,0 +1,1 @@
+SELECT *                 FROM TABLE(some_ptf(                     input1 => TABLE(customers) PARTITION BY nationkey,                     input3 => TABLE(lineitem),                     input2 => TABLE(nation) PARTITION BY nationkey                     COPARTITION(customers, nation)))

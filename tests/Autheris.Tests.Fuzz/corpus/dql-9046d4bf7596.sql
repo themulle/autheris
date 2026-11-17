@@ -1,1 +1,0 @@
-SELECT dbms_random.value(0, 100)

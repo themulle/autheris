@@ -1,0 +1,1 @@
+SELECT Type::staticMethod() FROM t

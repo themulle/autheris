@@ -1,0 +1,1 @@
+SELECT * FROM "Orders" a JOIN orders b ON a.id = b.id

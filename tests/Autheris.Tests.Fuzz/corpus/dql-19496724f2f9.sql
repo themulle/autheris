@@ -1,0 +1,1 @@
+SELECT ts_stat('SELECT 1'), id FROM orders

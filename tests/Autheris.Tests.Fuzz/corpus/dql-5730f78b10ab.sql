@@ -1,0 +1,1 @@
+WITH RECURSIVE chain (id, n) AS (SELECT id, 1 FROM orders UNION ALL SELECT c.id, c.n + 1 FROM chain c JOIN orders o ON o.id = c.id WHERE c.n < 3) SELECT id FROM chain

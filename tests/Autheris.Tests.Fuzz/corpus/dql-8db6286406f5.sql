@@ -1,0 +1,1 @@
+SELECT orders.id FROM (SELECT * FROM orders WHERE tenant_id = 42) AS orders

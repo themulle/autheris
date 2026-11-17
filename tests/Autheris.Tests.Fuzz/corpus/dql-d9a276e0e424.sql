@@ -1,0 +1,1 @@
+WITH orders AS (SELECT * FROM public.orders) SELECT * FROM orders

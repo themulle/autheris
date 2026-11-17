@@ -1,1 +1,0 @@
-SELECT serial_number FROM fin_cranes ORDER BY id

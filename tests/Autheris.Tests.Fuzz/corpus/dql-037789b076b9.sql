@@ -1,0 +1,1 @@
+SELECT c.id FROM crm_api.public.customers c JOIN erp.public.orders o ON o.customer_id = c.id WHERE c.id = 1 AND EXISTS (SELECT 1 FROM erp.public.orders)

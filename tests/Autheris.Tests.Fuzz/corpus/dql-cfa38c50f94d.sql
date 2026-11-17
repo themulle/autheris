@@ -1,0 +1,1 @@
+SELECT id FROM t WHERE a = 'x' AND b > 5 AND c = 'x'

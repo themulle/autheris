@@ -1,1 +1,0 @@
-SELECT __param_crane_type FROM t WHERE x = @crane_type

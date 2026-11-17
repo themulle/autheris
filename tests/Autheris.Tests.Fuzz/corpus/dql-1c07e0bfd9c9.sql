@@ -1,0 +1,1 @@
+SELECT trim(TRAILING '5' FROM created_at) FROM orders

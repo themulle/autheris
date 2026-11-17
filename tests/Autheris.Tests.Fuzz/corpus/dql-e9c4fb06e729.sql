@@ -1,1 +1,0 @@
-SELECT * FROM nums, generate_series(1, 100000000)

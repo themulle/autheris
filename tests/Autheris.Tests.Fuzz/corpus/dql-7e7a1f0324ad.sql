@@ -1,1 +1,0 @@
-SELECT ARRAY[1, 2, 3][2] AS x FROM t

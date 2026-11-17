@@ -1,1 +1,0 @@
-SELECT c.id, c.name FROM crm_api.public.customers c JOIN erp.public.orders o ON o.customer_id = c.id

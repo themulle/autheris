@@ -1,1 +1,0 @@
-SELECT id FROM t WHERE created_at > DATE '2024-01-01'

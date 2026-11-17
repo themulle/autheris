@@ -1,1 +1,0 @@
-SELECT pg_get_expr('1', 1)

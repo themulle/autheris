@@ -1,0 +1,1 @@
+SELECT id FROM t WHERE a = 'x' OR b = 'x' OR c = 1 OR d = '1'

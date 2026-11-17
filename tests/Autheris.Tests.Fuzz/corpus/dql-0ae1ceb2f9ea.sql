@@ -1,0 +1,1 @@
+SELECT DISTINCT client_id FROM air1 WHERE client_id IS NOT NULL

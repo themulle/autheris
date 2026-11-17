@@ -1,1 +1,0 @@
-SELECT OVERLAY('abcdef' PLACING 'XY' FROM 3)
