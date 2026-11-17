@@ -9,7 +9,7 @@ using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
@@ -78,7 +78,6 @@ public static class SimApiHostMain
         }
 
         Directory.CreateDirectory(dataDir);
-        var dataPath = Path.Combine(dataDir, "data.db");
         // The governance store is PostgreSQL only (WP-SIMPL-11): the caller supplies an empty database that the host migrates at startup.
         var govConnectionString = Environment.GetEnvironmentVariable(GovernanceConnectionEnvVar);
         if (string.IsNullOrWhiteSpace(govConnectionString))
@@ -93,12 +92,17 @@ public static class SimApiHostMain
 
         // SEC-LB-02: from here on the data dir is wiped on every exit path (codes 0, 1, 3, 4, 5).
         var cleaned = false;
+        var dataConnectionString = string.Empty;
         void Cleanup()
         {
             cleaned = true;
             try
             {
-                SqliteConnection.ClearAllPools();
+                NpgsqlConnection.ClearAllPools();
+                if (dataConnectionString.Length > 0)
+                {
+                    SimApiSeed.DropAsync(govConnectionString).GetAwaiter().GetResult();
+                }
             }
             finally
             {
@@ -112,14 +116,14 @@ public static class SimApiHostMain
             var startCode = 0;
             try
             {
-                SimApiSeed.Create(dataPath);
+                dataConnectionString = await SimApiSeed.CreateAsync(govConnectionString).ConfigureAwait(false);
 
-                using (var seeding = NewHost(options, dataPath, govConnectionString))
+                using (var seeding = NewHost(options, dataConnectionString, govConnectionString))
                 {
                     await RegisterCatalogAsync(seeding).ConfigureAwait(false);
                 }
 
-                factory = NewHost(options, dataPath, govConnectionString);
+                factory = NewHost(options, dataConnectionString, govConnectionString);
                 var port = options.Port;
                 factory.UseKestrel(k => k.Listen(IPAddress.Loopback, port));
                 factory.StartServer();
@@ -258,7 +262,7 @@ public static class SimApiHostMain
         }
     }
 
-    private static WebApplicationFactory<Program> NewHost(SimApiHostOptions options, string dataPath, string govConnectionString) =>
+    private static WebApplicationFactory<Program> NewHost(SimApiHostOptions options, string dataConnectionString, string govConnectionString) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
         {
             // The solution-relative content root discovery of WebApplicationFactory finds no solution (this project is in none, SEC-SIM-21).
@@ -267,8 +271,9 @@ public static class SimApiHostMain
             b.ConfigureServices(s => s.AddSingleton<IHostLifetime, SimHostLifetime>());
             b.UseShutdownTimeout(TimeSpan.FromSeconds(10));
             ApplySettings(b, govConnectionString);
-            b.UseSetting("Gateway:DataSources:Connections:default:Provider", "Sqlite");
-            b.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", $"Data Source={dataPath}");
+            b.UseSetting("Gateway:DataSources:Connections:default:Provider", "PostgreSql");
+            b.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", dataConnectionString);
+            b.UseSetting("Gateway:DataSources:Connections:default:DefaultSchema", "main");
             b.UseSetting("Gateway:WebSql:Enabled", "true");
             b.UseSetting("Gateway:WebSql:AllowDml", options.Profile == SimApiProfile.Write ? "true" : "false");
             b.ConfigureTestServices(s => s.AddSingleton<Autheris.Application.Common.Interfaces.IIdempotencyStore, ClusterWideTestIdempotencyStore>());
@@ -309,7 +314,7 @@ public static class SimApiHostMain
                 DisplayName = SimApiSeed.TableName,
                 TableName = SimApiSeed.TableName,
                 SchemaName = "main",
-                SourceType = "Sqlite",
+                SourceType = "PostgreSql",
                 SourceName = "default",
                 IsActive = true,
             },

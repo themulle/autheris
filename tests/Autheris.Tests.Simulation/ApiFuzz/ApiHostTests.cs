@@ -22,7 +22,9 @@ public sealed class ApiHostTests : SimulationTestBase
 
         (await client.GetAsync(new Uri("/odata/v4/$metadata", UriKind.Relative))).IsSuccessStatusCode.ShouldBeTrue();
 
-        using var odata = await client.GetAsync(new Uri("/odata/v4/$openapi", UriKind.Relative));
+        // The OData $openapi document is admin-only (the fuzz job fetches it as ClusterAdmin as well).
+        using var admin = host.CreateClient("ClusterAdmin");
+        using var odata = await admin.GetAsync(new Uri("/odata/v4/$openapi", UriKind.Relative));
         odata.IsSuccessStatusCode.ShouldBeTrue();
         using (var doc = JsonDocument.Parse(await odata.Content.ReadAsStringAsync()))
         {
