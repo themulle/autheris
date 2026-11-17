@@ -195,4 +195,21 @@ public sealed class SingleFlightKeySetCacheTests : IDisposable
         (await first.WaitAsync(Wait)).ShouldBe("new");
         (await joiner.WaitAsync(Wait)).ShouldBe("new");
     }
+
+    [Fact]
+    public async Task RetryRightAfterAFailedLoad_NeverReceivesTheFinishedFlightsFailure()
+    {
+        // The flight is unregistered before its waiters are released; otherwise the retry below could join the finished flight
+        // and receive the previous failure instead of starting its own load.
+        for (var i = 0; i < 500; i++)
+        {
+            var key = "retry-" + i;
+            await Should.ThrowAsync<InvalidOperationException>(async () =>
+                await _cache.GetOrLoadAsync(key, _ => throw new InvalidOperationException("first load fails"), CancellationToken.None).AsTask().WaitAsync(Wait));
+
+            var value = await _cache.GetOrLoadAsync(key, _ => Task.FromResult(Result("second")), CancellationToken.None).AsTask().WaitAsync(Wait);
+
+            value.ShouldBe("second");
+        }
+    }
 }
