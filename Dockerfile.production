@@ -20,6 +20,7 @@ EXPOSE 8080
 # Setup data volume for SQLite governance DB and install GSSAPI/NTLM/Kerberos runtime with non-root ownership (10001:10001)
 RUN mkdir -p /app/data && chown -R 10001:10001 /app/data
 RUN apt-get update \
+    && apt-get --only-upgrade install -y libc6 libc-bin perl-base \
     && apt-get install -y --no-install-recommends \
         libgssapi-krb5-2 \
         gss-ntlmssp \
