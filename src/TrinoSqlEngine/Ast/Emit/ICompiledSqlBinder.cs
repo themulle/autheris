@@ -1,5 +1,7 @@
 namespace TrinoSqlEngine.Ast.Emit;
 
+using TrinoSqlEngine.Numerics;
+
 using System;
 using System.Collections.Generic;
 using System.Data;
@@ -367,7 +369,7 @@ public abstract class DbCommandCompiledSqlBinder : ICompiledSqlBinder
                 parameter.Value = Convert.ToInt64(value, CultureInfo.InvariantCulture);
                 break;
             case SqlParameterType.Decimal:
-                decimal d = Convert.ToDecimal(value, CultureInfo.InvariantCulture);
+                decimal d = BinaryFloatingPointDecimal.ToDecimal(value);
                 if (DecimalAsDouble)
                 {
                     parameter.DbType = DbType.Double;

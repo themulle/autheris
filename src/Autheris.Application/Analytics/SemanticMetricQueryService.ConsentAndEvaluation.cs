@@ -417,8 +417,8 @@ public sealed partial class SemanticMetricQueryService
             aggValues.TryGetValue(metric.Measures[1], out var denObj) &&
             numObj is not null && denObj is not null)
         {
-            decimal num = Convert.ToDecimal(numObj, CultureInfo.InvariantCulture);
-            decimal den = Convert.ToDecimal(denObj, CultureInfo.InvariantCulture);
+            decimal num = DecimalConversions.ToDecimal(numObj);
+            decimal den = DecimalConversions.ToDecimal(denObj);
             return den == 0m ? null : Math.Round(num / den, 6);
         }
 
@@ -437,7 +437,7 @@ public sealed partial class SemanticMetricQueryService
                 aggValues.TryGetValue(metric.Measures[1], out var second) &&
                 first is not null && second is not null)
             {
-                return Convert.ToDecimal(first, CultureInfo.InvariantCulture) - Convert.ToDecimal(second, CultureInfo.InvariantCulture);
+                return DecimalConversions.ToDecimal(first) - DecimalConversions.ToDecimal(second);
             }
             return null;
         }
@@ -447,7 +447,7 @@ public sealed partial class SemanticMetricQueryService
         {
             if (aggValues.TryGetValue(mName, out var val) && val is not null)
             {
-                var decStr = Convert.ToDecimal(val, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture);
+                var decStr = DecimalConversions.ToDecimal(val).ToString(CultureInfo.InvariantCulture);
                 expr = System.Text.RegularExpressions.Regex.Replace(
                     expr,
                     $@"\b{System.Text.RegularExpressions.Regex.Escape(mName)}\b",
@@ -460,7 +460,7 @@ public sealed partial class SemanticMetricQueryService
         {
             using var table = new System.Data.DataTable();
             var computed = table.Compute(expr, null);
-            return computed is null or DBNull ? null : Convert.ToDecimal(computed, CultureInfo.InvariantCulture);
+            return computed is null or DBNull ? null : DecimalConversions.ToDecimal(computed);
         }
         catch
         {

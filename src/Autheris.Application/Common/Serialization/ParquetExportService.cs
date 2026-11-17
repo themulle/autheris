@@ -1,5 +1,6 @@
 namespace Autheris.Application.Common.Serialization;
 
+using Autheris.Domain.Common;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -560,7 +561,7 @@ public sealed partial class ParquetExportService : IParquetExportService
                 for (var i = 0; i < count; i++)
                 {
                     var value = GetValue(rows[i], name);
-                    data[i] = value is null ? null : Convert.ToDecimal(value, CultureInfo.InvariantCulture);
+                    data[i] = value is null ? null : DecimalConversions.ToDecimal(value);
                 }
                 return (new DataField(name, typeof(decimal?)), data);
             }

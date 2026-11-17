@@ -164,7 +164,7 @@ public static class VirtualFilterKeyCanonicalizer
         decimal converted;
         try
         {
-            converted = (decimal)d;
+            converted = DecimalConversions.FromDouble(d);
         }
         catch (OverflowException)
         {

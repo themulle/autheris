@@ -373,7 +373,7 @@ public sealed partial class DatabricksSourceCostCollector(
 
         if (element.TryGetDouble(out var dbl) && double.IsFinite(dbl) && dbl >= 0d && dbl <= (double)maxInclusive)
         {
-            value = (decimal)dbl;
+            value = DecimalConversions.FromDouble(dbl);
             return true;
         }
 

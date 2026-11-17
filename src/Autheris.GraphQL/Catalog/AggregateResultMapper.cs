@@ -280,8 +280,8 @@ internal static class AggregateValueConverter
         switch (raw)
         {
             case decimal m: value = m; return true;
-            case double d when double.IsFinite(d) && Math.Abs(d) < 7.9E28: value = (decimal)d; return true;
-            case float f when float.IsFinite(f) && Math.Abs(f) < 7.9E28f: value = (decimal)f; return true;
+            case double d when double.IsFinite(d) && Math.Abs(d) < 7.9E28: value = DecimalConversions.FromDouble(d); return true;
+            case float f when float.IsFinite(f) && Math.Abs(f) < 7.9E28f: value = DecimalConversions.FromSingle(f); return true;
             default:
                 if (TryLong(raw, out var l))
                 {
