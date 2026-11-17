@@ -21,6 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - The unused OpenJev client, `IOpenJevClient`, `JustificationTriageService`, `IJustificationTriageService` and the justification triage result types (#503).
 
 ### Fixed
+- The footprint budget nightly workflow no longer fails at start-up: the reusable footprint workflow used the same concurrency group as its caller.
 - `describe_dataset` returns the column `longDescription` (when requested with `include`) on the discovery-service path too (#714); the GraphQL `DiscoveryColumn` type gains the nullable field `longDescription` (sanitized, visible columns only).
 - The native DuckDB library is no longer loaded at startup: the time zone conversion state runs the DuckDB ICU probe lazily on the first DuckDB conversion check instead of in the startup hosted service, so a node that never uses DuckDB does not map `libduckdb.so` (the footprint lazy-load check reports `lazy: true`).
 

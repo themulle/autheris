@@ -7,8 +7,10 @@ on:
 permissions:
   contents: read
 
+# A called workflow sees the caller's github.workflow: the group must differ from the caller's own group
+# (footprint-budget-nightly.yml), otherwise the called run is cancelled at start-up and no job ever runs.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: footprint-budget-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
