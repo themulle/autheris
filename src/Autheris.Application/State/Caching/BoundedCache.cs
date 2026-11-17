@@ -70,6 +70,9 @@ public sealed class BoundedCache<TKey, TValue>
     /// <summary>Current number of entries (never above the capacity, apart from transient in-flight inserts).</summary>
     public int Count => _lru.Count;
 
+    /// <summary>Snapshot of the keys currently held (does not promote entries; expired entries may still be listed until read).</summary>
+    public System.Collections.Generic.IEnumerable<TKey> Keys => _lru.Keys;
+
     public bool TryGet(TKey key, out TValue value)
     {
         if (_lru.TryGet(key, out var entry))

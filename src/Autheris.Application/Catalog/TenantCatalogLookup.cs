@@ -1,7 +1,6 @@
 namespace Autheris.Application.Catalog;
 
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -28,7 +27,9 @@ public sealed class TenantCatalogLookup : ICatalogLookup, IDisposable
     private readonly IConsentRepository? _consentRepository;
     private readonly TimeProvider _timeProvider;
     private readonly TimeSpan _ttl;
-    private readonly ConcurrentDictionary<string, TenantCatalogSnapshot> _tenantSnapshots = new(StringComparer.Ordinal);
+    // One snapshot per tenant, so a tenant already holds at most one entry (far below the per-tenant share cap); the capped cache still
+    // enforces the bound uniformly. An evicted snapshot is rebuilt from the repository on the next call.
+    private readonly Autheris.Application.State.Caching.TenantShareCappedCache<string, TenantCatalogSnapshot> _tenantSnapshots;
     private readonly IDisposable? _eventSubscription;
 
     public TenantCatalogLookup(
@@ -37,8 +38,10 @@ public sealed class TenantCatalogLookup : ICatalogLookup, IDisposable
         ITenantRegistry? tenantRegistry = null,
         IConsentRepository? consentRepository = null,
         TimeProvider? timeProvider = null,
-        TimeSpan? ttl = null)
+        TimeSpan? ttl = null,
+        int maxEntries = Autheris.Domain.Options.CatalogCacheOptions.DefaultProviderMaxEntries)
     {
+        _tenantSnapshots = new(maxEntries, static tenant => tenant, StringComparer.Ordinal);
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _tenantRegistry = tenantRegistry;
         _consentRepository = consentRepository;
@@ -94,7 +97,7 @@ public sealed class TenantCatalogLookup : ICatalogLookup, IDisposable
     {
         if (tenantId is { } specificTenant && !string.IsNullOrWhiteSpace(specificTenant.Value))
         {
-            _tenantSnapshots.TryRemove(specificTenant.Value, out _);
+            _tenantSnapshots.TryRemove(specificTenant.Value);
             return;
         }
 
@@ -106,7 +109,7 @@ public sealed class TenantCatalogLookup : ICatalogLookup, IDisposable
         ct.ThrowIfCancellationRequested();
         var now = _timeProvider.GetUtcNow();
 
-        if (_tenantSnapshots.TryGetValue(tenantId.Value, out var cached) && cached.ExpiresAt > now)
+        if (_tenantSnapshots.TryGet(tenantId.Value, out var cached) && cached.ExpiresAt > now)
         {
             return cached;
         }
@@ -152,7 +155,7 @@ public sealed class TenantCatalogLookup : ICatalogLookup, IDisposable
         }
 
         var built = new TenantCatalogSnapshot(now.Add(_ttl), visibleTables, byIdentifier, byEntityName);
-        _tenantSnapshots[tenantId.Value] = built;
+        _tenantSnapshots.Set(tenantId.Value, built);
         return built;
     }
 
