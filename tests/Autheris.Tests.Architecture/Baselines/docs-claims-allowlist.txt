@@ -2,7 +2,7 @@
 # Format: path:exact-line-text
 #
 # docs/configuration-guide.md config/SLA value
-docs/configuration-guide.md:- `X-Trino-Wait-Timeout`: Wartefenster für synchrone Fertigstellung (z. B. `5s`, `500ms`, `1m`).
+docs/configuration-guide.md:- `X-Trino-Wait-Timeout`: How long a request waits for a synchronous result (e.g. `5s`, `500ms`, `1m`).
 # docs/operations-runbook.md config/SLA value
 docs/operations-runbook.md:Required audit writes (administrative changes, security events, denials and allow records written through `IAuditWriter.RecordRequiredAsync`) are coalesced by `AuditGroupCommitSink` into batches of up to 64 entries (5 ms coalescing window, 4,096 pending entries before back-pressure), each written in one transaction with one chain-tail read and one anchor ([F-AUDIT-01, section 10](features/f-audit-01-hardened-cryptographic-audit.md)).
 # docs/operations-runbook.md config/SLA value

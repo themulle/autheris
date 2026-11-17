@@ -17,7 +17,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - The unused OpenJev client, `IOpenJevClient`, `JustificationTriageService`, `IJustificationTriageService` and the justification triage result types (#503).
 
 ### Fixed
-- `describe_dataset` returns the column `longDescription` (when requested with `include`) on the discovery-service path too (#714).
+- `describe_dataset` returns the column `longDescription` (when requested with `include`) on the discovery-service path too (#714); the GraphQL `DiscoveryColumn` type gains the nullable field `longDescription` (sanitized, visible columns only).
 - A retry that started right after a failed key-set load could receive the finished load's failure instead of starting its own load (the single-flight cache released its waiters before unregistering the load); the Virtual Filter key set cache and every other user of `SingleFlightKeySetCache` are fixed.
 
 ## [1.8.4] - 2026-11-17

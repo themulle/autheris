@@ -1004,7 +1004,7 @@ Autheris supports the native Trino REST client protocol, so standard Trino tools
 - **Header support:**
   - `X-Trino-Catalog`: Selects the target data source.
   - `X-Trino-Schema`: Default schema.
-  - `X-Trino-Wait-Timeout`: Wait window for synchronous completion (e.g. `5s`, `500ms`, `1m`).
+  - `X-Trino-Wait-Timeout`: How long a request waits for a synchronous result (e.g. `5s`, `500ms`, `1m`).
   - `X-Trino-User` & `X-Trino-Source`: Identity and auditing context.
 
 ### 2.20 `VirtualFilters` (Virtual Filters & Access Profiles)
