@@ -12,7 +12,7 @@ using System.Security;
 public static class FileHashVerifier
 {
     /// <summary>Upper bound for a single file inside a module folder.</summary>
-    public const long MaxModuleFileBytes = 64L * 1024 * 1024;
+    public const long MaxModuleFileBytes = 256L * 1024 * 1024;
 
     /// <summary>
     /// Verifies all files under <paramref name="moduleDirectory"/> against <paramref name="manifest"/> and returns

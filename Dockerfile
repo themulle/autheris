@@ -54,6 +54,8 @@ VOLUME /app/scratch
 # Copy the artifacts published by the CI/CD runner
 COPY dist/publish/ ./
 COPY dist/modules/ /app/modules/
+# Production refuses module directories with writable permission bits (0555/0444 expected); the build context carries 0755/0644.
+RUN find /app/modules -type d -exec chmod 0555 {} + && find /app/modules -type f -exec chmod 0444 {} +
 
 # Non-root user for container hardening (UID:GID 10001:10001)
 USER 10001:10001

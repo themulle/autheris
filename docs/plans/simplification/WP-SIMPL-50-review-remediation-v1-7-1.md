@@ -166,7 +166,7 @@ Depends on: PR A (`ModuleLoader.cs`, logger from C13). Files: `ModuleAssemblyLoa
 | same | `All_keys_revoked_rejects_signed_module` | S | every KeyId revoked -> explicit empty-keyring error | B3 / SEC-50-07 |
 | same | `Manifest_without_key_id_is_rejected` | S | signed manifest, no KeyId -> rejected | B3 / SEC-50-07 |
 | `Unit/Hosting/FileHashVerifierTests.cs` (new) | `Fifo_in_module_root_is_rejected` | S | Linux only; FIFO in root -> rejected | C6 |
-| same | `Oversized_file_is_rejected` | S | file > 64 MiB -> rejected | C6 |
+| same | `Oversized_file_is_rejected` | S | file > 256 MiB -> rejected | C6 |
 | same | `File_growing_past_cap_during_read_is_rejected` | S | stream reporting small length, yielding > cap -> rejected | C6 / SEC-50-14 |
 
 ### PR B1b (module surface): B4, B11, B12, B13, C12, C14, C16
