@@ -145,12 +145,12 @@ Governance step `0011_role_grantee_and_profile_assignment_retirement` runs once 
 - Role `Deny` consents are not touched and keep restricting access.
 - Access profile assignments are deactivated: role assignments with `ADR020_ROLE_GRANTEE_UNSUPPORTED`, all other assignments with `OD32_PROFILE_ASSIGNMENT_REQUIRES_APPROVAL`.
 
-The canonical `ClusterAdmin` lists what the step revoked or deactivated with `GET /api/v1/admin/authz/migration-report` (`revokedRoleConsents` with tenant, role name and table, `deactivatedProfileAssignments`). Use the report to re-create the access as group grants.
+The canonical `ClusterAdmin` lists what the step revoked or deactivated with `GET /api/v1/admin/authz/migration-report` (`revokedRoleConsents` with `consentId`, `tenantId`, `roleName`, `tableId` and `revokeReason`; `deactivatedProfileAssignments`). Use the report to re-create the access as group grants.
 
 ### Consent manifests (`POST /api/v1/governance/consents/apply`)
 
-- A policy with `granteeType: "Role"` is refused for every effect with `400 BAD_REQUEST` ("The manifest contains a policy that is not supported."); nothing of the manifest is applied. Replace the role with a group whose members should hold the access (`granteeType: "Group"`, `granteeRef` = group SID).
-- Every policy needs an absolute `validUntil` (groups and `Deny` policies included) that lies in the future and within `Gateway:Governance:Grants:DeclarativeMaxDuration` (or `MaxDuration` when unset). `validityDays` has no effect; a policy without `validUntil` is refused with `400 INDIVIDUAL_GRANT_REQUIRES_EXPIRY`.
+- A policy with `granteeType: "Role"` for a table registered in the catalog is refused for every effect with `400 BAD_REQUEST` ("The manifest contains a policy that is not supported."); nothing of the manifest is applied. Replace the role with a group whose members should hold the access (`granteeType: "Group"`, `granteeRef` = group SID).
+- A policy for a table that is not registered in the catalog is skipped before any check runs. Every other policy needs an absolute `validUntil` (groups and `Deny` policies included) that lies in the future and within `Gateway:Governance:Grants:DeclarativeMaxDuration` (or `MaxDuration` when unset). `validityDays` has no effect; a policy without `validUntil` is refused with `400 INDIVIDUAL_GRANT_REQUIRES_EXPIRY`.
 - Individual `Allow` policies (`User`, `ServicePrincipal`) with a `Clear` column rule or on a sensitive table are refused with `400 INDIVIDUAL_GRANT_REQUIRES_FOUR_EYES`, because a manifest carries no approvals.
 
 Details and an example manifest: [F-GOV-15, Apply Semantics](../features/f-gov-15-declarative-consents-scopes.md#apply-semantics).

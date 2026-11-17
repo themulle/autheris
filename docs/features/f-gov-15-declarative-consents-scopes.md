@@ -60,7 +60,12 @@ flowchart TD
 
 ### Declarative Policy Manifest Example (`consent-policies.json`)
 
-A manifest grants to **groups** (standing access for everyone in the group) and, time-bound, to individual **users** or **service principals**. Every policy carries an absolute `validUntil`. The example below is accepted as written as long as `validUntil` lies in the future and within the configured maximum (see [Apply Semantics](#apply-semantics)) and, for the `User` policy, the table `default.sales.orders` is not sensitive (see [Four-Eyes Rule for Individual Grantees](#four-eyes-rule-for-individual-grantees)).
+A manifest grants to **groups** (standing access for everyone in the group) and, time-bound, to individual **users** or **service principals**. Every policy carries an absolute `validUntil`. The example below is accepted as written as long as:
+
+- `default.sales.orders` is registered in the catalog;
+- each `validUntil` lies in the future and within the configured maximum, and for the `User` policy within its class limit (see [Apply Semantics](#apply-semantics));
+- the applying principal is neither the example user nor a member of the example group, and its group memberships are completely resolved (group resolution not degraded);
+- for the `User` policy, the table is not sensitive (see [Four-Eyes Rule for Individual Grantees](#four-eyes-rule-for-individual-grantees)).
 
 ```json
 {
@@ -139,21 +144,22 @@ Response:
 ### Apply Semantics
 
 - **Atomic apply:** all revocations and creations of one manifest are written by `IConsentRepository.ReplaceConsentsAsync` in **one transaction with one epoch bump**, together with the `GITOPS_CONSENT_APPLY` audit entries. A fault leaves nothing changed and writes no audit record.
-- **All or nothing on validation:** the checks below run for all policies before anything is written, also in dry-run. The first refused policy rejects the whole manifest with `400`; nothing is applied.
+- **All or nothing on validation:** the checks below run for all policies of tables registered in the catalog before anything is written, also in dry-run. The first refused policy rejects the whole manifest with `400`; nothing is applied.
 - **Authenticated caller SID required:** the apply needs a principal that carries a user SID; that SID is the actor of every audit record. A principal without one is rejected (`403`) before any read or write, and no stand-in actor exists.
 - **Ambiguous manifests are refused:** a manifest with more than one policy for the same table and grantee is rejected as a whole before anything is written.
-- **Unknown tables are skipped:** a policy for a table that is not registered in the catalog is skipped with a detail line (`Table '...' not found in catalog; skipped policy.`).
-- **No role grantees:** a policy with `granteeType: "Role"` (for any effect) is refused with `400 BAD_REQUEST` ("The manifest contains a policy that is not supported."). Grant to a group or a user instead. The same answer is given for a missing or unknown `effect`.
+- **Unknown tables are skipped:** a policy for a table that is not registered in the catalog is skipped with a detail line (`Table '...' not found in catalog; skipped policy.`). No further check runs for a skipped policy: the grantee type, effect and `validUntil` rules below apply only to policies of registered tables.
+- **No role grantees:** a policy of a registered table with `granteeType: "Role"` (for any effect) is refused with `400 BAD_REQUEST` ("The manifest contains a policy that is not supported."). Grant to a group or a user instead. The same answer is given for a missing or unknown `effect`.
 - **Mandatory `validUntil` for every policy:** `Group`, `User` and `ServicePrincipal` policies, `Allow` and `Deny` alike, need an absolute `validUntil` that lies in the future and is at most `now + Gateway:Governance:Grants:DeclarativeMaxDuration` (when unset, `Gateway:Governance:Grants:MaxDuration` applies). A missing, past or too long `validUntil` answers `400` with `INDIVIDUAL_GRANT_REQUIRES_EXPIRY`, `INDIVIDUAL_GRANT_EXPIRY_IN_PAST` or `INDIVIDUAL_GRANT_EXCEEDS_MAXIMUM` (with the latest allowed `maxValidTo`); the codes carry the `INDIVIDUAL_GRANT_` prefix for group policies too. There is no relative validity field: `validityDays` has no effect.
 - **Individual grantees (`User`, `ServicePrincipal`)** are also evaluated by the [time-bound individual grant policy (F-GOV-22)](f-gov-22-time-bound-individual-grants.md) (`GrantKind.ManifestPolicy`): an `Allow` must stay within the class limit configured under `Gateway:Governance:IndividualGrants` (for example `RegularMaxDays`), bounded by `DeclarativeMaxDuration`. An `Allow` that needs four-eyes approval is refused, see the next section. An individual policy for the applying actor itself is refused for any effect (`INDIVIDUAL_GRANT_REQUIRES_FOUR_EYES`, self-grant).
 - **Group grantees** take no class limit and no four-eyes check. An `Allow` for a group the applying actor belongs to is refused (`INDIVIDUAL_GRANT_REQUIRES_FOUR_EYES`, self-grant), and so is any group `Allow` while the actor's group memberships could not be resolved completely (group resolution degraded). A `Deny` for an own group is accepted.
 - **Re-applying:** a policy that matches an active consent of the same grantee and table (same effect, column rules and row filters) is reported as `unchanged` and nothing is written; a difference in `description` only updates the description in place (`updated`); any other difference revokes the active consent and creates a new one (`revoked`, `applied`).
   - For individual grantees, an **earlier** `validUntil` than the stored one is a change (the grant is shortened); a later one is not, so a manifest never extends an individual grant. A longer validity needs a renewal (see F-GOV-22).
   - For group grantees, `validUntil` alone is not compared: re-applying a group policy with only a new `validUntil` reports `unchanged` and keeps the stored expiry.
+  - For GitOps pipelines this means that re-applying a manifest never extends a group grant or a `Deny` policy: the stored expiry is kept, the consent lapses at its `validUntil`, and only the next apply after that creates it again. A `Deny` is therefore not in force between its expiry and the next apply; schedule applies and choose `validUntil` accordingly.
 
 ### Four-Eyes Rule for Individual Grantees
 
-A manifest activates its consents immediately and carries no approvals. An individual grant that the grant policy marks as four-eyes therefore can never be applied through a manifest. An `Allow` policy for a `User` or `ServicePrincipal` grantee is refused with `400 INDIVIDUAL_GRANT_REQUIRES_FOUR_EYES` (also in dry-run, the whole manifest is rejected) when **any** of these holds:
+A manifest activates its consents immediately and carries no approvals. An individual grant that the grant policy marks as four-eyes therefore can never be applied through a manifest. An `Allow` policy for a `User` or `ServicePrincipal` grantee that passes the self-grant check and the expiry checks (`validUntil` and the class limit of [F-GOV-22](f-gov-22-time-bound-individual-grants.md), which run first and answer with their own codes, for example `INDIVIDUAL_GRANT_EXCEEDS_MAXIMUM` for a `validUntil` beyond `UnmaskedMaxDays` or `SensitiveMaxDays`) is refused with `400 INDIVIDUAL_GRANT_REQUIRES_FOUR_EYES` (also in dry-run, the whole manifest is rejected) when **any** of these holds:
 
 1. A column rule of the policy has `accessLevel: "Clear"` (with or without `applicableScopes`).
 2. The table is sensitive according to `GrantClassifier`, that is, any of:
@@ -172,7 +178,7 @@ The same `Allow` policies for a `Group` grantee are accepted, `Clear` rules and 
 
 To give individual test or demo users clear-text or sensitive access declaratively:
 
-- **One group per test user (recommended for declarative seeding):** create a directory group per test user (for example `autheris-test-alice`), make the user its only member, and grant the policies to that group (`granteeType: "Group"`, `granteeRef` = group SID). The test user's token or group resolution must list the group, and the applying principal must not be a member of it (self-grant rule). The policies are applied unchanged, including `Clear` rules and sensitive tables.
+- **One group per test user (recommended for declarative seeding):** create a directory group per test user (for example `autheris-test-alice`), make the user its only member, and grant the policies to that group (`granteeType: "Group"`, `granteeRef` = group SID). The test user's token or group resolution must list the group, and the applying principal must not be a member of it (self-grant rule). The policies are applied unchanged, including `Clear` rules and sensitive tables. Use this for test and demo data only: a group grant is standing access and is not subject to the individual class limits, four-eyes approval or individual recertification, so it must not stand in for individual access to real data.
 - **Consent request and approval workflow:** the test user requests access with `POST /api/v1/consent/requests` and an approver decides with `POST /api/v1/consent/requests/{id}/decision` (a second independent approver for tables that require four-eyes approval). The workflow records the approvals that a manifest cannot carry.
 - **Individual manifest policies** remain suitable for `Mask`-only access on non-sensitive tables and for `Deny` policies.
 
