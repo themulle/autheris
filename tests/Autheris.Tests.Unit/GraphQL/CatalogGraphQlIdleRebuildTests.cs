@@ -185,7 +185,6 @@ public sealed class CatalogGraphQlIdleRebuildTests
         var newest = await WaitForAsync(provider, e => e.Schema.Types.ContainsName("sales_public_t6"));
         newest.Schema.Types.ContainsName("sales_public_t0").ShouldBeTrue();
 
-        await Task.Delay(300);
         log.Entries.Count(e => e.Message.Contains("schema build started", StringComparison.Ordinal)).ShouldBe(3, "startup plus at most two rebuilds");
     }
 
@@ -324,7 +323,6 @@ public sealed class CatalogGraphQlIdleRebuildTests
             time.Advance(TimeSpan.FromMinutes(1));
         }
 
-        await Task.Delay(200);
         meta.GetAllTablesCalls.ShouldBe(baseline + 1, "ticks while a check runs are skipped, not queued");
         meta.BlockNext.SetResult();
     }
@@ -372,7 +370,9 @@ public sealed class CatalogGraphQlIdleRebuildTests
         await Provider(module, listener: new CatalogSchemaBuildDiagnosticListener(module)).GetExecutorAsync();
         meta.SetTables([MakeTable("secret_salaries", columns: "ssn_value"), MakeTable("secret_bonus")]);
         await module.CheckForCatalogChangesAsync();
-        await Task.Delay(300);
+        await WaitHelper.WaitUntil(
+            () => log.Entries.Count(e => e.Message.Contains("schema build finished", StringComparison.Ordinal)) >= 2,
+            TimeSpan.FromSeconds(20));
 
         foreach (var entry in log.Entries)
         {
