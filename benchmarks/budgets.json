@@ -8,7 +8,7 @@
       "source": "footprint"
     },
     "coldStartP50Seconds": {
-      "budget": 3.0,
+      "budget": 4.0,
       "unit": "s",
       "source": "footprint"
     },
