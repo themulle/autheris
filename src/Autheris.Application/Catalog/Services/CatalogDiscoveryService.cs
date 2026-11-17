@@ -24,7 +24,7 @@ using Autheris.Application.Services;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Options;
 
-public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
+public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
 {
     private readonly ITableMetadataRepository _metadataRepository;
     private readonly IAuditWriter _auditWriter;
@@ -388,8 +388,9 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
                 ct).ConfigureAwait(false);
 
             // Result hygiene: rebuilt from the caller's filtered metadata; hits that exist only because of a hidden column are dropped.
+            var hiddenText = await ResolveHiddenTextForHitsAsync(hits.Select(h => h.TableIdentifier), permittedById, allById, context, ct).ConfigureAwait(false);
             var tableHits = hits
-                .Select(h => ShapeHit(h, permittedById, allById, terms, singleIdentifier))
+                .Select(h => ShapeHit(h, permittedById, allById, terms, singleIdentifier, hiddenText))
                 .Where(h => h != null)
                 .Select(h => ToSummary(permittedById[h!.TableIdentifier], "Catalog", context.Language))
                 .ToList();
@@ -462,8 +463,9 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
                 tableId => permittedById.ContainsKey(tableId),
                 tableId => IsColumnRestricted(tableId, permittedById, allById),
                 ct).ConfigureAwait(false);
+            var hiddenText = await ResolveHiddenTextForHitsAsync(rawHits.Select(h => h.TableIdentifier), permittedById, allById, context, ct).ConfigureAwait(false);
             var tableHits = rawHits
-                .Select(h => ShapeHit(h, permittedById, allById, terms, singleIdentifier))
+                .Select(h => ShapeHit(h, permittedById, allById, terms, singleIdentifier, hiddenText))
                 .Where(h => h != null)
                 .Select(h => h!)
                 .Take(query.Limit);
@@ -703,7 +705,8 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         IReadOnlyDictionary<TableIdentifier, TableMetadata> permitted,
         IReadOnlyDictionary<TableIdentifier, TableMetadata> all,
         IReadOnlyList<string> queryTerms,
-        bool isSingleIdentifierQuery = false)
+        bool isSingleIdentifierQuery = false,
+        IReadOnlyDictionary<TableIdentifier, IReadOnlySet<string>>? hiddenText = null)
     {
         if (!permitted.TryGetValue(hit.TableIdentifier, out var visible))
         {
@@ -721,7 +724,9 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
 
         if (restricted)
         {
-            var text = VisibleTokens(visible);
+            IReadOnlySet<string>? hiddenCols = null;
+            hiddenText?.TryGetValue(hit.TableIdentifier, out hiddenCols);
+            var text = VisibleTokens(visible, hiddenCols);
             matchedTerms = hit.MatchedTerms
                 .Where(t => !string.IsNullOrWhiteSpace(t) && text.Contains(t))
                 .ToList();
@@ -781,65 +786,6 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
             RelatedJoinPaths = relations
         };
     }
-
-    // Whole tokens of the visible text (identifier, description, visible columns with type and description), split like the query terms
-    // and additionally on underscores, so a short term never matches inside an unrelated hidden-column word.
-    private static HashSet<string> VisibleTokens(TableMetadata table)
-    {
-        var sb = new System.Text.StringBuilder();
-        sb.Append(table.Identifier.Domain).Append(' ')
-          .Append(table.Identifier.Schema).Append(' ')
-          .Append(table.Identifier.TableName).Append(' ')
-          .Append(table.Table.DisplayName).Append(' ')
-          .Append(table.Table.Description).Append(' ');
-
-        if (table.Table.Texts is not null)
-        {
-            foreach (var (_, entry) in table.Table.Texts.Entries)
-            {
-                sb.Append(entry.DisplayName).Append(' ')
-                  .Append(entry.Description).Append(' ')
-                  .Append(entry.LongDescription).Append(' ');
-            }
-        }
-
-        foreach (var c in table.Columns)
-        {
-            sb.Append(c.ColumnName).Append(' ')
-              .Append(c.DataType).Append(' ')
-              .Append(c.DisplayName).Append(' ')
-              .Append(c.Description).Append(' ');
-
-            if (c.Texts is not null)
-            {
-                foreach (var (_, entry) in c.Texts.Entries)
-                {
-                    sb.Append(entry.DisplayName).Append(' ')
-                      .Append(entry.Description).Append(' ');
-                }
-            }
-        }
-
-        var tokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var t in sb.ToString().Split(TokenSeparators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            tokens.Add(t);
-            var folded = DiacriticNormalizer.FoldGermanUmlauts(t);
-            if (!string.Equals(t, folded, StringComparison.OrdinalIgnoreCase))
-            {
-                tokens.Add(folded);
-            }
-            var stripped = DiacriticNormalizer.StripAccents(t);
-            if (!string.Equals(t, stripped, StringComparison.OrdinalIgnoreCase))
-            {
-                tokens.Add(stripped);
-            }
-        }
-
-        return tokens;
-    }
-
-    private static readonly char[] TokenSeparators = [' ', '\t', '\r', '\n', ',', ';', '.', '(', ')', '"', '\'', '/', '\\', '-', '_', ':'];
 
     public async Task<DatasourceRegistrationResult> RegisterDatasourceAsync(DatasourceRegistrationRequest request, RequestContext context, CancellationToken ct = default)
     {

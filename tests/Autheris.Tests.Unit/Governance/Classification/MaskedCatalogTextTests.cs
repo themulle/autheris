@@ -333,6 +333,84 @@ public sealed class MaskedCatalogTextTests
         detail.Columns.Single(c => c.Name == "id").Description.ShouldNotBeNull();
     }
 
+    private static async Task<TestInMemoryClassificationStore> HiddenRuleStoreAsync()
+    {
+        var classStore = new TestInMemoryClassificationStore(Tenant.Value);
+        await classStore.UpsertClassificationMaskRuleAsync(new ClassificationMaskRule
+        {
+            Scope = ClassificationScopes.Global,
+            Code = ClassificationScopes.PiiSpecialCode,
+            MaskFunction = MaskFunction.TypeSafeRedact,
+            CatalogText = CatalogTextVisibility.Hidden,
+            UpdatedBy = "admin",
+            UpdatedAt = FixedNow
+        });
+        return classStore;
+    }
+
+    [Fact]
+    public async Task Search_TermOnlyInHiddenColumnDescription_DropsHit()
+    {
+        var table = BuildTable(Guid.NewGuid(), Guid.NewGuid());
+        var hidden = await ClassificationAccessResolver.ResolveIndexingHiddenTextColumnsAsync(table, await HiddenRuleStoreAsync());
+        hidden.ShouldContain("ssn");
+
+        // The caller sees the table without a third column, so the restricted-table text match applies.
+        var full = table with { Columns = [.. table.Columns, new TableColumn { ColumnName = "denied_col", DataType = "int" }] };
+        var all = new Dictionary<TableIdentifier, TableMetadata> { [CustomersId] = full };
+        var permitted = new Dictionary<TableIdentifier, TableMetadata> { [CustomersId] = table };
+        var hit = new CatalogSearchHit(CustomersId, "Customers", "Customer directory", "crm", "NORMAL", 0.9, 5.0, null, ["taxpayers"], [], [], null);
+
+        CatalogDiscoveryService.ShapeHit(hit, permitted, all, ["taxpayers"]).ShouldNotBeNull();
+        var hiddenText = new Dictionary<TableIdentifier, IReadOnlySet<string>> { [CustomersId] = hidden };
+        CatalogDiscoveryService.ShapeHit(hit, permitted, all, ["taxpayers"], hiddenText: hiddenText).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task GraphQlCatalogList_RuleLevelHidden_OmitsColumnText()
+    {
+        var table = BuildTable(Guid.NewGuid(), Guid.NewGuid());
+        var hidden = await ClassificationAccessResolver.ResolveIndexingHiddenTextColumnsAsync(table, await HiddenRuleStoreAsync());
+        var hiddenText = new Dictionary<TableIdentifier, IReadOnlySet<string>> { [CustomersId] = hidden };
+
+        var dto = Query.ToCatalogDto(table, isAdminView: true, status: "GRANTED", language: null, hiddenText);
+
+        dto.ShouldNotBeNull();
+        var ssn = dto.Columns.Single(c => c.Name == "ssn");
+        ssn.DataType.ShouldBe("varchar");
+        ssn.DisplayName.ShouldBeNull();
+        ssn.Description.ShouldBeNull();
+        dto.Columns.Single(c => c.Name == "id").Description.ShouldBe("Surrogate customer primary identifier.");
+    }
+
+    [Fact]
+    public async Task GetDatasetDetail_RepositoryHiddenRule_OmitsDisplayNameDescriptionLongDescription()
+    {
+        var table = BuildTable(Guid.NewGuid(), Guid.NewGuid());
+        var consents = new[] { BuildAllowConsent(includePiiSpecialClear: false) };
+        var classStore = await HiddenRuleStoreAsync();
+        var tables = new FakeDiscoveryTableRepository { Tables = { table } };
+        var consentRepo = new TestInMemoryConsentRepository(consents, filterWindow: false);
+        var options = new GatewayOptions { Tenancy = TenancyShape.Multi.Options() };
+        var service = new CatalogDiscoveryService(
+            tables,
+            new FakeAuditWriter(),
+            Options.Create(options),
+            Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(tables, consentRepo, options),
+            consentRepository: consentRepo,
+            classificationRepository: classStore);
+        var principal = DiscoveryTestBuilder.User(UserSid.Value, Tenant.Value);
+
+        var detail = await service.GetDatasetDetailAsync(CustomersId, new RequestContext(Tenant, UserSid, User: principal));
+
+        detail.ShouldNotBeNull();
+        var ssn = detail.Columns.Single(c => c.Name == "ssn");
+        ssn.Type.ShouldBe("varchar");
+        ssn.DisplayName.ShouldBeNull();
+        ssn.Description.ShouldBeNull();
+        detail.Columns.Single(c => c.Name == "id").Description.ShouldBe("Surrogate customer primary identifier.");
+    }
+
     [Fact]
     public async Task Examples_selecting_hidden_text_column_dropped()
     {

@@ -199,6 +199,7 @@ type DiscoveryColumn {
   classifications: [DiscoveryColumnClassification!]!
   clearRequestable: [String!]!
   longDescription: String
+  catalogTextHidden: Boolean!
 }
 
 type DiscoveryColumnClassification {

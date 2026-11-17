@@ -33,6 +33,32 @@ public sealed class CatalogNoOpSecurityTests
     }
 
     [Fact]
+    public void CatalogTextHiddenChange_IsRestrictive_AndFlushesImmediately()
+    {
+        // A visible-to-hidden switch of the catalog text of a column override is a restrictive change, so the writer bumps the table epoch
+        // and flushes the catalog version at once (an additive or unchanged classification would be batched).
+        ColumnMaskOverride Override(CatalogTextVisibility text) => new()
+        {
+            TableColumnId = "col-name",
+            Code = "PII_SPECIAL",
+            CatalogText = text,
+            UpdatedBy = "admin"
+        };
+
+        TableMetadata With(CatalogTextVisibility text) => Meta() with
+        {
+            ColumnMaskOverrides = new Dictionary<string, IReadOnlyList<ColumnMaskOverride>>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["name"] = [Override(text)]
+            }
+        };
+
+        Classify(With(CatalogTextVisibility.Visible), With(CatalogTextVisibility.Hidden)).ShouldBe(CatalogWriteClassification.Restrictive);
+        Classify(With(CatalogTextVisibility.Hidden), With(CatalogTextVisibility.Visible)).ShouldBe(CatalogWriteClassification.Restrictive);
+        Classify(With(CatalogTextVisibility.Hidden), With(CatalogTextVisibility.Hidden)).ShouldBe(CatalogWriteClassification.Unchanged);
+    }
+
+    [Fact]
     public void ClassificationChangeOnly_BumpsEpoch()
     {
         var before = Meta();

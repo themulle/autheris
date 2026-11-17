@@ -54,6 +54,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
     private readonly McpAccessHints _hints;
     private readonly Autheris.Application.Catalog.Discovery.IDiscoveryService? _discoveryService;
     private readonly Autheris.Application.Policy.Classification.ClassificationAccessResolver? _classificationResolver;
+    private Autheris.Application.Policy.Classification.ClassificationAccessResolver? _fallbackResolver;
 
     [Microsoft.Extensions.DependencyInjection.ActivatorUtilitiesConstructor]
     public McpDatasetCatalog(
@@ -996,8 +997,9 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         }
 
         var tenantId = McpCatalogVisibility.SafeTenantId(principal);
-        var resolver = _classificationResolver ?? new Autheris.Application.Policy.Classification.ClassificationAccessResolver(
-            new Autheris.Application.Sql.Masking.SqlDataMaskingProvider(Options.Create(options?.Value ?? new GatewayOptions())));
+        // The host always injects the repository-backed resolver; the built-in-rules fallback is created once per catalog instance, not per call.
+        var resolver = _classificationResolver ?? (_fallbackResolver ??= new Autheris.Application.Policy.Classification.ClassificationAccessResolver(
+            new Autheris.Application.Sql.Masking.SqlDataMaskingProvider(Options.Create(options?.Value ?? new GatewayOptions()))));
         var allowGrants = activeConsents.Where(c => c.Effect == ConsentEffect.Allow && c.TableIdentifier == table.Identifier).ToList();
         var scopes = Autheris.Domain.Security.TokenAccessScope.GetScopeSet(principal.Claims);
         var (perGrant, combinedWinners) = await resolver.ResolveForTableAsync(table, allowGrants, tenantId, scopes, ct: ct).ConfigureAwait(false);

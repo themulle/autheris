@@ -507,8 +507,11 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
                         {
                             if (d?.HiddenCatalogTextColumns is not { Count: > 0 } hidden) continue;
                             var gated = hidden.Where(d.IsCatalogTextHidden).ToHashSet(StringComparer.OrdinalIgnoreCase);
-                            if (gated.Count > 0)
-                                hiddenByTable[(d.Table.Domain.ToLowerInvariant(), d.Table.TableName.ToLowerInvariant())] = gated;
+                            if (gated.Count == 0) continue;
+                            // A query may select the column through its GraphQL field alias, so the aliases join the hidden identifiers.
+                            var mapping = _graphQlCatalogMap is null ? null : await _graphQlCatalogMap.GetTableAsync(d.Table, cancellationToken).ConfigureAwait(false);
+                            var byColumn = mapping?.Columns.ToDictionary(m => m.ColumnName, m => m, StringComparer.OrdinalIgnoreCase);
+                            hiddenByTable[(d.Table.Domain.ToLowerInvariant(), d.Table.TableName.ToLowerInvariant())] = GoldenQueryService.BuildHiddenIdentifierSet(gated, byColumn);
                         }
                         if (hiddenByTable.Count > 0)
                         {

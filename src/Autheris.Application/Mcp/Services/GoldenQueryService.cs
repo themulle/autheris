@@ -95,16 +95,6 @@ public sealed class GoldenQueryService : IGoldenQueryService
         return ValueTask.FromResult<IReadOnlyList<GoldenQuery>>(results);
     }
 
-    public async ValueTask<IReadOnlyList<GoldenQuery>> GetGoldenQueriesExcludingHiddenColumnsAsync(
-        string? domain,
-        string? tableName,
-        IReadOnlySet<string>? hiddenColumns,
-        CancellationToken ct = default)
-    {
-        var all = await GetGoldenQueriesAsync(domain, tableName, null, ct).ConfigureAwait(false);
-        return ExcludeHiddenColumnQueries(all, hiddenColumns);
-    }
-
     public static IReadOnlyList<GoldenQuery> ExcludeHiddenColumnQueries(
         IReadOnlyList<GoldenQuery> queries,
         IReadOnlySet<string>? hiddenIdentifiers)
