@@ -38,6 +38,16 @@
     <SelfContained Condition="'$(RuntimeIdentifier)' == 'linux-x64' And '$(SelfContained)' == ''">false</SelfContained>
   </PropertyGroup>
 
+  <!-- Image size: the gateway ships English only (no localized UI), so the localized satellite resource assemblies of the dependencies are not published. -->
+  <PropertyGroup>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <!-- Image size: libduckdb.so ships with its static symbol table (~11 MB). Stripping removes .symtab only; the dynamic symbols P/Invoke needs stay. Linux publish only, skipped when strip is absent. -->
+  <Target Name="StripNativeDuckDb" AfterTargets="CopyFilesToPublishDirectory" Condition="$([MSBuild]::IsOSPlatform('Linux')) And Exists('/usr/bin/strip') And Exists('$(PublishDir)libduckdb.so')">
+    <Exec Command="/usr/bin/strip --strip-unneeded &quot;$(PublishDir)libduckdb.so&quot;" ContinueOnError="true" />
+  </Target>
+
   <ItemGroup>
     <!-- Swagger UI wird lokal ausgeliefert (offline-faehig, kein CDN) -->
     <EmbeddedResource Include="Assets\swagger-ui\*.css;Assets\swagger-ui\*.js;Assets\swagger-ui\*.png" LogicalName="swagger-ui/%(Filename)%(Extension)" />
