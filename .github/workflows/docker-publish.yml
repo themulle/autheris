@@ -326,57 +326,62 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Checkout repository (scripts only)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+
       - name: Start published container with signed Lakehouse module and assert endpoints
         env:
           IMAGE_REF: ghcr.io/${{ github.repository }}@${{ needs.build-and-push.outputs.image_digest }}
+        run: bash .github/scripts/module-e2e.sh
+
+  # Branch verification of the signed module container e2e: manual dispatch on a non-main ref builds the image locally (no push, no
+  # environment, no tags, no release) and runs the same script as the published-image job.
+  module-e2e-branch:
+    name: Verify Signed Module Container Routes (E2E, branch build)
+    if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: global.json
+
+      - name: Restore with Locked Mode
+        run: dotnet restore Autheris.sln --locked-mode
+
+      - name: Publish Autheris and sign the Lakehouse module
+        env:
+          AUTHERIS_MODULE_SIGNING_KEY_PEM: ${{ secrets.AUTHERIS_MODULE_SIGNING_KEY_PEM }}
         run: |
-          IMAGE_REF_LOWER="${IMAGE_REF,,}"
-          FWD_SECRET="$(openssl rand -hex 32)"
-          trap 'docker rm -f autheris-module-e2e >/dev/null 2>&1 || true' EXIT
-          docker run -d --name autheris-module-e2e \
-            -p 127.0.0.1:8080:8080 \
-            -e ASPNETCORE_ENVIRONMENT=Production \
-            -e Gateway__Hosting__AllowedHosts__0=127.0.0.1 \
-            -e Gateway__Hosting__AllowedHosts__1=localhost \
-            -e Gateway__DataMasking__HmacSecretKeyVaultRef=module-e2e-hmac-placeholder \
-            -e Gateway__Authentication__Mode=Upstream \
-            -e Gateway__Authentication__ForwardAuth__Enabled=true \
-            -e Gateway__Authentication__ForwardAuth__TrustedProxies__0=127.0.0.1/32 \
-            -e Gateway__Authentication__ForwardAuth__SharedSecret="$FWD_SECRET" \
-            -e Gateway__Modules__Path=/app/modules \
-            -e Gateway__Modules__Enabled__0=lakehouse \
-            "$IMAGE_REF_LOWER"
-
-          ready=0
-          for _ in $(seq 1 30); do
-            code="$(curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/health/live || true)"
-            if [ "$code" = "200" ]; then
-              ready=1
-              break
-            fi
-            sleep 1
-          done
-          if [ "$ready" != "1" ]; then
-            docker logs autheris-module-e2e >&2 || true
-            echo "Error: Container failed to become healthy on /health/live" >&2
+          if [ -z "${AUTHERIS_MODULE_SIGNING_KEY_PEM:-}" ]; then
+            echo "Error: AUTHERIS_MODULE_SIGNING_KEY_PEM is required." >&2
             exit 1
           fi
+          VERSION="0.0.0-dev"
+          dotnet publish src/Autheris.Api/Autheris.Api.csproj -c Release --no-restore \
+            -p:AutherisIncludeTestAuth=false -p:Version="$VERSION" -o ./dist/publish
+          mkdir -p dist/modules
+          dotnet build tools/Autheris.ModuleSigner/Autheris.ModuleSigner.csproj -c Release --no-restore
+          dotnet publish modules/Autheris.Modules.Lakehouse/Autheris.Modules.Lakehouse.csproj -c Release --no-restore \
+            -p:Version="$VERSION" -o ./dist/modules/lakehouse
+          dotnet run --project tools/Autheris.ModuleSigner/Autheris.ModuleSigner.csproj -c Release --no-build -- \
+            --dir ./dist/modules/lakehouse --id lakehouse --version "$VERSION" --host-version "$VERSION"
 
-          module_code="$(curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/modules/lakehouse/iceberg/v1/tenant-a/namespaces)"
-          if [ "$module_code" != "401" ]; then
-            docker logs autheris-module-e2e >&2 || true
-            echo "Error: Expected HTTP 401 on /modules/lakehouse/iceberg/v1/tenant-a/namespaces, got $module_code" >&2
-            exit 1
-          fi
+      - name: Build local image
+        run: docker build -f Dockerfile -t autheris:module-e2e .
 
-          legacy_ns_code="$(curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/v1/tenant-a/namespaces)"
-          if [ "$legacy_ns_code" != "404" ]; then
-            echo "Error: Expected HTTP 404 on /v1/tenant-a/namespaces, got $legacy_ns_code" >&2
-            exit 1
-          fi
-
-          legacy_cfg_code="$(curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/v1/config)"
-          if [ "$legacy_cfg_code" != "404" ]; then
-            echo "Error: Expected HTTP 404 on /v1/config, got $legacy_cfg_code" >&2
-            exit 1
-          fi
+      - name: Start container with signed Lakehouse module and assert endpoints
+        env:
+          IMAGE_REF: autheris:module-e2e
+        run: bash .github/scripts/module-e2e.sh
