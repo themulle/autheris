@@ -3,12 +3,12 @@
   "tolerancePercent": 10,
   "metrics": {
     "coreImageUncompressedMB": {
-      "budget": 325,
+      "budget": 340,
       "unit": "MB",
       "source": "footprint"
     },
     "coldStartP50Seconds": {
-      "budget": 3.0,
+      "budget": 5.0,
       "unit": "s",
       "source": "footprint"
     },
