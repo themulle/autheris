@@ -175,7 +175,36 @@ public sealed class CompiledSqlTemplateCache
             System.Threading.Interlocked.Read(ref _misses),
             _entries.Count);
 
-    public static string HashOf(string keyMaterial)
+    public static string HashOf(string keyMaterial) => HashOf(keyMaterial.AsSpan());
+
+    /// <summary>
+    /// Hash of a key that is still in the (thread-local) builder: the characters are copied into a pooled or stack buffer, so no key string
+    /// is allocated on the hit path. The result is identical to <see cref="HashOf(string)"/> of the builder's text.
+    /// </summary>
+    public static string HashOf(StringBuilder key)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        int length = key.Length;
+        if (length <= 256)
+        {
+            Span<char> small = stackalloc char[length];
+            key.CopyTo(0, small, length);
+            return HashOf(small);
+        }
+
+        char[] rented = System.Buffers.ArrayPool<char>.Shared.Rent(length);
+        try
+        {
+            key.CopyTo(0, rented.AsSpan(0, length), length);
+            return HashOf(rented.AsSpan(0, length));
+        }
+        finally
+        {
+            System.Buffers.ArrayPool<char>.Shared.Return(rented, clearArray: true);   // holds the key material (tenant, policy)
+        }
+    }
+
+    private static string HashOf(ReadOnlySpan<char> keyMaterial)
     {
         // G8: hash from a pooled/stack buffer instead of allocating the UTF-8 bytes of the whole key material.
         int max = Encoding.UTF8.GetMaxByteCount(keyMaterial.Length);
@@ -219,6 +248,23 @@ public sealed class CompiledSqlTemplateCache
     {
         if (_entries.TryGetValue(hash, out var entry) &&
             string.Equals(entry.Template.KeyMaterial, keyMaterial, StringComparison.Ordinal))
+        {
+            System.Threading.Interlocked.Exchange(
+                ref entry.LastAccessSequence,
+                System.Threading.Interlocked.Increment(ref _accessClock));
+            return entry.Template;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Lookup with the key still in the builder and its hash from <see cref="HashOf(StringBuilder)"/>. The full key is compared chunk by chunk, so a
+    /// hit never materializes the key string.
+    /// </summary>
+    public CompiledSqlTemplate? Find(StringBuilder key, string hash)
+    {
+        if (_entries.TryGetValue(hash, out var entry) && CompileCacheKey.SameText(key, entry.Template.KeyMaterial))
         {
             System.Threading.Interlocked.Exchange(
                 ref entry.LastAccessSequence,
@@ -299,8 +345,20 @@ public static class CompileCacheKey
 
     public static string Material(CompileRequest request, string rawSql, DialectCapabilities capabilities, int engineMaxQueryLength = 0)
     {
-        ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(rawSql);
+        var sb = Build(request, rawSql, capabilities, engineMaxQueryLength);
+        string material = sb.ToString();
+        ReleaseBuilder(sb);
+        return material;
+    }
+
+    /// <summary>
+    /// Builds the key material into the calling thread's builder and returns it (no key string). The builder is only valid until the next
+    /// <see cref="Build"/> or <see cref="Material"/> call on the same thread; call <see cref="ReleaseBuilder"/> when done with it.
+    /// </summary>
+    public static StringBuilder Build(CompileRequest request, ReadOnlySpan<char> rawSql, DialectCapabilities capabilities, int engineMaxQueryLength = 0)
+    {
+        ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(capabilities);
 
         var sb = _keyBuilder ??= new StringBuilder(4096);
@@ -314,13 +372,38 @@ public static class CompileCacheKey
         // CR-ADG-41: the engine's input limit is checked while parsing, which a cache hit skips; it is part of the key instead.
         sb.Append(";maxq=").Append(engineMaxQueryLength.ToString(CultureInfo.InvariantCulture));
         sb.Append(";sql=").Append(rawSql.Length).Append(':').Append(rawSql);
-        string material = sb.ToString();
+        return sb;
+    }
+
+    /// <summary>Drops a builder that a very large statement grew, so the thread does not pin it.</summary>
+    public static void ReleaseBuilder(StringBuilder sb)
+    {
         if (sb.Capacity > MaxRetainedBuilderCapacity)
         {
-            _keyBuilder = null;   // do not pin a builder that a very large statement grew
+            _keyBuilder = null;
+        }
+    }
+
+    internal static bool SameText(StringBuilder sb, string text)
+    {
+        if (sb.Length != text.Length)
+        {
+            return false;
         }
 
-        return material;
+        ReadOnlySpan<char> rest = text;
+        foreach (var chunk in sb.GetChunks())
+        {
+            var span = chunk.Span;
+            if (!rest[..span.Length].SequenceEqual(span))
+            {
+                return false;
+            }
+
+            rest = rest[span.Length..];
+        }
+
+        return true;
     }
 
     // One builder per thread: the key is built on every compile, hit or miss.

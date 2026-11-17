@@ -81,7 +81,7 @@ public class AccessDecisionPointBenchmark : IDisposable
                     ColumnName = "region",
                     Operator = "EQ",
                     ValueType = "string",
-                    ValueJson = "[\"EMEA\"]"
+                    ValueJson = "\"EMEA\""
                 }
             ]
         };
