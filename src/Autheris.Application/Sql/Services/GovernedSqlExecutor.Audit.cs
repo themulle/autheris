@@ -30,7 +30,8 @@ public sealed partial class GovernedSqlExecutor
         int? affectedRows,
         string? reason,
         bool synthetic,
-        string? originalSql = null)
+        string? originalSql = null,
+        IReadOnlyDictionary<string, object?>? clientValues = null)
     {
         var fields = new Dictionary<string, object?>
         {
@@ -50,6 +51,11 @@ public sealed partial class GovernedSqlExecutor
         if (compiled is not null)
         {
             AddCompiledAuditFields(fields, compiled);
+            if (dmlContext.IsDml)
+            {
+                // The keyed digest of the new values: it ties the record to the exact values written without storing any of them.
+                fields["sql.bound_values_digest"] = _digester.ComputeBoundValues(compiled, clientValues);
+            }
         }
         else if (originalSql is not null)
         {
