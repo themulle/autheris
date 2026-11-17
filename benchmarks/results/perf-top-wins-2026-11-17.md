@@ -1,6 +1,6 @@
 # Performance top wins, before/after (2026-11-17)
 
-Source plan: `docs/plans/2026-11-17-plan-dotnet-11-performance.md`. Raw numbers: `perf-top-wins-2026-11-17.json`.
+Source plan: `docs/plans/2026-11-17-plan-dotnet-11-performance.md`. Raw numbers: `perf-top-wins-2026-11-17-*.json`.
 
 Method: .NET 11.0.0, BenchmarkDotNet 0.15.8 ShortRun in-process (the pinned BDN version cannot launch a `net11.0` child process), `[MemoryDiagnoser]`, 16 shared cores with other builds running. Allocation per op is exact; time (3 short iterations) is indicative only.
 
