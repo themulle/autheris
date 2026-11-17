@@ -3,7 +3,7 @@
   "tolerancePercent": 10,
   "metrics": {
     "coreImageUncompressedMB": {
-      "budget": 440,
+      "budget": 430,
       "unit": "MB",
       "source": "footprint"
     },

@@ -102,6 +102,20 @@ public sealed class TimeZoneConversionStateTests
     }
 
     [Fact]
+    public void Evaluate_DoesNotRunTheDuckDbProbeUntilDuckDbIsAskedFor()
+    {
+        var (state, _, probes) = Create(Pass, () => DuckDbProbeResult.Ok);
+        state.Evaluate();
+        state.IsAvailable(TargetSqlDialect.SqlServer).ShouldBeTrue();
+        state.IsAvailable(TargetSqlDialect.PostgreSql).ShouldBeTrue();
+        probes[0].ShouldBe(0);   // the native DuckDB library is not loaded at startup
+
+        state.IsAvailable(TargetSqlDialect.DuckDb).ShouldBeTrue();
+        state.IsAvailable(TargetSqlDialect.DuckDb).ShouldBeTrue();
+        probes[0].ShouldBe(1);
+    }
+
+    [Fact]
     public void T22_ASelfTestThatThrowsIsAFailure()
     {
         var log = new CapturingLogger<TimeZoneConversionState>();
