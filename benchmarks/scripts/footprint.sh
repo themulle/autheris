@@ -86,12 +86,16 @@ LAZY_ORACLE="true"
 RUN_ID="$$"
 NET_NAME="footprint-net-$RUN_ID"
 PG_NAME="footprint-pg-$RUN_ID"
+# The audit chain anchor lives in the data directory and must survive container restarts (the database keeps the chain);
+# a fresh container without the anchor of an earlier one fails the audit integrity check and /health/ready.
+DATA_VOL="footprint-data-$RUN_ID"
 # Digest-pinned like every other CI image (same major as deploy/podman-compose.yaml).
 PG_IMAGE='docker.io/library/postgres:18-alpine@sha256:b6972e1115a4ff8eba5d7f7d19184926d1e16d7d1136ae1e1a7ebf286da0f015'
 TLS_DIR="$(mktemp -d)"
 CLEANUP_CONTAINER=""
 NET_CREATED=false
 PG_STARTED=false
+VOL_CREATED=false
 
 cleanup() {
   if [ -n "$CLEANUP_CONTAINER" ]; then
@@ -100,6 +104,9 @@ cleanup() {
   fi
   if [ "$PG_STARTED" = "true" ]; then
     $CONTAINER_ENGINE rm -f "$PG_NAME" >/dev/null 2>&1 || true
+  fi
+  if [ "$VOL_CREATED" = "true" ]; then
+    $CONTAINER_ENGINE volume rm -f "$DATA_VOL" >/dev/null 2>&1 || true
   fi
   if [ "$NET_CREATED" = "true" ]; then
     $CONTAINER_ENGINE network rm "$NET_NAME" >/dev/null 2>&1 || true
@@ -132,6 +139,8 @@ chmod 0755 "$TLS_DIR"
 PG_PASSWORD="$(openssl rand -hex 24)"
 $CONTAINER_ENGINE network create "$NET_NAME" >/dev/null
 NET_CREATED=true
+$CONTAINER_ENGINE volume create "$DATA_VOL" >/dev/null
+VOL_CREATED=true
 # The key must be owned by the postgres user with mode 0600; copy it inside the container (root at start) instead of chown-ing on the host.
 PG_STARTED=true
 $CONTAINER_ENGINE run -d --name "$PG_NAME" --network "$NET_NAME" \
@@ -167,6 +176,7 @@ PG_CONN="Host=$PG_NAME;Port=5432;Database=governancedb;Username=footprint;Passwo
 RUN_ENV=(
   --network "$NET_NAME"
   -v "$TLS_DIR/ca.crt:/tls/ca.crt:ro,z"
+  -v "$DATA_VOL:/app/data"
   -e ASPNETCORE_ENVIRONMENT=Production
   -e Gateway__Hosting__AllowedHosts__0=127.0.0.1
   -e Gateway__Hosting__AllowedHosts__1=localhost
