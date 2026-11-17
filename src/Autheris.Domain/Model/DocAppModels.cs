@@ -54,7 +54,8 @@ public sealed record DepositDocRequest(
 public sealed record DepositDocResult(
     bool Success,
     DocChunkIdentifier? ChunkId,
-    string? FilePath,
     string Message,
-    string? ErrorCode = null
+    string? ErrorCode = null,
+    long? Version = null,
+    bool Sanitized = false
 );

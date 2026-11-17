@@ -38,6 +38,10 @@ public interface IDocSearchService
 {
     Task IndexChunkAsync(DocChunk chunk, CancellationToken cancellationToken = default);
     Task IndexChunksAsync(IEnumerable<DocChunk> chunks, CancellationToken cancellationToken = default);
+    Task RemoveDocumentAsync(DocKey key, CancellationToken cancellationToken = default);
+    Task RemoveTenantAsync(string tenantId, CancellationToken cancellationToken = default);
+    Task ReplaceAllAsync(IEnumerable<DocChunk> chunks, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<DocChunk>> SnapshotVisibleChunksAsync(DocAccessScope scope, CancellationToken cancellationToken = default);
 
     // The unscoped overloads see official documentation only (DocAccessScope.OfficialOnly).
     Task<IReadOnlyList<DocSearchResult>> SearchAsync(string query, DocCategory? category = null, int limit = 10, CancellationToken cancellationToken = default);

@@ -4,7 +4,7 @@
 **Authors:** Principal .NET & AI Infrastructure Architect  
 **Components:**
 - Domain: [`DocAppModels.cs`](../../src/Autheris.Domain/Model/DocAppModels.cs), [`DocChunkModels.cs`](../../src/Autheris.Domain/Model/DocChunkModels.cs)
-- Application: [`IUniversalDocStore.cs`](../../src/Autheris.Application/Docs/Interfaces/IUniversalDocStore.cs), [`FileSystemUniversalDocStore.cs`](../../src/Autheris.Infrastructure/Docs/FileSystemUniversalDocStore.cs), [`McpDocTools.cs`](../../src/Autheris.Application/Mcp/Services/McpDocTools.cs)
+- Application: [`IUniversalDocStore.cs`](../../src/Autheris.Application/Docs/Interfaces/IUniversalDocStore.cs), [`GovernanceDocStore.cs`](../../src/Autheris.Application/Docs/Services/GovernanceDocStore.cs), [`McpDocTools.cs`](../../src/Autheris.Application/Mcp/Services/McpDocTools.cs)
 - API: [`DocIngestionEndpoints.cs`](../../src/Autheris.Api/Endpoints/DocIngestionEndpoints.cs)
 - Search & Indexing: [`IDocSearchService.cs`](../../src/Autheris.Application/Docs/Interfaces/IDocSearchService.cs), [`MarkdownDocIngestor.cs`](../../src/Autheris.Application/Docs/Services/MarkdownDocIngestor.cs)
 

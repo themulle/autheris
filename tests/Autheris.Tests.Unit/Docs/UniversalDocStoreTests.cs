@@ -3,55 +3,41 @@ namespace Autheris.Tests.Unit.Docs;
 using System;
 using System.IO;
 using System.IO.Compression;
+using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Autheris.Application.Docs.Interfaces;
 using Autheris.Application.Docs.Services;
 using Autheris.Application.Mcp.Services;
 using Autheris.Domain.Model;
-using Autheris.Infrastructure.Docs;
 using Microsoft.Extensions.Logging.Abstractions;
 using Shouldly;
 using Xunit;
 
-public sealed class UniversalDocStoreTests : IDisposable
+public sealed class UniversalDocStoreTests
 {
-    private readonly string _testRootDir;
-    private readonly IDocSearchService _searchService;
+    private static readonly DocWriter OfficialWriter = new(null, "cluster-admin");
+    private static readonly DocWriter TenantAWriter = new("tenant-a", "user-a");
+
+    private readonly InMemoryDocumentRepository _repository;
+    private readonly InMemoryDocSearchService _searchService;
     private readonly IDocIngestor _ingestor;
-    private readonly FileSystemUniversalDocStore _docStore;
+    private readonly GovernanceDocStore _docStore;
 
     public UniversalDocStoreTests()
     {
-        _testRootDir = Path.Combine(Path.GetTempPath(), "autheris_docstore_test_" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(_testRootDir);
-
+        _repository = new InMemoryDocumentRepository();
         _searchService = new InMemoryDocSearchService();
         _ingestor = new MarkdownDocIngestor();
-        _docStore = new FileSystemUniversalDocStore(
-            _testRootDir,
+        _docStore = new GovernanceDocStore(
+            _repository,
             _searchService,
             _ingestor,
-            NullLogger<FileSystemUniversalDocStore>.Instance);
-    }
-
-    public void Dispose()
-    {
-        try
-        {
-            if (Directory.Exists(_testRootDir))
-            {
-                Directory.Delete(_testRootDir, recursive: true);
-            }
-        }
-        catch
-        {
-            // Ignore cleanup errors in tests
-        }
+            NullLogger<GovernanceDocStore>.Instance);
     }
 
     [Fact]
-    public async Task DepositDocumentAsync_SafelyStoresAndIndexesDocument()
+    public async Task CreateAsync_SafelyStoresAndIndexesDocument()
     {
         var request = new DepositDocRequest(
             AppId: "billing-service",
@@ -72,43 +58,75 @@ public sealed class UniversalDocStoreTests : IDisposable
             DocId: "payment-gw-timeout",
             ErrorCode: "PAY_TIMEOUT_504");
 
-        var result = await _docStore.DepositDocumentAsync(request);
+        var result = await _docStore.CreateAsync(OfficialWriter, request);
 
         result.Success.ShouldBeTrue();
-        // The result carries a store-relative path only (never the absolute server path).
-        result.FilePath.ShouldNotBeNull();
-        Path.IsPathRooted(result.FilePath).ShouldBeFalse();
-        result.FilePath.ShouldBe("billing-service/runbook/payment-gw-timeout.md");
-        File.Exists(Path.Combine(_testRootDir, result.FilePath)).ShouldBeTrue();
+        result.Version.ShouldBe(1);
 
-        // Verify instant discoverability via IDocSearchService
+        var persisted = await _repository.GetAsync(new DocKey(null, "billing-service", DocCategory.Runbook, "payment-gw-timeout"));
+        persisted.ShouldNotBeNull();
+
         var searchHits = await _searchService.SearchAsync("PAY_TIMEOUT_504");
         searchHits.Count.ShouldBeGreaterThanOrEqualTo(1);
         searchHits[0].AppId.ShouldBe("billing-service");
         searchHits[0].Id.DocId.ShouldBe("payment-gw-timeout");
         searchHits.Any(h => h.Title.Contains("Invoice Payment Gateway") || h.Id.DocId == "payment-gw-timeout").ShouldBeTrue();
 
-        // Verify listing applications
-        var apps = await _docStore.ListApplicationsAsync();
+        var apps = await _docStore.ListApplicationsAsync(DocAccessScope.OfficialOnly);
         apps.Count.ShouldBe(1);
         apps[0].AppId.ShouldBe("billing-service");
         apps[0].DocumentCount.ShouldBe(1);
     }
 
     [Fact]
-    public async Task ExtractBundleAsync_DefendsAgainstZipSlipAttack()
+    public async Task ReplaceAndDeleteAsync_EnforceOptimisticConcurrencyAndUpdateIndex()
+    {
+        var request = new DepositDocRequest(
+            AppId: "billing-service",
+            Category: DocCategory.Runbook,
+            Title: "Failover Runbook",
+            Content: "# Failover Runbook\n\n## LegacyStep\nUse old script.",
+            DocId: "failover");
+
+        var created = await _docStore.CreateAsync(TenantAWriter, request);
+        created.Success.ShouldBeTrue();
+        created.Version.ShouldBe(1);
+
+        var wrongVersion = await _docStore.ReplaceAsync(
+            TenantAWriter,
+            request with { Content = "# Failover Runbook\n\n## NewStep\nUse new script." },
+            expectedVersion: 99);
+        wrongVersion.Success.ShouldBeFalse();
+        wrongVersion.ErrorCode.ShouldBe("VERSION_MISMATCH");
+
+        var replaced = await _docStore.ReplaceAsync(
+            TenantAWriter,
+            request with { Content = "# Failover Runbook\n\n## NewStep\nUse new script." },
+            expectedVersion: 1);
+        replaced.Success.ShouldBeTrue();
+        replaced.Version.ShouldBe(2);
+
+        var scopeA = DocAccessScope.ForTenant("tenant-a");
+        (await _searchService.SearchAsync("LegacyStep", scopeA)).ShouldBeEmpty();
+        (await _searchService.SearchAsync("NewStep", scopeA)).Count.ShouldBe(1);
+
+        (await _docStore.DeleteAsync(new DocWriter("tenant-b", "user-b"), new DocKey("tenant-a", "billing-service", DocCategory.Runbook, "failover"))).ShouldBeFalse();
+        (await _docStore.DeleteAsync(TenantAWriter, new DocKey("tenant-a", "billing-service", DocCategory.Runbook, "failover"))).ShouldBeTrue();
+        (await _searchService.SearchAsync("NewStep", scopeA)).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task ImportBundleAsync_DefendsAgainstZipSlipAttack()
     {
         using var memoryStream = new MemoryStream();
         using (var archive = new ZipArchive(memoryStream, ZipArchiveMode.Create, leaveOpen: true))
         {
-            // Legitimate entry
             var goodEntry = archive.CreateEntry("runbooks/normal.md");
             using (var writer = new StreamWriter(goodEntry.Open()))
             {
                 writer.WriteLine("# Normal Runbook");
             }
 
-            // Malicious traversal entry trying to escape target dir
             var maliciousEntry = archive.CreateEntry("../../evil_system_file.txt");
             using (var writer = new StreamWriter(maliciousEntry.Open()))
             {
@@ -118,7 +136,7 @@ public sealed class UniversalDocStoreTests : IDisposable
 
         memoryStream.Position = 0;
 
-        var result = await _docStore.ExtractBundleAsync("compromised-app", memoryStream);
+        var result = await _docStore.ImportBundleAsync(OfficialWriter, "compromised-app", memoryStream);
 
         result.Success.ShouldBeFalse();
         result.ErrorCode.ShouldBe("ZIP_SLIP_ATTEMPT");
@@ -126,12 +144,11 @@ public sealed class UniversalDocStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task ExtractBundleAsync_DefendsAgainstZipBomb()
+    public async Task ImportBundleAsync_DefendsAgainstZipBomb()
     {
         using var memoryStream = new MemoryStream();
         using (var archive = new ZipArchive(memoryStream, ZipArchiveMode.Create, leaveOpen: true))
         {
-            // Create entries that exceed maximum entry limit or huge uncompressed size
             for (int i = 0; i < 1005; i++)
             {
                 var entry = archive.CreateEntry($"docs/doc_{i}.md");
@@ -141,7 +158,7 @@ public sealed class UniversalDocStoreTests : IDisposable
         }
 
         memoryStream.Position = 0;
-        var result = await _docStore.ExtractBundleAsync("huge-app", memoryStream);
+        var result = await _docStore.ImportBundleAsync(OfficialWriter, "huge-app", memoryStream);
 
         result.Success.ShouldBeFalse();
         result.ErrorCode.ShouldBe("ZIP_BOMB_DETECTED");
@@ -149,7 +166,7 @@ public sealed class UniversalDocStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task ExtractBundleAsync_ExtractsValidArchiveAndIndexesMarkdown()
+    public async Task ImportBundleAsync_ExtractsValidArchiveAndIndexesMarkdown()
     {
         using var memoryStream = new MemoryStream();
         using (var archive = new ZipArchive(memoryStream, ZipArchiveMode.Create, leaveOpen: true))
@@ -185,18 +202,16 @@ public sealed class UniversalDocStoreTests : IDisposable
 
         memoryStream.Position = 0;
 
-        var result = await _docStore.ExtractBundleAsync("auth-service", memoryStream);
+        var result = await _docStore.ImportBundleAsync(OfficialWriter, "auth-service", memoryStream);
 
         result.Success.ShouldBeTrue();
         result.Message.ShouldContain("unpacked");
 
-        // Verify manifest parsed
-        var manifest = await _docStore.GetManifestAsync("auth-service");
+        var manifest = await _docStore.GetManifestAsync(DocAccessScope.OfficialOnly, "auth-service");
         manifest.ShouldNotBeNull();
         manifest.Name.ShouldBe("Corporate Auth Service");
         manifest.Domain.ShouldBe("security");
 
-        // Verify search hit
         var hits = await _searchService.SearchAsync("Emergency MFA");
         hits.Count.ShouldBeGreaterThanOrEqualTo(1);
         hits[0].AppId.ShouldBe("auth-service");
@@ -213,14 +228,13 @@ public sealed class UniversalDocStoreTests : IDisposable
 
         await Should.ThrowAsync<ArgumentException>(async () =>
         {
-            await _docStore.DepositDocumentAsync(request);
+            await _docStore.CreateAsync(OfficialWriter, request);
         });
     }
 
     [Fact]
     public async Task McpTools_ListApplicationsAndDepositDocumentation_WorkCorrectly()
     {
-        // 1. Deposit via MCP execution handler
         var depositArgs = """
         {
           "appId": "crm-system",
@@ -233,37 +247,38 @@ public sealed class UniversalDocStoreTests : IDisposable
         var depositJson = await McpDocTools.ExecuteDepositDocumentationAsync(_docStore, depositArgs, DocSession("ClusterAdmin"));
         depositJson.ShouldContain("\"success\": true");
 
-        // 2. List via MCP execution handler
-        var listJson = await McpDocTools.ExecuteListApplicationsAsync(_docStore, null);
+        var listJson = await McpDocTools.ExecuteListApplicationsAsync(_docStore, null, DocSession("ClusterAdmin"));
         listJson.ShouldContain("\"total\": 1");
         listJson.ShouldContain("crm-system");
     }
 
     [Fact]
-    public async Task SyncExistingDocumentsAsync_IndexesMarkdownFilesOnDisk()
+    public async Task RefreshIndexAsync_ReloadsPersistedDocumentsIntoFreshSearchService()
     {
-        // Arrange: manually create a file structure on disk (simulating mounted shared-docs volume)
-        var appDir = Path.Combine(_testRootDir, "inventory-service", "runbooks");
-        Directory.CreateDirectory(appDir);
-        var filePath = Path.Combine(appDir, "stock-alert.md");
-        await File.WriteAllTextAsync(filePath, """
-        # Stock Level Critical Alert
+        await _repository.CreateAsync(new DocRecord(
+            TenantId: null,
+            AppId: "inventory-service",
+            Category: DocCategory.Runbook,
+            DocId: "stock-alert",
+            Title: "Stock Level Critical Alert",
+            Content: "# Stock Level Critical Alert\n\n## Symptom\nError code `ERR_STOCK_LOW` occurs when items reach threshold.",
+            ContentSha256: "abc",
+            ByteCount: 95,
+            Tags: [],
+            ErrorCode: "ERR_STOCK_LOW",
+            AuthorSid: "S-1",
+            Version: 1,
+            UpdatedAt: DateTimeOffset.UnixEpoch), new DocQuota(100, 1024 * 1024));
 
-        ## Symptom
-        Error code `ERR_STOCK_LOW` occurs when items reach threshold.
-        """);
-
-        // Act: Sync existing documents into fresh search service
         var freshSearchService = new InMemoryDocSearchService();
-        var store = new FileSystemUniversalDocStore(
-            _testRootDir,
+        var freshStore = new GovernanceDocStore(
+            _repository,
             freshSearchService,
             _ingestor,
-            NullLogger<FileSystemUniversalDocStore>.Instance);
+            NullLogger<GovernanceDocStore>.Instance);
 
-        var indexedCount = await store.SyncExistingDocumentsAsync();
+        var indexedCount = await freshStore.RefreshIndexAsync();
 
-        // Assert
         indexedCount.ShouldBeGreaterThan(0);
         var searchHits = await freshSearchService.SearchAsync("ERR_STOCK_LOW");
         searchHits.Count.ShouldBeGreaterThanOrEqualTo(1);
@@ -271,38 +286,38 @@ public sealed class UniversalDocStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task DocumentExistsAsync_SeesExactlyTheFileADepositWrites()
+    public async Task PurgeTenantAsync_RemovesTenantDocumentsAndSearchEntries()
     {
-        var request = new DepositDocRequest("billing-service", DocCategory.Runbook, "Payment Timeout", "# Payment Timeout", DocId: "payment-timeout");
+        await _docStore.CreateAsync(TenantAWriter, new DepositDocRequest("app-1", DocCategory.Runbook, "A1", "# Tenant A\n\nQuorum purge sentinel", DocId: "a1"));
+        await _docStore.CreateAsync(OfficialWriter, new DepositDocRequest("app-1", DocCategory.Runbook, "O1", "# Official\n\nOfficial purge sentinel", DocId: "o1"));
 
-        (await _docStore.DocumentExistsAsync(request)).ShouldBeFalse();
-        await _docStore.DepositDocumentAsync(request);
+        var purged = await _docStore.PurgeTenantAsync("tenant-a");
 
-        (await _docStore.DocumentExistsAsync(request)).ShouldBeTrue();
-        // Same document id without DocId (slug of the title) and in another category.
-        (await _docStore.DocumentExistsAsync(request with { DocId = null, Title = "payment-timeout" })).ShouldBeTrue();
-        (await _docStore.DocumentExistsAsync(request with { Category = DocCategory.Guide })).ShouldBeFalse();
+        purged.ShouldBe(1);
+        (await _searchService.SearchAsync("Quorum", DocAccessScope.ForTenant("tenant-a"))).ShouldBeEmpty();
+        (await _searchService.SearchAsync("Official", DocAccessScope.ForTenant("tenant-a"))).Count.ShouldBe(1);
     }
 
     private static McpSessionContext DocSession(string role) =>
         new("s1", "user-1", "tenant-a", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, UserSid: "user-1", Roles: [role]);
 
     [Fact]
-    public async Task McpDeposit_TenantGovernanceAdmin_CannotOverwriteAnExistingDocument_ClusterAdminCan()
+    public async Task McpDeposit_ExistingDocWithoutReplaceVersion_IsRejected_WithReplaceVersionClusterAdminReplaces()
     {
-        await _docStore.DepositDocumentAsync(new DepositDocRequest("billing-service", DocCategory.Runbook, "Runbook", "# Original", DocId: "runbook"));
-        var filePath = Path.Combine(_testRootDir, "billing-service", "runbook", "runbook.md");
+        await _docStore.CreateAsync(OfficialWriter, new DepositDocRequest("billing-service", DocCategory.Runbook, "Runbook", "# Original", DocId: "runbook"));
         var overwrite = """{"appId":"billing-service","category":"Runbook","docId":"runbook","title":"Runbook","content":"# Replaced"}""";
 
         var denied = await McpDocTools.ExecuteDepositDocumentationAsync(_docStore, overwrite, DocSession("GovernanceAdmin"));
+        denied.ShouldContain("DOC_ID_RESERVED");
 
-        denied.ShouldContain("Forbidden");
-        (await File.ReadAllTextAsync(filePath)).ShouldBe("# Original");
-
-        var allowed = await McpDocTools.ExecuteDepositDocumentationAsync(_docStore, overwrite, DocSession("ClusterAdmin"));
+        var replaceArgs = """{"appId":"billing-service","category":"Runbook","docId":"runbook","title":"Runbook","content":"# Replaced","replaceVersion":1}""";
+        var allowed = await McpDocTools.ExecuteDepositDocumentationAsync(_docStore, replaceArgs, DocSession("ClusterAdmin"));
 
         allowed.ShouldContain("\"success\": true");
-        (await File.ReadAllTextAsync(filePath)).ShouldBe("# Replaced");
+        var stored = await _repository.GetAsync(new DocKey(null, "billing-service", DocCategory.Runbook, "runbook"));
+        stored.ShouldNotBeNull();
+        stored.Content.ShouldBe("# Replaced");
+        stored.Version.ShouldBe(2);
     }
 
     [Fact]
@@ -313,6 +328,7 @@ public sealed class UniversalDocStoreTests : IDisposable
         var result = await McpDocTools.ExecuteDepositDocumentationAsync(_docStore, args, DocSession("GovernanceAdmin"));
 
         result.ShouldContain("\"success\": true");
-        File.Exists(Path.Combine(_testRootDir, "billing-service", "runbook", "new-runbook.md")).ShouldBeTrue();
+        var stored = await _repository.GetAsync(new DocKey("tenant-a", "billing-service", DocCategory.Runbook, "new-runbook"));
+        stored.ShouldNotBeNull();
     }
 }

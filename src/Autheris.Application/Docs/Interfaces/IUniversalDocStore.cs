@@ -1,57 +1,76 @@
 namespace Autheris.Application.Docs.Interfaces;
 
-using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Docs.Services;
 using Autheris.Domain.Model;
 
 /// <summary>
-/// Manages the physical and in-memory multi-application document lake,
-/// supporting atomic bundle extraction, individual document deposits, and manifest resolution.
+/// Manages the persisted multi-application document store and synchronizes searchable chunks.
 /// </summary>
 public interface IUniversalDocStore
 {
     /// <summary>
-    /// Lists all registered applications, optionally filtered by business domain or tag.
+    /// Lists applications visible to <paramref name="scope"/>, optionally filtered by business domain or tag.
     /// </summary>
-    Task<IReadOnlyList<DocAppSummary>> ListApplicationsAsync(string? domain = null, string? tag = null, CancellationToken ct = default);
+    Task<IReadOnlyList<DocAppSummary>> ListApplicationsAsync(
+        DocAccessScope scope,
+        string? domain = null,
+        string? tag = null,
+        CancellationToken ct = default);
 
     /// <summary>
-    /// Retrieves the manifest definition of a specific application.
+    /// Retrieves the manifest definition of a specific application visible to <paramref name="scope"/>.
     /// </summary>
-    Task<DocAppManifest?> GetManifestAsync(string appId, CancellationToken ct = default);
+    Task<DocAppManifest?> GetManifestAsync(
+        DocAccessScope scope,
+        string appId,
+        CancellationToken ct = default);
 
     /// <summary>
-    /// Deposits or updates an individual documentation asset (markdown, runbook, or specification).
-    /// Safely writes to the application directory and indexes chunks into the search engine.
+    /// Creates a new document owned by <paramref name="writer"/> and indexes its chunks on success.
     /// </summary>
-    Task<DepositDocResult> DepositDocumentAsync(DepositDocRequest request, CancellationToken ct = default);
+    Task<DepositDocResult> CreateAsync(
+        DocWriter writer,
+        DepositDocRequest request,
+        CancellationToken ct = default);
 
     /// <summary>
-    /// Whether <see cref="DepositDocumentAsync"/> would overwrite an existing document for <paramref name="request"/>
-    /// (same application, category and document id, resolved exactly as the deposit resolves them).
+    /// Replaces an existing document owned by <paramref name="writer"/> using optimistic concurrency <paramref name="expectedVersion"/>.
     /// </summary>
-    Task<bool> DocumentExistsAsync(DepositDocRequest request, CancellationToken ct = default);
+    Task<DepositDocResult> ReplaceAsync(
+        DocWriter writer,
+        DepositDocRequest request,
+        long expectedVersion,
+        CancellationToken ct = default);
 
     /// <summary>
-    /// Safely unpacks and applies an application documentation ZIP archive with Zip-Slip defense.
+    /// Soft-deletes a document identified by <paramref name="key"/> and removes its chunks from the search index.
     /// </summary>
-    Task<DepositDocResult> ExtractBundleAsync(string appId, Stream zipStream, CancellationToken ct = default);
+    Task<bool> DeleteAsync(
+        DocWriter writer,
+        DocKey key,
+        CancellationToken ct = default);
 
     /// <summary>
-    /// Tenant-scoped bundle extraction. With a non-null <paramref name="tenantId"/> only markdown documents are extracted, every
-    /// document is stamped with the tenant/author provenance block (so it is served to that tenant only and marked as untrusted
-    /// user content), and the bundle is rejected as a whole if any document would replace an existing file (official
-    /// documentation or another tenant's document). A null <paramref name="tenantId"/> behaves like the unscoped overload
-    /// (official documentation; cluster administrators only).
+    /// Validates, sanitizes, and imports a documentation ZIP bundle for <paramref name="writer"/>.
+    /// Tenant bundles are persisted atomically; official bundles create or replace each entry.
     /// </summary>
-    Task<DepositDocResult> ExtractBundleAsync(string appId, Stream zipStream, string? tenantId, string? authorSid, CancellationToken ct = default);
+    Task<DepositDocResult> ImportBundleAsync(
+        DocWriter writer,
+        string appId,
+        Stream zipStream,
+        CancellationToken ct = default);
 
     /// <summary>
-    /// Scans the physical document store directory, discovers all existing application documents,
-    /// and indexes them into the search engine.
+    /// Purges all documents and quota records belonging to <paramref name="tenantId"/>.
     /// </summary>
-    Task<int> SyncExistingDocumentsAsync(CancellationToken ct = default);
+    Task<int> PurgeTenantAsync(string tenantId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Reloads all persisted active documents into the search index and returns indexed section count.
+    /// </summary>
+    Task<int> RefreshIndexAsync(CancellationToken ct = default);
 }

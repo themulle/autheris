@@ -20,12 +20,7 @@ public static class GatewayMcpServiceExtensions
         services.AddSingleton<ISemanticPromptGuardrail, SemanticPromptGuardrail>();
         services.AddSingleton<Autheris.Application.Docs.Interfaces.IDocSearchService, Autheris.Application.Docs.Services.InMemoryDocSearchService>();
         services.AddSingleton<Autheris.Application.Docs.Interfaces.IDocIngestor, Autheris.Application.Docs.Services.MarkdownDocIngestor>();
-        services.AddSingleton<Autheris.Application.Docs.Interfaces.IUniversalDocStore>(sp => new Autheris.Infrastructure.Docs.FileSystemUniversalDocStore(
-            null,
-            sp.GetRequiredService<Autheris.Application.Docs.Interfaces.IDocSearchService>(),
-            sp.GetRequiredService<Autheris.Application.Docs.Interfaces.IDocIngestor>(),
-            sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<Autheris.Infrastructure.Docs.FileSystemUniversalDocStore>>(),
-            sp.GetService<Microsoft.Extensions.Options.IOptions<DocsOptions>>()));
+        services.AddSingleton<Autheris.Application.Docs.Interfaces.IUniversalDocStore, Autheris.Application.Docs.Services.GovernanceDocStore>();
         services.AddOptions<DocsOptions>()
             .Configure<Microsoft.Extensions.Configuration.IConfiguration>((o, cfg) =>
             {
@@ -59,7 +54,9 @@ public static class GatewayMcpServiceExtensions
         services.AddScoped<IAiDataGuardrailService, AiDataGuardrailService>();
         services.AddScoped<IMcpProtocolHandler, McpProtocolHandler>();
         services.AddHostedService<McpSchemaDiscoveryService>();
-        services.AddHostedService<Autheris.Application.Docs.Services.DocStoreStartupSyncService>();
+        services.AddSingleton<Autheris.Application.Docs.Services.DocIndexRefreshService>();
+        services.AddSingleton<Autheris.Application.Docs.Interfaces.IDocIndexReadiness>(sp => sp.GetRequiredService<Autheris.Application.Docs.Services.DocIndexRefreshService>());
+        services.AddHostedService(sp => sp.GetRequiredService<Autheris.Application.Docs.Services.DocIndexRefreshService>());
 
         // Human-in-the-Loop Step-Up Approval (F-AI-05)
         services.AddSingleton<IHitLStepUpApprovalService, HitLStepUpApprovalService>();

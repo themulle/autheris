@@ -11,23 +11,110 @@ using Autheris.Domain.Model;
 
 public sealed class InMemoryDocSearchService : IDocSearchService
 {
-    private readonly ConcurrentDictionary<string, DocChunk> _chunks = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _writeGate = new();
+    private volatile ConcurrentDictionary<DocIndexKey, DocChunk> _chunks = new(DocIndexKeyComparer.Instance);
 
     public Task IndexChunkAsync(DocChunk chunk, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(chunk);
-        Index(chunk);
+        lock (_writeGate)
+        {
+            _chunks[KeyOf(chunk)] = chunk;
+        }
         return Task.CompletedTask;
     }
 
     public Task IndexChunksAsync(IEnumerable<DocChunk> chunks, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(chunks);
-        foreach (var chunk in chunks)
+        lock (_writeGate)
         {
-            Index(chunk);
+            var index = _chunks;
+            foreach (var chunk in chunks)
+            {
+                if (chunk is not null)
+                {
+                    index[KeyOf(chunk)] = chunk;
+                }
+            }
         }
         return Task.CompletedTask;
+    }
+
+    public Task RemoveDocumentAsync(DocKey key, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        var tenantKey = key.TenantId?.Trim() ?? string.Empty;
+        var categoryName = key.Category.ToString();
+
+        lock (_writeGate)
+        {
+            var index = _chunks;
+            foreach (var existingKey in index.Keys)
+            {
+                if (string.Equals(existingKey.TenantKey, tenantKey, StringComparison.Ordinal) &&
+                    string.Equals(existingKey.ChunkId.AppId, key.AppId, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(existingKey.ChunkId.Category, categoryName, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(existingKey.ChunkId.DocId, key.DocId, StringComparison.OrdinalIgnoreCase))
+                {
+                    index.TryRemove(existingKey, out _);
+                }
+            }
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public Task RemoveTenantAsync(string tenantId, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(tenantId))
+        {
+            return Task.CompletedTask;
+        }
+
+        var normalized = tenantId.Trim();
+        lock (_writeGate)
+        {
+            var index = _chunks;
+            foreach (var existingKey in index.Keys)
+            {
+                if (string.Equals(existingKey.TenantKey, normalized, StringComparison.Ordinal))
+                {
+                    index.TryRemove(existingKey, out _);
+                }
+            }
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public Task ReplaceAllAsync(IEnumerable<DocChunk> chunks, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(chunks);
+        var next = new ConcurrentDictionary<DocIndexKey, DocChunk>(DocIndexKeyComparer.Instance);
+        foreach (var chunk in chunks)
+        {
+            if (chunk is not null)
+            {
+                next[KeyOf(chunk)] = chunk;
+            }
+        }
+
+        lock (_writeGate)
+        {
+            _chunks = next;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public Task<IReadOnlyList<DocChunk>> SnapshotVisibleChunksAsync(DocAccessScope scope, CancellationToken cancellationToken = default)
+    {
+        var snapshot = _chunks.Values
+            .Where(scope.CanSee)
+            .Select(c => c with { SourceFile = DocProvenance.ToSafeSourcePath(c.SourceFile) })
+            .ToList();
+        return Task.FromResult<IReadOnlyList<DocChunk>>(snapshot);
     }
 
     public Task<IReadOnlyList<DocSearchResult>> SearchAsync(
@@ -67,8 +154,9 @@ public sealed class InMemoryDocSearchService : IDocSearchService
         }
 
         var results = new List<DocSearchResult>();
+        var snapshot = _chunks;
 
-        foreach (var chunk in _chunks.Values)
+        foreach (var chunk in snapshot.Values)
         {
             if (!scope.CanSee(chunk))
             {
@@ -90,21 +178,18 @@ public sealed class InMemoryDocSearchService : IDocSearchService
             {
                 var termMatched = false;
 
-                // 1. Error code match (high boost: 3.0)
                 if (chunk.ErrorCodes.Any(ec => ec.Equals(term, StringComparison.OrdinalIgnoreCase)))
                 {
                     score += 3.0;
                     termMatched = true;
                 }
 
-                // 2. Title match (boost: 2.0)
                 if (titleLower.Contains(term, StringComparison.Ordinal))
                 {
                     score += 2.0;
                     termMatched = true;
                 }
 
-                // 3. Keyword / Content match (base: 1.0)
                 if (chunk.Keywords.Any(k => k.Equals(term, StringComparison.OrdinalIgnoreCase)) ||
                     contentLower.Contains(term, StringComparison.Ordinal))
                 {
@@ -151,13 +236,22 @@ public sealed class InMemoryDocSearchService : IDocSearchService
     public Task<DocChunk?> GetChunkAsync(DocChunkIdentifier id, DocAccessScope scope, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(id);
-        if (!_chunks.TryGetValue(id.ToString(), out var chunk) || !scope.CanSee(chunk))
+        var snapshot = _chunks;
+
+        // Official documentation always takes precedence over tenant documentation for identical identifiers.
+        if (snapshot.TryGetValue(new DocIndexKey(string.Empty, id), out var official) && scope.CanSee(official))
         {
-            // A chunk of another tenant looks exactly like a missing one.
-            return Task.FromResult<DocChunk?>(null);
+            return Task.FromResult<DocChunk?>(official with { SourceFile = DocProvenance.ToSafeSourcePath(official.SourceFile) });
         }
 
-        return Task.FromResult<DocChunk?>(chunk with { SourceFile = DocProvenance.ToSafeSourcePath(chunk.SourceFile) });
+        if (scope.TenantId is not null &&
+            snapshot.TryGetValue(new DocIndexKey(scope.TenantId, id), out var tenantChunk) &&
+            scope.CanSee(tenantChunk))
+        {
+            return Task.FromResult<DocChunk?>(tenantChunk with { SourceFile = DocProvenance.ToSafeSourcePath(tenantChunk.SourceFile) });
+        }
+
+        return Task.FromResult<DocChunk?>(null);
     }
 
     public Task<ErrorCodeDefinition?> LookupErrorCodeAsync(string errorCode, CancellationToken cancellationToken = default) =>
@@ -171,9 +265,6 @@ public sealed class InMemoryDocSearchService : IDocSearchService
         }
 
         var cleanCode = errorCode.Trim().ToUpperInvariant();
-
-        // Deterministic precedence (the dictionary enumeration order is unspecified): exact error-code metadata match before
-        // a title match, official documentation before tenant documents, then the chunk identifier.
         var matchingChunk = _chunks.Values
             .Where(c => scope.CanSee(c))
             .Select(c => (Chunk: c, MatchRank: ErrorCodeMatchRank(c, cleanCode)))
@@ -216,11 +307,14 @@ public sealed class InMemoryDocSearchService : IDocSearchService
         var topics = query
             .Select(c => $"{c.AppId} / {c.Category}: {c.Title}")
             .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(t => t)
+            .OrderBy(t => t, StringComparer.Ordinal)
             .ToList();
 
         return Task.FromResult<IReadOnlyList<string>>(topics);
     }
+
+    private static DocIndexKey KeyOf(DocChunk chunk) =>
+        new(chunk.TenantId?.Trim() ?? string.Empty, chunk.Id);
 
     /// <summary>0 = exact match on the error-code metadata, 1 = the title contains the code, -1 = no match.</summary>
     private static int ErrorCodeMatchRank(DocChunk chunk, string cleanCode)
@@ -233,18 +327,28 @@ public sealed class InMemoryDocSearchService : IDocSearchService
         return chunk.Title.Contains(cleanCode, StringComparison.OrdinalIgnoreCase) ? 1 : -1;
     }
 
-    /// <summary>
-    /// Chunk identifiers are not tenant-scoped (AppId::Category::DocId#Section), so different files can map to the same key.
-    /// An official chunk replaces anything; a tenant chunk replaces only a chunk of the same tenant. A tenant can therefore
-    /// never displace official documentation or another tenant's document from the index.
-    /// </summary>
-    private void Index(DocChunk chunk)
+    private readonly record struct DocIndexKey(string TenantKey, DocChunkIdentifier ChunkId);
+
+    private sealed class DocIndexKeyComparer : IEqualityComparer<DocIndexKey>
     {
-        _chunks.AddOrUpdate(
-            chunk.Id.ToString(),
-            chunk,
-            (_, existing) => chunk.TenantId is null || string.Equals(existing.TenantId, chunk.TenantId, StringComparison.Ordinal)
-                ? chunk
-                : existing);
+        public static readonly DocIndexKeyComparer Instance = new();
+
+        public bool Equals(DocIndexKey x, DocIndexKey y) =>
+            string.Equals(x.TenantKey, y.TenantKey, StringComparison.Ordinal) &&
+            string.Equals(x.ChunkId.AppId, y.ChunkId.AppId, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(x.ChunkId.Category, y.ChunkId.Category, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(x.ChunkId.DocId, y.ChunkId.DocId, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(x.ChunkId.SectionId, y.ChunkId.SectionId, StringComparison.OrdinalIgnoreCase);
+
+        public int GetHashCode(DocIndexKey obj)
+        {
+            var hash = new HashCode();
+            hash.Add(obj.TenantKey, StringComparer.Ordinal);
+            hash.Add(obj.ChunkId.AppId, StringComparer.OrdinalIgnoreCase);
+            hash.Add(obj.ChunkId.Category, StringComparer.OrdinalIgnoreCase);
+            hash.Add(obj.ChunkId.DocId, StringComparer.OrdinalIgnoreCase);
+            hash.Add(obj.ChunkId.SectionId, StringComparer.OrdinalIgnoreCase);
+            return hash.ToHashCode();
+        }
     }
 }

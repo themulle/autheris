@@ -81,7 +81,7 @@ public sealed class EventAndWebhookIntegrationTests : IClassFixture<EventAndWebh
         var response = await client.PutAsync($"/api/v1/docs/apps/orders-service/documents/architecture/{docId}", content);
 
         // Assert
-        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.StatusCode.ShouldBe(HttpStatusCode.Created);
         await ((IGatewayEventBusDrain)eventBus).DrainAsync();
         receivedEvent.ShouldNotBeNull();
         receivedEvent.AppId.ShouldBe("orders-service");

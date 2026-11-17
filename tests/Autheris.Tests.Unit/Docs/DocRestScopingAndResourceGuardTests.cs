@@ -1,6 +1,5 @@
 namespace Autheris.Tests.Unit.Docs;
 
-using Autheris.Domain.Security;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -13,15 +12,15 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Endpoints;
 using Autheris.Api.Middleware;
+using Autheris.Api.Security;
+using Autheris.Domain.Security;
 using Autheris.Application.Docs.Interfaces;
 using Autheris.Application.Docs.Services;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Mcp.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
-using Autheris.Infrastructure.Docs;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using Shouldly;
@@ -29,35 +28,18 @@ using Xunit;
 
 /// <summary>
 /// REST documentation endpoints follow the MCP documentation tools: callers other than a canonical ClusterAdmin deposit tenant
-/// documents (tenant bundle extraction never replaces an existing file), readers see official documentation plus their own tenant,
-/// and no absolute server path is returned. The stdio protocol handler reads semantic resources through the guardrail.
+/// documents (tenant bundle extraction is atomic and never replaces an existing official or tenant document), readers see official
+/// documentation plus their own tenant, and no absolute server path is returned.
 /// </summary>
-public sealed class DocRestScopingAndResourceGuardTests : IDisposable
+public sealed class DocRestScopingAndResourceGuardTests
 {
-    private readonly string _root;
+    private readonly InMemoryDocumentRepository _repository = new();
     private readonly InMemoryDocSearchService _search = new();
-    private readonly FileSystemUniversalDocStore _store;
+    private readonly GovernanceDocStore _store;
 
     public DocRestScopingAndResourceGuardTests()
     {
-        _root = Path.Combine(Path.GetTempPath(), "autheris_doc_rest_test_" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(_root);
-        _store = new FileSystemUniversalDocStore(_root, _search, new MarkdownDocIngestor(), NullLogger<FileSystemUniversalDocStore>.Instance);
-    }
-
-    public void Dispose()
-    {
-        try
-        {
-            if (Directory.Exists(_root))
-            {
-                Directory.Delete(_root, recursive: true);
-            }
-        }
-        catch
-        {
-            // Ignore cleanup errors in tests
-        }
+        _store = new GovernanceDocStore(_repository, _search, new MarkdownDocIngestor(), NullLogger<GovernanceDocStore>.Instance);
     }
 
     private static MemoryStream Zip(params (string Name, string Content)[] entries)
@@ -77,30 +59,24 @@ public sealed class DocRestScopingAndResourceGuardTests : IDisposable
         return ms;
     }
 
-    // ---- Tenant bundle extraction ------------------------------------------------------------------------------------------------
-
     [Fact]
-    public async Task TenantBundle_StampsEveryDocument_ServesOnlyTheTenant_AndSkipsNonMarkdown()
+    public async Task TenantBundle_StampsEveryDocument_ServesOnlyTheTenant_AndSkipsManifest()
     {
         using var zip = Zip(
             ("runbook/alpha.md", "# Zebraquartz Alpha\n\nAlpha procedure."),
             ("guide/beta.md", "# Zebraquartz Beta\n\nBeta procedure."),
             ("manifest.json", """{"appId":"tenant-app","name":"Spoofed"}"""));
 
-        var result = await _store.ExtractBundleAsync("tenant-app", zip, "tenant-a", "S-1-5-21-1");
+        var result = await _store.ImportBundleAsync(new DocWriter("tenant-a", "S-1-5-21-1"), "tenant-app", zip);
 
         result.Success.ShouldBeTrue();
-        result.FilePath.ShouldNotBeNull();
-        Path.IsPathRooted(result.FilePath).ShouldBeFalse();
 
-        foreach (var rel in new[] { "runbook/alpha.md", "guide/beta.md" })
-        {
-            var text = await File.ReadAllTextAsync(Path.Combine(_root, "tenant-app", rel));
-            text.ShouldStartWith("---\n" + DocProvenance.TenantKey + ": tenant-a\n");
-            text.ShouldContain(DocProvenance.AuthorKey + ": S-1-5-21-1");
-        }
+        var manifest = await _store.GetManifestAsync(DocAccessScope.ForTenant("tenant-a"), "tenant-app");
+        manifest.ShouldBeNull();
 
-        File.Exists(Path.Combine(_root, "tenant-app", "manifest.json")).ShouldBeFalse();
+        var alpha = await _repository.GetAsync(new DocKey("tenant-a", "tenant-app", DocCategory.Runbook, "alpha"));
+        alpha.ShouldNotBeNull();
+        alpha.AuthorSid.ShouldBe("S-1-5-21-1");
 
         var own = await _search.SearchAsync("zebraquartz", DocAccessScope.ForTenant("tenant-a"));
         own.Count.ShouldBeGreaterThanOrEqualTo(2);
@@ -112,37 +88,45 @@ public sealed class DocRestScopingAndResourceGuardTests : IDisposable
     }
 
     [Fact]
-    public async Task TenantBundle_CannotOverwriteAnOfficialDocument_AndWritesNothing()
+    public async Task TenantBundle_CannotOverwriteAnOfficialDocument_AndWritesNothingAtomically()
     {
-        await _store.DepositDocumentAsync(new DepositDocRequest("billing-service", DocCategory.Runbook, "Runbook", "# Official", DocId: "runbook"));
-        var officialPath = Path.Combine(_root, "billing-service", "runbook", "runbook.md");
+        await _store.CreateAsync(new DocWriter(null, "S-ADMIN"), new DepositDocRequest("billing-service", DocCategory.Runbook, "Runbook", "# Official", DocId: "runbook"));
 
         using var zip = Zip(
             ("guide/harmless.md", "# Harmless"),
             ("runbook/runbook.md", "# Replaced by a tenant"));
 
-        var result = await _store.ExtractBundleAsync("billing-service", zip, "tenant-a", "S-1");
+        var result = await _store.ImportBundleAsync(new DocWriter("tenant-a", "S-1"), "billing-service", zip);
 
         result.Success.ShouldBeFalse();
-        result.ErrorCode.ShouldBe("DOC_OVERWRITE_FORBIDDEN");
-        (await File.ReadAllTextAsync(officialPath)).ShouldBe("# Official");
-        File.Exists(Path.Combine(_root, "billing-service", "guide", "harmless.md")).ShouldBeFalse();
+        result.ErrorCode.ShouldBe("DOC_ID_RESERVED");
+        (await _repository.GetAsync(new DocKey(null, "billing-service", DocCategory.Runbook, "runbook")))!.Content.ShouldBe("# Official");
+        (await _repository.GetAsync(new DocKey("tenant-a", "billing-service", DocCategory.Guide, "harmless"))).ShouldBeNull();
     }
 
     [Fact]
-    public async Task TenantBundle_CannotOverwriteAnotherTenantsDocument()
+    public async Task TenantBundle_TwoTenantsWithSameDocId_StayIsolated()
     {
         using (var first = Zip(("runbook/shared.md", "# Tenant A secret procedure")))
         {
-            (await _store.ExtractBundleAsync("app", first, "tenant-a", "S-A")).Success.ShouldBeTrue();
+            (await _store.ImportBundleAsync(new DocWriter("tenant-a", "S-A"), "app", first)).Success.ShouldBeTrue();
         }
 
-        using var second = Zip(("runbook/shared.md", "# Tenant B replacement"));
-        var result = await _store.ExtractBundleAsync("app", second, "tenant-b", "S-B");
+        using (var second = Zip(("runbook/shared.md", "# Tenant B own procedure")))
+        {
+            (await _store.ImportBundleAsync(new DocWriter("tenant-b", "S-B"), "app", second)).Success.ShouldBeTrue();
+        }
 
-        result.Success.ShouldBeFalse();
-        result.ErrorCode.ShouldBe("DOC_OVERWRITE_FORBIDDEN");
-        (await File.ReadAllTextAsync(Path.Combine(_root, "app", "runbook", "shared.md"))).ShouldContain("Tenant A secret procedure");
+        (await _repository.GetAsync(new DocKey("tenant-a", "app", DocCategory.Runbook, "shared")))!.Content.ShouldContain("Tenant A");
+        (await _repository.GetAsync(new DocKey("tenant-b", "app", DocCategory.Runbook, "shared")))!.Content.ShouldContain("Tenant B");
+
+        var searchA = await _search.SearchAsync("procedure", DocAccessScope.ForTenant("tenant-a"));
+        searchA.ShouldHaveSingleItem();
+        searchA[0].Summary.ShouldContain("Tenant A");
+
+        var searchB = await _search.SearchAsync("procedure", DocAccessScope.ForTenant("tenant-b"));
+        searchB.ShouldHaveSingleItem();
+        searchB[0].Summary.ShouldContain("Tenant B");
     }
 
     [Fact]
@@ -152,11 +136,11 @@ public sealed class DocRestScopingAndResourceGuardTests : IDisposable
             ("runbook/legit.md", "# Legit"),
             ("../../evil.md", "# Evil"));
 
-        var result = await _store.ExtractBundleAsync("slip-app", zip, "tenant-a", "S-1");
+        var result = await _store.ImportBundleAsync(new DocWriter("tenant-a", "S-1"), "slip-app", zip);
 
         result.Success.ShouldBeFalse();
         result.ErrorCode.ShouldBe("ZIP_SLIP_ATTEMPT");
-        File.Exists(Path.Combine(_root, "slip-app", "runbook", "legit.md")).ShouldBeFalse();
+        (await _repository.GetAsync(new DocKey("tenant-a", "slip-app", DocCategory.Runbook, "legit"))).ShouldBeNull();
     }
 
     [Fact]
@@ -164,7 +148,7 @@ public sealed class DocRestScopingAndResourceGuardTests : IDisposable
     {
         using var zip = Zip(("runbook/huge.md", new string('x', 5 * 1024 * 1024 + 1)));
 
-        var result = await _store.ExtractBundleAsync("big-app", zip, "tenant-a", "S-1");
+        var result = await _store.ImportBundleAsync(new DocWriter("tenant-a", "S-1"), "big-app", zip);
 
         result.Success.ShouldBeFalse();
         result.ErrorCode.ShouldBe("DOC_TOO_LARGE");
@@ -175,12 +159,9 @@ public sealed class DocRestScopingAndResourceGuardTests : IDisposable
     {
         using var zip = Zip(("runbook/official.md", "# Quillbarrow Official\n\nOfficial procedure."));
 
-        var result = await _store.ExtractBundleAsync("off-app", zip, null, null);
+        var result = await _store.ImportBundleAsync(new DocWriter(null, "S-ADMIN"), "off-app", zip);
 
         result.Success.ShouldBeTrue();
-        result.FilePath.ShouldNotBeNull();
-        Path.IsPathRooted(result.FilePath).ShouldBeFalse();
-        (await File.ReadAllTextAsync(Path.Combine(_root, "off-app", "runbook", "official.md"))).ShouldNotContain(DocProvenance.TenantKey);
 
         var hits = await _search.SearchAsync("quillbarrow", DocAccessScope.ForTenant("tenant-b"));
         hits.ShouldNotBeEmpty();
@@ -188,15 +169,14 @@ public sealed class DocRestScopingAndResourceGuardTests : IDisposable
     }
 
     [Fact]
-    public async Task Deposit_ReturnsAStoreRelativePath()
+    public async Task Deposit_NeverExposesFilePathProperty()
     {
-        var result = await _store.DepositDocumentAsync(new DepositDocRequest("billing-service", DocCategory.Runbook, "Runbook", "# Text", DocId: "runbook"));
+        var result = await _store.CreateAsync(new DocWriter(null, "S-ADMIN"), new DepositDocRequest("billing-service", DocCategory.Runbook, "Runbook", "# Text", DocId: "runbook"));
 
-        result.FilePath.ShouldBe("billing-service/runbook/runbook.md");
-        Path.IsPathRooted(result.FilePath).ShouldBeFalse();
+        result.Success.ShouldBeTrue();
+        result.Version.ShouldBe(1);
+        typeof(DepositDocResult).GetProperty("FilePath").ShouldBeNull();
     }
-
-    // ---- REST endpoint scoping helpers --------------------------------------------------------------------------------------------
 
     private static DefaultHttpContext Http(string? tenant, params string[] roles)
     {
@@ -279,7 +259,7 @@ public sealed class DocRestScopingAndResourceGuardTests : IDisposable
     public async Task ReadScope_HidesAnotherTenantsDocumentsFromRestReaders()
     {
         using var zip = Zip(("runbook/mine.md", "# Gryphonmoss Tenant Runbook\n\nTenant A only."));
-        (await _store.ExtractBundleAsync("app", zip, "tenant-a", "S-A")).Success.ShouldBeTrue();
+        (await _store.ImportBundleAsync(new DocWriter("tenant-a", "S-A"), "app", zip)).Success.ShouldBeTrue();
 
         var asA = DocEndpointAccess.ResolveReadScope(Http("tenant-a", "DataConsumer"));
         var asB = DocEndpointAccess.ResolveReadScope(Http("tenant-b", "DataConsumer"));
@@ -291,20 +271,6 @@ public sealed class DocRestScopingAndResourceGuardTests : IDisposable
         (await _search.ListTopicsAsync(asA)).ShouldNotBeEmpty();
         (await _search.GetChunkAsync(visible[0].Id, asA)).ShouldNotBeNull();
         (await _search.GetChunkAsync(visible[0].Id, asB)).ShouldBeNull();
-    }
-
-    [Fact]
-    public void Scrub_NeverReturnsAnAbsolutePath()
-    {
-        var absolute = Path.Combine(Path.GetTempPath(), "shared-docs", "billing-service", "runbook", "x.md");
-
-        var scrubbed = DocEndpointAccess.Scrub(new DepositDocResult(true, null, absolute, "ok"));
-        var relative = DocEndpointAccess.Scrub(new DepositDocResult(true, null, "billing-service/runbook/x.md", "ok"));
-        var none = DocEndpointAccess.Scrub(new DepositDocResult(false, null, null, "no"));
-
-        scrubbed.FilePath.ShouldBe("x.md");
-        relative.FilePath.ShouldBe("billing-service/runbook/x.md");
-        none.FilePath.ShouldBeNull();
     }
 
     // ---- stdio protocol handler: semantic resources through the guardrail ---------------------------------------------------------
@@ -404,7 +370,6 @@ public sealed class DocRestScopingAndResourceGuardTests : IDisposable
     public async Task ResourcesRead_NeverReadsTheCompilerOutsideTheGuardrail()
     {
         var (handler, guardrail, compiler, sid) = Handler();
-        // A guardrail that denies without running the read delegate: the compiler must not have been consulted by the handler itself.
         guardrail.ReadResourceWithGuardrailAsync(
                 Arg.Any<string>(), Arg.Any<IReadOnlyList<TableIdentifier>>(), Arg.Any<Func<CancellationToken, Task<string>>>(),
                 Arg.Any<McpSessionContext>(), Arg.Any<bool>(), Arg.Any<CancellationToken>())
