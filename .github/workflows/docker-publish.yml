@@ -110,7 +110,7 @@ jobs:
               --no-restore \
               -p:Version="$VERSION" \
               -o ./dist/modules/lakehouse
-            # The module host rejects module files larger than 64 MiB (the macOS/Windows DuckDB natives exceed it); the image is linux-x64 only.
+            # The module host rejects module files larger than 256 MiB (the macOS/Windows DuckDB natives are large); the image is linux-x64 only.
             find ./dist/modules/lakehouse/runtimes -mindepth 1 -maxdepth 1 ! -name linux-x64 -exec rm -rf {} + 2>/dev/null || true
             find ./dist/modules/lakehouse -type f -size +64M -print >&2
             dotnet run --project tools/Autheris.ModuleSigner/Autheris.ModuleSigner.csproj -c Release --no-build -- \
@@ -363,14 +363,14 @@ jobs:
       - name: Restore with Locked Mode
         run: dotnet restore Autheris.sln --locked-mode
 
-      # The host trusts only the embedded release public key. The branch build trusts a throwaway key instead: a P-256 key pair is generated
-      # per run, its public half replaces the embedded key in this runner workspace only (never committed), and the module is signed with it.
-      # The release signing secret is not used here; the tag job verifies the module signed with it.
-      - name: Publish Autheris and sign the Lakehouse module with a throwaway key
+      - name: Publish Autheris and sign the Lakehouse module
+        env:
+          AUTHERIS_MODULE_SIGNING_KEY_PEM: ${{ secrets.AUTHERIS_MODULE_SIGNING_KEY_PEM }}
         run: |
-          openssl ecparam -name prime256v1 -genkey -noout | openssl pkcs8 -topk8 -nocrypt -out "$RUNNER_TEMP/module-e2e-signing.pem"
-          openssl pkey -in "$RUNNER_TEMP/module-e2e-signing.pem" -pubout -out src/Autheris.Api/Hosting/Keys/module-release-pub.pem
-          export AUTHERIS_MODULE_SIGNING_KEY_PEM="$(cat "$RUNNER_TEMP/module-e2e-signing.pem")"
+          if [ -z "${AUTHERIS_MODULE_SIGNING_KEY_PEM:-}" ]; then
+            echo "Error: AUTHERIS_MODULE_SIGNING_KEY_PEM is required." >&2
+            exit 1
+          fi
           VERSION="0.0.0-dev"
           dotnet publish src/Autheris.Api/Autheris.Api.csproj -c Release --no-restore \
             -p:AutherisIncludeTestAuth=false -p:Version="$VERSION" -o ./dist/publish
@@ -378,7 +378,7 @@ jobs:
           dotnet build tools/Autheris.ModuleSigner/Autheris.ModuleSigner.csproj -c Release --no-restore
           dotnet publish modules/Autheris.Modules.Lakehouse/Autheris.Modules.Lakehouse.csproj -c Release --no-restore \
             -p:Version="$VERSION" -o ./dist/modules/lakehouse
-          # The module host rejects module files larger than 64 MiB (the macOS/Windows DuckDB natives exceed it); the image is linux-x64 only.
+          # The module host rejects module files larger than 256 MiB (the macOS/Windows DuckDB natives are large); the image is linux-x64 only.
           find ./dist/modules/lakehouse/runtimes -mindepth 1 -maxdepth 1 ! -name linux-x64 -exec rm -rf {} + 2>/dev/null || true
           find ./dist/modules/lakehouse -type f -size +64M -print >&2
           dotnet run --project tools/Autheris.ModuleSigner/Autheris.ModuleSigner.csproj -c Release --no-build -- \
