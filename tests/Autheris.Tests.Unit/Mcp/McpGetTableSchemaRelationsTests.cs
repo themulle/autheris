@@ -131,6 +131,27 @@ public sealed class McpGetTableSchemaRelationsTests
     }
 
     [Fact]
+    public async Task ColumnAccess_IsTheCallersOwnState_ClearOrMask()
+    {
+        _discovery.GetDatasetDetailAsync(Customers, Arg.Any<RequestContext>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<CatalogDatasetDetail?>(new CatalogDatasetDetail(
+                DatasetId: Customers.ToString(), Domain: Customers.Domain, Schema: Customers.Schema, Table: Customers.TableName,
+                Columns:
+                [
+                    new CatalogColumnDetail("id", "int", "Public", "Clear", IsPrimaryKey: true, IsPiiIndicator: false),
+                    new CatalogColumnDetail("email", "varchar", "Sensitive", "Masked", IsPrimaryKey: false, IsPiiIndicator: true),
+                    new CatalogColumnDetail("ssn", "varchar", "Sensitive", "Hash", IsPrimaryKey: false, IsPiiIndicator: true)
+                ],
+                PrimaryKeys: ["id"], Sensitivity: "INTERNAL", IsActive: true)));
+
+        var table = (await GetTableSchemaAsync("""{"dataset":"sales.public.customers"}""")).Tables.ShouldHaveSingleItem();
+
+        table.Columns.Single(c => c.Name == "id").Access.ShouldBe("clear");
+        table.Columns.Single(c => c.Name == "email").Access.ShouldBe("mask");
+        table.Columns.Single(c => c.Name == "ssn").Access.ShouldBe("mask");
+    }
+
+    [Fact]
     public async Task WithoutGraphQlMapping_NoGraphQlFieldIsEmitted()
     {
         _map.GetTableAsync(Customers, Arg.Any<CancellationToken>()).Returns(Task.FromResult<GraphQlTableMapping?>(null));

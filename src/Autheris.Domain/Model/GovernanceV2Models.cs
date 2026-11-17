@@ -40,23 +40,6 @@ public sealed record ConsentRevocationImpactReport(
     bool ContainsCycles
 );
 
-public enum JustificationCategory
-{
-    LegitimateAudit = 1,
-    IncidentTriage = 2,
-    Unjustified = 3,
-    SuspiciousExfiltration = 4,
-    Unclassified = 5
-}
-
-public sealed record JustificationTriageResult(
-    JustificationCategory Category,
-    double Confidence,
-    string RawModelOutput,
-    bool AutoGrantEligible,
-    TimeSpan? GrantedDuration
-);
-
 public enum DataCatalogProviderType
 {
     OpenMetadata = 1

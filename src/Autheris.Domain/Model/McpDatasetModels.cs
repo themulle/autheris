@@ -204,7 +204,8 @@ public sealed record McpTableBriefColumn(
     string? Description = null,
     bool PrimaryKey = false,
     bool IsSensitive = false,
-    string? GraphQlField = null);
+    string? GraphQlField = null,
+    string? Access = null);
 
 /// <summary>Join relationship between datasets for automated query/report construction.</summary>
 public sealed record McpTableRelation(

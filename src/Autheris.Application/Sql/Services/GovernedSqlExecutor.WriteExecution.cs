@@ -1,6 +1,7 @@
 namespace Autheris.Application.Sql.Services;
 
 using System;
+using System.Collections.Generic;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
@@ -78,6 +79,7 @@ public sealed partial class GovernedSqlExecutor
         string dsName,
         DmlAuditContext dmlContext,
         CompiledSql compiled,
+        IReadOnlyDictionary<string, object?>? clientValues,
         int affectedRows,
         CancellationToken ct)
     {
@@ -105,7 +107,8 @@ public sealed partial class GovernedSqlExecutor
             compiled,
             affectedRows,
             reason: null,
-            synthetic: false).ConfigureAwait(false);
+            synthetic: false,
+            clientValues: clientValues).ConfigureAwait(false);
     }
 
     private static string ResolveCallerSid(ClaimsPrincipal user) =>

@@ -217,7 +217,6 @@
   "ReadPathRestSwitchDefaultIntegrationTests": 27.6,
   "ReadPathRestSwitchOffIntegrationTests": 39.6,
   "RealtimeStreamingSubscriptionTests": 27.2,
-  "RedTeamPromptInjectionTests": 0,
   "Removal.BorderlineRemovalTests": 11,
   "Removal.RemovedEndpointsTests": 4.7,
   "RestDatasetHttpTableCrossSourceDisabledIntegrationTests": 5.9,

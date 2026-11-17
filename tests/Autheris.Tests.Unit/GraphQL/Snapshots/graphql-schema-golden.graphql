@@ -198,6 +198,7 @@ type DiscoveryColumn {
   writeProtected: Boolean!
   classifications: [DiscoveryColumnClassification!]!
   clearRequestable: [String!]!
+  longDescription: String
 }
 
 type DiscoveryColumnClassification {

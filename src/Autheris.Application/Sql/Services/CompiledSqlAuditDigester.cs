@@ -1,6 +1,7 @@
 namespace Autheris.Application.Sql.Services;
 
 using System;
+using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using Autheris.Application.Common.Interfaces;
@@ -30,6 +31,7 @@ public sealed class CompiledSqlAuditDigester
 {
     private static readonly byte[] DigestKeyInfo = "Autheris:SqlCompiledDigest:v1"u8.ToArray();
     private static readonly byte[] OriginalHashKeyInfo = "Autheris:SqlOriginalHash:v1"u8.ToArray();
+    private static readonly byte[] BoundValuesKeyInfo = "Autheris:SqlBoundValues:v1"u8.ToArray();
     private static readonly byte[] AuditChainInfo = "Autheris:AuditChain:v1"u8.ToArray();
     private static readonly Lazy<byte[]> EphemeralKey = new(static () => RandomNumberGenerator.GetBytes(32));
 
@@ -39,7 +41,7 @@ public sealed class CompiledSqlAuditDigester
     private readonly object _gate = new();
     private volatile Keys? _keys;
 
-    private sealed record Keys(byte[] Digest, byte[] OriginalHash);
+    private sealed record Keys(byte[] Digest, byte[] OriginalHash, byte[] BoundValues);
 
     public CompiledSqlAuditDigester(IOptions<GatewayOptions> options, IKeyVaultSecretProvider? secretProvider = null, IHostEnvironment? environment = null)
     {
@@ -96,6 +98,57 @@ public sealed class CompiledSqlAuditDigester
         return (AstSecurityVisitor.TruncateForAudit(redacted, maxLength), hash);
     }
 
+    /// <summary>
+    /// The keyed digest of the values a statement binds from the client or from query literals (the new values of a DML statement):
+    /// <c>HMAC-SHA256(key, ordinal || type || length-prefixed value)</c> per slot, in ordinal order. The key is its own HKDF sub-key, so a
+    /// low-entropy value cannot be recovered by hashing candidates, and the record carries no value. Tenant, policy, mask and paging
+    /// slots are gateway-derived and left out.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">No usable audit key outside Development and Test (fail closed).</exception>
+    public string ComputeBoundValues(CompiledSql compiled, System.Collections.Generic.IReadOnlyDictionary<string, object?>? clientValues)
+    {
+        ArgumentNullException.ThrowIfNull(compiled);
+        var key = Resolved().BoundValues;
+        var buffer = new StringBuilder();
+        foreach (var slot in compiled.Parameters.OrderBy(p => p.Ordinal))
+        {
+            if (slot.Origin is not (ParameterOrigin.ClientNamed or ParameterOrigin.ClientPositional or ParameterOrigin.QueryLiteral))
+            {
+                continue;
+            }
+
+            var value = slot.Value;
+            if (value is null && clientValues is not null)
+            {
+                if (slot.SourceName is not null && clientValues.TryGetValue(slot.SourceName, out var byName))
+                {
+                    value = byName;
+                }
+                else if (clientValues.TryGetValue(slot.Name, out var byBinding))
+                {
+                    value = byBinding;
+                }
+            }
+
+            if (value is ClientListValue list && slot.ListIndex is { } index && index >= 0 && index < list.Count)
+            {
+                value = list[index];
+            }
+
+            var text = value switch
+            {
+                null => "null",
+                ClientListValue l => "list:" + l.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                IFormattable f => f.ToString(null, System.Globalization.CultureInfo.InvariantCulture),
+                byte[] bytes => Convert.ToBase64String(bytes),
+                _ => value.ToString() ?? string.Empty
+            };
+            buffer.Append(slot.Ordinal).Append('|').Append(value?.GetType().Name ?? "null").Append('|').Append(text.Length).Append(':').Append(text).Append(';');
+        }
+
+        return Convert.ToHexString(HMACSHA256.HashData(key, Encoding.UTF8.GetBytes(buffer.ToString())));
+    }
+
     private Keys Resolved()
     {
         if (_keys is { } cached)
@@ -112,7 +165,8 @@ public sealed class CompiledSqlAuditDigester
 
     private static Keys Derive(byte[] auditKey) => new(
         HKDF.DeriveKey(HashAlgorithmName.SHA256, auditKey, 32, info: DigestKeyInfo),
-        HKDF.DeriveKey(HashAlgorithmName.SHA256, auditKey, 32, info: OriginalHashKeyInfo));
+        HKDF.DeriveKey(HashAlgorithmName.SHA256, auditKey, 32, info: OriginalHashKeyInfo),
+        HKDF.DeriveKey(HashAlgorithmName.SHA256, auditKey, 32, info: BoundValuesKeyInfo));
 
     private byte[] ResolveAuditKey()
     {

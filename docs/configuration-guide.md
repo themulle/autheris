@@ -1,32 +1,32 @@
-# Konfigurationshandbuch – GraphQL Enterprise Gateway
+# Configuration Guide – GraphQL Enterprise Gateway
 
-Dieses Handbuch bietet eine vollständige, praxiserprobte Referenz aller Konfigurationsoptionen des **GraphQL Enterprise Gateway**, inklusive Validierungsregeln, Sicherheitsinvariablen, Umgebungsvariablen, Kubernetes-Konfiguration und Profilen (Entwicklung vs. Produktion).
+This guide is a complete, field-tested reference of all configuration options of the **GraphQL Enterprise Gateway**, including validation rules, security invariants, environment variables, Kubernetes configuration and profiles (development vs. production).
 
-Eine automatisch generierte, vollständige Referenz aller gebundenen Konfigurationsschlüssel finden Sie in der [Configuration Reference](reference/configuration.md).
+An automatically generated, complete reference of all bound configuration keys is available in the [Configuration Reference](reference/configuration.md).
 
 ---
 
-## 1. Architektur der Konfiguration
+## 1. Configuration Architecture
 
-Die Konfiguration basiert auf dem .NET 10 Options-Pattern (`IOptions<GatewayOptions>`) mit strenger Validierung beim Anwendungsstart (**Fail-Fast** via `ValidateOnStart()`). 
+The configuration is based on the .NET 10 options pattern (`IOptions<GatewayOptions>`) with strict validation at application startup (**fail-fast** via `ValidateOnStart()`).
 
-### 1.1 Hierarchie & Laderangfolge
-Konfigurationswerte werden in folgender Priorität ausgewertet (spätere Quellen überschreiben frühere):
-1. **`appsettings.json`**: Basis-Konfiguration für Standardeinstellungen.
-2. **`appsettings.{Environment}.json`**: Umgebungsabhängige Überschreibungen (z. B. `appsettings.Development.json` oder `appsettings.Production.json`).
-3. **Umgebungsvariablen**: Container- und Host-Konfiguration (Syntax: doppelte Unterstriche `Gateway__Section__Property`).
-4. **Secrets Provider**: Key Vault / Environment Secret Fallback für sensible kryptografische Schlüssel.
+### 1.1 Hierarchy & Load Order
+Configuration values are evaluated in the following priority (later sources override earlier ones):
+1. **`appsettings.json`**: Base configuration for default settings.
+2. **`appsettings.{Environment}.json`**: Environment-specific overrides (e.g. `appsettings.Development.json` or `appsettings.Production.json`).
+3. **Environment variables**: Container and host configuration (syntax: double underscores `Gateway__Section__Property`).
+4. **Secrets provider**: Key Vault / environment secret fallback for sensitive cryptographic keys.
 
-### 1.2 Startup-Validierung & Sicherheitsinvariablen
-Beim Hochfahren des Hosts (`Program.cs`) führt `GatewayServiceCollectionExtensions.AddGatewayOptions` rekursive DataAnnotation- und semantische Sicherheitsprüfungen durch. Schlägt eine Bedingung fehl, bricht der Startprozess mit einer `ValidationException` sofort ab:
+### 1.2 Startup Validation & Security Invariants
+When the host starts (`Program.cs`), `GatewayServiceCollectionExtensions.AddGatewayOptions` performs recursive DataAnnotation and semantic security checks. If a condition fails, the startup process aborts immediately with a `ValidationException`:
 
-| Regel-ID | Prüfung | Fehlerbedingung |
+| Rule ID | Check | Failure condition |
 | :--- | :--- | :--- |
-| **NF-HA-01a** | `ShutdownTimeoutSeconds >= QueryTimeoutSeconds + 10` | Shutdown muss mindestens 10 Sekunden mehr Puffer als der längste Query-Timeout haben. |
-| **NF-HA-01b** | `TerminationGracePeriodSeconds >= DrainDelaySeconds + ShutdownTimeoutSeconds + 10` | Kubelet Grace Period muss den gesamten Drain- und Shutdown-Zyklus abdecken. |
-| **NF-SEC-01** | `environment.IsDevelopment() \|\| !Authentication.EnableTestAuthHandler` | Der `TestAuthHandler` (Header-basiertes SID-Impersonation) ist außerhalb von `Development` **strikt verboten**. |
-| **NF-SEC-03** | Außerhalb von Development: `!string.IsNullOrWhiteSpace(HmacSecretKeyVaultRef)` und nicht gleich Test-Defaults | HMAC-Salts müssen in Staging/Produktion aus einem sicheren Secret-Store stammen. |
-| **NF-SEC-04** | Außerhalb von Development: BasicAuth Benutzer müssen zwingend das gesalzene PBKDF2-Format (`$pbkdf2$...`) verwenden | Klartext- und ungesalzene SHA-256-Passwörter sind in Staging/Produktion verboten und werden zur Laufzeit mit `401 Unauthorized` abgewiesen. |
+| **NF-HA-01a** | `ShutdownTimeoutSeconds >= QueryTimeoutSeconds + 10` | Shutdown must have at least 10 seconds more buffer than the longest query timeout. |
+| **NF-HA-01b** | `TerminationGracePeriodSeconds >= DrainDelaySeconds + ShutdownTimeoutSeconds + 10` | The kubelet grace period must cover the entire drain and shutdown cycle. |
+| **NF-SEC-01** | `environment.IsDevelopment() \|\| !Authentication.EnableTestAuthHandler` | The `TestAuthHandler` (header-based SID impersonation) is **strictly forbidden** outside `Development`. |
+| **NF-SEC-03** | Outside Development: `!string.IsNullOrWhiteSpace(HmacSecretKeyVaultRef)` and not equal to the test defaults | HMAC salts must come from a secure secret store in staging/production. |
+| **NF-SEC-04** | Outside Development: BasicAuth users must use the salted PBKDF2 format (`$pbkdf2$...`) | Plaintext and unsalted SHA-256 passwords are forbidden in staging/production and are rejected at runtime with `401 Unauthorized`. |
 | **R-DEP-2** | Outside Development: Secret keys (`DataMasking.HmacSecretKeyVaultRef`, `GovernanceDb.AuditHmacKeyVaultRef`, `Authentication.ForwardAuth.SharedSecret`) must be at least 32 bytes in UTF-8 representation | Cryptographic keys shorter than 32 UTF-8 bytes are rejected fail-closed during startup validation. |
 | **R-API-1** | Outside Development: all `DANGER:` bypass flags strictly prohibited; ITSM webhooks are verified with per-instance secrets only | Any `DANGER:` flag causes an immediate `ValidationException` process startup crash outside `Development`. |
 
@@ -38,20 +38,20 @@ Beim Hochfahren des Hosts (`Program.cs`) führt `GatewayServiceCollectionExtensi
 
 ---
 
-## 2. Vollständige Referenz der Konfigurationssektionen (`Gateway:*`)
+## 2. Complete Reference of the Configuration Sections (`Gateway:*`)
 
-Alle gateway-spezifischen Optionen befinden sich unter dem Hauptknoten `"Gateway"`. Eine automatisch generierte Tabelle aller Optionen und ihrer Quellcodedateien ist in der [Configuration Reference](reference/configuration.md) hinterlegt.
+All gateway-specific options live under the root node `"Gateway"`. An automatically generated table of all options and their source files is available in the [Configuration Reference](reference/configuration.md).
 
-### 2.1 `HighAvailability` (Hochverfügbarkeit & Graceful Shutdown)
+### 2.1 `HighAvailability` (High Availability & Graceful Shutdown)
 
-Steuert das Verkehrs-Draining bei Rolling Deployments und Pod-Terminierungen.
+Controls traffic draining during rolling deployments and pod terminations.
 
-| Eigenschaft | Typ | Wertebereich | Standard | Beschreibung |
+| Property | Type | Range | Default | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `DrainDelaySeconds` | `int` | `1 .. 30` | `5` | Wartezeit nach Eingang des SIGTERM-Signals, bevor aktive Verbindungen geschlossen werden (erlaubt K8s Endpoints-Controller das Propagieren des Unready-Zustands). |
-| `QueryTimeoutSeconds` | `int` | `5 .. 120` | `30` | Maximal zulässige Ausführungsdauer eines GraphQL-Requests. |
-| `ShutdownTimeoutSeconds` | `int` | `10 .. 180` | `40` | Maximale Zeitspanne, die aktiven Anfragen eingeräumt wird, um regulär zu beenden. |
-| `TerminationGracePeriodSeconds` | `int` | `20 .. 300` | `60` | Kubelet Pod-Grace-Period-Korridor zur Vermeidung von abruptem SIGKILL. |
+| `DrainDelaySeconds` | `int` | `1 .. 30` | `5` | Wait time after the SIGTERM signal arrives before active connections are closed (lets the K8s endpoints controller propagate the unready state). |
+| `QueryTimeoutSeconds` | `int` | `5 .. 120` | `30` | Maximum permitted execution time of a GraphQL request. |
+| `ShutdownTimeoutSeconds` | `int` | `10 .. 180` | `40` | Maximum time granted to active requests to finish normally. |
+| `TerminationGracePeriodSeconds` | `int` | `20 .. 300` | `60` | Kubelet pod grace period corridor that avoids an abrupt SIGKILL. |
 
 The Helm chart renders these four keys as `Gateway__HighAvailability__*` from `gateway.drainDelaySeconds`, `gateway.shutdownTimeoutSeconds`, `gateway.queryTimeoutSeconds` and `terminationGracePeriodSeconds`. The chart default `gateway.queryTimeoutSeconds` is 20 (the application default is 30). The chart renders only values inside the ranges above and enforces the stricter NF-HA-01b `TerminationGracePeriodSeconds >= 2 * DrainDelaySeconds + ShutdownTimeoutSeconds + 10`, because the `preStop` sleep also consumes the drain time; the render fails otherwise. See [f-ops-02](features/f-ops-02-high-availability-kubernetes-helm.md) section 5.2.
 
@@ -68,70 +68,70 @@ The Helm chart renders these four keys as `Gateway__HighAvailability__*` from `g
 
 ### 2.2 `Authentication` (Multi-Protocol Identity, ForwardAuth & Kerberos)
 
-Das Gateway unterstützt ein flexibles, mehrgleisiges Authentifizierungskonzept mit automatischer Protokollauswahl (**Smart Dynamic Scheme Selector**). Es vereint Kubernetes Ingress ForwardAuth, Microsoft Entra ID (Azure AD), AD FS, HTTP Basic Authentication und Windows Kerberos.
+The gateway supports a flexible, multi-track authentication concept with automatic protocol selection (**Smart Dynamic Scheme Selector**). It combines Kubernetes Ingress ForwardAuth, Microsoft Entra ID (Azure AD), AD FS, HTTP Basic Authentication and Windows Kerberos.
 
-#### 2.2.1 Basiseinstellungen & Kerberos / Negotiate
-| Eigenschaft | Typ | Wertebereich | Standard | Beschreibung |
+#### 2.2.1 Base Settings & Kerberos / Negotiate
+| Property | Type | Range | Default | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `Domain` | `string` | Gültiger FQDN | `"CORP.LOCAL"` | Active Directory Domäne. |
-| `ServicePrincipalName` | `string` | SPN-Format | `"HTTP/gql-gateway.corp.local"` | Kerberos Service Principal Name für SPNEGO/Negotiate. |
+| `Domain` | `string` | Valid FQDN | `"CORP.LOCAL"` | Active Directory domain. |
+| `ServicePrincipalName` | `string` | SPN format | `"HTTP/gql-gateway.corp.local"` | Kerberos service principal name for SPNEGO/Negotiate. |
 | `RequireKerberosOnly` | `bool` | `true \| false` | `true` | Enforces Kerberos: `NTLM` Authorization headers are not routed to Negotiate, and identities authenticated by Negotiate with an authentication type other than Kerberos (e.g. NTLM) are rejected. `PersistNtlmCredentials`/`PersistKerberosCredentials` are always disabled so credentials never carry over on shared upstream connections. |
-| `EnableTestAuthHandler` | `bool` | `true \| false` | `false` | Ermöglicht `X-Test-User-Sid`-Header zur Simulation von Identitäten (**nur in Development erlaubt!**). |
+| `EnableTestAuthHandler` | `bool` | `true \| false` | `false` | Enables the `X-Test-User-Sid` header for simulating identities (**allowed in Development only!**). |
 
 #### 2.2.2 `Authentication.ForwardAuth` (Kubernetes / Traefik Ingress)
-Wird das Gateway in Kubernetes betrieben, kann die Authentifizierung an den vorgelagerten Ingress-Controller (z. B. **Traefik Ingress**) via ForwardAuth (z. B. Authelia, Keycloak Gatekeeper, Authentik, OAuth2-Proxy) delegiert werden. Traefik terminiert SSL, prüft das Benutzer-Session-Cookie oder JWT und leitet die verifizierten Identitätsmerkmale per HTTP-Header weiter:
+When the gateway runs in Kubernetes, authentication can be delegated to the upstream ingress controller (e.g. **Traefik Ingress**) via ForwardAuth (e.g. Authelia, Keycloak Gatekeeper, Authentik, OAuth2-Proxy). Traefik terminates SSL, checks the user session cookie or JWT and forwards the verified identity attributes via HTTP headers:
 
-| Eigenschaft | Typ | Wertebereich | Standard | Beschreibung |
+| Property | Type | Range | Default | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `Enabled` | `bool` | `true \| false` | `false` | Aktiviert das ForwardAuth Authentication Scheme. |
-| `UserHeader` | `string` | Header-Name | `"X-Forwarded-User"` | Header mit Benutzeridentifikator (Benutzername oder User-SID). |
-| `EmailHeader` | `string` | Header-Name | `"X-Forwarded-Email"` | Header mit der E-Mail-Adresse des Benutzers. |
-| `GroupsHeader` | `string` | Header-Name | `"X-Forwarded-Groups"` | Kommagetrennte Liste von Gruppen-SIDs oder Gruppennamen. |
-| `RolesHeader` | `string` | Header-Name | `"X-Forwarded-Roles"` | Kommagetrennte Liste von Rollen (z. B. `GovernanceAdmin,DataOwner`). |
-| `SharedSecretHeader` | `string` | Header-Name | `"X-Forwarded-Secret"` | Header für das Pre-Shared Secret zwischen Ingress und Gateway. |
-| `SharedSecret` | `string` | Geheimes Token | `""` | Pre-Shared Secret for ForwardAuth validation. Outside Development, mandatory if `SharedSecretKeyVaultRef` is unset, and must be at least 32 UTF-8 bytes long (`Encoding.UTF8.GetByteCount >= 32`). Recommended: Base64 string of >= 32 cryptographically random bytes (256 bits). |
-| `SharedSecretKeyVaultRef` | `string` | Secret-Name | `""` | Name des Secrets in Azure Key Vault / HashiCorp Vault. |
-| `RequireTrustedProxy` | `bool` | `true \| false` | `true` | **Zero-Trust**: Erzwingt, dass Anfragen zwingend von einer IP aus `TrustedNetworks` oder `TrustedProxies` stammen müssen. |
-| `TrustedProxies` | `List<string>` | IP-Adressen | `[]` | Feste IP-Adressen der vertrauenswürdigen Traefik-Pods / Proxies. |
-| `TrustedNetworks` | `List<string>` | CIDR-Blöcke | `["127.0.0.1/32", "::1/128"]` | Erlaubte Subnetze (z. B. Kubernetes Pod-CIDR `"10.244.0.0/16"`). |
+| `Enabled` | `bool` | `true \| false` | `false` | Enables the ForwardAuth authentication scheme. |
+| `UserHeader` | `string` | Header name | `"X-Forwarded-User"` | Header carrying the user identifier (user name or user SID). |
+| `EmailHeader` | `string` | Header name | `"X-Forwarded-Email"` | Header carrying the user's email address. |
+| `GroupsHeader` | `string` | Header name | `"X-Forwarded-Groups"` | Comma-separated list of group SIDs or group names. |
+| `RolesHeader` | `string` | Header name | `"X-Forwarded-Roles"` | Comma-separated list of roles (e.g. `GovernanceAdmin,DataOwner`). |
+| `SharedSecretHeader` | `string` | Header name | `"X-Forwarded-Secret"` | Header for the pre-shared secret between ingress and gateway. |
+| `SharedSecret` | `string` | Secret token | `""` | Pre-Shared Secret for ForwardAuth validation. Outside Development, mandatory if `SharedSecretKeyVaultRef` is unset, and must be at least 32 UTF-8 bytes long (`Encoding.UTF8.GetByteCount >= 32`). Recommended: Base64 string of >= 32 cryptographically random bytes (256 bits). |
+| `SharedSecretKeyVaultRef` | `string` | Secret name | `""` | Name of the secret in Azure Key Vault / HashiCorp Vault. |
+| `RequireTrustedProxy` | `bool` | `true \| false` | `true` | **Zero-Trust**: Requires that requests originate from an IP in `TrustedNetworks` or `TrustedProxies`. |
+| `TrustedProxies` | `List<string>` | IP addresses | `[]` | Fixed IP addresses of the trusted Traefik pods / proxies. |
+| `TrustedNetworks` | `List<string>` | CIDR blocks | `["127.0.0.1/32", "::1/128"]` | Allowed subnets (e.g. Kubernetes pod CIDR `"10.244.0.0/16"`). |
 
-#### 2.2.3 `Authentication.BasicAuth` (HTTP Basic Authentication & Login-API)
-Ermöglicht direkte Authentifizierung via `Authorization: Basic <base64>` für GraphQL-Queries sowie einen dedizierten Endpunkt `/api/auth/login`:
+#### 2.2.3 `Authentication.BasicAuth` (HTTP Basic Authentication & Login API)
+Enables direct authentication via `Authorization: Basic <base64>` for GraphQL queries as well as a dedicated endpoint `/api/auth/login`:
 
-| Eigenschaft | Typ | Wertebereich | Standard | Beschreibung |
+| Property | Type | Range | Default | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `Enabled` | `bool` | `true \| false` | `false` | Aktiviert HTTP Basic Auth und den Login-Endpunkt `/api/auth/login`. |
-| `Users` | `List<BasicAuthUserConfig>` | Array | `[]` | Liste konfigurierter Benutzerkonten. |
-| `Users[].Username` | `string` | Text | `""` | Eindeutiger Benutzername für Basic Auth. |
-| `Users[].Password` | `string` | PBKDF2 / Klartext | `""` | In Produktion: Gesalzener PBKDF2-String im Format `$pbkdf2$<iterations>$<saltBase64>$<hashBase64>`. Klartext ist **nur in `Development`** erlaubt! |
-| `Users[].PasswordHashSha256` | `string` | 64-Hex SHA256 | `""` | Veralteter ungesalzener SHA-256 Hash (**nur in `Development`** erlaubt; in Produktion verboten). |
-| `Users[].Roles` | `List<string>` | Rollen-Array | `[]` | Zugewiesene Rollen (`DataConsumer`, `DataOwner`, `GovernanceAdmin`). |
-| `Users[].UserSid` | `string` | SID-Format | `""` | Zugeordnete Windows-User-SID (z. B. `S-1-5-21-CONSUMER-1`). |
-| `Users[].GroupSids` | `List<string>` | SID-Array | `[]` | Zugeordnete Windows-Gruppen-SIDs. |
+| `Enabled` | `bool` | `true \| false` | `false` | Enables HTTP Basic Auth and the login endpoint `/api/auth/login`. |
+| `Users` | `List<BasicAuthUserConfig>` | Array | `[]` | List of configured user accounts. |
+| `Users[].Username` | `string` | Text | `""` | Unique user name for Basic Auth. |
+| `Users[].Password` | `string` | PBKDF2 / plaintext | `""` | In production: salted PBKDF2 string in the format `$pbkdf2$<iterations>$<saltBase64>$<hashBase64>`. Plaintext is allowed **in `Development` only**! |
+| `Users[].PasswordHashSha256` | `string` | 64-hex SHA256 | `""` | Deprecated unsalted SHA-256 hash (allowed **in `Development` only**; forbidden in production). |
+| `Users[].Roles` | `List<string>` | Role array | `[]` | Assigned roles (`DataConsumer`, `DataOwner`, `GovernanceAdmin`). |
+| `Users[].UserSid` | `string` | SID format | `""` | Mapped Windows user SID (e.g. `S-1-5-21-CONSUMER-1`). |
+| `Users[].GroupSids` | `List<string>` | SID array | `[]` | Mapped Windows group SIDs. |
 | `SuccessCacheSeconds` | `int` | `>= 0` | `30` | Lifetime of a verified-credential marker; spares the password hash on repeated requests. `0` disables it. |
 | `MarkerKeyRef` | `string?` | Secret reference | `null` | Secret (via the key vault secret provider) that keys the **cluster-shared** verified marker in Redis (HMAC bound to the credential version). Unset: the marker is per replica. See [F-AUTH-DX](features/f-auth-dx-basic-auth-session.md#behaviour-and-security). |
 
 > [!IMPORTANT]
-> **Sicherheits-Invariante für Produktion**:
-> - Außerhalb der `Development`-Umgebung werden ungesalzene SHA-256-Hashes (`PasswordHashSha256`) sowie Klartextpasswörter (`Password`) ausnahmslos abgelehnt (`401 Unauthorized`).
-> - Passwörter müssen das PBKDF2-Format aufweisen: `$pbkdf2$<iterations>$<salt>$<hash>` (z. B. `$pbkdf2$600000$c2FsdHNhbHQ=$...`).
-> - **Timing-Angriffsschutz**: Existiert ein angefragter Benutzername nicht, führt das Gateway im Hintergrund eine Dummy-PBKDF2-Berechnung mit derselben Iterationszahl durch, sodass Angreifer über Zeitmessungen keine gültigen Benutzernamen enumerieren können. Alle Hashvergleiche erfolgen via `CryptographicOperations.FixedTimeEquals`.
+> **Security invariant for production**:
+> - Outside the `Development` environment, unsalted SHA-256 hashes (`PasswordHashSha256`) and plaintext passwords (`Password`) are rejected without exception (`401 Unauthorized`).
+> - Passwords must use the PBKDF2 format: `$pbkdf2$<iterations>$<salt>$<hash>` (e.g. `$pbkdf2$600000$c2FsdHNhbHQ=$...`).
+> - **Timing attack protection**: If a requested user name does not exist, the gateway performs a dummy PBKDF2 computation with the same iteration count in the background, so attackers cannot enumerate valid user names via timing measurements. All hash comparisons use `CryptographicOperations.FixedTimeEquals`.
 
 #### 2.2.4 `Authentication.EntraId` & `Authentication.Adfs` (JWT Bearer)
-Unterstützt moderne OIDC/OAuth2-Bearer-Token aus Microsoft Entra ID (Azure AD) und Active Directory Federation Services (AD FS):
+Supports modern OIDC/OAuth2 bearer tokens from Microsoft Entra ID (Azure AD) and Active Directory Federation Services (AD FS):
 
 - **EntraId**:
-  - `Enabled` (`bool`): Aktiviert Bearer-Validierung gegen Microsoft Entra ID.
-  - `Instance` (`string`, Standard: `"https://login.microsoftonline.com/"`): Entra ID Login-Instanz.
-  - `TenantId` (`string`): Entra ID Mandanten-ID (GUID).
-  - `ClientId` (`string`): Anwendungs-Client-ID.
-  - `Audience` (`string`): Erwartete Token-Audience (z. B. `"api://gql-gateway"`).
+  - `Enabled` (`bool`): Enables bearer validation against Microsoft Entra ID.
+  - `Instance` (`string`, default: `"https://login.microsoftonline.com/"`): Entra ID login instance.
+  - `TenantId` (`string`): Entra ID tenant ID (GUID).
+  - `ClientId` (`string`): Application client ID.
+  - `Audience` (`string`): Expected token audience (e.g. `"api://gql-gateway"`).
 - **Adfs**:
-  - `Enabled` (`bool`): Aktiviert Bearer-Validierung gegen AD FS.
-  - `MetadataAddress` (`string`): Federation-Metadata-URL von AD FS.
-  - `Audience` (`string`): Relying Party Identifier.
+  - `Enabled` (`bool`): Enables bearer validation against AD FS.
+  - `MetadataAddress` (`string`): Federation metadata URL of AD FS.
+  - `Audience` (`string`): Relying party identifier.
 - **EnterpriseClaimsTransformation**:
-  - Normalisiert Entra ID (`oid`, `preferred_username`, `groups` GUIDs/SIDs) und AD FS Claims (`onprem_sid`, `primarysid`, `primarygroupsid`, `roles`) automatisch in kanonische `ClaimTypes.PrimarySid`, `ClaimTypes.GroupSid` und `ClaimTypes.Role`.
+  - Automatically normalizes Entra ID (`oid`, `preferred_username`, `groups` GUIDs/SIDs) and AD FS claims (`onprem_sid`, `primarysid`, `primarygroupsid`, `roles`) into the canonical `ClaimTypes.PrimarySid`, `ClaimTypes.GroupSid` and `ClaimTypes.Role`.
 
 ```json
 "Authentication": {
@@ -188,17 +188,17 @@ Throttles SCIM-originated user deprovisioning (PUT/PATCH `active=false` and DELE
 
 Out-of-range values fail startup. Above the limit the endpoint answers `429` with a fixed SCIM error body and a `Retry-After` header (seconds until the oldest counted lock leaves the window); nothing is changed for the blocked user. The first block per realm and window writes the required audit event `SCIM_MASS_CHANGE_BLOCKED` (tenant, realm, count, limit, window only) and one warning log line. If the count query fails, the SCIM operation fails (fail closed); admin deprovisioning is unaffected. Concurrent nodes may overshoot the limit by at most the number of in-flight requests.
 
-### 2.3 `GovernanceDb` (Katalog- & Consent-Datenbank)
+### 2.3 `GovernanceDb` (Catalog & Consent Database)
 
-Speicherort für Metadaten, Freigaben, Delegationen, Vier-Augen-Genehmigungen und Audit-Logs.
+Storage for metadata, grants, delegations, four-eyes approvals and audit logs.
 
-| Eigenschaft | Typ | Wertebereich | Standard | Beschreibung |
+| Property | Type | Range | Default | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `Provider` | `string` | `"PostgreSql"`, `"SqlServer"` | `"PostgreSql"` | Datenbank-Treiber für die Governance-Verwaltung. Jeder andere Wert (auch `"Sqlite"`) lässt den Start fehlschlagen (siehe `docs/operations/migration-simplification.md`). |
-| `ConnectionString` | `string` | ADO.NET ConnStr | `"Data Source=governance.db;Cache=Shared"` | Verbindungszeichenfolge zur Governance-DB. |
-| `CommandTimeoutSeconds` | `int` | `1 .. 60` | `15` | Timeout für Governance-SQL-Statements. |
-| `EnableOutboxProcessor` | `bool` | `true \| false` | `true` | Startet den asynchronen Outbox-Worker für Invalidation-Events. |
-| `SeedDemoData` | `bool` | `true \| false` | `true` | Initialisiert Demo-Tabellen und Standard-Governance-Regeln bei leerer DB. |
+| `Provider` | `string` | `"PostgreSql"`, `"SqlServer"` | `"PostgreSql"` | Database driver for governance storage. Any other value (including `"Sqlite"`) makes startup fail (see `docs/operations/migration-simplification.md`). |
+| `ConnectionString` | `string` | ADO.NET ConnStr | `"Data Source=governance.db;Cache=Shared"` | Connection string to the governance DB. |
+| `CommandTimeoutSeconds` | `int` | `1 .. 60` | `15` | Timeout for governance SQL statements. |
+| `EnableOutboxProcessor` | `bool` | `true \| false` | `true` | Starts the asynchronous outbox worker for invalidation events. |
+| `SeedDemoData` | `bool` | `true \| false` | `true` | Initializes demo tables and default governance rules when the DB is empty. |
 | `MigrationConnectionString` | `string` | ADO.NET ConnStr | unset | PostgreSQL / SQL Server only: separate role that runs the schema migrations (DDL). The runtime role then needs no DDL rights. |
 | `Migrations:Mode` | `string` | `Apply`, `Verify`, `Skip` | `Apply` | How the versioned schema migrations are handled at startup (see below). `Skip` is rejected outside Development. |
 | `Migrations:AllowNewerSchema` | `bool` | `true \| false` | `false` | When `false`, startup fails with `GOVERNANCE_SCHEMA_NEWER_THAN_BUILD` if the database holds migrations newer than the running build. When `true` (rollback aid), that one check is skipped with a warning per start (`GOVERNANCE_SCHEMA_NEWER_ALLOWED`); the checksums, history and shape of every step the build knows are still verified and no DDL runs. |
@@ -245,7 +245,7 @@ Run the migrations as a one-off job with `Autheris.Api --migrate-governance`: it
 }
 ```
 
-**SQL Server als Governance-DB:** `Provider = "SqlServer"` (Aliase `MsSql`, `SqlServer`) legt das Schema beim Start selbst an (idempotent, serialisiert über `sp_getapplock`) und ist – wie PostgreSQL – für Cluster-/Mehr-Replika-Betrieb zugelassen. Beispiel:
+**SQL Server as governance DB:** `Provider = "SqlServer"` (aliases `MsSql`, `SqlServer`) creates the schema itself at startup (idempotent, serialized via `sp_getapplock`) and, like PostgreSQL, is permitted for cluster / multi-replica operation. Example:
 
 ```json
 "GovernanceDb": {
@@ -255,23 +255,23 @@ Run the migrations as a one-off job with `Autheris.Api --migrate-governance`: it
 }
 ```
 
-- Außerhalb von Development verlangt die TLS-Policy `Encrypt=Mandatory` (oder `Strict`) und `TrustServerCertificate=false`.
-- `MigrationConnectionString` (optional) führt die DDL mit einem separaten Login aus; der Laufzeit-Login braucht dann nur `SELECT`/`INSERT`/`UPDATE`/`DELETE` (auf `AUDIT_LOG_ENTRIES` nur `SELECT`/`INSERT`).
-- Das Audit-Log ist append-only: ein `INSTEAD OF`-Trigger blockiert `UPDATE`/`DELETE`, eine leere Guard-Tabelle mit Fremdschlüssel blockiert `TRUNCATE`. Ein Tabellen-Owner kann beides entfernen – der Laufzeit-Login darf deshalb keine DDL-Rechte haben.
-- Integrationstests: `SqlServer*ContractTests` laufen gegen `AUTHERIS_TEST_MSSQL` (Connection-String eines Servers, auf dem der Login Datenbanken anlegen darf) oder per Testcontainers (Docker).
+- Outside Development, the TLS policy requires `Encrypt=Mandatory` (or `Strict`) and `TrustServerCertificate=false`.
+- `MigrationConnectionString` (optional) runs the DDL with a separate login; the runtime login then only needs `SELECT`/`INSERT`/`UPDATE`/`DELETE` (on `AUDIT_LOG_ENTRIES` only `SELECT`/`INSERT`).
+- The audit log is append-only: an `INSTEAD OF` trigger blocks `UPDATE`/`DELETE`, and an empty guard table with a foreign key blocks `TRUNCATE`. A table owner can remove both, so the runtime login must not have DDL rights.
+- Integration tests: `SqlServer*ContractTests` run against `AUTHERIS_TEST_MSSQL` (connection string of a server on which the login may create databases) or via Testcontainers (Docker).
 
 ---
 
-### 2.4 `DataSources` (Backend-Fachdatenbanken & RLS-Pushdown)
+### 2.4 `DataSources` (Backend Business Databases & RLS Pushdown)
 
-Konfiguriert echte relationale Datenbank-Backends für die abgefragten Fachdaten. Das Gateway unterstützt über `ISqlConnectionFactory` die Provider `"SqlServer"`, `"PostgreSql"` und `"Sqlite"`. See [source-least-privilege-roles.md](operations/source-least-privilege-roles.md) for least-privilege source database role templates.
+Configures real relational database backends for the queried business data. Via `ISqlConnectionFactory` the gateway supports the providers `"SqlServer"`, `"PostgreSql"` and `"Sqlite"`. See [source-least-privilege-roles.md](operations/source-least-privilege-roles.md) for least-privilege source database role templates.
 
 SQL table reads (GraphQL, OData, MCP, connectors) run through the governed SQL pipeline (`SqlTableReadExecutor`, the AST compiler and the dialect binder): the compiler **applies the tenant filter, the row-level security policy and the column masks inside the statement sent to the database**. There is no synthetic-data fallback:
 
-| Eigenschaft | Typ | Wertebereich | Standard | Beschreibung |
+| Property | Type | Range | Default | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `DataSources:Connections:{sourceName}:Provider` | `string` | `"SqlServer"`, `"PostgreSql"`, `"Sqlite"` | `"Sqlite"` | Datenbank-Treiber für die Ziel-Datenquelle. |
-| `DataSources:Connections:{sourceName}:ConnectionString` | `string` | ADO.NET ConnStr | `""` | Verbindungszeichenfolge zur Zieldatenbank. DEP-7: außerhalb von Development verlangt der Start bei PostgreSQL `SSL Mode=VerifyFull` (oder `VerifyCA`), bei SQL Server `Encrypt=Mandatory`/`Strict` ohne `TrustServerCertificate=true`. |
+| `DataSources:Connections:{sourceName}:Provider` | `string` | `"SqlServer"`, `"PostgreSql"`, `"Sqlite"` | `"Sqlite"` | Database driver for the target data source. |
+| `DataSources:Connections:{sourceName}:ConnectionString` | `string` | ADO.NET ConnStr | `""` | Connection string to the target database. DEP-7: outside Development, startup requires `SSL Mode=VerifyFull` (or `VerifyCA`) for PostgreSQL and `Encrypt=Mandatory`/`Strict` without `TrustServerCertificate=true` for SQL Server. |
 | `DataSources:RequireTenantColumn` | `bool` | `true`, `false` | `false` | Review E-5: when `true`, a table without a tenant column (`tenant_id`, `TenantId`, ...) is refused fail-closed instead of being read unscoped. |
 | `DataSources:TenantColumnExemptTables` | `string[]` | `schema.table` or `table` | `[]` | Tables that are deliberately shared across tenants and therefore exempt from `RequireTenantColumn`. For WebSQL DML an entry exempts a table only by its exact `schema.table` name (case-insensitive); a bare table name or a suffix never matches, and DML on any other table without a tenant column is refused. |
 
@@ -379,30 +379,30 @@ When a Kerberos KDC is reachable and the SQL Server SPN (`MSSQLSvc/<fqdn>:1433@R
 
 ---
 
-### 2.5 `Caching` (Zweistufiges Caching & Multi-Instance Redis Clustering)
+### 2.5 `Caching` (Two-Tier Caching & Multi-Instance Redis Clustering)
 
-Steuert den L1 In-Memory Cache, L2 Redis und die Konsistenzprüfung.
+Controls the L1 in-memory cache, L2 Redis and the consistency check.
 
 #### `Caching.L1MemoryCache`
-| Eigenschaft | Typ | Wertebereich | Standard | Beschreibung |
+| Property | Type | Range | Default | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `SizeLimitMb` | `int` | `16 .. 4096` | `512` | Maximale In-Memory-Cache-Größe in Megabyte. |
-| `DefaultTtlMinutes` | `int` | `1 .. 120` | `10` | Standard-Gültigkeit zwischengespeicherter Consent-Entscheidungen. |
+| `SizeLimitMb` | `int` | `16 .. 4096` | `512` | Maximum in-memory cache size in megabytes. |
+| `DefaultTtlMinutes` | `int` | `1 .. 120` | `10` | Default validity of cached consent decisions. |
 
 #### `Caching.Redis`
-| Eigenschaft | Typ | Wertebereich | Standard | Beschreibung |
+| Property | Type | Range | Default | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `Configuration` | `string` | StackExchange.Redis ConnStr | `"localhost:6379,abortConnect=false"` | Redis Host- und Verbindungsparameter. |
-| `InstanceName` | `string` | Prefix | `"Autheris:"` | Schlüsselpräfix für Multi-Gateway-Cluster. |
-| `InvalidationChannel` | `string` | Kanalname | `"consent:invalidations"` | Redis Pub/Sub Kanal für Epochen-Änderungen. |
-| `ConnectTimeoutMs` | `int` | `100 .. 10000` | `2000` | Verbindungs-Timeout in Millisekunden. |
-| `SyncTimeoutMs` | `int` | `100 .. 10000` | `1000` | Synchroner Lese-/Schreib-Timeout in ms. |
+| `Configuration` | `string` | StackExchange.Redis ConnStr | `"localhost:6379,abortConnect=false"` | Redis host and connection parameters. |
+| `InstanceName` | `string` | Prefix | `"Autheris:"` | Key prefix for multi-gateway clusters. |
+| `InvalidationChannel` | `string` | Channel name | `"consent:invalidations"` | Redis pub/sub channel for epoch changes. |
+| `ConnectTimeoutMs` | `int` | `100 .. 10000` | `2000` | Connection timeout in milliseconds. |
+| `SyncTimeoutMs` | `int` | `100 .. 10000` | `1000` | Synchronous read/write timeout in ms. |
 
 #### `Caching.EpochValidation`
-| Eigenschaft | Typ | Wertebereich | Standard | Beschreibung |
+| Property | Type | Range | Default | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `FailClosedOnSensitiveTables` | `bool` | `true \| false` | `true` | Zero-Trust: Bei Nichterreichbarkeit des Epochen-Stores wird der Zugriff auf sensible Tabellen blockiert. |
-| `DegradedMaxStalenessSeconds` | `int` | `1 .. 300` | `30` | Maximale Staleness für unkritische Tabellen bei Redis-Ausfall. |
+| `FailClosedOnSensitiveTables` | `bool` | `true \| false` | `true` | Zero-Trust: If the epoch store is unreachable, access to sensitive tables is blocked. |
+| `DegradedMaxStalenessSeconds` | `int` | `1 .. 300` | `30` | Maximum staleness for non-critical tables during a Redis outage. |
 | `PipelinedMGetEnabled` | `bool` | `true \| false` | `true` | Reads the epochs of several tables as concurrent single-key `GET`s pipelined over one connection (no multi-key `MGET`, so it works on Redis Cluster without `CROSSSLOT`). `false` reads them one after another. |
 | `LocalStalenessBudgetMilliseconds` | `int` | `0 .. 250` | `150` | How long a replica may reuse an epoch read from Redis for **non-sensitive** tables of Autheris-enforced sources. Always 0 for highly sensitive tables and delegated sources; `0` disables the budget. See [F-OPS-02, section 4.5](features/f-ops-02-high-availability-kubernetes-helm.md#45-replica-aware-request-features). |
 | `MaxLocalEpochEntries` | `int` | — | `50000` | Upper bound of locally cached epochs for the staleness budget. |
@@ -431,41 +431,41 @@ Steuert den L1 In-Memory Cache, L2 Redis und die Konsistenzprüfung.
 
 ---
 
-### 2.5 `RateLimiting` (DDoS- & Missbrauchsschutz)
+### 2.5 `RateLimiting` (DDoS & Abuse Protection)
 
-Kombiniert Pre-Authentication IP-Limiting mit Token-Bucket-Verbrauch pro Windows-Benutzer-SID.
+Combines pre-authentication IP limiting with token-bucket consumption per Windows user SID.
 
 #### `RateLimiting.PreAuthIpRateLimit`
-| Eigenschaft | Typ | Wertebereich | Standard | Beschreibung |
+| Property | Type | Range | Default | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `PermitLimit` | `int` | `1 .. 100000` | `100` | Maximal erlaubte Requests pro IP-Adresse innerhalb des Fensters. |
-| `WindowSeconds` | `int` | `1 .. 3600` | `60` | Zeitfenster in Sekunden für das IP-Rate-Limit. |
-| `QueueLimit` | `int` | `>= 0` | `0` | Warteschlangengröße vor Zurückweisung mit `HTTP 429`. |
+| `PermitLimit` | `int` | `1 .. 100000` | `100` | Maximum allowed requests per IP address within the window. |
+| `WindowSeconds` | `int` | `1 .. 3600` | `60` | Time window in seconds for the IP rate limit. |
+| `QueueLimit` | `int` | `>= 0` | `0` | Queue size before rejection with `HTTP 429`. |
 
 #### `RateLimiting.PostAuthSidRateLimit`
-| Eigenschaft | Typ | Wertebereich | Standard | Beschreibung |
+| Property | Type | Range | Default | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `TokenBucketCapacity` | `int` | `10 .. 100000` | `500` | Maximale Token-Kapazität pro authentifizierter User-SID. |
-| `TokensPerSecond` | `int` | `1 .. 10000` | `50` | Nachfüllrate des Token-Buckets pro Sekunde. |
+| `TokenBucketCapacity` | `int` | `10 .. 100000` | `500` | Maximum token capacity per authenticated user SID. |
+| `TokensPerSecond` | `int` | `1 .. 10000` | `50` | Refill rate of the token bucket per second. |
 
 #### `RateLimiting.ClientTiers` (GraphQL Pre-Execution Cost & Quota Defense)
 
-Steuert die [`CostAndQuotaMiddleware`](../src/Autheris.GraphQL/Interceptors/CostAndQuotaMiddleware.cs) ([`F-PERF-13`](features/f-perf-13-cost-and-quota-rate-limiting.md)) zur dynamischen Zuordnung von Aufrufern zu Kontingent-Stufen (`Free`, `Standard`, `Enterprise`, `Internal`) vor der GraphQL-Ausführung.
+Controls the [`CostAndQuotaMiddleware`](../src/Autheris.GraphQL/Interceptors/CostAndQuotaMiddleware.cs) ([`F-PERF-13`](features/f-perf-13-cost-and-quota-rate-limiting.md)) for the dynamic assignment of callers to quota tiers (`Free`, `Standard`, `Enterprise`, `Internal`) before GraphQL execution.
 
-| Eigenschaft | Typ | Standard | Beschreibung |
+| Property | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `RoleTierMappings` | `Dictionary<string, string>` | `{}` | Mappt Benutzerrollen (Claims) auf Tiers (z. B. `"FinanceAdmins": "Enterprise"`). |
-| `ApiKeys` | `Dictionary<string, string>` | `{}` | Mappt registrierte API-Keys (`X-API-Key`) auf Tiers. |
-| `TierLimits` | `Dictionary<string, ClientTierLimitOverride>` | Standardwerte je Tier | Ermöglicht das Überschreiben der Standard-Grenzwerte pro Tier. |
+| `RoleTierMappings` | `Dictionary<string, string>` | `{}` | Maps user roles (claims) to tiers (e.g. `"FinanceAdmins": "Enterprise"`). |
+| `ApiKeys` | `Dictionary<string, string>` | `{}` | Maps registered API keys (`X-API-Key`) to tiers. |
+| `TierLimits` | `Dictionary<string, ClientTierLimitOverride>` | Default values per tier | Allows overriding the default limits per tier. |
 
 ##### `ClientTierLimitOverride` Parameter
-| Eigenschaft | Typ | Standard (Standard / Enterprise) | Beschreibung |
+| Property | Type | Default (Standard / Enterprise) | Description |
 | :--- | :--- | :--- | :--- |
-| `MaxCostPerQuery` | `int?` | `250` / `1000` | Maximal erlaubte statische AST-Kostenpunkte pro Einzelabfrage (Fail-Fast bei Überschreitung mit `QUERY_COST_QUOTA_EXCEEDED`). |
-| `MaxComplexityDepth` | `int?` | `10` / `20` | Maximale Verschachtelungstiefe der GraphQL-Selektion. |
-| `MaxTokensCapacity` | `int?` | `1000` / `10000` | Maximale Kapazität des verteilten Token-Buckets. |
-| `TokenRefillRatePerSecond` | `double?` | `20.0` / `200.0` | Nachfüllrate von Kostenpunkten pro Sekunde. |
-| `ExposeCostExtensions` | `bool?` | `true` | Schaltet die Rückgabe von `extensions.cost` in der GraphQL-Antwort frei. |
+| `MaxCostPerQuery` | `int?` | `250` / `1000` | Maximum permitted static AST cost points per single query (fail-fast on overrun with `QUERY_COST_QUOTA_EXCEEDED`). |
+| `MaxComplexityDepth` | `int?` | `10` / `20` | Maximum nesting depth of the GraphQL selection. |
+| `MaxTokensCapacity` | `int?` | `1000` / `10000` | Maximum capacity of the distributed token bucket. |
+| `TokenRefillRatePerSecond` | `double?` | `20.0` / `200.0` | Refill rate of cost points per second. |
+| `ExposeCostExtensions` | `bool?` | `true` | Enables returning `extensions.cost` in the GraphQL response. |
 
 ```json
 "RateLimiting": {
@@ -498,31 +498,31 @@ Steuert die [`CostAndQuotaMiddleware`](../src/Autheris.GraphQL/Interceptors/Cost
 ```
 
 > [!TIP]
-> **Resilienz & Hochverfügbarkeit (Failover)**:
-> In Multi-Pod-Umgebungen nutzt `RedisRateLimiterService` Redis für die instanzübergreifende Ratenbegrenzung. Sollte das Redis-Cluster ausfallen oder Verbindungsprobleme melden, schaltet das Gateway **automatisch und transparent** auf den lokalen `InMemoryRateLimiterService` um. Anfragen werden nicht blockiert, und das Gateway bleibt vor DoS-Attacken geschützt.
+> **Resilience & High Availability (Failover)**:
+> In multi-pod environments `RedisRateLimiterService` uses Redis for cross-instance rate limiting. Should the Redis cluster fail or report connection problems, the gateway switches **automatically and transparently** to the local `InMemoryRateLimiterService`. Requests are not blocked, and the gateway stays protected against DoS attacks.
 > 
-> **Performance auf Hot-Paths**:
-> Der lokale `InMemoryRateLimiterService` pflegt IP- und Bucket-Zähler über atomare `Interlocked.Increment` / `Interlocked.Decrement` Operationen, um Deadlocks und Lock-Contention auf `ConcurrentDictionary.Count` vollständig zu vermeiden.
+> **Performance on hot paths**:
+> The local `InMemoryRateLimiterService` maintains IP and bucket counters via atomic `Interlocked.Increment` / `Interlocked.Decrement` operations to completely avoid deadlocks and lock contention on `ConcurrentDictionary.Count`.
 
 
 ---
 
-### 2.6 `GraphQL` (Engine- & Abfrageschutz)
+### 2.6 `GraphQL` (Engine & Query Protection)
 
-Steuert Hot Chocolate 16 Parameter, Komplexitätsgrenzen und Anti-CSRF-Prüfungen.
+Controls Hot Chocolate 16 parameters, complexity limits and anti-CSRF checks.
 
-| Eigenschaft | Typ | Wertebereich | Standard | Beschreibung |
+| Property | Type | Range | Default | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `EndpointPath` | `string` | URL-Pfad | `"/graphql"` | Relativer Endpunkt-Pfad für GraphQL-Abfragen. |
-| `MaxAllowedExecutionDepth` | `int` | `1 .. 25` | `10` | Maximale Abfragetiefe zur Vermeidung zyklischer DoS-Queries. |
-| `MaxAllowedComplexity` | `int` | `100 .. 10000` | `1500` | Maximales statisches Query-Kostenbudget. |
-| `Subscriptions:Enabled` | `bool` | `true \| false` | `false` | Schaltet den GraphQL-Subscription-Root-Typ samt In-Memory-Provider (Start-Zeit, Neustart nötig). Nur bei `true` werden Root-Typ und In-Memory-Provider registriert; bei `false` enthält das Schema keinen `Subscription`-Typ und Subscription-Dokumente scheitern an der Validierung. Der WebSocket-Transport für Queries und Mutations bleibt authentifiziert. Read-only-Tokens dürfen Subscriptions in keinem Fall ausführen. |
-| `EnableIntrospection` | `bool` | `true \| false` | `false` | Schema-Introspektion (`__schema`). In Produktion deaktivieren! |
-| `PersistedQueriesOnly` | `bool` | `true \| false` | `false` | Erlaubt nur vorregistrierte Hash-basierte Abfragen. |
-| `EnableBananaCakePop` | `bool` | `true \| false` | `false` | Nitro Banana Cake Pop GraphQL IDE im Browser. In Produktion deaktivieren! |
-| `MaxResponseRows` | `int` | `100 .. 100000` | `5000` | Maximal zulässige Zeilenanzahl im Response-Budget. |
-| `MaxResponseBytes` | `long` | `1 MB .. 100 MB` | `10485760` (10 MB) | Maximales Byte-Budget für GraphQL-Antworten. |
-| `TrustedOrigins` | `List<string>` | URLs / `"*"` | `[]` | CORS- und Anti-CSRF-Erlaubnisliste für `Origin`/`Referer`-Header. |
+| `EndpointPath` | `string` | URL path | `"/graphql"` | Relative endpoint path for GraphQL queries. |
+| `MaxAllowedExecutionDepth` | `int` | `1 .. 25` | `10` | Maximum query depth to prevent cyclic DoS queries. |
+| `MaxAllowedComplexity` | `int` | `100 .. 10000` | `1500` | Maximum static query cost budget. |
+| `Subscriptions:Enabled` | `bool` | `true \| false` | `false` | Enables the GraphQL subscription root type together with the in-memory provider (start-time setting, restart required). Only when `true` are the root type and the in-memory provider registered; when `false` the schema contains no `Subscription` type and subscription documents fail validation. The WebSocket transport for queries and mutations stays authenticated. Read-only tokens may never execute subscriptions. |
+| `EnableIntrospection` | `bool` | `true \| false` | `false` | Schema introspection (`__schema`). Disable in production! |
+| `PersistedQueriesOnly` | `bool` | `true \| false` | `false` | Allows only pre-registered hash-based queries. |
+| `EnableBananaCakePop` | `bool` | `true \| false` | `false` | Nitro Banana Cake Pop GraphQL IDE in the browser. Disable in production! |
+| `MaxResponseRows` | `int` | `100 .. 100000` | `5000` | Maximum permitted row count in the response budget. |
+| `MaxResponseBytes` | `long` | `1 MB .. 100 MB` | `10485760` (10 MB) | Maximum byte budget for GraphQL responses. |
+| `TrustedOrigins` | `List<string>` | URLs / `"*"` | `[]` | CORS and anti-CSRF allowlist for `Origin`/`Referer` headers. |
 | `TrustedDocumentsDirectory` | `string` | Directory path | `""` | Global allowlist of `*.graphql` / `*.gql` documents (hashed over the normalized document). Required and must exist when `PersistedQueriesOnly=true`, unless `AppScopedTrustedDocuments.Enabled=true` (then it may be empty). |
 | `AppScopedTrustedDocuments.Enabled` | `bool` | `true \| false` | `false` | Runtime-managed, app-scoped trusted documents (see below). Requires `PersistedQueriesOnly=true`; startup fails otherwise. |
 | `AppScopedTrustedDocuments.HeaderName` | `string` | HTTP token | `"X-Autheris-App"` | Request header that carries the app identity `<appId>/<version>`. |
@@ -574,19 +574,19 @@ The admin API requires the `ClusterAdmin` role plus a delegated scope; every cha
 | `GET /api/admin/trusted-documents/{appId}` | `trusted-documents:read` or `write` | `200` origins and versions with status and hash count, `404` unknown app |
 
 > [!IMPORTANT]
-> **Anti-CSRF Preflight Schutz**: Jede eingehende POST- oder GET-Abfrage an `/graphql` erfordert zwingend den Header `GraphQL-Preflight: 1` oder `X-Requested-With`. Browser-Anfragen ohne diesen Header werden mit `HTTP 400 Bad Request` abgewiesen.
+> **Anti-CSRF preflight protection**: Every incoming POST or GET request to `/graphql` requires the header `GraphQL-Preflight: 1` or `X-Requested-With`. Browser requests without this header are rejected with `HTTP 400 Bad Request`.
 
 ---
 
-### 2.7 `DataMasking` (Kryptografische Pseudonymisierung & Maskierung)
+### 2.7 `DataMasking` (Cryptographic Pseudonymization & Masking)
 
-Konfiguriert die deterministische Pseudonymisierung (`HMAC_SHA256`) sowie Maskierungs-Caches.
+Configures deterministic pseudonymization (`HMAC_SHA256`) and masking caches.
 
-| Eigenschaft | Typ | Wertebereich | Standard | Beschreibung |
+| Property | Type | Range | Default | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `HmacKeyId` | `string` | Bezeichner | `"key-2026-q1"` | Schlüssel-ID zur Unterstützung von Key-Rotationen. |
+| `HmacKeyId` | `string` | Identifier | `"key-2026-q1"` | Key ID to support key rotations. |
 | `HmacSecretKeyVaultRef` | `string` | Secret-Name | `"DEV_INSECURE_...` | Name of the secret in Azure Key Vault / HashiCorp Vault or environment fallback. Outside Development, must resolve to at least 32 UTF-8 bytes. |
-| `MaskingCacheTtlHours` | `int` | `1 .. 168` | `24` | Gültigkeitsdauer des Caches für vorberechnete Maskierungsregeln. |
+| `MaskingCacheTtlHours` | `int` | `1 .. 168` | `24` | Validity period of the cache for precomputed masking rules. |
 
 > [!NOTE]
 > **Key Entropy & Length (R-DEP-2)**: The HMAC masking master key must contain >= 32 UTF-8 bytes outside Development. 32 hexadecimal characters encode only 16 bytes of entropy and are only 32 ASCII bytes, which could be weak. Recommended practice is a Base64-encoded string derived from at least 32 cryptographically secure random bytes (256 bits of entropy).
@@ -601,17 +601,17 @@ Konfiguriert die deterministische Pseudonymisierung (`HMAC_SHA256`) sowie Maskie
 
 ---
 
-### 2.8 `Audit` (Manipulationssichere HMAC-SHA256 Audit-Hash-Chain)
+### 2.8 `Audit` (Tamper-Proof HMAC-SHA256 Audit Hash Chain)
 
-Protokolliert Datenzugriffe manipulationssicher in einer kryptografisch verketteten HMAC-SHA256 Prüfkette (`AUDIT_LOG_ENTRIES`). Durch den Einsatz eines geheimen HMAC-Schlüssels (aus Key Vault oder Umgebung) kann die Kette selbst bei direktem Schreibzugriff auf die relationale Governance-DB nicht unbemerkt modifiziert werden.
+Logs data accesses tamper-proof in a cryptographically chained HMAC-SHA256 audit chain (`AUDIT_LOG_ENTRIES`). By using a secret HMAC key (from Key Vault or environment), the chain cannot be modified unnoticed even with direct write access to the relational governance DB.
 
-| Eigenschaft | Typ | Wertebereich | Standard | Beschreibung |
+| Property | Type | Range | Default | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `TierBAggregationWindowSeconds` | `int` | `1 .. 3600` | `60` | Aggregationsintervall für unkritische Tier-B Massenzugriffe. |
-| `AuditLogRetentionDays` | `int` | `1 .. 7300` | `3650` (10 Jahre) | Gesetzliche Aufbewahrungsfrist für Prüfprotokolle. |
-| `VerifyHashChainIntervalHours` | `int` | `1 .. 168` | `24` | Zyklische Integritätsprüfung der gesamten Prüfkette im Hintergrund mit timing-sicherem `FixedTimeEquals`. |
-| `HmacSecretKeyVaultRef` | `string` | Secret-Name | `"GQL-GATEWAY-AUDIT-HMAC-SECRET"` | Key Vault Referenz für den geheimen HMAC-Schlüssel der Audit-Kette. Outside Development, must resolve to at least 32 UTF-8 bytes (recommended: Base64 of >= 32 random bytes). |
-| `ElasticsearchSinkUrl` | `string` | URL | `""` | Optionaler sekundärer Sink für SIEM-Systeme (Splunk / Elasticsearch). |
+| `TierBAggregationWindowSeconds` | `int` | `1 .. 3600` | `60` | Aggregation interval for non-critical tier-B bulk accesses. |
+| `AuditLogRetentionDays` | `int` | `1 .. 7300` | `3650` (10 years) | Statutory retention period for audit logs. |
+| `VerifyHashChainIntervalHours` | `int` | `1 .. 168` | `24` | Cyclic background integrity check of the entire audit chain using timing-safe `FixedTimeEquals`. |
+| `HmacSecretKeyVaultRef` | `string` | Secret name | `"GQL-GATEWAY-AUDIT-HMAC-SECRET"` | Key Vault reference for the secret HMAC key of the audit chain. Outside Development, must resolve to at least 32 UTF-8 bytes (recommended: Base64 of >= 32 random bytes). |
+| `ElasticsearchSinkUrl` | `string` | URL | `""` | Optional secondary sink for SIEM systems (Splunk / Elasticsearch). |
 
 ```json
 "Audit": {
@@ -625,15 +625,15 @@ Protokolliert Datenzugriffe manipulationssicher in einer kryptografisch verkette
 
 ---
 
-### 2.9 `ReverseProxy` (Forwarded Headers & Proxy-Netzwerke)
+### 2.9 `ReverseProxy` (Forwarded Headers & Proxy Networks)
 
-Schützt vor IP-Spoofing hinter Load Balancern (K8s Ingress, F5, Envoy, NGINX).
+Protects against IP spoofing behind load balancers (K8s Ingress, F5, Envoy, NGINX).
 
-| Eigenschaft | Typ | Wertebereich | Standard | Beschreibung |
+| Property | Type | Range | Default | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `Enabled` | `bool` | `true \| false` | `true` | Aktiviert die Auswertung von `X-Forwarded-For` und `X-Forwarded-Proto`. |
-| `KnownNetworks` | `List<string>` | CIDR-Notation | `["127.0.0.1/32", "::1/128"]` | Trusted IP networks (e.g. internal pod subnet). A configured list replaces the default entirely (no merging). Loopback is always trusted for `X-Forwarded-*` headers, so an empty array (`[]`) is treated as not configured and logs a startup warning. |
-| `KnownProxies` | `List<string>` | IP-Adressen | `[]` | Feste IP-Adressen vorgelagerter Reverse Proxies. |
+| `Enabled` | `bool` | `true \| false` | `true` | Enables evaluation of `X-Forwarded-For` and `X-Forwarded-Proto`. |
+| `KnownNetworks` | `List<string>` | CIDR notation | `["127.0.0.1/32", "::1/128"]` | Trusted IP networks (e.g. internal pod subnet). A configured list replaces the default entirely (no merging). Loopback is always trusted for `X-Forwarded-*` headers, so an empty array (`[]`) is treated as not configured and logs a startup warning. |
+| `KnownProxies` | `List<string>` | IP addresses | `[]` | Fixed IP addresses of upstream reverse proxies. |
 
 ```json
 "ReverseProxy": {
@@ -651,21 +651,21 @@ Schützt vor IP-Spoofing hinter Load Balancern (K8s Ingress, F5, Envoy, NGINX).
 
 ---
 
-### 2.10 `OpenMetadata` (Governance-Katalog-Synchronisation & Webhooks)
+### 2.10 `OpenMetadata` (Governance Catalog Synchronization & Webhooks)
 
-Automatische Synchronisation von Schema-Metadaten, Klassifikations-Tags (`PII.*`) und Ownership aus OpenMetadata.
+Automatic synchronization of schema metadata, classification tags (`PII.*`) and ownership from OpenMetadata.
 
-| Eigenschaft | Typ | Wertebereich | Standard | Beschreibung |
+| Property | Type | Range | Default | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `Enabled` | `bool` | `true \| false` | `false` | Aktiviert den OpenMetadata-Sync-Background-Worker. |
-| `ServerUrl` | `string` | URL | `"http://localhost:8585/api/v1"` | Basis-URL der OpenMetadata REST API. |
-| `AuthToken` | `string` | JWT / Token | `""` | Bearer-Token für die OpenMetadata API. |
-| `WebhookSecret` | `string` | Secret | `""` | HMAC-SHA256 Secret zur Validierung eingehender Webhooks unter `/api/webhooks/openmetadata`. |
-| `ServiceFilter` | `string` | Service-Name | `""` | Filtert Tabellen auf einen bestimmten Datenservice. |
-| `SyncIntervalMinutes` | `int` | `1 .. 1440` | `30` | Intervall des Hintergrund-Pollings. |
-| `TagToMaskingRuleMap` | `Map` | Tag -> MaskingType | *Siehe unten* | Zuordnung von OpenMetadata Klassifikations-Tags zu Maskierungsregeln. |
-| `TeamToGroupSidMap` | `Map` | Team -> SID | `{}` | Übersetzung von OpenMetadata Teams in Active Directory Gruppen-SIDs. Schlüssel brauchen das Präfix `id:` (gültige GUID), `fqn:` oder `name:`; Werte müssen gültige SIDs sein (`S-1-...`). Ein Schlüssel ohne Präfix, eine ungültige GUID, ein leerer oder ungültiger Wert und zwei Schlüssel für dasselbe Team lassen den Start fehlschlagen (die Meldung nennt Optionspfad und Eintragsposition, nie einen SID-Wert). |
-| `UserToUserSidMap` | `Map` | User -> SID | `{}` | Übersetzung von OpenMetadata Usernames in Windows User-SIDs. |
+| `Enabled` | `bool` | `true \| false` | `false` | Enables the OpenMetadata sync background worker. |
+| `ServerUrl` | `string` | URL | `"http://localhost:8585/api/v1"` | Base URL of the OpenMetadata REST API. |
+| `AuthToken` | `string` | JWT / token | `""` | Bearer token for the OpenMetadata API. |
+| `WebhookSecret` | `string` | Secret | `""` | HMAC-SHA256 secret for validating incoming webhooks at `/api/webhooks/openmetadata`. |
+| `ServiceFilter` | `string` | Service name | `""` | Filters tables to a specific data service. |
+| `SyncIntervalMinutes` | `int` | `1 .. 1440` | `30` | Background polling interval. |
+| `TagToMaskingRuleMap` | `Map` | Tag -> MaskingType | *See below* | Mapping of OpenMetadata classification tags to masking rules. |
+| `TeamToGroupSidMap` | `Map` | Team -> SID | `{}` | Translation of OpenMetadata teams to Active Directory group SIDs. Keys need the prefix `id:` (valid GUID), `fqn:` or `name:`; values must be valid SIDs (`S-1-...`). A key without a prefix, an invalid GUID, an empty or invalid value, and two keys for the same team make startup fail (the message names the option path and entry position, never a SID value). |
+| `UserToUserSidMap` | `Map` | User -> SID | `{}` | Translation of OpenMetadata user names to Windows user SIDs. |
 
 ```json
 "OpenMetadata": {
@@ -692,20 +692,20 @@ Automatische Synchronisation von Schema-Metadaten, Klassifikations-Tags (`PII.*`
 ```
 
 > [!IMPORTANT]
-> **Webhook Replay-Schutz (`/api/webhooks/openmetadata`)**:
-> - Eingehende Webhooks erfordern zwingend eine gültige HMAC-SHA256-Signatur im Header `X-OpenMetadata-Signature` (geprüft via `FixedTimeEquals`).
-> - Webhook-Payloads müssen zwingend die Felder `id` (eindeutige GUID/ID) und `timestamp` (Unix-Millisekunden) enthalten.
-> - Anfragen mit fehlenden Feldern, verarbeiteten IDs (Deduplizierung) oder Zeitstempeln außerhalb des 5-Minuten-Gleitzeitfensters werden fail-closed mit `HTTP 401/400` abgewiesen.
+> **Webhook replay protection (`/api/webhooks/openmetadata`)**:
+> - Incoming webhooks require a valid HMAC-SHA256 signature in the `X-OpenMetadata-Signature` header (verified via `FixedTimeEquals`).
+> - Webhook payloads must contain the fields `id` (unique GUID/ID) and `timestamp` (Unix milliseconds).
+> - Requests with missing fields, already processed IDs (deduplication) or timestamps outside the 5-minute sliding time window are rejected fail-closed with `HTTP 401/400`.
 
 ---
 
-### 2.11 `Plugins` (Isolierte C#-Konnektoren)
+### 2.11 `Plugins` (Isolated C# Connectors)
 
-Verwaltet dynamische C#-Erweiterungen (`IHttpDataSourcePlugin`) in isolierten `AssemblyLoadContext`-Instanzen.
+Manages dynamic C# extensions (`IHttpDataSourcePlugin`) in isolated `AssemblyLoadContext` instances.
 
-| Eigenschaft | Typ | Wertebereich | Standard | Beschreibung |
+| Property | Type | Range | Default | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `Directory` | `string` | Verzeichnispfad | `"plugins"` | Relativer oder absoluter Pfad zum Plugin-Ordner mit DLLs. |
+| `Directory` | `string` | Directory path | `"plugins"` | Relative or absolute path to the plugin folder containing DLLs. |
 
 ```json
 "Plugins": {
@@ -725,28 +725,28 @@ Plugin action handlers are limited to 30 seconds per execution; in-flight action
 
 ---
 
-### 2.12 `DataSources.Http` (SSRF-Schutz & Egress-Sicherheit für REST)
+### 2.12 `DataSources.Http` (SSRF Protection & Egress Security for REST)
 
-Für deklarative HTTP-Datenquellen (`DeclarativeHttpDataSourceExecutor`) gelten strikte Zero-Trust Egress-Vorgaben zum Schutz vor Server-Side Request Forgery (SSRF):
+Declarative HTTP data sources (`DeclarativeHttpDataSourceExecutor`) are subject to strict zero-trust egress rules to protect against server-side request forgery (SSRF):
 
-- **DNS- & IP-Validierung**: Vor jedem HTTP-Aufruf wird der Ziel-Hostname per DNS aufgelöst. Loopback-Adressen (`127.0.0.0/8`, `::1`), Link-Local (`169.254.0.0/16`, `fe80::/10`) und private Netze nach RFC 1918 (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`) werden abgewiesen.
-- **Cloud-Metadaten-Schutz**: Hostnamen wie `metadata.google.internal` und `kubernetes.default.svc` sind explizit gesperrt.
-- **Hop-für-Hop Redirect-Prüfung**: Automatisches Folgen von HTTP-Weiterleitungen ist im HTTP-Client deaktiviert (`AllowAutoRedirect = false`). Bei Statuscodes 301, 302, 307 und 308 führt der Executor eine schrittweise Re-Validierung des `Location`-Headers durch (maximal 5 Hops), um SSRF über offene Weiterleitungen auszuschließen.
+- **DNS & IP validation**: Before every HTTP call the target host name is resolved via DNS. Loopback addresses (`127.0.0.0/8`, `::1`), link-local (`169.254.0.0/16`, `fe80::/10`) and private networks per RFC 1918 (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`) are rejected.
+- **Cloud metadata protection**: Host names such as `metadata.google.internal` and `kubernetes.default.svc` are explicitly blocked.
+- **Hop-by-hop redirect validation**: Automatic following of HTTP redirects is disabled in the HTTP client (`AllowAutoRedirect = false`). For status codes 301, 302, 307 and 308 the executor re-validates the `Location` header step by step (maximum 5 hops) to rule out SSRF via open redirects.
 
 ---
 
-### 2.13 `Catalog` (Enterprise Data Catalog Integration & DSGVO-Klassifizierung)
+### 2.13 `Catalog` (Enterprise Data Catalog Integration & GDPR Classification)
 
-Ermöglicht die zentrale Anbindung an **OpenMetadata** zur automatisierten Spiegelung von Metadaten und Sensitivitäts-Klassifizierungen.
+Enables the central connection to **OpenMetadata** for automated mirroring of metadata and sensitivity classifications.
 
-| Eigenschaft | Typ | Wertebereich | Standard | Beschreibung |
+| Property | Type | Range | Default | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `Enabled` | `bool` | `true \| false` | `false` | Aktiviert die Data-Catalog-Integration. |
-| `Provider` | `string` | `OpenMetadata` | `"OpenMetadata"` | Aktiver Datenkatalog-Provider. |
-| `SyncIntervalMinutes` | `int` | `1 .. 1440` | `60` | Synchronisationsintervall des Hintergrunddienstes in Minuten. |
-| `TagToMaskingRuleMap` | `Dictionary<string, string>` | Key-Value Paare | *(Standard-Map)* | Mappt Katalog-Tags auf Maskierungsregeln (`REDACT`, `MASK_EMAIL`, `HMAC_SHA256`). |
-| `GdprArticle9Tags` | `List<string>` | Tag-Namen | *(Art. 9 Tags)* | Tags für besondere Kategorien (Gesundheit, Biometrie, Genetik, Religion). Erzwingt `HIGH`, Four-Eyes und `REDACT`. |
-| `PiiTags` | `List<string>` | Tag-Namen | *(PII Tags)* | Tags für personenbezogene Daten. |
+| `Enabled` | `bool` | `true \| false` | `false` | Enables the data catalog integration. |
+| `Provider` | `string` | `OpenMetadata` | `"OpenMetadata"` | Active data catalog provider. |
+| `SyncIntervalMinutes` | `int` | `1 .. 1440` | `60` | Synchronization interval of the background service in minutes. |
+| `TagToMaskingRuleMap` | `Dictionary<string, string>` | Key-value pairs | *(default map)* | Maps catalog tags to masking rules (`REDACT`, `MASK_EMAIL`, `HMAC_SHA256`). |
+| `GdprArticle9Tags` | `List<string>` | Tag names | *(Art. 9 tags)* | Tags for special categories (health, biometrics, genetics, religion). Enforces `HIGH`, four-eyes and `REDACT`. |
+| `PiiTags` | `List<string>` | Tag names | *(PII tags)* | Tags for personal data. |
 | `SharedTables` | `List<string>` | `domain.schema.table` | `[]` | Tables visible in the GraphQL `catalog` to administrators and discovery users of every tenant, in addition to the tables the tenant holds a consent record on. |
 
 > [!NOTE]
@@ -786,27 +786,27 @@ The `Gateway:OpenSchema` and `Gateway:Catalog:OpenSchema` keys were removed (OD-
 
 ---
 
-### 2.14 `Insecure` (Pragmatisches Onboarding & Fremdsystem-Anbindung)
+### 2.14 `Insecure` (Pragmatic Onboarding & Third-Party System Integration)
 
-Für schnelle PoCs, Integrationstests, externe Webhook-Systeme oder Third-Party-Konnektoren können Sicherheitsprüfungen per Konfiguration gelockert werden. Um Risiken transparent zu machen, sind alle Parameter zwingend nach Sicherheitsauswirkung präfixiert:
+For quick PoCs, integration tests, external webhook systems or third-party connectors, security checks can be relaxed via configuration. To make risks transparent, all parameters are prefixed by security impact:
 
-- **`warn_` (Mittlerer Impact)**: Lockert Limits und Netzwerkschutz.
-- **`danger_` (Kritischer Impact)**: Deaktiviert Authentifizierung, Autorisierung oder Zertifikatsprüfungen vollständig.
+- **`warn_` (medium impact)**: Relaxes limits and network protection.
+- **`danger_` (critical impact)**: Completely disables authentication, authorization or certificate checks.
 
 > [!CAUTION]
 > **Production & Staging Warning (DANGER Switches)**:
 > All `danger_`-prefixed switches, as well as flags reclassified as `DANGER:` (such as `warn_allow_unmasked_ai_access`, `warn_mock_external_systems_if_unreachable`, `warn_auto_approve_access_requests`, `warn_disable_rate_limiting`, `warn_allow_unsigned_s3_requests`, `warn_ignore_webhook_timestamp_tolerance`, `OpenMetadata.AutoCreateConsents`, and `WebSql.MaxAffectedRows <= 0` with DML enabled), **strictly abort application startup outside of the `Development` environment** (`ValidationException` fail-fast).
 
-| Eigenschaft | Typ | Standard | Sicherheits-Level | Beschreibung |
+| Property | Type | Default | Security level | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `danger_allow_anonymous_access` | `bool` | `false` | **CRITICAL** | Erlaubt GraphQL-Abfragen ohne jegliche Authentifizierung (anonymer Benutzer). |
-| `danger_bypass_consent_checks` | `bool` | `false` | **CRITICAL** | Umgeht die Zero-Trust Consent-Prüfung (`ALLOW` für alle Tabellen). |
-| `danger_bypass_webhook_signature_validation` | `bool` | `false` | **CRITICAL** | Erlaubt ungesignete Webhook-Aufrufe (z. B. OpenMetadata ohne HMAC-Prüfung). |
-| `danger_allow_untrusted_certificates` | `bool` | `false` | **CRITICAL** | Akzeptiert selbstsignierte oder abgelaufene SSL/TLS-Zertifikate bei ausgehenden HTTP-Aufrufen. |
-| `danger_allow_anonymous_webhooks` | `bool` | `false` | **CRITICAL** | Akzeptiert eingehende Webhook-Payloads ohne Auth-Token oder Secret. |
-| `warn_allow_all_cors_origins` | `bool` | `false` | **WARN** | Setzt `Access-Control-Allow-Origin: *` und deaktiviert CSRF-Preflight. |
-| `warn_disable_rate_limiting` | `bool` | `false` | **WARN** | Deaktiviert IP- und SID-basiertes Rate-Limiting (keine `429 Too Many Requests`). |
-| `warn_relaxed_query_limits` | `bool` | `false` | **WARN** | Deaktiviert AST-Depth- und Complexity-Limits für tief verschachtelte Abfragen. |
+| `danger_allow_anonymous_access` | `bool` | `false` | **CRITICAL** | Allows GraphQL queries without any authentication (anonymous user). |
+| `danger_bypass_consent_checks` | `bool` | `false` | **CRITICAL** | Bypasses the zero-trust consent check (`ALLOW` for all tables). |
+| `danger_bypass_webhook_signature_validation` | `bool` | `false` | **CRITICAL** | Allows unsigned webhook calls (e.g. OpenMetadata without HMAC verification). |
+| `danger_allow_untrusted_certificates` | `bool` | `false` | **CRITICAL** | Accepts self-signed or expired SSL/TLS certificates on outgoing HTTP calls. |
+| `danger_allow_anonymous_webhooks` | `bool` | `false` | **CRITICAL** | Accepts incoming webhook payloads without an auth token or secret. |
+| `warn_allow_all_cors_origins` | `bool` | `false` | **WARN** | Sets `Access-Control-Allow-Origin: *` and disables the CSRF preflight. |
+| `warn_disable_rate_limiting` | `bool` | `false` | **WARN** | Disables IP- and SID-based rate limiting (no `429 Too Many Requests`). |
+| `warn_relaxed_query_limits` | `bool` | `false` | **WARN** | Disables AST depth and complexity limits for deeply nested queries. |
 
 ```json
 "Insecure": {
@@ -841,31 +841,31 @@ Precedence per switch: explicit `Dev` value, then an explicitly set legacy key (
 
 ### 2.15 `Identity & Multi-Tenant / M2M Service-Accounts`
 
-Unterstützt hybride Identitätsmigration und Machine-to-Machine-Zugriffe für Hintergrund-Jobs:
+Supports hybrid identity migration and machine-to-machine access for background jobs:
 
-- **Abstraktionsschicht (`IIdentityProvider`)**: Ermöglicht den parallelen Betrieb von On-Prem-Active-Directory (Kerberos) und Microsoft Entra ID (Azure AD / OIDC) ohne Code-Änderungen an Fachkomponenten.
-- **Service-Accounts & M2M-Zugriff**: Authentifizierung via OAuth2 Client-Credentials oder mutual TLS (mTLS). Im Gateway wird der Aufrufer als Dienst-Prinzipal mit `SP-<client_id>` SID geführt und erhält dedizierte, zeitlich befristete Consents mit technischer Begründung.
-- **Multi-Tenant Datenisolation**: Zweistufige Mandantentrennung über SQL-Pushdown (`WHERE tenant_id = @tenant`) und native PostgreSQL Row-Level-Security mittels transaktionalem `SET LOCAL app.tenant_id = @tenant`.
+- **Abstraction layer (`IIdentityProvider`)**: Enables parallel operation of on-prem Active Directory (Kerberos) and Microsoft Entra ID (Azure AD / OIDC) without code changes to business components.
+- **Service accounts & M2M access**: Authentication via OAuth2 client credentials or mutual TLS (mTLS). In the gateway the caller is represented as a service principal with an `SP-<client_id>` SID and receives dedicated, time-limited consents with a technical justification.
+- **Multi-tenant data isolation**: Two-tier tenant separation via SQL pushdown (`WHERE tenant_id = @tenant`) and native PostgreSQL row-level security using transactional `SET LOCAL app.tenant_id = @tenant`.
 
 ---
 
 ### 2.16 `Mcp` (Enterprise Model Context Protocol Server & AI Data Guardrails)
 
-Exponiert autorisierte GraphQL-Persisted-Queries als typisierte Tools für autonome KI-Agenten (Anthropic Claude, AutoGen, LangChain) über standardkonforme Server-Sent Events (SSE) und JSON-RPC 2.0.
+Exposes authorized GraphQL persisted queries as typed tools for autonomous AI agents (Anthropic Claude, AutoGen, LangChain) over standards-compliant Server-Sent Events (SSE) and JSON-RPC 2.0.
 
-| Eigenschaft | Typ | Wertebereich | Standard | Beschreibung |
+| Property | Type | Range | Default | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `Mcp:Enabled` | `bool` | `true \| false` | `false` | Aktiviert den MCP-Server (Streamable HTTP unter `Mcp:EndpointPath`, offizielles MCP-C#-SDK, zustandslos). |
-| `Mcp:EndpointPath` | `string` | URL-Pfad | `"/mcp"` | Pfad des MCP-Endpunkts (Streamable HTTP). |
-| `Mcp:MaxTokensPerCall` | `int` | `256 .. 128000` | `4096` | Maximales Token-Budget pro Tool-Aufruf; verhindert Context-Window-Overflows. |
-| `Mcp:MaxResultRows` | `int` | `1 .. 10000` | `100` | Obergrenze der Ergebniszeilen je MCP-Datentool (`query_dataset`, `query_sql`, `call_procedure`, `sample_rows`, `query_graphql`; bei GraphQL je Liste). Ein kleineres `limit` der Anfrage bleibt erhalten, ein größeres hebt die Grenze nie an; ein ungültiges `limit` (0, negativ, keine Ganzzahl) wird abgelehnt. Wurden Zeilen gekürzt, trägt das Ergebnis `truncated: true` und `rowCap`. `sample_rows` bleibt zusätzlich auf 20 Zeilen begrenzt. Ein Wert `<= 0` fällt auf `100` zurück. |
-| `Mcp:AllowedOperations` | `string[]` | GraphQL Operationen | `[]` | Whitelist freigegebener Abfragen. |
+| `Mcp:Enabled` | `bool` | `true \| false` | `false` | Enables the MCP server (streamable HTTP at `Mcp:EndpointPath`, official MCP C# SDK, stateless). |
+| `Mcp:EndpointPath` | `string` | URL path | `"/mcp"` | Path of the MCP endpoint (streamable HTTP). |
+| `Mcp:MaxTokensPerCall` | `int` | `256 .. 128000` | `4096` | Maximum token budget per tool call; prevents context window overflows. |
+| `Mcp:MaxResultRows` | `int` | `1 .. 10000` | `100` | Upper limit of result rows per MCP data tool (`query_dataset`, `query_sql`, `call_procedure`, `sample_rows`, `query_graphql`; for GraphQL per list). A smaller `limit` in the request is kept, a larger one never raises the limit; an invalid `limit` (0, negative, not an integer) is rejected. If rows were truncated, the result carries `truncated: true` and `rowCap`. `sample_rows` additionally stays limited to 20 rows. A value `<= 0` falls back to `100`. |
+| `Mcp:AllowedOperations` | `string[]` | GraphQL operations | `[]` | Allowlist of approved queries. |
 
-> `warn_allow_unmasked_ai_access` und `danger_bypass_mcp_auth` liegen ausschließlich unter `Insecure` (ADR-012, Phase 4).
+> `warn_allow_unmasked_ai_access` and `danger_bypass_mcp_auth` live exclusively under `Insecure` (ADR-012, phase 4).
 
-Der Server arbeitet zustandslos: Jede Anfrage wird mit der Identität ihrer eigenen HTTP-Anfrage ausgeführt, es gibt keine MCP-Sitzungen und keinen alten SSE-Transport (`/mcp/sse`, `/mcp/message`) mehr. Sind Entra ID oder AD FS aktiviert, veröffentlicht das Gateway unter `/.well-known/oauth-protected-resource<EndpointPath>` die OAuth-Metadaten (RFC 9728) mit diesen Ausstellern als Autorisierungsserver; 401-Antworten des MCP-Endpunkts verweisen per `WWW-Authenticate: Bearer resource_metadata=…` darauf. MCP-Clients finden so ohne weitere Konfiguration heraus, wo sie ein Token bekommen.
+The server is stateless: every request runs with the identity of its own HTTP request, there are no MCP sessions and no legacy SSE transport (`/mcp/sse`, `/mcp/message`) any more. If Entra ID or AD FS is enabled, the gateway publishes the OAuth metadata (RFC 9728) at `/.well-known/oauth-protected-resource<EndpointPath>` with these issuers as authorization servers; 401 responses of the MCP endpoint point to it via `WWW-Authenticate: Bearer resource_metadata=…`. This way MCP clients find out without further configuration where to obtain a token.
 
-Die Dataset-Tools `list_datasets`, `describe_dataset`, `query_graphql` und `sample_rows` ([F-AI-11](features/f-ai-11-mcp-dataset-tools.md)) sind immer registriert und brauchen keinen Eintrag in `AllowedOperations`. Agenten fragen Daten bevorzugt mit `query_graphql` ab. Jedes MCP-Tool wird vom Access Decision Point entschieden; Consent, Zeilenfilter und Maskierung gelten in jedem Fall.
+The dataset tools `list_datasets`, `describe_dataset`, `query_graphql` and `sample_rows` ([F-AI-11](features/f-ai-11-mcp-dataset-tools.md)) are always registered and need no entry in `AllowedOperations`. Agents preferably query data with `query_graphql`. Every MCP tool is decided by the Access Decision Point; consent, row filters and masking apply in every case.
 
 ```json
 "Mcp": {
@@ -883,13 +883,13 @@ Die Dataset-Tools `list_datasets`, `describe_dataset`, `query_graphql` und `samp
 
 ### 2.17 `DuckDbOlap` & `ArrowExport` (In-Memory OLAP & Arrow IPC Streaming)
 
-| Schlüssel | Typ | Wertebereich | Standard | Beschreibung |
+| Key | Type | Range | Default | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `DuckDbOlap:Enabled` | `bool` | `true \| false` | `true` | Aktiviert die eingebettete In-Memory DuckDB-Vektorengine (`F-DATA-03`). |
-| `DuckDbOlap:MaxMemory` | `string` | z. B. `"512MB"`, `"2GB"` | `"1GB"` | Maximale RAM-Quota pro DuckDB-Session (`PRAGMA max_memory`). |
-| `DuckDbOlap:MaxThreads` | `int` | `1 .. 8` | `2` | Maximale Thread-Anzahl für parallele SIMD-Ausführung. |
-| `DuckDbOlap:MaxStagedRowsPerTable` | `int` | `1000 .. 5000000` | `250000` | Obergrenze gestagter Zeilen pro temporärer Quelltabelle. |
-| `DuckDbOlap:MaxResultRows` | `int` | `1 ..` | `50000` | Obergrenze der Zeilen eines OLAP-Ergebnisses; ein kleineres `limit` der Anfrage bleibt erhalten. |
+| `DuckDbOlap:Enabled` | `bool` | `true \| false` | `true` | Enables the embedded in-memory DuckDB vector engine (`F-DATA-03`). |
+| `DuckDbOlap:MaxMemory` | `string` | e.g. `"512MB"`, `"2GB"` | `"1GB"` | Maximum RAM quota per DuckDB session (`PRAGMA max_memory`). |
+| `DuckDbOlap:MaxThreads` | `int` | `1 .. 8` | `2` | Maximum thread count for parallel SIMD execution. |
+| `DuckDbOlap:MaxStagedRowsPerTable` | `int` | `1000 .. 5000000` | `250000` | Upper limit of staged rows per temporary source table. |
+| `DuckDbOlap:MaxResultRows` | `int` | `1 ..` | `50000` | Upper limit of the rows of an OLAP result; a smaller `limit` in the request is kept. |
 | `DuckDbOlap:QueryTimeoutSeconds` | `int` | `1 .. 300` | `60` | Timeout for analytical in-memory DuckDB queries; it also covers authorization and the source reads of the request. |
 | `DuckDbOlap:MaxTempDirectorySize` | `string` | e.g. `"256MB"`, `"0B"` | `"256MB"` | Maximum size of the session spill directory (`PRAGMA max_temp_directory_size`). Authoritative for all DuckDB sessions; `WebSql:CrossSource:MaxTempDirectorySize` was removed. |
 | `DuckDbOlap:MaxTableCount` | `int` | `1 ..` | `10` | Maximum distinct tables of one request. |
@@ -899,9 +899,9 @@ Die Dataset-Tools `list_datasets`, `describe_dataset`, `query_graphql` und `samp
 | `DuckDbOlap:MaxConcurrentQueries` | `int` | `1 .. 64` | `4` | Global cap on concurrent OLAP requests. |
 | `DuckDbOlap:MaxConcurrentQueriesPerTenant` | `int` | `1 ..` | `2` | Per-tenant cap on concurrent OLAP requests (`429` when exceeded). |
 | `DuckDbOlap:MaxSqlLength` | `int` | `1 ..` | `32768` | Maximum length of the client SQL text. |
-| `ArrowExport:Enabled` | `bool` | `true \| false` | `false` | Aktiviert den binären Zero-Copy Apache Arrow Export (`F-DATA-04`). |
-| `ArrowExport:BatchSize` | `int` | `100 .. 100000` | `10000` | Zeilenanzahl pro gestreamtem Arrow-RecordBatch. |
-| `ArrowExport:MaxRowsPerExport` | `int` | `1000 .. 10000000` | `1000000` | Maximale Zeilenanzahl pro Export-Vorgang. |
+| `ArrowExport:Enabled` | `bool` | `true \| false` | `false` | Enables the binary zero-copy Apache Arrow export (`F-DATA-04`). |
+| `ArrowExport:BatchSize` | `int` | `100 .. 100000` | `10000` | Row count per streamed Arrow RecordBatch. |
+| `ArrowExport:MaxRowsPerExport` | `int` | `1000 .. 10000000` | `1000000` | Maximum row count per export operation. |
 
 ```json
 "DuckDbOlap": {
@@ -936,20 +936,20 @@ Die Dataset-Tools `list_datasets`, `describe_dataset`, `query_graphql` und `samp
 
 ### 2.19 `WebSql` (Governed SQL & Trino REST Protocol)
 
-Autheris bietet eine integrierte, abgesicherte WebSQL-Schnittstelle, die 100% kompatibel zur Trino/Presto-SQL-Syntax und dem nativen Trino REST Client-Protokoll ist. Abfragen können über Standard-HTTP/HTTPS abgesetzt werden, ohne Datenbank-Ports nach außen zu öffnen.
+Autheris provides an integrated, secured WebSQL interface that is 100% compatible with the Trino/Presto SQL syntax and the native Trino REST client protocol. Queries can be submitted over standard HTTP/HTTPS without opening database ports to the outside.
 
-| Eigenschaft | Typ | Standard | Beschreibung |
+| Property | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `WebSql:Enabled` | `bool` | `true` | Aktiviert die WebSQL- und Trino-Statement-Endpunkte. |
-| `WebSql:DefaultDataSourceName` | `string` | `"default"` | Standard-Datenquelle, wenn kein Catalog/DataSource explizit angegeben ist. |
-| `WebSql:AllowedDataSources` | `string[]` | `[]` | Liste global freigegebener Datenquellen für WebSQL-Abfragen. |
-| `WebSql:TenantDataSourceAllowlist` | `Dictionary<string, string[]>` | `{}` | Mandantenspezifische Einschränkung erlaubter Datenquellen. |
-| `WebSql:DefaultMaxRows` | `long` | `1000` | Zeilen einer Abfrage ohne `LIMIT` (`POST /api/v1/sql`). |
-| `WebSql:MaxAllowedRows` | `long` | `10000` | Obergrenze für ein explizites `LIMIT` (`0` = keine Obergrenze). |
-| `WebSql:ExecutionTimeoutSeconds` | `int` | `30` | Maximaler Timeout für die Abfrageausführung im Backend. |
-| `WebSql:AllowDml` | `bool` | `false` | Erlaubt schreibende Operationen (`INSERT`, `UPDATE`, `DELETE`) auf Basis expliziter freigegebener Schreibregeln (`WriteRules`) in Consents/Access Profiles. Startup fails unless `DataSources:RequireTenantColumn=true`, `WebSql:MaxAffectedRows` is greater than 0, and a cluster-wide idempotency store (`Caching:Redis:Enabled = true`) is configured. DML on `/api/v1/sql` requires the `Idempotency-Key` header. |
-| `WebSql:MaxAffectedRows` | `long` | `1000` | Maximal erlaubte Zeilenanzahl bei DML; Überschreitung triggert automatischen Rollback. |
-| `WebSql:RejectUnfilteredDml` | `bool` | `true` | Verhindert ungefilterte `UPDATE`/`DELETE`-Statements (`WHERE 1=1`, `WHERE true`). |
+| `WebSql:Enabled` | `bool` | `true` | Enables the WebSQL and Trino statement endpoints. |
+| `WebSql:DefaultDataSourceName` | `string` | `"default"` | Default data source when no catalog/data source is specified explicitly. |
+| `WebSql:AllowedDataSources` | `string[]` | `[]` | List of globally approved data sources for WebSQL queries. |
+| `WebSql:TenantDataSourceAllowlist` | `Dictionary<string, string[]>` | `{}` | Tenant-specific restriction of allowed data sources. |
+| `WebSql:DefaultMaxRows` | `long` | `1000` | Rows of a query without `LIMIT` (`POST /api/v1/sql`). |
+| `WebSql:MaxAllowedRows` | `long` | `10000` | Upper limit for an explicit `LIMIT` (`0` = no upper limit). |
+| `WebSql:ExecutionTimeoutSeconds` | `int` | `30` | Maximum timeout for query execution in the backend. |
+| `WebSql:AllowDml` | `bool` | `false` | Allows write operations (`INSERT`, `UPDATE`, `DELETE`) based on explicitly approved write rules (`WriteRules`) in consents/access profiles. Startup fails unless `DataSources:RequireTenantColumn=true`, `WebSql:MaxAffectedRows` is greater than 0, and a cluster-wide idempotency store (`Caching:Redis:Enabled = true`) is configured. DML on `/api/v1/sql` requires the `Idempotency-Key` header. |
+| `WebSql:MaxAffectedRows` | `long` | `1000` | Maximum permitted row count for DML; exceeding it triggers an automatic rollback. |
+| `WebSql:RejectUnfilteredDml` | `bool` | `true` | Prevents unfiltered `UPDATE`/`DELETE` statements (`WHERE 1=1`, `WHERE true`). |
 
 ```json
 "WebSql": {
@@ -965,18 +965,18 @@ Autheris bietet eine integrierte, abgesicherte WebSQL-Schnittstelle, die 100% ko
 }
 ```
 
-#### Zeilenlimits je Transport (`RowLimits`)
+#### Row Limits per Transport (`RowLimits`)
 
-Alle SQL-Transporte laufen durch dieselbe WebSQL-Pipeline. Ohne eigene Werte gelten `WebSql:DefaultMaxRows` und `WebSql:MaxAllowedRows`; je Transport lässt sich jeder der beiden Werte einzeln überschreiben:
+All SQL transports run through the same WebSQL pipeline. Without their own values, `WebSql:DefaultMaxRows` and `WebSql:MaxAllowedRows` apply; per transport, each of the two values can be overridden individually:
 
-| Schlüssel | Transport | Zusätzliche Obergrenze |
+| Key | Transport | Additional upper limit |
 |---|---|---|
-| `RowLimits:Trino:DefaultMaxRows` / `:MaxAllowedRows` | Trino-Protokoll (`POST /v1/statement`) | – |
-| `RowLimits:Parquet:...` | WebSQL mit `Accept: application/vnd.apache.parquet` | `ParquetEgress:MaxRowsPerFile` |
-| `RowLimits:SqlEndpoints:...` | Deklarierte SQL-Endpunkte (`/api/v1/queries/...`) | – |
+| `RowLimits:Trino:DefaultMaxRows` / `:MaxAllowedRows` | Trino protocol (`POST /v1/statement`) | – |
+| `RowLimits:Parquet:...` | WebSQL with `Accept: application/vnd.apache.parquet` | `ParquetEgress:MaxRowsPerFile` |
+| `RowLimits:SqlEndpoints:...` | Declared SQL endpoints (`/api/v1/queries/...`) | – |
 | `RowLimits:ArrowExport:...` | Arrow-Export (`POST /api/v1/export/arrow`) | `Arrow:MaxExportRows` |
 
-Ergebnisse, die das Limit erreichen, werden als gekürzt gemeldet (`truncated`, `X-Autheris-Truncated`, bei Parquet zusätzlich `X-Export-Truncated`).
+Results that reach the limit are reported as truncated (`truncated`, `X-Autheris-Truncated`, for Parquet additionally `X-Export-Truncated`).
 
 ```json
 "RowLimits": {
@@ -985,38 +985,38 @@ Ergebnisse, die das Limit erreichen, werden als gekürzt gemeldet (`truncated`, 
 }
 ```
 
-#### Trino REST Client Protokoll (`/v1/statement`) & `wait_timeout`
+#### Trino REST Client Protocol (`/v1/statement`) & `wait_timeout`
 
-Autheris unterstützt das native Trino REST Client Protokoll, womit Standard-Trino-Tools (Trino CLI, Python `trino-python-client`, DBeaver, Apache Superset) direkt angebunden werden können:
+Autheris supports the native Trino REST client protocol, so standard Trino tools (Trino CLI, Python `trino-python-client`, DBeaver, Apache Superset) can be connected directly:
 
-- **Endpunkte:**
-  - `POST /v1/statement` (oder `POST /api/v1/sql`): Nimmt die Abfrage im Request-Body entgegen (Text oder JSON).
-  - `GET /v1/statement/queued/{id}` (oder `GET /api/sql/statements/{id}`): Pollt den Status langlaufender Abfragen.
-  - `DELETE /v1/statement/{id}` (oder `DELETE /api/sql/statements/{id}`): Bricht eine laufende Abfrage ab (`204 No Content`).
+- **Endpoints:**
+  - `POST /v1/statement` (or `POST /api/v1/sql`): Accepts the query in the request body (text or JSON).
+  - `GET /v1/statement/queued/{id}` (or `GET /api/sql/statements/{id}`): Polls the status of long-running queries.
+  - `DELETE /v1/statement/{id}` (or `DELETE /api/sql/statements/{id}`): Cancels a running query (`204 No Content`).
 - **Synchronous Fast-Path via `X-Trino-Wait-Timeout`:**
-  - Wird ein Timeout übergeben (z. B. `X-Trino-Wait-Timeout: 5s` oder URL-Parameter `?wait_timeout=5s`) und die Abfrage beendet innerhalb dieses Fensters, antwortet das Gateway sofort mit HTTP 200 und Status `FINISHED` inklusive aller Zeilen.
+  - If a timeout is passed (e.g. `X-Trino-Wait-Timeout: 5s` or URL parameter `?wait_timeout=5s`) and the query finishes within this window, the gateway responds immediately with HTTP 200 and status `FINISHED`, including all rows.
 - **Asynchronous Continuation Path:**
-  - Benötigt die Abfrage länger als der Timeout, antwortet das Gateway sofort mit Status `RUNNING` und einer `nextUri` (`/v1/statement/queued/{id}`), um Timeouts an Load-Balancern und Proxies zu verhindern.
-- **3-Teilige Bezeichner (`<catalog>.<schema>.<table>`):**
-  - Tabellen können standardmäßig als `catalog.schema.table` angesprochen werden.
-  - Der `catalog`-Teil wird gegen die Datenquelle validiert bzw. automatisch als Ziel-Datenquelle inferiert.
-  - Der Dialekt-Generator strippt den Catalog-Präfix vor der Ausführung auf PostgreSQL (`"schema"."table"`), SQL Server (`[schema].[table]`) oder SQLite (`[table]`), wodurch Cross-Database- und DB-Escape-Kollisionen verhindert werden.
-- **Header-Unterstützung:**
-  - `X-Trino-Catalog`: Wählt die Ziel-Datenquelle aus.
-  - `X-Trino-Schema`: Standard-Schema.
-  - `X-Trino-Wait-Timeout`: Wartefenster für synchrone Fertigstellung (z. B. `5s`, `500ms`, `1m`).
-  - `X-Trino-User` & `X-Trino-Source`: Identitäts- und Auditierungskontext.
+  - If the query takes longer than the timeout, the gateway responds immediately with status `RUNNING` and a `nextUri` (`/v1/statement/queued/{id}`) to prevent timeouts at load balancers and proxies.
+- **Three-part identifiers (`<catalog>.<schema>.<table>`):**
+  - Tables can be addressed as `catalog.schema.table` by default.
+  - The `catalog` part is validated against the data source or automatically inferred as the target data source.
+  - The dialect generator strips the catalog prefix before execution on PostgreSQL (`"schema"."table"`), SQL Server (`[schema].[table]`) or SQLite (`[table]`), which prevents cross-database and DB-escape collisions.
+- **Header support:**
+  - `X-Trino-Catalog`: Selects the target data source.
+  - `X-Trino-Schema`: Default schema.
+  - `X-Trino-Wait-Timeout`: How long a request waits for a synchronous result (e.g. `5s`, `500ms`, `1m`).
+  - `X-Trino-User` & `X-Trino-Source`: Identity and auditing context.
 
-### 2.20 `VirtualFilters` (Virtuelle Filter & Access Profiles)
+### 2.20 `VirtualFilters` (Virtual Filters & Access Profiles)
 
-Steuert die Verwaltung und Cluster-Synchronisation relationsbasierter Zeilenfilter ([`F-GOV-09`](features/f-gov-09-virtual-filters.md)).
+Controls the management and cluster synchronization of relation-based row filters ([`F-GOV-09`](features/f-gov-09-virtual-filters.md)).
 
-| Eigenschaft | Typ | Standard | Beschreibung |
+| Property | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `VirtualFilters:MaxRemovals` | `int` | `10` | Maximale Anzahl an Bindungen, die ein GitOps-Sync ohne `?force=true` entfernen darf. Das Entfernen erweitert die Sichtrechte des Berechtigten; `0` deaktiviert die Schranke. |
-| `VirtualFilters:GenerationCheckSeconds` | `int` | `5` | Intervall in Sekunden, in dem eine Gateway-Instanz die Generation mit der Datenbank abgleicht. `0` prüft bei jedem Zugriff. |
+| `VirtualFilters:MaxRemovals` | `int` | `10` | Maximum number of bindings a GitOps sync may remove without `?force=true`. Removing widens the grantee's visibility rights; `0` disables the guard. |
+| `VirtualFilters:GenerationCheckSeconds` | `int` | `5` | Interval in seconds at which a gateway instance reconciles the generation with the database. `0` checks on every access. |
 | `RowFilters:SubqueryStrategy` | `enum` | `Exists` | SQL strategy for row-filter subqueries built as SQL text: `Exists` (`EXISTS (SELECT 1 ...)`), `InCorrelated` or `In`. Applies to the REST data API, OLAP and federated staging, governed aggregations, procedures and change detection. **No effect on the governed SQL compiler** (WebSQL, Trino protocol, Arrow IPC over HTTP, async jobs, SQL endpoints, MCP SQL tools), which always emits correlated policy subqueries; a non-default value is reported as a startup warning (`Configuration: Gateway:RowFilters:SubqueryStrategy ... has no effect ...`). |
-| `Logging:LogGeneratedSql` | `bool` | `false` | Diagnoseschalter zur Protokollierung generierter Ziel-SQL-Abfragen inklusive RLS- und Virtual-Filter-Prädikate. |
+| `Logging:LogGeneratedSql` | `bool` | `false` | Diagnostic switch for logging generated target SQL queries including RLS and virtual filter predicates. |
 
 ```json
 "VirtualFilters": {
@@ -1114,7 +1114,7 @@ The tenant signal of the tenant administrator view is derived from consent recor
 
 With the default `false`, a payload that carries `owner`, `owners`, `group` or `groups` is rejected as a whole (`dbt_owner_import_disabled`); nothing is written. With `true`, the caller must additionally hold the `GovernanceAdmin` role (re-checked in the import service; `DbtAdmin` alone is rejected), and the write repository and the audit repository must be registered. The manifest sync (`/sync`) never writes owners. See the dbt module documentation for the payload and its limits.
 
-## 3. Deployment & Umgebungsvariablen
+## 3. Deployment & Environment Variables
 
 ```bash
 # ASP.NET Core Hosting & Environment
@@ -1127,13 +1127,13 @@ Gateway__HighAvailability__QueryTimeoutSeconds=30
 Gateway__HighAvailability__ShutdownTimeoutSeconds=40
 Gateway__HighAvailability__TerminationGracePeriodSeconds=60
 
-# Authentifizierung & Sicherheit
+# Authentication & security
 Gateway__Authentication__Domain=CORP.LOCAL
 Gateway__Authentication__ServicePrincipalName=HTTP/gateway.corp.local
 Gateway__Authentication__RequireKerberosOnly=true
 Gateway__Authentication__EnableTestAuthHandler=false
 
-# Governance-Datenbank
+# Governance database
 Gateway__GovernanceDb__Provider=PostgreSql
 Gateway__GovernanceDb__ConnectionString="Host=pg-ha.corp.local;Database=governance;Username=autheris_app;Password=<secret>;SSL Mode=VerifyFull"
 
@@ -1141,11 +1141,11 @@ Gateway__GovernanceDb__ConnectionString="Host=pg-ha.corp.local;Database=governan
 Gateway__Caching__Redis__Configuration="redis-ha.corp.local:6379,abortConnect=false,ssl=true,password=SecretRedisPass!"
 Gateway__Caching__EpochValidation__FailClosedOnSensitiveTables=true
 
-# Secrets & Schlüssel
+# Secrets & keys
 Gateway__DataMasking__HmacKeyId=key-2026-q1
 Gateway__DataMasking__HmacSecretKeyVaultRef=GQL-HMAC-SECRET-KEY
 
-# GraphQL & Origin-Sicherheit
+# GraphQL & origin security
 Gateway__GraphQL__EnableIntrospection=false
 Gateway__GraphQL__EnableBananaCakePop=false
 Gateway__GraphQL__TrustedOrigins__0=https://bi.corp.local
@@ -1158,7 +1158,7 @@ Gateway__OpenMetadata__AuthToken=eyJhbGciOi...
 Gateway__OpenMetadata__WebhookSecret=<GENERATE_STRONG_SECRET> # openssl rand -base64 32
 ```
 
-### 3.2 Beispiel Kubernetes Deployment & ConfigMap
+### 3.2 Example Kubernetes Deployment & ConfigMap
 
 ```yaml
 apiVersion: apps/v1
@@ -1214,7 +1214,7 @@ spec:
 
 ### 3.3 Traefik Ingress & ForwardAuth Integration (Kubernetes)
 
-Wird Autheris in Kubernetes hinter **Traefik** betrieben, übernimmt Traefik die Authentifizierung (z. B. via Authelia, Keycloak oder Authentik) und leitet die verifizierten Identitätsmerkmale an Autheris weiter.
+When Autheris runs in Kubernetes behind **Traefik**, Traefik handles authentication (e.g. via Authelia, Keycloak or Authentik) and forwards the verified identity attributes to Autheris.
 
 #### 3.3.1 Traefik ForwardAuth Middleware
 
@@ -1237,7 +1237,7 @@ spec:
 ```
 
 > [!SECURITY]
-> **SEC H-1 Tenant-Isolation**: `X-Forwarded-Tenant` wird von Autheris standardmäßig ignoriert (`TrustUpstreamTenant = false`), um Header-Spoofing durch Clients zu verhindern. Falls der Reverse Proxy den Tenant setzt, muss `Authentication:ForwardAuth:TrustUpstreamTenant = true` und eine explizite Positivliste `Authentication:ForwardAuth:AllowedTenantIds` konfiguriert werden. Ist `AllowedTenantIds` leer, schlägt jede Authentifizierung fail-closed fehl.
+> **SEC H-1 tenant isolation**: `X-Forwarded-Tenant` is ignored by Autheris by default (`TrustUpstreamTenant = false`) to prevent header spoofing by clients. If the reverse proxy sets the tenant, `Authentication:ForwardAuth:TrustUpstreamTenant = true` and an explicit allowlist `Authentication:ForwardAuth:AllowedTenantIds` must be configured. If `AllowedTenantIds` is empty, every authentication fails closed.
 
 #### 3.3.2 Traefik Shared-Secret Middleware (Anti-Spoofing)
 
@@ -1279,35 +1279,35 @@ spec:
 
 ---
 
-## 4. Konfigurationsprofile im Vergleich
+## 4. Configuration Profiles Compared
 
 | Parameter | Development (`appsettings.Development.json`) | Production (`appsettings.Production.json`) |
 | :--- | :--- | :--- |
 | `Logging:LogLevel:Default` | `Debug` | `Information` / `Warning` |
-| `Authentication:EnableTestAuthHandler` | `true` (erlaubt Test-Header) | `false` (**Zwingend vorgeschrieben**) |
+| `Authentication:EnableTestAuthHandler` | `true` (allows test header) | `false` (**mandatory**) |
 | `Authentication:RequireKerberosOnly` | `false` | `true` |
-| `Authentication:ForwardAuth:Enabled` | `false` / `true` für Tests | `true` (hinter K8s Traefik Ingress) |
-| `Authentication:ForwardAuth:RequireTrustedProxy` | `false` | `true` (Validiert Traefik Pod CIDRs) |
-| `GovernanceDb:Provider` | `PostgreSql` oder `SqlServer` (Connection-String Pflicht) | `PostgreSql` oder `SqlServer` (TLS mit Zertifikatsprüfung) |
+| `Authentication:ForwardAuth:Enabled` | `false` / `true` for tests | `true` (behind K8s Traefik Ingress) |
+| `Authentication:ForwardAuth:RequireTrustedProxy` | `false` | `true` (validates Traefik pod CIDRs) |
+| `GovernanceDb:Provider` | `PostgreSql` or `SqlServer` (connection string required) | `PostgreSql` or `SqlServer` (TLS with certificate validation) |
 | `Caching:EpochValidation:FailClosed` | `false` | `true` (Zero-Trust Fail-Closed) |
 | `GraphQL:EnableIntrospection` | `true` | `false` |
-| `GraphQL:EnableBananaCakePop` | `true` (Nitro IDE im Browser) | `false` |
-| `GraphQL:PersistedQueriesOnly` | `false` | `true` (empfohlen) |
-| `DataMasking:HmacSecretKeyVaultRef` | `"DEV_INSECURE_TEST_KEY_ONLY"` | Key Vault Secret Referenz (**Validiert**) |
-| `Audit:TierBAggregationWindowSeconds` | `5` Sekunden | `60` Sekunden |
+| `GraphQL:EnableBananaCakePop` | `true` (Nitro IDE in the browser) | `false` |
+| `GraphQL:PersistedQueriesOnly` | `false` | `true` (recommended) |
+| `DataMasking:HmacSecretKeyVaultRef` | `"DEV_INSECURE_TEST_KEY_ONLY"` | Key Vault secret reference (**validated**) |
+| `Audit:TierBAggregationWindowSeconds` | `5` seconds | `60` seconds |
 
 ---
 
-## 5. Checkliste für den Produktions-Rollout
+## 5. Production Rollout Checklist
 
-Vor Freigabe einer neuen Produktivumgebung sind folgende Punkte zu verifizieren:
+Before releasing a new production environment, verify the following items:
 
-- [ ] **Auth-Sicherheit**: `Gateway:Authentication:EnableTestAuthHandler` steht auf `false`.
-- [ ] **ForwardAuth / Traefik Trust**: Bei Kubernetes-Betrieb ist `RequireTrustedProxy = true` gesetzt, `TrustedNetworks` enthält nur die Traefik Ingress Pod-CIDR und `SharedSecretKeyVaultRef` ist konfiguriert.
-- [ ] **Kryptografie**: `Gateway:DataMasking:HmacSecretKeyVaultRef` verweist auf ein valides Key Vault Secret und nicht auf Dev-Defaults.
-- [ ] **Introspektion**: `Gateway:GraphQL:EnableIntrospection` und `EnableBananaCakePop` sind auf `false` gesetzt.
-- [ ] **Zero-Trust Fail-Closed**: `Gateway:Caching:EpochValidation:FailClosedOnSensitiveTables` ist auf `true`.
-- [ ] **Anti-CSRF & CORS**: `Gateway:GraphQL:TrustedOrigins` enthält nur verifizierte Domänen (kein Wildcard `*` in Produktion!).
-- [ ] **High Availability**: K8s `terminationGracePeriodSeconds` ist größer als `DrainDelaySeconds + ShutdownTimeoutSeconds + 10s`.
-- [ ] **Proxy-Sicherheit**: `Gateway:ReverseProxy:KnownNetworks` schränkt vertrauenswürdige IPs auf tatsächliche Ingress-Controller ein.
-- [ ] **Echte Datenquellen**: `Gateway:DataSources` enthält valide ConnectionStrings für produktive Fachdatenbanken.
+- [ ] **Auth security**: `Gateway:Authentication:EnableTestAuthHandler` is set to `false`.
+- [ ] **ForwardAuth / Traefik trust**: In Kubernetes deployments `RequireTrustedProxy = true` is set, `TrustedNetworks` contains only the Traefik ingress pod CIDR and `SharedSecretKeyVaultRef` is configured.
+- [ ] **Cryptography**: `Gateway:DataMasking:HmacSecretKeyVaultRef` points to a valid Key Vault secret and not to dev defaults.
+- [ ] **Introspection**: `Gateway:GraphQL:EnableIntrospection` and `EnableBananaCakePop` are set to `false`.
+- [ ] **Zero-Trust fail-closed**: `Gateway:Caching:EpochValidation:FailClosedOnSensitiveTables` is `true`.
+- [ ] **Anti-CSRF & CORS**: `Gateway:GraphQL:TrustedOrigins` contains only verified domains (no wildcard `*` in production!).
+- [ ] **High availability**: K8s `terminationGracePeriodSeconds` is greater than `DrainDelaySeconds + ShutdownTimeoutSeconds + 10s`.
+- [ ] **Proxy security**: `Gateway:ReverseProxy:KnownNetworks` restricts trusted IPs to the actual ingress controllers.
+- [ ] **Real data sources**: `Gateway:DataSources` contains valid connection strings for production business databases.

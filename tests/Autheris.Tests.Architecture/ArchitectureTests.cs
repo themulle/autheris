@@ -123,7 +123,6 @@ public class ArchitectureTests
             typeof(Autheris.Application.Catalog.Interfaces.IDataCatalogClient),
             typeof(Autheris.Application.Catalog.Interfaces.IDataCatalogSyncService),
             typeof(Autheris.Application.Lineage.IOpenLineageClient),
-            typeof(Autheris.Application.Common.Interfaces.IOpenJevClient),
             typeof(Autheris.Extensions.OpenMetadata.IOpenMetadataClient),
             typeof(Autheris.Application.Streaming.Interfaces.IMssqlChangeTrackingPoller)
         };

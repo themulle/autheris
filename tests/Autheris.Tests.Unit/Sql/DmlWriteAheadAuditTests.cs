@@ -94,6 +94,54 @@ public sealed class DmlWriteAheadAuditTests
     }
 
     [Fact]
+    public async Task Dml_IntentAuditUnavailable_DoesNotExecute()
+    {
+        var compiled = await GovernedSqlExecutorX1Tests.CompileAsync("PostgreSql", Update);
+        var h = GovernedSqlExecutorX1Tests.CreateHarness("PostgreSql", auditSink: (e, _) =>
+            e.EventType == AuditEventTypes.WebSqlDmlIntent ? throw new InvalidOperationException("audit store down") : Task.CompletedTask);
+
+        await Should.ThrowAsync<AuditUnavailableException>(() => GovernedSqlExecutorX1Tests.ExecuteAsync(h, compiled, dml: GovernedSqlExecutorX1Tests.Dml()));
+
+        h.Factory.ReceivedCalls().ShouldBeEmpty();
+        h.Connection.Transactions.ShouldBeEmpty();
+        h.Audit.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Dml_records_carry_a_keyed_digest_of_the_new_values_and_never_a_value()
+    {
+        const string literal = "zz-literal-77";
+        var first = await RunAsync(literal);
+        var same = await RunAsync(literal);
+        var other = await RunAsync("zz-literal-78");
+
+        foreach (var entry in first.Audit)
+        {
+            entry.DetailsJson.ShouldContain("sql.bound_values_digest");
+            entry.DetailsJson.ShouldNotContain(literal);
+        }
+
+        Digest(first, AuditEventTypes.WebSqlDmlIntent).ShouldBe(Digest(first, AuditEventTypes.WebSqlDmlExecuted));
+        Digest(first, AuditEventTypes.WebSqlDmlIntent).ShouldBe(Digest(same, AuditEventTypes.WebSqlDmlIntent));
+        Digest(first, AuditEventTypes.WebSqlDmlIntent).ShouldNotBe(Digest(other, AuditEventTypes.WebSqlDmlIntent));
+
+        static async Task<GovernedSqlExecutorX1Tests.Harness> RunAsync(string value)
+        {
+            var compiled = await GovernedSqlExecutorX1Tests.CompileAsync("PostgreSql", $"UPDATE orders SET amount = '{value}' WHERE id = 1");
+            var h = GovernedSqlExecutorX1Tests.CreateHarness("PostgreSql");
+            await GovernedSqlExecutorX1Tests.ExecuteAsync(h, compiled, dml: GovernedSqlExecutorX1Tests.Dml());
+            return h;
+        }
+
+        static string Digest(GovernedSqlExecutorX1Tests.Harness h, string eventType)
+        {
+            var json = h.Audit.Single(e => e.EventType == eventType).DetailsJson;
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            return doc.RootElement.GetProperty("sql.bound_values_digest").GetString()!;
+        }
+    }
+
+    [Fact]
     public async Task Audit_failure_in_failure_path_does_not_mask_statement_error()
     {
         var compiled = await GovernedSqlExecutorX1Tests.CompileAsync("PostgreSQL", "UPDATE orders SET amount = 1 WHERE id > 0");

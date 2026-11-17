@@ -558,7 +558,7 @@ public sealed partial class GovernedSqlExecutor
 
             // Write-ahead: the required intent record (statement fingerprint and target tables, no values) exists before any
             // connection, transaction or statement. A failing audit store refuses the statement.
-            await RecordDmlAuditAsync(tenantId, user, dsName, dmlContext, AuditEventTypes.WebSqlDmlIntent, "ALLOW", compiled, affectedRows: null, reason: null, synthetic: false).ConfigureAwait(false);
+            await RecordDmlAuditAsync(tenantId, user, dsName, dmlContext, AuditEventTypes.WebSqlDmlIntent, "ALLOW", compiled, affectedRows: null, reason: null, synthetic: false, clientValues: clientValues).ConfigureAwait(false);
         }
 
         var maxConcurrentReads = _options.Value.DataSources?.MaxConcurrentReadsPerUserAndTable ?? 0;
@@ -646,7 +646,7 @@ public sealed partial class GovernedSqlExecutor
                                 compiled,
                                 clientValues,
                                 limits,
-                                (affected, token) => OnBeforeDmlCommitAsync(tenantId, user, dsName, dmlContext, compiled, affected, token),
+                                (affected, token) => OnBeforeDmlCommitAsync(tenantId, user, dsName, dmlContext, compiled, clientValues, affected, token),
                                 ct),
                             ct).ConfigureAwait(false);
                         deliveredOrAffectedRows = affectedRows;
