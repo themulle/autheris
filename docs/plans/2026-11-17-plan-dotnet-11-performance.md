@@ -1,6 +1,6 @@
 # PLAN-NET11-PERF: .NET 11 and C# 15 performance opportunities
 
-Status: PLANNED (analysis only, no code changed)
+Status: IN PROGRESS (WP-PERF11-01, WP-PERF11-02 and the measured part of WP-PERF11-08 delivered 2026-11-17; Runtime Async, R2R, STJ, pipeline items still open)
 Date: 2026-11-17
 Parent: [`00-master-plan-overview.md`](00-master-plan-overview.md), follows [`2026-11-16-plan-dotnet-11-upgrade.md`](2026-11-16-plan-dotnet-11-upgrade.md) (`PLAN-NET11`, flip merged).
 
@@ -171,3 +171,16 @@ Legend: Gain MS = Microsoft figure, H = hypothesis to be measured. Effort in per
 ## Sources
 
 Microsoft Learn, fetched 2026-11-17: What's new in .NET 11 runtime, What's new in .NET 11 libraries, ASP.NET Core 11 release notes (first 100 KB), What's new in EF Core 11, What's new in C# 15.
+
+## 9. Delivered (2026-11-17, branch `perf/dotnet11-top-wins`)
+
+Measured on .NET 11.0.0, BenchmarkDotNet ShortRun in-process with `[MemoryDiagnoser]` (details and raw data: `benchmarks/results/perf-top-wins-2026-11-17.md` and `.json`). Allocation is exact, time is indicative.
+
+| Item | Change | Before | After |
+|---|---|---|---|
+| WP-PERF11-01 | Baseline run of ADP, SqlCompiler, SqlParserCache, VirtualFilterEnforcement; `AccessDecisionPointBenchmark` setup fixed (scalar `EQ` literal), new `AuditChainBenchmark` | n/a | stored |
+| WP-PERF11-02 (P4) audit | `CanonicalPayloadWriter` (pooled chars, stack or pooled UTF-8, span `HashData`) in `AuditCanonicalizer`/`AuditChainEngine`; golden vectors from an independent Python oracle | 1,848 B and 2.17 us (HMAC), 1,904 B and 1.14 us (SHA-256) | 152 B and 1.65 us, 152 B and 0.84 us |
+| WP-PERF11-02 (P4) PDP | `AccessDecisionPoint.MergeRoles` (no LINQ, pre-sized, shared empty set) | 2,352 B (Decide cached, no roles) | 2,232 B (-5%); more with real roles |
+| WP-PERF11-08 (SQL core) | Compile cache key kept in the thread-local builder: `CompileCacheKey.Build`, `HashOf(StringBuilder)`, `Find(StringBuilder, hash)`; key string only on a miss | AstCached 6,625 B / 6.45 us (0.5 KB), 13,853 B / 10.88 us (4 KB), 270,447 B (64 KB) | 3,152 B / 4.20 us, 3,152 B / 6.26 us, 136,885 B |
+
+Skipped for evidence or size: the compile miss path is dominated by the ANTLR parse (about 430 us of about 700 us for a 0.5 KB statement) and `SqlAstBuilder` object allocation (17 KB), not by `Substring` or `ToUpperInvariant` on token paths; no measured hot spot of 3 percent or more was found there. `HashSet`-creation-site conversion (P6) and the other `Encoding.GetBytes` hash sites (`CallerAttributes`, `VirtualFilterModels`, `CatalogSchemaModel`, trusted document hash) are definition-time or cache-miss paths and were left alone. P1 (Runtime Async) and P2 (R2R) remain separate spikes.

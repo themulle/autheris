@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 - The container image is 409 MB uncompressed (was 421 MB): the published `libduckdb.so` is stripped of its static symbol table (-11 MB) and the localized satellite resource assemblies of the dependencies are no longer published (`SatelliteResourceLanguages=en`). The footprint budget is lowered from 440 MB to 430 MB.
+- Governed SQL compile cache hits no longer allocate the cache key string: the key is built in a thread-local builder, hashed from a pooled buffer and compared chunk by chunk (allocation per cached compile 6.6 KB to 3.2 KB for a 0.5 KB statement, 13.9 KB to 3.2 KB for 4 KB; cache keys and hashes are unchanged).
+- Audit entry hashing (`AuditChainEngine`, `AuditCanonicalizer`) streams the canonical payload into a pooled buffer instead of building a payload string and a byte array (152 B instead of 1.8 KB per entry, about 25 percent faster); hash values are byte-identical.
+- The access decision point builds the role set without LINQ, pre-sized, and shares one empty set for subjects without roles.
 
 ### Fixed
 - The native DuckDB library is no longer loaded at startup: the time zone conversion state runs the DuckDB ICU probe lazily on the first DuckDB conversion check instead of in the startup hosted service, so a node that never uses DuckDB does not map `libduckdb.so` (the footprint lazy-load check reports `lazy: true`).
