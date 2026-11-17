@@ -182,6 +182,7 @@ RUN_ENV=(
   -e Authentication__Realms__Realms__proxy__FixedTenantId=footprint
   -e Authentication__Realms__Realms__proxy__Provisioning=None
   -e Gateway__Tenancy__DefaultTenantId=footprint
+  -e Gateway__Governance__GrantRecords__SigningKey="$(openssl ecparam -name prime256v1 -genkey -noout | openssl pkcs8 -topk8 -nocrypt)"
   -e Gateway__SqlEndpoints__Directory=/app/data/queries
   -e Gateway__GovernanceDb__Provider=PostgreSql
   -e Gateway__GovernanceDb__ConnectionString="$PG_CONN"
