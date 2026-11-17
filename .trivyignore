@@ -1,27 +1,7 @@
 # .trivyignore
 # Autheris Supply-Chain & Container Security Ignore List
 # Each entry MUST have an issue/CVE identifier, justification, and expiration date.
-# Reviewed: 2026-11-04
+# Reviewed: 2026-11-17
 
-# Base image libpcre2-8-0 (Ubuntu 24.04 Noble) - upstream candidate 10.42-4ubuntu2.2 pending publication in noble-updates mirrors
-CVE-2026-103111 # Exp: 2026-12-31, Justification: Base image libpcre2-8-0 patch 10.42-4ubuntu2.2 pending in Ubuntu noble-updates
-CVE-2026-86145 # Exp: 2026-12-31, Justification: Base image libpcre2-8-0 patch 10.42-4ubuntu2.2 pending in Ubuntu noble-updates
-CVE-2026-89156 # Exp: 2026-12-31, Justification: Base image libpcre2-8-0 patch 10.42-4ubuntu2.2 pending in Ubuntu noble-updates
-CVE-2026-89157 # Exp: 2026-12-31, Justification: Base image libpcre2-8-0 patch 10.42-4ubuntu2.2 pending in Ubuntu noble-updates
-CVE-2026-89158 # Exp: 2026-12-31, Justification: Base image libpcre2-8-0 patch 10.42-4ubuntu2.2 pending in Ubuntu noble-updates
-CVE-2026-89160 # Exp: 2026-12-31, Justification: Base image libpcre2-8-0 patch 10.42-4ubuntu2.2 pending in Ubuntu noble-updates
-CVE-2026-89161 # Exp: 2026-12-31, Justification: Base image libpcre2-8-0 patch 10.42-4ubuntu2.2 pending in Ubuntu noble-updates
-
-# Base image libapt-pkg6.0t64 (Ubuntu 24.04 Noble) - CVE-2026-109518
-CVE-2026-109518 # Exp: 2026-12-31, Justification: Base image libapt-pkg6.0t64 patch 2.8.4ubuntu0.1 in Ubuntu noble
-
-# Base image perl-base (Ubuntu 24.04 Noble) - CVE-2026-82560
-CVE-2026-82560 # Exp: 2026-12-31, Justification: Base image perl-base fix 5.38.2-3.2ubuntu0.7 pending in the dotnet/aspnet 10.0.15 image (installed 5.38.2-3.2ubuntu0.6); bump the base image digest once published
-
-# Base image libc-bin / libc6 (Ubuntu 24.04 Noble) - MEDIUM, fixed in 2.39-0ubuntu8.12
-CVE-2026-18374 # Exp: 2026-12-14, Justification: Base image libc-bin/libc6 fix 2.39-0ubuntu8.12 pending in the dotnet/aspnet 10.0.15 image (installed 2.39-0ubuntu8.9); bump the base image digest once Microsoft publishes it and remove these entries (owner decision 2026-11-14)
-CVE-2026-84243 # Exp: 2026-12-14, Justification: Base image libc-bin/libc6 fix 2.39-0ubuntu8.12 pending in the dotnet/aspnet 10.0.15 image (installed 2.39-0ubuntu8.9); bump the base image digest once Microsoft publishes it and remove these entries (owner decision 2026-11-14)
-CVE-2026-8674 # Exp: 2026-12-14, Justification: Base image libc-bin/libc6 fix 2.39-0ubuntu8.12 pending in the dotnet/aspnet 10.0.15 image (installed 2.39-0ubuntu8.9); bump the base image digest once Microsoft publishes it and remove these entries (owner decision 2026-11-14)
-CVE-2026-86805 # Exp: 2026-12-14, Justification: Base image libc-bin/libc6 fix 2.39-0ubuntu8.12 pending in the dotnet/aspnet 10.0.15 image (installed 2.39-0ubuntu8.9); bump the base image digest once Microsoft publishes it and remove these entries (owner decision 2026-11-14)
-CVE-2026-95818 # Exp: 2026-12-14, Justification: Base image libc-bin/libc6 fix 2.39-0ubuntu8.12 pending in the dotnet/aspnet 10.0.15 image (installed 2.39-0ubuntu8.9); bump the base image digest once Microsoft publishes it and remove these entries (owner decision 2026-11-14)
-CVE-2026-97399 # Exp: 2026-12-14, Justification: Base image libc-bin/libc6 fix 2.39-0ubuntu8.12 pending in the dotnet/aspnet 10.0.15 image (installed 2.39-0ubuntu8.9); bump the base image digest once Microsoft publishes it and remove these entries (owner decision 2026-11-14)
+# Base image usr/bin/pebble (Ubuntu 26.04 Resolute, dotnet/aspnet 11.0.0-resolute) - Go stdlib v1.27.3
+CVE-2026-97054 # Exp: 2026-12-31, Justification: Go stdlib v1.27.3 inside the base image binary usr/bin/pebble (HTTP/1 MaxBytesReader connection handling of a Go server); pebble is never started (ENTRYPOINT and HEALTHCHECK run only dotnet Autheris.Api.dll); fix in Go 1.26.11/1.27.4 pending in the dotnet/aspnet 11 image; remove when the base image digest is bumped

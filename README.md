@@ -2,7 +2,7 @@
 
 Autheris is a policy-enforcement data gateway that authorizes, enforces, and provably documents access to enterprise data across heterogeneous databases and APIs.
 
-Built on .NET 10, Autheris sits between data consumers (applications, BI analysts, and AI agents) and data sources:
+Built on .NET 11, Autheris sits between data consumers (applications, BI analysts, and AI agents) and data sources:
 
 1. **Identity**: Callers authenticate directly at Autheris (Microsoft Entra ID / OIDC, Kerberos / Negotiate, Basic, RFC 6238 TOTP) or through an upstream reverse proxy via verified `ForwardAuth` headers. Group memberships combine token claims with on-premises Active Directory groups provisioned via SCIM 2.0.
 2. **Authorization on data**: Users and AD groups access tables, views, and stored procedures in Oracle, Databricks, Microsoft SQL Server, PostgreSQL, declarative HTTP/OpenAPI sources, and DuckDB OLAP through a single access decision point (`IAccessDecisionPoint`). Row-level security, PII column masking, column-level visibility, and explicit write grants are enforced identically across GraphQL, REST, OData, Trino `/v1/statement`, and MCP.
@@ -61,7 +61,7 @@ See the [Simplification Migration Guide](docs/operations/migration-simplificatio
 
 ### Prerequisites
 
-- [.NET 10.0 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
+- [.NET 11.0 SDK](https://dotnet.microsoft.com/download/dotnet/11.0)
 - Docker or Podman (for PostgreSQL governance store and compose stack)
 
 ### Build and test from source

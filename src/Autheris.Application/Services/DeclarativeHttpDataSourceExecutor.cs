@@ -500,7 +500,7 @@ public sealed class DeclarativeHttpDataSourceExecutor : IDataSourceExecutor
         TenantId? tenant)
     {
         var baseUrl = descriptor.BaseUrl.TrimEnd('/');
-        var pathTemplate = descriptor.PathTemplate.StartsWith('/')
+        var pathTemplate = descriptor.PathTemplate.StartsWith('/', StringComparison.Ordinal)
             ? descriptor.PathTemplate
             : "/" + descriptor.PathTemplate;
 

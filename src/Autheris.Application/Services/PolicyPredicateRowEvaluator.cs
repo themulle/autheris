@@ -1,5 +1,6 @@
 namespace Autheris.Application.Services;
 
+using Autheris.Domain.Common;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -371,7 +372,7 @@ internal static class PolicyPredicateRowEvaluator
     {
         try
         {
-            return Convert.ToDecimal(value, CultureInfo.InvariantCulture);
+            return DecimalConversions.FromDouble(value);
         }
         catch (OverflowException)
         {
@@ -389,7 +390,7 @@ internal static class PolicyPredicateRowEvaluator
         {
             try
             {
-                return Convert.ToDecimal(left, CultureInfo.InvariantCulture).CompareTo(Convert.ToDecimal(right, CultureInfo.InvariantCulture));
+                return DecimalConversions.ToDecimal(left).CompareTo(DecimalConversions.ToDecimal(right));
             }
             catch (OverflowException)
             {

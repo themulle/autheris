@@ -88,8 +88,8 @@ public static class FilterValueCoercion
                 if (val is decimal decVal) return decVal;
                 if (val is int iDec) return (decimal)iDec;
                 if (val is long lDec) return (decimal)lDec;
-                if (val is double dDec) return (decimal)dDec;
-                if (val is float fDec) return (decimal)fDec;
+                if (val is double dDec) return DecimalConversions.FromDouble(dDec);
+                if (val is float fDec) return DecimalConversions.FromSingle(fDec);
                 break;
 
             case ColumnValueKind.Float:

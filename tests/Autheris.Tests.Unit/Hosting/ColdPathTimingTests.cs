@@ -125,7 +125,7 @@ public sealed class ColdPathTimingTests
 
     [Trait("Category", "Security")]
     [Fact]
-    public void ColdPathTimingOptions_EnabledOutsideDevelopment_FailsOnStartValidation()
+    public async Task ColdPathTimingOptions_EnabledOutsideDevelopment_FailsOnStartValidation()
     {
         // T-OPS150-15: the options pipeline (ValidateOnStart) actually carries the validator.
         var services = new ServiceCollection();
@@ -136,9 +136,9 @@ public sealed class ColdPathTimingTests
 
         using var sp = services.BuildServiceProvider();
 
-        // ValidateOnStart registers the validation with IStartupValidator, which the host runs before it starts; nobody reads the options here.
-        var validator = sp.GetRequiredService<IStartupValidator>();
-        var ex = Should.Throw<Exception>(validator.Validate);
+        // ValidateOnStart registers the validation with IAsyncStartupValidator, which the host runs before it starts; nobody reads the options here.
+        var validator = sp.GetRequiredService<IAsyncStartupValidator>();
+        var ex = await Should.ThrowAsync<Exception>(async () => await validator.ValidateAsync(CancellationToken.None));
         (ex is OptionsValidationException || ex.InnerException is OptionsValidationException || ex is AggregateException { InnerExceptions: [OptionsValidationException, ..] })
             .ShouldBeTrue();
     }

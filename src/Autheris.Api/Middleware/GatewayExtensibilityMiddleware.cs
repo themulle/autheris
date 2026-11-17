@@ -75,7 +75,7 @@ public sealed class GatewayExtensibilityMiddleware
             return;
         }
 
-        var endpoint = _options.GraphQL.EndpointPath.StartsWith('/')
+        var endpoint = _options.GraphQL.EndpointPath.StartsWith('/', StringComparison.Ordinal)
             ? _options.GraphQL.EndpointPath
             : "/" + _options.GraphQL.EndpointPath;
 

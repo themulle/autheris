@@ -209,7 +209,7 @@ public static class EgressAddressRules
     {
         ArgumentNullException.ThrowIfNull(host);
         var h = host.Trim();
-        if (h.Length >= 2 && h.StartsWith('[') && h.EndsWith(']'))
+        if (h.Length >= 2 && h.StartsWith('[', StringComparison.Ordinal) && h.EndsWith(']', StringComparison.Ordinal))
         {
             h = h[1..^1];
         }

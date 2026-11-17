@@ -268,7 +268,7 @@ public sealed class OpenLineageClient : IOpenLineageClient
             return true;
         }
 
-        var literal = host.StartsWith('[') && host.EndsWith(']') ? host[1..^1] : host;
+        var literal = host.StartsWith('[', StringComparison.Ordinal) && host.EndsWith(']', StringComparison.Ordinal) ? host[1..^1] : host;
         return IPAddress.TryParse(literal, out var ip) && IPAddress.IsLoopback(ip);
     }
 }

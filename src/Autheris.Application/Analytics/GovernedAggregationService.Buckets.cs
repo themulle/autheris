@@ -644,11 +644,11 @@ public sealed partial class GovernedAggregationService
             decimal d => d,
             int i => i,
             long l => l,
-            double db => (decimal)db,
-            float f => (decimal)f,
+            double db => DecimalConversions.FromDouble(db),
+            float f => DecimalConversions.FromSingle(f),
             short s => s,
             byte b => b,
-            _ => Convert.ToDecimal(value, CultureInfo.InvariantCulture)
+            _ => DecimalConversions.ToDecimal(value)
         };
 
     private static object PreferIntegralOrDecimal(decimal value, string? dataType)

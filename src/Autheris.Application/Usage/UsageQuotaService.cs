@@ -311,7 +311,7 @@ public sealed class UsageQuotaService : IUsageQuotaService
                     violatedRatio = ratio;
                 }
             }
-            else if (violated is null && used >= quota.Limit * (decimal)quota.SoftLimitRatio)
+            else if (violated is null && used >= quota.Limit * DecimalConversions.FromDouble(quota.SoftLimitRatio))
             {
                 warnings ??= [];
                 var warning = new UsageQuotaWarning(quota.Scope, quota.Metric);

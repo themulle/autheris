@@ -3,7 +3,7 @@
 # Multi-protocol Enterprise GraphQL Gateway
 # ==============================================================================
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0.15@sha256:bfd912c83295ce66d4b706ebb8541b9f14259b0e76fbb88b2751f58ce2399d2e AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:11.0.0-resolute@sha256:bc0d6653979efba491ab3d6f589d691f96c309c3c3ef81325efa6978e7b7f242 AS runtime
 WORKDIR /app
 
 # Default configuration (8080 HTTP)
@@ -30,7 +30,7 @@ ENV APP_UID=10001
 RUN mkdir -p /app/data && chown -R $APP_UID:$APP_UID /app/data
 RUN mkdir -p /app/shared-docs /app/scratch && chown -R $APP_UID:$APP_UID /app/shared-docs /app/scratch
 RUN apt-get update \
-    && apt-get --only-upgrade install -y libpcre2-8-0 apt libapt-pkg6.0t64 \
+    && apt-get --only-upgrade install -y libpcre2-8-0 apt libapt-pkg7.0 libc6 libc-bin perl-base \
     && apt-get install -y --no-install-recommends \
         libgssapi-krb5-2 \
         gss-ntlmssp \

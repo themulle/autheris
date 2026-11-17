@@ -41,7 +41,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Setup .NET 10
+      - name: Setup .NET 11
         uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: global.json
@@ -102,10 +102,12 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Setup .NET 10
+      - name: Setup .NET 11
         uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: global.json
+          # The pinned mutation-testing tool runs on the .NET 10 runtime (rollForward false); remove this line once it targets .NET 11.
+          dotnet-version: '10.0.x'
 
       - name: Restore with Locked Mode
         run: dotnet restore Autheris.sln --locked-mode
@@ -209,7 +211,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Setup .NET 10
+      - name: Setup .NET 11
         uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: global.json

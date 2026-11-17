@@ -44,7 +44,7 @@ public static partial class ODataEndpoints
         ITableMetadataRepository metadataRepo,
         HttpContext context)
     {
-        if (entitySetName.StartsWith('$'))
+        if (entitySetName.StartsWith('$', StringComparison.Ordinal))
         {
             return Results.NotFound();
         }
@@ -240,7 +240,7 @@ public static partial class ODataEndpoints
         context.Response.Headers["OData-Version"] = "4.0";
         foreach (var (key, _) in context.Request.Query)
         {
-            if (key.StartsWith('$'))
+            if (key.StartsWith('$', StringComparison.Ordinal))
             {
                 return ODataError(StatusCodes.Status400BadRequest, "InvalidQueryOption", "The '/$count' segment takes no query options.");
             }
@@ -292,7 +292,7 @@ public static partial class ODataEndpoints
     {
         foreach (var (key, values) in query)
         {
-            if (!key.StartsWith('$'))
+            if (!key.StartsWith('$', StringComparison.Ordinal))
             {
                 continue;
             }

@@ -131,7 +131,7 @@ internal static class RequiredFilterColumnRule
             }
             else if (c == '-' && i + 1 < sql.Length && sql[i + 1] == '-')
             {
-                var end = sql.IndexOf('\n', i);
+                var end = sql.IndexOf('\n', i, StringComparison.Ordinal);
                 i = end < 0 ? sql.Length : end + 1;
             }
             else if (c == '/' && i + 1 < sql.Length && sql[i + 1] == '*')
@@ -142,7 +142,7 @@ internal static class RequiredFilterColumnRule
             else if (c is '"' or '`' or '[')
             {
                 var close = c == '[' ? ']' : c;
-                var end = sql.IndexOf(close, i + 1);
+                var end = sql.IndexOf(close, i + 1, StringComparison.Ordinal);
                 if (end < 0)
                 {
                     break;

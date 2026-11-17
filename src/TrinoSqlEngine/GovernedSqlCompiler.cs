@@ -450,7 +450,7 @@ internal sealed class GovernedSqlCompiler
         int start = 0;
         for (int i = 0; i < parts; i++)
         {
-            int end = i == parts - 1 ? normalized.Length : normalized.IndexOf('.', start);
+            int end = i == parts - 1 ? normalized.Length : normalized.IndexOf('.', start, StringComparison.Ordinal);
             identifiers[i] = new SqlIdentifier(normalized.Substring(start, end - start));
             start = end + 1;
         }

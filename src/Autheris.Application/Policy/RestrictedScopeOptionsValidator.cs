@@ -46,7 +46,7 @@ public sealed class RestrictedScopeOptionsValidator(IHostEnvironment environment
                 var entry = scopes[i];
                 if (string.IsNullOrWhiteSpace(entry)
                     || entry.Any(char.IsWhiteSpace)
-                    || entry.EndsWith('/')
+                    || entry.EndsWith('/', StringComparison.Ordinal)
                     || entry.Length > RestrictedScopeOptions.MaxScopeLength)
                 {
                     failures.Add($"{Path}:Scopes:{i} must be a non-empty scope name without whitespace, without a trailing '/' and at most {RestrictedScopeOptions.MaxScopeLength} characters.");

@@ -579,7 +579,7 @@ public sealed class ConsentDecisionPipeline(
         var trimmed = rowFilterJson.TrimStart();
         try
         {
-            var inputs = trimmed.StartsWith('[')
+            var inputs = trimmed.StartsWith('[', StringComparison.Ordinal)
                 ? JsonSerializer.Deserialize<List<RowFilterInput>>(rowFilterJson, CaseInsensitiveJsonOptions)
                 : (JsonSerializer.Deserialize<RowFilterInput>(rowFilterJson, CaseInsensitiveJsonOptions) is { } single ? [single] : null);
             if (inputs == null) return filters;

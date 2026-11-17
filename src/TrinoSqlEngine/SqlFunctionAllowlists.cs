@@ -249,7 +249,7 @@ public static class SqlFunctionAllowlists
     {
         if (string.IsNullOrWhiteSpace(name)) return false;
         string last = name.Trim();
-        int dot = last.LastIndexOf('.');
+        int dot = last.LastIndexOf('.', StringComparison.Ordinal);
         if (dot >= 0) last = last[(dot + 1)..];
         last = last.Trim().Trim('"', '[', ']', '`').Trim();
         return TimeZoneFunctionNames.Contains(last);

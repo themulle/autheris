@@ -298,7 +298,7 @@ public sealed partial class ColumnMaskingProvider : IColumnMaskingProvider
         }
 
         int at = text.IndexOf('@', StringComparison.Ordinal);
-        return at > 0 && text.IndexOf('.', at) > at + 1;
+        return at > 0 && text.IndexOf('.', at, StringComparison.Ordinal) > at + 1;
     }
 
     private static string MaskEmail(string email)

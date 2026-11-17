@@ -128,7 +128,7 @@ public static class GatewayApplicationBuilderExtensions
     }
 
     internal static string ResolveGraphQlPath(GatewayOptions gatewayOptions) =>
-        gatewayOptions.GraphQL.EndpointPath.StartsWith('/')
+        gatewayOptions.GraphQL.EndpointPath.StartsWith('/', StringComparison.Ordinal)
             ? gatewayOptions.GraphQL.EndpointPath
             : "/" + gatewayOptions.GraphQL.EndpointPath;
 
@@ -195,7 +195,7 @@ public static class GatewayApplicationBuilderExtensions
         // In production, administrators and developers use the standalone Banana Cake Pop desktop app.
         if (gatewayOptions.GraphQL.EnableBananaCakePop)
         {
-            var bcpPath = gatewayOptions.GraphQL.BananaCakePopPath.StartsWith('/')
+            var bcpPath = gatewayOptions.GraphQL.BananaCakePopPath.StartsWith('/', StringComparison.Ordinal)
                 ? gatewayOptions.GraphQL.BananaCakePopPath
                 : "/" + gatewayOptions.GraphQL.BananaCakePopPath;
 

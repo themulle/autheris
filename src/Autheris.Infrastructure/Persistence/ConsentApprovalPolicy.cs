@@ -32,7 +32,7 @@ internal static class ConsentApprovalPolicy
     public static string NormalizeApprover(string? value)
     {
         var candidate = value ?? string.Empty;
-        var idx = candidate.LastIndexOf(':');
+        var idx = candidate.LastIndexOf(':', StringComparison.Ordinal);
         return (idx >= 0 ? candidate[(idx + 1)..] : candidate).Trim();
     }
 

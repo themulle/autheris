@@ -298,7 +298,7 @@ public sealed class GovernedTreeQueryServiceTests
 
         var model = await CatalogSchemaModel.BuildAsync(metadata, relations);
 
-        model.Tables.Single(t => t.Identifier == Authors).Relations.Any().ShouldBe(executable);
+        (model.Tables.Single(t => t.Identifier == Authors).Relations.Count > 0).ShouldBe(executable);
     }
 
     private static readonly TableIdentifier CrmArticles = new("crm", "main", "articles");

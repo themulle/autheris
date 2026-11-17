@@ -848,7 +848,7 @@ public sealed partial class QueryCostAnalyzerRule : IDocumentValidatorRule
                     return RuntimeLimit.Number;
                 }
 
-                number = ivn.Value.StartsWith('-') ? long.MinValue : long.MaxValue;
+                number = ivn.Value.StartsWith('-', StringComparison.Ordinal) ? long.MinValue : long.MaxValue;
                 return RuntimeLimit.Number;
             case System.Text.Json.JsonElement je:
                 if (je.ValueKind == System.Text.Json.JsonValueKind.Number && je.TryGetInt64(out number))

@@ -845,7 +845,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
 
     private static string ExtractUnqualifiedName(string tableName)
     {
-        var idx = tableName.LastIndexOf('.');
+        var idx = tableName.LastIndexOf('.', StringComparison.Ordinal);
         return idx >= 0 && idx < tableName.Length - 1 ? tableName[(idx + 1)..] : tableName;
     }
 }

@@ -409,11 +409,11 @@ public sealed class StartupWarmupTests
     [InlineData("Gateway:Startup:Warmup:TimeoutSeconds", "301")]
     [InlineData("Gateway:Startup:Warmup:Steps:Unknown:Enabled", "true")]
     [InlineData("Gateway:Startup:Warmup:Steps:GraphQlExecutor:Enabled", "true")]
-    public void WarmupOptions_InvalidConfiguration_RejectsHostStart(string key, string value)
+    public async Task WarmupOptions_InvalidConfiguration_RejectsHostStart(string key, string value)
     {
         using var sp = BuildWithConfig(new() { [key] = value });
 
-        var ex = Should.Throw<Exception>(sp.GetRequiredService<IStartupValidator>().Validate);
+        var ex = await Should.ThrowAsync<Exception>(async () => await sp.GetRequiredService<IAsyncStartupValidator>().ValidateAsync(CancellationToken.None));
         (ex is OptionsValidationException || ex is AggregateException { InnerExceptions: [OptionsValidationException, ..] }).ShouldBeTrue();
     }
 

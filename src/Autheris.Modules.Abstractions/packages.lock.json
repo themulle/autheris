@@ -1,7 +1,7 @@
 {
   "version": 1,
   "dependencies": {
-    "net10.0": {
+    "net11.0": {
       "MemoryPack": {
         "type": "Transitive",
         "resolved": "1.21.4",
@@ -21,16 +21,10 @@
         "resolved": "1.21.4",
         "contentHash": "g14EsSS85yn0lHTi0J9ivqlZMf09A2iI51fmI+0KkzIzyCbWOBWPi5mdaY7YWmXprk12aYh9u/qfWHQUYthlwg=="
       },
-      "System.ComponentModel.Annotations": {
-        "type": "Transitive",
-        "resolved": "5.0.0",
-        "contentHash": "dMkqfy2el8A8/I76n2Hi1oBFEbG1SfxD2l5nhwXV3XjlnOmwxJlQbYpJH4W51odnU9sARCSAgv7S3CyAFMkpYg=="
-      },
       "autheris.domain": {
         "type": "Project",
         "dependencies": {
-          "MemoryPack": "[1.21.4, )",
-          "System.ComponentModel.Annotations": "[5.0.0, )"
+          "MemoryPack": "[1.21.4, )"
         }
       }
     }

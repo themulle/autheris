@@ -35,7 +35,7 @@ Vollständige, reproduzierbare Last- und Latenz-Benchmark-Umgebung für das Proj
                                      │
                              HTTP (Port 5050)
                                      ▼
-                        [ GqlGateway.Api (.NET 10) ]
+                        [ GqlGateway.Api (.NET 11) ]
                    ┌─────────────────┼─────────────────┐
                    ▼                 ▼                 ▼
           [ PostgreSQL DB ]     [ Redis 7 ]
@@ -45,7 +45,7 @@ Vollständige, reproduzierbare Last- und Latenz-Benchmark-Umgebung für das Proj
 ```
 
 ### Enthaltene Services in der `podman-compose.yaml`
-1. **`gqlgateway-api`**: Multi-Stage Build (`Containerfile`) mit .NET 10 Runtime auf Port 5050. Startet in gehärteter Production-Konfiguration: ForwardAuth aktiv, TestAuthHandler deaktiviert, Token-Bucket Rate Limiter aktiv, Postgres-, SQL Server- und Redis-Anbindung sowie dynamisch aktivierte Extensions.
+1. **`gqlgateway-api`**: Multi-Stage Build (`Containerfile`) mit .NET 11 Runtime (`mcr.microsoft.com/dotnet/aspnet:11.0.0-resolute`, Ubuntu 26.04) auf Port 5050. Startet in gehärteter Production-Konfiguration: ForwardAuth aktiv, TestAuthHandler deaktiviert, Token-Bucket Rate Limiter aktiv, Postgres-, SQL Server- und Redis-Anbindung sowie dynamisch aktivierte Extensions.
 2. **`postgres`**: Enterprise-RDBMS für Invoices & Line Items (Domain `finance`). Seeding mit konfigurierbaren Zeilenmengen (Standard: 200.000 Zeilen) inkl. sensibler Daten (`email`, `iban`, `salary`).
 3. **`sqlserver`**: Azure SQL Edge Engine (`mcr.microsoft.com/azure-sql-edge:1.0.7`) für CRM Sales Orders (Domain `crm`). Leichtgewichtige MS SQL Server-Engine (~500 MB RAM) zur Validierung von T-SQL-Dialekten (`ORDER BY ... OFFSET ... ROWS FETCH NEXT ... ROWS ONLY`) und sensiblen E-Mail-Maskierungen.
 4. **Governance-Store**: Der `postgres`-Service hostet auch den Governance-Store (`Gateway__GovernanceDb__*`, Provider `PostgreSql`). Die Demo-Daten (Rollen, Data-Owner, Masking-Regeln, RLS-Row-Filter) legt gateway-seitig `SeedDemoData=true` an (`SEED_DEMO_DATA`, Standard `true` im Compose-Stack); es gibt keinen separaten Seed-Container mehr.
@@ -86,6 +86,9 @@ Um Ressourcen auf Entwicklungsrechnern und CI/CD-Runnern zu schonen, stehen **6 
 - **Hardware-Empfehlung**:
   - Für `minimal` / `lakehouse` / `enterprise`: 4 CPU-Kerne, 4–8 GB RAM.
   - Für `full` (alle Extensions & k6 Lasttest): 8 CPU-Kerne, 12–16 GB RAM.
+- **CPU instruction set**: x86-64-v2 or newer (SSE4.2, POPCNT) is required by the .NET 11 runtime on x64; ARM64 hosts are unaffected.
+- **Outbound TLS**: the .NET 11 runtime no longer downloads missing intermediate certificates (AIA) for TLS server authentication and fetches at most two on Linux; data sources and identity providers must present or have installed their complete certificate chain.
+- **Configuration values**: an empty string supplied by a later configuration provider (for example an empty environment variable) overrides the earlier value; an empty value for a boolean setting stops the startup with a binding error naming the key.
 
 ---
 

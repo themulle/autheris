@@ -242,8 +242,8 @@ public sealed record ModuleManifest(
         }
 
         if (path.Contains('\\', StringComparison.Ordinal) ||
-            path.StartsWith('/') ||
-            path.EndsWith('/') ||
+            path.StartsWith('/', StringComparison.Ordinal) ||
+            path.EndsWith('/', StringComparison.Ordinal) ||
             Path.IsPathRooted(path))
         {
             return false;

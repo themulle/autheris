@@ -110,7 +110,7 @@ internal static class CatalogSearchDocumentBuilder
                      !string.Equals(col.ColumnName, "tenant_id", StringComparison.OrdinalIgnoreCase))
             {
                 var entityName = col.ColumnName[..^3];
-                targetTable = entityName.EndsWith('s') ? entityName : entityName + "s";
+                targetTable = entityName.EndsWith('s', StringComparison.Ordinal) ? entityName : entityName + "s";
                 targetCol = col.ColumnName;
             }
 

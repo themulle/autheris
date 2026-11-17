@@ -258,7 +258,7 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
         try
         {
             // Normalize via URI representation to resolve /../ and /./ segments
-            var dummyUri = new Uri("http://localhost" + (pathOnly.StartsWith('/') ? pathOnly : "/" + pathOnly));
+            var dummyUri = new Uri("http://localhost" + (pathOnly.StartsWith('/', StringComparison.Ordinal) ? pathOnly : "/" + pathOnly));
             return dummyUri.AbsolutePath;
         }
         catch

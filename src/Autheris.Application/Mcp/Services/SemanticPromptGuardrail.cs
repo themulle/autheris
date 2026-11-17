@@ -253,7 +253,7 @@ public sealed partial class SemanticPromptGuardrail(ILogger<SemanticPromptGuardr
         var start = 0;
         while (start <= text.Length)
         {
-            var end = text.IndexOf('\n', start);
+            var end = text.IndexOf('\n', start, StringComparison.Ordinal);
             var lineEnd = end < 0 ? text.Length : end;
             var line = text.Substring(start, lineEnd - start);
             sb.Append(inspect(line));

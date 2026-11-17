@@ -35,7 +35,7 @@ to `INTERNAL_SERVER_ERROR`.
 
 ```
 dotnet build tests/Autheris.Sim.ApiHost -c Release -p:AutherisIncludeTestAuth=true
-dotnet tests/Autheris.Sim.ApiHost/bin/Release/net10.0/Autheris.Sim.ApiHost.dll --port 5073 --data-dir "$TMPDIR/sim-data" --ready-file "$TMPDIR/ready" --profile read
+dotnet tests/Autheris.Sim.ApiHost/bin/Release/net11.0/Autheris.Sim.ApiHost.dll --port 5073 --data-dir "$TMPDIR/sim-data" --ready-file "$TMPDIR/ready" --profile read
 # POST {"query":"{ finance_dbo_finance_items(first: 1, offset: 0) { sensitive_note_2 } }"} to http://127.0.0.1:5073/graphql
 # authenticated with the sim host's reader test-auth identity (documented in scripts/sim/run-api-fuzz.sh)
 ```

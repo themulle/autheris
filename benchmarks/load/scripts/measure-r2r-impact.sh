@@ -125,14 +125,14 @@ if [ "$SKIP_DOCKER" != "true" ] && command -v docker >/dev/null 2>&1 && docker i
   DOCKER_AVAILABLE=true
   echo "Building benchmark Docker container images..."
   docker build -q -t autheris-bench:non-r2r -f - "$DIST_DIR/non-r2r" << 'EOF' >/dev/null 2>&1
-FROM mcr.microsoft.com/dotnet/aspnet:10.0.13 AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:11.0.0-resolute AS runtime
 WORKDIR /app
 COPY . ./
 ENTRYPOINT ["dotnet", "Autheris.Api.dll"]
 EOF
 
   docker build -q -t autheris-bench:r2r -f - "$DIST_DIR/r2r" << 'EOF' >/dev/null 2>&1
-FROM mcr.microsoft.com/dotnet/aspnet:10.0.13 AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:11.0.0-resolute AS runtime
 WORKDIR /app
 COPY . ./
 ENTRYPOINT ["dotnet", "Autheris.Api.dll"]

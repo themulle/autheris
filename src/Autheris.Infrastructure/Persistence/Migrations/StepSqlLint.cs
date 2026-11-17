@@ -146,7 +146,7 @@ internal static class StepSqlLint
             var c = sql[i];
             if (c == '-' && i + 1 < sql.Length && sql[i + 1] == '-')
             {
-                var end = sql.IndexOf('\n', i);
+                var end = sql.IndexOf('\n', i, StringComparison.Ordinal);
                 end = end < 0 ? sql.Length : end;
                 sb.Append(sql.AsSpan(i + 2, end - i - 2).Trim().Equals("batch", StringComparison.OrdinalIgnoreCase) ? ';' : ' ');
                 i = end;
@@ -171,7 +171,7 @@ internal static class StepSqlLint
             }
             else if (c == '[')
             {
-                var end = sql.IndexOf(']', i + 1);
+                var end = sql.IndexOf(']', i + 1, StringComparison.Ordinal);
                 end = end < 0 ? sql.Length - 1 : end;
                 sb.Append(sql.AsSpan(i + 1, end - i - 1));
                 i = end + 1;
@@ -218,7 +218,7 @@ internal static class StepSqlLint
             var c = sql[i];
             if (c == '-' && i + 1 < sql.Length && sql[i + 1] == '-')
             {
-                var end = sql.IndexOf('\n', i + 2);
+                var end = sql.IndexOf('\n', i + 2, StringComparison.Ordinal);
                 i = end < 0 ? sql.Length : end + 1;
                 sb.Append(' ');
             }
