@@ -41,6 +41,8 @@ public interface IDocumentRepository
     Task<DocWriteOutcome> CreateAsync(DocRecord record, DocQuota quota, CancellationToken ct = default);
     Task<DocWriteOutcome> ReplaceAsync(DocRecord record, long? expectedVersion, DocQuota quota, CancellationToken ct = default);
     Task<DocWriteOutcome> CreateManyAsync(IReadOnlyList<DocRecord> records, DocQuota quota, CancellationToken ct = default);
+    /// <summary>Atomically creates, revives or replaces official (<c>TenantId == null</c>) documents in one transaction; all-or-nothing.</summary>
+    Task<DocWriteOutcome> UpsertOfficialManyAsync(IReadOnlyList<DocRecord> records, CancellationToken ct = default);
     Task<DocWriteOutcome> DeleteAsync(DocKey key, long? expectedVersion, DateTimeOffset deletedAt, CancellationToken ct = default);
     Task<int> PurgeTenantAsync(string tenantId, CancellationToken ct = default);
     Task<DocRecord?> GetAsync(DocKey key, CancellationToken ct = default);

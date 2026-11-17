@@ -136,6 +136,7 @@ public static class AuditEventTypes
     public const string DocDiscoveryRead = "DOC_DISCOVERY_READ";
     public const string DocDocumentDeleted = "DOC_DOCUMENT_DELETED";
     public const string DocTenantPurged = "DOC_TENANT_PURGED";
+    public const string DocIndexSyncRequested = "DOC_INDEX_SYNC_REQUESTED";
     public const string DocLegacyImportCompleted = "DOC_LEGACY_IMPORT_COMPLETED";
 
     // Governed Aggregation & Semantic Layer Metrics (#28, #37, #38)

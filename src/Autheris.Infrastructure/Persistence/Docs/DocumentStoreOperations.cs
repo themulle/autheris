@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.Common;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Docs.Interfaces;
@@ -28,6 +29,36 @@ internal static class DocumentStoreOperations
                 if (!version.HasValue) return (false, new DocWriteOutcome(DocWriteStatus.AlreadyExists));
                 if (doc.TenantId is not null && !await TryReserveQuotaAsync(repo, conn, tx, doc.TenantId, 1, doc.ByteCount, quota, updatedAt, ct).ConfigureAwait(false))
                     return (false, new DocWriteOutcome(DocWriteStatus.QuotaExceeded));
+                last = doc with { Version = version.Value };
+            }
+            return (true, new DocWriteOutcome(DocWriteStatus.Created, last));
+        }, ct);
+    }
+
+    public static Task<DocWriteOutcome> UpsertOfficialManyAsync(GovernanceRepository repo, IReadOnlyList<DocRecord> records, CancellationToken ct)
+    {
+        if (records.Count == 0) return Task.FromResult(new DocWriteOutcome(DocWriteStatus.Created));
+        if (records.Any(r => r.TenantId is not null)) throw new ArgumentException("Only official documents can be upserted in bulk.", nameof(records));
+        var now = TimeProvider.System.GetUtcNow();
+        return RunInTxAsync(repo, async (conn, tx) =>
+        {
+            DocRecord? last = null;
+            foreach (var raw in records)
+            {
+                var updatedAt = (raw.UpdatedAt == default ? now : raw.UpdatedAt).ToUniversalTime();
+                var doc = raw with { TenantId = null, UpdatedAt = updatedAt, DeletedAt = null };
+                var cur = await LockRowAsync(repo, conn, tx, new DocKey(null, doc.AppId, doc.Category, doc.DocId), ct).ConfigureAwait(false);
+                if (cur is not null && !cur.Value.Deleted)
+                {
+                    await using var cmd = repo.CreateDocCommand(conn, tx, DocumentStoreSql.UpdateOfficialSql);
+                    DocumentStoreSql.BindPayload(cmd, doc, updatedAt);
+                    await repo.ExecuteNonQueryAsync(cmd, "Governance.Docs.Replace", ct).ConfigureAwait(false);
+                    last = doc with { Version = cur.Value.Version + 1 };
+                    continue;
+                }
+
+                var version = await TryInsertOrReviveAsync(repo, conn, tx, doc, updatedAt, ct).ConfigureAwait(false);
+                if (!version.HasValue) return (false, new DocWriteOutcome(DocWriteStatus.AlreadyExists));
                 last = doc with { Version = version.Value };
             }
             return (true, new DocWriteOutcome(DocWriteStatus.Created, last));

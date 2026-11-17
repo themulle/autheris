@@ -133,8 +133,7 @@ public static class DocIngestionEndpoints
                 return ApiProblems.BadRequest(ApiErrorCodes.DocEmpty, "Document content cannot be empty.", httpContext);
             }
 
-            if (Encoding.UTF8.GetByteCount(body.Content) > docsOptions.Value.MaxDocumentBytes * 2L &&
-                Encoding.UTF8.GetByteCount(body.Content) > docsOptions.Value.MaxBundleBytes)
+            if (Encoding.UTF8.GetByteCount(body.Content) > docsOptions.Value.MaxDocumentBytes)
             {
                 return ApiProblems.PayloadTooLarge($"Document exceeds maximum allowed size of {docsOptions.Value.MaxDocumentBytes} bytes.", httpContext, ApiErrorCodes.DocTooLarge);
             }
@@ -361,7 +360,7 @@ public static class DocIngestionEndpoints
 
             var count = await docStore.RefreshIndexAsync(ct).ConfigureAwait(false);
             return Results.Ok(new { message = $"Synchronized {count} document sections into search index.", indexedSections = count });
-        }).RequireAuthorization(GatewayPolicies.ClusterAdmin).WithAudit(AuditLevel.Full, AuditEventTypes.DocIngestionBundleApplied);
+        }).RequireAuthorization(GatewayPolicies.ClusterAdmin).WithAudit(AuditLevel.Full, AuditEventTypes.DocIndexSyncRequested);
 
         return app;
     }

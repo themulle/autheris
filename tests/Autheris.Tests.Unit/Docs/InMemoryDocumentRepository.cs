@@ -95,6 +95,35 @@ internal sealed class InMemoryDocumentRepository : IDocumentRepository
         }
     }
 
+    public int FailUpsertAfter { get; set; } = -1;
+
+    public Task<DocWriteOutcome> UpsertOfficialManyAsync(IReadOnlyList<DocRecord> records, CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            var snapshot = new Dictionary<Key, DocRecord>(_rows);
+            DocRecord? last = null;
+            var written = 0;
+            foreach (var raw in records)
+            {
+                if (FailUpsertAfter >= 0 && written >= FailUpsertAfter)
+                {
+                    Restore(snapshot);
+                    return Task.FromResult(new DocWriteOutcome(DocWriteStatus.QuotaExceeded));
+                }
+
+                var key = new Key(null, raw.AppId, raw.Category, raw.DocId);
+                var version = _rows.TryGetValue(key, out var existing) ? existing.Version + 1 : 1;
+                var updatedAt = raw.UpdatedAt == default ? _timeProvider.GetUtcNow() : raw.UpdatedAt;
+                last = raw with { TenantId = null, Version = version, UpdatedAt = updatedAt, DeletedAt = null };
+                _rows[key] = last;
+                written++;
+            }
+
+            return Task.FromResult(new DocWriteOutcome(DocWriteStatus.Created, last));
+        }
+    }
+
     public Task<DocWriteOutcome> ReplaceAsync(DocRecord record, long? expectedVersion, DocQuota quota, CancellationToken ct = default)
     {
         lock (_gate)

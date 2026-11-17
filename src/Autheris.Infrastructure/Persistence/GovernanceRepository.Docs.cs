@@ -21,6 +21,9 @@ public partial class GovernanceRepository : IDocumentRepository
     public Task<DocWriteOutcome> CreateAsync(DocRecord record, DocQuota quota, CancellationToken ct = default)
         => CreateManyAsync([record ?? throw new ArgumentNullException(nameof(record))], quota ?? throw new ArgumentNullException(nameof(quota)), ct);
 
+    public Task<DocWriteOutcome> UpsertOfficialManyAsync(IReadOnlyList<DocRecord> records, CancellationToken ct = default)
+        => DocumentStoreOperations.UpsertOfficialManyAsync(this, records ?? throw new ArgumentNullException(nameof(records)), ct);
+
     public Task<DocWriteOutcome> CreateManyAsync(IReadOnlyList<DocRecord> records, DocQuota quota, CancellationToken ct = default)
         => DocumentStoreOperations.CreateManyAsync(this, records ?? throw new ArgumentNullException(nameof(records)), quota ?? throw new ArgumentNullException(nameof(quota)), ct);
 

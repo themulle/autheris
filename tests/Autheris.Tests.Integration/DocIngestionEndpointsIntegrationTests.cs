@@ -88,12 +88,14 @@ public sealed class DocIngestionEndpointsIntegrationTests : IClassFixture<DocIng
         searchDoc.RootElement.GetProperty("total").GetInt32().ShouldBeGreaterThanOrEqualTo(1);
     }
 
-    [Fact]
-    public async Task SyncExistingDocuments_RequiresGovernanceAdmin()
+    [Theory]
+    [InlineData("DataConsumer")]
+    [InlineData("GovernanceAdmin")]
+    public async Task Sync_RequiresClusterAdmin(string role)
     {
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-DAVID");
-        client.DefaultRequestHeaders.Add("X-Test-Roles", "DataConsumer");
+        client.DefaultRequestHeaders.Add("X-Test-Roles", role);
 
         var response = await client.PostAsync("/api/v1/docs/sync", new StringContent("{}", Encoding.UTF8, "application/json"));
 

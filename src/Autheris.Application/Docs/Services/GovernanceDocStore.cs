@@ -320,16 +320,10 @@ public sealed class GovernanceDocStore : IUniversalDocStore
                 Sanitized: anySanitized);
         }
 
-        if (parsed.Manifest is not null)
-        {
-            _manifests[new ManifestKey(string.Empty, appId)] = parsed.Manifest;
-        }
-
-        var officialChunks = new List<DocChunk>();
-        long? lastOfficialVersion = null;
+        var officialRecords = new List<DocRecord>(parsed.Entries.Count);
         foreach (var entry in parsed.Entries)
         {
-            var record = new DocRecord(
+            officialRecords.Add(new DocRecord(
                 TenantId: null,
                 AppId: appId,
                 Category: entry.Category,
@@ -342,23 +336,31 @@ public sealed class GovernanceDocStore : IUniversalDocStore
                 ErrorCode: null,
                 AuthorSid: writer.AuthorSid,
                 Version: 1,
-                UpdatedAt: now);
+                UpdatedAt: now));
+        }
 
-            var outcome = await _repository.CreateAsync(record, Quota, ct).ConfigureAwait(false);
-            if (outcome.Status == DocWriteStatus.AlreadyExists)
-            {
-                outcome = await _repository.ReplaceAsync(record, expectedVersion: null, Quota, ct).ConfigureAwait(false);
-            }
-
-            if (!outcome.Succeeded || outcome.Record is null)
+        long? lastOfficialVersion = null;
+        if (officialRecords.Count > 0)
+        {
+            var outcome = await _repository.UpsertOfficialManyAsync(officialRecords, ct).ConfigureAwait(false);
+            if (!outcome.Succeeded)
             {
                 return MapWriteFailure(outcome.Status, anySanitized);
             }
 
-            lastOfficialVersion = outcome.Record.Version;
-            var key = new DocKey(null, appId, entry.Category, entry.DocId);
-            await _searchService.RemoveDocumentAsync(key, ct).ConfigureAwait(false);
-            officialChunks.AddRange(await BuildChunksAsync(outcome.Record, ct).ConfigureAwait(false));
+            lastOfficialVersion = outcome.Record?.Version;
+        }
+
+        if (parsed.Manifest is not null)
+        {
+            _manifests[new ManifestKey(string.Empty, appId)] = parsed.Manifest;
+        }
+
+        var officialChunks = new List<DocChunk>();
+        foreach (var record in officialRecords)
+        {
+            await _searchService.RemoveDocumentAsync(new DocKey(null, appId, record.Category, record.DocId), ct).ConfigureAwait(false);
+            officialChunks.AddRange(await BuildChunksAsync(record, ct).ConfigureAwait(false));
         }
 
         if (officialChunks.Count > 0)

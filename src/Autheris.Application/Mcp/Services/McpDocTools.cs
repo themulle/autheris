@@ -3,6 +3,7 @@ namespace Autheris.Application.Mcp.Services;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -645,17 +646,13 @@ public static class McpDocTools
             ? await docStore.ReplaceAsync(writer, request, replaceVersion.Value, ct).ConfigureAwait(false)
             : await docStore.CreateAsync(writer, request, ct).ConfigureAwait(false);
 
-        if (!result.Success)
-        {
-            return McpToolError.Serialize(result.ErrorCode ?? "DOC_ERROR", result.Message);
-        }
-
         if (auditWriter is not null)
         {
             var actorSid = !string.IsNullOrWhiteSpace(writer.AuthorSid)
                 ? new Sid(writer.AuthorSid)
                 : new Sid("mcp-agent");
             var tenantId = TenantId.TryParse(writer.TenantId, out var tid) ? tid : TenantId.Platform;
+            var contentBytes = Encoding.UTF8.GetBytes(sanitized.Text);
             await auditWriter.RecordRequiredAsync(new AuditLogEntry
             {
                 TenantId = tenantId,
@@ -663,7 +660,7 @@ public static class McpDocTools
                 EventType = AuditEventTypes.DocIngestionDocumentApplied,
                 ActorSid = actorSid,
                 TargetTable = $"{request.AppId}/{request.Category}/{request.DocId}",
-                Decision = "ALLOW",
+                Decision = result.Success ? "ALLOW" : "DENY",
                 TraceId = sessionContext?.SessionId ?? string.Empty,
                 DetailsJson = JsonSerializer.Serialize(new
                 {
@@ -672,9 +669,17 @@ public static class McpDocTools
                     docId = request.DocId,
                     version = result.Version,
                     replaced = replaceVersion.HasValue,
-                    sanitized = result.Sanitized
+                    sanitized = result.Sanitized,
+                    errorCode = result.Success ? null : result.ErrorCode ?? "DOC_ERROR",
+                    contentSha256 = Convert.ToHexString(SHA256.HashData(contentBytes)).ToLowerInvariant(),
+                    byteCount = contentBytes.Length
                 })
             }, ct).ConfigureAwait(false);
+        }
+
+        if (!result.Success)
+        {
+            return McpToolError.Serialize(result.ErrorCode ?? "DOC_ERROR", result.Message);
         }
 
         return JsonSerializer.Serialize(result, IndentedOptions);

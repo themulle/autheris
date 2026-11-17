@@ -86,6 +86,7 @@ internal static class DocBundleReader
         }
 
         var entries = new List<DocBundleEntry>();
+        var seenKeys = new HashSet<(DocCategory Category, string DocId)>();
         DocAppManifest? manifest = null;
         long cumulativeHeaderBytes = 0;
         long cumulativeActualBytes = 0;
@@ -202,6 +203,15 @@ internal static class DocBundleReader
             }
 
             var category = ResolveCategoryFromSegment(segments[0]);
+            if (!seenKeys.Add((category, docId)))
+            {
+                return Fail(new DepositDocResult(
+                    Success: false,
+                    ChunkId: null,
+                    Message: $"Archive entry '{entry.FullName}' resolves to a document that is already part of the bundle.",
+                    ErrorCode: "INVALID_PARAMS"));
+            }
+
             var title = UntrustedMarkdownSanitizer.SanitizeTitle(ExtractTitle(sanitized.Text, docId), options.MaxTitleLength);
             if (string.IsNullOrWhiteSpace(title))
             {

@@ -115,6 +115,7 @@ public static class AuditPolicyTable
         [AuditEventTypes.DocDiscoveryRead] = AuditFailurePolicy.BestEffort,
         [AuditEventTypes.DocDocumentDeleted] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.DocTenantPurged] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.DocIndexSyncRequested] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.DocLegacyImportCompleted] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.AggregateQuery] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.MetricQuery] = AuditFailurePolicy.FailClosed,
