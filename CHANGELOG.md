@@ -12,12 +12,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 - `docs/configuration-guide.md` is in English (#485).
+- The container image is 409 MB uncompressed (was 421 MB): the published `libduckdb.so` is stripped of its static symbol table (-11 MB) and the localized satellite resource assemblies of the dependencies are no longer published (`SatelliteResourceLanguages=en`). The footprint budget is lowered from 440 MB to 430 MB.
 
 ### Removed
 - The unused OpenJev client, `IOpenJevClient`, `JustificationTriageService`, `IJustificationTriageService` and the justification triage result types (#503).
 
 ### Fixed
 - `describe_dataset` returns the column `longDescription` (when requested with `include`) on the discovery-service path too (#714); the GraphQL `DiscoveryColumn` type gains the nullable field `longDescription` (sanitized, visible columns only).
+- The native DuckDB library is no longer loaded at startup: the time zone conversion state runs the DuckDB ICU probe lazily on the first DuckDB conversion check instead of in the startup hosted service, so a node that never uses DuckDB does not map `libduckdb.so` (the footprint lazy-load check reports `lazy: true`).
+
 - A retry that started right after a failed key-set load could receive the finished load's failure instead of starting its own load (the single-flight cache released its waiters before unregistering the load); the Virtual Filter key set cache and every other user of `SingleFlightKeySetCache` are fixed.
 
 ## [1.8.4] - 2026-11-17
