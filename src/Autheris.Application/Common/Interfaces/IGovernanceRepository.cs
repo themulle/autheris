@@ -598,6 +598,12 @@ public interface ITableRelationRepository
     Task<IReadOnlyList<TableRelation>> GetAllRelationsAsync(CancellationToken ct = default);
 
     /// <summary>
+    /// Issue #786: true when <see cref="GetAllRelationsAsync"/> is complete, so an empty result means "no relations" and
+    /// callers must not fall back to one <see cref="GetRelationsForTableAsync"/> read per table. Test doubles keep the default.
+    /// </summary>
+    bool BulkRelationsAuthoritative => false;
+
+    /// <summary>
     /// Creates or updates a relation by its natural key (parent table, child table, relation name) together with its ordered key pairs in one
     /// transaction (issue #151). Throws <see cref="Autheris.Domain.Exceptions.InvalidRelationException"/> for invalid keys, unknown, inactive or ambiguous
     /// tables and unknown key columns; nothing is written then.

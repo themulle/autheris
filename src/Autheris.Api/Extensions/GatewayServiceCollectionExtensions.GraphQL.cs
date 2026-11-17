@@ -82,6 +82,25 @@ public static partial class GatewayServiceCollectionExtensions
     /// I417-SC-A03: builds the admission rule from the same <c>GatewayOptions.QueryCost</c> instance that
     /// <c>CostAndQuotaMiddleware</c> reads, so both price a list identically.
     /// </summary>
+    /// <summary>
+    /// Issue #786: the module is composed here with the catalog version provider, the epoch service and the clock, so an idle
+    /// refresh tick exits on the unchanged version instead of rebuilding the whole candidate model every interval.
+    /// </summary>
+    internal static CatalogGraphQlTypeModule CreateCatalogGraphQlTypeModule(IServiceProvider sp, GatewayOptions gatewayOptions) =>
+        new(
+            sp.GetRequiredService<ITableMetadataRepository>(),
+            sp.GetRequiredService<ITableRelationRepository>(),
+            sp.GetService<ILogger<CatalogGraphQlTypeModule>>(),
+            TimeSpan.FromSeconds(gatewayOptions.GraphQL.CatalogSchemaRefreshSeconds),
+            versionProvider: sp.GetService<Autheris.Application.Catalog.ICatalogVersionProvider>(),
+            aggregationEnabled: gatewayOptions.GraphQL.Aggregation.Enabled,
+            crossSourceEnabled: gatewayOptions.IsCrossSourceEnabled,
+            metricsEnabled: (gatewayOptions.GraphQL.Metrics?.Enabled ?? true) && gatewayOptions.GraphQL.Aggregation.Enabled,
+            graphQlOptions: gatewayOptions.GraphQL,
+            transportResolver: sp.GetService<Autheris.Application.DataSources.IDataSourceOptionsResolver>(),
+            epochService: sp.GetService<IEpochValidationService>(),
+            timeProvider: sp.GetService<TimeProvider>());
+
     internal static Autheris.GraphQL.Interceptors.QueryCostAnalyzerRule CreateQueryCostRule(
         GatewayOptions gatewayOptions,
         int maxCost,
@@ -125,16 +144,8 @@ public static partial class GatewayServiceCollectionExtensions
 
         services.AddSingleton<ErrorSanitizingFilter>();
         // R-GQL-12: one module instance (and change-detection timer) for the application, also across schema rebuilds.
-        services.AddSingleton(sp => new CatalogGraphQlTypeModule(
-            sp.GetRequiredService<ITableMetadataRepository>(),
-            sp.GetRequiredService<ITableRelationRepository>(),
-            sp.GetService<ILogger<CatalogGraphQlTypeModule>>(),
-            TimeSpan.FromSeconds(gatewayOptions.GraphQL.CatalogSchemaRefreshSeconds),
-            aggregationEnabled: gatewayOptions.GraphQL.Aggregation.Enabled,
-            crossSourceEnabled: gatewayOptions.IsCrossSourceEnabled,
-            metricsEnabled: (gatewayOptions.GraphQL.Metrics?.Enabled ?? true) && gatewayOptions.GraphQL.Aggregation.Enabled,
-            graphQlOptions: gatewayOptions.GraphQL,
-            transportResolver: sp.GetService<Autheris.Application.DataSources.IDataSourceOptionsResolver>()));
+        services.AddSingleton(sp => CreateCatalogGraphQlTypeModule(sp, gatewayOptions));
+        services.AddSingleton<Autheris.GraphQL.Catalog.CatalogSchemaBuildDiagnosticListener>();
         services.AddSingleton<ICatalogSchemaDiagnostics>(sp => sp.GetRequiredService<CatalogGraphQlTypeModule>());
         services.AddSingleton<ISocketTokenValidator, JwtSocketTokenValidator>();
         services.AddOptions<RevocationWatchOptions>()
@@ -200,6 +211,8 @@ public static partial class GatewayServiceCollectionExtensions
             .AddApplicationService<ITableMetadataRepository>()
             .AddApplicationService<ITableRelationRepository>()
             .AddApplicationService<CatalogGraphQlTypeModule>()
+            .AddApplicationService<Autheris.GraphQL.Catalog.CatalogSchemaBuildDiagnosticListener>()
+            .AddDiagnosticEventListener(sp => sp.GetRequiredService<Autheris.GraphQL.Catalog.CatalogSchemaBuildDiagnosticListener>())
             .AddApplicationService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.AnalyticsOptions>>()
             .AddTypeModule(sp => sp.GetRequiredService<CatalogGraphQlTypeModule>())
             .AddErrorFilter(sp => sp.GetRequiredService<ErrorSanitizingFilter>())

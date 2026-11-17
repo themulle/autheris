@@ -221,6 +221,7 @@ public sealed partial class CatalogSchemaModel
         CatalogTableFingerprintCache? fingerprintCache,
         IEpochValidationService? epochService,
         TimeProvider? timeProvider,
+        string phase = "check",
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(metadataRepository);
@@ -258,7 +259,7 @@ public sealed partial class CatalogSchemaModel
 
             sqlTables.Add(candidate);
             tablesProcessed++;
-            MaybeLogBuildProgress(logger, effectiveTime, buildStartTimestamp, ref lastProgressTimestamp, tablesProcessed);
+            MaybeLogBuildProgress(logger, effectiveTime, buildStartTimestamp, ref lastProgressTimestamp, tablesProcessed, phase);
         }
         var omittedTables = new List<CatalogOmittedTable>();
         foreach (var excluded in sqlTables.Where(t =>
@@ -412,7 +413,7 @@ public sealed partial class CatalogSchemaModel
         // Bulk pre-fetch all relations in one query (INC-138-4) with fallback for test doubles or legacy providers
         var allRelations = await relationRepository.GetAllRelationsAsync(ct).ConfigureAwait(false);
         var relationsByTable = new Dictionary<TableIdentifier, List<TableRelation>>();
-        if (allRelations != null && allRelations.Count > 0)
+        if (allRelations != null && (allRelations.Count > 0 || relationRepository.BulkRelationsAuthoritative))
         {
             foreach (var rel in allRelations)
             {
@@ -436,7 +437,29 @@ public sealed partial class CatalogSchemaModel
                 }
 
                 tablesProcessed++;
-                MaybeLogBuildProgress(logger, effectiveTime, buildStartTimestamp, ref lastProgressTimestamp, tablesProcessed);
+                MaybeLogBuildProgress(logger, effectiveTime, buildStartTimestamp, ref lastProgressTimestamp, tablesProcessed, phase);
+            }
+        }
+
+        // Reverse index (O(n)): child table -> (parent builder, relation), in tableBuilders order then relation order,
+        // so reverse field names, suffixes and ordering are identical to scanning every table per table.
+        var reverseByChild = new Dictionary<TableIdentifier, List<(int ParentIndex, TableRelation Relation)>>();
+        for (var parentIndex = 0; parentIndex < tableBuilders.Count; parentIndex++)
+        {
+            if (!relationsByTable.TryGetValue(tableBuilders[parentIndex].Metadata.Identifier, out var parentRelations))
+            {
+                continue;
+            }
+
+            foreach (var rel in parentRelations)
+            {
+                if (!reverseByChild.TryGetValue(rel.ChildTableIdentifier, out var revList))
+                {
+                    revList = [];
+                    reverseByChild[rel.ChildTableIdentifier] = revList;
+                }
+
+                revList.Add((parentIndex, rel));
             }
         }
 
@@ -497,21 +520,12 @@ public sealed partial class CatalogSchemaModel
 
             // Also check for reverse relations where this table is the child
             // Lookup in cached relationsByTable in memory
-            foreach (var other in tableBuilders)
+            reverseByChild.TryGetValue(meta.Identifier, out var reverseRelations);
+            foreach (var (parentIndex, rel) in (IEnumerable<(int ParentIndex, TableRelation Relation)>?)reverseRelations ?? [])
             {
-                if (other.Metadata.Identifier.Equals(meta.Identifier))
+                var other = tableBuilders[parentIndex];
                 {
-                    continue;
-                }
-
-                if (!relationsByTable.TryGetValue(other.Metadata.Identifier, out var otherRelations))
-                {
-                    continue;
-                }
-
-                foreach (var rel in otherRelations)
-                {
-                    if (!rel.ChildTableIdentifier.Equals(meta.Identifier))
+                    if (other.Metadata.Identifier.Equals(meta.Identifier))
                     {
                         continue;
                     }
@@ -568,7 +582,7 @@ public sealed partial class CatalogSchemaModel
                 meta,
                 columns,
                 relations));
-            MaybeLogBuildProgress(logger, effectiveTime, buildStartTimestamp, ref lastProgressTimestamp, finalTables.Count);
+            MaybeLogBuildProgress(logger, effectiveTime, buildStartTimestamp, ref lastProgressTimestamp, finalTables.Count, phase);
         }
 
         if (invalidRelations.Count > 0)
@@ -629,7 +643,8 @@ public sealed partial class CatalogSchemaModel
         TimeProvider? timeProvider,
         long buildStartTimestamp,
         ref long lastProgressTimestamp,
-        int tablesProcessed)
+        int tablesProcessed,
+        string phase = "rebuild")
     {
         if (logger is null || timeProvider is null)
         {
@@ -645,9 +660,10 @@ public sealed partial class CatalogSchemaModel
         lastProgressTimestamp = nowTimestamp;
         long elapsedMs = (long)timeProvider.GetElapsedTime(buildStartTimestamp, nowTimestamp).TotalMilliseconds;
         logger.LogInformation(
-            "GraphQL catalog schema build progress: tablesProcessed={TablesProcessed} elapsedMs={ElapsedMs}",
+            "GraphQL catalog schema build progress: tablesProcessed={TablesProcessed} elapsedMs={ElapsedMs} phase={Phase}",
             tablesProcessed,
-            elapsedMs);
+            elapsedMs,
+            phase);
     }
 
     private const int MaxInvalidRelationDetailLines = 10;

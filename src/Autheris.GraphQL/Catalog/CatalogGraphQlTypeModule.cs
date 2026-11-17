@@ -23,7 +23,7 @@ using Microsoft.Extensions.Options;
 
 namespace Autheris.GraphQL.Catalog;
 
-public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalogSchemaDiagnostics
+public sealed partial class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalogSchemaDiagnostics
 {
     private readonly ITableMetadataRepository _metadataRepo;
     private readonly ITableRelationRepository _relationRepo;
@@ -34,7 +34,7 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
     private readonly bool _crossSourceEnabled;
     private readonly bool _metricsEnabled;
     private readonly object _timerLock = new();
-    private Timer? _refreshTimer;
+    private ITimer? _refreshTimer;
     private sealed record BuiltState(string? Fingerprint, IReadOnlyList<CatalogOmittedTable> OmittedTables);
     private sealed record PendingBuild(
         CatalogSchemaModel Model,
@@ -49,6 +49,8 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
     private long _builtStructureVersion = -1;
     private long _builtContentVersion = -1;
     private readonly SemaphoreSlim _checkGate = new(1, 1);
+
+
     private readonly CatalogTableFingerprintCache _tableFingerprintCache = new();
     internal CatalogTableFingerprintCache FingerprintCache => _tableFingerprintCache;
 
@@ -202,109 +204,6 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
     /// <summary>BUG #157: omissions of the schema actually served; an immutable snapshot swapped after each build.</summary>
     public IReadOnlyList<CatalogOmittedTable> OmittedTables => _built.OmittedTables;
 
-    internal async Task<bool> CheckForCatalogChangesAsync(CancellationToken ct = default)
-    {
-        // Serialize instead of dropping: a caller that starts after a completed catalog write always runs its own
-        // check and so observes that write. The wait is cancellable; a cancelled wait never took the semaphore.
-        await _checkGate.WaitAsync(ct).ConfigureAwait(false);
-        var changed = false;
-        try
-        {
-            var builtStruct = Volatile.Read(ref _builtStructureVersion);
-            var builtContent = Volatile.Read(ref _builtContentVersion);
-            var transportChanged = TransportVisibilityChanged();
-            if (transportChanged)
-            {
-                _tableFingerprintCache.Clear();
-                Volatile.Write(ref _pendingBuild, null);
-            }
-
-            Autheris.Application.Catalog.CatalogVersion? currentVer = null;
-            if (_versionProvider != null)
-            {
-                try
-                {
-                    currentVer = await _versionProvider.GetCatalogVersionAsync(ct).ConfigureAwait(false);
-                    if (!transportChanged &&
-                        builtStruct >= 0 &&
-                        currentVer.Value.StructureVersion == builtStruct &&
-                        currentVer.Value.ContentVersion == builtContent)
-                    {
-                        return false;
-                    }
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    _logger?.LogDebug(ex, "GraphQL catalog structure version check failed; falling back to schema fingerprint check.");
-                }
-            }
-
-            var candidateSeen = new System.Collections.Concurrent.ConcurrentDictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
-            CatalogSchemaModel candidateModel;
-            string current;
-            try
-            {
-                candidateModel = await CatalogSchemaModel.BuildAsync(
-                    _metadataRepo,
-                    _relationRepo,
-                    _logger,
-                    dialectRegistry: null,
-                    crossSourceEnabled: _crossSourceEnabled,
-                    tableFilter: GetTableFilter(candidateSeen),
-                    fingerprintCache: _tableFingerprintCache,
-                    epochService: _epochService,
-                    timeProvider: _timeProvider,
-                    ct: ct).ConfigureAwait(false);
-                current = candidateModel.Fingerprint();
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                _logger?.LogDebug(ex, "GraphQL catalog change check failed; retrying with the next interval.");
-                return false;
-            }
-
-            if (!transportChanged && string.Equals(current, _built.Fingerprint, StringComparison.Ordinal))
-            {
-                if (currentVer.HasValue)
-                {
-                    Volatile.Write(ref _builtStructureVersion, currentVer.Value.StructureVersion);
-                    Volatile.Write(ref _builtContentVersion, currentVer.Value.ContentVersion);
-                }
-                Volatile.Write(ref _pendingBuild, null);
-                return false;
-            }
-
-            Volatile.Write(ref _pendingBuild, new PendingBuild(candidateModel, current, candidateSeen, currentVer));
-            changed = true;
-        }
-        finally
-        {
-            _checkGate.Release();
-        }
-
-        // Raised outside the semaphore so a re-entrant TypesChanged handler cannot deadlock on it.
-        if (changed)
-        {
-            _logger?.LogInformation("GraphQL catalog changed; rebuilding the GraphQL schema.");
-            TypesChanged?.Invoke(this, EventArgs.Empty);
-        }
-
-        return changed;
-    }
-
-    private void EnsureRefreshTimer()
-    {
-        if (_refreshInterval <= TimeSpan.Zero || _refreshTimer != null)
-        {
-            return;
-        }
-
-        lock (_timerLock)
-        {
-            _refreshTimer ??= new Timer(_ => _ = CheckForCatalogChangesAsync(), null, _refreshInterval, _refreshInterval);
-        }
-    }
-
     public void Dispose()
     {
         lock (_timerLock)
@@ -321,6 +220,18 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
         CatalogSchemaModel schemaModel;
         long buildStartTimestamp = _timeProvider.GetTimestamp();
         long lastProgressTimestamp = buildStartTimestamp;
+
+        // Issue #786: the request is served from here on, so a change seen from now on may queue exactly one more rebuild.
+        // The latch is released before the pending model is taken: a change that lands afterwards is either taken by
+        // this build or raises the next (trailing) request.
+        Interlocked.Exchange(ref _rebuildRequested, 0);
+        Volatile.Write(ref _deferralStartTimestamp, NoTimestamp);
+        Volatile.Write(ref _lastCheckSawChange, 0);
+        Volatile.Write(ref _buildStartTimestamp, buildStartTimestamp);
+        var trigger = Interlocked.Exchange(ref _everBuilt, 1) == 0
+            ? "startup"
+            : Interlocked.Exchange(ref _coalescedSinceBuild, 0) > 0 ? "coalesced" : "change";
+        _logger?.LogInformation("GraphQL catalog schema build started: trigger={Trigger}", trigger);
         try
         {
             var pending = Interlocked.Exchange(ref _pendingBuild, null);
@@ -356,7 +267,9 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
                     fingerprintCache: _tableFingerprintCache,
                     epochService: _epochService,
                     timeProvider: _timeProvider,
+                    phase: "rebuild",
                     ct: cancellationToken).ConfigureAwait(false);
+                _lastFullCheckTimestamp = _timeProvider.GetTimestamp();
                 _transportSeen = seen;
                 _currentSchemaModel = schemaModel;
                 CurrentLookup = GetTableMetadataForField;
@@ -373,12 +286,15 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
         {
             _logger?.LogError(ex, "GraphQL catalog schema could not be built; serving the schema without catalog tables until the catalog is reachable.");
             schemaModel = CatalogSchemaModel.Empty;
+            Interlocked.Exchange(ref _rebuildRequested, 0);
             Volatile.Write(ref _pendingBuild, null);
             _built = new BuiltState(null, []);
             Volatile.Write(ref _builtStructureVersion, -1);
             Volatile.Write(ref _builtContentVersion, -1);
         }
 
+        Volatile.Write(ref _lastBuiltTables, schemaModel.Tables.Count);
+        Volatile.Write(ref _lastBuiltOmitted, schemaModel.OmittedTables.Count);
         EnsureRefreshTimer();
 
         var types = new List<ITypeSystemMember>();
@@ -482,7 +398,7 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
 
             ConnectionGraphQlTypes.RegisterTable(types, table);
             registeredTables++;
-            CatalogSchemaModel.MaybeLogBuildProgress(_logger, _timeProvider, buildStartTimestamp, ref lastProgressTimestamp, registeredTables);
+            CatalogSchemaModel.MaybeLogBuildProgress(_logger, _timeProvider, buildStartTimestamp, ref lastProgressTimestamp, registeredTables, "rebuild");
         }
 
         if (schemaModel.Tables.Count > 0)

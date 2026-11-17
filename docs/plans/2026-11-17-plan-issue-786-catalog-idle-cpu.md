@@ -2,6 +2,8 @@
 
 Phase 2 architect plan. Issue: [#786](https://github.com/themulle/autheris/issues/786). Related: [#675](https://github.com/themulle/autheris/issues/675), [#678](https://github.com/themulle/autheris/issues/678), [#679](https://github.com/themulle/autheris/issues/679), plan [`2026-11-13-plan-issues-catalog-scale.md`](2026-11-13-plan-issues-catalog-scale.md) (`WP-OI-SCALE-*`). Code facts verified on `main` @ `cfbcb7b28`. Bug fix: no new options, no `freeze-exception` needed (default taken).
 
+**Status: IMPLEMENTED (WP-786-1..5)** in one PR. Delivered as planned, with these deviations: the module exposes `internal CheckForCatalogChangesAsync(fromTimer, forceFull, ct)` and the integration readiness helper (`GraphQlSchemaReadiness`) calls it with `forceFull: true` instead of bumping the version in each fixture; the quiet-period state is reset when a build starts, so a change after a finished build is a leading edge again. The `[Trait("Category","Scale")]` measurement (section 5) is not part of this PR and stays open.
+
 ## 1. Root cause (with evidence)
 
 The reporter's suspicion is half right: the periodic check does build a full candidate model on every tick, but that is the steady 6 % baseline that a restart does not remove. The 115 % comes from queued Hot Chocolate (HC) schema rebuilds, one per "GraphQL catalog changed" line, that run one after another long after the sync.

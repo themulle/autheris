@@ -33,7 +33,8 @@ internal static class GraphQlSchemaReadiness
         using var cts = new CancellationTokenSource(timeout);
         try
         {
-            await module.CheckForCatalogChangesAsync(cts.Token);
+            // Fixtures write catalog rows directly (no version bump), so the unchanged-version early exit must not apply.
+            await module.CheckForCatalogChangesAsync(fromTimer: false, forceFull: true, cts.Token);
         }
         catch (OperationCanceledException)
         {
