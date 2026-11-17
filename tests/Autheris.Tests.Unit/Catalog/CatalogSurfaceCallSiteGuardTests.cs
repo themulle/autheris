@@ -128,7 +128,9 @@ public sealed class CatalogSurfaceCallSiteGuardTests
             "TableModels.cs", "DatasetCatalogStore.cs", "CatalogTablePersistedProjection.cs",
             "McpDatasetCatalog.cs", "Query.Catalog.cs", "CatalogDiscoveryService.cs", "McpDatasetModels.cs",
             "DiscoveryService.cs", "DiscoveryAccessMapper.cs", "ExternalCatalogReader.cs",
-            "DatasetCatalogAdminService.cs", "CatalogApiEndpoints.cs"
+            "DatasetCatalogAdminService.cs", "CatalogApiEndpoints.cs",
+            // search_catalog tag filter: removes already authorized hits only, never widens visibility (#712).
+            "McpToolExecutionHandler.cs"
         ];
 
         var offenders = SourceFiles()

@@ -29,6 +29,50 @@ public static class DiscoveryTextSanitizer
         return TruncateOnRuneBoundary(filtered, maxRunes);
     }
 
+    /// <summary>Marker appended to a summary that was cut.</summary>
+    public const string SummaryCutMarker = "…";
+
+    /// <summary>Default maximum length (in runes) of the description summary in list and search results.</summary>
+    public const int MaxSummaryRunes = 240;
+
+    /// <summary>
+    /// Sanitises <paramref name="input"/> like <see cref="SanitizeText"/>, then shortens it for list and search results:
+    /// the first sentence when it fits in <paramref name="maxRunes"/>, otherwise a cut on a rune boundary followed by
+    /// <see cref="SummaryCutMarker"/>. Text that already fits is returned unchanged.
+    /// </summary>
+    public static string? Summarize(string? input, int maxRunes = MaxSummaryRunes)
+    {
+        var clean = SanitizeText(input, MaxDescriptionRunes);
+        if (string.IsNullOrEmpty(clean))
+        {
+            return clean;
+        }
+
+        var sentenceEnd = -1;
+        for (var i = 0; i < clean.Length - 1; i++)
+        {
+            if (clean[i] is '.' or '!' or '?' && char.IsWhiteSpace(clean[i + 1]))
+            {
+                sentenceEnd = i + 1;
+                break;
+            }
+        }
+
+        var candidate = sentenceEnd > 0 ? clean[..sentenceEnd] : clean;
+        var runeCount = 0;
+        foreach (var _ in candidate.EnumerateRunes())
+        {
+            runeCount++;
+        }
+
+        if (runeCount <= maxRunes)
+        {
+            return candidate;
+        }
+
+        return TruncateOnRuneBoundary(candidate, Math.Max(1, maxRunes - 1)).TrimEnd() + SummaryCutMarker;
+    }
+
     public static string SanitizeRequiredText(string? input, string fallback, int maxRunes = MaxDisplayNameRunes)
     {
         var clean = SanitizeText(input, maxRunes, allowNewlinesAndTabs: false);

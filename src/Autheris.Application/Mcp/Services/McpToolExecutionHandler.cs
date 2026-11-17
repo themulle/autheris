@@ -221,11 +221,22 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
                 _ => CatalogSearchMode.Hybrid
             };
 
-            var searchQuery = new CatalogSearchQuery(query, domain, limit, mode, ExpandRelations: true, Language: language);
+            var tagFilter = root.TryGetProperty("tag", out var tagProp) && tagProp.ValueKind == JsonValueKind.String ? tagProp.GetString()?.Trim() : null;
+            if (string.IsNullOrEmpty(tagFilter))
+            {
+                tagFilter = null;
+            }
+
+            // A tag narrows the already authorized hits: the search is widened to the documented maximum, then cut back to the requested limit.
+            var searchQuery = new CatalogSearchQuery(query, domain, tagFilter is null ? limit : MaxCatalogSearchResults, mode, ExpandRelations: true, Language: language);
             IReadOnlyList<CatalogSearchHit> results;
             try
             {
                 results = await _catalogDiscoveryService.SearchCatalogDetailedAsync(searchQuery, requestContext, ct).ConfigureAwait(false);
+                if (tagFilter is not null)
+                {
+                    results = await FilterHitsByTagAsync(results, tagFilter, limit, ct).ConfigureAwait(false);
+                }
             }
             catch (GatewayInvalidQueryException)
             {
@@ -250,7 +261,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
                 table = McpDatasetCatalog.DatasetIdOf(h),
                 domain = h.Domain,
                 display_name = DiscoveryTextSanitizer.SanitizeText(h.DisplayName, DiscoveryTextSanitizer.MaxDisplayNameRunes),
-                description = DiscoveryTextSanitizer.SanitizeText(h.Description, DiscoveryTextSanitizer.MaxDescriptionRunes),
+                description = DiscoveryTextSanitizer.Summarize(h.Description),
                 language = h.Language,
                 relevance_score = Math.Round(h.CombinedScore, 4),
                 matched_terms = h.MatchedTerms.Select(t => DiscoveryTextSanitizer.SanitizeRequiredText(t, string.Empty, DiscoveryTextSanitizer.MaxDisplayNameRunes)).ToList(),
@@ -344,12 +355,17 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
                     continue;
                 }
 
+                // Root field of the table and field of each visible column in the catalog GraphQL schema; only columns of the caller's own view are emitted.
+                var graphQlMapping = _graphQlMap is null ? null : await _graphQlMap.GetTableAsync(tableId, ct).ConfigureAwait(false);
+                var graphQlFields = graphQlMapping?.Columns.ToDictionary(m => m.ColumnName, m => m.Field, StringComparer.OrdinalIgnoreCase);
+
                 var columns = detail.Columns.Select(c => new McpTableBriefColumn(
                     Name: c.Name,
                     Type: c.Type,
                     Description: c.Description,
                     PrimaryKey: c.IsPrimaryKey,
-                    IsSensitive: !string.IsNullOrEmpty(c.Sensitivity) && !string.Equals(c.Sensitivity, "Public", StringComparison.OrdinalIgnoreCase) && !string.Equals(c.Sensitivity, "NORMAL", StringComparison.OrdinalIgnoreCase)
+                    IsSensitive: !string.IsNullOrEmpty(c.Sensitivity) && !string.Equals(c.Sensitivity, "Public", StringComparison.OrdinalIgnoreCase) && !string.Equals(c.Sensitivity, "NORMAL", StringComparison.OrdinalIgnoreCase),
+                    GraphQlField: graphQlFields is not null && graphQlFields.TryGetValue(c.Name, out var columnField) ? columnField : null
                 )).ToList();
 
                 // MCP-05: only declared relations are emitted, never guessed from column names.
@@ -363,7 +379,8 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
                     Description: detail.Description,
                     PrimaryKeys: detail.PrimaryKeys,
                     Columns: columns,
-                    Relations: relations));
+                    Relations: relations,
+                    GraphQlField: graphQlMapping?.QueryField));
             }
 
             return JsonSerializer.Serialize(new McpTableSchemaResult(briefSchemas.Count, briefSchemas), JsonOpts);
@@ -698,6 +715,31 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
 
         static bool Lists(CatalogDatasetDetail dataset, string column) =>
             dataset.Columns.Any(c => string.Equals(c.Name, column, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private async Task<IReadOnlyList<CatalogSearchHit>> FilterHitsByTagAsync(IReadOnlyList<CatalogSearchHit> hits, string tag, int limit, CancellationToken ct)
+    {
+        var kept = new List<CatalogSearchHit>(Math.Min(limit, hits.Count));
+        foreach (var hit in hits)
+        {
+            if (kept.Count >= limit)
+            {
+                break;
+            }
+
+            if (!string.Equals(hit.Kind, "table", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var metadata = await _metadataRepo.GetTableMetadataAsync(hit.TableIdentifier, ct).ConfigureAwait(false);
+            if (metadata is not null && metadata.CatalogTags.Any(t => string.Equals(t, tag, StringComparison.OrdinalIgnoreCase)))
+            {
+                kept.Add(hit);
+            }
+        }
+
+        return kept;
     }
 
     private static string CreateMcpError(string tenantId, string tool, string code, string message) =>

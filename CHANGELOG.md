@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.8.1] - 2026-11-17
+
+### Added
+- MCP discovery ergonomics: `list_datasets` and `search_catalog` return short summaries; `describe_dataset` selects sections and columns and filters relations by term; `search_catalog` filters by tag; over-budget results are shortened by whole datasets; `get_table_schema` reports the GraphQL field per table and visible column.
+
+### Fixed
+- The release footprint gate builds the container image with an empty `dist/modules` directory; v1.8.0 was not published because this gate failed. 1.8.1 is the first published release of the 1.8 line.
+
 ## [1.8.0] - 2026-11-16
 
 ### BREAKING

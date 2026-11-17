@@ -311,7 +311,7 @@ public sealed partial class AiDataGuardrailService
     }
 
     /// <summary>
-    /// Applies the per-call token budget (MCP-08): a result above <c>Mcp.MaxTokensPerCall</c> is replaced by a truncation notice.
+    /// Applies the per-call token budget (MCP-08): a catalog result above <c>Mcp.MaxTokensPerCall</c> is shortened by whole datasets, any other result is replaced by a truncation notice.
     /// Shared by dataset tools and doc tools so no tool skips the budget.
     /// </summary>
     private string ApplyTokenBudget(string toolName, string json, out int estimatedTokens, out bool truncated)
@@ -324,7 +324,13 @@ public sealed partial class AiDataGuardrailService
         {
             _logger.LogWarning("Tool result for '{ToolName}' ({EstimatedTokens} tokens) exceeded max token budget ({MaxTokens}). Truncating result.", toolName, estimatedTokens, maxTokens);
             int maxChars = maxTokens * 4;
-            if (json.Length > maxChars)
+            if (json.Length > maxChars && McpBudgetShortening.TryShorten(toolName, json, maxChars, maxTokens, out var shortened))
+            {
+                json = shortened;
+                estimatedTokens = Math.Max(1, json.Length / 4);
+                truncated = true;
+            }
+            else if (json.Length > maxChars)
             {
                 json = JsonSerializer.Serialize(new
                 {

@@ -59,7 +59,8 @@ if [ ! -f "$ROOT/dist/publish/Autheris.Api.dll" ]; then
     -o "$ROOT/dist/publish"
 fi
 
-# Step 2: Build container image
+# Step 2: Build container image (the Dockerfile copies dist/modules; measure the image without modules)
+mkdir -p "$ROOT/dist/modules"
 echo "Building benchmark container image (autheris:measure)..."
 $CONTAINER_ENGINE build -f Dockerfile -t autheris:measure .
 

@@ -323,6 +323,23 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
 
         try
         {
+            McpDescribeNarrowing.Request? describeNarrowing = null;
+            if (string.Equals(tool.Name, McpDatasetTools.DescribeDataset, StringComparison.OrdinalIgnoreCase))
+            {
+                if (!McpDescribeNarrowing.TryParse(
+                        variables.GetValueOrDefault("include"),
+                        variables.GetValueOrDefault("columns"),
+                        Number("columnOffset"),
+                        Number("columnLimit"),
+                        variables.GetValueOrDefault("relations"),
+                        out var parsedNarrowing))
+                {
+                    return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.InvalidParams, PersistedToolValidator.InvalidArgumentsCode);
+                }
+
+                describeNarrowing = parsedNarrowing;
+            }
+
             object result = tool.Name.ToLowerInvariant() switch
             {
                 McpDatasetTools.ListDatasets => (Text("language") != null || Bool("overview") != null || Text("format") != null)
@@ -337,6 +354,11 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
                 McpDatasetTools.SampleRows => await _datasetCatalog.SampleRowsAsync(principal, Text("dataset") ?? string.Empty, ToCount(variables) is { } requestedCount ? McpRowCap.Effective(requestedCount, Math.Min(RowCap(), McpDatasetCatalog.MaxSampleRows)) : null, cancellationToken).ConfigureAwait(false),
                 _ => await _datasetCatalog.SampleRowsAsync(principal, Text("dataset") ?? string.Empty, ToCount(variables), cancellationToken).ConfigureAwait(false)
             };
+
+            if (describeNarrowing is not null && result is McpDatasetDescription described)
+            {
+                result = McpDescribeNarrowing.Apply(described, describeNarrowing);
+            }
 
             var serialized = JsonSerializer.Serialize(result, CamelCaseJsonOptions);
             return tool.Name.Equals(McpDatasetTools.SampleRows, StringComparison.OrdinalIgnoreCase)
