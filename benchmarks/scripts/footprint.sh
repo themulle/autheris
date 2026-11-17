@@ -81,8 +81,92 @@ COLD_STARTS=()
 LAZY_DUCKDB="true"
 LAZY_ORACLE="true"
 
+# The gateway requires a governance database (PostgreSQL or SQL Server) and, outside Development, a verified-TLS connection to it.
+# A throwaway PostgreSQL sidecar with a throwaway CA and server certificate (valid one day) provides that; the password is random per run.
+RUN_ID="$$"
+NET_NAME="footprint-net-$RUN_ID"
+PG_NAME="footprint-pg-$RUN_ID"
+# Digest-pinned like every other CI image (same major as deploy/podman-compose.yaml).
+PG_IMAGE='docker.io/library/postgres:18-alpine@sha256:b6972e1115a4ff8eba5d7f7d19184926d1e16d7d1136ae1e1a7ebf286da0f015'
+TLS_DIR="$(mktemp -d)"
+CLEANUP_CONTAINER=""
+NET_CREATED=false
+PG_STARTED=false
+
+cleanup() {
+  if [ -n "$CLEANUP_CONTAINER" ]; then
+    $CONTAINER_ENGINE stop "$CLEANUP_CONTAINER" >/dev/null 2>&1 || true
+    $CONTAINER_ENGINE rm -f "$CLEANUP_CONTAINER" >/dev/null 2>&1 || true
+  fi
+  if [ "$PG_STARTED" = "true" ]; then
+    $CONTAINER_ENGINE rm -f "$PG_NAME" >/dev/null 2>&1 || true
+  fi
+  if [ "$NET_CREATED" = "true" ]; then
+    $CONTAINER_ENGINE network rm "$NET_NAME" >/dev/null 2>&1 || true
+  fi
+  rm -rf "$TLS_DIR"
+}
+trap cleanup EXIT
+
+dump_logs() {
+  echo "--- app container logs ($1) ---" >&2
+  $CONTAINER_ENGINE logs "$1" >&2 2>&1 || true
+  echo "--- postgres sidecar logs ---" >&2
+  $CONTAINER_ENGINE logs "$PG_NAME" >&2 2>&1 || true
+}
+
+echo "Starting PostgreSQL sidecar with verified TLS..."
+(
+  cd "$TLS_DIR"
+  openssl genrsa -out ca.key 2048 2>/dev/null
+  openssl req -x509 -new -key ca.key -sha256 -days 1 -subj "/CN=autheris-footprint-ca" -out ca.crt
+  openssl genrsa -out server.key 2048 2>/dev/null
+  openssl req -new -key server.key -subj "/CN=$PG_NAME" -out server.csr
+  printf 'subjectAltName=DNS:%s\nextendedKeyUsage=serverAuth\nbasicConstraints=CA:FALSE\n' "$PG_NAME" > server.ext
+  openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial -sha256 -days 1 -extfile server.ext -out server.crt 2>/dev/null
+  rm -f ca.key ca.srl server.csr server.ext
+  chmod 0644 ca.crt server.crt server.key
+)
+chmod 0755 "$TLS_DIR"
+
+PG_PASSWORD="$(openssl rand -hex 24)"
+$CONTAINER_ENGINE network create "$NET_NAME" >/dev/null
+NET_CREATED=true
+# The key must be owned by the postgres user with mode 0600; copy it inside the container (root at start) instead of chown-ing on the host.
+PG_STARTED=true
+$CONTAINER_ENGINE run -d --name "$PG_NAME" --network "$NET_NAME" \
+  -e POSTGRES_USER=footprint -e POSTGRES_DB=governancedb -e POSTGRES_PASSWORD="$PG_PASSWORD" \
+  -v "$TLS_DIR:/tls-src:ro,z" \
+  --entrypoint sh "$PG_IMAGE" -c '
+    set -e
+    mkdir -p /tls
+    cp /tls-src/server.crt /tls-src/server.key /tls/
+    chown postgres:postgres /tls/server.crt /tls/server.key
+    chmod 0600 /tls/server.key
+    exec docker-entrypoint.sh postgres -c ssl=on -c ssl_cert_file=/tls/server.crt -c ssl_key_file=/tls/server.key' >/dev/null
+
+PG_READY=false
+for _ in $(seq 1 60); do
+  if $CONTAINER_ENGINE exec "$PG_NAME" pg_isready -h 127.0.0.1 -U footprint -d governancedb -q >/dev/null 2>&1; then
+    PG_READY=true
+    break
+  fi
+  sleep 1
+done
+if [ "$PG_READY" != "true" ]; then
+  echo "Error: PostgreSQL sidecar did not become ready within 60 seconds" >&2
+  $CONTAINER_ENGINE logs "$PG_NAME" >&2 2>&1 || true
+  exit 1
+fi
+# The entrypoint restarts the server once after initdb; wait for it to settle on the TCP socket with TLS.
+sleep 2
+
+PG_CONN="Host=$PG_NAME;Port=5432;Database=governancedb;Username=footprint;Password=$PG_PASSWORD;SSL Mode=VerifyFull;Root Certificate=/tls/ca.crt"
+
 # Minimal Production configuration the gateway requires to start (same set as the signed-module container e2e in docker-publish.yml).
 RUN_ENV=(
+  --network "$NET_NAME"
+  -v "$TLS_DIR/ca.crt:/tls/ca.crt:ro,z"
   -e ASPNETCORE_ENVIRONMENT=Production
   -e Gateway__Hosting__AllowedHosts__0=127.0.0.1
   -e Gateway__Hosting__AllowedHosts__1=localhost
@@ -91,16 +175,21 @@ RUN_ENV=(
   -e Gateway__Authentication__ForwardAuth__Enabled=true
   -e Gateway__Authentication__ForwardAuth__TrustedProxies__0=127.0.0.1/32
   -e Gateway__Authentication__ForwardAuth__SharedSecret="$(openssl rand -hex 32)"
+  -e Gateway__GovernanceDb__Provider=PostgreSql
+  -e Gateway__GovernanceDb__ConnectionString="$PG_CONN"
 )
 
-CLEANUP_CONTAINER=""
-cleanup() {
-  if [ -n "$CLEANUP_CONTAINER" ]; then
-    $CONTAINER_ENGINE stop "$CLEANUP_CONTAINER" >/dev/null 2>&1 || true
-    $CONTAINER_ENGINE rm -f "$CLEANUP_CONTAINER" >/dev/null 2>&1 || true
-  fi
-}
-trap cleanup EXIT
+# One-off schema migration (always applies); all measurements below run with Migrations:Mode=Verify so they measure the app, not a migration.
+echo "Applying governance schema migrations (one-off job)..."
+MIGRATE_NAME="footprint-migrate-$RUN_ID"
+if ! $CONTAINER_ENGINE run --name "$MIGRATE_NAME" "${RUN_ENV[@]}" autheris:measure --migrate-governance; then
+  echo "Error: governance migration job failed" >&2
+  dump_logs "$MIGRATE_NAME"
+  $CONTAINER_ENGINE rm -f "$MIGRATE_NAME" >/dev/null 2>&1 || true
+  exit 1
+fi
+$CONTAINER_ENGINE rm -f "$MIGRATE_NAME" >/dev/null 2>&1 || true
+RUN_ENV+=(-e Gateway__GovernanceDb__Migrations__Mode=Verify)
 
 for i in $(seq 1 "$ITERATIONS"); do
   START_NS=$(date +%s%N)
@@ -123,7 +212,7 @@ for i in $(seq 1 "$ITERATIONS"); do
 
   if [ "$READY" != "true" ]; then
     echo "Error: cold start timed out on iteration $i" >&2
-    $CONTAINER_ENGINE logs "$CLEANUP_CONTAINER" >&2 || true
+    dump_logs "$CLEANUP_CONTAINER"
     exit 1
   fi
 

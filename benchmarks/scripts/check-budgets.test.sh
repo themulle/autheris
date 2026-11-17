@@ -33,7 +33,7 @@ assert_exit() {
 # 1. Fixture within budget -> exit 0
 cat > "$TMP_DIR/within.json" <<'EOF'
 {
-  "coreImageUncompressedMB": 325,
+  "coreImageUncompressedMB": 340,
   "coldStartP50Seconds": 3.0,
   "warmP99Milliseconds": 3.47,
   "ciPrWallClockMedianMinutes": 25.0
@@ -43,10 +43,10 @@ SUMMARY_FILE="$TMP_DIR/summary.md"
 GITHUB_STEP_SUMMARY="$SUMMARY_FILE" assert_exit 0 "fixture within budget" bash "$CHECK_SCRIPT" "$BUDGETS_FILE" "$TMP_DIR/within.json"
 grep -q "coreImageUncompressedMB" "$SUMMARY_FILE"
 
-# 2. Footprint metric +11% (325 * 1.11 = 360.75) -> exit 1
+# 2. Footprint metric +11% (340 * 1.11 = 377.4) -> exit 1
 cat > "$TMP_DIR/over-footprint.json" <<'EOF'
 {
-  "coreImageUncompressedMB": 360.75,
+  "coreImageUncompressedMB": 377.4,
   "coldStartP50Seconds": 3.0,
   "warmP99Milliseconds": 3.47,
   "ciPrWallClockMedianMinutes": 25.0
@@ -57,7 +57,7 @@ assert_exit 1 "footprint metric +11%" bash "$CHECK_SCRIPT" "$BUDGETS_FILE" "$TMP
 # 3. PR CI median 30.0 min (lessThan 30) -> exit 1
 cat > "$TMP_DIR/ci-30-0.json" <<'EOF'
 {
-  "coreImageUncompressedMB": 325,
+  "coreImageUncompressedMB": 340,
   "coldStartP50Seconds": 3.0,
   "warmP99Milliseconds": 3.47,
   "ciPrWallClockMedianMinutes": 30.0
@@ -68,7 +68,7 @@ assert_exit 1 "PR CI median 30.0 min" bash "$CHECK_SCRIPT" "$BUDGETS_FILE" "$TMP
 # 4. PR CI median 29.9 min -> exit 0
 cat > "$TMP_DIR/ci-29-9.json" <<'EOF'
 {
-  "coreImageUncompressedMB": 325,
+  "coreImageUncompressedMB": 340,
   "coldStartP50Seconds": 3.0,
   "warmP99Milliseconds": 3.47,
   "ciPrWallClockMedianMinutes": 29.9
@@ -79,7 +79,7 @@ assert_exit 0 "PR CI median 29.9 min" bash "$CHECK_SCRIPT" "$BUDGETS_FILE" "$TMP
 # 5. Missing metric -> exit 1
 cat > "$TMP_DIR/missing.json" <<'EOF'
 {
-  "coreImageUncompressedMB": 325,
+  "coreImageUncompressedMB": 340,
   "coldStartP50Seconds": 3.0,
   "warmP99Milliseconds": 3.47
 }
