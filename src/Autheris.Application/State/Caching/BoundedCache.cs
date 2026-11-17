@@ -70,7 +70,8 @@ public sealed class BoundedCache<TKey, TValue>
     /// <summary>Current number of entries (never above the capacity, apart from transient in-flight inserts).</summary>
     public int Count => _lru.Count;
 
-    /// <summary>Snapshot of the keys currently held (does not promote entries; expired entries may still be listed until read).</summary>
+    /// <summary>Snapshot of the keys currently held (does not promote entries; expired entries may still be listed until read).
+    /// Weakly consistent: a key admitted concurrently with an invalidation can survive it; hits are still TTL- and fingerprint-checked by the callers.</summary>
     public System.Collections.Generic.IEnumerable<TKey> Keys => _lru.Keys;
 
     public bool TryGet(TKey key, out TValue value)

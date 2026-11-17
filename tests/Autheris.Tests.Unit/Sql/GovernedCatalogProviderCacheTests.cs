@@ -73,4 +73,42 @@ public sealed class GovernedCatalogProviderCacheTests
         (await f.ColumnsOf(T(0))).ShouldBe(["id"]);
         f.Loads.ShouldBeGreaterThan(loadsAfterFill);
     }
+
+    private static int CacheCount(GovernedCatalogProvider sut)
+    {
+        var field = typeof(GovernedCatalogProvider).GetField("_cache", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        return (int)field.FieldType.GetProperty("Count")!.GetValue(field.GetValue(sut))!;
+    }
+
+    [Fact]
+    public async Task Invalidate_RemovesMatchingKeys_CaseInsensitive()
+    {
+        var f = new Fixture(maxEntries: 100);
+        await f.ColumnsOf(T(1));
+        await f.ColumnsOf(T(2));
+        CacheCount(f.Sut).ShouldBe(2);
+
+        f.Sut.Invalidate("unrelated");
+        CacheCount(f.Sut).ShouldBe(2);
+
+        // The data source name and the connection key are both "ds" here; either match removes the entry, whatever the case.
+        f.Sut.Invalidate("DS");
+        CacheCount(f.Sut).ShouldBe(0);
+
+        await f.ColumnsOf(T(1));
+        f.Sut.Invalidate();
+        CacheCount(f.Sut).ShouldBe(0);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Hit_WithFingerprintMismatch_IsReloaded()
+    {
+        var f = new Fixture(maxEntries: 100);
+        (await f.ColumnsOf(T(1))).ShouldBe(["id"]);
+
+        f.Column = "changed";
+
+        (await f.ColumnsOf(T(1))).ShouldBe(["changed"]);
+    }
 }

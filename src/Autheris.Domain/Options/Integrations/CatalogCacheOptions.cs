@@ -18,6 +18,6 @@ public sealed class CatalogCacheOptions
     /// <summary>Lifetime of a table metadata entry in seconds, before the epoch check. Valid range 1-300.</summary>
     [Range(1, 300)] public int MetadataTtlSeconds { get; init; } = DefaultMetadataTtlSeconds;
 
-    /// <summary>Maximum number of entries of the governed catalog provider and the tenant catalog lookup. Valid range 100-1000000.</summary>
+    /// <summary>Maximum number of entries of the governed catalog provider. Valid range 100-1000000.</summary>
     [Range(100, 1_000_000)] public int ProviderMaxEntries { get; init; } = DefaultProviderMaxEntries;
 }
