@@ -41,8 +41,7 @@ public sealed record DiscoveryColumn(
     bool WriteProtected = false,
     IReadOnlyList<DiscoveryColumnClassification>? Classifications = null,
     IReadOnlyList<string>? ClearRequestable = null,
-    string? LongDescription = null,
-    [property: HotChocolate.GraphQLIgnore, System.Text.Json.Serialization.JsonIgnore] bool CatalogTextHidden = false)
+    string? LongDescription = null)
 {
     public IReadOnlyList<DiscoveryColumnClassification> Classifications { get; init; } = Classifications ?? [];
     public IReadOnlyList<string> ClearRequestable { get; init; } = ClearRequestable ?? [];
@@ -64,7 +63,12 @@ public sealed record DiscoveryObject(
     DiscoveryTableStatistics? Statistics,
     bool SamplesAvailable,
     bool IsHidden,
-    DiscoveryWriteState? Write = null);
+    DiscoveryWriteState? Write = null)
+{
+    /// <summary>Internal shaping input: names of Masked columns whose catalog text was withheld; never part of a client contract.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public IReadOnlySet<string> HiddenTextColumns { get; init; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+}
 
 public sealed record DiscoveryTableStatistics(
     long? ApproxRowCount,

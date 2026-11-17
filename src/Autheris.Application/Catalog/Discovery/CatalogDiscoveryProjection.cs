@@ -39,8 +39,8 @@ public static class CatalogDiscoveryProjection
                 _ => "Deny"
             },
             IsPrimaryKey: false, IsPiiIndicator: c.Pii,
-            DisplayName: c.CatalogTextHidden ? null : (c.DisplayName ?? c.Name),
-            Description: c.CatalogTextHidden ? null : c.Description,
+            DisplayName: obj.HiddenTextColumns.Contains(c.Name) ? null : (c.DisplayName ?? c.Name),
+            Description: obj.HiddenTextColumns.Contains(c.Name) ? null : c.Description,
             Classifications: c.Classifications, ClearRequestable: c.ClearRequestable)).ToList();
 
         return new CatalogDatasetDetail(

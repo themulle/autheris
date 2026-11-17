@@ -492,8 +492,7 @@ public sealed partial class Query
                     null,
                     WriteProtected: c.WriteProtected,
                     Classifications: classifications,
-                    ClearRequestable: clearRequestable,
-                    CatalogTextHidden: hideText);
+                    ClearRequestable: clearRequestable);
             }).ToList();
 
         return new TableMetadataDto

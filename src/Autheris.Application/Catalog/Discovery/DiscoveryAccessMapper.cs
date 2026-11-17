@@ -52,6 +52,7 @@ public static class DiscoveryAccessMapper
         var defs = classificationDefinitions
             ?? ClassificationAccessResolver.BuiltInCatalog(tenantId ?? ClassificationScopes.Global).Definitions;
         var mappedCols = new List<DiscoveryColumn>(visibleCols.Count);
+        HashSet<string>? hiddenTextColumns = null;
         foreach (var col in visibleCols)
         {
             var (colState, clearInSomeRows) = MapColumnState(table, decision, col.ColumnName);
@@ -95,8 +96,11 @@ public static class DiscoveryAccessMapper
                 WriteProtected: col.WriteProtected,
                 Classifications: classifications,
                 ClearRequestable: clearRequestable,
-                LongDescription: hideText ? null : colLongDescription,
-                CatalogTextHidden: hideText));
+                LongDescription: hideText ? null : colLongDescription));
+            if (hideText)
+            {
+                (hiddenTextColumns ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase)).Add(col.ColumnName);
+            }
         }
 
         var tableLocalized = !string.IsNullOrWhiteSpace(language) ? table.Table.Texts.Resolve(language) : null;
@@ -134,7 +138,10 @@ public static class DiscoveryAccessMapper
             Statistics: tableStats,
             SamplesAvailable: samplesAvailable,
             IsHidden: isHidden,
-            Write: writeState);
+            Write: writeState)
+        {
+            HiddenTextColumns = hiddenTextColumns ?? (IReadOnlySet<string>)new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        };
     }
 
     private static DiscoveryWriteState MapWriteState(

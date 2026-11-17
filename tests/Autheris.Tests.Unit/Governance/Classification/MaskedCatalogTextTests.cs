@@ -325,7 +325,7 @@ public sealed class MaskedCatalogTextTests
         // get_table_schema reads its columns from this projected detail row.
         var ssnDiscovery = obj.Columns.Single(c => c.Name == "ssn");
         ssnDiscovery.LongDescription.ShouldBeNull();
-        ssnDiscovery.CatalogTextHidden.ShouldBeTrue();
+        obj.HiddenTextColumns.ShouldContain("ssn");
         var detail = CatalogDiscoveryProjection.ToDatasetDetail(obj, language: null);
         var ssn = detail.Columns.Single(c => c.Name == "ssn");
         ssn.Description.ShouldBeNull();
@@ -500,7 +500,6 @@ public sealed class MaskedCatalogTextTests
         obj.ShouldNotBeNull();
         var ssn = obj.Columns.Single(c => c.Name == "ssn");
         ssn.State.ShouldBe(DiscoveryColumnState.Clear);
-        ssn.CatalogTextHidden.ShouldBeFalse();
         ssn.DisplayName.ShouldBe("Taxpayer National Secret Identifier");
         ssn.Description.ShouldBe("Secret government tax number issued to taxpayers.");
     }
@@ -518,7 +517,6 @@ public sealed class MaskedCatalogTextTests
         obj.ShouldNotBeNull();
         var ssn = obj.Columns.Single(c => c.Name == "ssn");
         ssn.State.ShouldBe(DiscoveryColumnState.Masked);
-        ssn.CatalogTextHidden.ShouldBeFalse();
         ssn.DisplayName.ShouldBe("Taxpayer National Secret Identifier");
         ssn.Description.ShouldBe("Secret government tax number issued to taxpayers.");
     }

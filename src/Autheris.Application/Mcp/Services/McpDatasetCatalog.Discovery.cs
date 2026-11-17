@@ -299,7 +299,7 @@ public sealed partial class McpDatasetCatalog
             .Select(c =>
             {
                 graphQlColumns.TryGetValue(c.Name, out var field);
-                var colProfile = !brief && !c.CatalogTextHidden && c.Statistics != null
+                var colProfile = !brief && !obj.HiddenTextColumns.Contains(c.Name) && c.Statistics != null
                     ? new ColumnValueProfile(
                         MinValue: c.Statistics.MinValue,
                         MaxValue: c.Statistics.MaxValue,
@@ -312,21 +312,21 @@ public sealed partial class McpDatasetCatalog
                 return new McpDatasetColumn(
                     c.Name,
                     c.DataType,
-                    c.CatalogTextHidden ? null : DiscoveryTextSanitizer.SanitizeText(c.Description, DiscoveryTextSanitizer.MaxDescriptionRunes),
+                    obj.HiddenTextColumns.Contains(c.Name) ? null : DiscoveryTextSanitizer.SanitizeText(c.Description, DiscoveryTextSanitizer.MaxDescriptionRunes),
                     c.Pii,
                     PrimaryKey: false,
                     GraphQlField: field?.Field,
                     GraphQlType: field?.GraphQlType,
                     ValueProfile: colProfile,
                     Access: c.State == DiscoveryColumnState.Clear ? "clear" : "mask",
-                    DisplayName: c.CatalogTextHidden ? null : DiscoveryTextSanitizer.SanitizeText(c.DisplayName, DiscoveryTextSanitizer.MaxDisplayNameRunes),
+                    DisplayName: obj.HiddenTextColumns.Contains(c.Name) ? null : DiscoveryTextSanitizer.SanitizeText(c.DisplayName, DiscoveryTextSanitizer.MaxDisplayNameRunes),
                     Classifications: c.Classifications, ClearRequestable: c.ClearRequestable,
-                    LongDescription: c.CatalogTextHidden ? null : c.LongDescription);
+                    LongDescription: obj.HiddenTextColumns.Contains(c.Name) ? null : c.LongDescription);
             })
             .ToList();
 
         var hiddenCols = obj.Columns
-            .Where(static c => c.CatalogTextHidden)
+            .Where(c => obj.HiddenTextColumns.Contains(c.Name))
             .Select(static c => c.Name)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
