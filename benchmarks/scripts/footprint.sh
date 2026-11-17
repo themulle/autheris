@@ -81,6 +81,18 @@ COLD_STARTS=()
 LAZY_DUCKDB="true"
 LAZY_ORACLE="true"
 
+# Minimal Production configuration the gateway requires to start (same set as the signed-module container e2e in docker-publish.yml).
+RUN_ENV=(
+  -e ASPNETCORE_ENVIRONMENT=Production
+  -e Gateway__Hosting__AllowedHosts__0=127.0.0.1
+  -e Gateway__Hosting__AllowedHosts__1=localhost
+  -e Gateway__DataMasking__HmacSecretKeyVaultRef=footprint-hmac-placeholder
+  -e Gateway__Authentication__Mode=Upstream
+  -e Gateway__Authentication__ForwardAuth__Enabled=true
+  -e Gateway__Authentication__ForwardAuth__TrustedProxies__0=127.0.0.1/32
+  -e Gateway__Authentication__ForwardAuth__SharedSecret="$(openssl rand -hex 32)"
+)
+
 CLEANUP_CONTAINER=""
 cleanup() {
   if [ -n "$CLEANUP_CONTAINER" ]; then
@@ -92,7 +104,7 @@ trap cleanup EXIT
 
 for i in $(seq 1 "$ITERATIONS"); do
   START_NS=$(date +%s%N)
-  CLEANUP_CONTAINER=$($CONTAINER_ENGINE run -d --rm -p "$PORT:8080" -e ASPNETCORE_ENVIRONMENT=Production autheris:measure)
+  CLEANUP_CONTAINER=$($CONTAINER_ENGINE run -d -p "$PORT:8080" "${RUN_ENV[@]}" autheris:measure)
   
   READY=false
   TIMEOUT_SECS=60
@@ -129,13 +141,14 @@ for i in $(seq 1 "$ITERATIONS"); do
   fi
 
   $CONTAINER_ENGINE stop "$CLEANUP_CONTAINER" >/dev/null 2>&1 || true
+  $CONTAINER_ENGINE rm -f "$CLEANUP_CONTAINER" >/dev/null 2>&1 || true
   CLEANUP_CONTAINER=""
   echo "  Iteration $i: $DURATION_MS ms"
 done
 
 # Step 5: Warm Latency Measurement
 echo "Measuring warm latency (Warmup: $WARM_UP, Requests: $WARM_REQUESTS)..."
-CLEANUP_CONTAINER=$($CONTAINER_ENGINE run -d --rm -p "$PORT:8080" -e ASPNETCORE_ENVIRONMENT=Production autheris:measure)
+CLEANUP_CONTAINER=$($CONTAINER_ENGINE run -d -p "$PORT:8080" "${RUN_ENV[@]}" autheris:measure)
 DEADLINE=$(( $(date +%s) + 60 ))
 while [ "$(date +%s)" -lt "$DEADLINE" ]; do
   if curl -s -f -o /dev/null "http://127.0.0.1:$PORT/health/ready" 2>/dev/null; then
