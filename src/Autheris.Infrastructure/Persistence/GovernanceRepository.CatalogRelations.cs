@@ -230,6 +230,9 @@ public partial class GovernanceRepository
         return await CatalogRowHydrator.GetCatalogVersionAsync(conn, CatalogVersionSql, ct).ConfigureAwait(false);
     }
 
+    /// <inheritdoc />
+    public bool BulkRelationsAuthoritative => true;
+
     public async Task<IReadOnlyList<TableRelation>> GetAllRelationsAsync(CancellationToken ct = default)
     {
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
