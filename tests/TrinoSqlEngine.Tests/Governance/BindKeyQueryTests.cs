@@ -1,6 +1,5 @@
 using System.Collections.Immutable;
 using System.Security;
-using Microsoft.Data.Sqlite;
 using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Governance;
 using Xunit;
@@ -24,7 +23,7 @@ public sealed class BindKeyQueryTests
     [Fact]
     public void BindsTextAndEveryParameterInOrdinalOrder_SEC_RF107_20()
     {
-        using var command = new SqliteCommand();
+        using var command = new TrinoSqlEngine.Tests.Compiler.BinderMutationTests.RecCommand();
 
         CompiledSqlBinders.BindKeyQuery(command, Query(Tenant(), Policy()), TargetSqlDialect.PostgreSql);
 
@@ -37,7 +36,7 @@ public sealed class BindKeyQueryTests
     [Fact]
     public void NoParameters_BindsTheTextOnly()
     {
-        using var command = new SqliteCommand();
+        using var command = new TrinoSqlEngine.Tests.Compiler.BinderMutationTests.RecCommand();
 
         CompiledSqlBinders.BindKeyQuery(command, Query(), TargetSqlDialect.PostgreSql);
 
@@ -47,7 +46,7 @@ public sealed class BindKeyQueryTests
     [Fact]
     public void ClientNamedOrigin_IsRefused_NoClientValuesExist_SEC_RF107_20()
     {
-        using var command = new SqliteCommand();
+        using var command = new TrinoSqlEngine.Tests.Compiler.BinderMutationTests.RecCommand();
         var client = new BoundParameter("$p1", "p1", 1, null, SqlParameterType.String, ParameterOrigin.ClientNamed, "who");
 
         Assert.Throws<MissingClientParameterException>(() => CompiledSqlBinders.BindKeyQuery(command, Query(client), TargetSqlDialect.PostgreSql));
@@ -56,7 +55,7 @@ public sealed class BindKeyQueryTests
     [Fact]
     public void ClientPositionalOrigin_IsRefused_SEC_RF107_20()
     {
-        using var command = new SqliteCommand();
+        using var command = new TrinoSqlEngine.Tests.Compiler.BinderMutationTests.RecCommand();
         var client = new BoundParameter("$p1", "p1", 1, "x", SqlParameterType.String, ParameterOrigin.ClientPositional);
 
         Assert.Throws<SecurityException>(() => CompiledSqlBinders.BindKeyQuery(command, Query(client), TargetSqlDialect.PostgreSql));

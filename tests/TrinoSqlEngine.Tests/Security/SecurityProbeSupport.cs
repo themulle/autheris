@@ -2,7 +2,6 @@ using System.Collections.Frozen;
 using System.Data;
 using System.Data.Common;
 using System.Text.RegularExpressions;
-using Microsoft.Data.Sqlite;
 using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Nodes;
 using TrinoSqlEngine.Ast.Visitors;
@@ -239,10 +238,10 @@ internal static class ProbeAsserts
         Xunit.Assert.Equal(expectedPredicates * MentionsPerTenantPredicate(compiled.Dialect), TenantMarkerMentions(compiled));
 }
 
-/// <summary>A command with a settable <c>BindByName</c> property, like ODP.NET's <c>OracleCommand</c>, over an in-memory SQLite command.</summary>
+/// <summary>A command with a settable <c>BindByName</c> property, like ODP.NET's <c>OracleCommand</c>, over an in-process DuckDB command.</summary>
 internal sealed class FakeOracleCommand : DbCommand
 {
-    private readonly SqliteCommand _inner = new();
+    private readonly TrinoSqlEngine.Tests.Compiler.BinderMutationTests.RecCommand _inner = new();
 
     public bool BindByName { get; set; }
 

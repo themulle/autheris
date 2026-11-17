@@ -1,7 +1,6 @@
 using System.Collections.Frozen;
 using System.Collections.Immutable;
 using System.Data;
-using Microsoft.Data.Sqlite;
 using TrinoSqlEngine.Ast.Capabilities;
 using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Generators;
@@ -223,7 +222,7 @@ public class OracleGeneratorTests
 
     // ---- binder (SEC-ADG-03, SEC-ADG-17) ----
 
-    private sealed class BindByNameCommand : SqliteCommand
+    private sealed class BindByNameCommand : TrinoSqlEngine.Tests.Compiler.BinderMutationTests.RecCommand
     {
         public bool BindByName { get; set; }
     }
@@ -246,7 +245,7 @@ public class OracleGeneratorTests
     public void OracleBinder_CommandWithoutBindByName_FailsClosed()
     {
         var binder = new OracleCompiledSqlBinder();
-        using var cmd = new SqliteCommand();
+        using var cmd = new TrinoSqlEngine.Tests.Compiler.BinderMutationTests.RecCommand();
         Assert.ThrowsAny<System.Security.SecurityException>(() => binder.Bind(cmd, Compiled(), new Dictionary<string, object?>()));
     }
 

@@ -1,7 +1,7 @@
 using System.Collections.Immutable;
 using System.Data;
 using System.Security;
-using Microsoft.Data.Sqlite;
+using DuckDB.NET.Data;
 using TrinoSqlEngine.Ast.Capabilities;
 using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Generators;
@@ -198,14 +198,14 @@ internal static class SecurityProbes
         // ---- binder and checked execution (CR-ADG-43, CR-ADG-45, SEC-ADG-03) --------------------------------------------------
         Add("Binder_RefusesAStatementThatNeedsTheCheckedExecutor", "binder-refusal", () =>
         {
-            using var command = new SqliteCommand();
+            using var command = new TrinoSqlEngine.Tests.Compiler.BinderMutationTests.RecCommand();
             var compiled = Checked("INSERT INTO t (a) SELECT 1", expected: 1);
             Assert.Throws<CheckedExecutionRequiredException>(() => new SqlServerCompiledSqlBinder().Bind(command, compiled, new Dictionary<string, object?>()));
         });
 
         Add("Binder_RefusesTheReservedCheckAlias_EvenWhenTheFlagIsLost", "binder-alias", () =>
         {
-            using var command = new SqliteCommand();
+            using var command = new TrinoSqlEngine.Tests.Compiler.BinderMutationTests.RecCommand();
             var flagLost = Checked("INSERT INTO t (a) SELECT 1 FROM (SELECT 1 AS a) autheris_ins", expected: null);
             Assert.False(flagLost.RequiresRowCountCheck);
             Assert.Throws<CheckedExecutionRequiredException>(() => new SqlServerCompiledSqlBinder().Bind(command, flagLost, new Dictionary<string, object?>()));
@@ -218,7 +218,7 @@ internal static class SecurityProbes
             new OracleCompiledSqlBinder().Bind(withProperty, compiled, new Dictionary<string, object?>());
             Assert.True(withProperty.BindByName, "ODP.NET binds by position unless BindByName is true");
 
-            using var withoutProperty = new SqliteCommand();
+            using var withoutProperty = new TrinoSqlEngine.Tests.Compiler.BinderMutationTests.RecCommand();
             Assert.Throws<SecurityException>(() => new OracleCompiledSqlBinder().Bind(withoutProperty, compiled, new Dictionary<string, object?>()));
         });
 
@@ -227,7 +227,7 @@ internal static class SecurityProbes
             using var connection = OpenTable();
             var compiled = Checked("INSERT INTO t (a) SELECT 1 UNION ALL SELECT 2", expected: 1, TargetSqlDialect.DuckDb);
             var executor = new CheckedDmlExecutor(new DuckDbCompiledSqlBinder());
-            Assert.ThrowsAsync<DmlCheckOptionViolationException>(() => executor.ExecuteAsync(connection, compiled, new Dictionary<string, object?>())).GetAwaiter().GetResult();
+            Assert.ThrowsAsync<DmlCheckOptionViolationException>(() => executor.ExecuteAsync(connection, compiled, new Dictionary<string, object?>(), IsolationLevel.Unspecified)).GetAwaiter().GetResult();
             Assert.Equal(0, Count(connection));
         });
 
@@ -236,11 +236,11 @@ internal static class SecurityProbes
             using var connection = OpenTable();
             var compiled = Checked("INSERT INTO t (a) SELECT 1 WHERE 1 = 2", expected: 1, TargetSqlDialect.DuckDb);   // writes 0 rows, 1 expected
             var executor = new CheckedDmlExecutor(new DuckDbCompiledSqlBinder());
-            Assert.ThrowsAsync<DmlCheckOptionViolationException>(() => executor.ExecuteAsync(connection, compiled, new Dictionary<string, object?>())).GetAwaiter().GetResult();
+            Assert.ThrowsAsync<DmlCheckOptionViolationException>(() => executor.ExecuteAsync(connection, compiled, new Dictionary<string, object?>(), IsolationLevel.Unspecified)).GetAwaiter().GetResult();
             Assert.Equal(0, Count(connection));
 
             var matching = Checked("INSERT INTO t (a) SELECT 7", expected: 1, TargetSqlDialect.DuckDb);
-            Assert.Equal(1, executor.ExecuteAsync(connection, matching, new Dictionary<string, object?>()).GetAwaiter().GetResult());
+            Assert.Equal(1, executor.ExecuteAsync(connection, matching, new Dictionary<string, object?>(), IsolationLevel.Unspecified).GetAwaiter().GetResult());
             Assert.Equal(1, Count(connection));
         });
 
@@ -429,7 +429,7 @@ internal static class SecurityProbes
             var d = dialect;
             Add($"BinderFactory_For_RefusesACheckedStatement[{d}]", "binder-factory", () =>
             {
-                using var command = new SqliteCommand();
+                using var command = new TrinoSqlEngine.Tests.Compiler.BinderMutationTests.RecCommand();
                 var compiled = Checked("INSERT INTO t (a) SELECT 1", expected: 1, d);
                 Assert.Throws<CheckedExecutionRequiredException>(() => CompiledSqlBinders.For(d).Bind(command, compiled, new Dictionary<string, object?>()));
             });
@@ -470,9 +470,9 @@ internal static class SecurityProbes
             ExpectedAffectedRows = expected
         };
 
-    private static SqliteConnection OpenTable()
+    private static DuckDBConnection OpenTable()
     {
-        var connection = new SqliteConnection("Data Source=:memory:");
+        var connection = new DuckDBConnection("Data Source=:memory:");
         connection.Open();
         using var create = connection.CreateCommand();
         create.CommandText = "CREATE TABLE t (a INTEGER)";
@@ -480,7 +480,7 @@ internal static class SecurityProbes
         return connection;
     }
 
-    private static long Count(SqliteConnection connection)
+    private static long Count(DuckDBConnection connection)
     {
         using var command = connection.CreateCommand();
         command.CommandText = "SELECT COUNT(*) FROM t";

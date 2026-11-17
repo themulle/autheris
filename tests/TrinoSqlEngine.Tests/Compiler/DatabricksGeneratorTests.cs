@@ -1,7 +1,6 @@
 using System.Collections.Frozen;
 using System.Collections.Immutable;
 using System.Data;
-using Microsoft.Data.Sqlite;
 using TrinoSqlEngine.Ast.Capabilities;
 using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Generators;
@@ -291,7 +290,7 @@ public class DatabricksGeneratorTests
         var compiled = new CompiledSql("SELECT :p1", ImmutableArray.Create(
                 new BoundParameter(":p1", "p1", 0, "acme", SqlParameterType.String, ParameterOrigin.Tenant, "t")),
             TargetSqlDialect.Databricks, SqlStatementClass.Select, ImmutableArray<SecurityPredicateId>.Empty, "v");
-        using var cmd = new SqliteCommand();
+        using var cmd = new TrinoSqlEngine.Tests.Compiler.BinderMutationTests.RecCommand();
         binder.Bind(cmd, compiled, new Dictionary<string, object?>());
         Assert.Equal("p1", cmd.Parameters[0].ParameterName);
         Assert.Equal(DbType.String, cmd.Parameters[0].DbType);
