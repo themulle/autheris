@@ -356,7 +356,10 @@ public sealed class CatalogSearchWarmupService : BackgroundService
                 return false;
             }
 
-            if (changed.Count == 0 && _lastIndexedVersion is { } previous && targetVersion.StructureVersion > previous.StructureVersion)
+            // A version that moved without any changed table row (a mask rule or classification change, which alters which texts are
+            // indexed) cannot be applied as a delta: the stored hidden-text sets and documents would stay stale, so rebuild in full.
+            if (changed.Count == 0 && _lastIndexedVersion is { } previous &&
+                (targetVersion.StructureVersion > previous.StructureVersion || targetVersion.ContentVersion > previous.ContentVersion))
             {
                 return false;
             }

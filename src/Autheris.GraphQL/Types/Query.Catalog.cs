@@ -253,10 +253,14 @@ public sealed partial class Query
 
         // Second line of defence: ToCatalogDtos re-applies the shaping rule with the set's admin view.
         var hiddenText = new Dictionary<TableIdentifier, IReadOnlySet<string>>();
+        var hiddenResolver = new Autheris.Application.Policy.Classification.ClassificationAccessResolver.IndexingHiddenTextResolver(classificationRepository);
         foreach (var t in visible.Tables)
         {
-            hiddenText[t.Identifier] = await Autheris.Application.Policy.Classification.ClassificationAccessResolver
-                .ResolveIndexingHiddenTextColumnsAsync(t, classificationRepository, ct).ConfigureAwait(false);
+            var hidden = await hiddenResolver.ResolveAsync(t, ct).ConfigureAwait(false);
+            if (hidden.Count > 0)
+            {
+                hiddenText[t.Identifier] = hidden;
+            }
         }
 
         var catalogList = ToCatalogDtos(visible.Tables, visible.IsAdminView, activeConsents, pendingRequests, isAdmin, targetLang, hiddenText);

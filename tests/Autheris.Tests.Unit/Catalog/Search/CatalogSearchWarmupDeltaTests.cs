@@ -164,6 +164,74 @@ public sealed class CatalogSearchWarmupDeltaTests
         engine.Search(new CatalogSearchQuery("recoveredmarkerz", Mode: CatalogSearchMode.KeywordBm25), _ => true).Count.ShouldBe(1);
     }
 
+    [Fact]
+    public async Task MaskRuleChangedToHidden_SearchSnapshotRebuilt_TermNoLongerMatches()
+    {
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 11, 15, 12, 0, 0, TimeSpan.Zero));
+        const string tenant = "tenant-a";
+        var ssnColumnId = Guid.NewGuid();
+        var sensitive = MakeTable("people", "People directory", ["id", "ssn"]);
+        sensitive = sensitive with
+        {
+            OwnerTenantId = tenant,
+            Columns =
+            [
+                new TableColumn { ColumnName = "id", DataType = "text" },
+                new TableColumn { Id = ssnColumnId, ColumnName = "ssn", DataType = "text", Description = "Taxpayer zebrawordz number" }
+            ],
+            ColumnClassifications = new Dictionary<string, IReadOnlyList<ColumnClassification>>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["ssn"] =
+                [
+                    new ColumnClassification
+                    {
+                        Scope = ClassificationScopes.Global,
+                        TableColumnId = ssnColumnId.ToString(),
+                        Code = ClassificationScopes.PiiSpecialCode,
+                        Source = "OWNER",
+                        AssignedAt = time.GetUtcNow()
+                    }
+                ]
+            }
+        };
+        var tables = Enumerable.Range(0, 20).Select(i => MakeTable($"filler_{i}", $"Filler table {i}", ["id"])).Append(sensitive).ToList();
+        var repo = new InMemoryDeltaMetadataRepository(tables);
+        var classStore = new Autheris.Tests.Unit.Governance.Classification.TestInMemoryClassificationStore(tenant);
+        ClassificationMaskRule Rule(CatalogTextVisibility text) => new()
+        {
+            Scope = ClassificationScopes.Global,
+            Code = ClassificationScopes.PiiSpecialCode,
+            MaskFunction = MaskFunction.TypeSafeRedact,
+            CatalogText = text,
+            UpdatedBy = "admin",
+            UpdatedAt = time.GetUtcNow()
+        };
+        await classStore.UpsertClassificationMaskRuleAsync(Rule(CatalogTextVisibility.Visible));
+        var versionProvider = new MutableCatalogVersionProvider(new CatalogVersion(1, 1));
+        var bus = new InMemoryEventBus();
+        var engine = new CatalogSearchEngine(
+            new CountingEmbeddingGenerator(),
+            Options.Create(new CatalogSearchOptions { EmbeddingProvider = CatalogEmbeddingProvider.LocalOnnx, EmbeddingDimensions = 4 }),
+            NullLogger<CatalogSearchEngine>.Instance,
+            classificationRepository: classStore);
+
+        using var service = CreateService(repo, engine, versionProvider, bus, time);
+        await service.StartAsync(CancellationToken.None);
+        await WaitHelper.WaitUntil(() => engine.IndexedTableCount == 21, TimeSpan.FromSeconds(5));
+        engine.Search(new CatalogSearchQuery("zebrawordz", Mode: CatalogSearchMode.KeywordBm25), _ => true).Count.ShouldBe(1);
+
+        // The rule path bumps only the content version and touches no table row.
+        await classStore.UpsertClassificationMaskRuleAsync(Rule(CatalogTextVisibility.Hidden));
+        versionProvider.Version = new CatalogVersion(1, 2);
+        time.Advance(CatalogSearchWarmupService.MinimumRebuildInterval);
+        await bus.PublishAsync(ICatalogVersionProvider.CatalogChangedEventChannel, new object());
+        await WaitHelper.WaitUntil(() => engine.LastIndexedVersion == (1L, 2L), TimeSpan.FromSeconds(5));
+        await service.StopAsync(CancellationToken.None);
+
+        repo.GetAllCalls.ShouldBe(2);
+        engine.Search(new CatalogSearchQuery("zebrawordz", Mode: CatalogSearchMode.KeywordBm25), _ => true).ShouldBeEmpty();
+    }
+
     private static CatalogSearchWarmupService CreateService(
         ITableMetadataRepository repo,
         ICatalogSearchEngine engine,

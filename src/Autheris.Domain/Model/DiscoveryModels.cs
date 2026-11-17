@@ -42,7 +42,7 @@ public sealed record DiscoveryColumn(
     IReadOnlyList<DiscoveryColumnClassification>? Classifications = null,
     IReadOnlyList<string>? ClearRequestable = null,
     string? LongDescription = null,
-    bool CatalogTextHidden = false)
+    [property: HotChocolate.GraphQLIgnore, System.Text.Json.Serialization.JsonIgnore] bool CatalogTextHidden = false)
 {
     public IReadOnlyList<DiscoveryColumnClassification> Classifications { get; init; } = Classifications ?? [];
     public IReadOnlyList<string> ClearRequestable { get; init; } = ClearRequestable ?? [];

@@ -362,12 +362,12 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
     private async Task<PreparedDocument[]> PrepareDocumentsAsync(IReadOnlyList<TableMetadata> tables, CancellationToken ct)
     {
         var docs = new PreparedDocument[tables.Count];
+        var hiddenResolver = new ClassificationAccessResolver.IndexingHiddenTextResolver(_classificationRepository);
         for (int i = 0; i < tables.Count; i++)
         {
             ct.ThrowIfCancellationRequested();
             var table = tables[i];
-            var hiddenCols = await ClassificationAccessResolver.ResolveIndexingHiddenTextColumnsAsync(
-                table, _classificationRepository, ct).ConfigureAwait(false);
+            var hiddenCols = await hiddenResolver.ResolveAsync(table, ct).ConfigureAwait(false);
             var (bm25Doc, text) = CatalogSearchDocumentBuilder.BuildDocuments(table, hiddenCols);
             var sha256 = CatalogSearchEmbeddingCache.ComputeContentSha256Hex(text);
             docs[i] = new PreparedDocument(table, bm25Doc, text, sha256, hiddenCols);

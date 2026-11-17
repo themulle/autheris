@@ -797,19 +797,41 @@ public sealed class ClassificationAccessResolver
         string? KeyRef,
         CatalogTextVisibility CatalogText);
 
-    public static async Task<IReadOnlySet<string>> ResolveIndexingHiddenTextColumnsAsync(
+    public static Task<IReadOnlySet<string>> ResolveIndexingHiddenTextColumnsAsync(
         TableMetadata metadata,
         IClassificationRepository? repository,
         CancellationToken ct = default)
+        => new IndexingHiddenTextResolver(repository).ResolveAsync(metadata, ct);
+
+    /// <summary>
+    /// Resolves the columns whose catalog text is HIDDEN for table rows, loading the classification definitions and mask rules once per
+    /// tenant scope; create one per request or rebuild pass and reuse it across tables.
+    /// </summary>
+    public sealed class IndexingHiddenTextResolver(IClassificationRepository? repository)
     {
-        var tenantScope = string.IsNullOrWhiteSpace(metadata.OwnerTenantId) ? null : metadata.OwnerTenantId;
-        IReadOnlyList<DataClassification> defs = Array.Empty<DataClassification>();
-        IReadOnlyList<ClassificationMaskRule> rules = Array.Empty<ClassificationMaskRule>();
-        if (repository is not null)
+        private readonly Dictionary<string, ClassificationPolicyCatalog[]> _catalogsByScope = new(StringComparer.Ordinal);
+
+        public async Task<IReadOnlySet<string>> ResolveAsync(TableMetadata metadata, CancellationToken ct = default)
         {
-            defs = await repository.GetClassificationsAsync(tenantScope, includeInactive: true, ct).ConfigureAwait(false);
-            rules = await repository.GetClassificationMaskRulesAsync(tenantScope, ct).ConfigureAwait(false);
+            var tenantScope = string.IsNullOrWhiteSpace(metadata.OwnerTenantId) ? null : metadata.OwnerTenantId;
+            if (!_catalogsByScope.TryGetValue(tenantScope ?? string.Empty, out var catalogs))
+            {
+                catalogs = await LoadCatalogsAsync(tenantScope, ct).ConfigureAwait(false);
+                _catalogsByScope[tenantScope ?? string.Empty] = catalogs;
+            }
+
+            return await ResolveColumnsAsync(metadata, tenantScope, catalogs, ct).ConfigureAwait(false);
         }
+
+        private async Task<ClassificationPolicyCatalog[]> LoadCatalogsAsync(string? tenantScope, CancellationToken ct)
+        {
+            IReadOnlyList<DataClassification> defs = Array.Empty<DataClassification>();
+            IReadOnlyList<ClassificationMaskRule> rules = Array.Empty<ClassificationMaskRule>();
+            if (repository is not null)
+            {
+                defs = await repository.GetClassificationsAsync(tenantScope, includeInactive: true, ct).ConfigureAwait(false);
+                rules = await repository.GetClassificationMaskRulesAsync(tenantScope, ct).ConfigureAwait(false);
+            }
 
         var defMap = new Dictionary<string, DataClassification>(StringComparer.Ordinal);
         if (defs.Count > 0)
@@ -833,12 +855,15 @@ public sealed class ClassificationAccessResolver
             if (ClassificationScopes.IsGlobal(r.Scope)) globalRules[r.Code] = r;
             else if (tenantScope is not null && string.Equals(r.Scope, tenantScope, StringComparison.Ordinal)) tenantRules[r.Code] = r;
         }
-        var catalogs = new[]
+        return new[]
         {
             new ClassificationPolicyCatalog(ClassificationScopes.Global, catalogDefs, globalRules),
             new ClassificationPolicyCatalog(tenantScope ?? ClassificationScopes.Global, catalogDefs, tenantRules)
         };
+        }
 
+        private async Task<IReadOnlySet<string>> ResolveColumnsAsync(TableMetadata metadata, string? tenantScope, ClassificationPolicyCatalog[] catalogs, CancellationToken ct)
+        {
         HashSet<string>? hidden = null;
         foreach (var col in metadata.Columns)
         {
@@ -867,5 +892,6 @@ public sealed class ClassificationAccessResolver
             }
         }
         return hidden ?? (IReadOnlySet<string>)new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        }
     }
 }

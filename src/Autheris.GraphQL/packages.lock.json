@@ -606,6 +606,7 @@
       "autheris.domain": {
         "type": "Project",
         "dependencies": {
+          "HotChocolate.Abstractions": "[16.7.5, )",
           "MemoryPack": "[1.21.4, )"
         }
       },

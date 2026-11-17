@@ -88,6 +88,7 @@ public sealed partial class CatalogDiscoveryService
         CancellationToken ct)
     {
         var result = new Dictionary<TableIdentifier, IReadOnlySet<string>>();
+        var hiddenResolver = new Autheris.Application.Policy.Classification.ClassificationAccessResolver.IndexingHiddenTextResolver(_classificationRepository);
         foreach (var id in hitTables.Distinct())
         {
             if (!permitted.TryGetValue(id, out var visible) || !IsColumnRestricted(id, permitted, all))
@@ -95,8 +96,7 @@ public sealed partial class CatalogDiscoveryService
                 continue;
             }
 
-            var hidden = await Autheris.Application.Policy.Classification.ClassificationAccessResolver
-                .ResolveIndexingHiddenTextColumnsAsync(visible, _classificationRepository, ct).ConfigureAwait(false);
+            var hidden = await hiddenResolver.ResolveAsync(visible, ct).ConfigureAwait(false);
             if (hidden.Count == 0)
             {
                 continue;

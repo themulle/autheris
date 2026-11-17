@@ -136,6 +136,7 @@ Integration `tests/Autheris.Tests.Integration/Governance/Migrations/` (PG and SQ
 3. PR 3 Resolver + decision integration (`ClassificationAccessResolver`, decision point, `ConsentColumnSnapshot`, `ApplyProfileMasking` removal), step 2 (~400; `size-exception` allowed for generated shape JSON only).
 4. PR 4 Consumers off `IsSensitive` (GrantClassifier, catalog/MCP/OData/federation/profiling, dbt/OpenMetadata mapping to classifications), audit fields, discovery fields (~350).
 4b. PR 4b Catalog text of Masked columns (#571, 5.8): `catalog_text` attribute (included in step 1 DDL), resolver output `CatalogTextVisible`, filtering on the catalog paths and examples, search indexing rule (~170). After PR 4.
+   - 2026-11-17 (PR 4b review): the GraphQL catalog list hides the text of HIDDEN sensitive columns for every caller, not per-caller Clear; this over-hiding is fail-safe and accepted.
 5. PR 5 Admin API and per-classification clear requests (needs WP-47 pipeline) (~380).
 6. PR 6a/6b Drop steps 3 and 4 (~120 src + SQL).
 
