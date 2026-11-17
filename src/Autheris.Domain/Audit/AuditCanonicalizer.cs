@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using Autheris.Domain.Model;
 
 namespace Autheris.Domain.Audit;
@@ -97,23 +95,69 @@ public static class AuditCanonicalizer
     {
         ArgumentNullException.ThrowIfNull(hmacKey);
 
-        var payload = BuildCanonicalPayload(
-            sequence,
-            id,
-            prevHash,
-            occurredAt,
-            eventType,
-            actorSid,
-            targetTable,
-            targetColumn,
-            decision,
-            traceId,
-            detailsJson,
-            tenantId);
+        return HashCanonicalPayload(hmacKey, sequence, id, prevHash, occurredAt, eventType, actorSid, targetTable, targetColumn, decision, traceId, detailsJson, tenantId);
+    }
 
-        Span<byte> hashBytes = stackalloc byte[32];
-        HMACSHA256.HashData(hmacKey, Encoding.UTF8.GetBytes(payload), hashBytes);
-        return Convert.ToHexString(hashBytes);
+    /// <summary>
+    /// Hashes the canonical payload (see <see cref="BuildCanonicalPayload"/>) without building the payload string: SHA-256 when
+    /// <paramref name="hmacKey"/> is null, HMAC-SHA-256 otherwise (an empty key is still a key). Upper-case hex; the digest bytes are identical to hashing the UTF-8
+    /// bytes of <see cref="BuildCanonicalPayload"/>.
+    /// </summary>
+    internal static string HashCanonicalPayload(
+        byte[]? hmacKey,
+        long? sequence,
+        string id,
+        string prevHash,
+        DateTimeOffset occurredAt,
+        string? eventType,
+        string? actorSid,
+        string? targetTable,
+        string? targetColumn,
+        string? decision,
+        string? traceId,
+        string? detailsJson,
+        string? tenantId)
+    {
+        int estimate = 96 + id.Length + prevHash.Length
+            + 2 * ((eventType?.Length ?? 0) + (actorSid?.Length ?? 0) + (targetTable?.Length ?? 0) + (targetColumn?.Length ?? 0)
+                + (decision?.Length ?? 0) + (traceId?.Length ?? 0) + (detailsJson?.Length ?? 0) + (tenantId?.Length ?? 0));
+        var writer = new CanonicalPayloadWriter(estimate);
+        try
+        {
+            if (sequence.HasValue)
+            {
+                writer.Append("v2|");
+                writer.AppendLong(sequence.Value);
+                writer.Append('|');
+            }
+
+            writer.Append(id);
+            writer.Append('|');
+            writer.Append(prevHash);
+            writer.Append('|');
+            writer.AppendRoundTrip(occurredAt);
+            writer.Append('|');
+            writer.AppendCanonical(eventType);
+            writer.Append('|');
+            writer.AppendCanonical(actorSid);
+            writer.Append('|');
+            writer.AppendCanonical(targetTable);
+            writer.Append('|');
+            writer.AppendCanonical(targetColumn);
+            writer.Append('|');
+            writer.AppendCanonical(decision);
+            writer.Append('|');
+            writer.AppendCanonical(traceId);
+            writer.Append('|');
+            writer.AppendCanonical(detailsJson);
+            writer.Append('|');
+            writer.AppendCanonical(tenantId);
+            return writer.HashToHex(hmacKey);
+        }
+        finally
+        {
+            writer.Dispose();
+        }
     }
 
     /// <summary>

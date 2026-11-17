@@ -52,7 +52,8 @@ public static class AuditChainEngine
                 tenantId);
         }
 
-        string canonical = AuditCanonicalizer.BuildCanonicalPayload(
+        return AuditCanonicalizer.HashCanonicalPayload(
+            null,
             sequence,
             id,
             prevHash,
@@ -65,8 +66,6 @@ public static class AuditChainEngine
             traceId,
             detailsJson,
             tenantId);
-        byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(canonical));
-        return Convert.ToHexString(hash);
     }
 
     /// <summary>
