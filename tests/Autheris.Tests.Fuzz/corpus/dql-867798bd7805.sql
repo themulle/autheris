@@ -1,0 +1,1 @@
+WITH a AS (WITH a AS (SELECT 1 AS id) SELECT id FROM a) SELECT id FROM a

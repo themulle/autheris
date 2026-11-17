@@ -1,0 +1,1 @@
+SELECT a || 'x' AS c, -a AS n, a % 2 AS m FROM t

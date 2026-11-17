@@ -1,1 +1,0 @@
-SELECT grouping(dept, region), SUM(amount) FROM orders GROUP BY CUBE (dept, region)

@@ -1,0 +1,1 @@
+SELECT query_to_xml_and_xmlschema('SELECT * FROM hr.salaries', true, false, '')

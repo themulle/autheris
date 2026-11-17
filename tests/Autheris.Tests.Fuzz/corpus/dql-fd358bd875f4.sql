@@ -1,1 +1,0 @@
-SELECT nq'[a]' FROM "T"

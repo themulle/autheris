@@ -1,1 +1,0 @@
-SELECT id FROM orders WHERE created_at > current_date - INTERVAL '7' DAY

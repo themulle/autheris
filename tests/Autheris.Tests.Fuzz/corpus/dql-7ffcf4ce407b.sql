@@ -1,0 +1,1 @@
+SELECT month, total_sales FROM analytics.monthly_sales WHERE year = @year

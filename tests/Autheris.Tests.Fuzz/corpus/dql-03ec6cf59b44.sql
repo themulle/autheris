@@ -1,1 +1,0 @@
-SELECT sys_context('USERENV', 'ISATT') FROM orders

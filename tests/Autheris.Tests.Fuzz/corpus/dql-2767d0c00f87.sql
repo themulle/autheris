@@ -1,0 +1,1 @@
+SELECT upper(email) FROM orders

@@ -1,0 +1,1 @@
+WITH SESSION                    key = 'value'                 WITH                    FUNCTION foo()                    RETURNS bigint                    RETURN 42                 SELECT 1

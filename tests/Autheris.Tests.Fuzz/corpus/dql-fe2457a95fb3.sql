@@ -1,0 +1,1 @@
+SELECT created_at + INTERVAL '1' DAY FROM orders

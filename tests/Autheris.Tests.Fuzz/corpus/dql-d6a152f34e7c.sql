@@ -1,0 +1,1 @@
+SELECT id, name, salary FROM employees WHERE id = 123 ORDER BY name

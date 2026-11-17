@@ -1,0 +1,1 @@
+SELECT * FROM customers WHERE EXISTS (SELECT 1 FROM orders LIMIT 1)

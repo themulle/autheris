@@ -1,0 +1,1 @@
+SELECT u.id, o.id FROM secure_users u JOIN orders o ON u.email = o.email

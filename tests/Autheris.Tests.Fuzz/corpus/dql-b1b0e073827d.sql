@@ -1,0 +1,1 @@
+SELECT dept FROM orders UNION SELECT name FROM customers

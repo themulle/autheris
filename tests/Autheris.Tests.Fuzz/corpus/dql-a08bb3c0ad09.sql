@@ -1,0 +1,1 @@
+SELECT 'O''Reilly' FROM orders

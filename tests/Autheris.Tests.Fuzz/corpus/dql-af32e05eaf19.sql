@@ -1,1 +1,0 @@
-SELECT current_setting('app.tenant')

@@ -1,1 +1,0 @@
-SELECT COUNT(*) FROM orders WHERE amount = 0

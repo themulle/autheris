@@ -1,0 +1,1 @@
+SELECT id, dept FROM orders

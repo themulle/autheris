@@ -1,0 +1,1 @@
+SELECT upper(email), coalesce(status, 'x'), count(*) FROM orders GROUP BY email, status

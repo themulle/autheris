@@ -1,0 +1,1 @@
+SELECT id, CASE WHEN amount > 100 THEN 'big' ELSE 'small' END AS size FROM orders

@@ -1,0 +1,1 @@
+SELECT id FROM t LIMIT 1

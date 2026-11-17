@@ -1,0 +1,1 @@
+SELECT count(*) AS n, count(DISTINCT a) AS d FROM t

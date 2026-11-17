@@ -1,1 +1,0 @@
-SELECT array_agg(id ORDER BY amount) FROM orders

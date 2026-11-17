@@ -1,0 +1,1 @@
+SELECT id FROM employees FOR VERSION AS OF 1

@@ -1,1 +1,0 @@
-SELECT * FROM (SELECT * FROM customers LIMIT 3) c

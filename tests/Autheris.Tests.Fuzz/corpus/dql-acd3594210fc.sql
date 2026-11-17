@@ -1,1 +1,0 @@
-SELECT EXTRACT(MONTH FROM created_at) FROM orders

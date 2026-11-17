@@ -1,0 +1,1 @@
+SELECT (SELECT MAX(id) FROM customers) AS m, amount > 2 AS f FROM orders

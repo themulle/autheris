@@ -1,1 +1,0 @@
-SELECT * FROM (SELECT * FROM "my_schema"."orders" WHERE tenant_id = 42)

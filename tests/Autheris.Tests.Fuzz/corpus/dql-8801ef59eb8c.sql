@@ -1,1 +1,0 @@
-SELECT * FROM TABLE(my_ptf(TABLE(orders)))

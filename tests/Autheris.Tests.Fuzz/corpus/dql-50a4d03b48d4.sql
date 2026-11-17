@@ -1,1 +1,0 @@
-SELECT secret FROM hr.salaries

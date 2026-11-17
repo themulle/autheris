@@ -1,1 +1,0 @@
-SELECT 1; /* comment */ DROP TABLE users

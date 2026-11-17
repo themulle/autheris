@@ -1,1 +1,0 @@
-SELECT id FROM orders WHERE created_at < TIMESTAMP '2024-01-01 10:00:00'

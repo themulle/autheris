@@ -1,0 +1,1 @@
+SELECT json_value(payload, 'lax $.a') FROM t

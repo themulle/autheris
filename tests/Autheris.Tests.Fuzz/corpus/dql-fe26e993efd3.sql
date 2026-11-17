@@ -1,1 +1,0 @@
-SELECT * FROM TABLE(some_ptf(input => TABLE(orders) AS ord(a, b, c)))

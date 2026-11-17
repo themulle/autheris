@@ -1,0 +1,1 @@
+WITH x AS (SELECT * FROM customers LIMIT 5) SELECT * FROM x

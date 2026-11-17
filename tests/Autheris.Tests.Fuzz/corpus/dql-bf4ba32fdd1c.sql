@@ -1,0 +1,1 @@
+SELECT c.id FROM crm_api.public.customers c JOIN erp.public.orders o ON o.customer_id = (SELECT MAX(id) FROM erp.public.orders) WHERE c.id = 1

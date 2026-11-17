@@ -1,0 +1,1 @@
+SELECT id FROM orders WHERE created_at > current_time

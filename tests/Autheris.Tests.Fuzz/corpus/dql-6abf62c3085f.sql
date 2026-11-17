@@ -1,1 +1,0 @@
-SELECT c.id, o.id FROM crm_customers c, orders o WHERE c.email = o.email

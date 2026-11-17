@@ -1,0 +1,1 @@
+SELECT /* outer /* nested */ comment */ 1 FROM orders

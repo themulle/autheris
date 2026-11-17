@@ -1,1 +1,0 @@
-SELECT id FROM orders WHERE id = 1 AND 1 = 2

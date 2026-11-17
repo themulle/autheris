@@ -1,0 +1,1 @@
+SELECT id FROM orders WHERE created_at > DATE 'not-a-date'

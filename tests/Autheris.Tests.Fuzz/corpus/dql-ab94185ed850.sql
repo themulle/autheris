@@ -1,1 +1,0 @@
-SELECT id FROM orders WHERE id = @__gql_internal

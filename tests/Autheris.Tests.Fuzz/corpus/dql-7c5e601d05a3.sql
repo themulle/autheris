@@ -1,1 +1,0 @@
-SELECT CAST(a AS decimal(10, 2)) AS d, CAST(b AS double) AS i, CAST(c AS varchar) AS v FROM t

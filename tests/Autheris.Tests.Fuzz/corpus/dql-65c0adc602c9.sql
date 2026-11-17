@@ -1,1 +1,0 @@
-SELECT tenant_key, display_name, is_active FROM integration_tenants WHERE tenant_key = :p1

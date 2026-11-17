@@ -1,1 +1,0 @@
-SELECT * FROM TABLE(some_ptf(input => 1))

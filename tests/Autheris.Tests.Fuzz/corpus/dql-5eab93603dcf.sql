@@ -1,1 +1,0 @@
-SELECT * FROM t PIVOT (sum(amount) FOR month IN (1, 2))

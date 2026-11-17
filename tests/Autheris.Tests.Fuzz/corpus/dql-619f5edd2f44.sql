@@ -1,1 +1,0 @@
-WITH orders AS (SELECT 1 AS x) SELECT * FROM public.orders

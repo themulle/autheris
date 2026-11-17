@@ -1,0 +1,1 @@
+SELECT EXTRACT(DOW FROM created_at) FROM orders

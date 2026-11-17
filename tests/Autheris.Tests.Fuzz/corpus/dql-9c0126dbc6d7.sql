@@ -1,0 +1,1 @@
+SELECT CAST(id AS "varchar") FROM orders

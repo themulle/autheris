@@ -1,0 +1,1 @@
+SELECT id, status FROM crm_api.public.tickets

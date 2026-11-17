@@ -1,0 +1,1 @@
+SELECT substring(created_at FROM 6 FOR 2) FROM orders

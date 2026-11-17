@@ -1,1 +1,0 @@
-SELECT code FROM lookup

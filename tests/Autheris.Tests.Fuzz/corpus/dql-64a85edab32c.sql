@@ -1,0 +1,1 @@
+SELECT id, COUNT(*) FROM dbo.people GROUP BY id HAVING MAX(salary) > 1

@@ -1,0 +1,1 @@
+SELECT dept, grouping(dept), SUM(amount) FROM orders GROUP BY ROLLUP (dept)

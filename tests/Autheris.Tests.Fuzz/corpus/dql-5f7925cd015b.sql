@@ -1,0 +1,1 @@
+SELECT dept, COUNT(*) FROM orders GROUP BY dept

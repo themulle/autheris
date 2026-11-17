@@ -1,1 +1,0 @@
-SELECT E'foo bar' FROM orders

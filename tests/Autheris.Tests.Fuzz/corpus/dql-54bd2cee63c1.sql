@@ -1,0 +1,1 @@
+SELECT e.id, o.id FROM employees e JOIN orders o ON e.id = o.id

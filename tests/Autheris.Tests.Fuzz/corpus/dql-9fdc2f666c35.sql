@@ -1,0 +1,1 @@
+SELECT CAST(a AS decimal(10, 2)) AS d, TRY_CAST(b AS integer) AS i, CAST(c AS varchar) AS v FROM t

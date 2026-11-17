@@ -1,0 +1,1 @@
+SELECT count(*) FILTER (WHERE a > 1) AS n, array_agg(a ORDER BY b) AS xs FROM t

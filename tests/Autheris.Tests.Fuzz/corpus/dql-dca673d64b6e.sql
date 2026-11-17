@@ -1,1 +1,0 @@
-SELECT x[1].f() FROM orders

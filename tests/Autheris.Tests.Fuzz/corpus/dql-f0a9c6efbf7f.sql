@@ -1,0 +1,1 @@
+SELECT * FROM api.fn_Telemetry(@tenant_id, @region)

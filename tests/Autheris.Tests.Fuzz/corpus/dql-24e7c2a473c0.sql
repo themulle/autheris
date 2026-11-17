@@ -1,1 +1,0 @@
-SELECT id FROM crm_api.public.customers UNION ALL SELECT id FROM erp.public.orders

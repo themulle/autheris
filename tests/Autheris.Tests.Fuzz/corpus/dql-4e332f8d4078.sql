@@ -1,0 +1,1 @@
+SELECT o.id, read_csv('secret.csv') FROM crm.public.orders o JOIN logistics.v1.shipments s ON o.id = s.id

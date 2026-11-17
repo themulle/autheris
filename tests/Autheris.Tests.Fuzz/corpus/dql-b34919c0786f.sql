@@ -1,0 +1,1 @@
+SELECT fn_dblog(NULL, NULL)

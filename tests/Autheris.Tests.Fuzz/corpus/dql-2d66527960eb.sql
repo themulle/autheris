@@ -1,0 +1,1 @@
+SELECT * FROM t FOR VERSION AS OF 'version1'

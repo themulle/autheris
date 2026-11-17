@@ -1,1 +1,0 @@
-SELECT a FROM t WHERE true AND NOT false

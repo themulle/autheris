@@ -1,0 +1,1 @@
+SELECT c.id FROM crm_api.public.customers c WHERE c.id IN ('1', '2', '3') AND c.account_id IN ('X', 'Y')

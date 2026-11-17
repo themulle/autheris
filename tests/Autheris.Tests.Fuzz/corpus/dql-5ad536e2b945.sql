@@ -1,0 +1,1 @@
+SELECT dept, COUNT(id) FROM t GROUP BY ROLLUP (dept)
