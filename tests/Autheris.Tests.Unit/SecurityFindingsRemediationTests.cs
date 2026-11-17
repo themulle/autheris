@@ -348,54 +348,6 @@ public class SecurityFindingsRemediationTests
             GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, mockEnv, _ => null));
     }
 
-    [Fact]
-    public async Task JustificationTriageService_RequiresFourEyes_DisallowsAutoGrantEvenIfLowSensitivity()
-    {
-        var openJevClient = Substitute.For<IOpenJevClient>();
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        var auditRepo = Substitute.For<IAuditLogRepository>();
-
-        var table = new TableIdentifier("finance", "dbo", "low_risk_table");
-        metadataRepo.GetTableMetadataAsync(table, Arg.Any<System.Threading.CancellationToken>())
-            .Returns(new TableMetadata
-            {
-                Table = new Table
-                {
-                    Sensitivity = "LOW_SENSITIVITY",
-                    RequiresFourEyes = true,
-                    IsActive = true
-                }
-            });
-
-        openJevClient.ClassifyJustificationAsync(
-            Arg.Any<TenantId>(),
-            Arg.Any<Sid>(),
-            Arg.Any<TableIdentifier>(),
-            Arg.Any<string>(),
-            Arg.Any<System.Threading.CancellationToken>())
-            .Returns(new JustificationTriageResult(
-                JustificationCategory.LegitimateAudit,
-                0.95,
-                "Routine task",
-                false,
-                null));
-
-        var triageService = new JustificationTriageService(
-            openJevClient,
-            metadataRepo,
-            auditRepo,
-            NullLogger<JustificationTriageService>.Instance);
-
-        var result = await triageService.TriageJustificationAsync(
-            new TenantId("tenant-1"),
-            new Sid("S-1-5-21-1234"),
-            table,
-            "Valid business reason");
-
-        result.AutoGrantEligible.ShouldBeFalse();
-        result.GrantedDuration.ShouldBeNull();
-    }
-
     // =========================================================================
     // Finding B1 & Hardening: Strict Tenant Isolation & TenantId Validation
     // =========================================================================

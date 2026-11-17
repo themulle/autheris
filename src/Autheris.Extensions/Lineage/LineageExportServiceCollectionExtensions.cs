@@ -11,11 +11,8 @@ using Microsoft.Extensions.Logging;
 
 public static class LineageExportServiceCollectionExtensions
 {
-    public const string OpenJevHttpClientName = "OpenJev";
-
     /// <summary>
-    /// External lineage / AI triage endpoints: OpenLineage (Marquez, Atlas, ...) export client and the OpenJEV
-    /// justification classifier. The internal lineage graph store stays in the core.
+    /// External lineage endpoint: OpenLineage (Marquez, Atlas, ...) export client. The internal lineage graph store stays in the core.
     /// </summary>
     public static IServiceCollection AddLineageExportIntegration(this IServiceCollection services, GatewayOptions gatewayOptions)
     {
