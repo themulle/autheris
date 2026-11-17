@@ -110,6 +110,9 @@ jobs:
               --no-restore \
               -p:Version="$VERSION" \
               -o ./dist/modules/lakehouse
+            # The module host rejects module files larger than 64 MiB (the macOS/Windows DuckDB natives exceed it); the image is linux-x64 only.
+            find ./dist/modules/lakehouse/runtimes -mindepth 1 -maxdepth 1 ! -name linux-x64 -exec rm -rf {} + 2>/dev/null || true
+            find ./dist/modules/lakehouse -type f -size +64M -print >&2
             dotnet run --project tools/Autheris.ModuleSigner/Autheris.ModuleSigner.csproj -c Release --no-build -- \
               --dir ./dist/modules/lakehouse \
               --id lakehouse \
@@ -375,6 +378,9 @@ jobs:
           dotnet build tools/Autheris.ModuleSigner/Autheris.ModuleSigner.csproj -c Release --no-restore
           dotnet publish modules/Autheris.Modules.Lakehouse/Autheris.Modules.Lakehouse.csproj -c Release --no-restore \
             -p:Version="$VERSION" -o ./dist/modules/lakehouse
+          # The module host rejects module files larger than 64 MiB (the macOS/Windows DuckDB natives exceed it); the image is linux-x64 only.
+          find ./dist/modules/lakehouse/runtimes -mindepth 1 -maxdepth 1 ! -name linux-x64 -exec rm -rf {} + 2>/dev/null || true
+          find ./dist/modules/lakehouse -type f -size +64M -print >&2
           dotnet run --project tools/Autheris.ModuleSigner/Autheris.ModuleSigner.csproj -c Release --no-build -- \
             --dir ./dist/modules/lakehouse --id lakehouse --version "$VERSION" --host-version "$VERSION"
 
