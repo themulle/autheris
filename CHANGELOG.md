@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- A retry that started right after a failed key-set load could receive the finished load's failure instead of starting its own load (the single-flight cache released its waiters before unregistering the load); the Virtual Filter key set cache and every other user of `SingleFlightKeySetCache` are fixed.
+
 ## [1.8.4] - 2026-11-17
 
 ### Fixed

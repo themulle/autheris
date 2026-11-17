@@ -107,7 +107,7 @@ public sealed class SingleFlightKeySetCache<TValue> : IDisposable where TValue :
         {
             if (TryGet(key, out var raced) && (accept is null || accept(raced!)))
             {
-                flight.Completion.SetResult(raced!);
+                Complete(key, flight, raced!);
                 return;
             }
 
@@ -128,11 +128,11 @@ public sealed class SingleFlightKeySetCache<TValue> : IDisposable where TValue :
                 AbsoluteExpiration = loaded.AbsoluteExpiration,
                 Size = Math.Max(1, loaded.SizeBytes)
             });
-            flight.Completion.SetResult(loaded.Value);
+            Complete(key, flight, loaded.Value);
         }
         catch (Exception ex)
         {
-            flight.Completion.SetException(ex);   // the waiters see the failure; nothing is cached
+            Fail(key, flight, ex);   // the waiters see the failure; nothing is cached
         }
         finally
         {
@@ -140,6 +140,23 @@ public sealed class SingleFlightKeySetCache<TValue> : IDisposable where TValue :
             ((ICollection<KeyValuePair<string, InFlightLoad>>)_inFlight).Remove(new KeyValuePair<string, InFlightLoad>(key, flight));
         }
     }
+
+    // The flight is unregistered BEFORE its waiters are released. Otherwise a caller that continues right after the completion
+    // (for example a retry after a failed load) could still find the finished flight and receive its stale outcome (04 d).
+    private void Complete(string key, InFlightLoad flight, TValue value)
+    {
+        Unregister(key, flight);
+        flight.Completion.SetResult(value);
+    }
+
+    private void Fail(string key, InFlightLoad flight, Exception exception)
+    {
+        Unregister(key, flight);
+        flight.Completion.SetException(exception);
+    }
+
+    private void Unregister(string key, InFlightLoad flight)
+        => ((ICollection<KeyValuePair<string, InFlightLoad>>)_inFlight).Remove(new KeyValuePair<string, InFlightLoad>(key, flight));
 
     /// <summary>One running load; it removes itself when it completes (success or failure), so a failure is never cached.</summary>
     private sealed class InFlightLoad
