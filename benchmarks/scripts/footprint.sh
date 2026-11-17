@@ -175,6 +175,7 @@ RUN_ENV=(
   -e Gateway__Authentication__ForwardAuth__Enabled=true
   -e Gateway__Authentication__ForwardAuth__TrustedProxies__0=127.0.0.1
   -e Gateway__Authentication__ForwardAuth__SharedSecret="$(openssl rand -hex 32)"
+  -e Gateway__Audit__ChainAnchorPath=/app/data/audit-chain.anchor
   -e Gateway__GovernanceDb__Provider=PostgreSql
   -e Gateway__GovernanceDb__ConnectionString="$PG_CONN"
 )
