@@ -19,6 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Removed
 - The unused OpenJev client, `IOpenJevClient`, `JustificationTriageService`, `IJustificationTriageService` and the justification triage result types (#503).
+- `IDelegationCapability.SourceEnforcesRowSecurity` and `SourceEnforcesMasking`: no code read them (#503).
 
 ### Fixed
 - `describe_dataset` returns the column `longDescription` (when requested with `include`) on the discovery-service path too (#714); the GraphQL `DiscoveryColumn` type gains the nullable field `longDescription` (sanitized, visible columns only).
