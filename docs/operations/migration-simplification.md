@@ -130,3 +130,27 @@ SQLite is no longer supported as a governance or metadata store. The gateway fai
 - Helm: `gateway.governanceDb.existingSecret` is required (the chart fails to render without it); there is no SQLite branch in `governance-migration-job.yaml`.
 - `deploy/scripts/smoke-compose.sh` starts the stack with a random database password, polls `/health/ready` for up to 120 s and tears the stack down.
 - There is no data migration tool from a SQLite governance file. Re-create governance data through the Admin API or seed PostgreSQL; the unsupported migration script `tools/migrations/upgrade_governance_v1_1_to_v1_2.sql` was removed.
+
+---
+
+## 4. Role Grantees and Declarative Consent Manifests (1.8.0)
+
+Grants (consents) address users, service principals and groups only (ADR-020). A role never matches a grant; role-bound restrictions (role `Deny` consents, virtual filter profiles bound to a role) keep applying.
+
+### What the upgrade does to existing role consents
+
+Governance step `0011_role_grantee_and_profile_assignment_retirement` runs once on upgrade (PostgreSQL and SQL Server, forward-only):
+
+- Every role consent that is not yet revoked and whose effect is not `Deny` is revoked (`revoked_by_sid = 'system:migration-0011'`, `revoke_reason = 'ADR020_ROLE_GRANTEE_UNSUPPORTED'`). Users who had access only through such a role consent lose it after the upgrade.
+- Role `Deny` consents are not touched and keep restricting access.
+- Access profile assignments are deactivated: role assignments with `ADR020_ROLE_GRANTEE_UNSUPPORTED`, all other assignments with `OD32_PROFILE_ASSIGNMENT_REQUIRES_APPROVAL`.
+
+The canonical `ClusterAdmin` lists what the step revoked or deactivated with `GET /api/v1/admin/authz/migration-report` (`revokedRoleConsents` with tenant, role name and table, `deactivatedProfileAssignments`). Use the report to re-create the access as group grants.
+
+### Consent manifests (`POST /api/v1/governance/consents/apply`)
+
+- A policy with `granteeType: "Role"` is refused for every effect with `400 BAD_REQUEST` ("The manifest contains a policy that is not supported."); nothing of the manifest is applied. Replace the role with a group whose members should hold the access (`granteeType: "Group"`, `granteeRef` = group SID).
+- Every policy needs an absolute `validUntil` (groups and `Deny` policies included) that lies in the future and within `Gateway:Governance:Grants:DeclarativeMaxDuration` (or `MaxDuration` when unset). `validityDays` has no effect; a policy without `validUntil` is refused with `400 INDIVIDUAL_GRANT_REQUIRES_EXPIRY`.
+- Individual `Allow` policies (`User`, `ServicePrincipal`) with a `Clear` column rule or on a sensitive table are refused with `400 INDIVIDUAL_GRANT_REQUIRES_FOUR_EYES`, because a manifest carries no approvals.
+
+Details and an example manifest: [F-GOV-15, Apply Semantics](../features/f-gov-15-declarative-consents-scopes.md#apply-semantics).

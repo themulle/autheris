@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- F-GOV-15 shows a group and a user manifest instead of a role grantee and describes the current apply rules (`validUntil` for every policy, no `validityDays`, no role grantees) and the four-eyes rule for individual grantees, including how to seed test and demo environments; F-GOV-22 explains `INDIVIDUAL_GRANT_REQUIRES_FOUR_EYES` on the manifest path; the simplification migration guide describes what the upgrade does to role consents (#800, #801).
+
 ## [1.8.5] - 2026-11-17
 
 ### Added
@@ -65,6 +68,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - OpenSchema removal (OD-19): The `Gateway:OpenSchema` and `Gateway:Catalog:OpenSchema` keys were removed and setting either key triggers startup failure via `LegacySwitchGuard`. Anonymous catalog access is not supported. Authenticated users discover the catalog by default ("visible unless hidden"); objects and columns can be explicitly hidden using `PUT /api/v1/catalog/datasets/{id}/discovery`, and the legacy `visibility` tier is ignored.
 - MCP `search_catalog` and `find_relevant_tables` name a table hit and its join targets with the `list_datasets` id `domain.schema.table` instead of `domain.table` (`table`, `join_relations[].target_table`, `candidates[].dataset`, `candidates[].relations[].targetTable`), so a hit can be passed to `describe_dataset` and tables with the same name in two schemas are distinct hits (#627). `join_condition` keeps the table names.
 - An unsupported governance provider fails startup: `Gateway:GovernanceDb:Provider` accepts only `PostgreSql` (default) and `SqlServer`; `Sqlite` and SQLite connection strings are rejected in every environment, and an empty connection string fails startup. There is no migration tool from SQLite governance files. The deploy stack (compose, Helm, benchmark) uses PostgreSQL and the `governance-seed` container is removed. See [Governance store migration](docs/operations/migration-simplification.md#3-governance-store-migration-postgresql-and-sql-server).
+- Role grantees retired (ADR-020): a role never matches a grant. `POST /api/v1/governance/consents/apply` refuses a policy with `granteeType: "Role"` (any effect) with `400 BAD_REQUEST`, and every manifest policy, group and `Deny` policies included, needs an absolute `validUntil` within `Gateway:Governance:Grants:DeclarativeMaxDuration`; `validityDays` has no effect. Governance step `0011_role_grantee_and_profile_assignment_retirement` revokes every non-`Deny` role consent on upgrade (revoke reason `ADR020_ROLE_GRANTEE_UNSUPPORTED`) and deactivates access profile assignments; role `Deny` consents stay and keep restricting. The canonical ClusterAdmin lists the revoked consents with `GET /api/v1/admin/authz/migration-report`; re-create the access as group grants. See [Role grantees and declarative consent manifests](docs/operations/migration-simplification.md#4-role-grantees-and-declarative-consent-manifests-180).
 - SQLite data-source support removed (OD-2): `Gateway:DataSources:*` with `Provider = "Sqlite"` (or `"sqlite3"`) or an empty `Provider` fails startup fail-closed with `UnsupportedDataSourceDialectException`; `Microsoft.Data.Sqlite` is removed from production and module projects.
 
 ### Added
