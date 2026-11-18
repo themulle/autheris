@@ -55,7 +55,7 @@ public sealed class AuditRetentionSecurityTests
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { [key] = value }).Build();
         Should.Throw<InvalidOperationException>(() => UnknownGatewayKeyGuard.ThrowIfUnknownKeys(configuration))
-            .Message.ShouldContain("removed in v");
+            .Message.ShouldContain("Gateway:Audit:Worm was removed");
 
         // 100 chained rows, the first 60 are eligible for purge.
         var rows = new List<Row>();

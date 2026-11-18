@@ -37,7 +37,7 @@ public sealed class UnknownGatewayKeyGuardTests
             UnknownGatewayKeyGuard.ThrowIfUnknownKeys(Config(("Gateway:Audit:Worm:Enabled", value))));
 
         ex.Message.ShouldContain("Gateway:Audit:Worm");
-        ex.Message.ShouldContain("removed in v");
+        ex.Message.ShouldContain("Gateway:Audit:Worm was removed");
     }
 
     [Theory]
