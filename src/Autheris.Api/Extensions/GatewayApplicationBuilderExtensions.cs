@@ -259,6 +259,7 @@ public static class GatewayApplicationBuilderExtensions
 
         app.MapUsageEndpoints();
         app.MapVirtualFilterEndpoints();
+        app.MapProductEndpoints();
         app.MapCallerAttributeAdminEndpoints();
         app.MapConsentWorkflowAdminEndpoints();
         app.MapConsentApiEndpoints();

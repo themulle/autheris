@@ -125,7 +125,7 @@ public sealed partial class ColumnMaskingProvider : IColumnMaskingProvider
         }
     }
 
-    // The in-memory side of ARC-C-12: the spec comes from the same builder as the SQL path (a non-SQLite dialect, so a partial mask is
+    // The in-memory side of ARC-C-12: the spec comes from the same builder as the SQL path (a dialect with full mask support, so a partial mask is
     // the variable-length one), only its evaluation is local.
     private static object? EvaluateSpec(MaskingRule rule, string columnName, object? value, string canonicalText)
     {

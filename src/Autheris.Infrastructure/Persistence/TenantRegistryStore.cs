@@ -5,7 +5,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 
 /// <summary>
-/// CR-ADG-31: portable storage of the tenant registry (SQLite, PostgreSQL, SQL Server; plain SELECT/INSERT/UPDATE, no
+/// CR-ADG-31: portable storage of the tenant registry (PostgreSQL, SQL Server; plain SELECT/INSERT/UPDATE, no
 /// dialect-specific upsert). The primary key is the normalized key (<see cref="TenantRegistryKey"/>), so two spellings of one
 /// group can never both be recorded: the insert of the loser fails on the key, and the loser marks the group as collided.
 /// A collided group denies every spelling, including the first one, until an operator resolves it. Statements run in

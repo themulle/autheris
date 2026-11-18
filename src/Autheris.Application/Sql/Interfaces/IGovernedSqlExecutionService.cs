@@ -20,6 +20,9 @@ public static class SqlTransports
     public const string Trino = "Trino";
     public const string Rest = "Rest";
     public const string Mcp = "Mcp";
+
+    /// <summary>Stage 1 of a data product, run as the product definer; never listed in the cross-source allowed transports, never settable by a client.</summary>
+    public const string ProductLoad = "ProductLoad";
     public const string ArrowExport = "ArrowExport";
     public const string SqlEndpoints = "SqlEndpoints";
     public const string AsyncJob = "AsyncJob";

@@ -1,5 +1,6 @@
 namespace Autheris.Extensions.Lakehouse.Services;
 
+using Autheris.Modules.Lakehouse.Models;
 using System;
 using System.Collections.Generic;
 using System.Linq;
