@@ -1,4 +1,4 @@
-namespace Autheris.Domain.Model;
+namespace Autheris.Modules.Lakehouse.Models;
 
 using System;
 using System.Collections.Generic;
