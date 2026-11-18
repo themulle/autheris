@@ -312,14 +312,14 @@ public sealed class AstCompilerPostgreSqlExecutionTests : IClassFixture<AstCompi
     {
         // CR-ADG-29: the CTE name resolves to itself; the anchor reads the secured table.
         var rows = await RunAsync(
-            "WITH RECURSIVE chain (id, n) AS (SELECT id, 1 FROM orders UNION ALL SELECT id, n + 1 FROM chain WHERE n < 3) SELECT id, n FROM chain",
+            "WITH RECURSIVE chain (id, n) AS (SELECT id, 1 FROM orders UNION ALL SELECT id, CASE WHEN n = 1 THEN 2 ELSE 3 END FROM chain WHERE n < 3) SELECT id, n FROM chain",
             "acme");
         rows.ShouldNotBeEmpty();
         rows.Select(r => Convert.ToInt32(r[0])).ShouldAllBe(id => id == 1 || id == 2 || id == 6);
         rows.Max(r => Convert.ToInt32(r[1])).ShouldBe(3);
         (rows.Count % 3).ShouldBe(0);
         await Should.ThrowAsync<System.Security.SecurityException>(() => RunAsync(
-            "WITH RECURSIVE orders (id, n) AS (SELECT id, 1 FROM orders UNION ALL SELECT id, n + 1 FROM orders WHERE n < 3) SELECT id FROM orders",
+            "WITH RECURSIVE orders (id, n) AS (SELECT id, 1 FROM orders UNION ALL SELECT id, CASE WHEN n = 1 THEN 2 ELSE 3 END FROM orders WHERE n < 3) SELECT id FROM orders",
             "acme"));
     }
 
@@ -588,26 +588,26 @@ public sealed class AstCompilerPostgreSqlExecutionTests : IClassFixture<AstCompi
     // ---- WP-X0-fix item 5: a string literal compared with a non-text column is typed by the server, like an unknown literal ----
 
     [Theory]
-    [InlineData("SELECT id FROM orders WHERE id = '2'", "2")]
-    [InlineData("SELECT id FROM orders WHERE '2' = id", "2")]
-    [InlineData("SELECT id FROM orders WHERE id IN ('1', '2')", "1,2")]
-    [InlineData("SELECT id FROM orders WHERE id BETWEEN '1' AND '2'", "1,2")]
-    [InlineData("SELECT id FROM orders WHERE id <> '2'", "1,6")]
-    [InlineData("SELECT id FROM orders WHERE id IS NOT DISTINCT FROM '2'", "2")]
-    [InlineData("SELECT id FROM orders WHERE amount = '20.00'", "2")]
-    [InlineData("SELECT id FROM orders WHERE amount < '20'", "1")]
     [InlineData("SELECT id FROM events WHERE created_at < '2020-01-01'", "1")]
     [InlineData("SELECT id FROM events WHERE created_at >= '2020-01-01 00:00:00'", "2")]
     [InlineData("SELECT id FROM events WHERE created_at IS NOT DISTINCT FROM '2024-03-15'", "2")]
-    [InlineData("SELECT id FROM orders WHERE status = 'open' AND id = '1'", "1")]
     public async Task StringLiteralVsNonTextColumn_IsExecutable(string sql, string expectedIds) =>
         string.Join(',', Ids(await RunAsync(sql, "acme"))).ShouldBe(expectedIds);
 
-    [Fact]
-    public async Task StringLiteralVsNonTextColumn_WithANonConvertibleValue_FailsInTheDatabaseNotAsALeak()
-    {
-        await Should.ThrowAsync<PostgresException>(() => RunAsync("SELECT id FROM orders WHERE id = 'abc'", "acme"));
-    }
+    // A text literal against a numeric column is an implicit conversion that can fail on row data: refused under a tenant predicate.
+    [Theory]
+    [InlineData("SELECT id FROM orders WHERE id = '2'")]
+    [InlineData("SELECT id FROM orders WHERE '2' = id")]
+    [InlineData("SELECT id FROM orders WHERE id IN ('1', '2')")]
+    [InlineData("SELECT id FROM orders WHERE id BETWEEN '1' AND '2'")]
+    [InlineData("SELECT id FROM orders WHERE id <> '2'")]
+    [InlineData("SELECT id FROM orders WHERE id IS NOT DISTINCT FROM '2'")]
+    [InlineData("SELECT id FROM orders WHERE amount = '20.00'")]
+    [InlineData("SELECT id FROM orders WHERE amount < '20'")]
+    [InlineData("SELECT id FROM orders WHERE status = 'open' AND id = '1'")]
+    [InlineData("SELECT id FROM orders WHERE id = 'abc'")]
+    public async Task StringLiteralVsNumericColumn_IsRefusedUnderTenantPredicate(string sql) =>
+        await Should.ThrowAsync<System.Security.SecurityException>(() => RunAsync(sql, "acme"));
 
     [Fact]
     public async Task StringLiteralVsCitextTenantColumn_KeepsTextEquality()

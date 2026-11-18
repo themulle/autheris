@@ -49,7 +49,7 @@ public sealed class GovernedSqlExecutorX1Tests
     }
 
     private const string RecursiveSql =
-        "WITH RECURSIVE t(id) AS (SELECT id FROM orders WHERE id = 1 UNION ALL SELECT id + 1 FROM t WHERE id < 3) SELECT id FROM t";
+        "WITH RECURSIVE t(id) AS (SELECT id FROM orders WHERE id = 1 UNION ALL SELECT id FROM t WHERE id < 3) SELECT id FROM t";
 
     internal static ClaimsPrincipal Writer() =>
         Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(new ClaimsPrincipal(new ClaimsIdentity(

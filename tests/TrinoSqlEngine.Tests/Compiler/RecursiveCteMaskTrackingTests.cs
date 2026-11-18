@@ -46,16 +46,16 @@ public class RecursiveCteMaskTrackingTests
     }, CancellationToken.None);
 
     [Theory]
-    [InlineData("WITH RECURSIVE r (n, s) AS (SELECT 1, 'x' UNION ALL SELECT 2, email FROM orders UNION ALL SELECT n + 1, 'x' FROM r WHERE n < 3) ")]
-    [InlineData("WITH RECURSIVE r (n, s) AS (SELECT 1, 'x' UNION ALL SELECT 2, 'x' UNION ALL SELECT r.n + 1, o.email FROM r JOIN orders o ON o.id = r.n WHERE r.n < 3) ")]
-    [InlineData("WITH RECURSIVE r (n, s) AS (SELECT id, email FROM orders UNION ALL SELECT 2, 'x' UNION ALL SELECT n + 1, 'x' FROM r WHERE n < 3) ")]
-    [InlineData("WITH RECURSIVE r (s, n) AS (SELECT email, 1 FROM orders UNION ALL SELECT 'x', n + 1 FROM r WHERE n < 3) ")]
-    [InlineData("WITH RECURSIVE r (s, n) AS (SELECT 'x', 1 UNION ALL SELECT o.email, r.n + 1 FROM r JOIN orders o ON o.id = r.n WHERE r.n < 3) ")]
-    [InlineData("WITH RECURSIVE r (n, s) AS (SELECT 1, 'x' UNION ALL SELECT r.n + 1, coalesce(o.email, 'y') FROM r JOIN orders o ON o.id = r.n WHERE r.n < 3) ")]
-    [InlineData("WITH RECURSIVE r (n, s) AS (SELECT 1, 'x' UNION ALL SELECT r.n + 1, upper(o.email) FROM r JOIN orders o ON o.id = r.n WHERE r.n < 3) ")]
-    [InlineData("WITH RECURSIVE r (n, s) AS (SELECT 1, 'x' UNION ALL SELECT r.n + 1, CASE WHEN r.n > 0 THEN o.email END FROM r JOIN orders o ON o.id = r.n WHERE r.n < 3) ")]
-    [InlineData("WITH RECURSIVE r AS (SELECT 1 AS n, 'x' AS s UNION ALL SELECT 2, email FROM orders UNION ALL SELECT n + 1, s FROM r WHERE n < 3) ")]
-    [InlineData("WITH RECURSIVE r AS (SELECT id AS n, 'x' AS s FROM orders UNION ALL SELECT r.n + 1, e.email FROM r JOIN (SELECT id, email FROM orders) e ON e.id = r.n WHERE r.n < 3) ")]
+    [InlineData("WITH RECURSIVE r (n, s) AS (SELECT 1, 'x' UNION ALL SELECT 2, email FROM orders UNION ALL SELECT n, 'x' FROM r WHERE n < 3) ")]
+    [InlineData("WITH RECURSIVE r (n, s) AS (SELECT 1, 'x' UNION ALL SELECT 2, 'x' UNION ALL SELECT r.n, o.email FROM r JOIN orders o ON o.id = r.n WHERE r.n < 3) ")]
+    [InlineData("WITH RECURSIVE r (n, s) AS (SELECT id, email FROM orders UNION ALL SELECT 2, 'x' UNION ALL SELECT n, 'x' FROM r WHERE n < 3) ")]
+    [InlineData("WITH RECURSIVE r (s, n) AS (SELECT email, 1 FROM orders UNION ALL SELECT 'x', n FROM r WHERE n < 3) ")]
+    [InlineData("WITH RECURSIVE r (s, n) AS (SELECT 'x', 1 UNION ALL SELECT o.email, r.n FROM r JOIN orders o ON o.id = r.n WHERE r.n < 3) ")]
+    [InlineData("WITH RECURSIVE r (n, s) AS (SELECT 1, 'x' UNION ALL SELECT r.n, coalesce(o.email, 'y') FROM r JOIN orders o ON o.id = r.n WHERE r.n < 3) ")]
+    [InlineData("WITH RECURSIVE r (n, s) AS (SELECT 1, 'x' UNION ALL SELECT r.n, upper(o.email) FROM r JOIN orders o ON o.id = r.n WHERE r.n < 3) ")]
+    [InlineData("WITH RECURSIVE r (n, s) AS (SELECT 1, 'x' UNION ALL SELECT r.n, CASE WHEN r.n > 0 THEN o.email END FROM r JOIN orders o ON o.id = r.n WHERE r.n < 3) ")]
+    [InlineData("WITH RECURSIVE r AS (SELECT 1 AS n, 'x' AS s UNION ALL SELECT 2, email FROM orders UNION ALL SELECT n, s FROM r WHERE n < 3) ")]
+    [InlineData("WITH RECURSIVE r AS (SELECT id AS n, 'x' AS s FROM orders UNION ALL SELECT r.n, e.email FROM r JOIN (SELECT id, email FROM orders) e ON e.id = r.n WHERE r.n < 3) ")]
     public void MaskedValueAtAnyMemberPosition_MarksThatOutputColumn(string head)
     {
         // the masked output column is never usable in a filter, a sort or an aggregate; the clear one still is
@@ -90,7 +90,7 @@ public class RecursiveCteMaskTrackingTests
     [Fact]
     public void MaskedAnchorWithNamesFromTheAnchor_IsTrackedByName()
     {
-        const string Head = "WITH RECURSIVE r AS (SELECT id AS n, email AS s FROM orders UNION ALL SELECT n + 1, s FROM r WHERE n < 3) ";
+        const string Head = "WITH RECURSIVE r AS (SELECT id AS n, email AS s FROM orders UNION ALL SELECT n, s FROM r WHERE n < 3) ";
 
         Assert.Throws<SecurityException>(() => Compile(Head + "SELECT n FROM r WHERE s = 'x'"));
         Assert.NotNull(Compile(Head + "SELECT n FROM r WHERE n = 1"));
@@ -99,7 +99,7 @@ public class RecursiveCteMaskTrackingTests
     [Fact]
     public void MaskedAnchorWithUnaliasedColumn_KeepsItsSimpleName()
     {
-        const string Head = "WITH RECURSIVE r AS (SELECT id, email FROM orders UNION ALL SELECT id + 1, email FROM r WHERE id < 3) ";
+        const string Head = "WITH RECURSIVE r AS (SELECT id, email FROM orders UNION ALL SELECT id, email FROM r WHERE id < 3) ";
 
         Assert.Throws<SecurityException>(() => Compile(Head + "SELECT id FROM r WHERE email = 'x'"));
         Assert.NotNull(Compile(Head + "SELECT id FROM r WHERE id = 1"));
@@ -108,7 +108,7 @@ public class RecursiveCteMaskTrackingTests
     [Fact]
     public void NoMaskedColumnAnywhere_IsNotRestricted()
     {
-        const string Head = "WITH RECURSIVE r (n, s) AS (SELECT id, region FROM orders UNION ALL SELECT n + 1, s FROM r WHERE n < 3) ";
+        const string Head = "WITH RECURSIVE r (n, s) AS (SELECT id, region FROM orders UNION ALL SELECT n, s FROM r WHERE n < 3) ";
 
         Assert.NotNull(Compile(Head + "SELECT n FROM r WHERE s = 'x'"));
         Assert.NotNull(Compile(Head + "SELECT max(s) FROM r"));

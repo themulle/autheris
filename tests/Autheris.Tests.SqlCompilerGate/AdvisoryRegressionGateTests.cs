@@ -65,4 +65,26 @@ public sealed class AdvisoryRegressionGateTests
         // control: statements without a data-dependent failure still compile (the Databricks case reuses the PostgreSQL catalog types, so it only proves the refusal)
         if (dialect != "databricks") engine.Compile("SELECT id FROM orders WHERE id > 3 AND id / 2 = 1".AsMemory(), Request(dialect, scenario), CancellationToken.None).Sql.ShouldNotBeNullOrEmpty();
     }
+
+    [Theory]
+    [InlineData("postgresql", "case_03", "SELECT id FROM orders WHERE sqrt(id) > 1")]
+    [InlineData("sqlserver", "case_03", "SELECT id FROM orders WHERE sqrt(id) > 1")]
+    [InlineData("oracle", "case_03", "SELECT id FROM orders WHERE sqrt(id) > 1")]
+    [InlineData("databricks", "case_03", "SELECT id FROM orders WHERE sqrt(id) > 1")]
+    [InlineData("postgresql", "case_04", "SELECT id FROM orders WHERE power(id, 2) = 4")]
+    [InlineData("sqlserver", "case_04", "SELECT id FROM orders WHERE power(id, 2) = 4")]
+    [InlineData("oracle", "case_04", "SELECT id FROM orders WHERE power(id, 2) = 4")]
+    [InlineData("databricks", "case_04", "SELECT id FROM orders WHERE power(id, 2) = 4")]
+    [InlineData("postgresql", "case_05", "SELECT id FROM orders WHERE id + 1 > 3")]
+    [InlineData("sqlserver", "case_05", "SELECT id FROM orders WHERE id + 1 > 3")]
+    [InlineData("oracle", "case_05", "SELECT id FROM orders WHERE id + 1 > 3")]
+    [InlineData("databricks", "case_05", "SELECT id FROM orders WHERE id + 1 > 3")]
+    public void Regression_allowlist_case(string dialect, string item, string sql)
+    {
+        Assert.NotNull(item);
+        var engine = new FastSqlEngine();
+
+        Should.Throw<SecurityException>(() => engine.Compile(sql.AsMemory(), Request(dialect, PolicyScenario.Tenant), CancellationToken.None))
+            .Message.ShouldBe(RowPolicyErrorGuard.Message);
+    }
 }

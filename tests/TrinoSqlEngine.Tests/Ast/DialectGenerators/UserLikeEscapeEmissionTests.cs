@@ -164,7 +164,7 @@ public sealed class UserLikeEscapeEmissionTests
         Assert.Contains(backslashEscape, literal.Sql, StringComparison.Ordinal);
         Assert.Contains(literal.Parameters, p => Equals(p.Value, "a\\\\b%"));
 
-        var nonLiteral = Compile("SELECT id FROM orders WHERE name LIKE email", dialect);
+        var nonLiteral = Compile("SELECT id, name LIKE email AS m FROM orders", dialect);
         Assert.Contains(dialect == TargetSqlDialect.Databricks ? backslashEscape : "ESCAPE ''", nonLiteral.Sql, StringComparison.Ordinal);
 
         var custom = Compile("SELECT id FROM orders WHERE name LIKE 'a\\b%' ESCAPE '!'", dialect);

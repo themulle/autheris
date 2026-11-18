@@ -180,7 +180,7 @@ public class G8AllocationGuardSecurityTests
     [Fact]
     public void RecursiveCte_GateStillFires_WhenDisabled()
     {
-        const string recursive = "WITH RECURSIVE r (n) AS (SELECT id FROM orders UNION ALL SELECT n + 1 FROM r WHERE n < 3) SELECT n FROM r";
+        const string recursive = "WITH RECURSIVE r (n) AS (SELECT id FROM orders UNION ALL SELECT n FROM r WHERE n < 3) SELECT n FROM r";
 
         Assert.Throws<SqlCompileNotSupportedException>(() => Compile(recursive, Request(maskEmail: false, recursive: false)));
         Assert.NotNull(Compile(recursive, Request(maskEmail: false, recursive: true)));

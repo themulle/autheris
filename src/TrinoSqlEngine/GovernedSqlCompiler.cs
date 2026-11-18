@@ -224,7 +224,7 @@ internal sealed class GovernedSqlCompiler
         if (visitor.RowPolicyApplied)
         {
             // Details: private advisory. The user tree (without any injected predicate) is checked.
-            Ast.Security.RowPolicyErrorGuard.Enforce(simplified);
+            Ast.Security.RowPolicyErrorGuard.Enforce(typedLiterals);
         }
 
         CheckBudget(request, clock, token);

@@ -1,0 +1,121 @@
+using System.Security;
+using TrinoSqlEngine.Ast.Emit;
+using TrinoSqlEngine.Ast.Nodes;
+using TrinoSqlEngine.Ast.Security;
+using TrinoSqlEngine.Governance;
+using Xunit;
+using static TrinoSqlEngine.Tests.Compiler.PolicyFixtures;
+
+namespace TrinoSqlEngine.Tests.Compiler;
+
+/// <summary>Allowlist of non-raising user expressions while a tenant predicate applies (issue 847, GHSA-66xj-4459-x8gx).</summary>
+[Trait("Category", "SqlGate")]
+[Trait("Category", "Security")]
+public class RowPolicyExpressionAllowlistTests
+{
+    private readonly FastSqlEngine _engine = new();
+
+    private static CompileRequest Request(TargetSqlDialect dialect)
+    {
+        var rowFilters = new DictPolicyProvider();
+        rowFilters.NoPolicy.Add(Orders);
+        rowFilters.NoPolicy.Add(Lookup);
+        return new CompileRequest
+        {
+            TargetDialect = dialect,
+            TokenGuards = SqlTokenSecurityOptions.Strict,
+            AllowedFunctions = SqlFunctionAllowlists.Build(dialect, null),
+            Policy = new GovernancePolicy
+            {
+                RowFilters = rowFilters,
+                Masks = new DictMaskProvider(),
+                Catalog = Catalog(),
+                Tenant = new TenantBinding("__autheris_tenant", "acme", SqlParameterType.String)
+            }
+        };
+    }
+
+    private CompiledSql Compile(string sql, TargetSqlDialect dialect = TargetSqlDialect.SqlServer) => _engine.Compile(sql.AsMemory(), Request(dialect), CancellationToken.None);
+
+    public static TheoryData<string, string> Refused() => new()
+    {
+        { "case_01", "SELECT Id FROM Orders WHERE Id + 1 > 3" },
+        { "case_02", "SELECT Id FROM Orders WHERE Id * 2 > 3" },
+        { "case_03", "SELECT Id FROM Orders WHERE Amount / Id > 3" },
+        { "case_04", "SELECT Id FROM Orders WHERE Id % Id = 0" },
+        { "case_05", "SELECT Id FROM Orders WHERE sqrt(Id) > 3" },
+        { "case_06", "SELECT Id FROM Orders WHERE ln(Id) > 3" },
+        { "case_07", "SELECT Id FROM Orders WHERE power(Id, 2) > 3" },
+        { "case_08", "SELECT Id FROM Orders WHERE to_date(Status) IS NULL" },
+        { "case_09", "SELECT Id FROM Orders WHERE date_parse(Status, '%Y') IS NULL" },
+        { "case_10", "SELECT Id FROM Orders WHERE regexp_like(Status, 'a+')" },
+        { "case_11", "SELECT Id FROM Orders WHERE json_parse(Status) IS NULL" },
+        { "case_12", "SELECT Id FROM Orders WHERE element_at(Status, Id) = 'a'" },
+        { "case_13", "SELECT Id FROM Orders WHERE exp(Id) > 1" },
+        { "case_14", "SELECT Id FROM (SELECT 1 / (Id - Id + 1) AS Q, Id FROM Orders) AS d WHERE Q = 1" },
+        { "case_15", "SELECT Id FROM Orders WHERE Id = '5'" },
+        { "case_16", "SELECT Id FROM Orders WHERE CAST(Status AS INTEGER) = 1" },
+        { "case_17", "SELECT Id FROM Orders WHERE (SELECT Id FROM Entitlements) = 1" },
+        { "case_19", "SELECT Id FROM Orders WHERE abs(Id) > 3" },
+        { "case_20", "SELECT Id FROM Orders GROUP BY Id HAVING sum(Id) > 3" },
+        { "case_21", "SELECT Id FROM Orders WHERE -Id > 3" },
+        { "case_22", "SELECT Id FROM Orders WHERE Id / 0 > 3" },
+        { "case_23", "SELECT Id FROM Orders WHERE substring(Status, Id, 2) = 'a'" },
+        { "case_24", "SELECT Id FROM Orders WHERE from_base(Status, 16) = 1" },
+    };
+
+    public static TheoryData<string, string> Allowed() => new()
+    {
+        { "case_01", "SELECT Id FROM Orders WHERE Id > 3 AND Status = 'open' OR Region <> 'EU'" },
+        { "case_02", "SELECT Id FROM Orders WHERE Status IS NULL OR Email IS NOT NULL" },
+        { "case_03", "SELECT Id FROM Orders WHERE Id IN (1, 2, 3)" },
+        { "case_04", "SELECT Id FROM Orders WHERE Status LIKE 'op%'" },
+        { "case_05", "SELECT Id FROM Orders WHERE Id BETWEEN 1 AND 10" },
+        { "case_06", "SELECT Id FROM Orders WHERE coalesce(Status, 'x') = 'x' AND nullif(Region, 'EU') IS NULL" },
+        { "case_07", "SELECT Id FROM Orders WHERE CASE WHEN Id > 3 THEN 1 ELSE 0 END = 1" },
+        { "case_08", "SELECT Id FROM Orders WHERE lower(Status) = 'a' AND upper(Region) = 'B' AND length(Email) > 3" },
+        { "case_09", "SELECT Id FROM Orders WHERE substring(Status, 1, 2) = 'ab' AND concat(Status, Region) = 'x'" },
+        { "case_10", "SELECT count(*), min(Id), max(Id) FROM Orders" },
+        { "case_11", "SELECT Id FROM Orders WHERE Id / 2 = 1 AND Id % 3 = 0" },
+        { "case_12", "SELECT Id FROM Orders WHERE trim(Status) = 'a'" },
+        { "case_13", "SELECT Id FROM Orders WHERE TRY_CAST(Status AS INTEGER) = 1" },
+        { "case_14", "SELECT Id FROM Orders WHERE Amount > 1.5" },
+        { "case_15", "SELECT sqrt(Id), Id / Amount, Id + 1 FROM Orders WHERE Id > 3" },
+    };
+
+    [Theory]
+    [MemberData(nameof(Refused))]
+    public void Refused_expression_under_tenant_predicate_is_rejected(string item, string sql)
+    {
+        Assert.NotNull(item);
+        Assert.Throws<SecurityException>(() => Compile(sql));
+    }
+
+    [Theory]
+    [InlineData("case_01", "SELECT Id FROM Orders WHERE Id + 1 > 3")]
+    [InlineData("case_02", "SELECT Id FROM Orders WHERE sqrt(Id) > 3")]
+    [InlineData("case_03", "SELECT Id FROM Orders WHERE Id = '5'")]
+    public void Refusal_uses_the_fixed_message(string item, string sql)
+    {
+        Assert.NotNull(item);
+        var ex = Assert.Throws<SecurityException>(() => Compile(sql));
+        Assert.Equal(RowPolicyErrorGuard.Message, ex.Message);
+    }
+
+    [Theory]
+    [MemberData(nameof(Allowed))]
+    public void Allowed_expression_under_tenant_predicate_compiles(string item, string sql)
+    {
+        Assert.NotNull(item);
+        Assert.False(string.IsNullOrEmpty(Compile(sql).Sql));
+    }
+
+    [Theory]
+    [InlineData("case_01", "SELECT Code FROM Lookup WHERE sqrt(Code) > 3")]
+    [InlineData("case_02", "SELECT Code FROM Lookup WHERE CAST(Code AS INTEGER) + 1 > 3")]
+    public void Refused_expression_without_policy_or_tenant_predicate_compiles(string item, string sql)
+    {
+        Assert.NotNull(item);
+        Assert.False(string.IsNullOrEmpty(Compile(sql).Sql));
+    }
+}

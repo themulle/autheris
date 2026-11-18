@@ -28,7 +28,7 @@ public class DateAddCompileConsistencyTests
     [InlineData(TargetSqlDialect.DuckDb)]
     public void DateAdd_IsAcceptedByTheCompilerFunctionMap(TargetSqlDialect dialect)
     {
-        var compiled = new FastSqlEngine().Compile("SELECT id FROM orders WHERE ts > date_add('day', -1, ts)".AsMemory(), new CompileRequest
+        var compiled = new FastSqlEngine().Compile("SELECT date_add('day', -1, ts) AS r FROM orders".AsMemory(), new CompileRequest
         {
             TargetDialect = dialect,
             TokenGuards = SqlTokenSecurityOptions.Strict,

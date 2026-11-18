@@ -70,27 +70,27 @@ public class RecursiveCteGovernanceTests
         Compile(sql, Request(dialect, allow));
 
     private static string Counter(string name) =>
-        $"WITH RECURSIVE {name} (n) AS (SELECT 1 UNION ALL SELECT c.n + 1 FROM {name} c WHERE c.n < 3) SELECT n FROM {name}";
+        $"WITH RECURSIVE {name} (n) AS (SELECT 1 UNION ALL SELECT c.n FROM {name} c WHERE c.n < 3) SELECT n FROM {name}";
 
     // ---- SEC-277-01: scope parity ----
 
     private static readonly string[] ScopeCorpus =
     [
-        "WITH RECURSIVE r (n) AS (SELECT id FROM orders UNION ALL SELECT n + 1 FROM r WHERE n < 3) SELECT n FROM r",
-        "WITH RECURSIVE R (n) AS (SELECT id FROM orders UNION ALL SELECT n + 1 FROM r WHERE n < 3) SELECT n FROM R",
-        "WITH RECURSIVE \"r\" (n) AS (SELECT id FROM orders UNION ALL SELECT n + 1 FROM \"r\" WHERE n < 3) SELECT n FROM \"r\"",
-        "WITH RECURSIVE r (n) AS (SELECT id FROM orders UNION ALL SELECT n + 1 FROM \"R\" WHERE n < 3) SELECT n FROM r",
-        "SELECT t.n, e.id FROM (WITH RECURSIVE r (n) AS (SELECT id FROM orders UNION ALL SELECT n + 1 FROM r WHERE n < 3) SELECT n FROM r) t " +
+        "WITH RECURSIVE r (n) AS (SELECT id FROM orders UNION ALL SELECT n FROM r WHERE n < 3) SELECT n FROM r",
+        "WITH RECURSIVE R (n) AS (SELECT id FROM orders UNION ALL SELECT n FROM r WHERE n < 3) SELECT n FROM R",
+        "WITH RECURSIVE \"r\" (n) AS (SELECT id FROM orders UNION ALL SELECT n FROM \"r\" WHERE n < 3) SELECT n FROM \"r\"",
+        "WITH RECURSIVE r (n) AS (SELECT id FROM orders UNION ALL SELECT n FROM \"R\" WHERE n < 3) SELECT n FROM r",
+        "SELECT t.n, e.id FROM (WITH RECURSIVE r (n) AS (SELECT id FROM orders UNION ALL SELECT n FROM r WHERE n < 3) SELECT n FROM r) t " +
             "JOIN entitlements e ON e.id = t.n",
-        "WITH RECURSIVE a (n) AS (SELECT id FROM orders UNION ALL SELECT n + 1 FROM a WHERE n < 2), " +
-            "b (n) AS (SELECT n FROM a UNION ALL SELECT n + 1 FROM b WHERE n < 3) SELECT n FROM b",
+        "WITH RECURSIVE a (n) AS (SELECT id FROM orders UNION ALL SELECT n FROM a WHERE n < 2), " +
+            "b (n) AS (SELECT n FROM a UNION ALL SELECT n FROM b WHERE n < 3) SELECT n FROM b",
         "WITH RECURSIVE a (n) AS (SELECT id FROM orders UNION ALL SELECT n FROM b), b (n) AS (SELECT id FROM entitlements) SELECT n FROM a",
-        "SELECT q.n, e.id FROM (WITH RECURSIVE r (n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM r WHERE n < 3) SELECT n FROM r) q " +
+        "SELECT q.n, e.id FROM (WITH RECURSIVE r (n) AS (SELECT 1 UNION ALL SELECT n FROM r WHERE n < 3) SELECT n FROM r) q " +
             "JOIN entitlements e ON e.id = q.n WHERE e.id IN (SELECT id FROM orders)",
-        "SELECT a.n FROM (WITH RECURSIVE r (n) AS (SELECT id FROM orders UNION ALL SELECT n + 1 FROM r WHERE n < 3) SELECT n FROM r) a, " +
+        "SELECT a.n FROM (WITH RECURSIVE r (n) AS (SELECT id FROM orders UNION ALL SELECT n FROM r WHERE n < 3) SELECT n FROM r) a, " +
             "(WITH q AS (SELECT id AS n FROM entitlements) SELECT n FROM q) b",
-        "WITH RECURSIVE entitlements (n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM entitlements WHERE n < 3) SELECT n FROM entitlements UNION ALL SELECT id FROM orders",
-        "WITH RECURSIVE r (n) AS (SELECT id FROM orders UNION ALL SELECT n + 1 FROM r WHERE n < 3) SELECT r.n FROM r JOIN orders o ON o.id = r.n"
+        "WITH RECURSIVE entitlements (n) AS (SELECT 1 UNION ALL SELECT n FROM entitlements WHERE n < 3) SELECT n FROM entitlements UNION ALL SELECT id FROM orders",
+        "WITH RECURSIVE r (n) AS (SELECT id FROM orders UNION ALL SELECT n FROM r WHERE n < 3) SELECT r.n FROM r JOIN orders o ON o.id = r.n"
     ];
 
     /// <summary>
@@ -150,10 +150,10 @@ public class RecursiveCteGovernanceTests
             Counter("\"Orders\""),
             "SELECT n FROM (" + Counter("orders") + ") t",
             // a later CTE named like an authorized table (forward and mutual references)
-            "WITH RECURSIVE a (n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM a WHERE n < 3), orders (n) AS (SELECT n FROM a) SELECT n FROM orders",
+            "WITH RECURSIVE a (n) AS (SELECT 1 UNION ALL SELECT n FROM a WHERE n < 3), orders (n) AS (SELECT n FROM a) SELECT n FROM orders",
             "WITH RECURSIVE a (n) AS (SELECT id FROM entitlements UNION ALL SELECT n FROM orders), entitlements (n) AS (SELECT 1) SELECT n FROM a",
             // the name equals a table that is referenced in a sibling scope
-            "WITH RECURSIVE entitlements (n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM entitlements WHERE n < 3) " +
+            "WITH RECURSIVE entitlements (n) AS (SELECT 1 UNION ALL SELECT n FROM entitlements WHERE n < 3) " +
                 "SELECT n FROM entitlements UNION ALL SELECT id FROM orders"
         ];
 
@@ -197,7 +197,7 @@ public class RecursiveCteGovernanceTests
         var catalogName = Assert.Throws<SqlCompileNotSupportedException>(() => Compile(Counter("orders"), dialect, allow: false));
         var unknownName = Assert.Throws<SqlCompileNotSupportedException>(() => Compile(Counter("zzz"), dialect, allow: false));
         var masked = Assert.Throws<SqlCompileNotSupportedException>(() => Compile(
-            "WITH RECURSIVE r (n, s) AS (SELECT id, email FROM orders UNION ALL SELECT n + 1, s FROM r WHERE n < 3) SELECT max(s) FROM r", dialect, allow: false));
+            "WITH RECURSIVE r (n, s) AS (SELECT id, email FROM orders UNION ALL SELECT n, s FROM r WHERE n < 3) SELECT max(s) FROM r", dialect, allow: false));
 
         Assert.Equal(SqlCompileNotSupportedReason.Construct, catalogName.Reason);
         Assert.Equal(catalogName.Message, unknownName.Message);
@@ -212,10 +212,10 @@ public class RecursiveCteGovernanceTests
     {
         const StatementPermissions all =
             StatementPermissions.Insert | StatementPermissions.Update | StatementPermissions.Delete | StatementPermissions.Merge;
-        const string Recursive = "WITH RECURSIVE r (n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM r WHERE n < 3) SELECT n FROM r";
+        const string Recursive = "WITH RECURSIVE r (n) AS (SELECT 1 UNION ALL SELECT n FROM r WHERE n < 3) SELECT n FROM r";
         foreach (string sql in new[]
         {
-            "INSERT INTO orders (id, status) WITH RECURSIVE r (n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM r WHERE n < 3) SELECT n, 'x' FROM r",
+            "INSERT INTO orders (id, status) WITH RECURSIVE r (n) AS (SELECT 1 UNION ALL SELECT n FROM r WHERE n < 3) SELECT n, 'x' FROM r",
             "UPDATE orders SET status = 'x' WHERE id IN (" + Recursive + ")",
             "DELETE FROM orders WHERE id IN (" + Recursive + ")",
             "MERGE INTO orders t USING (" + Recursive + ") s ON t.id = s.n WHEN MATCHED THEN UPDATE SET status = 'x'"
@@ -357,7 +357,7 @@ public class RecursiveCteGovernanceTests
         foreach (string sql in new[]
         {
             "SELECT id FROM orders OPTION (MAXRECURSION 0)",
-            "WITH RECURSIVE r (n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM r) SELECT n FROM r OPTION (MAXRECURSION 0)",
+            "WITH RECURSIVE r (n) AS (SELECT 1 UNION ALL SELECT n FROM r) SELECT n FROM r OPTION (MAXRECURSION 0)",
             "SELECT id FROM orders OPTION (MAXDOP 1)"
         })
         {
@@ -434,16 +434,16 @@ public class RecursiveCteGovernanceTests
     {
         // anchor literal, masked column in the recursive member
         const string MaskedInRecursiveMember =
-            "WITH RECURSIVE r (n, s) AS (SELECT 1, 'x' UNION ALL SELECT r.n + 1, o.email FROM r JOIN orders o ON o.id = r.n WHERE r.n < 3) ";
+            "WITH RECURSIVE r (n, s) AS (SELECT 1, 'x' UNION ALL SELECT r.n, o.email FROM r JOIN orders o ON o.id = r.n WHERE r.n < 3) ";
         // the reverse: masked column in the anchor, literal in the recursive member
         const string MaskedInAnchor =
-            "WITH RECURSIVE r (n, s) AS (SELECT id, email FROM orders UNION ALL SELECT n + 1, 'x' FROM r WHERE n < 3) ";
+            "WITH RECURSIVE r (n, s) AS (SELECT id, email FROM orders UNION ALL SELECT n, 'x' FROM r WHERE n < 3) ";
         // the masked value is only carried by the self-reference
         const string MaskedCarried =
-            "WITH RECURSIVE r (n, s) AS (SELECT id, email FROM orders UNION ALL SELECT r.n + 1, r.s FROM r WHERE r.n < 3) ";
+            "WITH RECURSIVE r (n, s) AS (SELECT id, email FROM orders UNION ALL SELECT r.n, r.s FROM r WHERE r.n < 3) ";
         // no column list: the output names come from the anchor, the recursive member renames the masked column
         const string MaskedRenamed =
-            "WITH RECURSIVE r AS (SELECT 1 AS n, 'x' AS s UNION ALL SELECT r.n + 1, o.email FROM r JOIN orders o ON o.id = r.n WHERE r.n < 3) ";
+            "WITH RECURSIVE r AS (SELECT 1 AS n, 'x' AS s UNION ALL SELECT r.n, o.email FROM r JOIN orders o ON o.id = r.n WHERE r.n < 3) ";
 
         foreach (string head in new[] { MaskedInRecursiveMember, MaskedInAnchor, MaskedCarried, MaskedRenamed })
         {
@@ -458,7 +458,7 @@ public class RecursiveCteGovernanceTests
     [MemberData(nameof(Dialects))]
     public void RecursiveCte_WithoutMaskedColumn_StillAcceptsPredicatesAndAggregates(TargetSqlDialect dialect)
     {
-        const string Head = "WITH RECURSIVE r (n, s) AS (SELECT 1, 'x' UNION ALL SELECT r.n + 1, r.s FROM r WHERE r.n < 3) ";
+        const string Head = "WITH RECURSIVE r (n, s) AS (SELECT 1, 'x' UNION ALL SELECT r.n, r.s FROM r WHERE r.n < 3) ";
         Compile(Head + "SELECT n, s FROM r", dialect);
         Compile(Head + "SELECT max(r.n) FROM r", dialect);
         Compile(Head + "SELECT n FROM r ORDER BY n", dialect);

@@ -54,7 +54,7 @@ public sealed class AstSecurityDmlPrecedenceTests
     [InlineData(TargetSqlDialect.SqlServer)]
     public void Delete_With_Composite_InSubquery_Operand_Emits_Parentheses(TargetSqlDialect dialect)
     {
-        var compiled = Compile(dialect, "DELETE FROM orders WHERE (id + amount) IN (SELECT id FROM entitlements)");
+        var compiled = Compile(dialect, "DELETE FROM orders WHERE (id + amount) IN (SELECT code FROM lookup)");
 
         Assert.Matches(@"(?i)" + @"\(" + Id + @"\s*\+\s*" + Amount + @"\)\s+IN", Flatten(compiled.Sql));
         TenantIsBound(compiled);

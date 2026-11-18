@@ -374,6 +374,63 @@
       "issue": "#847",
       "reviewer": "@themulle",
       "approval": "approved"
+    },
+    {
+      "dialects": [
+        "PostgreSql"
+      ],
+      "class": "ast-stricter",
+      "reason": "SecurityException",
+      "statements": [
+        "4a9d7964a207",
+        "5b5e88580631",
+        "8867d3341044",
+        "a1f1acf85184",
+        "a90a65b0afb4",
+        "b1628116ebf5",
+        "b9f46524ecb0",
+        "c36feedc0f24",
+        "d0d7bc9dd1eb",
+        "e1db24324c58",
+        "e44f3822e5e8",
+        "fb9c0264e3fe"
+      ],
+      "justification": "Intended tightening: on a table with a tenant predicate or a row policy, only expressions that cannot raise a data-dependent error are accepted; arithmetic on columns, functions outside the non-raising allowlist and implicit text-to-number comparisons are refused. Details: private advisory.",
+      "issue": "#847",
+      "reviewer": "@themulle",
+      "approval": "approved"
+    },
+    {
+      "dialects": [
+        "SqlServer"
+      ],
+      "class": "ast-stricter",
+      "reason": "SecurityException",
+      "statements": [
+        "5b5e88580631",
+        "c36feedc0f24",
+        "d0d7bc9dd1eb"
+      ],
+      "justification": "Intended tightening: on a table with a tenant predicate or a row policy, only expressions that cannot raise a data-dependent error are accepted; arithmetic on columns, functions outside the non-raising allowlist and implicit text-to-number comparisons are refused. Details: private advisory.",
+      "issue": "#847",
+      "reviewer": "@themulle",
+      "approval": "approved"
+    },
+    {
+      "dialects": [
+        "Oracle"
+      ],
+      "class": "ast-stricter",
+      "reason": "SecurityException",
+      "statements": [
+        "5b5e88580631",
+        "c36feedc0f24",
+        "d0d7bc9dd1eb"
+      ],
+      "justification": "Intended tightening: on a table with a tenant predicate or a row policy, only expressions that cannot raise a data-dependent error are accepted; arithmetic on columns, functions outside the non-raising allowlist and implicit text-to-number comparisons are refused. Details: private advisory.",
+      "issue": "#847",
+      "reviewer": "@themulle",
+      "approval": "approved"
     }
   ],
   "legacyDefects": [
