@@ -53,6 +53,11 @@ public static class UnknownGatewayKeyGuard
     private const string RemovedFinOpsMessage =
         "Gateway:FinOps was removed; usage is tracked by Gateway:UsageAccounting; quotas: Gateway:UsageAccounting:Quotas";
 
+    private const string RemovedAuditWormPrefix = GatewayConfigurationSchema.Root + ":Audit:Worm";
+
+    private const string RemovedAuditWormMessage =
+        "Gateway:Audit:Worm (removed in v1.9.0; the audit archive export is gone, retention keeps signed purge checkpoints and anchors; export archives via SIEM or database backup)";
+
     private static readonly string[] RemovedSimpl12Prefixes =
     [
         GatewayConfigurationSchema.Root + ":Itsm",
@@ -239,6 +244,16 @@ public static class UnknownGatewayKeyGuard
             unknown.Add(RemovedFinOpsMessage);
         }
 
+        // The audit archive export is gone: every key of the section fails startup with any value (including false or empty).
+        if (configuration.GetSection(RemovedAuditWormPrefix).Exists() ||
+            configuration.AsEnumerable().Any(kv =>
+                !string.IsNullOrEmpty(kv.Key) &&
+                (kv.Key.Equals(RemovedAuditWormPrefix, StringComparison.OrdinalIgnoreCase) ||
+                 kv.Key.StartsWith(RemovedAuditWormPrefix + ":", StringComparison.OrdinalIgnoreCase))))
+        {
+            unknown.Add(RemovedAuditWormMessage);
+        }
+
         // Removed sections and keys fail startup with any value (including false or empty).
         foreach (var removedPrefix in RemovedSimpl12Prefixes)
         {
@@ -272,7 +287,7 @@ public static class UnknownGatewayKeyGuard
             }
 
             if (IsClaimedByLoadedModule(fullKey, RemovedAuthzPrefixes) ||
-                IsClaimedByLoadedModule(fullKey, [RemovedCasbinPrefix, RemovedFinOpsPrefix]))
+                IsClaimedByLoadedModule(fullKey, [RemovedCasbinPrefix, RemovedFinOpsPrefix, RemovedAuditWormPrefix]))
             {
                 continue;
             }

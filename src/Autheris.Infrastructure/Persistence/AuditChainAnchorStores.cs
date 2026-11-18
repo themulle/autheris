@@ -14,7 +14,7 @@ namespace Autheris.Infrastructure.Persistence;
 /// <summary>
 /// SEC H-17: Default anchor store. Keeps the signed audit chain end anchor in a JSON file outside of the
 /// governance database. For real tamper resistance the file should live on a different volume / identity
-/// than the database (or be mirrored to WORM storage, see AuditWormExportService manifest).
+/// than the database (or be kept in an append-only directory, see WormDirectoryAuditChainAnchorStore).
 /// </summary>
 public sealed class FileAuditChainAnchorStore : IAuditChainAnchorStore
 {

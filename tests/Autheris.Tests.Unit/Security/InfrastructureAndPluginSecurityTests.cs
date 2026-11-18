@@ -225,70 +225,11 @@ public sealed partial class InfrastructureAndPluginSecurityTests : IDisposable
         DetailsJson = $"{{\"record\": {i}}}"
     };
 
-    // =========================================================================
-    // M-31: WORM export completeness
-    // =========================================================================
-
+    // Declared here so the security test inventory keeps its stable ids for the M-27..M-30 tests below.
     private sealed class OkHandler : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
             => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
-    }
-
-    private IOptions<GatewayOptions> WormOptions() => Options.Create(new GatewayOptions
-    {
-        Audit = new AuditOptions
-        {
-            Worm = new WormAuditOptions { Enabled = true, StorageType = "Local", ExportPath = Path.Combine(_tempDir, "worm"), RetentionDays = 30 }
-        }
-    });
-
-    private static AuditChainRecord Record(long rowId, long seq, string prev, string hash) =>
-        new(rowId, seq, new AuditLogEntry { TenantId = Autheris.Tests.Common.TestTenants.Default, EventType = "E", ActorSid = new Sid("S-1-5-21-1"), PrevHash = prev, EntryHash = hash });
-
-    [Fact]
-    public async Task M31_WormExport_ContinuityGap_FailsInsteadOfReportingSuccess()
-    {
-        var repo = Substitute.For<IAuditLogRepository, IAuditChainExportSource>();
-        repo.VerifyAuditHashChainAsync(Arg.Any<CancellationToken>()).Returns(true);
-        var source = (IAuditChainExportSource)repo;
-        source.GetAuditChainRangeAsync(Arg.Any<DateTimeOffset>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<AuditChainRange?>(new AuditChainRange(1, 3, 3)));
-        source.GetAuditChainPageAsync(Arg.Any<long>(), Arg.Any<long>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<AuditChainRecord>>(new List<AuditChainRecord>
-            {
-                Record(1, 1, "GENESIS", "H1"),
-                Record(2, 2, "H1", "H2"),
-                Record(3, 3, "SOMETHING_ELSE", "H3")
-            }));
-
-        using var httpClient = new HttpClient(new OkHandler());
-        var exporter = new AuditWormExportService(repo, WormOptions(), httpClient, NullLogger<AuditWormExportService>.Instance);
-        var result = await exporter.ExportAuditSnapshotAsync(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow);
-
-        result.Success.ShouldBeFalse();
-        result.ErrorMessage!.ShouldContain("continuity");
-    }
-
-    [Fact]
-    public async Task M31_WormExport_CountMismatch_FailsInsteadOfReportingSuccess()
-    {
-        var repo = Substitute.For<IAuditLogRepository, IAuditChainExportSource>();
-        repo.VerifyAuditHashChainAsync(Arg.Any<CancellationToken>()).Returns(true);
-        var source = (IAuditChainExportSource)repo;
-        source.GetAuditChainRangeAsync(Arg.Any<DateTimeOffset>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<AuditChainRange?>(new AuditChainRange(1, 4, 4)));
-        source.GetAuditChainPageAsync(Arg.Any<long>(), Arg.Any<long>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
-            .Returns(
-                Task.FromResult<IReadOnlyList<AuditChainRecord>>(new List<AuditChainRecord> { Record(1, 1, "GENESIS", "H1"), Record(2, 2, "H1", "H2"), Record(3, 3, "H2", "H3") }),
-                Task.FromResult<IReadOnlyList<AuditChainRecord>>(new List<AuditChainRecord>()));
-
-        using var httpClient = new HttpClient(new OkHandler());
-        var exporter = new AuditWormExportService(repo, WormOptions(), httpClient, NullLogger<AuditWormExportService>.Instance);
-        var result = await exporter.ExportAuditSnapshotAsync(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow);
-
-        result.Success.ShouldBeFalse();
-        result.ErrorMessage!.ShouldContain("incomplete");
     }
 
     // =========================================================================

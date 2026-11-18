@@ -507,7 +507,6 @@ public sealed class OutboundEgressAllowlistHardeningTests
     [InlineData("OpenLineageClient")]
     [InlineData("S3LakehouseStorageProvider")]
     [InlineData("AzureBlobStorageProvider")]
-    [InlineData("IAuditWormExportService")]
     public void E03_AllIntegrationClients_UseHardenedPrimaryHandler(string clientName)
     {
         var provider = BuildGatewayServices();

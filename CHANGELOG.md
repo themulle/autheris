@@ -25,6 +25,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Documents hidden from discovery are no longer returned by `search_docs`, `list_doc_topics`, `list_applications` counts, `get_procedure`, `lookup_error_code` or the document search, list and read routes, except to their writer. A hidden or foreign document answers exactly like an unknown one.
 
 ### Removed
+- The unwired audit archive export (WORM export service, `Gateway:Audit:Worm:*`, egress name `AuditWorm`) is removed. Any `Gateway:Audit:Worm` key now fails startup, with any value. Retention purge still writes signed purge checkpoints and anchors, and chain verification still passes across a purged range.
 - Configuration key `Gateway:CatalogSearch:Enabled`. Catalog search validation and the index warm-up are always active; use `Gateway:CatalogSearch:WarmupOnStartup` to control the startup warm-up. The key fails startup with any value, including `false` or empty.
 - Governance schema step `0027_drop_legacy_governance_columns` (PostgreSQL and SQL Server) drops `CONSENT_REQUESTS.itsm_ticket_id` with its unique index `ux_consent_requests_ticket` and `TABLE_CATALOG_SETTINGS.visibility`. The GraphQL consent request types no longer expose `itsmTicketId`. All nodes must run this build before the step applies.
 
