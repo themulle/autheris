@@ -22,7 +22,7 @@ using Microsoft.Extensions.Options;
 public sealed class ProcedureDefinitionLoader
 {
     internal const string LegacySqlHeaderMessage = "SQL-header procedure declarations (*.proc.sql) are no longer supported; convert them to *.proc.yaml.";
-    internal const string WriteModeRejectedMessage = "Write procedures are enabled with data products (WP-SIMPL-49).";
+    internal const string WriteModeRejectedMessage = "Write procedures must be bound to a data product: declare 'schema' and 'product_owner'.";
     private const long MaxFileBytes = 64 * 1024;
 
     internal static bool IsSupportedProcedureFile(string filePath) =>
@@ -253,7 +253,9 @@ public sealed class ProcedureDefinitionLoader
     /// <summary>Static policy checks that need no database access.</summary>
     internal string? CheckPolicy(ProcedureDefinition definition)
     {
-        if (definition.Mode == ProcedureMode.Write)
+        // A write procedure runs only as a data product (execute-write grant on the product): without a product binding it is refused.
+        if (definition.Mode == ProcedureMode.Write &&
+            (string.IsNullOrWhiteSpace(definition.ProductSchema) || string.IsNullOrWhiteSpace(definition.ProductOwner)))
         {
             return WriteModeRejectedMessage;
         }

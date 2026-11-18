@@ -185,6 +185,12 @@ type DataCatalogSyncPayload {
   warnings: [String!]!
 }
 
+type DiscoveryApplicationRef {
+  appId: String!
+  name: String
+  documentCount: Int!
+}
+
 type DiscoveryColumn {
   name: String!
   displayName: String
@@ -196,9 +202,9 @@ type DiscoveryColumn {
   statistics: DiscoveryColumnStatistics
   clearInSomeRows: Boolean!
   writeProtected: Boolean!
+  longDescription: String
   classifications: [DiscoveryColumnClassification!]!
   clearRequestable: [String!]!
-  longDescription: String
   documents: [DiscoveryDocumentRef!]!
 }
 
@@ -216,12 +222,6 @@ type DiscoveryColumnStatistics {
   minValue: String
   maxValue: String
   topValues: [String!]
-}
-
-type DiscoveryApplicationRef {
-  appId: String!
-  name: String
-  documentCount: Int!
 }
 
 type DiscoveryDocumentRef {
@@ -461,6 +461,7 @@ enum WriteOperation {
   INSERT
   UPDATE
   DELETE
+  EXECUTE_WRITE
 }
 
 enum WriteRowScope {
