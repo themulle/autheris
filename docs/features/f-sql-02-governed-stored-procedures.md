@@ -393,6 +393,6 @@ GRANT EXECUTE ON SCHEMA::api TO autheris_proc;
 
 The stored procedure governance engine is verified by comprehensive test suites in `tests/Autheris.Tests.Unit`:
 
-- [`ProcedureEndpointTests.cs`](../../tests/Autheris.Tests.Unit/ProcedureEndpointTests.cs): Parsing, context binding, execution timeouts, role checks, and error code mappings.
+- [`ProcedureEndpointTests.cs`](../../tests/Autheris.Tests.Unit/Procedures/ProcedureEndpointTests.cs): Parsing, context binding, execution timeouts, role checks, and error code mappings.
 - [`PureYamlProcedureGovernanceTests.cs`](../../tests/Autheris.Tests.Unit/Procedures/PureYamlProcedureGovernanceTests.cs): Zero-privilege pure-YAML declarations, source column masking, fail-closed column pruning, and generator round-trip.
-- [`ArchitectureAndCleanCodeTests.cs`](../../tests/Autheris.Tests.Unit/ArchitectureAndCleanCodeTests.cs): DDL hash verification, parameter sanitization, and DI registration.
+- [`ArchitectureAndCleanCodeTests.cs`](../../tests/Autheris.Tests.Unit/Procedures/ArchitectureAndCleanCodeTests.cs): DDL hash verification, parameter sanitization, and DI registration.

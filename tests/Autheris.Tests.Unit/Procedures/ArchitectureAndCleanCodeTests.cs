@@ -1,4 +1,4 @@
-namespace Autheris.Tests.Unit;
+namespace Autheris.Tests.Unit.Procedures;
 
 using System;
 using System.Collections.Generic;
