@@ -6,7 +6,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Catalog;
 using Autheris.Application.Mcp.Interfaces;
+using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
@@ -18,11 +20,29 @@ public sealed class GoldenQueryService : IGoldenQueryService
     private readonly ILogger<GoldenQueryService> _logger;
     private readonly int _maxResults;
     private readonly bool _enabled;
+    private readonly IGoldenQueryRepository? _repository;
+    private readonly ICatalogVersionProvider? _versionProvider;
+    private readonly ConcurrentDictionary<string, StoreSnapshot> _storeCache = new(StringComparer.Ordinal);
+
+    /// <summary>Tenant-keyed store snapshots kept at once; the cache is cleared when exceeded.</summary>
+    private const int MaxCachedTenants = 1024;
+
+    /// <summary>Caller independent store entries of one tenant at one catalog version; caller filters run after this read.</summary>
+    private sealed record StoreSnapshot(CatalogVersion Version, IReadOnlyList<GoldenQuery> Entries, IReadOnlySet<string> ConfigCopyIds);
 
     /// <param name="demoData">Without a switch (direct construction) the built-in demo queries are registered, as before.</param>
-    public GoldenQueryService(IOptions<GatewayOptions>? options, ILogger<GoldenQueryService> logger, IDemoDataSwitch? demoData = null)
+    /// <param name="repository">Without a store only configured entries are served.</param>
+    /// <param name="versionProvider">Keys the store cache; without it the store is read on every call.</param>
+    public GoldenQueryService(
+        IOptions<GatewayOptions>? options,
+        ILogger<GoldenQueryService> logger,
+        IDemoDataSwitch? demoData = null,
+        IGoldenQueryRepository? repository = null,
+        ICatalogVersionProvider? versionProvider = null)
     {
         _logger = logger;
+        _repository = repository;
+        _versionProvider = versionProvider;
         var goldenOpts = options?.Value.GoldenQueries ?? new GoldenQueryOptions();
         _enabled = goldenOpts.Enabled;
         _maxResults = goldenOpts.MaxResultsPerRequest > 0 ? goldenOpts.MaxResultsPerRequest : 20;
@@ -93,6 +113,150 @@ public sealed class GoldenQueryService : IGoldenQueryService
 
         var results = query.Take(_maxResults).ToList();
         return ValueTask.FromResult<IReadOnlyList<GoldenQuery>>(results);
+    }
+
+    public async ValueTask<IReadOnlyList<GoldenQuery>> GetGoldenQueriesAsync(
+        GoldenQueryReadContext context,
+        string? domain,
+        string? tableName,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        if (!_enabled)
+        {
+            return [];
+        }
+
+        var snapshot = await LoadStoreSnapshotAsync(context.Tenant, ct).ConfigureAwait(false);
+        var merged = new Dictionary<string, GoldenQuery>(StringComparer.OrdinalIgnoreCase);
+        foreach (var stored in snapshot.Entries)
+        {
+            merged[stored.Id] = stored;
+        }
+
+        foreach (var configured in _queries.Values)
+        {
+            // Config wins on an equal id, except against the persisted copy of a config entry (the store wins on an equal source key).
+            if (!snapshot.ConfigCopyIds.Contains(configured.Id))
+            {
+                merged[configured.Id] = configured;
+            }
+        }
+
+        IEnumerable<GoldenQuery> query = merged.Values;
+        if (!string.IsNullOrWhiteSpace(domain))
+        {
+            query = query.Where(q => string.Equals(q.Domain, domain, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (!string.IsNullOrWhiteSpace(tableName))
+        {
+            query = query.Where(q => string.Equals(q.TableName, tableName, StringComparison.OrdinalIgnoreCase));
+        }
+
+        // Caller visibility first, cap second: hidden entries cannot crowd out visible ones.
+        var results = query
+            .OrderBy(q => q.Domain, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(q => q.TableName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(q => q.Id, StringComparer.Ordinal)
+            .Where(q => IsVisibleToCaller(context, q))
+            .Take(_maxResults)
+            .ToList();
+        return results;
+    }
+
+    private static bool IsVisibleToCaller(GoldenQueryReadContext context, GoldenQuery query)
+    {
+        try
+        {
+            if (context.IsDatasetVisible is { } datasetVisible)
+            {
+                if (!datasetVisible(query.Domain, query.TableName))
+                {
+                    return false;
+                }
+
+                if (context.ReferencedDatasets is { } referenced &&
+                    referenced(query).Any(r => !datasetVisible(r.Domain, r.Table)))
+                {
+                    return false;
+                }
+            }
+
+            if (context.HiddenIdentifiers is { } hiddenOf)
+            {
+                var hidden = hiddenOf(query.Domain, query.TableName);
+                if (hidden is { Count: > 0 } && MentionsAnyIdentifier(query.QueryText, hidden))
+                {
+                    return false;
+                }
+
+                if (context.ReferencedDatasets is { } referenced)
+                {
+                    foreach (var (refDomain, refTable) in referenced(query))
+                    {
+                        var refHidden = hiddenOf(refDomain, refTable);
+                        if (refHidden is { Count: > 0 } && MentionsAnyIdentifier(query.QueryText, refHidden))
+                        {
+                            return false;
+                        }
+                    }
+                }
+            }
+
+            return true;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            return false;
+        }
+    }
+
+    private async ValueTask<StoreSnapshot> LoadStoreSnapshotAsync(TenantId tenant, CancellationToken ct)
+    {
+        var empty = new StoreSnapshot(default, [], new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+        if (_repository is null || string.IsNullOrWhiteSpace(tenant.Value))
+        {
+            return empty;
+        }
+
+        try
+        {
+            CatalogVersion? version = _versionProvider is null
+                ? null
+                : await _versionProvider.GetCatalogVersionAsync(ct).ConfigureAwait(false);
+            if (version is { } current && _storeCache.TryGetValue(tenant.Value, out var hit) && hit.Version == current)
+            {
+                return hit;
+            }
+
+            var rows = await _repository.GetForTenantAsync(tenant, ct).ConfigureAwait(false);
+            var entries = rows
+                .Select(r => new GoldenQuery(r.SourceKey, r.Domain, r.TableName, r.Title, r.Description ?? string.Empty, r.QueryText, r.VariablesJson, [r.Source.ToString().ToLowerInvariant()], r.UpdatedAt))
+                .ToList();
+            var configCopies = rows
+                .Where(r => r.Source == GoldenQuerySource.Config)
+                .Select(r => r.SourceKey)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var snapshot = new StoreSnapshot(version ?? default, entries, configCopies);
+            if (version is not null)
+            {
+                if (_storeCache.Count >= MaxCachedTenants)
+                {
+                    _storeCache.Clear();
+                }
+
+                _storeCache[tenant.Value] = snapshot;
+            }
+
+            return snapshot;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException)
+        {
+            // Fail closed: a store failure serves configured entries only.
+            _logger.LogWarning("GOLDEN_QUERY_STORE_READ_FAILED: stored golden queries unavailable ({Error}).", ex.GetType().Name);
+            return empty;
+        }
     }
 
     public static IReadOnlyList<GoldenQuery> ExcludeHiddenColumnQueries(

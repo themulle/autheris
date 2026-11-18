@@ -330,15 +330,9 @@ public sealed partial class McpDatasetCatalog
             .Select(static c => c.Name)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        IReadOnlyList<McpDatasetExample> examples = [];
-        if (!brief && goldenQueryService != null)
-        {
-            var goldens = await goldenQueryService.GetGoldenQueriesAsync(obj.Domain, obj.Name, ct).ConfigureAwait(false);
-            var hiddenIds = GoldenQueryService.BuildHiddenIdentifierSet(hiddenCols, graphQlColumns);
-            examples = GoldenQueryService.ExcludeHiddenColumnQueries(goldens, hiddenIds)
-                .Select(g => new McpDatasetExample(g.Title, g.Description, g.QueryText, g.VariablesJson))
-                .ToList();
-        }
+        IReadOnlyList<McpDatasetExample> examples = brief
+            ? []
+            : await LoadExamplesAsync(principal, obj.Domain, obj.Name, graphQl, graphQlColumns, hiddenCols, ct).ConfigureAwait(false);
 
         var graphQlAccess = brief || graphQl == null
             ? null

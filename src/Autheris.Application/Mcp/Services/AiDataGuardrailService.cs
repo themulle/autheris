@@ -469,11 +469,12 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
             var isMcpAuthBypassed = _options.Value.IsMcpAuthBypassed;
             bool isAdmin = IsUnrestrictedCatalogCaller(sessionContext);
             IReadOnlyList<GoldenQuery> queries;
+            var callerTenant = Autheris.Domain.Common.TenantId.TryParse(sessionContext.TenantId, out var parsedTenant) ? parsedTenant : Autheris.Domain.Common.TenantId.Platform;
 
             if (isMcpAuthBypassed || isAdmin)
             {
                 // MCP-15: a null predicate still keeps the per-request cap.
-                queries = await _goldenQueryService.GetGoldenQueriesAsync(domain, tableName, null, cancellationToken).ConfigureAwait(false);
+                queries = await _goldenQueryService.GetGoldenQueriesAsync(new GoldenQueryReadContext(callerTenant), domain, tableName, cancellationToken).ConfigureAwait(false);
             }
             else if (_consentRepository != null)
             {
@@ -495,21 +496,20 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
                     visibleKeys = null;
                 }
 
-                queries = visibleKeys is null
-                    ? Array.Empty<GoldenQuery>()
-                    : await _goldenQueryService.GetGoldenQueriesAsync(domain, tableName, q => visibleKeys.Contains((q.Domain.ToLowerInvariant(), q.TableName.ToLowerInvariant())), cancellationToken).ConfigureAwait(false);
-                if (queries.Count > 0 && _decisionPoint is not null && callerPrincipal is not null && visibleTables is { Count: > 0 })
+                // Caller visibility and hidden catalog text are resolved first and applied before the per-request cap.
+                var hiddenByTable = new Dictionary<(string Domain, string Table), IReadOnlySet<string>>();
+                var resolved = visibleKeys is not null;
+                if (resolved && _decisionPoint is not null && callerPrincipal is not null && visibleTables is { Count: > 0 })
                 {
-                    var decisions = await _decisionPoint.DecideManyAsync(
-                        Autheris.Domain.Security.SecurityPrincipalContext.FromPrincipal(callerPrincipal, sessionContext.TenantId),
-                        visibleTables,
-                        Autheris.Application.Policy.Pdp.AccessOperation.Discover,
-                        Autheris.Application.Policy.Pdp.AccessTransport.Mcp,
-                        cancellationToken).ConfigureAwait(false);
-                    if (decisions is { Count: > 0 })
+                    try
                     {
-                        var hiddenByTable = new Dictionary<(string Domain, string Table), IReadOnlySet<string>>();
-                        foreach (var d in decisions)
+                        var decisions = await _decisionPoint.DecideManyAsync(
+                            Autheris.Domain.Security.SecurityPrincipalContext.FromPrincipal(callerPrincipal, sessionContext.TenantId),
+                            visibleTables,
+                            Autheris.Application.Policy.Pdp.AccessOperation.Discover,
+                            Autheris.Application.Policy.Pdp.AccessTransport.Mcp,
+                            cancellationToken).ConfigureAwait(false);
+                        foreach (var d in decisions ?? [])
                         {
                             if (d?.HiddenCatalogTextColumns is not { Count: > 0 } hidden) continue;
                             var gated = hidden.Where(d.IsCatalogTextHidden).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -519,14 +519,23 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
                             var byColumn = mapping?.Columns.ToDictionary(m => m.ColumnName, m => m, StringComparer.OrdinalIgnoreCase);
                             hiddenByTable[(d.Table.Domain.ToLowerInvariant(), d.Table.TableName.ToLowerInvariant())] = GoldenQueryService.BuildHiddenIdentifierSet(gated, byColumn);
                         }
-                        if (hiddenByTable.Count > 0)
-                        {
-                            queries = queries.Where(q =>
-                                !hiddenByTable.TryGetValue((q.Domain.ToLowerInvariant(), q.TableName.ToLowerInvariant()), out var hiddenCols) ||
-                                !GoldenQueryService.MentionsAnyIdentifier(q.QueryText, hiddenCols)).ToList();
-                        }
+                    }
+                    catch (Exception ex) when (ex is not OutOfMemoryException and not OperationCanceledException)
+                    {
+                        resolved = false;
                     }
                 }
+
+                queries = !resolved
+                    ? Array.Empty<GoldenQuery>()
+                    : await _goldenQueryService.GetGoldenQueriesAsync(
+                        new GoldenQueryReadContext(
+                            callerTenant,
+                            IsDatasetVisible: (d, t) => visibleKeys!.Contains((d.ToLowerInvariant(), t.ToLowerInvariant())),
+                            HiddenIdentifiers: (d, t) => hiddenByTable.TryGetValue((d.ToLowerInvariant(), t.ToLowerInvariant()), out var hiddenCols) ? hiddenCols : null),
+                        domain,
+                        tableName,
+                        cancellationToken).ConfigureAwait(false);
             }
             else
             {
@@ -534,7 +543,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
                 queries = Array.Empty<GoldenQuery>();
             }
 
-            rawDataJson = JsonSerializer.Serialize(new { tenantId = sessionContext.TenantId, queries });
+            rawDataJson = JsonSerializer.Serialize(new { tenantId = sessionContext.TenantId, contentNotice = McpDocTools.UntrustedContentNotice, queries });
         }
         else if (_queryExecutor != null)
         {

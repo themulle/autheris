@@ -54,7 +54,7 @@ public sealed class McpAccessHintTests
                 Columns = [new TableColumn { ColumnName = "id", DataType = "int", Description = "Key" }]
             }
         ]));
-        golden.GetGoldenQueriesAsync(Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+        golden.GetGoldenQueriesAsync(Arg.Any<GoldenQueryReadContext>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
             .Returns(ValueTask.FromResult<IReadOnlyList<GoldenQuery>>([]));
         return new McpDatasetCatalog(metadata, consents, Substitute.For<IGatewayExecutionService>(), golden, Options.Create(o), graphQl,
             visibilityService: Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(metadata.ServeSingleReadsFromCatalog(), consents, o),

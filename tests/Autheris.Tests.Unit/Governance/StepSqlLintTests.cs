@@ -161,7 +161,8 @@ public sealed class StepSqlLintTests
                 (19, "pattern_grants"),
                 (20, "data_classifications"),
                 (21, "consent_classification_access"),
-                (22, "docs_store")
+                (22, "docs_store"),
+                (23, "golden_queries")
             ]);
         }
     }
