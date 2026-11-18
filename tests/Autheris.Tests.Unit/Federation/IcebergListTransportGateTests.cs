@@ -28,7 +28,9 @@ public sealed class IcebergListTransportGateTests
         Columns = [new TableColumn { ColumnName = "id" }]
     };
 
-    internal static async Task AssertListHidesDeniedSourcesAsync()
+    internal static Task AssertListHidesDeniedSourcesAsync() => RunAsync(denial: new TransportNotAllowedException("denied_src", DataSourceTransportFlags.Rest), expectHidden: true);
+
+    private static async Task RunAsync(Exception denial, bool expectHidden)
     {
         var items = new[] { Lake("denied_src", "secret", "t1"), Lake("open_src", "open", "t2") };
         var repo = Substitute.For<ITableMetadataRepository>();
@@ -38,7 +40,7 @@ public sealed class IcebergListTransportGateTests
 
         var gate = Substitute.For<IDataSourceTransportGate>();
         gate.EnsureCatalogSourceAsync("denied_src", Arg.Any<CancellationToken>())
-            .Returns(Task.FromException(new TransportNotAllowedException("denied_src", DataSourceTransportFlags.Rest)));
+            .Returns(Task.FromException(denial));
 
         var options = Options.Create(new GatewayOptions { Tenancy = new TenancyOptions { DefaultTenantId = "default-tenant" } });
         var consents = Substitute.For<IConsentRepository>();
@@ -51,11 +53,21 @@ public sealed class IcebergListTransportGateTests
         var admin = new ClaimsPrincipal(new ClaimsIdentity(
             [new Claim(ClaimTypes.PrimarySid, "admin@corp.com"), new Claim(ClaimTypes.Role, "GovernanceAdmin")], "Bearer"));
 
+        if (!expectHidden)
+        {
+            await Should.ThrowAsync<InvalidOperationException>(() => service.ListNamespacesAsync("tenant-1", admin).AsTask());
+            await Should.ThrowAsync<InvalidOperationException>(() => service.ListTablesAsync("tenant-1", "secret", admin).AsTask());
+            return;
+        }
+
         var namespaces = await service.ListNamespacesAsync("tenant-1", admin);
         namespaces.ShouldNotContain("secret");
         var tables = await service.ListTablesAsync("tenant-1", "secret", admin);
         tables.ShouldBeEmpty();
     }
+
+    [Fact]
+    public Task Non_transport_gate_failure_propagates() => RunAsync(new InvalidOperationException("gate failure"), expectHidden: false);
 
     [Fact]
     public Task List_hides_denied_sources() => AssertListHidesDeniedSourcesAsync();

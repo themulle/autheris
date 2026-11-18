@@ -296,7 +296,7 @@ public sealed class CdcWebhookDeliveryService : BackgroundService
 
             if (!decision.IsAllowed || decision.MaskedPayload is not { Count: > 0 })
             {
-                Drop(string.Equals(decision.FilterReason, "Transport not allowed", StringComparison.Ordinal) ? "transport_denied" : "denied");
+                Drop(decision.IsTransportDenied ? "transport_denied" : "denied");
                 Record(subscription, b => b.DroppedDenied++);
                 continue;
             }

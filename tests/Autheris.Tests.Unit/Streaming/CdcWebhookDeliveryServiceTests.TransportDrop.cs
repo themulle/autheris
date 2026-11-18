@@ -61,7 +61,7 @@ public sealed partial class CdcWebhookDeliveryServiceTests
         await f.AddSubscription();
         var enforcer = Substitute.For<IStreamRlsPolicyEnforcer>();
         enforcer.EvaluateAndMaskAsync(Arg.Any<CdcEvent>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<CancellationToken>())
-            .Returns(ValueTask.FromResult(StreamSecurityDecision.Denied("Transport not allowed")));
+            .Returns(ValueTask.FromResult(StreamSecurityDecision.TransportDenied()));
         f.EnforcerOverride = enforcer;
         var service = f.Create();
 

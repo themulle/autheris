@@ -69,6 +69,18 @@ public sealed class CdcSubscriptionGovernorTransportTests
         lease.ShouldNotBeNull();
     }
 
+    [Theory]
+    [InlineData(DataSourceTransportFlags.None)]
+    [InlineData(DataSourceTransportFlags.GraphQL | DataSourceTransportFlags.Rest)]
+    public async Task All_tables_subscription_denied_for_unusable_ingress(DataSourceTransportFlags ingress)
+    {
+        var gate = Substitute.For<IDataSourceTransportGate>();
+        gate.Ingress.Returns(ingress);
+        var ex = await Should.ThrowAsync<GraphQLException>(() =>
+            Governor().AdmitAsync(User(admin: true), "cdc_all", null, null, Substitute.For<IAuditLogRepository>(), CancellationToken.None, transportGate: gate));
+        ex.Errors[0].Code.ShouldBe("FORBIDDEN");
+    }
+
     [Fact]
     public Task Subscription_without_registered_gate_is_denied() => AssertNoGateDeniesTableSubscriptionAsync();
 
