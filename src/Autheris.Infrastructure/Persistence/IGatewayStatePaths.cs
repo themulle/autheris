@@ -10,11 +10,11 @@ public interface IGatewayStatePaths
     /// <summary>Full path of the state directory.</summary>
     string StateDirectory { get; }
 
-    /// <summary>Full path of the SQLite governance database file inside <see cref="StateDirectory"/>.</summary>
+    /// <summary>Full path of the local governance database file inside <see cref="StateDirectory"/>.</summary>
     string GovernanceDatabaseFile { get; }
 
     /// <summary>
-    /// The effective SQLite governance connection string: an explicitly configured value wins; otherwise Development/Test use a private
+    /// The effective governance connection string: an explicitly configured value wins; otherwise Development/Test use a private
     /// in-memory database and every other environment the governance database file in the state directory.
     /// </summary>
     string ResolveGovernanceConnectionString(string? configured);

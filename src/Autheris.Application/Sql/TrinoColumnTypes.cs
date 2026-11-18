@@ -53,7 +53,7 @@ public static class TrinoColumnTypes
             return TrinoColumnType.Varchar;
         }
 
-        // Every value must have the reported type (SQLite types per value, not per column).
+        // Every value must have the reported type.
         int maxScale = 0;
         foreach (var value in values)
         {

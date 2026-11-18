@@ -24,7 +24,7 @@ There is exactly one way to produce governed SQL: `ISqlEngine.Compile`. There is
   security injection, a coverage proof, dialect capability validation and emission with every value bound.
 - **Typed policy input**: tenant binding, row policies, column masks, table catalog and DML guards are values of the request, never
   text. Policy and mask values travel as parameters.
-- **Dialect generators** for PostgreSQL, SQL Server, SQLite, Oracle, DuckDB and Databricks, driven by a declarative capability table
+- **Dialect generators** for PostgreSQL, SQL Server, Oracle, DuckDB and Databricks, driven by a declarative capability table
   (`DialectCapabilityTable`), plus an ANSI generator that only renders inline text.
 - **Binders and a checked DML executor** (`CompiledSqlBinders`, `CheckedDmlExecutor`): the only code that assigns
   `DbCommand.CommandText` for governed SQL, with a row-count check for INSERT statements that have check-option semantics.
@@ -195,7 +195,6 @@ the supported DML classes. A dialect without an entry cannot be compiled.
 | :--- | :--- |
 | SQL Server | Production |
 | PostgreSQL | Production |
-| SQLite | Production |
 | Oracle | Production |
 | DuckDB | Production |
 | Databricks | Production |
@@ -285,7 +284,7 @@ Messages carry categories and counts, never request text or bound values.
 | :--- | :--- |
 | `tests/TrinoSqlEngine.Tests` | Trino grammar compliance, analyzer, parser concurrency and limits, the compiler (`Compiler/`), dialect generators, security regressions (`Security/`), conformance fixtures, property tests with oracles. |
 | `tests/Autheris.Tests.Architecture` | IL scans: no legacy types, no free-text expression nodes, `CompiledSql` is constructed only by the engine, `CommandText` is assigned only by the binder, governed entry points reach `Compile` and the binder. |
-| `tests/Autheris.Tests.SqlCompilerGate` | Differential and execution gate on SQLite, PostgreSQL, SQL Server and Oracle with an independent policy oracle. |
+| `tests/Autheris.Tests.SqlCompilerGate` | Differential and execution gate on PostgreSQL, SQL Server and Oracle with an independent policy oracle. |
 
 ```bash
 dotnet test tests/TrinoSqlEngine.Tests
