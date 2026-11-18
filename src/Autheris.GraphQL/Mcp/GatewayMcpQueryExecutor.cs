@@ -348,9 +348,25 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
                 describeNarrowing = parsedNarrowing;
             }
 
+            // Issues #798 / #804: a present accessStatus is a known status string; non-string, blank and unknown values are rejected with
+            // the fixed text of the search tools (the value is never echoed).
+            string? accessStatus = null;
+            if (string.Equals(tool.Name, McpDatasetTools.ListDatasets, StringComparison.OrdinalIgnoreCase)
+                && variables.TryGetValue("accessStatus", out var rawAccessStatus) && rawAccessStatus is not null)
+            {
+                if (rawAccessStatus is not string accessText || !Autheris.Application.Catalog.Discovery.CatalogAccessStatus.TryParseFilter(accessText, out _))
+                {
+                    return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.InvalidParams, Autheris.Application.Catalog.Discovery.CatalogAccessStatus.InvalidFilterMessage);
+                }
+
+                accessStatus = accessText;
+            }
+
             object result = tool.Name.ToLowerInvariant() switch
             {
-                McpDatasetTools.ListDatasets => (Text("language") != null || Bool("overview") != null || Text("format") != null)
+                McpDatasetTools.ListDatasets => accessStatus is not null
+                    ? await _datasetCatalog.ListDatasetsAsync(principal, Text("search"), Text("domain"), Number("offset"), Number("limit"), Text("tag"), Text("language"), Bool("overview"), Text("format"), accessStatus, cancellationToken).ConfigureAwait(false)
+                    : (Text("language") != null || Bool("overview") != null || Text("format") != null)
                     ? await _datasetCatalog.ListDatasetsAsync(principal, Text("search"), Text("domain"), Number("offset"), Number("limit"), Text("tag"), Text("language"), Bool("overview"), Text("format"), cancellationToken).ConfigureAwait(false)
                     : (Number("offset") != null || Number("limit") != null || Text("tag") != null)
                         ? await _datasetCatalog.ListDatasetsAsync(principal, Text("search"), Text("domain"), Number("offset"), Number("limit"), Text("tag"), cancellationToken).ConfigureAwait(false)

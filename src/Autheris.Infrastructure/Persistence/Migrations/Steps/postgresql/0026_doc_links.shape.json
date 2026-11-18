@@ -1,0 +1,161 @@
+{
+  "ops": [
+    {
+      "op": "addTable",
+      "table": "doc_links",
+      "newTable": {
+        "name": "doc_links",
+        "columns": [
+          {
+            "name": "tenant_id",
+            "type": "CHARACTER VARYING(128)",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "link_id",
+            "type": "UUID",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "source_kind",
+            "type": "CHARACTER VARYING(16)",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "app_id",
+            "type": "CHARACTER VARYING(64)",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "category",
+            "type": "CHARACTER VARYING(32)",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "doc_id",
+            "type": "CHARACTER VARYING(128)",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "doc_tenant_id",
+            "type": "CHARACTER VARYING(128)",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "target_kind",
+            "type": "CHARACTER VARYING(16)",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "target_domain",
+            "type": "CHARACTER VARYING(256)",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "target_schema",
+            "type": "CHARACTER VARYING(256)",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "target_name",
+            "type": "CHARACTER VARYING(256)",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "target_column",
+            "type": "CHARACTER VARYING(256)",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "link_digest",
+            "type": "BYTEA",
+            "family": "binary",
+            "nullable": false
+          },
+          {
+            "name": "created_by",
+            "type": "CHARACTER VARYING(256)",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "created_at_utc",
+            "type": "TIMESTAMP WITH TIME ZONE",
+            "family": "datetime",
+            "nullable": false
+          }
+        ],
+        "primaryKey": [
+          "link_id"
+        ],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addIndex",
+      "table": "doc_links",
+      "name": "ux_doc_links_source_target",
+      "unique": true,
+      "columns": [
+        "tenant_id",
+        "link_digest"
+      ]
+    },
+    {
+      "op": "addIndex",
+      "table": "DOC_LINKS",
+      "name": "idx_doc_links_source",
+      "unique": false,
+      "columns": [
+        "tenant_id",
+        "source_kind",
+        "app_id",
+        "category",
+        "doc_id"
+      ]
+    },
+    {
+      "op": "addIndex",
+      "table": "doc_links",
+      "name": "idx_doc_links_target",
+      "unique": false,
+      "columns": [
+        "tenant_id",
+        "target_domain",
+        "target_schema"
+      ]
+    },
+    {
+      "op": "addColumn",
+      "table": "doc_official_documents",
+      "column": {
+        "name": "discovery_hidden",
+        "type": "BOOLEAN",
+        "family": "boolean",
+        "nullable": false
+      }
+    },
+    {
+      "op": "addColumn",
+      "table": "doc_tenant_documents",
+      "column": {
+        "name": "discovery_hidden",
+        "type": "BOOLEAN",
+        "family": "boolean",
+        "nullable": false
+      }
+    }
+  ]
+}

@@ -140,6 +140,8 @@ public static class AuditEventTypes
     public const string DocIngestionDocumentApplied = "DOC_INGESTION_DOCUMENT_APPLIED";
     public const string DocDiscoveryRead = "DOC_DISCOVERY_READ";
     public const string DocDocumentDeleted = "DOC_DOCUMENT_DELETED";
+    public const string DocLinksChanged = "DOC_LINKS_CHANGED";
+    public const string DocVisibilityChanged = "DOC_VISIBILITY_CHANGED";
     public const string DocTenantPurged = "DOC_TENANT_PURGED";
     public const string DocIndexSyncRequested = "DOC_INDEX_SYNC_REQUESTED";
     public const string DocLegacyImportCompleted = "DOC_LEGACY_IMPORT_COMPLETED";

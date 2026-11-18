@@ -22,6 +22,7 @@ src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs|/datasets/{id}/row-filter-stra
 src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs|/datasets/{id}/samples
 src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs|/datasources
 src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs|/domains
+src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs|/graphql-schema-status
 src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs|/search
 src/Autheris.Api/Endpoints/CdcStreamAdminEndpoints.cs|/api/v1/cdc/streams
 src/Autheris.Api/Endpoints/ChangeDetectionEndpoints.cs|/api/v1/data/{domain}/{schema}/{table}/change-token

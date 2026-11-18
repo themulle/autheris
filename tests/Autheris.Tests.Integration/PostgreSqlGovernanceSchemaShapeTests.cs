@@ -254,18 +254,15 @@ public sealed class PostgreSqlGovernanceSchemaShapeTests : IClassFixture<Postgre
             () => GovernanceSchemaTestSupport.RunPostgreSqlAsync(db.ConnectionString, GovernanceMigrationMode.Verify));
         ex.Deviations.ShouldContain(d => d.Kind == SchemaDeviationKind.MissingTable && d.Table == "table_indexes");
 
-        // And a drifted shadow earlier in the search_path hides the intact table, exactly as the runtime would resolve it.
-        await ExecAsync(db.ConnectionString, "DROP SCHEMA shadow CASCADE;");
-        await using (var conn = new NpgsqlConnection(db.ConnectionString))
-        {
-            await conn.OpenAsync();
-            PostgreSqlBaselineSchema.Apply(conn, null); // restores the dropped tables (idempotent DDL)
-        }
+        // And a drifted shadow earlier in the search_path hides the intact table, exactly as the runtime would resolve it. A fresh,
+        // fully migrated database is used: re-applying the frozen baseline over later drop steps is not supported.
+        await using var intact = await PostgreSqlTestDatabase.CreateAsync();
+        await GovernanceSchemaTestSupport.RunPostgreSqlAsync(intact.ConnectionString, GovernanceMigrationMode.Apply);
 
-        await ExecAsync(db.ConnectionString, "CREATE SCHEMA shadow; CREATE TABLE shadow.consent_column_rules (id TEXT PRIMARY KEY); "
+        await ExecAsync(intact.ConnectionString, "CREATE SCHEMA shadow; CREATE TABLE shadow.consent_column_rules (id TEXT PRIMARY KEY); "
             + "CREATE TABLE shadow.autheris_schema_migrations (LIKE public.autheris_schema_migrations INCLUDING ALL); "
             + "INSERT INTO shadow.autheris_schema_migrations SELECT * FROM public.autheris_schema_migrations;");
-        var shadowed = new NpgsqlConnectionStringBuilder(db.ConnectionString) { SearchPath = "shadow,public" }.ConnectionString;
+        var shadowed = new NpgsqlConnectionStringBuilder(intact.ConnectionString) { SearchPath = "shadow,public" }.ConnectionString;
         var hidden = await Should.ThrowAsync<GovernanceSchemaDriftException>(
             () => GovernanceSchemaTestSupport.RunPostgreSqlAsync(shadowed, GovernanceMigrationMode.Verify));
         hidden.Deviations.ShouldContain(d => d.Table == "consent_column_rules" && d.Kind == SchemaDeviationKind.MissingColumn);

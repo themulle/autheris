@@ -185,6 +185,24 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         CancellationToken ct = default) =>
         ListDatasetsAsync(principal, search, domain, offset, limit, tag, language, overview: null, format: null, ct);
 
+    public Task<McpDatasetList> ListDatasetsAsync(
+        ClaimsPrincipal principal,
+        string? search,
+        string? domain,
+        int? offset,
+        int? limit,
+        string? tag,
+        string? language,
+        bool? overview,
+        string? format,
+        CancellationToken ct = default) =>
+        ListDatasetsAsync(principal, search, domain, offset, limit, tag, language, overview, format, accessStatus: null, ct);
+
+    /// <summary>
+    /// Issue #798: <paramref name="accessStatus"/> (<c>GRANTED</c>, <c>PENDING</c>, <c>EXPIRED</c>, <c>REQUEST_ACCESS</c>; null: no filter)
+    /// keeps only datasets the caller has in that state, before the total, the paging and the overview counts. An unknown value throws
+    /// <see cref="ArgumentException"/> (never ignored).
+    /// </summary>
     public async Task<McpDatasetList> ListDatasetsAsync(
         ClaimsPrincipal principal,
         string? search,
@@ -195,11 +213,13 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         string? language,
         bool? overview,
         string? format,
+        string? accessStatus,
         CancellationToken ct = default)
     {
+        var accessFilter = CatalogAccessStatus.ParseFilter(accessStatus);
         if (_discoveryService != null && !IsBypassed)
         {
-            return await ListDatasetsWithDiscoveryAsync(principal, search, domain, offset, limit, tag, language, overview, format, ct).ConfigureAwait(false);
+            return await ListDatasetsWithDiscoveryAsync(principal, search, domain, offset, limit, tag, language, overview, format, accessFilter, ct).ConfigureAwait(false);
         }
 
         // F-C11: the service has already dropped every row the shaping rule maps to NotFound; the check below is the second line of
@@ -208,6 +228,15 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         var visible = allVisible
             .Where(t => Shape(isAdminView, t) != CatalogOutputShape.NotFound)
             .ToList();
+
+        // Issue #798: the caller's consents are read once; the filter runs on the visible set, before every count and page.
+        (IReadOnlyList<Consent> ActiveConsents, IReadOnlyList<ConsentRequest> PendingRequests, bool IsAdmin)? callerConsents = null;
+        if (accessFilter is { } wantedAccess)
+        {
+            var (filterConsents, filterRequests, filterIsAdmin) = await GetCallerConsentsAndRequestsAsync(principal, ct).ConfigureAwait(false);
+            callerConsents = (filterConsents, filterRequests, filterIsAdmin);
+            visible.RemoveAll(t => !CatalogAccessStatus.Matches(AccessStatusOf(t.Identifier, filterConsents, filterRequests, filterIsAdmin, IsBypassed), wantedAccess));
+        }
 
         var negotiatedLanguage = _languageNegotiator?.NegotiateLanguage(language, _localizationOptions?.Value.SupportedLanguages, _localizationOptions?.Value.DefaultLanguage);
 
@@ -260,7 +289,8 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         }
 
         var candidateProcedures = new List<(string Id, RegisteredProcedure Proc)>();
-        if (_procedureCatalog != null)
+        // Procedures are listed as GRANTED; any other access filter leaves them out.
+        if (_procedureCatalog != null && accessFilter is null or DiscoveryAccessState.Granted)
         {
             var visibleProcedures = await _procedureCatalog.ListVisibleAsync(principal, principal.GetTenantId(), ct).ConfigureAwait(false);
             foreach (var proc in visibleProcedures.Where(p => p.Definition.Mode == ProcedureMode.Read && !string.IsNullOrWhiteSpace(p.Definition.ResultTable)))
@@ -300,7 +330,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         var pagedCandidates = allCandidates.Skip(effectiveOffset).Take(effectiveLimit).ToList();
 
         // Step 3: Deferred materialization ONLY for the paged slice (50 items max)
-        var (activeConsents, pendingRequests, isAdmin) = await GetCallerConsentsAndRequestsAsync(principal, ct).ConfigureAwait(false);
+        var (activeConsents, pendingRequests, isAdmin) = callerConsents ?? await GetCallerConsentsAndRequestsAsync(principal, ct).ConfigureAwait(false);
         var pagedSummaries = new List<McpDatasetSummary>(pagedCandidates.Count);
 
         foreach (var c in pagedCandidates)
@@ -308,9 +338,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
             if (c.Table is { } t)
             {
                 var graphQl = graphQlMap == null ? null : await graphQlMap.GetTableAsync(t.Identifier, ct).ConfigureAwait(false);
-                var status = options?.Value.IsMcpAuthBypassed == true
-                    ? "GRANTED"
-                    : CatalogVisibility.ComputeAccessStatus(t.Identifier, activeConsents, pendingRequests, isAdmin);
+                var status = AccessStatusOf(t.Identifier, activeConsents, pendingRequests, isAdmin, IsBypassed);
 
                 var resolved = negotiatedLanguage != null ? t.Table.Texts.Resolve(negotiatedLanguage) : null;
                 var displayName = McpCatalogText.DisplayName(resolved?.Title ?? t.Table.DisplayName, t.Identifier.TableName);
@@ -418,13 +446,12 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         var graphQl = graphQlMap == null ? null : await graphQlMap.GetTableAsync(id, ct).ConfigureAwait(false);
         var graphQlColumns = (graphQl?.Columns ?? []).ToDictionary(c => c.ColumnName, StringComparer.OrdinalIgnoreCase);
 
-        // #799 review: the access label is the caller's effective level. A non-administrator level already is the data-path level (an explicit
-        // Clear on a sensitive column is clear); the administrator view is Clear for every column, but a sensitive column stays masked
-        // for it. The key and index projection uses the same labels, so a key column never shows access "mask".
+        // The access label is the data-path level seen through the sensitivity rule: a column graded sensitive is never reported as clear
+        // (an explicit Clear on it is shown as mask). The key and index projection uses the same labels, so a key column never shows "mask".
         string? AccessLabel(TableColumn c) => columnAccessLevels.TryGetValue(c.ColumnName, out var lvl)
             ? lvl switch
             {
-                Autheris.Domain.Interfaces.ColumnAccessLevel.Clear when !isAdmin || !ClassificationMetadata.IsColumnSensitive(table, c) => "clear",
+                Autheris.Domain.Interfaces.ColumnAccessLevel.Clear when !ClassificationMetadata.IsColumnSensitive(table, c) => "clear",
                 Autheris.Domain.Interfaces.ColumnAccessLevel.Clear or Autheris.Domain.Interfaces.ColumnAccessLevel.Mask => "mask",
                 _ => null
             }
