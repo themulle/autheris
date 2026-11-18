@@ -584,7 +584,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
     /// <summary>
     /// SEC M-17: Strukturiertes Fehler-Ergebnis für MCP-Tool-Aufrufe (Deny, Ausführungsfehler, nicht verfügbar).
     /// </summary>
-    internal static string CreateErrorResult(string tenantId, string toolName, string code, string message, string? graphQLResultJson = null)
+    internal static string CreateErrorResult(string tenantId, string toolName, string code, string message, string? graphQLResultJson = null, int? retryAfterSeconds = null)
     {
         JsonElement? graphQL = null;
         if (!string.IsNullOrWhiteSpace(graphQLResultJson))
@@ -604,7 +604,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
             tenantId,
             toolName,
             IsError: true,
-            new McpToolError(code, message),
+            new McpToolError(code, message, retryAfterSeconds),
             graphQL), CamelCaseJsonOptions);
     }
 
@@ -756,16 +756,16 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         return new ClaimsPrincipal(identity);
     }
 
-    private string CreateDiscoveryErrorResult(string tenantId, string toolName, Autheris.Application.Catalog.Discovery.DiscoveryStatusException ex)
+    internal static string CreateDiscoveryErrorResult(string tenantId, string toolName, Autheris.Application.Catalog.Discovery.DiscoveryStatusException ex)
     {
         var code = ex.Kind switch
         {
             Autheris.Application.Catalog.Discovery.DiscoveryFailureKind.Unauthenticated => "UNAUTHORIZED",
             Autheris.Application.Catalog.Discovery.DiscoveryFailureKind.Forbidden => McpErrorCodes.Forbidden,
-            Autheris.Application.Catalog.Discovery.DiscoveryFailureKind.RateLimited => "RATE_LIMITED",
+            Autheris.Application.Catalog.Discovery.DiscoveryFailureKind.RateLimited => ex.Code,
             _ => McpErrorCodes.InvalidParams
         };
-        return CreateErrorResult(tenantId, toolName, code, ex.Message);
+        return CreateErrorResult(tenantId, toolName, code, ex.Message, retryAfterSeconds: ex.RetryAfterSeconds);
     }
 }
 
@@ -781,7 +781,11 @@ public static class McpErrorCodes
     public const string NotFound = "NOT_FOUND";
 }
 
-internal sealed record McpToolError(string Code, string Message);
+internal sealed record McpToolError(
+    string Code,
+    string Message,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    int? RetryAfterSeconds = null);
 
 internal sealed record McpToolErrorPayload(
     string TenantId,

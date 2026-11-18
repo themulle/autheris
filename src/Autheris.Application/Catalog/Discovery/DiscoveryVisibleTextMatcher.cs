@@ -107,13 +107,13 @@ internal static class DiscoveryVisibleTextMatcher
 
     private static IEnumerable<string> VisibleFields(TableMetadata table, DiscoveryObject projected)
     {
-        foreach (var field in new[] { table.Identifier.Domain, table.Identifier.Schema, table.Identifier.TableName, projected.DisplayName, projected.Description, table.Table.DisplayName, table.Table.Description })
-        {
-            if (!string.IsNullOrWhiteSpace(field))
-            {
-                yield return field;
-            }
-        }
+        if (!string.IsNullOrWhiteSpace(table.Identifier.Domain)) yield return table.Identifier.Domain;
+        if (!string.IsNullOrWhiteSpace(table.Identifier.Schema)) yield return table.Identifier.Schema;
+        if (!string.IsNullOrWhiteSpace(table.Identifier.TableName)) yield return table.Identifier.TableName;
+        if (!string.IsNullOrWhiteSpace(projected.DisplayName)) yield return projected.DisplayName;
+        if (!string.IsNullOrWhiteSpace(projected.Description)) yield return projected.Description;
+        if (!string.IsNullOrWhiteSpace(table.Table.DisplayName)) yield return table.Table.DisplayName;
+        if (!string.IsNullOrWhiteSpace(table.Table.Description)) yield return table.Table.Description;
 
         foreach (var tag in projected.Tags)
         {
@@ -124,19 +124,27 @@ internal static class DiscoveryVisibleTextMatcher
         {
             foreach (var entry in table.Table.Texts.Entries.Values)
             {
-                foreach (var field in new[] { entry.DisplayName, entry.Description, entry.LongDescription })
-                {
-                    if (!string.IsNullOrWhiteSpace(field))
-                    {
-                        yield return field;
-                    }
-                }
+                if (!string.IsNullOrWhiteSpace(entry.DisplayName)) yield return entry.DisplayName;
+                if (!string.IsNullOrWhiteSpace(entry.Description)) yield return entry.Description;
+                if (!string.IsNullOrWhiteSpace(entry.LongDescription)) yield return entry.LongDescription;
             }
         }
 
-        var sourceColumns = table.Columns.ToDictionary(static c => c.ColumnName, StringComparer.OrdinalIgnoreCase);
+        // The projected columns are the source columns minus the discovery-hidden ones, in the same order: walk both in one pass.
+        var sourceIndex = 0;
         foreach (var column in projected.Columns)
         {
+            TableColumn? source = null;
+            while (sourceIndex < table.Columns.Count)
+            {
+                var candidate = table.Columns[sourceIndex++];
+                if (string.Equals(candidate.ColumnName, column.Name, StringComparison.OrdinalIgnoreCase))
+                {
+                    source = candidate;
+                    break;
+                }
+            }
+
             if (column.State == DiscoveryColumnState.NoAccess)
             {
                 continue;
@@ -144,31 +152,21 @@ internal static class DiscoveryVisibleTextMatcher
 
             yield return column.Name;
             yield return column.DataType;
-            var textHidden = projected.HiddenTextColumns.Contains(column.Name);
-            if (textHidden)
+            if (projected.HiddenTextColumns.Contains(column.Name))
             {
                 continue;
             }
 
-            foreach (var field in new[] { column.DisplayName, column.Description, column.LongDescription })
-            {
-                if (!string.IsNullOrWhiteSpace(field))
-                {
-                    yield return field;
-                }
-            }
+            if (!string.IsNullOrWhiteSpace(column.DisplayName)) yield return column.DisplayName;
+            if (!string.IsNullOrWhiteSpace(column.Description)) yield return column.Description;
+            if (!string.IsNullOrWhiteSpace(column.LongDescription)) yield return column.LongDescription;
 
-            if (sourceColumns.TryGetValue(column.Name, out var source) && source.Texts is not null)
+            if (source?.Texts is not null)
             {
                 foreach (var entry in source.Texts.Entries.Values)
                 {
-                    foreach (var field in new[] { entry.DisplayName, entry.Description })
-                    {
-                        if (!string.IsNullOrWhiteSpace(field))
-                        {
-                            yield return field;
-                        }
-                    }
+                    if (!string.IsNullOrWhiteSpace(entry.DisplayName)) yield return entry.DisplayName;
+                    if (!string.IsNullOrWhiteSpace(entry.Description)) yield return entry.Description;
                 }
             }
         }

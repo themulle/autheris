@@ -37,6 +37,8 @@ using Microsoft.Extensions.Options;
 public sealed class DiscoveryService : IDiscoveryService
 {
     public const int MaxPageSize = 200;
+    private const int MaxSearchWindows = 5;
+    private const int MaxSearchWindowSize = 1000;
     public const int MaxAuditObjectIds = 50;
     public const int ExpiredLookbackDays = 90;
 
@@ -314,34 +316,46 @@ public sealed class DiscoveryService : IDiscoveryService
             if (!string.IsNullOrWhiteSpace(trimmed) && _searchEngine?.IsIndexReady == true)
             {
                 var mode = ParseSearchMode(options.Mode);
-                // Candidates are verified against the caller-visible text before the limit applies, so ask the index for more than one page.
-                var engineQuery = new CatalogSearchQuery(
-                    QueryText: trimmed,
-                    DomainFilter: options.Domain,
-                    Limit: Math.Min(MaxPageSize, Math.Max(limit * 4, 50)),
-                    Mode: mode,
-                    Language: options.Language);
-
-                var hits = await _searchEngine.SearchAsync(
-                    engineQuery,
-                    id => visibleById.ContainsKey(id),
-                    isColumnRestricted: null,
-                    ct).ConfigureAwait(false);
-
-                var candidates = new List<TableMetadata>(hits.Count);
-                foreach (var hit in hits)
-                {
-                    if (visibleById.TryGetValue(hit.TableIdentifier, out var meta))
-                    {
-                        candidates.Add(meta);
-                    }
-                }
-
+                // Candidates are verified against the caller-visible text before the limit applies, so the index window grows
+                // (bounded) until enough verified hits exist or the index has no more candidates.
+                var window = Math.Min(MaxPageSize, Math.Max(limit * 4, 50));
                 var restrictedScores = new Dictionary<TableIdentifier, int>();
-                matchedTables = await KeepCallerVisibleMatchesAsync(
-                    caller, sid, scopeKey, candidates, options.Language,
-                    (table, projected) => DiscoveryVisibleTextMatcher.MatchesAnyTerm(table, projected, trimmed), ct,
-                    restrictedScores, (table, projected) => DiscoveryVisibleTextMatcher.VisibleTermMatchCount(table, projected, trimmed)).ConfigureAwait(false);
+                matchedTables = [];
+                for (var attempt = 0; attempt < MaxSearchWindows; attempt++)
+                {
+                    var hits = await _searchEngine.SearchAsync(
+                        new CatalogSearchQuery(
+                            QueryText: trimmed,
+                            DomainFilter: options.Domain,
+                            Limit: window,
+                            Mode: mode,
+                            Language: options.Language),
+                        id => visibleById.ContainsKey(id),
+                        isColumnRestricted: null,
+                        ct).ConfigureAwait(false);
+
+                    var candidates = new List<TableMetadata>(hits.Count);
+                    foreach (var hit in hits)
+                    {
+                        if (visibleById.TryGetValue(hit.TableIdentifier, out var meta))
+                        {
+                            candidates.Add(meta);
+                        }
+                    }
+
+                    restrictedScores.Clear();
+                    matchedTables = await KeepCallerVisibleMatchesAsync(
+                        caller, sid, scopeKey, candidates, options.Language,
+                        (table, projected) => DiscoveryVisibleTextMatcher.MatchesAnyTerm(table, projected, trimmed), ct,
+                        restrictedScores, (table, projected) => DiscoveryVisibleTextMatcher.VisibleTermMatchCount(table, projected, trimmed)).ConfigureAwait(false);
+
+                    if (matchedTables.Count >= limit || hits.Count < window)
+                    {
+                        break;
+                    }
+
+                    window = Math.Min(MaxSearchWindowSize, window * 2);
+                }
 
                 // The index score of a column-restricted table was computed from its whole text, so its position would reveal hidden text.
                 // Such hits follow the unrestricted ones (engine order) and are ordered by caller-visible term matches, then by identifier.
@@ -374,9 +388,12 @@ public sealed class DiscoveryService : IDiscoveryService
                     q = q.Where(t => MatchesNonHiddenText(t, trimmed));
                 }
 
-                matchedTables = await KeepCallerVisibleMatchesAsync(
-                    caller, sid, scopeKey, q.ToList(), options.Language,
-                    (table, projected) => string.IsNullOrWhiteSpace(trimmed) || DiscoveryVisibleTextMatcher.ContainsQuery(table, projected, trimmed), ct).ConfigureAwait(false);
+                // Without search text there is nothing to verify: the plain listing needs no per-caller projection here.
+                matchedTables = string.IsNullOrWhiteSpace(trimmed)
+                    ? q.Take(limit).ToList()
+                    : await KeepCallerVisibleMatchesAsync(
+                        caller, sid, scopeKey, q.ToList(), options.Language,
+                        (table, projected) => DiscoveryVisibleTextMatcher.ContainsQuery(table, projected, trimmed), ct).ConfigureAwait(false);
                 if (matchedTables.Count > limit)
                 {
                     matchedTables.RemoveRange(limit, matchedTables.Count - limit);

@@ -36,13 +36,14 @@ public sealed class CatalogSearchColumnDenyOracleTests
     private const string Marker = "zebracornmarker";
     private const string DeniedColumn = "diagnosis_code";
     private const string VisibleOnlyTerm = "pineapplezone";
+    private const string MaskedMarker = "hiddenmaskmarker";
     private const string RandomTerm = "quuxbazrandomword";
 
     private static readonly TenantId Tenant = new("tenant-a");
     private static readonly Sid UserSid = new("S-1-5-21-USER-813");
     private static readonly DateTimeOffset FixedNow = new(2026, 11, 18, 12, 0, 0, TimeSpan.Zero);
 
-    private enum Caller { DenyOneColumn, ClearAll, NoConsent }
+    private enum Caller { DenyOneColumn, ClearAll, NoConsent, MaskedHiddenText }
 
     private static TableMetadata BuildTable(string name, string markerColumn = DeniedColumn, bool hiddenMarker = true) => new()
     {
@@ -66,7 +67,7 @@ public sealed class CatalogSearchColumnDenyOracleTests
             Col("birth_date", "Calendar day of birth."),
             Col("region", $"Sales area {VisibleOnlyTerm} of the record."),
             Col("status", "Lifecycle state."),
-            Col("notes", "Free form remarks."),
+            Col("notes", $"Free form remarks {MaskedMarker}."),
             Col(markerColumn, hiddenMarker ? $"Internal classification {Marker} assigned by the clinic." : "Internal classification assigned by the clinic.")
         ]
     };
@@ -91,12 +92,16 @@ public sealed class CatalogSearchColumnDenyOracleTests
             c => c.ColumnName,
             c => c.ColumnName switch
             {
-                DeniedColumn when caller == Caller.DenyOneColumn && (deniedTable is null || req.Object.Identifier.TableName == deniedTable) => ColumnAccessLevel.Deny,
+                DeniedColumn when caller == Caller.DenyOneColumn && (deniedTable is null || req.Object.Identifier.TableName == deniedTable || req.Object.Identifier.TableName.StartsWith("bulk", StringComparison.Ordinal)) => ColumnAccessLevel.Deny,
                 "email" => ColumnAccessLevel.Mask,
+                "notes" when caller == Caller.MaskedHiddenText => ColumnAccessLevel.Mask,
                 _ => ColumnAccessLevel.Clear
             },
             StringComparer.OrdinalIgnoreCase);
-        return TableAccessDecision.Allowed(req.Object.Identifier, levels);
+        var decision = TableAccessDecision.Allowed(req.Object.Identifier, levels);
+        return caller == Caller.MaskedHiddenText
+            ? decision with { HiddenCatalogTextColumns = new HashSet<string>(["notes"], StringComparer.OrdinalIgnoreCase) }
+            : decision;
     });
 
     private static async Task<(DiscoveryService Discovery, FakeDiscoveryTableRepository Tables)> CreateAsync(
@@ -379,6 +384,80 @@ public sealed class CatalogSearchColumnDenyOracleTests
             (await service.SearchCatalogAsync(term, null, context)).ShouldBeEmpty();
         }
 
+        (await service.SearchCatalogDetailedAsync(new CatalogSearchQuery("directory", Mode: CatalogSearchMode.KeywordBm25), context)).Count.ShouldBe(1);
+    }
+
+    [Theory]
+    [InlineData("keyword")]
+    [InlineData("hybrid")]
+    public async Task MaskedColumnWithHiddenCatalogText_TermOnlyInItsDescription_NoHit_ClearCallerHits(string mode)
+    {
+        var masked = await CreateAsync(Caller.MaskedHiddenText, BuildTable("patients"));
+        var clear = await CreateAsync(Caller.ClearAll, BuildTable("patients"));
+
+        (await SearchAsync(masked.Discovery, MaskedMarker, mode)).ShouldBeEmpty();
+        (await SearchAsync(clear.Discovery, MaskedMarker, mode)).Count.ShouldBe(1);
+        // The masked column itself stays listed by describe_dataset, so its name remains searchable.
+        (await SearchAsync(masked.Discovery, "notes", mode)).Count.ShouldBe(1);
+
+        var list = await McpOf(masked.Discovery, masked.Tables).ListDatasetsAsync(Principal(), MaskedMarker, null, CancellationToken.None);
+        list.Datasets.ShouldBeEmpty();
+        list.Total.ShouldBe(0);
+        (await McpOf(clear.Discovery, clear.Tables).ListDatasetsAsync(Principal(), MaskedMarker, null, CancellationToken.None)).Total.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Search_VerifiedHitBeyondTheFirstIndexWindow_IsStillFound()
+    {
+        // 80 column-restricted tables outrank the one visible table in the index (the marker repeats in their denied column), so the
+        // first window holds no verifiable hit.
+        var bulk = Enumerable.Range(0, 80)
+            .Select(i =>
+            {
+                var t = BuildTable($"bulk{i:D2}");
+                return t with { Columns = [.. t.Columns.Take(7), Col(DeniedColumn, string.Join(' ', Enumerable.Repeat(Marker, 6)))] };
+            });
+        var (discovery, _) = await CreateAsync(Caller.DenyOneColumn, [.. bulk, BuildTable("visits")]);
+
+        var hits = await SearchAsync(discovery, Marker, "keyword", limit: 1);
+
+        hits.Select(h => h.Name).ShouldBe(["visits"]);
+    }
+
+    [Fact]
+    public async Task CatalogServiceWithoutConsentRepository_FailsClosed_OnlyTableLevelTextMatches()
+    {
+        var table = BuildTable("patients");
+        var tables = new FakeDiscoveryTableRepository();
+        tables.Tables.Add(table);
+        var consent = new Consent
+        {
+            Id = Guid.NewGuid(),
+            TenantId = Tenant,
+            TableIdentifier = table.Identifier,
+            GranteeType = GranteeType.User,
+            GranteeSid = UserSid,
+            Effect = ConsentEffect.Allow,
+            ValidFrom = FixedNow.AddDays(-1),
+            ValidTo = FixedNow.AddDays(30)
+        };
+        var consents = new TestInMemoryConsentRepository([consent], filterWindow: false);
+        var options = new GatewayOptions { Tenancy = TenancyShape.Multi.Options() };
+        var engine = new CatalogSearchEngine(
+            new ConstantVectorGenerator(),
+            Options.Create(new CatalogSearchOptions()),
+            NullLogger<CatalogSearchEngine>.Instance,
+            new AdjustableClassificationTimeProvider(FixedNow));
+        await engine.RebuildIndexAsync([table]);
+        var service = new CatalogDiscoveryService(
+            tables,
+            new FakeAuditWriter(),
+            Options.Create(options),
+            Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(tables, consents, options),
+            searchEngine: engine);
+        var context = new RequestContext(Tenant, UserSid, User: Principal());
+
+        (await service.SearchCatalogDetailedAsync(new CatalogSearchQuery("region", Mode: CatalogSearchMode.KeywordBm25), context)).ShouldBeEmpty();
         (await service.SearchCatalogDetailedAsync(new CatalogSearchQuery("directory", Mode: CatalogSearchMode.KeywordBm25), context)).Count.ShouldBe(1);
     }
 

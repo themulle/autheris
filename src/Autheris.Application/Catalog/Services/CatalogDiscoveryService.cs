@@ -270,7 +270,8 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
     }
 
     /// <summary>The caller's resolved level per column (shared with describe_dataset); null when it cannot be resolved (fail closed).</summary>
-    private async Task<IReadOnlyDictionary<string, ColumnAccessLevel>?> ResolveCallerColumnLevelsAsync(TableMetadata metadata, RequestContext context, CancellationToken ct)
+    private async Task<IReadOnlyDictionary<string, ColumnAccessLevel>?> ResolveCallerColumnLevelsAsync(
+        TableMetadata metadata, RequestContext context, CancellationToken ct, IReadOnlyList<Consent>? prefetchedConsents = null)
     {
         try
         {
@@ -289,9 +290,7 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
             }
 
             var tenantId = principal.GetTenantId();
-            var subjects = principal.GetGroupSids().Append(userSid.Value).ToList();
-            var consents = await _consentRepository.GetAllActiveConsentsForSubjectsAsync(
-                subjects, principal.GetUserRoles(), _timeProvider.GetUtcNow(), tenantId, ct).ConfigureAwait(false);
+            var consents = prefetchedConsents ?? await FetchCallerConsentsAsync(context, userSid.Value, ct).ConfigureAwait(false);
             var granted = consents.Any(c => c.Effect == ConsentEffect.Allow && c.TableIdentifier == metadata.Identifier && c.TenantId == tenantId);
             return CatalogCallerColumnLevels.Resolve(resolution, principal, metadata, consents, isAdmin: false, isGranted: granted, bypass: false, _logger);
         }
@@ -306,6 +305,14 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
         }
     }
 
+    private async Task<IReadOnlyList<Consent>> FetchCallerConsentsAsync(RequestContext context, Sid userSid, CancellationToken ct)
+    {
+        var principal = context.User;
+        var subjects = principal.GetGroupSids().Append(userSid).ToList();
+        return await _consentRepository!.GetAllActiveConsentsForSubjectsAsync(
+            subjects, principal.GetUserRoles(), _timeProvider.GetUtcNow(), principal.GetTenantId(), ct).ConfigureAwait(false);
+    }
+
     /// <summary>
     /// Search hits of the PDP-less catalog path: each hit table with the columns the caller cannot see (level Deny or unresolved) removed,
     /// so the restricted-table hit shaping also drops a hit that exists only through such a column. Unresolvable levels leave no column.
@@ -317,12 +324,29 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
         CancellationToken ct)
     {
         var projected = new Dictionary<TableIdentifier, TableMetadata>(permitted);
-        if (_consentRepository == null)
+
+        // Consents are read once per request, not once per hit table. Without a resolver (or an identity) no column is known to be
+        // visible, so every hit table is projected to no columns and only table-level text can match (fail closed).
+        IReadOnlyList<Consent>? consents = null;
+        try
         {
-            // No per-caller column resolver in this composition: the visibility service's column shaping is the only authority.
-            return projected;
+            var scope = CallerScopeResolver.Resolve(context.User, CatalogOwner);
+            var userSid = context.User.GetUserSid();
+            if (!CallerScopeResolver.IsAdminView(scope) && _consentRepository != null && userSid != null && scope != CallerScope.None)
+            {
+                consents = await FetchCallerConsentsAsync(context, userSid.Value, ct).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("Catalog search consent lookup failed ({ExceptionType}); hit columns omitted.", ex.GetType().Name);
         }
 
+        var admin = CallerScopeResolver.IsAdminView(CallerScopeResolver.Resolve(context.User, CatalogOwner));
         foreach (var id in hitTables.Distinct())
         {
             if (!permitted.TryGetValue(id, out var table))
@@ -330,7 +354,9 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
                 continue;
             }
 
-            var levels = await ResolveCallerColumnLevelsAsync(table, context, ct).ConfigureAwait(false);
+            var levels = admin || consents != null
+                ? await ResolveCallerColumnLevelsAsync(table, context, ct, consents).ConfigureAwait(false)
+                : null;
             projected[id] = table with
             {
                 Columns = table.Columns

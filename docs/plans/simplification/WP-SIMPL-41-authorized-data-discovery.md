@@ -203,7 +203,7 @@ Measurable outcome: `git grep -n "OpenSchema\|IsOpenSchemaAllowed" -- src` retur
 10. **Audit and rate limits (PR 3, PR 5).**
     - Every discovery list, detail, search and samples call writes `CATALOG_READ` (Summarized) with the fields `surface` (graphql|rest|mcp|search), `objectCount`, `objectIds` (up to 50; for detail the one id), `queryHash` (SHA-256 of the normalized search text, never the text) and `tenant`.
     - The existing `.WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead)` stays on the REST routes, and the service-level record covers GraphQL and MCP.
-    - Rate limits: per (tenant, sid), via `IRateLimiterService`, with scope `discovery` (`RequestsPerMinute`) for read calls and `discovery-access-request` (`AccessRequestsPerHour`) for request access. On excess: 429 `RATE_LIMIT_EXCEEDED` with `Retry-After`, the GraphQL error code `RATE_LIMITED`, or the MCP tool error `RATE_LIMITED`.
+    - Rate limits: per (tenant, sid), via `IRateLimiterService`, with scope `discovery` (`RequestsPerMinute`) for read calls and `discovery-access-request` (`AccessRequestsPerHour`) for request access. On excess: 429 `RATE_LIMIT_EXCEEDED` with `Retry-After`, the GraphQL error and the MCP tool error use the same code `RATE_LIMIT_EXCEEDED` and carry `retryAfterSeconds`.
     - The `warn_disable_rate_limiting` switch also disables these limits; the bypass is already reported as WARN.
 11. **Retire the tier model (PR 5).**
     - Delete `DatasetVisibility`, the tier switch in `CatalogVisibility.FilterForSubject` (`:85-135`; `CatalogSurface.Discovery` handling) and `CatalogView.Summary`/`Full`, together with their uses in `CatalogViewShaping`, `CatalogDiscoveryService` (`:448,569,639`) and `McpDatasetCatalog` (`:420,981,1256`).
