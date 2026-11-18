@@ -56,7 +56,7 @@ public static class UnknownGatewayKeyGuard
     private const string RemovedAuditWormPrefix = GatewayConfigurationSchema.Root + ":Audit:Worm";
 
     private const string RemovedAuditWormMessage =
-        "Gateway:Audit:Worm (removed in v1.9.0; the audit archive export is gone, retention keeps signed purge checkpoints and anchors; export archives via SIEM or database backup)";
+        "Gateway:Audit:Worm was removed; the audit archive export is gone, retention keeps signed purge checkpoints and anchors; export archives via SIEM or database backup";
 
     private static readonly string[] RemovedSimpl12Prefixes =
     [
