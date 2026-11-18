@@ -170,5 +170,6 @@ internal static class Wp0
             Substitute.For<IKeyVaultSecretProvider>(),
             Substitute.For<IOpenApiIngestionService>(),
             searchEngine,
-            logger ?? NullLogger<CatalogDiscoveryService>.Instance);
+            logger ?? NullLogger<CatalogDiscoveryService>.Instance,
+            consentRepository: consents);
 }
