@@ -15,7 +15,7 @@ namespace Autheris.Tests.Unit.Products;
 
 /// <summary>The catalog exposure of a product follows its load status, and the idle drop reaches the products of every tenant.</summary>
 [Trait("Category", "Security")]
-public sealed class ProductExposureTests
+public sealed partial class ProductExposureTests
 {
     private readonly ProductHarness _h = new();
     private readonly ScriptedRunner _runner = new();
@@ -30,7 +30,7 @@ public sealed class ProductExposureTests
     }
 
     private ProductLoadService Loader() => new(_h.Store, _runner, new RecordingCacheStore(), _catalog, _cluster,
-        Options.Create(new TableCacheOptions()), _h.Audit, _time, null, _h.CatalogObjects);
+        _h.Audit, _time, null, _h.CatalogObjects);
 
     private async Task<DataProduct> CreateAsync(LoadSettings load, TenantId? tenant = null, string name = "orders_view")
     {

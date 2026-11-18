@@ -113,9 +113,9 @@ public sealed class ViewLoadTests
     private readonly ScriptedRunner _runner = new();
     private readonly FakeTimeProvider _time = new(new DateTimeOffset(2026, 11, 18, 10, 0, 0, TimeSpan.Zero));
     private readonly IDistributedClusterStateProvider _cluster = Substitute.For<IDistributedClusterStateProvider>();
-    private TableCacheOptions _caps = new();
+    private ProductLoadCaps _caps = ProductLoadCaps.Default;
 
-    private ProductLoadService Service() => new(_h.Store, _runner, _store, _catalog, _cluster, Options.Create(_caps), _h.Audit, _time);
+    private ProductLoadService Service() => new(_h.Store, _runner, _store, _catalog, _cluster, _h.Audit, _time) { Caps = _caps };
 
     public ViewLoadTests()
     {
@@ -188,16 +188,16 @@ public sealed class ViewLoadTests
         _store.Dropped.ShouldHaveSingleItem("the shadow generation of the failed load is dropped");
         _catalog.GetAll().ShouldBeEmpty();
 
-        ProductLoadService.EffectiveLimits(new ProductLimits(0, 0, 0), new TableCacheOptions { ProductMaxRows = 5, ProductMaxBytes = 0, ProductMaxRuntimeSeconds = 10 })
+        ProductLoadService.EffectiveLimits(new ProductLimits(0, 0, 0), new ProductLoadCaps(5, 0, 10))
             .ShouldBe(new ProductLimits(5, 0, 10));
-        ProductLoadService.EffectiveLimits(new ProductLimits(100, 7, 99), new TableCacheOptions { ProductMaxRows = 5, ProductMaxBytes = 50, ProductMaxRuntimeSeconds = 10 })
+        ProductLoadService.EffectiveLimits(new ProductLimits(100, 7, 99), new ProductLoadCaps(5, 50, 10))
             .ShouldBe(new ProductLimits(5, 7, 10), "a product limit is lowered to the global cap, never raised");
     }
 
     [Fact]
     public async Task Global_caps_apply_to_a_product_without_limits()
     {
-        _caps = new TableCacheOptions { ProductMaxRows = 1 };
+        _caps = new ProductLoadCaps(1, 0, 0);
         var product = await CreateAsync();
 
         (await Should.ThrowAsync<ProductLoadException>(() => Service().LoadAsync(product))).Code.ShouldBe(ProductErrorCodes.LimitExceeded);

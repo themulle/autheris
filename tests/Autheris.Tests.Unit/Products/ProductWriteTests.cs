@@ -257,7 +257,7 @@ public sealed class ProductWriteTests
         var runner = new ScriptedRunner();
         var cluster = Substitute.For<Autheris.Application.State.IDistributedClusterStateProvider>();
         var loader = new ProductLoadService(_store, runner, new RecordingCacheStore(), new Autheris.Application.State.Caching.TableCache.TableCacheCatalog(), cluster,
-            Options.Create(new Autheris.Domain.Options.TableCache.TableCacheOptions()), new RecordingAuditWriter());
+            new RecordingAuditWriter());
 
         await Should.ThrowAsync<ProductLoadException>(() => loader.LoadAsync(_product));
 

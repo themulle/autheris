@@ -23,17 +23,6 @@ public sealed class TableCacheOptions
     public int DefaultDiskLimitMb { get; init; } = 10240;
 
     public int DefaultTtlSeconds { get; init; } = 3600;
-
-
-    /// <summary>Global cap of the rows of a data product load (0 = no cap). A product limit above the cap is lowered to it.</summary>
-    public long ProductMaxRows { get; init; } = 10_000_000;
-
-    /// <summary>Global cap of the bytes of a data product load (0 = no cap). A product limit above the cap is lowered to it.</summary>
-    public long ProductMaxBytes { get; init; } = 2L * 1024 * 1024 * 1024;
-
-    /// <summary>Global cap of the runtime in seconds of a data product load (0 = no cap). A product limit above the cap is lowered to it.</summary>
-    public int ProductMaxRuntimeSeconds { get; init; } = 900;
-
     public int MaxStaleSurvivalSeconds { get; init; } = 86400; // 24 hours default, hard safety ceiling 7 days
 
     public TableCacheEncryptionOptions Encryption { get; init; } = new();

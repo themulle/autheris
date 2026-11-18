@@ -26,7 +26,7 @@ public sealed class ProductWorkerFailClosedTests
     private readonly IDistributedClusterStateProvider _cluster = Substitute.For<IDistributedClusterStateProvider>();
 
     private ProductLoadService Loader() =>
-        new(_h.Store, _runner, new RecordingCacheStore(), _catalog, _cluster, Options.Create(new TableCacheOptions()), _h.Audit, _time);
+        new(_h.Store, _runner, new RecordingCacheStore(), _catalog, _cluster, _h.Audit, _time);
 
     private static ClusterJobContext Context() => new(1, Substitute.For<IDistributedLease>());
 

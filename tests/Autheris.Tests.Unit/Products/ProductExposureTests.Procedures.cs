@@ -14,7 +14,7 @@ namespace Autheris.Tests.Unit.Products;
 
 /// <summary>A read procedure exposed as a data product: the product decision replaces the consent lookup on the governed table set.</summary>
 [Trait("Category", "Security")]
-public sealed class ProcedureProductTests
+public sealed partial class ProductExposureTests
 {
     private static readonly TenantId Tenant = ProductHarness.Tenant;
     private static readonly TableIdentifier ProductObject = ProductSource.ObjectOf(Tenant, "sales", "get_orders");
@@ -219,5 +219,43 @@ public sealed class ProcedureProductTests
         var service = await CreateAsync(ClearGrant());
 
         await Should.ThrowAsync<KeyNotFoundException>(() => service.ExecuteAsync("get_orders", Inputs(), Caller(), new TenantId("tenant-b")));
+    }
+
+    [Fact]
+    public async Task Procedure_product_clear_only_with_cleared_column_and_clear_rule()
+    {
+        var withClear = await (await CreateAsync(ClearGrant())).ExecuteAsync("get_orders", Inputs(), Caller(), Tenant);
+        var mask = ClearGrant();
+        mask["note"] = ColumnAccessLevel.Mask;
+        var withMask = await (await CreateAsync(mask)).ExecuteAsync("get_orders", Inputs(), Caller(), Tenant);
+
+        withClear.Rows[0]["note"].ShouldBe("n1");
+        withClear.Rows[0]["order_id"].ShouldBe("***", "a column not declared clear-eligible stays masked even with a clear rule");
+        withMask.Rows[0]["note"].ShouldBe("***");
+    }
+
+    [Fact]
+    public async Task Procedure_product_row_policy_returns_uniform_404()
+    {
+        var blocked = await Should.ThrowAsync<KeyNotFoundException>(async () =>
+            await (await CreateAsync(ClearGrant(), rowFilter: "region = 'EU'")).ExecuteAsync("get_orders", Inputs(), Caller(), Tenant));
+        var unknown = await Should.ThrowAsync<KeyNotFoundException>(async () =>
+            await (await CreateAsync(ClearGrant())).ExecuteAsync("no_such_procedure", Inputs(), Caller(), Tenant));
+
+        blocked.Message.ShouldBe(unknown.Message);
+    }
+
+    [Fact]
+    public async Task Unknown_foreign_hidden_product_same_404()
+    {
+        var hidden = await Should.ThrowAsync<KeyNotFoundException>(async () =>
+            await (await CreateAsync(grant: null)).ExecuteAsync("get_orders", Inputs(), Caller(), Tenant));
+        var foreign = await Should.ThrowAsync<KeyNotFoundException>(async () =>
+            await (await CreateAsync(ClearGrant())).ExecuteAsync("get_orders", Inputs(), Caller(), new TenantId("tenant-b")));
+        var unknown = await Should.ThrowAsync<KeyNotFoundException>(async () =>
+            await (await CreateAsync(ClearGrant())).ExecuteAsync("no_such_procedure", Inputs(), Caller(), Tenant));
+
+        hidden.Message.ShouldBe(unknown.Message);
+        foreign.Message.ShouldBe(unknown.Message);
     }
 }

@@ -74,7 +74,7 @@ public sealed class ProductCallerQueryTests : IDisposable
         }
     }
 
-    private ProductLoadService Loader() => new(_h.Store, _runner, _store, _catalog, _cluster, Options.Create(new TableCacheOptions()), _h.Audit, _time);
+    private ProductLoadService Loader() => new(_h.Store, _runner, _store, _catalog, _cluster, _h.Audit, _time);
 
     private async Task<(DataProduct Product, ProductLoadService Loader)> LoadedProductAsync(LoadSettings? load = null)
     {

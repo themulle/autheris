@@ -115,7 +115,7 @@ public sealed class ProductDefinerTests
         var catalog = new TableCacheCatalog();
         var cluster = Substitute.For<IDistributedClusterStateProvider>();
         cluster.TryAcquireLeaseAsync(default!, default, default).ReturnsForAnyArgs(_ => new ValueTask<IDistributedLease?>(Substitute.For<IDistributedLease>()));
-        var service = new ProductLoadService(harness.Store, runner, store, catalog, cluster, Options.Create(new TableCacheOptions()), harness.Audit,
+        var service = new ProductLoadService(harness.Store, runner, store, catalog, cluster, harness.Audit,
             new FakeTimeProvider(new DateTimeOffset(2026, 11, 18, 10, 0, 0, TimeSpan.Zero)));
 
         // the product tenant is the tenant of the pipeline: re-store under it

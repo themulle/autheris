@@ -28,7 +28,7 @@ public sealed class ProductScheduleTests
 
     private ProductScheduleJob Job(out ProductLoadService loader)
     {
-        loader = new ProductLoadService(_h.Store, _runner, new RecordingCacheStore(), _catalog, _cluster, Options.Create(new TableCacheOptions()), _h.Audit, _time);
+        loader = new ProductLoadService(_h.Store, _runner, new RecordingCacheStore(), _catalog, _cluster, _h.Audit, _time);
         return new ProductScheduleJob(_h.Store, loader, NullLogger<ProductScheduleJob>.Instance, _time);
     }
 

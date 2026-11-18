@@ -44,7 +44,7 @@ public sealed class ProductLogConfidentialityTests
         cluster.TryAcquireLeaseAsync(default!, default, default).ReturnsForAnyArgs(_ => new ValueTask<IDistributedLease?>(Substitute.For<IDistributedLease>()));
         var logger = new CapturingLogger();
         var loader = new ProductLoadService(h.Store, runner, new RecordingCacheStore(), new TableCacheCatalog(), cluster,
-            Options.Create(new TableCacheOptions()), h.Audit, new FakeTimeProvider(), logger);
+            h.Audit, new FakeTimeProvider(), logger);
         var admin = new ProductCaller(ProductHarness.Admin, ProductHarness.Tenant, true, false, true);
         var product = await h.Service.PutAsync(new ProductPutRequest(admin, "sales", "orders_view", DataProductKind.View, "SELECT id FROM crm.public.orders", ProductHarness.Bob,
             new LoadSettings(LoadMode.Live)));

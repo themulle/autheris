@@ -19,7 +19,6 @@ public static class ProductLoadingServiceExtensions
             sp.GetRequiredService<Autheris.Domain.Caching.TableCache.ITableCacheStore>(),
             sp.GetRequiredService<Autheris.Domain.Caching.TableCache.ITableCacheCatalog>(),
             sp.GetRequiredService<Autheris.Application.State.IDistributedClusterStateProvider>(),
-            sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.TableCache.TableCacheOptions>>(),
             sp.GetRequiredService<IAuditWriter>(),
             sp.GetService<TimeProvider>(),
             sp.GetService<ILogger<ProductLoadService>>(),

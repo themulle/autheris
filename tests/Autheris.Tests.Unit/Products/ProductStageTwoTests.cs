@@ -34,7 +34,7 @@ public sealed class ProductStageTwoTests
         _cluster.TryAcquireLeaseAsync(default!, default, default).ReturnsForAnyArgs(_ => new ValueTask<IDistributedLease?>(Substitute.For<IDistributedLease>()));
     }
 
-    private ProductLoadService Loader() => new(_h.Store, _runner, _store, _catalog, _cluster, Options.Create(new TableCacheOptions()), _h.Audit, _time);
+    private ProductLoadService Loader() => new(_h.Store, _runner, _store, _catalog, _cluster, _h.Audit, _time);
 
     private async Task<DataProduct> CreateAsync(LoadSettings load)
     {

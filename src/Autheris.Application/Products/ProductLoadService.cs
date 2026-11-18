@@ -32,7 +32,6 @@ public sealed class ProductLoadService(
     ITableCacheStore store,
     ITableCacheCatalog catalog,
     IDistributedClusterStateProvider cluster,
-    IOptions<TableCacheOptions> options,
     IAuditWriter audit,
     TimeProvider? timeProvider = null,
     ILogger<ProductLoadService>? logger = null,
@@ -55,10 +54,13 @@ public sealed class ProductLoadService(
         catalog.TryGet(ProductSource.CacheKey(product.Tenant, product.Schema, product.Name), out var meta) && meta is not null ? meta.LastRefreshedAt : null;
 
     /// <summary>The limits of a load: the product limit lowered to the global cap (a zero means no limit on that side).</summary>
-    public static ProductLimits EffectiveLimits(ProductLimits product, TableCacheOptions caps) => new(
-        Cap(product.MaxRows, caps.ProductMaxRows),
-        Cap(product.MaxBytes, caps.ProductMaxBytes),
-        (int)Cap(product.MaxRuntimeSeconds, caps.ProductMaxRuntimeSeconds));
+    internal static ProductLimits EffectiveLimits(ProductLimits product, ProductLoadCaps caps) => new(
+        Cap(product.MaxRows, caps.MaxRows),
+        Cap(product.MaxBytes, caps.MaxBytes),
+        (int)Cap(product.MaxRuntimeSeconds, caps.MaxRuntimeSeconds));
+
+    /// <summary>The global caps of a load: fixed limits of the gateway, not configuration (tests set them per instance).</summary>
+    internal ProductLoadCaps Caps { get; init; } = ProductLoadCaps.Default;
 
     private static long Cap(long requested, long cap) => cap <= 0 ? requested : requested <= 0 ? cap : Math.Min(requested, cap);
 
@@ -82,8 +84,7 @@ public sealed class ProductLoadService(
         }
 
         var key = ProductSource.CacheKey(current.Tenant, current.Schema, current.Name);
-        var caps = options.Value;
-        var limits = EffectiveLimits(current.Limits, caps);
+        var limits = EffectiveLimits(current.Limits, Caps);
         var runtime = limits.MaxRuntimeSeconds > 0 ? TimeSpan.FromSeconds(limits.MaxRuntimeSeconds) : TimeSpan.FromHours(1);
         var held = await cluster.TryAcquireLeaseAsync($"product-load:{key}", runtime + LeaseSlack, ct).ConfigureAwait(false)
             ?? throw new ProductLoadException(ProductErrorCodes.LoadInProgress);
@@ -360,4 +361,10 @@ public sealed class ProductLoadService(
         DetailsJson = JsonSerializer.Serialize(new { productId = product.Id, definitionHash = product.DefinitionHash, mode = product.Load.Mode.ToString(), detail = details }),
         OccurredAt = at
     };
+}
+
+/// <summary>Global caps of a data product load (0 = no cap): a product limit above a cap is lowered to the cap.</summary>
+internal sealed record ProductLoadCaps(long MaxRows, long MaxBytes, int MaxRuntimeSeconds)
+{
+    public static ProductLoadCaps Default { get; } = new(10_000_000, 2L * 1024 * 1024 * 1024, 900);
 }
