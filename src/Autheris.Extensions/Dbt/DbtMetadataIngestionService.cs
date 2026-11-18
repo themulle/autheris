@@ -651,21 +651,11 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                         });
                     }
 
-                    var updatedMetadata = new TableMetadata
+                    // A copy of a loaded table keeps every persisted governance field (classifications, mask overrides, keys, ...).
+                    var updatedMetadata = existingMeta with
                     {
                         Table = updatedTableObj,
-                        Identifier = existingMeta.Identifier,
-                        Columns = updatedColumns,
-                        ColumnMaskingRules = existingMeta.ColumnMaskingRules,
-                        ColumnClassifications = existingMeta.ColumnClassifications,
-                        PrimaryKeyColumns = existingMeta.PrimaryKeyColumns,
-                        PrimaryKeyDirections = existingMeta.PrimaryKeyDirections,
-                        Indexes = existingMeta.Indexes,
-                        MinGroupSize = existingMeta.MinGroupSize,
-                        NonPersonal = existingMeta.NonPersonal,
-                        SmallGroupStrategy = existingMeta.SmallGroupStrategy,
-                        OwnerTenantId = existingMeta.OwnerTenantId,
-                        ExpectedRows = existingMeta.ExpectedRows
+                        Columns = updatedColumns
                     };
 
                     // Issue #94 (D-8): primary_key / unique constraints, unique tests, and meta.indexes replace the stored definition.
@@ -1536,16 +1526,12 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                     }
                 }
 
-                var updatedMetadata = new TableMetadata
+                var updatedMetadata = existingMeta with
                 {
                     Table = updatedTable,
-                    Identifier = existingMeta.Identifier,
                     Columns = updatedCols,
                     ColumnMaskingRules = updatedMaskingRules,
-                    ColumnClassifications = ClassificationMetadata.Merge(existingMeta.ColumnClassifications, ClassificationMetadata.AssignPii(flaggedColumns, "DBT")),
-                    PrimaryKeyColumns = existingMeta.PrimaryKeyColumns,
-                    PrimaryKeyDirections = existingMeta.PrimaryKeyDirections,
-                    Indexes = existingMeta.Indexes
+                    ColumnClassifications = ClassificationMetadata.Merge(existingMeta.ColumnClassifications, ClassificationMetadata.AssignPii(flaggedColumns, "DBT"))
                 };
 
                 pendingUpserts.Add(updatedMetadata);

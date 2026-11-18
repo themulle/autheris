@@ -25,6 +25,9 @@ UPDATE a
 SET access_level = 2
 FROM dbo.CONSENT_CLASSIFICATION_ACCESS a
 WHERE a.code = N'PII' AND a.access_level = 1 AND a.approved_by_sid IS NULL AND a.valid_until IS NULL
+  AND NOT EXISTS (
+      SELECT 1 FROM dbo.CONSENT_COLUMN_RULES r2 INNER JOIN dbo.COLUMN_CLASSIFICATIONS cc2 ON cc2.table_column_id = r2.table_column_id
+      WHERE r2.consent_id = a.consent_id AND r2.access_level = 2 AND cc2.scope = N'*' AND cc2.code <> N'PUBLIC')
   AND EXISTS (
       SELECT 1 FROM dbo.CONSENTS c
       INNER JOIN dbo.CONSENT_COLUMN_RULES r ON r.consent_id = c.id AND r.access_level = 2

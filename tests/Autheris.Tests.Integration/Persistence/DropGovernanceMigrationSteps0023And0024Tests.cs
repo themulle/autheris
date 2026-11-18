@@ -35,9 +35,9 @@ public sealed class DropGovernanceMigrationSteps0023And0024Tests
         INSERT INTO column_mask_overrides VALUES ('00000000-0000-0000-0000-000000000001', '*', 'c-deny', NULL, 'TYPE_SAFE_REDACT', '{"constant":"***"}', NULL, 'VISIBLE', 'system:migration-0020', CURRENT_TIMESTAMP);
         INSERT INTO column_classifications VALUES ('*', 'c-deny', 'PII', 'MIGRATION', 'system:migration-0020', CURRENT_TIMESTAMP);
         -- consents: Clear rule on a legacy-sensitive column (no PII row yet / MASK row from the 0021 backfill), and a Clear rule on a clean column
-        INSERT INTO consents VALUES ('k-missing', 't1', 0), ('k-backfilled', 't1', 0), ('k-clean', 't1', 0), ('k-revoked', 't1', 1), ('k-admin', 't1', 0);
-        INSERT INTO consent_column_rules VALUES ('r1', 'k-missing', 'c-plain', 2), ('r2', 'k-backfilled', 'c-public', 2), ('r3', 'k-clean', 'c-clean', 2), ('r4', 'k-revoked', 'c-plain', 2), ('r5', 'k-admin', 'c-plain', 2);
-        INSERT INTO consent_classification_access VALUES ('t1', 'k-backfilled', 'PII', 1, NULL, NULL, CURRENT_TIMESTAMP), ('t1', 'k-admin', 'PII', 1, NULL, 'approver', CURRENT_TIMESTAMP);
+        INSERT INTO consents VALUES ('k-missing', 't1', 0), ('k-backfilled', 't1', 0), ('k-clean', 't1', 0), ('k-revoked', 't1', 1), ('k-admin', 't1', 0), ('k-classified', 't1', 0);
+        INSERT INTO consent_column_rules VALUES ('r1', 'k-missing', 'c-plain', 2), ('r2', 'k-backfilled', 'c-public', 2), ('r3', 'k-clean', 'c-clean', 2), ('r4', 'k-revoked', 'c-plain', 2), ('r5', 'k-admin', 'c-plain', 2), ('r6', 'k-classified', 'c-plain', 2), ('r7', 'k-classified', 'c-deny', 2);
+        INSERT INTO consent_classification_access VALUES ('t1', 'k-backfilled', 'PII', 1, NULL, NULL, CURRENT_TIMESTAMP), ('t1', 'k-admin', 'PII', 1, NULL, 'approver', CURRENT_TIMESTAMP), ('t1', 'k-classified', 'PII', 1, NULL, NULL, CURRENT_TIMESTAMP);
         -- (b) flagged sensitive, but classified PUBLIC after step 0020
         INSERT INTO column_classifications VALUES ('*', 'c-public', 'PUBLIC', 'ADMIN', 'admin', CURRENT_TIMESTAMP);
         """;
@@ -77,6 +77,8 @@ public sealed class DropGovernanceMigrationSteps0023And0024Tests
         (await Scalar(conn, "SELECT access_level FROM consent_classification_access WHERE consent_id = 'k-backfilled' AND code = 'PII'")).ShouldBe(2);
         (await Scalar(conn, "SELECT COUNT(*) FROM consent_classification_access WHERE consent_id IN ('k-clean', 'k-revoked')")).ShouldBe(0);
         (await Scalar(conn, "SELECT access_level FROM consent_classification_access WHERE consent_id = 'k-admin' AND code = 'PII'")).ShouldBe(1);
+        // a consent that already holds a Clear rule on a column with a non-PUBLIC global classification keeps its MASK row
+        (await Scalar(conn, "SELECT access_level FROM consent_classification_access WHERE consent_id = 'k-classified' AND code = 'PII'")).ShouldBe(1);
 
         // (c) a legacy rule-less sensitive column has no override; the legacy objects are gone
         (await Scalar(conn, "SELECT COUNT(*) FROM column_mask_overrides WHERE table_column_id = 'c-plain'")).ShouldBe(0);

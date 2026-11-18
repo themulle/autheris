@@ -22,6 +22,9 @@ ON CONFLICT (tenant_id, consent_id, code) DO NOTHING;
 UPDATE consent_classification_access
 SET access_level = 2
 WHERE code = 'PII' AND access_level = 1 AND approved_by_sid IS NULL AND valid_until IS NULL
+  AND NOT EXISTS (
+      SELECT 1 FROM consent_column_rules r2 INNER JOIN column_classifications cc2 ON cc2.table_column_id = r2.table_column_id
+      WHERE r2.consent_id = consent_classification_access.consent_id AND r2.access_level = 2 AND cc2.scope = '*' AND cc2.code <> 'PUBLIC')
   AND EXISTS (
       SELECT 1 FROM consents c
       INNER JOIN consent_column_rules r ON r.consent_id = c.id AND r.access_level = 2
