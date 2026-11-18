@@ -85,7 +85,6 @@ public sealed class QueryAnalysisExecutionCostModelTests
                 SchemaName = "public",
                 TableName = name,
                 DisplayName = name,
-                Visibility = DatasetVisibility.Full
             },
             Columns = cols.Select(c => new TableColumn { ColumnName = c.Name, DataType = c.Type, IsSensitive = c.IsSensitive }).ToList(),
             ColumnMaskingRules = maskingRules ?? new Dictionary<string, MaskingRule>(),

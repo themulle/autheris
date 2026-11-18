@@ -118,10 +118,10 @@ public sealed class CatalogCallerMigrationBatch1Tests
         public object? MaskValue(string columnName, object? rawValue, MaskingRule rule) => rawValue;
     }
 
-    private static TableMetadata MakeTable(string domain, string schema, string name, DatasetVisibility visibility = DatasetVisibility.Summary) => new()
+    private static TableMetadata MakeTable(string domain, string schema, string name) => new()
     {
         Identifier = new TableIdentifier(domain, schema, name),
-        Table = new Table { SourceName = domain, SchemaName = schema, TableName = name, DataSourceType = DataSourceType.Sql, IsActive = true, Visibility = visibility },
+        Table = new Table { SourceName = domain, SchemaName = schema, TableName = name, DataSourceType = DataSourceType.Sql, IsActive = true },
         Columns = [new TableColumn { ColumnName = "id", DataType = "int" }]
     };
 
@@ -156,7 +156,8 @@ public sealed class CatalogCallerMigrationBatch1Tests
     public async Task BundledConsentRequestService_UsesBatchLookup_AndFailsClosedForHiddenUnconsentedTables()
     {
         var visible = MakeTable("crm", "dbo", "orders");
-        var hidden = MakeTable("crm", "dbo", "secrets", DatasetVisibility.Hidden);
+        var hidden = MakeTable("crm", "dbo", "secrets");
+        hidden = hidden with { Table = hidden.Table with { DiscoveryHidden = true } };
         var repo = new RecordingCatalogRepository([visible, hidden]);
         var service = new BundledConsentRequestService(repo, new StubConsentRepository([]));
 

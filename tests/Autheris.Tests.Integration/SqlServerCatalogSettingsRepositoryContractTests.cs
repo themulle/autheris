@@ -18,14 +18,13 @@ public sealed class SqlServerCatalogSettingsRepositoryContractTests : CatalogSet
     private SqlServerTestDatabase? _db;
     private readonly List<SqlServerGovernanceRepository> _repos = [];
 
-    private SqlServerGovernanceRepository Create(DatasetVisibility newTableDefault)
+    private SqlServerGovernanceRepository Create()
     {
         var env = Substitute.For<IHostEnvironment>();
         env.EnvironmentName.Returns("Development");
         var options = Options.Create(new GatewayOptions
         {
-            GovernanceDb = new GovernanceDbOptions { Provider = "SqlServer", ConnectionString = _db!.ConnectionString, SeedDemoData = false },
-            Catalog = new DataCatalogOptions { DefaultVisibility = newTableDefault }
+            GovernanceDb = new GovernanceDbOptions { Provider = "SqlServer", ConnectionString = _db!.ConnectionString, SeedDemoData = false }
         });
         var repo = GovernanceStoreFactory.CreateSqlServer(Substitute.For<IEpochValidationService>(), options, env);
         _repos.Add(repo);
@@ -35,11 +34,11 @@ public sealed class SqlServerCatalogSettingsRepositoryContractTests : CatalogSet
     protected override async Task<IGovernanceRepository?> CreateRepositoryAsync()
     {
         _db = await SqlServerTestDatabase.CreateAsync();
-        return _db.IsAvailable ? Create(DatasetVisibility.Hidden) : null;
+        return _db.IsAvailable ? Create() : null;
     }
 
-    protected override Task<IGovernanceRepository?> CreateAdditionalRepositoryAsync(DatasetVisibility newTableDefault = DatasetVisibility.Hidden) =>
-        Task.FromResult<IGovernanceRepository?>(Create(newTableDefault));
+    protected override Task<IGovernanceRepository?> CreateAdditionalRepositoryAsync() =>
+        Task.FromResult<IGovernanceRepository?>(Create());
 
     protected override async Task ExecuteRawAsync(string sql)
     {

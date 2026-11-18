@@ -510,7 +510,6 @@ public sealed class AdminMcpTwoPhaseTests
                 PluginName = "orders-plugin",
                 Location = "https://orders.internal.org/api/v1",
                 Tags = ["finance", "external"],
-                Visibility = DatasetVisibility.Full
             }
         };
 
@@ -537,7 +536,6 @@ public sealed class AdminMcpTwoPhaseTests
         savedMetadata.Table.PluginName.ShouldBe("orders-plugin");
         savedMetadata.Table.Location.ShouldBe("https://orders.internal.org/api/v1");
         savedMetadata.Table.Tags.ShouldBe(["finance", "external"]);
-        savedMetadata.Table.Visibility.ShouldBe(DatasetVisibility.Full);
         savedMetadata.Table.SourceType.ShouldBe("HTTP");
         savedMetadata.Table.SourceName.ShouldBe("api_gateway");
     }

@@ -29,8 +29,8 @@ public sealed class CatalogSearchIncrementalIndexSecurityTests
         var embedder = new TrackingEmbeddingGenerator();
         var engine = CreateEngine(embedder);
 
-        var t1 = CreateTable("sales", "orders", "Customer orders and shipments", visibility: DatasetVisibility.Full);
-        var t2 = CreateTable("crm", "customers", "Customer master profiles", visibility: DatasetVisibility.Full);
+        var t1 = CreateTable("sales", "orders", "Customer orders and shipments");
+        var t2 = CreateTable("crm", "customers", "Customer master profiles");
 
         await engine.RebuildIndexAsync([t1, t2]);
         embedder.EmbeddedTextCount.ShouldBe(2);
@@ -53,7 +53,7 @@ public sealed class CatalogSearchIncrementalIndexSecurityTests
     public async Task EmbeddingCache_ModelOrProviderOrDimensionChange_NotReused()
     {
         var sharedCache = new CatalogSearchEmbeddingCache();
-        var table = CreateTable("sales", "orders", "Orders ledger", visibility: DatasetVisibility.Full);
+        var table = CreateTable("sales", "orders", "Orders ledger");
 
         var genA = new TrackingEmbeddingGenerator(modelId: "model-v1", dimensions: 4);
         var engineA = CreateEngine(genA, CatalogEmbeddingProvider.LocalOnnx, sharedCache);
@@ -98,8 +98,8 @@ public sealed class CatalogSearchIncrementalIndexSecurityTests
         const string rawSecret1 = "sk-live-SUPERSECRETVALUE111";
         const string rawSecret2 = "sk-live-DIFFERENTSECRET222";
 
-        var t1 = CreateTable("sec", "audit_one", $"Token api_key={rawSecret1} endpoint logs", visibility: DatasetVisibility.Full);
-        var t2 = CreateTable("sec", "audit_one", $"Token api_key={rawSecret2} endpoint logs", visibility: DatasetVisibility.Full);
+        var t1 = CreateTable("sec", "audit_one", $"Token api_key={rawSecret1} endpoint logs");
+        var t2 = CreateTable("sec", "audit_one", $"Token api_key={rawSecret2} endpoint logs");
 
         await engine.RebuildIndexAsync([t1]);
         embedder.EmbeddedTextCount.ShouldBe(1);
@@ -160,9 +160,8 @@ public sealed class CatalogSearchIncrementalIndexSecurityTests
             "sales",
             "orders",
             "Primary customer orders table",
-            columns: ["order_id", "legacy_ssn_token"],
-            visibility: DatasetVisibility.Full);
-        var otherTable = CreateTable("hr", "departments", "Department hierarchy", visibility: DatasetVisibility.Full);
+            columns: ["order_id", "legacy_ssn_token"]);
+        var otherTable = CreateTable("hr", "departments", "Department hierarchy");
 
         await engine.RebuildIndexAsync([initialOrders, otherTable]);
 
@@ -177,8 +176,7 @@ public sealed class CatalogSearchIncrementalIndexSecurityTests
             "sales",
             "orders",
             "Primary customer orders table",
-            columns: ["order_id", "invoice_reference"],
-            visibility: DatasetVisibility.Full);
+            columns: ["order_id", "invoice_reference"]);
 
         await engine.ApplyDeltaAsync([updatedOrders], []);
 
@@ -203,16 +201,16 @@ public sealed class CatalogSearchIncrementalIndexSecurityTests
         var embedder = new TrackingEmbeddingGenerator();
         var engine = CreateEngine(embedder);
 
-        var activeKeep = CreateTable("sales", "orders", "Public order catalog", visibility: DatasetVisibility.Full);
-        var toDeactivate = CreateTable("hr", "payroll", "Sensitive payroll disbursements", visibility: DatasetVisibility.Full);
-        var toHide = CreateTable("fin", "ledgers", "General financial ledgers", visibility: DatasetVisibility.Full);
-        var toDelete = CreateTable("ops", "incidents", "Incident tracking logs", visibility: DatasetVisibility.Full);
+        var activeKeep = CreateTable("sales", "orders", "Public order catalog");
+        var toDeactivate = CreateTable("hr", "payroll", "Sensitive payroll disbursements");
+        var toHide = CreateTable("fin", "ledgers", "General financial ledgers");
+        var toDelete = CreateTable("ops", "incidents", "Incident tracking logs");
 
         await engine.RebuildIndexAsync([activeKeep, toDeactivate, toHide, toDelete]);
         engine.IndexedTableCount.ShouldBe(4);
 
         var deactivated = toDeactivate with { Table = toDeactivate.Table with { IsActive = false } };
-        var hidden = toHide with { Table = toHide.Table with { Visibility = DatasetVisibility.Hidden } };
+        var hidden = toHide with { Table = toHide.Table with { DiscoveryHidden = true } };
 
         await engine.ApplyDeltaAsync([deactivated, hidden], [toDelete.Identifier]);
 
@@ -323,7 +321,7 @@ public sealed class CatalogSearchIncrementalIndexSecurityTests
             "kilo", "lima", "mike", "november", "oscar", "papa", "quebec", "romeo", "sierra", "tangoword"
         };
         var initialTables = Enumerable.Range(0, 20)
-            .Select(i => CreateTable("sales", $"base_table_{i}", $"Base table documentation {markerWords[i]}", visibility: DatasetVisibility.Full))
+            .Select(i => CreateTable("sales", $"base_table_{i}", $"Base table documentation {markerWords[i]}"))
             .ToList();
         await engine.RebuildIndexAsync(initialTables);
 
@@ -336,13 +334,13 @@ public sealed class CatalogSearchIncrementalIndexSecurityTests
         };
 
         var mergeBatch = Enumerable.Range(0, 4)
-            .Select(i => CreateTable("sales", $"base_table_{i}", $"Updated via merge batch {markerWords[i]}", visibility: DatasetVisibility.Full))
+            .Select(i => CreateTable("sales", $"base_table_{i}", $"Updated via merge batch {markerWords[i]}"))
             .ToList();
         var mergeTask = engine.ApplyDeltaAsync(mergeBatch, []);
         await mergeEntered.Task;
 
         // While compaction is in flight, execute a concurrent upsert and a concurrent deletion.
-        var concurrentTable = CreateTable("finance", "concurrent_ledger", "Arrived concurrently during compaction", visibility: DatasetVisibility.Full);
+        var concurrentTable = CreateTable("finance", "concurrent_ledger", "Arrived concurrently during compaction");
         await engine.ApplyDeltaAsync([concurrentTable], [initialTables[19].Identifier]);
 
         allowMergeCommit.TrySetResult();
@@ -361,7 +359,7 @@ public sealed class CatalogSearchIncrementalIndexSecurityTests
 
         // Failed delta keeps the previous serving index intact and sets error status.
         embedder.ThrowOnNextCall = true;
-        var failedTable = CreateTable("hr", "failed_table", "Must never drop previous serving snapshot", visibility: DatasetVisibility.Full);
+        var failedTable = CreateTable("hr", "failed_table", "Must never drop previous serving snapshot");
         var ex = await Should.ThrowAsync<InvalidOperationException>(() => engine.ApplyDeltaAsync([failedTable], []));
         ex.Data[CatalogSearchErrorCodes.ErrorCodeDataKey].ShouldBe(CatalogSearchErrorCodes.EmbeddingFailed);
 
@@ -375,7 +373,7 @@ public sealed class CatalogSearchIncrementalIndexSecurityTests
         // Failed compaction keeps base + delta + tombstones serving intact and hides removed table.
         engine.BeforeCompactionCommitForTesting = _ => throw new InvalidOperationException("Simulated compaction failure.");
         var deltaWithTombstone = Enumerable.Range(5, 4)
-            .Select(i => CreateTable("sales", $"base_table_{i}", $"Updated during failing merge {markerWords[i]}", visibility: DatasetVisibility.Full))
+            .Select(i => CreateTable("sales", $"base_table_{i}", $"Updated during failing merge {markerWords[i]}"))
             .ToList();
         await engine.ApplyDeltaAsync(deltaWithTombstone, [initialTables[18].Identifier]);
 
@@ -397,7 +395,7 @@ public sealed class CatalogSearchIncrementalIndexSecurityTests
 
         // 10 base tables => DeltaRebuildRatio (10%) = 1 entry; 2 delta changes triggers compact merge.
         var baseTables = Enumerable.Range(0, 10)
-            .Select(i => CreateTable("sales", $"tbl_{i}", $"Order ledger item {i}", visibility: DatasetVisibility.Full))
+            .Select(i => CreateTable("sales", $"tbl_{i}", $"Order ledger item {i}"))
             .ToList();
         await engine.RebuildIndexAsync(baseTables);
         embedder.ResetCounters();
@@ -426,13 +424,13 @@ public sealed class CatalogSearchIncrementalIndexSecurityTests
             text.Contains("obsolete_secret_column", StringComparison.OrdinalIgnoreCase) ? BaseVec : AltVec);
         var engine = CreateEngine(embedder);
 
-        var original = CreateTable("sales", "orders", "Customer orders", columns: ["id", "obsolete_secret_column"], visibility: DatasetVisibility.Full);
+        var original = CreateTable("sales", "orders", "Customer orders", columns: ["id", "obsolete_secret_column"]);
         var neighbors = Enumerable.Range(0, 24)
-            .Select(i => CreateTable("hr", $"roles_{i}", "Access roles", columns: ["id", "role_name"], visibility: DatasetVisibility.Full))
+            .Select(i => CreateTable("hr", $"roles_{i}", "Access roles", columns: ["id", "role_name"]))
             .ToArray();
         await engine.RebuildIndexAsync([original, .. neighbors]);
 
-        var updated = CreateTable("sales", "orders", "Customer orders", columns: ["id", "order_total"], visibility: DatasetVisibility.Full);
+        var updated = CreateTable("sales", "orders", "Customer orders", columns: ["id", "order_total"]);
         await engine.ApplyDeltaAsync([updated], []);
 
         engine.Search(new CatalogSearchQuery("obsolete_secret_column", Mode: CatalogSearchMode.KeywordBm25), _ => true).ShouldBeEmpty();
@@ -452,7 +450,7 @@ public sealed class CatalogSearchIncrementalIndexSecurityTests
 
         // Branch 1: > 10% delta (2 / 12 = 16.7%) triggers compaction/rebuild.
         var smallCorpus = Enumerable.Range(0, 12)
-            .Select(i => CreateTable("dom", $"small_{i}", $"Small corpus table {i}", visibility: DatasetVisibility.Full))
+            .Select(i => CreateTable("dom", $"small_{i}", $"Small corpus table {i}"))
             .ToList();
         await engine.RebuildIndexAsync(smallCorpus);
         await engine.ApplyDeltaAsync([], [smallCorpus[0].Identifier, smallCorpus[1].Identifier]);
@@ -464,7 +462,7 @@ public sealed class CatalogSearchIncrementalIndexSecurityTests
         // Branch 2: > 5,000 tombstones (< 10% of 51,000 base tables) independently triggers compaction/rebuild.
         const int largeCount = 51_000;
         var largeCorpus = Enumerable.Range(0, largeCount)
-            .Select(i => CreateTable("scale", $"t_{i}", "Scale table", visibility: DatasetVisibility.Full))
+            .Select(i => CreateTable("scale", $"t_{i}", "Scale table"))
             .ToList();
         await engine.RebuildIndexAsync(largeCorpus);
 
@@ -502,7 +500,7 @@ public sealed class CatalogSearchIncrementalIndexSecurityTests
     {
         var engine = CreateEngine(new TrackingEmbeddingGenerator());
         var seed = Enumerable.Range(0, 30)
-            .Select(i => CreateTable("sales", $"tbl_{i}", $"Orders table item {i}", visibility: DatasetVisibility.Full))
+            .Select(i => CreateTable("sales", $"tbl_{i}", $"Orders table item {i}"))
             .ToList();
         await engine.RebuildIndexAsync(seed);
 
@@ -520,7 +518,7 @@ public sealed class CatalogSearchIncrementalIndexSecurityTests
 
         for (int step = 0; step < 5; step++)
         {
-            var updated = CreateTable("sales", "tbl_0", $"Orders table revision {step}", visibility: DatasetVisibility.Full);
+            var updated = CreateTable("sales", "tbl_0", $"Orders table revision {step}");
             await engine.ApplyDeltaAsync([updated], []);
         }
 
@@ -553,7 +551,6 @@ public sealed class CatalogSearchIncrementalIndexSecurityTests
         string tableName,
         string description,
         IReadOnlyList<string>? columns = null,
-        DatasetVisibility visibility = DatasetVisibility.Hidden,
         bool isActive = true) =>
         new()
         {
@@ -564,7 +561,6 @@ public sealed class CatalogSearchIncrementalIndexSecurityTests
                 SchemaName = "public",
                 TableName = tableName,
                 Description = description,
-                Visibility = visibility,
                 IsActive = isActive
             },
             Columns = (columns ?? ["id"]).Select(c => new TableColumn { ColumnName = c, DataType = "text" }).ToList(),

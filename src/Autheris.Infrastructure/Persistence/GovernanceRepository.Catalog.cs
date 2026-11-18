@@ -415,12 +415,6 @@ public partial class GovernanceRepository
         return change;
     }
 
-    public async Task<DatasetVisibilityCounts> GetDatasetVisibilityCountsAsync(CancellationToken ct = default)
-    {
-        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        return await DatasetCatalogStore.CountByVisibilityAsync(conn, null, KeyDialect, ct).ConfigureAwait(false);
-    }
-
     public async Task<DatasetCatalogSettings?> GetDatasetCatalogSettingsAsync(TableIdentifier table, bool strict = true, CancellationToken ct = default)
     {
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
@@ -437,11 +431,6 @@ public partial class GovernanceRepository
         TableIdentifier table, IReadOnlyList<string> add, IReadOnlyList<string> remove, Sid actor, CancellationToken ct = default) =>
         WriteCatalogSettingsAsync(table, (conn, tx) =>
             DatasetCatalogStore.ChangeTagsAsync(conn, tx, KeyDialect, table, add, remove, actor, ct), ct);
-
-    public Task<DatasetCatalogChange?> SetDatasetVisibilityAsync(
-        TableIdentifier table, DatasetVisibility visibility, Sid actor, CancellationToken ct = default) =>
-        WriteCatalogSettingsAsync(table, (conn, tx) =>
-            DatasetCatalogStore.SetVisibilityAsync(conn, tx, KeyDialect, table, visibility, actor, ct), ct);
 
     public Task<DatasetCatalogChange?> SetDatasetPrivacyAsync(
         TableIdentifier table, int? minGroupSize, bool? nonPersonal, Sid actor, CancellationToken ct = default) =>

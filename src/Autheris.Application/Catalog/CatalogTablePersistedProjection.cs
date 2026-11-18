@@ -410,7 +410,7 @@ public sealed class CatalogTablePersistedProjection
     private static IReadOnlyDictionary<string, string> BuildNotPersisted()
     {
         const string surrogate = "surrogate id or foreign key; not catalog content";
-        const string overlay = "stored in the dataset catalog settings (tags and visibility), not by the metadata upsert";
+        const string overlay = "stored in the dataset catalog settings (tags and discovery flags), not by the metadata upsert";
         const string notWritten = "not written by the metadata upsert";
         const string derived = "derived from projected properties";
         return new Dictionary<string, string>(StringComparer.Ordinal)
@@ -419,7 +419,7 @@ public sealed class CatalogTablePersistedProjection
             ["MaskingRule.Id"] = surrogate, ["MaskingRule.TableColumnId"] = surrogate,
             ["Table.EnforcementMode"] = notWritten, ["Table.PhysicalDatabaseName"] = notWritten, ["Table.Location"] = notWritten,
             ["Table.RlsExpression"] = notWritten, ["Table.SmallGroupStrategy"] = notWritten, ["Table.RequiredFilterColumnGroups"] = notWritten,
-            ["Table.ExpectedRows"] = notWritten, ["Table.Tags"] = overlay, ["Table.Visibility"] = overlay,
+            ["Table.ExpectedRows"] = notWritten, ["Table.Tags"] = overlay,
             ["Table.DiscoveryHidden"] = overlay, ["Table.SamplesDisabled"] = overlay, ["Table.ObjectKind"] = notWritten,
             ["Table.IsDelegatedSource"] = derived, ["Table.IsHighlySensitive"] = derived, ["Table.Dialect"] = derived,
             ["TableColumn.Name"] = derived, ["TableColumn.Semantics"] = derived, ["TableColumn.WriteProtected"] = notWritten,
@@ -430,7 +430,7 @@ public sealed class CatalogTablePersistedProjection
             ["TableMetadata.Identifier"] = "persisted as Table.SourceName, SchemaName and TableName, which are projected",
             ["TableMetadata.EnforcementMode"] = derived, ["TableMetadata.IsDelegatedSource"] = derived, ["TableMetadata.OwnerTenantId"] = notWritten,
             ["TableMetadata.RowFilterEvaluation"] = "written by the row filter evaluation settings API, never by the metadata upsert",
-            ["TableMetadata.CatalogView"] = "set by the visibility filter at read time", ["TableMetadata.CatalogTags"] = overlay,
+            ["TableMetadata.CatalogView"] = "set by the consent filter at read time", ["TableMetadata.CatalogTags"] = overlay,
             ["TableMetadata.ReplaceKeyDefinition"] = "write intent, not persisted", ["TableMetadata.ReplaceColumns"] = "write intent, not persisted",
             ["TableMetadata.EstimatedRowCount"] = notWritten,
             ["TableMetadata.ExpectedRows"] = notWritten, ["TableMetadata.IngestedAt"] = notWritten, ["TableMetadata.AsOf"] = notWritten,

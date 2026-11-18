@@ -113,7 +113,6 @@ public class Issue175SecurityConditionsTests
 
     private static TableMetadata CreateTable(
         string name,
-        DatasetVisibility visibility = DatasetVisibility.Full,
         params (string Name, string Type, bool IsNullable)[] columns)
     {
         var id = new TableIdentifier("sales", "public", name);
@@ -127,7 +126,6 @@ public class Issue175SecurityConditionsTests
                 SchemaName = "public",
                 TableName = name,
                 DisplayName = name,
-                Visibility = visibility
             },
             Columns = columns.Select(c => new TableColumn
             {
@@ -210,7 +208,7 @@ public class Issue175SecurityConditionsTests
         };
         var engine = new HotChocolateGraphQlCostAnalysisEngine(provider, Options.Create(gatewayOptions));
 
-        var usersTable = CreateTable("users", DatasetVisibility.Full, ("id", "varchar", false), ("name", "varchar", false));
+        var usersTable = CreateTable("users", ("id", "varchar", false), ("name", "varchar", false));
         var metadataRepo = Substitute.For<ITableMetadataRepository>();
         metadataRepo.StubTables([usersTable]);
 
@@ -300,7 +298,7 @@ fragment FragB on User {
         var (provider, _) = await CreateTestExecutorProviderAsync();
         var engine = new HotChocolateGraphQlCostAnalysisEngine(provider);
 
-        var usersTable = CreateTable("users", DatasetVisibility.Full, ("id", "varchar", false), ("name", "varchar", false));
+        var usersTable = CreateTable("users", ("id", "varchar", false), ("name", "varchar", false));
 
         var metadataRepo = Substitute.For<ITableMetadataRepository>();
         metadataRepo.StubTables([usersTable]);
@@ -346,7 +344,8 @@ fragment FragB on User {
         var (provider, _) = await CreateTestExecutorProviderAsync();
         var engine = new HotChocolateGraphQlCostAnalysisEngine(provider);
 
-        var hiddenTable = CreateTable("secret_ledger", DatasetVisibility.Hidden, ("id", "varchar", false), ("balance", "numeric", false));
+        var hiddenTable = CreateTable("secret_ledger", ("id", "varchar", false), ("balance", "numeric", false));
+        hiddenTable = hiddenTable with { Table = hiddenTable.Table with { DiscoveryHidden = true } };
         var metadataRepo = Substitute.For<ITableMetadataRepository>();
         metadataRepo.StubTables([hiddenTable]);
 

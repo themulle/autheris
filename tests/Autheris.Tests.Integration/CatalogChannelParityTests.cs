@@ -278,23 +278,19 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
         using var scope = factory.Services.CreateScope();
         var repo = scope.ServiceProvider.GetRequiredService<IGovernanceRepository>();
         var admin = new Sid("S-ADMIN");
-        foreach (var (id, tier) in new[]
-                 {
-                     (SummaryT, DatasetVisibility.Summary), (FullT, DatasetVisibility.Full),
-                     (HiddenT, DatasetVisibility.Hidden), (UnsharedFullT, DatasetVisibility.Full)
-                 })
+        foreach (var id in new[] { SummaryT, FullT, HiddenT, UnsharedFullT })
         {
             await repo.UpsertTableMetadataAsync(new TableMetadata
             {
-                Table = new Table { Id = Guid.NewGuid(), DisplayName = id.TableName, TableName = id.TableName, SchemaName = id.Schema, SourceType = "PostgreSql", SourceName = id.Domain, Description = "Tier fixture " + id.TableName },
+                Table = new Table { Id = Guid.NewGuid(), DisplayName = id.TableName, TableName = id.TableName, SchemaName = id.Schema, SourceType = "PostgreSql", SourceName = id.Domain, Description = "Fixture " + id.TableName },
                 Identifier = id,
                 Columns = [new() { ColumnName = "id", DataType = "integer" }, new() { ColumnName = "tier_secret_col", DataType = "varchar" }]
             });
-            await repo.SetDatasetVisibilityAsync(id, tier, admin);
         }
 
         await repo.ChangeDatasetTagsAsync(SummaryT, ["finance"], [], admin);
     }
+
 
     private async Task<(WebApplicationFactory<Program> Factory, HttpClient User)> TierFactoryAsync(string mode = "Multi", string sid = "S-T-USER", string? tenant = TenantB, string roles = "Reader")
     {
