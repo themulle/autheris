@@ -11,6 +11,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.State.Caching;
 using Autheris.Application.Sql.ListParameters;
 using Autheris.Domain.Common;
@@ -45,6 +46,12 @@ public sealed class CallerAttributeResolver : ICallerAttributeResolver, ICallerA
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _bulkheads = new(StringComparer.Ordinal);
     private readonly ConditionalWeakTable<ClaimsPrincipal, CallerAttributeRequestState> _states = new();
     private readonly Autheris.Application.Plugins.Auth.IAuthPluginHost? _authPluginHost;
+    private readonly IEventBus? _eventBus;
+    private readonly IDisposable? _subscription;
+    private long _flushGeneration;
+
+    /// <summary>Cluster channel carrying <c>A|tenant|attribute</c> and <c>S|tenant|subjectKey</c> invalidations (best effort; the TTL ceiling bounds a lost message).</summary>
+    public const string InvalidationChannel = "autheris:callerattr:invalidate";
 
     public CallerAttributeResolver(
         ICallerAttributeRegistry registry,
@@ -52,7 +59,8 @@ public sealed class CallerAttributeResolver : ICallerAttributeResolver, ICallerA
         IOptions<GatewayOptions> options,
         TimeProvider? time = null,
         ILogger<CallerAttributeResolver>? logger = null,
-        Autheris.Application.Plugins.Auth.IAuthPluginHost? authPluginHost = null)
+        Autheris.Application.Plugins.Auth.IAuthPluginHost? authPluginHost = null,
+        IEventBus? eventBus = null)
     {
         _registry = registry ?? throw new ArgumentNullException(nameof(registry));
         _providers = (providers ?? []).GroupBy(p => p.Kind, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.Last(), StringComparer.Ordinal);
@@ -61,6 +69,60 @@ public sealed class CallerAttributeResolver : ICallerAttributeResolver, ICallerA
         _logger = logger;
         _authPluginHost = authPluginHost;
         _cache = new SingleFlightKeySetCache<ResolvedAttributeEntry>(_options.Cache.SizeLimitBytes, _time);
+        _eventBus = eventBus;
+        if (_eventBus is not null)
+        {
+            _eventBus.ConnectionRestored += OnConnectionRestored;
+            _subscription = _eventBus.Subscribe<string>(InvalidationChannel, OnPeerInvalidationAsync);
+        }
+    }
+
+    // A partition may have swallowed invalidations: every cached value is stale from here on (the flush generation is part of the cache key).
+    private void OnConnectionRestored() => Interlocked.Increment(ref _flushGeneration);
+
+    private Task OnPeerInvalidationAsync(string message)
+    {
+        var parts = message?.Split('|', 3);
+        if (parts is { Length: 3 } && parts[1].Length > 0 && parts[2].Length > 0)
+        {
+            if (parts[0] == "A")
+            {
+                BumpAttribute(new TenantId(parts[1]), parts[2]);
+            }
+            else if (parts[0] == "S")
+            {
+                BumpSubject(new TenantId(parts[1]), parts[2]);
+            }
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private void BumpAttribute(TenantId tenant, string attributeName) =>
+        _attributeEpochs.AddOrUpdate(EpochKey(tenant.Value, attributeName), 1, static (_, v) => v + 1);
+
+    private void BumpSubject(TenantId tenant, string subjectKey) =>
+        _subjectEpochs.AddOrUpdate(EpochKey(tenant.Value, subjectKey.ToLowerInvariant()), 1, static (_, v) => v + 1);
+
+    private void Publish(string message)
+    {
+        if (_eventBus is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _ = _eventBus.PublishAsync(InvalidationChannel, message).ContinueWith(
+                t => _logger?.LogWarning(t.Exception, "Best-effort publish of a caller attribute invalidation failed."),
+                CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger?.LogWarning(ex, "Best-effort publish of a caller attribute invalidation failed.");
+        }
     }
 
     public bool IsEnabled => _options.Enabled;
@@ -80,7 +142,16 @@ public sealed class CallerAttributeResolver : ICallerAttributeResolver, ICallerA
         return result;
     }
 
-    public void Dispose() => _cache.Dispose();
+    public void Dispose()
+    {
+        if (_eventBus is not null)
+        {
+            _eventBus.ConnectionRestored -= OnConnectionRestored;
+        }
+
+        _subscription?.Dispose();
+        _cache.Dispose();
+    }
 
     public CallerSubject CreateSubject(ClaimsPrincipal? principal, TenantId tenant, bool longLived = false)
     {
@@ -93,11 +164,17 @@ public sealed class CallerAttributeResolver : ICallerAttributeResolver, ICallerA
         return subject with { RequestState = _states.GetValue(principal, _ => new CallerAttributeRequestState(_time, TimeSpan.FromSeconds(_options.RequestMemoSeconds))) };
     }
 
-    public void InvalidateAttribute(TenantId tenant, string attributeName) =>
-        _attributeEpochs.AddOrUpdate(EpochKey(tenant.Value, attributeName), 1, static (_, v) => v + 1);
+    public void InvalidateAttribute(TenantId tenant, string attributeName)
+    {
+        BumpAttribute(tenant, attributeName);
+        Publish($"A|{tenant.Value}|{attributeName}");
+    }
 
-    public void InvalidateSubject(TenantId tenant, string subjectKey) =>
-        _subjectEpochs.AddOrUpdate(EpochKey(tenant.Value, subjectKey.ToLowerInvariant()), 1, static (_, v) => v + 1);
+    public void InvalidateSubject(TenantId tenant, string subjectKey)
+    {
+        BumpSubject(tenant, subjectKey);
+        Publish($"S|{tenant.Value}|{subjectKey}");
+    }
 
     public async ValueTask<CallerAttributeSet> ResolveAsync(CallerSubject subject, IReadOnlyCollection<string> names, CancellationToken ct)
     {
@@ -427,6 +504,7 @@ public sealed class CallerAttributeResolver : ICallerAttributeResolver, ICallerA
         AppendPart(sb, definition.ComputeDefinitionHash());
         AppendPart(sb, attributeEpoch.ToString(CultureInfo.InvariantCulture));
         AppendPart(sb, subjectEpoch.ToString(CultureInfo.InvariantCulture));
+        AppendPart(sb, Interlocked.Read(ref _flushGeneration).ToString(CultureInfo.InvariantCulture));
 
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(sb.ToString())));
     }
