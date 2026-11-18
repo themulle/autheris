@@ -41,12 +41,11 @@ public sealed class ProductCallerQueryTests : IDisposable
     private readonly TableCacheCatalog _catalog = new();
     private readonly CountingRunner _runner = new();
     private readonly FakeTimeProvider _time = new(new DateTimeOffset(2026, 11, 18, 10, 0, 0, TimeSpan.Zero));
-    private readonly IDistributedClusterStateProvider _cluster = Substitute.For<IDistributedClusterStateProvider>();
+    private readonly IDistributedClusterStateProvider _cluster = ProductHarness.LeasingCluster();
     private readonly InMemoryTableCacheStore _store;
 
     public ProductCallerQueryTests()
     {
-        _cluster.TryAcquireLeaseAsync(default!, default, default).ReturnsForAnyArgs(_ => new ValueTask<IDistributedLease?>(Substitute.For<IDistributedLease>()));
         _store = new InMemoryTableCacheStore(Options.Create(new TableCacheOptions()), null, _catalog);
     }
 

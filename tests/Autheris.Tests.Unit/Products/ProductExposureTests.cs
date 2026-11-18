@@ -21,12 +21,11 @@ public sealed partial class ProductExposureTests
     private readonly ScriptedRunner _runner = new();
     private readonly TableCacheCatalog _catalog = new();
     private readonly FakeTimeProvider _time = new(new DateTimeOffset(2026, 11, 18, 10, 0, 0, TimeSpan.Zero));
-    private readonly IDistributedClusterStateProvider _cluster = Substitute.For<IDistributedClusterStateProvider>();
+    private readonly IDistributedClusterStateProvider _cluster = ProductHarness.LeasingCluster();
 
     public ProductExposureTests()
     {
         _h.CatalogObjects.Now = _time.GetUtcNow;
-        _cluster.TryAcquireLeaseAsync(default!, default, default).ReturnsForAnyArgs(_ => new ValueTask<IDistributedLease?>(Substitute.For<IDistributedLease>()));
     }
 
     private ProductLoadService Loader() => new(_h.Store, _runner, new RecordingCacheStore(), _catalog, _cluster,

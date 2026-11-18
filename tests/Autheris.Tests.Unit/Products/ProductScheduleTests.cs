@@ -19,12 +19,8 @@ public sealed class ProductScheduleTests
     private readonly ScriptedRunner _runner = new();
     private readonly FakeTimeProvider _time = new(new DateTimeOffset(2026, 11, 18, 10, 0, 0, TimeSpan.Zero));
     private readonly TableCacheCatalog _catalog = new();
-    private readonly IDistributedClusterStateProvider _cluster = Substitute.For<IDistributedClusterStateProvider>();
+    private readonly IDistributedClusterStateProvider _cluster = ProductHarness.LeasingCluster();
 
-    public ProductScheduleTests()
-    {
-        _cluster.TryAcquireLeaseAsync(default!, default, default).ReturnsForAnyArgs(_ => new ValueTask<IDistributedLease?>(Substitute.For<IDistributedLease>()));
-    }
 
     private ProductScheduleJob Job(out ProductLoadService loader)
     {
