@@ -32,12 +32,12 @@ public sealed class McpCatalogSummaryViewTests
     private const string SharedId = "sales.dbo.shared_t";
     private static readonly string[] SharedList = [SharedId];
 
-    private static TableMetadata Tier(string name, DatasetVisibility visibility, params string[] tags)
+    private static TableMetadata Tier(string name, params string[] tags)
     {
         var t = Wp0.Table("sales", name, "Short text", ["id", "secret_col", "pii_col"]);
         return t with
         {
-            Table = t.Table with { Visibility = visibility, LongDescription = "mentions secret_col and pii_col", Sensitivity = "CONFIDENTIAL", RequiresFourEyes = true },
+            Table = t.Table with { LongDescription = "mentions secret_col and pii_col", Sensitivity = "CONFIDENTIAL", RequiresFourEyes = true },
             CatalogTags = tags
         };
     }
@@ -65,92 +65,10 @@ public sealed class McpCatalogSummaryViewTests
 
     // --- Summary allow-list ---
 
-    [Fact]
-    public async Task Summary_Describe_IsBuiltFromTheAllowList()
-    {
-        var owners = Substitute.For<IDataOwnershipRepository>();
-        owners.GetDataOwnersForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<DataOwner>>(
-        [
-            new DataOwner { DisplayName = "Olga Owner", Email = "olga@corp.example", AdAccount = "CORP\\olga" },
-            new DataOwner { DisplayName = "Dan Delegate", Email = "dan@corp.example", AdAccount = "CORP\\dan" },
-            new DataOwner { DisplayName = "", Email = "nameless@corp.example", AdAccount = "CORP\\nameless" }
-        ]));
-        var catalog = Catalog(Opts(TenancyShape.Multi), [Tier("shared_t", DatasetVisibility.Summary, "finance", "pii")], owners);
 
-        var d = await catalog.DescribeDatasetAsync(Subject(), SharedId);
 
-        d.View.ShouldBe("summary");
-        d.Id.ShouldBe(SharedId);
-        d.Description.ShouldBe("Short text");
-        d.Sensitivity.ShouldBe("CONFIDENTIAL");
-        d.RequiresApproval.ShouldBeTrue();
-        d.Tags.ShouldBe(["finance", "pii"]);
-        d.AccessStatus.ShouldBe("NONE");
-        d.DataOwner.ShouldBe("Olga Owner");
-        d.DataOwnerDelegates.ShouldBe(["Dan Delegate"]);
-        d.LongDescription.ShouldBeNull();
-        d.Columns.ShouldBeEmpty();
-        d.Examples.ShouldBeEmpty();
-        d.GraphQl.ShouldBeNull();
-        d.OtherAccess.ShouldBeNull();
-        d.Indexes.ShouldBeNull();
-        System.Text.Json.JsonSerializer.Serialize(d).ShouldNotContain("secret_col");
-        System.Text.Json.JsonSerializer.Serialize(d).ShouldNotContain("@");
-    }
 
-    [Fact]
-    public void Summary_AllowList_PinsTheExactPropertySet()
-    {
-        // A property added to the description is excluded from the Summary until it is classified here (BC-14).
-        var nonAllowListed = new[] { "LongDescription", "Columns", "Examples", "GraphQl", "OtherAccess", "Indexes", "PrimaryKeyOrder", "Parameters", "RequiredFilterColumns", "RequiredFilterColumnGroups", "ColumnTotal" };
-        var allowListed = new[]
-        {
-            "Id", "DisplayName", "Domain", "Schema", "Table", "Description", "Sensitivity", "RequiresApproval", "Tags", "DataOwner", "DataOwnerDelegates", "AccessStatus", "View", "Kind", "Language", "RequestedLanguage", "Size"
-        };
 
-        var all = typeof(McpDatasetDescription).GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .Select(p => p.Name).Where(n => n != "EqualityContract").OrderBy(n => n).ToList();
-
-        all.ShouldBe(nonAllowListed.Concat(allowListed).OrderBy(n => n).ToList());
-    }
-
-    [Fact]
-    public async Task Summary_List_ReportsNoColumnsAndNoGraphQlField_AndTagsComeFromCatalogTags()
-    {
-        var catalog = Catalog(Opts(TenancyShape.Multi), [Tier("shared_t", DatasetVisibility.Summary, "finance")]);
-
-        var list = await catalog.ListDatasetsAsync(Subject());
-
-        var row = list.Datasets.ShouldHaveSingleItem();
-        row.ColumnCount.ShouldBe(0);
-        row.GraphQlField.ShouldBeNull();
-        row.Tags.ShouldBe(["finance"]);
-        (await catalog.ListDatasetsAsync(Subject(), tag: "FINANCE")).Datasets.Count.ShouldBe(1);
-        (await catalog.ListDatasetsAsync(Subject(), tag: "other")).Datasets.ShouldBeEmpty();
-    }
-
-    [Fact]
-    public async Task Summary_Search_NeverMatchesAColumnName_FullDoes()
-    {
-        var catalog = Catalog(Opts(TenancyShape.Multi, SharedId, "sales.dbo.full_t"),
-            [Tier("shared_t", DatasetVisibility.Summary), Tier("full_t", DatasetVisibility.Full)]);
-
-        var hits = await catalog.ListDatasetsAsync(Subject(), search: "secret_col");
-
-        hits.Datasets.Select(d => d.Id).ShouldBe(["sales.dbo.full_t"]);
-    }
-
-    [Fact]
-    public async Task Full_DescribeHasColumns_AndNoSummaryMarker()
-    {
-        var catalog = Catalog(Opts(TenancyShape.Multi), [Tier("shared_t", DatasetVisibility.Full)]);
-
-        var d = await catalog.DescribeDatasetAsync(Subject(), SharedId);
-
-        d.View.ShouldBeNull();
-        d.Columns.Count.ShouldBe(3);
-        d.LongDescription.ShouldNotBeNull();
-    }
 
     // --- G1 / F-C11 / F-C12 ---
 
@@ -167,7 +85,7 @@ public sealed class McpCatalogSummaryViewTests
             _ => (TenancyShape.Single, Wp0.User("gov", null, ["GovernanceAdmin"]))
         };
         // The persisted tier is Summary, but an administrator view is never narrowed (accepted behaviour, pinned).
-        var catalog = Catalog(Opts(mode), [Tier("shared_t", DatasetVisibility.Summary)], consents: Wp0.Allow(new TableIdentifier("sales", "dbo", "shared_t"), "x", Wp0.TenantA));
+        var catalog = Catalog(Opts(mode), [Tier("shared_t")], consents: Wp0.Allow(new TableIdentifier("sales", "dbo", "shared_t"), "x", Wp0.TenantA));
 
         var d = await catalog.DescribeDatasetAsync(principal, SharedId);
 
@@ -190,7 +108,7 @@ public sealed class McpCatalogSummaryViewTests
             "claimless" => Wp0.User("S-USER", null),
             _ => new ClaimsPrincipal(new ClaimsIdentity())
         };
-        var catalog = Catalog(Opts(TenancyShape.Multi), [Tier("shared_t", DatasetVisibility.Hidden)]);
+        var catalog = Catalog(Opts(TenancyShape.Multi), [Tier("shared_t")]);
 
         (await catalog.ListDatasetsAsync(principal)).Datasets.ShouldBeEmpty();
         await Should.ThrowAsync<TableNotFoundException>(() => catalog.DescribeDatasetAsync(principal, SharedId));
@@ -199,7 +117,7 @@ public sealed class McpCatalogSummaryViewTests
     [Fact]
     public void ShapeStage_NonAdminUnmarkedOrUnknownView_IsNotFound_AdminIsFull()
     {
-        var row = Tier("shared_t", DatasetVisibility.Full);
+        var row = Tier("shared_t");
 
         McpDatasetCatalog.Shape(false, row with { CatalogView = CatalogView.Unmarked }).ShouldBe(CatalogOutputShape.NotFound);
         McpDatasetCatalog.Shape(false, row with { CatalogView = (CatalogView)42 }).ShouldBe(CatalogOutputShape.NotFound);
@@ -210,7 +128,7 @@ public sealed class McpCatalogSummaryViewTests
     public async Task Claimless_GovernanceAdmin_Multi_NeverFullOutput()
     {
         var claimless = Wp0.User("gov", null, ["GovernanceAdmin"]);
-        var catalog = Catalog(Opts(TenancyShape.Multi), [Tier("shared_t", DatasetVisibility.Summary), Tier("other_t", DatasetVisibility.Full)]);
+        var catalog = Catalog(Opts(TenancyShape.Multi), [Tier("shared_t"), Tier("other_t")]);
 
         // No tier for a claim-less caller in Multi, no administrator view: nothing at all.
         (await catalog.ListDatasetsAsync(claimless)).Datasets.ShouldBeEmpty();
@@ -224,7 +142,7 @@ public sealed class McpCatalogSummaryViewTests
     {
         // The same principal (claim-less GovernanceAdmin) is Claimless in Multi and Unrestricted in Single; list and shaping agree.
         var principal = Wp0.User("gov", null, ["GovernanceAdmin"]);
-        var catalog = Catalog(Opts(mode), [Tier("shared_t", DatasetVisibility.Summary)]);
+        var catalog = Catalog(Opts(mode), [Tier("shared_t")]);
 
         var list = await catalog.ListDatasetsAsync(principal);
 

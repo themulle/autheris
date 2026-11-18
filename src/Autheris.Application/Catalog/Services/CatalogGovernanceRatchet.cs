@@ -59,7 +59,6 @@ public static class CatalogGovernanceRatchet
             HttpEndpoint = exTable.HttpEndpoint ?? inTable.HttpEndpoint,
             PluginName = !string.IsNullOrWhiteSpace(exTable.PluginName) ? exTable.PluginName : inTable.PluginName,
             Tags = exTable.Tags,
-            Visibility = exTable.Visibility != DatasetVisibility.Hidden ? exTable.Visibility : inTable.Visibility,
             RlsExpression = !string.IsNullOrWhiteSpace(exTable.RlsExpression) ? exTable.RlsExpression : inTable.RlsExpression,
             MinGroupSize = mergedMinGroupSize,
             NonPersonal = exTable.NonPersonal,

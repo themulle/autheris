@@ -47,7 +47,6 @@ public sealed class ExplainSubtreeEligibilityTests
         IReadOnlyList<string> columns,
         DatabaseDialect dialect = DatabaseDialect.PostgreSql,
         Dictionary<string, MaskingRule>? masking = null,
-        DatasetVisibility visibility = DatasetVisibility.Full,
         bool isSensitiveColumn = false,
         string? sensitiveColName = null)
     {
@@ -62,7 +61,6 @@ public sealed class ExplainSubtreeEligibilityTests
                 DataSourceType = DataSourceType.Sql,
                 SourceName = domain,
                 IsActive = true,
-                Visibility = visibility
             },
             Columns = columns.Select(c => new TableColumn
             {
@@ -368,7 +366,7 @@ public sealed class ExplainSubtreeEligibilityTests
             "JOIN sales.public.hidden_orders h ON o.id = h.id " +
             "JOIN inventory.dbo.stocks s ON o.id = s.id";
 
-        var hiddenOrders = CreateTable("sales", "public", "hidden_orders", ["id", "secret"], visibility: DatasetVisibility.Hidden);
+        var hiddenOrders = CreateTable("sales", "public", "hidden_orders", ["id", "secret"]);
         var stocks = CreateTable("inventory", "dbo", "stocks", ["id", "status"], DatabaseDialect.SqlServer);
 
         // Caller lacks consent for hiddenOrders, so no positive decision exists for it.
@@ -454,7 +452,7 @@ public sealed class ExplainSubtreeEligibilityTests
             "JOIN inventory.dbo.stocks s ON o.id = s.id";
 
         var orders = CreateTable("sales", "public", "orders", ["id"]);
-        var hiddenOrders = CreateTable("sales", "public", "hidden_orders", ["id", "secret"], visibility: DatasetVisibility.Hidden);
+        var hiddenOrders = CreateTable("sales", "public", "hidden_orders", ["id", "secret"]);
         var customers = CreateTable("sales", "public", "customers", ["id", "region", "ssn"], isSensitiveColumn: true, sensitiveColName: "ssn");
         var stocks = CreateTable("inventory", "dbo", "stocks", ["id", "status"], DatabaseDialect.SqlServer);
 

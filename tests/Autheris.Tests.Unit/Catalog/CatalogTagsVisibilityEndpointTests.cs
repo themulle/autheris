@@ -44,18 +44,8 @@ public sealed class CatalogTagsVisibilityEndpointTests
 
     private static DatasetCatalogResult Ok(DatasetCatalogOutcome outcome = DatasetCatalogOutcome.Applied, bool effective = true) =>
         new(outcome, Orders, new DatasetCatalogSettings(
-            [new DatasetTag("pii", DatasetTagSource.Admin), new DatasetTag("sales", DatasetTagSource.Dbt)], DatasetVisibility.Summary), effective);
+            [new DatasetTag("pii", DatasetTagSource.Admin), new DatasetTag("sales", DatasetTagSource.Dbt)]));
 
-    [Fact]
-    public async Task Get_Success_ReturnsTagsWithSourceVisibilityAndTierEffective()
-    {
-        _service.GetAsync(Arg.Any<ClaimsPrincipal?>(), "sales.dbo.orders", Arg.Any<CancellationToken>()).Returns(Ok(DatasetCatalogOutcome.Unchanged, effective: false));
-
-        var (status, body) = await Run(await CatalogApiEndpoints.GetDatasetCatalogSettingsHandler("sales.dbo.orders", _service, Context(), default));
-
-        status.ShouldBe(200);
-        body.ShouldBe("{\"datasetId\":\"sales.dbo.orders\",\"tags\":[{\"tag\":\"pii\",\"source\":\"admin\"},{\"tag\":\"sales\",\"source\":\"dbt\"}],\"visibility\":\"Summary\",\"tierEffective\":false,\"minGroupSize\":null,\"nonPersonal\":null,\"warning\":null}");
-    }
 
     [Fact]
     public async Task PutTags_PassesNormalizedReplaceEditToTheService_AndReturnsSettings()
@@ -66,7 +56,7 @@ public sealed class CatalogTagsVisibilityEndpointTests
 
         status.ShouldBe(200);
         await _service.Received(1).ApplyAsync(Arg.Any<ClaimsPrincipal?>(), "sales.dbo.orders",
-            Arg.Is<DatasetCatalogEdit>(e => e.ReplaceTags!.SequenceEqual(new[] { "PII" }) && e.AddTags == null && e.Visibility == null), "admin", Arg.Any<CancellationToken>());
+            Arg.Is<DatasetCatalogEdit>(e => e.ReplaceTags!.SequenceEqual(new[] { "PII" }) && e.AddTags == null), "admin", Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -96,7 +86,6 @@ public sealed class CatalogTagsVisibilityEndpointTests
     [InlineData(DatasetCatalogOutcome.Forbidden, 403, "ACCESS_DENIED")]
     [InlineData(DatasetCatalogOutcome.InvalidTag, 400, "INVALID_TAG")]
     [InlineData(DatasetCatalogOutcome.TagLimitExceeded, 400, "TAG_LIMIT_EXCEEDED")]
-    [InlineData(DatasetCatalogOutcome.InvalidVisibility, 400, "INVALID_VISIBILITY")]
     [InlineData(DatasetCatalogOutcome.InvalidColumns, 400, "INVALID_COLUMNS")]
     [InlineData(DatasetCatalogOutcome.InvalidRequest, 400, "BAD_REQUEST")]
     [InlineData(DatasetCatalogOutcome.Unavailable, 503, "SERVICE_UNAVAILABLE")]

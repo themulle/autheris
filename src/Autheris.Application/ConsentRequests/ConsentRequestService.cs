@@ -48,6 +48,8 @@ public sealed class ConsentRequestService : IConsentRequestService
     private readonly IConsentMaterializationGuard? _materializationGuard;
     private readonly IRowPolicyDependencyIndex? _policyDependencyIndex;
     private readonly IClassificationRepository? _classificationRepository;
+    private readonly IRateLimiterService? _rateLimiter;
+    private readonly IOptions<Autheris.Application.Catalog.Services.CatalogDiscoveryOptions>? _discoveryOptions;
 
     public ConsentRequestService(
         ITableMetadataRepository metadataRepository,
@@ -63,8 +65,12 @@ public sealed class ConsentRequestService : IConsentRequestService
         IConsentWorkflowConfigRepository? workflowConfigRepository = null,
         IConsentWorkflowRouter? workflowRouter = null,
         IConsentEventOutbox? eventOutbox = null,
-        IClassificationRepository? classificationRepository = null)
+        IClassificationRepository? classificationRepository = null,
+        IRateLimiterService? rateLimiter = null,
+        IOptions<Autheris.Application.Catalog.Services.CatalogDiscoveryOptions>? discoveryOptions = null)
     {
+        _rateLimiter = rateLimiter;
+        _discoveryOptions = discoveryOptions;
         _classificationRepository = classificationRepository;
         _materializationGuard = materializationGuard;
         _policyDependencyIndex = policyDependencyIndex;
@@ -91,6 +97,18 @@ public sealed class ConsentRequestService : IConsentRequestService
         if (_gatewayOptions?.Value.Authentication.EntraId.SelfServiceEnabled == false)
         {
             throw new ConsentRequestException("FORBIDDEN", "Self-service access requests are disabled.");
+        }
+
+        if (_rateLimiter is not null && _gatewayOptions is not null)
+        {
+            var limitTenant = ResolveTenantId(principal, command.ContextTenant, ClusterAdminPolicy.IsCanonicalClusterAdmin(principal));
+            var retryAfter = await Autheris.Application.Catalog.Discovery.DiscoveryCallerGate.CheckAccessRequestRateAsync(
+                limitTenant, command.UserSid, _discoveryOptions?.Value.Discovery ?? new Autheris.Application.Catalog.Services.CatalogDiscoverySettings(),
+                _gatewayOptions.Value, _rateLimiter, ct).ConfigureAwait(false);
+            if (retryAfter is { } wait)
+            {
+                throw new ConsentRequestException("RATE_LIMIT_EXCEEDED", "Access request rate limit exceeded.", wait);
+            }
         }
 
         // #341: caller text; a blank component or one with a dot or line break is a client error, not a constructor fault.

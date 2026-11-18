@@ -83,65 +83,8 @@ public sealed class CatalogChannelMigrationTests
     // T-CAT138-10 / SEC-CAT138-15 (Summary: no columns, no samples)
     // ------------------------------------------------------------------------------------------------------------------------------
 
-    [Fact]
-    public async Task SummaryRow_NoColumnsNoSamples_ThroughServiceRestAndMcp_T_CAT138_10()
-    {
-        var plain = Wp0.Table("sales", "sum_t", "Summary", ["id", "secret"]);
-        var summary = plain with { Table = plain.Table with { Visibility = DatasetVisibility.Summary } };
-        var tables = Wp0.Tables(summary);
-        var options = Opts();
-        var (mcp, rest, service) = Channels(tables, Wp0.Consents(), options);
-        var user = Wp0.User("S-USER", "tenant-a");
 
-        // The engine only produces Summary rows for shared tables on the discovery surface.
-        var shared = new GatewayOptions { Tenancy = options.Tenancy, Catalog = new DataCatalogOptions { SharedTables = ["sales.dbo.sum_t"] } };
-        (mcp, rest, service) = Channels(tables, Wp0.Consents(), shared);
 
-        var detail = await rest.GetDatasetDetailAsync(summary.Identifier, Wp0.Context(user));
-        detail.ShouldNotBeNull().Columns.ShouldBeEmpty();
-        var description = await mcp.DescribeDatasetAsync(user, "sales.dbo.sum_t");
-        description.Columns.ShouldBeEmpty();
-        description.View.ShouldBe(McpDatasetCatalog.SummaryView);
-        (await service.FindVisibleAsync(CatalogVisibilityTestFactory.Caller(user), summary.Identifier))!.Value.Shape.ShouldBe(CatalogOutputShape.Summary);
-
-        await Should.ThrowAsync<GatewayForbiddenException>(() => mcp.SampleRowsAsync(user, "sales.dbo.sum_t", 3));
-    }
-
-    [Fact]
-    public async Task SampleRows_SummaryShape_Denied_FullRequired()
-    {
-        // The service says Summary for a row whose own tier is Full: the channel obeys the service shape, never recomputes it.
-        var full = Wp0.Table("sales", "full_t", "Full", ["id"]) with { CatalogView = CatalogView.Full };
-        var service = Substitute.For<ICatalogVisibilityService>();
-        service.FindVisibleAsync(Arg.Any<CatalogCaller>(), full.Identifier, Arg.Any<CancellationToken>())
-            .Returns(new CatalogVisibleRow(full, CatalogOutputShape.Summary));
-        var gateway = Substitute.For<IGatewayExecutionService>();
-        var mcp = new McpDatasetCatalog(
-            Wp0.Tables(full), Wp0.Consents(), gateway, Substitute.For<IAuditLogRepository>(),
-            options: Options.Create(Opts()), visibilityService: service);
-
-        await Should.ThrowAsync<GatewayForbiddenException>(() => mcp.SampleRowsAsync(Wp0.User("S-USER", "tenant-a"), "sales.dbo.full_t", 3));
-
-        gateway.ReceivedCalls().ShouldBeEmpty();
-    }
-
-    [Fact]
-    public async Task Shape_ComesFromServiceResolver_NotRecomputedByChannel()
-    {
-        var full = Wp0.Table("sales", "full_t", "Full", ["id", "secret"]) with { CatalogView = CatalogView.Full };
-        var service = Substitute.For<ICatalogVisibilityService>();
-        service.FindVisibleAsync(Arg.Any<CatalogCaller>(), full.Identifier, Arg.Any<CancellationToken>())
-            .Returns(new CatalogVisibleRow(full, CatalogOutputShape.Summary));
-        var options = Opts();
-        var mcp = new McpDatasetCatalog(
-            Wp0.Tables(full), Wp0.Consents(), Substitute.For<IGatewayExecutionService>(), Substitute.For<IAuditLogRepository>(),
-            options: Options.Create(options), visibilityService: service);
-        var rest = new CatalogDiscoveryService(Wp0.Tables(full), global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), Options.Create(options), service);
-        var user = Wp0.User("S-USER", "tenant-a");
-
-        (await mcp.DescribeDatasetAsync(user, "sales.dbo.full_t")).Columns.ShouldBeEmpty();
-        (await rest.GetDatasetDetailAsync(full.Identifier, Wp0.Context(user)))!.Columns.ShouldBeEmpty();
-    }
 
     // ------------------------------------------------------------------------------------------------------------------------------
     // T-CAT138-11

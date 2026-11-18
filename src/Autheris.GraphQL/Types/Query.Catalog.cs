@@ -460,8 +460,8 @@ public sealed partial class Query
     }
 
     /// <summary>
-    /// Issue #111 shaping of one consent/tier-filtered row (<see cref="Autheris.Application.Services.CatalogViewShaping"/>): null when the row
-    /// does not exist for the caller (a non-administrator row without a recognised view), no columns for <c>Summary</c>.
+    /// Shaping of one consent-filtered row (<see cref="Autheris.Application.Services.CatalogViewShaping"/>): null when the row
+    /// does not exist for the caller (a non-administrator row without a recognised view).
     /// </summary>
     internal static TableMetadataDto? ToCatalogDto(TableMetadata t, bool isAdminView, string status, string? language = null,
         IReadOnlyDictionary<TableIdentifier, IReadOnlySet<string>>? hiddenText = null)
@@ -474,10 +474,8 @@ public sealed partial class Query
 
         var resolved = !string.IsNullOrWhiteSpace(language) ? t.Table.Texts.Resolve(language) : null;
 
-        var columnNames = shape == Autheris.Application.Services.CatalogOutputShape.Summary ? [] : t.Columns.Select(c => c.ColumnName).ToList();
-        IReadOnlyList<DiscoveryColumn> columns = shape == Autheris.Application.Services.CatalogOutputShape.Summary
-            ? Array.Empty<DiscoveryColumn>()
-            : t.Columns.Select(c =>
+        var columnNames = t.Columns.Select(c => c.ColumnName).ToList();
+        IReadOnlyList<DiscoveryColumn> columns = t.Columns.Select(c =>
             {
                 var colResolved = !string.IsNullOrWhiteSpace(language) ? c.Texts.Resolve(language) : null;
                 var isSens = ClassificationMetadata.IsColumnSensitive(t, c);

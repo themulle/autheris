@@ -27,7 +27,7 @@ public sealed class CallerAttributeDisclosureTests
         tableRepo.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>()).Returns(new TableMetadata
         {
             Identifier = Orders,
-            Table = new Table { Visibility = DatasetVisibility.Full },
+            Table = new Table { },
             Columns = [new TableColumn { ColumnName = "id", DataType = "int" }, new TableColumn { ColumnName = "cost_center", DataType = "varchar" }]
         });
         var consentRepo = Substitute.For<IConsentRepository>();

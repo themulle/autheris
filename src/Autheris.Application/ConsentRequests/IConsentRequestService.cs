@@ -55,13 +55,17 @@ public sealed class SubmitConsentRequestResult
 /// <summary>Business failure of a consent use case; <see cref="Code"/> is the stable error code exposed to clients.</summary>
 public sealed class ConsentRequestException : Exception
 {
-    public ConsentRequestException(string code, string message)
+    public ConsentRequestException(string code, string message, int? retryAfterSeconds = null)
         : base(message)
     {
         Code = code;
+        RetryAfterSeconds = retryAfterSeconds;
     }
 
     public string Code { get; }
+
+    /// <summary>Seconds after which a rate-limited caller may retry (only set for <c>RATE_LIMIT_EXCEEDED</c>).</summary>
+    public int? RetryAfterSeconds { get; }
 }
 
 /// <summary>Use case: a user requests access to a table.</summary>
