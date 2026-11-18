@@ -158,7 +158,6 @@ type ConsentRequestDto {
   status: String!
   requestedAt: DateTime!
   requestedValidTo: DateTime
-  itsmTicketId: String
   contextJson: String
   effectPreview: ApprovalEffectPreviewDto
 }

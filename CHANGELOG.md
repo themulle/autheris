@@ -20,6 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Removed
 - Configuration key `Gateway:CatalogSearch:Enabled`. Catalog search validation and the index warm-up are always active; use `Gateway:CatalogSearch:WarmupOnStartup` to control the startup warm-up. The key fails startup with any value, including `false` or empty.
+- Governance schema step `0027_drop_legacy_governance_columns` (PostgreSQL and SQL Server) drops `CONSENT_REQUESTS.itsm_ticket_id` with its unique index `ux_consent_requests_ticket` and `TABLE_CATALOG_SETTINGS.visibility`. The GraphQL consent request types no longer expose `itsmTicketId`. All nodes must run this build before the step applies.
 
 ### Fixed
 - `consents/apply` is idempotent for columns with several rules, for example a base rule plus a scope rule on the same column (#806). Column rules and row filters are compared as multisets independent of order, scopes as sets in their stored form. Re-applying an unchanged manifest reports `unchanged` and writes no revocation, consent, grant record, audit entry or epoch bump. Duplicated rules or scopes can no longer hide a difference.
