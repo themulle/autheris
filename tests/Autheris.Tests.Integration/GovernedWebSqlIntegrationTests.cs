@@ -295,7 +295,7 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<GovernedWebSq
     {
         await RegisterTableAsync("orders", "id", "total", "email", "ssn", "tenant_id");
 
-        var result = await RunAsync("SELECT * FROM orders WHERE CAST(total AS INTEGER) > 100 LIMIT 5000", User("usr_alice", "tenant_123"), "tenant_123");
+        var result = await RunAsync("SELECT * FROM orders WHERE total > 100 LIMIT 5000", User("usr_alice", "tenant_123"), "tenant_123");
 
         // 700 rows of tenant_123 (600 with total > 100) and one foreign row; the limit is clamped to MaxAllowedRows (500)
         result.RowCount.ShouldBe(500);

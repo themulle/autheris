@@ -32,7 +32,7 @@ public sealed class OracleModuloAndIntegerDivisionTests
                 new CatalogColumn("num0", numZeroType),
                 new CatalogColumn("num_bare", bareNumType),
                 new CatalogColumn("unk_col", "unknown_custom")),
-                "TenantId", 1)
+                null, 1)
         }, "dbo");
 
     private CompiledSql CompileOracle(string sql, InMemoryTableCatalog? catalog = null)

@@ -18,8 +18,8 @@ using static Autheris.Tests.Unit.Sql.ClientListFixture;
 /// <summary>REQ-SQL-130: the conversion through the whole governed pipeline (state, mapper, audit, logs).</summary>
 public sealed class ConvertTimeZoneWebSqlTests
 {
-    private const string Good = "SELECT convert_timezone('UTC', 'Europe/Berlin', CAST(status AS timestamp)) AS t FROM orders";
-    private const string BadZone = "SELECT convert_timezone('Europe/Evil', 'UTC', CAST(status AS timestamp)) AS t FROM orders";
+    private const string Good = "SELECT convert_timezone('UTC', 'Europe/Berlin', CAST('2024-01-01 00:00:00' AS timestamp)) AS t FROM orders";
+    private const string BadZone = "SELECT convert_timezone('Europe/Evil', 'UTC', CAST('2024-01-01 00:00:00' AS timestamp)) AS t FROM orders";
 
     private sealed class FixedState(bool available) : ITimeZoneConversionState
     {

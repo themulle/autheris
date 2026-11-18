@@ -82,17 +82,24 @@ public sealed class CallerAttributeResolver : ICallerAttributeResolver, ICallerA
 
     private Task OnPeerInvalidationAsync(string message)
     {
-        var parts = message?.Split('|', 3);
-        if (parts is { Length: 3 } && parts[1].Length > 0 && parts[2].Length > 0)
+        try
         {
-            if (parts[0] == "A")
+            var parts = message?.Split('|', 3);
+            if (parts is { Length: 3 } && parts[1].Length > 0 && parts[2].Length > 0)
             {
-                BumpAttribute(new TenantId(parts[1]), parts[2]);
+                if (parts[0] == "A")
+                {
+                    BumpAttribute(new TenantId(parts[1]), parts[2]);
+                }
+                else if (parts[0] == "S")
+                {
+                    BumpSubject(new TenantId(parts[1]), parts[2]);
+                }
             }
-            else if (parts[0] == "S")
-            {
-                BumpSubject(new TenantId(parts[1]), parts[2]);
-            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger?.LogDebug("A malformed caller attribute invalidation message was ignored ({ExceptionType}).", ex.GetType().Name);
         }
 
         return Task.CompletedTask;

@@ -68,7 +68,7 @@ public class RequiredFilterScopeMutationTests
         "SELECT id FROM orders WHERE 'Z' > region", "SELECT id FROM orders WHERE region <= 'Z'", "SELECT id FROM orders WHERE 'Z' >= region",
         "SELECT id FROM orders WHERE region > 'A'", "SELECT id FROM orders WHERE 'A' < region", "SELECT id FROM orders WHERE region >= 'A'",
         "SELECT id FROM orders WHERE 'A' <= region", "SELECT id FROM orders WHERE (region = 'EU')", "SELECT id FROM orders WHERE ((region = 'EU'))",
-        "SELECT id FROM orders WHERE CAST(region AS varchar) = 'EU'", "SELECT id FROM orders WHERE region = CAST('EU' AS varchar)",
+        "SELECT id FROM orders WHERE region = CAST('EU' AS varchar)",
         "SELECT id FROM orders WHERE region BETWEEN 'A' AND 'F'", "SELECT id FROM orders WHERE region IN ('A', 'B')",
         "SELECT id FROM orders WHERE region IN ('A', NULL)", "SELECT id FROM orders WHERE region IN (SELECT region FROM items)",
         "SELECT id FROM orders WHERE region = 'EU' AND status = 'x'", "SELECT id FROM orders WHERE status = 'x' AND region = 'EU'",
@@ -128,6 +128,17 @@ public class RequiredFilterScopeMutationTests
         "WITH x AS (SELECT id FROM refs) SELECT o.id FROM orders o JOIN x ON o.id = x.id WHERE region = 'EU'",
         "SELECT id FROM orders WHERE dbo.orders.region = 'EU'",
         "SELECT t.id FROM (SELECT id, region FROM orders) t WHERE t.region = 'EU'");
+
+    [Fact]
+    public void Cast_of_the_column_satisfies_the_required_filter_on_a_table_without_tenant_column()
+    {
+        var catalog = new InMemoryTableCatalog(new[]
+        {
+            new TableCatalogEntry(Orders, Cols("id", "region"), null, ImmutableArray.Create("region"), 1)
+        }, "dbo");
+
+        Assert.False(string.IsNullOrEmpty(Compile("SELECT id FROM orders WHERE CAST(region AS varchar) = 'EU'", catalog).Sql));
+    }
 
     [Theory]
     [MemberData(nameof(Constraining))]

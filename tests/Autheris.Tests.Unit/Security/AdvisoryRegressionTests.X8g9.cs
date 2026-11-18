@@ -26,23 +26,24 @@ public sealed partial class AdvisoryRegressionTests
 {
     // GHSA-x8g9-cm3h-p6jq (details: private advisory).
     [Theory]
-    [InlineData("replayed_epoch_does_not_revive_cached_entries")]
-    [InlineData("missing_epoch_after_observation_flushes_entries")]
-    [InlineData("invalidation_drops_cached_attribute_value")]
-    [InlineData("peer_invalidation_drops_cached_attribute_value")]
-    [InlineData("reconnect_drops_cached_attribute_value")]
-    [InlineData("administration_change_invalidates_the_attribute")]
+    [InlineData("case_01")]
+    [InlineData("case_02")]
+    [InlineData("case_03")]
+    [InlineData("case_04")]
+    [InlineData("case_05")]
+    [InlineData("case_06")]
+    [InlineData("case_07")]
     public async Task Ghsa_x8g9_p6jq_regression(string bullet)
     {
         switch (bullet)
         {
-            case "replayed_epoch_does_not_revive_cached_entries":
-                await EpochReplayAsync(epochAfterFlush: 1);
+            case "case_01":
+                await CacheScenarioAsync(epochAfterFlush: 1);
                 break;
-            case "missing_epoch_after_observation_flushes_entries":
-                await EpochReplayAsync(epochAfterFlush: 0);
+            case "case_02":
+                await CacheScenarioAsync(epochAfterFlush: 0);
                 break;
-            case "invalidation_drops_cached_attribute_value":
+            case "case_03":
             {
                 using var fixture = new AttributeFixture();
                 await fixture.ResolveAsync();
@@ -56,7 +57,7 @@ public sealed partial class AdvisoryRegressionTests
                 fixture.Provider.Calls.ShouldBe(3);
                 break;
             }
-            case "peer_invalidation_drops_cached_attribute_value":
+            case "case_04":
             {
                 var bus = Substitute.For<IEventBus>();
                 Func<string, Task>? handler = null;
@@ -75,7 +76,7 @@ public sealed partial class AdvisoryRegressionTests
                 await bus.Received().PublishAsync(CallerAttributeResolver.InvalidationChannel, $"A|{Tenant.Value}|cost_center", Arg.Any<CancellationToken>());
                 break;
             }
-            case "reconnect_drops_cached_attribute_value":
+            case "case_05":
             {
                 var bus = Substitute.For<IEventBus>();
                 using var fixture = new AttributeFixture(bus);
@@ -85,7 +86,7 @@ public sealed partial class AdvisoryRegressionTests
                 fixture.Provider.Calls.ShouldBe(2);
                 break;
             }
-            case "administration_change_invalidates_the_attribute":
+            case "case_06":
             {
                 var repository = Substitute.For<ICallerAttributeRepository>();
                 repository.ApproveServiceSetAsync(default!, default!, default!, default!, default!, default, default).ReturnsForAnyArgs(CallerAttributeChangeResult.Applied);
@@ -95,6 +96,23 @@ public sealed partial class AdvisoryRegressionTests
                     Microsoft.Extensions.Options.Options.Create(new GatewayOptions { CallerAttributes = Options() }), TimeProvider.System, [], invalidator);
                 await service.ApproveServiceSetAsync(Tenant, "app-1", "cost_center", "hash", new CallerAttributeActor("oid-bob", HoldsApproverRole: true));
                 invalidator.Received(1).InvalidateAttribute(Tenant, "cost_center");
+                break;
+            }
+            case "case_07":
+            {
+                var bus = Substitute.For<IEventBus>();
+                Func<string, Task>? handler = null;
+                bus.Subscribe<string>(CallerAttributeResolver.InvalidationChannel, Arg.Do<Func<string, Task>>(h => handler = h)).Returns(Substitute.For<IDisposable>());
+                using var fixture = new AttributeFixture(bus);
+                await fixture.ResolveAsync();
+                handler.ShouldNotBeNull();
+                foreach (var message in new string?[] { null, "", "A|bad tenant!|x", "S|_reserved|x", "A|" + new string('t', 80) + "|x", "Z|t|x" })
+                {
+                    await handler(message!);
+                }
+
+                await fixture.ResolveAsync();
+                fixture.Provider.Calls.ShouldBe(1);
                 break;
             }
             default:
@@ -123,7 +141,7 @@ public sealed partial class AdvisoryRegressionTests
         public void Dispose() => Resolver.Dispose();
     }
 
-    private static async Task EpochReplayAsync(long epochAfterFlush)
+    private static async Task CacheScenarioAsync(long epochAfterFlush)
     {
         var tenant = new TenantId("tenant-replay");
         var served = new Queue<long>([5, epochAfterFlush, 5]);
@@ -144,7 +162,6 @@ public sealed partial class AdvisoryRegressionTests
 
         (await cache.GetProfilesAsync(tenant, "alice")).Count.ShouldBe(1);
 
-        // The grant is revoked, the store loses its counter and later replays the epoch of the cached entry.
         repository.GetProfilesForSubjectAsync(tenant, "alice", Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<AccessProfile>>([]));
         (await cache.GetProfilesAsync(tenant, "alice")).ShouldBeEmpty();
         (await cache.GetProfilesAsync(tenant, "alice")).ShouldBeEmpty();

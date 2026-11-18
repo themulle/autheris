@@ -32,37 +32,37 @@ public sealed partial class AdvisoryRegressionTests
 
     // GHSA-rxr4-mf28-p2hv (details: private advisory).
     [Theory]
-    [InlineData("in_list_on_key_column_is_rejected")]
-    [InlineData("like_on_unique_column_is_rejected")]
-    [InlineData("composite_key_member_is_isolating")]
-    [InlineData("set_filter_on_group_column_stays_allowed")]
-    [InlineData("secure_non_zero_default_threshold")]
-    [InlineData("threshold_below_floor_fails_validation")]
-    [InlineData("suppressed_group_count_is_not_exposed_by_default")]
+    [InlineData("case_01")]
+    [InlineData("case_02")]
+    [InlineData("case_03")]
+    [InlineData("case_04")]
+    [InlineData("case_05")]
+    [InlineData("case_06")]
+    [InlineData("case_07")]
     public void Ghsa_rxr4_p2hv_regression(string bullet)
     {
         switch (bullet)
         {
-            case "in_list_on_key_column_is_rejected":
+            case "case_01":
                 Should.Throw<AggregationFilterRejectedException>(() => EnforceAggregationFilter("employee_id IN (1, 2, 3)"));
                 break;
-            case "like_on_unique_column_is_rejected":
+            case "case_02":
                 Should.Throw<AggregationFilterRejectedException>(() => EnforceAggregationFilter("email LIKE 'a%'"));
                 break;
-            case "composite_key_member_is_isolating":
+            case "case_03":
                 Should.Throw<AggregationFilterRejectedException>(() => EnforceAggregationFilter("tenant_part <= 3"));
                 break;
-            case "set_filter_on_group_column_stays_allowed":
+            case "case_04":
                 Should.NotThrow(() => EnforceAggregationFilter("department IN ('a', 'b')"));
                 break;
-            case "secure_non_zero_default_threshold":
+            case "case_05":
                 new AnalyticsOptions().Privacy.DefaultMinGroupSize.ShouldBeGreaterThanOrEqualTo(2);
                 break;
-            case "threshold_below_floor_fails_validation":
+            case "case_06":
                 new AnalyticsOptionsValidator().Validate(null, new AnalyticsOptions { Privacy = new AnalyticsPrivacyOptions { DefaultMinGroupSize = 1 } }).Failed.ShouldBeTrue();
                 new AnalyticsOptionsValidator().Validate(null, new AnalyticsOptions { Privacy = new AnalyticsPrivacyOptions { DefaultMinGroupSize = 0 } }).Failed.ShouldBeTrue();
                 break;
-            case "suppressed_group_count_is_not_exposed_by_default":
+            case "case_07":
                 new AnalyticsPrivacyOptions().ExposeSuppressedGroupsCount.ShouldBeFalse();
                 break;
             default:

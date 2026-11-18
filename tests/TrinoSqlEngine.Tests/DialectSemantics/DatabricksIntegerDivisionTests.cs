@@ -22,7 +22,7 @@ public sealed class DatabricksIntegerDivisionTests
                 new CatalogColumn("b", "INT4"),
                 new CatalogColumn("dec_col", "DECIMAL(10, 2)"),
                 new CatalogColumn("dbl_col", "DOUBLE")),
-                "TenantId", 1)
+                null, 1)
         }, "dbo");
 
     private static CompileRequest DatabricksRequest(InMemoryTableCatalog catalog, int expansionFactor = 20) => new()

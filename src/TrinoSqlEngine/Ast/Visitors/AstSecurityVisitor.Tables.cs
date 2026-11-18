@@ -19,7 +19,7 @@ namespace TrinoSqlEngine.Ast.Visitors;
 
 public sealed partial class AstSecurityVisitor : SqlAstRewriter
 {
-    /// <summary>True once a table of the statement received a row policy (not only the tenant predicate); see <see cref="Security.RowPolicyErrorGuard"/>.</summary>
+    /// <summary>True once a table of the statement received a tenant predicate or a row policy; see <see cref="Security.RowPolicyErrorGuard"/>.</summary>
     public bool RowPolicyApplied { get; private set; }
 
     public override SqlNode VisitNamedTableSource(NamedTableSource node)
@@ -72,6 +72,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         var tenant = typed.BuildTenantPredicate(entry);
         if (tenant != null)
         {
+            RowPolicyApplied = true;
             var id = new SecurityPredicateId(tid.ToString(), 0);
             conjuncts.Add(new SecurityPredicateExpression(tenant, id, scope));
         }
@@ -131,6 +132,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         TypedPolicyContext typed,
         SecurityScope scope)
     {
+        RowPolicyApplied = true;
         var tid = entry.Identity;
         foreach (var sig in perCell.Signatures)
         {
