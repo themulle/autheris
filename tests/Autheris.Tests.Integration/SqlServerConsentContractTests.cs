@@ -63,23 +63,6 @@ public sealed class SqlServerConsentContractTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Schema_HasUniqueTicketIndexPerTenant()
-    {
-        if (!_available) return;
-
-        await using var repo = NewRepository();
-        await using var conn = new SqlConnection(_db!.ConnectionString);
-        await conn.OpenAsync();
-        await using var cmd = new SqlCommand(
-            "SELECT is_unique FROM sys.indexes WHERE name = 'ux_consent_requests_ticket' AND object_id = OBJECT_ID('dbo.CONSENT_REQUESTS')", conn);
-
-        var isUnique = await cmd.ExecuteScalarAsync();
-
-        isUnique.ShouldNotBeNull();
-        Convert.ToBoolean(isUnique).ShouldBeTrue();
-    }
-
-    [Fact]
     public async Task ApproveConsentRequest_HighSensitivityTable_EnforcesFourEyesWhenRequiresFourEyesIsFalse()
     {
         if (!_available) return;

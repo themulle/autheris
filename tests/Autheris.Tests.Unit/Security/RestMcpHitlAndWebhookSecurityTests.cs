@@ -402,7 +402,6 @@ public class RestMcpHitlAndWebhookSecurityTests
                 RequesterSid = new Sid("S-1-5-21-REQUESTER"),
                 RequestedGranteeRef = "S-1-5-21-REQUESTER",
                 Status = "PENDING_EXTERNAL_APPROVAL",
-                ItsmTicketId = ticketId,
                 TenantId = new TenantId(tenant),
                 RequestedValidTo = DateTimeOffset.UtcNow.AddDays(1)
             };

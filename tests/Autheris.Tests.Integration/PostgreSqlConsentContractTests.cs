@@ -76,23 +76,6 @@ public sealed class PostgreSqlConsentContractTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Schema_HasUniqueTicketIndexPerTenant()
-    {
-        if (!_available) return;
-
-        await using var repo = NewRepository();
-        await using var conn = new NpgsqlConnection(_db!.ConnectionString);
-        await conn.OpenAsync();
-        await using var cmd = new NpgsqlCommand(
-            "SELECT indexdef FROM pg_indexes WHERE indexname = 'ux_consent_requests_ticket'", conn);
-
-        var def = (string?)await cmd.ExecuteScalarAsync();
-
-        def.ShouldNotBeNull();
-        def.ShouldContain("UNIQUE");
-    }
-
-    [Fact]
     public async Task ApproveConsentRequest_HighSensitivityTable_EnforcesFourEyesWhenRequiresFourEyesIsFalse()
     {
         if (!_available) return;

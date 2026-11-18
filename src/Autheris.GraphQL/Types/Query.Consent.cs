@@ -83,7 +83,6 @@ public sealed partial class Query
             Status = r.Status,
             RequestedAt = r.RequestedAt,
             RequestedValidTo = r.RequestedValidTo,
-            ItsmTicketId = r.ItsmTicketId,
             ContextJson = r.ContextJson
         });
 
@@ -152,7 +151,6 @@ public sealed partial class Query
                 Status = r.Status,
                 RequestedAt = r.RequestedAt,
                 RequestedValidTo = r.RequestedValidTo,
-                ItsmTicketId = r.ItsmTicketId,
                 ContextJson = r.ContextJson,
                 EffectPreview = preview
             });
