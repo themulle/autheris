@@ -516,7 +516,8 @@ public sealed class DiscoveryService : IDiscoveryService
             }
         }
 
-        var allTables = await _metadataRepository!.GetAllTablesAsync(ct).ConfigureAwait(false);
+        var allTables = await CatalogTablePageReader.ReadAllAsync(
+            _metadataRepository!, new CatalogTableQuery(IncludeInactive: false), ct: ct).ConfigureAwait(false);
         var virtualFiltered = DiscoveryTenantScope.DropForeignVirtualTables(allTables, caller.Tenant);
 
         var tenantConsentList = await _consentRepository!.GetTablesWithConsentsForTenantAsync(caller.Tenant, ct).ConfigureAwait(false);

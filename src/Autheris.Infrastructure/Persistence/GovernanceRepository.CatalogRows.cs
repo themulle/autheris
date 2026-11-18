@@ -33,6 +33,9 @@ public partial class GovernanceRepository
     internal static Task<long> ReadTableEpochAsync(DbConnection conn, Guid tableId, CancellationToken ct) =>
         CatalogRowHydrator.ReadTableEpochAsync(conn, tableId, ct);
 
+    internal static Task<Dictionary<Guid, long>> ReadTableEpochsByIdsAsync(DbConnection conn, IReadOnlyList<Guid> tableIds, CancellationToken ct) =>
+        CatalogRowHydrator.ReadTableEpochsByIdsAsync(conn, tableIds, ct);
+
     internal static Task<Dictionary<Guid, long>> ReadAllTableEpochsAsync(DbConnection conn, CancellationToken ct) =>
         CatalogRowHydrator.ReadAllTableEpochsAsync(conn, ct);
 

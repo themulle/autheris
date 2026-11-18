@@ -151,7 +151,7 @@ public sealed class TableAccessPolicyArch1Tests
         var tables = Substitute.For<ITableMetadataRepository>();
         tables.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(ci => Task.FromResult<TableMetadata?>(ci.Arg<TableIdentifier>().TableName == "orders" ? Meta() : null));
-        tables.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([Meta()]));
+        tables.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>([Meta()]));
 
         var service = global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             Options.Create(new GatewayOptions { WebSql = new WebSqlOptions { Enabled = true, DefaultMaxRows = 100, MaxAllowedRows = 500 } }), executionGuard: GovernedTestSupport.Guard,

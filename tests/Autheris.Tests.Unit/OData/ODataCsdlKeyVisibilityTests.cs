@@ -30,7 +30,7 @@ public sealed class ODataCsdlKeyVisibilityTests
     {
         var repo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
             Substitute.For<ITableMetadataRepository>());
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([table]));
+        repo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>([table]));
         var exec = Substitute.For<IGatewayExecutionService>();
         exec.CheckTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableMetadata>(), false, Arg.Any<CancellationToken>())
             .Returns(ci => Task.FromResult(TableAccessDecision.Allowed(

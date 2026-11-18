@@ -283,7 +283,7 @@ public sealed class GovernedTreeQueryServiceTests
 
         // Schema: the relation is exposed exactly when the predicate accepts the pair.
         var metadata = Substitute.For<ITableMetadataRepository>();
-        metadata.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([authors, articles]);
+        metadata.StubAllTables([authors, articles]);
         var relations = Substitute.For<ITableRelationRepository>();
         relations.GetRelationsForTableAsync(Authors, Arg.Any<CancellationToken>()).Returns([new TableRelation
         {

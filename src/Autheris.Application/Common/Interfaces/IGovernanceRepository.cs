@@ -9,6 +9,23 @@ public interface ITableMetadataRepository : Autheris.Application.Catalog.ICatalo
     Task<IReadOnlyList<TableMetadata>> GetAllTablesAsync(CancellationToken ct = default);
 
     /// <summary>
+    /// Resolves several tables for one request (one entry per requested identifier in request order, null = unknown or inactive).
+    /// Same per-table semantics as <see cref="GetTableMetadataAsync"/> (an unavailable table still throws); implementations
+    /// validate all cached entries with one batched epoch read. Default: sequential single lookups.
+    /// </summary>
+    async Task<IReadOnlyList<TableMetadata?>> GetTableMetadataBatchAsync(IReadOnlyList<TableIdentifier> tables, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(tables);
+        var result = new TableMetadata?[tables.Count];
+        for (var i = 0; i < tables.Count; i++)
+        {
+            result[i] = await GetTableMetadataAsync(tables[i], ct).ConfigureAwait(false);
+        }
+
+        return result;
+    }
+
+    /// <summary>
     /// Returns identifiers of tables whose persisted <c>POLICY_EPOCHS.change_version</c> is strictly greater than <paramref name="sinceVersion"/>.
     /// </summary>
     Task<IReadOnlyList<TableIdentifier>> GetTablesChangedSinceAsync(long sinceVersion, CancellationToken ct = default)

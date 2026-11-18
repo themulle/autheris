@@ -68,7 +68,7 @@ public sealed class McpTokenEfficientRetrievalTests
         for (int i = 0; i < 50; i++) tables.Add(CreateTable(new("hr", "public", $"employee_{i}"), "HR table"));
 
         var options = new GatewayOptions { Catalog = new DataCatalogOptions { SharedTables = tables.Select(t => $"{t.Identifier.Domain}.{t.Identifier.Schema}.{t.Identifier.TableName}").ToList() } };
-        _metadata.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(tables));
+        _metadata.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(tables));
 
         var catalog = new McpDatasetCatalog(_metadata, _consents, _gateway, options: Options.Create(options),
             visibilityService: Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(_metadata.ServeSingleReadsFromCatalog(), _consents, options));
@@ -100,7 +100,7 @@ public sealed class McpTokenEfficientRetrievalTests
         };
 
         var options = new GatewayOptions { Catalog = new DataCatalogOptions { SharedTables = ["sales.public.orders", "sales.public.customers"] } };
-        _metadata.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(tables));
+        _metadata.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(tables));
 
         var catalog = new McpDatasetCatalog(_metadata, _consents, _gateway, options: Options.Create(options),
             visibilityService: Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(_metadata.ServeSingleReadsFromCatalog(), _consents, options));
@@ -124,7 +124,7 @@ public sealed class McpTokenEfficientRetrievalTests
     {
         var table = CreateTable(OrdersTable, "Orders table", ("id", "int", true), ("customer_id", "int", false), ("amount", "decimal", false));
         var options = new GatewayOptions { Catalog = new DataCatalogOptions { SharedTables = ["sales.public.orders"] } };
-        _metadata.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([table]));
+        _metadata.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>([table]));
         _metadata.GetTableMetadataAsync(OrdersTable, Arg.Any<CancellationToken>()).Returns(Task.FromResult<TableMetadata?>(table));
 
         var catalog = new McpDatasetCatalog(_metadata, _consents, _gateway, options: Options.Create(options),

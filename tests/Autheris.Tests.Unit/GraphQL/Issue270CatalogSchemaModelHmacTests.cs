@@ -49,7 +49,7 @@ public sealed class Issue270CatalogSchemaModelHmacTests
             }
         };
 
-        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([metadata]);
+        _metadataRepo.StubAllTables([metadata]);
         _relationRepo.GetRelationsForTableAsync(_tableId, Arg.Any<CancellationToken>()).Returns([]);
 
         var model = await CatalogSchemaModel.BuildAsync(_metadataRepo, _relationRepo);
@@ -85,7 +85,7 @@ public sealed class Issue270CatalogSchemaModelHmacTests
             ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
         };
 
-        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([metadata]);
+        _metadataRepo.StubAllTables([metadata]);
         _relationRepo.GetRelationsForTableAsync(_tableId, Arg.Any<CancellationToken>()).Returns([]);
 
         var model = await CatalogSchemaModel.BuildAsync(_metadataRepo, _relationRepo);
@@ -121,12 +121,12 @@ public sealed class Issue270CatalogSchemaModelHmacTests
             }
         };
 
-        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([unmaskedMeta]);
+        _metadataRepo.StubAllTables([unmaskedMeta]);
         _relationRepo.GetRelationsForTableAsync(_tableId, Arg.Any<CancellationToken>()).Returns([]);
         var unmaskedModel = await CatalogSchemaModel.BuildAsync(_metadataRepo, _relationRepo);
         var fpUnmasked = unmaskedModel.Fingerprint();
 
-        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([maskedMeta]);
+        _metadataRepo.StubAllTables([maskedMeta]);
         var maskedModel = await CatalogSchemaModel.BuildAsync(_metadataRepo, _relationRepo);
         var fpMasked = maskedModel.Fingerprint();
 

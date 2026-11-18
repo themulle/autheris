@@ -209,7 +209,7 @@ public sealed class Issue417QueryCostConfigurationTests
     {
         var meta = Substitute.For<ITableMetadataRepository>();
         var rel = Substitute.For<ITableRelationRepository>();
-        meta.GetAllTablesAsync(Arg.Any<System.Threading.CancellationToken>()).Returns([Table()]);
+        meta.StubAllTables([Table()]);
         rel.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<System.Threading.CancellationToken>()).Returns([]);
         var services = new ServiceCollection();
         services.AddSingleton(meta);
