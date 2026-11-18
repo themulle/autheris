@@ -45,9 +45,9 @@ public sealed class McpDatasetCatalogKeyVisibilityTests
             [
                 new TableColumn { ColumnName = "id", DataType = "int" },
                 new TableColumn { ColumnName = "amount", DataType = "decimal" },
-                new TableColumn { ColumnName = "customer_email", DataType = "varchar", IsSensitive = true }
+                new TableColumn { ColumnName = "customer_email", DataType = "varchar" }
             ]
-        };
+        }.WithPii("customer_email");
         _metadata.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>([table]));
         // Same grants as the sibling MCP tests: id and amount are visible, customer_email is not.
         _consents.GetAllActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<IEnumerable<string>?>(), Arg.Any<DateTimeOffset?>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())

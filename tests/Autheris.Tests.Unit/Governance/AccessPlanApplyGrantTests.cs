@@ -50,13 +50,13 @@ public sealed class AccessPlanApplyGrantTests
     {
         var id = Guid.NewGuid();
         var meta = new TableMetadata
-        {
+        { ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor(sensitive ? new[] { "amount" } : Array.Empty<string>()),
             Identifier = new TableIdentifier("sales", "public", "orders"),
             Table = new Table { Id = id, SchemaName = "public", TableName = "orders", Sensitivity = "INTERNAL", IsActive = true },
             Columns =
             [
-                new TableColumn { TableId = id, ColumnName = "id", DataType = "int", IsSensitive = false },
-                new TableColumn { TableId = id, ColumnName = "amount", DataType = "numeric", IsSensitive = sensitive }
+                new TableColumn { TableId = id, ColumnName = "id", DataType = "int" },
+                new TableColumn { TableId = id, ColumnName = "amount", DataType = "numeric" }
             ],
             PrimaryKeyColumns = ["id"]
         };

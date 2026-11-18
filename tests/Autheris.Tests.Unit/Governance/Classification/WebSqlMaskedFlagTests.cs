@@ -51,8 +51,8 @@ public sealed class WebSqlMaskedFlagTests
             Table = new Table { Id = Guid.NewGuid(), SourceName = "crm", SchemaName = "public", TableName = "patients", IsActive = true },
             Columns =
             [
-                new TableColumn { Id = ssnId, ColumnName = "ssn", DataType = "varchar", IsSensitive = false },
-                new TableColumn { Id = Guid.NewGuid(), ColumnName = "city", DataType = "varchar", IsSensitive = false }
+                new TableColumn { Id = ssnId, ColumnName = "ssn", DataType = "varchar" },
+                new TableColumn { Id = Guid.NewGuid(), ColumnName = "city", DataType = "varchar" }
             ],
             ColumnClassifications = new Dictionary<string, IReadOnlyList<ColumnClassification>>(StringComparer.OrdinalIgnoreCase)
             {

@@ -125,7 +125,8 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
         {
             Table = new Table { Id = Guid.NewGuid(), DisplayName = "orders", TableName = "orders", SchemaName = SchemaName, SourceName = Source, SourceType = "Databricks", DataSourceType = DataSourceType.Sql, IsActive = true },
             Identifier = OrdersId,
-            Columns = [Col("id", "int"), Col("tenantid", "string"), Col("region", "string"), Col("status", "string"), Col("amount", "decimal"), Col("email", "string", sensitive: true)],
+            Columns = [Col("id", "int"), Col("tenantid", "string"), Col("region", "string"), Col("status", "string"), Col("amount", "decimal"), Col("email", "string")],
+            ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("email"),
             ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase) { ["email"] = new MaskingRule { RuleType = "REDACT" } }
         };
         await repo.UpsertTableMetadataAsync(ordersMeta);
@@ -164,7 +165,8 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
         {
             Table = new Table { Id = Guid.NewGuid(), DisplayName = "orders", TableName = "orders", SchemaName = SchemaName, SourceName = SourceNoTrino, SourceType = "Databricks", DataSourceType = DataSourceType.Sql, IsActive = true },
             Identifier = OrdersNoTrinoId,
-            Columns = [Col("id", "int"), Col("tenantid", "string"), Col("region", "string"), Col("status", "string"), Col("amount", "decimal"), Col("email", "string", sensitive: true)]
+            Columns = [Col("id", "int"), Col("tenantid", "string"), Col("region", "string"), Col("status", "string"), Col("amount", "decimal"), Col("email", "string")],
+            ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("email")
         };
         await repo.UpsertTableMetadataAsync(ordersNoTrinoMeta);
 
@@ -176,8 +178,8 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
         });
     }
 
-    private static TableColumn Col(string name, string type, bool sensitive = false) =>
-        new() { ColumnName = name, DataType = type, IsSensitive = sensitive };
+    private static TableColumn Col(string name, string type) =>
+        new() { ColumnName = name, DataType = type };
 
     private static ConsentColumnRule CRule(string col, ColumnAccessLevel level = ColumnAccessLevel.Clear) =>
         new() { ColumnName = col, AccessLevel = level };

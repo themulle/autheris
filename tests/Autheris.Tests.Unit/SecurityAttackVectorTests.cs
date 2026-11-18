@@ -209,9 +209,9 @@ public sealed class SecurityAttackVectorTests
             [
                 new TableColumn { ColumnName = "id", DataType = "int" },
                 new TableColumn { ColumnName = "name", DataType = "varchar" },
-                new TableColumn { ColumnName = "salary", DataType = "decimal", IsSensitive = true }
+                new TableColumn { ColumnName = "salary", DataType = "decimal" }
             ]
-        };
+        }.WithPii("salary");
 
         // Access decision specifies: id=Clear, name=Clear, salary=Mask
         var columnAccess = new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)

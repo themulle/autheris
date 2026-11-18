@@ -372,8 +372,8 @@ public sealed partial class GovernanceRepositoryBatchUpsertTests
             Columns = includeColumns
                 ?
                 [
-                    new TableColumn { Id = Guid.NewGuid(), TableId = tableId, ColumnName = "id", DataType = "integer", IsSensitive = false },
-                    new TableColumn { Id = Guid.NewGuid(), TableId = tableId, ColumnName = "name", DataType = "text", IsSensitive = false }
+                    new TableColumn { Id = Guid.NewGuid(), TableId = tableId, ColumnName = "id", DataType = "integer" },
+                    new TableColumn { Id = Guid.NewGuid(), TableId = tableId, ColumnName = "name", DataType = "text" }
                 ]
                 : [],
             ColumnMaskingRules = masks ?? new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase),

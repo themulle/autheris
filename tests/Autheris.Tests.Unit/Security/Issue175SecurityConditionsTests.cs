@@ -130,8 +130,7 @@ public class Issue175SecurityConditionsTests
             Columns = columns.Select(c => new TableColumn
             {
                 ColumnName = c.Name,
-                DataType = c.Type,
-                IsSensitive = false
+                DataType = c.Type
             }).ToList(),
             ColumnMaskingRules = new Dictionary<string, MaskingRule>(),
             PrimaryKeyColumns = ["id"]

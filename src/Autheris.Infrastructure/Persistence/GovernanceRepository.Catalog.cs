@@ -118,12 +118,15 @@ public partial class GovernanceRepository
             var rowFilterEvaluation = await RowFilterEvaluationStore.ReadObjectAsync(
                 conn, null, KeyDialect, tableId.Value, ct).ConfigureAwait(false);
 
+            var classifications = await CatalogRowHydrator.ReadTableClassificationsAsync(conn, tableId.Value, ct).ConfigureAwait(false);
+
             var result = new TableMetadata
             {
                 Identifier = table,
                 Table = tableEntity,
                 Columns = columns,
                 ColumnMaskingRules = maskingRules,
+                ColumnClassifications = classifications,
                 PrimaryKeyColumns = pkColumns,
                 PrimaryKeyDirections = pkDirections,
                 Indexes = indexes,
@@ -250,6 +253,8 @@ public partial class GovernanceRepository
         var rowFilterStrategies = prefetchedRowFilterStrategies
             ?? await RowFilterEvaluationStore.ReadBatchObjectAsync(conn, null, KeyDialect, ct).ConfigureAwait(false);
 
+        var classificationsByTable = await CatalogRowHydrator.ReadAllClassificationsAsync(conn, ct).ConfigureAwait(false);
+
         if (epochs != null && AfterMetadataSnapshotForTesting is { } hook)
         {
             await hook(ct).ConfigureAwait(false);
@@ -303,6 +308,7 @@ public partial class GovernanceRepository
                 Table = tableEntity,
                 Columns = columns,
                 ColumnMaskingRules = maskingRules,
+                ColumnClassifications = CatalogRowHydrator.ClassificationsOf(classificationsByTable, tid),
                 PrimaryKeyColumns = pkColumns,
                 PrimaryKeyDirections = pkDirections,
                 Indexes = indexes,

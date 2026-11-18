@@ -282,9 +282,9 @@ public class PureYamlProcedureGovernanceTests
                 Columns =
                 [
                     new TableColumn { ColumnName = "id" },
-                    new TableColumn { ColumnName = "note", IsSensitive = true }
+                    new TableColumn { ColumnName = "note" }
                 ]
-            });
+            }.WithPii("note"));
 
         var consents = Substitute.For<IConsentRepository>();
         consents.GetActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
@@ -382,9 +382,9 @@ public class PureYamlProcedureGovernanceTests
                 Columns =
                 [
                     new TableColumn { ColumnName = "id" },
-                    new TableColumn { ColumnName = "note", IsSensitive = true }
+                    new TableColumn { ColumnName = "note" }
                 ]
-            });
+            }.WithPii("note"));
 
         var consents = Substitute.For<IConsentRepository>();
         consents.GetActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())

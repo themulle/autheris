@@ -173,13 +173,13 @@ public abstract class RestDatasetHttpTableTestBase
                 new TableColumn { TableId = table.Id, ColumnName = "id", DataType = "int" },
                 new TableColumn { TableId = table.Id, ColumnName = "name", DataType = "varchar" },
                 new TableColumn { TableId = table.Id, ColumnName = "region", DataType = "varchar" },
-                new TableColumn { TableId = table.Id, ColumnName = "email", DataType = "varchar", IsSensitive = true }
+                new TableColumn { TableId = table.Id, ColumnName = "email", DataType = "varchar" }
             ],
             ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
             {
                 ["email"] = new MaskingRule { RuleType = "REDACT", Replacement = "[REDACTED-EMAIL]" }
             }
-        };
+        }.WithPii("email");
         return await repo.UpsertTableMetadataAsync(meta);
     }
 

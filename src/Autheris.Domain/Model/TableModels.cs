@@ -215,7 +215,6 @@ public sealed class TableColumn
     public string DataType { get; init; } = "varchar";
     public string? Collation { get; init; }
     public string? LengthSemantics { get; init; }
-    public bool IsSensitive { get; init; }
     public bool WriteProtected { get; init; }
     public bool DiscoveryHidden { get; init; }
     public string? Description { get; init; }

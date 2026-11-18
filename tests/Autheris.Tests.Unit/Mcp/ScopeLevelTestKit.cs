@@ -40,7 +40,7 @@ internal static class ScopeLevelTestKit
     public static TableMetadata CreateTable(
         bool gradeSensitive = false,
         IReadOnlyDictionary<string, MaskingRule>? maskingRules = null) => new()
-    {
+    { ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor(gradeSensitive ? new[] { "grade" } : Array.Empty<string>()),
         Identifier = Orders,
         Table = new Table
         {
@@ -57,7 +57,6 @@ internal static class ScopeLevelTestKit
             {
                 ColumnName = "grade",
                 DataType = "varchar",
-                IsSensitive = gradeSensitive,
                 Meta = new Dictionary<string, string> { ["accepted_values"] = JsonSerializer.Serialize(SentinelValues), ["empty_share"] = "0" }
             }
         ],
