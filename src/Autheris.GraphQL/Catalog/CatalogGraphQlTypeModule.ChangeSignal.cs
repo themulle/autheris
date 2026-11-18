@@ -17,7 +17,12 @@ public sealed partial class CatalogGraphQlTypeModule : ICatalogSchemaFreshness
     /// <summary>Issue #802: upper bound of the quiet period (the default periodic refresh interval).</summary>
     internal static readonly TimeSpan MaxQuietPeriod = TimeSpan.FromSeconds(60);
 
+    /// <summary>Issue #802: minimum spacing of the status endpoint's catalog version reads (caps store load per instance).</summary>
+    internal static readonly TimeSpan StatusReadSpacing = TimeSpan.FromMilliseconds(250);
+
     private static readonly TimeSpan StatusVersionReadTimeout = TimeSpan.FromSeconds(2);
+
+    private static readonly TimeSpan StatusStoreReadTimeout = TimeSpan.FromSeconds(5);
 
     private readonly Lock _signalLock = new();
     private readonly IDisposable? _changeSubscription;
@@ -30,8 +35,12 @@ public sealed partial class CatalogGraphQlTypeModule : ICatalogSchemaFreshness
     private long _signalSeq;
     private long _checkedSignalSeq;
     private long _lastBuildDurationTicks;
+    private long _nextTickDueUtcTicks = long.MaxValue;
     private int _buildInFlight;
-    private Task<CatalogVersion>? _statusVersionRead;
+
+    private readonly Lock _statusReadLock = new();
+    private TaskCompletionSource<CatalogVersion>? _queuedStatusRead;
+    private long _lastStatusReadStart = NoTimestamp;
 
     /// <summary>
     /// Quiet period that ends a burst: the duration of the last executor build, clamped to [2 s, 60 s]. A large catalog
@@ -43,6 +52,18 @@ public sealed partial class CatalogGraphQlTypeModule : ICatalogSchemaFreshness
         {
             var build = TimeSpan.FromTicks(Volatile.Read(ref _lastBuildDurationTicks));
             return build < MinQuietPeriod ? MinQuietPeriod : build > MaxQuietPeriod ? MaxQuietPeriod : build;
+        }
+    }
+
+    /// <summary>True while an event-driven check is scheduled (tests).</summary>
+    internal bool HasScheduledSignalCheck
+    {
+        get
+        {
+            lock (_signalLock)
+            {
+                return _signalDue.HasValue;
+            }
         }
     }
 
@@ -92,7 +113,10 @@ public sealed partial class CatalogGraphQlTypeModule : ICatalogSchemaFreshness
         }
     }
 
-    /// <summary>Issue #802: a check deferred the rebuild (burst); one follow-up check ends it after the quiet period.</summary>
+    /// <summary>
+    /// Issue #802: a check deferred the rebuild (burst); one follow-up check ends it after the quiet period, unless the
+    /// periodic tick comes first (it ends the burst as well, so a second full check would only add load).
+    /// </summary>
     private void ScheduleFollowUpCheck()
     {
         if (_changeSubscription is null)
@@ -108,9 +132,24 @@ public sealed partial class CatalogGraphQlTypeModule : ICatalogSchemaFreshness
             }
 
             var now = _timeProvider.GetUtcNow();
-            ArmSignalTimerLocked(TrailingDueLocked(now, QuietPeriod), leading: false, now);
+            if (now - _burstStart >= MaxRebuildDeferral)
+            {
+                // No signalled burst is running (the deferral came from a periodic tick): the cap counts from now.
+                _burstStart = now;
+            }
+
+            var due = TrailingDueLocked(now, QuietPeriod);
+            if (Volatile.Read(ref _nextTickDueUtcTicks) <= due.UtcTicks)
+            {
+                return;
+            }
+
+            ArmSignalTimerLocked(due, leading: false, now);
         }
     }
+
+    private void RecordNextTick() =>
+        Volatile.Write(ref _nextTickDueUtcTicks, (_timeProvider.GetUtcNow() + _refreshInterval).UtcTicks);
 
     private DateTimeOffset TrailingDueLocked(DateTimeOffset now, TimeSpan quiet)
     {
@@ -210,10 +249,12 @@ public sealed partial class CatalogGraphQlTypeModule : ICatalogSchemaFreshness
             return false;
         }
 
+        // The change event may not have arrived yet (queued in-process delivery, Redis round trip, a dropped event, another
+        // instance's write), so the store decides: a read that starts after this request arrived, uncached.
         CatalogVersion current;
         try
         {
-            current = await ReadStatusVersionAsync().WaitAsync(StatusVersionReadTimeout, _timeProvider, ct).ConfigureAwait(false);
+            current = await ReadCatalogVersionForStatusAsync().WaitAsync(StatusVersionReadTimeout, _timeProvider, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -229,34 +270,62 @@ public sealed partial class CatalogGraphQlTypeModule : ICatalogSchemaFreshness
         return current.StructureVersion <= builtStructure && current.ContentVersion <= builtContent;
     }
 
-    /// <summary>Single-flight read through the (cached) version provider: concurrent status requests share one read.</summary>
-    private Task<CatalogVersion> ReadStatusVersionAsync()
+    /// <summary>
+    /// Returns the first store read that starts after this call: callers join a read that is queued but not started, never
+    /// one in flight (it may predate their write). Reads start at least <see cref="StatusReadSpacing"/> apart, which bounds
+    /// the store load whatever the request rate.
+    /// </summary>
+    private Task<CatalogVersion> ReadCatalogVersionForStatusAsync()
     {
-        var inFlight = Volatile.Read(ref _statusVersionRead);
-        if (inFlight is { IsCompleted: false })
+        TaskCompletionSource<CatalogVersion> read;
+        TimeSpan wait;
+        lock (_statusReadLock)
         {
-            return inFlight;
+            if (_queuedStatusRead is { } queued)
+            {
+                return queued.Task;
+            }
+
+            read = new TaskCompletionSource<CatalogVersion>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _queuedStatusRead = read;
+            wait = _lastStatusReadStart == NoTimestamp
+                ? TimeSpan.Zero
+                : StatusReadSpacing - _timeProvider.GetElapsedTime(_lastStatusReadStart, _timeProvider.GetTimestamp());
         }
 
-        var read = new TaskCompletionSource<CatalogVersion>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var winner = Interlocked.CompareExchange(ref _statusVersionRead, read.Task, inFlight);
-        if (!ReferenceEquals(winner, inFlight))
-        {
-            return winner!;
-        }
-
-        _ = CompleteStatusVersionReadAsync(read);
+        _ = RunStatusReadAsync(read, wait);
         return read.Task;
     }
 
-    private async Task CompleteStatusVersionReadAsync(TaskCompletionSource<CatalogVersion> read)
+    private async Task RunStatusReadAsync(TaskCompletionSource<CatalogVersion> read, TimeSpan wait)
     {
         try
         {
-            read.TrySetResult(await _versionProvider!.GetCatalogVersionAsync(CancellationToken.None).ConfigureAwait(false));
+            if (wait > TimeSpan.Zero)
+            {
+                await Task.Delay(wait, _timeProvider).ConfigureAwait(false);
+            }
+
+            lock (_statusReadLock)
+            {
+                // From here on the read is in flight: later callers queue the next one.
+                _queuedStatusRead = null;
+                _lastStatusReadStart = _timeProvider.GetTimestamp();
+            }
+
+            using var timeout = new CancellationTokenSource(StatusStoreReadTimeout, _timeProvider);
+            read.TrySetResult(await _metadataRepo.GetCatalogVersionAsync(timeout.Token).ConfigureAwait(false));
         }
         catch (Exception ex)
         {
+            lock (_statusReadLock)
+            {
+                if (ReferenceEquals(_queuedStatusRead, read))
+                {
+                    _queuedStatusRead = null;
+                }
+            }
+
             read.TrySetException(ex);
         }
     }

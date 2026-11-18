@@ -43,6 +43,7 @@
 /api/v1/catalog/datasets|GET|no side effect: lists catalog datasets
 /api/v1/catalog/datasources|GET|no side effect: lists catalog datasources
 /api/v1/catalog/domains|GET|no side effect: lists catalog domains
+/api/v1/catalog/graphql-schema-status|GET|no side effect: reads the GraphQL schema freshness state
 /api/v1/catalog/objects|GET|no side effect: lists external catalog objects with visibility filtering
 /api/v1/catalog/objects/{id}|GET|no side effect: reads external catalog object metadata by id or identifier
 /api/v1/catalog/search|GET|no side effect: searches catalog metadata
@@ -111,7 +112,6 @@
 /api/v1/usage/users|GET|no side effect: reports tenant usage grouped by user
 /docs|GET|no side effect: serves API documentation page
 /graphql/{**slug}|ANY|no side effect: GraphQL HTTP GET only executes queries (mutations rejected)
-/health/graphql-schema|GET|no side effect: reads the GraphQL schema freshness state
 /health/live|GET|no side effect: liveness probe
 /health/ready|GET|no side effect: readiness probe
 /metrics|ANY|no side effect: Prometheus metrics scrape endpoint

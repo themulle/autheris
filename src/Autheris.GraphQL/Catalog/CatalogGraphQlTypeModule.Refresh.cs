@@ -76,7 +76,10 @@ public sealed partial class CatalogGraphQlTypeModule
             {
                 try
                 {
-                    currentVer = await _versionProvider.GetCatalogVersionAsync(ct).ConfigureAwait(false);
+                    // Issue #802: a forced check reads the store directly; the provider's cache may predate the write.
+                    currentVer = forceFull
+                        ? await _metadataRepo.GetCatalogVersionAsync(ct).ConfigureAwait(false)
+                        : await _versionProvider.GetCatalogVersionAsync(ct).ConfigureAwait(false);
                     if (!transportChanged &&
                         !forceFull &&
                         builtStruct >= 0 &&
@@ -126,8 +129,9 @@ public sealed partial class CatalogGraphQlTypeModule
             {
                 if (currentVer.HasValue)
                 {
-                    Volatile.Write(ref _builtStructureVersion, currentVer.Value.StructureVersion);
-                    Volatile.Write(ref _builtContentVersion, currentVer.Value.ContentVersion);
+                    // Never lowered (issue #802): a cached provider version may be older than the store read of a forced check.
+                    RaiseToAtLeast(ref _builtStructureVersion, currentVer.Value.StructureVersion);
+                    RaiseToAtLeast(ref _builtContentVersion, currentVer.Value.ContentVersion);
                 }
                 Volatile.Write(ref _pendingBuild, null);
                 Volatile.Write(ref _deferralStartTimestamp, NoTimestamp);
@@ -254,6 +258,11 @@ public sealed partial class CatalogGraphQlTypeModule
         lock (_timerLock)
         {
             // Non-reentrant (issue #786): a tick that finds a check still running is skipped inside the check.
+            if (_refreshTimer is null)
+            {
+                RecordNextTick();
+            }
+
             _refreshTimer ??= _timeProvider.CreateTimer(
                 _ => _ = RunTimerCheckAsync(),
                 null,
@@ -264,6 +273,7 @@ public sealed partial class CatalogGraphQlTypeModule
 
     private async Task RunTimerCheckAsync()
     {
+        RecordNextTick();
         try
         {
             await CheckForCatalogChangesAsync(fromTimer: true, forceFull: false).ConfigureAwait(false);

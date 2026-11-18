@@ -65,7 +65,6 @@ public class IntegrationGapAEndpointMetadataTests : IClassFixture<IntegrationGap
     [Theory]
     [InlineData("GET", "/health/live")]
     [InlineData("GET", "/health/ready")]
-    [InlineData("GET", "/health/graphql-schema")]
     [InlineData("GET", "/odata/v4/$swagger")]
     [InlineData("GET", "/docs")]
     [InlineData("POST", "/api/webhooks/openmetadata")]
@@ -154,7 +153,7 @@ public class IntegrationGapAEndpointMetadataTests : IClassFixture<IntegrationGap
     {
         var client = _factory.CreateClient();
 
-        foreach (var path in new[] { "/health/live", "/health/ready", "/health/graphql-schema", "/", "/odata/v4/$swagger", "/docs" })
+        foreach (var path in new[] { "/health/live", "/health/ready", "/", "/odata/v4/$swagger", "/docs" })
         {
             var response = await client.GetAsync(path);
             response.StatusCode.ShouldNotBe(HttpStatusCode.Unauthorized, $"GET {path}");

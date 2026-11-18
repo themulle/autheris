@@ -56,6 +56,14 @@ public static partial class CatalogApiEndpoints
         .RequireAuthorization()
         .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
+        // Issue #802: whether the served GraphQL schema is behind the catalog. Authenticated: the answer reveals write timing.
+        group.MapGet("/graphql-schema-status", (
+            [Microsoft.AspNetCore.Mvc.FromServices] Autheris.GraphQL.Catalog.ICatalogSchemaFreshness? freshness,
+            HttpContext httpContext,
+            CancellationToken ct) => GetGraphQlSchemaStatusAsync(freshness, httpContext, ct))
+        .RequireAuthorization()
+        .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
+
         // Data sources disclose endpoint base URLs and authentication state: administrators only. A tenant-scoped GovernanceAdmin
         // is further confined to the tables of its tenant by the service. A GovernanceAdmin without a resolvable tenant is
         // answered with a stable 403 that names the option instead of a misleading empty list.

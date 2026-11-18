@@ -291,7 +291,13 @@ public sealed partial class CatalogGraphQlTypeModule : ITypeModule, IDisposable,
                 }
             }
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (OperationCanceledException)
+        {
+            // Issue #802: a cancelled build never completes; it must not leave the schema status "building" forever.
+            Interlocked.Exchange(ref _buildInFlight, 0);
+            throw;
+        }
+        catch (Exception ex)
         {
             _logger?.LogError(ex, "GraphQL catalog schema could not be built; serving the schema without catalog tables until the catalog is reachable.");
             schemaModel = CatalogSchemaModel.Empty;
