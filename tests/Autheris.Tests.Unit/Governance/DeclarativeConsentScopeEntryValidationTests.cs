@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Tests.Unit.TestSupport;
 using Autheris.Application.Governance.Services;
 using Autheris.Application.Governance.Validation;
 using Autheris.Domain.Common;

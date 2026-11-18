@@ -1,3 +1,4 @@
+using Autheris.Tests.Unit.TestSupport;
 using System;
 using Microsoft.Extensions.DependencyInjection;
 using Autheris.Tests.Unit.TestDoubles;

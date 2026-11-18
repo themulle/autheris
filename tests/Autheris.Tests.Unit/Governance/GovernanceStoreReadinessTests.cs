@@ -1,3 +1,4 @@
+using Autheris.Tests.Unit.TestSupport;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
