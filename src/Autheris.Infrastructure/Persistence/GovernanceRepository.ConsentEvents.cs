@@ -658,7 +658,7 @@ WHERE tenant_id = @tenant AND consent_id = @consentId AND record_type = 'EXPIRED
         cmd.CommandText = isPg
             ? @"SELECT r.id, r.table_id, r.requester_sid, r.requested_grantee_type, r.requested_grantee_ref,
        r.business_justification, r.status, r.requested_at, r.requested_valid_to,
-       t.source_name, t.schema_name, t.table_name, r.itsm_ticket_id, r.tenant_id,
+       t.source_name, t.schema_name, t.table_name, r.tenant_id,
        r.requester_identifiers_json, r.context_json, r.requested_write_rules_json,
        r.version, r.workflow_mode, r.external_system_id, r.external_reference, r.requested_valid_from, r.updated_at, r.request_kind, r.profile_id
 FROM CONSENT_REQUESTS r
@@ -668,7 +668,7 @@ ORDER BY r.requested_at ASC
 LIMIT 500"
             : @"SELECT TOP (500) r.id, r.table_id, r.requester_sid, r.requested_grantee_type, r.requested_grantee_ref,
        r.business_justification, r.status, r.requested_at, r.requested_valid_to,
-       t.source_name, t.schema_name, t.table_name, r.itsm_ticket_id, r.tenant_id,
+       t.source_name, t.schema_name, t.table_name, r.tenant_id,
        r.requester_identifiers_json, r.context_json, r.requested_write_rules_json,
        r.version, r.workflow_mode, r.external_system_id, r.external_reference, r.requested_valid_from, r.updated_at, r.request_kind, r.profile_id
 FROM dbo.CONSENT_REQUESTS r
@@ -803,12 +803,12 @@ WHERE id = @id AND tenant_id = @tenant
 
     private static ConsentRequest ReadConsentRequestRow(DbDataReader reader)
     {
-        var ids = reader.IsDBNull(14)
+        var ids = reader.IsDBNull(13)
             ? new List<string>()
-            : JsonSerializer.Deserialize<List<string>>(reader.GetString(14)) ?? new List<string>();
-        var writeRules = reader.IsDBNull(16)
+            : JsonSerializer.Deserialize<List<string>>(reader.GetString(13)) ?? new List<string>();
+        var writeRules = reader.IsDBNull(15)
             ? Array.Empty<WriteRule>()
-            : (IReadOnlyList<WriteRule>)(JsonSerializer.Deserialize<List<WriteRule>>(reader.GetString(16)) ?? new List<WriteRule>());
+            : (IReadOnlyList<WriteRule>)(JsonSerializer.Deserialize<List<WriteRule>>(reader.GetString(15)) ?? new List<WriteRule>());
         return ConsentWorkflowSql.BuildConsentRequest(
             reader,
             Guid.Parse(reader.GetString(0)),
@@ -821,12 +821,11 @@ WHERE id = @id AND tenant_id = @tenant
             ConsentWorkflowSql.ReadOptionalTimestamp(reader, 7) ?? DateTimeOffset.UnixEpoch,
             ConsentWorkflowSql.ReadOptionalTimestamp(reader, 8) ?? DateTimeOffset.UnixEpoch,
             reader.IsDBNull(9) ? default : new TableIdentifier(reader.GetString(9), reader.GetString(10), reader.GetString(11)),
-            reader.IsDBNull(12) ? null : reader.GetString(12),
-            StoredTenant.Parse(reader.GetString(13)).Value,
+            StoredTenant.Parse(reader.GetString(12)).Value,
             ids,
-            reader.IsDBNull(15) ? null : reader.GetString(15),
+            reader.IsDBNull(14) ? null : reader.GetString(14),
             writeRules,
             true,
-            17);
+            16);
     }
 }

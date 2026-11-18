@@ -201,7 +201,7 @@ public sealed class SemanticManifestImportTests
 
         await rig.Service.ParseAndIngestAsync(Manifest("status = 'x'"), Autheris.Tests.Common.TestTenants.Default, "alice");
 
-        await catalog.Received(1).RegisterManifestAsync(Arg.Any<DbtSemanticManifest>(), Autheris.Tests.Common.TestTenants.Default, "alice", Arg.Any<CancellationToken>());
+        await catalog.Received(1).ImportAsync(Arg.Any<DbtSemanticManifest>(), Autheris.Tests.Common.TestTenants.Default, "alice", Arg.Any<CancellationToken>());
     }
 
     [Theory]

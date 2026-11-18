@@ -30,6 +30,7 @@ using Autheris.Infrastructure.Persistence.Migrations;
 using Autheris.Infrastructure.Security;
 using Autheris.Infrastructure.Streaming;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 public static partial class GatewayGovernanceServiceExtensions
 {
@@ -38,7 +39,7 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<IAccessProfileCache, AccessProfileCache>();
         services.AddSingleton<IDbtProposalRepository, InMemoryDbtProposalRepository>();
         services.AddSingleton<IDbtTestTargetMap, DbtTestTargetMap>();
-        services.AddSingleton<IDbtHealthCircuitBreaker, DbtHealthCircuitBreaker>();
+        services.TryAddSingleton<IDbtHealthCircuitBreaker, NoDbtHealthData>();
 
         services.AddSingleton<VirtualFilterAdministrationService>();
         services.AddSingleton<IVirtualFilterSnapshotProvider, VirtualFilterSnapshotProvider>();

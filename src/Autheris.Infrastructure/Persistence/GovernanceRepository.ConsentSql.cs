@@ -47,9 +47,9 @@ internal static class ConsentSqlCore
     public const string InsertConsentRequestSql = @"INSERT INTO CONSENT_REQUESTS (
                                     id, table_id, requester_sid, requested_grantee_type, requested_grantee_ref,
                                     business_justification, status, requested_at, requested_valid_to,
-                                    itsm_ticket_id, tenant_id, requester_identifiers_json, context_json, requested_write_rules_json,
+                                    tenant_id, requester_identifiers_json, context_json, requested_write_rules_json,
                                     version, workflow_mode, external_system_id, external_reference, requested_valid_from, updated_at, request_kind, profile_id
-                                ) VALUES (@id, @tid, @sid, @gType, @gRef, @just, @status, @reqAt, @reqTo, @ticket, @tenantId, @reqIds, @ctx, @reqWriteRules, @version, @workflowMode, @externalSystemId, @externalReference, @reqValidFrom, @updatedAt, @requestKind, @profileId)";
+                                ) VALUES (@id, @tid, @sid, @gType, @gRef, @just, @status, @reqAt, @reqTo, @tenantId, @reqIds, @ctx, @reqWriteRules, @version, @workflowMode, @externalSystemId, @externalReference, @reqValidFrom, @updatedAt, @requestKind, @profileId)";
 
     public const string SelectApprovalStepsSql = "SELECT step_number, approver_sid, decision, rejection_reason, decided_at FROM APPROVAL_STEPS WHERE consent_request_id = @id ORDER BY step_number ASC";
 
@@ -577,7 +577,6 @@ internal static class ConsentSqlCore
             cmd.AddBound("@status", request.Status);
             cmd.AddBound("@reqAt", request.RequestedAt.ToString("O"));
             cmd.AddBound("@reqTo", request.RequestedValidTo.ToUniversalTime().ToString("O"));
-            cmd.AddBound("@ticket", (object?)request.ItsmTicketId ?? DBNull.Value);
             cmd.AddBound("@tenantId", request.TenantId.Value);
             cmd.AddBound("@reqIds", (object?)reqIdentifiersJson ?? DBNull.Value);
             cmd.AddBound("@ctx", (object?)request.ContextJson ?? DBNull.Value);
@@ -626,10 +625,10 @@ internal static class ConsentSqlCore
 
     public static ConsentRequest ReadFullConsentRequestRow(DbDataReader reader)
     {
-        var reqIdsJson = reader.IsDBNull(14) ? null : reader.GetString(14);
+        var reqIdsJson = reader.IsDBNull(13) ? null : reader.GetString(13);
         var reqIds = !string.IsNullOrWhiteSpace(reqIdsJson) ? JsonSerializer.Deserialize<List<string>>(reqIdsJson) : null;
         var (writeRules, includeRead) = ConsentWriteRulesSql.DeserializeRequestedWriteRules(
-            reader.FieldCount > 16 && !reader.IsDBNull(16) ? reader.GetString(16) : null);
+            reader.FieldCount > 15 && !reader.IsDBNull(15) ? reader.GetString(15) : null);
 
         return ConsentWorkflowSql.BuildConsentRequest(
             reader,
@@ -643,13 +642,12 @@ internal static class ConsentSqlCore
             DateTimeOffset.Parse(reader.GetString(7)),
             DateTimeOffset.Parse(reader.GetString(8)),
             reader.IsDBNull(9) ? default : new TableIdentifier(reader.GetString(9), reader.GetString(10), reader.GetString(11)),
-            reader.IsDBNull(12) ? null : reader.GetString(12),
-            StoredTenant.Parse(reader.IsDBNull(13) ? null : reader.GetString(13)),
+            StoredTenant.Parse(reader.IsDBNull(12) ? null : reader.GetString(12)),
             reqIds ?? new List<string>(),
-            reader.FieldCount > 15 && !reader.IsDBNull(15) ? reader.GetString(15) : null,
+            reader.FieldCount > 14 && !reader.IsDBNull(14) ? reader.GetString(14) : null,
             writeRules,
             includeRead,
-            17);
+            16);
     }
 
     public static ConsentRequest ReadSummaryConsentRequestRow(DbDataReader reader)
@@ -668,7 +666,6 @@ internal static class ConsentSqlCore
             DateTimeOffset.Parse(reader.GetString(7)),
             DateTimeOffset.Parse(reader.GetString(8)),
             reader.IsDBNull(9) ? default : new TableIdentifier(reader.GetString(9), reader.GetString(10), reader.GetString(11)),
-            null,
             default,
             new List<string>(),
             reader.FieldCount > 12 && !reader.IsDBNull(12) ? reader.GetString(12) : null,

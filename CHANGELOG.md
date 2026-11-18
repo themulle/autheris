@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Optional `accessStatus` filter on `list_datasets`, `search_catalog`, `find_relevant_tables` and `GET /api/v1/catalog/objects` (`granted`, `requested`, `expired`, `none` there), applied before ranking, limit and paging, so `total`, `nextOffset`, `totalCount` and `nextCursor` count the filtered set. The filter evaluates only the caller's grant candidates: one consent read per request and one access decision per table the caller holds a grant on, kept for the whole request (also across the internal pages of the REST list), not one per catalog table. Empty and unknown values are rejected (#798, #804).
 
 ### Changed
+- Core consumers of the dbt integration depend on core contracts only: the new `ISemanticMetricImport` (in `Autheris.Application.Catalog.Semantic`) is the import seam for semantic manifests, and `IDbtHealthCircuitBreaker` defaults to the core `NoDbtHealthData` (every table healthy, nothing recorded) until the dbt integration registers the recording implementation.
 - `consents/apply` treats more differences as a change and replaces the stored consent (#806):
   - An active consent with write rules, row scopes or classification access (for example the write grant of an approved consent request) is now revoked and replaced by the declarative consent when a manifest policy for the same grantee and table is applied. The manifest never creates these, so such a consent no longer counts as `unchanged`.
   - An earlier `validUntil` is a change for group policies too (before: individual grants only). Group grants stored with a later expiry than the manifest's `validUntil` are therefore replaced once on the first apply after the upgrade. A later `validUntil` still never extends a grant.
@@ -22,6 +23,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Removed
 - Configuration key `Gateway:CatalogSearch:Enabled`. Catalog search validation and the index warm-up are always active; use `Gateway:CatalogSearch:WarmupOnStartup` to control the startup warm-up. The key fails startup with any value, including `false` or empty.
+- Governance schema step `0027_drop_legacy_governance_columns` (PostgreSQL and SQL Server) drops `CONSENT_REQUESTS.itsm_ticket_id` with its unique index `ux_consent_requests_ticket` and `TABLE_CATALOG_SETTINGS.visibility`. The GraphQL consent request types no longer expose `itsmTicketId`. All nodes must run this build before the step applies.
 
 ### Fixed
 - `consents/apply` is idempotent for columns with several rules, for example a base rule plus a scope rule on the same column (#806). Column rules and row filters are compared as multisets independent of order, scopes as sets in their stored form. Re-applying an unchanged manifest reports `unchanged` and writes no revocation, consent, grant record, audit entry or epoch bump. Duplicated rules or scopes can no longer hide a difference.
