@@ -394,7 +394,8 @@ public sealed class Bm25SearchIndex
     /// </summary>
     private static (CorpusStats Full, CorpusStats TableLevel, double[] AvgFieldLength) BuildVisibleStats(
         List<IndexedDocument> visible,
-        string[] queryTerms)
+        string[] queryTerms,
+        Func<TableIdentifier, bool>? isColumnRestricted)
     {
         var terms = queryTerms.Length > MaxQueryTerms ? queryTerms[..MaxQueryTerms] : queryTerms;
         var df = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -406,7 +407,10 @@ public sealed class Bm25SearchIndex
         foreach (var doc in visible)
         {
             seen.Clear();
-            for (int f = 0; f < CatalogSearchFieldWeights.FieldCount; f++)
+
+            // Fields the caller cannot see are not scored, so they must not feed any statistic either.
+            int fieldLimit = isColumnRestricted != null && isColumnRestricted(doc.TableId) ? FirstColumnField : CatalogSearchFieldWeights.FieldCount;
+            for (int f = 0; f < fieldLimit; f++)
             {
                 totals[f] += doc.FieldLengths[f];
                 var tf = doc.FieldTermFrequencies[f];
@@ -503,27 +507,40 @@ public sealed class Bm25SearchIndex
         if (queryTerms.Length == 0 || _activeDocCount == 0) return [];
 
         // Authorization filtering happens before any corpus statistic is read: document count, field lengths, document
-        // frequency and expansion vocabulary come from the visible documents only when anything is hidden.
+        // frequency and expansion vocabulary come from the visible documents and visible fields only when anything is hidden or column-restricted.
         var visible = CollectVisibleDocuments(isAllowed);
         if (visible.Count == 0) return [];
+
+        // Tables with denied columns are scored on their table-level fields only; they are resolved once so the
+        // statistics and the scoring agree on which tables are restricted.
+        HashSet<TableIdentifier>? restrictedTables = null;
+        if (isColumnRestricted != null)
+        {
+            foreach (var doc in visible)
+            {
+                if (isColumnRestricted(doc.TableId)) (restrictedTables ??= []).Add(doc.TableId);
+            }
+
+            isColumnRestricted = restrictedTables is null ? null : restrictedTables.Contains;
+        }
 
         CorpusStats fullStats;
         CorpusStats tableLevelStats;
         var avgFieldLength = new double[CatalogSearchFieldWeights.FieldCount];
-        if (visible.Count == _activeDocCount)
+        if (visible.Count == _activeDocCount && restrictedTables is null)
         {
             for (int f = 0; f < avgFieldLength.Length; f++)
             {
-                avgFieldLength[f] = (double)_totalFieldLengths[f] / _activeDocCount;
+                avgFieldLength[f] = (double)_totalFieldLengths[f] / visible.Count;
             }
 
             int GlobalDf(string t) => _baseTermDocCounts.GetValueOrDefault(t) + _termDocCountDeltas.GetValueOrDefault(t);
-            fullStats = new CorpusStats(_activeDocCount, GlobalDf, _vocabulary);
-            tableLevelStats = new CorpusStats(_activeDocCount, GlobalDf, _tableLevelVocabulary);
+            fullStats = new CorpusStats(visible.Count, GlobalDf, _vocabulary);
+            tableLevelStats = new CorpusStats(visible.Count, GlobalDf, _tableLevelVocabulary);
         }
         else
         {
-            (fullStats, tableLevelStats, avgFieldLength) = BuildVisibleStats(visible, queryTerms);
+            (fullStats, tableLevelStats, avgFieldLength) = BuildVisibleStats(visible, queryTerms, isColumnRestricted);
         }
 
         if (!Array.Exists(avgFieldLength, static a => a > 0.0)) return [];

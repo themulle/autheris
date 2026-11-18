@@ -322,7 +322,8 @@ public sealed class CatalogAtScaleSecurityTests : IAsyncDisposable
         OllamaEmbeddingGenerator.ValidateEndpoint("ftp://ollama.local/api/embeddings").ShouldBeFalse();
 
         // 2. Valid HTTP/HTTPS endpoint allowed
-        OllamaEmbeddingGenerator.ValidateEndpoint("http://localhost:11434").ShouldBeTrue();
+        OllamaEmbeddingGenerator.ValidateEndpoint("http://localhost:11434").ShouldBeFalse();
+        OllamaEmbeddingGenerator.ValidateEndpoint("http://127.0.0.1:11434").ShouldBeFalse();
         OllamaEmbeddingGenerator.ValidateEndpoint("https://ollama.internal.net:11434").ShouldBeTrue();
 
         // 3. Secret scrubbing on prompt

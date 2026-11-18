@@ -28,6 +28,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Configuration key `Gateway:CatalogSearch:Enabled`. Catalog search validation and the index warm-up are always active; use `Gateway:CatalogSearch:WarmupOnStartup` to control the startup warm-up. The key fails startup with any value, including `false` or empty.
 - Governance schema step `0027_drop_legacy_governance_columns` (PostgreSQL and SQL Server) drops `CONSENT_REQUESTS.itsm_ticket_id` with its unique index `ux_consent_requests_ticket` and `TABLE_CATALOG_SETTINGS.visibility`. The GraphQL consent request types no longer expose `itsmTicketId`. All nodes must run this build before the step applies.
 
+### Changed (breaking)
+- A loopback `Gateway:CatalogSearch:OllamaEndpoint` (`localhost`, `127.0.0.0/8`, `::1`) is refused at startup validation, because the outbound egress policy never allowed it. Private Ollama hosts need `Gateway:Egress:TrustedInternalHosts` or `TrustedInternalNetworks` plus `CatalogEmbeddings` in `Gateway:Egress:TrustedIntegrations`.
+
 ### Fixed
 - Catalog keyword search now computes its BM25 corpus statistics (document count, term frequency, partial-match vocabulary) over the tables the caller may see, so tables the caller cannot see no longer move scores. The catalog embedding client now follows the outbound egress policy (integration name `CatalogEmbeddings`, usable in `Gateway:Egress:TrustedIntegrations`); private targets are refused unless allowlisted.
 - `consents/apply` is idempotent for columns with several rules, for example a base rule plus a scope rule on the same column (#806). Column rules and row filters are compared as multisets independent of order, scopes as sets in their stored form. Re-applying an unchanged manifest reports `unchanged` and writes no revocation, consent, grant record, audit entry or epoch bump. Duplicated rules or scopes can no longer hide a difference.

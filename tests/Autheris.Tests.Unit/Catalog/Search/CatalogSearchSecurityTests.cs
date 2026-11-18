@@ -41,6 +41,36 @@ public sealed class CatalogSearchSecurityTests
         ]
     };
 
+    // Same tables, but the text of the denied columns is different: nothing the caller sees changes, so nothing may change in the results.
+    private static readonly TableMetadata PaymentsOtherDeniedText = PaymentsWithDeniedColumn with
+    {
+        Columns =
+        [
+            new TableColumn { ColumnName = "id", DataType = "varchar" },
+            new TableColumn { ColumnName = "invoice_ref", DataType = "varchar" },
+            new TableColumn { ColumnName = "xq_flag", DataType = "varchar", Description = "Opaque flag value" }
+        ]
+    };
+
+    // Visible table whose only "invoice" text sits in a column the caller may not see.
+    private static readonly TableMetadata LedgerWithDeniedColumn = Wp0.Table("fin", "ledger", "General ledger", ["id", "audit_note"]) with
+    {
+        Columns =
+        [
+            new TableColumn { ColumnName = "id", DataType = "varchar" },
+            new TableColumn { ColumnName = "audit_note", DataType = "varchar", Description = "Invoice audit trail" }
+        ]
+    };
+
+    private static readonly TableMetadata LedgerOtherDeniedText = LedgerWithDeniedColumn with
+    {
+        Columns =
+        [
+            new TableColumn { ColumnName = "id", DataType = "varchar" },
+            new TableColumn { ColumnName = "audit_note", DataType = "varchar", Description = "Opaque audit trail" }
+        ]
+    };
+
     private static readonly TableMetadata Register = Wp0.Table("fin", "register", "Invoice register", ["id", "amount"]);
     private static readonly TableMetadata Customers = Wp0.Table("crm", "customers", "Customer master data", ["id", "name"]);
     private static readonly TableMetadata Restricted = Wp0.Table(
@@ -58,7 +88,8 @@ public sealed class CatalogSearchSecurityTests
         {
             Wp0.Allow(Register.Identifier, Sid, Wp0.TenantA),
             Wp0.Allow(Customers.Identifier, Sid, Wp0.TenantA),
-            Wp0.Allow(PaymentsWithDeniedColumn.Identifier, Sid, Wp0.TenantA, "id", "invoice_ref")
+            Wp0.Allow(PaymentsWithDeniedColumn.Identifier, Sid, Wp0.TenantA, "id", "invoice_ref"),
+            Wp0.Allow(LedgerWithDeniedColumn.Identifier, Sid, Wp0.TenantA, "id")
         };
         var service = Wp0.Service(Wp0.Tables(catalog), Wp0.Consents(consents), Wp0.Options(TenancyShape.Multi), engine);
         var context = Wp0.Context(Wp0.User(Sid, "tenant-a"));
@@ -69,8 +100,16 @@ public sealed class CatalogSearchSecurityTests
     [Trait("Category", "Security")]
     public async Task Restricted_tables_absent_from_results_scores_counts_snippets()
     {
-        var withRestricted = await SearchAsync([Register, Customers, PaymentsWithDeniedColumn, Restricted], "invoice");
-        var withoutRestricted = await SearchAsync([Register, Customers, PaymentsWithDeniedColumn], "invoice");
+        var withRestricted = await SearchAsync([Register, Customers, PaymentsWithDeniedColumn, LedgerWithDeniedColumn, Restricted], "invoice");
+        var withoutRestricted = await SearchAsync([Register, Customers, PaymentsWithDeniedColumn, LedgerWithDeniedColumn], "invoice");
+        // A catalog without the restricted table whose denied columns carry different text (the term only occurs in denied text).
+        var clean = await SearchAsync([Register, Customers, PaymentsOtherDeniedText, LedgerOtherDeniedText], "invoice");
+
+        foreach (var other in new[] { withoutRestricted, clean })
+        {
+            withRestricted.Select(h => h.TableIdentifier.TableName).ToArray().ShouldBe(other.Select(h => h.TableIdentifier.TableName).ToArray());
+            withRestricted.Select(h => h.Bm25Score).ToArray().ShouldBe(other.Select(h => h.Bm25Score).ToArray());
+        }
 
         // Presence and counts: only visible tables, same total as the catalog that never had the restricted table.
         withRestricted.Select(h => h.TableIdentifier.TableName).ShouldNotContain("payroll_vault");
