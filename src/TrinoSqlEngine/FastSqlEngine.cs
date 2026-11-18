@@ -624,7 +624,7 @@ public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQue
                     $"line {token.Line}:{token.Column}: UESCAPE is not permitted due to dialect lexer differentials.");
             }
 
-            // SQL-1: Bracket lexer differentials (SQL Server / SQLite lex [...] as quoted identifier)
+            // SQL-1: Bracket lexer differentials (SQL Server lexes [...] as quoted identifier)
             if (options.RejectBracketLexerDifferentials)
             {
                 if (text.SequenceEqual("[") || text.SequenceEqual("]"))

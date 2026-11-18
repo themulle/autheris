@@ -475,7 +475,7 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
 
     /// <summary>
     /// The keyword of a cross join (comma join or explicit CROSS JOIN). A dialect overrides it when CROSS JOIN carries a planner
-    /// meaning (SQLite pins the join order); the returned text must be a constant.
+    /// meaning; the returned text must be a constant.
     /// </summary>
     protected virtual string CrossJoinKeyword => "CROSS JOIN";
 

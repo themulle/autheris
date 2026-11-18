@@ -634,7 +634,7 @@ internal static class CatalogKeyDefinitionStore
             ? id.ToString()
             : throw new TableDefinitionException("The key or index definition references a column that does not exist.");
 
-    // Microsoft.Data.Sqlite treats an explicitly assigned null as "no transaction" even inside a snapshot scope: assign only when set.
+    // Some providers treat an explicitly assigned null as "no transaction" even inside a snapshot scope: assign only when set.
     internal static void Enlist(DbCommand cmd, DbTransaction? tx)
     {
         if (tx is not null)

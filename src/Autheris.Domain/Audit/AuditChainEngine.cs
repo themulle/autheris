@@ -7,7 +7,7 @@ using Autheris.Domain.Model;
 namespace Autheris.Domain.Audit;
 
 /// <summary>
-/// Shared cryptographic hash-chain engine for WORM audit log persistence across SQLite, PostgreSQL, and SQL Server.
+/// Shared cryptographic hash-chain engine for WORM audit log persistence across PostgreSQL and SQL Server.
 /// Centralizes HMAC-SHA256 / SHA-256 canonical digest computation and batch chain linking.
 /// </summary>
 public static class AuditChainEngine

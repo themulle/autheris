@@ -54,7 +54,7 @@ public abstract class DbCommandCompiledSqlBinder : ICompiledSqlBinder
 
     protected virtual DbType TimestampDbType => DbType.DateTime;
 
-    /// <summary>The provider has no decimal type and would store a decimal parameter as text (SQLite): bind a REAL instead.</summary>
+    /// <summary>The provider has no decimal type and would store a decimal parameter as text: bind a REAL instead.</summary>
     protected virtual bool DecimalAsDouble => false;
 
     /// <summary>The provider passes strings as C strings and would truncate at an embedded NUL (fail closed instead).</summary>
