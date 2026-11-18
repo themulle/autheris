@@ -96,6 +96,8 @@ public static class AuditPolicyTable
         [AuditEventTypes.ProductSettingsChanged] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.ProductColumnClassificationChanged] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.ProductAccessDenied] = AuditFailurePolicy.BestEffort,
+        [AuditEventTypes.ProductLoaded] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.ProductLoadFailed] = AuditFailurePolicy.BestEffort,
         [AuditEventTypes.DataSourceOwnerAssigned] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.DataSourceOwnerRemoved] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.DatasourceTested] = AuditFailurePolicy.FailClosed,

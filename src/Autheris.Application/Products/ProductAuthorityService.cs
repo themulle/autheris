@@ -22,6 +22,12 @@ public static class ProductErrorCodes
     public const string ReasonRequired = "PRODUCT_REASON_REQUIRED";
     public const string Conflict = "PRODUCT_CONFLICT";
     public const string Retired = "PRODUCT_RETIRED";
+    public const string Stale = "PRODUCT_STALE";
+    public const string Unavailable = "PRODUCT_UNAVAILABLE";
+    public const string LoadFailed = "PRODUCT_LOAD_FAILED";
+    public const string LoadInProgress = "PRODUCT_LOAD_IN_PROGRESS";
+    public const string LimitExceeded = "PRODUCT_LIMIT_EXCEEDED";
+    public const string DefinitionChanged = "PRODUCT_DEFINITION_CHANGED";
 }
 
 /// <summary>The caller of a product operation. <see cref="ViaSyncPath"/> is set only by the signed sync path, never by a REST route.</summary>

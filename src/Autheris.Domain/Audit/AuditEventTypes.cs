@@ -113,6 +113,8 @@ public static class AuditEventTypes
     public const string ProductSettingsChanged = "PRODUCT_SETTINGS_CHANGED";
     public const string ProductColumnClassificationChanged = "PRODUCT_COLUMN_CLASSIFICATION_CHANGED";
     public const string ProductAccessDenied = "PRODUCT_ACCESS_DENIED";
+    public const string ProductLoaded = "PRODUCT_LOADED";
+    public const string ProductLoadFailed = "PRODUCT_LOAD_FAILED";
     public const string DataSourceOwnerAssigned = "DATA_SOURCE_OWNER_ASSIGNED";
     public const string DataSourceOwnerRemoved = "DATA_SOURCE_OWNER_REMOVED";
 
