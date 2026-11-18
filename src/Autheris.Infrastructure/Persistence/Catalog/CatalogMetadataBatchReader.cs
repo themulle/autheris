@@ -80,4 +80,37 @@ internal static class CatalogMetadataBatchReader
 
         return result;
     }
+
+    /// <summary>The current epoch, or null when it cannot be read (the cache is then bypassed and the table is loaded from the database).</summary>
+    internal static async Task<long?> TryReadEpochAsync(GovernanceRepository repo, Guid tableId, CancellationToken ct)
+    {
+        try
+        {
+            await using var conn = await repo.OpenConnectionAsync(ct).ConfigureAwait(false);
+            return await GovernanceRepository.ReadTableEpochAsync(conn, tableId, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            repo.LogCatalogNotice("The table epoch could not be read; the metadata cache is bypassed (fail-closed).");
+            return null;
+        }
+    }
+
+    /// <summary>Applies a fresh tier/tags overlay to every row (cached structural rows and freshly loaded rows alike; `with`, no mutation).</summary>
+    internal static async Task<List<TableMetadata>> ApplyOverlayAsync(GovernanceRepository repo, List<TableMetadata> result, CancellationToken ct)
+    {
+        if (result.Count == 0)
+        {
+            return result;
+        }
+
+        await using var conn = await repo.OpenConnectionAsync(ct).ConfigureAwait(false);
+        var overlay = await DatasetCatalogStore.ReadOverlayAsync(conn, null, repo.KeyDialect, null, repo.CatalogLogger, ct).ConfigureAwait(false);
+        for (var i = 0; i < result.Count; i++)
+        {
+            result[i] = DatasetCatalogStore.Apply(result[i], overlay);
+        }
+
+        return result;
+    }
 }

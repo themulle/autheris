@@ -145,20 +145,7 @@ public partial class GovernanceRepository
         }
     }
 
-    /// <summary>The current epoch, or null when it cannot be read (the cache is then bypassed and the table is loaded from the database).</summary>
-    private async Task<long?> TryReadTableEpochAsync(Guid tableId, CancellationToken ct)
-    {
-        try
-        {
-            await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-            return await ReadTableEpochAsync(conn, tableId, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            LogCatalogNotice("The table epoch could not be read; the metadata cache is bypassed (fail-closed).");
-            return null;
-        }
-    }
+    private Task<long?> TryReadTableEpochAsync(Guid tableId, CancellationToken ct) => CatalogMetadataBatchReader.TryReadEpochAsync(this, tableId, ct);
 
     public async Task<IReadOnlyList<TableMetadata>> GetAllTablesAsync(CancellationToken ct = default)
     {
@@ -343,26 +330,7 @@ public partial class GovernanceRepository
         return result;
     }
 
-    internal async Task<List<TableMetadata>> ApplyDatasetCatalogOverlayAsync(List<TableMetadata> result, CancellationToken ct)
-    {
-        if (result.Count == 0)
-        {
-            return result;
-        }
-
-        // Issue #111 (F-C6): rows served from the structural cache and freshly loaded rows alike get a fresh tier/tags overlay (`with`, no mutation).
-        await using (var overlayConn = await OpenConnectionAsync(ct).ConfigureAwait(false))
-        {
-            var overlay = await DatasetCatalogStore.ReadOverlayAsync(
-                overlayConn, null, KeyDialect, null, _logger, ct).ConfigureAwait(false);
-            for (var i = 0; i < result.Count; i++)
-            {
-                result[i] = DatasetCatalogStore.Apply(result[i], overlay);
-            }
-        }
-
-        return result;
-    }
+    internal Task<List<TableMetadata>> ApplyDatasetCatalogOverlayAsync(List<TableMetadata> result, CancellationToken ct) => CatalogMetadataBatchReader.ApplyOverlayAsync(this, result, ct);
 
     public async Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default) =>
         (await UpsertTableMetadataWithResultAsync(metadata, ct).ConfigureAwait(false)).Metadata;
