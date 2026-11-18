@@ -157,3 +157,4 @@ git grep -n -E "RowFilterPredicate|SubqueryJoinHop|AdditionalHops|SubqueryCorrel
 - 2026-11-08 (WP-SIMPL-11 PR-C3): the `tools/PolicyPredicateLint` pre-deploy tool (its only loader was the SQLite governance lint source) is deleted. Any reference to it in this package is obsolete: the enforcing control is the runtime deny (`GatewayStartupValidator.ListDeniedTables`, reported at startup by `DeniedTablesStartupReporter`), and `PolicyPredicateLinter` keeps its unit tests (`PolicyPredicateLintTests`). No PostgreSQL lint source exists; an offline pre-deploy lint over the whole governance store is an owner follow-up.
 
 - 2026-11-18: rows renumbered to S30-S37 (owner default), PR 1-6 merged, PR 7 parity rows.
+- 2026-11-18 (open item): S30-S37 are asserted on the decision point and explain only; extending them to the 19 surfaces needs a surface-projection design and stays open. The WP-SIMPL-46 "27 x 15" parity box stays open.

@@ -31,6 +31,13 @@ internal sealed partial class CrossTransportParityGrantModelRows
     internal static readonly Sid GroupA = new("S-1-5-21-9001-9002-9003-3001");
     internal static readonly Sid GroupB = new("S-1-5-21-9001-9002-9003-3002");
 
+    private static IReadOnlyDictionary<string, ColumnAccessLevel> Cols(ColumnAccessLevel ssn) => new Dictionary<string, ColumnAccessLevel>
+    {
+        ["id"] = ColumnAccessLevel.Clear,
+        ["region"] = ColumnAccessLevel.Clear,
+        ["ssn"] = ssn
+    };
+
     internal static Guid GrantId(int n) => new($"00000000-0000-0000-0000-0000000030{n:00}");
 
     private static readonly TableIdentifier GrantOrdersId = new("default", "main", "orders");
@@ -47,7 +54,7 @@ internal sealed partial class CrossTransportParityGrantModelRows
             // S30: filtered grant via group A plus unfiltered grant via group B -> all rows, both grant ids.
             new(ParityScenarioId.S30_FilteredAndUnfilteredGrantUnion, principal, tenant, table,
                 [GroupGrant(1, GroupA, now, [RegionEntry("EU")]), GroupGrant(2, GroupB, now)], [], VirtualFilterSnapshot.Empty, false, false,
-                new(true, GrantIds: [GrantId(1), GrantId(2)], RowSet: ParityRowSet.Unfiltered), plain),
+                new(true, GrantIds: [GrantId(1), GrantId(2)], RowSet: ParityRowSet.Unfiltered, ColumnState: Cols(ColumnAccessLevel.Mask)), plain),
 
             // S31: overlapping grants with different masking -> ssn is Clear only in the rows of the clearing grant (per-cell state).
             new(ParityScenarioId.S31_OverlappingGrantsPerCellMasking, principal, tenant, table,
@@ -56,38 +63,43 @@ internal sealed partial class CrossTransportParityGrantModelRows
                     GroupGrant(2, GroupB, now, [RegionEntry("US")], ColumnRules(ColumnAccessLevel.Mask))
                 ], [], VirtualFilterSnapshot.Empty, false, false,
                 new(true, GrantIds: [GrantId(1), GrantId(2)], RowSet: ParityRowSet.Filtered,
-                    ColumnState: new Dictionary<string, ColumnAccessLevel> { ["ssn"] = ColumnAccessLevel.RowDependent }), plain),
+                    ColumnState: Cols(ColumnAccessLevel.RowDependent)), plain),
 
             // S32: hard policy via group A plus unfiltered grant via group B -> filtered (the hard policy is not bypassable).
             new(ParityScenarioId.S32_HardPolicyWithUnfilteredGrant, principal, tenant, table,
                 [GroupGrant(1, GroupB, now)], [], VirtualFilterSnapshot.Empty, false, false,
-                new(true, GrantIds: [GrantId(1)], RowSet: ParityRowSet.Filtered),
+                new(true, GrantIds: [GrantId(1)], RowSet: ParityRowSet.Filtered, ColumnState: Cols(ColumnAccessLevel.Mask)),
                 new ParityGrantModelSetup([ActiveOrgPolicy()], [HardProfile(GroupA)])),
 
             // S33: pattern grant and an object created after approval -> the later object is covered.
             new(ParityScenarioId.S33_PatternGrantObjectCreatedLater, principal, tenant, GrantModelTable("orders_2027"),
                 [PatternGrant(1, "default.main.orders_*", now)], [], VirtualFilterSnapshot.Empty, false, false,
-                new(true, GrantIds: [GrantId(1)], RowSet: ParityRowSet.Unfiltered), plain),
+                new(true, GrantIds: [GrantId(1)], RowSet: ParityRowSet.Unfiltered, ColumnState: Cols(ColumnAccessLevel.Mask)), plain),
 
-            // S34: uncovered Deny vs Skip -> the Deny grant does not contribute, the Skip grant becomes unfiltered.
+            // S34: uncovered Deny vs Skip -> both grants are in the match set (the decision lists every matching grant), but only the Skip
+            // grant shapes the row set: it becomes unfiltered, and the Deny grant's parameter never reaches the predicate.
             new(ParityScenarioId.S34_UncoveredDenyVersusSkip, principal, tenant, table,
                 [
                     GroupGrant(1, GroupA, now, [SegmentEntry("gold", UncoveredPolicy.Deny)]),
                     GroupGrant(2, GroupB, now, [SegmentEntry("gold", UncoveredPolicy.Skip)])
                 ], [], VirtualFilterSnapshot.Empty, false, false,
-                new(true, GrantIds: [GrantId(2)], RowSet: ParityRowSet.Unfiltered), plain),
+                new(true, GrantIds: [GrantId(1), GrantId(2)], RowSet: ParityRowSet.Unfiltered, ColumnState: Cols(ColumnAccessLevel.Mask),
+                    PredicateParameterValues: []), plain),
 
             // S35: composite-key policy (both key columns are compared pair-wise).
             new(ParityScenarioId.S35_CompositeKeyPolicy, principal, tenant, table,
                 [GroupGrant(1, GroupA, now, [new GrantRowScopeEntry("composite_live", new Dictionary<string, JsonElement>())])], [],
                 VirtualFilterSnapshot.Empty, false, false,
-                new(true, GrantIds: [GrantId(1)], RowSet: ParityRowSet.Filtered), new ParityGrantModelSetup([CompositeLivePolicy()], [])),
+                new(true, GrantIds: [GrantId(1)], RowSet: ParityRowSet.Filtered, ColumnState: Cols(ColumnAccessLevel.Mask),
+                    PredicateSqlFragments: ["EXISTS (SELECT 1 FROM", "region", "id"]),
+                new ParityGrantModelSetup([CompositeLivePolicy()], [])),
 
             // S36: cross-source KeySet policy (the key set is loaded from another data source).
             new(ParityScenarioId.S36_CrossSourceKeySet, principal, tenant, table,
                 [GroupGrant(1, GroupA, now, [new GrantRowScopeEntry("keyset_cross", new Dictionary<string, JsonElement>())])], [],
                 VirtualFilterSnapshot.Empty, false, false,
-                new(true, GrantIds: [GrantId(1)], RowSet: ParityRowSet.Filtered),
+                new(true, GrantIds: [GrantId(1)], RowSet: ParityRowSet.Filtered, ColumnState: Cols(ColumnAccessLevel.Mask),
+                    PredicateParameterValues: ["EU", "US"]),
                 new ParityGrantModelSetup([KeySetPolicy()], [],
                     VirtualFilterKeySet.Create([VirtualFilterKeyType.Text], new object?[][] { ["EU"], ["US"] }))),
 
@@ -95,7 +107,7 @@ internal sealed partial class CrossTransportParityGrantModelRows
             new(ParityScenarioId.S37_ParametersFromTwoGrantsMerged, principal, tenant, table,
                 [GroupGrant(1, GroupA, now, [RegionEntry("EU", "UK")]), GroupGrant(2, GroupB, now, [RegionEntry("US", "UK")])], [],
                 VirtualFilterSnapshot.Empty, false, false,
-                new(true, GrantIds: [GrantId(1), GrantId(2)], RowSet: ParityRowSet.Filtered, PredicateParameterValues: ["EU", "UK", "US"]), plain)
+                new(true, GrantIds: [GrantId(1), GrantId(2)], RowSet: ParityRowSet.Filtered, ColumnState: Cols(ColumnAccessLevel.Mask), PredicateParameterValues: ["EU", "UK", "US"]), plain)
         ];
     }
 
@@ -107,7 +119,8 @@ internal sealed partial class CrossTransportParityGrantModelRows
         IReadOnlyList<Guid> ExplainGrantIds,
         ParityRowSet RowSet,
         IReadOnlyDictionary<string, ColumnAccessLevel> ColumnState,
-        IReadOnlyList<string> ParameterValues);
+        IReadOnlyList<string> ParameterValues,
+        string PredicateSql);
 
     internal static async Task<GrantModelOutcome> EvaluateAsync(ParityScenario scenario, CancellationToken ct)
     {
@@ -135,7 +148,12 @@ internal sealed partial class CrossTransportParityGrantModelRows
         var parameters = decision.RowPolicy?.Project().Parameters.Values
             .Select(v => v?.ToString() ?? string.Empty).ToList() ?? [];
         var columns = scenario.Table.Columns
-            .ToDictionary(c => c.ColumnName, c => decision.IsAllowed ? decision.GetColumnAccess(c.ColumnName) : ColumnAccessLevel.Deny,
+            .ToDictionary(
+                c => c.ColumnName,
+                c => !decision.IsAllowed ? ColumnAccessLevel.Deny
+                    : decision.GetColumnAccess(c.ColumnName) == ColumnAccessLevel.RowDependent
+                        ? ColumnAccessLevel.RowDependent
+                        : decision.GetEffectiveColumnAccess(c.ColumnName, scenario.Table),
                 StringComparer.OrdinalIgnoreCase);
 
         return new GrantModelOutcome(
@@ -145,7 +163,8 @@ internal sealed partial class CrossTransportParityGrantModelRows
             [.. explanation.Grants.Select(g => Guid.Parse(g.GrantId))],
             rowSet,
             columns,
-            parameters);
+            parameters,
+            decision.RowPolicy?.Project().Sql ?? string.Empty);
     }
 
     private static ClaimsPrincipal GroupUser(Sid sid, params Sid[] groups)

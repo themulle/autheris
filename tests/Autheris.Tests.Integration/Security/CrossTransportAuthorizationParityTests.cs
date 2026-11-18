@@ -122,6 +122,14 @@ public sealed class CrossTransportAuthorizationParityTests
             }
         }
 
+        if (expected.PredicateSqlFragments is not null)
+        {
+            foreach (var fragment in expected.PredicateSqlFragments)
+            {
+                outcome.PredicateSql.ShouldContain(fragment, customMessage: $"Scenario={scenarioId} predicate shape.");
+            }
+        }
+
         if (expected.PredicateParameterValues is not null)
         {
             outcome.ParameterValues.OrderBy(v => v, StringComparer.Ordinal).ToArray()

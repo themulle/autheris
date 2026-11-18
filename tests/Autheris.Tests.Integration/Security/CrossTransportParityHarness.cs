@@ -148,7 +148,9 @@ public sealed record ParityExpectation(
     // Grant-model rows: column state per cell; RowDependent means the state differs between rows (null = not asserted).
     IReadOnlyDictionary<string, ColumnAccessLevel>? ColumnState = null,
     // Grant-model rows: the parameter values bound into the row predicate, compared as a set (null = not asserted).
-    IReadOnlyList<string>? PredicateParameterValues = null);
+    IReadOnlyList<string>? PredicateParameterValues = null,
+    // Grant-model rows: substrings the rendered row predicate must contain (null = not asserted).
+    IReadOnlyList<string>? PredicateSqlFragments = null);
 
 public sealed record ParityOutcome(
     bool Allowed,
