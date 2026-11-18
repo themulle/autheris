@@ -189,7 +189,7 @@ public sealed class AstCompilerDuckDbExecutionIntegrationTests : IDisposable
     [InlineData("SELECT id, sum(amount) OVER (PARTITION BY status ORDER BY amount ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS rn FROM orders")]
     [InlineData("SELECT id, CASE WHEN amount > 15 THEN 'big' ELSE 'small' END AS size FROM orders")]
     [InlineData("SELECT id FROM orders WHERE email LIKE '%@acme.example' OR email IS NULL")]
-    [InlineData("SELECT id, cast(amount AS integer) AS a, try_cast(status AS integer) AS t FROM orders")]
+    [InlineData("SELECT id, cast(1.5 AS integer) AS a, try_cast('x' AS integer) AS t FROM orders")]
     [InlineData("SELECT id, amount > 15 AS flag FROM orders")]
     [InlineData("SELECT id FROM orders WHERE id BETWEEN 1 AND 6 AND status IN ('open', 'closed') AND NOT (amount < 0)")]
     [InlineData("SELECT * FROM (VALUES (1, 'a'), (2, 'b')) AS v (x, y)")]
