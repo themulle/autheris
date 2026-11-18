@@ -1,3 +1,4 @@
+using Autheris.Tests.Unit.TestSupport;
 using System.Security.Claims;
 using Autheris.Application.Governance.Services;
 using Autheris.Application.Common.Interfaces;

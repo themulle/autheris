@@ -14,6 +14,7 @@ Autheris.Domain.Options.BackstageIntegrationOptions.DefaultLifecycle
 Autheris.Domain.Options.BackstageIntegrationOptions.DefaultOwner
 Autheris.Domain.Options.BackstageIntegrationOptions.Enabled
 Autheris.Domain.Options.BackstageIntegrationOptions.SystemName
+Autheris.Domain.Options.CatalogSearchOptions.Enabled
 Autheris.Domain.Options.CatalogSearchOptions.FieldWeights
 Autheris.Domain.Options.CdnOptions.PurgeMode
 Autheris.Domain.Options.CollibraOptions.BaseUrl

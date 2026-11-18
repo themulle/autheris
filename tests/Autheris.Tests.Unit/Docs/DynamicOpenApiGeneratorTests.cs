@@ -1,0 +1,355 @@
+namespace Autheris.Tests.Unit.Docs;
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
+using Autheris.Application.Common.Interfaces;
+using Autheris.Application.OData.Interfaces;
+using Autheris.Application.OData.Services;
+using Autheris.Domain.Common;
+using Autheris.Domain.Interfaces;
+using Autheris.Domain.Model;
+using Microsoft.Extensions.Logging.Abstractions;
+using NSubstitute;
+using Shouldly;
+using Xunit;
+
+public sealed class DynamicOpenApiGeneratorTests
+{
+    private static List<TableMetadata> CreateSampleTables()
+    {
+        return new List<TableMetadata>
+        {
+            new TableMetadata
+            {
+                Identifier = new TableIdentifier("finance", "dbo", "invoices"),
+                Table = new Table { SchemaName = "dbo", TableName = "invoices", DisplayName = "Monthly Invoices" },
+                PrimaryKeyColumns = ["id"],
+                Columns =
+                [
+                    new TableColumn { ColumnName = "id", DataType = "integer" },
+                    new TableColumn { ColumnName = "customer_name", DataType = "varchar" },
+                    new TableColumn { ColumnName = "amount", DataType = "decimal" },
+                    new TableColumn { ColumnName = "iban", DataType = "varchar" },
+                    new TableColumn { ColumnName = "invoice_date", DataType = "date" }
+                ]
+            }.WithPii("iban"),
+            new TableMetadata
+            {
+                Identifier = new TableIdentifier("sales", "dbo", "leads"),
+                Table = new Table { SchemaName = "dbo", TableName = "leads", DisplayName = "Sales Leads" },
+                PrimaryKeyColumns = ["lead_id"],
+                Columns =
+                [
+                    new TableColumn { ColumnName = "lead_id", DataType = "integer" },
+                    new TableColumn { ColumnName = "company", DataType = "varchar" }
+                ]
+            }
+        };
+    }
+
+    [Fact]
+    public async Task GenerateOpenApiJsonAsync_WithAllTables_ProducesValidOpenApi31Spec()
+    {
+        var repo = Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
+            Substitute.For<ITableMetadataRepository>());
+        repo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(CreateSampleTables()));
+
+        var generator = new DynamicOpenApiGenerator(repo, NullLogger<DynamicOpenApiGenerator>.Instance);
+        var json = await generator.GenerateOpenApiJsonAsync(null);
+
+        json.ShouldNotBeNullOrWhiteSpace();
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        root.GetProperty("openapi").GetString().ShouldBe("3.1.0");
+        root.GetProperty("info").GetProperty("title").GetString()!.ShouldContain("Autheris");
+
+        var paths = root.GetProperty("paths");
+        paths.TryGetProperty("/finance/dbo/invoices", out var invoicesPath).ShouldBeTrue();
+        paths.TryGetProperty("/sales/dbo/leads", out var leadsPath).ShouldBeTrue();
+
+        var getInvoices = invoicesPath.GetProperty("get");
+        getInvoices.GetProperty("summary").GetString().ShouldBe("Query finance.invoices");
+
+        var parameters = getInvoices.GetProperty("parameters");
+        parameters.EnumerateArray().Select(p => p.GetProperty("name").GetString()!).ToArray()
+            .ShouldBe(new[] { "$select", "$top", "$skip", "$filter", "$orderby", "$count", "$format" }, ignoreOrder: false);
+        getInvoices.GetProperty("description").GetString()!.ShouldContain("$filter");
+        getInvoices.GetProperty("description").GetString()!.ShouldContain("$orderby");
+
+        var schemas = root.GetProperty("components").GetProperty("schemas");
+        schemas.TryGetProperty("finance_dbo_invoices", out var invoiceSchema).ShouldBeTrue();
+
+        var props = invoiceSchema.GetProperty("properties");
+        props.GetProperty("id").GetProperty("type").GetString().ShouldBe("integer");
+        props.GetProperty("amount").GetProperty("type").EnumerateArray().Select(e => e.GetString()).ShouldBe(new[] { "number", "null" });
+        props.GetProperty("iban").GetProperty("x-sensitive").GetBoolean().ShouldBeTrue();
+    }
+
+    private static async Task<JsonElement> GetInvoiceSchemaAsync(List<TableMetadata> tables)
+    {
+        var repo = Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
+            Substitute.For<ITableMetadataRepository>());
+        repo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(tables));
+        var generator = new DynamicOpenApiGenerator(repo, NullLogger<DynamicOpenApiGenerator>.Instance);
+        var json = await generator.GenerateOpenApiJsonAsync(null);
+        using var doc = JsonDocument.Parse(json);
+        return doc.RootElement.GetProperty("components").GetProperty("schemas").GetProperty("finance_dbo_invoices").Clone();
+    }
+
+    private static TableMetadata WithColumns(TableMetadata t, List<TableColumn> columns) => new()
+    {
+        Identifier = t.Identifier,
+        Table = t.Table,
+        PrimaryKeyColumns = t.PrimaryKeyColumns,
+        Columns = columns
+    };
+
+    private static string[] TypeNames(JsonElement prop) =>
+        prop.GetProperty("type").EnumerateArray().Select(e => e.GetString()!).ToArray();
+
+    [Fact]
+    public async Task EntitySchema_NonKeyColumn_IsTypeArrayWithNull()
+    {
+        var schema = await GetInvoiceSchemaAsync(CreateSampleTables());
+        var props = schema.GetProperty("properties");
+
+        TypeNames(props.GetProperty("customer_name")).ShouldBe(new[] { "string", "null" });
+        TypeNames(props.GetProperty("amount")).ShouldBe(new[] { "number", "null" });
+        TypeNames(props.GetProperty("iban")).ShouldBe(new[] { "string", "null" });
+    }
+
+    [Fact]
+    public async Task EntitySchema_KeyColumn_SingleTypeAndRequired()
+    {
+        var schema = await GetInvoiceSchemaAsync(CreateSampleTables());
+
+        schema.GetProperty("properties").GetProperty("id").GetProperty("type").GetString().ShouldBe("integer");
+        schema.GetProperty("required").EnumerateArray().Select(e => e.GetString()).ShouldBe(new[] { "id" });
+    }
+
+    [Fact]
+    public async Task EntitySchema_NullableDateTime_KeepsFormat()
+    {
+        var tables = CreateSampleTables();
+        tables[0] = WithColumns(tables[0], [.. tables[0].Columns, new TableColumn { ColumnName = "created_at", DataType = "timestamp" }]);
+
+        var schema = await GetInvoiceSchemaAsync(tables);
+        var created = schema.GetProperty("properties").GetProperty("created_at");
+
+        TypeNames(created).ShouldBe(new[] { "string", "null" });
+        created.GetProperty("format").GetString().ShouldBe("date-time");
+        TypeNames(schema.GetProperty("properties").GetProperty("invoice_date")).ShouldBe(new[] { "string", "null" });
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task EntitySchema_NullabilityIndependentOfMaskingRules()
+    {
+        // A4-S1: the generator takes no caller, consent or masking input, so the schema of a table must not depend
+        // on column sensitivity or metadata that drives masking (Mask / NULLIFY rules); every non-key column is nullable.
+        // Structural test: it varies only the classification of all non-key columns (plain vs. sensitive tables) and compares the emitted types.
+        var plain = CreateSampleTables();
+        var masked = CreateSampleTables();
+        masked[0] = masked[0] with { ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor(masked[0].Columns.Where(c => c.ColumnName != "id").Select(c => c.ColumnName).ToArray()) };
+
+        var plainProps = (await GetInvoiceSchemaAsync(plain)).GetProperty("properties");
+        var maskedProps = (await GetInvoiceSchemaAsync(masked)).GetProperty("properties");
+
+        foreach (var name in new[] { "customer_name", "amount", "iban", "invoice_date" })
+        {
+            TypeNames(maskedProps.GetProperty(name)).ShouldBe(TypeNames(plainProps.GetProperty(name)));
+            TypeNames(maskedProps.GetProperty(name)).ShouldContain("null");
+        }
+
+        maskedProps.GetProperty("id").GetProperty("type").GetString().ShouldBe("integer");
+    }
+
+    [Fact]
+    public async Task OpenApiYaml_RendersNullableTypeArray()
+    {
+        var repo = Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
+            Substitute.For<ITableMetadataRepository>());
+        repo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(CreateSampleTables()));
+        var generator = new DynamicOpenApiGenerator(repo, NullLogger<DynamicOpenApiGenerator>.Instance);
+
+        var yaml = await generator.GenerateOpenApiYamlAsync(null);
+
+        yaml.ShouldContain("- \"null\"");
+        yaml.ShouldContain("- \"number\"");
+    }
+
+    [Fact]
+    public async Task GenerateOpenApiJsonAsync_WithDomainScope_FiltersPathsOnlyToTargetDomain()
+    {
+        var repo = Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
+            Substitute.For<ITableMetadataRepository>());
+        repo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(CreateSampleTables()));
+
+        var generator = new DynamicOpenApiGenerator(repo, NullLogger<DynamicOpenApiGenerator>.Instance);
+        var json = await generator.GenerateOpenApiJsonAsync("finance");
+
+        using var doc = JsonDocument.Parse(json);
+        var paths = doc.RootElement.GetProperty("paths");
+
+        paths.TryGetProperty("/finance/dbo/invoices", out _).ShouldBeTrue();
+        paths.TryGetProperty("/sales/dbo/leads", out _).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task GenerateOpenApiYamlAsync_ProducesValidYamlStructure()
+    {
+        var repo = Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
+            Substitute.For<ITableMetadataRepository>());
+        repo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(CreateSampleTables()));
+
+        var generator = new DynamicOpenApiGenerator(repo, NullLogger<DynamicOpenApiGenerator>.Instance);
+        var yaml = await generator.GenerateOpenApiYamlAsync(null);
+
+        yaml.ShouldContain("openapi: \"3.1.0\"");
+        yaml.ShouldContain("/finance/dbo/invoices:");
+        yaml.ShouldContain("/sales/dbo/leads:");
+        yaml.ShouldContain("components:");
+    }
+
+    [Fact]
+    public async Task GenerateOpenApiYamlAsync_IsParseableYamlWithSamePathsAsJson()
+    {
+        var repo = Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
+            Substitute.For<ITableMetadataRepository>());
+        repo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(CreateSampleTables()));
+
+        var generator = new DynamicOpenApiGenerator(repo, NullLogger<DynamicOpenApiGenerator>.Instance);
+        var yaml = await generator.GenerateOpenApiYamlAsync(null);
+        var json = await generator.GenerateOpenApiJsonAsync(null);
+
+        // Keys starting with '@' must be quoted and empty collections need a blank after the colon.
+        yaml.ShouldContain("\"@odata.context\":");
+
+        // Throws a YamlException if the document is not valid YAML.
+        var root = new YamlDotNet.Serialization.DeserializerBuilder()
+            .Build()
+            .Deserialize<Dictionary<string, object>>(yaml);
+
+        root.ShouldContainKey("paths");
+        var yamlPaths = ((Dictionary<object, object>)root["paths"]).Keys.Select(k => k.ToString()!).OrderBy(k => k).ToList();
+
+        using var doc = JsonDocument.Parse(json);
+        var jsonPaths = doc.RootElement.GetProperty("paths").EnumerateObject().Select(p => p.Name).OrderBy(k => k).ToList();
+
+        yamlPaths.ShouldBe(jsonPaths);
+    }
+
+    [Fact]
+    public async Task OpenApiCacheManager_CachesOutputAndInvalidatesCorrectly()
+    {
+        var cacheManager = new OpenApiCacheManager();
+        int factoryInvocationCount = 0;
+
+        Task<string> Factory(CancellationToken _)
+        {
+            Interlocked.Increment(ref factoryInvocationCount);
+            return Task.FromResult("{\"openapi\": \"3.1.0\"}");
+        }
+
+        var bytes1 = await cacheManager.GetOrAddAsync("finance", isYaml: false, Factory);
+        var bytes2 = await cacheManager.GetOrAddAsync("finance", isYaml: false, Factory);
+
+        bytes1.ShouldBe(bytes2);
+        factoryInvocationCount.ShouldBe(1);
+
+        cacheManager.InvalidateCache();
+
+        var bytes3 = await cacheManager.GetOrAddAsync("finance", isYaml: false, Factory);
+        factoryInvocationCount.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task GenerateOpenApiJsonAsync_WithModularTrue_EmploysExternalRefsForSchemas()
+    {
+        var repo = Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
+            Substitute.For<ITableMetadataRepository>());
+        repo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(CreateSampleTables()));
+
+        var generator = new DynamicOpenApiGenerator(repo, NullLogger<DynamicOpenApiGenerator>.Instance);
+        var json = await generator.GenerateOpenApiJsonAsync(null, modular: true);
+
+        using var doc = JsonDocument.Parse(json);
+        var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
+
+        schemas.TryGetProperty("finance_dbo_invoices", out var invoiceSchema).ShouldBeTrue();
+        invoiceSchema.TryGetProperty("$ref", out var refProp).ShouldBeTrue();
+        refProp.GetString().ShouldBe("/odata/v4/$openapi/schemas/finance/dbo/invoices");
+
+        schemas.TryGetProperty("sales_dbo_leads", out var leadSchema).ShouldBeTrue();
+        leadSchema.TryGetProperty("$ref", out var leadRefProp).ShouldBeTrue();
+        leadRefProp.GetString().ShouldBe("/odata/v4/$openapi/schemas/sales/dbo/leads");
+    }
+
+    [Fact]
+    public async Task GenerateEntitySchemaJsonAsync_ReturnsIsolatedTableSchema()
+    {
+        var repo = Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
+            Substitute.For<ITableMetadataRepository>());
+        repo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(CreateSampleTables()));
+
+        var generator = new DynamicOpenApiGenerator(repo, NullLogger<DynamicOpenApiGenerator>.Instance);
+        var schemaJson = await generator.GenerateEntitySchemaJsonAsync(new TableIdentifier("finance", "dbo", "invoices"));
+
+        schemaJson.ShouldNotBeNull();
+        using var doc = JsonDocument.Parse(schemaJson!);
+        var root = doc.RootElement;
+
+        root.GetProperty("title").GetString().ShouldBe("finance_dbo_invoices");
+        root.GetProperty("type").GetString().ShouldBe("object");
+        root.GetProperty("properties").TryGetProperty("customer_name", out _).ShouldBeTrue();
+        root.GetProperty("properties").GetProperty("iban").GetProperty("x-sensitive").GetBoolean().ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task GetIndexDocumentAsync_ReturnsAggregatedDomainCatalog()
+    {
+        var repo = Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
+            Substitute.For<ITableMetadataRepository>());
+        repo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(CreateSampleTables()));
+
+        var generator = new DynamicOpenApiGenerator(repo, NullLogger<DynamicOpenApiGenerator>.Instance);
+        var index = await generator.GetIndexDocumentAsync("https://gateway.example.com");
+
+        index.TotalTables.ShouldBe(2);
+        index.Domains.Count.ShouldBe(2);
+
+        var financeDomain = index.Domains.FirstOrDefault(d => d.Domain == "finance");
+        financeDomain.ShouldNotBeNull();
+        financeDomain!.TableCount.ShouldBe(1);
+        financeDomain.JsonUrl.ShouldBe("https://gateway.example.com/odata/v4/finance/openapi.json");
+        financeDomain.YamlUrl.ShouldBe("https://gateway.example.com/odata/v4/finance/openapi.yaml");
+
+        index.Apis.Count.ShouldBeGreaterThan(0);
+        index.Apis.ShouldContain(a => a.Name == "All Domains (Monolithic)");
+    }
+
+    [Fact]
+    public async Task OpenApiCacheManager_DistinguishesModularAndStandardKeys()
+    {
+        var cacheManager = new OpenApiCacheManager();
+        int factoryInvocationCount = 0;
+
+        Task<string> Factory(CancellationToken _)
+        {
+            Interlocked.Increment(ref factoryInvocationCount);
+            return Task.FromResult("{\"openapi\": \"3.1.0\"}");
+        }
+
+        var standard = await cacheManager.GetOrAddAsync("finance", false, false, Factory);
+        var modular = await cacheManager.GetOrAddAsync("finance", false, true, Factory);
+
+        standard.ShouldNotBeSameAs(modular);
+        factoryInvocationCount.ShouldBe(2);
+    }
+}

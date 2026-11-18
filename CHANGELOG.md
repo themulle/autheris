@@ -17,6 +17,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - A row filter `valueType` or filter group difference is a change (before: ignored).
 - F-GOV-15 shows a group and a user manifest instead of a role grantee and describes the current apply rules (`validUntil` for every policy, no `validityDays`, no role grantees) and the four-eyes rule for individual grantees, including how to seed test and demo environments; F-GOV-22 explains `INDIVIDUAL_GRANT_REQUIRES_FOUR_EYES` on the manifest path; the simplification migration guide describes what the upgrade does to role consents (#800, #801).
 
+### Removed
+- Configuration key `Gateway:CatalogSearch:Enabled`. Catalog search validation and the index warm-up are always active; use `Gateway:CatalogSearch:WarmupOnStartup` to control the startup warm-up. The key fails startup with any value, including `false` or empty.
+
 ### Fixed
 - `consents/apply` is idempotent for columns with several rules, for example a base rule plus a scope rule on the same column (#806). Column rules and row filters are compared as multisets independent of order, scopes as sets in their stored form. Re-applying an unchanged manifest reports `unchanged` and writes no revocation, consent, grant record, audit entry or epoch bump. Duplicated rules or scopes can no longer hide a difference.
 - `consents/apply` ignores the grantee's pattern grants (#806). The subject read also returns the grantee's pattern grants of the whole domain. Before, a matching pattern grant, even one for another table, could count as the identical consent (no grant was created for the table), and a changed policy revoked the grantee's domain-wide pattern grants.

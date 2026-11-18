@@ -14,9 +14,6 @@ public sealed class CatalogSearchOptions
 {
     public const string SectionName = "Gateway:CatalogSearch";
 
-    /// <summary>Aktiviert die Suche im MCP-Server und Catalog-Endpoint (Default: true).</summary>
-    public bool Enabled { get; set; } = true;
-
     /// <summary>Embedding-Provider: None (Default), LocalOnnx, Ollama.</summary>
     public CatalogEmbeddingProvider EmbeddingProvider { get; set; } = CatalogEmbeddingProvider.None;
 
