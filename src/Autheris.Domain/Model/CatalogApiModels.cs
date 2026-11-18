@@ -29,6 +29,8 @@ public sealed record CatalogColumnDetail(
     IReadOnlyList<DiscoveryColumnClassification>? Classifications = null,
     IReadOnlyList<string>? ClearRequestable = null);
 
+/// <param name="RequiredFilterColumns">Issue #807: required filter columns the caller's answer lists; null when there are none.</param>
+/// <param name="RequiredFilterColumnGroups">Issue #807: required filter column groups (one group must be filtered as a whole); null when none.</param>
 public sealed record CatalogDatasetDetail(
     string DatasetId,
     string Domain,
@@ -44,7 +46,11 @@ public sealed record CatalogDatasetDetail(
     string? LongDescription = null,
     string? Language = null,
     IReadOnlyList<string>? PrimaryKeyDirections = null,
-    McpDatasetSize? Size = null);
+    McpDatasetSize? Size = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<string>? RequiredFilterColumns = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<IReadOnlyList<string>>? RequiredFilterColumnGroups = null);
 
 public sealed record CatalogDatasourceSummary(
     string Id,
