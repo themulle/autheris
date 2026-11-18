@@ -427,6 +427,8 @@ public partial class GovernanceRepository
             await RecordAuditEventAsync(ConsentWriteRulesSql.BuildWriteGrantChangedAudit(created, actorSid), tx, ct).ConfigureAwait(false);
         }
 
+        if (ClearGrantAudit.TryBuild(created) is { } clearAudit) { await RecordAuditEventAsync(clearAudit, tx, ct).ConfigureAwait(false); }
+
         return created;
     }
 
@@ -602,7 +604,9 @@ public partial class GovernanceRepository
         return await ConsentSqlCore.GetPendingRequestsForApproverAsync(conn, ConsentSql.SelectPendingRequestsForApproverSql, approverSid, TimeProvider.System.GetUtcNow(), ct).ConfigureAwait(false);
     }
 
-    public async Task<ConsentRequest> ApproveConsentRequestStepAsync(Guid requestId, Sid approverSid, CancellationToken ct = default)
+    public Task<ConsentRequest> ApproveConsentRequestStepAsync(Guid requestId, Sid approverSid, CancellationToken ct = default) => ApproveConsentRequestStepAsync(requestId, approverSid, false, ct);
+
+    public async Task<ConsentRequest> ApproveConsentRequestStepAsync(Guid requestId, Sid approverSid, bool requireSecondApprover, CancellationToken ct = default)
     {
         var req = await GetConsentRequestAsync(requestId, ct).ConfigureAwait(false)
             ?? throw new InvalidOperationException($"Request {requestId} not found.");
@@ -642,7 +646,7 @@ public partial class GovernanceRepository
             int stepNumber = state.NextStepNumber;
             await ConsentSqlCore.InsertApprovedStepAsync(conn, tx, Guid.NewGuid(), requestId, stepNumber, approverSid, TimeProvider.System.GetUtcNow(), ct).ConfigureAwait(false);
 
-            string newStatus = ConsentApprovalPolicy.StatusAfterApproval(state.RequiresFourEyes, stepNumber, ConsentWorkflowMode.Internal, state.Sensitivity);
+            string newStatus = ConsentApprovalPolicy.StatusAfterApproval(state.RequiresFourEyes || requireSecondApprover, stepNumber, ConsentWorkflowMode.Internal, state.Sensitivity);
             await ConsentSqlCore.ApplyGuardedStatusAsync(conn, tx, ConsentStatusUpdateSeam, requestId, newStatus, currentStatus, ct).ConfigureAwait(false);
 
             req.Status = newStatus;
@@ -708,12 +712,16 @@ public partial class GovernanceRepository
         return ExecuteAtomicApprovalWithConsentAsync(requestId, step, consent, consent?.RowFilters ?? Array.Empty<ConsentRowFilter>(), consent?.ColumnRules ?? Array.Empty<ConsentColumnRule>(), ct);
     }
 
+    public Task<Consent> ExecuteAtomicApprovalWithConsentAsync(Guid requestId, ApprovalStep step, Consent consent, IReadOnlyList<ConsentRowFilter> rowFilters, IReadOnlyList<ConsentColumnRule> columnRules, CancellationToken ct = default) =>
+        ExecuteAtomicApprovalWithConsentAsync(requestId, step, consent, rowFilters, columnRules, false, ct);
+
     public async Task<Consent> ExecuteAtomicApprovalWithConsentAsync(
         Guid requestId,
         ApprovalStep step,
         Consent consent,
         IReadOnlyList<ConsentRowFilter> rowFilters,
         IReadOnlyList<ConsentColumnRule> columnRules,
+        bool requireSecondApprover,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(step);
@@ -755,7 +763,7 @@ public partial class GovernanceRepository
                 throw new InvalidOperationException(ConsentApprovalPolicy.SameApproverViolationMessage);
             }
 
-            string newStatus = ConsentApprovalPolicy.StatusAfterApproval(state.RequiresFourEyes, state.NextStepNumber, ConsentWorkflowMode.Internal, state.Sensitivity);
+            string newStatus = ConsentApprovalPolicy.StatusAfterApproval(state.RequiresFourEyes || requireSecondApprover, state.NextStepNumber, ConsentWorkflowMode.Internal, state.Sensitivity);
             if (!string.Equals(newStatus, ConsentApprovalPolicy.Approved, StringComparison.Ordinal))
             {
                 throw new InvalidOperationException(ConsentApprovalPolicy.FourEyesNotSatisfiedMessage(requestId));
@@ -931,63 +939,5 @@ public partial class GovernanceRepository
         }
 
         await InvalidateTableEpochAsync(req.TableIdentifier, ct).ConfigureAwait(false);
-    }
-
-    public async Task DeleteConsentRequestAsync(Guid requestId, CancellationToken ct = default)
-    {
-        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
-        try
-        {
-            await ConsentSqlCore.DeleteConsentRequestRowsAsync(conn, tx, requestId, ct).ConfigureAwait(false);
-            await CommitTransactionAsync(tx, ct).ConfigureAwait(false);
-        }
-        catch
-        {
-            await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
-            throw;
-        }
-    }
-
-    private async Task HydrateConsentsBatchAsync(DbConnection conn, List<Consent> consents, CancellationToken ct)
-    {
-        await ConsentSqlCore.HydrateConsentsBatchAsync(conn, consents, ct).ConfigureAwait(false);
-        await ConsentPatternSqlCore.HydrateApprovingOwnersBatchAsync(conn, consents, ct).ConfigureAwait(false);
-    }
-
-    private async Task<IReadOnlyCollection<string>> ResolveDataOwnerIdsInternalAsync(IEnumerable<string> identifiers, CancellationToken ct)
-    {
-        const string resolveDataOwnerIdsSql = @"SELECT id FROM DATA_OWNERS WHERE LOWER(ad_sid) = LOWER(@p) OR LOWER(ad_account) = LOWER(@p) OR LOWER(email) = LOWER(@p)";
-        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var identifier in identifiers.Where(i => !string.IsNullOrWhiteSpace(i)))
-        {
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandText = resolveDataOwnerIdsSql;
-            cmd.AddBound("@p", identifier);
-            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-            while (await reader.ReadAsync(ct).ConfigureAwait(false))
-            {
-                ids.Add(reader.GetString(0));
-            }
-        }
-        return ids;
-    }
-
-    private async Task<IReadOnlyCollection<string>> ResolveRequesterOwnerIdsInternalAsync(ConsentRequest req, CancellationToken ct)
-    {
-        var identifiers = ConsentApprovalPolicy.IdentifierCandidates(req.RequesterSid.Value).ToList();
-        if (req.RequesterIdentifiers != null)
-        {
-            identifiers.AddRange(req.RequesterIdentifiers);
-        }
-
-        return await ResolveDataOwnerIdsInternalAsync(identifiers, ct).ConfigureAwait(false);
-    }
-
-    private async Task<bool> IsAuthorizedApproverForTableInternalAsync(TableIdentifier table, Sid approverSid, CancellationToken ct)
-    {
-        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        return await IsAuthorizedApproverForTableInternalAsync(conn, null, table, approverSid, ct).ConfigureAwait(false);
     }
 }

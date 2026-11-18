@@ -1,7 +1,11 @@
 using System.Reflection;
 using Autheris.Application.Catalog;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Policy.Classification;
+using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using Autheris.Domain.Tenancy;
+using NSubstitute;
 using Autheris.Infrastructure.Persistence;
 using Autheris.Infrastructure.Persistence.Dialects;
 using Microsoft.Extensions.Time.Testing;
@@ -104,6 +108,51 @@ public sealed class ClassificationMutationFlushTests
     }
 
     [Fact]
+    public async Task Admin_api_mutations_flush_immediately_and_hidden_catalog_text_reaches_the_search_index_resolver()
+    {
+        var repo = new InMemoryClassificationRepository();
+        var columnId = Guid.NewGuid();
+        var table = new TableIdentifier("crm", "public", "customers");
+        repo.ColumnTables[columnId.ToString()] = table;
+        var ownership = Substitute.For<IDataOwnershipRepository>();
+        ownership.IsAuthorizedApproverForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<Sid>(), Arg.Any<CancellationToken>()).Returns(true);
+        var caller = new ClassificationAdminCaller(new TenantId("tenant-a"), "S-1-OWNER", IsClusterAdmin: false, IsGovernanceAdmin: false);
+        var meta = new TableMetadata
+        {
+            Identifier = table,
+            OwnerTenantId = "tenant-a",
+            Table = new Table { Id = Guid.NewGuid(), SourceName = "crm", SchemaName = "public", TableName = "customers", IsActive = true },
+            Columns = [new TableColumn { Id = columnId, ColumnName = "ssn", DataType = "varchar" }]
+        };
+        var tables = Substitute.For<ITableMetadataRepository>();
+        tables.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(meta);
+        var service = new ClassificationAdminService(repo, tables, ownership, new FakeTimeProvider(FixedTimestamp));
+
+        (await service.AssignColumnClassificationAsync(caller, columnId.ToString(), "PII", ClassificationAdminScope.Tenant)).IsOk.ShouldBeTrue();
+        repo.VersionFlushes.ShouldBe(1);
+
+        var before = await ClassificationAccessResolver.ResolveIndexingHiddenTextColumnsAsync(meta, repo);
+        before.ShouldNotContain("ssn");
+
+        var hidden = await service.UpsertMaskOverrideAsync(
+            caller, columnId.ToString(), "PII", new MaskRuleInput(MaskFunction.Nullify, null, null, CatalogTextVisibility.Hidden), ClassificationAdminScope.Tenant);
+        hidden.IsOk.ShouldBeTrue();
+        repo.VersionFlushes.ShouldBe(2);
+
+        // The index rebuild that the flushed catalog version triggers resolves the new HIDDEN override: the column text is not indexed.
+        var after = await ClassificationAccessResolver.ResolveIndexingHiddenTextColumnsAsync(meta, repo);
+        after.ShouldContain("ssn");
+
+        var govAdmin = caller with { IsGovernanceAdmin = true };
+        (await service.UpsertMaskRuleAsync(
+            govAdmin, "FINANCIAL", new MaskRuleInput(MaskFunction.Nullify, null, null, CatalogTextVisibility.Hidden), ClassificationAdminScope.Tenant, null)).IsOk.ShouldBeTrue();
+        repo.VersionFlushes.ShouldBe(3);
+
+        (await service.RemoveColumnClassificationAsync(caller, columnId.ToString(), "PII", ClassificationAdminScope.Tenant)).IsOk.ShouldBeTrue();
+        repo.VersionFlushes.ShouldBe(4);
+    }
+
+    [Fact]
     public void Repository_classifications_sql_constants_and_allowlist_cover_all_classification_tables()
     {
         Enum.GetValues<GovernanceTable>().Select(t => t.ToSqlName())
@@ -138,6 +187,11 @@ internal sealed class InMemoryClassificationRepository : IClassificationReposito
     public int VersionFlushes => Volatile.Read(ref _flushes);
 
     public bool ThrowOnScopeFlush { get; set; }
+
+    public Dictionary<string, TableIdentifier> ColumnTables { get; } = new(StringComparer.Ordinal);
+
+    public Task<TableIdentifier?> GetTableIdentifierByColumnIdAsync(string tableColumnId, CancellationToken ct = default) =>
+        Task.FromResult<TableIdentifier?>(ColumnTables.TryGetValue(tableColumnId, out var table) ? table : null);
 
     public Task FlushCatalogVersionAsync(long structureDelta, long contentDelta, CancellationToken ct = default)
     {

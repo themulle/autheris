@@ -72,6 +72,15 @@ public interface IClassificationRepository
         string? code,
         CancellationToken ct = default);
 
+    /// <summary>
+    /// Resolves the table that owns <paramref name="tableColumnId"/>, or <c>null</c> when the column is unknown.
+    /// Callers treat <c>null</c> as not found (fail closed).
+    /// </summary>
+    Task<TableIdentifier?> GetTableIdentifierByColumnIdAsync(
+        string tableColumnId,
+        CancellationToken ct = default)
+        => Task.FromResult<TableIdentifier?>(null);
+
     Task<IReadOnlyList<ConsentClassificationAccess>> GetConsentClassificationAccessAsync(
         string tenantId,
         Guid consentId,

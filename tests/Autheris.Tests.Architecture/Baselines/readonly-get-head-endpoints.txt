@@ -72,6 +72,8 @@
 /api/v1/governance/audit|GET|no side effect: queries governance audit log entries
 /api/v1/governance/caller-attributes/service-sets|GET|no side effect: lists caller attribute service sets
 /api/v1/governance/caller-attributes/|GET|no side effect: lists caller attribute definitions
+/api/v1/governance/classifications/{code}/mask-rule|GET|no side effect: reads one classification mask rule of the caller scope
+/api/v1/governance/classifications/{code}|GET|no side effect: reads one classification definition of the caller scope
 /api/v1/governance/config-sync/status|GET|no side effect: reads virtual filter config sync status
 /api/v1/governance/contracts|GET|no side effect: lists data contracts
 /api/v1/governance/effective-filters|GET|no side effect: reads effective row filters
