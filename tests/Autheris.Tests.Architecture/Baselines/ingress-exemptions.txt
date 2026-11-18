@@ -88,6 +88,9 @@ route /api/v1/consents/bulk | governance, consent, ReBAC, FinOps or ext-authz ro
 route /api/v1/docs/apps | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
 route /api/v1/docs/apps/{appId}/bundle | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
 route /api/v1/docs/apps/{appId}/documents/{category}/{docId} | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
+route /api/v1/docs/apps/{appId}/documents/{category}/{docId}/discovery | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
+route /api/v1/docs/apps/{appId}/documents/{category}/{docId}/links | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
+route /api/v1/docs/apps/{appId}/links | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
 route /api/v1/docs/apps/{appId}/manifest | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
 route /api/v1/docs/errors/{errorCode} | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
 route /api/v1/docs/procedures/{*identifier} | catalog integration, lineage, schema-registry, webhook or docs route; metadata only

@@ -130,6 +130,8 @@ public static class AuditPolicyTable
         [AuditEventTypes.DocIngestionDocumentApplied] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.DocDiscoveryRead] = AuditFailurePolicy.BestEffort,
         [AuditEventTypes.DocDocumentDeleted] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.DocLinksChanged] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.DocVisibilityChanged] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.DocTenantPurged] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.DocIndexSyncRequested] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.DocLegacyImportCompleted] = AuditFailurePolicy.FailClosed,

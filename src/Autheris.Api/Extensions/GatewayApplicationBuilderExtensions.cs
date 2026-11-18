@@ -234,6 +234,7 @@ public static class GatewayApplicationBuilderExtensions
         app.MapEffectiveAccessEndpoints();
         app.MapDataContractEndpoints();
         app.MapDocIngestionEndpoints();
+        app.MapDocLinkEndpoints();
         app.MapGovernanceClassificationEndpoints();
         app.MapClassificationAdminEndpoints();
         app.MapCatalogEndpoints();
