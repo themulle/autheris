@@ -6,11 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- `search_catalog` hits and `find_relevant_tables` candidates carry `accessStatus`, the caller's own status as `list_datasets` reports it (`GRANTED`, `PENDING`, `EXPIRED`, `REQUEST_ACCESS`); the REST `/api/v1/catalog/search` hits carry it too. `find_relevant_tables` recommends an access request instead of the query tools for candidates the caller cannot read (#804).
+- Optional `accessStatus` filter on `list_datasets`, `search_catalog`, `find_relevant_tables` and `GET /api/v1/catalog/objects` (`granted`, `requested`, `expired`, `none` there), applied before ranking, limit and paging, so `total`, `nextOffset`, `totalCount` and `nextCursor` count the filtered set. The filter evaluates only the caller's grant candidates: one consent read per request and one access decision per table the caller holds a grant on, kept for the whole request (also across the internal pages of the REST list), not one per catalog table. Empty and unknown values are rejected (#798, #804).
+
+### Changed
+- `consents/apply` treats more differences as a change and replaces the stored consent (#806):
+  - An active consent with write rules, row scopes or classification access (for example the write grant of an approved consent request) is now revoked and replaced by the declarative consent when a manifest policy for the same grantee and table is applied. The manifest never creates these, so such a consent no longer counts as `unchanged`.
+  - An earlier `validUntil` is a change for group policies too (before: individual grants only). Group grants stored with a later expiry than the manifest's `validUntil` are therefore replaced once on the first apply after the upgrade. A later `validUntil` still never extends a grant.
+  - A row filter `valueType` or filter group difference is a change (before: ignored).
+- F-GOV-15 shows a group and a user manifest instead of a role grantee and describes the current apply rules (`validUntil` for every policy, no `validityDays`, no role grantees) and the four-eyes rule for individual grantees, including how to seed test and demo environments; F-GOV-22 explains `INDIVIDUAL_GRANT_REQUIRES_FOUR_EYES` on the manifest path; the simplification migration guide describes what the upgrade does to role consents (#800, #801).
+
 ### Removed
 - Configuration key `Gateway:CatalogSearch:Enabled`. Catalog search validation and the index warm-up are always active; use `Gateway:CatalogSearch:WarmupOnStartup` to control the startup warm-up. The key fails startup with any value, including `false` or empty.
 
-### Changed
-- F-GOV-15 shows a group and a user manifest instead of a role grantee and describes the current apply rules (`validUntil` for every policy, no `validityDays`, no role grantees) and the four-eyes rule for individual grantees, including how to seed test and demo environments; F-GOV-22 explains `INDIVIDUAL_GRANT_REQUIRES_FOUR_EYES` on the manifest path; the simplification migration guide describes what the upgrade does to role consents (#800, #801).
+### Fixed
+- `consents/apply` is idempotent for columns with several rules, for example a base rule plus a scope rule on the same column (#806). Column rules and row filters are compared as multisets independent of order, scopes as sets in their stored form. Re-applying an unchanged manifest reports `unchanged` and writes no revocation, consent, grant record, audit entry or epoch bump. Duplicated rules or scopes can no longer hide a difference.
+- `consents/apply` ignores the grantee's pattern grants (#806). The subject read also returns the grantee's pattern grants of the whole domain. Before, a matching pattern grant, even one for another table, could count as the identical consent (no grant was created for the table), and a changed policy revoked the grantee's domain-wide pattern grants.
+- Consent manifests (`consents/apply`) and consent request decisions (column masking input) reject a scope entry that is blank or contains a comma with `400` before anything is written. The store keeps a rule's scopes comma-separated and drops empty entries on read, so `applicableScopes: [" "]` silently became a base rule for every scope (for example `Clear` for all callers instead of one scope), and a comma split one entry into several scopes. An empty list still sets the base level (#806).
 
 ## [1.8.5] - 2026-11-17
 
