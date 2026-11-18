@@ -98,7 +98,6 @@ public static class GatewayExecutionServiceExtensions
                 sp.GetService<Autheris.Application.Policy.WriteGrants.IRowPolicyDependencyIndex>(),
                 sp.GetService<TimeProvider>()));
         services.AddScoped<Autheris.Application.Policy.Pdp.IAccessDecisionPoint, Autheris.Application.Policy.Pdp.AccessDecisionPoint>();
-        services.AddScoped<IUnifiedPolicyDecisionPoint, UnifiedPolicyDecisionPoint>();
 
         // Hierarchical Parquet Egress (F-DATA-01)
         services.AddSingleton<IParquetExportService, ParquetExportService>();

@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Data;
 
+using Autheris.Application.Policy.Pdp;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -45,12 +46,12 @@ public sealed class ChangesSinceDisclosureTests
     {
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetTableMetadataAsync(Table, Arg.Any<CancellationToken>()).Returns(metadata);
-        var pdp = Substitute.For<IUnifiedPolicyDecisionPoint>();
-        pdp.EvaluateAccessAsync(Table, Arg.Any<TableMetadata>(), Arg.Any<SecurityPrincipalContext>(), Arg.Any<IReadOnlyList<string>?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(TableAccessDecision.Allowed(
+        var pdp = Substitute.For<IAccessDecisionPoint>();
+        pdp.DecideAsync(Arg.Is<AccessRequest>(r => r.Object.Identifier == Table), Arg.Any<CancellationToken>())
+            .Returns(TableAccessDecision.Allowed(
                 Table,
                 new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase) { ["id"] = ColumnAccessLevel.Clear, ["name"] = ColumnAccessLevel.Clear },
-                hasUnconstrainedColumnAllow: true)));
+                hasUnconstrainedColumnAllow: true));
         var service = new GovernedChangeDetectionService(
             repo, pdp, provider, Substitute.For<IColumnMaskingProvider>(), Substitute.For<IAuditLogRepository>(),
             options: Options.Create(new ChangeDetectionOptions { MaxChangesPerCall = maxChanges }));

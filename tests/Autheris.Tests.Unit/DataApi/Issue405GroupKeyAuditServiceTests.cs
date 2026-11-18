@@ -98,6 +98,7 @@ public sealed class Issue405GroupKeyAuditServiceTests
         var spyPlanner = planner ?? Substitute.For<IGovernedTableReadPlanner>();
         var service = new GovernedAggregationService(
             metaRepo,
+            Autheris.Tests.Unit.TestSupport.AccessDecisionPointStubs.Denying(),
             sqlExecutionService: sql,
             dataSourceExecutors: [new FixedExecutor(DataSourceType.HttpDeclarative)],
             auditWriter: writer,

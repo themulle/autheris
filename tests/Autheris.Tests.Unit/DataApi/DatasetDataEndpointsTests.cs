@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.DataApi;
 
+using Autheris.Application.Policy.Pdp;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -287,7 +288,7 @@ public sealed class DatasetDataEndpointsTests
         services.AddLogging();
         services.AddSingleton<Microsoft.Extensions.Hosting.IHostEnvironment>(new DevelopmentHostEnvironment());
         services.AddSingleton(Substitute.For<ITableMetadataRepository>());
-        services.AddSingleton(Substitute.For<Autheris.Application.Policy.IUnifiedPolicyDecisionPoint>());
+        services.AddSingleton(Substitute.For<Autheris.Application.Policy.Pdp.IAccessDecisionPoint>());
         services.AddSingleton(Substitute.For<Autheris.Application.Sql.Interfaces.IGovernedSqlExecutionService>());
         services.AddSingleton(Substitute.For<Autheris.Application.Sql.Interfaces.IFederatedQueryExecutionService>());
         services.AddSingleton(Substitute.For<IColumnMaskingProvider>());

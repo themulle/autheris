@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Api;
 
+using Autheris.Application.Policy.Pdp;
 using System.Security.Claims;
 using System.Text.Json;
 using Autheris.Api.Endpoints;
@@ -109,7 +110,7 @@ public sealed class ErrorBodyMigrationEndpointTests
         await TableStreamEndpoints.HandleBulkStreamAsync(
             domain, schema, table, ctx,
             repo ?? Substitute.For<ITableMetadataRepository>(),
-            Substitute.For<IUnifiedPolicyDecisionPoint>(),
+            Substitute.For<IAccessDecisionPoint>(),
             Substitute.For<IGovernedTableReadPlanner>(),
             Substitute.For<IGovernedSqlExecutionService>(),
             Substitute.For<IKeysetCursorEncoder>(),

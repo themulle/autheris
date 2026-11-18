@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.DataApi;
 
+using Autheris.Application.Policy.Pdp;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -51,8 +52,8 @@ public sealed class GovernedDataQueryServiceTypedPolicyTests
         var policy = new RowPolicyFactory(new PolicyPredicateRenderer()).FromPredicate(predicate, DatabaseDialect.PostgreSql);
         var decision = TableAccessDecision.Allowed(Table, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)
             .WithAdditionalRowPolicy(policy);
-        var pdp = Substitute.For<IUnifiedPolicyDecisionPoint>();
-        pdp.EvaluateAccessAsync(Table, metadata, Arg.Any<Autheris.Domain.Security.SecurityPrincipalContext>(), Arg.Any<IReadOnlyList<string>?>(), Arg.Any<CancellationToken>())
+        var pdp = Substitute.For<IAccessDecisionPoint>();
+        pdp.DecideAsync(Arg.Is<AccessRequest>(r => r.Object == metadata), Arg.Any<CancellationToken>())
             .Returns(decision);
 
         GovernedSqlQueryRequest? sent = null;

@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Analytics;
 
+using Autheris.Application.Policy.Pdp;
 using Autheris.Tests.Unit.Catalog;
 using System;
 using System.Collections.Generic;
@@ -147,6 +148,7 @@ public sealed class AggregationPrivacyHardeningTests
         var service = new GovernedAggregationService(
             metaRepo,
             audit,
+            Autheris.Tests.Unit.TestSupport.AccessDecisionPointStubs.Denying(),
             dataSourceExecutors: [executor],
             analyticsOptions: Options.Create(options));
         return (service, executor, audit);
@@ -563,7 +565,8 @@ public sealed class AggregationPrivacyHardeningTests
             catalog,
             Substitute.For<IGovernedAggregationService>(),
             Substitute.For<ITableMetadataRepository>(),
-            auditLogRepository: new CapturingAuditLogRepository());
+            auditLogRepository: new CapturingAuditLogRepository(),
+            pdp: Autheris.Tests.Unit.TestSupport.AccessDecisionPointStubs.Denying());
 
         await Should.ThrowAsync<KeyNotFoundException>(() => service.QueryMetricsAsync(
             PrincipalWithRole("Analyst", tenant: "tenant-b"),
@@ -582,7 +585,7 @@ public sealed class AggregationPrivacyHardeningTests
 
     private static async Task<(SemanticMetricQueryService Service, CapturingAuditLogRepository Audit)> CreateMetricServiceAsync(
         bool tablePresent,
-        IUnifiedPolicyDecisionPoint? pdp = null)
+        IAccessDecisionPoint? pdp = null)
     {
         var catalog = new Autheris.Application.Catalog.Semantic.InMemorySemanticCatalog();
         var model = new DbtSemanticModel(
@@ -609,15 +612,15 @@ public sealed class AggregationPrivacyHardeningTests
             Substitute.For<IGovernedAggregationService>(),
             metaRepo,
             audit,
-            pdp: pdp);
+            pdp ?? Autheris.Tests.Unit.TestSupport.AccessDecisionPointStubs.Denying());
         return (service, audit);
     }
 
     [Fact]
     public async Task QueryMetricsAsync_DeniedTableAndMissingTable_AreIndistinguishableAndNameNothing()
     {
-        var pdp = Substitute.For<IUnifiedPolicyDecisionPoint>();
-        pdp.EvaluateAccessAsync(Arg.Any<TableIdentifier>(), Arg.Any<TableMetadata>(), Arg.Any<SecurityPrincipalContext>(), Arg.Any<IReadOnlyList<string>?>(), Arg.Any<CancellationToken>())
+        var pdp = Substitute.For<IAccessDecisionPoint>();
+        pdp.DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>())
             .Returns(TableAccessDecision.Denied(OrdersTableId, "secret-denial-reason"));
 
         var (denied, deniedAudit) = await CreateMetricServiceAsync(tablePresent: true, pdp);
@@ -751,6 +754,7 @@ public sealed class AggregationPrivacyHardeningTests
         var service = new GovernedAggregationService(
             metaRepo,
             new CapturingAuditLogRepository(),
+            Autheris.Tests.Unit.TestSupport.AccessDecisionPointStubs.Denying(),
             gatewayExecutionService: gateway,
             analyticsOptions: Options.Create(new AnalyticsOptions()));
 
@@ -784,6 +788,7 @@ public sealed class AggregationPrivacyHardeningTests
         var service = new GovernedAggregationService(
             metaRepo,
             new CapturingAuditLogRepository(),
+            Autheris.Tests.Unit.TestSupport.AccessDecisionPointStubs.Denying(),
             sqlExecutionService: sql,
             analyticsOptions: Options.Create(new AnalyticsOptions
             {

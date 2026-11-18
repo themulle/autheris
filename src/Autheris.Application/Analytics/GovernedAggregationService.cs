@@ -18,6 +18,7 @@ using Autheris.Application.Governance.Services;
 using Autheris.Application.Identity.Attributes;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
+using Autheris.Application.Policy.Pdp;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
@@ -43,11 +44,8 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
     internal const string DeniedMessage = "Access denied.";
 
     private readonly ITableMetadataRepository _metadataRepository;
-    private readonly IUnifiedPolicyDecisionPoint? _pdp;
-    private readonly ITableAccessResolver? _accessResolver;
+    private readonly IAccessDecisionPoint _pdp;
     private readonly IGatewayExecutionService? _gatewayExecutionService;
-    private readonly IConsentRepository? _consentRepository;
-    private readonly IConsentResolutionService? _resolutionService;
     private readonly IGovernedSqlExecutionService? _sqlExecutionService;
     private readonly IEnumerable<IDataSourceExecutor>? _dataSourceExecutors;
     private readonly Autheris.Application.DataSources.IDataSourceTransportGate _transportGate;
@@ -62,11 +60,8 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
     public GovernedAggregationService(
         ITableMetadataRepository metadataRepository,
         IAuditLogRepository auditLogRepository,
-        IUnifiedPolicyDecisionPoint? pdp = null,
-        ITableAccessResolver? accessResolver = null,
+        IAccessDecisionPoint pdp,
         IGatewayExecutionService? gatewayExecutionService = null,
-        IConsentRepository? consentRepository = null,
-        IConsentResolutionService? resolutionService = null,
         IGovernedSqlExecutionService? sqlExecutionService = null,
         IEnumerable<IDataSourceExecutor>? dataSourceExecutors = null,
         IAuditWriter? auditWriter = null,
@@ -80,11 +75,8 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
         _transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
         ArgumentNullException.ThrowIfNull(auditLogRepository);
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
-        _pdp = pdp;
-        _accessResolver = accessResolver ?? (gatewayExecutionService as ITableAccessResolver);
+        _pdp = pdp ?? throw new ArgumentNullException(nameof(pdp));
         _gatewayExecutionService = gatewayExecutionService;
-        _consentRepository = consentRepository ?? (metadataRepository as IConsentRepository);
-        _resolutionService = resolutionService;
         _sqlExecutionService = sqlExecutionService;
         _dataSourceExecutors = dataSourceExecutors;
         _auditWriter = auditWriter ?? new AuditWriter(auditLogRepository, NullLogger<AuditWriter>.Instance);
@@ -97,11 +89,8 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
 
     public GovernedAggregationService(
         ITableMetadataRepository metadataRepository,
-        IUnifiedPolicyDecisionPoint? pdp = null,
-        ITableAccessResolver? accessResolver = null,
+        IAccessDecisionPoint pdp,
         IGatewayExecutionService? gatewayExecutionService = null,
-        IConsentRepository? consentRepository = null,
-        IConsentResolutionService? resolutionService = null,
         IGovernedSqlExecutionService? sqlExecutionService = null,
         IEnumerable<IDataSourceExecutor>? dataSourceExecutors = null,
         IAuditWriter? auditWriter = null,
@@ -114,11 +103,8 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
         // Issue #447 no gate means deny, never pass-through.
         _transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
-        _pdp = pdp;
-        _accessResolver = accessResolver ?? (gatewayExecutionService as ITableAccessResolver);
+        _pdp = pdp ?? throw new ArgumentNullException(nameof(pdp));
         _gatewayExecutionService = gatewayExecutionService;
-        _consentRepository = consentRepository ?? (metadataRepository as IConsentRepository);
-        _resolutionService = resolutionService;
         _sqlExecutionService = sqlExecutionService;
         _dataSourceExecutors = dataSourceExecutors;
         _auditWriter = auditWriter ?? (metadataRepository is IAuditLogRepository repoAudit ? new AuditWriter(repoAudit, NullLogger<AuditWriter>.Instance) : null);

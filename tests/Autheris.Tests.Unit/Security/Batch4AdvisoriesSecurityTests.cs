@@ -75,15 +75,11 @@ public sealed class Batch4AdvisoriesSecurityTests
         metaRepo.GetTableMetadataAsync(meta.Identifier, Arg.Any<CancellationToken>())
             .Returns(meta);
 
-        var accessResolver = Substitute.For<ITableAccessResolver>();
-        accessResolver.ResolveTableAccessAsync(Arg.Any<ClaimsPrincipal>(), meta.Identifier, null, null, Arg.Any<CancellationToken>())
-            .Returns(new ResolvedTableAccess(meta, TableAccessDecision.Allowed(meta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true), Tenant, new Sid("user-1"), Wp0.User("user-1", Tenant.Value)));
-
         var service = new GovernedAggregationService(
             metaRepo,
             Substitute.For<IAuditLogRepository>(),
-            analyticsOptions: Options.Create(new AnalyticsOptions { MinimumGroupSize = 5 }),
-            accessResolver: accessResolver);
+            Autheris.Tests.Unit.TestSupport.AccessDecisionPointStubs.Returning(r => TableAccessDecision.Allowed(meta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)),
+            analyticsOptions: Options.Create(new AnalyticsOptions { MinimumGroupSize = 5 }));
 
         var user = Wp0.User("user-1", Tenant.Value);
 

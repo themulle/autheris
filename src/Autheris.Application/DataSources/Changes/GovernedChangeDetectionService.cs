@@ -33,7 +33,8 @@ public sealed partial class GovernedChangeDetectionService : IGovernedChangeDete
     private static readonly byte[] EphemeralProcessFallbackKey = RandomNumberGenerator.GetBytes(32);
 
     private readonly ITableMetadataRepository _metadataRepository;
-    private readonly IUnifiedPolicyDecisionPoint _pdp;
+    private readonly Autheris.Application.Policy.Pdp.IAccessDecisionPoint _pdp;
+    private readonly Microsoft.Extensions.Logging.ILogger? _logger;
     private readonly IChangeVersionProvider _versionProvider;
     private readonly IColumnMaskingProvider _maskingProvider;
     private readonly IAuditLogRepository _auditLogRepository;
@@ -43,13 +44,15 @@ public sealed partial class GovernedChangeDetectionService : IGovernedChangeDete
 
     public GovernedChangeDetectionService(
         ITableMetadataRepository metadataRepository,
-        IUnifiedPolicyDecisionPoint pdp,
+        Autheris.Application.Policy.Pdp.IAccessDecisionPoint pdp,
         IChangeVersionProvider versionProvider,
         IColumnMaskingProvider maskingProvider,
         IAuditLogRepository auditLogRepository,
         IOptions<ChangeDetectionOptions>? options = null,
-        Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null)
+        Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null,
+        Microsoft.Extensions.Logging.ILogger<GovernedChangeDetectionService>? logger = null)
     {
+        _logger = logger;
         _transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _pdp = pdp ?? throw new ArgumentNullException(nameof(pdp));
@@ -82,7 +85,8 @@ public sealed partial class GovernedChangeDetectionService : IGovernedChangeDete
             tenantId,
             clientIp,
             requestedColumns: null,
-            ct).ConfigureAwait(false);
+            ct,
+            _logger).ConfigureAwait(false);
 
         if (!metadata.Table.IsActive)
         {
@@ -132,7 +136,8 @@ public sealed partial class GovernedChangeDetectionService : IGovernedChangeDete
             request.TenantId,
             request.ClientIp,
             request.SelectColumns,
-            ct).ConfigureAwait(false);
+            ct,
+            _logger).ConfigureAwait(false);
 
         if (!metadata.Table.IsActive)
         {

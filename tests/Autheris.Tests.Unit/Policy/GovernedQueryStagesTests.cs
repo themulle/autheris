@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Policy;
 
+using Autheris.Application.Policy.Pdp;
 using System;
 using System.Collections.Generic;
 using System.Security.Claims;
@@ -34,9 +35,8 @@ public sealed class GovernedQueryStagesTests
     [Fact]
     public async Task Authorize_NonCanonicalClusterAdminClaim_Throws()
     {
-        var pdp = Substitute.For<IUnifiedPolicyDecisionPoint>();
-        pdp.EvaluateAccessAsync(Arg.Any<TableIdentifier>(), Arg.Any<TableMetadata>(), Arg.Any<Autheris.Domain.Security.SecurityPrincipalContext>(),
-                Arg.Any<IReadOnlyList<string>?>(), Arg.Any<CancellationToken>())
+        var pdp = Substitute.For<IAccessDecisionPoint>();
+        pdp.DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>())
             .Returns(TableAccessDecision.Allowed(Orders, new Dictionary<string, ColumnAccessLevel> { ["id"] = ColumnAccessLevel.Clear }, hasUnconstrainedColumnAllow: true));
         // A ForwardAuth identity is never a canonical cluster admin, whatever role claims it carries.
         var user = new ClaimsPrincipal(new ClaimsIdentity(
@@ -51,9 +51,8 @@ public sealed class GovernedQueryStagesTests
     [Fact]
     public async Task Authorize_DeniedDecision_ThrowsWithReasons()
     {
-        var pdp = Substitute.For<IUnifiedPolicyDecisionPoint>();
-        pdp.EvaluateAccessAsync(Arg.Any<TableIdentifier>(), Arg.Any<TableMetadata>(), Arg.Any<Autheris.Domain.Security.SecurityPrincipalContext>(),
-                Arg.Any<IReadOnlyList<string>?>(), Arg.Any<CancellationToken>())
+        var pdp = Substitute.For<IAccessDecisionPoint>();
+        pdp.DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>())
             .Returns(TableAccessDecision.Denied(Orders, "no consent"));
 
         var ex = await Should.ThrowAsync<UnauthorizedAccessException>(() =>
