@@ -231,6 +231,8 @@ public sealed class ConsentRequestService : IConsentRequestService
             ? System.Text.Json.JsonSerializer.Serialize(command.Context)
             : null;
 
+        // Only validated items of the dedicated request field are ever stored under the reserved key.
+        contextJson = RequestedClearCodec.Strip(contextJson);
         if (command.RequestedClear is { Count: > 0 } requestedClear)
         {
             contextJson = RequestedClearCodec.Merge(

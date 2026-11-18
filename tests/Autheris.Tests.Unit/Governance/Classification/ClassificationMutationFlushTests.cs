@@ -116,7 +116,6 @@ public sealed class ClassificationMutationFlushTests
         repo.ColumnTables[columnId.ToString()] = table;
         var ownership = Substitute.For<IDataOwnershipRepository>();
         ownership.IsAuthorizedApproverForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<Sid>(), Arg.Any<CancellationToken>()).Returns(true);
-        var service = new ClassificationAdminService(repo, ownership, null, new FakeTimeProvider(FixedTimestamp));
         var caller = new ClassificationAdminCaller(new TenantId("tenant-a"), "S-1-OWNER", IsClusterAdmin: false, IsGovernanceAdmin: false);
         var meta = new TableMetadata
         {
@@ -125,6 +124,9 @@ public sealed class ClassificationMutationFlushTests
             Table = new Table { Id = Guid.NewGuid(), SourceName = "crm", SchemaName = "public", TableName = "customers", IsActive = true },
             Columns = [new TableColumn { Id = columnId, ColumnName = "ssn", DataType = "varchar" }]
         };
+        var tables = Substitute.For<ITableMetadataRepository>();
+        tables.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(meta);
+        var service = new ClassificationAdminService(repo, tables, ownership, new FakeTimeProvider(FixedTimestamp));
 
         (await service.AssignColumnClassificationAsync(caller, columnId.ToString(), "PII", ClassificationAdminScope.Tenant)).IsOk.ShouldBeTrue();
         repo.VersionFlushes.ShouldBe(1);

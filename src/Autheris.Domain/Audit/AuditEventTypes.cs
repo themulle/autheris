@@ -125,6 +125,7 @@ public static class AuditEventTypes
     public const string ClassificationTransitioned = "CLASSIFICATION_TRANSITIONED";
     public const string ClassificationChanged = "CLASSIFICATION_CHANGED";
     public const string ColumnClassificationChanged = "COLUMN_CLASSIFICATION_CHANGED";
+    public const string ClassificationClearGranted = "CLASSIFICATION_CLEAR_GRANTED";
     public const string MaskRuleChanged = "MASK_RULE_CHANGED";
     public const string MaskOverrideChanged = "MASK_OVERRIDE_CHANGED";
     public const string GovernanceConfigHashRead = "GOVERNANCE_CONFIG_HASH_READ";

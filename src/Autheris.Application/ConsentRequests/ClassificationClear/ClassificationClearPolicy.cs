@@ -43,6 +43,19 @@ public static class RequestedClearCodec
         return root.ToJsonString();
     }
 
+    /// <summary>Removes the server-owned key from client supplied context so a requester can never inject Clear items.</summary>
+    public static string? Strip(string? contextJson)
+    {
+        var root = TryParseObject(contextJson);
+        if (root is null)
+        {
+            return contextJson;
+        }
+
+        root.Remove(JsonKey);
+        return root.ToJsonString();
+    }
+
     /// <summary>Reads the requested Clear items; malformed content yields no items (masked, never widened).</summary>
     public static IReadOnlyList<RequestedClearItem> Parse(string? contextJson)
     {

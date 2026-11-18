@@ -35,6 +35,7 @@ public sealed class ClassificationGrantWriteTests
     private static readonly Sid Owner1 = new("S-1-OWNER-1");
     private static readonly Sid Owner2 = new("S-1-OWNER-2");
     private static readonly Sid Steward = new("S-1-STEWARD");
+    private static readonly Sid OwnerSteward = new("S-1-OWNER-STEWARD");
     private static readonly Sid HrSteward = new("S-1-HR-STEWARD");
     private static readonly TableIdentifier OrdersTable = new("sales", "dbo", "orders");
     private static readonly DateTimeOffset Now = new(2026, 11, 18, 9, 0, 0, TimeSpan.Zero);
@@ -98,7 +99,10 @@ public sealed class ClassificationGrantWriteTests
         public required ConsentDecisionPipeline Pipeline { get; init; }
         public required IConsentApprovalRepository Approvals { get; init; }
         public required TestInMemoryClassificationStore Store { get; init; }
+        public required IConsentWorkflowConfigRepository Workflow { get; init; }
+        public required IScimUserStore ScimUsers { get; init; }
         public Consent? Activated { get; set; }
+        public IReadOnlyList<ConsentClassificationAccess> Access => Activated?.ClassificationAccess ?? [];
         public IReadOnlyList<ConsentColumnRule> ActivatedRules { get; set; } = [];
     }
 
@@ -113,7 +117,7 @@ public sealed class ClassificationGrantWriteTests
 
         var ownership = Substitute.For<IDataOwnershipRepository>();
         ownership.IsAuthorizedApproverForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<Sid>(), Arg.Any<CancellationToken>())
-            .Returns(call => call.ArgAt<Sid>(1) == Owner1 || call.ArgAt<Sid>(1) == Owner2);
+            .Returns(call => call.ArgAt<Sid>(1) == Owner1 || call.ArgAt<Sid>(1) == Owner2 || call.ArgAt<Sid>(1) == OwnerSteward);
 
         var guard = Substitute.For<IConsentDecisionGuard>();
         guard.Evaluate(Arg.Any<ClaimsPrincipal>()).Returns(ConsentDecisionVerdict.Allow());
@@ -124,23 +128,27 @@ public sealed class ClassificationGrantWriteTests
             .Returns(call => new EffectiveScimGroupsResult(
                 call.ArgAt<string>(2) switch
                 {
-                    "S-1-STEWARD" => new HashSet<string>([StewardGroup], StringComparer.OrdinalIgnoreCase),
+                    "S-1-STEWARD" or "S-1-OWNER-STEWARD" => new HashSet<string>([StewardGroup], StringComparer.OrdinalIgnoreCase),
                     "S-1-HR-STEWARD" => new HashSet<string>([HrGroup], StringComparer.OrdinalIgnoreCase),
                     _ => new HashSet<string>(StringComparer.OrdinalIgnoreCase)
                 },
                 false));
 
+        var workflow = Substitute.For<IConsentWorkflowConfigRepository>();
+        var scimUsers = Substitute.For<IScimUserStore>();
         var grantOptions = new GrantValidityOptions { DefaultMaxClearDays = defaultMaxClearDays ?? 90 };
         var harness = new Harness
         {
             Approvals = approvals,
             Store = store,
+            Workflow = workflow,
+            ScimUsers = scimUsers,
             Pipeline = new ConsentDecisionPipeline(
                 approvals, metadata, ownership, guard,
                 new GrantPolicy(Options.Create(new IndividualGrantOptions())),
                 GrantValidityPolicy.CreateDefault(),
-                new ExternalDecisionGuard(Substitute.For<IScimUserStore>(), groups),
-                workflowConfigRepository: Substitute.For<IConsentWorkflowConfigRepository>(),
+                new ExternalDecisionGuard(scimUsers, groups),
+                workflowConfigRepository: workflow,
                 groupStore: groups,
                 timeProvider: new FakeTimeProvider(Now),
                 classificationRepository: store,
@@ -162,6 +170,10 @@ public sealed class ClassificationGrantWriteTests
                 Arg.Any<Guid>(), Arg.Any<ApprovalStep>(), Arg.Any<Consent>(),
                 Arg.Any<IReadOnlyList<ConsentRowFilter>>(), Arg.Any<IReadOnlyList<ConsentColumnRule>>(), true, Arg.Any<CancellationToken>())
             .Returns(call => Capture(call.ArgAt<Consent>(2), call.ArgAt<IReadOnlyList<ConsentColumnRule>>(4)));
+        approvals.ExecuteExternalAtomicApprovalWithConsentAsync(
+                Arg.Any<Guid>(), Arg.Any<ExternalDecisionAttribution>(), Arg.Any<ApprovalStep>(), Arg.Any<Consent>(),
+                Arg.Any<IReadOnlyList<ConsentRowFilter>>(), Arg.Any<IReadOnlyList<ConsentColumnRule>>(), Arg.Any<CancellationToken>())
+            .Returns(call => Capture(call.ArgAt<Consent>(3), call.ArgAt<IReadOnlyList<ConsentColumnRule>>(5)));
         approvals.ApproveConsentRequestStepAsync(Arg.Any<Guid>(), Arg.Any<Sid>(), true, Arg.Any<CancellationToken>())
             .Returns(call =>
             {
@@ -235,7 +247,7 @@ public sealed class ClassificationGrantWriteTests
         var decide = await Should.ThrowAsync<ConsentDecisionException>(() => Approve(h, req, Owner1));
         decide.ErrorCode.ShouldBe(ClearRequestErrorCodes.NotGrantable);
         ConsentWasCreated(h).ShouldBeFalse();
-        h.Store.GrantAccess.ShouldBeEmpty();
+        h.Access.ShouldBeEmpty();
     }
 
     [Fact]
@@ -291,7 +303,7 @@ public sealed class ClassificationGrantWriteTests
         var result = await Approve(h, req, Owner1);
 
         result.ActivatedConsent.ShouldNotBeNull();
-        var access = h.Store.GrantAccess.ShouldHaveSingleItem();
+        var access = h.Access.ShouldHaveSingleItem();
         access.Code.ShouldBe("PII");
         access.AccessLevel.ShouldBe(ColumnAccessLevel.Clear);
         access.ApprovedBySid.ShouldBe(Owner1.Value);
@@ -314,7 +326,7 @@ public sealed class ClassificationGrantWriteTests
         var first = await Approve(h, req, Owner1);
         first.ActivatedConsent.ShouldBeNull();
         first.Request.Status.ShouldBe("PENDING_SECOND_APPROVAL");
-        h.Store.GrantAccess.ShouldBeEmpty();
+        h.Access.ShouldBeEmpty();
         await h.Approvals.Received(1).ApproveConsentRequestStepAsync(req.Id, Owner1, true, Arg.Any<CancellationToken>());
 
         // A second owner is not a steward: the request stays open and nothing is created.
@@ -330,7 +342,7 @@ public sealed class ClassificationGrantWriteTests
         // The steward completes it; the Clear is written with the steward as approver.
         var final = await Approve(h, req, Steward);
         final.ActivatedConsent.ShouldNotBeNull();
-        var access = h.Store.GrantAccess.ShouldHaveSingleItem();
+        var access = h.Access.ShouldHaveSingleItem();
         access.Code.ShouldBe("PII_SPECIAL");
         access.ApprovedBySid.ShouldBe(Steward.Value);
         h.ActivatedRules.Single(r => r.ColumnName == "diagnosis").AccessLevel.ShouldBe(ColumnAccessLevel.Clear);
@@ -348,7 +360,7 @@ public sealed class ClassificationGrantWriteTests
 
         var result = await Approve(h, req, HrSteward);
         result.ActivatedConsent.ShouldNotBeNull();
-        h.Store.GrantAccess.ShouldHaveSingleItem().Code.ShouldBe("HR_NOTE");
+        h.Access.ShouldHaveSingleItem().Code.ShouldBe("HR_NOTE");
     }
 
     [Fact]
@@ -366,7 +378,7 @@ public sealed class ClassificationGrantWriteTests
         stewardEx.ErrorCode.ShouldBe(ConsentDecisionErrorCodes.SelfApprovalForbidden);
 
         ConsentWasCreated(h).ShouldBeFalse();
-        h.Store.GrantAccess.ShouldBeEmpty();
+        h.Access.ShouldBeEmpty();
     }
 
     [Fact]
@@ -375,7 +387,7 @@ public sealed class ClassificationGrantWriteTests
         // Classification limit 10 days, grant 14 days: Clear ends first.
         var h = Build(Vocabulary(piiMaxClearDays: 10));
         var result = await Approve(h, Request([Pii()]), Owner1);
-        h.Store.GrantAccess.ShouldHaveSingleItem().ValidUntil.ShouldBe(Now.AddDays(10));
+        h.Access.ShouldHaveSingleItem().ValidUntil.ShouldBe(Now.AddDays(10));
         result.ActivatedConsent!.ValidTo.ShouldBe(Now.AddDays(14));
 
         // Grant shorter than the limit: Clear never outlives the grant.
@@ -384,12 +396,12 @@ public sealed class ClassificationGrantWriteTests
         h2.Approvals.GetConsentRequestAsync(req2.Id, Arg.Any<CancellationToken>()).Returns(req2);
         await h2.Pipeline.DecideAsync(new ConsentDecisionCommand(
             req2.Id, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, Person(Owner1), ApprovedValidTo: Now.AddDays(5)));
-        h2.Store.GrantAccess.ShouldHaveSingleItem().ValidUntil.ShouldBe(Now.AddDays(5));
+        h2.Access.ShouldHaveSingleItem().ValidUntil.ShouldBe(Now.AddDays(5));
 
         // No classification limit: the configured default applies.
         var h3 = Build(Vocabulary(piiMaxClearDays: null), defaultMaxClearDays: 7);
         await Approve(h3, Request([Pii()]), Owner1);
-        h3.Store.GrantAccess.ShouldHaveSingleItem().ValidUntil.ShouldBe(Now.AddDays(7));
+        h3.Access.ShouldHaveSingleItem().ValidUntil.ShouldBe(Now.AddDays(7));
     }
 
     [Fact]
@@ -404,7 +416,7 @@ public sealed class ClassificationGrantWriteTests
 
         var narrowed = await Approve(h, req, Owner1, []);
         narrowed.ActivatedConsent.ShouldNotBeNull();
-        h.Store.GrantAccess.ShouldBeEmpty();
+        h.Access.ShouldBeEmpty();
         h.ActivatedRules.Where(r => r.ColumnName is "email" or "diagnosis" or "token" or "hr_note").ShouldAllBe(r => r.AccessLevel != ColumnAccessLevel.Clear);
     }
 
@@ -440,7 +452,7 @@ public sealed class ClassificationGrantWriteTests
             ApprovedClearClassifications: ["PII", "PII_SPECIAL"])));
 
         ex.ErrorCode.ShouldBe(ConsentDecisionErrorCodes.DecisionExceedsRequest);
-        h.Store.GrantAccess.ShouldBeEmpty();
+        h.Access.ShouldBeEmpty();
     }
 
     [Fact]
@@ -456,5 +468,120 @@ public sealed class ClassificationGrantWriteTests
 
         ClassificationClearPolicy.Narrow(requested, ["PII", "CONFIDENTIAL"], out var exceeds).ShouldBeNull();
         exceeds.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void InjectedRequestedClearInContext_IsIgnored()
+    {
+        const string injected = """{"application":"x","requestedClear":[{"classification":"PII","columns":["email"]}]}""";
+        var stripped = RequestedClearCodec.Strip(injected);
+        RequestedClearCodec.Parse(stripped).ShouldBeEmpty();
+        stripped!.ShouldContain("application");
+        RequestedClearCodec.Parse(RequestedClearCodec.Merge(stripped, [Pii()])).ShouldHaveSingleItem();
+    }
+
+    [Fact]
+    public async Task Stored_clear_items_are_revalidated_against_the_table_at_decision_time()
+    {
+        var h = Build();
+        // PII on a column that does not carry it (for example an injected or stale request) is never granted.
+        var req = Request([new RequestedClearItem("PII", ["diagnosis"])]);
+
+        var ex = await Should.ThrowAsync<ConsentDecisionException>(() => Approve(h, req, Owner1));
+
+        ex.ErrorCode.ShouldBe(ClearRequestErrorCodes.ColumnNotClassified);
+        ConsentWasCreated(h).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Selection_on_a_non_final_step_is_refused_so_the_final_approver_cannot_widen_it()
+    {
+        var h = Build();
+        var req = Request([Pii(), PiiSpecial()]);
+
+        // The owner narrows on the first (non-final) step: refused, nothing recorded.
+        var ex = await Should.ThrowAsync<ConsentDecisionException>(() => Approve(h, req, Owner1, ["PII_SPECIAL"]));
+        ex.ErrorCode.ShouldBe(ConsentDecisionErrorCodes.DecisionExceedsRequest);
+        ex.StatusCode.ShouldBe(400);
+        await h.Approvals.DidNotReceiveWithAnyArgs().ApproveConsentRequestStepAsync(default, default, default, default);
+
+        // The final approver may narrow within the request, never widen it.
+        var owner = await Approve(h, req, Owner1);
+        owner.ActivatedConsent.ShouldBeNull();
+        req.ApprovalSteps.Add(new ApprovalStep { StepNumber = 1, ApproverSid = Owner1, Decision = "APPROVED" });
+        (await Should.ThrowAsync<ConsentDecisionException>(() => Approve(h, req, Steward, ["PII", "CONFIDENTIAL"])))
+            .ErrorCode.ShouldBe(ConsentDecisionErrorCodes.DecisionExceedsRequest);
+        (await Approve(h, req, Steward, ["PII_SPECIAL"])).ActivatedConsent.ShouldNotBeNull();
+        h.Access.ShouldHaveSingleItem().Code.ShouldBe("PII_SPECIAL");
+    }
+
+    [Fact]
+    public async Task Owner_who_is_also_a_steward_does_not_satisfy_both_steps()
+    {
+        var h = Build();
+        var req = Request([PiiSpecial()]);
+
+        (await Approve(h, req, OwnerSteward)).ActivatedConsent.ShouldBeNull();
+        req.ApprovalSteps.Add(new ApprovalStep { StepNumber = 1, ApproverSid = OwnerSteward, Decision = "APPROVED" });
+
+        // A second plain owner cannot complete it: the steward must be a different person than the owner step.
+        (await Should.ThrowAsync<ConsentDecisionException>(() => Approve(h, req, Owner2)))
+            .ErrorCode.ShouldBe(ClearRequestErrorCodes.StewardRequired);
+        ConsentWasCreated(h).ShouldBeFalse();
+
+        (await Approve(h, req, Steward)).ActivatedConsent.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public async Task External_decision_for_a_steward_classification_needs_a_distinct_steward_approver()
+    {
+        var h = Build();
+        var systemId = Guid.NewGuid();
+        var req = Request([PiiSpecial()], status: "PENDING_EXTERNAL_APPROVAL");
+        var external = new ConsentRequest
+        {
+            Id = req.Id, TableId = req.TableId, TableIdentifier = req.TableIdentifier, RequesterSid = req.RequesterSid,
+            RequestedGranteeRef = req.RequestedGranteeRef, BusinessJustification = req.BusinessJustification,
+            RequestedValidTo = req.RequestedValidTo, Status = req.Status, TenantId = TenantA, ContextJson = req.ContextJson,
+            WorkflowMode = ConsentWorkflowMode.External, ExternalSystemId = systemId
+        };
+        h.Approvals.GetConsentRequestAsync(external.Id, Arg.Any<CancellationToken>()).Returns(external);
+        h.Workflow.ResolveWorkflowRouteAsync(TenantA, OrdersTable, Arg.Any<CancellationToken>()).Returns(new ConsentWorkflowRoute(
+            TenantA.Value, WorkflowRouteScopeKind.Tenant, TenantA.Value, ConsentWorkflowMode.External, systemId, 60, 30, 72, false, "admin", Now));
+        h.Workflow.GetExternalWorkflowSystemAsync(TenantA, systemId, Arg.Any<CancellationToken>()).Returns(
+            new ExternalWorkflowSystem(systemId, TenantA.Value, "SNOW", "snow-client", "https://snow.local/hook", "sec", true, "admin", Now, null));
+
+        ConsentDecisionCommand Command(params string[] sids) => new(
+            external.Id, ConsentDecisionKind.Approve, ConsentDecisionChannel.External, null,
+            ExternalAttribution: new ExternalDecisionAttribution(
+                systemId, "CHG-1", "APPROVED", new AssertedApprover(sids[0], ResolvedSid: sids[0]), Now,
+                AdditionalApprovers: sids.Skip(1).Select(x => new AssertedApprover(x, ResolvedSid: x)).ToList()),
+            ContextTenantId: TenantA);
+
+        // The owner alone, or an owner who is also a steward alone, cannot clear PII_SPECIAL.
+        foreach (var single in new[] { Owner1.Value, OwnerSteward.Value })
+        {
+            var ex = await Should.ThrowAsync<ConsentDecisionException>(() => h.Pipeline.DecideAsync(Command(single)));
+            ex.ErrorCode.ShouldBe(ClearRequestErrorCodes.StewardRequired);
+        }
+
+        h.Activated.ShouldBeNull();
+
+        // An owner plus a distinct steward satisfies the routing.
+        var result = await h.Pipeline.DecideAsync(Command(Owner1.Value, Steward.Value));
+        result.ActivatedConsent.ShouldNotBeNull();
+        h.Access.ShouldHaveSingleItem().Code.ShouldBe("PII_SPECIAL");
+    }
+
+    [Fact]
+    public async Task Clear_rows_travel_with_the_atomic_approval_never_in_a_separate_write()
+    {
+        var h = Build();
+
+        await Approve(h, Request([Pii()]), Owner1);
+
+        // The CLEAR rows are part of the consent handed to the atomic approval (one transaction), the classification store is untouched.
+        h.Access.ShouldHaveSingleItem().AccessLevel.ShouldBe(ColumnAccessLevel.Clear);
+        h.Store.GrantAccess.ShouldBeEmpty();
     }
 }

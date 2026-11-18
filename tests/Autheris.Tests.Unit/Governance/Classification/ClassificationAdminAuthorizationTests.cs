@@ -49,7 +49,7 @@ public sealed class ClassificationAdminAuthorizationTests
             Table = new Table { Id = Guid.NewGuid(), SourceName = "crm", SchemaName = "public", TableName = "customers", IsActive = true }
         });
 
-        return (new ClassificationAdminService(store, ownership, tables, new FakeTimeProvider(Now)), store);
+        return (new ClassificationAdminService(store, tables, ownership, new FakeTimeProvider(Now)), store);
     }
 
     private static ClassificationDefinitionInput Definition(string name = "Custom") =>
@@ -85,6 +85,36 @@ public sealed class ClassificationAdminAuthorizationTests
         allowed.Status.ShouldBe(ClassificationAdminStatus.Ok);
         allowed.Value!.Scope.ShouldBe(ClassificationScopes.Global);
         allowed.Value.UpdatedBy.ShouldBe("S-1-CLUSTER");
+    }
+
+    [Fact]
+    public async Task Tenant_may_change_only_approver_steward_and_max_days_of_a_built_in_code()
+    {
+        var (service, _) = Build();
+        var pii = (await service.GetClassificationAsync(GovernanceAdmin(), "PII", ClassificationAdminScope.Global, null)).Value!;
+        ClassificationDefinitionInput Same() => new(pii.DisplayName, null, pii.ParentCode, pii.RestrictionRank, pii.ClearGrantable, pii.SeparateApproval, ApproverMode.Steward, "S-1-GRP-STEWARD", 14);
+
+        (await service.UpsertClassificationAsync(GovernanceAdmin(), "PII", Same(), ClassificationAdminScope.Tenant, null)).IsOk.ShouldBeTrue();
+        (await service.UpsertClassificationAsync(GovernanceAdmin(), "PII", Same() with { RestrictionRank = 5 }, ClassificationAdminScope.Tenant, null))
+            .Status.ShouldBe(ClassificationAdminStatus.Invalid);
+        (await service.UpsertClassificationAsync(GovernanceAdmin(), "PII", Same() with { ParentCode = "PUBLIC" }, ClassificationAdminScope.Tenant, null))
+            .Status.ShouldBe(ClassificationAdminStatus.Invalid);
+        (await service.UpsertClassificationAsync(GovernanceAdmin(), "PII", Same() with { ClearGrantable = false }, ClassificationAdminScope.Tenant, null))
+            .Status.ShouldBe(ClassificationAdminStatus.Invalid);
+        (await service.UpsertClassificationAsync(GovernanceAdmin(), "PII", Same() with { SeparateApproval = false }, ClassificationAdminScope.Tenant, null))
+            .Status.ShouldBe(ClassificationAdminStatus.Invalid);
+    }
+
+    [Fact]
+    public async Task Credentials_can_never_be_made_clear_grantable_at_any_scope()
+    {
+        var (service, _) = Build();
+        var input = new ClassificationDefinitionInput("Credentials", null, null, 90, true, true, ApproverMode.DataOwner, null, null);
+
+        (await service.UpsertClassificationAsync(ClusterAdmin(), "CREDENTIALS", input, ClassificationAdminScope.Global, null))
+            .Status.ShouldBe(ClassificationAdminStatus.Invalid);
+        (await service.UpsertClassificationAsync(GovernanceAdmin(), "CREDENTIALS", input, ClassificationAdminScope.Tenant, null))
+            .Status.ShouldBe(ClassificationAdminStatus.Invalid);
     }
 
     [Fact]

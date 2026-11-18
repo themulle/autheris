@@ -106,6 +106,7 @@ public static class AuditPolicyTable
         [AuditEventTypes.ClassificationTransitioned] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.ClassificationChanged] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.ColumnClassificationChanged] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.ClassificationClearGranted] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.MaskRuleChanged] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.MaskOverrideChanged] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.GovernanceConfigHashRead] = AuditFailurePolicy.BestEffort,

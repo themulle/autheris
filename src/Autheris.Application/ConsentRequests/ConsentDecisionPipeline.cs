@@ -412,7 +412,8 @@ public sealed partial class ConsentDecisionPipeline(
         // tables. Routing a first step through the step-only path for any other reason (for example the grant class of a table with a
         // sensitive column) would leave the request APPROVED without a consent row, so the grant-class flag must not choose the path.
         // A steward approves per-classification Clear after the data owner: that needs a second distinct approver on the internal channel.
-        bool requireSecondApprover = clearPlan is { NeedsSteward: true } && command.Channel == ConsentDecisionChannel.Internal;
+        bool stewardGate = clearPlan is { NeedsSteward: true };
+        bool requireSecondApprover = stewardGate && command.Channel == ConsentDecisionChannel.Internal;
         bool requiresFourEyes = (meta?.Table.IsHighlySensitive ?? false) || requireSecondApprover;
 
         bool isFinalApproval = !requiresFourEyes || combinedApprovers.Count >= 2 || string.Equals(req.Status, "PENDING_SECOND_APPROVAL", StringComparison.OrdinalIgnoreCase);
@@ -423,6 +424,15 @@ public sealed partial class ConsentDecisionPipeline(
             || columnRules.Count > 0
             || !string.IsNullOrEmpty(command.ColumnMaskingJson)
             || !string.IsNullOrEmpty(command.RowFilterJson);
+
+        if (!isFinalApproval && clearPlan is not null && command.ApprovedClearClassifications is not null)
+        {
+            // Only the final approval selects (narrows) the Clear items, so a later approver can never widen an earlier selection.
+            throw new ConsentDecisionException(
+                ConsentDecisionErrorCodes.DecisionExceedsRequest,
+                "The classification Clear selection is only accepted on the final approval.",
+                statusCode: 400);
+        }
 
         if (!isFinalApproval && hasRestrictions)
         {
@@ -473,9 +483,16 @@ public sealed partial class ConsentDecisionPipeline(
                 approvedWriteRules = req.RequestedWriteRules;
             }
 
-            if (requireSecondApprover)
+            if (stewardGate)
             {
-                await EnsureStewardCoverageAsync(req, clearPlan!, combinedApprovers, ct).ConfigureAwait(false);
+                // Prior approvers in step order, then the current ones: the first is the owner step.
+                var ordered = (req.ApprovalSteps ?? [])
+                    .Where(static s => string.Equals(s.Decision, "APPROVED", StringComparison.OrdinalIgnoreCase))
+                    .OrderBy(static s => s.StepNumber)
+                    .Select(static s => s.ApproverSid.Value)
+                    .Concat(currentApprovers)
+                    .ToList();
+                await EnsureStewardCoverageAsync(req, clearPlan!, ordered, ct).ConfigureAwait(false);
             }
 
             var effectiveFinalSid = command.Channel == ConsentDecisionChannel.External ? externalApproverSids[^1] : actorSid;
@@ -494,9 +511,10 @@ public sealed partial class ConsentDecisionPipeline(
                 columnRules = ApplyClearColumns(columnRules, clearPlan).ToList();
             }
 
+            var consentId = Guid.NewGuid();
             var finalConsent = new Consent
             {
-                Id = Guid.NewGuid(),
+                Id = consentId,
                 TableId = req.TableId,
                 TableIdentifier = req.TableIdentifier,
                 ConsentRequestId = req.Id,
@@ -515,7 +533,10 @@ public sealed partial class ConsentDecisionPipeline(
                 GrantSource = req.RequestKind == ConsentRequestKind.ProfileAssignment
                     ? ConsentGrantSource.AccessProfile
                     : ConsentGrantSource.ConsentRequest,
-                ProfileAssignmentId = req.RequestKind == ConsentRequestKind.ProfileAssignment ? req.Id : null
+                ProfileAssignmentId = req.RequestKind == ConsentRequestKind.ProfileAssignment ? req.Id : null,
+                ClassificationAccess = clearPlan is null
+                    ? []
+                    : BuildClearAccess(req, consentId, clearPlan, effectiveFinalSid, now, effectiveValidTo, DefaultMaxClearDays)
             };
 
             var approvalStep = new ApprovalStep
@@ -540,11 +561,6 @@ public sealed partial class ConsentDecisionPipeline(
                         req.Id, approvalStep, finalConsent, rowFilters, columnRules, requireSecondApprover: true, ct).ConfigureAwait(false)
                     : await _approvalRepository.ExecuteAtomicApprovalWithConsentAsync(
                         req.Id, approvalStep, finalConsent, rowFilters, columnRules, ct).ConfigureAwait(false);
-            }
-
-            if (clearPlan is not null)
-            {
-                await WriteClearAccessAsync(activated, req, clearPlan, effectiveFinalSid, now, effectiveValidTo, ct).ConfigureAwait(false);
             }
 
             var approvedReq = CloneWithStatus(req, "APPROVED", now);

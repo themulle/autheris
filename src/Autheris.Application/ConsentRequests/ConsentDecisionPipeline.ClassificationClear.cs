@@ -61,26 +61,25 @@ public sealed partial class ConsentDecisionPipeline
             : await classificationRepository.GetClassificationsAsync(tenant, includeInactive: true, ct).ConfigureAwait(false);
         var catalog = ClassificationClearPolicy.ResolveCatalog(tenant, definitions);
 
-        foreach (var item in approved)
-        {
-            // Re-check the live vocabulary: a classification deactivated or made non-grantable since the request is never cleared.
-            if (string.Equals(item.Classification, ClassificationScopes.CredentialsCode, StringComparison.Ordinal) ||
-                !catalog.Definitions.TryGetValue(item.Classification, out var def) ||
-                !def.IsActive || !def.ClearGrantable || !def.SeparateApproval)
-            {
-                throw new ConsentDecisionException(
-                    ClearRequestErrorCodes.NotGrantable,
-                    "Clear access can no longer be granted for a requested classification.",
-                    statusCode: 409);
-            }
-        }
-
-        if (classificationRepository is null)
+        if (classificationRepository is null || _metadataRepository is null)
         {
             throw new ConsentDecisionException(
                 ClearRequestErrorCodes.Unavailable,
-                "Classification Clear cannot be persisted by this deployment.",
+                "Classification Clear cannot be verified or persisted by this deployment.",
                 statusCode: 409);
+        }
+
+        // The stored request is never trusted: re-validate the approved items against the live vocabulary and the table
+        // (columns exist and carry exactly that classification, grantable, never CREDENTIALS).
+        var meta = await _metadataRepository.GetTableMetadataAsync(req.TableIdentifier, ct).ConfigureAwait(false)
+            ?? throw new ConsentDecisionException(ClearRequestErrorCodes.Unavailable, "The table metadata was not found.", statusCode: 409);
+        try
+        {
+            approved = ClassificationClearPolicy.ValidateRequest(approved, catalog, meta, tenant);
+        }
+        catch (ClearRequestException ex)
+        {
+            throw new ConsentDecisionException(ex.Code, ex.Message, statusCode: 409);
         }
 
         return ClassificationClearPolicy.BuildPlan(approved, catalog);
@@ -120,10 +119,15 @@ public sealed partial class ConsentDecisionPipeline
         }
     }
 
-    /// <summary>Every steward group of the approved classifications must be represented by one of the approvers.</summary>
+    /// <summary>
+    /// Every steward group of the approved classifications must be represented by an approver other than the first one (the owner
+    /// step): an owner who is also a steward never satisfies both roles, and at least two distinct people must approve.
+    /// </summary>
     private async Task EnsureStewardCoverageAsync(
-        ConsentRequest req, ClearApprovalPlan plan, IReadOnlyList<string> approverSids, CancellationToken ct)
+        ConsentRequest req, ClearApprovalPlan plan, IReadOnlyList<string> orderedApproverSids, CancellationToken ct)
     {
+        var distinct = orderedApproverSids.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var approverSids = distinct.Skip(1).ToList();
         var covered = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         if (groupStore is not null)
         {
@@ -143,7 +147,7 @@ public sealed partial class ConsentDecisionPipeline
             }
         }
 
-        if (plan.StewardGroupSids.Any(g => !covered.Contains(g)))
+        if (distinct.Count < 2 || plan.StewardGroupSids.Any(g => !covered.Contains(g)))
         {
             throw new ConsentDecisionException(
                 ClearRequestErrorCodes.StewardRequired,
@@ -171,22 +175,16 @@ public sealed partial class ConsentDecisionPipeline
             .ToList();
     }
 
-    private async Task WriteClearAccessAsync(
-        Consent activated, ConsentRequest req, ClearApprovalPlan plan, Sid approver, DateTimeOffset now, DateTimeOffset grantValidTo, CancellationToken ct)
-    {
-        foreach (var item in plan.Items)
+    private static List<ConsentClassificationAccess> BuildClearAccess(
+        ConsentRequest req, Guid consentId, ClearApprovalPlan plan, Sid approver, DateTimeOffset now, DateTimeOffset grantValidTo, int defaultMaxClearDays) =>
+        plan.Items.Select(item => new ConsentClassificationAccess
         {
-            var def = plan.Catalog.Definitions[item.Classification];
-            await classificationRepository!.UpsertConsentClassificationAccessAsync(new ConsentClassificationAccess
-            {
-                TenantId = req.TenantId.Value,
-                ConsentId = activated.Id,
-                Code = item.Classification,
-                AccessLevel = ColumnAccessLevel.Clear,
-                ValidUntil = ClassificationClearPolicy.CapValidity(grantValidTo, now, def, DefaultMaxClearDays),
-                ApprovedBySid = approver.Value,
-                ApprovedAt = now
-            }, ct).ConfigureAwait(false);
-        }
-    }
+            TenantId = req.TenantId.Value,
+            ConsentId = consentId,
+            Code = item.Classification,
+            AccessLevel = ColumnAccessLevel.Clear,
+            ValidUntil = ClassificationClearPolicy.CapValidity(grantValidTo, now, plan.Catalog.Definitions[item.Classification], defaultMaxClearDays),
+            ApprovedBySid = approver.Value,
+            ApprovedAt = now
+        }).ToList();
 }

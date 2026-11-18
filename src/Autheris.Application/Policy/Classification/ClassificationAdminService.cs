@@ -122,13 +122,14 @@ public interface IClassificationAdminService
 /// </summary>
 public sealed class ClassificationAdminService(
     IClassificationRepository repository,
+    ITableMetadataRepository tableMetadataRepository,
     IDataOwnershipRepository? ownershipRepository = null,
-    ITableMetadataRepository? tableMetadataRepository = null,
     TimeProvider? timeProvider = null) : IClassificationAdminService
 {
     private const string ColumnWideOverride = "_all";
 
     private readonly IClassificationRepository _repository = repository ?? throw new ArgumentNullException(nameof(repository));
+    private readonly ITableMetadataRepository _tables = tableMetadataRepository ?? throw new ArgumentNullException(nameof(tableMetadataRepository));
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
 
     public static string? ParseOverrideCode(string codeOrAll) =>
@@ -167,6 +168,22 @@ public sealed class ClassificationAdminService(
         if (!ClassificationHierarchyValidator.IsValidClassificationCode(code))
         {
             return Invalid<DataClassification>("The classification code is not valid.");
+        }
+
+        if (string.Equals(code, ClassificationScopes.CredentialsCode, StringComparison.Ordinal) && input.ClearGrantable)
+        {
+            return Invalid<DataClassification>("Credentials can never be granted as clear.");
+        }
+
+        // A tenant may adjust approver, steward group and max_clear_days of a built-in code, never its rank, parent or grantability.
+        if (resolved.Scope != ClassificationScopes.Global &&
+            ClassificationAccessResolver.BuiltInCatalog(resolved.Scope!).Definitions.TryGetValue(code, out var builtIn) &&
+            (builtIn.RestrictionRank != input.RestrictionRank ||
+             !string.Equals(builtIn.ParentCode, input.ParentCode, StringComparison.Ordinal) ||
+             builtIn.ClearGrantable != input.ClearGrantable ||
+             builtIn.SeparateApproval != input.SeparateApproval))
+        {
+            return Invalid<DataClassification>("A tenant may only change approver, steward group and max clear days of a built-in classification.");
         }
 
         var existing = await _repository.GetClassificationAsync(resolved.Scope!, code, ct).ConfigureAwait(false);
@@ -450,9 +467,9 @@ public sealed class ClassificationAdminService(
             return (null, null, ColumnNotFound<T>());
         }
 
-        if (!caller.IsClusterAdmin && tableMetadataRepository is not null)
+        if (!caller.IsClusterAdmin)
         {
-            var meta = await tableMetadataRepository.GetTableMetadataAsync(table.Value, ct).ConfigureAwait(false);
+            var meta = await _tables.GetTableMetadataAsync(table.Value, ct).ConfigureAwait(false);
             if (meta is null)
             {
                 return (null, null, ColumnNotFound<T>());
