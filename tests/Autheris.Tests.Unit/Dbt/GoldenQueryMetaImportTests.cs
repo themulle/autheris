@@ -139,7 +139,8 @@ public sealed class GoldenQueryMetaImportTests
             Entry("Operation directive", "query Q @live { orders { id } }"),
             Entry("Braces", braces),
             Entry("Alias own", "{ o: orders { identifier: id } }"),
-            Entry("Alias foreign", "{ o: payroll { id } }")
+            Entry("Alias foreign", "{ o: payroll { id } }"),
+            Entry("Connection", "{ ordersConnection { edges { node { id } } } }")
         ]));
 
         result.Warnings.ShouldContain(w => w.Contains("entry 0") && w.Contains("QUERY_FRAGMENTS_NOT_ALLOWED"));
@@ -148,6 +149,7 @@ public sealed class GoldenQueryMetaImportTests
         result.Warnings.ShouldContain(w => w.Contains("entry 3") && w.Contains("QUERY_DIRECTIVES_NOT_ALLOWED"));
         result.Warnings.ShouldContain(w => w.Contains("entry 4") && w.Contains("QUERY_TOO_COMPLEX"));
         result.Warnings.ShouldContain(w => w.Contains("entry 6") && w.Contains("QUERY_FOREIGN_DATASET"));
+        result.Warnings.ShouldContain(w => w.Contains("entry 7") && w.Contains("QUERY_CONNECTION_ROOT_NOT_ALLOWED"));
         fixture.Store.Stored(TenantA, OrdersTableId.ToString()).Select(e => e.Title).ShouldBe(["Alias own"]);
     }
 

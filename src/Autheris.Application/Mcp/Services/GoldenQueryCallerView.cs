@@ -62,6 +62,12 @@ public sealed class GoldenQueryCallerView
             var next = new List<TableIdentifier>();
             foreach (var seed in frontier)
             {
+                if (visible.Count >= MaxDatasets)
+                {
+                    // Beyond the cap a dataset stays unresolved and invisible: stored entries of it are dropped (fail closed).
+                    break;
+                }
+
                 var key = Key(seed.Domain, seed.Table);
                 var mapping = seed.Mapping;
                 if (mapping is null && map is not null && seed.Id is { } id)
@@ -114,13 +120,13 @@ public sealed class GoldenQueryCallerView
 
     /// <summary>
     /// The datasets other than the owner that <paramref name="query"/> reaches; <c>null</c> when the entry cannot be proven safe (it does not parse,
-    /// has fragments, selects a hidden field or reaches an invisible or unresolvable dataset). The walk applies to stored entries with a mapping of the owner.
+    /// has fragments, selects a hidden field or reaches an invisible or unresolvable dataset). Stored entries are always verified: with a mapping of the owner by the full walk, without one only a flat selection is served.
     /// </summary>
     private IEnumerable<(string Domain, string Table)>? Referenced(GoldenQuery query)
     {
         var ownerKey = Key(query.Domain, query.TableName);
         // Configured entries are administrator-authored and may use any shape; they keep the identifier match of the read context.
-        if (!query.FromStore || !_mappings.TryGetValue(ownerKey, out var owner))
+        if (!query.FromStore)
         {
             return [];
         }
@@ -133,6 +139,12 @@ public sealed class GoldenQueryCallerView
         catch (Exception ex) when (ex is SyntaxException or ArgumentException or InvalidOperationException)
         {
             return null;
+        }
+
+        if (!_mappings.TryGetValue(ownerKey, out var owner))
+        {
+            // Without a mapping of the owner no relation can be resolved: only a flat selection of the owner's own fields may be served.
+            return IsFlatQuery(document) ? [] : null;
         }
 
         var reached = new Dictionary<(string, string), (string Domain, string Table)>();
@@ -156,6 +168,28 @@ public sealed class GoldenQueryCallerView
         }
 
         return reached.Values.ToList();
+    }
+
+    private static bool IsFlatQuery(DocumentNode document)
+    {
+        foreach (var definition in document.Definitions)
+        {
+            if (definition is not OperationDefinitionNode { Operation: OperationType.Query } operation)
+            {
+                return false;
+            }
+
+            foreach (var selection in operation.SelectionSet.Selections)
+            {
+                if (selection is not FieldNode { SelectionSet: { } fields } ||
+                    fields.Selections.Any(f => f is not FieldNode { SelectionSet: null }))
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
     }
 
     private bool Walk(

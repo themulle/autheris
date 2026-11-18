@@ -77,10 +77,14 @@ public sealed class GoldenQueryCallerViewTests
         (await service.GetGoldenQueriesAsync(restricted.ToContext(Tenant), null, null, CancellationToken.None)).ShouldBeEmpty();
     }
 
-    [Fact]
-    public async Task Without_graphql_mapping_only_the_owner_is_checked()
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData("{ orders { id } }", 1)]
+    [InlineData("{ orders { id customer { name } } }", 0)]
+    [InlineData("{ orders { ... on Order { id } } }", 0)]
+    public async Task Without_graphql_mapping_only_a_flat_selection_is_served(string query, int expected)
     {
-        var service = NewService("{ orders { id } }");
+        var service = NewService(query);
         var view = await GoldenQueryCallerView.BuildAsync(
             [new GoldenQueryCallerView.Seed(Orders.Domain, Orders.TableName, Orders)],
             null,
@@ -88,7 +92,35 @@ public sealed class GoldenQueryCallerViewTests
             (_, _, _, _, _) => Task.FromResult<IReadOnlySet<string>?>(new HashSet<string>()),
             CancellationToken.None);
 
-        (await service.GetGoldenQueriesAsync(view.ToContext(Tenant), null, null, CancellationToken.None)).Count.ShouldBe(1);
+        (await service.GetGoldenQueriesAsync(view.ToContext(Tenant), null, null, CancellationToken.None)).Count.ShouldBe(expected);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Datasets_beyond_the_closure_cap_serve_no_stored_entries()
+    {
+        var seeds = Enumerable.Range(0, GoldenQueryCallerView.MaxDatasets + 1)
+            .Select(i => new GoldenQueryCallerView.Seed("warehouse", "t" + i, new TableIdentifier("warehouse", "dbo", "t" + i)))
+            .ToList();
+        var view = await GoldenQueryCallerView.BuildAsync(
+            seeds,
+            null,
+            (t, _) => Task.FromResult<IReadOnlySet<TableIdentifier>>(new HashSet<TableIdentifier>()),
+            (_, _, _, _, _) => Task.FromResult<IReadOnlySet<string>?>(new HashSet<string>()),
+            CancellationToken.None);
+        var demo = Substitute.For<IDemoDataSwitch>();
+        demo.Enabled.Returns(false);
+        var repository = Substitute.For<IGoldenQueryRepository>();
+        repository.GetForTenantAsync(Arg.Any<TenantId>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<GoldenQueryStoreRecord>>(
+        [
+            new GoldenQueryStoreRecord("a", "tbl-0", "warehouse", "dbo", "t0", GoldenQuerySource.Dbt, "k0", "In", null, "{ t0 { id } }", null, new string('a', 64), DateTimeOffset.UtcNow),
+            new GoldenQueryStoreRecord("b", "tbl-1", "warehouse", "dbo", "t" + GoldenQueryCallerView.MaxDatasets, GoldenQuerySource.Dbt, "k1", "Out", null, "{ t" + GoldenQueryCallerView.MaxDatasets + " { id } }", null, new string('a', 64), DateTimeOffset.UtcNow)
+        ]));
+        var service = new GoldenQueryService(Options.Create(new GatewayOptions()), NullLogger<GoldenQueryService>.Instance, demo, repository);
+
+        var served = await service.GetGoldenQueriesAsync(view.ToContext(Tenant), null, null, CancellationToken.None);
+
+        served.Select(q => q.Id).ShouldBe(["k0"]);
     }
 
     private static async Task<IReadOnlyList<GoldenQuery>> Serve(

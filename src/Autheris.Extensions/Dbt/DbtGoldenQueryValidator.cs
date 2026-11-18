@@ -97,10 +97,10 @@ internal static class DbtGoldenQueryValidator
         return (new GoldenQueryStoreEntry(sourceKey, title, string.IsNullOrWhiteSpace(description) ? null : description, query, variables), null);
     }
 
-    /// <summary>A root field belongs to the dataset when it is the table name or the catalog GraphQL name (<c>domain_schema_table</c>), optionally as connection field.</summary>
+    /// <summary>A root field belongs to the dataset when it is the table name or the catalog GraphQL name (<c>domain_schema_table</c>); connection fields are not accepted.</summary>
     internal static bool OwnsRootField(TableIdentifier dataset, string field)
     {
-        var name = field.EndsWith("Connection", StringComparison.Ordinal) ? field[..^"Connection".Length] : field;
+        var name = field;
         return string.Equals(name, dataset.TableName, StringComparison.OrdinalIgnoreCase)
             || string.Equals(name, Sanitize($"{dataset.Domain}_{dataset.Schema}_{dataset.TableName}"), StringComparison.OrdinalIgnoreCase)
             || string.Equals(name, Sanitize($"{dataset.Schema}_{dataset.TableName}"), StringComparison.OrdinalIgnoreCase);
@@ -166,7 +166,9 @@ internal static class DbtGoldenQueryValidator
 
                 if (!OwnsRootField(dataset, root.Name.Value))
                 {
-                    return "QUERY_FOREIGN_DATASET";
+                    return root.Name.Value.EndsWith("Connection", StringComparison.Ordinal) && OwnsRootField(dataset, root.Name.Value[..^"Connection".Length])
+                        ? "QUERY_CONNECTION_ROOT_NOT_ALLOWED"
+                        : "QUERY_FOREIGN_DATASET";
                 }
             }
 
