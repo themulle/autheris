@@ -415,4 +415,99 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
 
         viaDefault.ShouldBeEmpty();
     }
+
+    // ---------------------------------------------------------------------------------------------------------------------------
+    // #845 / #838: a column the caller has no access to is neither named nor counted on MCP or GraphQL (REST keeps its request-access listing).
+    // ---------------------------------------------------------------------------------------------------------------------------
+
+    private const string OrdersDataset = "dom_a.main.orders_a";
+    private const string DeniedColumn = "secret_note";
+
+    private static async Task<string> GraphQlCatalogAsync(HttpClient client)
+    {
+        var response = await client.PostAsJsonAsync("/graphql", new
+        {
+            query = "query { catalog { tableName columnNames columns { name } } catalogObject(domain: \"dom_a\", schema: \"main\", name: \"orders_a\") { columnNames columns { name } } }"
+        });
+        return await BodyAsync(response);
+    }
+
+    private static IReadOnlyList<string> SchemaColumnNames(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        return doc.RootElement.GetProperty("tables")[0].GetProperty("columns").EnumerateArray().Select(c => c.GetProperty("name").GetString()!).ToList();
+    }
+
+    [Fact]
+    public async Task Parity_DeniedColumn_NotNamedOnRestFilteredMcpGetTableSchemaDescribeDatasetAndGraphQl()
+    {
+        var client = await ClientAsync("S-A-USER", TenantA, "Reader");
+
+        MaskingStatesOf(await BodyAsync(await client.GetAsync("/api/v1/catalog/datasets/" + OrdersDataset))).ShouldNotContainKey(DeniedColumn);
+        (await GraphQlCatalogAsync(client)).ShouldNotContain(DeniedColumn);
+
+        await using var mcp = await McpTestClient.ConnectAsync(client);
+        var (_, schema) = await McpTestClient.CallAsync(mcp, "get_table_schema", new { dataset = OrdersDataset });
+        var (_, describe) = await McpTestClient.CallAsync(mcp, "describe_dataset", new { dataset = OrdersDataset });
+        var (_, permissions) = await McpTestClient.CallAsync(mcp, "get_my_permissions", new { dataset = OrdersDataset });
+        schema.ShouldNotContain(DeniedColumn);
+        describe.ShouldNotContain(DeniedColumn);
+        permissions.ShouldNotContain(DeniedColumn);
+        SchemaColumnNames(schema).ShouldContain("amount");
+    }
+
+    [Fact]
+    public async Task Parity_AgentReadScope_ColumnSetEqualAcrossMcpTools()
+    {
+        var client = await ClientAsync("S-A-USER", TenantA, "Reader");
+        await using var mcp = await McpTestClient.ConnectAsync(client);
+
+        var (_, schema) = await McpTestClient.CallAsync(mcp, "get_table_schema", new { dataset = OrdersDataset });
+        var (_, describe) = await McpTestClient.CallAsync(mcp, "describe_dataset", new { dataset = OrdersDataset });
+        var (_, permissions) = await McpTestClient.CallAsync(mcp, "get_my_permissions", new { dataset = OrdersDataset });
+
+        using var describeDoc = JsonDocument.Parse(describe);
+        var describeNames = describeDoc.RootElement.GetProperty("columns").EnumerateArray().Select(c => c.GetProperty("name").GetString()!).ToList();
+        using var permissionsDoc = JsonDocument.Parse(permissions);
+        var permissionNames = permissionsDoc.RootElement.GetProperty("columns").EnumerateArray().Select(c => c.GetProperty("name").GetString()!).ToList();
+        SchemaColumnNames(schema).ShouldBe(describeNames, ignoreOrder: true);
+        permissionNames.ShouldBe(describeNames, ignoreOrder: true);
+        describeNames.ShouldNotContain(DeniedColumn);
+    }
+
+    [Fact]
+    public async Task Parity_ConsentlessCaller_NoColumnNamesOnMcpOrGraphQl()
+    {
+        var client = await ClientAsync("S-B-USER", TenantB, "Reader");
+        await using var mcp = await McpTestClient.ConnectAsync(client);
+
+        var (_, schema) = await McpTestClient.CallAsync(mcp, "get_table_schema", new { dataset = "dom_b.main.invoices_b" });
+        var (_, permissions) = await McpTestClient.CallAsync(mcp, "get_my_permissions", new { dataset = "dom_b.main.invoices_b" });
+        var graphQl = await BodyAsync(await client.PostAsJsonAsync("/graphql", new { query = "query { catalog { tableName columnNames columns { name } } }" }));
+
+        foreach (var column in new[] { "secret_note", "amount" })
+        {
+            schema.ShouldNotContain(column);
+            permissions.ShouldNotContain(column);
+            graphQl.ShouldNotContain(column);
+        }
+    }
+
+    [Fact]
+    public async Task Parity_ColumnCount_ListDatasetsEqualsDescribeDatasetColumns()
+    {
+        var client = await ClientAsync("S-A-USER", TenantA, "Reader");
+        await using var mcp = await McpTestClient.ConnectAsync(client);
+
+        var (_, list) = await McpTestClient.CallAsync(mcp, "list_datasets", new { });
+        var (_, describe) = await McpTestClient.CallAsync(mcp, "describe_dataset", new { dataset = OrdersDataset });
+
+        using var describeDoc = JsonDocument.Parse(describe);
+        var described = describeDoc.RootElement.GetProperty("columns").GetArrayLength();
+        using var listDoc = JsonDocument.Parse(list);
+        var datasets = listDoc.RootElement.TryGetProperty("datasets", out var d) ? d : listDoc.RootElement;
+        var row = datasets.EnumerateArray().Single(x => x.GetProperty("id").GetString() == OrdersDataset);
+        row.GetProperty("columnCount").GetInt32().ShouldBe(described);
+        described.ShouldBe(2);
+    }
 }

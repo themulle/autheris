@@ -80,7 +80,7 @@ public static class CatalogDiscoveryProjection
             Bm25Score: 1.0,
             VectorScore: null,
             MatchedTerms: [],
-            RelevantColumns: obj.Columns.Where(static c => c.State != DiscoveryColumnState.NoAccess).Select(static c => c.Name).Take(5).ToList(),
+            RelevantColumns: DiscoveryColumnVisibility.VisibleColumns(obj).Select(static c => c.Name).Take(5).ToList(),
             RelatedJoinPaths: [],
             SuggestedGraphQlField: null,
             EffectiveMode: effectiveMode,

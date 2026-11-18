@@ -409,8 +409,11 @@ public sealed partial class Query
         return new GraphQLException(error.Build());
     }
 
-    internal static TableMetadataDto ToTableMetadataDto(DiscoveryObject obj, string? language = null) =>
-        new()
+    internal static TableMetadataDto ToTableMetadataDto(DiscoveryObject obj, string? language = null)
+    {
+        // Columns and names come from the shared visible set only: a column the caller has no access to is neither listed nor named.
+        var visibleColumns = Autheris.Application.Catalog.Discovery.DiscoveryColumnVisibility.VisibleColumns(obj);
+        return new()
         {
             Kind = obj.Kind,
             Domain = obj.Domain,
@@ -419,8 +422,8 @@ public sealed partial class Query
             DisplayName = obj.DisplayName ?? obj.Name,
             Sensitivity = obj.Sensitivity,
             Description = obj.Description,
-            Columns = obj.Columns,
-            ColumnNames = obj.Columns.Select(static c => c.Name).ToList(),
+            Columns = visibleColumns,
+            ColumnNames = visibleColumns.Select(static c => c.Name).ToList(),
             Tags = obj.Tags,
             AccessStatus = obj.Access switch
             {
@@ -442,6 +445,7 @@ public sealed partial class Query
             Applications = obj.Applications,
             DocumentsTruncated = obj.DocumentsTruncated
         };
+    }
 
     /// <summary>The shaping loop of the catalog query: rows that do not exist for the caller are dropped before filtering and paging (F-C11).</summary>
     internal static List<TableMetadataDto> ToCatalogDtos(
@@ -477,8 +481,7 @@ public sealed partial class Query
 
         var resolved = !string.IsNullOrWhiteSpace(language) ? t.Table.Texts.Resolve(language) : null;
 
-        var columnNames = t.Columns.Select(c => c.ColumnName).ToList();
-        IReadOnlyList<DiscoveryColumn> columns = t.Columns.Select(c =>
+        IReadOnlyList<DiscoveryColumn> allColumns = t.Columns.Select(c =>
             {
                 var colResolved = !string.IsNullOrWhiteSpace(language) ? c.Texts.Resolve(language) : null;
                 var isSens = ClassificationMetadata.IsColumnSensitive(t, c);
@@ -501,6 +504,8 @@ public sealed partial class Query
                     Classifications: classifications,
                     ClearRequestable: clearRequestable);
             }).ToList();
+        var columns = Autheris.Application.Catalog.Discovery.DiscoveryColumnVisibility.VisibleColumns(allColumns);
+        var columnNames = columns.Select(static c => c.Name).ToList();
 
         return new TableMetadataDto
         {

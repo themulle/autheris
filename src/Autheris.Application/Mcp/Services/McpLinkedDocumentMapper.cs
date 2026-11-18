@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using Autheris.Application.Catalog.Discovery;
 using Autheris.Domain.Model;
 
 /// <summary>Maps the linked documents of a discovery object to MCP output under the per-result payload cap.</summary>
@@ -25,7 +26,7 @@ internal sealed record McpLinkedDocuments(
         var truncated = obj.DocumentsTruncated;
         var docs = Take(obj.Documents, ref budget, ref truncated);
         var columns = new Dictionary<string, IReadOnlyList<McpLinkedDocument>>(StringComparer.OrdinalIgnoreCase);
-        foreach (var column in obj.Columns.Where(static c => c.Documents.Count > 0 && c.State != DiscoveryColumnState.NoAccess))
+        foreach (var column in DiscoveryColumnVisibility.VisibleColumns(obj).Where(static c => c.Documents.Count > 0))
         {
             var taken = Take(column.Documents, ref budget, ref truncated);
             if (taken.Count > 0) columns[column.Name] = taken;

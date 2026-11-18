@@ -404,7 +404,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
                 var graphQlMapping = _graphQlMap is null ? null : await _graphQlMap.GetTableAsync(tableId, ct).ConfigureAwait(false);
                 var graphQlFields = graphQlMapping?.Columns.ToDictionary(m => m.ColumnName, m => m.Field, StringComparer.OrdinalIgnoreCase);
 
-                var columns = detail.Columns.Select(c => new McpTableBriefColumn(
+                var columns = DiscoveryColumnVisibility.VisibleColumns(detail).Select(c => new McpTableBriefColumn(
                     Name: c.Name,
                     Type: c.Type,
                     Description: c.Description,
@@ -459,7 +459,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
                 allowed = true,
                 isActive = detail.IsActive,
                 sensitivity = detail.Sensitivity,
-                columns = detail.Columns.Select(c => new
+                columns = DiscoveryColumnVisibility.VisibleColumns(detail).Select(c => new
                 {
                     name = c.Name,
                     type = c.Type,
@@ -733,7 +733,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
         RequestContext requestContext,
         CancellationToken ct)
     {
-        if (_graphQlMap == null || detail.Columns.Count == 0)
+        if (_graphQlMap == null || DiscoveryColumnVisibility.VisibleColumns(detail).Count == 0)
         {
             return [];
         }
@@ -767,7 +767,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
         return relations;
 
         static bool Lists(CatalogDatasetDetail dataset, string column) =>
-            dataset.Columns.Any(c => string.Equals(c.Name, column, StringComparison.OrdinalIgnoreCase));
+            DiscoveryColumnVisibility.VisibleColumns(dataset).Any(c => string.Equals(c.Name, column, StringComparison.OrdinalIgnoreCase));
     }
 
     private async Task<IReadOnlyList<CatalogSearchHit>> FilterHitsByTagAsync(IReadOnlyList<CatalogSearchHit> hits, string tag, int limit, CancellationToken ct)
