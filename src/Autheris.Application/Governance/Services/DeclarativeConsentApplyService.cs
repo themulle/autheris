@@ -49,7 +49,7 @@ public sealed class DeclarativeConsentApplyService(
     private static readonly Dictionary<string, KeyedLockEntry> GranteeLocks = new(StringComparer.Ordinal);
     private static readonly GatewayRole[] RequiredApplyRoles = [GatewayRole.GovernanceAdmin, GatewayRole.ClusterAdmin];
 
-    // the policy is stateless; without an injected instance the built-in maxima apply (never "no policy").
+    // the policy is stateless; without an injected instance the test-default validity maxima apply (never "no policy").
     // Kept for constructor/DI compatibility: the APPLIED audit entries are written by ReplaceConsentsAsync inside its transaction, never separately.
     private readonly IAuditLogRepository _auditLogRepository = auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository));
 
@@ -206,7 +206,7 @@ public sealed class DeclarativeConsentApplyService(
             manifestGrantees.Add((granteeType, granteeSid.Value));
             declaredPairs.Add((granteeType, granteeSid.Value, tableId));
 
-            // individual grants need an absolute, class-bounded validUntil (also in dry-run). Group/role grants are standing.
+            // every policy needs an absolute validUntil within the declarative maximum (also in dry-run); individual grants are also class-bounded.
             var individual = granteeType is GranteeType.User or GranteeType.ServicePrincipal;
 
             // SR-M-10 (SoD): no self-grant, neither directly (any identifier form) nor through a group or role the actor holds.
