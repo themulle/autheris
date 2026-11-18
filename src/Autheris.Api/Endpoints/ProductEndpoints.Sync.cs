@@ -50,6 +50,11 @@ public static partial class ProductEndpoints
             return ApiProblems.Forbidden(ProductErrorCodes.CreationNotAuthorized, "Only the synchronisation identity may call the synchronisation endpoints.", context);
         }
 
+        if (apply && context.User.IsReadOnly())
+        {
+            return ApiProblems.Forbidden(ProductErrorCodes.CreationNotAuthorized, "A read-only token cannot apply a synchronisation.", context);
+        }
+
         var caller = new ProductCaller(security.UserSid, security.TenantId, false, ViaSyncPath: true);
         return await MapErrorsAsync(async () =>
         {
