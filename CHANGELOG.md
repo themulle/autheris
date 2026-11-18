@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- `callerState.rowScopeDescription` on `GET /api/v1/catalog/objects/{id}` and the list route: the owner-authored description of the caller's own applicable allow consent (the one `describe_my_access` shows; user or service principal before group, then earliest expiry), `null` unless `access` is `granted` (#858).
 - Linked documents and applications appear on discovery objects (`documents`, `applications`, per-column `documents`; GraphQL and MCP `describe_dataset`, `documentCount` in `list_datasets`). A document is returned only when it is readable for the caller (official or same tenant), not hidden from discovery, and its target is discoverable. At most 10 documents per object and 5 per column, newest first.
 - MCP tool `read_document` returns one whole document as sanitised Markdown with `trust`, the untrusted-content notice for tenant text and a 64 KiB window (`truncated`, `nextOffset`). `search_docs` accepts `dataset` and `column` filters and lists the discoverable `linkedTargets` of each hit.
 - `search_catalog` hits and `find_relevant_tables` candidates carry `accessStatus`, the caller's own status as `list_datasets` reports it (`GRANTED`, `PENDING`, `EXPIRED`, `REQUEST_ACCESS`); the REST `/api/v1/catalog/search` hits carry it too. `find_relevant_tables` recommends an access request instead of the query tools for candidates the caller cannot read (#804).
