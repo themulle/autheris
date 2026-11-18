@@ -484,7 +484,7 @@ public record TableAccessDecision(
 
     /// <summary>
     /// SEC H-10/C-03: Single source of truth for the effective access level of a column, used for projection AND filtering.
-    /// Deny stays Deny; catalog-sensitive columns (IsSensitive or a ColumnMaskingRule) are masked unless an explicit Clear rule exists.
+    /// Deny stays Deny; catalog-sensitive columns (classified or carrying a column mask rule) are masked unless an explicit Clear rule exists.
     /// Filtering on a column is only permitted when this method returns <see cref="ColumnAccessLevel.Clear"/>.
     /// </summary>
     public ColumnAccessLevel GetEffectiveColumnAccess(string columnName, TableMetadata? metadata)

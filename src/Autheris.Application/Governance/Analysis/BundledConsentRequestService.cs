@@ -220,7 +220,7 @@ public sealed class BundledConsentRequestService : IBundledConsentRequestService
                 }
             }
 
-            if (table.Table.Visibility == DatasetVisibility.Hidden && !isAdmin && !isOwner && !hasGrant)
+            if (table.Table.DiscoveryHidden && !isAdmin && !isOwner && !hasGrant)
             {
                 throw new KeyNotFoundException($"Dataset '{item.Dataset}' was not found or is not visible.");
             }

@@ -238,7 +238,7 @@ public sealed class ExternalCatalogReader(
                     c.DisplayName,
                     c.DataType,
                     c.Description,
-                    IsSensitive = ClassificationMetadata.IsColumnSensitive(table, c),
+                    Classified = ClassificationMetadata.IsColumnSensitive(table, c),
                     c.DiscoveryHidden,
                     c.WriteProtected,
                     masking = DefaultMaskingState(table, c)
@@ -548,8 +548,8 @@ public sealed class ExternalCatalogReader(
                     continue;
                 }
 
-                var isSensitive = ClassificationMetadata.IsColumnSensitive(table, col);
-                bool pii = isSensitive || CatalogPiiDetector.IsPii(col.ColumnName, isSensitive);
+                var classified = ClassificationMetadata.IsColumnSensitive(table, col);
+                bool pii = classified || CatalogPiiDetector.IsPii(col.ColumnName, classified);
                 list.Add(new ExternalCatalogColumnDto(
                     Name: col.ColumnName,
                     DisplayName: col.DisplayName,
@@ -559,7 +559,7 @@ public sealed class ExternalCatalogReader(
                     Sensitivity: pii ? "SENSITIVE" : "NORMAL",
                     Pii: pii,
                     DefaultMaskingState: DefaultMaskingState(table, col),
-                    ColumnSecurity: isSensitive,
+                    ColumnSecurity: classified,
                     Hidden: true,
                     WriteProtected: col.WriteProtected,
                     AccessState: includeAccessState ? DiscoveryColumnState.NoAccess.ToString().ToLowerInvariant() : null,

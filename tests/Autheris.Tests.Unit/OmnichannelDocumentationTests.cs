@@ -69,11 +69,10 @@ public sealed class OmnichannelDocumentationTests
                 {
                     ColumnName = "iban",
                     DataType = "varchar",
-                    IsSensitive = true,
                     Description = "Customer billing IBAN."
                 }
             ]
-        };
+        }.WithPii("iban");
     }
 
     [Fact]

@@ -218,9 +218,11 @@ public sealed class CatalogCallerMigrationBatch3Tests
             PrimaryKeyColumns = ["id"],
             Columns =
             [
-                new TableColumn { ColumnName = "id", DataType = "integer", IsSensitive = false },
-                new TableColumn { ColumnName = sensitiveCol ? $"secret_col_{(isActive ? "active" : "old_" + tableName)}" : "note", DataType = "varchar", IsSensitive = sensitiveCol }
-            ]
+                new TableColumn { ColumnName = "id", DataType = "integer" },
+                new TableColumn { ColumnName = sensitiveCol ? $"secret_col_{(isActive ? "active" : "old_" + tableName)}" : "note", DataType = "varchar" }
+            ],
+            ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor(
+                sensitiveCol ? new[] { $"secret_col_{(isActive ? "active" : "old_" + tableName)}" } : Array.Empty<string>())
         };
 
     private static SecurityPrincipalContext BuildContext(Sid userSid, TenantId tenant) =>

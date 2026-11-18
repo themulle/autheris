@@ -69,14 +69,13 @@ internal static class DiscoveryTestBuilder
         var cols = columns.Length == 0
             ? new List<TableColumn>
             {
-                new() { ColumnName = "id", DataType = "int", IsSensitive = false },
-                new() { ColumnName = "email", DataType = "varchar", IsSensitive = true }
+                new() { ColumnName = "id", DataType = "int" },
+                new() { ColumnName = "email", DataType = "varchar" }
             }
             : columns.Select(c => new TableColumn
             {
                 ColumnName = c.Name,
                 DataType = "varchar",
-                IsSensitive = c.Sensitive,
                 DiscoveryHidden = c.Hidden
             }).ToList();
 
@@ -105,6 +104,8 @@ internal static class DiscoveryTestBuilder
                 Sensitivity = "NORMAL"
             },
             Columns = cols,
+            ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor(
+                columns.Length == 0 ? new[] { "email" } : columns.Where(c => c.Sensitive).Select(c => c.Name).ToArray()),
             OwnerTenantId = ownerTenantId,
             CatalogTags = ["core"]
         };

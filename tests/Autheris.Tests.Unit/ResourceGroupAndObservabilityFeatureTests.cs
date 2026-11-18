@@ -291,9 +291,9 @@ public sealed class ResourceGroupAndObservabilityFeatureTests
             Columns =
             [
                 new TableColumn { ColumnName = "id", DataType = "varchar" },
-                new TableColumn { ColumnName = "iban", DataType = "varchar", IsSensitive = true }
+                new TableColumn { ColumnName = "iban", DataType = "varchar" }
             ]
-        };
+        }.WithPii("iban");
 
         repo.GetAllTablesAsync(NSubstitute.Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([sampleTable]));

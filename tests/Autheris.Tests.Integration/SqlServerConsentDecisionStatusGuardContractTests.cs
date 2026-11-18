@@ -59,11 +59,7 @@ public sealed class SqlServerConsentDecisionStatusGuardContractTests : ConsentDe
         await using var conn = new SqlConnection(_db!.ConnectionString);
         await conn.OpenAsync();
         await using var cmd = new SqlCommand(@"
-            INSERT INTO ROLES (id, role_name, description)
-            SELECT @rid, 'GovernanceAdmin', 'Governance Administrator'
-            WHERE NOT EXISTS (SELECT 1 FROM ROLES WHERE role_name = 'GovernanceAdmin');
-            INSERT INTO ROLE_MEMBERS (id, role_id, member_type, member_sid)
-            SELECT @m, id, 'User', @sid FROM ROLES WHERE role_name = 'GovernanceAdmin';", conn);
+            SELECT 1;", conn);
         cmd.Parameters.AddWithValue("@rid", Guid.NewGuid().ToString());
         cmd.Parameters.AddWithValue("@m", Guid.NewGuid().ToString());
         cmd.Parameters.AddWithValue("@sid", sid);

@@ -178,26 +178,6 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
         var tableDescription = tableResolved?.Description ?? metadata.Table.Description;
         var tableLongDescription = tableResolved?.LongDescription ?? metadata.Table.LongDescription;
 
-        // Summary (issue #111): identifier, sensitivity and activity only; no columns, keys or indexes.
-        if (visibleRow.Shape == CatalogOutputShape.Summary)
-        {
-            return new CatalogDatasetDetail(
-                DatasetId: metadata.Identifier.ToString(),
-                Domain: metadata.Identifier.Domain,
-                Schema: metadata.Identifier.Schema,
-                Table: metadata.Identifier.TableName,
-                Columns: [],
-                PrimaryKeys: [],
-                Sensitivity: metadata.Table.Sensitivity.ToString(),
-                IsActive: metadata.Table.IsActive,
-                Indexes: [],
-                DisplayName: tableDisplayName,
-                Description: tableDescription,
-                LongDescription: null,
-                Language: lang,
-                Size: DatasetSizeClassifier.Resolve(metadata));
-        }
-
         // I404-SC-L1/L2/L4: declared keys and indexes are reported only as a whole and only when every column is Clear for this
         // caller: the caller's resolved access level (shared with describe_dataset) and the catalog masking state must both say Clear.
         var callerClear = await ResolveCallerClearColumnsAsync(metadata, context, ct).ConfigureAwait(false);
@@ -574,14 +554,6 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
     }
 
     /// <summary>
-    /// Issue #804, path without the discovery service: the caller's status from the visible row, in the vocabulary of
-    /// <see cref="CatalogVisibility.ComputeAccessStatus"/>. A tier row (<see cref="CatalogView.Summary"/> or <see cref="CatalogView.Full"/>) is
-    /// visible without a grant (<c>NONE</c>); a consent row and the administrator view are readable (<c>GRANTED</c>).
-    /// </summary>
-    private static string LegacyAccessStatusOf(TableMetadata row) =>
-        row.CatalogView is CatalogView.Summary or CatalogView.Full ? Autheris.Application.Catalog.Discovery.CatalogAccessStatus.None : Autheris.Application.Catalog.Discovery.CatalogAccessStatus.Granted;
-
-    /// <summary>
     /// Issue #682 A: the suggested GraphQL field of a table hit is its root field in the catalog GraphQL schema, never derived
     /// from the id (the root field includes the schema and is sanitized). Null for a table without a root field, for a Summary
     /// row and when no GraphQL map is registered.
@@ -624,8 +596,7 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
         foreach (var hit in hits)
         {
             var field = _graphQlMap != null &&
-                        permitted.TryGetValue(hit.TableIdentifier, out var row) &&
-                        row.CatalogView != CatalogView.Summary
+                        permitted.ContainsKey(hit.TableIdentifier)
                 ? await _graphQlMap.GetRootFieldAsync(hit.TableIdentifier, ct).ConfigureAwait(false)
                 : null;
             result.Add(hit with { SuggestedGraphQlField = field });
@@ -747,8 +718,7 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
             Domain: table.Identifier.Domain,
             Schema: table.Identifier.Schema,
             Table: table.Identifier.TableName,
-            // A Summary row discloses only the allow-listed fields; the source type is not one of them.
-            SourceType: table.CatalogView == CatalogView.Summary ? string.Empty : sourceType,
+            SourceType: sourceType,
             Sensitivity: table.Table.Sensitivity.ToString(),
             Description: resolved?.Description ?? table.Table.Description,
             IsActive: table.Table.IsActive,
@@ -873,7 +843,7 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
             Bm25Score = bm25Score,
             VectorScore = vectorScore,
             Description = visible.Table.Description,
-            SuggestedGraphQlField = visible.CatalogView == CatalogView.Summary ? null : hit.SuggestedGraphQlField,
+            SuggestedGraphQlField = hit.SuggestedGraphQlField,
             Sensitivity = visible.Table.Sensitivity?.ToString() ?? "NORMAL",
             MatchedTerms = matchedTerms,
             RelevantColumns = relevantColumns,
@@ -1015,9 +985,9 @@ internal static class CatalogPiiDetector
 {
     private static readonly string[] PiiKeywords = ["name", "email", "phone", "iban", "birth", "address", "lat", "lon"];
 
-    public static bool IsPii(string columnName, bool isSensitive = false)
+    public static bool IsPii(string columnName, bool classified = false)
     {
-        if (isSensitive) return true;
+        if (classified) return true;
         if (string.IsNullOrWhiteSpace(columnName)) return false;
         var lower = columnName.ToLowerInvariant();
         return PiiKeywords.Any(k => lower.Contains(k, StringComparison.OrdinalIgnoreCase));

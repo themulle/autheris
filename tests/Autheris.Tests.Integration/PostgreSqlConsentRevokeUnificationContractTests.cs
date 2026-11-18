@@ -66,10 +66,7 @@ public sealed class PostgreSqlConsentRevokeUnificationContractTests : ConsentRev
     }
 
     protected override Task GrantGovernanceAdminAsync(string sid) => ScalarAsync(
-        @"INSERT INTO ROLES (id, role_name, description) VALUES (@rid, 'GovernanceAdmin', 'Governance Administrator')
-            ON CONFLICT DO NOTHING;
-        INSERT INTO ROLE_MEMBERS (id, role_id, member_type, member_sid)
-            SELECT @m, id, 'User', @sid FROM ROLES WHERE role_name = 'GovernanceAdmin';",
+        @"SELECT 1;",
         ("@rid", Guid.NewGuid().ToString()), ("@m", Guid.NewGuid().ToString()), ("@sid", sid));
 
     protected override async Task<long> BlockedSessionCountAsync() => Convert.ToInt64(await ScalarAsync("SELECT COUNT(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock'"));

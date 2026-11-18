@@ -320,12 +320,13 @@ public abstract class GovernanceStoresContractBase : IAsyncLifetime
     private static TableMetadata MaskedTable(string tableName, Guid ruleId, params string[] maskedColumns)
     {
         var id = Guid.NewGuid();
-        var columns = maskedColumns.Select(c => new TableColumn { TableId = id, ColumnName = c, DataType = "TEXT", IsSensitive = true }).ToList();
+        var columns = maskedColumns.Select(c => new TableColumn { TableId = id, ColumnName = c, DataType = "TEXT" }).ToList();
         return new TableMetadata
         {
             Identifier = new TableIdentifier("MaskDomain", "dbo", tableName),
             Table = new Table { Id = id, SourceName = "MaskDomain", SchemaName = "dbo", TableName = tableName, Sensitivity = "LOW", IsActive = true },
             Columns = columns,
+            ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor(maskedColumns),
             ColumnMaskingRules = maskedColumns.ToDictionary(c => c, c => new MaskingRule { Id = ruleId, RuleType = "REDACT" })
         };
     }

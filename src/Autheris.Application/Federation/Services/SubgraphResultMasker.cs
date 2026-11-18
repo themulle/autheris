@@ -352,8 +352,8 @@ public sealed class SubgraphResultMasker : ISubgraphResultMasker
     /// <summary>
     /// Returns true if the given (real) field name is treated as sensitive by the federated result masker.
     /// </summary>
-    public static bool IsSensitiveField(string fieldName)
-        => !string.IsNullOrEmpty(fieldName) && IsSensitiveFieldName(fieldName, out _);
+    public static bool IsMaskedField(string fieldName)
+        => !string.IsNullOrEmpty(fieldName) && IsMaskedFieldName(fieldName, out _);
 
     private static bool ShouldMaskField(
         string responseKey,
@@ -415,7 +415,7 @@ public sealed class SubgraphResultMasker : ISubgraphResultMasker
             return true;
         }
 
-        return IsSensitiveFieldName(fieldName, out rule);
+        return IsMaskedFieldName(fieldName, out rule);
     }
 
     private static bool IsScalarLeaf(object? value)
@@ -426,7 +426,7 @@ public sealed class SubgraphResultMasker : ISubgraphResultMasker
            || name.Equals("id", StringComparison.OrdinalIgnoreCase)
            || name.EndsWith("Id", StringComparison.Ordinal);
 
-    private static bool IsSensitiveFieldName(string fieldName, out MaskingRule rule)
+    private static bool IsMaskedFieldName(string fieldName, out MaskingRule rule)
     {
         var lower = fieldName.ToLowerInvariant();
 

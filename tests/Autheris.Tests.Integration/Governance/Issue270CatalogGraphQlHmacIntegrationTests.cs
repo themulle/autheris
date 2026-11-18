@@ -93,14 +93,14 @@ public sealed class Issue270CatalogGraphQlHmacIntegrationTests : IDisposable
             Columns =
             [
                 new TableColumn { ColumnName = "id", DataType = "int" },
-                new TableColumn { ColumnName = "transaction_id", DataType = "bigint", IsSensitive = true }
+                new TableColumn { ColumnName = "transaction_id", DataType = "bigint" }
             ],
             PrimaryKeyColumns = ["id"],
             ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
             {
                 ["transaction_id"] = new MaskingRule { RuleType = "HMAC_SHA256" }
             }
-        };
+        }.WithPii("transaction_id");
 
         await _repository.UpsertTableMetadataAsync(meta);
 
@@ -147,14 +147,14 @@ public sealed class Issue270CatalogGraphQlHmacIntegrationTests : IDisposable
             Columns =
             [
                 new TableColumn { ColumnName = "id", DataType = "int" },
-                new TableColumn { ColumnName = "transaction_id", DataType = "bigint", IsSensitive = true }
+                new TableColumn { ColumnName = "transaction_id", DataType = "bigint" }
             ],
             PrimaryKeyColumns = ["id"],
             ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
             {
                 ["transaction_id"] = new MaskingRule { RuleType = "HMAC_SHA256" }
             }
-        };
+        }.WithPii("transaction_id");
 
         await _repository.UpsertTableMetadataAsync(meta);
 
@@ -222,6 +222,7 @@ public sealed class Issue270CatalogGraphQlHmacIntegrationTests : IDisposable
             Identifier = _txTableId,
             Table = initialMeta.Table,
             Columns = initialMeta.Columns,
+            ColumnClassifications = initialMeta.ColumnClassifications,
             PrimaryKeyColumns = ["id"],
             ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
             {

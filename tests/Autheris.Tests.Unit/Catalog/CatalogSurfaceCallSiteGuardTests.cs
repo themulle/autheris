@@ -9,8 +9,7 @@ using Shouldly;
 using Xunit;
 
 /// <summary>
-/// Issue #111 T-3 item 13, M-11, T-R2-1, T-R3-2, F-C13: source-level guards. A new catalog call site without an explicit decision stays on
-/// <c>CatalogSurface.DataAccess</c>; policy code never reads catalog tags, tier or view.
+/// Issue #111 T-3 item 13, M-11, T-R2-1, T-R3-2, F-C13: source-level guards. The retired visibility surface switch stays gone; policy code never reads catalog tags, tier or view.
 /// </summary>
 public sealed class CatalogSurfaceCallSiteGuardTests
 {
@@ -49,48 +48,15 @@ public sealed class CatalogSurfaceCallSiteGuardTests
 
     [Fact]
     [Trait("Category", "Security")]
-    public void OnlyTheDiscoveryCallSites_PassCatalogSurfaceDiscovery()
+    public void CatalogSurface_NoLongerExists_AndNoSourceFileReferencesTheDiscoverySurface()
     {
-        // Definition files plus the three discovery sites of the plan (section 1.2 rows 1-6); everything else keeps the DataAccess default.
-        string[] allowed =
-        [
-            "CatalogSurface.cs", "CatalogVisibility.cs", "McpCatalogVisibility.cs",
-            "CatalogVisibilityService.cs" // #138 INC-1 (SEC-CAT138-18): the only service entry; channel files leave the list when migrated.
-        ];
-
+        // The tier model is retired: authorized discovery has its own decision path, so no visibility surface switch remains.
         var offenders = SourceFiles()
-            .Where(f => File.ReadAllText(f).Contains("CatalogSurface.Discovery", StringComparison.Ordinal))
+            .Where(f => File.ReadAllText(f).Contains("CatalogSurface", StringComparison.Ordinal))
             .Select(Name)
-            .Where(n => !allowed.Contains(n))
             .ToList();
 
         offenders.ShouldBeEmpty();
-    }
-
-    [Theory]
-    [InlineData("AiDataGuardrailService.cs")]
-    [InlineData("SemanticMcpCompiler.cs")]
-    [InlineData("TrinoMetadataQueryHandler.cs")]
-    [InlineData("IcebergRestCatalogFederationService.cs")]
-    [InlineData("EffectiveAccessExplanationService.cs")]
-    [Trait("Category", "Security")]
-    public void DataPathAndMetadataSurfaces_NeverReferenceTheDiscoverySurface(string file)
-    {
-        var path = SourceFiles().Single(f => Name(f) == file);
-
-        File.ReadAllText(path).ShouldNotContain("CatalogSurface");
-    }
-
-    [Fact]
-    [Trait("Category", "Security")]
-    public void DiscoverySurface_IsNeverTheDefaultOfAnyVisibilityOverload()
-    {
-        foreach (var file in new[] { "CatalogVisibility.cs", "McpCatalogVisibility.cs" })
-        {
-            var text = File.ReadAllText(SourceFiles().Single(f => Name(f) == file));
-
-            Regex.IsMatch(text, @"CatalogSurface\s+\w+\s*=\s*CatalogSurface\.Discovery").ShouldBeFalse(file);
-        }
     }
 
     [Fact]

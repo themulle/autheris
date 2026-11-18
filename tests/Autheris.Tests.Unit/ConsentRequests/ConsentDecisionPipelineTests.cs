@@ -240,9 +240,9 @@ public sealed class ConsentDecisionPipelineTests
             Columns =
             [
                 plain.Columns[0],
-                new TableColumn { Id = Guid.NewGuid(), TableId = plain.Table.Id, ColumnName = "email", DataType = "VARCHAR", IsSensitive = true }
+                new TableColumn { Id = Guid.NewGuid(), TableId = plain.Table.Id, ColumnName = "email", DataType = "VARCHAR" }
             ]
-        };
+        }.WithPii("email");
         metadata.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(meta);
         var req = Request();
         approvals.GetConsentRequestAsync(req.Id, Arg.Any<CancellationToken>()).Returns(req);

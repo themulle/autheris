@@ -53,7 +53,7 @@ public static class McpToolGroups
             McpSemanticTools.QueryMetrics, "simulate_query", "query_customers", "query_invoices");
 
         Add(McpToolGroup.Api, McpDatasetTools.InvokeApi, McpDatasetTools.DescribeApi);
-        Add(McpToolGroup.Access, McpDatasetTools.GetMyPermissions, McpDatasetTools.DescribeMyAccess);
+        Add(McpToolGroup.Access, McpDatasetTools.GetMyPermissions, McpDatasetTools.DescribeMyAccess, McpDatasetTools.RequestAccess);
 
         // Ungrouped: only Mcp:DisabledTools can switch these off (admin tools are limited to the cluster admin anyway).
         Add(McpToolGroup.None,

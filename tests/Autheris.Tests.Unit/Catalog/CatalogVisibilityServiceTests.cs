@@ -274,36 +274,7 @@ public sealed class CatalogVisibilityServiceTests
 
     private static TableMetadata WithView(string name, CatalogView view) => Row(new TableIdentifier("sales", "dbo", name)) with { CatalogView = view };
 
-    [Fact]
-    [Trait("Category", "Security")]
-    public void CatalogVisibleRow_NeverCarriesNotFound()
-    {
-        var row = Row(T1);
 
-        Should.Throw<ArgumentOutOfRangeException>(() => new CatalogVisibleRow(row, CatalogOutputShape.NotFound));
-        Should.Throw<ArgumentOutOfRangeException>(() => new CatalogVisibleRow(row, (CatalogOutputShape)42));
-        Should.Throw<ArgumentNullException>(() => new CatalogVisibleRow(null!, CatalogOutputShape.Full));
-        new CatalogVisibleRow(row, CatalogOutputShape.Summary).Shape.ShouldBe(CatalogOutputShape.Summary);
-    }
-
-    [Fact]
-    [Trait("Category", "Security")]
-    public async Task SummaryRow_ShapeSummary_AllThreeMethods_KeepsCatalogViewSummary()
-    {
-        var summary = WithView("sum_t", CatalogView.Summary);
-        var service = CatalogVisibilityTestFactory.Create(
-            Wp0.Tables(summary), Wp0.Consents(), Opts(),
-            engineOutput: (_, _, _) => Task.FromResult<IReadOnlyList<TableMetadata>>([summary]));
-        var caller = Caller(Subject());
-
-        var set = await service.GetVisibleAsync(caller);
-        set.ShapeOf(summary.Identifier).ShouldBe(CatalogOutputShape.Summary);
-        set.Find(summary.Identifier)!.CatalogView.ShouldBe(CatalogView.Summary);
-        var found = await service.FindVisibleAsync(caller, summary.Identifier);
-        found!.Value.Shape.ShouldBe(CatalogOutputShape.Summary);
-        found.Value.Table.CatalogView.ShouldBe(CatalogView.Summary);
-        (await service.FilterVisibleAsync(caller, [summary.Identifier])).ShouldBe([summary.Identifier]);
-    }
 
     [Theory]
     [InlineData("ClusterAdmin", true)]
@@ -410,4 +381,17 @@ public sealed class CatalogVisibilityServiceTests
         (await service.FilterVisibleAsync(Caller(Subject()), [unmarked.Identifier, unknown.Identifier])).ShouldBeEmpty();
         (await service.FindVisibleAsync(Caller(Subject()), granted.Identifier))!.Value.Shape.ShouldBe(CatalogOutputShape.Full);
     }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void CatalogVisibleRow_NeverCarriesNotFound()
+    {
+        var row = Row(T1);
+
+        Should.Throw<ArgumentOutOfRangeException>(() => new CatalogVisibleRow(row, CatalogOutputShape.NotFound));
+        Should.Throw<ArgumentOutOfRangeException>(() => new CatalogVisibleRow(row, (CatalogOutputShape)42));
+        Should.Throw<ArgumentNullException>(() => new CatalogVisibleRow(null!, CatalogOutputShape.Full));
+        new CatalogVisibleRow(row, CatalogOutputShape.Full).Shape.ShouldBe(CatalogOutputShape.Full);
+    }
+
 }

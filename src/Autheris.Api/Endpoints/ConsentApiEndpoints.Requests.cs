@@ -620,6 +620,7 @@ public static partial class ConsentApiEndpoints
     {
         return ex.Code switch
         {
+            "RATE_LIMIT_EXCEEDED" => ApiProblems.TooManyRequests(ApiErrorCodes.RateLimitExceeded, "Access request rate limit exceeded. Retry later.", context, ex.RetryAfterSeconds ?? 1),
             "FORBIDDEN" => ApiProblems.Forbidden(ConsentDecisionErrorCodes.DecisionNotPermitted, "Consent request operation is not permitted.", context),
             "TABLE_NOT_FOUND" or "NOT_FOUND" => ApiProblems.NotFound(ApiErrorCodes.TableNotRegistered, "Target table, access profile, or consent request was not found.", context),
             "CONFLICT" or "IDEMPOTENCY_CONFLICT" => ApiProblems.Conflict(ApiErrorCodes.Conflict, "Consent request conflicts with existing state.", context),

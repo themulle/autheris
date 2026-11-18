@@ -71,7 +71,7 @@ public sealed partial class AuditDetailsBuilder
             return this;
         }
 
-        if (IsSensitiveKey(key))
+        if (IsRedactedKey(key))
         {
             _fields[safeKey] = RedactedPlaceholder;
             return this;
@@ -123,7 +123,7 @@ public sealed partial class AuditDetailsBuilder
     public static string? ScrubValue(string? value) =>
         value == null ? null : ScrubAndSanitize(value, maxFieldLength: 1024, externalScrubber: null);
 
-    public static bool IsSensitiveKey(string key)
+    public static bool IsRedactedKey(string key)
     {
         string forAllowList = NormalizeKeyForAllowList(key);
         if (AllowListedNormalizedKeys.Contains(forAllowList))
@@ -185,7 +185,7 @@ public sealed partial class AuditDetailsBuilder
             }
 
             string safeKey = SanitizeAndTruncate(prop.Name, ctx.MaxFieldLength);
-            if (IsSensitiveKey(prop.Name))
+            if (IsRedactedKey(prop.Name))
             {
                 result[safeKey] = RedactedPlaceholder;
             }
@@ -269,7 +269,7 @@ public sealed partial class AuditDetailsBuilder
                     }
                     string rawKey = Convert.ToString(entry.Key) ?? string.Empty;
                     string safeKey = SanitizeAndTruncate(rawKey, ctx.MaxFieldLength);
-                    obj[safeKey] = IsSensitiveKey(rawKey)
+                    obj[safeKey] = IsRedactedKey(rawKey)
                         ? RedactedPlaceholder
                         : RedactDotNetValue(entry.Value, depth + 1, ctx);
                     lastKey = safeKey;

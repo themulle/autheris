@@ -638,8 +638,8 @@ public sealed class AuthPluginSecurityTests
             {
                 Identifier = new TableIdentifier("data_source", "public", "customers"),
                 Table = new Table { SourceName = "data_source", SchemaName = "public", TableName = "customers", SourceType = "PostgreSQL", DataSourceType = DataSourceType.Sql },
-                Columns = [new TableColumn { ColumnName = "id", DataType = "INTEGER" }, new TableColumn { ColumnName = "ssn", DataType = "TEXT", IsSensitive = true }]
-            },
+                Columns = [new TableColumn { ColumnName = "id", DataType = "INTEGER" }, new TableColumn { ColumnName = "ssn", DataType = "TEXT" }]
+            }.WithPii("ssn"),
             RequestedColumns: ["id", "ssn"]);
 
     private static TableAccessPolicy CreateAllowingPolicy(

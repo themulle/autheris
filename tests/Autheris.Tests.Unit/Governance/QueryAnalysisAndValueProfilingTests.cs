@@ -43,7 +43,6 @@ public sealed class QueryAnalysisAndValueProfilingTests
         string domain,
         string schema,
         string name,
-        DatasetVisibility visibility,
         IReadOnlyList<TableColumn> columns,
         string? rlsExpression = null,
         long? estimatedRowCount = 5000,
@@ -60,7 +59,6 @@ public sealed class QueryAnalysisAndValueProfilingTests
                 SchemaName = schema,
                 TableName = name,
                 DisplayName = name,
-                Visibility = visibility,
                 RlsExpression = rlsExpression
             },
             Columns = columns,
@@ -84,7 +82,6 @@ public sealed class QueryAnalysisAndValueProfilingTests
             "sales",
             "public",
             "orders",
-            DatasetVisibility.Full,
             new[]
             {
                 new TableColumn { ColumnName = "id", DataType = "uuid" },
@@ -189,18 +186,16 @@ public sealed class QueryAnalysisAndValueProfilingTests
             "crm",
             "public",
             "customers",
-            DatasetVisibility.Full,
             new[]
             {
                 new TableColumn { ColumnName = "id", DataType = "uuid" },
-                new TableColumn { ColumnName = "email", DataType = "varchar", IsSensitive = true }
-            });
+                new TableColumn { ColumnName = "email", DataType = "varchar" }
+            }).WithPii("email");
 
         var invoicesTable = CreateCatalogTable(
             "billing",
             "public",
             "invoices",
-            DatasetVisibility.Summary,
             new[]
             {
                 new TableColumn { ColumnName = "id", DataType = "uuid" },
@@ -211,12 +206,12 @@ public sealed class QueryAnalysisAndValueProfilingTests
             "hr",
             "private",
             "secret_salaries",
-            DatasetVisibility.Hidden,
             new[]
             {
                 new TableColumn { ColumnName = "id", DataType = "uuid" },
-                new TableColumn { ColumnName = "base_salary", DataType = "decimal", IsSensitive = true }
-            });
+                new TableColumn { ColumnName = "base_salary", DataType = "decimal" }
+            }).WithPii("base_salary");
+        secretSalariesTable = secretSalariesTable with { Table = secretSalariesTable.Table with { DiscoveryHidden = true } };
 
         var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
         metadataRepo.StubAllTables(new[] { customersTable, invoicesTable, secretSalariesTable });
@@ -284,23 +279,21 @@ public sealed class QueryAnalysisAndValueProfilingTests
             "iam",
             "public",
             "users",
-            DatasetVisibility.Full,
             new[]
             {
                 new TableColumn { ColumnName = "id", DataType = "uuid" },
-                new TableColumn { ColumnName = "ssn", DataType = "varchar", IsSensitive = true }
-            });
+                new TableColumn { ColumnName = "ssn", DataType = "varchar" }
+            }).WithPii("ssn");
 
         var auditTable = CreateCatalogTable(
             "iam",
             "public",
             "user_events",
-            DatasetVisibility.Full,
             new[]
             {
                 new TableColumn { ColumnName = "event_id", DataType = "uuid" },
-                new TableColumn { ColumnName = "actor_ssn", DataType = "varchar", IsSensitive = true }
-            });
+                new TableColumn { ColumnName = "actor_ssn", DataType = "varchar" }
+            }).WithPii("actor_ssn");
 
         var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
         metadataRepo.StubAllTables(new[] { usersTable, auditTable });
@@ -369,22 +362,19 @@ public sealed class QueryAnalysisAndValueProfilingTests
             "sales",
             "public",
             "orders",
-            DatasetVisibility.Summary,
             new[] { new TableColumn { ColumnName = "id", DataType = "uuid" } });
 
         var shipmentsTable = CreateCatalogTable(
             "logistics",
             "public",
             "shipments",
-            DatasetVisibility.Summary,
             new[] { new TableColumn { ColumnName = "id", DataType = "uuid" } });
 
         var paymentsTable = CreateCatalogTable(
             "sales",
             "public",
             "payments",
-            DatasetVisibility.Full,
-            new[] { new TableColumn { ColumnName = "card_last4", DataType = "varchar", IsSensitive = true } });
+            new[] { new TableColumn { ColumnName = "card_last4", DataType = "varchar" } }).WithPii("card_last4");
 
         var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
         metadataRepo.StubAllTables(new[] { ordersTable, shipmentsTable, paymentsTable });
@@ -466,7 +456,6 @@ public sealed class QueryAnalysisAndValueProfilingTests
             "sales",
             "public",
             "orders",
-            DatasetVisibility.Full,
             new[] { new TableColumn { ColumnName = "id", DataType = "uuid" } });
 
         var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
@@ -545,14 +534,12 @@ public sealed class QueryAnalysisAndValueProfilingTests
             "sales",
             "public",
             "orders",
-            DatasetVisibility.Full,
             new[] { new TableColumn { ColumnName = "id", DataType = "uuid" } });
 
         var customersTable = CreateCatalogTable(
             "sales",
             "public",
             "customers",
-            DatasetVisibility.Full,
             new[] { new TableColumn { ColumnName = "id", DataType = "uuid" } });
 
         var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());

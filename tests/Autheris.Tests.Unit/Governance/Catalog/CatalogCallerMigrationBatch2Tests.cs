@@ -200,7 +200,6 @@ public sealed class CatalogCallerMigrationBatch2Tests
             TableName = name,
             DataSourceType = endpoint is null ? DataSourceType.Sql : DataSourceType.HttpDeclarative,
             IsActive = active,
-            Visibility = DatasetVisibility.Summary,
             HttpEndpoint = endpoint
         },
         Columns = [new TableColumn { ColumnName = "id", DataType = "int" }]
