@@ -301,8 +301,20 @@ public static partial class TreeSqlCompiler
         var node = plan.Node;
         var limit = node.ExecutionLimit ?? node.Limit;
 
+        // The outer ORDER BY reads the page CTE, so every ordering column must be projected, including a unique-key
+        // tie-break the query does not select. The outer select list is built from the plan outputs only, so such a
+        // column never reaches the JSON.
+        var projected = plan.InnerColumns.ToList();
+        foreach (var (column, _) in rootOrderWithTieBreaks)
+        {
+            if (!projected.Contains(column, StringComparer.OrdinalIgnoreCase))
+            {
+                projected.Add(column);
+            }
+        }
+
         var sb = new StringBuilder("SELECT ");
-        sb.Append(string.Join(", ", plan.InnerColumns.Select(c => $"{target}.{Q(context, c)} AS {Q(context, c)}")));
+        sb.Append(string.Join(", ", projected.Select(c => $"{target}.{Q(context, c)} AS {Q(context, c)}")));
 
         var securedSource = plan.Access.SecuredSource;
         if (securedSource != null)
