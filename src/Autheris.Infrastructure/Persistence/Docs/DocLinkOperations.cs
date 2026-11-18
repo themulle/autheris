@@ -18,7 +18,7 @@ internal static class DocLinkOperations
     private const string Columns = "tenant_id, link_id, source_kind, app_id, category, doc_id, doc_tenant_id, target_kind, target_domain, target_schema, target_name, target_column, created_by, created_at_utc";
     private const string SourceWhere = "tenant_id = @tenant_id AND source_kind = @source_kind AND app_id = @app_id AND category = @category AND doc_id = @doc_id AND doc_tenant_id = @doc_tenant_id";
 
-    internal const string InsertSql = "INSERT INTO DOC_LINKS (" + Columns + ") VALUES (@tenant_id, @link_id, @source_kind, @app_id, @category, @doc_id, @doc_tenant_id, @target_kind, @target_domain, @target_schema, @target_name, @target_column, @created_by, @created_at_utc)";
+    internal const string InsertSql = "INSERT INTO DOC_LINKS (" + Columns + ", link_digest) VALUES (@tenant_id, @link_id, @source_kind, @app_id, @category, @doc_id, @doc_tenant_id, @target_kind, @target_domain, @target_schema, @target_name, @target_column, @created_by, @created_at_utc, @link_digest)";
     internal const string DeleteSourceSql = "DELETE FROM DOC_LINKS WHERE " + SourceWhere;
     internal const string ListSourceSql = "SELECT " + Columns + " FROM DOC_LINKS WHERE " + SourceWhere + " ORDER BY target_domain, target_schema, target_name, target_column, link_id";
     internal const string DeleteTenantSql = "DELETE FROM DOC_LINKS WHERE tenant_id = @tenant_id";
@@ -82,6 +82,7 @@ internal static class DocLinkOperations
                 cmd.AddBound("@target_schema", t.Schema);
                 cmd.AddBound("@target_name", t.Name);
                 cmd.AddBound("@target_column", t.Column ?? string.Empty);
+                cmd.AddBound("@link_digest", ComputeKeyHash(tenant, source, t), DbType.Binary);
                 cmd.AddBound("@created_by", actor);
                 cmd.AddBound("@created_at_utc", now, DbType.DateTimeOffset);
                 await repo.ExecuteNonQueryAsync(cmd, "Governance.DocLinks.Insert", ct).ConfigureAwait(false);
@@ -151,6 +152,13 @@ internal static class DocLinkOperations
         cmd.AddBound("@category", source.Category?.ToString() ?? string.Empty);
         cmd.AddBound("@doc_id", source.DocId ?? string.Empty);
         cmd.AddBound("@doc_tenant_id", source.DocTenantId ?? string.Empty);
+    }
+
+    /// <summary>SHA-256 over the full uniqueness key; the unique index covers this hash because the raw key exceeds SQL Server's 1700-byte index limit.</summary>
+    internal static byte[] ComputeKeyHash(string tenant, DocLinkSource source, DocLinkTarget t)
+    {
+        var key = string.Join('\u001f', tenant, source.Kind.ToString(), source.AppId, source.Category?.ToString() ?? string.Empty, source.DocId ?? string.Empty, source.DocTenantId ?? string.Empty, t.Kind.ToString(), t.Domain, t.Schema, t.Name, t.Column ?? string.Empty);
+        return System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(key));
     }
 
     private static string Tenant(string tenantId) => TenantScope.RequireTenantString(tenantId, GovernanceTable.DocLinks.ToSqlName());

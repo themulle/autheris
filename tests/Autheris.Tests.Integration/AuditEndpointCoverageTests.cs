@@ -45,8 +45,15 @@ public class AuditEndpointCoverageTests : IClassFixture<AuditEndpointCoverageTes
         "DiscoveryArtifactService writes the CATALOG_DISCOVERY_ARTIFACTS_CHANGED record with before/after hashes for every change; " +
         "denials, failures and exceptions are finalized by AccessAuditMiddleware.";
 
+    private const string DocLinkJustification =
+        "DocLinkService writes the DOC_LINKS_CHANGED / DOC_VISIBILITY_CHANGED record fail-closed with before/after targets and rolls the change back if the record cannot be written; " +
+        "denials, failures and exceptions are finalized by AccessAuditMiddleware.";
+
     private static readonly Dictionary<string, string> ApprovedDelegatedRoutes = new(StringComparer.OrdinalIgnoreCase)
     {
+        ["PUT /api/v1/docs/apps/{appId}/documents/{category}/{docId}/links"] = DocLinkJustification,
+        ["PUT /api/v1/docs/apps/{appId}/links"] = DocLinkJustification,
+        ["PUT /api/v1/docs/apps/{appId}/documents/{category}/{docId}/discovery"] = DocLinkJustification,
         ["POST /api/v1/authz/explain"] =
             "AccessExplanationService writes the AUTHZ_EXPLAIN record fail-closed for every outcome; " +
             "HTTP denials, failures and exceptions are finalized by AccessAuditMiddleware.",

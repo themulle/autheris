@@ -16,14 +16,18 @@ BEGIN
         target_schema  NVARCHAR(256)    NOT NULL,
         target_name    NVARCHAR(256)    NOT NULL,
         target_column  NVARCHAR(256)    NOT NULL,
+        link_digest  BINARY(32)       NOT NULL,
         created_by     NVARCHAR(256)    NOT NULL,
         created_at_utc DATETIMEOFFSET   NOT NULL,
         CONSTRAINT PK_DOC_LINKS PRIMARY KEY (link_id)
     );
+    -- Key columns can reach 2800 bytes; SQL Server caps a nonclustered key at 1700 bytes, so uniqueness runs over a SHA-256 of the key.
     CREATE UNIQUE INDEX ux_doc_links_source_target
-        ON dbo.DOC_LINKS (tenant_id, source_kind, app_id, category, doc_id, doc_tenant_id, target_kind, target_domain, target_schema, target_name, target_column);
+        ON dbo.DOC_LINKS (tenant_id, link_digest);
+    CREATE INDEX idx_doc_links_source
+        ON dbo.DOC_LINKS (tenant_id, source_kind, app_id, category, doc_id);
     CREATE INDEX idx_doc_links_target
-        ON dbo.DOC_LINKS (tenant_id, target_domain, target_schema, target_name);
+        ON dbo.DOC_LINKS (tenant_id, target_domain, target_schema);
 END;
 
 -- batch

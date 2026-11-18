@@ -86,6 +86,7 @@ public sealed class DocLinkService : IDocLinkService
     {
         var actor = ResolveActor(principal);
         if (actor is null) return Fail(DocLinkOutcome.Unauthenticated);
+        if (!DocumentRules.IsValidAppId(appId)) return Fail(DocLinkOutcome.InvalidRequest, "Invalid application id.");
         if (Validate(targets) is { } invalid) return invalid;
         return await ReplaceAsync(actor, caller, DocLinkSource.ForApplication(appId), DocAccessPolicy.ResolveWriter(caller, appId, out _) is not null, targets, ct).ConfigureAwait(false);
     }
@@ -112,14 +113,19 @@ public sealed class DocLinkService : IDocLinkService
         {
             await _audit.RecordRequiredAsync(NewEntry(actor, AuditEventTypes.DocVisibilityChanged, new { appId, category = category.ToString(), docId, official = doc.TenantId is null, before = previous.Value, after = hidden }), ct).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex)
         {
-            await _documents.SetDiscoveryHiddenAsync(key, previous.Value, _time.GetUtcNow(), CancellationToken.None).ConfigureAwait(false);
+            using var rollback = new CancellationTokenSource(RollbackTimeout);
+            await _documents.SetDiscoveryHiddenAsync(key, previous.Value, _time.GetUtcNow(), rollback.Token).ConfigureAwait(false);
+            if (ex is OperationCanceledException) throw;
             return Fail(DocLinkOutcome.Unavailable, "Audit persistence failed; the change was rolled back.");
         }
 
         return new DocLinkResult(DocLinkOutcome.Ok);
     }
+
+    /// <summary>The compensating write runs on its own bounded token so a cancelled request still undoes an unaudited change.</summary>
+    private static readonly TimeSpan RollbackTimeout = TimeSpan.FromSeconds(10);
 
     private async Task<DocLinkResult> ReplaceAsync(Actor actor, DocCaller caller, DocLinkSource source, bool isWriter, IReadOnlyList<DocLinkTarget> targets, CancellationToken ct)
     {
@@ -160,9 +166,11 @@ public sealed class DocLinkService : IDocLinkService
                 after = final.Select(Describe).ToList()
             }), ct).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex)
         {
-            await _links.ReplaceForSourceAsync(tenant, source, beforeTargets, actor.Sid.Value, CancellationToken.None).ConfigureAwait(false);
+            using var rollback = new CancellationTokenSource(RollbackTimeout);
+            await _links.ReplaceForSourceAsync(tenant, source, beforeTargets, actor.Sid.Value, rollback.Token).ConfigureAwait(false);
+            if (ex is OperationCanceledException) throw;
             return Fail(DocLinkOutcome.Unavailable, "Audit persistence failed; the change was rolled back.");
         }
 

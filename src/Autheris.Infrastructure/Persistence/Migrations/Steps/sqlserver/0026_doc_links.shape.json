@@ -79,6 +79,12 @@
             "nullable": false
           },
           {
+            "name": "link_digest",
+            "type": "BINARY",
+            "family": "binary",
+            "nullable": false
+          },
+          {
             "name": "created_by",
             "type": "NVARCHAR",
             "family": "string",
@@ -104,16 +110,20 @@
       "unique": true,
       "columns": [
         "tenant_id",
+        "link_digest"
+      ]
+    },
+    {
+      "op": "addIndex",
+      "table": "DOC_LINKS",
+      "name": "idx_doc_links_source",
+      "unique": false,
+      "columns": [
+        "tenant_id",
         "source_kind",
         "app_id",
         "category",
-        "doc_id",
-        "doc_tenant_id",
-        "target_kind",
-        "target_domain",
-        "target_schema",
-        "target_name",
-        "target_column"
+        "doc_id"
       ]
     },
     {
@@ -124,8 +134,7 @@
       "columns": [
         "tenant_id",
         "target_domain",
-        "target_schema",
-        "target_name"
+        "target_schema"
       ]
     },
     {

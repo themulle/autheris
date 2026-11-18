@@ -28,7 +28,7 @@ public sealed class DocLinksMigration0026Tests
             var links = shape.Tables.Single(t => string.Equals(t.Name, "DOC_LINKS", StringComparison.OrdinalIgnoreCase));
             links.PrimaryKey.ShouldBe(["link_id"]);
             links.Columns.Single(c => string.Equals(c.Name, "tenant_id", StringComparison.OrdinalIgnoreCase)).Nullable.ShouldBeFalse();
-            links.Indexes.Any(i => i.Unique && i.Columns.Contains("tenant_id") && i.Columns.Contains("target_name")).ShouldBeTrue();
+            links.Indexes.Any(i => i.Unique && i.Columns.Contains("tenant_id") && i.Columns.Contains("link_digest")).ShouldBeTrue();
 
             foreach (var table in new[] { "DOC_OFFICIAL_DOCUMENTS", "DOC_TENANT_DOCUMENTS" })
             {
