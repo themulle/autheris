@@ -7,6 +7,7 @@ using System.Linq;
 using System.Text.Json;
 using Autheris.Application.Catalog.Semantic;
 using Autheris.Application.Catalog.Services;
+using Autheris.Application.DataSources.Services;
 using Autheris.Application.Policy.Classification;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -138,10 +139,57 @@ public static class DiscoveryAccessMapper
             Statistics: tableStats,
             SamplesAvailable: samplesAvailable,
             IsHidden: isHidden,
-            Write: writeState)
+            Write: writeState,
+            QueryShape: MapQueryShape(table, mappedCols))
         {
             HiddenTextColumns = hiddenTextColumns ?? (IReadOnlySet<string>)new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         };
+    }
+
+    /// <summary>
+    /// Issues #805/#807: keys and indexes over the listed columns whose state is <see cref="DiscoveryColumnState.Clear"/>
+    /// (the shared <see cref="DatasetIndexProjection"/> rule), required filters over the listed columns the caller has any access to.
+    /// <paramref name="columns"/> holds only columns that are not discovery-hidden; a caller without access to any column gets nothing.
+    /// </summary>
+    private static DiscoveryQueryShape MapQueryShape(TableMetadata table, IReadOnlyList<DiscoveryColumn> columns)
+    {
+        // Runs for every listed object: a set is built only when the table declares something it is needed for.
+        var hasKeys = table.PrimaryKeyColumns.Count > 0 || table.Indexes.Count > 0;
+        var hasFilters = table.RequiredFilterColumns.Length > 0 || table.RequiredFilterColumnGroups.Length > 0;
+        if (!hasKeys && !hasFilters)
+        {
+            return DiscoveryQueryShape.Empty;
+        }
+
+        HashSet<string>? listed = null;
+        HashSet<string>? clear = null;
+        foreach (var column in columns)
+        {
+            if (hasFilters && column.State != DiscoveryColumnState.NoAccess)
+            {
+                (listed ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase)).Add(column.Name);
+            }
+
+            if (hasKeys && column.State == DiscoveryColumnState.Clear)
+            {
+                (clear ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase)).Add(column.Name);
+            }
+        }
+
+        if (listed is null && clear is null)
+        {
+            return DiscoveryQueryShape.Empty;
+        }
+
+        var keys = clear is null ? DatasetKeyProjection.Empty : DatasetIndexProjection.Project(table, clear);
+        IReadOnlyList<string> requiredColumns = [];
+        IReadOnlyList<IReadOnlyList<string>> requiredGroups = [];
+        if (listed is not null)
+        {
+            (requiredColumns, requiredGroups) = RequiredFilterColumnProjection.Project(table, listed);
+        }
+
+        return new DiscoveryQueryShape(keys.PrimaryKeyColumns, keys.PrimaryKeyDirections, keys.Indexes, requiredColumns, requiredGroups);
     }
 
     private static DiscoveryWriteState MapWriteState(

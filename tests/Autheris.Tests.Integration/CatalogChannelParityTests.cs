@@ -189,7 +189,7 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
         var states = MaskingStatesOf(detail);
         states["id"].ShouldBe("Clear");
         states["amount"].ShouldBe("Clear");
-        states["secret_note"].ShouldBe("Deny");
+        states.ShouldNotContainKey("secret_note");
 
         var search = await BodyAsync(await client.GetAsync("/api/v1/catalog/search?q=secret_note"));
         search.ShouldNotContain("secret_note");
@@ -350,7 +350,7 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
 
         var granted = MaskingStatesOf(await BodyAsync(await client.GetAsync("/api/v1/catalog/datasets/dom_s.main.hid_t")));
         granted["id"].ShouldBe("Clear");
-        granted["tier_secret_col"].ShouldBe("Deny");
+        granted.ShouldNotContainKey("tier_secret_col");
 
         var other = await ClientAsync("S-T-OTHER", TenantB, "Reader", factory);
         MaskingStatesOf(await BodyAsync(await other.GetAsync("/api/v1/catalog/datasets/dom_s.main.hid_t"))).Values.ShouldAllBe(state => state == "Deny");

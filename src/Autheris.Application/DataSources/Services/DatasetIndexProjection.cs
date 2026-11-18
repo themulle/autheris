@@ -15,10 +15,24 @@ public sealed record DatasetKeyProjection(
     public static DatasetKeyProjection Empty { get; } = new([], [], []);
 
     /// <summary>Issue #390: the key columns in key order with their direction; null when the key is not wholly readable.</summary>
-    public IReadOnlyList<McpKeyColumn>? PrimaryKeyOrder =>
-        PrimaryKeyColumns.Count == 0
-            ? null
-            : PrimaryKeyColumns.Select((c, i) => new McpKeyColumn(c, KeyDirections.IsDescending(PrimaryKeyDirections, i) ? "DESC" : "ASC")).ToList();
+    public IReadOnlyList<McpKeyColumn>? PrimaryKeyOrder => KeyOrder(PrimaryKeyColumns, PrimaryKeyDirections);
+
+    /// <summary>The key columns in key order with their direction; null for an empty key.</summary>
+    public static IReadOnlyList<McpKeyColumn>? KeyOrder(IReadOnlyList<string> columns, IReadOnlyList<KeyColumnDirection> directions)
+    {
+        if (columns.Count == 0)
+        {
+            return null;
+        }
+
+        var order = new McpKeyColumn[columns.Count];
+        for (var i = 0; i < order.Length; i++)
+        {
+            order[i] = new McpKeyColumn(columns[i], KeyDirections.ToWire(KeyDirections.IsDescending(directions, i) ? KeyColumnDirection.Descending : KeyColumnDirection.Ascending));
+        }
+
+        return order;
+    }
 }
 
 /// <summary>

@@ -1,3 +1,4 @@
+using Autheris.Tests.Unit.TestSupport;
 namespace Autheris.Tests.Unit.Federation;
 
 using Autheris.Tests.Unit.Catalog;
