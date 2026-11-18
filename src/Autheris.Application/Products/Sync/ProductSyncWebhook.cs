@@ -34,6 +34,8 @@ public sealed class ProductSyncWebhookService(
     public static readonly TimeSpan TimestampWindow = TimeSpan.FromMinutes(5);
     internal const string SecretRefPrefix = "products-sync-webhook-";
     internal const string ReplayKeyPrefix = "products:sync:webhook:";
+    internal const string RejectionKeyPrefix = "products:sync:webhook-rejected:";
+    internal const int RejectionAuditWindowSeconds = 60;
     private const int MaxDeliveryIdLength = 100;
 
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
@@ -198,17 +200,59 @@ public sealed class ProductSyncWebhookService(
         return true;
     }
 
+    /// <summary>
+    /// Rejected deliveries are anonymous input, so their audit rows are throttled per tenant: the first rejection of a minute is audited and
+    /// carries the number of rejections the previous minute suppressed. Without a reachable counter every rejection is audited (never silent).
+    /// </summary>
+    private async Task<(bool Audit, long Suppressed)> ShouldAuditRejectionAsync(TenantId tenant, CancellationToken ct)
+    {
+        if (state is null)
+        {
+            return (true, 0);
+        }
+
+        try
+        {
+            var minute = _time.GetUtcNow().ToUnixTimeSeconds() / RejectionAuditWindowSeconds;
+            var prefix = RejectionKeyPrefix + tenant.Value + ":";
+            var ttl = TimeSpan.FromSeconds(RejectionAuditWindowSeconds * 3);
+            var count = await state.IncrementAsync(prefix + minute, 1, ttl, ct).ConfigureAwait(false);
+            if (count is null)
+            {
+                return (true, 0);
+            }
+
+            if (count > 1)
+            {
+                return (false, 0);
+            }
+
+            var previous = await state.IncrementAsync(prefix + (minute - 1), 0, ttl, ct).ConfigureAwait(false);
+            return (true, Math.Max(0, (previous ?? 0) - 1));
+        }
+        catch (ClusterStateUnavailableException)
+        {
+            return (true, 0);
+        }
+    }
+
     private async Task<ProductSyncWebhookStatus> RejectAsync(TenantId tenant, ProductSyncWebhookStatus status, string reason, CancellationToken ct)
     {
         try
         {
+            var (write, suppressed) = await ShouldAuditRejectionAsync(tenant, ct).ConfigureAwait(false);
+            if (!write)
+            {
+                return status;
+            }
+
             await audit.RecordBestEffortAsync(new AuditLogEntry
             {
                 EventType = AuditEventTypes.ProductSyncWebhookRejected,
                 TenantId = tenant,
                 TargetTable = "products.sync",
                 Decision = "DENY",
-                DetailsJson = JsonSerializer.Serialize(new { reason }),
+                DetailsJson = JsonSerializer.Serialize(new { reason, suppressedPreviousWindow = suppressed }),
                 OccurredAt = _time.GetUtcNow()
             }, ct).ConfigureAwait(false);
         }

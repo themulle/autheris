@@ -263,9 +263,53 @@ public sealed class ProductSyncWebhookTests
         entry.DetailsJson.ShouldNotContain("SELECT");
         _h.Audit.Entries.First(e => e.EventType == AuditEventTypes.ProductSyncRejected).DetailsJson.ShouldContain("\"commit\":\"invalid\"");
     }
+
+    [Fact]
+    public async Task Webhook_RejectionAudit_IsThrottledPerTenant()
+    {
+        var body = Body();
+        var bad = new ProductSyncWebhookDelivery(Now(), "d-1", "sha256=" + new string('0', 64));
+
+        for (var i = 0; i < 5; i++)
+        {
+            (await _webhook.HandleAsync(TenantA, body, bad)).ShouldBe(ProductSyncWebhookStatus.Unauthorized);
+        }
+
+        _audit.Entries.Count(e => e.EventType == AuditEventTypes.ProductSyncWebhookRejected && e.TenantId == TenantA).ShouldBe(1, "one row per tenant and minute");
+
+        (await _webhook.HandleAsync(TenantB, body, bad)).ShouldBe(ProductSyncWebhookStatus.Unauthorized);
+        _audit.Entries.Count(e => e.TenantId == TenantB && e.EventType == AuditEventTypes.ProductSyncWebhookRejected).ShouldBe(1, "another tenant has its own budget");
+
+        _time.Advance(TimeSpan.FromSeconds(ProductSyncWebhookService.RejectionAuditWindowSeconds + 1));
+        var later = new ProductSyncWebhookDelivery(Now(), "d-1", "sha256=" + new string('0', 64));
+        (await _webhook.HandleAsync(TenantA, body, later)).ShouldBe(ProductSyncWebhookStatus.Unauthorized);
+
+        var rows = _audit.Entries.Where(e => e.EventType == AuditEventTypes.ProductSyncWebhookRejected && e.TenantId == TenantA).ToList();
+        rows.Count.ShouldBe(2);
+        rows[1].DetailsJson.ShouldContain("\"suppressedPreviousWindow\":4");
+    }
+
+    [Fact]
+    public async Task Sync_ScanLimitHit_RejectsWithStableCode()
+    {
+        var admin = _h.Caller(ProductHarness.Admin, admin: true);
+        foreach (var name in new[] { "a_view", "b_view", "c_view" })
+        {
+            await _h.Service.PutAsync(new ProductPutRequest(admin, "sales", name, DataProductKind.View, "SELECT id FROM crm.public.orders", ProductHarness.Bob, null, null));
+        }
+
+        var limited = new ProductSyncService(_h.Service, _h.Store, _h.Audit) { ScanPageSize = 2, ScanMaxPages = 1 };
+        var ex = await Should.ThrowAsync<ProductSyncRejectedException>(() => limited.PlanAsync(Request()));
+        ex.Reason.ShouldBe(ProductSyncReasons.TooManyProducts);
+        ProductSyncReasons.TooManyProducts.ShouldBe("PRODUCT_SYNC_TOO_MANY_PRODUCTS");
+
+        var wide = new ProductSyncService(_h.Service, _h.Store, _h.Audit) { ScanPageSize = 2, ScanMaxPages = 2 };
+        (await wide.PlanAsync(Request())).Applied.ShouldBeFalse("a scan that reaches the end of the list is complete");
+    }
 }
 
 internal sealed class FakeSecrets(Dictionary<string, byte[]> secrets) : IKeyVaultSecretProvider
 {
     public byte[] GetSecretBytes(string secretRef) => secrets.TryGetValue(secretRef, out var value) ? (byte[])value.Clone() : throw new KeyNotFoundException();
+
 }
