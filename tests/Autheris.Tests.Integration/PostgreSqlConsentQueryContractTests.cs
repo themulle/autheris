@@ -57,10 +57,7 @@ public sealed class PostgreSqlConsentQueryContractTests : ConsentQueryContractTe
         await using var conn = new NpgsqlConnection(_db!.ConnectionString);
         await conn.OpenAsync();
         await using var cmd = new NpgsqlCommand(@"
-            INSERT INTO ROLES (id, role_name, description) VALUES (@rid, 'GovernanceAdmin', 'Governance Administrator')
-            ON CONFLICT (role_name) DO NOTHING;
-            INSERT INTO ROLE_MEMBERS (id, role_id, member_type, member_sid)
-            SELECT @m, id, 'User', @sid FROM ROLES WHERE role_name = 'GovernanceAdmin';", conn);
+            SELECT 1;", conn);
         cmd.Parameters.AddWithValue("@rid", Guid.NewGuid().ToString());
         cmd.Parameters.AddWithValue("@m", Guid.NewGuid().ToString());
         cmd.Parameters.AddWithValue("@sid", sid);

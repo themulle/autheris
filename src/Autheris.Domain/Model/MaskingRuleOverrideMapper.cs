@@ -27,7 +27,7 @@ public static class MaskingRuleOverrideMapper
         using var doc = ParseParams(paramsJson);
         var root = doc?.RootElement;
         var rule = new MaskingRule { TableColumnId = tableColumnId };
-        return function switch
+        var built = function switch
         {
             MaskFunction.Nullify => rule with { RuleType = GetBool(root, "deny") ? "DENY" : "NULLIFY" },
             MaskFunction.Hash => rule with { RuleType = "HMAC_SHA256", HmacKeyId = keyRef },
@@ -43,12 +43,40 @@ public static class MaskingRuleOverrideMapper
             MaskFunction.GeoJitter => rule with { RuleType = "GEO_JITTER", Decimals = GetInt(root, "decimals") ?? rule.Decimals },
             _ => rule with { RuleType = "REDACT", Replacement = GetString(root, "constant") ?? DefaultConstant }
         };
+
+        // The declared catalog rule type survives the round trip when it maps to the stored function (aliases like MASK_EMAIL or FULL).
+        return GetString(root, "rule_type") is { Length: > 0 } declared
+            && FromRule(built with { RuleType = declared }).FunctionCode == functionCode
+            ? built with { RuleType = declared }
+            : built;
     }
 
     /// <summary>Builds the persisted override parts of a catalog rule. An unknown rule type maps to a type-safe constant redaction.</summary>
     public static (string FunctionCode, string? ParamsJson, string? KeyRef) FromRule(MaskingRule rule)
     {
         ArgumentNullException.ThrowIfNull(rule);
+        var (function, parameters, keyRef) = FromRuleCore(rule);
+        return (function, string.IsNullOrWhiteSpace(rule.RuleType) ? parameters : WithRuleType(parameters, rule.RuleType.Trim()), keyRef);
+    }
+
+    private static string WithRuleType(string? paramsJson, string ruleType)
+    {
+        var bag = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        if (!string.IsNullOrWhiteSpace(paramsJson))
+        {
+            using var doc = JsonDocument.Parse(paramsJson);
+            foreach (var p in doc.RootElement.EnumerateObject())
+            {
+                bag[p.Name] = p.Value.Clone();
+            }
+        }
+
+        bag["rule_type"] = JsonSerializer.SerializeToElement(ruleType);
+        return JsonSerializer.Serialize(bag);
+    }
+
+    private static (string FunctionCode, string? ParamsJson, string? KeyRef) FromRuleCore(MaskingRule rule)
+    {
         return (rule.RuleType ?? string.Empty).Trim().ToUpperInvariant() switch
         {
             "NULLIFY" => (ClassificationMaskFunctions.ToCode(MaskFunction.Nullify), null, null),

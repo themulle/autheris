@@ -17,6 +17,10 @@ public sealed class MaskingRuleOverrideMapperTests
     [InlineData("PARTIAL_MASK")]
     [InlineData("GEO_JITTER")]
     [InlineData("REDACT")]
+    [InlineData("MASK_EMAIL")]
+    [InlineData("MASK_IBAN")]
+    [InlineData("FULL")]
+    [InlineData("HMAC")]
     public void Rule_SurvivesPersistAndRead_WithTheSameEnforcementKind(string ruleType)
     {
         var rule = new MaskingRule { RuleType = ruleType, Replacement = ruleType == "REDACT" ? "XX" : null, PatternOrFormat = ruleType is "TOKENIZE" or "PARTIAL_MASK" ? "d" : null, HmacKeyId = "k1" };
@@ -24,7 +28,7 @@ public sealed class MaskingRuleOverrideMapperTests
         var (function, parameters, keyRef) = MaskingRuleOverrideMapper.FromRule(rule);
         var read = MaskingRuleOverrideMapper.ToRule(function, parameters, keyRef, Guid.NewGuid());
 
-        read.RuleType.ShouldBe(ruleType == "HMAC_SHA256" ? "HMAC_SHA256" : ruleType);
+        read.RuleType.ShouldBe(ruleType);
         read.IsHmac.ShouldBe(rule.IsHmac);
         if (rule.IsHmac || ruleType == "TOKENIZE")
         {
