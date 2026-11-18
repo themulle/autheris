@@ -1,3 +1,4 @@
+using Autheris.Tests.Unit.TestSupport;
 namespace Autheris.Tests.Unit.Security;
 
 using Autheris.Application.Catalog;

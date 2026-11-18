@@ -1,3 +1,4 @@
+using Autheris.Tests.Unit.TestSupport;
 using System.Security.Claims;
 using Autheris.Application.Audit;
 using Autheris.Application.Governance.ConsentRequests;
