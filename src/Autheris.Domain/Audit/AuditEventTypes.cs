@@ -105,6 +105,17 @@ public static class AuditEventTypes
     public const string WriteGrantChanged = "WRITE_GRANT_CHANGED";
     public const string ProfileInvalidationFailed = "PROFILE_INVALIDATION_FAILED";
 
+    // Data products
+    public const string ProductCreated = "PRODUCT_CREATED";
+    public const string ProductDefinitionChanged = "PRODUCT_DEFINITION_CHANGED";
+    public const string ProductRetired = "PRODUCT_RETIRED";
+    public const string ProductOwnerTransferred = "PRODUCT_OWNER_TRANSFERRED";
+    public const string ProductSettingsChanged = "PRODUCT_SETTINGS_CHANGED";
+    public const string ProductColumnClassificationChanged = "PRODUCT_COLUMN_CLASSIFICATION_CHANGED";
+    public const string ProductAccessDenied = "PRODUCT_ACCESS_DENIED";
+    public const string DataSourceOwnerAssigned = "DATA_SOURCE_OWNER_ASSIGNED";
+    public const string DataSourceOwnerRemoved = "DATA_SOURCE_OWNER_REMOVED";
+
     // Plan 9: Datasources & Async Jobs
     public const string DatasourceTested = "DATASOURCE_TESTED";
     public const string DatasourceTestRequested = "DATASOURCE_TEST_REQUESTED";

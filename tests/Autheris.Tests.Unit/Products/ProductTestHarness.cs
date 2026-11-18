@@ -1,0 +1,155 @@
+using Autheris.Application.Audit;
+using Autheris.Application.ConsentRequests.Events;
+using Autheris.Application.Products;
+using Autheris.Domain.Model;
+using NSubstitute;
+using TrinoSqlEngine;
+
+namespace Autheris.Tests.Unit.Products;
+
+/// <summary>Tenant-scoped in-memory product store with the version semantics of the SQL store.</summary>
+internal sealed class InMemoryDataProductRepository : IDataProductRepository
+{
+    private readonly Dictionary<(string Tenant, string Schema, string Name), DataProduct> _products = [];
+    private readonly Dictionary<(string Tenant, Guid Product), List<DataProductVersion>> _versions = [];
+    private readonly HashSet<(string Tenant, string Source, string Owner)> _owners = [];
+
+    public Task<DataProduct?> GetProductAsync(TenantId tenant, string schema, string name, CancellationToken ct = default) =>
+        Task.FromResult(_products.GetValueOrDefault((tenant.Value, schema, name)));
+
+    public Task<IReadOnlyList<DataProduct>> ListProductsAsync(TenantId tenant, string? afterKey, int limit, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<DataProduct>>(_products.Values.Where(p => p.Tenant == tenant)
+            .OrderBy(p => p.Schema, StringComparer.Ordinal).ThenBy(p => p.Name, StringComparer.Ordinal).Take(limit).ToList());
+
+    public Task<ProductWriteOutcome> CreateProductAsync(DataProduct product, DataProductVersion firstRevision, CancellationToken ct = default)
+    {
+        var key = (product.Tenant.Value, product.Schema, product.Name);
+        if (!_products.TryAdd(key, product))
+        {
+            return Task.FromResult(new ProductWriteOutcome(ProductWriteStatus.AlreadyExists));
+        }
+
+        _versions[(product.Tenant.Value, product.Id)] = [firstRevision];
+        return Task.FromResult(new ProductWriteOutcome(ProductWriteStatus.Created, product));
+    }
+
+    public Task<ProductWriteOutcome> ReplaceProductAsync(DataProduct product, int expectedVersion, DataProductVersion? definitionRevision, CancellationToken ct = default)
+    {
+        var key = (product.Tenant.Value, product.Schema, product.Name);
+        if (!_products.TryGetValue(key, out var current))
+        {
+            return Task.FromResult(new ProductWriteOutcome(ProductWriteStatus.NotFound));
+        }
+
+        if (current.Version != expectedVersion)
+        {
+            return Task.FromResult(new ProductWriteOutcome(ProductWriteStatus.VersionMismatch));
+        }
+
+        var stored = product with { Version = expectedVersion + 1 };
+        _products[key] = stored;
+        if (definitionRevision is not null)
+        {
+            _versions[(product.Tenant.Value, product.Id)].Add(definitionRevision with { Version = stored.Version });
+        }
+
+        return Task.FromResult(new ProductWriteOutcome(ProductWriteStatus.Replaced, stored));
+    }
+
+    public Task<IReadOnlyList<DataProductVersion>> GetProductVersionsAsync(TenantId tenant, Guid productId, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<DataProductVersion>>(_versions.GetValueOrDefault((tenant.Value, productId)) ?? []);
+
+    public Task<bool> IsDataSourceOwnerAsync(TenantId tenant, string dataSource, Sid ownerSid, CancellationToken ct = default) =>
+        Task.FromResult(_owners.Contains((tenant.Value, dataSource.ToLowerInvariant(), ownerSid.Value.ToLowerInvariant())));
+
+    public Task<IReadOnlyList<DataSourceOwner>> GetDataSourceOwnersAsync(TenantId tenant, string dataSource, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<DataSourceOwner>>(_owners.Where(o => o.Tenant == tenant.Value && string.Equals(o.Source, dataSource, StringComparison.OrdinalIgnoreCase))
+            .Select(o => new DataSourceOwner(tenant, o.Source, new Sid(o.Owner), new Sid("admin"), DateTimeOffset.UnixEpoch)).ToList());
+
+    public Task<bool> AddDataSourceOwnerAsync(DataSourceOwner owner, CancellationToken ct = default) =>
+        Task.FromResult(_owners.Add((owner.Tenant.Value, owner.DataSource.ToLowerInvariant(), owner.OwnerSid.Value.ToLowerInvariant())));
+
+    public Task<bool> RemoveDataSourceOwnerAsync(TenantId tenant, string dataSource, Sid ownerSid, CancellationToken ct = default) =>
+        Task.FromResult(_owners.Remove((tenant.Value, dataSource.ToLowerInvariant(), ownerSid.Value.ToLowerInvariant())));
+}
+
+internal sealed class RecordingAuditWriter : IAuditWriter
+{
+    public List<AuditLogEntry> Entries { get; } = [];
+
+    public Task RecordRequiredAsync(AuditLogEntry entry, CancellationToken ct = default)
+    {
+        Entries.Add(entry);
+        return Task.CompletedTask;
+    }
+
+    public Task RecordBestEffortAsync(AuditLogEntry entry, CancellationToken ct = default) => RecordRequiredAsync(entry, ct);
+
+    public Task RecordAsync(AuditLogEntry entry, CancellationToken ct = default) => RecordRequiredAsync(entry, ct);
+}
+
+/// <summary>Wires the real services over in-memory stores: owners per table, a stored catalog with PII flags and a recording audit/outbox.</summary>
+internal sealed class ProductHarness
+{
+    public static readonly TenantId Tenant = new("tenant-a");
+    public static readonly Sid Alice = new("S-1-5-21-1001");
+    public static readonly Sid Bob = new("S-1-5-21-1002");
+    public static readonly Sid Carol = new("S-1-5-21-1003");
+    public static readonly Sid Admin = new("S-1-5-21-9001");
+    public static readonly Sid SyncIdentity = new("S-1-5-21-9002");
+
+    public static readonly TableIdentifier Customers = new("crm", "public", "customers");
+    public static readonly TableIdentifier Orders = new("crm", "public", "orders");
+    public static readonly TableIdentifier Products = new("erp", "public", "items");
+
+    public InMemoryDataProductRepository Store { get; } = new();
+
+    public RecordingAuditWriter Audit { get; } = new();
+
+    public IConsentEventOutbox Outbox { get; } = Substitute.For<IConsentEventOutbox>();
+
+    public Dictionary<string, HashSet<TableIdentifier>> Owned { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    public ProductAuthorityService Authority { get; }
+
+    public DataProductService Service { get; }
+
+    public ProductHarness()
+    {
+        var ownership = Substitute.For<IDataOwnershipRepository>();
+        ownership.GetOwnedOrDelegatedTablesAsync(default, default!, default, default).ReturnsForAnyArgs(call =>
+        {
+            var sid = call.ArgAt<Sid>(0).Value;
+            var requested = call.ArgAt<IReadOnlyCollection<TableIdentifier>>(1);
+            IReadOnlySet<TableIdentifier> owned = Owned.TryGetValue(sid, out var set) ? requested.Where(set.Contains).ToHashSet() : new HashSet<TableIdentifier>();
+            return Task.FromResult(owned);
+        });
+        ownership.GetAuthorizedApproverSidsForTableAsync(default, default, default).ReturnsForAnyArgs(call =>
+        {
+            var table = call.ArgAt<TableIdentifier>(0);
+            IReadOnlySet<string> sids = Owned.Where(o => o.Value.Contains(table)).Select(o => o.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            return Task.FromResult(sids);
+        });
+
+        var catalog = Substitute.For<IProductCatalogColumns>();
+        catalog.GetColumnsAsync(default, default, default).ReturnsForAnyArgs(call => Task.FromResult(Columns(call.ArgAt<TableIdentifier>(1))));
+
+        Authority = new ProductAuthorityService(ownership, Store);
+        Service = new DataProductService(Store, Authority, catalog, FastSqlEngine.Default, ownership, Audit, Outbox);
+    }
+
+    public static IReadOnlyList<CatalogColumnInfo>? Columns(TableIdentifier table) => table.TableName switch
+    {
+        "customers" => [new("id", "bigint", false), new("email", "varchar", true), new("segment", "varchar", false)],
+        "orders" => [new("id", "bigint", false), new("customer_id", "bigint", false), new("total", "decimal", false)],
+        "items" => [new("sku", "varchar", false), new("price", "decimal", false)],
+        _ => null
+    };
+
+    public ProductCaller Caller(Sid sid, bool admin = false, bool viaSync = false) => new(sid, Tenant, admin, viaSync, admin);
+
+    public ProductPutRequest Put(ProductCaller caller, string sql, Sid? owner = null, string name = "orders_view", DataProductKind kind = DataProductKind.View) =>
+        new(caller, "sales", name, kind, sql, owner);
+
+    public const string CustomerOrders = "SELECT o.id, o.total, c.segment FROM crm.public.orders o JOIN crm.public.customers c ON o.customer_id = c.id";
+}

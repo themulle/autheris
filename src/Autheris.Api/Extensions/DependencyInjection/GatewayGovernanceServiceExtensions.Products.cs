@@ -1,0 +1,35 @@
+namespace Autheris.Api.Extensions.DependencyInjection;
+
+using Autheris.Application.Audit;
+using Autheris.Application.Common.Interfaces;
+using Autheris.Application.ConsentRequests.Events;
+using Autheris.Application.Products;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+
+public static partial class GatewayGovernanceServiceExtensions
+{
+    /// <summary>Data products: creation authority, product-owner rules, base-owner notification and column classification.</summary>
+    private static void AddDataProducts(IServiceCollection services)
+    {
+        services.AddSingleton<IProductCatalogColumns>(sp => new ProductCatalogColumns(sp.GetRequiredService<ITableMetadataRepository>()));
+        services.AddSingleton(sp => new ProductAuthorityService(
+            sp.GetRequiredService<IDataOwnershipRepository>(),
+            sp.GetRequiredService<IDataProductRepository>(),
+            sp.GetService<TimeProvider>()));
+        services.AddSingleton(sp => new DataProductService(
+            sp.GetRequiredService<IDataProductRepository>(),
+            sp.GetRequiredService<ProductAuthorityService>(),
+            sp.GetRequiredService<IProductCatalogColumns>(),
+            sp.GetRequiredService<TrinoSqlEngine.ISqlEngine>(),
+            sp.GetRequiredService<IDataOwnershipRepository>(),
+            sp.GetRequiredService<IAuditWriter>(),
+            sp.GetService<IConsentEventOutbox>(),
+            sp.GetService<TimeProvider>(),
+            sp.GetService<ILogger<DataProductService>>()));
+        services.AddSingleton(sp => new DataSourceOwnerService(
+            sp.GetRequiredService<IDataProductRepository>(),
+            sp.GetRequiredService<IAuditWriter>(),
+            sp.GetService<TimeProvider>()));
+    }
+}
