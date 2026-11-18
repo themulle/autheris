@@ -205,6 +205,7 @@ public static class McpDatasetTools
                 "search": { "type": "string", "description": "Optional text matched against dataset ids, descriptions and column names." },
                 "domain": { "type": "string", "description": "Optional business domain filter (e.g. 'sales')." },
                 "tag": { "type": "string", "description": "Optional tag filter to find datasets with a matching tag (e.g. 'finance', 'pii', 'sales')." },
+                "accessStatus": { "type": "string", "enum": ["GRANTED", "PENDING", "EXPIRED", "REQUEST_ACCESS"], "description": "Optional: only datasets with this accessStatus for you (GRANTED: you can read it; REQUEST_ACCESS: visible, request access to read it; PENDING: your access request is open; EXPIRED: your access expired recently). Applied before paging: total and nextOffset count the filtered datasets." },
                 "offset": { "type": "integer", "minimum": 0, "description": "Optional pagination offset (default 0)." },
                 "limit": { "type": "integer", "minimum": 1, "maximum": 100, "description": "Optional maximum datasets to return per page (default 50, max 100)." },
                 "language": { "type": "string", "description": "Optional BCP 47 language tag (e.g. 'de', 'en') or Accept-Language range for localized dataset titles and descriptions." },
@@ -300,7 +301,7 @@ public static class McpDatasetTools
 
         yield return new McpToolDefinition(
             Name: SearchCatalog,
-            Description: "Performs hybrid semantic vector and keyword search across thousands of tables in the catalog. Input natural language inquiries (e.g. 'monthly revenue by customer', 'unpaid invoices') or exact table codes. Returns ranked candidate tables, relevance score, matching columns, and explicit join relations.",
+            Description: "Performs hybrid semantic vector and keyword search across thousands of tables in the catalog. Input natural language inquiries (e.g. 'monthly revenue by customer', 'unpaid invoices') or exact table codes. Returns ranked candidate tables, relevance score, matching columns, explicit join relations and your accessStatus per table (GRANTED: you can read it). Search your readable tables first with accessStatus 'GRANTED'.",
             InputJsonSchema: """
             {
               "type": "object",
@@ -310,6 +311,7 @@ public static class McpDatasetTools
                 "domain": { "type": "string", "description": "Optional business domain filter (e.g. 'sales', 'finance', 'core')." },
                 "limit": { "type": "integer", "description": "Maximum number of candidate tables to return (default: 5, max: 20)." },
                 "tag": { "type": "string", "description": "Optional exact tag filter (case-insensitive), same as on list_datasets; only datasets carrying the tag are returned." },
+                "accessStatus": { "type": "string", "enum": ["GRANTED", "PENDING", "EXPIRED", "REQUEST_ACCESS"], "description": "Optional: only tables with this accessStatus for you, same values as on list_datasets (GRANTED: you can read it; REQUEST_ACCESS: request access first). Applied before ranking and the limit." },
                 "mode": { "type": "string", "enum": ["hybrid", "semantic", "keyword"], "description": "Search mode: 'hybrid' (default), 'semantic', or 'keyword'." },
                 "language": { "type": "string", "description": "Optional BCP 47 language tag (e.g. 'de', 'en') or Accept-Language range for query language bias and localized hit descriptions." }
               }
@@ -319,7 +321,7 @@ public static class McpDatasetTools
 
         yield return new McpToolDefinition(
             Name: FindRelevantTables,
-            Description: "Discovers the required tables, columns, and foreign key join conditions for an AI application, report, or dashboard use-case across 10,000+ tables. Performs hybrid semantic and keyword search, returning ranked candidate tables with join conditions in a compact token-efficient response.",
+            Description: "Discovers the required tables, columns, and foreign key join conditions for an AI application, report, or dashboard use-case across 10,000+ tables. Performs hybrid semantic and keyword search, returning ranked candidate tables with join conditions and your accessStatus per table (GRANTED: you can read it) in a compact token-efficient response.",
             InputJsonSchema: """
             {
               "type": "object",
@@ -328,7 +330,8 @@ public static class McpDatasetTools
                 "use_case": { "type": "string", "description": "Natural language description of the report, app, or query requirement (e.g. 'Customer revenue and margin by sales region')." },
                 "domain": { "type": "string", "description": "Optional business domain filter (e.g. 'sales', 'finance')." },
                 "limit": { "type": "integer", "description": "Maximum candidate tables to return (default: 5, max: 20)." },
-                "language": { "type": "string", "description": "Optional BCP 47 language tag." }
+                "language": { "type": "string", "description": "Optional BCP 47 language tag." },
+                "accessStatus": { "type": "string", "enum": ["GRANTED", "PENDING", "EXPIRED", "REQUEST_ACCESS"], "description": "Optional: only tables with this accessStatus for you, same values as on list_datasets (GRANTED: you can read it; REQUEST_ACCESS: request access first). Applied before ranking and the limit." }
               }
             }
             """,

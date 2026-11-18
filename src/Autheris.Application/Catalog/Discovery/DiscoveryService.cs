@@ -42,6 +42,8 @@ public sealed class DiscoveryService : IDiscoveryService
     public const int MaxAuditObjectIds = 50;
     public const int ExpiredLookbackDays = 90;
 
+    private static readonly IReadOnlySet<TableIdentifier> EmptyTableSet = new HashSet<TableIdentifier>();
+
     private readonly ITableMetadataRepository? _metadataRepository;
     private readonly IAccessDecisionPoint? _decisionPoint;
     private readonly IConsentRepository? _consentRepository;
@@ -152,6 +154,15 @@ public sealed class DiscoveryService : IDiscoveryService
             }
 
             var matchedTables = filtered.ToList();
+
+            // Issue #798: the access filter narrows the matched set before the total and the page are taken. It runs before the
+            // caller-visible text check (#813) so only the tables in the wanted state are projected; both only narrow the set.
+            if (query.Access is { } wantedAccess)
+            {
+                var view = await LoadAccessViewAsync(caller, sid, matchedTables, wantedAccess, ct).ConfigureAwait(false);
+                matchedTables = matchedTables.FindAll(t => view.StateOf(t.Identifier) == wantedAccess);
+            }
+
             if (!string.IsNullOrWhiteSpace(query.Search))
             {
                 var searchText = query.Search.Trim();
@@ -163,6 +174,10 @@ public sealed class DiscoveryService : IDiscoveryService
             var eligibleProcedures = (await LoadEligibleProceduresAsync(caller, scoped.VisibleTables, ct).ConfigureAwait(false))
                 .Where(p => DiscoveryProcedureResolver.MatchesQuery(p.Procedure, query.Domain, query.Schema, query.Tag, query.Search))
                 .ToList();
+            if (query.Access is { } wantedProcedureAccess)
+            {
+                eligibleProcedures = await FilterProceduresByAccessAsync(caller, sid, scopeKey, eligibleProcedures, wantedProcedureAccess, ct).ConfigureAwait(false);
+            }
 
             var totalCount = matchedTables.Count + eligibleProcedures.Count;
             var first = Math.Clamp(query.First <= 0 ? 50 : query.First, 1, MaxPageSize);
@@ -310,7 +325,16 @@ public sealed class DiscoveryService : IDiscoveryService
 
             var limit = Math.Clamp(options.Limit <= 0 ? 25 : options.Limit, 1, MaxPageSize);
             var trimmed = text?.Trim() ?? string.Empty;
-            var visibleById = scoped.VisibleTables.ToDictionary(static t => t.Identifier);
+
+            // Issue #804: the access filter narrows the searchable set before ranking and the limit.
+            var searchable = scoped.VisibleTables;
+            if (options.Access is { } wantedAccess)
+            {
+                var view = await LoadAccessViewAsync(caller, sid, scoped.VisibleTables, wantedAccess, ct).ConfigureAwait(false);
+                searchable = scoped.VisibleTables.Where(t => view.StateOf(t.Identifier) == wantedAccess).ToList();
+            }
+
+            var visibleById = searchable.ToDictionary(static t => t.Identifier);
 
             List<TableMetadata> matchedTables;
             if (!string.IsNullOrWhiteSpace(trimmed) && _searchEngine?.IsIndexReady == true)
@@ -376,7 +400,7 @@ public sealed class DiscoveryService : IDiscoveryService
             }
             else
             {
-                IEnumerable<TableMetadata> q = scoped.VisibleTables;
+                IEnumerable<TableMetadata> q = searchable;
                 if (!string.IsNullOrWhiteSpace(options.Domain))
                 {
                     var d = options.Domain.Trim();
@@ -401,12 +425,22 @@ public sealed class DiscoveryService : IDiscoveryService
             }
 
             var remainingForProcs = Math.Max(0, limit - matchedTables.Count);
-            var matchedProcedures = remainingForProcs > 0
-                ? (await LoadEligibleProceduresAsync(caller, scoped.VisibleTables, ct).ConfigureAwait(false))
+            List<EligibleDiscoveryProcedure> matchedProcedures = [];
+            if (remainingForProcs > 0)
+            {
+                matchedProcedures = (await LoadEligibleProceduresAsync(caller, scoped.VisibleTables, ct).ConfigureAwait(false))
                     .Where(p => DiscoveryProcedureResolver.MatchesQuery(p.Procedure, options.Domain, schema: null, tag: null, trimmed))
-                    .Take(remainingForProcs)
-                    .ToList()
-                : [];
+                    .ToList();
+                if (options.Access is { } wantedProcedureAccess)
+                {
+                    matchedProcedures = await FilterProceduresByAccessAsync(caller, sid, scopeKey, matchedProcedures, wantedProcedureAccess, ct).ConfigureAwait(false);
+                }
+
+                if (matchedProcedures.Count > remainingForProcs)
+                {
+                    matchedProcedures.RemoveRange(remainingForProcs, matchedProcedures.Count - remainingForProcs);
+                }
+            }
 
             var tableObjects = await ResolveObjectsBatchAsync(
                 caller, sid, scopeKey, matchedTables, options.Language, ct).ConfigureAwait(false);
@@ -746,6 +780,158 @@ public sealed class DiscoveryService : IDiscoveryService
         }
 
         return results.Where(static r => r is not null).Select(static r => r!).ToList();
+    }
+
+    /// <summary>
+    /// Issues #798 / #804: the caller's access state of <paramref name="tables"/>, set-based. One read of the caller's active consents gives the
+    /// grant candidates (<see cref="GrantCandidatesAsync"/>); only those go to the access decision point, so a caller with three grants in a
+    /// catalog of 3,000 tables costs three decisions, not 3,000. The pending and expired sets are the ones the per-object state uses, read only
+    /// when <paramref name="wanted"/> needs them. Each state follows <see cref="DiscoveryAccessMapper.AccessStateOf"/>, the rule of the
+    /// per-object <see cref="DiscoveryObject.Access"/>, so the filter and the reported state agree.
+    /// </summary>
+    private async Task<CallerAccessView> LoadAccessViewAsync(
+        CatalogCaller caller,
+        Sid sid,
+        IReadOnlyList<TableMetadata> tables,
+        DiscoveryAccessState wanted,
+        CancellationToken ct)
+    {
+        var subject = SecurityPrincipalContext.FromPrincipal(caller.Principal!, caller.Tenant);
+        var candidates = await GrantCandidatesAsync(caller, subject, tables, ct).ConfigureAwait(false);
+        var granted = new HashSet<TableIdentifier>();
+        if (candidates.Count > 0)
+        {
+            var decisions = await _decisionPoint!.DecideManyAsync(
+                subject, candidates, AccessOperation.Discover, AccessTransport.Discovery, ct).ConfigureAwait(false);
+            if (decisions.Count != candidates.Count)
+            {
+                throw new InvalidOperationException("AccessDecisionPoint returned mismatched decision count.");
+            }
+
+            for (var i = 0; i < candidates.Count; i++)
+            {
+                if (decisions[i].IsAllowed)
+                {
+                    granted.Add(candidates[i].Identifier);
+                }
+            }
+        }
+
+        if (wanted == DiscoveryAccessState.Granted)
+        {
+            return new CallerAccessView(granted, EmptyTableSet, EmptyTableSet);
+        }
+
+        var pending = await LoadPendingRequestTablesAsync(sid, ct).ConfigureAwait(false);
+        var expired = await LoadRecentlyExpiredTablesAsync(sid, caller.Tenant, ct).ConfigureAwait(false);
+        return new CallerAccessView(granted, pending, expired);
+    }
+
+    /// <summary>
+    /// The tables of <paramref name="tables"/> the access decision point can allow for the caller: every table when consent is bypassed,
+    /// otherwise those an active Allow read consent of the caller (user SIDs and group SIDs, caller tenant) targets, directly or by a pattern
+    /// grant (never a hidden table by pattern). Zero trust: the consent resolver denies a read without such a consent, and an access profile
+    /// never creates an allow (SR-M-07), so no other table can be granted. The decision point still decides every candidate; this set only
+    /// spares it the tables it cannot allow.
+    /// </summary>
+    private async Task<List<TableMetadata>> GrantCandidatesAsync(
+        CatalogCaller caller,
+        SecurityPrincipalContext subject,
+        IReadOnlyList<TableMetadata> tables,
+        CancellationToken ct)
+    {
+        if (tables.Count == 0)
+        {
+            return [];
+        }
+
+        if (_gatewayOptions.IsConsentBypassed)
+        {
+            return [.. tables];
+        }
+
+        var subjects = caller.Principal!.GetAllUserSids();
+        subjects.Add(subject.UserSid);
+        subjects.UnionWith(subject.GroupSids);
+        var consents = await _consentRepository!.GetAllActiveConsentsForSubjectsAsync(
+            subjects, roles: null, _timeProvider.GetUtcNow(), caller.Tenant, ct).ConfigureAwait(false);
+
+        HashSet<TableIdentifier>? targeted = null;
+        List<Autheris.Application.Policy.RowScopes.ObjectPatternMatcher>? patterns = null;
+        foreach (var consent in consents)
+        {
+            // Write-only consents (write rules without column rules) never grant a read.
+            if (consent.Effect != ConsentEffect.Allow || (consent.WriteRules.Count > 0 && consent.ColumnRules.Count == 0))
+            {
+                continue;
+            }
+
+            if (!consent.IsPatternGrant)
+            {
+                (targeted ??= []).Add(consent.TableIdentifier);
+            }
+            else if (Autheris.Application.Policy.RowScopes.ObjectPatternMatcher.TryParse(consent.ObjectPattern, out var matcher, out _))
+            {
+                (patterns ??= []).Add(matcher!);
+            }
+        }
+
+        if (targeted is null && patterns is null)
+        {
+            return [];
+        }
+
+        var candidates = new List<TableMetadata>();
+        foreach (var table in tables)
+        {
+            if (targeted?.Contains(table.Identifier) == true || (patterns?.Exists(p => p.Matches(table)) ?? false))
+            {
+                candidates.Add(table);
+            }
+        }
+
+        return candidates;
+    }
+
+    /// <summary>Issue #798: the procedures whose resolved caller state is <paramref name="wanted"/> (procedures are few; they resolve as on a page).</summary>
+    private async Task<List<EligibleDiscoveryProcedure>> FilterProceduresByAccessAsync(
+        CatalogCaller caller,
+        Sid sid,
+        ScopeMemoKey scopeKey,
+        List<EligibleDiscoveryProcedure> procedures,
+        DiscoveryAccessState wanted,
+        CancellationToken ct)
+    {
+        if (procedures.Count == 0)
+        {
+            return procedures;
+        }
+
+        var resolved = await ResolveProceduresBatchAsync(caller, sid, scopeKey, procedures, ct).ConfigureAwait(false);
+        if (resolved.Count != procedures.Count)
+        {
+            throw new InvalidOperationException("Procedure resolution returned a mismatched count.");
+        }
+
+        var kept = new List<EligibleDiscoveryProcedure>(procedures.Count);
+        for (var i = 0; i < procedures.Count; i++)
+        {
+            if (resolved[i].Access == wanted)
+            {
+                kept.Add(procedures[i]);
+            }
+        }
+
+        return kept;
+    }
+
+    private sealed record CallerAccessView(
+        IReadOnlySet<TableIdentifier> Granted,
+        IReadOnlySet<TableIdentifier> Pending,
+        IReadOnlySet<TableIdentifier> Expired)
+    {
+        public DiscoveryAccessState StateOf(TableIdentifier table) =>
+            DiscoveryAccessMapper.AccessStateOf(Granted.Contains(table), Pending.Contains(table), Expired.Contains(table));
     }
 
     private async Task<IReadOnlySet<TableIdentifier>> LoadPendingRequestTablesAsync(Sid sid, CancellationToken ct)

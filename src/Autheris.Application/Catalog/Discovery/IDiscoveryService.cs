@@ -16,6 +16,7 @@ public enum DiscoverySurface
     Search = 3
 }
 
+/// <param name="Access">Issue #798: only objects in this caller access state; applied before the total and paging. Null: no filter.</param>
 public sealed record DiscoveryQuery(
     string? Domain = null,
     string? Schema = null,
@@ -24,14 +25,17 @@ public sealed record DiscoveryQuery(
     string? Language = null,
     int First = 50,
     int After = 0,
-    DiscoverySurface Surface = DiscoverySurface.Rest);
+    DiscoverySurface Surface = DiscoverySurface.Rest,
+    DiscoveryAccessState? Access = null);
 
+/// <param name="Access">Issue #804: only objects in this caller access state; applied before ranking and the limit. Null: no filter.</param>
 public sealed record DiscoverySearchOptions(
     string? Domain = null,
     int Limit = 25,
     string? Mode = null,
     string? Language = null,
-    DiscoverySurface Surface = DiscoverySurface.Rest);
+    DiscoverySurface Surface = DiscoverySurface.Rest,
+    DiscoveryAccessState? Access = null);
 
 public sealed record DiscoveryPage(
     IReadOnlyList<DiscoveryObject> Items,

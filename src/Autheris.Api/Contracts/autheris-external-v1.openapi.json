@@ -31,6 +31,7 @@
           { "name": "changedSince", "in": "query", "schema": { "type": "integer", "format": "int64" } },
           { "name": "cursor", "in": "query", "schema": { "type": "string" } },
           { "name": "pageSize", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 200 } },
+          { "name": "accessStatus", "in": "query", "description": "Only objects with this callerState.access (granted, requested, expired, none; the MCP names GRANTED, PENDING, EXPIRED, REQUEST_ACCESS are accepted too, case-insensitive). Applied before totalCount and nextCursor. User callers only.", "schema": { "type": "string" } },
           { "name": "If-None-Match", "in": "header", "schema": { "type": "string" } }
         ],
         "responses": {

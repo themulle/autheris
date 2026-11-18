@@ -342,6 +342,8 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
 
             object result = tool.Name.ToLowerInvariant() switch
             {
+                McpDatasetTools.ListDatasets when Text("accessStatus") is { } accessStatus =>
+                    await _datasetCatalog.ListDatasetsAsync(principal, Text("search"), Text("domain"), Number("offset"), Number("limit"), Text("tag"), Text("language"), Bool("overview"), Text("format"), accessStatus, cancellationToken).ConfigureAwait(false),
                 McpDatasetTools.ListDatasets => (Text("language") != null || Bool("overview") != null || Text("format") != null)
                     ? await _datasetCatalog.ListDatasetsAsync(principal, Text("search"), Text("domain"), Number("offset"), Number("limit"), Text("tag"), Text("language"), Bool("overview"), Text("format"), cancellationToken).ConfigureAwait(false)
                     : (Number("offset") != null || Number("limit") != null || Text("tag") != null)

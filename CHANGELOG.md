@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- `search_catalog` hits and `find_relevant_tables` candidates carry `accessStatus`, the caller's own status as `list_datasets` reports it (`GRANTED`, `PENDING`, `EXPIRED`, `REQUEST_ACCESS`); the REST `/api/v1/catalog/search` hits carry it too. `find_relevant_tables` recommends an access request instead of the query tools for candidates the caller cannot read (#804).
+- Optional `accessStatus` filter on `list_datasets`, `search_catalog`, `find_relevant_tables` and `GET /api/v1/catalog/objects` (`granted`, `requested`, `expired`, `none` there), applied before ranking, limit and paging, so `total`, `nextOffset`, `totalCount` and `nextCursor` count the filtered set. The filter evaluates only the caller's grant candidates (one consent read plus one access decision per granted table), not the whole catalog. Unknown values are rejected (#798, #804).
+
 ## [1.8.5] - 2026-11-17
 
 ### Added
