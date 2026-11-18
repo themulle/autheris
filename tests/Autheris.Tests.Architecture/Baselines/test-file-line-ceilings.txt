@@ -20,7 +20,7 @@ tests/Autheris.Tests.Unit/Security/HostingAuthAndMiddlewareSecurityTests.cs	1034
 tests/Autheris.Tests.Unit/Security/InfrastructureAndPluginSecurityTests.cs	987
 tests/Autheris.Tests.Unit/OData/ODataTests.cs	1317
 tests/Autheris.Tests.Unit/Serialization/ParquetOutputNegotiationTests.cs	1086
-tests/Autheris.Tests.Unit/ProcedureEndpointTests.cs	1393
+tests/Autheris.Tests.Unit/Procedures/ProcedureEndpointTests.cs	1393
 tests/Autheris.Tests.Unit/Procedures/ProcedureExecutionSecurityTests.cs	1068
 tests/Autheris.Tests.Unit/Procedures/ProcedureRowBudgetAndScanCapTests.cs	1452
 tests/Autheris.Tests.Unit/Security/SecurityFindingsRemediationTests.cs	1408

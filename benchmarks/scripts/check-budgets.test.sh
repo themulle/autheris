@@ -43,7 +43,7 @@ SUMMARY_FILE="$TMP_DIR/summary.md"
 GITHUB_STEP_SUMMARY="$SUMMARY_FILE" assert_exit 0 "fixture within budget" bash "$CHECK_SCRIPT" "$BUDGETS_FILE" "$TMP_DIR/within.json"
 grep -q "coreImageUncompressedMB" "$SUMMARY_FILE"
 
-# 2. Footprint metric +11% (340 * 1.11 = 377.4) -> exit 1
+# 2. Footprint metric above budget plus tolerance (377.4 > 325 * 1.10 = 357.5) -> exit 1
 cat > "$TMP_DIR/over-footprint.json" <<'EOF'
 {
   "coreImageUncompressedMB": 377.4,
@@ -52,7 +52,7 @@ cat > "$TMP_DIR/over-footprint.json" <<'EOF'
   "ciPrWallClockMedianMinutes": 25.0
 }
 EOF
-assert_exit 1 "footprint metric +11%" bash "$CHECK_SCRIPT" "$BUDGETS_FILE" "$TMP_DIR/over-footprint.json"
+assert_exit 1 "footprint metric over budget plus tolerance" bash "$CHECK_SCRIPT" "$BUDGETS_FILE" "$TMP_DIR/over-footprint.json"
 
 # 3. PR CI median 30.0 min (lessThan 30) -> exit 1
 cat > "$TMP_DIR/ci-30-0.json" <<'EOF'

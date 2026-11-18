@@ -17,7 +17,7 @@ using NSubstitute.ExceptionExtensions;
 using Shouldly;
 using Xunit;
 
-namespace Autheris.Tests.Unit;
+namespace Autheris.Tests.Unit.Procedures;
 
 /// <summary>F-SQL-02: declaration parsing, registration policy and governed execution of stored procedure endpoints.</summary>
 public class ProcedureEndpointTests
