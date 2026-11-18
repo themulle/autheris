@@ -19,6 +19,71 @@ using Xunit;
 public sealed class ExternalCatalogApiTests
 {
     [Fact]
+    public async Task CatalogObjects_PersonTokenWithoutRole_Returns200_WithDiscoveryScopedItems()
+    {
+        await using var harness = ExternalCatalogTestHarness.Create();
+        var visible = harness.AddTable("pg", "customers", ownerTenantId: "tenant-a", hidden: false);
+        harness.AddTable("pg", "secret_audit", ownerTenantId: "tenant-a", hidden: true);
+
+        var person = ExternalCatalogTestHarness.BuildDelegatedUserPrincipal("tenant-a", "S-1-5-21-PERSON", scopes: "Apps.Read");
+
+        var list = await harness.ListObjectsAsync(person);
+        list.StatusCode.Should().Be(StatusCodes.Status200OK);
+        var items = list.ReadJson().GetProperty("items").EnumerateArray().ToList();
+        items.Should().ContainSingle();
+        items[0].GetProperty("objectId").GetString().Should().Be(visible.Identifier.ToString());
+
+        var byId = await harness.GetObjectByIdAsync(person, visible.Table.Id.ToString());
+        byId.StatusCode.Should().Be(StatusCodes.Status200OK);
+    }
+
+    [Fact]
+    public async Task CatalogObjects_AppOnlyTokenWithoutScopeOrRole_StaysForbidden()
+    {
+        await using var harness = ExternalCatalogTestHarness.Create();
+        harness.RegisterExternalSystem("tenant-a", "some-app", enabled: true);
+        harness.AddTable("pg", "customers", ownerTenantId: "tenant-a", hidden: false);
+
+        var app = ExternalCatalogTestHarness.BuildAppPrincipal("tenant-a", "some-app");
+
+        (await harness.ListObjectsAsync(app)).StatusCode.Should().Be(StatusCodes.Status403Forbidden);
+    }
+
+    [Fact]
+    public async Task CatalogObjects_PersonTokenWithOtherExternalScope_StaysForbidden()
+    {
+        await using var harness = ExternalCatalogTestHarness.Create();
+        var person = ExternalCatalogTestHarness.BuildDelegatedUserPrincipal("tenant-a", "S-1-5-21-PERSON", scopes: "Autheris.Consent.Read");
+
+        (await harness.ListObjectsAsync(person)).StatusCode.Should().Be(StatusCodes.Status403Forbidden);
+    }
+
+    [Fact]
+    public async Task CatalogObjects_Anonymous_Is401()
+    {
+        await using var harness = ExternalCatalogTestHarness.Create();
+
+        var anonymous = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity());
+        (await harness.AuthorizeAsync(anonymous, GatewayPolicies.CatalogRead)).Succeeded.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task CatalogObjects_PersonToken_SeesSameObjectsAsDatasets()
+    {
+        await using var harness = ExternalCatalogTestHarness.Create();
+        harness.AddTable("pg", "customers", ownerTenantId: "tenant-a", hidden: false);
+        harness.AddTable("pg", "secret_audit", ownerTenantId: "tenant-a", hidden: true);
+
+        var plain = ExternalCatalogTestHarness.BuildDelegatedUserPrincipal("tenant-a", "S-1-5-21-PERSON", scopes: "Apps.Read");
+        var scoped = ExternalCatalogTestHarness.BuildDelegatedUserPrincipal("tenant-a", "S-1-5-21-PERSON", scopes: ExternalApiPermissions.CatalogRead);
+
+        static List<string?> Ids(ExecutedCatalogResponse r) =>
+            r.ReadJson().GetProperty("items").EnumerateArray().Select(i => i.GetProperty("objectId").GetString()).Order().ToList();
+
+        Ids(await harness.ListObjectsAsync(plain)).Should().BeEquivalentTo(Ids(await harness.ListObjectsAsync(scoped)));
+    }
+
+    [Fact]
     public async Task HiddenObjectsAndColumns_Excluded_ForCatalogRead()
     {
         await using var harness = ExternalCatalogTestHarness.Create();
