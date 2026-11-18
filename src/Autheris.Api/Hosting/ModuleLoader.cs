@@ -99,6 +99,7 @@ public sealed class ModuleLoader
     private readonly string _hostVersion;
     private readonly string _abstractionsVersion;
     private readonly Func<string, bool>? _isDirectoryWritableOverride;
+    private readonly Func<string, uint?>? _ownerUidProbe;
     private readonly ILogger<ModuleLoader> _logger;
 
     public ModuleLoader(
@@ -107,8 +108,10 @@ public sealed class ModuleLoader
         string abstractionsVersion = DefaultAbstractionsVersion,
         Func<string, bool>? isDirectoryWritableOverride = null,
         ILogger<ModuleLoader>? logger = null,
-        IReadOnlyDictionary<string, ECDsa>? keyring = null)
+        IReadOnlyDictionary<string, ECDsa>? keyring = null,
+        Func<string, uint?>? ownerUidProbe = null)
     {
+        _ownerUidProbe = ownerUidProbe;
         _publicKeyOverride = publicKeyOverride;
         _keyringOverride = keyring;
         _hostVersion = string.IsNullOrWhiteSpace(hostVersion) ? ResolveHostVersion() : hostVersion;
@@ -267,7 +270,8 @@ public sealed class ModuleLoader
             fullModulesRoot,
             isProduction,
             moduleId: enabledIds[0],
-            isWritableOverride: _isDirectoryWritableOverride);
+            isWritableOverride: _isDirectoryWritableOverride,
+            ownerUidProbe: _ownerUidProbe);
 
         using var ownedKeyring = _keyringOverride is null && _publicKeyOverride is null ? LoadEmbeddedKeyring() : null;
         var revokedKeyIds = ReadRevokedKeyIds(configuration);
@@ -301,7 +305,8 @@ public sealed class ModuleLoader
                 fullModuleDir,
                 isProduction,
                 moduleId: moduleId,
-                isWritableOverride: _isDirectoryWritableOverride);
+                isWritableOverride: _isDirectoryWritableOverride,
+            ownerUidProbe: _ownerUidProbe);
 
             var manifestPath = Path.Combine(fullModuleDir, "module.json");
             if (!File.Exists(manifestPath))
@@ -327,7 +332,7 @@ public sealed class ModuleLoader
                     $"Manifest id '{manifest.Id}' does not match enabled module directory '{moduleId}'.");
             }
 
-            VerifyVersionCompatibility(moduleId, "hostVersion", manifest.HostVersion, _hostVersion);
+            VerifyVersionCompatibility(moduleId, "hostVersion", manifest.HostVersion, _hostVersion, exact: true);
             VerifyVersionCompatibility(moduleId, "abstractionsVersion", manifest.AbstractionsVersion, _abstractionsVersion);
 
             bool isUnsignedDev = allowUnsigned && isDevelopment && string.IsNullOrWhiteSpace(manifest.Signature);
@@ -363,6 +368,13 @@ public sealed class ModuleLoader
             }
 
             VerifyMinimumVersion(moduleId, manifest.Version, configuration.GetSection(MinVersionsConfigKey)[moduleId]);
+
+            ModuleDirectoryPermissionCheck.VerifyFiles(
+                fullModuleDir,
+                manifest.Files.Select(f => f.Path),
+                isProduction,
+                moduleId,
+                _isDirectoryWritableOverride);
 
             VerifiedModuleImage verifiedImage;
             try
@@ -600,17 +612,33 @@ public sealed class ModuleLoader
         string moduleId,
         string fieldName,
         string manifestVersion,
-        string hostExpectedVersion)
+        string hostExpectedVersion,
+        bool exact = false)
     {
-        if (!TryParseMajorMinor(manifestVersion, out int reqMajor, out int reqMinor) ||
-            !TryParseMajorMinor(hostExpectedVersion, out int hostMajor, out int hostMinor))
+        if (!TryParseVersion(manifestVersion, out var manifestParsed) ||
+            !TryParseVersion(hostExpectedVersion, out var hostParsed))
         {
             throw new ModuleLoadException(
                 moduleId,
                 $"Invalid semantic version in '{fieldName}': manifest='{manifestVersion}', host='{hostExpectedVersion}'.");
         }
 
-        if (reqMajor != hostMajor || reqMinor != hostMinor)
+        if (exact)
+        {
+            if (manifestParsed.Major != hostParsed.Major ||
+                manifestParsed.Minor != hostParsed.Minor ||
+                manifestParsed.Patch != hostParsed.Patch ||
+                !string.Equals(manifestParsed.Prerelease, hostParsed.Prerelease, StringComparison.Ordinal))
+            {
+                throw new ModuleLoadException(
+                    moduleId,
+                    $"Incompatible {fieldName} '{manifestVersion}'; host requires exactly '{hostExpectedVersion}' (build metadata ignored).");
+            }
+
+            return;
+        }
+
+        if (manifestParsed.Major != hostParsed.Major || manifestParsed.Minor != hostParsed.Minor)
         {
             throw new ModuleLoadException(
                 moduleId,
@@ -618,20 +646,21 @@ public sealed class ModuleLoader
         }
     }
 
-    private static bool TryParseMajorMinor(string versionText, out int major, out int minor)
+    private static bool TryParseVersion(string versionText, out (int Major, int Minor, int Patch, string Prerelease) result)
     {
-        major = 0;
-        minor = 0;
+        result = default;
         if (string.IsNullOrWhiteSpace(versionText))
         {
             return false;
         }
 
-        var core = versionText.Split('-', '+')[0];
-        if (Version.TryParse(core, out var parsed))
+        var withoutBuild = versionText.Split('+')[0];
+        var dash = withoutBuild.IndexOf('-', StringComparison.Ordinal);
+        var core = dash < 0 ? withoutBuild : withoutBuild[..dash];
+        var prerelease = dash < 0 ? string.Empty : withoutBuild[(dash + 1)..];
+        if (Version.TryParse(core, out var parsed) && parsed.Build >= 0 && parsed.Revision < 0)
         {
-            major = parsed.Major;
-            minor = parsed.Minor;
+            result = (parsed.Major, parsed.Minor, parsed.Build, prerelease);
             return true;
         }
 
