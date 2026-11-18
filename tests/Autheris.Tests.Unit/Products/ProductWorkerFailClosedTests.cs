@@ -28,7 +28,7 @@ public sealed class ProductWorkerFailClosedTests
     private ProductLoadService Loader() =>
         new(_h.Store, _runner, new RecordingCacheStore(), _catalog, _cluster, _h.Audit, _time);
 
-    private static ClusterJobContext Context() => new(1, Substitute.For<IDistributedLease>());
+    private static ClusterJobContext Context() => new(1, new StubLease());
 
     private async Task<DataProduct> CreateAsync(string name)
     {
@@ -45,7 +45,7 @@ public sealed class ProductWorkerFailClosedTests
         _cluster.TryAcquireLeaseAsync(default!, default, default).ReturnsForAnyArgs(call =>
             call.ArgAt<string>(0).Contains("a_first", StringComparison.Ordinal)
                 ? throw new InvalidOperationException("lease store down: secret-value")
-                : new ValueTask<IDistributedLease?>(Substitute.For<IDistributedLease>()));
+                : new ValueTask<IDistributedLease?>(new StubLease()));
         var job = new ProductScheduleJob(_h.Store, Loader(), NullLogger<ProductScheduleJob>.Instance, _time);
 
         await job.ExecuteAsync(Context(), CancellationToken.None);
@@ -59,7 +59,7 @@ public sealed class ProductWorkerFailClosedTests
     public async Task Failing_load_audits_failed_event()
     {
         var product = await CreateAsync("orders_view");
-        _cluster.TryAcquireLeaseAsync(default!, default, default).ReturnsForAnyArgs(_ => new ValueTask<IDistributedLease?>(Substitute.For<IDistributedLease>()));
+        _cluster.TryAcquireLeaseAsync(default!, default, default).ReturnsForAnyArgs(_ => new ValueTask<IDistributedLease?>(new StubLease()));
         _runner.Failure = _ => new InvalidOperationException("source down");
 
         await Should.ThrowAsync<ProductLoadException>(() => Loader().LoadAsync(product));

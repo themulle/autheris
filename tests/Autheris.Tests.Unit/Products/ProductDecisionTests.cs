@@ -224,8 +224,7 @@ public sealed class ProductDecisionTests
     [Fact]
     public async Task A_failed_owner_link_fails_the_operation()
     {
-        var failing = Substitute.For<IProductCatalogOwnerStore>();
-        failing.SetOwnerAsync(default, default, default, default).ReturnsForAnyArgs(_ => throw new InvalidOperationException("db down"));
+        var failing = new RecordingOwnerStore { Fail = true };
         var sync = new ProductOwnershipSync(failing);
         var product = await CreateProductAsync();
         var stored = (await _h.Store.GetProductAsync(ProductHarness.Tenant, "sales", "orders_view"))!;

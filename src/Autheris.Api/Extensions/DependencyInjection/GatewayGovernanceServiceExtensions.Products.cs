@@ -19,8 +19,9 @@ public static partial class GatewayGovernanceServiceExtensions
         // the owner link and the catalog object are persisted by the governance store; a host without it keeps products unpersisted (fail closed)
         services.AddSingleton<IProductCatalogOwnerStore>(sp => new Autheris.Infrastructure.Persistence.Products.ProductCatalogOwnerStore(sp.GetRequiredService<Autheris.Infrastructure.Persistence.GovernanceRepository>()));
         services.AddSingleton<IOnDemandProductStore>(sp => new Autheris.Infrastructure.Persistence.Products.OnDemandProductStore(sp.GetRequiredService<Autheris.Infrastructure.Persistence.GovernanceRepository>()));
+        services.AddSingleton<IProductCatalogObjectWriter>(sp => new Autheris.Infrastructure.Persistence.Products.ProductCatalogObjectWriter(sp.GetRequiredService<Autheris.Infrastructure.Persistence.GovernanceRepository>()));
         services.AddSingleton<IProductCatalogStore>(sp => new ProductCatalogStore(
-            sp.GetRequiredService<ITableMetadataRepository>(),
+            sp.GetRequiredService<IProductCatalogObjectWriter>(),
             sp.GetRequiredService<IClassificationRepository>(),
             sp.GetService<TimeProvider>()));
         services.AddScoped<IProductReadAccess, ProductReadAccess>();

@@ -128,7 +128,7 @@ public sealed class ProductWriteTests
     private static ITableReadConcurrencyGate Gate()
     {
         var gate = Substitute.For<ITableReadConcurrencyGate>();
-        gate.TryEnter(default!, default).ReturnsForAnyArgs(Substitute.For<IDisposable>());
+        gate.TryEnter(default!, default).ReturnsForAnyArgs(new NoopDisposable());
         return gate;
     }
 

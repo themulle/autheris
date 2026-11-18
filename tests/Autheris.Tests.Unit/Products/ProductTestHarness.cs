@@ -105,9 +105,46 @@ internal sealed class RecordingAuditWriter : IAuditWriter
     public Task RecordAsync(AuditLogEntry entry, CancellationToken ct = default) => RecordRequiredAsync(entry, ct);
 }
 
+/// <summary>Lease double that is never lost.</summary>
+internal sealed class StubLease : IDistributedLease
+{
+    public string ResourceKey => "stub";
+
+    public long Token => 1;
+
+    public CancellationToken LeaseLost => CancellationToken.None;
+
+    public DateTimeOffset LastConfirmedAt => DateTimeOffset.UnixEpoch;
+
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+}
+
+/// <summary>Disposable that does nothing.</summary>
+internal sealed class NoopDisposable : IDisposable
+{
+    public void Dispose()
+    {
+    }
+}
+
+/// <summary>Product-only catalog writer double; applies the same identity guard as the SQL writer.</summary>
+internal sealed class RecordingCatalogObjectWriter : IProductCatalogObjectWriter
+{
+    public List<TableMetadata> Written { get; } = [];
+
+    public Task<TableMetadata> UpsertAsync(TenantId tenant, TableMetadata metadata, CancellationToken ct = default)
+    {
+        ProductSource.EnsureProductObject(tenant, metadata);
+        Written.Add(metadata);
+        return Task.FromResult(metadata);
+    }
+}
+
 /// <summary>Records the owner links of product catalog objects.</summary>
 internal sealed class RecordingOwnerStore : IProductCatalogOwnerStore
 {
+    public bool Fail { get; set; }
+
     public Dictionary<TableIdentifier, Sid?> Owners { get; } = [];
 
     public int Calls { get; private set; }
@@ -115,6 +152,11 @@ internal sealed class RecordingOwnerStore : IProductCatalogOwnerStore
     public Task SetOwnerAsync(TenantId tenant, TableIdentifier catalogObject, Sid? owner, CancellationToken ct = default)
     {
         Calls++;
+        if (Fail)
+        {
+            throw new InvalidOperationException("db down");
+        }
+
         Owners[catalogObject] = owner;
         return Task.CompletedTask;
     }
@@ -178,7 +220,7 @@ internal sealed class ProductHarness
     public static IDistributedClusterStateProvider LeasingCluster()
     {
         var cluster = Substitute.For<IDistributedClusterStateProvider>();
-        cluster.TryAcquireLeaseAsync(default!, default, default).ReturnsForAnyArgs(_ => new ValueTask<IDistributedLease?>(Substitute.For<IDistributedLease>()));
+        cluster.TryAcquireLeaseAsync(default!, default, default).ReturnsForAnyArgs(_ => new ValueTask<IDistributedLease?>(new StubLease()));
         return cluster;
     }
 

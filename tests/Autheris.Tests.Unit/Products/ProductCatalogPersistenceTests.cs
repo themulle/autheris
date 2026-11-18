@@ -12,6 +12,48 @@ public sealed class ProductCatalogPersistenceTests
     private static readonly TableIdentifier ProductObject = ProductSource.ObjectOf(ProductHarness.Tenant, "sales", "orders_view");
 
     private readonly ProductHarness _h = new();
+    private readonly IClassificationRepository _classifications = Substitute.For<IClassificationRepository>();
+
+    [Fact]
+    public async Task ProductCatalogStore_PersistsValidProductIdentity()
+    {
+        var product = await CreateAsync();
+        var writer = new RecordingCatalogObjectWriter();
+
+        await new ProductCatalogStore(writer, _classifications).PersistAsync(product);
+
+        var written = writer.Written.Single();
+        written.Identifier.ShouldBe(ProductObject);
+        written.Identifier.Domain.ShouldBe(ProductSource.Name);
+        Should.NotThrow(() => ProductSource.EnsureProductObject(ProductHarness.Tenant, written));
+    }
+
+    [Fact]
+    public async Task CatalogImport_ProductsSource_StillRejected()
+    {
+        var product = await CreateAsync();
+        var projected = ProductCatalogProjector.Project(product, null, DateTimeOffset.UnixEpoch);
+
+        Should.Throw<Autheris.Application.Catalog.Services.CatalogReservedSourceNameException>(
+            () => Autheris.Application.Catalog.Services.CatalogSourceNameValidator.Validate(projected));
+    }
+
+    [Fact]
+    public async Task ProductCatalogPath_RejectsForeignTenantHash()
+    {
+        var product = await CreateAsync();
+        var projected = ProductCatalogProjector.Project(product, null, DateTimeOffset.UnixEpoch);
+        var writer = new RecordingCatalogObjectWriter();
+        var foreign = new TenantId("tenant-b");
+        var regular = projected with
+        {
+            Identifier = new TableIdentifier("crm", projected.Identifier.Schema, projected.Identifier.TableName),
+        };
+
+        await Should.ThrowAsync<ArgumentException>(() => writer.UpsertAsync(foreign, projected));
+        await Should.ThrowAsync<ArgumentException>(() => writer.UpsertAsync(ProductHarness.Tenant, regular));
+        writer.Written.ShouldBeEmpty();
+    }
 
     private async Task<DataProduct> CreateAsync(string sql = "SELECT c.id, c.email, c.segment FROM crm.public.customers c")
     {
@@ -23,14 +65,13 @@ public sealed class ProductCatalogPersistenceTests
     public async Task Catalog_object_persisted_with_classified_columns()
     {
         var product = await CreateAsync();
-        var metadata = Substitute.For<ITableMetadataRepository>();
-        metadata.UpsertTableMetadataAsync(default!, default).ReturnsForAnyArgs(call => Task.FromResult(call.Arg<TableMetadata>()));
-        var classifications = Substitute.For<IClassificationRepository>();
-        var store = new ProductCatalogStore(metadata, classifications);
+        var writer = new RecordingCatalogObjectWriter();
+        var classifications = _classifications;
+        var store = new ProductCatalogStore(writer, classifications);
 
         await store.PersistAsync(product);
 
-        var written = (TableMetadata)metadata.ReceivedCalls().Single(c => c.GetMethodInfo().Name == nameof(ITableMetadataRepository.UpsertTableMetadataAsync)).GetArguments()[0]!;
+        var written = writer.Written.Single();
         written.Identifier.ShouldBe(ProductObject);
         written.Table.IsActive.ShouldBeTrue();
         var email = written.Columns.Single(c => c.ColumnName == "email");

@@ -244,7 +244,7 @@ public sealed class ProductCallerQueryTests : IDisposable
         var (product, loader) = await LoadedProductAsync(new LoadSettings(LoadMode.OnDemand, TtlMinutes: 10, IdleDropMinutes: 30));
         var result = await loader.GetResultAsync(product);
         var job = new ProductIdleDropJob(_h.Store, loader, NullLogger<ProductIdleDropJob>.Instance);
-        var context = new Autheris.Application.Runtime.Hosting.ClusterJobContext(1, Substitute.For<IDistributedLease>());
+        var context = new Autheris.Application.Runtime.Hosting.ClusterJobContext(1, new StubLease());
 
         await job.ExecuteAsync(context, CancellationToken.None);
         _catalog.TryGet(result.CacheKey, out _).ShouldBeTrue("a recently read result stays");

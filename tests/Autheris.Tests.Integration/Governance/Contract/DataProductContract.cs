@@ -204,8 +204,8 @@ public abstract class DataProductContract : GovernanceContractBase
         var tenant = Store.TenantA;
         var product = NewProduct(tenant, "owned_view");
         var projected = ProductCatalogProjector.Project(product, null, T0);
-        var metadata = Store.Services.GetRequiredService<Autheris.Application.Common.Interfaces.ITableMetadataRepository>();
-        await metadata.UpsertTableMetadataAsync(projected);
+        var writer = new Autheris.Infrastructure.Persistence.Products.ProductCatalogObjectWriter(Store.Services.GetRequiredService<Autheris.Infrastructure.Persistence.GovernanceRepository>());
+        await writer.UpsertAsync(tenant, projected);
         var owners = new Autheris.Infrastructure.Persistence.Products.ProductCatalogOwnerStore(Store.Services.GetRequiredService<Autheris.Infrastructure.Persistence.GovernanceRepository>());
         var ownership = Store.Services.GetRequiredService<Autheris.Application.Common.Interfaces.IDataOwnershipRepository>();
         var objects = new[] { projected.Identifier };

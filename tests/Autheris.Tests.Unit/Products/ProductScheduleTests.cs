@@ -36,7 +36,7 @@ public sealed class ProductScheduleTests
             new LoadSettings(LoadMode.Schedule, Interval: interval)));
     }
 
-    private static ClusterJobContext Context() => new(1, Substitute.For<IDistributedLease>());
+    private static ClusterJobContext Context() => new(1, new StubLease());
 
     [Fact]
     public async Task Interval_below_one_minute_or_missing_is_rejected_and_cron_is_not_supported()

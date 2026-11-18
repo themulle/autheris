@@ -98,7 +98,7 @@ public sealed partial class ProductExposureTests
         var job = new ProductIdleDropJob(_h.Store, loader, NullLogger<ProductIdleDropJob>.Instance);
 
         _time.Advance(TimeSpan.FromMinutes(31));
-        await job.ExecuteAsync(new ClusterJobContext(1, Substitute.For<IDistributedLease>()), CancellationToken.None);
+        await job.ExecuteAsync(new ClusterJobContext(1, new StubLease()), CancellationToken.None);
 
         _catalog.TryGet(resultA.CacheKey, out _).ShouldBeFalse();
         _catalog.TryGet(resultB.CacheKey, out _).ShouldBeFalse();
