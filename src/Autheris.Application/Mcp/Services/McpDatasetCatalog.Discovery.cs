@@ -169,7 +169,8 @@ public sealed partial class McpDatasetCatalog
             Tags: obj.Tags,
             AccessStatus: status,
             Kind: obj.Kind.ToString().ToLowerInvariant(),
-            Size: null);
+            Size: null,
+            DocumentCount: obj.DocumentCount > 0 ? obj.DocumentCount : null);
     }
 
     private async Task<McpDatasetSummary> BuildProcedureSummaryAsync(ClaimsPrincipal principal, string procId, RegisteredProcedure proc, CancellationToken ct)
@@ -263,6 +264,7 @@ public sealed partial class McpDatasetCatalog
         var description = DiscoveryTextSanitizer.SanitizeText(obj.Description, DiscoveryTextSanitizer.MaxDescriptionRunes);
         var accessStatus = MapDiscoveryAccessStatus(obj.Access);
 
+        var linked = McpLinkedDocuments.From(obj);
         var ownerLabels = obj.Owners
             .Select(static o => !string.IsNullOrWhiteSpace(o.Email) ? $"{o.DisplayName} <{o.Email}>" : o.DisplayName)
             .ToList();
@@ -293,7 +295,12 @@ public sealed partial class McpDatasetCatalog
                 View: SummaryView,
                 Kind: obj.Kind.ToString().ToLowerInvariant(),
                 Language: negotiatedLanguage,
-                RequestedLanguage: language);
+                RequestedLanguage: language)
+            {
+                Documents = linked.Documents,
+                Applications = linked.Applications,
+                DocumentsTruncated = linked.Truncated
+            };
         }
 
         var graphQl = brief || graphQlMap == null ? null : await graphQlMap.GetTableAsync(id, ct).ConfigureAwait(false);
@@ -337,7 +344,10 @@ public sealed partial class McpDatasetCatalog
                     Access: access,
                     DisplayName: obj.HiddenTextColumns.Contains(c.Name) ? null : DiscoveryTextSanitizer.SanitizeText(c.DisplayName, DiscoveryTextSanitizer.MaxDisplayNameRunes),
                     Classifications: c.Classifications, ClearRequestable: c.ClearRequestable,
-                    LongDescription: obj.HiddenTextColumns.Contains(c.Name) ? null : c.LongDescription);
+                    LongDescription: obj.HiddenTextColumns.Contains(c.Name) ? null : c.LongDescription)
+                {
+                    Documents = linked.ColumnDocuments.TryGetValue(c.Name, out var columnDocs) ? columnDocs : null
+                };
             })
             .ToList();
 
@@ -379,7 +389,12 @@ public sealed partial class McpDatasetCatalog
             RequiredFilterColumnGroups: shape.RequiredFilterColumnGroups.Count == 0 ? null : shape.RequiredFilterColumnGroups,
             Language: negotiatedLanguage,
             RequestedLanguage: language,
-            PrimaryKeyOrder: Autheris.Application.DataSources.Services.DatasetKeyProjection.KeyOrder(shape.PrimaryKeyColumns, shape.PrimaryKeyDirections));
+            PrimaryKeyOrder: Autheris.Application.DataSources.Services.DatasetKeyProjection.KeyOrder(shape.PrimaryKeyColumns, shape.PrimaryKeyDirections))
+        {
+            Documents = linked.Documents,
+            Applications = linked.Applications,
+            DocumentsTruncated = linked.Truncated
+        };
     }
 
     private static string MapDiscoveryAccessStatus(DiscoveryAccessState state) => CatalogAccessStatus.Of(state);

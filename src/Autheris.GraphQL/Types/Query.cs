@@ -48,6 +48,9 @@ public sealed class TableMetadataDto
     public string? DataOwner { get; init; }
     public IReadOnlyList<string>? Delegates { get; init; }
     public string? Language { get; init; }
+    public IReadOnlyList<DiscoveryDocumentRef> Documents { get; init; } = [];
+    public IReadOnlyList<DiscoveryApplicationRef> Applications { get; init; } = [];
+    public bool DocumentsTruncated { get; init; }
 }
 
 public sealed partial class Query

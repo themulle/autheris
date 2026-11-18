@@ -28,6 +28,13 @@ public sealed record DiscoveryWriteState(
 
 public sealed record DiscoveryColumnClassification(string Code, string DisplayName);
 
+/// <summary>A linked document returned with a discovery object; <paramref name="Trust"/> is <c>official</c> or <c>untrusted</c>.</summary>
+public sealed record DiscoveryDocumentRef(
+    string AppId, string Category, string DocId, string Title, string? Summary, bool Official, string Trust, DateTimeOffset UpdatedAt);
+
+/// <summary>An application linked to a discovery object ("program based on this data").</summary>
+public sealed record DiscoveryApplicationRef(string AppId, string? Name, int DocumentCount);
+
 public sealed record DiscoveryColumn(
     string Name,
     string? DisplayName,
@@ -45,6 +52,9 @@ public sealed record DiscoveryColumn(
 {
     public IReadOnlyList<DiscoveryColumnClassification> Classifications { get; init; } = Classifications ?? [];
     public IReadOnlyList<string> ClearRequestable { get; init; } = ClearRequestable ?? [];
+
+    /// <summary>Documents linked to this column that the caller may see (at most 5, newest first).</summary>
+    public IReadOnlyList<DiscoveryDocumentRef> Documents { get; init; } = [];
 }
 
 public sealed record DiscoveryObject(
@@ -69,6 +79,18 @@ public sealed record DiscoveryObject(
     /// <summary>Internal shaping input: names of Masked columns whose catalog text was withheld; never part of a client contract.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public IReadOnlySet<string> HiddenTextColumns { get; init; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Documents linked to this object that the caller may see (at most 10, newest first).</summary>
+    public IReadOnlyList<DiscoveryDocumentRef> Documents { get; init; } = [];
+
+    /// <summary>Applications linked to this object that the caller may see.</summary>
+    public IReadOnlyList<DiscoveryApplicationRef> Applications { get; init; } = [];
+
+    /// <summary>True when more documents were linked than the output cap allows.</summary>
+    public bool DocumentsTruncated { get; init; }
+
+    /// <summary>Number of visible documents linked to this object before the output cap.</summary>
+    public int DocumentCount { get; init; }
 }
 
 /// <summary>
