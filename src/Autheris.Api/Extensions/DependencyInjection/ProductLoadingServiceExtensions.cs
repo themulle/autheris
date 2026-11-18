@@ -29,6 +29,8 @@ public static class ProductLoadingServiceExtensions
             sp.GetRequiredService<Autheris.Domain.Caching.TableCache.ITableCacheCatalog>()));
         services.TryAddScoped<ProductScheduleJob>();
         services.AddHostedService<ProductScheduleService>();
+        services.TryAddScoped<ProductIdleDropJob>();
+        services.AddHostedService<ProductIdleDropService>();
         return services;
     }
 }

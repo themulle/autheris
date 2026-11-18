@@ -40,6 +40,7 @@ public sealed class ProductLoadService(
     private static readonly TimeSpan LeaseSlack = TimeSpan.FromSeconds(60);
     private readonly ConcurrentDictionary<TableIdentifier, Lazy<Task<ProductResult>>> _inFlight = new();
     private readonly ConcurrentDictionary<TableIdentifier, DateTimeOffset> _lastAccess = new();
+    private readonly ConcurrentDictionary<TableIdentifier, (TenantId Tenant, string Schema, string Name)> _tracked = new();
     private readonly ConcurrentDictionary<TableIdentifier, DateTimeOffset> _lastAttempt = new();
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
 
@@ -172,6 +173,11 @@ public sealed class ProductLoadService(
         ArgumentNullException.ThrowIfNull(product);
         var key = ProductSource.CacheKey(product.Tenant, product.Schema, product.Name);
         _lastAccess[key] = _time.GetUtcNow();
+        if (product.Load.Mode == LoadMode.OnDemand)
+        {
+            _tracked[key] = (product.Tenant, product.Schema, product.Name);
+        }
+
         if (product.Load.Mode == LoadMode.Live)
         {
             return await LoadAsync(product, ct).ConfigureAwait(false);
@@ -232,6 +238,9 @@ public sealed class ProductLoadService(
         return ProductFreshness.Evaluate(product, loadedAt, _time.GetUtcNow());
     }
 
+    /// <summary>The <c>onDemand</c> products this process served since its start (the candidates of the idle drop; a result nobody reads here is not tracked).</summary>
+    public IReadOnlyList<(TenantId Tenant, string Schema, string Name)> TrackedOnDemand() => [.. _tracked.Values];
+
     /// <summary>Drops the results of <c>onDemand</c> products that no read touched for their idle period. Returns the number dropped.</summary>
     public async Task<int> DropIdleAsync(IReadOnlyList<DataProduct> candidates, CancellationToken ct = default)
     {
@@ -245,6 +254,7 @@ public sealed class ProductLoadService(
             {
                 await store.EvictAsync(key, ct).ConfigureAwait(false);
                 _lastAccess.TryRemove(key, out _);
+                _tracked.TryRemove(key, out _);
                 dropped++;
             }
         }
