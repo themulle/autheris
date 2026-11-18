@@ -145,5 +145,5 @@ All measurement outputs conform to the following schema:
 
 ## 6. Budgets
 
-Target budgets for container image footprint, startup, warm latency, and pull-request CI wall-clock duration are defined in [`../budgets.json`](../budgets.json) and enforced nightly and on release by [`../scripts/check-budgets.sh`](../scripts/check-budgets.sh) against the measured artifacts in [`../results/footprint-2026-11-05-7900268.json`](../results/footprint-2026-11-05-7900268.json).
+Target budgets for container image footprint, startup, warm latency, and pull-request CI wall-clock duration are defined in [`../budgets.json`](../budgets.json) and enforced nightly and on release by [`../scripts/check-budgets.sh`](../scripts/check-budgets.sh) against the measured artifacts. Baseline ("before"): [`../results/footprint-2026-11-05-7900268.json`](../results/footprint-2026-11-05-7900268.json); latest recorded ("after", nightly job on `main`): [`../results/footprint-2026-11-18-feeab35.json`](../results/footprint-2026-11-18-feeab35.json).
 
