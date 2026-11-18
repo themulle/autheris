@@ -463,4 +463,66 @@ public sealed class GoldenQuerySecurityTests
 
         result.Select(q => q.Id).OrderBy(x => x).ShouldBe(["visible-0", "visible-2"]);
     }
+
+    [Fact]
+    public async Task GoldenQuery_SelectingAliasedHiddenField_IsDropped()
+    {
+        var table = new TableMetadata
+        {
+            Identifier = new TableIdentifier("finance", "dbo", "customers"),
+            Table = new Table { SchemaName = "dbo", TableName = "customers" },
+            Columns = [new TableColumn { ColumnName = "id", DataType = "varchar" }, new TableColumn { ColumnName = "ssn", DataType = "varchar" }]
+        };
+        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([table]));
+        _goldenService.RegisterGoldenQuery(new GoldenQuery("golden-alias", "finance", "customers", "Tax numbers", "Aliased", "query { customers { taxNumber } }"));
+
+        var pdp = Substitute.For<Autheris.Application.Policy.Pdp.IAccessDecisionPoint>();
+        pdp.DecideManyAsync(default!, default!, default, default, default).ReturnsForAnyArgs(ci =>
+            ValueTask.FromResult<IReadOnlyList<Autheris.Domain.Interfaces.TableAccessDecision>>(
+            [
+                Autheris.Domain.Interfaces.TableAccessDecision.Allowed(
+                    table.Identifier,
+                    new Dictionary<string, Autheris.Domain.Interfaces.ColumnAccessLevel>
+                    {
+                        ["id"] = Autheris.Domain.Interfaces.ColumnAccessLevel.Clear,
+                        ["ssn"] = Autheris.Domain.Interfaces.ColumnAccessLevel.Mask
+                    },
+                    hasUnconstrainedColumnAllow: false) with { HiddenCatalogTextColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "ssn" } }
+            ]));
+        var map = Substitute.For<IGraphQlCatalogMap>();
+        map.GetTableAsync(table.Identifier, Arg.Any<CancellationToken>()).Returns(new GraphQlTableMapping(
+            table.Identifier, "customers", "Customer", "CustomerFilter", "CustomerOrder",
+            [new GraphQlColumnMapping("id", "id", "Int"), new GraphQlColumnMapping("ssn", "taxNumber", "String")], []));
+
+        var guardrail = new AiDataGuardrailService(
+            _toolRegistry,
+            Options.Create(new GatewayOptions()),
+            NullLogger<AiDataGuardrailService>.Instance,
+            global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance,
+            tableMetadataRepository: _metadataRepo,
+            goldenQueryService: _goldenService,
+            graphQlCatalogMap: map,
+            consentRepository: _consentRepo,
+            decisionPoint: pdp);
+        var session = new McpSessionContext("sess-alias", "sp-alias", "tenant-1", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, "S-1-5-21-AGENT9", ["AiAgent"], []);
+        _consentRepo.GetAllActiveConsentsForSubjectsAsync(
+            Arg.Any<IEnumerable<Sid>>(), Arg.Any<IEnumerable<string>?>(), Arg.Any<DateTimeOffset?>(), new TenantId("tenant-1"), Arg.Any<CancellationToken>())
+            .Returns(new[]
+            {
+                new Consent
+                {
+                    Id = Guid.NewGuid(), TenantId = new TenantId("tenant-1"), TableIdentifier = table.Identifier, Effect = ConsentEffect.Allow,
+                    GranteeType = GranteeType.User, GranteeSid = new Sid("S-1-5-21-AGENT9"), RowFilters = [], ColumnRules = []
+                }
+            });
+
+        var result = await guardrail.ExecuteToolWithGuardrailAsync(
+            new McpToolCallRequest("get_golden_queries", """{ "domain": "finance", "tableName": "customers" }""", session.SessionId), session);
+
+        result.IsSuccess.ShouldBeTrue();
+        var ids = ExtractQueryIds(result.ContentJson);
+        ids.ShouldContain("golden-customers");
+        ids.ShouldNotContain("golden-alias");
+    }
 }

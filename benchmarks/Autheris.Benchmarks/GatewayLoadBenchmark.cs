@@ -40,6 +40,9 @@ public class GatewayLoadBenchmark : IDisposable
             apiPath = Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "src/Autheris.Api"));
         }
 
+        var governanceConnectionString = Environment.GetEnvironmentVariable("AUTHERIS_BENCH_GOVERNANCE_CONNECTION")
+            ?? throw new InvalidOperationException("Set AUTHERIS_BENCH_GOVERNANCE_CONNECTION to a PostgreSQL connection string for the governance store.");
+
         _factory = new WebApplicationFactory<global::Program>().WithWebHostBuilder(builder =>
         {
             if (Directory.Exists(apiPath))
@@ -50,8 +53,8 @@ public class GatewayLoadBenchmark : IDisposable
             builder.UseSetting("Logging:LogLevel:Microsoft", "Warning");
             builder.UseSetting("Logging:LogLevel:HotChocolate", "Warning");
             builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", "Data Source=:memory:;Mode=Memory;Cache=Shared");
+            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", governanceConnectionString);
             builder.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "100000");
             builder.UseSetting("Gateway:RateLimiting:PostAuthSidRateLimit:TokenBucketCapacity", "100000");
             builder.UseSetting("Gateway:RateLimiting:PostAuthSidRateLimit:TokensPerSecond", "10000");

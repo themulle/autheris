@@ -1475,7 +1475,6 @@
           "Autheris.Api": "[0.0.0-dev, )",
           "Autheris.Application": "[0.0.0-dev, )",
           "Microsoft.AspNetCore.Mvc.Testing": "[11.0.0, )",
-          "Microsoft.Data.Sqlite": "[11.0.0, )",
           "xunit.extensibility.core": "[2.9.3, )"
         }
       },

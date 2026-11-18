@@ -22,10 +22,10 @@ using Microsoft.Extensions.Options;
 /// </summary>
 public partial class GovernanceRepository : IGovernanceRepository, IConsentDescriptionRepository, Migrations.IGovernanceStoreInitializer, IAuditChainExportSource, IAuditPurgeKeyProvider
 {
-    private static readonly long MetadataCacheTtlTicks = TimeSpan.FromSeconds(30).Ticks;
+    internal long MetadataCacheTtlTicks { get; }
 
     // Bounded (a 10k-table catalog must not grow the cache without limit); a miss just reloads the metadata.
-    private readonly Autheris.Application.State.Caching.BoundedCache<string, (TableMetadata? Metadata, long CachedAtTicks, long Epoch)> _metadataCache = new(20_000, comparer: StringComparer.OrdinalIgnoreCase);
+    private readonly Autheris.Application.State.Caching.BoundedCache<string, (TableMetadata? Metadata, long CachedAtTicks, long Epoch)> _metadataCache;
     private readonly System.Collections.Concurrent.ConcurrentDictionary<TableIdentifier, long> _deferredEpochTables = new();
     private long _deferredEpochSeq;
     private readonly CatalogKeyDefinitionStore.KeyTableProbe _keyTables = new();
@@ -135,6 +135,9 @@ public partial class GovernanceRepository : IGovernanceRepository, IConsentDescr
         _eventBus = eventBus;
         _epochValidationService = epochValidationService;
         _options = options?.Value;
+        var cacheOptions = _options?.Catalog?.Cache ?? new CatalogCacheOptions();
+        MetadataCacheTtlTicks = TimeSpan.FromSeconds(cacheOptions.MetadataTtlSeconds).Ticks;
+        _metadataCache = new(cacheOptions.MetadataMaxEntries, comparer: StringComparer.OrdinalIgnoreCase);
         _logger = logger;
         _materializationGuard = materializationGuard;
         _auditRecorder = auditRecorder;

@@ -135,9 +135,10 @@ public sealed class McpDatasetCatalogTests
         graphQl.Endpoint.ShouldBe("/graphql");
         graphQl.QueryField.ShouldBe("sales_public_orders");
         graphQl.FilterType.ShouldBe("sales_public_orders_filter");
-        graphQl.ExampleQuery.ShouldContain("sales_public_orders(first: 10)");
-        graphQl.ExampleQuery.ShouldContain("id amount");
-        graphQl.ExampleQuery.ShouldNotContain("customer_email");
+        var exampleQuery = graphQl.ExampleQuery.ShouldNotBeNull();
+        exampleQuery.ShouldContain("sales_public_orders(first: 10)");
+        exampleQuery.ShouldContain("id amount");
+        exampleQuery.ShouldNotContain("customer_email");
         graphQl.Arguments.ShouldContain("where");
         // The related payroll table is hidden from this caller, so its relation is not offered.
         graphQl.Relations.ShouldBeEmpty();

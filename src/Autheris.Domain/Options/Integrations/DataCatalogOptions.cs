@@ -6,6 +6,10 @@ namespace Autheris.Domain.Options;
 public sealed class DataCatalogOptions
 {
     public bool Enabled { get; init; } = false;
+
+    /// <summary>Limits of the in-memory catalog caches (<c>Gateway:Catalog:Cache</c>).</summary>
+    public CatalogCacheOptions Cache { get; init; } = new();
+
     public DataCatalogProviderType Provider { get; init; } = DataCatalogProviderType.OpenMetadata;
     [Range(1, 1440)] public int SyncIntervalMinutes { get; init; } = 60;
 

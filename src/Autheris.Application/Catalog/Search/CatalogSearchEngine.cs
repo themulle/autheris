@@ -9,6 +9,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Policy.Classification;
 using Autheris.Application.State.Caching;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
@@ -29,6 +31,7 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
     private readonly ILogger<CatalogSearchEngine> _logger;
     private readonly TimeProvider _timeProvider;
     private readonly CatalogSearchEmbeddingCache _documentEmbeddingCache;
+    private readonly IClassificationRepository? _classificationRepository;
     private readonly object _statusLock = new();
     private readonly Lock _stateLock = new();
 
@@ -89,13 +92,15 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
         IOptions<CatalogSearchOptions> options,
         ILogger<CatalogSearchEngine> logger,
         TimeProvider? timeProvider = null,
-        CatalogSearchEmbeddingCache? documentEmbeddingCache = null)
+        CatalogSearchEmbeddingCache? documentEmbeddingCache = null,
+        IClassificationRepository? classificationRepository = null)
     {
         _embeddingGenerator = embeddingGenerator ?? throw new ArgumentNullException(nameof(embeddingGenerator));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _timeProvider = timeProvider ?? TimeProvider.System;
         _documentEmbeddingCache = documentEmbeddingCache ?? new CatalogSearchEmbeddingCache();
+        _classificationRepository = classificationRepository;
     }
 
     public CatalogSearchIndexStatus GetStatus(DateTimeOffset? utcNow = null)
@@ -142,7 +147,7 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
         try
         {
             var activeTables = tables.Where(static t => t != null && t.Table.IsActive && !t.Table.DiscoveryHidden).ToList();
-            var prepared = PrepareDocuments(activeTables, ct);
+            var prepared = await PrepareDocumentsAsync(activeTables, ct).ConfigureAwait(false);
             var vectors = await ResolveEmbeddingsWithCacheAsync(prepared, existingVectorIndex: null, ct).ConfigureAwait(false);
             var baseSnapshot = BuildCleanSnapshot(prepared, vectors, _timeProvider.GetUtcNow());
 
@@ -199,7 +204,7 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
         ReadOnlyMemory<float>[] resolvedVectors;
         try
         {
-            preparedDocs = PrepareDocuments(activeCandidates, ct);
+            preparedDocs = await PrepareDocumentsAsync(activeCandidates, ct).ConfigureAwait(false);
             resolvedVectors = await ResolveEmbeddingsWithCacheAsync(preparedDocs, existingVectorIndex: null, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
@@ -270,7 +275,7 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
             }
 
             var activeTables = captured.MetadataMap.Values.Where(static t => t.Table.IsActive && !t.Table.DiscoveryHidden).ToList();
-            var prepared = PrepareDocuments(activeTables, ct);
+            var prepared = await PrepareDocumentsAsync(activeTables, ct).ConfigureAwait(false);
             var vectors = await ResolveEmbeddingsWithCacheAsync(prepared, captured.VectorIndex, ct).ConfigureAwait(false);
             var compactedBase = BuildCleanSnapshot(prepared, vectors, _timeProvider.GetUtcNow());
 
@@ -354,16 +359,18 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
         return current;
     }
 
-    private PreparedDocument[] PrepareDocuments(IReadOnlyList<TableMetadata> tables, CancellationToken ct)
+    private async Task<PreparedDocument[]> PrepareDocumentsAsync(IReadOnlyList<TableMetadata> tables, CancellationToken ct)
     {
         var docs = new PreparedDocument[tables.Count];
+        var hiddenResolver = new ClassificationAccessResolver.IndexingHiddenTextResolver(_classificationRepository);
         for (int i = 0; i < tables.Count; i++)
         {
             ct.ThrowIfCancellationRequested();
             var table = tables[i];
-            var (bm25Doc, text) = CatalogSearchDocumentBuilder.BuildDocuments(table);
+            var hiddenCols = await hiddenResolver.ResolveAsync(table, ct).ConfigureAwait(false);
+            var (bm25Doc, text) = CatalogSearchDocumentBuilder.BuildDocuments(table, hiddenCols);
             var sha256 = CatalogSearchEmbeddingCache.ComputeContentSha256Hex(text);
-            docs[i] = new PreparedDocument(table, bm25Doc, text, sha256);
+            docs[i] = new PreparedDocument(table, bm25Doc, text, sha256, hiddenCols);
         }
         return docs;
     }
@@ -483,11 +490,16 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
         var vectorDocs = new List<(TableIdentifier, ReadOnlyMemory<float>)>(prepared.Length);
         var metadataBuilder = ImmutableDictionary.CreateBuilder<TableIdentifier, TableMetadata>();
         var fkBuilder = ImmutableDictionary.CreateBuilder<TableIdentifier, List<TableRelationship>>();
+        var hiddenBuilder = ImmutableDictionary.CreateBuilder<TableIdentifier, IReadOnlySet<string>>();
 
         for (int i = 0; i < prepared.Length; i++)
         {
             var doc = prepared[i];
             metadataBuilder[doc.Table.Identifier] = doc.Table;
+            if (doc.HiddenColumns.Count > 0)
+            {
+                hiddenBuilder[doc.Table.Identifier] = doc.HiddenColumns;
+            }
             bm25Docs.Add(doc.Bm25Doc);
 
             if (!vectors[i].IsEmpty)
@@ -507,7 +519,8 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
             VectorIndex: new VectorSearchIndex(vectorDocs),
             MetadataMap: metadataBuilder.ToImmutable(),
             ForeignKeysGraph: fkBuilder.ToImmutable(),
-            CreatedAt: now);
+            CreatedAt: now,
+            HiddenTextColumns: hiddenBuilder.ToImmutable());
     }
 
     private static PreparedDeltaBatch BuildEffectiveBatch(
@@ -563,17 +576,27 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
 
         var metadataBuilder = ToImmutableBuilder(current.MetadataMap);
         var fkBuilder = ToImmutableBuilder(current.ForeignKeysGraph);
+        var hiddenBuilder = ToImmutableBuilder(current.HiddenTextColumns ?? ImmutableDictionary<TableIdentifier, IReadOnlySet<string>>.Empty);
 
         foreach (var id in batch.Removals)
         {
             metadataBuilder.Remove(id);
             fkBuilder.Remove(id);
+            hiddenBuilder.Remove(id);
         }
 
         foreach (var upsert in batch.Upserts)
         {
             var id = upsert.Doc.Table.Identifier;
             metadataBuilder[id] = upsert.Doc.Table;
+            if (upsert.Doc.HiddenColumns.Count > 0)
+            {
+                hiddenBuilder[id] = upsert.Doc.HiddenColumns;
+            }
+            else
+            {
+                hiddenBuilder.Remove(id);
+            }
             var fks = CatalogSearchDocumentBuilder.BuildForeignKeys(upsert.Doc.Table);
             if (fks is { Count: > 0 })
             {
@@ -590,7 +613,8 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
             VectorIndex: nextVector,
             MetadataMap: metadataBuilder.ToImmutable(),
             ForeignKeysGraph: fkBuilder.ToImmutable(),
-            CreatedAt: now);
+            CreatedAt: now,
+            HiddenTextColumns: hiddenBuilder.ToImmutable());
     }
 
     private static ImmutableDictionary<TableIdentifier, TValue>.Builder ToImmutableBuilder<TValue>(
@@ -599,7 +623,7 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
             ? imm.ToBuilder()
             : dict.ToImmutableDictionary().ToBuilder();
 
-    private sealed record PreparedDocument(TableMetadata Table, Bm25Document Bm25Doc, string ScrubbedText, string ContentSha256Hex);
+    private sealed record PreparedDocument(TableMetadata Table, Bm25Document Bm25Doc, string ScrubbedText, string ContentSha256Hex, IReadOnlySet<string> HiddenColumns);
     private sealed record PreparedUpsert(PreparedDocument Doc, ReadOnlyMemory<float> Vector);
     private sealed record PreparedDeltaBatch(IReadOnlyList<PreparedUpsert> Upserts, IReadOnlyCollection<TableIdentifier> Removals);
 
@@ -753,14 +777,17 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
                                        .ToList();
                 }
 
+                IReadOnlySet<string>? hiddenTextCols = null;
+                snapshot.HiddenTextColumns?.TryGetValue(kvp.Key, out hiddenTextCols);
                 var matchedCols = meta?.Columns
                     .Where(c => !c.DiscoveryHidden && kvp.Value.Terms.Any(term =>
                         c.ColumnName.Contains(term, StringComparison.OrdinalIgnoreCase) ||
-                        (!string.IsNullOrEmpty(c.DisplayName) && c.DisplayName.Contains(term, StringComparison.OrdinalIgnoreCase)) ||
-                        (!string.IsNullOrEmpty(c.Description) && c.Description.Contains(term, StringComparison.OrdinalIgnoreCase)) ||
-                        c.Texts.Entries.Values.Any(entry =>
-                            (!string.IsNullOrEmpty(entry.DisplayName) && entry.DisplayName.Contains(term, StringComparison.OrdinalIgnoreCase)) ||
-                            (!string.IsNullOrEmpty(entry.Description) && entry.Description.Contains(term, StringComparison.OrdinalIgnoreCase)))))
+                        (!(hiddenTextCols?.Contains(c.ColumnName) ?? false) &&
+                         ((!string.IsNullOrEmpty(c.DisplayName) && c.DisplayName.Contains(term, StringComparison.OrdinalIgnoreCase)) ||
+                          (!string.IsNullOrEmpty(c.Description) && c.Description.Contains(term, StringComparison.OrdinalIgnoreCase)) ||
+                          c.Texts.Entries.Values.Any(entry =>
+                              (!string.IsNullOrEmpty(entry.DisplayName) && entry.DisplayName.Contains(term, StringComparison.OrdinalIgnoreCase)) ||
+                              (!string.IsNullOrEmpty(entry.Description) && entry.Description.Contains(term, StringComparison.OrdinalIgnoreCase)))))))
                     .Select(c => c.ColumnName)
                     .Take(5)
                     .ToList() ?? [];

@@ -63,7 +63,12 @@ public sealed record DiscoveryObject(
     DiscoveryTableStatistics? Statistics,
     bool SamplesAvailable,
     bool IsHidden,
-    DiscoveryWriteState? Write = null);
+    DiscoveryWriteState? Write = null)
+{
+    /// <summary>Internal shaping input: names of Masked columns whose catalog text was withheld; never part of a client contract.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public IReadOnlySet<string> HiddenTextColumns { get; init; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+}
 
 public sealed record DiscoveryTableStatistics(
     long? ApproxRowCount,

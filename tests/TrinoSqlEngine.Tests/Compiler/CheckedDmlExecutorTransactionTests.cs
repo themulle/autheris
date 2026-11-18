@@ -2,7 +2,7 @@ using System.Collections;
 using System.Collections.Immutable;
 using System.Data;
 using System.Data.Common;
-using Microsoft.Data.Sqlite;
+using DuckDB.NET.Data;
 using TrinoSqlEngine.Ast.Emit;
 using Xunit;
 
@@ -23,9 +23,9 @@ public class CheckedDmlExecutorTransactionTests
 
     private static ICheckedDmlExecutor Executor(TargetSqlDialect dialect = TargetSqlDialect.SqlServer) => CompiledSqlBinders.CheckedExecutorFor(dialect);
 
-    private static async Task<SqliteConnection> OpenTableAsync()
+    private static async Task<DuckDBConnection> OpenTableAsync()
     {
-        var connection = new SqliteConnection("Data Source=:memory:");
+        var connection = new DuckDBConnection("Data Source=:memory:");
         await connection.OpenAsync();
         await using var create = connection.CreateCommand();
         create.CommandText = "CREATE TABLE t (a INTEGER)";
@@ -33,20 +33,23 @@ public class CheckedDmlExecutorTransactionTests
         return connection;
     }
 
-    private static async Task<long> CountAsync(SqliteConnection connection)
+    private static async Task<long> CountAsync(DuckDBConnection connection)
     {
         await using var cmd = connection.CreateCommand();
         cmd.CommandText = "SELECT COUNT(*) FROM t";
         return (long)(await cmd.ExecuteScalarAsync())!;
     }
 
-    // ---- real provider (SQLite in-memory): the caller's transaction is used, never a nested one ----
+    private static Task AssertCompletedAsync(DbTransaction transaction) =>
+        Assert.ThrowsAsync<InvalidOperationException>(() => transaction.CommitAsync());   // a completed transaction cannot be completed again
+
+    // ---- real provider (DuckDB in-process): the caller's transaction is used, never a nested one ----
 
     [Fact]
     public async Task ExecuteInTransaction_UsesCallerTransaction_NoNestedBegin()
     {
         await using var connection = await OpenTableAsync();
-        await using var transaction = await connection.BeginTransactionAsync();   // Microsoft.Data.Sqlite refuses a second BeginTransaction
+        await using var transaction = await connection.BeginTransactionAsync();   // a nested BeginTransaction is refused
         int affected = await Executor().ExecuteInTransactionAsync(transaction, Dml("INSERT INTO t (a) SELECT 1"), NoValues, new CheckedDmlLimits(30, 0));
         Assert.Equal(1, affected);
         Assert.Equal(1, await CountAsync(connection));   // committed by the executor
@@ -59,7 +62,6 @@ public class CheckedDmlExecutorTransactionTests
         await using var transaction = await connection.BeginTransactionAsync();
         await Executor().ExecuteInTransactionAsync(transaction, Dml("INSERT INTO t (a) SELECT 1"), NoValues, new CheckedDmlLimits(30, 0));
         // the executor completed it; a second completion by the caller is a defect and must fail loudly
-        Assert.Null(transaction.Connection);
         await Assert.ThrowsAnyAsync<InvalidOperationException>(() => transaction.CommitAsync());
     }
 
@@ -71,7 +73,7 @@ public class CheckedDmlExecutorTransactionTests
         var compiled = Dml("INSERT INTO t (a) SELECT 1 UNION ALL SELECT 2", expected: 1);
         await Assert.ThrowsAsync<DmlCheckOptionViolationException>(() =>
             Executor().ExecuteInTransactionAsync(transaction, compiled, NoValues, new CheckedDmlLimits(30, 0)));
-        Assert.Null(transaction.Connection);
+        await AssertCompletedAsync(transaction);
         Assert.Equal(0, await CountAsync(connection));
     }
 
@@ -104,8 +106,7 @@ public class CheckedDmlExecutorTransactionTests
     public async Task ExecuteInTransaction_ForeignTransaction_Rejected()
     {
         await using var connection = await OpenTableAsync();
-        var transaction = await connection.BeginTransactionAsync();
-        await transaction.CommitAsync();   // completed: it belongs to no usable connection any more
+        var transaction = new CompletedTransaction();   // completed: it belongs to no usable connection any more
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             Executor().ExecuteInTransactionAsync(transaction, Dml("INSERT INTO t (a) SELECT 1"), NoValues, new CheckedDmlLimits(30, 0)));
         Assert.Equal(0, await CountAsync(connection));
@@ -118,7 +119,7 @@ public class CheckedDmlExecutorTransactionTests
         await using var transaction = await connection.BeginTransactionAsync();
         await Assert.ThrowsAsync<InvalidOperationException>(() => Executor(TargetSqlDialect.SqlServer).ExecuteInTransactionAsync(
             transaction, Dml("INSERT INTO t (a) SELECT 1", TargetSqlDialect.PostgreSql), NoValues, new CheckedDmlLimits(30, 0)));
-        Assert.Null(transaction.Connection);   // still completed by the executor (single owner), nothing written
+        await AssertCompletedAsync(transaction);   // still completed by the executor (single owner), nothing written
         Assert.Equal(0, await CountAsync(connection));
     }
 
@@ -284,7 +285,7 @@ public class CheckedDmlExecutorTransactionTests
         var binder = CompiledSqlBinders.For(dialect);
         Assert.True(binder.CanBind(dialect));
         Assert.Same(binder, CompiledSqlBinders.For(dialect));   // stateless singleton
-        using var cmd = new SqliteCommand();
+        using var cmd = new TrinoSqlEngine.Tests.Compiler.BinderMutationTests.RecCommand();
         var checkedStatement = Dml("INSERT INTO t SELECT 1", dialect, expected: 1);
         Assert.Throws<CheckedExecutionRequiredException>(() => binder.Bind(cmd, checkedStatement, NoValues));
         Assert.NotNull(CompiledSqlBinders.CheckedExecutorFor(dialect));
@@ -336,11 +337,19 @@ public class CheckedDmlExecutorTransactionTests
             new CheckedDmlLimits(30, 5),
             (_, _) => throw new InvalidOperationException("pre-commit audit failed")));
 
-        Assert.Null(transaction.Connection);
+        await AssertCompletedAsync(transaction);
         Assert.Equal(0, await CountAsync(connection));
     }
 
     // ---- minimal ADO.NET fake ----
+
+    private sealed class CompletedTransaction : DbTransaction
+    {
+        protected override DbConnection? DbConnection => null;
+        public override IsolationLevel IsolationLevel => IsolationLevel.ReadCommitted;
+        public override void Commit() => throw new InvalidOperationException("The transaction is completed.");
+        public override void Rollback() { }
+    }
 
     private sealed class FakeConnection : DbConnection
     {
@@ -406,7 +415,7 @@ public class CheckedDmlExecutorTransactionTests
             connection.OnExecute is { } run ? run(cancellationToken) : Task.FromResult(connection.Affected);
         public override object? ExecuteScalar() => null;
         public override void Prepare() { }
-        protected override DbParameter CreateDbParameter() => new SqliteParameter();
+        protected override DbParameter CreateDbParameter() => new TrinoSqlEngine.Tests.Compiler.BinderMutationTests.RecParameter();
         protected override DbDataReader ExecuteDbDataReader(CommandBehavior behavior) => throw new NotSupportedException();
     }
 

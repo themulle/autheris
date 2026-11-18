@@ -1,5 +1,4 @@
 using System.Collections.Immutable;
-using Microsoft.Data.Sqlite;
 using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Nodes;
 using Xunit;
@@ -35,7 +34,7 @@ public class BinderCheckAliasBoundaryTests
 
     private static bool IsRefused(string sql, TargetSqlDialect dialect)
     {
-        using var cmd = new SqliteCommand();
+        using var cmd = new TrinoSqlEngine.Tests.Compiler.BinderMutationTests.RecCommand();
         var compiled = Compiled(sql, dialect);
         Assert.False(compiled.RequiresRowCountCheck);
         try
@@ -122,7 +121,7 @@ public class BinderCheckAliasBoundaryTests
     public void Binder_RefusesNullStatements_AndBindsThePlainText()
     {
         var binder = new SqlServerCompiledSqlBinder();
-        using var cmd = new SqliteCommand();
+        using var cmd = new TrinoSqlEngine.Tests.Compiler.BinderMutationTests.RecCommand();
         Assert.Throws<ArgumentNullException>(() => binder.Bind(cmd, null!, new Dictionary<string, object?>()));
 
         binder.Bind(cmd, Compiled("DELETE FROM t", TargetSqlDialect.SqlServer), new Dictionary<string, object?>());

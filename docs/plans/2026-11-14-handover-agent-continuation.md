@@ -49,8 +49,8 @@ Pushed feature branches on `origin` (state at the 2026-11-15 handover; the rollu
 2. **Non-DDL queue (ready after step 1):**
    - `WP-SIMPL-40 PR 40d`: `LegacyDocFileImporter`, delete `DocProvenance.cs`, remove `/app/shared-docs` from `Dockerfile`.
    - `WP-SIMPL-41 PR 5`: request access with clear columns, retire `DatasetVisibility` tier model, access-request rate limit.
-   - `#677 PR 4b`: migrate remaining `7` callers in `tests/Autheris.Tests.Architecture/Baselines/get-all-tables-callers.txt` (`CatalogSnapshotProvider.cs`, `DiscoveryService.cs`, `CatalogSearchWarmupService.cs`, `TenantCatalogLookup.cs`, `McpDatasetCatalog.cs`, `DbtMetadataIngestionService.cs`, `CatalogSchemaModel.cs`).
-   - `#678`: configurable bounded caches (`Gateway:Catalog:Cache`) in `GovernanceRepository.cs` & `TenantCatalogLookup.cs`.
+   - `#677 PR 4b`: migrate remaining `6` callers in `tests/Autheris.Tests.Architecture/Baselines/get-all-tables-callers.txt` (`CatalogSnapshotProvider.cs`, `DiscoveryService.cs`, `CatalogSearchWarmupService.cs`, `McpDatasetCatalog.cs`, `DbtMetadataIngestionService.cs`, `CatalogSchemaModel.cs`).
+   - `#678`: configurable bounded caches (`Gateway:Catalog:Cache`) in `GovernanceRepository.cs` & `GovernedCatalogProvider.cs`.
    - `W7-52-5A` & `W7-52-5B`: classification admin endpoints & per-classification clear requests.
    - `WP-SIMPL-31 PR 2c`: remaining non-`Tests.Unit` SQLite references (`Autheris.Tests.Common`, `Autheris.Tests.Integration`, `Autheris.Tests.SqlCompilerGate`, `Autheris.Sim.ApiHost`, `TrinoSqlEngine.Tests`).
    - `WP-SIMPL-44 PR 3` (`W7-44-3`) and `WP-SIMPL-50 PR B5, B6, C`.

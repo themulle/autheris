@@ -19,7 +19,7 @@ public sealed class FrozenLegacyTests
             FrozenLegacy.WriteOutcome("cccccccccccc", PolicyScenario.TenantConsentMask, new EngineOutcome.Rejected(RejectionStage.Compile, "SecurityException", true))
         };
 
-        var frozen = FrozenLegacy.Parse(FrozenLegacy.Serialize("Sqlite", "abc", results));
+        var frozen = FrozenLegacy.Parse(FrozenLegacy.Serialize("PostgreSql", "abc", results));
 
         frozen.Count.ShouldBe(3);
         frozen.TryGet("aaaaaaaaaaaa", PolicyScenario.Tenant, out var rows).ShouldBeTrue();
@@ -60,8 +60,8 @@ public sealed class FrozenLegacyTests
     [Fact]
     public void RequireFrozenLegacy_FailsWhenAStatementHasNoFrozenResult()
     {
-        Should.NotThrow(() => DifferentialRules.RequireFrozenLegacy("Sqlite", []));
-        Should.Throw<Exception>(() => DifferentialRules.RequireFrozenLegacy("Sqlite", ["abc/Tenant"])).Message.ShouldContain("no frozen legacy result");
+        Should.NotThrow(() => DifferentialRules.RequireFrozenLegacy("PostgreSql", []));
+        Should.Throw<Exception>(() => DifferentialRules.RequireFrozenLegacy("PostgreSql", ["abc/Tenant"])).Message.ShouldContain("no frozen legacy result");
     }
 
     [Fact]

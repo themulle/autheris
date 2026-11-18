@@ -9,7 +9,7 @@
 
   <ItemGroup>
     <PackageReference Include="FsCheck.Xunit" Version="3.6.0" />
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="11.0.0" />
+    <PackageReference Include="DuckDB.NET.Data.Full" Version="1.5.6.1" />
     <PackageReference Include="NSubstitute" Version="6.2.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.12.0" />
     <PackageReference Include="xunit" Version="2.9.3" />

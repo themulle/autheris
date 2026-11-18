@@ -4,7 +4,6 @@
 src/Autheris.Application/Catalog/CatalogSnapshotProvider.cs
 src/Autheris.Application/Catalog/Discovery/DiscoveryService.cs
 src/Autheris.Application/Catalog/Search/CatalogSearchWarmupService.cs
-src/Autheris.Application/Catalog/TenantCatalogLookup.cs
 src/Autheris.Application/Mcp/Services/McpDatasetCatalog.cs
 src/Autheris.Extensions/Dbt/DbtMetadataIngestionService.cs
 src/Autheris.GraphQL/Catalog/CatalogSchemaModel.cs
