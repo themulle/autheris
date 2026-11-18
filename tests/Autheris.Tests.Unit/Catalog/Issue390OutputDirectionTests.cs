@@ -50,7 +50,7 @@ public sealed class Issue390OutputDirectionTests
     {
         var metadata = Substitute.For<ITableMetadataRepository>();
         var consents = Substitute.For<IConsentRepository>();
-        metadata.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([table]));
+        metadata.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>([table]));
         consents.GetAllActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<IEnumerable<string>?>(), Arg.Any<DateTimeOffset?>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<Consent>>(
             [

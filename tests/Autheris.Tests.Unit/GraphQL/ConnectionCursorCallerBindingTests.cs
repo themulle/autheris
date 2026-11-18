@@ -39,7 +39,7 @@ public sealed class ConnectionCursorCallerBindingTests
     public ConnectionCursorCallerBindingTests()
     {
         var table = CreateTableMetadata();
-        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([table]);
+        _metadataRepo.StubAllTables([table]);
         _relationRepo.GetRelationsForTableAsync(_custTableId, Arg.Any<CancellationToken>()).Returns([]);
         _treeService.GetMaskedColumns(Arg.Any<ClaimsPrincipal>(), Arg.Any<TreeQueryNode>(), Arg.Any<string>()).Returns([]);
         _treeService.ExecuteAsync(

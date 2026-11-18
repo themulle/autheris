@@ -42,8 +42,7 @@ public sealed class CatalogSchemaModelPartitioningTests
         var tSales = CreateTable(new TableIdentifier("sales", "dbo", "orders"));
         var tHr = CreateTable(new TableIdentifier("hr", "dbo", "employees"));
 
-        metaRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns([tFinance, tSales, tHr]);
+        metaRepo.StubAllTables([tFinance, tSales, tHr]);
         relRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns([]);
 
@@ -63,8 +62,7 @@ public sealed class CatalogSchemaModelPartitioningTests
         var tFinance = CreateTable(new TableIdentifier("finance", "dbo", "invoices"));
         var tSales = CreateTable(new TableIdentifier("sales", "dbo", "orders"));
 
-        metaRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns([tFinance, tSales]);
+        metaRepo.StubAllTables([tFinance, tSales]);
         relRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns([]);
 

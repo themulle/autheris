@@ -213,7 +213,7 @@ public sealed class CatalogPagedReadSecurityTests
         withInactive.Items.Select(t => t.Identifier).ShouldBe([inactive.Identifier, active.Identifier]);
     }
 
-    private static GovernanceRepository CreateRepository(FakeCatalogStore store, bool postgresql)
+    internal static GovernanceRepository CreateRepository(FakeCatalogStore store, bool postgresql)
     {
         IGovernanceSqlDialect dialect = postgresql
             ? new PostgreSqlGovernanceDialect(() => store.Open())
@@ -224,12 +224,12 @@ public sealed class CatalogPagedReadSecurityTests
             logger: NullLogger<GovernanceRepository>.Instance);
     }
 
-    private static FakeTableRecord MakeRecord(string domain, string schema, string table, string description, long epoch = 1, bool isActive = true) =>
+    internal static FakeTableRecord MakeRecord(string domain, string schema, string table, string description, long epoch = 1, bool isActive = true) =>
         new(Guid.NewGuid(), domain, schema, table, description, epoch, isActive);
 
-    private sealed record RecordedCommand(string Sql, IReadOnlyDictionary<string, object?> Parameters);
+    internal sealed record RecordedCommand(string Sql, IReadOnlyDictionary<string, object?> Parameters);
 
-    private sealed class FakeTableRecord(Guid id, string domain, string schema, string tableName, string description, long epoch, bool isActive)
+    internal sealed class FakeTableRecord(Guid id, string domain, string schema, string tableName, string description, long epoch, bool isActive)
     {
         public Guid Id { get; } = id;
         public string Domain { get; } = domain;
@@ -241,13 +241,19 @@ public sealed class CatalogPagedReadSecurityTests
         public bool IsActive { get; } = isActive;
     }
 
-    private sealed class FakeCatalogStore(IEnumerable<FakeTableRecord> seed)
+    internal sealed class FakeCatalogStore(IEnumerable<FakeTableRecord> seed)
     {
         private readonly List<FakeTableRecord> _tables = [.. seed];
         public List<RecordedCommand> RecordedCommands { get; } = [];
         public Action<string, IReadOnlyDictionary<string, object?>>? BeforeTableEntityQueryHook { get; set; }
 
         public DbConnection Open() => new CallbackDbConnection(Execute);
+
+        /// <summary>Table ids whose POLICY_EPOCHS row is absent from every epoch read.</summary>
+        public HashSet<Guid> MissingEpochRows { get; } = [];
+
+        /// <summary>When set, every POLICY_EPOCHS statement fails.</summary>
+        public bool FailEpochReads { get; set; }
 
         public void SetEpochOnly(Guid tableId, long newEpoch)
             => _tables.Single(t => t.Id == tableId).Epoch = newEpoch;
@@ -272,7 +278,32 @@ public sealed class CatalogPagedReadSecurityTests
 
             if (sql.Contains("FROM POLICY_EPOCHS", StringComparison.OrdinalIgnoreCase))
             {
-                var rows = _tables
+                if (FailEpochReads)
+                {
+                    throw new InvalidOperationException("epoch read failed");
+                }
+
+                IEnumerable<FakeTableRecord> epochRows = _tables.Where(t => !MissingEpochRows.Contains(t.Id));
+                if (parameters.TryGetValue("@tableId", out var single))
+                {
+                    var wantedId = Convert.ToString(single, CultureInfo.InvariantCulture);
+                    epochRows = epochRows.Where(t => string.Equals(t.Id.ToString(), wantedId, StringComparison.OrdinalIgnoreCase));
+                }
+                else if (sql.Contains("t.id IN", StringComparison.OrdinalIgnoreCase))
+                {
+                    var wantedIds = new HashSet<string>(
+                        parameters.Values.Select(v => Convert.ToString(v, CultureInfo.InvariantCulture) ?? string.Empty),
+                        StringComparer.OrdinalIgnoreCase);
+                    epochRows = epochRows.Where(t => wantedIds.Contains(t.Id.ToString()));
+                }
+
+                if (parameters.ContainsKey("@tableId"))
+                {
+                    // single-table scalar read: SELECT MAX(epoch) (no row value = NULL = missing epoch row).
+                    return new StubDbDataReader(["epoch"], [[epochRows.Select(t => (object?)t.Epoch).FirstOrDefault()]]);
+                }
+
+                var rows = epochRows
                     .Select(t => new object?[] { t.Id.ToString(), t.Epoch })
                     .ToList();
                 return new StubDbDataReader(["id", "epoch"], rows);
@@ -350,7 +381,7 @@ public sealed class CatalogPagedReadSecurityTests
                     StringComparer.OrdinalIgnoreCase);
                 q = q.Where(t => ids.Contains(t.Id.ToString()));
             }
-            else if (sql.Contains("LOWER(source_name) = LOWER(@d", StringComparison.OrdinalIgnoreCase))
+            else if (sql.Contains("LOWER(source_name) = LOWER(@d", StringComparison.OrdinalIgnoreCase) && parameters.ContainsKey("@d0"))
             {
                 var wanted = new HashSet<TableIdentifier>();
                 for (var i = 0; parameters.TryGetValue("@d" + i, out var d); i++)
@@ -362,6 +393,16 @@ public sealed class CatalogPagedReadSecurityTests
                 }
 
                 q = q.Where(t => wanted.Contains(t.Identifier));
+            }
+
+            if (parameters.TryGetValue("@domain", out var dm) && dm is string singleDomain)
+            {
+                q = q.Where(t => string.Equals(t.Domain, singleDomain, StringComparison.OrdinalIgnoreCase));
+            }
+
+            if (parameters.TryGetValue("@table", out var tn) && tn is string singleTable)
+            {
+                q = q.Where(t => string.Equals(t.TableName, singleTable, StringComparison.OrdinalIgnoreCase));
             }
 
             if (parameters.TryGetValue("@dataSource", out var ds) && ds is string domain)

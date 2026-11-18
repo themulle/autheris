@@ -136,7 +136,7 @@ public sealed class Perf254SecurityTests
             Columns = [new TableColumn { ColumnName = "id", DataType = "int" }]
         };
 
-        metaRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([tableA, tableB]);
+        metaRepo.StubAllTables([tableA, tableB]);
         relRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns([]);
 
         // Partition filter: only sales

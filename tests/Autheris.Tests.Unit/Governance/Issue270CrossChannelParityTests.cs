@@ -50,7 +50,7 @@ public sealed class Issue270CrossChannelParityTests
 
     private async Task<IRequestExecutor> CreateExecutorAsync(TableMetadata metadata, ClaimsPrincipal principal)
     {
-        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([metadata]);
+        _metadataRepo.StubAllTables([metadata]);
         _relationRepo.GetRelationsForTableAsync(_empTableId, Arg.Any<CancellationToken>()).Returns([]);
 
         var services = new ServiceCollection();

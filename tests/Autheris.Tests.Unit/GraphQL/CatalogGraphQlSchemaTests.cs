@@ -66,8 +66,7 @@ public sealed class CatalogGraphQlSchemaTests
             PrimaryKeyColumns = ["order_id"]
         };
 
-        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns([custTable, orderTable]);
+        _metadataRepo.StubAllTables([custTable, orderTable]);
 
         var relation = new TableRelation
         {
@@ -325,8 +324,7 @@ public sealed class CatalogGraphQlSchemaTests
             },
             PrimaryKeyColumns = ["id"]
         };
-        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns([
+        _metadataRepo.StubAllTables([
                 valid,
                 ColumnlessTable(new TableIdentifier("sales", "dbo", "empty")),
                 ColumnlessTable(new TableIdentifier("sales", "dbo", "dashed"), new TableColumn { ColumnName = "a-b", DataType = "int" })
@@ -422,8 +420,7 @@ public sealed class CatalogGraphQlSchemaTests
         };
 
         // Add collidingTable alongside existing custTable and orderTable
-        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns([
+        _metadataRepo.StubAllTables([
                 new TableMetadata
                 {
                     Identifier = _custTableId,
@@ -486,8 +483,7 @@ public sealed class CatalogGraphQlSchemaTests
             PrimaryKeyColumns = ["id"]
         };
 
-        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns([dealTable]);
+        _metadataRepo.StubAllTables([dealTable]);
         _relationRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns([]);
 
@@ -545,8 +541,7 @@ public sealed class CatalogGraphQlSchemaTests
             PrimaryKeyColumns = ["id"]
         };
 
-        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns([flagTable]);
+        _metadataRepo.StubAllTables([flagTable]);
         _relationRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns([]);
 
@@ -602,8 +597,7 @@ public sealed class CatalogGraphQlSchemaTests
             PrimaryKeyColumns = ["id"]
         };
 
-        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns([userTable]);
+        _metadataRepo.StubAllTables([userTable]);
         _relationRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns([]);
 
@@ -650,8 +644,7 @@ public sealed class CatalogGraphQlSchemaTests
             PrimaryKeyColumns = ["order_id"]
         };
 
-        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns([custTable, orderTable]);
+        _metadataRepo.StubAllTables([custTable, orderTable]);
         _relationRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns([]);
 
@@ -736,8 +729,7 @@ public sealed class CatalogGraphQlSchemaTests
             PrimaryKeyColumns = ["id"]
         };
 
-        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns([Table(_custTableId, customersSource, "id", "name"), Table(_orderTableId, ordersSource, "order_id", "customer_id")]);
+        _metadataRepo.StubAllTables([Table(_custTableId, customersSource, "id", "name"), Table(_orderTableId, ordersSource, "order_id", "customer_id")]);
     }
 
     private static string TypeBlock(string sdl, string typeName)

@@ -90,7 +90,7 @@ public sealed partial class OlapFederationGateTests
             harness.MetadataCalls++;
             return metas.TryGetValue(ci.Arg<TableIdentifier>(), out var m) ? m : null;
         });
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(_ => (IReadOnlyList<TableMetadata>)metas.Values.ToList());
+        repo.StubAllTables(_ => Task.FromResult<IReadOnlyList<TableMetadata>>(metas.Values.ToList()));
         Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(repo);
 
         var resolver = Substitute.For<ICrossDomainAccessResolver>();

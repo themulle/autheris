@@ -176,8 +176,7 @@ public sealed class Issue153ProcedureCatalogMcpSecurityTests
         var procService = Substitute.For<IProcedureExecutionService>();
 
         var tableOrder = CreateTableMetadata(OrdersTableId, ("id", "int", false), ("amount", "decimal", false));
-        metaRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(new List<TableMetadata> { tableOrder });
+        metaRepo.StubAllTables(new List<TableMetadata> { tableOrder });
         metaRepo.GetTableMetadataAsync(OrdersTableId, Arg.Any<CancellationToken>())
             .Returns(tableOrder);
 

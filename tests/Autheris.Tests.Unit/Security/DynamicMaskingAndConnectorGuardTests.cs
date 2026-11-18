@@ -103,8 +103,7 @@ public sealed class DynamicMaskingAndConnectorGuardTests
         var metaRepo = Substitute.For<ITableMetadataRepository>();
         metaRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<TableMetadata?>(metadata));
-        metaRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(new[] { metadata }));
+        metaRepo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(new[] { metadata }));
 
         // Enable PreventInDbHmacKeyExposure
         var options = Options.Create(new GatewayOptions

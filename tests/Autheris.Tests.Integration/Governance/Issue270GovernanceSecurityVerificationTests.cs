@@ -119,7 +119,7 @@ public sealed class Issue270GovernanceSecurityVerificationTests : IDisposable
         };
 
         var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([meta]);
+        metadataRepo.StubAllTables([meta]);
 
         var relationRepo = Substitute.For<ITableRelationRepository>();
         relationRepo.GetRelationsForTableAsync(tableId, Arg.Any<CancellationToken>()).Returns([]);
@@ -197,7 +197,7 @@ public sealed class Issue270GovernanceSecurityVerificationTests : IDisposable
         };
 
         var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([meta]);
+        metadataRepo.StubAllTables([meta]);
 
         var relationRepo = Substitute.For<ITableRelationRepository>();
         relationRepo.GetRelationsForTableAsync(tableId, Arg.Any<CancellationToken>()).Returns([]);
@@ -267,7 +267,7 @@ public sealed class Issue270GovernanceSecurityVerificationTests : IDisposable
         };
 
         var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([meta]);
+        metadataRepo.StubAllTables([meta]);
 
         var relationRepo = Substitute.For<ITableRelationRepository>();
         relationRepo.GetRelationsForTableAsync(tableId, Arg.Any<CancellationToken>()).Returns([]);

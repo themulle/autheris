@@ -123,7 +123,7 @@ public sealed class DefaultTenantCatalogReviewFindingsTests
         var tables = new[] { Wp0.Table("sales", "orders"), ownVirtual, foreignVirtual };
         var repo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
             Substitute.For<ITableMetadataRepository>());
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(tables));
+        repo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(tables));
         var exec = Substitute.For<IGatewayExecutionService>();
         exec.CheckTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableMetadata>(), false, Arg.Any<CancellationToken>())
             .Returns(ci => Task.FromResult(TableAccessDecision.Allowed(

@@ -1226,11 +1226,17 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
 
                 if (existingMeta == null)
                 {
-                    var allTables = await _metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
-                    var candidates = allTables.Where(m =>
-                        IsTenantAllowed(m.Identifier, caller) &&
-                        string.Equals(m.Identifier.Schema, tableId.Schema, StringComparison.OrdinalIgnoreCase) &&
-                        string.Equals(m.Identifier.TableName, tableId.TableName, StringComparison.OrdinalIgnoreCase)).ToList();
+                    var candidates = (await Autheris.Application.Catalog.CatalogTablePageReader.ReadAllAsync(
+                        _metadataRepository,
+                        new Autheris.Application.Catalog.CatalogTableQuery(
+                            Schema: tableId.Schema,
+                            NamePrefix: tableId.TableName,
+                            IncludeInactive: false,
+                            Limit: Autheris.Application.Catalog.CatalogTableQuery.MaxLimit),
+                        m => IsTenantAllowed(m.Identifier, caller) &&
+                             string.Equals(m.Identifier.Schema, tableId.Schema, StringComparison.OrdinalIgnoreCase) &&
+                             string.Equals(m.Identifier.TableName, tableId.TableName, StringComparison.OrdinalIgnoreCase),
+                        ct: ct).ConfigureAwait(false)).ToList();
 
                     if (candidates.Count > 1)
                     {

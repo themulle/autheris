@@ -61,7 +61,7 @@ public sealed class ReadOnlyTokenAggregateTests
 
             var table = TypedAggregateTestHost.DefaultTable();
             var metadataRepo = Substitute.For<ITableMetadataRepository>();
-            metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([table]);
+            metadataRepo.StubAllTables([table]);
             var relationRepo = Substitute.For<ITableRelationRepository>();
             relationRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns([]);
             var accessor = Substitute.For<IHttpContextAccessor>();

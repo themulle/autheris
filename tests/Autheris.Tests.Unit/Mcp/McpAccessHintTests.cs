@@ -44,7 +44,7 @@ public sealed class McpAccessHintTests
         var consents = Substitute.For<IConsentRepository>();
         var golden = Substitute.For<IGoldenQueryService>();
         var graphQl = Substitute.For<IGraphQlCatalogMap>();
-        metadata.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(
+        metadata.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(
         [
             new TableMetadata
             {

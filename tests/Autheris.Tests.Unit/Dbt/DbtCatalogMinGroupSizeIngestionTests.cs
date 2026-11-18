@@ -110,7 +110,7 @@ public sealed class DbtCatalogMinGroupSizeIngestionTests
         var logger = NullLogger<DbtMetadataIngestionService>.Instance;
 
         metadataRepo.GetTableMetadataAsync(TargetTable, Arg.Any<CancellationToken>()).Returns(stored);
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([stored]);
+        metadataRepo.StubAllTables([stored]);
 
         TableMetadata? persisted = null;
         metadataRepo.UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>())

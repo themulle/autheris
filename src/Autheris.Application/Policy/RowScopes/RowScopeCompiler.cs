@@ -753,9 +753,12 @@ public sealed partial class RowScopeCompiler
         }
 
         var columns = new Dictionary<string, (string? Column, string? Error)>(StringComparer.OrdinalIgnoreCase);
+        var requested = tables.Values.ToList();
+        var resolved = await _catalog.GetTableMetadataBatchAsync(requested, ct).ConfigureAwait(false);
+        var tableIndex = 0;
         foreach (var (name, identifier) in tables)
         {
-            var meta = await _catalog.GetTableMetadataAsync(identifier, ct).ConfigureAwait(false);
+            var meta = resolved[tableIndex++];
             if (meta == null)
             {
                 columns[name] = (null, $"the source table '{name}' is unknown in the catalog");
