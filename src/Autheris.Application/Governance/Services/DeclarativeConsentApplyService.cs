@@ -253,8 +253,10 @@ public sealed class DeclarativeConsentApplyService(
 
             var existingConsents = await consentRepository.GetActiveConsentsForSubjectsAsync(new[] { granteeSid!.Value }, tableId, now, tenantId, ct).ConfigureAwait(false);
 
+            // Issue #806: the subject read also returns the grantee's pattern grants of the whole domain. Only grants for exactly this table are
+            // what the policy replaces: a pattern grant must neither count as the identical consent nor be revoked by the change path.
             var activeExisting = existingConsents
-                .Where(c => c.IsActive(now) && c.TenantId == tenantId && MatchesGrantee(c, granteeType, granteeSid))
+                .Where(c => c.IsActive(now) && c.TenantId == tenantId && !c.IsPatternGrant && c.TableIdentifier.Equals(tableId) && MatchesGrantee(c, granteeType, granteeSid))
                 .ToList();
 
             // Issue #116: scope-only column rules never grant access (fail closed); surface that as a non-blocking warning.
@@ -270,7 +272,7 @@ public sealed class DeclarativeConsentApplyService(
             }
 
             // Check if existing consent matches desired policy
-            var matchingConsent = activeExisting.FirstOrDefault(c => IsIdentical(c, effect, policy, individual ? policy.ValidUntil : null));
+            var matchingConsent = activeExisting.FirstOrDefault(c => IsIdentical(c, effect, policy, validTo));
             if (matchingConsent != null)
             {
                 // Decision 6: a description-only difference is an in-place update (same id, no revoke, no epoch bump); every semantic
@@ -338,14 +340,13 @@ public sealed class DeclarativeConsentApplyService(
                     foreach (var cr in policy.ColumnRules)
                     {
                         var colMeta = metadata.Columns.FirstOrDefault(c => string.Equals(c.ColumnName, cr.ColumnName, StringComparison.OrdinalIgnoreCase));
-                        var accessLevel = Enum.TryParse<ColumnAccessLevel>(cr.AccessLevel, ignoreCase: true, out var lvl) ? lvl : ColumnAccessLevel.Deny;
                         colRules.Add(new ConsentColumnRule
                         {
                             Id = Guid.NewGuid(),
                             ConsentId = consentId,
                             TableColumnId = colMeta?.Id ?? Guid.NewGuid(),
                             ColumnName = cr.ColumnName,
-                            AccessLevel = accessLevel,
+                            AccessLevel = ParseAccessLevel(cr.AccessLevel),
                             ApplicableScopes = cr.ApplicableScopes ?? Array.Empty<string>()
                         });
                     }
@@ -710,7 +711,7 @@ public sealed class DeclarativeConsentApplyService(
 
     // A Clear column rule exposes the column in clear text: the grant is classified like an Unmasked one.
     private static bool HasClearColumnRule(DeclarativeConsentPolicy policy) =>
-        policy.ColumnRules?.Any(r => Enum.TryParse<ColumnAccessLevel>(r.AccessLevel, ignoreCase: true, out var level) && level == ColumnAccessLevel.Clear) == true;
+        policy.ColumnRules?.Any(r => ParseAccessLevel(r.AccessLevel) == ColumnAccessLevel.Clear) == true;
 
     private static bool MatchesGrantee(Consent consent, GranteeType type, Sid? sid)
     {
@@ -718,47 +719,118 @@ public sealed class DeclarativeConsentApplyService(
         return consent.GranteeSid == sid;
     }
 
-    /// <param name="desiredIndividualValidTo">
-    /// The explicit validUntil of an individual grant. An EARLIER expiry than the stored one is a change (the manifest shortens the grant); a later or equal one is not
-    /// (a longer validity is a renewal, which needs its own approval, so the manifest cannot extend a grant).
+    /// <summary>
+    /// Issue #806: true only when <paramref name="existing"/> equals what the create path would store for <paramref name="policy"/>,
+    /// so an unchanged manifest writes nothing and every real difference takes the revoke/create path. Column rules and row filters are compared
+    /// as multisets independent of order; strings ordinally, because the create path stores them verbatim.
+    /// </summary>
+    /// <param name="desiredValidTo">
+    /// The validUntil of the policy. An EARLIER expiry than the stored one is a change (the manifest shortens the grant); a later or equal one is not
+    /// (a re-apply never extends a grant: an individual grant needs a renewal with its own approval).
     /// </param>
-    private static bool IsIdentical(Consent existing, ConsentEffect desiredEffect, DeclarativeConsentPolicy policy, DateTimeOffset? desiredIndividualValidTo = null)
+    private static bool IsIdentical(Consent existing, ConsentEffect desiredEffect, DeclarativeConsentPolicy policy, DateTimeOffset desiredValidTo)
     {
-        if (existing.Effect != desiredEffect) return false;
-        if (desiredIndividualValidTo is { } desired && desired < existing.ValidTo) return false;
-
-        // Check column rules
-        var desiredColRules = policy.ColumnRules ?? Array.Empty<DeclarativeColumnRule>();
-        if (existing.ColumnRules.Count != desiredColRules.Count) return false;
-
-        foreach (var desiredCr in desiredColRules)
+        if (existing.Effect != desiredEffect || desiredValidTo < existing.ValidTo)
         {
-            var match = existing.ColumnRules.FirstOrDefault(c => string.Equals(c.ColumnName, desiredCr.ColumnName, StringComparison.OrdinalIgnoreCase));
-            if (match == null) return false;
-            var desiredLevel = Enum.TryParse<ColumnAccessLevel>(desiredCr.AccessLevel, ignoreCase: true, out var lvl) ? lvl : ColumnAccessLevel.Deny;
-            if (match.AccessLevel != desiredLevel) return false;
-
-            var existingScopes = match.ApplicableScopes ?? Array.Empty<string>();
-            var desiredScopes = desiredCr.ApplicableScopes ?? Array.Empty<string>();
-            if (existingScopes.Count != desiredScopes.Count) return false;
-            if (!existingScopes.All(s => desiredScopes.Contains(s, StringComparer.OrdinalIgnoreCase))) return false;
+            return false;
         }
 
-        // Check row filters
-        var desiredRowFilters = policy.RowFilters ?? Array.Empty<DeclarativeRowFilter>();
-        if (existing.RowFilters.Count != desiredRowFilters.Count) return false;
-
-        foreach (var desiredRf in desiredRowFilters)
+        // The manifest creates none of these, so an existing consent that carries them grants or restricts differently.
+        if (existing.WriteRules is { Count: > 0 } || existing.RowScope is { Count: > 0 } || existing.ClassificationAccess is { Count: > 0 })
         {
-            var match = existing.RowFilters.FirstOrDefault(r => string.Equals(r.ColumnName, desiredRf.ColumnName, StringComparison.OrdinalIgnoreCase));
-            if (match == null) return false;
-            if (!string.Equals(match.Operator, desiredRf.Operator, StringComparison.OrdinalIgnoreCase)) return false;
-            if (!string.Equals(match.ValueJson, desiredRf.ValueJson, StringComparison.Ordinal)) return false;
-            if (!string.Equals(match.UserAttribute, desiredRf.UserAttribute, StringComparison.OrdinalIgnoreCase)) return false;
-            if (!string.Equals(match.ValueSource ?? "LITERAL", desiredRf.ValueSource ?? "LITERAL", StringComparison.OrdinalIgnoreCase)) return false;
+            return false;
+        }
+
+        var desiredColumnRules = policy.ColumnRules ?? [];
+        var desiredRowFilters = policy.RowFilters ?? [];
+        return existing.ColumnRules.Count == desiredColumnRules.Count
+            && existing.RowFilters.Count == desiredRowFilters.Count
+            && SameMultiset(existing.ColumnRules.Select(ColumnRuleKey.Of), desiredColumnRules.Select(ColumnRuleKey.Of), existing.ColumnRules.Count)
+            && SameMultiset(existing.RowFilters.Select(RowFilterKey.Of), desiredRowFilters.Select(RowFilterKey.Of), existing.RowFilters.Count);
+    }
+
+    /// <summary>Both sequences hold <paramref name="count"/> keys; true when every key occurs equally often in both.</summary>
+    private static bool SameMultiset<TKey>(IEnumerable<TKey> existing, IEnumerable<TKey> desired, int count)
+        where TKey : notnull
+    {
+        if (count == 0)
+        {
+            return true;
+        }
+
+        var remaining = new Dictionary<TKey, int>(count);
+        foreach (var key in existing)
+        {
+            remaining[key] = remaining.GetValueOrDefault(key) + 1;
+        }
+
+        foreach (var key in desired)
+        {
+            if (!remaining.TryGetValue(key, out var left) || left == 0)
+            {
+                return false;
+            }
+
+            remaining[key] = left - 1;
         }
 
         return true;
+    }
+
+    /// <summary>The access level of a manifest column rule as stored: parsed by name (ignoring case); unknown or undefined values are <c>Deny</c>.</summary>
+    private static ColumnAccessLevel ParseAccessLevel(string? accessLevel) =>
+        Enum.TryParse<ColumnAccessLevel>(accessLevel, ignoreCase: true, out var level) && level is ColumnAccessLevel.Deny or ColumnAccessLevel.Mask or ColumnAccessLevel.Clear
+            ? level
+            : ColumnAccessLevel.Deny;
+
+    /// <summary>
+    /// The scopes of a column rule in their stored form (the repository writes them comma-joined and reads them back split, trimmed and without
+    /// empty entries), de-duplicated and ordinally sorted: the rule applies when the caller holds any of them, so order and duplicates do not matter.
+    /// </summary>
+    private static string CanonicalScopes(IReadOnlyList<string?>? scopes)
+    {
+        if (scopes is not { Count: > 0 })
+        {
+            return string.Empty;
+        }
+
+        var set = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (var scope in scopes)
+        {
+            foreach (var part in (scope ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                set.Add(part);
+            }
+        }
+
+        return string.Join(',', set);
+    }
+
+    private readonly record struct ColumnRuleKey(string Column, ColumnAccessLevel Level, string Scopes)
+    {
+        public static ColumnRuleKey Of(ConsentColumnRule rule) => new(rule.ColumnName, rule.AccessLevel, CanonicalScopes(rule.ApplicableScopes));
+
+        public static ColumnRuleKey Of(DeclarativeColumnRule rule) => new(rule.ColumnName, ParseAccessLevel(rule.AccessLevel), CanonicalScopes(rule.ApplicableScopes));
+    }
+
+    private readonly record struct RowFilterKey(
+        int FilterGroup,
+        RowFilterType FilterType,
+        string Column,
+        string Operator,
+        string ValueType,
+        string ValueJson,
+        string ValueSource,
+        string? UserAttribute)
+    {
+        private const string DefaultValueSource = "LITERAL";
+
+        public static RowFilterKey Of(ConsentRowFilter filter) => new(
+            filter.FilterGroup, filter.FilterType, filter.ColumnName, filter.Operator, filter.ValueType, filter.ValueJson, filter.ValueSource ?? DefaultValueSource, filter.UserAttribute);
+
+        // The create path writes every manifest filter into group 0 as a simple column predicate.
+        public static RowFilterKey Of(DeclarativeRowFilter filter) => new(
+            0, RowFilterType.SimpleColumnPredicate, filter.ColumnName, filter.Operator, filter.ValueType, filter.ValueJson, filter.ValueSource ?? DefaultValueSource, filter.UserAttribute);
     }
 
     private void AuthorizeCaller(ClaimsPrincipal caller, DeclarativeConsentManifest manifest, out Sid actorSid, out TenantId tenantId)

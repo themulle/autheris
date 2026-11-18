@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- `consents/apply` treats more differences as a change and replaces the stored consent (#806):
+  - An active consent with write rules, row scopes or classification access (for example the write grant of an approved consent request) is now revoked and replaced by the declarative consent when a manifest policy for the same grantee and table is applied. The manifest never creates these, so such a consent no longer counts as `unchanged`.
+  - An earlier `validUntil` is a change for group policies too (before: individual grants only). Group grants stored with a later expiry than the manifest's `validUntil` are therefore replaced once on the first apply after the upgrade. A later `validUntil` still never extends a grant.
+  - A row filter `valueType` or filter group difference is a change (before: ignored).
+
+### Fixed
+- `consents/apply` is idempotent for columns with several rules, for example a base rule plus a scope rule on the same column (#806). Column rules and row filters are compared as multisets independent of order, scopes as sets in their stored form. Re-applying an unchanged manifest reports `unchanged` and writes no revocation, consent, grant record, audit entry or epoch bump. Duplicated rules or scopes can no longer hide a difference.
+- `consents/apply` ignores the grantee's pattern grants (#806). The subject read also returns the grantee's pattern grants of the whole domain. Before, a matching pattern grant, even one for another table, could count as the identical consent (no grant was created for the table), and a changed policy revoked the grantee's domain-wide pattern grants.
+
 ## [1.8.5] - 2026-11-17
 
 ### Added
