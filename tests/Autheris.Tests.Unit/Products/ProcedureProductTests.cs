@@ -46,7 +46,7 @@ public sealed class ProcedureProductTests
     private readonly List<AuditLogEntry> _entries = [];
 
     private static ClaimsPrincipal Caller() => Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(new ClaimsPrincipal(
-        new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-1003"), DefaultTenantCaller.Claim], "test")));
+        new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-1003"), Autheris.Tests.Unit.TestSupport.DefaultTenantCaller.Claim], "test")));
 
     private async Task<GovernedProcedureExecutionService> CreateAsync(
         Dictionary<string, ColumnAccessLevel>? grant,

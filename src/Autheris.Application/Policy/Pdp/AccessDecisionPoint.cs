@@ -260,6 +260,11 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
             {
                 allowed = allowed with { ColumnMasks = _typedPolicies.MaskPolicies.ForDecision(allowed, metadata, subject.TenantId) };
             }
+            if (isProduct)
+            {
+                allowed = await ApplyProductColumnClassesAsync(allowed, subject.TenantId, ct).ConfigureAwait(false);
+            }
+
             return allowed with { EvaluatedByPdp = true };
         }
 

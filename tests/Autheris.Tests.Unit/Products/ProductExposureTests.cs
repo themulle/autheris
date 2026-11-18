@@ -122,4 +122,36 @@ public sealed class ProductExposureTests
 
         Exposed(product).ShouldBeFalse();
     }
+
+    [Fact]
+    public async Task Consent_bypass_still_masks_pii_masked_columns()
+    {
+        var admin = new ProductCaller(ProductHarness.Admin, ProductHarness.Tenant, true, false, true);
+        var created = await _h.Service.PutAsync(new ProductPutRequest(admin, "sales", "orders_view", DataProductKind.View,
+            "SELECT id, email FROM crm.public.customers", ProductHarness.Bob, new LoadSettings(LoadMode.Live)));
+        var stored = (await _h.Store.GetProductAsync(created.Tenant, "sales", "orders_view"))!;
+        var meta = ProductCatalogProjector.Project(stored, _time.GetUtcNow(), _time.GetUtcNow());
+        var bypass = new Autheris.Domain.Options.GatewayOptions
+        {
+            Insecure = new Autheris.Domain.Options.InsecureGettingStartedOptions { danger_bypass_consent_checks = true }
+        };
+        var pdp = new Autheris.Application.Policy.Pdp.AccessDecisionPoint(Options.Create(bypass), null, null, null, productRepository: _h.Store);
+        var subject = new Autheris.Domain.Security.SecurityPrincipalContext
+        {
+            IsAuthenticated = true,
+            UserSid = ProductHarness.Carol,
+            ResolvedTenant = ProductHarness.Tenant,
+            GroupSids = new HashSet<Sid>(),
+            GroupResolutionStatus = Autheris.Domain.Identity.GroupResolutionStatus.Complete,
+            TenantRoles = new HashSet<string>(),
+            ClusterRoles = new HashSet<string>(),
+            AuthenticationScheme = "Bearer"
+        };
+
+        var decision = await pdp.DecideAsync(new Autheris.Application.Policy.Pdp.AccessRequest(
+            subject, meta, Autheris.Application.Policy.Pdp.AccessOperation.Read, Autheris.Application.Policy.Pdp.AccessTransport.Rest));
+
+        decision.IsAllowed.ShouldBeTrue();
+        decision.GetEffectiveColumnAccess("email", meta).ShouldBe(Autheris.Domain.Interfaces.ColumnAccessLevel.Mask);
+    }
 }

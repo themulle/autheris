@@ -1,6 +1,7 @@
 namespace Autheris.Application.Products;
 
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Runtime.Hosting;
@@ -41,9 +42,20 @@ public sealed class ProductIdleDropJob(
         DataProduct? after = null;
         while (true)
         {
-            var page = await products.ListOnDemandProductsAsync(after, PageSize, ct).ConfigureAwait(false);
-            await loader.ReprojectAgedAsync(page, ct).ConfigureAwait(false);
-            dropped += await loader.DropIdleAsync(page, ct).ConfigureAwait(false);
+            IReadOnlyList<DataProduct> page;
+            try
+            {
+                page = await products.ListOnDemandProductsAsync(after, PageSize, ct).ConfigureAwait(false);
+                await loader.ReprojectAgedAsync(page, ct).ConfigureAwait(false);
+                dropped += await loader.DropIdleAsync(page, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // a store error ends this tick only; the next tick starts again (type only, no message)
+                logger.LogWarning("The idle drop tick of data products failed ({ExceptionType}).", ex.GetType().Name);
+                break;
+            }
+
             if (page.Count < PageSize)
             {
                 break;

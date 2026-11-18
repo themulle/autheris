@@ -610,6 +610,18 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
                 throw new WebSqlTableDeniedException($"WebSQL access denied to table '{resolved.Target.FullName}'.");
             }
 
+            // Only the objects the creation authority approved are readable as the product, and only within the product's tenant.
+            var identifier = resolved.Metadata.Identifier;
+            if (!definer.Product.BaseObjects.Any(b =>
+                    string.Equals(b.Domain, identifier.Domain, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(b.Schema, identifier.Schema, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(b.TableName, identifier.TableName, StringComparison.OrdinalIgnoreCase)) ||
+                (!string.IsNullOrEmpty(resolved.Metadata.OwnerTenantId) &&
+                 !string.Equals(resolved.Metadata.OwnerTenantId, tenantId.Value, StringComparison.Ordinal)))
+            {
+                throw new WebSqlTableDeniedException($"WebSQL access denied to table '{resolved.Target.FullName}'.");
+            }
+
             var decisionKey = CrossSourcePlanner.DecisionKey(resolved);
             if (decisions.ContainsKey(decisionKey))
             {

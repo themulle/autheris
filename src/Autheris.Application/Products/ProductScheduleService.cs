@@ -59,9 +59,19 @@ public sealed class ProductScheduleJob(
                 {
                     await loader.LoadAsync(product, ct).ConfigureAwait(false);
                 }
-                catch (ProductLoadException ex)
+                catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    logger.LogWarning("Scheduled load of data product {Product} failed with {Code}.", $"{product.Schema}.{product.Name}", ex.Code);
+                    // any failure of one product (also a store or lease error) is audited and never stops the tick
+                    var code = ex is ProductLoadException known ? known.Code : ProductErrorCodes.LoadFailed;
+                    logger.LogWarning("Scheduled load of data product {Product} failed with {Code} ({ExceptionType}).", $"{product.Schema}.{product.Name}", code, ex.GetType().Name);
+                    try
+                    {
+                        await loader.AuditFailureAsync(product, code, ct).ConfigureAwait(false);
+                    }
+                    catch (Exception audit) when (audit is not OperationCanceledException)
+                    {
+                        logger.LogWarning("The failed scheduled load of data product {Product} could not be audited ({ExceptionType}).", $"{product.Schema}.{product.Name}", audit.GetType().Name);
+                    }
                 }
             }
 

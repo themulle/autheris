@@ -52,7 +52,7 @@ public sealed partial class DataProductService
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger?.LogError(ex, "The catalog object of a data product could not be persisted.");
+            _logger?.LogError("The catalog object of a data product could not be persisted ({ExceptionType}).", ex.GetType().Name);
             throw new ProductException(ProductFailure.Conflict, ProductErrorCodes.CatalogPersistFailed);
         }
     }
@@ -192,7 +192,7 @@ public sealed partial class DataProductService
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                _logger?.LogWarning(ex, "Base owner notification for a data product event failed.");
+                _logger?.LogWarning("Base owner notification for a data product event failed ({ExceptionType}).", ex.GetType().Name);
             }
         }
 

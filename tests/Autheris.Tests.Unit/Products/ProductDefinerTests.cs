@@ -23,12 +23,12 @@ namespace Autheris.Tests.Unit.Products;
 [Trait("Category", "Security")]
 public sealed class ProductDefinerTests
 {
-    private static readonly TableMetadata Customers = SqlTable("crm", "public", "customers", "id", "name");
-    private static readonly TableMetadata Orders = SqlTable("erp", "public", "orders", "id", "total");
+    internal static readonly TableMetadata Customers = SqlTable("crm", "public", "customers", "id", "name");
+    internal static readonly TableMetadata Orders = SqlTable("erp", "public", "orders", "id", "total");
 
-    private const string Join = "SELECT c.id, c.name, o.total FROM crm.public.customers c JOIN erp.public.orders o ON c.id = o.id";
+    internal const string Join = "SELECT c.id, c.name, o.total FROM crm.public.customers c JOIN erp.public.orders o ON c.id = o.id";
 
-    private static FederatedServiceHarness.Pipeline Pipeline(int? maxStagedRowsPerTable = null, params TableMetadata[] extra) =>
+    internal static FederatedServiceHarness.Pipeline Pipeline(int? maxStagedRowsPerTable = null, params TableMetadata[] extra) =>
         FederatedServiceHarness.Build(
             [
                 (Customers, new StubTableConnector("crm", [Row(("id", "1"), ("name", "Alpha")), Row(("id", "2"), ("name", "Beta")), Row(("id", "3"), ("name", "Gamma"))])),
@@ -38,12 +38,13 @@ public sealed class ProductDefinerTests
             consents: Substitute.For<Autheris.Application.Common.Interfaces.IConsentRepository>(),
             maxStagedRowsPerTable: maxStagedRowsPerTable);
 
-    internal static DataProduct Product(string sql, TenantId? tenant = null) => new(
-        Guid.NewGuid(), tenant ?? Tenant, "sales", "orders_view", DataProductKind.View, sql, ProductDefinitions.Hash(sql), [], [],
+    internal static DataProduct Product(string sql, TenantId? tenant = null, IReadOnlyList<TableIdentifier>? baseObjects = null) => new(
+        Guid.NewGuid(), tenant ?? Tenant, "sales", "orders_view", DataProductKind.View, sql, ProductDefinitions.Hash(sql),
+        baseObjects ?? [Customers.Identifier, Orders.Identifier], [],
         new Sid("S-1-5-21-1"), ProductCreatorAuthority.DataProductAdmin, DataProductStatus.Active, null,
         new LoadSettings(LoadMode.OnDemand, TtlMinutes: 5), ProductLimits.Default, null, new Sid("S-1-5-21-2"));
 
-    private static GovernedSqlQueryRequest Request(string sql, string transport = SqlTransports.ProductLoad) => new(sql, Transport: transport);
+    internal static GovernedSqlQueryRequest Request(string sql, string transport = SqlTransports.ProductLoad) => new(sql, Transport: transport);
 
     [Fact]
     public async Task Definer_identity_skips_only_base_consent_keeps_admission_and_limits()

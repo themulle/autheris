@@ -108,11 +108,11 @@ public sealed class ProductLoadService(
                 OperationCanceledException => ProductErrorCodes.LimitExceeded, // the runtime limit
                 _ => ProductErrorCodes.LoadFailed
             };
-            logger?.LogWarning(ex, "Data product load failed with {Code}.", code);
+            logger?.LogWarning("Data product load failed with {Code} ({ExceptionType}).", code, ex.GetType().Name);
             // the previous result stays; a product without one is invalid until a load succeeds
             await SetStatusAsync(current, catalog.TryGet(key, out _) ? DataProductStatus.Stale : DataProductStatus.Invalid, ct).ConfigureAwait(false);
             await audit.RecordBestEffortAsync(Entry(AuditEventTypes.ProductLoadFailed, current, new { code }, started), ct).ConfigureAwait(false);
-            throw ex as ProductLoadException ?? new ProductLoadException(code, ex);
+            throw ex as ProductLoadException ?? new ProductLoadException(code);
         }
     }
 
@@ -254,7 +254,17 @@ public sealed class ProductLoadService(
             var last = _lastAccess.TryGetValue(key, out var t) ? t : (catalog.TryGet(key, out var m) && m is not null ? m.LastRefreshedAt : now);
             if (now - last > TimeSpan.FromMinutes(product.Load.IdleDropMinutes) && catalog.Remove(key))
             {
-                await store.EvictAsync(key, ct).ConfigureAwait(false);
+                try
+                {
+                    await store.EvictAsync(key, ct).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // one failing product never blocks the others; the type only, a store message can carry values
+                    logger?.LogWarning("Dropping the idle result of data product {Product} failed ({ExceptionType}).", $"{product.Schema}.{product.Name}", ex.GetType().Name);
+                    continue;
+                }
+
                 _lastAccess.TryRemove(key, out _);
                 _tracked.TryRemove(key, out _);
                 dropped++;
@@ -300,7 +310,7 @@ public sealed class ProductLoadService(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            logger?.LogWarning(ex, "The catalog object of data product {Product} could not be re-projected.", $"{product.Schema}.{product.Name}");
+            logger?.LogWarning("The catalog object of data product {Product} could not be re-projected ({ExceptionType}).", $"{product.Schema}.{product.Name}", ex.GetType().Name);
         }
     }
 
@@ -331,10 +341,14 @@ public sealed class ProductLoadService(
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 _deactivated.TryRemove(key, out _);
-                logger?.LogWarning(ex, "The catalog object of data product {Product} could not be re-projected.", $"{product.Schema}.{product.Name}");
+                logger?.LogWarning("The catalog object of data product {Product} could not be re-projected ({ExceptionType}).", $"{product.Schema}.{product.Name}", ex.GetType().Name);
             }
         }
     }
+
+    /// <summary>Records a failure of a worker tick for one product (best effort, code only).</summary>
+    public Task AuditFailureAsync(DataProduct product, string code, CancellationToken ct = default) =>
+        audit.RecordBestEffortAsync(Entry(AuditEventTypes.ProductLoadFailed, product, new { code }, _time.GetUtcNow()), ct);
 
     private AuditLogEntry Entry(string eventType, DataProduct product, object details, DateTimeOffset at) => new()
     {
