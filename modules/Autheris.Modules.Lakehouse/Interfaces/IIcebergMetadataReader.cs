@@ -1,5 +1,6 @@
 namespace Autheris.Extensions.Lakehouse.Interfaces;
 
+using Autheris.Modules.Lakehouse.Models;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;

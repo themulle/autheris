@@ -407,7 +407,7 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
                 return ("GRAPHQL_VARIABLE_INVALID", VariableMessage);
             }
 
-            // Provider layer: Microsoft.Data.Sqlite raises SqliteException (SQLITE_ERROR) for "LIKE or GLOB pattern too complex".
+            // Provider layer: a driver error for "LIKE or GLOB pattern too complex".
             if (ex is System.Data.Common.DbException && ex.Message.Contains("LIKE or GLOB", StringComparison.OrdinalIgnoreCase))
             {
                 return ("INVALID_QUERY", InvalidQueryMessage);

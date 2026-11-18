@@ -22,7 +22,7 @@ internal static class StructuredFilterKeyQueryBuilder
     internal const string TenantParameter = "@vf_tenant";
 
     /// <param name="filter">A structured filter (validated identifiers).</param>
-    /// <param name="dialect">Dialect of the key source: SQL Server, PostgreSQL or SQLite.</param>
+    /// <param name="dialect">Dialect of the key source: SQL Server or PostgreSQL.</param>
     /// <param name="tenantColumnsByAlias">Tenant column per table alias of the definition (tables without one are absent).</param>
     /// <param name="tenantId">The caller's tenant (bound as <see cref="TenantParameter"/>).</param>
     /// <param name="maxRows">Row limit of the query (<c>MaxAuthorizedKeys + 1</c>).</param>
