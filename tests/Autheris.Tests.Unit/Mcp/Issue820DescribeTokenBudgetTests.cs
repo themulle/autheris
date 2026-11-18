@@ -87,15 +87,31 @@ public sealed class Issue820DescribeTokenBudgetTests
 
     private static System.Security.Claims.ClaimsPrincipal User => DiscoveryTestBuilder.User("S-1-USER", "tenant-a");
 
-    private static async Task<string> DescribeWireAsync(McpDatasetCatalog catalog, bool brief = false, int columnOffset = 0, IReadOnlyList<string>? names = null)
+    private static async Task<string> DescribeWireAsync(McpDatasetCatalog catalog, bool brief = false, IReadOnlyList<string>? names = null)
     {
         var described = await catalog.DescribeDatasetAsync(User, DatasetId, language: null, brief);
-        var narrowed = McpDescribeNarrowing.Apply(described, new McpDescribeNarrowing.Request(null, names, columnOffset, null, null));
+        var narrowed = McpDescribeNarrowing.Apply(described, new McpDescribeNarrowing.Request(null, names, 0, null, null));
         return JsonSerializer.Serialize(McpCatalogWire.ForTool(narrowed, compactList: false), McpResultJson.Options);
     }
 
-    private static string Arguments(int columnOffset = 0) =>
-        columnOffset == 0 ? $$"""{"dataset":"{{DatasetId}}"}""" : $$"""{"dataset":"{{DatasetId}}","columnOffset":{{columnOffset}}}""";
+    /// <summary>The executor's describe path: the narrowing is parsed from the same arguments JSON the budget step reads.</summary>
+    private static async Task<string> DescribeWireAsync(McpDatasetCatalog catalog, string arguments, bool brief = false)
+    {
+        using var doc = JsonDocument.Parse(arguments);
+        var root = doc.RootElement;
+        object? Raw(string name) => root.TryGetProperty(name, out var p) ? (p.ValueKind == JsonValueKind.String ? p.GetString() : p.GetRawText()) : null;
+        int? Number(string name) => root.TryGetProperty(name, out var p) ? p.GetInt32() : null;
+        McpDescribeNarrowing.TryParse(Raw("include"), Raw("columns"), Number("columnOffset"), Number("columnLimit"), Raw("relations"), out var request).ShouldBeTrue();
+        var described = await catalog.DescribeDatasetAsync(User, DatasetId, language: null, brief);
+        return JsonSerializer.Serialize(McpCatalogWire.ForTool(McpDescribeNarrowing.Apply(described, request), compactList: false), McpResultJson.Options);
+    }
+
+    private static string Arguments(int columnOffset = 0, int? columnLimit = null)
+    {
+        var offset = columnOffset == 0 ? string.Empty : $",\"columnOffset\":{columnOffset}";
+        var limit = columnLimit is { } l ? $",\"columnLimit\":{l}" : string.Empty;
+        return $"{{\"dataset\":\"{DatasetId}\"{offset}{limit}}}";
+    }
 
     /// <summary>The budget step of the guardrail: shortened when over budget, otherwise the answer unchanged.</summary>
     private static string Budgeted(string json, string arguments, int maxTokens = DefaultMaxTokens) =>
@@ -108,24 +124,32 @@ public sealed class Issue820DescribeTokenBudgetTests
     private static List<string> ColumnNames(JsonElement root) =>
         root.GetProperty("columns").EnumerateArray().Select(c => c.GetProperty("name").GetString()!).ToList();
 
-    /// <summary>Reads every page with <c>columnOffset</c> = <c>_meta.nextColumnOffset</c> until an answer is not shortened.</summary>
-    private static async Task<List<string>> ReadAllPagesAsync(McpDatasetCatalog catalog, bool brief = false, int maxTokens = DefaultMaxTokens)
+    /// <summary>
+    /// Reads every page: the next <c>columnOffset</c> is <c>_meta.nextColumnOffset</c> of a shortened answer, otherwise the offset after the
+    /// returned columns; stops at <c>columnTotal</c>.
+    /// </summary>
+    private static async Task<List<string>> ReadAllPagesAsync(McpDatasetCatalog catalog, bool brief = false, int maxTokens = DefaultMaxTokens, int? columnLimit = null)
     {
         var names = new List<string>();
         var offset = 0;
         for (var page = 0; page < WideColumnCount; page++)
         {
-            var json = Budgeted(await DescribeWireAsync(catalog, brief, offset), Arguments(offset), maxTokens);
+            var arguments = Arguments(offset, columnLimit);
+            var json = Budgeted(await DescribeWireAsync(catalog, arguments, brief), arguments, maxTokens);
             json.Length.ShouldBeLessThanOrEqualTo(maxTokens * 4);
             using var doc = JsonDocument.Parse(json);
-            names.AddRange(ColumnNames(doc.RootElement));
-            if (!doc.RootElement.TryGetProperty("_meta", out var meta))
+            var root = doc.RootElement;
+            var returned = ColumnNames(root);
+            returned.ShouldNotBeEmpty();
+            names.AddRange(returned);
+            var next = root.TryGetProperty("_meta", out var meta) ? meta.GetProperty("nextColumnOffset").GetInt32() : offset + returned.Count;
+            next.ShouldBe(offset + returned.Count);
+            var total = root.TryGetProperty("columnTotal", out var t) ? t.GetInt32() : next;
+            if (next >= total)
             {
                 return names;
             }
 
-            var next = meta.GetProperty("nextColumnOffset").GetInt32();
-            next.ShouldBeGreaterThan(offset);
             offset = next;
         }
 
@@ -166,6 +190,27 @@ public sealed class Issue820DescribeTokenBudgetTests
         note.ShouldContain("columnOffset");
         note.ShouldContain("columns");
         note.ShouldContain("brief");
+        note.ShouldContain("columnTotal minus nextColumnOffset");
+    }
+
+    [Fact]
+    public async Task ColumnLimitWindow_IsShortened_OmittedCountsOnlyTheWindow_AndPagingReadsAllColumns()
+    {
+        const int columnLimit = 120;
+        var arguments = Arguments(0, columnLimit);
+
+        using (var doc = JsonDocument.Parse(Budgeted(await DescribeWireAsync(Catalog(), arguments), arguments)))
+        {
+            var root = doc.RootElement;
+            var returned = ColumnNames(root).Count;
+            returned.ShouldBeLessThan(columnLimit);
+            root.GetProperty("columnTotal").GetInt32().ShouldBe(WideColumnCount);
+            var meta = root.GetProperty("_meta");
+            meta.GetProperty("omitted").GetInt32().ShouldBe(columnLimit - returned);
+            meta.GetProperty("nextColumnOffset").GetInt32().ShouldBe(returned);
+        }
+
+        (await ReadAllPagesAsync(Catalog(), columnLimit: columnLimit)).ShouldBe(Enumerable.Range(0, WideColumnCount).Select(i => $"t_col{i:D3}"));
     }
 
     [Fact]
@@ -239,6 +284,7 @@ public sealed class Issue820DescribeTokenBudgetTests
     }
 
     [Fact]
+    [Trait("Category", "Security")]
     public async Task BudgetBelowTheAnswerWithoutColumns_IsNotShortened()
     {
         var json = await DescribeWireAsync(Catalog());
@@ -246,29 +292,87 @@ public sealed class Issue820DescribeTokenBudgetTests
         McpBudgetShortening.TryShorten(McpDatasetTools.DescribeDataset, json, Arguments(), 400, 100, out _).ShouldBeFalse();
     }
 
-    [Fact]
-    public void UnparsableArguments_AreNotShortened() =>
-        McpBudgetShortening.TryShorten(McpDatasetTools.DescribeDataset, """{"id":"x","columns":[{"name":"a"},{"name":"b"}]}""", "not json", 30, 8, out _).ShouldBeFalse();
+    /// <summary>Three columns of about 1,000 characters: 2,000 characters fit the envelope and one column, 900 not even one.</summary>
+    private static readonly string ThreeLargeColumns = JsonSerializer.Serialize(new
+    {
+        id = "erp.dbo.x",
+        columns = Enumerable.Range(0, 3).Select(i => new { name = $"c{i}", description = new string('d', 1_000) })
+    });
 
     [Fact]
-    public async Task Guardrail_ShortensAnOverBudgetDescription_AndLeavesAnUnderBudgetOneUnchanged()
+    [Trait("Category", "Security")]
+    public void MissingOrUnreadableArguments_AreNotShortened()
     {
-        var wide = await DescribeWireAsync(Catalog());
-        const string small = """{"id":"erp.dbo.small","columns":[{"name":"a","type":"int"}]}""";
+        McpBudgetShortening.TryShorten(McpDatasetTools.DescribeDataset, ThreeLargeColumns, "{}", 2_000, 500, out var readable).ShouldBeTrue();
+        using (var doc = JsonDocument.Parse(readable))
+        {
+            doc.RootElement.GetProperty("columns").GetArrayLength().ShouldBe(1);
+        }
+
+        string?[] unreadable = [null, "not json", """{"columnOffset":1.5}""", """{"columnOffset":-1}""", """{"columnOffset":"1"}"""];
+        foreach (var arguments in unreadable)
+        {
+            McpBudgetShortening.TryShorten(McpDatasetTools.DescribeDataset, ThreeLargeColumns, arguments, 2_000, 500, out _).ShouldBeFalse(arguments ?? "null");
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void FirstColumnAloneOverBudget_IsNotShortenedToAnEmptyPage_AndTheNoticeNamesTheWaysOut()
+    {
+        // An answer with returned 0 and nextColumnOffset == columnOffset would make a client loop forever.
+        McpBudgetShortening.TryShorten(McpDatasetTools.DescribeDataset, ThreeLargeColumns, """{"columnOffset":7}""", 900, 225, out _).ShouldBeFalse();
+
+        var note = McpBudgetShortening.NoticeNote(McpDatasetTools.DescribeDataset, """{"columnOffset":7}""");
+        note.ShouldContain("columnOffset 7");
+        note.ShouldContain("longDescription");
+        note.ShouldContain("brief: true");
+        note.ShouldContain("columns");
+        McpBudgetShortening.NoticeNote(McpDatasetTools.ListDatasets, "{}").ShouldContain("offset/limit");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Guardrail_OversizedSingleColumn_ReturnsTheDescribeNotice()
+    {
+        var guardrail = Guardrail(ThreeLargeColumns, maxTokens: 256);
+
+        var result = await guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest(McpDatasetTools.DescribeDataset, Arguments()), Session());
+
+        result.TruncatedDueToBudget.ShouldBeTrue();
+        using var doc = JsonDocument.Parse(result.ContentJson);
+        doc.RootElement.TryGetProperty("columns", out _).ShouldBeFalse();
+        var meta = doc.RootElement.GetProperty("_meta");
+        meta.GetProperty("reason").GetString().ShouldBe("TOKEN_BUDGET_EXCEEDED");
+        meta.GetProperty("note").GetString()!.ShouldContain("columnOffset 0");
+    }
+
+    private static McpSessionContext Session() =>
+        new("s1", "agent", "tenant-a", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, UserSid: "S-1-USER");
+
+    private static AiDataGuardrailService Guardrail(string executorResult, int maxTokens = DefaultMaxTokens, string? smallResult = null)
+    {
         var executor = Substitute.For<IMcpQueryExecutor>();
-        executor.ExecuteOperationAsync(Arg.Any<McpToolDefinition>(), Arg.Is<string>(a => a.Contains("company_settings")), Arg.Any<McpSessionContext>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(wide));
+        executor.ExecuteOperationAsync(Arg.Any<McpToolDefinition>(), Arg.Is<string>(a => !a.Contains("erp.dbo.small")), Arg.Any<McpSessionContext>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(executorResult));
         executor.ExecuteOperationAsync(Arg.Any<McpToolDefinition>(), Arg.Is<string>(a => a.Contains("erp.dbo.small")), Arg.Any<McpSessionContext>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(small));
-        var guardrail = new AiDataGuardrailService(
+            .Returns(Task.FromResult(smallResult ?? "{}"));
+        return new AiDataGuardrailService(
             new McpToolRegistry(Options.Create(new GatewayOptions()), new NoDemo()),
-            Options.Create(new GatewayOptions { Mcp = new McpOptions { Enabled = true, MaxTokensPerCall = DefaultMaxTokens } }),
+            Options.Create(new GatewayOptions { Mcp = new McpOptions { Enabled = true, MaxTokensPerCall = maxTokens } }),
             NullLogger<AiDataGuardrailService>.Instance,
             global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance,
             queryExecutor: executor,
             decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(),
             tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable());
-        var session = new McpSessionContext("s1", "agent", "tenant-a", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, UserSid: "S-1-USER");
+    }
+
+    [Fact]
+    public async Task Guardrail_ShortensAnOverBudgetDescription_AndLeavesAnUnderBudgetOneUnchanged()
+    {
+        const string small = """{"id":"erp.dbo.small","columns":[{"name":"a","type":"int"}]}""";
+        var guardrail = Guardrail(await DescribeWireAsync(Catalog()), smallResult: small);
+        var session = Session();
 
         var shortened = await guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest(McpDatasetTools.DescribeDataset, Arguments()), session);
         var unchanged = await guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest(McpDatasetTools.DescribeDataset, """{"dataset":"erp.dbo.small"}"""), session);

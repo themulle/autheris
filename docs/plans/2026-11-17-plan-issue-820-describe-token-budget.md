@@ -21,7 +21,9 @@
   parameters: call again with the same arguments and `columnOffset` = `nextColumnOffset`, or select columns by name with `columns`; on a
   full answer it also names `brief: true`. With a `columns` name selection (names win over paging) there is no `nextColumnOffset`; the
   note says to request the columns not returned by name.
-- **REQ-820-3:** under-budget answers are byte-identical to today. If not even the answer without columns fits, the existing notice stays.
+- **REQ-820-3:** under-budget answers are byte-identical to today. If not even one column fits, the notice stays (an empty page with an
+  unchanged cursor would make a client loop); for `describe_dataset` its note names `columns`, `include` without `longDescription`,
+  `brief: true` and the budget. The same one-item minimum applies to the shortened list and search (review finding).
 - **Decision (no automatic brief fallback):** #705 shortens the list without switching to `compact`; switching the shape silently would
   give the agent an answer it did not ask for and make pages of one table differ in shape. The note offers `brief: true` instead.
 - **Decision (no new parameter):** `columnOffset` / `columnLimit` from #704 already are the deterministic column cursor (catalog column
@@ -35,7 +37,7 @@
   dispatches the describe result to `TryShortenColumns`: binary search over the number of kept `columns` (as for datasets), the envelope
   is the parsed answer itself, so the brief shape (`McpCatalogWire.Brief`) is handled without a second code path.
 - The requested `columnOffset` and the presence of `columns` are read from the call arguments (already validated by the executor);
-  unparsable arguments mean no shortening (notice).
+  missing or unparsable arguments, or a non-integer or negative `columnOffset`, mean no shortening (notice).
 - `ApplyTokenBudget` gains an optional `argumentsJson` that the dataset-tool call site passes (`AiDataGuardrailService.cs`). No change in
   `GatewayMcpQueryExecutor` or the wire models.
 - The shortened JSON is written with the relaxed encoder of `McpResultJson`, so non-ASCII text keeps the size and form of the
@@ -48,16 +50,18 @@
 - **SEC-820-2:** the continuation is an ordinary new `describe_dataset` call: authorization, column visibility, masking and the
   narrowing run again; `columnOffset` indexes the caller's visible columns only, so hidden columns never appear on any page and never
   shift the cursor in a way that reveals them.
-- **SEC-820-3:** fail closed: when the answer without any column does not fit, or the answer or arguments cannot be parsed, the
-  existing `TOKEN_BUDGET_EXCEEDED` notice replaces the result.
+- **SEC-820-3:** fail closed: when not even one column fits, or the answer or arguments are missing or cannot be parsed, the
+  `TOKEN_BUDGET_EXCEEDED` notice replaces the result.
 
 ## Phase 4: Test plan
 
 `Issue820DescribeTokenBudgetTests` (wire shape from the real catalog + `McpDescribeNarrowing` + `McpCatalogWire.ForTool`):
 300-column table under the default 4,096 tokens keeps dataset-level members, a column prefix and the marker; paging with
 `nextColumnOffset` returns all columns without overlap or gap; brief + budget; hidden (denied) columns on no page (Security);
-under-budget answer unchanged; `columns` name selection has no `nextColumnOffset`; budget below the envelope falls back; guardrail
-end to end (`ExecuteToolWithGuardrailAsync` with a stub executor) shortens instead of replacing.
+under-budget answer unchanged; `columns` name selection has no `nextColumnOffset`; `columnOffset` + `columnLimit` window (omitted
+counts the window only); guardrail end to end (`ExecuteToolWithGuardrailAsync` with a stub executor) shortens instead of replacing.
+Fail closed (Security): budget below the envelope, a single oversized column (describe notice), missing, unparsable, non-integer or
+negative arguments.
 
 ## Out of scope (same symptom, different mechanism)
 

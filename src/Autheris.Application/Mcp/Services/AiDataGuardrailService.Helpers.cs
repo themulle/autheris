@@ -338,7 +338,7 @@ public sealed partial class AiDataGuardrailService
                     _meta = new
                     {
                         truncated = true, reason = "TOKEN_BUDGET_EXCEEDED", warning = "[TRUNCATED DUE TO MCP TOKEN BUDGET]",
-                        maxTokens, note = "Result exceeded token budget. Use pagination (offset/limit) or filters to narrow the result."
+                        maxTokens, note = McpBudgetShortening.NoticeNote(toolName, argumentsJson)
                     }
                 });
                 estimatedTokens = Math.Max(1, json.Length / 4);

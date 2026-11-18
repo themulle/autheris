@@ -25,14 +25,15 @@ internal static class McpBudgetShortening
         string.Equals(toolName, McpDatasetTools.SearchCatalog, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, McpDatasetTools.DescribeDataset, StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>Shortens without call arguments; a <c>describe_dataset</c> result is then read as called without column paging.</summary>
+    /// <summary>Shortens without call arguments; a <c>describe_dataset</c> result is then never shortened, its cursor depends on them.</summary>
     public static bool TryShorten(string toolName, string json, int maxChars, int maxTokens, out string shortened) =>
         TryShorten(toolName, json, argumentsJson: null, maxChars, maxTokens, out shortened);
 
     /// <summary>
     /// Keeps the longest prefix of the <c>datasets</c> array (list, search) or of the <c>columns</c> array (describe) whose serialization
-    /// fits <paramref name="maxChars"/>; every other member is kept unchanged. Returns false when the result has no such array, not even an
-    /// empty array fits, or (describe) <paramref name="argumentsJson"/> cannot be read, because the continuation depends on it.
+    /// fits <paramref name="maxChars"/>; every other member is kept unchanged. Returns false when the result has no such array, not even one
+    /// item fits (an empty answer with an unchanged cursor would make a client loop), or (describe) <paramref name="argumentsJson"/> is
+    /// missing or cannot be read, because the continuation depends on it.
     /// </summary>
     public static bool TryShorten(string toolName, string json, string? argumentsJson, int maxChars, int maxTokens, out string shortened)
     {
@@ -52,6 +53,25 @@ internal static class McpBudgetShortening
 
         shortened = result;
         return true;
+    }
+
+    /// <summary>
+    /// The note of the notice that replaces a result which cannot be shortened. For <c>describe_dataset</c> it names the ways to get a
+    /// smaller answer: the dataset-level members plus the first requested column do not fit.
+    /// </summary>
+    public static string NoticeNote(string toolName, string? argumentsJson)
+    {
+        if (!string.Equals(toolName, McpDatasetTools.DescribeDataset, StringComparison.OrdinalIgnoreCase))
+        {
+            return "Result exceeded token budget. Use pagination (offset/limit) or filters to narrow the result.";
+        }
+
+        var column = TryReadColumnCursor(argumentsJson, out var columnOffset, out var namedColumns) && !namedColumns
+            ? $"the column at columnOffset {columnOffset}"
+            : "the first requested column";
+        return $"Result exceeded token budget even with only the dataset-level members and {column}. Request columns by name with "
+            + "columns, leave longDescription out of include, select fewer sections with include, use brief: true, or ask for a larger "
+            + "Mcp:MaxTokensPerCall.";
     }
 
     private static string? ShortenDatasets(JsonObject root, bool isList, int maxChars, int maxTokens)
@@ -96,7 +116,8 @@ internal static class McpBudgetShortening
         var note = namedColumns
             ? "Columns shortened to fit the token budget. Call describe_dataset again and name the columns not returned in columns."
             : "Columns shortened to fit the token budget. Call describe_dataset again with the same arguments and columnOffset set to "
-              + "_meta.nextColumnOffset to read the remaining columns, or name the wanted columns in columns."
+              + "_meta.nextColumnOffset to read the remaining columns (columnTotal minus nextColumnOffset remain; omitted counts only "
+              + "the columns cut from this answer), or name the wanted columns in columns."
               + (brief ? string.Empty : " brief: true returns smaller column signatures.");
         return KeepPrefix(root, ColumnsProperty, ItemsOf(columns), maxChars, (copy, keep, omitted) =>
         {
@@ -107,14 +128,14 @@ internal static class McpBudgetShortening
 
     /// <summary>
     /// Binary search over the number of kept items; each candidate is <paramref name="root"/> with a prefix of <paramref name="items"/> in
-    /// <paramref name="property"/>, marked by <paramref name="mark"/>. Falls back to the empty prefix; null when not even that fits.
+    /// <paramref name="property"/>, marked by <paramref name="mark"/>. Null when not even the first item fits.
     /// </summary>
     private static string? KeepPrefix(JsonObject root, string property, JsonNode?[] items, int maxChars, Action<JsonObject, int, int> mark)
     {
         // The envelope keeps the member in place but empty, so a candidate clones only the envelope and its kept items.
         root[property] = new JsonArray();
-        var low = 0;
-        var high = items.Length - 1;
+        var low = 1;
+        var high = items.Length;
         string? best = null;
         while (low <= high)
         {
@@ -131,8 +152,7 @@ internal static class McpBudgetShortening
             }
         }
 
-        best ??= Build(root, property, items, 0, mark);
-        return best.Length <= maxChars ? best : null;
+        return best;
     }
 
     private static string Build(JsonObject root, string property, JsonNode?[] items, int keep, Action<JsonObject, int, int> mark)
@@ -197,7 +217,7 @@ internal static class McpBudgetShortening
     {
         columnOffset = 0;
         namedColumns = false;
-        if (ParseObject(string.IsNullOrWhiteSpace(argumentsJson) ? "{}" : argumentsJson) is not { } arguments)
+        if (argumentsJson is null || ParseObject(argumentsJson) is not { } arguments)
         {
             return false;
         }
