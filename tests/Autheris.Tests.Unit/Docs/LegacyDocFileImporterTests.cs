@@ -185,4 +185,54 @@ public sealed class LegacyDocFileImporterTests : IDisposable
         (await _repo.ReadChangedSinceAsync(null)).ShouldBeEmpty();
         await _audit.DidNotReceiveWithAnyArgs().RecordAsync(default!, default);
     }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Deleted_document_is_not_revived_on_second_run()
+    {
+        Write("app/guide/gone.md", "# Gone\n\nbody");
+        Write("app/guide/tenantgone.md", TenantFile("tenant-a", "# Gone"));
+        var importer = CreateImporter(_source);
+        (await importer.RunAsync(CancellationToken.None))!.Imported.ShouldBe(2);
+        await _repo.DeleteAsync(new DocKey(null, "app", DocCategory.Guide, "gone"), null, DateTimeOffset.UtcNow);
+        await _repo.DeleteAsync(new DocKey("tenant-a", "app", DocCategory.Guide, "tenantgone"), null, DateTimeOffset.UtcNow);
+
+        var second = await importer.RunAsync(CancellationToken.None);
+
+        second.ShouldBe(new LegacyDocImportResult(0, 0, 0, 2));
+        (await _repo.GetAsync(new DocKey(null, "app", DocCategory.Guide, "gone"))).ShouldBeNull();
+        (await _repo.GetAsync(new DocKey("tenant-a", "app", DocCategory.Guide, "tenantgone"))).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task Missing_source_directory_logs_and_emits_no_audit_event()
+    {
+        var result = await CreateImporter(Path.Combine(_source, "does-not-exist")).RunAsync(CancellationToken.None);
+
+        result.ShouldBe(new LegacyDocImportResult(0, 0, 0, 0));
+        await _audit.DidNotReceiveWithAnyArgs().RecordAsync(default!, default);
+    }
+
+    [Fact]
+    public async Task Audit_failure_does_not_fail_the_run()
+    {
+        Write("app/guide/a.md", "# A");
+        _audit.RecordAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>()).Returns(Task.FromException(new AuditUnavailableException("down")));
+
+        var result = await CreateImporter(_source).RunAsync(CancellationToken.None);
+
+        result!.Imported.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Title_comes_from_heading_and_invalid_author_is_dropped()
+    {
+        Write("app/guide/t.md", "---\nautheris-tenant: tenant-a\nautheris-author: bad author<script>\n---\n# My Heading\n\nbody");
+
+        await CreateImporter(_source).RunAsync(CancellationToken.None);
+
+        var row = await _repo.GetAsync(new DocKey("tenant-a", "app", DocCategory.Guide, "t"));
+        row!.Title.ShouldBe("My Heading");
+        row.AuthorSid.ShouldBeNull();
+    }
 }

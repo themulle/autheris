@@ -6,6 +6,7 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
@@ -81,14 +82,27 @@ public sealed partial class LegacyDocFileImporter : BackgroundService
             return null;
         }
 
-        var root = Path.GetFullPath(source);
+        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(source));
+        if (!Directory.Exists(root) || IsLink(root))
+        {
+            LogSourceUnusable(_logger);
+            return new LegacyDocImportResult(0, 0, 0, 0);
+        }
+
+        // Rows incl. tombstones, keyed without content: an existing row (even a deleted one) is never recreated.
+        var existing = new Dictionary<DocKey, string>();
+        foreach (var row in await _repository.ReadChangedSinceAsync(null, ct).ConfigureAwait(false))
+        {
+            existing[new DocKey(row.TenantId, row.AppId, row.Category, row.DocId)] = row.ContentSha256;
+        }
+
         int imported = 0, skipped = 0, rejected = 0, alreadyPresent = 0;
 
         foreach (var file in EnumerateCandidateFiles(root, () => skipped++))
         {
             ct.ThrowIfCancellationRequested();
             var relative = Path.GetRelativePath(root, file.Path).Replace('\\', '/');
-            switch (await ImportFileAsync(file, ct).ConfigureAwait(false))
+            switch (await ImportFileAsync(file, existing, ct).ConfigureAwait(false))
             {
                 case Outcome.Imported: imported++; break;
                 case Outcome.AlreadyPresent: alreadyPresent++; break;
@@ -98,21 +112,30 @@ public sealed partial class LegacyDocFileImporter : BackgroundService
         }
 
         var result = new LegacyDocImportResult(imported, skipped, rejected, alreadyPresent);
-        await _audit.RecordAsync(new AuditLogEntry
+        try
         {
-            TenantId = TenantId.Platform,
-            EventType = AuditEventTypes.DocLegacyImportCompleted,
-            ActorSid = new Sid("S-1-0-0"),
-            Decision = "ALLOW",
-            TargetTable = "doc_documents",
-            TraceId = Guid.NewGuid().ToString("N"),
-            DetailsJson = JsonSerializer.Serialize(new { imported, skipped, rejected, alreadyPresent })
-        }, ct).ConfigureAwait(false);
+            await _audit.RecordAsync(new AuditLogEntry
+            {
+                TenantId = TenantId.Platform,
+                EventType = AuditEventTypes.DocLegacyImportCompleted,
+                ActorSid = new Sid("S-1-0-0"),
+                Decision = "ALLOW",
+                TargetTable = "doc_documents",
+                TraceId = Guid.NewGuid().ToString("N"),
+                DetailsJson = JsonSerializer.Serialize(new { imported, skipped, rejected, alreadyPresent })
+            }, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // The imported documents are not rolled back; only the completion record is missing.
+            LogAuditFailed(_logger, ex.GetType().Name);
+        }
+
         LogCompleted(_logger, imported, skipped, rejected, alreadyPresent);
         return result;
     }
 
-    private async Task<Outcome> ImportFileAsync(Candidate file, CancellationToken ct)
+    private async Task<Outcome> ImportFileAsync(Candidate file, Dictionary<DocKey, string> existing, CancellationToken ct)
     {
         if (!Enum.TryParse<DocCategory>(file.Category, ignoreCase: true, out var category) ||
             !Enum.IsDefined(category) || char.IsDigit(file.Category[0]))
@@ -139,7 +162,8 @@ public sealed partial class LegacyDocFileImporter : BackgroundService
             return Outcome.Rejected;
         }
 
-        var (body, tenant, author) = ParseProvenance(raw);
+        var (body, tenant, rawAuthor) = ParseProvenance(raw);
+        var author = rawAuthor is not null && AuthorPattern().IsMatch(rawAuthor) ? rawAuthor : null;
         if (tenant is not null && (tenant == UnknownTenant || !DocumentRules.IsValidTenantId(tenant)))
         {
             return Outcome.Skipped;
@@ -147,24 +171,24 @@ public sealed partial class LegacyDocFileImporter : BackgroundService
 
         try
         {
-            var request = new DepositDocRequest(file.AppId, category, string.Empty, body, file.DocId, AuthorSid: author);
-            var result = await _store.CreateAsync(new DocWriter(tenant, author), request, ct).ConfigureAwait(false);
-            if (result.Success)
+            var key = new DocKey(tenant, file.AppId, category, file.DocId);
+            var sanitized = UntrustedMarkdownSanitizer.Sanitize(body, _options.MaxDocumentBytes).Text;
+            var sha = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sanitized))).ToLowerInvariant();
+            if (existing.TryGetValue(key, out var existingSha))
             {
-                return Outcome.Imported;
+                return string.Equals(existingSha, sha, StringComparison.Ordinal) ? Outcome.AlreadyPresent : Outcome.Rejected;
             }
 
-            if (result.ErrorCode != "DOC_EXISTS")
+            var title = DocumentRules.ExtractTitle(sanitized, file.DocId);
+            var request = new DepositDocRequest(file.AppId, category, title, body, file.DocId, AuthorSid: author);
+            var result = await _store.CreateAsync(new DocWriter(tenant, author), request, ct).ConfigureAwait(false);
+            if (!result.Success)
             {
                 return Outcome.Rejected;
             }
 
-            var existing = await _repository.GetAsync(new DocKey(tenant, file.AppId, category, file.DocId), ct).ConfigureAwait(false);
-            var sanitized = UntrustedMarkdownSanitizer.Sanitize(body, _options.MaxDocumentBytes).Text;
-            var sha = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sanitized))).ToLowerInvariant();
-            return existing is { IsDeleted: false } && string.Equals(existing.ContentSha256, sha, StringComparison.Ordinal)
-                ? Outcome.AlreadyPresent
-                : Outcome.Rejected;
+            existing[key] = sha;
+            return Outcome.Imported;
         }
         catch (Exception ex) when (ex is ArgumentException or DocValidationException)
         {
@@ -178,19 +202,14 @@ public sealed partial class LegacyDocFileImporter : BackgroundService
     /// </summary>
     private static IEnumerable<Candidate> EnumerateCandidateFiles(string root, Action onSkipped)
     {
-        if (!Directory.Exists(root))
-        {
-            yield break;
-        }
-
-        var rootPrefix = Path.TrimEndingDirectorySeparator(root) + Path.DirectorySeparatorChar;
-        foreach (var appDir in Directory.EnumerateDirectories(root))
+        var rootPrefix = root + Path.DirectorySeparatorChar;
+        foreach (var appDir in SafeList(() => Directory.EnumerateDirectories(root), onSkipped))
         {
             if (IsLink(appDir)) { onSkipped(); continue; }
-            foreach (var categoryDir in Directory.EnumerateDirectories(appDir))
+            foreach (var categoryDir in SafeList(() => Directory.EnumerateDirectories(appDir), onSkipped))
             {
                 if (IsLink(categoryDir)) { onSkipped(); continue; }
-                foreach (var path in Directory.EnumerateFiles(categoryDir, "*.md"))
+                foreach (var path in SafeList(() => Directory.EnumerateFiles(categoryDir, "*.md"), onSkipped))
                 {
                     var full = Path.GetFullPath(path);
                     if (!full.StartsWith(rootPrefix, StringComparison.Ordinal) || IsLink(full))
@@ -209,10 +228,30 @@ public sealed partial class LegacyDocFileImporter : BackgroundService
         }
     }
 
+    private static string[] SafeList(Func<IEnumerable<string>> list, Action onSkipped)
+    {
+        try
+        {
+            return [.. list()];
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+        {
+            onSkipped();
+            return [];
+        }
+    }
+
     private static bool IsLink(string path)
     {
-        var info = new FileInfo(path);
-        return info.LinkTarget is not null || info.Attributes.HasFlag(FileAttributes.ReparsePoint);
+        try
+        {
+            var info = new FileInfo(path);
+            return info.LinkTarget is not null || info.Attributes.HasFlag(FileAttributes.ReparsePoint);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+        {
+            return true;
+        }
     }
 
     /// <summary>
@@ -272,6 +311,9 @@ public sealed partial class LegacyDocFileImporter : BackgroundService
         return (fileContent, hasTenantKey ? UnknownTenant : null, null);
     }
 
+    [GeneratedRegex("^[A-Za-z0-9._@-]{1,128}$", RegexOptions.CultureInvariant)]
+    private static partial Regex AuthorPattern();
+
     private enum Outcome { Imported, AlreadyPresent, Skipped, Rejected }
 
     private readonly record struct Candidate(string Path, string AppId, string Category, string DocId);
@@ -281,6 +323,12 @@ public sealed partial class LegacyDocFileImporter : BackgroundService
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Legacy doc import {Disposition} file {RelativePath}.")]
     private static partial void LogFile(ILogger logger, string disposition, string relativePath);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Legacy doc import skipped: Docs:LegacyImport:SourcePath does not name an existing directory, or it is a link.")]
+    private static partial void LogSourceUnusable(ILogger logger);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Legacy doc import completed, audit failed ({ExceptionType}).")]
+    private static partial void LogAuditFailed(ILogger logger, string exceptionType);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Legacy doc import failed ({ExceptionType}).")]
     private static partial void LogImportFailed(ILogger logger, string exceptionType);
