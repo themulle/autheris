@@ -70,6 +70,10 @@ internal static class CatalogDiscoveryApiHelpers
                     description = detail.Description,
                     sensitivity = detail.Sensitivity,
                     primaryKeys = detail.PrimaryKeys,
+                    primaryKeyDirections = detail.PrimaryKeyDirections,
+                    indexes = detail.Indexes,
+                    requiredFilterColumns = detail.RequiredFilterColumns,
+                    requiredFilterColumnGroups = detail.RequiredFilterColumnGroups,
                     size = detail.Size,
                     columns = detail.Columns.Select(c => new
                     {
