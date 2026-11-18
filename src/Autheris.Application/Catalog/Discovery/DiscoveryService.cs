@@ -150,6 +150,14 @@ public sealed class DiscoveryService : IDiscoveryService
             }
 
             var matchedTables = filtered.ToList();
+            if (!string.IsNullOrWhiteSpace(query.Search))
+            {
+                var searchText = query.Search.Trim();
+                matchedTables = await KeepCallerVisibleMatchesAsync(
+                    caller, sid, scopeKey, matchedTables, query.Language,
+                    (table, projected) => DiscoveryVisibleTextMatcher.ContainsQuery(table, projected, searchText), ct).ConfigureAwait(false);
+            }
+
             var eligibleProcedures = (await LoadEligibleProceduresAsync(caller, scoped.VisibleTables, ct).ConfigureAwait(false))
                 .Where(p => DiscoveryProcedureResolver.MatchesQuery(p.Procedure, query.Domain, query.Schema, query.Tag, query.Search))
                 .ToList();
@@ -306,10 +314,11 @@ public sealed class DiscoveryService : IDiscoveryService
             if (!string.IsNullOrWhiteSpace(trimmed) && _searchEngine?.IsIndexReady == true)
             {
                 var mode = ParseSearchMode(options.Mode);
+                // Candidates are verified against the caller-visible text before the limit applies, so ask the index for more than one page.
                 var engineQuery = new CatalogSearchQuery(
                     QueryText: trimmed,
                     DomainFilter: options.Domain,
-                    Limit: limit,
+                    Limit: Math.Min(MaxPageSize, Math.Max(limit * 4, 50)),
                     Mode: mode,
                     Language: options.Language);
 
@@ -319,13 +328,36 @@ public sealed class DiscoveryService : IDiscoveryService
                     isColumnRestricted: null,
                     ct).ConfigureAwait(false);
 
-                matchedTables = [];
+                var candidates = new List<TableMetadata>(hits.Count);
                 foreach (var hit in hits)
                 {
                     if (visibleById.TryGetValue(hit.TableIdentifier, out var meta))
                     {
-                        matchedTables.Add(meta);
+                        candidates.Add(meta);
                     }
+                }
+
+                var restrictedScores = new Dictionary<TableIdentifier, int>();
+                matchedTables = await KeepCallerVisibleMatchesAsync(
+                    caller, sid, scopeKey, candidates, options.Language,
+                    (table, projected) => DiscoveryVisibleTextMatcher.MatchesAnyTerm(table, projected, trimmed), ct,
+                    restrictedScores, (table, projected) => DiscoveryVisibleTextMatcher.VisibleTermMatchCount(table, projected, trimmed)).ConfigureAwait(false);
+
+                // The index score of a column-restricted table was computed from its whole text, so its position would reveal hidden text.
+                // Such hits follow the unrestricted ones (engine order) and are ordered by caller-visible term matches, then by identifier.
+                if (restrictedScores.Count > 0)
+                {
+                    var unrestricted = matchedTables.Where(t => !restrictedScores.ContainsKey(t.Identifier));
+                    var restrictedOrdered = matchedTables
+                        .Where(t => restrictedScores.ContainsKey(t.Identifier))
+                        .OrderByDescending(t => restrictedScores[t.Identifier])
+                        .ThenBy(t => t.Identifier.ToString(), StringComparer.OrdinalIgnoreCase);
+                    matchedTables = unrestricted.Concat(restrictedOrdered).ToList();
+                }
+
+                if (matchedTables.Count > limit)
+                {
+                    matchedTables.RemoveRange(limit, matchedTables.Count - limit);
                 }
             }
             else
@@ -342,7 +374,13 @@ public sealed class DiscoveryService : IDiscoveryService
                     q = q.Where(t => MatchesNonHiddenText(t, trimmed));
                 }
 
-                matchedTables = q.Take(limit).ToList();
+                matchedTables = await KeepCallerVisibleMatchesAsync(
+                    caller, sid, scopeKey, q.ToList(), options.Language,
+                    (table, projected) => string.IsNullOrWhiteSpace(trimmed) || DiscoveryVisibleTextMatcher.ContainsQuery(table, projected, trimmed), ct).ConfigureAwait(false);
+                if (matchedTables.Count > limit)
+                {
+                    matchedTables.RemoveRange(limit, matchedTables.Count - limit);
+                }
             }
 
             var remainingForProcs = Math.Max(0, limit - matchedTables.Count);
@@ -384,6 +422,51 @@ public sealed class DiscoveryService : IDiscoveryService
             RecordFailure(ex, "Discovery SearchAsync failed closed.");
             return [];
         }
+    }
+
+    /// <summary>
+    /// Keeps the candidates a search may return for this caller: a table with nothing hidden from the caller passes as is; a
+    /// column-restricted table (a denied column, a withheld column text, or no access at all) passes only when
+    /// <paramref name="matchesVisibleText"/> holds for the caller-projected object, the same projection describe_dataset returns.
+    /// The projection resolves all column decisions in one batch for the candidates; any mismatch fails closed.
+    /// </summary>
+    private async Task<List<TableMetadata>> KeepCallerVisibleMatchesAsync(
+        CatalogCaller caller,
+        Sid sid,
+        ScopeMemoKey scopeKey,
+        List<TableMetadata> candidates,
+        string? language,
+        Func<TableMetadata, DiscoveryObject, bool> matchesVisibleText,
+        CancellationToken ct,
+        Dictionary<TableIdentifier, int>? restrictedScores = null,
+        Func<TableMetadata, DiscoveryObject, int>? visibleScore = null)
+    {
+        if (candidates.Count == 0)
+        {
+            return candidates;
+        }
+
+        var projected = await ResolveObjectsBatchAsync(caller, sid, scopeKey, candidates, language, ct).ConfigureAwait(false);
+        if (projected.Count != candidates.Count)
+        {
+            throw new InvalidOperationException("Discovery projection returned a mismatched object count.");
+        }
+
+        var kept = new List<TableMetadata>(candidates.Count);
+        for (var i = 0; i < candidates.Count; i++)
+        {
+            var restricted = DiscoveryVisibleTextMatcher.IsRestricted(candidates[i], projected[i]);
+            if (!restricted || matchesVisibleText(candidates[i], projected[i]))
+            {
+                kept.Add(candidates[i]);
+                if (restricted)
+                {
+                    restrictedScores?[candidates[i].Identifier] = visibleScore?.Invoke(candidates[i], projected[i]) ?? 0;
+                }
+            }
+        }
+
+        return kept;
     }
 
     private async ValueTask<List<EligibleDiscoveryProcedure>> LoadEligibleProceduresAsync(
