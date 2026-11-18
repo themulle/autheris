@@ -70,56 +70,56 @@ WHERE ";
 FROM TABLES WITH (UPDLOCK, ROWLOCK)
 WHERE ";
 
-        public const string SelectColumnsByTableIdsPrefixPg = @"SELECT c.id, c.table_id, c.column_name, c.data_type, c.is_sensitive,
-       m.id, m.rule_type, m.pattern_or_format, m.replacement, m.hmac_key_id,
+        public const string SelectColumnsByTableIdsPrefixPg = @"SELECT c.id, c.table_id, c.column_name, c.data_type,
+       m.mask_function, m.params_json, m.key_ref,
        c.description, c.long_description, c.meta_json, c.doc_source,
        c.display_name, c.texts_json, c.""collation"", c.length_semantics
 FROM TABLE_COLUMNS c
-LEFT JOIN COLUMN_MASKING_RULES m ON c.id = m.table_column_id
+LEFT JOIN COLUMN_MASK_OVERRIDES m ON c.id = m.table_column_id AND m.scope = '*' AND m.code IS NULL
 WHERE c.table_id IN (";
 
-        public const string SelectColumnsByTableIdsPrefixSs = @"SELECT c.id, c.table_id, c.column_name, c.data_type, c.is_sensitive,
-       m.id, m.rule_type, m.pattern_or_format, m.replacement, m.hmac_key_id,
+        public const string SelectColumnsByTableIdsPrefixSs = @"SELECT c.id, c.table_id, c.column_name, c.data_type,
+       m.mask_function, m.params_json, m.key_ref,
        c.description, c.long_description, c.meta_json, c.doc_source,
        c.display_name, c.texts_json, c.[collation], c.length_semantics
 FROM TABLE_COLUMNS c
-LEFT JOIN COLUMN_MASKING_RULES m ON c.id = m.table_column_id
+LEFT JOIN COLUMN_MASK_OVERRIDES m ON c.id = m.table_column_id AND m.scope = '*' AND m.code IS NULL
 WHERE c.table_id IN (";
 
-        public const string SelectTableColumnsSqlPg = @"SELECT c.id, c.table_id, c.column_name, c.data_type, c.is_sensitive,
-       m.id, m.rule_type, m.pattern_or_format, m.replacement, m.hmac_key_id,
+        public const string SelectTableColumnsSqlPg = @"SELECT c.id, c.table_id, c.column_name, c.data_type,
+       m.mask_function, m.params_json, m.key_ref,
        c.description, c.long_description, c.meta_json, c.doc_source,
        c.display_name, c.texts_json, c.""collation"", c.length_semantics
 FROM TABLE_COLUMNS c
-LEFT JOIN COLUMN_MASKING_RULES m ON c.id = m.table_column_id
+LEFT JOIN COLUMN_MASK_OVERRIDES m ON c.id = m.table_column_id AND m.scope = '*' AND m.code IS NULL
 WHERE c.table_id = @tableId
 ORDER BY c.ordinal, c.column_name";
 
-        public const string SelectTableColumnsSqlSs = @"SELECT c.id, c.table_id, c.column_name, c.data_type, c.is_sensitive,
-       m.id, m.rule_type, m.pattern_or_format, m.replacement, m.hmac_key_id,
+        public const string SelectTableColumnsSqlSs = @"SELECT c.id, c.table_id, c.column_name, c.data_type,
+       m.mask_function, m.params_json, m.key_ref,
        c.description, c.long_description, c.meta_json, c.doc_source,
        c.display_name, c.texts_json, c.[collation], c.length_semantics
 FROM TABLE_COLUMNS c
-LEFT JOIN COLUMN_MASKING_RULES m ON c.id = m.table_column_id
+LEFT JOIN COLUMN_MASK_OVERRIDES m ON c.id = m.table_column_id AND m.scope = '*' AND m.code IS NULL
 WHERE c.table_id = @tableId
 ORDER BY c.ordinal, c.column_name";
 
-        public const string SelectActiveBatchTableColumnsSqlPg = @"SELECT c.id, c.table_id, c.column_name, c.data_type, c.is_sensitive,
-       m.id, m.rule_type, m.pattern_or_format, m.replacement, m.hmac_key_id,
+        public const string SelectActiveBatchTableColumnsSqlPg = @"SELECT c.id, c.table_id, c.column_name, c.data_type,
+       m.mask_function, m.params_json, m.key_ref,
        c.description, c.long_description, c.meta_json, c.doc_source,
        c.display_name, c.texts_json, c.""collation"", c.length_semantics
 FROM TABLE_COLUMNS c
-LEFT JOIN COLUMN_MASKING_RULES m ON c.id = m.table_column_id
+LEFT JOIN COLUMN_MASK_OVERRIDES m ON c.id = m.table_column_id AND m.scope = '*' AND m.code IS NULL
 INNER JOIN TABLES t ON c.table_id = t.id
 WHERE t.is_active = 1
 ORDER BY c.table_id, c.ordinal, c.column_name";
 
-        public const string SelectActiveBatchTableColumnsSqlSs = @"SELECT c.id, c.table_id, c.column_name, c.data_type, c.is_sensitive,
-       m.id, m.rule_type, m.pattern_or_format, m.replacement, m.hmac_key_id,
+        public const string SelectActiveBatchTableColumnsSqlSs = @"SELECT c.id, c.table_id, c.column_name, c.data_type,
+       m.mask_function, m.params_json, m.key_ref,
        c.description, c.long_description, c.meta_json, c.doc_source,
        c.display_name, c.texts_json, c.[collation], c.length_semantics
 FROM TABLE_COLUMNS c
-LEFT JOIN COLUMN_MASKING_RULES m ON c.id = m.table_column_id
+LEFT JOIN COLUMN_MASK_OVERRIDES m ON c.id = m.table_column_id AND m.scope = '*' AND m.code IS NULL
 INNER JOIN TABLES t ON c.table_id = t.id
 WHERE t.is_active = 1
 ORDER BY c.table_id, c.ordinal, c.column_name";
@@ -173,12 +173,11 @@ WHEN MATCHED THEN UPDATE SET
 WHEN NOT MATCHED THEN INSERT (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json, min_group_size, non_personal, dbt_unique_id)
     VALUES (@id, @sourceType, @domain, @schema, @tableName, @displayName, @sensitivity, @fourEyes, @active, @dst, @httpJson, @plugin, @desc, @longDesc, @docSource, @requiredFilterColumnsJson, @textsJson, @minGroupSize, @nonPersonal, @dbtUniqueId);";
 
-        public const string InsertColumnSqlPg = @"INSERT INTO TABLE_COLUMNS (id, table_id, column_name, data_type, is_sensitive, description, long_description, doc_source, meta_json, display_name, texts_json, ""collation"", length_semantics, ordinal)
-VALUES (@id, @tableId, @columnName, @dataType, @isSensitive, @description, @longDescription, @docSource, @metaJson, @displayName, @textsJson, @collation, @lengthSemantics,
+        public const string InsertColumnSqlPg = @"INSERT INTO TABLE_COLUMNS (id, table_id, column_name, data_type, description, long_description, doc_source, meta_json, display_name, texts_json, ""collation"", length_semantics, ordinal)
+VALUES (@id, @tableId, @columnName, @dataType, @description, @longDescription, @docSource, @metaJson, @displayName, @textsJson, @collation, @lengthSemantics,
     (SELECT COALESCE(MAX(ordinal), 0) + 1 FROM TABLE_COLUMNS WHERE table_id = @tableId))
 ON CONFLICT (id) DO UPDATE SET
     data_type = EXCLUDED.data_type,
-    is_sensitive = EXCLUDED.is_sensitive,
     description = COALESCE(EXCLUDED.description, TABLE_COLUMNS.description),
     long_description = COALESCE(EXCLUDED.long_description, TABLE_COLUMNS.long_description),
     doc_source = COALESCE(EXCLUDED.doc_source, TABLE_COLUMNS.doc_source),
@@ -193,7 +192,6 @@ USING (SELECT @id AS id, (SELECT COALESCE(MAX(ordinal), 0) + 1 FROM dbo.TABLE_CO
 ON t.id = s.id
 WHEN MATCHED THEN UPDATE SET
     data_type = @dataType,
-    is_sensitive = @isSensitive,
     description = COALESCE(@description, t.description),
     long_description = COALESCE(@longDescription, t.long_description),
     doc_source = COALESCE(@docSource, t.doc_source),
@@ -202,8 +200,8 @@ WHEN MATCHED THEN UPDATE SET
     texts_json = @textsJson,
     [collation] = @collation,
     length_semantics = @lengthSemantics
-WHEN NOT MATCHED THEN INSERT (id, table_id, column_name, data_type, is_sensitive, description, long_description, doc_source, meta_json, display_name, texts_json, [collation], length_semantics, ordinal)
-    VALUES (@id, @tableId, @columnName, @dataType, @isSensitive, @description, @longDescription, @docSource, @metaJson, @displayName, @textsJson, @collation, @lengthSemantics, s.ordinal);";
+WHEN NOT MATCHED THEN INSERT (id, table_id, column_name, data_type, description, long_description, doc_source, meta_json, display_name, texts_json, [collation], length_semantics, ordinal)
+    VALUES (@id, @tableId, @columnName, @dataType, @description, @longDescription, @docSource, @metaJson, @displayName, @textsJson, @collation, @lengthSemantics, s.ordinal);";
 
         public const string ActiveTableIdentifierSql = "SELECT source_name, schema_name, table_name FROM TABLES WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table) AND is_active = 1";
 

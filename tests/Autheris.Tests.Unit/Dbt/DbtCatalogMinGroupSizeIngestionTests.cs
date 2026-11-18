@@ -110,7 +110,7 @@ public sealed class DbtCatalogMinGroupSizeIngestionTests
         var logger = NullLogger<DbtMetadataIngestionService>.Instance;
 
         metadataRepo.GetTableMetadataAsync(TargetTable, Arg.Any<CancellationToken>()).Returns(stored);
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([stored]);
+        metadataRepo.StubAllTables([stored]);
 
         TableMetadata? persisted = null;
         metadataRepo.UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>())
@@ -393,11 +393,11 @@ public sealed class DbtCatalogMinGroupSizeIngestionTests
     {
         var stored = CreateStoredMetadata(tableMinGroup: null, tableNonPersonal: false);
         stored = stored with
-        {
+        { ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("salary"),
             Columns =
             [
                 new TableColumn { TableId = stored.Table.Id, ColumnName = "id", DataType = "int" },
-                new TableColumn { TableId = stored.Table.Id, ColumnName = "salary", DataType = "numeric", IsSensitive = true }
+                new TableColumn { TableId = stored.Table.Id, ColumnName = "salary", DataType = "numeric" }
             ]
         };
         var (svc, _, _, getPersisted) = CreateHarness(stored);

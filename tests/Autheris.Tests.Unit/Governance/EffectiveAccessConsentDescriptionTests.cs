@@ -52,7 +52,7 @@ public sealed class EffectiveAccessConsentDescriptionTests
         var store = consents.ToList();
         var tables = Substitute.For<ITableMetadataRepository>();
         tables.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>()).Returns(CreateTable());
-        tables.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([CreateTable()]));
+        tables.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>([CreateTable()]));
         var repo = Substitute.For<IConsentRepository>();
         repo.GetActiveConsentsForSubjectsAsync(default!, default, default, default, default)
             .ReturnsForAnyArgs(_ => Task.FromResult<IReadOnlyList<Consent>>(store.ToList()));

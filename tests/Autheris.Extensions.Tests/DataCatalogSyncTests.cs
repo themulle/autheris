@@ -136,8 +136,8 @@ public class DataCatalogSyncTests
                 m.Identifier.Equals(tableId) &&
                 m.Table.Sensitivity == "HIGH" &&
                 m.Table.RequiresFourEyes &&
-                m.Columns.Single(c => c.ColumnName == "diagnosis").IsSensitive &&
-                !m.Columns.Single(c => c.ColumnName == "visit_id").IsSensitive &&
+                ClassificationMetadata.IsColumnSensitive(m, "diagnosis") &&
+                !ClassificationMetadata.IsColumnSensitive(m, "visit_id") &&
                 m.ColumnMaskingRules.ContainsKey("diagnosis") &&
                 m.ColumnMaskingRules["diagnosis"].RuleType == "REDACT"),
             Arg.Any<CancellationToken>());

@@ -135,7 +135,6 @@ public sealed class McpToolAnnotationsTests
     [InlineData("list_orders")]
     [InlineData("")]
     [InlineData("list_datasets\0")]
-    [InlineData("request_access")]
     [Trait("Category", "Security")]
     public void An_unclassified_name_is_state_changing_and_destructive(string name)
     {

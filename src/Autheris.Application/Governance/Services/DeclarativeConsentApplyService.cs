@@ -417,7 +417,7 @@ public sealed class DeclarativeConsentApplyService(
                 {
                     totalEvaluated++;
                     var datasetId = new TableIdentifier(entry.Domain, entry.Schema, entry.TableName).ToString();
-                    var edit = new DatasetCatalogEdit(entry.Tags, null, null, entry.Visibility);
+                    var edit = new DatasetCatalogEdit(entry.Tags, null, null);
                     var planned = await datasetCatalog.ApplyAsync(caller, datasetId, edit, "manifest", ct, dryRun: true).ConfigureAwait(false);
                     switch (planned.Outcome)
                     {
@@ -848,7 +848,6 @@ public sealed class DeclarativeDatasetCatalogException(DatasetCatalogOutcome out
     {
         DatasetCatalogOutcome.InvalidTag => "INVALID_TAG",
         DatasetCatalogOutcome.TagLimitExceeded => "TAG_LIMIT_EXCEEDED",
-        DatasetCatalogOutcome.InvalidVisibility => "INVALID_VISIBILITY",
         DatasetCatalogOutcome.Forbidden => "FORBIDDEN",
         DatasetCatalogOutcome.Unavailable => "UNAVAILABLE",
         _ => "INVALID_REQUEST"

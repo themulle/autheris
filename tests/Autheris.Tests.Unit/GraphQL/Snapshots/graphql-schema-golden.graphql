@@ -76,6 +76,7 @@ type Mutation {
     context: AccessRequestContextInput
     writeRules: [ConsentWriteRuleInput!]
     requestWriteOnly: Boolean
+    clearColumns: [String!]
   ): ConsentRequestPayload! @cost(weight: "10")
   withdrawAccessRequest(requestId: UUID!): ConsentRequestPayload!
     @cost(weight: "10")

@@ -63,10 +63,10 @@ public sealed class Issue143ScopeBlindPathTests
     private static IcebergRestCatalogFederationService IcebergWith(List<IReadOnlySet<string>?> seen, bool sensitive, params ConsentColumnRule[] rules)
     {
         var meta = new TableMetadata
-        {
+        { ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor(sensitive ? new[] { "ssn" } : Array.Empty<string>()),
             Identifier = IcebergId,
             Table = new Table { SourceName = "tenant-1", SchemaName = "raw", TableName = "orders", DataSourceType = DataSourceType.LakehouseIceberg },
-            Columns = [new TableColumn { ColumnName = "ssn", IsSensitive = sensitive }]
+            Columns = [new TableColumn { ColumnName = "ssn" }]
         };
         var metadataRepo = Substitute.For<ITableMetadataRepository>();
         metadataRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult<TableMetadata?>(meta));

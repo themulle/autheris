@@ -41,8 +41,7 @@ public sealed class BulkKeysetStreamingSecurityTests
 
     private static TableMetadata CreateTableMetadata(
         string tableName = "orders",
-        IReadOnlyList<string>? primaryKeys = null,
-        DatasetVisibility visibility = DatasetVisibility.Full)
+        IReadOnlyList<string>? primaryKeys = null)
     {
         return new TableMetadata
         {
@@ -53,7 +52,6 @@ public sealed class BulkKeysetStreamingSecurityTests
                 SchemaName = "dbo",
                 SourceName = "sales",
                 SourceType = "PostgreSQL",
-                Visibility = visibility
             },
             PrimaryKeyColumns = primaryKeys ?? ["id"],
             Columns =

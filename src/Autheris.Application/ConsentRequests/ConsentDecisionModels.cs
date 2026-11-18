@@ -62,7 +62,8 @@ public sealed record ConsentDecisionCommand(
     IReadOnlyList<ConsentColumnRule>? PrebuiltColumnRules = null,
     bool HasPrebuiltRestrictions = false,
     IReadOnlyList<int>? ApprovedProfileItems = null,
-    IReadOnlyList<string>? ApprovedClearColumns = null);
+    IReadOnlyList<string>? ApprovedClearColumns = null,
+    IReadOnlyList<string>? ApprovedClearClassifications = null);
 
 public sealed record ConsentDecisionResult(
     ConsentRequest Request,

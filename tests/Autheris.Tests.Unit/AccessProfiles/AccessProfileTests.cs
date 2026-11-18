@@ -50,11 +50,11 @@ public sealed class AccessProfileTests
             },
             Columns =
             [
-                new TableColumn { ColumnName = "crane_id", DataType = "VARCHAR(64)", IsSensitive = false },
-                new TableColumn { ColumnName = "latitude", DataType = "DOUBLE PRECISION", IsSensitive = true },
-                new TableColumn { ColumnName = "longitude", DataType = "DOUBLE PRECISION", IsSensitive = true },
-                new TableColumn { ColumnName = "customer_id", DataType = "VARCHAR(128)", IsSensitive = true },
-                new TableColumn { ColumnName = "status", DataType = "VARCHAR(32)", IsSensitive = false }
+                new TableColumn { ColumnName = "crane_id", DataType = "VARCHAR(64)" },
+                new TableColumn { ColumnName = "latitude", DataType = "DOUBLE PRECISION" },
+                new TableColumn { ColumnName = "longitude", DataType = "DOUBLE PRECISION" },
+                new TableColumn { ColumnName = "customer_id", DataType = "VARCHAR(128)" },
+                new TableColumn { ColumnName = "status", DataType = "VARCHAR(32)" }
             ],
             ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
             {
@@ -62,7 +62,7 @@ public sealed class AccessProfileTests
                 ["longitude"] = new MaskingRule { RuleType = "GEO_JITTER", Mode = "round", Decimals = 2 },
                 ["customer_id"] = new MaskingRule { RuleType = "PARTIAL_MASK", KeepPrefix = 2, KeepSuffix = 2 }
             }
-        };
+        }.WithPii("latitude", "longitude", "customer_id");
     }
 
     private static TableAccessPolicy CreatePolicy(
@@ -774,8 +774,7 @@ public sealed class AccessProfileTests
         var clusterState = Substitute.For<IDistributedClusterStateProvider>();
         var metaRepo = Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
             Substitute.For<ITableMetadataRepository>());
-        metaRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([CreateTelemetryTableMetadata()]));
+        metaRepo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>([CreateTelemetryTableMetadata()]));
 
         var memoryCache = new MemoryCache(new MemoryCacheOptions());
         var context = CreateEndpointContext(

@@ -39,13 +39,13 @@ public sealed class GovernedConnectorReaderArch2Tests
     private static readonly TableIdentifier Table = new("sales", "public", "orders");
 
     private static readonly TableMetadata Meta = new()
-    {
+    { ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("email"),
         Identifier = Table,
         Columns =
         [
             new TableColumn { ColumnName = "id", DataType = "int" },
             new TableColumn { ColumnName = "region", DataType = "varchar" },
-            new TableColumn { ColumnName = "email", DataType = "varchar", IsSensitive = true }
+            new TableColumn { ColumnName = "email", DataType = "varchar" }
         ]
     };
 

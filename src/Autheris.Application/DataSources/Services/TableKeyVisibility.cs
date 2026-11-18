@@ -67,7 +67,6 @@ public static class TableKeyVisibility
             TableId = column.TableId,
             ColumnName = column.ColumnName,
             DataType = column.DataType,
-            IsSensitive = column.IsSensitive,
             Description = column.Description,
             LongDescription = column.LongDescription,
             DocumentationSource = column.DocumentationSource,

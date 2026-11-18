@@ -351,7 +351,7 @@ public sealed class PerCellColumnStateTests
             Timestamp: DateTimeOffset.UtcNow);
 
     private static TableMetadata OrdersMetadata(TargetSqlDialect dialect = TargetSqlDialect.PostgreSql) => new()
-    {
+    { ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("email", "ssn"),
         Identifier = OrdersId,
         Table = new Table { Id = Guid.NewGuid(), SourceName = "prod", SchemaName = "dbo", TableName = "orders", SourceType = SourceTypeFor(dialect), IsActive = true },
         PrimaryKeyColumns = ["id"],
@@ -361,8 +361,8 @@ public sealed class PerCellColumnStateTests
             new TableColumn { ColumnName = "tenant_id", DataType = "VARCHAR(64)" },
             new TableColumn { ColumnName = "region", DataType = "VARCHAR(32)" },
             new TableColumn { ColumnName = "tier", DataType = "VARCHAR(32)" },
-            new TableColumn { ColumnName = "email", DataType = "VARCHAR(128)", IsSensitive = true },
-            new TableColumn { ColumnName = "ssn", DataType = "VARCHAR(64)", IsSensitive = true }
+            new TableColumn { ColumnName = "email", DataType = "VARCHAR(128)" },
+            new TableColumn { ColumnName = "ssn", DataType = "VARCHAR(64)" }
         ],
         ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
         {

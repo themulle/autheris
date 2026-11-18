@@ -262,7 +262,6 @@ public sealed class CatalogSearchWarmupDeltaTests
             SchemaName = "public",
             TableName = name,
             Description = description,
-            Visibility = DatasetVisibility.Full,
             IsActive = true
         },
         Columns = columns.Select(c => new TableColumn { ColumnName = c, DataType = "text" }).ToList(),

@@ -176,14 +176,14 @@ public sealed class DatasetSizeClassTests
         var visibleTable = new TableMetadata
         {
             Identifier = visibleId,
-            Table = new Table { TableName = visibleId.TableName, SchemaName = visibleId.Schema, Sensitivity = "INTERNAL", Visibility = DatasetVisibility.Full },
+            Table = new Table { TableName = visibleId.TableName, SchemaName = visibleId.Schema, Sensitivity = "INTERNAL" },
             EstimatedRowCount = 50_000
         };
 
         var invisibleTable = new TableMetadata
         {
             Identifier = invisibleId,
-            Table = new Table { TableName = invisibleId.TableName, SchemaName = invisibleId.Schema, Sensitivity = "CONFIDENTIAL", Visibility = DatasetVisibility.Hidden },
+            Table = new Table { TableName = invisibleId.TableName, SchemaName = invisibleId.Schema, Sensitivity = "CONFIDENTIAL" },
             EstimatedRowCount = 500_000
         };
 
@@ -254,7 +254,7 @@ public sealed class DatasetSizeClassTests
         var table = new TableMetadata
         {
             Identifier = tableId,
-            Table = new Table { TableName = tableId.TableName, SchemaName = tableId.Schema, Sensitivity = "NORMAL", Visibility = DatasetVisibility.Full },
+            Table = new Table { TableName = tableId.TableName, SchemaName = tableId.Schema, Sensitivity = "NORMAL" },
             EstimatedRowCount = 250_000,
             IngestedAt = DateTimeOffset.UtcNow
         };

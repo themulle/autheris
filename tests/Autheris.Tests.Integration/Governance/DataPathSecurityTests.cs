@@ -290,9 +290,9 @@ public class DataPathSecurityTests : IDisposable
             Identifier = table,
             Columns = new List<TableColumn>
             {
-                new() { Id = Guid.NewGuid(), ColumnName = "secret_col", DataType = "varchar", IsSensitive = true }
+                new() { Id = Guid.NewGuid(), ColumnName = "secret_col", DataType = "varchar" }
             }
-        };
+        }.WithPii("secret_col");
 
         var dynamicType = new DynamicTableType(meta, _maskingProvider);
         var schema = SchemaBuilder.New()

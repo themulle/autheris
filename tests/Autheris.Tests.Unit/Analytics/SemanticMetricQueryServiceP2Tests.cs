@@ -71,7 +71,7 @@ public sealed class SemanticMetricQueryServiceP2Tests
         var table = SemanticManifestValidatorTests.Orders();
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetTableMetadataAsync(table.Identifier, Arg.Any<CancellationToken>()).Returns(table);
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([table]);
+        repo.StubAllTables([table]);
 
         var pdp = Substitute.For<IUnifiedPolicyDecisionPoint>();
         var decision = allow

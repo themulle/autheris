@@ -96,7 +96,7 @@ internal static class Wp0
     public static ITableMetadataRepository Tables(params TableMetadata[] tables)
     {
         var repo = Substitute.For<ITableMetadataRepository>();
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(tables));
+        repo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(tables));
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(ci => Task.FromResult<TableMetadata?>(tables.FirstOrDefault(t => t.Identifier == ci.Arg<TableIdentifier>())));
         repo.GetTablesAsync(Arg.Any<IReadOnlyCollection<TableIdentifier>>(), Arg.Any<CancellationToken>())

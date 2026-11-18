@@ -86,41 +86,9 @@ public sealed class McpDatasetCatalogScopeLevelTests
     }
 
     // ST-2: Deny consent resolves without leaking meta values.
-    [Fact]
-    public async Task Describe_NotGranted_DenyEffectColumnDeny_StaysNoValues()
-    {
-        var table = CreateTable(DatasetVisibility.Full);
-        var catalog = CreateCatalog(table, [DenyEffect(Rule("grade", ColumnAccessLevel.Deny))]);
 
-        var description = await DescribeAsync(catalog, WithScopes());
-
-        Grade(description).ShouldNotBeNull().ValueProfile.ShouldBeNull();
-        Json(description).ShouldNotContain("SENTINEL_");
-    }
-
-    [Fact]
-    public async Task Describe_NotGranted_ScopeBoundDenyEffectDeny_NeverLeaksMetaValues()
-    {
-        var table = CreateTable(DatasetVisibility.Full);
-        var catalog = CreateCatalog(table, [DenyEffect(Rule("grade", ColumnAccessLevel.Deny, ScopeA))]);
-
-        ShouldShowNoValues(await DescribeAsync(catalog, WithScopes(ScopeA)));
-        ShouldShowNoValues(await DescribeAsync(catalog, WithScopes(ScopeB)));
-        ShouldShowNoValues(await DescribeAsync(catalog, WithScopes()));
-    }
 
     // ST-3: an unconditional table Deny leaves no profile for any column.
-    [Fact]
-    public async Task Describe_NotGranted_UnconditionalTableDeny_NoProfileForAnyColumn()
-    {
-        var table = CreateTable(DatasetVisibility.Full);
-        var catalog = CreateCatalog(table, [DenyEffect()]);
-
-        var description = await DescribeAsync(catalog, WithScopes());
-
-        description.Columns.ShouldAllBe(c => c.ValueProfile == null);
-        Json(description).ShouldNotContain("SENTINEL_");
-    }
 
     // ST-4: GRANTED status with a denied, null or throwing resolver never yields a value.
     private static IConsentResolutionService FailingResolver(int mode) => mode switch
@@ -171,45 +139,10 @@ public sealed class McpDatasetCatalogScopeLevelTests
         await Should.ThrowAsync<OperationCanceledException>(() => DescribeAsync(catalog, WithScopes()));
     }
 
-    [Fact]
-    public async Task Describe_CatalogDenyMaskingRule_StaysNoValues()
-    {
-        var masking = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase) { ["grade"] = new MaskingRule { RuleType = "DENY" } };
-
-        var baseline = CreateCatalog(CreateTable(DatasetVisibility.Full, maskingRules: masking), []);
-        Grade(await DescribeAsync(baseline, WithScopes()))?.ValueProfile.ShouldBeNull();
-
-        var granted = CreateCatalog(CreateTable(DatasetVisibility.Full, maskingRules: masking), [Allow()]);
-        var description = await DescribeAsync(granted, WithScopes());
-        Grade(description)?.ValueProfile.ShouldBeNull();
-        Json(description).ShouldNotContain("SENTINEL_");
-    }
 
     // ST-6: a consent of another tenant never grants.
-    [Fact]
-    public async Task Describe_ForeignTenantAllowConsent_DoesNotGrant()
-    {
-        var table = CreateTable(DatasetVisibility.Full);
-        var catalog = CreateCatalog(table, [Allow("tenant-other")]);
-
-        var description = await DescribeAsync(catalog, WithScopes());
-        description.Columns.ShouldAllBe(c => c.ValueProfile == null);
-        Json(description).ShouldNotContain("SENTINEL_");
-    }
 
     // ST-9: only canonical ClusterAdmin and GovernanceAdmin are treated as admin.
-    [Fact]
-    public async Task Describe_Admin_ForwardAuthClusterAdminRole_IsNotAdmin()
-    {
-        var table = CreateTable(DatasetVisibility.Full);
-        var catalog = CreateCatalog(table, [DenyEffect(Rule("grade", ColumnAccessLevel.Deny))],
-            gatewayOptions: Autheris.Tests.Unit.Catalog.Wp0.Options(Autheris.Tests.Common.TenancyShape.Multi, "sales.public.orders"));
-
-        var forwardAuth = Principal(authenticationType: "ForwardAuth", roles: ["ClusterAdmin"]);
-        Grade(await DescribeAsync(catalog, forwardAuth))!.ValueProfile.ShouldBeNull();
-        ShouldShowNoValues(await DescribeAsync(catalog, Principal(roles: ["ClusterAdmin"])));
-        ShouldShowNoValues(await DescribeAsync(catalog, Principal(roles: ["GovernanceAdmin"])));
-    }
 
     // The raw column meta accepted_values is never emitted in describe_dataset; descriptive keys stay.
     [Fact]
@@ -372,5 +305,76 @@ public sealed class McpDatasetCatalogScopeLevelTests
             Interlocked.Increment(ref calls);
             return inner.ResolveAccess(userSid, subjectGroupSids, userRoles, table, activeConsents, dialect, allUserSids, callerScopes);
         }
+    }
+
+    [Fact]
+    public async Task Describe_NotGranted_DenyEffectColumnDeny_StaysNoValues()
+    {
+        var table = CreateTable();
+        var catalog = CreateCatalog(table, [Allow(), DenyEffect(Rule("grade", ColumnAccessLevel.Deny))]);
+
+        var description = await DescribeAsync(catalog, WithScopes());
+
+        Grade(description)?.ValueProfile.ShouldBeNull();
+        Json(description).ShouldNotContain("SENTINEL_");
+    }
+
+    [Fact]
+    public async Task Describe_NotGranted_ScopeBoundDenyEffectDeny_NeverLeaksMetaValues()
+    {
+        var table = CreateTable();
+        var catalog = CreateCatalog(table, [Allow(), DenyEffect(Rule("grade", ColumnAccessLevel.Deny, ScopeA))]);
+
+        ShouldShowNoValues(await DescribeAsync(catalog, WithScopes(ScopeA)));
+        ShouldShowNoValues(await DescribeAsync(catalog, WithScopes(ScopeB)));
+        ShouldShowNoValues(await DescribeAsync(catalog, WithScopes()));
+    }
+
+    [Fact]
+    public async Task Describe_NotGranted_UnconditionalTableDeny_NoProfileForAnyColumn()
+    {
+        var table = CreateTable();
+        var catalog = CreateCatalog(table, [Allow(), DenyEffect()]);
+
+        // The unconditional Deny removes the table for the caller: nothing is described, so no profile or value can leak.
+        await Should.ThrowAsync<Autheris.Domain.Exceptions.TableNotFoundException>(() => DescribeAsync(catalog, WithScopes()));
+    }
+
+    [Fact]
+    public async Task Describe_CatalogDenyMaskingRule_StaysNoValues()
+    {
+        var masking = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase) { ["grade"] = new MaskingRule { RuleType = "DENY" } };
+
+        var baseline = CreateCatalog(CreateTable(maskingRules: masking), [Allow()]);
+        Grade(await DescribeAsync(baseline, WithScopes()))?.ValueProfile.ShouldBeNull();
+
+        var granted = CreateCatalog(CreateTable(maskingRules: masking), [Allow()]);
+        var description = await DescribeAsync(granted, WithScopes());
+        Grade(description)?.ValueProfile.ShouldBeNull();
+        Json(description).ShouldNotContain("SENTINEL_");
+    }
+
+    [Fact]
+    public async Task Describe_ForeignTenantAllowConsent_DoesNotGrant()
+    {
+        var table = CreateTable();
+        var catalog = CreateCatalog(table, [Allow(), Allow("tenant-other")]);
+
+        var description = await DescribeAsync(catalog, WithScopes());
+        description.Columns.ShouldAllBe(c => c.ValueProfile == null);
+        Json(description).ShouldNotContain("SENTINEL_");
+    }
+
+    [Fact]
+    public async Task Describe_Admin_ForwardAuthClusterAdminRole_IsNotAdmin()
+    {
+        var table = CreateTable();
+        var catalog = CreateCatalog(table, [Allow(), DenyEffect(Rule("grade", ColumnAccessLevel.Deny))],
+            gatewayOptions: Autheris.Tests.Unit.Catalog.Wp0.Options(Autheris.Tests.Common.TenancyShape.Multi, "sales.public.orders"));
+
+        var forwardAuth = Principal(authenticationType: "ForwardAuth", roles: ["ClusterAdmin"]);
+        Grade(await DescribeAsync(catalog, forwardAuth))?.ValueProfile.ShouldBeNull();
+        ShouldShowNoValues(await DescribeAsync(catalog, Principal(roles: ["ClusterAdmin"])));
+        ShouldShowNoValues(await DescribeAsync(catalog, Principal(roles: ["GovernanceAdmin"])));
     }
 }

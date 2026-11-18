@@ -90,7 +90,7 @@ public sealed partial class OlapFederationGateTests
             harness.MetadataCalls++;
             return metas.TryGetValue(ci.Arg<TableIdentifier>(), out var m) ? m : null;
         });
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(_ => (IReadOnlyList<TableMetadata>)metas.Values.ToList());
+        repo.StubAllTables(_ => Task.FromResult<IReadOnlyList<TableMetadata>>(metas.Values.ToList()));
         Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(repo);
 
         var resolver = Substitute.For<ICrossDomainAccessResolver>();
@@ -461,7 +461,7 @@ public sealed partial class OlapFederationGateTests
     private static readonly IReadOnlyList<TableColumn> PiiColumns =
     [
         new TableColumn { ColumnName = "id", DataType = "int" },
-        new TableColumn { ColumnName = "ssn", DataType = "string", IsSensitive = true }
+        new TableColumn { ColumnName = "ssn", DataType = "string" }
     ];
 
     private static TableDef PiiTable(string domain, string table, string connector, string ruleType) => new(

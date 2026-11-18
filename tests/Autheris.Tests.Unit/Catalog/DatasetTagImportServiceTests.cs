@@ -21,7 +21,7 @@ public sealed class DatasetTagImportServiceTests
     private static readonly TableIdentifier Orders = new("sales", "dbo", "orders");
     private readonly ITableMetadataRepository _tables = Substitute.For<ITableMetadataRepository>();
     private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
-    private DatasetCatalogSettings _before = new([], DatasetVisibility.Hidden);
+    private DatasetCatalogSettings _before = new([]);
     private IReadOnlyList<string>? _written;
 
     public DatasetTagImportServiceTests()
@@ -68,7 +68,7 @@ public sealed class DatasetTagImportServiceTests
     [Fact]
     public async Task A3_Overflow_DropsTheExcessInSortedOrder_AdminTagsCountAgainstTheCap()
     {
-        _before = new DatasetCatalogSettings([new DatasetTag("a1", DatasetTagSource.Admin), new DatasetTag("a2", DatasetTagSource.Admin)], DatasetVisibility.Hidden);
+        _before = new DatasetCatalogSettings([new DatasetTag("a1", DatasetTagSource.Admin), new DatasetTag("a2", DatasetTagSource.Admin)]);
 
         var result = await Create(max: 4).ImportDbtTagsAsync(Orders, ["z", "m", "b", "c"], default);
 
@@ -79,7 +79,7 @@ public sealed class DatasetTagImportServiceTests
     [Fact]
     public async Task A3_TagAlreadyPresentAsAdmin_DoesNotCountTwice()
     {
-        _before = new DatasetCatalogSettings([new DatasetTag("pii", DatasetTagSource.Admin)], DatasetVisibility.Hidden);
+        _before = new DatasetCatalogSettings([new DatasetTag("pii", DatasetTagSource.Admin)]);
 
         var result = await Create(max: 2).ImportDbtTagsAsync(Orders, ["pii", "x"], default);
 
@@ -95,7 +95,7 @@ public sealed class DatasetTagImportServiceTests
 
         await _audit.Received(1).RecordRequiredAsync(Arg.Is<AuditLogEntry>(e =>
             e.EventType == AuditEventTypes.CatalogTagsChanged && e.TenantId == TenantId.Platform && e.TargetTable == Orders.ToString() && e.DetailsJson.Contains("\"source\":\"dbt\"")
-            && e.DetailsJson.Contains("\"after\":{\"visibility\":\"Hidden\",\"tags\":[\"pii\"]}")), CancellationToken.None);
+            && e.DetailsJson.Contains("\"after\":{\"tags\":[\"pii\"]}")), CancellationToken.None);
 
         _audit.ClearReceivedCalls();
         _tables.ReplaceDatasetTagsAsync(Orders, Arg.Any<IReadOnlyList<string>>(), DatasetTagSource.Dbt, Arg.Any<Sid>(), Arg.Any<CancellationToken>())
@@ -130,7 +130,7 @@ public sealed class DatasetTagImportServiceTests
     [Fact]
     public async Task EmptyDbtTags_ReplacesWithNone_SoRemovedModelTagsAreRemoved()
     {
-        _before = new DatasetCatalogSettings([new DatasetTag("old", DatasetTagSource.Dbt)], DatasetVisibility.Hidden);
+        _before = new DatasetCatalogSettings([new DatasetTag("old", DatasetTagSource.Dbt)]);
 
         var result = await Create().ImportDbtTagsAsync(Orders, [], default);
 

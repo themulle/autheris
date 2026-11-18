@@ -59,7 +59,7 @@ public sealed partial class QueryAnalysisService
             }
         }
 
-        if (table.Table.Visibility == DatasetVisibility.Hidden && !hasTableGrant && !isOwner && !isAdmin)
+        if (table.Table.DiscoveryHidden && !hasTableGrant && !isOwner && !isAdmin)
         {
             outcome.HiddenMissingDatasetsCount++;
             outcome.Diagnostics.Add(new QueryValidationDiagnostic(

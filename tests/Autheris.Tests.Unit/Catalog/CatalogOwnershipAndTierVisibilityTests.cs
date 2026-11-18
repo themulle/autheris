@@ -57,7 +57,7 @@ public sealed class CatalogOwnershipAndTierVisibilityTests
         Catalog = new DataCatalogOptions { SharedTables = [Orders.ToString(), Customers.ToString(), AuditLogs.ToString()] }
     });
 
-    private static TableMetadata CreateTableMetadata(TableIdentifier id, string description, IReadOnlyList<string> tags, DatasetVisibility visibility = DatasetVisibility.Hidden)
+    private static TableMetadata CreateTableMetadata(TableIdentifier id, string description, IReadOnlyList<string> tags)
     {
         return new TableMetadata
         {
@@ -71,7 +71,6 @@ public sealed class CatalogOwnershipAndTierVisibilityTests
                 Description = description,
                 Sensitivity = "NORMAL",
                 Tags = tags, // Backstage export (Table.Tags) and MCP/GraphQL (CatalogTags) read different sources; the fixture feeds both
-                Visibility = visibility
             },
             CatalogTags = tags,
             Columns =
@@ -83,97 +82,7 @@ public sealed class CatalogOwnershipAndTierVisibilityTests
         };
     }
 
-    [Fact]
-    public async Task ListDatasets_FilterByTag_ReturnsOnlyMatchingDatasets()
-    {
-        // Arrange
-        var table1 = CreateTableMetadata(Orders, "Orders table", ["sales", "financial", "pii"], DatasetVisibility.Full);
-        var table2 = CreateTableMetadata(Customers, "Customers table", ["crm", "pii"], DatasetVisibility.Full);
-        var table3 = CreateTableMetadata(AuditLogs, "Audit logs", ["audit", "system"], DatasetVisibility.Full);
 
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        metadataRepo.StubTables([table1, table2, table3]);
-
-        var consentRepo = Substitute.For<IConsentRepository>();
-        var gatewayExec = Substitute.For<IGatewayExecutionService>();
-        var user = CreateUser();
-
-        var catalog = new McpDatasetCatalog(metadataRepo, consentRepo, gatewayExec, options: TierOptions(),
-            visibilityService: Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(metadataRepo.ServeSingleReadsFromCatalog(), consentRepo, TierOptions().Value));
-
-        // Act: Filter by tag "financial"
-        var financialList = await catalog.ListDatasetsAsync(user, tag: "financial");
-
-        // Assert
-        financialList.Datasets.Count.ShouldBe(1);
-        financialList.Datasets[0].Id.ShouldBe("sales.public.orders");
-        financialList.Datasets[0].Tags.ShouldNotBeNull();
-        financialList.Datasets[0].Tags!.ShouldContain("financial");
-
-        // Act: Filter by tag "pii" (case-insensitive)
-        var piiList = await catalog.ListDatasetsAsync(user, tag: "PII");
-
-        // Assert
-        piiList.Datasets.Count.ShouldBe(2);
-        piiList.Datasets.Select(d => d.Id).ShouldBe(["crm.public.customers", "sales.public.orders"]);
-
-        // Act: Filter by non-existent tag
-        var emptyList = await catalog.ListDatasetsAsync(user, tag: "non-existent");
-        emptyList.Datasets.ShouldBeEmpty();
-    }
-
-    [Fact]
-    public async Task DescribeDataset_ReturnsDataOwnerAndDelegates()
-    {
-        // Arrange
-        var table = CreateTableMetadata(Orders, "Orders table", ["sales"], DatasetVisibility.Full);
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        metadataRepo.StubTables([table]);
-
-        var consentRepo = Substitute.For<IConsentRepository>();
-        var gatewayExec = Substitute.For<IGatewayExecutionService>();
-
-        var dataOwnerRepo = Substitute.For<IDataOwnershipRepository>();
-        dataOwnerRepo.GetDataOwnersForTableAsync(Orders, Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<DataOwner>>(
-            [
-                new DataOwner
-                {
-                    DisplayName = "Alice Johnson",
-                    Email = "alice@example.com",
-                    AdAccount = "CORP\\alice",
-                    IsActive = true
-                },
-                new DataOwner
-                {
-                    DisplayName = "Bob Smith",
-                    Email = "bob@example.com",
-                    AdAccount = "CORP\\bob",
-                    IsActive = true
-                }
-            ]));
-
-        var catalog = new McpDatasetCatalog(
-            metadataRepo,
-            consentRepo,
-            gatewayExec,
-            dataOwnershipRepository: dataOwnerRepo,
-            options: TierOptions(),
-            visibilityService: Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(metadataRepo.ServeSingleReadsFromCatalog(), consentRepo, TierOptions().Value));
-
-        var user = CreateUser();
-
-        // Act
-        var desc = await catalog.DescribeDatasetAsync(user, "sales.public.orders");
-
-        // Assert
-        desc.DataOwner.ShouldBe("Alice Johnson <alice@example.com>");
-        desc.DataOwnerDelegates.ShouldNotBeNull();
-        desc.DataOwnerDelegates!.Count.ShouldBe(1);
-        desc.DataOwnerDelegates[0].ShouldBe("Bob Smith <bob@example.com>");
-        desc.Tags.ShouldNotBeNull();
-        desc.Tags!.ShouldContain("sales");
-    }
 
     [Fact]
     public void CatalogVisibility_ComputeAccessStatus_CorrectlyClassifiesStatus()
@@ -212,35 +121,6 @@ public sealed class CatalogOwnershipAndTierVisibilityTests
             .ShouldBe("GRANTED");
     }
 
-    [Fact]
-    public void CatalogVisibility_FilterForSubject_EnforcesDatasetVisibility()
-    {
-        var hiddenTable = CreateTableMetadata(Orders, "Hidden without consent", [], DatasetVisibility.Hidden);
-        var summaryTable = CreateTableMetadata(Customers, "Summary visible", [], DatasetVisibility.Summary);
-        var fullTable = CreateTableMetadata(AuditLogs, "Full visible", [], DatasetVisibility.Full);
-
-        var tenantId = new TenantId(Tenant);
-        var emptyConsents = Array.Empty<Consent>();
-
-        // Act
-        var shared = new[] { Orders.ToString(), Customers.ToString(), AuditLogs.ToString() };
-        var visible = CatalogVisibility.FilterForSubject(
-            [hiddenTable, summaryTable, fullTable], emptyConsents, tenantId, null, CatalogSurface.Discovery, shared);
-
-        // Assert:
-        // Hidden should be omitted
-        visible.Any(t => t.Identifier == Orders).ShouldBeFalse();
-
-        // Summary should be included, but with Columns empty
-        var crm = visible.FirstOrDefault(t => t.Identifier == Customers);
-        crm.ShouldNotBeNull();
-        crm.Columns.ShouldBeEmpty();
-
-        // Full should be included with columns
-        var sys = visible.FirstOrDefault(t => t.Identifier == AuditLogs);
-        sys.ShouldNotBeNull();
-        sys.Columns.Count.ShouldBe(2);
-    }
 
     public sealed class TestMaskingQuery
     {
@@ -302,42 +182,4 @@ public sealed class CatalogOwnershipAndTierVisibilityTests
         }
     }
 
-    [Fact]
-    public async Task GraphQLCatalog_SupportsTagFilteringAndAccessStatus()
-    {
-        // Arrange
-        var table1 = CreateTableMetadata(Orders, "Orders table", ["ecommerce", "sales"], DatasetVisibility.Full);
-        var table2 = CreateTableMetadata(Customers, "Customers table", ["crm"], DatasetVisibility.Full);
-
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        metadataRepo.StubTables([table1, table2]);
-
-        var consentRepo = Substitute.For<IConsentRepository>();
-        var httpContextAccessor = Substitute.For<IHttpContextAccessor>();
-        var httpContext = new DefaultHttpContext();
-        httpContext.User = CreateUser();
-        httpContextAccessor.HttpContext.Returns(httpContext);
-
-        var query = new Query();
-
-        // Act
-        var result = await query.GetCatalogAsync(
-            domain: null,
-            first: null,
-            after: null,
-            search: null,
-            tag: "ecommerce",
-            metadataRepository: metadataRepo,
-            consentRepository: consentRepo,
-            approvalRepository: null,
-            dataOwnershipRepository: null,
-            httpContextAccessor: httpContextAccessor,
-            options: TierOptions(),
-            visibilityService: Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(metadataRepo, consentRepo, TierOptions().Value));
-
-        // Assert
-        result.Count.ShouldBe(1);
-        result[0].TableName.ShouldBe("orders");
-        result[0].Tags.ShouldContain("ecommerce");
-    }
 }

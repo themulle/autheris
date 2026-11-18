@@ -47,6 +47,7 @@ public static class LegacySwitchGuard
             ["Caching:Redis:FailClosedOnRevocationLookupError"] = "was removed together with the behaviour it enabled (a failed token revocation lookup always rejects the token); delete the key.",
             ["OpenSchema"] = "OpenSchema was removed (OD-19). Authenticated users discover the catalog by default; anonymous catalog access is not supported. Remove the key.",
             ["Catalog:OpenSchema"] = "OpenSchema was removed (OD-19). Authenticated users discover the catalog by default; anonymous catalog access is not supported. Remove the key.",
+            ["Catalog:DefaultVisibility"] = "was removed with the Hidden/Summary/Full tier model (OD-19). Every object is discoverable unless it is explicitly hidden (PUT /api/v1/catalog/datasets/{id}/discovery); delete the key.",
             ["WebSql:DmlWriterRoles"] = "was removed; governed writes use explicit approved WriteRules on consents or access profiles. Delete the key."
         };
 

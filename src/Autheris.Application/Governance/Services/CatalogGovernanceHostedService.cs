@@ -13,17 +13,12 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Issue #111 (A-9, rev. 3 b): audits the effective <c>Gateway:Catalog:DefaultVisibility</c> and <c>Gateway:Tenancy:DefaultTenantId</c> presence once at startup and on
-/// every configuration change, turns the tally of tables created with a non-Hidden default tier into one aggregated audit entry per interval
-/// (count, source; no table names), and keeps the tier gauge fresh. All writes are best effort and never block the host.
+/// Audits whether a default tenant is configured once at startup and on every configuration change. The write is best effort and never blocks the host.
 /// </summary>
 public sealed class CatalogGovernanceHostedService : BackgroundService
 {
-    internal static readonly TimeSpan FlushInterval = TimeSpan.FromMinutes(5);
-
     private readonly IAuditWriter _audit;
     private readonly IOptionsMonitor<GatewayOptions> _options;
-    private readonly CatalogVisibilityMetrics _metrics;
     private readonly ILogger<CatalogGovernanceHostedService> _logger;
     private IDisposable? _subscription;
     private string _lastAudited = string.Empty;
@@ -31,18 +26,15 @@ public sealed class CatalogGovernanceHostedService : BackgroundService
     public CatalogGovernanceHostedService(
         IAuditWriter audit,
         IOptionsMonitor<GatewayOptions> options,
-        CatalogVisibilityMetrics metrics,
         ILogger<CatalogGovernanceHostedService> logger)
     {
         _audit = audit ?? throw new ArgumentNullException(nameof(audit));
         _options = options ?? throw new ArgumentNullException(nameof(options));
-        _metrics = metrics ?? throw new ArgumentNullException(nameof(metrics));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     public override async Task StartAsync(CancellationToken cancellationToken)
     {
-        await _metrics.RefreshAsync(cancellationToken).ConfigureAwait(false);
         await AuditConfigurationAsync("startup", _options.CurrentValue, cancellationToken).ConfigureAwait(false);
         _subscription = _options.OnChange(o => _ = OnOptionsChangedAsync(o));
         await base.StartAsync(cancellationToken).ConfigureAwait(false);
@@ -52,57 +44,22 @@ public sealed class CatalogGovernanceHostedService : BackgroundService
     {
         _subscription?.Dispose();
         await base.StopAsync(cancellationToken).ConfigureAwait(false);
-        await FlushDefaultTierTallyAsync(CancellationToken.None).ConfigureAwait(false);
     }
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        using var timer = new PeriodicTimer(FlushInterval);
-        try
-        {
-            while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
-            {
-                await FlushDefaultTierTallyAsync(stoppingToken).ConfigureAwait(false);
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            // Shutdown.
-        }
-    }
+    protected override Task ExecuteAsync(CancellationToken stoppingToken) => Task.CompletedTask;
 
     internal Task OnOptionsChangedAsync(GatewayOptions options) => AuditConfigurationAsync("configuration", options, CancellationToken.None, onlyWhenChanged: true);
 
     private async Task AuditConfigurationAsync(string source, GatewayOptions options, CancellationToken ct, bool onlyWhenChanged = false)
     {
-        var defaultVisibility = options.Catalog.DefaultVisibility.ToString();
         var mode = TenantResolver.EffectiveDefaultOf(options.Tenancy) is null ? "None" : "Configured";
-        var state = defaultVisibility + "|" + mode;
-        if (onlyWhenChanged && string.Equals(state, _lastAudited, StringComparison.Ordinal))
+        if (onlyWhenChanged && string.Equals(mode, _lastAudited, StringComparison.Ordinal))
         {
             return;
         }
 
-        _lastAudited = state;
-        await WriteAsync(source, new { source, defaultVisibility, defaultTenant = mode }, ct).ConfigureAwait(false);
-    }
-
-    /// <summary>Writes one aggregated entry for the tables created since the last flush with a non-Hidden default tier; nothing when there are none.</summary>
-    internal async Task FlushDefaultTierTallyAsync(CancellationToken ct)
-    {
-        var count = CatalogDefaultTierTally.TakeAndReset();
-        if (count <= 0)
-        {
-            return;
-        }
-
-        await WriteAsync("ingestion", new
-        {
-            source = "ingestion",
-            count,
-            defaultVisibility = _options.CurrentValue.Catalog.DefaultVisibility.ToString()
-        }, ct).ConfigureAwait(false);
-        _metrics.RequestRefresh();
+        _lastAudited = mode;
+        await WriteAsync(source, new { source, defaultTenant = mode }, ct).ConfigureAwait(false);
     }
 
     private async Task WriteAsync(string source, object details, CancellationToken ct)

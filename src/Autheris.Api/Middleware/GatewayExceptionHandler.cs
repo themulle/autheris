@@ -150,6 +150,8 @@ public sealed class GatewayExceptionHandler(ILogger<GatewayExceptionHandler> log
         Autheris.Application.Governance.Grants.Records.GrantRecordUnavailableException => (StatusCodes.Status503ServiceUnavailable, "The grant record store is temporarily unavailable. Retry later.", UnavailableRetryAfterSeconds),
         // migrations still pending: fail closed with a retryable 503 instead of a 500 plus error log.
         Autheris.Infrastructure.Persistence.Migrations.GovernanceStoreNotReadyException => (StatusCodes.Status503ServiceUnavailable, "The governance store is not ready yet. Retry later.", UnavailableRetryAfterSeconds),
+        Autheris.Domain.Exceptions.CatalogSnapshotNotReadyException => (StatusCodes.Status503ServiceUnavailable, "The catalog is not loaded yet. Retry later.", UnavailableRetryAfterSeconds),
+        Autheris.Domain.Exceptions.CatalogSearchIndexNotReadyException => (StatusCodes.Status503ServiceUnavailable, "The catalog search index is not ready yet. Retry later.", UnavailableRetryAfterSeconds),
         GatewayNotImplementedException => (StatusCodes.Status501NotImplemented, "The requested feature or data source capability is not implemented.", null),
         GatewayUnsupportedColumnTypeException => (StatusCodes.Status501NotImplemented, "The requested column type is not supported.", null),
         NotSupportedException => (StatusCodes.Status501NotImplemented, "The requested operation is not supported.", null),

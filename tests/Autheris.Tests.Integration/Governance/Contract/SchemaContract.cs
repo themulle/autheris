@@ -76,8 +76,7 @@ public abstract class SchemaContract : GovernanceContractBase
                 {
                     Id = Guid.NewGuid(),
                     ColumnName = "id",
-                    DataType = "int",
-                    IsSensitive = false
+                    DataType = "int"
                 }
             ]
         });

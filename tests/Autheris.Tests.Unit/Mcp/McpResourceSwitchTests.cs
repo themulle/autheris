@@ -214,7 +214,7 @@ public sealed class McpResourceSwitchTests
     public async Task ST_115_11_Semantic_resources_are_empty_when_Catalog_is_off_in_both_handlers()
     {
         var repo = Substitute.For<ITableMetadataRepository>();
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([Table()]));
+        repo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>([Table()]));
         Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(repo);
 
         var open = new SemanticMcpCompiler(repo, NullLogger<SemanticMcpCompiler>.Instance, options: Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions { Insecure = new Autheris.Domain.Options.InsecureGettingStartedOptions { danger_bypass_mcp_auth = true } }), switches: Switches());

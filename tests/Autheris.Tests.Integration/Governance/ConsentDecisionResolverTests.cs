@@ -459,10 +459,10 @@ public sealed class ConsentDecisionResolverTests : IDisposable
         var meta = await _repository.GetTableMetadataAsync(table);
         meta.ShouldNotBeNull();
         await _repository.UpsertTableMetadataAsync(new TableMetadata
-        {
+        { ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor(sensitive ? new[] { "id" } : Array.Empty<string>()),
             Identifier = meta.Identifier,
             Table = meta.Table,
-            Columns = [new TableColumn { TableId = meta.Table.Id, ColumnName = "id", DataType = "INT", IsSensitive = sensitive }]
+            Columns = [new TableColumn { TableId = meta.Table.Id, ColumnName = "id", DataType = "INT" }]
         });
     }
 
