@@ -15,13 +15,14 @@ public enum DeclarativeManifestViolation
 /// rejected text or character.
 /// </summary>
 public sealed class DeclarativeManifestValidationException(int policyIndex, DeclarativeManifestViolation violation = DeclarativeManifestViolation.Description)
-    : ArgumentException(BuildMessage(policyIndex, violation))
+    : ArgumentException(Describe(policyIndex, violation))
 {
     public int PolicyIndex { get; } = policyIndex;
 
     public DeclarativeManifestViolation Violation { get; } = violation;
 
-    private static string BuildMessage(int policyIndex, DeclarativeManifestViolation violation) => violation switch
+    /// <summary>The fixed client-facing text for a violation; endpoints build the response from it, never from <see cref="Exception.Message"/>.</summary>
+    public static string Describe(int policyIndex, DeclarativeManifestViolation violation) => violation switch
     {
         DeclarativeManifestViolation.ScopeEntry =>
             $"Manifest policy at index {policyIndex} has a column rule with a blank scope entry or a scope entry that contains a comma; list scope names only (an empty list sets the base level for all scopes).",
