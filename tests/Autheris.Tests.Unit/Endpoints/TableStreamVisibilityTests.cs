@@ -122,6 +122,7 @@ public sealed class TableStreamVisibilityTests
             TableName = "secret_orders",
             SourceType = "PostgreSQL",
             IsActive = isActive,
+            DiscoveryHidden = true,
         },
         PrimaryKeyColumns = ["id"],
         Columns = [new TableColumn { ColumnName = "id", DataType = "integer" }]

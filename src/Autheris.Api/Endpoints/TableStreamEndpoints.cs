@@ -758,6 +758,10 @@ public static class TableStreamEndpoints
                 return true;
             }
         }
+        else if (!metadata.Table.DiscoveryHidden)
+        {
+            return true;
+        }
 
         if (EndpointSecurity.IsCanonicalClusterAdmin(httpContext.User))
         {

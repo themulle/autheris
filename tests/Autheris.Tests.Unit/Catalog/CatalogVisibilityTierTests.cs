@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Catalog;
 
+using Autheris.Application.Catalog.Discovery;
 using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
@@ -53,26 +54,62 @@ public sealed class CatalogVisibilityTierTests
         string[]? shared = null, TenancyShape mode = TenancyShape.Multi, string tenant = TenantA) =>
         CatalogVisibility.FilterForSubject(tables, consents ?? [], new TenantId(tenant), null);
 
-    // ---- DataAccess (default): the tier switch is not executed at all (F-C13, G2) ----
+    // ---- Discovery column handling ----
 
+    [Fact]
+    public void Discovery_RemovesTableLevelDenyMaskedColumns()
+    {
+        var masking = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["secret_col"] = new MaskingRule { RuleType = "DENY" },
+            ["id"] = new MaskingRule { RuleType = "REDACT" }
+        };
 
+        var visible = Filter([Table(Shared, masking: masking)], [Allow(Shared)]);
 
-    // ---- Discovery ----
+        visible.ShouldHaveSingleItem().Columns.Select(c => c.ColumnName).ShouldBe(["id"]);
+    }
 
+    // ---- Tenant gate ----
 
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Multi_MalformedSharedEntries_AreSkipped_NeverWiden()
+    {
+        var shared = DiscoveryTenantScope.ParseSharedTables(["", "  ", "not-a-table", "*", "a.b", "shared.public.catalog_t"]);
+        var empty = new HashSet<TableIdentifier>();
 
+        shared.ShouldContain(Shared);
+        shared.ShouldNotContain(Other);
+        shared.Count.ShouldBe(2); // "a.b" is the valid two-part form (default.a.b); every other malformed entry is dropped.
+        DiscoveryTenantScope.IsInScope(Table(Shared), new TenantId(TenantA), catalogOwner: null, shared, empty).ShouldBeTrue();
+        DiscoveryTenantScope.IsInScope(Table(Other), new TenantId(TenantA), catalogOwner: null, shared, empty).ShouldBeFalse();
+    }
 
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Multi_LegacyTenantId_IsANormalTenant_SharedTablesStillDecideScope()
+    {
+        var legacy = Autheris.Tests.Common.TestTenants.Default;
+        var shared = DiscoveryTenantScope.ParseSharedTables(SharedList);
+        var empty = new HashSet<TableIdentifier>();
 
+        DiscoveryTenantScope.IsInScope(Table(Shared), legacy, catalogOwner: null, shared, empty).ShouldBeTrue();
+        DiscoveryTenantScope.IsInScope(Table(Other), legacy, catalogOwner: null, shared, empty).ShouldBeFalse();
+        DiscoveryTenantScope.IsInScope(Table(Shared), legacy, catalogOwner: null, DiscoveryTenantScope.ParseSharedTables(null), empty).ShouldBeFalse();
+    }
 
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task VisibleTables_Multi_ClaimlessPrincipal_SeesNothing_EvenWithConsent()
+    {
+        var claimless = User(tenant: null);
 
+        var visible = await CatalogVisibility.VisibleTablesAsync(
+            [Table(Shared)], claimless, Autheris.Tests.Common.TestTenants.Default, ConsentRepo([Allow(Shared, Autheris.Tests.Common.TestTenants.Default.Value)]));
 
-    // ---- Tenant gate (M-2, T-R2-5) ----
-
-
-
-
-
-
+        visible.ShouldBeEmpty();
+    }
 
     // ---- Policy neutrality of catalog tags (T-R2-1, T-R2-2, T-R3-1, O-6a) ----
 
@@ -94,9 +131,6 @@ public sealed class CatalogVisibilityTierTests
             .ShouldBe(Autheris.Application.Governance.Grants.GrantClassifier.IsSensitive(plain));
         Autheris.Application.Governance.Grants.GrantClassifier.IsSensitive(tagged).ShouldBeFalse();
     }
-
-    // ---- Admin rows (G1) ----
-
 
     private static ClaimsPrincipal User(string? tenant, params string[] roles)
     {

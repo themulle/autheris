@@ -85,11 +85,30 @@ public sealed class DiscoveryAccessRequestService : IDiscoveryAccessRequestServi
         var sid = await DiscoveryCallerGate.EnsureAccessRequestAllowedAsync(
             caller, _discoveryOptions?.Value ?? new CatalogDiscoveryOptions(), _gatewayOptions.Value, rateLimiter: null, ct).ConfigureAwait(false);
 
+        TableIdentifier? audited = null;
+        try
+        {
+            return await RequestCoreAsync(request, caller, sid, t => audited = t, ct).ConfigureAwait(false);
+        }
+        catch (ConsentRequestException ex) when (IsAuditedDenial(ex.Code))
+        {
+            await AuditDenialAsync(caller, sid, audited, ex.Code, ct).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    private static bool IsAuditedDenial(string code) =>
+        code is NotFoundCode or InvalidColumnsCode or "RATE_LIMIT_EXCEEDED";
+
+    private async Task<SubmitConsentRequestResult> RequestCoreAsync(
+        DiscoveryAccessRequest request, CatalogCaller caller, Sid sid, Action<TableIdentifier> onTable, CancellationToken ct)
+    {
         if (!TableIdentifier.TryCreate(request.Domain, request.Schema, request.TableName, out var tableId))
         {
             throw new ConsentRequestException("VALIDATION_ERROR", "Domain, Schema and TableName must be valid, non-empty values.");
         }
 
+        onTable(tableId);
         var discovered = await _discovery.GetAsync(tableId, caller, ct).ConfigureAwait(false);
         if (discovered is null || discovered.IsHidden || discovered.Kind == DiscoveryObjectKind.Procedure)
         {
@@ -209,6 +228,29 @@ public sealed class DiscoveryAccessRequestService : IDiscoveryAccessRequestServi
             ';',
             items.SelectMany(i => i.Columns.Select(c => i.Classification + "|" + c.ToLowerInvariant()))
                 .OrderBy(x => x, StringComparer.Ordinal));
+
+    private async Task AuditDenialAsync(CatalogCaller caller, Sid sid, TableIdentifier? table, string reasonCode, CancellationToken ct)
+    {
+        if (_audit is null)
+        {
+            return;
+        }
+
+        // Reason code only: neither column names nor the justification are recorded for a denial.
+        await _audit.RecordBestEffortAsync(new AuditLogEntry
+        {
+            TenantId = caller.Tenant,
+            EventType = AuditEventTypes.ConsentRequested,
+            ActorSid = sid,
+            TargetTable = table?.ToString() ?? string.Empty,
+            Decision = "DENY",
+            DetailsJson = JsonSerializer.Serialize(new
+            {
+                reason = reasonCode,
+                surface = caller.Channel.ToString()
+            })
+        }, ct).ConfigureAwait(false);
+    }
 
     private async Task AuditAsync(
         CatalogCaller caller, Sid sid, TableIdentifier table, IReadOnlyList<RequestedClearItem> clear, SubmitConsentRequestResult result, CancellationToken ct)

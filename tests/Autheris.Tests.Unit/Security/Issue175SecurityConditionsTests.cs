@@ -345,6 +345,7 @@ fragment FragB on User {
         var engine = new HotChocolateGraphQlCostAnalysisEngine(provider);
 
         var hiddenTable = CreateTable("secret_ledger", ("id", "varchar", false), ("balance", "numeric", false));
+        hiddenTable = hiddenTable with { Table = hiddenTable.Table with { DiscoveryHidden = true } };
         var metadataRepo = Substitute.For<ITableMetadataRepository>();
         metadataRepo.StubTables([hiddenTable]);
 

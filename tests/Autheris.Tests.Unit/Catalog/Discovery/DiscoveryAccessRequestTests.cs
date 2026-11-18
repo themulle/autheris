@@ -5,12 +5,14 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Audit;
 using Autheris.Application.Catalog.Discovery;
 using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Catalog.Services;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.ConsentRequests;
 using Autheris.Application.ConsentRequests.ClassificationClear;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -152,5 +154,35 @@ public sealed class DiscoveryAccessRequestTests
 
         _submitted!.DurationDays.ShouldBeGreaterThanOrEqualTo(1);
         _submitted.RequestedClear.ShouldBeNull();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task RequestAccess_Denials_AreAudited_WithReasonCodeOnly()
+    {
+        var audit = Substitute.For<IAuditWriter>();
+        var captured = new List<AuditLogEntry>();
+        await audit.RecordBestEffortAsync(Arg.Do<AuditLogEntry>(captured.Add), Arg.Any<CancellationToken>());
+        var service = new DiscoveryAccessRequestService(
+            _discovery, _consents, Options.Create(new GatewayOptions { Tenancy = TenancyShape.Multi.Options() }), _approvals,
+            Options.Create(new CatalogDiscoveryOptions()), audit);
+
+        Discovered(null);
+        await Should.ThrowAsync<ConsentRequestException>(() => service.RequestAsync(Request(), Caller()));
+
+        Discovered(Table(false, Col("email", DiscoveryColumnState.Masked, "PII")));
+        await Should.ThrowAsync<ConsentRequestException>(() => service.RequestAsync(Request("secret_probe_column"), Caller()));
+
+        _consents.SubmitAsync(Arg.Any<ConsentRequestSubmission>(), Arg.Any<CancellationToken>())
+            .Returns<Task<SubmitConsentRequestResult>>(_ => throw new ConsentRequestException("RATE_LIMIT_EXCEEDED", "limited", 5));
+        await Should.ThrowAsync<ConsentRequestException>(() => service.RequestAsync(Request("email"), Caller()));
+
+        captured.Select(e => e.Decision).ShouldAllBe(d => d == "DENY");
+        captured.Select(e => e.DetailsJson).Count().ShouldBe(3);
+        string.Join('|', captured.Select(e => e.DetailsJson)).ShouldContain("NOT_FOUND");
+        string.Join('|', captured.Select(e => e.DetailsJson)).ShouldContain("INVALID_COLUMNS");
+        string.Join('|', captured.Select(e => e.DetailsJson)).ShouldContain("RATE_LIMIT_EXCEEDED");
+        string.Join('|', captured.Select(e => e.DetailsJson)).ShouldNotContain("secret_probe_column");
+        string.Join('|', captured.Select(e => e.DetailsJson)).ShouldNotContain("Quarterly audit");
     }
 }

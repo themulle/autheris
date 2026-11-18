@@ -452,13 +452,10 @@ Autheris.Tests.Unit.Catalog.CatalogVisibilityTelemetryTests.SEC_111_12_Startup_N
 Autheris.Tests.Unit.Catalog.CatalogVisibilityTierTests.DataAccess_PersistedSummaryOrFull_WithoutConsent_Dropped,feature deleted (WP-SIMPL-41),Security
 Autheris.Tests.Unit.Catalog.CatalogVisibilityTierTests.M2_Multi_NullOrEmptySharedTables_TiersAreOff,feature deleted (WP-SIMPL-41),Security
 Autheris.Tests.Unit.Catalog.CatalogVisibilityTierTests.M2_Multi_TiersApplyOnlyToSharedTables_OtherTenantConsentNeverMakesTableVisible,feature deleted (WP-SIMPL-41),Security
-Autheris.Tests.Unit.Catalog.CatalogVisibilityTierTests.Multi_LegacyTenantId_IsANormalTenant_TiersFollowSharedTables,feature deleted (WP-SIMPL-41),Security
-Autheris.Tests.Unit.Catalog.CatalogVisibilityTierTests.Multi_MalformedSharedEntries_AreSkipped_NeverWiden,feature deleted (WP-SIMPL-41),Security
 Autheris.Tests.Unit.Catalog.CatalogVisibilityTierTests.T_R2_1_CatalogTags_ChangeNoContractResult_AndNoGrantClassification,feature deleted (WP-SIMPL-41),Security
 Autheris.Tests.Unit.Catalog.CatalogVisibilityTierTests.T_R2_4_EveryReturnedRow_HasAnExplicitNonUnmarkedView,feature deleted (WP-SIMPL-41),Security
 Autheris.Tests.Unit.Catalog.CatalogVisibilityTierTests.TenantAdmin_SharedTable_PersistedHidden_Behaviour_Pinned,feature deleted (WP-SIMPL-41),Security
 Autheris.Tests.Unit.Catalog.CatalogVisibilityTierTests.VisibleTables_8ParamOverload_DefaultsToDataAccess,feature deleted (WP-SIMPL-41),Security
-Autheris.Tests.Unit.Catalog.CatalogVisibilityTierTests.VisibleTables_Multi_ClaimlessPrincipal_NeverGetsTiers_EvenForSharedTable,feature deleted (WP-SIMPL-41),Security
 Autheris.Tests.Unit.Catalog.TestTime.Admin_SetsFull_AuditsVisibilityWithBeforeAfterSourceTenantAndAuthType,feature deleted (WP-SIMPL-41),Security
 Autheris.Tests.Unit.Catalog.TestTime.SEC_111_05_Owner_AsksFull_IsForbidden_DenyAudited_AndNothingIsWritten_EvenTags,feature deleted (WP-SIMPL-41),Security
 Autheris.Tests.Unit.Catalog.TestTime.SEC_111_05_Owner_SettingFullOnAnAlreadyFullDataset_IsStillForbidden,feature deleted (WP-SIMPL-41),Security
@@ -484,12 +481,8 @@ Autheris.Tests.Unit.Mcp.McpCatalogSummaryViewTests.Summary_AllowList_PinsTheExac
 Autheris.Tests.Unit.Mcp.McpCatalogSummaryViewTests.Summary_Describe_IsBuiltFromTheAllowList,feature deleted (WP-SIMPL-41),Security
 Autheris.Tests.Unit.Mcp.McpCatalogSummaryViewTests.Summary_List_ReportsNoColumnsAndNoGraphQlField_AndTagsComeFromCatalogTags,feature deleted (WP-SIMPL-41),Security
 Autheris.Tests.Unit.Mcp.McpCatalogSummaryViewTests.Summary_Search_NeverMatchesAColumnName_FullDoes,feature deleted (WP-SIMPL-41),Security
-Autheris.Tests.Unit.Mcp.McpDatasetCatalogScopeLevelTests.Describe_Admin_ForwardAuthClusterAdminRole_IsNotAdmin,feature deleted (WP-SIMPL-41),Security
-Autheris.Tests.Unit.Mcp.McpDatasetCatalogScopeLevelTests.Describe_CatalogDenyMaskingRule_StaysNoValues,feature deleted (WP-SIMPL-41),Security
-Autheris.Tests.Unit.Mcp.McpDatasetCatalogScopeLevelTests.Describe_ForeignTenantAllowConsent_DoesNotGrant,feature deleted (WP-SIMPL-41),Security
-Autheris.Tests.Unit.Mcp.McpDatasetCatalogScopeLevelTests.Describe_NotGranted_DenyEffectColumnDeny_StaysNoValues,feature deleted (WP-SIMPL-41),Security
-Autheris.Tests.Unit.Mcp.McpDatasetCatalogScopeLevelTests.Describe_NotGranted_ScopeBoundDenyEffectDeny_NeverLeaksMetaValues,feature deleted (WP-SIMPL-41),Security
-Autheris.Tests.Unit.Mcp.McpDatasetCatalogScopeLevelTests.Describe_NotGranted_UnconditionalTableDeny_NoProfileForAnyColumn,feature deleted (WP-SIMPL-41),Security
 
 Autheris.Tests.Unit.Catalog.CatalogChannelMigrationTests.Shape_ComesFromServiceResolver_NotRecomputedByChannel,feature deleted (WP-SIMPL-41),Security
 Autheris.Tests.Unit.Catalog.FakeRebac.CatalogVisibleRow_NeverCarriesNotFound,Autheris.Tests.Unit.Catalog.CatalogVisibilityServiceTests.CatalogVisibleRow_NeverCarriesNotFound,Security
+Autheris.Tests.Unit.Catalog.CatalogVisibilityTierTests.Multi_LegacyTenantId_IsANormalTenant_TiersFollowSharedTables,feature deleted (WP-SIMPL-41),Security
+Autheris.Tests.Unit.Catalog.CatalogVisibilityTierTests.VisibleTables_Multi_ClaimlessPrincipal_NeverGetsTiers_EvenForSharedTable,feature deleted (WP-SIMPL-41),Security

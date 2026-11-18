@@ -177,6 +177,12 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
             return new DatasetCatalogResult(DatasetCatalogOutcome.Unavailable);
         }
 
+        // Only an administrator may lift a discovery hide; a dataset owner may hide but never unhide.
+        if (!actor.IsAdmin && requestedDiscoveryHidden == false && before.DiscoveryHidden)
+        {
+            return new DatasetCatalogResult(DatasetCatalogOutcome.Forbidden);
+        }
+
         if (replace is not null || add is not null || remove is not null)
         {
             if (ExceedsCap(before, replace, add, remove, max))

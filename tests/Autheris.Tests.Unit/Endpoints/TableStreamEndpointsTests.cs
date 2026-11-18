@@ -117,6 +117,7 @@ public sealed class TableStreamEndpointsTests
     {
         var context = CreateHttpContext();
         var hiddenTable = CreateTableMetadata();
+        hiddenTable = hiddenTable with { Table = hiddenTable.Table with { DiscoveryHidden = true } };
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<TableMetadata?>(hiddenTable));

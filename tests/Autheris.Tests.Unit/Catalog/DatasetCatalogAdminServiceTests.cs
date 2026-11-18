@@ -396,6 +396,27 @@ public sealed class DatasetCatalogAdminServiceTests
     }
 
     [Fact]
+    [Trait("Category", "Security")]
+    public async Task Owner_cannot_unhide_a_dataset_an_admin_hid()
+    {
+        OwnerIs("S-1-5-21-owner");
+        var svc = Create();
+        var hide = new DatasetCatalogEdit(null, null, null, DiscoveryHidden: true);
+        var unhide = new DatasetCatalogEdit(null, null, null, DiscoveryHidden: false);
+
+        (await svc.ApplyAsync(Admin(), "sales.dbo.orders", hide, "admin", default)).Outcome.ShouldBe(DatasetCatalogOutcome.Applied);
+
+        var ownerAttempt = await svc.ApplyAsync(Owner(), "sales.dbo.orders", unhide, "admin", default);
+        var ownerDryRun = await svc.ApplyAsync(Owner(), "sales.dbo.orders", unhide, "admin", default, dryRun: true);
+
+        ownerAttempt.Outcome.ShouldBe(DatasetCatalogOutcome.Forbidden);
+        ownerDryRun.Outcome.ShouldBe(DatasetCatalogOutcome.Forbidden);
+        _state.DiscoveryHidden.ShouldBeTrue();
+        (await svc.ApplyAsync(Admin(), "sales.dbo.orders", unhide, "admin", default)).Outcome.ShouldBe(DatasetCatalogOutcome.Applied);
+        _state.DiscoveryHidden.ShouldBeFalse();
+    }
+
+    [Fact]
     public async Task Apply_UnknownHiddenColumn_ReturnsInvalidColumns()
     {
         var edit = new DatasetCatalogEdit(null, null, null, null, null,
