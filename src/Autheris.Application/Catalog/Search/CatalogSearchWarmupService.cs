@@ -270,7 +270,8 @@ public sealed class CatalogSearchWarmupService : BackgroundService
             if (!updatedViaDelta)
             {
                 _logger.LogInformation("Starte Index-Neuaufbau für den Katalog-Suchindex...");
-                var tables = await _metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
+                var tables = await CatalogTablePageReader.ReadAllAsync(
+                    _metadataRepository, new CatalogTableQuery(IncludeInactive: false), ct: ct).ConfigureAwait(false);
                 await _searchEngine.RebuildIndexAsync(tables, ct).ConfigureAwait(false);
                 _lastFullRebuildUtc = _timeProvider.GetUtcNow();
                 _logger.LogInformation("Katalog-Suchindex Neuaufbau erfolgreich beendet ({Count} Tabellen).", tables.Count);

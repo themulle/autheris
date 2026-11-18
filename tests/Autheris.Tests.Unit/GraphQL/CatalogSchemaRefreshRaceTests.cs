@@ -62,7 +62,7 @@ public sealed class CatalogSchemaRefreshRaceTests
         public ITableMetadataRepository Repository()
         {
             var meta = Substitute.For<ITableMetadataRepository>();
-            meta.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(_ => ReadAsync());
+            meta.StubAllTables(_ => ReadAsync());
             return meta;
         }
 

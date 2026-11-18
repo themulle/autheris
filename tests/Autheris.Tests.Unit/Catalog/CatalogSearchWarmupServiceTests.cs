@@ -38,7 +38,7 @@ public sealed class CatalogSearchWarmupServiceTests
     public async Task WarmupOnStartup_BuildsIndexOnce()
     {
         var tables = new List<TableMetadata> { CreateTable("t1") };
-        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(tables);
+        _metadataRepo.StubAllTables(tables);
         _versionProvider.GetCatalogVersionAsync(Arg.Any<CancellationToken>())
             .Returns(new ValueTask<CatalogVersion>(new CatalogVersion(1, 1)));
 
@@ -61,7 +61,7 @@ public sealed class CatalogSearchWarmupServiceTests
         await WaitHelper.WaitUntil(() => _searchEngine.ReceivedCalls().Any(), TimeSpan.FromSeconds(5));
         await service.StopAsync(CancellationToken.None);
 
-        await _searchEngine.Received(1).RebuildIndexAsync(tables, Arg.Any<CancellationToken>());
+        await _searchEngine.Received(1).RebuildIndexAsync(Arg.Is<IReadOnlyList<TableMetadata>>(l => l.SequenceEqual(tables)), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -70,8 +70,7 @@ public sealed class CatalogSearchWarmupServiceTests
         var tables1 = new List<TableMetadata> { CreateTable("t1") };
         var tables2 = new List<TableMetadata> { CreateTable("t1"), CreateTable("t2") };
 
-        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(tables1, tables2);
+        _metadataRepo.StubAllTablesSequence(tables1, tables2);
 
         Func<object, Task>? eventHandler = null;
         var eventBus = Substitute.For<IEventBus>();
@@ -120,7 +119,7 @@ public sealed class CatalogSearchWarmupServiceTests
     public async Task PeriodicRefresh_SkipsWhenVersionUnchanged()
     {
         var tables = new List<TableMetadata> { CreateTable("t1") };
-        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(tables);
+        _metadataRepo.StubAllTables(tables);
 
         // Version stays at (1, 1)
         _versionProvider.GetCatalogVersionAsync(Arg.Any<CancellationToken>())
@@ -145,7 +144,7 @@ public sealed class CatalogSearchWarmupServiceTests
         await service.StopAsync(CancellationToken.None);
 
         // Only the initial warmup build should have occurred
-        await _searchEngine.Received(1).RebuildIndexAsync(tables, Arg.Any<CancellationToken>());
+        await _searchEngine.Received(1).RebuildIndexAsync(Arg.Is<IReadOnlyList<TableMetadata>>(l => l.SequenceEqual(tables)), Arg.Any<CancellationToken>());
     }
 
     [Fact]

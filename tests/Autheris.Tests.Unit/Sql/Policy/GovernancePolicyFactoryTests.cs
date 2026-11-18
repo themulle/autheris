@@ -173,8 +173,8 @@ public sealed class GovernancePolicyFactoryTests
         var metadata = new TableMetadata
         {
             Identifier = OrdersId,
-            Columns = [new TableColumn { ColumnName = "email", IsSensitive = true }, new TableColumn { ColumnName = "id" }]
-        };
+            Columns = [new TableColumn { ColumnName = "email" }, new TableColumn { ColumnName = "id" }]
+        }.WithPii("email");
         // No explicit level for email: only the catalog marks it sensitive, so it is masked unless a typed mask exists.
         var unlisted = TableAccessDecision.Allowed(OrdersId, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)
             .WithAdditionalRowPolicy(RegionPolicy());

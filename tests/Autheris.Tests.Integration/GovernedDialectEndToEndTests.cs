@@ -96,8 +96,9 @@ public abstract class GovernedDialectEndToEndBase : IDisposable
                 new TableColumn { ColumnName = Col("id"), DataType = "int" },
                 new TableColumn { ColumnName = Col("tenant_id"), DataType = "varchar" },
                 new TableColumn { ColumnName = Col("region"), DataType = "varchar" },
-                new TableColumn { ColumnName = Col("email"), DataType = "varchar", IsSensitive = true }
+                new TableColumn { ColumnName = Col("email"), DataType = "varchar" }
             ],
+            ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor(Col("email")),
             ColumnMaskingRules = withMask
                 ? new Dictionary<string, MaskingRule> { [Col("email")] = new MaskingRule { RuleType = "REDACT" } }
                 : new Dictionary<string, MaskingRule>()

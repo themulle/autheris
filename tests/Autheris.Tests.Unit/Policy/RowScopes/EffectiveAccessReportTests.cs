@@ -602,11 +602,12 @@ public sealed class EffectiveAccessReportTests
             },
             Identifier = id,
             OwnerTenantId = ownerTenant,
-            Columns = cols
+            Columns = cols,
+            ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor(cols.Where(c => c.Meta.ContainsKey("__pii")).Select(c => c.ColumnName).ToArray())
         };
 
     private static TableColumn col(string name, bool sensitive = false, bool hidden = false) =>
-        new() { ColumnName = name, IsSensitive = sensitive, DiscoveryHidden = hidden };
+        new() { ColumnName = name, Meta = sensitive ? new Dictionary<string, string> { ["__pii"] = "1" } : new Dictionary<string, string>(), DiscoveryHidden = hidden };
 
     private static SecurityPrincipalContext BuildContext(
         Sid userSid,

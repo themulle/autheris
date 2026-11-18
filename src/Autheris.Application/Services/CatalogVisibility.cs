@@ -61,42 +61,21 @@ public static class CatalogVisibility
     }
 
     /// <summary>
-    /// Tables a non-admin subject may discover. A table with an active Allow consent (and no unconditional Deny) takes the consent path
-    /// (<see cref="CatalogView.Granted"/>, columns per consent). Issue #111: persisted tiers apply only on <see cref="CatalogSurface.Discovery"/>
-    /// (the default <see cref="CatalogSurface.DataAccess"/> never executes the tier switch: a table without Allow consent is dropped), and only
-    /// for the tables <paramref name="sharedTables"/> names (null or empty: tiers off; consents never extend the set) or, for the catalog owner
-    /// (<paramref name="catalogOwner"/>, the default tenant), for every table. Every returned row carries an explicit
-    /// <see cref="CatalogView"/>; <c>Summary</c> never carries columns, <c>Full</c> carries the columns minus every DENY-masked column.
+    /// Tables a non-admin subject may reach through data access. A table with an active Allow consent (and no unconditional Deny) takes the
+    /// consent path (<see cref="CatalogView.Granted"/>, columns per consent); a table without Allow consent is dropped. Every returned row
+    /// carries an explicit <see cref="CatalogView"/>. Authorized discovery has its own decision path and does not use this filter.
     /// </summary>
     public static IReadOnlyList<TableMetadata> FilterForSubject(
         IEnumerable<TableMetadata> allTables,
         IEnumerable<Consent> activeConsents,
         TenantId tenantId,
-        IReadOnlySet<string>? callerScopes = null,
-        CatalogSurface surface = CatalogSurface.DataAccess,
-        IEnumerable<string>? sharedTables = null,
-        TenantId? catalogOwner = null)
+        IReadOnlySet<string>? callerScopes = null)
     {
         ArgumentNullException.ThrowIfNull(allTables);
         ArgumentNullException.ThrowIfNull(activeConsents);
 
         // #112 A1-13 (defence in depth): a foreign tenant's virtual table is dropped before any consent or tier is looked at.
         allTables = DropForeignVirtualTables(allTables, tenantId);
-
-        var tiersApply = surface == CatalogSurface.Discovery;
-        HashSet<TableIdentifier>? tierTables = null;
-        var allTablesTiered = false;
-        if (tiersApply)
-        {
-            if (CallerScopeResolver.IsOwner(tenantId, catalogOwner))
-            {
-                allTablesTiered = true;
-            }
-            else
-            {
-                tierTables = ParseSharedTables(sharedTables);
-            }
-        }
 
         var tenantConsents = activeConsents.Where(c => c.TenantId == tenantId).ToList();
 
@@ -120,20 +99,6 @@ public static class CatalogVisibility
             var isAllowed = allowedTableIds.Contains(table.Identifier) && !unconditionallyDeniedTableIds.Contains(table.Identifier);
             if (!isAllowed)
             {
-                // DataAccess: no tier switch at all. Discovery: only Summary and Full on tier-eligible tables; Hidden and every unknown value drops.
-                if (tiersApply && (allTablesTiered || (tierTables?.Contains(table.Identifier) ?? false)))
-                {
-                    switch (table.Table.Visibility)
-                    {
-                        case DatasetVisibility.Summary:
-                            visible.Add(table with { Columns = Array.Empty<TableColumn>(), CatalogView = CatalogView.Summary });
-                            break;
-                        case DatasetVisibility.Full:
-                            visible.Add(table with { Columns = ColumnsWithoutDeny(table), CatalogView = CatalogView.Full });
-                            break;
-                    }
-                }
-
                 continue;
             }
 
@@ -169,46 +134,6 @@ public static class CatalogVisibility
         }
 
         return visible;
-    }
-
-    /// <summary>Columns of <paramref name="table"/> minus every column with a table-level DENY masking rule (issue #111 G-2).</summary>
-    private static List<TableColumn> ColumnsWithoutDeny(TableMetadata table)
-    {
-        if (table.ColumnMaskingRules is not { Count: > 0 } rules)
-        {
-            return table.Columns.ToList();
-        }
-
-        var denied = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (colName, rule) in rules)
-        {
-            if (string.Equals(rule.RuleType, "DENY", StringComparison.OrdinalIgnoreCase))
-            {
-                denied.Add(colName);
-            }
-        }
-
-        return table.Columns.Where(c => !denied.Contains(c.ColumnName)).ToList();
-    }
-
-    /// <summary>Parses <c>domain.schema.table</c> entries like <see cref="FilterToTenant"/>; malformed entries are skipped (never widen).</summary>
-    private static HashSet<TableIdentifier>? ParseSharedTables(IEnumerable<string>? sharedTables)
-    {
-        if (sharedTables is null)
-        {
-            return null;
-        }
-
-        HashSet<TableIdentifier>? parsed = null;
-        foreach (var shared in sharedTables)
-        {
-            if (!string.IsNullOrWhiteSpace(shared) && TableIdentifier.TryParse(shared, out var id))
-            {
-                (parsed ??= []).Add(id);
-            }
-        }
-
-        return parsed;
     }
 
     /// <summary>
@@ -326,22 +251,7 @@ public static class CatalogVisibility
         CancellationToken ct = default)
         => VisibleTablesAsync(allTables, principal, tenantId, consentRepository, contract, catalogOwner: null, sharedTables: null, ct);
 
-    /// <summary>
-    /// Fail-closed default: this overload (and every overload without a surface) is <see cref="CatalogSurface.DataAccess"/>, never
-    /// <see cref="CatalogSurface.Discovery"/> (issue #111, pinned by test).
-    /// </summary>
-    public static Task<IReadOnlyList<TableMetadata>> VisibleTablesAsync(
-        IReadOnlyList<TableMetadata> allTables,
-        ClaimsPrincipal principal,
-        TenantId tenantId,
-        IConsentRepository? consentRepository,
-        Autheris.Application.Governance.Contracts.SchemaContractDefinition? contract,
-        TenantId? catalogOwner,
-        IEnumerable<string>? sharedTables,
-        CancellationToken ct = default)
-        => VisibleTablesAsync(allTables, principal, tenantId, consentRepository, contract, catalogOwner, sharedTables, CatalogSurface.DataAccess, ct);
-
-    /// <summary>Issue #111: as above for an explicit <paramref name="surface"/>; only the discovery call sites pass <see cref="CatalogSurface.Discovery"/>.</summary>
+    /// <summary>The data-access visibility: admins and consented tables only (fail closed).</summary>
     public static async Task<IReadOnlyList<TableMetadata>> VisibleTablesAsync(
         IReadOnlyList<TableMetadata> allTables,
         ClaimsPrincipal principal,
@@ -350,7 +260,6 @@ public static class CatalogVisibility
         Autheris.Application.Governance.Contracts.SchemaContractDefinition? contract,
         TenantId? catalogOwner,
         IEnumerable<string>? sharedTables,
-        CatalogSurface surface,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(allTables);
@@ -400,8 +309,7 @@ public static class CatalogVisibility
 
         // Scopes from the claims overload, as the data path (TableAccessPolicy) reads them.
         var visible = FilterForSubject(
-            allTables, activeConsents, tenantId, Autheris.Domain.Security.TokenAccessScope.GetScopeSet(principal.Claims),
-            surface, sharedTables, catalogOwner);
+            allTables, activeConsents, tenantId, Autheris.Domain.Security.TokenAccessScope.GetScopeSet(principal.Claims));
         return FilterByContract(visible, contract);
     }
 }

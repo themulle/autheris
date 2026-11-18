@@ -166,7 +166,7 @@ public sealed class PolicyCoreConsentUnionAndRlsSecurityTests
                     [
                         new TableColumn { ColumnName = "id" },
                         new TableColumn { ColumnName = "name" },
-                        new TableColumn { ColumnName = "salary", IsSensitive = true },
+                        new TableColumn { ColumnName = "salary" },
                         new TableColumn { ColumnName = "iban" },
                         new TableColumn { ColumnName = "ssn" }
                     ],
@@ -174,7 +174,7 @@ public sealed class PolicyCoreConsentUnionAndRlsSecurityTests
                     {
                         ["iban"] = new MaskingRule { RuleType = "REDACT" }
                     }
-                }));
+                }.WithPii("salary")));
 
             Masking.MaskValue(Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<MaskingRule>()).Returns("***");
         }

@@ -36,16 +36,15 @@ public sealed class CatalogViewDefaultsTests
     {
         var o = new DataCatalogOptions();
         o.MaxTagsPerDataset.ShouldBe(32);
-        o.DefaultVisibility.ShouldBe(DatasetVisibility.Hidden);
     }
 
     [Fact]
     public void DatasetCatalogChange_Changed_ComparesTagSetsAndVisibility()
     {
         var id = new TableIdentifier("d", "s", "t");
-        var a = new DatasetCatalogSettings([new DatasetTag("x", DatasetTagSource.Admin)], DatasetVisibility.Hidden);
+        var a = new DatasetCatalogSettings([new DatasetTag("x", DatasetTagSource.Admin)]);
         new DatasetCatalogChange(id, a, a with { Tags = [new DatasetTag("x", DatasetTagSource.Admin)] }).Changed.ShouldBeFalse();
-        new DatasetCatalogChange(id, a, a with { Visibility = DatasetVisibility.Summary }).Changed.ShouldBeTrue();
+        new DatasetCatalogChange(id, a, a with { DiscoveryHidden = true }).Changed.ShouldBeTrue();
         new DatasetCatalogChange(id, a, a with { Tags = [new DatasetTag("x", DatasetTagSource.Dbt)] }).Changed.ShouldBeTrue();
         new DatasetCatalogChange(id, a, a with { Tags = [] }).Changed.ShouldBeTrue();
     }

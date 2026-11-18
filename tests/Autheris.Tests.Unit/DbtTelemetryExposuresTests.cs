@@ -58,8 +58,7 @@ public sealed class DbtTelemetryExposuresTests
         var repo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
             Substitute.For<ITableMetadataRepository>());
         var table = CreateSampleTable();
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([table]));
+        repo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>([table]));
 
         var telemetry = new InMemoryTelemetryMetricsProvider();
         telemetry.RecordQueryExecution(table.Identifier, 12.4, "powerbi-executive");

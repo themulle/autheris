@@ -40,7 +40,6 @@ public sealed class CatalogTenantIsolationTests
             TableName = id.TableName,
             DisplayName = id.ToString(),
             Sensitivity = "NORMAL",
-            Visibility = DatasetVisibility.Hidden
         },
         Columns = [new TableColumn { ColumnName = "id", DataType = "int" }]
     };

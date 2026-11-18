@@ -39,8 +39,7 @@ public sealed class DatasourceTestingSecurityTests
     private DatasourceTestingService CreateService(GatewayOptions? options = null)
     {
         // Simulate empty catalog before table ingestion / initial onboarding
-        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([]));
+        _metadataRepo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>([]));
 
         var gatewayOptions = options ?? new GatewayOptions();
 

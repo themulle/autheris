@@ -30,7 +30,8 @@ public sealed class TypedMaskAttachmentTests
     {
         Identifier = Orders,
         Table = new Table { SourceName = "ds", SchemaName = "main", TableName = "orders", SourceType = "PostgreSQL" },
-        Columns = columns.Select(c => new TableColumn { ColumnName = c.Name, DataType = "TEXT", IsSensitive = c.Sensitive }).ToList(),
+        Columns = columns.Select(c => new TableColumn { ColumnName = c.Name, DataType = "TEXT" }).ToList(),
+        ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor(columns.Where(c => c.Sensitive).Select(c => c.Name).ToArray()),
         ColumnMaskingRules = columns.Where(c => c.Rule != null).ToDictionary(c => c.Name, c => c.Rule!)
     };
 

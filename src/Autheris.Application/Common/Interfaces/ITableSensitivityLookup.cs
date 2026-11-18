@@ -9,5 +9,5 @@ using Autheris.Domain.Common;
 /// </summary>
 public interface ITableSensitivityLookup
 {
-    ValueTask<bool> IsSensitiveAsync(TableIdentifier table, CancellationToken ct = default);
+    ValueTask<bool> HasSensitiveDataAsync(TableIdentifier table, CancellationToken ct = default);
 }

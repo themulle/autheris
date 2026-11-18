@@ -578,6 +578,7 @@ internal sealed partial class CrossTransportParityHarness : IAsyncDisposable
                 IsActive = s.Table.Table.IsActive
             },
             Columns = s.Table.Columns,
+            ColumnClassifications = s.Table.ColumnClassifications,
             ColumnMaskingRules = s.Table.ColumnMaskingRules
         };
         var lhRepo = new InMemoryTableRepo([lakehouseTable]);
@@ -666,6 +667,7 @@ internal sealed partial class CrossTransportParityHarness : IAsyncDisposable
                 IsActive = s.Table.Table.IsActive
             },
             Columns = s.Table.Columns,
+            ColumnClassifications = s.Table.ColumnClassifications,
             ColumnMaskingRules = s.Table.ColumnMaskingRules
         };
         var httpRepo = new InMemoryTableRepo([httpMeta]);
@@ -701,6 +703,7 @@ internal sealed partial class CrossTransportParityHarness : IAsyncDisposable
                 IsActive = s.Table.Table.IsActive
             },
             Columns = s.Table.Columns,
+            ColumnClassifications = s.Table.ColumnClassifications,
             ColumnMaskingRules = s.Table.ColumnMaskingRules
         };
         var subject = SecurityContextOf(s);

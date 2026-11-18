@@ -32,10 +32,10 @@ public sealed class McpDatasetDisplayNameTests
     private const string SharedId = "sales.dbo.shared_t";
     private const string Distinct = "ZQX-Distinct-Display-Name";
 
-    private static TableMetadata Row(string displayName, DatasetVisibility visibility = DatasetVisibility.Full, string name = "shared_t")
+    private static TableMetadata Row(string displayName, string name = "shared_t")
     {
         var t = Wp0.Table("sales", name, "Short text", ["id"]);
-        return t with { Table = t.Table with { DisplayName = displayName, Visibility = visibility, Sensitivity = "INTERNAL" } };
+        return t with { Table = t.Table with { DisplayName = displayName, Sensitivity = "INTERNAL" } };
     }
 
     private static GatewayOptions Opts(params TableMetadata[] rows) => new()
@@ -45,11 +45,11 @@ public sealed class McpDatasetDisplayNameTests
     };
 
     private static McpDatasetCatalog Catalog(
-        TableMetadata[] rows, ILogger<McpDatasetCatalog>? logger = null, ILogger<CatalogVisibilityService>? visLogger = null)
+        TableMetadata[] rows, ILogger<McpDatasetCatalog>? logger = null, ILogger<CatalogVisibilityService>? visLogger = null, int consented = int.MaxValue)
     {
         var options = Opts(rows);
         var tables = Wp0.Tables(rows);
-        var consents = Wp0.Consents();
+        var consents = Wp0.Consents(rows.Take(consented).Select(r => Wp0.Allow(r.Identifier, "S-USER", Wp0.TenantA)).ToArray());
         return new McpDatasetCatalog(
             tables, consents, Substitute.For<IGatewayExecutionService>(), Substitute.For<IAuditLogRepository>(),
             options: Options.Create(options), logger: logger,
@@ -94,15 +94,6 @@ public sealed class McpDatasetDisplayNameTests
         d.DisplayName.ShouldBe("shared_t");
     }
 
-    [Fact]
-    public async Task DescribeDataset_SummaryView_HasDisplayName_NoColumns()
-    {
-        var d = await Catalog([Row("Orders (EU)", DatasetVisibility.Summary)]).DescribeDatasetAsync(Subject(), SharedId);
-
-        d.View.ShouldNotBeNull();
-        d.DisplayName.ShouldBe("Orders (EU)");
-        d.Columns.ShouldBeEmpty();
-    }
 
     [Fact]
     public async Task DisplayName_OversizedAndControlChars_SanitisedInBothTools()
@@ -124,7 +115,7 @@ public sealed class McpDatasetDisplayNameTests
     public async Task HiddenTable_DistinctiveDisplayName_AbsentFromListJsonAndDescribeError()
     {
         // SEC-CAT146A-07: a table the visibility layer hides yields no row at all, not a blanked one; the error echoes the caller input only.
-        var catalog = Catalog([Row(Distinct, DatasetVisibility.Hidden)]);
+        var catalog = Catalog([Row(Distinct)], consented: 0);
 
         Json(await catalog.ListDatasetsAsync(Subject())).ShouldNotContain(Distinct);
         var ex = await Should.ThrowAsync<TableNotFoundException>(() => catalog.DescribeDatasetAsync(Subject(), SharedId));
@@ -136,8 +127,8 @@ public sealed class McpDatasetDisplayNameTests
     public async Task UnconsentedUnmarkedTable_DisplayNameAbsent()
     {
         // SEC-CAT146A-07: an untiered (Unmarked) table that no consent releases is invisible to a non-admin caller.
-        var row = Row(Distinct, DatasetVisibility.Hidden) with { CatalogView = CatalogView.Unmarked };
-        var catalog = Catalog([row]);
+        var row = Row(Distinct) with { CatalogView = CatalogView.Unmarked };
+        var catalog = Catalog([row], consented: 0);
 
         var list = await catalog.ListDatasetsAsync(Subject());
 
@@ -170,7 +161,7 @@ public sealed class McpDatasetDisplayNameTests
         // SEC-CAT146A-06 / T-CAT146A-07
         var log = new CapturingLogger<McpDatasetCatalog>();
         var visLog = new CapturingLogger<CatalogVisibilityService>();
-        var catalog = Catalog([Row(Distinct), Row(Distinct + "-hidden", DatasetVisibility.Hidden, "hidden_t")], logger: log, visLogger: visLog);
+        var catalog = Catalog([Row(Distinct), Row(Distinct + "-hidden", "hidden_t")], logger: log, visLogger: visLog, consented: 1);
 
         await catalog.ListDatasetsAsync(Subject());
         await catalog.DescribeDatasetAsync(Subject(), SharedId);

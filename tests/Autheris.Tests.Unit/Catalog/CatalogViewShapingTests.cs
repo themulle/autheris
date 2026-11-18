@@ -12,15 +12,11 @@ public sealed class CatalogViewShapingTests
     [Theory]
     [InlineData(CatalogView.Unmarked)]
     [InlineData(CatalogView.Granted)]
-    [InlineData(CatalogView.Summary)]
-    [InlineData(CatalogView.Full)]
     public void F_C11_Admin_GetsFullOutput_ForEveryView(CatalogView view) =>
         CatalogViewShaping.Resolve(isAdmin: true, view).ShouldBe(CatalogOutputShape.Full);
 
     [Theory]
     [InlineData(CatalogView.Granted, CatalogOutputShape.Full)]
-    [InlineData(CatalogView.Full, CatalogOutputShape.Full)]
-    [InlineData(CatalogView.Summary, CatalogOutputShape.Summary)]
     [InlineData(CatalogView.Unmarked, CatalogOutputShape.NotFound)]
     public void F_C11_NonAdmin_FollowsTheViewPositively(CatalogView view, CatalogOutputShape expected) =>
         CatalogViewShaping.Resolve(isAdmin: false, view).ShouldBe(expected);

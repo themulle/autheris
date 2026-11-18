@@ -212,7 +212,7 @@ public sealed class Issue271SecurityAuditVerificationTests
         };
 
         var metaRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
-        metaRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([meta]);
+        metaRepo.StubAllTables([meta]);
 
         var consentRepo = Substitute.For<IConsentRepository>();
         var userSid = new Sid("S-1-5-21-TEST");

@@ -58,13 +58,13 @@ public sealed class GovernedAggregationAndMetricsTests
                 new TableColumn { TableId = tableId, ColumnName = "department", DataType = "varchar" },
                 new TableColumn { TableId = tableId, ColumnName = "status", DataType = "varchar" },
                 new TableColumn { TableId = tableId, ColumnName = "amount", DataType = "decimal" },
-                new TableColumn { TableId = tableId, ColumnName = "discount_secret", DataType = "decimal", IsSensitive = true }
+                new TableColumn { TableId = tableId, ColumnName = "discount_secret", DataType = "decimal" }
             ],
             ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
             {
                 ["discount_secret"] = new MaskingRule { RuleType = "REDACT" }
             }
-        };
+        }.WithPii("discount_secret");
     }
 
     private static ClaimsPrincipal CreatePrincipal(string sid, string tenant = "tenant-a", string role = "Analyst") =>
@@ -583,7 +583,7 @@ public sealed class GovernedAggregationAndMetricsTests
         var metadata = CreateOrdersMetadata(minGroupSize: 5);
         var metaRepo = Substitute.For<ITableMetadataRepository>();
         metaRepo.GetTableMetadataAsync(OrdersTableId, Arg.Any<CancellationToken>()).Returns(metadata);
-        metaRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([metadata]);
+        metaRepo.StubAllTables([metadata]);
 
         // 10 EU Software orders (amount = 100 each -> mrr = 1000, survives), 5 EU Services orders (complementary suppressed),
         // 2 EU Hardware orders (amount = 50 each -> primary suppressed because 2 < 5),

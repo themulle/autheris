@@ -43,7 +43,7 @@ public sealed class CatalogTransportDiscoveryTests
         var meta = Substitute.For<ITableMetadataRepository>();
         var rel = Substitute.For<ITableRelationRepository>();
         rel.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns([]);
-        meta.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(new List<TableMetadata> { Table("visible_t", "open_src"), Table("hidden_t", "secret_src") });
+        meta.StubAllTables(new List<TableMetadata> { Table("visible_t", "open_src"), Table("hidden_t", "secret_src") });
         return (new CatalogGraphQlTypeModule(meta, rel, transportResolver: resolver), meta);
     }
 

@@ -27,8 +27,7 @@ public sealed class SemanticMcpCompilerTests
             Columns = [new TableColumn { ColumnName = "id", DataType = "int" }]
         };
         var repo = Substitute.For<ITableMetadataRepository>();
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([table]));
+        repo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>([table]));
         return Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(repo);
     }
 
