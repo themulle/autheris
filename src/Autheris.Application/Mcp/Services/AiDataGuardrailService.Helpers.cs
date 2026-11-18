@@ -311,10 +311,11 @@ public sealed partial class AiDataGuardrailService
     }
 
     /// <summary>
-    /// Applies the per-call token budget (MCP-08): a catalog result above <c>Mcp.MaxTokensPerCall</c> is shortened by whole datasets, any other result is replaced by a truncation notice.
-    /// Shared by dataset tools and doc tools so no tool skips the budget.
+    /// Applies the per-call token budget (MCP-08): a catalog result above <c>Mcp.MaxTokensPerCall</c> is shortened by whole datasets or, for
+    /// <c>describe_dataset</c>, whole columns (issue #820; <paramref name="argumentsJson"/> carries the column cursor), any other result is
+    /// replaced by a truncation notice. Shared by dataset tools and doc tools so no tool skips the budget.
     /// </summary>
-    private string ApplyTokenBudget(string toolName, string json, out int estimatedTokens, out bool truncated)
+    private string ApplyTokenBudget(string toolName, string json, out int estimatedTokens, out bool truncated, string? argumentsJson = null)
     {
         int maxTokens = _options.Value.Mcp.MaxTokensPerCall > 0 ? _options.Value.Mcp.MaxTokensPerCall : 4096;
         estimatedTokens = Math.Max(1, json.Length / 4);
@@ -324,7 +325,7 @@ public sealed partial class AiDataGuardrailService
         {
             _logger.LogWarning("Tool result for '{ToolName}' ({EstimatedTokens} tokens) exceeded max token budget ({MaxTokens}). Truncating result.", toolName, estimatedTokens, maxTokens);
             int maxChars = maxTokens * 4;
-            if (json.Length > maxChars && McpBudgetShortening.TryShorten(toolName, json, maxChars, maxTokens, out var shortened))
+            if (json.Length > maxChars && McpBudgetShortening.TryShorten(toolName, json, argumentsJson, maxChars, maxTokens, out var shortened))
             {
                 json = shortened;
                 estimatedTokens = Math.Max(1, json.Length / 4);
@@ -337,7 +338,7 @@ public sealed partial class AiDataGuardrailService
                     _meta = new
                     {
                         truncated = true, reason = "TOKEN_BUDGET_EXCEEDED", warning = "[TRUNCATED DUE TO MCP TOKEN BUDGET]",
-                        maxTokens, note = "Result exceeded token budget. Use pagination (offset/limit) or filters to narrow the result."
+                        maxTokens, note = McpBudgetShortening.NoticeNote(toolName, argumentsJson)
                     }
                 });
                 estimatedTokens = Math.Max(1, json.Length / 4);
@@ -393,7 +394,7 @@ public sealed partial class AiDataGuardrailService
         McpSessionContext sessionContext,
         CancellationToken ct) =>
         tool.Name.Equals(McpDatasetTools.CallProcedure, StringComparison.OrdinalIgnoreCase)
-            ? Task.FromResult(ResolveProcedureTables(argumentsJson))
+            ? Task.FromResult(ResolveProcedureTables(argumentsJson, sessionContext))
             : ResolveMetricTablesAsync(argumentsJson, sessionContext, ct);
 
     /// <summary>
@@ -401,7 +402,7 @@ public sealed partial class AiDataGuardrailService
     /// the validated referenced tables of an Active procedure plus its result table, each keyed under the procedure's catalog domain.
     /// Unknown and non-Active procedures resolve to no tables alike (the executor refuses both).
     /// </summary>
-    private IReadOnlyList<TableIdentifier>? ResolveProcedureTables(string? argumentsJson)
+    private IReadOnlyList<TableIdentifier>? ResolveProcedureTables(string? argumentsJson, McpSessionContext sessionContext)
     {
         var name = McpDatasetTools.ProcedureNameArgument(argumentsJson);
         if (name == null || _procedureRegistry == null)
@@ -421,6 +422,15 @@ public sealed partial class AiDataGuardrailService
             // A non-Active procedure reads nothing: the executor refuses it (NOT_FOUND, or unavailable only for callers that may
             // see it). Denying here would answer it differently from an unknown procedure (02 existence oracle).
             return [];
+        }
+
+        if (!string.IsNullOrWhiteSpace(registered.Definition.ProductSchema))
+        {
+            // a product procedure is governed on its product object (the tables its SQL touches carry no consent for the caller)
+            var principal = McpProtocolHandler.BuildPrincipalFromSession(sessionContext);
+            return Autheris.Application.Catalog.Semantic.SemanticTenancy.FromOptions(_options).ResolveCallerTenant(principal) is { } tenant
+                ? [Autheris.Application.Products.ProductSource.ObjectOf(tenant, registered.Definition.ProductSchema.Trim().ToLowerInvariant(), registered.Definition.Name.ToLowerInvariant())]
+                : null;
         }
 
         var tables = registered.GovernedTables();

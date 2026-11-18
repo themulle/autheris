@@ -203,7 +203,7 @@ public static class McpDatasetTools
 
         yield return new McpToolDefinition(
             Name: ListDatasets,
-            Description: "Lists the datasets (tables) you may query with their GraphQL field, and all protocols of the gateway. Start here, then call describe_dataset and query with query_graphql.",
+            Description: "Lists the datasets (tables) you may query with their GraphQL field, and all protocols of the gateway (format 'compact' leaves out the GraphQL field and the protocols). Start here, then call describe_dataset and query with query_graphql.",
             InputJsonSchema: """
             {
               "type": "object",
@@ -211,11 +211,12 @@ public static class McpDatasetTools
                 "search": { "type": "string", "description": "Optional text matched against dataset ids, descriptions and column names." },
                 "domain": { "type": "string", "description": "Optional business domain filter (e.g. 'sales')." },
                 "tag": { "type": "string", "description": "Optional tag filter to find datasets with a matching tag (e.g. 'finance', 'pii', 'sales')." },
+                "accessStatus": { "type": "string", "enum": ["GRANTED", "PENDING", "EXPIRED", "REQUEST_ACCESS"], "description": "Optional: only datasets with this accessStatus for you (GRANTED: you can read it; REQUEST_ACCESS: visible, request access to read it; PENDING: your access request is open; EXPIRED: your access expired recently). Applied before paging: total and nextOffset count the filtered datasets." },
                 "offset": { "type": "integer", "minimum": 0, "description": "Optional pagination offset (default 0)." },
                 "limit": { "type": "integer", "minimum": 1, "maximum": 100, "description": "Optional maximum datasets to return per page (default 50, max 100)." },
                 "language": { "type": "string", "description": "Optional BCP 47 language tag (e.g. 'de', 'en') or Accept-Language range for localized dataset titles and descriptions." },
                 "overview": { "type": "boolean", "description": "When true, returns an aggregated summary of business domains and table counts without paginating individual datasets (optimal for large catalogs in <200 tokens)." },
-                "format": { "type": "string", "enum": ["full", "compact"], "description": "Output format: 'full' (default) or 'compact' (dense table list omitting verbose access paths, ideal for LLM token efficiency)." }
+                "format": { "type": "string", "enum": ["full", "compact"], "description": "Output format: 'full' (default) or 'compact': each dataset as id, display name (only when it differs from the table name), first sentence of the description, sensitivity and access status; no GraphQL field, column count, tags, size or access paths." }
               }
             }
             """,
@@ -230,11 +231,11 @@ public static class McpDatasetTools
               "required": ["dataset"],
               "properties": {
                 "dataset": { "type": "string", "description": "Dataset id as returned by list_datasets (domain.schema.table)." },
-                "brief": { "type": "boolean", "description": "When true, returns only the short description and essential column signatures (name, type, pk) omitting bulky profiling and golden queries to save tokens." },
+                "brief": { "type": "boolean", "description": "When true, returns column signatures only (name, type, access, primaryKey on key columns) plus the primary key order, indexes and required filter columns; no column descriptions, classifications, value profiles, GraphQL block or example queries." },
                 "language": { "type": "string", "description": "Optional BCP 47 language tag (e.g. 'de', 'en') or Accept-Language range for localized dataset and column descriptions." },
                 "include": { "type": "array", "items": { "type": "string", "enum": ["columns", "keys", "indexes", "relations", "examples", "graphql", "access", "longDescription"] }, "description": "Optional sections to return; sections not listed are omitted (default: all, without column long descriptions). Add longDescription together with columns to receive the long description of each returned column." },
                 "columns": { "type": "array", "items": { "type": "string" }, "description": "Optional column names; only these columns are returned (columnTotal reports the full count)." },
-                "columnOffset": { "type": "integer", "minimum": 0, "description": "Number of columns to skip when paging through the columns (default 0)." },
+                "columnOffset": { "type": "integer", "minimum": 0, "description": "Number of columns to skip when paging through the columns (default 0). An answer shortened to the token budget names the next value in _meta.nextColumnOffset." },
                 "columnLimit": { "type": "integer", "minimum": 1, "maximum": 500, "description": "Maximum number of columns to return when paging through the columns." },
                 "relations": { "type": "string", "description": "Optional term; only GraphQL relations whose field or target dataset contains it are returned." }
               }
@@ -324,7 +325,7 @@ public static class McpDatasetTools
 
         yield return new McpToolDefinition(
             Name: SearchCatalog,
-            Description: "Performs hybrid semantic vector and keyword search across thousands of tables in the catalog. Input natural language inquiries (e.g. 'monthly revenue by customer', 'unpaid invoices') or exact table codes. Returns ranked candidate tables, relevance score, matching columns, and explicit join relations.",
+            Description: "Performs hybrid semantic vector and keyword search across thousands of tables in the catalog. Input natural language inquiries (e.g. 'monthly revenue by customer', 'unpaid invoices') or exact table codes. Returns ranked candidate tables, relevance score, matching columns, explicit join relations and your accessStatus per table (GRANTED: you can read it). Search your readable tables first with accessStatus 'GRANTED'.",
             InputJsonSchema: """
             {
               "type": "object",
@@ -334,6 +335,7 @@ public static class McpDatasetTools
                 "domain": { "type": "string", "description": "Optional business domain filter (e.g. 'sales', 'finance', 'core')." },
                 "limit": { "type": "integer", "description": "Maximum number of candidate tables to return (default: 5, max: 20)." },
                 "tag": { "type": "string", "description": "Optional exact tag filter (case-insensitive), same as on list_datasets; only datasets carrying the tag are returned." },
+                "accessStatus": { "type": "string", "enum": ["GRANTED", "PENDING", "EXPIRED", "REQUEST_ACCESS"], "description": "Optional: only tables with this accessStatus for you, same values as on list_datasets (GRANTED: you can read it; REQUEST_ACCESS: request access first). Applied before ranking and the limit." },
                 "mode": { "type": "string", "enum": ["hybrid", "semantic", "keyword"], "description": "Search mode: 'hybrid' (default), 'semantic', or 'keyword'." },
                 "language": { "type": "string", "description": "Optional BCP 47 language tag (e.g. 'de', 'en') or Accept-Language range for query language bias and localized hit descriptions." }
               }
@@ -343,7 +345,7 @@ public static class McpDatasetTools
 
         yield return new McpToolDefinition(
             Name: FindRelevantTables,
-            Description: "Discovers the required tables, columns, and foreign key join conditions for an AI application, report, or dashboard use-case across 10,000+ tables. Performs hybrid semantic and keyword search, returning ranked candidate tables with join conditions in a compact token-efficient response.",
+            Description: "Discovers the required tables, columns, and foreign key join conditions for an AI application, report, or dashboard use-case across 10,000+ tables. Performs hybrid semantic and keyword search, returning ranked candidate tables with join conditions and your accessStatus per table (GRANTED: you can read it) in a compact token-efficient response.",
             InputJsonSchema: """
             {
               "type": "object",
@@ -352,7 +354,8 @@ public static class McpDatasetTools
                 "use_case": { "type": "string", "description": "Natural language description of the report, app, or query requirement (e.g. 'Customer revenue and margin by sales region')." },
                 "domain": { "type": "string", "description": "Optional business domain filter (e.g. 'sales', 'finance')." },
                 "limit": { "type": "integer", "description": "Maximum candidate tables to return (default: 5, max: 20)." },
-                "language": { "type": "string", "description": "Optional BCP 47 language tag." }
+                "language": { "type": "string", "description": "Optional BCP 47 language tag." },
+                "accessStatus": { "type": "string", "enum": ["GRANTED", "PENDING", "EXPIRED", "REQUEST_ACCESS"], "description": "Optional: only tables with this accessStatus for you, same values as on list_datasets (GRANTED: you can read it; REQUEST_ACCESS: request access first). Applied before ranking and the limit." }
               }
             }
             """,
@@ -449,7 +452,7 @@ public static class McpDatasetTools
 
         yield return new McpToolDefinition(
             Name: CallProcedure,
-            Description: "Executes a governed stored procedure or table-valued function with input validation, concurrency control, row-level security, and column masking under the caller's context.",
+            Description: "Executes a governed stored procedure or table-valued function with input validation, concurrency control, row-level security, and column masking under the caller's context. A procedure declared with mode write changes data: it needs an execute-write grant on its data product, is refused for read-only tokens, returns no rows and is audited before and after the call; the tool is therefore annotated as destructive unless the session is read-only.",
             InputJsonSchema: """
             {
               "type": "object",

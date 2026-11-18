@@ -77,7 +77,7 @@ public static class McpToolAnnotations
             McpSemanticTools.QueryMetrics, "query_data_catalog", "get_golden_queries", "simulate_query",
             "query_customers", "query_invoices", McpAdminTools.ResolvePrincipal,
             McpDocTools.SearchDocs, McpDocTools.LookupErrorCode, McpDocTools.GetProcedure,
-            McpDocTools.ListDocTopics, McpDocTools.ListApplications);
+            McpDocTools.ListDocTopics, McpDocTools.ListApplications, McpDocTools.ReadDocument);
 
         Add(Effect.Adds, McpDatasetTools.RequestAccess, McpAdminTools.PlanAccess, McpAdminTools.PlanRowFilterEvaluation, McpAdminTools.RegisterDatasource);
 

@@ -56,6 +56,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
     private readonly Autheris.Application.Catalog.Semantic.ISemanticCatalogService? _semanticCatalog;
     private readonly Autheris.Application.Catalog.Interfaces.ICatalogVisibilityService? _catalogVisibility;
     private readonly Autheris.Application.Docs.Interfaces.IDocIndexReadiness? _docIndexReadiness;
+    private readonly Autheris.Application.Docs.Services.IDocLinkCallerView? _docLinkReader;
     private readonly Autheris.Application.Audit.IAuditWriter? _auditWriter;
 
     private static readonly TimeSpan DefaultRegexTimeout = TimeSpan.FromMilliseconds(250);
@@ -89,8 +90,10 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         Autheris.Application.Catalog.Semantic.ISemanticCatalogService? semanticCatalog = null,
         Autheris.Application.Catalog.Interfaces.ICatalogVisibilityService? catalogVisibility = null,
         Autheris.Application.Docs.Interfaces.IDocIndexReadiness? docIndexReadiness = null,
-        Autheris.Application.Audit.IAuditWriter? auditWriter = null)
+        Autheris.Application.Audit.IAuditWriter? auditWriter = null,
+        Autheris.Application.Docs.Services.IDocLinkCallerView? docLinkReader = null)
     {
+        _docLinkReader = docLinkReader;
         _toolRegistry = toolRegistry ?? throw new ArgumentNullException(nameof(toolRegistry));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -247,7 +250,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
 
         if (McpDocTools.IsDocTool(tool.Name))
         {
-            var rawDocJson = await McpDocTools.ExecuteDocToolAsync(tool.Name, request.ArgumentsJson ?? "{}", _docSearchService, _docStore, sessionContext, _auditWriter, _docIndexReadiness, cancellationToken).ConfigureAwait(false);
+            var rawDocJson = await McpDocTools.ExecuteDocToolAsync(tool.Name, request.ArgumentsJson ?? "{}", _docSearchService, _docStore, sessionContext, _auditWriter, _docIndexReadiness, _docLinkReader, cancellationToken).ConfigureAwait(false);
             bool docWasMasked = false;
             string scrubbedDocJson = !_options.Value.IsMcpUnmaskedAllowed ? ScrubPiiAndSensitiveData(rawDocJson, out docWasMasked) : rawDocJson;
             bool isError = TryGetExecutorError(rawDocJson, out var docErr);
@@ -591,7 +594,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         }
 
         scrubbedJson = await InspectOutputAsync(tool.Name, scrubbedJson, sessionContext, cancellationToken, m => wasMasked |= m).ConfigureAwait(false);
-        scrubbedJson = ApplyTokenBudget(tool.Name, scrubbedJson, out var estimatedTokens, out var truncated);
+        scrubbedJson = ApplyTokenBudget(tool.Name, scrubbedJson, out var estimatedTokens, out var truncated, argsJson);
 
         await RecordAuditEventAsync(tool.Name, sessionContext, "ALLOW", "Tool executed successfully under AI guardrails.", wasMasked, truncated, estimatedTokens, cancellationToken).ConfigureAwait(false);
 

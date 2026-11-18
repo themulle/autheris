@@ -686,6 +686,15 @@ public sealed partial class ConsentDecisionPipeline(
                     throw new ConsentDecisionException("BAD_REQUEST", $"Invalid accessLevel '{input.AccessLevel}'.", statusCode: 400);
                 }
 
+                // A blank scope entry is stored as no scope and would turn a scope rule into a base rule for every scope (fail closed).
+                if (!ConsentRuleScopeValidator.AreValid(input.ApplicableScopes))
+                {
+                    throw new ConsentDecisionException(
+                        "BAD_REQUEST",
+                        $"Column '{input.ColumnName}' has a blank scope entry or a scope entry that contains a comma; list scope names only.",
+                        statusCode: 400);
+                }
+
                 parsedByCol[input.ColumnName] = input;
             }
 
@@ -751,7 +760,6 @@ public sealed partial class ConsentDecisionPipeline(
         Status = status,
         RequestedAt = req.RequestedAt,
         RequestedValidTo = req.RequestedValidTo,
-        ItsmTicketId = req.ItsmTicketId,
         TenantId = req.TenantId,
         ContextJson = req.ContextJson,
         RequesterIdentifiers = [.. req.RequesterIdentifiers],

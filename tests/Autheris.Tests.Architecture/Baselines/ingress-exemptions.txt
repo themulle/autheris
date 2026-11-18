@@ -88,6 +88,9 @@ route /api/v1/consents/bulk | governance, consent, ReBAC, FinOps or ext-authz ro
 route /api/v1/docs/apps | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
 route /api/v1/docs/apps/{appId}/bundle | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
 route /api/v1/docs/apps/{appId}/documents/{category}/{docId} | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
+route /api/v1/docs/apps/{appId}/documents/{category}/{docId}/discovery | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
+route /api/v1/docs/apps/{appId}/documents/{category}/{docId}/links | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
+route /api/v1/docs/apps/{appId}/links | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
 route /api/v1/docs/apps/{appId}/manifest | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
 route /api/v1/docs/errors/{errorCode} | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
 route /api/v1/docs/procedures/{*identifier} | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
@@ -129,6 +132,7 @@ route /api/v1/governance/virtual-filters/sync/apply | governance, consent, ReBAC
 route /api/v1/governance/virtual-filters/sync/plan | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/governance/virtual-filters/sync/status | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/governance/virtual-filters/sync/webhook | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
+route /api/v1/products/sync/webhook/{tenant} | governance, signed Git push webhook; anonymous, signature-authenticated, no C1..C5 choke point
 route /api/v1/profiles | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/profiles/{id} | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/profiles/{id}/assignments/approve | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
@@ -173,6 +177,7 @@ scope src/Autheris.Application/Catalog/Search/OllamaEmbeddingGenerator.cs | exem
 scope src/Autheris.Application/Events/InMemoryGatewayEventBus.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Application/Policy/RowScopes/PatternCoverageMonitor.cs | exempt: infrastructure background work (pattern grant catalog epoch monitor); governance repositories only, reaches no governed data
 scope src/Autheris.Application/Procedures/Services/ProcedureRegistrationService.cs | exempt: procedure registry sync; reaches no governed data
+scope src/Autheris.Application/Products/FederationProductQueryRunner.cs | copy: stamps the WebSql ingress transport in the load scope; the definer run is judged by the WebSql transport flag of every source it reads
 scope src/Autheris.Application/Runtime/Hosting/ClusterPartitionedService.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Application/Runtime/Hosting/ClusterScheduledService.cs | exempt: cluster-scheduled lease runner; reaches no governed data
 scope src/Autheris.Application/Runtime/Jobs/Services/AsyncJobScheduler.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data

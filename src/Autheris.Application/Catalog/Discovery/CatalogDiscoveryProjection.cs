@@ -28,7 +28,13 @@ public static class CatalogDiscoveryProjection
 
     public static CatalogDatasetDetail ToDatasetDetail(DiscoveryObject obj, string? language)
     {
-        var columns = obj.Columns.Select(c => new CatalogColumnDetail(
+        // #805/#807: keys, indexes and required filters as projected for this caller by the discovery core.
+        var shape = obj.QueryShape ?? DiscoveryQueryShape.Empty;
+        var primaryKeys = new HashSet<string>(shape.PrimaryKeyColumns, StringComparer.OrdinalIgnoreCase);
+        // Without access every column is listed as Deny, so the caller can see what to request; with access a column the caller is
+        // denied is not listed at all.
+        var granted = obj.Access == DiscoveryAccessState.Granted;
+        var columns = obj.Columns.Where(c => !granted || c.State != DiscoveryColumnState.NoAccess).Select(c => new CatalogColumnDetail(
             Name: c.Name,
             Type: c.DataType,
             Sensitivity: c.Pii ? "Sensitive" : "Public",
@@ -38,7 +44,7 @@ public static class CatalogDiscoveryProjection
                 DiscoveryColumnState.Masked => "Masked",
                 _ => "Deny"
             },
-            IsPrimaryKey: false, IsPiiIndicator: c.Pii,
+            IsPrimaryKey: primaryKeys.Contains(c.Name), IsPiiIndicator: c.Pii,
             DisplayName: obj.HiddenTextColumns.Contains(c.Name) ? null : (c.DisplayName ?? c.Name),
             Description: obj.HiddenTextColumns.Contains(c.Name) ? null : c.Description,
             Classifications: c.Classifications, ClearRequestable: c.ClearRequestable)).ToList();
@@ -49,14 +55,18 @@ public static class CatalogDiscoveryProjection
             Schema: obj.Schema,
             Table: obj.Name,
             Columns: columns,
-            PrimaryKeys: [],
+            PrimaryKeys: shape.PrimaryKeyColumns,
             Sensitivity: obj.Sensitivity,
             IsActive: true,
-            Indexes: [],
+            Indexes: shape.Indexes,
             DisplayName: obj.DisplayName,
             Description: obj.Description,
             LongDescription: null,
-            Language: language);
+            Language: language,
+            // Issue #390 contract: parallel to PrimaryKeys, null unless a column is descending.
+            PrimaryKeyDirections: KeyDirections.AnyDescending(shape.PrimaryKeyDirections) ? KeyDirections.ToWire(shape.PrimaryKeyDirections) : null,
+            RequiredFilterColumns: shape.RequiredFilterColumns.Count == 0 ? null : shape.RequiredFilterColumns,
+            RequiredFilterColumnGroups: shape.RequiredFilterColumnGroups.Count == 0 ? null : shape.RequiredFilterColumnGroups);
     }
 
     public static CatalogSearchHit ToSearchHit(DiscoveryObject obj, string? effectiveMode, string? language) =>
@@ -76,7 +86,8 @@ public static class CatalogDiscoveryProjection
             EffectiveMode: effectiveMode,
             Language: language,
             Kind: obj.Kind.ToString().ToLowerInvariant(),
-            DatasetId: $"{obj.Domain}.{obj.Schema}.{obj.Name}");
+            DatasetId: $"{obj.Domain}.{obj.Schema}.{obj.Name}",
+            AccessStatus: CatalogAccessStatus.Of(obj.Access));
 
     public static IReadOnlyList<CatalogDatasetSummary> FilterProcedureSummaries(
         IReadOnlyList<RegisteredProcedure> visibleProcedures,
@@ -123,6 +134,7 @@ public static class CatalogDiscoveryProjection
                 RelatedJoinPaths: [],
                 SuggestedGraphQlField: null,
                 Kind: "procedure",
-                DatasetId: $"procedure:{p.Definition.Name}"))
+                DatasetId: $"procedure:{p.Definition.Name}",
+                AccessStatus: CatalogAccessStatus.Granted))
             .ToList();
 }

@@ -74,6 +74,18 @@ public static class DocAccessPolicy
         return null;
     }
 
+    /// <summary>
+    /// Official documents and the caller tenant's documents; a document that is hidden from discovery stays visible
+    /// only to its writer (canonical ClusterAdmin for official documents, GovernanceAdmin for the tenant's own).
+    /// </summary>
     public static DocAccessScope ResolveReader(DocCaller caller) =>
-        DocAccessScope.ForTenant(caller?.TenantId);
+        caller is null
+            ? DocAccessScope.OfficialOnly
+            : DocAccessScope.ForTenant(
+                caller.TenantId,
+                hiddenOfficialVisible: caller.HasSession && !caller.IsReadOnlySession && caller.IsCanonicalClusterAdmin,
+                hiddenTenantVisible: caller.HasSession && !caller.IsReadOnlySession && caller.IsGovernanceAdmin);
+
+    /// <summary>The scope of a caller that must never see documents hidden from discovery (discovery output, linked documents).</summary>
+    public static DocAccessScope ResolveDiscoveryReader(string? tenantId) => DocAccessScope.ForTenant(tenantId);
 }

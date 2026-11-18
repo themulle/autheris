@@ -42,7 +42,6 @@ public sealed class ConsentRequest
     public string Status { get; set; } = "PENDING"; // PENDING, APPROVED, REJECTED, EXPIRED, ESCALATED, PENDING_EXTERNAL_APPROVAL
     public DateTimeOffset RequestedAt { get; init; } = DateTimeOffset.UtcNow;
     public DateTimeOffset RequestedValidTo { get; init; }
-    public string? ItsmTicketId { get; set; }
     public TenantId TenantId { get; set; }
     public string? ContextJson { get; set; }
     public List<string> RequesterIdentifiers { get; init; } = new();

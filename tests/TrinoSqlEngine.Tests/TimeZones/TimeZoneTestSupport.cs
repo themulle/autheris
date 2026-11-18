@@ -29,8 +29,8 @@ internal static class TimeZoneTestSupport
             new CatalogColumn("OccurredOn", date), new CatalogColumn("Label", text), new CatalogColumn("Version", dialect == TargetSqlDialect.SqlServer ? "timestamp" : plain), new CatalogColumn("UpdatedAt", plain));
         return new InMemoryTableCatalog(
         [
-            new TableCatalogEntry(Events, columns, "TenantId", 1),
-            new TableCatalogEntry(Other, columns, "TenantId", 1)
+            new TableCatalogEntry(Events, columns, null, 1),
+            new TableCatalogEntry(Other, columns, null, 1)
         ], "dbo");
     }
 

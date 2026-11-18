@@ -1,0 +1,7 @@
+{
+  "ops": [
+    { "op": "dropIndex", "table": "CONSENT_REQUESTS", "name": "ux_consent_requests_ticket" },
+    { "op": "dropColumn", "table": "CONSENT_REQUESTS", "name": "itsm_ticket_id" },
+    { "op": "dropColumn", "table": "TABLE_CATALOG_SETTINGS", "name": "visibility" }
+  ]
+}

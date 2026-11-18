@@ -59,7 +59,8 @@ public sealed record DocChunk(
     string? AnchorId,
     DateTimeOffset UpdatedAt,
     string? TenantId = null,
-    [property: JsonIgnore] string? AuthorSid = null
+    [property: JsonIgnore] string? AuthorSid = null,
+    [property: JsonIgnore] bool DiscoveryHidden = false
 )
 {
     /// <summary>

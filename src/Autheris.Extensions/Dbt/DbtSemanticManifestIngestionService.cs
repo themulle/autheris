@@ -41,7 +41,7 @@ public sealed class SemanticManifestPartialException : Exception
 
 public sealed class DbtSemanticManifestIngestionService : IDbtSemanticManifestIngestionService
 {
-    private readonly ISemanticCatalogService _catalogService;
+    private readonly ISemanticMetricImport _metricImport;
     private readonly ILogger<DbtSemanticManifestIngestionService> _logger;
     private readonly ITableMetadataRepository? _tableRepository;
     private readonly Autheris.Application.Governance.Interfaces.IDatasetTagImportService? _tagImport;
@@ -53,7 +53,7 @@ public sealed class DbtSemanticManifestIngestionService : IDbtSemanticManifestIn
     private static readonly string?[] SemanticModelTags = ["dbt", "semantic-model"];
 
     public DbtSemanticManifestIngestionService(
-        ISemanticCatalogService catalogService,
+        ISemanticMetricImport metricImport,
         ILogger<DbtSemanticManifestIngestionService> logger,
         ITableMetadataRepository? tableRepository = null,
         Autheris.Application.Governance.Interfaces.IDatasetTagImportService? tagImport = null,
@@ -64,7 +64,7 @@ public sealed class DbtSemanticManifestIngestionService : IDbtSemanticManifestIn
     {
         _catalogWriteScopes = catalogWriteScopeFactory;
         _tagImport = tagImport;
-        _catalogService = catalogService ?? throw new ArgumentNullException(nameof(catalogService));
+        _metricImport = metricImport ?? throw new ArgumentNullException(nameof(metricImport));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _tableRepository = tableRepository;
         _validator = validator ?? new SemanticManifestValidator(PolicyParserSetup.CreateParser(), Options.Create(new SemanticOptions()));
@@ -92,7 +92,7 @@ public sealed class DbtSemanticManifestIngestionService : IDbtSemanticManifestIn
         }
 
         // Persist and swap the catalog first (atomic, all or nothing); the idempotent virtual-table upserts follow (M-4).
-        await _catalogService.RegisterManifestAsync(manifest, tenantId, importedBy, cancellationToken).ConfigureAwait(false);
+        await _metricImport.ImportAsync(manifest, tenantId, importedBy, cancellationToken).ConfigureAwait(false);
 
         try
         {
@@ -482,7 +482,9 @@ public sealed class DbtSemanticManifestIngestionService : IDbtSemanticManifestIn
                     PrimaryKeyColumns = primaryKeys
                 };
 
-                pendingTables.Add(tableMeta);
+                // A re-import never loosens stored governance: merge with the persisted entry (new tables are unchanged).
+                var existingMeta = await _tableRepository.GetTableMetadataAsync(tableMeta.Identifier, cancellationToken).ConfigureAwait(false);
+                pendingTables.Add(Autheris.Application.Catalog.Services.CatalogGovernanceRatchet.Merge(tableMeta, existingMeta));
             }
 
             if (pendingTables.Count > 0)

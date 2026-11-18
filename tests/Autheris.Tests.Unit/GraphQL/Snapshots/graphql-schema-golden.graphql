@@ -158,7 +158,6 @@ type ConsentRequestDto {
   status: String!
   requestedAt: DateTime!
   requestedValidTo: DateTime
-  itsmTicketId: String
   contextJson: String
   effectPreview: ApprovalEffectPreviewDto
 }
@@ -186,6 +185,12 @@ type DataCatalogSyncPayload {
   warnings: [String!]!
 }
 
+type DiscoveryApplicationRef {
+  appId: String!
+  name: String
+  documentCount: Int!
+}
+
 type DiscoveryColumn {
   name: String!
   displayName: String
@@ -197,9 +202,10 @@ type DiscoveryColumn {
   statistics: DiscoveryColumnStatistics
   clearInSomeRows: Boolean!
   writeProtected: Boolean!
+  longDescription: String
   classifications: [DiscoveryColumnClassification!]!
   clearRequestable: [String!]!
-  longDescription: String
+  documents: [DiscoveryDocumentRef!]!
 }
 
 type DiscoveryColumnClassification {
@@ -216,6 +222,17 @@ type DiscoveryColumnStatistics {
   minValue: String
   maxValue: String
   topValues: [String!]
+}
+
+type DiscoveryDocumentRef {
+  appId: String!
+  category: String!
+  docId: String!
+  title: String!
+  summary: String
+  official: Boolean!
+  trust: String!
+  updatedAt: DateTime!
 }
 
 type DiscoveryOwner {
@@ -350,6 +367,9 @@ type TableMetadataDto {
   dataOwner: String
   delegates: [String!]
   language: String
+  documents: [DiscoveryDocumentRef!]!
+  applications: [DiscoveryApplicationRef!]!
+  documentsTruncated: Boolean!
 }
 
 type TableRecordPayload {
@@ -441,6 +461,7 @@ enum WriteOperation {
   INSERT
   UPDATE
   DELETE
+  EXECUTE_WRITE
 }
 
 enum WriteRowScope {

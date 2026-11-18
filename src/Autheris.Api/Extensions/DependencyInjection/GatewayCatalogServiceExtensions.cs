@@ -70,6 +70,19 @@ public static class GatewayCatalogServiceExtensions
 
         services.TryAddScoped<ICatalogVisibilityService, CatalogVisibilityService>();
         services.TryAddScoped<Autheris.Application.Catalog.Discovery.IDiscoveryArtifactService, Autheris.Application.Catalog.Discovery.DiscoveryArtifactService>();
+        services.TryAddScoped<Autheris.Application.Docs.Services.IDocLinkService, Autheris.Application.Docs.Services.DocLinkService>();
+        // Optional enrichment: hosts without the document stores (no governance repository) resolve no reader and discovery returns no documents.
+        services.TryAddScoped<Autheris.Application.Docs.Services.IDocLinkDiscoveryReader>(sp =>
+            sp.GetService<Autheris.Application.Docs.Interfaces.IDocLinkRepository>() is { } links &&
+            sp.GetService<Autheris.Application.Docs.Interfaces.IDocumentRepository>() is { } documents &&
+            sp.GetService<Autheris.Application.Docs.Interfaces.IUniversalDocStore>() is { } store
+                ? new Autheris.Application.Docs.Services.DocLinkDiscoveryReader(links, documents, store)
+                : null!);
+        services.TryAddScoped<Autheris.Application.Docs.Services.IDocLinkCallerView>(sp =>
+            sp.GetService<Autheris.Application.Docs.Services.IDocLinkDiscoveryReader>() is { } reader &&
+            sp.GetService<Autheris.Application.Catalog.Discovery.IDiscoveryService>() is { } discovery
+                ? new Autheris.Application.Docs.Services.DocLinkCallerView(discovery, reader)
+                : null!);
         services.TryAddScoped<Autheris.Application.Catalog.Discovery.IDiscoveryService>(sp =>
             new Autheris.Application.Catalog.Discovery.DiscoveryService(
                 sp.GetService<ITableMetadataRepository>(),
@@ -86,7 +99,8 @@ public static class GatewayCatalogServiceExtensions
                 sp.GetService<TimeProvider>(),
                 sp.GetService<ILogger<Autheris.Application.Catalog.Discovery.DiscoveryService>>(),
                 sp.GetService<IClassificationRepository>(),
-                sp.GetService<Autheris.Application.Procedures.Interfaces.IProcedureCatalog>()));
+                sp.GetService<Autheris.Application.Procedures.Interfaces.IProcedureCatalog>(),
+                sp.GetService<Autheris.Application.Docs.Services.IDocLinkDiscoveryReader>()));
         services.TryAddScoped<Autheris.Application.Catalog.Discovery.IDiscoveryAccessRequestService>(sp =>
             new Autheris.Application.Catalog.Discovery.DiscoveryAccessRequestService(
                 sp.GetRequiredService<Autheris.Application.Catalog.Discovery.IDiscoveryService>(),

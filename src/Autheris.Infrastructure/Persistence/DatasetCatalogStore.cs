@@ -20,8 +20,6 @@ internal static class DatasetCatalogStore
     internal const string SettingsTable = "TABLE_CATALOG_SETTINGS";
     internal const string SystemDefaultActor = "system:default";
 
-    // The legacy NOT NULL tier column is neither read nor interpreted any more; inserts write this constant until a DDL step drops the column.
-    private const int LegacyVisibilityValue = 0;
     private const string AdminSource = "admin";
     private const string DbtSource = "dbt";
 
@@ -568,14 +566,13 @@ internal static class DatasetCatalogStore
                 var insertParams = new (string, object)[]
                 {
                     ("@tid", tableId.ToString()),
-                    ("@vis", LegacyVisibilityValue),
                     ("@mgs", mgsValue),
                     ("@np", npValue),
                     ("@by", actor.Value),
                     ("@now", Now())
                 };
                 await ExecAsync(conn, tx,
-                    $"INSERT INTO {dialect.Prefix}{SettingsTable} (table_id, visibility, min_group_size, non_personal, updated_by, updated_at) VALUES (@tid, @vis, @mgs, @np, @by, @now)", ct, insertParams).ConfigureAwait(false);
+                    $"INSERT INTO {dialect.Prefix}{SettingsTable} (table_id, min_group_size, non_personal, updated_by, updated_at) VALUES (@tid, @mgs, @np, @by, @now)", ct, insertParams).ConfigureAwait(false);
             }
         }, ct);
     }
@@ -612,7 +609,6 @@ internal static class DatasetCatalogStore
                     var insertParams = new (string, object)[]
                     {
                         ("@tid", tableId.ToString()),
-                        ("@vis", LegacyVisibilityValue),
                         ("@mgs", (object?)before.MinGroupSize ?? DBNull.Value),
                         ("@np", (object?)before.NonPersonal ?? DBNull.Value),
                         ("@dh", dhValue),
@@ -621,7 +617,7 @@ internal static class DatasetCatalogStore
                         ("@now", Now())
                     };
                     await ExecAsync(conn, tx,
-                        $"INSERT INTO {dialect.Prefix}{SettingsTable} (table_id, visibility, min_group_size, non_personal, discovery_hidden, samples_disabled, updated_by, updated_at) VALUES (@tid, @vis, @mgs, @np, @dh, @sd, @by, @now)", ct, insertParams).ConfigureAwait(false);
+                        $"INSERT INTO {dialect.Prefix}{SettingsTable} (table_id, min_group_size, non_personal, discovery_hidden, samples_disabled, updated_by, updated_at) VALUES (@tid, @mgs, @np, @dh, @sd, @by, @now)", ct, insertParams).ConfigureAwait(false);
                 }
             }
 

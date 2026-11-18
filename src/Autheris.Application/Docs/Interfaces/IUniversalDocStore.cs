@@ -30,6 +30,17 @@ public interface IUniversalDocStore
         CancellationToken ct = default);
 
     /// <summary>
+    /// Reads one active document visible to <paramref name="scope"/>: the caller tenant's own document wins over an official one.
+    /// A document that is unknown, deleted, foreign, or hidden from discovery for this scope yields <c>null</c> in every case.
+    /// </summary>
+    Task<DocRecord?> ReadDocumentAsync(
+        DocAccessScope scope,
+        string appId,
+        DocCategory category,
+        string docId,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Creates a new document owned by <paramref name="writer"/> and indexes its chunks on success.
     /// </summary>
     Task<DepositDocResult> CreateAsync(

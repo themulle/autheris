@@ -366,7 +366,7 @@ public sealed class AstCompilerOracleExecutionTests
     [InlineData("SELECT id, sum(amount) OVER (PARTITION BY status ORDER BY amount ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS rn FROM orders")]
     [InlineData("SELECT id, CASE WHEN amount > 15 THEN 'big' ELSE 'small' END AS size FROM orders")]
     [InlineData("SELECT id FROM orders WHERE email LIKE '%@acme.example' OR email IS NULL")]
-    [InlineData("SELECT id, cast(amount AS integer) AS a, cast(status AS varchar) AS t FROM orders")]
+    [InlineData("SELECT id, cast(1.5 AS integer) AS a, cast('x' AS varchar) AS t FROM orders")]
     [InlineData("SELECT id, amount > 15 AS flag FROM orders")]
     [InlineData("SELECT id FROM orders WHERE id BETWEEN 1 AND 6 AND status IN ('open', 'closed') AND NOT (amount < 0)")]
     [InlineData("SELECT 1 AS x")]

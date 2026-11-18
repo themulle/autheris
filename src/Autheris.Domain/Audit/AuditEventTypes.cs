@@ -105,6 +105,26 @@ public static class AuditEventTypes
     public const string WriteGrantChanged = "WRITE_GRANT_CHANGED";
     public const string ProfileInvalidationFailed = "PROFILE_INVALIDATION_FAILED";
 
+    // Data products
+    public const string ProductCreated = "PRODUCT_CREATED";
+    public const string ProductDefinitionChanged = "PRODUCT_DEFINITION_CHANGED";
+    public const string ProductRetired = "PRODUCT_RETIRED";
+    public const string ProductOwnerTransferred = "PRODUCT_OWNER_TRANSFERRED";
+    public const string ProductSettingsChanged = "PRODUCT_SETTINGS_CHANGED";
+    public const string ProductColumnClassificationChanged = "PRODUCT_COLUMN_CLASSIFICATION_CHANGED";
+    public const string ProductAccessDenied = "PRODUCT_ACCESS_DENIED";
+    public const string ProductLoaded = "PRODUCT_LOADED";
+    public const string ProductLoadFailed = "PRODUCT_LOAD_FAILED";
+    public const string ProductRead = "PRODUCT_READ";
+    public const string ProductReprojected = "PRODUCT_REPROJECTED";
+    public const string ProductIdleDropped = "PRODUCT_IDLE_DROPPED";
+    public const string ProductSyncApplied = "PRODUCT_SYNC_APPLIED";
+    public const string ProductSyncRejected = "PRODUCT_SYNC_REJECTED";
+    public const string ProductSyncWebhookReceived = "PRODUCT_SYNC_WEBHOOK_RECEIVED";
+    public const string ProductSyncWebhookRejected = "PRODUCT_SYNC_WEBHOOK_REJECTED";
+    public const string DataSourceOwnerAssigned = "DATA_SOURCE_OWNER_ASSIGNED";
+    public const string DataSourceOwnerRemoved = "DATA_SOURCE_OWNER_REMOVED";
+
     // Plan 9: Datasources & Async Jobs
     public const string DatasourceTested = "DATASOURCE_TESTED";
     public const string DatasourceTestRequested = "DATASOURCE_TEST_REQUESTED";
@@ -140,6 +160,8 @@ public static class AuditEventTypes
     public const string DocIngestionDocumentApplied = "DOC_INGESTION_DOCUMENT_APPLIED";
     public const string DocDiscoveryRead = "DOC_DISCOVERY_READ";
     public const string DocDocumentDeleted = "DOC_DOCUMENT_DELETED";
+    public const string DocLinksChanged = "DOC_LINKS_CHANGED";
+    public const string DocVisibilityChanged = "DOC_VISIBILITY_CHANGED";
     public const string DocTenantPurged = "DOC_TENANT_PURGED";
     public const string DocIndexSyncRequested = "DOC_INDEX_SYNC_REQUESTED";
     public const string DocLegacyImportCompleted = "DOC_LEGACY_IMPORT_COMPLETED";

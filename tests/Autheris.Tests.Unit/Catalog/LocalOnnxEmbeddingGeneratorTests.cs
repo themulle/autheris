@@ -85,7 +85,6 @@ public sealed class LocalOnnxEmbeddingGeneratorTests
             generator,
             Options.Create(new CatalogSearchOptions
             {
-                Enabled = true,
                 EmbeddingProvider = CatalogEmbeddingProvider.LocalOnnx
             }),
             NullLogger<CatalogSearchEngine>.Instance);

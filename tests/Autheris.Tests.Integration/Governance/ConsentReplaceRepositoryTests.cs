@@ -133,6 +133,37 @@ public sealed class ConsentReplaceRepositoryTests : IDisposable
         (await _repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-MANIFEST-GROUP")], _table, DateTimeOffset.UtcNow, TenantA)).Count(c => c.GranteeType == GranteeType.Group).ShouldBe(1);
     }
 
+    [Fact]
+    public async Task ManifestApply_EndToEnd_BaseAndScopeRuleAndTwoRowFiltersOnOneColumn_ReApplyIsUnchangedAndWritesNothing()
+    {
+        // Issue #806: a base rule plus a scope rule on the same column and two row filters on one column, read back from the database.
+        await EnsureTableAsync();
+        var svc = new Autheris.Application.Governance.Services.DeclarativeConsentApplyService(_repo, _repo, _repo);
+        var caller = ManifestAdmin(Admin.Value, TenantA.Value);
+        var grantee = new Sid("S-1-5-21-MANIFEST-GROUP-806");
+        var policy = new DeclarativeConsentPolicy(
+            _table.Domain, _table.Schema, _table.TableName, "Group", grantee.Value, "Allow",
+            ColumnRules: [new DeclarativeColumnRule("id", "Clear"), new DeclarativeColumnRule("id", "Mask", ["Agent.Read"])],
+            RowFilters: [new DeclarativeRowFilter("id", "GT", "int", "[0]"), new DeclarativeRowFilter("id", "LT", "int", "[1000]")],
+            ValidUntil: DateTimeOffset.UtcNow.AddDays(30));
+
+        var first = await svc.ApplyManifestAsync(caller, new DeclarativeConsentManifest("1", [policy]));
+        var stored = (await _repo.GetActiveConsentsForSubjectsAsync([grantee], _table, DateTimeOffset.UtcNow, TenantA)).Single(c => c.GranteeType == GranteeType.Group);
+        var epochAfterFirst = await _repo.GetTableEpochAsync(_table);
+        var second = await svc.ApplyManifestAsync(caller, new DeclarativeConsentManifest("1", [policy]));
+
+        first.Applied.ShouldBe(1);
+        second.Unchanged.ShouldBe(1);
+        second.Applied.ShouldBe(0);
+        second.Revoked.ShouldBe(0);
+        second.Updated.ShouldBe(0);
+        (await _repo.GetTableEpochAsync(_table)).ShouldBe(epochAfterFirst);
+        var active = (await _repo.GetActiveConsentsForSubjectsAsync([grantee], _table, DateTimeOffset.UtcNow, TenantA)).Where(c => c.GranteeType == GranteeType.Group).ToList();
+        active.Select(c => c.Id).ShouldBe([stored.Id]);
+        active[0].ColumnRules.Count.ShouldBe(2);
+        active[0].RowFilters.Count.ShouldBe(2);
+    }
+
     private static Autheris.Domain.Security.ConsentRevocationAuthority AdminAuth() =>
         Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(ManifestAdmin(Admin.Value, TenantA.Value));
 

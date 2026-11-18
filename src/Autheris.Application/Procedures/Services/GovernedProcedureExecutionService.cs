@@ -85,8 +85,10 @@ public sealed partial class GovernedProcedureExecutionService : IProcedureExecut
         ProcedureDenialAuditLimiter? denialAuditLimiter = null,
         Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null,
         Autheris.Application.Policy.Pdp.IAccessDecisionPoint? accessDecisionPoint = null,
-        Autheris.Application.Usage.IUsageRecorder? usageRecorder = null)
+        Autheris.Application.Usage.IUsageRecorder? usageRecorder = null,
+        Autheris.Application.Products.IDataProductRepository? productRepository = null)
     {
+        _products = productRepository;
         _accessDecisionPoint = accessDecisionPoint ?? new Autheris.Application.Policy.Pdp.AccessDecisionPoint(
             options,
             consentResolution,
@@ -97,7 +99,8 @@ public sealed partial class GovernedProcedureExecutionService : IProcedureExecut
             accessProfileRepository: accessProfileRepository,
             memoryCache: memoryCache,
             accessProfileCache: accessProfileCache,
-            typedPolicies: typedPolicies);
+            typedPolicies: typedPolicies,
+            productRepository: productRepository);
         _transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
         _concurrencyGate = concurrencyGate;
         _denialAuditLimiter = denialAuditLimiter ?? new ProcedureDenialAuditLimiter();
@@ -139,9 +142,9 @@ public sealed partial class GovernedProcedureExecutionService : IProcedureExecut
 
         var definition = registered.Definition;
 
-        // 1a. Write-mode guard: only read procedures are executable. A write-mode definition is not visible,
-        // answered exactly like an unknown name, before anything caller-controlled is looked at.
-        if (definition.Mode != ProcedureMode.Read)
+        // 1a. Write-mode guard: a write procedure is executable only as a data product, on a wired transport and for a caller whose token
+        // permits writes. Anything else is not visible, answered exactly like an unknown name, before anything caller-controlled is looked at.
+        if (definition.Mode != ProcedureMode.Read && !WriteCallAllowed(definition, user))
         {
             var denyUser = user.GetUserSid() ?? new Sid("anonymous");
             RecordProcedureUsage(definition, tenantId, denyUser, Autheris.Application.Usage.UsageOutcome.DenyAccess, 0, false);
@@ -193,7 +196,11 @@ public sealed partial class GovernedProcedureExecutionService : IProcedureExecut
             {
                 string.IsNullOrWhiteSpace(definition.DataSource) ? _options.Value.SqlEndpoints.Procedures.ConnectionName : definition.DataSource
             };
-            sources.AddRange(decisions.Values.Select(d => string.IsNullOrWhiteSpace(d.Meta.Table.SourceName) ? d.Meta.Identifier.Domain : d.Meta.Table.SourceName));
+            if (!IsProduct(definition))
+            {
+                // A product decision names the reserved product source, which is no data source of the transport gate.
+                sources.AddRange(decisions.Values.Select(d => string.IsNullOrWhiteSpace(d.Meta.Table.SourceName) ? d.Meta.Identifier.Domain : d.Meta.Table.SourceName));
+            }
             await _transportGate.EnsureCatalogSourcesAsync(sources, ct).ConfigureAwait(false);
 
             // 6. Call (security context goes into the read-only SESSION_CONTEXT)
@@ -201,6 +208,11 @@ public sealed partial class GovernedProcedureExecutionService : IProcedureExecut
                 tenantId.Value,
                 userSid.Value,
                 user.FindFirst("purpose")?.Value ?? user.FindFirst("purpose_id")?.Value);
+
+            if (definition.Mode == ProcedureMode.Write)
+            {
+                return await ExecuteWriteProductAsync(definition, values, visibility, context, tenantId, userSid, traceId, sw, ct).ConfigureAwait(false);
+            }
 
             // 6a. Row budget, decided before the invoke from the visibility decisions: a scoped call scans up
             // to MaxScanRows raw rows (the limit is applied after the row scope), an unscoped call reads the limit itself.
@@ -268,7 +280,9 @@ public sealed partial class GovernedProcedureExecutionService : IProcedureExecut
             }
 
             // 7. Result-set governance (deny / mask / drop unknown columns)
-            var governed = GovernResult(definition, raw, decisions, registered.Validation.ResultColumnSources, tenantId);
+            var governed = IsProduct(definition)
+                ? GovernProductResult(definition, raw, decisions, tenantId)
+                : GovernResult(definition, raw, decisions, registered.Validation.ResultColumnSources, tenantId);
 
             // 8. Synchronous audit BEFORE data leaves the gateway (fail-closed: an audit failure aborts the response)
             await AuditAsync(
@@ -280,6 +294,8 @@ public sealed partial class GovernedProcedureExecutionService : IProcedureExecut
                 new
                 {
                     mode = definition.Mode.ToString(),
+                    productId = visibility.Product?.Id,
+                    definitionHash = visibility.Product?.DefinitionHash,
                     rowCount = governed.Rows.Count,
                     truncated,
                     scanCapReached,
@@ -349,6 +365,11 @@ public sealed partial class GovernedProcedureExecutionService : IProcedureExecut
             if (definition.RequiredRoles.Count > 0 && !HasAnyRole(user, definition.RequiredRoles))
             {
                 return ProcedureVisibility.Hidden("role");
+            }
+
+            if (IsProduct(definition))
+            {
+                return await EvaluateProductVisibilityAsync(definition, user, userSid, tenantId, consentBypassed, ct).ConfigureAwait(false);
             }
 
             // Table set: one definition shared with the AI guardrail. Zero tables is never visible (nothing could be consent-checked).
@@ -763,7 +784,8 @@ public sealed partial class GovernedProcedureExecutionService : IProcedureExecut
     private static bool IsRowScoped(ProcedureDefinition definition, Dictionary<string, TableDecision> decisions, out TableDecision resultDecision)
     {
         resultDecision = default;
-        return definition.ResultTable != null &&
+        return !IsProduct(definition) &&
+               definition.ResultTable != null &&
                decisions.TryGetValue(definition.ResultTable, out resultDecision) &&
                !string.IsNullOrWhiteSpace(resultDecision.Decision.CombinedRowFilterSql);
     }
@@ -914,7 +936,7 @@ public sealed partial class GovernedProcedureExecutionService : IProcedureExecut
 }
 
 /// <summary>Result of the visibility stage; <see cref="Reason"/> is for the server-side audit only.</summary>
-internal sealed record ProcedureVisibility(bool Visible, string Reason, Dictionary<string, TableDecision> Decisions)
+internal sealed record ProcedureVisibility(bool Visible, string Reason, Dictionary<string, TableDecision> Decisions, Autheris.Domain.Model.DataProduct? Product = null)
 {
     public static ProcedureVisibility Hidden(string reason) => new(false, reason, new Dictionary<string, TableDecision>(StringComparer.OrdinalIgnoreCase));
 }

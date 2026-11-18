@@ -1,3 +1,4 @@
+using Autheris.Tests.Unit.TestSupport;
 using System.Security.Claims;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Sql.Tree;

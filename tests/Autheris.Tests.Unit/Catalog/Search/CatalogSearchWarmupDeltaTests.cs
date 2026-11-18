@@ -241,7 +241,7 @@ public sealed class CatalogSearchWarmupDeltaTests
         new(
             repo,
             engine,
-            Options.Create(new CatalogSearchOptions { Enabled = true, WarmupOnStartup = true, RefreshSeconds = 0 }),
+            Options.Create(new CatalogSearchOptions { WarmupOnStartup = true, RefreshSeconds = 0 }),
             NullLogger<CatalogSearchWarmupService>.Instance,
             eventBus: bus,
             versionProvider: versionProvider,

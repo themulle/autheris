@@ -411,6 +411,28 @@ public static class DocIngestionEndpoints
 /// </summary>
 internal static class DocEndpointAccess
 {
+    public static DocCaller BuildCaller(HttpContext httpContext, string? tenant, string? authorSid) => new(
+        IsCanonicalClusterAdmin: EndpointSecurity.IsCanonicalClusterAdmin(httpContext.User),
+        IsGovernanceAdmin: GatewayPolicies.HasRole(httpContext.User, GatewayRole.GovernanceAdmin),
+        TenantId: tenant,
+        AuthorSid: authorSid,
+        HasSession: httpContext.User.Identity?.IsAuthenticated ?? false,
+        IsReadOnlySession: false);
+
+    public static DocCaller BuildCaller(HttpContext httpContext)
+    {
+        string? tenant = null;
+        try
+        {
+            tenant = EndpointSecurity.GetRequestTenant(httpContext).Value;
+        }
+        catch (Exception ex) when (ex is SecurityException or Autheris.Domain.Exceptions.GatewaySecurityException)
+        {
+        }
+
+        return BuildCaller(httpContext, tenant, EndpointSecurity.GetCallerIdentity(httpContext));
+    }
+
     public static bool TryResolveDepositor(HttpContext httpContext, string appId, out DocWriter? writer, out IResult? denied)
     {
         writer = null;
@@ -429,13 +451,7 @@ internal static class DocEndpointAccess
             {
             }
 
-            var caller = new DocCaller(
-                IsCanonicalClusterAdmin: EndpointSecurity.IsCanonicalClusterAdmin(httpContext.User),
-                IsGovernanceAdmin: GatewayPolicies.HasRole(httpContext.User, GatewayRole.GovernanceAdmin),
-                TenantId: tenant,
-                AuthorSid: authorSid,
-                HasSession: httpContext.User.Identity?.IsAuthenticated ?? false,
-                IsReadOnlySession: false);
+            var caller = BuildCaller(httpContext, tenant, authorSid);
 
             writer = DocAccessPolicy.ResolveWriter(caller, appId, out var policyDenial);
             if (writer is null)
@@ -487,7 +503,7 @@ internal static class DocEndpointAccess
                 TenantId: tenant,
                 AuthorSid: EndpointSecurity.GetCallerIdentity(httpContext),
                 HasSession: httpContext.User.Identity?.IsAuthenticated ?? false,
-                IsReadOnlySession: false);
+                IsReadOnlySession: httpContext.User.IsReadOnly());
 
             return DocAccessPolicy.ResolveReader(caller);
         }

@@ -87,8 +87,6 @@ public sealed class CatalogSearchWarmupService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        if (!_options.Value.Enabled) return;
-
         if (_eventBus != null)
         {
             _eventSubscription = _eventBus.Subscribe<object>(

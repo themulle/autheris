@@ -37,8 +37,10 @@ public static class DiscoveryTextSanitizer
 
     /// <summary>
     /// Sanitises <paramref name="input"/> like <see cref="SanitizeText"/>, then shortens it for list and search results:
-    /// the first sentence when it fits in <paramref name="maxRunes"/>, otherwise a cut on a rune boundary followed by
-    /// <see cref="SummaryCutMarker"/>. Text that already fits is returned unchanged.
+    /// the first sentence when it fits in <paramref name="maxRunes"/>, otherwise a cut at the last word boundary (or on a rune boundary
+    /// when there is none in the second half) followed by <see cref="SummaryCutMarker"/>. A sentence ends at <c>.</c>, <c>!</c> or <c>?</c>
+    /// followed by white space and an upper-case letter; after a period the word before it must be longer than two characters, so
+    /// abbreviations such as "z. B." or "Nr. 184" do not end it (#799). Text that already fits is returned unchanged.
     /// </summary>
     public static string? Summarize(string? input, int maxRunes = MaxSummaryRunes)
     {
@@ -51,7 +53,7 @@ public static class DiscoveryTextSanitizer
         var sentenceEnd = -1;
         for (var i = 0; i < clean.Length - 1; i++)
         {
-            if (clean[i] is '.' or '!' or '?' && char.IsWhiteSpace(clean[i + 1]))
+            if (IsSentenceEnd(clean, i))
             {
                 sentenceEnd = i + 1;
                 break;
@@ -70,7 +72,47 @@ public static class DiscoveryTextSanitizer
             return candidate;
         }
 
-        return TruncateOnRuneBoundary(candidate, Math.Max(1, maxRunes - 1)).TrimEnd() + SummaryCutMarker;
+        var cut = TruncateOnRuneBoundary(candidate, Math.Max(1, maxRunes - 1));
+        var lastSpace = cut.AsSpan().LastIndexOf(' ');
+        if (lastSpace >= cut.Length / 2)
+        {
+            cut = cut[..lastSpace];
+        }
+
+        return cut.TrimEnd() + SummaryCutMarker;
+    }
+
+    private static bool IsSentenceEnd(string text, int i)
+    {
+        var c = text[i];
+        if (c is not ('.' or '!' or '?') || !char.IsWhiteSpace(text[i + 1]))
+        {
+            return false;
+        }
+
+        var next = i + 1;
+        while (next < text.Length && char.IsWhiteSpace(text[next]))
+        {
+            next++;
+        }
+
+        if (next >= text.Length || !char.IsUpper(text[next]))
+        {
+            return false;
+        }
+
+        if (c != '.')
+        {
+            return true;
+        }
+
+        var wordLength = 0;
+        for (var j = i - 1; j >= 0 && char.IsLetterOrDigit(text[j]); j--)
+        {
+            wordLength++;
+        }
+
+        return wordLength > 2;
     }
 
     public static string SanitizeRequiredText(string? input, string fallback, int maxRunes = MaxDisplayNameRunes)

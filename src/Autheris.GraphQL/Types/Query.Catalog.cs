@@ -437,7 +437,10 @@ public sealed partial class Query
             IsHidden = obj.IsHidden,
             Write = obj.Write,
             DataOwner = obj.Owners.FirstOrDefault()?.DisplayName,
-            Language = language
+            Language = language,
+            Documents = obj.Documents,
+            Applications = obj.Applications,
+            DocumentsTruncated = obj.DocumentsTruncated
         };
 
     /// <summary>The shaping loop of the catalog query: rows that do not exist for the caller are dropped before filtering and paging (F-C11).</summary>

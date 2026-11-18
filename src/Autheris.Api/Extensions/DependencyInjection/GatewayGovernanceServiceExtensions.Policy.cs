@@ -30,6 +30,7 @@ using Autheris.Infrastructure.Persistence.Migrations;
 using Autheris.Infrastructure.Security;
 using Autheris.Infrastructure.Streaming;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 public static partial class GatewayGovernanceServiceExtensions
 {
@@ -38,7 +39,7 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<IAccessProfileCache, AccessProfileCache>();
         services.AddSingleton<IDbtProposalRepository, InMemoryDbtProposalRepository>();
         services.AddSingleton<IDbtTestTargetMap, DbtTestTargetMap>();
-        services.AddSingleton<IDbtHealthCircuitBreaker, DbtHealthCircuitBreaker>();
+        services.TryAddSingleton<IDbtHealthCircuitBreaker, NoDbtHealthData>();
 
         services.AddSingleton<VirtualFilterAdministrationService>();
         services.AddSingleton<IVirtualFilterSnapshotProvider, VirtualFilterSnapshotProvider>();
@@ -59,7 +60,8 @@ public static partial class GatewayGovernanceServiceExtensions
             sp.GetRequiredService<Autheris.Application.Common.Interfaces.IAuditLogRepository>(),
             sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>>(),
             sp.GetService<TimeProvider>() ?? TimeProvider.System,
-            sp.GetServices<Autheris.Application.Identity.Attributes.ICallerAttributeDefinitionValidator>()));
+            sp.GetServices<Autheris.Application.Identity.Attributes.ICallerAttributeDefinitionValidator>(),
+            sp.GetRequiredService<Autheris.Application.Identity.Attributes.ICallerAttributeCacheInvalidator>()));
         // Issue #281: runtime-managed, app-scoped trusted GraphQL documents (registry polls the generation row; the admin service invalidates it).
         services.AddSingleton<Autheris.Application.Governance.TrustedDocuments.ITrustedDocumentAppRegistry, Autheris.Application.Governance.TrustedDocuments.TrustedDocumentAppRegistry>();
         services.AddSingleton<Autheris.Application.Governance.TrustedDocuments.TrustedDocumentAdministrationService>();

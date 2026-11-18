@@ -14,23 +14,47 @@ using Autheris.Domain.Model;
 /// </summary>
 public readonly record struct DocAccessScope
 {
-    private DocAccessScope(string? tenantId) => TenantId = tenantId;
+    private DocAccessScope(string? tenantId, bool hiddenOfficialVisible, bool hiddenTenantVisible)
+    {
+        TenantId = tenantId;
+        HiddenOfficialVisible = hiddenOfficialVisible;
+        HiddenTenantVisible = hiddenTenantVisible;
+    }
 
     /// <summary>The caller's tenant; null when the caller is not bound to a tenant (official documentation only).</summary>
     public string? TenantId { get; }
 
+    /// <summary>True for the official-document writer, who still sees official documents hidden from discovery.</summary>
+    public bool HiddenOfficialVisible { get; }
+
+    /// <summary>True for the tenant-document writer, who still sees the tenant's documents hidden from discovery.</summary>
+    public bool HiddenTenantVisible { get; }
+
     /// <summary>Official documentation only (callers without a tenant-bound session, e.g. the REST discovery endpoints).</summary>
     public static DocAccessScope OfficialOnly => default;
 
-    /// <summary>Official documentation plus the documents deposited by <paramref name="tenantId"/>.</summary>
-    public static DocAccessScope ForTenant(string? tenantId) =>
-        string.IsNullOrWhiteSpace(tenantId) ? default : new DocAccessScope(tenantId.Trim());
+    /// <summary>Official documentation plus the documents deposited by <paramref name="tenantId"/>; hidden documents are excluded.</summary>
+    public static DocAccessScope ForTenant(string? tenantId) => ForTenant(tenantId, hiddenOfficialVisible: false, hiddenTenantVisible: false);
+
+    /// <summary>
+    /// Like <see cref="ForTenant(string?)"/>, but a document writer also sees the documents it may write that are hidden from discovery.
+    /// </summary>
+    public static DocAccessScope ForTenant(string? tenantId, bool hiddenOfficialVisible, bool hiddenTenantVisible) =>
+        string.IsNullOrWhiteSpace(tenantId)
+            ? new DocAccessScope(null, hiddenOfficialVisible, false)
+            : new DocAccessScope(tenantId.Trim(), hiddenOfficialVisible, hiddenTenantVisible);
 
     public bool CanSee(DocChunk chunk)
     {
         ArgumentNullException.ThrowIfNull(chunk);
-        return chunk.TenantId is null ||
-               (TenantId is not null && string.Equals(chunk.TenantId, TenantId, StringComparison.Ordinal));
+        if (chunk.TenantId is null)
+        {
+            return !chunk.DiscoveryHidden || HiddenOfficialVisible;
+        }
+
+        return TenantId is not null &&
+               string.Equals(chunk.TenantId, TenantId, StringComparison.Ordinal) &&
+               (!chunk.DiscoveryHidden || HiddenTenantVisible);
     }
 }
 
@@ -39,6 +63,8 @@ public interface IDocSearchService
     Task IndexChunkAsync(DocChunk chunk, CancellationToken cancellationToken = default);
     Task IndexChunksAsync(IEnumerable<DocChunk> chunks, CancellationToken cancellationToken = default);
     Task RemoveDocumentAsync(DocKey key, CancellationToken cancellationToken = default);
+    /// <summary>Updates the discovery-hidden flag of every indexed chunk of <paramref name="key"/> without re-reading the document.</summary>
+    Task SetDocumentHiddenAsync(DocKey key, bool hidden, CancellationToken cancellationToken = default);
     Task RemoveTenantAsync(string tenantId, CancellationToken cancellationToken = default);
     Task ReplaceAllAsync(IEnumerable<DocChunk> chunks, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<DocChunk>> SnapshotVisibleChunksAsync(DocAccessScope scope, CancellationToken cancellationToken = default);

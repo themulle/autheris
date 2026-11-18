@@ -125,7 +125,6 @@ public sealed class ConsentApiMigrationStep0014Tests
             "sales",
             "dbo",
             "orders",
-            "INC-123",
             "tenant-rt",
             "[\"S-1-5-21-500\"]",
             "{}",

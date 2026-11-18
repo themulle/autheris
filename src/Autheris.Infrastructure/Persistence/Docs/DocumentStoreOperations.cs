@@ -100,7 +100,34 @@ internal static class DocumentStoreOperations
             if (tenantId is not null)
                 await ExecBoundAsync(repo, conn, tx, DocumentStoreSql.DecrementQuotaSql, "Governance.Docs.DecrementQuota", "@tenant_id", tenantId, null, ct,
                     ("@old_bytes", (long)cur.Value.ByteCount, DbType.Int64), ("@updated_at", at, DbType.DateTimeOffset)).ConfigureAwait(false);
+            await DocLinkOperations.DeleteForDeletedDocumentAsync(repo, conn, tx, key with { TenantId = tenantId }, ct).ConfigureAwait(false);
             return (true, new DocWriteOutcome(DocWriteStatus.Deleted));
+        }, ct);
+    }
+
+    public static Task<bool?> SetDiscoveryHiddenAsync(GovernanceRepository repo, DocKey key, bool hidden, DateTimeOffset at, CancellationToken ct)
+    {
+        var tenantId = NormalizeScope(key.TenantId);
+        var utcAt = (at == default ? TimeProvider.System.GetUtcNow() : at).ToUniversalTime();
+        return RunInTxAsync(repo, async (conn, tx) =>
+        {
+            var cur = await LockRowAsync(repo, conn, tx, key with { TenantId = tenantId }, ct).ConfigureAwait(false);
+            if (cur is null || cur.Value.Deleted) return (false, (bool?)null);
+            await using var read = repo.CreateDocCommand(conn, tx, tenantId is null ? DocumentStoreSql.GetOfficialSql : DocumentStoreSql.GetTenantSql);
+            DocumentStoreSql.BindKey(read, tenantId, key.AppId, key.Category, key.DocId);
+            bool previous;
+            await using (var r = await repo.ExecuteReaderAsync(read, "Governance.Docs.GetHidden", ct).ConfigureAwait(false))
+            {
+                if (!await r.ReadAsync(ct).ConfigureAwait(false)) return (false, (bool?)null);
+                previous = r.GetBoolean(11);
+            }
+
+            await using var cmd = repo.CreateDocCommand(conn, tx, tenantId is null ? DocumentStoreSql.SetHiddenOfficialSql : DocumentStoreSql.SetHiddenTenantSql);
+            DocumentStoreSql.BindKey(cmd, tenantId, key.AppId, key.Category, key.DocId);
+            cmd.AddBound("@hidden", hidden, DbType.Boolean);
+            cmd.AddBound("@updated_at", utcAt, DbType.DateTimeOffset);
+            await repo.ExecuteNonQueryAsync(cmd, "Governance.Docs.SetHidden", ct).ConfigureAwait(false);
+            return (true, (bool?)previous);
         }, ct);
     }
 
@@ -110,6 +137,7 @@ internal static class DocumentStoreOperations
         return RunInTxAsync(repo, async (conn, tx) =>
         {
             var deleted = await ExecBoundAsync(repo, conn, tx, DocumentStoreSql.PurgeTenantDocsSql, "Governance.Docs.PurgeTenantDocs", "@tenant_id", validTenant, null, ct).ConfigureAwait(false);
+            await DocLinkOperations.DeleteForTenantAsync(repo, conn, tx, validTenant, ct).ConfigureAwait(false);
             await ExecBoundAsync(repo, conn, tx, DocumentStoreSql.PurgeTenantUsageSql, "Governance.Docs.PurgeTenantUsage", "@tenant_id", validTenant, null, ct).ConfigureAwait(false);
             return (true, deleted);
         }, ct);
@@ -160,7 +188,7 @@ internal static class DocumentStoreOperations
         return await r.ReadAsync(ct).ConfigureAwait(false) ? new DocTenantUsage(validTenant, r.GetInt32(0), r.GetInt64(1), r.GetFieldValue<DateTimeOffset>(2)) : new DocTenantUsage(validTenant, 0, 0, DateTimeOffset.UnixEpoch);
     }
 
-    private static async Task<T> RunInTxAsync<T>(GovernanceRepository repo, Func<DbConnection, DbTransaction, Task<(bool Commit, T Result)>> work, CancellationToken ct)
+    internal static async Task<T> RunInTxAsync<T>(GovernanceRepository repo, Func<DbConnection, DbTransaction, Task<(bool Commit, T Result)>> work, CancellationToken ct)
     {
         await using var conn = await repo.OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);

@@ -26,6 +26,7 @@ public sealed partial class McpDatasetCatalog
         string? language,
         bool? overview,
         string? format,
+        DiscoveryAccessState? access,
         CancellationToken ct)
     {
         var negotiatedLanguage = _languageNegotiator?.NegotiateLanguage(
@@ -40,7 +41,7 @@ public sealed partial class McpDatasetCatalog
         if (overview == true)
         {
             var allPage = await _discoveryService!.ListAsync(
-                new DiscoveryQuery(domain, Schema: null, search, tag, negotiatedLanguage, First: 10_000, After: 0, DiscoverySurface.Mcp),
+                new DiscoveryQuery(domain, Schema: null, search, tag, negotiatedLanguage, First: 10_000, After: 0, DiscoverySurface.Mcp, access),
                 caller,
                 ct).ConfigureAwait(false);
             var domainCounts = allPage.Items
@@ -70,7 +71,7 @@ public sealed partial class McpDatasetCatalog
         if (_procedureCatalog == null)
         {
             var page = await _discoveryService!.ListAsync(
-                new DiscoveryQuery(domain, Schema: null, search, tag, negotiatedLanguage, First: effectiveLimit, After: effectiveOffset, DiscoverySurface.Mcp),
+                new DiscoveryQuery(domain, Schema: null, search, tag, negotiatedLanguage, First: effectiveLimit, After: effectiveOffset, DiscoverySurface.Mcp, access),
                 caller,
                 ct).ConfigureAwait(false);
             var pagedOnly = new List<McpDatasetSummary>(page.Items.Count);
@@ -82,8 +83,9 @@ public sealed partial class McpDatasetCatalog
             return BuildDiscoveryListResult(pagedOnly, page.TotalCount, effectiveOffset, effectiveLimit, format, negotiatedLanguage, language);
         }
 
+        // The registered procedures are listed below; the discovery page carries tables only.
         var tablePage = await _discoveryService!.ListAsync(
-            new DiscoveryQuery(domain, Schema: null, search, tag, negotiatedLanguage, First: 10_000, After: 0, DiscoverySurface.Mcp),
+            new DiscoveryQuery(domain, Schema: null, search, tag, negotiatedLanguage, First: 10_000, After: 0, DiscoverySurface.Mcp, access, IncludeProcedures: false),
             caller,
             ct).ConfigureAwait(false);
         foreach (var obj in tablePage.Items)
@@ -96,7 +98,10 @@ public sealed partial class McpDatasetCatalog
             candidates.Add(($"{obj.Domain}.{obj.Schema}.{obj.Name}", obj, null));
         }
 
-        var visibleProcs = await _procedureCatalog.ListVisibleAsync(principal, principal.GetTenantId(), ct).ConfigureAwait(false);
+        // Procedures are listed as GRANTED; any other access filter leaves them out.
+        var visibleProcs = access is null or DiscoveryAccessState.Granted
+            ? await _procedureCatalog.ListVisibleAsync(principal, principal.GetTenantId(), ct).ConfigureAwait(false)
+            : [];
         foreach (var proc in visibleProcs.Where(p => p.Definition.Mode == ProcedureMode.Read && !string.IsNullOrWhiteSpace(p.Definition.ResultTable)))
         {
             var def = proc.Definition;
@@ -164,7 +169,8 @@ public sealed partial class McpDatasetCatalog
             Tags: obj.Tags,
             AccessStatus: status,
             Kind: obj.Kind.ToString().ToLowerInvariant(),
-            Size: null);
+            Size: null,
+            DocumentCount: obj.DocumentCount > 0 ? obj.DocumentCount : null);
     }
 
     private async Task<McpDatasetSummary> BuildProcedureSummaryAsync(ClaimsPrincipal principal, string procId, RegisteredProcedure proc, CancellationToken ct)
@@ -258,6 +264,7 @@ public sealed partial class McpDatasetCatalog
         var description = DiscoveryTextSanitizer.SanitizeText(obj.Description, DiscoveryTextSanitizer.MaxDescriptionRunes);
         var accessStatus = MapDiscoveryAccessStatus(obj.Access);
 
+        var linked = McpLinkedDocuments.From(obj);
         var ownerLabels = obj.Owners
             .Select(static o => !string.IsNullOrWhiteSpace(o.Email) ? $"{o.DisplayName} <{o.Email}>" : o.DisplayName)
             .ToList();
@@ -288,18 +295,34 @@ public sealed partial class McpDatasetCatalog
                 View: SummaryView,
                 Kind: obj.Kind.ToString().ToLowerInvariant(),
                 Language: negotiatedLanguage,
-                RequestedLanguage: language);
+                RequestedLanguage: language)
+            {
+                Documents = linked.Documents,
+                Applications = linked.Applications,
+                DocumentsTruncated = linked.Truncated
+            };
         }
 
         var graphQl = brief || graphQlMap == null ? null : await graphQlMap.GetTableAsync(id, ct).ConfigureAwait(false);
         var graphQlColumns = (graphQl?.Columns ?? []).ToDictionary(c => c.ColumnName, StringComparer.OrdinalIgnoreCase);
 
+        // #805/#807: keys, indexes and required filters as projected for this caller by the discovery core.
+        var shape = obj.QueryShape ?? DiscoveryQueryShape.Empty;
+        var primaryKeys = new HashSet<string>(shape.PrimaryKeyColumns, StringComparer.OrdinalIgnoreCase);
+
         var columns = obj.Columns
             .Where(static c => c.State != DiscoveryColumnState.NoAccess)
             .Select(c =>
             {
+                var access = c.State == DiscoveryColumnState.Clear ? "clear" : "mask";
+                if (brief)
+                {
+                    // Issue #799: a column signature only (name, type, key flag, access).
+                    return new McpDatasetColumn(c.Name, c.DataType, Description: null, c.Pii, primaryKeys.Contains(c.Name), Access: access);
+                }
+
                 graphQlColumns.TryGetValue(c.Name, out var field);
-                var colProfile = !brief && !obj.HiddenTextColumns.Contains(c.Name) && c.Statistics != null
+                var colProfile = !obj.HiddenTextColumns.Contains(c.Name) && c.Statistics != null
                     ? new ColumnValueProfile(
                         MinValue: c.Statistics.MinValue,
                         MaxValue: c.Statistics.MaxValue,
@@ -314,14 +337,17 @@ public sealed partial class McpDatasetCatalog
                     c.DataType,
                     obj.HiddenTextColumns.Contains(c.Name) ? null : DiscoveryTextSanitizer.SanitizeText(c.Description, DiscoveryTextSanitizer.MaxDescriptionRunes),
                     c.Pii,
-                    PrimaryKey: false,
+                    PrimaryKey: primaryKeys.Contains(c.Name),
                     GraphQlField: field?.Field,
                     GraphQlType: field?.GraphQlType,
                     ValueProfile: colProfile,
-                    Access: c.State == DiscoveryColumnState.Clear ? "clear" : "mask",
+                    Access: access,
                     DisplayName: obj.HiddenTextColumns.Contains(c.Name) ? null : DiscoveryTextSanitizer.SanitizeText(c.DisplayName, DiscoveryTextSanitizer.MaxDisplayNameRunes),
                     Classifications: c.Classifications, ClearRequestable: c.ClearRequestable,
-                    LongDescription: obj.HiddenTextColumns.Contains(c.Name) ? null : c.LongDescription);
+                    LongDescription: obj.HiddenTextColumns.Contains(c.Name) ? null : c.LongDescription)
+                {
+                    Documents = linked.ColumnDocuments.TryGetValue(c.Name, out var columnDocs) ? columnDocs : null
+                };
             })
             .ToList();
 
@@ -356,19 +382,22 @@ public sealed partial class McpDatasetCatalog
             DataOwner: dataOwner,
             DataOwnerDelegates: delegates,
             AccessStatus: accessStatus,
-            Indexes: null,
+            Indexes: shape.Indexes,
+            View: brief ? BriefView : null,
             Kind: obj.Kind.ToString().ToLowerInvariant(),
+            RequiredFilterColumns: shape.RequiredFilterColumns.Count == 0 ? null : shape.RequiredFilterColumns,
+            RequiredFilterColumnGroups: shape.RequiredFilterColumnGroups.Count == 0 ? null : shape.RequiredFilterColumnGroups,
             Language: negotiatedLanguage,
-            RequestedLanguage: language);
+            RequestedLanguage: language,
+            PrimaryKeyOrder: Autheris.Application.DataSources.Services.DatasetKeyProjection.KeyOrder(shape.PrimaryKeyColumns, shape.PrimaryKeyDirections))
+        {
+            Documents = linked.Documents,
+            Applications = linked.Applications,
+            DocumentsTruncated = linked.Truncated
+        };
     }
 
-    private static string MapDiscoveryAccessStatus(DiscoveryAccessState state) => state switch
-    {
-        DiscoveryAccessState.Granted => "GRANTED",
-        DiscoveryAccessState.Requested => "PENDING",
-        DiscoveryAccessState.Expired => "EXPIRED",
-        _ => "REQUEST_ACCESS"
-    };
+    private static string MapDiscoveryAccessStatus(DiscoveryAccessState state) => CatalogAccessStatus.Of(state);
 
     private static bool Matches(TableMetadata table, string search)
     {

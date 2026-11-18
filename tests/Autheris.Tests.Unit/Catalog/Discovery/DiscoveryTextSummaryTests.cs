@@ -42,4 +42,19 @@ public sealed class DiscoveryTextSummaryTests
         summary[..^1].Length.ShouldBe(18);
         char.IsHighSurrogate(summary[^2]).ShouldBeFalse();
     }
+    [Theory]
+    [InlineData("Settings per company, z. B. the fiscal year. Second sentence.", "Settings per company, z. B. the fiscal year.")]
+    [InlineData("Only in company Nr. 184 and live in the ERP. Second sentence.", "Only in company Nr. 184 and live in the ERP.")]
+    [InlineData("Version 2.5 of the model. Second sentence.", "Version 2.5 of the model.")]
+    [InlineData("Is it current? Yes, nightly.", "Is it current?")]
+    public void Summarize_AbbreviationsDoNotEndTheFirstSentence(string text, string expected) =>
+        DiscoveryTextSanitizer.Summarize(text).ShouldBe(expected);
+
+    [Fact]
+    public void Summarize_LongSentence_IsCutAtAWordBoundary()
+    {
+        var summary = DiscoveryTextSanitizer.Summarize("alpha beta gamma delta epsilon zeta eta theta", 20);
+
+        summary.ShouldBe("alpha beta gamma" + DiscoveryTextSanitizer.SummaryCutMarker);
+    }
 }

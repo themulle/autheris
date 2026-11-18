@@ -42,7 +42,7 @@ public partial class GovernanceRepository
 
         public const string SelectConsentRequestByIdSql = @"SELECT r.id, r.table_id, r.requester_sid, r.requested_grantee_type, r.requested_grantee_ref,
                                        r.business_justification, r.status, r.requested_at, r.requested_valid_to,
-                                       t.source_name, t.schema_name, t.table_name, r.itsm_ticket_id, r.tenant_id,
+                                       t.source_name, t.schema_name, t.table_name, r.tenant_id,
                                        r.requester_identifiers_json, r.context_json, r.requested_write_rules_json,
                                        r.version, r.workflow_mode, r.external_system_id, r.external_reference, r.requested_valid_from, r.updated_at, r.request_kind, r.profile_id
                                 FROM CONSENT_REQUESTS r

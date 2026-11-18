@@ -1,3 +1,4 @@
+using Autheris.Tests.Unit.TestSupport;
 namespace Autheris.Tests.Unit.Governance;
 
 using System;
@@ -441,7 +442,7 @@ public sealed class QueryAnalysisAndValueProfilingTests
         logisticsTicket.Datasets.Should().ContainSingle().Which.Should().Be("logistics.public.shipments");
 
         createdRequests.Should().HaveCount(3);
-        createdRequests.Should().OnlyContain(r => r.ItsmTicketId == "PR-4821");
+        createdRequests.Should().OnlyContain(r => r.BusinessJustification!.Contains("[Ref:PR-4821]"));
     }
 
     // =========================================================================

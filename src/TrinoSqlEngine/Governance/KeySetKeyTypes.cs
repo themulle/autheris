@@ -16,7 +16,7 @@ public enum KeyTypeClass
     /// <summary>Bounded character type of a non-Unicode class (<c>varchar</c>, <c>char</c>, <c>varchar2</c> on SQL Server and Oracle).</summary>
     NonUnicodeText,
 
-    /// <summary>Bounded character type of the Unicode class (<c>nvarchar</c>, <c>nchar</c>, <c>nvarchar2</c>; every bounded text on PostgreSQL and SQLite).</summary>
+    /// <summary>Bounded character type of the Unicode class (<c>nvarchar</c>, <c>nchar</c>, <c>nvarchar2</c>; every bounded text on PostgreSQL).</summary>
     UnicodeText,
     Uuid
 }
