@@ -760,7 +760,6 @@ public sealed partial class ConsentDecisionPipeline(
         Status = status,
         RequestedAt = req.RequestedAt,
         RequestedValidTo = req.RequestedValidTo,
-        ItsmTicketId = req.ItsmTicketId,
         TenantId = req.TenantId,
         ContextJson = req.ContextJson,
         RequesterIdentifiers = [.. req.RequesterIdentifiers],

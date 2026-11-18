@@ -295,7 +295,6 @@ public sealed class BundledConsentRequestService : IBundledConsentRequestService
                     Status = "PENDING",
                     RequestedAt = DateTimeOffset.UtcNow,
                     RequestedValidTo = request.RequestedUntilUtc ?? bundledDefaultValidTo,
-                    ItsmTicketId = request.ConsumerReference ?? ticketId.ToString("N"),
                     TenantId = tenantId,
                     ApprovalSteps = bucket.PrimaryOwnerSid is { } approverSid
                         ? new List<ApprovalStep>

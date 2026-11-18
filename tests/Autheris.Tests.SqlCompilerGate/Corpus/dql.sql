@@ -1066,9 +1066,6 @@ SELECT tenant_key, display_name, is_active FROM integration_tenants WHERE tenant
 -- @id a7d65c195dd7 class=select expected=accept source=tests/Autheris.Tests.Integration/OracleIntegrationTests.cs
 SELECT id, customer_name, total_amount FROM orders ORDER BY id OFFSET 1 LIMIT 2
 
--- @id d8d0b1957286 class=select expected=accept source=tests/Autheris.Tests.Integration/PostgreSqlConsentContractTests.cs
-SELECT indexdef FROM pg_indexes WHERE indexname = 'ux_consent_requests_ticket'
-
 -- @id 149dadc45b42 class=select expected=accept source=tests/Autheris.Tests.Integration/PostgreSqlGovernanceContractTests.cs
 SELECT count(*), count(DISTINCT seq), max(seq), min(seq) FROM audit_log_entries
 
@@ -1088,9 +1085,6 @@ SELECT id FROM default.main.air1
 SELECT a.id FROM air1 a
 WHERE EXISTS (SELECT 1 FROM client c JOIN crane k ON k.serial_number = c.crane_serial_number
               WHERE c.client_id = a.client_id AND k.is_delivered IS NULL)
-
--- @id e8cb2370b2c9 class=select expected=accept source=tests/Autheris.Tests.Integration/SqlServerConsentContractTests.cs
-SELECT is_unique FROM sys.indexes WHERE name = 'ux_consent_requests_ticket' AND object_id = OBJECT_ID('dbo.CONSENT_REQUESTS')
 
 -- @id 4a874bd30819 class=select expected=accept source=tests/Autheris.Tests.Integration/SqlServerGovernanceContractTests.cs
 SELECT COUNT_BIG(*) FROM AUDIT_LOG_ENTRIES
