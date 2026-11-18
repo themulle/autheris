@@ -70,6 +70,9 @@ public sealed class RemovedConfigKeysTests
     [InlineData("Gateway:Casbin:Enabled", "true")]
     [InlineData("Gateway:Casbin:PolicyPath", "/policies/policy.csv")]
     [InlineData("Gateway:Casbin:DecisionCache:Enabled", "true")]
+    [InlineData("Gateway:CatalogSearch:Enabled", "true")]
+    [InlineData("Gateway:CatalogSearch:Enabled", "false")]
+    [InlineData("Gateway:CatalogSearch:Enabled", "")]
     public void Every_removed_key_fails_startup(string key, string value)
     {
         var configuration = Config(key, value);
@@ -254,5 +257,16 @@ public sealed class RemovedConfigKeysTests
             UnknownGatewayKeyGuard.ThrowIfUnknownKeys(Config(key, value)));
 
         ex.Message.ShouldContain("Gateway:FinOps was removed; usage is tracked by Gateway:UsageAccounting; quotas: Gateway:UsageAccounting:Quotas");
+    }
+
+    [Theory]
+    [InlineData("true")]
+    [InlineData("false")]
+    [InlineData("")]
+    public void Removed_catalog_search_switch_fails_with_replacement_message_for_any_value(string value)
+    {
+        var configuration = Config("Gateway:CatalogSearch:Enabled", value);
+        var ex = Should.Throw<InvalidOperationException>(() => UnknownGatewayKeyGuard.ThrowIfUnknownKeys(configuration));
+        ex.Message.ShouldContain("CatalogSearch:Enabled (removed;");
     }
 }

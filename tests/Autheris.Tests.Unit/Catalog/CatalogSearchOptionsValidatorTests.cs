@@ -19,7 +19,6 @@ public sealed class CatalogSearchOptionsValidatorTests
     {
         var options = new CatalogSearchOptions
         {
-            Enabled = true,
             EmbeddingProvider = CatalogEmbeddingProvider.None,
             RefreshSeconds = refreshSeconds
         };
@@ -37,7 +36,6 @@ public sealed class CatalogSearchOptionsValidatorTests
     {
         var options = new CatalogSearchOptions
         {
-            Enabled = true,
             EmbeddingProvider = CatalogEmbeddingProvider.None,
             RefreshSeconds = refreshSeconds
         };
@@ -52,7 +50,6 @@ public sealed class CatalogSearchOptionsValidatorTests
     {
         var options = new CatalogSearchOptions
         {
-            Enabled = true,
             EmbeddingProvider = CatalogEmbeddingProvider.LocalOnnx,
             ModelPath = "/models/model.onnx",
             TokenizerPath = "/models/tokenizer.json",
