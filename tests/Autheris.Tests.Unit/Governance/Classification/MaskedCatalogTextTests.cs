@@ -260,7 +260,16 @@ public sealed class MaskedCatalogTextTests
             ssn.ValueProfile.ShouldBeNull();
 
             var idColOut = desc.Columns.Single(c => c.Name == "id");
-            idColOut.Description.ShouldBe("Surrogate customer primary identifier.");
+            if (channel == "mcp-brief")
+            {
+                // The brief shape is column signatures only: no column text on any column, hidden or not.
+                idColOut.Description.ShouldBeNull();
+                desc.Columns.ShouldAllBe(c => c.Description == null && c.DisplayName == null);
+            }
+            else
+            {
+                idColOut.Description.ShouldBe("Surrogate customer primary identifier.");
+            }
         }
         else if (channel == "rest")
         {

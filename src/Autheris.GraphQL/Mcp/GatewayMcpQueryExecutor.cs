@@ -384,6 +384,9 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
                 result = McpDescribeNarrowing.Apply(described, describeNarrowing);
             }
 
+            // Issue #799: the brief describe and the compact list have their own, smaller wire shapes.
+            result = McpCatalogWire.ForTool(result, compactList: string.Equals(Text("format"), "compact", StringComparison.OrdinalIgnoreCase));
+
             var serialized = JsonSerializer.Serialize(result, CamelCaseJsonOptions);
             return tool.Name.Equals(McpDatasetTools.SampleRows, StringComparison.OrdinalIgnoreCase)
                 ? Capped(tool.Name, serialized, McpRowCap.TrimRows(serialized, Math.Min(RowCap(), McpDatasetCatalog.MaxSampleRows)))
