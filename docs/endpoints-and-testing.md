@@ -12,6 +12,7 @@ CSRF Protection: Mandatory for GraphQL; required for REST when browser indicator
 |---|---|---|---|---|
 | **GraphQL** | `/graphql`, `/graphql/{domain}` (GET/POST/WebSocket) | Authenticated + CSRF | Always active; Nitro IDE in Dev only | `WalkingSkeleton`, `EndToEndSqlite` |
 | **Metrics & Health** | `/metrics`, `/health/live`, `/health/ready` | Metrics: Auth; Health: Anonymous | Always active | `WalkingSkeleton`, `EndToEndSqlite` |
+| **GraphQL Schema Status** | `GET /api/v1/catalog/graphql-schema-status` (200 `Current`, 503 `Updating` with `Retry-After: 1`) | Authenticated | Always active | `CatalogGraphQlChangeSignalTests` |
 | **Authentication & Session** | `/api/auth/login` (GET/POST), `/session`, `/logout` | Basic / ForwardAuth / Session | Always active | `WalkingSkeleton`, `BasicAuthOptimizationTests` |
 | **Developer Hub** | `/`, `/getting-started`, `/api/dev/info`, `/personas`, `/login/{persona}` | Anonymous | `Development` environment only | `InsecureGettingStarted` |
 | **System & Monitoring** | `/api/governance/system/{metrics,health,resource-groups}` | Role-gated | `SystemMetrics.Enabled` | Unit tests |
