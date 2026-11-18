@@ -37,8 +37,7 @@ public sealed class CatalogGraphQlConnectionTests
     public CatalogGraphQlConnectionTests()
     {
         var custTable = CreateTableMetadata();
-        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns([custTable]);
+        _metadataRepo.StubAllTables([custTable]);
         _relationRepo.GetRelationsForTableAsync(_custTableId, Arg.Any<CancellationToken>())
             .Returns([]);
     }

@@ -106,8 +106,7 @@ public sealed class QueryAnalysisAndValueProfilingTests
             rlsExpression: "tenant_id = current_setting('app.tenant_id')");
 
         var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(new[] { ordersTable });
+        metadataRepo.StubAllTables(new[] { ordersTable });
 
         var consentRepo = Substitute.For<IConsentRepository>();
         consentRepo.GetAllActiveConsentsForSubjectsAsync(
@@ -220,8 +219,7 @@ public sealed class QueryAnalysisAndValueProfilingTests
             });
 
         var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(new[] { customersTable, invoicesTable, secretSalariesTable });
+        metadataRepo.StubAllTables(new[] { customersTable, invoicesTable, secretSalariesTable });
 
         var consentRepo = Substitute.For<IConsentRepository>();
         consentRepo.GetAllActiveConsentsForSubjectsAsync(
@@ -305,8 +303,7 @@ public sealed class QueryAnalysisAndValueProfilingTests
             });
 
         var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(new[] { usersTable, auditTable });
+        metadataRepo.StubAllTables(new[] { usersTable, auditTable });
 
         var consentRepo = Substitute.For<IConsentRepository>();
         consentRepo.GetAllActiveConsentsForSubjectsAsync(
@@ -390,8 +387,7 @@ public sealed class QueryAnalysisAndValueProfilingTests
             new[] { new TableColumn { ColumnName = "card_last4", DataType = "varchar", IsSensitive = true } });
 
         var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(new[] { ordersTable, shipmentsTable, paymentsTable });
+        metadataRepo.StubAllTables(new[] { ordersTable, shipmentsTable, paymentsTable });
         Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(metadataRepo);
 
         var consentRepo = Substitute.For<IConsentRepository>();
@@ -474,8 +470,7 @@ public sealed class QueryAnalysisAndValueProfilingTests
             new[] { new TableColumn { ColumnName = "id", DataType = "uuid" } });
 
         var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(new[] { ordersTable });
+        metadataRepo.StubAllTables(new[] { ordersTable });
 
         var consentRepo = Substitute.For<IConsentRepository>();
         consentRepo.GetAllActiveConsentsForSubjectsAsync(
@@ -561,8 +556,7 @@ public sealed class QueryAnalysisAndValueProfilingTests
             new[] { new TableColumn { ColumnName = "id", DataType = "uuid" } });
 
         var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(new[] { ordersTable, customersTable });
+        metadataRepo.StubAllTables(new[] { ordersTable, customersTable });
 
         var consentRepo = Substitute.For<IConsentRepository>();
         consentRepo.GetAllActiveConsentsForSubjectsAsync(

@@ -25,7 +25,7 @@ public sealed class TypedAggregateSchemaTests
     internal static async Task<CatalogSchemaModel> BuildAsync(params TableMetadata[] tables)
     {
         var metaRepo = Substitute.For<ITableMetadataRepository>();
-        metaRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(tables.ToList());
+        metaRepo.StubAllTables(tables.ToList());
         var relRepo = Substitute.For<ITableRelationRepository>();
         relRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns([]);
         return await CatalogSchemaModel.BuildAsync(metaRepo, relRepo);

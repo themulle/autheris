@@ -34,8 +34,7 @@ public sealed class CatalogSchemaModelTests
         var nonSql = CreateTable(new TableIdentifier("sales", "dbo", "mongo_table"), isActive: true, dsType: DataSourceType.HttpDeclarative, dialect: "PostgreSql");
         var invalidDialect = CreateTable(new TableIdentifier("sales", "dbo", "bad_dialect"), isActive: true, dsType: DataSourceType.Sql, dialect: "UnknownDialect");
 
-        metaRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns([activeSql, inactiveSql, nonSql, invalidDialect]);
+        metaRepo.StubAllTables([activeSql, inactiveSql, nonSql, invalidDialect]);
 
         relRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns([]);
@@ -56,8 +55,7 @@ public sealed class CatalogSchemaModelTests
         var table1 = CreateTable(new TableIdentifier("sales", "dbo", "orders_item"), dialect: "SqlServer");
         var table2 = CreateTable(new TableIdentifier("sales_dbo", "orders", "item"), dialect: "SqlServer");
 
-        metaRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns([table1, table2]);
+        metaRepo.StubAllTables([table1, table2]);
 
         relRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns([]);
@@ -79,8 +77,7 @@ public sealed class CatalogSchemaModelTests
         var table1 = CreateTable(new TableIdentifier("db", "public", "orders"), dialect: "SqlServer");
         var table2 = CreateTable(new TableIdentifier("db", "public", "orders_filter"), dialect: "SqlServer");
 
-        metaRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns([table1, table2]);
+        metaRepo.StubAllTables([table1, table2]);
 
         relRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns([]);
@@ -103,8 +100,7 @@ public sealed class CatalogSchemaModelTests
         var table1 = CreateTable(new TableIdentifier("db", "public", "orders"), dialect: "SqlServer");
         var table2 = CreateTable(new TableIdentifier("db", "public", "orders_order_by"), dialect: "SqlServer");
 
-        metaRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns([table1, table2]);
+        metaRepo.StubAllTables([table1, table2]);
 
         relRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns([]);
@@ -135,8 +131,7 @@ public sealed class CatalogSchemaModelTests
             new TableColumn { ColumnName = "description", DataType = "text" }
         ]);
 
-        metaRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns([table]);
+        metaRepo.StubAllTables([table]);
 
         relRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns([]);
@@ -178,8 +173,7 @@ public sealed class CatalogSchemaModelTests
                 ["is_verified"] = new MaskingRule { RuleType = "HASH" }
             });
 
-        metaRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns([table]);
+        metaRepo.StubAllTables([table]);
 
         relRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns([]);
@@ -211,8 +205,7 @@ public sealed class CatalogSchemaModelTests
             new TableColumn { ColumnName = "customer_id", DataType = "int" }
         ]);
 
-        metaRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns([parentTable, childTable]);
+        metaRepo.StubAllTables([parentTable, childTable]);
 
         var relation = new TableRelation
         {
@@ -271,8 +264,7 @@ public sealed class CatalogSchemaModelTests
             new TableColumn { ColumnName = "user_id", DataType = "int" }
         ]);
 
-        metaRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns([parentTable, childTable]);
+        metaRepo.StubAllTables([parentTable, childTable]);
 
         var relation = new TableRelation
         {
@@ -305,7 +297,7 @@ public sealed class CatalogSchemaModelTests
         var pg = CreateTable(new TableIdentifier("sales", "public", "orders"), dialect: "PostgreSql");
         var oracle = CreateTable(new TableIdentifier("erp", "app", "invoices"), dialect: "Oracle");
         var databricks = CreateTable(new TableIdentifier("lake", "gold", "facts"), dialect: "Databricks");
-        metaRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([pg, oracle, databricks]);
+        metaRepo.StubAllTables([pg, oracle, databricks]);
         relRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns([]);
 
         var model = await CatalogSchemaModel.BuildAsync(metaRepo, relRepo);
@@ -324,7 +316,7 @@ public sealed class CatalogSchemaModelTests
             new TableColumn { ColumnName = "id", DataType = "int" },
             new TableColumn { ColumnName = "unit-price", DataType = "decimal" }
         ]);
-        metaRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([table]);
+        metaRepo.StubAllTables([table]);
         relRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns([]);
 
         var model = await CatalogSchemaModel.BuildAsync(metaRepo, relRepo);
@@ -362,7 +354,7 @@ public sealed class CatalogSchemaModelTests
     {
         var metaRepo = Substitute.For<ITableMetadataRepository>();
         var relRepo = Substitute.For<ITableRelationRepository>();
-        metaRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(tables);
+        metaRepo.StubAllTables(tables);
         relRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(ci => relations.Where(r => r.ParentTableIdentifier == ci.ArgAt<TableIdentifier>(0)).ToList());
         return await CatalogSchemaModel.BuildAsync(metaRepo, relRepo, logger);

@@ -44,8 +44,7 @@ public sealed class ExtensionsSecurityAuditRemediationTests
                 Columns = [new TableColumn { ColumnName = "id", DataType = "integer" }]
             }
         };
-        metaMock.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(metaTables));
+        metaMock.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(metaTables));
         metaMock.QueryTablesAsync(
                 Arg.Any<Autheris.Application.Catalog.CatalogTableQuery>(),
                 Arg.Any<CancellationToken>())

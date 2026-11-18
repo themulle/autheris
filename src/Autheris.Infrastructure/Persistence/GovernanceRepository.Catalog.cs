@@ -35,14 +35,18 @@ public partial class GovernanceRepository
         return DatasetCatalogStore.Apply(structural, overlay);
     }
 
-    private async Task<TableMetadata?> GetTableMetadataCoreAsync(
+    public Task<IReadOnlyList<TableMetadata?>> GetTableMetadataBatchAsync(IReadOnlyList<TableIdentifier> tables, CancellationToken ct = default)
+        => CatalogMetadataBatchReader.ReadAsync(this, tables, ct);
+
+    internal async Task<TableMetadata?> GetTableMetadataCoreAsync(
         TableIdentifier table,
         IReadOnlyDictionary<Guid, CatalogKeyDefinitionStore.TableKeyRows>? prefetchedKeys,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool probeCache = true)
     {
         var cacheKey = table.ToString().ToLowerInvariant();
         var nowTicks = TimeProvider.System.GetUtcNow().UtcTicks;
-        if (_metadataCache.TryGetValue(cacheKey, out var entry) && entry.Metadata != null && (nowTicks - entry.CachedAtTicks < MetadataCacheTtlTicks))
+        if (probeCache && _metadataCache.TryGetValue(cacheKey, out var entry) && entry.Metadata != null && (nowTicks - entry.CachedAtTicks < MetadataCacheTtlTicks))
         {
             // PERS-17: a hit is served only while the table epoch is unchanged (a write on another replica bumps it); an unreadable
             // epoch or a mismatch reloads from the database.

@@ -83,8 +83,7 @@ public class DbtHealthExecutionMiddlewareTests
         var accessResolver = Substitute.For<ITableAccessResolver>();
 
         var tableId = new TableIdentifier("finance", "dbo", "orders");
-        tableRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(new[] { new TableMetadata { Identifier = tableId, Table = new Table { TableName = "orders", SchemaName = "dbo", SourceName = "finance" } } });
+        tableRepo.StubAllTables(new[] { new TableMetadata { Identifier = tableId, Table = new Table { TableName = "orders", SchemaName = "dbo", SourceName = "finance" } } });
         Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(tableRepo);
 
         circuitBreaker.GetTableHealthAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
@@ -125,8 +124,7 @@ public class DbtHealthExecutionMiddlewareTests
         var accessResolver = Substitute.For<ITableAccessResolver>();
 
         var tableId = new TableIdentifier("finance", "dbo", "orders");
-        tableRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(new[] { new TableMetadata { Identifier = tableId, Table = new Table { TableName = "orders", SchemaName = "dbo", SourceName = "finance" } } });
+        tableRepo.StubAllTables(new[] { new TableMetadata { Identifier = tableId, Table = new Table { TableName = "orders", SchemaName = "dbo", SourceName = "finance" } } });
         Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(tableRepo);
 
         circuitBreaker.GetTableHealthAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
@@ -166,8 +164,7 @@ public class DbtHealthExecutionMiddlewareTests
         var tableRepo = Substitute.For<ITableMetadataRepository>();
 
         var tableId = new TableIdentifier("finance", "dbo", "orders");
-        tableRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(new[] { new TableMetadata { Identifier = tableId, Table = new Table { TableName = "orders", SchemaName = "dbo", SourceName = "finance" } } });
+        tableRepo.StubAllTables(new[] { new TableMetadata { Identifier = tableId, Table = new Table { TableName = "orders", SchemaName = "dbo", SourceName = "finance" } } });
         Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(tableRepo);
 
         circuitBreaker.GetTableHealthAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
@@ -198,7 +195,7 @@ public class DbtHealthExecutionMiddlewareTests
 
         var tableId = new TableIdentifier("finance", "dbo", "orders");
         var meta = new TableMetadata { Identifier = tableId, Table = new Table { TableName = "orders", SchemaName = "dbo", SourceName = "finance" } };
-        tableRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(new[] { meta });
+        tableRepo.StubAllTables(new[] { meta });
         Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(tableRepo);
         circuitBreaker.GetTableHealthAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(new DbtHealthState(tableId, status, Array.Empty<DbtTestFailure>(), DateTimeOffset.UtcNow));

@@ -222,7 +222,7 @@ public sealed class DbtTests
             }
         };
 
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(tableList));
+        metadataRepo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(tableList));
         metadataRepo.QueryTablesAsync(
                 Arg.Any<Autheris.Application.Catalog.CatalogTableQuery>(),
                 Arg.Any<CancellationToken>())
@@ -590,8 +590,7 @@ public sealed class DbtTests
 
         metadataRepo.GetTableMetadataAsync(targetTableId, Arg.Any<CancellationToken>())
             .Returns(existingMetadata);
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns([existingMetadata]);
+        metadataRepo.StubAllTables([existingMetadata]);
 
         var service = new DbtMetadataIngestionService(proposalRepo, metadataRepo, graphStore, logger);
 
@@ -667,8 +666,7 @@ public sealed class DbtTests
 
         metadataRepo.GetTableMetadataAsync(targetTableId, Arg.Any<CancellationToken>())
             .Returns(existingMetadata);
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns([existingMetadata]);
+        metadataRepo.StubAllTables([existingMetadata]);
 
         var service = new DbtMetadataIngestionService(proposalRepo, metadataRepo, graphStore, logger);
 
@@ -734,7 +732,7 @@ public sealed class DbtTests
             Columns = [new TableColumn { ColumnName = "col_a", DataType = "varchar" }]
         };
         metadataRepo.GetTableMetadataAsync(targetTableId, Arg.Any<CancellationToken>()).Returns(existingMetadata);
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([existingMetadata]);
+        metadataRepo.StubAllTables([existingMetadata]);
         var service = new DbtMetadataIngestionService(Substitute.For<IDbtProposalRepository>(), metadataRepo, Substitute.For<ILineageGraphStore>(), NullLogger<DbtMetadataIngestionService>.Instance);
 
         var json = "{ \"classifications\": [ { \"database\": \"postgres\", \"schema\": \"analytics\", \"table\": \"customers\", \"columns\": { \"col_a\": { \"masking_rule\": \"" + alias + "\" } } } ] }";
@@ -760,7 +758,7 @@ public sealed class DbtTests
             Columns = [new TableColumn { ColumnName = "col_a", DataType = "varchar" }]
         };
         metadataRepo.GetTableMetadataAsync(targetTableId, Arg.Any<CancellationToken>()).Returns(existingMetadata);
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([existingMetadata]);
+        metadataRepo.StubAllTables([existingMetadata]);
         var service = new DbtMetadataIngestionService(Substitute.For<IDbtProposalRepository>(), metadataRepo, Substitute.For<ILineageGraphStore>(), NullLogger<DbtMetadataIngestionService>.Instance);
         var json = "{ \"classifications\": [ { \"database\": \"postgres\", \"schema\": \"analytics\", \"table\": \"customers\", \"columns\": { \"col_a\": { \"masking_rule\": \"" + alias + "\" } } } ] }";
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
@@ -801,8 +799,7 @@ public sealed class DbtTests
 
         metadataRepo.GetTableMetadataAsync(targetTableId, Arg.Any<CancellationToken>())
             .Returns(existingMetadata);
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns([existingMetadata]);
+        metadataRepo.StubAllTables([existingMetadata]);
 
         var service = new DbtMetadataIngestionService(proposalRepo, metadataRepo, graphStore, logger);
 
@@ -861,7 +858,7 @@ public sealed class DbtTests
             metadataRepo.GetTableMetadataAsync(table.Identifier, Arg.Any<CancellationToken>()).Returns(table);
         }
 
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(tables.ToList());
+        metadataRepo.StubAllTables(tables.ToList());
         var service = new DbtMetadataIngestionService(
             Substitute.For<IDbtProposalRepository>(), metadataRepo, Substitute.For<ILineageGraphStore>(), NullLogger<DbtMetadataIngestionService>.Instance);
         return (service, metadataRepo);
@@ -1056,7 +1053,7 @@ public sealed class DbtTests
         var graphStore = Substitute.For<ILineageGraphStore>();
         var logger = NullLogger<DbtMetadataIngestionService>.Instance;
 
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([]);
+        metadataRepo.StubAllTables([]);
 
         var service = new DbtMetadataIngestionService(proposalRepo, metadataRepo, graphStore, logger);
 

@@ -575,7 +575,7 @@ public sealed partial class InfrastructureAndPluginSecurityTests : IDisposable
     {
         var table = new TableIdentifier("finance", "dbo", "ledger");
         var repo = Substitute.For<ITableMetadataRepository>();
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(new List<TableMetadata>
+        repo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(new List<TableMetadata>
         {
             new()
             {

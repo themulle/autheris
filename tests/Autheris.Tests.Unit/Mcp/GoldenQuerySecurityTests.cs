@@ -53,8 +53,7 @@ public sealed class GoldenQuerySecurityTests
             Columns = [new TableColumn { ColumnName = "id", DataType = "varchar" }]
         };
 
-        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([_customersTable, _ordersTable]));
+        _metadataRepo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>([_customersTable, _ordersTable]));
 
         _goldenService = new GoldenQueryService(Options.Create(new GatewayOptions()), NullLogger<GoldenQueryService>.Instance);
         _goldenService.RegisterGoldenQuery(new GoldenQuery(
@@ -473,8 +472,7 @@ public sealed class GoldenQuerySecurityTests
             Table = new Table { SchemaName = "dbo", TableName = "customers" },
             Columns = [new TableColumn { ColumnName = "id", DataType = "varchar" }, new TableColumn { ColumnName = "ssn", DataType = "varchar" }]
         };
-        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([table]));
+        _metadataRepo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>([table]));
         _goldenService.RegisterGoldenQuery(new GoldenQuery("golden-alias", "finance", "customers", "Tax numbers", "Aliased", "query { customers { taxNumber } }"));
 
         var pdp = Substitute.For<Autheris.Application.Policy.Pdp.IAccessDecisionPoint>();
