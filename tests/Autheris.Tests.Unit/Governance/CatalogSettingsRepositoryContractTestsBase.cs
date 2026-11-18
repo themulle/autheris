@@ -315,7 +315,8 @@ public abstract class CatalogSettingsRepositoryContractTestsBase : IAsyncLifetim
         var id = NewTable();
         var meta = await UpsertTableAsync(Repo, id);
         await Repo.SetDatasetPrivacyAsync(id, 3, null, Admin);
-        await ExecuteRawAsync($"UPDATE TABLE_CATALOG_SETTINGS SET visibility = 9 WHERE table_id = '{meta.Table.Id}'");
+        await ExecuteRawAsync(
+            $"INSERT INTO TABLE_TAGS (table_id, tag, source, created_by, created_at) VALUES ('{meta.Table.Id}', 'Bad Tag!', 'admin', 'x', '2026-01-01T00:00:00.0000000+00:00')");
         var reader = (await CreateAdditionalRepositoryAsync())!;
 
         await Should.ThrowAsync<Exception>(() => reader.GetDatasetCatalogSettingsAsync(id, strict: true));
