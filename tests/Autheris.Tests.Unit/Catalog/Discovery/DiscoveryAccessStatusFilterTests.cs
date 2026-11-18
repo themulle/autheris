@@ -3,10 +3,19 @@ namespace Autheris.Tests.Unit.Catalog.Discovery;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Claims;
 using System.Threading.Tasks;
 using Autheris.Application.Catalog.Discovery;
 using Autheris.Application.Catalog.Interfaces;
+using Autheris.Application.Catalog.Search;
+using Autheris.Application.Catalog.Services;
 using Autheris.Application.Policy.Pdp;
+using Autheris.Application.Services;
+using Autheris.Domain.Options;
+using Autheris.Tests.Common;
+using Autheris.Tests.Unit.Governance.Classification;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -60,7 +69,7 @@ public sealed class DiscoveryAccessStatusFilterTests
         }
 
         var pdp = new FakeAccessDecisionPoint(r =>
-            consents.Active.Any(c => c.GranteeSid == r.Subject.UserSid && c.TableIdentifier == r.Object.Identifier)
+            consents.Active.Any(c => c.GranteeSid is { } g && (g == r.Subject.UserSid || r.Subject.GroupSids.Contains(g)) && c.TableIdentifier == r.Object.Identifier)
                 ? TableAccessDecision.Allowed(r.Object.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)
                 : TableAccessDecision.Denied(r.Object.Identifier, "Denied"));
 
@@ -68,16 +77,7 @@ public sealed class DiscoveryAccessStatusFilterTests
         return new Fixture(service, pdp, consents, repo.Tables);
     }
 
-    private static Consent Allow(string sid, TableIdentifier table) => new()
-    {
-        TableIdentifier = table,
-        Effect = ConsentEffect.Allow,
-        GranteeType = GranteeType.User,
-        GranteeSid = new Sid(sid),
-        TenantId = new TenantId("tenant-a"),
-        ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
-        ValidTo = DateTimeOffset.UtcNow.AddDays(30)
-    };
+    private static Consent Allow(string sid, TableIdentifier table) => Grant(table, sid);
 
     private static CatalogCaller CallerOf(string sid) => DiscoveryTestBuilder.Caller(DiscoveryTestBuilder.User(sid, "tenant-a"));
 
@@ -205,9 +205,10 @@ public sealed class DiscoveryAccessStatusFilterTests
     }
 
     [Fact]
-    public async Task PatternGrant_MakesMatchingTablesCandidates()
+    public async Task PatternGrant_MakesOnlyMatchingVisibleTablesCandidates()
     {
-        var f = Create(3, grantedIndexes: []);
+        // t000..t009 match the pattern, t010 and t011 do not; t005 is hidden (not visible to the caller at all).
+        var f = Create(12, grantedIndexes: [], hiddenGrantedIndex: 5);
         f.Consents.Active.Add(new Consent
         {
             ObjectPattern = "sales.dbo.t00*",
@@ -224,7 +225,173 @@ public sealed class DiscoveryAccessStatusFilterTests
 
         var page = await service.ListAsync(new DiscoveryQuery(First: 200, Access: DiscoveryAccessState.Granted), CallerOf(Caller));
 
-        page.TotalCount.ShouldBe(3);
+        page.TotalCount.ShouldBe(9);
+        page.Items.ShouldNotContain(o => o.Name == "t005" || o.Name == "t010" || o.Name == "t011");
+        pdp.Requests.Where(r => r.Operation == AccessOperation.Discover)
+            .ShouldAllBe(r => r.Object.Identifier.TableName.StartsWith("t00", StringComparison.Ordinal) && r.Object.Identifier.TableName != "t005");
+    }
+
+    [Fact]
+    public async Task GroupGrant_IsGranted()
+    {
+        var f = Create(4, grantedIndexes: []);
+        f.Consents.Active.Add(Grant(f.Tables[2].Identifier, GroupSid, GranteeType.Group));
+
+        var member = await f.Service.ListAsync(new DiscoveryQuery(First: 200, Access: DiscoveryAccessState.Granted), GroupMemberCaller());
+        var nonMember = await f.Service.ListAsync(new DiscoveryQuery(First: 200, Access: DiscoveryAccessState.Granted), CallerOf(Other));
+
+        member.Items.Select(o => o.Name).ShouldBe(["t002"]);
+        nonMember.Items.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task List_PagingLoop_DecidesEachTableOnce()
+    {
+        // The REST object list pages through 200-row pages of one scoped service: the caller view is computed once, not per page.
+        var f = Create(450, grantedIndexes: Enumerable.Range(0, 450).ToArray());
+        var caller = CallerOf(Caller);
+
+        var seen = 0;
+        for (var after = 0; ; after += 200)
+        {
+            var page = await f.Service.ListAsync(new DiscoveryQuery(First: 200, After: after, Access: DiscoveryAccessState.Granted), caller);
+            seen += page.Items.Count;
+            page.TotalCount.ShouldBe(450);
+            if (!page.HasNextPage)
+            {
+                break;
+            }
+        }
+
+        seen.ShouldBe(450);
+        // 450 filter decisions once, plus the read decision of each of the 450 page objects.
+        f.Pdp.Requests.Count(r => r.Operation == AccessOperation.Discover).ShouldBeLessThanOrEqualTo(450 + 450);
+        f.Consents.AllActiveReads.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Search_WithTheIndexReady_FilterIsAppliedBeforeTheLimit()
+    {
+        var f = Create(30, grantedIndexes: [27, 28, 29]);
+        var engine = new CatalogSearchEngine(
+            new ConstantVectorGenerator(),
+            Options.Create(new CatalogSearchOptions()),
+            NullLogger<CatalogSearchEngine>.Instance,
+            new AdjustableClassificationTimeProvider(DateTimeOffset.UtcNow));
+        await engine.RebuildIndexAsync(f.Tables);
+        var service = new DiscoveryService(
+            CopyOf(f.Tables), f.Pdp, f.Consents, new FakeDiscoveryApprovalRepository(), new FakeDiscoveryOwnershipRepository(),
+            new FakeDiscoveryArtifactStore(), new FakeAuditWriter(),
+            Options.Create(new GatewayOptions { Tenancy = TenancyShape.Multi.Options() }),
+            Options.Create(new CatalogDiscoveryOptions()),
+            searchEngine: engine);
+        engine.IsIndexReady.ShouldBeTrue();
+
+        var hits = await service.SearchAsync(
+            "description", new DiscoverySearchOptions(Limit: 2, Mode: "keyword", Access: DiscoveryAccessState.Granted), CallerOf(Caller));
+
+        hits.Count.ShouldBe(2);
+        hits.ShouldAllBe(o => o.Access == DiscoveryAccessState.Granted && (o.Name == "t027" || o.Name == "t028" || o.Name == "t029"));
+    }
+
+    /// <summary>
+    /// Parity over the real decision point (AccessDecisionPoint, TableAccessPolicy, ConsentResolutionService): for every state, the filtered
+    /// listing is exactly the unfiltered listing restricted to that state (user, group and pattern grants, Deny, write-only, not yet valid).
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task RealDecisionPoint_FilteredEqualsUnfilteredWhereState_ForEveryState()
+    {
+        var repo = new FakeDiscoveryTableRepository();
+        foreach (var name in new[] { "user_grant", "group_grant", "denied", "write_only", "future", "pat_a", "pending", "expired", "none" })
+        {
+            repo.Tables.Add(DiscoveryTestBuilder.MakeTable("sales", name));
+        }
+
+        repo.Tables.Add(DiscoveryTestBuilder.MakeTable("sales", "pat_hidden", hidden: true));
+        TableIdentifier Id(string name) => repo.Tables.Single(t => t.Identifier.TableName == name).Identifier;
+
+        var consents = new FakeDiscoveryConsentRepository { RecentlyExpired = new HashSet<TableIdentifier> { Id("expired") } };
+        consents.Active.Add(Grant(Id("user_grant"), Caller));
+        consents.Active.Add(Grant(Id("group_grant"), GroupSid, GranteeType.Group));
+        consents.Active.Add(Grant(Id("denied"), Caller));
+        consents.Active.Add(Grant(Id("denied"), Caller, effect: ConsentEffect.Deny));
+        var writeOnly = Grant(Id("write_only"), Caller);
+        writeOnly.WriteRules = [new WriteRule(Guid.NewGuid(), WriteOperation.Delete, [], WriteRowScope.AllRows)];
+        consents.Active.Add(writeOnly);
+        consents.Active.Add(Grant(Id("future"), Caller, validFrom: DateTimeOffset.UtcNow.AddDays(1)));
+        consents.Active.Add(new Consent
+        {
+            ObjectPattern = "sales.dbo.pat_*",
+            DataSource = "sales",
+            // An internal-workflow pattern grant also needs an authorized approving owner; the external one applies as is.
+            WorkflowMode = ConsentWorkflowMode.External,
+            Effect = ConsentEffect.Allow,
+            GranteeType = GranteeType.User,
+            GranteeSid = new Sid(Caller),
+            TenantId = new TenantId("tenant-a"),
+            ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
+            ValidTo = DateTimeOffset.UtcNow.AddDays(30)
+        });
+
+        var approvals = new FakeDiscoveryApprovalRepository();
+        approvals.Requests.Add(new ConsentRequest { Id = Guid.NewGuid(), TableIdentifier = Id("pending"), RequesterSid = new Sid(Caller), Status = "PENDING" });
+
+        var options = Options.Create(new GatewayOptions { Tenancy = TenancyShape.Multi.Options() });
+        var pdp = new AccessDecisionPoint(options, new ConsentResolutionService(), consents);
+        var service = new DiscoveryService(
+            repo, pdp, consents, approvals, new FakeDiscoveryOwnershipRepository(), new FakeDiscoveryArtifactStore(), new FakeAuditWriter(),
+            options, Options.Create(new CatalogDiscoveryOptions()));
+        var caller = GroupMemberCaller();
+
+        var all = await service.ListAsync(new DiscoveryQuery(First: 200), caller);
+        all.Items.ShouldNotContain(o => o.Name == "pat_hidden");
+        all.Items.Where(o => o.Access == DiscoveryAccessState.Granted).Select(o => o.Name).Order(StringComparer.Ordinal)
+            .ShouldBe(["group_grant", "pat_a", "user_grant"]);
+        all.Items.Single(o => o.Name == "pending").Access.ShouldBe(DiscoveryAccessState.Requested);
+        all.Items.Single(o => o.Name == "expired").Access.ShouldBe(DiscoveryAccessState.Expired);
+
+        foreach (var state in Enum.GetValues<DiscoveryAccessState>())
+        {
+            var filtered = await service.ListAsync(new DiscoveryQuery(First: 200, Access: state), caller);
+            filtered.Items.Select(o => o.Name).ShouldBe(all.Items.Where(o => o.Access == state).Select(o => o.Name), $"state {state}");
+            filtered.TotalCount.ShouldBe(filtered.Items.Count);
+        }
+    }
+
+    private const string GroupSid = "S-1-5-21-1000-2000-3000-5001";
+
+    private static Consent Grant(
+        TableIdentifier table,
+        string grantee,
+        GranteeType type = GranteeType.User,
+        ConsentEffect effect = ConsentEffect.Allow,
+        DateTimeOffset? validFrom = null) => new()
+    {
+        TableIdentifier = table,
+        Effect = effect,
+        GranteeType = type,
+        GranteeSid = new Sid(grantee),
+        TenantId = new TenantId("tenant-a"),
+        ValidFrom = validFrom ?? DateTimeOffset.UtcNow.AddDays(-1),
+        ValidTo = DateTimeOffset.UtcNow.AddDays(30)
+    };
+
+    private static CatalogCaller GroupMemberCaller()
+    {
+        var principal = DiscoveryTestBuilder.User(Caller, "tenant-a");
+        ((ClaimsIdentity)principal.Identity!).AddClaim(new Claim(ClaimTypes.GroupSid, GroupSid, ClaimValueTypes.String, IdentityClaimIssuers.Pipeline));
+        return DiscoveryTestBuilder.Caller(principal);
+    }
+
+    private sealed class ConstantVectorGenerator : ILocalEmbeddingGenerator
+    {
+        public int EmbeddingDimensions => 4;
+        public string ModelIdentifier => "constant-test";
+        public ReadOnlyMemory<float> GenerateNormalizedEmbedding(string text) => new float[] { 1, 0, 0, 0 };
+
+        public Task<IReadOnlyList<ReadOnlyMemory<float>>> GenerateNormalizedEmbeddingsAsync(IReadOnlyList<string> texts, System.Threading.CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<ReadOnlyMemory<float>>>(texts.Select(_ => (ReadOnlyMemory<float>)new float[] { 1, 0, 0, 0 }).ToList());
     }
 
     private static FakeDiscoveryTableRepository CopyOf(List<TableMetadata> tables)

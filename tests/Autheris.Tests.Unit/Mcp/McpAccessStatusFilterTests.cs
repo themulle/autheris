@@ -3,6 +3,7 @@ namespace Autheris.Tests.Unit.Mcp;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Claims;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -18,7 +19,10 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.GraphQL.Mcp;
 using Autheris.Tests.Unit.Catalog.Discovery;
+using IRequestExecutorProvider = HotChocolate.Execution.IRequestExecutorProvider;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
@@ -281,5 +285,68 @@ public sealed class McpAccessStatusFilterTests
         granted.NextOffset.ShouldBe(1);
         requestable.Total.ShouldBe(0);
         requestable.Datasets.ShouldBeEmpty();
+    }
+
+    // list_datasets through the MCP executor (the closed-world schema check is stubbed out to reach the executor's own check).
+
+    private static GatewayMcpQueryExecutor Executor(IMcpDatasetCatalog catalog)
+    {
+        var validator = Substitute.For<IPersistedToolValidator>();
+        validator.ValidateToolInvocation(Arg.Any<McpToolDefinition>(), Arg.Any<JsonElement>(), out Arg.Any<string?>()).Returns(true);
+        return new GatewayMcpQueryExecutor(
+            Substitute.For<IRequestExecutorProvider>(),
+            Substitute.For<IGatewayExecutionService>(),
+            NullLogger<GatewayMcpQueryExecutor>.Instance,
+            McpRowCapTests.Options(100),
+            datasetCatalog: catalog,
+            persistedToolValidator: validator);
+    }
+
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData("\"\"")]
+    [InlineData("\"   \"")]
+    [InlineData("\"MINE<script>\"")]
+    [InlineData("42")]
+    [InlineData("true")]
+    public async Task ListDatasets_InvalidFilter_IsRejectedWithTheFixedMessage(string accessStatusJson)
+    {
+        var catalog = Substitute.For<IMcpDatasetCatalog>();
+
+        var json = await Executor(catalog).ExecuteOperationAsync(
+            Tool(McpDatasetTools.ListDatasets), "{\"accessStatus\":" + accessStatusJson + "}", Session);
+
+        json.ShouldContain("INVALID_PARAMS");
+        json.ShouldContain("Allowed values: GRANTED, PENDING, EXPIRED, REQUEST_ACCESS");
+        json.ShouldNotContain("MINE");
+        catalog.ReceivedCalls().ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task ListDatasets_Filter_ReachesTheCatalogWithAllArguments()
+    {
+        var catalog = Substitute.For<IMcpDatasetCatalog>();
+        catalog.ListDatasetsAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<int?>(), Arg.Any<int?>(), Arg.Any<string?>(),
+                Arg.Any<string?>(), Arg.Any<bool?>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(new McpDatasetList([], 0, false));
+
+        await Executor(catalog).ExecuteOperationAsync(
+            Tool(McpDatasetTools.ListDatasets), """{"accessStatus":"GRANTED","limit":5,"format":"compact"}""", Session);
+
+        await catalog.Received(1).ListDatasetsAsync(Arg.Any<ClaimsPrincipal>(), null, null, null, 5, null, null, null, "compact", "GRANTED", Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData(McpDatasetTools.SearchCatalog, "query")]
+    [InlineData(McpDatasetTools.FindRelevantTables, "use_case")]
+    public async Task SearchTools_BlankFilter_IsRejected(string tool, string textArgument)
+    {
+        var (handler, search) = Handler(Hit("orders", "GRANTED"));
+
+        var json = await handler.ExecuteToolAsync(Tool(tool), "{\"" + textArgument + "\":\"orders\",\"accessStatus\":\"\"}", Session, CancellationToken.None);
+
+        json.ShouldContain("INVALID_PARAMS");
+        await search.DidNotReceiveWithAnyArgs().SearchCatalogDetailedAsync(default!, default!, default);
     }
 }

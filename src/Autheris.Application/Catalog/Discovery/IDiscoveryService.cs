@@ -17,6 +17,7 @@ public enum DiscoverySurface
 }
 
 /// <param name="Access">Issue #798: only objects in this caller access state; applied before the total and paging. Null: no filter.</param>
+/// <param name="IncludeProcedures">False for callers that list registered procedures themselves (MCP): no procedure is resolved or counted.</param>
 public sealed record DiscoveryQuery(
     string? Domain = null,
     string? Schema = null,
@@ -26,7 +27,8 @@ public sealed record DiscoveryQuery(
     int First = 50,
     int After = 0,
     DiscoverySurface Surface = DiscoverySurface.Rest,
-    DiscoveryAccessState? Access = null);
+    DiscoveryAccessState? Access = null,
+    bool IncludeProcedures = true);
 
 /// <param name="Access">Issue #804: only objects in this caller access state; applied before ranking and the limit. Null: no filter.</param>
 public sealed record DiscoverySearchOptions(

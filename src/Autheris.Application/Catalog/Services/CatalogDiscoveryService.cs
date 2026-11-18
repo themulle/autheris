@@ -597,6 +597,12 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
         var hits = new List<CatalogSearchHit>(objs.Count);
         foreach (var obj in objs)
         {
+            // Procedures are added once below from the registered catalog (GRANTED, as list_datasets reports them), never twice.
+            if (obj.Kind == DiscoveryObjectKind.Procedure)
+            {
+                continue;
+            }
+
             var hit = Autheris.Application.Catalog.Discovery.CatalogDiscoveryProjection.ToSearchHit(obj, mode, lang);
             if (_graphQlMap != null && obj.Columns.Count > 0)
                 hit = hit with { SuggestedGraphQlField = await _graphQlMap.GetRootFieldAsync(hit.TableIdentifier, ct).ConfigureAwait(false) };

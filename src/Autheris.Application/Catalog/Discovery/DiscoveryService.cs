@@ -17,6 +17,7 @@ using Autheris.Application.Catalog.Services;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy.Classification;
 using Autheris.Application.Policy.Pdp;
+using Autheris.Application.Policy.RowScopes;
 using Autheris.Application.Tenancy;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
@@ -63,6 +64,7 @@ public sealed class DiscoveryService : IDiscoveryService
     private readonly Lock _memoLock = new();
     private readonly Dictionary<ScopeMemoKey, ScopedCatalog> _scopeMemo = [];
     private readonly Dictionary<ObjectMemoKey, DiscoveryObject> _objectMemo = [];
+    private readonly Dictionary<ScopeMemoKey, CallerAccessMemo> _accessMemo = [];
 
     private readonly record struct ScopeMemoKey(string Subject, string ClaimsHash, string Tenant, CatalogChannel Channel);
     private readonly record struct ObjectMemoKey(ScopeMemoKey ScopeKey, DiscoveryObjectKind Kind, TableIdentifier TableId, string LanguageKey);
@@ -159,7 +161,7 @@ public sealed class DiscoveryService : IDiscoveryService
             // caller-visible text check (#813) so only the tables in the wanted state are projected; both only narrow the set.
             if (query.Access is { } wantedAccess)
             {
-                var view = await LoadAccessViewAsync(caller, sid, matchedTables, wantedAccess, ct).ConfigureAwait(false);
+                var view = await LoadAccessViewAsync(caller, sid, scopeKey, matchedTables, wantedAccess, ct).ConfigureAwait(false);
                 matchedTables = matchedTables.FindAll(t => view.StateOf(t.Identifier) == wantedAccess);
             }
 
@@ -171,9 +173,11 @@ public sealed class DiscoveryService : IDiscoveryService
                     (table, projected) => DiscoveryVisibleTextMatcher.ContainsQuery(table, projected, searchText), ct).ConfigureAwait(false);
             }
 
-            var eligibleProcedures = (await LoadEligibleProceduresAsync(caller, scoped.VisibleTables, ct).ConfigureAwait(false))
-                .Where(p => DiscoveryProcedureResolver.MatchesQuery(p.Procedure, query.Domain, query.Schema, query.Tag, query.Search))
-                .ToList();
+            var eligibleProcedures = query.IncludeProcedures
+                ? (await LoadEligibleProceduresAsync(caller, scoped.VisibleTables, ct).ConfigureAwait(false))
+                    .Where(p => DiscoveryProcedureResolver.MatchesQuery(p.Procedure, query.Domain, query.Schema, query.Tag, query.Search))
+                    .ToList()
+                : [];
             if (query.Access is { } wantedProcedureAccess)
             {
                 eligibleProcedures = await FilterProceduresByAccessAsync(caller, sid, scopeKey, eligibleProcedures, wantedProcedureAccess, ct).ConfigureAwait(false);
@@ -327,11 +331,16 @@ public sealed class DiscoveryService : IDiscoveryService
             var trimmed = text?.Trim() ?? string.Empty;
 
             // Issue #804: the access filter narrows the searchable set before ranking and the limit.
+            // The domain filter runs first, so only the tables of that domain are decided.
             var searchable = scoped.VisibleTables;
             if (options.Access is { } wantedAccess)
             {
-                var view = await LoadAccessViewAsync(caller, sid, scoped.VisibleTables, wantedAccess, ct).ConfigureAwait(false);
-                searchable = scoped.VisibleTables.Where(t => view.StateOf(t.Identifier) == wantedAccess).ToList();
+                var accessDomain = options.Domain?.Trim();
+                var inDomain = string.IsNullOrEmpty(accessDomain)
+                    ? scoped.VisibleTables
+                    : scoped.VisibleTables.Where(t => string.Equals(t.Identifier.Domain, accessDomain, StringComparison.OrdinalIgnoreCase)).ToList();
+                var view = await LoadAccessViewAsync(caller, sid, scopeKey, inDomain, wantedAccess, ct).ConfigureAwait(false);
+                searchable = inDomain.Where(t => view.StateOf(t.Identifier) == wantedAccess).ToList();
             }
 
             var visibleById = searchable.ToDictionary(static t => t.Identifier);
@@ -783,114 +792,136 @@ public sealed class DiscoveryService : IDiscoveryService
     }
 
     /// <summary>
-    /// Issues #798 / #804: the caller's access state of <paramref name="tables"/>, set-based. One read of the caller's active consents gives the
-    /// grant candidates (<see cref="GrantCandidatesAsync"/>); only those go to the access decision point, so a caller with three grants in a
-    /// catalog of 3,000 tables costs three decisions, not 3,000. The pending and expired sets are the ones the per-object state uses, read only
-    /// when <paramref name="wanted"/> needs them. Each state follows <see cref="DiscoveryAccessMapper.AccessStateOf"/>, the rule of the
-    /// per-object <see cref="DiscoveryObject.Access"/>, so the filter and the reported state agree.
+    /// Issues #798 / #804: the caller's access state of <paramref name="tables"/>, set-based and memoized per caller scope (like
+    /// <see cref="LoadScopedCatalogAsync"/>), so a paging loop (the REST object list reads 200-row pages) decides each table once per request.
+    /// One read of the caller's active consents gives the grant candidates (<see cref="CallerAccessMemo.IsCandidate"/>); only candidates not
+    /// decided yet go to the access decision point, so a caller with three grants in a catalog of 3,000 tables costs three decisions, not 3,000.
+    /// The pending and expired sets are the ones the per-object state uses, read once and only when <paramref name="wanted"/> needs them. Each
+    /// state follows <see cref="DiscoveryAccessMapper.AccessStateOf"/>, the rule of the per-object <see cref="DiscoveryObject.Access"/>.
     /// </summary>
     private async Task<CallerAccessView> LoadAccessViewAsync(
         CatalogCaller caller,
         Sid sid,
+        ScopeMemoKey scopeKey,
         IReadOnlyList<TableMetadata> tables,
         DiscoveryAccessState wanted,
         CancellationToken ct)
     {
         var subject = SecurityPrincipalContext.FromPrincipal(caller.Principal!, caller.Tenant);
-        var candidates = await GrantCandidatesAsync(caller, subject, tables, ct).ConfigureAwait(false);
-        var granted = new HashSet<TableIdentifier>();
-        if (candidates.Count > 0)
-        {
-            var decisions = await _decisionPoint!.DecideManyAsync(
-                subject, candidates, AccessOperation.Discover, AccessTransport.Discovery, ct).ConfigureAwait(false);
-            if (decisions.Count != candidates.Count)
-            {
-                throw new InvalidOperationException("AccessDecisionPoint returned mismatched decision count.");
-            }
+        var memo = await LoadAccessMemoAsync(caller, subject, scopeKey, ct).ConfigureAwait(false);
 
-            for (var i = 0; i < candidates.Count; i++)
+        List<TableMetadata>? undecided = null;
+        lock (_memoLock)
+        {
+            foreach (var table in tables)
             {
-                if (decisions[i].IsAllowed)
+                if (!memo.Allowed.ContainsKey(table.Identifier) && memo.IsCandidate(table))
                 {
-                    granted.Add(candidates[i].Identifier);
+                    (undecided ??= []).Add(table);
                 }
             }
         }
 
-        if (wanted == DiscoveryAccessState.Granted)
+        if (undecided is not null)
         {
-            return new CallerAccessView(granted, EmptyTableSet, EmptyTableSet);
+            var decisions = await _decisionPoint!.DecideManyAsync(
+                subject, undecided, AccessOperation.Discover, AccessTransport.Discovery, ct).ConfigureAwait(false);
+            if (decisions.Count != undecided.Count)
+            {
+                throw new InvalidOperationException("AccessDecisionPoint returned mismatched decision count.");
+            }
+
+            lock (_memoLock)
+            {
+                for (var i = 0; i < undecided.Count; i++)
+                {
+                    memo.Allowed[undecided[i].Identifier] = decisions[i].IsAllowed;
+                }
+            }
         }
 
-        var pending = await LoadPendingRequestTablesAsync(sid, ct).ConfigureAwait(false);
-        var expired = await LoadRecentlyExpiredTablesAsync(sid, caller.Tenant, ct).ConfigureAwait(false);
-        return new CallerAccessView(granted, pending, expired);
+        if (wanted != DiscoveryAccessState.Granted)
+        {
+            memo.Pending ??= await LoadPendingRequestTablesAsync(sid, ct).ConfigureAwait(false);
+            memo.Expired ??= await LoadRecentlyExpiredTablesAsync(sid, caller.Tenant, ct).ConfigureAwait(false);
+        }
+
+        var granted = new HashSet<TableIdentifier>();
+        lock (_memoLock)
+        {
+            foreach (var table in tables)
+            {
+                if (memo.Allowed.TryGetValue(table.Identifier, out var allowed) && allowed)
+                {
+                    granted.Add(table.Identifier);
+                }
+            }
+        }
+
+        return new CallerAccessView(granted, memo.Pending ?? EmptyTableSet, memo.Expired ?? EmptyTableSet);
     }
 
     /// <summary>
-    /// The tables of <paramref name="tables"/> the access decision point can allow for the caller: every table when consent is bypassed,
-    /// otherwise those an active Allow read consent of the caller (user SIDs and group SIDs, caller tenant) targets, directly or by a pattern
-    /// grant (never a hidden table by pattern). Zero trust: the consent resolver denies a read without such a consent, and an access profile
-    /// never creates an allow (SR-M-07), so no other table can be granted. The decision point still decides every candidate; this set only
-    /// spares it the tables it cannot allow.
+    /// The grant sources of the caller, read once per scope: every table is a candidate when consent is bypassed, otherwise the tables an
+    /// active Allow read consent of the caller (user SIDs and group SIDs, caller tenant) targets, directly or by a pattern grant (never a hidden
+    /// table by pattern). Zero trust: the consent resolver denies a read without such a consent, and an access profile never creates an allow
+    /// (SR-M-07), so no other table can be granted. The decision point still decides every candidate; the set only spares it the tables it
+    /// cannot allow.
     /// </summary>
-    private async Task<List<TableMetadata>> GrantCandidatesAsync(
+    private async Task<CallerAccessMemo> LoadAccessMemoAsync(
         CatalogCaller caller,
         SecurityPrincipalContext subject,
-        IReadOnlyList<TableMetadata> tables,
+        ScopeMemoKey scopeKey,
         CancellationToken ct)
     {
-        if (tables.Count == 0)
+        lock (_memoLock)
         {
-            return [];
+            if (_accessMemo.TryGetValue(scopeKey, out var cached))
+            {
+                return cached;
+            }
         }
 
+        CallerAccessMemo memo;
         if (_gatewayOptions.IsConsentBypassed)
         {
-            return [.. tables];
+            memo = new CallerAccessMemo(AllTables: true, Targeted: [], Patterns: []);
         }
-
-        var subjects = caller.Principal!.GetAllUserSids();
-        subjects.Add(subject.UserSid);
-        subjects.UnionWith(subject.GroupSids);
-        var consents = await _consentRepository!.GetAllActiveConsentsForSubjectsAsync(
-            subjects, roles: null, _timeProvider.GetUtcNow(), caller.Tenant, ct).ConfigureAwait(false);
-
-        HashSet<TableIdentifier>? targeted = null;
-        List<Autheris.Application.Policy.RowScopes.ObjectPatternMatcher>? patterns = null;
-        foreach (var consent in consents)
+        else
         {
-            // Write-only consents (write rules without column rules) never grant a read.
-            if (consent.Effect != ConsentEffect.Allow || (consent.WriteRules.Count > 0 && consent.ColumnRules.Count == 0))
+            var subjects = caller.Principal!.GetAllUserSids();
+            subjects.Add(subject.UserSid);
+            subjects.UnionWith(subject.GroupSids);
+            var consents = await _consentRepository!.GetAllActiveConsentsForSubjectsAsync(
+                subjects, roles: null, _timeProvider.GetUtcNow(), caller.Tenant, ct).ConfigureAwait(false);
+
+            var targeted = new HashSet<TableIdentifier>();
+            var patterns = new List<ObjectPatternMatcher>();
+            foreach (var consent in consents)
             {
-                continue;
+                // Write-only consents (write rules without column rules) never grant a read.
+                if (consent.Effect != ConsentEffect.Allow || (consent.WriteRules.Count > 0 && consent.ColumnRules.Count == 0))
+                {
+                    continue;
+                }
+
+                if (!consent.IsPatternGrant)
+                {
+                    targeted.Add(consent.TableIdentifier);
+                }
+                else if (ObjectPatternMatcher.TryParse(consent.ObjectPattern, out var matcher, out _))
+                {
+                    patterns.Add(matcher!);
+                }
             }
 
-            if (!consent.IsPatternGrant)
-            {
-                (targeted ??= []).Add(consent.TableIdentifier);
-            }
-            else if (Autheris.Application.Policy.RowScopes.ObjectPatternMatcher.TryParse(consent.ObjectPattern, out var matcher, out _))
-            {
-                (patterns ??= []).Add(matcher!);
-            }
+            memo = new CallerAccessMemo(AllTables: false, targeted, patterns);
         }
 
-        if (targeted is null && patterns is null)
+        lock (_memoLock)
         {
-            return [];
+            return _accessMemo.TryAdd(scopeKey, memo) ? memo : _accessMemo[scopeKey];
         }
-
-        var candidates = new List<TableMetadata>();
-        foreach (var table in tables)
-        {
-            if (targeted?.Contains(table.Identifier) == true || (patterns?.Exists(p => p.Matches(table)) ?? false))
-            {
-                candidates.Add(table);
-            }
-        }
-
-        return candidates;
     }
 
     /// <summary>Issue #798: the procedures whose resolved caller state is <paramref name="wanted"/> (procedures are few; they resolve as on a page).</summary>
@@ -923,6 +954,17 @@ public sealed class DiscoveryService : IDiscoveryService
         }
 
         return kept;
+    }
+
+    /// <summary>The caller's grant sources and the decided tables of one scope (issue #798); mutated only under <c>_memoLock</c>.</summary>
+    private sealed record CallerAccessMemo(bool AllTables, HashSet<TableIdentifier> Targeted, List<ObjectPatternMatcher> Patterns)
+    {
+        public Dictionary<TableIdentifier, bool> Allowed { get; } = [];
+        public IReadOnlySet<TableIdentifier>? Pending { get; set; }
+        public IReadOnlySet<TableIdentifier>? Expired { get; set; }
+
+        public bool IsCandidate(TableMetadata table) =>
+            AllTables || Targeted.Contains(table.Identifier) || Patterns.Exists(p => p.Matches(table));
     }
 
     private sealed record CallerAccessView(

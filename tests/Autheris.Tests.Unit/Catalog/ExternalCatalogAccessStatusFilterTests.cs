@@ -68,6 +68,29 @@ public sealed class ExternalCatalogAccessStatusFilterTests
     }
 
     [Fact]
+    public async Task Granted_OnALargeCatalog_DecidesEachTableOnceAcrossTheInternalPages()
+    {
+        // 450 granted tables: the reader pulls three 200-row discovery pages; the caller view is built once, not once per page.
+        await using var harness = Create(450, Enumerable.Range(0, 450).ToArray());
+        var decide = harness.Pdp.Decide;
+        var discoverDecisions = 0;
+        harness.Pdp.Decide = r =>
+        {
+            if (r.Operation == Autheris.Application.Policy.Pdp.AccessOperation.Discover)
+            {
+                discoverDecisions++;
+            }
+
+            return decide(r);
+        };
+
+        var page = (await harness.ListObjectsAsync(User(), pageSize: 200, accessStatus: "granted")).ReadJson();
+
+        page.GetProperty("totalCount").GetInt32().ShouldBe(450);
+        discoverDecisions.ShouldBeLessThanOrEqualTo(450 + 450);
+    }
+
+    [Fact]
     public async Task None_ReturnsTheRequestableObjects()
     {
         await using var harness = Create(4, 0);
@@ -89,6 +112,17 @@ public sealed class ExternalCatalogAccessStatusFilterTests
         response.StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
         response.Body.ShouldContain("granted, requested, expired, none");
         response.Body.ShouldNotContain("everything");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task EmptyValue_IsA400_NotNoFilter()
+    {
+        await using var harness = Create(2, 0);
+
+        var response = await harness.ListObjectsAsync(User(), accessStatus: "");
+
+        response.StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
     }
 
     [Fact]

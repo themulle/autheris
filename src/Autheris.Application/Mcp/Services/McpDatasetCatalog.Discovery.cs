@@ -83,8 +83,9 @@ public sealed partial class McpDatasetCatalog
             return BuildDiscoveryListResult(pagedOnly, page.TotalCount, effectiveOffset, effectiveLimit, format, negotiatedLanguage, language);
         }
 
+        // The registered procedures are listed below; the discovery page carries tables only.
         var tablePage = await _discoveryService!.ListAsync(
-            new DiscoveryQuery(domain, Schema: null, search, tag, negotiatedLanguage, First: 10_000, After: 0, DiscoverySurface.Mcp, access),
+            new DiscoveryQuery(domain, Schema: null, search, tag, negotiatedLanguage, First: 10_000, After: 0, DiscoverySurface.Mcp, access, IncludeProcedures: false),
             caller,
             ct).ConfigureAwait(false);
         foreach (var obj in tablePage.Items)

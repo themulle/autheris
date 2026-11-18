@@ -33,14 +33,19 @@ public static class CatalogAccessStatus
     /// <summary>
     /// Parses a filter value, case-insensitively: the MCP names (<c>GRANTED</c>, <c>PENDING</c>, <c>EXPIRED</c>, <c>REQUEST_ACCESS</c>), the
     /// legacy <c>NONE</c> and the REST <c>callerState.access</c> names (<c>granted</c>, <c>requested</c>, <c>expired</c>, <c>none</c>).
-    /// Null or blank means "no filter" (<paramref name="state"/> null, result true); any other value is invalid (false).
+    /// Null means "no filter" (<paramref name="state"/> null, result true); a blank or any other value is invalid (false), never "no filter".
     /// </summary>
     public static bool TryParseFilter(string? value, out DiscoveryAccessState? state)
     {
         state = null;
-        if (string.IsNullOrWhiteSpace(value))
+        if (value is null)
         {
             return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
         }
 
         var v = value.Trim();
