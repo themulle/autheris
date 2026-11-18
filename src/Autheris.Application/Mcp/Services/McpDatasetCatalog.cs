@@ -446,13 +446,12 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         var graphQl = graphQlMap == null ? null : await graphQlMap.GetTableAsync(id, ct).ConfigureAwait(false);
         var graphQlColumns = (graphQl?.Columns ?? []).ToDictionary(c => c.ColumnName, StringComparer.OrdinalIgnoreCase);
 
-        // #799 review: the access label is the caller's effective level. A non-administrator level already is the data-path level (an explicit
-        // Clear on a sensitive column is clear); the administrator view is Clear for every column, but a sensitive column stays masked
-        // for it. The key and index projection uses the same labels, so a key column never shows access "mask".
+        // The access label is the data-path level seen through the sensitivity rule: a column graded sensitive is never reported as clear
+        // (an explicit Clear on it is shown as mask). The key and index projection uses the same labels, so a key column never shows "mask".
         string? AccessLabel(TableColumn c) => columnAccessLevels.TryGetValue(c.ColumnName, out var lvl)
             ? lvl switch
             {
-                Autheris.Domain.Interfaces.ColumnAccessLevel.Clear when !isAdmin || !ClassificationMetadata.IsColumnSensitive(table, c) => "clear",
+                Autheris.Domain.Interfaces.ColumnAccessLevel.Clear when !ClassificationMetadata.IsColumnSensitive(table, c) => "clear",
                 Autheris.Domain.Interfaces.ColumnAccessLevel.Clear or Autheris.Domain.Interfaces.ColumnAccessLevel.Mask => "mask",
                 _ => null
             }

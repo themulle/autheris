@@ -77,7 +77,7 @@ internal sealed class McpAccessHints(IReadPathSwitches? switches, bool mcpEnable
         var next = new List<string>(2);
         if (Tool(McpDatasetTools.DescribeDataset)) next.Add("call describe_dataset");
         if (Tool(McpDatasetTools.QueryGraphQl)) next.Add("query with query_graphql");
-        return "Lists the datasets (tables) you may query with their GraphQL field, and all protocols of the gateway."
+        return "Lists the datasets (tables) you may query with their GraphQL field, and all protocols of the gateway (format 'compact' leaves out the GraphQL field and the protocols)."
             + (next.Count == 0 ? string.Empty : " Start here, then " + string.Join(" and ", next) + ".");
     }
 
