@@ -73,11 +73,15 @@ public static class GatewayCatalogServiceExtensions
         services.TryAddScoped<Autheris.Application.Docs.Services.IDocLinkService, Autheris.Application.Docs.Services.DocLinkService>();
         // Optional enrichment: hosts without the document stores (no governance repository) resolve no reader and discovery returns no documents.
         services.TryAddScoped<Autheris.Application.Docs.Services.IDocLinkDiscoveryReader>(sp =>
-            sp.GetService<ITableMetadataRepository>() is { } metadata &&
             sp.GetService<Autheris.Application.Docs.Interfaces.IDocLinkRepository>() is { } links &&
             sp.GetService<Autheris.Application.Docs.Interfaces.IDocumentRepository>() is { } documents &&
             sp.GetService<Autheris.Application.Docs.Interfaces.IUniversalDocStore>() is { } store
-                ? new Autheris.Application.Docs.Services.DocLinkDiscoveryReader(metadata, links, documents, store, sp.GetRequiredService<IOptions<GatewayOptions>>())
+                ? new Autheris.Application.Docs.Services.DocLinkDiscoveryReader(links, documents, store)
+                : null!);
+        services.TryAddScoped<Autheris.Application.Docs.Services.IDocLinkCallerView>(sp =>
+            sp.GetService<Autheris.Application.Docs.Services.IDocLinkDiscoveryReader>() is { } reader &&
+            sp.GetService<Autheris.Application.Catalog.Discovery.IDiscoveryService>() is { } discovery
+                ? new Autheris.Application.Docs.Services.DocLinkCallerView(discovery, reader)
                 : null!);
         services.TryAddScoped<Autheris.Application.Catalog.Discovery.IDiscoveryService>(sp =>
             new Autheris.Application.Catalog.Discovery.DiscoveryService(

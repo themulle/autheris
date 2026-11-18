@@ -56,7 +56,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
     private readonly Autheris.Application.Catalog.Semantic.ISemanticCatalogService? _semanticCatalog;
     private readonly Autheris.Application.Catalog.Interfaces.ICatalogVisibilityService? _catalogVisibility;
     private readonly Autheris.Application.Docs.Interfaces.IDocIndexReadiness? _docIndexReadiness;
-    private readonly Autheris.Application.Docs.Services.IDocLinkDiscoveryReader? _docLinkReader;
+    private readonly Autheris.Application.Docs.Services.IDocLinkCallerView? _docLinkReader;
     private readonly Autheris.Application.Audit.IAuditWriter? _auditWriter;
 
     private static readonly TimeSpan DefaultRegexTimeout = TimeSpan.FromMilliseconds(250);
@@ -91,7 +91,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         Autheris.Application.Catalog.Interfaces.ICatalogVisibilityService? catalogVisibility = null,
         Autheris.Application.Docs.Interfaces.IDocIndexReadiness? docIndexReadiness = null,
         Autheris.Application.Audit.IAuditWriter? auditWriter = null,
-        Autheris.Application.Docs.Services.IDocLinkDiscoveryReader? docLinkReader = null)
+        Autheris.Application.Docs.Services.IDocLinkCallerView? docLinkReader = null)
     {
         _docLinkReader = docLinkReader;
         _toolRegistry = toolRegistry ?? throw new ArgumentNullException(nameof(toolRegistry));

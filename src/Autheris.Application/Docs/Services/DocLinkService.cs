@@ -112,9 +112,9 @@ public sealed class DocLinkService : IDocLinkService
 
         var previous = await _documents.SetDiscoveryHiddenAsync(key, hidden, _time.GetUtcNow(), ct).ConfigureAwait(false);
         if (previous is null) return Fail(DocLinkOutcome.NotFound);
-        if (_search is not null) await _search.SetDocumentHiddenAsync(key, hidden, ct).ConfigureAwait(false);
         try
         {
+            if (_search is not null) await _search.SetDocumentHiddenAsync(key, hidden, ct).ConfigureAwait(false);
             await _audit.RecordRequiredAsync(NewEntry(actor, AuditEventTypes.DocVisibilityChanged, new { appId, category = category.ToString(), docId, official = doc.TenantId is null, before = previous.Value, after = hidden }), ct).ConfigureAwait(false);
         }
         catch (Exception ex)

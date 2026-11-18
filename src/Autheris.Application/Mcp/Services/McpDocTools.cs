@@ -105,7 +105,7 @@ public static partial class McpDocTools
         McpSessionContext? sessionContext,
         IAuditWriter? auditWriter,
         IDocIndexReadiness? indexReadiness,
-        IDocLinkDiscoveryReader? linkReader,
+        IDocLinkCallerView? linkReader,
         CancellationToken ct = default)
     {
         if (string.Equals(toolName, ReadDocument, StringComparison.OrdinalIgnoreCase))
@@ -284,7 +284,7 @@ public static partial class McpDocTools
         IDocSearchService searchService,
         string? argumentsJson,
         McpSessionContext? sessionContext,
-        IDocLinkDiscoveryReader? linkReader,
+        IDocLinkCallerView? linkReader,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(searchService);

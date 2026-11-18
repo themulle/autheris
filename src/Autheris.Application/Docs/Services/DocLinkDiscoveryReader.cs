@@ -21,6 +21,9 @@ public static class DocLinkDiscoveryLimits
     public const int MaxDocumentsPerColumn = 5;
     public const int SummaryRunes = 300;
     public const int TitleRunes = 200;
+
+    /// <summary>Upper bound of the links resolved for one dataset filter.</summary>
+    public const int MaxLinksResolved = 200;
 }
 
 /// <summary>Linked documents and applications of one discovery object, already filtered for the caller.</summary>
@@ -60,35 +63,30 @@ public interface IDocLinkDiscoveryReader
     Task<IReadOnlyDictionary<TableIdentifier, DocLinkView>> ForTablesAsync(string tenantId, IReadOnlyList<TableMetadata> tables, CancellationToken ct = default);
 
     /// <summary>
-    /// Keys of the documents linked to <paramref name="table"/> (or to <paramref name="column"/> of it) that the caller may see;
-    /// <c>null</c> when the target is not discoverable for the caller.
+    /// Keys of the readable, non-hidden documents linked to <paramref name="table"/> (or to <paramref name="column"/> of it).
+    /// The target is NOT checked here: callers must have verified that it is discoverable for their caller.
+    /// At most <see cref="DocLinkDiscoveryLimits.MaxLinksResolved"/> links are resolved.
     /// </summary>
-    Task<IReadOnlySet<DocKey>?> DocumentsLinkedToAsync(string tenantId, TableIdentifier table, string? column, CancellationToken ct = default);
+    Task<IReadOnlySet<DocKey>> LinkedDocumentsAsync(string tenantId, TableIdentifier table, string? column, CancellationToken ct = default);
 
-    /// <summary>The discoverable targets (as <c>domain.schema.table[.column]</c>) of the document <paramref name="key"/>.</summary>
-    Task<IReadOnlyList<string>> VisibleTargetsOfAsync(string tenantId, DocKey key, CancellationToken ct = default);
+    /// <summary>The raw link targets of the document <paramref name="key"/>; callers must filter them for their caller.</summary>
+    Task<IReadOnlyList<DocLinkTarget>> TargetsOfAsync(string tenantId, DocKey key, CancellationToken ct = default);
 }
 
 public sealed class DocLinkDiscoveryReader : IDocLinkDiscoveryReader
 {
-    private readonly ITableMetadataRepository _metadata;
     private readonly IDocLinkRepository _links;
     private readonly IDocumentRepository _documents;
     private readonly IUniversalDocStore _store;
-    private readonly IOptions<GatewayOptions> _gatewayOptions;
 
     public DocLinkDiscoveryReader(
-        ITableMetadataRepository metadata,
         IDocLinkRepository links,
         IDocumentRepository documents,
-        IUniversalDocStore store,
-        IOptions<GatewayOptions> gatewayOptions)
+        IUniversalDocStore store)
     {
-        _metadata = metadata ?? throw new ArgumentNullException(nameof(metadata));
         _links = links ?? throw new ArgumentNullException(nameof(links));
         _documents = documents ?? throw new ArgumentNullException(nameof(documents));
         _store = store ?? throw new ArgumentNullException(nameof(store));
-        _gatewayOptions = gatewayOptions ?? throw new ArgumentNullException(nameof(gatewayOptions));
     }
 
     public async Task<IReadOnlyDictionary<TableIdentifier, DocLinkView>> ForTablesAsync(string tenantId, IReadOnlyList<TableMetadata> tables, CancellationToken ct = default)
@@ -166,40 +164,36 @@ public sealed class DocLinkDiscoveryReader : IDocLinkDiscoveryReader
         return result;
     }
 
-    public async Task<IReadOnlySet<DocKey>?> DocumentsLinkedToAsync(string tenantId, TableIdentifier table, string? column, CancellationToken ct = default)
+    public async Task<IReadOnlySet<DocKey>> LinkedDocumentsAsync(string tenantId, TableIdentifier table, string? column, CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(tenantId)) return null;
-        var target = new DocLinkTarget(column is null ? DocLinkTargetKind.Table : DocLinkTargetKind.Column, table.Domain, table.Schema, table.TableName, column);
-        if (await ResolveDiscoverableAsync(tenantId, target, ct).ConfigureAwait(false) is not { } resolved) return null;
-        var links = await _links.ListForTargetsAsync(tenantId, [new DocLinkTarget(DocLinkTargetKind.Table, table.Domain, table.Schema, table.TableName)], ct).ConfigureAwait(false);
         var keys = new HashSet<DocKey>();
-        var cache = new Dictionary<DocKey, DocRecord?>();
-        foreach (var link in links)
+        if (string.IsNullOrWhiteSpace(tenantId)) return keys;
+        var links = await _links.ListForTargetsAsync(tenantId, [new DocLinkTarget(DocLinkTargetKind.Table, table.Domain, table.Schema, table.TableName)], ct).ConfigureAwait(false);
+        var candidates = new HashSet<DocKey>();
+        foreach (var link in links.Take(DocLinkDiscoveryLimits.MaxLinksResolved))
         {
             if (link.Source.Kind != DocLinkSourceKind.Document || KeyOf(link.Source) is not { } key) continue;
             var matches = column is null
                 ? link.Target.Kind != DocLinkTargetKind.Column
-                : link.Target.Kind == DocLinkTargetKind.Column && string.Equals(link.Target.Column, resolved.Column, StringComparison.OrdinalIgnoreCase);
-            if (!matches) continue;
+                : link.Target.Kind == DocLinkTargetKind.Column && string.Equals(link.Target.Column, column, StringComparison.OrdinalIgnoreCase);
+            if (matches) candidates.Add(key);
+        }
+
+        // The repository has no batch read, so each distinct document is read once.
+        var cache = new Dictionary<DocKey, DocRecord?>();
+        foreach (var key in candidates)
+        {
             if (await ResolveRefAsync(tenantId, key, cache, ct).ConfigureAwait(false) is not null) keys.Add(key);
         }
 
         return keys;
     }
 
-    public async Task<IReadOnlyList<string>> VisibleTargetsOfAsync(string tenantId, DocKey key, CancellationToken ct = default)
+    public async Task<IReadOnlyList<DocLinkTarget>> TargetsOfAsync(string tenantId, DocKey key, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(tenantId)) return [];
         var links = await _links.ListForSourceAsync(tenantId, DocLinkSource.ForDocument(key), ct).ConfigureAwait(false);
-        var targets = new List<string>();
-        foreach (var link in links.Take(DocLinkLimits.MaxTargetsPerSource))
-        {
-            if (link.Target.Kind == DocLinkTargetKind.Procedure) continue;
-            if (await ResolveDiscoverableAsync(tenantId, link.Target, ct).ConfigureAwait(false) is not { } resolved) continue;
-            targets.Add($"{resolved.Id.Domain}.{resolved.Id.Schema}.{resolved.Id.TableName}{(resolved.Column is null ? string.Empty : "." + resolved.Column)}");
-        }
-
-        return targets;
+        return links.Take(DocLinkLimits.MaxTargetsPerSource).Select(static l => l.Target).ToList();
     }
 
     private async Task<DiscoveryDocumentRef?> ResolveRefAsync(string tenantId, DocKey key, Dictionary<DocKey, DocRecord?> cache, CancellationToken ct)
@@ -218,31 +212,6 @@ public sealed class DocLinkDiscoveryReader : IDocLinkDiscoveryReader
         return new DiscoveryDocumentRef(
             record.AppId, record.Category.ToString(), record.DocId, title, string.IsNullOrEmpty(summary) ? null : summary,
             official, official ? "official" : "untrusted", record.UpdatedAt);
-    }
-
-    private async Task<(TableIdentifier Id, string? Column)?> ResolveDiscoverableAsync(string tenantId, DocLinkTarget target, CancellationToken ct)
-    {
-        if (target.Kind == DocLinkTargetKind.Procedure) return null;
-        if (!TableIdentifier.TryCreate(target.Domain, target.Schema, target.Name, out var id)) return null;
-        TenantId tenant;
-        try
-        {
-            tenant = new TenantId(tenantId);
-        }
-        catch (ArgumentException)
-        {
-            return null;
-        }
-
-        var table = await _metadata.GetTableMetadataAsync(id, ct).ConfigureAwait(false);
-        if (table is null || !table.Table.IsActive || table.Table.DiscoveryHidden) return null;
-        var catalogOwner = TenantResolver.EffectiveDefaultOf(_gatewayOptions.Value.Tenancy);
-        var shared = DiscoveryTenantScope.ParseSharedTables(_gatewayOptions.Value.Catalog.SharedTables);
-        if (DiscoveryTenantScope.DropForeignVirtualTables([table], tenant).Count == 0 ||
-            !DiscoveryTenantScope.IsInScope(table, tenant, catalogOwner, shared, new HashSet<TableIdentifier>())) return null;
-        if (target.Kind != DocLinkTargetKind.Column) return (table.Identifier, null);
-        var col = table.Columns.FirstOrDefault(c => string.Equals(c.ColumnName, target.Column, StringComparison.OrdinalIgnoreCase));
-        return col is null || col.DiscoveryHidden ? null : (table.Identifier, col.ColumnName);
     }
 
     private static DocKey? KeyOf(DocLinkSource source) =>

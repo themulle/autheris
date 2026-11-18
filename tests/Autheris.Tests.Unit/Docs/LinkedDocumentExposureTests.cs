@@ -11,6 +11,8 @@ using Autheris.Application.Docs.Interfaces;
 using Autheris.Application.Docs.Services;
 using Autheris.Application.Mcp.Services;
 using Autheris.Domain.Common;
+using Autheris.Domain.Interfaces;
+using Autheris.Application.Policy.Pdp;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Tests.Common;
@@ -34,9 +36,11 @@ public sealed class LinkedDocumentExposureTests
         public FakeDiscoveryTableRepository Tables { get; } = new();
         public GovernanceDocStore Store { get; }
         public DocLinkDiscoveryReader Reader { get; }
+        public DocLinkCallerView CallerView { get; }
+        public ThrowingCallerView? Failing { get; set; }
         public DiscoveryService Discovery { get; }
 
-        public Harness()
+        public Harness(bool denyAmount = false)
         {
             Docs = new InMemoryDocumentRepository { Links = Links };
             Store = new GovernanceDocStore(Docs, Search, new MarkdownDocIngestor(), NullLogger<GovernanceDocStore>.Instance);
@@ -44,12 +48,17 @@ public sealed class LinkedDocumentExposureTests
             Tables.Tables.Add(DiscoveryTestBuilder.MakeTable("sales", "hidden_tbl", Tenant, hidden: true));
             Tables.Tables.Add(DiscoveryTestBuilder.MakeTable("other", "foreign", "tenant-b"));
             var options = Options.Create(new GatewayOptions { Tenancy = TenancyShape.Multi.Options() });
-            Reader = new DocLinkDiscoveryReader(Tables, Links, Docs, Store, options);
+            Reader = new DocLinkDiscoveryReader(Links, Docs, Store);
             Discovery = new DiscoveryService(
-                Tables, FakeAccessDecisionPoint.AllowAll(), new FakeDiscoveryConsentRepository(), new FakeDiscoveryApprovalRepository(),
+                Tables, denyAmount ? DenyAmountColumn() : FakeAccessDecisionPoint.AllowAll(), new FakeDiscoveryConsentRepository(), new FakeDiscoveryApprovalRepository(),
                 new FakeDiscoveryOwnershipRepository(), new FakeDiscoveryArtifactStore(), new FakeAuditWriter(), options,
                 Options.Create(new CatalogDiscoveryOptions()), logger: NullLogger<DiscoveryService>.Instance, docLinks: Reader);
+            CallerView = new DocLinkCallerView(Discovery, Reader);
         }
+
+        private static FakeAccessDecisionPoint DenyAmountColumn() => new(r => TableAccessDecision.Allowed(
+            r.Object.Identifier,
+            r.Object.Columns.ToDictionary(c => c.ColumnName, c => c.ColumnName == "amount" ? ColumnAccessLevel.Deny : ColumnAccessLevel.Clear, StringComparer.OrdinalIgnoreCase)));
 
         public async Task SeedAsync(string? docTenant, string docId, string title = "Orders guide", string content = "# Orders\n\nHow orders flow.", bool hidden = false, int daysAgo = 0)
         {
@@ -73,6 +82,17 @@ public sealed class LinkedDocumentExposureTests
             return await Discovery.GetAsync(new TableIdentifier(domain, "dbo", name), DiscoveryTestBuilder.Caller(principal), default);
         }
     }
+
+    private sealed class ThrowingCallerView : IDocLinkCallerView
+    {
+        public Task<IReadOnlySet<DocKey>?> DocumentsLinkedToAsync(System.Security.Claims.ClaimsPrincipal principal, string tenantId, TableIdentifier table, string? column, System.Threading.CancellationToken ct = default) =>
+            throw new InvalidOperationException("link store down");
+
+        public Task<IReadOnlyDictionary<DocKey, IReadOnlyList<string>>> VisibleTargetsOfAsync(System.Security.Claims.ClaimsPrincipal principal, string tenantId, IReadOnlyList<DocKey> keys, System.Threading.CancellationToken ct = default) =>
+            throw new InvalidOperationException("link store down");
+    }
+
+    private static System.Security.Claims.ClaimsPrincipal Principal() => DiscoveryTestBuilder.User("S-USER", Tenant, ["AiAgent"]);
 
     private static McpSessionContext Session(bool admin = false, string tenant = Tenant) => new(
         "s1", "sp", tenant, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, UserSid: "S-USER", Roles: admin ? ["GovernanceAdmin"] : ["AiAgent"]);
@@ -149,7 +169,7 @@ public sealed class LinkedDocumentExposureTests
 
         obj!.Documents.ShouldBeEmpty();
         obj.Applications.ShouldBeEmpty();
-        (await h.Reader.DocumentsLinkedToAsync(Tenant, new TableIdentifier("sales", "dbo", "orders"), null))!.ShouldBeEmpty();
+        (await h.CallerView.DocumentsLinkedToAsync(Principal(), Tenant, new TableIdentifier("sales", "dbo", "orders"), null))!.ShouldBeEmpty();
     }
 
     [Fact]
@@ -166,9 +186,9 @@ public sealed class LinkedDocumentExposureTests
         hidden.ShouldNotBeNull();
         hidden.IsHidden.ShouldBeTrue();
         hidden.Documents.ShouldBeEmpty();
-        (await h.Reader.DocumentsLinkedToAsync(Tenant, new TableIdentifier("sales", "dbo", "hidden_tbl"), null)).ShouldBeNull();
-        (await h.Reader.DocumentsLinkedToAsync(Tenant, new TableIdentifier("other", "dbo", "foreign"), null)).ShouldBeNull();
-        (await h.Reader.VisibleTargetsOfAsync(Tenant, new DocKey(Tenant, App, DocCategory.Runbook, "guide"))).ShouldBeEmpty();
+        (await h.CallerView.DocumentsLinkedToAsync(Principal(), Tenant, new TableIdentifier("sales", "dbo", "hidden_tbl"), null)).ShouldBeNull();
+        (await h.CallerView.DocumentsLinkedToAsync(Principal(), Tenant, new TableIdentifier("other", "dbo", "foreign"), null)).ShouldBeNull();
+        (await h.CallerView.VisibleTargetsOfAsync(Principal(), Tenant, [new DocKey(Tenant, App, DocCategory.Runbook, "guide")])).ShouldBeEmpty();
     }
 
     [Fact]
@@ -183,7 +203,7 @@ public sealed class LinkedDocumentExposureTests
 
         obj!.Documents.ShouldBeEmpty();
         obj.Columns.ShouldAllBe(c => c.Documents.Count == 0);
-        (await h.Reader.DocumentsLinkedToAsync(Tenant, new TableIdentifier("sales", "dbo", "orders"), "secret")).ShouldBeNull();
+        (await h.CallerView.DocumentsLinkedToAsync(Principal(), Tenant, new TableIdentifier("sales", "dbo", "orders"), "secret")).ShouldBeNull();
     }
 
     [Fact]
@@ -221,9 +241,9 @@ public sealed class LinkedDocumentExposureTests
         await h.LinkAsync("linked", Tenant, "sales", "orders");
         await h.LinkAsync("on-hidden", Tenant, "sales", "hidden_tbl");
 
-        var filtered = JsonDocument.Parse(await McpDocTools.ExecuteSearchDocsAsync(h.Search, """{ "query": "report", "dataset": "sales.dbo.orders" }""", Session(), h.Reader));
-        var onHidden = JsonDocument.Parse(await McpDocTools.ExecuteSearchDocsAsync(h.Search, """{ "query": "report", "dataset": "sales.dbo.hidden_tbl" }""", Session(), h.Reader));
-        var unknown = JsonDocument.Parse(await McpDocTools.ExecuteSearchDocsAsync(h.Search, """{ "query": "report", "dataset": "sales.dbo.nope" }""", Session(), h.Reader));
+        var filtered = JsonDocument.Parse(await McpDocTools.ExecuteSearchDocsAsync(h.Search, """{ "query": "report", "dataset": "sales.dbo.orders" }""", Session(), h.CallerView));
+        var onHidden = JsonDocument.Parse(await McpDocTools.ExecuteSearchDocsAsync(h.Search, """{ "query": "report", "dataset": "sales.dbo.hidden_tbl" }""", Session(), h.CallerView));
+        var unknown = JsonDocument.Parse(await McpDocTools.ExecuteSearchDocsAsync(h.Search, """{ "query": "report", "dataset": "sales.dbo.nope" }""", Session(), h.CallerView));
 
         filtered.RootElement.GetProperty("total").GetInt32().ShouldBe(1);
         var hit = filtered.RootElement.GetProperty("results")[0];
@@ -297,5 +317,183 @@ public sealed class LinkedDocumentExposureTests
     {
         McpDocTools.IsDocTool(McpDocTools.ReadDocument).ShouldBeTrue();
         McpDocTools.Definitions().Select(d => d.Name).ShouldContain(McpDocTools.ReadDocument);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task SearchDocs_ColumnFilter_DeniedColumn_ReturnsEmpty()
+    {
+        var h = new Harness(denyAmount: true);
+        await h.SeedAsync(Tenant, "amount-note", title: "Amount note", content: "# Amount\n\nreport text");
+        await h.LinkAsync("amount-note", Tenant, "sales", "orders", "amount");
+
+        var denied = JsonDocument.Parse(await McpDocTools.ExecuteSearchDocsAsync(h.Search, """{ "query": "report", "dataset": "sales.dbo.orders", "column": "amount" }""", Session(), h.CallerView));
+
+        denied.RootElement.GetProperty("total").GetInt32().ShouldBe(0);
+        (await h.CallerView.DocumentsLinkedToAsync(Principal(), Tenant, new TableIdentifier("sales", "dbo", "orders"), "amount")).ShouldBeNull();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task SearchDocs_LinkedTargets_OmitDeniedColumn()
+    {
+        var h = new Harness(denyAmount: true);
+        await h.SeedAsync(Tenant, "note", title: "Note", content: "# Note\n\nreport text");
+        await h.LinkAsync("note", Tenant, "sales", "orders", "amount");
+        await h.LinkAsync("note", Tenant, "sales", "orders", "id");
+
+        var json = await McpDocTools.ExecuteSearchDocsAsync(h.Search, """{ "query": "report" }""", Session(), h.CallerView);
+
+        json.ShouldContain("sales.dbo.orders.id");
+        json.ShouldNotContain("amount");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Discovery_DeniedColumn_HasNoLinkedDocuments()
+    {
+        var h = new Harness(denyAmount: true);
+        await h.SeedAsync(Tenant, "note", title: "Note");
+        await h.SeedAsync(Tenant, "table-note", title: "Table note");
+        await h.LinkAsync("note", Tenant, "sales", "orders", "amount");
+        await h.LinkAsync("table-note", Tenant, "sales", "orders");
+
+        var obj = await h.DescribeAsync("sales", "orders");
+
+        obj!.Columns.Single(c => c.Name == "amount").State.ShouldBe(DiscoveryColumnState.NoAccess);
+        obj.Columns.ShouldAllBe(c => c.Documents.Count == 0);
+        McpLinkedDocuments.From(obj).ColumnDocuments.ShouldBeEmpty();
+        obj.Documents.Select(d => d.DocId).ShouldBe(["table-note"]);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task SearchDocs_ReaderFailure_ReturnsNoDocuments_AndNoError()
+    {
+        var h = new Harness();
+        await h.SeedAsync(Tenant, "linked", title: "Linked report", content: "# Linked\n\nreport text");
+        await h.LinkAsync("linked", Tenant, "sales", "orders");
+        var failing = new ThrowingCallerView();
+
+        var filtered = JsonDocument.Parse(await McpDocTools.ExecuteSearchDocsAsync(h.Search, """{ "query": "report", "dataset": "sales.dbo.orders" }""", Session(), failing));
+        var plain = JsonDocument.Parse(await McpDocTools.ExecuteSearchDocsAsync(h.Search, """{ "query": "report" }""", Session(), failing));
+
+        filtered.RootElement.GetProperty("total").GetInt32().ShouldBe(0);
+        plain.RootElement.GetProperty("total").GetInt32().ShouldBe(1);
+        plain.RootElement.GetProperty("results")[0].TryGetProperty("linkedTargets", out _).ShouldBeFalse();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Discovery_DocumentCountAndTruncation_IgnoreHiddenAndForeignDocuments()
+    {
+        var h = new Harness();
+        for (var i = 0; i < 10; i++)
+        {
+            await h.SeedAsync(Tenant, $"doc-{i:D2}", daysAgo: i);
+            await h.LinkAsync($"doc-{i:D2}", Tenant, "sales", "orders");
+        }
+
+        var before = await h.DescribeAsync("sales", "orders");
+        await h.SeedAsync(Tenant, "hidden-one", hidden: true);
+        await h.SeedAsync("tenant-b", "foreign-one");
+        await h.LinkAsync("hidden-one", Tenant, "sales", "orders");
+        await h.LinkAsync("foreign-one", "tenant-b", "sales", "orders");
+        var after = await h.DescribeAsync("sales", "orders");
+
+        after!.DocumentCount.ShouldBe(before!.DocumentCount);
+        after.DocumentsTruncated.ShouldBe(before.DocumentsTruncated);
+        after.Documents.Count.ShouldBe(before.Documents.Count);
+        McpLinkedDocuments.From(after).Truncated.ShouldBeFalse();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task HiddenDocuments_AbsentFromErrorCodeProcedureAndApplicationCounts_ButVisibleToWriter()
+    {
+        var h = new Harness();
+        await h.SeedAsync(Tenant, "visible", content: "# Visible\n\ntext");
+        await h.Docs.CreateAsync(
+            new DocRecord(Tenant, App, DocCategory.ErrorCode, "err-hid", "Err hidden", "# ERR_HIDDEN_42\n\nSymptom text", "sha", 20, [], "ERR_HIDDEN_42", "S-W", 1, DateTimeOffset.UtcNow, null, true),
+            new DocQuota(1000, 100_000_000));
+        await h.SeedAsync(Tenant, "hid", content: "# Hidden\n\nsecret text", hidden: true);
+
+        var lookupUser = await McpDocTools.ExecuteLookupErrorCodeAsync(h.Search, """{ "errorCode": "ERR_HIDDEN_42" }""", Session());
+        var lookupAdmin = await McpDocTools.ExecuteLookupErrorCodeAsync(h.Search, """{ "errorCode": "ERR_HIDDEN_42" }""", Session(admin: true));
+        var procUser = await McpDocTools.ExecuteGetProcedureAsync(h.Search, $$"""{ "identifier": "{{App}}::Runbook::hid#hidden" }""", Session());
+        var procAdmin = await McpDocTools.ExecuteGetProcedureAsync(h.Search, $$"""{ "identifier": "{{App}}::Runbook::hid#hidden" }""", Session(admin: true));
+        var appsUser = JsonDocument.Parse(await McpDocTools.ExecuteListApplicationsAsync(h.Store, "{}", Session())).RootElement.ToString();
+        var appsAdmin = JsonDocument.Parse(await McpDocTools.ExecuteListApplicationsAsync(h.Store, "{}", Session(admin: true))).RootElement.ToString();
+
+        lookupUser.ShouldNotContain("ERR_HIDDEN_42");
+        lookupAdmin.ShouldContain("ERR_HIDDEN_42");
+        procUser.ShouldContain("NOT_FOUND");
+        procAdmin.ShouldContain("secret text");
+        appsUser.ShouldContain("\"documentCount\": 1");
+        appsAdmin.ShouldContain("\"documentCount\": 3");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task HiddenDocuments_ReadOnlyAdminSession_AndOtherTenantAdmin_NeverSeeThem()
+    {
+        var h = new Harness();
+        await h.SeedAsync(Tenant, "hid", title: "Hidden quarterly", content: "# Hidden\n\nquarterly text", hidden: true);
+        await h.SeedAsync(null, "official-hid", title: "Official quarterly", content: "# Official\n\nquarterly text", hidden: true);
+        var readOnlyAdmin = Session(admin: true) with { IsReadOnly = true };
+        var otherTenantAdmin = Session(admin: true, tenant: "tenant-b");
+
+        foreach (var session in new[] { readOnlyAdmin, otherTenantAdmin })
+        {
+            (await McpDocTools.ExecuteSearchDocsAsync(h.Search, """{ "query": "quarterly" }""", session)).ShouldContain("\"total\": 0");
+            (await McpDocTools.ExecuteReadDocumentAsync(h.Store, $$"""{ "appId": "{{App}}", "category": "Runbook", "docId": "hid" }""", session)).ShouldContain("NOT_FOUND");
+            (await McpDocTools.ExecuteReadDocumentAsync(h.Store, $$"""{ "appId": "{{App}}", "category": "Runbook", "docId": "official-hid" }""", session)).ShouldContain("NOT_FOUND");
+        }
+
+        DocAccessPolicy.ResolveReader(new DocCaller(false, true, Tenant, "S", true, true)).HiddenTenantVisible.ShouldBeFalse();
+        DocAccessPolicy.ResolveReader(new DocCaller(true, false, Tenant, "S", true, true)).HiddenOfficialVisible.ShouldBeFalse();
+        DocAccessPolicy.ResolveReader(new DocCaller(false, true, "tenant-b", "S", true, false)).CanSee(
+            (await h.Search.SnapshotVisibleChunksAsync(DocAccessScope.ForTenant(Tenant, false, true))).First(c => c.TenantId == Tenant)).ShouldBeFalse();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task RestScopes_HiddenDocuments_AbsentFromSearchListAndGet_ForNonWriter()
+    {
+        var h = new Harness();
+        await h.SeedAsync(Tenant, "shown", content: "# Shown\n\nquarterly text");
+        await h.SeedAsync(Tenant, "hid", content: "# Hidden\n\nquarterly text", hidden: true);
+        var nonWriter = DocAccessScope.ForTenant(Tenant);
+        var writer = DocAccessScope.ForTenant(Tenant, hiddenOfficialVisible: false, hiddenTenantVisible: true);
+        var hiddenId = new DocChunkIdentifier(App, "Runbook", "hid", "hidden");
+
+        (await h.Search.SearchAsync("quarterly", nonWriter, null, 10)).Select(r => r.Id.DocId).ShouldBe(["shown"]);
+        (await h.Search.SnapshotVisibleChunksAsync(nonWriter)).ShouldAllBe(c => c.Id.DocId != "hid");
+        (await h.Search.GetChunkAsync(hiddenId, nonWriter)).ShouldBeNull();
+        (await h.Search.ListTopicsAsync(nonWriter)).ShouldAllBe(t => !t.Contains("Hidden", StringComparison.Ordinal));
+        (await h.Search.GetChunkAsync(hiddenId, writer)).ShouldNotBeNull();
+        (await h.Search.SearchAsync("quarterly", writer, null, 10)).Count.ShouldBe(2);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task ReadDocument_HugeOffset_ReturnsEmptyWindow_AndContinuationWindowIsSanitised()
+    {
+        var h = new Harness();
+        var content = "# Big\n\n" + string.Concat(Enumerable.Repeat("0123456789abcdef\n", 6000)) + "tail\u202E<script>x</script>";
+        await h.SeedAsync(Tenant, "big", content: content);
+
+        var huge = JsonDocument.Parse(await McpDocTools.ExecuteReadDocumentAsync(h.Store, $$"""{ "appId": "{{App}}", "category": "Runbook", "docId": "big", "offset": 2147483647 }""", Session())).RootElement;
+        var first = JsonDocument.Parse(await McpDocTools.ExecuteReadDocumentAsync(h.Store, $$"""{ "appId": "{{App}}", "category": "Runbook", "docId": "big" }""", Session())).RootElement;
+        var next = first.GetProperty("nextOffset").GetInt32();
+        var second = JsonDocument.Parse(await McpDocTools.ExecuteReadDocumentAsync(h.Store, $$"""{ "appId": "{{App}}", "category": "Runbook", "docId": "big", "offset": {{next}} }""", Session())).RootElement;
+
+        huge.GetProperty("content").GetString().ShouldBe(string.Empty);
+        huge.TryGetProperty("truncated", out _).ShouldBeFalse();
+        var tail = second.GetProperty("content").GetString()!;
+        tail.ShouldContain("tail");
+        tail.ShouldNotContain("\u202E");
+        tail.ShouldNotContain("<script>");
+        second.GetProperty("contentNotice").GetString().ShouldBe(McpDocTools.UntrustedContentNotice);
     }
 }

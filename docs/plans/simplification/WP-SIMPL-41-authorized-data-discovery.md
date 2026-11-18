@@ -419,6 +419,12 @@ Finally, run the full unit and architecture suites once.
 
    PR 6b (2026-11-18): discovery objects, GraphQL, `describe_dataset`, `list_datasets` (`documentCount`), `search_docs` (`dataset`, `column`, `linkedTargets`), `read_document`, and the `discovery_hidden` read filters (index chunk flag, `DocAccessScope`) are in. Deferred to follow-ups: BM25 and semantic indexing of linked document text (the catalog search index is shared across tenants, tenant-scoped text needs a per-tenant design), `matchedInDocument`, the REST external catalog `documents` field, `links` on `deposit_documentation` and the PUT document route, and procedure link targets (kept at 404 because no procedure discoverability check is exposed for the link gate).
 
+   PR 6b review notes (2026-11-18, accepted, tracked here):
+   - Hiding a document is eventually consistent across nodes: only the local search index is updated at once, other nodes follow within `Docs:IndexRefreshSeconds` (default 30 s, maximum 600 s). Discovery output and `read_document` read the store directly and are immediate.
+   - The `search_docs` `dataset`/`column` filter ranks the 200 best hits of the query (`LinkedSearchWindow`) and then keeps the linked ones, so a linked document outside those 200 hits is not returned. At most 200 links are resolved per filter; the document repository has no batch read, so each distinct document is read once.
+   - The `search_docs` target checks use the caller's own discovery projection of the table (hidden, no-access column states and consent scope), so a denied column neither filters nor appears in `linkedTargets`. A failing link read yields no documents or targets, never an error.
+   - REST reads derive the read-only flag from the token (`IsReadOnly`), so a read-only GovernanceAdmin never sees hidden documents.
+
    PR 6a review notes (accepted, tracked here):
    - The `discovery_hidden` flag set by PR 6a has no read effect until PR 6b filters discovery, search and MCP reads by it.
    - The audit `before` payload of a link change lists the targets that were kept for a caller who cannot manage them.

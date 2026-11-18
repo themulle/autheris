@@ -131,7 +131,7 @@ public static partial class McpDocTools
 
     private static async Task<IReadOnlyList<DocSearchResult>> SearchLinkedToDatasetAsync(
         IDocSearchService searchService,
-        IDocLinkDiscoveryReader? linkReader,
+        IDocLinkCallerView? linkReader,
         McpSessionContext? sessionContext,
         string query,
         DocCategory? category,
@@ -141,17 +141,29 @@ public static partial class McpDocTools
         CancellationToken ct)
     {
         if (linkReader is null || sessionContext is null || string.IsNullOrWhiteSpace(sessionContext.TenantId) ||
+            McpProtocolHandler.BuildPrincipalFromSession(sessionContext) is not { } principal ||
             !TableIdentifier.TryParse(dataset.Trim(), out var tableId))
         {
             return [];
         }
 
-        var keys = await linkReader.DocumentsLinkedToAsync(sessionContext.TenantId, tableId, string.IsNullOrWhiteSpace(column) ? null : column.Trim(), ct).ConfigureAwait(false);
+        IReadOnlySet<DocKey>? keys;
+        try
+        {
+            keys = await linkReader.DocumentsLinkedToAsync(principal, sessionContext.TenantId, tableId, string.IsNullOrWhiteSpace(column) ? null : column.Trim(), ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Fail closed: a failing link read yields no documents, never an error that tells the target apart.
+            return [];
+        }
+
         if (keys is null || keys.Count == 0)
         {
             return [];
         }
 
+        // The window is fixed, so a dataset filter only sees documents among the best LinkedSearchWindow hits of the query.
         var hits = await searchService.SearchAsync(query, ScopeOf(sessionContext), category, LinkedSearchWindow, ct).ConfigureAwait(false);
         return hits
             .Where(h => keys.Contains(new DocKey(h.TenantId, h.AppId, h.Category, h.Id.DocId)))
@@ -162,30 +174,34 @@ public static partial class McpDocTools
     private static async Task AddLinkedTargetsAsync(
         JsonObject node,
         IReadOnlyList<DocSearchResult> results,
-        IDocLinkDiscoveryReader? linkReader,
+        IDocLinkCallerView? linkReader,
         McpSessionContext? sessionContext,
         CancellationToken ct)
     {
         if (linkReader is null || sessionContext is null || string.IsNullOrWhiteSpace(sessionContext.TenantId) ||
+            McpProtocolHandler.BuildPrincipalFromSession(sessionContext) is not { } principal ||
             node["results"] is not JsonArray array)
         {
             return;
         }
 
-        var cache = new Dictionary<DocKey, IReadOnlyList<string>>();
+        IReadOnlyDictionary<DocKey, IReadOnlyList<string>> targets;
+        try
+        {
+            var keys = results.Select(h => new DocKey(h.TenantId, h.AppId, h.Category, h.Id.DocId)).Distinct().ToList();
+            targets = await linkReader.VisibleTargetsOfAsync(principal, sessionContext.TenantId, keys, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return;
+        }
+
         for (var i = 0; i < results.Count && i < array.Count; i++)
         {
             var hit = results[i];
-            var key = new DocKey(hit.TenantId, hit.AppId, hit.Category, hit.Id.DocId);
-            if (!cache.TryGetValue(key, out var targets))
+            if (targets.TryGetValue(new DocKey(hit.TenantId, hit.AppId, hit.Category, hit.Id.DocId), out var names) && names.Count > 0 && array[i] is JsonObject item)
             {
-                targets = await linkReader.VisibleTargetsOfAsync(sessionContext.TenantId, key, ct).ConfigureAwait(false);
-                cache[key] = targets;
-            }
-
-            if (targets.Count > 0 && array[i] is JsonObject item)
-            {
-                item["linkedTargets"] = JsonSerializer.SerializeToNode(targets, IndentedOptions);
+                item["linkedTargets"] = JsonSerializer.SerializeToNode(names, IndentedOptions);
             }
         }
     }
