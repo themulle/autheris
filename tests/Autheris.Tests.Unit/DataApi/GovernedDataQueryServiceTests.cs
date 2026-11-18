@@ -46,16 +46,16 @@ public sealed class GovernedDataQueryServiceTests
             },
             Columns = new List<TableColumn>
             {
-                new() { ColumnName = "id", DataType = "int", IsSensitive = false },
-                new() { ColumnName = "email", DataType = "varchar", IsSensitive = true },
-                new() { ColumnName = "name", DataType = "varchar", IsSensitive = false }
+                new() { ColumnName = "id", DataType = "int" },
+                new() { ColumnName = "email", DataType = "varchar" },
+                new() { ColumnName = "name", DataType = "varchar" }
             },
             ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
             {
                 ["email"] = new() { RuleType = "MASK_EMAIL" }
             },
             PrimaryKeyColumns = primaryKey ?? new[] { "id" }
-        };
+        }.WithPii("email");
     }
 
     [Fact]

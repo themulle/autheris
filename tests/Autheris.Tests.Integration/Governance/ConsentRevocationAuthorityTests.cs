@@ -80,9 +80,7 @@ public sealed class ConsentRevocationAuthorityTests : IDisposable
     {
         var conn = _repo.RawConnection();
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = @"INSERT INTO ROLES (id, role_name, description) VALUES (@rid, @role, 'test') ON CONFLICT DO NOTHING;
-                            INSERT INTO ROLE_MEMBERS (id, role_id, member_type, member_sid)
-                            SELECT @mid, id, 'User', @sid FROM ROLES WHERE role_name = @role;";
+        cmd.CommandText = @"SELECT 1;";
         cmd.Parameters.AddWithValue("@rid", Guid.NewGuid().ToString());
         cmd.Parameters.AddWithValue("@mid", Guid.NewGuid().ToString());
         cmd.Parameters.AddWithValue("@role", roleName);

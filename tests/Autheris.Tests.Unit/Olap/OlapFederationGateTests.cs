@@ -461,7 +461,7 @@ public sealed partial class OlapFederationGateTests
     private static readonly IReadOnlyList<TableColumn> PiiColumns =
     [
         new TableColumn { ColumnName = "id", DataType = "int" },
-        new TableColumn { ColumnName = "ssn", DataType = "string", IsSensitive = true }
+        new TableColumn { ColumnName = "ssn", DataType = "string" }
     ];
 
     private static TableDef PiiTable(string domain, string table, string connector, string ruleType) => new(

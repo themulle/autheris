@@ -416,7 +416,7 @@ public sealed partial class RowScopeCompiler
                 }
             }
 
-            bool isSensitive = ClassificationMetadata.IsColumnSensitive(metadata, metaCol, colName);
+            bool classified = ClassificationMetadata.IsColumnSensitive(metadata, metaCol, colName);
             bool hasExplicitClear = raw == ColumnAccessLevel.Clear &&
                 (classOutcome?.AccessLevel == ColumnAccessLevel.Clear || allow.ColumnRules.Any(r =>
                     string.Equals(r.ColumnName, colName, StringComparison.OrdinalIgnoreCase) &&
@@ -424,7 +424,7 @@ public sealed partial class RowScopeCompiler
                     ConsentResolutionService.RuleAppliesToScopes(r, callerScopes)));
 
             bool clearancePermits = clearance is null || clearance.Permits(colName);
-            if (isSensitive && (!hasExplicitClear || !clearancePermits))
+            if (classified && (!hasExplicitClear || !clearancePermits))
             {
                 if (raw == ColumnAccessLevel.Clear && !hasExplicitClear && clearancePermits)
                 {

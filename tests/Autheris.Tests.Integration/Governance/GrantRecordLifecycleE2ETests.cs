@@ -257,8 +257,8 @@ public sealed class GrantRecordLifecycleE2ETests(GovernancePostgresFixture fixtu
             },
             Columns =
             [
-                new TableColumn { Id = Guid.NewGuid(), ColumnName = "id", DataType = "int", IsSensitive = false },
-                new TableColumn { Id = Guid.NewGuid(), ColumnName = "total", DataType = "decimal", IsSensitive = false }
+                new TableColumn { Id = Guid.NewGuid(), ColumnName = "id", DataType = "int" },
+                new TableColumn { Id = Guid.NewGuid(), ColumnName = "total", DataType = "decimal" }
             ],
             PrimaryKeyColumns = ["id"]
         });

@@ -272,6 +272,7 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
                 var schemaLongDesc = schemaObj.TryGetProperty("x-long-description", out var longDescProp) ? longDescProp.GetString() : null;
 
                 var columns = new List<TableColumn>();
+                var flaggedColumns = new List<TableColumn>();
 
                 if (schemaObj.TryGetProperty("properties", out var props) && props.ValueKind == JsonValueKind.Object)
                 {
@@ -284,7 +285,7 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
                         var formatStr = colVal.TryGetProperty("format", out var fp) ? fp.GetString() : null;
                         var colDesc = colVal.TryGetProperty("description", out var cdp) ? cdp.GetString() : null;
                         var colLongDesc = colVal.TryGetProperty("x-long-description", out var cldp) ? cldp.GetString() : null;
-                        var isSensitive = colVal.TryGetProperty("x-sensitive", out var xSens) && xSens.GetBoolean();
+                        var flagged = colVal.TryGetProperty("x-sensitive", out var xSens) && xSens.GetBoolean();
 
                         var effectiveType = !string.IsNullOrWhiteSpace(formatStr) ? formatStr : typeStr;
 
@@ -297,16 +298,20 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
                             }
                         }
 
-                        columns.Add(new TableColumn
+                        var column = new TableColumn
                         {
                             ColumnName = colName,
                             DataType = effectiveType,
                             Description = colDesc,
                             LongDescription = colLongDesc,
                             DocumentationSource = "OpenApi",
-                            IsSensitive = isSensitive,
                             Meta = metaDict
-                        });
+                        };
+                        columns.Add(column);
+                        if (flagged)
+                        {
+                            flaggedColumns.Add(column);
+                        }
 
                         totalColumns++;
                     }
@@ -378,7 +383,9 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
                             ApiKeySecretName = apiKeySecretName
                         }
                     },
-                    Columns = effectiveColumns
+                    Columns = effectiveColumns,
+                    ColumnClassifications = ClassificationMetadata.AssignPii(
+                        flaggedColumns.Where(f => effectiveColumns.Contains(f)), "OPENAPI")
                 };
 
                 // Issue #94 (D-8): keys come only from x-autheris-primary-key / x-autheris-indexes; nothing is guessed.
@@ -386,7 +393,7 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
                 tableMetadata = ApplyKeyExtensions(tableMetadata, schemaObj);
 
                 // SEC M-30: an OpenAPI (re-)ingestion must never weaken governance of an existing table
-                // (RequiresFourEyes, Sensitivity, IsActive, column IsSensitive, masking rules) nor re-route it
+                // (RequiresFourEyes, Sensitivity, IsActive, column classifications, masking rules) nor re-route it
                 // (DataSourceType / HttpEndpoint of existing tables are preserved).
                 if (existing != null)
                 {

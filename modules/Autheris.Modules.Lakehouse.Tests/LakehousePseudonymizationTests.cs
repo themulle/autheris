@@ -85,13 +85,13 @@ public sealed class LakehousePseudonymizationTests
 
         var tableId = new TableIdentifier("lake", "sales", "delta_orders");
         var metadata = new TableMetadata
-        {
+        { ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("secret_col"),
             Identifier = tableId,
             Table = new Table { SourceName = "lake", SchemaName = "sales", TableName = "delta_orders", DataSourceType = DataSourceType.LakehouseDelta },
             Columns =
             [
                 new TableColumn { ColumnName = "tenantId", DataType = "string" },
-                new TableColumn { ColumnName = "secret_col", DataType = "string", IsSensitive = true }
+                new TableColumn { ColumnName = "secret_col", DataType = "string" }
             ],
             ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
             {
@@ -217,13 +217,13 @@ public sealed class LakehousePseudonymizationTests
 
         var tableId = new TableIdentifier("lake", "sales", "orders");
         var metadata = new TableMetadata
-        {
+        { ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("customerEmail"),
             Identifier = tableId,
             Table = new Table { SourceName = "lake", SchemaName = "sales", TableName = "orders", DataSourceType = DataSourceType.LakehouseIceberg },
             Columns =
             [
                 new TableColumn { ColumnName = "tenantId", DataType = "string" },
-                new TableColumn { ColumnName = "customerEmail", DataType = "string", IsSensitive = true }
+                new TableColumn { ColumnName = "customerEmail", DataType = "string" }
             ],
             ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
             {
@@ -289,12 +289,12 @@ public sealed class LakehousePseudonymizationTests
     {
         var tableId = new TableIdentifier("lake", "sales", "orders");
         var metadata = new TableMetadata
-        {
+        { ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("customerEmail"),
             Identifier = tableId,
             Table = new Table { SourceName = "lake", SchemaName = "sales", TableName = "orders" },
             Columns =
             [
-                new TableColumn { ColumnName = "customerEmail", DataType = "string", IsSensitive = true }
+                new TableColumn { ColumnName = "customerEmail", DataType = "string" }
             ],
             ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
             {

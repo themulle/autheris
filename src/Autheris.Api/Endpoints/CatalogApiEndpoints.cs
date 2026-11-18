@@ -206,8 +206,8 @@ public static partial class CatalogApiEndpoints
         .RequireAuthorization()
         .WithAudit(AuditLevel.Delegated, AuditEventTypes.MetadataSampleRead);
 
-        // Issue #111: dataset tags and catalog visibility tier. RequireAuthorization() only: owners must reach the routes, so the
-        // decision (admin class, owner or delegate, Full only for administrators) is taken inside DatasetCatalogAdminService.
+        // Issue #111: dataset tags and discovery flags. RequireAuthorization() only: owners must reach the routes, so the
+        // decision (admin class, owner or delegate) is taken inside DatasetCatalogAdminService.
         MapDatasetCatalogRoutes(group);
         var legacyCatalog = app.MapGroup("/api/catalog").WithIngressTransport(DataSourceTransportFlags.Rest);
         MapDatasetCatalogRoutes(legacyCatalog);
@@ -283,8 +283,8 @@ public static partial class CatalogApiEndpoints
         CancellationToken ct)
     {
         var edit = request is null || (request.MinGroupSize is null && !request.NonPersonal.HasValue)
-            ? new Autheris.Application.Governance.Interfaces.DatasetCatalogEdit(null, null, null, null) { Malformed = true }
-            : new Autheris.Application.Governance.Interfaces.DatasetCatalogEdit(null, null, null, null, request.MinGroupSize, request.NonPersonal);
+            ? new Autheris.Application.Governance.Interfaces.DatasetCatalogEdit(null, null, null) { Malformed = true }
+            : new Autheris.Application.Governance.Interfaces.DatasetCatalogEdit(null, null, null, request.MinGroupSize, request.NonPersonal);
         return MapCatalogResult(await service.ApplyAsync(httpContext.User, id, edit, "admin", ct).ConfigureAwait(false));
     }
 
@@ -303,8 +303,8 @@ public static partial class CatalogApiEndpoints
         CancellationToken ct)
     {
         var edit = request?.Tags is null
-            ? new Autheris.Application.Governance.Interfaces.DatasetCatalogEdit(null, null, null, null) { Malformed = true }
-            : new Autheris.Application.Governance.Interfaces.DatasetCatalogEdit(request.Tags, null, null, null);
+            ? new Autheris.Application.Governance.Interfaces.DatasetCatalogEdit(null, null, null) { Malformed = true }
+            : new Autheris.Application.Governance.Interfaces.DatasetCatalogEdit(request.Tags, null, null);
         return MapCatalogResult(await service.ApplyAsync(httpContext.User, id, edit, "admin", ct).ConfigureAwait(false));
     }
 
@@ -316,8 +316,8 @@ public static partial class CatalogApiEndpoints
         CancellationToken ct)
     {
         var edit = request is null || (request.Add is null && request.Remove is null)
-            ? new Autheris.Application.Governance.Interfaces.DatasetCatalogEdit(null, null, null, null) { Malformed = true }
-            : new Autheris.Application.Governance.Interfaces.DatasetCatalogEdit(null, request.Add, request.Remove, null);
+            ? new Autheris.Application.Governance.Interfaces.DatasetCatalogEdit(null, null, null) { Malformed = true }
+            : new Autheris.Application.Governance.Interfaces.DatasetCatalogEdit(null, request.Add, request.Remove);
         return MapCatalogResult(await service.ApplyAsync(httpContext.User, id, edit, "admin", ct).ConfigureAwait(false));
     }
 
@@ -329,8 +329,8 @@ public static partial class CatalogApiEndpoints
         CancellationToken ct)
     {
         var edit = request is null || (!request.Hidden.HasValue && request.HiddenColumns is null && !request.SamplesDisabled.HasValue)
-            ? new Autheris.Application.Governance.Interfaces.DatasetCatalogEdit(null, null, null, null) { Malformed = true }
-            : new Autheris.Application.Governance.Interfaces.DatasetCatalogEdit(null, null, null, null, null, null, request.Hidden, request.HiddenColumns, request.SamplesDisabled);
+            ? new Autheris.Application.Governance.Interfaces.DatasetCatalogEdit(null, null, null) { Malformed = true }
+            : new Autheris.Application.Governance.Interfaces.DatasetCatalogEdit(null, null, null, null, null, request.Hidden, request.HiddenColumns, request.SamplesDisabled);
         return MapCatalogResult(await service.ApplyAsync(httpContext.User, id, edit, "admin", ct).ConfigureAwait(false));
     }
 
@@ -345,8 +345,6 @@ public static partial class CatalogApiEndpoints
                 return Results.Ok(new DatasetCatalogSettingsDto(
                     result.Table!.Value.ToString(),
                     [.. settings.Tags.OrderBy(t => t.Tag, StringComparer.Ordinal).Select(t => new DatasetTagDto(t.Tag, t.Source == DatasetTagSource.Dbt ? "dbt" : "admin"))],
-                    settings.Visibility.ToString(),
-                    result.TierEffective,
                     settings.MinGroupSize,
                     settings.NonPersonal,
                     result.Warning));
@@ -356,8 +354,6 @@ public static partial class CatalogApiEndpoints
                 return ApiProblems.BadRequest(ApiErrorCodes.InvalidTag, "The tag is invalid.");
             case Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.TagLimitExceeded:
                 return ApiProblems.BadRequest(ApiErrorCodes.TagLimitExceeded, "The tag limit is exceeded.");
-            case Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.InvalidVisibility:
-                return ApiProblems.BadRequest(ApiErrorCodes.InvalidVisibility, "The visibility is invalid.");
             case Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.InvalidColumns:
                 return ApiProblems.BadRequest(ApiErrorCodes.InvalidColumns, "One or more column names are invalid.");
             case Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.InvalidRequest:

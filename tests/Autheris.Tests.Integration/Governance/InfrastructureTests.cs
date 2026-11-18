@@ -70,7 +70,7 @@ public class InfrastructureTests : IDisposable
         financeTable1.ShouldNotBeNull();
         financeTable1.Columns.Count.ShouldBe(5);
         financeTable1.Columns.ShouldContain(c => c.ColumnName == "amount");
-        financeTable1.Columns.ShouldContain(c => c.ColumnName == "email" && c.IsSensitive);
+        ClassificationMetadata.IsColumnSensitive(financeTable1, "email").ShouldBeTrue();
         financeTable1.ColumnMaskingRules.ContainsKey("email").ShouldBeTrue();
     }
 

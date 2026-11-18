@@ -216,9 +216,9 @@ public sealed class Batch5SecurityTestsB : IDisposable
             [
                 new TableColumn { ColumnName = "id", DataType = "int" },
                 new TableColumn { ColumnName = "name", DataType = "text" },
-                new TableColumn { ColumnName = "ssn", DataType = "text", IsSensitive = true }
+                new TableColumn { ColumnName = "ssn", DataType = "text" }
             ]
-        };
+        }.WithPii("ssn");
 
         // Permitted metadata has restricted columns (ssn is withheld)
         var restrictedMeta = new TableMetadata

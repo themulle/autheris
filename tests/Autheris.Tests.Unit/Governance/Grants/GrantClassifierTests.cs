@@ -9,9 +9,9 @@ namespace Autheris.Tests.Unit.Governance.Grants;
 public sealed class GrantClassifierTests
 {
     private static TableMetadata Table(string sensitivity = "NORMAL", bool colSensitive = false, string[]? tags = null, bool fourEyes = false) => new()
-    {
+    { ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor(colSensitive ? new[] { "id" } : Array.Empty<string>()),
         Table = new Table { Sensitivity = sensitivity, Tags = tags ?? [], RequiresFourEyes = fourEyes },
-        Columns = [new TableColumn { ColumnName = "id", IsSensitive = colSensitive }]
+        Columns = [new TableColumn { ColumnName = "id" }]
     };
 
     [Fact]

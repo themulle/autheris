@@ -126,7 +126,6 @@ public sealed class ParityHostFixture : IAsyncLifetime, IParityHost
         {
             var id = new TableIdentifier(source, "main", table);
             await governance.ReplaceTableKeyDefinitionAsync(id, ["id"], []);
-            await governance.SetDatasetVisibilityAsync(id, DatasetVisibility.Full, new Sid("parity-seed"));
         }
     }
 

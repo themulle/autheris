@@ -672,8 +672,8 @@ public partial class ProcedureExecutionSecurityTests
             var m = new TableMetadata
             {
                 Identifier = ci.Arg<TableIdentifier>(),
-                Columns = [new TableColumn { ColumnName = "order_id" }, new TableColumn { ColumnName = "secret" }, new TableColumn { ColumnName = "salary", IsSensitive = true }]
-            };
+                Columns = [new TableColumn { ColumnName = "order_id" }, new TableColumn { ColumnName = "secret" }, new TableColumn { ColumnName = "salary" }]
+            }.WithPii("salary");
             return meta?.Invoke(m) ?? m;
         });
         e.Resolution.ResolveAccess(Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>())

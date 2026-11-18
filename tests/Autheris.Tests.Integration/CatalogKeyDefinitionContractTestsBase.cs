@@ -322,7 +322,7 @@ public abstract class CatalogKeyDefinitionContractTestsBase
 
         await Repo.UpsertTableMetadataAsync(Meta(id, masking: masking));
 
-        Count("SELECT COUNT(*) FROM COLUMN_MASKING_RULES WHERE table_column_id = @c", ("@c", ColumnId(id, "c"))).ShouldBe(1L);
+        Count("SELECT COUNT(*) FROM COLUMN_MASK_OVERRIDES WHERE scope = '*' AND table_column_id = @c", ("@c", ColumnId(id, "c"))).ShouldBe(1L);
         Count("SELECT COUNT(*) FROM TABLE_PRIMARY_KEY_COLUMNS WHERE table_id = @t", ("@t", TableId(id))).ShouldBe(2L);
     }
 

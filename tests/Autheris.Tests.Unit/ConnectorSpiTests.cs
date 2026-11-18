@@ -47,10 +47,10 @@ public class ConnectorSpiTests
             [
                 new TableColumn { ColumnName = "Id", DataType = "int" },
                 new TableColumn { ColumnName = "Amount", DataType = "decimal" },
-                new TableColumn { ColumnName = "Iban", DataType = "varchar", IsSensitive = true },
-                new TableColumn { ColumnName = "SecretNote", DataType = "varchar", IsSensitive = true }
+                new TableColumn { ColumnName = "Iban", DataType = "varchar" },
+                new TableColumn { ColumnName = "SecretNote", DataType = "varchar" }
             ]
-        };
+        }.WithPii("Iban", "SecretNote");
     }
 
     private static SqlConnector NewSqlConnector(

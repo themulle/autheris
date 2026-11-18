@@ -24,7 +24,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Issue #138 INC-1: the one discovery visibility entry point (always <see cref="CatalogSurface.Discovery"/>). Order of one evaluation:
+/// Issue #138 INC-1: the data-access-side catalog visibility entry point (consents, admin and owner views; authorized discovery has its own path). Order of one evaluation:
 /// <see cref="CallerScopeResolver"/> (once) -> <see cref="CatalogVisibility"/> engine -> shape (NotFound rows dropped) -> transport
 /// filter -> memo (no further filter; hidden objects stay hidden, a grant is not needed to discover). Every failure answers empty / null; nothing falls back
 /// to an unfiltered list. Scoped: the memo lives and dies with the DI scope.
@@ -300,7 +300,7 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
             {
                 engineOutput = await CatalogVisibility.VisibleTablesAsync(
                     rows, context.Principal, context.Tenant, _consentRepository, contract, context.CatalogOwner, context.SharedTables,
-                    CatalogSurface.Discovery, ct).ConfigureAwait(false);
+                    ct).ConfigureAwait(false);
             }
 
             // F-C11 / a row that does not exist for this caller class never reaches the evaluator or the memo.
@@ -344,7 +344,7 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
         var roles = string.Join(',', principal.GetUserRoles().OrderBy(x => x, StringComparer.Ordinal));
         var scopes = string.Join(',', Autheris.Domain.Security.TokenAccessScope.GetScopeSet(principal.Claims).OrderBy(x => x, StringComparer.Ordinal));
         var claims = $"{scope}|{resolvedTenant.Value}|g:{groups}|r:{roles}|s:{scopes}";
-        return new MemoKey(sid.Value, claims, tenant.Value, string.Empty, nameof(CatalogSurface.Discovery));
+        return new MemoKey(sid.Value, claims, tenant.Value, string.Empty, "data-access");
     }
 
     private static MemoKey KeyOf(Context context, SchemaContractDefinition? contract) =>

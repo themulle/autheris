@@ -66,7 +66,7 @@ public sealed class CatalogTableProjectionTests
     public void NewColumn_IsAdditive()
     {
         var before = Meta(columns: [Column("id", "int")]);
-        var after = Meta(columns: [Column("id", "int"), Column("name", isSensitive: true)]);
+        var after = Meta(columns: [Column("id", "int"), Column("name")]) with { ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("name") };
 
         Diff(before, after).Classification.ShouldBe(CatalogWriteClassification.Additive);
     }

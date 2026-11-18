@@ -394,7 +394,7 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
         var meta = f.Upserted.ShouldHaveSingleItem();
         meta.Table.Sensitivity.ShouldBe("HIGH");
         meta.Table.RequiresFourEyes.ShouldBeTrue();
-        meta.Columns.Single(c => c.ColumnName == "diagnosis").IsSensitive.ShouldBeTrue();
+        ClassificationMetadata.IsColumnSensitive(meta, "diagnosis").ShouldBeTrue();
         meta.ColumnMaskingRules["diagnosis"].RuleType.ShouldBe("REDACT");
         f.Created.ShouldBeEmpty();
     }
@@ -423,7 +423,7 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
         await f.Service.SyncPermissionsAsync();
 
         var meta = f.Upserted.ShouldHaveSingleItem();
-        meta.Columns.Single().IsSensitive.ShouldBeTrue();
+        ClassificationMetadata.IsColumnSensitive(meta, meta.Columns.Single().ColumnName).ShouldBeTrue();
         meta.ColumnMaskingRules.ShouldContainKey("phone");
         f.Created.ShouldBeEmpty();
     }
@@ -449,10 +449,10 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
     public void E06_IsExcludedFromAutoGrant_OnlyPlainTablesAreGrantable()
     {
         static TableMetadata Meta(string sensitivity, bool fourEyes = false, bool sensitiveColumn = false) => new()
-        {
+        { ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor(sensitiveColumn ? new[] { "c" } : Array.Empty<string>()),
             Identifier = OrdersId,
             Table = new Table { Sensitivity = sensitivity, RequiresFourEyes = fourEyes },
-            Columns = [new TableColumn { ColumnName = "c", IsSensitive = sensitiveColumn }]
+            Columns = [new TableColumn { ColumnName = "c" }]
         };
 
         OpenMetadataSyncService.IsExcludedFromAutoGrant(Meta("NORMAL")).ShouldBeFalse();

@@ -99,7 +99,7 @@ public sealed class QueryAnalysisBucketSecurityTests
         var table = new TableMetadata
         {
             Identifier = tableId,
-            Table = new Table { Id = Guid.NewGuid(), SourceName = "sales", SchemaName = "public", TableName = "orders", DisplayName = "orders", Visibility = DatasetVisibility.Full },
+            Table = new Table { Id = Guid.NewGuid(), SourceName = "sales", SchemaName = "public", TableName = "orders", DisplayName = "orders" },
             Columns = [new TableColumn { ColumnName = "id", DataType = "int" }],
             PrimaryKeyColumns = ["id"]
         };

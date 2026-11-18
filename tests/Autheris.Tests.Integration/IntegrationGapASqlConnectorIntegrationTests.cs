@@ -29,7 +29,7 @@ public sealed class IntegrationGapASqlConnectorIntegrationTests
     private const string RawSsn = "123-45-6789";
 
     private static TableMetadata CreateEmployeesMetadata() => new()
-    {
+    { ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("ssn"),
         Identifier = new TableIdentifier("corp", "public", "employees"),
         Table = new Table
         {
@@ -44,7 +44,7 @@ public sealed class IntegrationGapASqlConnectorIntegrationTests
         [
             new TableColumn { ColumnName = "id", DataType = "int" },
             new TableColumn { ColumnName = "name", DataType = "varchar" },
-            new TableColumn { ColumnName = "ssn", DataType = "varchar", IsSensitive = true }
+            new TableColumn { ColumnName = "ssn", DataType = "varchar" }
         ],
         ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
         {
