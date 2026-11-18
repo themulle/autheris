@@ -13,4 +13,8 @@ public sealed record GoldenQuery(
     string? VariablesJson = null,
     IReadOnlyList<string>? Tags = null,
     DateTimeOffset CreatedAt = default
-);
+)
+{
+    /// <summary>True for an entry read from the governance store (dbt-maintained, untrusted text): its selections are verified field by field against the caller's view.</summary>
+    public bool FromStore { get; init; }
+}

@@ -49,7 +49,7 @@ public sealed class CatalogSchemaRefreshRGql12Tests
     public async Task CatalogChange_RaisesTypesChanged_UnchangedCatalog_DoesNot()
     {
         var (meta, rel) = Repos();
-        meta.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(new List<TableMetadata> { Table("orders") });
+        meta.StubAllTables(new List<TableMetadata> { Table("orders") });
         using var module = new CatalogGraphQlTypeModule(meta, rel);
         var raised = 0;
         module.TypesChanged += (_, _) => raised++;
@@ -57,7 +57,7 @@ public sealed class CatalogSchemaRefreshRGql12Tests
         await new ServiceCollection().AddGraphQLServer().AddQueryType<PingQuery>().AddTypeModule(_ => module).BuildRequestExecutorAsync();
 
         (await module.CheckForCatalogChangesAsync()).ShouldBeFalse();
-        meta.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(new List<TableMetadata> { Table("orders"), Table("invoices") });
+        meta.StubAllTables(new List<TableMetadata> { Table("orders"), Table("invoices") });
         (await module.CheckForCatalogChangesAsync()).ShouldBeTrue();
         raised.ShouldBe(1);
     }
@@ -66,14 +66,14 @@ public sealed class CatalogSchemaRefreshRGql12Tests
     public async Task UnreachableCatalog_ServesSchemaWithoutCatalogTables_AndRecovers()
     {
         var (meta, rel) = Repos();
-        meta.GetAllTablesAsync(Arg.Any<CancellationToken>()).ThrowsAsync(new TimeoutException("governance db down"));
+        meta.FailAllTables(new TimeoutException("governance db down"));
         using var module = new CatalogGraphQlTypeModule(meta, rel);
 
         var executor = await new ServiceCollection().AddGraphQLServer().AddQueryType<PingQuery>().AddTypeModule(_ => module).BuildRequestExecutorAsync();
         await using var result = await executor.ExecuteAsync("{ ping }");
         result.ToJson().ShouldContain("pong");
 
-        meta.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(new List<TableMetadata> { Table("orders") });
+        meta.StubAllTables(new List<TableMetadata> { Table("orders") });
         (await module.CheckForCatalogChangesAsync()).ShouldBeTrue();
     }
 
@@ -116,7 +116,7 @@ public sealed class CatalogSchemaRefreshRGql12Tests
     public async Task Refresh_ColumnlessTableAddedAtRuntime_RaisesTypesChangedAndRebuiltExecutorServesValidTable()
     {
         var (meta, rel) = Repos();
-        meta.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(new List<TableMetadata> { Table("orders") });
+        meta.StubAllTables(new List<TableMetadata> { Table("orders") });
         using var module = new CatalogGraphQlTypeModule(meta, rel);
         var raised = 0;
         module.TypesChanged += (_, _) => raised++;
@@ -125,7 +125,7 @@ public sealed class CatalogSchemaRefreshRGql12Tests
         await resolver.GetExecutorAsync();
         ((ICatalogSchemaDiagnostics)module).OmittedTables.ShouldBeEmpty();
 
-        meta.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(new List<TableMetadata> { Table("orders"), ColumnlessTable("empty") });
+        meta.StubAllTables(new List<TableMetadata> { Table("orders"), ColumnlessTable("empty") });
         (await module.CheckForCatalogChangesAsync()).ShouldBeTrue();
         raised.ShouldBe(1);
 
@@ -142,7 +142,7 @@ public sealed class CatalogSchemaRefreshRGql12Tests
     public async Task Diagnostics_AfterBuild_ReportsOmittedTables()
     {
         var (meta, rel) = Repos();
-        meta.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(new List<TableMetadata> { Table("orders"), ColumnlessTable("empty") });
+        meta.StubAllTables(new List<TableMetadata> { Table("orders"), ColumnlessTable("empty") });
         using var module = new CatalogGraphQlTypeModule(meta, rel);
 
         await new ServiceCollection().AddGraphQLServer().AddQueryType<PingQuery>().AddTypeModule(_ => module).BuildRequestExecutorAsync();
@@ -156,7 +156,7 @@ public sealed class CatalogSchemaRefreshRGql12Tests
     public async Task Diagnostics_CatalogUnreachable_ReportsEmptyList()
     {
         var (meta, rel) = Repos();
-        meta.GetAllTablesAsync(Arg.Any<CancellationToken>()).ThrowsAsync(new TimeoutException("down"));
+        meta.FailAllTables(new TimeoutException("down"));
         using var module = new CatalogGraphQlTypeModule(meta, rel);
 
         await new ServiceCollection().AddGraphQLServer().AddQueryType<PingQuery>().AddTypeModule(_ => module).BuildRequestExecutorAsync();
@@ -170,7 +170,7 @@ public sealed class CatalogSchemaRefreshRGql12Tests
     {
         // SEC-BUG157-07 / T-BUG157-S12
         var (meta, rel) = Repos();
-        meta.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(new List<TableMetadata> { Table("orders"), ColumnlessTable("empty") });
+        meta.StubAllTables(new List<TableMetadata> { Table("orders"), ColumnlessTable("empty") });
         using var module = new CatalogGraphQlTypeModule(meta, rel);
         var provider = new ServiceCollection().AddGraphQLServer().AddQueryType<PingQuery>().AddTypeModule(_ => module).Services.BuildServiceProvider();
         var resolver = provider.GetRequiredService<IRequestExecutorProvider>();
@@ -179,7 +179,7 @@ public sealed class CatalogSchemaRefreshRGql12Tests
         var first = diagnostics.OmittedTables;
         var firstCopy = first.ToArray();
 
-        meta.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(new List<TableMetadata> { Table("orders"), ColumnlessTable("empty"), ColumnlessTable("empty2") });
+        meta.StubAllTables(new List<TableMetadata> { Table("orders"), ColumnlessTable("empty"), ColumnlessTable("empty2") });
         (await module.CheckForCatalogChangesAsync()).ShouldBeTrue();
         await WaitForRebuildAsync(resolver, diagnostics, expectedOmissions: 2);
 

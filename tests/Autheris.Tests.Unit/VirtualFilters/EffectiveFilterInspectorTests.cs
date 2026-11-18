@@ -27,7 +27,7 @@ public sealed class EffectiveFilterInspectorTests
     {
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetTableMetadataAsync(Air1.Identifier, Arg.Any<CancellationToken>()).Returns(Air1);
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(new List<TableMetadata> { Air1 });
+        repo.StubAllTables(new List<TableMetadata> { Air1 });
         return Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(repo);
     }
 

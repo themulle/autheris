@@ -228,7 +228,7 @@ public sealed class OpenMetadataSyncServiceTests
         // Check consents – SEC E-06: the table contains PII-tagged (sensitive/masked) columns, therefore no allow consent
         // is created automatically even with AutoCreateConsents=true (the positive case for a non-sensitive table is
         // covered in OpenMetadataReconcileAndAlationHardeningTests.E07_TeamAndUserGrantees_ResolvedFromSeparateKeyMaps).
-        capturedMetadata.Columns.Single(c => c.ColumnName == "email").IsSensitive.ShouldBeTrue();
+        ClassificationMetadata.IsColumnSensitive(capturedMetadata, "email").ShouldBeTrue();
         createdConsents.ShouldBeEmpty();
 
         // Check epoch bumped

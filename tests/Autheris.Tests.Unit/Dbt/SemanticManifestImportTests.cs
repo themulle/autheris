@@ -50,7 +50,7 @@ public sealed class SemanticManifestImportTests
         var repository = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
         var orders = SemanticManifestValidatorTests.Orders();
         repository.GetTableMetadataAsync(orders.Identifier, Arg.Any<CancellationToken>()).Returns(orders);
-        repository.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([orders]);
+        repository.StubAllTables([orders]);
         var consents = Substitute.For<IConsentRepository>();
         consents.GetTablesWithConsentsForTenantAsync(Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
             .Returns(tenantsHoldConsent ? [orders.Identifier] : []);
@@ -169,7 +169,7 @@ public sealed class SemanticManifestImportTests
         var virtualTable = rig.Upserts.Single();
         // Only the tenant's own virtual table is in the repository now; a second import must not resolve it as the base table.
         var onlyVirtual = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
-        onlyVirtual.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([virtualTable]);
+        onlyVirtual.StubAllTables([virtualTable]);
         var resolver = new SemanticBaseTableResolver(onlyVirtual);
 
         var resolved = await resolver.TryResolveAsync(new DbtSemanticModel("orders", "d", "orders", [], [], []));

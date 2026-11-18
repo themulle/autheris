@@ -82,7 +82,7 @@ public sealed class DbtSemanticManifestEndpointTests
         var orders = SemanticManifestValidatorTests.Orders();
         var repository = Substitute.For<ITableMetadataRepository>();
         repository.GetTableMetadataAsync(orders.Identifier, Arg.Any<CancellationToken>()).Returns(orders);
-        repository.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([orders]);
+        repository.StubAllTables([orders]);
         repository.UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>()).Returns(ci => Task.FromResult(ci.Arg<TableMetadata>()));
         var consents = Substitute.For<IConsentRepository>();
         consents.GetTablesWithConsentsForTenantAsync(Arg.Any<TenantId>(), Arg.Any<CancellationToken>()).Returns([orders.Identifier]);

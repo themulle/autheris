@@ -14,13 +14,12 @@ public static class GovernanceGlobalTables
     {
         "TABLES", // Platform-wide catalog table registry
         "TABLE_COLUMNS", // Column definitions of registered catalog tables
-        "COLUMN_MASKING_RULES", // Masking policies per table column
+        "COLUMN_CLASSIFICATIONS", // Column classification assignments (scope column, no tenant_id)
+        "COLUMN_MASK_OVERRIDES", // Column mask overrides (scope column, no tenant_id)
         "DATA_OWNERS", // Platform data ownership assignments
         "TABLE_OWNERS", // Table owner mappings
         "DATA_OWNER_DELEGATIONS", // Data owner delegations
         "DOC_OFFICIAL_DOCUMENTS", // Official documentation written only by canonical ClusterAdmin
-        "ROLES", // Platform role definitions
-        "ROLE_MEMBERS", // Role membership assignments
         "POLICY_EPOCHS", // Global policy version epochs
         "AUDIT_LOG_TRUNCATE_GUARD", // Single-row database truncate guard
         "CATALOG_STATE", // Global schema and catalog state tracking

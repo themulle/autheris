@@ -64,7 +64,7 @@ public sealed class McpSemanticResourceSecurityTests
         IGoldenQueryService? golden = null)
     {
         var repo = Substitute.For<ITableMetadataRepository>();
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(tables));
+        repo.StubAllTables(Task.FromResult(tables));
         Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(repo);
         return new SemanticMcpCompiler(
             repo, NullLogger<SemanticMcpCompiler>.Instance, golden, AllowAll(tables.Select(t => t.Identifier)),
@@ -93,7 +93,7 @@ public sealed class McpSemanticResourceSecurityTests
         var registry = Substitute.For<IMcpToolRegistry>();
         registry.FindTool("get_golden_queries").Returns(new McpToolDefinition("get_golden_queries", "Golden", "{}", string.Empty, null));
         var repo = Substitute.For<ITableMetadataRepository>();
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([Table(Orders)]));
+        repo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>([Table(Orders)]));
         var golden = new GoldenQueryService(Options.Create(new GatewayOptions()), NullLogger<GoldenQueryService>.Instance);
         golden.RegisterGoldenQuery(new GoldenQuery("g1", "sales", "orders", "Orders", "d", "query { sales { orders { id } } }"));
         var guardrail = new AiDataGuardrailService(

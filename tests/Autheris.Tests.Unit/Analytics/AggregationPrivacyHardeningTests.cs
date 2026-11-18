@@ -56,13 +56,13 @@ public sealed class AggregationPrivacyHardeningTests
                 new TableColumn { TableId = tableId, ColumnName = "status", DataType = "varchar" },
                 new TableColumn { TableId = tableId, ColumnName = "amount", DataType = "decimal" },
                 new TableColumn { TableId = tableId, ColumnName = "denied_col", DataType = "varchar" },
-                new TableColumn { TableId = tableId, ColumnName = "discount_secret", DataType = "decimal", IsSensitive = true }
+                new TableColumn { TableId = tableId, ColumnName = "discount_secret", DataType = "decimal" }
             ],
             ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
             {
                 ["discount_secret"] = new MaskingRule { RuleType = "REDACT" }
             }
-        };
+        }.WithPii("discount_secret");
     }
 
     private static TableAccessDecision CreateDecision() =>

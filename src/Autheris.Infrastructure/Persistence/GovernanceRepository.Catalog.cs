@@ -35,14 +35,18 @@ public partial class GovernanceRepository
         return DatasetCatalogStore.Apply(structural, overlay);
     }
 
-    private async Task<TableMetadata?> GetTableMetadataCoreAsync(
+    public Task<IReadOnlyList<TableMetadata?>> GetTableMetadataBatchAsync(IReadOnlyList<TableIdentifier> tables, CancellationToken ct = default)
+        => CatalogMetadataBatchReader.ReadAsync(this, tables, ct);
+
+    internal async Task<TableMetadata?> GetTableMetadataCoreAsync(
         TableIdentifier table,
         IReadOnlyDictionary<Guid, CatalogKeyDefinitionStore.TableKeyRows>? prefetchedKeys,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool probeCache = true)
     {
         var cacheKey = table.ToString().ToLowerInvariant();
         var nowTicks = TimeProvider.System.GetUtcNow().UtcTicks;
-        if (_metadataCache.TryGetValue(cacheKey, out var entry) && entry.Metadata != null && (nowTicks - entry.CachedAtTicks < MetadataCacheTtlTicks))
+        if (probeCache && _metadataCache.TryGetValue(cacheKey, out var entry) && entry.Metadata != null && (nowTicks - entry.CachedAtTicks < MetadataCacheTtlTicks))
         {
             // PERS-17: a hit is served only while the table epoch is unchanged (a write on another replica bumps it); an unreadable
             // epoch or a mismatch reloads from the database.
@@ -114,12 +118,15 @@ public partial class GovernanceRepository
             var rowFilterEvaluation = await RowFilterEvaluationStore.ReadObjectAsync(
                 conn, null, KeyDialect, tableId.Value, ct).ConfigureAwait(false);
 
+            var classifications = await CatalogRowHydrator.ReadTableClassificationsAsync(conn, tableId.Value, ct).ConfigureAwait(false);
+
             var result = new TableMetadata
             {
                 Identifier = table,
                 Table = tableEntity,
                 Columns = columns,
                 ColumnMaskingRules = maskingRules,
+                ColumnClassifications = classifications,
                 PrimaryKeyColumns = pkColumns,
                 PrimaryKeyDirections = pkDirections,
                 Indexes = indexes,
@@ -141,20 +148,7 @@ public partial class GovernanceRepository
         }
     }
 
-    /// <summary>The current epoch, or null when it cannot be read (the cache is then bypassed and the table is loaded from the database).</summary>
-    private async Task<long?> TryReadTableEpochAsync(Guid tableId, CancellationToken ct)
-    {
-        try
-        {
-            await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-            return await ReadTableEpochAsync(conn, tableId, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            LogCatalogNotice("The table epoch could not be read; the metadata cache is bypassed (fail-closed).");
-            return null;
-        }
-    }
+    private Task<long?> TryReadTableEpochAsync(Guid tableId, CancellationToken ct) => CatalogMetadataBatchReader.TryReadEpochAsync(this, tableId, ct);
 
     public async Task<IReadOnlyList<TableMetadata>> GetAllTablesAsync(CancellationToken ct = default)
     {
@@ -259,6 +253,8 @@ public partial class GovernanceRepository
         var rowFilterStrategies = prefetchedRowFilterStrategies
             ?? await RowFilterEvaluationStore.ReadBatchObjectAsync(conn, null, KeyDialect, ct).ConfigureAwait(false);
 
+        var classificationsByTable = await CatalogRowHydrator.ReadAllClassificationsAsync(conn, ct).ConfigureAwait(false);
+
         if (epochs != null && AfterMetadataSnapshotForTesting is { } hook)
         {
             await hook(ct).ConfigureAwait(false);
@@ -312,6 +308,7 @@ public partial class GovernanceRepository
                 Table = tableEntity,
                 Columns = columns,
                 ColumnMaskingRules = maskingRules,
+                ColumnClassifications = CatalogRowHydrator.ClassificationsOf(classificationsByTable, tid),
                 PrimaryKeyColumns = pkColumns,
                 PrimaryKeyDirections = pkDirections,
                 Indexes = indexes,
@@ -339,26 +336,7 @@ public partial class GovernanceRepository
         return result;
     }
 
-    internal async Task<List<TableMetadata>> ApplyDatasetCatalogOverlayAsync(List<TableMetadata> result, CancellationToken ct)
-    {
-        if (result.Count == 0)
-        {
-            return result;
-        }
-
-        // Issue #111 (F-C6): rows served from the structural cache and freshly loaded rows alike get a fresh tier/tags overlay (`with`, no mutation).
-        await using (var overlayConn = await OpenConnectionAsync(ct).ConfigureAwait(false))
-        {
-            var overlay = await DatasetCatalogStore.ReadOverlayAsync(
-                overlayConn, null, KeyDialect, null, _logger, ct).ConfigureAwait(false);
-            for (var i = 0; i < result.Count; i++)
-            {
-                result[i] = DatasetCatalogStore.Apply(result[i], overlay);
-            }
-        }
-
-        return result;
-    }
+    internal Task<List<TableMetadata>> ApplyDatasetCatalogOverlayAsync(List<TableMetadata> result, CancellationToken ct) => CatalogMetadataBatchReader.ApplyOverlayAsync(this, result, ct);
 
     public async Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default) =>
         (await UpsertTableMetadataWithResultAsync(metadata, ct).ConfigureAwait(false)).Metadata;
@@ -443,12 +421,6 @@ public partial class GovernanceRepository
         return change;
     }
 
-    public async Task<DatasetVisibilityCounts> GetDatasetVisibilityCountsAsync(CancellationToken ct = default)
-    {
-        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        return await DatasetCatalogStore.CountByVisibilityAsync(conn, null, KeyDialect, ct).ConfigureAwait(false);
-    }
-
     public async Task<DatasetCatalogSettings?> GetDatasetCatalogSettingsAsync(TableIdentifier table, bool strict = true, CancellationToken ct = default)
     {
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
@@ -465,11 +437,6 @@ public partial class GovernanceRepository
         TableIdentifier table, IReadOnlyList<string> add, IReadOnlyList<string> remove, Sid actor, CancellationToken ct = default) =>
         WriteCatalogSettingsAsync(table, (conn, tx) =>
             DatasetCatalogStore.ChangeTagsAsync(conn, tx, KeyDialect, table, add, remove, actor, ct), ct);
-
-    public Task<DatasetCatalogChange?> SetDatasetVisibilityAsync(
-        TableIdentifier table, DatasetVisibility visibility, Sid actor, CancellationToken ct = default) =>
-        WriteCatalogSettingsAsync(table, (conn, tx) =>
-            DatasetCatalogStore.SetVisibilityAsync(conn, tx, KeyDialect, table, visibility, actor, ct), ct);
 
     public Task<DatasetCatalogChange?> SetDatasetPrivacyAsync(
         TableIdentifier table, int? minGroupSize, bool? nonPersonal, Sid actor, CancellationToken ct = default) =>

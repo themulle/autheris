@@ -87,6 +87,15 @@ public static class GatewayCatalogServiceExtensions
                 sp.GetService<ILogger<Autheris.Application.Catalog.Discovery.DiscoveryService>>(),
                 sp.GetService<IClassificationRepository>(),
                 sp.GetService<Autheris.Application.Procedures.Interfaces.IProcedureCatalog>()));
+        services.TryAddScoped<Autheris.Application.Catalog.Discovery.IDiscoveryAccessRequestService>(sp =>
+            new Autheris.Application.Catalog.Discovery.DiscoveryAccessRequestService(
+                sp.GetRequiredService<Autheris.Application.Catalog.Discovery.IDiscoveryService>(),
+                sp.GetRequiredService<Autheris.Application.ConsentRequests.IConsentRequestService>(),
+                sp.GetRequiredService<IOptions<GatewayOptions>>(),
+                sp.GetService<IConsentApprovalRepository>(),
+                sp.GetService<IOptions<CatalogDiscoveryOptions>>(),
+                sp.GetService<Autheris.Application.Audit.IAuditWriter>(),
+                sp.GetService<Autheris.Application.Governance.Grants.IGrantValidityPolicy>()));
         services.TryAddScoped<ICatalogDiscoveryService>(sp => new CatalogDiscoveryService(
             sp.GetRequiredService<ITableMetadataRepository>(),
             sp.GetRequiredService<Autheris.Application.Audit.IAuditWriter>(),

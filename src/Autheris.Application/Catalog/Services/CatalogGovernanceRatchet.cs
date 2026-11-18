@@ -59,7 +59,6 @@ public static class CatalogGovernanceRatchet
             HttpEndpoint = exTable.HttpEndpoint ?? inTable.HttpEndpoint,
             PluginName = !string.IsNullOrWhiteSpace(exTable.PluginName) ? exTable.PluginName : inTable.PluginName,
             Tags = exTable.Tags,
-            Visibility = exTable.Visibility != DatasetVisibility.Hidden ? exTable.Visibility : inTable.Visibility,
             RlsExpression = !string.IsNullOrWhiteSpace(exTable.RlsExpression) ? exTable.RlsExpression : inTable.RlsExpression,
             MinGroupSize = mergedMinGroupSize,
             NonPersonal = exTable.NonPersonal,
@@ -98,7 +97,6 @@ public static class CatalogGovernanceRatchet
                 ColumnName = col.ColumnName,
                 DisplayName = !string.IsNullOrWhiteSpace(col.DisplayName) ? col.DisplayName : exCol?.DisplayName,
                 DataType = string.IsNullOrWhiteSpace(col.DataType) && exCol != null ? exCol.DataType : col.DataType,
-                IsSensitive = col.IsSensitive || exCol?.IsSensitive == true,
                 Description = col.Description ?? exCol?.Description,
                 LongDescription = col.LongDescription ?? exCol?.LongDescription,
                 Texts = col.Texts is { IsEmpty: false } ? col.Texts : (exCol?.Texts ?? LocalizedTexts.Empty),
@@ -144,6 +142,7 @@ public static class CatalogGovernanceRatchet
             OwnerTenantId = existing.OwnerTenantId,
             Columns = mergedColumns,
             ColumnMaskingRules = mergedRules,
+            ColumnClassifications = ClassificationMetadata.Merge(existing.ColumnClassifications, incoming.ColumnClassifications),
             PrimaryKeyColumns = replace ? incoming.PrimaryKeyColumns : existing.PrimaryKeyColumns,
             // I390-SC-12: directions always travel with the column list of the same side (never combined across sides).
             PrimaryKeyDirections = replace ? incoming.PrimaryKeyDirections : existing.PrimaryKeyDirections,

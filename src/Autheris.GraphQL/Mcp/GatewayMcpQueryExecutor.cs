@@ -38,6 +38,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
     private readonly IPersistedToolValidator _persistedToolValidator;
     private readonly IMcpDatasetCatalog? _datasetCatalog;
     private readonly IMcpToolExecutionHandler? _toolExecutionHandler;
+    private readonly Autheris.Application.Catalog.Discovery.IDiscoveryAccessRequestService? _accessRequests;
     private readonly ILogger<GatewayMcpQueryExecutor> _logger;
 
     // Issue #447: the in-process GraphQL request runs in the MCP request scope, so it inherits the stamped ingress.
@@ -71,8 +72,10 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         IMcpProvenanceEnricher? provenanceEnricher = null,
         IMcpDatasetCatalog? datasetCatalog = null,
         IMcpToolExecutionHandler? toolExecutionHandler = null,
-        IServiceProvider? services = null)
+        IServiceProvider? services = null,
+        Autheris.Application.Catalog.Discovery.IDiscoveryAccessRequestService? accessRequests = null)
     {
+        _accessRequests = accessRequests;
         _services = services;
         _options = gatewayOptions ?? throw new ArgumentNullException(nameof(gatewayOptions));
         _executorProvider = executorProvider ?? throw new ArgumentNullException(nameof(executorProvider));
@@ -304,6 +307,11 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         if (string.Equals(tool.Name, McpDatasetTools.QueryGraphQl, StringComparison.OrdinalIgnoreCase))
         {
             return await ExecuteGraphQlQueryAsync(tool, principal, sessionContext, argumentsJson, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (string.Equals(tool.Name, McpDatasetTools.RequestAccess, StringComparison.OrdinalIgnoreCase))
+        {
+            return await ExecuteRequestAccessAsync(tool, principal, sessionContext, variables, cancellationToken).ConfigureAwait(false);
         }
 
         if (_datasetCatalog == null)
@@ -757,6 +765,85 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
             Autheris.Domain.Security.TokenAccessScope.MarkReadOnly(identity);
         }
         return new ClaimsPrincipal(identity);
+    }
+
+    private async Task<string> ExecuteRequestAccessAsync(
+        McpToolDefinition tool,
+        ClaimsPrincipal principal,
+        McpSessionContext sessionContext,
+        Dictionary<string, object?> variables,
+        CancellationToken ct)
+    {
+        if (sessionContext.IsReadOnly)
+        {
+            return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.NotFound, "Unknown tool.");
+        }
+
+        if (_accessRequests is null)
+        {
+            return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.NotAvailable, "Access requests are not available.");
+        }
+
+        string? Text(string name) => variables.TryGetValue(name, out var v) ? v as string : null;
+        int? days = variables.TryGetValue("durationDays", out var d) ? d switch { int i => i, long l when l is >= 1 and <= int.MaxValue => (int)l, double x when x >= 1 && x <= int.MaxValue && x == Math.Floor(x) => (int)x, _ => 0 } : null;
+        if (days is 0)
+        {
+            return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.InvalidParams, PersistedToolValidator.InvalidArgumentsCode);
+        }
+
+        List<string>? clearColumns = null;
+        if (variables.TryGetValue("clearColumns", out var cc) && cc is not null)
+        {
+            if (cc is not System.Collections.IEnumerable items || cc is string)
+            {
+                return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.InvalidParams, PersistedToolValidator.InvalidArgumentsCode);
+            }
+
+            clearColumns = [];
+            foreach (var item in items)
+            {
+                clearColumns.Add(item as string ?? string.Empty);
+            }
+        }
+
+        if (!McpDatasetCatalog.TryParseDatasetId(Text("dataset"), out var id))
+        {
+            return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.NotFound, "Dataset not found or not visible.");
+        }
+
+        try
+        {
+            var tenant = Autheris.Application.ConsentRequests.ConsentRequestService.ResolveTenantId(
+                principal, new Autheris.Domain.Common.TenantId(sessionContext.TenantId), Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal));
+            var result = await _accessRequests.RequestAsync(
+                new Autheris.Application.Catalog.Discovery.DiscoveryAccessRequest(
+                    id.Domain, id.Schema, id.TableName, Text("justification") ?? string.Empty, days, Text("duration"), clearColumns, null),
+                new Autheris.Application.Catalog.Interfaces.CatalogCaller(principal, tenant, Autheris.Application.Catalog.Interfaces.CatalogChannel.Mcp),
+                ct).ConfigureAwait(false);
+            return JsonSerializer.Serialize(new
+            {
+                dataset = id.ToString(),
+                requestId = result.RequestId,
+                status = result.Status,
+                message = result.Message,
+                clearColumns
+            }, CamelCaseJsonOptions);
+        }
+        catch (Autheris.Application.ConsentRequests.ConsentRequestException ex)
+        {
+            var code = ex.Code switch
+            {
+                "NOT_FOUND" => McpErrorCodes.NotFound,
+                "FORBIDDEN" => McpErrorCodes.Forbidden,
+                "VALIDATION_ERROR" => McpErrorCodes.InvalidParams,
+                _ => ex.Code
+            };
+            return CreateErrorResult(sessionContext.TenantId, tool.Name, code, ex.Message, retryAfterSeconds: ex.RetryAfterSeconds);
+        }
+        catch (Autheris.Application.Catalog.Discovery.DiscoveryStatusException ex)
+        {
+            return CreateDiscoveryErrorResult(sessionContext.TenantId, tool.Name, ex);
+        }
     }
 
     internal static string CreateDiscoveryErrorResult(string tenantId, string toolName, Autheris.Application.Catalog.Discovery.DiscoveryStatusException ex)

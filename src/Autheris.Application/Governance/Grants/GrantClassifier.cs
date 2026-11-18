@@ -22,7 +22,7 @@ public static class GrantClassifier
         foreach (var t in tables)
         {
             any = true;
-            if (t is null || IsSensitive(t))
+            if (t is null || ContainsSensitiveData(t))
             {
                 return GrantSensitivity.Sensitive;
             }
@@ -31,7 +31,7 @@ public static class GrantClassifier
         return any ? GrantSensitivity.Regular : GrantSensitivity.Sensitive;
     }
 
-    public static bool IsSensitive(TableMetadata table)
+    public static bool ContainsSensitiveData(TableMetadata table)
     {
         ArgumentNullException.ThrowIfNull(table);
         if (table.Table.IsHighlySensitive)

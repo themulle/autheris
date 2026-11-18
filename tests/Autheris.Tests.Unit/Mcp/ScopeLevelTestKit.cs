@@ -38,10 +38,9 @@ internal static class ScopeLevelTestKit
     /// is not emitted, and the profile channel would no longer tell Mask from Deny).
     /// </summary>
     public static TableMetadata CreateTable(
-        DatasetVisibility visibility = DatasetVisibility.Hidden,
         bool gradeSensitive = false,
         IReadOnlyDictionary<string, MaskingRule>? maskingRules = null) => new()
-    {
+    { ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor(gradeSensitive ? new[] { "grade" } : Array.Empty<string>()),
         Identifier = Orders,
         Table = new Table
         {
@@ -50,7 +49,6 @@ internal static class ScopeLevelTestKit
             SchemaName = "public",
             TableName = "orders",
             DisplayName = "orders",
-            Visibility = visibility
         },
         Columns =
         [
@@ -59,7 +57,6 @@ internal static class ScopeLevelTestKit
             {
                 ColumnName = "grade",
                 DataType = "varchar",
-                IsSensitive = gradeSensitive,
                 Meta = new Dictionary<string, string> { ["accepted_values"] = JsonSerializer.Serialize(SentinelValues), ["empty_share"] = "0" }
             }
         ],
@@ -148,7 +145,7 @@ internal static class ScopeLevelTestKit
     public static ITableMetadataRepository MetadataRepository(TableMetadata table)
     {
         var repo = Substitute.For<ITableMetadataRepository>();
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([table]));
+        repo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>([table]));
         repo.GetTableMetadataAsync(table.Identifier, Arg.Any<CancellationToken>()).Returns(Task.FromResult<TableMetadata?>(table));
         return Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(repo);
     }

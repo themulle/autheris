@@ -222,7 +222,7 @@ public sealed class DbtTests
             }
         };
 
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(tableList));
+        metadataRepo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(tableList));
         metadataRepo.QueryTablesAsync(
                 Arg.Any<Autheris.Application.Catalog.CatalogTableQuery>(),
                 Arg.Any<CancellationToken>())
@@ -590,8 +590,7 @@ public sealed class DbtTests
 
         metadataRepo.GetTableMetadataAsync(targetTableId, Arg.Any<CancellationToken>())
             .Returns(existingMetadata);
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns([existingMetadata]);
+        metadataRepo.StubAllTables([existingMetadata]);
 
         var service = new DbtMetadataIngestionService(proposalRepo, metadataRepo, graphStore, logger);
 
@@ -633,7 +632,7 @@ public sealed class DbtTests
             m.Table.Sensitivity == "CONFIDENTIAL" &&
             m.Table.DocumentationSource == "dbt_governance_v1" &&
             m.ColumnMaskingRules.ContainsKey("email_address") &&
-            m.Columns.First(c => c.ColumnName == "email_address").IsSensitive
+            ClassificationMetadata.IsColumnSensitive(m, "email_address")
         ), Arg.Any<CancellationToken>());
     }
 
@@ -667,8 +666,7 @@ public sealed class DbtTests
 
         metadataRepo.GetTableMetadataAsync(targetTableId, Arg.Any<CancellationToken>())
             .Returns(existingMetadata);
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns([existingMetadata]);
+        metadataRepo.StubAllTables([existingMetadata]);
 
         var service = new DbtMetadataIngestionService(proposalRepo, metadataRepo, graphStore, logger);
 
@@ -734,7 +732,7 @@ public sealed class DbtTests
             Columns = [new TableColumn { ColumnName = "col_a", DataType = "varchar" }]
         };
         metadataRepo.GetTableMetadataAsync(targetTableId, Arg.Any<CancellationToken>()).Returns(existingMetadata);
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([existingMetadata]);
+        metadataRepo.StubAllTables([existingMetadata]);
         var service = new DbtMetadataIngestionService(Substitute.For<IDbtProposalRepository>(), metadataRepo, Substitute.For<ILineageGraphStore>(), NullLogger<DbtMetadataIngestionService>.Instance);
 
         var json = "{ \"classifications\": [ { \"database\": \"postgres\", \"schema\": \"analytics\", \"table\": \"customers\", \"columns\": { \"col_a\": { \"masking_rule\": \"" + alias + "\" } } } ] }";
@@ -743,6 +741,34 @@ public sealed class DbtTests
 
         result.Success.ShouldBeTrue();
         await metadataRepo.Received(1).UpsertTableMetadataAsync(Arg.Is<TableMetadata>(m => m.ColumnMaskingRules["col_a"].RuleType == expected), Arg.Any<CancellationToken>());
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task DbtMetadataIngestionService_UnqualifiedImportLookup_OnlyCallersExactTableIsCandidate()
+    {
+        static TableMetadata Make(string domain, string name) => new()
+        {
+            Identifier = new TableIdentifier(domain, "analytics", name),
+            Table = new Table { Id = Guid.NewGuid(), SourceName = domain, SchemaName = "analytics", TableName = name, Sensitivity = "NORMAL" },
+            Columns = [new TableColumn { ColumnName = "col_a", DataType = "varchar" }]
+        };
+
+        var own = Make("postgres", "customers");
+        var foreignTenant = Make("other_tenant", "customers");
+        var prefixSibling = Make("postgres", "customers_x");
+        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        metadataRepo.StubAllTables([own, foreignTenant, prefixSibling]);
+        var service = new DbtMetadataIngestionService(Substitute.For<IDbtProposalRepository>(), metadataRepo, Substitute.For<ILineageGraphStore>(), NullLogger<DbtMetadataIngestionService>.Instance);
+
+        // The direct point lookup misses (unstubbed), so the paged schema plus name candidates decide.
+        var json = "{ \"classifications\": [ { \"database\": \"postgres\", \"schema\": \"analytics\", \"table\": \"customers\", \"columns\": { \"col_a\": { \"masking_rule\": \"email_mask\" } } } ] }";
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
+        var result = await service.IngestGovernanceStreamAsync(stream, Caller, dryRun: false);
+
+        result.Success.ShouldBeTrue();
+        await metadataRepo.Received(1).UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>());
+        await metadataRepo.Received(1).UpsertTableMetadataAsync(Arg.Is<TableMetadata>(m => m.Identifier == own.Identifier), Arg.Any<CancellationToken>());
     }
 
     [Theory]
@@ -760,7 +786,7 @@ public sealed class DbtTests
             Columns = [new TableColumn { ColumnName = "col_a", DataType = "varchar" }]
         };
         metadataRepo.GetTableMetadataAsync(targetTableId, Arg.Any<CancellationToken>()).Returns(existingMetadata);
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([existingMetadata]);
+        metadataRepo.StubAllTables([existingMetadata]);
         var service = new DbtMetadataIngestionService(Substitute.For<IDbtProposalRepository>(), metadataRepo, Substitute.For<ILineageGraphStore>(), NullLogger<DbtMetadataIngestionService>.Instance);
         var json = "{ \"classifications\": [ { \"database\": \"postgres\", \"schema\": \"analytics\", \"table\": \"customers\", \"columns\": { \"col_a\": { \"masking_rule\": \"" + alias + "\" } } } ] }";
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
@@ -801,8 +827,7 @@ public sealed class DbtTests
 
         metadataRepo.GetTableMetadataAsync(targetTableId, Arg.Any<CancellationToken>())
             .Returns(existingMetadata);
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns([existingMetadata]);
+        metadataRepo.StubAllTables([existingMetadata]);
 
         var service = new DbtMetadataIngestionService(proposalRepo, metadataRepo, graphStore, logger);
 
@@ -836,7 +861,7 @@ public sealed class DbtTests
     }
 
     private static TableMetadata GovernanceTable(string tableName, string sensitivity, IReadOnlyDictionary<string, MaskingRule>? rules = null, bool sensitiveColumn = false) => new()
-    {
+    { ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor(sensitiveColumn ? new[] { "email" } : Array.Empty<string>()),
         Identifier = new TableIdentifier("postgres", "analytics", tableName),
         Table = new Table
         {
@@ -848,7 +873,7 @@ public sealed class DbtTests
         },
         Columns =
         [
-            new TableColumn { ColumnName = "email", DataType = "varchar", IsSensitive = sensitiveColumn }
+            new TableColumn { ColumnName = "email", DataType = "varchar" }
         ],
         ColumnMaskingRules = rules ?? new Dictionary<string, MaskingRule>()
     };
@@ -861,7 +886,7 @@ public sealed class DbtTests
             metadataRepo.GetTableMetadataAsync(table.Identifier, Arg.Any<CancellationToken>()).Returns(table);
         }
 
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(tables.ToList());
+        metadataRepo.StubAllTables(tables.ToList());
         var service = new DbtMetadataIngestionService(
             Substitute.For<IDbtProposalRepository>(), metadataRepo, Substitute.For<ILineageGraphStore>(), NullLogger<DbtMetadataIngestionService>.Instance);
         return (service, metadataRepo);
@@ -1056,7 +1081,7 @@ public sealed class DbtTests
         var graphStore = Substitute.For<ILineageGraphStore>();
         var logger = NullLogger<DbtMetadataIngestionService>.Instance;
 
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([]);
+        metadataRepo.StubAllTables([]);
 
         var service = new DbtMetadataIngestionService(proposalRepo, metadataRepo, graphStore, logger);
 

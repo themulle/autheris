@@ -40,7 +40,7 @@ public sealed class EpochValidationBootstrapTests
         mux.GetDatabase(Arg.Any<int>(), Arg.Any<object?>()).Returns(db);
 
         var sensitivity = Substitute.For<ITableSensitivityLookup>();
-        sensitivity.IsSensitiveAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+        sensitivity.HasSensitiveDataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<bool>(false));
 
         var time = new FakeTimeProvider();

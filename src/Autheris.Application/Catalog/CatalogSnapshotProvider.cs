@@ -43,6 +43,8 @@ public sealed class CatalogSnapshotProvider : ICatalogSnapshotProvider, IDisposa
 
     public CatalogSnapshot CurrentSnapshot => Volatile.Read(ref _currentSnapshot);
 
+    public bool IsInitialized => Volatile.Read(ref _initialized);
+
     public bool IsDegraded => Volatile.Read(ref _consecutiveFailures) >= DegradedFailureThreshold;
 
     internal bool IsWaitingForCooldown => Volatile.Read(ref _isWaitingForCooldown);
@@ -81,9 +83,14 @@ public sealed class CatalogSnapshotProvider : ICatalogSnapshotProvider, IDisposa
 
     public async ValueTask<CatalogSnapshot> GetSnapshotAsync(CancellationToken ct = default)
     {
-        if (!_initialized)
+        if (!Volatile.Read(ref _initialized))
         {
             await RefreshAsync(ct).ConfigureAwait(false);
+        }
+
+        if (!Volatile.Read(ref _initialized))
+        {
+            throw new Autheris.Domain.Exceptions.CatalogSnapshotNotReadyException();
         }
 
         return Volatile.Read(ref _currentSnapshot);
@@ -164,7 +171,8 @@ public sealed class CatalogSnapshotProvider : ICatalogSnapshotProvider, IDisposa
             IReadOnlyList<TableMetadata> tables;
             try
             {
-                tables = await _governanceRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
+                tables = await CatalogTablePageReader.ReadAllAsync(
+                    _governanceRepo, new CatalogTableQuery(IncludeInactive: false), ct: ct).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {

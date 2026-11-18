@@ -40,7 +40,7 @@ public sealed class MultilingualCatalogGovernanceTests
         var initial = new TableMetadata
         {
             Identifier = id,
-            CatalogView = CatalogView.Full,
+            CatalogView = CatalogView.Granted,
             Table = new Table
             {
                 Id = Guid.NewGuid(),
@@ -68,7 +68,7 @@ public sealed class MultilingualCatalogGovernanceTests
         var updatedTexts = new TableMetadata
         {
             Identifier = id,
-            CatalogView = CatalogView.Full,
+            CatalogView = CatalogView.Granted,
             Table = new Table
             {
                 Id = initial.Table.Id,
@@ -100,7 +100,7 @@ public sealed class MultilingualCatalogGovernanceTests
         var updatedStructure = new TableMetadata
         {
             Identifier = id,
-            CatalogView = CatalogView.Full,
+            CatalogView = CatalogView.Granted,
             Table = updatedTexts.Table,
             Columns =
             [

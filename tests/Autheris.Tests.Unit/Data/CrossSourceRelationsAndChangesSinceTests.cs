@@ -84,7 +84,7 @@ public sealed class CrossSourceRelationsAndChangesSinceTests
             [
                 new TableColumn { ColumnName = "id", DataType = "int" },
                 new TableColumn { ColumnName = "name", DataType = "varchar" },
-                new TableColumn { ColumnName = "email", DataType = "varchar", IsSensitive = true },
+                new TableColumn { ColumnName = "email", DataType = "varchar" },
                 new TableColumn { ColumnName = "region", DataType = "varchar" },
                 new TableColumn { ColumnName = "tenant_id", DataType = "varchar" }
             ],
@@ -92,7 +92,7 @@ public sealed class CrossSourceRelationsAndChangesSinceTests
             {
                 ["email"] = new MaskingRule { RuleType = "REDACT", Replacement = "***@***" }
             }
-        };
+        }.WithPii("email");
     }
 
     // =========================================================================

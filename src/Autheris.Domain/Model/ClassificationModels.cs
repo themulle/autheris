@@ -457,9 +457,61 @@ public static class ClassificationMetadata
         if (metadata is not null && !string.IsNullOrWhiteSpace(name) &&
             TryGetEffectiveColumnClassifications(metadata, name, null, out var classifications))
             return classifications.Any(static cc => !string.Equals(cc.Code, ClassificationScopes.PublicCode, StringComparison.OrdinalIgnoreCase));
-        if (column?.IsSensitive == true) return true;
         return metadata is not null && !string.IsNullOrWhiteSpace(name) &&
                (metadata.ColumnMaskingRules.ContainsKey(name) || (column is not null && metadata.ColumnMaskingRules.ContainsKey(column.ColumnName)));
+    }
+
+    /// <summary>
+    /// Ingestion of a source-side sensitivity flag: the flagged columns receive the global PII classification. Additive only;
+    /// persisting it never removes a classification (<see cref="Merge"/> keeps every existing one).
+    /// </summary>
+    public static IReadOnlyDictionary<string, IReadOnlyList<ColumnClassification>> AssignPii(IEnumerable<TableColumn> flaggedColumns, string source)
+    {
+        var result = new Dictionary<string, IReadOnlyList<ColumnClassification>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var column in flaggedColumns)
+        {
+            result[column.ColumnName] =
+            [
+                new ColumnClassification
+                {
+                    TableColumnId = column.Id.ToString(),
+                    Code = ClassificationScopes.PiiCode,
+                    Source = source,
+                    AssignedBy = "system:ingestion"
+                }
+            ];
+        }
+
+        return result;
+    }
+
+    /// <summary>Union of two classification maps (per column, scope and code); a classification of <paramref name="first"/> wins on a duplicate.</summary>
+    public static IReadOnlyDictionary<string, IReadOnlyList<ColumnClassification>> Merge(
+        IReadOnlyDictionary<string, IReadOnlyList<ColumnClassification>> first,
+        IReadOnlyDictionary<string, IReadOnlyList<ColumnClassification>> second)
+    {
+        var merged = new Dictionary<string, List<ColumnClassification>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var source in new[] { first, second })
+        {
+            foreach (var (column, list) in source)
+            {
+                if (!merged.TryGetValue(column, out var target))
+                {
+                    target = [];
+                    merged[column] = target;
+                }
+
+                foreach (var item in list)
+                {
+                    if (!target.Exists(x => string.Equals(x.Scope, item.Scope, StringComparison.Ordinal) && string.Equals(x.Code, item.Code, StringComparison.Ordinal)))
+                    {
+                        target.Add(item);
+                    }
+                }
+            }
+        }
+
+        return merged.ToDictionary(static kv => kv.Key, static kv => (IReadOnlyList<ColumnClassification>)kv.Value, StringComparer.OrdinalIgnoreCase);
     }
 
     public static bool IsTableSensitive(TableMetadata? metadata) =>
