@@ -40,8 +40,10 @@ public sealed partial class DataProductService(
     IConsentEventOutbox? outbox = null,
     TimeProvider? timeProvider = null,
     ILogger<DataProductService>? logger = null,
-    IProductOwnershipSync? ownershipSync = null)
+    IProductOwnershipSync? ownershipSync = null,
+    IProductCatalogStore? catalogStore = null)
 {
+    private readonly IProductCatalogStore? _catalogStore = catalogStore;
     private readonly IProductOwnershipSync? _ownershipSync = ownershipSync;
     private readonly IDataProductRepository _products = products ?? throw new ArgumentNullException(nameof(products));
     private readonly ProductAuthorityService _authority = authority ?? throw new ArgumentNullException(nameof(authority));
@@ -128,6 +130,7 @@ public sealed partial class DataProductService(
         }
 
         var stored = outcome.Product ?? product;
+        await PersistCatalogAsync(stored, ct).ConfigureAwait(false);
         if (_ownershipSync is not null && (existing is null || existing.ProductOwner != stored.ProductOwner))
         {
             await _ownershipSync.SyncAsync(stored, ct).ConfigureAwait(false);
@@ -163,6 +166,7 @@ public sealed partial class DataProductService(
 
         var now = _time.GetUtcNow();
         var retired = await ReplaceAsync(product with { Status = DataProductStatus.Retired, UpdatedAt = now, Version = product.Version + 1 }, product.Version, ct).ConfigureAwait(false);
+        await PersistCatalogAsync(retired, ct).ConfigureAwait(false);
         if (_ownershipSync is not null)
         {
             await _ownershipSync.SyncAsync(retired, ct).ConfigureAwait(false);
@@ -190,6 +194,7 @@ public sealed partial class DataProductService(
 
         var now = _time.GetUtcNow();
         var moved = await ReplaceAsync(product with { ProductOwner = newOwner, UpdatedAt = now, Version = product.Version + 1 }, product.Version, ct).ConfigureAwait(false);
+        await PersistCatalogAsync(moved, ct).ConfigureAwait(false);
         if (_ownershipSync is not null)
         {
             await _ownershipSync.SyncAsync(moved, ct).ConfigureAwait(false);
@@ -222,6 +227,7 @@ public sealed partial class DataProductService(
         var updated = await ReplaceAsync(
             product with { Description = description ?? product.Description, Load = load is null ? product.Load : ValidatedLoad(product.Kind, load), UpdatedAt = now, Version = product.Version + 1 },
             product.Version, ct).ConfigureAwait(false);
+        await PersistCatalogAsync(updated, ct).ConfigureAwait(false);
         await AuditAsync(AuditEventTypes.ProductSettingsChanged, caller, updated, new { loadMode = updated.Load.Mode.ToString() }, now, ct).ConfigureAwait(false);
         return updated;
     }
@@ -260,6 +266,7 @@ public sealed partial class DataProductService(
         columns[index] = result.Column;
         var now = _time.GetUtcNow();
         var updated = await ReplaceAsync(product with { Columns = columns, UpdatedAt = now, Version = product.Version + 1 }, product.Version, ct).ConfigureAwait(false);
+        await PersistCatalogAsync(updated, ct).ConfigureAwait(false);
         await AuditAsync(
             AuditEventTypes.ProductColumnClassificationChanged, caller, updated,
             new { column = result.Column.Name, from = product.Columns[index].Class.ToString(), to = target.ToString(), reason = result.Column.DeclassificationReason }, now, ct).ConfigureAwait(false);

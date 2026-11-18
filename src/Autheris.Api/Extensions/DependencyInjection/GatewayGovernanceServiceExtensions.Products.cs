@@ -13,6 +13,12 @@ public static partial class GatewayGovernanceServiceExtensions
     private static void AddDataProducts(IServiceCollection services)
     {
         services.AddSingleton<IProductCatalogColumns>(sp => new ProductCatalogColumns(sp.GetRequiredService<ITableMetadataRepository>()));
+        // the owner link and the catalog object are persisted by the governance store; a host without it keeps products unpersisted (fail closed)
+        services.AddSingleton<IProductCatalogOwnerStore>(sp => new Autheris.Infrastructure.Persistence.Products.ProductCatalogOwnerStore(sp.GetRequiredService<Autheris.Infrastructure.Persistence.GovernanceRepository>()));
+        services.AddSingleton<IProductCatalogStore>(sp => new ProductCatalogStore(
+            sp.GetRequiredService<ITableMetadataRepository>(),
+            sp.GetRequiredService<IClassificationRepository>(),
+            sp.GetService<TimeProvider>()));
         services.AddSingleton(sp => new ProductAuthorityService(
             sp.GetRequiredService<IDataOwnershipRepository>(),
             sp.GetRequiredService<IDataProductRepository>(),
@@ -27,7 +33,8 @@ public static partial class GatewayGovernanceServiceExtensions
             sp.GetService<IConsentEventOutbox>(),
             sp.GetService<TimeProvider>(),
             sp.GetService<ILogger<DataProductService>>(),
-            sp.GetService<IProductCatalogOwnerStore>() is { } ownerStore ? new ProductOwnershipSync(ownerStore) : null));
+            sp.GetService<IProductCatalogOwnerStore>() is { } ownerStore ? new ProductOwnershipSync(ownerStore) : null,
+            sp.GetService<IProductCatalogStore>()));
         services.AddSingleton(sp => new DataSourceOwnerService(
             sp.GetRequiredService<IDataProductRepository>(),
             sp.GetRequiredService<IAuditWriter>(),

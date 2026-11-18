@@ -23,6 +23,10 @@ public static class ProductLoadingServiceExtensions
             sp.GetRequiredService<IAuditWriter>(),
             sp.GetService<TimeProvider>(),
             sp.GetService<ILogger<ProductLoadService>>()));
+        services.TryAddSingleton<IProductResultRouter>(sp => new ProductResultRouter(
+            sp.GetRequiredService<IDataProductRepository>(),
+            sp.GetRequiredService<ProductLoadService>(),
+            sp.GetRequiredService<Autheris.Domain.Caching.TableCache.ITableCacheCatalog>()));
         services.TryAddScoped<ProductScheduleJob>();
         services.AddHostedService<ProductScheduleService>();
         return services;

@@ -35,6 +35,28 @@ public sealed partial class DataProductService
     private const int MaxDefinitionLength = 100_000;
     private const int MaxBaseObjects = 64;
 
+    /// <summary>
+    /// Persists the catalog object of the product; a failure fails the operation (no product the catalog cannot decide). The write is
+    /// idempotent, so the same request repeated converges, and until then the decision point denies the product object (fail closed).
+    /// </summary>
+    private async Task PersistCatalogAsync(DataProduct product, CancellationToken ct)
+    {
+        if (_catalogStore is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _catalogStore.PersistAsync(product, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger?.LogError(ex, "The catalog object of a data product could not be persisted.");
+            throw new ProductException(ProductFailure.Conflict, ProductErrorCodes.CatalogPersistFailed);
+        }
+    }
+
     [GeneratedRegex(@"\A[a-z][a-z0-9_]{0,62}\z", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 100)]
     private static partial Regex NameRegex();
 

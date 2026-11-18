@@ -111,6 +111,26 @@ internal sealed class RecordingOwnerStore : IProductCatalogOwnerStore
     }
 }
 
+/// <summary>Records the projected catalog object of every persisted product; <see cref="Fail"/> makes the next persists throw.</summary>
+internal sealed class RecordingCatalogStore : IProductCatalogStore
+{
+    public Dictionary<TableIdentifier, TableMetadata> Objects { get; } = [];
+
+    public bool Fail { get; set; }
+
+    public Task PersistAsync(DataProduct product, CancellationToken ct = default)
+    {
+        if (Fail)
+        {
+            throw new InvalidOperationException("catalog down");
+        }
+
+        var projected = ProductCatalogProjector.Project(product, null, DateTimeOffset.UnixEpoch);
+        Objects[projected.Identifier] = projected;
+        return Task.CompletedTask;
+    }
+}
+
 /// <summary>Wires the real services over in-memory stores: owners per table, a stored catalog with PII flags and a recording audit/outbox.</summary>
 internal sealed class ProductHarness
 {
@@ -134,6 +154,8 @@ internal sealed class ProductHarness
     public Dictionary<string, HashSet<TableIdentifier>> Owned { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     public RecordingOwnerStore OwnerLinks { get; } = new();
+
+    public RecordingCatalogStore CatalogObjects { get; } = new();
 
     public ProductAuthorityService Authority { get; }
 
@@ -160,7 +182,7 @@ internal sealed class ProductHarness
         catalog.GetColumnsAsync(default, default, default).ReturnsForAnyArgs(call => Task.FromResult(Columns(call.ArgAt<TableIdentifier>(1))));
 
         Authority = new ProductAuthorityService(ownership, Store);
-        Service = new DataProductService(Store, Authority, catalog, FastSqlEngine.Default, ownership, Audit, Outbox, ownershipSync: new ProductOwnershipSync(OwnerLinks));
+        Service = new DataProductService(Store, Authority, catalog, FastSqlEngine.Default, ownership, Audit, Outbox, ownershipSync: new ProductOwnershipSync(OwnerLinks), catalogStore: CatalogObjects);
     }
 
     public static IReadOnlyList<CatalogColumnInfo>? Columns(TableIdentifier table) => table.TableName switch

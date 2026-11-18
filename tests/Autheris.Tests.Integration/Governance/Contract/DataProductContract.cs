@@ -177,6 +177,34 @@ public abstract class DataProductContract : GovernanceContractBase
         (await Products.GetProductAsync(Store.TenantA, "sales", "retiring"))!.Status.Should().Be(DataProductStatus.Retired);
         (await Products.CreateProductAsync(NewProduct(Store.TenantA, "retiring"), Revision(product))).Status.Should().Be(ProductWriteStatus.AlreadyExists);
     }
+
+    [RequiresContainerRuntimeFact]
+    [Trait("Category", "Security")]
+    public async Task Product_catalog_object_has_one_primary_owner_that_retire_removes()
+    {
+        if (!Store.IsAvailable) return;
+        var tenant = Store.TenantA;
+        var product = NewProduct(tenant, "owned_view");
+        var projected = ProductCatalogProjector.Project(product, null, T0);
+        var metadata = Store.Services.GetRequiredService<Autheris.Application.Common.Interfaces.ITableMetadataRepository>();
+        await metadata.UpsertTableMetadataAsync(projected);
+        var owners = new Autheris.Infrastructure.Persistence.Products.ProductCatalogOwnerStore(Store.Services.GetRequiredService<Autheris.Infrastructure.Persistence.GovernanceRepository>());
+        var ownership = Store.Services.GetRequiredService<Autheris.Application.Common.Interfaces.IDataOwnershipRepository>();
+        var objects = new[] { projected.Identifier };
+
+        await owners.SetOwnerAsync(tenant, projected.Identifier, Alice);
+        await owners.SetOwnerAsync(tenant, projected.Identifier, Bob);
+
+        (await ownership.GetOwnedOrDelegatedTablesAsync(Bob, objects, T0)).ToList().Should().Contain(projected.Identifier);
+        (await ownership.GetOwnedOrDelegatedTablesAsync(Alice, objects, T0)).ToList().Should().BeEmpty("the owner is replaced, never added");
+
+        await owners.SetOwnerAsync(tenant, projected.Identifier, null);
+        (await ownership.GetOwnedOrDelegatedTablesAsync(Bob, objects, T0)).ToList().Should().BeEmpty();
+
+        // another tenant's identity, or a table that is no product object, is refused before any write
+        var act = () => owners.SetOwnerAsync(Store.TenantB, projected.Identifier, Alice);
+        await act.Should().ThrowAsync<ArgumentException>();
+    }
 }
 
 [Collection(GovernancePostgresCollection.Name)]
