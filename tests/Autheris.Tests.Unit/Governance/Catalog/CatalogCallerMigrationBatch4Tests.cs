@@ -83,7 +83,7 @@ public sealed class CatalogCallerMigrationBatch4Tests
         using var service = new CatalogSearchWarmupService(
             catalog,
             engine,
-            Options.Create(new CatalogSearchOptions { Enabled = true, WarmupOnStartup = true, RefreshSeconds = 0 }),
+            Options.Create(new CatalogSearchOptions { WarmupOnStartup = true, RefreshSeconds = 0 }),
             NullLogger<CatalogSearchWarmupService>.Instance);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
