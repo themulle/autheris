@@ -54,20 +54,16 @@ Pushed feature branches on `origin` (state at the 2026-11-15 handover; the rollu
 
 ## 4. Next work, in dependency order
 
-State 2026-11-18 (see section 0a): steps 1 and most of 2 below are done; the remaining order is:
-1. **Top priority:** PR #817 (#813 search oracle via denied columns), then merge.
-2. **Non-DDL lanes (parallel, max 2 builds):**
-   - Lane A: `WP-SIMPL-41 PR 5` (request access with clear columns, retire the `DatasetVisibility` tier model, access-request rate limit), after #817.
-   - Lane B: one PR `#677 PR 4b` + `#678 PR 2` (last 6 `GetAllTablesAsync` callers; batched epoch read per request, compact search payload, cold-start unavailable), after #817.
-   - Lane C: one PR `W7-52-5A+5B` (branch `feat/simpl-52-pr5-classification-admin-clear`, in progress).
-   - Done: `WP-SIMPL-40 PR 40c/40d`, `W7-52-4B`, `#678 PR 1`, `WP-SIMPL-31 PR 2c`, `WP-SIMPL-44 PR 3`, `WP-SIMPL-50 PR B5/B6/C`, Dependabot #697/#699/#700.
-3. **Serialized DDL queue (one step at a time, starting at `0023`; prepared branches: `feat/simpl-54-golden-queries`, `feat/simpl-49-data-products-a` (A1 done, A2/A3 next); renumber at merge):**
-   - `0023`: `W7-52-6A` (`0023_drop_is_sensitive` — after remaining `IsSensitive` consumers finish)
-   - `0024`: `W7-52-6B` (`0024_drop_superseded_governance_columns`)
-   - `0025`: `W7-54-1..3` (`WP-SIMPL-54` golden queries from dbt meta `#580`)
-   - `0026`: `WP-SIMPL-41 PR 6` (`doc_links` + `discovery_hidden` on docs, after `WP-SIMPL-40 PR 40c/d` and `WP-SIMPL-41 PR 5`)
-   - `0027`: `W7-49-A1..A6` (`WP-SIMPL-49` data products Phase A)
+State at the end of the 2026-11-18 session. Merged since section 0a: #817 (#813 search oracle, closed), #819 (`WP-SIMPL-52 PR 5a+5b`), #822 (`#677 PR 4b` + `#678 PR 2`; compact search payload deferred, see the catalog-scale plan note), #825 (`WP-SIMPL-41 PR 5`, tier model retired). Remaining, in order:
+1. **DDL queue (strictly one at a time; the runner needs a gap-free step catalogue, so a later branch renumbers its step pair, both checksum goldens, `StepSqlLintTests` and its step tests):**
+   - PR #824 `WP-SIMPL-52 PR 6a+6b` (steps `0023_drop_is_sensitive`, `0024_drop_superseded_governance_columns`): reviewed (DENY mapping, PUBLIC backfill, consent classification-access backfill for decision parity, real-DB step test); a merge-main follow-up was in progress; merge when CI is green. All nodes must run the new build before 0023 applies.
+   - PR #821 `WP-SIMPL-54` (draft, reviewed twice, approved after fixes): renumber `0023_golden_queries` to the next free step after #824, undraft, merge.
+   - `WP-SIMPL-41 PR 6` (`doc_links` + `discovery_hidden` on docs): not started; needs a step number after #821.
+   - Branch `feat/simpl-49-data-products-a` (`WP-SIMPL-49`, step `0023_data_products`, renumber last): A1 + A2 done (model/store/roles/API, definer load, `products.t_<hash>.<schema>__<name>` identity, catalog persistence and ownership, stage-2 connector, schedule/idle-drop workers, re-projection). Open: A3 read procedures (decided defaults in the plan changelog: columns from `DeclaredOutputs`, non-empty `ProcedureResult` row policy fails closed for now, `ProductSchema` on `ProcedureDefinition`), A4 write procedures, A5 Git sync, A6 discovery/usage/parity rows; then Phase 3 review of the whole branch before the PR.
+2. **Follow-ups:** `WP-SIMPL-52 PR 6c` (remove the readers of `consents.role_id/role_name`, `consent_requests.itsm_ticket_id`, `access_profiles.masking_mode/target_tables`, `consent_row_filters.key_set_*`, then a DDL step) and the dropped `TABLE_CATALOG_SETTINGS.visibility` column (WP-41 PR 5 stopped reading it).
+3. **Other open WP-SIMPL work (code audit 2026-11-18 against `main`):** WP-10 footprint "after" file; WP-19 PR-C; WP-20 remaining `*SqlCore` files and LOC target; WP-23 test restructuring (6-8 PRs); WP-25 Dockerfile `FLAVOR` arg + Phase 3 sign-off; WP-27 Lakehouse models out of Domain; WP-28 (3) and WP-29 (4) modules; WP-31 SQLite comment hits; WP-32 configuration reduction (~6, not started); WP-35 budgets vs OD-37 (owner); WP-36 sub-packages 5a/5b, 6b/6c, 7 (5); WP-38 PR 4/5; WP-44/45 container and integration suites; WP-46 `IUnifiedPolicyDecisionPoint` removal; WP-48 PR 7 parity rows (id clash with WP-46 S20-S22, owner renumbering decision); WP-50 C8 (`CS0108;CA2012` NoWarn); small leftovers in WP-12, 39, 40, 42.
 4. **Blocked offline (missing in `/work/nuget`):** `#628b..d` (`Microsoft.ML.OnnxRuntime` & `Microsoft.ML.Tokenizers`).
+5. **Process notes:** the repository LOC budget (`GovernanceRepositoryLocBudgetTests`) is at its limit: put new SQL into operations classes under `src/Autheris.Infrastructure/Persistence/` (examples: `CatalogMetadataBatchReader`, `GoldenQueryStoreOperations`, `Products/*`). Long agent sessions exhaust context around 400-500k tokens: hand large WPs to fresh agents per slice. Review findings in this session repeatedly caught collateral test deletions and security regressions; keep Phase 5 on every PR.
 
 ## 5. Owner-only tasks (do not attempt)
 
