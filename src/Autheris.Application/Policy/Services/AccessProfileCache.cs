@@ -39,6 +39,10 @@ public sealed class AccessProfileCache : IAccessProfileCache, IDisposable
     // Local epoch cache: Tenant -> (Epoch, ExpiryTimestamp)
     private readonly ConcurrentDictionary<string, (long Epoch, DateTimeOffset ExpiresAt)> _epochCache = new(StringComparer.OrdinalIgnoreCase);
 
+    // Per node and tenant: the last epoch seen in the cluster store and a local generation. An epoch below the last seen one moves the
+    // generation on, which makes every L1 entry of the earlier run unreachable (details: private advisory).
+    private readonly ConcurrentDictionary<string, (long Last, long Generation)> _epochWatermark = new(StringComparer.OrdinalIgnoreCase);
+
     public AccessProfileCache(
         IAccessProfileRepository accessProfileRepository,
         IDistributedClusterStateProvider? clusterState,
@@ -150,6 +154,7 @@ public sealed class AccessProfileCache : IAccessProfileCache, IDisposable
         CancellationToken ct)
     {
         long? epoch = null;
+        long generation = 0;
         bool storeAvailable = false;
 
         if (_clusterState != null)
@@ -158,6 +163,7 @@ public sealed class AccessProfileCache : IAccessProfileCache, IDisposable
             {
                 epoch = await GetEpochAsync(tenantId, ct).ConfigureAwait(false);
                 storeAvailable = epoch.HasValue;
+                generation = _epochWatermark.TryGetValue(tenantId.Value, out var mark) ? mark.Generation : 0;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -169,7 +175,9 @@ public sealed class AccessProfileCache : IAccessProfileCache, IDisposable
         if (storeAvailable && epoch.HasValue)
         {
             // Epoch is readable: use epoch-keyed L1 cache entry
-            var cacheKey = $"auth:profile:{tenantId.Value}:{epoch.Value}:{keySuffix}";
+            var cacheKey = generation == 0
+                ? $"auth:profile:{tenantId.Value}:{epoch.Value}:{keySuffix}"
+                : $"auth:profile:{tenantId.Value}:g{generation}:{epoch.Value}:{keySuffix}";
             if (_memoryCache.TryGetValue(cacheKey, out var cachedObj) && cachedObj is IReadOnlyList<AccessProfile> cachedProfiles)
             {
                 return cachedProfiles;
@@ -242,6 +250,7 @@ public sealed class AccessProfileCache : IAccessProfileCache, IDisposable
             throw new InvalidOperationException($"Cluster state store returned null when incrementing access profile epoch for tenant '{tenantId.Value}'.");
         }
 
+        ObserveEpoch(tenantId.Value, newEpoch.Value);
         _epochCache[tenantId.Value] = (newEpoch.Value, _timeProvider.GetUtcNow().AddMilliseconds(GetEpochCacheTtlMs()));
 
         if (_eventBus != null)
@@ -285,8 +294,26 @@ public sealed class AccessProfileCache : IAccessProfileCache, IDisposable
             epoch = bumped ?? 1;
         }
 
+        ObserveEpoch(tenantId.Value, epoch);
         _epochCache[tenantId.Value] = (epoch, now.AddMilliseconds(GetEpochCacheTtlMs()));
         return epoch;
+    }
+
+    private void ObserveEpoch(string tenant, long epoch)
+    {
+        _epochWatermark.AddOrUpdate(
+            tenant,
+            _ => (epoch, 0),
+            (_, mark) =>
+            {
+                if (epoch >= mark.Last)
+                {
+                    return (epoch, mark.Generation);
+                }
+
+                _logger.LogWarning("Access profile epoch for tenant {Tenant} moved backwards ({Seen} < {Last}); flushing L1 entries of the previous run.", tenant, epoch, mark.Last);
+                return (epoch, mark.Generation + 1);
+            });
     }
 
     private int GetEpochCacheTtlMs()

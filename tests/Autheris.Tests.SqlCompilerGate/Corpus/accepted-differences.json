@@ -316,6 +316,64 @@
       "issue": "#91",
       "reviewer": "@themulle",
       "approval": "approved"
+    },
+    {
+      "dialects": [
+        "PostgreSql"
+      ],
+      "class": "ast-stricter",
+      "reason": "SecurityException",
+      "statements": [
+        "655397aa4f94",
+        "656aa92b4b6f",
+        "6e60ae760277",
+        "7c8935f76dfd",
+        "9e1b05ac03d8",
+        "c1d2a200b39b"
+      ],
+      "justification": "Intended tightening: a cast of a column is refused on a table with a tenant predicate or a row policy. Details: private advisory.",
+      "issue": "#847",
+      "reviewer": "@themulle",
+      "approval": "approved"
+    },
+    {
+      "dialects": [
+        "SqlServer"
+      ],
+      "class": "ast-stricter",
+      "reason": "SecurityException",
+      "statements": [
+        "473a0dcfdbca",
+        "655397aa4f94",
+        "656aa92b4b6f",
+        "6e60ae760277",
+        "7c8935f76dfd",
+        "9e1b05ac03d8",
+        "c1d2a200b39b"
+      ],
+      "justification": "Intended tightening: a cast of a column is refused on a table with a tenant predicate or a row policy. Details: private advisory.",
+      "issue": "#847",
+      "reviewer": "@themulle",
+      "approval": "approved"
+    },
+    {
+      "dialects": [
+        "Oracle"
+      ],
+      "class": "ast-stricter",
+      "reason": "SecurityException",
+      "statements": [
+        "655397aa4f94",
+        "656aa92b4b6f",
+        "6e60ae760277",
+        "7c8935f76dfd",
+        "9e1b05ac03d8",
+        "c1d2a200b39b"
+      ],
+      "justification": "Intended tightening: a cast of a column is refused on a table with a tenant predicate or a row policy. Details: private advisory.",
+      "issue": "#847",
+      "reviewer": "@themulle",
+      "approval": "approved"
     }
   ],
   "legacyDefects": [

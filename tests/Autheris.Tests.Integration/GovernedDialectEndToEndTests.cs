@@ -201,7 +201,7 @@ public abstract class GovernedDialectEndToEndBase : IDisposable
         if (!await EnsureHostAsync()) return;
         if (!Target!.ConversionFails) return;   // SQLite converts silently
 
-        var ex = await Should.ThrowAsync<GovernedSqlException>(() => QueryAsync($"SELECT CAST(region AS integer) FROM {Ref}", "acme"));
+        var ex = await Should.ThrowAsync<GovernedSqlException>(() => QueryAsync($"SELECT CAST('abc' AS integer) FROM {Ref}", "acme"));
 
         ex.Code.ShouldBeOneOf("SQL_DATA_ERROR", "SQL_PROVIDER_ERROR");
         ex.Message.ShouldBe(GovernedSqlErrorCodes.FixedMessage(ex.Code));   // no driver text, value or object name

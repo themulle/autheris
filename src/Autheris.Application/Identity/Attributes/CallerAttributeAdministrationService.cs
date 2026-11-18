@@ -47,6 +47,7 @@ public sealed class CallerAttributeAdministrationService
     private readonly IAuditLogRepository _audit;
     private readonly CallerAttributeOptions _options;
     private readonly TimeProvider _time;
+    private readonly ICallerAttributeCacheInvalidator? _invalidator;
     private readonly Dictionary<string, ICallerAttributeDefinitionValidator> _validators;
 
     public CallerAttributeAdministrationService(
@@ -55,8 +56,10 @@ public sealed class CallerAttributeAdministrationService
         IAuditLogRepository audit,
         IOptions<GatewayOptions> options,
         TimeProvider time,
-        IEnumerable<ICallerAttributeDefinitionValidator> validators)
+        IEnumerable<ICallerAttributeDefinitionValidator> validators,
+        ICallerAttributeCacheInvalidator? invalidator = null)
     {
+        _invalidator = invalidator;
         _repository = repository ?? throw new ArgumentNullException(nameof(repository));
         _registry = registry ?? throw new ArgumentNullException(nameof(registry));
         _audit = audit ?? throw new ArgumentNullException(nameof(audit));
@@ -81,6 +84,7 @@ public sealed class CallerAttributeAdministrationService
         var result = await _repository.SubmitDefinitionAsync(definition, actor.SubjectKey, _time.GetUtcNow(), ct).ConfigureAwait(false);
         EnsureApplied(result);
         _registry.Invalidate();
+        _invalidator?.InvalidateAttribute(definition.Tenant, definition.Name);
         await AuditAsync(definition.Tenant, actor, AuditEventTypes.CallerAttributeDefinitionPending, definition.Name,
             new { name = definition.Name, status = "PendingApproval", hash = definition.ComputeDefinitionHash() }, ct).ConfigureAwait(false);
     }
@@ -90,6 +94,7 @@ public sealed class CallerAttributeAdministrationService
         EnsureEnabled();
         EnsureApplied(await _repository.RequestDeletionAsync(tenant, name, actor.SubjectKey, _time.GetUtcNow(), ct).ConfigureAwait(false));
         _registry.Invalidate();
+        _invalidator?.InvalidateAttribute(tenant, name);
         await AuditAsync(tenant, actor, AuditEventTypes.CallerAttributeDefinitionPending, name, new { name, status = "DeletionPending" }, ct).ConfigureAwait(false);
     }
 
@@ -109,6 +114,7 @@ public sealed class CallerAttributeAdministrationService
         var result = await _repository.ApproveDefinitionAsync(tenant, name, actor.SubjectKey, expectedHash, _time.GetUtcNow(), ct).ConfigureAwait(false);
         EnsureApplied(result);
         _registry.Invalidate();
+        _invalidator?.InvalidateAttribute(tenant, name);
         await AuditAsync(tenant, actor, before.PendingDeletion ? AuditEventTypes.CallerAttributeDefinitionDeleted : AuditEventTypes.CallerAttributeDefinitionApplied, name,
             new { name, before = before.DefinitionHash, after = before.PendingDeletion ? null : expectedHash }, ct).ConfigureAwait(false);
     }
@@ -118,6 +124,7 @@ public sealed class CallerAttributeAdministrationService
         EnsureEnabled();
         EnsureApplied(await _repository.RejectDefinitionAsync(tenant, name, actor.SubjectKey, _time.GetUtcNow(), ct).ConfigureAwait(false));
         _registry.Invalidate();
+        _invalidator?.InvalidateAttribute(tenant, name);
         await AuditAsync(tenant, actor, AuditEventTypes.CallerAttributeDefinitionRejected, name, new { name }, ct).ConfigureAwait(false);
     }
 
@@ -145,6 +152,7 @@ public sealed class CallerAttributeAdministrationService
 
         EnsureApplied(await _repository.SubmitServiceSetAsync(tenant, applicationId, attributeName, values, actor.SubjectKey, _time.GetUtcNow(), ct).ConfigureAwait(false));
         _registry.Invalidate();
+        _invalidator?.InvalidateAttribute(tenant, attributeName);
         await AuditAsync(tenant, actor, AuditEventTypes.CallerAttributeServiceSetChanged, attributeName,
             new { attribute = attributeName, step = "submitted", count = values.Count }, ct).ConfigureAwait(false);
     }
@@ -156,6 +164,7 @@ public sealed class CallerAttributeAdministrationService
         RequireApproverRole(CallerAttributeProviderBinding.ServiceSet, actor);
         EnsureApplied(await _repository.ApproveServiceSetAsync(tenant, applicationId, attributeName, actor.SubjectKey, expectedHash, _time.GetUtcNow(), ct).ConfigureAwait(false));
         _registry.Invalidate();
+        _invalidator?.InvalidateAttribute(tenant, attributeName);
         await AuditAsync(tenant, actor, AuditEventTypes.CallerAttributeServiceSetChanged, attributeName,
             new { attribute = attributeName, step = "approved", hash = expectedHash }, ct).ConfigureAwait(false);
     }
@@ -165,6 +174,7 @@ public sealed class CallerAttributeAdministrationService
         EnsureEnabled();
         EnsureApplied(await _repository.RejectServiceSetAsync(tenant, applicationId, attributeName, actor.SubjectKey, _time.GetUtcNow(), ct).ConfigureAwait(false));
         _registry.Invalidate();
+        _invalidator?.InvalidateAttribute(tenant, attributeName);
         await AuditAsync(tenant, actor, AuditEventTypes.CallerAttributeServiceSetChanged, attributeName, new { attribute = attributeName, step = "rejected" }, ct).ConfigureAwait(false);
     }
 

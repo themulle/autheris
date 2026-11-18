@@ -135,7 +135,7 @@ public sealed class ConvertTimeZoneExecutionTests : IClassFixture<ConvertTimeZon
                 RowFilters = none,
                 Masks = none,
                 Catalog = new InMemoryTableCatalog(
-                    [new TableCatalogEntry(table, ImmutableArray.Create(new CatalogColumn("id", i), new CatalogColumn("tenantid", t), new CatalogColumn("ts", ts)), "tenantid", 1)], schema),
+                    [new TableCatalogEntry(table, ImmutableArray.Create(new CatalogColumn("id", i), new CatalogColumn("tenantid", t), new CatalogColumn("ts", ts)), null, 1)], schema),
                 Tenant = new TenantBinding("__autheris_tenant", "acme", SqlParameterType.String)
             }
         }, CancellationToken.None);
