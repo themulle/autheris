@@ -609,7 +609,7 @@ internal static class DatasetCatalogStore
                     var insertParams = new (string, object)[]
                     {
                         ("@tid", tableId.ToString()),
-                            ("@mgs", (object?)before.MinGroupSize ?? DBNull.Value),
+                        ("@mgs", (object?)before.MinGroupSize ?? DBNull.Value),
                         ("@np", (object?)before.NonPersonal ?? DBNull.Value),
                         ("@dh", dhValue),
                         ("@sd", sdValue),

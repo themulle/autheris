@@ -57,7 +57,9 @@ public sealed class DropLegacyGovernanceColumns0027Tests
         var srcRoot = Path.Combine(FindRepoRoot(), "src");
         var migrations = Path.DirectorySeparatorChar + "Migrations" + Path.DirectorySeparatorChar;
         var ticket = new Regex(@"itsm_ticket_id", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-        var visibilityColumn = new Regex(@"(table_id,\s*visibility\b|SET\s+visibility\b|""@vis"")", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        // Any non-comment line naming the bare word "visibility" in a file that touches the settings table (CatalogVisibility and
+        // similar identifiers do not match the word boundary).
+        var visibilityColumn = new Regex(@"^(?!\s*//).*\bvisibility\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Multiline);
 
         var offenders = new List<string>();
         foreach (var file in Directory.EnumerateFiles(srcRoot, "*.cs", SearchOption.AllDirectories))
