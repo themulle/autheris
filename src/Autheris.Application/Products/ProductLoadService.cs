@@ -43,6 +43,7 @@ public sealed class ProductLoadService(
     private readonly ConcurrentDictionary<TableIdentifier, DateTimeOffset> _lastAccess = new();
     private readonly ConcurrentDictionary<TableIdentifier, (TenantId Tenant, string Schema, string Name)> _tracked = new();
     private readonly ConcurrentDictionary<TableIdentifier, DateTimeOffset> _lastAttempt = new();
+    private readonly ConcurrentDictionary<TableIdentifier, bool> _deactivated = new();
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
 
     /// <summary>True when a load of the product was started within <paramref name="span"/> (successful or not): the schedule worker never retries faster than the interval.</summary>
@@ -291,6 +292,8 @@ public sealed class ProductLoadService(
             return;
         }
 
+        _deactivated.TryRemove(ProductSource.CacheKey(product.Tenant, product.Schema, product.Name), out _);
+
         try
         {
             await catalogStore.PersistAsync(product, LoadedAt(product), ct).ConfigureAwait(false);
@@ -298,6 +301,38 @@ public sealed class ProductLoadService(
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger?.LogWarning(ex, "The catalog object of data product {Product} could not be re-projected.", $"{product.Schema}.{product.Name}");
+        }
+    }
+
+    /// <summary>
+    /// Deactivates the catalog object of stale products whose last result aged past <c>MaxStaleness</c> without any load attempt (no status
+    /// transition would). Once per product until its next transition; a failure is retried on the next tick.
+    /// </summary>
+    public async Task ReprojectAgedAsync(IReadOnlyList<DataProduct> candidates, CancellationToken ct = default)
+    {
+        if (catalogStore is null)
+        {
+            return;
+        }
+
+        var now = _time.GetUtcNow();
+        foreach (var product in candidates)
+        {
+            var key = ProductSource.CacheKey(product.Tenant, product.Schema, product.Name);
+            if (product.Status != DataProductStatus.Stale || ProductFreshness.IsExposable(product, LoadedAt(product), now) || !_deactivated.TryAdd(key, true))
+            {
+                continue;
+            }
+
+            try
+            {
+                await catalogStore.PersistAsync(product, LoadedAt(product), ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _deactivated.TryRemove(key, out _);
+                logger?.LogWarning(ex, "The catalog object of data product {Product} could not be re-projected.", $"{product.Schema}.{product.Name}");
+            }
         }
     }
 

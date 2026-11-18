@@ -42,6 +42,7 @@ public sealed class ProductIdleDropJob(
         while (true)
         {
             var page = await products.ListOnDemandProductsAsync(after, PageSize, ct).ConfigureAwait(false);
+            await loader.ReprojectAgedAsync(page, ct).ConfigureAwait(false);
             dropped += await loader.DropIdleAsync(page, ct).ConfigureAwait(false);
             if (page.Count < PageSize)
             {

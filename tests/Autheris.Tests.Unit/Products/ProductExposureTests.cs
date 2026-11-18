@@ -104,4 +104,22 @@ public sealed class ProductExposureTests
         _catalog.TryGet(resultA.CacheKey, out _).ShouldBeFalse();
         _catalog.TryGet(resultB.CacheKey, out _).ShouldBeFalse();
     }
+
+    [Fact]
+    public async Task Aged_stale_product_is_deactivated_by_the_tick_without_a_load_attempt()
+    {
+        var product = await CreateAsync(new LoadSettings(LoadMode.Schedule, Interval: TimeSpan.FromHours(1), MaxStalenessMinutes: 120));
+        var loader = Loader();
+        await loader.LoadAsync(product);
+        _time.Advance(TimeSpan.FromMinutes(70));
+        _runner.Failure = _ => new InvalidOperationException("down");
+        var current = (await _h.Store.GetProductAsync(product.Tenant, "sales", "orders_view"))!;
+        await Should.ThrowAsync<ProductLoadException>(() => loader.LoadAsync(current));
+        Exposed(product).ShouldBeTrue();
+
+        _time.Advance(TimeSpan.FromMinutes(60));
+        await loader.ReprojectAgedAsync([(await _h.Store.GetProductAsync(product.Tenant, "sales", "orders_view"))!]);
+
+        Exposed(product).ShouldBeFalse();
+    }
 }

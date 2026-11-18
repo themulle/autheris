@@ -46,6 +46,7 @@ public sealed class ProductScheduleJob(
         while (true)
         {
             var page = await products.ListScheduledProductsAsync(after, PageSize, ct).ConfigureAwait(false);
+            await loader.ReprojectAgedAsync(page, ct).ConfigureAwait(false);
             foreach (var product in page)
             {
                 ct.ThrowIfCancellationRequested();
