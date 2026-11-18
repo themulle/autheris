@@ -659,6 +659,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
 
         try
         {
+            using var callScope = Autheris.Application.Procedures.Interfaces.ProcedureCallScope.Enter(Autheris.Application.Procedures.Interfaces.ProcedureCallTransport.Mcp);
             var result = await _procedureExecutionService.ExecuteAsync(procName, rawInputs, userPrincipal, tenantId, ct).ConfigureAwait(false);
 
             var rows = result.Rows;

@@ -1,3 +1,4 @@
+using Autheris.Modules.Lakehouse.Models;
 using Autheris.Application.Services;
 
 namespace Autheris.Extensions.Lakehouse.Services;

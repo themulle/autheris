@@ -23,7 +23,8 @@ internal static class DiscoveryProcedureResolver
 {
     public static List<EligibleDiscoveryProcedure> FilterEligible(
         IReadOnlyList<RegisteredProcedure> visibleProcedures,
-        IReadOnlyList<TableMetadata> visibleTables)
+        IReadOnlyList<TableMetadata> visibleTables,
+        TenantId? tenant = null)
     {
         if (visibleProcedures.Count == 0 || visibleTables.Count == 0)
         {
@@ -53,7 +54,10 @@ internal static class DiscoveryProcedureResolver
                 continue;
             }
 
-            var governedIds = proc.GovernedTables();
+            // a product procedure is decided on its product object, never on the tables its SQL touches
+            var governedIds = string.IsNullOrWhiteSpace(proc.Definition.ProductSchema)
+                ? proc.GovernedTables()
+                : ProductObjects(proc.Definition, tenant);
             if (governedIds is null || governedIds.Count == 0)
             {
                 continue;
@@ -80,6 +84,11 @@ internal static class DiscoveryProcedureResolver
 
         return eligible;
     }
+
+    private static IReadOnlyList<TableIdentifier>? ProductObjects(ProcedureDefinition definition, TenantId? tenant) =>
+        tenant is { Value: { Length: > 0 } } t
+            ? [Autheris.Application.Products.ProductSource.ObjectOf(t, definition.ProductSchema!.Trim().ToLowerInvariant(), definition.Name.ToLowerInvariant())]
+            : null;
 
     public static bool MatchesQuery(
         RegisteredProcedure proc,
