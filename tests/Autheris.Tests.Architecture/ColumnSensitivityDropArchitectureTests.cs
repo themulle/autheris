@@ -26,7 +26,7 @@ public sealed class ColumnSensitivityDropArchitectureTests
     private static readonly HashSet<string> NonSecretKeyColumns = new(StringComparer.OrdinalIgnoreCase)
     {
         "key_ref", "key_id", "key_fingerprint", "wrapped_key", "key_ordinal", "user_key", "asset_key", "normalized_key", "max_keys",
-        "hmac_secret_protected", "key_set_strategy", "key_set_duration_seconds", "key_set_max_keys", "key_set_max_age_seconds"
+        "hmac_secret_protected", "key_set_strategy", "key_set_duration_seconds", "key_set_max_keys", "key_set_max_age_seconds", "source_key"
     };
 
     private static string Root()

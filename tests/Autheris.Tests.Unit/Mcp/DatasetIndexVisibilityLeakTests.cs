@@ -81,7 +81,7 @@ public sealed class DatasetIndexVisibilityLeakTests
                 }
             ]));
         var golden = Substitute.For<IGoldenQueryService>();
-        golden.GetGoldenQueriesAsync(Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+        golden.GetGoldenQueriesAsync(Arg.Any<GoldenQueryReadContext>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
             .Returns(ValueTask.FromResult<IReadOnlyList<GoldenQuery>>([]));
         return new McpDatasetCatalog(metadata, consents, Substitute.For<IGatewayExecutionService>(), golden,
             Options.Create(new GatewayOptions()), Substitute.For<IGraphQlCatalogMap>(),

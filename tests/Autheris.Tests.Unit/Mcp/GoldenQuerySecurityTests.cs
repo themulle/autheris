@@ -383,6 +383,24 @@ public sealed class GoldenQuerySecurityTests
 
     [Fact]
     [Trait("Category", "Security")]
+    public async Task GetGoldenQueries_Output_CarriesUntrustedContentNotice()
+    {
+        var session = Session("MCP54N", "AiAgent");
+        AllowFinanceFor("MCP54N");
+        var guardrail = GuardrailWith(CappedService(5, "finance", "customers", hidden: 0, visible: 1));
+
+        var result = await CallGolden(guardrail, session);
+
+        using (var doc = JsonDocument.Parse(result.ContentJson))
+        {
+            doc.RootElement.GetProperty("contentNotice").GetString().ShouldBe(McpDocTools.UntrustedContentNotice);
+        }
+
+        ExtractQueryIds(result.ContentJson).ShouldBe(["visible-0"]);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
     public async Task Mcp15_MoreGoldensThanCap_VisibleOnesStillReturned()
     {
         var session = Session("MCP15A", "AiAgent");

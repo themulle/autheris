@@ -38,7 +38,7 @@ public sealed class McpDatasetCatalogTests
     public McpDatasetCatalogTests()
     {
         _metadata.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>([Table(Orders, "Customer orders"), Table(Payroll, "Salaries")]));
-        _golden.GetGoldenQueriesAsync(Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+        _golden.GetGoldenQueriesAsync(Arg.Any<GoldenQueryReadContext>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
             .Returns(ValueTask.FromResult<IReadOnlyList<GoldenQuery>>([]));
         // The caller has an Allow consent on orders that grants id and amount, but not customer_email.
         _consents.GetAllActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<IEnumerable<string>?>(), Arg.Any<DateTimeOffset?>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
@@ -290,7 +290,7 @@ public sealed class McpDatasetCatalogTests
     [Fact]
     public async Task DescribeDataset_ReturnsOnlyGrantedColumns_AndExamples()
     {
-        _golden.GetGoldenQueriesAsync("sales", "orders", Arg.Any<CancellationToken>())
+        _golden.GetGoldenQueriesAsync(Arg.Any<GoldenQueryReadContext>(), "sales", "orders", Arg.Any<CancellationToken>())
             .Returns(ValueTask.FromResult<IReadOnlyList<GoldenQuery>>(
                 [new GoldenQuery("g1", "sales", "orders", "Big orders", "Orders above 1000", "query { orders { id } }", "{\"min\":1000}")]));
 

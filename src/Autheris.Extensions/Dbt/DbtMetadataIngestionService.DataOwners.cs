@@ -10,6 +10,7 @@ using Autheris.Application.Audit;
 using Autheris.Application.Catalog.Semantic;
 using Autheris.Application.Governance;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Lineage;
 using Autheris.Application.Policy;
 using Autheris.Application.VirtualFilters;
@@ -51,10 +52,12 @@ public sealed partial class DbtMetadataIngestionService
         Autheris.Application.Catalog.ICatalogWriteScopeFactory? catalogWriteScopeFactory = null,
         IClassificationRepository? classificationRepository = null,
         Microsoft.Extensions.Options.IOptions<Autheris.Application.Catalog.Services.CatalogDiscoveryOptions>? discoveryOptions = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IGoldenQueryRepository? goldenQueryRepository = null)
         : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, gatewayOptions, sqlEndpointLoader, relationRepository,
             virtualFilterAdmin, tagImport, artifactStore, testTargetMap, auditWriter, logger)
     {
+        _goldenQueryRepository = goldenQueryRepository;
         _auditLog = auditLog ?? throw new ArgumentNullException(nameof(auditLog));
         _ownerAssignments = ownerAssignments;
         _ownerIdentityVerifier = ownerIdentityVerifier;

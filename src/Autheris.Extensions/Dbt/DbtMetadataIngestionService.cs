@@ -377,6 +377,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         }
 
         var pendingModelUpdates = new List<(TableMetadata Metadata, IReadOnlyList<string> Tags, IReadOnlyList<IReadOnlyDictionary<string, object?>>? SyntheticSamples)>();
+        var pendingGoldenQueries = new List<(TableMetadata Metadata, DbtGoldenQueryMeta Meta)>();
         foreach (var model in models)
         {
             ct.ThrowIfCancellationRequested();
@@ -667,6 +668,10 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                     if (!dryRun)
                     {
                         pendingModelUpdates.Add((updatedMetadata, model.Tags, model.SyntheticSamples));
+                        if (model.GoldenQueries is { } goldenMeta)
+                        {
+                            pendingGoldenQueries.Add((updatedMetadata, goldenMeta));
+                        }
                     }
                 }
             }
@@ -708,6 +713,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         }
 
         await FlushPendingModelUpdatesAsync(pendingModelUpdates, warnings, ct).ConfigureAwait(false);
+        await SyncGoldenQueriesAsync(pendingGoldenQueries, warnings, ct).ConfigureAwait(false);
 
         if (autoSyncFailed)
         {
