@@ -311,10 +311,11 @@ public sealed partial class AiDataGuardrailService
     }
 
     /// <summary>
-    /// Applies the per-call token budget (MCP-08): a catalog result above <c>Mcp.MaxTokensPerCall</c> is shortened by whole datasets, any other result is replaced by a truncation notice.
-    /// Shared by dataset tools and doc tools so no tool skips the budget.
+    /// Applies the per-call token budget (MCP-08): a catalog result above <c>Mcp.MaxTokensPerCall</c> is shortened by whole datasets or, for
+    /// <c>describe_dataset</c>, whole columns (issue #820; <paramref name="argumentsJson"/> carries the column cursor), any other result is
+    /// replaced by a truncation notice. Shared by dataset tools and doc tools so no tool skips the budget.
     /// </summary>
-    private string ApplyTokenBudget(string toolName, string json, out int estimatedTokens, out bool truncated)
+    private string ApplyTokenBudget(string toolName, string json, out int estimatedTokens, out bool truncated, string? argumentsJson = null)
     {
         int maxTokens = _options.Value.Mcp.MaxTokensPerCall > 0 ? _options.Value.Mcp.MaxTokensPerCall : 4096;
         estimatedTokens = Math.Max(1, json.Length / 4);
@@ -324,7 +325,7 @@ public sealed partial class AiDataGuardrailService
         {
             _logger.LogWarning("Tool result for '{ToolName}' ({EstimatedTokens} tokens) exceeded max token budget ({MaxTokens}). Truncating result.", toolName, estimatedTokens, maxTokens);
             int maxChars = maxTokens * 4;
-            if (json.Length > maxChars && McpBudgetShortening.TryShorten(toolName, json, maxChars, maxTokens, out var shortened))
+            if (json.Length > maxChars && McpBudgetShortening.TryShorten(toolName, json, argumentsJson, maxChars, maxTokens, out var shortened))
             {
                 json = shortened;
                 estimatedTokens = Math.Max(1, json.Length / 4);

@@ -228,7 +228,7 @@ public static class McpDatasetTools
                 "language": { "type": "string", "description": "Optional BCP 47 language tag (e.g. 'de', 'en') or Accept-Language range for localized dataset and column descriptions." },
                 "include": { "type": "array", "items": { "type": "string", "enum": ["columns", "keys", "indexes", "relations", "examples", "graphql", "access", "longDescription"] }, "description": "Optional sections to return; sections not listed are omitted (default: all, without column long descriptions). Add longDescription together with columns to receive the long description of each returned column." },
                 "columns": { "type": "array", "items": { "type": "string" }, "description": "Optional column names; only these columns are returned (columnTotal reports the full count)." },
-                "columnOffset": { "type": "integer", "minimum": 0, "description": "Number of columns to skip when paging through the columns (default 0)." },
+                "columnOffset": { "type": "integer", "minimum": 0, "description": "Number of columns to skip when paging through the columns (default 0). An answer shortened to the token budget names the next value in _meta.nextColumnOffset." },
                 "columnLimit": { "type": "integer", "minimum": 1, "maximum": 500, "description": "Maximum number of columns to return when paging through the columns." },
                 "relations": { "type": "string", "description": "Optional term; only GraphQL relations whose field or target dataset contains it are returned." }
               }
