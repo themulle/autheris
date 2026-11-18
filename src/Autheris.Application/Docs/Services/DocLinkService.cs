@@ -51,6 +51,7 @@ public sealed class DocLinkService : IDocLinkService
     private readonly IAuditWriter _audit;
     private readonly IOptions<GatewayOptions> _gatewayOptions;
     private readonly TimeProvider _time;
+    private readonly IDocSearchService? _search;
 
     public DocLinkService(
         ITableMetadataRepository metadata,
@@ -59,8 +60,10 @@ public sealed class DocLinkService : IDocLinkService
         IDocumentRepository documents,
         IAuditWriter audit,
         IOptions<GatewayOptions> gatewayOptions,
-        TimeProvider? time = null)
+        TimeProvider? time = null,
+        IDocSearchService? search = null)
     {
+        _search = search;
         _metadata = metadata ?? throw new ArgumentNullException(nameof(metadata));
         _owners = owners ?? throw new ArgumentNullException(nameof(owners));
         _links = links ?? throw new ArgumentNullException(nameof(links));
@@ -109,6 +112,7 @@ public sealed class DocLinkService : IDocLinkService
 
         var previous = await _documents.SetDiscoveryHiddenAsync(key, hidden, _time.GetUtcNow(), ct).ConfigureAwait(false);
         if (previous is null) return Fail(DocLinkOutcome.NotFound);
+        if (_search is not null) await _search.SetDocumentHiddenAsync(key, hidden, ct).ConfigureAwait(false);
         try
         {
             await _audit.RecordRequiredAsync(NewEntry(actor, AuditEventTypes.DocVisibilityChanged, new { appId, category = category.ToString(), docId, official = doc.TenantId is null, before = previous.Value, after = hidden }), ct).ConfigureAwait(false);
@@ -117,6 +121,7 @@ public sealed class DocLinkService : IDocLinkService
         {
             using var rollback = new CancellationTokenSource(RollbackTimeout);
             await _documents.SetDiscoveryHiddenAsync(key, previous.Value, _time.GetUtcNow(), rollback.Token).ConfigureAwait(false);
+            if (_search is not null) await _search.SetDocumentHiddenAsync(key, previous.Value, rollback.Token).ConfigureAwait(false);
             if (ex is OperationCanceledException) throw;
             return Fail(DocLinkOutcome.Unavailable, "Audit persistence failed; the change was rolled back.");
         }

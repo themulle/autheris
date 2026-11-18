@@ -417,6 +417,8 @@ Finally, run the full unit and architecture suites once.
 5. **PR 5, request access with clear columns (GraphQL, MCP; REST via WP-SIMPL-47), tier-model removal and access-request rate limit:** steps 9, 10 (requests) and 11 (estimated +220 / -400 src).
 6. **PR 6, linked documents and MCP untrusted-text handling:** step 13, after WP-SIMPL-40 PR 40c and PR 3 of this WP (estimated +390 src). If it exceeds 400, split it into 6a (links model, repository, routes, audit) and 6b (discovery/search/MCP exposure, `read_document`, untrusted-text wrapper).
 
+   PR 6b (2026-11-18): discovery objects, GraphQL, `describe_dataset`, `list_datasets` (`documentCount`), `search_docs` (`dataset`, `column`, `linkedTargets`), `read_document`, and the `discovery_hidden` read filters (index chunk flag, `DocAccessScope`) are in. Deferred to follow-ups: BM25 and semantic indexing of linked document text (the catalog search index is shared across tenants, tenant-scoped text needs a per-tenant design), `matchedInDocument`, the REST external catalog `documents` field, `links` on `deposit_documentation` and the PUT document route, and procedure link targets (kept at 404 because no procedure discoverability check is exposed for the link gate).
+
    PR 6a review notes (accepted, tracked here):
    - The `discovery_hidden` flag set by PR 6a has no read effect until PR 6b filters discovery, search and MCP reads by it.
    - The audit `before` payload of a link change lists the targets that were kept for a caller who cannot manage them.

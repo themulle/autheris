@@ -200,6 +200,7 @@ type DiscoveryColumn {
   classifications: [DiscoveryColumnClassification!]!
   clearRequestable: [String!]!
   longDescription: String
+  documents: [DiscoveryDocumentRef!]!
 }
 
 type DiscoveryColumnClassification {
@@ -216,6 +217,23 @@ type DiscoveryColumnStatistics {
   minValue: String
   maxValue: String
   topValues: [String!]
+}
+
+type DiscoveryApplicationRef {
+  appId: String!
+  name: String
+  documentCount: Int!
+}
+
+type DiscoveryDocumentRef {
+  appId: String!
+  category: String!
+  docId: String!
+  title: String!
+  summary: String
+  official: Boolean!
+  trust: String!
+  updatedAt: DateTime!
 }
 
 type DiscoveryOwner {
@@ -350,6 +368,9 @@ type TableMetadataDto {
   dataOwner: String
   delegates: [String!]
   language: String
+  documents: [DiscoveryDocumentRef!]!
+  applications: [DiscoveryApplicationRef!]!
+  documentsTruncated: Boolean!
 }
 
 type TableRecordPayload {

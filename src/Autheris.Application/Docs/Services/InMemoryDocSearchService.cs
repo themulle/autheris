@@ -65,6 +65,30 @@ public sealed class InMemoryDocSearchService : IDocSearchService
         return Task.CompletedTask;
     }
 
+    public Task SetDocumentHiddenAsync(DocKey key, bool hidden, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        var tenantKey = key.TenantId?.Trim() ?? string.Empty;
+        var categoryName = key.Category.ToString();
+
+        lock (_writeGate)
+        {
+            var index = _chunks;
+            foreach (var (existingKey, chunk) in index)
+            {
+                if (string.Equals(existingKey.TenantKey, tenantKey, StringComparison.Ordinal) &&
+                    string.Equals(existingKey.ChunkId.AppId, key.AppId, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(existingKey.ChunkId.Category, categoryName, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(existingKey.ChunkId.DocId, key.DocId, StringComparison.OrdinalIgnoreCase))
+                {
+                    index[existingKey] = chunk with { DiscoveryHidden = hidden };
+                }
+            }
+        }
+
+        return Task.CompletedTask;
+    }
+
     public Task RemoveTenantAsync(string tenantId, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(tenantId))

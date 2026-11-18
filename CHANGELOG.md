@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- Linked documents and applications appear on discovery objects (`documents`, `applications`, per-column `documents`; GraphQL and MCP `describe_dataset`, `documentCount` in `list_datasets`). A document is returned only when it is readable for the caller (official or same tenant), not hidden from discovery, and its target is discoverable. At most 10 documents per object and 5 per column, newest first.
+- MCP tool `read_document` returns one whole document as sanitised Markdown with `trust`, the untrusted-content notice for tenant text and a 64 KiB window (`truncated`, `nextOffset`). `search_docs` accepts `dataset` and `column` filters and lists the discoverable `linkedTargets` of each hit.
+
+### Changed
+- Documents hidden from discovery are no longer returned by `search_docs`, `list_doc_topics`, `list_applications` counts, `get_procedure`, `lookup_error_code` or the document search, list and read routes, except to their writer. A hidden or foreign document answers exactly like an unknown one.
+
 ## [1.8.5] - 2026-11-17
 
 ### Added

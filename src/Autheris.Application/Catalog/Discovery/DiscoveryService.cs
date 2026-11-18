@@ -57,6 +57,7 @@ public sealed class DiscoveryService : IDiscoveryService
     private readonly ILogger<DiscoveryService> _logger;
     private readonly IClassificationRepository? _classificationRepository;
     private readonly Autheris.Application.Procedures.Interfaces.IProcedureCatalog? _procedureCatalog;
+    private readonly Autheris.Application.Docs.Services.IDocLinkDiscoveryReader? _docLinks;
 
     private readonly Lock _memoLock = new();
     private readonly Dictionary<ScopeMemoKey, ScopedCatalog> _scopeMemo = [];
@@ -83,8 +84,10 @@ public sealed class DiscoveryService : IDiscoveryService
         TimeProvider? timeProvider = null,
         ILogger<DiscoveryService>? logger = null,
         IClassificationRepository? classificationRepository = null,
-        Autheris.Application.Procedures.Interfaces.IProcedureCatalog? procedureCatalog = null)
+        Autheris.Application.Procedures.Interfaces.IProcedureCatalog? procedureCatalog = null,
+        Autheris.Application.Docs.Services.IDocLinkDiscoveryReader? docLinks = null)
     {
+        _docLinks = docLinks;
         ArgumentNullException.ThrowIfNull(gatewayOptions);
         _metadataRepository = metadataRepository;
         _decisionPoint = decisionPoint;
@@ -649,6 +652,8 @@ public sealed class DiscoveryService : IDiscoveryService
             ? ClassificationAccessResolver.BuiltInCatalog(caller.Tenant.Value).Definitions
             : ClassificationHierarchyValidator.ResolveEffective(await _classificationRepository.GetClassificationsAsync(caller.Tenant.Value, includeInactive: true, ct).ConfigureAwait(false), caller.Tenant.Value);
 
+        var docLinks = await LoadDocumentLinksAsync(caller.Tenant.Value, uncachedTables, ct).ConfigureAwait(false);
+
         for (var i = 0; i < uncached.Count; i++)
         {
             var (targetIdx, table) = uncached[i];
@@ -671,6 +676,11 @@ public sealed class DiscoveryService : IDiscoveryService
                 table, decision, owners, isPending, isExpired, artifacts, language,
                 isHidden: table.Table.DiscoveryHidden, insertDecisions[i], updateDecisions[i], deleteDecisions[i], defs, repoColClasses, caller.Tenant.Value);
 
+            if (docLinks.TryGetValue(table.Identifier, out var linkView))
+            {
+                mapped = linkView.ApplyTo(mapped);
+            }
+
             results[targetIdx] = mapped;
             lock (_memoLock)
             {
@@ -679,6 +689,26 @@ public sealed class DiscoveryService : IDiscoveryService
         }
 
         return results.Where(static r => r is not null).Select(static r => r!).ToList();
+    }
+
+    /// <summary>Linked documents are optional enrichment: a failure leaves the objects without documents (fail closed).</summary>
+    private async Task<IReadOnlyDictionary<TableIdentifier, Autheris.Application.Docs.Services.DocLinkView>> LoadDocumentLinksAsync(
+        string tenantId, IReadOnlyList<TableMetadata> tables, CancellationToken ct)
+    {
+        if (_docLinks is null)
+        {
+            return new Dictionary<TableIdentifier, Autheris.Application.Docs.Services.DocLinkView>();
+        }
+
+        try
+        {
+            return await _docLinks.ForTablesAsync(tenantId, tables, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            RecordFailure(ex, "Reading linked documents failed; discovery objects are returned without documents.");
+            return new Dictionary<TableIdentifier, Autheris.Application.Docs.Services.DocLinkView>();
+        }
     }
 
     private async Task<IReadOnlyList<DiscoveryObject>> ResolveProceduresBatchAsync(
