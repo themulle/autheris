@@ -60,10 +60,10 @@ public sealed class Issue270GovernanceSecurityVerificationTests : IDisposable
         {
             Identifier = validTableId,
             Table = new Table { IsActive = true, SourceType = "PostgreSql", DataSourceType = DataSourceType.Sql, DisplayName = "Customers" },
-            Columns = [new TableColumn { ColumnName = "ssn", DataType = "bigint", IsSensitive = true }],
+            Columns = [new TableColumn { ColumnName = "ssn", DataType = "bigint" }],
             PrimaryKeyColumns = ["ssn"],
             ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
-        };
+        }.WithPii("ssn");
         await _repository.UpsertTableMetadataAsync(meta);
 
         // 2. Corrupt the masking rule directly in the database (e.g. empty rule_type)
@@ -79,9 +79,9 @@ public sealed class Issue270GovernanceSecurityVerificationTests : IDisposable
             var colId = colIdObj!.ToString();
 
             using var insertCorruptCmd = rawConn.CreateCommand();
-            insertCorruptCmd.CommandText = @"INSERT INTO COLUMN_MASKING_RULES (id, table_column_id, rule_type, pattern_or_format, replacement, hmac_key_id)
-                                            VALUES (@id, @colId, '', NULL, NULL, NULL)";
-            insertCorruptCmd.Parameters.AddWithValue("@id", Guid.NewGuid().ToString());
+            insertCorruptCmd.CommandText = @"INSERT INTO COLUMN_MASK_OVERRIDES (id, scope, table_column_id, code, mask_function, updated_by, updated_at)
+                                            VALUES (@id, '*', @colId, NULL, '', 'test', CURRENT_TIMESTAMP)";
+            insertCorruptCmd.Parameters.AddWithValue("@id", Guid.NewGuid());
             insertCorruptCmd.Parameters.AddWithValue("@colId", colId!);
             await insertCorruptCmd.ExecuteNonQueryAsync();
         }
@@ -329,7 +329,7 @@ public sealed class Issue270GovernanceSecurityVerificationTests : IDisposable
             // No dynamic table or column interpolation in catalog batch queries
             content.ShouldNotContain("WHERE t.table_name = '\" +");
             content.ShouldNotContain("WHERE t.table_name = $\"");
-            content.ShouldNotContain("LEFT JOIN COLUMN_MASKING_RULES m ON c.id = $\"");
+            content.ShouldNotContain("LEFT JOIN COLUMN_MASK_OVERRIDES m ON c.id = $\"");
         }
     }
 

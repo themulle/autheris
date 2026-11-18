@@ -293,9 +293,9 @@ public class ProcedureEndpointTests
             Columns =
             [
                 new TableColumn { ColumnName = "order_id" },
-                new TableColumn { ColumnName = "salary", IsSensitive = true }
+                new TableColumn { ColumnName = "salary" }
             ]
-        };
+        }.WithPii("salary");
 
         f.Tables.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(meta);
         f.Consents.GetActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())

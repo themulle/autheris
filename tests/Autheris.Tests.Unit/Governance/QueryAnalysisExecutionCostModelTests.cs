@@ -87,7 +87,8 @@ public sealed class QueryAnalysisExecutionCostModelTests
                 DisplayName = name,
                 Visibility = DatasetVisibility.Full
             },
-            Columns = cols.Select(c => new TableColumn { ColumnName = c.Name, DataType = c.Type, IsSensitive = c.IsSensitive }).ToList(),
+            Columns = cols.Select(c => new TableColumn { ColumnName = c.Name, DataType = c.Type }).ToList(),
+            ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor(cols.Where(c => c.IsSensitive).Select(c => c.Name).ToArray()),
             ColumnMaskingRules = maskingRules ?? new Dictionary<string, MaskingRule>(),
             PrimaryKeyColumns = ["id"]
         };

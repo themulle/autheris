@@ -53,11 +53,7 @@ public sealed class Issue143RestrictedScopeParityTests : IClassFixture<Issue143R
             var air1 = (await repo.GetTableMetadataAsync(Air1Id))!;
             await repo.UpsertTableMetadataAsync(air1 with
             {
-                Columns = air1.Columns
-                    .Select(c => c.ColumnName == "value"
-                        ? new TableColumn { Id = c.Id, TableId = c.TableId, ColumnName = c.ColumnName, DataType = c.DataType, IsSensitive = true, Meta = c.Meta }
-                        : c)
-                    .ToList()
+                ColumnClassifications = ClassificationMetadata.Merge(air1.ColumnClassifications, TableMetadataClassificationTestExtensions.PiiFor("value"))
             });
         }
     }

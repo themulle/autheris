@@ -74,8 +74,6 @@ public sealed class SqlServerConsentQueryContractTests : ConsentQueryContractTes
     [InlineData("ix_consents_tenant_role", "CONSENTS")]
     [InlineData("ix_consent_column_rules_consent", "CONSENT_COLUMN_RULES")]
     [InlineData("ix_consent_row_filters_consent", "CONSENT_ROW_FILTERS")]
-    [InlineData("ix_column_masking_rules_column", "COLUMN_MASKING_RULES")]
-    [InlineData("ix_role_members_member", "ROLE_MEMBERS")]
     [InlineData("ix_table_owners_owner", "TABLE_OWNERS")]
     [InlineData("ix_tables_natural_ci", "TABLES")]
     public async Task SEC_SC_02_Baseline_CreatesIndex(string index, string table)

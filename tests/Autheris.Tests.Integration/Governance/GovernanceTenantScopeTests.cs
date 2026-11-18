@@ -75,8 +75,6 @@ public sealed class GovernanceTenantScopeTests
     {
         GovernanceGlobalTables.IsGlobal("tables").ShouldBeTrue();
         GovernanceGlobalTables.IsGlobal("TABLES").ShouldBeTrue();
-        GovernanceGlobalTables.IsGlobal("roles").ShouldBeTrue();
-        GovernanceGlobalTables.IsGlobal("ROLES").ShouldBeTrue();
         GovernanceGlobalTables.IsGlobal("consents").ShouldBeFalse();
         GovernanceGlobalTables.IsGlobal("CONSENTS").ShouldBeFalse();
     }
@@ -87,8 +85,8 @@ public sealed class GovernanceTenantScopeTests
         // SEC-SIMPL-22: pins the literal set; adding a table is a deliberate, reviewed change.
         GovernanceGlobalTables.All.OrderBy(t => t, StringComparer.Ordinal).ShouldBe(
         [
-            "AUDIT_LOG_TRUNCATE_GUARD", "CATALOG_STATE", "COLUMN_MASKING_RULES", "DATA_OWNERS", "DATA_OWNER_DELEGATIONS",
-            "DOC_OFFICIAL_DOCUMENTS", "POLICY_EPOCHS", "ROLES", "ROLE_MEMBERS", "TABLES", "TABLE_CATALOG_SETTINGS", "TABLE_COLUMNS", "TABLE_INDEXES",
+            "AUDIT_LOG_TRUNCATE_GUARD", "CATALOG_STATE", "DATA_OWNERS", "DATA_OWNER_DELEGATIONS",
+            "DOC_OFFICIAL_DOCUMENTS", "POLICY_EPOCHS", "TABLES", "TABLE_CATALOG_SETTINGS", "TABLE_COLUMNS", "TABLE_INDEXES",
             "TABLE_INDEX_COLUMNS", "TABLE_OWNERS", "TABLE_PRIMARY_KEY_COLUMNS", "TABLE_RELATIONS", "TABLE_RELATION_KEYS",
             "TABLE_ROW_FILTER_STRATEGIES", "TABLE_TAGS", "TRUSTED_DOCUMENT_APPS", "TRUSTED_DOCUMENT_APP_ORIGINS",
             "TRUSTED_DOCUMENT_APP_VERSIONS", "TRUSTED_DOCUMENT_GENERATION", "TRUSTED_DOCUMENT_HASHES",

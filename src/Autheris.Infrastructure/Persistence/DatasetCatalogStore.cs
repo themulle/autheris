@@ -181,7 +181,6 @@ internal static class DatasetCatalogStore
         DataType = c.DataType,
         Collation = c.Collation,
         LengthSemantics = c.LengthSemantics,
-        IsSensitive = c.IsSensitive,
         WriteProtected = c.WriteProtected,
         DiscoveryHidden = hidden,
         Description = c.Description,

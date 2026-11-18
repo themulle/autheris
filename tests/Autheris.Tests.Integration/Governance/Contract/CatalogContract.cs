@@ -46,22 +46,19 @@ public abstract class CatalogContract : GovernanceContractBase
                 {
                     Id = Guid.NewGuid(),
                     ColumnName = "id",
-                    DataType = "bigint",
-                    IsSensitive = false
+                    DataType = "bigint"
                 },
                 new TableColumn
                 {
                     Id = Guid.NewGuid(),
                     ColumnName = "tenant_code",
-                    DataType = "varchar",
-                    IsSensitive = false
+                    DataType = "varchar"
                 },
                 new TableColumn
                 {
                     Id = emailColId,
                     ColumnName = "email",
-                    DataType = "varchar",
-                    IsSensitive = true
+                    DataType = "varchar"
                 }
             ],
             ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
@@ -77,7 +74,7 @@ public abstract class CatalogContract : GovernanceContractBase
             },
             PrimaryKeyColumns = primaryKey ?? ["id"],
             Indexes = indexes ?? []
-        };
+        }.WithPii("email");
     }
 
     [RequiresContainerRuntimeFact]

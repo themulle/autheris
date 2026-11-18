@@ -67,9 +67,10 @@ public sealed class ExplainSubtreeEligibilityTests
             Columns = columns.Select(c => new TableColumn
             {
                 ColumnName = c,
-                DataType = "varchar",
-                IsSensitive = isSensitiveColumn && string.Equals(c, sensitiveColName, StringComparison.OrdinalIgnoreCase)
+                DataType = "varchar"
             }).ToList(),
+            ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor(
+                columns.Where(c => isSensitiveColumn && string.Equals(c, sensitiveColName, StringComparison.OrdinalIgnoreCase)).ToArray()),
             ColumnMaskingRules = masking ?? new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
         };
     }

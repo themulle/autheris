@@ -120,10 +120,10 @@ public sealed class DatasetCatalogPrivacyEditTests
             Identifier = Orders,
             Columns =
             [
-                new TableColumn { ColumnName = "secret", IsSensitive = true }
+                new TableColumn { ColumnName = "secret" }
             ],
             Table = new Table { Id = Guid.NewGuid(), Sensitivity = "NORMAL", TableName = "orders", SchemaName = "dbo", SourceName = "sales", SourceType = "sql" }
-        };
+        }.WithPii("secret");
         _tables.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>()).Returns(meta);
 
         var svc = Create();

@@ -151,47 +151,41 @@ internal static class CatalogRowHydrator
         tableId = Guid.Parse(reader.GetString(o + 1));
         var colName = reader.GetString(o + 2);
         var dataType = reader.GetString(o + 3);
-        var isSensitive = reader.GetInt32(o + 4) == 1;
-
         maskingRule = null;
-        if (!reader.IsDBNull(o + 5))
+        if (!reader.IsDBNull(o + 4))
         {
-            var ruleType = reader.GetString(o + 6);
-            if (string.IsNullOrWhiteSpace(ruleType))
+            var functionCode = reader.GetString(o + 4);
+            if (string.IsNullOrWhiteSpace(functionCode))
             {
-                throw new FormatException("Corrupted masking rule: rule_type is empty");
+                throw new FormatException("Corrupted column mask override: mask_function is empty");
             }
 
-            maskingRule = new MaskingRule
-            {
-                Id = Guid.Parse(reader.GetString(o + 5)),
-                TableColumnId = colId,
-                RuleType = ruleType,
-                PatternOrFormat = reader.IsDBNull(o + 7) ? null : reader.GetString(o + 7),
-                Replacement = reader.IsDBNull(o + 8) ? null : reader.GetString(o + 8),
-                HmacKeyId = reader.IsDBNull(o + 9) ? null : reader.GetString(o + 9)
-            };
+            maskingRule = MaskingRuleOverrideMapper.ToRule(
+                functionCode,
+                reader.IsDBNull(o + 5) ? null : reader.GetString(o + 5),
+                reader.IsDBNull(o + 6) ? null : reader.GetString(o + 6),
+                colId);
         }
 
-        var desc = reader.IsDBNull(o + 10) ? null : reader.GetString(o + 10);
-        var longDesc = reader.IsDBNull(o + 11) ? null : reader.GetString(o + 11);
-        var metaJson = reader.IsDBNull(o + 12) ? null : reader.GetString(o + 12);
-        var docSource = reader.IsDBNull(o + 13) ? null : reader.GetString(o + 13);
-        var colDisplayName = reader.IsDBNull(o + 14) ? null : reader.GetString(o + 14);
-        var colTextsJson = reader.IsDBNull(o + 15) ? null : reader.GetString(o + 15);
+        var desc = reader.IsDBNull(o + 7) ? null : reader.GetString(o + 7);
+        var longDesc = reader.IsDBNull(o + 8) ? null : reader.GetString(o + 8);
+        var metaJson = reader.IsDBNull(o + 9) ? null : reader.GetString(o + 9);
+        var docSource = reader.IsDBNull(o + 10) ? null : reader.GetString(o + 10);
+        var colDisplayName = reader.IsDBNull(o + 11) ? null : reader.GetString(o + 11);
+        var colTextsJson = reader.IsDBNull(o + 12) ? null : reader.GetString(o + 12);
         var colTexts = CatalogLocalizationPersistence.ParseLocalizedTexts(colTextsJson, colId, logger);
         var metaDict = ParseColumnMetaJson(metaJson);
 
         string? collation = null;
-        if (reader.FieldCount > o + 16 && !reader.IsDBNull(o + 16))
+        if (reader.FieldCount > o + 13 && !reader.IsDBNull(o + 13))
         {
-            collation = reader.GetString(o + 16);
+            collation = reader.GetString(o + 13);
         }
 
         string? lengthSemantics = null;
-        if (reader.FieldCount > o + 17 && !reader.IsDBNull(o + 17))
+        if (reader.FieldCount > o + 14 && !reader.IsDBNull(o + 14))
         {
-            lengthSemantics = reader.GetString(o + 17);
+            lengthSemantics = reader.GetString(o + 14);
         }
 
         return new TableColumn
@@ -201,7 +195,6 @@ internal static class CatalogRowHydrator
             ColumnName = colName,
             DisplayName = colDisplayName,
             DataType = dataType,
-            IsSensitive = isSensitive,
             Collation = collation,
             LengthSemantics = lengthSemantics,
             Description = desc,
@@ -691,13 +684,176 @@ internal static class CatalogRowHydrator
         }
     }
 
+    internal const string InsertGlobalClassificationIfAbsentSql = @"INSERT INTO COLUMN_CLASSIFICATIONS (scope, table_column_id, code, source, assigned_by, assigned_at)
+SELECT '*', @colId, @code, @source, @assignedBy, CURRENT_TIMESTAMP
+WHERE NOT EXISTS (SELECT 1 FROM COLUMN_CLASSIFICATIONS WHERE scope = '*' AND table_column_id = @colId AND code = @code)";
+
+    internal const string DeleteGlobalMaskOverrideSql = "DELETE FROM COLUMN_MASK_OVERRIDES WHERE scope = '*' AND table_column_id = @colId AND code IS NULL";
+
+    internal const string InsertGlobalMaskOverrideSql = @"INSERT INTO COLUMN_MASK_OVERRIDES (id, scope, table_column_id, code, mask_function, params_json, key_ref, catalog_text, updated_by, updated_at)
+VALUES (@id, '*', @colId, NULL, @maskFunction, @paramsJson, @keyRef, 'VISIBLE', 'system:catalog-upsert', CURRENT_TIMESTAMP)";
+
+    internal const string SelectGlobalClassificationsByTableSql = @"SELECT c.table_id, c.column_name, cc.table_column_id, cc.code, cc.source, cc.assigned_by, cc.assigned_at
+FROM COLUMN_CLASSIFICATIONS cc INNER JOIN TABLE_COLUMNS c ON c.id = cc.table_column_id
+WHERE cc.scope = '*' AND c.table_id = @tableId
+ORDER BY c.column_name, cc.code";
+
+    internal const string SelectGlobalClassificationsByTableIdsPrefix = @"SELECT c.table_id, c.column_name, cc.table_column_id, cc.code, cc.source, cc.assigned_by, cc.assigned_at
+FROM COLUMN_CLASSIFICATIONS cc INNER JOIN TABLE_COLUMNS c ON c.id = cc.table_column_id
+WHERE cc.scope = '*' AND c.table_id IN (";
+
+    internal const string SelectAllGlobalClassificationsSql = @"SELECT c.table_id, c.column_name, cc.table_column_id, cc.code, cc.source, cc.assigned_by, cc.assigned_at
+FROM COLUMN_CLASSIFICATIONS cc INNER JOIN TABLE_COLUMNS c ON c.id = cc.table_column_id
+WHERE cc.scope = '*'
+ORDER BY c.table_id, c.column_name, cc.code";
+
+    /// <summary>Global classification rows keyed by table id and column name. Sensitivity of a column is derived from these rows only.</summary>
+    internal static async Task<Dictionary<Guid, Dictionary<string, IReadOnlyList<ColumnClassification>>>> ReadGlobalClassificationsAsync(
+        DbCommand cmd,
+        CancellationToken ct)
+    {
+        var byTable = new Dictionary<Guid, Dictionary<string, List<ColumnClassification>>>();
+        await using (var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false))
+        {
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                var tableId = Guid.Parse(reader.GetString(0));
+                var columnName = reader.GetString(1);
+                if (!byTable.TryGetValue(tableId, out var columns))
+                {
+                    columns = new Dictionary<string, List<ColumnClassification>>(StringComparer.OrdinalIgnoreCase);
+                    byTable[tableId] = columns;
+                }
+
+                if (!columns.TryGetValue(columnName, out var list))
+                {
+                    list = [];
+                    columns[columnName] = list;
+                }
+
+                list.Add(new ColumnClassification
+                {
+                    Scope = ClassificationScopes.Global,
+                    TableColumnId = reader.GetString(2),
+                    Code = reader.GetString(3),
+                    Source = reader.GetString(4),
+                    AssignedBy = reader.GetString(5),
+                    AssignedAt = reader.GetFieldValue<DateTimeOffset>(6)
+                });
+            }
+        }
+
+        return byTable.ToDictionary(
+            static t => t.Key,
+            static t => t.Value.ToDictionary(static c => c.Key, static c => (IReadOnlyList<ColumnClassification>)c.Value, StringComparer.OrdinalIgnoreCase));
+    }
+
+    internal static void SeedSensitiveColumn(DbConnection conn, DbTransaction trans, string colId, string constant)
+    {
+        using (var cc = conn.CreateCommand())
+        {
+            cc.Transaction = trans;
+            cc.CommandText = InsertGlobalClassificationIfAbsentSql;
+            cc.AddBound("@colId", colId);
+            cc.AddBound("@code", ClassificationScopes.PiiCode);
+            cc.AddBound("@source", "SEED");
+            cc.AddBound("@assignedBy", "system:seed");
+            cc.ExecuteNonQuery();
+        }
+
+        using var mask = conn.CreateCommand();
+        mask.Transaction = trans;
+        mask.CommandText = @"INSERT INTO COLUMN_MASK_OVERRIDES (id, scope, table_column_id, code, mask_function, params_json, key_ref, catalog_text, updated_by, updated_at)
+                             SELECT @id, '*', @cid, NULL, 'TYPE_SAFE_REDACT', @params, NULL, 'VISIBLE', 'system:seed', CURRENT_TIMESTAMP
+                             WHERE NOT EXISTS (SELECT 1 FROM COLUMN_MASK_OVERRIDES WHERE scope = '*' AND table_column_id = @cid AND code IS NULL);";
+        mask.AddBound("@id", Guid.NewGuid());
+        mask.AddBound("@cid", colId);
+        mask.AddBound("@params", System.Text.Json.JsonSerializer.Serialize(new { constant }));
+        mask.ExecuteNonQuery();
+    }
+
+    internal static async Task<Dictionary<string, IReadOnlyList<ColumnClassification>>> ReadTableClassificationsAsync(DbConnection conn, Guid tableId, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = SelectGlobalClassificationsByTableSql;
+        cmd.AddBound("@tableId", tableId.ToString());
+        return ClassificationsOf(await ReadGlobalClassificationsAsync(cmd, ct).ConfigureAwait(false), tableId);
+    }
+
+    internal static async Task<Dictionary<Guid, Dictionary<string, IReadOnlyList<ColumnClassification>>>> ReadAllClassificationsAsync(DbConnection conn, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = SelectAllGlobalClassificationsSql;
+        return await ReadGlobalClassificationsAsync(cmd, ct).ConfigureAwait(false);
+    }
+
+    internal static Dictionary<string, IReadOnlyList<ColumnClassification>> ClassificationsOf(
+        Dictionary<Guid, Dictionary<string, IReadOnlyList<ColumnClassification>>> byTable, Guid tableId) =>
+        byTable.TryGetValue(tableId, out var own) ? own : new Dictionary<string, IReadOnlyList<ColumnClassification>>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Additive only: an incoming global classification is stored when absent; an upsert never removes a classification.</summary>
+    private static async Task<bool> WriteGlobalClassificationsAsync(
+        DbConnection conn, DbTransaction tx, Guid colId, TableMetadata metadata, string columnName, CancellationToken ct)
+    {
+        if (!metadata.ColumnClassifications.TryGetValue(columnName, out var incoming))
+        {
+            return false;
+        }
+
+        var added = false;
+        foreach (var classification in incoming.Where(static c => ClassificationScopes.IsGlobal(c.Scope)))
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.Transaction = tx;
+            cmd.CommandText = InsertGlobalClassificationIfAbsentSql;
+            cmd.AddBound("@colId", colId.ToString());
+            cmd.AddBound("@code", classification.Code);
+            cmd.AddBound("@source", string.IsNullOrWhiteSpace(classification.Source) ? "INGEST" : classification.Source);
+            cmd.AddBound("@assignedBy", string.IsNullOrWhiteSpace(classification.AssignedBy) ? "system:catalog-upsert" : classification.AssignedBy);
+            added |= await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false) == 1;
+        }
+
+        return added;
+    }
+
+    private static async Task WriteGlobalMaskOverrideAsync(
+        DbConnection conn, DbTransaction tx, Guid colId, string columnName, TableMetadata metadata, CancellationToken ct)
+    {
+        await using (var del = conn.CreateCommand())
+        {
+            del.Transaction = tx;
+            del.CommandText = DeleteGlobalMaskOverrideSql;
+            del.AddBound("@colId", colId.ToString());
+            await del.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+
+        if (!metadata.ColumnMaskingRules.TryGetValue(columnName, out var rule))
+        {
+            return;
+        }
+
+        var (functionCode, paramsJson, keyRef) = MaskingRuleOverrideMapper.FromRule(rule);
+        await using var ins = conn.CreateCommand();
+        ins.Transaction = tx;
+        ins.CommandText = InsertGlobalMaskOverrideSql;
+        ins.AddBound("@id", Guid.NewGuid());
+        ins.AddBound("@colId", colId.ToString());
+        ins.AddBound("@maskFunction", functionCode);
+        ins.AddBound("@paramsJson", (object?)paramsJson ?? DBNull.Value);
+        ins.AddBound("@keyRef", (object?)keyRef ?? DBNull.Value);
+        if (await ins.ExecuteNonQueryAsync(ct).ConfigureAwait(false) != 1)
+        {
+            throw new InvalidOperationException($"The masking rule of column '{columnName}' could not be stored.");
+        }
+    }
+
     internal static async Task<bool> UpsertColumnsAndMaskingRulesAsync(
         DbConnection conn,
         DbTransaction tx,
         string insertColumnSql,
         Guid tableId,
         TableMetadata metadata,
-        Dictionary<string, (Guid Id, string DataType, bool IsSensitive, string? Description, string? LongDescription, string? DocSource, string? Collation, string? LengthSemantics)> existingColsByName,
+        Dictionary<string, (Guid Id, string DataType, string? Description, string? LongDescription, string? DocSource, string? Collation, string? LengthSemantics)> existingColsByName,
         Dictionary<string, Guid> colIdByName,
         CancellationToken ct,
         Func<string?, string?, bool>? shouldOverwriteDoc = null)
@@ -713,7 +869,7 @@ internal static class CatalogRowHydrator
                     structuralChange = true;
                     await using var delColCmd = conn.CreateCommand();
                     delColCmd.Transaction = tx;
-                    delColCmd.CommandText = "DELETE FROM COLUMN_MASKING_RULES WHERE table_column_id = @colId; DELETE FROM TABLE_COLUMNS WHERE id = @colId;";
+                    delColCmd.CommandText = "DELETE FROM COLUMN_CLASSIFICATIONS WHERE table_column_id = @colId; DELETE FROM COLUMN_MASK_OVERRIDES WHERE table_column_id = @colId; DELETE FROM TABLE_COLUMNS WHERE id = @colId;";
                     delColCmd.AddBound("@colId", existingInfo.Id.ToString());
                     await delColCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
                 }
@@ -734,7 +890,6 @@ internal static class CatalogRowHydrator
             {
                 colId = existingCol.Id;
                 if (!string.Equals(existingCol.DataType, col.DataType, StringComparison.OrdinalIgnoreCase) ||
-                    existingCol.IsSensitive != col.IsSensitive ||
                     !string.Equals(existingCol.Collation, col.Collation, StringComparison.Ordinal) ||
                     !string.Equals(existingCol.LengthSemantics, col.LengthSemantics, StringComparison.OrdinalIgnoreCase))
                 {
@@ -777,7 +932,6 @@ internal static class CatalogRowHydrator
                 insertColCmd.AddBound("@tableId", tableId.ToString());
                 insertColCmd.AddBound("@columnName", col.ColumnName);
                 insertColCmd.AddBound("@dataType", col.DataType);
-                insertColCmd.AddBound("@isSensitive", col.IsSensitive ? 1 : 0);
                 insertColCmd.AddBound("@description", (object?)targetColDesc ?? DBNull.Value);
                 insertColCmd.AddBound("@longDescription", (object?)targetColLongDesc ?? DBNull.Value);
                 insertColCmd.AddBound("@docSource", (object?)targetColDocSource ?? DBNull.Value);
@@ -791,33 +945,12 @@ internal static class CatalogRowHydrator
 
             colIdByName[col.ColumnName] = colId;
 
-            await using (var delMaskCmd = conn.CreateCommand())
+            if (await WriteGlobalClassificationsAsync(conn, tx, colId, metadata, col.ColumnName, ct).ConfigureAwait(false))
             {
-                delMaskCmd.Transaction = tx;
-                delMaskCmd.CommandText = "DELETE FROM COLUMN_MASKING_RULES WHERE table_column_id = @colId";
-                delMaskCmd.AddBound("@colId", colId.ToString());
-                await delMaskCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                structuralChange = true;
             }
 
-            if (metadata.ColumnMaskingRules.TryGetValue(col.ColumnName, out var maskRule))
-            {
-                await using (var insertMaskCmd = conn.CreateCommand())
-                {
-                    insertMaskCmd.Transaction = tx;
-                    insertMaskCmd.CommandText = @"INSERT INTO COLUMN_MASKING_RULES (id, table_column_id, rule_type, pattern_or_format, replacement, hmac_key_id)
-                                                  VALUES (@id, @colId, @ruleType, @pattern, @replacement, @hmacKeyId)";
-                    insertMaskCmd.AddBound("@id", Guid.NewGuid().ToString());
-                    insertMaskCmd.AddBound("@colId", colId.ToString());
-                    insertMaskCmd.AddBound("@ruleType", maskRule.RuleType);
-                    insertMaskCmd.AddBound("@pattern", (object?)maskRule.PatternOrFormat ?? DBNull.Value);
-                    insertMaskCmd.AddBound("@replacement", (object?)maskRule.Replacement ?? DBNull.Value);
-                    insertMaskCmd.AddBound("@hmacKeyId", (object?)maskRule.HmacKeyId ?? DBNull.Value);
-                    if (await insertMaskCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false) != 1)
-                    {
-                        throw new InvalidOperationException($"The masking rule of column '{col.ColumnName}' could not be stored.");
-                    }
-                }
-            }
+            await WriteGlobalMaskOverrideAsync(conn, tx, colId, col.ColumnName, metadata, ct).ConfigureAwait(false);
         }
 
         return structuralChange;

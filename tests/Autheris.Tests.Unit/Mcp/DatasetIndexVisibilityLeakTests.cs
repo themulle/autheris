@@ -38,7 +38,7 @@ public sealed class DatasetIndexVisibilityLeakTests
     private static readonly TableIdentifier Orders = new("sales", "public", "orders");
 
     private static TableMetadata Table() => new()
-    {
+    { ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("email"),
         Identifier = Orders,
         Table = new Table { TableName = "orders", SchemaName = "public", Sensitivity = "INTERNAL", IsActive = true },
         PrimaryKeyColumns = ["id", "email"],
@@ -52,7 +52,7 @@ public sealed class DatasetIndexVisibilityLeakTests
         [
             new TableColumn { ColumnName = "id", DataType = "int" },
             new TableColumn { ColumnName = "amount", DataType = "decimal" },
-            new TableColumn { ColumnName = "email", DataType = "varchar", IsSensitive = true }
+            new TableColumn { ColumnName = "email", DataType = "varchar" }
         ]
     };
 

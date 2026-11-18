@@ -30,9 +30,9 @@ public sealed class SemanticMcpAndSimulatorTests
                 new TableColumn { ColumnName = "month", DataType = "date" },
                 new TableColumn { ColumnName = "gross_revenue", DataType = "decimal" },
                 new TableColumn { ColumnName = "net_revenue", DataType = "decimal" },
-                new TableColumn { ColumnName = "iban", DataType = "varchar", IsSensitive = true }
+                new TableColumn { ColumnName = "iban", DataType = "varchar" }
             ]
-        };
+        }.WithPii("iban");
     }
 
     [Fact]

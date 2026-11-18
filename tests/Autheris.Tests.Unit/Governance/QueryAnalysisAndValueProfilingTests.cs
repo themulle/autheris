@@ -194,8 +194,8 @@ public sealed class QueryAnalysisAndValueProfilingTests
             new[]
             {
                 new TableColumn { ColumnName = "id", DataType = "uuid" },
-                new TableColumn { ColumnName = "email", DataType = "varchar", IsSensitive = true }
-            });
+                new TableColumn { ColumnName = "email", DataType = "varchar" }
+            }).WithPii("email");
 
         var invoicesTable = CreateCatalogTable(
             "billing",
@@ -216,8 +216,8 @@ public sealed class QueryAnalysisAndValueProfilingTests
             new[]
             {
                 new TableColumn { ColumnName = "id", DataType = "uuid" },
-                new TableColumn { ColumnName = "base_salary", DataType = "decimal", IsSensitive = true }
-            });
+                new TableColumn { ColumnName = "base_salary", DataType = "decimal" }
+            }).WithPii("base_salary");
 
         var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
         metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
@@ -290,8 +290,8 @@ public sealed class QueryAnalysisAndValueProfilingTests
             new[]
             {
                 new TableColumn { ColumnName = "id", DataType = "uuid" },
-                new TableColumn { ColumnName = "ssn", DataType = "varchar", IsSensitive = true }
-            });
+                new TableColumn { ColumnName = "ssn", DataType = "varchar" }
+            }).WithPii("ssn");
 
         var auditTable = CreateCatalogTable(
             "iam",
@@ -301,8 +301,8 @@ public sealed class QueryAnalysisAndValueProfilingTests
             new[]
             {
                 new TableColumn { ColumnName = "event_id", DataType = "uuid" },
-                new TableColumn { ColumnName = "actor_ssn", DataType = "varchar", IsSensitive = true }
-            });
+                new TableColumn { ColumnName = "actor_ssn", DataType = "varchar" }
+            }).WithPii("actor_ssn");
 
         var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
         metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
@@ -387,7 +387,7 @@ public sealed class QueryAnalysisAndValueProfilingTests
             "public",
             "payments",
             DatasetVisibility.Full,
-            new[] { new TableColumn { ColumnName = "card_last4", DataType = "varchar", IsSensitive = true } });
+            new[] { new TableColumn { ColumnName = "card_last4", DataType = "varchar" } }).WithPii("card_last4");
 
         var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
         metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())

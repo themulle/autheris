@@ -81,7 +81,7 @@ internal sealed partial class CrossTransportParityHarness
         SecurityPrincipalContext.FromPrincipal(s.Principal, s.EffectiveTenant, clientIp: clientIp);
 
     private static TableMetadata DefaultOrdersTable() => new()
-    {
+    { ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("ssn"),
         Identifier = OrdersId,
         Table = new Table { Id = Guid.NewGuid(), SourceName = "default", SchemaName = "main", TableName = "orders", SourceType = "PostgreSql", IsActive = true },
         TenantColumnName = "tenant_id",
@@ -89,7 +89,7 @@ internal sealed partial class CrossTransportParityHarness
         [
             new TableColumn { ColumnName = "id", DataType = "int" },
             new TableColumn { ColumnName = "region", DataType = "varchar" },
-            new TableColumn { ColumnName = "ssn", DataType = "varchar", IsSensitive = true },
+            new TableColumn { ColumnName = "ssn", DataType = "varchar" },
             new TableColumn { ColumnName = "tenant_id", DataType = "varchar" }
         ]
     };

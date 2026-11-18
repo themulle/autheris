@@ -107,8 +107,6 @@ public sealed class PostgreSqlConsentQueryContractTests : ConsentQueryContractTe
     [InlineData("ix_consents_tenant_role")]
     [InlineData("ix_consent_column_rules_consent")]
     [InlineData("ix_consent_row_filters_consent")]
-    [InlineData("ix_column_masking_rules_column")]
-    [InlineData("ix_role_members_member")]
     [InlineData("ix_table_owners_owner")]
     [InlineData("ix_tables_natural_ci")]
     public async Task SEC_SC_02_Baseline_CreatesIndex(string index)

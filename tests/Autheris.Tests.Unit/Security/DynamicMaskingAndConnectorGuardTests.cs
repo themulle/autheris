@@ -92,13 +92,13 @@ public sealed class DynamicMaskingAndConnectorGuardTests
             Columns = new[]
             {
                 new TableColumn { ColumnName = "id", DataType = "int" },
-                new TableColumn { ColumnName = "ssn", DataType = "varchar", IsSensitive = true }
+                new TableColumn { ColumnName = "ssn", DataType = "varchar" }
             },
             ColumnMaskingRules = new Dictionary<string, MaskingRule>
             {
                 ["ssn"] = new MaskingRule { RuleType = "HMAC" }
             }
-        };
+        }.WithPii("ssn");
 
         var metaRepo = Substitute.For<ITableMetadataRepository>();
         metaRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())

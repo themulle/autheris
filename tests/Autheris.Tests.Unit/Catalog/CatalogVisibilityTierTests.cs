@@ -264,9 +264,9 @@ public sealed class CatalogVisibilityTierTests
         CatalogVisibility.FilterByContract([tagged], excluding).Count.ShouldBe(1);
         CatalogVisibility.FilterByContract([tagged], including).Count.ShouldBe(CatalogVisibility.FilterByContract([plain], including).Count);
         CatalogVisibility.FilterByContract([tagged], including).Count.ShouldBe(0);
-        Autheris.Application.Governance.Grants.GrantClassifier.IsSensitive(tagged)
-            .ShouldBe(Autheris.Application.Governance.Grants.GrantClassifier.IsSensitive(plain));
-        Autheris.Application.Governance.Grants.GrantClassifier.IsSensitive(tagged).ShouldBeFalse();
+        Autheris.Application.Governance.Grants.GrantClassifier.ContainsSensitiveData(tagged)
+            .ShouldBe(Autheris.Application.Governance.Grants.GrantClassifier.ContainsSensitiveData(plain));
+        Autheris.Application.Governance.Grants.GrantClassifier.ContainsSensitiveData(tagged).ShouldBeFalse();
     }
 
     // ---- Admin rows (G1) ----

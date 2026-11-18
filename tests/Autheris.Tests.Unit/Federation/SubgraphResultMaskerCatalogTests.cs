@@ -187,12 +187,12 @@ public sealed class SubgraphResultMaskerCatalogTests
             OwnerTenantId = "tenant-a",
             Columns =
             [
-                new TableColumn { ColumnName = "loyalty_code", IsSensitive = true },
-                new TableColumn { ColumnName = "note", IsSensitive = false },
-                new TableColumn { ColumnName = "pin", IsSensitive = false }
+                new TableColumn { ColumnName = "loyalty_code" },
+                new TableColumn { ColumnName = "note" },
+                new TableColumn { ColumnName = "pin" }
             ],
             ColumnMaskingRules = new Dictionary<string, MaskingRule> { ["pin"] = new MaskingRule { RuleType = "NULLIFY" } }
-        };
+        }.WithPii("loyalty_code");
         repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([table]));
         Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(repo);
         var options = Options.Create(new GatewayOptions { Federation = new FederationOptions { CatalogMaskingCacheSeconds = 60 } });

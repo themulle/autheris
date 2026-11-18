@@ -3,6 +3,7 @@ namespace Autheris.Infrastructure.Persistence;
 using System;
 using System.Data.Common;
 using Autheris.Domain.Model;
+using Autheris.Infrastructure.Persistence.Catalog;
 using Autheris.Infrastructure.Persistence.Dialects;
 using Microsoft.Extensions.Logging;
 
@@ -232,14 +233,13 @@ public partial class GovernanceRepository
                         using (var cmd = conn.CreateCommand())
                         {
                             cmd.Transaction = trans;
-                            cmd.CommandText = @"INSERT INTO TABLE_COLUMNS (id, table_id, column_name, data_type, is_sensitive, ordinal)
-                                                VALUES (@id, @tid, @name, @type, @sens, (SELECT COALESCE(MAX(ordinal), 0) + 1 FROM TABLE_COLUMNS WHERE table_id = @tid))
+                            cmd.CommandText = @"INSERT INTO TABLE_COLUMNS (id, table_id, column_name, data_type, ordinal)
+                                                VALUES (@id, @tid, @name, @type, (SELECT COALESCE(MAX(ordinal), 0) + 1 FROM TABLE_COLUMNS WHERE table_id = @tid))
                                                 ON CONFLICT DO NOTHING;";
                             cmd.AddBound("@id", colId);
                             cmd.AddBound("@tid", tableId);
                             cmd.AddBound("@name", cName);
                             cmd.AddBound("@type", cType);
-                            cmd.AddBound("@sens", cSens ? 1 : 0);
                             cmd.ExecuteNonQuery();
                         }
 
@@ -258,15 +258,7 @@ public partial class GovernanceRepository
 
                         if (cSens)
                         {
-                            using var maskCmd = conn.CreateCommand();
-                            maskCmd.Transaction = trans;
-                            maskCmd.CommandText = @"INSERT INTO COLUMN_MASKING_RULES (id, table_column_id, rule_type, pattern_or_format, replacement, hmac_key_id)
-                                                   SELECT @id, @cid, 'REGEX', '', '', 'key-2026-q1'
-                                                   WHERE NOT EXISTS (SELECT 1 FROM COLUMN_MASKING_RULES WHERE table_column_id = @cid)
-                                                   ON CONFLICT DO NOTHING;";
-                            maskCmd.AddBound("@id", Guid.NewGuid().ToString());
-                            maskCmd.AddBound("@cid", colId);
-                            maskCmd.ExecuteNonQuery();
+                            CatalogRowHydrator.SeedSensitiveColumn(conn, trans, colId, "***");
                         }
                     }
                 }
@@ -320,14 +312,13 @@ public partial class GovernanceRepository
                 using (var cmd = conn.CreateCommand())
                 {
                     cmd.Transaction = trans;
-                    cmd.CommandText = @"INSERT INTO TABLE_COLUMNS (id, table_id, column_name, data_type, is_sensitive, ordinal)
-                                        VALUES (@id, @tid, @name, @type, @sens, (SELECT COALESCE(MAX(ordinal), 0) + 1 FROM TABLE_COLUMNS WHERE table_id = @tid))
+                    cmd.CommandText = @"INSERT INTO TABLE_COLUMNS (id, table_id, column_name, data_type, ordinal)
+                                        VALUES (@id, @tid, @name, @type, (SELECT COALESCE(MAX(ordinal), 0) + 1 FROM TABLE_COLUMNS WHERE table_id = @tid))
                                         ON CONFLICT DO NOTHING;";
                     cmd.AddBound("@id", colId);
                     cmd.AddBound("@tid", childTableId);
                     cmd.AddBound("@name", cName);
                     cmd.AddBound("@type", cType);
-                    cmd.AddBound("@sens", cSens ? 1 : 0);
                     cmd.ExecuteNonQuery();
                 }
 
@@ -346,15 +337,7 @@ public partial class GovernanceRepository
 
                 if (cSens)
                 {
-                    using var mcmd = conn.CreateCommand();
-                    mcmd.Transaction = trans;
-                    mcmd.CommandText = @"INSERT INTO COLUMN_MASKING_RULES (id, table_column_id, rule_type, pattern_or_format, replacement, hmac_key_id)
-                                         SELECT @id, @cid, 'REDACT', '', '[CONFIDENTIAL NOTE]', 'key-2026-q1'
-                                         WHERE NOT EXISTS (SELECT 1 FROM COLUMN_MASKING_RULES WHERE table_column_id = @cid)
-                                         ON CONFLICT DO NOTHING;";
-                    mcmd.AddBound("@id", Guid.NewGuid().ToString());
-                    mcmd.AddBound("@cid", colId);
-                    mcmd.ExecuteNonQuery();
+                    CatalogRowHydrator.SeedSensitiveColumn(conn, trans, colId, "[CONFIDENTIAL NOTE]");
                 }
             }
 
@@ -522,14 +505,13 @@ public partial class GovernanceRepository
                         using (var cmd = conn.CreateCommand())
                         {
                             cmd.Transaction = trans;
-                            cmd.CommandText = @"INSERT INTO TABLE_COLUMNS (id, table_id, column_name, data_type, is_sensitive, ordinal)
-                                                SELECT @id, @tid, @name, @type, @sens, (SELECT COALESCE(MAX(ordinal), 0) + 1 FROM TABLE_COLUMNS WHERE table_id = @tid)
+                            cmd.CommandText = @"INSERT INTO TABLE_COLUMNS (id, table_id, column_name, data_type, ordinal)
+                                                SELECT @id, @tid, @name, @type, (SELECT COALESCE(MAX(ordinal), 0) + 1 FROM TABLE_COLUMNS WHERE table_id = @tid)
                                                 WHERE NOT EXISTS (SELECT 1 FROM TABLE_COLUMNS WHERE table_id = @tid AND column_name = @name);";
                             cmd.AddBound("@id", Guid.NewGuid().ToString());
                             cmd.AddBound("@tid", tableId);
                             cmd.AddBound("@name", cName);
                             cmd.AddBound("@type", cType);
-                            cmd.AddBound("@sens", cSens ? 1 : 0);
                             cmd.ExecuteNonQuery();
                         }
 
@@ -545,14 +527,7 @@ public partial class GovernanceRepository
 
                         if (cSens && !string.IsNullOrEmpty(colId))
                         {
-                            using var maskCmd = conn.CreateCommand();
-                            maskCmd.Transaction = trans;
-                            maskCmd.CommandText = @"INSERT INTO COLUMN_MASKING_RULES (id, table_column_id, rule_type, pattern_or_format, replacement)
-                                                   SELECT @id, @cid, 'EMAIL', NULL, '***@***.***'
-                                                   WHERE NOT EXISTS (SELECT 1 FROM COLUMN_MASKING_RULES WHERE table_column_id = @cid);";
-                            maskCmd.AddBound("@id", Guid.NewGuid().ToString());
-                            maskCmd.AddBound("@cid", colId);
-                            maskCmd.ExecuteNonQuery();
+                            CatalogRowHydrator.SeedSensitiveColumn(conn, trans, colId, "***@***.***");
                         }
                     }
                 }

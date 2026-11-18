@@ -633,7 +633,7 @@ public sealed class DbtTests
             m.Table.Sensitivity == "CONFIDENTIAL" &&
             m.Table.DocumentationSource == "dbt_governance_v1" &&
             m.ColumnMaskingRules.ContainsKey("email_address") &&
-            m.Columns.First(c => c.ColumnName == "email_address").IsSensitive
+            ClassificationMetadata.IsColumnSensitive(m, "email_address")
         ), Arg.Any<CancellationToken>());
     }
 
@@ -836,7 +836,7 @@ public sealed class DbtTests
     }
 
     private static TableMetadata GovernanceTable(string tableName, string sensitivity, IReadOnlyDictionary<string, MaskingRule>? rules = null, bool sensitiveColumn = false) => new()
-    {
+    { ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor(sensitiveColumn ? new[] { "email" } : Array.Empty<string>()),
         Identifier = new TableIdentifier("postgres", "analytics", tableName),
         Table = new Table
         {
@@ -848,7 +848,7 @@ public sealed class DbtTests
         },
         Columns =
         [
-            new TableColumn { ColumnName = "email", DataType = "varchar", IsSensitive = sensitiveColumn }
+            new TableColumn { ColumnName = "email", DataType = "varchar" }
         ],
         ColumnMaskingRules = rules ?? new Dictionary<string, MaskingRule>()
     };

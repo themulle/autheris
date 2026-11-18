@@ -52,11 +52,11 @@ public sealed class AccessProfileRuntimeResolutionTests
             },
             Columns =
             [
-                new TableColumn { ColumnName = "crane_id", DataType = "VARCHAR(64)", IsSensitive = false },
-                new TableColumn { ColumnName = "latitude", DataType = "DOUBLE PRECISION", IsSensitive = true },
-                new TableColumn { ColumnName = "longitude", DataType = "DOUBLE PRECISION", IsSensitive = true },
-                new TableColumn { ColumnName = "customer_id", DataType = "VARCHAR(128)", IsSensitive = true },
-                new TableColumn { ColumnName = "status", DataType = "VARCHAR(32)", IsSensitive = false }
+                new TableColumn { ColumnName = "crane_id", DataType = "VARCHAR(64)" },
+                new TableColumn { ColumnName = "latitude", DataType = "DOUBLE PRECISION" },
+                new TableColumn { ColumnName = "longitude", DataType = "DOUBLE PRECISION" },
+                new TableColumn { ColumnName = "customer_id", DataType = "VARCHAR(128)" },
+                new TableColumn { ColumnName = "status", DataType = "VARCHAR(32)" }
             ],
             ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
             {
@@ -64,7 +64,7 @@ public sealed class AccessProfileRuntimeResolutionTests
                 ["longitude"] = new MaskingRule { RuleType = "GEO_JITTER", Mode = "round", Decimals = 2 },
                 ["customer_id"] = new MaskingRule { RuleType = "PARTIAL_MASK", KeepPrefix = 2, KeepSuffix = 2 }
             }
-        };
+        }.WithPii("latitude", "longitude", "customer_id");
     }
 
     private static TableAccessPolicy CreatePolicy(

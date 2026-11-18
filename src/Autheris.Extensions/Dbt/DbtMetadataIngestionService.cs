@@ -646,7 +646,6 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                             TableId = c.TableId,
                             ColumnName = c.ColumnName,
                             DataType = c.DataType,
-                            IsSensitive = c.IsSensitive,
                             Description = colDesc,
                             LongDescription = colLongDesc,
                             Meta = colMeta
@@ -659,6 +658,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                         Identifier = existingMeta.Identifier,
                         Columns = updatedColumns,
                         ColumnMaskingRules = existingMeta.ColumnMaskingRules,
+                        ColumnClassifications = existingMeta.ColumnClassifications,
                         PrimaryKeyColumns = existingMeta.PrimaryKeyColumns,
                         PrimaryKeyDirections = existingMeta.PrimaryKeyDirections,
                         Indexes = existingMeta.Indexes,
@@ -1338,6 +1338,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                 };
 
                 var updatedCols = new List<TableColumn>();
+                var flaggedColumns = new List<TableColumn>();
                 var updatedMaskingRules = new Dictionary<string, MaskingRule>(existingMeta.ColumnMaskingRules, StringComparer.OrdinalIgnoreCase);
 
                 JsonElement colsElement = default;
@@ -1345,7 +1346,8 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
 
                 foreach (var col in existingMeta.Columns)
                 {
-                    var colSensitivity = col.IsSensitive;
+                    var wasSensitive = ClassificationMetadata.IsColumnSensitive(existingMeta, col);
+                    var newlyFlagged = false;
                     var colDesc = col.Description;
                     var colMeta = new Dictionary<string, string>(col.Meta ?? new Dictionary<string, string>(), StringComparer.OrdinalIgnoreCase);
 
@@ -1357,7 +1359,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                             // B-03: Use Table.IsSensitivityHigh (SensitivityRank >= 3) instead of != "PUBLIC"
                             var incomingHigh = Table.IsSensitivityHigh(cs);
                             var storedLabel = colMeta.TryGetValue("sensitivity", out var sl) ? sl : null;
-                            if ((col.IsSensitive && !incomingHigh) ||
+                            if ((wasSensitive && !incomingHigh) ||
                                 (!string.IsNullOrWhiteSpace(storedLabel) && Table.SensitivityRank(cs) < Table.SensitivityRank(storedLabel)))
                             {
                                 // Fail closed: a lower column sensitivity is not applied but rejects the import (proposal workflow).
@@ -1365,7 +1367,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                             }
                             else
                             {
-                                colSensitivity = incomingHigh;
+                                newlyFlagged = incomingHigh;
                                 if (!string.IsNullOrWhiteSpace(cs)) colMeta["sensitivity"] = cs;
                             }
                         }
@@ -1513,17 +1515,21 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                         RejectRuleRemoval(updatedMaskingRules, tableId, col.ColumnName);
                     }
 
-                    updatedCols.Add(new TableColumn
+                    var updatedCol = new TableColumn
                     {
                         Id = col.Id,
                         TableId = col.TableId,
                         ColumnName = col.ColumnName,
                         DataType = col.DataType,
-                        IsSensitive = colSensitivity,
                         Description = colDesc,
                         LongDescription = col.LongDescription,
                         Meta = colMeta
-                    });
+                    };
+                    updatedCols.Add(updatedCol);
+                    if (newlyFlagged)
+                    {
+                        flaggedColumns.Add(updatedCol);
+                    }
                 }
 
                 var updatedMetadata = new TableMetadata
@@ -1532,6 +1538,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                     Identifier = existingMeta.Identifier,
                     Columns = updatedCols,
                     ColumnMaskingRules = updatedMaskingRules,
+                    ColumnClassifications = ClassificationMetadata.Merge(existingMeta.ColumnClassifications, ClassificationMetadata.AssignPii(flaggedColumns, "DBT")),
                     PrimaryKeyColumns = existingMeta.PrimaryKeyColumns,
                     PrimaryKeyDirections = existingMeta.PrimaryKeyDirections,
                     Indexes = existingMeta.Indexes

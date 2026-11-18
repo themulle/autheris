@@ -54,7 +54,7 @@ public sealed class CatalogTablePersistedProjection
         "Table.DataSourceType", "Table.HttpEndpoint", "Table.PluginName", "Table.MinGroupSize", "Table.NonPersonal", "Table.RequiredFilterColumns",
         "Table.DbtUniqueId",
         "TableColumn.ColumnName", "TableColumn.DisplayName", "TableColumn.DataType", "TableColumn.Collation", "TableColumn.LengthSemantics",
-        "TableColumn.IsSensitive", "TableColumn.Description", "TableColumn.LongDescription", "TableColumn.Texts", "TableColumn.DocumentationSource",
+        "TableColumn.Description", "TableColumn.LongDescription", "TableColumn.Texts", "TableColumn.DocumentationSource",
         "TableColumn.Meta",
         "MaskingRule.RuleType", "MaskingRule.PatternOrFormat", "MaskingRule.Replacement", "MaskingRule.HmacKeyId",
         "TableMetadata.Table", "TableMetadata.Columns", "TableMetadata.ColumnMaskingRules",
@@ -79,7 +79,7 @@ public sealed class CatalogTablePersistedProjection
         ["TABLES.texts_json"] = "table.texts", ["TABLES.min_group_size"] = "table.min_group_size", ["TABLES.non_personal"] = "table.non_personal",
         ["TABLES.dbt_unique_id"] = "table.dbt_unique_id",
         ["TABLE_COLUMNS.id"] = "(surrogate id)", ["TABLE_COLUMNS.table_id"] = "(foreign key)", ["TABLE_COLUMNS.column_name"] = "column[name]",
-        ["TABLE_COLUMNS.data_type"] = "column.data_type", ["TABLE_COLUMNS.is_sensitive"] = "column.is_sensitive",
+        ["TABLE_COLUMNS.data_type"] = "column.data_type",
         ["TABLE_COLUMNS.description"] = "column.description", ["TABLE_COLUMNS.long_description"] = "column.long_description",
         ["TABLE_COLUMNS.doc_source"] = "column.doc_source", ["TABLE_COLUMNS.meta_json"] = "column.meta", ["TABLE_COLUMNS.display_name"] = "column.display_name",
         ["TABLE_COLUMNS.texts_json"] = "column.texts", ["TABLE_COLUMNS.collation"] = "column.collation",
@@ -166,7 +166,6 @@ public sealed class CatalogTablePersistedProjection
 
             values[prefix + ".present"] = "1";
             values[prefix + ".data_type"] = column.DataType;
-            values[prefix + ".is_sensitive"] = Flag(column.IsSensitive);
             values[prefix + ".collation"] = column.Collation;
             values[prefix + ".length_semantics"] = column.LengthSemantics;
             values[prefix + ".display_name"] = column.DisplayName;
