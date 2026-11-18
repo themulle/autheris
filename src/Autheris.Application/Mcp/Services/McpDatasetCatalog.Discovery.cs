@@ -306,6 +306,10 @@ public sealed partial class McpDatasetCatalog
         var graphQl = brief || graphQlMap == null ? null : await graphQlMap.GetTableAsync(id, ct).ConfigureAwait(false);
         var graphQlColumns = (graphQl?.Columns ?? []).ToDictionary(c => c.ColumnName, StringComparer.OrdinalIgnoreCase);
 
+        // #805/#807: keys, indexes and required filters as projected for this caller by the discovery core.
+        var shape = obj.QueryShape ?? DiscoveryQueryShape.Empty;
+        var primaryKeys = new HashSet<string>(shape.PrimaryKeyColumns, StringComparer.OrdinalIgnoreCase);
+
         var columns = obj.Columns
             .Where(static c => c.State != DiscoveryColumnState.NoAccess)
             .Select(c =>
@@ -326,7 +330,7 @@ public sealed partial class McpDatasetCatalog
                     c.DataType,
                     obj.HiddenTextColumns.Contains(c.Name) ? null : DiscoveryTextSanitizer.SanitizeText(c.Description, DiscoveryTextSanitizer.MaxDescriptionRunes),
                     c.Pii,
-                    PrimaryKey: false,
+                    PrimaryKey: primaryKeys.Contains(c.Name),
                     GraphQlField: field?.Field,
                     GraphQlType: field?.GraphQlType,
                     ValueProfile: colProfile,
@@ -371,10 +375,13 @@ public sealed partial class McpDatasetCatalog
             DataOwner: dataOwner,
             DataOwnerDelegates: delegates,
             AccessStatus: accessStatus,
-            Indexes: null,
+            Indexes: brief ? null : shape.Indexes,
             Kind: obj.Kind.ToString().ToLowerInvariant(),
+            RequiredFilterColumns: brief || shape.RequiredFilterColumns.Count == 0 ? null : shape.RequiredFilterColumns,
+            RequiredFilterColumnGroups: brief || shape.RequiredFilterColumnGroups.Count == 0 ? null : shape.RequiredFilterColumnGroups,
             Language: negotiatedLanguage,
-            RequestedLanguage: language)
+            RequestedLanguage: language,
+            PrimaryKeyOrder: brief ? null : Autheris.Application.DataSources.Services.DatasetKeyProjection.KeyOrder(shape.PrimaryKeyColumns, shape.PrimaryKeyDirections))
         {
             Documents = linked.Documents,
             Applications = linked.Applications,

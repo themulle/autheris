@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Text.Json;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Tests.Unit.TestSupport;
 using Autheris.Application.Governance.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;

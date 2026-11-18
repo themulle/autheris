@@ -1,3 +1,4 @@
+using Autheris.Tests.Unit.TestSupport;
 using Autheris.Tests.Unit;
 using System;
 using System.Collections.Generic;
