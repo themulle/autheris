@@ -391,16 +391,22 @@ public sealed partial class Query
         }
     }
 
-    private static GraphQLException MapDiscoveryGraphQlError(DiscoveryStatusException ex)
+    internal static GraphQLException MapDiscoveryGraphQlError(DiscoveryStatusException ex)
     {
         var code = ex.Kind switch
         {
             DiscoveryFailureKind.Unauthenticated => "UNAUTHORIZED",
             DiscoveryFailureKind.Forbidden => "FORBIDDEN",
-            DiscoveryFailureKind.RateLimited => "RATE_LIMITED",
+            DiscoveryFailureKind.RateLimited => ex.Code,
             _ => "BAD_REQUEST"
         };
-        return new GraphQLException(ErrorBuilder.New().SetCode(code).SetMessage(ex.Message).Build());
+        var error = ErrorBuilder.New().SetCode(code).SetMessage(ex.Message);
+        if (ex.RetryAfterSeconds is { } retryAfter)
+        {
+            error.SetExtension("retryAfterSeconds", retryAfter);
+        }
+
+        return new GraphQLException(error.Build());
     }
 
     internal static TableMetadataDto ToTableMetadataDto(DiscoveryObject obj, string? language = null) =>

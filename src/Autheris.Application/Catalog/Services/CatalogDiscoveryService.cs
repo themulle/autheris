@@ -265,7 +265,14 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
     /// </summary>
     private async Task<IReadOnlySet<string>> ResolveCallerClearColumnsAsync(TableMetadata metadata, RequestContext context, CancellationToken ct)
     {
-        var empty = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var levels = await ResolveCallerColumnLevelsAsync(metadata, context, ct).ConfigureAwait(false);
+        return Autheris.Application.DataSources.Services.DatasetIndexProjection.ClearSet(levels);
+    }
+
+    /// <summary>The caller's resolved level per column (shared with describe_dataset); null when it cannot be resolved (fail closed).</summary>
+    private async Task<IReadOnlyDictionary<string, ColumnAccessLevel>?> ResolveCallerColumnLevelsAsync(
+        TableMetadata metadata, RequestContext context, CancellationToken ct, IReadOnlyList<Consent>? prefetchedConsents = null)
+    {
         try
         {
             var principal = context.User;
@@ -273,23 +280,19 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
             var resolution = _consentResolution ?? new ConsentResolutionService();
             if (CallerScopeResolver.IsAdminView(scope))
             {
-                return Autheris.Application.DataSources.Services.DatasetIndexProjection.ClearSet(
-                    CatalogCallerColumnLevels.Resolve(resolution, principal, metadata, [], isAdmin: true, isGranted: false, bypass: false, _logger));
+                return CatalogCallerColumnLevels.Resolve(resolution, principal, metadata, [], isAdmin: true, isGranted: false, bypass: false, _logger);
             }
 
             var userSid = principal.GetUserSid();
             if (_consentRepository == null || userSid == null || scope == CallerScope.None)
             {
-                return empty;
+                return null;
             }
 
             var tenantId = principal.GetTenantId();
-            var subjects = principal.GetGroupSids().Append(userSid.Value).ToList();
-            var consents = await _consentRepository.GetAllActiveConsentsForSubjectsAsync(
-                subjects, principal.GetUserRoles(), _timeProvider.GetUtcNow(), tenantId, ct).ConfigureAwait(false);
+            var consents = prefetchedConsents ?? await FetchCallerConsentsAsync(context, userSid.Value, ct).ConfigureAwait(false);
             var granted = consents.Any(c => c.Effect == ConsentEffect.Allow && c.TableIdentifier == metadata.Identifier && c.TenantId == tenantId);
-            return Autheris.Application.DataSources.Services.DatasetIndexProjection.ClearSet(
-                CatalogCallerColumnLevels.Resolve(resolution, principal, metadata, consents, isAdmin: false, isGranted: granted, bypass: false, _logger));
+            return CatalogCallerColumnLevels.Resolve(resolution, principal, metadata, consents, isAdmin: false, isGranted: granted, bypass: false, _logger);
         }
         catch (OperationCanceledException)
         {
@@ -298,8 +301,71 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
         catch (Exception ex)
         {
             _logger.LogWarning("Catalog detail key visibility lookup failed for {Dataset} ({ExceptionType}); keys and indexes omitted.", metadata.Identifier.ToString(), ex.GetType().Name);
-            return empty;
+            return null;
         }
+    }
+
+    private async Task<IReadOnlyList<Consent>> FetchCallerConsentsAsync(RequestContext context, Sid userSid, CancellationToken ct)
+    {
+        var principal = context.User;
+        var subjects = principal.GetGroupSids().Append(userSid).ToList();
+        return await _consentRepository!.GetAllActiveConsentsForSubjectsAsync(
+            subjects, principal.GetUserRoles(), _timeProvider.GetUtcNow(), principal.GetTenantId(), ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Search hits of the PDP-less catalog path: each hit table with the columns the caller cannot see (level Deny or unresolved) removed,
+    /// so the restricted-table hit shaping also drops a hit that exists only through such a column. Unresolvable levels leave no column.
+    /// </summary>
+    private async Task<IReadOnlyDictionary<TableIdentifier, TableMetadata>> ProjectCallerColumnsAsync(
+        IEnumerable<TableIdentifier> hitTables,
+        IReadOnlyDictionary<TableIdentifier, TableMetadata> permitted,
+        RequestContext context,
+        CancellationToken ct)
+    {
+        var projected = new Dictionary<TableIdentifier, TableMetadata>(permitted);
+
+        // Consents are read once per request, not once per hit table. Without a resolver (or an identity) no column is known to be
+        // visible, so every hit table is projected to no columns and only table-level text can match (fail closed).
+        IReadOnlyList<Consent>? consents = null;
+        try
+        {
+            var scope = CallerScopeResolver.Resolve(context.User, CatalogOwner);
+            var userSid = context.User.GetUserSid();
+            if (!CallerScopeResolver.IsAdminView(scope) && _consentRepository != null && userSid != null && scope != CallerScope.None)
+            {
+                consents = await FetchCallerConsentsAsync(context, userSid.Value, ct).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("Catalog search consent lookup failed ({ExceptionType}); hit columns omitted.", ex.GetType().Name);
+        }
+
+        var admin = CallerScopeResolver.IsAdminView(CallerScopeResolver.Resolve(context.User, CatalogOwner));
+        foreach (var id in hitTables.Distinct())
+        {
+            if (!permitted.TryGetValue(id, out var table))
+            {
+                continue;
+            }
+
+            var levels = admin || consents != null
+                ? await ResolveCallerColumnLevelsAsync(table, context, ct, consents).ConfigureAwait(false)
+                : null;
+            projected[id] = table with
+            {
+                Columns = table.Columns
+                    .Where(c => levels != null && levels.TryGetValue(c.ColumnName, out var level) && level != ColumnAccessLevel.Deny)
+                    .ToList()
+            };
+        }
+
+        return projected;
     }
 
     private static string MaskingStateOf(TableMetadata metadata, TableColumn c)
@@ -388,9 +454,10 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
                 ct).ConfigureAwait(false);
 
             // Result hygiene: rebuilt from the caller's filtered metadata; hits that exist only because of a hidden column are dropped.
-            var hiddenText = await ResolveHiddenTextForHitsAsync(hits.Select(h => h.TableIdentifier), permittedById, allById, context, ct).ConfigureAwait(false);
+            var callerTables = await ProjectCallerColumnsAsync(hits.Select(h => h.TableIdentifier), permittedById, context, ct).ConfigureAwait(false);
+            var hiddenText = await ResolveHiddenTextForHitsAsync(hits.Select(h => h.TableIdentifier), callerTables, allById, context, ct).ConfigureAwait(false);
             var tableHits = hits
-                .Select(h => ShapeHit(h, permittedById, allById, terms, singleIdentifier, hiddenText))
+                .Select(h => ShapeHit(h, callerTables, allById, terms, singleIdentifier, hiddenText))
                 .Where(h => h != null)
                 .Select(h => ToSummary(permittedById[h!.TableIdentifier], "Catalog", context.Language))
                 .ToList();
@@ -463,9 +530,10 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
                 tableId => permittedById.ContainsKey(tableId),
                 tableId => IsColumnRestricted(tableId, permittedById, allById),
                 ct).ConfigureAwait(false);
-            var hiddenText = await ResolveHiddenTextForHitsAsync(rawHits.Select(h => h.TableIdentifier), permittedById, allById, context, ct).ConfigureAwait(false);
+            var callerTables = await ProjectCallerColumnsAsync(rawHits.Select(h => h.TableIdentifier), permittedById, context, ct).ConfigureAwait(false);
+            var hiddenText = await ResolveHiddenTextForHitsAsync(rawHits.Select(h => h.TableIdentifier), callerTables, allById, context, ct).ConfigureAwait(false);
             var tableHits = rawHits
-                .Select(h => ShapeHit(h, permittedById, allById, terms, singleIdentifier, hiddenText))
+                .Select(h => ShapeHit(h, callerTables, allById, terms, singleIdentifier, hiddenText))
                 .Where(h => h != null)
                 .Select(h => h!)
                 .Take(query.Limit);

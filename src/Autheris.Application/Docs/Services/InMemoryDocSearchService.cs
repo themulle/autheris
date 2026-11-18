@@ -112,7 +112,7 @@ public sealed class InMemoryDocSearchService : IDocSearchService
     {
         var snapshot = _chunks.Values
             .Where(scope.CanSee)
-            .Select(c => c with { SourceFile = DocProvenance.ToSafeSourcePath(c.SourceFile) })
+            .Select(c => c with { SourceFile = DocSourcePath.ToSafe(c.SourceFile) })
             .ToList();
         return Task.FromResult<IReadOnlyList<DocChunk>>(snapshot);
     }
@@ -213,7 +213,7 @@ public sealed class InMemoryDocSearchService : IDocSearchService
                     Summary: chunk.Summary,
                     RelevanceScore: score,
                     MatchedTerms: matchedTerms,
-                    SourceFile: DocProvenance.ToSafeSourcePath(chunk.SourceFile),
+                    SourceFile: DocSourcePath.ToSafe(chunk.SourceFile),
                     TenantId: chunk.TenantId
                 ));
             }
@@ -241,14 +241,14 @@ public sealed class InMemoryDocSearchService : IDocSearchService
         // Official documentation always takes precedence over tenant documentation for identical identifiers.
         if (snapshot.TryGetValue(new DocIndexKey(string.Empty, id), out var official) && scope.CanSee(official))
         {
-            return Task.FromResult<DocChunk?>(official with { SourceFile = DocProvenance.ToSafeSourcePath(official.SourceFile) });
+            return Task.FromResult<DocChunk?>(official with { SourceFile = DocSourcePath.ToSafe(official.SourceFile) });
         }
 
         if (scope.TenantId is not null &&
             snapshot.TryGetValue(new DocIndexKey(scope.TenantId, id), out var tenantChunk) &&
             scope.CanSee(tenantChunk))
         {
-            return Task.FromResult<DocChunk?>(tenantChunk with { SourceFile = DocProvenance.ToSafeSourcePath(tenantChunk.SourceFile) });
+            return Task.FromResult<DocChunk?>(tenantChunk with { SourceFile = DocSourcePath.ToSafe(tenantChunk.SourceFile) });
         }
 
         return Task.FromResult<DocChunk?>(null);
@@ -286,7 +286,7 @@ public sealed class InMemoryDocSearchService : IDocSearchService
             RootCause: $"Referenced in documentation section '{matchingChunk.Title}'.",
             Resolution: matchingChunk.Content,
             RunbookRef: matchingChunk.Category == DocCategory.Runbook ? matchingChunk.Id.ToString() : null,
-            SourceFile: DocProvenance.ToSafeSourcePath(matchingChunk.SourceFile),
+            SourceFile: DocSourcePath.ToSafe(matchingChunk.SourceFile),
             TenantId: matchingChunk.TenantId
         );
 
