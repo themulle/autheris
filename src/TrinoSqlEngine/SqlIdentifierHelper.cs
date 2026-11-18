@@ -70,7 +70,7 @@ public static class SqlIdentifierHelper
             return isQuoted ? id : id.ToLowerInvariant();
         }
 
-        // For ANSI, SQLite, and SQL Server canonical comparison:
+        // For ANSI and SQL Server canonical comparison:
         return id.ToLowerInvariant();
     }
 
