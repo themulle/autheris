@@ -126,6 +126,24 @@ public sealed class CrossSourceQueryRouter : ICrossSourceQueryRouter
                 throw new WebSqlTableDeniedException($"WebSQL access denied to table '{target.FullName}'.");
             }
 
+            // a product object is read from its cached result only: the object must be this tenant's product, the source is the reserved one
+            // (never mapped) and the table is staged like a non-SQL source so the caller's decision on the product applies to every row.
+            if (Autheris.Application.Products.ProductSource.IsProductSource(tableId.Domain) ||
+                Autheris.Application.Products.ProductSource.IsProductSource(meta.Table.SourceName))
+            {
+                if (!Autheris.Application.Products.ProductSource.IsProductSource(tableId.Domain) ||
+                    !Autheris.Application.Products.ProductSource.IsProductSource(meta.Table.SourceName) ||
+                    !Autheris.Application.Products.ProductSource.TryParse(tableId, tenantId, out _, out _))
+                {
+                    throw new WebSqlTableDeniedException($"WebSQL access denied to table '{target.FullName}'.");
+                }
+
+                hasNonSqlSource = true;
+                distinctDataSources.Add(Autheris.Application.Products.ProductSource.Name);
+                resolvedTables.Add(new ResolvedSourceTable(target, tableId, meta, Autheris.Application.Products.ProductSource.Name));
+                continue;
+            }
+
             // SQLA-07: the read uses the catalog SourceName, so the allowlists are checked on that effective source too (the domain check above
             // stays); an empty effective source is denied. A "default" fallback is only valid when the catalog SourceName names the requested domain
             // (same rule as the single-catalog rewriter).
@@ -179,7 +197,8 @@ public sealed class CrossSourceQueryRouter : ICrossSourceQueryRouter
                 throw new WebSqlPolicyException("DML statements across multiple data sources or HTTP APIs are not permitted in WebSQL.");
             }
 
-            if (!_crossSourceOptions.Enabled)
+            var productsOnly = distinctDataSources.Count == 1 && distinctDataSources.Contains(Autheris.Application.Products.ProductSource.Name);
+            if (!productsOnly && !_crossSourceOptions.Enabled)
             {
                 throw new WebSqlPolicyException("Cross-catalog queries across multiple data sources are not supported in WebSQL.");
             }

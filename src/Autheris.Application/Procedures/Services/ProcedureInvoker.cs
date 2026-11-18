@@ -24,7 +24,7 @@ using Microsoft.Extensions.Options;
 /// and typed parameters; no EXEC text is ever composed. Before the call the security context is written to the
 /// read-only SESSION_CONTEXT on the same connection so database-side RLS policies can evaluate it.
 /// </summary>
-public sealed class ProcedureInvoker : IProcedureInvoker
+public sealed partial class ProcedureInvoker : IProcedureInvoker
 {
     private static readonly Regex DecimalPrecisionRegex = new(
         @"\((\d+)(?:,(\d+))?\)", RegexOptions.Compiled, TimeSpan.FromMilliseconds(100));

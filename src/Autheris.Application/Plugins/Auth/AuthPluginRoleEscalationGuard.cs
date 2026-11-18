@@ -23,7 +23,7 @@ public sealed partial class AuthPluginRoleEscalationGuard
     [
         // GatewayRole
         "ClusterAdmin", "TenantAdmin", "GovernanceAdmin", "SecurityAuditor", "Auditor", "DataOwner", "DataSteward", "SchemaPublisher",
-        "FilterAdmin", "FilterSync", "CallerAttributeApprover", "CallerAttributeInspector",
+        "FilterAdmin", "FilterSync", "CallerAttributeApprover", "CallerAttributeInspector", "DataProductAdmin", "DataProductSync",
 
         // GatewayPolicies role sets
         "Approver", "SecurityAdmin", "PrivacyAdmin", "DataProtectionOfficer", "SchemaAdmin", "GatewayAdmin", "PlatformAdmin",

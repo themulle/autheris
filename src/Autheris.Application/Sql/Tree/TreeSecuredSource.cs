@@ -107,7 +107,7 @@ internal static class TreeSecuredSourceMarkers
                 }
                 case '?':
                 {
-                    // SQLite emits numbered question markers (?1). A bare or undeclared question mark is never part of governed output.
+                    // A dialect may emit numbered question markers (?1). A bare or undeclared question mark is never part of governed output.
                     var end = i + 1;
                     while (end < sql.Length && char.IsAsciiDigit(sql[end]))
                     {
@@ -242,7 +242,7 @@ internal static class TreeSecuredSourceMarkers
         return end;
     }
 
-    /// <summary>The engine's own marker names: <c>@p</c> plus digits (SQLite, SQL Server) or <c>$</c> plus digits (PostgreSQL).</summary>
+    /// <summary>The engine's own marker names: <c>@p</c> plus digits (SQL Server) or <c>$</c> plus digits (PostgreSQL).</summary>
     private static bool IsEngineStyle(string token) =>
         token.Length > 2 && token[0] == '@' && token[1] is 'p' or 'P' && token.AsSpan(2).IndexOfAnyExceptInRange('0', '9') < 0;
 
