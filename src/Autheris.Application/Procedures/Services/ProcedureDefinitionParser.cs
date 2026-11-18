@@ -328,7 +328,10 @@ public static partial class ProcedureDefinitionParser
             DdlHash = model.Integrity?.DdlHash?.Trim(),
             RowScopeKey = ValidateRowScopeKey(SplitRowScopeKey(ParseYamlRowScopeKey(model.RowScopeKey), out var scopeTableColumns), resultTable, outputs),
             RowScopeKeyTable = scopeTableColumns,
-            ErrorCodes = ParseErrorCodes(model.ErrorCodes)
+            ErrorCodes = ParseErrorCodes(model.ErrorCodes),
+            ProductSchema = string.IsNullOrWhiteSpace(model.Schema) ? null : RequireIdentifier(model.Schema.Trim(), "schema"),
+            ProductOwner = string.IsNullOrWhiteSpace(model.ProductOwner) ? null : model.ProductOwner.Trim(),
+            ClearedReason = string.IsNullOrWhiteSpace(model.ClearedReason) ? null : Sanitize(model.ClearedReason)
         };
     }
 
@@ -640,6 +643,15 @@ public sealed class ProcedureYamlModel
     public string? Procedure { get; set; }
     public string? Kind { get; set; }
     public string? Mode { get; set; }
+
+    /// <summary>Product schema when the procedure is exposed as a data product.</summary>
+    public string? Schema { get; set; }
+
+    /// <summary>The product owner (a SID) that decides the grants on the product.</summary>
+    public string? ProductOwner { get; set; }
+
+    /// <summary>Why the <c>cleared_columns</c> may leave in clear (required by the Git synchronisation).</summary>
+    public string? ClearedReason { get; set; }
     public string? DataSource { get; set; }
     public string? Rls { get; set; }
     public string? ResultTable { get; set; }

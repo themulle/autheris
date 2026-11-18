@@ -32,7 +32,7 @@ public sealed class ProcedureReadOnlyTests
             File.WriteAllText(file, $"name: w\nprocedure: api.usp_W\nmode: {mode}\n");
 
             TestProcedureYaml.Definition(File.ReadAllText(file)).Mode.ShouldBe(ProcedureMode.Write);
-            loader.CheckPolicy(TestProcedureYaml.Definition(File.ReadAllText(file))).ShouldBe("Write procedures are enabled with data products (WP-SIMPL-49).");
+            loader.CheckPolicy(TestProcedureYaml.Definition(File.ReadAllText(file))).ShouldBe(ProcedureDefinitionLoader.WriteModeRejectedMessage);
             loader.LoadFromDirectory().ShouldBe(0);
             registry.GetAll().ShouldBeEmpty();
         }
@@ -40,6 +40,24 @@ public sealed class ProcedureReadOnlyTests
         {
             Directory.Delete(dir, true);
         }
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Write_Mode_Bound_To_Product_Passes_Static_Policy_And_Unbound_Does_Not()
+    {
+        var loader = new ProcedureDefinitionLoader(new InMemoryProcedureRegistry(), Options.Create(new GatewayOptions
+        {
+            DataSources = ProcedureTestData.SqlServerSources("procedures"),
+            SqlEndpoints = new SqlEndpointsOptions { Procedures = new ProcedureEndpointsOptions { Enabled = true, AllowedSchemas = ["api"], RequireDdlHashForDeclared = false } }
+        }));
+
+        var bound = TestProcedureYaml.Definition("procedure: api.usp_W\nmode: write\nschema: sales\nproduct_owner: S-1-5-21-1002\n");
+
+        bound.ProductSchema.ShouldBe("sales");
+        bound.ProductOwner.ShouldBe("S-1-5-21-1002");
+        loader.CheckPolicy(bound).ShouldNotBe(ProcedureDefinitionLoader.WriteModeRejectedMessage);
+        loader.CheckPolicy(TestProcedureYaml.Definition("procedure: api.usp_W\nmode: write\nschema: sales\n")).ShouldBe(ProcedureDefinitionLoader.WriteModeRejectedMessage);
     }
 
     [Theory]

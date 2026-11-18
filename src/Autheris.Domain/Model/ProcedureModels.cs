@@ -84,6 +84,18 @@ public sealed record ProcedureDefinition(
     public string? Description { get; init; }
 
     /// <summary>
+    /// Product schema of the procedure when it is exposed as a data product (<c>products.t_&lt;tenanthash&gt;.&lt;schema&gt;__&lt;name&gt;</c>, the name
+    /// being <see cref="Name"/>). Blank means a plain procedure governed by consents on its table set.
+    /// </summary>
+    public string? ProductSchema { get; init; }
+
+    /// <summary>The product owner (SID) declared by the file; used by the Git synchronisation only.</summary>
+    public string? ProductOwner { get; init; }
+
+    /// <summary>The reason the <see cref="ClearedResultColumns"/> may leave in clear; used by the Git synchronisation only.</summary>
+    public string? ClearedReason { get; init; }
+
+    /// <summary>
     /// Optional (composite) key that identifies a row of <see cref="ResultTable"/> in the result set. When set, a consent
     /// row filter on the result table is not a denial: the result rows are matched against the rows the filter allows
     /// (semi-join on these columns, evaluated by the database) and all other rows are removed. Without it a row filter
