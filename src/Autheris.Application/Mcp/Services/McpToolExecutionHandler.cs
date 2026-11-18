@@ -106,6 +106,39 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
         string.Equals(toolName, McpDatasetTools.CallProcedure, StringComparison.OrdinalIgnoreCase) ||
         McpSemanticTools.IsSemanticTool(toolName);
 
+    private const string QueryNextStep =
+        "Call get_table_schema(datasets: [...]) to inspect required columns and join conditions, then generate query using query_sql or query_dataset.";
+
+    /// <summary>
+    /// Issue #804: the next step names the query tools only for candidates the caller can read; for the others it asks for an access
+    /// request first. Built from the caller's own <c>accessStatus</c> values only; a candidate without a status keeps the query step.
+    /// </summary>
+    internal static string RecommendedNextStepFor(IReadOnlyList<McpUseCaseCandidate> candidates)
+    {
+        var notReadable = candidates.Count(static c =>
+            c.AccessStatus is not null && !string.Equals(c.AccessStatus, CatalogAccessStatus.Granted, StringComparison.Ordinal));
+        if (notReadable == 0)
+        {
+            return QueryNextStep;
+        }
+
+        return notReadable == candidates.Count
+            ? "None of these tables is readable for you (accessStatus is not GRANTED): request access to the tables you need before querying them; describe_my_access explains your current access."
+            : "Call get_table_schema(datasets: [...]) for the candidates with accessStatus GRANTED to inspect required columns and join conditions, then generate query using query_sql or query_dataset. Request access to the other candidates before querying them.";
+    }
+
+    /// <summary>Issue #804: the optional <c>accessStatus</c> argument; absent or null is no filter, any value that is not a known status is invalid.</summary>
+    private static bool TryReadAccessFilter(JsonElement root, out DiscoveryAccessState? filter)
+    {
+        filter = null;
+        if (!root.TryGetProperty("accessStatus", out var prop) || prop.ValueKind == JsonValueKind.Null)
+        {
+            return true;
+        }
+
+        return prop.ValueKind == JsonValueKind.String && CatalogAccessStatus.TryParseFilter(prop.GetString(), out filter);
+    }
+
     /// <summary>
     /// Issue #447: the central tool error mapping. A transport denial from any gate call below becomes a tool error
     /// (<c>isError</c>) with the code <c>TRANSPORT_NOT_ALLOWED</c> and fixed text: no source name, no sub-reason.
@@ -227,8 +260,14 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
                 tagFilter = null;
             }
 
+            if (!TryReadAccessFilter(root, out var accessFilter))
+            {
+                return CreateMcpError(sessionContext.TenantId, tool.Name, InvalidParamsCode, CatalogAccessStatus.InvalidFilterMessage);
+            }
+
             // A tag narrows the already authorized hits: the search is widened to the documented maximum, then cut back to the requested limit.
-            var searchQuery = new CatalogSearchQuery(query, domain, tagFilter is null ? limit : MaxCatalogSearchResults, mode, ExpandRelations: true, Language: language);
+            // Issue #804: the access filter is applied by the search itself, before ranking and the limit.
+            var searchQuery = new CatalogSearchQuery(query, domain, tagFilter is null ? limit : MaxCatalogSearchResults, mode, ExpandRelations: true, Language: language, AccessStatus: accessFilter);
             IReadOnlyList<CatalogSearchHit> results;
             try
             {
@@ -264,6 +303,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
                 description = DiscoveryTextSanitizer.Summarize(h.Description),
                 language = h.Language,
                 relevance_score = Math.Round(h.CombinedScore, 4),
+                accessStatus = h.AccessStatus,
                 matched_terms = h.MatchedTerms.Select(t => DiscoveryTextSanitizer.SanitizeRequiredText(t, string.Empty, DiscoveryTextSanitizer.MaxDisplayNameRunes)).ToList(),
                 matched_columns = h.RelevantColumns,
                 join_relations = h.RelatedJoinPaths.Select(r => new
@@ -290,8 +330,12 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
             var domain = root.TryGetProperty("domain", out var dProp) ? dProp.GetString() : null;
             var limit = root.TryGetProperty("limit", out var lProp) && lProp.TryGetInt32(out var l) ? Math.Clamp(l, 1, MaxCatalogSearchResults) : DefaultCatalogSearchResults;
             var language = root.TryGetProperty("language", out var langProp) ? langProp.GetString() : null;
+            if (!TryReadAccessFilter(root, out var accessFilter))
+            {
+                return CreateMcpError(sessionContext.TenantId, tool.Name, InvalidParamsCode, CatalogAccessStatus.InvalidFilterMessage);
+            }
 
-            var searchQuery = new CatalogSearchQuery(useCase, domain, limit, CatalogSearchMode.Hybrid, ExpandRelations: true, Language: language);
+            var searchQuery = new CatalogSearchQuery(useCase, domain, limit, CatalogSearchMode.Hybrid, ExpandRelations: true, Language: language, AccessStatus: accessFilter);
             IReadOnlyList<CatalogSearchHit> results;
             try
             {
@@ -312,7 +356,8 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
                 Relations: h.RelatedJoinPaths.Select(r => new McpTableRelation(
                     TargetTable: McpDatasetCatalog.DatasetId(r.ToTable),
                     FromColumn: r.FromColumn,
-                    ToColumn: r.ToColumn)).ToList()
+                    ToColumn: r.ToColumn)).ToList(),
+                AccessStatus: h.AccessStatus
             )).ToList();
 
             return SerializeBoundedList(candidates, items => new
@@ -321,7 +366,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
                 UseCase = useCase,
                 TotalCandidates = results.Count,
                 Candidates = items,
-                RecommendedNextStep = "Call get_table_schema(datasets: [...]) to inspect required columns and join conditions, then generate query using query_sql or query_dataset."
+                RecommendedNextStep = RecommendedNextStepFor(candidates)
             });
         }
 

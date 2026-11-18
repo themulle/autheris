@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- `search_catalog` hits and `find_relevant_tables` candidates carry `accessStatus`, the caller's own status as `list_datasets` reports it (`GRANTED`, `PENDING`, `EXPIRED`, `REQUEST_ACCESS`); the REST `/api/v1/catalog/search` hits carry it too. `find_relevant_tables` recommends an access request instead of the query tools for candidates the caller cannot read (#804).
+- Optional `accessStatus` filter on `list_datasets`, `search_catalog`, `find_relevant_tables` and `GET /api/v1/catalog/objects` (`granted`, `requested`, `expired`, `none` there), applied before ranking, limit and paging, so `total`, `nextOffset`, `totalCount` and `nextCursor` count the filtered set. The filter evaluates only the caller's grant candidates: one consent read per request and one access decision per table the caller holds a grant on, kept for the whole request (also across the internal pages of the REST list), not one per catalog table. Empty and unknown values are rejected (#798, #804).
 - `GET /api/v1/catalog/graphql-schema-status` (authenticated) reports whether the GraphQL schema this instance serves is behind the catalog: `200 {"status":"Current"}` or `503 {"status":"Updating"}` with `Retry-After: 1`. A client that writes the catalog and then queries (a seeding job, integration tests) polls it until 200. It compares the served schema with the catalog version in the store, so it is correct even before the change event arrives; the body carries no catalog names, counts or versions. `/health/ready` is unchanged and does not turn 503 during a schema rebuild (#802).
 
 ### Changed
