@@ -110,6 +110,7 @@ public sealed class Issue270GovernanceBatchHydrationTests : IDisposable
             Identifier = tableId,
             Table = initialMetadata.Table,
             Columns = initialMetadata.Columns,
+            ColumnClassifications = initialMetadata.ColumnClassifications,
             PrimaryKeyColumns = ["id"],
             ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
             {
@@ -164,6 +165,7 @@ public sealed class Issue270GovernanceBatchHydrationTests : IDisposable
             Identifier = tableId,
             Table = initialMetadata.Table,
             Columns = initialMetadata.Columns,
+            ColumnClassifications = initialMetadata.ColumnClassifications,
             PrimaryKeyColumns = ["id"],
             ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
         };
@@ -213,6 +215,7 @@ public sealed class Issue270GovernanceBatchHydrationTests : IDisposable
                 Description = "Updated business description"
             },
             Columns = initialMetadata.Columns,
+            ColumnClassifications = initialMetadata.ColumnClassifications,
             PrimaryKeyColumns = ["id"],
             ColumnMaskingRules = initialMetadata.ColumnMaskingRules
         };

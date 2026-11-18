@@ -14,6 +14,8 @@ public static class GovernanceGlobalTables
     {
         "TABLES", // Platform-wide catalog table registry
         "TABLE_COLUMNS", // Column definitions of registered catalog tables
+        "COLUMN_CLASSIFICATIONS", // Column classification assignments (scope column, no tenant_id)
+        "COLUMN_MASK_OVERRIDES", // Column mask overrides (scope column, no tenant_id)
         "DATA_OWNERS", // Platform data ownership assignments
         "TABLE_OWNERS", // Table owner mappings
         "DATA_OWNER_DELEGATIONS", // Data owner delegations

@@ -783,7 +783,7 @@ ORDER BY c.table_id, c.column_name, cc.code";
             static t => t.Value.ToDictionary(static c => c.Key, static c => (IReadOnlyList<ColumnClassification>)c.Value, StringComparer.OrdinalIgnoreCase));
     }
 
-    internal static void SeedSensitiveColumn(DbConnection conn, DbTransaction trans, string colId, string constant)
+    internal static void SeedSensitiveColumn(DbConnection conn, DbTransaction trans, string colId, string ruleType, string replacement)
     {
         using (var cc = conn.CreateCommand())
         {
@@ -799,11 +799,13 @@ ORDER BY c.table_id, c.column_name, cc.code";
         using var mask = conn.CreateCommand();
         mask.Transaction = trans;
         mask.CommandText = @"INSERT INTO COLUMN_MASK_OVERRIDES (id, scope, table_column_id, code, mask_function, params_json, key_ref, catalog_text, updated_by, updated_at)
-                             SELECT @id, '*', @cid, NULL, 'TYPE_SAFE_REDACT', @params, NULL, 'VISIBLE', 'system:seed', CURRENT_TIMESTAMP
+                             SELECT @id, '*', @cid, NULL, @fn, @params, NULL, 'VISIBLE', 'system:seed', CURRENT_TIMESTAMP
                              WHERE NOT EXISTS (SELECT 1 FROM COLUMN_MASK_OVERRIDES WHERE scope = '*' AND table_column_id = @cid AND code IS NULL);";
         mask.AddBound("@id", Guid.NewGuid());
         mask.AddBound("@cid", colId);
-        mask.AddBound("@params", System.Text.Json.JsonSerializer.Serialize(new { constant }));
+        var (function, parameters, _) = MaskingRuleOverrideMapper.FromRule(new MaskingRule { RuleType = ruleType, Replacement = replacement });
+        mask.AddBound("@fn", function);
+        mask.AddBound("@params", (object?)parameters ?? DBNull.Value);
         mask.ExecuteNonQuery();
     }
 

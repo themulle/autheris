@@ -325,6 +325,7 @@ public sealed class TreeSqlCompilerIntegrationTests
                 Identifier = meta.Identifier,
                 Table = meta.Table,
                 Columns = meta.Columns,
+                ColumnClassifications = meta.ColumnClassifications,
                 PrimaryKeyColumns = meta.PrimaryKeyColumns,
                 ColumnMaskingRules = new Dictionary<string, MaskingRule> { ["email"] = new MaskingRule { RuleType = "HMAC_SHA256" } }
             }

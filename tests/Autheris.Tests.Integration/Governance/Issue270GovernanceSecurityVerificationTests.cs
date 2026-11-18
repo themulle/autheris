@@ -368,6 +368,7 @@ public sealed class Issue270GovernanceSecurityVerificationTests : IDisposable
             Identifier = tableId,
             Table = initialMeta.Table,
             Columns = initialMeta.Columns,
+            ColumnClassifications = initialMeta.ColumnClassifications,
             PrimaryKeyColumns = ["id"],
             ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
             {

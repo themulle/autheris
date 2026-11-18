@@ -258,7 +258,7 @@ public partial class GovernanceRepository
 
                         if (cSens)
                         {
-                            CatalogRowHydrator.SeedSensitiveColumn(conn, trans, colId, "***");
+                            CatalogRowHydrator.SeedSensitiveColumn(conn, trans, colId, "REGEX", string.Empty);
                         }
                     }
                 }
@@ -337,7 +337,7 @@ public partial class GovernanceRepository
 
                 if (cSens)
                 {
-                    CatalogRowHydrator.SeedSensitiveColumn(conn, trans, colId, "[CONFIDENTIAL NOTE]");
+                    CatalogRowHydrator.SeedSensitiveColumn(conn, trans, colId, "REDACT", "[CONFIDENTIAL NOTE]");
                 }
             }
 
@@ -527,7 +527,7 @@ public partial class GovernanceRepository
 
                         if (cSens && !string.IsNullOrEmpty(colId))
                         {
-                            CatalogRowHydrator.SeedSensitiveColumn(conn, trans, colId, "***@***.***");
+                            CatalogRowHydrator.SeedSensitiveColumn(conn, trans, colId, "EMAIL", "***@***.***");
                         }
                     }
                 }

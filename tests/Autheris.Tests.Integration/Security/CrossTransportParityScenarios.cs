@@ -109,6 +109,7 @@ internal sealed partial class CrossTransportParityHarness
         },
         TenantColumnName = table.TenantColumnName,
         Columns = table.Columns,
+        ColumnClassifications = table.ColumnClassifications,
         ColumnMaskingRules = table.ColumnMaskingRules
     };
 
@@ -132,7 +133,8 @@ internal sealed partial class CrossTransportParityHarness
         Identifier = OrdersId,
         Table = new Table { Id = Guid.NewGuid(), SourceName = "default", SchemaName = "main", TableName = "orders", SourceType = "Databricks", EnforcementMode = EnforcementMode.Delegated, IsActive = true },
         TenantColumnName = "tenant_id",
-        Columns = DefaultOrdersTable().Columns
+        Columns = DefaultOrdersTable().Columns,
+        ColumnClassifications = DefaultOrdersTable().ColumnClassifications
     };
 
     private static ClaimsPrincipal CompleteUser(Sid sid, Sid? group = null, string[]? roles = null, string[]? scopes = null)

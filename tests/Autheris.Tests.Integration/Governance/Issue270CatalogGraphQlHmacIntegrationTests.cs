@@ -222,6 +222,7 @@ public sealed class Issue270CatalogGraphQlHmacIntegrationTests : IDisposable
             Identifier = _txTableId,
             Table = initialMeta.Table,
             Columns = initialMeta.Columns,
+            ColumnClassifications = initialMeta.ColumnClassifications,
             PrimaryKeyColumns = ["id"],
             ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
             {
