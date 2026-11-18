@@ -26,7 +26,8 @@ public static partial class GatewayGovernanceServiceExtensions
             sp.GetRequiredService<IAuditWriter>(),
             sp.GetService<IConsentEventOutbox>(),
             sp.GetService<TimeProvider>(),
-            sp.GetService<ILogger<DataProductService>>()));
+            sp.GetService<ILogger<DataProductService>>(),
+            sp.GetService<IProductCatalogOwnerStore>() is { } ownerStore ? new ProductOwnershipSync(ownerStore) : null));
         services.AddSingleton(sp => new DataSourceOwnerService(
             sp.GetRequiredService<IDataProductRepository>(),
             sp.GetRequiredService<IAuditWriter>(),

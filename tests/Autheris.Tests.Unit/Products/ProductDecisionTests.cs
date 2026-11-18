@@ -7,6 +7,7 @@ using Autheris.Domain.Security;
 using Autheris.Tests.Unit.Governance.Classification;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -16,7 +17,7 @@ namespace Autheris.Tests.Unit.Products;
 public sealed class ProductDecisionTests
 {
     private static readonly DateTimeOffset Now = DateTimeOffset.UtcNow;
-    private static readonly TableIdentifier ProductObject = ProductSource.ObjectOf("sales", "orders_view");
+    private static readonly TableIdentifier ProductObject = ProductSource.ObjectOf(ProductHarness.Tenant, "sales", "orders_view");
 
     private readonly ProductHarness _h = new();
 
@@ -151,8 +152,8 @@ public sealed class ProductDecisionTests
         (await Decide(pdp, product, AccessOperation.Insert)).IsAllowed.ShouldBeFalse();
         (await Decide(pdp, product with { Table = product.Table with { IsActive = false } })).IsAllowed.ShouldBeFalse();
 
-        var other = ProductSource.ObjectOf("sales", "missing");
-        var unknown = product with { Identifier = other, Table = product.Table with { TableName = "missing" } };
+        var other = ProductSource.ObjectOf(ProductHarness.Tenant, "sales", "missing");
+        var unknown = product with { Identifier = other, Table = product.Table with { TableName = other.TableName } };
         (await Decide(Pdp(Grant(other, ConsentEffect.Allow, Rule("id", ColumnAccessLevel.Clear))), unknown)).IsAllowed.ShouldBeFalse();
     }
 
@@ -169,5 +170,67 @@ public sealed class ProductDecisionTests
         ProductFreshness.IsExposable(limited with { Status = DataProductStatus.Retired }, Now, Now).ShouldBeFalse();
         ProductFreshness.IsExposable(limited with { Status = DataProductStatus.Invalid }, Now, Now).ShouldBeFalse();
         ProductCatalogProjector.Project(limited with { Status = DataProductStatus.Retired }, Now, Now).Table.IsActive.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Product_catalog_object_uses_tenant_scoped_identity()
+    {
+        var product = await CreateProductAsync();
+        var schema = Autheris.Application.Catalog.Semantic.SemanticVirtualTables.TenantSchema(ProductHarness.Tenant);
+
+        product.Identifier.ShouldBe(new TableIdentifier("products", schema, "sales__orders_view"));
+        ProductSource.CacheKey(ProductHarness.Tenant, "sales", "orders_view").ShouldBe(product.Identifier);
+        ProductSource.TryParse(product.Identifier, ProductHarness.Tenant, out var parsedSchema, out var parsedName).ShouldBeTrue();
+        (parsedSchema, parsedName).ShouldBe(("sales", "orders_view"));
+
+        // another tenant, the bare legacy form and a wrong domain name no product
+        ProductSource.TryParse(product.Identifier, new TenantId("tenant-b"), out _, out _).ShouldBeFalse();
+        ProductSource.TryParse(new TableIdentifier("products", "sales", "orders_view"), ProductHarness.Tenant, out _, out _).ShouldBeFalse();
+        ProductSource.TryParse(product.Identifier with { Domain = "erp" }, ProductHarness.Tenant, out _, out _).ShouldBeFalse();
+
+        // a grant addressed at another tenant's product identity never opens this product
+        var foreign = ProductSource.ObjectOf(new TenantId("tenant-b"), "sales", "orders_view");
+        var pdp = Pdp(Grant(foreign, ConsentEffect.Allow, Rule("id", ColumnAccessLevel.Clear)));
+        (await Decide(pdp, product with { Identifier = foreign })).IsAllowed.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task A_schema_that_would_make_the_identity_ambiguous_is_rejected()
+    {
+        var admin = _h.Caller(ProductHarness.Admin, admin: true);
+        foreach (var schema in new[] { "sales__eu", "sales_" })
+        {
+            var request = new ProductPutRequest(admin, schema, "orders_view", DataProductKind.View, "SELECT id FROM crm.public.customers", ProductHarness.Bob);
+            (await Should.ThrowAsync<ProductException>(() => _h.Service.PutAsync(request))).Code.ShouldBe(ProductErrorCodes.DefinitionInvalid);
+        }
+    }
+
+    [Fact]
+    public async Task Product_owner_linked_as_data_owner()
+    {
+        var admin = _h.Caller(ProductHarness.Admin, admin: true);
+        var created = await _h.Service.PutAsync(_h.Put(admin, "SELECT id FROM crm.public.customers", ProductHarness.Bob));
+        var catalogObject = ProductSource.ObjectOf(created.Tenant, "sales", "orders_view");
+
+        _h.OwnerLinks.Owners[catalogObject].ShouldBe(ProductHarness.Bob);
+
+        await _h.Service.TransferAsync(admin, "sales", "orders_view", ProductHarness.Alice);
+        _h.OwnerLinks.Owners[catalogObject].ShouldBe(ProductHarness.Alice);
+
+        await _h.Service.RetireAsync(admin, "sales", "orders_view");
+        _h.OwnerLinks.Owners[catalogObject].ShouldBeNull("a retired product has no data owner");
+    }
+
+    [Fact]
+    public async Task A_failed_owner_link_fails_the_operation()
+    {
+        var failing = Substitute.For<IProductCatalogOwnerStore>();
+        failing.SetOwnerAsync(default, default, default, default).ReturnsForAnyArgs(_ => throw new InvalidOperationException("db down"));
+        var sync = new ProductOwnershipSync(failing);
+        var product = await CreateProductAsync();
+        var stored = (await _h.Store.GetProductAsync(ProductHarness.Tenant, "sales", "orders_view"))!;
+
+        (await Should.ThrowAsync<ProductException>(() => sync.SyncAsync(stored))).Code.ShouldBe(ProductErrorCodes.OwnerSyncFailed);
+        product.ShouldNotBeNull();
     }
 }

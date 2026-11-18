@@ -77,14 +77,16 @@ public sealed class ConsentDecisionPipelineTests
         string tenant = "tenant-a",
         GranteeType granteeType = GranteeType.User,
         string? granteeRef = null,
-        List<ApprovalStep>? steps = null) => new()
+        List<ApprovalStep>? steps = null,
+        Sid? requester = null,
+        TableIdentifier? table = null) => new()
     {
         Id = Guid.NewGuid(),
         TableId = Guid.NewGuid(),
-        TableIdentifier = new TableIdentifier("sales", "dbo", "orders"),
-        RequesterSid = RequesterSid,
+        TableIdentifier = table ?? new TableIdentifier("sales", "dbo", "orders"),
+        RequesterSid = requester ?? RequesterSid,
         RequestedGranteeType = granteeType,
-        RequestedGranteeRef = granteeRef ?? RequesterSid.Value,
+        RequestedGranteeRef = granteeRef ?? (requester ?? RequesterSid).Value,
         BusinessJustification = "Pipeline verification",
         RequestedValidTo = FixedNow.AddDays(14),
         Status = status,
@@ -301,6 +303,23 @@ public sealed class ConsentDecisionPipelineTests
         approvals.GetConsentRequestAsync(req.Id, Arg.Any<CancellationToken>()).Returns(req);
         scimGroups.GetEffectiveGroupSidsForUserAsync(TenantA, Arg.Any<string>(), Approver1Sid.Value, Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(new EffectiveScimGroupsResult(new HashSet<string>(["S-1-5-21-TARGET-GRP"]), false));
+
+        var ex = await Should.ThrowAsync<ConsentDecisionException>(() => pipeline.DecideAsync(
+            new ConsentDecisionCommand(req.Id, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, Principal(Approver1Sid))));
+
+        ex.ErrorCode.ShouldBe(ConsentDecisionErrorCodes.SelfApprovalForbidden);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Self_approval_of_product_grant_rejected()
+    {
+        // the product owner is the data owner of the product object (an authorized approver), yet never decides their own request
+        var product = Autheris.Application.Products.ProductSource.ObjectOf(TenantA, "sales", "orders_view");
+        var (pipeline, approvals, _, ownership, _, _, _, _) = BuildSut();
+        ownership.IsAuthorizedApproverForTableAsync(product, Approver1Sid, Arg.Any<CancellationToken>()).Returns(true);
+        var req = Request(requester: Approver1Sid, table: product);
+        approvals.GetConsentRequestAsync(req.Id, Arg.Any<CancellationToken>()).Returns(req);
 
         var ex = await Should.ThrowAsync<ConsentDecisionException>(() => pipeline.DecideAsync(
             new ConsentDecisionCommand(req.Id, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, Principal(Approver1Sid))));

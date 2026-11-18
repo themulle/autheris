@@ -39,7 +39,7 @@ using TrinoSqlEngine.Ast.Nodes;
 using Autheris.Application.Sql.Federation.Parameters;
 using Autheris.Application.Sql.ListParameters;
 
-public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionService
+public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionService, Autheris.Application.Products.IProductDefinerExecutor
 {
     private static readonly SqlTokenSecurityOptions AnalysisTokenOptions = Autheris.Application.Sql.Policy.ClientSqlTokenPolicy.Analysis;
 
@@ -213,8 +213,34 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+        return await BufferedAsync(request, user, tenantId, definer: null, ct).ConfigureAwait(false);
+    }
 
-        var (duckDbResult, plan, truncated) = await ExecuteFederatedInternalAsync(request, user, tenantId, ct).ConfigureAwait(false);
+    /// <summary>
+    /// Stage 1 of a data product: the definition runs as the product. Only the consent decision of the base objects is skipped; admission,
+    /// reserved names, the security visitor, read-only enforcement, timeouts, limits and auditing apply as for any federated query.
+    /// </summary>
+    public async Task<GovernedSqlResult> ExecuteAsync(Autheris.Application.Products.ProductDefiner definer, GovernedSqlQueryRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(definer);
+        ArgumentNullException.ThrowIfNull(request);
+        if (!string.Equals(request.Transport, SqlTransports.ProductLoad, StringComparison.Ordinal) ||
+            !string.Equals(request.Sql, definer.Product.Definition, StringComparison.Ordinal))
+        {
+            throw new WebSqlPolicyException("A product definer runs only the definition of its product.");
+        }
+
+        return await BufferedAsync(request, definer.Principal, definer.Tenant, definer, ct).ConfigureAwait(false);
+    }
+
+    private async Task<GovernedSqlResult> BufferedAsync(
+        GovernedSqlQueryRequest request,
+        ClaimsPrincipal user,
+        TenantId tenantId,
+        Autheris.Application.Products.ProductDefiner? definer,
+        CancellationToken ct)
+    {
+        var (duckDbResult, plan, truncated) = await ExecuteFederatedInternalAsync(request, user, tenantId, ct, definer).ConfigureAwait(false);
 
         var rows = new List<IReadOnlyDictionary<string, object?>>(duckDbResult.Rows.Count);
         foreach (var row in duckDbResult.Rows)
@@ -291,7 +317,8 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         GovernedSqlQueryRequest request,
         ClaimsPrincipal user,
         TenantId tenantId,
-        CancellationToken ct)
+        CancellationToken ct,
+        Autheris.Application.Products.ProductDefiner? definer = null)
     {
         var crossSourceOptions = _options.Value.WebSql?.CrossSource ?? new CrossSourceOptions();
         if (!crossSourceOptions.Enabled)
@@ -301,9 +328,15 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
 
         // Transport Gate (Section 3.5)
         var allowedTransports = crossSourceOptions.GetEffectiveAllowedTransports();
-        // Fail-closed: a request without a transport is rejected, never exempted from the gate.
-        if (string.IsNullOrWhiteSpace(request.Transport) ||
-            !allowedTransports.Any(t => string.Equals(t, request.Transport, StringComparison.OrdinalIgnoreCase)))
+        // Fail-closed: a request without a transport is rejected, never exempted from the gate. The product load transport is only valid with a definer.
+        var isProductLoad = string.Equals(request.Transport, SqlTransports.ProductLoad, StringComparison.Ordinal);
+        if (isProductLoad != (definer is not null))
+        {
+            throw new WebSqlPolicyException("Cross-catalog queries across multiple data sources are not supported in WebSQL.");
+        }
+
+        if (definer is null && (string.IsNullOrWhiteSpace(request.Transport) ||
+            !allowedTransports.Any(t => string.Equals(t, request.Transport, StringComparison.OrdinalIgnoreCase))))
         {
             throw new WebSqlPolicyException("Cross-catalog queries across multiple data sources are not supported in WebSQL.");
         }
@@ -391,7 +424,8 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         {
             throw new WebSqlPolicyException(routing.RejectionReason ?? "Unsupported data source type.");
         }
-        if (routing.SourceClass != QuerySourceClass.CrossSource)
+        // a definition over one source is staged through the same governed path as a cross-source one
+        if (routing.SourceClass != QuerySourceClass.CrossSource && !(definer is not null && routing.SourceClass == QuerySourceClass.HomogeneousSql))
         {
             throw new WebSqlPolicyException("Query is not a cross-source query.");
         }
@@ -420,7 +454,9 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
             timeoutCts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
 
             // Phase A: Authorize ALL tables before any read (INV-1, INV-2)
-            var (decisions, userSid) = await AuthorizeAllTablesAsync(metadata, routing.Tables, user, tenantId, isDml: false, timeoutCts.Token).ConfigureAwait(false);
+            var (decisions, userSid) = definer is null
+                ? await AuthorizeAllTablesAsync(metadata, routing.Tables, user, tenantId, isDml: false, timeoutCts.Token).ConfigureAwait(false)
+                : AuthorizeDefinerTables(definer, routing.Tables, metadata, tenantId);
 
             // Issue #447 C2: all-or-nothing before key loading, planning, the start audit record and any staging.
             await _transportGate.EnsureCatalogSourcesAsync(routing.Tables.Select(t => t.EffectiveDataSource), timeoutCts.Token).ConfigureAwait(false);
@@ -546,6 +582,55 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         }
 
         return await _vfPlanner.PlanAsync(statement, tables, decisions, tenantId, ct, keySourceReads).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The decisions of a definer run: the base objects of the product are read as the product, so their consent decision is skipped
+    /// (no grant, deny or row policy of the base objects applies; the product's own grants decide stage 2). The tenant column rule, the
+    /// masked column guardrails and the exclusion of product objects (a product never reads a product) stay.
+    /// </summary>
+    private (Dictionary<TableIdentifier, TableAccessDecision> Decisions, Sid UserSid) AuthorizeDefinerTables(
+        Autheris.Application.Products.ProductDefiner definer,
+        IReadOnlyList<ResolvedSourceTable> tables,
+        SqlQueryMetadata metadata,
+        TenantId tenantId)
+    {
+        if (definer.Tenant != tenantId || string.IsNullOrWhiteSpace(tenantId.Value))
+        {
+            throw new WebSqlPolicyException("A product definer runs only in the tenant of its product.");
+        }
+
+        var decisions = new Dictionary<TableIdentifier, TableAccessDecision>();
+        foreach (var resolved in tables)
+        {
+            if (Autheris.Application.Products.ProductSource.IsProductSource(resolved.Metadata.Identifier.Domain) ||
+                Autheris.Application.Products.ProductSource.IsProductSource(resolved.EffectiveDataSource) ||
+                Autheris.Application.Products.ProductSource.IsProductSource(resolved.Metadata.Table.SourceName))
+            {
+                throw new WebSqlTableDeniedException($"WebSQL access denied to table '{resolved.Target.FullName}'.");
+            }
+
+            var decisionKey = CrossSourcePlanner.DecisionKey(resolved);
+            if (decisions.ContainsKey(decisionKey))
+            {
+                continue;
+            }
+
+            string? tenantColumn = TableMetadata.RequireTenantColumnOrThrow(
+                resolved.Metadata,
+                _options.Value.DataSources?.RequireTenantColumn == true,
+                _options.Value.DataSources?.TenantColumnExemptTables);
+            if (tenantColumn != null && !System.Text.RegularExpressions.Regex.IsMatch(tenantColumn, "^[A-Za-z_][A-Za-z0-9_]{0,127}$"))
+            {
+                throw new InvalidOperationException($"The tenant column '{tenantColumn}' of {resolved.Target.FullName} is not a plain identifier; the query is refused (fail-closed).");
+            }
+
+            var decision = TableAccessDecision.Allowed(resolved.Metadata.Identifier, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true) with { EvaluatedByPdp = true };
+            GovernedSqlExecutionService.EnforceMaskedColumnGuardrails(resolved.Target, resolved.Metadata, decision, metadata);
+            decisions[decisionKey] = decision;
+        }
+
+        return (decisions, definer.Principal.GetUserSid() ?? new Sid("anonymous"));
     }
 
     private async Task<(Dictionary<TableIdentifier, TableAccessDecision> Decisions, Sid UserSid)> AuthorizeAllTablesAsync(

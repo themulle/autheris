@@ -12,7 +12,7 @@ public static class ProductLoadingServiceExtensions
     /// <summary>Stage 1 of data product views. Needs the governed table cache, so it is registered together with it.</summary>
     internal static IServiceCollection AddProductLoading(this IServiceCollection services)
     {
-        services.TryAddSingleton<IProductQueryRunner, UnwiredProductQueryRunner>();
+        services.TryAddSingleton<IProductQueryRunner, FederationProductQueryRunner>();
         services.TryAddSingleton(sp => new ProductLoadService(
             sp.GetRequiredService<IDataProductRepository>(),
             sp.GetRequiredService<IProductQueryRunner>(),

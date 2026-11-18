@@ -77,7 +77,7 @@ internal sealed class ScriptedRunner : IProductQueryRunner
 
     public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    public async Task<ProductQueryResult> RunAsync(DataProduct product, CancellationToken ct)
+    public async Task<ProductQueryResult> RunAsync(ProductDefiner definer, CancellationToken ct)
     {
         var call = Interlocked.Increment(ref _calls);
         Started.TrySetResult();

@@ -43,7 +43,7 @@ public sealed partial class ProductArchitectureTests
         load.ShouldContain("ProductDefinitions.Hash(current.Definition)");
         load.ShouldContain("ProductErrorCodes.DefinitionChanged");
         // the runner only ever receives the re-read current revision
-        load.ShouldContain("runner.RunAsync(product, ct)");
+        load.ShouldContain("runner.RunAsync(new ProductDefiner(product, limits), ct)");
         Regex.Count(load, @"runner\.RunAsync\(").ShouldBe(1);
     }
 }

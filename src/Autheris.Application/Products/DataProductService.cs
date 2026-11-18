@@ -39,8 +39,10 @@ public sealed partial class DataProductService(
     IAuditWriter audit,
     IConsentEventOutbox? outbox = null,
     TimeProvider? timeProvider = null,
-    ILogger<DataProductService>? logger = null)
+    ILogger<DataProductService>? logger = null,
+    IProductOwnershipSync? ownershipSync = null)
 {
+    private readonly IProductOwnershipSync? _ownershipSync = ownershipSync;
     private readonly IDataProductRepository _products = products ?? throw new ArgumentNullException(nameof(products));
     private readonly ProductAuthorityService _authority = authority ?? throw new ArgumentNullException(nameof(authority));
     private readonly IProductCatalogColumns _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
@@ -69,7 +71,7 @@ public sealed partial class DataProductService(
         ArgumentNullException.ThrowIfNull(command);
         var caller = command.Caller;
         var (schema, name) = (Normalize(command.Schema), Normalize(command.Name));
-        if (!ValidName(schema) || !ValidName(name) || command.Description is { Length: > MaxDescriptionLength })
+        if (!ValidSchema(schema) || !ValidName(name) || command.Description is { Length: > MaxDescriptionLength })
         {
             throw Invalid();
         }
@@ -126,6 +128,11 @@ public sealed partial class DataProductService(
         }
 
         var stored = outcome.Product ?? product;
+        if (_ownershipSync is not null && (existing is null || existing.ProductOwner != stored.ProductOwner))
+        {
+            await _ownershipSync.SyncAsync(stored, ct).ConfigureAwait(false);
+        }
+
         var notified = definitionChanged
             ? await NotifyBaseOwnersAsync(stored, existing is null ? ProductEventTypes.Created : ProductEventTypes.Changed, now, ct).ConfigureAwait(false)
             : 0;
@@ -156,6 +163,11 @@ public sealed partial class DataProductService(
 
         var now = _time.GetUtcNow();
         var retired = await ReplaceAsync(product with { Status = DataProductStatus.Retired, UpdatedAt = now, Version = product.Version + 1 }, product.Version, ct).ConfigureAwait(false);
+        if (_ownershipSync is not null)
+        {
+            await _ownershipSync.SyncAsync(retired, ct).ConfigureAwait(false);
+        }
+
         var notified = await NotifyBaseOwnersAsync(retired, ProductEventTypes.Retired, now, ct).ConfigureAwait(false);
         await AuditAsync(AuditEventTypes.ProductRetired, caller, retired, new { baseOwnersNotified = notified }, now, ct).ConfigureAwait(false);
         return retired;
@@ -178,6 +190,11 @@ public sealed partial class DataProductService(
 
         var now = _time.GetUtcNow();
         var moved = await ReplaceAsync(product with { ProductOwner = newOwner, UpdatedAt = now, Version = product.Version + 1 }, product.Version, ct).ConfigureAwait(false);
+        if (_ownershipSync is not null)
+        {
+            await _ownershipSync.SyncAsync(moved, ct).ConfigureAwait(false);
+        }
+
         await AuditAsync(AuditEventTypes.ProductOwnerTransferred, caller, moved, new { previousOwner = product.ProductOwner.Value, newOwner = newOwner.Value }, now, ct).ConfigureAwait(false);
         return moved;
     }

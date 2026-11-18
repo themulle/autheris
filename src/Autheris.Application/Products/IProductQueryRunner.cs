@@ -21,15 +21,22 @@ public sealed record ProductQueryResult(IReadOnlyList<string> Columns, IAsyncEnu
 /// </summary>
 public interface IProductQueryRunner
 {
-    Task<ProductQueryResult> RunAsync(DataProduct product, CancellationToken ct);
+    Task<ProductQueryResult> RunAsync(ProductDefiner definer, CancellationToken ct);
 }
 
 /// <summary>
-/// Fails closed with <see cref="ProductErrorCodes.LoadFailed"/> until the definer execution of the federation staging is wired: no product
-/// SQL ever runs under a caller identity or without the staging governance.
+/// Fails closed with <see cref="ProductErrorCodes.LoadFailed"/> when no definer execution is available: no product SQL ever runs under a
+/// caller identity or without the staging governance.
 /// </summary>
 public sealed class UnwiredProductQueryRunner : IProductQueryRunner
 {
-    public Task<ProductQueryResult> RunAsync(DataProduct product, CancellationToken ct) =>
+    public Task<ProductQueryResult> RunAsync(ProductDefiner definer, CancellationToken ct) =>
         throw new ProductLoadException(ProductErrorCodes.LoadFailed);
+}
+
+/// <summary>The federation engine entry that runs a definition as a <see cref="ProductDefiner"/> (buffered, bounded by the engine result cap).</summary>
+public interface IProductDefinerExecutor
+{
+    Task<Autheris.Application.Sql.Interfaces.GovernedSqlResult> ExecuteAsync(
+        ProductDefiner definer, Autheris.Application.Sql.Interfaces.GovernedSqlQueryRequest request, CancellationToken ct);
 }

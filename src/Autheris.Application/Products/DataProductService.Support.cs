@@ -47,6 +47,10 @@ public sealed partial class DataProductService
 
     private static bool ValidName(string value) => NameRegex().IsMatch(value);
 
+    // The schema is the first part of the catalog identity (schema__name): it never holds the separator and never ends with an underscore.
+    private static bool ValidSchema(string value) =>
+        NameRegex().IsMatch(value) && !value.Contains(ProductSource.Separator, StringComparison.Ordinal) && !value.EndsWith('_', StringComparison.Ordinal);
+
     private static ProductException Invalid() => new(ProductFailure.Invalid, ProductErrorCodes.DefinitionInvalid);
 
     private static bool CanView(ProductCaller caller, DataProduct product) =>

@@ -25,6 +25,7 @@ public static class ProductErrorCodes
     public const string Stale = "PRODUCT_STALE";
     public const string Unavailable = "PRODUCT_UNAVAILABLE";
     public const string LoadFailed = "PRODUCT_LOAD_FAILED";
+    public const string OwnerSyncFailed = "PRODUCT_OWNER_SYNC_FAILED";
     public const string LoadInProgress = "PRODUCT_LOAD_IN_PROGRESS";
     public const string LimitExceeded = "PRODUCT_LIMIT_EXCEEDED";
     public const string DefinitionChanged = "PRODUCT_DEFINITION_CHANGED";

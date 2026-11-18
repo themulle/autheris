@@ -96,6 +96,21 @@ internal sealed class RecordingAuditWriter : IAuditWriter
     public Task RecordAsync(AuditLogEntry entry, CancellationToken ct = default) => RecordRequiredAsync(entry, ct);
 }
 
+/// <summary>Records the owner links of product catalog objects.</summary>
+internal sealed class RecordingOwnerStore : IProductCatalogOwnerStore
+{
+    public Dictionary<TableIdentifier, Sid?> Owners { get; } = [];
+
+    public int Calls { get; private set; }
+
+    public Task SetOwnerAsync(TenantId tenant, TableIdentifier catalogObject, Sid? owner, CancellationToken ct = default)
+    {
+        Calls++;
+        Owners[catalogObject] = owner;
+        return Task.CompletedTask;
+    }
+}
+
 /// <summary>Wires the real services over in-memory stores: owners per table, a stored catalog with PII flags and a recording audit/outbox.</summary>
 internal sealed class ProductHarness
 {
@@ -117,6 +132,8 @@ internal sealed class ProductHarness
     public IConsentEventOutbox Outbox { get; } = Substitute.For<IConsentEventOutbox>();
 
     public Dictionary<string, HashSet<TableIdentifier>> Owned { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    public RecordingOwnerStore OwnerLinks { get; } = new();
 
     public ProductAuthorityService Authority { get; }
 
@@ -143,7 +160,7 @@ internal sealed class ProductHarness
         catalog.GetColumnsAsync(default, default, default).ReturnsForAnyArgs(call => Task.FromResult(Columns(call.ArgAt<TableIdentifier>(1))));
 
         Authority = new ProductAuthorityService(ownership, Store);
-        Service = new DataProductService(Store, Authority, catalog, FastSqlEngine.Default, ownership, Audit, Outbox);
+        Service = new DataProductService(Store, Authority, catalog, FastSqlEngine.Default, ownership, Audit, Outbox, ownershipSync: new ProductOwnershipSync(OwnerLinks));
     }
 
     public static IReadOnlyList<CatalogColumnInfo>? Columns(TableIdentifier table) => table.TableName switch

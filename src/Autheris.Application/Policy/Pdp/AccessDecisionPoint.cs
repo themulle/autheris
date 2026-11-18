@@ -169,6 +169,12 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
             return PreconditionDenied(table, "PRODUCT_READ_ONLY", "Product", null, "Access denied: a data product is read-only.");
         }
 
+        if (isProduct && !Autheris.Application.Products.ProductSource.TryParse(table, subject.TenantId, out _, out _))
+        {
+            // the identity must name a product of the caller's own tenant
+            return PreconditionDenied(table, "PRODUCT_UNKNOWN", "Product", null, "Access denied: the data product is not available.");
+        }
+
         if (request.Operation is AccessOperation.Insert or AccessOperation.Update or AccessOperation.Delete)
         {
             return await DecideWriteAsync(request, ct).ConfigureAwait(false);
@@ -275,9 +281,9 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
             return decision;
         }
 
-        var product = _productRepository is null
+        var product = _productRepository is null || !Autheris.Application.Products.ProductSource.TryParse(decision.Table, tenant, out var productSchema, out var productName)
             ? null
-            : await _productRepository.GetProductAsync(tenant, decision.Table.Schema.ToLowerInvariant(), decision.Table.TableName.ToLowerInvariant(), ct).ConfigureAwait(false);
+            : await _productRepository.GetProductAsync(tenant, productSchema, productName, ct).ConfigureAwait(false);
         if (product is null)
         {
             return TableAccessDecision.Denied(decision.Table, "Access denied: the data product is not available.") with { EvaluatedByPdp = true };

@@ -115,7 +115,7 @@ public sealed class ProductLoadService(
 
     private async Task<ProductResult> StageAsync(DataProduct product, TableIdentifier key, ProductLimits limits, DateTimeOffset started, CancellationToken ct)
     {
-        var query = await runner.RunAsync(product, ct).ConfigureAwait(false);
+        var query = await runner.RunAsync(new ProductDefiner(product, limits), ct).ConfigureAwait(false);
         var counter = new Counter();
         var epoch = started.ToUnixTimeMilliseconds();
         string shadow;

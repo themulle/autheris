@@ -145,3 +145,7 @@ About +1,800 / -400 src (removed procedure consent and row-scope paths), tests +
 - D-49g (OD-44): procedures are not protected by Autheris beyond the permission class: `read` needs `Execute`, `write` needs `ExecuteWrite`; no transaction or connection enforcement; database rights bound what a procedure does.
 - D-49h (OD-44): Git is the admin channel for definitions (`DataProductSync`); repository review is the control; Git-managed definitions are read-only in the API.
 - D-49i: PII lineage defaults to `PiiMasked`; only the creator can declassify, with a reason.
+
+## Changelog
+
+- 2026-11-18: definer load runner (`ProductDefiner`, `FederationProductQueryRunner`, `IProductDefinerExecutor` on the federation service); catalog identity is `products.t_<tenanthash>.<schema>__<name>` (also the table cache key; schemas may not contain `__` or end with `_`); product owner is linked as data owner through `IProductCatalogOwnerStore` (persistence still to do); migration step stays 0023 (main ends at 0022). Definer loads are judged by the WebSql transport flag of each source and need `Gateway:WebSql:CrossSource:Enabled`.
