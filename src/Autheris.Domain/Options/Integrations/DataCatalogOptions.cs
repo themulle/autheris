@@ -36,12 +36,6 @@ public sealed class DataCatalogOptions
     /// <summary>Issue #111: maximum number of catalog tags per dataset (all sources together). Valid range 1-256, default 32.</summary>
     public int MaxTagsPerDataset { get; init; } = 32;
 
-    /// <summary>
-    /// Issue #111: catalog visibility given to tables created after this setting is applied (never at read time, existing tables never change).
-    /// Only <see cref="DatasetVisibility.Hidden"/> and <see cref="DatasetVisibility.Summary"/> are valid; <see cref="DatasetVisibility.Full"/> fails start-up validation.
-    /// </summary>
-    public DatasetVisibility DefaultVisibility { get; init; } = DatasetVisibility.Hidden;
-
     public string OpenLineageEndpoint { get; init; } = string.Empty;
     public string OpenLineageApiKey { get; init; } = string.Empty;
 

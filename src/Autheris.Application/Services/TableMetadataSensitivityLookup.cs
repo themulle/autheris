@@ -25,7 +25,7 @@ public sealed class TableMetadataSensitivityLookup : ITableSensitivityLookup
         _logger = logger;
     }
 
-    public async ValueTask<bool> IsSensitiveAsync(TableIdentifier table, CancellationToken ct = default)
+    public async ValueTask<bool> HasSensitiveDataAsync(TableIdentifier table, CancellationToken ct = default)
     {
         try
         {

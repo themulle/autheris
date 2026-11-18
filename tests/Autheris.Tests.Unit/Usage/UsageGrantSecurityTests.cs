@@ -155,7 +155,6 @@ public sealed class UsageGrantSecurityTests
                 SchemaName = "dbo",
                 SourceName = "sales-pg",
                 SourceType = "PostgreSQL",
-                Visibility = DatasetVisibility.Full,
                 IsActive = true
             },
             PrimaryKeyColumns = ["id"],

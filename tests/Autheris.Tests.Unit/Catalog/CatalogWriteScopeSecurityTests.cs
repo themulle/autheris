@@ -167,6 +167,8 @@ public sealed class CatalogWriteScopeSecurityTests
     {
         public CatalogSnapshot CurrentSnapshot => null!;
 
+        public bool IsInitialized => true;
+
         public ValueTask<CatalogSnapshot> GetSnapshotAsync(CancellationToken ct = default) => new(CurrentSnapshot);
 
         public Task RefreshAsync(CancellationToken ct = default) => Task.CompletedTask;

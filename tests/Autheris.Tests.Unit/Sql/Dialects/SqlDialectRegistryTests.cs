@@ -162,7 +162,7 @@ public sealed class SqlDialectRegistryTests
             Columns = [new TableColumn { ColumnName = "id", DataType = "int" }]
         };
 
-        metaRepo.GetAllTablesAsync(Arg.Any<System.Threading.CancellationToken>()).Returns([oracleTable, dbxTable]);
+        metaRepo.StubAllTables([oracleTable, dbxTable]);
         relRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<System.Threading.CancellationToken>()).Returns([]);
 
         var model = await CatalogSchemaModel.BuildAsync(metaRepo, relRepo, logger: null, dialectRegistry: registry);

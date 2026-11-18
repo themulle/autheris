@@ -114,10 +114,10 @@ public sealed class DefaultReadOrderingTests
     public void HmacOrCatalogSensitiveColumn_NotUsed()
     {
         var m = Meta(("a", "int"), ("b", "int")) with
-        {
+        { ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("a"),
             Columns = new[]
             {
-                new TableColumn { ColumnName = "a", DataType = "int", IsSensitive = true },
+                new TableColumn { ColumnName = "a", DataType = "int" },
                 new TableColumn { ColumnName = "b", DataType = "int" }
             },
             PrimaryKeyColumns = new[] { "a" }

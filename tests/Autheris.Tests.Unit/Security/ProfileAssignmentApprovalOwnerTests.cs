@@ -120,7 +120,7 @@ public sealed class ProfileAssignmentApprovalOwnerTests
         };
 
         var (context, _, tables, repo) = Setup(profile);
-        tables.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Array.Empty<TableMetadata>()); // 0 tables matched
+        tables.StubAllTables(Array.Empty<TableMetadata>()); // 0 tables matched
 
         var req = new ApproveProfileAssignmentRequest { Subject = GranteeSid, SubjectType = "User" };
         var result = await GovernanceEndpoints.ApproveProfileAssignmentAsync(ProfileId, req, context, repo, CancellationToken.None);
@@ -149,7 +149,7 @@ public sealed class ProfileAssignmentApprovalOwnerTests
 
         var (context, owners, tables, repo) = Setup(profile);
         var tableMeta = CreateTable("sales", "public", "orders");
-        tables.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([tableMeta]);
+        tables.StubAllTables([tableMeta]);
 
         // Approver is NOT owner
         owners.IsAuthorizedApproverForTableAsync(tableMeta.Identifier, Arg.Is<Sid>(s => s.Value == ApproverSid), Arg.Any<CancellationToken>())
@@ -182,7 +182,7 @@ public sealed class ProfileAssignmentApprovalOwnerTests
 
         var (context, owners, tables, repo) = Setup(profile);
         var tableMeta = CreateTable("sales", "public", "orders");
-        tables.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([tableMeta]);
+        tables.StubAllTables([tableMeta]);
 
         // Approver IS owner
         owners.IsAuthorizedApproverForTableAsync(tableMeta.Identifier, Arg.Is<Sid>(s => s.Value == ApproverSid), Arg.Any<CancellationToken>())
@@ -211,7 +211,7 @@ public sealed class ProfileAssignmentApprovalOwnerTests
         };
 
         var (context, _, tables, repo) = Setup(profile);
-        tables.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Array.Empty<TableMetadata>()); // 0 tables matched
+        tables.StubAllTables(Array.Empty<TableMetadata>()); // 0 tables matched
 
         var req = new ApproveProfileAssignmentRequest { Subject = GranteeSid, SubjectType = "User" };
         var result = await GovernanceEndpoints.ApproveProfileAssignmentAsync(ProfileId, req, context, repo, CancellationToken.None);

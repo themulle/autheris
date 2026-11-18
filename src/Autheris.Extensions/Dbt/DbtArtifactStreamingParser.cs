@@ -305,7 +305,7 @@ public static class DbtArtifactStreamingParser
                     columns,
                     dependsOn,
                     contractEnforced
-                ) { PhysicalName = physicalName, SyntheticSamples = ExtractSyntheticSamplesFromNode(node, columns.Keys) });
+                ) { PhysicalName = physicalName, SyntheticSamples = ExtractSyntheticSamplesFromNode(node, columns.Keys), GoldenQueries = DbtGoldenQueryMetaReader.Read(node, uniqueId, relations) });
             }
         }
 
@@ -381,7 +381,7 @@ public static class DbtArtifactStreamingParser
                     columns,
                     [],
                     false
-                ) { PhysicalName = physicalName, SyntheticSamples = ExtractSyntheticSamplesFromNode(srcNode, columns.Keys) });
+                ) { PhysicalName = physicalName, SyntheticSamples = ExtractSyntheticSamplesFromNode(srcNode, columns.Keys), GoldenQueries = DbtGoldenQueryMetaReader.Read(srcNode, uniqueId, relations) });
             }
         }
 

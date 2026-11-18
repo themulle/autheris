@@ -233,7 +233,8 @@ public sealed partial class CatalogSchemaModel
         long lastProgressTimestamp = buildStartTimestamp;
         int tablesProcessed = 0;
 
-        var allTables = await metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
+        var allTables = await Autheris.Application.Catalog.CatalogTablePageReader.ReadAllAsync(
+            metadataRepository, new Autheris.Application.Catalog.CatalogTableQuery(IncludeInactive: false), ct: ct).ConfigureAwait(false);
 
         // Filter: only active, discovery-visible SQL tables whose dialect the tree compiler supports.
         // Hidden tables are evicted from any fingerprint cache and excluded silently from the GraphQL schema.

@@ -57,7 +57,7 @@ public sealed class McpUnderlyingTableFourEyesTests
                     ? new TableMetadata { Identifier = id, Table = new Table { TableName = "pub", IsActive = true } }
                     : null;
             });
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Array.Empty<TableMetadata>());
+        repo.StubAllTables(Array.Empty<TableMetadata>());
         return repo;
     }
 

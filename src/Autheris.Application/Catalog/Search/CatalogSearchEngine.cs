@@ -219,7 +219,7 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
         lock (_stateLock)
         {
             var current = _currentSnapshot;
-            var batch = BuildEffectiveBatch(current, preparedDocs, resolvedVectors, explicitRemovals);
+            var batch = BuildEffectiveBatch(preparedDocs, resolvedVectors, explicitRemovals);
 
             var now = _timeProvider.GetUtcNow();
             var nextSnapshot = current is null
@@ -524,7 +524,6 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
     }
 
     private static PreparedDeltaBatch BuildEffectiveBatch(
-        CatalogSearchSnapshot? current,
         PreparedDocument[] candidates,
         ReadOnlyMemory<float>[] vectors,
         HashSet<TableIdentifier> explicitRemovals)
@@ -535,12 +534,8 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
         for (int i = 0; i < candidates.Length; i++)
         {
             var doc = candidates[i];
-            // If an existing non-hidden table transitioned to Hidden, treat it as removed from searchable segments.
-            if (doc.Table.Table.DiscoveryHidden ||
-                (current != null &&
-                 current.MetadataMap.TryGetValue(doc.Table.Identifier, out var existing) &&
-                 existing.Table.Visibility != DatasetVisibility.Hidden &&
-                 doc.Table.Table.Visibility == DatasetVisibility.Hidden))
+            // A table that is hidden now is removed from the searchable segments.
+            if (doc.Table.Table.DiscoveryHidden)
             {
                 removals.Add(doc.Table.Identifier);
                 continue;

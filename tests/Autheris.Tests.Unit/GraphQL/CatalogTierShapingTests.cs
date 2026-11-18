@@ -30,17 +30,17 @@ public sealed class CatalogTierShapingTests
 {
     private static readonly string[] Shared = ["sales.dbo.sum_t", "sales.dbo.full_t", "sales.dbo.hid_t"];
 
-    private static TableMetadata Tier(string name, DatasetVisibility visibility, params string[] tags)
+    private static TableMetadata Tier(string name, params string[] tags)
     {
         var t = Wp0.Table("sales", name, "Short " + name, ["id", "secret_col"]);
-        return t with { Table = t.Table with { Visibility = visibility, DisplayName = name }, CatalogTags = tags };
+        return t with { Table = t.Table with { DisplayName = name }, CatalogTags = tags };
     }
 
     private static readonly TableMetadata[] Tables =
     [
-        Tier("sum_t", DatasetVisibility.Summary, "finance"),
-        Tier("full_t", DatasetVisibility.Full, "ops"),
-        Tier("hid_t", DatasetVisibility.Hidden, "internal")
+        Tier("sum_t", "finance"),
+        Tier("full_t", "ops"),
+        Tier("hid_t", "internal")
     ];
 
     private static GatewayOptions Opts(TenancyShape mode) => new()
@@ -63,27 +63,7 @@ public sealed class CatalogTierShapingTests
 
     private static ClaimsPrincipal Subject(string? tenant = "tenant-a") => Wp0.User("S-USER", tenant);
 
-    [Fact]
-    public async Task Summary_HasNoColumns_Full_HasColumns_Hidden_Absent_TagsFromCatalogTags()
-    {
-        var result = await Catalog(Subject(), Opts(TenancyShape.Multi));
 
-        result.Select(r => r.TableName).OrderBy(n => n).ShouldBe(["full_t", "sum_t"]);
-        var summary = result.Single(r => r.TableName == "sum_t");
-        summary.Columns.ShouldBeEmpty();
-        summary.Description.ShouldBe("Short sum_t");
-        summary.Tags.ShouldBe(["finance"]);
-        result.Single(r => r.TableName == "full_t").ColumnNames.ShouldBe(["id", "secret_col"]);
-        (await Catalog(Subject(), Opts(TenancyShape.Multi), tag: "FINANCE")).Select(r => r.TableName).ShouldBe(["sum_t"]);
-    }
-
-    [Fact]
-    public async Task Summary_Search_NeverMatchesAColumn()
-    {
-        var result = await Catalog(Subject(), Opts(TenancyShape.Multi), search: "secret_col");
-
-        result.Select(r => r.TableName).ShouldBe(["full_t"]);
-    }
 
     [Theory]
     [InlineData("global")]
@@ -110,7 +90,7 @@ public sealed class CatalogTierShapingTests
     public async Task NonAdminRow_Unmarked_TreatedAsNotFound(string caller)
     {
         // Untiered tables: no tier row exists for the non-administrator, nothing leaks.
-        var hiddenOnly = new[] { Tier("hid_t", DatasetVisibility.Hidden) };
+        var hiddenOnly = new[] { Tier("hid_t") };
         var accessor = Substitute.For<IHttpContextAccessor>();
         accessor.HttpContext.Returns(new DefaultHttpContext { User = caller == "subject" ? Subject() : Subject(null) });
 
@@ -135,9 +115,9 @@ public sealed class CatalogTierShapingTests
     {
         var rows = new[]
         {
-            Tier("a_t", DatasetVisibility.Full) with { CatalogView = CatalogView.Unmarked },
-            Tier("b_t", DatasetVisibility.Full) with { CatalogView = (CatalogView)42 },
-            Tier("c_t", DatasetVisibility.Full) with { CatalogView = CatalogView.Granted }
+            Tier("a_t") with { CatalogView = CatalogView.Unmarked },
+            Tier("b_t") with { CatalogView = (CatalogView)42 },
+            Tier("c_t") with { CatalogView = CatalogView.Granted }
         };
 
         Query.ToCatalogDtos(rows, isAdminView: false, [], [], isAdmin: false).Select(d => d.TableName).ShouldBe(["c_t"]);
@@ -153,16 +133,6 @@ public sealed class CatalogTierShapingTests
         await Should.ThrowAsync<GraphQLException>(() => Catalog(none, Opts(TenancyShape.Multi)));
     }
 
-    [Fact]
-    public void ShapeStage_NonAdminUnmarkedOrUnknownView_IsNull_AdminIsFull_SummaryHasNoColumns()
-    {
-        var row = Tier("full_t", DatasetVisibility.Full);
-
-        Query.ToCatalogDto(row with { CatalogView = CatalogView.Unmarked }, isAdminView: false, "NONE").ShouldBeNull();
-        Query.ToCatalogDto(row with { CatalogView = (CatalogView)42 }, isAdminView: false, "NONE").ShouldBeNull();
-        Query.ToCatalogDto(row with { CatalogView = CatalogView.Unmarked }, isAdminView: true, "GRANTED")!.Columns.Count.ShouldBe(2);
-        Query.ToCatalogDto(row with { CatalogView = CatalogView.Summary }, isAdminView: false, "NONE")!.Columns.ShouldBeEmpty();
-    }
 
     [Fact]
     public async Task Claimless_GovernanceAdmin_Multi_NeverFullOutput()
@@ -183,13 +153,4 @@ public sealed class CatalogTierShapingTests
         result.ShouldAllBe(r => r.Columns.Count == 2);
     }
 
-    [Fact]
-    public async Task OpenSchema_Branch_NotAffectedByTierShaping()
-    {
-        // OpenSchema is removed (OD-19); subject follows tier shaping and hidden tables are absent.
-        var result = await Catalog(Subject(), Opts(TenancyShape.Multi));
-
-        result.Count.ShouldBe(2);
-        result.Any(r => r.TableName == "hid_t").ShouldBeFalse();
-    }
 }

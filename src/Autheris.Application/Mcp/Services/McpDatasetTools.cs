@@ -15,6 +15,7 @@ public static class McpDatasetTools
     public const string DescribeDataset = "describe_dataset";
     public const string DescribeMyAccess = "describe_my_access";
     public const string SampleRows = "sample_rows";
+    public const string RequestAccess = "request_access";
     public const string QueryGraphQl = "query_graphql";
 
     // Track D: Hybrid MCP Tools (ADR-02)
@@ -42,6 +43,7 @@ public static class McpDatasetTools
         string.Equals(toolName, DescribeDataset, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, DescribeMyAccess, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, SampleRows, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(toolName, RequestAccess, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, QueryGraphQl, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, QuerySql, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, QueryDataset, StringComparison.OrdinalIgnoreCase) ||
@@ -178,6 +180,10 @@ public static class McpDatasetTools
         }
     }
 
+    /// <summary>Tools a read-only session neither sees nor can call (they answer like an unknown tool).</summary>
+    public static bool IsHiddenFromReadOnlySession(string? toolName) =>
+        string.Equals(toolName, RequestAccess, StringComparison.OrdinalIgnoreCase);
+
     public static IEnumerable<McpToolDefinition> Definitions()
     {
         yield return new McpToolDefinition(
@@ -250,6 +256,24 @@ public static class McpDatasetTools
             }
             """,
             TargetGraphQLOperation: SampleRows);
+
+        yield return new McpToolDefinition(
+            Name: RequestAccess,
+            Description: "Requests access to a dataset for the caller. Optionally asks for Clear (unmasked) access to named columns; the data owner decides. The justification is sent to the data owner.",
+            InputJsonSchema: """
+            {
+              "type": "object",
+              "required": ["dataset", "justification"],
+              "properties": {
+                "dataset": { "type": "string", "description": "Dataset id as returned by list_datasets (domain.schema.table)." },
+                "justification": { "type": "string", "minLength": 5, "maxLength": 2000, "description": "Business justification (5 to 2000 characters)." },
+                "durationDays": { "type": "integer", "minimum": 1, "description": "Requested validity in days. Omit for the configured default." },
+                "duration": { "type": "string", "description": "Requested validity as ISO-8601 duration (for example P2W). Wins over durationDays." },
+                "clearColumns": { "type": "array", "maxItems": 50, "items": { "type": "string" }, "description": "Columns that should be Clear instead of masked. Only masked columns that offer a Clear request are accepted." }
+              }
+            }
+            """,
+            TargetGraphQLOperation: RequestAccess);
 
         yield return new McpToolDefinition(
             Name: DescribeMyAccess,

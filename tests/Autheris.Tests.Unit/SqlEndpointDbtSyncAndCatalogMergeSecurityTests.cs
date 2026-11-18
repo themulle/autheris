@@ -186,14 +186,14 @@ public sealed class SqlEndpointDbtSyncAndCatalogMergeSecurityTests : IDisposable
             },
             Columns =
             [
-                new TableColumn { ColumnName = "iban", IsSensitive = true },
-                new TableColumn { ColumnName = "legacy_ssn", IsSensitive = true }
+                new TableColumn { ColumnName = "iban" },
+                new TableColumn { ColumnName = "legacy_ssn" }
             ],
             ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
             {
                 ["iban"] = new MaskingRule { RuleType = "REDACT" }
             }
-        };
+        }.WithPii("iban", "legacy_ssn");
 
         var incoming = new TableMetadata
         {
@@ -210,15 +210,15 @@ public sealed class SqlEndpointDbtSyncAndCatalogMergeSecurityTests : IDisposable
             },
             Columns =
             [
-                new TableColumn { ColumnName = "iban", IsSensitive = false },
-                new TableColumn { ColumnName = "email", IsSensitive = true }
+                new TableColumn { ColumnName = "iban" },
+                new TableColumn { ColumnName = "email" }
             ],
             ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
             {
                 ["iban"] = new MaskingRule { RuleType = "MASK_IBAN" },
                 ["email"] = new MaskingRule { RuleType = "MASK_EMAIL" }
             }
-        };
+        }.WithPii("email");
 
         var merged = CatalogGovernanceRatchet.Merge(incoming, existing);
 
@@ -229,9 +229,9 @@ public sealed class SqlEndpointDbtSyncAndCatalogMergeSecurityTests : IDisposable
         merged.Table.DataSourceType.ShouldBe(DataSourceType.HttpPlugin);
         merged.Table.PluginName.ShouldBe("payroll-plugin");
         merged.Table.SourceType.ShouldBe("SqlServer");
-        merged.Columns.Single(c => c.ColumnName == "iban").IsSensitive.ShouldBeTrue();
-        merged.Columns.Single(c => c.ColumnName == "legacy_ssn").IsSensitive.ShouldBeTrue();
-        merged.Columns.Single(c => c.ColumnName == "email").IsSensitive.ShouldBeTrue();
+        ClassificationMetadata.IsColumnSensitive(merged, "iban").ShouldBeTrue();
+        ClassificationMetadata.IsColumnSensitive(merged, "legacy_ssn").ShouldBeTrue();
+        ClassificationMetadata.IsColumnSensitive(merged, "email").ShouldBeTrue();
         merged.ColumnMaskingRules["iban"].RuleType.ShouldBe("REDACT");
         merged.ColumnMaskingRules["email"].RuleType.ShouldBe("MASK_EMAIL");
 

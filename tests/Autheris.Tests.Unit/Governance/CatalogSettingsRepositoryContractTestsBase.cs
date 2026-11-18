@@ -18,13 +18,11 @@ public abstract class CatalogSettingsRepositoryContractTestsBase : IAsyncLifetim
     protected IGovernanceRepository Repo { get; private set; } = null!;
     protected bool Available { get; private set; }
 
-    /// <summary>A repository on a fresh database; the new-table default visibility is Hidden.</summary>
+    /// <summary>A repository on a fresh database; fresh state.</summary>
     protected abstract Task<IGovernanceRepository?> CreateRepositoryAsync();
 
-    /// <summary>A further repository instance on the SAME database (restart or replica with its own metadata cache).</summary>
-    protected abstract Task<IGovernanceRepository?> CreateAdditionalRepositoryAsync(DatasetVisibility newTableDefault = DatasetVisibility.Hidden);
+    protected abstract Task<IGovernanceRepository?> CreateAdditionalRepositoryAsync();
 
-    /// <summary>Runs raw SQL against the governance database (used to corrupt rows behind the repository).</summary>
     protected abstract Task ExecuteRawAsync(string sql);
 
     protected abstract Task DisposeRepositoryAsync();
@@ -89,70 +87,8 @@ public abstract class CatalogSettingsRepositoryContractTestsBase : IAsyncLifetim
         }
     }
 
-    [Fact]
-    public async Task VisibilityCounts_FollowTierChanges_ForTheGauge()
-    {
-        if (!Available) { return; }
 
-        var before = await Repo.GetDatasetVisibilityCountsAsync();
-        var a = NewTable();
-        var b = NewTable();
-        await UpsertTableAsync(Repo, a);
-        await UpsertTableAsync(Repo, b);
-        await Repo.SetDatasetVisibilityAsync(a, DatasetVisibility.Summary, Admin);
-        await Repo.SetDatasetVisibilityAsync(b, DatasetVisibility.Full, Admin);
 
-        var after = await Repo.GetDatasetVisibilityCountsAsync();
-
-        (after.Summary - before.Summary).ShouldBe(1);
-        (after.Full - before.Full).ShouldBe(1);
-        (after.Hidden - before.Hidden).ShouldBe(0);
-        await Repo.SetDatasetVisibilityAsync(a, DatasetVisibility.Hidden, Admin);
-        var reverted = await Repo.GetDatasetVisibilityCountsAsync();
-        (reverted.Hidden - before.Hidden).ShouldBe(1);
-        (reverted.Summary - before.Summary).ShouldBe(0);
-    }
-
-    [Fact]
-    public async Task Visibility_IsPersisted_MissingRowIsHidden_AndOverlaidIntoTableVisibility()
-    {
-        if (!Available) { return; }
-
-        var id = NewTable();
-        await UpsertTableAsync(Repo, id);
-
-        var initial = await Repo.GetDatasetCatalogSettingsAsync(id);
-        initial.ShouldNotBeNull();
-        initial.Visibility.ShouldBe(DatasetVisibility.Hidden);
-        initial.Tags.ShouldBeEmpty();
-
-        var change = await Repo.SetDatasetVisibilityAsync(id, DatasetVisibility.Summary, Admin);
-
-        change.ShouldNotBeNull();
-        change.Before.Visibility.ShouldBe(DatasetVisibility.Hidden);
-        change.After.Visibility.ShouldBe(DatasetVisibility.Summary);
-        var restarted = (await CreateAdditionalRepositoryAsync())!;
-        (await restarted.GetTableMetadataAsync(id))!.Table.Visibility.ShouldBe(DatasetVisibility.Summary);
-        (await FromAllAsync(restarted, id))!.Table.Visibility.ShouldBe(DatasetVisibility.Summary);
-    }
-
-    [Fact]
-    public async Task UnknownOrInactiveTable_ReturnsNull_ForEveryMethod()
-    {
-        if (!Available) { return; }
-
-        var unknown = NewTable("unknown");
-        var inactive = NewTable("inactive");
-        await UpsertTableAsync(Repo, inactive, active: false);
-
-        foreach (var id in new[] { unknown, inactive })
-        {
-            (await Repo.GetDatasetCatalogSettingsAsync(id)).ShouldBeNull();
-            (await Repo.ReplaceDatasetTagsAsync(id, ["a"], DatasetTagSource.Admin, Admin)).ShouldBeNull();
-            (await Repo.ChangeDatasetTagsAsync(id, ["a"], [], Admin)).ShouldBeNull();
-            (await Repo.SetDatasetVisibilityAsync(id, DatasetVisibility.Full, Admin)).ShouldBeNull();
-        }
-    }
 
     [Fact]
     public async Task DbtReplace_ReplacesOnlyDbtRows_AdminRowsAndTagsInBothStayAdmin()
@@ -218,19 +154,6 @@ public abstract class CatalogSettingsRepositoryContractTestsBase : IAsyncLifetim
         noop!.Changed.ShouldBeFalse();
     }
 
-    [Fact]
-    public async Task IdempotentWrites_ReportNoChange()
-    {
-        if (!Available) { return; }
-
-        var id = NewTable();
-        await UpsertTableAsync(Repo, id);
-        await Repo.ReplaceDatasetTagsAsync(id, ["x", "y"], DatasetTagSource.Admin, Admin);
-        await Repo.SetDatasetVisibilityAsync(id, DatasetVisibility.Summary, Admin);
-
-        (await Repo.ReplaceDatasetTagsAsync(id, ["y", "x"], DatasetTagSource.Admin, Admin))!.Changed.ShouldBeFalse();
-        (await Repo.SetDatasetVisibilityAsync(id, DatasetVisibility.Summary, Admin))!.Changed.ShouldBeFalse();
-    }
 
     [Fact]
     public async Task InvalidTag_IsRejected_NothingIsWritten()
@@ -246,150 +169,11 @@ public abstract class CatalogSettingsRepositoryContractTestsBase : IAsyncLifetim
         (await Repo.GetDatasetCatalogSettingsAsync(id))!.Tags.ShouldBeEmpty();
     }
 
-    [Fact]
-    public async Task Reingestion_Upsert_LeavesTagsAndVisibilityUntouched()
-    {
-        if (!Available) { return; }
 
-        var id = NewTable();
-        await UpsertTableAsync(Repo, id);
-        await Repo.ReplaceDatasetTagsAsync(id, ["keep-me"], DatasetTagSource.Admin, Admin);
-        await Repo.SetDatasetVisibilityAsync(id, DatasetVisibility.Full, Admin);
 
-        // Re-ingestion: the same table identifier is upserted again, with a different description and a "Tags" literal that must be ignored.
-        var existing = (await Repo.GetTableMetadataAsync(id))!;
-        await Repo.UpsertTableMetadataAsync(existing with
-        {
-            Table = existing.Table with { Description = "changed by ingestion", Tags = ["ingestion-tag"], Visibility = DatasetVisibility.Hidden }
-        });
 
-        var after = (await Repo.GetTableMetadataAsync(id))!;
-        after.Table.Visibility.ShouldBe(DatasetVisibility.Full);
-        after.CatalogTags.ShouldBe(["keep-me"]);
-        after.Table.Tags.ShouldBeEmpty();
-        TagNames((await Repo.GetDatasetCatalogSettingsAsync(id))!).ShouldBe(["keep-me"]);
-    }
 
-    [Fact]
-    public async Task M1_TierChange_IsEffectiveImmediately_OnTheSameInstance_AndOnAReplicaWithItsOwnCache()
-    {
-        if (!Available) { return; }
 
-        var id = NewTable();
-        await UpsertTableAsync(Repo, id);
-        var replica = (await CreateAdditionalRepositoryAsync())!;
-
-        await Repo.SetDatasetVisibilityAsync(id, DatasetVisibility.Full, Admin);
-        await Repo.ReplaceDatasetTagsAsync(id, ["pii"], DatasetTagSource.Admin, Admin);
-        foreach (var repo in new[] { Repo, replica })
-        {
-            (await repo.GetTableMetadataAsync(id))!.Table.Visibility.ShouldBe(DatasetVisibility.Full);
-            (await FromAllAsync(repo, id))!.Table.Visibility.ShouldBe(DatasetVisibility.Full);
-        }
-
-        // Restricting: both instances have a warm structural cache entry; the next read must show Hidden without waiting for the TTL.
-        await Repo.SetDatasetVisibilityAsync(id, DatasetVisibility.Hidden, Admin);
-        await Repo.ReplaceDatasetTagsAsync(id, [], DatasetTagSource.Admin, Admin);
-
-        foreach (var repo in new[] { Repo, replica })
-        {
-            var single = (await repo.GetTableMetadataAsync(id))!;
-            single.Table.Visibility.ShouldBe(DatasetVisibility.Hidden);
-            single.CatalogTags.ShouldBeEmpty();
-            var listed = (await FromAllAsync(repo, id))!;
-            listed.Table.Visibility.ShouldBe(DatasetVisibility.Hidden);
-            listed.CatalogTags.ShouldBeEmpty();
-        }
-    }
-
-    [Fact]
-    public async Task T_R2_7_OverlayOnCachedRows_ReadsFresh_AndNeverMutatesAPreviouslyReturnedRecord()
-    {
-        if (!Available) { return; }
-
-        var id = NewTable();
-        await UpsertTableAsync(Repo, id);
-        var replica = (await CreateAdditionalRepositoryAsync())!;
-        var warm = (await replica.GetTableMetadataAsync(id))!; // structural entry cached on the replica
-        warm.Table.Visibility.ShouldBe(DatasetVisibility.Hidden);
-
-        await Repo.SetDatasetVisibilityAsync(id, DatasetVisibility.Full, Admin);
-        await Repo.ReplaceDatasetTagsAsync(id, ["fresh"], DatasetTagSource.Admin, Admin);
-
-        var listed = (await FromAllAsync(replica, id))!; // GetAllTablesAsync with a warm cache
-        listed.Table.Visibility.ShouldBe(DatasetVisibility.Full);
-        listed.CatalogTags.ShouldBe(["fresh"]);
-        warm.Table.Visibility.ShouldBe(DatasetVisibility.Hidden);
-        warm.CatalogTags.ShouldBeEmpty();
-    }
-
-    [Fact]
-    public async Task Degradation_CorruptVisibilityInteger_YieldsHiddenAndNoTags_OthersUnaffected_NeverThrows()
-    {
-        if (!Available) { return; }
-
-        var broken = NewTable("broken");
-        var healthy = NewTable("healthy");
-        var brokenMeta = await UpsertTableAsync(Repo, broken);
-        await UpsertTableAsync(Repo, healthy);
-        await Repo.SetDatasetVisibilityAsync(broken, DatasetVisibility.Full, Admin);
-        await Repo.ReplaceDatasetTagsAsync(broken, ["pii"], DatasetTagSource.Admin, Admin);
-        await Repo.SetDatasetVisibilityAsync(healthy, DatasetVisibility.Summary, Admin);
-        await ExecuteRawAsync($"UPDATE TABLE_CATALOG_SETTINGS SET visibility = 3 WHERE table_id = '{brokenMeta.Table.Id}'");
-        var reader = (await CreateAdditionalRepositoryAsync())!;
-
-        var all = await reader.GetAllTablesAsync();
-
-        var brokenRow = all.Single(t => t.Identifier == broken);
-        brokenRow.Table.Visibility.ShouldBe(DatasetVisibility.Hidden);
-        brokenRow.CatalogTags.ShouldBeEmpty();
-        all.Single(t => t.Identifier == healthy).Table.Visibility.ShouldBe(DatasetVisibility.Summary);
-        (await reader.GetTableMetadataAsync(broken))!.Table.Visibility.ShouldBe(DatasetVisibility.Hidden);
-    }
-
-    [Fact]
-    public async Task Degradation_TagViolatingTheRules_YieldsHiddenAndNoTagsForThatTableOnly()
-    {
-        if (!Available) { return; }
-
-        var broken = NewTable("broken");
-        var healthy = NewTable("healthy");
-        var brokenMeta = await UpsertTableAsync(Repo, broken);
-        await UpsertTableAsync(Repo, healthy);
-        await Repo.SetDatasetVisibilityAsync(broken, DatasetVisibility.Full, Admin);
-        await Repo.SetDatasetVisibilityAsync(healthy, DatasetVisibility.Full, Admin);
-        await Repo.ReplaceDatasetTagsAsync(healthy, ["good"], DatasetTagSource.Admin, Admin);
-        await ExecuteRawAsync(
-            $"INSERT INTO TABLE_TAGS (table_id, tag, source, created_by, created_at) VALUES ('{brokenMeta.Table.Id}', 'Bad Tag!', 'admin', 'x', '2026-01-01T00:00:00.0000000+00:00')");
-        var reader = (await CreateAdditionalRepositoryAsync())!;
-
-        var all = await reader.GetAllTablesAsync();
-
-        var brokenRow = all.Single(t => t.Identifier == broken);
-        brokenRow.Table.Visibility.ShouldBe(DatasetVisibility.Hidden);
-        brokenRow.CatalogTags.ShouldBeEmpty();
-        var healthyRow = all.Single(t => t.Identifier == healthy);
-        healthyRow.Table.Visibility.ShouldBe(DatasetVisibility.Full);
-        healthyRow.CatalogTags.ShouldBe(["good"]);
-    }
-
-    [Fact]
-    public async Task Degradation_DroppedTagTable_YieldsHiddenForEveryRow_NeverFull_NeverThrows()
-    {
-        if (!Available) { return; }
-
-        var id = NewTable();
-        await UpsertTableAsync(Repo, id);
-        await Repo.SetDatasetVisibilityAsync(id, DatasetVisibility.Full, Admin);
-        var reader = (await CreateAdditionalRepositoryAsync())!; // created before the drop: a new instance would fail its shape check
-        await ExecuteRawAsync("DROP TABLE TABLE_TAGS");
-
-        var all = await reader.GetAllTablesAsync();
-
-        all.ShouldNotBeEmpty();
-        all.ShouldAllBe(t => t.Table.Visibility == DatasetVisibility.Hidden && t.CatalogTags.Count == 0);
-        (await reader.GetTableMetadataAsync(id))!.Table.Visibility.ShouldBe(DatasetVisibility.Hidden);
-    }
 
     [Fact]
     public async Task StrictRead_ThrowsOnStoreError_InsteadOfAFakeHidden()
@@ -404,7 +188,123 @@ public abstract class CatalogSettingsRepositoryContractTestsBase : IAsyncLifetim
         await Should.ThrowAsync<Exception>(() => reader.GetDatasetCatalogSettingsAsync(id, strict: true));
         var lenient = await reader.GetDatasetCatalogSettingsAsync(id, strict: false);
         lenient.ShouldNotBeNull();
-        lenient.Visibility.ShouldBe(DatasetVisibility.Hidden);
+        lenient.Tags.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task UnknownOrInactiveTable_ReturnsNull_ForEveryMethod()
+    {
+        if (!Available) { return; }
+
+        var unknown = NewTable("unknown");
+        var inactive = NewTable("inactive");
+        await UpsertTableAsync(Repo, inactive, active: false);
+
+        foreach (var id in new[] { unknown, inactive })
+        {
+            (await Repo.GetDatasetCatalogSettingsAsync(id)).ShouldBeNull();
+            (await Repo.ReplaceDatasetTagsAsync(id, ["a"], DatasetTagSource.Admin, Admin)).ShouldBeNull();
+            (await Repo.ChangeDatasetTagsAsync(id, ["a"], [], Admin)).ShouldBeNull();
+            (await Repo.SetDatasetPrivacyAsync(id, 3, null, Admin)).ShouldBeNull();
+        }
+    }
+
+    [Fact]
+    public async Task IdempotentWrites_ReportNoChange()
+    {
+        if (!Available) { return; }
+
+        var id = NewTable();
+        await UpsertTableAsync(Repo, id);
+        await Repo.ReplaceDatasetTagsAsync(id, ["x", "y"], DatasetTagSource.Admin, Admin);
+        await Repo.SetDatasetPrivacyAsync(id, 3, null, Admin);
+
+        (await Repo.ReplaceDatasetTagsAsync(id, ["y", "x"], DatasetTagSource.Admin, Admin))!.Changed.ShouldBeFalse();
+        (await Repo.SetDatasetPrivacyAsync(id, 3, null, Admin))!.Changed.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Reingestion_Upsert_LeavesTagsAndSettingsUntouched()
+    {
+        if (!Available) { return; }
+
+        var id = NewTable();
+        await UpsertTableAsync(Repo, id);
+        await Repo.ReplaceDatasetTagsAsync(id, ["keep-me"], DatasetTagSource.Admin, Admin);
+        await Repo.SetDatasetPrivacyAsync(id, 3, null, Admin);
+
+        // Re-ingestion: the same table identifier is upserted again, with a different description and a "Tags" literal that must be ignored.
+        var existing = (await Repo.GetTableMetadataAsync(id))!;
+        await Repo.UpsertTableMetadataAsync(existing with
+        {
+            Table = existing.Table with { Description = "changed by ingestion", Tags = ["ingestion-tag"] }
+        });
+
+        var after = (await Repo.GetTableMetadataAsync(id))!;
+        after.CatalogTags.ShouldBe(["keep-me"]);
+        after.Table.Tags.ShouldBeEmpty();
+        TagNames((await Repo.GetDatasetCatalogSettingsAsync(id))!).ShouldBe(["keep-me"]);
+    }
+
+    [Fact]
+    public async Task T_R2_7_OverlayOnCachedRows_ReadsFresh_AndNeverMutatesAPreviouslyReturnedRecord()
+    {
+        if (!Available) { return; }
+
+        var id = NewTable();
+        await UpsertTableAsync(Repo, id);
+        var replica = (await CreateAdditionalRepositoryAsync())!;
+        var warm = (await replica.GetTableMetadataAsync(id))!; // structural entry cached on the replica
+
+        await Repo.SetDatasetPrivacyAsync(id, 3, null, Admin);
+        await Repo.ReplaceDatasetTagsAsync(id, ["fresh"], DatasetTagSource.Admin, Admin);
+
+        var listed = (await FromAllAsync(replica, id))!; // GetAllTablesAsync with a warm cache
+        listed.CatalogTags.ShouldBe(["fresh"]);
+        warm.CatalogTags.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Degradation_TagViolatingTheRules_YieldsHiddenAndNoTagsForThatTableOnly()
+    {
+        if (!Available) { return; }
+
+        var broken = NewTable("broken");
+        var healthy = NewTable("healthy");
+        var brokenMeta = await UpsertTableAsync(Repo, broken);
+        await UpsertTableAsync(Repo, healthy);
+        await Repo.SetDatasetPrivacyAsync(broken, 3, null, Admin);
+        await Repo.SetDatasetPrivacyAsync(healthy, 3, null, Admin);
+        await Repo.ReplaceDatasetTagsAsync(healthy, ["good"], DatasetTagSource.Admin, Admin);
+        await ExecuteRawAsync(
+            $"INSERT INTO TABLE_TAGS (table_id, tag, source, created_by, created_at) VALUES ('{brokenMeta.Table.Id}', 'Bad Tag!', 'admin', 'x', '2026-01-01T00:00:00.0000000+00:00')");
+        var reader = (await CreateAdditionalRepositoryAsync())!;
+
+        var all = await reader.GetAllTablesAsync();
+
+        var brokenRow = all.Single(t => t.Identifier == broken);
+        brokenRow.Table.DiscoveryHidden.ShouldBeTrue();
+        brokenRow.CatalogTags.ShouldBeEmpty();
+        var healthyRow = all.Single(t => t.Identifier == healthy);
+        healthyRow.CatalogTags.ShouldBe(["good"]);
+    }
+
+    [Fact]
+    public async Task Degradation_DroppedTagTable_YieldsHiddenForEveryRow_NeverFull_NeverThrows()
+    {
+        if (!Available) { return; }
+
+        var id = NewTable();
+        await UpsertTableAsync(Repo, id);
+        await Repo.SetDatasetPrivacyAsync(id, 3, null, Admin);
+        var reader = (await CreateAdditionalRepositoryAsync())!; // created before the drop: a new instance would fail its shape check
+        await ExecuteRawAsync("DROP TABLE TABLE_TAGS");
+
+        var all = await reader.GetAllTablesAsync();
+
+        all.ShouldNotBeEmpty();
+        all.ShouldAllBe(t => t.Table.DiscoveryHidden && t.CatalogTags.Count == 0);
+        (await reader.GetTableMetadataAsync(id))!.Table.DiscoveryHidden.ShouldBeTrue();
     }
 
     [Fact]
@@ -414,34 +314,11 @@ public abstract class CatalogSettingsRepositoryContractTestsBase : IAsyncLifetim
 
         var id = NewTable();
         var meta = await UpsertTableAsync(Repo, id);
-        await Repo.SetDatasetVisibilityAsync(id, DatasetVisibility.Summary, Admin);
-        await ExecuteRawAsync($"UPDATE TABLE_CATALOG_SETTINGS SET visibility = 9 WHERE table_id = '{meta.Table.Id}'");
+        await Repo.SetDatasetPrivacyAsync(id, 3, null, Admin);
+        await ExecuteRawAsync(
+            $"INSERT INTO TABLE_TAGS (table_id, tag, source, created_by, created_at) VALUES ('{meta.Table.Id}', 'Bad Tag!', 'admin', 'x', '2026-01-01T00:00:00.0000000+00:00')");
         var reader = (await CreateAdditionalRepositoryAsync())!;
 
         await Should.ThrowAsync<Exception>(() => reader.GetDatasetCatalogSettingsAsync(id, strict: true));
-    }
-
-    [Fact]
-    public async Task DefaultVisibilitySummary_NewTableGetsASummaryRow_ExistingTablesAndHiddenDefaultWriteNoRow()
-    {
-        if (!Available) { return; }
-
-        var existing = NewTable("existing");
-        await UpsertTableAsync(Repo, existing); // created under the Hidden default
-        var summaryRepo = (await CreateAdditionalRepositoryAsync(DatasetVisibility.Summary))!;
-        var created = NewTable("created");
-        await UpsertTableAsync(summaryRepo, created);
-        // Re-ingestion of the existing table under the Summary default must not change it.
-        var existingMeta = (await summaryRepo.GetTableMetadataAsync(existing))!;
-        await summaryRepo.UpsertTableMetadataAsync(existingMeta);
-        var hiddenCreated = NewTable("hidden");
-        await UpsertTableAsync(Repo, hiddenCreated);
-
-        (await summaryRepo.GetTableMetadataAsync(created))!.Table.Visibility.ShouldBe(DatasetVisibility.Summary);
-        (await summaryRepo.GetTableMetadataAsync(existing))!.Table.Visibility.ShouldBe(DatasetVisibility.Hidden);
-        (await Repo.GetTableMetadataAsync(hiddenCreated))!.Table.Visibility.ShouldBe(DatasetVisibility.Hidden);
-
-        // A-9: the tier given to a new table is tallied for the aggregated creation audit (only the created table counts, not the re-ingested one).
-        Autheris.Domain.Diagnostics.CatalogDefaultTierTally.TakeAndReset().ShouldBeGreaterThanOrEqualTo(1);
     }
 }

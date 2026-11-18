@@ -45,6 +45,9 @@ public sealed record DbtModelDefinition(
     /// <summary>Synthetic sample rows declared in meta (e.g. meta.synthetic_samples); null when none declared.</summary>
     public IReadOnlyList<IReadOnlyDictionary<string, object?>>? SyntheticSamples { get; init; }
 
+    /// <summary>Raw <c>meta.golden_queries</c> declaration; null when the node declares none (the dataset's dbt entries are then removed).</summary>
+    public DbtGoldenQueryMeta? GoldenQueries { get; init; }
+
     private readonly string? _physicalName;
 
     /// <summary>Issue #666: the physical table name (dbt alias for models, identifier for sources); defaults to <see cref="Name"/>.</summary>

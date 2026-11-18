@@ -57,9 +57,10 @@ internal static class ConsentSqlCore
 
     public const string InsertRejectedStepSql = "INSERT INTO APPROVAL_STEPS (id, consent_request_id, step_number, approver_sid, decision, rejection_reason, decided_at) VALUES (@id, @reqId, (SELECT COALESCE(MAX(step_number), 0) + 1 FROM APPROVAL_STEPS WHERE consent_request_id = @reqId), @sid, 'REJECTED', @reason, @now)";
 
-    public const string SelectColumnSnapshotSql = @"SELECT c.id, c.column_name, c.is_sensitive, MAX(CASE WHEN m.id IS NOT NULL THEN 1 ELSE 0 END) AS has_mask
-                                       FROM TABLE_COLUMNS c LEFT JOIN COLUMN_MASKING_RULES m ON c.id = m.table_column_id
-                                       WHERE c.table_id = @tid GROUP BY c.id, c.column_name, c.is_sensitive";
+    public const string SelectColumnSnapshotSql = @"SELECT c.id, c.column_name,
+                                       CASE WHEN EXISTS (SELECT 1 FROM COLUMN_CLASSIFICATIONS cc WHERE cc.table_column_id = c.id AND cc.scope = '*' AND cc.code <> 'PUBLIC') THEN 1 ELSE 0 END AS is_classified,
+                                       CASE WHEN EXISTS (SELECT 1 FROM COLUMN_MASK_OVERRIDES m WHERE m.table_column_id = c.id AND m.scope = '*' AND m.code IS NULL) THEN 1 ELSE 0 END AS has_mask
+                                       FROM TABLE_COLUMNS c WHERE c.table_id = @tid";
 
     public static void ReadSubjectConsentRows(DbDataReader reader, TableIdentifier table, DateTimeOffset atTime, HashSet<string> subjectSet, HashSet<Guid> seen, List<Consent> consents)
     {
@@ -917,9 +918,9 @@ internal static class ConsentSqlCore
                 {
                     var colId = Guid.Parse(reader.GetString(0));
                     var colName = reader.GetString(1);
-                    var isSensitive = Convert.ToInt32(reader.GetValue(2)) == 1;
+                    var classified = Convert.ToInt32(reader.GetValue(2)) == 1;
                     var hasMask = Convert.ToInt32(reader.GetValue(3)) == 1;
-                    int accessLevel = (int)ConsentColumnSnapshot.AccessLevelFor(isSensitive, hasMask);
+                    int accessLevel = (int)ConsentColumnSnapshot.AccessLevelFor(classified, hasMask);
                     columnRules.Add((Guid.NewGuid(), colId, colName, accessLevel));
                 }
             }

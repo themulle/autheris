@@ -39,15 +39,15 @@ public static class VirtualSystemTables
         },
         Columns = new TableColumn[]
         {
-            new() { ColumnName = "id", DataType = "varchar", IsSensitive = false },
-            new() { ColumnName = "name", DataType = "varchar", IsSensitive = false },
-            new() { ColumnName = "domain", DataType = "varchar", IsSensitive = false },
-            new() { ColumnName = "type", DataType = "varchar", IsSensitive = false },
-            new() { ColumnName = "base_url", DataType = "varchar", IsSensitive = false },
-            new() { ColumnName = "is_configured", DataType = "boolean", IsSensitive = false },
-            new() { ColumnName = "status", DataType = "varchar", IsSensitive = false },
-            new() { ColumnName = "created_at", DataType = "timestamp", IsSensitive = false },
-            new() { ColumnName = "updated_at", DataType = "timestamp", IsSensitive = false }
+            new() { ColumnName = "id", DataType = "varchar" },
+            new() { ColumnName = "name", DataType = "varchar" },
+            new() { ColumnName = "domain", DataType = "varchar" },
+            new() { ColumnName = "type", DataType = "varchar" },
+            new() { ColumnName = "base_url", DataType = "varchar" },
+            new() { ColumnName = "is_configured", DataType = "boolean" },
+            new() { ColumnName = "status", DataType = "varchar" },
+            new() { ColumnName = "created_at", DataType = "timestamp" },
+            new() { ColumnName = "updated_at", DataType = "timestamp" }
         },
         PrimaryKeyColumns = new[] { "id" }
     };
@@ -68,12 +68,12 @@ public static class VirtualSystemTables
         },
         Columns = new TableColumn[]
         {
-            new() { ColumnName = "id", DataType = "varchar", IsSensitive = false },
-            new() { ColumnName = "table_id", DataType = "varchar", IsSensitive = false },
-            new() { ColumnName = "column_name", DataType = "varchar", IsSensitive = false },
-            new() { ColumnName = "sensitivity", DataType = "varchar", IsSensitive = false },
-            new() { ColumnName = "masking_type", DataType = "varchar", IsSensitive = false },
-            new() { ColumnName = "classification_tags", DataType = "varchar", IsSensitive = false }
+            new() { ColumnName = "id", DataType = "varchar" },
+            new() { ColumnName = "table_id", DataType = "varchar" },
+            new() { ColumnName = "column_name", DataType = "varchar" },
+            new() { ColumnName = "sensitivity", DataType = "varchar" },
+            new() { ColumnName = "masking_type", DataType = "varchar" },
+            new() { ColumnName = "classification_tags", DataType = "varchar" }
         },
         PrimaryKeyColumns = new[] { "id" }
     };
@@ -94,11 +94,11 @@ public static class VirtualSystemTables
         },
         Columns = new TableColumn[]
         {
-            new() { ColumnName = "id", DataType = "varchar", IsSensitive = false },
-            new() { ColumnName = "table_id", DataType = "varchar", IsSensitive = false },
-            new() { ColumnName = "principal", DataType = "varchar", IsSensitive = false },
-            new() { ColumnName = "filter_expression", DataType = "varchar", IsSensitive = false },
-            new() { ColumnName = "valid_until", DataType = "timestamp", IsSensitive = false }
+            new() { ColumnName = "id", DataType = "varchar" },
+            new() { ColumnName = "table_id", DataType = "varchar" },
+            new() { ColumnName = "principal", DataType = "varchar" },
+            new() { ColumnName = "filter_expression", DataType = "varchar" },
+            new() { ColumnName = "valid_until", DataType = "timestamp" }
         },
         PrimaryKeyColumns = new[] { "id" }
     };
@@ -119,14 +119,14 @@ public static class VirtualSystemTables
         },
         Columns = new TableColumn[]
         {
-            new() { ColumnName = "id", DataType = "varchar", IsSensitive = false },
-            new() { ColumnName = "timestamp", DataType = "timestamp", IsSensitive = false },
-            new() { ColumnName = "actor_sid", DataType = "varchar", IsSensitive = false },
-            new() { ColumnName = "channel", DataType = "varchar", IsSensitive = false },
-            new() { ColumnName = "action", DataType = "varchar", IsSensitive = false },
-            new() { ColumnName = "target", DataType = "varchar", IsSensitive = false },
-            new() { ColumnName = "correlation_id", DataType = "varchar", IsSensitive = false },
-            new() { ColumnName = "worm_signature", DataType = "varchar", IsSensitive = false }
+            new() { ColumnName = "id", DataType = "varchar" },
+            new() { ColumnName = "timestamp", DataType = "timestamp" },
+            new() { ColumnName = "actor_sid", DataType = "varchar" },
+            new() { ColumnName = "channel", DataType = "varchar" },
+            new() { ColumnName = "action", DataType = "varchar" },
+            new() { ColumnName = "target", DataType = "varchar" },
+            new() { ColumnName = "correlation_id", DataType = "varchar" },
+            new() { ColumnName = "worm_signature", DataType = "varchar" }
         },
         PrimaryKeyColumns = new[] { "id" }
     };

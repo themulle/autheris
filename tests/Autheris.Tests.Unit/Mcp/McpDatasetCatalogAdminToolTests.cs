@@ -51,26 +51,23 @@ public sealed class McpDatasetCatalogAdminToolTests
     public async Task ForwardsDatasetTagsAndVisibility_WithTheSessionPrincipal_AndSourceMcp()
     {
         _datasets.ApplyAsync(default, default!, default!, default!, default, default).ReturnsForAnyArgs(new DatasetCatalogResult(
-            DatasetCatalogOutcome.Applied, Orders, new DatasetCatalogSettings([new DatasetTag("pii", DatasetTagSource.Admin)], DatasetVisibility.Summary), true));
+            DatasetCatalogOutcome.Applied, Orders, new DatasetCatalogSettings([new DatasetTag("pii", DatasetTagSource.Admin)])));
 
-        var result = await Run("""{"dataset":"sales.dbo.orders","tags":["pii"],"visibility":"Summary","planId":"plan_1","confirmationToken":"tok"}""");
+        var result = await Run("""{"dataset":"sales.dbo.orders","tags":["pii"],"planId":"plan_1","confirmationToken":"tok"}""");
 
         result.IsSuccess.ShouldBeTrue();
-        result.ContentJson.ShouldContain("\"visibility\":\"Summary\"");
-        result.ContentJson.ShouldContain("\"tierEffective\":true");
         await _datasets.Received(1).ApplyAsync(
             Arg.Is<ClaimsPrincipal?>(p => p != null && p.FindFirst(ClaimTypes.PrimarySid)!.Value == "S-1-5-21-99999999-500" && p.IsInRole("ClusterAdmin")),
             "sales.dbo.orders",
-            Arg.Is<DatasetCatalogEdit>(e => e.ReplaceTags!.Single() == "pii" && e.Visibility == "Summary" && !e.Malformed),
+            Arg.Is<DatasetCatalogEdit>(e => e.ReplaceTags!.Single() == "pii" && !e.Malformed),
             "mcp", Arg.Any<CancellationToken>(), false);
     }
 
     [Theory]
-    [InlineData("""{"dataset":"a.b.c","visibility":2}""")]
-    [InlineData("""{"dataset":"a.b.c","visibility":"Full","extra":1}""")]
+    [InlineData("""{"dataset":"a.b.c","extra":1}""")]
     [InlineData("""{"dataset":"a.b.c","tags":"pii"}""")]
     [InlineData("""{"tags":["x"]}""")]
-    [InlineData("""{"dataset":"a.b.c"}""")]
+    [InlineData("""{"dataset":"a.b.c","tags":["x"]}""")]
     [InlineData("""not json""")]
     public async Task MalformedOrIncompleteArguments_AreRejected_BeforeTheService(string json)
     {
@@ -85,13 +82,12 @@ public sealed class McpDatasetCatalogAdminToolTests
     [InlineData(DatasetCatalogOutcome.Forbidden, "FORBIDDEN")]
     [InlineData(DatasetCatalogOutcome.InvalidTag, "INVALID_TAG")]
     [InlineData(DatasetCatalogOutcome.TagLimitExceeded, "TAG_LIMIT_EXCEEDED")]
-    [InlineData(DatasetCatalogOutcome.InvalidVisibility, "INVALID_VISIBILITY")]
     [InlineData(DatasetCatalogOutcome.Unavailable, "UNAVAILABLE")]
     public async Task ServiceRefusal_IsAToolError_WithTheStableCode(DatasetCatalogOutcome outcome, string code)
     {
         _datasets.ApplyAsync(default, default!, default!, default!, default, default).ReturnsForAnyArgs(new DatasetCatalogResult(outcome));
 
-        var result = await Run("""{"dataset":"a.b.c","visibility":"Full","planId":"plan_1","confirmationToken":"tok"}""");
+        var result = await Run("""{"dataset":"a.b.c","tags":["x"],"planId":"plan_1","confirmationToken":"tok"}""");
 
         result.IsSuccess.ShouldBeFalse();
         result.ErrorMessage.ShouldBe(code);
@@ -103,7 +99,7 @@ public sealed class McpDatasetCatalogAdminToolTests
         _planning.PlanAdminOperationAsync(default!, default!, default!, default!, default, default)
             .ReturnsForAnyArgs(new AdminPlanAccessResult("plan_9", "a.b.c", [], [], DateTimeOffset.UtcNow.AddMinutes(10)));
 
-        var result = await Run("""{"dataset":"a.b.c","visibility":"Full"}""");
+        var result = await Run("""{"dataset":"a.b.c","tags":["x"]}""");
 
         result.IsSuccess.ShouldBeTrue();
         result.ContentJson.ShouldContain("CONFIRMATION_REQUIRED");
@@ -120,7 +116,7 @@ public sealed class McpDatasetCatalogAdminToolTests
         _planning.ConsumeAdminOperationAsync(default!, default!, default!, default!, default, default)
             .ReturnsForAnyArgs<Task>(_ => throw new System.Security.SecurityException("The confirmed plan does not match this operation and its arguments."));
 
-        var result = await Run("""{"dataset":"a.b.c","visibility":"Full","planId":"plan_1","confirmationToken":"tok"}""");
+        var result = await Run("""{"dataset":"a.b.c","tags":["x"],"planId":"plan_1","confirmationToken":"tok"}""");
 
         result.IsSuccess.ShouldBeFalse();
         result.ErrorMessage!.ShouldContain("does not match");
@@ -131,7 +127,7 @@ public sealed class McpDatasetCatalogAdminToolTests
     public async Task NoServiceConfigured_IsAToolError_NothingIsAttempted()
     {
         var result = await McpAdminTools.ExecuteAdminToolAsync(McpAdminTools.SetDatasetCatalog,
-            """{"dataset":"a.b.c","visibility":"Full"}""", Session, _planning);
+            """{"dataset":"a.b.c","tags":["x"]}""", Session, _planning);
 
         result.IsSuccess.ShouldBeFalse();
     }

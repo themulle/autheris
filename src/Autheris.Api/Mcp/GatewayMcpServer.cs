@@ -73,6 +73,11 @@ public static class GatewayMcpServer
             available = available.Where(t => !McpAdminTools.IsAdminTool(t.Name)).ToList();
         }
 
+        if (session.IsReadOnly)
+        {
+            available = available.Where(t => !McpDatasetTools.IsHiddenFromReadOnlySession(t.Name)).ToList();
+        }
+
         var tools = available
             .OrderBy(t => t.Name, StringComparer.Ordinal)
             .Select(t => ToTool(t, session.IsReadOnly, options.IsWebSqlDmlAllowed))

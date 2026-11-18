@@ -42,12 +42,12 @@ public sealed class AstCompilerHmacSql4Tests(ITestOutputHelper output)
             Columns =
             [
                 new TableColumn { ColumnName = "id", DataType = "int" },
-                new TableColumn { ColumnName = "email", DataType = "varchar", IsSensitive = true },
+                new TableColumn { ColumnName = "email", DataType = "varchar" },
                 new TableColumn { ColumnName = "region", DataType = "varchar" },
                 new TableColumn { ColumnName = "tenant_id", DataType = "varchar" }
             ],
             ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase) { ["email"] = new MaskingRule { RuleType = "HMAC" } }
-        };
+        }.WithPii("email");
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(ci => Task.FromResult<TableMetadata?>(table.Identifier.Equals(ci.Arg<TableIdentifier>()) ? table : null));

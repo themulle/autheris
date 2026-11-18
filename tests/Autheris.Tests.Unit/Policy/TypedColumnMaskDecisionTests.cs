@@ -92,8 +92,8 @@ public sealed class TypedColumnMaskDecisionTests
         var metadata = new TableMetadata
         {
             Identifier = Orders,
-            Columns = [new TableColumn { ColumnName = "ssn", DataType = "varchar", IsSensitive = true }]
-        };
+            Columns = [new TableColumn { ColumnName = "ssn", DataType = "varchar" }]
+        }.WithPii("ssn");
 
         decision.RequireTypedColumnMasks(metadata).IsAllowed.ShouldBeFalse();
         (decision with { ColumnMasks = Masks("ssn") }).RequireTypedColumnMasks(metadata).IsAllowed.ShouldBeTrue();

@@ -74,7 +74,7 @@ public sealed class MultilingualCatalogSecurityTests
         var visibleTable = new TableMetadata
         {
             Identifier = id,
-            CatalogView = CatalogView.Full,
+            CatalogView = CatalogView.Granted,
             Table = new Table { TableName = id.TableName, SchemaName = id.Schema, SourceName = id.Domain, DisplayName = "Orders" },
             Columns =
             [
@@ -85,7 +85,7 @@ public sealed class MultilingualCatalogSecurityTests
         var allTable = new TableMetadata
         {
             Identifier = id,
-            CatalogView = CatalogView.Full,
+            CatalogView = CatalogView.Granted,
             Table = new Table { TableName = id.TableName, SchemaName = id.Schema, SourceName = id.Domain, DisplayName = "Orders" },
             Columns =
             [
@@ -172,7 +172,7 @@ public sealed class MultilingualCatalogSecurityTests
         var table = new TableMetadata
         {
             Identifier = id,
-            CatalogView = CatalogView.Full,
+            CatalogView = CatalogView.Granted,
             Table = new Table
             {
                 TableName = id.TableName,

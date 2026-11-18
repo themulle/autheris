@@ -255,8 +255,7 @@ public sealed class WebSqlSameSourceSubtreeTests
         var stocksTable = CreateTable("inventory", "dbo", "stocks", DataSourceType.Sql, ["id", "status"], DatabaseDialect.SqlServer);
 
         var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(new[] { ordersTable, itemsTable, stocksTable });
+        metadataRepo.StubAllTables(new[] { ordersTable, itemsTable, stocksTable });
 
         var consentRepo = Substitute.For<IConsentRepository>();
         consentRepo.GetAllActiveConsentsForSubjectsAsync(

@@ -17,7 +17,7 @@ internal static class CatalogRepositoryStubs
     public static void StubTables(this ITableMetadataRepository repo, IEnumerable<TableMetadata> tables)
     {
         var all = tables.ToList();
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(all));
+        repo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(all));
         repo.QueryTablesAsync(Arg.Any<CatalogTableQuery>(), Arg.Any<CancellationToken>())
             .Returns(ci => Task.FromResult(Page(all, ci.Arg<CatalogTableQuery>())));
         repo.GetTablesAsync(Arg.Any<IReadOnlyCollection<TableIdentifier>>(), Arg.Any<CancellationToken>())

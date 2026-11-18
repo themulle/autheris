@@ -145,7 +145,7 @@ public sealed class DataSourceTransportConfigurationReporterTests
     public async Task Reporter_ListsCatalogSourcesWithoutProfile_Sanitised()
     {
         var repo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(
+        repo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(
         [
             Wp0.Table("profiled", "a"),
             Wp0.Table("plain", "b"),
