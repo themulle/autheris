@@ -411,26 +411,39 @@ public sealed class CatalogGraphQlChangeSignalTests
         doc.RootElement.GetProperty("status").GetString().ShouldBe(expectedText);
     }
 
+    private static async Task<AuditContext> PollAsync(SchemaStatusAuditSampler sampler, string sid, string tenant = "tenant-a")
+    {
+        var audit = new AuditContext { ActorSid = new Autheris.Domain.Common.Sid(sid), TenantId = new Autheris.Domain.Common.TenantId(tenant) };
+        var context = new DefaultHttpContext { RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider() };
+        context.Features.Set(audit);
+        await CatalogApiEndpoints.GetGraphQlSchemaStatusAsync(new FixedFreshness(false), context, sampler, CancellationToken.None);
+        return audit;
+    }
+
     [Fact]
     [Trait("Category", "Security")]
-    public async Task StatusEndpoint_Polling_WritesOneAggregatedAuditRowPerInterval()
+    public async Task StatusEndpoint_FirstPollOfEachCaller_IsAudited()
+    {
+        var sampler = new SchemaStatusAuditSampler(new FakeTimeProvider());
+
+        (await PollAsync(sampler, "S-1-5-21-1")).IsHandled.ShouldBeFalse();
+        (await PollAsync(sampler, "S-1-5-21-2")).IsHandled.ShouldBeFalse("another caller's first poll is never suppressed by the first caller");
+        (await PollAsync(sampler, "S-1-5-21-1", tenant: "tenant-b")).IsHandled.ShouldBeFalse("the key includes the tenant");
+        (await PollAsync(sampler, "S-1-5-21-1")).IsHandled.ShouldBeTrue("the same caller is aggregated");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task StatusEndpoint_RepeatedPolls_SameCaller_AreAggregated()
     {
         var time = new FakeTimeProvider();
         var sampler = new SchemaStatusAuditSampler(time);
-        var freshness = new FixedFreshness(false);
         var audited = 0;
-        AuditContext? last = null;
-
         for (var i = 0; i < 50; i++)
         {
-            var audit = new AuditContext();
-            var context = new DefaultHttpContext { RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider() };
-            context.Features.Set(audit);
-            await CatalogApiEndpoints.GetGraphQlSchemaStatusAsync(freshness, context, sampler, CancellationToken.None);
-            if (!audit.IsHandled)
+            if (!(await PollAsync(sampler, "S-1-5-21-1")).IsHandled)
             {
                 audited++;
-                last = audit;
             }
 
             time.Advance(TimeSpan.FromMilliseconds(100));
@@ -439,13 +452,25 @@ public sealed class CatalogGraphQlChangeSignalTests
         audited.ShouldBe(1, "50 polls within one interval produce a single audit row");
 
         time.Advance(SchemaStatusAuditSampler.Interval);
-        var next = new AuditContext();
-        var ctx = new DefaultHttpContext { RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider() };
-        ctx.Features.Set(next);
-        await CatalogApiEndpoints.GetGraphQlSchemaStatusAsync(freshness, ctx, sampler, CancellationToken.None);
+        var next = await PollAsync(sampler, "S-1-5-21-1");
         next.IsHandled.ShouldBeFalse("the next interval audits again");
         next.AdditionalDetails["aggregatedPolls"].ShouldBe(50, "the row says how many polls it stands for");
-        last.ShouldNotBeNull();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task StatusEndpoint_SamplerOverflow_AuditsEveryRequest()
+    {
+        var sampler = new SchemaStatusAuditSampler(new FakeTimeProvider(), maxEntries: 2);
+        await PollAsync(sampler, "S-1-5-21-1");
+        await PollAsync(sampler, "S-1-5-21-2");
+
+        for (var i = 0; i < 5; i++)
+        {
+            (await PollAsync(sampler, "S-1-5-21-3")).IsHandled.ShouldBeFalse("a full map never suppresses an untracked caller");
+        }
+
+        (await PollAsync(sampler, "S-1-5-21-1")).IsHandled.ShouldBeTrue("tracked callers stay aggregated");
     }
 
     [Fact]
@@ -562,7 +587,7 @@ public sealed class CatalogGraphQlChangeSignalTests
     private static async Task<(int Status, string Body, HttpContext Context)> ExecuteStatusAsync(ICatalogSchemaFreshness? freshness)
     {
         var context = new DefaultHttpContext { RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider() };
-        var result = await CatalogApiEndpoints.GetGraphQlSchemaStatusAsync(freshness, context, CancellationToken.None);
+        var result = await CatalogApiEndpoints.GetGraphQlSchemaStatusAsync(freshness, context, null, CancellationToken.None);
         var body = new MemoryStream();
         context.Response.Body = body;
         await result.ExecuteAsync(context);
