@@ -102,6 +102,8 @@ public static class GatewaySqlEngineServiceExtensions
         services.AddSingleton<Autheris.Application.Olap.IOlapRequestLimiter, Autheris.Application.Olap.OlapRequestLimiter>();
         services.AddSingleton<Autheris.Application.Federation.IFederationGate, Autheris.Application.Federation.FederationGate>();
         services.AddScoped<IFederatedQueryExecutionService, FederatedDuckDbExecutionService>();
+        services.AddScoped<Autheris.Application.Products.IProductDefinerExecutor>(
+            sp => (Autheris.Application.Products.IProductDefinerExecutor)sp.GetRequiredService<IFederatedQueryExecutionService>());
 
         // F-SQL-02: governed stored procedure endpoints (SQL Server, read-only in phase 1). with the kill switch off
         // (default) no procedure service exists at all; consumers take them as optional and see null.

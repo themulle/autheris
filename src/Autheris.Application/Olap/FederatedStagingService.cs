@@ -35,6 +35,9 @@ public sealed class FederatedStagingService : IFederatedStagingService
     private readonly IEnumerable<IDataSourceExecutor>? _executors;
     private readonly Autheris.Application.DataSources.IDataSourceTransportGate _transportGate;
     private readonly ITableMetadataRepository? _metadataRepository;
+    private readonly Autheris.Application.Products.IProductResultRouter? _productRouter;
+    private readonly Autheris.Application.Products.IProductReadAudit? _productReadAudit;
+    private readonly Autheris.Domain.Caching.TableCache.ITableCacheStore? _productCache;
 
     public FederatedStagingService(
         IAutherisConnectorRegistry connectorRegistry,
@@ -44,8 +47,14 @@ public sealed class FederatedStagingService : IFederatedStagingService
         ILogger<FederatedStagingService> logger,
         IEnumerable<IDataSourceExecutor>? executors = null,
         ITableMetadataRepository? metadataRepository = null,
-        Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null)
+        Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null,
+        Autheris.Application.Products.IProductResultRouter? productRouter = null,
+        Autheris.Domain.Caching.TableCache.ITableCacheStore? productCache = null,
+        Autheris.Application.Products.IProductReadAudit? productReadAudit = null)
     {
+        _productReadAudit = productReadAudit;
+        _productRouter = productRouter;
+        _productCache = productCache;
         // Issue #447 no gate means deny, never pass-through.
         _transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
         _connectorRegistry = connectorRegistry ?? throw new ArgumentNullException(nameof(connectorRegistry));
@@ -406,6 +415,7 @@ public sealed class FederatedStagingService : IFederatedStagingService
             }
 
             bool isKeySetCandidate = req.KeySetPlan != null &&
+                                     connector is not Autheris.Application.Products.ProductConnector &&
                                      req.Metadata.Table.DataSourceType == DataSourceType.Sql &&
                                      (_gatewayOptions.Value.WebSql?.CrossSource?.DynamicKeySet?.Enabled ?? true);
 
@@ -727,6 +737,15 @@ public sealed class FederatedStagingService : IFederatedStagingService
 
     private IAutherisConnector? ResolveConnector(TableMetadata metadata)
     {
+        // a data product is read from its cached stage-1 result only, never from a registered connector or a base table
+        if (Autheris.Application.Products.ProductSource.IsProductSource(metadata.Identifier.Domain) ||
+            Autheris.Application.Products.ProductSource.IsProductSource(metadata.Table.SourceName))
+        {
+            return _productRouter is null || _productCache is null || !Autheris.Application.Products.ProductSource.IsProductSource(metadata.Identifier.Domain)
+                ? null
+                : new Autheris.Application.Products.ProductConnector(_productRouter, _productCache, metadata.Identifier, _productReadAudit);
+        }
+
         if (metadata.Table.DataSourceType == DataSourceType.Sql)
         {
             if (_connectorRegistry.TryGetConnectorForTable(metadata.Identifier, out var sqlConn) && sqlConn != null)

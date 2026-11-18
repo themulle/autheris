@@ -127,4 +127,21 @@ public sealed class NoSqliteArchitectureTests
             "Baselines/sqlite-literals.txt contains stale entries with no SQLite string literals:\n" +
             string.Join("\n", stale));
     }
+
+    [Fact]
+    public void Src_files_do_not_mention_sqlite_outside_allowlist()
+    {
+        var allowlist = RepositoryScan.ReadBaseline("sqlite-literals.txt")
+            .ToHashSet(StringComparer.Ordinal);
+
+        var offenders = RepositoryScan.EnumerateFiles("src", "*.cs")
+            .Where(p => !allowlist.Contains(p))
+            .Where(p => RepositoryScan.ReadText(p).Contains("sqlite", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(p => p, StringComparer.Ordinal)
+            .ToList();
+
+        offenders.ShouldBeEmpty(
+            "src/ files outside Baselines/sqlite-literals.txt must not mention SQLite, not even in comments:\n" +
+            string.Join("\n", offenders));
+    }
 }

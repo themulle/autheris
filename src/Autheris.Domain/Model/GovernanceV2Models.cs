@@ -47,7 +47,7 @@ public enum DataCatalogProviderType
 
 public enum DataCatalogSyncMode
 {
-    Mirror = 1,      // Ingest/Sync catalog into local SQLite governance store
+    Mirror = 1,      // Ingest/Sync catalog into local governance store
     Reference = 2    // Referencing/federated lookup on-demand
 }
 

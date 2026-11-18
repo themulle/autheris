@@ -1,0 +1,257 @@
+{
+  "ops": [
+    {
+      "op": "addTable",
+      "table": "data_products",
+      "newTable": {
+        "name": "data_products",
+        "columns": [
+          {
+            "name": "tenant_id",
+            "type": "CHARACTER VARYING(128)",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "product_schema",
+            "type": "CHARACTER VARYING(64)",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "product_name",
+            "type": "CHARACTER VARYING(64)",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "id",
+            "type": "CHARACTER VARYING(36)",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "kind",
+            "type": "CHARACTER VARYING(16)",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "definition",
+            "type": "TEXT",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "definition_hash",
+            "type": "CHARACTER VARYING(64)",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "base_objects_json",
+            "type": "TEXT",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "columns_json",
+            "type": "TEXT",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "created_by",
+            "type": "CHARACTER VARYING(256)",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "authority",
+            "type": "CHARACTER VARYING(32)",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "status",
+            "type": "CHARACTER VARYING(16)",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "managed_by",
+            "type": "CHARACTER VARYING(64)",
+            "family": "string",
+            "nullable": true
+          },
+          {
+            "name": "load_json",
+            "type": "TEXT",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "limits_json",
+            "type": "TEXT",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "description",
+            "type": "CHARACTER VARYING(1000)",
+            "family": "string",
+            "nullable": true
+          },
+          {
+            "name": "product_owner",
+            "type": "CHARACTER VARYING(256)",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "version",
+            "type": "INTEGER",
+            "family": "integer",
+            "nullable": false
+          },
+          {
+            "name": "created_at",
+            "type": "TIMESTAMP WITH TIME ZONE",
+            "family": "datetime",
+            "nullable": false
+          },
+          {
+            "name": "updated_at",
+            "type": "TIMESTAMP WITH TIME ZONE",
+            "family": "datetime",
+            "nullable": false
+          }
+        ],
+        "primaryKey": [
+          "tenant_id",
+          "product_schema",
+          "product_name"
+        ],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addIndex",
+      "table": "data_products",
+      "name": "uq_data_products_tenant_id",
+      "unique": true,
+      "columns": [
+        "tenant_id",
+        "id"
+      ]
+    },
+    {
+      "op": "addTable",
+      "table": "data_product_versions",
+      "newTable": {
+        "name": "data_product_versions",
+        "columns": [
+          {
+            "name": "tenant_id",
+            "type": "CHARACTER VARYING(128)",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "product_id",
+            "type": "CHARACTER VARYING(36)",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "version",
+            "type": "INTEGER",
+            "family": "integer",
+            "nullable": false
+          },
+          {
+            "name": "definition_hash",
+            "type": "CHARACTER VARYING(64)",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "definition",
+            "type": "TEXT",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "author",
+            "type": "CHARACTER VARYING(256)",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "authority",
+            "type": "CHARACTER VARYING(32)",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "created_at",
+            "type": "TIMESTAMP WITH TIME ZONE",
+            "family": "datetime",
+            "nullable": false
+          }
+        ],
+        "primaryKey": [
+          "tenant_id",
+          "product_id",
+          "version"
+        ],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addTable",
+      "table": "data_source_owners",
+      "newTable": {
+        "name": "data_source_owners",
+        "columns": [
+          {
+            "name": "tenant_id",
+            "type": "CHARACTER VARYING(128)",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "data_source",
+            "type": "CHARACTER VARYING(128)",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "owner_sid",
+            "type": "CHARACTER VARYING(128)",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "assigned_by",
+            "type": "CHARACTER VARYING(256)",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "assigned_at",
+            "type": "TIMESTAMP WITH TIME ZONE",
+            "family": "datetime",
+            "nullable": false
+          }
+        ],
+        "primaryKey": [
+          "tenant_id",
+          "data_source",
+          "owner_sid"
+        ],
+        "indexes": []
+      }
+    }
+  ]
+}

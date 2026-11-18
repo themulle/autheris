@@ -51,6 +51,13 @@ public sealed class GraphQlSchemaGoldenTests
         var executor = await sp.GetRequiredService<IRequestExecutorProvider>().GetExecutorAsync();
         var currentSdl = NormalizeSdl(executor.Schema.ToString());
 
+        if (string.Equals(Environment.GetEnvironmentVariable("AUTHERIS_UPDATE_SNAPSHOTS"), "1", StringComparison.Ordinal))
+        {
+            var target = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../GraphQL/Snapshots/graphql-schema-golden.graphql"));
+            await File.WriteAllTextAsync(target, executor.Schema.ToString());
+            return;
+        }
+
         var snapshotPath = Path.Combine(AppContext.BaseDirectory, SnapshotRelativePath);
         if (!File.Exists(snapshotPath))
         {

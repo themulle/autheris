@@ -91,6 +91,14 @@ public static partial class GatewayServiceCollectionExtensions
         services.AddAutherisEvents(gatewayOptions);
         services.AddAutherisStorage(gatewayOptions, hostEnv);
         services.AddAutherisGovernance(gatewayOptions);
+
+        // the governed table cache (and with it the data product loading) exists only where it is enabled
+        if (services.FirstOrDefault(d => d.ServiceType == typeof(IConfiguration))?.ImplementationInstance is IConfiguration hostConfiguration &&
+            hostConfiguration.GetSection(Autheris.Domain.Options.TableCache.TableCacheOptions.SectionName).Get<Autheris.Domain.Options.TableCache.TableCacheOptions>()?.Enabled == true)
+        {
+            services.AddGovernedTableCache(hostConfiguration);
+        }
+
         services.AddAutherisSecurity(gatewayOptions, hostEnv);
         services.AddAutherisSqlEngine(gatewayOptions);
         services.AddAutherisExecution(gatewayOptions, hostEnv);
