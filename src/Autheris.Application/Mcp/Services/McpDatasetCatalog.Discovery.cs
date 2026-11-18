@@ -302,8 +302,15 @@ public sealed partial class McpDatasetCatalog
             .Where(static c => c.State != DiscoveryColumnState.NoAccess)
             .Select(c =>
             {
+                var access = c.State == DiscoveryColumnState.Clear ? "clear" : "mask";
+                if (brief)
+                {
+                    // Issue #799: a column signature only (name, type, key flag, access).
+                    return new McpDatasetColumn(c.Name, c.DataType, Description: null, c.Pii, primaryKeys.Contains(c.Name), Access: access);
+                }
+
                 graphQlColumns.TryGetValue(c.Name, out var field);
-                var colProfile = !brief && !obj.HiddenTextColumns.Contains(c.Name) && c.Statistics != null
+                var colProfile = !obj.HiddenTextColumns.Contains(c.Name) && c.Statistics != null
                     ? new ColumnValueProfile(
                         MinValue: c.Statistics.MinValue,
                         MaxValue: c.Statistics.MaxValue,
@@ -322,7 +329,7 @@ public sealed partial class McpDatasetCatalog
                     GraphQlField: field?.Field,
                     GraphQlType: field?.GraphQlType,
                     ValueProfile: colProfile,
-                    Access: c.State == DiscoveryColumnState.Clear ? "clear" : "mask",
+                    Access: access,
                     DisplayName: obj.HiddenTextColumns.Contains(c.Name) ? null : DiscoveryTextSanitizer.SanitizeText(c.DisplayName, DiscoveryTextSanitizer.MaxDisplayNameRunes),
                     Classifications: c.Classifications, ClearRequestable: c.ClearRequestable,
                     LongDescription: obj.HiddenTextColumns.Contains(c.Name) ? null : c.LongDescription);
@@ -366,13 +373,14 @@ public sealed partial class McpDatasetCatalog
             DataOwner: dataOwner,
             DataOwnerDelegates: delegates,
             AccessStatus: accessStatus,
-            Indexes: brief ? null : shape.Indexes,
+            Indexes: shape.Indexes,
+            View: brief ? BriefView : null,
             Kind: obj.Kind.ToString().ToLowerInvariant(),
-            RequiredFilterColumns: brief || shape.RequiredFilterColumns.Count == 0 ? null : shape.RequiredFilterColumns,
-            RequiredFilterColumnGroups: brief || shape.RequiredFilterColumnGroups.Count == 0 ? null : shape.RequiredFilterColumnGroups,
+            RequiredFilterColumns: shape.RequiredFilterColumns.Count == 0 ? null : shape.RequiredFilterColumns,
+            RequiredFilterColumnGroups: shape.RequiredFilterColumnGroups.Count == 0 ? null : shape.RequiredFilterColumnGroups,
             Language: negotiatedLanguage,
             RequestedLanguage: language,
-            PrimaryKeyOrder: brief ? null : Autheris.Application.DataSources.Services.DatasetKeyProjection.KeyOrder(shape.PrimaryKeyColumns, shape.PrimaryKeyDirections));
+            PrimaryKeyOrder: Autheris.Application.DataSources.Services.DatasetKeyProjection.KeyOrder(shape.PrimaryKeyColumns, shape.PrimaryKeyDirections));
     }
 
     private static string MapDiscoveryAccessStatus(DiscoveryAccessState state) => state switch

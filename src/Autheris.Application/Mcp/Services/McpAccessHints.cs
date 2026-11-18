@@ -27,7 +27,7 @@ internal sealed class McpAccessHints(IReadPathSwitches? switches, bool mcpEnable
 
         if (Tool(McpDatasetTools.DescribeDataset))
         {
-            parts.Add("describe_dataset returns the GraphQL field, the filter and sort types and an example query for each dataset.");
+            parts.Add("describe_dataset returns the GraphQL field, the filter and sort types and an example query for each dataset (not with brief: true).");
         }
 
         if (!mcpEnabled)
