@@ -446,27 +446,47 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         var graphQl = graphQlMap == null ? null : await graphQlMap.GetTableAsync(id, ct).ConfigureAwait(false);
         var graphQlColumns = (graphQl?.Columns ?? []).ToDictionary(c => c.ColumnName, StringComparer.OrdinalIgnoreCase);
 
-        // I404-SC-L1/L4: keys and indexes only when wholly Clear for this caller (the level lookup fails closed to Deny).
-        var keyView = Autheris.Application.DataSources.Services.DatasetIndexProjection.Project(table, Autheris.Application.DataSources.Services.DatasetIndexProjection.ClearSet(columnAccessLevels));
+        // The access label is the data-path level seen through the sensitivity rule: a column graded sensitive is never reported as clear
+        // (an explicit Clear on it is shown as mask). The key and index projection uses the same labels, so a key column never shows "mask".
+        string? AccessLabel(TableColumn c) => columnAccessLevels.TryGetValue(c.ColumnName, out var lvl)
+            ? lvl switch
+            {
+                Autheris.Domain.Interfaces.ColumnAccessLevel.Clear when !ClassificationMetadata.IsColumnSensitive(table, c) => "clear",
+                Autheris.Domain.Interfaces.ColumnAccessLevel.Clear or Autheris.Domain.Interfaces.ColumnAccessLevel.Mask => "mask",
+                _ => null
+            }
+            : null;
+
+        // I404-SC-L1/L4: keys and indexes only when wholly clear for this caller (the level lookup fails closed to Deny).
+        var clearColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var column in table.Columns)
+        {
+            if (AccessLabel(column) == "clear")
+            {
+                clearColumns.Add(column.ColumnName);
+            }
+        }
+
+        var keyView = Autheris.Application.DataSources.Services.DatasetIndexProjection.Project(table, clearColumns);
         var primaryKeys = new HashSet<string>(keyView.PrimaryKeyColumns, StringComparer.OrdinalIgnoreCase);
 
         var hiddenCols = await ResolveFallbackHiddenColumnsAsync(table, columnAccessLevels, activeConsents, principal, ct).ConfigureAwait(false);
 
-        // Token-efficient Brief view for AI App & Report Generators
+        // Issue #799: the brief view carries column signatures (name, type, key flag, access) and what a correct query needs (key order,
+        // indexes, required filters); McpCatalogWire.Brief drops everything else on the wire.
         if (brief)
         {
-            var briefColumns = table.Columns.Select(c =>
-            {
-                bool hideText = hiddenCols.Contains(c.ColumnName);
-                var colResolved = !hideText && negotiatedLanguage != null ? c.Texts.Resolve(negotiatedLanguage) : null;
-                return new McpDatasetColumn(
-                    c.ColumnName,
-                    c.DataType,
-                    hideText ? null : (colResolved?.Description ?? c.Description),
-                    ClassificationMetadata.IsColumnSensitive(table, c),
-                    primaryKeys.Contains(c.ColumnName),
-                    DisplayName: hideText ? null : (colResolved?.Title ?? c.DisplayName));
-            }).ToList();
+            var briefColumns = table.Columns.Select(c => new McpDatasetColumn(
+                c.ColumnName,
+                c.DataType,
+                Description: null,
+                ClassificationMetadata.IsColumnSensitive(table, c),
+                primaryKeys.Contains(c.ColumnName),
+                Access: AccessLabel(c))).ToList();
+
+            // Issue #807: required filters only over the columns this answer lists.
+            var briefFilters = Autheris.Application.DataSources.Services.RequiredFilterColumnProjection.Project(
+                table, briefColumns.Select(static c => c.Name).ToHashSet(StringComparer.OrdinalIgnoreCase));
 
             var tableResolvedBrief = negotiatedLanguage != null ? table.Table.Texts.Resolve(negotiatedLanguage) : null;
             return new McpDatasetDescription(
@@ -487,10 +507,13 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
                 DataOwner: null,
                 DataOwnerDelegates: null,
                 AccessStatus: accessStatus,
-                Indexes: null,
-                View: "Brief",
+                Indexes: keyView.Indexes,
+                View: BriefView,
+                RequiredFilterColumns: briefFilters.Columns.Count > 0 ? briefFilters.Columns : null,
+                RequiredFilterColumnGroups: briefFilters.Groups.Count > 0 ? briefFilters.Groups : null,
                 Language: negotiatedLanguage,
                 RequestedLanguage: language,
+                PrimaryKeyOrder: keyView.PrimaryKeyOrder,
                 Size: DatasetSizeClassifier.Resolve(table));
         }
         var columns = table.Columns
@@ -504,15 +527,6 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
                 var colDisplayName = hideText ? null : (colResolved?.Title ?? c.DisplayName);
                 var colDescription = hideText ? null : (colResolved?.Description ?? c.Description);
 
-                var accessLabel = columnAccessLevels.TryGetValue(c.ColumnName, out var lvl)
-                    ? lvl switch
-                    {
-                        Autheris.Domain.Interfaces.ColumnAccessLevel.Clear when !ClassificationMetadata.IsColumnSensitive(table, c) => "clear",
-                        Autheris.Domain.Interfaces.ColumnAccessLevel.Clear or Autheris.Domain.Interfaces.ColumnAccessLevel.Mask => "mask",
-                        _ => null
-                    }
-                    : null;
-
                 return new McpDatasetColumn(
                     c.ColumnName,
                     c.DataType,
@@ -524,7 +538,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
                     hideText ? null : RestrictSemantics(c),
                     Deprecation: deprecation,
                     ValueProfile: null,
-                    Access: accessLabel,
+                    Access: AccessLabel(c),
                     DisplayName: colDisplayName,
                     LongDescription: hideText ? null : DiscoveryTextSanitizer.SanitizeText(colResolved?.LongDescription ?? c.LongDescription, DiscoveryTextSanitizer.MaxDescriptionRunes * 4, allowNewlinesAndTabs: true));
             })
@@ -716,6 +730,9 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
 
     /// <summary>Value of <see cref="McpDatasetDescription.View"/> for the allow-listed summary.</summary>
     public const string SummaryView = "summary";
+
+    /// <summary>Issue #799: value of <see cref="McpDatasetDescription.View"/> for <c>describe_dataset(brief: true)</c>.</summary>
+    public const string BriefView = "Brief";
 
     internal static CatalogOutputShape Shape(bool isAdminView, TableMetadata table) =>
         CatalogViewShaping.Resolve(isAdminView, table.CatalogView);

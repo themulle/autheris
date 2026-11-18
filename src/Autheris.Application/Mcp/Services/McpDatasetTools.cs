@@ -203,7 +203,7 @@ public static class McpDatasetTools
 
         yield return new McpToolDefinition(
             Name: ListDatasets,
-            Description: "Lists the datasets (tables) you may query with their GraphQL field, and all protocols of the gateway. Start here, then call describe_dataset and query with query_graphql.",
+            Description: "Lists the datasets (tables) you may query with their GraphQL field, and all protocols of the gateway (format 'compact' leaves out the GraphQL field and the protocols). Start here, then call describe_dataset and query with query_graphql.",
             InputJsonSchema: """
             {
               "type": "object",
@@ -216,7 +216,7 @@ public static class McpDatasetTools
                 "limit": { "type": "integer", "minimum": 1, "maximum": 100, "description": "Optional maximum datasets to return per page (default 50, max 100)." },
                 "language": { "type": "string", "description": "Optional BCP 47 language tag (e.g. 'de', 'en') or Accept-Language range for localized dataset titles and descriptions." },
                 "overview": { "type": "boolean", "description": "When true, returns an aggregated summary of business domains and table counts without paginating individual datasets (optimal for large catalogs in <200 tokens)." },
-                "format": { "type": "string", "enum": ["full", "compact"], "description": "Output format: 'full' (default) or 'compact' (dense table list omitting verbose access paths, ideal for LLM token efficiency)." }
+                "format": { "type": "string", "enum": ["full", "compact"], "description": "Output format: 'full' (default) or 'compact': each dataset as id, display name (only when it differs from the table name), first sentence of the description, sensitivity and access status; no GraphQL field, column count, tags, size or access paths." }
               }
             }
             """,
@@ -231,7 +231,7 @@ public static class McpDatasetTools
               "required": ["dataset"],
               "properties": {
                 "dataset": { "type": "string", "description": "Dataset id as returned by list_datasets (domain.schema.table)." },
-                "brief": { "type": "boolean", "description": "When true, returns only the short description and essential column signatures (name, type, pk) omitting bulky profiling and golden queries to save tokens." },
+                "brief": { "type": "boolean", "description": "When true, returns column signatures only (name, type, access, primaryKey on key columns) plus the primary key order, indexes and required filter columns; no column descriptions, classifications, value profiles, GraphQL block or example queries." },
                 "language": { "type": "string", "description": "Optional BCP 47 language tag (e.g. 'de', 'en') or Accept-Language range for localized dataset and column descriptions." },
                 "include": { "type": "array", "items": { "type": "string", "enum": ["columns", "keys", "indexes", "relations", "examples", "graphql", "access", "longDescription"] }, "description": "Optional sections to return; sections not listed are omitted (default: all, without column long descriptions). Add longDescription together with columns to receive the long description of each returned column." },
                 "columns": { "type": "array", "items": { "type": "string" }, "description": "Optional column names; only these columns are returned (columnTotal reports the full count)." },
