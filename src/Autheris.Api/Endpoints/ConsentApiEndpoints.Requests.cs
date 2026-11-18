@@ -266,7 +266,8 @@ public static partial class ConsentApiEndpoints
                         body.RequestWriteOnly,
                         body.RequestedDuration,
                         body.RequestedValidFrom,
-                        body.RequestedValidTo),
+                        body.RequestedValidTo,
+                        body.RequestedClear),
                     ct).ConfigureAwait(false);
             }
 
@@ -402,7 +403,8 @@ public static partial class ConsentApiEndpoints
                     attribution,
                     tenantId,
                     ApprovedProfileItems: body.ApprovedItems,
-                    ApprovedClearColumns: body.ApprovedClearColumns),
+                    ApprovedClearColumns: body.ApprovedClearColumns,
+                    ApprovedClearClassifications: body.ApprovedClearClassifications),
                 ct).ConfigureAwait(false);
 
             var eTag = FormatRequestETag(result.Request.Version);
@@ -652,7 +654,8 @@ public sealed record CreateConsentRequestBody(
     string? Kind = null,
     Guid? ProfileId = null,
     string? Grantee = null,
-    string? GranteeType = null);
+    string? GranteeType = null,
+    IReadOnlyList<Autheris.Application.ConsentRequests.ClassificationClear.RequestedClearItem>? RequestedClear = null);
 
 public sealed record ConsentDecisionBody(
     string? Decision = null,
@@ -669,7 +672,8 @@ public sealed record ConsentDecisionBody(
     AssertedApprover? Approver = null,
     IReadOnlyList<AssertedApprover>? Approvers = null,
     IReadOnlyList<int>? ApprovedItems = null,
-    IReadOnlyList<string>? ApprovedClearColumns = null);
+    IReadOnlyList<string>? ApprovedClearColumns = null,
+    IReadOnlyList<string>? ApprovedClearClassifications = null);
 
 public sealed record ConsentDecisionApiResponse(
     ConsentRequestDto Request,

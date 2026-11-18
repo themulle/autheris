@@ -121,6 +121,74 @@ public sealed class ClassificationIngestionSyncTests
     }
 
     [Fact]
+    public async Task Ingestion_sync_never_removes_existing_column_classifications()
+    {
+        var emailColId = Guid.NewGuid();
+        var secretColId = Guid.NewGuid();
+        var metaRepo = new CountingBatchTableMetadataRepository();
+        SeedExistingTable(metaRepo, "crm", "analytics", "customers", emailColId, secretColId);
+        var classRepo = new TestInMemoryClassificationStore("tenant-a");
+        var time = new AdjustableClassificationTimeProvider(FixedNow);
+
+        var seeded = new (Guid Column, string Code, string Source)[]
+        {
+            (emailColId, ClassificationScopes.PiiSpecialCode, "OWNER"),
+            (emailColId, ClassificationScopes.FinancialCode, "ADMIN"),
+            (emailColId, ClassificationScopes.PiiCode, "INGESTION"),
+            (secretColId, ClassificationScopes.CredentialsCode, "MIGRATION")
+        };
+        foreach (var (column, code, source) in seeded)
+        {
+            await classRepo.AssignColumnClassificationAsync(new ColumnClassification
+            {
+                Scope = ClassificationScopes.Global,
+                TableColumnId = column.ToString(),
+                Code = code,
+                Source = source,
+                AssignedBy = "seed",
+                AssignedAt = FixedNow.AddDays(-3)
+            });
+        }
+
+        var options = Options.Create(new GatewayOptions { Dbt = new DbtOptions { ActivateNewTables = false } });
+        var svc = new DbtMetadataIngestionService(
+            new FakeDbtProposalRepository(), metaRepo, new FakeLineageGraphStore(), epochRepository: null,
+            options, sqlEndpointLoader: null, relationRepository: null, virtualFilterAdmin: null,
+            tagImport: null, artifactStore: null, testTargetMap: null,
+            NullLogger<DbtMetadataIngestionService>.Instance, new NullAuditLogRepository(),
+            classificationRepository: classRepo, timeProvider: time);
+
+        // Re-ingestion where the source dropped every classification, or downgrades it to PUBLIC, must not remove anything.
+        foreach (var columnMeta in new[] { "{}", "{ \"classification\": \"PUBLIC\" }" })
+        {
+            var manifest = $$"""
+            {
+              "metadata": { "dbt_version": "1.8.0" },
+              "nodes": {
+                "model.analytics.customers": {
+                  "name": "customers", "database": "crm", "schema": "analytics",
+                  "config": { "materialized": "table" }, "tags": [], "meta": {},
+                  "columns": {
+                    "email": { "name": "email", "data_type": "varchar", "tags": [], "meta": {{columnMeta}} },
+                    "token": { "name": "token", "data_type": "varchar", "tags": [], "meta": {{columnMeta}} }
+                  }
+                }
+              }
+            }
+            """;
+            await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(manifest));
+            await svc.IngestManifestStreamAsClusterAdminAsync(stream, dryRun: false, CancellationToken.None);
+        }
+
+        classRepo.RemoveCalls.ShouldBe(0);
+        foreach (var (column, code, source) in seeded)
+        {
+            classRepo.ColumnClassifications.ShouldContain(c =>
+                c.TableColumnId == column.ToString() && c.Code == code && c.Source == source && c.Scope == ClassificationScopes.Global);
+        }
+    }
+
+    [Fact]
     public async Task Unknown_dbt_and_openmetadata_codes_fail_closed_and_never_widen_to_public()
     {
         var emailColId = Guid.NewGuid();
