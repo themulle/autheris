@@ -23,8 +23,6 @@ public sealed class TableCacheOptions
     public int DefaultDiskLimitMb { get; init; } = 10240;
 
     public int DefaultTtlSeconds { get; init; } = 3600;
-
-
     public int MaxStaleSurvivalSeconds { get; init; } = 86400; // 24 hours default, hard safety ceiling 7 days
 
     public TableCacheEncryptionOptions Encryption { get; init; } = new();

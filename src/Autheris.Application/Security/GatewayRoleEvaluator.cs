@@ -191,9 +191,15 @@ public sealed class GatewayRoleEvaluator : IGatewayRoleEvaluator
                     continue;
                 }
 
+                // Data product roles are bound to one named tenant; the wildcard tenant never confers them.
+                if (parsedRole.IsTenantScopedOnly() && roleTenant == "*")
+                {
+                    continue;
+                }
+
                 result.Add(parsedRole);
             }
-            else if (GatewayRoleExtensions.TryParseGlobalRole(raw, out var globalRole))
+            else if (GatewayRoleExtensions.TryParseGlobalRole(raw, out var globalRole) && !globalRole.IsTenantScopedOnly())
             {
                 // Global role (applies across all tenants)
                 result.Add(globalRole);

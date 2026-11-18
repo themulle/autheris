@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Modules.Lakehouse.Models;
 using System;
 using System.Collections.Generic;
 using System.IO;

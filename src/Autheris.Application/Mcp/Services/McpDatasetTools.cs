@@ -452,7 +452,7 @@ public static class McpDatasetTools
 
         yield return new McpToolDefinition(
             Name: CallProcedure,
-            Description: "Executes a governed stored procedure or table-valued function with input validation, concurrency control, row-level security, and column masking under the caller's context.",
+            Description: "Executes a governed stored procedure or table-valued function with input validation, concurrency control, row-level security, and column masking under the caller's context. A procedure declared with mode write changes data: it needs an execute-write grant on its data product, is refused for read-only tokens, returns no rows and is audited before and after the call; the tool is therefore annotated as destructive unless the session is read-only.",
             InputJsonSchema: """
             {
               "type": "object",

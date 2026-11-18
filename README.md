@@ -115,7 +115,7 @@ Performance and footprint figures are tracked exclusively through reproducible s
 
 - **Measurement protocol and budgets**: See [Benchmark Protocol](benchmarks/protocol/README.md) and `benchmarks/budgets.json`.
 - **Warm latency and ReadyToRun baseline**: Non-R2R warm P50 of 1.17 ms and P99 of 3.47 ms vs. R2R warm P50 of 2.97 ms and P99 of 10.24 ms are recorded in the [R2R Spike Report](benchmarks/results/r2r-spike-report.md).
-- **Footprint and repository metrics**: Checked-in measurements reside in [benchmarks/results/footprint-2026-11-05-7900268.json](benchmarks/results/footprint-2026-11-05-7900268.json) and [benchmarks/results/repo-metrics-2026-11-05-7900268.json](benchmarks/results/repo-metrics-2026-11-05-7900268.json).
+- **Footprint and repository metrics**: Checked-in measurements reside in [benchmarks/results/footprint-2026-11-05-7900268.json](benchmarks/results/footprint-2026-11-05-7900268.json), [benchmarks/results/footprint-2026-11-18-feeab35.json](benchmarks/results/footprint-2026-11-18-feeab35.json) and [benchmarks/results/repo-metrics-2026-11-05-7900268.json](benchmarks/results/repo-metrics-2026-11-05-7900268.json).
 
 Run the microbenchmark suite locally with:
 

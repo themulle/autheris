@@ -50,7 +50,7 @@ public sealed record SqlTokenSecurityOptions
 
     /// <summary>
     /// SQL-1: Reject '[' / ']' tokens and string literals / quoted identifiers containing '[', ']', '--' or '/*'.
-    /// SQL Server and SQLite lex [...] as a quoted identifier while the Trino grammar lexes it as array syntax, so
+    /// SQL Server lexes [...] as a quoted identifier while the Trino grammar lexes it as array syntax, so
     /// string content for the gateway could become executable SQL (and comment out appended filters) on the backend.
     /// </summary>
     public bool RejectBracketLexerDifferentials { get; init; }
@@ -85,7 +85,7 @@ public sealed record SqlTokenSecurityOptions
     /// <summary>
     /// The strict switches for a statement compiled for <paramref name="dialect"/> (used by the policy producers that parse administrator
     /// text, such as virtual filter definitions). Bracket sequences are rejected for the dialects that lex <c>[...]</c> as a quoted
-    /// identifier (SQL Server, SQLite), and <c>${</c> for Databricks; dollar quoting is rejected everywhere.
+    /// identifier (SQL Server), and <c>${</c> for Databricks; dollar quoting is rejected everywhere.
     /// </summary>
     public static SqlTokenSecurityOptions ForDialect(TargetSqlDialect dialect) => new()
     {

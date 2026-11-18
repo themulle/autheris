@@ -291,6 +291,8 @@ public static class ProcedureEndpointRoutes
             return;
         }
 
+        // POST is the one wired REST method for write procedures; GET never runs one.
+        using var scope = ProcedureCallScope.Enter(ProcedureCallTransport.Rest);
         await ExecuteAsync(name, inputs, http, service, loggerFactory).ConfigureAwait(false);
     }
 
