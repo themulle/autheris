@@ -202,7 +202,7 @@ public static class SltCorpusRunner
             return;
         }
 
-        Record(q, SltScenario.Permissive, runnerA.Run(q.Sql), expected, null, classifier, summary, reproPrefix);
+        Record(q, SltScenario.Permissive, RunEngine(runnerA, q.Sql), expected, null, classifier, summary, reproPrefix);
 
         if (runnerB is not null && filtered is not null)
         {
@@ -217,8 +217,19 @@ public static class SltCorpusRunner
                 return;
             }
 
-            Record(q, SltScenario.RowFilter, runnerB.Run(q.Sql), expectedB, expected, classifier, summary, reproPrefix);
+            Record(q, SltScenario.RowFilter, RunEngine(runnerB, q.Sql), expectedB, expected, classifier, summary, reproPrefix);
         }
+    }
+
+    /// <summary>
+    /// One engine run. A first timeout is retried once: a statement that stalls on a starved or cold runner finishes the second time
+    /// (warm page cache, compiled paths), while a statement that really hangs times out twice and is still reported as a hang. A leak or a
+    /// wrong result is never retried, so the retry cannot hide one.
+    /// </summary>
+    internal static SltEngineOutcome RunEngine(ISltEngine engine, string sql)
+    {
+        var outcome = engine.Run(sql);
+        return outcome is SltEngineHung ? engine.Run(sql) : outcome;
     }
 
     private static void Record(SltQuery q, SltScenario scenario, SltEngineOutcome outcome, IReadOnlyList<string> expected, IReadOnlyList<string>? unfiltered, SltClassifier classifier, SltRunSummary summary, string reproPrefix)

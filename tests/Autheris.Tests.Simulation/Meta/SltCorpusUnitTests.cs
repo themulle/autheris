@@ -401,6 +401,35 @@ public sealed class SltCorpusUnitTests
         }
     }
 
+    private sealed class StallOnceEngine(SltEngineOutcome second) : ISltEngine
+    {
+        public int Calls { get; private set; }
+
+        public SltEngineOutcome Run(string sql) => ++Calls == 1 ? new SltEngineHung("Execute") : second;
+
+        public void InvalidateCatalog()
+        {
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void SltCorpusRunner_RunEngine_RetriesAStallOnceAndKeepsEveryOtherOutcome()
+    {
+        // A stall on a starved runner recovers on the retry; a leak, a crash or a second hang is reported as seen.
+        var rows = new SltEngineRows([[1L]]);
+        var recovered = new StallOnceEngine(rows);
+        SltCorpusRunner.RunEngine(recovered, "SELECT 1").ShouldBeSameAs(rows);
+        recovered.Calls.ShouldBe(2);
+
+        SltCorpusRunner.RunEngine(new StallOnceEngine(new SltEngineHung("Execute")), "SELECT 1").ShouldBeOfType<SltEngineHung>();
+        SltCorpusRunner.RunEngine(new StallOnceEngine(new SltEngineCrashed("Execute", "X", "m")), "SELECT 1").ShouldBeOfType<SltEngineCrashed>();
+
+        var hanging = new HangingEngine();
+        SltCorpusRunner.RunEngine(hanging, "SELECT 1").ShouldBeOfType<SltEngineHung>();
+        hanging.Calls.ShouldBe(2);
+    }
+
     [Fact]
     [Trait("Category", "Security")]
     public async Task SltCorpusRunner_HangCircuitBreakerSkipsRemainingQueriesAndStaysRed()
@@ -413,7 +442,7 @@ public sealed class SltCorpusUnitTests
 
         var summary = await SltCorpusRunner.RunAsync(corpus, 1, int.MaxValue, classifier, "repro", engineFactory: (_, _) => engine, hangCircuitLimit: 3);
 
-        engine.Calls.ShouldBe(3);
+        engine.Calls.ShouldBe(6, "each hang is retried once before it counts");
         summary.Count(SltVerdict.Hang).ShouldBe(3);
         summary.Skipped["test/x.test"].ShouldBe(7);
         summary.OpenCircuits["test/x.test"].ShouldStartWith("Hang:Execute");
