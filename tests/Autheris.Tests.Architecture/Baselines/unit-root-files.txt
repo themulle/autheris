@@ -1,3 +1,1 @@
 # WP-SIMPL-23 baseline: .cs files in tests/Autheris.Tests.Unit/ root (ratchet: shrink-only)
-tests/Autheris.Tests.Unit/ArchitectureAndCleanCodeTests.cs
-tests/Autheris.Tests.Unit/ProcedureEndpointTests.cs
