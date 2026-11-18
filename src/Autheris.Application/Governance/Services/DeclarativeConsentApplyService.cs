@@ -12,6 +12,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Governance.Grants;
 using Autheris.Application.Governance.Interfaces;
+using Autheris.Application.Governance.Validation;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Security;
 using Autheris.Domain.Audit;
@@ -115,8 +116,8 @@ public sealed class DeclarativeConsentApplyService(
             }
         }
 
-        // INC1 decision 6: normalise every description before anything is read or written (also in dry-run); a violation
-        // rejects the whole manifest with a neutral message that names only the policy index.
+        // INC1 decision 6: normalise every description and check every scope entry before anything is read or written (also in dry-run);
+        // a violation rejects the whole manifest with a neutral message that names only the policy index.
         var descriptions = new string?[policies.Count];
         for (var i = 0; i < policies.Count; i++)
         {
@@ -127,6 +128,15 @@ public sealed class DeclarativeConsentApplyService(
             }
 
             descriptions[i] = check.Value;
+
+            // A blank scope entry is stored as no scope and would turn a scope rule into a base rule for every scope (fail closed).
+            foreach (var rule in policies[i].ColumnRules ?? [])
+            {
+                if (!ConsentRuleScopeValidator.AreValid(rule.ApplicableScopes))
+                {
+                    throw new DeclarativeManifestValidationException(i, DeclarativeManifestViolation.ScopeEntry);
+                }
+            }
         }
 
         var lockKeys = !dryRun && policies.Count > 0
