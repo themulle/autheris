@@ -91,7 +91,8 @@ public sealed partial class CatalogGraphQlTypeModule : ITypeModule, IDisposable,
         GraphQLOptions? graphQlOptions = null,
         Autheris.Application.DataSources.IDataSourceOptionsResolver? transportResolver = null,
         IEpochValidationService? epochService = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IEventBus? eventBus = null)
     {
         _transportResolver = transportResolver;
         _epochService = epochService;
@@ -105,6 +106,7 @@ public sealed partial class CatalogGraphQlTypeModule : ITypeModule, IDisposable,
         _refreshInterval = refreshInterval ?? TimeSpan.Zero;
         _versionProvider = versionProvider;
         _graphQlOptions = graphQlOptions ?? new GraphQLOptions();
+        _changeSubscription = SubscribeToCatalogChanges(eventBus); // last: a signal may arrive at once (issue #802)
     }
 
     internal static string BuildOffsetDescription(int maxAllowedOffset) =>
@@ -211,6 +213,8 @@ public sealed partial class CatalogGraphQlTypeModule : ITypeModule, IDisposable,
             _refreshTimer?.Dispose();
             _refreshTimer = null;
         }
+
+        DisposeChangeSignal();
     }
 
     public async ValueTask<IReadOnlyCollection<ITypeSystemMember>> CreateTypesAsync(
@@ -224,6 +228,8 @@ public sealed partial class CatalogGraphQlTypeModule : ITypeModule, IDisposable,
         // Issue #786: the request is served from here on, so a change seen from now on may queue exactly one more rebuild.
         // The latch is released before the pending model is taken: a change that lands afterwards is either taken by
         // this build or raises the next (trailing) request.
+        // Issue #802: the build is marked in flight before the request is released, so the schema status never has a gap.
+        Interlocked.Exchange(ref _buildInFlight, 1);
         Interlocked.Exchange(ref _rebuildRequested, 0);
         Volatile.Write(ref _deferralStartTimestamp, NoTimestamp);
         Volatile.Write(ref _lastCheckSawChange, 0);
@@ -257,6 +263,10 @@ public sealed partial class CatalogGraphQlTypeModule : ITypeModule, IDisposable,
             else
             {
                 var seen = new System.Collections.Concurrent.ConcurrentDictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+                // Issue #802: the version is read before the model, so the recorded version never claims a write the model lacks.
+                Autheris.Application.Catalog.CatalogVersion? catVer = _versionProvider is null
+                    ? null
+                    : await _versionProvider.GetCatalogVersionAsync(cancellationToken).ConfigureAwait(false);
                 schemaModel = await CatalogSchemaModel.BuildAsync(
                     _metadataRepo,
                     _relationRepo,
@@ -274,11 +284,10 @@ public sealed partial class CatalogGraphQlTypeModule : ITypeModule, IDisposable,
                 _currentSchemaModel = schemaModel;
                 CurrentLookup = GetTableMetadataForField;
                 _built = new BuiltState(schemaModel.Fingerprint(), schemaModel.OmittedTables);
-                if (_versionProvider != null)
+                if (catVer.HasValue)
                 {
-                    var catVer = await _versionProvider.GetCatalogVersionAsync(cancellationToken).ConfigureAwait(false);
-                    Volatile.Write(ref _builtStructureVersion, catVer.StructureVersion);
-                    Volatile.Write(ref _builtContentVersion, catVer.ContentVersion);
+                    Volatile.Write(ref _builtStructureVersion, catVer.Value.StructureVersion);
+                    Volatile.Write(ref _builtContentVersion, catVer.Value.ContentVersion);
                 }
             }
         }

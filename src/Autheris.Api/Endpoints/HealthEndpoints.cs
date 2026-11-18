@@ -8,6 +8,7 @@ using Autheris.Domain.Options;
 using Autheris.Api.Endpoints.Health;
 using Autheris.Api.Extensions;
 using Autheris.Api.Hosting.Warmup;
+using Autheris.GraphQL.Catalog;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -60,7 +61,37 @@ public static class HealthEndpoints
             CancellationToken ct) => HandleReadyAsync(controller, readinessProbe, executorGate, warmupState, gatewayOptions, environment, ct))
         .AllowAnonymous().WithAuditExemption("Operational health probe");
 
+        // Issue #802: whether the served GraphQL schema is behind the catalog, for clients that query right after a catalog
+        // write. Deliberately separate from /health/ready, which must not flap to 503 during every routine schema rebuild.
+        app.MapGet("/health/graphql-schema", (
+            [FromServices] ICatalogSchemaFreshness? freshness,
+            HttpContext context,
+            CancellationToken ct) => HandleGraphQlSchemaAsync(freshness, context, ct))
+        .AllowAnonymous().WithAuditExemption("Operational health probe");
+
         return app;
+    }
+
+    /// <summary>
+    /// Issue #802: 200 <c>{"status":"Current"}</c> or 503 <c>{"status":"Updating"}</c> with <c>Retry-After: 1</c>; 404 when
+    /// the GraphQL catalog module is not registered. The body is the same in every environment and never carries catalog
+    /// names, counts or versions (SEC-802-1).
+    /// </summary>
+    internal static async Task<IResult> HandleGraphQlSchemaAsync(ICatalogSchemaFreshness? freshness, HttpContext context, CancellationToken ct)
+    {
+        context.Response.Headers.CacheControl = "no-store";
+        if (freshness is null)
+        {
+            return Results.NotFound();
+        }
+
+        if (await freshness.IsSchemaCurrentAsync(ct).ConfigureAwait(false))
+        {
+            return Results.Ok(new { status = "Current" });
+        }
+
+        context.Response.Headers.RetryAfter = "1";
+        return Results.Json(new { status = "Updating" }, statusCode: StatusCodes.Status503ServiceUnavailable);
     }
 
     internal static async Task<IResult> HandleReadyAsync(

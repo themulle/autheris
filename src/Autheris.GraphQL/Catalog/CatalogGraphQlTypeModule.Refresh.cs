@@ -199,6 +199,7 @@ public sealed partial class CatalogGraphQlTypeModule
             else
             {
                 _logger?.LogDebug("GraphQL catalog changed again; rebuild deferred until the changes settle.");
+                ScheduleFollowUpCheck();
             }
         }
 
@@ -279,10 +280,14 @@ public sealed partial class CatalogGraphQlTypeModule
         var start = Volatile.Read(ref _buildStartTimestamp);
         if (start == NoTimestamp)
         {
+            Interlocked.Exchange(ref _buildInFlight, 0);
             return;
         }
 
-        var elapsedMs = (long)_timeProvider.GetElapsedTime(start, _timeProvider.GetTimestamp()).TotalMilliseconds;
+        var elapsed = _timeProvider.GetElapsedTime(start, _timeProvider.GetTimestamp());
+        Volatile.Write(ref _lastBuildDurationTicks, elapsed.Ticks);
+        Interlocked.Exchange(ref _buildInFlight, 0);
+        var elapsedMs = (long)elapsed.TotalMilliseconds;
         _logger?.LogInformation(
             "GraphQL catalog schema build finished: tables={Tables} omitted={Omitted} elapsedMs={ElapsedMs} phase=rebuild",
             Volatile.Read(ref _lastBuiltTables),

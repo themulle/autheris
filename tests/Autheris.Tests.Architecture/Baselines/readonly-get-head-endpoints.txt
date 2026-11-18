@@ -111,6 +111,7 @@
 /api/v1/usage/users|GET|no side effect: reports tenant usage grouped by user
 /docs|GET|no side effect: serves API documentation page
 /graphql/{**slug}|ANY|no side effect: GraphQL HTTP GET only executes queries (mutations rejected)
+/health/graphql-schema|GET|no side effect: reads the GraphQL schema freshness state
 /health/live|GET|no side effect: liveness probe
 /health/ready|GET|no side effect: readiness probe
 /metrics|ANY|no side effect: Prometheus metrics scrape endpoint

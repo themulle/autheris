@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- `GET /health/graphql-schema` (anonymous) reports whether the GraphQL schema this instance serves is behind the catalog: `200 {"status":"Current"}` or `503 {"status":"Updating"}` with `Retry-After: 1`. A client that writes the catalog and then queries (a seeding job, integration tests) polls it until 200. The body carries no catalog names, counts or versions; `/health/ready` is unchanged and does not turn 503 during a schema rebuild (#802).
+
+### Fixed
+- New datasets are queryable within seconds after a dbt sync, a governance import or another catalog write instead of after the next periodic catalog check (about 60 s of `GRAPHQL_VALIDATION_FAILED`): the GraphQL catalog module now listens to `catalog:changed` and runs a debounced check (1 s after the first change, at the end of a burst after a quiet period of the last build's duration, 2 to 60 s). Rebuilds stay coalesced as in #786, a write without schema effect (for example a consent apply) never rebuilds, and the `reloadSchema` mutation now reaches the module. Other instances learn about the change through the Redis event bus, or at their periodic check without Redis (#802).
+
 ## [1.8.5] - 2026-11-17
 
 ### Added

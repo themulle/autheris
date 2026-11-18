@@ -85,6 +85,7 @@ public static partial class GatewayServiceCollectionExtensions
     /// <summary>
     /// Issue #786: the module is composed here with the catalog version provider, the epoch service and the clock, so an idle
     /// refresh tick exits on the unchanged version instead of rebuilding the whole candidate model every interval.
+    /// Issue #802: the event bus delivers <c>catalog:changed</c>, so a committed catalog write starts a prompt check.
     /// </summary>
     internal static CatalogGraphQlTypeModule CreateCatalogGraphQlTypeModule(IServiceProvider sp, GatewayOptions gatewayOptions) =>
         new(
@@ -99,7 +100,8 @@ public static partial class GatewayServiceCollectionExtensions
             graphQlOptions: gatewayOptions.GraphQL,
             transportResolver: sp.GetService<Autheris.Application.DataSources.IDataSourceOptionsResolver>(),
             epochService: sp.GetService<IEpochValidationService>(),
-            timeProvider: sp.GetService<TimeProvider>());
+            timeProvider: sp.GetService<TimeProvider>(),
+            eventBus: sp.GetService<Autheris.Application.Common.Interfaces.IEventBus>());
 
     internal static Autheris.GraphQL.Interceptors.QueryCostAnalyzerRule CreateQueryCostRule(
         GatewayOptions gatewayOptions,
@@ -147,6 +149,7 @@ public static partial class GatewayServiceCollectionExtensions
         services.AddSingleton(sp => CreateCatalogGraphQlTypeModule(sp, gatewayOptions));
         services.AddSingleton<Autheris.GraphQL.Catalog.CatalogSchemaBuildDiagnosticListener>();
         services.AddSingleton<ICatalogSchemaDiagnostics>(sp => sp.GetRequiredService<CatalogGraphQlTypeModule>());
+        services.AddSingleton<Autheris.GraphQL.Catalog.ICatalogSchemaFreshness>(sp => sp.GetRequiredService<CatalogGraphQlTypeModule>());
         services.AddSingleton<ISocketTokenValidator, JwtSocketTokenValidator>();
         services.AddOptions<RevocationWatchOptions>()
             .BindConfiguration(RevocationWatchOptions.SectionName)

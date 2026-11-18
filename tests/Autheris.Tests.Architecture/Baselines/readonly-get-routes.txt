@@ -71,6 +71,7 @@ src/Autheris.Api/Endpoints/GovernanceEndpoints.RowFilterEvaluation.cs|/api/v1/go
 src/Autheris.Api/Endpoints/GovernanceEndpoints.cs|/api/v1/profiles
 src/Autheris.Api/Endpoints/GovernanceEndpoints.cs|/api/v1/profiles/{id}
 src/Autheris.Api/Endpoints/GovernancePlanEndpoints.cs|/api/governance/plans/{planId}
+src/Autheris.Api/Endpoints/HealthEndpoints.cs|/health/graphql-schema
 src/Autheris.Api/Endpoints/HealthEndpoints.cs|/health/live
 src/Autheris.Api/Endpoints/HealthEndpoints.cs|/health/ready
 src/Autheris.Api/Endpoints/HitLEndpoints.cs|/api/governance/hitl/pending

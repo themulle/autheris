@@ -144,6 +144,7 @@ route /api/v1/tenants/{tenantId}/lifecycle/locks/{realmId}/{userKey} | governanc
 route /api/webhooks/config-sync | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
 route /api/webhooks/openmetadata | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
 route /docs | static docs, swagger or Nitro portal page; no data access
+route /health/graphql-schema | health probe or metrics; no governed data access
 route /health/live | health probe or metrics; no governed data access
 route /health/ready | health probe or metrics; no governed data access
 route /metrics | health probe or metrics; no governed data access
