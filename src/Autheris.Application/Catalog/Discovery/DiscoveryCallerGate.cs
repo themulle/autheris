@@ -23,12 +23,11 @@ public static class DiscoveryCallerGate
     public const string AnonymousMcpClientSid = "ANONYMOUS_MCP_CLIENT";
     public const string AnonymousSidValue = "S-1-5-21-ANONYMOUS";
 
-    public static async ValueTask<Sid> EnsureAllowedAsync(
+    private static Sid ValidateCaller(
         CatalogCaller caller,
         CatalogDiscoveryOptions discoveryOptions,
         GatewayOptions gatewayOptions,
-        IRateLimiterService? rateLimiter,
-        CancellationToken ct = default)
+        out CatalogDiscoverySettings settings)
     {
         ArgumentNullException.ThrowIfNull(caller);
         ArgumentNullException.ThrowIfNull(discoveryOptions);
@@ -63,7 +62,7 @@ public static class DiscoveryCallerGate
                 "A resolved tenant is required for catalog discovery.");
         }
 
-        var settings = discoveryOptions.Discovery ?? new CatalogDiscoverySettings();
+        settings = discoveryOptions.Discovery ?? new CatalogDiscoverySettings();
         var (requiredRoles, requiredScopes) = ResolveRequirements(settings, caller.Tenant);
 
         if (requiredRoles.Count > 0 && !HasAnyRole(principal, requiredRoles))
@@ -84,10 +83,21 @@ public static class DiscoveryCallerGate
                 "Caller token does not carry a required scope for catalog discovery.");
         }
 
+        return userSid.Value;
+    }
+
+    public static async ValueTask<Sid> EnsureAllowedAsync(
+        CatalogCaller caller,
+        CatalogDiscoveryOptions discoveryOptions,
+        GatewayOptions gatewayOptions,
+        IRateLimiterService? rateLimiter,
+        CancellationToken ct = default)
+    {
+        var sid = ValidateCaller(caller, discoveryOptions, gatewayOptions, out var settings);
         if (rateLimiter != null && !gatewayOptions.Insecure.warn_disable_rate_limiting)
         {
             var rpm = Math.Max(1, settings.RequestsPerMinute);
-            var key = $"discovery:{caller.Tenant.Value}:{userSid.Value.Value}";
+            var key = $"discovery:{caller.Tenant.Value}:{sid.Value}";
             var policy = new PostAuthSidRateLimitOptions
             {
                 TokenBucketCapacity = rpm,
@@ -105,7 +115,61 @@ public static class DiscoveryCallerGate
             }
         }
 
-        return userSid.Value;
+        return sid;
+    }
+
+
+    /// <summary>Scope key of the access-request rate limit (per tenant and subject).</summary>
+    public const string AccessRequestScope = "discovery-access-request";
+
+    /// <summary>
+    /// Same caller checks as <see cref="EnsureAllowedAsync"/>, with the separate hourly access-request limit
+    /// (<see cref="CatalogDiscoverySettings.AccessRequestsPerHour"/>) instead of the read limit.
+    /// </summary>
+    public static async ValueTask<Sid> EnsureAccessRequestAllowedAsync(
+        CatalogCaller caller,
+        CatalogDiscoveryOptions discoveryOptions,
+        GatewayOptions gatewayOptions,
+        IRateLimiterService? rateLimiter,
+        CancellationToken ct = default)
+    {
+        var sid = ValidateCaller(caller, discoveryOptions, gatewayOptions, out var settings);
+        var retryAfter = await CheckAccessRequestRateAsync(caller.Tenant, sid, settings, gatewayOptions, rateLimiter, ct).ConfigureAwait(false);
+        if (retryAfter is { } wait)
+        {
+            throw new DiscoveryStatusException(
+                DiscoveryFailureKind.RateLimited,
+                "RATE_LIMIT_EXCEEDED",
+                "Access request rate limit exceeded.",
+                wait);
+        }
+
+        return sid;
+    }
+
+    /// <summary>
+    /// The one access-request limit per (tenant, sid), shared by every channel through the consent request service.
+    /// Returns the retry-after seconds when the limit is exceeded, otherwise null.
+    /// </summary>
+    public static async ValueTask<int?> CheckAccessRequestRateAsync(
+        TenantId tenant,
+        Sid sid,
+        CatalogDiscoverySettings settings,
+        GatewayOptions gatewayOptions,
+        IRateLimiterService? rateLimiter,
+        CancellationToken ct = default)
+    {
+        if (rateLimiter is null || gatewayOptions.Insecure.warn_disable_rate_limiting)
+        {
+            return null;
+        }
+
+        var perHour = Math.Max(1, settings.AccessRequestsPerHour);
+        var key = $"{AccessRequestScope}:{tenant.Value}:{sid.Value}";
+        var policy = new Autheris.Domain.Model.ClientQuotaPolicy(
+            Autheris.Domain.Model.ClientTier.Standard, 1, 1, perHour, perHour / 3600.0, false);
+        var result = await rateLimiter.CheckCostQuotaAsync(key, 1, policy, ct).ConfigureAwait(false);
+        return result.Allowed ? null : Math.Max(1, result.RetryAfterSeconds);
     }
 
     private static (IReadOnlyList<string> Roles, IReadOnlyList<string> Scopes) ResolveRequirements(

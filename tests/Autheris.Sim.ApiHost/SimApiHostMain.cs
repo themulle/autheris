@@ -335,7 +335,6 @@ public static class SimApiHostMain
         var governance = scope.ServiceProvider.GetRequiredService<IGovernanceRepository>();
         var table = new TableIdentifier("default", "main", SimApiSeed.TableName);
         await governance.ReplaceTableKeyDefinitionAsync(table, ["id"], []).ConfigureAwait(false);
-        await governance.SetDatasetVisibilityAsync(table, DatasetVisibility.Full, new Sid("sim-seed")).ConfigureAwait(false);
     }
 #endif
 }

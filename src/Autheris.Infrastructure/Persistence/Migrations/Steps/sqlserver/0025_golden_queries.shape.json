@@ -1,0 +1,27 @@
+{
+  "ops": [
+    {
+      "op": "addTable",
+      "table": "GOLDEN_QUERIES",
+      "newTable": {
+        "name": "GOLDEN_QUERIES",
+        "columns": [
+          { "name": "id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "tenant_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "table_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "source", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "source_key", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "title", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "description", "type": "NVARCHAR", "family": "string", "nullable": true },
+          { "name": "query_text", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "variables_json", "type": "NVARCHAR", "family": "string", "nullable": true },
+          { "name": "content_hash", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "updated_at", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": false }
+        ],
+        "primaryKey": ["id"],
+        "indexes": []
+      }
+    },
+    { "op": "addIndex", "table": "GOLDEN_QUERIES", "name": "UX_GOLDEN_QUERIES_KEY", "unique": true, "columns": ["tenant_id", "table_id", "source", "source_key"] }
+  ]
+}

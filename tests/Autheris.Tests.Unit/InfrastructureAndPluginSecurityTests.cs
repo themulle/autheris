@@ -578,10 +578,10 @@ public sealed partial class InfrastructureAndPluginSecurityTests : IDisposable
         repo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(new List<TableMetadata>
         {
             new()
-            {
+            { ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("iban"),
                 Identifier = table,
                 Table = new Table { SchemaName = "dbo", TableName = "ledger", Description = "General ledger" },
-                Columns = [new TableColumn { ColumnName = "iban", DataType = "varchar", IsSensitive = true, Description = "Account IBAN" }]
+                Columns = [new TableColumn { ColumnName = "iban", DataType = "varchar", Description = "Account IBAN" }]
             }
         }));
         repo.ServeCatalogReads();
@@ -691,9 +691,9 @@ public sealed partial class InfrastructureAndPluginSecurityTests : IDisposable
                 DataSourceType = DataSourceType.HttpDeclarative,
                 HttpEndpoint = new HttpEndpointDescriptor { BaseUrl = "https://payments.internal.corp", PathTemplate = "/api/v1/payments", TenantIdHeaderName = "X-Tenant" }
             },
-            Columns = [new TableColumn { ColumnName = "pan", DataType = "string", IsSensitive = true }],
+            Columns = [new TableColumn { ColumnName = "pan", DataType = "string" }],
             ColumnMaskingRules = new Dictionary<string, MaskingRule> { ["pan"] = new MaskingRule { RuleType = "REDACT" } }
-        };
+        }.WithPii("pan");
 
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetTableMetadataAsync(tableId, Arg.Any<CancellationToken>()).Returns(Task.FromResult<TableMetadata?>(existing));
@@ -727,7 +727,7 @@ public sealed partial class InfrastructureAndPluginSecurityTests : IDisposable
         var merged = upserted.Single();
         merged.Table.RequiresFourEyes.ShouldBeTrue();
         merged.Table.Sensitivity.ShouldBe("HIGH");
-        merged.GetColumn("pan")!.IsSensitive.ShouldBeTrue();
+        ClassificationMetadata.IsColumnSensitive(merged, "pan").ShouldBeTrue();
         merged.ColumnMaskingRules.ShouldContainKey("pan");
         merged.HttpEndpoint!.BaseUrl.ShouldBe("https://payments.internal.corp");
         merged.HttpEndpoint!.TenantIdHeaderName.ShouldBe("X-Tenant");

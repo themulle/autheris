@@ -33,7 +33,8 @@ internal static class CatalogBatchUpsertHelper
         Dictionary<Guid, List<TableColumn>> ColumnsByTable,
         Dictionary<Guid, Dictionary<string, MaskingRule>> MasksByTable,
         HashSet<Guid> CorruptedIds,
-        Dictionary<Guid, CatalogKeyDefinitionStore.TableKeyRows>? Keys);
+        Dictionary<Guid, CatalogKeyDefinitionStore.TableKeyRows>? Keys,
+        Dictionary<Guid, Dictionary<string, IReadOnlyList<ColumnClassification>>> ClassificationsByTable);
 
     internal static async Task<ChunkItemOutcome[]> ExecuteChunkWithRetryAsync(
         GovernanceRepository repo,
@@ -109,7 +110,7 @@ internal static class CatalogBatchUpsertHelper
                     incoming.Table.LongDescription,
                     incoming.Table.DocumentationSource);
 
-                Dictionary<string, (Guid Id, string DataType, bool IsSensitive, string? Description, string? LongDescription, string? DocSource, string? Collation, string? LengthSemantics)> existingColsByName;
+                Dictionary<string, (Guid Id, string DataType, string? Description, string? LongDescription, string? DocSource, string? Collation, string? LengthSemantics)> existingColsByName;
                 Dictionary<string, MaskingRule> existingMaskingRules;
                 Dictionary<string, Guid> colIdByName;
 
@@ -125,7 +126,7 @@ internal static class CatalogBatchUpsertHelper
 
                     storedBefore[i] = before.CorruptedIds.Contains(tableIds[i])
                         ? null
-                        : await TryProjectFromSnapshotAsync(repo, conn, tx, incoming.Identifier, existingTable, cols, masks, before.Keys, ct).ConfigureAwait(false);
+                        : await TryProjectFromSnapshotAsync(repo, conn, tx, incoming.Identifier, existingTable, cols, masks, before.Keys, ClassificationsOf(before, tableIds[i]), ct).ConfigureAwait(false);
                     if (storedBefore[i] is not null)
                     {
                         anyStoredBefore = true;
@@ -142,10 +143,6 @@ internal static class CatalogBatchUpsertHelper
                 }
 
                 await ExecuteTableUpsertRowAsync(repo, conn, tx, tableIds[i], incoming, docs, ct).ConfigureAwait(false);
-                if (!existed && repo.OptionsSnapshot?.Catalog?.DefaultVisibility == DatasetVisibility.Summary)
-                {
-                    await DatasetCatalogStore.InsertDefaultAsync(conn, tx, repo.KeyDialect, tableIds[i], DatasetVisibility.Summary, ct).ConfigureAwait(false);
-                }
 
                 if (CatalogRowHydrator.HasMaskingRulesChanged(existingMaskingRules, incoming.ColumnMaskingRules))
                 {
@@ -192,7 +189,7 @@ internal static class CatalogBatchUpsertHelper
                         {
                             var cols = afterSnap.ColumnsByTable.TryGetValue(tableIds[i], out var c) ? c : new List<TableColumn>();
                             var masks = afterSnap.MasksByTable.TryGetValue(tableIds[i], out var m) ? m : new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase);
-                            var afterProj = await TryProjectFromSnapshotAsync(repo, conn, tx, chunk[i].Identifier, afterTable, cols, masks, afterSnap.Keys, ct).ConfigureAwait(false);
+                            var afterProj = await TryProjectFromSnapshotAsync(repo, conn, tx, chunk[i].Identifier, afterTable, cols, masks, afterSnap.Keys, ClassificationsOf(afterSnap, tableIds[i]), ct).ConfigureAwait(false);
                             if (afterProj is not null)
                             {
                                 classification = CatalogTablePersistedProjection.Compare(storedBefore[i]!, afterProj).Classification;
@@ -361,6 +358,7 @@ internal static class CatalogBatchUpsertHelper
                     Table = entity,
                     Columns = cols,
                     ColumnMaskingRules = masks,
+                    ColumnClassifications = ClassificationsOf(details, entity.Id),
                     PrimaryKeyColumns = pkCols,
                     PrimaryKeyDirections = pkDirs,
                     Indexes = indexes,
@@ -399,7 +397,7 @@ internal static class CatalogBatchUpsertHelper
     {
         if (tableIds.Count == 0)
         {
-            return new ChunkColumnKeySnapshot(new(), new(), new(), null);
+            return new ChunkColumnKeySnapshot(new(), new(), new(), null, new());
         }
 
         var (cols, masks, corrupted) = await LoadChunkColumnsAsync(repo, conn, tx, tableIds, ct).ConfigureAwait(false);
@@ -410,7 +408,29 @@ internal static class CatalogBatchUpsertHelper
             keys = await CatalogKeyDefinitionStore.ReadBatchAsync(conn, tx, repo.KeyDialect, tableIds, ct).ConfigureAwait(false);
         }
 
-        return new ChunkColumnKeySnapshot(cols, masks, corrupted, keys);
+        var classifications = await LoadChunkClassificationsAsync(repo, conn, tx, tableIds, ct).ConfigureAwait(false);
+        return new ChunkColumnKeySnapshot(cols, masks, corrupted, keys, classifications);
+    }
+
+    private static IReadOnlyDictionary<string, IReadOnlyList<ColumnClassification>> ClassificationsOf(ChunkColumnKeySnapshot snapshot, Guid tableId) =>
+        snapshot.ClassificationsByTable.TryGetValue(tableId, out var found)
+            ? found
+            : new Dictionary<string, IReadOnlyList<ColumnClassification>>(StringComparer.OrdinalIgnoreCase);
+
+    private static async Task<Dictionary<Guid, Dictionary<string, IReadOnlyList<ColumnClassification>>>> LoadChunkClassificationsAsync(
+        GovernanceRepository repo, DbConnection conn, DbTransaction? tx, IReadOnlyList<Guid> tableIds, CancellationToken ct)
+    {
+        var idStrings = new string[tableIds.Count];
+        for (var i = 0; i < tableIds.Count; i++)
+        {
+            idStrings[i] = tableIds[i].ToString();
+        }
+
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = CatalogRowHydrator.SelectGlobalClassificationsByTableIdsPrefix
+            + ConsentSqlCore.BindIdInClause(cmd, "tid", idStrings) + ") ORDER BY c.table_id, c.column_name, cc.code";
+        return await CatalogRowHydrator.ReadGlobalClassificationsAsync(cmd, ct).ConfigureAwait(false);
     }
 
     private static async Task<CatalogTablePersistedProjection?> TryProjectFromSnapshotAsync(
@@ -422,6 +442,7 @@ internal static class CatalogBatchUpsertHelper
         List<TableColumn> columns,
         Dictionary<string, MaskingRule> maskingRules,
         IReadOnlyDictionary<Guid, CatalogKeyDefinitionStore.TableKeyRows>? prefetchedKeys,
+        IReadOnlyDictionary<string, IReadOnlyList<ColumnClassification>> classifications,
         CancellationToken ct)
     {
         try
@@ -436,6 +457,7 @@ internal static class CatalogBatchUpsertHelper
                 Table = tableEntity,
                 Columns = columns,
                 ColumnMaskingRules = maskingRules,
+                ColumnClassifications = classifications,
                 PrimaryKeyColumns = pkCols,
                 PrimaryKeyDirections = pkDirs,
                 Indexes = indexes
@@ -571,18 +593,18 @@ internal static class CatalogBatchUpsertHelper
     private static void BuildColumnMaps(
         List<TableColumn> columns,
         Dictionary<string, MaskingRule> maskingRules,
-        out Dictionary<string, (Guid Id, string DataType, bool IsSensitive, string? Description, string? LongDescription, string? DocSource, string? Collation, string? LengthSemantics)> existingColsByName,
+        out Dictionary<string, (Guid Id, string DataType, string? Description, string? LongDescription, string? DocSource, string? Collation, string? LengthSemantics)> existingColsByName,
         out Dictionary<string, MaskingRule> existingMaskingRules,
         out Dictionary<string, Guid> colIdByName)
     {
-        existingColsByName = new Dictionary<string, (Guid, string, bool, string?, string?, string?, string?, string?)>(StringComparer.OrdinalIgnoreCase);
+        existingColsByName = new Dictionary<string, (Guid, string, string?, string?, string?, string?, string?)>(StringComparer.OrdinalIgnoreCase);
         existingMaskingRules = new Dictionary<string, MaskingRule>(maskingRules, StringComparer.OrdinalIgnoreCase);
         colIdByName = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var col in columns)
         {
             existingColsByName[col.ColumnName] = (
-                col.Id, col.DataType, col.IsSensitive,
+                col.Id, col.DataType,
                 col.Description, col.LongDescription, col.DocumentationSource,
                 col.Collation, col.LengthSemantics);
             colIdByName[col.ColumnName] = col.Id;

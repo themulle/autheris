@@ -37,7 +37,7 @@ public sealed class AuthzMigrationTests
         {
             Identifier = new TableIdentifier("sales", "public", "orders"),
             Table = new Table { Id = tableId, SchemaName = "public", TableName = "orders", Sensitivity = "INTERNAL", IsActive = true },
-            Columns = [new TableColumn { TableId = tableId, ColumnName = "id", DataType = "int", IsSensitive = false }],
+            Columns = [new TableColumn { TableId = tableId, ColumnName = "id", DataType = "int" }],
             PrimaryKeyColumns = ["id"]
         };
         var tables = Substitute.For<ITableMetadataRepository>();

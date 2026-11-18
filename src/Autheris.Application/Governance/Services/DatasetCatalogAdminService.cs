@@ -19,7 +19,7 @@ using Autheris.Domain.Security;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Issue #111 ( A-5, A-8, A-9): the only writer of dataset tags and visibility tiers. Authorization comes from the authenticated principal
+/// Issue #111 ( A-5, A-8, A-9): the only writer of dataset tags and discovery flags. Authorization comes from the authenticated principal
 /// (<see cref="CallerScopeResolver"/> plus the ownership store), never from the request. The mandatory order is: caller class, ownership lookup
 /// on the parsed identifier for every non-admin caller (also for unknown datasets, so both take the same path), dataset resolution, manageable check
 /// (identical NotFound), body validation, the <c>Full</c> rule, then one strict before-read and the writes. The before-state is read strictly, so a
@@ -39,7 +39,6 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
     private readonly IAuditWriter _audit;
     private readonly IOptionsMonitor<GatewayOptions> _options;
     private readonly TimeProvider _time;
-    private readonly ICatalogVisibilityMetrics? _metrics;
     private readonly IEventBus? _eventBus;
     // Probe throttle state: bounded (hard cap, then one shared overflow bucket), swept at most once per window under the lock.
     private readonly Dictionary<string, ProbeWindowState> _probes = new(StringComparer.Ordinal);
@@ -58,7 +57,6 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
         IAuditWriter audit,
         IOptionsMonitor<GatewayOptions> options,
         TimeProvider? time = null,
-        ICatalogVisibilityMetrics? metrics = null,
         IEventBus? eventBus = null)
     {
         _tables = tables ?? throw new ArgumentNullException(nameof(tables));
@@ -66,7 +64,6 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
         _audit = audit ?? throw new ArgumentNullException(nameof(audit));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _time = time ?? TimeProvider.System;
-        _metrics = metrics;
         _eventBus = eventBus;
     }
 
@@ -94,7 +91,7 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
             var settings = await _tables.GetDatasetCatalogSettingsAsync(gate.Table, strict: true, ct).ConfigureAwait(false);
             return settings is null
                 ? new DatasetCatalogResult(DatasetCatalogOutcome.NotFound)
-                : new DatasetCatalogResult(DatasetCatalogOutcome.Unchanged, gate.Table, settings, IsTierEffective(gate.Table, gate.Caller!.Value.Tenant));
+                : new DatasetCatalogResult(DatasetCatalogOutcome.Unchanged, gate.Table, settings);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -123,17 +120,6 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
         if (edit.Malformed)
         {
             return new DatasetCatalogResult(DatasetCatalogOutcome.InvalidRequest);
-        }
-
-        DatasetVisibility? requested = null;
-        if (edit.Visibility is not null)
-        {
-            if (!DatasetTagRules.TryParseVisibility(edit.Visibility, out var parsed))
-            {
-                return new DatasetCatalogResult(DatasetCatalogOutcome.InvalidVisibility);
-            }
-
-            requested = parsed;
         }
 
         int? requestedMinGroupSize = null;
@@ -175,17 +161,6 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
             return new DatasetCatalogResult(DatasetCatalogOutcome.InvalidTag);
         }
 
-        // The Full rule: only the administrator classes may set Full; the owner who asks is told so after ownership is established.
-        if (requested == DatasetVisibility.Full && !actor.IsAdmin)
-        {
-            if (!dryRun)
-            {
-                await AuditDenyFullAsync(actor, table, source, ct).ConfigureAwait(false);
-            }
-
-            return new DatasetCatalogResult(DatasetCatalogOutcome.Forbidden);
-        }
-
         DatasetCatalogSettings before;
         try
         {
@@ -202,6 +177,12 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
             return new DatasetCatalogResult(DatasetCatalogOutcome.Unavailable);
         }
 
+        // Only an administrator may lift a discovery hide; a dataset owner may hide but never unhide.
+        if (!actor.IsAdmin && requestedDiscoveryHidden == false && before.DiscoveryHidden)
+        {
+            return new DatasetCatalogResult(DatasetCatalogOutcome.Forbidden);
+        }
+
         if (replace is not null || add is not null || remove is not null)
         {
             if (ExceedsCap(before, replace, add, remove, max))
@@ -214,12 +195,10 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
         {
             return await SimulateAsync(
                 table,
-                actor.Tenant,
                 before,
                 replace,
                 add,
                 remove,
-                requested,
                 minGroupSizeSpecified,
                 requestedMinGroupSize,
                 nonPersonalSpecified,
@@ -231,7 +210,6 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
         }
 
         DatasetCatalogChange? tagChange = null;
-        DatasetCatalogChange? visibilityChange = null;
         DatasetCatalogChange? privacyChange = null;
         DatasetCatalogChange? discoveryChange = null;
         var actorSid = actor.Sid;
@@ -257,19 +235,10 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
                 tagChange = tagChange is null ? change : new DatasetCatalogChange(table, tagChange.Before, change.After);
             }
 
-            // The tag change is committed: audit it before the visibility write, so a failing visibility write cannot lose the record.
+            // The tag change is committed: audit it before the later writes, so a failing write cannot lose the record.
             if (tagChange?.Changed == true)
             {
                 await AuditChangeAsync(AuditEventTypes.CatalogTagsChanged, actor, table, source, tagChange.Before, tagChange.After).ConfigureAwait(false);
-            }
-
-            if (requested is { } visibility)
-            {
-                visibilityChange = await _tables.SetDatasetVisibilityAsync(table, visibility, actorSid, ct).ConfigureAwait(false);
-                if (visibilityChange is null)
-                {
-                    return new DatasetCatalogResult(DatasetCatalogOutcome.NotFound);
-                }
             }
 
             if (minGroupSizeSpecified || nonPersonalSpecified)
@@ -300,7 +269,6 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
 
         var after = new DatasetCatalogSettings(
             tagChange?.After.Tags ?? before.Tags,
-            visibilityChange?.After.Visibility ?? before.Visibility,
             privacyChange?.After.MinGroupSize ?? before.MinGroupSize,
             privacyChange?.After.NonPersonal ?? before.NonPersonal,
             discoveryChange?.After.DiscoveryHidden ?? before.DiscoveryHidden,
@@ -308,23 +276,15 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
             discoveryChange?.After.HiddenColumns ?? before.HiddenColumns);
 
         var tagsChanged = tagChange?.Changed == true;
-        var visibilityChanged = visibilityChange?.Changed == true;
         var privacyChanged = privacyChange?.Changed == true;
         var discoveryChanged = discoveryChange?.Changed == true;
-
-        if (visibilityChanged)
-        {
-            await AuditChangeAsync(AuditEventTypes.CatalogVisibilityChanged, actor, table, source, visibilityChange!.Before, visibilityChange.After).ConfigureAwait(false);
-            _metrics?.RequestRefresh();
-        }
 
         if (discoveryChanged)
         {
             await AuditChangeAsync(AuditEventTypes.CatalogVisibilityChanged, actor, table, source, discoveryChange!.Before, discoveryChange.After).ConfigureAwait(false);
-            _metrics?.RequestRefresh();
         }
 
-        if ((visibilityChanged || discoveryChanged) && _eventBus != null)
+        if (discoveryChanged && _eventBus != null)
         {
             await _eventBus.PublishAsync(
                 Autheris.Application.Catalog.Search.CatalogSearchWarmupService.CatalogVisibilityChangedEventChannel,
@@ -348,13 +308,13 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
         }
 
         return new DatasetCatalogResult(
-            tagsChanged || visibilityChanged || privacyChanged || discoveryChanged ? DatasetCatalogOutcome.Applied : DatasetCatalogOutcome.Unchanged,
-            table, after, IsTierEffective(table, actor.Tenant), warning);
+            tagsChanged || privacyChanged || discoveryChanged ? DatasetCatalogOutcome.Applied : DatasetCatalogOutcome.Unchanged,
+            table, after, warning);
     }
 
     /// <summary>Dry run: the state the edit would produce, computed from the strict before-state like the repositories do.</summary>
     private async Task<DatasetCatalogResult> SimulateAsync(
-        TableIdentifier table, TenantId tenant, DatasetCatalogSettings before, IReadOnlyList<string>? replace, IReadOnlyList<string>? add, IReadOnlyList<string>? remove, DatasetVisibility? requested,
+        TableIdentifier table, DatasetCatalogSettings before, IReadOnlyList<string>? replace, IReadOnlyList<string>? add, IReadOnlyList<string>? remove,
         bool minGroupSizeSpecified, int? requestedMinGroupSize, bool nonPersonalSpecified, bool? requestedNonPersonal,
         bool? requestedDiscoveryHidden, bool? requestedSamplesDisabled, IReadOnlyList<string>? requestedHiddenColumns, CancellationToken ct)
     {
@@ -382,7 +342,7 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
         var afterSamplesDisabled = requestedSamplesDisabled ?? before.SamplesDisabled;
         var afterHiddenColumns = requestedHiddenColumns ?? before.HiddenColumns;
         var after = new DatasetCatalogSettings(
-            tags, requested ?? before.Visibility, afterMinGroup, afterNonPersonal,
+            tags, afterMinGroup, afterNonPersonal,
             afterDiscoveryHidden, afterSamplesDisabled, afterHiddenColumns);
         var changed = new DatasetCatalogChange(table, before, after).Changed;
 
@@ -396,7 +356,7 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
             }
         }
 
-        return new DatasetCatalogResult(changed ? DatasetCatalogOutcome.Applied : DatasetCatalogOutcome.Unchanged, table, after, IsTierEffective(table, tenant), warning);
+        return new DatasetCatalogResult(changed ? DatasetCatalogOutcome.Applied : DatasetCatalogOutcome.Unchanged, table, after, warning);
     }
 
     private readonly record struct Gate(DatasetCatalogResult? Failure, Caller? Caller, TableIdentifier Table);
@@ -564,28 +524,8 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
         return admin.Count > max;
     }
 
-    private bool IsTierEffective(TableIdentifier table, TenantId tenant)
-    {
-        var options = _options.CurrentValue;
-        if (CallerScopeResolver.IsOwner(tenant, TenantResolver.EffectiveDefaultOf(options.Tenancy)))
-        {
-            return true;
-        }
-
-        foreach (var entry in options.Catalog.SharedTables ?? [])
-        {
-            if (TableIdentifier.TryParse(entry, out var shared) && shared.Equals(table))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
     private static object View(DatasetCatalogSettings s) => new
     {
-        visibility = s.Visibility.ToString(),
         tags = s.Tags.Select(t => t.Tag).OrderBy(t => t, StringComparer.Ordinal).ToArray(),
         minGroupSize = s.MinGroupSize,
         nonPersonal = s.NonPersonal,
@@ -604,17 +544,6 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
             Decision = "ALLOW",
             DetailsJson = JsonSerializer.Serialize(new { before = View(before), after = View(after), source, authType = actor.AuthType, tenant = actor.Tenant.Value })
         }, CancellationToken.None);
-
-    private Task AuditDenyFullAsync(Caller actor, TableIdentifier table, string source, CancellationToken ct)
-        => _audit.RecordBestEffortAsync(new AuditLogEntry
-        {
-            TenantId = actor.Tenant,
-            EventType = AuditEventTypes.CatalogVisibilityChanged,
-            ActorSid = actor.Sid,
-            TargetTable = table.ToString(),
-            Decision = "DENY",
-            DetailsJson = JsonSerializer.Serialize(new { requested = "Full", reason = "owner_may_not_set_full", source, authType = actor.AuthType, tenant = actor.Tenant.Value })
-        }, ct);
 
     /// <summary>
     /// Probe signal for a caller who cannot manage the dataset (unknown, inactive and foreign datasets all end here, so the response and the work

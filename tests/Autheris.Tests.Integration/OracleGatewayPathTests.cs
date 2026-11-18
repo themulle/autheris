@@ -300,8 +300,9 @@ public sealed class OracleGatewayPathTests : IDisposable
                     new Autheris.Domain.Model.TableColumn { ColumnName = "ID", DataType = "int" },
                     new Autheris.Domain.Model.TableColumn { ColumnName = "TENANT_ID", DataType = "varchar" },
                     new Autheris.Domain.Model.TableColumn { ColumnName = "REGION", DataType = "varchar" },
-                    new Autheris.Domain.Model.TableColumn { ColumnName = "EMAIL", DataType = "varchar", IsSensitive = true }
+                    new Autheris.Domain.Model.TableColumn { ColumnName = "EMAIL", DataType = "varchar" }
                 ],
+                ColumnClassifications = Autheris.Domain.Model.TableMetadataClassificationTestExtensions.PiiFor("EMAIL"),
                 ColumnMaskingRules = new Dictionary<string, Autheris.Domain.Model.MaskingRule> { ["EMAIL"] = new() { RuleType = "REDACT" } }
             });
         }

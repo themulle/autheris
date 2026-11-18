@@ -54,7 +54,7 @@ public sealed class McpResultEmptyMembersTests
     {
         _output = output;
         _metadata.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>([OrdersTable()]));
-        _golden.GetGoldenQueriesAsync(Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+        _golden.GetGoldenQueriesAsync(Arg.Any<GoldenQueryReadContext>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
             .Returns(ValueTask.FromResult<IReadOnlyList<GoldenQuery>>([]));
         // The caller holds an Allow consent with every column Clear, so describe_dataset runs the value-profile path.
         _consents.GetAllActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<IEnumerable<string>?>(), Arg.Any<DateTimeOffset?>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())

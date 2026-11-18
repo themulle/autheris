@@ -47,11 +47,11 @@ public sealed class CatalogIngestionUnavailableTableTests : IDisposable
         {
             Identifier = id,
             Table = new Table { SourceType = "PostgreSQL", SourceName = id.Domain, SchemaName = id.Schema, TableName = id.TableName, DisplayName = id.TableName, IsActive = true },
-            Columns = [new TableColumn { ColumnName = "id", DataType = "int" }, new TableColumn { ColumnName = "ssn", DataType = "varchar", IsSensitive = true }],
+            Columns = [new TableColumn { ColumnName = "id", DataType = "int" }, new TableColumn { ColumnName = "ssn", DataType = "varchar" }],
             ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase) { ["ssn"] = new MaskingRule { RuleType = "REDACT", Replacement = "[REDACTED]" } },
             PrimaryKeyColumns = ["id"],
             ReplaceKeyDefinition = true
-        });
+        }.WithPii("ssn"));
         Exec("UPDATE TABLE_PRIMARY_KEY_COLUMNS SET key_ordinal = 5");
         _repo.InvalidateMetadataCacheForTesting();
         await Should.ThrowAsync<Autheris.Domain.Exceptions.TableMetadataUnavailableException>(() => _repo.GetTableMetadataAsync(id));
@@ -72,7 +72,7 @@ public sealed class CatalogIngestionUnavailableTableTests : IDisposable
     }
 
     private void MaskingRuleOfSsnMustSurvive() =>
-        Scalar("SELECT COUNT(*) FROM COLUMN_MASKING_RULES m JOIN TABLE_COLUMNS c ON c.id = m.table_column_id WHERE c.column_name = 'ssn' AND c.table_id IN (SELECT id FROM TABLES WHERE is_active = 1 AND table_name <> 'x')")
+        Scalar("SELECT COUNT(*) FROM COLUMN_MASK_OVERRIDES m JOIN TABLE_COLUMNS c ON c.id = m.table_column_id WHERE c.column_name = 'ssn' AND c.table_id IN (SELECT id FROM TABLES WHERE is_active = 1 AND table_name <> 'x')")
             .ShouldBeGreaterThanOrEqualTo(1);
 
     private long TablesNamed(string name) => Scalar($"SELECT COUNT(*) FROM TABLES WHERE table_name = '{name}'");

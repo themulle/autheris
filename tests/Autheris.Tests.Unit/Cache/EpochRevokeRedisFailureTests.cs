@@ -46,8 +46,8 @@ public sealed class EpochRevokeRedisFailureTests
         multiplexer.GetDatabase(Arg.Any<int>(), Arg.Any<object?>()).Returns(db);
 
         var sensitivity = Substitute.For<ITableSensitivityLookup>();
-        sensitivity.IsSensitiveAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(new ValueTask<bool>(false));
-        sensitivity.IsSensitiveAsync(Sensitive, Arg.Any<CancellationToken>()).Returns(new ValueTask<bool>(true));
+        sensitivity.HasSensitiveDataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(new ValueTask<bool>(false));
+        sensitivity.HasSensitiveDataAsync(Sensitive, Arg.Any<CancellationToken>()).Returns(new ValueTask<bool>(true));
 
         var bus = Substitute.For<IEventBus>();
         Harness? harness = null;

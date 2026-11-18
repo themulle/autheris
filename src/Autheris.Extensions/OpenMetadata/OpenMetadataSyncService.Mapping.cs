@@ -36,13 +36,14 @@ public sealed partial class OpenMetadataSyncService
 
         var tableGuid = omTable.Id == Guid.Empty ? Guid.NewGuid() : omTable.Id;
         var columns = new List<TableColumn>();
+        var flaggedColumns = new List<TableColumn>();
         var maskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase);
         bool anyArt9Column = false;
 
         foreach (var omCol in omTable.Columns)
         {
             var colId = Guid.NewGuid();
-            bool isSensitive = false;
+            bool flagged = false;
             string? ruleType = null;
 
             foreach (var tag in omCol.Tags)
@@ -50,7 +51,7 @@ public sealed partial class OpenMetadataSyncService
                 if (omOptions.TagToMaskingRuleMap.TryGetValue(tag.TagFQN, out var mappedRule))
                 {
                     ruleType ??= mappedRule;
-                    isSensitive = true;
+                    flagged = true;
                 }
 
                 // SEC E-06: Art. 9 and PII tags (Catalog.GdprArticle9Tags / Catalog.PiiTags, like the catalog sync) mark the
@@ -63,11 +64,11 @@ public sealed partial class OpenMetadataSyncService
                     tag.TagFQN.StartsWith("PersonalData.", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(tag.TagFQN, "PII", StringComparison.OrdinalIgnoreCase))
                 {
-                    isSensitive = true;
+                    flagged = true;
                 }
             }
 
-            if (isSensitive)
+            if (flagged)
             {
                 ruleType ??= "REDACT";
                 maskingRules[omCol.Name] = new MaskingRule
@@ -81,14 +82,18 @@ public sealed partial class OpenMetadataSyncService
                 };
             }
 
-            columns.Add(new TableColumn
+            var column = new TableColumn
             {
                 Id = colId,
                 TableId = tableGuid,
                 ColumnName = omCol.Name,
-                DataType = omCol.DataType,
-                IsSensitive = isSensitive
-            });
+                DataType = omCol.DataType
+            };
+            columns.Add(column);
+            if (flagged)
+            {
+                flaggedColumns.Add(column);
+            }
         }
 
         // SEC E-06: Art. 9 on the table or on any column => HIGH + four-eyes (same rule as the catalog sync);
@@ -117,7 +122,8 @@ public sealed partial class OpenMetadataSyncService
             Table = tableEntity,
             Identifier = tableId,
             Columns = columns,
-            ColumnMaskingRules = maskingRules
+            ColumnMaskingRules = maskingRules,
+            ColumnClassifications = ClassificationMetadata.AssignPii(flaggedColumns, "OPENMETADATA")
         };
 
         // Issue #94 (D-8): PRIMARY_KEY and UNIQUE table constraints are the declared definition; replaced only when present and valid.

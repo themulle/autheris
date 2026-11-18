@@ -101,30 +101,30 @@ public class ScaleCatalogBenchmark
                 if (i % 2 == 0)
                 {
                     pkColumns = new[] { "tenant_id", "id" };
-                    columns.Add(new() { TableId = tableGuid, ColumnName = "tenant_id", DataType = "varchar(50)", IsSensitive = false });
-                    columns.Add(new() { TableId = tableGuid, ColumnName = "id", DataType = "bigint", IsSensitive = false });
-                    columns.Add(new() { TableId = tableGuid, ColumnName = "name", DataType = "varchar(100)", IsSensitive = false });
-                    columns.Add(new() { TableId = tableGuid, ColumnName = "email", DataType = "varchar(255)", IsSensitive = true });
-                    columns.Add(new() { TableId = tableGuid, ColumnName = "created_at", DataType = "timestamp", IsSensitive = false });
+                    columns.Add(new() { TableId = tableGuid, ColumnName = "tenant_id", DataType = "varchar(50)" });
+                    columns.Add(new() { TableId = tableGuid, ColumnName = "id", DataType = "bigint" });
+                    columns.Add(new() { TableId = tableGuid, ColumnName = "name", DataType = "varchar(100)" });
+                    columns.Add(new() { TableId = tableGuid, ColumnName = "email", DataType = "varchar(255)" });
+                    columns.Add(new() { TableId = tableGuid, ColumnName = "created_at", DataType = "timestamp" });
                 }
                 else
                 {
                     pkColumns = new[] { "company_code", "fiscal_year", "id" };
-                    columns.Add(new() { TableId = tableGuid, ColumnName = "company_code", DataType = "varchar(10)", IsSensitive = false });
-                    columns.Add(new() { TableId = tableGuid, ColumnName = "fiscal_year", DataType = "int", IsSensitive = false });
-                    columns.Add(new() { TableId = tableGuid, ColumnName = "id", DataType = "bigint", IsSensitive = false });
-                    columns.Add(new() { TableId = tableGuid, ColumnName = "amount", DataType = "decimal(18,2)", IsSensitive = false });
-                    columns.Add(new() { TableId = tableGuid, ColumnName = "email", DataType = "varchar(255)", IsSensitive = true });
+                    columns.Add(new() { TableId = tableGuid, ColumnName = "company_code", DataType = "varchar(10)" });
+                    columns.Add(new() { TableId = tableGuid, ColumnName = "fiscal_year", DataType = "int" });
+                    columns.Add(new() { TableId = tableGuid, ColumnName = "id", DataType = "bigint" });
+                    columns.Add(new() { TableId = tableGuid, ColumnName = "amount", DataType = "decimal(18,2)" });
+                    columns.Add(new() { TableId = tableGuid, ColumnName = "email", DataType = "varchar(255)" });
                 }
             }
             else
             {
                 pkColumns = new[] { "id" };
-                columns.Add(new() { TableId = tableGuid, ColumnName = "id", DataType = "bigint", IsSensitive = false });
-                columns.Add(new() { TableId = tableGuid, ColumnName = "name", DataType = "varchar(100)", IsSensitive = false });
-                columns.Add(new() { TableId = tableGuid, ColumnName = "amount", DataType = "decimal(18,2)", IsSensitive = false });
-                columns.Add(new() { TableId = tableGuid, ColumnName = "email", DataType = "varchar(255)", IsSensitive = true });
-                columns.Add(new() { TableId = tableGuid, ColumnName = "created_at", DataType = "timestamp", IsSensitive = false });
+                columns.Add(new() { TableId = tableGuid, ColumnName = "id", DataType = "bigint" });
+                columns.Add(new() { TableId = tableGuid, ColumnName = "name", DataType = "varchar(100)" });
+                columns.Add(new() { TableId = tableGuid, ColumnName = "amount", DataType = "decimal(18,2)" });
+                columns.Add(new() { TableId = tableGuid, ColumnName = "email", DataType = "varchar(255)" });
+                columns.Add(new() { TableId = tableGuid, ColumnName = "created_at", DataType = "timestamp" });
             }
 
             var maskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
@@ -145,7 +145,8 @@ public class ScaleCatalogBenchmark
                 Identifier = tableId,
                 Columns = columns,
                 PrimaryKeyColumns = pkColumns,
-                ColumnMaskingRules = maskingRules
+                ColumnMaskingRules = maskingRules,
+                ColumnClassifications = ClassificationMetadata.AssignPii(columns.Where(c => c.ColumnName == "email"), "BENCH")
             };
 
             _catalog[tableId] = meta;

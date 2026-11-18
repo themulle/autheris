@@ -403,45 +403,8 @@ public sealed class GovernanceTestStore : IAsyncDisposable
         return await cmd.ExecuteScalarAsync().ConfigureAwait(false);
     }
 
-    public async Task GrantGovernanceAdminAsync(Sid sid)
-    {
-        const string roleId = "00000000-0000-0000-0000-000000000a01";
-        var now = DateTimeOffset.UtcNow.ToString("O");
-        if (IsSqlServer)
-        {
-            await ExecuteNonQueryAsync(
-                @"IF NOT EXISTS (SELECT 1 FROM ROLES WHERE id = @roleId OR name = 'GovernanceAdmin')
-                  INSERT INTO ROLES (id, name, description, source, is_critical, created_at)
-                  VALUES (@roleId, 'GovernanceAdmin', 'Governance Admin', 'MANUAL', 0, @now);",
-                ("@roleId", roleId),
-                ("@now", now)).ConfigureAwait(false);
-
-            await ExecuteNonQueryAsync(
-                @"INSERT INTO SUBJECT_ROLE_ASSIGNMENTS (id, subject_sid, role_id, assigned_by, assigned_at)
-                  SELECT @id, @sid, r.id, 'test', @now FROM ROLES r WHERE r.name = 'GovernanceAdmin'
-                  AND NOT EXISTS (SELECT 1 FROM SUBJECT_ROLE_ASSIGNMENTS sra WHERE sra.subject_sid = @sid AND sra.role_id = r.id);",
-                ("@id", Guid.NewGuid().ToString()),
-                ("@sid", sid.Value),
-                ("@now", now)).ConfigureAwait(false);
-        }
-        else
-        {
-            await ExecuteNonQueryAsync(
-                @"INSERT INTO ROLES (id, name, description, source, is_critical, created_at)
-                  VALUES (@roleId, 'GovernanceAdmin', 'Governance Admin', 'MANUAL', 0, @now)
-                  ON CONFLICT (name) DO NOTHING;",
-                ("@roleId", roleId),
-                ("@now", now)).ConfigureAwait(false);
-
-            await ExecuteNonQueryAsync(
-                @"INSERT INTO SUBJECT_ROLE_ASSIGNMENTS (id, subject_sid, role_id, assigned_by, assigned_at)
-                  SELECT @id, @sid, id, 'test', @now FROM ROLES WHERE name = 'GovernanceAdmin'
-                  ON CONFLICT (subject_sid, role_id) DO NOTHING;",
-                ("@id", Guid.NewGuid().ToString()),
-                ("@sid", sid.Value),
-                ("@now", now)).ConfigureAwait(false);
-        }
-    }
+    // Role membership no longer exists in the governance schema (roles are retired); the admin check is claim based.
+    public Task GrantGovernanceAdminAsync(Sid sid) => Task.CompletedTask;
 
     public async ValueTask DisposeAsync()
     {

@@ -183,51 +183,6 @@ public sealed partial class GovernanceRepositoryBatchUpsertTests
         eventBus.CatalogChangedCount.ShouldBe(0);
     }
 
-    [Fact]
-    public async Task MixedChunk_AndDocumentationPrecedence_BumpsEpochOnlyForChangedTables_AndPreservesGovernanceFields()
-    {
-        var harness = new RecordingBatchHarness(_dbName);
-        var epochService = new RecordingEpochValidationService();
-        var options = new GatewayOptions
-        {
-            Catalog = new DataCatalogOptions { DefaultVisibility = DatasetVisibility.Summary }
-        };
-        var repo = CreateRepository(harness, options: options, epochService: epochService);
-
-        var tUnchanged = BuildTable("crm", "dbo", "static_tbl", description: "Manual text", docSource: "Manual");
-        var tUpdated = BuildTable("crm", "dbo", "dynamic_tbl", description: "Old text", docSource: "dbt");
-        await repo.UpsertTableMetadataBatchAsync([tUnchanged, tUpdated], CancellationToken.None);
-
-        // Governance-set visibility tier (Hidden) must never be overwritten by later ingestion batch upserts.
-        await repo.SetDatasetVisibilityAsync(tUpdated.Identifier, DatasetVisibility.Hidden, new Sid("S-1-5-21-admin"), CancellationToken.None);
-
-        var epochUnchangedBefore = await repo.GetTableEpochAsync(tUnchanged.Identifier, CancellationToken.None);
-        var epochUpdatedBefore = await repo.GetTableEpochAsync(tUpdated.Identifier, CancellationToken.None);
-        epochService.Invalidations.Clear();
-
-        // Lower-precedence dbt attempt on tUnchanged leaves Manual description intact (-> Unchanged); tUpdated updates description.
-        var dbtAttempt = BuildTable("crm", "dbo", "static_tbl", description: "Overwritten by dbt?", docSource: "dbt");
-        var newDbt = BuildTable("crm", "dbo", "dynamic_tbl", description: "Fresh dbt desc", docSource: "dbt");
-
-        var results = await repo.UpsertTableMetadataBatchAsync([dbtAttempt, newDbt], CancellationToken.None);
-
-        var unchangedResult = results[0];
-        unchangedResult.Kind.ShouldBe(CatalogUpsertKind.Unchanged);
-        unchangedResult.Classification.ShouldBe(CatalogWriteClassification.Unchanged);
-        unchangedResult.Metadata.Table.Description.ShouldBe("Manual text");
-
-        results[1].Kind.ShouldBe(CatalogUpsertKind.Updated);
-        results[1].Metadata.Table.Description.ShouldBe("Fresh dbt desc");
-
-        (await repo.GetTableEpochAsync(tUnchanged.Identifier, CancellationToken.None)).ShouldBe(epochUnchangedBefore);
-        (await repo.GetTableEpochAsync(tUpdated.Identifier, CancellationToken.None)).ShouldBeGreaterThan(epochUpdatedBefore);
-
-        var vis = await ReadStoredVisibilityAsync(tUpdated.Identifier);
-        vis.ShouldBe((int)DatasetVisibility.Hidden);
-
-        epochService.Invalidations.ShouldNotContain(tUnchanged.Identifier);
-        epochService.Invalidations.Count(id => id.Equals(tUpdated.Identifier)).ShouldBe(1);
-    }
 
     [Fact]
     [Trait("Category", "Security")]
@@ -327,6 +282,47 @@ public sealed partial class GovernanceRepositoryBatchUpsertTests
         eventBus.CatalogChangedCount.ShouldBe(0);
     }
 
+    [Fact]
+    public async Task MixedChunk_AndDocumentationPrecedence_BumpsEpochOnlyForChangedTables_AndPreservesGovernanceFields()
+    {
+        var harness = new RecordingBatchHarness(_dbName);
+        var epochService = new RecordingEpochValidationService();
+        var repo = CreateRepository(harness, epochService: epochService);
+
+        var tUnchanged = BuildTable("crm", "dbo", "static_tbl", description: "Manual text", docSource: "Manual");
+        var tUpdated = BuildTable("crm", "dbo", "dynamic_tbl", description: "Old text", docSource: "dbt");
+        await repo.UpsertTableMetadataBatchAsync([tUnchanged, tUpdated], CancellationToken.None);
+
+        // Governance-set discovery flag (hidden) must never be overwritten by later ingestion batch upserts.
+        await repo.SetDatasetDiscoveryAsync(tUpdated.Identifier, true, null, null, new Sid("S-1-5-21-admin"), CancellationToken.None);
+
+        var epochUnchangedBefore = await repo.GetTableEpochAsync(tUnchanged.Identifier, CancellationToken.None);
+        var epochUpdatedBefore = await repo.GetTableEpochAsync(tUpdated.Identifier, CancellationToken.None);
+        epochService.Invalidations.Clear();
+
+        // Lower-precedence dbt attempt on tUnchanged leaves Manual description intact (-> Unchanged); tUpdated updates description.
+        var dbtAttempt = BuildTable("crm", "dbo", "static_tbl", description: "Overwritten by dbt?", docSource: "dbt");
+        var newDbt = BuildTable("crm", "dbo", "dynamic_tbl", description: "Fresh dbt desc", docSource: "dbt");
+
+        var results = await repo.UpsertTableMetadataBatchAsync([dbtAttempt, newDbt], CancellationToken.None);
+
+        var unchangedResult = results[0];
+        unchangedResult.Kind.ShouldBe(CatalogUpsertKind.Unchanged);
+        unchangedResult.Classification.ShouldBe(CatalogWriteClassification.Unchanged);
+        unchangedResult.Metadata.Table.Description.ShouldBe("Manual text");
+
+        results[1].Kind.ShouldBe(CatalogUpsertKind.Updated);
+        results[1].Metadata.Table.Description.ShouldBe("Fresh dbt desc");
+
+        (await repo.GetTableEpochAsync(tUnchanged.Identifier, CancellationToken.None)).ShouldBe(epochUnchangedBefore);
+        (await repo.GetTableEpochAsync(tUpdated.Identifier, CancellationToken.None)).ShouldBeGreaterThan(epochUpdatedBefore);
+
+        (await repo.GetTableMetadataAsync(tUpdated.Identifier, CancellationToken.None))!.Table.DiscoveryHidden.ShouldBeTrue();
+
+        epochService.Invalidations.ShouldNotContain(tUnchanged.Identifier);
+        epochService.Invalidations.Count(id => id.Equals(tUpdated.Identifier)).ShouldBe(1);
+    }
+
     private GovernanceRepository CreateRepository(
         RecordingBatchHarness harness,
         GatewayOptions? options = null,
@@ -341,23 +337,6 @@ public sealed partial class GovernanceRepositoryBatchUpsertTests
             eventBus: eventBus);
     }
 
-    private async Task<int?> ReadStoredVisibilityAsync(TableIdentifier id)
-    {
-        await using var connection = new NpgsqlConnection(_dbName);
-        await connection.OpenAsync();
-        await using var cmd = connection.CreateCommand();
-        cmd.CommandText = """
-            SELECT d.visibility
-            FROM TABLE_CATALOG_SETTINGS d
-            INNER JOIN TABLES t ON d.table_id = t.id
-            WHERE LOWER(t.source_name) = LOWER(@d) AND LOWER(t.schema_name) = LOWER(@s) AND LOWER(t.table_name) = LOWER(@t)
-            """;
-        cmd.Parameters.AddWithValue("d", id.Domain);
-        cmd.Parameters.AddWithValue("s", id.Schema);
-        cmd.Parameters.AddWithValue("t", id.TableName);
-        var scalar = await cmd.ExecuteScalarAsync();
-        return scalar is null or DBNull ? null : Convert.ToInt32(scalar);
-    }
 
     private static TableMetadata BuildTable(
         string domain,
@@ -393,8 +372,8 @@ public sealed partial class GovernanceRepositoryBatchUpsertTests
             Columns = includeColumns
                 ?
                 [
-                    new TableColumn { Id = Guid.NewGuid(), TableId = tableId, ColumnName = "id", DataType = "integer", IsSensitive = false },
-                    new TableColumn { Id = Guid.NewGuid(), TableId = tableId, ColumnName = "name", DataType = "text", IsSensitive = false }
+                    new TableColumn { Id = Guid.NewGuid(), TableId = tableId, ColumnName = "id", DataType = "integer" },
+                    new TableColumn { Id = Guid.NewGuid(), TableId = tableId, ColumnName = "name", DataType = "text" }
                 ]
                 : [],
             ColumnMaskingRules = masks ?? new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase),
@@ -402,4 +381,5 @@ public sealed partial class GovernanceRepositoryBatchUpsertTests
             ReplaceKeyDefinition = replaceKeyDef
         };
     }
+
 }

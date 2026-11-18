@@ -349,15 +349,15 @@ public sealed class CatalogPagedReadSecurityTests
                     .Where(t => requested.Count == 0 || requested.Contains(t.Id.ToString()))
                     .Select(t => new object?[]
                     {
-                        Guid.NewGuid().ToString(), t.Id.ToString(), "id", "int", 0,
-                        null, null, null, null, null,
+                        Guid.NewGuid().ToString(), t.Id.ToString(), "id", "int",
+                        null, null, null,
                         null, null, null, null, null, null, null, null
                     })
                     .ToList();
                 return new StubDbDataReader(
                     [
-                        "id", "table_id", "column_name", "data_type", "is_sensitive",
-                        "m_id", "rule_type", "pattern_or_format", "replacement", "hmac_key_id",
+                        "id", "table_id", "column_name", "data_type",
+                        "mask_function", "params_json", "key_ref",
                         "desc", "long_desc", "meta", "doc", "disp", "texts", "collation", "len_sem"
                     ],
                     rows);

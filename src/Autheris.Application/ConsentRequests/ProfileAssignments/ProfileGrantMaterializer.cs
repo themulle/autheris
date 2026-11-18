@@ -604,7 +604,7 @@ public sealed class ProfileGrantMaterializer(
                 continue;
             }
 
-            bool isSensitive = ClassificationMetadata.IsColumnSensitive(meta, col);
+            bool classified = ClassificationMetadata.IsColumnSensitive(meta, col);
             ColumnAccessLevel level;
             if (maskingMode == MaskingPolicyMode.Unmasked)
             {
@@ -612,7 +612,7 @@ public sealed class ProfileGrantMaterializer(
                     ? ColumnAccessLevel.Clear
                     : ColumnAccessLevel.Mask;
             }
-            else if (isSensitive)
+            else if (classified)
             {
                 level = ColumnAccessLevel.Mask;
             }

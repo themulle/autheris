@@ -34,7 +34,7 @@ public sealed class PdpPreconditionAndExplainTests
     private static readonly TenantId Tenant = new("tenant-a");
 
     private static TableMetadata ActiveTable(bool isActive = true) => new()
-    {
+    { ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("email", "secret_note"),
         Identifier = TableId,
         Table = new Table
         {
@@ -47,8 +47,8 @@ public sealed class PdpPreconditionAndExplainTests
         Columns =
         [
             new TableColumn { ColumnName = "id", DataType = "int" },
-            new TableColumn { ColumnName = "email", DataType = "varchar", IsSensitive = true },
-            new TableColumn { ColumnName = "secret_note", DataType = "varchar", IsSensitive = true }
+            new TableColumn { ColumnName = "email", DataType = "varchar" },
+            new TableColumn { ColumnName = "secret_note", DataType = "varchar" }
         ],
         ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
         {
@@ -192,10 +192,10 @@ public sealed class PdpPreconditionAndExplainTests
             Columns =
             [
                 new TableColumn { ColumnName = "id", DataType = "int" },
-                new TableColumn { ColumnName = "email", DataType = "varchar", IsSensitive = true }
+                new TableColumn { ColumnName = "email", DataType = "varchar" }
             ],
             ColumnMaskingRules = fullMeta.ColumnMaskingRules
-        };
+        }.WithPii("email");
 
         var consent = new Consent
         {

@@ -118,7 +118,7 @@ public sealed class CatalogNoOpSecurityTests
     public void EveryProjectedProperty_FlipIsChanged()
     {
         var baseline = Meta(
-            columns: [Column("id", "int"), Column("name", isSensitive: false, description: "n", collation: "C")],
+            columns: [Column("id", "int"), Column("name", description: "n", collation: "C")],
             masks: Mask("name"),
             indexes: [new TableIndexDefinition("ix_name", ["name"], false)]);
 
@@ -158,7 +158,7 @@ public sealed class CatalogNoOpSecurityTests
                 ]
             },
             ["Column.DataType"] = baseline with { Columns = [Column("id", "bigint"), baseline.Columns[1]] },
-            ["Column.IsSensitive"] = baseline with { Columns = [baseline.Columns[0], Column("name", isSensitive: true, description: "n", collation: "C")] },
+            ["Column.Classification"] = baseline with { Columns = [baseline.Columns[0], Column("name", description: "n", collation: "C")], ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("name") },
             ["Column.Description"] = baseline with { Columns = [baseline.Columns[0], Column("name", description: "x", collation: "C")] },
             ["Column.LongDescription"] = baseline with
             {
