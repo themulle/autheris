@@ -1,0 +1,156 @@
+namespace Autheris.Tests.Unit.GraphQL;
+
+using Autheris.Tests.Common;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Security.Claims;
+using System.Threading;
+using System.Threading.Tasks;
+using Autheris.Application.Common.Interfaces;
+using Autheris.Domain.Common;
+using Autheris.Domain.Model;
+using Autheris.Domain.Options;
+using Autheris.GraphQL.Types;
+using Autheris.Tests.Unit.Catalog;
+using Autheris.Tests.Unit.TestSupport;
+using HotChocolate;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Options;
+using NSubstitute;
+using Shouldly;
+using Xunit;
+
+/// <summary>
+/// Issue #111 WP-3 (A-4, A-1 G1, F-C9, F-C11, F-C12): GraphQL <c>catalog</c> shaping. Summary rows carry no columns, admin rows keep
+/// <see cref="CatalogView.Unmarked"/> and full output, tags come from <c>CatalogTags</c>.
+/// </summary>
+[Trait("Category", "Security")]
+public sealed class CatalogTierShapingTests
+{
+    private static readonly string[] Shared = ["sales.dbo.sum_t", "sales.dbo.full_t", "sales.dbo.hid_t"];
+
+    private static TableMetadata Tier(string name, params string[] tags)
+    {
+        var t = Wp0.Table("sales", name, "Short " + name, ["id", "secret_col"]);
+        return t with { Table = t.Table with { DisplayName = name }, CatalogTags = tags };
+    }
+
+    private static readonly TableMetadata[] Tables =
+    [
+        Tier("sum_t", "finance"),
+        Tier("full_t", "ops"),
+        Tier("hid_t", "internal")
+    ];
+
+    private static GatewayOptions Opts(TenancyShape mode) => new()
+    {
+        Tenancy = mode.Options(),
+        Catalog = new DataCatalogOptions { SharedTables = Shared }
+    };
+
+    private static Task<IReadOnlyList<TableMetadataDto>> Catalog(ClaimsPrincipal user, GatewayOptions options, string? search = null, string? tag = null)
+    {
+        var accessor = Substitute.For<IHttpContextAccessor>();
+        accessor.HttpContext.Returns(new DefaultHttpContext { User = user });
+        var tables = Wp0.Tables(Tables);
+        var consents = Wp0.Consents();
+        return new Query().GetCatalogAsync(
+            domain: null, first: null, after: null, search: search, tag: tag,
+            tables, consents, approvalRepository: null, dataOwnershipRepository: null,
+            accessor, Options.Create(options), CatalogVisibilityTestFactory.Create(tables, consents, options));
+    }
+
+    private static ClaimsPrincipal Subject(string? tenant = "tenant-a") => Wp0.User("S-USER", tenant);
+
+
+
+    [Theory]
+    [InlineData("global")]
+    [InlineData("tenant")]
+    [InlineData("unrestricted")]
+    public async Task AdminRow_UnmarkedView_GetsFullDescription(string admin)
+    {
+        var (mode, principal) = admin switch
+        {
+            "global" => (TenancyShape.Multi, Wp0.User("root", "tenant-a", ["ClusterAdmin"])),
+            "tenant" => (TenancyShape.Multi, Wp0.User("gov", "tenant-a", ["GovernanceAdmin"])),
+            _ => (TenancyShape.Single, Wp0.User("gov", Wp0.SingleTenantClaim, ["GovernanceAdmin"]))
+        };
+
+        var result = await Catalog(principal, Opts(mode));
+
+        result.ShouldNotBeEmpty();
+        result.ShouldAllBe(r => r.Columns.Count == 2);
+    }
+
+    [Theory]
+    [InlineData("subject")]
+    [InlineData("claimless")]
+    public async Task NonAdminRow_Unmarked_TreatedAsNotFound(string caller)
+    {
+        // Untiered tables: no tier row exists for the non-administrator, nothing leaks.
+        var hiddenOnly = new[] { Tier("hid_t") };
+        var accessor = Substitute.For<IHttpContextAccessor>();
+        accessor.HttpContext.Returns(new DefaultHttpContext { User = caller == "subject" ? Subject() : Subject(null) });
+
+        var hiddenTables = Wp0.Tables(hiddenOnly);
+        var hiddenConsents = Wp0.Consents();
+        var hiddenOptions = Opts(TenancyShape.Multi);
+        var run = () => new Query().GetCatalogAsync(null, null, null, null, null, hiddenTables, hiddenConsents, null, null, accessor, Options.Create(hiddenOptions),
+            CatalogVisibilityTestFactory.Create(hiddenTables, hiddenConsents, hiddenOptions));
+
+        if (caller == "claimless")
+        {
+            // DT-A-3: no tenant claim, no default tenant: refused, nothing leaks.
+            (await Should.ThrowAsync<HotChocolate.GraphQLException>(run)).Errors.ShouldContain(e => e.Code == "UNAUTHORIZED");
+            return;
+        }
+
+        (await run()).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void ShapeLoop_NonAdminRowsWithoutRecognisedView_NeverReachTheResult_AdminKeepsThem()
+    {
+        var rows = new[]
+        {
+            Tier("a_t") with { CatalogView = CatalogView.Unmarked },
+            Tier("b_t") with { CatalogView = (CatalogView)42 },
+            Tier("c_t") with { CatalogView = CatalogView.Granted }
+        };
+
+        Query.ToCatalogDtos(rows, isAdminView: false, [], [], isAdmin: false).Select(d => d.TableName).ShouldBe(["c_t"]);
+        Query.ToCatalogDtos(rows, isAdminView: true, [], [], isAdmin: true).Count.ShouldBe(3);
+    }
+
+    [Fact]
+    public async Task NonAdminRow_Unmarked_NoneCaller_IsRefused()
+    {
+        // An invalid tenant claim resolves to the None class and is refused outright.
+        var none = Wp0.User("S-USER", "not a valid tenant!");
+
+        await Should.ThrowAsync<GraphQLException>(() => Catalog(none, Opts(TenancyShape.Multi)));
+    }
+
+
+    [Fact]
+    public async Task Claimless_GovernanceAdmin_Multi_NeverFullOutput()
+    {
+        // DT-A-3: a claimless caller has no tenant; the GraphQL catalog refuses it (UNAUTHORIZED), never a default tenant or a full output.
+        var ex = await Should.ThrowAsync<HotChocolate.GraphQLException>(() => Catalog(Wp0.User("gov", null, ["GovernanceAdmin"]), Opts(TenancyShape.Multi)));
+
+        ex.Errors.ShouldContain(e => e.Code == "UNAUTHORIZED");
+    }
+
+    [Theory]
+    [InlineData(TenancyShape.Single, 3)]
+    public async Task Shaping_IsAdmin_ComesFromSameResolverAsListFilter(TenancyShape mode, int expected)
+    {
+        var result = await Catalog(Wp0.User("gov", Wp0.SingleTenantClaim, ["GovernanceAdmin"]), Opts(mode));
+
+        result.Count.ShouldBe(expected);
+        result.ShouldAllBe(r => r.Columns.Count == 2);
+    }
+
+}

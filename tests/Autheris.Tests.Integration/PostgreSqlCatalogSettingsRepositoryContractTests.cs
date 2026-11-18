@@ -66,4 +66,37 @@ public sealed class PostgreSqlCatalogSettingsRepositoryContractTests : CatalogSe
         }
     }
 
+    [Fact]
+    public async Task T_R2_6_FullTier_NewDenyMaskingRule_AppliesOnlyAfterTheCachedEntryIsInvalidated_ResidualPinned()
+    {
+        if (!Available)
+        {
+            return;
+        }
+
+        var admin = new Sid("S-1-5-21-admin");
+        var id = new TableIdentifier("Sales", "Crm", "deny_" + Guid.NewGuid().ToString("N")[..8]);
+        var table = new Table { Id = Guid.NewGuid(), SourceName = id.Domain, SchemaName = id.Schema, TableName = id.TableName, DisplayName = id.TableName, IsActive = true };
+        var columns = new[]
+        {
+            new TableColumn { TableId = table.Id, ColumnName = "id", DataType = "INT" },
+            new TableColumn { TableId = table.Id, ColumnName = "ssn", DataType = "TEXT" }
+        };
+        await Repo.UpsertTableMetadataAsync(new TableMetadata { Identifier = id, Table = table, Columns = columns });
+        var warm = (await Repo.GetTableMetadataAsync(id))!; // structural entry (incl. masking rules) is now cached
+        var ssn = warm.Columns.Single(c => c.ColumnName == "ssn");
+
+        await ExecuteRawAsync(
+            $"INSERT INTO COLUMN_MASKING_RULES (id, table_column_id, rule_type) VALUES ('{Guid.NewGuid()}', '{ssn.Id}', 'DENY')");
+
+        IReadOnlyList<string> Names(TableMetadata m) => Autheris.Application.Services.CatalogVisibility
+            .FilterForSubject([m], [Autheris.Tests.Unit.Catalog.Wp0.Allow(m.Identifier, "S-X", new TenantId("t"))], new TenantId("t"), null)
+            .Single().Columns.Select(c => c.ColumnName).ToList();
+
+        // Accepted residual (A-6): within the 30 s cache TTL the freshly denied column name is still part of the Full view of the cached entry.
+        Names((await Repo.GetTableMetadataAsync(id))!).ShouldBe(["id", "ssn"]);
+
+        ((PostgreSqlGovernanceRepository)Repo).InvalidateMetadataCacheForTesting();
+        Names((await Repo.GetTableMetadataAsync(id))!).ShouldBe(["id"]);
+    }
 }

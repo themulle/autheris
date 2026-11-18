@@ -132,4 +132,5 @@ public sealed class CatalogGraphQlVisibilityServiceTests
 
         (await Catalog(user, Wp0.Tables(unmarked), Wp0.Consents(), Opts(TenancyShape.Multi), service: service)).ShouldBeEmpty();
     }
+
 }

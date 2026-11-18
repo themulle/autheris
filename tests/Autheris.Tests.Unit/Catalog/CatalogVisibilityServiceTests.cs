@@ -381,4 +381,17 @@ public sealed class CatalogVisibilityServiceTests
         (await service.FilterVisibleAsync(Caller(Subject()), [unmarked.Identifier, unknown.Identifier])).ShouldBeEmpty();
         (await service.FindVisibleAsync(Caller(Subject()), granted.Identifier))!.Value.Shape.ShouldBe(CatalogOutputShape.Full);
     }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void CatalogVisibleRow_NeverCarriesNotFound()
+    {
+        var row = Row(T1);
+
+        Should.Throw<ArgumentOutOfRangeException>(() => new CatalogVisibleRow(row, CatalogOutputShape.NotFound));
+        Should.Throw<ArgumentOutOfRangeException>(() => new CatalogVisibleRow(row, (CatalogOutputShape)42));
+        Should.Throw<ArgumentNullException>(() => new CatalogVisibleRow(null!, CatalogOutputShape.Full));
+        new CatalogVisibleRow(row, CatalogOutputShape.Full).Shape.ShouldBe(CatalogOutputShape.Full);
+    }
+
 }

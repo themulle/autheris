@@ -428,7 +428,13 @@ public sealed partial class Mutation
         }
         catch (ConsentRequestException ex)
         {
-            throw new GraphQLException(ErrorBuilder.New().SetCode(ex.Code).SetMessage(ex.Message).Build());
+            var error = ErrorBuilder.New().SetCode(ex.Code).SetMessage(ex.Message);
+            if (ex.RetryAfterSeconds is { } retryAfter)
+            {
+                error.SetExtension("retryAfterSeconds", retryAfter);
+            }
+
+            throw new GraphQLException(error.Build());
         }
         catch (DiscoveryStatusException ex)
         {

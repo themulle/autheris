@@ -177,6 +177,17 @@ public sealed class CatalogVirtualTableVisibilityTests
         tenant.Select(Id).ShouldBe([Id(own)]);
     }
 
+    [Fact]
+    public async Task VirtualTable_ForeignTenant_SharedTablesDoesNotReadmit()
+    {
+        var foreign = VirtualTable(TenantB);
+        var shared = new[] { foreign.Identifier.ToString() };
+
+        // Discovery tier of a subject and the consent-derived view of a claimed GovernanceAdmin both honour SharedTables for real tables.
+        (await VisibleAsync(Wp0.User("S-USER", "tenant-a"), TenantA, [foreign], Wp0.Consents(), shared: shared)).ShouldBeEmpty();
+        (await VisibleAsync(Wp0.User("S-ADM", "tenant-a", ["GovernanceAdmin"]), TenantA, [foreign], Wp0.Consents(), shared: shared)).ShouldBeEmpty();
+    }
+
     private sealed class ThrowingMaskingRules : IReadOnlyDictionary<string, MaskingRule>
     {
         public MaskingRule this[string key] => throw new InvalidOperationException("consent evaluation reached a foreign virtual table");
@@ -325,4 +336,5 @@ public sealed class CatalogVirtualTableVisibilityTests
         mcpNames.ShouldBe(expected, "MCP");
         graphQl.ShouldBe(expected, "GraphQL");
     }
+
 }

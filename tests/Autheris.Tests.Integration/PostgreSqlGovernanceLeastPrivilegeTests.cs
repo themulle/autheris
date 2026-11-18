@@ -289,4 +289,40 @@ public sealed class PostgreSqlGovernanceLeastPrivilegeTests : IClassFixture<Post
             await cmd.ExecuteNonQueryAsync();
         }
     }
+
+    [Fact]
+    public async Task RuntimeLogin_CanSetReadAndClearDatasetTagsAndVisibility_OnTheNewTables()
+    {
+        // Issue #111: the runtime login needs SELECT/INSERT/UPDATE/DELETE on TABLE_TAGS and TABLE_CATALOG_SETTINGS; the generic runtime grant
+        // covers both, and the tag/tier flow (including the tier overlay on every catalog read) works without any DDL right.
+        var options = GovernanceSchemaTestSupport.PostgreSqlOptions(_runtimeConnectionString, GovernanceMigrationMode.Verify);
+        using var repository = GovernanceSchemaTestSupport.UnmigratedPostgreSql(options);
+        await new PostgreSqlGovernanceMigrationRunner(repository, options).RunAsync();
+        await repository.InitializeAsync();
+
+        var identifier = new TableIdentifier("lpsource", "dbo", "tags_" + Guid.NewGuid().ToString("N")[..8]);
+        await repository.UpsertTableMetadataAsync(new TableMetadata
+        {
+            Table = new Table { Id = Guid.NewGuid(), DisplayName = "t", TableName = identifier.TableName, SchemaName = "dbo", SourceType = "PostgreSql", SourceName = "lpsource" },
+            Identifier = identifier,
+            Columns = [new TableColumn { ColumnName = "id", DataType = "int" }]
+        });
+        var actor = new Sid("S-1-5-21-lp");
+
+        (await repository.ReplaceDatasetTagsAsync(identifier, ["finance", "pii"], DatasetTagSource.Admin, actor)).ShouldNotBeNull();
+        (await repository.ReplaceDatasetTagsAsync(identifier, ["dbt-tag"], DatasetTagSource.Dbt, actor)).ShouldNotBeNull();
+        (await repository.ChangeDatasetTagsAsync(identifier, ["extra"], ["pii"], actor)).ShouldNotBeNull();
+        (await repository.SetDatasetDiscoveryAsync(identifier, true, null, null, actor)).ShouldNotBeNull();
+
+        var read = (await repository.GetTableMetadataAsync(identifier))!;
+        read.Table.DiscoveryHidden.ShouldBeTrue();
+        read.CatalogTags.ShouldBe(["dbt-tag", "extra", "finance"], ignoreOrder: true);
+        (await repository.GetAllTablesAsync()).Single(t => t.Identifier == identifier).Table.DiscoveryHidden.ShouldBeTrue();
+
+        (await repository.SetDatasetDiscoveryAsync(identifier, false, null, null, actor)).ShouldNotBeNull();
+        (await repository.ReplaceDatasetTagsAsync(identifier, [], DatasetTagSource.Admin, actor)).ShouldNotBeNull();
+        (await repository.ReplaceDatasetTagsAsync(identifier, [], DatasetTagSource.Dbt, actor)).ShouldNotBeNull();
+        (await repository.GetTableMetadataAsync(identifier))!.CatalogTags.ShouldBeEmpty();
+    }
+
 }

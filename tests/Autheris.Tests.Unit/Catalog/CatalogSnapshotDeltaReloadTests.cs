@@ -178,6 +178,70 @@ public sealed class CatalogSnapshotDeltaReloadTests
         provider.CurrentSnapshot.FindTable(tables[1].Identifier)!.Table.DisplayName.ShouldBe("after_gap");
     }
 
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task VisibilityChanged_ReflectedOnDeltaReload()
+    {
+        var t1 = CreateTable("orders", visibility: CatalogView.Unmarked);
+        var t2 = CreateTable("customers", visibility: CatalogView.Granted);
+
+        var repo = new InMemoryDeltaGovernanceRepo(new[] { t1, t2 });
+        var versionProvider = new FakeVersionProvider(new CatalogVersion(1, 1));
+        var time = new FakeTimeProvider(StartUtc);
+
+        await using var provider = new CatalogSnapshotProvider(repo.Proxy, versionProvider, null, null, time);
+        await provider.GetSnapshotAsync();
+        provider.CurrentSnapshot.FindTable(t1.Identifier)!.CatalogView.ShouldBe(CatalogView.Unmarked);
+
+        var t1Full = t1 with { CatalogView = CatalogView.Granted };
+        repo.SetTable(t1Full, changeVersion: 3);
+        versionProvider.Current = new CatalogVersion(1, 2);
+
+        await provider.RefreshAsync();
+        provider.CurrentSnapshot.FindTable(t1.Identifier)!.CatalogView.ShouldBe(CatalogView.Granted);
+        provider.CurrentSnapshot.FindTable(t2.Identifier)!.CatalogView.ShouldBe(CatalogView.Granted);
+        repo.GetAllTablesCallCount.ShouldBe(1);
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task InFlightReader_SeesConsistentSnapshotDuringDeltaSwap()
+    {
+        var t1 = CreateTable("orders", visibility: CatalogView.Unmarked);
+        var t2 = CreateTable("customers", visibility: CatalogView.Granted);
+
+        var repo = new InMemoryDeltaGovernanceRepo(new[] { t1, t2 });
+        var versionProvider = new FakeVersionProvider(new CatalogVersion(1, 1));
+        var time = new FakeTimeProvider(StartUtc);
+
+        await using var provider = new CatalogSnapshotProvider(repo.Proxy, versionProvider, null, null, time);
+        var readerSnapshot = await provider.GetSnapshotAsync();
+        readerSnapshot.TableCount.ShouldBe(2);
+        readerSnapshot.FindTable(t1.Identifier)!.CatalogView.ShouldBe(CatalogView.Unmarked);
+
+        var t1Updated = t1 with { CatalogView = CatalogView.Granted };
+        var t2Removed = t2 with { Table = t2.Table with { IsActive = false } };
+        repo.SetTable(t1Updated, changeVersion: 3);
+        versionProvider.Current = new CatalogVersion(1, 2);
+
+        await provider.RefreshAsync();
+
+        var swapped = provider.CurrentSnapshot;
+        swapped.ShouldNotBeSameAs(readerSnapshot);
+        swapped.FindTable(t1.Identifier)!.CatalogView.ShouldBe(CatalogView.Granted);
+
+        // Previously captured snapshot remains completely immutable and unchanged.
+        readerSnapshot.TableCount.ShouldBe(2);
+        readerSnapshot.FindTable(t1.Identifier)!.CatalogView.ShouldBe(CatalogView.Unmarked);
+        readerSnapshot.FindTable(t2.Identifier).ShouldNotBeNull();
+
+        // Also remove t2 cleanly via WithDelta directly and verify earlier snapshot is untouched.
+        var third = swapped.WithDelta(new CatalogVersion(1, 3), [t2Removed.Identifier], Array.Empty<TableMetadata>());
+        third.TableCount.ShouldBe(1);
+        swapped.TableCount.ShouldBe(2);
+        readerSnapshot.TableCount.ShouldBe(2);
+    }
+
 
     private sealed class FakeVersionProvider(CatalogVersion initial) : ICatalogVersionProvider
     {
@@ -285,4 +349,5 @@ public sealed class CatalogSnapshotDeltaReloadTests
             };
         }
     }
+
 }

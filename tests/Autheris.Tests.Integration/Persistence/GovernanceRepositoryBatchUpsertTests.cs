@@ -282,6 +282,47 @@ public sealed partial class GovernanceRepositoryBatchUpsertTests
         eventBus.CatalogChangedCount.ShouldBe(0);
     }
 
+    [Fact]
+    public async Task MixedChunk_AndDocumentationPrecedence_BumpsEpochOnlyForChangedTables_AndPreservesGovernanceFields()
+    {
+        var harness = new RecordingBatchHarness(_dbName);
+        var epochService = new RecordingEpochValidationService();
+        var repo = CreateRepository(harness, epochService: epochService);
+
+        var tUnchanged = BuildTable("crm", "dbo", "static_tbl", description: "Manual text", docSource: "Manual");
+        var tUpdated = BuildTable("crm", "dbo", "dynamic_tbl", description: "Old text", docSource: "dbt");
+        await repo.UpsertTableMetadataBatchAsync([tUnchanged, tUpdated], CancellationToken.None);
+
+        // Governance-set discovery flag (hidden) must never be overwritten by later ingestion batch upserts.
+        await repo.SetDatasetDiscoveryAsync(tUpdated.Identifier, true, null, null, new Sid("S-1-5-21-admin"), CancellationToken.None);
+
+        var epochUnchangedBefore = await repo.GetTableEpochAsync(tUnchanged.Identifier, CancellationToken.None);
+        var epochUpdatedBefore = await repo.GetTableEpochAsync(tUpdated.Identifier, CancellationToken.None);
+        epochService.Invalidations.Clear();
+
+        // Lower-precedence dbt attempt on tUnchanged leaves Manual description intact (-> Unchanged); tUpdated updates description.
+        var dbtAttempt = BuildTable("crm", "dbo", "static_tbl", description: "Overwritten by dbt?", docSource: "dbt");
+        var newDbt = BuildTable("crm", "dbo", "dynamic_tbl", description: "Fresh dbt desc", docSource: "dbt");
+
+        var results = await repo.UpsertTableMetadataBatchAsync([dbtAttempt, newDbt], CancellationToken.None);
+
+        var unchangedResult = results[0];
+        unchangedResult.Kind.ShouldBe(CatalogUpsertKind.Unchanged);
+        unchangedResult.Classification.ShouldBe(CatalogWriteClassification.Unchanged);
+        unchangedResult.Metadata.Table.Description.ShouldBe("Manual text");
+
+        results[1].Kind.ShouldBe(CatalogUpsertKind.Updated);
+        results[1].Metadata.Table.Description.ShouldBe("Fresh dbt desc");
+
+        (await repo.GetTableEpochAsync(tUnchanged.Identifier, CancellationToken.None)).ShouldBe(epochUnchangedBefore);
+        (await repo.GetTableEpochAsync(tUpdated.Identifier, CancellationToken.None)).ShouldBeGreaterThan(epochUpdatedBefore);
+
+        (await repo.GetTableMetadataAsync(tUpdated.Identifier, CancellationToken.None))!.Table.DiscoveryHidden.ShouldBeTrue();
+
+        epochService.Invalidations.ShouldNotContain(tUnchanged.Identifier);
+        epochService.Invalidations.Count(id => id.Equals(tUpdated.Identifier)).ShouldBe(1);
+    }
+
     private GovernanceRepository CreateRepository(
         RecordingBatchHarness harness,
         GatewayOptions? options = null,
@@ -340,4 +381,5 @@ public sealed partial class GovernanceRepositoryBatchUpsertTests
             ReplaceKeyDefinition = replaceKeyDef
         };
     }
+
 }

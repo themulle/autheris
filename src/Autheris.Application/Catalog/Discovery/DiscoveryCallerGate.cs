@@ -134,24 +134,42 @@ public static class DiscoveryCallerGate
         CancellationToken ct = default)
     {
         var sid = ValidateCaller(caller, discoveryOptions, gatewayOptions, out var settings);
-        if (rateLimiter != null && !gatewayOptions.Insecure.warn_disable_rate_limiting)
+        var retryAfter = await CheckAccessRequestRateAsync(caller.Tenant, sid, settings, gatewayOptions, rateLimiter, ct).ConfigureAwait(false);
+        if (retryAfter is { } wait)
         {
-            var perHour = Math.Max(1, settings.AccessRequestsPerHour);
-            var key = $"{AccessRequestScope}:{caller.Tenant.Value}:{sid.Value}";
-            var policy = new Autheris.Domain.Model.ClientQuotaPolicy(
-                Autheris.Domain.Model.ClientTier.Standard, 1, 1, perHour, perHour / 3600.0, false);
-            var result = await rateLimiter.CheckCostQuotaAsync(key, 1, policy, ct).ConfigureAwait(false);
-            if (!result.Allowed)
-            {
-                throw new DiscoveryStatusException(
-                    DiscoveryFailureKind.RateLimited,
-                    "RATE_LIMIT_EXCEEDED",
-                    "Access request rate limit exceeded.",
-                    Math.Max(1, result.RetryAfterSeconds));
-            }
+            throw new DiscoveryStatusException(
+                DiscoveryFailureKind.RateLimited,
+                "RATE_LIMIT_EXCEEDED",
+                "Access request rate limit exceeded.",
+                wait);
         }
 
         return sid;
+    }
+
+    /// <summary>
+    /// The one access-request limit per (tenant, sid), shared by every channel through the consent request service.
+    /// Returns the retry-after seconds when the limit is exceeded, otherwise null.
+    /// </summary>
+    public static async ValueTask<int?> CheckAccessRequestRateAsync(
+        TenantId tenant,
+        Sid sid,
+        CatalogDiscoverySettings settings,
+        GatewayOptions gatewayOptions,
+        IRateLimiterService? rateLimiter,
+        CancellationToken ct = default)
+    {
+        if (rateLimiter is null || gatewayOptions.Insecure.warn_disable_rate_limiting)
+        {
+            return null;
+        }
+
+        var perHour = Math.Max(1, settings.AccessRequestsPerHour);
+        var key = $"{AccessRequestScope}:{tenant.Value}:{sid.Value}";
+        var policy = new Autheris.Domain.Model.ClientQuotaPolicy(
+            Autheris.Domain.Model.ClientTier.Standard, 1, 1, perHour, perHour / 3600.0, false);
+        var result = await rateLimiter.CheckCostQuotaAsync(key, 1, policy, ct).ConfigureAwait(false);
+        return result.Allowed ? null : Math.Max(1, result.RetryAfterSeconds);
     }
 
     private static (IReadOnlyList<string> Roles, IReadOnlyList<string> Scopes) ResolveRequirements(

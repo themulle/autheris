@@ -27,7 +27,6 @@ public sealed class DiscoveryAccessRequestTests
     private readonly IDiscoveryService _discovery = Substitute.For<IDiscoveryService>();
     private readonly IConsentRequestService _consents = Substitute.For<IConsentRequestService>();
     private readonly IConsentApprovalRepository _approvals = Substitute.For<IConsentApprovalRepository>();
-    private readonly IRateLimiterService _limiter = Substitute.For<IRateLimiterService>();
     private ConsentRequestSubmission? _submitted;
 
     public DiscoveryAccessRequestTests()
@@ -38,8 +37,6 @@ public sealed class DiscoveryAccessRequestTests
                 _submitted = ci.Arg<ConsentRequestSubmission>();
                 return new SubmitConsentRequestResult { RequestId = Guid.NewGuid(), Status = "PENDING", Message = "ok" };
             });
-        _limiter.CheckCostQuotaAsync(Arg.Any<string>(), Arg.Any<int>(), Arg.Any<ClientQuotaPolicy>(), Arg.Any<CancellationToken>())
-            .Returns(new CostQuotaResult(true, 10, 0));
         _approvals.GetRequestsByRequesterSidAsync(Arg.Any<Sid>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
             .Returns(Array.Empty<ConsentRequest>());
     }
@@ -52,7 +49,7 @@ public sealed class DiscoveryAccessRequestTests
 
     private DiscoveryAccessRequestService Service(CatalogDiscoverySettings? settings = null) =>
         new(_discovery, _consents, Options.Create(new GatewayOptions { Tenancy = TenancyShape.Multi.Options() }), _approvals,
-            Options.Create(new CatalogDiscoveryOptions { Discovery = settings ?? new CatalogDiscoverySettings() }), _limiter);
+            Options.Create(new CatalogDiscoveryOptions { Discovery = settings ?? new CatalogDiscoverySettings() }));
 
     private static CatalogCaller Caller(string sid = "S-1") =>
         DiscoveryTestBuilder.Caller(DiscoveryTestBuilder.User(sid, "tenant-a"));
@@ -110,24 +107,6 @@ public sealed class DiscoveryAccessRequestTests
 
         results.Distinct().Count().ShouldBe(1);
         results[0].Code.ShouldBe(DiscoveryAccessRequestService.NotFoundCode);
-        await _consents.DidNotReceiveWithAnyArgs().SubmitAsync(default!, default);
-    }
-
-    [Fact]
-    [Trait("Category", "Security")]
-    public async Task RequestAccess_RateLimited_RetryAfter()
-    {
-        Discovered(Table());
-        _limiter.CheckCostQuotaAsync(Arg.Any<string>(), Arg.Any<int>(), Arg.Any<ClientQuotaPolicy>(), Arg.Any<CancellationToken>())
-            .Returns(new CostQuotaResult(false, 0, 120));
-
-        var ex = await Should.ThrowAsync<DiscoveryStatusException>(() => Service().RequestAsync(Request(), Caller()));
-
-        ex.Kind.ShouldBe(DiscoveryFailureKind.RateLimited);
-        ex.Code.ShouldBe("RATE_LIMIT_EXCEEDED");
-        ex.RetryAfterSeconds.ShouldBe(120);
-        await _limiter.Received(1).CheckCostQuotaAsync(
-            "discovery-access-request:tenant-a:S-1", 1, Arg.Is<ClientQuotaPolicy>(p => p.MaxTokensCapacity == 30), Arg.Any<CancellationToken>());
         await _consents.DidNotReceiveWithAnyArgs().SubmitAsync(default!, default);
     }
 

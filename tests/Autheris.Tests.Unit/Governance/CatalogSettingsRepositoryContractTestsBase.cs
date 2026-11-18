@@ -191,5 +191,133 @@ public abstract class CatalogSettingsRepositoryContractTestsBase : IAsyncLifetim
         lenient.Tags.ShouldBeEmpty();
     }
 
+    [Fact]
+    public async Task UnknownOrInactiveTable_ReturnsNull_ForEveryMethod()
+    {
+        if (!Available) { return; }
 
+        var unknown = NewTable("unknown");
+        var inactive = NewTable("inactive");
+        await UpsertTableAsync(Repo, inactive, active: false);
+
+        foreach (var id in new[] { unknown, inactive })
+        {
+            (await Repo.GetDatasetCatalogSettingsAsync(id)).ShouldBeNull();
+            (await Repo.ReplaceDatasetTagsAsync(id, ["a"], DatasetTagSource.Admin, Admin)).ShouldBeNull();
+            (await Repo.ChangeDatasetTagsAsync(id, ["a"], [], Admin)).ShouldBeNull();
+            (await Repo.SetDatasetPrivacyAsync(id, 3, null, Admin)).ShouldBeNull();
+        }
+    }
+
+    [Fact]
+    public async Task IdempotentWrites_ReportNoChange()
+    {
+        if (!Available) { return; }
+
+        var id = NewTable();
+        await UpsertTableAsync(Repo, id);
+        await Repo.ReplaceDatasetTagsAsync(id, ["x", "y"], DatasetTagSource.Admin, Admin);
+        await Repo.SetDatasetPrivacyAsync(id, 3, null, Admin);
+
+        (await Repo.ReplaceDatasetTagsAsync(id, ["y", "x"], DatasetTagSource.Admin, Admin))!.Changed.ShouldBeFalse();
+        (await Repo.SetDatasetPrivacyAsync(id, 3, null, Admin))!.Changed.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Reingestion_Upsert_LeavesTagsAndSettingsUntouched()
+    {
+        if (!Available) { return; }
+
+        var id = NewTable();
+        await UpsertTableAsync(Repo, id);
+        await Repo.ReplaceDatasetTagsAsync(id, ["keep-me"], DatasetTagSource.Admin, Admin);
+        await Repo.SetDatasetPrivacyAsync(id, 3, null, Admin);
+
+        // Re-ingestion: the same table identifier is upserted again, with a different description and a "Tags" literal that must be ignored.
+        var existing = (await Repo.GetTableMetadataAsync(id))!;
+        await Repo.UpsertTableMetadataAsync(existing with
+        {
+            Table = existing.Table with { Description = "changed by ingestion", Tags = ["ingestion-tag"] }
+        });
+
+        var after = (await Repo.GetTableMetadataAsync(id))!;
+        after.CatalogTags.ShouldBe(["keep-me"]);
+        after.Table.Tags.ShouldBeEmpty();
+        TagNames((await Repo.GetDatasetCatalogSettingsAsync(id))!).ShouldBe(["keep-me"]);
+    }
+
+    [Fact]
+    public async Task T_R2_7_OverlayOnCachedRows_ReadsFresh_AndNeverMutatesAPreviouslyReturnedRecord()
+    {
+        if (!Available) { return; }
+
+        var id = NewTable();
+        await UpsertTableAsync(Repo, id);
+        var replica = (await CreateAdditionalRepositoryAsync())!;
+        var warm = (await replica.GetTableMetadataAsync(id))!; // structural entry cached on the replica
+
+        await Repo.SetDatasetPrivacyAsync(id, 3, null, Admin);
+        await Repo.ReplaceDatasetTagsAsync(id, ["fresh"], DatasetTagSource.Admin, Admin);
+
+        var listed = (await FromAllAsync(replica, id))!; // GetAllTablesAsync with a warm cache
+        listed.CatalogTags.ShouldBe(["fresh"]);
+        warm.CatalogTags.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Degradation_TagViolatingTheRules_YieldsHiddenAndNoTagsForThatTableOnly()
+    {
+        if (!Available) { return; }
+
+        var broken = NewTable("broken");
+        var healthy = NewTable("healthy");
+        var brokenMeta = await UpsertTableAsync(Repo, broken);
+        await UpsertTableAsync(Repo, healthy);
+        await Repo.SetDatasetPrivacyAsync(broken, 3, null, Admin);
+        await Repo.SetDatasetPrivacyAsync(healthy, 3, null, Admin);
+        await Repo.ReplaceDatasetTagsAsync(healthy, ["good"], DatasetTagSource.Admin, Admin);
+        await ExecuteRawAsync(
+            $"INSERT INTO TABLE_TAGS (table_id, tag, source, created_by, created_at) VALUES ('{brokenMeta.Table.Id}', 'Bad Tag!', 'admin', 'x', '2026-01-01T00:00:00.0000000+00:00')");
+        var reader = (await CreateAdditionalRepositoryAsync())!;
+
+        var all = await reader.GetAllTablesAsync();
+
+        var brokenRow = all.Single(t => t.Identifier == broken);
+        brokenRow.Table.DiscoveryHidden.ShouldBeTrue();
+        brokenRow.CatalogTags.ShouldBeEmpty();
+        var healthyRow = all.Single(t => t.Identifier == healthy);
+        healthyRow.CatalogTags.ShouldBe(["good"]);
+    }
+
+    [Fact]
+    public async Task Degradation_DroppedTagTable_YieldsHiddenForEveryRow_NeverFull_NeverThrows()
+    {
+        if (!Available) { return; }
+
+        var id = NewTable();
+        await UpsertTableAsync(Repo, id);
+        await Repo.SetDatasetPrivacyAsync(id, 3, null, Admin);
+        var reader = (await CreateAdditionalRepositoryAsync())!; // created before the drop: a new instance would fail its shape check
+        await ExecuteRawAsync("DROP TABLE TABLE_TAGS");
+
+        var all = await reader.GetAllTablesAsync();
+
+        all.ShouldNotBeEmpty();
+        all.ShouldAllBe(t => t.Table.DiscoveryHidden && t.CatalogTags.Count == 0);
+        (await reader.GetTableMetadataAsync(id))!.Table.DiscoveryHidden.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task StrictRead_ThrowsOnACorruptRow_InsteadOfAFakeHidden()
+    {
+        if (!Available) { return; }
+
+        var id = NewTable();
+        var meta = await UpsertTableAsync(Repo, id);
+        await Repo.SetDatasetPrivacyAsync(id, 3, null, Admin);
+        await ExecuteRawAsync($"UPDATE TABLE_CATALOG_SETTINGS SET visibility = 9 WHERE table_id = '{meta.Table.Id}'");
+        var reader = (await CreateAdditionalRepositoryAsync())!;
+
+        await Should.ThrowAsync<Exception>(() => reader.GetDatasetCatalogSettingsAsync(id, strict: true));
+    }
 }

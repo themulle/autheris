@@ -835,7 +835,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
                 "VALIDATION_ERROR" => McpErrorCodes.InvalidParams,
                 _ => ex.Code
             };
-            return CreateErrorResult(sessionContext.TenantId, tool.Name, code, ex.Message);
+            return CreateErrorResult(sessionContext.TenantId, tool.Name, code, ex.Message, retryAfterSeconds: ex.RetryAfterSeconds);
         }
         catch (Autheris.Application.Catalog.Discovery.DiscoveryStatusException ex)
         {

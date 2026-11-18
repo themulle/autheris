@@ -40,7 +40,7 @@ public interface IDiscoveryAccessRequestService
 }
 
 /// <summary>
-/// Gate (authentication, optional role/scope, hourly rate limit), discoverability check, clear-column mapping, idempotency of identical
+/// Gate (authentication, optional role/scope; the hourly rate limit lives in the consent request service), discoverability check, clear-column mapping, idempotency of identical
 /// pending requests and audit in front of <see cref="IConsentRequestService"/>. A table that is hidden, foreign or unknown answers
 /// <c>NOT_FOUND</c>; an unknown, hidden, denied, already clear or non-clearable column answers <c>INVALID_COLUMNS</c>.
 /// </summary>
@@ -56,7 +56,6 @@ public sealed class DiscoveryAccessRequestService : IDiscoveryAccessRequestServi
     private readonly IConsentApprovalRepository? _approvals;
     private readonly IOptions<GatewayOptions> _gatewayOptions;
     private readonly IOptions<CatalogDiscoveryOptions>? _discoveryOptions;
-    private readonly IRateLimiterService? _rateLimiter;
     private readonly IAuditWriter? _audit;
     private readonly IGrantValidityPolicy _validity;
 
@@ -66,7 +65,6 @@ public sealed class DiscoveryAccessRequestService : IDiscoveryAccessRequestServi
         IOptions<GatewayOptions> gatewayOptions,
         IConsentApprovalRepository? approvals = null,
         IOptions<CatalogDiscoveryOptions>? discoveryOptions = null,
-        IRateLimiterService? rateLimiter = null,
         IAuditWriter? audit = null,
         IGrantValidityPolicy? validity = null)
     {
@@ -75,7 +73,6 @@ public sealed class DiscoveryAccessRequestService : IDiscoveryAccessRequestServi
         _gatewayOptions = gatewayOptions ?? throw new ArgumentNullException(nameof(gatewayOptions));
         _approvals = approvals;
         _discoveryOptions = discoveryOptions;
-        _rateLimiter = rateLimiter;
         _audit = audit;
         _validity = validity ?? GrantValidityPolicy.CreateDefault();
     }
@@ -86,7 +83,7 @@ public sealed class DiscoveryAccessRequestService : IDiscoveryAccessRequestServi
         ArgumentNullException.ThrowIfNull(caller);
 
         var sid = await DiscoveryCallerGate.EnsureAccessRequestAllowedAsync(
-            caller, _discoveryOptions?.Value ?? new CatalogDiscoveryOptions(), _gatewayOptions.Value, _rateLimiter, ct).ConfigureAwait(false);
+            caller, _discoveryOptions?.Value ?? new CatalogDiscoveryOptions(), _gatewayOptions.Value, rateLimiter: null, ct).ConfigureAwait(false);
 
         if (!TableIdentifier.TryCreate(request.Domain, request.Schema, request.TableName, out var tableId))
         {

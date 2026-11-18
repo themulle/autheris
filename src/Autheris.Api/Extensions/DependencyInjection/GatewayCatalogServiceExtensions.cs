@@ -94,7 +94,6 @@ public static class GatewayCatalogServiceExtensions
                 sp.GetRequiredService<IOptions<GatewayOptions>>(),
                 sp.GetService<IConsentApprovalRepository>(),
                 sp.GetService<IOptions<CatalogDiscoveryOptions>>(),
-                sp.GetService<IRateLimiterService>(),
                 sp.GetService<Autheris.Application.Audit.IAuditWriter>(),
                 sp.GetService<Autheris.Application.Governance.Grants.IGrantValidityPolicy>()));
         services.TryAddScoped<ICatalogDiscoveryService>(sp => new CatalogDiscoveryService(
