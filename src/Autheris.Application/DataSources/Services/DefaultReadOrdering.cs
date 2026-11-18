@@ -244,7 +244,7 @@ public static class DefaultReadOrdering
 
     /// <summary>
     /// False for document, binary, LOB, spatial and structured types that cannot (or should not) appear in an ORDER BY on the
-    /// dialect. Unknown types count as orderable. <c>text</c> stays orderable on PostgreSQL, SQLite and Databricks.
+    /// dialect. Unknown types count as orderable. <c>text</c> stays orderable on PostgreSQL and Databricks.
     /// </summary>
     public static bool IsOrderableType(string? dataType, DatabaseDialect dialect)
     {

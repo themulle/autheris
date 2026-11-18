@@ -9,7 +9,7 @@ using TrinoSqlEngine.Governance;
 
 /// <summary>
 /// Everything that determines the result of a key query (107 A-6). The compiled key SQL carries canonical table names,
-/// the projected catalog columns and every predicate shape; the binds carry the tenant and the policy values and the row limit of SQLite
+/// the projected catalog columns and every predicate shape; the binds carry the tenant and the policy values
 /// (D-WPC-8). The statement's text budget is deliberately not an input: entries stay statement independent.
 /// </summary>
 /// <param name="Provider">Provider name of the governed read connection.</param>

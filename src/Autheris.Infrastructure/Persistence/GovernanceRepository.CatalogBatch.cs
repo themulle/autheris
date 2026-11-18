@@ -41,7 +41,11 @@ public partial class GovernanceRepository
             SemanticVirtualTables.EnsureNamespaceRespected(item);
             validated[i] = item.ReplaceKeyDefinition ? TableKeyDefinitionValidator.Validate(item) : item;
         }
+        return await UpsertValidatedBatchAsync(validated, ct).ConfigureAwait(false);
+    }
 
+    internal async Task<IReadOnlyList<CatalogTableUpsertResult>> UpsertValidatedBatchAsync(TableMetadata[] validated, CancellationToken ct)
+    {
         // Deduplicate by case-insensitive identifier (latest entry wins) while preserving input-to-slot mapping.
         var keyToSlot = new Dictionary<CatalogBatchUpsertHelper.NormalizedIdentifierKey, int>();
         var distinct = new List<TableMetadata>();

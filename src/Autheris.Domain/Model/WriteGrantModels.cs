@@ -7,7 +7,10 @@ public enum WriteOperation
 {
     Insert = 1,
     Update = 2,
-    Delete = 3
+    Delete = 3,
+
+    /// <summary>Executes a write procedure exposed as a data product; independent of the read <c>Execute</c> grant. Carries no columns.</summary>
+    ExecuteWrite = 4
 }
 
 public enum WriteRowScope
@@ -39,11 +42,11 @@ public sealed record WriteRule(
                 throw new InvalidOperationException($"Write rule {Id}: {Operation} requires at least one column.");
             }
         }
-        else if (Operation is WriteOperation.Delete)
+        else if (Operation is WriteOperation.Delete or WriteOperation.ExecuteWrite)
         {
             if (Columns != null && Columns.Count > 0)
             {
-                throw new InvalidOperationException($"Write rule {Id}: Delete must not specify columns.");
+                throw new InvalidOperationException($"Write rule {Id}: {Operation} must not specify columns.");
             }
         }
         else
