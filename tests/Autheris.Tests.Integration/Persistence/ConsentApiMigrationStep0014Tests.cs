@@ -1,15 +1,6 @@
-using System.Data.Common;
-using Autheris.Application.Governance.Grants.Records;
-using Autheris.Domain.Audit;
-using Autheris.Domain.Common;
-using Autheris.Domain.Grants;
-using Autheris.Domain.Model;
-using Autheris.Domain.Options;
-using Autheris.Infrastructure.Persistence;
-using Autheris.Infrastructure.Persistence.Dialects;
-using Microsoft.Data.Sqlite;
-using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
+using Autheris.Infrastructure.Persistence.Migrations;
+using Autheris.Tests.Integration.Governance;
+using Npgsql;
 using Shouldly;
 using Xunit;
 
@@ -19,12 +10,17 @@ public sealed class ConsentApiMigrationStep0014Tests
 {
     [Trait("Category", "Security")]
     [Fact]
-    public void Consents_GrantSource_Backfill_DefaultsTo_ConsentRequest_NeverDeclarative()
+    public async Task Consents_GrantSource_Backfill_DefaultsTo_ConsentRequest_NeverDeclarative()
     {
-        using var conn = new SqliteConnection("Data Source=:memory:");
-        conn.Open();
+        var step = SqlMigrationStep.LoadEmbedded("postgresql").Single(s => s.Name == "consent_api");
 
-        Exec(conn, """
+        // The pre-step shape lives in a dedicated schema of a throwaway clone; the unqualified step SQL resolves there only.
+        await using var conn = new NpgsqlConnection(await GovernanceTestDatabase.CreateAsync("consent_api_step"));
+        await conn.OpenAsync();
+
+        await Exec(conn, """
+            CREATE SCHEMA pre_step;
+            SET search_path TO pre_step;
             CREATE TABLE CONSENT_REQUESTS (
                 id TEXT PRIMARY KEY,
                 table_id TEXT NOT NULL,
@@ -61,55 +57,37 @@ public sealed class ConsentApiMigrationStep0014Tests
             VALUES ('consent-legacy-1', 'tbl-1', 'req-legacy-1', 'Allow', 'User', 'S-1-5-1', 'S-1-5-1', '2026-11-10T08:00:00Z', '2026-12-10T08:00:00Z', 0, 't-1');
             """);
 
-        Exec(conn, """
-            ALTER TABLE CONSENT_REQUESTS ADD COLUMN version INT NOT NULL DEFAULT 1;
-            ALTER TABLE CONSENT_REQUESTS ADD COLUMN workflow_mode VARCHAR(16) NOT NULL DEFAULT 'INTERNAL';
-            ALTER TABLE CONSENT_REQUESTS ADD COLUMN external_system_id VARCHAR(36) NULL;
-            ALTER TABLE CONSENT_REQUESTS ADD COLUMN external_reference VARCHAR(256) NULL;
-            ALTER TABLE CONSENT_REQUESTS ADD COLUMN requested_valid_from TEXT NULL;
-            ALTER TABLE CONSENT_REQUESTS ADD COLUMN updated_at TEXT NULL;
-            ALTER TABLE CONSENT_REQUESTS ADD COLUMN request_kind VARCHAR(24) NOT NULL DEFAULT 'CONSENT';
-            ALTER TABLE CONSENT_REQUESTS ADD COLUMN profile_id VARCHAR(36) NULL;
-            UPDATE CONSENT_REQUESTS
-               SET external_reference = COALESCE(external_reference, itsm_ticket_id),
-                   requested_valid_from = COALESCE(requested_valid_from, requested_at),
-                   updated_at = COALESCE(updated_at, requested_at);
-            ALTER TABLE CONSENTS ADD COLUMN expiry_notice_sent_at TEXT NULL;
-            ALTER TABLE CONSENTS ADD COLUMN grant_record_seq BIGINT NOT NULL DEFAULT 0;
-            ALTER TABLE CONSENTS ADD COLUMN grant_source VARCHAR(24) NOT NULL DEFAULT 'CONSENT_REQUEST';
-            ALTER TABLE CONSENTS ADD COLUMN profile_assignment_id VARCHAR(36) NULL;
-            """);
-
-        using (var checkConsent = conn.CreateCommand())
+        foreach (var batch in step.Batches)
         {
-            checkConsent.CommandText = "SELECT grant_source, grant_record_seq, profile_assignment_id, expiry_notice_sent_at FROM CONSENTS WHERE id = 'consent-legacy-1'";
-            using var r = checkConsent.ExecuteReader();
-            r.Read().ShouldBeTrue();
+            await Exec(conn, batch);
+        }
+
+        await using (var consent = new NpgsqlCommand("SELECT grant_source, grant_record_seq, profile_assignment_id, expiry_notice_sent_at FROM CONSENTS WHERE id = 'consent-legacy-1'", conn))
+        await using (var r = await consent.ExecuteReaderAsync())
+        {
+            (await r.ReadAsync()).ShouldBeTrue();
             r.GetString(0).ShouldBe("CONSENT_REQUEST");
             r.GetString(0).ShouldNotBe("DECLARATIVE");
             r.GetInt64(1).ShouldBe(0L);
-            r.IsDBNull(2).ShouldBeTrue();
-            r.IsDBNull(3).ShouldBeTrue();
+            (await r.IsDBNullAsync(2)).ShouldBeTrue();
+            (await r.IsDBNullAsync(3)).ShouldBeTrue();
         }
 
-        using (var checkReq = conn.CreateCommand())
+        await using (var request = new NpgsqlCommand("SELECT version, workflow_mode, external_reference, requested_valid_from, request_kind FROM CONSENT_REQUESTS WHERE id = 'req-legacy-1'", conn))
+        await using (var r = await request.ExecuteReaderAsync())
         {
-            checkReq.CommandText = "SELECT version, workflow_mode, external_reference, requested_valid_from, updated_at, request_kind FROM CONSENT_REQUESTS WHERE id = 'req-legacy-1'";
-            using var r = checkReq.ExecuteReader();
-            r.Read().ShouldBeTrue();
+            (await r.ReadAsync()).ShouldBeTrue();
             r.GetInt32(0).ShouldBe(1);
             r.GetString(1).ShouldBe("INTERNAL");
             r.GetString(2).ShouldBe("INC-9001");
-            r.GetString(3).ShouldBe("2026-11-10T08:00:00Z");
-            r.GetString(4).ShouldBe("2026-11-10T08:00:00Z");
-            r.GetString(5).ShouldBe("CONSENT");
+            r.GetFieldValue<DateTime>(3).ShouldBe(new DateTime(2026, 11, 10, 8, 0, 0, DateTimeKind.Utc));
+            r.GetString(4).ShouldBe("CONSENT");
         }
     }
 
-    private static void Exec(SqliteConnection conn, string sql)
+    private static async Task Exec(NpgsqlConnection conn, string sql)
     {
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = sql;
-        cmd.ExecuteNonQuery();
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        await cmd.ExecuteNonQueryAsync();
     }
 }

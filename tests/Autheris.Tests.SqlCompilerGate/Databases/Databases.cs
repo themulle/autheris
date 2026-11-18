@@ -5,43 +5,11 @@ namespace Autheris.Tests.SqlCompilerGate.Databases;
 using System.Data.Common;
 using Autheris.Tests.SqlCompilerGate.Model;
 using Microsoft.Data.SqlClient;
-using Microsoft.Data.Sqlite;
 using Npgsql;
 using Oracle.ManagedDataAccess.Client;
 using Testcontainers.MsSql;
 using Testcontainers.Oracle;
 using Testcontainers.PostgreSql;
-
-/// <summary>SQLite in process: a shared-cache in-memory database that lives as long as the keeper connection.</summary>
-#pragma warning disable CA1001 // the keeper connection is disposed by StopAsync (IAsyncLifetime)
-public sealed class SqliteGateDatabase : GateDatabase
-{
-    private readonly string _connectionString = $"Data Source=gate-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
-    private SqliteConnection? _keeper;
-
-    public override GateDialect Dialect => GateDialect.Sqlite;
-    public override string DefaultSchema => "main";
-
-    protected override async Task StartAsync()
-    {
-        _keeper = new SqliteConnection(_connectionString);
-        await _keeper.OpenAsync();
-    }
-
-    protected override async Task StopAsync()
-    {
-        if (_keeper is not null) await _keeper.DisposeAsync();
-    }
-
-    public override async Task<DbConnection> OpenAsync()
-    {
-        var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync();
-        return connection;
-    }
-}
-
-#pragma warning restore CA1001
 
 public sealed class PostgreSqlGateDatabase : GateDatabase
 {

@@ -1,7 +1,6 @@
 using System.Collections.Frozen;
 using System.Collections.Immutable;
 using System.Data;
-using Microsoft.Data.Sqlite;
 using TrinoSqlEngine.Ast.Capabilities;
 using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Generators;
@@ -217,7 +216,7 @@ public class PostgreSqlGeneratorTests
                 new BoundParameter("$1", "1", 0, "acme", SqlParameterType.String, ParameterOrigin.Tenant, "t"),
                 new BoundParameter("$2", "2", 1, null, SqlParameterType.String, ParameterOrigin.ClientNamed, "foo")),
             TargetSqlDialect.PostgreSql, SqlStatementClass.Select, ImmutableArray<SecurityPredicateId>.Empty, "v");
-        using var cmd = new SqliteCommand();
+        using var cmd = new TrinoSqlEngine.Tests.Compiler.BinderMutationTests.RecCommand();
         binder.Bind(cmd, compiled, new Dictionary<string, object?> { ["foo"] = 7, ["1"] = "evil" });
 
         Assert.Equal("SELECT $1, $2", cmd.CommandText);
@@ -234,7 +233,7 @@ public class PostgreSqlGeneratorTests
         var compiled = new CompiledSql("SELECT $1", ImmutableArray.Create(
                 new BoundParameter("$1", "1", 0, "a\0b", SqlParameterType.String, ParameterOrigin.QueryLiteral)),
             TargetSqlDialect.PostgreSql, SqlStatementClass.Select, ImmutableArray<SecurityPredicateId>.Empty, "v");
-        using var cmd = new SqliteCommand();
+        using var cmd = new TrinoSqlEngine.Tests.Compiler.BinderMutationTests.RecCommand();
         Assert.ThrowsAny<System.Security.SecurityException>(() => binder.Bind(cmd, compiled, new Dictionary<string, object?>()));
     }
 }

@@ -1,6 +1,5 @@
 using System.Collections.Immutable;
 using System.Data;
-using Microsoft.Data.Sqlite;
 using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Governance;
 using Xunit;
@@ -50,9 +49,9 @@ public class LiteralBindTypeTests
 
     private static (DbType DbType, int Size, object? Value)[] BindAll(CompiledSql compiled, DbCommandCompiledSqlBinder binder)
     {
-        using var command = new SqliteCommand();
+        using var command = new TrinoSqlEngine.Tests.Compiler.BinderMutationTests.RecCommand();
         binder.Bind(command, compiled, new Dictionary<string, object?>());
-        return command.Parameters.Cast<SqliteParameter>().Select(p => (p.DbType, p.Size, p.Value)).ToArray();
+        return command.Parameters.Cast<System.Data.Common.DbParameter>().Select(p => (p.DbType, p.Size, p.Value)).ToArray();
     }
 
     [Fact]

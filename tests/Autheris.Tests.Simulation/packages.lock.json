@@ -1502,7 +1502,6 @@
           "Autheris.Api": "[0.0.0-dev, )",
           "Autheris.Application": "[0.0.0-dev, )",
           "Microsoft.AspNetCore.Mvc.Testing": "[11.0.0, )",
-          "Microsoft.Data.Sqlite": "[11.0.0, )",
           "xunit.extensibility.core": "[2.9.3, )"
         }
       },
@@ -1519,7 +1518,6 @@
           "Autheris.Application": "[0.0.0-dev, )",
           "FastSqlEngine": "[0.0.0-dev, )",
           "Microsoft.Data.SqlClient": "[7.1.2, )",
-          "Microsoft.Data.Sqlite": "[11.0.0, )",
           "Microsoft.NET.Test.Sdk": "[18.12.0, )",
           "Npgsql": "[10.0.3, )",
           "Oracle.ManagedDataAccess.Core": "[23.26.400, )",

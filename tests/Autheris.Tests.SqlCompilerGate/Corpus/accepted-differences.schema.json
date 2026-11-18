@@ -32,7 +32,6 @@
             "minItems": 1,
             "items": {
               "enum": [
-                "Sqlite",
                 "PostgreSql",
                 "SqlServer",
                 "Oracle"
@@ -126,7 +125,6 @@
             "minItems": 1,
             "items": {
               "enum": [
-                "Sqlite",
                 "PostgreSql",
                 "SqlServer",
                 "Oracle"

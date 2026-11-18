@@ -18,32 +18,28 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;
 using Autheris.Infrastructure.Persistence.Dialects;
-using Microsoft.Data.Sqlite;
+using Autheris.Tests.Integration.Governance;
+using Npgsql;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Shouldly;
 using Xunit;
 
 [Trait("Category", "Security")]
-public sealed partial class GovernanceRepositoryBatchUpsertTests : IDisposable
+public sealed partial class GovernanceRepositoryBatchUpsertTests
 {
-    private readonly SqliteConnection _keepAlive;
     private readonly string _dbName;
 
+    /// <summary>A fresh clone of the migrated PostgreSQL governance template; the harness records every command and transaction outcome.</summary>
     public GovernanceRepositoryBatchUpsertTests()
     {
-        _dbName = $"file:batch_upsert_{Guid.NewGuid():N}?mode=memory&cache=shared";
-        _keepAlive = new SqliteConnection($"Data Source={_dbName}");
-        _keepAlive.Open();
-        CreateSchema(_keepAlive);
+        _dbName = GovernanceTestDatabase.Create("batch_upsert");
     }
-
-    public void Dispose() => _keepAlive.Dispose();
 
     [Fact]
     public async Task EmptyBatch_ReturnsEmpty_AndOpensNoConnections()
     {
-        var harness = new SqliteBatchHarness(_dbName);
+        var harness = new RecordingBatchHarness(_dbName);
         var repo = CreateRepository(harness);
 
         var results = await repo.UpsertTableMetadataBatchAsync(Array.Empty<TableMetadata>(), CancellationToken.None);
@@ -56,7 +52,7 @@ public sealed partial class GovernanceRepositoryBatchUpsertTests : IDisposable
     [Fact]
     public async Task InvalidRowInBatch_FailsPreFlight_BeforeAnyDbWork()
     {
-        var harness = new SqliteBatchHarness(_dbName);
+        var harness = new RecordingBatchHarness(_dbName);
         var repo = CreateRepository(harness);
 
         var valid = BuildTable("sales", "crm", "customers");
@@ -76,7 +72,7 @@ public sealed partial class GovernanceRepositoryBatchUpsertTests : IDisposable
     [Trait("Category", "Security")]
     public async Task DuplicateIdentifiers_LatestWins_AndLocksTablesInDeterministicOrder()
     {
-        var harness = new SqliteBatchHarness(_dbName);
+        var harness = new RecordingBatchHarness(_dbName);
         var repo = CreateRepository(harness);
 
         var zTable = BuildTable("zeta", "dbo", "t_z", description: "Z desc");
@@ -103,7 +99,7 @@ public sealed partial class GovernanceRepositoryBatchUpsertTests : IDisposable
     [Fact]
     public async Task LargeBatch_ChunksByParameterBudget_AndBoundsCommandParameters()
     {
-        var harness = new SqliteBatchHarness(_dbName);
+        var harness = new RecordingBatchHarness(_dbName);
         var repo = CreateRepository(harness);
 
         var batch = Enumerable.Range(0, 502)
@@ -122,7 +118,7 @@ public sealed partial class GovernanceRepositoryBatchUpsertTests : IDisposable
         lockSelects[0].Params.Count.ShouldBe(1500);
         lockSelects[1].Params.Count.ShouldBe(6);
 
-        var budgetHarness = new SqliteBatchHarness(_dbName);
+        var budgetHarness = new RecordingBatchHarness(_dbName);
         var budgetProvider = new FixedChunkBudgetProvider(chunkSize: 2);
         var budgetDialect = new CustomBudgetDialect(budgetProvider, () => budgetHarness.CreateConnection());
         var customRepo = new GovernanceRepository(budgetDialect, options: Options.Create(new GatewayOptions()));
@@ -137,9 +133,9 @@ public sealed partial class GovernanceRepositoryBatchUpsertTests : IDisposable
             {
                 await customRepo.UpsertTableMetadataBatchAsync(smallBatch, CancellationToken.None);
             }
-            catch (SqliteException ex)
+            catch (DbException ex)
             {
-                // SQL Server MERGE syntax does not execute in SQLite; inspect the pre-write chunk SELECT commands first.
+                // The empty upsert statements of the stub dialect do not execute; inspect the pre-write chunk SELECT commands first.
                 throw new InvalidOperationException(ex.Message, ex);
             }
         });
@@ -156,7 +152,7 @@ public sealed partial class GovernanceRepositoryBatchUpsertTests : IDisposable
     [Trait("Category", "Security")]
     public async Task AllUnchangedChunk_RollsBackWithZeroEpochOrVersionBump()
     {
-        var harness = new SqliteBatchHarness(_dbName);
+        var harness = new RecordingBatchHarness(_dbName);
         var epochService = new RecordingEpochValidationService();
         var eventBus = new RecordingEventBus();
         var repo = CreateRepository(harness, epochService: epochService, eventBus: eventBus);
@@ -190,7 +186,7 @@ public sealed partial class GovernanceRepositoryBatchUpsertTests : IDisposable
     [Fact]
     public async Task MixedChunk_AndDocumentationPrecedence_BumpsEpochOnlyForChangedTables_AndPreservesGovernanceFields()
     {
-        var harness = new SqliteBatchHarness(_dbName);
+        var harness = new RecordingBatchHarness(_dbName);
         var epochService = new RecordingEpochValidationService();
         var options = new GatewayOptions
         {
@@ -237,7 +233,7 @@ public sealed partial class GovernanceRepositoryBatchUpsertTests : IDisposable
     [Trait("Category", "Security")]
     public async Task CatalogWriteScope_DefersAdditiveChunk_AndFlushesOnRestrictiveItemInChunk()
     {
-        var harness = new SqliteBatchHarness(_dbName);
+        var harness = new RecordingBatchHarness(_dbName);
         var eventBus = new RecordingEventBus();
         var repo = CreateRepository(harness, eventBus: eventBus);
         var dirty = new CatalogDirtyFlag();
@@ -295,7 +291,7 @@ public sealed partial class GovernanceRepositoryBatchUpsertTests : IDisposable
     {
         var epochService = new RecordingEpochValidationService();
         var eventBus = new RecordingEventBus();
-        var harness = new SqliteBatchHarness(_dbName);
+        var harness = new RecordingBatchHarness(_dbName);
         var repo = CreateRepository(harness, epochService: epochService, eventBus: eventBus);
 
         // Fail attempts 1 & 2 right at COMMIT, succeed on attempt 3.
@@ -332,7 +328,7 @@ public sealed partial class GovernanceRepositoryBatchUpsertTests : IDisposable
     }
 
     private GovernanceRepository CreateRepository(
-        SqliteBatchHarness harness,
+        RecordingBatchHarness harness,
         GatewayOptions? options = null,
         IEpochValidationService? epochService = null,
         IEventBus? eventBus = null)
@@ -347,16 +343,18 @@ public sealed partial class GovernanceRepositoryBatchUpsertTests : IDisposable
 
     private async Task<int?> ReadStoredVisibilityAsync(TableIdentifier id)
     {
-        await using var cmd = _keepAlive.CreateCommand();
+        await using var connection = new NpgsqlConnection(_dbName);
+        await connection.OpenAsync();
+        await using var cmd = connection.CreateCommand();
         cmd.CommandText = """
             SELECT d.visibility
             FROM TABLE_CATALOG_SETTINGS d
             INNER JOIN TABLES t ON d.table_id = t.id
             WHERE LOWER(t.source_name) = LOWER(@d) AND LOWER(t.schema_name) = LOWER(@s) AND LOWER(t.table_name) = LOWER(@t)
             """;
-        cmd.Parameters.AddWithValue("@d", id.Domain);
-        cmd.Parameters.AddWithValue("@s", id.Schema);
-        cmd.Parameters.AddWithValue("@t", id.TableName);
+        cmd.Parameters.AddWithValue("d", id.Domain);
+        cmd.Parameters.AddWithValue("s", id.Schema);
+        cmd.Parameters.AddWithValue("t", id.TableName);
         var scalar = await cmd.ExecuteScalarAsync();
         return scalar is null or DBNull ? null : Convert.ToInt32(scalar);
     }

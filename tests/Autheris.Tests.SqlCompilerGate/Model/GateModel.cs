@@ -8,7 +8,7 @@ using TrinoSqlEngine;
 public enum EngineKind { Ast, Unfiltered }
 
 /// <summary>The databases of the legacy-vs-AST differential (G4). DuckDB and Databricks have no legacy path (cross-dialect, WP-X0y).</summary>
-public enum GateDialect { Sqlite, PostgreSql, SqlServer, Oracle }
+public enum GateDialect { PostgreSql, SqlServer, Oracle }
 
 public enum ColumnKind { Whole, Text, Fixed, Timestamp }
 
@@ -155,10 +155,6 @@ public static class GateModel
 
     public static string TypeOf(GateDialect dialect, ColumnDef column) => (dialect, column.Kind) switch
     {
-        (GateDialect.Sqlite, ColumnKind.Whole) => "INTEGER",
-        (GateDialect.Sqlite, ColumnKind.Text) => "TEXT",
-        (GateDialect.Sqlite, ColumnKind.Fixed) => "NUMERIC",
-        (GateDialect.Sqlite, ColumnKind.Timestamp) => "TEXT",
         (GateDialect.PostgreSql, ColumnKind.Whole) => "integer",
         (GateDialect.PostgreSql, ColumnKind.Text) => "text",
         (GateDialect.PostgreSql, ColumnKind.Fixed) => "numeric(18,2)",

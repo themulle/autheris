@@ -9,7 +9,7 @@ using Autheris.Tests.SqlCompilerGate.Model;
 using Shouldly;
 using Xunit.Abstractions;
 
-/// <summary>A database for the parity gate. SQLite is in process and always runs; the container databases run under <c>SQLGATE_PROFILE</c>.</summary>
+/// <summary>A database for the parity gate. the container databases run under <c>SQLGATE_PROFILE</c>.</summary>
 public sealed class ParityFixture<TDatabase> : IAsyncLifetime
     where TDatabase : GateDatabase, new()
 {

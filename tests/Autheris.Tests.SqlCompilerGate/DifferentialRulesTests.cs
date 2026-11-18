@@ -26,13 +26,13 @@ public sealed class DifferentialRulesTests
     public void UnavailableAstLeg_IsAFailure_NotASkip()
     {
         var ex = Should.Throw<Xunit.Sdk.XunitException>(() =>
-            DifferentialRules.RequireAstLeg("Sqlite", new[] { "ReadOnly: no binder" }));
+            DifferentialRules.RequireAstLeg("PostgreSql", new[] { "ReadOnly: no binder" }));
 
-        ex.Message.ShouldContain("Sqlite");
+        ex.Message.ShouldContain("PostgreSql");
         ex.Message.ShouldContain("no binder");
     }
 
     [Fact]
     public void AvailableAstLeg_DoesNotThrow() =>
-        Should.NotThrow(() => DifferentialRules.RequireAstLeg("Sqlite", Array.Empty<string>()));
+        Should.NotThrow(() => DifferentialRules.RequireAstLeg("PostgreSql", Array.Empty<string>()));
 }

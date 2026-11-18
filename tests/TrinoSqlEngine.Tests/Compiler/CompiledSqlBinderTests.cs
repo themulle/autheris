@@ -1,6 +1,6 @@
 using System.Collections.Immutable;
 using System.Data;
-using Microsoft.Data.Sqlite;
+using DuckDB.NET.Data;
 using TrinoSqlEngine.Ast.Emit;
 using Xunit;
 
@@ -29,7 +29,7 @@ public class CompiledSqlBinderTests
     [Fact]
     public void Bind_SetsCommandTextAndTypedParameters()
     {
-        using var cmd = new SqliteCommand();
+        using var cmd = new TrinoSqlEngine.Tests.Compiler.BinderMutationTests.RecCommand();
         var compiled = Compiled("SELECT 1",
             Param(0, "acme", SqlParameterType.String, ParameterOrigin.Tenant, "__t"),
             Param(1, 42, SqlParameterType.Int32, ParameterOrigin.QueryLiteral),
@@ -49,7 +49,7 @@ public class CompiledSqlBinderTests
     [Fact]
     public void Bind_ClientNamed_ResolvesFromClientValues()
     {
-        using var cmd = new SqliteCommand();
+        using var cmd = new TrinoSqlEngine.Tests.Compiler.BinderMutationTests.RecCommand();
         var compiled = Compiled("SELECT 1", Param(0, null, SqlParameterType.String, ParameterOrigin.ClientNamed, "foo"));
 
         _binder.Bind(cmd, compiled, new Dictionary<string, object?> { ["foo"] = "bar" });
@@ -60,7 +60,7 @@ public class CompiledSqlBinderTests
     [Fact]
     public void Bind_ClientNamed_Missing_FailsClosed()
     {
-        using var cmd = new SqliteCommand();
+        using var cmd = new TrinoSqlEngine.Tests.Compiler.BinderMutationTests.RecCommand();
         var compiled = Compiled("SELECT 1", Param(0, null, SqlParameterType.String, ParameterOrigin.ClientNamed, "foo"));
 
         Assert.ThrowsAny<System.Security.SecurityException>(() => _binder.Bind(cmd, compiled, new Dictionary<string, object?>()));
@@ -70,7 +70,7 @@ public class CompiledSqlBinderTests
     public void Bind_ClientNamedValue_CannotAliasInternalParameter()
     {
         // SEC-ADG-19: a client key such as "@p0" or "__autheris_tenant" never reaches a tenant/policy slot.
-        using var cmd = new SqliteCommand();
+        using var cmd = new TrinoSqlEngine.Tests.Compiler.BinderMutationTests.RecCommand();
         var compiled = Compiled("SELECT 1",
             Param(0, "acme", SqlParameterType.String, ParameterOrigin.Tenant, "__autheris_tenant"),
             Param(1, null, SqlParameterType.String, ParameterOrigin.ClientNamed, "foo"));
@@ -87,15 +87,15 @@ public class CompiledSqlBinderTests
     [Fact]
     public void Bind_OnCommandWithExistingParameters_Throws()
     {
-        using var cmd = new SqliteCommand();
-        cmd.Parameters.AddWithValue("@x", 1);
+        using var cmd = new TrinoSqlEngine.Tests.Compiler.BinderMutationTests.RecCommand();
+        cmd.Parameters.Add(new TrinoSqlEngine.Tests.Compiler.BinderMutationTests.RecParameter { ParameterName = "@x", Value = 1 });
         Assert.Throws<InvalidOperationException>(() => _binder.Bind(cmd, Compiled("SELECT 1"), new Dictionary<string, object?>()));
     }
 
     [Fact]
     public void Bind_NullValue_BindsDbNull()
     {
-        using var cmd = new SqliteCommand();
+        using var cmd = new TrinoSqlEngine.Tests.Compiler.BinderMutationTests.RecCommand();
         _binder.Bind(cmd, Compiled("SELECT 1", Param(0, null, SqlParameterType.Null, ParameterOrigin.QueryLiteral)), new Dictionary<string, object?>());
         Assert.Equal(DBNull.Value, cmd.Parameters[0].Value);
     }
@@ -103,12 +103,12 @@ public class CompiledSqlBinderTests
     [Fact]
     public void Bind_EveryParameter_IsDistinctlyNamed_OneToOneWithMarkers()
     {
-        using var cmd = new SqliteCommand();
+        using var cmd = new TrinoSqlEngine.Tests.Compiler.BinderMutationTests.RecCommand();
         var compiled = Compiled("SELECT 1",
             Param(0, 1, SqlParameterType.Int32, ParameterOrigin.QueryLiteral),
             Param(1, 2, SqlParameterType.Int32, ParameterOrigin.QueryLiteral));
         _binder.Bind(cmd, compiled, new Dictionary<string, object?>());
-        Assert.Equal(new[] { "@p0", "@p1" }, cmd.Parameters.Cast<SqliteParameter>().Select(p => p.ParameterName));
+        Assert.Equal(new[] { "@p0", "@p1" }, cmd.Parameters.Cast<System.Data.Common.DbParameter>().Select(p => p.ParameterName));
     }
 
     // ---- CR-ADG-43: a statement with a row-count check runs only through the checked executor ----
@@ -137,7 +137,7 @@ public class CompiledSqlBinderTests
     public void Bind_OfAStatementWithARowCountCheck_IsRefused_WithATypedError_AndTouchesNothing(TargetSqlDialect dialect)
     {
         var compiled = Checked("INSERT INTO t SELECT 1", 1) with { Dialect = dialect };
-        using var cmd = new SqliteCommand();
+        using var cmd = new TrinoSqlEngine.Tests.Compiler.BinderMutationTests.RecCommand();
         var ex = Assert.Throws<CheckedExecutionRequiredException>(() => BinderOf(dialect).Bind(cmd, compiled, new Dictionary<string, object?>()));
         Assert.Equal(GovernedSqlErrorCodes.CheckedExecutionRequired, ex.Code);
         Assert.Equal("DML_CHECKED_EXECUTION_REQUIRED", ex.Code);
@@ -175,7 +175,7 @@ public class CompiledSqlBinderTests
         {
             var compiled = Compiled(sql) with { Dialect = dialect, StatementClass = SqlStatementClass.Insert };
             Assert.False(compiled.RequiresRowCountCheck);
-            using var cmd = new SqliteCommand();
+            using var cmd = new TrinoSqlEngine.Tests.Compiler.BinderMutationTests.RecCommand();
             var ex = Assert.Throws<CheckedExecutionRequiredException>(() => BinderOf(dialect).Bind(cmd, compiled, new Dictionary<string, object?>()));
             Assert.Equal(dialect, ex.Dialect);
             Assert.Equal(string.Empty, cmd.CommandText);
@@ -186,14 +186,14 @@ public class CompiledSqlBinderTests
     [Fact]
     public void Bind_OfAStatementWithoutARowCountCheck_IsUnchanged()
     {
-        using var cmd = new SqliteCommand();
+        using var cmd = new TrinoSqlEngine.Tests.Compiler.BinderMutationTests.RecCommand();
         _binder.Bind(cmd, Compiled("DELETE FROM t"), new Dictionary<string, object?>());
         Assert.Equal("DELETE FROM t", cmd.CommandText);
     }
 
-    private static async Task<SqliteConnection> OpenTableAsync()
+    private static async Task<DuckDBConnection> OpenTableAsync()
     {
-        var connection = new SqliteConnection("Data Source=:memory:");
+        var connection = new DuckDBConnection("Data Source=:memory:");
         await connection.OpenAsync();
         await using var create = connection.CreateCommand();
         create.CommandText = "CREATE TABLE t (a INTEGER)";
@@ -201,19 +201,25 @@ public class CompiledSqlBinderTests
         return connection;
     }
 
-    private static async Task<long> CountAsync(SqliteConnection connection)
+    private static async Task<long> CountAsync(DuckDBConnection connection)
     {
         await using var cmd = connection.CreateCommand();
         cmd.CommandText = "SELECT COUNT(*) FROM t";
         return (long)(await cmd.ExecuteScalarAsync())!;
     }
 
+    private static BoundParameter DuckParam(int ord, object? value) =>
+        new($"$p{ord}", $"p{ord}", ord, value, SqlParameterType.Int32, ParameterOrigin.QueryLiteral, null);
+
+    private static CompiledSql DuckChecked(string sql, int expected, params BoundParameter[] ps) =>
+        Checked(sql, expected, ps) with { Dialect = TargetSqlDialect.DuckDb };
+
     [Fact]
     public async Task CheckedExecutor_CommitsWhenTheAffectedCountMatches()
     {
         await using var connection = await OpenTableAsync();
-        var compiled = Checked("INSERT INTO t (a) SELECT 1 WHERE @p0 = 1", 1, Param(0, 1, SqlParameterType.Int32, ParameterOrigin.QueryLiteral));
-        int affected = await new CheckedDmlExecutor(_binder).ExecuteAsync(connection, compiled, new Dictionary<string, object?>());
+        var compiled = DuckChecked("INSERT INTO t (a) SELECT 1 WHERE $p0 = 1", 1, DuckParam(0, 1));
+        int affected = await new CheckedDmlExecutor(new DuckDbCompiledSqlBinder()).ExecuteAsync(connection, compiled, new Dictionary<string, object?>(), IsolationLevel.Unspecified);
         Assert.Equal(1, affected);
         Assert.Equal(1, await CountAsync(connection));
     }
@@ -223,13 +229,13 @@ public class CompiledSqlBinderTests
     {
         await using var connection = await OpenTableAsync();
         // two rows are written but only one is expected: the transaction is rolled back, nothing stays
-        var compiled = Checked("INSERT INTO t (a) SELECT 1 UNION ALL SELECT 2", 1);
-        await Assert.ThrowsAsync<DmlCheckOptionViolationException>(() => new CheckedDmlExecutor(_binder).ExecuteAsync(connection, compiled, new Dictionary<string, object?>()));
+        var compiled = DuckChecked("INSERT INTO t (a) SELECT 1 UNION ALL SELECT 2", 1);
+        await Assert.ThrowsAsync<DmlCheckOptionViolationException>(() => new CheckedDmlExecutor(new DuckDbCompiledSqlBinder()).ExecuteAsync(connection, compiled, new Dictionary<string, object?>(), IsolationLevel.Unspecified));
         Assert.Equal(0, await CountAsync(connection));
 
         // the policy filtered a row out: zero rows written, one expected
-        var filtered = Checked("INSERT INTO t (a) SELECT 1 WHERE @p0 = 2", 1, Param(0, 1, SqlParameterType.Int32, ParameterOrigin.QueryLiteral));
-        await Assert.ThrowsAsync<DmlCheckOptionViolationException>(() => new CheckedDmlExecutor(_binder).ExecuteAsync(connection, filtered, new Dictionary<string, object?>()));
+        var filtered = DuckChecked("INSERT INTO t (a) SELECT 1 WHERE $p0 = 2", 1, DuckParam(0, 1));
+        await Assert.ThrowsAsync<DmlCheckOptionViolationException>(() => new CheckedDmlExecutor(new DuckDbCompiledSqlBinder()).ExecuteAsync(connection, filtered, new Dictionary<string, object?>(), IsolationLevel.Unspecified));
         Assert.Equal(0, await CountAsync(connection));
     }
 
@@ -238,10 +244,10 @@ public class CompiledSqlBinderTests
     {
         await using var connection = await OpenTableAsync();
         var broken = Checked("INSERT INTO nope (a) SELECT 1", 1);
-        await Assert.ThrowsAnyAsync<Exception>(() => new CheckedDmlExecutor(_binder).ExecuteAsync(connection, broken, new Dictionary<string, object?>()));
+        await Assert.ThrowsAnyAsync<Exception>(() => new CheckedDmlExecutor(_binder).ExecuteAsync(connection, broken, new Dictionary<string, object?>(), IsolationLevel.Unspecified));
         Assert.Equal(0, await CountAsync(connection));
 
-        int affected = await new CheckedDmlExecutor(_binder).ExecuteAsync(connection, Compiled("INSERT INTO t (a) SELECT 5"), new Dictionary<string, object?>());
+        int affected = await new CheckedDmlExecutor(_binder).ExecuteAsync(connection, Compiled("INSERT INTO t (a) SELECT 5"), new Dictionary<string, object?>(), IsolationLevel.Unspecified);
         Assert.Equal(1, affected);
     }
 
@@ -250,7 +256,7 @@ public class CompiledSqlBinderTests
     {
         await using var connection = await OpenTableAsync();
         var compiled = Checked("INSERT INTO t (a) SELECT 1", 1) with { Dialect = TargetSqlDialect.PostgreSql };
-        await Assert.ThrowsAsync<InvalidOperationException>(() => new CheckedDmlExecutor(_binder).ExecuteAsync(connection, compiled, new Dictionary<string, object?>()));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => new CheckedDmlExecutor(_binder).ExecuteAsync(connection, compiled, new Dictionary<string, object?>(), IsolationLevel.Unspecified));
         Assert.Equal(0, await CountAsync(connection));
     }
 }

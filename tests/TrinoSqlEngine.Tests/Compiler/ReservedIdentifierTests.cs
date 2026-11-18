@@ -1,5 +1,4 @@
 using System.Collections.Immutable;
-using Microsoft.Data.Sqlite;
 using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Governance;
 using Xunit;
@@ -99,7 +98,7 @@ public class ReservedIdentifierTests
     [InlineData("SELECT autheris_ins2 FROM t")]
     public void Bind_DoesNotTreatASubstringAsTheCheckAlias(string sql)
     {
-        using var command = new SqliteCommand();
+        using var command = new TrinoSqlEngine.Tests.Compiler.BinderMutationTests.RecCommand();
 
         new SqlServerCompiledSqlBinder().Bind(command, Compiled(sql), new Dictionary<string, object?>());
 
@@ -113,7 +112,7 @@ public class ReservedIdentifierTests
     [InlineData("SELECT 1 FROM t AS autheris_ins")]
     public void Bind_StillRefusesTheExactCheckAlias_InEveryQuotingStyle(string sql)
     {
-        using var command = new SqliteCommand();
+        using var command = new TrinoSqlEngine.Tests.Compiler.BinderMutationTests.RecCommand();
 
         Assert.Throws<CheckedExecutionRequiredException>(() =>
             new SqlServerCompiledSqlBinder().Bind(command, Compiled(sql), new Dictionary<string, object?>()));
