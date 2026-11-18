@@ -581,9 +581,16 @@ public partial class GovernanceRepository : IClassificationRepository
         return await reader.ReadAsync(ct).ConfigureAwait(false) ? ReadMaskRule(reader) : null;
     }
 
+    public async Task<TableIdentifier?> GetTableIdentifierByColumnIdAsync(string tableColumnId, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tableColumnId);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        return await TryReadTableIdentifierByColumnIdAsync(conn, null, tableColumnId, ct).ConfigureAwait(false);
+    }
+
     private async Task<TableIdentifier?> TryReadTableIdentifierByColumnIdAsync(
         DbConnection conn,
-        DbTransaction tx,
+        DbTransaction? tx,
         string tableColumnId,
         CancellationToken ct)
     {

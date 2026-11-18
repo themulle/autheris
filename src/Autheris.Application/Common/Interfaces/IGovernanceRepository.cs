@@ -408,6 +408,16 @@ public interface IConsentApprovalRepository
         => Task.FromResult<IReadOnlyList<ConsentRequest>>(Array.Empty<ConsentRequest>());
     Task<IReadOnlyList<ConsentRequest>> GetPendingRequestsForApproverAsync(Sid approverSid, CancellationToken ct = default);
     Task<ConsentRequest> ApproveConsentRequestStepAsync(Guid requestId, Sid approverSid, CancellationToken ct = default);
+
+    /// <summary>
+    /// Records an approval step like <see cref="ApproveConsentRequestStepAsync(Guid, Sid, CancellationToken)"/>; when
+    /// <paramref name="requireSecondApprover"/> is set the request needs a second distinct approver regardless of the table's
+    /// four-eyes flag (per-classification Clear approved by a steward after the data owner).
+    /// </summary>
+    Task<ConsentRequest> ApproveConsentRequestStepAsync(Guid requestId, Sid approverSid, bool requireSecondApprover, CancellationToken ct = default)
+        => requireSecondApprover
+            ? throw new NotSupportedException($"{GetType().Name} does not implement mandatory second approvers.")
+            : ApproveConsentRequestStepAsync(requestId, approverSid, ct);
     Task<ConsentRequest> RejectConsentRequestAsync(Guid requestId, Sid approverSid, string reason, CancellationToken ct = default);
 
     /// <summary>
@@ -500,6 +510,22 @@ public interface IConsentApprovalRepository
         IReadOnlyList<ConsentColumnRule> columnRules,
         CancellationToken ct = default)
         => throw new NotSupportedException($"{GetType().Name} does not implement atomic approval.");
+
+    /// <summary>
+    /// Atomic approval like <see cref="ExecuteAtomicApprovalWithConsentAsync(Guid, ApprovalStep, Consent, IReadOnlyList{ConsentRowFilter}, IReadOnlyList{ConsentColumnRule}, CancellationToken)"/>;
+    /// when <paramref name="requireSecondApprover"/> is set the step only completes the request as the second distinct approval.
+    /// </summary>
+    Task<Consent> ExecuteAtomicApprovalWithConsentAsync(
+        Guid requestId,
+        ApprovalStep step,
+        Consent consent,
+        IReadOnlyList<ConsentRowFilter> rowFilters,
+        IReadOnlyList<ConsentColumnRule> columnRules,
+        bool requireSecondApprover,
+        CancellationToken ct = default)
+        => requireSecondApprover
+            ? throw new NotSupportedException($"{GetType().Name} does not implement mandatory second approvers.")
+            : ExecuteAtomicApprovalWithConsentAsync(requestId, step, consent, rowFilters, columnRules, ct);
 
     Task<ConsentRequestPage> QueryTenantConsentRequestsAsync(
         ConsentRequestPageQuery query,

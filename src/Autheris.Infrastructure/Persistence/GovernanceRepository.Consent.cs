@@ -602,7 +602,9 @@ public partial class GovernanceRepository
         return await ConsentSqlCore.GetPendingRequestsForApproverAsync(conn, ConsentSql.SelectPendingRequestsForApproverSql, approverSid, TimeProvider.System.GetUtcNow(), ct).ConfigureAwait(false);
     }
 
-    public async Task<ConsentRequest> ApproveConsentRequestStepAsync(Guid requestId, Sid approverSid, CancellationToken ct = default)
+    public Task<ConsentRequest> ApproveConsentRequestStepAsync(Guid requestId, Sid approverSid, CancellationToken ct = default) => ApproveConsentRequestStepAsync(requestId, approverSid, false, ct);
+
+    public async Task<ConsentRequest> ApproveConsentRequestStepAsync(Guid requestId, Sid approverSid, bool requireSecondApprover, CancellationToken ct = default)
     {
         var req = await GetConsentRequestAsync(requestId, ct).ConfigureAwait(false)
             ?? throw new InvalidOperationException($"Request {requestId} not found.");
@@ -642,7 +644,7 @@ public partial class GovernanceRepository
             int stepNumber = state.NextStepNumber;
             await ConsentSqlCore.InsertApprovedStepAsync(conn, tx, Guid.NewGuid(), requestId, stepNumber, approverSid, TimeProvider.System.GetUtcNow(), ct).ConfigureAwait(false);
 
-            string newStatus = ConsentApprovalPolicy.StatusAfterApproval(state.RequiresFourEyes, stepNumber, ConsentWorkflowMode.Internal, state.Sensitivity);
+            string newStatus = ConsentApprovalPolicy.StatusAfterApproval(state.RequiresFourEyes || requireSecondApprover, stepNumber, ConsentWorkflowMode.Internal, state.Sensitivity);
             await ConsentSqlCore.ApplyGuardedStatusAsync(conn, tx, ConsentStatusUpdateSeam, requestId, newStatus, currentStatus, ct).ConfigureAwait(false);
 
             req.Status = newStatus;
@@ -708,12 +710,16 @@ public partial class GovernanceRepository
         return ExecuteAtomicApprovalWithConsentAsync(requestId, step, consent, consent?.RowFilters ?? Array.Empty<ConsentRowFilter>(), consent?.ColumnRules ?? Array.Empty<ConsentColumnRule>(), ct);
     }
 
+    public Task<Consent> ExecuteAtomicApprovalWithConsentAsync(Guid requestId, ApprovalStep step, Consent consent, IReadOnlyList<ConsentRowFilter> rowFilters, IReadOnlyList<ConsentColumnRule> columnRules, CancellationToken ct = default) =>
+        ExecuteAtomicApprovalWithConsentAsync(requestId, step, consent, rowFilters, columnRules, false, ct);
+
     public async Task<Consent> ExecuteAtomicApprovalWithConsentAsync(
         Guid requestId,
         ApprovalStep step,
         Consent consent,
         IReadOnlyList<ConsentRowFilter> rowFilters,
         IReadOnlyList<ConsentColumnRule> columnRules,
+        bool requireSecondApprover,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(step);
@@ -755,7 +761,7 @@ public partial class GovernanceRepository
                 throw new InvalidOperationException(ConsentApprovalPolicy.SameApproverViolationMessage);
             }
 
-            string newStatus = ConsentApprovalPolicy.StatusAfterApproval(state.RequiresFourEyes, state.NextStepNumber, ConsentWorkflowMode.Internal, state.Sensitivity);
+            string newStatus = ConsentApprovalPolicy.StatusAfterApproval(state.RequiresFourEyes || requireSecondApprover, state.NextStepNumber, ConsentWorkflowMode.Internal, state.Sensitivity);
             if (!string.Equals(newStatus, ConsentApprovalPolicy.Approved, StringComparison.Ordinal))
             {
                 throw new InvalidOperationException(ConsentApprovalPolicy.FourEyesNotSatisfiedMessage(requestId));

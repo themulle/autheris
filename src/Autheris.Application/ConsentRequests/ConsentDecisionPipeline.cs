@@ -8,6 +8,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.ConsentRequests.ClassificationClear;
 using Autheris.Application.ConsentRequests.Events;
 using Autheris.Application.ConsentRequests.ProfileAssignments;
 using Autheris.Application.Governance.ConsentRequests;
@@ -33,7 +34,7 @@ public interface IConsentDecisionPipeline
 /// four-eyes distinctness, self-approval prohibition (including effective group membership),
 /// grant validity bounds, and atomic persistence.
 /// </summary>
-public sealed class ConsentDecisionPipeline(
+public sealed partial class ConsentDecisionPipeline(
     IConsentApprovalRepository approvalRepository,
     ITableMetadataRepository? metadataRepository,
     IDataOwnershipRepository ownershipRepository,
@@ -50,7 +51,9 @@ public sealed class ConsentDecisionPipeline(
     TimeProvider? timeProvider = null,
     TenantId? fallbackTenantId = null,
     IConsentEventOutbox? eventOutbox = null,
-    IProfileAssignmentDecisionHandler? profileAssignmentHandler = null) : IConsentDecisionPipeline
+    IProfileAssignmentDecisionHandler? profileAssignmentHandler = null,
+    IClassificationRepository? classificationRepository = null,
+    IOptions<GrantValidityOptions>? grantOptions = null) : IConsentDecisionPipeline
 {
     private static readonly JsonSerializerOptions CaseInsensitiveJsonOptions = new() { PropertyNameCaseInsensitive = true };
     private readonly IConsentApprovalRepository _approvalRepository = approvalRepository ?? throw new ArgumentNullException(nameof(approvalRepository));
@@ -108,6 +111,8 @@ public sealed class ConsentDecisionPipeline(
                 statusCode: 409);
         }
 
+        var clearPlan = await ResolveClearPlanAsync(req, command, ct).ConfigureAwait(false);
+
         IReadOnlyList<Sid> externalApproverSids = Array.Empty<Sid>();
         if (command.Channel == ConsentDecisionChannel.External)
         {
@@ -123,7 +128,7 @@ public sealed class ConsentDecisionPipeline(
         }
         else
         {
-            await ValidateInternalCallerAuthorizationAsync(req, command.Principal!, actorSid, command.Decision, ct).ConfigureAwait(false);
+            await ValidateInternalCallerAuthorizationAsync(req, command.Principal!, actorSid, command.Decision, clearPlan, ct).ConfigureAwait(false);
         }
 
         if (req.RequestKind == ConsentRequestKind.ProfileAssignment && profileAssignmentHandler != null)
@@ -136,7 +141,7 @@ public sealed class ConsentDecisionPipeline(
             return await ExecuteRejectAsync(command, req, actorSid, externalApproverSids, ct).ConfigureAwait(false);
         }
 
-        return await ExecuteApproveAsync(command, req, actorSid, externalApproverSids, ct).ConfigureAwait(false);
+        return await ExecuteApproveAsync(command, req, actorSid, externalApproverSids, clearPlan, ct).ConfigureAwait(false);
     }
 
     private async Task EnforceInternalCallerGuardAsync(ClaimsPrincipal? principal, CancellationToken ct)
@@ -250,6 +255,7 @@ public sealed class ConsentDecisionPipeline(
         ClaimsPrincipal principal,
         Sid approverSid,
         ConsentDecisionKind decision,
+        ClearApprovalPlan? clearPlan,
         CancellationToken ct)
     {
         if (decision == ConsentDecisionKind.Approve)
@@ -300,10 +306,8 @@ public sealed class ConsentDecisionPipeline(
             bool isAuthorized = await _ownershipRepository.IsAuthorizedApproverForTableAsync(req.TableIdentifier, approverSid, ct).ConfigureAwait(false);
             if (!isAuthorized)
             {
-                throw new ConsentDecisionException(
-                    "FORBIDDEN",
-                    $"User '{approverSid}' is neither a data owner nor a delegated approver for '{req.TableIdentifier}' and has no approver role.",
-                    statusCode: 403);
+                // Only a steward of a requested classification may approve without owning the table (after the data owner).
+                await EnsureStewardMayApproveAsync(req, clearPlan, approverSid, ct).ConfigureAwait(false);
             }
         }
     }
@@ -347,6 +351,7 @@ public sealed class ConsentDecisionPipeline(
         ConsentRequest req,
         Sid actorSid,
         IReadOnlyList<Sid> externalApproverSids,
+        ClearApprovalPlan? clearPlan,
         CancellationToken ct)
     {
         var now = _timeProvider.GetUtcNow();
@@ -390,7 +395,7 @@ public sealed class ConsentDecisionPipeline(
                 effectiveValidTo,
                 now,
                 GrantClassifier.Classify([meta]),
-                IsUnmaskedApproval(columnRules, meta) ? MaskingPolicyMode.Unmasked : MaskingPolicyMode.Default,
+                IsUnmaskedApproval(columnRules, meta) || clearPlan is not null ? MaskingPolicyMode.Unmasked : MaskingPolicyMode.Default,
                 Requester: req.RequesterSid.Value,
                 Approvers: combinedApprovers,
                 Justification: req.BusinessJustification));
@@ -406,7 +411,9 @@ public sealed class ConsentDecisionPipeline(
         // The repositories decide the status of a first step under the row lock and only require a second approver for highly sensitive
         // tables. Routing a first step through the step-only path for any other reason (for example the grant class of a table with a
         // sensitive column) would leave the request APPROVED without a consent row, so the grant-class flag must not choose the path.
-        bool requiresFourEyes = meta?.Table.IsHighlySensitive ?? false;
+        // A steward approves per-classification Clear after the data owner: that needs a second distinct approver on the internal channel.
+        bool requireSecondApprover = clearPlan is { NeedsSteward: true } && command.Channel == ConsentDecisionChannel.Internal;
+        bool requiresFourEyes = (meta?.Table.IsHighlySensitive ?? false) || requireSecondApprover;
 
         bool isFinalApproval = !requiresFourEyes || combinedApprovers.Count >= 2 || string.Equals(req.Status, "PENDING_SECOND_APPROVAL", StringComparison.OrdinalIgnoreCase);
 
@@ -437,7 +444,9 @@ public sealed class ConsentDecisionPipeline(
                     return new ConsentDecisionResult(extStep);
                 }
 
-                var stepReq = await _approvalRepository.ApproveConsentRequestStepAsync(req.Id, actorSid, ct).ConfigureAwait(false);
+                var stepReq = requireSecondApprover
+                    ? await _approvalRepository.ApproveConsentRequestStepAsync(req.Id, actorSid, requireSecondApprover: true, ct).ConfigureAwait(false)
+                    : await _approvalRepository.ApproveConsentRequestStepAsync(req.Id, actorSid, ct).ConfigureAwait(false);
                 await EmitRequestEventAsync(stepReq, ConsentEventTypes.RequestUpdated, now, ct).ConfigureAwait(false);
                 return new ConsentDecisionResult(stepReq);
             }
@@ -464,6 +473,11 @@ public sealed class ConsentDecisionPipeline(
                 approvedWriteRules = req.RequestedWriteRules;
             }
 
+            if (requireSecondApprover)
+            {
+                await EnsureStewardCoverageAsync(req, clearPlan!, combinedApprovers, ct).ConfigureAwait(false);
+            }
+
             var effectiveFinalSid = command.Channel == ConsentDecisionChannel.External ? externalApproverSids[^1] : actorSid;
             if (!req.ShouldGrantReadColumns && columnRules.Count == 0 && approvedWriteRules.Count == 0)
             {
@@ -473,6 +487,11 @@ public sealed class ConsentDecisionPipeline(
             if (columnRules.Count == 0 && req.ShouldGrantReadColumns && meta != null)
             {
                 columnRules = ConsentColumnSnapshot.FromMetadata(meta).ToList();
+            }
+
+            if (clearPlan is not null)
+            {
+                columnRules = ApplyClearColumns(columnRules, clearPlan).ToList();
             }
 
             var finalConsent = new Consent
@@ -516,8 +535,16 @@ public sealed class ConsentDecisionPipeline(
             }
             else
             {
-                activated = await _approvalRepository.ExecuteAtomicApprovalWithConsentAsync(
-                    req.Id, approvalStep, finalConsent, rowFilters, columnRules, ct).ConfigureAwait(false);
+                activated = requireSecondApprover
+                    ? await _approvalRepository.ExecuteAtomicApprovalWithConsentAsync(
+                        req.Id, approvalStep, finalConsent, rowFilters, columnRules, requireSecondApprover: true, ct).ConfigureAwait(false)
+                    : await _approvalRepository.ExecuteAtomicApprovalWithConsentAsync(
+                        req.Id, approvalStep, finalConsent, rowFilters, columnRules, ct).ConfigureAwait(false);
+            }
+
+            if (clearPlan is not null)
+            {
+                await WriteClearAccessAsync(activated, req, clearPlan, effectiveFinalSid, now, effectiveValidTo, ct).ConfigureAwait(false);
             }
 
             var approvedReq = CloneWithStatus(req, "APPROVED", now);

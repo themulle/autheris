@@ -25,6 +25,8 @@ src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs|/domains
 src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs|/search
 src/Autheris.Api/Endpoints/CdcStreamAdminEndpoints.cs|/api/v1/cdc/streams
 src/Autheris.Api/Endpoints/ChangeDetectionEndpoints.cs|/api/v1/data/{domain}/{schema}/{table}/change-token
+src/Autheris.Api/Endpoints/ClassificationAdminEndpoints.cs|ClassificationRoute
+src/Autheris.Api/Endpoints/ClassificationAdminEndpoints.cs|ClassificationRoute + "/mask-rule"
 src/Autheris.Api/Endpoints/ConsentApiEndpoints.Grants.cs|/grant-records/keys
 src/Autheris.Api/Endpoints/ConsentApiEndpoints.Grants.cs|/grant-records/proof
 src/Autheris.Api/Endpoints/ConsentApiEndpoints.Grants.cs|/grant-records/{seq:long}

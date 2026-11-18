@@ -123,6 +123,10 @@ public static class AuditEventTypes
     // Governance classification, access plans and step-up consoles
     public const string ClassificationProposed = "CLASSIFICATION_PROPOSED";
     public const string ClassificationTransitioned = "CLASSIFICATION_TRANSITIONED";
+    public const string ClassificationChanged = "CLASSIFICATION_CHANGED";
+    public const string ColumnClassificationChanged = "COLUMN_CLASSIFICATION_CHANGED";
+    public const string MaskRuleChanged = "MASK_RULE_CHANGED";
+    public const string MaskOverrideChanged = "MASK_OVERRIDE_CHANGED";
     public const string GovernanceConfigHashRead = "GOVERNANCE_CONFIG_HASH_READ";
     public const string AccessPlanRead = "ACCESS_PLAN_READ";
     public const string TwoFactorEnrollmentStarted = "TWO_FACTOR_ENROLLMENT_STARTED";
