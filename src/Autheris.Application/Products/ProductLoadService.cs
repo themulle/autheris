@@ -40,7 +40,16 @@ public sealed class ProductLoadService(
     private static readonly TimeSpan LeaseSlack = TimeSpan.FromSeconds(60);
     private readonly ConcurrentDictionary<TableIdentifier, Lazy<Task<ProductResult>>> _inFlight = new();
     private readonly ConcurrentDictionary<TableIdentifier, DateTimeOffset> _lastAccess = new();
+    private readonly ConcurrentDictionary<TableIdentifier, DateTimeOffset> _lastAttempt = new();
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
+
+    /// <summary>True when a load of the product was started within <paramref name="span"/> (successful or not): the schedule worker never retries faster than the interval.</summary>
+    public bool AttemptedWithin(DataProduct product, TimeSpan span) =>
+        _lastAttempt.TryGetValue(ProductSource.CacheKey(product.Tenant, product.Schema, product.Name), out var at) && _time.GetUtcNow() - at < span;
+
+    /// <summary>The load time of the current stage-1 result, or null when the product has none.</summary>
+    public DateTimeOffset? LoadedAt(DataProduct product) =>
+        catalog.TryGet(ProductSource.CacheKey(product.Tenant, product.Schema, product.Name), out var meta) && meta is not null ? meta.LastRefreshedAt : null;
 
     /// <summary>The limits of a load: the product limit lowered to the global cap (a zero means no limit on that side).</summary>
     public static ProductLimits EffectiveLimits(ProductLimits product, TableCacheOptions caps) => new(
@@ -78,6 +87,7 @@ public sealed class ProductLoadService(
         await using var lease = held;
 
         var started = _time.GetUtcNow();
+        _lastAttempt[key] = started;
         try
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);

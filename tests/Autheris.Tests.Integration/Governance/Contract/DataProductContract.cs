@@ -135,6 +135,24 @@ public abstract class DataProductContract : GovernanceContractBase
 
     [RequiresContainerRuntimeFact]
     [Trait("Category", "Security")]
+    public async Task Scheduled_listing_spans_tenants_and_skips_other_load_modes()
+    {
+        if (!Store.IsAvailable) return;
+        var schedule = new LoadSettings(LoadMode.Schedule, Interval: TimeSpan.FromMinutes(5));
+        foreach (var (tenant, name, load) in new[] { (Store.TenantA, "sched_a", schedule), (Store.TenantB, "sched_b", schedule), (Store.TenantA, "live_a", LoadSettings.Default) })
+        {
+            var p = NewProduct(tenant, name) with { Load = load };
+            await Products.CreateProductAsync(p, Revision(p));
+        }
+
+        var first = await Products.ListScheduledProductsAsync(null, 1);
+        var second = await Products.ListScheduledProductsAsync(first.Single(), 10);
+        first.Concat(second).Select(p => (p.Tenant.Value, p.Name)).Should().Equal((Store.TenantA.Value, "sched_a"), (Store.TenantB.Value, "sched_b"));
+        first.Single().Load.Interval.Should().Be(TimeSpan.FromMinutes(5));
+    }
+
+    [RequiresContainerRuntimeFact]
+    [Trait("Category", "Security")]
     public override async Task Page_size_above_cap_is_clamped_or_rejected()
     {
         if (!Store.IsAvailable) return;

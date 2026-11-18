@@ -147,7 +147,7 @@ public sealed class ViewLoadTests
     [Fact]
     public async Task Load_failure_keeps_result_and_marks_stale()
     {
-        var product = await CreateAsync(new LoadSettings(LoadMode.Schedule, Cron: "0 * * * *"));
+        var product = await CreateAsync(new LoadSettings(LoadMode.Schedule, Interval: TimeSpan.FromHours(1)));
         var first = await Service().LoadAsync(product);
         var key = first.CacheKey;
         _catalog.TryGet(key, out var before).ShouldBeTrue();
@@ -167,7 +167,7 @@ public sealed class ViewLoadTests
     [Fact]
     public async Task Max_staleness_exceeded_denies()
     {
-        var product = await CreateAsync(new LoadSettings(LoadMode.Schedule, Cron: "0 * * * *", MaxStalenessMinutes: 30));
+        var product = await CreateAsync(new LoadSettings(LoadMode.Schedule, Interval: TimeSpan.FromHours(1), MaxStalenessMinutes: 30));
         var service = Service();
         await service.LoadAsync(product);
 
@@ -292,7 +292,7 @@ public sealed class ViewLoadTests
     [Fact]
     public async Task Load_mode_change_keeps_grants()
     {
-        var product = await CreateAsync(new LoadSettings(LoadMode.Schedule, Cron: "0 * * * *"));
+        var product = await CreateAsync(new LoadSettings(LoadMode.Schedule, Interval: TimeSpan.FromHours(1)));
         var before = ProductCatalogProjector.Project(product, null, _time.GetUtcNow());
 
         var changed = await _h.Service.UpdateSettingsAsync(_h.Caller(ProductHarness.Bob), "sales", "orders_view", null, new LoadSettings(LoadMode.OnDemand, 15));

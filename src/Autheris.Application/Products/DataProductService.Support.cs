@@ -66,7 +66,7 @@ public sealed partial class DataProductService
 
         var valid = load.Mode switch
         {
-            LoadMode.Schedule => !string.IsNullOrWhiteSpace(load.Cron) && load.Cron.Length <= 100,
+            LoadMode.Schedule => load.Interval is { } interval && interval >= LoadSettings.MinInterval && interval <= LoadSettings.MaxInterval,
             LoadMode.OnDemand => load.TtlMinutes is >= 1 and <= 1440 && load.IdleDropMinutes >= 0,
             LoadMode.Live => true,
             _ => false

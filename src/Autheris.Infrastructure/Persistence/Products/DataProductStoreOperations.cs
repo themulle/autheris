@@ -50,6 +50,24 @@ internal static class DataProductStoreOperations
         return items;
     }
 
+    public static async Task<IReadOnlyList<DataProduct>> ListScheduledAsync(GovernanceRepository repo, DataProduct? after, int limit, CancellationToken ct)
+    {
+        await using var conn = await repo.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var cmd = repo.CreateProductCommand(conn, null, repo.Dialect is PostgreSqlGovernanceDialect ? DataProductStoreSql.ListScheduledPgSql : DataProductStoreSql.ListScheduledSsSql);
+        cmd.AddBound("@after_tenant", after?.Tenant.Value ?? string.Empty);
+        cmd.AddBound("@after_schema", after?.Schema ?? string.Empty);
+        cmd.AddBound("@after_name", after?.Name ?? string.Empty);
+        cmd.AddBound("@limit", Math.Clamp(limit, 1, 200), DbType.Int32);
+        await using var r = await repo.ExecuteReaderAsync(cmd, "Governance.Products.ListScheduled", ct).ConfigureAwait(false);
+        var items = new List<DataProduct>();
+        while (await r.ReadAsync(ct).ConfigureAwait(false))
+        {
+            items.Add(DataProductStoreSql.ReadProduct(r, new TenantId(r.GetString(0)), 1));
+        }
+
+        return items;
+    }
+
     private static (string Schema, string Name) SplitKey(string? key)
     {
         if (string.IsNullOrWhiteSpace(key))

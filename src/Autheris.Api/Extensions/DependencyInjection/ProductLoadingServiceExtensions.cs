@@ -23,6 +23,8 @@ public static class ProductLoadingServiceExtensions
             sp.GetRequiredService<IAuditWriter>(),
             sp.GetService<TimeProvider>(),
             sp.GetService<ILogger<ProductLoadService>>()));
+        services.TryAddScoped<ProductScheduleJob>();
+        services.AddHostedService<ProductScheduleService>();
         return services;
     }
 }

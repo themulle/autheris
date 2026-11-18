@@ -21,6 +21,14 @@ internal sealed class InMemoryDataProductRepository : IDataProductRepository
         Task.FromResult<IReadOnlyList<DataProduct>>(_products.Values.Where(p => p.Tenant == tenant)
             .OrderBy(p => p.Schema, StringComparer.Ordinal).ThenBy(p => p.Name, StringComparer.Ordinal).Take(limit).ToList());
 
+    public Task<IReadOnlyList<DataProduct>> ListScheduledProductsAsync(DataProduct? after, int limit, CancellationToken ct = default)
+    {
+        var ordered = _products.Values.Where(p => p.Kind == DataProductKind.View && p.Load.Mode == LoadMode.Schedule && p.Status != DataProductStatus.Retired)
+            .OrderBy(p => p.Tenant.Value, StringComparer.Ordinal).ThenBy(p => p.Schema, StringComparer.Ordinal).ThenBy(p => p.Name, StringComparer.Ordinal);
+        var page = ordered.Where(p => after is null || string.CompareOrdinal($"{p.Tenant.Value}/{p.Schema}/{p.Name}", $"{after.Tenant.Value}/{after.Schema}/{after.Name}") > 0).Take(limit).ToList();
+        return Task.FromResult<IReadOnlyList<DataProduct>>(page);
+    }
+
     public Task<ProductWriteOutcome> CreateProductAsync(DataProduct product, DataProductVersion firstRevision, CancellationToken ct = default)
     {
         var key = (product.Tenant.Value, product.Schema, product.Name);

@@ -22,6 +22,12 @@ public interface IDataProductRepository
     Task<IReadOnlyList<DataProduct>> ListProductsAsync(TenantId tenant, string? afterKey, int limit, CancellationToken ct = default);
 
     /// <summary>Inserts the product with its first definition revision; <see cref="ProductWriteStatus.AlreadyExists"/> when the schema and name are taken.</summary>
+    /// <summary>
+    /// The scheduled views of every tenant, ordered by tenant, schema and name (keyset after <paramref name="after"/>). The only cross-tenant
+    /// read of the store: it serves the schedule worker, which loads each product under the product's own tenant.
+    /// </summary>
+    Task<IReadOnlyList<DataProduct>> ListScheduledProductsAsync(DataProduct? after, int limit, CancellationToken ct = default);
+
     Task<ProductWriteOutcome> CreateProductAsync(DataProduct product, DataProductVersion firstRevision, CancellationToken ct = default);
 
     /// <summary>

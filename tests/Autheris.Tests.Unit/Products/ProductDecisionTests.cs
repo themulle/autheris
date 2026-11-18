@@ -161,7 +161,7 @@ public sealed class ProductDecisionTests
     {
         var admin = _h.Caller(ProductHarness.Admin, admin: true);
         var created = await _h.Service.PutAsync(_h.Put(admin, "SELECT id FROM crm.public.customers", ProductHarness.Bob));
-        var limited = created with { Load = new LoadSettings(LoadMode.Schedule, Cron: "0 * * * *", MaxStalenessMinutes: 60) };
+        var limited = created with { Load = new LoadSettings(LoadMode.Schedule, Interval: TimeSpan.FromHours(1), MaxStalenessMinutes: 60) };
 
         ProductFreshness.IsExposable(limited, Now, Now).ShouldBeTrue();
         ProductFreshness.IsExposable(limited with { Status = DataProductStatus.Stale }, Now.AddMinutes(-30), Now).ShouldBeTrue("stale within MaxStaleness");

@@ -29,14 +29,21 @@ public sealed record DataProductColumn(
     string? DeclassifiedBy,
     string? DeclassificationReason);
 
-/// <summary>Load settings of a view. <see cref="MaxStalenessMinutes"/> is the optional maximum age of the last successful load.</summary>
+/// <summary>
+/// Load settings of a view. <see cref="Interval"/> is the fixed refresh interval of <c>Schedule</c> (at least one minute; cron expressions are
+/// not supported). <see cref="MaxStalenessMinutes"/> is the optional maximum age of the last successful load.
+/// </summary>
 public sealed record LoadSettings(
     LoadMode Mode,
     int TtlMinutes = 0,
-    string? Cron = null,
+    TimeSpan? Interval = null,
     int IdleDropMinutes = 0,
     int? MaxStalenessMinutes = null)
 {
+    public static readonly TimeSpan MinInterval = TimeSpan.FromMinutes(1);
+
+    public static readonly TimeSpan MaxInterval = TimeSpan.FromDays(7);
+
     public static LoadSettings Default { get; } = new(LoadMode.Live);
 }
 

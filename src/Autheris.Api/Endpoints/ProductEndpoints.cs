@@ -68,9 +68,9 @@ public static partial class ProductEndpoints
         return app;
     }
 
-    internal sealed record LoadBody(LoadMode Mode, int TtlMinutes = 0, string? Cron = null, int IdleDropMinutes = 0, int? MaxStalenessMinutes = null)
+    internal sealed record LoadBody(LoadMode Mode, int TtlMinutes = 0, int? IntervalMinutes = null, int IdleDropMinutes = 0, int? MaxStalenessMinutes = null)
     {
-        public LoadSettings ToModel() => new(Mode, TtlMinutes, Cron, IdleDropMinutes, MaxStalenessMinutes);
+        public LoadSettings ToModel() => new(Mode, TtlMinutes, IntervalMinutes is { } m ? TimeSpan.FromMinutes(m) : null, IdleDropMinutes, MaxStalenessMinutes);
     }
 
     internal sealed record LimitsBody(long MaxRows = 0, long MaxBytes = 0, int MaxRuntimeSeconds = 0);
