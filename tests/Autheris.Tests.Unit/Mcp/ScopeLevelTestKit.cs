@@ -38,7 +38,6 @@ internal static class ScopeLevelTestKit
     /// is not emitted, and the profile channel would no longer tell Mask from Deny).
     /// </summary>
     public static TableMetadata CreateTable(
-        DatasetVisibility visibility = DatasetVisibility.Hidden,
         bool gradeSensitive = false,
         IReadOnlyDictionary<string, MaskingRule>? maskingRules = null) => new()
     {
@@ -50,7 +49,6 @@ internal static class ScopeLevelTestKit
             SchemaName = "public",
             TableName = "orders",
             DisplayName = "orders",
-            Visibility = visibility
         },
         Columns =
         [

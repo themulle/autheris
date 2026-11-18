@@ -112,11 +112,6 @@ public sealed class GatewayCoreOptionsValidator : IValidateOptions<GatewayOption
             failures.Add("Gateway:Catalog:MaxTagsPerDataset must be between 1 and 256.");
         }
 
-        if (opts.Catalog.DefaultVisibility is not (Autheris.Domain.Model.DatasetVisibility.Hidden or Autheris.Domain.Model.DatasetVisibility.Summary))
-        {
-            failures.Add("Gateway:Catalog:DefaultVisibility must be Hidden or Summary (Full is not allowed as a default).");
-        }
-
         failures.AddRange(TeamToGroupSidMapRules.Validate(opts.OpenMetadata.TeamToGroupSidMap, "Gateway:OpenMetadata:TeamToGroupSidMap"));
 
         if (!_environment.IsDevelopment() &&

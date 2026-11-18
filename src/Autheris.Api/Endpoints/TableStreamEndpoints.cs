@@ -757,15 +757,6 @@ public static class TableStreamEndpoints
             {
                 return true;
             }
-
-            if (metadata.Table.Visibility != DatasetVisibility.Hidden)
-            {
-                return false;
-            }
-        }
-        else if (metadata.Table.Visibility != DatasetVisibility.Hidden)
-        {
-            return true;
         }
 
         if (EndpointSecurity.IsCanonicalClusterAdmin(httpContext.User))

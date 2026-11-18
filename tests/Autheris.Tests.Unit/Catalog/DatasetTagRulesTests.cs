@@ -83,40 +83,6 @@ public sealed class DatasetTagRulesTests
         error.ShouldBe(DatasetTagRules.InvalidTag);
     }
 
-    [Theory]
-    [InlineData(0, DatasetVisibility.Hidden)]
-    [InlineData(1, DatasetVisibility.Summary)]
-    [InlineData(2, DatasetVisibility.Full)]
-    [InlineData(3, DatasetVisibility.Hidden)]
-    [InlineData(-1, DatasetVisibility.Hidden)]
-    [InlineData(int.MaxValue, DatasetVisibility.Hidden)]
-    [InlineData(null, DatasetVisibility.Hidden)]
-    public void ReadStored_MapsOnlyKnownValues_FailClosed(int? stored, DatasetVisibility expected) =>
-        DatasetTagRules.ReadStored(stored).ShouldBe(expected);
 
-    [Theory]
-    [InlineData("Summary", DatasetVisibility.Summary)]
-    [InlineData("summary", DatasetVisibility.Summary)]
-    [InlineData("FULL", DatasetVisibility.Full)]
-    [InlineData("Hidden", DatasetVisibility.Hidden)]
-    public void TryParseVisibility_AcceptsNames(string raw, DatasetVisibility expected)
-    {
-        DatasetTagRules.TryParseVisibility(raw, out var v).ShouldBeTrue();
-        v.ShouldBe(expected);
-    }
 
-    [Theory]
-    [InlineData("2")]
-    [InlineData("1")]
-    [InlineData("full ")]
-    [InlineData("Full,Summary")]
-    [InlineData("")]
-    [InlineData(null)]
-    [InlineData("-1")]
-    [InlineData("Unknown")]
-    public void TryParseVisibility_RejectsEverythingElse(string? raw)
-    {
-        DatasetTagRules.TryParseVisibility(raw, out var v).ShouldBeFalse();
-        v.ShouldBe(DatasetVisibility.Hidden);
-    }
 }

@@ -88,20 +88,6 @@ public sealed class CatalogGraphQlVisibilityServiceTests
         (await Catalog(user, tables, serviceConsents, options, graphQlConsents: empty)).Select(t => t.TableName).ShouldBe(["orders"]);
     }
 
-    [Fact]
-    public async Task Shape_ComesFromTheServiceSet_NotRecomputedByGraphQl()
-    {
-        // A service set that says "non-admin view" for a Global administrator: the channel must follow the set, not the principal.
-        var admin = Wp0.User("root", "tenant-a", ["ClusterAdmin"]);
-        var unmarked = Wp0.Table("sales", "u_t", "U", ["id"]) with { CatalogView = CatalogView.Summary };
-        var service = Substitute.For<ICatalogVisibilityService>();
-        service.GetVisibleAsync(Arg.Any<CatalogCaller>(), Arg.Any<Autheris.Application.Governance.Contracts.SchemaContractDefinition?>(), Arg.Any<CancellationToken>())
-            .Returns(new ValueTask<CatalogVisibleSet>(new CatalogVisibleSet([unmarked], CallerScope.Subject, isAdminView: false)));
-
-        var result = await Catalog(admin, Wp0.Tables(unmarked), Wp0.Consents(), Opts(TenancyShape.Multi), service: service);
-
-        result.Single().Columns.ShouldBeEmpty();
-    }
 
     [Fact]
     public async Task MissingService_Empty_FailClosed()

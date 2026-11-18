@@ -32,7 +32,7 @@ public sealed class CatalogVirtualTableVisibilityTests
     private static readonly TenantId TenantA = Wp0.TenantA;
     private static readonly TenantId TenantB = Wp0.TenantB;
 
-    private static TableMetadata VirtualTable(TenantId tenant, string name = "orders", DatasetVisibility visibility = DatasetVisibility.Hidden)
+    private static TableMetadata VirtualTable(TenantId tenant, string name = "orders")
     {
         var id = SemanticVirtualTables.IdentifierFor(tenant, name);
         return new TableMetadata
@@ -45,7 +45,6 @@ public sealed class CatalogVirtualTableVisibilityTests
                 TableName = name,
                 DocumentationSource = SemanticVirtualTables.SourceMarker,
                 IsActive = true,
-                Visibility = visibility,
                 DataSourceType = DataSourceType.Sql
             },
             Columns = [new TableColumn { ColumnName = "id", DataType = "varchar" }, new TableColumn { ColumnName = "secret_col", DataType = "varchar" }]
@@ -59,10 +58,10 @@ public sealed class CatalogVirtualTableVisibilityTests
 
     private static async Task<List<string>> VisibleAsync(
         ClaimsPrincipal user, TenantId tenant, IEnumerable<TableMetadata> tables, IConsentRepository consents,
-        TenancyShape mode = TenancyShape.Multi, IEnumerable<string>? shared = null, CatalogSurface surface = CatalogSurface.DataAccess)
+        TenancyShape mode = TenancyShape.Multi, IEnumerable<string>? shared = null)
     {
         var visible = await CatalogVisibility.VisibleTablesAsync(
-            tables.ToList(), user, tenant, consents, contract: null, mode.Owner(), shared, surface);
+            tables.ToList(), user, tenant, consents, contract: null, mode.Owner(), shared);
         return visible.Select(t => t.Identifier.ToString()).Order().ToList();
     }
 
@@ -90,16 +89,6 @@ public sealed class CatalogVirtualTableVisibilityTests
         (await VisibleAsync(Wp0.User("S-USER", "tenant-a"), TenantA, [foreign], consents)).ShouldBeEmpty();
     }
 
-    [Fact]
-    public async Task VirtualTable_ForeignTenant_SharedTablesDoesNotReadmit()
-    {
-        var foreign = VirtualTable(TenantB, visibility: DatasetVisibility.Full);
-        var shared = new[] { foreign.Identifier.ToString() };
-
-        // Discovery tier of a subject and the consent-derived view of a claimed GovernanceAdmin both honour SharedTables for real tables.
-        (await VisibleAsync(Wp0.User("S-USER", "tenant-a"), TenantA, [foreign], Wp0.Consents(), shared: shared, surface: CatalogSurface.Discovery)).ShouldBeEmpty();
-        (await VisibleAsync(Wp0.User("S-ADM", "tenant-a", ["GovernanceAdmin"]), TenantA, [foreign], Wp0.Consents(), shared: shared)).ShouldBeEmpty();
-    }
 
     [Fact]
     public async Task VirtualTable_ForeignTenant_AdminConsentTablesDoNotReadmit()

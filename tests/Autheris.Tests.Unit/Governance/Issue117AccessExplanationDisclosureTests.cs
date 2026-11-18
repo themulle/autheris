@@ -33,10 +33,10 @@ public sealed class Issue117AccessExplanationDisclosureTests
             [DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "S-1-5-21-USER"), .. extra],
             "test"));
 
-    private static TableMetadata Meta(DatasetVisibility visibility = DatasetVisibility.Hidden) => new()
+    private static TableMetadata Meta() => new()
     {
         Identifier = Denied,
-        Table = new Table { Visibility = visibility },
+        Table = new Table(),
         Columns =
         [
             new TableColumn { ColumnName = "id", DataType = "int" },
@@ -106,7 +106,7 @@ public sealed class Issue117AccessExplanationDisclosureTests
         // Issue #111: this service is a DataAccess surface (no persisted tier); the table is discoverable through an Allow consent whose
         // resolved decision is denied for another reason (here the mocked resolver).
         var tableRepo = Substitute.For<ITableMetadataRepository>();
-        tableRepo.GetTableMetadataAsync(Denied, Arg.Any<CancellationToken>()).Returns(Meta(DatasetVisibility.Full));
+        tableRepo.GetTableMetadataAsync(Denied, Arg.Any<CancellationToken>()).Returns(Meta());
         var consentRepo = Substitute.For<IConsentRepository>();
         consentRepo.GetActiveConsentsForSubjectsAsync(default!, default, default, default, default)
             .ReturnsForAnyArgs(Task.FromResult<IReadOnlyList<Consent>>(Array.Empty<Consent>()));

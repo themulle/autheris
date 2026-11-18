@@ -4,6 +4,8 @@ using System.Linq;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Catalog.Discovery;
+using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.ConsentRequests;
 using Autheris.Application.Governance.ConsentRequests;
 using Autheris.Application.Governance.Grants;
@@ -371,7 +373,7 @@ public sealed partial class Mutation
         [Service] IConsentRequestService consentRequestService,
         [Service] IHttpContextAccessor httpContextAccessor,
         CancellationToken ct = default)
-        => RequestTableAccessAsync(domain, schema, tableName, justification, durationDays, idempotencyKey, null, consentRequestService, httpContextAccessor, null, null, ct);
+        => RequestTableAccessAsync(domain, schema, tableName, justification, durationDays, idempotencyKey, null, consentRequestService, httpContextAccessor, null, null, null, null, ct);
 
     public async Task<ConsentRequestPayload> RequestTableAccessAsync(
         string domain,
@@ -385,6 +387,8 @@ public sealed partial class Mutation
         [Service] IHttpContextAccessor httpContextAccessor = default!,
         List<ConsentWriteRuleInput>? writeRules = null,
         bool? requestWriteOnly = null,
+        List<string>? clearColumns = null,
+        [Service] IDiscoveryAccessRequestService? discoveryAccessRequests = null,
         CancellationToken ct = default)
     {
         var userSid = GetAuthenticatedUserSid(httpContextAccessor);
@@ -392,6 +396,22 @@ public sealed partial class Mutation
 
         try
         {
+            if (discoveryAccessRequests is not null && (writeRules is not { Count: > 0 }) && requestWriteOnly is null)
+            {
+                var tenant = ConsentRequestService.ResolveTenantId(
+                    principal, GetContextTenantId(httpContextAccessor), ClusterAdminPolicy.IsCanonicalClusterAdmin(principal));
+                var accessResult = await discoveryAccessRequests.RequestAsync(
+                    new DiscoveryAccessRequest(domain, schema, tableName, justification, durationDays, null, clearColumns, idempotencyKey, context),
+                    new CatalogCaller(principal, tenant, CatalogChannel.GraphQl),
+                    ct).ConfigureAwait(false);
+                return new ConsentRequestPayload { RequestId = accessResult.RequestId, Status = accessResult.Status, Message = accessResult.Message };
+            }
+
+            if (clearColumns is { Count: > 0 })
+            {
+                throw new ConsentRequestException("INVALID_COLUMNS", "Clear columns cannot be requested together with write rules.");
+            }
+
             var result = await consentRequestService.SubmitAsync(
                 new ConsentRequestSubmission(
                     domain, schema, tableName, justification, durationDays, idempotencyKey,
@@ -409,6 +429,10 @@ public sealed partial class Mutation
         catch (ConsentRequestException ex)
         {
             throw new GraphQLException(ErrorBuilder.New().SetCode(ex.Code).SetMessage(ex.Message).Build());
+        }
+        catch (DiscoveryStatusException ex)
+        {
+            throw Query.MapDiscoveryGraphQlError(ex);
         }
     }
 

@@ -53,7 +53,7 @@ public sealed class TableStreamEndpointsTests
         return context;
     }
 
-    private static TableMetadata CreateTableMetadata(string tableName = "orders", DatasetVisibility visibility = DatasetVisibility.Full)
+    private static TableMetadata CreateTableMetadata(string tableName = "orders")
     {
         return new TableMetadata
         {
@@ -64,7 +64,6 @@ public sealed class TableStreamEndpointsTests
                 SchemaName = "dbo",
                 SourceName = "sales",
                 SourceType = "PostgreSQL",
-                Visibility = visibility
             },
             PrimaryKeyColumns = ["id"],
             Columns =
@@ -117,7 +116,7 @@ public sealed class TableStreamEndpointsTests
     public async Task HandleBulkStreamAsync_HiddenTableNonAdmin_Returns404AntiEnumeration()
     {
         var context = CreateHttpContext();
-        var hiddenTable = CreateTableMetadata(visibility: DatasetVisibility.Hidden);
+        var hiddenTable = CreateTableMetadata();
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<TableMetadata?>(hiddenTable));

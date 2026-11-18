@@ -157,6 +157,11 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         }
 
         var tool = _toolRegistry.FindTool(request.ToolName);
+        if (tool != null && sessionContext.IsReadOnly && McpDatasetTools.IsHiddenFromReadOnlySession(tool.Name))
+        {
+            tool = null;
+        }
+
         if (tool == null)
         {
             activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");

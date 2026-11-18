@@ -122,7 +122,6 @@ public sealed class TableStreamVisibilityTests
             TableName = "secret_orders",
             SourceType = "PostgreSQL",
             IsActive = isActive,
-            Visibility = DatasetVisibility.Hidden
         },
         PrimaryKeyColumns = ["id"],
         Columns = [new TableColumn { ColumnName = "id", DataType = "integer" }]
@@ -207,7 +206,6 @@ public sealed class TableStreamVisibilityTests
                 TableName = "secret_orders",
                 SourceType = "PostgreSQL",
                 IsActive = true,
-                Visibility = DatasetVisibility.Full
             }
         }, noIdentity, "/api/v1/data/sales/dbo/secret_orders/stream"))
             .ShouldBe(StatusCodes.Status404NotFound);

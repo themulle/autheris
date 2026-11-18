@@ -199,7 +199,7 @@ public static class McpAdminTools
 
         yield return new McpToolDefinition(
             Name: SetDatasetCatalog,
-            Description: "Sets the tags and/or the catalog visibility tier (Hidden, Summary, Full) of a dataset (issue #111). Full is an administrator act and every change is audited. " + ConfirmationHint,
+            Description: "Sets the tags and privacy settings of a dataset (issue #111). Every change is audited. " + ConfirmationHint,
             InputJsonSchema: """
             {
               "type": "object",
@@ -208,7 +208,6 @@ public static class McpAdminTools
               "properties": {
                 "dataset": { "type": "string", "description": "Dataset identifier (domain.schema.table or table id)." },
                 "tags": { "type": "array", "items": { "type": "string" }, "description": "Replaces the admin tags (empty list removes them). Omit to leave unchanged." },
-                "visibility": { "type": "string", "enum": ["Hidden", "Summary", "Full"], "description": "Catalog tier. Omit to leave unchanged." },
                 "minGroupSize": { "type": "string", "description": "Minimum group size (1..1000000 or 'none'). Omit to leave unchanged." },
                 "nonPersonal": { "type": "boolean", "description": "Flag indicating whether dataset contains non-personal data. Omit to leave unchanged." },
                 "planId": { "type": "string", "description": "Plan identifier returned by the first (planning) call." },
@@ -433,7 +432,6 @@ public static class McpAdminTools
     private sealed record SetDatasetCatalogArguments(
         string? Dataset,
         IReadOnlyList<string>? Tags,
-        string? Visibility,
         string? MinGroupSize = null,
         bool? NonPersonal = null,
         string? PlanId = null,
@@ -441,7 +439,7 @@ public static class McpAdminTools
 
     /// <summary>
     /// Issue #111 (A-8): the same service as REST and the manifest, called with the principal rebuilt from the session, so the tool cannot widen
-    /// anything beyond what the session principal may do (Full needs an administrator class, decided by the service, not by this tool).
+    /// anything beyond what the session principal may do (decided by the service, not by this tool).
     /// </summary>
     private static async Task<McpToolCallResult> SetDatasetCatalogAsync(
         string argumentsJson,
@@ -457,9 +455,9 @@ public static class McpAdminTools
 
         var req = JsonSerializer.Deserialize<SetDatasetCatalogArguments>(argumentsJson, StrictJsonOptions)
             ?? throw new ArgumentException("Invalid arguments for admin_set_dataset_catalog.");
-        if (string.IsNullOrWhiteSpace(req.Dataset) || (req.Tags is null && req.Visibility is null && req.MinGroupSize is null && req.NonPersonal is null))
+        if (string.IsNullOrWhiteSpace(req.Dataset) || (req.Tags is null && req.MinGroupSize is null && req.NonPersonal is null))
         {
-            throw new ArgumentException("admin_set_dataset_catalog requires 'dataset' and at least one of 'tags', 'visibility', 'minGroupSize', or 'nonPersonal'.");
+            throw new ArgumentException("admin_set_dataset_catalog requires 'dataset' and at least one of 'tags', 'minGroupSize', or 'nonPersonal'.");
         }
 
         // Two-phase confirmation (ADR-03): the confirmed arguments are the edit itself, without the confirmation properties.
@@ -478,7 +476,7 @@ public static class McpAdminTools
         }
 
         var principal = Autheris.Application.Mcp.Services.McpProtocolHandler.BuildPrincipalFromSession(sessionContext);
-        var edit = new Autheris.Application.Governance.Interfaces.DatasetCatalogEdit(req.Tags, null, null, req.Visibility, req.MinGroupSize, req.NonPersonal);
+        var edit = new Autheris.Application.Governance.Interfaces.DatasetCatalogEdit(req.Tags, null, null, req.MinGroupSize, req.NonPersonal);
         var result = await datasetCatalog.ApplyAsync(principal, req.Dataset, edit, "mcp", ct).ConfigureAwait(false);
         if (!result.IsSuccess)
         {
@@ -487,7 +485,6 @@ public static class McpAdminTools
                 Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.Forbidden => "FORBIDDEN",
                 Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.InvalidTag => "INVALID_TAG",
                 Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.TagLimitExceeded => "TAG_LIMIT_EXCEEDED",
-                Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.InvalidVisibility => "INVALID_VISIBILITY",
                 Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.InvalidRequest => "INVALID_REQUEST",
                 Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.Unavailable => "UNAVAILABLE",
                 _ => "NOT_FOUND"
@@ -501,8 +498,7 @@ public static class McpAdminTools
             datasetId = result.Table!.Value.ToString(),
             changed = result.Outcome == Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.Applied,
             tags = settings.Tags.OrderBy(t => t.Tag, StringComparer.Ordinal).Select(t => new { tag = t.Tag, source = t.Source == DatasetTagSource.Dbt ? "dbt" : "admin" }),
-            visibility = settings.Visibility.ToString(),
-            tierEffective = result.TierEffective
+            discoveryHidden = settings.DiscoveryHidden
         }, JsonOptions));
     }
 }

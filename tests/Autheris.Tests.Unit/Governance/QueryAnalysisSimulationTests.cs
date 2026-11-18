@@ -50,7 +50,6 @@ public sealed class QueryAnalysisSimulationTests
                 SchemaName = "public",
                 TableName = "orders",
                 DisplayName = "orders",
-                Visibility = DatasetVisibility.Full
             },
             Columns = [new TableColumn { ColumnName = "id", DataType = "uuid" }],
             PrimaryKeyColumns = ["id"]

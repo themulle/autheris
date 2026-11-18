@@ -178,26 +178,6 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
         var tableDescription = tableResolved?.Description ?? metadata.Table.Description;
         var tableLongDescription = tableResolved?.LongDescription ?? metadata.Table.LongDescription;
 
-        // Summary (issue #111): identifier, sensitivity and activity only; no columns, keys or indexes.
-        if (visibleRow.Shape == CatalogOutputShape.Summary)
-        {
-            return new CatalogDatasetDetail(
-                DatasetId: metadata.Identifier.ToString(),
-                Domain: metadata.Identifier.Domain,
-                Schema: metadata.Identifier.Schema,
-                Table: metadata.Identifier.TableName,
-                Columns: [],
-                PrimaryKeys: [],
-                Sensitivity: metadata.Table.Sensitivity.ToString(),
-                IsActive: metadata.Table.IsActive,
-                Indexes: [],
-                DisplayName: tableDisplayName,
-                Description: tableDescription,
-                LongDescription: null,
-                Language: lang,
-                Size: DatasetSizeClassifier.Resolve(metadata));
-        }
-
         // I404-SC-L1/L2/L4: declared keys and indexes are reported only as a whole and only when every column is Clear for this
         // caller: the caller's resolved access level (shared with describe_dataset) and the catalog masking state must both say Clear.
         var callerClear = await ResolveCallerClearColumnsAsync(metadata, context, ct).ConfigureAwait(false);
@@ -598,8 +578,7 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
         foreach (var hit in hits)
         {
             var field = _graphQlMap != null &&
-                        permitted.TryGetValue(hit.TableIdentifier, out var row) &&
-                        row.CatalogView != CatalogView.Summary
+                        permitted.ContainsKey(hit.TableIdentifier)
                 ? await _graphQlMap.GetRootFieldAsync(hit.TableIdentifier, ct).ConfigureAwait(false)
                 : null;
             result.Add(hit with { SuggestedGraphQlField = field });
@@ -721,8 +700,7 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
             Domain: table.Identifier.Domain,
             Schema: table.Identifier.Schema,
             Table: table.Identifier.TableName,
-            // A Summary row discloses only the allow-listed fields; the source type is not one of them.
-            SourceType: table.CatalogView == CatalogView.Summary ? string.Empty : sourceType,
+            SourceType: sourceType,
             Sensitivity: table.Table.Sensitivity.ToString(),
             Description: resolved?.Description ?? table.Table.Description,
             IsActive: table.Table.IsActive,
@@ -847,7 +825,7 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
             Bm25Score = bm25Score,
             VectorScore = vectorScore,
             Description = visible.Table.Description,
-            SuggestedGraphQlField = visible.CatalogView == CatalogView.Summary ? null : hit.SuggestedGraphQlField,
+            SuggestedGraphQlField = hit.SuggestedGraphQlField,
             Sensitivity = visible.Table.Sensitivity?.ToString() ?? "NORMAL",
             MatchedTerms = matchedTerms,
             RelevantColumns = relevantColumns,

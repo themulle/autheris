@@ -70,33 +70,4 @@ public static class DatasetTagRules
         tags = list;
         return true;
     }
-
-    /// <summary>Maps a stored integer: 0, 1, 2 only; everything else (and null) is <see cref="DatasetVisibility.Hidden"/>.</summary>
-    public static DatasetVisibility ReadStored(int? stored) => stored switch
-    {
-        1 => DatasetVisibility.Summary,
-        2 => DatasetVisibility.Full,
-        _ => DatasetVisibility.Hidden
-    };
-
-    /// <summary>Parses the names Hidden, Summary, Full (any case). Numbers, numeric strings, lists and padded values are rejected.</summary>
-    public static bool TryParseVisibility(string? raw, out DatasetVisibility visibility)
-    {
-        visibility = DatasetVisibility.Hidden;
-        if (raw is null)
-        {
-            return false;
-        }
-
-        foreach (var name in Enum.GetNames<DatasetVisibility>())
-        {
-            if (string.Equals(raw, name, StringComparison.OrdinalIgnoreCase))
-            {
-                visibility = Enum.Parse<DatasetVisibility>(name);
-                return true;
-            }
-        }
-
-        return false;
-    }
 }

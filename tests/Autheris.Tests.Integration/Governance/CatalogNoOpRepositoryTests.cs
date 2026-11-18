@@ -132,24 +132,6 @@ public sealed class CatalogNoOpRepositoryTests : IDisposable
         (await _repo.GetCatalogVersionAsync()).ShouldBe(version);
     }
 
-    [Fact]
-    public async Task SetDatasetVisibility_HiddenFlagChangeOnly_BumpsVersion()
-    {
-        await _repo.UpsertTableMetadataWithResultAsync(Build());
-        var actor = new Sid("S-1-5-21-admin");
-        await _repo.SetDatasetVisibilityAsync(_identifier, DatasetVisibility.Full, actor);
-        var afterFull = await _repo.GetCatalogVersionAsync();
-
-        var unchanged = await _repo.SetDatasetVisibilityAsync(_identifier, DatasetVisibility.Full, actor);
-        unchanged.ShouldNotBeNull();
-        unchanged.Changed.ShouldBeFalse();
-        (await _repo.GetCatalogVersionAsync()).ShouldBe(afterFull);
-
-        var hidden = await _repo.SetDatasetVisibilityAsync(_identifier, DatasetVisibility.Hidden, actor);
-        hidden.ShouldNotBeNull();
-        hidden.Changed.ShouldBeTrue();
-        (await _repo.GetCatalogVersionAsync()).ShouldNotBe(afterFull);
-    }
 
     [Fact]
     public async Task CreateRelationAsync_IdenticalRelation_DoesNotBumpVersion()

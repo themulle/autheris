@@ -168,6 +168,11 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
             tools = tools.Where(t => !McpAdminTools.IsAdminTool(t.Name)).ToList();
         }
 
+        if (session.IsReadOnly)
+        {
+            tools = tools.Where(t => !McpDatasetTools.IsHiddenFromReadOnlySession(t.Name)).ToList();
+        }
+
         // F-AI-07: Extract prompt if provided in params for dynamic Just-in-Time pruning
         string? prompt = null;
         if (root.TryGetProperty("params", out var paramsProp) && paramsProp.ValueKind == JsonValueKind.Object)

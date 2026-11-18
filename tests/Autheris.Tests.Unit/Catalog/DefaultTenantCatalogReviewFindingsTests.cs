@@ -71,15 +71,15 @@ public sealed class DefaultTenantCatalogReviewFindingsTests
         tables.GetActiveTableIdentifierAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(ci => (TableIdentifier?)ci.Arg<TableIdentifier>());
         tables.GetDatasetCatalogSettingsAsync(Arg.Any<TableIdentifier>(), Arg.Any<bool>(), Arg.Any<CancellationToken>())
-            .Returns(new DatasetCatalogSettings([], DatasetVisibility.Hidden));
-        tables.SetDatasetVisibilityAsync(Arg.Any<TableIdentifier>(), Arg.Any<DatasetVisibility>(), Arg.Any<Sid>(), Arg.Any<CancellationToken>())
+            .Returns(new DatasetCatalogSettings([]));
+        tables.ReplaceDatasetTagsAsync(Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<string>>(), Arg.Any<DatasetTagSource>(), Arg.Any<Sid>(), Arg.Any<CancellationToken>())
             .Returns(ci => new DatasetCatalogChange(ci.Arg<TableIdentifier>(),
-                new DatasetCatalogSettings([], DatasetVisibility.Hidden), new DatasetCatalogSettings([], ci.Arg<DatasetVisibility>())));
+                new DatasetCatalogSettings([]), new DatasetCatalogSettings([new DatasetTag("x", DatasetTagSource.Admin)])));
         var svc = AdminService(tables);
-        var edit = new DatasetCatalogEdit(null, null, null, "Full");
+        var edit = new DatasetCatalogEdit(["x"], null, null);
 
         (await svc.ApplyAsync(OwnerAdmin(), foreign.ToString(), edit, "admin", default)).Outcome.ShouldBe(DatasetCatalogOutcome.NotFound);
-        await tables.DidNotReceiveWithAnyArgs().SetDatasetVisibilityAsync(default, default, default, default);
+        await tables.DidNotReceiveWithAnyArgs().ReplaceDatasetTagsAsync(default!, default!, default, default, default);
         (await svc.ApplyAsync(OwnerAdmin(), own.ToString(), edit, "admin", default)).Outcome.ShouldBe(DatasetCatalogOutcome.Applied);
         // The global administrator is not confined.
         var clusterAdmin = Wp0.User("S-CA", null, ["ClusterAdmin"]);

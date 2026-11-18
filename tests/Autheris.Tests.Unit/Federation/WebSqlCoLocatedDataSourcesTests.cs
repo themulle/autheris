@@ -37,7 +37,6 @@ public sealed class WebSqlCoLocatedDataSourcesTests
                 PhysicalDatabaseName = dbName,
                 SourceType = provider,
                 DataSourceType = DataSourceType.Sql,
-                Visibility = DatasetVisibility.Full,
                 IsActive = true
             },
             Columns =

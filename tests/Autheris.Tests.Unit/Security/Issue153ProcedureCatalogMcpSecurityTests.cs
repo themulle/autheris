@@ -48,7 +48,7 @@ public sealed class Issue153ProcedureCatalogMcpSecurityTests
         new()
         {
             Identifier = id,
-            CatalogView = CatalogView.Full,
+            CatalogView = CatalogView.Granted,
             Table = new Table { TableName = id.TableName, SchemaName = id.Schema, Sensitivity = "INTERNAL", Description = $"{id.TableName} table" },
             Columns = columns.Select(c => new TableColumn { ColumnName = c.Name, DataType = c.Type, IsSensitive = c.Sensitive, Description = c.Name }).ToList()
         };

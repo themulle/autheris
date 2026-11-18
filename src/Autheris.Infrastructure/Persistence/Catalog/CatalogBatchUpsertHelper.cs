@@ -142,10 +142,6 @@ internal static class CatalogBatchUpsertHelper
                 }
 
                 await ExecuteTableUpsertRowAsync(repo, conn, tx, tableIds[i], incoming, docs, ct).ConfigureAwait(false);
-                if (!existed && repo.OptionsSnapshot?.Catalog?.DefaultVisibility == DatasetVisibility.Summary)
-                {
-                    await DatasetCatalogStore.InsertDefaultAsync(conn, tx, repo.KeyDialect, tableIds[i], DatasetVisibility.Summary, ct).ConfigureAwait(false);
-                }
 
                 if (CatalogRowHydrator.HasMaskingRulesChanged(existingMaskingRules, incoming.ColumnMaskingRules))
                 {
