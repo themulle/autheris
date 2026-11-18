@@ -17,7 +17,7 @@ public sealed record DocRecord(
     string? TenantId, string AppId, DocCategory Category, string DocId,
     string Title, string Content, string ContentSha256, int ByteCount,
     IReadOnlyList<string> Tags, string? ErrorCode, string? AuthorSid,
-    long Version, DateTimeOffset UpdatedAt, DateTimeOffset? DeletedAt = null)
+    long Version, DateTimeOffset UpdatedAt, DateTimeOffset? DeletedAt = null, bool DiscoveryHidden = false)
 {
     public bool IsDeleted => DeletedAt.HasValue;
     public string ETag => $"\"{Version}\"";
@@ -48,5 +48,7 @@ public interface IDocumentRepository
     Task<DocRecord?> GetAsync(DocKey key, CancellationToken ct = default);
     Task<IReadOnlyList<DocRecord>> ReadChangedSinceAsync(DateTimeOffset? since, CancellationToken ct = default);
     Task<int> PurgeTombstonesAsync(DateTimeOffset cutoff, CancellationToken ct = default);
+    /// <summary>Sets the discovery-hidden flag of an active document without bumping its version; returns the previous value, or <c>null</c> when the document does not exist.</summary>
+    Task<bool?> SetDiscoveryHiddenAsync(DocKey key, bool hidden, DateTimeOffset at, CancellationToken ct = default);
     Task<DocTenantUsage> GetTenantUsageAsync(string tenantId, CancellationToken ct = default);
 }
