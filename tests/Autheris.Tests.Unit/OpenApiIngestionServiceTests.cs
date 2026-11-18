@@ -123,7 +123,7 @@ public sealed class OpenApiIngestionServiceTests
         paymentTable.Columns.Count.ShouldBe(3);
 
         var panCol = paymentTable.Columns.First(c => c.ColumnName == "pan_masked");
-        panCol.IsSensitive.ShouldBeTrue();
+        ClassificationMetadata.IsColumnSensitive(paymentTable, "pan_masked").ShouldBeTrue();
         panCol.Description.ShouldBe("Masked credit card primary account number.");
 
         var refundTable = upsertedTables.FirstOrDefault(t => t.Identifier.TableName == "refund");

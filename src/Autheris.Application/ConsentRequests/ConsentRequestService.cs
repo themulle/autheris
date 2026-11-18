@@ -14,6 +14,7 @@ using Autheris.Application.ConsentRequests.Routing;
 using Autheris.Application.Governance.Grants;
 using Autheris.Application.Identity.Attributes;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.ConsentRequests.ClassificationClear;
 using Autheris.Application.Policy.WriteGrants;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -46,6 +47,9 @@ public sealed class ConsentRequestService : IConsentRequestService
     private readonly IIdentitySubjectResolver? _subjectResolver;
     private readonly IConsentMaterializationGuard? _materializationGuard;
     private readonly IRowPolicyDependencyIndex? _policyDependencyIndex;
+    private readonly IClassificationRepository? _classificationRepository;
+    private readonly IRateLimiterService? _rateLimiter;
+    private readonly IOptions<Autheris.Application.Catalog.Services.CatalogDiscoveryOptions>? _discoveryOptions;
 
     public ConsentRequestService(
         ITableMetadataRepository metadataRepository,
@@ -60,8 +64,14 @@ public sealed class ConsentRequestService : IConsentRequestService
         TimeProvider? timeProvider = null,
         IConsentWorkflowConfigRepository? workflowConfigRepository = null,
         IConsentWorkflowRouter? workflowRouter = null,
-        IConsentEventOutbox? eventOutbox = null)
+        IConsentEventOutbox? eventOutbox = null,
+        IClassificationRepository? classificationRepository = null,
+        IRateLimiterService? rateLimiter = null,
+        IOptions<Autheris.Application.Catalog.Services.CatalogDiscoveryOptions>? discoveryOptions = null)
     {
+        _rateLimiter = rateLimiter;
+        _discoveryOptions = discoveryOptions;
+        _classificationRepository = classificationRepository;
         _materializationGuard = materializationGuard;
         _policyDependencyIndex = policyDependencyIndex;
         _grantPolicy = grantPolicy ?? new GrantPolicy(validityPolicy: grantValidityPolicy);
@@ -87,6 +97,18 @@ public sealed class ConsentRequestService : IConsentRequestService
         if (_gatewayOptions?.Value.Authentication.EntraId.SelfServiceEnabled == false)
         {
             throw new ConsentRequestException("FORBIDDEN", "Self-service access requests are disabled.");
+        }
+
+        if (_rateLimiter is not null && _gatewayOptions is not null)
+        {
+            var limitTenant = ResolveTenantId(principal, command.ContextTenant, ClusterAdminPolicy.IsCanonicalClusterAdmin(principal));
+            var retryAfter = await Autheris.Application.Catalog.Discovery.DiscoveryCallerGate.CheckAccessRequestRateAsync(
+                limitTenant, command.UserSid, _discoveryOptions?.Value.Discovery ?? new Autheris.Application.Catalog.Services.CatalogDiscoverySettings(),
+                _gatewayOptions.Value, _rateLimiter, ct).ConfigureAwait(false);
+            if (retryAfter is { } wait)
+            {
+                throw new ConsentRequestException("RATE_LIMIT_EXCEEDED", "Access request rate limit exceeded.", wait);
+            }
         }
 
         // #341: caller text; a blank component or one with a dot or line break is a client error, not a constructor fault.
@@ -135,6 +157,10 @@ public sealed class ConsentRequestService : IConsentRequestService
         var writeRulesFingerprint = command.RequestedWriteRules is { Count: > 0 }
             ? System.Text.Json.JsonSerializer.Serialize(command.RequestedWriteRules)
             : string.Empty;
+        if (command.RequestedClear is { Count: > 0 })
+        {
+            writeRulesFingerprint += "|clear:" + System.Text.Json.JsonSerializer.Serialize(command.RequestedClear);
+        }
         var requestFingerprint = IdempotencyFingerprint(
             ResolveTenantId(principal, command.ContextTenant, isCrossTenantAdmin).Value,
             command.Domain, command.Schema, command.TableName, justification.Trim(), durationDays,
@@ -223,6 +249,15 @@ public sealed class ConsentRequestService : IConsentRequestService
             ? System.Text.Json.JsonSerializer.Serialize(command.Context)
             : null;
 
+        // Only validated items of the dedicated request field are ever stored under the reserved key.
+        contextJson = RequestedClearCodec.Strip(contextJson);
+        if (command.RequestedClear is { Count: > 0 } requestedClear)
+        {
+            contextJson = RequestedClearCodec.Merge(
+                contextJson,
+                await ValidateRequestedClearAsync(requestedClear, meta, tenantId, validatedWriteRules, command.RequestWriteOnly, ct).ConfigureAwait(false));
+        }
+
         bool includeReadAccess = validatedWriteRules.Count == 0 || command.RequestWriteOnly == false;
         var request = new ConsentRequest
         {
@@ -282,6 +317,36 @@ public sealed class ConsentRequestService : IConsentRequestService
         };
         await StoreIdempotentAsync(userSid, command.IdempotencyKey, requestFingerprint, submitted, ct).ConfigureAwait(false);
         return submitted;
+    }
+
+    private async Task<IReadOnlyList<RequestedClearItem>> ValidateRequestedClearAsync(
+        IReadOnlyList<RequestedClearItem> requestedClear,
+        TableMetadata meta,
+        TenantId tenantId,
+        IReadOnlyList<WriteRule> writeRules,
+        bool? requestWriteOnly,
+        CancellationToken ct)
+    {
+        if (_classificationRepository is null)
+        {
+            throw new ConsentRequestException(ClearRequestErrorCodes.Unavailable, "Classification Clear cannot be requested by this deployment.");
+        }
+
+        if (writeRules.Count > 0 && requestWriteOnly != false)
+        {
+            throw new ConsentRequestException(ClearRequestErrorCodes.Invalid, "Classification Clear needs read access; a write-only request cannot carry it.");
+        }
+
+        var definitions = await _classificationRepository.GetClassificationsAsync(tenantId.Value, includeInactive: true, ct).ConfigureAwait(false);
+        try
+        {
+            return ClassificationClearPolicy.ValidateRequest(
+                requestedClear, ClassificationClearPolicy.ResolveCatalog(tenantId.Value, definitions), meta, tenantId.Value);
+        }
+        catch (ClearRequestException ex)
+        {
+            throw new ConsentRequestException(ex.Code, ex.Message);
+        }
     }
 
     /// <summary>

@@ -28,7 +28,7 @@ public sealed class CatalogGraphQlMapTests
     public CatalogGraphQlMapTests()
     {
         var metadata = Substitute.For<ITableMetadataRepository>();
-        metadata.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(
+        metadata.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(
         [
             Table(Customers, [new TableColumn { ColumnName = "id", DataType = "bigint" }, new TableColumn { ColumnName = "name", DataType = "varchar" }]),
             Table(Orders, [new TableColumn { ColumnName = "id", DataType = "int" }, new TableColumn { ColumnName = "customer_id", DataType = "bigint" }, new TableColumn { ColumnName = "amount", DataType = "decimal(10,2)" }]),
@@ -90,7 +90,7 @@ public sealed class CatalogGraphQlMapTests
     {
         // BUG #75 (S-9): the MCP view is derived from the same model, so an omitted relation never shows up.
         var metadata = Substitute.For<ITableMetadataRepository>();
-        metadata.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(
+        metadata.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(
         [
             Table(Customers, [new TableColumn { ColumnName = "id", DataType = "bigint" }], sourceName: "pg1"),
             Table(Orders, [new TableColumn { ColumnName = "id", DataType = "int" }, new TableColumn { ColumnName = "customer_id", DataType = "bigint" }], sourceName: "pg2")
@@ -127,7 +127,7 @@ public sealed class CatalogGraphQlMapTests
         // Issue #682 A: the root field is a lossy, sanitized derivation of the id; only the model knows the mapping.
         var gps = new TableIdentifier("fleet-ops", "raw_v2", "gps_position");
         var metadata = Substitute.For<ITableMetadataRepository>();
-        metadata.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(
+        metadata.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(
             [Table(gps, [new TableColumn { ColumnName = "id", DataType = "int" }])]));
         var map = new CatalogGraphQlMap(metadata, Substitute.For<ITableRelationRepository>());
 

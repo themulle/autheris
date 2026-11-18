@@ -63,7 +63,7 @@ public sealed class CatalogMaskedFieldsExtensionTests
         };
 
         var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([customers, orders]);
+        metadataRepo.StubAllTables([customers, orders]);
 
         var relationRepo = Substitute.For<ITableRelationRepository>();
         relationRepo.GetRelationsForTableAsync(Customers, Arg.Any<CancellationToken>()).Returns(

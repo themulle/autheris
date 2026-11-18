@@ -61,8 +61,7 @@ public sealed class ReadPathSwitchesMetricsAndAnalyzeTests
             PrimaryKeyColumns = ["id"]
         };
 
-        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns([sampleTable]);
+        _metadataRepo.StubAllTables([sampleTable]);
         _relationRepo.GetRelationsForTableAsync(sampleTableId, Arg.Any<CancellationToken>())
             .Returns([]);
     }

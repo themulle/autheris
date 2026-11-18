@@ -178,26 +178,6 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
         var tableDescription = tableResolved?.Description ?? metadata.Table.Description;
         var tableLongDescription = tableResolved?.LongDescription ?? metadata.Table.LongDescription;
 
-        // Summary (issue #111): identifier, sensitivity and activity only; no columns, keys or indexes.
-        if (visibleRow.Shape == CatalogOutputShape.Summary)
-        {
-            return new CatalogDatasetDetail(
-                DatasetId: metadata.Identifier.ToString(),
-                Domain: metadata.Identifier.Domain,
-                Schema: metadata.Identifier.Schema,
-                Table: metadata.Identifier.TableName,
-                Columns: [],
-                PrimaryKeys: [],
-                Sensitivity: metadata.Table.Sensitivity.ToString(),
-                IsActive: metadata.Table.IsActive,
-                Indexes: [],
-                DisplayName: tableDisplayName,
-                Description: tableDescription,
-                LongDescription: null,
-                Language: lang,
-                Size: DatasetSizeClassifier.Resolve(metadata));
-        }
-
         // I404-SC-L1/L2/L4: declared keys and indexes are reported only as a whole and only when every column is Clear for this
         // caller: the caller's resolved access level (shared with describe_dataset) and the catalog masking state must both say Clear.
         var callerClear = await ResolveCallerClearColumnsAsync(metadata, context, ct).ConfigureAwait(false);
@@ -491,9 +471,15 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
             return await SearchDetailedWithDiscoveryAsync(query, context, ct).ConfigureAwait(false);
         }
 
-        var (permitted, all) = await VisibleForAsync(context, ct).ConfigureAwait(false);
+        var (visible, all) = await VisibleForAsync(context, ct).ConfigureAwait(false);
+        // Issue #804: the access filter narrows the searchable set before ranking and the limit.
+        var permitted = query.AccessStatus is { } wanted
+            ? visible.Where(t => Autheris.Application.Catalog.Discovery.CatalogAccessStatus.Matches(LegacyAccessStatusOf(t), wanted)).ToList()
+            : visible;
         var permittedById = permitted.ToDictionary(t => t.Identifier);
-        var visibleProcedures = await GetVisibleProceduresAsync(context, ct).ConfigureAwait(false);
+        var visibleProcedures = query.AccessStatus is null or DiscoveryAccessState.Granted
+            ? await GetVisibleProceduresAsync(context, ct).ConfigureAwait(false)
+            : [];
         var q = query.QueryText?.Trim();
 
         var procHits = visibleProcedures
@@ -517,7 +503,8 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
                 RelatedJoinPaths: [],
                 SuggestedGraphQlField: null,
                 Kind: "procedure",
-                DatasetId: $"procedure:{p.Definition.Name}"))
+                DatasetId: $"procedure:{p.Definition.Name}",
+                AccessStatus: Autheris.Application.Catalog.Discovery.CatalogAccessStatus.Granted))
             .ToList();
 
         if (_searchEngine?.IsIndexReady == true)
@@ -535,7 +522,7 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
             var tableHits = rawHits
                 .Select(h => ShapeHit(h, callerTables, allById, terms, singleIdentifier, hiddenText))
                 .Where(h => h != null)
-                .Select(h => h!)
+                .Select(h => h! with { AccessStatus = permittedById.TryGetValue(h!.TableIdentifier, out var row) ? LegacyAccessStatusOf(row) : null })
                 .Take(query.Limit);
 
             return (await WithGraphQlFieldsAsync(tableHits, permittedById, ct).ConfigureAwait(false)).Concat(procHits).Take(query.Limit).ToList();
@@ -559,7 +546,8 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
                 MatchedTerms: string.IsNullOrWhiteSpace(q) ? [] : [q],
                 RelevantColumns: [],
                 RelatedJoinPaths: [],
-                SuggestedGraphQlField: null))
+                SuggestedGraphQlField: null,
+                AccessStatus: LegacyAccessStatusOf(d)))
             .Take(query.Limit);
 
         return (await WithGraphQlFieldsAsync(fallbackHits, permittedById, ct).ConfigureAwait(false)).Concat(procHits).Take(query.Limit).ToList();
@@ -575,17 +563,27 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
         var trimmed = query.QueryText?.Trim() ?? string.Empty;
         var mode = query.Mode.ToString();
         var lang = query.Language ?? context.Language;
-        var searchOpts = new Autheris.Application.Catalog.Discovery.DiscoverySearchOptions(query.DomainFilter, query.Limit, mode, lang, Autheris.Application.Catalog.Discovery.DiscoverySurface.Search);
+        var searchOpts = new Autheris.Application.Catalog.Discovery.DiscoverySearchOptions(
+            query.DomainFilter, query.Limit, mode, lang, Autheris.Application.Catalog.Discovery.DiscoverySurface.Search, query.AccessStatus);
         var objs = await _discovery!.SearchAsync(trimmed, searchOpts, CallerOf(context), ct).ConfigureAwait(false);
         var hits = new List<CatalogSearchHit>(objs.Count);
         foreach (var obj in objs)
         {
+            // Procedures are added once below from the registered catalog (GRANTED, as list_datasets reports them), never twice.
+            if (obj.Kind == DiscoveryObjectKind.Procedure)
+            {
+                continue;
+            }
+
             var hit = Autheris.Application.Catalog.Discovery.CatalogDiscoveryProjection.ToSearchHit(obj, mode, lang);
             if (_graphQlMap != null && obj.Columns.Count > 0)
                 hit = hit with { SuggestedGraphQlField = await _graphQlMap.GetRootFieldAsync(hit.TableIdentifier, ct).ConfigureAwait(false) };
             hits.Add(hit);
         }
-        var visibleProcs = await GetVisibleProceduresAsync(context, ct).ConfigureAwait(false);
+        // Procedure hits report GRANTED (as list_datasets does); they are left out under any other access filter.
+        var visibleProcs = query.AccessStatus is null or DiscoveryAccessState.Granted
+            ? await GetVisibleProceduresAsync(context, ct).ConfigureAwait(false)
+            : [];
         return hits.Concat(Autheris.Application.Catalog.Discovery.CatalogDiscoveryProjection.FilterProcedureHits(visibleProcs, query.DomainFilter, trimmed)).Take(query.Limit).ToList();
     }
 
@@ -598,8 +596,7 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
         foreach (var hit in hits)
         {
             var field = _graphQlMap != null &&
-                        permitted.TryGetValue(hit.TableIdentifier, out var row) &&
-                        row.CatalogView != CatalogView.Summary
+                        permitted.ContainsKey(hit.TableIdentifier)
                 ? await _graphQlMap.GetRootFieldAsync(hit.TableIdentifier, ct).ConfigureAwait(false)
                 : null;
             result.Add(hit with { SuggestedGraphQlField = field });
@@ -721,8 +718,7 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
             Domain: table.Identifier.Domain,
             Schema: table.Identifier.Schema,
             Table: table.Identifier.TableName,
-            // A Summary row discloses only the allow-listed fields; the source type is not one of them.
-            SourceType: table.CatalogView == CatalogView.Summary ? string.Empty : sourceType,
+            SourceType: sourceType,
             Sensitivity: table.Table.Sensitivity.ToString(),
             Description: resolved?.Description ?? table.Table.Description,
             IsActive: table.Table.IsActive,
@@ -847,7 +843,7 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
             Bm25Score = bm25Score,
             VectorScore = vectorScore,
             Description = visible.Table.Description,
-            SuggestedGraphQlField = visible.CatalogView == CatalogView.Summary ? null : hit.SuggestedGraphQlField,
+            SuggestedGraphQlField = hit.SuggestedGraphQlField,
             Sensitivity = visible.Table.Sensitivity?.ToString() ?? "NORMAL",
             MatchedTerms = matchedTerms,
             RelevantColumns = relevantColumns,
@@ -989,9 +985,9 @@ internal static class CatalogPiiDetector
 {
     private static readonly string[] PiiKeywords = ["name", "email", "phone", "iban", "birth", "address", "lat", "lon"];
 
-    public static bool IsPii(string columnName, bool isSensitive = false)
+    public static bool IsPii(string columnName, bool classified = false)
     {
-        if (isSensitive) return true;
+        if (classified) return true;
         if (string.IsNullOrWhiteSpace(columnName)) return false;
         var lower = columnName.ToLowerInvariant();
         return PiiKeywords.Any(k => lower.Contains(k, StringComparison.OrdinalIgnoreCase));

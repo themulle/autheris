@@ -150,7 +150,7 @@ public sealed class CatalogDiscoveryServiceTests
             Columns = [new TableColumn { ColumnName = "id", DataType = "int" }]
         };
 
-        _metadataRepository.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([table]);
+        _metadataRepository.StubAllTables([table]);
 
         _searchEngine.IsIndexReady.Returns(true);
         var hit = new CatalogSearchHit(
@@ -208,7 +208,7 @@ public sealed class CatalogDiscoveryServiceTests
             Columns = [new TableColumn { ColumnName = "id", DataType = "int" }]
         };
 
-        _metadataRepository.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([table, customers]);
+        _metadataRepository.StubAllTables([table, customers]);
 
         _searchEngine.IsIndexReady.Returns(true);
         var hit = new CatalogSearchHit(
@@ -264,7 +264,7 @@ public sealed class CatalogDiscoveryServiceTests
             Columns = [new TableColumn { ColumnName = "lead_id", DataType = "int" }]
         };
 
-        _metadataRepository.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([table]);
+        _metadataRepository.StubAllTables([table]);
 
         _searchEngine.IsIndexReady.Returns(false); // search engine not ready yet
 

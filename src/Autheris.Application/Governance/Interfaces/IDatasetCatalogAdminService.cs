@@ -6,13 +6,12 @@ using Autheris.Domain.Model;
 
 /// <summary>
 /// Issue #111 ( C-2): one edit of the admin-managed catalog settings of a dataset. A null member is "unchanged", never a reset;
-/// an empty <see cref="ReplaceTags"/> list replaces the admin tags with none. <see cref="Visibility"/> is the requested name (Hidden, Summary, Full).
+/// an empty <see cref="ReplaceTags"/> list replaces the admin tags with none.
 /// </summary>
 public sealed record DatasetCatalogEdit(
     IReadOnlyList<string>? ReplaceTags,
     IReadOnlyList<string>? AddTags,
     IReadOnlyList<string>? RemoveTags,
-    string? Visibility,
     string? MinGroupSize = null,
     bool? NonPersonal = null,
     bool? DiscoveryHidden = null,
@@ -35,25 +34,23 @@ public enum DatasetCatalogOutcome
     NotFound,
     InvalidTag,
     TagLimitExceeded,
-    InvalidVisibility,
     InvalidColumns,
     InvalidRequest,
     Unavailable
 }
 
-/// <summary>Outcome plus, on success, the resolved dataset, its settings after the edit and whether the tier is effective for it.</summary>
+/// <summary>Outcome plus, on success, the resolved dataset and its settings after the edit.</summary>
 public sealed record DatasetCatalogResult(
     DatasetCatalogOutcome Outcome,
     TableIdentifier? Table = null,
     DatasetCatalogSettings? Settings = null,
-    bool TierEffective = true,
     string? Warning = null)
 {
     public bool IsSuccess => Outcome is DatasetCatalogOutcome.Applied or DatasetCatalogOutcome.Unchanged;
 }
 
 /// <summary>
-/// The only writer of dataset tags and visibility tiers (REST, declarative manifest and the MCP admin tool all call it). It authorizes from the
+/// The only writer of dataset tags and discovery flags (REST, declarative manifest and the MCP admin tool all call it). It authorizes from the
 /// authenticated principal through <c>CallerScopeResolver</c>and the ownership store, never from request fields ( A-5).
 /// </summary>
 public interface IDatasetCatalogAdminService

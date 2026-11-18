@@ -53,8 +53,7 @@ public sealed class GoldenQuerySecurityTests
             Columns = [new TableColumn { ColumnName = "id", DataType = "varchar" }]
         };
 
-        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([_customersTable, _ordersTable]));
+        _metadataRepo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>([_customersTable, _ordersTable]));
 
         _goldenService = new GoldenQueryService(Options.Create(new GatewayOptions()), NullLogger<GoldenQueryService>.Instance);
         _goldenService.RegisterGoldenQuery(new GoldenQuery(
@@ -384,6 +383,24 @@ public sealed class GoldenQuerySecurityTests
 
     [Fact]
     [Trait("Category", "Security")]
+    public async Task GetGoldenQueries_Output_CarriesUntrustedContentNotice()
+    {
+        var session = Session("MCP54N", "AiAgent");
+        AllowFinanceFor("MCP54N");
+        var guardrail = GuardrailWith(CappedService(5, "finance", "customers", hidden: 0, visible: 1));
+
+        var result = await CallGolden(guardrail, session);
+
+        using (var doc = JsonDocument.Parse(result.ContentJson))
+        {
+            doc.RootElement.GetProperty("contentNotice").GetString().ShouldBe(McpDocTools.UntrustedContentNotice);
+        }
+
+        ExtractQueryIds(result.ContentJson).ShouldBe(["visible-0"]);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
     public async Task Mcp15_MoreGoldensThanCap_VisibleOnesStillReturned()
     {
         var session = Session("MCP15A", "AiAgent");
@@ -473,8 +490,7 @@ public sealed class GoldenQuerySecurityTests
             Table = new Table { SchemaName = "dbo", TableName = "customers" },
             Columns = [new TableColumn { ColumnName = "id", DataType = "varchar" }, new TableColumn { ColumnName = "ssn", DataType = "varchar" }]
         };
-        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([table]));
+        _metadataRepo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>([table]));
         _goldenService.RegisterGoldenQuery(new GoldenQuery("golden-alias", "finance", "customers", "Tax numbers", "Aliased", "query { customers { taxNumber } }"));
 
         var pdp = Substitute.For<Autheris.Application.Policy.Pdp.IAccessDecisionPoint>();

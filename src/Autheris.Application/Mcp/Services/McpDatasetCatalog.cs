@@ -1,5 +1,6 @@
 namespace Autheris.Application.Mcp.Services;
 
+using Autheris.Application.Catalog;
 using Autheris.Application.Tenancy;
 using System;
 using System.Collections.Generic;
@@ -184,6 +185,24 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         CancellationToken ct = default) =>
         ListDatasetsAsync(principal, search, domain, offset, limit, tag, language, overview: null, format: null, ct);
 
+    public Task<McpDatasetList> ListDatasetsAsync(
+        ClaimsPrincipal principal,
+        string? search,
+        string? domain,
+        int? offset,
+        int? limit,
+        string? tag,
+        string? language,
+        bool? overview,
+        string? format,
+        CancellationToken ct = default) =>
+        ListDatasetsAsync(principal, search, domain, offset, limit, tag, language, overview, format, accessStatus: null, ct);
+
+    /// <summary>
+    /// Issue #798: <paramref name="accessStatus"/> (<c>GRANTED</c>, <c>PENDING</c>, <c>EXPIRED</c>, <c>REQUEST_ACCESS</c>; null: no filter)
+    /// keeps only datasets the caller has in that state, before the total, the paging and the overview counts. An unknown value throws
+    /// <see cref="ArgumentException"/> (never ignored).
+    /// </summary>
     public async Task<McpDatasetList> ListDatasetsAsync(
         ClaimsPrincipal principal,
         string? search,
@@ -194,11 +213,13 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         string? language,
         bool? overview,
         string? format,
+        string? accessStatus,
         CancellationToken ct = default)
     {
+        var accessFilter = CatalogAccessStatus.ParseFilter(accessStatus);
         if (_discoveryService != null && !IsBypassed)
         {
-            return await ListDatasetsWithDiscoveryAsync(principal, search, domain, offset, limit, tag, language, overview, format, ct).ConfigureAwait(false);
+            return await ListDatasetsWithDiscoveryAsync(principal, search, domain, offset, limit, tag, language, overview, format, accessFilter, ct).ConfigureAwait(false);
         }
 
         // F-C11: the service has already dropped every row the shaping rule maps to NotFound; the check below is the second line of
@@ -207,6 +228,15 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         var visible = allVisible
             .Where(t => Shape(isAdminView, t) != CatalogOutputShape.NotFound)
             .ToList();
+
+        // Issue #798: the caller's consents are read once; the filter runs on the visible set, before every count and page.
+        (IReadOnlyList<Consent> ActiveConsents, IReadOnlyList<ConsentRequest> PendingRequests, bool IsAdmin)? callerConsents = null;
+        if (accessFilter is { } wantedAccess)
+        {
+            var (filterConsents, filterRequests, filterIsAdmin) = await GetCallerConsentsAndRequestsAsync(principal, ct).ConfigureAwait(false);
+            callerConsents = (filterConsents, filterRequests, filterIsAdmin);
+            visible.RemoveAll(t => !CatalogAccessStatus.Matches(AccessStatusOf(t.Identifier, filterConsents, filterRequests, filterIsAdmin, IsBypassed), wantedAccess));
+        }
 
         var negotiatedLanguage = _languageNegotiator?.NegotiateLanguage(language, _localizationOptions?.Value.SupportedLanguages, _localizationOptions?.Value.DefaultLanguage);
 
@@ -259,7 +289,8 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         }
 
         var candidateProcedures = new List<(string Id, RegisteredProcedure Proc)>();
-        if (_procedureCatalog != null)
+        // Procedures are listed as GRANTED; any other access filter leaves them out.
+        if (_procedureCatalog != null && accessFilter is null or DiscoveryAccessState.Granted)
         {
             var visibleProcedures = await _procedureCatalog.ListVisibleAsync(principal, principal.GetTenantId(), ct).ConfigureAwait(false);
             foreach (var proc in visibleProcedures.Where(p => p.Definition.Mode == ProcedureMode.Read && !string.IsNullOrWhiteSpace(p.Definition.ResultTable)))
@@ -299,18 +330,15 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         var pagedCandidates = allCandidates.Skip(effectiveOffset).Take(effectiveLimit).ToList();
 
         // Step 3: Deferred materialization ONLY for the paged slice (50 items max)
-        var (activeConsents, pendingRequests, isAdmin) = await GetCallerConsentsAndRequestsAsync(principal, ct).ConfigureAwait(false);
+        var (activeConsents, pendingRequests, isAdmin) = callerConsents ?? await GetCallerConsentsAndRequestsAsync(principal, ct).ConfigureAwait(false);
         var pagedSummaries = new List<McpDatasetSummary>(pagedCandidates.Count);
 
         foreach (var c in pagedCandidates)
         {
             if (c.Table is { } t)
             {
-                var summaryOnly = Shape(isAdminView, t) == CatalogOutputShape.Summary;
-                var graphQl = graphQlMap == null || summaryOnly ? null : await graphQlMap.GetTableAsync(t.Identifier, ct).ConfigureAwait(false);
-                var status = options?.Value.IsMcpAuthBypassed == true
-                    ? "GRANTED"
-                    : CatalogVisibility.ComputeAccessStatus(t.Identifier, activeConsents, pendingRequests, isAdmin);
+                var graphQl = graphQlMap == null ? null : await graphQlMap.GetTableAsync(t.Identifier, ct).ConfigureAwait(false);
+                var status = AccessStatusOf(t.Identifier, activeConsents, pendingRequests, isAdmin, IsBypassed);
 
                 var resolved = negotiatedLanguage != null ? t.Table.Texts.Resolve(negotiatedLanguage) : null;
                 var displayName = McpCatalogText.DisplayName(resolved?.Title ?? t.Table.DisplayName, t.Identifier.TableName);
@@ -321,7 +349,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
                     displayName,
                     description,
                     t.Table.Sensitivity,
-                    summaryOnly ? 0 : t.Columns.Count,
+                    t.Columns.Count,
                     graphQl?.QueryField,
                     Tags: t.CatalogTags,
                     AccessStatus: status,
@@ -410,11 +438,6 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         var accessStatus = AccessStatusOf(id, activeConsents, pendingRequests, isAdmin, options?.Value.IsMcpAuthBypassed == true);
 
         var negotiatedLanguage = _languageNegotiator?.NegotiateLanguage(language, _localizationOptions?.Value.SupportedLanguages, _localizationOptions?.Value.DefaultLanguage);
-
-        if (shape == CatalogOutputShape.Summary)
-        {
-            return await BuildSummaryDescriptionAsync(table, accessStatus, negotiatedLanguage, language, ct).ConfigureAwait(false);
-        }
 
         var columnAccessLevels = ResolveColumnLevels(principal, table, activeConsents, isAdmin, isGranted: options?.Value.IsMcpAuthBypassed != true && string.Equals(accessStatus, "GRANTED", StringComparison.OrdinalIgnoreCase),
             bypass: options?.Value.IsMcpAuthBypassed == true);
@@ -507,15 +530,9 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
             })
             .ToList();
 
-        IReadOnlyList<McpDatasetExample> examples = [];
-        if (goldenQueryService != null)
-        {
-            var goldens = await goldenQueryService.GetGoldenQueriesAsync(id.Domain, id.TableName, ct).ConfigureAwait(false);
-            var hiddenIds = GoldenQueryService.BuildHiddenIdentifierSet(hiddenCols, graphQlColumns);
-            examples = GoldenQueryService.ExcludeHiddenColumnQueries(goldens, hiddenIds)
-                .Select(g => new McpDatasetExample(g.Title, g.Description, g.QueryText, g.VariablesJson))
-                .ToList();
-        }
+        var exampleHidden = new HashSet<string>(hiddenCols, StringComparer.OrdinalIgnoreCase);
+        exampleHidden.UnionWith(columnAccessLevels.Where(kv => kv.Value == Autheris.Domain.Interfaces.ColumnAccessLevel.Deny).Select(kv => kv.Key));
+        var examples = await LoadExamplesAsync(principal, id, graphQl, graphQlColumns, exampleHidden, ct).ConfigureAwait(false);
 
         var (dataOwner, dataOwnerDelegates) = await LoadOwnersAsync(id, displayNameOnly: false, ct).ConfigureAwait(false);
 
@@ -593,41 +610,6 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
             // Fail-safe
             return (null, null);
         }
-    }
-
-    /// <summary>
-    /// Issue #111 A-4: the <c>Summary</c> answer is built from an allow-list (a property added to <see cref="McpDatasetDescription"/> is
-    /// excluded until it is listed here): identifier, sanitised display name (same trust as the description), description,
-    /// sensitivity, four-eyes flag, tags, display-name-only owners, access status and the view marker. No long description, columns, examples, GraphQL block, access hints, keys or profiles.
-    /// </summary>
-    private async Task<McpDatasetDescription> BuildSummaryDescriptionAsync(TableMetadata table, string accessStatus, string? negotiatedLanguage, string? requestedLanguage, CancellationToken ct)
-    {
-        var id = table.Identifier;
-        var (owner, delegates) = await LoadOwnersAsync(id, displayNameOnly: true, ct).ConfigureAwait(false);
-        var resolved = negotiatedLanguage != null ? table.Table.Texts.Resolve(negotiatedLanguage) : null;
-        return new McpDatasetDescription(
-            DatasetId(id),
-            McpCatalogText.DisplayName(resolved?.Title ?? table.Table.DisplayName, id.TableName),
-            id.Domain,
-            id.Schema,
-            id.TableName,
-            resolved?.Description ?? table.Table.Description,
-            LongDescription: null,
-            table.Table.Sensitivity,
-            table.Table.RequiresFourEyes,
-            Columns: [],
-            Examples: [],
-            GraphQl: null,
-            OtherAccess: null,
-            Tags: table.CatalogTags,
-            DataOwner: owner,
-            DataOwnerDelegates: delegates,
-            AccessStatus: accessStatus,
-            Indexes: null,
-            View: SummaryView,
-            Language: negotiatedLanguage,
-            RequestedLanguage: requestedLanguage,
-            Size: DatasetSizeClassifier.Resolve(table));
     }
 
     private async Task<McpDatasetDescription> DescribeProcedureDatasetAsync(ClaimsPrincipal principal, string dataset, CancellationToken ct)
@@ -958,7 +940,6 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         var (table, shape) = await FindVisibleAsync(principal, dataset, ct).ConfigureAwait(false);
         if (shape != CatalogOutputShape.Full)
         {
-            // rows are read only for a Full shape; a Summary row exposes no sample rows.
             throw new GatewayForbiddenException("Sample rows require full catalog access to the dataset.");
         }
 
@@ -1167,7 +1148,8 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
     {
         if (IsBypassed)
         {
-            return (await _metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false), true);
+            return (await CatalogTablePageReader.ReadAllAsync(
+                _metadataRepository, new CatalogTableQuery(IncludeInactive: false), ct: ct).ConfigureAwait(false), true);
         }
 
         if (visibility == null)
@@ -1183,8 +1165,14 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
     {
         if (IsBypassed)
         {
-            var all = await _metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
-            return all.Select(t => DatasetId(t.Identifier)).ToHashSet(StringComparer.Ordinal);
+            var wanted = graphQl.Relations.Select(r => r.Target).Distinct().ToList();
+            if (wanted.Count == 0)
+            {
+                return new HashSet<string>(StringComparer.Ordinal);
+            }
+
+            var found = await _metadataRepository.GetTablesAsync(wanted, ct).ConfigureAwait(false);
+            return found.Select(t => DatasetId(t.Identifier)).ToHashSet(StringComparer.Ordinal);
         }
 
         if (visibility == null)

@@ -43,6 +43,10 @@ public sealed class ExternalCatalogReader(
     public const int MaxChangesLimit = 500;
     private const string CatalogReadAdminPermission = "Autheris.Catalog.Read.Admin";
 
+    /// <summary>Issue #798: fixed text of an unknown <c>accessStatus</c> value (the value is never echoed).</summary>
+    internal const string InvalidAccessStatusMessage =
+        "Invalid accessStatus filter. Allowed values: granted, requested, expired, none (or GRANTED, PENDING, EXPIRED, REQUEST_ACCESS).";
+
     private readonly ITableMetadataRepository _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
     private readonly IDiscoveryService _discoveryService = discoveryService ?? throw new ArgumentNullException(nameof(discoveryService));
     private readonly IConsentRepository _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
@@ -81,12 +85,24 @@ public sealed class ExternalCatalogReader(
             }
         }
 
+        if (!CatalogAccessStatus.TryParseFilter(query.AccessStatus, out var accessFilter))
+        {
+            return ExternalCatalogResult.Fail<ExternalCatalogPageDto>(400, "INVALID_QUERY", InvalidAccessStatusMessage);
+        }
+
         int pageSize = Math.Clamp(query.PageSize <= 0 ? DefaultPageSize : query.PageSize, 1, MaxPageSize);
         var (allTables, versions, visibility) = await LoadContextAsync(user, tenantId, ct).ConfigureAwait(false);
 
+        // Issue #798: an app-only caller has no caller access state (callerState is null), so there is nothing to filter on.
+        if (accessFilter is not null && visibility.IsServicePrincipal)
+        {
+            return ExternalCatalogResult.Fail<ExternalCatalogPageDto>(400, "INVALID_QUERY", "The accessStatus filter applies to user callers only.");
+        }
+
+        // The access filter runs in the discovery service, before the total and the cursor are computed below.
         List<ExternalCatalogObjectDto> allDtos = visibility.IsServicePrincipal
             ? await BuildAppCatalogObjectsAsync(allTables, tenantId, versions, visibility, ct).ConfigureAwait(false)
-            : await BuildUserCatalogObjectsAsync(user, tenantId, allTables, versions, visibility, ct).ConfigureAwait(false);
+            : await BuildUserCatalogObjectsAsync(user, tenantId, allTables, versions, visibility, accessFilter, ct).ConfigureAwait(false);
 
         var filtered = ApplyFilters(allDtos, query, kindFilter)
             .OrderBy(static o => o.ObjectId, StringComparer.OrdinalIgnoreCase)
@@ -222,7 +238,7 @@ public sealed class ExternalCatalogReader(
                     c.DisplayName,
                     c.DataType,
                     c.Description,
-                    IsSensitive = ClassificationMetadata.IsColumnSensitive(table, c),
+                    Classified = ClassificationMetadata.IsColumnSensitive(table, c),
                     c.DiscoveryHidden,
                     c.WriteProtected,
                     masking = DefaultMaskingState(table, c)
@@ -344,6 +360,7 @@ public sealed class ExternalCatalogReader(
         IReadOnlyList<TableMetadata> allTables,
         IReadOnlyDictionary<string, CatalogObjectVersionRow> versions,
         CallerVisibility visibility,
+        DiscoveryAccessState? accessFilter,
         CancellationToken ct)
     {
         var byId = allTables.ToDictionary(static t => t.Identifier);
@@ -354,7 +371,7 @@ public sealed class ExternalCatalogReader(
         while (true)
         {
             var page = await _discoveryService.ListAsync(
-                new DiscoveryQuery(First: DiscoveryService.MaxPageSize, After: after, Surface: DiscoverySurface.Rest),
+                new DiscoveryQuery(First: DiscoveryService.MaxPageSize, After: after, Surface: DiscoverySurface.Rest, Access: accessFilter),
                 caller,
                 ct).ConfigureAwait(false);
 
@@ -531,8 +548,8 @@ public sealed class ExternalCatalogReader(
                     continue;
                 }
 
-                var isSensitive = ClassificationMetadata.IsColumnSensitive(table, col);
-                bool pii = isSensitive || CatalogPiiDetector.IsPii(col.ColumnName, isSensitive);
+                var classified = ClassificationMetadata.IsColumnSensitive(table, col);
+                bool pii = classified || CatalogPiiDetector.IsPii(col.ColumnName, classified);
                 list.Add(new ExternalCatalogColumnDto(
                     Name: col.ColumnName,
                     DisplayName: col.DisplayName,
@@ -542,7 +559,7 @@ public sealed class ExternalCatalogReader(
                     Sensitivity: pii ? "SENSITIVE" : "NORMAL",
                     Pii: pii,
                     DefaultMaskingState: DefaultMaskingState(table, col),
-                    ColumnSecurity: isSensitive,
+                    ColumnSecurity: classified,
                     Hidden: true,
                     WriteProtected: col.WriteProtected,
                     AccessState: includeAccessState ? DiscoveryColumnState.NoAccess.ToString().ToLowerInvariant() : null,

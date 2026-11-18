@@ -16,14 +16,20 @@ public sealed class GrantValidityOptions
     public string MaxDuration { get; set; } = string.Empty;
 
     /// <summary>
-    /// Default ISO-8601 duration applied when a consent request omits an explicit validity window or timestamp (for example, <c>P1Y</c>). Must not exceed <see cref="MaxDuration"/>.
+    /// Default ISO-8601 duration applied when a consent request omits an explicit validity window or timestamp (for example, <c>P1Y</c>). Must not exceed <c>MaxDuration</c>.
     /// </summary>
     public string DefaultDuration { get; set; } = string.Empty;
 
     /// <summary>
-    /// Maximum allowed ISO-8601 duration for declarative manifest grants (defaults to <see cref="MaxDuration"/> when omitted).
+    /// Maximum allowed ISO-8601 duration for declarative manifest grants (defaults to <c>MaxDuration</c> when omitted).
     /// </summary>
     public string? DeclarativeMaxDuration { get; set; }
+
+    /// <summary>
+    /// Maximum number of days a per-classification Clear access may last when the classification defines no
+    /// <c>max_clear_days</c> of its own. The effective Clear validity is additionally bounded by the grant validity.
+    /// </summary>
+    public int DefaultMaxClearDays { get; set; } = 90;
 
     /// <summary>
     /// Test/unit default (multi-year) for service construction without dependency injection. It is NOT a production

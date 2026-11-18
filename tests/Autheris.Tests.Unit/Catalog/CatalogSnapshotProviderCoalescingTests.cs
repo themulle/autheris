@@ -61,8 +61,7 @@ public sealed class CatalogSnapshotProviderCoalescingTests
             .Returns(_ => new ValueTask<CatalogVersion>(version));
 
         var repo = Substitute.For<IGovernanceRepository>();
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(_ =>
+        repo.StubAllTables(_ =>
             {
                 lock (refreshTimestamps)
                 {
@@ -111,8 +110,7 @@ public sealed class CatalogSnapshotProviderCoalescingTests
             .Returns(_ => new ValueTask<CatalogVersion>(version));
 
         var repo = Substitute.For<IGovernanceRepository>();
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(_ => Task.FromResult<IReadOnlyList<TableMetadata>>([CreateTable($"t_{version.StructureVersion}")]));
+        repo.StubAllTables(_ => Task.FromResult<IReadOnlyList<TableMetadata>>([CreateTable($"t_{version.StructureVersion}")]));
         repo.GetAllRelationsAsync(Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<TableRelation>>(Array.Empty<TableRelation>()));
 
@@ -152,8 +150,7 @@ public sealed class CatalogSnapshotProviderCoalescingTests
             .Returns(_ => new ValueTask<CatalogVersion>(version));
 
         var repo = Substitute.For<IGovernanceRepository>();
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(async _ =>
+        repo.StubAllTables(async _ =>
             {
                 var call = Interlocked.Increment(ref loadCallCount);
                 if (call == 1)
@@ -208,8 +205,7 @@ public sealed class CatalogSnapshotProviderCoalescingTests
                 : ValueTask.FromException<CatalogVersion>(versionFailure));
 
         var repo = Substitute.For<IGovernanceRepository>();
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(_ => tableFailure is null
+        repo.StubAllTables(_ => tableFailure is null
                 ? Task.FromResult<IReadOnlyList<TableMetadata>>([initialTable])
                 : Task.FromException<IReadOnlyList<TableMetadata>>(tableFailure));
         repo.GetAllRelationsAsync(Arg.Any<CancellationToken>())
@@ -266,8 +262,7 @@ public sealed class CatalogSnapshotProviderCoalescingTests
             .Returns(_ => new ValueTask<CatalogVersion>(version));
 
         var repo = Substitute.For<IGovernanceRepository>();
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(_ =>
+        repo.StubAllTables(_ =>
             {
                 var n = Interlocked.Increment(ref loadCount);
                 return Task.FromResult<IReadOnlyList<TableMetadata>>([CreateTable($"orders_{n}")]);

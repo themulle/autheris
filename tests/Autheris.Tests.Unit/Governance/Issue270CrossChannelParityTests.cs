@@ -50,7 +50,7 @@ public sealed class Issue270CrossChannelParityTests
 
     private async Task<IRequestExecutor> CreateExecutorAsync(TableMetadata metadata, ClaimsPrincipal principal)
     {
-        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([metadata]);
+        _metadataRepo.StubAllTables([metadata]);
         _relationRepo.GetRelationsForTableAsync(_empTableId, Arg.Any<CancellationToken>()).Returns([]);
 
         var services = new ServiceCollection();
@@ -89,14 +89,14 @@ public sealed class Issue270CrossChannelParityTests
             Columns =
             [
                 new TableColumn { ColumnName = "id", DataType = "int" },
-                new TableColumn { ColumnName = "ssn", DataType = "bigint", IsSensitive = true }
+                new TableColumn { ColumnName = "ssn", DataType = "bigint" }
             ],
             PrimaryKeyColumns = ["id"],
             ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
             {
                 ["ssn"] = baseRule
             }
-        };
+        }.WithPii("ssn");
 
         const long rawSsn = 123456789L;
         // 1. Compute pseudonym as WebSQL / REST does via the unified IColumnMaskingProvider

@@ -374,14 +374,14 @@ public sealed class ProfileAssignmentTests
         private List<ConsentWorkflowRoute> Routes { get; } = [];
 
         public static TableMetadata BuildTable(string domain, string schema, string name, string sensitivity) => new()
-        {
+        { ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("secret_ssn"),
             Table = new Table { Id = Guid.NewGuid(), SchemaName = schema, TableName = name, Sensitivity = sensitivity },
             Identifier = new TableIdentifier(domain, schema, name),
             Columns =
             [
-                new TableColumn { ColumnName = "id", IsSensitive = false },
-                new TableColumn { ColumnName = "total", IsSensitive = false },
-                new TableColumn { ColumnName = "secret_ssn", IsSensitive = true }
+                new TableColumn { ColumnName = "id" },
+                new TableColumn { ColumnName = "total" },
+                new TableColumn { ColumnName = "secret_ssn" }
             ]
         };
 

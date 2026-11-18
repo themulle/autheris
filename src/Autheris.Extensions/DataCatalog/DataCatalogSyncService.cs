@@ -117,6 +117,7 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
 
             var maskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase);
             var tableColumns = new List<TableColumn>();
+            var flaggedColumns = new List<TableColumn>();
 
             foreach (var col in tableAsset.Columns)
             {
@@ -129,15 +130,10 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
                                    col.Classifications.Any(c => catalogOpts.GdprArticle9Tags.Contains(c, StringComparer.OrdinalIgnoreCase));
                 isArt9 |= isArt9Column;
 
-                var isSensitive = matchedTag != null || isArt9Column || col.Tags.Any(t => catalogOpts.PiiTags.Contains(t, StringComparer.OrdinalIgnoreCase));
+                var flagged = matchedTag != null || isArt9Column || col.Tags.Any(t => catalogOpts.PiiTags.Contains(t, StringComparer.OrdinalIgnoreCase));
 
-                // Ratchet: Never downgrade sensitive status if existing column is already sensitive
-                var existingCol = existing?.Columns?.FirstOrDefault(c => string.Equals(c.ColumnName, col.ColumnName, StringComparison.OrdinalIgnoreCase));
-                if (existingCol?.IsSensitive == true)
-                {
-                    isSensitive = true;
-                }
-
+                // Ratchet: a flagged column receives the PII classification; persisting classifications is additive, so an
+                // existing classification of the column is never removed.
                 if (matchedTag != null && catalogOpts.TagToMaskingRuleMap.TryGetValue(matchedTag, out var ruleType))
                 {
                     maskedColumns++;
@@ -157,14 +153,18 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
                     };
                 }
 
-                tableColumns.Add(new TableColumn
+                var tableColumn = new TableColumn
                 {
                     ColumnName = col.ColumnName,
                     DataType = col.DataType,
-                    IsSensitive = isSensitive,
                     Description = col.Description,
                     DocumentationSource = "DataCatalog"
-                });
+                };
+                tableColumns.Add(tableColumn);
+                if (flagged)
+                {
+                    flaggedColumns.Add(tableColumn);
+                }
             }
 
             if (isArt9)
@@ -224,7 +224,8 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
                     IsActive = existing != null ? existing.Table.IsActive : activateNewTables
                 },
                 Columns = tableColumns,
-                ColumnMaskingRules = maskingRules
+                ColumnMaskingRules = maskingRules,
+                ColumnClassifications = ClassificationMetadata.AssignPii(flaggedColumns, "DATACATALOG")
             };
 
             // Issue #94 (D-8): a declared primary key / indexes of the asset, else the IsPrimaryKey column flags (column order),

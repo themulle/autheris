@@ -111,8 +111,7 @@ public sealed class PreAuthRateLimitAndProtocolKillSwitchTests
         var consentRepo = Substitute.For<IConsentRepository>();
         var execService = Substitute.For<IGatewayExecutionService>();
 
-        metaRepo.GetAllTablesAsync(Arg.Any<System.Threading.CancellationToken>())
-            .Returns(new System.Collections.Generic.List<TableMetadata>());
+        metaRepo.StubAllTables(new System.Collections.Generic.List<TableMetadata>());
 
         var disabledOptions = new GatewayOptions
         {
@@ -148,8 +147,7 @@ public sealed class PreAuthRateLimitAndProtocolKillSwitchTests
         var consentRepo = Substitute.For<IConsentRepository>();
         var execService = Substitute.For<IGatewayExecutionService>();
 
-        metaRepo.GetAllTablesAsync(Arg.Any<System.Threading.CancellationToken>())
-            .Returns(new System.Collections.Generic.List<TableMetadata>());
+        metaRepo.StubAllTables(new System.Collections.Generic.List<TableMetadata>());
 
         var enabledOptions = new GatewayOptions
         {

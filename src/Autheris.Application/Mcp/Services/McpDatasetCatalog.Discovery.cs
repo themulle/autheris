@@ -26,6 +26,7 @@ public sealed partial class McpDatasetCatalog
         string? language,
         bool? overview,
         string? format,
+        DiscoveryAccessState? access,
         CancellationToken ct)
     {
         var negotiatedLanguage = _languageNegotiator?.NegotiateLanguage(
@@ -40,7 +41,7 @@ public sealed partial class McpDatasetCatalog
         if (overview == true)
         {
             var allPage = await _discoveryService!.ListAsync(
-                new DiscoveryQuery(domain, Schema: null, search, tag, negotiatedLanguage, First: 10_000, After: 0, DiscoverySurface.Mcp),
+                new DiscoveryQuery(domain, Schema: null, search, tag, negotiatedLanguage, First: 10_000, After: 0, DiscoverySurface.Mcp, access),
                 caller,
                 ct).ConfigureAwait(false);
             var domainCounts = allPage.Items
@@ -70,7 +71,7 @@ public sealed partial class McpDatasetCatalog
         if (_procedureCatalog == null)
         {
             var page = await _discoveryService!.ListAsync(
-                new DiscoveryQuery(domain, Schema: null, search, tag, negotiatedLanguage, First: effectiveLimit, After: effectiveOffset, DiscoverySurface.Mcp),
+                new DiscoveryQuery(domain, Schema: null, search, tag, negotiatedLanguage, First: effectiveLimit, After: effectiveOffset, DiscoverySurface.Mcp, access),
                 caller,
                 ct).ConfigureAwait(false);
             var pagedOnly = new List<McpDatasetSummary>(page.Items.Count);
@@ -82,8 +83,9 @@ public sealed partial class McpDatasetCatalog
             return BuildDiscoveryListResult(pagedOnly, page.TotalCount, effectiveOffset, effectiveLimit, format, negotiatedLanguage, language);
         }
 
+        // The registered procedures are listed below; the discovery page carries tables only.
         var tablePage = await _discoveryService!.ListAsync(
-            new DiscoveryQuery(domain, Schema: null, search, tag, negotiatedLanguage, First: 10_000, After: 0, DiscoverySurface.Mcp),
+            new DiscoveryQuery(domain, Schema: null, search, tag, negotiatedLanguage, First: 10_000, After: 0, DiscoverySurface.Mcp, access, IncludeProcedures: false),
             caller,
             ct).ConfigureAwait(false);
         foreach (var obj in tablePage.Items)
@@ -96,7 +98,10 @@ public sealed partial class McpDatasetCatalog
             candidates.Add(($"{obj.Domain}.{obj.Schema}.{obj.Name}", obj, null));
         }
 
-        var visibleProcs = await _procedureCatalog.ListVisibleAsync(principal, principal.GetTenantId(), ct).ConfigureAwait(false);
+        // Procedures are listed as GRANTED; any other access filter leaves them out.
+        var visibleProcs = access is null or DiscoveryAccessState.Granted
+            ? await _procedureCatalog.ListVisibleAsync(principal, principal.GetTenantId(), ct).ConfigureAwait(false)
+            : [];
         foreach (var proc in visibleProcs.Where(p => p.Definition.Mode == ProcedureMode.Read && !string.IsNullOrWhiteSpace(p.Definition.ResultTable)))
         {
             var def = proc.Definition;
@@ -330,15 +335,9 @@ public sealed partial class McpDatasetCatalog
             .Select(static c => c.Name)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        IReadOnlyList<McpDatasetExample> examples = [];
-        if (!brief && goldenQueryService != null)
-        {
-            var goldens = await goldenQueryService.GetGoldenQueriesAsync(obj.Domain, obj.Name, ct).ConfigureAwait(false);
-            var hiddenIds = GoldenQueryService.BuildHiddenIdentifierSet(hiddenCols, graphQlColumns);
-            examples = GoldenQueryService.ExcludeHiddenColumnQueries(goldens, hiddenIds)
-                .Select(g => new McpDatasetExample(g.Title, g.Description, g.QueryText, g.VariablesJson))
-                .ToList();
-        }
+        IReadOnlyList<McpDatasetExample> examples = brief
+            ? []
+            : await LoadExamplesAsync(principal, id, graphQl, graphQlColumns, ExampleHiddenColumns(hiddenCols, graphQl, obj), ct).ConfigureAwait(false);
 
         var graphQlAccess = brief || graphQl == null
             ? null
@@ -368,13 +367,7 @@ public sealed partial class McpDatasetCatalog
             RequestedLanguage: language);
     }
 
-    private static string MapDiscoveryAccessStatus(DiscoveryAccessState state) => state switch
-    {
-        DiscoveryAccessState.Granted => "GRANTED",
-        DiscoveryAccessState.Requested => "PENDING",
-        DiscoveryAccessState.Expired => "EXPIRED",
-        _ => "REQUEST_ACCESS"
-    };
+    private static string MapDiscoveryAccessStatus(DiscoveryAccessState state) => CatalogAccessStatus.Of(state);
 
     private static bool Matches(TableMetadata table, string search)
     {
@@ -401,8 +394,7 @@ public sealed partial class McpDatasetCatalog
             return true;
         }
 
-        // A Summary row matches on identifier and description only; Full rows carry no DENY-masked column (removed by the engine).
-        if (table.CatalogView != CatalogView.Summary && table.Columns.Count > 0)
+        if (table.Columns.Count > 0)
         {
             foreach (var c in table.Columns)
             {

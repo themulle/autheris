@@ -312,7 +312,8 @@ internal sealed class ExternalCatalogTestHarness : IAsyncDisposable
         long? changedSince = null,
         string? cursor = null,
         int? pageSize = null,
-        string? ifNoneMatch = null)
+        string? ifNoneMatch = null,
+        string? accessStatus = null)
     {
         if (!(await AuthorizeAsync(caller, GatewayPolicies.CatalogRead)).Succeeded)
         {
@@ -334,6 +335,7 @@ internal sealed class ExternalCatalogTestHarness : IAsyncDisposable
             changedSince,
             cursor,
             pageSize,
+            accessStatus,
             CancellationToken.None);
         return await ExecuteResultAsync(ctx, result);
     }

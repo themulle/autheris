@@ -1,5 +1,5 @@
--- phase3: MIG-0023
--- Governance schema step 0023 (SQL Server): data products (OD-44): product definitions, their definition history and data-source owners.
+-- phase3: MIG-0028
+-- Governance schema step 0028 (SQL Server): data products (OD-44): product definitions, their definition history and data-source owners.
 
 IF OBJECT_ID(N'dbo.DATA_PRODUCTS', N'U') IS NULL
 BEGIN

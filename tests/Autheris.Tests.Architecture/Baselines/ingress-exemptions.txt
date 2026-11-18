@@ -171,7 +171,6 @@ scope src/Autheris.Application/Audit/AuditRetentionPurgeWorker.cs | exempt: audi
 scope src/Autheris.Application/Catalog/CatalogSnapshotProvider.cs | exempt: infrastructure background work (catalog snapshot refresh); reaches no governed data
 scope src/Autheris.Application/Catalog/Search/OllamaEmbeddingGenerator.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Application/Events/InMemoryGatewayEventBus.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
-scope src/Autheris.Application/Governance/Services/CatalogVisibilityMetrics.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Application/Policy/RowScopes/PatternCoverageMonitor.cs | exempt: infrastructure background work (pattern grant catalog epoch monitor); governance repositories only, reaches no governed data
 scope src/Autheris.Application/Procedures/Services/ProcedureRegistrationService.cs | exempt: procedure registry sync; reaches no governed data
 scope src/Autheris.Application/Products/FederationProductQueryRunner.cs | copy: stamps the WebSql ingress transport in the load scope; the definer run is judged by the WebSql transport flag of every source it reads

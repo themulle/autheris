@@ -61,10 +61,10 @@ public sealed class PostgreSqlDemoSeedParityTests(GovernancePostgresFixture post
         (await CountAsync(connectionString, "SELECT COUNT(*) FROM TABLE_RELATIONS")).ShouldBe(1);
         (await CountAsync(connectionString, "SELECT COUNT(*) FROM TABLE_RELATION_KEYS")).ShouldBe(1);
         (await CountAsync(connectionString,
-            "SELECT COUNT(*) FROM COLUMN_MASKING_RULES m JOIN TABLE_COLUMNS c ON c.id = m.table_column_id WHERE c.column_name = 'email' AND m.rule_type <> 'REGEX'"))
+            "SELECT COUNT(*) FROM COLUMN_MASK_OVERRIDES m JOIN TABLE_COLUMNS c ON c.id = m.table_column_id WHERE c.column_name = 'email' AND m.mask_function <> 'TYPE_SAFE_REDACT'"))
             .ShouldBe(0);
         (await CountAsync(connectionString,
-            "SELECT COUNT(*) FROM COLUMN_MASKING_RULES m JOIN TABLE_COLUMNS c ON c.id = m.table_column_id WHERE c.column_name = 'sensitive_note' AND m.rule_type = 'REDACT'"))
+            "SELECT COUNT(*) FROM COLUMN_MASK_OVERRIDES m JOIN TABLE_COLUMNS c ON c.id = m.table_column_id WHERE c.column_name = 'sensitive_note' AND m.params_json LIKE '%CONFIDENTIAL NOTE%'"))
             .ShouldBe(1);
     }
 

@@ -466,7 +466,7 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
         var repo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(ci => Task.FromResult<TableMetadata?>(known.FirstOrDefault(t => t.Identifier.Equals(ci.Arg<TableIdentifier>()))));
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(catalog));
+        repo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(catalog));
 
         var writeConsents = new List<Consent>();
         if (permissiveWrite)

@@ -390,6 +390,7 @@ public sealed class CutoverArchitectureTests
         // -- governed SQL: compiled text only --
         ("TrinoSqlEngine.Ast.Emit.DbCommandCompiledSqlBinder", "the binder: the only place that turns CompiledSql into command text"),
         ("Autheris.Infrastructure.Persistence.BindByNameOracleCommand", "DbCommand decorator: forwards the text the binder gave it to the Oracle command (BindByName)"),
+        ("Autheris.Infrastructure.Persistence.GoldenQueries.GoldenQueryStoreOperations", "governance-store access with fixed, parameterised SQL constants (golden queries); no caller-supplied text"),
         ("Autheris.Infrastructure.Persistence.MetadataGuardedCommand", "DbCommand decorator: forwards the text to the inner command; the text is checked before every execution"),
         // -- the allowed exceptions of §28.9 (the text comes from the typed IR / the compiler, never from a client string) --
         ("Autheris.Application.Sql.Tree.GovernedTreeQueryService", "§28.9 OQ-GQL: executes compiled.Sql of the GraphQL tree compiler"),

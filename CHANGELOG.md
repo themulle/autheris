@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- `search_catalog` hits and `find_relevant_tables` candidates carry `accessStatus`, the caller's own status as `list_datasets` reports it (`GRANTED`, `PENDING`, `EXPIRED`, `REQUEST_ACCESS`); the REST `/api/v1/catalog/search` hits carry it too. `find_relevant_tables` recommends an access request instead of the query tools for candidates the caller cannot read (#804).
+- Optional `accessStatus` filter on `list_datasets`, `search_catalog`, `find_relevant_tables` and `GET /api/v1/catalog/objects` (`granted`, `requested`, `expired`, `none` there), applied before ranking, limit and paging, so `total`, `nextOffset`, `totalCount` and `nextCursor` count the filtered set. The filter evaluates only the caller's grant candidates: one consent read per request and one access decision per table the caller holds a grant on, kept for the whole request (also across the internal pages of the REST list), not one per catalog table. Empty and unknown values are rejected (#798, #804).
+
+### Changed
+- `consents/apply` treats more differences as a change and replaces the stored consent (#806):
+  - An active consent with write rules, row scopes or classification access (for example the write grant of an approved consent request) is now revoked and replaced by the declarative consent when a manifest policy for the same grantee and table is applied. The manifest never creates these, so such a consent no longer counts as `unchanged`.
+  - An earlier `validUntil` is a change for group policies too (before: individual grants only). Group grants stored with a later expiry than the manifest's `validUntil` are therefore replaced once on the first apply after the upgrade. A later `validUntil` still never extends a grant.
+  - A row filter `valueType` or filter group difference is a change (before: ignored).
+- F-GOV-15 shows a group and a user manifest instead of a role grantee and describes the current apply rules (`validUntil` for every policy, no `validityDays`, no role grantees) and the four-eyes rule for individual grantees, including how to seed test and demo environments; F-GOV-22 explains `INDIVIDUAL_GRANT_REQUIRES_FOUR_EYES` on the manifest path; the simplification migration guide describes what the upgrade does to role consents (#800, #801).
+
+### Fixed
+- `consents/apply` is idempotent for columns with several rules, for example a base rule plus a scope rule on the same column (#806). Column rules and row filters are compared as multisets independent of order, scopes as sets in their stored form. Re-applying an unchanged manifest reports `unchanged` and writes no revocation, consent, grant record, audit entry or epoch bump. Duplicated rules or scopes can no longer hide a difference.
+- `consents/apply` ignores the grantee's pattern grants (#806). The subject read also returns the grantee's pattern grants of the whole domain. Before, a matching pattern grant, even one for another table, could count as the identical consent (no grant was created for the table), and a changed policy revoked the grantee's domain-wide pattern grants.
+- Consent manifests (`consents/apply`) and consent request decisions (column masking input) reject a scope entry that is blank or contains a comma with `400` before anything is written. The store keeps a rule's scopes comma-separated and drops empty entries on read, so `applicableScopes: [" "]` silently became a base rule for every scope (for example `Clear` for all callers instead of one scope), and a comma split one entry into several scopes. An empty list still sets the base level (#806).
+
 ## [1.8.5] - 2026-11-17
 
 ### Added
@@ -65,6 +81,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - OpenSchema removal (OD-19): The `Gateway:OpenSchema` and `Gateway:Catalog:OpenSchema` keys were removed and setting either key triggers startup failure via `LegacySwitchGuard`. Anonymous catalog access is not supported. Authenticated users discover the catalog by default ("visible unless hidden"); objects and columns can be explicitly hidden using `PUT /api/v1/catalog/datasets/{id}/discovery`, and the legacy `visibility` tier is ignored.
 - MCP `search_catalog` and `find_relevant_tables` name a table hit and its join targets with the `list_datasets` id `domain.schema.table` instead of `domain.table` (`table`, `join_relations[].target_table`, `candidates[].dataset`, `candidates[].relations[].targetTable`), so a hit can be passed to `describe_dataset` and tables with the same name in two schemas are distinct hits (#627). `join_condition` keeps the table names.
 - An unsupported governance provider fails startup: `Gateway:GovernanceDb:Provider` accepts only `PostgreSql` (default) and `SqlServer`; `Sqlite` and SQLite connection strings are rejected in every environment, and an empty connection string fails startup. There is no migration tool from SQLite governance files. The deploy stack (compose, Helm, benchmark) uses PostgreSQL and the `governance-seed` container is removed. See [Governance store migration](docs/operations/migration-simplification.md#3-governance-store-migration-postgresql-and-sql-server).
+- Role grantees retired (ADR-020): a role never matches a grant. `POST /api/v1/governance/consents/apply` refuses a policy with `granteeType: "Role"` (any effect) for a table registered in the catalog with `400 BAD_REQUEST`, and every such manifest policy, group and `Deny` policies included, needs an absolute `validUntil` within `Gateway:Governance:Grants:DeclarativeMaxDuration` (`MaxDuration` when unset); `validityDays` has no effect. Governance step `0011_role_grantee_and_profile_assignment_retirement` revokes every non-`Deny` role consent on upgrade (revoke reason `ADR020_ROLE_GRANTEE_UNSUPPORTED`) and deactivates access profile assignments; role `Deny` consents stay and keep restricting. The canonical ClusterAdmin lists the revoked consents with `GET /api/v1/admin/authz/migration-report`; re-create the access as group grants. See [Role grantees and declarative consent manifests](docs/operations/migration-simplification.md#4-role-grantees-and-declarative-consent-manifests-180).
 - SQLite data-source support removed (OD-2): `Gateway:DataSources:*` with `Provider = "Sqlite"` (or `"sqlite3"`) or an empty `Provider` fails startup fail-closed with `UnsupportedDataSourceDialectException`; `Microsoft.Data.Sqlite` is removed from production and module projects.
 
 ### Added
@@ -78,7 +95,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Catalog search: BM25F per-field weights and matching query tokens as parts of indexed words.
 
 ### Changed
-- Grant validity: grants may be valid for several years. There is no compiled-in maximum; `Gateway:Governance:Grants:MaxDuration` and `DeclarativeMaxDuration` are required configuration (startup fails without them), and `Gateway:Governance:IndividualGrants:*` are optional operator limits. The former per-class ceilings (180/90/30/7/365/90 days) and the group exemption are gone. REST requests without a duration use `DefaultDuration`.
+- Grant validity: grants may be valid for several years. There is no compiled-in maximum; `Gateway:Governance:Grants:MaxDuration` and `DefaultDuration` are required configuration (startup fails without them), `DeclarativeMaxDuration` is optional and defaults to `MaxDuration`, and `Gateway:Governance:IndividualGrants:*` are optional operator limits. The former per-class ceilings (180/90/30/7/365/90 days) and the group exemption are gone. REST requests without a duration use `DefaultDuration`.
 - Governance schema steps `0013` to `0022` are new (`0012_dbt_unique_id` stays as released); only PostgreSQL and SQL Server are supported governance stores.
 - Authentication and authorization core with direct and upstream-header modes; the Casbin engine and its options were deleted.
 

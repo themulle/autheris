@@ -51,7 +51,8 @@ public sealed record CatalogSearchQuery(
     float MinRelevanceScore = 0.01f,
     bool ExpandRelations = true,
     int MaxRelationsPerHit = 3,
-    string? Language = null);
+    string? Language = null,
+    DiscoveryAccessState? AccessStatus = null);
 
 /// <summary>
 /// Repräsentiert einen einzelnen bewerteten Treffer der Katalogsuche mit Schema- und Join-Details.
@@ -72,7 +73,8 @@ public sealed record CatalogSearchHit(
     string Kind = "table",
     string? DatasetId = null,
     string? EffectiveMode = null,
-    string? Language = null);
+    string? Language = null,
+    string? AccessStatus = null);
 
 /// <summary>
 /// Typed key uniquely identifying an entity in the catalog index.

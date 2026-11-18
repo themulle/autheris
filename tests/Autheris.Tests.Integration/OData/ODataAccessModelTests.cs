@@ -118,8 +118,8 @@ public sealed class ODataAccessModelTests : IClassFixture<ODataAccessModelTests.
                 new TableColumn { Id = Guid.NewGuid(), ColumnName = "id", DataType = "integer" },
                 new TableColumn { Id = Guid.NewGuid(), ColumnName = "name", DataType = "varchar" },
                 new TableColumn { Id = regionColId, ColumnName = "region", DataType = "varchar" },
-                new TableColumn { Id = emailColId, ColumnName = "email", DataType = "varchar", IsSensitive = true },
-                new TableColumn { Id = Guid.NewGuid(), ColumnName = "secret_notes", DataType = "varchar", IsSensitive = true }
+                new TableColumn { Id = emailColId, ColumnName = "email", DataType = "varchar" },
+                new TableColumn { Id = Guid.NewGuid(), ColumnName = "secret_notes", DataType = "varchar" }
             ],
             ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
             {
@@ -130,7 +130,7 @@ public sealed class ODataAccessModelTests : IClassFixture<ODataAccessModelTests.
                     Replacement = "***REDACTED***"
                 }
             }
-        });
+        }.WithPii("email", "secret_notes"));
 
         var meta = (await repo.GetTableMetadataAsync(CustomersTable))!;
         var persistedRegionCol = meta.Columns.Single(c => c.ColumnName == "region");

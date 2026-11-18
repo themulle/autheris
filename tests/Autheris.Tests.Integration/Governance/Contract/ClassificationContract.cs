@@ -184,6 +184,17 @@ public abstract class ClassificationContract : GovernanceContractBase
         var withInactive = await Classifications.GetClassificationsAsync(Store.TenantA.Value, includeInactive: true);
         withInactive.Select(c => c.Code).Should().Contain("RETIRED_TAG");
     }
+
+    [RequiresContainerRuntimeFact]
+    [Trait("Category", "Security")]
+    public async Task Unknown_column_id_resolves_to_no_table_and_blank_id_is_rejected()
+    {
+        if (!Store.IsAvailable) return;
+
+        (await Classifications.GetTableIdentifierByColumnIdAsync(Guid.NewGuid().ToString())).Should().BeNull();
+        Func<Task> blank = () => Classifications.GetTableIdentifierByColumnIdAsync(" ");
+        await blank.Should().ThrowAsync<ArgumentException>();
+    }
 }
 
 [Collection(GovernancePostgresCollection.Name)]

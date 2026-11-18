@@ -251,8 +251,7 @@ public sealed class SemanticMcpDispatchAndTrinoMetadataTests
         };
 
         var tableRepo = Substitute.For<ITableMetadataRepository>();
-        tableRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(new IReadOnlyList<TableMetadata>[] { [visibleTable, hiddenTable] }[0]);
+        tableRepo.StubAllTables(new IReadOnlyList<TableMetadata>[] { [visibleTable, hiddenTable] }[0]);
         Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(tableRepo);
 
         var tenantId = new TenantId("tenant-a");

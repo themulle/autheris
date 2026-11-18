@@ -221,6 +221,12 @@ public sealed class GrantValidityPolicy : IGrantValidityPolicy
                 $"'{GrantValidityOptions.SectionName}:{nameof(GrantValidityOptions.DeclarativeMaxDuration)}' must be a positive ISO-8601 duration when configured.");
         }
 
+        if (options.DefaultMaxClearDays < 1)
+        {
+            return ValidateOptionsResult.Fail(
+                $"'{GrantValidityOptions.SectionName}:{nameof(GrantValidityOptions.DefaultMaxClearDays)}' must be at least 1.");
+        }
+
         return ValidateOptionsResult.Success;
     }
 

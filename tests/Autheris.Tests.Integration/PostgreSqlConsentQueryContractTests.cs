@@ -57,10 +57,7 @@ public sealed class PostgreSqlConsentQueryContractTests : ConsentQueryContractTe
         await using var conn = new NpgsqlConnection(_db!.ConnectionString);
         await conn.OpenAsync();
         await using var cmd = new NpgsqlCommand(@"
-            INSERT INTO ROLES (id, role_name, description) VALUES (@rid, 'GovernanceAdmin', 'Governance Administrator')
-            ON CONFLICT (role_name) DO NOTHING;
-            INSERT INTO ROLE_MEMBERS (id, role_id, member_type, member_sid)
-            SELECT @m, id, 'User', @sid FROM ROLES WHERE role_name = 'GovernanceAdmin';", conn);
+            SELECT 1;", conn);
         cmd.Parameters.AddWithValue("@rid", Guid.NewGuid().ToString());
         cmd.Parameters.AddWithValue("@m", Guid.NewGuid().ToString());
         cmd.Parameters.AddWithValue("@sid", sid);
@@ -107,8 +104,6 @@ public sealed class PostgreSqlConsentQueryContractTests : ConsentQueryContractTe
     [InlineData("ix_consents_tenant_role")]
     [InlineData("ix_consent_column_rules_consent")]
     [InlineData("ix_consent_row_filters_consent")]
-    [InlineData("ix_column_masking_rules_column")]
-    [InlineData("ix_role_members_member")]
     [InlineData("ix_table_owners_owner")]
     [InlineData("ix_tables_natural_ci")]
     public async Task SEC_SC_02_Baseline_CreatesIndex(string index)

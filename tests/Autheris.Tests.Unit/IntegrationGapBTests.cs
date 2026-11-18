@@ -115,13 +115,13 @@ public sealed class IntegrationGapBTests
     {
         var table = new TableIdentifier("finance", "dbo", "ledger");
         var repo = Substitute.For<ITableMetadataRepository>();
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(new List<TableMetadata>
+        repo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(new List<TableMetadata>
         {
             new()
-            {
+            { ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("iban"),
                 Identifier = table,
                 Table = new Table { SchemaName = "dbo", TableName = "ledger", Description = "General ledger" },
-                Columns = [new TableColumn { ColumnName = "iban", DataType = "varchar", IsSensitive = true }]
+                Columns = [new TableColumn { ColumnName = "iban", DataType = "varchar" }]
             }
         }));
         Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(repo);

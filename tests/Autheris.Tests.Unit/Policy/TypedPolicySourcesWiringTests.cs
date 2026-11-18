@@ -165,14 +165,14 @@ public sealed class TypedPolicySourcesWiringTests
     // ---- SR-M-07: access profiles also apply on the unified PDP and the cross-domain (OLAP) path ------------------------
 
     private static TableMetadata MetaWithSensitiveColumn() => new()
-    {
+    { ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("ssn"),
         Identifier = Orders,
         Table = new Table { SourceName = "sales", SchemaName = "main", TableName = "orders", SourceType = "PostgreSql", IsActive = true },
         Columns =
         [
             new TableColumn { ColumnName = "id", DataType = "INTEGER" },
             new TableColumn { ColumnName = "region", DataType = "TEXT" },
-            new TableColumn { ColumnName = "ssn", DataType = "TEXT", IsSensitive = true }
+            new TableColumn { ColumnName = "ssn", DataType = "TEXT" }
         ]
     };
 

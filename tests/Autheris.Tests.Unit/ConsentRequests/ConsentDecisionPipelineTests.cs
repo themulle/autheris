@@ -226,6 +226,27 @@ public sealed class ConsentDecisionPipelineTests
         capturedConsent.CreatedBySid.ShouldBe(Approver1Sid);
     }
 
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData("\" \"")]
+    [InlineData("\"\"")]
+    [InlineData("\"Agent.Read,Report.Read\"")]
+    public async Task DecideAsync_ColumnMaskingWithBlankOrCommaScopeEntry_IsRejected_AndCreatesNoConsent(string scopeJson)
+    {
+        // Issue #806 review: a blank scope entry is stored as no scope, so the Clear rule would apply to every scope instead of one.
+        var (pipeline, approvals, _, _, _, _, _, _) = BuildSut(tableFourEyes: false);
+        var req = Request();
+        approvals.GetConsentRequestAsync(req.Id, Arg.Any<CancellationToken>()).Returns(req);
+        var masking = "[{\"columnName\":\"id\",\"accessLevel\":\"Mask\"},{\"columnName\":\"amount\",\"accessLevel\":\"Clear\",\"applicableScopes\":[" + scopeJson + "]}]";
+
+        var ex = await Should.ThrowAsync<ConsentDecisionException>(() => pipeline.DecideAsync(new ConsentDecisionCommand(
+            req.Id, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, Principal(Approver1Sid), ColumnMaskingJson: masking)));
+
+        ex.ErrorCode.ShouldBe("BAD_REQUEST");
+        ex.StatusCode.ShouldBe(400);
+        await approvals.DidNotReceiveWithAnyArgs().ExecuteAtomicApprovalWithConsentAsync(default, default!, default!, default!, default!, default);
+    }
+
     [Fact]
     [Trait("Category", "Security")]
     public async Task DecideAsync_SensitiveColumnTableWithoutFourEyesFlag_SingleApproval_CreatesTheConsentAtomically_NeverLeavesApprovedRequestWithoutConsent()
@@ -242,9 +263,9 @@ public sealed class ConsentDecisionPipelineTests
             Columns =
             [
                 plain.Columns[0],
-                new TableColumn { Id = Guid.NewGuid(), TableId = plain.Table.Id, ColumnName = "email", DataType = "VARCHAR", IsSensitive = true }
+                new TableColumn { Id = Guid.NewGuid(), TableId = plain.Table.Id, ColumnName = "email", DataType = "VARCHAR" }
             ]
-        };
+        }.WithPii("email");
         metadata.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(meta);
         var req = Request();
         approvals.GetConsentRequestAsync(req.Id, Arg.Any<CancellationToken>()).Returns(req);

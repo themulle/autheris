@@ -92,7 +92,6 @@ public sealed class Issue116ScopeOnlyColumnRuleConsistencyTests
             {
                 SourceName = "sales", SchemaName = "public", TableName = "orders",
                 DisplayName = "sales.orders", Sensitivity = "NORMAL",
-                Visibility = DatasetVisibility.Hidden
             },
             Columns =
             [

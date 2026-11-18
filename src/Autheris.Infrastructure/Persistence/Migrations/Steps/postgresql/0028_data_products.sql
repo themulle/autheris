@@ -1,5 +1,5 @@
--- phase3: MIG-0023
--- Governance schema step 0023 (PostgreSQL): data products (OD-44): product definitions, their definition history and data-source owners.
+-- phase3: MIG-0028
+-- Governance schema step 0028 (PostgreSQL): data products (OD-44): product definitions, their definition history and data-source owners.
 
 CREATE TABLE IF NOT EXISTS data_products (
     tenant_id          VARCHAR(128)   NOT NULL,

@@ -8,12 +8,12 @@ using Xunit;
 namespace Autheris.Tests.Unit.Persistence.Migrations;
 
 [Trait("Category", "Security")]
-public sealed class DataProductsMigration0023Tests
+public sealed class DataProductsMigration0028Tests
 {
     private static readonly string[] Tables = ["DATA_PRODUCTS", "DATA_PRODUCT_VERSIONS", "DATA_SOURCE_OWNERS"];
 
     [Fact]
-    public void Migration0023_ExistsPassesStepSqlLintAndKeepsTheTenantInEveryKey()
+    public void Migration0028_ExistsPassesStepSqlLintAndKeepsTheTenantInEveryKey()
     {
         var registered = Enum.GetValues<GovernanceTable>().Select(t => t.ToSqlName()).ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var table in Tables)
@@ -25,12 +25,12 @@ public sealed class DataProductsMigration0023Tests
         foreach (var engine in new[] { "postgresql", "sqlserver" })
         {
             var steps = SqlMigrationStep.LoadEmbedded(engine);
-            var step = steps.Single(s => s.Version == 23 && s.Name == "data_products");
-            step.Phase3Marker.ShouldBe("MIG-0023");
+            var step = steps.Single(s => s.Version == 28 && s.Name == "data_products");
+            step.Phase3Marker.ShouldBe("MIG-0028");
             StepSqlLint.Validate(step.Sql, step.GuardSql, step.Phase3Marker).ShouldBeEmpty();
             step.Sql.ShouldNotContain("REFERENCES", Case.Insensitive, "no foreign key to source systems");
 
-            var shape = GovernanceSchemaShapeLoader.LoadAt(engine, 23, steps.ToDictionary(s => s.Version, s => s.ShapeDelta));
+            var shape = GovernanceSchemaShapeLoader.LoadAt(engine, 28, steps.ToDictionary(s => s.Version, s => s.ShapeDelta));
             foreach (var table in Tables)
             {
                 var shaped = shape.Tables.Single(t => string.Equals(t.Name, table, StringComparison.OrdinalIgnoreCase));
@@ -47,14 +47,14 @@ public sealed class DataProductsMigration0023Tests
     }
 
     [Fact]
-    public void Migration0023_ChecksumMatchesGoldenFile()
+    public void Migration0028_ChecksumMatchesGoldenFile()
     {
         var repoRoot = FindRepoRoot();
         foreach (var engine in new[] { "postgresql", "sqlserver" })
         {
-            var step = SqlMigrationStep.LoadEmbedded(engine).Single(s => s.Version == 23 && s.Name == "data_products");
+            var step = SqlMigrationStep.LoadEmbedded(engine).Single(s => s.Version == 28 && s.Name == "data_products");
             var checksumsPath = Path.Combine(repoRoot, "tests", "Autheris.Tests.Architecture", "Golden", "GovernanceSteps", $"checksums.{engine}.txt");
-            var line = File.ReadAllLines(checksumsPath).Single(l => l.StartsWith("0023 data_products ", StringComparison.Ordinal));
+            var line = File.ReadAllLines(checksumsPath).Single(l => l.StartsWith("0028 data_products ", StringComparison.Ordinal));
             step.Checksum.ShouldBe(line.Split(' ', StringSplitOptions.RemoveEmptyEntries)[2]);
         }
     }

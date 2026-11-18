@@ -12,7 +12,14 @@ public interface ICatalogSnapshotProvider
     CatalogSnapshot CurrentSnapshot { get; }
 
     /// <summary>
-    /// Gets the latest catalog snapshot, refreshing if necessary or returning the current snapshot.
+    /// Gets whether the first snapshot has been loaded. Before that, <see cref="CurrentSnapshot"/> is an empty placeholder
+    /// that consumers must never treat as an empty catalog.
+    /// </summary>
+    bool IsInitialized { get; }
+
+    /// <summary>
+    /// Gets the latest catalog snapshot, refreshing if necessary. Throws <see cref="Autheris.Domain.Exceptions.CatalogSnapshotNotReadyException"/>
+    /// while no snapshot has been loaded yet (typed unavailable, never an empty success).
     /// </summary>
     ValueTask<CatalogSnapshot> GetSnapshotAsync(CancellationToken ct = default);
 

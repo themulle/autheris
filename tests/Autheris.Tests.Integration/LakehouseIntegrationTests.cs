@@ -206,10 +206,10 @@ public class LakehouseIntegrationTests : IClassFixture<LakehouseIntegrationTests
             Columns =
             [
                 new TableColumn { ColumnName = "orderId", DataType = "string" },
-                new TableColumn { ColumnName = "customerEmail", DataType = "string", IsSensitive = true },
-                new TableColumn { ColumnName = "iban", DataType = "string", IsSensitive = true },
-                new TableColumn { ColumnName = "healthData", DataType = "string", IsSensitive = true },
-                new TableColumn { ColumnName = "secretInternalNotes", DataType = "string", IsSensitive = true },
+                new TableColumn { ColumnName = "customerEmail", DataType = "string" },
+                new TableColumn { ColumnName = "iban", DataType = "string" },
+                new TableColumn { ColumnName = "healthData", DataType = "string" },
+                new TableColumn { ColumnName = "secretInternalNotes", DataType = "string" },
                 new TableColumn { ColumnName = "tenantId", DataType = "string" },
                 new TableColumn { ColumnName = "orderDate", DataType = "string" }
             ],
@@ -219,7 +219,7 @@ public class LakehouseIntegrationTests : IClassFixture<LakehouseIntegrationTests
                 ["customerEmail"] = new MaskingRule { RuleType = "MASK_EMAIL" },
                 ["iban"] = new MaskingRule { RuleType = "MASK_IBAN" }
             }
-        };
+        }.WithPii("customerEmail", "iban", "healthData", "secretInternalNotes");
 
         var decision = new TableAccessDecision(
             Table: tableId,

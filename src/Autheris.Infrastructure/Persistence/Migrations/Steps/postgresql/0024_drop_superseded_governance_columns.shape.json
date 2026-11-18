@@ -1,0 +1,19 @@
+{
+  "ops": [
+    { "op": "dropTable", "table": "role_members" },
+    { "op": "dropTable", "table": "roles" },
+    { "op": "dropTable", "table": "access_policy_selectors" },
+    { "op": "dropTable", "table": "access_policy_grantees" },
+    { "op": "dropTable", "table": "access_policies" },
+    { "op": "dropColumn", "table": "consent_row_filters", "name": "dependent_table" },
+    { "op": "dropColumn", "table": "consent_row_filters", "name": "dependent_table_alias" },
+    { "op": "dropColumn", "table": "consent_row_filters", "name": "foreign_key_column" },
+    { "op": "dropColumn", "table": "consent_row_filters", "name": "primary_key_column" },
+    { "op": "dropColumn", "table": "consent_row_filters", "name": "subquery_predicate_json" },
+    { "op": "dropColumn", "table": "consent_row_filters", "name": "target_temporal_column" },
+    { "op": "dropColumn", "table": "consent_row_filters", "name": "dependent_valid_from_column" },
+    { "op": "dropColumn", "table": "consent_row_filters", "name": "dependent_valid_to_column" },
+    { "op": "dropColumn", "table": "consent_row_filters", "name": "target_table_alias" },
+    { "op": "dropColumn", "table": "consent_row_filters", "name": "additional_hops_json" }
+  ]
+}

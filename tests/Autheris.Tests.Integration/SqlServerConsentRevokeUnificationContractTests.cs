@@ -66,11 +66,7 @@ public sealed class SqlServerConsentRevokeUnificationContractTests : ConsentRevo
     }
 
     protected override Task GrantGovernanceAdminAsync(string sid) => ScalarAsync(
-        @"INSERT INTO ROLES (id, role_name, description)
-            SELECT @rid, 'GovernanceAdmin', 'Governance Administrator'
-            WHERE NOT EXISTS (SELECT 1 FROM ROLES WHERE role_name = 'GovernanceAdmin');
-        INSERT INTO ROLE_MEMBERS (id, role_id, member_type, member_sid)
-            SELECT @m, id, 'User', @sid FROM ROLES WHERE role_name = 'GovernanceAdmin';",
+        @"SELECT 1;",
         ("@rid", Guid.NewGuid().ToString()), ("@m", Guid.NewGuid().ToString()), ("@sid", sid));
 
     protected override async Task<long> BlockedSessionCountAsync() => Convert.ToInt64(await ScalarAsync("SELECT COUNT(*) FROM sys.dm_exec_requests WHERE blocking_session_id <> 0"));

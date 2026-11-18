@@ -26,18 +26,20 @@ public static class ProductCatalogProjector
             IsActive = ProductFreshness.IsExposable(product, loadedAt, now),
             ObjectKind = DiscoveryObjectKind.Table
         };
+        var columns = product.Columns.Select(c => (Column: new TableColumn
+        {
+            TableId = product.Id,
+            ColumnName = c.Name,
+            DataType = c.DataType
+        }, c.Class)).ToList();
         return new TableMetadata
         {
             Table = table,
             Identifier = identifier,
             OwnerTenantId = product.Tenant.Value,
-            Columns = product.Columns.Select(c => new TableColumn
-            {
-                TableId = product.Id,
-                ColumnName = c.Name,
-                DataType = c.DataType,
-                IsSensitive = c.Class != ProductColumnClass.NonPii
-            }).ToList()
+            Columns = columns.Select(static x => x.Column).ToList(),
+            ColumnClassifications = ClassificationMetadata.AssignPii(
+                columns.Where(static x => x.Class != ProductColumnClass.NonPii).Select(static x => x.Column), "PRODUCT")
         };
     }
 }
