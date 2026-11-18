@@ -270,4 +270,65 @@ public sealed class DiscoveryColumnVisibilityTests
         detail.Columns.Select(c => c.Name).ShouldContain(Denied);
         detail.Columns.ShouldAllBe(c => c.MaskingState == "Deny");
     }
+
+    [Fact]
+    public async Task DiscoveryColumnVisibility_UnknownMaskingState_IsNotListed()
+    {
+        var (discovery, _) = Create(Mode.ClearAll);
+        var detail = DetailOf(await ObjectAsync(discovery, Patients));
+        var column = detail.Columns[0];
+
+        DiscoveryColumnVisibility.VisibleColumns(detail with { Columns = [column with { MaskingState = "SomethingNew" }] }).ShouldBeEmpty();
+        DiscoveryColumnVisibility.VisibleColumns(detail with { Columns = [column with { MaskingState = "DENY" }] }).ShouldBeEmpty();
+        DiscoveryColumnVisibility.VisibleColumns(detail with { Columns = [column with { MaskingState = "HMAC_SHA256" }] }).Count.ShouldBe(1);
+    }
+
+    private static IConsentResolutionService Resolver()
+    {
+        var resolver = Substitute.For<IConsentResolutionService>();
+        resolver.ResolveAccess(
+                Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(), Arg.Any<TableIdentifier>(),
+                Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<Autheris.Domain.Common.DatabaseDialect>(), Arg.Any<IReadOnlySet<Sid>?>(), Arg.Any<IReadOnlySet<string>?>())
+            .Returns(call => TableAccessDecision.Allowed(
+                call.ArgAt<TableIdentifier>(3),
+                new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["id"] = ColumnAccessLevel.Clear,
+                    ["fullname"] = ColumnAccessLevel.Clear,
+                    ["email"] = ColumnAccessLevel.Mask,
+                    [Denied] = ColumnAccessLevel.Deny
+                }));
+        return resolver;
+    }
+
+    [Fact]
+    public void GraphQlCatalog_DeniedColumn_IsNotListed()
+    {
+        var dto = Query.ToCatalogDto(Table("patients") with { CatalogView = CatalogView.Granted }, isAdminView: false, status: "GRANTED", principal: User(), consentResolution: Resolver(), activeConsents: []);
+
+        dto!.ColumnNames.ShouldBe(["id", "fullname", "email"], ignoreOrder: true);
+        dto.Columns.Select(c => c.Name).ShouldNotContain(Denied);
+        dto.Columns.Single(c => c.Name == "email").State.ShouldBe(DiscoveryColumnState.Masked);
+    }
+
+    [Theory]
+    [InlineData("REQUEST_ACCESS")]
+    [InlineData("PENDING")]
+    [InlineData("EXPIRED")]
+    public void GraphQlCatalog_UngrantedTable_ListsNoColumns(string status)
+    {
+        var dto = Query.ToCatalogDto(Table("patients") with { CatalogView = CatalogView.Granted }, isAdminView: false, status: status, principal: User(), consentResolution: Resolver(), activeConsents: []);
+
+        dto!.Columns.ShouldBeEmpty();
+        dto.ColumnNames.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void GraphQlCatalog_UnresolvableCaller_ListsNoColumns()
+    {
+        var dto = Query.ToCatalogDto(Table("patients") with { CatalogView = CatalogView.Granted }, isAdminView: false, status: "GRANTED");
+
+        dto!.Columns.ShouldBeEmpty();
+        dto.ColumnNames.ShouldBeEmpty();
+    }
 }

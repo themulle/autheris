@@ -47,8 +47,8 @@ public static class DiscoveryColumnVisibility
     public static int VisibleCount(DiscoveryObject? obj) => VisibleColumns(obj).Count;
 
     /// <summary>
-    /// The visible columns of a REST-shaped dataset detail (any masking state except Deny). A denied column, an ungranted table (all
-    /// columns listed as Deny for the request-access flow) and an empty state yield no column.
+    /// The visible columns of a REST-shaped dataset detail (Clear, Masked or a known masking rule type). A denied column, an ungranted table
+    /// (all columns listed as Deny for the request-access flow) and an empty or unknown state yield no column.
     /// </summary>
     public static IReadOnlyList<CatalogColumnDetail> VisibleColumns(CatalogDatasetDetail? detail)
     {
@@ -62,7 +62,12 @@ public static class DiscoveryColumnVisibility
             .ToList();
     }
 
-    // The legacy projection reports a masking rule type as the state; any named state other than Deny is a masked view of the column.
-    private static bool IsVisibleMaskingState(string? state) =>
-        !string.IsNullOrWhiteSpace(state) && !string.Equals(state, "Deny", StringComparison.OrdinalIgnoreCase);
+    // The legacy projection reports the masking rule type as the state. Only the known states and rule types are visible; anything else
+    // (Deny, DENY, an empty or an unknown value) fails closed.
+    private static readonly HashSet<string> VisibleStates = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Clear", "Masked", "Mask", "REDACT", "NULLIFY", "HMAC", "HMAC_SHA256", "HASH", "MASK_EMAIL", "MASK_PHONE", "GEO_JITTER", "PARTIAL_MASK", "TOKENIZE"
+    };
+
+    private static bool IsVisibleMaskingState(string? state) => state is not null && VisibleStates.Contains(state.Trim());
 }

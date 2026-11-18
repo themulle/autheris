@@ -1,0 +1,25 @@
+{
+  "metric": "footprint",
+  "date": "2026-11-18",
+  "sha": "feeab35",
+  "host": {
+    "hostname": "runnervmccnms",
+    "os": "Linux",
+    "kernel": "7.0.0-1019-azure",
+    "arch": "x86_64",
+    "cpu": "Intel(R) Xeon(R) 6973P-C"
+  },
+  "values": {
+    "image_uncompressed_bytes": 429355341,
+    "image_uncompressed_mb": 409.47,
+    "image_compressed_bytes": 160736917,
+    "image_compressed_mb": 153.29,
+    "cold_p50_ms": 3412.35,
+    "cold_p95_ms": 3595.13,
+    "warm_p50_ms": 0.72,
+    "warm_p99_ms": 1.12,
+    "lazy_duckdb": true,
+    "lazy_oracle": true
+  },
+  "method": "bash benchmarks/scripts/footprint.sh"
+}

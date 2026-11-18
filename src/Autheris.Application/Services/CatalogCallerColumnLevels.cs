@@ -15,7 +15,7 @@ using Microsoft.Extensions.Logging;
 /// data-path resolver (granted: consent decision, otherwise: catalog baseline lowered by Deny-effect consents), then lowered by the
 /// catalog DENY masking rules. Every failure except cancellation yields Deny for every column (fail closed).
 /// </summary>
-internal static class CatalogCallerColumnLevels
+public static class CatalogCallerColumnLevels
 {
     public static IReadOnlyDictionary<string, ColumnAccessLevel> Resolve(
         IConsentResolutionService consentResolution,

@@ -456,15 +456,73 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
         SchemaColumnNames(schema).ShouldContain("amount");
     }
 
+    private static readonly TableIdentifier ScopedA = new("dom_a", "main", "scoped_a");
+
+    /// <summary>A table whose column <c>ssn</c> is readable, except for a token that carries the <c>Agent.Read</c> scope (a scope-bound Deny rule).</summary>
+    private async Task SeedScopedTableAsync()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IGovernanceRepository>();
+        if (await repo.GetTableMetadataAsync(ScopedA) != null)
+        {
+            return;
+        }
+
+        await repo.UpsertTableMetadataAsync(new TableMetadata
+        {
+            Table = new Table { Id = Guid.NewGuid(), DisplayName = ScopedA.TableName, TableName = ScopedA.TableName, SchemaName = ScopedA.Schema, SourceType = "PostgreSql", SourceName = ScopedA.Domain, Description = "Scoped table" },
+            Identifier = ScopedA,
+            Columns = new List<TableColumn>
+            {
+                new() { ColumnName = "id", DataType = "integer" },
+                new() { ColumnName = "amount", DataType = "integer" },
+                new() { ColumnName = "ssn", DataType = "varchar" }
+            }
+        });
+        var meta = await repo.GetTableMetadataAsync(ScopedA);
+        await repo.CreateConsentAsync(new Consent
+        {
+            TableId = meta!.Table.Id,
+            TableIdentifier = ScopedA,
+            TenantId = new TenantId(TenantA),
+            Effect = ConsentEffect.Allow,
+            GranteeType = GranteeType.User,
+            GranteeSid = new Sid("S-A-USER"),
+            ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
+            ValidTo = DateTimeOffset.UtcNow.AddDays(1),
+            ColumnRules =
+            [
+                new ConsentColumnRule { ColumnName = "id", AccessLevel = ColumnAccessLevel.Clear },
+                new ConsentColumnRule { ColumnName = "amount", AccessLevel = ColumnAccessLevel.Clear },
+                new ConsentColumnRule { ColumnName = "ssn", AccessLevel = ColumnAccessLevel.Clear },
+                new ConsentColumnRule { ColumnName = "ssn", AccessLevel = ColumnAccessLevel.Deny, ApplicableScopes = ["Agent.Read"] }
+            ]
+        });
+    }
+
     [Fact]
     public async Task Parity_AgentReadScope_ColumnSetEqualAcrossMcpTools()
     {
-        var client = await ClientAsync("S-A-USER", TenantA, "Reader");
-        await using var mcp = await McpTestClient.ConnectAsync(client);
+        var plain = await ClientAsync("S-A-USER", TenantA, "Reader");
+        await SeedScopedTableAsync();
+        var scoped = await ClientAsync("S-A-USER", TenantA, "Reader");
+        scoped.DefaultRequestHeaders.Add("X-Test-Scope", "Agent.Read");
+        const string dataset = "dom_a.main.scoped_a";
+        const string graphQlQuery = "query { catalogObject(domain: \"dom_a\", schema: \"main\", name: \"scoped_a\") { columnNames } catalog { tableName columnNames } }";
 
-        var (_, schema) = await McpTestClient.CallAsync(mcp, "get_table_schema", new { dataset = OrdersDataset });
-        var (_, describe) = await McpTestClient.CallAsync(mcp, "describe_dataset", new { dataset = OrdersDataset });
-        var (_, permissions) = await McpTestClient.CallAsync(mcp, "get_my_permissions", new { dataset = OrdersDataset });
+        // Reference: without the scope the column is listed on both channels, so its absence below is caused by the scope.
+        await using (var plainMcp = await McpTestClient.ConnectAsync(plain))
+        {
+            var (_, plainSchema) = await McpTestClient.CallAsync(plainMcp, "get_table_schema", new { dataset });
+            SchemaColumnNames(plainSchema).ShouldContain("ssn");
+        }
+
+        (await BodyAsync(await plain.PostAsJsonAsync("/graphql", new { query = graphQlQuery }))).ShouldContain("ssn");
+
+        await using var mcp = await McpTestClient.ConnectAsync(scoped);
+        var (_, schema) = await McpTestClient.CallAsync(mcp, "get_table_schema", new { dataset });
+        var (_, describe) = await McpTestClient.CallAsync(mcp, "describe_dataset", new { dataset });
+        var (_, permissions) = await McpTestClient.CallAsync(mcp, "get_my_permissions", new { dataset });
 
         using var describeDoc = JsonDocument.Parse(describe);
         var describeNames = describeDoc.RootElement.GetProperty("columns").EnumerateArray().Select(c => c.GetProperty("name").GetString()!).ToList();
@@ -472,7 +530,9 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
         var permissionNames = permissionsDoc.RootElement.GetProperty("columns").EnumerateArray().Select(c => c.GetProperty("name").GetString()!).ToList();
         SchemaColumnNames(schema).ShouldBe(describeNames, ignoreOrder: true);
         permissionNames.ShouldBe(describeNames, ignoreOrder: true);
-        describeNames.ShouldNotContain(DeniedColumn);
+        describeNames.ShouldNotContain("ssn");
+        describeNames.ShouldContain("amount");
+        (await BodyAsync(await scoped.PostAsJsonAsync("/graphql", new { query = graphQlQuery }))).ShouldNotContain("ssn");
     }
 
     [Fact]

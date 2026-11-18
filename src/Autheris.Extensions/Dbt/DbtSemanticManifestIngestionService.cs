@@ -482,7 +482,9 @@ public sealed class DbtSemanticManifestIngestionService : IDbtSemanticManifestIn
                     PrimaryKeyColumns = primaryKeys
                 };
 
-                pendingTables.Add(tableMeta);
+                // A re-import never loosens stored governance: merge with the persisted entry (new tables are unchanged).
+                var existingMeta = await _tableRepository.GetTableMetadataAsync(tableMeta.Identifier, cancellationToken).ConfigureAwait(false);
+                pendingTables.Add(Autheris.Application.Catalog.Services.CatalogGovernanceRatchet.Merge(tableMeta, existingMeta));
             }
 
             if (pendingTables.Count > 0)

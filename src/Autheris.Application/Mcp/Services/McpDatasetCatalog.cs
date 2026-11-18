@@ -867,15 +867,6 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         return semantics with { RawMeta = descriptive };
     }
 
-    /// <summary>
-    /// Issue #127: the only producer of column levels for MCP dataset description. The level is the one the
-    /// data path resolves for the same caller: token scopes from the claims overload (as <c>TableAccessPolicy</c>), consents
-    /// of the caller's tenant, <see cref="Autheris.Domain.Interfaces.IConsentResolutionService"/> and
-    /// <c>GetEffectiveColumnAccess</c>. A caller with an access status other than GRANTED (feature
-    /// <c>ReleaseProfileToCatalogViewers</c>) gets the catalog baseline lowered by Deny-effect consents; a GRANTED caller whose
-    /// decision is denied, and any resolution failure, yields Deny for every column. Nothing is cached across callers: a cache
-    /// key here would have to include tenant, user SID and the hash of groups, roles and scopes.
-    /// </summary>
     /// <summary>Columns the caller may see for the table: a column whose level is Deny or not resolved is not counted.</summary>
     private int VisibleColumnCount(ClaimsPrincipal principal, TableMetadata table, IReadOnlyList<Consent> activeConsents, bool isAdmin, string accessStatus)
     {
@@ -885,6 +876,15 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         return table.Columns.Count(c => levels.TryGetValue(c.ColumnName, out var level) && level != Autheris.Domain.Interfaces.ColumnAccessLevel.Deny);
     }
 
+    /// <summary>
+    /// Issue #127: the only producer of column levels for MCP dataset description. The level is the one the
+    /// data path resolves for the same caller: token scopes from the claims overload (as <c>TableAccessPolicy</c>), consents
+    /// of the caller's tenant, <see cref="Autheris.Domain.Interfaces.IConsentResolutionService"/> and
+    /// <c>GetEffectiveColumnAccess</c>. A caller with an access status other than GRANTED (feature
+    /// <c>ReleaseProfileToCatalogViewers</c>) gets the catalog baseline lowered by Deny-effect consents; a GRANTED caller whose
+    /// decision is denied, and any resolution failure, yields Deny for every column. Nothing is cached across callers: a cache
+    /// key here would have to include tenant, user SID and the hash of groups, roles and scopes.
+    /// </summary>
     private IReadOnlyDictionary<string, Autheris.Domain.Interfaces.ColumnAccessLevel> ResolveColumnLevels(
         ClaimsPrincipal principal,
         TableMetadata table,
