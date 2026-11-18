@@ -743,6 +743,34 @@ public sealed class DbtTests
         await metadataRepo.Received(1).UpsertTableMetadataAsync(Arg.Is<TableMetadata>(m => m.ColumnMaskingRules["col_a"].RuleType == expected), Arg.Any<CancellationToken>());
     }
 
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task DbtMetadataIngestionService_UnqualifiedImportLookup_OnlyCallersExactTableIsCandidate()
+    {
+        static TableMetadata Make(string domain, string name) => new()
+        {
+            Identifier = new TableIdentifier(domain, "analytics", name),
+            Table = new Table { Id = Guid.NewGuid(), SourceName = domain, SchemaName = "analytics", TableName = name, Sensitivity = "NORMAL" },
+            Columns = [new TableColumn { ColumnName = "col_a", DataType = "varchar" }]
+        };
+
+        var own = Make("postgres", "customers");
+        var foreignTenant = Make("other_tenant", "customers");
+        var prefixSibling = Make("postgres", "customers_x");
+        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        metadataRepo.StubAllTables([own, foreignTenant, prefixSibling]);
+        var service = new DbtMetadataIngestionService(Substitute.For<IDbtProposalRepository>(), metadataRepo, Substitute.For<ILineageGraphStore>(), NullLogger<DbtMetadataIngestionService>.Instance);
+
+        // The direct point lookup misses (unstubbed), so the paged schema plus name candidates decide.
+        var json = "{ \"classifications\": [ { \"database\": \"postgres\", \"schema\": \"analytics\", \"table\": \"customers\", \"columns\": { \"col_a\": { \"masking_rule\": \"email_mask\" } } } ] }";
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
+        var result = await service.IngestGovernanceStreamAsync(stream, Caller, dryRun: false);
+
+        result.Success.ShouldBeTrue();
+        await metadataRepo.Received(1).UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>());
+        await metadataRepo.Received(1).UpsertTableMetadataAsync(Arg.Is<TableMetadata>(m => m.Identifier == own.Identifier), Arg.Any<CancellationToken>());
+    }
+
     [Theory]
     [InlineData("geo_mask")]
     [InlineData("mask_geo_jitter")]

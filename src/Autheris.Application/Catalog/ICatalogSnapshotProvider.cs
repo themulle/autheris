@@ -15,7 +15,7 @@ public interface ICatalogSnapshotProvider
     /// Gets whether the first snapshot has been loaded. Before that, <see cref="CurrentSnapshot"/> is an empty placeholder
     /// that consumers must never treat as an empty catalog.
     /// </summary>
-    bool IsInitialized => true;
+    bool IsInitialized { get; }
 
     /// <summary>
     /// Gets the latest catalog snapshot, refreshing if necessary. Throws <see cref="Autheris.Domain.Exceptions.CatalogSnapshotNotReadyException"/>
