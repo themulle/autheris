@@ -6,6 +6,30 @@
 -- (or an admin override) is never touched. A PUBLIC classification does not count as protection.
 -- All nodes must run this build before the step applies: older builds still write the dropped objects.
 
+-- Decision parity: an active consent with a Clear column rule on a column that receives PII below keeps that clearance.
+-- Rows the 0021 backfill created as MASK (no approver, no expiry) are raised to CLEAR; missing rows are added as CLEAR.
+INSERT INTO consent_classification_access (tenant_id, consent_id, code, access_level, valid_until, approved_by_sid, approved_at)
+SELECT c.tenant_id, c.id, 'PII', 2, NULL, NULL, CURRENT_TIMESTAMP
+FROM consents c
+WHERE c.is_revoked = 0
+  AND EXISTS (
+      SELECT 1 FROM consent_column_rules r INNER JOIN table_columns tc ON tc.id = r.table_column_id
+      WHERE r.consent_id = c.id AND r.access_level = 2
+      AND (tc.is_sensitive = 1 OR EXISTS (SELECT 1 FROM column_masking_rules m WHERE m.table_column_id = tc.id))
+      AND NOT EXISTS (SELECT 1 FROM column_classifications cc WHERE cc.scope = '*' AND cc.table_column_id = tc.id AND cc.code <> 'PUBLIC'))
+ON CONFLICT (tenant_id, consent_id, code) DO NOTHING;
+
+UPDATE consent_classification_access
+SET access_level = 2
+WHERE code = 'PII' AND access_level = 1 AND approved_by_sid IS NULL AND valid_until IS NULL
+  AND EXISTS (
+      SELECT 1 FROM consents c
+      INNER JOIN consent_column_rules r ON r.consent_id = c.id AND r.access_level = 2
+      INNER JOIN table_columns tc ON tc.id = r.table_column_id
+      WHERE c.id = consent_classification_access.consent_id AND c.tenant_id = consent_classification_access.tenant_id AND c.is_revoked = 0
+      AND (tc.is_sensitive = 1 OR EXISTS (SELECT 1 FROM column_masking_rules m WHERE m.table_column_id = tc.id))
+      AND NOT EXISTS (SELECT 1 FROM column_classifications cc WHERE cc.scope = '*' AND cc.table_column_id = tc.id AND cc.code <> 'PUBLIC'));
+
 INSERT INTO column_classifications (scope, table_column_id, code, source, assigned_by, assigned_at)
 SELECT '*', tc.id, 'PII', 'MIGRATION', 'system:migration-0023', CURRENT_TIMESTAMP
 FROM table_columns tc

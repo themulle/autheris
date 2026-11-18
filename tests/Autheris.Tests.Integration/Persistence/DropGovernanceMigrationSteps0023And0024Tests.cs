@@ -23,12 +23,21 @@ public sealed class DropGovernanceMigrationSteps0023And0024Tests
             id UUID PRIMARY KEY, scope VARCHAR(64) NOT NULL, table_column_id TEXT NOT NULL, code VARCHAR(64) NULL, mask_function VARCHAR(32) NOT NULL,
             params_json TEXT NULL, key_ref VARCHAR(128) NULL, catalog_text VARCHAR(8) NOT NULL DEFAULT 'VISIBLE', updated_by VARCHAR(256) NOT NULL, updated_at TIMESTAMPTZ NOT NULL);
         CREATE UNIQUE INDEX ux_column_mask_overrides_all ON column_mask_overrides (scope, table_column_id) WHERE code IS NULL;
+        CREATE TABLE consents (id TEXT PRIMARY KEY, tenant_id VARCHAR(128) NOT NULL, is_revoked INTEGER NOT NULL);
+        CREATE TABLE consent_column_rules (id TEXT PRIMARY KEY, consent_id TEXT NOT NULL, table_column_id TEXT NOT NULL, access_level INTEGER NOT NULL);
+        CREATE TABLE consent_classification_access (
+            tenant_id VARCHAR(128) NOT NULL, consent_id TEXT NOT NULL, code VARCHAR(64) NOT NULL, access_level SMALLINT NOT NULL,
+            valid_until TIMESTAMPTZ NULL, approved_by_sid VARCHAR(256) NULL, approved_at TIMESTAMPTZ NOT NULL, PRIMARY KEY (tenant_id, consent_id, code));
         INSERT INTO data_classifications VALUES ('*', 'PUBLIC', 0), ('*', 'PII', 40);
         INSERT INTO table_columns VALUES ('c-deny', 't', 'deny_col', 1), ('c-public', 't', 'public_col', 1), ('c-plain', 't', 'plain_col', 1), ('c-clean', 't', 'clean_col', 0);
         INSERT INTO column_masking_rules VALUES ('r1', 'c-deny', 'DENY', NULL, NULL, NULL);
         -- (a) the override the step 0020 backfill created for the DENY rule: a visible redaction
         INSERT INTO column_mask_overrides VALUES ('00000000-0000-0000-0000-000000000001', '*', 'c-deny', NULL, 'TYPE_SAFE_REDACT', '{"constant":"***"}', NULL, 'VISIBLE', 'system:migration-0020', CURRENT_TIMESTAMP);
         INSERT INTO column_classifications VALUES ('*', 'c-deny', 'PII', 'MIGRATION', 'system:migration-0020', CURRENT_TIMESTAMP);
+        -- consents: Clear rule on a legacy-sensitive column (no PII row yet / MASK row from the 0021 backfill), and a Clear rule on a clean column
+        INSERT INTO consents VALUES ('k-missing', 't1', 0), ('k-backfilled', 't1', 0), ('k-clean', 't1', 0), ('k-revoked', 't1', 1), ('k-admin', 't1', 0);
+        INSERT INTO consent_column_rules VALUES ('r1', 'k-missing', 'c-plain', 2), ('r2', 'k-backfilled', 'c-public', 2), ('r3', 'k-clean', 'c-clean', 2), ('r4', 'k-revoked', 'c-plain', 2), ('r5', 'k-admin', 'c-plain', 2);
+        INSERT INTO consent_classification_access VALUES ('t1', 'k-backfilled', 'PII', 1, NULL, NULL, CURRENT_TIMESTAMP), ('t1', 'k-admin', 'PII', 1, NULL, 'approver', CURRENT_TIMESTAMP);
         -- (b) flagged sensitive, but classified PUBLIC after step 0020
         INSERT INTO column_classifications VALUES ('*', 'c-public', 'PUBLIC', 'ADMIN', 'admin', CURRENT_TIMESTAMP);
         """;
@@ -62,6 +71,12 @@ public sealed class DropGovernanceMigrationSteps0023And0024Tests
         (await Scalar(conn, "SELECT COUNT(*) FROM column_classifications WHERE table_column_id = 'c-plain' AND code = 'PII'")).ShouldBe(1);
         (await Scalar(conn, "SELECT COUNT(*) FROM column_classifications WHERE table_column_id = 'c-clean'")).ShouldBe(0);
         (await Scalar(conn, "SELECT COUNT(*) FROM column_classifications WHERE table_column_id = 'c-deny' AND code = 'PII'")).ShouldBe(1);
+
+        // consent clearance parity: CLEAR rows for active consents with a Clear rule on a newly classified column; nothing for clean, revoked or admin-decided rows
+        (await Scalar(conn, "SELECT access_level FROM consent_classification_access WHERE consent_id = 'k-missing' AND code = 'PII'")).ShouldBe(2);
+        (await Scalar(conn, "SELECT access_level FROM consent_classification_access WHERE consent_id = 'k-backfilled' AND code = 'PII'")).ShouldBe(2);
+        (await Scalar(conn, "SELECT COUNT(*) FROM consent_classification_access WHERE consent_id IN ('k-clean', 'k-revoked')")).ShouldBe(0);
+        (await Scalar(conn, "SELECT access_level FROM consent_classification_access WHERE consent_id = 'k-admin' AND code = 'PII'")).ShouldBe(1);
 
         // (c) a legacy rule-less sensitive column has no override; the legacy objects are gone
         (await Scalar(conn, "SELECT COUNT(*) FROM column_mask_overrides WHERE table_column_id = 'c-plain'")).ShouldBe(0);

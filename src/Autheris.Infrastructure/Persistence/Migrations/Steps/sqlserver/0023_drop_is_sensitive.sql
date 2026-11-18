@@ -6,6 +6,35 @@
 -- (or an admin override) is never touched. A PUBLIC classification does not count as protection.
 -- All nodes must run this build before the step applies: older builds still write the dropped objects.
 
+-- Decision parity: an active consent with a Clear column rule on a column that receives PII below keeps that clearance.
+-- Rows the 0021 backfill created as MASK (no approver, no expiry) are raised to CLEAR; missing rows are added as CLEAR.
+INSERT INTO dbo.CONSENT_CLASSIFICATION_ACCESS (tenant_id, consent_id, code, access_level, valid_until, approved_by_sid, approved_at)
+SELECT c.tenant_id, c.id, N'PII', CAST(2 AS SMALLINT), NULL, NULL, SYSUTCDATETIME()
+FROM dbo.CONSENTS c
+WHERE c.is_revoked = 0
+  AND EXISTS (
+      SELECT 1 FROM dbo.CONSENT_COLUMN_RULES r INNER JOIN dbo.TABLE_COLUMNS tc ON tc.id = r.table_column_id
+      WHERE r.consent_id = c.id AND r.access_level = 2
+      AND (tc.is_sensitive = 1 OR EXISTS (SELECT 1 FROM dbo.COLUMN_MASKING_RULES m WHERE m.table_column_id = tc.id))
+      AND NOT EXISTS (SELECT 1 FROM dbo.COLUMN_CLASSIFICATIONS cc WHERE cc.scope = N'*' AND cc.table_column_id = tc.id AND cc.code <> N'PUBLIC'))
+  AND NOT EXISTS (SELECT 1 FROM dbo.CONSENT_CLASSIFICATION_ACCESS e WHERE e.tenant_id = c.tenant_id AND e.consent_id = c.id AND e.code = N'PII');
+
+-- batch
+
+UPDATE a
+SET access_level = 2
+FROM dbo.CONSENT_CLASSIFICATION_ACCESS a
+WHERE a.code = N'PII' AND a.access_level = 1 AND a.approved_by_sid IS NULL AND a.valid_until IS NULL
+  AND EXISTS (
+      SELECT 1 FROM dbo.CONSENTS c
+      INNER JOIN dbo.CONSENT_COLUMN_RULES r ON r.consent_id = c.id AND r.access_level = 2
+      INNER JOIN dbo.TABLE_COLUMNS tc ON tc.id = r.table_column_id
+      WHERE c.id = a.consent_id AND c.tenant_id = a.tenant_id AND c.is_revoked = 0
+      AND (tc.is_sensitive = 1 OR EXISTS (SELECT 1 FROM dbo.COLUMN_MASKING_RULES m WHERE m.table_column_id = tc.id))
+      AND NOT EXISTS (SELECT 1 FROM dbo.COLUMN_CLASSIFICATIONS cc WHERE cc.scope = N'*' AND cc.table_column_id = tc.id AND cc.code <> N'PUBLIC'));
+
+-- batch
+
 INSERT INTO dbo.COLUMN_CLASSIFICATIONS (scope, table_column_id, code, source, assigned_by, assigned_at)
 SELECT N'*', tc.id, N'PII', N'MIGRATION', N'system:migration-0023', SYSUTCDATETIME()
 FROM dbo.TABLE_COLUMNS tc
