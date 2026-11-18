@@ -306,7 +306,7 @@ public sealed class ModuleLoader
                 isProduction,
                 moduleId: moduleId,
                 isWritableOverride: _isDirectoryWritableOverride,
-            ownerUidProbe: _ownerUidProbe);
+                ownerUidProbe: _ownerUidProbe);
 
             var manifestPath = Path.Combine(fullModuleDir, "module.json");
             if (!File.Exists(manifestPath))

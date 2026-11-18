@@ -3,7 +3,10 @@ using Shouldly;
 
 namespace Autheris.Tests.Architecture;
 
-/// <summary>SEC-25-06: shipped Helm and compose files never mount a modules volume writable.</summary>
+/// <summary>
+/// SEC-25-06: shipped Helm and compose files never mount a modules volume writable.
+/// The Helm readOnly check is a heuristic: it looks for <c>readOnly: true</c> within the 6 lines after the volume name.
+/// </summary>
 public sealed partial class ModuleVolumeReadOnlyTests
 {
     [GeneratedRegex(@"^\s*-\s*name:\s*\S*modules\S*\s*$", RegexOptions.IgnoreCase)]

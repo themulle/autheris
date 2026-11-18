@@ -142,3 +142,4 @@ docker build --build-arg FLAVOR=core . && docker build --build-arg FLAVOR=full .
 - `IGovernanceConnectionFactory` (governance store only) and `IAutherisGraphQLModule` are defined here because WP-SIMPL-29 needs them.
 - Customer DLL plugins and signed modules share only hashing/parsing helpers; their trust anchors and directories stay separate (OD-31).
 - Removal of the Api -> Extensions reference is owned by WP-SIMPL-29 (last module WP); this WP adds a shrinking baseline.
+- 2026-11-18: SEC-25-05 ownership is enforced at image build; the runtime owner probe hook (`ownerUidProbe`) is present but not wired (open item, no native call in the host).
