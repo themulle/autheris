@@ -35,7 +35,9 @@ public sealed class ProductLoadService(
     IAuditWriter audit,
     TimeProvider? timeProvider = null,
     ILogger<ProductLoadService>? logger = null,
-    IProductCatalogStore? catalogStore = null)
+    IProductCatalogStore? catalogStore = null,
+    IProductBaseObjectCheck? baseObjects = null,
+    ProductUsageTracker? usage = null) : IProductRefreshTimes
 {
     private static readonly TimeSpan LeaseSlack = TimeSpan.FromSeconds(60);
     private readonly ConcurrentDictionary<TableIdentifier, Lazy<Task<ProductResult>>> _inFlight = new();
@@ -96,9 +98,17 @@ public sealed class ProductLoadService(
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeout.CancelAfter(runtime);
+            // every run re-checks that the base objects are still active; a retired or deactivated one makes the product invalid
+            if (baseObjects is not null && !await baseObjects.AllActiveAsync(current.BaseObjects, timeout.Token).ConfigureAwait(false))
+            {
+                throw new ProductLoadException(ProductErrorCodes.BaseObjectInactive);
+            }
+
             var result = await StageAsync(current, key, limits, started, timeout.Token).ConfigureAwait(false);
             await SetStatusAsync(current, DataProductStatus.Active, ct).ConfigureAwait(false);
-            await audit.RecordRequiredAsync(Entry(AuditEventTypes.ProductLoaded, current, new { rows = catalog.TryGet(key, out var m) ? m?.RowCount : null }, started), ct).ConfigureAwait(false);
+            var rowsLoaded = catalog.TryGet(key, out var m) ? m?.RowCount : null;
+            await audit.RecordRequiredAsync(Entry(AuditEventTypes.ProductLoaded, current, new { rows = rowsLoaded }, started), ct).ConfigureAwait(false);
+            usage?.RecordLoad(current.Tenant, current.Id, true, rowsLoaded ?? 0, (long)(_time.GetUtcNow() - started).TotalMilliseconds);
             return result;
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
@@ -111,7 +121,9 @@ public sealed class ProductLoadService(
             };
             logger?.LogWarning("Data product load failed with {Code} ({ExceptionType}).", code, ex.GetType().Name);
             // the previous result stays; a product without one is invalid until a load succeeds
-            await SetStatusAsync(current, catalog.TryGet(key, out _) ? DataProductStatus.Stale : DataProductStatus.Invalid, ct).ConfigureAwait(false);
+            await SetStatusAsync(
+                current, code != ProductErrorCodes.BaseObjectInactive && catalog.TryGet(key, out _) ? DataProductStatus.Stale : DataProductStatus.Invalid, ct).ConfigureAwait(false);
+            usage?.RecordLoad(current.Tenant, current.Id, false, 0, 0);
             await audit.RecordBestEffortAsync(Entry(AuditEventTypes.ProductLoadFailed, current, new { code }, started), ct).ConfigureAwait(false);
             throw ex as ProductLoadException ?? new ProductLoadException(code);
         }
@@ -269,6 +281,7 @@ public sealed class ProductLoadService(
                 _lastAccess.TryRemove(key, out _);
                 _tracked.TryRemove(key, out _);
                 dropped++;
+                await audit.RecordBestEffortAsync(Entry(AuditEventTypes.ProductIdleDropped, product, new { idleMinutes = product.Load.IdleDropMinutes }, now), ct).ConfigureAwait(false);
             }
         }
 
@@ -308,12 +321,18 @@ public sealed class ProductLoadService(
         try
         {
             await catalogStore.PersistAsync(product, LoadedAt(product), ct).ConfigureAwait(false);
+            await AuditReprojectAsync(product, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger?.LogWarning("The catalog object of data product {Product} could not be re-projected ({ExceptionType}).", $"{product.Schema}.{product.Name}", ex.GetType().Name);
         }
     }
+
+    private Task AuditReprojectAsync(DataProduct product, CancellationToken ct) =>
+        audit.RecordAsync(
+            Entry(AuditEventTypes.ProductReprojected, product, new { exposed = ProductFreshness.IsExposable(product, LoadedAt(product), _time.GetUtcNow()), status = product.Status.ToString() }, _time.GetUtcNow()),
+            ct);
 
     /// <summary>
     /// Deactivates the catalog object of stale products whose last result aged past <c>MaxStaleness</c> without any load attempt (no status
@@ -338,6 +357,7 @@ public sealed class ProductLoadService(
             try
             {
                 await catalogStore.PersistAsync(product, LoadedAt(product), ct).ConfigureAwait(false);
+                await AuditReprojectAsync(product, ct).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {

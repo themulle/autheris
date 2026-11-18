@@ -113,8 +113,7 @@ public sealed class ProductDefinerTests
         var created = await harness.Service.PutAsync(new ProductPutRequest(admin, "sales", "orders_view", DataProductKind.View, Join, ProductHarness.Bob));
         var store = new RecordingCacheStore();
         var catalog = new TableCacheCatalog();
-        var cluster = Substitute.For<IDistributedClusterStateProvider>();
-        cluster.TryAcquireLeaseAsync(default!, default, default).ReturnsForAnyArgs(_ => new ValueTask<IDistributedLease?>(Substitute.For<IDistributedLease>()));
+        var cluster = ProductHarness.LeasingCluster();
         var service = new ProductLoadService(harness.Store, runner, store, catalog, cluster, harness.Audit,
             new FakeTimeProvider(new DateTimeOffset(2026, 11, 18, 10, 0, 0, TimeSpan.Zero)));
 

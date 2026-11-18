@@ -67,6 +67,7 @@ public static partial class ProductEndpoints
         group.MapDelete("sources/{dataSource}/owners/{ownerSid}", (string dataSource, string ownerSid, HttpContext context, DataSourceOwnerService service) => RemoveOwnerAsync(dataSource, ownerSid, context, service))
             .WithAudit(AuditLevel.Full, AuditEventTypes.DataSourceOwnerRemoved);
 
+        MapDiscoveryRoutes(group);
         MapSyncRoutes(app, group);
 
         return app;

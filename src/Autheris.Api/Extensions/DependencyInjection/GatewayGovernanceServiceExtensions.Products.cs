@@ -23,6 +23,14 @@ public static partial class GatewayGovernanceServiceExtensions
             sp.GetRequiredService<ITableMetadataRepository>(),
             sp.GetRequiredService<IClassificationRepository>(),
             sp.GetService<TimeProvider>()));
+        services.AddScoped<IProductReadAccess, ProductReadAccess>();
+        // refresh times come from the stage 1 loader when the table cache is enabled; without it no product has a result
+        services.AddScoped(sp => new ProductDiscoveryService(
+            sp.GetRequiredService<IDataProductRepository>(),
+            sp.GetRequiredService<IProductReadAccess>(),
+            sp.GetService<IProductRefreshTimes>() ?? NoProductRefreshTimes.Instance,
+            sp.GetService<TimeProvider>(),
+            sp.GetService<ProductUsageTracker>()));
         services.AddSingleton(sp => new ProductAuthorityService(
             sp.GetRequiredService<IDataOwnershipRepository>(),
             sp.GetRequiredService<IDataProductRepository>(),

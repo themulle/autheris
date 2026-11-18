@@ -27,12 +27,7 @@ public sealed class ProductStageTwoTests
     private readonly TableCacheCatalog _catalog = new();
     private readonly ScriptedRunner _runner = new();
     private readonly FakeTimeProvider _time = new(new DateTimeOffset(2026, 11, 18, 10, 0, 0, TimeSpan.Zero));
-    private readonly IDistributedClusterStateProvider _cluster = Substitute.For<IDistributedClusterStateProvider>();
-
-    public ProductStageTwoTests()
-    {
-        _cluster.TryAcquireLeaseAsync(default!, default, default).ReturnsForAnyArgs(_ => new ValueTask<IDistributedLease?>(Substitute.For<IDistributedLease>()));
-    }
+    private readonly IDistributedClusterStateProvider _cluster = ProductHarness.LeasingCluster();
 
     private ProductLoadService Loader() => new(_h.Store, _runner, _store, _catalog, _cluster, _h.Audit, _time);
 

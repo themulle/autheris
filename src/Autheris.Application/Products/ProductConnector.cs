@@ -20,9 +20,9 @@ public sealed class ProductConnector : IAutherisConnector
 {
     private readonly ProductRecordSource _records;
 
-    public ProductConnector(IProductResultRouter router, ITableCacheStore store, TableIdentifier productObject)
+    public ProductConnector(IProductResultRouter router, ITableCacheStore store, TableIdentifier productObject, IProductReadAudit? readAudit = null)
     {
-        _records = new ProductRecordSource(router ?? throw new ArgumentNullException(nameof(router)), store ?? throw new ArgumentNullException(nameof(store)), productObject);
+        _records = new ProductRecordSource(router ?? throw new ArgumentNullException(nameof(router)), store ?? throw new ArgumentNullException(nameof(store)), productObject, readAudit);
     }
 
     public string ConnectorId => ProductSource.Name;
@@ -54,7 +54,7 @@ public sealed class ProductConnector : IAutherisConnector
             Task.FromResult<IReadOnlyList<ConnectorSplit>>([ConnectorSplit.Default("product")]);
     }
 
-    private sealed class ProductRecordSource(IProductResultRouter router, ITableCacheStore store, TableIdentifier productObject) : IConnectorRecordSource
+    private sealed class ProductRecordSource(IProductResultRouter router, ITableCacheStore store, TableIdentifier productObject, IProductReadAudit? readAudit) : IConnectorRecordSource
     {
         public async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> ReadSplitAsync(
             ConnectorSplit split, ConnectorSessionContext session, [EnumeratorCancellation] CancellationToken ct = default)
@@ -99,6 +99,12 @@ public sealed class ProductConnector : IAutherisConnector
                     }
 
                     rows.Add(row);
+                }
+
+                // the read is on record before the rows leave the reader (an audit failure aborts it)
+                if (readAudit is not null)
+                {
+                    await readAudit.RecordReadAsync(session.Principal, tenant, schema, name, rows.Count, ct).ConfigureAwait(false);
                 }
 
                 return rows;

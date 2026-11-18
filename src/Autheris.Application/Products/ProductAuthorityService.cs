@@ -30,6 +30,7 @@ public static class ProductErrorCodes
     public const string LoadInProgress = "PRODUCT_LOAD_IN_PROGRESS";
     public const string LimitExceeded = "PRODUCT_LIMIT_EXCEEDED";
     public const string DefinitionChanged = "PRODUCT_DEFINITION_CHANGED";
+    public const string BaseObjectInactive = "PRODUCT_BASE_OBJECT_INACTIVE";
 }
 
 /// <summary>The caller of a product operation. <see cref="ViaSyncPath"/> is set only by the signed sync path, never by a REST route.</summary>

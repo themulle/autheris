@@ -36,6 +36,7 @@ public sealed class FederatedStagingService : IFederatedStagingService
     private readonly Autheris.Application.DataSources.IDataSourceTransportGate _transportGate;
     private readonly ITableMetadataRepository? _metadataRepository;
     private readonly Autheris.Application.Products.IProductResultRouter? _productRouter;
+    private readonly Autheris.Application.Products.IProductReadAudit? _productReadAudit;
     private readonly Autheris.Domain.Caching.TableCache.ITableCacheStore? _productCache;
 
     public FederatedStagingService(
@@ -48,8 +49,10 @@ public sealed class FederatedStagingService : IFederatedStagingService
         ITableMetadataRepository? metadataRepository = null,
         Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null,
         Autheris.Application.Products.IProductResultRouter? productRouter = null,
-        Autheris.Domain.Caching.TableCache.ITableCacheStore? productCache = null)
+        Autheris.Domain.Caching.TableCache.ITableCacheStore? productCache = null,
+        Autheris.Application.Products.IProductReadAudit? productReadAudit = null)
     {
+        _productReadAudit = productReadAudit;
         _productRouter = productRouter;
         _productCache = productCache;
         // Issue #447 no gate means deny, never pass-through.
@@ -740,7 +743,7 @@ public sealed class FederatedStagingService : IFederatedStagingService
         {
             return _productRouter is null || _productCache is null || !Autheris.Application.Products.ProductSource.IsProductSource(metadata.Identifier.Domain)
                 ? null
-                : new Autheris.Application.Products.ProductConnector(_productRouter, _productCache, metadata.Identifier);
+                : new Autheris.Application.Products.ProductConnector(_productRouter, _productCache, metadata.Identifier, _productReadAudit);
         }
 
         if (metadata.Table.DataSourceType == DataSourceType.Sql)

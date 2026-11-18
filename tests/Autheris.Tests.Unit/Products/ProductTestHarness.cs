@@ -1,6 +1,7 @@
 using Autheris.Application.Audit;
 using Autheris.Application.ConsentRequests.Events;
 using Autheris.Application.Products;
+using Autheris.Application.State;
 using Autheris.Domain.Model;
 using NSubstitute;
 using TrinoSqlEngine;
@@ -172,6 +173,14 @@ internal sealed class ProductHarness
     public ProductAuthorityService Authority { get; }
 
     public DataProductService Service { get; }
+
+    /// <summary>A cluster state provider that grants every lease.</summary>
+    public static IDistributedClusterStateProvider LeasingCluster()
+    {
+        var cluster = Substitute.For<IDistributedClusterStateProvider>();
+        cluster.TryAcquireLeaseAsync(default!, default, default).ReturnsForAnyArgs(_ => new ValueTask<IDistributedLease?>(Substitute.For<IDistributedLease>()));
+        return cluster;
+    }
 
     public ProductHarness()
     {

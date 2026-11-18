@@ -112,15 +112,10 @@ public sealed class ViewLoadTests
     private readonly TableCacheCatalog _catalog = new();
     private readonly ScriptedRunner _runner = new();
     private readonly FakeTimeProvider _time = new(new DateTimeOffset(2026, 11, 18, 10, 0, 0, TimeSpan.Zero));
-    private readonly IDistributedClusterStateProvider _cluster = Substitute.For<IDistributedClusterStateProvider>();
+    private readonly IDistributedClusterStateProvider _cluster = ProductHarness.LeasingCluster();
     private ProductLoadCaps _caps = ProductLoadCaps.Default;
 
     private ProductLoadService Service() => new(_h.Store, _runner, _store, _catalog, _cluster, _h.Audit, _time) { Caps = _caps };
-
-    public ViewLoadTests()
-    {
-        _cluster.TryAcquireLeaseAsync(default!, default, default).ReturnsForAnyArgs(_ => new ValueTask<IDistributedLease?>(Substitute.For<IDistributedLease>()));
-    }
 
     private async Task<DataProduct> CreateAsync(LoadSettings? load = null, ProductLimits? limits = null)
     {

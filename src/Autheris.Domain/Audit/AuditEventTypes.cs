@@ -115,6 +115,9 @@ public static class AuditEventTypes
     public const string ProductAccessDenied = "PRODUCT_ACCESS_DENIED";
     public const string ProductLoaded = "PRODUCT_LOADED";
     public const string ProductLoadFailed = "PRODUCT_LOAD_FAILED";
+    public const string ProductRead = "PRODUCT_READ";
+    public const string ProductReprojected = "PRODUCT_REPROJECTED";
+    public const string ProductIdleDropped = "PRODUCT_IDLE_DROPPED";
     public const string ProductSyncApplied = "PRODUCT_SYNC_APPLIED";
     public const string ProductSyncRejected = "PRODUCT_SYNC_REJECTED";
     public const string ProductSyncWebhookReceived = "PRODUCT_SYNC_WEBHOOK_RECEIVED";

@@ -294,6 +294,8 @@ public sealed partial class GovernedProcedureExecutionService : IProcedureExecut
                 new
                 {
                     mode = definition.Mode.ToString(),
+                    productId = visibility.Product?.Id,
+                    definitionHash = visibility.Product?.DefinitionHash,
                     rowCount = governed.Rows.Count,
                     truncated,
                     scanCapReached,

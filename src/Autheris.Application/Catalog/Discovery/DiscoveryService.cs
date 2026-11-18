@@ -542,7 +542,7 @@ public sealed partial class DiscoveryService : IDiscoveryService
         var visibleProcedures = await _procedureCatalog
             .ListVisibleAsync(principal, caller.Tenant, ct)
             .ConfigureAwait(false);
-        return DiscoveryProcedureResolver.FilterEligible(visibleProcedures, visibleTables);
+        return DiscoveryProcedureResolver.FilterEligible(visibleProcedures, visibleTables, caller.Tenant);
     }
 
     private async Task<ScopedCatalog> LoadScopedCatalogAsync(
