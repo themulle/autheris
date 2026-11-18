@@ -1,33 +1,16 @@
 namespace Autheris.Infrastructure.Persistence;
 
-using System.Collections.Generic;
-using System.Data.Common;
-using System.Threading;
-using System.Threading.Tasks;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Infrastructure.Persistence.GoldenQueries;
 
 public partial class GovernanceRepository : IGoldenQueryRepository
 {
-    public Task ReplaceForTableAsync(
-        TenantId tenant,
-        string tableId,
-        GoldenQuerySource source,
-        IReadOnlyList<GoldenQueryStoreEntry> entries,
-        CancellationToken ct = default)
+    public Task ReplaceForTableAsync(TenantId tenant, string tableId, GoldenQuerySource source, IReadOnlyList<GoldenQueryStoreEntry> entries, CancellationToken ct = default)
         => GoldenQueryStoreOperations.ReplaceForTableAsync(this, tenant, tableId, source, entries, ct);
 
     public Task<IReadOnlyList<GoldenQueryStoreRecord>> GetForTenantAsync(TenantId tenant, CancellationToken ct = default)
         => GoldenQueryStoreOperations.GetForTenantAsync(this, tenant, ct);
-
-    internal DbCommand CreateGoldenCommand(DbConnection conn, DbTransaction? tx, string sql)
-    {
-        var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
-        cmd.CommandText = sql;
-        return cmd;
-    }
 
     internal Task FlushGoldenScopeAsync(CancellationToken ct) => FlushScopePendingAsync(ct);
 }

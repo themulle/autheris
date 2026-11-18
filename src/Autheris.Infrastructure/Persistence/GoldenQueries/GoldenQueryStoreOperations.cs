@@ -3,6 +3,7 @@ namespace Autheris.Infrastructure.Persistence.GoldenQueries;
 using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Data.Common;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Catalog;
@@ -12,6 +13,14 @@ using Autheris.Infrastructure.Persistence.Dialects;
 
 internal static class GoldenQueryStoreOperations
 {
+    private static DbCommand CreateCommand(DbConnection conn, DbTransaction? tx, string sql)
+    {
+        var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = sql;
+        return cmd;
+    }
+
     private const string GoldenDeleteSql = "DELETE FROM GOLDEN_QUERIES WHERE tenant_id = @tenant_id AND table_id = @table_id AND source = @source";
 
     private const string GoldenInsertSql = "INSERT INTO GOLDEN_QUERIES (id, tenant_id, table_id, source, source_key, title, description, query_text, variables_json, content_hash, updated_at) VALUES (@id, @tenant_id, @table_id, @source, @source_key, @title, @description, @query_text, @variables_json, @content_hash, @updated_at)";
@@ -47,7 +56,7 @@ internal static class GoldenQueryStoreOperations
             await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
             try
             {
-                await using (var del = repo.CreateGoldenCommand(conn, tx, GoldenDeleteSql))
+                await using (var del = CreateCommand(conn, tx, GoldenDeleteSql))
                 {
                     del.AddBound("@tenant_id", validTenant);
                     del.AddBound("@table_id", tableId);
@@ -57,7 +66,7 @@ internal static class GoldenQueryStoreOperations
 
                 foreach (var entry in entries)
                 {
-                    await using var ins = repo.CreateGoldenCommand(conn, tx, GoldenInsertSql);
+                    await using var ins = CreateCommand(conn, tx, GoldenInsertSql);
                     ins.AddBound("@id", Guid.NewGuid().ToString("D"));
                     ins.AddBound("@tenant_id", validTenant);
                     ins.AddBound("@table_id", tableId);
@@ -90,7 +99,7 @@ internal static class GoldenQueryStoreOperations
     {
         var validTenant = TenantScope.RequireTenantString(tenant.Value, GovernanceTable.GoldenQueries.ToSqlName());
         await using var conn = await repo.OpenConnectionAsync(ct).ConfigureAwait(false);
-        await using var cmd = repo.CreateGoldenCommand(conn, null, GoldenSelectSql);
+        await using var cmd = CreateCommand(conn, null, GoldenSelectSql);
         cmd.AddBound("@tenant_id", validTenant);
 
         var list = new List<GoldenQueryStoreRecord>();

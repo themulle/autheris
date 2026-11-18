@@ -22,7 +22,7 @@ public sealed class GoldenQueriesMigration0025Tests
             step.Phase3Marker.ShouldBe("MIG-0025");
             StepSqlLint.Validate(step.Sql, step.GuardSql, step.Phase3Marker).ShouldBeEmpty();
 
-            var shape = GovernanceSchemaShapeLoader.LoadAt(engine, 23, steps.ToDictionary(s => s.Version, s => s.ShapeDelta));
+            var shape = GovernanceSchemaShapeLoader.LoadAt(engine, 25, steps.ToDictionary(s => s.Version, s => s.ShapeDelta));
             var table = shape.Tables.Single(t => string.Equals(t.Name, "GOLDEN_QUERIES", StringComparison.OrdinalIgnoreCase));
             table.PrimaryKey.ShouldBe(["id"]);
             table.Columns.Single(c => c.Name == "tenant_id").Nullable.ShouldBeFalse();
