@@ -967,9 +967,9 @@ internal static class CatalogPiiDetector
 {
     private static readonly string[] PiiKeywords = ["name", "email", "phone", "iban", "birth", "address", "lat", "lon"];
 
-    public static bool IsPii(string columnName, bool isSensitive = false)
+    public static bool IsPii(string columnName, bool classified = false)
     {
-        if (isSensitive) return true;
+        if (classified) return true;
         if (string.IsNullOrWhiteSpace(columnName)) return false;
         var lower = columnName.ToLowerInvariant();
         return PiiKeywords.Any(k => lower.Contains(k, StringComparison.OrdinalIgnoreCase));

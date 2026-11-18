@@ -47,7 +47,7 @@ public sealed class LogRedactionProcessor : BaseProcessor<LogRecord>
                 {
                     val = StripQueryString(strVal);
                 }
-                else if (IsSensitiveKey(key))
+                else if (IsRedactedKey(key))
                 {
                     val = "[redacted]";
                 }
@@ -87,7 +87,7 @@ public sealed class LogRedactionProcessor : BaseProcessor<LogRecord>
         key.Equals("RequestUri", StringComparison.OrdinalIgnoreCase) ||
         key.Equals("Path", StringComparison.OrdinalIgnoreCase);
 
-    private static bool IsSensitiveKey(string key)
+    private static bool IsRedactedKey(string key)
     {
         if (key.StartsWith("autheris.", StringComparison.OrdinalIgnoreCase) ||
             key.Equals("StatementText", StringComparison.OrdinalIgnoreCase) ||

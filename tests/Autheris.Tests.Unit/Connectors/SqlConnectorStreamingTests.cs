@@ -47,9 +47,9 @@ public sealed class SqlConnectorStreamingTests
             [
                 new TableColumn { ColumnName = "Id", DataType = "int" },
                 new TableColumn { ColumnName = "Amount", DataType = "decimal" },
-                new TableColumn { ColumnName = "Iban", DataType = "varchar", IsSensitive = true }
+                new TableColumn { ColumnName = "Iban", DataType = "varchar" }
             ]
-        };
+        }.WithPii("Iban");
     }
 
     private static SqlConnector CreateSqlConnector(

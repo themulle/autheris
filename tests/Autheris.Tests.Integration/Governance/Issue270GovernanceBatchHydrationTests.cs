@@ -53,7 +53,7 @@ public sealed class Issue270GovernanceBatchHydrationTests : IDisposable
             Columns =
             [
                 new TableColumn { ColumnName = "id", DataType = "int" },
-                new TableColumn { ColumnName = "account_number", DataType = "bigint", IsSensitive = true }
+                new TableColumn { ColumnName = "account_number", DataType = "bigint" }
             ],
             PrimaryKeyColumns = ["id"],
             ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
@@ -64,7 +64,7 @@ public sealed class Issue270GovernanceBatchHydrationTests : IDisposable
                     HmacKeyId = "master-key"
                 }
             }
-        };
+        }.WithPii("account_number");
 
         await _repository.UpsertTableMetadataAsync(metadata);
 
@@ -110,6 +110,7 @@ public sealed class Issue270GovernanceBatchHydrationTests : IDisposable
             Identifier = tableId,
             Table = initialMetadata.Table,
             Columns = initialMetadata.Columns,
+            ColumnClassifications = initialMetadata.ColumnClassifications,
             PrimaryKeyColumns = ["id"],
             ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
             {
@@ -164,6 +165,7 @@ public sealed class Issue270GovernanceBatchHydrationTests : IDisposable
             Identifier = tableId,
             Table = initialMetadata.Table,
             Columns = initialMetadata.Columns,
+            ColumnClassifications = initialMetadata.ColumnClassifications,
             PrimaryKeyColumns = ["id"],
             ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
         };
@@ -213,6 +215,7 @@ public sealed class Issue270GovernanceBatchHydrationTests : IDisposable
                 Description = "Updated business description"
             },
             Columns = initialMetadata.Columns,
+            ColumnClassifications = initialMetadata.ColumnClassifications,
             PrimaryKeyColumns = ["id"],
             ColumnMaskingRules = initialMetadata.ColumnMaskingRules
         };

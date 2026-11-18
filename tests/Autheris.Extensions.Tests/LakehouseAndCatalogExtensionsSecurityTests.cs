@@ -368,7 +368,7 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
             Table = new Table { SourceName = "lake", SchemaName = "public", TableName = "orders", DataSourceType = DataSourceType.LakehouseIceberg },
             Columns =
             [
-                new TableColumn { ColumnName = "region", IsSensitive = true },
+                new TableColumn { ColumnName = "region" },
                 new TableColumn { ColumnName = "note" },
                 new TableColumn { ColumnName = "tenantId" }
             ],
@@ -376,7 +376,7 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
             {
                 ["note"] = new MaskingRule { RuleType = "HMAC_SHA256" }
             }
-        };
+        }.WithPii("region");
 
         return (executor, metadata);
     }
@@ -605,7 +605,7 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
     // ------------------------------------------------------------------ M-32
 
     private static TableMetadata ProtectedExistingTable(TableIdentifier id) => new()
-    {
+    { ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("ssn"),
         Identifier = id,
         Table = new Table
         {
@@ -622,7 +622,7 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
         },
         Columns =
         [
-            new TableColumn { ColumnName = "ssn", DataType = "varchar", IsSensitive = true },
+            new TableColumn { ColumnName = "ssn", DataType = "varchar" },
             new TableColumn { ColumnName = "name", DataType = "varchar" }
         ],
         ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
@@ -639,7 +639,7 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
         m.Table.DataSourceType.ShouldBe(DataSourceType.HttpPlugin);
         m.Table.PluginName.ShouldBe("billing-plugin");
         m.Table.SourceType.ShouldBe("SqlServer");
-        m.Columns.Single(c => c.ColumnName == "ssn").IsSensitive.ShouldBeTrue();
+        ClassificationMetadata.IsColumnSensitive(m, "ssn").ShouldBeTrue();
         m.ColumnMaskingRules["ssn"].RuleType.ShouldBe("REDACT");
     }
 

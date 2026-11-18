@@ -123,7 +123,7 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<GovernedWebSq
     private async Task RegisterTableAsync(string tableName, params string[] columns) =>
         await RegisterTableAsync(tableName, null, columns.Select(c => new TableColumn { ColumnName = c, DataType = "varchar" }).ToList());
 
-    private async Task RegisterTableAsync(string tableName, Dictionary<string, MaskingRule>? masking, List<TableColumn> columns)
+    private async Task RegisterTableAsync(string tableName, Dictionary<string, MaskingRule>? masking, List<TableColumn> columns, params string[] piiColumns)
     {
         using var scope = _factory.Services.CreateScope();
         var tableRepo = scope.ServiceProvider.GetRequiredService<ITableMetadataRepository>();
@@ -132,6 +132,7 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<GovernedWebSq
             Table = new Table { Id = Guid.NewGuid(), DisplayName = tableName, TableName = tableName, SchemaName = "public", SourceName = "default", SourceType = "PostgreSql" },
             Identifier = new TableIdentifier("default", "public", tableName),
             Columns = columns,
+            ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor(piiColumns),
             ColumnMaskingRules = masking ?? new Dictionary<string, MaskingRule>()
         });
     }
@@ -271,9 +272,10 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<GovernedWebSq
             new Dictionary<string, MaskingRule> { ["ssn"] = new MaskingRule { RuleType = "REDACT", Replacement = "XXX" } },
             [
                 new TableColumn { ColumnName = "id", DataType = "varchar" },
-                new TableColumn { ColumnName = "ssn", DataType = "varchar", IsSensitive = true },
+                new TableColumn { ColumnName = "ssn", DataType = "varchar" },
                 new TableColumn { ColumnName = "tenant_id", DataType = "varchar" }
-            ]);
+            ],
+            "ssn");
 
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-WEBSQL");
@@ -309,8 +311,9 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<GovernedWebSq
             new Dictionary<string, MaskingRule> { ["ssn"] = new MaskingRule { RuleType = "REDACT", Replacement = "XXX-XX-XXXX" } },
             [
                 new TableColumn { ColumnName = "id", DataType = "varchar" }, new TableColumn { ColumnName = "name", DataType = "varchar" },
-                new TableColumn { ColumnName = "ssn", DataType = "varchar", IsSensitive = true }, new TableColumn { ColumnName = "tenant_id", DataType = "varchar" }
-            ]);
+                new TableColumn { ColumnName = "ssn", DataType = "varchar" }, new TableColumn { ColumnName = "tenant_id", DataType = "varchar" }
+            ],
+            "ssn");
 
         var result = await RunAsync("SELECT id, name, ssn FROM employees", User("usr_bob", "tenant_456"), "tenant_456");
 
@@ -359,7 +362,7 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<GovernedWebSq
         };
         if (withSsn)
         {
-            columns.Add(new TableColumn { ColumnName = "ssn", DataType = "varchar", IsSensitive = true });
+            columns.Add(new TableColumn { ColumnName = "ssn", DataType = "varchar" });
         }
 
         await tableRepo.UpsertTableMetadataAsync(new TableMetadata
@@ -367,6 +370,7 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<GovernedWebSq
             Table = new Table { Id = Guid.NewGuid(), DisplayName = "org", TableName = "org", SchemaName = "public", SourceName = "default", SourceType = "PostgreSql" },
             Identifier = new TableIdentifier("default", "public", "org"),
             Columns = columns,
+            ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor(withSsn ? new[] { "ssn" } : Array.Empty<string>()),
             ColumnMaskingRules = masking ?? new Dictionary<string, MaskingRule>()
         });
     }
@@ -649,7 +653,8 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<GovernedWebSq
         await RegisterTableAsync(
             "hr_employees",
             null,
-            [new TableColumn { ColumnName = "id", DataType = "varchar" }, new TableColumn { ColumnName = "ssn", DataType = "varchar", IsSensitive = true }, new TableColumn { ColumnName = "tenant_id", DataType = "varchar" }]);
+            [new TableColumn { ColumnName = "id", DataType = "varchar" }, new TableColumn { ColumnName = "ssn", DataType = "varchar" }, new TableColumn { ColumnName = "tenant_id", DataType = "varchar" }],
+            "ssn");
 
         var user = User("usr_test", "tenant_test");
 

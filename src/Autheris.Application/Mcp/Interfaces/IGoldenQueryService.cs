@@ -18,5 +18,12 @@ public interface IGoldenQueryService
     /// </summary>
     ValueTask<IReadOnlyList<GoldenQuery>> GetGoldenQueriesAsync(string? domain, string? tableName, Func<GoldenQuery, bool>? visible, CancellationToken ct);
 
+    /// <summary>
+    /// Serves configured entries plus the tenant's stored entries (dbt <c>meta.golden_queries</c>). Caller visibility from
+    /// <paramref name="context"/> is applied before the per-request cap: an entry is returned only when its owning and referenced datasets
+    /// are visible and it mentions no hidden column. Configured entries win on an equal id, except against a persisted config copy.
+    /// </summary>
+    ValueTask<IReadOnlyList<GoldenQuery>> GetGoldenQueriesAsync(GoldenQueryReadContext context, string? domain, string? tableName, CancellationToken ct);
+
     ValueTask<GoldenQuery?> GetByIdAsync(string id, CancellationToken ct = default);
 }

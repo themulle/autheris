@@ -58,13 +58,13 @@ public sealed class AdminMcpTwoPhaseTests
             },
             Columns = new List<TableColumn>
             {
-                new() { TableId = tableId, ColumnName = "id", DataType = "int", IsSensitive = false },
-                new() { TableId = tableId, ColumnName = "total_amount", DataType = "numeric", IsSensitive = false },
-                new() { TableId = tableId, ColumnName = "customer_name", DataType = "varchar", IsSensitive = true },
-                new() { TableId = tableId, ColumnName = "customer_email", DataType = "varchar", IsSensitive = true }
+                new() { TableId = tableId, ColumnName = "id", DataType = "int" },
+                new() { TableId = tableId, ColumnName = "total_amount", DataType = "numeric" },
+                new() { TableId = tableId, ColumnName = "customer_name", DataType = "varchar" },
+                new() { TableId = tableId, ColumnName = "customer_email", DataType = "varchar" }
             },
             PrimaryKeyColumns = ["id"]
-        };
+        }.WithPii("customer_name", "customer_email");
 
         _tableRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(_mockMetadata);
@@ -80,8 +80,8 @@ public sealed class AdminMcpTwoPhaseTests
             Table = new Table { Id = Guid.NewGuid(), SchemaName = "public", TableName = "orders", Sensitivity = "INTERNAL", IsActive = true },
             Columns = new List<TableColumn>
             {
-                new() { TableId = Guid.NewGuid(), ColumnName = "id", DataType = "int", IsSensitive = false },
-                new() { TableId = Guid.NewGuid(), ColumnName = "total_amount", DataType = "numeric", IsSensitive = false }
+                new() { TableId = Guid.NewGuid(), ColumnName = "id", DataType = "int" },
+                new() { TableId = Guid.NewGuid(), ColumnName = "total_amount", DataType = "numeric" }
             },
             PrimaryKeyColumns = ["id"]
         };

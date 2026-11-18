@@ -362,9 +362,9 @@ public sealed class GovernedDataPathsG4Tests
     }
 
     private static TableMetadata HmacMeta(TableIdentifier id) => new()
-    {
+    { ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("email"),
         Identifier = id,
-        Columns = [new TableColumn { ColumnName = "email", IsSensitive = true }],
+        Columns = [new TableColumn { ColumnName = "email" }],
         ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
         {
             ["email"] = new MaskingRule { RuleType = "HMAC_SHA256" }

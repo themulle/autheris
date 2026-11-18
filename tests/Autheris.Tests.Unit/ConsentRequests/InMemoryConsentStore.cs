@@ -45,7 +45,7 @@ internal sealed class InMemoryConsentStore(
         Identifier = new TableIdentifier("pg", "public", "orders"),
         Columns =
         [
-            new TableColumn { Id = Guid.NewGuid(), ColumnName = "id", DataType = "bigint", IsSensitive = false }
+            new TableColumn { Id = Guid.NewGuid(), ColumnName = "id", DataType = "bigint" }
         ]
     };
 

@@ -87,7 +87,7 @@ public sealed class PostgreSqlCatalogSettingsRepositoryContractTests : CatalogSe
         var ssn = warm.Columns.Single(c => c.ColumnName == "ssn");
 
         await ExecuteRawAsync(
-            $"INSERT INTO COLUMN_MASKING_RULES (id, table_column_id, rule_type) VALUES ('{Guid.NewGuid()}', '{ssn.Id}', 'DENY')");
+            $"INSERT INTO COLUMN_MASK_OVERRIDES (id, scope, table_column_id, code, mask_function, params_json, updated_by, updated_at) VALUES ('{Guid.NewGuid()}', '*', '{ssn.Id}', NULL, 'NULLIFY', '{{\"deny\":true}}', 'test', CURRENT_TIMESTAMP)");
 
         IReadOnlyList<string> Names(TableMetadata m) => Autheris.Application.Services.CatalogVisibility
             .FilterForSubject([m], [Autheris.Tests.Unit.Catalog.Wp0.Allow(m.Identifier, "S-X", new TenantId("t"))], new TenantId("t"), null)

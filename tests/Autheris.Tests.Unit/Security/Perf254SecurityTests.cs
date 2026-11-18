@@ -168,7 +168,7 @@ public sealed class Perf254SecurityTests
         mux.GetDatabase(Arg.Any<int>(), Arg.Any<object?>()).Returns(db);
 
         var sensitivity = Substitute.For<ITableSensitivityLookup>();
-        sensitivity.IsSensitiveAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(new ValueTask<bool>(false));
+        sensitivity.HasSensitiveDataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(new ValueTask<bool>(false));
 
         var time = new FakeTimeProvider();
         var service = new EpochValidationService(Options.Create(new GatewayOptions()), Substitute.For<IEventBus>(), sensitivity, mux, logger, time);

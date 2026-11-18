@@ -25,7 +25,7 @@ public sealed class GovernedTableReadPlannerTests
     private readonly GovernedTableReadPlanner _planner = new();
 
     private static TableMetadata Metadata(IReadOnlyList<string>? primaryKey = null) => new()
-    {
+    { ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("email"),
         Identifier = Customers,
         Table = new Table
         {
@@ -39,7 +39,7 @@ public sealed class GovernedTableReadPlannerTests
         Columns = new List<TableColumn>
         {
             new() { ColumnName = "id", DataType = "int" },
-            new() { ColumnName = "email", DataType = "varchar", IsSensitive = true },
+            new() { ColumnName = "email", DataType = "varchar" },
             new() { ColumnName = "name", DataType = "varchar" },
             new() { ColumnName = "secret", DataType = "varchar" }
         },

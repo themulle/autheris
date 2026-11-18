@@ -49,14 +49,14 @@ public sealed class DbtSourceNamePreservationTests
             },
             Columns =
             [
-                new TableColumn { ColumnName = "customer_id", DataType = "int", IsSensitive = false },
-                new TableColumn { ColumnName = "ssn", DataType = "varchar", IsSensitive = true }
+                new TableColumn { ColumnName = "customer_id", DataType = "int" },
+                new TableColumn { ColumnName = "ssn", DataType = "varchar" }
             ],
             ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
             {
                 ["ssn"] = new MaskingRule { RuleType = "REDACT" }
             }
-        };
+        }.WithPii("ssn");
 
         // Incoming metadata from an external catalog trying to reset SourceName or weaken security
         var incoming = new TableMetadata

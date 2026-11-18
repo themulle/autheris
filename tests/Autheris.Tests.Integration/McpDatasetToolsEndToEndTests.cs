@@ -86,9 +86,9 @@ public sealed class McpDatasetToolsEndToEndTests : IClassFixture<McpDatasetTools
                 new() { ColumnName = "serial_number", DataType = "varchar", Description = "Serial number" },
                 new() { ColumnName = "crane_type", DataType = "varchar", Description = "Crane type" },
                 new() { ColumnName = "tonnage", DataType = "integer", Description = "Lifting capacity in t" },
-                new() { ColumnName = "owner_email", DataType = "varchar", IsSensitive = true, Description = "Owner contact" },
+                new() { ColumnName = "owner_email", DataType = "varchar", Description = "Owner contact" },
             }
-        });
+        }.WithPii("owner_email"));
 
         var meta = await repo.GetTableMetadataAsync(Cranes);
         await repo.CreateConsentAsync(new Consent

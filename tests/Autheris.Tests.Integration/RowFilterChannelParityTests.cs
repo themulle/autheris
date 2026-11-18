@@ -560,8 +560,13 @@ WHERE EXISTS (SELECT 1 FROM client c JOIN crane k ON k.serial_number = c.crane_s
             }, actor);
         }
 
-        protected static Consent Consent(TableMetadata meta, TableIdentifier id, IReadOnlyList<ConsentRowFilter> rowFilters, ConsentEffect effect = ConsentEffect.Allow) => new()
+        protected static Consent Consent(TableMetadata meta, TableIdentifier id, IReadOnlyList<ConsentRowFilter> rowFilters, ConsentEffect effect = ConsentEffect.Allow) => ConsentWith(Guid.NewGuid(), meta, id, rowFilters, effect);
+
+        // A base Clear on a classified column needs the matching classification clearance (the classification model replaces the legacy flag).
+        private static Consent ConsentWith(Guid consentId, TableMetadata meta, TableIdentifier id, IReadOnlyList<ConsentRowFilter> rowFilters, ConsentEffect effect) => new()
         {
+            Id = consentId,
+            ClassificationAccess = [new ConsentClassificationAccess { TenantId = Tenant, ConsentId = consentId, Code = ClassificationScopes.PiiCode, AccessLevel = ColumnAccessLevel.Clear, ApprovedAt = DateTimeOffset.UtcNow }],
             TableId = meta.Table.Id,
             TableIdentifier = id,
             TenantId = new TenantId(Tenant),

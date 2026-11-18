@@ -139,7 +139,7 @@ public partial class GovernanceRepository
             }
             catch (Exception ex) when (ex is InvalidCastException or FormatException or JsonException or ArgumentException)
             {
-                LogCatalogNotice("A catalog row in TABLE_COLUMNS or COLUMN_MASKING_RULES is invalid; the table is marked unavailable (fail-closed).");
+                LogCatalogNotice("A catalog row in TABLE_COLUMNS or its column mask override is invalid; the table is marked unavailable (fail-closed).");
                 if (tid.HasValue)
                 {
                     corruptedTableIds.Add(tid.Value);

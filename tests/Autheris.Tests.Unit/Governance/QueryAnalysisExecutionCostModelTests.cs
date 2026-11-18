@@ -72,7 +72,7 @@ public sealed class QueryAnalysisExecutionCostModelTests
     private static TableMetadata CreateTable(
         string name,
         IReadOnlyDictionary<string, MaskingRule>? maskingRules = null,
-        params (string Name, string Type, bool IsSensitive)[] cols)
+        params (string Name, string Type, bool Pii)[] cols)
     {
         var id = new TableIdentifier("sales", "public", name);
         return new TableMetadata
@@ -86,7 +86,8 @@ public sealed class QueryAnalysisExecutionCostModelTests
                 TableName = name,
                 DisplayName = name,
             },
-            Columns = cols.Select(c => new TableColumn { ColumnName = c.Name, DataType = c.Type, IsSensitive = c.IsSensitive }).ToList(),
+            Columns = cols.Select(c => new TableColumn { ColumnName = c.Name, DataType = c.Type }).ToList(),
+            ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor(cols.Where(c => c.Pii).Select(c => c.Name).ToArray()),
             ColumnMaskingRules = maskingRules ?? new Dictionary<string, MaskingRule>(),
             PrimaryKeyColumns = ["id"]
         };

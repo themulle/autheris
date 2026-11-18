@@ -96,6 +96,20 @@ internal static class McpCatalogVisibility
         return tables.Where(t => visible.Contains(t.Identifier)).ToList();
     }
 
+    /// <summary>The caller's tenant, or <c>null</c> when it cannot be resolved (no platform fallback: such a caller reads no tenant-scoped store entries).</summary>
+    internal static TenantId? TryTenantId(ClaimsPrincipal principal)
+    {
+        try
+        {
+            var tenant = principal.GetTenantId();
+            return string.IsNullOrWhiteSpace(tenant.Value) || TenantId.IsReserved(tenant) ? (TenantId?)null : tenant;
+        }
+        catch (Exception ex) when (ex is System.Security.SecurityException or Autheris.Domain.Exceptions.GatewaySecurityException)
+        {
+            return null;
+        }
+    }
+
     // An invalid tenant claim resolves to "no caller" in the resolver; the consent lookup sees the reserved platform tenant, which holds no consents (fail closed).
     internal static TenantId SafeTenantId(ClaimsPrincipal principal)
     {

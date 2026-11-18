@@ -502,15 +502,9 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
             })
             .ToList();
 
-        IReadOnlyList<McpDatasetExample> examples = [];
-        if (goldenQueryService != null)
-        {
-            var goldens = await goldenQueryService.GetGoldenQueriesAsync(id.Domain, id.TableName, ct).ConfigureAwait(false);
-            var hiddenIds = GoldenQueryService.BuildHiddenIdentifierSet(hiddenCols, graphQlColumns);
-            examples = GoldenQueryService.ExcludeHiddenColumnQueries(goldens, hiddenIds)
-                .Select(g => new McpDatasetExample(g.Title, g.Description, g.QueryText, g.VariablesJson))
-                .ToList();
-        }
+        var exampleHidden = new HashSet<string>(hiddenCols, StringComparer.OrdinalIgnoreCase);
+        exampleHidden.UnionWith(columnAccessLevels.Where(kv => kv.Value == Autheris.Domain.Interfaces.ColumnAccessLevel.Deny).Select(kv => kv.Key));
+        var examples = await LoadExamplesAsync(principal, id, graphQl, graphQlColumns, exampleHidden, ct).ConfigureAwait(false);
 
         var (dataOwner, dataOwnerDelegates) = await LoadOwnersAsync(id, displayNameOnly: false, ct).ConfigureAwait(false);
 
