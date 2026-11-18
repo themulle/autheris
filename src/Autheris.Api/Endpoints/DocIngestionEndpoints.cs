@@ -503,7 +503,7 @@ internal static class DocEndpointAccess
                 TenantId: tenant,
                 AuthorSid: EndpointSecurity.GetCallerIdentity(httpContext),
                 HasSession: httpContext.User.Identity?.IsAuthenticated ?? false,
-                IsReadOnlySession: false);
+                IsReadOnlySession: httpContext.User.IsReadOnly());
 
             return DocAccessPolicy.ResolveReader(caller);
         }

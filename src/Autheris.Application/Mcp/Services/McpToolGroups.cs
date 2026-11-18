@@ -62,7 +62,7 @@ public static class McpToolGroups
             Autheris.Application.Mcp.Tools.McpAdminTools.ResolvePrincipal, Autheris.Application.Mcp.Tools.McpAdminTools.PlanRowFilterEvaluation,
             Autheris.Application.Mcp.Tools.McpAdminTools.ApplyRowFilterEvaluation, Autheris.Application.Mcp.Tools.McpAdminTools.SetDatasetCatalog,
             McpDocTools.SearchDocs, McpDocTools.LookupErrorCode, McpDocTools.GetProcedure,
-            McpDocTools.ListDocTopics, McpDocTools.ListApplications, McpDocTools.DepositDocumentation);
+            McpDocTools.ListDocTopics, McpDocTools.ListApplications, McpDocTools.DepositDocumentation, McpDocTools.ReadDocument);
 
         return map.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
     }

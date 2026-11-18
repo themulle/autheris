@@ -16,7 +16,7 @@ using Autheris.Domain.Audit;
 using Autheris.Domain.Model;
 using Autheris.Domain.Security;
 
-public static class McpDocTools
+public static partial class McpDocTools
 {
     public const string SearchDocs = "search_docs";
     public const string LookupErrorCode = "lookup_error_code";
@@ -24,6 +24,7 @@ public static class McpDocTools
     public const string ListDocTopics = "list_doc_topics";
     public const string ListApplications = "list_applications";
     public const string DepositDocumentation = "deposit_documentation";
+    public const string ReadDocument = "read_document";
 
     /// <summary>Maximum UTF-8 byte length of returned document text content in MCP read payloads.</summary>
     public const int MaxReadContentBytes = 64 * 1024;
@@ -37,7 +38,8 @@ public static class McpDocTools
         string.Equals(toolName, GetProcedure, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, ListDocTopics, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, ListApplications, StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(toolName, DepositDocumentation, StringComparison.OrdinalIgnoreCase);
+        string.Equals(toolName, DepositDocumentation, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(toolName, ReadDocument, StringComparison.OrdinalIgnoreCase);
 
     private static readonly JsonSerializerOptions IndentedOptions = new()
     {
@@ -84,6 +86,17 @@ public static class McpDocTools
         CancellationToken ct = default) =>
         ExecuteDocToolAsync(toolName, argumentsJson, searchService, docStore, sessionContext, auditWriter: null, indexReadiness: null, ct);
 
+    public static Task<string> ExecuteDocToolAsync(
+        string toolName,
+        string argumentsJson,
+        IDocSearchService? searchService,
+        IUniversalDocStore? docStore,
+        McpSessionContext? sessionContext,
+        IAuditWriter? auditWriter,
+        IDocIndexReadiness? indexReadiness,
+        CancellationToken ct = default) =>
+        ExecuteDocToolAsync(toolName, argumentsJson, searchService, docStore, sessionContext, auditWriter, indexReadiness, linkReader: null, ct);
+
     public static async Task<string> ExecuteDocToolAsync(
         string toolName,
         string argumentsJson,
@@ -92,15 +105,25 @@ public static class McpDocTools
         McpSessionContext? sessionContext,
         IAuditWriter? auditWriter,
         IDocIndexReadiness? indexReadiness,
+        IDocLinkCallerView? linkReader,
         CancellationToken ct = default)
     {
+        if (string.Equals(toolName, ReadDocument, StringComparison.OrdinalIgnoreCase))
+        {
+            if (docStore == null || indexReadiness is { IsInitialLoadComplete: false })
+            {
+                return McpToolError.Serialize("NOT_AVAILABLE", "Universal doc store is not ready.");
+            }
+            return await ExecuteReadDocumentAsync(docStore, argumentsJson, sessionContext, ct).ConfigureAwait(false);
+        }
+
         if (string.Equals(toolName, SearchDocs, StringComparison.OrdinalIgnoreCase))
         {
             if (searchService == null || indexReadiness is { IsInitialLoadComplete: false })
             {
                 return McpToolError.Serialize("NOT_AVAILABLE", "Doc search service is not ready.");
             }
-            return await ExecuteSearchDocsAsync(searchService, argumentsJson, sessionContext, ct).ConfigureAwait(false);
+            return await ExecuteSearchDocsAsync(searchService, argumentsJson, sessionContext, linkReader, ct).ConfigureAwait(false);
         }
 
         if (string.Equals(toolName, LookupErrorCode, StringComparison.OrdinalIgnoreCase))
@@ -163,6 +186,8 @@ public static class McpDocTools
               "properties": {
                 "query": { "type": "string", "description": "Search terms (keywords, topics, error codes or concepts)." },
                 "category": { "type": "string", "enum": ["Runbook", "Architecture", "Adr", "ApiEndpoint", "ErrorCode", "Configuration", "Guide"], "description": "Optional category filter." },
+                "dataset": { "type": "string", "description": "Optional dataset id (domain.schema.table). Restricts results to documents linked to that dataset." },
+                "column": { "type": "string", "description": "Optional column of 'dataset'. Restricts results to documents linked to that column." },
                 "limit": { "type": "integer", "minimum": 1, "maximum": 20, "description": "Maximum number of matching sections to return (default 5, at most 20)." }
               }
             }
@@ -224,6 +249,8 @@ public static class McpDocTools
             """,
             TargetGraphQLOperation: ListApplications);
 
+        yield return ReadDocumentDefinition();
+
         yield return new McpToolDefinition(
             Name: DepositDocumentation,
             Description: "Deposits or updates documentation, a troubleshooting runbook, or an error resolution guide directly into the enterprise universal document store.",
@@ -246,15 +273,25 @@ public static class McpDocTools
             TargetGraphQLOperation: DepositDocumentation);
     }
 
-    public static async Task<string> ExecuteSearchDocsAsync(
+    public static Task<string> ExecuteSearchDocsAsync(
         IDocSearchService searchService,
         string? argumentsJson,
         McpSessionContext? sessionContext = null,
+        CancellationToken ct = default) =>
+        ExecuteSearchDocsAsync(searchService, argumentsJson, sessionContext, linkReader: null, ct);
+
+    public static async Task<string> ExecuteSearchDocsAsync(
+        IDocSearchService searchService,
+        string? argumentsJson,
+        McpSessionContext? sessionContext,
+        IDocLinkCallerView? linkReader,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(searchService);
 
         string? query = null;
+        string? dataset = null;
+        string? datasetColumn = null;
         DocCategory? category = null;
         int limit = 5;
 
@@ -272,6 +309,14 @@ public static class McpDocTools
                     Enum.TryParse<DocCategory>(c.GetString(), true, out var parsedCat))
                 {
                     category = parsedCat;
+                }
+                if (root.TryGetProperty("dataset", out var ds) && ds.ValueKind == JsonValueKind.String)
+                {
+                    dataset = ds.GetString();
+                }
+                if (root.TryGetProperty("column", out var dc) && dc.ValueKind == JsonValueKind.String)
+                {
+                    datasetColumn = dc.GetString();
                 }
                 if (root.TryGetProperty("limit", out var l) && l.ValueKind != JsonValueKind.Null)
                 {
@@ -293,7 +338,21 @@ public static class McpDocTools
             return McpToolError.Serialize("INVALID_PARAMS", "Argument 'query' is required.");
         }
 
-        var rawResults = await searchService.SearchAsync(query, ScopeOf(sessionContext), category, limit, ct).ConfigureAwait(false);
+        if (!string.IsNullOrWhiteSpace(datasetColumn) && string.IsNullOrWhiteSpace(dataset))
+        {
+            return McpToolError.Serialize("INVALID_PARAMS", "Argument 'column' requires 'dataset'.");
+        }
+
+        IReadOnlyList<DocSearchResult> rawResults;
+        if (string.IsNullOrWhiteSpace(dataset))
+        {
+            rawResults = await searchService.SearchAsync(query, ScopeOf(sessionContext), category, limit, ct).ConfigureAwait(false);
+        }
+        else
+        {
+            rawResults = await SearchLinkedToDatasetAsync(searchService, linkReader, sessionContext, query, category, limit, dataset, datasetColumn, ct).ConfigureAwait(false);
+        }
+
         var anyTruncated = false;
         var results = new List<DocSearchResult>(rawResults.Count);
         var remainingBytes = MaxReadContentBytes;
@@ -311,6 +370,8 @@ public static class McpDocTools
             ["total"] = results.Count,
             ["results"] = JsonSerializer.SerializeToNode(results, IndentedOptions)
         };
+
+        await AddLinkedTargetsAsync(node, results, linkReader, sessionContext, ct).ConfigureAwait(false);
 
         if (anyTruncated)
         {

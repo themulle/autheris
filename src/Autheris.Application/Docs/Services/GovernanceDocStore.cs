@@ -127,6 +127,31 @@ public sealed class GovernanceDocStore : IUniversalDocStore
         return Task.FromResult<DocAppManifest?>(null);
     }
 
+    public async Task<DocRecord?> ReadDocumentAsync(
+        DocAccessScope scope,
+        string appId,
+        DocCategory category,
+        string docId,
+        CancellationToken ct = default)
+    {
+        if (!DocumentRules.IsValidAppId(appId) || !DocumentRules.IsValidDocId(docId))
+        {
+            return null;
+        }
+
+        if (scope.TenantId is not null)
+        {
+            var own = await _repository.GetAsync(new DocKey(scope.TenantId, appId, category, docId), ct).ConfigureAwait(false);
+            if (own is { IsDeleted: false } && (!own.DiscoveryHidden || scope.HiddenTenantVisible))
+            {
+                return own;
+            }
+        }
+
+        var official = await _repository.GetAsync(new DocKey(null, appId, category, docId), ct).ConfigureAwait(false);
+        return official is { IsDeleted: false } && (!official.DiscoveryHidden || scope.HiddenOfficialVisible) ? official : null;
+    }
+
     public async Task<DepositDocResult> CreateAsync(
         DocWriter writer,
         DepositDocRequest request,
@@ -493,7 +518,7 @@ public sealed class GovernanceDocStore : IUniversalDocStore
             sourcePath,
             ct).ConfigureAwait(false);
 
-        if (record.TenantId is null && record.AuthorSid is null && string.IsNullOrWhiteSpace(record.ErrorCode))
+        if (record.TenantId is null && record.AuthorSid is null && string.IsNullOrWhiteSpace(record.ErrorCode) && !record.DiscoveryHidden)
         {
             return chunks;
         }
@@ -510,6 +535,7 @@ public sealed class GovernanceDocStore : IUniversalDocStore
             {
                 TenantId = record.TenantId,
                 AuthorSid = record.AuthorSid,
+                DiscoveryHidden = record.DiscoveryHidden,
                 ErrorCodes = errorCodes
             });
         }
