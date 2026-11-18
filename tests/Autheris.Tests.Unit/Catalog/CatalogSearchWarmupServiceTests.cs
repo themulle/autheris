@@ -44,7 +44,6 @@ public sealed class CatalogSearchWarmupServiceTests
 
         var options = Options.Create(new CatalogSearchOptions
         {
-            Enabled = true,
             WarmupOnStartup = true,
             RefreshSeconds = 0
         });
@@ -79,7 +78,6 @@ public sealed class CatalogSearchWarmupServiceTests
 
         var options = Options.Create(new CatalogSearchOptions
         {
-            Enabled = true,
             WarmupOnStartup = true,
             RefreshSeconds = 0
         });
@@ -127,7 +125,6 @@ public sealed class CatalogSearchWarmupServiceTests
 
         var options = Options.Create(new CatalogSearchOptions
         {
-            Enabled = true,
             WarmupOnStartup = true,
             RefreshSeconds = 1 // 1 second interval
         });
@@ -193,7 +190,7 @@ public sealed class CatalogSearchWarmupServiceTests
         using var service = new CatalogSearchWarmupService(
             repo,
             engine,
-            Options.Create(new CatalogSearchOptions { Enabled = true, WarmupOnStartup = true, RefreshSeconds = 0 }),
+            Options.Create(new CatalogSearchOptions { WarmupOnStartup = true, RefreshSeconds = 0 }),
             NullLogger<CatalogSearchWarmupService>.Instance,
             versionProvider: versionProvider,
             timeProvider: time);
@@ -235,7 +232,7 @@ public sealed class CatalogSearchWarmupServiceTests
         using var service = new CatalogSearchWarmupService(
             repo,
             engine,
-            Options.Create(new CatalogSearchOptions { Enabled = true, WarmupOnStartup = true, RefreshSeconds = 0 }),
+            Options.Create(new CatalogSearchOptions { WarmupOnStartup = true, RefreshSeconds = 0 }),
             NullLogger<CatalogSearchWarmupService>.Instance,
             eventBus: bus,
             versionProvider: versionProvider,
@@ -271,7 +268,7 @@ public sealed class CatalogSearchWarmupServiceTests
         using var service = new CatalogSearchWarmupService(
             repo,
             engine,
-            Options.Create(new CatalogSearchOptions { Enabled = true, WarmupOnStartup = true, RefreshSeconds = 0 }),
+            Options.Create(new CatalogSearchOptions { WarmupOnStartup = true, RefreshSeconds = 0 }),
             NullLogger<CatalogSearchWarmupService>.Instance,
             eventBus: bus,
             versionProvider: versionProvider,
@@ -319,7 +316,7 @@ public sealed class CatalogSearchWarmupServiceTests
         using var service = new CatalogSearchWarmupService(
             repo,
             engine,
-            Options.Create(new CatalogSearchOptions { Enabled = true, WarmupOnStartup = true, RefreshSeconds = 0 }),
+            Options.Create(new CatalogSearchOptions { WarmupOnStartup = true, RefreshSeconds = 0 }),
             NullLogger<CatalogSearchWarmupService>.Instance,
             eventBus: bus,
             versionProvider: versionProvider,
@@ -357,7 +354,7 @@ public sealed class CatalogSearchWarmupServiceTests
         using var service = new CatalogSearchWarmupService(
             repo,
             engine,
-            Options.Create(new CatalogSearchOptions { Enabled = true, WarmupOnStartup = true, RefreshSeconds = 0 }),
+            Options.Create(new CatalogSearchOptions { WarmupOnStartup = true, RefreshSeconds = 0 }),
             NullLogger<CatalogSearchWarmupService>.Instance,
             eventBus: bus,
             versionProvider: versionProvider,
@@ -388,7 +385,6 @@ public sealed class CatalogSearchWarmupServiceTests
         var failingEmbeddings = new FailingEmbeddingGenerator("ollama bearer-secret-123 failure");
         var searchOptions = Options.Create(new CatalogSearchOptions
         {
-            Enabled = true,
             WarmupOnStartup = true,
             RefreshSeconds = 0,
             EmbeddingProvider = CatalogEmbeddingProvider.Ollama

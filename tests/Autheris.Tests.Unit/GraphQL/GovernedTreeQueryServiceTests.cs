@@ -1,3 +1,4 @@
+using Autheris.Tests.Unit.TestSupport;
 using System.Data.Common;
 using System.Security.Claims;
 using System.Text.Json;

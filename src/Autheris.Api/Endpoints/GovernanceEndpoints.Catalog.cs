@@ -152,8 +152,11 @@ public static partial class GovernanceEndpoints
         }
         catch (Autheris.Application.Governance.Services.DeclarativeManifestValidationException ex)
         {
-            // fixed message naming only the policy index, never the rejected text.
-            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, $"Manifest policy at index {ex.PolicyIndex} has an invalid description.", context);
+            // fixed message naming only the policy index and the violated rule, never the rejected text.
+            return ApiProblems.BadRequest(
+                ApiErrorCodes.BadRequest,
+                Autheris.Application.Governance.Services.DeclarativeManifestValidationException.Describe(ex.PolicyIndex, ex.Violation),
+                context);
         }
         catch (ArgumentException ex) when (ex.ParamName == "manifest")
         {

@@ -34,13 +34,14 @@ public sealed class Issue807LegacyDescribeTests
     {
         Identifier = Readings,
         Table = new Table { TableName = "readings", SchemaName = "public", Sensitivity = "INTERNAL", RequiredFilterColumns = required, RequiredFilterColumnGroups = groups },
+        ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("secret_key"),
         PrimaryKeyColumns = ["device_id", "ts"],
         PrimaryKeyDirections = [KeyColumnDirection.Ascending, KeyColumnDirection.Descending],
         Columns =
         [
             new TableColumn { ColumnName = "device_id", DataType = "int" },
             new TableColumn { ColumnName = "ts", DataType = "datetime" },
-            new TableColumn { ColumnName = "secret_key", DataType = "varchar", IsSensitive = true }
+            new TableColumn { ColumnName = "secret_key", DataType = "varchar" }
         ]
     };
 
@@ -64,7 +65,7 @@ public sealed class Issue807LegacyDescribeTests
                 }
             ]));
         var golden = Substitute.For<IGoldenQueryService>();
-        golden.GetGoldenQueriesAsync(Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+        golden.GetGoldenQueriesAsync(Arg.Any<GoldenQueryReadContext>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
             .Returns(ValueTask.FromResult<IReadOnlyList<GoldenQuery>>([]));
         var catalog = new McpDatasetCatalog(metadata, consents, Substitute.For<IGatewayExecutionService>(), golden,
             Options.Create(new GatewayOptions()), Substitute.For<IGraphQlCatalogMap>(),

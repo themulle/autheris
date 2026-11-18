@@ -290,24 +290,21 @@ public static class DiscoveryAccessMapper
         bool isPendingRequest,
         bool isRecentlyExpired)
     {
-        if (decision.IsAllowed)
-        {
-            var restricted = HasRowPredicate(decision);
-            return (DiscoveryAccessState.Granted, restricted ? DiscoveryRowScope.RowRestricted : DiscoveryRowScope.Full);
-        }
-
-        if (isPendingRequest)
-        {
-            return (DiscoveryAccessState.Requested, null);
-        }
-
-        if (isRecentlyExpired)
-        {
-            return (DiscoveryAccessState.Expired, null);
-        }
-
-        return (DiscoveryAccessState.None, null);
+        var access = AccessStateOf(decision.IsAllowed, isPendingRequest, isRecentlyExpired);
+        return access == DiscoveryAccessState.Granted
+            ? (access, HasRowPredicate(decision) ? DiscoveryRowScope.RowRestricted : DiscoveryRowScope.Full)
+            : (access, null);
     }
+
+    /// <summary>
+    /// The one precedence rule of the caller's access state (issues #798 / #804: the per-object state and the <c>accessStatus</c> filter
+    /// both use it): an allowed read wins, then a pending request, then a recently expired grant, otherwise none.
+    /// </summary>
+    internal static DiscoveryAccessState AccessStateOf(bool isAllowed, bool isPendingRequest, bool isRecentlyExpired) =>
+        isAllowed ? DiscoveryAccessState.Granted
+        : isPendingRequest ? DiscoveryAccessState.Requested
+        : isRecentlyExpired ? DiscoveryAccessState.Expired
+        : DiscoveryAccessState.None;
 
     internal static bool HasRowPredicate(TableAccessDecision decision) =>
         decision.RowPolicy is not null ||

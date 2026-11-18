@@ -1,0 +1,145 @@
+namespace Autheris.Tests.Unit.Sql;
+
+using System;
+using System.Collections.Generic;
+using System.Security.Claims;
+using System.Threading;
+using System.Threading.Tasks;
+using Autheris.Application.DataSources.Connectors;
+using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Sql.Services;
+using Autheris.Domain.Common;
+using Autheris.Domain.Connectors;
+using Autheris.Domain.Interfaces;
+using Autheris.Domain.Model;
+using Autheris.Domain.Options;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using NSubstitute;
+using Shouldly;
+using Xunit;
+
+public sealed class WebSqlMaskingExpressionsTests
+{
+    private static TableMetadata CreateTableWithMaskingRules()
+    {
+        return new TableMetadata
+        {
+            Identifier = new TableIdentifier("sales", "dbo", "customers"),
+            Table = new Table
+            {
+                TableName = "customers",
+                SchemaName = "dbo",
+                SourceName = "sales",
+                SourceType = "PostgreSQL"
+            },
+            Columns =
+            [
+                new TableColumn { ColumnName = "id", DataType = "integer" },
+                new TableColumn { ColumnName = "email", DataType = "varchar" },
+                new TableColumn { ColumnName = "iban", DataType = "varchar" },
+                new TableColumn { ColumnName = "ssn", DataType = "varchar" },
+                new TableColumn { ColumnName = "secret_note", DataType = "varchar" }
+            ],
+            ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["email"] = new MaskingRule { RuleType = "MASK_EMAIL" },
+                ["iban"] = new MaskingRule { RuleType = "MASK_IBAN" },
+                ["ssn"] = new MaskingRule { RuleType = "REDACT" },
+                ["secret_note"] = new MaskingRule { RuleType = "NULLIFY" }
+            }
+        };
+    }
+
+    private static GovernedSqlExecutionService CreateService()
+    {
+        var options = new GatewayOptions
+        {
+            WebSql = new WebSqlOptions
+            {
+                Enabled = true,
+                DefaultDataSourceName = "sales",
+                AllowedDataSources = ["sales"]
+            }
+        };
+
+        var tableRepo = Substitute.For<ITableMetadataRepository>();
+        tableRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<TableMetadata?>(CreateTableWithMaskingRules()));
+
+        var resolution = Substitute.For<IConsentResolutionService>();
+        resolution.ResolveAccess(
+                Arg.Any<Sid>(),
+                Arg.Any<IReadOnlySet<Sid>>(),
+                Arg.Any<IReadOnlySet<string>>(),
+                Arg.Any<TableIdentifier>(),
+                Arg.Any<IReadOnlyList<Consent>>(),
+                Arg.Any<DatabaseDialect>())
+            .Returns(ci => TableAccessDecision.Allowed(
+                ci.ArgAt<TableIdentifier>(3),
+                new Dictionary<string, ColumnAccessLevel>
+                {
+                    ["email"] = ColumnAccessLevel.Mask,
+                    ["iban"] = ColumnAccessLevel.Mask,
+                    ["ssn"] = ColumnAccessLevel.Mask,
+                    ["secret_note"] = ColumnAccessLevel.Mask
+                }));
+
+        var consentRepo = Substitute.For<IConsentRepository>();
+        consentRepo.GetActiveConsentsForSubjectsAsync(
+                Arg.Any<IEnumerable<Sid>>(),
+                Arg.Any<TableIdentifier>(),
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<TenantId?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<Consent>>(Array.Empty<Consent>()));
+
+        return global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
+            Options.Create(options), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard,
+            consentResolution: resolution,
+            tableRepository: tableRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(tableRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
+            connectionFactory: null,
+            clientIpResolver: null,
+            environment: null,
+            logger: NullLogger<GovernedSqlExecutionService>.Instance,
+            consentRepository: consentRepo);
+    }
+
+    private static ClaimsPrincipal CreateUser()
+    {
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.PrimarySid, "S-1-5-21-USER"),
+            new(ClaimTypes.Name, "alice"),
+            new("tenant_id", "tenant-1")
+        };
+        return global::Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(
+            new ClaimsPrincipal(new ClaimsIdentity(claims, "Test")));
+    }
+
+    [Fact]
+    public async Task RewriteSqlAsync_MaskEmail_ProducesEmailMaskExpressionNotGenericAsterisks()
+    {
+        var service = CreateService();
+        var user = CreateUser();
+
+        var compiled = await service.CompileAsync("SELECT email FROM sales.dbo.customers", user, new TenantId("tenant-1"));
+
+        // X0f/X1: MASK_EMAIL is the typed constant "***@***" (a bound Mask value), not the generic "***" redaction and never text.
+        compiled.ValuesOf(TrinoSqlEngine.Ast.Emit.ParameterOrigin.Mask).ShouldContain("***@***");
+        compiled.Sql.ShouldNotContain("***@***");
+    }
+
+    [Fact]
+    public async Task RewriteSqlAsync_MaskIban_ProducesIbanMaskExpressionNotGenericAsterisks()
+    {
+        var service = CreateService();
+        var user = CreateUser();
+
+        var compiled = await service.CompileAsync("SELECT iban FROM sales.dbo.customers", user, new TenantId("tenant-1"));
+
+        // X0f/X1: MASK_IBAN is the typed constant "****" (neither characters nor length are revealed), not the generic "***" redaction.
+        compiled.ValuesOf(TrinoSqlEngine.Ast.Emit.ParameterOrigin.Mask).ShouldContain("****");
+        compiled.Sql.ShouldNotContain("****");
+    }
+}

@@ -1,3 +1,4 @@
+using Autheris.Tests.Unit.TestSupport;
 namespace Autheris.Tests.Unit.GraphQL;
 
 using System;

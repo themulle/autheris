@@ -1,3 +1,4 @@
+using Autheris.Tests.Unit.Policy;
 namespace Autheris.Tests.Unit.Security;
 
 using System.Security.Claims;

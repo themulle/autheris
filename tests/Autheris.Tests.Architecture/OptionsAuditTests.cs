@@ -17,12 +17,15 @@ public sealed class OptionsAuditTests
         @"Enforce|Require|Allowed|Allow|Deny|Mask|Pii|Tls|Auth|Redaction",
         RegexOptions.CultureInvariant);
 
+    private const int RemovedOptionsCount = 76;
+
     [Fact]
     [Trait("Category", "Security")]
     public void No_enforcement_option_deleted_while_wired()
     {
         var removed = RepositoryScan.ReadBaseline("removed-options.txt");
-        removed.Count.ShouldBe(75, "The removed-options baseline must contain all 75 deleted options.");
+        // Pinned: deleting a row would silently stop checking that option; raise this only when you add a row.
+        removed.Count.ShouldBe(RemovedOptionsCount, "The removed-options baseline lists every deleted option; raise the count only when you add a row.");
 
         var assemblies = new[]
         {
@@ -77,4 +80,54 @@ public sealed class OptionsAuditTests
             }
         }
     }
+
+    /// <summary>
+    /// Opt-in switches of kept features are never removed to meet the surface budget: each exists, defaults to off and is still read
+    /// by production code. A switch that a later work package has not declared yet may be absent, but once declared it must default to off.
+    /// </summary>
+    [Theory]
+    [InlineData("SqlEndpoints:Procedures:Enabled", true, @"Procedures\??\.Enabled")]
+    [InlineData("WebSql:Enabled", true, @"WebSql\??\.Enabled")]
+    [InlineData("WebSql:AllowDml", true, @"\.AllowDml\b")]
+    [InlineData("Authentication:ForwardAuth:Enabled", true, @"ForwardAuth\??\.Enabled")]
+    [InlineData("WebSql:Dml:AllowDeleteGrants", false, @"\.AllowDeleteGrants\b")]
+    [Trait("Category", "Security")]
+    public void Opt_in_switches_retained(string path, bool mustBeDeclared, string consumerPattern)
+    {
+        object? instance = new Autheris.Domain.Options.GatewayOptions();
+        PropertyInfo? property = null;
+        foreach (var segment in path.Split(':'))
+        {
+            if (instance is null)
+            {
+                break;
+            }
+
+            property = instance.GetType().GetProperty(segment, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+            if (property is null)
+            {
+                break;
+            }
+
+            instance = property.GetValue(instance);
+        }
+
+        if (property is null || instance is null)
+        {
+            mustBeDeclared.ShouldBeFalse($"Opt-in switch Gateway:{path} was deleted. Opt-in switches of kept features stay.");
+            return;
+        }
+
+        property.PropertyType.ShouldBe(typeof(bool));
+        instance.ShouldBe(false, $"Opt-in switch Gateway:{path} must default to off.");
+
+        var consumer = new Regex(consumerPattern, RegexOptions.CultureInvariant);
+        RepositoryScan.ProductionFiles
+            .Any(f => !f.RelativePath.StartsWith("src/Autheris.Domain/Options/", StringComparison.Ordinal) &&
+                      consumer.IsMatch(StripComments(f.Text)))
+            .ShouldBeTrue($"Opt-in switch Gateway:{path} is no longer read by production code, so it no longer gates its feature.");
+    }
+
+    private static string StripComments(string text) =>
+        Regex.Replace(text, @"//[^\n]*|/\*.*?\*/", " ", RegexOptions.Singleline);
 }

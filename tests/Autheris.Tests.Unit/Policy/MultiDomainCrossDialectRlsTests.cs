@@ -1,0 +1,205 @@
+using System;
+using System.Collections.Generic;
+using Autheris.Application.Services;
+using Autheris.Domain.Common;
+using Autheris.Domain.Model;
+using Shouldly;
+using Xunit;
+
+namespace Autheris.Tests.Unit.Policy;
+
+public class MultiDomainCrossDialectRlsTests
+{
+    private readonly RowFilterSqlBuilder _builder = new();
+
+    #region Cross-Source Virtual Set Filtering
+
+    [Fact]
+    public void CrossSourceSetFilter_OddCounts_ChunksAccurately()
+    {
+        // 7 items with batch limit 3 -> 3 chunks: [3, 3, 1]
+        var filter = new ConsentRowFilter
+        {
+            FilterType = RowFilterType.CrossSourceSetFilter,
+            ColumnName = "customer_id",
+            ValueJson = "[\"C-1\", \"C-2\", \"C-3\", \"C-4\", \"C-5\", \"C-6\", \"C-7\"]"
+        };
+
+        var sqlSqlServer = AdvancedRlsFilterGenerator.BuildCrossSourceSetFilter(filter, maxBatchSize: 3, DatabaseDialect.SqlServer);
+        sqlSqlServer.ShouldBe("(([customer_id] IN ('C-1', 'C-2', 'C-3')) OR ([customer_id] IN ('C-4', 'C-5', 'C-6')) OR ([customer_id] IN ('C-7')))");
+
+        var sqlDatabricks = AdvancedRlsFilterGenerator.BuildCrossSourceSetFilter(filter, maxBatchSize: 3, DatabaseDialect.Databricks);
+        sqlDatabricks.ShouldBe("((`customer_id` IN ('C-1', 'C-2', 'C-3')) OR (`customer_id` IN ('C-4', 'C-5', 'C-6')) OR (`customer_id` IN ('C-7')))");
+
+        var sqlPostgres = AdvancedRlsFilterGenerator.BuildCrossSourceSetFilter(filter, maxBatchSize: 3, DatabaseDialect.PostgreSql);
+        sqlPostgres.ShouldBe("((\"customer_id\" IN ('C-1', 'C-2', 'C-3')) OR (\"customer_id\" IN ('C-4', 'C-5', 'C-6')) OR (\"customer_id\" IN ('C-7')))");
+    }
+
+    [Fact]
+    public void CrossSourceSetFilter_EscapesSingleQuotesInValues()
+    {
+        var filter = new ConsentRowFilter
+        {
+            FilterType = RowFilterType.CrossSourceSetFilter,
+            ColumnName = "client_name",
+            ValueJson = "[\"O'Connor\", \"L'Aura\", \"NormalName\"]"
+        };
+
+        var sql = AdvancedRlsFilterGenerator.BuildCrossSourceSetFilter(filter, maxBatchSize: 10, DatabaseDialect.SqlServer);
+        sql.ShouldBe("[client_name] IN ('O''Connor', 'L''Aura', 'NormalName')");
+    }
+
+    #endregion
+
+    #region RowFilterSqlBuilder Combined Filters & Operators
+
+    [Fact]
+    public void BuildCombinedRowFilter_WhenAllowHasUnconstrainedConsent_ShortCircuitsAllowPredicates()
+    {
+        var allowWithFilter = new Consent
+        {
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
+            Effect = ConsentEffect.Allow,
+            RowFilters = new[]
+            {
+                new ConsentRowFilter { ColumnName = "region", Operator = "EQ", ValueJson = "\"EMEA\"" }
+            }
+        };
+
+        var allowUnconstrained = new Consent
+        {
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
+            Effect = ConsentEffect.Allow,
+            RowFilters = Array.Empty<ConsentRowFilter>() // No filters -> Unrestricted!
+        };
+
+        // When any allow consent has no filter, row filtering is unconstrained
+        var combined = _builder.BuildCombinedRowFilter(
+            new[] { allowWithFilter, allowUnconstrained },
+            Array.Empty<Consent>(),
+            DatabaseDialect.SqlServer);
+
+        combined.ShouldBeNull();
+    }
+
+    [Fact]
+    public void BuildCombinedRowFilter_MultipleAllowAndMultipleDeny_CombinesWithOrAndNot()
+    {
+        var allow1 = new Consent
+        {
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
+            Effect = ConsentEffect.Allow,
+            RowFilters = new[]
+            {
+                new ConsentRowFilter { ColumnName = "department", Operator = "EQ", ValueJson = "\"Finance\"" }
+            }
+        };
+
+        var allow2 = new Consent
+        {
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
+            Effect = ConsentEffect.Allow,
+            RowFilters = new[]
+            {
+                new ConsentRowFilter { ColumnName = "department", Operator = "EQ", ValueJson = "\"Controlling\"" }
+            }
+        };
+
+        var deny1 = new Consent
+        {
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
+            Effect = ConsentEffect.Deny,
+            RowFilters = new[]
+            {
+                new ConsentRowFilter { ColumnName = "is_confidential", Operator = "EQ", ValueJson = "true" }
+            }
+        };
+
+        var deny2 = new Consent
+        {
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
+            Effect = ConsentEffect.Deny,
+            RowFilters = new[]
+            {
+                new ConsentRowFilter { ColumnName = "amount", Operator = "GT", ValueJson = "1000000" }
+            }
+        };
+
+        // SQL Server Dialect
+        var combinedSql = _builder.BuildCombinedRowFilter(
+            new[] { allow1, allow2 },
+            new[] { deny1, deny2 },
+            DatabaseDialect.SqlServer);
+
+        combinedSql.ShouldNotBeNull();
+        // A consents combined with OR: ([department] = 'Finance' OR [department] = 'Controlling')
+        combinedSql.ShouldContain("([department] = 'Finance' OR [department] = 'Controlling')");
+        // D consents combined with AND NOT ((D1 OR D2))
+        combinedSql.ShouldContain("AND NOT (([is_confidential] = 1 OR [amount] > 1000000))");
+    }
+
+    [Theory]
+    [InlineData("EQ", "\"ACTIVE\"", "[status] = 'ACTIVE'")]
+    [InlineData("NEQ", "\"ARCHIVED\"", "[status] <> 'ARCHIVED'")]
+    [InlineData("LT", "100", "[status] < 100")]
+    [InlineData("GT", "50", "[status] > 50")]
+    [InlineData("LTE", "1000", "[status] <= 1000")]
+    [InlineData("GTE", "10", "[status] >= 10")]
+    [InlineData("LIKE", "\"%CORP%\"", "[status] LIKE '%CORP%'")]
+    public void FormatCondition_AllOperators_FormatAccurately(string op, string valJson, string expected)
+    {
+        var filter = new ConsentRowFilter
+        {
+            ColumnName = "status",
+            Operator = op,
+            ValueJson = valJson
+        };
+
+        var result = _builder.FormatCondition(filter, DatabaseDialect.SqlServer);
+        result.ShouldBe(expected);
+    }
+
+    [Fact]
+    public void FormatCondition_NullValueHandling_ProducesIsNullAndIsNotNull()
+    {
+        var filterNullEq = new ConsentRowFilter
+        {
+            ColumnName = "deleted_at",
+            Operator = "EQ",
+            ValueJson = "null"
+        };
+        _builder.FormatCondition(filterNullEq, DatabaseDialect.SqlServer).ShouldBe("[deleted_at] IS NULL");
+
+        var filterNullNeq = new ConsentRowFilter
+        {
+            ColumnName = "deleted_at",
+            Operator = "NEQ",
+            ValueJson = "null"
+        };
+        _builder.FormatCondition(filterNullNeq, DatabaseDialect.SqlServer).ShouldBe("[deleted_at] IS NOT NULL");
+    }
+
+    [Fact]
+    public void FormatCondition_InOperator_HandlesArrayAndEmptyArray()
+    {
+        var filterWithValues = new ConsentRowFilter
+        {
+            ColumnName = "country",
+            Operator = "IN",
+            ValueJson = "[\"DE\", \"AT\", \"CH\"]"
+        };
+        _builder.FormatCondition(filterWithValues, DatabaseDialect.SqlServer)
+            .ShouldBe("[country] IN ('DE', 'AT', 'CH')");
+
+        var filterEmpty = new ConsentRowFilter
+        {
+            ColumnName = "country",
+            Operator = "IN",
+            ValueJson = "[]"
+        };
+        _builder.FormatCondition(filterEmpty, DatabaseDialect.SqlServer)
+            .ShouldBe("1 = 0");
+    }
+
+    #endregion
+}
