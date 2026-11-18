@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Autheris.Api.Errors;
 using Autheris.Api.Extensions;
 using Autheris.Application.Products;
+using Autheris.Application.Products.Sync;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -65,6 +66,8 @@ public static partial class ProductEndpoints
         group.MapDelete("sources/{dataSource}/owners/{ownerSid}", (string dataSource, string ownerSid, HttpContext context, DataSourceOwnerService service) => RemoveOwnerAsync(dataSource, ownerSid, context, service))
             .WithAudit(AuditLevel.Full, AuditEventTypes.DataSourceOwnerRemoved);
 
+        MapSyncRoutes(app, group);
+
         return app;
     }
 
@@ -120,6 +123,13 @@ public static partial class ProductEndpoints
                 _ when ex.Code == ProductErrorCodes.OwnerMustDiffer => ApiProblems.Unprocessable(ex.Code, "The product owner must differ from the creator.", context),
                 _ => ApiProblems.Forbidden(ex.Code, "The caller is not allowed to perform this data product operation.", context)
             };
+        }
+        catch (ProductSyncRejectedException ex)
+        {
+            return ApiProblems.Unprocessable(
+                ProductSyncRejectedException.StableCode,
+                $"The commit was rejected ({ex.Reason}{(ex.FileIndex >= 0 ? $", file {ex.FileIndex}" : string.Empty)}{(ex.ProductCode is null ? string.Empty : $", {ex.ProductCode}")}); nothing was applied.",
+                context);
         }
         catch (JsonException ex)
         {

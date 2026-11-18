@@ -115,6 +115,10 @@ public static class AuditEventTypes
     public const string ProductAccessDenied = "PRODUCT_ACCESS_DENIED";
     public const string ProductLoaded = "PRODUCT_LOADED";
     public const string ProductLoadFailed = "PRODUCT_LOAD_FAILED";
+    public const string ProductSyncApplied = "PRODUCT_SYNC_APPLIED";
+    public const string ProductSyncRejected = "PRODUCT_SYNC_REJECTED";
+    public const string ProductSyncWebhookReceived = "PRODUCT_SYNC_WEBHOOK_RECEIVED";
+    public const string ProductSyncWebhookRejected = "PRODUCT_SYNC_WEBHOOK_REJECTED";
     public const string DataSourceOwnerAssigned = "DATA_SOURCE_OWNER_ASSIGNED";
     public const string DataSourceOwnerRemoved = "DATA_SOURCE_OWNER_REMOVED";
 

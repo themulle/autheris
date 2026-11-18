@@ -89,6 +89,12 @@ public sealed record ProcedureDefinition(
     /// </summary>
     public string? ProductSchema { get; init; }
 
+    /// <summary>The product owner (SID) declared by the file; used by the Git synchronisation only.</summary>
+    public string? ProductOwner { get; init; }
+
+    /// <summary>The reason the <see cref="ClearedResultColumns"/> may leave in clear; used by the Git synchronisation only.</summary>
+    public string? ClearedReason { get; init; }
+
     /// <summary>
     /// Optional (composite) key that identifies a row of <see cref="ResultTable"/> in the result set. When set, a consent
     /// row filter on the result table is not a denial: the result rows are matched against the rows the filter allows

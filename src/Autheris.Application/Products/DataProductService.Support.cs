@@ -147,8 +147,9 @@ public sealed partial class DataProductService
             var (tree, _) = _sqlEngine.Parse(definition.AsMemory(), null, ct);
             statement = new SqlAstBuilder().BuildStatement(tree);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
         {
+            // the engine may cancel its own work on a hostile definition; only a cancellation of the caller is propagated
             throw Invalid();
         }
 

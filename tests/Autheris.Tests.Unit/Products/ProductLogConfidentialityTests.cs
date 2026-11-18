@@ -6,7 +6,6 @@ using Autheris.Domain.Options.TableCache;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
-using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -40,8 +39,7 @@ public sealed class ProductLogConfidentialityTests
     {
         var h = new ProductHarness();
         var runner = new ScriptedRunner { Failure = _ => new InvalidOperationException("row value jane.doe@example.com") };
-        var cluster = Substitute.For<IDistributedClusterStateProvider>();
-        cluster.TryAcquireLeaseAsync(default!, default, default).ReturnsForAnyArgs(_ => new ValueTask<IDistributedLease?>(Substitute.For<IDistributedLease>()));
+        var cluster = new InMemoryClusterStateProvider();
         var logger = new CapturingLogger();
         var loader = new ProductLoadService(h.Store, runner, new RecordingCacheStore(), new TableCacheCatalog(), cluster,
             h.Audit, new FakeTimeProvider(), logger);

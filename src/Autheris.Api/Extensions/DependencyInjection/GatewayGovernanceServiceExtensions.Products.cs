@@ -3,7 +3,10 @@ namespace Autheris.Api.Extensions.DependencyInjection;
 using Autheris.Application.Audit;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.ConsentRequests.Events;
+using Autheris.Application.Procedures.Interfaces;
 using Autheris.Application.Products;
+using Autheris.Application.Products.Sync;
+using Autheris.Application.State;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -36,6 +39,17 @@ public static partial class GatewayGovernanceServiceExtensions
             sp.GetService<ILogger<DataProductService>>(),
             sp.GetService<IProductCatalogOwnerStore>() is { } ownerStore ? new ProductOwnershipSync(ownerStore) : null,
             sp.GetService<IProductCatalogStore>()));
+        services.AddSingleton(sp => new ProductSyncService(
+            sp.GetRequiredService<DataProductService>(),
+            sp.GetRequiredService<IDataProductRepository>(),
+            sp.GetRequiredService<IAuditWriter>(),
+            sp.GetService<IProcedureRegistry>(),
+            sp.GetService<TimeProvider>()));
+        services.AddSingleton(sp => new ProductSyncWebhookService(
+            sp.GetService<IKeyVaultSecretProvider>(),
+            sp.GetService<IDistributedClusterStateProvider>(),
+            sp.GetRequiredService<IAuditWriter>(),
+            sp.GetService<TimeProvider>()));
         services.AddSingleton(sp => new DataSourceOwnerService(
             sp.GetRequiredService<IDataProductRepository>(),
             sp.GetRequiredService<IAuditWriter>(),

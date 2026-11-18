@@ -14,7 +14,10 @@ using Autheris.Domain.Model;
 using Microsoft.Extensions.Logging;
 using TrinoSqlEngine;
 
-/// <summary>A create or definition change (PUT). Admin and sync creations must name <see cref="ProductOwner"/>.</summary>
+/// <summary>
+/// A create or definition change (PUT). Admin and sync creations must name <see cref="ProductOwner"/>. A <see cref="DryRun"/> runs every
+/// check, including the creation authority, and returns the product that would be stored without writing, notifying or auditing it.
+/// </summary>
 public sealed record ProductPutRequest(
     ProductCaller Caller,
     string Schema,
@@ -24,7 +27,8 @@ public sealed record ProductPutRequest(
     Sid? ProductOwner = null,
     LoadSettings? Load = null,
     ProductLimits? Limits = null,
-    string? Description = null);
+    string? Description = null,
+    bool DryRun = false);
 
 /// <summary>
 /// Administration of data products: creation authority, product-owner rules, base-owner notification and column classification.
@@ -118,6 +122,11 @@ public sealed partial class DataProductService(
             existing?.ManagedBy ?? (caller.ViaSyncPath ? "Git" : null), load, limits, command.Description ?? existing?.Description,
             existing?.ProductOwner ?? decision.ProductOwner!.Value, existing is null ? 1 : existing.Version + 1,
             existing?.CreatedAt ?? now, now);
+        if (command.DryRun)
+        {
+            return product;
+        }
+
         var revision = new DataProductVersion(product.Id, product.Version, hash, product.Definition, caller.Sid, decision.Authority!.Value, now);
 
         var definitionChanged = existing is null || existing.DefinitionHash != hash || !SameObjects(existing.BaseObjects, analysis.BaseObjects);

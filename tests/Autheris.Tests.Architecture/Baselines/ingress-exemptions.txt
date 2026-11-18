@@ -132,6 +132,7 @@ route /api/v1/governance/virtual-filters/sync/apply | governance, consent, ReBAC
 route /api/v1/governance/virtual-filters/sync/plan | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/governance/virtual-filters/sync/status | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/governance/virtual-filters/sync/webhook | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
+route /api/v1/products* | data product administration and Git synchronisation (incl. the signed webhook); governance state only, products are read through the governed catalog path
 route /api/v1/profiles | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/profiles/{id} | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/profiles/{id}/assignments/approve | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
