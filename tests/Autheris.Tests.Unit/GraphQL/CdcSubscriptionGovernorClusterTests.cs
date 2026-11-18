@@ -21,6 +21,8 @@ using Xunit;
 
 public sealed class CdcSubscriptionGovernorClusterTests
 {
+    private static readonly Autheris.Application.DataSources.IDataSourceTransportGate Gate = Substitute.For<Autheris.Application.DataSources.IDataSourceTransportGate>();
+
     private static ClaimsPrincipal CreateUser(string sid, string tenant = "tenant-a", params string[] roles)
     {
         var claims = new List<Claim>
@@ -74,16 +76,16 @@ public sealed class CdcSubscriptionGovernorClusterTests
         var table = new TableIdentifier("default", "public", "orders");
 
         // User 1 admits 2 subscriptions
-        await using var l1 = await governor.AdmitAsync(user1, "cdc_orders", table, resolver, audit, CancellationToken.None);
-        await using var l2 = await governor.AdmitAsync(user1, "cdc_orders", table, resolver, audit, CancellationToken.None);
+        await using var l1 = await governor.AdmitAsync(user1, "cdc_orders", table, resolver, audit, CancellationToken.None, transportGate: Gate);
+        await using var l2 = await governor.AdmitAsync(user1, "cdc_orders", table, resolver, audit, CancellationToken.None, transportGate: Gate);
 
         // User 1 third attempt reaches per-subject limit
         var ex = await Should.ThrowAsync<GraphQLException>(() =>
-            governor.AdmitAsync(user1, "cdc_orders", table, resolver, audit, CancellationToken.None));
+            governor.AdmitAsync(user1, "cdc_orders", table, resolver, audit, CancellationToken.None, transportGate: Gate));
         ex.Errors[0].Code.ShouldBe("TOO_MANY_REQUESTS");
 
         // User 2 from the SAME tenant is admitted
-        await using var l3 = await governor.AdmitAsync(user2, "cdc_orders", table, resolver, audit, CancellationToken.None);
+        await using var l3 = await governor.AdmitAsync(user2, "cdc_orders", table, resolver, audit, CancellationToken.None, transportGate: Gate);
         l3.ShouldNotBeNull();
     }
 
@@ -95,13 +97,13 @@ public sealed class CdcSubscriptionGovernorClusterTests
 
         var table = new TableIdentifier("default", "public", "orders");
 
-        await using var l1 = await governor.AdmitAsync(CreateUser("S-1-U1"), "cdc_orders", table, resolver, audit, CancellationToken.None);
-        await using var l2 = await governor.AdmitAsync(CreateUser("S-1-U2"), "cdc_orders", table, resolver, audit, CancellationToken.None);
-        await using var l3 = await governor.AdmitAsync(CreateUser("S-1-U3"), "cdc_orders", table, resolver, audit, CancellationToken.None);
+        await using var l1 = await governor.AdmitAsync(CreateUser("S-1-U1"), "cdc_orders", table, resolver, audit, CancellationToken.None, transportGate: Gate);
+        await using var l2 = await governor.AdmitAsync(CreateUser("S-1-U2"), "cdc_orders", table, resolver, audit, CancellationToken.None, transportGate: Gate);
+        await using var l3 = await governor.AdmitAsync(CreateUser("S-1-U3"), "cdc_orders", table, resolver, audit, CancellationToken.None, transportGate: Gate);
 
         // Fourth across tenant exceeds MaxSubscriptionsPerTenant (3)
         var ex = await Should.ThrowAsync<GraphQLException>(() =>
-            governor.AdmitAsync(CreateUser("S-1-U4"), "cdc_orders", table, resolver, audit, CancellationToken.None));
+            governor.AdmitAsync(CreateUser("S-1-U4"), "cdc_orders", table, resolver, audit, CancellationToken.None, transportGate: Gate));
         ex.Errors[0].Code.ShouldBe("TOO_MANY_REQUESTS");
     }
 
@@ -122,7 +124,7 @@ public sealed class CdcSubscriptionGovernorClusterTests
         var table = new TableIdentifier("default", "public", "orders");
 
         var ex = await Should.ThrowAsync<GraphQLException>(() =>
-            governor.AdmitAsync(CreateUser("S-1-USER"), "cdc_orders", table, resolver, audit, CancellationToken.None));
+            governor.AdmitAsync(CreateUser("S-1-USER"), "cdc_orders", table, resolver, audit, CancellationToken.None, transportGate: Gate));
         ex.Errors[0].Code.ShouldBe("TOO_MANY_REQUESTS");
 
         // Verify slot 1 was released!
@@ -170,7 +172,7 @@ public sealed class CdcSubscriptionGovernorClusterTests
         var table = new TableIdentifier("default", "public", "orders");
         using var streamCts = new CancellationTokenSource();
 
-        await using var lease = await governor.AdmitAsync(CreateUser("S-1-USER"), "cdc_orders", table, resolver, audit, CancellationToken.None, streamCts);
+        await using var lease = await governor.AdmitAsync(CreateUser("S-1-USER"), "cdc_orders", table, resolver, audit, CancellationToken.None, streamCts, Gate);
         lease.IsStreamCompleted.ShouldBeFalse();
 
         // Trigger renewal
