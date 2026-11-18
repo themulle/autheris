@@ -17,6 +17,7 @@ public static class SemanticCatalogServiceCollectionExtensions
             sp.GetRequiredService<IOptions<SemanticOptions>>().Value.PersistManifest
                 ? ActivatorUtilities.CreateInstance<PersistentSemanticCatalog>(sp)
                 : ActivatorUtilities.CreateInstance<InMemorySemanticCatalog>(sp));
+        services.TryAddSingleton<ISemanticMetricImport>(sp => sp.GetRequiredService<ISemanticCatalogService>());
         services.TryAddSingleton(sp => SemanticTenancy.FromOptions(sp.GetService<IOptions<GatewayOptions>>()));
         services.TryAddSingleton(sp => new SemanticManifestValidator(
             sp.GetService<TrinoSqlEngine.Governance.IPolicyExpressionParser>() ?? Autheris.Application.Policy.Lint.PolicyParserSetup.CreateParser(),

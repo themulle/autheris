@@ -88,3 +88,8 @@ dotnet test tests/Autheris.Tests.Architecture -c Release
 - `IDbtHealthCircuitBreaker` stays core with a no-data default implementation; the dbt module supplies the real one.
 - The OpenMetadata receiver becomes an authenticated module route (signature still required), because module routes cannot be anonymous (WP-SIMPL-25, SEC-SIMPL-43).
 - OpenMetadata legacy switch entries stay in core `LegacySwitchGuard` so they fail fast even when the module is absent.
+
+## Changelog
+- 2026-11-18: PR 1 (#488 webhook items) was already on `main` (#637: signature header checked before body read, unauthenticated bodies capped at 2 MB, OpenMetadata event-id replay cache, dbt skew and event-id dedup). Re-verified; `OpenMetadataWebhookTests.Replayed_event_is_rejected` and `.Buffer_is_bounded` exist and are green; no code change.
+- 2026-11-18: PR 2 done: `ISemanticMetricImport` (core, implemented by the semantic catalogs, consumed by `DbtSemanticManifestIngestionService`); `IDbtHealthCircuitBreaker` core default `NoDbtHealthData`, replaced by `AddDbtIntegration`; `CoreMetricModelArchitectureTests` added. `AnalyticsEndpoints` and `McpSemanticTools` already referenced only `Autheris.Application.Catalog.Semantic`.
+- 2026-11-18: Deferred: moving the GraphQL mutation `SyncOpenMetadataAsync` behind `IAutherisGraphQLModule` (the interface does not exist yet; WP-SIMPL-25). It stays in core until the OpenMetadata extraction (PR 4).
