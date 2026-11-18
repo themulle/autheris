@@ -386,32 +386,6 @@ public sealed class SltCorpusUnitTests
         runner.Run("SELECT count(*) FROM t").ShouldBeOfType<SltEngineRows>(); // fast query unaffected, connection still usable
     }
 
-    private sealed class HangingEngine : ISltEngine
-    {
-        public int Calls { get; private set; }
-
-        public SltEngineOutcome Run(string sql)
-        {
-            Calls++;
-            return new SltEngineHung("Execute");
-        }
-
-        public void InvalidateCatalog()
-        {
-        }
-    }
-
-    private sealed class StallOnceEngine(SltEngineOutcome second) : ISltEngine
-    {
-        public int Calls { get; private set; }
-
-        public SltEngineOutcome Run(string sql) => ++Calls == 1 ? new SltEngineHung("Execute") : second;
-
-        public void InvalidateCatalog()
-        {
-        }
-    }
-
     [Fact]
     [Trait("Category", "Security")]
     public void SltCorpusRunner_RunEngine_RetriesAStallOnceAndKeepsEveryOtherOutcome()
@@ -474,5 +448,31 @@ public sealed class SltCorpusUnitTests
 
         classifier.Classify(new SltObservation(FindingKind.WrongResult, cls, RowFilterScenario: true)).ShouldBe(SltVerdict.Finding);
         classifier.Classify(new SltObservation(FindingKind.WrongResult, cls, RowFilterScenario: false)).ShouldBe(SltVerdict.AcceptedDifference);
+    }
+
+    private sealed class HangingEngine : ISltEngine
+    {
+        public int Calls { get; private set; }
+
+        public SltEngineOutcome Run(string sql)
+        {
+            Calls++;
+            return new SltEngineHung("Execute");
+        }
+
+        public void InvalidateCatalog()
+        {
+        }
+    }
+
+    private sealed class StallOnceEngine(SltEngineOutcome second) : ISltEngine
+    {
+        public int Calls { get; private set; }
+
+        public SltEngineOutcome Run(string sql) => ++Calls == 1 ? new SltEngineHung("Execute") : second;
+
+        public void InvalidateCatalog()
+        {
+        }
     }
 }
