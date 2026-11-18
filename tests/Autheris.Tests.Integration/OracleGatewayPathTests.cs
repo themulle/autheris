@@ -331,7 +331,7 @@ public sealed class OracleGatewayPathTests : IDisposable
         // a provider error is a stable code with a fixed message (ORA-01722 text never reaches the caller)
         var failing = _host.CreateClient();
         failing.DefaultRequestHeaders.Add("X-Tenant-Id", "acme");
-        var error = await failing.PostAsJsonAsync("/api/v1/sql", new { sql = $"SELECT CAST(region AS integer) FROM {AstCompilerOracleFixture.AppUser}.ORDERS", dataSource = Source });
+        var error = await failing.PostAsJsonAsync("/api/v1/sql", new { sql = $"SELECT CAST('abc' AS integer) FROM {AstCompilerOracleFixture.AppUser}.ORDERS", dataSource = Source });
         var errorBody = await error.Content.ReadAsStringAsync();
         errorBody.ShouldNotContain("ORA-");
         errorBody.ShouldContain("code");

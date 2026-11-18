@@ -64,7 +64,7 @@ public sealed class McpBudgetShorteningTests
 
     [Fact]
     public void TryShorten_OtherTool_IsNotShortened() =>
-        McpBudgetShortening.TryShorten("describe_dataset", ListResult(10, 400), 1_000, 250, out _).ShouldBeFalse();
+        McpBudgetShortening.TryShorten(McpDatasetTools.DescribeMyAccess, ListResult(10, 400), 1_000, 250, out _).ShouldBeFalse();
 
     [Fact]
     public void TryShorten_ResultWithoutDatasets_IsNotShortened() =>

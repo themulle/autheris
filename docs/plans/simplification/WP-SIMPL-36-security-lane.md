@@ -139,3 +139,10 @@ About +2,200 src and +3,300 tests LOC across all PRs excluding batch 5; 8-11 per
 - Every advisory step refers to the private advisory for its fix list instead of repeating it publicly; the spec names only id and neutral title.
 - DML: sub-package 3 implements only the four DML advisories; the write-grant model, write-protected columns and write budget are WP-SIMPL-45 (D-45-8, OD-26). The ReBAC switch is dropped (OD-30, WP-SIMPL-46 PR 5).
 - Advisory ownership: this WP is the only owner of GHSA-p234-g3ph-gqh2 and GHSA-x8g9-cm3h-p6jq; GHSA-92vp-663x-pp52 is shared with WP-SIMPL-39 (procedures part) through one regression theory.
+
+## Changelog
+- 2026-11-18 (sub-package 7): GHSA-x8g9-cm3h-p6jq partially fixed; remaining items tracked in the private advisory. Test: `AdvisoryRegressionTests.Ghsa_x8g9_p6jq_regression`.
+- 2026-11-18 (sub-package 7): GHSA-v77c-jh96-7rgr already fixed; regression test added: `AdvisoryRegressionTests.Ghsa_v77c_7rgr_regression`.
+- 2026-11-18 (sub-package 7): GHSA-rxr4-mf28-p2hv partially fixed; remaining items tracked in the private advisory. Test: `AdvisoryRegressionTests.Ghsa_rxr4_p2hv_regression`.
+- 2026-11-18 (sub-package 7): GHSA-66xj-4459-x8gx partially fixed; remaining items tracked in the private advisory. Test: `AdvisoryRegressionGateTests.Ghsa_66xj_x8gx_regression` (project `tests/Autheris.Tests.SqlCompilerGate`, one case per dialect).
+- 2026-11-18 (sub-package 7): GHSA-p234-g3ph-gqh2 already fixed; regression test added: `AdvisoryRegressionTests.Ghsa_p234_gqh2_regression`.

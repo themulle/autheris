@@ -19,6 +19,9 @@ namespace TrinoSqlEngine.Ast.Visitors;
 
 public sealed partial class AstSecurityVisitor : SqlAstRewriter
 {
+    /// <summary>True once a table of the statement received a tenant predicate or a row policy; see <see cref="Security.RowPolicyErrorGuard"/>.</summary>
+    public bool RowPolicyApplied { get; private set; }
+
     public override SqlNode VisitNamedTableSource(NamedTableSource node)
     {
         string scopeKey = SqlIdentifierHelper.FoldIdentifierForScope(node.Name.Parts[^1]);
@@ -69,6 +72,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         var tenant = typed.BuildTenantPredicate(entry);
         if (tenant != null)
         {
+            RowPolicyApplied = true;
             var id = new SecurityPredicateId(tid.ToString(), 0);
             conjuncts.Add(new SecurityPredicateExpression(tenant, id, scope));
         }
@@ -77,6 +81,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         bool referencesTarget = false;
         if (applies)
         {
+            RowPolicyApplied = true;
             var predicate = typed.RowFilters.GetPredicate(tid);
             typed.AddValues(predicate.Parameters);
             var expression = (Expression)new PolicySubqueryTenantRewriter(typed).Visit(predicate.Expression);
@@ -127,6 +132,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         TypedPolicyContext typed,
         SecurityScope scope)
     {
+        RowPolicyApplied = true;
         var tid = entry.Identity;
         foreach (var sig in perCell.Signatures)
         {
@@ -135,6 +141,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
 
         if (perCell.NarrowingPredicate is not null)
         {
+            RowPolicyApplied = true;
             typed.AddValues(perCell.NarrowingPredicate.Parameters);
         }
 
