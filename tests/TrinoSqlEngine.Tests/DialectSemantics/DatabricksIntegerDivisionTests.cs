@@ -32,7 +32,7 @@ public sealed class DatabricksIntegerDivisionTests
         MaxExpansionFactor = expansionFactor,
         Policy = new GovernancePolicy
         {
-            RowFilters = new DictPolicyProvider(),
+            RowFilters = new DictPolicyProvider { NoPolicy = { Items } },
             Masks = new DictMaskProvider(),
             Catalog = catalog,
             Tenant = new TenantBinding("__autheris_tenant", "acme", SqlParameterType.String)
@@ -101,7 +101,7 @@ public sealed class DatabricksIntegerDivisionTests
             MaxExpansionFactor = 20,
             Policy = new GovernancePolicy
             {
-                RowFilters = new DictPolicyProvider(),
+                RowFilters = new DictPolicyProvider { NoPolicy = { Items } },
                 Masks = new DictMaskProvider(),
                 Catalog = CatalogWithColumnType("INTEGER"),
                 Tenant = new TenantBinding("__autheris_tenant", "acme", SqlParameterType.String)

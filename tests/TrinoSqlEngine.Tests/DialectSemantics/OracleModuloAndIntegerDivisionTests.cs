@@ -43,7 +43,7 @@ public sealed class OracleModuloAndIntegerDivisionTests
             TokenGuards = SqlTokenSecurityOptions.Strict,
             Policy = new GovernancePolicy
             {
-                RowFilters = new DictPolicyProvider(),
+                RowFilters = new DictPolicyProvider { NoPolicy = { Items } },
                 Masks = new DictMaskProvider(),
                 Catalog = catalog ?? CatalogWithTypes(),
                 Tenant = new TenantBinding("__autheris_tenant", "acme", SqlParameterType.String)
