@@ -38,6 +38,7 @@ public static partial class ProductEndpoints
     {
         ArgumentNullException.ThrowIfNull(app);
         var group = app.MapGroup("/api/v1/products")
+            .WithIngressTransport(Autheris.Domain.Options.DataSources.DataSourceTransportFlags.Rest)
             .RequireAuthorization()
             .WithAudit(AuditLevel.Full, AuditEventTypes.ProductDefinitionChanged);
 
