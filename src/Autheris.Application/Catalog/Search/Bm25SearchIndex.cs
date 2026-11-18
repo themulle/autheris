@@ -334,27 +334,30 @@ public sealed class Bm25SearchIndex
 
     private sealed record QueryTermPlan(string Term, double? Idf, List<(string Token, double Idf)> Expansions);
 
-    private double? ComputeIdf(string term)
+    /// <summary>Corpus statistics one query is scored against: document count, document frequency and expansion vocabulary.</summary>
+    private sealed record CorpusStats(int DocCount, Func<string, int> DocumentFrequency, string[] Vocabulary);
+
+    private static double? ComputeIdf(CorpusStats stats, string term)
     {
-        int df = _baseTermDocCounts.GetValueOrDefault(term) + _termDocCountDeltas.GetValueOrDefault(term);
+        int df = stats.DocumentFrequency(term);
         if (df <= 0) return null;
 
         // Robertson-Sparck Jones IDF with smoothing
-        return Math.Log(1.0 + (_activeDocCount - df + 0.5) / (df + 0.5));
+        return Math.Log(1.0 + (stats.DocCount - df + 0.5) / (df + 0.5));
     }
 
-    private QueryTermPlan[] BuildPlan(string[] queryTerms, string[] vocabulary)
+    private static QueryTermPlan[] BuildPlan(string[] queryTerms, CorpusStats stats, string[] vocabulary)
     {
         int count = Math.Min(queryTerms.Length, MaxQueryTerms);
         var plan = new QueryTermPlan[count];
         for (int i = 0; i < count; i++)
         {
             var term = queryTerms[i];
-            double? idf = ComputeIdf(term);
+            double? idf = ComputeIdf(stats, term);
             var expansions = new List<(string Token, double Idf)>();
             foreach (var candidate in Expand(term, vocabulary))
             {
-                if (ComputeIdf(candidate) is { } expansionIdf)
+                if (ComputeIdf(stats, candidate) is { } expansionIdf)
                 {
                     expansions.Add((candidate, expansionIdf));
                 }
@@ -364,6 +367,83 @@ public sealed class Bm25SearchIndex
         }
 
         return plan;
+    }
+
+    private List<IndexedDocument> CollectVisibleDocuments(Func<TableIdentifier, bool>? isAllowed)
+    {
+        var visible = new List<IndexedDocument>(_activeDocCount);
+        for (int i = 0; i < _baseDocuments.Count; i++)
+        {
+            var doc = _baseDocuments[i];
+            if (_baseTombstones.Contains(i) || !doc.HasTokens || (isAllowed != null && !isAllowed(doc.TableId))) continue;
+            visible.Add(doc);
+        }
+
+        foreach (var doc in _deltaDocuments.Values)
+        {
+            if (!doc.HasTokens || (isAllowed != null && !isAllowed(doc.TableId))) continue;
+            visible.Add(doc);
+        }
+
+        return visible;
+    }
+
+    /// <summary>
+    /// Statistics over the visible documents only: document count, field lengths, document frequency and expansion
+    /// vocabulary. Restricted documents therefore cannot move a visible document's score, its rank or its partial matches.
+    /// </summary>
+    private static (CorpusStats Full, CorpusStats TableLevel, double[] AvgFieldLength) BuildVisibleStats(
+        List<IndexedDocument> visible,
+        string[] queryTerms)
+    {
+        var terms = queryTerms.Length > MaxQueryTerms ? queryTerms[..MaxQueryTerms] : queryTerms;
+        var df = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var vocabAll = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var vocabTableLevel = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var totals = new long[CatalogSearchFieldWeights.FieldCount];
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var doc in visible)
+        {
+            seen.Clear();
+            for (int f = 0; f < CatalogSearchFieldWeights.FieldCount; f++)
+            {
+                totals[f] += doc.FieldLengths[f];
+                var tf = doc.FieldTermFrequencies[f];
+                if (tf is null) continue;
+
+                foreach (var token in tf.Keys)
+                {
+                    if (!IsRelevantToken(token, terms)) continue;
+                    if (seen.Add(token)) df[token] = df.GetValueOrDefault(token) + 1;
+                    vocabAll.Add(token);
+                    if (f < FirstColumnField) vocabTableLevel.Add(token);
+                }
+            }
+        }
+
+        var avg = new double[CatalogSearchFieldWeights.FieldCount];
+        for (int f = 0; f < avg.Length; f++)
+        {
+            avg[f] = visible.Count == 0 ? 0.0 : (double)totals[f] / visible.Count;
+        }
+
+        Func<string, int> dfOf = t => df.GetValueOrDefault(t);
+        return (
+            new CorpusStats(visible.Count, dfOf, SortVocabulary(vocabAll)),
+            new CorpusStats(visible.Count, dfOf, SortVocabulary(vocabTableLevel)),
+            avg);
+    }
+
+    private static bool IsRelevantToken(string token, string[] queryTerms)
+    {
+        foreach (var term in queryTerms)
+        {
+            if (string.Equals(token, term, StringComparison.OrdinalIgnoreCase)) return true;
+            if (term.Length >= MinPartialMatchLength && token.Length > term.Length && token.Contains(term, StringComparison.Ordinal)) return true;
+        }
+
+        return false;
     }
 
     private static double PseudoTf(
@@ -422,43 +502,45 @@ public sealed class Bm25SearchIndex
         var queryTerms = SmartSchemaTokenizer.Tokenize(query, expandAbbreviations: false);
         if (queryTerms.Length == 0 || _activeDocCount == 0) return [];
 
+        // Authorization filtering happens before any corpus statistic is read: document count, field lengths, document
+        // frequency and expansion vocabulary come from the visible documents only when anything is hidden.
+        var visible = CollectVisibleDocuments(isAllowed);
+        if (visible.Count == 0) return [];
+
+        CorpusStats fullStats;
+        CorpusStats tableLevelStats;
         var avgFieldLength = new double[CatalogSearchFieldWeights.FieldCount];
-        bool anyNonZeroField = false;
-        for (int f = 0; f < avgFieldLength.Length; f++)
+        if (visible.Count == _activeDocCount)
         {
-            avgFieldLength[f] = (double)_totalFieldLengths[f] / _activeDocCount;
-            if (avgFieldLength[f] > 0.0)
+            for (int f = 0; f < avgFieldLength.Length; f++)
             {
-                anyNonZeroField = true;
+                avgFieldLength[f] = (double)_totalFieldLengths[f] / _activeDocCount;
             }
+
+            int GlobalDf(string t) => _baseTermDocCounts.GetValueOrDefault(t) + _termDocCountDeltas.GetValueOrDefault(t);
+            fullStats = new CorpusStats(_activeDocCount, GlobalDf, _vocabulary);
+            tableLevelStats = new CorpusStats(_activeDocCount, GlobalDf, _tableLevelVocabulary);
+        }
+        else
+        {
+            (fullStats, tableLevelStats, avgFieldLength) = BuildVisibleStats(visible, queryTerms);
         }
 
-        if (!anyNonZeroField) return [];
+        if (!Array.Exists(avgFieldLength, static a => a > 0.0)) return [];
 
-        var fullPlan = BuildPlan(queryTerms, _vocabulary);
+        var fullPlan = BuildPlan(queryTerms, fullStats, fullStats.Vocabulary);
         if (!Array.Exists(fullPlan, static e => e.Idf.HasValue || e.Expansions.Count > 0))
         {
             return [];
         }
 
-        var tableLevelPlan = isColumnRestricted != null ? BuildPlan(queryTerms, _tableLevelVocabulary) : fullPlan;
+        var tableLevelPlan = isColumnRestricted != null ? BuildPlan(queryTerms, tableLevelStats, tableLevelStats.Vocabulary) : fullPlan;
 
         var results = new List<(TableIdentifier TableId, double Score, IReadOnlyList<string> MatchedTerms)>();
 
-        for (int i = 0; i < _baseDocuments.Count; i++)
+        foreach (var doc in visible)
         {
-            // Skip tombstoned entries before predicate evaluation or scoring.
-            if (_baseTombstones.Contains(i))
-            {
-                continue;
-            }
-
-            ScoreDocument(_baseDocuments[i], fullPlan, tableLevelPlan, avgFieldLength, _weights, isAllowed, isColumnRestricted, results);
-        }
-
-        foreach (var doc in _deltaDocuments.Values)
-        {
-            ScoreDocument(doc, fullPlan, tableLevelPlan, avgFieldLength, _weights, isAllowed, isColumnRestricted, results);
+            ScoreDocument(doc, fullPlan, tableLevelPlan, avgFieldLength, _weights, isAllowed: null, isColumnRestricted, results);
         }
 
         return results.OrderByDescending(x => x.Score).Take(topK).ToList();
