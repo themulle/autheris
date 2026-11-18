@@ -175,6 +175,13 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
             return PreconditionDenied(table, "PRODUCT_UNKNOWN", "Product", null, "Access denied: the data product is not available.");
         }
 
+        if (request.Operation == AccessOperation.ExecuteWrite)
+        {
+            return isProduct
+                ? await DecideExecuteWriteAsync(request, ct).ConfigureAwait(false)
+                : PreconditionDenied(table, "EXECUTE_WRITE_NOT_PRODUCT", "Product", null, "Access denied: write execution is only available on data products.");
+        }
+
         if (request.Operation is AccessOperation.Insert or AccessOperation.Update or AccessOperation.Delete)
         {
             return await DecideWriteAsync(request, ct).ConfigureAwait(false);

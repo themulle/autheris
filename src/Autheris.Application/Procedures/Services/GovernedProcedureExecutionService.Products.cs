@@ -12,6 +12,7 @@ using Autheris.Application.Products;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
+using Microsoft.Extensions.Logging;
 using TableDecision = (Autheris.Domain.Interfaces.TableAccessDecision Decision, Autheris.Domain.Model.TableMetadata Meta, System.Collections.Generic.IReadOnlySet<string>? SensitivityOnlyMasked);
 
 /// <summary>
@@ -70,7 +71,7 @@ public sealed partial class GovernedProcedureExecutionService
         };
 
         var secContext = Autheris.Domain.Security.SecurityPrincipalContext.FromPrincipal(user, tenantId, clientIp: ResolveClientIp(user));
-        var request = new AccessRequest(secContext, meta, AccessOperation.Execute, AccessTransport.Procedure);
+        var request = new AccessRequest(secContext, meta, definition.Mode == ProcedureMode.Write ? AccessOperation.ExecuteWrite : AccessOperation.Execute, AccessTransport.Procedure);
         var decision = await _accessDecisionPoint!.DecideAsync(request, ct).ConfigureAwait(false);
         if (!decision.IsAllowed || !string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql))
         {
@@ -78,7 +79,7 @@ public sealed partial class GovernedProcedureExecutionService
         }
 
         var decisions = new Dictionary<string, TableDecision>(StringComparer.OrdinalIgnoreCase) { [objectId.ToQualifiedName()] = (decision, meta, null) };
-        return new ProcedureVisibility(true, string.Empty, decisions);
+        return new ProcedureVisibility(true, string.Empty, decisions, product);
     }
 
     /// <summary>Product column classes: every declared output is <c>PiiMasked</c> unless the procedure declares it clear-eligible.</summary>
@@ -157,5 +158,86 @@ public sealed partial class GovernedProcedureExecutionService
         }
 
         return (plan.Select(p => p.Name).ToList(), rows);
+    }
+
+    /// <summary>A write procedure runs only as a product, on REST or MCP, for a caller whose token permits writes.</summary>
+    private static bool WriteCallAllowed(ProcedureDefinition definition, ClaimsPrincipal user) =>
+        definition.Mode == ProcedureMode.Write &&
+        IsProduct(definition) &&
+        ProcedureCallScope.Transport is ProcedureCallTransport.Rest or ProcedureCallTransport.Mcp &&
+        !Autheris.Domain.Security.TokenAccessScope.IsReadOnly(user);
+
+    private const int MaxWriteStringLength = 4096;
+
+    /// <summary>
+    /// Runs the write procedure of a product after the execute-write decision. The intent is on record before the call and the outcome after
+    /// it (parameter names and counts only, never a value); an audit failure before the call aborts it. A write procedure returns no rows.
+    /// </summary>
+    private async Task<GovernedProcedureResult> ExecuteWriteProductAsync(
+        ProcedureDefinition definition,
+        Dictionary<string, object?> values,
+        ProcedureVisibility visibility,
+        ProcedureSecurityContext context,
+        TenantId tenantId,
+        Sid userSid,
+        string traceId,
+        System.Diagnostics.Stopwatch sw,
+        CancellationToken ct)
+    {
+        var product = visibility.Product ?? throw new InvalidOperationException("A write procedure is decided on its product.");
+        if (values.Count > definition.Parameters.Count ||
+            values.Values.Any(static v => v is string text && text.Length > MaxWriteStringLength))
+        {
+            throw new ArgumentException("Invalid parameter.");
+        }
+
+        if (!ProductWriteRateLimiter.TryAcquire(tenantId, product.Id))
+        {
+            RecordProcedureUsage(definition, tenantId, userSid, Autheris.Application.Usage.UsageOutcome.DenyRateLimit, 0, false);
+            await AuditAsync("PROCEDURE_THROTTLED", "DENY", definition, tenantId, userSid, new { reason = "write-rate", productId = product.Id }, traceId, ct).ConfigureAwait(false);
+            throw new Autheris.Domain.Exceptions.GatewayThrottledException(ProductWriteRateLimiter.WindowSeconds);
+        }
+
+        var names = values.Keys.Order(StringComparer.OrdinalIgnoreCase).ToArray();
+        await AuditAsync("PROCEDURE_WRITE_INTENT", "ALLOW", definition, tenantId, userSid,
+            new { productId = product.Id, definitionHash = product.DefinitionHash, parameterNames = names, parameterCount = names.Length }, traceId, ct).ConfigureAwait(false);
+
+        ProcedureWriteOutcome outcome;
+        try
+        {
+            outcome = await _invoker.ExecuteWriteAsync(definition, values, context, ct).ConfigureAwait(false);
+        }
+        catch (ProcedureBusinessException bex)
+        {
+            var mapped = definition.ErrorCodes.FirstOrDefault(e =>
+                (e.Number is not null && e.Number == bex.ErrorNumber) || (e.SqlState is not null && e.SqlState == bex.SqlState));
+            RecordProcedureUsage(definition, tenantId, userSid, Autheris.Application.Usage.UsageOutcome.DenyOther, 0, false);
+            await AuditAsync("PROCEDURE_WRITE_OUTCOME", "DENY", definition, tenantId, userSid,
+                new { productId = product.Id, definitionHash = product.DefinitionHash, outcome = "rejected", mappedCode = mapped?.Code }, traceId, ct).ConfigureAwait(false);
+            throw new ProcedureBusinessException(bex.ErrorNumber, bex.SqlState, traceId, mapped?.Code, mapped?.Message);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger?.LogError("Write procedure '{Procedure}' failed with {ExceptionType} (trace {TraceId}).", definition.ProcedureName, ex.GetType().Name, traceId);
+            RecordProcedureUsage(definition, tenantId, userSid, Autheris.Application.Usage.UsageOutcome.Error, 0, false);
+            await AuditAsync("PROCEDURE_WRITE_OUTCOME", "DENY", definition, tenantId, userSid,
+                new { productId = product.Id, definitionHash = product.DefinitionHash, outcome = "failed", reason = ex.GetType().Name }, traceId, ct).ConfigureAwait(false);
+            throw;
+        }
+
+        var affected = (int)Math.Clamp(outcome.RowsAffected ?? 0, 0, int.MaxValue);
+        await AuditAsync("PROCEDURE_WRITE_OUTCOME", "ALLOW", definition, tenantId, userSid,
+            new
+            {
+                productId = product.Id,
+                definitionHash = product.DefinitionHash,
+                outcome = "completed",
+                rowsAffected = outcome.RowsAffected,
+                durationMs = sw.ElapsedMilliseconds,
+                parameterCount = names.Length
+            }, traceId, ct).ConfigureAwait(false);
+        RecordProcedureUsage(definition, tenantId, userSid, Autheris.Application.Usage.UsageOutcome.Allow, affected, true,
+            ExtractDecisionGrants(visibility.Decisions.Values.Select(d => d.Decision)));
+        return new GovernedProcedureResult([], [], affected, false, sw.ElapsedMilliseconds);
     }
 }

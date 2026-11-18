@@ -142,9 +142,9 @@ public sealed partial class GovernedProcedureExecutionService : IProcedureExecut
 
         var definition = registered.Definition;
 
-        // 1a. Write-mode guard: only read procedures are executable. A write-mode definition is not visible,
-        // answered exactly like an unknown name, before anything caller-controlled is looked at.
-        if (definition.Mode != ProcedureMode.Read)
+        // 1a. Write-mode guard: a write procedure is executable only as a data product, on a wired transport and for a caller whose token
+        // permits writes. Anything else is not visible, answered exactly like an unknown name, before anything caller-controlled is looked at.
+        if (definition.Mode != ProcedureMode.Read && !WriteCallAllowed(definition, user))
         {
             var denyUser = user.GetUserSid() ?? new Sid("anonymous");
             RecordProcedureUsage(definition, tenantId, denyUser, Autheris.Application.Usage.UsageOutcome.DenyAccess, 0, false);
@@ -208,6 +208,11 @@ public sealed partial class GovernedProcedureExecutionService : IProcedureExecut
                 tenantId.Value,
                 userSid.Value,
                 user.FindFirst("purpose")?.Value ?? user.FindFirst("purpose_id")?.Value);
+
+            if (definition.Mode == ProcedureMode.Write)
+            {
+                return await ExecuteWriteProductAsync(definition, values, visibility, context, tenantId, userSid, traceId, sw, ct).ConfigureAwait(false);
+            }
 
             // 6a. Row budget, decided before the invoke from the visibility decisions: a scoped call scans up
             // to MaxScanRows raw rows (the limit is applied after the row scope), an unscoped call reads the limit itself.
@@ -929,7 +934,7 @@ public sealed partial class GovernedProcedureExecutionService : IProcedureExecut
 }
 
 /// <summary>Result of the visibility stage; <see cref="Reason"/> is for the server-side audit only.</summary>
-internal sealed record ProcedureVisibility(bool Visible, string Reason, Dictionary<string, TableDecision> Decisions)
+internal sealed record ProcedureVisibility(bool Visible, string Reason, Dictionary<string, TableDecision> Decisions, Autheris.Domain.Model.DataProduct? Product = null)
 {
     public static ProcedureVisibility Hidden(string reason) => new(false, reason, new Dictionary<string, TableDecision>(StringComparer.OrdinalIgnoreCase));
 }
