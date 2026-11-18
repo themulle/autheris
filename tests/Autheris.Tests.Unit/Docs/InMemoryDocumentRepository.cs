@@ -24,6 +24,9 @@ internal sealed class InMemoryDocumentRepository : IDocumentRepository
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
+    /// <summary>Optional link store that receives the delete/purge cascade of the real repository.</summary>
+    public InMemoryDocLinkRepository? Links { get; set; }
+
     public bool FailNextRead { get; set; }
 
     public List<DateTimeOffset> PurgeCutoffs { get; } = [];
@@ -181,13 +184,30 @@ internal sealed class InMemoryDocumentRepository : IDocumentRepository
 
             var at = deletedAt == default ? _timeProvider.GetUtcNow() : deletedAt;
             _rows[dictKey] = existing with { Version = existing.Version + 1, UpdatedAt = at, DeletedAt = at };
+            Links?.RemoveForDeletedDocument(key with { TenantId = tenant });
             return Task.FromResult(new DocWriteOutcome(DocWriteStatus.Deleted));
+        }
+    }
+
+    public Task<bool?> SetDiscoveryHiddenAsync(DocKey key, bool hidden, DateTimeOffset at, CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            var dictKey = new Key(NormalizeTenant(key.TenantId), key.AppId, key.Category, key.DocId);
+            if (!_rows.TryGetValue(dictKey, out var existing) || existing.IsDeleted)
+            {
+                return Task.FromResult<bool?>(null);
+            }
+
+            _rows[dictKey] = existing with { DiscoveryHidden = hidden, UpdatedAt = at == default ? _timeProvider.GetUtcNow() : at };
+            return Task.FromResult<bool?>(existing.DiscoveryHidden);
         }
     }
 
     public Task<int> PurgeTenantAsync(string tenantId, CancellationToken ct = default)
     {
         var normalized = tenantId.Trim();
+        Links?.RemoveForTenant(normalized);
         lock (_gate)
         {
             var toRemove = _rows.Keys.Where(k => string.Equals(k.TenantId, normalized, StringComparison.Ordinal)).ToList();

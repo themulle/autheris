@@ -417,6 +417,13 @@ Finally, run the full unit and architecture suites once.
 5. **PR 5, request access with clear columns (GraphQL, MCP; REST via WP-SIMPL-47), tier-model removal and access-request rate limit:** steps 9, 10 (requests) and 11 (estimated +220 / -400 src).
 6. **PR 6, linked documents and MCP untrusted-text handling:** step 13, after WP-SIMPL-40 PR 40c and PR 3 of this WP (estimated +390 src). If it exceeds 400, split it into 6a (links model, repository, routes, audit) and 6b (discovery/search/MCP exposure, `read_document`, untrusted-text wrapper).
 
+   PR 6a review notes (accepted, tracked here):
+   - The `discovery_hidden` flag set by PR 6a has no read effect until PR 6b filters discovery, search and MCP reads by it.
+   - The audit `before` payload of a link change lists the targets that were kept for a caller who cannot manage them.
+   - Concurrent link replaces for one source are last-writer-wins; the unique `link_digest` index prevents duplicates but a replace can drop a concurrent insert.
+   - Toggling the hide flag does not bump the document `version`.
+   - The SQL Server key limit (1700 bytes) is met by a SHA-256 `link_digest` unique index plus narrower source/target lookup indexes.
+
 ## 10. Risks, rollback, and things the developer must NOT do
 - Risk: widening, because the default flips from hidden to visible. Mitigations: tenant scoping is fail-closed for unowned tables, the flag-read failure mode is "all hidden", and the parity and cross-tenant tests are security-tagged. Rollback per PR by revert. The catalog-discovery migration step is additive, so a revert of code leaves unused columns (harmless).
 - Risk: uploaded statistics or samples that contain real PII. The uploader is responsible (owner decision). Autheris keeps the size and row caps, hidden-column drop, per-table disable and audit hash, so incidents can be traced and the artifact deleted (`DELETE`). Residual risk for Phase 3: section 13, SEC-DISC-12.

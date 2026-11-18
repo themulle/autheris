@@ -86,7 +86,8 @@ public static class CatalogDiscoveryProjection
             EffectiveMode: effectiveMode,
             Language: language,
             Kind: obj.Kind.ToString().ToLowerInvariant(),
-            DatasetId: $"{obj.Domain}.{obj.Schema}.{obj.Name}");
+            DatasetId: $"{obj.Domain}.{obj.Schema}.{obj.Name}",
+            AccessStatus: CatalogAccessStatus.Of(obj.Access));
 
     public static IReadOnlyList<CatalogDatasetSummary> FilterProcedureSummaries(
         IReadOnlyList<RegisteredProcedure> visibleProcedures,
@@ -133,6 +134,7 @@ public static class CatalogDiscoveryProjection
                 RelatedJoinPaths: [],
                 SuggestedGraphQlField: null,
                 Kind: "procedure",
-                DatasetId: $"procedure:{p.Definition.Name}"))
+                DatasetId: $"procedure:{p.Definition.Name}",
+                AccessStatus: CatalogAccessStatus.Granted))
             .ToList();
 }

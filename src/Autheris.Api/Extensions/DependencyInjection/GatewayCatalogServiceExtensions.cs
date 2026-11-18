@@ -70,6 +70,7 @@ public static class GatewayCatalogServiceExtensions
 
         services.TryAddScoped<ICatalogVisibilityService, CatalogVisibilityService>();
         services.TryAddScoped<Autheris.Application.Catalog.Discovery.IDiscoveryArtifactService, Autheris.Application.Catalog.Discovery.DiscoveryArtifactService>();
+        services.TryAddScoped<Autheris.Application.Docs.Services.IDocLinkService, Autheris.Application.Docs.Services.DocLinkService>();
         services.TryAddScoped<Autheris.Application.Catalog.Discovery.IDiscoveryService>(sp =>
             new Autheris.Application.Catalog.Discovery.DiscoveryService(
                 sp.GetService<ITableMetadataRepository>(),
