@@ -2,6 +2,7 @@ namespace Autheris.Application.Catalog.External;
 
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Security.Claims;
 using System.Security.Cryptography;
@@ -57,6 +58,25 @@ public sealed class ExternalCatalogReader(
     private readonly IDiscoveryArtifactStore? _artifactStore = artifactStore;
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
 
+    private const char CursorSeparator = '.';
+
+    /// <summary>Upper bound of the <c>q</c> filter (the same bound the catalog search engine applies to its query text).</summary>
+    public const int MaxSearchTextLength = Autheris.Application.Catalog.Search.CatalogSearchEngine.DefaultMaxQueryLength;
+
+    private static string ComputeCursorBinding(string? searchText, DiscoveryAccessState? accessFilter)
+    {
+        var material = string.Create(CultureInfo.InvariantCulture, $"q={searchText}\na={accessFilter}");
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(material)), 0, 8);
+    }
+
+    private static bool TrySplitCursor(string raw, out string offsetText, out string boundTo)
+    {
+        var i = raw.IndexOf(CursorSeparator, StringComparison.Ordinal);
+        offsetText = i > 0 ? raw[..i] : string.Empty;
+        boundTo = i > 0 ? raw[(i + 1)..] : string.Empty;
+        return i > 0 && boundTo.Length > 0;
+    }
+
     public async Task<ExternalCatalogResult<ExternalCatalogPageDto>> ListObjectsAsync(
         ClaimsPrincipal user,
         TenantId tenantId,
@@ -74,20 +94,39 @@ public sealed class ExternalCatalogReader(
                 "Invalid kind filter. Allowed values: table, view, procedure.");
         }
 
+        if (!CatalogAccessStatus.TryParseFilter(query.AccessStatus, out var accessFilter))
+        {
+            return ExternalCatalogResult.Fail<ExternalCatalogPageDto>(400, "INVALID_QUERY", InvalidAccessStatusMessage);
+        }
+
+        var searchText = string.IsNullOrWhiteSpace(query.Q) ? null : query.Q.Trim();
+        if (searchText is not null && searchText.Length > MaxSearchTextLength)
+        {
+            return ExternalCatalogResult.Fail<ExternalCatalogPageDto>(
+                400,
+                "INVALID_QUERY",
+                $"The q filter exceeds the maximum length of {MaxSearchTextLength} characters.");
+        }
+
+        // The cursor is bound to the text query and the access filter: swapping either one between pages is a 400, not a silent re-page.
+        var cursorBinding = ComputeCursorBinding(searchText, accessFilter);
         int afterOffset = 0;
         if (query.Cursor is not null)
         {
             if (!PageCursor.TryDecode(query.Cursor, out var rawCursor)
-                || !int.TryParse(rawCursor, out afterOffset)
-                || afterOffset < 0)
+                || !TrySplitCursor(rawCursor, out var offsetText, out var boundTo)
+                || !int.TryParse(offsetText, NumberStyles.None, CultureInfo.InvariantCulture, out afterOffset))
             {
                 return ExternalCatalogResult.Fail<ExternalCatalogPageDto>(400, "INVALID_CURSOR", "The cursor is malformed.");
             }
-        }
 
-        if (!CatalogAccessStatus.TryParseFilter(query.AccessStatus, out var accessFilter))
-        {
-            return ExternalCatalogResult.Fail<ExternalCatalogPageDto>(400, "INVALID_QUERY", InvalidAccessStatusMessage);
+            if (!string.Equals(boundTo, cursorBinding, StringComparison.Ordinal))
+            {
+                return ExternalCatalogResult.Fail<ExternalCatalogPageDto>(
+                    400,
+                    "INVALID_CURSOR",
+                    "The cursor does not belong to this q and accessStatus.");
+            }
         }
 
         int pageSize = Math.Clamp(query.PageSize <= 0 ? DefaultPageSize : query.PageSize, 1, MaxPageSize);
@@ -99,10 +138,16 @@ public sealed class ExternalCatalogReader(
             return ExternalCatalogResult.Fail<ExternalCatalogPageDto>(400, "INVALID_QUERY", "The accessStatus filter applies to user callers only.");
         }
 
+        // A text query is verified per caller by discovery; an app-only caller has no caller projection to verify against.
+        if (searchText is not null && visibility.IsServicePrincipal)
+        {
+            return ExternalCatalogResult.Fail<ExternalCatalogPageDto>(400, "INVALID_QUERY", "The q filter applies to user callers only.");
+        }
+
         // The access filter runs in the discovery service, before the total and the cursor are computed below.
         List<ExternalCatalogObjectDto> allDtos = visibility.IsServicePrincipal
             ? await BuildAppCatalogObjectsAsync(allTables, tenantId, versions, visibility, ct).ConfigureAwait(false)
-            : await BuildUserCatalogObjectsAsync(user, tenantId, allTables, versions, visibility, accessFilter, ct).ConfigureAwait(false);
+            : await BuildUserCatalogObjectsAsync(user, tenantId, allTables, versions, visibility, accessFilter, searchText, ct).ConfigureAwait(false);
 
         var filtered = ApplyFilters(allDtos, query, kindFilter)
             .OrderBy(static o => o.ObjectId, StringComparer.OrdinalIgnoreCase)
@@ -110,7 +155,7 @@ public sealed class ExternalCatalogReader(
 
         var pageItems = filtered.Skip(afterOffset).Take(pageSize).ToList();
         var nextOffset = afterOffset + pageItems.Count;
-        var nextCursor = nextOffset < filtered.Count ? PageCursor.Encode(nextOffset.ToString()) : null;
+        var nextCursor = nextOffset < filtered.Count ? PageCursor.Encode(nextOffset.ToString(CultureInfo.InvariantCulture) + CursorSeparator + cursorBinding) : null;
 
         return ExternalCatalogResult.Ok(
             new ExternalCatalogPageDto(pageItems, nextCursor, filtered.Count));
@@ -361,6 +406,7 @@ public sealed class ExternalCatalogReader(
         IReadOnlyDictionary<string, CatalogObjectVersionRow> versions,
         CallerVisibility visibility,
         DiscoveryAccessState? accessFilter,
+        string? searchText,
         CancellationToken ct)
     {
         var byId = allTables.ToDictionary(static t => t.Identifier);
@@ -371,7 +417,7 @@ public sealed class ExternalCatalogReader(
         while (true)
         {
             var page = await _discoveryService.ListAsync(
-                new DiscoveryQuery(First: DiscoveryService.MaxPageSize, After: after, Surface: DiscoverySurface.Rest, Access: accessFilter),
+                new DiscoveryQuery(First: DiscoveryService.MaxPageSize, After: after, Search: searchText, Surface: DiscoverySurface.Rest, Access: accessFilter),
                 caller,
                 ct).ConfigureAwait(false);
 
