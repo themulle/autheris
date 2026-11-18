@@ -165,6 +165,7 @@ public sealed class StepSqlLintTests
                 (23, "drop_is_sensitive"),
                 (24, "drop_superseded_governance_columns"),
                 (25, "golden_queries"),
+                (26, "doc_links"),
                 (27, "drop_legacy_governance_columns")
             ]);
         }

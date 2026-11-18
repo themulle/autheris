@@ -8,7 +8,7 @@ using System.Threading.Tasks;
 using Autheris.Application.Docs.Interfaces;
 using Autheris.Infrastructure.Persistence.Docs;
 
-public partial class GovernanceRepository : IDocumentRepository
+public partial class GovernanceRepository : IDocumentRepository, IDocLinkRepository
 {
     internal DbCommand CreateDocCommand(DbConnection conn, DbTransaction? tx, string sql)
     {
@@ -47,4 +47,19 @@ public partial class GovernanceRepository : IDocumentRepository
 
     public Task<DocTenantUsage> GetTenantUsageAsync(string tenantId, CancellationToken ct = default)
         => DocumentStoreOperations.GetTenantUsageAsync(this, tenantId, ct);
+
+    public Task<bool?> SetDiscoveryHiddenAsync(DocKey key, bool hidden, DateTimeOffset at, CancellationToken ct = default)
+        => DocumentStoreOperations.SetDiscoveryHiddenAsync(this, key ?? throw new ArgumentNullException(nameof(key)), hidden, at, ct);
+
+    public Task<IReadOnlyList<DocLinkRecord>> ListForTargetsAsync(string tenantId, IReadOnlyList<DocLinkTarget> targets, CancellationToken ct = default)
+        => DocLinkOperations.ListForTargetsAsync(this, tenantId, targets, ct);
+
+    public Task<IReadOnlyList<DocLinkRecord>> ListForSourceAsync(string tenantId, DocLinkSource source, CancellationToken ct = default)
+        => DocLinkOperations.ListForSourceAsync(this, tenantId, source, ct);
+
+    public Task ReplaceForSourceAsync(string tenantId, DocLinkSource source, IReadOnlyList<DocLinkTarget> targets, string actor, CancellationToken ct = default)
+        => DocLinkOperations.ReplaceForSourceAsync(this, tenantId, source, targets, actor, ct);
+
+    public Task<int> DeleteForSourceAsync(string tenantId, DocLinkSource source, CancellationToken ct = default)
+        => DocLinkOperations.DeleteForSourceAsync(this, tenantId, source, ct);
 }

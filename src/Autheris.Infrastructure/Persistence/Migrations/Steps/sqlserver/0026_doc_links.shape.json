@@ -1,0 +1,161 @@
+{
+  "ops": [
+    {
+      "op": "addTable",
+      "table": "DOC_LINKS",
+      "newTable": {
+        "name": "DOC_LINKS",
+        "columns": [
+          {
+            "name": "tenant_id",
+            "type": "NVARCHAR",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "link_id",
+            "type": "UNIQUEIDENTIFIER",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "source_kind",
+            "type": "NVARCHAR",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "app_id",
+            "type": "NVARCHAR",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "category",
+            "type": "NVARCHAR",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "doc_id",
+            "type": "NVARCHAR",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "doc_tenant_id",
+            "type": "NVARCHAR",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "target_kind",
+            "type": "NVARCHAR",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "target_domain",
+            "type": "NVARCHAR",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "target_schema",
+            "type": "NVARCHAR",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "target_name",
+            "type": "NVARCHAR",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "target_column",
+            "type": "NVARCHAR",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "link_digest",
+            "type": "BINARY",
+            "family": "binary",
+            "nullable": false
+          },
+          {
+            "name": "created_by",
+            "type": "NVARCHAR",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "created_at_utc",
+            "type": "DATETIMEOFFSET",
+            "family": "datetime",
+            "nullable": false
+          }
+        ],
+        "primaryKey": [
+          "link_id"
+        ],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addIndex",
+      "table": "DOC_LINKS",
+      "name": "ux_doc_links_source_target",
+      "unique": true,
+      "columns": [
+        "tenant_id",
+        "link_digest"
+      ]
+    },
+    {
+      "op": "addIndex",
+      "table": "DOC_LINKS",
+      "name": "idx_doc_links_source",
+      "unique": false,
+      "columns": [
+        "tenant_id",
+        "source_kind",
+        "app_id",
+        "category",
+        "doc_id"
+      ]
+    },
+    {
+      "op": "addIndex",
+      "table": "DOC_LINKS",
+      "name": "idx_doc_links_target",
+      "unique": false,
+      "columns": [
+        "tenant_id",
+        "target_domain",
+        "target_schema"
+      ]
+    },
+    {
+      "op": "addColumn",
+      "table": "DOC_OFFICIAL_DOCUMENTS",
+      "column": {
+        "name": "discovery_hidden",
+        "type": "BIT",
+        "family": "boolean",
+        "nullable": false
+      }
+    },
+    {
+      "op": "addColumn",
+      "table": "DOC_TENANT_DOCUMENTS",
+      "column": {
+        "name": "discovery_hidden",
+        "type": "BIT",
+        "family": "boolean",
+        "nullable": false
+      }
+    }
+  ]
+}
