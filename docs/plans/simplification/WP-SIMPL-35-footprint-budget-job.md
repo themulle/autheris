@@ -79,3 +79,6 @@ Single PR (scripts/workflow/json, ~+150 lines, no src); label `[WF]`.
 - One CI metric (PR wall-clock median incl. queue, < 30 min, OD-6) replaces the former PR 15 min / full 30 min split.
 - Missing metric = failure (fail closed).
 - Results commit goes through the release PR mechanism, never a direct push from the nightly.
+
+## Changelog
+- 2026-11-18 (owner default, OD-37 kept): `benchmarks/budgets.json` is restored to the plan values (core image 325 MB, cold-start P50 3.0 s, warm P99 3.47 ms, PR CI median < 30 min). The interim raises to 430 MB and 5.0 s made for the .NET 11 image are reverted. The latest nightly measurement (`footprint-2026-11-18-feeab35.json`: 409.47 MB, 3.41 s) is above the restored budgets plus the 10% tolerance, so the nightly and release footprint job report a budget failure until the image shrinks. Candidates for the reduction: the module-free core image (`FLAVOR=core`, WP-SIMPL-25), DuckDB native libraries out of the core image, a trimmed base image.

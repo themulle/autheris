@@ -216,6 +216,13 @@ public sealed class DataSourceTransportGate : IDataSourceTransportGate
             return new TransportDecision(TransportDecisionReason.UnknownSource);
         }
 
+        // the reserved product source has no profile: a caller read of a product object (catalog path only, never a client-named source)
+        // is served from the cached result, whose stage 1 passed the gate for every base source it read.
+        if (catalogKnown && Autheris.Application.Products.ProductSource.IsProductSource(canonicalName))
+        {
+            return new TransportDecision(TransportDecisionReason.Allowed);
+        }
+
         try
         {
             if (!resolver.TryResolve(canonicalName, out var profile) || profile is null)

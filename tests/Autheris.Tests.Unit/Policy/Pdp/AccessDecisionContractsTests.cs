@@ -24,8 +24,8 @@ public sealed class AccessDecisionContractsTests
     {
         // AccessOperation
         var operations = Enum.GetNames<AccessOperation>();
-        operations.Length.ShouldBe(6);
-        operations.ShouldBe(["Read", "Insert", "Update", "Delete", "Execute", "Discover"]);
+        operations.Length.ShouldBe(7);
+        operations.ShouldBe(["Read", "Insert", "Update", "Delete", "Execute", "ExecuteWrite", "Discover"]);
 
         // AccessTransport
         var transports = Enum.GetNames<AccessTransport>();

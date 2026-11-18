@@ -117,6 +117,21 @@ public sealed record SecurityPrincipalContext
     /// <summary>K-K10: Checks whether the principal satisfies the required GatewayRole with hierarchy semantics.</summary>
     public bool HasRole(GatewayRole role)
     {
+        // Tenant-scoped-only roles (data products) are conferred by the request tenant's roles alone: never by ClusterAdmin or a global role.
+        if (role.IsTenantScopedOnly())
+        {
+            foreach (var r in TenantRoles)
+            {
+                if (!r.Contains(':', StringComparison.Ordinal) &&
+                    GatewayRoleExtensions.TryParseGlobalRole(r, out var tenantRole) && tenantRole == role)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         if (IsClusterAdmin) return true;
 
         // Cluster roles can satisfy any role (global scope), but roles containing ':' are tenant-scoped and must be ignored for global checks

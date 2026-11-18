@@ -14,8 +14,8 @@ using Autheris.Application.Analytics;
 /// </summary>
 /// <remarks>
 /// <paramref name="ChunkedStringRead"/> false reads a string cell whole through <see cref="DbDataReader.GetString"/> and checks the budget afterwards.
-/// SQLite needs it: Microsoft.Data.Sqlite <c>GetChars</c> resolves the column origin and segfaults the process on an expression column
-/// (for example <c>strftime</c>); SQLite has no (max) type and holds the value in memory already.
+/// A provider needs it when <c>GetChars</c> resolves the column origin and segfaults the process on an expression column
+/// (for example <c>strftime</c>); such a provider has no (max) type and holds the value in memory already.
 /// </remarks>
 public sealed record ResultByteBudget(long MaxValueBytes, long MaxTotalBytes, bool ChunkedStringRead = true)
 {
@@ -24,7 +24,7 @@ public sealed record ResultByteBudget(long MaxValueBytes, long MaxTotalBytes, bo
     /// <summary>16 KiB per group key and 32 MiB per result.</summary>
     public static ResultByteBudget GroupKeys { get; } = new(16 * 1024, 32L * 1024 * 1024);
 
-    /// <summary>The same budgets for a provider whose <c>GetChars</c> is unsafe (SQLite): the value is read whole, then counted.</summary>
+    /// <summary>The same budgets for a provider whose <c>GetChars</c> is unsafe: the value is read whole, then counted.</summary>
     public static ResultByteBudget GroupKeysWholeValue { get; } = GroupKeys with { ChunkedStringRead = false };
 
     /// <summary>Reads one cell; string cells are counted against the budget, every other value is read as is.</summary>
