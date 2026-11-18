@@ -36,8 +36,8 @@ public interface IRowFilterKeySetLoader
 /// <list type="bullet">
 /// <item>The session is tenant only: <c>userSid: null, purpose: null</c>(01 b); the key set is principal independent.</item>
 /// <item>SQL Server: <c>SET TRANSACTION ISOLATION LEVEL READ COMMITTED</c> before the query, regardless of <c>ReadUncommitted</c>so
-/// uncommitted rows are never cached. PostgreSQL and Oracle: <c>SET TRANSACTION READ ONLY</c>, always rolled back. SQLite: <c>PRAGMA query_only</c>.</item>
-/// <item>Every <see cref="CompiledKeyQuery.Parameters"/> element is bound through the engine's production binder (<see cref="CompiledSqlBinders.BindKeyQuery"/>; the SQLite row limit is a
+/// uncommitted rows are never cached. PostgreSQL and Oracle: <c>SET TRANSACTION READ ONLY</c>, always rolled back.</item>
+/// <item>Every <see cref="CompiledKeyQuery.Parameters"/> element is bound through the engine's production binder (<see cref="CompiledSqlBinders.BindKeyQuery"/>; a row limit may be a
 /// <c>QueryLiteral</c>bind) and the command's parameter count is checked before execution (D-WPC-8).</item>
 /// <item>At most <c>MaxKeys + 1</c> rows are read; one more than <c>MaxKeys</c> yields the overflow sentinel. A set with a value that does not fit
 /// the foreign key type yields the not-bindable sentinel (07 b).</item>

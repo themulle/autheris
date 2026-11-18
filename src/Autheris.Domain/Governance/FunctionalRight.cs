@@ -19,6 +19,7 @@ public readonly record struct FunctionalRight(string Value)
     public static readonly FunctionalRight GovernanceApprove = new("Governance.Approve");
     public static readonly FunctionalRight GovernanceAdminRight = new("Governance.Admin");
     public static readonly FunctionalRight SecurityAdmin = new("Security.Admin");
+    public static readonly FunctionalRight DataProductAdmin = new("DataProduct.Admin");
 
     // Operational Rights
     public static readonly FunctionalRight DataExport = new("Data.Export");
@@ -33,6 +34,7 @@ public readonly record struct FunctionalRight(string Value)
         GovernanceApprove.Value,
         GovernanceAdminRight.Value,
         SecurityAdmin.Value,
+        DataProductAdmin.Value,
         ClusterAdmin.Value
     ];
 
@@ -40,6 +42,7 @@ public readonly record struct FunctionalRight(string Value)
         this == GovernanceApprove ||
         this == GovernanceAdminRight ||
         this == SecurityAdmin ||
+        this == DataProductAdmin ||
         this == ClusterAdmin;
 
     public string Name => Value;

@@ -628,7 +628,7 @@ public sealed partial class GovernedSqlExecutor
 
                 if (dmlContext.IsDml)
                 {
-                    // the session initializer gives no transaction on SQL Server, Oracle and SQLite, so one is begun here. From the
+                    // the session initializer gives no transaction on SQL Server and Oracle, so one is begun here. From the
                     // call on, the checked executor is the single owner of the completion (commit or rollback); this method only disposes it.
                     tx ??= await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
                     txCompleted = true;
@@ -688,7 +688,7 @@ public sealed partial class GovernedSqlExecutor
                 command.CommandTimeout = commandTimeout;
                 binder.Bind(command, compiled, clientValues);
 
-                // the execution and the streaming of the rows run under the provider guard (SQLite interrupts at the timeout).
+                // the execution and the streaming of the rows run under the provider guard.
                 bool isTruncated = false;
                 await _executionGuard.RunAsync(
                     connection,
