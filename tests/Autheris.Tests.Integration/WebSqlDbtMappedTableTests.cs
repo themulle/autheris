@@ -124,10 +124,10 @@ public sealed class WebSqlDbtMappedTableTests : IAsyncLifetime
                 new TableColumn { ColumnName = "id", DataType = "int" },
                 new TableColumn { ColumnName = "tenant_id", DataType = "varchar" },
                 new TableColumn { ColumnName = "region", DataType = "varchar" },
-                new TableColumn { ColumnName = "email", DataType = "varchar", IsSensitive = true }
+                new TableColumn { ColumnName = "email", DataType = "varchar" }
             ],
             ColumnMaskingRules = new Dictionary<string, MaskingRule>()
-        });
+        }.WithPii("email"));
 
     private static async Task<GovernedSqlResult> QueryAsync(WebApplicationFactory<Program> host, string sql)
     {

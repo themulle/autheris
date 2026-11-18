@@ -57,8 +57,8 @@ public sealed class ClassificationAuditTests
             Table = new Table { Id = Guid.NewGuid(), SourceName = "crm", SchemaName = "public", TableName = "customers", IsActive = true },
             Columns =
             [
-                new TableColumn { Id = emailColId, ColumnName = "email", DataType = "varchar", IsSensitive = false },
-                new TableColumn { Id = ssnColId, ColumnName = "ssn", DataType = "varchar", IsSensitive = false }
+                new TableColumn { Id = emailColId, ColumnName = "email", DataType = "varchar" },
+                new TableColumn { Id = ssnColId, ColumnName = "ssn", DataType = "varchar" }
             ],
             ColumnClassifications = new Dictionary<string, IReadOnlyList<ColumnClassification>>(StringComparer.OrdinalIgnoreCase)
             {

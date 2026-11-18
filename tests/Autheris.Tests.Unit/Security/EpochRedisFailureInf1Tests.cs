@@ -59,7 +59,7 @@ public sealed class EpochRedisFailureInf1Tests
     public async Task DegradedMode_TableWithSensitiveColumn_FailsClosed()
     {
         // SR15-41: In degraded mode (Redis disconnected), FailClosedOnSensitiveTables must fail closed
-        // not only on IsHighlySensitive, but also when any column is marked IsSensitive.
+        // not only on IsHighlySensitive, but also when any column is classified.
         var multiplexer = Substitute.For<IConnectionMultiplexer>();
         multiplexer.IsConnected.Returns(false); // degraded
 
@@ -77,9 +77,10 @@ public sealed class EpochRedisFailureInf1Tests
             },
             Columns =
             [
-                new Autheris.Domain.Model.TableColumn { ColumnName = "id", IsSensitive = false },
-                new Autheris.Domain.Model.TableColumn { ColumnName = "salary", IsSensitive = true }
-            ]
+                new Autheris.Domain.Model.TableColumn { ColumnName = "id" },
+                new Autheris.Domain.Model.TableColumn { ColumnName = "salary" }
+            ],
+            ColumnClassifications = Autheris.Domain.Model.TableMetadataClassificationTestExtensions.PiiFor("salary")
         };
 
         tableMetaRepo.GetTableMetadataAsync(Table, Arg.Any<System.Threading.CancellationToken>())

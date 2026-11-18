@@ -28,11 +28,11 @@ public sealed class ConsentColumnSnapshotRPol11Tests
             Columns =
             [
                 new TableColumn { ColumnName = "id" },
-                new TableColumn { ColumnName = "ssn", IsSensitive = true },
+                new TableColumn { ColumnName = "ssn" },
                 new TableColumn { ColumnName = "email" }
             ],
             ColumnMaskingRules = new Dictionary<string, MaskingRule> { ["email"] = new MaskingRule { RuleType = "HMAC" } }
-        };
+        }.WithPii("ssn");
 
         ConsentColumnSnapshot.FromMetadata(meta).Select(r => (r.ColumnName, r.AccessLevel)).ShouldBe(
         [

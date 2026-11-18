@@ -564,7 +564,18 @@
           "kind": { "type": "string", "nullable": true },
           "profileId": { "type": "string", "format": "uuid", "nullable": true },
           "grantee": { "type": "string", "nullable": true },
-          "granteeType": { "type": "string", "nullable": true }
+          "granteeType": { "type": "string", "nullable": true },
+          "requestedClear": {
+            "type": "array",
+            "nullable": true,
+            "items": {
+              "type": "object",
+              "properties": {
+                "classification": { "type": "string" },
+                "columns": { "type": "array", "items": { "type": "string" } }
+              }
+            }
+          }
         }
       },
       "ConsentDecisionBody": {
@@ -584,7 +595,8 @@
           "approver": { "type": "object", "nullable": true },
           "approvers": { "type": "array", "items": { "type": "object" }, "nullable": true },
           "approvedItems": { "type": "array", "items": { "type": "integer" }, "nullable": true },
-          "approvedClearColumns": { "type": "array", "items": { "type": "string" }, "nullable": true }
+          "approvedClearColumns": { "type": "array", "items": { "type": "string" }, "nullable": true },
+          "approvedClearClassifications": { "type": "array", "items": { "type": "string" }, "nullable": true }
         }
       },
       "RevokeConsentGrantBody": {

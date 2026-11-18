@@ -25,6 +25,7 @@ using Autheris.Domain.Model;
 /// <param name="RequestedDuration">Optional ISO-8601 duration string (for example, <c>P2W</c>).</param>
 /// <param name="RequestedValidFrom">Optional start of the requested validity window.</param>
 /// <param name="RequestedValidTo">Optional explicit end of the requested validity window.</param>
+/// <param name="RequestedClear">Optional per-classification Clear access: classifications with the columns they should be cleared for.</param>
 public sealed record ConsentRequestSubmission(
     string Domain,
     string Schema,
@@ -40,7 +41,8 @@ public sealed record ConsentRequestSubmission(
     bool? RequestWriteOnly = null,
     string? RequestedDuration = null,
     DateTimeOffset? RequestedValidFrom = null,
-    DateTimeOffset? RequestedValidTo = null);
+    DateTimeOffset? RequestedValidTo = null,
+    IReadOnlyList<Autheris.Application.ConsentRequests.ClassificationClear.RequestedClearItem>? RequestedClear = null);
 
 /// <summary>Outcome of a consent request submission.</summary>
 public sealed class SubmitConsentRequestResult
@@ -53,13 +55,17 @@ public sealed class SubmitConsentRequestResult
 /// <summary>Business failure of a consent use case; <see cref="Code"/> is the stable error code exposed to clients.</summary>
 public sealed class ConsentRequestException : Exception
 {
-    public ConsentRequestException(string code, string message)
+    public ConsentRequestException(string code, string message, int? retryAfterSeconds = null)
         : base(message)
     {
         Code = code;
+        RetryAfterSeconds = retryAfterSeconds;
     }
 
     public string Code { get; }
+
+    /// <summary>Seconds after which a rate-limited caller may retry (only set for <c>RATE_LIMIT_EXCEEDED</c>).</summary>
+    public int? RetryAfterSeconds { get; }
 }
 
 /// <summary>Use case: a user requests access to a table.</summary>

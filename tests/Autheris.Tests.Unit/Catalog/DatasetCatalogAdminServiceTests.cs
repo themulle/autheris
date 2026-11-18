@@ -25,7 +25,7 @@ public sealed class DatasetCatalogAdminServiceTests
     private readonly IDataOwnershipRepository _owners = Substitute.For<IDataOwnershipRepository>();
     private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
     private readonly TestTime _time = new();
-    private DatasetCatalogSettings _state = new([], DatasetVisibility.Hidden);
+    private DatasetCatalogSettings _state = new([]);
 
     private sealed class TestTime : TimeProvider
     {
@@ -59,13 +59,6 @@ public sealed class DatasetCatalogAdminServiceTests
                 }
 
                 _state = before with { Tags = tags };
-                return new DatasetCatalogChange(Orders, before, _state);
-            });
-        _tables.SetDatasetVisibilityAsync(Orders, Arg.Any<DatasetVisibility>(), Arg.Any<Sid>(), Arg.Any<CancellationToken>())
-            .Returns(ci =>
-            {
-                var before = _state;
-                _state = before with { Visibility = ci.Arg<DatasetVisibility>() };
                 return new DatasetCatalogChange(Orders, before, _state);
             });
         _tables.SetDatasetDiscoveryAsync(Orders, Arg.Any<bool?>(), Arg.Any<bool?>(), Arg.Any<IReadOnlyList<string>?>(), Arg.Any<Sid>(), Arg.Any<CancellationToken>())
@@ -103,23 +96,8 @@ public sealed class DatasetCatalogAdminServiceTests
     private void OwnerIs(string sid) => _owners.IsAuthorizedApproverForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<Sid>(), Arg.Any<CancellationToken>())
         .Returns(ci => ci.Arg<Sid>().Value == sid && ci.Arg<TableIdentifier>().Equals(Orders));
 
-    private static DatasetCatalogEdit Vis(string v) => new(null, null, null, v);
-    private static DatasetCatalogEdit Replace(params string[] t) => new(t, null, null, null);
-
-    [Fact]
-    public async Task Admin_SetsFull_AuditsVisibilityWithBeforeAfterSourceTenantAndAuthType()
-    {
-        var result = await Create().ApplyAsync(Admin(), "sales.dbo.orders", Vis("Full"), "admin", default);
-
-        result.Outcome.ShouldBe(DatasetCatalogOutcome.Applied);
-        result.Settings!.Visibility.ShouldBe(DatasetVisibility.Full);
-        await _audit.Received(1).RecordRequiredAsync(Arg.Is<AuditLogEntry>(e =>
-            e.EventType == AuditEventTypes.CatalogVisibilityChanged && e.Decision == "ALLOW" && e.TargetTable == Orders.ToString()
-            && e.DetailsJson.Contains("\"before\":{\"visibility\":\"Hidden\"")
-            && e.DetailsJson.Contains("\"after\":{\"visibility\":\"Full\"")
-            && e.DetailsJson.Contains("\"source\":\"admin\"")
-            && e.DetailsJson.Contains("\"authType\":\"Bearer\"")), CancellationToken.None);
-    }
+    private static DatasetCatalogEdit Vis(string v) => new(["x"], null, null);
+    private static DatasetCatalogEdit Replace(params string[] t) => new(t, null, null);
 
     [Fact]
     [Trait("Category", "Security")]
@@ -135,22 +113,11 @@ public sealed class DatasetCatalogAdminServiceTests
     }
 
     [Fact]
-    public async Task TagReplace_AuditsTagsChanged_NotVisibility()
-    {
-        var result = await Create().ApplyAsync(Admin(), "sales.dbo.orders", Replace("Pii", "finance"), "admin", default);
-
-        result.Outcome.ShouldBe(DatasetCatalogOutcome.Applied);
-        await _audit.Received(1).RecordRequiredAsync(Arg.Is<AuditLogEntry>(e =>
-            e.EventType == AuditEventTypes.CatalogTagsChanged && e.DetailsJson.Contains("\"pii\"") && e.DetailsJson.Contains("\"finance\"")), CancellationToken.None);
-        await _audit.DidNotReceive().RecordRequiredAsync(Arg.Is<AuditLogEntry>(e => e.EventType == AuditEventTypes.CatalogVisibilityChanged), Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
     public async Task Idempotent_Edit_IsUnchanged_AndWritesNoAudit()
     {
-        _state = new DatasetCatalogSettings([new DatasetTag("pii", DatasetTagSource.Admin)], DatasetVisibility.Summary);
+        _state = new DatasetCatalogSettings([new DatasetTag("pii", DatasetTagSource.Admin)]);
 
-        var result = await Create().ApplyAsync(Admin(), "sales.dbo.orders", new DatasetCatalogEdit(["pii"], null, null, "Summary"), "admin", default);
+        var result = await Create().ApplyAsync(Admin(), "sales.dbo.orders", new DatasetCatalogEdit(["pii"], null, null), "admin", default);
 
         result.Outcome.ShouldBe(DatasetCatalogOutcome.Unchanged);
         await _audit.DidNotReceive().RecordRequiredAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>());
@@ -172,40 +139,13 @@ public sealed class DatasetCatalogAdminServiceTests
         OwnerIs("S-1-5-21-owner");
         var svc = Create();
 
-        (await svc.ApplyAsync(Owner(), "sales.dbo.orders", new DatasetCatalogEdit(["pii"], null, null, "Summary"), "admin", default))
+        (await svc.ApplyAsync(Owner(), "sales.dbo.orders", new DatasetCatalogEdit(["pii"], null, null), "admin", default))
             .Outcome.ShouldBe(DatasetCatalogOutcome.Applied);
         (await svc.ApplyAsync(Owner(), "sales.dbo.orders", Vis("Hidden"), "admin", default)).Outcome.ShouldBe(DatasetCatalogOutcome.Applied);
 
-        _state.Visibility.ShouldBe(DatasetVisibility.Hidden);
     }
 
     [Trait("Category", "Security")]
-    [Fact]
-    public async Task SEC_111_05_Owner_AsksFull_IsForbidden_DenyAudited_AndNothingIsWritten_EvenTags()
-    {
-        OwnerIs("S-1-5-21-owner");
-
-        var result = await Create().ApplyAsync(Owner(), "sales.dbo.orders", new DatasetCatalogEdit(["pii"], null, null, "full"), "admin", default);
-
-        result.Outcome.ShouldBe(DatasetCatalogOutcome.Forbidden);
-        _state.Tags.ShouldBeEmpty();
-        _state.Visibility.ShouldBe(DatasetVisibility.Hidden);
-        await _tables.DidNotReceiveWithAnyArgs().ReplaceDatasetTagsAsync(default, default!, default, default, default);
-        await _tables.DidNotReceiveWithAnyArgs().SetDatasetVisibilityAsync(default, default, default, default);
-        await _audit.Received(1).RecordBestEffortAsync(Arg.Is<AuditLogEntry>(e =>
-            e.Decision == "DENY" && e.EventType == AuditEventTypes.CatalogVisibilityChanged && e.DetailsJson.Contains("\"requested\":\"Full\"")), Arg.Any<CancellationToken>());
-    }
-
-    [Trait("Category", "Security")]
-    [Fact]
-    public async Task SEC_111_05_Owner_SettingFullOnAnAlreadyFullDataset_IsStillForbidden()
-    {
-        OwnerIs("S-1-5-21-owner");
-        _state = new DatasetCatalogSettings([], DatasetVisibility.Full);
-
-        (await Create().ApplyAsync(Owner(), "sales.dbo.orders", Vis("Full"), "admin", default)).Outcome.ShouldBe(DatasetCatalogOutcome.Forbidden);
-    }
-
     [Trait("Category", "Security")]
     [Fact]
     public async Task SEC_111_08_Stranger_KnownAndUnknownDataset_AreTheSameNotFound_AndBothRunTheOwnershipLookup()
@@ -221,7 +161,7 @@ public sealed class DatasetCatalogAdminServiceTests
         unknown.ShouldBe(known);
         garbage.ShouldBe(known);
         await _owners.Received(3).IsAuthorizedApproverForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<Sid>(), Arg.Any<CancellationToken>());
-        await _tables.DidNotReceiveWithAnyArgs().SetDatasetVisibilityAsync(default, default, default, default);
+        await _tables.DidNotReceiveWithAnyArgs().ReplaceDatasetTagsAsync(default!, default!, default, default, default);
     }
 
     [Trait("Category", "Security")]
@@ -312,38 +252,23 @@ public sealed class DatasetCatalogAdminServiceTests
         (await svc.ApplyAsync(null, "sales.dbo.orders", Vis("Full"), "admin", default)).Outcome.ShouldBe(DatasetCatalogOutcome.NotFound);
         (await svc.ApplyAsync(new ClaimsPrincipal(new ClaimsIdentity()), "sales.dbo.orders", Vis("Full"), "admin", default)).Outcome.ShouldBe(DatasetCatalogOutcome.NotFound);
         (await svc.ApplyAsync(forwardAuth, "sales.dbo.orders", Vis("Full"), "admin", default)).Outcome.ShouldBe(DatasetCatalogOutcome.NotFound);
-        await _tables.DidNotReceiveWithAnyArgs().SetDatasetVisibilityAsync(default, default, default, default);
+        await _tables.DidNotReceiveWithAnyArgs().ReplaceDatasetTagsAsync(default!, default!, default, default, default);
     }
 
     [Trait("Category", "Security")]
-    [Theory]
-    [InlineData("2")]
-    [InlineData("Hidden,Full")]
-    [InlineData(" Full")]
-    [InlineData("Everything")]
-    [InlineData("")]
-    public async Task SEC_111_05_UnrecognisedVisibility_IsInvalid_AndNeverFull(string raw)
-    {
-        var result = await Create().ApplyAsync(Admin(), "sales.dbo.orders", Vis(raw), "admin", default);
-
-        result.Outcome.ShouldBe(DatasetCatalogOutcome.InvalidVisibility);
-        _state.Visibility.ShouldBe(DatasetVisibility.Hidden);
-    }
-
     [Fact]
     public async Task InvalidTag_RejectsTheWholeRequest_VisibilityIncluded()
     {
-        var result = await Create().ApplyAsync(Admin(), "sales.dbo.orders", new DatasetCatalogEdit(["ok", "no spaces"], null, null, "Summary"), "admin", default);
+        var result = await Create().ApplyAsync(Admin(), "sales.dbo.orders", new DatasetCatalogEdit(["ok", "no spaces"], null, null), "admin", default);
 
         result.Outcome.ShouldBe(DatasetCatalogOutcome.InvalidTag);
-        _state.Visibility.ShouldBe(DatasetVisibility.Hidden);
         await _tables.DidNotReceiveWithAnyArgs().ReplaceDatasetTagsAsync(default, default!, default, default, default);
     }
 
     [Fact]
     public async Task TagCap_CountsTagsOfAllSources_FromTheStrictBeforeState()
     {
-        _state = new DatasetCatalogSettings([new DatasetTag("d1", DatasetTagSource.Dbt), new DatasetTag("d2", DatasetTagSource.Dbt)], DatasetVisibility.Hidden);
+        _state = new DatasetCatalogSettings([new DatasetTag("d1", DatasetTagSource.Dbt), new DatasetTag("d2", DatasetTagSource.Dbt)]);
         var svc = Create(maxTags: 3);
 
         (await svc.ApplyAsync(Admin(), "sales.dbo.orders", Replace("a", "b", "c"), "admin", default)).Outcome.ShouldBe(DatasetCatalogOutcome.TagLimitExceeded);
@@ -363,25 +288,14 @@ public sealed class DatasetCatalogAdminServiceTests
         var result = await Create().ApplyAsync(Admin(), "sales.dbo.orders", Vis("Summary"), "admin", default);
 
         result.Outcome.ShouldBe(DatasetCatalogOutcome.Unavailable);
-        await _tables.DidNotReceiveWithAnyArgs().SetDatasetVisibilityAsync(default, default, default, default);
+        await _tables.DidNotReceiveWithAnyArgs().ReplaceDatasetTagsAsync(default!, default!, default, default, default);
         await _audit.DidNotReceiveWithAnyArgs().RecordRequiredAsync(default!, default);
-    }
-
-    [Theory]
-    [InlineData("Multi", new string[0], false)]
-    [InlineData("Multi", new[] { "sales.dbo.orders" }, true)]
-    [InlineData("Single", new string[0], true)]
-    public async Task TierEffective_IsFalseForNonSharedTablesInMulti(string mode, string[] shared, bool expected)
-    {
-        var result = await Create(mode, shared: shared).ApplyAsync(Admin(), "sales.dbo.orders", Vis("Summary"), "admin", default);
-
-        result.TierEffective.ShouldBe(expected);
     }
 
     [Fact]
     public async Task Get_Admin_ReturnsSettings_Stranger_NotFound_StoreFailure_Unavailable()
     {
-        _state = new DatasetCatalogSettings([new DatasetTag("pii", DatasetTagSource.Admin)], DatasetVisibility.Summary);
+        _state = new DatasetCatalogSettings([new DatasetTag("pii", DatasetTagSource.Admin)]);
         var svc = Create();
 
         var ok = await svc.GetAsync(Admin(), "sales.dbo.orders", default);
@@ -400,29 +314,6 @@ public sealed class DatasetCatalogAdminServiceTests
         _tables.GetActiveTableIdentifierByIdAsync(id, Arg.Any<CancellationToken>()).Returns(Orders);
 
         (await Create().ApplyAsync(Admin(), id.ToString("D"), Vis("Summary"), "admin", default)).Outcome.ShouldBe(DatasetCatalogOutcome.Applied);
-    }
-
-    [Trait("Category", "Security")]
-    [Fact]
-    public async Task SEC_111_11_DryRun_WritesNothing_AuditsNothing_ButReportsTheSameOutcomeClasses()
-    {
-        OwnerIs("S-1-5-21-owner");
-        var svc = Create(maxTags: 2);
-
-        (await svc.ApplyAsync(Admin(), "sales.dbo.orders", new DatasetCatalogEdit(["a"], null, null, "Summary"), "manifest", default, dryRun: true))
-            .Outcome.ShouldBe(DatasetCatalogOutcome.Applied);
-        (await svc.ApplyAsync(Admin(), "sales.dbo.orders", Vis("Hidden"), "manifest", default, dryRun: true)).Outcome.ShouldBe(DatasetCatalogOutcome.Unchanged);
-        (await svc.ApplyAsync(Admin(), "sales.dbo.orders", Replace("a", "b", "c"), "manifest", default, dryRun: true)).Outcome.ShouldBe(DatasetCatalogOutcome.TagLimitExceeded);
-        (await svc.ApplyAsync(Owner(), "sales.dbo.orders", Vis("Full"), "manifest", default, dryRun: true)).Outcome.ShouldBe(DatasetCatalogOutcome.Forbidden);
-        (await svc.ApplyAsync(Stranger(), "sales.dbo.orders", Vis("Summary"), "manifest", default, dryRun: true)).Outcome.ShouldBe(DatasetCatalogOutcome.NotFound);
-        (await svc.ApplyAsync(Admin(), "sales.dbo.orders", Vis("7"), "manifest", default, dryRun: true)).Outcome.ShouldBe(DatasetCatalogOutcome.InvalidVisibility);
-
-        _state.Visibility.ShouldBe(DatasetVisibility.Hidden);
-        _state.Tags.ShouldBeEmpty();
-        await _tables.DidNotReceiveWithAnyArgs().ReplaceDatasetTagsAsync(default, default!, default, default, default);
-        await _tables.DidNotReceiveWithAnyArgs().ChangeDatasetTagsAsync(default, default!, default!, default, default);
-        await _tables.DidNotReceiveWithAnyArgs().SetDatasetVisibilityAsync(default, default, default, default);
-        await _audit.DidNotReceiveWithAnyArgs().RecordRequiredAsync(default!, default);
     }
 
     [Trait("Category", "Security")]
@@ -459,20 +350,6 @@ public sealed class DatasetCatalogAdminServiceTests
 
     [Trait("Category", "Security")]
     [Fact]
-    public async Task SEC_111_12_TagChangeAudit_SurvivesAFailingVisibilityWrite()
-    {
-        _tables.SetDatasetVisibilityAsync(Orders, Arg.Any<DatasetVisibility>(), Arg.Any<Sid>(), Arg.Any<CancellationToken>())
-            .ThrowsAsync(new InvalidOperationException("db"));
-
-        await Should.ThrowAsync<InvalidOperationException>(() =>
-            Create().ApplyAsync(Admin(), "sales.dbo.orders", new DatasetCatalogEdit(["pii"], null, null, "Summary"), "admin", default));
-
-        _state.Tags.Single().Tag.ShouldBe("pii");
-        await _audit.Received(1).RecordRequiredAsync(Arg.Is<AuditLogEntry>(e => e.EventType == AuditEventTypes.CatalogTagsChanged), CancellationToken.None);
-    }
-
-    [Trait("Category", "Security")]
-    [Fact]
     public async Task SEC_111_08_GuidPath_StoreFault_IsUnavailable_AndOwnershipStoreDown_Is503Too()
     {
         var id = Guid.NewGuid().ToString("D");
@@ -505,7 +382,7 @@ public sealed class DatasetCatalogAdminServiceTests
     [Fact]
     public async Task Apply_DiscoveryFlags_SetsFlagsAndAuditsVisibilityChanged()
     {
-        var edit = new DatasetCatalogEdit(null, null, null, null, null, null,
+        var edit = new DatasetCatalogEdit(null, null, null, null, null,
             DiscoveryHidden: true, HiddenColumns: ["col1"], SamplesDisabled: true);
 
         var result = await Create().ApplyAsync(Admin(), "sales.dbo.orders", edit, "admin", default);
@@ -519,13 +396,78 @@ public sealed class DatasetCatalogAdminServiceTests
     }
 
     [Fact]
+    [Trait("Category", "Security")]
+    public async Task Owner_cannot_unhide_a_dataset_an_admin_hid()
+    {
+        OwnerIs("S-1-5-21-owner");
+        var svc = Create();
+        var hide = new DatasetCatalogEdit(null, null, null, DiscoveryHidden: true);
+        var unhide = new DatasetCatalogEdit(null, null, null, DiscoveryHidden: false);
+
+        (await svc.ApplyAsync(Admin(), "sales.dbo.orders", hide, "admin", default)).Outcome.ShouldBe(DatasetCatalogOutcome.Applied);
+
+        var ownerAttempt = await svc.ApplyAsync(Owner(), "sales.dbo.orders", unhide, "admin", default);
+        var ownerDryRun = await svc.ApplyAsync(Owner(), "sales.dbo.orders", unhide, "admin", default, dryRun: true);
+
+        ownerAttempt.Outcome.ShouldBe(DatasetCatalogOutcome.Forbidden);
+        ownerDryRun.Outcome.ShouldBe(DatasetCatalogOutcome.Forbidden);
+        _state.DiscoveryHidden.ShouldBeTrue();
+        (await svc.ApplyAsync(Admin(), "sales.dbo.orders", unhide, "admin", default)).Outcome.ShouldBe(DatasetCatalogOutcome.Applied);
+        _state.DiscoveryHidden.ShouldBeFalse();
+    }
+
+    [Fact]
     public async Task Apply_UnknownHiddenColumn_ReturnsInvalidColumns()
     {
-        var edit = new DatasetCatalogEdit(null, null, null, null, null, null,
+        var edit = new DatasetCatalogEdit(null, null, null, null, null,
             DiscoveryHidden: true, HiddenColumns: ["unknown_col"]);
 
         var result = await Create().ApplyAsync(Admin(), "sales.dbo.orders", edit, "admin", default);
 
         result.Outcome.ShouldBe(DatasetCatalogOutcome.InvalidColumns);
     }
+
+    [Fact]
+    public async Task TagReplace_AuditsTagsChanged_NotVisibility()
+    {
+        var result = await Create().ApplyAsync(Admin(), "sales.dbo.orders", Replace("Pii", "finance"), "admin", default);
+
+        result.Outcome.ShouldBe(DatasetCatalogOutcome.Applied);
+        await _audit.Received(1).RecordRequiredAsync(Arg.Is<AuditLogEntry>(e =>
+            e.EventType == AuditEventTypes.CatalogTagsChanged && e.DetailsJson.Contains("\"pii\"") && e.DetailsJson.Contains("\"finance\"")), CancellationToken.None);
+        await _audit.DidNotReceive().RecordRequiredAsync(Arg.Is<AuditLogEntry>(e => e.EventType == AuditEventTypes.CatalogVisibilityChanged), Arg.Any<CancellationToken>());
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task SEC_111_11_DryRun_WritesNothing_AuditsNothing_ButReportsTheSameOutcomeClasses()
+    {
+        OwnerIs("S-1-5-21-owner");
+        var svc = Create(maxTags: 2);
+
+        (await svc.ApplyAsync(Admin(), "sales.dbo.orders", new DatasetCatalogEdit(["a"], null, null), "manifest", default, dryRun: true))
+            .Outcome.ShouldBe(DatasetCatalogOutcome.Applied);
+        (await svc.ApplyAsync(Admin(), "sales.dbo.orders", Replace("a", "b", "c"), "manifest", default, dryRun: true)).Outcome.ShouldBe(DatasetCatalogOutcome.TagLimitExceeded);
+        (await svc.ApplyAsync(Stranger(), "sales.dbo.orders", Vis("Summary"), "manifest", default, dryRun: true)).Outcome.ShouldBe(DatasetCatalogOutcome.NotFound);
+
+        _state.Tags.ShouldBeEmpty();
+        await _tables.DidNotReceiveWithAnyArgs().ReplaceDatasetTagsAsync(default, default!, default, default, default);
+        await _tables.DidNotReceiveWithAnyArgs().ChangeDatasetTagsAsync(default, default!, default!, default, default);
+        await _audit.DidNotReceiveWithAnyArgs().RecordRequiredAsync(default!, default);
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task SEC_111_12_TagChangeAudit_SurvivesAFailingVisibilityWrite()
+    {
+        _tables.SetDatasetPrivacyAsync(Orders, Arg.Any<int?>(), Arg.Any<bool?>(), Arg.Any<Sid>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new InvalidOperationException("db"));
+
+        await Should.ThrowAsync<InvalidOperationException>(() =>
+            Create().ApplyAsync(Admin(), "sales.dbo.orders", new DatasetCatalogEdit(["pii"], null, null, "5"), "admin", default));
+
+        _state.Tags.Single().Tag.ShouldBe("pii");
+        await _audit.Received(1).RecordRequiredAsync(Arg.Is<AuditLogEntry>(e => e.EventType == AuditEventTypes.CatalogTagsChanged), CancellationToken.None);
+    }
+
 }

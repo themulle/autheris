@@ -36,7 +36,7 @@ public sealed class CatalogSearchMultilingualTests
         return new TableMetadata
         {
             Identifier = id,
-            CatalogView = CatalogView.Full,
+            CatalogView = CatalogView.Granted,
             Table = new Table
             {
                 Id = Guid.NewGuid(),

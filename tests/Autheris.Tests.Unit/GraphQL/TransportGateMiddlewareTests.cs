@@ -490,6 +490,11 @@ public sealed class TransportGateMiddlewareTests
                 return Task.FromResult(_tables);
             }
 
+            if (rt == typeof(Task<Autheris.Application.Catalog.CatalogTablePage>))
+            {
+                return Task.FromResult(new Autheris.Application.Catalog.CatalogTablePage(_tables, null));
+            }
+
             if (rt == typeof(Task<IReadOnlyList<TableRelation>>))
             {
                 return Task.FromResult<IReadOnlyList<TableRelation>>(Array.Empty<TableRelation>());

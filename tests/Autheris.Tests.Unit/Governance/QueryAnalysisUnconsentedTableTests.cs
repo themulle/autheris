@@ -17,24 +17,22 @@ using Xunit;
 [Trait("Category", "Security")]
 public sealed class QueryAnalysisUnconsentedTableTests
 {
-    private static TableMetadata Orders(DatasetVisibility visibility)
+    private static TableMetadata Orders()
     {
         var t = Wp0.Table("sales", "orders", "Orders", ["id", "salary"]);
-        return t with { Table = t.Table with { Visibility = visibility } };
+        return t;
     }
 
-    private static Task<QueryAnalysisResult> AnalyzeAsync(DatasetVisibility visibility, string sql)
+    private static Task<QueryAnalysisResult> AnalyzeAsync(string sql)
     {
-        var service = new QueryAnalysisService(Wp0.Tables(Orders(visibility)), Wp0.Consents());
+        var service = new QueryAnalysisService(Wp0.Tables(Orders()), Wp0.Consents());
         return service.AnalyzeQueriesAsync([QueryAnalysisItem.FromSql(sql, name: "q")], Wp0.User("S-NOBODY", "tenant-a"));
     }
 
-    [Theory]
-    [InlineData(DatasetVisibility.Summary)]
-    [InlineData(DatasetVisibility.Full)]
-    public async Task SelectStar_WithoutGrant_ExpandsNoColumns_AndRequestsOnlyTheTable(DatasetVisibility visibility)
+    [Fact]
+    public async Task SelectStar_WithoutGrant_ExpandsNoColumns_AndRequestsOnlyTheTable()
     {
-        var result = await AnalyzeAsync(visibility, "SELECT * FROM sales.dbo.orders");
+        var result = await AnalyzeAsync("SELECT * FROM sales.dbo.orders");
 
         result.ValidationReport.OutputColumns.ShouldBeEmpty();
         result.ValidationReport.Diagnostics.ShouldNotContain(d => d.Code == QueryDiagnosticCodes.UnknownColumn);
@@ -43,13 +41,11 @@ public sealed class QueryAnalysisUnconsentedTableTests
         missing[0].RequestedLevel.ShouldBe("READ");
     }
 
-    [Theory]
-    [InlineData(DatasetVisibility.Summary)]
-    [InlineData(DatasetVisibility.Full)]
-    public async Task ExistingAndGhostColumns_AnswerAlike_NoExistenceOracle(DatasetVisibility visibility)
+    [Fact]
+    public async Task ExistingAndGhostColumns_AnswerAlike_NoExistenceOracle()
     {
-        var real = await AnalyzeAsync(visibility, "SELECT salary FROM sales.dbo.orders WHERE id = 1");
-        var ghost = await AnalyzeAsync(visibility, "SELECT ghost_column FROM sales.dbo.orders WHERE ghost_filter = 1");
+        var real = await AnalyzeAsync("SELECT salary FROM sales.dbo.orders WHERE id = 1");
+        var ghost = await AnalyzeAsync("SELECT ghost_column FROM sales.dbo.orders WHERE ghost_filter = 1");
 
         foreach (var result in new[] { real, ghost })
         {
@@ -65,7 +61,10 @@ public sealed class QueryAnalysisUnconsentedTableTests
     [Fact]
     public async Task HiddenTable_WithoutGrant_StaysTheUnknownTableDiagnostic()
     {
-        var result = await AnalyzeAsync(DatasetVisibility.Hidden, "SELECT * FROM sales.dbo.orders");
+        var hidden = Orders();
+        hidden = hidden with { Table = hidden.Table with { DiscoveryHidden = true } };
+        var service = new QueryAnalysisService(Wp0.Tables(hidden), Wp0.Consents());
+        var result = await service.AnalyzeQueriesAsync([QueryAnalysisItem.FromSql("SELECT * FROM sales.dbo.orders", name: "q")], Wp0.User("S-NOBODY", "tenant-a"));
 
         result.ValidationReport.Diagnostics.ShouldContain(d => d.Code == QueryDiagnosticCodes.UnknownTable);
         result.ValidationReport.OutputColumns.ShouldBeEmpty();
@@ -75,7 +74,7 @@ public sealed class QueryAnalysisUnconsentedTableTests
     public async Task GrantedCaller_StillGetsColumnEvaluation()
     {
         var service = new QueryAnalysisService(
-            Wp0.Tables(Orders(DatasetVisibility.Summary)),
+            Wp0.Tables(Orders()),
             Wp0.Consents(Wp0.Allow(new TableIdentifier("sales", "dbo", "orders"), "S-OK", Wp0.TenantA)));
 
         var result = await service.AnalyzeQueriesAsync([QueryAnalysisItem.FromSql("SELECT * FROM sales.dbo.orders", name: "q")], Wp0.User("S-OK", "tenant-a"));
@@ -88,7 +87,7 @@ public sealed class QueryAnalysisUnconsentedTableTests
     [Fact]
     public async Task BundledRequest_ColumnItem_ForUnconsentedTable_DoesNotValidatePerColumn()
     {
-        var service = new BundledConsentRequestService(Wp0.Tables(Orders(DatasetVisibility.Summary)), Wp0.Consents());
+        var service = new BundledConsentRequestService(Wp0.Tables(Orders()), Wp0.Consents());
         var requester = Wp0.User("S-NOBODY", "tenant-a");
 
         var real = await service.SubmitBundledRequestAsync(requester,

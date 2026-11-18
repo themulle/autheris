@@ -49,7 +49,7 @@ public sealed class GraphQlPagingEngineTests
 
     public GraphQlPagingEngineTests()
     {
-        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([Table(Customers), Table(Secrets)]);
+        _metadataRepo.StubAllTables([Table(Customers), Table(Secrets)]);
         _relationRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns([]);
         _accessResolver.ResolveTableAccessAsync(
                 Arg.Any<ClaimsPrincipal?>(),

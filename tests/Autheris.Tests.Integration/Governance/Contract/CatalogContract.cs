@@ -46,22 +46,19 @@ public abstract class CatalogContract : GovernanceContractBase
                 {
                     Id = Guid.NewGuid(),
                     ColumnName = "id",
-                    DataType = "bigint",
-                    IsSensitive = false
+                    DataType = "bigint"
                 },
                 new TableColumn
                 {
                     Id = Guid.NewGuid(),
                     ColumnName = "tenant_code",
-                    DataType = "varchar",
-                    IsSensitive = false
+                    DataType = "varchar"
                 },
                 new TableColumn
                 {
                     Id = emailColId,
                     ColumnName = "email",
-                    DataType = "varchar",
-                    IsSensitive = true
+                    DataType = "varchar"
                 }
             ],
             ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
@@ -77,7 +74,7 @@ public abstract class CatalogContract : GovernanceContractBase
             },
             PrimaryKeyColumns = primaryKey ?? ["id"],
             Indexes = indexes ?? []
-        };
+        }.WithPii("email");
     }
 
     [RequiresContainerRuntimeFact]
@@ -129,7 +126,6 @@ public abstract class CatalogContract : GovernanceContractBase
         var tableB = await Store.TableMetadata.UpsertTableMetadataAsync(BuildTable("isolated_b"));
         var epochBBefore = await Store.PolicyEpochs.GetTableEpochAsync(tableB.Identifier);
 
-        _ = await Store.TableMetadata.SetDatasetVisibilityAsync(tableA.Identifier, DatasetVisibility.Full, AdminSid);
         _ = await Store.TableMetadata.ReplaceDatasetTagsAsync(tableA.Identifier, ["finance", "governed"], DatasetTagSource.Admin, AdminSid);
         _ = await Store.TableMetadata.ReplaceTableKeyDefinitionAsync(
             tableA.Identifier,
@@ -138,7 +134,7 @@ public abstract class CatalogContract : GovernanceContractBase
 
         var settingsB = await Store.TableMetadata.GetDatasetCatalogSettingsAsync(tableB.Identifier);
         settingsB.Should().NotBeNull();
-        settingsB!.Visibility.Should().Be(DatasetVisibility.Hidden);
+        settingsB!.Tags.Should().BeEmpty();
         settingsB.Tags.Should().BeEmpty();
 
         var reloadedB = await Store.TableMetadata.GetTableMetadataAsync(tableB.Identifier);
@@ -224,18 +220,12 @@ public abstract class CatalogContract : GovernanceContractBase
         var t2 = await Store.TableMetadata.UpsertTableMetadataAsync(
             BuildTable("ord_2", primaryKey: ["id", "tenant_code"]));
 
-        _ = await Store.TableMetadata.SetDatasetVisibilityAsync(t1.Identifier, DatasetVisibility.Summary, AdminSid);
-        _ = await Store.TableMetadata.SetDatasetVisibilityAsync(t2.Identifier, DatasetVisibility.Full, AdminSid);
 
         var loaded1 = await Store.TableMetadata.GetTableMetadataAsync(t1.Identifier);
         loaded1!.PrimaryKeyColumns.Should().Equal("tenant_code", "id");
 
         var loaded2 = await Store.TableMetadata.GetTableMetadataAsync(t2.Identifier);
         loaded2!.PrimaryKeyColumns.Should().Equal("id", "tenant_code");
-
-        var counts = await Store.TableMetadata.GetDatasetVisibilityCountsAsync();
-        counts.Summary.Should().BeGreaterOrEqualTo(1);
-        counts.Full.Should().BeGreaterOrEqualTo(1);
     }
 
     [RequiresContainerRuntimeFact]
@@ -268,7 +258,6 @@ public abstract class CatalogContract : GovernanceContractBase
         (await Store.TableMetadata.GetActiveTableIdentifierAsync(table.Identifier)).Should().BeNull();
         (await Store.TableMetadata.GetActiveTableIdentifierByIdAsync(table.Table.Id)).Should().BeNull();
         (await Store.TableMetadata.GetDatasetCatalogSettingsAsync(table.Identifier)).Should().BeNull();
-        (await Store.TableMetadata.SetDatasetVisibilityAsync(table.Identifier, DatasetVisibility.Full, AdminSid)).Should().BeNull();
         (await Store.TableMetadata.ReplaceDatasetTagsAsync(table.Identifier, ["tag1"], DatasetTagSource.Admin, AdminSid)).Should().BeNull();
     }
 
@@ -324,23 +313,10 @@ public abstract class CatalogContract : GovernanceContractBase
         var afterDbtClear = await Store.TableMetadata.GetDatasetCatalogSettingsAsync(table.Identifier);
         afterDbtClear!.Tags.Select(t => t.Tag).Should().BeEquivalentTo(["pii", "shared"]);
 
-        _ = await Store.TableMetadata.SetDatasetVisibilityAsync(table.Identifier, DatasetVisibility.Full, AdminSid);
         _ = await Store.TableMetadata.UpsertTableMetadataAsync(table);
 
         var afterReingest = await Store.TableMetadata.GetDatasetCatalogSettingsAsync(table.Identifier);
-        afterReingest!.Visibility.Should().Be(DatasetVisibility.Full);
-        afterReingest.Tags.Select(t => t.Tag).Should().BeEquivalentTo(["pii", "shared"]);
-
-        await Store.ExecuteNonQueryAsync(
-            "UPDATE TABLE_CATALOG_SETTINGS SET visibility = 99 WHERE table_id = @tid",
-            ("@tid", table.Table.Id.ToString()));
-
-        var strictAct = () => Store.TableMetadata.GetDatasetCatalogSettingsAsync(table.Identifier, strict: true);
-        await strictAct.Should().ThrowAsync<InvalidOperationException>();
-
-        var lenient = await Store.TableMetadata.GetDatasetCatalogSettingsAsync(table.Identifier, strict: false);
-        lenient.Should().NotBeNull();
-        lenient!.Visibility.Should().Be(DatasetVisibility.Hidden);
+        afterReingest!.Tags.Select(t => t.Tag).Should().BeEquivalentTo(["pii", "shared"]);
     }
 
     [RequiresContainerRuntimeFact]

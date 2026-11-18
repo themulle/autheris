@@ -62,12 +62,11 @@ internal static class McpCatalogVisibility
             contract: null,
             TenantResolver.EffectiveDefaultOf(options?.Tenancy),
             options?.Catalog.SharedTables,
-            CatalogSurface.DataAccess,
             ct).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// Consent, tier and column visibility (<see cref="VisibleTablesAsync(IReadOnlyList{TableMetadata}, ClaimsPrincipal?, IConsentRepository?, GatewayOptions?, CancellationToken)"/>)
+    /// Consent and column visibility (<see cref="VisibleTablesAsync(IReadOnlyList{TableMetadata}, ClaimsPrincipal?, IConsentRepository?, GatewayOptions?, CancellationToken)"/>)
     /// intersected with the catalog visibility service, which adds the visibility step (MCP-14). A table must pass both; without a
     /// service the first rule alone applies (the service is always registered in a running gateway). The intersection keeps the
     /// column filtering of the first rule and can only remove tables.

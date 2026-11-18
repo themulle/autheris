@@ -140,7 +140,7 @@ public sealed class CatalogKeysEndpointTests : IDisposable
         var (status, _) = await Run(await Put("sales.dbo.orders", new SetDatasetKeysDto(PrimaryKey: ["a"]), interleaving));
 
         status.ShouldBe(200);
-        Scalar("SELECT COUNT(*) FROM COLUMN_MASKING_RULES m JOIN TABLE_COLUMNS c ON c.id = m.table_column_id WHERE c.column_name = 'ssn'").ShouldBe(1L);
+        Scalar("SELECT COUNT(*) FROM COLUMN_MASK_OVERRIDES m JOIN TABLE_COLUMNS c ON c.id = m.table_column_id WHERE c.column_name = 'ssn'").ShouldBe(1L);
     }
 
     [Fact]

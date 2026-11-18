@@ -260,7 +260,7 @@ public sealed class AiDataGuardrailDecisionPointTests
     [Fact]
     public async Task Describe_full_view_with_consent_grant_on_an_unreleased_row_is_decided_and_a_deny_blocks_the_profiles()
     {
-        var h = Create(Denied, shape: CatalogOutputShape.Full, view: CatalogView.Full, released: false, granted: true);
+        var h = Create(Denied, shape: CatalogOutputShape.Full, view: CatalogView.Granted, released: false, granted: true);
 
         var result = await Describe(h, OrdersArgs);
 
@@ -274,13 +274,9 @@ public sealed class AiDataGuardrailDecisionPointTests
 
     [Theory]
     // describe_dataset now omits legacy value profiles and checks PDP unless brief:true is requested.
-    [InlineData(CatalogOutputShape.Summary, CatalogView.Summary, false, false, true)]
-    [InlineData(CatalogOutputShape.Summary, CatalogView.Summary, false, true, true)]
-    [InlineData(CatalogOutputShape.Full, CatalogView.Full, false, false, true)]
-    [InlineData(CatalogOutputShape.Full, CatalogView.Full, false, true, true)]
-    [InlineData(CatalogOutputShape.Full, CatalogView.Full, true, false, true)]
     [InlineData(CatalogOutputShape.Full, CatalogView.Granted, false, false, true)]
     [InlineData(CatalogOutputShape.Full, CatalogView.Granted, false, true, true)]
+    [InlineData(CatalogOutputShape.Full, CatalogView.Granted, true, false, true)]
     public async Task Describe_non_brief_is_always_decided(
         CatalogOutputShape shape, CatalogView view, bool released, bool granted, bool decided)
     {
@@ -313,7 +309,7 @@ public sealed class AiDataGuardrailDecisionPointTests
     public async Task Brief_is_parsed_exactly_as_the_handler_and_never_looser(string args, bool decided)
     {
         // A full view that would emit value profiles (granted): only an unambiguous brief request skips the decision.
-        var h = Create(Denied, shape: CatalogOutputShape.Full, view: CatalogView.Full, released: true, granted: true);
+        var h = Create(Denied, shape: CatalogOutputShape.Full, view: CatalogView.Granted, released: true, granted: true);
 
         var result = await Describe(h, args);
 

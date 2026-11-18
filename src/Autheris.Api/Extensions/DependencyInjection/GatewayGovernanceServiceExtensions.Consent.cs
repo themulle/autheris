@@ -84,6 +84,7 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationHandler, ExternalSystemRequirementHandler>();
         services.AddScoped<Autheris.Application.ConsentRequests.IConsentDecisionPipeline, Autheris.Application.ConsentRequests.ConsentDecisionPipeline>();
         services.AddScoped<Autheris.Application.ConsentRequests.IConsentRequestService, Autheris.Application.ConsentRequests.ConsentRequestService>();
+        services.AddSingleton<Autheris.Application.Policy.Classification.IClassificationAdminService, Autheris.Application.Policy.Classification.ClassificationAdminService>();
         services.AddSingleton<Autheris.Application.Governance.Grants.IOwnerGrantService, Autheris.Application.Governance.Grants.OwnerGrantService>();
         services.AddSingleton<Autheris.Application.ConsentRequests.ProfileAssignments.IProfileGrantMaterializer, Autheris.Application.ConsentRequests.ProfileAssignments.ProfileGrantMaterializer>();
         services.AddScoped<Autheris.Application.ConsentRequests.ProfileAssignments.ProfileAssignmentRequestService>();

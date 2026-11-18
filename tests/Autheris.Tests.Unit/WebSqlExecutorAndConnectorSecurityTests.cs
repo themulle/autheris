@@ -91,7 +91,7 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
             [
                 new TableColumn { ColumnName = "id", DataType = "int" },
                 new TableColumn { ColumnName = "name", DataType = "varchar" },
-                new TableColumn { ColumnName = "ssn", DataType = "varchar", IsSensitive = true },
+                new TableColumn { ColumnName = "ssn", DataType = "varchar" },
                 new TableColumn { ColumnName = "region", DataType = "varchar" },
                 new TableColumn { ColumnName = "tenant_id", DataType = "varchar" }
             ],
@@ -99,7 +99,7 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
             {
                 ["ssn"] = new MaskingRule { RuleType = hmacRuleType }
             }
-        };
+        }.WithPii("ssn");
     }
 
     private static TableMetadata CreateOrdersMetadata()

@@ -81,8 +81,7 @@ public sealed class DatasourceTestingServiceTests
     public async Task TestConnection_ValidHttpSource_ReturnsSuccessWithLatency()
     {
         var httpTable = CreateHttpTable("crm", "customers", "https://api.crm-sample.com");
-        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns([httpTable]);
+        _metadataRepo.StubAllTables([httpTable]);
 
         var fakeHandler = new FakeHttpMessageHandler((req) =>
         {
@@ -106,8 +105,7 @@ public sealed class DatasourceTestingServiceTests
     public async Task TestConnection_InvalidCredentials_ReturnsFailureWithStatus401()
     {
         var httpTable = CreateHttpTable("crm", "customers", "https://api.crm-sample.com");
-        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns([httpTable]);
+        _metadataRepo.StubAllTables([httpTable]);
 
         var fakeHandler = new FakeHttpMessageHandler((req) =>
         {
@@ -132,8 +130,7 @@ public sealed class DatasourceTestingServiceTests
     {
         // AWS / Cloud metadata IP 169.254.169.254
         var httpTable = CreateHttpTable("cloud", "metadata", "http://169.254.169.254");
-        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns([httpTable]);
+        _metadataRepo.StubAllTables([httpTable]);
 
         var service = new DatasourceTestingService(
             _metadataRepo, _httpClientFactory, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), _secretProvider, _environment, NullLogger<DatasourceTestingService>.Instance);
@@ -148,8 +145,7 @@ public sealed class DatasourceTestingServiceTests
     public async Task TestConnection_RelativeProbePathTraversal_Rejects()
     {
         var httpTable = CreateHttpTable("crm", "customers", "https://api.crm-sample.com");
-        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns([httpTable]);
+        _metadataRepo.StubAllTables([httpTable]);
 
         var service = new DatasourceTestingService(
             _metadataRepo, _httpClientFactory, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), _secretProvider, _environment, NullLogger<DatasourceTestingService>.Instance);
@@ -171,8 +167,7 @@ public sealed class DatasourceTestingServiceTests
     public async Task SR_M_14_TestConnection_ProbePathRetargeting_IsRejected(string probePath)
     {
         var httpTable = CreateHttpTable("crm", "customers", "https://api.crm-sample.com");
-        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns([httpTable]);
+        _metadataRepo.StubAllTables([httpTable]);
 
         var service = new DatasourceTestingService(
             _metadataRepo, _httpClientFactory, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), _secretProvider, _environment, NullLogger<DatasourceTestingService>.Instance);
@@ -207,8 +202,7 @@ public sealed class DatasourceTestingServiceTests
             PrimaryKeyColumns = ["id"]
         };
 
-        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns([sqlTableMeta]);
+        _metadataRepo.StubAllTables([sqlTableMeta]);
 
         var service = new DatasourceTestingService(
             _metadataRepo, _httpClientFactory, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), _secretProvider, _environment, NullLogger<DatasourceTestingService>.Instance);
@@ -226,8 +220,7 @@ public sealed class DatasourceTestingServiceTests
     public async Task TestDatasource_IgnoresForbiddenHeadersAndCrlfInjection()
     {
         var httpTable = CreateHttpTable("crm", "customers", "https://api.crm-sample.com");
-        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns([httpTable]);
+        _metadataRepo.StubAllTables([httpTable]);
 
         HttpRequestMessage? captured = null;
         var fakeHandler = new FakeHttpMessageHandler(req =>

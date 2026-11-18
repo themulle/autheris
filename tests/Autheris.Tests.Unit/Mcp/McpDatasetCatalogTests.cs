@@ -37,8 +37,7 @@ public sealed class McpDatasetCatalogTests
 
     public McpDatasetCatalogTests()
     {
-        _metadata.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([Table(Orders, "Customer orders"), Table(Payroll, "Salaries")]));
+        _metadata.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>([Table(Orders, "Customer orders"), Table(Payroll, "Salaries")]));
         _golden.GetGoldenQueriesAsync(Arg.Any<GoldenQueryReadContext>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
             .Returns(ValueTask.FromResult<IReadOnlyList<GoldenQuery>>([]));
         // The caller has an Allow consent on orders that grants id and amount, but not customer_email.
@@ -63,7 +62,7 @@ public sealed class McpDatasetCatalogTests
     }
 
     private static TableMetadata Table(TableIdentifier id, string description) => new()
-    {
+    { ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("customer_email"),
         Identifier = id,
         Table = new Table { TableName = id.TableName, SchemaName = id.Schema, Description = description, Sensitivity = "INTERNAL" },
         PrimaryKeyColumns = ["id"],
@@ -71,7 +70,7 @@ public sealed class McpDatasetCatalogTests
         [
             new TableColumn { ColumnName = "id", DataType = "int", Description = "Key" },
             new TableColumn { ColumnName = "amount", DataType = "decimal", Description = "Order amount" },
-            new TableColumn { ColumnName = "customer_email", DataType = "varchar", IsSensitive = true, Description = "Contact" }
+            new TableColumn { ColumnName = "customer_email", DataType = "varchar", Description = "Contact" }
         ]
     };
 
@@ -374,8 +373,7 @@ public sealed class McpDatasetCatalogTests
         var t2 = Table(new TableIdentifier("sales", "public", "t2"), "Table 2");
         var t3 = Table(new TableIdentifier("sales", "public", "t3"), "Table 3");
 
-        _metadata.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([t1, t2, t3]));
+        _metadata.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>([t1, t2, t3]));
 
         var admin = User("ClusterAdmin");
         var resultPage1 = await Catalog().ListDatasetsAsync(admin, search: null, domain: null, offset: 0, limit: 2);

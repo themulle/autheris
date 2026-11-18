@@ -30,11 +30,4 @@ public sealed class DatasetCatalogOptionsValidationTests
     public void MaxTagsPerDataset_RangeIsValidated(int value, bool fails) =>
         Fails(new DataCatalogOptions { MaxTagsPerDataset = value }, "Gateway:Catalog:MaxTagsPerDataset").ShouldBe(fails);
 
-    [Theory]
-    [InlineData(DatasetVisibility.Hidden, false)]
-    [InlineData(DatasetVisibility.Summary, false)]
-    [InlineData(DatasetVisibility.Full, true)]
-    [InlineData((DatasetVisibility)7, true)]
-    public void DefaultVisibility_FullAndUnknownValuesFailStartup(DatasetVisibility value, bool fails) =>
-        Fails(new DataCatalogOptions { DefaultVisibility = value }, "Gateway:Catalog:DefaultVisibility").ShouldBe(fails);
 }

@@ -406,8 +406,7 @@ public sealed class DocumentationSourcePriorityTests
                 new TableColumn
                 {
                     ColumnName = "email",
-                    DataType = "varchar",
-                    IsSensitive = false
+                    DataType = "varchar"
                 }
             ]
         };

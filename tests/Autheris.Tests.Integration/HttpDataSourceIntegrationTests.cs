@@ -160,7 +160,7 @@ public sealed class HttpDataSourceIntegrationTests : IClassFixture<HttpDataSourc
                 new TableColumn { TableId = table.Id, ColumnName = "id", DataType = "int" },
                 new TableColumn { TableId = table.Id, ColumnName = "name", DataType = "varchar" },
                 new TableColumn { TableId = table.Id, ColumnName = "region", DataType = "varchar" },
-                new TableColumn { TableId = table.Id, ColumnName = "email", DataType = "varchar", IsSensitive = true }
+                new TableColumn { TableId = table.Id, ColumnName = "email", DataType = "varchar" }
             };
 
             var maskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
@@ -173,7 +173,8 @@ public sealed class HttpDataSourceIntegrationTests : IClassFixture<HttpDataSourc
                 Identifier = tableId,
                 Table = table,
                 Columns = columns,
-                ColumnMaskingRules = maskingRules
+                ColumnMaskingRules = maskingRules,
+                ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("email")
             };
 
             var savedMeta = await repo.UpsertTableMetadataAsync(meta);
@@ -280,9 +281,9 @@ public sealed class HttpDataSourceIntegrationTests : IClassFixture<HttpDataSourc
             {
                 new TableColumn { TableId = table.Id, ColumnName = "invoice_id", DataType = "varchar" },
                 new TableColumn { TableId = table.Id, ColumnName = "customer_id", DataType = "varchar" },
-                new TableColumn { TableId = table.Id, ColumnName = "tax_number", DataType = "varchar", IsSensitive = true },
+                new TableColumn { TableId = table.Id, ColumnName = "tax_number", DataType = "varchar" },
                 new TableColumn { TableId = table.Id, ColumnName = "total", DataType = "decimal" },
-                new TableColumn { TableId = table.Id, ColumnName = "secret_notes", DataType = "varchar", IsSensitive = true }
+                new TableColumn { TableId = table.Id, ColumnName = "secret_notes", DataType = "varchar" }
             };
 
             var maskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
@@ -295,7 +296,8 @@ public sealed class HttpDataSourceIntegrationTests : IClassFixture<HttpDataSourc
                 Identifier = tableId,
                 Table = table,
                 Columns = columns,
-                ColumnMaskingRules = maskingRules
+                ColumnMaskingRules = maskingRules,
+                ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("tax_number", "secret_notes")
             };
 
             var savedMeta = await repo.UpsertTableMetadataAsync(meta);

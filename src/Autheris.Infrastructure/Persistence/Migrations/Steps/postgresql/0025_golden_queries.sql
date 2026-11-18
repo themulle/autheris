@@ -1,5 +1,5 @@
--- phase3: MIG-0023
--- Governance schema step 0023 (PostgreSQL): tenant-scoped golden queries maintained by data owners (dbt meta) and config.
+-- phase3: MIG-0025
+-- Governance schema step 0025 (PostgreSQL): tenant-scoped golden queries maintained by data owners (dbt meta) and config.
 
 CREATE TABLE IF NOT EXISTS golden_queries (
     id             VARCHAR(36)   NOT NULL,

@@ -27,7 +27,7 @@ public sealed class DatasetCatalogPrivacyEditTests
     private readonly ITableMetadataRepository _tables = Substitute.For<ITableMetadataRepository>();
     private readonly IDataOwnershipRepository _owners = Substitute.For<IDataOwnershipRepository>();
     private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
-    private DatasetCatalogSettings _state = new([], DatasetVisibility.Hidden, MinGroupSize: null, NonPersonal: null);
+    private DatasetCatalogSettings _state = new([], MinGroupSize: null, NonPersonal: null);
 
     public DatasetCatalogPrivacyEditTests()
     {
@@ -59,7 +59,7 @@ public sealed class DatasetCatalogPrivacyEditTests
     public async Task Apply_SetNonPersonalAndMinGroupSize_AuditsBeforeAfter()
     {
         var svc = Create();
-        var edit = new DatasetCatalogEdit(null, null, null, null, MinGroupSize: "5", NonPersonal: true);
+        var edit = new DatasetCatalogEdit(null, null, null, MinGroupSize: "5", NonPersonal: true);
 
         var result = await svc.ApplyAsync(Admin(), "sales.dbo.orders", edit, "admin", CancellationToken.None);
 
@@ -77,7 +77,7 @@ public sealed class DatasetCatalogPrivacyEditTests
     public async Task Apply_InvalidMinGroupSize_InvalidRequest()
     {
         var svc = Create();
-        var edit = new DatasetCatalogEdit(null, null, null, null, MinGroupSize: "invalid_number", NonPersonal: true);
+        var edit = new DatasetCatalogEdit(null, null, null, MinGroupSize: "invalid_number", NonPersonal: true);
 
         var result = await svc.ApplyAsync(Admin(), "sales.dbo.orders", edit, "admin", CancellationToken.None);
 
@@ -88,9 +88,9 @@ public sealed class DatasetCatalogPrivacyEditTests
     [Fact]
     public async Task Apply_Unchanged_NoAudit()
     {
-        _state = new DatasetCatalogSettings([], DatasetVisibility.Hidden, MinGroupSize: 5, NonPersonal: true);
+        _state = new DatasetCatalogSettings([], MinGroupSize: 5, NonPersonal: true);
         var svc = Create();
-        var edit = new DatasetCatalogEdit(null, null, null, null, MinGroupSize: "5", NonPersonal: true);
+        var edit = new DatasetCatalogEdit(null, null, null, MinGroupSize: "5", NonPersonal: true);
 
         var result = await svc.ApplyAsync(Admin(), "sales.dbo.orders", edit, "admin", CancellationToken.None);
 
@@ -102,7 +102,7 @@ public sealed class DatasetCatalogPrivacyEditTests
     public async Task Apply_Unauthorized_Denied()
     {
         var svc = Create();
-        var edit = new DatasetCatalogEdit(null, null, null, null, MinGroupSize: "5", NonPersonal: true);
+        var edit = new DatasetCatalogEdit(null, null, null, MinGroupSize: "5", NonPersonal: true);
 
         // Stranger without ownership or cluster admin gets NotFound (fail-closed, does not leak existence)
         var result = await svc.ApplyAsync(Stranger(), "sales.dbo.orders", edit, "admin", CancellationToken.None);
@@ -120,14 +120,14 @@ public sealed class DatasetCatalogPrivacyEditTests
             Identifier = Orders,
             Columns =
             [
-                new TableColumn { ColumnName = "secret", IsSensitive = true }
+                new TableColumn { ColumnName = "secret" }
             ],
             Table = new Table { Id = Guid.NewGuid(), Sensitivity = "NORMAL", TableName = "orders", SchemaName = "dbo", SourceName = "sales", SourceType = "sql" }
-        };
+        }.WithPii("secret");
         _tables.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>()).Returns(meta);
 
         var svc = Create();
-        var edit = new DatasetCatalogEdit(null, null, null, null, MinGroupSize: "1", NonPersonal: true);
+        var edit = new DatasetCatalogEdit(null, null, null, MinGroupSize: "1", NonPersonal: true);
 
         var result = await svc.ApplyAsync(Admin(), "sales.dbo.orders", edit, "admin", CancellationToken.None);
 
@@ -143,7 +143,7 @@ public sealed class DatasetCatalogPrivacyEditTests
             .Returns<Task>(_ => throw new InvalidOperationException("Audit store failed"));
 
         var svc = Create();
-        var edit = new DatasetCatalogEdit(null, null, null, null, MinGroupSize: "1", NonPersonal: true);
+        var edit = new DatasetCatalogEdit(null, null, null, MinGroupSize: "1", NonPersonal: true);
 
         await Should.ThrowAsync<InvalidOperationException>(async () =>
             await svc.ApplyAsync(Admin(), "sales.dbo.orders", edit, "admin", CancellationToken.None));

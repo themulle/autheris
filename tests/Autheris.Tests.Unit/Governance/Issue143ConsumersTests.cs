@@ -106,7 +106,7 @@ public sealed class Issue143ConsumersTests
     {
         var tableRepo = Substitute.For<ITableMetadataRepository>();
         tableRepo.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>()).Returns(Meta);
-        tableRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([Meta]));
+        tableRepo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>([Meta]));
         var consentRepo = Substitute.For<IConsentRepository>();
         consentRepo.GetActiveConsentsForSubjectsAsync(default!, default, default, default, default)
             .ReturnsForAnyArgs(Task.FromResult<IReadOnlyList<Consent>>(consents));

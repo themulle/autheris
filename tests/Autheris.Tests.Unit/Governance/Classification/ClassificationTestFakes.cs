@@ -158,8 +158,18 @@ internal sealed class TestInMemoryClassificationStore : IClassificationRepositor
         return Task.CompletedTask;
     }
 
-    public Task<bool> RemoveColumnClassificationAsync(string tableColumnId, string scope, string code, CancellationToken ct = default) =>
-        Task.FromResult(ColumnClassifications.RemoveAll(c => c.TableColumnId == tableColumnId && c.Code == code) > 0);
+    public Dictionary<string, TableIdentifier> ColumnTables { get; } = new(StringComparer.Ordinal);
+
+    public Task<TableIdentifier?> GetTableIdentifierByColumnIdAsync(string tableColumnId, CancellationToken ct = default) =>
+        Task.FromResult<TableIdentifier?>(ColumnTables.TryGetValue(tableColumnId, out var table) ? table : null);
+
+    public int RemoveCalls { get; private set; }
+
+    public Task<bool> RemoveColumnClassificationAsync(string scope, string tableColumnId, string code, CancellationToken ct = default)
+    {
+        RemoveCalls++;
+        return Task.FromResult(ColumnClassifications.RemoveAll(c => c.Scope == scope && c.TableColumnId == tableColumnId && c.Code == code) > 0);
+    }
 
     public Task<IReadOnlyList<ColumnMaskOverride>> GetColumnMaskOverridesAsync(string tableColumnId, string? scope = null, CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<ColumnMaskOverride>>(ColumnMaskOverrides.Where(o => o.TableColumnId == tableColumnId).ToList());
@@ -171,7 +181,7 @@ internal sealed class TestInMemoryClassificationStore : IClassificationRepositor
         return Task.FromResult(maskOverride);
     }
 
-    public Task<bool> DeleteColumnMaskOverrideAsync(string tableColumnId, string scope, string? code, CancellationToken ct = default) =>
+    public Task<bool> DeleteColumnMaskOverrideAsync(string scope, string tableColumnId, string? code, CancellationToken ct = default) =>
         Task.FromResult(ColumnMaskOverrides.RemoveAll(o => o.TableColumnId == tableColumnId && o.Scope == scope && o.Code == code) > 0);
 
     public Task<IReadOnlyList<ConsentClassificationAccess>> GetConsentClassificationAccessAsync(string tenantId, Guid consentId, CancellationToken ct = default) =>

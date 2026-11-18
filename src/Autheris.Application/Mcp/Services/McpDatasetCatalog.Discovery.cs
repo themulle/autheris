@@ -395,8 +395,7 @@ public sealed partial class McpDatasetCatalog
             return true;
         }
 
-        // A Summary row matches on identifier and description only; Full rows carry no DENY-masked column (removed by the engine).
-        if (table.CatalogView != CatalogView.Summary && table.Columns.Count > 0)
+        if (table.Columns.Count > 0)
         {
             foreach (var c in table.Columns)
             {

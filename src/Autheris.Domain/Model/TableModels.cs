@@ -24,16 +24,7 @@ public enum GranteeType
 public enum CatalogView
 {
     Unmarked = 0,
-    Granted = 1,
-    Summary = 2,
-    Full = 3
-}
-
-public enum DatasetVisibility
-{
-    Hidden = 0,
-    Summary = 1,
-    Full = 2
+    Granted = 1
 }
 
 /// <summary>
@@ -159,7 +150,6 @@ public sealed record Table
     public HttpEndpointDescriptor? HttpEndpoint { get; init; }
     public string? PluginName { get; init; }
     public IReadOnlyList<string> Tags { get; init; } = Array.Empty<string>();
-    public DatasetVisibility Visibility { get; init; } = DatasetVisibility.Hidden;
     public bool DiscoveryHidden { get; init; }
     public bool SamplesDisabled { get; init; }
     public DiscoveryObjectKind ObjectKind { get; init; } = DiscoveryObjectKind.Table;
@@ -225,7 +215,6 @@ public sealed class TableColumn
     public string DataType { get; init; } = "varchar";
     public string? Collation { get; init; }
     public string? LengthSemantics { get; init; }
-    public bool IsSensitive { get; init; }
     public bool WriteProtected { get; init; }
     public bool DiscoveryHidden { get; init; }
     public string? Description { get; init; }

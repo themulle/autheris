@@ -68,7 +68,7 @@ public sealed class CatalogGovernanceRatchetTests
     };
 
     private static TableMetadata FullyPopulatedExisting(TableIdentifier id) => new()
-    {
+    { ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("a"),
         Identifier = id,
         OwnerTenantId = "tenant-a",
         Table = new Table
@@ -94,7 +94,6 @@ public sealed class CatalogGovernanceRatchetTests
             HttpEndpoint = new HttpEndpointDescriptor { BaseUrl = "https://api.local" },
             PluginName = "plugin",
             Tags = ["finance"],
-            Visibility = DatasetVisibility.Full,
             RlsExpression = "region = 'EU'",
             MinGroupSize = 11,
             SmallGroupStrategy = SmallGroupStrategy.MergeIntoOther,
@@ -114,7 +113,6 @@ public sealed class CatalogGovernanceRatchetTests
                 ColumnName = "a",
                 DisplayName = "Column A",
                 DataType = "int",
-                IsSensitive = true,
                 Description = "persisted a",
                 LongDescription = "persisted long a",
                 Texts = new LocalizedTexts(new Dictionary<string, LocalizedTextEntry> { ["de"] = new("Spalte A") }),
@@ -131,7 +129,7 @@ public sealed class CatalogGovernanceRatchetTests
         PrimaryKeyColumns = ["a"],
         RowFilterEvaluation = new RowFilterEvaluationSettings(RowFilterEvaluationStrategy.KeySetCache, 60, 100),
         CatalogTags = ["dbt"],
-        CatalogView = CatalogView.Summary,
+        CatalogView = CatalogView.Granted,
         EstimatedRowCount = 42,
         ExpectedRows = 43,
         MinGroupSize = 7,
@@ -193,7 +191,7 @@ public sealed class CatalogGovernanceRatchetTests
         colA.Id.ShouldBe(exA.Id);
         colA.DisplayName.ShouldBe("Column A");
         colA.Texts.ShouldBeSameAs(exA.Texts);
-        colA.IsSensitive.ShouldBeTrue();
+        ClassificationMetadata.IsColumnSensitive(merged, "a").ShouldBeTrue();
         colA.Description.ShouldBe("persisted a");
         colA.LongDescription.ShouldBe("persisted long a");
         colA.DocumentationSource.ShouldBe("Admin");
@@ -235,7 +233,7 @@ public sealed class CatalogGovernanceRatchetTests
         colA.DataType.ShouldBe("bigint");
         colA.DisplayName.ShouldBe("Catalog A");
         colA.Description.ShouldBe("catalog a");
-        colA.IsSensitive.ShouldBeTrue();
+        ClassificationMetadata.IsColumnSensitive(merged, "a").ShouldBeTrue();
     }
 
     [Fact]
@@ -329,6 +327,8 @@ public sealed class CatalogGovernanceRatchetTests
         nameof(TableMetadata.Identifier),
         nameof(TableMetadata.Columns),
         nameof(TableMetadata.ColumnMaskingRules),
+        // Merged additively (union, existing wins); covered by Merge_UnionsColumnClassifications_NeverRemovesExistingOnes.
+        nameof(TableMetadata.ColumnClassifications),
         nameof(TableMetadata.PrimaryKeyColumns),
         nameof(TableMetadata.PrimaryKeyDirections),
         nameof(TableMetadata.Indexes),
@@ -399,5 +399,19 @@ public sealed class CatalogGovernanceRatchetTests
             Equals(actual, expected).ShouldBeTrue(
                 $"TableMetadata.{property.Name} must survive the merge without drift");
         }
+    }
+
+    [Fact]
+    public void Merge_UnionsColumnClassifications_NeverRemovesExistingOnes()
+    {
+        var id = new TableIdentifier("d", "s", "t");
+        var existing = new TableMetadata { Identifier = id, Table = new Table { SourceName = "d", SchemaName = "s", TableName = "t" }, Columns = [new TableColumn { ColumnName = "a" }, new TableColumn { ColumnName = "b" }] }.WithPii("a");
+        var incoming = new TableMetadata { Identifier = id, Table = existing.Table, Columns = existing.Columns }.WithPii("b");
+
+        var merged = CatalogGovernanceRatchet.Merge(incoming, existing);
+
+        ClassificationMetadata.IsColumnSensitive(merged, "a").ShouldBeTrue();
+        ClassificationMetadata.IsColumnSensitive(merged, "b").ShouldBeTrue();
+        ClassificationMetadata.IsColumnSensitive(CatalogGovernanceRatchet.Merge(new TableMetadata { Identifier = id, Table = existing.Table, Columns = existing.Columns }, existing), "a").ShouldBeTrue();
     }
 }

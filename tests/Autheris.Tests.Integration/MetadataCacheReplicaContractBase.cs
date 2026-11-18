@@ -42,11 +42,11 @@ public abstract class MetadataCacheReplicaContractBase : IAsyncLifetime
         {
             Identifier = new TableIdentifier("ReplicaDomain", "dbo", name),
             Table = new Table { Id = id, SourceName = "ReplicaDomain", SchemaName = "dbo", TableName = name, Sensitivity = "LOW", IsActive = active },
-            Columns = [new TableColumn { TableId = id, ColumnName = "email", DataType = "TEXT", IsSensitive = true }],
+            Columns = [new TableColumn { TableId = id, ColumnName = "email", DataType = "TEXT" }],
             ColumnMaskingRules = maskedColumn == null
                 ? new Dictionary<string, MaskingRule>()
                 : new Dictionary<string, MaskingRule> { [maskedColumn] = new MaskingRule { RuleType = "REDACT" } }
-        };
+        }.WithPii("email");
     }
 
     private static string Name(string prefix) => prefix + "_" + Guid.NewGuid().ToString("N")[..8];

@@ -63,8 +63,7 @@ public sealed class CatalogListingVisibilityTests
     private static ITableMetadataRepository Tables()
     {
         var repo = Substitute.For<ITableMetadataRepository>();
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([Lakehouse(OrdersId), Lakehouse(SalariesId)]));
+        repo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>([Lakehouse(OrdersId), Lakehouse(SalariesId)]));
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<TableMetadata?>(null));
         return Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(repo);

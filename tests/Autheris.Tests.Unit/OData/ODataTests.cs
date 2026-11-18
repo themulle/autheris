@@ -1024,8 +1024,7 @@ public sealed class ODataTests
         var sampleTable = CreateSampleTable();
         var user = CreateAuthenticatedUser("sales");
 
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(new[] { sampleTable }));
+        metadataRepo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(new[] { sampleTable }));
 
         // Decision: allow id, customer, amount; deny invoice_date, created_at
         var decision = TableAccessDecision.Allowed(
@@ -1069,8 +1068,7 @@ public sealed class ODataTests
         };
         var user = CreateAuthenticatedUser("sales");
 
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(new[] { table1, table2 }));
+        metadataRepo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(new[] { table1, table2 }));
 
         // table1 allowed, table2 denied
         execService.CheckTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Is<TableMetadata>(m => m.Identifier == table1.Identifier), false, Arg.Any<CancellationToken>())
@@ -1097,8 +1095,7 @@ public sealed class ODataTests
         var execService = Substitute.For<IGatewayExecutionService>();
         using var memoryCache = new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions { SizeLimit = 1024 * 1024 });
         var sampleTable = CreateSampleTable();
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(new[] { sampleTable }));
+        metadataRepo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(new[] { sampleTable }));
         execService.CheckTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableMetadata>(), Arg.Any<bool>(), Arg.Any<CancellationToken>())
             .Returns<Task<TableAccessDecision>>(_ => throw new InvalidOperationException("boom"));
 
@@ -1122,8 +1119,7 @@ public sealed class ODataTests
         var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
             Substitute.For<ITableMetadataRepository>());
         var execService = Substitute.For<IGatewayExecutionService>();
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(new[] { CreateSampleTable() }));
+        metadataRepo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(new[] { CreateSampleTable() }));
 
         var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
         var xml = await handler.GetMetadataCsdlAsync(CreateAuthenticatedUser("sales"));
@@ -1138,8 +1134,7 @@ public sealed class ODataTests
         var execService = Substitute.For<IGatewayExecutionService>();
         using var memoryCache = new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions { SizeLimit = 1024 * 1024 });
         var sampleTable = CreateSampleTable();
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(new[] { sampleTable }));
+        metadataRepo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(new[] { sampleTable }));
         execService.CheckTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableMetadata>(), Arg.Any<bool>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(TableAccessDecision.Allowed(sampleTable.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)));
 
@@ -1215,8 +1210,7 @@ public sealed class ODataTests
         var memoryCache = new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions());
 
         var sampleTable = CreateSampleTable();
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns([sampleTable]);
+        metadataRepo.StubAllTables([sampleTable]);
 
         var decision = TableAccessDecision.Allowed(
             sampleTable.Identifier,
@@ -1266,8 +1260,7 @@ public sealed class ODataTests
         var memoryCache = new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions());
 
         var sampleTable = CreateSampleTable();
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns([sampleTable]);
+        metadataRepo.StubAllTables([sampleTable]);
 
         var decision = TableAccessDecision.Allowed(
             sampleTable.Identifier,

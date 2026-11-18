@@ -8,18 +8,18 @@ using Xunit;
 namespace Autheris.Tests.Unit.Persistence.Migrations;
 
 [Trait("Category", "Security")]
-public sealed class GoldenQueriesMigration0023Tests
+public sealed class GoldenQueriesMigration0025Tests
 {
     [Fact]
-    public void Migration0023_ExistsAndPassesStepSqlLintAndShapeContract()
+    public void Migration0025_ExistsAndPassesStepSqlLintAndShapeContract()
     {
         Enum.GetValues<GovernanceTable>().Select(t => t.ToSqlName()).ShouldContain("GOLDEN_QUERIES");
 
         foreach (var engine in new[] { "postgresql", "sqlserver" })
         {
             var steps = SqlMigrationStep.LoadEmbedded(engine);
-            var step = steps.Single(s => s.Version == 23 && s.Name == "golden_queries");
-            step.Phase3Marker.ShouldBe("MIG-0023");
+            var step = steps.Single(s => s.Version == 25 && s.Name == "golden_queries");
+            step.Phase3Marker.ShouldBe("MIG-0025");
             StepSqlLint.Validate(step.Sql, step.GuardSql, step.Phase3Marker).ShouldBeEmpty();
 
             var shape = GovernanceSchemaShapeLoader.LoadAt(engine, 23, steps.ToDictionary(s => s.Version, s => s.ShapeDelta));
@@ -32,20 +32,20 @@ public sealed class GoldenQueriesMigration0023Tests
     }
 
     [Fact]
-    public void Migration0023_ChecksumMatchesGoldenFile()
+    public void Migration0025_ChecksumMatchesGoldenFile()
     {
         var repoRoot = FindRepoRoot();
         foreach (var engine in new[] { "postgresql", "sqlserver" })
         {
-            var step = SqlMigrationStep.LoadEmbedded(engine).Single(s => s.Version == 23 && s.Name == "golden_queries");
+            var step = SqlMigrationStep.LoadEmbedded(engine).Single(s => s.Version == 25 && s.Name == "golden_queries");
             var checksumsPath = Path.Combine(repoRoot, "tests", "Autheris.Tests.Architecture", "Golden", "GovernanceSteps", $"checksums.{engine}.txt");
-            var line = File.ReadAllLines(checksumsPath).Single(l => l.StartsWith("0023 golden_queries ", StringComparison.Ordinal));
+            var line = File.ReadAllLines(checksumsPath).Single(l => l.StartsWith("0025 golden_queries ", StringComparison.Ordinal));
             step.Checksum.ShouldBe(line.Split(' ', StringSplitOptions.RemoveEmptyEntries)[2]);
         }
     }
 
     [Fact]
-    public void Migration0023_TableIsTenantScoped()
+    public void Migration0025_TableIsTenantScoped()
     {
         GovernanceGlobalTables.IsGlobal("GOLDEN_QUERIES").ShouldBeFalse();
         Should.Throw<ArgumentException>(() => TenantScope.RequireTenantString(null, "GOLDEN_QUERIES"));

@@ -1,5 +1,5 @@
--- phase3: MIG-0023
--- Governance schema step 0023 (SQL Server): tenant-scoped golden queries maintained by data owners (dbt meta) and config.
+-- phase3: MIG-0025
+-- Governance schema step 0025 (SQL Server): tenant-scoped golden queries maintained by data owners (dbt meta) and config.
 
 IF OBJECT_ID(N'dbo.GOLDEN_QUERIES', N'U') IS NULL
 CREATE TABLE dbo.GOLDEN_QUERIES (

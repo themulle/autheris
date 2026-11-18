@@ -39,10 +39,8 @@ public static partial class GatewayGovernanceServiceExtensions
         // (runs with the GatewayOptions ValidateOnStart).
         services.AddSingleton<IRowFilterEvaluationAdminService, RowFilterEvaluationAdminService>();
 
-        // Issue #111: the only writer of dataset tags and catalog visibility tiers (REST, manifest and MCP admin tool).
+        // Issue #111: the only writer of dataset tags and discovery flags (REST, manifest and MCP admin tool).
         services.AddSingleton<IDatasetTagImportService, DatasetTagImportService>();
-        services.AddSingleton<CatalogVisibilityMetrics>();
-        services.AddSingleton<ICatalogVisibilityMetrics>(sp => sp.GetRequiredService<CatalogVisibilityMetrics>());
         services.AddSingleton<Autheris.Application.Catalog.Discovery.IDiscoveryArtifactStore>(sp => new DiscoveryArtifactStore(sp.GetRequiredService<Autheris.Application.Common.Interfaces.IGovernanceRepository>()));
         services.AddHostedService<CatalogGovernanceHostedService>();
         services.AddSingleton<IDatasetCatalogAdminService>(sp => new DatasetCatalogAdminService(
@@ -51,7 +49,6 @@ public static partial class GatewayGovernanceServiceExtensions
             sp.GetRequiredService<Autheris.Application.Audit.IAuditWriter>(),
             sp.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<GatewayOptions>>(),
             sp.GetService<TimeProvider>(),
-            sp.GetService<ICatalogVisibilityMetrics>(),
             sp.GetService<Autheris.Application.Common.Interfaces.IEventBus>()));
         services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<GatewayOptions>, Autheris.Application.Policy.RowFilterKeySetCacheOptionsValidator>();
         // Issue #107: the row-filter key-set cache runtime. The cache size and concurrency are read once (a size change needs a restart,

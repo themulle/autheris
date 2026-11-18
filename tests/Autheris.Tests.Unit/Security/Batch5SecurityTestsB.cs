@@ -216,9 +216,9 @@ public sealed class Batch5SecurityTestsB : IDisposable
             [
                 new TableColumn { ColumnName = "id", DataType = "int" },
                 new TableColumn { ColumnName = "name", DataType = "text" },
-                new TableColumn { ColumnName = "ssn", DataType = "text", IsSensitive = true }
+                new TableColumn { ColumnName = "ssn", DataType = "text" }
             ]
-        };
+        }.WithPii("ssn");
 
         // Permitted metadata has restricted columns (ssn is withheld)
         var restrictedMeta = new TableMetadata
@@ -407,7 +407,7 @@ public sealed class Batch5SecurityTestsB : IDisposable
         var ownershipRepo = Substitute.For<IDataOwnershipRepository>();
 
         metadataRepo.GetTableMetadataAsync(tableId, Arg.Any<CancellationToken>()).Returns(stored);
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([stored]);
+        metadataRepo.StubAllTables([stored]);
 
         TableMetadata? persisted = null;
         metadataRepo.UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>())

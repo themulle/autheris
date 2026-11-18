@@ -6,9 +6,6 @@ namespace Autheris.Infrastructure.Persistence.Dialects;
 /// </summary>
 public enum GovernanceTable
 {
-    AccessPolicies,
-    AccessPolicyGrantees,
-    AccessPolicySelectors,
     AccessProfiles,
     AccessProfileAssignments,
     ApprovalSteps,
@@ -33,7 +30,6 @@ public enum GovernanceTable
     ColumnCatalogSettings,
     ColumnClassifications,
     ColumnMaskOverrides,
-    ColumnMaskingRules,
     ConsentApprovingOwners,
     ConsentClassificationAccess,
     ConsentColumnRules,
@@ -67,8 +63,6 @@ public enum GovernanceTable
     ProfileAssignmentItems,
     RecertCampaigns,
     RecertItems,
-    RoleMembers,
-    Roles,
     SemanticManifests,
     TableCatalogSettings,
     TableColumns,
@@ -102,9 +96,6 @@ public static class GovernanceTableExtensions
 {
     public static string ToSqlName(this GovernanceTable table) => table switch
     {
-        GovernanceTable.AccessPolicies => "ACCESS_POLICIES",
-        GovernanceTable.AccessPolicyGrantees => "ACCESS_POLICY_GRANTEES",
-        GovernanceTable.AccessPolicySelectors => "ACCESS_POLICY_SELECTORS",
         GovernanceTable.AccessProfiles => "ACCESS_PROFILES",
         GovernanceTable.AccessProfileAssignments => "ACCESS_PROFILE_ASSIGNMENTS",
         GovernanceTable.ApprovalSteps => "APPROVAL_STEPS",
@@ -129,7 +120,6 @@ public static class GovernanceTableExtensions
         GovernanceTable.ColumnCatalogSettings => "COLUMN_CATALOG_SETTINGS",
         GovernanceTable.ColumnClassifications => "COLUMN_CLASSIFICATIONS",
         GovernanceTable.ColumnMaskOverrides => "COLUMN_MASK_OVERRIDES",
-        GovernanceTable.ColumnMaskingRules => "COLUMN_MASKING_RULES",
         GovernanceTable.ConsentApprovingOwners => "CONSENT_APPROVING_OWNERS",
         GovernanceTable.ConsentClassificationAccess => "CONSENT_CLASSIFICATION_ACCESS",
         GovernanceTable.ConsentColumnRules => "CONSENT_COLUMN_RULES",
@@ -163,8 +153,6 @@ public static class GovernanceTableExtensions
         GovernanceTable.ProfileAssignmentItems => "PROFILE_ASSIGNMENT_ITEMS",
         GovernanceTable.RecertCampaigns => "RECERT_CAMPAIGNS",
         GovernanceTable.RecertItems => "RECERT_ITEMS",
-        GovernanceTable.RoleMembers => "ROLE_MEMBERS",
-        GovernanceTable.Roles => "ROLES",
         GovernanceTable.SemanticManifests => "SEMANTIC_MANIFESTS",
         GovernanceTable.TableCatalogSettings => "TABLE_CATALOG_SETTINGS",
         GovernanceTable.TableColumns => "TABLE_COLUMNS",

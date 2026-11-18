@@ -50,7 +50,7 @@ internal sealed class TypedAggregateTestHost
     public async Task<IRequestExecutor> BuildAsync()
     {
         var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Tables.ToList());
+        metadataRepo.StubAllTables(Tables.ToList());
         var relationRepo = Substitute.For<ITableRelationRepository>();
         relationRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns([]);
 

@@ -79,7 +79,7 @@ public static class McpToolAnnotations
             McpDocTools.SearchDocs, McpDocTools.LookupErrorCode, McpDocTools.GetProcedure,
             McpDocTools.ListDocTopics, McpDocTools.ListApplications);
 
-        Add(Effect.Adds, McpAdminTools.PlanAccess, McpAdminTools.PlanRowFilterEvaluation, McpAdminTools.RegisterDatasource);
+        Add(Effect.Adds, McpDatasetTools.RequestAccess, McpAdminTools.PlanAccess, McpAdminTools.PlanRowFilterEvaluation, McpAdminTools.RegisterDatasource);
 
         Add(Effect.Overwrites,
             McpAdminTools.ApplyAccess, McpAdminTools.ApplyRowFilterEvaluation, McpAdminTools.SetDatasetState,

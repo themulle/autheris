@@ -9,6 +9,23 @@ public interface ITableMetadataRepository : Autheris.Application.Catalog.ICatalo
     Task<IReadOnlyList<TableMetadata>> GetAllTablesAsync(CancellationToken ct = default);
 
     /// <summary>
+    /// Resolves several tables for one request (one entry per requested identifier in request order, null = unknown or inactive).
+    /// Same per-table semantics as <see cref="GetTableMetadataAsync"/> (an unavailable table still throws); implementations
+    /// validate all cached entries with one batched epoch read. Default: sequential single lookups.
+    /// </summary>
+    async Task<IReadOnlyList<TableMetadata?>> GetTableMetadataBatchAsync(IReadOnlyList<TableIdentifier> tables, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(tables);
+        var result = new TableMetadata?[tables.Count];
+        for (var i = 0; i < tables.Count; i++)
+        {
+            result[i] = await GetTableMetadataAsync(tables[i], ct).ConfigureAwait(false);
+        }
+
+        return result;
+    }
+
+    /// <summary>
     /// Returns identifiers of tables whose persisted <c>POLICY_EPOCHS.change_version</c> is strictly greater than <paramref name="sinceVersion"/>.
     /// </summary>
     Task<IReadOnlyList<TableIdentifier>> GetTablesChangedSinceAsync(long sinceVersion, CancellationToken ct = default)
@@ -129,14 +146,10 @@ public interface ITableMetadataRepository : Autheris.Application.Catalog.ICatalo
         => throw new NotSupportedException($"{GetType().Name} does not implement row filter evaluation settings.");
 
     /// <summary>
-    /// Issue #111: the persisted catalog tags and visibility of an active table (missing settings row = Hidden), or null when the table is
-    /// unknown or inactive. <paramref name="strict"/> (admin read mode) throws on any store error instead of degrading to Hidden.
+    /// Issue #111: the persisted catalog tags and discovery settings of an active table, or null when the table is
+    /// unknown or inactive. <paramref name="strict"/> (admin read mode) throws on any store error instead of degrading to the secure value.
     /// </summary>
     Task<DatasetCatalogSettings?> GetDatasetCatalogSettingsAsync(TableIdentifier table, bool strict = true, CancellationToken ct = default)
-        => throw new NotSupportedException($"{GetType().Name} does not implement dataset catalog settings.");
-
-    /// <summary>Issue #111 (A-9): table counts per tier for <c>autheris_catalog_visibility_total</c>; Hidden is all tables minus the Summary and Full rows.</summary>
-    Task<DatasetVisibilityCounts> GetDatasetVisibilityCountsAsync(CancellationToken ct = default)
         => throw new NotSupportedException($"{GetType().Name} does not implement dataset catalog settings.");
 
     /// <summary>
@@ -150,11 +163,6 @@ public interface ITableMetadataRepository : Autheris.Application.Catalog.ICatalo
     /// <summary>Issue #111: adds and removes admin-source tags (a dbt row of a removed tag is kept) in one transaction. Null when the table is unknown or inactive.</summary>
     Task<DatasetCatalogChange?> ChangeDatasetTagsAsync(
         TableIdentifier table, IReadOnlyList<string> add, IReadOnlyList<string> remove, Sid actor, CancellationToken ct = default)
-        => throw new NotSupportedException($"{GetType().Name} does not implement dataset catalog settings.");
-
-    /// <summary>Issue #111: sets the visibility tier in one transaction with the before read. No epoch bump. Null when the table is unknown or inactive.</summary>
-    Task<DatasetCatalogChange?> SetDatasetVisibilityAsync(
-        TableIdentifier table, DatasetVisibility visibility, Sid actor, CancellationToken ct = default)
         => throw new NotSupportedException($"{GetType().Name} does not implement dataset catalog settings.");
 
     /// <summary>Issue #448: sets the minimum group size and non-personal table overlay in one transaction. Null when the table is unknown or inactive.</summary>
@@ -408,6 +416,16 @@ public interface IConsentApprovalRepository
         => Task.FromResult<IReadOnlyList<ConsentRequest>>(Array.Empty<ConsentRequest>());
     Task<IReadOnlyList<ConsentRequest>> GetPendingRequestsForApproverAsync(Sid approverSid, CancellationToken ct = default);
     Task<ConsentRequest> ApproveConsentRequestStepAsync(Guid requestId, Sid approverSid, CancellationToken ct = default);
+
+    /// <summary>
+    /// Records an approval step like <see cref="ApproveConsentRequestStepAsync(Guid, Sid, CancellationToken)"/>; when
+    /// <paramref name="requireSecondApprover"/> is set the request needs a second distinct approver regardless of the table's
+    /// four-eyes flag (per-classification Clear approved by a steward after the data owner).
+    /// </summary>
+    Task<ConsentRequest> ApproveConsentRequestStepAsync(Guid requestId, Sid approverSid, bool requireSecondApprover, CancellationToken ct = default)
+        => requireSecondApprover
+            ? throw new NotSupportedException($"{GetType().Name} does not implement mandatory second approvers.")
+            : ApproveConsentRequestStepAsync(requestId, approverSid, ct);
     Task<ConsentRequest> RejectConsentRequestAsync(Guid requestId, Sid approverSid, string reason, CancellationToken ct = default);
 
     /// <summary>
@@ -500,6 +518,22 @@ public interface IConsentApprovalRepository
         IReadOnlyList<ConsentColumnRule> columnRules,
         CancellationToken ct = default)
         => throw new NotSupportedException($"{GetType().Name} does not implement atomic approval.");
+
+    /// <summary>
+    /// Atomic approval like <see cref="ExecuteAtomicApprovalWithConsentAsync(Guid, ApprovalStep, Consent, IReadOnlyList{ConsentRowFilter}, IReadOnlyList{ConsentColumnRule}, CancellationToken)"/>;
+    /// when <paramref name="requireSecondApprover"/> is set the step only completes the request as the second distinct approval.
+    /// </summary>
+    Task<Consent> ExecuteAtomicApprovalWithConsentAsync(
+        Guid requestId,
+        ApprovalStep step,
+        Consent consent,
+        IReadOnlyList<ConsentRowFilter> rowFilters,
+        IReadOnlyList<ConsentColumnRule> columnRules,
+        bool requireSecondApprover,
+        CancellationToken ct = default)
+        => requireSecondApprover
+            ? throw new NotSupportedException($"{GetType().Name} does not implement mandatory second approvers.")
+            : ExecuteAtomicApprovalWithConsentAsync(requestId, step, consent, rowFilters, columnRules, ct);
 
     Task<ConsentRequestPage> QueryTenantConsentRequestsAsync(
         ConsentRequestPageQuery query,
