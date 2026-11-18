@@ -18,11 +18,6 @@ public sealed class CatalogSearchOptionsValidator : IValidateOptions<CatalogSear
             return ValidateOptionsResult.Fail("RefreshSeconds must be 0 (disabled) or at least 5 seconds.");
         }
 
-        if (!options.Enabled)
-        {
-            return ValidateOptionsResult.Success;
-        }
-
         if (options.EmbeddingProvider == CatalogEmbeddingProvider.LocalOnnx)
         {
             return ValidateOptionsResult.Fail("LocalOnnx embedding provider is not available in this build.");

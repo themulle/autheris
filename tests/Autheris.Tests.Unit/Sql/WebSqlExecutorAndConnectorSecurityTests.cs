@@ -1,0 +1,1260 @@
+#pragma warning disable CA2012
+
+namespace Autheris.Tests.Unit.Sql;
+
+using Autheris.Tests.Unit.Catalog;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Data;
+using System.Data.Common;
+using System.Diagnostics.CodeAnalysis;
+using System.IO;
+using System.Security;
+using System.Security.Claims;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using Autheris.Api.Endpoints;
+using Autheris.Application.DataSources.Connectors;
+using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Services;
+using Autheris.Application.Sql;
+using Autheris.Application.Sql.Interfaces;
+using Autheris.Application.Sql.Services;
+using Autheris.Domain.Common;
+using Autheris.Domain.Connectors;
+using Autheris.Domain.Exceptions;
+using Autheris.Domain.Interfaces;
+using Autheris.Domain.Model;
+using Autheris.Domain.Options;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using NSubstitute;
+using Shouldly;
+using Xunit;
+
+/// <summary>
+/// Regression tests for the WebSQL / SQL executor findings of the security review 2026-10-02
+/// (C-01, C-03, H-10, H-13, M-10, M-20).
+/// </summary>
+[Trait("Category", "Security")]
+public sealed class WebSqlExecutorAndConnectorSecurityTests
+{
+    private static Microsoft.Extensions.Hosting.IHostEnvironment CreateDevEnvironment()
+    {
+        var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
+        env.EnvironmentName.Returns("Development");
+        return env;
+    }
+
+    private const string Tenant = "tenant_a";
+    private const string HmacSecretRef = "GQL-HMAC-SECRET-KEY";
+    private const string HmacSecretValue = "super-secret-hmac-value-0123456789";
+
+    // =========================================================================
+    // Helpers
+    // =========================================================================
+
+    private static ClaimsPrincipal CreateUser(params string[] roles)
+    {
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.PrimarySid, "S-1-5-21-WEBSQL-USER"),
+            new("tenant_id", Tenant),
+            new("scp", "Sql.Write")
+        };
+        foreach (var role in roles)
+        {
+            claims.Add(new Claim(ClaimTypes.Role, role));
+        }
+
+        return Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(
+            new ClaimsPrincipal(new ClaimsIdentity(claims, "Test")));
+    }
+
+    private static TableMetadata CreateEmployeesMetadata(string? sourceName = null, string hmacRuleType = "REDACT")
+    {
+        return new TableMetadata
+        {
+            Identifier = new TableIdentifier(sourceName ?? "default", "public", "employees"),
+            Table = new Table
+            {
+                TableName = "employees",
+                SchemaName = "public",
+                SourceName = sourceName ?? string.Empty,
+                SourceType = "PostgreSQL"
+            },
+            Columns =
+            [
+                new TableColumn { ColumnName = "id", DataType = "int" },
+                new TableColumn { ColumnName = "name", DataType = "varchar" },
+                new TableColumn { ColumnName = "ssn", DataType = "varchar" },
+                new TableColumn { ColumnName = "region", DataType = "varchar" },
+                new TableColumn { ColumnName = "tenant_id", DataType = "varchar" }
+            ],
+            ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["ssn"] = new MaskingRule { RuleType = hmacRuleType }
+            }
+        }.WithPii("ssn");
+    }
+
+    private static TableMetadata CreateOrdersMetadata()
+    {
+        return new TableMetadata
+        {
+            Identifier = new TableIdentifier("default", "public", "orders"),
+            Table = new Table { TableName = "orders", SchemaName = "public", SourceType = "PostgreSQL" },
+            Columns =
+            [
+                new TableColumn { ColumnName = "id", DataType = "int" },
+                new TableColumn { ColumnName = "amount", DataType = "decimal" },
+                new TableColumn { ColumnName = "tenant_id", DataType = "varchar" }
+            ]
+        };
+    }
+
+    private static ITableMetadataRepository CreateRepository(params TableMetadata[] tables)
+    {
+        var repo = Substitute.For<ITableMetadataRepository>();
+        repo.StubTables(tables);
+        repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+            .Returns(ci =>
+            {
+                var id = ci.Arg<TableIdentifier>();
+                foreach (var t in tables)
+                {
+                    if (t.Identifier.Equals(id))
+                    {
+                        return Task.FromResult<TableMetadata?>(t);
+                    }
+                }
+                return Task.FromResult<TableMetadata?>(null);
+            });
+        return repo;
+    }
+
+    private static IConsentRepository CreateConsentRepository()
+    {
+        var repo = Substitute.For<IConsentRepository>();
+        repo.GetActiveConsentsForSubjectsAsync(
+                Arg.Any<IEnumerable<Sid>>(),
+                Arg.Any<TableIdentifier>(),
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<TenantId?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<Consent>>(Array.Empty<Consent>()));
+        return repo;
+    }
+
+    private static IConsentResolutionService CreateConsentResolution(Func<TableIdentifier, TableAccessDecision> decisionFactory)
+    {
+        var resolution = Substitute.For<IConsentResolutionService>();
+        resolution.ResolveAccess(
+                Arg.Any<Sid>(),
+                Arg.Any<IReadOnlySet<Sid>>(),
+                Arg.Any<IReadOnlySet<string>>(),
+                Arg.Any<TableIdentifier>(),
+                Arg.Any<IReadOnlyList<Consent>>(),
+                Arg.Any<DatabaseDialect>(), callerScopes: Arg.Any<IReadOnlySet<string>?>())
+            .Returns(ci => decisionFactory(ci.ArgAt<TableIdentifier>(3)));
+        return resolution;
+    }
+
+    private static TableAccessDecision UnconstrainedAllow(TableIdentifier table, string? rowFilter = null) =>
+        TableAccessDecision.Allowed(table, new Dictionary<string, ColumnAccessLevel>(), rowFilter, hasUnconstrainedColumnAllow: true);
+
+    private static IKeyVaultSecretProvider CreateSecretProvider()
+    {
+        var provider = Substitute.For<IKeyVaultSecretProvider>();
+        provider.GetSecretBytes(Arg.Any<string>()).Returns(Encoding.UTF8.GetBytes(HmacSecretValue));
+        return provider;
+    }
+
+    private static GatewayOptions CreateOptions(
+        bool enabled = true,
+        bool allowDml = false,
+        List<string>? allowedDataSources = null)
+    {
+        return new GatewayOptions
+        {
+            WebSql = new WebSqlOptions
+            {
+                Enabled = enabled,
+                AllowDml = allowDml,
+                AllowedDataSources = allowedDataSources ?? [],
+                DefaultMaxRows = 100,
+                MaxAllowedRows = 500
+            },
+            DataMasking = new DataMaskingOptions
+            {
+                HmacSecretKeyVaultRef = HmacSecretRef,
+                HmacKeyId = "key-2026-q4"
+            }
+        };
+    }
+
+    private static GovernedSqlExecutionService CreateService(
+        GatewayOptions? options = null,
+        ITableMetadataRepository? repository = null,
+        IConsentResolutionService? consentResolution = null,
+        IConsentRepository? consentRepository = null,
+        IKeyVaultSecretProvider? secretProvider = null,
+        IAuditLogRepository? auditLog = null,
+        bool withConsentServices = true,
+        bool permissiveWrite = true)
+    {
+        var repo = repository ?? CreateRepository(CreateEmployeesMetadata(), CreateOrdersMetadata());
+        var gatewayOptions = Options.Create(options ?? CreateOptions());
+        var effectiveConsentResolution = withConsentServices ? (consentResolution ?? CreateConsentResolution(t => UnconstrainedAllow(t))) : null;
+        var effectiveConsentRepo = withConsentServices ? (consentRepository ?? (permissiveWrite ? CreateWriteConsentRepository() : CreateConsentRepository())) : null;
+        var typedPolicies = global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(gatewayOptions, secretProvider);
+        var pdp = effectiveConsentRepo != null
+            ? new Autheris.Application.Policy.Pdp.AccessDecisionPoint(
+                gatewayOptions,
+                effectiveConsentResolution,
+                effectiveConsentRepo,
+                Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
+                typedPolicies: typedPolicies,
+                writeGrantEvaluator: new Autheris.Application.Policy.WriteGrants.WriteGrantEvaluator(effectiveConsentRepo, allowDeleteGrants: permissiveWrite))
+            : null;
+
+        return global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
+            gatewayOptions, executionGuard: GovernedTestSupport.Guard,
+            consentResolution: effectiveConsentResolution,
+            tableRepository: repo,
+            policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(repo), typedPolicies: typedPolicies,
+            auditLogRepository: auditLog ?? global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance,
+            connectionFactory: null,
+            clientIpResolver: null,
+            environment: CreateDevEnvironment(),
+            logger: NullLogger<GovernedSqlExecutionService>.Instance,
+            consentRepository: effectiveConsentRepo,
+            secretProvider: secretProvider,
+            sqlEngine: new TrinoSqlEngine.FastSqlEngine(),
+            accessDecisionPoint: pdp);
+    }
+
+    private static IConsentRepository CreateWriteConsentRepository()
+    {
+        var ordersMeta = CreateOrdersMetadata();
+        var consent = new Consent
+        {
+            TableIdentifier = ordersMeta.Identifier,
+            TenantId = new TenantId(Tenant),
+            GranteeType = GranteeType.User,
+            GranteeSid = new Sid("S-1-5-21-WEBSQL-USER"),
+            Effect = ConsentEffect.Allow,
+            ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
+            ValidTo = DateTimeOffset.UtcNow.AddDays(1),
+            WriteRules =
+            [
+                new WriteRule(Guid.NewGuid(), WriteOperation.Insert, ["id", "amount", "tenant_id"], WriteRowScope.AllRows),
+                new WriteRule(Guid.NewGuid(), WriteOperation.Update, ["id", "amount", "tenant_id"], WriteRowScope.AllRows),
+                new WriteRule(Guid.NewGuid(), WriteOperation.Delete, [], WriteRowScope.AllRows)
+            ]
+        };
+        return new SingleTableConsentRepository(ordersMeta.Identifier, consent);
+    }
+
+    // =========================================================================
+    // C-01: SQL functions must not bypass RLS / masking / ABAC
+    // =========================================================================
+
+    [Fact]
+    public async Task C01_TableLessQueryToXml_IsRejected()
+    {
+        var service = CreateService();
+
+        await Should.ThrowAsync<WebSqlPolicyException>(() =>
+            service.RewriteSqlAsync("SELECT query_to_xml('SELECT * FROM hr.salaries', true, false, '')", CreateUser(), new TenantId(Tenant)));
+    }
+
+    [Fact]
+    public async Task C01_TableLessLiteralSelect_IsRejected()
+    {
+        var service = CreateService();
+
+        await Should.ThrowAsync<WebSqlPolicyException>(() =>
+            service.RewriteSqlAsync("SELECT 1", CreateUser(), new TenantId(Tenant)));
+    }
+
+    [Fact]
+    public async Task C01_QueryToXmlNextToGovernedTable_IsRejectedByFunctionPolicy()
+    {
+        var service = CreateService();
+
+        await Should.ThrowAsync<WebSqlPolicyException>(() =>
+            service.RewriteSqlAsync("SELECT query_to_xml('SELECT * FROM hr.salaries', true, false, ''), id FROM employees", CreateUser(), new TenantId(Tenant)));
+    }
+
+    [Fact]
+    public async Task C01_GovernedTableSelect_StillWorks_WithTenantFilter()
+    {
+        var service = CreateService();
+
+        var compiled = await service.CompileAsync("SELECT id, name FROM employees", CreateUser(), new TenantId(Tenant));
+
+        compiled.ShouldBindTenant("tenant_a");
+        compiled.Sql.ShouldContain("LIMIT 100");
+    }
+
+    // =========================================================================
+    // C-03: Consent model, catalog masking, metadata requirement, data source allowlist
+    // =========================================================================
+
+    [Fact]
+    public void C03_WebSql_IsDisabledByDefault()
+    {
+        new GatewayOptions().WebSql.Enabled.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task C03_WebSqlDisabled_RejectsEveryStatement()
+    {
+        var service = CreateService(options: new GatewayOptions());
+
+        await Should.ThrowAsync<WebSqlPolicyException>(() =>
+            service.RewriteSqlAsync("SELECT id FROM employees", CreateUser(), new TenantId(Tenant)));
+    }
+
+    [Fact]
+    public async Task C03_ConsentDeny_IsEnforced()
+    {
+        var consent = CreateConsentResolution(t => TableAccessDecision.Denied(t, "no consent"));
+        var service = CreateService(consentResolution: consent);
+
+        var ex = await Should.ThrowAsync<WebSqlPolicyException>(() =>
+            service.RewriteSqlAsync("SELECT id FROM employees", CreateUser(), new TenantId(Tenant)));
+        ex.Message.ShouldContain("denied");
+        ex.Message.ShouldNotContain("no consent");
+    }
+
+    [Fact]
+    public async Task C03_MissingConsentServices_FailsClosed()
+    {
+        var service = CreateService(withConsentServices: false);
+
+        await Should.ThrowAsync<WebSqlPolicyException>(() =>
+            service.RewriteSqlAsync("SELECT id FROM employees", CreateUser(), new TenantId(Tenant)));
+    }
+
+    [Fact]
+    public async Task C03_ConsentRowFilter_IsPushedDown()
+    {
+        // A real consent: the production resolution turns its row filter into a typed policy (a text-only filter would be denied).
+        var employees = CreateEmployeesMetadata();
+        var consentRepository = Substitute.For<IConsentRepository>();
+        consentRepository.GetActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<Consent>>([new Consent
+            {
+                TableIdentifier = employees.Identifier,
+                TenantId = new TenantId(Tenant),
+                GranteeType = GranteeType.User,
+                GranteeSid = new Sid("S-1-5-21-WEBSQL-USER"),
+                Effect = ConsentEffect.Allow,
+                ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
+                ValidTo = DateTimeOffset.UtcNow.AddDays(1),
+                RowFilters = [new ConsentRowFilter { ColumnName = "region", Operator = "EQ", ValueType = "string", ValueJson = "\"EU\"" }],
+                ColumnRules = employees.Columns.Select(c => new ConsentColumnRule { ColumnName = c.ColumnName, AccessLevel = ColumnAccessLevel.Clear }).ToList()
+            }]));
+        var service = CreateService(consentResolution: new Autheris.Application.Services.ConsentResolutionService(), consentRepository: consentRepository);
+
+        var compiled = await service.CompileAsync("SELECT id, name FROM employees", CreateUser(), new TenantId(Tenant));
+
+        compiled.CountOfValue(TrinoSqlEngine.Ast.Emit.ParameterOrigin.Policy, "EU").ShouldBe(1);
+        compiled.Sql.ShouldNotContain("EU");
+        compiled.ShouldBindTenant("tenant_a");
+    }
+
+    [Fact]
+    public async Task C03_UnconstrainedConsent_DoesNotUnmaskSensitiveCatalogColumn()
+    {
+        var service = CreateService();
+
+        var compiled = await service.CompileAsync("SELECT id, ssn FROM employees", CreateUser(), new TenantId(Tenant));
+
+        compiled.ValuesOf(TrinoSqlEngine.Ast.Emit.ParameterOrigin.Mask).ShouldContain("***");
+    }
+
+    [Fact]
+    public async Task C03_ExplicitConsentClear_UnmasksSensitiveColumn()
+    {
+        var consent = CreateConsentResolution(t => TableAccessDecision.Allowed(t, new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["id"] = ColumnAccessLevel.Clear,
+            ["name"] = ColumnAccessLevel.Clear,
+            ["ssn"] = ColumnAccessLevel.Clear,
+            ["region"] = ColumnAccessLevel.Clear,
+            ["tenant_id"] = ColumnAccessLevel.Clear
+        }));
+        var service = CreateService(consentResolution: consent);
+
+        var compiled = await service.CompileAsync("SELECT id, ssn FROM employees", CreateUser(), new TenantId(Tenant));
+
+        compiled.ValuesOf(TrinoSqlEngine.Ast.Emit.ParameterOrigin.Mask).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task C03_TableWithoutCatalogMetadata_IsRejected()
+    {
+        var service = CreateService();
+
+        var ex = await Should.ThrowAsync<WebSqlPolicyException>(() =>
+            service.RewriteSqlAsync("SELECT * FROM hr_salaries", CreateUser(), new TenantId(Tenant)));
+        ex.Message.ShouldContain("not registered");
+    }
+
+    [Fact]
+    public async Task C03_DataSourceNotOnAllowlist_IsRejected()
+    {
+        var service = CreateService();
+
+        await Should.ThrowAsync<WebSqlPolicyException>(() =>
+            service.ExecuteGovernedQueryAsync(
+                new GovernedSqlQueryRequest("SELECT id FROM employees", DataSourceName: "hr_prod"),
+                CreateUser(),
+                new TenantId(Tenant),
+                (_, _) => Task.CompletedTask));
+    }
+
+    [Fact]
+    public async Task C03_DataSourceOnAllowlist_IsAccepted()
+    {
+        var service = CreateService(options: CreateOptions(allowedDataSources: ["analytics"]));
+        bool rowWriterCalled = false;
+
+        await service.ExecuteGovernedQueryAsync(
+            new GovernedSqlQueryRequest("SELECT id FROM employees", DataSourceName: "analytics"),
+            CreateUser(),
+            new TenantId(Tenant),
+            (_, _) =>
+            {
+                rowWriterCalled = true;
+                return Task.CompletedTask;
+            });
+
+        rowWriterCalled.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task C03_TableBoundToDifferentDataSource_IsRejected()
+    {
+        var repo = CreateRepository(CreateEmployeesMetadata(sourceName: "hr_db"));
+        var service = CreateService(repository: repo);
+
+        await Should.ThrowAsync<WebSqlPolicyException>(() =>
+            service.RewriteSqlAsync("SELECT id FROM employees", CreateUser(), new TenantId(Tenant)));
+    }
+
+    // =========================================================================
+    // H-10: Filter oracle on masked / sensitive columns
+    // =========================================================================
+
+    [Fact]
+    public void H10_EffectiveAccess_SensitiveColumnWithoutExplicitClear_IsMask()
+    {
+        var metadata = CreateEmployeesMetadata();
+        var decision = UnconstrainedAllow(metadata.Identifier);
+
+        decision.GetEffectiveColumnAccess("ssn", metadata).ShouldBe(ColumnAccessLevel.Mask);
+        decision.GetEffectiveColumnAccess("name", metadata).ShouldBe(ColumnAccessLevel.Clear);
+    }
+
+    [Fact]
+    public void H10_EffectiveAccess_ExplicitClearAndDeny_AreRespected()
+    {
+        var metadata = CreateEmployeesMetadata();
+        var decision = TableAccessDecision.Allowed(metadata.Identifier, new Dictionary<string, ColumnAccessLevel>
+        {
+            ["ssn"] = ColumnAccessLevel.Clear,
+            ["name"] = ColumnAccessLevel.Deny
+        });
+
+        decision.GetEffectiveColumnAccess("ssn", metadata).ShouldBe(ColumnAccessLevel.Clear);
+        decision.GetEffectiveColumnAccess("name", metadata).ShouldBe(ColumnAccessLevel.Deny);
+        decision.GetEffectiveColumnAccess("region", metadata).ShouldBe(ColumnAccessLevel.Deny);
+    }
+
+    [Fact]
+    public async Task H10_SqlExecutor_FilterOnSensitiveColumn_WithUnconstrainedAllow_IsRejected()
+    {
+        var metadata = CreateEmployeesMetadata();
+        var principal = CreateUser();
+        var context = new DataSourceExecutionContext(
+            SourceName: "hr_db",
+            Metadata: metadata,
+            Principal: principal,
+            AccessDecision: UnconstrainedAllow(metadata.Identifier),
+            Arguments: new Dictionary<string, object?> { ["ssn"] = "123-45-6789" },
+            RequestedFields: ["id", "name"]);
+
+        var executor = new SqlTableReadExecutor(
+            new Autheris.Application.DataSources.Services.GovernedTableReadPlanner(),
+            () => Substitute.For<Autheris.Application.Sql.Interfaces.IGovernedSqlExecutionService>());
+
+        var ex = await Should.ThrowAsync<ArgumentException>(() => executor.ExecuteAsync(context));
+        ex.Message.ShouldContain("ssn");
+    }
+
+    [Fact]
+    public async Task H10_SqlExecutor_FilterOnClearColumn_StillWorks()
+    {
+        var metadata = CreateEmployeesMetadata();
+        var context = new DataSourceExecutionContext(
+            SourceName: "hr_db",
+            Metadata: metadata,
+            Principal: CreateUser(),
+            AccessDecision: UnconstrainedAllow(metadata.Identifier),
+            Arguments: new Dictionary<string, object?> { ["name"] = "Alice" },
+            RequestedFields: ["id", "name"]);
+
+        var governed = Substitute.For<Autheris.Application.Sql.Interfaces.IGovernedSqlExecutionService>();
+        governed.ExecuteQueryBufferedAsync(default!, default!, default, default)
+            .ReturnsForAnyArgs(new Autheris.Application.Sql.Interfaces.GovernedSqlResult("", [], [], 0, 0));
+        var executor = new SqlTableReadExecutor(new Autheris.Application.DataSources.Services.GovernedTableReadPlanner(), () => governed);
+
+        var rows = await executor.ExecuteAsync(context);
+        rows.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public void H10_ConnectorEvaluator_FilterOnMaskingRuleColumn_IsRejected()
+    {
+        var metadata = CreateEmployeesMetadata();
+        var session = new ConnectorSessionContext(
+            Principal: CreateUser(),
+            Tenant: new TenantId(Tenant),
+            AccessDecision: UnconstrainedAllow(metadata.Identifier),
+            ProjectedColumns: ["id"],
+            Arguments: new Dictionary<string, object?> { ["ssn"] = "123-45-6789" });
+
+        Should.Throw<SecurityException>(() => ConnectorSecurityPolicyEvaluator.EnforceSecurityPolicy(session, metadata));
+    }
+
+    [Fact]
+    public void H10_ConnectorEvaluator_FilterOnExplicitlyClearSensitiveColumn_IsAllowed()
+    {
+        var metadata = CreateEmployeesMetadata();
+        var decision = TableAccessDecision.Allowed(metadata.Identifier, new Dictionary<string, ColumnAccessLevel>
+        {
+            ["id"] = ColumnAccessLevel.Clear,
+            ["ssn"] = ColumnAccessLevel.Clear
+        });
+        var session = new ConnectorSessionContext(
+            Principal: CreateUser(),
+            Tenant: new TenantId(Tenant),
+            AccessDecision: decision,
+            ProjectedColumns: ["id"],
+            Arguments: new Dictionary<string, object?> { ["ssn"] = "123-45-6789" });
+
+        Should.NotThrow(() => ConnectorSecurityPolicyEvaluator.EnforceSecurityPolicy(session, metadata));
+    }
+
+    // =========================================================================
+    // H-13: No secret name as salt, keyed HMAC with the resolved secret, never in SQL text / audit
+    // =========================================================================
+
+    [Fact]
+    public async Task H13_WebSqlHmac_UsesParameterizedKey_AndNeverEmbedsSecretOrSecretName()
+    {
+        var repo = CreateRepository(CreateEmployeesMetadata(hmacRuleType: "HMAC"));
+        var service = CreateService(repository: repo, secretProvider: CreateSecretProvider());
+
+        var compiled = await service.CompileAsync("SELECT id, ssn FROM employees", CreateUser(), new TenantId(Tenant));
+
+        // PostgreSQL: the HMAC runs in the database with a bound, HKDF-derived key; the key and its reference are never text.
+        compiled.Sql.ShouldContain("HMAC(", Case.Insensitive);
+        compiled.Parameters.Count(p => p.Origin == TrinoSqlEngine.Ast.Emit.ParameterOrigin.Mask).ShouldBeGreaterThan(0);
+        compiled.Sql.ShouldNotContain(HmacSecretRef);
+        compiled.Sql.ShouldNotContain(HmacSecretValue);
+        compiled.Sql.ShouldNotContain("DIGEST(");
+        compiled.Parameters.Any(p => p.Value is string text && text.Contains(HmacSecretValue)).ShouldBeFalse();
+        compiled.Parameters.Any(p => p.Value is byte[] raw && Encoding.UTF8.GetString(raw).Contains(HmacSecretValue)).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task H13_WebSqlAudit_DoesNotContainSecretOrSecretName()
+    {
+        var repo = CreateRepository(CreateEmployeesMetadata(hmacRuleType: "HMAC"));
+        var audit = Substitute.For<IAuditLogRepository>();
+        AuditLogEntry? captured = null;
+        audit.RecordAuditEventAsync(Arg.Do<AuditLogEntry>(e => captured = e), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+
+        var service = CreateService(repository: repo, secretProvider: CreateSecretProvider(), auditLog: audit);
+        string? syntheticQueryEcho = null;
+
+        await service.ExecuteGovernedQueryAsync(
+            new GovernedSqlQueryRequest("SELECT id, ssn FROM employees"),
+            CreateUser(),
+            new TenantId(Tenant),
+            async (reader, token) =>
+            {
+                if (await reader.ReadAsync(token))
+                {
+                    syntheticQueryEcho = reader.GetValue(1)?.ToString();
+                }
+            });
+
+        captured.ShouldNotBeNull();
+        captured.DetailsJson.ShouldNotContain(HmacSecretRef);
+        captured.DetailsJson.ShouldNotContain(HmacSecretValue);
+        syntheticQueryEcho.ShouldNotBeNull();
+        syntheticQueryEcho.ShouldNotContain(HmacSecretValue);
+    }
+
+    [Fact]
+    public async Task H13_WithoutResolvableSecret_HmacColumnIsRedacted_NotHashedUnkeyed()
+    {
+        var repo = CreateRepository(CreateEmployeesMetadata(hmacRuleType: "HMAC"));
+        var service = CreateService(repository: repo, secretProvider: null);
+
+        var compiled = await service.CompileAsync("SELECT id, ssn FROM employees", CreateUser(), new TenantId(Tenant));
+
+        compiled.ValuesOf(TrinoSqlEngine.Ast.Emit.ParameterOrigin.Mask).ShouldContain("***");
+        compiled.Sql.ShouldNotContain("HMAC(", Case.Insensitive);
+        compiled.Sql.ShouldNotContain(HmacSecretRef);
+    }
+
+    [Fact]
+    public async Task H13_ReservedInternalParameterName_InSqlOrParameters_IsRejected()
+    {
+        var service = CreateService(secretProvider: CreateSecretProvider());
+
+        await Should.ThrowAsync<WebSqlPolicyException>(() =>
+            service.RewriteSqlAsync("SELECT id, '__gql_mk0' FROM employees", CreateUser(), new TenantId(Tenant)));
+
+        await Should.ThrowAsync<WebSqlPolicyException>(() =>
+            service.ExecuteGovernedQueryAsync(
+                new GovernedSqlQueryRequest("SELECT id FROM employees", new Dictionary<string, object?> { ["@__gql_mk0"] = "attacker-key" }),
+                CreateUser(),
+                new TenantId(Tenant),
+                (_, _) => Task.CompletedTask));
+    }
+
+    // =========================================================================
+    // M-20: DML authorization and WITH CHECK against the caller's tenant
+    // =========================================================================
+
+    [Fact]
+    public async Task M20_Dml_WithoutWriteDecision_IsRejected_ForAnyRole()
+    {
+        var service = CreateService(options: CreateOptions(allowDml: true), permissiveWrite: false);
+
+        await Should.ThrowAsync<WebSqlTableDeniedException>(() =>
+            service.RewriteSqlAsync("DELETE FROM orders WHERE id = 1", CreateUser("WebSqlWriter"), new TenantId(Tenant)));
+    }
+
+    [Fact]
+    public async Task M20_Insert_IntoLibraryDefaultTenant42_IsRejected()
+    {
+        var service = CreateService(options: CreateOptions(allowDml: true));
+
+        // X1: a literal tenant value that is not the caller's is rejected by the compiler (typed SecurityException, SQL_POLICY_VIOLATION).
+        var ex = await Should.ThrowAsync<System.Security.SecurityException>(() =>
+            service.RewriteSqlAsync("INSERT INTO orders (id, amount, tenant_id) VALUES (1, 10, '42')", CreateUser("WebSqlWriter"), new TenantId(Tenant)));
+        Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(ex, out var mapped).ShouldBeTrue();
+        mapped.Code.ShouldBe("SQL_POLICY_VIOLATION");
+    }
+
+    [Fact]
+    public async Task M20_Insert_WithoutTenantColumn_IsRejected()
+    {
+        var service = CreateService(options: CreateOptions(allowDml: true));
+
+        var ex = await Should.ThrowAsync<System.Security.SecurityException>(() =>
+            service.RewriteSqlAsync("INSERT INTO orders (id, amount) VALUES (1, 10)", CreateUser("WebSqlWriter"), new TenantId(Tenant)));
+        Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(ex, out var mapped).ShouldBeTrue();
+        mapped.Code.ShouldBe("SQL_POLICY_VIOLATION");
+    }
+
+    [Fact]
+    public async Task M20_Insert_IntoOwnTenant_WithWriterRole_IsAccepted()
+    {
+        var service = CreateService(options: CreateOptions(allowDml: true));
+
+        var compiled = await service.CompileAsync("INSERT INTO orders (id, amount, tenant_id) VALUES (1, 10, 'tenant_a')", CreateUser("WebSqlWriter"), new TenantId(Tenant));
+
+        compiled.Sql.ShouldContain("INSERT");
+        compiled.StatementClass.ShouldBe(TrinoSqlEngine.Ast.Emit.SqlStatementClass.Insert);
+    }
+
+    // =========================================================================
+    // M-10: No exception / database messages to the client
+    // =========================================================================
+
+    private static async Task<(int Status, string Body)> InvokeEndpointAsync(Exception toThrow)
+    {
+        using var services = new ServiceCollection().BuildServiceProvider();
+        var context = new DefaultHttpContext
+        {
+            RequestServices = services,
+            TraceIdentifier = "trace-websql-42",
+            User = CreateUser()
+        };
+        context.Request.ContentType = "text/plain";
+        context.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes("SELECT id FROM employees"));
+        context.Response.Body = new MemoryStream();
+
+        await WebSqlEndpoints.HandleWebSqlRequest(
+            context,
+            new ThrowingSqlService(toThrow),
+            Options.Create(CreateOptions()),
+            NullLoggerFactory.Instance);
+
+        context.Response.Body.Seek(0, SeekOrigin.Begin);
+        using var reader = new StreamReader(context.Response.Body);
+        return (context.Response.StatusCode, await reader.ReadToEndAsync());
+    }
+
+    [Fact]
+    public async Task M10_DatabaseError_IsNotEchoedToClient()
+    {
+        var (status, body) = await InvokeEndpointAsync(
+            new InvalidOperationException("relation \"hr.salaries\" does not exist on server db-prod-01"));
+
+        status.ShouldBe(StatusCodes.Status500InternalServerError);
+        body.ShouldNotContain("hr.salaries");
+        body.ShouldNotContain("db-prod-01");
+        body.ShouldContain("trace-websql-42");
+    }
+
+    [Fact]
+    public async Task M10_UncuratedSecurityException_ReturnsGenericForbidden()
+    {
+        var (status, body) = await InvokeEndpointAsync(new SecurityException("internal policy rule p42 for subject S-1-5-21-ADMIN"));
+
+        status.ShouldBe(StatusCodes.Status403Forbidden);
+        body.ShouldNotContain("p42");
+        body.ShouldContain("trace-websql-42");
+    }
+
+    [Fact]
+    public async Task M10_CuratedPolicyException_IsReturnedWith403()
+    {
+        var (status, body) = await InvokeEndpointAsync(new WebSqlPolicyException("DDL statements are strictly forbidden in WebSQL."));
+
+        // WP-X0a (SEC-X1-01): the message of the exception is never returned; the body carries the stable code and the fixed message.
+        status.ShouldBe(StatusCodes.Status403Forbidden);
+        body.ShouldNotContain("DDL statements");
+        body.ShouldContain("SQL_POLICY_VIOLATION");
+    }
+
+    [Fact]
+    public async Task M10_ArgumentException_ReturnsGenericBadRequest()
+    {
+        var (status, body) = await InvokeEndpointAsync(new ArgumentException("line 1:7: mismatched input near 'secret_table'"));
+
+        status.ShouldBe(StatusCodes.Status400BadRequest);
+        body.ShouldNotContain("secret_table");
+    }
+
+    private sealed class ThrowingSqlService(Exception toThrow) : IGovernedSqlExecutionService
+    {
+        public Task ExecuteGovernedQueryAsync(GovernedSqlQueryRequest request, ClaimsPrincipal user, TenantId tenantId, Func<DbDataReader, CancellationToken, Task> rowWriter, CancellationToken ct = default)
+            => Task.FromException(toThrow);
+
+        public Task<GovernedSqlResult> ExecuteQueryBufferedAsync(GovernedSqlQueryRequest request, ClaimsPrincipal user, TenantId tenantId, CancellationToken ct = default)
+            => Task.FromException<GovernedSqlResult>(toThrow);
+
+        public Task ValidateAsync(string rawSql, ClaimsPrincipal user, TenantId tenantId, CancellationToken ct = default)
+            => Task.FromException(toThrow);
+    }
+
+    // =========================================================================
+    // D-1: WebSQL must dispose DataReader BEFORE committing the transaction
+    // =========================================================================
+
+    [Fact]
+    public async Task D01_ExecuteGovernedQuery_WhenTransactionActive_DisposesReaderBeforeCommit()
+    {
+        var options = new GatewayOptions
+        {
+            WebSql = new WebSqlOptions
+            {
+                Enabled = true,
+                AllowedDataSources = ["pg_ds"],
+                DefaultMaxRows = 100,
+                MaxAllowedRows = 500
+            },
+            DataSources = new SqlDataSourceOptions
+            {
+                Connections = new Dictionary<string, DataSourceConnectionOptions>
+                {
+                    ["pg_ds"] = new()
+                    {
+                        ConnectionString = "Host=localhost;Database=test",
+                        Provider = "PostgreSQL"
+                    }
+                }
+            }
+        };
+
+        var fakeConnection = new StrictDriverDbConnection();
+        var connectionFactory = Substitute.For<ISqlConnectionFactory>();
+        connectionFactory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<DbConnection>(fakeConnection));
+
+        var employeesMeta = CreateEmployeesMetadata("pg_ds");
+        var tableRepo = Substitute.For<ITableMetadataRepository>();
+        tableRepo.StubTables([employeesMeta]);
+        tableRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+            .Returns(ci => ci.Arg<TableIdentifier>().TableName == "employees" ? Task.FromResult<TableMetadata?>(employeesMeta) : Task.FromResult<TableMetadata?>(null));
+
+        var service = global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
+            Options.Create(options), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard,
+            consentResolution: CreateConsentResolution(t => UnconstrainedAllow(t)),
+            consentRepository: CreateConsentRepository(),
+            tableRepository: tableRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(tableRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
+            connectionFactory: connectionFactory,
+            logger: NullLogger<GovernedSqlExecutionService>.Instance);
+
+        var request = new GovernedSqlQueryRequest("SELECT id, name FROM public.employees", DataSourceName: "pg_ds");
+
+        bool rowsObserved = false;
+
+        // Act
+        await service.ExecuteGovernedQueryAsync(
+            request,
+            CreateUser(),
+            new TenantId(Tenant),
+            async (reader, ct) =>
+            {
+                while (await reader.ReadAsync(ct))
+                {
+                    rowsObserved = true;
+                }
+            });
+
+        // Assert: user reads always roll back the read-only transaction after disposing the reader.
+        rowsObserved.ShouldBeTrue();
+        fakeConnection.CurrentTransaction.ShouldNotBeNull();
+        fakeConnection.CurrentTransaction.WasRolledBack.ShouldBeTrue();
+        fakeConnection.CurrentTransaction.WasDisposed.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task D01_ExecuteGovernedQuery_WhenStreamingFails_DisposesReaderBeforeRollback()
+    {
+        var options = new GatewayOptions
+        {
+            WebSql = new WebSqlOptions
+            {
+                Enabled = true,
+                AllowedDataSources = ["pg_ds"],
+                DefaultMaxRows = 100,
+                MaxAllowedRows = 500
+            },
+            DataSources = new SqlDataSourceOptions
+            {
+                Connections = new Dictionary<string, DataSourceConnectionOptions>
+                {
+                    ["pg_ds"] = new()
+                    {
+                        ConnectionString = "Host=localhost;Database=test",
+                        Provider = "PostgreSQL"
+                    }
+                }
+            }
+        };
+
+        var fakeConnection = new StrictDriverDbConnection();
+        var connectionFactory = Substitute.For<ISqlConnectionFactory>();
+        connectionFactory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<DbConnection>(fakeConnection));
+
+        var employeesMeta = CreateEmployeesMetadata("pg_ds");
+        var tableRepo = Substitute.For<ITableMetadataRepository>();
+        tableRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+            .Returns(ci => ci.Arg<TableIdentifier>().TableName == "employees" ? Task.FromResult<TableMetadata?>(employeesMeta) : Task.FromResult<TableMetadata?>(null));
+
+        var service = global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
+            Options.Create(options), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard,
+            consentResolution: CreateConsentResolution(t => UnconstrainedAllow(t)),
+            consentRepository: CreateConsentRepository(),
+            tableRepository: tableRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(tableRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
+            connectionFactory: connectionFactory,
+            logger: NullLogger<GovernedSqlExecutionService>.Instance);
+
+        var request = new GovernedSqlQueryRequest("SELECT id, name FROM public.employees", DataSourceName: "pg_ds");
+
+        // Act & Assert: Exception during streaming must trigger rollback after reader is disposed
+        await Should.ThrowAsync<InvalidDataException>(async () =>
+        {
+            await service.ExecuteGovernedQueryAsync(
+                request,
+                CreateUser(),
+                new TenantId(Tenant),
+                async (reader, ct) =>
+                {
+                    if (await reader.ReadAsync(ct))
+                    {
+                        throw new InvalidDataException("Simulated streaming failure");
+                    }
+                });
+        });
+
+        fakeConnection.CurrentTransaction.ShouldNotBeNull();
+        fakeConnection.CurrentTransaction.WasRolledBack.ShouldBeTrue();
+        fakeConnection.CurrentTransaction.WasDisposed.ShouldBeTrue();
+    }
+
+    private sealed class StrictDriverDbConnection : DbConnection
+    {
+        public StrictDriverDbTransaction? CurrentTransaction { get; private set; }
+
+        protected override DbTransaction BeginDbTransaction(IsolationLevel isolationLevel)
+        {
+            CurrentTransaction = new StrictDriverDbTransaction(this);
+            return CurrentTransaction;
+        }
+
+        public override void ChangeDatabase(string databaseName) { }
+        public override void Close() { }
+        [AllowNull] public override string ConnectionString { get; set; } = "Host=localhost;Database=test";
+        public override string Database => "test";
+        public override ConnectionState State => ConnectionState.Open;
+        public override string DataSource => "localhost";
+        public override string ServerVersion => "16.0";
+        public override void Open() { }
+
+        protected override DbCommand CreateDbCommand() =>
+            new StrictDriverDbCommand(new Autheris.Tests.Unit.FakeDbCommand(), this);
+    }
+
+    private sealed class StrictDriverDbTransaction : DbTransaction
+    {
+        public StrictDriverDbDataReader? ActiveReader { get; set; }
+        public bool WasCommitted { get; private set; }
+        public bool WasRolledBack { get; private set; }
+        public bool WasDisposed { get; private set; }
+        private readonly DbConnection _connection;
+
+        public StrictDriverDbTransaction(DbConnection connection) => _connection = connection;
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) WasDisposed = true;
+            base.Dispose(disposing);
+        }
+
+        public override async ValueTask DisposeAsync()
+        {
+            WasDisposed = true;
+            await base.DisposeAsync();
+        }
+
+        public override void Commit()
+        {
+            if (ActiveReader != null && !ActiveReader.IsClosed)
+            {
+                throw new InvalidOperationException("Npgsql driver error: An operation is already in progress. DataReader is still open on connection during commit.");
+            }
+            WasCommitted = true;
+        }
+
+        public override Task CommitAsync(CancellationToken cancellationToken = default)
+        {
+            Commit();
+            return Task.CompletedTask;
+        }
+
+        public override void Rollback()
+        {
+            if (ActiveReader != null && !ActiveReader.IsClosed)
+            {
+                throw new InvalidOperationException("Npgsql driver error: An operation is already in progress. DataReader is still open on connection during rollback.");
+            }
+            WasRolledBack = true;
+        }
+
+        public override Task RollbackAsync(CancellationToken cancellationToken = default)
+        {
+            Rollback();
+            return Task.CompletedTask;
+        }
+
+        public override IsolationLevel IsolationLevel => IsolationLevel.ReadCommitted;
+        protected override DbConnection DbConnection => _connection;
+    }
+
+    private sealed class StrictDriverDbCommand : DbCommand
+    {
+        private readonly DbCommand _inner;
+        private readonly StrictDriverDbConnection _conn;
+
+        public StrictDriverDbCommand(DbCommand inner, StrictDriverDbConnection conn)
+        {
+            _inner = inner;
+            _conn = conn;
+        }
+
+        protected override DbDataReader ExecuteDbDataReader(CommandBehavior behavior)
+        {
+            var table = new System.Data.DataTable();
+            table.Columns.Add("id", typeof(int));
+            table.Columns.Add("name", typeof(string));
+            table.Rows.Add(1, "Alice");
+            var reader = table.CreateDataReader();
+            return new StrictDriverDbDataReader(reader, _conn.CurrentTransaction!);
+        }
+
+        protected override Task<DbDataReader> ExecuteDbDataReaderAsync(CommandBehavior behavior, CancellationToken cancellationToken)
+        {
+            return Task.FromResult<DbDataReader>(ExecuteDbDataReader(behavior));
+        }
+
+        public override void Cancel() => _inner.Cancel();
+        public override int ExecuteNonQuery() => 1;
+        public override Task<int> ExecuteNonQueryAsync(CancellationToken cancellationToken) => Task.FromResult(1);
+        public override object? ExecuteScalar() => 1;
+        public override Task<object?> ExecuteScalarAsync(CancellationToken cancellationToken) => Task.FromResult<object?>(1);
+        public override void Prepare() => _inner.Prepare();
+        [AllowNull] public override string CommandText { get => _inner.CommandText; set => _inner.CommandText = value ?? string.Empty; }
+        public override int CommandTimeout { get => _inner.CommandTimeout; set => _inner.CommandTimeout = value; }
+        public override CommandType CommandType { get => _inner.CommandType; set => _inner.CommandType = value; }
+        protected override DbConnection? DbConnection { get => _conn; set { } }
+        protected override DbParameterCollection DbParameterCollection => _inner.Parameters;
+        protected override DbTransaction? DbTransaction { get => _conn.CurrentTransaction; set { } }
+        public override bool DesignTimeVisible { get => false; set { } }
+        public override UpdateRowSource UpdatedRowSource { get => _inner.UpdatedRowSource; set => _inner.UpdatedRowSource = value; }
+        protected override DbParameter CreateDbParameter() => _inner.CreateParameter();
+    }
+
+    private sealed class StrictDriverDbDataReader : DbDataReader
+    {
+        private readonly DbDataReader _inner;
+        private readonly StrictDriverDbTransaction _tx;
+        private bool _isClosed;
+
+        public StrictDriverDbDataReader(DbDataReader inner, StrictDriverDbTransaction tx)
+        {
+            _inner = inner;
+            _tx = tx;
+            _tx.ActiveReader = this;
+        }
+
+        public override bool IsClosed => _isClosed;
+
+        public override void Close()
+        {
+            _isClosed = true;
+            _inner.Close();
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                _isClosed = true;
+                _inner.Dispose();
+            }
+            base.Dispose(disposing);
+        }
+
+        public override async ValueTask DisposeAsync()
+        {
+            _isClosed = true;
+            await _inner.DisposeAsync();
+            await base.DisposeAsync();
+        }
+
+        public override int FieldCount => _inner.FieldCount;
+        public override bool HasRows => _inner.HasRows;
+        public override int RecordsAffected => _inner.RecordsAffected;
+        public override int Depth => _inner.Depth;
+        public override object this[int ordinal] => _inner[ordinal];
+        public override object this[string name] => _inner[name];
+        public override bool GetBoolean(int ordinal) => _inner.GetBoolean(ordinal);
+        public override byte GetByte(int ordinal) => _inner.GetByte(ordinal);
+        public override long GetBytes(int ordinal, long dataOffset, byte[]? buffer, int bufferOffset, int length) => _inner.GetBytes(ordinal, dataOffset, buffer, bufferOffset, length);
+        public override char GetChar(int ordinal) => _inner.GetChar(ordinal);
+        public override long GetChars(int ordinal, long dataOffset, char[]? buffer, int bufferOffset, int length) => _inner.GetChars(ordinal, dataOffset, buffer, bufferOffset, length);
+        public override string GetDataTypeName(int ordinal) => _inner.GetDataTypeName(ordinal);
+        public override DateTime GetDateTime(int ordinal) => _inner.GetDateTime(ordinal);
+        public override decimal GetDecimal(int ordinal) => _inner.GetDecimal(ordinal);
+        public override double GetDouble(int ordinal) => _inner.GetDouble(ordinal);
+        public override Type GetFieldType(int ordinal) => _inner.GetFieldType(ordinal);
+        public override float GetFloat(int ordinal) => _inner.GetFloat(ordinal);
+        public override Guid GetGuid(int ordinal) => _inner.GetGuid(ordinal);
+        public override short GetInt16(int ordinal) => _inner.GetInt16(ordinal);
+        public override int GetInt32(int ordinal) => _inner.GetInt32(ordinal);
+        public override long GetInt64(int ordinal) => _inner.GetInt64(ordinal);
+        public override string GetName(int ordinal) => _inner.GetName(ordinal);
+        public override int GetOrdinal(string name) => _inner.GetOrdinal(name);
+        public override string GetString(int ordinal) => _inner.GetString(ordinal);
+        public override object GetValue(int ordinal) => _inner.GetValue(ordinal);
+        public override int GetValues(object[] values) => _inner.GetValues(values);
+        public override bool IsDBNull(int ordinal) => _inner.IsDBNull(ordinal);
+        public override bool NextResult() => _inner.NextResult();
+        public override bool Read() => _inner.Read();
+        public override Task<bool> ReadAsync(CancellationToken cancellationToken) => _inner.ReadAsync(cancellationToken);
+        public override System.Collections.IEnumerator GetEnumerator() => _inner.GetEnumerator();
+    }
+
+    #region S-2 WebSql Error Mapping Tests
+
+    [Fact]
+    public async Task WriteWebSqlErrorAsync_GatewayNotImplementedException_Returns501_WithGenericMessage()
+    {
+        var context = new DefaultHttpContext();
+        context.Response.Body = new MemoryStream();
+        context.TraceIdentifier = "trace-501";
+
+        var ex = new GatewayNotImplementedException("Confidential internal connection string missing for ds 'secret'");
+        await WebSqlEndpoints.WriteWebSqlErrorAsync(context, ex, NullLogger.Instance, CancellationToken.None);
+
+        context.Response.StatusCode.ShouldBe(StatusCodes.Status501NotImplemented);
+        context.Response.Body.Position = 0;
+        using var doc = await System.Text.Json.JsonDocument.ParseAsync(context.Response.Body);
+        doc.RootElement.GetProperty("code").GetString().ShouldBe("NOT_IMPLEMENTED");
+        var msg = doc.RootElement.GetProperty("detail").GetString();
+        msg.ShouldNotBeNull();
+        msg.ShouldBe("The requested feature or data source capability is not implemented.");
+        msg.ShouldNotContain("Confidential");
+    }
+
+    [Fact]
+    public async Task WriteWebSqlErrorAsync_ParseCanceledException_Returns400_WithGenericMessage()
+    {
+        var context = new DefaultHttpContext();
+        context.Response.Body = new MemoryStream();
+        context.TraceIdentifier = "trace-400";
+
+        var ex = new Antlr4.Runtime.Misc.ParseCanceledException("line 1:10 unexpected token");
+        await WebSqlEndpoints.WriteWebSqlErrorAsync(context, ex, NullLogger.Instance, CancellationToken.None);
+
+        context.Response.StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
+        context.Response.Body.Position = 0;
+        using var doc = await System.Text.Json.JsonDocument.ParseAsync(context.Response.Body);
+        doc.RootElement.GetProperty("code").GetString().ShouldNotBeNullOrWhiteSpace();
+        var msg = doc.RootElement.GetProperty("detail").GetString();
+        msg.ShouldNotBeNull();
+        msg.ShouldBe("Invalid SQL syntax.");
+        msg.ShouldNotContain("unexpected token");
+    }
+
+    [Fact]
+    public async Task API_11_WriteWebSqlErrorAsync_PolicyException_InProduction_SanitizesMessage()
+    {
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        var env = NSubstitute.Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
+        env.EnvironmentName.Returns("Production");
+        services.AddSingleton(env);
+        var sp = services.BuildServiceProvider();
+
+        var context = new DefaultHttpContext { RequestServices = sp };
+        context.Response.Body = new MemoryStream();
+        context.TraceIdentifier = "trace-403";
+
+        var ex = new WebSqlPolicyException("Confidential table schema leak in policy denial");
+        await WebSqlEndpoints.WriteWebSqlErrorAsync(context, ex, NullLogger.Instance, CancellationToken.None);
+
+        context.Response.StatusCode.ShouldBe(StatusCodes.Status403Forbidden);
+        context.Response.Body.Position = 0;
+        using var doc = await System.Text.Json.JsonDocument.ParseAsync(context.Response.Body);
+        doc.RootElement.GetProperty("code").GetString().ShouldNotBeNullOrWhiteSpace();
+        var msg = doc.RootElement.GetProperty("detail").GetString();
+        msg.ShouldNotBeNull();
+        msg.ShouldBe(WebSqlEndpoints.GenericForbiddenMessage);
+        msg.ShouldNotContain("Confidential table schema leak");
+    }
+
+    #endregion
+
+    #region D-6 Tenant Identity Sanitization Tests
+
+    [Fact]
+    public async Task SqlTableReadExecutor_InvalidTenantClaim_ThrowsForbiddenWithGenericMessage()
+    {
+        var executor = new SqlTableReadExecutor(
+            new Autheris.Application.DataSources.Services.GovernedTableReadPlanner(),
+            () => Substitute.For<Autheris.Application.Sql.Interfaces.IGovernedSqlExecutionService>());
+
+        var table = new Table
+        {
+            SourceName = "test_ds",
+            SchemaName = "main",
+            TableName = "users",
+            DataSourceType = DataSourceType.Sql,
+            SourceType = "sqlite"
+        };
+        var metadata = new TableMetadata
+        {
+            Table = table,
+            Identifier = table.ToIdentifier("test_ds"),
+            Columns = [new TableColumn { ColumnName = "id", DataType = "int" }]
+        };
+
+        var invalidTenantClaim = "malicious_tenant; DROP TABLE users;--";
+        var principal = new ClaimsPrincipal(new ClaimsIdentity([
+            new Claim("sub", "attacker"),
+            new Claim("tenant_id", invalidTenantClaim)
+        ]));
+
+        var context = new DataSourceExecutionContext(
+            SourceName: "test_ds",
+            Metadata: metadata,
+            Principal: principal,
+            AccessDecision: TableAccessDecision.Allowed(metadata.Identifier, new Dictionary<string, ColumnAccessLevel> { ["id"] = ColumnAccessLevel.Clear }),
+            Arguments: new Dictionary<string, object?>(),
+            RequestedFields: ["id"]);
+
+        var ex = await Should.ThrowAsync<GatewayForbiddenException>(() => executor.ExecuteAsync(context));
+        ex.Message.ShouldBe("Invalid tenant identity.");
+        ex.Message.ShouldNotContain(invalidTenantClaim);
+    }
+
+    [Fact]
+    public async Task WebSql_InactiveTable_IsRejectedAsTableDenied()
+    {
+        var repo = Substitute.For<ITableMetadataRepository>();
+        var tableId = new TableIdentifier("default", "public", "inactive_orders");
+        var metadata = new TableMetadata
+        {
+            Identifier = tableId,
+            Table = new Table { TableName = "inactive_orders", SchemaName = "public", IsActive = false, SourceType = "PostgreSQL" },
+            Columns = [new TableColumn { ColumnName = "id", DataType = "int" }]
+        };
+        repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<TableMetadata?>(metadata));
+
+        var service = CreateService(repository: repo);
+        var ex = await Should.ThrowAsync<WebSqlPolicyException>(() =>
+            service.RewriteSqlAsync("SELECT id FROM inactive_orders", CreateUser(), new TenantId("default"), CancellationToken.None));
+
+        ex.Message.ShouldContain("denied or the table is not registered");
+    }
+
+    #endregion
+
+    private sealed class SingleTableConsentRepository(TableIdentifier targetTable, Consent consent) : IConsentRepository
+    {
+        public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<Consent>>(targetTable.Equals(table) ? [consent] : []);
+
+        public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, TenantId? tenantId, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<Consent>>(targetTable.Equals(table) ? [consent] : []);
+
+        public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? roles = null, DateTimeOffset? atTime = null, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<Consent>>([consent]);
+
+        public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? roles, DateTimeOffset? atTime, TenantId? tenantId, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<Consent>>([consent]);
+
+        public Task<Consent> CreateConsentAsync(Consent newConsent, CancellationToken ct = default) => Task.FromResult(newConsent);
+        public Task<Consent?> GetConsentByIdAsync(Guid consentId, CancellationToken ct = default) => Task.FromResult<Consent?>(null);
+        public Task RevokeConsentAsync(Guid consentId, Sid revokedBySid, string reason, Autheris.Domain.Security.ConsentRevocationAuthority authority, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<IReadOnlyList<Consent>> GetExpiringConsentsAsync(DateTimeOffset threshold, int maxResults = 1000, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<Consent>>([]);
+        public Task<IReadOnlyList<Consent>> GetActiveConsentsByConsentRequestIdAsync(Guid consentRequestId, DateTimeOffset atTime, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<Consent>>([]);
+        public Task<bool> RevokeSystemConsentAsync(Guid consentId, Guid consentRequestId, Sid revokedBySid, string reason, CancellationToken ct = default) => Task.FromResult(false);
+        public Task<Autheris.Application.Governance.Paging.ConsentPage> GetConsentPageAsync(Autheris.Application.Governance.Paging.ConsentPageQuery query, CancellationToken ct = default) =>
+            Task.FromResult(new Autheris.Application.Governance.Paging.ConsentPage([], null));
+        public Task ReplaceConsentsAsync(IReadOnlyList<Guid> revokeConsentIds, IReadOnlyList<Consent> create, Sid actor, string reason, Autheris.Domain.Security.ConsentRevocationAuthority authority, IReadOnlyList<AuditLogEntry>? auditEntries = null, CancellationToken ct = default) =>
+            Task.CompletedTask;
+    }
+}
+

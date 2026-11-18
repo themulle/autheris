@@ -1,3 +1,4 @@
+using Autheris.Tests.Unit.TestSupport;
 namespace Autheris.Tests.Integration.OData;
 
 using System;

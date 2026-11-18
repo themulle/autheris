@@ -28,6 +28,13 @@ public static class UnknownGatewayKeyGuard
         (GatewayConfigurationSchema.Root + ":Rest:AllowDeclaredValidation", "Rest:AllowDeclaredValidation (removed; declared-only procedure validation is always active)")
     ];
 
+    private static readonly (string Key, string Message)[] RemovedFlagKeys =
+    [
+        (GatewayConfigurationSchema.Root + ":CatalogSearch:Enabled", "CatalogSearch:Enabled (removed; catalog search validation and warm-up are always active, tune CatalogSearch:WarmupOnStartup instead)")
+    ];
+
+    private static readonly (string Key, string Message)[] AllRemovedKeysWithMessage = [.. RemovedProcedureDeclaredKeys, .. RemovedFlagKeys];
+
     private const string RemovedAuthzReplacement = "removed by ADR-020; data access is granted by grant records";
 
     private static readonly string[] RemovedAuthzPrefixes =
@@ -192,7 +199,7 @@ public static class UnknownGatewayKeyGuard
             unknown.Add("SqlEndpoints:Procedures:EnableHotReload (removed (WP-SIMPL-39); definitions are re-scanned each interval)");
         }
 
-        foreach (var (removedKey, message) in RemovedProcedureDeclaredKeys)
+        foreach (var (removedKey, message) in AllRemovedKeysWithMessage)
         {
             if (configuration.AsEnumerable().Any(kv => string.Equals(kv.Key, removedKey, StringComparison.OrdinalIgnoreCase)))
             {
@@ -254,7 +261,7 @@ public static class UnknownGatewayKeyGuard
 
             var fullKey = GatewayConfigurationSchema.Root + ":" + entry.Key;
             if (string.Equals(fullKey, RemovedProcedureHotReloadKey, StringComparison.OrdinalIgnoreCase) ||
-                RemovedProcedureDeclaredKeys.Any(r => string.Equals(fullKey, r.Key, StringComparison.OrdinalIgnoreCase)))
+                AllRemovedKeysWithMessage.Any(r => string.Equals(fullKey, r.Key, StringComparison.OrdinalIgnoreCase)))
             {
                 continue;
             }
