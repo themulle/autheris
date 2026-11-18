@@ -17,12 +17,15 @@ public sealed class OptionsAuditTests
         @"Enforce|Require|Allowed|Allow|Deny|Mask|Pii|Tls|Auth|Redaction",
         RegexOptions.CultureInvariant);
 
+    private const int RemovedOptionsCount = 76;
+
     [Fact]
     [Trait("Category", "Security")]
     public void No_enforcement_option_deleted_while_wired()
     {
         var removed = RepositoryScan.ReadBaseline("removed-options.txt");
-        removed.Count.ShouldBeGreaterThanOrEqualTo(75, "The removed-options baseline lists every deleted option and only grows.");
+        // Pinned: deleting a row would silently stop checking that option; raise this only when you add a row.
+        removed.Count.ShouldBe(RemovedOptionsCount, "The removed-options baseline lists every deleted option; raise the count only when you add a row.");
 
         var assemblies = new[]
         {

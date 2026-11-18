@@ -33,7 +33,10 @@ public sealed class SecureDefaultsSnapshotTests
         var update = Environment.GetEnvironmentVariable("AUTHERIS_UPDATE_SECURE_DEFAULTS");
         if (string.Equals(update, "1", StringComparison.Ordinal) || string.Equals(update, "true", StringComparison.OrdinalIgnoreCase))
         {
+            // Regeneration never passes: the rewritten snapshot must be reviewed and committed, and CI must not regenerate it.
+            Environment.GetEnvironmentVariable("CI").ShouldBeNull("The secure-defaults snapshot cannot be regenerated in CI.");
             File.WriteAllText(path, Render(current));
+            throw new InvalidOperationException($"{SnapshotFile} regenerated; review the diff, commit it and re-run without AUTHERIS_UPDATE_SECURE_DEFAULTS.");
         }
 
         var expected = RepositoryScan.ReadBaseline(SnapshotFile);
