@@ -51,6 +51,32 @@ public static partial class DocumentRules
         return IdentifierPattern().IsMatch(trimmed.ToLowerInvariant());
     }
 
+    /// <summary>Title of a markdown document: its leading heading, else <paramref name="fallbackDocId"/>.</summary>
+    public static string ExtractTitle(string markdown, string fallbackDocId)
+    {
+        foreach (var rawLine in markdown.Split('\n'))
+        {
+            var line = rawLine.Trim();
+            if (line.Length == 0)
+            {
+                continue;
+            }
+
+            if (line.StartsWith('#', StringComparison.Ordinal))
+            {
+                var heading = line.TrimStart('#').Trim();
+                if (!string.IsNullOrWhiteSpace(heading))
+                {
+                    return heading;
+                }
+            }
+
+            break;
+        }
+
+        return fallbackDocId;
+    }
+
     public static bool IsValidAppId(string? appId) =>
         IsValidIdentifier(appId, MaxAppIdLength);
 

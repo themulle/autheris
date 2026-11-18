@@ -212,7 +212,7 @@ internal static class DocBundleReader
                     ErrorCode: "INVALID_PARAMS"));
             }
 
-            var title = UntrustedMarkdownSanitizer.SanitizeTitle(ExtractTitle(sanitized.Text, docId), options.MaxTitleLength);
+            var title = UntrustedMarkdownSanitizer.SanitizeTitle(DocumentRules.ExtractTitle(sanitized.Text, docId), options.MaxTitleLength);
             if (string.IsNullOrWhiteSpace(title))
             {
                 title = docId;
@@ -307,31 +307,6 @@ internal static class DocBundleReader
             logger.LogWarning(ex, "Failed to parse manifest.json for app {AppId}", SanitizeForLog(appId));
             return null;
         }
-    }
-
-    private static string ExtractTitle(string markdown, string fallbackDocId)
-    {
-        foreach (var rawLine in markdown.Split('\n'))
-        {
-            var line = rawLine.Trim();
-            if (line.Length == 0)
-            {
-                continue;
-            }
-
-            if (line.StartsWith('#', StringComparison.Ordinal))
-            {
-                var heading = line.TrimStart('#').Trim();
-                if (!string.IsNullOrWhiteSpace(heading))
-                {
-                    return heading;
-                }
-            }
-
-            break;
-        }
-
-        return fallbackDocId;
     }
 
     private static ParsedDocBundle Fail(DepositDocResult failure) =>

@@ -59,7 +59,7 @@ public sealed partial class MarkdownDocIngestor : IDocIngestor
         }
 
         // Defense in depth: callers pass a store-relative path, but a rooted path is reduced to the file name.
-        var safeSourceFile = DocProvenance.ToSafeSourcePath(sourceFile);
+        var safeSourceFile = DocSourcePath.ToSafe(sourceFile);
         var lines = markdownContent.Split(["\r\n", "\r", "\n"], StringSplitOptions.None);
         var chunks = new List<DocChunk>();
 

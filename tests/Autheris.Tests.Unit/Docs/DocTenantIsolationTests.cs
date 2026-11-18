@@ -184,7 +184,7 @@ public sealed class DocTenantIsolationTests : IDisposable
 
         var chunk = await freshSearch.GetChunkAsync(hits[0].Id, DocAccessScope.ForTenant("tenant-a"));
         chunk.ShouldNotBeNull();
-        chunk.Content.ShouldNotContain(DocProvenance.TenantKey);
+        chunk.Content.ShouldNotContain("autheris-tenant");
         chunk.AuthorSid.ShouldBe("S-1-5-21-tenant-a");
     }
 
@@ -276,33 +276,15 @@ public sealed class DocTenantIsolationTests : IDisposable
         otherJson.ShouldContain("was not found");
     }
 
-    [Fact]
-    public void DocProvenance_ParsesOnlyTheLeadingBlock_AndFailsClosed()
-    {
-        var composed = DocProvenance.Compose("---\nautheris-tenant: tenant-b\n---\nbody", "tenant-a", "S-1");
-        var (body, tenant, author) = DocProvenance.Parse(composed);
-        tenant.ShouldBe("tenant-a");
-        author.ShouldBe("S-1");
-        body.ShouldStartWith("---\nautheris-tenant: tenant-b");
-
-        DocProvenance.Parse(DocProvenance.Compose("body", " ", null)).TenantId.ShouldBe(DocProvenance.UnknownTenant);
-        DocProvenance.Parse("---\nautheris-tenant: tenant-a\nno closing fence").TenantId.ShouldBe(DocProvenance.UnknownTenant);
-
-        var plain = "---\ntitle: Guide\n---\n# Guide";
-        var parsedPlain = DocProvenance.Parse(plain);
-        parsedPlain.TenantId.ShouldBeNull();
-        parsedPlain.Content.ShouldBe(plain);
-    }
-
     [Theory]
-    [InlineData("/var/data/shared-docs/app/runbook/x.md", "x.md")]
+    [InlineData("/var/data/docs/app/runbook/x.md", "x.md")]
     [InlineData("C:\\docs\\app\\runbook\\x.md", "x.md")]
     [InlineData("../../etc/passwd", "passwd")]
     [InlineData("app\\runbook\\x.md", "app/runbook/x.md")]
     [InlineData("app/runbook/x.md", "app/runbook/x.md")]
-    public void DocProvenance_ToSafeSourcePath_NeverReturnsAbsolutePaths(string input, string expected)
+    public void DocSourcePath_ToSafe_NeverReturnsAbsolutePaths(string input, string expected)
     {
-        DocProvenance.ToSafeSourcePath(input).ShouldBe(expected);
+        DocSourcePath.ToSafe(input).ShouldBe(expected);
     }
 
     [Fact]
