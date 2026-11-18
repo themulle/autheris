@@ -54,6 +54,37 @@ Pushed feature branches on `origin` (state at the 2026-11-15 handover; the rollu
 
 ## 4. Next work, in dependency order
 
+**Update 2026-11-18 night:**
+- **Merged on `main`:**
+  - Issue PRs: #823, #826 (keys, indexes and required filters on discovery; denied columns of a granted table are no longer listed on the REST detail), #828, #831, #832.
+  - Simplification:
+    - `WP-SIMPL-41 PR 6a` (#837, step `0026_doc_links`, SQL Server keys through a `link_digest`).
+    - `WP-SIMPL-52 PR 6c` (#842, step `0027_drop_legacy_governance_columns`, narrowed to `TABLE_CATALOG_SETTINGS.visibility` and `consent_requests.itsm_ticket_id`).
+    - `WP-SIMPL-23` root moves (#840: 127 of 129 root files; the last two wait for an owner edit in `docs/features/f-sql-02-governed-stored-procedures.md`).
+    - `WP-SIMPL-32 PR 1` (#841: options inventory and budget ratchets; `Gateway:CatalogSearch:Enabled` removed).
+    - `WP-SIMPL-28 PR 1+2` (#844: #488 already fixed by #637; `ISemanticMetricImport`, `NoDbtHealthData`).
+- **Open PRs:**
+  - #830 (#802 schema rebuild, approved).
+  - #827, then #829 (stacked).
+  - #843 `WP-SIMPL-41 PR 6b` (approved after the second review).
+  - #846 `WP-SIMPL-36` sub-package 7 (review fixes in progress; GHSA-66xj function oracles are tracked by #847, and the x8g9 and rxr4 residual items stay in their private advisories).
+- **`WP-SIMPL-49`** (branch `feat/simpl-49-data-products-a`, step renumbered to `0028_data_products`):
+  - Phase 3 is done. Conditions SEC-DP-01..22 are in the plan, and SEC-DP-01..05 are fixed.
+  - A3 (read procedures) and A4 (write procedures with `ExecuteWrite`) are done.
+  - A5 (Git sync) is in progress; A6 is still open.
+  - The governance repository LOC budget is raised by the products partial.
+- **New follow-up issues:**
+  - #835: GraphQL rebuild on restrictive changes.
+  - #838: GraphQL discovery lists denied columns.
+  - #847: SQL user expressions before the row and tenant predicates.
+- **WP-52 follow-ups still open** (live readers):
+  - `consents.role_id/role_name`: Role grantee removal.
+  - `access_profiles.masking_mode/target_tables`: profile items migration.
+  - `consent_row_filters.key_set_*`: a decision is needed.
+- **Process:**
+  - After #840, `AUTHERIS_UPDATE_SECURITY_INVENTORY=1` appends the renamed unit tests to `security-tests-base.txt`. Keep that file as `main` plus the PR's own tests.
+  - Every merge on `main` re-conflicts `CHANGELOG.md` in the open PRs. Merge a green PR before resolving the next one.
+
 State at the end of the 2026-11-18 session. Merged since section 0a: #817 (#813 search oracle, closed), #819 (`WP-SIMPL-52 PR 5a+5b`), #822 (`#677 PR 4b` + `#678 PR 2`; compact search payload deferred, see the catalog-scale plan note), #825 (`WP-SIMPL-41 PR 5`, tier model retired). Remaining, in order:
 1. **DDL queue (strictly one at a time; the runner needs a gap-free step catalogue, so a later branch renumbers its step pair, both checksum goldens, `StepSqlLintTests` and its step tests):**
    - DONE: PR #824 `WP-SIMPL-52 PR 6a+6b` (steps `0023_drop_is_sensitive`, `0024_drop_superseded_governance_columns`; all nodes must run the new build before 0023 applies; guard test `TableMetadataCopyArchitectureTests` keeps `ColumnClassifications` on table copies) and PR #821 `WP-SIMPL-54` (step `0025_golden_queries`, #580 closed). `main` now ends at step `0025`; main CI green after #824.
