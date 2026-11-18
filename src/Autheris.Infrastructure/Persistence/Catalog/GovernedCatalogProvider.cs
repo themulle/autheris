@@ -18,7 +18,7 @@ namespace Autheris.Infrastructure.Persistence.Catalog;
 /// <summary>
 /// WP-X0c / CR-ADG-47: builds the compiler catalog from database metadata. Fail closed: a table is part of the result only when
 /// the governance record, the data source, the dialect and the database metadata all agree. Every other case (load failure,
-/// zero columns, a governance column missing in the database, a tenant column with a non-TEXT SQLite affinity) omits the table,
+/// zero columns, a governance column missing in the database, a tenant column with a non-text type) omits the table,
 /// so the compiler rejects it as unknown. Entries are cached per data source and table for at most
 /// <see cref="GovernedCatalogOptions.MaxCacheTtlSeconds"/> seconds; denials and failures are never cached. Every cache hit is
 /// re-validated against a fingerprint of the security-relevant governance inputs (data source, provider, dialect, governed columns,

@@ -39,7 +39,7 @@ internal sealed class ConsumerAggregationSql
         _ => BuildMerge()
     };
 
-    // SQLite resolves an unqualified column in DO UPDATE SET to the existing row; PostgreSQL reports it as ambiguous.
+    // PostgreSQL reports an unqualified column in DO UPDATE SET as ambiguous.
     private static ConsumerAggregationSql BuildOnConflict(bool qualify)
     {
         string query = qualify ? "CONSUMER_APP_QUERYNAME_DAILY." : string.Empty;

@@ -649,7 +649,7 @@ internal static class PolicySubqueryTables
         });
 
     /// <summary>
-    /// The governance identifiers a policy table name may stand for. The policy renders <c>schema.table</c> (SQLite: the table alone), without
+    /// The governance identifiers a policy table name may stand for. The policy renders <c>schema.table</c>, without
     /// the data source, so the data source of the statement and the legacy <c>default</c> domain are tried. The provider verifies each
     /// candidate against the governance record and the database and omits the ones that do not exist.
     /// </summary>
