@@ -91,6 +91,22 @@ public sealed class GatewayCoreOptionsValidator : IValidateOptions<GatewayOption
 
         ValidateDefaultTenant(opts, failures);
 
+        var catalogCache = opts.Catalog.Cache ?? new CatalogCacheOptions();
+        if (catalogCache.MetadataMaxEntries is < 1_000 or > 1_000_000)
+        {
+            failures.Add("Gateway:Catalog:Cache:MetadataMaxEntries must be between 1000 and 1000000.");
+        }
+
+        if (catalogCache.MetadataTtlSeconds is < 1 or > 300)
+        {
+            failures.Add("Gateway:Catalog:Cache:MetadataTtlSeconds must be between 1 and 300.");
+        }
+
+        if (catalogCache.ProviderMaxEntries is < 100 or > 1_000_000)
+        {
+            failures.Add("Gateway:Catalog:Cache:ProviderMaxEntries must be between 100 and 1000000.");
+        }
+
         if (opts.Catalog.MaxTagsPerDataset is < 1 or > Autheris.Domain.Model.DatasetTagRules.HardMaxTagsPerDataset)
         {
             failures.Add("Gateway:Catalog:MaxTagsPerDataset must be between 1 and 256.");

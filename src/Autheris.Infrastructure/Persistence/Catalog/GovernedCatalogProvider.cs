@@ -31,7 +31,9 @@ public sealed partial class GovernedCatalogProvider : IGovernedCatalogProvider
     private readonly TimeSpan _ttl;
     private readonly TimeProvider _time;
     private readonly ILogger _logger;
-    private readonly ConcurrentDictionary<(string DataSource, string ConnectionKey, string Schema, string Table), CacheItem> _cache = new();
+    // Entries are keyed by data source and table only: the cached catalog entry derives from the governance record and the database
+    // metadata, never from a tenant or a caller, so a per-tenant share cap does not apply. A miss reloads and re-admits the table.
+    private readonly Autheris.Application.State.Caching.BoundedCache<(string DataSource, string ConnectionKey, string Schema, string Table), CacheItem> _cache;
 
     private readonly record struct CacheItem(TableCatalogEntry Entry, DateTimeOffset ExpiresAt, string Fingerprint);
 
@@ -50,13 +52,14 @@ public sealed partial class GovernedCatalogProvider : IGovernedCatalogProvider
         _gateway = gateway;
         _ttl = TimeSpan.FromSeconds(options.CacheTtlSeconds);
         _time = time ?? TimeProvider.System;
+        _cache = new(Math.Max(3, gateway.Value?.Catalog?.Cache?.ProviderMaxEntries ?? CatalogCacheOptions.DefaultProviderMaxEntries));
         _logger = logger ?? NullLogger<GovernedCatalogProvider>.Instance;
     }
 
     /// <summary>Drops the cached entries of one data source, or of all when <paramref name="dataSourceName"/> is null (metadata reload).</summary>
     public void Invalidate(string? dataSourceName = null)
     {
-        foreach (var key in _cache.Keys)
+        foreach (var key in _cache.Keys.ToArray())
         {
             if (dataSourceName is null || string.Equals(key.DataSource, dataSourceName, StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(key.ConnectionKey, dataSourceName, StringComparison.OrdinalIgnoreCase))
@@ -86,7 +89,7 @@ public sealed partial class GovernedCatalogProvider : IGovernedCatalogProvider
         {
             ct.ThrowIfCancellationRequested();
             var key = (dataSourceName.ToLowerInvariant(), connectionKey?.ToLowerInvariant() ?? string.Empty, table.Schema, table.TableName);
-            if (_cache.TryGetValue(key, out var cached) && cached.ExpiresAt > _time.GetUtcNow() &&
+            if (_cache.TryGet(key, out var cached) && cached.ExpiresAt > _time.GetUtcNow() &&
                 await FingerprintMatchesAsync(connectionKey, table, cached.Fingerprint, ct).ConfigureAwait(false))
             {
                 entries.Add(cached.Entry);
