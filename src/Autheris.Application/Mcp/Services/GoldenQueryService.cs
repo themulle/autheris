@@ -43,6 +43,10 @@ public sealed class GoldenQueryService : IGoldenQueryService
         _logger = logger;
         _repository = repository;
         _versionProvider = versionProvider;
+        if (repository is not null && versionProvider is null)
+        {
+            _logger.LogWarning("GOLDEN_QUERY_STORE_UNCACHED: no catalog version provider is available; stored golden queries are read on every call.");
+        }
         var goldenOpts = options?.Value.GoldenQueries ?? new GoldenQueryOptions();
         _enabled = goldenOpts.Enabled;
         _maxResults = goldenOpts.MaxResultsPerRequest > 0 ? goldenOpts.MaxResultsPerRequest : 20;
@@ -169,18 +173,22 @@ public sealed class GoldenQueryService : IGoldenQueryService
     {
         try
         {
-            if (context.IsDatasetVisible is { } datasetVisible)
+            // Default deny: without a visibility delegate nothing is visible.
+            if (context.IsDatasetVisible is not { } datasetVisible || !datasetVisible(query.Domain, query.TableName))
             {
-                if (!datasetVisible(query.Domain, query.TableName))
+                return false;
+            }
+
+            IReadOnlyList<(string Domain, string Table)> references = [];
+            if (context.ReferencedDatasets is { } referenced)
+            {
+                // A null result means the entry could not be proven safe (unresolvable field, unparseable text).
+                if (referenced(query)?.ToList() is not { } reached || reached.Any(r => !datasetVisible(r.Domain, r.Table)))
                 {
                     return false;
                 }
 
-                if (context.ReferencedDatasets is { } referenced &&
-                    referenced(query).Any(r => !datasetVisible(r.Domain, r.Table)))
-                {
-                    return false;
-                }
+                references = reached;
             }
 
             if (context.HiddenIdentifiers is { } hiddenOf)
@@ -191,15 +199,12 @@ public sealed class GoldenQueryService : IGoldenQueryService
                     return false;
                 }
 
-                if (context.ReferencedDatasets is { } referenced)
+                foreach (var (refDomain, refTable) in references)
                 {
-                    foreach (var (refDomain, refTable) in referenced(query))
+                    var refHidden = hiddenOf(refDomain, refTable);
+                    if (refHidden is { Count: > 0 } && MentionsAnyIdentifier(query.QueryText, refHidden))
                     {
-                        var refHidden = hiddenOf(refDomain, refTable);
-                        if (refHidden is { Count: > 0 } && MentionsAnyIdentifier(query.QueryText, refHidden))
-                        {
-                            return false;
-                        }
+                        return false;
                     }
                 }
             }
@@ -212,10 +217,11 @@ public sealed class GoldenQueryService : IGoldenQueryService
         }
     }
 
-    private async ValueTask<StoreSnapshot> LoadStoreSnapshotAsync(TenantId tenant, CancellationToken ct)
+    private async ValueTask<StoreSnapshot> LoadStoreSnapshotAsync(TenantId? caller, CancellationToken ct)
     {
         var empty = new StoreSnapshot(default, [], new HashSet<string>(StringComparer.OrdinalIgnoreCase));
-        if (_repository is null || string.IsNullOrWhiteSpace(tenant.Value))
+        // No tenant, no entries: a missing, default or reserved (platform) tenant never reads the store.
+        if (_repository is null || caller is not { } tenant || string.IsNullOrWhiteSpace(tenant.Value) || TenantId.IsReserved(tenant))
         {
             return empty;
         }
@@ -232,7 +238,7 @@ public sealed class GoldenQueryService : IGoldenQueryService
 
             var rows = await _repository.GetForTenantAsync(tenant, ct).ConfigureAwait(false);
             var entries = rows
-                .Select(r => new GoldenQuery(r.SourceKey, r.Domain, r.TableName, r.Title, r.Description ?? string.Empty, r.QueryText, r.VariablesJson, [r.Source.ToString().ToLowerInvariant()], r.UpdatedAt))
+                .Select(r => new GoldenQuery(r.SourceKey, r.Domain, r.TableName, r.Title, r.Description ?? string.Empty, r.QueryText, r.VariablesJson, [r.Source.ToString().ToLowerInvariant()], r.UpdatedAt) { FromStore = true })
                 .ToList();
             var configCopies = rows
                 .Where(r => r.Source == GoldenQuerySource.Config)
@@ -295,6 +301,11 @@ public sealed class GoldenQueryService : IGoldenQueryService
         return set;
     }
 
+    /// <summary>
+    /// Conservative word match: every run of letters, digits and underscores in <paramref name="text"/> is compared with the identifiers
+    /// (case-insensitive), so a hidden name inside a string literal, a comment or an unrelated field of the same name also matches. Over-hiding
+    /// an example is intended; it is never the other way round.
+    /// </summary>
     public static bool MentionsAnyIdentifier(string? text, IReadOnlySet<string> identifiers)
     {
         if (string.IsNullOrWhiteSpace(text) || identifiers.Count == 0)

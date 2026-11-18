@@ -27,7 +27,7 @@ public sealed class GoldenQueryStoreReadTests
     public async Task Describe_dataset_examples_after_sync_without_restart()
     {
         var fixture = new Fixture();
-        var context = new GoldenQueryReadContext(TenantA);
+        var context = GoldenQueryReadContext.AllVisible(TenantA);
 
         (await fixture.Service.GetGoldenQueriesAsync(context, "warehouse", "orders", CancellationToken.None)).ShouldBeEmpty();
 
@@ -48,7 +48,7 @@ public sealed class GoldenQueryStoreReadTests
     public async Task Store_is_read_once_per_tenant_and_catalog_version()
     {
         var fixture = new Fixture { Rows = [Row("orders", "dbt-1", "orders { id }")] };
-        var context = new GoldenQueryReadContext(TenantA);
+        var context = GoldenQueryReadContext.AllVisible(TenantA);
 
         await fixture.Service.GetGoldenQueriesAsync(context, null, null, CancellationToken.None);
         await fixture.Service.GetGoldenQueriesAsync(context, "warehouse", "orders", CancellationToken.None);
@@ -64,7 +64,7 @@ public sealed class GoldenQueryStoreReadTests
             Rows = [Row("orders", "dbt-1", "orders { amount }")]
         };
 
-        var served = await fixture.Service.GetGoldenQueriesAsync(new GoldenQueryReadContext(TenantA), "warehouse", "orders", CancellationToken.None);
+        var served = await fixture.Service.GetGoldenQueriesAsync(GoldenQueryReadContext.AllVisible(TenantA), "warehouse", "orders", CancellationToken.None);
 
         served.Select(q => q.Id).ShouldBe(["cfg-1", "dbt-1"]);
     }
@@ -85,7 +85,7 @@ public sealed class GoldenQueryStoreReadTests
             ]
         };
 
-        var served = (await fixture.Service.GetGoldenQueriesAsync(new GoldenQueryReadContext(TenantA), null, null, CancellationToken.None))
+        var served = (await fixture.Service.GetGoldenQueriesAsync(GoldenQueryReadContext.AllVisible(TenantA), null, null, CancellationToken.None))
             .ToDictionary(q => q.Id);
 
         served["same"].Title.ShouldBe("Configured");
@@ -141,6 +141,7 @@ public sealed class GoldenQueryStoreReadTests
         };
         var context = new GoldenQueryReadContext(
             TenantA,
+            IsDatasetVisible: (_, _) => true,
             HiddenIdentifiers: (_, _) => new HashSet<string>(["salary"], StringComparer.OrdinalIgnoreCase));
 
         var served = await fixture.Service.GetGoldenQueriesAsync(context, "warehouse", "orders", CancellationToken.None);
@@ -156,6 +157,7 @@ public sealed class GoldenQueryStoreReadTests
         var fixture = new Fixture(maxResults: 2) { Rows = rows };
         var context = new GoldenQueryReadContext(
             TenantA,
+            IsDatasetVisible: (_, _) => true,
             HiddenIdentifiers: (_, _) => new HashSet<string>(["secret"], StringComparer.OrdinalIgnoreCase));
 
         var served = await fixture.Service.GetGoldenQueriesAsync(context, "warehouse", "orders", CancellationToken.None);
@@ -168,7 +170,7 @@ public sealed class GoldenQueryStoreReadTests
     public async Task Throwing_caller_delegate_drops_the_entry()
     {
         var fixture = new Fixture { Rows = [Row("orders", "dbt-1", "orders { id }")] };
-        var context = new GoldenQueryReadContext(TenantA, HiddenIdentifiers: (_, _) => throw new InvalidOperationException("boom"));
+        var context = new GoldenQueryReadContext(TenantA, IsDatasetVisible: (_, _) => true, HiddenIdentifiers: (_, _) => throw new InvalidOperationException("boom"));
 
         (await fixture.Service.GetGoldenQueriesAsync(context, null, null, CancellationToken.None)).ShouldBeEmpty();
     }
@@ -178,8 +180,8 @@ public sealed class GoldenQueryStoreReadTests
     public async Task Cached_entry_set_is_filtered_per_caller()
     {
         var fixture = new Fixture { Rows = [Row("orders", "dbt-1", "orders { id salary }"), Row("orders", "dbt-2", "orders { id }")] };
-        var restricted = new GoldenQueryReadContext(TenantA, HiddenIdentifiers: (_, _) => new HashSet<string>(["salary"], StringComparer.OrdinalIgnoreCase));
-        var open = new GoldenQueryReadContext(TenantA);
+        var restricted = new GoldenQueryReadContext(TenantA, IsDatasetVisible: (_, _) => true, HiddenIdentifiers: (_, _) => new HashSet<string>(["salary"], StringComparer.OrdinalIgnoreCase));
+        var open = GoldenQueryReadContext.AllVisible(TenantA);
 
         var first = await fixture.Service.GetGoldenQueriesAsync(restricted, null, null, CancellationToken.None);
         var second = await fixture.Service.GetGoldenQueriesAsync(open, null, null, CancellationToken.None);
@@ -199,8 +201,8 @@ public sealed class GoldenQueryStoreReadTests
         fixture.RowsByTenant[TenantA.Value] = [Row("orders", "dbt-a", "orders { id }")];
         fixture.RowsByTenant[TenantB.Value] = [Row("orders", "dbt-b", "orders { id }")];
 
-        var a = await fixture.Service.GetGoldenQueriesAsync(new GoldenQueryReadContext(TenantA), null, null, CancellationToken.None);
-        var b = await fixture.Service.GetGoldenQueriesAsync(new GoldenQueryReadContext(TenantB), null, null, CancellationToken.None);
+        var a = await fixture.Service.GetGoldenQueriesAsync(GoldenQueryReadContext.AllVisible(TenantA), null, null, CancellationToken.None);
+        var b = await fixture.Service.GetGoldenQueriesAsync(GoldenQueryReadContext.AllVisible(TenantB), null, null, CancellationToken.None);
 
         a.Select(q => q.Id).ShouldBe(["dbt-a"]);
         b.Select(q => q.Id).ShouldBe(["dbt-b"]);
@@ -212,7 +214,7 @@ public sealed class GoldenQueryStoreReadTests
     {
         var fixture = new Fixture { Rows = [Row("orders", "dbt-1", "orders { id }")] };
 
-        (await fixture.Service.GetGoldenQueriesAsync(new GoldenQueryReadContext(default), null, null, CancellationToken.None)).ShouldBeEmpty();
+        (await fixture.Service.GetGoldenQueriesAsync(GoldenQueryReadContext.AllVisible(default(TenantId)), null, null, CancellationToken.None)).ShouldBeEmpty();
 
         await fixture.Repository.DidNotReceiveWithAnyArgs().GetForTenantAsync(default, CancellationToken.None);
     }
@@ -225,7 +227,7 @@ public sealed class GoldenQueryStoreReadTests
         fixture.Repository.GetForTenantAsync(Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
             .Returns<Task<IReadOnlyList<GoldenQueryStoreRecord>>>(_ => throw new InvalidOperationException("store down"));
 
-        var served = await fixture.Service.GetGoldenQueriesAsync(new GoldenQueryReadContext(TenantA), null, null, CancellationToken.None);
+        var served = await fixture.Service.GetGoldenQueriesAsync(GoldenQueryReadContext.AllVisible(TenantA), null, null, CancellationToken.None);
 
         served.Select(q => q.Id).ShouldBe(["cfg-1"]);
     }
@@ -235,7 +237,41 @@ public sealed class GoldenQueryStoreReadTests
     {
         var fixture = new Fixture(enabled: false) { Rows = [Row("orders", "dbt-1", "orders { id }")] };
 
+        (await fixture.Service.GetGoldenQueriesAsync(GoldenQueryReadContext.AllVisible(TenantA), null, null, CancellationToken.None)).ShouldBeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Unresolvable_or_reserved_tenant_reads_no_stored_entries()
+    {
+        var fixture = new Fixture { Rows = [Row("orders", "dbt-1", "{ orders { id } }")] };
+
+        (await fixture.Service.GetGoldenQueriesAsync(GoldenQueryReadContext.AllVisible(null), null, null, CancellationToken.None)).ShouldBeEmpty();
+        (await fixture.Service.GetGoldenQueriesAsync(GoldenQueryReadContext.AllVisible(TenantId.Platform), null, null, CancellationToken.None)).ShouldBeEmpty();
+
+        await fixture.Repository.DidNotReceiveWithAnyArgs().GetForTenantAsync(default, CancellationToken.None);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Context_without_visibility_delegate_denies_every_entry()
+    {
+        var fixture = new Fixture
+        {
+            Rows = [Row("orders", "dbt-1", "{ orders { id } }")]
+        };
+
         (await fixture.Service.GetGoldenQueriesAsync(new GoldenQueryReadContext(TenantA), null, null, CancellationToken.None)).ShouldBeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Entry_that_cannot_be_proven_safe_is_dropped()
+    {
+        var fixture = new Fixture { Rows = [Row("orders", "dbt-1", "{ orders { id } }")] };
+        var context = new GoldenQueryReadContext(TenantA, IsDatasetVisible: (_, _) => true, ReferencedDatasets: _ => null);
+
+        (await fixture.Service.GetGoldenQueriesAsync(context, null, null, CancellationToken.None)).ShouldBeEmpty();
     }
 
     private static GoldenQueryStoreRecord Row(string table, string key, string query, GoldenQuerySource source = GoldenQuerySource.Dbt) =>

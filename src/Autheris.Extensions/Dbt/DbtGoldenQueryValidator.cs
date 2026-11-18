@@ -118,6 +118,11 @@ internal static class DbtGoldenQueryValidator
 
     private static string? ValidateQueryAst(string query, TableIdentifier dataset)
     {
+        if (BraceDepthExceeds(query, MaxSelectionDepth + 2))
+        {
+            return "QUERY_TOO_COMPLEX";
+        }
+
         DocumentNode document;
         try
         {
@@ -129,7 +134,12 @@ internal static class DbtGoldenQueryValidator
         }
 
         var operations = document.Definitions.OfType<OperationDefinitionNode>().ToList();
-        if (operations.Count == 0 || document.Definitions.Any(d => d is not OperationDefinitionNode and not FragmentDefinitionNode))
+        if (document.Definitions.Any(d => d is FragmentDefinitionNode))
+        {
+            return "QUERY_FRAGMENTS_NOT_ALLOWED";
+        }
+
+        if (operations.Count == 0 || document.Definitions.Any(d => d is not OperationDefinitionNode))
         {
             return "QUERY_SYNTAX";
         }
@@ -140,6 +150,11 @@ internal static class DbtGoldenQueryValidator
             if (operation.Operation != OperationType.Query)
             {
                 return "QUERY_NOT_QUERY_OPERATION";
+            }
+
+            if (operation.Directives.Count > 0 || operation.VariableDefinitions.Any(v => v.Directives.Count > 0))
+            {
+                return "QUERY_DIRECTIVES_NOT_ALLOWED";
             }
 
             foreach (var selection in operation.SelectionSet.Selections)
@@ -155,47 +170,74 @@ internal static class DbtGoldenQueryValidator
                 }
             }
 
-            if (!WithinBounds(operation.SelectionSet, 1, ref fields))
+            var bounds = WithinBounds(operation.SelectionSet, 1, ref fields);
+            if (bounds is not null)
             {
-                return "QUERY_TOO_COMPLEX";
+                return bounds;
             }
         }
 
         return null;
     }
 
-    private static bool WithinBounds(SelectionSetNode? set, int depth, ref int fields)
+    private static bool BraceDepthExceeds(string query, int max)
+    {
+        var depth = 0;
+        var inString = false;
+        for (var i = 0; i < query.Length; i++)
+        {
+            var c = query[i];
+            if (inString)
+            {
+                if (c == '\\') i++;
+                else if (c == '"') inString = false;
+            }
+            else if (c == '"') inString = true;
+            else if (c == '{' && ++depth > max) return true;
+            else if (c == '}') depth--;
+        }
+
+        return false;
+    }
+
+    /// <summary>Null when the selection set is within bounds, otherwise the reason code (fragments and directives are never accepted).</summary>
+    private static string? WithinBounds(SelectionSetNode? set, int depth, ref int fields)
     {
         if (set is null)
         {
-            return true;
+            return null;
         }
 
         if (depth > MaxSelectionDepth)
         {
-            return false;
+            return "QUERY_TOO_COMPLEX";
         }
 
         foreach (var selection in set.Selections)
         {
-            if (++fields > MaxSelectedFields)
+            if (selection is not FieldNode field)
             {
-                return false;
+                return "QUERY_FRAGMENTS_NOT_ALLOWED";
             }
 
-            var child = selection switch
+            if (field.Directives.Count > 0)
             {
-                FieldNode f => f.SelectionSet,
-                InlineFragmentNode i => i.SelectionSet,
-                _ => null
-            };
-            if (!WithinBounds(child, depth + 1, ref fields))
+                return "QUERY_DIRECTIVES_NOT_ALLOWED";
+            }
+
+            if (++fields > MaxSelectedFields)
             {
-                return false;
+                return "QUERY_TOO_COMPLEX";
+            }
+
+            var nested = WithinBounds(field.SelectionSet, depth + 1, ref fields);
+            if (nested is not null)
+            {
+                return nested;
             }
         }
 
-        return true;
+        return null;
     }
 
     private static (string? Json, string? Reason) SanitizeVariables(string raw)

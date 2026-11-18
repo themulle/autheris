@@ -332,7 +332,7 @@ public sealed partial class McpDatasetCatalog
 
         IReadOnlyList<McpDatasetExample> examples = brief
             ? []
-            : await LoadExamplesAsync(principal, obj.Domain, obj.Name, graphQl, graphQlColumns, hiddenCols, ct).ConfigureAwait(false);
+            : await LoadExamplesAsync(principal, id, graphQl, graphQlColumns, ExampleHiddenColumns(hiddenCols, graphQl, obj), ct).ConfigureAwait(false);
 
         var graphQlAccess = brief || graphQl == null
             ? null

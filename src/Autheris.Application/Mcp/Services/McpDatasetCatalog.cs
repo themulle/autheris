@@ -507,7 +507,9 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
             })
             .ToList();
 
-        var examples = await LoadExamplesAsync(principal, id.Domain, id.TableName, graphQl, graphQlColumns, hiddenCols, ct).ConfigureAwait(false);
+        var exampleHidden = new HashSet<string>(hiddenCols, StringComparer.OrdinalIgnoreCase);
+        exampleHidden.UnionWith(columnAccessLevels.Where(kv => kv.Value == Autheris.Domain.Interfaces.ColumnAccessLevel.Deny).Select(kv => kv.Key));
+        var examples = await LoadExamplesAsync(principal, id, graphQl, graphQlColumns, exampleHidden, ct).ConfigureAwait(false);
 
         var (dataOwner, dataOwnerDelegates) = await LoadOwnersAsync(id, displayNameOnly: false, ct).ConfigureAwait(false);
 

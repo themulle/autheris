@@ -7,18 +7,18 @@ using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Mcp.Interfaces;
+using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 
 public sealed partial class McpDatasetCatalog
 {
     /// <summary>
-    /// Golden queries of one dataset for the caller. The owning dataset is the one being described; relation targets must be visible, and
-    /// an example that mentions a hidden column of the dataset or of a reached relation target is dropped before the result cap.
+    /// Golden queries of one dataset for the caller. The caller view is built by the shared <see cref="GoldenQueryCallerView"/>: relation
+    /// targets (transitively) must be visible, hidden columns of every reached dataset drop the example and an unresolvable field drops it.
     /// </summary>
     private async Task<IReadOnlyList<McpDatasetExample>> LoadExamplesAsync(
         ClaimsPrincipal principal,
-        string domain,
-        string tableName,
+        TableIdentifier owner,
         GraphQlTableMapping? graphQl,
         IReadOnlyDictionary<string, GraphQlColumnMapping> graphQlColumns,
         IReadOnlySet<string> hiddenColumns,
@@ -29,30 +29,58 @@ public sealed partial class McpDatasetCatalog
             return [];
         }
 
-        var relations = graphQl?.Relations ?? [];
-        var visibleTargets = new HashSet<(string, string)>();
-        if (relations.Count > 0 && graphQl is not null)
-        {
-            var visibleIds = await VisibleRelationTargetsAsync(principal, graphQl, ct).ConfigureAwait(false);
-            foreach (var relation in relations.Where(r => visibleIds.Contains(DatasetId(r.Target))))
+        var view = await GoldenQueryCallerView.BuildAsync(
+            [new GoldenQueryCallerView.Seed(owner.Domain, owner.TableName, owner, graphQl)],
+            graphQlMap,
+            (targets, token) => FilterVisibleTargetsAsync(principal, targets, token),
+            async (id, domain, table, mapping, token) =>
             {
-                visibleTargets.Add((relation.Target.Domain.ToLowerInvariant(), relation.Target.TableName.ToLowerInvariant()));
-            }
+                if (string.Equals(domain, owner.Domain, StringComparison.OrdinalIgnoreCase) && string.Equals(table, owner.TableName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return hiddenColumns;
+                }
+
+                var visibleColumns = id is { } target ? await VisibleTargetColumnsAsync(principal, target, token).ConfigureAwait(false) : null;
+                return visibleColumns is null
+                    ? null
+                    : (mapping?.Columns.Select(c => c.ColumnName).Where(c => !visibleColumns.Contains(c)).ToHashSet(StringComparer.OrdinalIgnoreCase)
+                        ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+            },
+            ct).ConfigureAwait(false);
+
+        var context = view.ToContext(McpCatalogVisibility.TryTenantId(principal));
+        var goldens = await goldenQueryService.GetGoldenQueriesAsync(context, owner.Domain, owner.TableName, ct).ConfigureAwait(false);
+        var hiddenIds = GoldenQueryService.BuildHiddenIdentifierSet(hiddenColumns, graphQlColumns);
+        return GoldenQueryService.ExcludeHiddenColumnQueries(goldens, hiddenIds)
+            .Select(g => new McpDatasetExample(g.Title, g.Description, g.QueryText, g.VariablesJson))
+            .ToList();
+    }
+
+    private async Task<IReadOnlySet<TableIdentifier>> FilterVisibleTargetsAsync(ClaimsPrincipal principal, IReadOnlyList<TableIdentifier> targets, CancellationToken ct)
+    {
+        if (IsBypassed)
+        {
+            return targets.ToHashSet();
         }
 
-        var hiddenIds = GoldenQueryService.BuildHiddenIdentifierSet(hiddenColumns, graphQlColumns);
-        bool IsOwner(string d, string t) =>
-            string.Equals(d, domain, StringComparison.OrdinalIgnoreCase) && string.Equals(t, tableName, StringComparison.OrdinalIgnoreCase);
+        if (visibility == null)
+        {
+            return new HashSet<TableIdentifier>();
+        }
 
-        var context = new GoldenQueryReadContext(
-            McpCatalogVisibility.SafeTenantId(principal),
-            IsDatasetVisible: (d, t) => IsOwner(d, t) || visibleTargets.Contains((d.ToLowerInvariant(), t.ToLowerInvariant())),
-            HiddenIdentifiers: (d, t) => IsOwner(d, t) ? hiddenIds : null,
-            ReferencedDatasets: q => relations
-                .Where(r => GoldenQueryService.MentionsAnyIdentifier(q.QueryText, new HashSet<string>([r.Field], StringComparer.OrdinalIgnoreCase)))
-                .Select(r => (r.Target.Domain, r.Target.TableName)));
+        var visible = await visibility.FilterVisibleAsync(CallerOf(principal), targets, ct).ConfigureAwait(false);
+        return visible.ToHashSet();
+    }
 
-        var goldens = await goldenQueryService.GetGoldenQueriesAsync(context, domain, tableName, ct).ConfigureAwait(false);
-        return GoldenQueryService.ExcludeHiddenColumnQueries(goldens, hiddenIds).Select(g => new McpDatasetExample(g.Title, g.Description, g.QueryText, g.VariablesJson)).ToList();
+    /// <summary>Hidden-text columns plus every mapped column that discovery already withheld from the caller.</summary>
+    private static IReadOnlySet<string> ExampleHiddenColumns(IReadOnlySet<string> hiddenText, GraphQlTableMapping? graphQl, Autheris.Domain.Model.DiscoveryObject obj)
+    {
+        var hidden = new HashSet<string>(hiddenText, StringComparer.OrdinalIgnoreCase);
+        if (graphQl is not null)
+        {
+            hidden.UnionWith(graphQl.Columns.Select(c => c.ColumnName).Where(n => !obj.Columns.Any(c => string.Equals(c.Name, n, StringComparison.OrdinalIgnoreCase))));
+        }
+
+        return hidden;
     }
 }

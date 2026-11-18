@@ -125,6 +125,33 @@ public sealed class GoldenQueryMetaImportTests
     }
 
     [Fact]
+    [Trait("Category", "Security")]
+    public async Task Fragments_directives_and_deep_nesting_rejected()
+    {
+        var fixture = new Fixture();
+        var braces = new string('{', 40) + new string('}', 40);
+
+        var result = await fixture.SyncAsync(Manifest(
+        [
+            Entry("Fragment", "{ orders { ...F } } fragment F on Order { id }"),
+            Entry("Inline", "{ orders { ... on Order { id } } }"),
+            Entry("Directive", "{ orders { id @include(if: false) } }"),
+            Entry("Operation directive", "query Q @live { orders { id } }"),
+            Entry("Braces", braces),
+            Entry("Alias own", "{ o: orders { identifier: id } }"),
+            Entry("Alias foreign", "{ o: payroll { id } }")
+        ]));
+
+        result.Warnings.ShouldContain(w => w.Contains("entry 0") && w.Contains("QUERY_FRAGMENTS_NOT_ALLOWED"));
+        result.Warnings.ShouldContain(w => w.Contains("entry 1") && w.Contains("QUERY_FRAGMENTS_NOT_ALLOWED"));
+        result.Warnings.ShouldContain(w => w.Contains("entry 2") && w.Contains("QUERY_DIRECTIVES_NOT_ALLOWED"));
+        result.Warnings.ShouldContain(w => w.Contains("entry 3") && w.Contains("QUERY_DIRECTIVES_NOT_ALLOWED"));
+        result.Warnings.ShouldContain(w => w.Contains("entry 4") && w.Contains("QUERY_TOO_COMPLEX"));
+        result.Warnings.ShouldContain(w => w.Contains("entry 6") && w.Contains("QUERY_FOREIGN_DATASET"));
+        fixture.Store.Stored(TenantA, OrdersTableId.ToString()).Select(e => e.Title).ShouldBe(["Alias own"]);
+    }
+
+    [Fact]
     public async Task Oversized_text_rejected()
     {
         var fixture = new Fixture();
