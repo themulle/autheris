@@ -95,6 +95,72 @@ public sealed class GoldenQueryService : IGoldenQueryService
         return ValueTask.FromResult<IReadOnlyList<GoldenQuery>>(results);
     }
 
+    public static IReadOnlyList<GoldenQuery> ExcludeHiddenColumnQueries(
+        IReadOnlyList<GoldenQuery> queries,
+        IReadOnlySet<string>? hiddenIdentifiers)
+    {
+        if (queries.Count == 0 || hiddenIdentifiers is null or { Count: 0 })
+        {
+            return queries;
+        }
+
+        return queries.Where(q => !MentionsAnyIdentifier(q.QueryText, hiddenIdentifiers)).ToList();
+    }
+
+    public static IReadOnlySet<string> BuildHiddenIdentifierSet(
+        IReadOnlySet<string>? hiddenColumns,
+        IReadOnlyDictionary<string, GraphQlColumnMapping>? graphQlColumns = null)
+    {
+        if (hiddenColumns is null or { Count: 0 })
+        {
+            return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var set = new HashSet<string>(hiddenColumns, StringComparer.OrdinalIgnoreCase);
+        if (graphQlColumns is not null)
+        {
+            foreach (var col in hiddenColumns)
+            {
+                if (graphQlColumns.TryGetValue(col, out var gql) && !string.IsNullOrWhiteSpace(gql.Field))
+                {
+                    set.Add(gql.Field);
+                }
+            }
+        }
+
+        return set;
+    }
+
+    public static bool MentionsAnyIdentifier(string? text, IReadOnlySet<string> identifiers)
+    {
+        if (string.IsNullOrWhiteSpace(text) || identifiers.Count == 0)
+        {
+            return false;
+        }
+
+        int i = 0;
+        while (i < text.Length)
+        {
+            if (IsIdentifierChar(text[i]))
+            {
+                int start = i;
+                while (i < text.Length && IsIdentifierChar(text[i])) i++;
+                if (identifiers.Contains(text[start..i]))
+                {
+                    return true;
+                }
+            }
+            else
+            {
+                i++;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsIdentifierChar(char c) => char.IsLetterOrDigit(c) || c == '_';
+
     private static bool IsVisible(Func<GoldenQuery, bool> visible, GoldenQuery query)
     {
         try

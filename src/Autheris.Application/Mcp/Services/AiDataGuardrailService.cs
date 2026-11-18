@@ -479,13 +479,15 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
             {
                 // MCP-15: visibility is evaluated first and applied before the cap; any failure yields an empty list, never "all".
                 HashSet<(string Domain, string Table)>? visibleKeys = null;
+                IReadOnlyList<TableMetadata>? visibleTables = null;
+                System.Security.Claims.ClaimsPrincipal? callerPrincipal = null;
                 try
                 {
-                    var principal = McpProtocolHandler.BuildPrincipalFromSession(sessionContext);
+                    callerPrincipal = McpProtocolHandler.BuildPrincipalFromSession(sessionContext);
                     var allTables = _tableMetadataRepository != null
                         ? await CatalogTablePageReader.ReadAllAsync(_tableMetadataRepository, new CatalogTableQuery(IncludeInactive: false), static t => t.Table.IsActive, ct: cancellationToken).ConfigureAwait(false)
                         : Array.Empty<TableMetadata>();
-                    var visibleTables = await McpCatalogVisibility.VisibleTablesAsync(allTables, principal, _consentRepository, _options.Value, _catalogVisibility, cancellationToken).ConfigureAwait(false);
+                    visibleTables = await McpCatalogVisibility.VisibleTablesAsync(allTables, callerPrincipal, _consentRepository, _options.Value, _catalogVisibility, cancellationToken).ConfigureAwait(false);
                     visibleKeys = visibleTables?.Select(t => (Domain: t.Identifier.Domain.ToLowerInvariant(), Table: t.Identifier.TableName.ToLowerInvariant())).ToHashSet();
                 }
                 catch (Exception ex) when (ex is not OutOfMemoryException and not OperationCanceledException)
@@ -496,6 +498,35 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
                 queries = visibleKeys is null
                     ? Array.Empty<GoldenQuery>()
                     : await _goldenQueryService.GetGoldenQueriesAsync(domain, tableName, q => visibleKeys.Contains((q.Domain.ToLowerInvariant(), q.TableName.ToLowerInvariant())), cancellationToken).ConfigureAwait(false);
+                if (queries.Count > 0 && _decisionPoint is not null && callerPrincipal is not null && visibleTables is { Count: > 0 })
+                {
+                    var decisions = await _decisionPoint.DecideManyAsync(
+                        Autheris.Domain.Security.SecurityPrincipalContext.FromPrincipal(callerPrincipal, sessionContext.TenantId),
+                        visibleTables,
+                        Autheris.Application.Policy.Pdp.AccessOperation.Discover,
+                        Autheris.Application.Policy.Pdp.AccessTransport.Mcp,
+                        cancellationToken).ConfigureAwait(false);
+                    if (decisions is { Count: > 0 })
+                    {
+                        var hiddenByTable = new Dictionary<(string Domain, string Table), IReadOnlySet<string>>();
+                        foreach (var d in decisions)
+                        {
+                            if (d?.HiddenCatalogTextColumns is not { Count: > 0 } hidden) continue;
+                            var gated = hidden.Where(d.IsCatalogTextHidden).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                            if (gated.Count == 0) continue;
+                            // A query may select the column through its GraphQL field alias, so the aliases join the hidden identifiers.
+                            var mapping = _graphQlCatalogMap is null ? null : await _graphQlCatalogMap.GetTableAsync(d.Table, cancellationToken).ConfigureAwait(false);
+                            var byColumn = mapping?.Columns.ToDictionary(m => m.ColumnName, m => m, StringComparer.OrdinalIgnoreCase);
+                            hiddenByTable[(d.Table.Domain.ToLowerInvariant(), d.Table.TableName.ToLowerInvariant())] = GoldenQueryService.BuildHiddenIdentifierSet(gated, byColumn);
+                        }
+                        if (hiddenByTable.Count > 0)
+                        {
+                            queries = queries.Where(q =>
+                                !hiddenByTable.TryGetValue((q.Domain.ToLowerInvariant(), q.TableName.ToLowerInvariant()), out var hiddenCols) ||
+                                !GoldenQueryService.MentionsAnyIdentifier(q.QueryText, hiddenCols)).ToList();
+                        }
+                    }
+                }
             }
             else
             {

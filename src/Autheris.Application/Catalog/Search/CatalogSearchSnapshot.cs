@@ -14,7 +14,8 @@ public sealed record CatalogSearchSnapshot(
     VectorSearchIndex VectorIndex,
     IReadOnlyDictionary<TableIdentifier, TableMetadata> MetadataMap,
     IReadOnlyDictionary<TableIdentifier, List<TableRelationship>> ForeignKeysGraph,
-    DateTimeOffset CreatedAt)
+    DateTimeOffset CreatedAt,
+    IReadOnlyDictionary<TableIdentifier, IReadOnlySet<string>>? HiddenTextColumns = null)
 {
     public int BaseDocumentCount => Bm25Index.BaseDocumentCount;
 

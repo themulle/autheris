@@ -366,6 +366,11 @@ public sealed class ClassificationAccessResolver
                 def, keyedOverrides, unkeyedOverride, catalog, hasRestrictedClass);
             if (candidate is null)
             {
+                if (HasHiddenCatalogTextRule(def, keyedOverrides, unkeyedOverride, catalog))
+                {
+                    catalogText = CatalogTextVisibility.Hidden;
+                }
+
                 continue;
             }
 
@@ -464,6 +469,21 @@ public sealed class ClassificationAccessResolver
         return ResolveDefaultFallbackCandidate(def, catalog);
     }
 
+    private static bool HasHiddenCatalogTextRule(
+        DataClassification def,
+        IReadOnlyDictionary<string, ColumnMaskOverride> keyedOverrides,
+        ColumnMaskOverride? unkeyedOverride,
+        ClassificationPolicyCatalog catalog)
+    {
+        if (keyedOverrides.TryGetValue(def.Code, out var keyed))
+            return keyed.CatalogText == CatalogTextVisibility.Hidden;
+        if (unkeyedOverride is not null)
+            return unkeyedOverride.CatalogText == CatalogTextVisibility.Hidden;
+        return TryResolveRuleFromHierarchy(def.Code, catalog, out var rule)
+            ? rule.CatalogText == CatalogTextVisibility.Hidden
+            : ResolveDefaultFallbackCandidate(def, catalog).CatalogText == CatalogTextVisibility.Hidden;
+    }
+
     private static bool TryResolveRuleFromHierarchy(
         string startCode,
         ClassificationPolicyCatalog catalog,
@@ -526,6 +546,17 @@ public sealed class ClassificationAccessResolver
     }
 
     private static ColumnClassificationGrantOutcome PickStricterOutcome(
+        ColumnClassificationGrantOutcome current,
+        ColumnClassificationGrantOutcome candidate)
+    {
+        var mergedText = current.CatalogText == CatalogTextVisibility.Hidden || candidate.CatalogText == CatalogTextVisibility.Hidden
+            ? CatalogTextVisibility.Hidden
+            : CatalogTextVisibility.Visible;
+        var winner = PickStricterOutcomeCore(current, candidate);
+        return winner.CatalogText == mergedText ? winner : winner with { CatalogText = mergedText };
+    }
+
+    private static ColumnClassificationGrantOutcome PickStricterOutcomeCore(
         ColumnClassificationGrantOutcome current,
         ColumnClassificationGrantOutcome candidate)
     {
@@ -765,4 +796,102 @@ public sealed class ClassificationAccessResolver
         string? ParamsJson,
         string? KeyRef,
         CatalogTextVisibility CatalogText);
+
+    public static Task<IReadOnlySet<string>> ResolveIndexingHiddenTextColumnsAsync(
+        TableMetadata metadata,
+        IClassificationRepository? repository,
+        CancellationToken ct = default)
+        => new IndexingHiddenTextResolver(repository).ResolveAsync(metadata, ct);
+
+    /// <summary>
+    /// Resolves the columns whose catalog text is HIDDEN for table rows, loading the classification definitions and mask rules once per
+    /// tenant scope; create one per request or rebuild pass and reuse it across tables.
+    /// </summary>
+    public sealed class IndexingHiddenTextResolver(IClassificationRepository? repository)
+    {
+        private readonly Dictionary<string, ClassificationPolicyCatalog[]> _catalogsByScope = new(StringComparer.Ordinal);
+
+        public async Task<IReadOnlySet<string>> ResolveAsync(TableMetadata metadata, CancellationToken ct = default)
+        {
+            var tenantScope = string.IsNullOrWhiteSpace(metadata.OwnerTenantId) ? null : metadata.OwnerTenantId;
+            if (!_catalogsByScope.TryGetValue(tenantScope ?? string.Empty, out var catalogs))
+            {
+                catalogs = await LoadCatalogsAsync(tenantScope, ct).ConfigureAwait(false);
+                _catalogsByScope[tenantScope ?? string.Empty] = catalogs;
+            }
+
+            return await ResolveColumnsAsync(metadata, tenantScope, catalogs, ct).ConfigureAwait(false);
+        }
+
+        private async Task<ClassificationPolicyCatalog[]> LoadCatalogsAsync(string? tenantScope, CancellationToken ct)
+        {
+            IReadOnlyList<DataClassification> defs = Array.Empty<DataClassification>();
+            IReadOnlyList<ClassificationMaskRule> rules = Array.Empty<ClassificationMaskRule>();
+            if (repository is not null)
+            {
+                defs = await repository.GetClassificationsAsync(tenantScope, includeInactive: true, ct).ConfigureAwait(false);
+                rules = await repository.GetClassificationMaskRulesAsync(tenantScope, ct).ConfigureAwait(false);
+            }
+
+        var defMap = new Dictionary<string, DataClassification>(StringComparer.Ordinal);
+        if (defs.Count > 0)
+        {
+            var tenantDefs = new List<DataClassification>();
+            foreach (var d in defs)
+            {
+                if (ClassificationScopes.IsGlobal(d.Scope)) defMap[d.Code] = d;
+                else if (tenantScope is not null && string.Equals(d.Scope, tenantScope, StringComparison.Ordinal)) tenantDefs.Add(d);
+            }
+            foreach (var d in tenantDefs) defMap[d.Code] = d;
+        }
+        var builtIn = BuiltInCatalog(tenantScope ?? ClassificationScopes.Global);
+        var catalogDefs = new Dictionary<string, DataClassification>(builtIn.Definitions, StringComparer.Ordinal);
+        foreach (var kv in defMap) catalogDefs[kv.Key] = kv.Value;
+
+        var globalRules = new Dictionary<string, ClassificationMaskRule>(builtIn.MaskRules, StringComparer.Ordinal);
+        var tenantRules = new Dictionary<string, ClassificationMaskRule>(StringComparer.Ordinal);
+        foreach (var r in rules)
+        {
+            if (ClassificationScopes.IsGlobal(r.Scope)) globalRules[r.Code] = r;
+            else if (tenantScope is not null && string.Equals(r.Scope, tenantScope, StringComparison.Ordinal)) tenantRules[r.Code] = r;
+        }
+        return new[]
+        {
+            new ClassificationPolicyCatalog(ClassificationScopes.Global, catalogDefs, globalRules),
+            new ClassificationPolicyCatalog(tenantScope ?? ClassificationScopes.Global, catalogDefs, tenantRules)
+        };
+        }
+
+        private async Task<IReadOnlySet<string>> ResolveColumnsAsync(TableMetadata metadata, string? tenantScope, ClassificationPolicyCatalog[] catalogs, CancellationToken ct)
+        {
+        HashSet<string>? hidden = null;
+        foreach (var col in metadata.Columns)
+        {
+            if (col.DiscoveryHidden) continue;
+            var overrides = metadata.ColumnMaskOverrides.TryGetValue(col.ColumnName, out var memOv) ? memOv : Array.Empty<ColumnMaskOverride>();
+            if (repository is not null && col.Id != Guid.Empty)
+            {
+                var persistedOv = await repository.GetColumnMaskOverridesAsync(col.Id.ToString(), tenantScope, ct).ConfigureAwait(false);
+                if (persistedOv.Count > 0) overrides = overrides.Count == 0 ? persistedOv : [.. overrides, .. persistedOv];
+            }
+            if (overrides.Any(static o => o.CatalogText == CatalogTextVisibility.Hidden))
+            {
+                (hidden ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase)).Add(col.ColumnName);
+                continue;
+            }
+
+            var classes = metadata.ColumnClassifications.TryGetValue(col.ColumnName, out var memCc) ? memCc : Array.Empty<ColumnClassification>();
+            if (repository is not null && col.Id != Guid.Empty)
+            {
+                var persistedCc = await repository.GetColumnClassificationsAsync(col.Id.ToString(), tenantScope, ct).ConfigureAwait(false);
+                if (persistedCc.Count > 0) classes = classes.Count == 0 ? persistedCc : [.. classes, .. persistedCc];
+            }
+            if (classes.Any(cc => catalogs.Any(cat => TryResolveRuleFromHierarchy(cc.Code, cat, out var r) && r.CatalogText == CatalogTextVisibility.Hidden)))
+            {
+                (hidden ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase)).Add(col.ColumnName);
+            }
+        }
+        return hidden ?? (IReadOnlySet<string>)new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        }
+    }
 }

@@ -105,6 +105,15 @@ public record TableAccessDecision(
     /// <summary>Data-access audit entries for classification levels applied per grant.</summary>
     public IReadOnlyList<GrantClassificationAuditEntry> GrantClassificationsAudit { get; init; } = [];
 
+    /// <summary>Columns whose catalog text is suppressed when masked for this caller.</summary>
+    public IReadOnlySet<string>? HiddenCatalogTextColumns { get; init; }
+
+    /// <summary>True when catalog text (description, display name, semantics, value profile, examples) must be omitted for <paramref name="columnName"/>.</summary>
+    public bool IsCatalogTextHidden(string columnName) =>
+        HiddenCatalogTextColumns is { Count: > 0 } hidden &&
+        hidden.Contains(columnName) &&
+        GetColumnAccess(columnName) != ColumnAccessLevel.Clear;
+
     /// <summary>
     /// Typed variant of <see cref="WithAdditionalRowFilter"/>: AND-merges <paramref name="policy"/> into <see cref="RowPolicy"/> and
     /// re-projects the text. On a decision that carries only a string filter the text is composed and the decision stays string-only

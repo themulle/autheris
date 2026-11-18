@@ -126,6 +126,7 @@ public sealed partial class Query
         [Service] Autheris.Application.Catalog.Localization.ILanguageNegotiator? languageNegotiator = null,
         [Service] IOptions<Autheris.Domain.Options.CatalogLocalizationOptions>? localizationOptions = null,
         [Service] IDiscoveryService? discoveryService = null,
+        [Service] IClassificationRepository? classificationRepository = null,
         CancellationToken ct = default)
     {
         var httpContext = httpContextAccessor?.HttpContext;
@@ -251,7 +252,18 @@ public sealed partial class Query
         }
 
         // Second line of defence: ToCatalogDtos re-applies the shaping rule with the set's admin view.
-        var catalogList = ToCatalogDtos(visible.Tables, visible.IsAdminView, activeConsents, pendingRequests, isAdmin, targetLang);
+        var hiddenText = new Dictionary<TableIdentifier, IReadOnlySet<string>>();
+        var hiddenResolver = new Autheris.Application.Policy.Classification.ClassificationAccessResolver.IndexingHiddenTextResolver(classificationRepository);
+        foreach (var t in visible.Tables)
+        {
+            var hidden = await hiddenResolver.ResolveAsync(t, ct).ConfigureAwait(false);
+            if (hidden.Count > 0)
+            {
+                hiddenText[t.Identifier] = hidden;
+            }
+        }
+
+        var catalogList = ToCatalogDtos(visible.Tables, visible.IsAdminView, activeConsents, pendingRequests, isAdmin, targetLang, hiddenText);
 
         return FilterAndPaginateCatalog(catalogList, domain, search, tag, first, after);
     }
@@ -424,13 +436,14 @@ public sealed partial class Query
 
     /// <summary>The shaping loop of the catalog query: rows that do not exist for the caller are dropped before filtering and paging (F-C11).</summary>
     internal static List<TableMetadataDto> ToCatalogDtos(
-        IEnumerable<TableMetadata> visibleTables, bool isAdminView, IReadOnlyList<Consent> activeConsents, IReadOnlyList<ConsentRequest> pendingRequests, bool isAdmin, string? language = null)
+        IEnumerable<TableMetadata> visibleTables, bool isAdminView, IReadOnlyList<Consent> activeConsents, IReadOnlyList<ConsentRequest> pendingRequests, bool isAdmin, string? language = null,
+        IReadOnlyDictionary<TableIdentifier, IReadOnlySet<string>>? hiddenText = null)
     {
         var catalogList = new List<TableMetadataDto>();
         foreach (var t in visibleTables)
         {
             var status = Autheris.Application.Services.CatalogVisibility.ComputeAccessStatus(t.Identifier, activeConsents, pendingRequests, isAdmin);
-            var dto = ToCatalogDto(t, isAdminView, status, language);
+            var dto = ToCatalogDto(t, isAdminView, status, language, hiddenText);
             if (dto != null)
             {
                 catalogList.Add(dto);
@@ -444,7 +457,8 @@ public sealed partial class Query
     /// Issue #111 shaping of one consent/tier-filtered row (<see cref="Autheris.Application.Services.CatalogViewShaping"/>): null when the row
     /// does not exist for the caller (a non-administrator row without a recognised view), no columns for <c>Summary</c>.
     /// </summary>
-    internal static TableMetadataDto? ToCatalogDto(TableMetadata t, bool isAdminView, string status, string? language = null)
+    internal static TableMetadataDto? ToCatalogDto(TableMetadata t, bool isAdminView, string status, string? language = null,
+        IReadOnlyDictionary<TableIdentifier, IReadOnlySet<string>>? hiddenText = null)
     {
         var shape = Autheris.Application.Services.CatalogViewShaping.Resolve(isAdminView, t.CatalogView);
         if (shape == Autheris.Application.Services.CatalogOutputShape.NotFound)
@@ -461,13 +475,17 @@ public sealed partial class Query
             {
                 var colResolved = !string.IsNullOrWhiteSpace(language) ? c.Texts.Resolve(language) : null;
                 var isSens = ClassificationMetadata.IsColumnSensitive(t, c);
+                // Hidden by an override or by a rule-level setting; a column that is not sensitive is Clear for the row and keeps its text.
+                bool hideText = isSens &&
+                                ((t.ColumnMaskOverrides.TryGetValue(c.ColumnName, out var ovs) && ovs.Any(static o => o.CatalogText == CatalogTextVisibility.Hidden)) ||
+                                 (hiddenText is not null && hiddenText.TryGetValue(t.Identifier, out var hiddenCols) && hiddenCols.Contains(c.ColumnName)));
                 var (pii, clearSep, classifications, clearRequestable) = Autheris.Application.Catalog.Discovery.DiscoveryAccessMapper
                     .ResolveColumnClassifications(t, c, t.Table.DiscoveryHidden);
                 return new DiscoveryColumn(
                     c.ColumnName,
-                    colResolved?.Title ?? c.DisplayName,
+                    hideText ? null : (colResolved?.Title ?? c.DisplayName),
                     c.DataType,
-                    colResolved?.Description ?? c.Description,
+                    hideText ? null : (colResolved?.Description ?? c.Description),
                     pii,
                     clearSep,
                     isSens ? DiscoveryColumnState.Masked : DiscoveryColumnState.Clear,
