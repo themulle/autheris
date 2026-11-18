@@ -9,6 +9,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 - F-GOV-15 shows a group and a user manifest instead of a role grantee and describes the current apply rules (`validUntil` for every policy, no `validityDays`, no role grantees) and the four-eyes rule for individual grantees, including how to seed test and demo environments; F-GOV-22 explains `INDIVIDUAL_GRANT_REQUIRES_FOUR_EYES` on the manifest path; the simplification migration guide describes what the upgrade does to role consents (#800, #801).
 
+### Fixed
+- A tree query whose root has a set-based list child no longer fails with an invalid column when the root `orderBy` omits the unique key and the key is not selected: the page CTE now projects the tie-break key columns it orders by; they are not returned unless selected. The root and child tie-break keys are resolved to their catalog spelling, and access is checked on that name: a key declared as `ID` for column `id` is written as `id` (the same column on SQL Server, a fix on PostgreSQL), and a key column that is unknown, not a safe name, masked or denied is never used as tie-break (the next clear unique index is used, else the list stays correlated) (#836).
+
 ## [1.8.5] - 2026-11-17
 
 ### Added
