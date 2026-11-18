@@ -71,4 +71,21 @@ public sealed class ConsentManifestApplyEndpointTests
         status.ShouldBe(StatusCodes.Status400BadRequest);
         text.ShouldNotContain(Marker);
     }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task BlankScopeEntry_Returns400_NamingThePolicyIndexAndTheRule()
+    {
+        var service = Substitute.For<IDeclarativeConsentApplyService>();
+        service.ApplyManifestAsync(default!, default!, default, default, default)
+            .ReturnsForAnyArgs(Task.FromException<Autheris.Domain.Model.DeclarativeApplyResult>(
+                new Autheris.Application.Governance.Services.DeclarativeManifestValidationException(2, Autheris.Application.Governance.Services.DeclarativeManifestViolation.ScopeEntry)));
+        var context = Request("{ \"version\": \"1\", \"policies\": [] }");
+
+        var (status, text) = await ExecuteAsync(await GovernanceEndpoints.ApplyConsentManifestAsync(context, service, CancellationToken.None), context);
+
+        status.ShouldBe(StatusCodes.Status400BadRequest);
+        text.ShouldContain("index 2");
+        text.ShouldContain("blank scope entry");
+    }
 }

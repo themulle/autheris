@@ -279,7 +279,8 @@ public sealed record McpUseCaseCandidate(
     string? Description,
     double RelevanceScore,
     IReadOnlyList<string> MatchedColumns,
-    IReadOnlyList<McpTableRelation> Relations);
+    IReadOnlyList<McpTableRelation> Relations,
+    string? AccessStatus = null);
 
 /// <summary>Result of find_relevant_tables.</summary>
 public sealed record McpUseCaseDiscoveryResult(

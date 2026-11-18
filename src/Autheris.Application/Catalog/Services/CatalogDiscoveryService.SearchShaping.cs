@@ -110,4 +110,14 @@ public sealed partial class CatalogDiscoveryService
     }
 
     private static readonly char[] TokenSeparators = [' ', '\t', '\r', '\n', ',', ';', '.', '(', ')', '"', '\'', '/', '\\', '-', '_', ':'];
+
+    /// <summary>
+    /// Issue #804, path without the discovery service: the caller's status from the visible row, in the vocabulary of
+    /// <see cref="CatalogVisibility.ComputeAccessStatus"/>. Without the tier model a visible row is either a consent row
+    /// (<see cref="CatalogView.Granted"/>) or an administrator row, so it is always readable (<c>GRANTED</c>).
+    /// </summary>
+    private static string LegacyAccessStatusOf(TableMetadata row) =>
+        row.CatalogView is CatalogView.Granted or CatalogView.Unmarked
+            ? Autheris.Application.Catalog.Discovery.CatalogAccessStatus.Granted
+            : Autheris.Application.Catalog.Discovery.CatalogAccessStatus.None;
 }

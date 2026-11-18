@@ -17,6 +17,7 @@ using Autheris.Application.Catalog.Services;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy.Classification;
 using Autheris.Application.Policy.Pdp;
+using Autheris.Application.Policy.RowScopes;
 using Autheris.Application.Tenancy;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
@@ -34,13 +35,15 @@ using Microsoft.Extensions.Options;
 /// Unified authorized data discovery core shared by REST, GraphQL, MCP, and Search channels.
 /// Delegates all allow, row-scope, and column-level decisions solely to <see cref="IAccessDecisionPoint.DecideManyAsync"/>.
 /// </summary>
-public sealed class DiscoveryService : IDiscoveryService
+public sealed partial class DiscoveryService : IDiscoveryService
 {
     public const int MaxPageSize = 200;
     private const int MaxSearchWindows = 5;
     private const int MaxSearchWindowSize = 1000;
     public const int MaxAuditObjectIds = 50;
     public const int ExpiredLookbackDays = 90;
+
+    private static readonly IReadOnlySet<TableIdentifier> EmptyTableSet = new HashSet<TableIdentifier>();
 
     private readonly ITableMetadataRepository? _metadataRepository;
     private readonly IAccessDecisionPoint? _decisionPoint;
@@ -62,6 +65,7 @@ public sealed class DiscoveryService : IDiscoveryService
     private readonly Lock _memoLock = new();
     private readonly Dictionary<ScopeMemoKey, ScopedCatalog> _scopeMemo = [];
     private readonly Dictionary<ObjectMemoKey, DiscoveryObject> _objectMemo = [];
+    private readonly Dictionary<ScopeMemoKey, CallerAccessMemo> _accessMemo = [];
 
     private readonly record struct ScopeMemoKey(string Subject, string ClaimsHash, string Tenant, CatalogChannel Channel);
     private readonly record struct ObjectMemoKey(ScopeMemoKey ScopeKey, DiscoveryObjectKind Kind, TableIdentifier TableId, string LanguageKey);
@@ -155,6 +159,15 @@ public sealed class DiscoveryService : IDiscoveryService
             }
 
             var matchedTables = filtered.ToList();
+
+            // Issue #798: the access filter narrows the matched set before the total and the page are taken. It runs before the
+            // caller-visible text check (#813) so only the tables in the wanted state are projected; both only narrow the set.
+            if (query.Access is { } wantedAccess)
+            {
+                var view = await LoadAccessViewAsync(caller, sid, scopeKey, matchedTables, wantedAccess, ct).ConfigureAwait(false);
+                matchedTables = matchedTables.FindAll(t => view.StateOf(t.Identifier) == wantedAccess);
+            }
+
             if (!string.IsNullOrWhiteSpace(query.Search))
             {
                 var searchText = query.Search.Trim();
@@ -163,9 +176,15 @@ public sealed class DiscoveryService : IDiscoveryService
                     (table, projected) => DiscoveryVisibleTextMatcher.ContainsQuery(table, projected, searchText), ct).ConfigureAwait(false);
             }
 
-            var eligibleProcedures = (await LoadEligibleProceduresAsync(caller, scoped.VisibleTables, ct).ConfigureAwait(false))
-                .Where(p => DiscoveryProcedureResolver.MatchesQuery(p.Procedure, query.Domain, query.Schema, query.Tag, query.Search))
-                .ToList();
+            var eligibleProcedures = query.IncludeProcedures
+                ? (await LoadEligibleProceduresAsync(caller, scoped.VisibleTables, ct).ConfigureAwait(false))
+                    .Where(p => DiscoveryProcedureResolver.MatchesQuery(p.Procedure, query.Domain, query.Schema, query.Tag, query.Search))
+                    .ToList()
+                : [];
+            if (query.Access is { } wantedProcedureAccess)
+            {
+                eligibleProcedures = await FilterProceduresByAccessAsync(caller, sid, scopeKey, eligibleProcedures, wantedProcedureAccess, ct).ConfigureAwait(false);
+            }
 
             var totalCount = matchedTables.Count + eligibleProcedures.Count;
             var first = Math.Clamp(query.First <= 0 ? 50 : query.First, 1, MaxPageSize);
@@ -313,7 +332,21 @@ public sealed class DiscoveryService : IDiscoveryService
 
             var limit = Math.Clamp(options.Limit <= 0 ? 25 : options.Limit, 1, MaxPageSize);
             var trimmed = text?.Trim() ?? string.Empty;
-            var visibleById = scoped.VisibleTables.ToDictionary(static t => t.Identifier);
+
+            // Issue #804: the access filter narrows the searchable set before ranking and the limit.
+            // The domain filter runs first, so only the tables of that domain are decided.
+            var searchable = scoped.VisibleTables;
+            if (options.Access is { } wantedAccess)
+            {
+                var accessDomain = options.Domain?.Trim();
+                var inDomain = string.IsNullOrEmpty(accessDomain)
+                    ? scoped.VisibleTables
+                    : scoped.VisibleTables.Where(t => string.Equals(t.Identifier.Domain, accessDomain, StringComparison.OrdinalIgnoreCase)).ToList();
+                var view = await LoadAccessViewAsync(caller, sid, scopeKey, inDomain, wantedAccess, ct).ConfigureAwait(false);
+                searchable = inDomain.Where(t => view.StateOf(t.Identifier) == wantedAccess).ToList();
+            }
+
+            var visibleById = searchable.ToDictionary(static t => t.Identifier);
 
             List<TableMetadata> matchedTables;
             if (!string.IsNullOrWhiteSpace(trimmed) && _searchEngine?.IsIndexReady == true)
@@ -379,7 +412,7 @@ public sealed class DiscoveryService : IDiscoveryService
             }
             else
             {
-                IEnumerable<TableMetadata> q = scoped.VisibleTables;
+                IEnumerable<TableMetadata> q = searchable;
                 if (!string.IsNullOrWhiteSpace(options.Domain))
                 {
                     var d = options.Domain.Trim();
@@ -404,12 +437,22 @@ public sealed class DiscoveryService : IDiscoveryService
             }
 
             var remainingForProcs = Math.Max(0, limit - matchedTables.Count);
-            var matchedProcedures = remainingForProcs > 0
-                ? (await LoadEligibleProceduresAsync(caller, scoped.VisibleTables, ct).ConfigureAwait(false))
+            List<EligibleDiscoveryProcedure> matchedProcedures = [];
+            if (remainingForProcs > 0)
+            {
+                matchedProcedures = (await LoadEligibleProceduresAsync(caller, scoped.VisibleTables, ct).ConfigureAwait(false))
                     .Where(p => DiscoveryProcedureResolver.MatchesQuery(p.Procedure, options.Domain, schema: null, tag: null, trimmed))
-                    .Take(remainingForProcs)
-                    .ToList()
-                : [];
+                    .ToList();
+                if (options.Access is { } wantedProcedureAccess)
+                {
+                    matchedProcedures = await FilterProceduresByAccessAsync(caller, sid, scopeKey, matchedProcedures, wantedProcedureAccess, ct).ConfigureAwait(false);
+                }
+
+                if (matchedProcedures.Count > remainingForProcs)
+                {
+                    matchedProcedures.RemoveRange(remainingForProcs, matchedProcedures.Count - remainingForProcs);
+                }
+            }
 
             var tableObjects = await ResolveObjectsBatchAsync(
                 caller, sid, scopeKey, matchedTables, options.Language, ct).ConfigureAwait(false);
@@ -689,26 +732,6 @@ public sealed class DiscoveryService : IDiscoveryService
         }
 
         return results.Where(static r => r is not null).Select(static r => r!).ToList();
-    }
-
-    /// <summary>Linked documents are optional enrichment: a failure leaves the objects without documents (fail closed).</summary>
-    private async Task<IReadOnlyDictionary<TableIdentifier, Autheris.Application.Docs.Services.DocLinkView>> LoadDocumentLinksAsync(
-        string tenantId, IReadOnlyList<TableMetadata> tables, CancellationToken ct)
-    {
-        if (_docLinks is null)
-        {
-            return new Dictionary<TableIdentifier, Autheris.Application.Docs.Services.DocLinkView>();
-        }
-
-        try
-        {
-            return await _docLinks.ForTablesAsync(tenantId, tables, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            RecordFailure(ex, "Reading linked documents failed; discovery objects are returned without documents.");
-            return new Dictionary<TableIdentifier, Autheris.Application.Docs.Services.DocLinkView>();
-        }
     }
 
     private async Task<IReadOnlyList<DiscoveryObject>> ResolveProceduresBatchAsync(

@@ -68,6 +68,7 @@ public static class ExternalCatalogApiEndpoints
         long? changedSince = null,
         string? cursor = null,
         int? pageSize = null,
+        string? accessStatus = null,
         CancellationToken ct = default)
     {
         if (!TryResolveTenant(context, out var tenantId, out var denied))
@@ -85,7 +86,8 @@ public static class ExternalCatalogApiEndpoints
             Pii: pii,
             ChangedSince: changedSince,
             Cursor: cursor,
-            PageSize: pageSize ?? ExternalCatalogReader.DefaultPageSize);
+            PageSize: pageSize ?? ExternalCatalogReader.DefaultPageSize,
+            AccessStatus: accessStatus);
 
         var result = await reader.ListObjectsAsync(context.User, tenantId, query, ct).ConfigureAwait(false);
         return ToJsonOrProblemResult(context, result);

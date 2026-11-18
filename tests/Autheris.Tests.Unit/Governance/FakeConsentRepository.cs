@@ -97,7 +97,8 @@ internal sealed class FakeConsentRepository : IConsentRepository, IConsentDescri
         GranteeType = c.GranteeType, GranteeSid = c.GranteeSid, RoleId = c.RoleId, RoleName = c.RoleName, ValidFrom = c.ValidFrom, ValidTo = validTo ?? c.ValidTo,
         IsRevoked = revoked, RevokeReason = revokeReason ?? c.RevokeReason, RenewalCount = c.RenewalCount + renewalCountDelta,
         GrantSource = c.GrantSource, GrantRecordSeq = c.GrantRecordSeq, ProfileAssignmentId = c.ProfileAssignmentId, ExpiryNoticeSentAt = c.ExpiryNoticeSentAt,
-        ColumnRules = c.ColumnRules, RowFilters = c.RowFilters, Description = c.Description
+        ColumnRules = c.ColumnRules, RowFilters = c.RowFilters, Description = c.Description,
+        ObjectPattern = c.ObjectPattern, DataSource = c.DataSource, ColumnSetMode = c.ColumnSetMode
     };
 
     public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, CancellationToken ct = default) =>
@@ -106,7 +107,9 @@ internal sealed class FakeConsentRepository : IConsentRepository, IConsentDescri
     public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, TenantId? tenantId, CancellationToken ct = default)
     {
         var set = subjects.Select(s => s.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        IReadOnlyList<Consent> r = _consents.Where(c => c.IsActive(atTime) && c.TableIdentifier.Equals(table)
+        // Like GovernanceRepository, the read also returns the subjects' pattern grants of the whole domain (data source) of the table.
+        IReadOnlyList<Consent> r = _consents.Where(c => c.IsActive(atTime)
+            && (c.TableIdentifier.Equals(table) || (c.IsPatternGrant && string.Equals(c.DataSource, table.Domain, StringComparison.OrdinalIgnoreCase)))
             && c.GranteeSid is { } g && set.Contains(g.Value) && (tenantId is null || c.TenantId == tenantId.Value)).ToList();
         return Task.FromResult(r);
     }
