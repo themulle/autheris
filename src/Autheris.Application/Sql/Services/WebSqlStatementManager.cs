@@ -226,8 +226,11 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
                 var metadataRepo = scope.ServiceProvider.GetService<ITableMetadataRepository>();
                 var consentRepo = scope.ServiceProvider.GetService<IConsentRepository>();
                 var consentResolver = scope.ServiceProvider.GetService<IConsentResolutionService>();
+                var discovery = scope.ServiceProvider.GetService<Autheris.Application.Catalog.Discovery.IDiscoveryService>();
+                var decisionPoint = scope.ServiceProvider.GetService<Autheris.Application.Policy.Pdp.IAccessDecisionPoint>();
+                var visibility = discovery != null && decisionPoint != null ? new TrinoMetadataVisibility(discovery, decisionPoint) : null;
                 metadataResult = await TrinoMetadataQueryHandler.TryExecuteAsync(
-                    request.Sql, user, tenantId, metadataRepo, consentRepo, _gatewayOptions, consentResolver, sessionCts.Token).ConfigureAwait(false);
+                    request.Sql, user, tenantId, metadataRepo, consentRepo, _gatewayOptions, consentResolver, visibility, sessionCts.Token).ConfigureAwait(false);
             }
             if (metadataResult != null)
             {

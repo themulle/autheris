@@ -22,7 +22,7 @@ using Autheris.Domain.Options;
 /// <c>SHOW TABLES</c>, and <c>information_schema.schemata</c> / <c>tables</c> / <c>columns</c>) enforced
 /// strictly through the caller's governed catalog visibility.
 /// </summary>
-public static class TrinoMetadataQueryHandler
+public static partial class TrinoMetadataQueryHandler
 {
     private static readonly TimeSpan RegexTimeout = TimeSpan.FromMilliseconds(250);
 
@@ -75,6 +75,22 @@ public static class TrinoMetadataQueryHandler
     /// Same as above with the data-path consent resolver for <c>information_schema.columns</c>
     /// (<c>null</c> = a default <see cref="ConsentResolutionService"/>).
     /// </summary>
+    public static Task<GovernedSqlResult?> TryExecuteAsync(
+        string? rawSql,
+        ClaimsPrincipal user,
+        TenantId tenantId,
+        ITableMetadataRepository? metadataRepository,
+        IConsentRepository? consentRepository,
+        GatewayOptions? gatewayOptions,
+        IConsentResolutionService? consentResolver,
+        CancellationToken ct = default)
+        => TryExecuteAsync(rawSql, user, tenantId, metadataRepository, consentRepository, gatewayOptions, consentResolver, visibility: null, ct);
+
+    /// <summary>
+    /// Same as above with the discovery visible set and the decision point. With <paramref name="visibility"/> every listing
+    /// (<c>SHOW</c>, <c>information_schema</c>, <c>system.jdbc</c>) is limited to the objects discovery returns for the caller;
+    /// without it a <c>system.jdbc</c> statement fails closed.
+    /// </summary>
     public static async Task<GovernedSqlResult?> TryExecuteAsync(
         string? rawSql,
         ClaimsPrincipal user,
@@ -83,6 +99,7 @@ public static class TrinoMetadataQueryHandler
         IConsentRepository? consentRepository,
         GatewayOptions? gatewayOptions,
         IConsentResolutionService? consentResolver,
+        TrinoMetadataVisibility? visibility,
         CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(rawSql) || metadataRepository == null)
@@ -107,7 +124,24 @@ public static class TrinoMetadataQueryHandler
 
         if (!showCatalogsMatch.Success && !showSchemasMatch.Success && !showTablesMatch.Success && !infoSchemaMatch.Success)
         {
+            var jdbcMatch = TrinoJdbcMetadataShapes.JdbcStatementRegex.Match(normalized);
+            if (jdbcMatch.Success)
+            {
+                return await ExecuteJdbcAsync(rawSql, jdbcMatch, user, tenantId, metadataRepository, visibility, ct).ConfigureAwait(false);
+            }
+
+            // A metadata relation outside the handler grammar is refused here; it must never reach a source.
+            if (TrinoJdbcMetadataShapes.ReferencesMetadataRelation(normalized))
+            {
+                throw TrinoJdbcMetadataShapes.NotSupported();
+            }
+
             return null;
+        }
+
+        if (infoSchemaMatch.Success)
+        {
+            TrinoJdbcMetadataShapes.EnsureNotMixed(normalized[6..]);
         }
 
         var sw = Stopwatch.StartNew();
@@ -118,6 +152,12 @@ public static class TrinoMetadataQueryHandler
             static t => t.Table.IsActive,
             ct: ct).ConfigureAwait(false);
         var visibleTables = await CatalogVisibility.VisibleTablesAsync(activeTables, user, tenantId, consentRepository, contract: null, Autheris.Application.Tenancy.TenantResolver.EffectiveDefaultOf(gatewayOptions?.Tenancy), gatewayOptions?.Catalog.SharedTables, ct).ConfigureAwait(false);
+
+        if (visibility != null)
+        {
+            var discovered = await LoadVisibleObjectsAsync(visibility, user, tenantId, ct).ConfigureAwait(false);
+            visibleTables = visibleTables.Where(t => discovered.ContainsKey(VisibleKey(t.Identifier.Domain, t.Identifier.Schema, t.Identifier.TableName))).ToList();
+        }
 
         if (showCatalogsMatch.Success)
         {
