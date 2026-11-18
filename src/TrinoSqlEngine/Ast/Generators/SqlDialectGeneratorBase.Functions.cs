@@ -47,12 +47,12 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
 
     /// <summary>
     /// Wunsch 4: CAST target type in the dialect's spelling. The default keeps the (validated) Trino spelling, which is valid
-    /// for SQLite, DuckDB and ANSI.
+    /// for DuckDB and ANSI.
     /// </summary>
     protected virtual string FormatTypeName(TrinoType type) => StandardTypeName(type);
 
     /// <summary>
-    /// Dialect hook for a CAST that has no <c>CAST(x AS type)</c> form of the same meaning (SQLite DATE/TIMESTAMP/TIME). Returns false
+    /// Dialect hook for a CAST that has no <c>CAST(x AS type)</c> form of the same meaning. Returns false
     /// to emit the standard form. The emitted text must consist of generator tokens only (no client text).
     /// </summary>
     protected virtual bool TryFormatCast(ref ValueStringBuilder builder, CastExpression cast, SqlEmitterContext context) => false;
@@ -74,7 +74,7 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
     }
 
     /// <summary>
-    /// CR-ADG-25: closed CAST target type set shared by the dialects without their own type map (PostgreSQL, DuckDB, SQLite, ANSI).
+    /// CR-ADG-25: closed CAST target type set shared by the dialects without their own type map (PostgreSQL, DuckDB, ANSI).
     /// Anything else (<c>regclass</c>, <c>regrole</c>, <c>xml</c>, <c>json</c>, <c>oid</c>, ...) fails closed.
     /// </summary>
     protected string StandardTypeName(TrinoType type) => type.Name switch
@@ -263,7 +263,7 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
         builder.Append(')');
     }
 
-    /// <summary>INSTR(haystack, needle), used by SQLite and Oracle for POSITION.</summary>
+    /// <summary>INSTR(haystack, needle), used by Oracle for POSITION.</summary>
     protected void FormatInstr(ref ValueStringBuilder builder, PositionExpression position, SqlEmitterContext context)
     {
         builder.Append("INSTR(");

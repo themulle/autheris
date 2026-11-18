@@ -1,0 +1,257 @@
+{
+  "ops": [
+    {
+      "op": "addTable",
+      "table": "DATA_PRODUCTS",
+      "newTable": {
+        "name": "DATA_PRODUCTS",
+        "columns": [
+          {
+            "name": "tenant_id",
+            "type": "NVARCHAR",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "product_schema",
+            "type": "NVARCHAR",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "product_name",
+            "type": "NVARCHAR",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "id",
+            "type": "NVARCHAR",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "kind",
+            "type": "NVARCHAR",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "definition",
+            "type": "NVARCHAR",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "definition_hash",
+            "type": "NVARCHAR",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "base_objects_json",
+            "type": "NVARCHAR",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "columns_json",
+            "type": "NVARCHAR",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "created_by",
+            "type": "NVARCHAR",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "authority",
+            "type": "NVARCHAR",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "status",
+            "type": "NVARCHAR",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "managed_by",
+            "type": "NVARCHAR",
+            "family": "string",
+            "nullable": true
+          },
+          {
+            "name": "load_json",
+            "type": "NVARCHAR",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "limits_json",
+            "type": "NVARCHAR",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "description",
+            "type": "NVARCHAR",
+            "family": "string",
+            "nullable": true
+          },
+          {
+            "name": "product_owner",
+            "type": "NVARCHAR",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "version",
+            "type": "INT",
+            "family": "integer",
+            "nullable": false
+          },
+          {
+            "name": "created_at",
+            "type": "DATETIMEOFFSET",
+            "family": "datetime",
+            "nullable": false
+          },
+          {
+            "name": "updated_at",
+            "type": "DATETIMEOFFSET",
+            "family": "datetime",
+            "nullable": false
+          }
+        ],
+        "primaryKey": [
+          "tenant_id",
+          "product_schema",
+          "product_name"
+        ],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addIndex",
+      "table": "DATA_PRODUCTS",
+      "name": "uq_data_products_tenant_id",
+      "unique": true,
+      "columns": [
+        "tenant_id",
+        "id"
+      ]
+    },
+    {
+      "op": "addTable",
+      "table": "DATA_PRODUCT_VERSIONS",
+      "newTable": {
+        "name": "DATA_PRODUCT_VERSIONS",
+        "columns": [
+          {
+            "name": "tenant_id",
+            "type": "NVARCHAR",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "product_id",
+            "type": "NVARCHAR",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "version",
+            "type": "INT",
+            "family": "integer",
+            "nullable": false
+          },
+          {
+            "name": "definition_hash",
+            "type": "NVARCHAR",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "definition",
+            "type": "NVARCHAR",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "author",
+            "type": "NVARCHAR",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "authority",
+            "type": "NVARCHAR",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "created_at",
+            "type": "DATETIMEOFFSET",
+            "family": "datetime",
+            "nullable": false
+          }
+        ],
+        "primaryKey": [
+          "tenant_id",
+          "product_id",
+          "version"
+        ],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addTable",
+      "table": "DATA_SOURCE_OWNERS",
+      "newTable": {
+        "name": "DATA_SOURCE_OWNERS",
+        "columns": [
+          {
+            "name": "tenant_id",
+            "type": "NVARCHAR",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "data_source",
+            "type": "NVARCHAR",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "owner_sid",
+            "type": "NVARCHAR",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "assigned_by",
+            "type": "NVARCHAR",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "assigned_at",
+            "type": "DATETIMEOFFSET",
+            "family": "datetime",
+            "nullable": false
+          }
+        ],
+        "primaryKey": [
+          "tenant_id",
+          "data_source",
+          "owner_sid"
+        ],
+        "indexes": []
+      }
+    }
+  ]
+}

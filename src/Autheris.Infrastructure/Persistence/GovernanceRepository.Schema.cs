@@ -264,7 +264,7 @@ public partial class GovernanceRepository
                 }
             }
 
-            // Child table finance_items for finance_table_1 (same demo content as the SQLite seed that the governance tests were written against).
+            // Child table finance_items for finance_table_1.
             var childTableId = Guid.NewGuid().ToString();
             using (var cmd = conn.CreateCommand())
             {

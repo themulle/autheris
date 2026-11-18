@@ -113,7 +113,7 @@ public sealed class DataSourceConnectionOptions
 
     /// <summary>
     /// WP-X0b: default schema pinned on every connection rental. PostgreSQL: <c>search_path = pg_catalog, &lt;schema&gt;, pg_temp</c>;
-    /// Oracle: <c>CURRENT_SCHEMA</c>. SQL Server and SQLite ignore it. Validated against <see cref="DefaultSchemaPolicy"/>; the
+    /// Oracle: <c>CURRENT_SCHEMA</c>. SQL Server ignores it. Validated against <see cref="DefaultSchemaPolicy"/>; the
     /// value is only ever passed as a bound parameter and quoted by the database (<c>format('%I')</c>,
     /// <c>DBMS_ASSERT.ENQUOTE_NAME</c>), never concatenated on the client.
     /// </summary>

@@ -46,7 +46,7 @@ public static class DialectCapabilityValidator
 
                     break;
                 case LikeExpression lk when capabilities.LikeIsCaseInsensitive && LikePatternEscaper.ContainsPolicyParameter(lk.Pattern):
-                    // the dialect LIKE is looser than the policy author expects (SQLite: ASCII case-insensitive).
+                    // the dialect LIKE is looser than the policy author expects.
                     throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, "policy LIKE on a case-insensitive LIKE dialect");
                 case InListExpression inList when capabilities.MaxInListItems is { } max && inList.Items.Count > max
                                                     && !CompilerHooks.IsDisabled(SecurityControl.InListLimit)
@@ -68,7 +68,7 @@ public static class DialectCapabilityValidator
         });
     }
 
-    /// <summary>The leaves of one connected UNION/INTERSECT/EXCEPT tree (SQLite counts them against SQLITE_MAX_COMPOUND_SELECT).</summary>
+    /// <summary>The leaves of one connected UNION/INTERSECT/EXCEPT tree.</summary>
     private static bool IsAssociativeUnionPair(SetOperationQuery outer, SetOperationQuery right) =>
         outer.Operator == SetOperator.Union && right.Operator == SetOperator.Union && outer.Distinct == right.Distinct;
 
