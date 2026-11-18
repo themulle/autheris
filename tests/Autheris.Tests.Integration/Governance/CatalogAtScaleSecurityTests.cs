@@ -148,7 +148,7 @@ public sealed class CatalogAtScaleSecurityTests : IAsyncDisposable
         var mockRepo = Substitute.For<IGovernanceRepository>();
         var verProvider = Substitute.For<ICatalogVersionProvider>();
 
-        mockRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Array.Empty<TableMetadata>());
+        mockRepo.StubAllTables(Array.Empty<TableMetadata>());
         mockRepo.GetAllRelationsAsync(Arg.Any<CancellationToken>()).Returns(Array.Empty<TableRelation>());
 
         // Initial version (5, 5)

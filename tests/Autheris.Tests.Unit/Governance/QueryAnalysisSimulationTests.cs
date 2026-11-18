@@ -55,7 +55,7 @@ public sealed class QueryAnalysisSimulationTests
             PrimaryKeyColumns = ["id"]
         };
         var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(new[] { table });
+        metadataRepo.StubAllTables(new[] { table });
         var consentRepo = Substitute.For<IConsentRepository>();
         consentRepo.GetAllActiveConsentsForSubjectsAsync(
                 Arg.Any<IEnumerable<Sid>>(), Arg.Any<IEnumerable<string>?>(), Arg.Any<DateTimeOffset?>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())

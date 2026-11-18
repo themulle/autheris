@@ -50,8 +50,7 @@ public sealed class McpResourceColumnFilterMcp1Tests
     private static SemanticMcpCompiler CreateCompiler(params Consent[] consents)
     {
         var repo = Substitute.For<ITableMetadataRepository>();
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(new List<TableMetadata> { Table(Hr), Table(Payroll) }));
+        repo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(new List<TableMetadata> { Table(Hr), Table(Payroll) }));
         Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(repo);
 
         var consentRepo = Substitute.For<IConsentRepository>();
@@ -124,8 +123,7 @@ public sealed class McpResourceColumnFilterMcp1Tests
         };
 
         var repo = Substitute.For<ITableMetadataRepository>();
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(new List<TableMetadata> { tableWithDeny }));
+        repo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(new List<TableMetadata> { tableWithDeny }));
         Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(repo);
 
         var compiler = new SemanticMcpCompiler(repo, NullLogger<SemanticMcpCompiler>.Instance, options: Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions { Insecure = new Autheris.Domain.Options.InsecureGettingStartedOptions { danger_bypass_mcp_auth = true } }));
@@ -166,8 +164,7 @@ public sealed class McpResourceColumnFilterMcp1Tests
     {
         // Fail-closed: when consent repository is null and auth is not bypassed, no tables/resources should be returned
         var repo = Substitute.For<ITableMetadataRepository>();
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(new List<TableMetadata> { Table(Hr) }));
+        repo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(new List<TableMetadata> { Table(Hr) }));
         Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(repo);
 
         var compiler = new SemanticMcpCompiler(repo, NullLogger<SemanticMcpCompiler>.Instance, null, null);

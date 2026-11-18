@@ -146,7 +146,7 @@ internal static class ScopeLevelTestKit
     public static ITableMetadataRepository MetadataRepository(TableMetadata table)
     {
         var repo = Substitute.For<ITableMetadataRepository>();
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([table]));
+        repo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>([table]));
         repo.GetTableMetadataAsync(table.Identifier, Arg.Any<CancellationToken>()).Returns(Task.FromResult<TableMetadata?>(table));
         return Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(repo);
     }

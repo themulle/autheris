@@ -22,6 +22,8 @@ internal static class CatalogRowHydrator
     // PERS-17: epoch rows are matched by the natural key (domain, schema, table): a write inserts the row with its own id, which is not TABLES.id.
     internal const string EpochJoin = "POLICY_EPOCHS p JOIN TABLES t ON LOWER(p.domain) = LOWER(t.source_name) AND LOWER(p.schema_name) = LOWER(t.schema_name) AND LOWER(p.table_name) = LOWER(t.table_name)";
     internal const string EpochByTableIdSql = "SELECT MAX(p.epoch) FROM POLICY_EPOCHS p JOIN TABLES t ON LOWER(p.domain) = LOWER(t.source_name) AND LOWER(p.schema_name) = LOWER(t.schema_name) AND LOWER(p.table_name) = LOWER(t.table_name) WHERE t.id = @tableId";
+    internal const string EpochsByTableIdsSqlPrefix = "SELECT t.id, MAX(p.epoch) FROM POLICY_EPOCHS p JOIN TABLES t ON LOWER(p.domain) = LOWER(t.source_name) AND LOWER(p.schema_name) = LOWER(t.schema_name) AND LOWER(p.table_name) = LOWER(t.table_name) WHERE t.id IN (";
+    internal const string EpochsByTableIdsSqlSuffix = ") GROUP BY t.id";
     internal const string AllEpochsSql = "SELECT t.id, MAX(p.epoch) FROM POLICY_EPOCHS p JOIN TABLES t ON LOWER(p.domain) = LOWER(t.source_name) AND LOWER(p.schema_name) = LOWER(t.schema_name) AND LOWER(p.table_name) = LOWER(t.table_name) GROUP BY t.id";
 
     internal const string ActiveTableByIdSql = "SELECT source_name, schema_name, table_name FROM TABLES WHERE id = @id AND is_active = 1";
@@ -304,6 +306,39 @@ internal static class CatalogRowHydrator
         cmd.AddBound("@tableId", tableId.ToString());
         var value = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
         return value is null or DBNull ? -1 : Convert.ToInt64(value, CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>
+    /// Reads the epochs of the given tables in as few round trips as the 500-parameter chunking allows (one for a normal request).
+    /// A table without an epoch row is absent from the result; callers must treat absence as a cache miss, never as a valid hit.
+    /// </summary>
+    internal static async Task<Dictionary<Guid, long>> ReadTableEpochsByIdsAsync(
+        DbConnection conn, IReadOnlyList<Guid> tableIds, CancellationToken ct)
+    {
+        var epochs = new Dictionary<Guid, long>(tableIds.Count);
+        const int chunkSize = 500;
+        for (var offset = 0; offset < tableIds.Count; offset += chunkSize)
+        {
+            var count = Math.Min(chunkSize, tableIds.Count - offset);
+            var idStrings = new string[count];
+            for (var i = 0; i < count; i++)
+            {
+                idStrings[i] = tableIds[offset + i].ToString();
+            }
+
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = EpochsByTableIdsSqlPrefix + ConsentSqlCore.BindIdInClause(cmd, "eid", idStrings) + EpochsByTableIdsSqlSuffix;
+            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                if (!reader.IsDBNull(1) && Guid.TryParse(reader.GetString(0), out var id))
+                {
+                    epochs[id] = Convert.ToInt64(reader.GetValue(1), CultureInfo.InvariantCulture);
+                }
+            }
+        }
+
+        return epochs;
     }
 
     internal static async Task<Dictionary<Guid, long>> ReadAllTableEpochsAsync(DbConnection conn, CancellationToken ct)

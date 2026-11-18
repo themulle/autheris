@@ -30,7 +30,7 @@ public sealed class DatasourceTestingServiceSqlTests
     private DatasourceTestingService CreateService(bool configured = true)
     {
         var table = new Table { SourceName = Source, SchemaName = "dbo", TableName = "orders", DataSourceType = DataSourceType.Sql };
-        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(new[]
+        _metadataRepo.StubAllTables(new[]
         {
             new TableMetadata { Identifier = new TableIdentifier(Source, "dbo", "orders"), Table = table, Columns = [], PrimaryKeyColumns = [] }
         });

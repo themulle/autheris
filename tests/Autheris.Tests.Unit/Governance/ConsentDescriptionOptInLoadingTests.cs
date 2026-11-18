@@ -65,7 +65,7 @@ public sealed class ConsentDescriptionOptInLoadingTests
         };
         var tables = Substitute.For<ITableMetadataRepository>();
         tables.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>()).Returns(table);
-        tables.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([table]));
+        tables.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>([table]));
         return (new EffectiveAccessExplanationService(tables, repo, new ConsentResolutionService()), tables);
     }
 

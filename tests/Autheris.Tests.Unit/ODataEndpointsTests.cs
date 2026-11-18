@@ -421,8 +421,7 @@ public sealed class ODataEndpointsTests
 
         var metadataRepo = Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
             Substitute.For<Autheris.Application.Common.Interfaces.ITableMetadataRepository>());
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<Autheris.Domain.Model.TableMetadata>>([table]));
+        metadataRepo.StubAllTables(Task.FromResult<IReadOnlyList<Autheris.Domain.Model.TableMetadata>>([table]));
 
         var rows = new List<IReadOnlyDictionary<string, object?>> { new Dictionary<string, object?> { ["id"] = 1 } };
         var payload = ODataResponseFormatter.FormatEntitySetResponse("http://localhost:8080/odata/v4", table.Identifier, rows);
@@ -457,8 +456,7 @@ public sealed class ODataEndpointsTests
         var context = CreateHttpContext(path: "/odata/v4/unknown_table");
         var metadataRepo = Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
             Substitute.For<Autheris.Application.Common.Interfaces.ITableMetadataRepository>());
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<Autheris.Domain.Model.TableMetadata>>([]));
+        metadataRepo.StubAllTables(Task.FromResult<IReadOnlyList<Autheris.Domain.Model.TableMetadata>>([]));
 
         var handler = CreateMockHandler(new ODataQueryResult(true, StatusCodes.Status200OK, new { }));
 
@@ -486,8 +484,7 @@ public sealed class ODataEndpointsTests
 
         var metadataRepo = Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
             Substitute.For<Autheris.Application.Common.Interfaces.ITableMetadataRepository>());
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<Autheris.Domain.Model.TableMetadata>>([table]));
+        metadataRepo.StubAllTables(Task.FromResult<IReadOnlyList<Autheris.Domain.Model.TableMetadata>>([table]));
 
         var handler = CreateMockHandler(new ODataQueryResult(true, StatusCodes.Status200OK, new { }));
 
@@ -532,8 +529,7 @@ public sealed class ODataEndpointsTests
 
         var metadataRepo = Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
             Substitute.For<Autheris.Application.Common.Interfaces.ITableMetadataRepository>());
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<Autheris.Domain.Model.TableMetadata>>([table1, table2]));
+        metadataRepo.StubAllTables(Task.FromResult<IReadOnlyList<Autheris.Domain.Model.TableMetadata>>([table1, table2]));
 
         var handler = CreateMockHandler(new ODataQueryResult(true, StatusCodes.Status200OK, new { }));
 
@@ -583,7 +579,7 @@ public sealed class ODataEndpointsTests
         context.RequestServices = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(services);
         var repo = Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
             Substitute.For<Autheris.Application.Common.Interfaces.ITableMetadataRepository>());
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<Autheris.Domain.Model.TableMetadata>>([]));
+        repo.StubAllTables(Task.FromResult<IReadOnlyList<Autheris.Domain.Model.TableMetadata>>([]));
 
         var result = await ODataEndpoints.HandleFlatEntitySetRequestAsync("SecretEntity_XYZ", CreateMockHandler(new ODataQueryResult(true, 200, new object())), repo, context);
         await result.ExecuteAsync(context);

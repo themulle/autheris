@@ -407,7 +407,7 @@ public sealed class Batch5SecurityTestsB : IDisposable
         var ownershipRepo = Substitute.For<IDataOwnershipRepository>();
 
         metadataRepo.GetTableMetadataAsync(tableId, Arg.Any<CancellationToken>()).Returns(stored);
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([stored]);
+        metadataRepo.StubAllTables([stored]);
 
         TableMetadata? persisted = null;
         metadataRepo.UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>())

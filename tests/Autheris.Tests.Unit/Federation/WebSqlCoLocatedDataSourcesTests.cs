@@ -138,8 +138,7 @@ public sealed class WebSqlCoLocatedDataSourcesTests
         var meta2 = CreateTable("crm", "dbo", "Customers", "DB_CRM", "SqlServer", "finance");
 
         var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns([meta1, meta2]);
+        metadataRepo.StubAllTables([meta1, meta2]);
 
         var consentRepo = Substitute.For<IConsentRepository>();
         consentRepo.GetAllActiveConsentsForSubjectsAsync(
@@ -206,8 +205,7 @@ public sealed class WebSqlCoLocatedDataSourcesTests
         var meta2 = CreateTable("crm", "dbo", "Customers", "DB_CRM", "SqlServer", "finance");
 
         var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns([meta1, meta2]);
+        metadataRepo.StubAllTables([meta1, meta2]);
 
         var consentRepo = Substitute.For<IConsentRepository>();
         consentRepo.GetAllActiveConsentsForSubjectsAsync(

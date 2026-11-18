@@ -288,6 +288,14 @@ public sealed class CatalogSnapshotDeltaReloadTests
             return Task.FromResult(active);
         }
 
+        /// <summary>A full scan (one page holding every active table); counted like a full load.</summary>
+        public Task<CatalogTablePage> QueryTablesAsync(CatalogTableQuery query, CancellationToken ct = default)
+        {
+            GetAllTablesCallCount++;
+            IReadOnlyList<TableMetadata> active = _tables.Values.Where(t => t.Table.IsActive).ToList();
+            return Task.FromResult(new CatalogTablePage(active, null));
+        }
+
         public Task<IReadOnlyList<TableRelation>> GetAllRelationsAsync(CancellationToken ct = default)
             => Task.FromResult<IReadOnlyList<TableRelation>>(Array.Empty<TableRelation>());
 
@@ -342,6 +350,7 @@ public sealed class CatalogSnapshotDeltaReloadTests
             return targetMethod.Name switch
             {
                 nameof(ITableMetadataRepository.GetAllTablesAsync) => _target!.GetAllTablesAsync(ct),
+                nameof(ITableMetadataRepository.QueryTablesAsync) => _target!.QueryTablesAsync((CatalogTableQuery)args![0]!, ct),
                 nameof(ITableRelationRepository.GetAllRelationsAsync) => _target!.GetAllRelationsAsync(ct),
                 nameof(ITableMetadataRepository.GetTablesChangedSinceAsync) => _target!.GetTablesChangedSinceAsync((long)args![0]!, ct),
                 nameof(ITableMetadataRepository.GetTablesAsync) => _target!.GetTablesAsync((IReadOnlyCollection<TableIdentifier>)args![0]!, ct),

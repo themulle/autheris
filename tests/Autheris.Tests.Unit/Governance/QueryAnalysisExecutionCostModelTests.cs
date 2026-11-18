@@ -110,7 +110,7 @@ public sealed class QueryAnalysisExecutionCostModelTests
 
         var ordersTable = CreateTable("orders", null, ("id", "varchar", false), ("region", "varchar", false));
         var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([ordersTable]);
+        metadataRepo.StubAllTables([ordersTable]);
 
         var consentRepo = Substitute.For<IConsentRepository>();
         consentRepo.GetAllActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<IEnumerable<string>?>(), Arg.Any<DateTimeOffset?>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
@@ -149,7 +149,7 @@ public sealed class QueryAnalysisExecutionCostModelTests
         var usersTable = CreateTable("users", null, ("id", "varchar", false), ("name", "varchar", false));
 
         var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([ordersTable, usersTable]);
+        metadataRepo.StubAllTables([ordersTable, usersTable]);
 
         var consentRepo = Substitute.For<IConsentRepository>();
         consentRepo.GetAllActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<IEnumerable<string>?>(), Arg.Any<DateTimeOffset?>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
@@ -183,7 +183,7 @@ public sealed class QueryAnalysisExecutionCostModelTests
 
         var ordersTable = CreateTable("orders", null, ("id", "varchar", false));
         var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([ordersTable]);
+        metadataRepo.StubAllTables([ordersTable]);
 
         var consentRepo = Substitute.For<IConsentRepository>();
         consentRepo.GetAllActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<IEnumerable<string>?>(), Arg.Any<DateTimeOffset?>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
@@ -217,7 +217,7 @@ public sealed class QueryAnalysisExecutionCostModelTests
 
         var ordersTable = CreateTable("orders", null, ("id", "varchar", false));
         var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([ordersTable]);
+        metadataRepo.StubAllTables([ordersTable]);
 
         var consentRepo = Substitute.For<IConsentRepository>();
         consentRepo.GetAllActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<IEnumerable<string>?>(), Arg.Any<DateTimeOffset?>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
@@ -248,7 +248,7 @@ public sealed class QueryAnalysisExecutionCostModelTests
         var ordersTable = CreateTable("orders", maskingRules, ("id", "varchar", false), ("ssn", "varchar", true));
 
         var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([ordersTable]);
+        metadataRepo.StubAllTables([ordersTable]);
 
         var caller = CreatePrincipal("user-1");
 
@@ -283,7 +283,7 @@ public sealed class QueryAnalysisExecutionCostModelTests
     {
         var ordersTable = CreateTable("orders", null, ("id", "varchar", false));
         var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([ordersTable]);
+        metadataRepo.StubAllTables([ordersTable]);
 
         var consentRepo = Substitute.For<IConsentRepository>();
         consentRepo.GetAllActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<IEnumerable<string>?>(), Arg.Any<DateTimeOffset?>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())

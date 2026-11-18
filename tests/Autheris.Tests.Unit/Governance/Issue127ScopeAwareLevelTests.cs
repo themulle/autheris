@@ -177,7 +177,7 @@ public sealed class Issue127ScopeAwareLevelTests
 
         var tableRepo = Substitute.For<ITableMetadataRepository>();
         tableRepo.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>()).Returns(table);
-        tableRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([table]));
+        tableRepo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>([table]));
         var consentRepo = Substitute.For<IConsentRepository>();
         consentRepo.GetActiveConsentsForSubjectsAsync(default!, default, default, default, default)
             .ReturnsForAnyArgs(Task.FromResult<IReadOnlyList<Consent>>(consents));

@@ -56,8 +56,7 @@ public sealed class DynamicOpenApiGeneratorTests
     {
         var repo = Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
             Substitute.For<ITableMetadataRepository>());
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(CreateSampleTables()));
+        repo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(CreateSampleTables()));
 
         var generator = new DynamicOpenApiGenerator(repo, NullLogger<DynamicOpenApiGenerator>.Instance);
         var json = await generator.GenerateOpenApiJsonAsync(null);
@@ -96,8 +95,7 @@ public sealed class DynamicOpenApiGeneratorTests
     {
         var repo = Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
             Substitute.For<ITableMetadataRepository>());
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(tables));
+        repo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(tables));
         var generator = new DynamicOpenApiGenerator(repo, NullLogger<DynamicOpenApiGenerator>.Instance);
         var json = await generator.GenerateOpenApiJsonAsync(null);
         using var doc = JsonDocument.Parse(json);
@@ -177,8 +175,7 @@ public sealed class DynamicOpenApiGeneratorTests
     {
         var repo = Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
             Substitute.For<ITableMetadataRepository>());
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(CreateSampleTables()));
+        repo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(CreateSampleTables()));
         var generator = new DynamicOpenApiGenerator(repo, NullLogger<DynamicOpenApiGenerator>.Instance);
 
         var yaml = await generator.GenerateOpenApiYamlAsync(null);
@@ -192,8 +189,7 @@ public sealed class DynamicOpenApiGeneratorTests
     {
         var repo = Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
             Substitute.For<ITableMetadataRepository>());
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(CreateSampleTables()));
+        repo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(CreateSampleTables()));
 
         var generator = new DynamicOpenApiGenerator(repo, NullLogger<DynamicOpenApiGenerator>.Instance);
         var json = await generator.GenerateOpenApiJsonAsync("finance");
@@ -210,8 +206,7 @@ public sealed class DynamicOpenApiGeneratorTests
     {
         var repo = Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
             Substitute.For<ITableMetadataRepository>());
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(CreateSampleTables()));
+        repo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(CreateSampleTables()));
 
         var generator = new DynamicOpenApiGenerator(repo, NullLogger<DynamicOpenApiGenerator>.Instance);
         var yaml = await generator.GenerateOpenApiYamlAsync(null);
@@ -227,8 +222,7 @@ public sealed class DynamicOpenApiGeneratorTests
     {
         var repo = Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
             Substitute.For<ITableMetadataRepository>());
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(CreateSampleTables()));
+        repo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(CreateSampleTables()));
 
         var generator = new DynamicOpenApiGenerator(repo, NullLogger<DynamicOpenApiGenerator>.Instance);
         var yaml = await generator.GenerateOpenApiYamlAsync(null);
@@ -280,8 +274,7 @@ public sealed class DynamicOpenApiGeneratorTests
     {
         var repo = Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
             Substitute.For<ITableMetadataRepository>());
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(CreateSampleTables()));
+        repo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(CreateSampleTables()));
 
         var generator = new DynamicOpenApiGenerator(repo, NullLogger<DynamicOpenApiGenerator>.Instance);
         var json = await generator.GenerateOpenApiJsonAsync(null, modular: true);
@@ -303,8 +296,7 @@ public sealed class DynamicOpenApiGeneratorTests
     {
         var repo = Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
             Substitute.For<ITableMetadataRepository>());
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(CreateSampleTables()));
+        repo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(CreateSampleTables()));
 
         var generator = new DynamicOpenApiGenerator(repo, NullLogger<DynamicOpenApiGenerator>.Instance);
         var schemaJson = await generator.GenerateEntitySchemaJsonAsync(new TableIdentifier("finance", "dbo", "invoices"));
@@ -324,8 +316,7 @@ public sealed class DynamicOpenApiGeneratorTests
     {
         var repo = Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
             Substitute.For<ITableMetadataRepository>());
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(CreateSampleTables()));
+        repo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(CreateSampleTables()));
 
         var generator = new DynamicOpenApiGenerator(repo, NullLogger<DynamicOpenApiGenerator>.Instance);
         var index = await generator.GetIndexDocumentAsync("https://gateway.example.com");

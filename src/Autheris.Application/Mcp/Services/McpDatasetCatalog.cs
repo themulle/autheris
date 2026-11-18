@@ -1,5 +1,6 @@
 namespace Autheris.Application.Mcp.Services;
 
+using Autheris.Application.Catalog;
 using Autheris.Application.Tenancy;
 using System;
 using System.Collections.Generic;
@@ -1125,7 +1126,8 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
     {
         if (IsBypassed)
         {
-            return (await _metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false), true);
+            return (await CatalogTablePageReader.ReadAllAsync(
+                _metadataRepository, new CatalogTableQuery(IncludeInactive: false), ct: ct).ConfigureAwait(false), true);
         }
 
         if (visibility == null)
@@ -1141,8 +1143,14 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
     {
         if (IsBypassed)
         {
-            var all = await _metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
-            return all.Select(t => DatasetId(t.Identifier)).ToHashSet(StringComparer.Ordinal);
+            var wanted = graphQl.Relations.Select(r => r.Target).Distinct().ToList();
+            if (wanted.Count == 0)
+            {
+                return new HashSet<string>(StringComparer.Ordinal);
+            }
+
+            var found = await _metadataRepository.GetTablesAsync(wanted, ct).ConfigureAwait(false);
+            return found.Select(t => DatasetId(t.Identifier)).ToHashSet(StringComparer.Ordinal);
         }
 
         if (visibility == null)

@@ -40,7 +40,7 @@ public sealed class EffectiveFiltersEndpointTests
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetTableMetadataAsync(Air1.Identifier, Arg.Any<CancellationToken>()).Returns(Air1);
         repo.GetTableMetadataAsync(Dm1.Identifier, Arg.Any<CancellationToken>()).Returns(Dm1);
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(new List<TableMetadata> { Air1, Dm1 });
+        repo.StubAllTables(new List<TableMetadata> { Air1, Dm1 });
         return Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(repo);
     }
 
