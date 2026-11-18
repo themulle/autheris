@@ -94,7 +94,7 @@ public static class DmlErrorSanitizer
     }
 
     /// <summary>
-    /// Provider error numbers and codes of an unknown column: SQL Server 207, Oracle ORA-00904, PostgreSQL 42703, SQLite result code 1 with
+    /// Provider error numbers and codes of an unknown column: SQL Server 207, Oracle ORA-00904, PostgreSQL 42703, a generic provider result code with
     /// the engine's own "no such column" token, DuckDB binder error and the Databricks UNRESOLVED_COLUMN error class (both have no number).
     /// </summary>
     private static bool IsUnknownIdentifier(TargetSqlDialect dialect, Exception error) => dialect switch
@@ -111,7 +111,7 @@ public static class DmlErrorSanitizer
 
     /// <summary>
     /// Provider codes of a set operation whose operands have a different column count: SQL Server 205, Oracle ORA-01789, PostgreSQL
-    /// SQLSTATE 42601 (syntax_error), SQLite result code 1 with the engine's own token, DuckDB binder message and the Databricks
+    /// SQLSTATE 42601 (syntax_error), a generic provider result code with the engine's own token, DuckDB binder message and the Databricks
     /// NUM_COLUMNS_MISMATCH error class.
     /// </summary>
     private static bool IsSetOperationDegreeError(TargetSqlDialect dialect, Exception error) => dialect switch

@@ -16,7 +16,7 @@ internal enum AccessProfileDialect
     SqlServer
 }
 
-/// <summary>A connection for one store operation; disposing releases it (and, for SQLite, the write gate).</summary>
+/// <summary>A connection for one store operation; disposing releases it .</summary>
 internal sealed class AccessProfileStoreScope(DbConnection connection, Func<ValueTask> dispose) : IAsyncDisposable
 {
     public DbConnection Connection { get; } = connection;

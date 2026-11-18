@@ -35,7 +35,7 @@ public static class CompiledSqlBinders
     /// <summary>
     /// Issue #107 (D-WPC-8): binds a<see cref="CompiledKeyQuery"/> to a provider command through the same production binder as every
     /// governed statement: <c>CommandText</c> is <see cref="CompiledKeyQuery.Sql"/> and every <see cref="CompiledKeyQuery.Parameters"/> element is added
-    /// by name in array order (the SQLite row limit is a <c>QueryLiteral</c> bind). The <see cref="CompiledSql"/> wrapper is created here, inside
+    /// by name in array order (a row limit may be a <c>QueryLiteral</c> bind). The <see cref="CompiledSql"/> wrapper is created here, inside
     /// the engine; a key query has no client parameters, so a client origin bind is refused by the binder.
     /// </summary>
     public static void BindKeyQuery(DbCommand command, CompiledKeyQuery query, TargetSqlDialect dialect)
