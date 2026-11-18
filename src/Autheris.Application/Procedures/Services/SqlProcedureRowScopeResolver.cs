@@ -26,7 +26,7 @@ using Microsoft.Extensions.Options;
 /// <list type="bullet">
 /// <item>The lookup uses the governed read connection of the table's data source (the connection every governed table
 /// read uses), never the EXECUTE-only procedure login of ADR-018.</item>
-/// <item>SQL Server, PostgreSQL and SQLite; the dialect of the connection must match the catalog dialect the row filter
+/// <item>SQL Server and PostgreSQL; the dialect of the connection must match the catalog dialect the row filter
 /// was generated for.</item>
 /// </list>
 /// </summary>

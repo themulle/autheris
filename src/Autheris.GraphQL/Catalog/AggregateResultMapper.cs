@@ -344,7 +344,7 @@ internal static class AggregateValueConverter
                 });
                 return true;
             case DateOnly date:
-                // Npgsql yields DateOnly for a PostgreSQL DATE: midnight UTC, the same value as the ISO date text of SQLite.
+                // Npgsql yields DateOnly for a PostgreSQL DATE: midnight UTC.
                 value = new DateTimeOffset(date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc));
                 return true;
             case string s:

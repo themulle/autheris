@@ -1,5 +1,6 @@
 namespace Autheris.Modules.Lakehouse.Tests;
 
+using Autheris.Modules.Lakehouse.Models;
 using System;
 using System.Collections.Generic;
 using System.Data.Common;

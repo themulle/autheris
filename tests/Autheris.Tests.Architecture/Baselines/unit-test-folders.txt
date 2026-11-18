@@ -48,6 +48,7 @@ Persistence
 Plugins
 Policy
 Procedures
+Products
 RateLimiting
 Security
 Serialization
