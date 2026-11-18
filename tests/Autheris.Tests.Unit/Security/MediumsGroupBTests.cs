@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Security;
 
+using Autheris.Modules.Lakehouse.Models;
 using System;
 using System.Collections.Generic;
 using System.Linq;
