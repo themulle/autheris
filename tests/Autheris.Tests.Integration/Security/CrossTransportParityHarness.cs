@@ -38,6 +38,7 @@ using Autheris.Application.Sql.Policy;
 using Autheris.Application.Sql.Services;
 using Autheris.Application.Streaming.Services;
 using Autheris.Application.VirtualFilters;
+using Autheris.Application.VirtualFilters.Federation;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
@@ -104,8 +105,30 @@ public enum ParityScenarioId
     S19_UnauthenticatedDenied,
     S20_InvalidTenantClaimDenied,
     S21_MissingUserSidDenied,
-    S22_ForeignTenantObject
+    S22_ForeignTenantObject,
+    S30_FilteredAndUnfilteredGrantUnion,
+    S31_OverlappingGrantsPerCellMasking,
+    S32_HardPolicyWithUnfilteredGrant,
+    S33_PatternGrantObjectCreatedLater,
+    S34_UncoveredDenyVersusSkip,
+    S35_CompositeKeyPolicy,
+    S36_CrossSourceKeySet,
+    S37_ParametersFromTwoGrantsMerged
 }
+
+/// <summary>The row set a decision exposes: no row predicate, a row predicate, or a predicate that matches no row.</summary>
+public enum ParityRowSet
+{
+    Unfiltered,
+    Filtered,
+    NoRows
+}
+
+/// <summary>Policies, hard-policy profiles and key-set data a grant-model scenario (S30..S37) evaluates against the decision point.</summary>
+public sealed record ParityGrantModelSetup(
+    IReadOnlyList<VirtualFilter> Policies,
+    IReadOnlyList<VirtualFilterAccessProfile> Profiles,
+    VirtualFilterKeySet? KeySet = null);
 
 public sealed record ParityExpectation(
     bool Allowed,
@@ -117,7 +140,15 @@ public sealed record ParityExpectation(
     // The grant carries column rules (an allow list), so it is not an unconstrained column allow, even when every column ends up Clear.
     bool ColumnConstrainedGrant = false,
     // The table is a delegated source (enforcement is left to the native engine; the gateway holds only the coarse gate).
-    bool DelegatedSource = false);
+    bool DelegatedSource = false,
+    // Grant-model rows: the ids of the grants that contribute to the decision (null = not asserted), compared as a set.
+    IReadOnlyList<Guid>? GrantIds = null,
+    // Grant-model rows: the row set the decision exposes (null = not asserted).
+    ParityRowSet? RowSet = null,
+    // Grant-model rows: column state per cell; RowDependent means the state differs between rows (null = not asserted).
+    IReadOnlyDictionary<string, ColumnAccessLevel>? ColumnState = null,
+    // Grant-model rows: the parameter values bound into the row predicate, compared as a set (null = not asserted).
+    IReadOnlyList<string>? PredicateParameterValues = null);
 
 public sealed record ParityOutcome(
     bool Allowed,
@@ -141,7 +172,9 @@ public sealed record ParityScenario(
     VirtualFilterSnapshot VirtualFilters,
     bool FailCallerAttributeResolution,
     bool SimulateIpMismatch,
-    ParityExpectation Expected);
+    ParityExpectation Expected,
+    // Set for the grant-model rows (S30..S37): they are evaluated against the decision point and explain, not against every surface.
+    ParityGrantModelSetup? GrantModel = null);
 
 internal sealed partial class CrossTransportParityHarness : IAsyncDisposable
 {

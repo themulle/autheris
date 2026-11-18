@@ -5,14 +5,14 @@ Parent: [ADR-020](../../adr/ADR-020-unified-authorization-model.md) (amendment 2
 ## 1. Goal and outcome
 Row restrictions become one model: named, approved row policies (the existing virtual-filter definitions) with typed parameters, used at two levels. Grant records reference policies with parameter values (ORed across the subject's grants); hard row policies are assigned to users or AD groups (ANDed after the grant union, not bypassable). Grant records may name an object pattern that is evaluated at decision time, so new objects are covered; PII columns not explicitly approved as Clear stay Masked. When overlapping grants differ in columns or masking, the column state is decided per cell. Admins, owners and approvers see the effective access with its provenance.
 
-Measurable: (a) `git grep -n -E "RowFilterPredicate|SubqueryJoinHop|AdditionalHops|SubqueryCorrelated|RowFilterSubqueryStrategy" -- src` returns only the migration step reader; (b) parity scenarios S20..S27 (section 6.3) pass on every transport and source; (c) the randomized per-cell test finds no Clear value outside the scope of a grant with Clear for that column; (d) the effective-access report and the approval preview return the row-restriction composition with provenance and no foreign predicate or parameter values.
+Measurable: (a) `git grep -n -E "RowFilterPredicate|SubqueryJoinHop|AdditionalHops|SubqueryCorrelated|RowFilterSubqueryStrategy" -- src` returns only the migration step reader; (b) parity scenarios S30..S37 (section 6.3) pass on every transport and source; (c) the randomized per-cell test finds no Clear value outside the scope of a grant with Clear for that column; (d) the effective-access report and the approval preview return the row-restriction composition with provenance and no foreign predicate or parameter values.
 
 ## 2. Preconditions and dependencies
 - Must be merged first: WP-SIMPL-46 PR 1 (decision point, grant step, decision record with `Grants`) for PR 1, 2 and 5 here; WP-SIMPL-46 PR 2 (all call sites re-routed through the decision point) for PR 3 and 4 here; WP-SIMPL-43 PR 3b (canonical effective groups).
 - Governance SQL location: if WP-SIMPL-20 is merged, SQL goes into the unified repository; otherwise into the PostgreSQL and SQL Server partials.
 - WP-SIMPL-21: the row-scope forms of step 3 and the per-cell projection of step 4 are added as cells of the dialect parity harness (SqlServer, PostgreSql, Oracle, Databricks, DuckDb, Ansi).
 - Feeds: WP-SIMPL-47 step 9a (pattern items, internal-mode ownership rule, approval-time hint) needs PR 5 and PR 6 here; WP-SIMPL-45 `OwnRows` uses the row-scope compiler of PR 3; WP-SIMPL-41 maps the per-cell state of PR 4; WP-SIMPL-42 counts every contributing grant (OD-42, from the WP-SIMPL-46 decision record).
-- Parity matrix: if WP-SIMPL-46 PR 6 merges after PR 4 here it includes S20..S27; otherwise PR 7 here adds them.
+- Parity matrix: if WP-SIMPL-46 PR 6 merges after PR 4 here it includes S30..S37; otherwise PR 7 here adds them.
 - Not parallel-safe: WP-SIMPL-46 PR 3-5 (`TableAccessPolicy`, decision cache), WP-SIMPL-45 PR 4 (`GovernedSqlRewriter`). Whichever merges second rebases.
 
 ## 3. Scope
@@ -94,7 +94,7 @@ Measurable: (a) `git grep -n -E "RowFilterPredicate|SubqueryJoinHop|AdditionalHo
 - `AuthorizationArchitectureTests` (extend): `Row_scopes_built_only_by_RowScopeCompiler` (no row-predicate string building outside `Policy/RowScopes` and the dialect renderers), `No_free_sql_predicate_on_grant_models` (no `string` predicate property on `Consent`, `AccessProfile` or profile items).
 - WP-SIMPL-21 dialect parity cells `RowScopeDialectTests`: composite `KeySet` (row-value `IN` vs `VALUES` join), `Live` `EXISTS`, per-cell `CASE` with flag join, on SqlServer, PostgreSql, Oracle, Databricks, DuckDb and Ansi.
 ### 6.3 Parity matrix rows (`CrossTransportAuthorizationParityTests`, WP-SIMPL-46 section 6.3)
-S20 filtered grant via group A plus unfiltered grant via group B -> all rows, both grant ids in `Grants`; S21 overlapping grants with different masking -> per-cell state; S22 hard policy via group A plus unfiltered grant via group B -> filtered; S23 pattern grant and an object created after approval; S24 uncovered `Deny` vs `Skip`; S25 composite-key policy; S26 cross-source `KeySet` policy; S27 same policy with parameters from two grants merged. The matrix becomes 27 x 15; each cell asserts allowed, per-column (or per-cell) state, row-set fingerprint and the set of contributing grant ids.
+S30 filtered grant via group A plus unfiltered grant via group B -> all rows, both grant ids in `Grants`; S31 overlapping grants with different masking -> per-cell state; S32 hard policy via group A plus unfiltered grant via group B -> filtered; S33 pattern grant and an object created after approval; S34 uncovered `Deny` vs `Skip`; S35 composite-key policy; S36 cross-source `KeySet` policy; S37 same policy with parameters from two grants merged. The matrix becomes 27 x 15; each cell asserts allowed, per-column (or per-cell) state, row-set fingerprint and the set of contributing grant ids.
 
 ## 7. Verification commands (one build at a time)
 ```
@@ -114,7 +114,7 @@ git grep -n -E "RowFilterPredicate|SubqueryJoinHop|AdditionalHops|SubqueryCorrel
 - [ ] Pattern grants cover new objects; the data source is fixed; new PII is Masked without explicit Clear; catalog epoch in the cache key; internal-mode ownership rule enforced and pending items created.
 - [ ] Effective-access report and preview with provenance and flags, authorized and redacted like explain, preview audited and non-blocking.
 - [ ] Migration converts or revokes subquery consent filters and drops profile predicates, both reported.
-- [ ] Parity rows S20..S27 green on all transports and sources.
+- [ ] Parity rows S30..S37 green on all transports and sources.
 
 ## 9. PR slicing (<= 400 net added src lines each)
 1. PR 1 "Row-policy parameters, evaluation mode, approval": step 1 (~350 src).
@@ -128,7 +128,7 @@ git grep -n -E "RowFilterPredicate|SubqueryJoinHop|AdditionalHops|SubqueryCorrel
 ## 10. Risks, rollback, and things the developer must NOT do
 - Risk: performance of `Live` policies with several signatures. Mitigation: one flag per signature, `KeySet` for expensive or cross-source policies, benchmark rows in `AccessDecisionPointBenchmark` (not a gate).
 - Risk: dynamic coverage exposes new objects without an approver noticing. Mitigation: data source fixed in the pattern, new PII Masked, internal-mode ownership rule, approval-time hint (WP-SIMPL-47) states that future objects are included, effective-access report.
-- Risk: masking drift while moving filter logic. Mitigation: existing virtual-filter and consent filter tests stay green except the deleted subquery-filter and profile-predicate tests; parity rows S20..S27.
+- Risk: masking drift while moving filter logic. Mitigation: existing virtual-filter and consent filter tests stay green except the deleted subquery-filter and profile-predicate tests; parity rows S30..S37.
 - Rollback: PR 1, 3, 4 and 6 revert cleanly; PR 2 and PR 5 revert together with their migration step (no production data; not deployed).
 - Must NOT: inline parameter values; compare composite keys per column; let a hard policy be bypassed by any grant; let a policy, binding or preview grant access; use `UNION ALL` for per-cell state; reveal a Clear value in a row outside a Clear grant's scope; allow a pattern without a literal data source or with regex; cache a decision without the catalog epoch; return predicate or parameter values of other subjects; treat a `NULL` key as a match.
 - Binding Phase 3 conditions: SEC-AZ-15..19 (sec plan section 11.1) and SEC-AZ-02, 04, 06, 07, 09.
@@ -155,3 +155,5 @@ git grep -n -E "RowFilterPredicate|SubqueryJoinHop|AdditionalHops|SubqueryCorrel
 
 ## Notes from other work packages
 - 2026-11-08 (WP-SIMPL-11 PR-C3): the `tools/PolicyPredicateLint` pre-deploy tool (its only loader was the SQLite governance lint source) is deleted. Any reference to it in this package is obsolete: the enforcing control is the runtime deny (`GatewayStartupValidator.ListDeniedTables`, reported at startup by `DeniedTablesStartupReporter`), and `PolicyPredicateLinter` keeps its unit tests (`PolicyPredicateLintTests`). No PostgreSQL lint source exists; an offline pre-deploy lint over the whole governance store is an owner follow-up.
+
+- 2026-11-18: rows renumbered to S30-S37 (owner default), PR 1-6 merged, PR 7 parity rows.
