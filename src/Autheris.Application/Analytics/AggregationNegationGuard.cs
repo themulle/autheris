@@ -46,7 +46,7 @@ internal static partial class AggregationNegationGuard
             var type = tokens[i].Type;
             var negates = type == SqlBaseLexer.NEQ
                 || (type == SqlBaseLexer.NOT && !IsIsNotNull(tokens, i));
-            var equals = type == SqlBaseLexer.EQ;
+            var equals = type == SqlBaseLexer.EQ || type == SqlBaseLexer.IN || type == SqlBaseLexer.LIKE;
             var isRange = type == SqlBaseLexer.LT
                 || type == SqlBaseLexer.LTE
                 || type == SqlBaseLexer.GT
@@ -192,20 +192,24 @@ internal static partial class AggregationNegationGuard
             _ => op.ToLowerInvariant()
         };
 
-    /// <summary>Primary-key columns and single-column unique-index columns: an equality on them can isolate one row.</summary>
+    /// <summary>Primary-key and unique-index columns: an equality, set (<c>IN</c>), pattern (<c>LIKE</c>) or range on them can isolate one row.</summary>
     private static HashSet<string> IsolatingColumns(TableMetadata metadata)
     {
         var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        if (metadata.PrimaryKeyColumns.Count == 1)
+        // Every member of a composite key is treated as isolating as well: a set or range over one member can still single out a row.
+        foreach (var key in metadata.PrimaryKeyColumns)
         {
-            set.Add(metadata.PrimaryKeyColumns[0]);
+            set.Add(key);
         }
 
         foreach (var index in metadata.Indexes)
         {
-            if (index.IsUnique && index.Columns.Count == 1)
+            if (index.IsUnique)
             {
-                set.Add(index.Columns[0]);
+                foreach (var column in index.Columns)
+                {
+                    set.Add(column);
+                }
             }
         }
 
