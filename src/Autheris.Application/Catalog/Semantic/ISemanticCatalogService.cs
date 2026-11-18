@@ -10,10 +10,13 @@ using Autheris.Domain.Model;
 /// Tenant-explicit semantic catalog (#112 A-9, F-6): there are no tenant-less members and no fallback to another tenant's data. A tenant
 /// sees only its own manifest; in <c>Single</c> tenancy mode every tenant id maps to the one legacy partition.
 /// </summary>
-public interface ISemanticCatalogService
+public interface ISemanticCatalogService : ISemanticMetricImport
 {
     /// <summary>Replaces the whole manifest of the tenant (removed metrics disappear). Throws <c>GatewayForbiddenException</c> for a tenant that has no catalog standing.</summary>
     Task RegisterManifestAsync(DbtSemanticManifest manifest, TenantId tenantId, string? importedBy = null, CancellationToken cancellationToken = default);
+
+    Task ISemanticMetricImport.ImportAsync(DbtSemanticManifest manifest, TenantId tenantId, string? importedBy, CancellationToken cancellationToken) =>
+        RegisterManifestAsync(manifest, tenantId, importedBy, cancellationToken);
 
     Task<IReadOnlyList<DbtMetric>> ListMetricsAsync(string? modelOrDataset, TenantId tenantId, CancellationToken cancellationToken = default);
     Task<DbtMetric?> GetMetricAsync(string metricName, TenantId tenantId, CancellationToken cancellationToken = default);
