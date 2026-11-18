@@ -1,7 +1,6 @@
 namespace Autheris.Application.Products;
 
 using System;
-using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Runtime.Hosting;
@@ -28,32 +27,30 @@ public class ProductIdleDropService(
         MaxJitter: TimeSpan.FromSeconds(5));
 }
 
-/// <summary>One tick: re-reads each product this process served on demand (current settings, never a stale copy) and drops the idle results.</summary>
+/// <summary>One tick: pages the <c>onDemand</c> products of every tenant (current settings, never a stale copy) and drops the idle results of this node.</summary>
 public sealed class ProductIdleDropJob(
-    IDataProductRepository products,
+    IOnDemandProductStore products,
     ProductLoadService loader,
     ILogger<ProductIdleDropJob> logger) : IClusterScheduledJob
 {
+    private const int PageSize = 100;
+
     public async Task ExecuteAsync(ClusterJobContext context, CancellationToken ct)
     {
-        var candidates = new List<DataProduct>();
-        foreach (var (tenant, schema, name) in loader.TrackedOnDemand())
+        var dropped = 0;
+        DataProduct? after = null;
+        while (true)
         {
-            ct.ThrowIfCancellationRequested();
-            try
+            var page = await products.ListOnDemandProductsAsync(after, PageSize, ct).ConfigureAwait(false);
+            dropped += await loader.DropIdleAsync(page, ct).ConfigureAwait(false);
+            if (page.Count < PageSize)
             {
-                if (await products.GetProductAsync(tenant, schema, name, ct).ConfigureAwait(false) is { } product)
-                {
-                    candidates.Add(product);
-                }
+                break;
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                logger.LogWarning(ex, "Idle drop could not read data product {Product}.", $"{schema}.{name}");
-            }
+
+            after = page[^1];
         }
 
-        var dropped = await loader.DropIdleAsync(candidates, ct).ConfigureAwait(false);
         if (dropped > 0)
         {
             logger.LogInformation("Dropped {Count} idle data product results.", dropped);

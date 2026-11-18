@@ -14,7 +14,10 @@ public interface IProductCatalogStore
     /// every PII column carrying the PII classification. The catalog version is bumped by the catalog write itself (a deactivation or a
     /// declassification is restrictive and published at once).
     /// </summary>
-    Task PersistAsync(DataProduct product, CancellationToken ct = default);
+    Task PersistAsync(DataProduct product, CancellationToken ct = default) => PersistAsync(product, null, ct);
+
+    /// <summary>As <see cref="PersistAsync(DataProduct, CancellationToken)"/>, with the load time of the cached result so a stale product beyond <c>MaxStaleness</c> is not exposed.</summary>
+    Task PersistAsync(DataProduct product, DateTimeOffset? loadedAt, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -31,11 +34,13 @@ public sealed class ProductCatalogStore(
     private readonly IClassificationRepository _classifications = classifications ?? throw new ArgumentNullException(nameof(classifications));
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
 
-    public async Task PersistAsync(DataProduct product, CancellationToken ct = default)
+    public Task PersistAsync(DataProduct product, CancellationToken ct = default) => PersistAsync(product, null, ct);
+
+    public async Task PersistAsync(DataProduct product, DateTimeOffset? loadedAt, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(product);
         var now = _time.GetUtcNow();
-        var projected = ProductCatalogProjector.Project(product, null, now);
+        var projected = ProductCatalogProjector.Project(product, loadedAt, now);
         var stored = await _metadata.UpsertTableMetadataAsync(projected, ct).ConfigureAwait(false);
         await ProductColumnClassifications.SyncAsync(_classifications, product, stored, now, ct).ConfigureAwait(false);
     }

@@ -8,7 +8,7 @@ using TrinoSqlEngine;
 namespace Autheris.Tests.Unit.Products;
 
 /// <summary>Tenant-scoped in-memory product store with the version semantics of the SQL store.</summary>
-internal sealed class InMemoryDataProductRepository : IDataProductRepository
+internal sealed class InMemoryDataProductRepository : IDataProductRepository, IOnDemandProductStore
 {
     private readonly Dictionary<(string Tenant, string Schema, string Name), DataProduct> _products = [];
     private readonly Dictionary<(string Tenant, Guid Product), List<DataProductVersion>> _versions = [];
@@ -24,6 +24,14 @@ internal sealed class InMemoryDataProductRepository : IDataProductRepository
     public Task<IReadOnlyList<DataProduct>> ListScheduledProductsAsync(DataProduct? after, int limit, CancellationToken ct = default)
     {
         var ordered = _products.Values.Where(p => p.Kind == DataProductKind.View && p.Load.Mode == LoadMode.Schedule && p.Status != DataProductStatus.Retired)
+            .OrderBy(p => p.Tenant.Value, StringComparer.Ordinal).ThenBy(p => p.Schema, StringComparer.Ordinal).ThenBy(p => p.Name, StringComparer.Ordinal);
+        var page = ordered.Where(p => after is null || string.CompareOrdinal($"{p.Tenant.Value}/{p.Schema}/{p.Name}", $"{after.Tenant.Value}/{after.Schema}/{after.Name}") > 0).Take(limit).ToList();
+        return Task.FromResult<IReadOnlyList<DataProduct>>(page);
+    }
+
+    public Task<IReadOnlyList<DataProduct>> ListOnDemandProductsAsync(DataProduct? after, int limit, CancellationToken ct = default)
+    {
+        var ordered = _products.Values.Where(p => p.Kind == DataProductKind.View && p.Load.Mode == LoadMode.OnDemand && p.Status != DataProductStatus.Retired)
             .OrderBy(p => p.Tenant.Value, StringComparer.Ordinal).ThenBy(p => p.Schema, StringComparer.Ordinal).ThenBy(p => p.Name, StringComparer.Ordinal);
         var page = ordered.Where(p => after is null || string.CompareOrdinal($"{p.Tenant.Value}/{p.Schema}/{p.Name}", $"{after.Tenant.Value}/{after.Schema}/{after.Name}") > 0).Take(limit).ToList();
         return Task.FromResult<IReadOnlyList<DataProduct>>(page);
@@ -118,14 +126,18 @@ internal sealed class RecordingCatalogStore : IProductCatalogStore
 
     public bool Fail { get; set; }
 
-    public Task PersistAsync(DataProduct product, CancellationToken ct = default)
+    public Func<DateTimeOffset> Now { get; set; } = () => DateTimeOffset.UnixEpoch;
+
+    public Task PersistAsync(DataProduct product, CancellationToken ct = default) => PersistAsync(product, null, ct);
+
+    public Task PersistAsync(DataProduct product, DateTimeOffset? loadedAt, CancellationToken ct = default)
     {
         if (Fail)
         {
             throw new InvalidOperationException("catalog down");
         }
 
-        var projected = ProductCatalogProjector.Project(product, null, DateTimeOffset.UnixEpoch);
+        var projected = ProductCatalogProjector.Project(product, loadedAt, Now());
         Objects[projected.Identifier] = projected;
         return Task.CompletedTask;
     }

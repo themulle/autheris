@@ -22,7 +22,8 @@ public static class ProductLoadingServiceExtensions
             sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.TableCache.TableCacheOptions>>(),
             sp.GetRequiredService<IAuditWriter>(),
             sp.GetService<TimeProvider>(),
-            sp.GetService<ILogger<ProductLoadService>>()));
+            sp.GetService<ILogger<ProductLoadService>>(),
+            sp.GetService<IProductCatalogStore>()));
         services.TryAddSingleton<IProductResultRouter>(sp => new ProductResultRouter(
             sp.GetRequiredService<IDataProductRepository>(),
             sp.GetRequiredService<ProductLoadService>(),

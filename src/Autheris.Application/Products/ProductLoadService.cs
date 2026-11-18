@@ -35,7 +35,8 @@ public sealed class ProductLoadService(
     IOptions<TableCacheOptions> options,
     IAuditWriter audit,
     TimeProvider? timeProvider = null,
-    ILogger<ProductLoadService>? logger = null)
+    ILogger<ProductLoadService>? logger = null,
+    IProductCatalogStore? catalogStore = null)
 {
     private static readonly TimeSpan LeaseSlack = TimeSpan.FromSeconds(60);
     private readonly ConcurrentDictionary<TableIdentifier, Lazy<Task<ProductResult>>> _inFlight = new();
@@ -273,6 +274,30 @@ public sealed class ProductLoadService(
         if (outcome.Status != ProductWriteStatus.Replaced)
         {
             logger?.LogInformation("The product changed while it was loaded; the load status was not recorded.");
+            return;
+        }
+
+        await ReprojectAsync(outcome.Product ?? current with { Status = status }, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Exposure follows <see cref="ProductFreshness.IsExposable"/>: a product that turned invalid (or stale beyond MaxStaleness) is deactivated
+    /// in the catalog at once (the catalog write publishes a restrictive change immediately). A failure is logged: the read path denies on its own.
+    /// </summary>
+    private async Task ReprojectAsync(DataProduct product, CancellationToken ct)
+    {
+        if (catalogStore is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await catalogStore.PersistAsync(product, LoadedAt(product), ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger?.LogWarning(ex, "The catalog object of data product {Product} could not be re-projected.", $"{product.Schema}.{product.Name}");
         }
     }
 
