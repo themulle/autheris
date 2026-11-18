@@ -54,17 +54,16 @@ public abstract class ConsentContract : GovernanceContractBase
                 {
                     Id = Guid.NewGuid(),
                     ColumnName = "id",
-                    DataType = "int",
-                    IsSensitive = false
+                    DataType = "int"
                 },
                 new TableColumn
                 {
                     Id = Guid.NewGuid(),
                     ColumnName = "secret_col",
-                    DataType = "varchar",
-                    IsSensitive = Table.IsSensitivityHigh(sensitivity)
+                    DataType = "varchar"
                 }
             ],
+            ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor(Table.IsSensitivityHigh(sensitivity) ? new[] { "secret_col" } : Array.Empty<string>()),
             PrimaryKeyColumns = ["id"]
         };
 

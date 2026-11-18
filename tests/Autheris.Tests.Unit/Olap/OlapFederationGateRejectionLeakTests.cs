@@ -36,7 +36,7 @@ public sealed partial class OlapFederationGateTests
         var columns = new List<TableColumn>
         {
             new() { ColumnName = "id", DataType = "int" },
-            new() { ColumnName = Canary, DataType = "string", IsSensitive = true }
+            new() { ColumnName = Canary, DataType = "string" }
         };
         TableDef Pii(string domain, string table, string connector) => new(
             domain, table, ConnectorId: connector, Columns: columns,

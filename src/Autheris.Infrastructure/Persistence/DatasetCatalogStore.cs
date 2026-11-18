@@ -8,7 +8,7 @@ using Microsoft.Extensions.Logging;
 namespace Autheris.Infrastructure.Persistence;
 
 /// <summary>
-/// Issue #111 ( A-1, A-2, A-6, A-10): shared read/write of the persisted dataset catalog tags and visibility tier for all governance
+/// Issue #111 ( A-1, A-2, A-6, A-10): shared read/write of the persisted dataset catalog tags and settings for all governance
 /// engines. Tags (<c>TABLE_TAGS</c>) and the tier (<c>TABLE_CATALOG_SETTINGS</c>) are separate from <c>TABLES</c> because ingestion upserts
 /// rewrite it. They are never stored in the metadata cache: the repositories overlay a fresh read on every call.
 /// Read side (catalog mode): every failure degrades to the secure value (Hidden, no tags) and is counted, never thrown; strict mode (admin reads)
@@ -19,12 +19,14 @@ internal static class DatasetCatalogStore
     internal const string TagsTable = "TABLE_TAGS";
     internal const string SettingsTable = "TABLE_CATALOG_SETTINGS";
     internal const string SystemDefaultActor = "system:default";
+
+    // The legacy NOT NULL tier column is neither read nor interpreted any more; inserts write this constant until a DDL step drops the column.
+    private const int LegacyVisibilityValue = 0;
     private const string AdminSource = "admin";
     private const string DbtSource = "dbt";
 
     /// <summary>The effective settings of one table after validation; <see cref="Degraded"/> rows carry the secure value.</summary>
     internal readonly record struct RowOverlay(
-        DatasetVisibility Visibility,
         IReadOnlyList<DatasetTag> Tags,
         IReadOnlyList<string> TagNames,
         bool Degraded,
@@ -37,12 +39,11 @@ internal static class DatasetCatalogStore
         private static readonly DatasetTag[] NoTags = [];
         private static readonly string[] NoTagNames = [];
 
-        internal static readonly RowOverlay Secure = new(DatasetVisibility.Hidden, NoTags, NoTagNames, true, null, null, DiscoveryHidden: true, SamplesDisabled: true);
-        internal static readonly RowOverlay Empty = new(DatasetVisibility.Hidden, NoTags, NoTagNames, false, null, null, DiscoveryHidden: false, SamplesDisabled: false);
+        internal static readonly RowOverlay Secure = new(NoTags, NoTagNames, true, null, null, DiscoveryHidden: true, SamplesDisabled: true);
+        internal static readonly RowOverlay Empty = new(NoTags, NoTagNames, false, null, null, DiscoveryHidden: false, SamplesDisabled: false);
 
         /// <summary>A healthy row; tables without tags share one empty array, tagged rows are sorted ordinally once.</summary>
         internal static RowOverlay Create(
-            DatasetVisibility visibility,
             List<DatasetTag>? tags,
             int? minGroupSize = null,
             bool? nonPersonal = null,
@@ -52,7 +53,7 @@ internal static class DatasetCatalogStore
         {
             if (tags is null || tags.Count == 0)
             {
-                return new RowOverlay(visibility, NoTags, NoTagNames, false, minGroupSize, nonPersonal, discoveryHidden, samplesDisabled, hiddenColumns);
+                return new RowOverlay(NoTags, NoTagNames, false, minGroupSize, nonPersonal, discoveryHidden, samplesDisabled, hiddenColumns);
             }
 
             var sorted = tags.ToArray();
@@ -63,14 +64,13 @@ internal static class DatasetCatalogStore
                 names[i] = sorted[i].Tag;
             }
 
-            return new RowOverlay(visibility, sorted, names, false, minGroupSize, nonPersonal, discoveryHidden, samplesDisabled, hiddenColumns);
+            return new RowOverlay(sorted, names, false, minGroupSize, nonPersonal, discoveryHidden, samplesDisabled, hiddenColumns);
         }
     }
 
     /// <summary>All validated rows of one read; a table without any row is <see cref="RowOverlay.Empty"/> (Hidden, no tags).</summary>
     internal sealed class OverlaySet
     {
-        private readonly Dictionary<Guid, DatasetVisibility> _visibility = [];
         private readonly Dictionary<Guid, List<DatasetTag>> _tags = [];
         private readonly Dictionary<Guid, int?> _minGroupSize = [];
         private readonly Dictionary<Guid, bool?> _nonPersonal = [];
@@ -81,8 +81,6 @@ internal static class DatasetCatalogStore
         private readonly Dictionary<Guid, RowOverlay> _built = [];
 
         internal bool AllDegraded { get; init; }
-
-        internal void SetVisibility(Guid id, DatasetVisibility visibility) => _visibility[id] = visibility;
 
         internal void SetPrivacy(Guid id, int? minGroupSize, bool? nonPersonal)
         {
@@ -130,18 +128,17 @@ internal static class DatasetCatalogStore
                 return built;
             }
 
-            var visibility = _visibility.TryGetValue(tableId, out var v) ? v : DatasetVisibility.Hidden;
             _tags.TryGetValue(tableId, out var list);
             _minGroupSize.TryGetValue(tableId, out var minGroupSize);
             _nonPersonal.TryGetValue(tableId, out var nonPersonal);
             var discoveryHidden = _discoveryHidden.TryGetValue(tableId, out var dh) && dh;
             var samplesDisabled = _samplesDisabled.TryGetValue(tableId, out var sd) && sd;
             _hiddenColumns.TryGetValue(tableId, out var hiddenCols);
-            return _built[tableId] = RowOverlay.Create(visibility, list, minGroupSize, nonPersonal, discoveryHidden, samplesDisabled, hiddenCols);
+            return _built[tableId] = RowOverlay.Create(list, minGroupSize, nonPersonal, discoveryHidden, samplesDisabled, hiddenCols);
         }
     }
 
-    /// <summary>Overlays the fresh tier, tags, and privacy settings onto a structural (possibly cached) record without mutating it.</summary>
+    /// <summary>Overlays the fresh tags, and privacy settings onto a structural (possibly cached) record without mutating it.</summary>
     internal static TableMetadata Apply(TableMetadata structural, RowOverlay row)
     {
         var columns = structural.Columns;
@@ -161,7 +158,6 @@ internal static class DatasetCatalogStore
         {
             Table = structural.Table with
             {
-                Visibility = row.Visibility,
                 DiscoveryHidden = row.Degraded || row.DiscoveryHidden,
                 SamplesDisabled = row.SamplesDisabled
             },
@@ -181,7 +177,6 @@ internal static class DatasetCatalogStore
         DataType = c.DataType,
         Collation = c.Collation,
         LengthSemantics = c.LengthSemantics,
-        IsSensitive = c.IsSensitive,
         WriteProtected = c.WriteProtected,
         DiscoveryHidden = hidden,
         Description = c.Description,
@@ -228,7 +223,6 @@ internal static class DatasetCatalogStore
         var row = set.Get(tableId);
         return new DatasetCatalogSettings(
             row.Tags,
-            row.Visibility,
             row.MinGroupSize,
             row.NonPersonal,
             row.DiscoveryHidden,
@@ -257,41 +251,11 @@ internal static class DatasetCatalogStore
         var row = (await ReadOverlayAsync(conn, tx, dialect, tableId.Value, logger, ct).ConfigureAwait(false)).Get(tableId.Value);
         return new DatasetCatalogSettings(
             row.Tags,
-            row.Visibility,
             row.MinGroupSize,
             row.NonPersonal,
             row.DiscoveryHidden,
             row.SamplesDisabled,
             row.HiddenColumns?.OrderBy(c => c, StringComparer.Ordinal).ToArray() ?? []);
-    }
-
-    /// <summary>Counts per tier: Summary and Full from the settings rows, Hidden as all tables minus those (every other stored value counts as Hidden).</summary>
-    internal static async Task<DatasetVisibilityCounts> CountByVisibilityAsync(
-        DbConnection conn, DbTransaction? tx, KeyDefinitionDialect dialect, CancellationToken ct)
-    {
-        long summary = 0, full = 0, total;
-        await using (var cmd = conn.CreateCommand())
-        {
-            Enlist(cmd, tx);
-            cmd.CommandText = $"SELECT COUNT(*), visibility FROM {dialect.Prefix}{SettingsTable} GROUP BY visibility";
-            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-            while (await reader.ReadAsync(ct).ConfigureAwait(false))
-            {
-                var tier = TryReadVisibility(reader, out var v) ? v : DatasetVisibility.Hidden;
-                var count = Convert.ToInt64(reader.GetValue(0), CultureInfo.InvariantCulture);
-                if (tier == DatasetVisibility.Summary) summary += count;
-                else if (tier == DatasetVisibility.Full) full += count;
-            }
-        }
-
-        await using (var cmd = conn.CreateCommand())
-        {
-            Enlist(cmd, tx);
-            cmd.CommandText = $"SELECT COUNT(*) FROM {dialect.Prefix}TABLES WHERE is_active = 1";
-            total = Convert.ToInt64(await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false), CultureInfo.InvariantCulture);
-        }
-
-        return new DatasetVisibilityCounts(Math.Max(0, total - summary - full), summary, full);
     }
 
     /// <summary>Id of the active table with this identifier (no row lock); null when unknown or inactive.</summary>
@@ -318,7 +282,7 @@ internal static class DatasetCatalogStore
         await using (var cmd = conn.CreateCommand())
         {
             Enlist(cmd, tx);
-            cmd.CommandText = $"SELECT table_id, visibility, min_group_size, non_personal, discovery_hidden, samples_disabled FROM {dialect.Prefix}{SettingsTable}{filter}";
+            cmd.CommandText = $"SELECT table_id, min_group_size, non_personal, discovery_hidden, samples_disabled FROM {dialect.Prefix}{SettingsTable}{filter}";
             if (tableId is { } id)
             {
                 AddParameter(cmd, "@tid", id.ToString());
@@ -333,44 +297,34 @@ internal static class DatasetCatalogStore
                     continue;
                 }
 
-                if (TryReadVisibility(reader, out var visibility))
+                int? rowMinGroupSize = null;
+                bool? rowNonPersonal = null;
+                if (reader.FieldCount > 1 && !reader.IsDBNull(1))
                 {
-                    set.SetVisibility(rowId, visibility);
-
-                    int? rowMinGroupSize = null;
-                    bool? rowNonPersonal = null;
-                    if (reader.FieldCount > 2 && !reader.IsDBNull(2))
-                    {
-                        rowMinGroupSize = Convert.ToInt32(reader.GetValue(2), CultureInfo.InvariantCulture);
-                    }
-                    if (reader.FieldCount > 3 && !reader.IsDBNull(3))
-                    {
-                        var val = reader.GetValue(3);
-                        rowNonPersonal = val is bool b ? b : Convert.ToInt32(val, CultureInfo.InvariantCulture) == 1;
-                    }
-
-                    set.SetPrivacy(rowId, rowMinGroupSize, rowNonPersonal);
-
-                    bool rowDiscoveryHidden = false;
-                    bool rowSamplesDisabled = false;
-                    if (reader.FieldCount > 4 && !reader.IsDBNull(4))
-                    {
-                        var dhVal = reader.GetValue(4);
-                        rowDiscoveryHidden = dhVal is bool b ? b : Convert.ToInt32(dhVal, CultureInfo.InvariantCulture) == 1;
-                    }
-                    if (reader.FieldCount > 5 && !reader.IsDBNull(5))
-                    {
-                        var sdVal = reader.GetValue(5);
-                        rowSamplesDisabled = sdVal is bool b ? b : Convert.ToInt32(sdVal, CultureInfo.InvariantCulture) == 1;
-                    }
-
-                    set.SetDiscoveryFlags(rowId, rowDiscoveryHidden, rowSamplesDisabled);
+                    rowMinGroupSize = Convert.ToInt32(reader.GetValue(1), CultureInfo.InvariantCulture);
                 }
-                else
+                if (reader.FieldCount > 2 && !reader.IsDBNull(2))
                 {
-                    Degrade(strict, logger, rowId.ToString(), SettingsTable);
-                    set.Poison(rowId);
+                    var val = reader.GetValue(2);
+                    rowNonPersonal = val is bool b ? b : Convert.ToInt32(val, CultureInfo.InvariantCulture) == 1;
                 }
+
+                set.SetPrivacy(rowId, rowMinGroupSize, rowNonPersonal);
+
+                bool rowDiscoveryHidden = false;
+                bool rowSamplesDisabled = false;
+                if (reader.FieldCount > 3 && !reader.IsDBNull(3))
+                {
+                    var dhVal = reader.GetValue(3);
+                    rowDiscoveryHidden = dhVal is bool b ? b : Convert.ToInt32(dhVal, CultureInfo.InvariantCulture) == 1;
+                }
+                if (reader.FieldCount > 4 && !reader.IsDBNull(4))
+                {
+                    var sdVal = reader.GetValue(4);
+                    rowSamplesDisabled = sdVal is bool b ? b : Convert.ToInt32(sdVal, CultureInfo.InvariantCulture) == 1;
+                }
+
+                set.SetDiscoveryFlags(rowId, rowDiscoveryHidden, rowSamplesDisabled);
             }
         }
 
@@ -462,31 +416,6 @@ internal static class DatasetCatalogStore
             return !reader.IsDBNull(0) && Guid.TryParse(Convert.ToString(reader.GetValue(0), CultureInfo.InvariantCulture), out id);
         }
         catch (Exception ex) when (ex is InvalidCastException or FormatException)
-        {
-            return false;
-        }
-    }
-
-    private static bool TryReadVisibility(DbDataReader reader, out DatasetVisibility visibility)
-    {
-        visibility = DatasetVisibility.Hidden;
-        try
-        {
-            if (reader.IsDBNull(1))
-            {
-                return false;
-            }
-
-            var stored = Convert.ToInt32(reader.GetValue(1), CultureInfo.InvariantCulture);
-            if (stored is < 0 or > 2)
-            {
-                return false;
-            }
-
-            visibility = DatasetTagRules.ReadStored(stored);
-            return true;
-        }
-        catch (Exception ex) when (ex is InvalidCastException or FormatException or OverflowException)
         {
             return false;
         }
@@ -608,41 +537,6 @@ internal static class DatasetCatalogStore
     }
 
     /// <summary>
-    /// Sets the tier (no write when unchanged). Null when the table is unknown or inactive. Race: <c>MutateAsync</c> reads the before-state inside
-    /// the caller's transaction, and the write path serialises through the table lookup lock (<c>TableLookupSql</c>); a concurrent first insert
-    /// that slips through ends in a primary-key violation on <c>table_id</c>, which fails the call closed (nothing is committed, no audit).
-    /// </summary>
-    internal static Task<DatasetCatalogChange?> SetVisibilityAsync(
-        DbConnection conn, DbTransaction tx, KeyDefinitionDialect dialect, TableIdentifier table,
-        DatasetVisibility visibility, Sid actor, CancellationToken ct)
-    {
-        if (!Enum.IsDefined(visibility))
-        {
-            throw new ArgumentOutOfRangeException(nameof(visibility));
-        }
-
-        return MutateAsync(conn, tx, dialect, table, actor, async (tableId, before) =>
-        {
-            if (before.Visibility == visibility)
-            {
-                return;
-            }
-
-            var parameters = new (string, object)[]
-            {
-                ("@tid", tableId.ToString()), ("@vis", (int)visibility), ("@by", actor.Value), ("@now", Now())
-            };
-            var updated = await ExecAsync(conn, tx,
-                $"UPDATE {dialect.Prefix}{SettingsTable} SET visibility = @vis, updated_by = @by, updated_at = @now WHERE table_id = @tid", ct, parameters).ConfigureAwait(false);
-            if (updated == 0)
-            {
-                await ExecAsync(conn, tx,
-                    $"INSERT INTO {dialect.Prefix}{SettingsTable} (table_id, visibility, updated_by, updated_at) VALUES (@tid, @vis, @by, @now)", ct, parameters).ConfigureAwait(false);
-            }
-        }, ct);
-    }
-
-    /// <summary>
     /// Sets the minimum group size and non-personal table overlay (no write when unchanged).
     /// </summary>
     internal static Task<DatasetCatalogChange?> SetPrivacyAsync(
@@ -674,7 +568,7 @@ internal static class DatasetCatalogStore
                 var insertParams = new (string, object)[]
                 {
                     ("@tid", tableId.ToString()),
-                    ("@vis", (int)before.Visibility),
+                    ("@vis", LegacyVisibilityValue),
                     ("@mgs", mgsValue),
                     ("@np", npValue),
                     ("@by", actor.Value),
@@ -718,7 +612,7 @@ internal static class DatasetCatalogStore
                     var insertParams = new (string, object)[]
                     {
                         ("@tid", tableId.ToString()),
-                        ("@vis", (int)before.Visibility),
+                        ("@vis", LegacyVisibilityValue),
                         ("@mgs", (object?)before.MinGroupSize ?? DBNull.Value),
                         ("@np", (object?)before.NonPersonal ?? DBNull.Value),
                         ("@dh", dhValue),
@@ -745,27 +639,6 @@ internal static class DatasetCatalogStore
                 }
             }
         }, ct);
-    }
-
-    /// <summary>
-    /// A-10: inserts the system default tier for a table created in this transaction (only when no row exists). The callers pass it only for
-    /// non-Hidden defaults, so the Hidden default writes nothing. Race: <c>WHERE NOT EXISTS</c> is not atomic across transactions; a concurrent
-    /// insert for the same new table violates the primary key and fails the creating transaction closed (the table is not created with a tier).
-    /// </summary>
-    internal static async Task<int> InsertDefaultAsync(
-        DbConnection conn, DbTransaction tx, KeyDefinitionDialect dialect, Guid tableId, DatasetVisibility visibility, CancellationToken ct)
-    {
-        var inserted = await ExecAsync(conn, tx,
-            $"INSERT INTO {dialect.Prefix}{SettingsTable} (table_id, visibility, updated_by, updated_at) " +
-            $"SELECT @tid, @vis, @by, @now WHERE NOT EXISTS (SELECT 1 FROM {dialect.Prefix}{SettingsTable} WHERE table_id = @tid)",
-            ct, ("@tid", tableId.ToString()), ("@vis", (int)visibility), ("@by", SystemDefaultActor), ("@now", Now())).ConfigureAwait(false);
-        if (inserted > 0)
-        {
-            // Feeds the aggregated creation audit of A-9 (counted before the commit; a rollback over-counts, which the entry states as "up to").
-            CatalogDefaultTierTally.Note();
-        }
-
-        return inserted;
     }
 
     private static async Task<DatasetCatalogChange?> MutateAsync(

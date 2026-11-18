@@ -59,11 +59,11 @@ public sealed class AccessProfileDistributedStateTests
             },
             Columns =
             [
-                new TableColumn { ColumnName = "crane_id", DataType = "VARCHAR(64)", IsSensitive = false },
-                new TableColumn { ColumnName = "status", DataType = "VARCHAR(32)", IsSensitive = false },
-                new TableColumn { ColumnName = "latitude", DataType = "DOUBLE", IsSensitive = true }
+                new TableColumn { ColumnName = "crane_id", DataType = "VARCHAR(64)" },
+                new TableColumn { ColumnName = "status", DataType = "VARCHAR(32)" },
+                new TableColumn { ColumnName = "latitude", DataType = "DOUBLE" }
             ]
-        };
+        }.WithPii("latitude");
     }
 
     private static TableAccessPolicy CreatePolicyWithCache(

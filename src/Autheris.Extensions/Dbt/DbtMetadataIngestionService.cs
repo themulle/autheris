@@ -377,6 +377,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         }
 
         var pendingModelUpdates = new List<(TableMetadata Metadata, IReadOnlyList<string> Tags, IReadOnlyList<IReadOnlyDictionary<string, object?>>? SyntheticSamples)>();
+        var pendingGoldenQueries = new List<(TableMetadata Metadata, DbtGoldenQueryMeta Meta)>();
         foreach (var model in models)
         {
             ct.ThrowIfCancellationRequested();
@@ -616,7 +617,6 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                         HttpEndpoint = existingMeta.Table.HttpEndpoint,
                         PluginName = existingMeta.Table.PluginName,
                         Tags = existingMeta.Table.Tags,
-                        Visibility = existingMeta.Table.Visibility,
                         RlsExpression = existingMeta.Table.RlsExpression,
                         MinGroupSize = newMinGroupSize,
                         NonPersonal = newNonPersonal,
@@ -646,27 +646,17 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                             TableId = c.TableId,
                             ColumnName = c.ColumnName,
                             DataType = c.DataType,
-                            IsSensitive = c.IsSensitive,
                             Description = colDesc,
                             LongDescription = colLongDesc,
                             Meta = colMeta
                         });
                     }
 
-                    var updatedMetadata = new TableMetadata
+                    // A copy of a loaded table keeps every persisted governance field (classifications, mask overrides, keys, ...).
+                    var updatedMetadata = existingMeta with
                     {
                         Table = updatedTableObj,
-                        Identifier = existingMeta.Identifier,
-                        Columns = updatedColumns,
-                        ColumnMaskingRules = existingMeta.ColumnMaskingRules,
-                        PrimaryKeyColumns = existingMeta.PrimaryKeyColumns,
-                        PrimaryKeyDirections = existingMeta.PrimaryKeyDirections,
-                        Indexes = existingMeta.Indexes,
-                        MinGroupSize = existingMeta.MinGroupSize,
-                        NonPersonal = existingMeta.NonPersonal,
-                        SmallGroupStrategy = existingMeta.SmallGroupStrategy,
-                        OwnerTenantId = existingMeta.OwnerTenantId,
-                        ExpectedRows = existingMeta.ExpectedRows
+                        Columns = updatedColumns
                     };
 
                     // Issue #94 (D-8): primary_key / unique constraints, unique tests, and meta.indexes replace the stored definition.
@@ -678,6 +668,10 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                     if (!dryRun)
                     {
                         pendingModelUpdates.Add((updatedMetadata, model.Tags, model.SyntheticSamples));
+                        if (model.GoldenQueries is { } goldenMeta)
+                        {
+                            pendingGoldenQueries.Add((updatedMetadata, goldenMeta));
+                        }
                     }
                 }
             }
@@ -719,6 +713,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         }
 
         await FlushPendingModelUpdatesAsync(pendingModelUpdates, warnings, ct).ConfigureAwait(false);
+        await SyncGoldenQueriesAsync(pendingGoldenQueries, warnings, ct).ConfigureAwait(false);
 
         if (autoSyncFailed)
         {
@@ -1333,7 +1328,6 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                     HttpEndpoint = existingMeta.Table.HttpEndpoint,
                     PluginName = existingMeta.Table.PluginName,
                     Tags = existingMeta.Table.Tags,
-                    Visibility = existingMeta.Table.Visibility,
                     RlsExpression = existingMeta.Table.RlsExpression,
                     MinGroupSize = existingMeta.Table.MinGroupSize,
                     NonPersonal = existingMeta.Table.NonPersonal,
@@ -1344,6 +1338,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                 };
 
                 var updatedCols = new List<TableColumn>();
+                var flaggedColumns = new List<TableColumn>();
                 var updatedMaskingRules = new Dictionary<string, MaskingRule>(existingMeta.ColumnMaskingRules, StringComparer.OrdinalIgnoreCase);
 
                 JsonElement colsElement = default;
@@ -1351,7 +1346,8 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
 
                 foreach (var col in existingMeta.Columns)
                 {
-                    var colSensitivity = col.IsSensitive;
+                    var wasSensitive = ClassificationMetadata.IsColumnSensitive(existingMeta, col);
+                    var newlyFlagged = false;
                     var colDesc = col.Description;
                     var colMeta = new Dictionary<string, string>(col.Meta ?? new Dictionary<string, string>(), StringComparer.OrdinalIgnoreCase);
 
@@ -1363,7 +1359,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                             // B-03: Use Table.IsSensitivityHigh (SensitivityRank >= 3) instead of != "PUBLIC"
                             var incomingHigh = Table.IsSensitivityHigh(cs);
                             var storedLabel = colMeta.TryGetValue("sensitivity", out var sl) ? sl : null;
-                            if ((col.IsSensitive && !incomingHigh) ||
+                            if ((wasSensitive && !incomingHigh) ||
                                 (!string.IsNullOrWhiteSpace(storedLabel) && Table.SensitivityRank(cs) < Table.SensitivityRank(storedLabel)))
                             {
                                 // Fail closed: a lower column sensitivity is not applied but rejects the import (proposal workflow).
@@ -1371,7 +1367,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                             }
                             else
                             {
-                                colSensitivity = incomingHigh;
+                                newlyFlagged = incomingHigh;
                                 if (!string.IsNullOrWhiteSpace(cs)) colMeta["sensitivity"] = cs;
                             }
                         }
@@ -1519,28 +1515,29 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                         RejectRuleRemoval(updatedMaskingRules, tableId, col.ColumnName);
                     }
 
-                    updatedCols.Add(new TableColumn
+                    var updatedCol = new TableColumn
                     {
                         Id = col.Id,
                         TableId = col.TableId,
                         ColumnName = col.ColumnName,
                         DataType = col.DataType,
-                        IsSensitive = colSensitivity,
                         Description = colDesc,
                         LongDescription = col.LongDescription,
                         Meta = colMeta
-                    });
+                    };
+                    updatedCols.Add(updatedCol);
+                    if (newlyFlagged)
+                    {
+                        flaggedColumns.Add(updatedCol);
+                    }
                 }
 
-                var updatedMetadata = new TableMetadata
+                var updatedMetadata = existingMeta with
                 {
                     Table = updatedTable,
-                    Identifier = existingMeta.Identifier,
                     Columns = updatedCols,
                     ColumnMaskingRules = updatedMaskingRules,
-                    PrimaryKeyColumns = existingMeta.PrimaryKeyColumns,
-                    PrimaryKeyDirections = existingMeta.PrimaryKeyDirections,
-                    Indexes = existingMeta.Indexes
+                    ColumnClassifications = ClassificationMetadata.Merge(existingMeta.ColumnClassifications, ClassificationMetadata.AssignPii(flaggedColumns, "DBT"))
                 };
 
                 pendingUpserts.Add(updatedMetadata);

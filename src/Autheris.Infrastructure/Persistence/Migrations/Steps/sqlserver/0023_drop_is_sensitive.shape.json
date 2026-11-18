@@ -1,0 +1,6 @@
+{
+  "ops": [
+    { "op": "dropTable", "table": "COLUMN_MASKING_RULES" },
+    { "op": "dropColumn", "table": "TABLE_COLUMNS", "name": "is_sensitive" }
+  ]
+}

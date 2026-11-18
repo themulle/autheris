@@ -334,8 +334,8 @@ end";
 
                 if (_options.FailClosedOnSensitiveTables)
                 {
-                    bool isSensitive = check.IsHighlySensitive || await _sensitivityLookup.IsSensitiveAsync(check.Table, ct).ConfigureAwait(false);
-                    if (isSensitive)
+                    bool hasSensitiveData = check.IsHighlySensitive || await _sensitivityLookup.HasSensitiveDataAsync(check.Table, ct).ConfigureAwait(false);
+                    if (hasSensitiveData)
                     {
                         results[check.Table] = false;
                         continue;
@@ -384,7 +384,7 @@ end";
             // bump is outstanding, sensitive tables bypass the cache like in the degraded mode.
             if (_pendingRedisBumps.ContainsKey(key) ||
                 (bumpOutstanding && _options.FailClosedOnSensitiveTables &&
-                 (check.IsHighlySensitive || await _sensitivityLookup.IsSensitiveAsync(check.Table, ct).ConfigureAwait(false))))
+                 (check.IsHighlySensitive || await _sensitivityLookup.HasSensitiveDataAsync(check.Table, ct).ConfigureAwait(false))))
             {
                 results[check.Table] = false;
                 continue;
@@ -398,7 +398,7 @@ end";
             {
                 _highestSeenRedisEpoch.TryGetValue(key, out var highestSeen);
                 if (entry.Epoch >= highestSeen &&
-                    !await _sensitivityLookup.IsSensitiveAsync(check.Table, ct).ConfigureAwait(false))
+                    !await _sensitivityLookup.HasSensitiveDataAsync(check.Table, ct).ConfigureAwait(false))
                 {
                     results[check.Table] = entry.Epoch == check.CachedEpoch;
                     continue;
@@ -689,7 +689,7 @@ end";
         // A revoke whose Redis bump is outstanding is treated like the degraded mode for sensitive tables (fail closed).
         if ((isDegraded || !_pendingRedisBumps.IsEmpty) && _options.FailClosedOnSensitiveTables)
         {
-            if (await _sensitivityLookup.IsSensitiveAsync(table, ct).ConfigureAwait(false))
+            if (await _sensitivityLookup.HasSensitiveDataAsync(table, ct).ConfigureAwait(false))
             {
                 return false;
             }
@@ -708,9 +708,9 @@ end";
 
         var now = _time.GetUtcNow();
         var budgetMs = _options.LocalStalenessBudgetMilliseconds;
-        bool isSensitive = await _sensitivityLookup.IsSensitiveAsync(table, ct).ConfigureAwait(false);
+        bool hasSensitiveData = await _sensitivityLookup.HasSensitiveDataAsync(table, ct).ConfigureAwait(false);
 
-        if (!isSensitive && budgetMs > 0 && !_epochFloors.ContainsKey(key) && _microCache.TryGetValue(key, out var entry))
+        if (!hasSensitiveData && budgetMs > 0 && !_epochFloors.ContainsKey(key) && _microCache.TryGetValue(key, out var entry))
         {
             if ((now - entry.CachedAt).TotalMilliseconds <= budgetMs)
             {

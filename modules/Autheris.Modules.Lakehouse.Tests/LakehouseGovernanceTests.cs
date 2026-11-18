@@ -49,14 +49,14 @@ public sealed class LakehouseGovernanceTests
     {
         var tableId = new TableIdentifier("lake", "sales", "delta_orders");
         var metadata = new TableMetadata
-        {
+        { ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("email"),
             Identifier = tableId,
             Table = new Table { SourceName = "lake", SchemaName = "sales", TableName = "delta_orders", DataSourceType = DataSourceType.LakehouseDelta, IsActive = true },
             Columns =
             [
                 new TableColumn { ColumnName = "id", DataType = "string" },
                 new TableColumn { ColumnName = "region", DataType = "string" },
-                new TableColumn { ColumnName = "email", DataType = "string", IsSensitive = true },
+                new TableColumn { ColumnName = "email", DataType = "string" },
                 new TableColumn { ColumnName = "tenantId", DataType = "string" }
             ],
             ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
@@ -340,7 +340,7 @@ public sealed class LakehouseGovernanceTests
 
         var sqlTableId = new TableIdentifier("erp", "dbo", "customers");
         var sqlMetadata = new TableMetadata
-        {
+        { ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("email"),
             Identifier = sqlTableId,
             PrimaryKeyColumns = ["customer_id"],
             Table = new Table { SourceName = "erp", SchemaName = "dbo", TableName = "customers", DataSourceType = DataSourceType.Sql, IsActive = true },
@@ -348,7 +348,7 @@ public sealed class LakehouseGovernanceTests
             [
                 new TableColumn { ColumnName = "customer_id", DataType = "string" },
                 new TableColumn { ColumnName = "company_name", DataType = "string" },
-                new TableColumn { ColumnName = "email", DataType = "string", IsSensitive = true },
+                new TableColumn { ColumnName = "email", DataType = "string" },
                 new TableColumn { ColumnName = "region", DataType = "string" }
             ],
             ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)

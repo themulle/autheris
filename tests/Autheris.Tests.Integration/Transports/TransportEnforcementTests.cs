@@ -149,7 +149,7 @@ public sealed class TransportEnforcementTests : IClassFixture<TransportEnforceme
             {
                 Table = new Table { Id = Guid.NewGuid(), DisplayName = table, TableName = table, SchemaName = "main", SourceType = "PostgreSql", SourceName = source },
                 Identifier = new TableIdentifier(source, "main", table),
-                CatalogView = CatalogView.Full, // sample rows are only read for a Full catalog shape
+                CatalogView = CatalogView.Granted, // sample rows are only read for a Full catalog shape
                 Columns =
                 [
                     new TableColumn { ColumnName = "id", DataType = "integer" },

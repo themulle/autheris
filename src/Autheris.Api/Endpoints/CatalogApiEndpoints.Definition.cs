@@ -332,8 +332,6 @@ public sealed record DatasetTagDto(string Tag, string Source);
 public sealed record DatasetCatalogSettingsDto(
     string DatasetId,
     System.Collections.Generic.IReadOnlyList<DatasetTagDto> Tags,
-    string Visibility,
-    bool TierEffective,
     int? MinGroupSize = null,
     bool? NonPersonal = null,
     string? Warning = null,

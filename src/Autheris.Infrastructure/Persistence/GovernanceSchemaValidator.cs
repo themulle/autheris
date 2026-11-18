@@ -15,9 +15,6 @@ public sealed class GovernanceSchemaValidator
         "IDENTITY_GROUP_MEMBERS",
         "IDENTITY_LOCKS",
         "FUNCTIONAL_RIGHT_MAPPINGS",
-        "ACCESS_POLICIES",
-        "ACCESS_POLICY_GRANTEES",
-        "ACCESS_POLICY_SELECTORS",
         "RECERT_CAMPAIGNS",
         "RECERT_ITEMS"
     };

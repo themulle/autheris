@@ -12,14 +12,12 @@ internal static class CatalogProjectionTestData
     public static TableColumn Column(
         string name,
         string dataType = "varchar",
-        bool isSensitive = false,
         string? description = null,
         string? collation = null,
         IReadOnlyDictionary<string, string>? meta = null) => new()
     {
         ColumnName = name,
         DataType = dataType,
-        IsSensitive = isSensitive,
         Description = description,
         Collation = collation,
         Meta = meta ?? new Dictionary<string, string>()

@@ -31,9 +31,9 @@ public readonly record struct CatalogVisibleRow
     public CatalogVisibleRow(TableMetadata table, CatalogOutputShape shape)
     {
         ArgumentNullException.ThrowIfNull(table);
-        if (shape is not (CatalogOutputShape.Summary or CatalogOutputShape.Full))
+        if (shape != CatalogOutputShape.Full)
         {
-            throw new ArgumentOutOfRangeException(nameof(shape), "A visible row is Summary or Full, never NotFound.");
+            throw new ArgumentOutOfRangeException(nameof(shape), "A visible row is Full, never NotFound.");
         }
 
         Table = table;

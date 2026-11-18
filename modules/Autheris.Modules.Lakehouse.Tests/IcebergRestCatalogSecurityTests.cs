@@ -264,10 +264,10 @@ public sealed class IcebergRestCatalogSecurityTests
     public async Task LoadTable_WithCatalogSensitiveColumnWithoutExplicitClear_IsDenied()
     {
         var meta = new TableMetadata
-        {
+        { ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("ssn"),
             Identifier = OrdersId,
             Table = new Table { SourceName = "tenant-1", SchemaName = "raw", TableName = "orders", DataSourceType = DataSourceType.LakehouseIceberg },
-            Columns = new[] { new TableColumn { ColumnName = "ssn", IsSensitive = true } }
+            Columns = new[] { new TableColumn { ColumnName = "ssn" } }
         };
         var service = ServiceWith(meta, AllowFor("analyst@corp.com"));
 

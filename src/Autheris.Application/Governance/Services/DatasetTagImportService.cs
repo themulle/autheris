@@ -131,7 +131,6 @@ public sealed class DatasetTagImportService : IDatasetTagImportService
 
     private static object View(DatasetCatalogSettings s) => new
     {
-        visibility = s.Visibility.ToString(),
         tags = s.Tags.Select(t => t.Tag).OrderBy(t => t, StringComparer.Ordinal).ToArray()
     };
 }

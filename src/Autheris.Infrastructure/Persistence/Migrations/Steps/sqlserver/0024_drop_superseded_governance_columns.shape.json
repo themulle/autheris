@@ -1,0 +1,19 @@
+{
+  "ops": [
+    { "op": "dropTable", "table": "ROLE_MEMBERS" },
+    { "op": "dropTable", "table": "ROLES" },
+    { "op": "dropTable", "table": "ACCESS_POLICY_SELECTORS" },
+    { "op": "dropTable", "table": "ACCESS_POLICY_GRANTEES" },
+    { "op": "dropTable", "table": "ACCESS_POLICIES" },
+    { "op": "dropColumn", "table": "CONSENT_ROW_FILTERS", "name": "dependent_table" },
+    { "op": "dropColumn", "table": "CONSENT_ROW_FILTERS", "name": "dependent_table_alias" },
+    { "op": "dropColumn", "table": "CONSENT_ROW_FILTERS", "name": "foreign_key_column" },
+    { "op": "dropColumn", "table": "CONSENT_ROW_FILTERS", "name": "primary_key_column" },
+    { "op": "dropColumn", "table": "CONSENT_ROW_FILTERS", "name": "subquery_predicate_json" },
+    { "op": "dropColumn", "table": "CONSENT_ROW_FILTERS", "name": "target_temporal_column" },
+    { "op": "dropColumn", "table": "CONSENT_ROW_FILTERS", "name": "dependent_valid_from_column" },
+    { "op": "dropColumn", "table": "CONSENT_ROW_FILTERS", "name": "dependent_valid_to_column" },
+    { "op": "dropColumn", "table": "CONSENT_ROW_FILTERS", "name": "target_table_alias" },
+    { "op": "dropColumn", "table": "CONSENT_ROW_FILTERS", "name": "additional_hops_json" }
+  ]
+}

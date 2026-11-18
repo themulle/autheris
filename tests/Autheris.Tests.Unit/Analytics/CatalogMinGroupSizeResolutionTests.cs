@@ -32,7 +32,7 @@ public sealed class CatalogMinGroupSizeResolutionTests
             {
                 new TableColumn { TableId = tableId, ColumnName = "id", DataType = "int" },
                 new TableColumn { TableId = tableId, ColumnName = "name", DataType = "varchar" },
-                new TableColumn { TableId = tableId, ColumnName = "secret", DataType = "varchar", IsSensitive = hasSensitiveColumn }
+                new TableColumn { TableId = tableId, ColumnName = "secret", DataType = "varchar" }
             };
 
         var maskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase);
@@ -47,6 +47,7 @@ public sealed class CatalogMinGroupSizeResolutionTests
             MinGroupSize = minGroupSize,
             NonPersonal = nonPersonal,
             ColumnMaskingRules = maskingRules,
+            ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor(hasSensitiveColumn ? new[] { "secret" } : Array.Empty<string>()),
             Table = new Table
             {
                 Id = tableId,

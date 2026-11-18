@@ -34,12 +34,12 @@ public sealed class DeclarativeConsentApplyDatasetsTests
     {
         Returns(DatasetCatalogOutcome.Applied);
 
-        var result = await Create(_datasets).ApplyManifestAsync(Caller, Manifest(new DeclarativeDatasetCatalog("sales", "dbo", "orders", ["pii"], "Summary")));
+        var result = await Create(_datasets).ApplyManifestAsync(Caller, Manifest(new DeclarativeDatasetCatalog("sales", "dbo", "orders", ["pii"])));
 
         result.Applied.ShouldBe(1);
         result.TotalEvaluated.ShouldBe(1);
         await _datasets.Received(1).ApplyAsync(Caller, "sales.dbo.orders",
-            Arg.Is<DatasetCatalogEdit>(e => e.ReplaceTags!.Single() == "pii" && e.Visibility == "Summary" && e.AddTags == null),
+            Arg.Is<DatasetCatalogEdit>(e => e.ReplaceTags!.Single() == "pii" && e.AddTags == null),
             "manifest", Arg.Any<CancellationToken>(), false);
     }
 
@@ -52,7 +52,7 @@ public sealed class DeclarativeConsentApplyDatasetsTests
 
         result.Unchanged.ShouldBe(1);
         await _datasets.Received().ApplyAsync(Caller, "sales.dbo.orders",
-            Arg.Is<DatasetCatalogEdit>(e => e.ReplaceTags == null && e.Visibility == null), "manifest", Arg.Any<CancellationToken>(), Arg.Any<bool>());
+            Arg.Is<DatasetCatalogEdit>(e => e.ReplaceTags == null), "manifest", Arg.Any<CancellationToken>(), Arg.Any<bool>());
     }
 
     [Trait("Category", "Security")]
@@ -61,7 +61,7 @@ public sealed class DeclarativeConsentApplyDatasetsTests
     {
         Returns(DatasetCatalogOutcome.Applied);
 
-        var result = await Create(_datasets).ApplyManifestAsync(Caller, Manifest(new DeclarativeDatasetCatalog("sales", "dbo", "orders", null, "Full")), dryRun: true);
+        var result = await Create(_datasets).ApplyManifestAsync(Caller, Manifest(new DeclarativeDatasetCatalog("sales", "dbo", "orders")), dryRun: true);
 
         result.DryRun.ShouldBeTrue();
         result.Applied.ShouldBe(1);
@@ -73,7 +73,6 @@ public sealed class DeclarativeConsentApplyDatasetsTests
     [Theory]
     [InlineData(DatasetCatalogOutcome.InvalidTag, "INVALID_TAG")]
     [InlineData(DatasetCatalogOutcome.TagLimitExceeded, "TAG_LIMIT_EXCEEDED")]
-    [InlineData(DatasetCatalogOutcome.InvalidVisibility, "INVALID_VISIBILITY")]
     [InlineData(DatasetCatalogOutcome.Forbidden, "FORBIDDEN")]
     [InlineData(DatasetCatalogOutcome.Unavailable, "UNAVAILABLE")]
     public async Task SEC_111_11_RejectedEntry_FailsTheWholeManifest_BeforeAnythingIsApplied(DatasetCatalogOutcome outcome, string code)
@@ -111,7 +110,7 @@ public sealed class DeclarativeConsentApplyDatasetsTests
     [Fact]
     public async Task SEC_111_11_NoServiceConfigured_DatasetsAreNotApplied_AndSaidSo()
     {
-        var result = await Create(null).ApplyManifestAsync(Caller, Manifest(new DeclarativeDatasetCatalog("sales", "dbo", "orders", null, "Summary")));
+        var result = await Create(null).ApplyManifestAsync(Caller, Manifest(new DeclarativeDatasetCatalog("sales", "dbo", "orders")));
 
         result.Applied.ShouldBe(0);
         result.Details.ShouldContain(d => d.Contains("not available"));
@@ -136,14 +135,14 @@ public sealed class DeclarativeConsentApplyDatasetsTests
         ], "test"));
         var apply = new DeclarativeConsentApplyService(Substitute.For<ITableMetadataRepository>(), _consents, Substitute.For<IAuditLogRepository>(), null, service);
 
-        var foreignResult = await apply.ApplyManifestAsync(tenantAdmin, Manifest(new DeclarativeDatasetCatalog("sales", "dbo", "foreign_t", ["x"], "Summary")));
-        var missingResult = await apply.ApplyManifestAsync(tenantAdmin, Manifest(new DeclarativeDatasetCatalog("sales", "dbo", "ghost_t", ["x"], "Summary")));
+        var foreignResult = await apply.ApplyManifestAsync(tenantAdmin, Manifest(new DeclarativeDatasetCatalog("sales", "dbo", "foreign_t", ["x"])));
+        var missingResult = await apply.ApplyManifestAsync(tenantAdmin, Manifest(new DeclarativeDatasetCatalog("sales", "dbo", "ghost_t", ["x"])));
 
         foreignResult.Applied.ShouldBe(missingResult.Applied);
         foreignResult.Unchanged.ShouldBe(missingResult.Unchanged);
         foreignResult.TotalEvaluated.ShouldBe(missingResult.TotalEvaluated);
         foreignResult.Details.Select(d => d.Replace("foreign_t", "N")).ShouldBe(missingResult.Details.Select(d => d.Replace("ghost_t", "N")));
-        await tables.DidNotReceiveWithAnyArgs().SetDatasetVisibilityAsync(default, default, default, default);
+        await tables.DidNotReceiveWithAnyArgs().ReplaceDatasetTagsAsync(default!, default!, default, default, default);
         // The skipped entries are one aggregated probe audit per manifest.
         await audit.Received(2).RecordBestEffortAsync(Arg.Is<AuditLogEntry>(e => e.DetailsJson.Contains("\"source\":\"manifest\"")), Arg.Any<CancellationToken>());
     }
