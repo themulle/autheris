@@ -25,7 +25,7 @@ public static partial class CatalogSourceNameValidator
 
     public static bool IsReserved(string? domain, string? schema, string? table)
     {
-        if (IsReservedCatalogOrSchema(domain) || IsReservedCatalogOrSchema(schema))
+        if (IsReservedCatalogOrSchema(domain) || IsReservedCatalogOrSchema(schema) || Autheris.Application.Products.ProductSource.IsProductSource(domain))
         {
             return true;
         }

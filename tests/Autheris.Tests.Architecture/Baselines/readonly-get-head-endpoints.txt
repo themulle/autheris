@@ -89,6 +89,12 @@
 /api/v1/procedures/openapi.json|GET|no side effect: serves stored procedure endpoints OpenAPI spec
 /api/v1/procedures/{name}|GET|no side effect: executes read-only governed stored procedure
 /api/v1/procedures/|GET|no side effect: lists configured stored procedure endpoints
+/api/v1/products/discovery|GET|no side effect: lists the data products the caller may read, with columns and refresh time
+/api/v1/products/{schema}/{name}/explain|GET|no side effect: explains the caller's own access to one data product
+/api/v1/products/{schema}/{name}/usage|GET|no side effect: reads the usage counters of one data product the caller may see
+/api/v1/products/sources/{dataSource}/owners|GET|no side effect: lists data source owners of the caller's tenant
+/api/v1/products/{schema}/{name}|GET|no side effect: reads one data product of the caller's tenant
+/api/v1/products/|GET|no side effect: lists data products of the caller's tenant
 /api/v1/profiles/{id}|GET|no side effect: reads governance profile by id
 /api/v1/profiles|GET|no side effect: lists governance profiles
 /api/v1/queries/openapi.json|GET|no side effect: serves declarative SQL queries OpenAPI spec

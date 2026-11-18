@@ -394,7 +394,7 @@ public sealed partial class AiDataGuardrailService
         McpSessionContext sessionContext,
         CancellationToken ct) =>
         tool.Name.Equals(McpDatasetTools.CallProcedure, StringComparison.OrdinalIgnoreCase)
-            ? Task.FromResult(ResolveProcedureTables(argumentsJson))
+            ? Task.FromResult(ResolveProcedureTables(argumentsJson, sessionContext))
             : ResolveMetricTablesAsync(argumentsJson, sessionContext, ct);
 
     /// <summary>
@@ -402,7 +402,7 @@ public sealed partial class AiDataGuardrailService
     /// the validated referenced tables of an Active procedure plus its result table, each keyed under the procedure's catalog domain.
     /// Unknown and non-Active procedures resolve to no tables alike (the executor refuses both).
     /// </summary>
-    private IReadOnlyList<TableIdentifier>? ResolveProcedureTables(string? argumentsJson)
+    private IReadOnlyList<TableIdentifier>? ResolveProcedureTables(string? argumentsJson, McpSessionContext sessionContext)
     {
         var name = McpDatasetTools.ProcedureNameArgument(argumentsJson);
         if (name == null || _procedureRegistry == null)
@@ -422,6 +422,15 @@ public sealed partial class AiDataGuardrailService
             // A non-Active procedure reads nothing: the executor refuses it (NOT_FOUND, or unavailable only for callers that may
             // see it). Denying here would answer it differently from an unknown procedure (02 existence oracle).
             return [];
+        }
+
+        if (!string.IsNullOrWhiteSpace(registered.Definition.ProductSchema))
+        {
+            // a product procedure is governed on its product object (the tables its SQL touches carry no consent for the caller)
+            var principal = McpProtocolHandler.BuildPrincipalFromSession(sessionContext);
+            return Autheris.Application.Catalog.Semantic.SemanticTenancy.FromOptions(_options).ResolveCallerTenant(principal) is { } tenant
+                ? [Autheris.Application.Products.ProductSource.ObjectOf(tenant, registered.Definition.ProductSchema.Trim().ToLowerInvariant(), registered.Definition.Name.ToLowerInvariant())]
+                : null;
         }
 
         var tables = registered.GovernedTables();

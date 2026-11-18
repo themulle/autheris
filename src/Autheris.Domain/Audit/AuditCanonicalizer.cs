@@ -4,7 +4,7 @@ namespace Autheris.Domain.Audit;
 
 /// <summary>
 /// AU-10: Anbieterneutraler Audit-Kern für einheitliches Escaping (\n, \r, \t, |)
-/// und konsistentes HMAC-SHA256 Entry-Hashing über SQLite, PostgreSQL und SQL Server.
+/// und konsistentes HMAC-SHA256 Entry-Hashing über PostgreSQL und SQL Server.
 /// </summary>
 public static class AuditCanonicalizer
 {

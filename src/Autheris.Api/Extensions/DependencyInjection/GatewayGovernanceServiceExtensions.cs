@@ -58,6 +58,7 @@ public static partial class GatewayGovernanceServiceExtensions
         AddLineageGdprAndConsumerUsage(services);
         AddTriageAndContracts(services);
         AddIdentityAndAccessGovernance(services);
+        AddDataProducts(services);
 
         return services;
     }
@@ -159,6 +160,7 @@ public static partial class GatewayGovernanceServiceExtensions
             Autheris.Application.ConsentRequests.ProfileAssignments.IProfileAssignmentStore,
             Autheris.Application.Docs.Interfaces.IDocumentRepository,
             Autheris.Application.Mcp.Interfaces.IGoldenQueryRepository,
+            Autheris.Application.Products.IDataProductRepository,
             Autheris.Application.Docs.Interfaces.IDocLinkRepository
         where TMigrationRunner : class, IGovernanceMigrationRunner
     {
@@ -206,6 +208,7 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<IClassificationRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<Autheris.Application.Docs.Interfaces.IDocumentRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<Autheris.Application.Mcp.Interfaces.IGoldenQueryRepository>(sp => sp.GetRequiredService<TRepository>());
+        services.AddSingleton<Autheris.Application.Products.IDataProductRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<Autheris.Application.Docs.Interfaces.IDocLinkRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IAuditChainExportSource>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<ICdcWatermarkRepository>(sp => sp.GetRequiredService<TRepository>());

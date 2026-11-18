@@ -32,7 +32,12 @@ public enum GatewayRole
     CallerAttributeInspector = 33,
 
     // Discovery artifact ingestion: uploading or deleting pre-computed discovery artifacts for tables in the caller's tenant.
-    CatalogArtifactUploader = 34
+    CatalogArtifactUploader = 34,
+
+    // Data products: creating products over any objects can expose data base owners would not release, and the Git sync identity
+    // creates products from a repository. Both are tenant-scoped only and implied by NO role, ClusterAdmin included.
+    DataProductAdmin = 35,
+    DataProductSync = 36
 }
 
 public static class GatewayRoleExtensions
@@ -53,6 +58,8 @@ public static class GatewayRoleExtensions
         ["CallerAttributeApprover"] = GatewayRole.CallerAttributeApprover,
         ["CallerAttributeInspector"] = GatewayRole.CallerAttributeInspector,
         ["CatalogArtifactUploader"] = GatewayRole.CatalogArtifactUploader,
+        ["DataProductAdmin"] = GatewayRole.DataProductAdmin,
+        ["DataProductSync"] = GatewayRole.DataProductSync,
         ["Analyst"] = GatewayRole.Consumer
     };
 
@@ -131,6 +138,13 @@ public static class GatewayRoleExtensions
     }
 
     /// <summary>
+    /// True for the roles that exist only as tenant-scoped grants ("tenant:Role") and are implied by no other role: a global claim never
+    /// confers them and <see cref="Implies"/> never derives them (not even from ClusterAdmin).
+    /// </summary>
+    public static bool IsTenantScopedOnly(this GatewayRole role) =>
+        role is GatewayRole.DataProductAdmin or GatewayRole.DataProductSync;
+
+    /// <summary>
     /// Checks role hierarchy: returns true if the granted role satisfies the required role.
     /// </summary>
     public static bool Implies(this GatewayRole granted, GatewayRole required)
@@ -138,6 +152,12 @@ public static class GatewayRoleExtensions
         if (granted == required)
         {
             return true;
+        }
+
+        // Data products: the product roles can expose data, so no role implies them, ClusterAdmin included.
+        if (required.IsTenantScopedOnly())
+        {
+            return false;
         }
 
         // ClusterAdmin implies all roles
