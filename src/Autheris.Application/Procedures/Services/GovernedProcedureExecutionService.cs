@@ -85,8 +85,10 @@ public sealed partial class GovernedProcedureExecutionService : IProcedureExecut
         ProcedureDenialAuditLimiter? denialAuditLimiter = null,
         Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null,
         Autheris.Application.Policy.Pdp.IAccessDecisionPoint? accessDecisionPoint = null,
-        Autheris.Application.Usage.IUsageRecorder? usageRecorder = null)
+        Autheris.Application.Usage.IUsageRecorder? usageRecorder = null,
+        Autheris.Application.Products.IDataProductRepository? productRepository = null)
     {
+        _products = productRepository;
         _accessDecisionPoint = accessDecisionPoint ?? new Autheris.Application.Policy.Pdp.AccessDecisionPoint(
             options,
             consentResolution,
@@ -97,7 +99,8 @@ public sealed partial class GovernedProcedureExecutionService : IProcedureExecut
             accessProfileRepository: accessProfileRepository,
             memoryCache: memoryCache,
             accessProfileCache: accessProfileCache,
-            typedPolicies: typedPolicies);
+            typedPolicies: typedPolicies,
+            productRepository: productRepository);
         _transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
         _concurrencyGate = concurrencyGate;
         _denialAuditLimiter = denialAuditLimiter ?? new ProcedureDenialAuditLimiter();
@@ -193,7 +196,11 @@ public sealed partial class GovernedProcedureExecutionService : IProcedureExecut
             {
                 string.IsNullOrWhiteSpace(definition.DataSource) ? _options.Value.SqlEndpoints.Procedures.ConnectionName : definition.DataSource
             };
-            sources.AddRange(decisions.Values.Select(d => string.IsNullOrWhiteSpace(d.Meta.Table.SourceName) ? d.Meta.Identifier.Domain : d.Meta.Table.SourceName));
+            if (!IsProduct(definition))
+            {
+                // A product decision names the reserved product source, which is no data source of the transport gate.
+                sources.AddRange(decisions.Values.Select(d => string.IsNullOrWhiteSpace(d.Meta.Table.SourceName) ? d.Meta.Identifier.Domain : d.Meta.Table.SourceName));
+            }
             await _transportGate.EnsureCatalogSourcesAsync(sources, ct).ConfigureAwait(false);
 
             // 6. Call (security context goes into the read-only SESSION_CONTEXT)
@@ -268,7 +275,9 @@ public sealed partial class GovernedProcedureExecutionService : IProcedureExecut
             }
 
             // 7. Result-set governance (deny / mask / drop unknown columns)
-            var governed = GovernResult(definition, raw, decisions, registered.Validation.ResultColumnSources, tenantId);
+            var governed = IsProduct(definition)
+                ? GovernProductResult(definition, raw, decisions, tenantId)
+                : GovernResult(definition, raw, decisions, registered.Validation.ResultColumnSources, tenantId);
 
             // 8. Synchronous audit BEFORE data leaves the gateway (fail-closed: an audit failure aborts the response)
             await AuditAsync(
@@ -349,6 +358,11 @@ public sealed partial class GovernedProcedureExecutionService : IProcedureExecut
             if (definition.RequiredRoles.Count > 0 && !HasAnyRole(user, definition.RequiredRoles))
             {
                 return ProcedureVisibility.Hidden("role");
+            }
+
+            if (IsProduct(definition))
+            {
+                return await EvaluateProductVisibilityAsync(definition, user, userSid, tenantId, consentBypassed, ct).ConfigureAwait(false);
             }
 
             // Table set: one definition shared with the AI guardrail. Zero tables is never visible (nothing could be consent-checked).
@@ -763,7 +777,8 @@ public sealed partial class GovernedProcedureExecutionService : IProcedureExecut
     private static bool IsRowScoped(ProcedureDefinition definition, Dictionary<string, TableDecision> decisions, out TableDecision resultDecision)
     {
         resultDecision = default;
-        return definition.ResultTable != null &&
+        return !IsProduct(definition) &&
+               definition.ResultTable != null &&
                decisions.TryGetValue(definition.ResultTable, out resultDecision) &&
                !string.IsNullOrWhiteSpace(resultDecision.Decision.CombinedRowFilterSql);
     }

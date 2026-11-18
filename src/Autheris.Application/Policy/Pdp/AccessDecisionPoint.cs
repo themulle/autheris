@@ -289,6 +289,12 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
             return TableAccessDecision.Denied(decision.Table, "Access denied: the data product is not available.") with { EvaluatedByPdp = true };
         }
 
+        if (product.Kind == DataProductKind.Procedure)
+        {
+            // The columns of a procedure product are the declared outputs of the procedure; the procedure execution classifies them.
+            return decision;
+        }
+
         var classes = product.Columns.ToDictionary(static c => c.Name, static c => c.Class, StringComparer.OrdinalIgnoreCase);
         var access = new Dictionary<string, ColumnAccessLevel>(decision.ColumnAccess, StringComparer.OrdinalIgnoreCase);
         var tightened = false;
