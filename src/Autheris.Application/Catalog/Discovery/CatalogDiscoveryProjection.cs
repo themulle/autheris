@@ -31,7 +31,7 @@ public static class CatalogDiscoveryProjection
         // #805/#807: keys, indexes and required filters as projected for this caller by the discovery core.
         var shape = obj.QueryShape ?? DiscoveryQueryShape.Empty;
         var primaryKeys = new HashSet<string>(shape.PrimaryKeyColumns, StringComparer.OrdinalIgnoreCase);
-        var columns = obj.Columns.Select(c => new CatalogColumnDetail(
+        var columns = obj.Columns.Where(static c => c.State != DiscoveryColumnState.NoAccess).Select(c => new CatalogColumnDetail(
             Name: c.Name,
             Type: c.DataType,
             Sensitivity: c.Pii ? "Sensitive" : "Public",

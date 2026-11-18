@@ -167,10 +167,10 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
 
         var list = await client.GetAsync("/api/v1/catalog/datasets");
         list.StatusCode.ShouldBe(HttpStatusCode.OK);
-        // Authorized discovery: the caller's own tenant objects are listed without access (every column Deny), a foreign tenant's table is absent.
+        // Authorized discovery: the caller's own tenant objects are listed without access (no column is listed), a foreign tenant's table is absent.
         var listBody = await BodyAsync(list);
         listBody.ShouldNotContain("orders_a");
-        MaskingStatesOf(await BodyAsync(await client.GetAsync("/api/v1/catalog/datasets/dom_b.main.invoices_b"))).Values.ShouldAllBe(state => state == "Deny");
+        MaskingStatesOf(await BodyAsync(await client.GetAsync("/api/v1/catalog/datasets/dom_b.main.invoices_b"))).ShouldBeEmpty();
         (await client.GetAsync("/api/v1/catalog/datasets/dom_a.main.orders_a")).StatusCode.ShouldBe(HttpStatusCode.NotFound);
         (await client.GetAsync("/api/v1/catalog/datasets/dom_a.main.does_not_exist")).StatusCode.ShouldBe(HttpStatusCode.NotFound);
         (await BodyAsync(await client.GetAsync("/api/v1/catalog/search?q=orders"))).ShouldBe("[]");
@@ -189,7 +189,7 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
         var states = MaskingStatesOf(detail);
         states["id"].ShouldBe("Clear");
         states["amount"].ShouldBe("Clear");
-        states["secret_note"].ShouldBe("Deny");
+        states.ShouldNotContainKey("secret_note");
 
         var search = await BodyAsync(await client.GetAsync("/api/v1/catalog/search?q=secret_note"));
         search.ShouldNotContain("secret_note");
@@ -328,7 +328,7 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
         {
             var detail = await client.GetAsync("/api/v1/catalog/datasets/dom_s.main." + shared);
             detail.StatusCode.ShouldBe(HttpStatusCode.OK);
-            MaskingStatesOf(await BodyAsync(detail)).Values.ShouldAllBe(state => state == "Deny");
+            MaskingStatesOf(await BodyAsync(detail)).ShouldBeEmpty();
         }
 
         var unshared = await client.GetAsync("/api/v1/catalog/datasets/dom_s.main.unshared_full_t");
@@ -350,10 +350,10 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
 
         var granted = MaskingStatesOf(await BodyAsync(await client.GetAsync("/api/v1/catalog/datasets/dom_s.main.hid_t")));
         granted["id"].ShouldBe("Clear");
-        granted["tier_secret_col"].ShouldBe("Deny");
+        granted.ShouldNotContainKey("tier_secret_col");
 
         var other = await ClientAsync("S-T-OTHER", TenantB, "Reader", factory);
-        MaskingStatesOf(await BodyAsync(await other.GetAsync("/api/v1/catalog/datasets/dom_s.main.hid_t"))).Values.ShouldAllBe(state => state == "Deny");
+        MaskingStatesOf(await BodyAsync(await other.GetAsync("/api/v1/catalog/datasets/dom_s.main.hid_t"))).ShouldBeEmpty();
     }
 
     private static Dictionary<string, string> MaskingStatesOf(string detailJson)

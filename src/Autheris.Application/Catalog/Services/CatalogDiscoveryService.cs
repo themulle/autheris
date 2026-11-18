@@ -180,7 +180,8 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
 
         // I404-SC-L1/L2/L4: declared keys and indexes are reported only as a whole and only when every column is Clear for this
         // caller: the caller's resolved access level (shared with describe_dataset) and the catalog masking state must both say Clear.
-        var callerClear = await ResolveCallerClearColumnsAsync(metadata, context, ct).ConfigureAwait(false);
+        var callerLevels = await ResolveCallerColumnLevelsAsync(metadata, context, ct).ConfigureAwait(false);
+        var callerClear = Autheris.Application.DataSources.Services.DatasetIndexProjection.ClearSet(callerLevels);
         var clear = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var column in metadata.Columns)
         {
@@ -196,7 +197,10 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
 
         var hiddenCatalogTextCols = await Autheris.Application.Policy.Classification.ClassificationAccessResolver
             .ResolveIndexingHiddenTextColumnsAsync(metadata, _classificationRepository, ct).ConfigureAwait(false);
-        var columnDetails = metadata.Columns.Select(c =>
+        // A column the caller cannot see (level Deny, or levels unresolved) is neither listed nor named by a required filter.
+        var columnDetails = metadata.Columns
+            .Where(c => callerLevels != null && callerLevels.TryGetValue(c.ColumnName, out var level) && level != ColumnAccessLevel.Deny)
+            .Select(c =>
         {
             var maskingState = MaskingStateOf(metadata, c);
             var (pii, _, classifications, clearRequestable) = Autheris.Application.Catalog.Discovery.DiscoveryAccessMapper

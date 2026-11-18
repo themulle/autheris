@@ -15,6 +15,9 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Tests.Common;
+using Autheris.Tests.Unit.Governance.Classification;
+using Autheris.Tests.Unit.TestSupport;
+using Autheris.Domain.Security;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -64,6 +67,7 @@ public sealed class Issue805807DiscoveryKeysAndFiltersTests
                 RequiredFilterColumnGroups = requiredFilterColumnGroups ?? [["ts"], ["reading", "site"]]
             },
             Columns = baseTable.Columns,
+            ColumnClassifications = baseTable.ColumnClassifications,
             OwnerTenantId = baseTable.OwnerTenantId,
             CatalogTags = baseTable.CatalogTags,
             PrimaryKeyColumns = pk ?? ["device", "ts"],
@@ -287,7 +291,7 @@ public sealed class Issue805807DiscoveryKeysAndFiltersTests
 
     [Fact]
     [Trait("Category", "Security")]
-    public async Task RestDetail_GroupWithDeniedMember_IsWithheld_AlthoughTheColumnIsListedAsDeny()
+    public async Task RestDetail_GroupWithDeniedMember_IsWithheld_AndTheDeniedColumnIsNotListed()
     {
         var (_, rest, context, _) = Build(
             ReadingsTable(requiredFilterColumns: ["device", "reading"]),
@@ -296,8 +300,64 @@ public sealed class Issue805807DiscoveryKeysAndFiltersTests
         var detail = await rest.GetDatasetDetailAsync(Readings, context);
 
         detail.ShouldNotBeNull();
-        detail.Columns.Single(c => c.Name == "reading").MaskingState.ShouldBe("Deny");
+        detail.Columns.ShouldNotContain(c => c.Name == "reading");
+        System.Text.Json.JsonSerializer.Serialize(detail).ShouldNotContain("\"reading\"");
         detail.RequiredFilterColumns.ShouldBe(["device"]);
         detail.RequiredFilterColumnGroups.ShouldNotBeNull().Select(g => string.Join(",", g)).ShouldBe(["ts"]);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task RestDetail_DeniedColumn_IsNotListed()
+    {
+        var (_, rest, context, _) = Build(
+            ReadingsTable(),
+            Pdp(new Dictionary<string, ColumnAccessLevel> { ["reading"] = ColumnAccessLevel.Deny }));
+
+        var detail = await rest.GetDatasetDetailAsync(Readings, context);
+
+        detail.ShouldNotBeNull();
+        detail.Columns.ShouldNotContain(c => c.Name == "reading");
+        detail.Columns.ShouldContain(c => c.Name == "device");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task RestDetail_WithoutDiscoveryService_DeniedRequiredFilterColumn_IsNotNamed()
+    {
+        var table = ReadingsTable(requiredFilterColumns: ["device", "reading"]) with
+        {
+            ColumnMaskingRules = new Dictionary<string, MaskingRule> { ["reading"] = new MaskingRule { RuleType = "DENY" } }
+        };
+        var repo = new FakeDiscoveryTableRepository();
+        repo.Tables.Add(table);
+        var consent = new Consent
+        {
+            Id = Guid.NewGuid(),
+            TenantId = new TenantId("tenant-a"),
+            TableIdentifier = Readings,
+            GranteeType = GranteeType.User,
+            GranteeSid = new Sid("S-1-USER"),
+            Effect = ConsentEffect.Allow,
+            ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
+            ValidTo = DateTimeOffset.UtcNow.AddDays(30)
+        };
+        var consents = new TestInMemoryConsentRepository([consent], filterWindow: false);
+        var options = new GatewayOptions { Tenancy = TenancyShape.Multi.Options() };
+        var rest = new CatalogDiscoveryService(
+            repo,
+            new FakeAuditWriter(),
+            Options.Create(options),
+            CatalogVisibilityTestFactory.Create(repo, consents, options),
+            consentRepository: consents);
+        var user = DiscoveryTestBuilder.User("S-1-USER", "tenant-a");
+
+        var detail = await rest.GetDatasetDetailAsync(Readings, new RequestContext(user, new TenantId("tenant-a")));
+
+        detail.ShouldNotBeNull();
+        detail.Columns.ShouldNotContain(c => c.Name == "reading");
+        detail.RequiredFilterColumns.ShouldBe(["device"]);
+        detail.RequiredFilterColumnGroups.ShouldNotBeNull().Select(g => string.Join(",", g)).ShouldBe(["ts"]);
+        System.Text.Json.JsonSerializer.Serialize(detail).ShouldNotContain("\"reading\"");
     }
 }
