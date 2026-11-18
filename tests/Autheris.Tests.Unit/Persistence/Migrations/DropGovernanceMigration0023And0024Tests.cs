@@ -33,6 +33,16 @@ public sealed class DropGovernanceMigration0023And0024Tests
         dropRules.ShouldBeGreaterThan(backfillMask, "nothing is dropped before the backfill ran");
         dropFlag.ShouldBeGreaterThan(dropRules);
         sql.ShouldContain("NOT EXISTS", Case.Insensitive);
+        sql.ShouldContain("<> " + (engine == "sqlserver" ? "N'PUBLIC'" : "'PUBLIC'"), Case.Insensitive);
+
+        // A legacy DENY rule keeps denying: mapped to NULLIFY flagged deny, and repaired for rows the 0020 backfill made visible.
+        var denyMap = engine == "sqlserver" ? "WHEN N'DENY' THEN N'NULLIFY'" : "WHEN 'DENY' THEN 'NULLIFY'";
+        sql.ShouldContain(denyMap);
+        sql.ShouldContain("{\"deny\":true}");
+        var repair = sql.IndexOf("Repair:", StringComparison.Ordinal);
+        repair.ShouldBeGreaterThan(backfillMask);
+        sql.IndexOf("DROP TABLE", StringComparison.OrdinalIgnoreCase).ShouldBeGreaterThan(repair);
+        sql.ShouldContain("system:migration-0020");
 
         var shape = GovernanceSchemaShapeLoader.LoadAt(engine, 23, steps.ToDictionary(s => s.Version, s => s.ShapeDelta));
         shape.Tables.ShouldNotContain(t => string.Equals(t.Name, "column_masking_rules", StringComparison.OrdinalIgnoreCase));

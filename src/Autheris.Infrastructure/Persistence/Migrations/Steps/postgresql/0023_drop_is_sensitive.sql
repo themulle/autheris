@@ -3,13 +3,14 @@
 -- Sensitivity is derived from column_classifications and masks from column_mask_overrides (WP-SIMPL-52 steps 1-2).
 -- The statements before the drops repeat the step 0020 backfill idempotently for rows that the pre-classification
 -- writers stored after that step, so no sensitivity or mask is lost. A column that carries a global classification
--- (or an admin override) is never touched.
+-- (or an admin override) is never touched. A PUBLIC classification does not count as protection.
+-- All nodes must run this build before the step applies: older builds still write the dropped objects.
 
 INSERT INTO column_classifications (scope, table_column_id, code, source, assigned_by, assigned_at)
 SELECT '*', tc.id, 'PII', 'MIGRATION', 'system:migration-0023', CURRENT_TIMESTAMP
 FROM table_columns tc
 WHERE (tc.is_sensitive = 1 OR EXISTS (SELECT 1 FROM column_masking_rules m WHERE m.table_column_id = tc.id))
-  AND NOT EXISTS (SELECT 1 FROM column_classifications cc WHERE cc.scope = '*' AND cc.table_column_id = tc.id)
+  AND NOT EXISTS (SELECT 1 FROM column_classifications cc WHERE cc.scope = '*' AND cc.table_column_id = tc.id AND cc.code <> 'PUBLIC')
 ON CONFLICT (scope, table_column_id, code) DO NOTHING;
 
 INSERT INTO column_mask_overrides (id, scope, table_column_id, code, mask_function, params_json, key_ref, catalog_text, updated_by, updated_at)
@@ -20,6 +21,7 @@ SELECT
     NULL,
     CASE UPPER(COALESCE(ranked.rule_type, ''))
         WHEN 'NULLIFY' THEN 'NULLIFY'
+        WHEN 'DENY' THEN 'NULLIFY'
         WHEN 'HMAC' THEN 'HASH'
         WHEN 'HMAC_SHA256' THEN 'HASH'
         WHEN 'HASH' THEN 'HASH'
@@ -32,6 +34,7 @@ SELECT
     END,
     CASE UPPER(COALESCE(ranked.rule_type, ''))
         WHEN 'NULLIFY' THEN NULL
+        WHEN 'DENY' THEN '{"deny":true}'
         WHEN 'HMAC' THEN NULL
         WHEN 'HMAC_SHA256' THEN NULL
         WHEN 'HASH' THEN NULL
@@ -80,6 +83,12 @@ WHERE ranked.rn = 1
         AND o.table_column_id = ranked.table_column_id
         AND o.code IS NULL
   );
+
+-- Repair: a DENY rule that the step 0020 backfill turned into a visible redaction stays denied.
+UPDATE column_mask_overrides
+SET mask_function = 'NULLIFY', params_json = '{"deny":true}', key_ref = NULL
+WHERE scope = '*' AND code IS NULL AND updated_by = 'system:migration-0020'
+  AND EXISTS (SELECT 1 FROM column_masking_rules m WHERE m.table_column_id = column_mask_overrides.table_column_id AND UPPER(m.rule_type) = 'DENY');
 
 DROP TABLE IF EXISTS column_masking_rules;
 

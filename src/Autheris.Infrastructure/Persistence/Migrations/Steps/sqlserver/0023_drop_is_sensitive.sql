@@ -3,13 +3,14 @@
 -- Sensitivity is derived from COLUMN_CLASSIFICATIONS and masks from COLUMN_MASK_OVERRIDES (WP-SIMPL-52 steps 1-2).
 -- The statements before the drops repeat the step 0020 backfill idempotently for rows that the pre-classification
 -- writers stored after that step, so no sensitivity or mask is lost. A column that carries a global classification
--- (or an admin override) is never touched.
+-- (or an admin override) is never touched. A PUBLIC classification does not count as protection.
+-- All nodes must run this build before the step applies: older builds still write the dropped objects.
 
 INSERT INTO dbo.COLUMN_CLASSIFICATIONS (scope, table_column_id, code, source, assigned_by, assigned_at)
 SELECT N'*', tc.id, N'PII', N'MIGRATION', N'system:migration-0023', SYSUTCDATETIME()
 FROM dbo.TABLE_COLUMNS tc
 WHERE (tc.is_sensitive = 1 OR EXISTS (SELECT 1 FROM dbo.COLUMN_MASKING_RULES m WHERE m.table_column_id = tc.id))
-  AND NOT EXISTS (SELECT 1 FROM dbo.COLUMN_CLASSIFICATIONS cc WHERE cc.scope = N'*' AND cc.table_column_id = tc.id);
+  AND NOT EXISTS (SELECT 1 FROM dbo.COLUMN_CLASSIFICATIONS cc WHERE cc.scope = N'*' AND cc.table_column_id = tc.id AND cc.code <> N'PUBLIC');
 
 -- batch
 
@@ -21,6 +22,7 @@ SELECT
     NULL,
     CASE UPPER(COALESCE(ranked.rule_type, N''))
         WHEN N'NULLIFY' THEN N'NULLIFY'
+        WHEN N'DENY' THEN N'NULLIFY'
         WHEN N'HMAC' THEN N'HASH'
         WHEN N'HMAC_SHA256' THEN N'HASH'
         WHEN N'HASH' THEN N'HASH'
@@ -33,6 +35,7 @@ SELECT
     END,
     CASE UPPER(COALESCE(ranked.rule_type, N''))
         WHEN N'NULLIFY' THEN NULL
+        WHEN N'DENY' THEN N'{"deny":true}'
         WHEN N'HMAC' THEN NULL
         WHEN N'HMAC_SHA256' THEN NULL
         WHEN N'HASH' THEN NULL
@@ -81,6 +84,15 @@ WHERE ranked.rn = 1
         AND o.table_column_id = ranked.table_column_id
         AND o.code IS NULL
   );
+
+-- batch
+
+-- Repair: a DENY rule that the step 0020 backfill turned into a visible redaction stays denied.
+UPDATE o
+SET mask_function = N'NULLIFY', params_json = N'{"deny":true}', key_ref = NULL
+FROM dbo.COLUMN_MASK_OVERRIDES o
+WHERE o.scope = N'*' AND o.code IS NULL AND o.updated_by = N'system:migration-0020'
+  AND EXISTS (SELECT 1 FROM dbo.COLUMN_MASKING_RULES m WHERE m.table_column_id = o.table_column_id AND UPPER(m.rule_type) = N'DENY');
 
 -- batch
 
