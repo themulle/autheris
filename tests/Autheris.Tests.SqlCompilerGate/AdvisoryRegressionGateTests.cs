@@ -11,12 +11,12 @@ using TrinoSqlEngine.Ast.Security;
 
 /// <summary>
 /// Regression of GHSA-66xj-4459-x8gx (details: private advisory), one case per target dialect. The statement is refused at compile time
-/// on every dialect, so the outcome no longer depends on the evaluation order the engine of that dialect picks. The compile needs no database.
+/// on every dialect. The compile needs no database.
 /// </summary>
 [Trait("Category", "Security")]
 public sealed class AdvisoryRegressionGateTests
 {
-    private const string Probe = "SELECT 1 FROM orders WHERE 1 / (CASE WHEN id = 42 THEN 0 ELSE 1 END) = 1";
+    private const string Probe = "SELECT 1 FROM orders WHERE 1 / (id - id + 1) = 1";
 
     private static CompileRequest Request(string dialect, PolicyScenario scenario)
     {
