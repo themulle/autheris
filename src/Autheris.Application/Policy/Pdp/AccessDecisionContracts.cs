@@ -17,6 +17,7 @@ public enum AccessOperation
     Update,
     Delete,
     Execute,
+    ExecuteWrite,
     Discover
 }
 

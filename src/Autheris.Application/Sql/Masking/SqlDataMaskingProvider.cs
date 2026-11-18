@@ -114,8 +114,7 @@ public sealed class SqlDataMaskingProvider
     /// parameter of the returned spec (origin <see cref="ParameterOrigin.Mask"/>); the dialect generator renders it. A rule that
     /// cannot be expressed exactly is mapped to the stricter mask (fail closed): an HMAC that may not reach the database (policy,
     /// Oracle, no key) and a fixed-length partial mask become Redact; MASK_EMAIL and MASK_IBAN become the constants
-    /// <c>***@***</c> and <c>****</c> (neither characters nor length of the value are revealed); on SQLite a partial mask becomes the
-    /// five-character constant of the legacy SQLite mask.
+    /// <c>***@***</c> and <c>****</c> (neither characters nor length of the value are revealed).
     /// </summary>
     /// <param name="rule">The catalog rule, or null for a column that is masked without a rule (ABAC).</param>
     /// <param name="dataType">The catalog data type; the emitter requires it (numeric and temporal columns redact to a typed NULL).</param>
@@ -562,7 +561,7 @@ public sealed class SqlDataMaskingProvider
         if (dialect == DatabaseDialect.Oracle)
         {
             // no in-database HMAC on Oracle without a DBMS_CRYPTO grant; the column is redacted (fail closed), never
-            // rendered through the SQLite UDF.
+            // rendered through a user-defined function.
             return null;
         }
 

@@ -288,7 +288,7 @@ public sealed class DatasetDataEndpointsTests
         services.AddLogging();
         services.AddSingleton<Microsoft.Extensions.Hosting.IHostEnvironment>(new DevelopmentHostEnvironment());
         services.AddSingleton(Substitute.For<ITableMetadataRepository>());
-        services.AddSingleton(Substitute.For<Autheris.Application.Policy.Pdp.IAccessDecisionPoint>());
+        services.AddSingleton(Autheris.Tests.Unit.TestSupport.AccessDecisionPointStubs.Denying());
         services.AddSingleton(Substitute.For<Autheris.Application.Sql.Interfaces.IGovernedSqlExecutionService>());
         services.AddSingleton(Substitute.For<Autheris.Application.Sql.Interfaces.IFederatedQueryExecutionService>());
         services.AddSingleton(Substitute.For<IColumnMaskingProvider>());

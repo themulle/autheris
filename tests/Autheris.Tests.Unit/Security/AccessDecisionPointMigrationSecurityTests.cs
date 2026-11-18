@@ -68,6 +68,22 @@ public sealed class AccessDecisionPointMigrationSecurityTests
         ColumnRules = [new ConsentColumnRule { ColumnName = "id", AccessLevel = ColumnAccessLevel.Clear }]
     };
 
+    private static ITableMetadataRepository MetaRepo() => Substitute.For<ITableMetadataRepository>();
+
+    private static IAuditLogRepository AuditRepo() => Substitute.For<IAuditLogRepository>();
+
+    private static ISemanticCatalogService Catalog() => Substitute.For<ISemanticCatalogService>();
+
+    private static IGovernedAggregationService Aggregation() => Substitute.For<IGovernedAggregationService>();
+
+    private static IConsentRepository ConsentsReturning(Func<IReadOnlyList<Consent>> consents)
+    {
+        var repo = Substitute.For<IConsentRepository>();
+        repo.GetActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
+            .Returns(_ => Task.FromResult(consents()));
+        return repo;
+    }
+
     private static IAccessDecisionPoint RecordingPdp(out List<AccessRequest> seen)
     {
         var requests = new List<AccessRequest>();
@@ -81,7 +97,7 @@ public sealed class AccessDecisionPointMigrationSecurityTests
 
     private static async Task<TableAccessDecision> InvokeAggregationDecisionAsync(IAccessDecisionPoint pdp, AggregationQuery? query = null)
     {
-        var service = new GovernedAggregationService(Substitute.For<ITableMetadataRepository>(), Substitute.For<IAuditLogRepository>(), pdp);
+        var service = new GovernedAggregationService(MetaRepo(), AuditRepo(), pdp);
         var task = (Task<TableAccessDecision>)typeof(GovernedAggregationService)
             .GetMethod("ResolveDecisionAsync", BindingFlags.NonPublic | BindingFlags.Instance)!
             .Invoke(service, [User(), new Sid(UserSidValue), Tenant, Meta(), query ?? new AggregationQuery(Orders), CancellationToken.None])!;
@@ -91,9 +107,9 @@ public sealed class AccessDecisionPointMigrationSecurityTests
     private static async Task<(TableAccessDecision Decision, bool HasMetricConsent)> InvokeMetricDecisionAsync(IAccessDecisionPoint pdp)
     {
         var service = new SemanticMetricQueryService(
-            Substitute.For<ISemanticCatalogService>(),
-            Substitute.For<IGovernedAggregationService>(),
-            Substitute.For<ITableMetadataRepository>(),
+            Catalog(),
+            Aggregation(),
+            MetaRepo(),
             pdp);
         var metric = new DbtMetric("mrr", "simple", null, null, null, "{ \"measure\": \"total\" }", [], ["total"],
             new Dictionary<string, string> { ["model"] = "m" });
@@ -131,14 +147,14 @@ public sealed class AccessDecisionPointMigrationSecurityTests
     public void Security_AggregationAndMetricServices_RequireDecisionPoint_FailClosed()
     {
         Should.Throw<ArgumentNullException>(() => new GovernedAggregationService(
-            Substitute.For<ITableMetadataRepository>(), Substitute.For<IAuditLogRepository>(), pdp: null!));
+            MetaRepo(), AuditRepo(), pdp: null!));
         Should.Throw<ArgumentNullException>(() => new GovernedAggregationService(
-            Substitute.For<ITableMetadataRepository>(), pdp: null!));
+            MetaRepo(), pdp: null!));
         Should.Throw<ArgumentNullException>(() => new SemanticMetricQueryService(
-            Substitute.For<ISemanticCatalogService>(), Substitute.For<IGovernedAggregationService>(), Substitute.For<ITableMetadataRepository>(),
-            Substitute.For<IAuditLogRepository>(), pdp: null!));
+            Catalog(), Aggregation(), MetaRepo(),
+            AuditRepo(), pdp: null!));
         Should.Throw<ArgumentNullException>(() => new SemanticMetricQueryService(
-            Substitute.For<ISemanticCatalogService>(), Substitute.For<IGovernedAggregationService>(), Substitute.For<ITableMetadataRepository>(),
+            Catalog(), Aggregation(), MetaRepo(),
             pdp: null!));
 
         foreach (var type in new[] { typeof(GovernedAggregationService), typeof(SemanticMetricQueryService) })
@@ -154,9 +170,7 @@ public sealed class AccessDecisionPointMigrationSecurityTests
     [Fact]
     public async Task Security_DecisionPointThrows_ConsumerDeniesAndNeverReturnsData()
     {
-        var throwing = Substitute.For<IAccessDecisionPoint>();
-        throwing.DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>())
-            .Returns<ValueTask<TableAccessDecision>>(_ => throw new InvalidOperationException("decision point unavailable"));
+        var throwing = AccessDecisionPointStubs.Throwing(() => new InvalidOperationException("decision point unavailable"));
 
         await Should.ThrowAsync<InvalidOperationException>(() =>
             GovernedQueryStages.AuthorizeTableAsync(throwing, Orders, Meta(), User(), Tenant, null, null, CancellationToken.None));
@@ -164,9 +178,7 @@ public sealed class AccessDecisionPointMigrationSecurityTests
         await Should.ThrowAsync<InvalidOperationException>(() => InvokeMetricDecisionAsync(throwing));
 
         // Cancellation stays a cancellation; it is never turned into a decision.
-        var cancelled = Substitute.For<IAccessDecisionPoint>();
-        cancelled.DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>())
-            .Returns<ValueTask<TableAccessDecision>>(_ => throw new OperationCanceledException());
+        var cancelled = AccessDecisionPointStubs.Throwing(() => new OperationCanceledException());
         await Should.ThrowAsync<OperationCanceledException>(() =>
             GovernedQueryStages.AuthorizeTableAsync(cancelled, Orders, Meta(), User(), Tenant, null, null, CancellationToken.None));
     }
@@ -192,9 +204,7 @@ public sealed class AccessDecisionPointMigrationSecurityTests
     public async Task Security_DecisionCache_DoesNotReuseDecisionAcrossSupplementalConsents()
     {
         var cache = new EpochConsentCache();
-        var repo = Substitute.For<IConsentRepository>();
-        repo.GetActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<Consent>>([]));
+        var repo = ConsentsReturning(() => []);
         var pdp = new AccessDecisionPoint(Options.Create(new GatewayOptions()), new ConsentResolutionService(), repo, cache);
         IReadOnlyList<Consent> supplemental = [AllowConsent()];
 
@@ -219,9 +229,7 @@ public sealed class AccessDecisionPointMigrationSecurityTests
     {
         var cache = new EpochConsentCache();
         var consents = new List<Consent> { AllowConsent() };
-        var repo = Substitute.For<IConsentRepository>();
-        repo.GetActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
-            .Returns(_ => Task.FromResult<IReadOnlyList<Consent>>(consents.ToList()));
+        var repo = ConsentsReturning(() => consents.ToList());
         var pdp = new AccessDecisionPoint(Options.Create(new GatewayOptions()), new ConsentResolutionService(), repo, cache);
 
         (await pdp.DecideReadAsync(Meta(), Subject(), AccessTransport.Rest, null, null, CancellationToken.None)).IsAllowed.ShouldBeTrue();
@@ -237,13 +245,11 @@ public sealed class AccessDecisionPointMigrationSecurityTests
     public async Task Security_DecisionCache_EpochBumpedWhileLoading_IsNotCached()
     {
         var cache = new EpochConsentCache();
-        var repo = Substitute.For<IConsentRepository>();
-        repo.GetActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
-            .Returns(_ =>
-            {
-                cache.BumpEpoch(Orders);
-                return Task.FromResult<IReadOnlyList<Consent>>([AllowConsent()]);
-            });
+        var repo = ConsentsReturning(() =>
+        {
+            cache.BumpEpoch(Orders);
+            return [AllowConsent()];
+        });
         var pdp = new AccessDecisionPoint(Options.Create(new GatewayOptions()), new ConsentResolutionService(), repo, cache);
 
         (await pdp.DecideReadAsync(Meta(), Subject(), AccessTransport.Rest, null, null, CancellationToken.None)).IsAllowed.ShouldBeTrue();
@@ -256,9 +262,7 @@ public sealed class AccessDecisionPointMigrationSecurityTests
     {
         var logger = new CapturingLogger();
         var audit = Substitute.For<IAuditWriter>();
-        var repo = Substitute.For<IConsentRepository>();
-        repo.GetActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<Consent>>([]));
+        var repo = ConsentsReturning(() => []);
         var pdp = new AccessDecisionPoint(
             Options.Create(new GatewayOptions()), new ConsentResolutionService(), repo, new EpochConsentCache(), auditWriter: audit);
 

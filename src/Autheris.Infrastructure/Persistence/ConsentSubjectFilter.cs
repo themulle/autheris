@@ -28,7 +28,7 @@ internal static class ConsentSubjectFilter
     internal static string? NormalizeOrNull(Sid? sid) => sid is { } s ? Normalize(s.Value) : null;
 
     /// <summary>
-    /// Prefilter (SQLite and SQL Server) (<c>IN (@s0, ...)</c> over the chunk; no IN list when the chunk is empty). Role consents and rows without a
+    /// Prefilter (SQL Server) (<c>IN (@s0, ...)</c> over the chunk; no IN list when the chunk is empty). Role consents and rows without a
     /// normalised SID always pass.
     /// </summary>
     internal static string InListPredicate(int subjectCount) => subjectCount == 0

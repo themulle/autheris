@@ -619,9 +619,7 @@ public sealed class AggregationPrivacyHardeningTests
     [Fact]
     public async Task QueryMetricsAsync_DeniedTableAndMissingTable_AreIndistinguishableAndNameNothing()
     {
-        var pdp = Substitute.For<IAccessDecisionPoint>();
-        pdp.DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>())
-            .Returns(TableAccessDecision.Denied(OrdersTableId, "secret-denial-reason"));
+        var pdp = Autheris.Tests.Unit.TestSupport.AccessDecisionPointStubs.Returning(_ => TableAccessDecision.Denied(OrdersTableId, "secret-denial-reason"));
 
         var (denied, deniedAudit) = await CreateMetricServiceAsync(tablePresent: true, pdp);
         var (missing, missingAudit) = await CreateMetricServiceAsync(tablePresent: false);

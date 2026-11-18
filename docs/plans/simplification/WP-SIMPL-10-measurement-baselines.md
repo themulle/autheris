@@ -65,3 +65,6 @@ Check in a reproducible measurement protocol and three scripts that produce the 
 - CI baseline reports both main runs (plan text) and PR runs (OD-6 target is PR); OD-6 governs the target.
 - Map* counting is single-sourced with WP-SIMPL-07's regex; plan-table counts (e.g. 275) are reconciled in the README, not forced.
 - Lazy-load verification uses process memory maps, no code change.
+
+## Changelog
+- 2026-11-18 (addendum, Phase 2): the "after" footprint is recorded as `benchmarks/results/footprint-2026-11-18-feeab35.json`, taken from the nightly footprint job artifact on `main` at `feeab35` (.NET 11, Ubuntu 26.04 base, GitHub-hosted runner): 409.47 MB uncompressed, 153.29 MB compressed, cold-start P50 3.41 s, warm P99 1.12 ms, lazy DuckDB and Oracle loading confirmed. The "after = WP-SIMPL-01 merge commit, <= 373 MB" criterion is replaced by "after = current `main`"; the 373 MB reference belonged to the .NET 10 image and no longer applies. The size target itself is owned by WP-SIMPL-35 (OD-37).

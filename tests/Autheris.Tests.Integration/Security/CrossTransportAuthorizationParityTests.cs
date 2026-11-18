@@ -85,6 +85,30 @@ public sealed class CrossTransportAuthorizationParityTests
         }
     }
 
+    /// <summary>Allow, deny, row filter and mask give the same result on the REST and Analytics read paths, both decided by the access decision point.</summary>
+    [Theory]
+    [MemberData(nameof(RestAndAnalyticsScenarios))]
+    public async Task Security_RestAndAnalyticsReads_DecisionParityAfterAdapterRemoval(ParityScenarioId scenarioId)
+    {
+        var scenario = ScenarioById[scenarioId];
+        await using var harness = new CrossTransportParityHarness();
+
+        var rest = await harness.EvaluateAsync(ParitySurface.Rest, scenario, CancellationToken.None);
+        var analytics = await harness.EvaluateAsync(ParitySurface.Analytics, scenario, CancellationToken.None);
+
+        analytics.Allowed.ShouldBe(rest.Allowed, $"Scenario={scenarioId}: REST and Analytics must agree on allow/deny. Diagnostic: {analytics.Diagnostic ?? "none"}");
+        if (rest.Allowed)
+        {
+            analytics.SsnMasked.ShouldBe(rest.SsnMasked, $"Scenario={scenarioId} mask mismatch.");
+            analytics.SsnDenied.ShouldBe(rest.SsnDenied, $"Scenario={scenarioId} denied-column mismatch.");
+            analytics.HasRowFilter.ShouldBe(rest.HasRowFilter, $"Scenario={scenarioId} row filter mismatch.");
+            analytics.HasMandatoryFilter.ShouldBe(rest.HasMandatoryFilter, $"Scenario={scenarioId} mandatory filter mismatch.");
+        }
+    }
+
+    public static IEnumerable<object[]> RestAndAnalyticsScenarios() =>
+        Scenarios.Select(s => new object[] { s.Id });
+
     [Fact]
     public async Task Degraded_groups_without_principal_denies_across_pdp_and_olap()
     {

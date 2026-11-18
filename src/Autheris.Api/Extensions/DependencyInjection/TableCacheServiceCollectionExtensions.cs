@@ -55,6 +55,7 @@ public static class TableCacheServiceCollectionExtensions
         services.TryAddSingleton<TtlTableCacheInvalidator>();
         services.TryAddSingleton<CdcTableCacheConsumer>();
         services.TryAddSingleton<GovernedTableCacheExecutionService>();
+        services.AddProductLoading();
 
         services.AddHostedService<TableCacheBackgroundWorker>();
 

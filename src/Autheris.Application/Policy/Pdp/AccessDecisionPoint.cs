@@ -51,6 +51,7 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
     private readonly Autheris.Application.Policy.RowScopes.RowScopeCompiler? _rowScopeCompiler;
     private readonly Autheris.Application.Catalog.ICatalogVersionProvider? _catalogVersionProvider;
     private readonly IDataOwnershipRepository? _ownershipRepository;
+    private readonly Autheris.Application.Products.IDataProductRepository? _productRepository;
 
     public AccessDecisionPoint(
         IOptions<GatewayOptions> options,
@@ -73,7 +74,8 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
         TimeProvider? timeProvider = null,
         Autheris.Application.Policy.RowScopes.RowScopeCompiler? rowScopeCompiler = null,
         Autheris.Application.Catalog.ICatalogVersionProvider? catalogVersionProvider = null,
-        IDataOwnershipRepository? ownershipRepository = null)
+        IDataOwnershipRepository? ownershipRepository = null,
+        Autheris.Application.Products.IDataProductRepository? productRepository = null)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _resolutionService = resolutionService;
@@ -94,6 +96,7 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
         _rowScopeCompiler = rowScopeCompiler;
         _catalogVersionProvider = catalogVersionProvider;
         _ownershipRepository = ownershipRepository;
+        _productRepository = productRepository;
         _writeGrantEvaluator = writeGrantEvaluator ?? (_consentRepository != null
             ? new Autheris.Application.Policy.WriteGrants.WriteGrantEvaluator(_consentRepository, policyDependencyIndex, _timeProvider)
             : null);
@@ -160,6 +163,25 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
             return PreconditionDenied(table, "TABLE_INACTIVE", "Catalog", null, $"Table '{table.ToQualifiedName()}' is not active.");
         }
 
+        var isProduct = Autheris.Application.Products.ProductSource.IsProductSource(table.Domain);
+        if (isProduct && request.Operation is AccessOperation.Insert or AccessOperation.Update or AccessOperation.Delete)
+        {
+            return PreconditionDenied(table, "PRODUCT_READ_ONLY", "Product", null, "Access denied: a data product is read-only.");
+        }
+
+        if (isProduct && !Autheris.Application.Products.ProductSource.TryParse(table, subject.TenantId, out _, out _))
+        {
+            // the identity must name a product of the caller's own tenant
+            return PreconditionDenied(table, "PRODUCT_UNKNOWN", "Product", null, "Access denied: the data product is not available.");
+        }
+
+        if (request.Operation == AccessOperation.ExecuteWrite)
+        {
+            return isProduct
+                ? await DecideExecuteWriteAsync(request, ct).ConfigureAwait(false)
+                : PreconditionDenied(table, "EXECUTE_WRITE_NOT_PRODUCT", "Product", null, "Access denied: write execution is only available on data products.");
+        }
+
         if (request.Operation is AccessOperation.Insert or AccessOperation.Update or AccessOperation.Delete)
         {
             return await DecideWriteAsync(request, ct).ConfigureAwait(false);
@@ -190,6 +212,12 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
                 SupplementalConsents: request.SupplementalConsents);
 
             var decision = await _policy.DecideAsync(query, ct).ConfigureAwait(false);
+            if (isProduct)
+            {
+                // Definer semantics: the policy above only looked at grants, denies and hard row policies of the product object itself.
+                decision = await ApplyProductColumnClassesAsync(decision, subject.TenantId, ct).ConfigureAwait(false);
+            }
+
             return decision with { EvaluatedByPdp = true };
         }
 
@@ -239,6 +267,11 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
             {
                 allowed = allowed with { ColumnMasks = _typedPolicies.MaskPolicies.ForDecision(allowed, metadata, subject.TenantId) };
             }
+            if (isProduct)
+            {
+                allowed = await ApplyProductColumnClassesAsync(allowed, subject.TenantId, ct).ConfigureAwait(false);
+            }
+
             return allowed with { EvaluatedByPdp = true };
         }
 
@@ -247,6 +280,51 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
             Reasons = [new DecisionReason(DecisionStep.DefaultDeny, "POLICY_UNAVAILABLE", "Policy", null)],
             EvaluatedByPdp = true
         };
+    }
+
+    /// <summary>
+    /// A <c>PiiMasked</c> product column is always masked, a <c>PiiClearEligible</c> column is clear only with a clear rule on the product
+    /// grant (the policy decision). Without a readable product the decision is denied (fail closed).
+    /// </summary>
+    private async ValueTask<TableAccessDecision> ApplyProductColumnClassesAsync(TableAccessDecision decision, TenantId tenant, CancellationToken ct)
+    {
+        if (!decision.IsAllowed)
+        {
+            return decision;
+        }
+
+        var product = _productRepository is null || !Autheris.Application.Products.ProductSource.TryParse(decision.Table, tenant, out var productSchema, out var productName)
+            ? null
+            : await _productRepository.GetProductAsync(tenant, productSchema, productName, ct).ConfigureAwait(false);
+        if (product is null)
+        {
+            return TableAccessDecision.Denied(decision.Table, "Access denied: the data product is not available.") with { EvaluatedByPdp = true };
+        }
+
+        if (product.Kind == DataProductKind.Procedure)
+        {
+            // The columns of a procedure product are the declared outputs of the procedure; the procedure execution classifies them.
+            return decision;
+        }
+
+        var classes = product.Columns.ToDictionary(static c => c.Name, static c => c.Class, StringComparer.OrdinalIgnoreCase);
+        var access = new Dictionary<string, ColumnAccessLevel>(decision.ColumnAccess, StringComparer.OrdinalIgnoreCase);
+        var tightened = false;
+        foreach (var (column, level) in decision.ColumnAccess)
+        {
+            // an unknown column is treated as masked-class: it never reaches clear
+            var resolved = Autheris.Application.Products.ProductColumnAccess.Resolve(
+                classes.TryGetValue(column, out var cls) ? cls : ProductColumnClass.PiiMasked, level);
+            if (resolved != level)
+            {
+                access[column] = resolved;
+                tightened = true;
+            }
+        }
+
+        return tightened
+            ? decision with { ColumnAccess = access, PerCellColumns = null, ColumnSignatures = null, RowDependentColumns = null }
+            : decision;
     }
 
     private static readonly IReadOnlySet<string> NoRoles =

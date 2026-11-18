@@ -110,6 +110,8 @@ public sealed class AuthorizationArchitectureTests
             .Where(f => f.Text.Contains("EvaluatedByPdp = true", StringComparison.Ordinal))
             .Select(f => f.RelativePath)
             .Where(path => !path.StartsWith("src/Autheris.Application/Policy/Pdp/", StringComparison.Ordinal))
+            // Federated execution builds an unconstrained allow for tables it resolved itself, to run the masked-column guardrails; it is never handed on as a caller decision.
+            .Where(path => path != "src/Autheris.Application/Sql/Services/FederatedDuckDbExecutionService.cs")
             .ToList();
 
         offenders.ShouldBeEmpty("Only the access decision point may mark a decision as evaluated by the PDP.");

@@ -290,9 +290,7 @@ public sealed class BulkKeysetStreamingSecurityTests
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<TableMetadata?>(table));
 
-        var pdp = Substitute.For<IAccessDecisionPoint>();
-        pdp.DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>())
-            .Returns(TableAccessDecision.Allowed(table.Identifier, new Dictionary<string, ColumnAccessLevel>(), null, true));
+        var pdp = Autheris.Tests.Unit.TestSupport.AccessDecisionPointStubs.Returning(_ => TableAccessDecision.Allowed(table.Identifier, new Dictionary<string, ColumnAccessLevel>(), null, true));
 
         var planner = new GovernedTableReadPlanner();
         var sqlExecution = Substitute.For<IGovernedSqlExecutionService>();
@@ -358,9 +356,7 @@ public sealed class BulkKeysetStreamingSecurityTests
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<TableMetadata?>(table));
 
-        var pdp = Substitute.For<IAccessDecisionPoint>();
-        pdp.DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>())
-            .Returns(TableAccessDecision.Allowed(table.Identifier, new Dictionary<string, ColumnAccessLevel>(), null, true));
+        var pdp = Autheris.Tests.Unit.TestSupport.AccessDecisionPointStubs.Returning(_ => TableAccessDecision.Allowed(table.Identifier, new Dictionary<string, ColumnAccessLevel>(), null, true));
 
         var planner = new GovernedTableReadPlanner();
         var sqlExecution = Substitute.For<IGovernedSqlExecutionService>();

@@ -110,7 +110,7 @@ public sealed class ErrorBodyMigrationEndpointTests
         await TableStreamEndpoints.HandleBulkStreamAsync(
             domain, schema, table, ctx,
             repo ?? Substitute.For<ITableMetadataRepository>(),
-            Substitute.For<IAccessDecisionPoint>(),
+            Autheris.Tests.Unit.TestSupport.AccessDecisionPointStubs.Denying(),
             Substitute.For<IGovernedTableReadPlanner>(),
             Substitute.For<IGovernedSqlExecutionService>(),
             Substitute.For<IKeysetCursorEncoder>(),

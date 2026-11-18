@@ -7,7 +7,7 @@ namespace Autheris.Infrastructure.Persistence;
 /// <summary>
 /// DEP-7 / INF-6: outside Development every database connection must encrypt and verify the server certificate.
 /// PostgreSQL requires <c>SSL Mode=VerifyFull</c> (<c>Require</c> and <c>VerifyCA</c> do not verify the server hostname);
-/// SQL Server requires encryption and <c>TrustServerCertificate=false</c>; Oracle requires TCPS. SQLite is a local file.
+/// SQL Server requires encryption and <c>TrustServerCertificate=false</c>; Oracle requires TCPS.
 /// </summary>
 public static class ConnectionTlsPolicy
 {
