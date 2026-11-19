@@ -67,6 +67,28 @@ public class ReadOnlyTokenTests
         ReadOnlyPrincipal().IsReadOnly().ShouldBeTrue();
     }
 
+    [Fact]
+    public void GetTokenScopes_ReadsScopeClaim()
+    {
+        var rfc9068 = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim("scope", "api://app/Agent.Read Agent.Read agent.read Sql.Write")],
+            "Bearer"));
+
+        var scopes = TokenAccessScope.GetTokenScopes(rfc9068);
+        scopes.Count.ShouldBe(2);
+        scopes.ShouldContain(s => string.Equals(ScopeNames.ToBareName(s), "Agent.Read", StringComparison.OrdinalIgnoreCase));
+        scopes.ShouldContain("Sql.Write");
+
+        // GetScopes stays scp-only (SEC-GOV143-10); GetTokenScopes reads scp, the mapped URI, and RFC 9068 scope.
+        TokenAccessScope.GetScopes(rfc9068).ShouldBeEmpty();
+        TokenAccessScope.GetTokenScopes(null).ShouldBeEmpty();
+
+        var scpAndScope = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim("scp", "Agent.Read"), new Claim("scope", "App.Read Agent.Read")],
+            "Bearer"));
+        TokenAccessScope.GetTokenScopes(scpAndScope).ShouldBe(["Agent.Read", "App.Read"]);
+    }
+
     // ---------------------------------------------------------------- Entra classification
 
     [Theory]
