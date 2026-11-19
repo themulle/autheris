@@ -53,14 +53,15 @@ public static class ProductSource
 
     /// <summary>
     /// Guards the product-only catalog write: the object must be the product identity of <paramref name="tenant"/> (reserved product source,
-    /// the tenant schema of exactly that tenant, a well-formed name), the table row must repeat that identity, and the product schema and name
+    /// the tenant schema of exactly that tenant, a well-formed name), the owner tenant of the row, the table row must repeat that identity, and the product schema and name
     /// must not be reserved system names. Anything else is refused before any write (fail closed).
     /// </summary>
     /// <exception cref="ArgumentException">The metadata is no product object of the tenant.</exception>
     public static void EnsureProductObject(TenantId tenant, TableMetadata metadata)
     {
         ArgumentNullException.ThrowIfNull(metadata);
-        if (!TryParse(metadata.Identifier, tenant, out var schema, out var name) ||
+        if (!string.Equals(metadata.OwnerTenantId, tenant.Value, StringComparison.Ordinal) ||
+            !TryParse(metadata.Identifier, tenant, out var schema, out var name) ||
             !string.Equals(metadata.Identifier.Domain, Name, StringComparison.Ordinal) ||
             !string.Equals(metadata.Table.SourceName, metadata.Identifier.Domain, StringComparison.Ordinal) ||
             !string.Equals(metadata.Table.SchemaName, metadata.Identifier.Schema, StringComparison.Ordinal) ||

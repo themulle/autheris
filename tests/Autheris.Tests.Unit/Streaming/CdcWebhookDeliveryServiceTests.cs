@@ -1,3 +1,4 @@
+#pragma warning disable CA2012 // NSubstitute .Returns(...) configures a ValueTask member; the instance is not consumed here.
 using Autheris.Tests.Common;
 namespace Autheris.Tests.Unit.Streaming;
 
@@ -31,7 +32,7 @@ using Shouldly;
 using Xunit;
 
 [Trait("Category", "Security")]
-public sealed class CdcWebhookDeliveryServiceTests
+public sealed partial class CdcWebhookDeliveryServiceTests
 {
     private static readonly DateTimeOffset Now = new(2026, 10, 14, 12, 0, 0, TimeSpan.Zero);
     private static readonly TableIdentifier Orders = new("sales", "public", "orders");
