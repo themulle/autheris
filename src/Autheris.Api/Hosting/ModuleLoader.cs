@@ -667,7 +667,7 @@ public sealed class ModuleLoader
         return false;
     }
 
-    private static IConfiguration BuildScopedModuleConfiguration(
+    internal static IConfiguration BuildScopedModuleConfiguration(
         string moduleId,
         IReadOnlyList<string> declaredSections,
         IConfiguration rootConfiguration)

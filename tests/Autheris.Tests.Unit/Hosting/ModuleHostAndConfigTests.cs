@@ -189,15 +189,32 @@ public sealed class ModuleConfigurationTests
     [Fact]
     public void Module_with_cdc_stream_id_collides_with_host_section()
     {
-        var method = typeof(ModuleLoader).GetMethod(
-            "BuildScopedModuleConfiguration",
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
-        var root = new ConfigurationBuilder().Build();
+        var ex = Should.Throw<ModuleLoadException>(() =>
+            ModuleLoader.BuildScopedModuleConfiguration("cdc-stream", Array.Empty<string>(), new ConfigurationBuilder().Build()));
+        ex.Message.ShouldContain("collides with the host configuration section");
+    }
 
-        var ex = Should.Throw<System.Reflection.TargetInvocationException>(() =>
-            method.Invoke(null, ["cdc-stream", Array.Empty<string>(), root]));
-        ex.InnerException.ShouldBeOfType<ModuleLoadException>();
-        ex.InnerException!.Message.ShouldContain("collides with the host configuration section");
+    [Fact]
+    public void Unmodularised_dbt_and_openmetadata_sections_stay_accepted()
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Gateway:Dbt:Enabled"] = "true",
+                ["Gateway:OpenMetadata:Enabled"] = "true",
+            })
+            .Build();
+        var result = ModuleLoader.LoadModules(new ServiceCollection(), config, new FakeHostEnvironment(), NullLogger<ModuleLoader>.Instance);
+
+        Should.NotThrow(() =>
+            UnknownGatewayKeyGuard.ThrowIfUnknownKeys(config, result, GatewayConfigurationSchema.EnforcedModuleSections));
+
+        var lineage = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Gateway:Lineage:Endpoint"] = "x" })
+            .Build();
+        Should.Throw<InvalidOperationException>(() =>
+            UnknownGatewayKeyGuard.ThrowIfUnknownKeys(lineage, result, GatewayConfigurationSchema.EnforcedModuleSections))
+            .Message.ShouldContain("module lineage is not installed");
     }
 
     [Fact]

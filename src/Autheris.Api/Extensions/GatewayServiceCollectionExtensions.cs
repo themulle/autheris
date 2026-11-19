@@ -124,7 +124,7 @@ public static partial class GatewayServiceCollectionExtensions
         Autheris.Api.Configuration.UnknownGatewayKeyGuard.ThrowIfUnknownKeys(
             configuration,
             moduleLoadResult,
-            Autheris.Api.Configuration.GatewayConfigurationSchema.KnownModuleSections);
+            Autheris.Api.Configuration.GatewayConfigurationSchema.EnforcedModuleSections);
         return services;
     }
     public static IServiceCollection AddGatewayAuth(

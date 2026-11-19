@@ -120,6 +120,18 @@ public static class GatewayConfigurationSchema
         };
 
     /// <summary>
+    /// The module sections whose absence fails startup in the host: only modules that exist or are planned now. Sections read by core
+    /// (for example Gateway:Dbt, Gateway:OpenMetadata) stay out until their module exists.
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> EnforcedModuleSections { get; } =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            [GatewaySections.Lakehouse] = "lakehouse",
+            [GatewaySections.Events] = "events",
+            [GatewaySections.Lineage] = "lineage",
+        };
+
+    /// <summary>
     /// The only subtrees (configuration paths) whose content is not checked key by key (<c>object</c>, <c>IConfigurationSection</c>,
     /// dictionaries with scalar values). None may sit under a security root; <c>T-08</c> pins this list.
     /// </summary>
