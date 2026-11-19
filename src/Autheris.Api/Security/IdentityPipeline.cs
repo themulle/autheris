@@ -433,6 +433,7 @@ public sealed class IdentityPipeline : IIdentityPipeline
             {
                 TenantId = tenantId,
                 EventType = AuditEventTypes.WorkloadRoleMappingApplied,
+                ActorSid = new Sid("IDENTITY_PIPELINE"),
                 Decision = "ALLOW",
                 TargetTable = "IDENTITY_REALMS",
                 TraceId = System.Diagnostics.Activity.Current?.TraceId.ToString() ?? string.Empty,
@@ -448,9 +449,9 @@ public sealed class IdentityPipeline : IIdentityPipeline
         {
             throw;
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            _logger.LogWarning("Workload role mapping for realm {RealmId} is not applied: the audit record could not be written (fail-closed).", realmId);
+            _logger.LogWarning("Workload role mapping for realm {RealmId} is not applied: the audit record could not be written ({ExceptionType}; fail-closed).", realmId, ex.GetType().Name);
             return [];
         }
 

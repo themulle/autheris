@@ -406,6 +406,48 @@ public abstract class CatalogContract : GovernanceContractBase
         feed.Changes.Should().Contain(c => c.ObjectId == objectId && c.Kind == "UPSERT" && c.Seq == seq1);
         feed.Changes.Should().Contain(c => c.ObjectId == objectId && c.Kind == "REMOVED" && c.Seq == seq2);
     }
+
+    private static TableMetadata MaskedTable(string tableName, Guid ruleId, params string[] maskedColumns)
+    {
+        var id = Guid.NewGuid();
+        var columns = maskedColumns.Select(c => new TableColumn { TableId = id, ColumnName = c, DataType = "TEXT" }).ToList();
+        return new TableMetadata
+        {
+            Identifier = new TableIdentifier("MaskDomain", "dbo", tableName),
+            Table = new Table { Id = id, SourceName = "MaskDomain", SchemaName = "dbo", TableName = tableName, Sensitivity = "LOW", IsActive = true },
+            Columns = columns,
+            ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor(maskedColumns),
+            ColumnMaskingRules = maskedColumns.ToDictionary(c => c, c => new MaskingRule { Id = ruleId, RuleType = "REDACT" })
+        };
+    }
+
+    [RequiresContainerRuntimeFact]
+    public async Task Upsert_ReusedRuleIdAcrossColumns_BothColumnsMasked()
+    {
+        if (!Store.IsAvailable) return;
+        var name = "mask_" + Guid.NewGuid().ToString("N")[..8];
+
+        await Store.TableMetadata.UpsertTableMetadataAsync(MaskedTable(name, Guid.NewGuid(), "email", "phone"));
+
+        var read = await Store.TableMetadata.GetTableMetadataAsync(new TableIdentifier("MaskDomain", "dbo", name));
+        read.Should().NotBeNull();
+        read!.ColumnMaskingRules.Keys.Should().BeEquivalentTo(["email", "phone"]);
+    }
+
+    [RequiresContainerRuntimeFact]
+    public async Task Upsert_RuleIdOfOtherTable_ColumnMasked()
+    {
+        if (!Store.IsAvailable) return;
+        var shared = Guid.NewGuid();
+        var first = "maskA_" + Guid.NewGuid().ToString("N")[..8];
+        var second = "maskB_" + Guid.NewGuid().ToString("N")[..8];
+
+        await Store.TableMetadata.UpsertTableMetadataAsync(MaskedTable(first, shared, "email"));
+        await Store.TableMetadata.UpsertTableMetadataAsync(MaskedTable(second, shared, "email"));
+
+        (await Store.TableMetadata.GetTableMetadataAsync(new TableIdentifier("MaskDomain", "dbo", first)))!.ColumnMaskingRules.Should().ContainKey("email");
+        (await Store.TableMetadata.GetTableMetadataAsync(new TableIdentifier("MaskDomain", "dbo", second)))!.ColumnMaskingRules.Should().ContainKey("email");
+    }
 }
 
 [Collection(GovernancePostgresCollection.Name)]

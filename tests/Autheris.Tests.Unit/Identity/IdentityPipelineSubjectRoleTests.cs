@@ -163,6 +163,7 @@ public sealed class IdentityPipelineSubjectRoleTests
 
         var entry = sink.ShouldHaveSingleItem();
         entry.EventType.ShouldBe("WORKLOAD_ROLE_MAPPING_APPLIED");
+        entry.ActorSid.Value.ShouldNotBeNullOrWhiteSpace();
         entry.DetailsJson.ShouldContain("workload");
         entry.DetailsJson.ShouldContain(SubjectRoleMappingTests.Subject);
         entry.DetailsJson.ShouldContain("ClusterAdmin");
