@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.OData;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -570,8 +571,7 @@ public sealed class ODataEndpointsTests
     public async Task OData_EntitySet_NotFound_Is_Fixed_Access_Denied_Outside_Development(string environment, int status, string code)
     {
         // NL-T-34 / NL-SC-34: the entity-set name is never echoed; outside Development the answer is the fixed ACCESS_DENIED 403.
-        var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
-        env.EnvironmentName.Returns(environment);
+        Microsoft.Extensions.Hosting.IHostEnvironment env = new TestHostEnvironment(environment);
         var context = CreateHttpContext(path: "/odata/v4/SecretEntity_XYZ");
         var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
         Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddSingleton(services, env);

@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Sql.TimeZones;
 
+using Autheris.Tests.Common;
 using System.Linq;
 using Autheris.Api.Configuration.Validation;
 using Autheris.Domain.Options;
@@ -15,8 +16,7 @@ public sealed class ConvertTimeZoneOptionsTests
 {
     private static ValidateResult Validate(params string[] additional)
     {
-        var environment = Substitute.For<IHostEnvironment>();
-        environment.EnvironmentName.Returns("Production");
+        IHostEnvironment environment = new TestHostEnvironment("Production");
         var result = new GatewayCoreOptionsValidator(environment).Validate(null, new GatewayOptions { WebSql = new WebSqlOptions { AdditionalAllowedFunctions = [.. additional] } });
         return new ValidateResult(result.Failed, result.Failures?.ToList() ?? []);
     }

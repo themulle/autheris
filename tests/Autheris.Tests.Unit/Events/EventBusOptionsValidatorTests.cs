@@ -2,6 +2,7 @@ namespace Autheris.Tests.Unit.Events;
 
 using Autheris.Api.Extensions.DependencyInjection;
 using Autheris.Domain.Options;
+using Autheris.Tests.Common;
 using Microsoft.Extensions.Hosting;
 using NSubstitute;
 using Shouldly;
@@ -11,8 +12,7 @@ public sealed class EventBusOptionsValidatorTests
 {
     private static EventBusOptionsValidator Validator(string env)
     {
-        var host = Substitute.For<IHostEnvironment>();
-        host.EnvironmentName.Returns(env);
+        IHostEnvironment host = new TestHostEnvironment(env);
         return new EventBusOptionsValidator(host);
     }
 

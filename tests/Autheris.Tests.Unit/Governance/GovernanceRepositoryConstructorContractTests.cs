@@ -3,6 +3,7 @@ using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Audit;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;
+using Autheris.Tests.Common;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
@@ -18,8 +19,7 @@ public sealed class GovernanceRepositoryConstructorContractTests
 {
     private static IHostEnvironment Env(string name)
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(name);
+        IHostEnvironment env = new TestHostEnvironment(name);
         return env;
     }
 

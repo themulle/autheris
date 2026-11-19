@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Integration;
 
+using Autheris.Tests.Common;
 using System;
 using System.Threading;
 using System.Threading.Tasks;
@@ -42,8 +43,7 @@ internal static class GovernanceSchemaTestSupport
 
     private static IHostEnvironment Env()
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Test");
+        IHostEnvironment env = new TestHostEnvironment("Test");
         return env;
     }
 

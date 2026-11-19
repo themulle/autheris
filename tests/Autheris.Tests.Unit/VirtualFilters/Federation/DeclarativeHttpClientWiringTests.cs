@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.VirtualFilters.Federation;
 
+using Autheris.Tests.Common;
 using System;
 using System.Net;
 using System.IO;
@@ -58,8 +59,7 @@ public sealed class DeclarativeHttpClientWiringTests
             // CR-09: the cap is a global HTTP data source option, not a WebSQL cross-source setting.
             DataSources = new SqlDataSourceOptions { Http = new HttpDataSourceOptions { MaxResponseBytes = Cap } }
         };
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Production");
+        IHostEnvironment env = new TestHostEnvironment("Production");
         var services = new ServiceCollection();
         services.AddSingleton(env);
         services.AddSingleton(Options.Create(options));
@@ -103,8 +103,7 @@ public sealed class DeclarativeHttpClientWiringTests
     {
         var options = new GatewayOptions { WebSql = new WebSqlOptions { CrossSource = new CrossSourceOptions { MaxStagedBytesPerTable = 100 } } };
         var primary = new StubPrimaryHandler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(new string('x', 5000)) });
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Production");
+        IHostEnvironment env = new TestHostEnvironment("Production");
         var services = new ServiceCollection();
         services.AddSingleton(env);
         services.AddSingleton(Options.Create(options));

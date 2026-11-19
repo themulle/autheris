@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Integration.Governance;
 
+using Autheris.Tests.Common;
 using System;
 using System.IO;
 using System.Linq;
@@ -25,8 +26,7 @@ public sealed class LegacyAuditRowSecurityPostgreSqlTests
 
     private static (PostgreSqlGovernanceRepository Repo, string ConnectionString) Create(AuditChainViolationPolicy? policy = null)
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Test");
+        IHostEnvironment env = new TestHostEnvironment("Test");
         var options = Options.Create(new GatewayOptions
         {
             GovernanceDb = new GovernanceDbOptions { SeedDemoData = false },

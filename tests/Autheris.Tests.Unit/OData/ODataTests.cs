@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.OData;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -328,8 +329,7 @@ public sealed class ODataTests
 
     private static Microsoft.Extensions.Hosting.IHostEnvironment DevEnv(string name = "Development")
     {
-        var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
-        env.EnvironmentName.Returns(name);
+        Microsoft.Extensions.Hosting.IHostEnvironment env = new TestHostEnvironment(name);
         return env;
     }
 

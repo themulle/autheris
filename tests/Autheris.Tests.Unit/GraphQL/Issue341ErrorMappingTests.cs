@@ -3,6 +3,7 @@ namespace Autheris.Tests.Unit.GraphQL;
 using Autheris.Api.Middleware;
 using Autheris.Application.Sql;
 using Autheris.Domain.Common;
+using Autheris.Tests.Common;
 using HotChocolate;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -21,8 +22,7 @@ public sealed class Issue341ErrorMappingTests
 
     private static ErrorSanitizingFilter CreateFilter(string envName)
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(envName);
+        IHostEnvironment env = new TestHostEnvironment(envName);
         return new ErrorSanitizingFilter(env, NullLogger<ErrorSanitizingFilter>.Instance);
     }
 

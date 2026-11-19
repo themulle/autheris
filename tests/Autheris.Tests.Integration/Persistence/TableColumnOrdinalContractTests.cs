@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Integration.Persistence;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Data.Common;
@@ -201,8 +202,7 @@ public sealed class PostgreSqlTableColumnOrdinalContractTests : TableColumnOrdin
 
     protected override IGovernanceRepository CreateRepository(string connectionString)
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        IHostEnvironment env = new TestHostEnvironment("Development");
         var options = Options.Create(new GatewayOptions
         {
             GovernanceDb = new GovernanceDbOptions { Provider = "PostgreSql", ConnectionString = connectionString, SeedDemoData = false }
@@ -247,8 +247,7 @@ public sealed class SqlServerTableColumnOrdinalContractTests : TableColumnOrdina
 
     protected override IGovernanceRepository CreateRepository(string connectionString)
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        IHostEnvironment env = new TestHostEnvironment("Development");
         var options = Options.Create(new GatewayOptions
         {
             GovernanceDb = new GovernanceDbOptions { Provider = "SqlServer", ConnectionString = connectionString, SeedDemoData = false }

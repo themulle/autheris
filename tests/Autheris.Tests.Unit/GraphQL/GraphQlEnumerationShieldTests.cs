@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.GraphQL;
 
+using Autheris.Tests.Common;
 using System.Threading.Tasks;
 using Autheris.Api.Middleware;
 using HotChocolate;
@@ -36,8 +37,7 @@ public sealed class GraphQlEnumerationShieldTests
 
     private static async Task<IRequestExecutor> CreateExecutorAsync(string environmentName)
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(environmentName);
+        IHostEnvironment env = new TestHostEnvironment(environmentName);
 
         return await new ServiceCollection()
             .AddSingleton(env)
@@ -111,8 +111,7 @@ public sealed class GraphQlEnumerationShieldTests
     [Fact]
     public void ErrorFilter_Production_InvalidQueryMessage_IsGeneric()
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Production");
+        IHostEnvironment env = new TestHostEnvironment("Production");
         var filter = new ErrorSanitizingFilter(env, NullLogger<ErrorSanitizingFilter>.Instance);
 
         var error = filter.OnError(ErrorBuilder.New().SetMessage("Unknown or denied column 'ssn'.").SetCode("INVALID_QUERY").Build());

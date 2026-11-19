@@ -2,6 +2,7 @@
 
 namespace Autheris.Tests.Unit.Sql;
 
+using Autheris.Tests.Common;
 using Autheris.Tests.Unit.Catalog;
 using System;
 using System.Collections.Generic;
@@ -45,8 +46,7 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
 {
     private static Microsoft.Extensions.Hosting.IHostEnvironment CreateDevEnvironment()
     {
-        var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        Microsoft.Extensions.Hosting.IHostEnvironment env = new TestHostEnvironment("Development");
         return env;
     }
 

@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.State;
 
+using Autheris.Tests.Common;
 using System.ComponentModel.DataAnnotations;
 using Autheris.Api.Extensions;
 using Autheris.Application.State;
@@ -36,8 +37,7 @@ public class ClusterStateTopologyTests
 
     private static IHostEnvironment Dev()
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        IHostEnvironment env = new TestHostEnvironment("Development");
         return env;
     }
 

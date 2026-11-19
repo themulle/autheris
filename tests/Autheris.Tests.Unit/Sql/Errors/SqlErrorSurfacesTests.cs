@@ -45,8 +45,7 @@ public sealed class SqlErrorSurfacesTests
 
     private static DefaultHttpContext Context(string environmentName)
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(environmentName);
+        IHostEnvironment env = new TestHostEnvironment(environmentName);
         var context = new DefaultHttpContext
         {
             RequestServices = new ServiceCollection().AddLogging().AddSingleton(env).BuildServiceProvider(),
@@ -265,7 +264,7 @@ public sealed class SqlErrorSurfacesTests
         try
         {
             var env = Substitute.For<IHostEnvironment>();
-            env.ContentRootPath.Returns(scratch);
+            env.ContentRootPath = scratch;
             var audit = Substitute.For<IAuditLogRepository>();
             var manager = new AsyncQueryJobManager(audit, environment: env);
             var sql = Substitute.For<IGovernedSqlExecutionService>();

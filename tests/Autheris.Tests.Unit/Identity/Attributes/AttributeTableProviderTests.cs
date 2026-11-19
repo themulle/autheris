@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Identity.Attributes;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Data.Common;
@@ -18,6 +19,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Microsoft.Extensions.Logging.Abstractions;
 using static CallerAttributeTestSupport;
 
 /// <summary>PLAN-GOV-129 test 6, ST-129-12 (BC-129-03, BC-129-09, BC-129-11): unit contract of the privileged attribute-table lookup.</summary>
@@ -85,8 +87,7 @@ public sealed class AttributeTableProviderTests
                 }
             }
         });
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(environment);
+        IHostEnvironment env = new TestHostEnvironment(environment);
         var logger = Substitute.For<ILogger<AttributeTableProvider>>();
         logger.When(l => l.Log(Arg.Any<LogLevel>(), Arg.Any<EventId>(), Arg.Any<object>(), Arg.Any<Exception?>(), Arg.Any<Func<object, Exception?, string>>()))
             .Do(c => _logs.Add(c.ArgAt<object>(2).ToString()!));
@@ -156,10 +157,9 @@ public sealed class AttributeTableProviderTests
                 }
             }
         });
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Production");
+        IHostEnvironment env = new TestHostEnvironment("Production");
         var factory = new CallbackFactory((_, _) => new StubDbDataReader(["cost_center", "tenant_id"], [["leak", "TENANT_A"]]));
-        var provider = new AttributeTableProvider(factory, options, env, Substitute.For<ILogger<AttributeTableProvider>>(), null);
+        var provider = new AttributeTableProvider(factory, options, env, NullLogger<AttributeTableProvider>.Instance, null);
 
         var result = await provider.ResolveAsync(UserSubject(), Definition(), default);
 

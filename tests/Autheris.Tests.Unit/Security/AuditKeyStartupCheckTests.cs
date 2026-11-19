@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Security;
 
+using Autheris.Tests.Common;
 using System.Text;
 using Autheris.Api.Extensions.DependencyInjection;
 using Autheris.Application.Common.Interfaces;
@@ -17,8 +18,7 @@ public sealed class AuditKeyStartupCheckTests
 {
     private static IHostEnvironment Env(string name)
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(name);
+        IHostEnvironment env = new TestHostEnvironment(name);
         return env;
     }
 

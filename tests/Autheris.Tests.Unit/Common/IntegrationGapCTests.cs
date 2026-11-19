@@ -346,8 +346,7 @@ public sealed class IntegrationGapCTests
 
     private static IHostEnvironment Env(string name)
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(name);
+        IHostEnvironment env = new TestHostEnvironment(name);
         return env;
     }
 
@@ -534,8 +533,7 @@ public sealed class IntegrationGapCTests
                 null,
                 hasUnconstrainedColumnAllow: true));
 
-        var devEnv = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
-        devEnv.EnvironmentName.Returns("Development");
+        IHostEnvironment devEnv = new TestHostEnvironment("Development");
 
         var repo = CreateRepository();
         return global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(

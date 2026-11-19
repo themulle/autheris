@@ -131,8 +131,7 @@ public sealed class ResponseSizeLimitingHandlerTests
         });
         var factory = Substitute.For<IHttpClientFactory>();
         factory.CreateClient(Arg.Any<string>()).Returns(client);
-        var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        Microsoft.Extensions.Hosting.IHostEnvironment env = new TestHostEnvironment("Development");
         var executor = new DeclarativeHttpDataSourceExecutor(
             factory, Microsoft.Extensions.Logging.Abstractions.NullLogger<DeclarativeHttpDataSourceExecutor>.Instance, environment: env);
         var metadata = FederatedVfPipelineHarness.HttpTable("crm_api", "public", "customers", "id");

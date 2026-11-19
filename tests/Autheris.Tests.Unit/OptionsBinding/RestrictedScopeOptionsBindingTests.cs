@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.OptionsBinding;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -36,8 +37,7 @@ public sealed class RestrictedScopeOptionsBindingTests
 
     private static (ValidateOptionsResult Result, ListLogger Log) Validate(RestrictedScopeOptions options, string environment = "Production")
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(environment);
+        IHostEnvironment env = new TestHostEnvironment(environment);
         var log = new ListLogger();
         return (new RestrictedScopeOptionsValidator(env, log).Validate(null, options), log);
     }

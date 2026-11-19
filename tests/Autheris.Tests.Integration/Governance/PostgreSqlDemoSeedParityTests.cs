@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Integration.Governance;
 
+using Autheris.Tests.Common;
 using System;
 using System.Linq;
 using System.Threading.Tasks;
@@ -24,8 +25,7 @@ public sealed class PostgreSqlDemoSeedParityTests(GovernancePostgresFixture post
 {
     private static PostgreSqlGovernanceRepository CreateSeeded(string connectionString)
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        IHostEnvironment env = new TestHostEnvironment("Development");
         var options = Options.Create(new GatewayOptions
         {
             GovernanceDb = new GovernanceDbOptions { Provider = "PostgreSql", ConnectionString = connectionString, SeedDemoData = true }

@@ -85,8 +85,7 @@ public sealed class BackgroundServiceLockTests
 
     internal static IHostEnvironment DevelopmentEnvironment()
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        IHostEnvironment env = new TestHostEnvironment("Development");
         return env;
     }
 

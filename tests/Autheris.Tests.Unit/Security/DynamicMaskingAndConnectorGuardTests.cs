@@ -2,6 +2,7 @@
 
 namespace Autheris.Tests.Unit.Security;
 
+using Autheris.Tests.Common;
 using Autheris.Tests.Unit.Catalog;
 using Autheris.Application.Audit;
 using Autheris.Tests.Unit.TestDoubles;
@@ -205,8 +206,7 @@ public sealed class DynamicMaskingAndConnectorGuardTests
             .Returns(Task.FromResult<TableMetadata?>(null));
 
         var context = new DefaultHttpContext();
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Production");
+        IHostEnvironment env = new TestHostEnvironment("Production");
         var serviceProvider = Substitute.For<IServiceProvider>();
         serviceProvider.GetService(typeof(IHostEnvironment)).Returns(env);
         serviceProvider.GetService(typeof(IAuditWriter)).Returns(AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()));
@@ -249,8 +249,7 @@ public sealed class DynamicMaskingAndConnectorGuardTests
     [Fact]
     public void RR_L3_05_ValidateGatewayOptions_RejectsIntrospectionInProductionWithoutOptIn()
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Production");
+        IHostEnvironment env = new TestHostEnvironment("Production");
 
         var options = new GatewayOptions
         {
@@ -266,8 +265,7 @@ public sealed class DynamicMaskingAndConnectorGuardTests
     [Fact]
     public void API_16_ValidateGatewayOptions_RejectsAllowAllCorsInProductionWithoutOptIn()
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Production");
+        IHostEnvironment env = new TestHostEnvironment("Production");
 
         var options = new GatewayOptions
         {

@@ -183,8 +183,7 @@ public sealed class DatasourceSecretNamespaceTests
 
         var secretProvider = new DefaultEnvironmentSecretProvider(configuration: config);
 
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Production");
+        IHostEnvironment env = new TestHostEnvironment("Production");
 
         var executor = new DeclarativeHttpDataSourceExecutor(
             factory,

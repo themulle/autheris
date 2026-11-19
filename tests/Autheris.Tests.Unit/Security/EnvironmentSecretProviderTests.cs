@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Security;
 
+using Autheris.Tests.Common;
 using System;
 using System.Text;
 using Autheris.Infrastructure.Security;
@@ -24,8 +25,7 @@ public class EnvironmentSecretProviderTests
         });
         var configuration = configBuilder.Build();
 
-        var mockEnv = Substitute.For<IHostEnvironment>();
-        mockEnv.EnvironmentName.Returns("Production");
+        IHostEnvironment mockEnv = new TestHostEnvironment("Production");
 
         var provider = new DefaultEnvironmentSecretProvider(configuration, mockEnv);
 
@@ -44,8 +44,7 @@ public class EnvironmentSecretProviderTests
             ["test_secret"] = "SuperSecretValue123"
         };
         var config = new ConfigurationBuilder().AddInMemoryCollection(inMemory).Build();
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(Environments.Production);
+        IHostEnvironment env = new TestHostEnvironment(Environments.Production);
         var logger = Substitute.For<Microsoft.Extensions.Logging.ILogger<DefaultEnvironmentSecretProvider>>();
 
         var provider = new DefaultEnvironmentSecretProvider(config, env, logger);
@@ -68,8 +67,7 @@ public class EnvironmentSecretProviderTests
             ["AUDIT_HMAC_KEY"] = "SuperSecretValue12345678901234567890"
         };
         var config = new ConfigurationBuilder().AddInMemoryCollection(inMemory).Build();
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(Environments.Production);
+        IHostEnvironment env = new TestHostEnvironment(Environments.Production);
         var logger = new TestSecretProviderLogger();
 
         var provider = new DefaultEnvironmentSecretProvider(config, env, logger);

@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Integration.Governance;
 
+using Autheris.Tests.Common;
 using System;
 using System.Threading.Tasks;
 using Autheris.Api.Extensions;
@@ -31,8 +32,7 @@ public sealed class EpochValidationDependencyCycleTests
                 ConnectionString = GovernanceTestDatabase.Create("epoch_cycle_" + Guid.NewGuid().ToString("N")[..8])
             }
         };
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        IHostEnvironment env = new TestHostEnvironment("Development");
         services.AddSingleton(env);
         services.AddSingleton(Options.Create(options));
         services.AddLogging();

@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.DependencyInjection;
 
+using Autheris.Tests.Common;
 using System.Reflection;
 using Autheris.Api.Extensions;
 using Autheris.Api.Extensions.DependencyInjection;
@@ -30,8 +31,7 @@ public sealed class CatalogVisibilityCompositionTests
     private static ServiceProvider Build()
     {
         var services = new ServiceCollection();
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(Environments.Development);
+        IHostEnvironment env = new TestHostEnvironment(Environments.Development);
         services.AddSingleton(env);
         services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
         services.AddLogging();

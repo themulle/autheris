@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Security;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Data.Common;
@@ -479,8 +480,7 @@ public sealed class WebSqlCostQuotaTests
             }
         };
 
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Production");
+        IHostEnvironment env = new TestHostEnvironment("Production");
 
         var ex = Assert.Throws<System.ComponentModel.DataAnnotations.ValidationException>(() => GatewayStartupValidator.ValidateStartup(options, env));
         ex.Message.Should().Contain("WebSql:Cost:Enabled must not be false outside Development");

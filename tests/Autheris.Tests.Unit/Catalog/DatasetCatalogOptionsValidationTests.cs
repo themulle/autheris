@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Catalog;
 
+using Autheris.Tests.Common;
 using System.Linq;
 using Autheris.Api.Configuration.Validation;
 using Autheris.Domain.Model;
@@ -14,8 +15,7 @@ public sealed class DatasetCatalogOptionsValidationTests
 {
     private static bool Fails(DataCatalogOptions catalog, string optionName)
     {
-        var environment = Substitute.For<IHostEnvironment>();
-        environment.EnvironmentName.Returns("Production");
+        IHostEnvironment environment = new TestHostEnvironment("Production");
         var result = new GatewayCoreOptionsValidator(environment).Validate(null, new GatewayOptions { Catalog = catalog });
         return result.Failed && result.Failures!.Any(f => f.Contains(optionName));
     }

@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Governance.TrustedDocuments;
 
+using Autheris.Tests.Common;
 using System.ComponentModel.DataAnnotations;
 using Autheris.Api.Extensions.DependencyInjection;
 using Autheris.Application.Governance.TrustedDocuments;
@@ -16,8 +17,7 @@ public sealed class AppScopedTrustedDocumentsStartupTests
 {
     private static IHostEnvironment Env()
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        IHostEnvironment env = new TestHostEnvironment("Development");
         return env;
     }
 

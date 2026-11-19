@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Webhooks;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -131,8 +132,7 @@ public sealed class WebhookDispatcherServiceTests
                 ]
             }
         });
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        IHostEnvironment env = new TestHostEnvironment("Development");
         var dispatcher = new WebhookDispatcherService(outbox, options, NullLogger<WebhookDispatcherService>.Instance, env);
 
         await dispatcher.DispatchEventAsync(new AccessPlanCreatedEvent(

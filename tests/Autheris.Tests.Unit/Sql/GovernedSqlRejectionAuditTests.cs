@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Sql;
 
+using Autheris.Tests.Common;
 using Autheris.Tests.Unit.Catalog;
 using System;
 using System.Collections.Generic;
@@ -79,8 +80,7 @@ public sealed class GovernedSqlRejectionAuditTests
         var audit = new List<AuditLogEntry>();
         var auditRepo = Substitute.For<IAuditLogRepository>();
         auditRepo.RecordAuditEventAsync(Arg.Do<AuditLogEntry>(audit.Add), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
-        var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        Microsoft.Extensions.Hosting.IHostEnvironment env = new TestHostEnvironment("Development");
 
         var service = global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             Options.Create(new GatewayOptions

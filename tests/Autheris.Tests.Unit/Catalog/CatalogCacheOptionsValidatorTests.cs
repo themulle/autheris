@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Catalog;
 
+using Autheris.Tests.Common;
 using System.Linq;
 using Autheris.Api.Configuration.Validation;
 using Autheris.Domain.Options;
@@ -13,8 +14,7 @@ public sealed class CatalogCacheOptionsValidatorTests
 {
     private static string[] Failures(CatalogCacheOptions cache)
     {
-        var environment = Substitute.For<IHostEnvironment>();
-        environment.EnvironmentName.Returns("Production");
+        IHostEnvironment environment = new TestHostEnvironment("Production");
         var result = new GatewayCoreOptionsValidator(environment).Validate(null, new GatewayOptions { Catalog = new DataCatalogOptions { Cache = cache } });
         return result.Failures?.Where(f => f.Contains("Gateway:Catalog:Cache")).ToArray() ?? [];
     }

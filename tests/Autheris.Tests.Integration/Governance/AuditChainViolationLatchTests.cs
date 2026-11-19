@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 using System.Text.Json;
 using Autheris.Application.Audit;
 using Autheris.Domain.Audit;
@@ -34,8 +35,7 @@ public sealed class AuditChainViolationLatchTests : IDisposable
 
     private PostgreSqlGovernanceRepository CreateRepo(AuditChainViolationPolicy? policy, out string connectionString)
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Test");
+        IHostEnvironment env = new TestHostEnvironment("Test");
         var db = $"audit_{Guid.NewGuid():N}.db";
         var options = Options.Create(new GatewayOptions
         {

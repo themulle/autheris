@@ -3,6 +3,7 @@ using Autheris.Application.Audit;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;
 using Autheris.Infrastructure.Persistence.Migrations;
+using Autheris.Tests.Common;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -58,8 +59,7 @@ public static class GovernanceStoreFactory
 
     private static IHostEnvironment DefaultEnvironment()
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Test");
+        IHostEnvironment env = new TestHostEnvironment("Test");
         return env;
     }
 }

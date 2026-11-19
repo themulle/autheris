@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Security;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -61,8 +62,7 @@ public sealed class AstCompilerHmacSql4Tests(ITestOutputHelper output)
 
         var secrets = Substitute.For<IKeyVaultSecretProvider>();
         secrets.GetSecretBytes(Arg.Any<string>()).Returns(Encoding.UTF8.GetBytes("super-secret-hmac-value-0123456789"));
-        var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        Microsoft.Extensions.Hosting.IHostEnvironment env = new TestHostEnvironment("Development");
 
         var gatewayOptions = Options.Create(new GatewayOptions
         {

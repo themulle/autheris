@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 using System.Security.Cryptography;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Streaming.Interfaces;
@@ -21,8 +22,7 @@ public sealed class KeyVaultCdcKekProviderTests
     {
         var monitor = Substitute.For<IOptionsMonitor<GatewayOptions>>();
         monitor.CurrentValue.Returns(options);
-        var host = Substitute.For<IHostEnvironment>();
-        host.EnvironmentName.Returns(env);
+        IHostEnvironment host = new TestHostEnvironment(env);
         return new KeyVaultCdcKekProvider(_secrets, monitor, host, NullLogger<KeyVaultCdcKekProvider>.Instance);
     }
 

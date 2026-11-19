@@ -30,8 +30,7 @@ public sealed class X1StartupTests
 
     private static IHostEnvironment Env(string name = "Development")
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(name);
+        IHostEnvironment env = new TestHostEnvironment(name);
         return env;
     }
 

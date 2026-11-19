@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Security;
 
+using Autheris.Tests.Common;
 using System.Threading.Tasks;
 using Autheris.Api.Extensions;
 using Autheris.Application.Security;
@@ -63,8 +64,7 @@ public class SsrfProtectionTests
     {
         var services = new ServiceCollection();
         var options = new GatewayOptions();
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(Environments.Production);
+        IHostEnvironment env = new TestHostEnvironment(Environments.Production);
         services.AddSingleton(env);
         services.AddLogging();
 

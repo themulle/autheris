@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Olap;
 
+using Autheris.Tests.Common;
 using System;
 using Autheris.Api.Configuration.Validation;
 using Autheris.Application.Olap;
@@ -16,8 +17,7 @@ public sealed class DuckDbOlapOptionsValidatorTests
 
     private static IHostEnvironment Env(string name)
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(name);
+        IHostEnvironment env = new TestHostEnvironment(name);
         return env;
     }
 

@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.ConsentRequests.Events;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -138,8 +139,7 @@ public sealed class ConsentEventPayloadTests
         var handler = new CapturingHttpHandler(HttpStatusCode.Accepted);
         var gatewayOptions = new GatewayOptions();
         var retryPolicy = new WebhookRetryPolicy(gatewayOptions.Webhooks, clock, () => 1.0);
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(Environments.Production);
+        IHostEnvironment env = new TestHostEnvironment(Environments.Production);
 
         var client = new WebhookDeliveryClient(
             new HttpClient(handler),
@@ -212,8 +212,7 @@ public sealed class ConsentEventPayloadTests
         var handler = new CapturingHttpHandler(HttpStatusCode.ServiceUnavailable);
         var gatewayOptions = new GatewayOptions();
         var retryPolicy = new WebhookRetryPolicy(gatewayOptions.Webhooks, clock, () => 1.0);
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(Environments.Production);
+        IHostEnvironment env = new TestHostEnvironment(Environments.Production);
 
         var client = new WebhookDeliveryClient(
             new HttpClient(handler),

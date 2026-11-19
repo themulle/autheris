@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 using System.ComponentModel.DataAnnotations;
 using Autheris.Api.Extensions;
 using Autheris.Application.Common.Interfaces;
@@ -18,8 +19,7 @@ public sealed class GatewayStatePathsTests
 {
     private static IHostEnvironment Env(string name)
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(name);
+        IHostEnvironment env = new TestHostEnvironment(name);
         return env;
     }
 
@@ -39,7 +39,7 @@ public sealed class GatewayStatePathsTests
     public void StatePaths_ResolveRelativeDirectoryAgainstTheContentRoot()
     {
         var env = Env("Production");
-        env.ContentRootPath.Returns("/srv/autheris");
+        env.ContentRootPath = "/srv/autheris";
 
         var paths = new GatewayStatePaths(Options.Create(new StateOptions { StateDirectory = "state" }), env);
 

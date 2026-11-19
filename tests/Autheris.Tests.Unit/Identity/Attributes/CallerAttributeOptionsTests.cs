@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Identity.Attributes;
 
+using Autheris.Tests.Common;
 using System.Linq;
 using Autheris.Api.Configuration.Validation;
 using Autheris.Domain.Options;
@@ -13,8 +14,7 @@ public sealed class CallerAttributeOptionsTests
 {
     private static string[] Validate(GatewayOptions options, string environment = "Production")
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(environment);
+        IHostEnvironment env = new TestHostEnvironment(environment);
         var result = new GatewayCoreOptionsValidator(env).Validate(null, options);
         return result.Failures?.ToArray() ?? [];
     }
