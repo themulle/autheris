@@ -3,7 +3,40 @@
 # Multi-protocol Enterprise GraphQL Gateway
 # ==============================================================================
 
-FROM mcr.microsoft.com/dotnet/aspnet:11.0.0-resolute@sha256:bc0d6653979efba491ab3d6f589d691f96c309c3c3ef81325efa6978e7b7f242 AS runtime
+# Image flavor: `core` ships no modules (no /app/modules); `full` additionally ships the signed modules from dist/modules after
+# an offline signature verification against the release public key embedded in the host. Any other value fails the build.
+ARG FLAVOR=core
+
+FROM mcr.microsoft.com/dotnet/aspnet:11.0.0-resolute@sha256:bc0d6653979efba491ab3d6f589d691f96c309c3c3ef81325efa6978e7b7f242 AS dotnet-base
+
+# core: nothing but a flavor marker is added to /app.
+FROM dotnet-base AS modules-core
+RUN mkdir -p /payload && echo core > /payload/.image-flavor
+
+# full: every module must verify against the pinned release public key or the build fails.
+# The trust root is the same file that is embedded into Autheris.Api as the Keys/module-release-*.pem resource; it is never taken
+# from a build argument, environment variable or secret.
+FROM dotnet-base AS modules-full
+COPY dist/tools/module-signer/ /tools/module-signer/
+COPY src/Autheris.Api/Hosting/Keys/module-release-pub.pem /tools/module-release-pub.pem
+COPY dist/modules/ /payload/modules/
+RUN set -eu; \
+    count=0; \
+    for module_dir in /payload/modules/*/; do \
+        [ -d "$module_dir" ] || continue; \
+        dotnet /tools/module-signer/Autheris.ModuleSigner.dll verify --pub /tools/module-release-pub.pem --dir "$module_dir" || exit 1; \
+        count=$((count + 1)); \
+    done; \
+    [ "$count" -gt 0 ] || { echo "Error: FLAVOR=full requires at least one signed module in dist/modules" >&2; exit 1; }; \
+    echo full > /payload/.image-flavor; \
+    find /payload/modules -type d -exec chmod 0555 {} + && find /payload/modules -type f -exec chmod 0444 {} +
+
+# An unknown flavor has no matching modules-<flavor> stage and fails the build here.
+FROM modules-${FLAVOR} AS modules-selected
+ARG FLAVOR
+RUN case "$FLAVOR" in core|full) ;; *) echo "Error: FLAVOR must be core or full" >&2; exit 1;; esac
+
+FROM dotnet-base AS runtime
 WORKDIR /app
 
 # Default configuration (8080 HTTP)
@@ -52,9 +85,8 @@ VOLUME /app/scratch
 
 # Copy the artifacts published by the CI/CD runner
 COPY dist/publish/ ./
-COPY dist/modules/ /app/modules/
-# Production refuses module directories with writable permission bits (0555/0444 expected); the build context carries 0755/0644.
-RUN find /app/modules -type d -exec chmod 0555 {} + && find /app/modules -type f -exec chmod 0444 {} +
+# Root-owned payload of the selected flavor (marker, plus /app/modules with 0555/0444 permissions for full).
+COPY --from=modules-selected --chown=0:0 /payload/ /app/
 
 # Non-root user for container hardening (UID:GID 10001:10001)
 USER 10001:10001

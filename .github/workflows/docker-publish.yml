@@ -41,6 +41,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       image_digest: ${{ steps.push.outputs.digest }}
+      image_digest_full: ${{ steps.push-full.outputs.digest }}
     permissions:
       contents: read
       packages: write
@@ -105,6 +106,8 @@ jobs:
           if [ -n "${AUTHERIS_MODULE_SIGNING_KEY_PEM:-}" ]; then
             HOST_VERSION="${VERSION%%+*}"
             dotnet build tools/Autheris.ModuleSigner/Autheris.ModuleSigner.csproj -c Release --no-restore
+            # The full image flavor verifies every module offline with this tool against the embedded release public key.
+            dotnet publish tools/Autheris.ModuleSigner/Autheris.ModuleSigner.csproj -c Release --no-restore -o ./dist/tools/module-signer
             dotnet publish modules/Autheris.Modules.Lakehouse/Autheris.Modules.Lakehouse.csproj \
               -c Release \
               --no-restore \
@@ -146,6 +149,8 @@ jobs:
           file: ./Dockerfile
           load: true
           push: false
+          build-args: |
+            FLAVOR=core
           tags: autheris:scan
           labels: |
             org.opencontainers.image.version=${{ env.VERSION }}
@@ -160,6 +165,34 @@ jobs:
           exit-code: '1'
           format: sarif
           output: trivy-results.sarif
+
+      # The full flavor needs the signed modules from the signing step; main pushes without the signing key publish core only.
+      - name: Build local full image for scanning
+        id: build-local-full
+        if: hashFiles('dist/modules/*/module.json') != ''
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: ./Dockerfile
+          load: true
+          push: false
+          build-args: |
+            FLAVOR=full
+          tags: autheris-full:scan
+          labels: |
+            org.opencontainers.image.version=${{ env.VERSION }}
+
+      - name: Trivy Container Vulnerability Scan (Gate, full)
+        if: hashFiles('dist/modules/*/module.json') != ''
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: autheris-full:scan
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          trivyignores: .trivyignore
+          exit-code: '1'
+          format: sarif
+          output: trivy-results-full.sarif
 
       - name: Upload Trivy SARIF
         if: always() && hashFiles('trivy-results.sarif') != ''
@@ -207,6 +240,11 @@ jobs:
           echo "tags<<EOF" >> $GITHUB_OUTPUT
           echo "$TAGS_STR" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
+          # The full flavor is a separate image name (autheris-full) with the same tag scheme.
+          FULL_TAGS_STR=$(printf "%s\n" "${TAGS[@]/#${IMAGE}:/${IMAGE}-full:}")
+          echo "tags_full<<EOF" >> $GITHUB_OUTPUT
+          echo "$FULL_TAGS_STR" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Build and push Docker image
         id: push
@@ -218,7 +256,25 @@ jobs:
           # Supply-chain attestations (SLSA provenance + SPDX SBOM) attached to the image
           provenance: mode=max
           sbom: true
+          build-args: |
+            FLAVOR=core
           tags: ${{ steps.meta.outputs.tags }}
+          labels: |
+            org.opencontainers.image.version=${{ env.VERSION }}
+
+      - name: Build and push full Docker image
+        id: push-full
+        if: hashFiles('dist/modules/*/module.json') != ''
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          provenance: mode=max
+          sbom: true
+          build-args: |
+            FLAVOR=full
+          tags: ${{ steps.meta.outputs.tags_full }}
           labels: |
             org.opencontainers.image.version=${{ env.VERSION }}
 
@@ -240,6 +296,18 @@ jobs:
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             --certificate-identity-regexp '^https://github\.com/themulle/autheris/\.github/workflows/docker-publish\.yml@refs/(heads/main|tags/v.+)$'
           echo "Published digest: ${DIGEST}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Sign full image by digest (keyless)
+        if: steps.push-full.outputs.digest != ''
+        env:
+          IMAGE: ghcr.io/${{ github.repository }}-full
+          DIGEST: ${{ steps.push-full.outputs.digest }}
+        run: |
+          cosign sign --yes "${IMAGE,,}@${DIGEST}"
+          cosign verify "${IMAGE,,}@${DIGEST}" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity-regexp '^https://github\.com/themulle/autheris/\.github/workflows/docker-publish\.yml@refs/(heads/main|tags/v.+)$'
+          echo "Published full digest: ${DIGEST}" >> "$GITHUB_STEP_SUMMARY"
 
   pr-container-scan:
     name: Container Scan (pull request)
@@ -337,14 +405,16 @@ jobs:
 
       - name: Start published container with signed Lakehouse module and assert endpoints
         env:
-          IMAGE_REF: ghcr.io/${{ github.repository }}@${{ needs.build-and-push.outputs.image_digest }}
+          IMAGE_REF: ghcr.io/${{ github.repository }}-full@${{ needs.build-and-push.outputs.image_digest_full }}
         run: bash .github/scripts/module-e2e.sh
 
-  # Branch verification of the signed module container e2e: manual dispatch on a non-main ref builds the image locally (no push, no
-  # environment, no tags, no release) and runs the same script as the published-image job.
+  # Branch verification of the signed module container e2e: manual dispatch on a non-main ref builds the full image locally (no push,
+  # no tags, no release) and runs the same script as the published-image job. The job reads the module signing key, so it runs in the
+  # protected module-release environment (required reviewers).
   module-e2e-branch:
     name: Verify Signed Module Container Routes (E2E, branch build)
     if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
+    environment: module-release
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -376,6 +446,7 @@ jobs:
             -p:AutherisIncludeTestAuth=false -p:Version="$VERSION" -o ./dist/publish
           mkdir -p dist/modules
           dotnet build tools/Autheris.ModuleSigner/Autheris.ModuleSigner.csproj -c Release --no-restore
+          dotnet publish tools/Autheris.ModuleSigner/Autheris.ModuleSigner.csproj -c Release --no-restore -o ./dist/tools/module-signer
           dotnet publish modules/Autheris.Modules.Lakehouse/Autheris.Modules.Lakehouse.csproj -c Release --no-restore \
             -p:Version="$VERSION" -o ./dist/modules/lakehouse
           # The module host rejects module files larger than 256 MiB (the macOS/Windows DuckDB natives are large); the image is linux-x64 only.
@@ -385,7 +456,7 @@ jobs:
             --dir ./dist/modules/lakehouse --id lakehouse --version "$VERSION" --host-version "$VERSION"
 
       - name: Build local image
-        run: docker build -f Dockerfile -t autheris:module-e2e .
+        run: docker build -f Dockerfile --build-arg FLAVOR=full -t autheris:module-e2e .
 
       - name: Start container with signed Lakehouse module and assert endpoints
         env:
