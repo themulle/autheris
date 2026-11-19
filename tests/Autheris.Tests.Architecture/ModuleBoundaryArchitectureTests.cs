@@ -194,6 +194,119 @@ public sealed partial class ModuleBoundaryArchitectureTests
         typeof(ModuleLoadResult).GetMethod("ConfigureGraphQL").ShouldBeNull();
     }
 
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Modules_do_not_resolve_tenant_from_http_items()
+    {
+        var root = RepositoryScan.FindRepositoryRoot();
+        var modulesDir = Path.Combine(root, "modules");
+        string[] forbidden = ["SecurityPrincipalContext.ItemKey", "TenantIdItemKey", ".GetTenantId(", ".FindFirst("];
+
+        var violations = new List<string>();
+        foreach (var csFile in Directory.EnumerateFiles(modulesDir, "*.cs", SearchOption.AllDirectories))
+        {
+            var rel = Path.GetRelativePath(root, csFile).Replace('\\', '/');
+            var moduleDir = rel.Split('/')[1];
+            if (moduleDir.EndsWith(".Tests", StringComparison.Ordinal) ||
+                rel.Contains("/bin/", StringComparison.Ordinal) || rel.Contains("/obj/", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var content = File.ReadAllText(csFile);
+            foreach (var token in forbidden)
+            {
+                if (content.Contains(token, StringComparison.Ordinal))
+                {
+                    violations.Add($"{rel} resolves tenant or principal via '{token}'");
+                }
+            }
+        }
+
+        violations.ShouldBeEmpty(
+            "Modules must take tenant and principal from IModuleRequestContext or ICallerContextProvider only:\n" +
+            string.Join("\n", violations));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void No_module_type_implements_module_request_context()
+    {
+        var root = RepositoryScan.FindRepositoryRoot();
+        var violations = new List<string>();
+        foreach (var csFile in Directory.EnumerateFiles(Path.Combine(root, "modules"), "*.cs", SearchOption.AllDirectories))
+        {
+            var rel = Path.GetRelativePath(root, csFile).Replace('\\', '/');
+            if (rel.Contains("/bin/", StringComparison.Ordinal) || rel.Contains("/obj/", StringComparison.Ordinal) ||
+                rel.Split('/')[1].EndsWith(".Tests", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (Regex.IsMatch(File.ReadAllText(csFile), @"class\s+\w+[^{;]*:\s*[^{;]*\bIModuleRequestContext\b"))
+            {
+                violations.Add(rel);
+            }
+        }
+
+        violations.ShouldBeEmpty("No module may implement IModuleRequestContext:\n" + string.Join("\n", violations));
+
+        typeof(ModuleLoader).Assembly.GetTypes()
+            .Where(t => typeof(IModuleRequestContext).IsAssignableFrom(t) && t.IsClass)
+            .Select(t => t.Name)
+            .ShouldBe([nameof(ModuleRequestContext)]);
+    }
+
+    [Fact]
+    public void Module_error_codes_equal_api_error_codes()
+    {
+        var apiCodes = typeof(Autheris.Api.Errors.ApiErrorCodes)
+            .GetFields(BindingFlags.Public | BindingFlags.Static)
+            .Where(f => f.IsLiteral)
+            .ToDictionary(f => f.Name, f => (string?)f.GetRawConstantValue(), StringComparer.Ordinal);
+
+        var moduleCodes = typeof(ModuleErrorCodes)
+            .GetFields(BindingFlags.Public | BindingFlags.Static)
+            .Where(f => f.IsLiteral)
+            .ToList();
+
+        moduleCodes.ShouldNotBeEmpty();
+        foreach (var field in moduleCodes)
+        {
+            apiCodes.ShouldContainKey(field.Name);
+            field.GetRawConstantValue().ShouldBe(apiCodes[field.Name], $"ModuleErrorCodes.{field.Name} drifted from ApiErrorCodes.{field.Name}");
+        }
+    }
+
+    [Fact]
+    public void Module_request_context_registered_without_modules()
+    {
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        var config = new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build();
+
+        Autheris.Api.Extensions.GatewayServiceCollectionExtensions.AddGatewayModules(
+            services,
+            config,
+            new TestHostEnvironment(),
+            new Autheris.Domain.Options.GatewayOptions());
+
+        services.Where(d => d.ServiceType == typeof(IModuleRequestContext))
+            .ShouldHaveSingleItem()
+            .ImplementationType.ShouldBe(typeof(ModuleRequestContext));
+    }
+
+    private sealed class TestHostEnvironment : Microsoft.Extensions.Hosting.IHostEnvironment
+    {
+        public string EnvironmentName { get; set; } = "Production";
+
+        public string ApplicationName { get; set; } = "Autheris.Tests";
+
+        public string ContentRootPath { get; set; } = AppContext.BaseDirectory;
+
+        public Microsoft.Extensions.FileProviders.IFileProvider ContentRootFileProvider { get; set; } =
+            new Microsoft.Extensions.FileProviders.NullFileProvider();
+    }
+
     private static List<string> ExtractProjectReferences(string csprojContent) =>
         ProjectReferenceRegex()
             .Matches(csprojContent)

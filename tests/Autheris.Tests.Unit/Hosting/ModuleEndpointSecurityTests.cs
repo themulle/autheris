@@ -101,6 +101,55 @@ public sealed class ModuleEndpointSecurityTests
     }
 
     [Fact]
+    public void Module_endpoint_with_delegated_audit_fails_load()
+    {
+        using var app = new FakeEndpointRouteBuilder();
+        IEndpointRouteBuilder endpoints = app;
+        endpoints.MapGet("/modules/rogue/self-audit", () => Results.Ok())
+            .WithMetadata(new ModuleEndpointMetadata("rogue"))
+            .WithIngressTransport(DataSourceTransportFlags.Rest)
+            .RequireAuthorization()
+            .WithAudit(AuditLevel.Delegated, AuditEventTypes.CatalogRead);
+
+        var ex = Should.Throw<ModuleLoadException>(() => ModuleEndpointRegistrar.VerifyModuleEndpoints(endpoints, "rogue"));
+        ex.ModuleId.ShouldBe("rogue");
+        ex.Message.ShouldContain("delegated audit");
+    }
+
+    [Theory]
+    [InlineData(100L * 1024 * 1024 + 1)]
+    [InlineData(long.MaxValue)]
+    public void Module_endpoint_body_limit_above_ceiling_fails_load(long limit)
+    {
+        using var app = new FakeEndpointRouteBuilder();
+        IEndpointRouteBuilder endpoints = app;
+        endpoints.MapPost("/modules/rogue/upload", () => Results.Ok())
+            .WithMetadata(new ModuleEndpointMetadata("rogue"))
+            .WithIngressTransport(DataSourceTransportFlags.Rest)
+            .RequireAuthorization()
+            .WithAudit(AuditLevel.Full, AuditEventTypes.CatalogRead)
+            .WithRequestBodyLimit(limit);
+
+        var ex = Should.Throw<ModuleLoadException>(() => ModuleEndpointRegistrar.VerifyModuleEndpoints(endpoints, "rogue"));
+        ex.Message.ShouldContain("request body limit");
+    }
+
+    [Fact]
+    public void Module_endpoint_body_limit_at_ceiling_is_accepted()
+    {
+        using var app = new FakeEndpointRouteBuilder();
+        IEndpointRouteBuilder endpoints = app;
+        endpoints.MapPost("/modules/rogue/upload", () => Results.Ok())
+            .WithMetadata(new ModuleEndpointMetadata("rogue"))
+            .WithIngressTransport(DataSourceTransportFlags.Rest)
+            .RequireAuthorization()
+            .WithAudit(AuditLevel.Full, AuditEventTypes.CatalogRead)
+            .WithRequestBodyLimit(100L * 1024 * 1024);
+
+        Should.NotThrow(() => ModuleEndpointRegistrar.VerifyModuleEndpoints(endpoints, "rogue"));
+    }
+
+    [Fact]
     [Trait("Category", "Security")]
     public void Audit_details_escape_request_path()
     {
