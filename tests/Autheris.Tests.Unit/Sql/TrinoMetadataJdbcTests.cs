@@ -98,8 +98,6 @@ public sealed class TrinoMetadataJdbcTests
         Column(result, "ORDINAL_POSITION").ShouldBe(["1"]);
     }
 
-    [Theory]
-    [Trait("Category", "Security")]
     [InlineData("SELECT * FROM system.jdbc.tables WHERE TABLE_NAME = 'a' OR TABLE_NAME = 'b'")]
     [InlineData("SELECT * FROM system.jdbc.tables WHERE TABLE_NAME IN (SELECT name FROM t)")]
     [InlineData("SELECT * FROM system.jdbc.tables t JOIN system.jdbc.columns c ON 1 = 1")]
@@ -117,6 +115,16 @@ public sealed class TrinoMetadataJdbcTests
     [InlineData("SELECT * FROM system.jdbc.tables WHERE TABLE_NAME LIKE 'a' ESCAPE 'ab'")]
     [InlineData("SELECT * FROM information_schema.tables JOIN sales.dbo.orders ON 1 = 1")]
     [InlineData("SELECT * FROM information_schema.tables WHERE table_name IN (SELECT 1)")]
+    [InlineData("SELECT * FROM \"system\".\"jdbc\".\"tables\"")]
+    [InlineData("SELECT * FROM \"SyStem\".\"JDBC\".\"tables\"")]
+    [InlineData("SELECT * FROM \"information_schema\".\"tables\"")]
+    [InlineData("SELECT * FROM sales.\"Information_Schema\".tables")]
+    [InlineData("SELECT * FROM system/**/.runtime.nodes")]
+    [InlineData("SELECT * FROM system /* x */ . jdbc.tables")]
+    [InlineData("SELECT * FROM `system`.jdbc.tables")]
+    [InlineData("SELECT TABLE_NAME FROM system.jdbc.tables ORDER BY TABLE_TYPE")]
+    [Theory]
+    [Trait("Category", "Security")]
     public async Task SystemJdbc_UnsupportedShape_IsNotSupported_NotForwarded(string sql)
     {
         var rig = new Rig([Orders], [Obj(Orders)]);

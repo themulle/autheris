@@ -60,8 +60,13 @@ internal static class TrinoJdbcMetadataShapes
 
     // Any reference to a system.* or information_schema.* relation, used to refuse (not forward) shapes the handler does not own.
     private static readonly Regex MetadataReferenceRegex = new(
-        @"(?<![A-Za-z0-9_$])(?:system|information_schema)\s*\.",
+        @"(?<![A-Za-z0-9_$])[""`]?(?:system|information_schema)[""`]?\s*\.",
         RegexOptions.IgnoreCase | RegexOptions.Compiled,
+        RegexTimeout);
+
+    private static readonly Regex BlockCommentRegex = new(
+        @"/\*.*?(?:\*/|$)",
+        RegexOptions.Singleline | RegexOptions.Compiled,
         RegexTimeout);
 
     private static readonly Regex MixedShapeRegex = new(
@@ -109,7 +114,8 @@ internal static class TrinoJdbcMetadataShapes
     };
 
     /// <summary>True when the statement references a <c>system.*</c> or <c>information_schema.*</c> relation.</summary>
-    internal static bool ReferencesMetadataRelation(string normalizedSql) => MetadataReferenceRegex.IsMatch(normalizedSql);
+    internal static bool ReferencesMetadataRelation(string normalizedSql) =>
+        MetadataReferenceRegex.IsMatch(BlockCommentRegex.Replace(normalizedSql, " "));
 
     /// <summary>
     /// An <c>information_schema</c> statement that also joins, unions or nests another relation is a mixed statement and
@@ -146,6 +152,7 @@ internal static class TrinoJdbcMetadataShapes
         }
 
         var tokens = Tokenize(rest);
+        var projected = new HashSet<int>(projection);
         var pos = 0;
         var conditions = new List<TrinoJdbcCondition>();
         if (IsKeyword(tokens, pos, "WHERE"))
@@ -182,6 +189,11 @@ internal static class TrinoJdbcMetadataShapes
             while (true)
             {
                 var column = ColumnIndex(ExpectIdentifier(tokens, ref pos), names);
+                if (!projected.Contains(column))
+                {
+                    throw NotSupported();
+                }
+
                 var descending = false;
                 if (IsKeyword(tokens, pos, "DESC"))
                 {

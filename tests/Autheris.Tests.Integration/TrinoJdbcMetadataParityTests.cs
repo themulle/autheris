@@ -25,14 +25,23 @@ public sealed class TrinoJdbcMetadataParityTests : IClassFixture<RowFilterChanne
     [Fact]
     public async Task Security_TrinoJdbcMetadata_ParityWithDiscoveryEndpoint()
     {
-        var discovery = await _fixture.Client().GetAsync("/api/v1/catalog/objects?first=200");
-        discovery.StatusCode.ShouldBe(HttpStatusCode.OK);
-        using var page = JsonDocument.Parse(await discovery.Content.ReadAsStringAsync());
-        var expected = page.RootElement.GetProperty("items").EnumerateArray()
-            .Where(i => !string.Equals(i.GetProperty("kind").GetString(), "procedure", StringComparison.OrdinalIgnoreCase))
-            .Select(i => $"{i.GetProperty("domain").GetString()}.{i.GetProperty("schema").GetString()}.{i.GetProperty("name").GetString()}".ToUpperInvariant())
-            .Order()
-            .ToList();
+        // The endpoint's visible set comes from the Rest discovery surface; page through every cursor.
+        var expected = new List<string>();
+        string? cursor = null;
+        do
+        {
+            var url = "/api/v1/catalog/objects?pageSize=200" + (cursor is null ? string.Empty : "&cursor=" + Uri.EscapeDataString(cursor));
+            var discovery = await _fixture.Client().GetAsync(url);
+            discovery.StatusCode.ShouldBe(HttpStatusCode.OK);
+            using var page = JsonDocument.Parse(await discovery.Content.ReadAsStringAsync());
+            expected.AddRange(page.RootElement.GetProperty("items").EnumerateArray()
+                .Where(i => !string.Equals(i.GetProperty("kind").GetString(), "procedure", StringComparison.OrdinalIgnoreCase))
+                .Select(i => $"{i.GetProperty("domain").GetString()}.{i.GetProperty("schema").GetString()}.{i.GetProperty("name").GetString()}".ToUpperInvariant()));
+            cursor = page.RootElement.TryGetProperty("nextCursor", out var next) && next.ValueKind == JsonValueKind.String ? next.GetString() : null;
+        }
+        while (cursor is not null);
+
+        expected.Sort(StringComparer.Ordinal);
         expected.ShouldNotBeEmpty();
 
         var client = _fixture.Client();

@@ -246,6 +246,17 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
                     }
                     catch { }
                 }
+                var metadataRowLimit = (int)Math.Min(int.MaxValue, (request.RowLimit ?? SqlRowLimit.For(_gatewayOptions?.WebSql ?? new WebSqlOptions())).Effective(null));
+                if (metadataResult.Rows.Count > metadataRowLimit)
+                {
+                    metadataResult = metadataResult with
+                    {
+                        Rows = metadataResult.Rows.Take(metadataRowLimit).ToList(),
+                        RowCount = metadataRowLimit,
+                        Truncated = true
+                    };
+                }
+
                 return metadataResult;
             }
 
