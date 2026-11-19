@@ -60,9 +60,8 @@ public sealed class VirtualFilterResolverBenchmark
         {
             TenantId = Tenant,
             Name = $"profile_{p}",
-            GranteeType = p switch { 0 => GranteeType.User, 1 => GranteeType.Group, _ => GranteeType.Role },
-            GranteeSid = p switch { 0 => User, 1 => Groups.First(), _ => (Sid?)null },
-            RoleName = p >= 2 ? (p == 2 ? "CraneAnalyst" : p == 3 ? "Reader" : "Other") : null,
+            GranteeType = p == 0 ? GranteeType.User : GranteeType.Group,
+            GranteeSid = p == 0 ? User : Groups.First(),
             Scope = "lwetem_prod.*.*",
             Uncovered = UncoveredPolicy.Skip,
             Bindings = filters.Select((f, i) => new FilterBinding
