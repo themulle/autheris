@@ -1,3 +1,4 @@
+#pragma warning disable CA2012 // NSubstitute .Returns(...) configures a ValueTask member; the instance is not consumed here.
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -110,7 +111,7 @@ public class AccessDecisionPointBenchmark : IDisposable
         };
 
         _request = new AccessRequest(subject, metadata, AccessOperation.Read, AccessTransport.GraphQl);
-        _cachedPdp.DecideAsync(_request).GetAwaiter().GetResult();
+        _cachedPdp.DecideAsync(_request).AsTask().GetAwaiter().GetResult();
     }
 
     [GlobalCleanup]

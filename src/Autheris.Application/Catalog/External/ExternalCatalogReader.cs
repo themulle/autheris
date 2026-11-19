@@ -14,6 +14,8 @@ using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Catalog.Services;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.ConsentRequests;
+using Autheris.Application.Governance;
+using Autheris.Application.Governance.Services;
 using Autheris.Application.Governance.Paging;
 using Autheris.Application.Security;
 using Autheris.Application.Tenancy;
@@ -36,7 +38,8 @@ public sealed class ExternalCatalogReader(
     ICatalogChangeStore changeStore,
     IOptions<GatewayOptions> gatewayOptions,
     IDiscoveryArtifactStore? artifactStore = null,
-    TimeProvider? timeProvider = null)
+    TimeProvider? timeProvider = null,
+    IOptions<GovernanceTextOptions>? textOptions = null)
 {
     public const int DefaultPageSize = 50;
     public const int MaxPageSize = 200;
@@ -56,6 +59,7 @@ public sealed class ExternalCatalogReader(
     private readonly GatewayOptions _gatewayOptions = gatewayOptions?.Value ?? throw new ArgumentNullException(nameof(gatewayOptions));
     private readonly IDiscoveryArtifactStore? _artifactStore = artifactStore;
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+    private readonly int _descriptionMaxLength = (textOptions?.Value ?? new GovernanceTextOptions()).ConsentDescriptionMaxLength;
 
     public async Task<ExternalCatalogResult<ExternalCatalogPageDto>> ListObjectsAsync(
         ClaimsPrincipal user,
@@ -109,6 +113,11 @@ public sealed class ExternalCatalogReader(
             .ToList();
 
         var pageItems = filtered.Skip(afterOffset).Take(pageSize).ToList();
+        if (!visibility.IsServicePrincipal)
+        {
+            await AttachRowScopeDescriptionsAsync(pageItems, allTables, user, tenantId, ct).ConfigureAwait(false);
+        }
+
         var nextOffset = afterOffset + pageItems.Count;
         var nextCursor = nextOffset < filtered.Count ? PageCursor.Encode(nextOffset.ToString()) : null;
 
@@ -162,7 +171,9 @@ public sealed class ExternalCatalogReader(
 
         versions.TryGetValue(matchedTable.Identifier.ToString(), out var ver);
         var mapped = MapUserObject(discovered, matchedTable, ver?.Seq, CanViewHiddenColumns(matchedTable, visibility));
-        return ExternalCatalogResult.Ok(mapped);
+        var single = new List<ExternalCatalogObjectDto> { mapped };
+        await AttachRowScopeDescriptionsAsync(single, [matchedTable], user, tenantId, ct).ConfigureAwait(false);
+        return ExternalCatalogResult.Ok(single[0]);
     }
 
     public async Task<ExternalCatalogResult<ExternalCatalogChangesResponseDto>> GetChangesAsync(
@@ -401,6 +412,82 @@ public sealed class ExternalCatalogReader(
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Fills <c>callerState.rowScopeDescription</c> for the granted objects of one response page: the caller's own applicable allow consents
+    /// (the predicate of the access explanation), tenant bound, one consent read and one description load per page. Any failure leaves the
+    /// field <c>null</c> and never hides the object. The text is never logged.
+    /// </summary>
+    private async Task AttachRowScopeDescriptionsAsync(
+        List<ExternalCatalogObjectDto> items,
+        IReadOnlyList<TableMetadata> tables,
+        ClaimsPrincipal user,
+        TenantId tenantId,
+        CancellationToken ct)
+    {
+        var granted = items.Where(static i => i.CallerState is { Access: "granted" }).ToList();
+        var userSid = user.GetUserSid();
+        if (granted.Count == 0 || userSid is null)
+        {
+            return;
+        }
+
+        Dictionary<string, string?> byObject;
+        try
+        {
+            var groupSids = user.GetGroupSids();
+            var roles = user.GetUserRoles();
+            var allUserSids = user.GetAllUserSids();
+            var subjects = (allUserSids.Count > 0 ? allUserSids : [userSid.Value]).Concat(groupSids).Distinct().ToList();
+            var now = _timeProvider.GetUtcNow();
+            var all = (await _consentRepository.GetAllActiveConsentsForSubjectsAsync(subjects, roles, now, tenantId, ct).ConfigureAwait(false))
+                .Where(c => c.TenantId == tenantId)
+                .ToList();
+
+            var tableById = tables.ToDictionary(static t => t.Identifier.ToString(), static t => t.Identifier, StringComparer.OrdinalIgnoreCase);
+            var applicableByObject = new Dictionary<string, List<Consent>>(StringComparer.OrdinalIgnoreCase);
+            var distinct = new Dictionary<Guid, Consent>();
+            foreach (var item in granted)
+            {
+                if (!tableById.TryGetValue(item.ObjectId, out var id))
+                {
+                    continue;
+                }
+
+                var applicable = EffectiveAccessExplanationService.MatchingAllowConsents(all, id, now, userSid.Value, groupSids, roles, allUserSids);
+                applicableByObject[item.ObjectId] = applicable;
+                foreach (var c in applicable)
+                {
+                    distinct[c.Id] = c;
+                }
+            }
+
+            await ConsentDescriptionLoader.LoadAsync(_consentRepository, distinct.Values.ToList(), ct).ConfigureAwait(false);
+            byObject = applicableByObject.ToDictionary(
+                static kv => kv.Key,
+                kv => ConsentDescriptionSelector.SelectOne(kv.Value, _descriptionMaxLength),
+                StringComparer.OrdinalIgnoreCase);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            return;
+        }
+
+        for (var i = 0; i < items.Count; i++)
+        {
+            var item = items[i];
+            if (item.CallerState is { Access: "granted" } state
+                && byObject.TryGetValue(item.ObjectId, out var text)
+                && text is not null)
+            {
+                items[i] = item with { CallerState = state with { RowScopeDescription = text } };
+            }
+        }
     }
 
     private async Task<ExternalCatalogObjectDto> MapSingleAppObjectAsync(
