@@ -1,0 +1,7 @@
+{
+  "ops": [
+    { "op": "dropIndex", "table": "CONSENTS", "name": "ix_consents_tenant_role" },
+    { "op": "dropColumn", "table": "CONSENTS", "name": "role_id" },
+    { "op": "dropColumn", "table": "CONSENTS", "name": "role_name" }
+  ]
+}

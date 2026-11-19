@@ -104,15 +104,13 @@ public sealed class MandatoryRowFilterResolverTests
 
     [Theory]
     [InlineData(GranteeType.Group, true)]
-    [InlineData(GranteeType.Role, true)]
     [InlineData(GranteeType.User, false)]
-    public async Task ProfilesForGroupsAndRoles_ApplyLikeConsents(GranteeType type, bool expected)
+    public async Task ProfilesForGroups_ApplyLikeConsents(GranteeType type, bool expected)
     {
         var profile = Profile(UncoveredPolicy.Deny, new FilterBinding { FilterName = "filter_a" }) with
         {
             GranteeType = type,
-            GranteeSid = type == GranteeType.Role ? (Sid?)null : new Sid("S-1-5-21-GROUP-CRANES"),
-            RoleName = type == GranteeType.Role ? "CraneAnalyst" : null
+            GranteeSid = new Sid("S-1-5-21-GROUP-CRANES")
         };
         var resolver = Resolver(Snapshot([ByClient], profile));
 
@@ -217,13 +215,13 @@ public sealed class MandatoryRowFilterResolverTests
         var userProfile = Profile(UncoveredPolicy.Skip, new FilterBinding { FilterName = "filter_a" });
         var roleProfile = Profile(UncoveredPolicy.Deny, new FilterBinding { FilterName = "filter_b" }) with
         {
-            Name = "analysts", GranteeType = GranteeType.Role, GranteeSid = null, RoleName = "CraneAnalyst"
+            Name = "analysts", GranteeType = GranteeType.Group, GranteeSid = new Sid("S-1-5-21-GROUP-CRANES")
         };
         var resolver = Resolver(Snapshot([ByClient, ByClientAndTs], userProfile, roleProfile));
-        var roles = new HashSet<string> { "CraneAnalyst" };
+        var groups = new HashSet<Sid> { new("S-1-5-21-GROUP-CRANES") };
 
-        (await resolver.ResolveAsync(Query(Table("fms", "air1", "client_id", "ts"), roles: roles))).AppliedFilters.ShouldBe(["filter_a", "filter_b"]);
-        (await resolver.ResolveAsync(Query(Table("dm", "dm1", "client_id"), roles: roles))).IsDenied.ShouldBeTrue();   // role profile: uncovered deny
+        (await resolver.ResolveAsync(Query(Table("fms", "air1", "client_id", "ts"), groups: groups))).AppliedFilters.ShouldBe(["filter_a", "filter_b"]);
+        (await resolver.ResolveAsync(Query(Table("dm", "dm1", "client_id"), groups: groups))).IsDenied.ShouldBeTrue();   // group profile: uncovered deny
     }
 
     [Fact]

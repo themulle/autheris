@@ -132,7 +132,6 @@ public sealed class GrantPolicyTests
 
     [Theory]
     [InlineData(GranteeType.Group)]
-    [InlineData(GranteeType.Role)]
     public void SEC_SC_20_GroupAndRoleGrants_AreStanding_NotLimited(GranteeType type)
     {
         var d = Policy().Evaluate(Req(null, type: type));

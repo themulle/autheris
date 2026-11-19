@@ -28,6 +28,20 @@ public sealed class UnknownGatewayKeyGuardTests
 
     [Theory]
     [Trait("Category", "Security")]
+    [InlineData("true")]
+    [InlineData("false")]
+    [InlineData("")]
+    public void Worm_Enabled_Fails_Startup(string value)
+    {
+        var ex = Should.Throw<InvalidOperationException>(() =>
+            UnknownGatewayKeyGuard.ThrowIfUnknownKeys(Config(("Gateway:Audit:Worm:Enabled", value))));
+
+        ex.Message.ShouldContain("Gateway:Audit:Worm");
+        ex.Message.ShouldContain("Gateway:Audit:Worm was removed");
+    }
+
+    [Theory]
+    [Trait("Category", "Security")]
     [InlineData("Development")]
     [InlineData("Production")]
     [InlineData("Staging")]

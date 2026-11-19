@@ -129,7 +129,16 @@ public sealed class DiscoveryWriteStateTests
             httpContextAccessor: CreateHttpAccessor(callerPrincipal));
         gqlObj.ShouldNotBeNull();
         AssertWriteState(gqlObj!.Write, ordersObj.Write!);
-        gqlObj.Columns.Single(c => string.Equals(c.Name, "audit_key", StringComparison.Ordinal)).WriteProtected.ShouldBeTrue();
+        // A column the caller cannot read is not named on GraphQL, write-protected or not; a readable one keeps the flag.
+        var gqlProtected = gqlObj.Columns.SingleOrDefault(c => string.Equals(c.Name, "audit_key", StringComparison.Ordinal));
+        if (protectedCol.State == DiscoveryColumnState.NoAccess)
+        {
+            gqlProtected.ShouldBeNull();
+        }
+        else
+        {
+            gqlProtected!.WriteProtected.ShouldBeTrue();
+        }
 
         // Policy-dependency table cannot carry write grants -> !Requestable & all false
         var depObj = await discovery.GetAsync(policyDep.Identifier, caller);

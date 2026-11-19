@@ -31,7 +31,6 @@ public static class GatewaySections
     public const string Hosting = "Gateway:Hosting";
     public const string Audit = "Gateway:Audit";
     public const string AuditRetention = "Gateway:Audit:Retention";
-    public const string AuditWorm = "Gateway:Audit:Worm";
     public const string Logging = "Gateway:Logging";
     public const string Insecure = "Gateway:Insecure";
     public const string Dev = "Gateway:Dev";

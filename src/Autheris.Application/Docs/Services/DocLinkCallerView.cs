@@ -75,7 +75,7 @@ public sealed class DocLinkCallerView : IDocLinkCallerView
         if (obj is null || obj.IsHidden || obj.Kind == DiscoveryObjectKind.Procedure) return null;
         if (target.Kind != DocLinkTargetKind.Column) return (id, null);
         var column = obj.Columns.FirstOrDefault(c => string.Equals(c.Name, target.Column, StringComparison.OrdinalIgnoreCase));
-        return column is null || column.State == DiscoveryColumnState.NoAccess ? null : (id, column.Name);
+        return column is null || !DiscoveryColumnVisibility.IsVisible(column.State) ? null : (id, column.Name);
     }
 
     /// <summary>Any failure (rate limit, repository error) means "not discoverable": the caller then sees nothing.</summary>

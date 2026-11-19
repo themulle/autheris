@@ -113,7 +113,6 @@ public sealed class AuthzMigrationTests
         Step0011(engine).ShouldContain("OD32_PROFILE_ASSIGNMENT_REQUIRES_APPROVAL");
 
         var repo = Substitute.For<IAccessProfileRepository>();
-        repo.GetRevokedRoleConsentsAsync(Arg.Any<CancellationToken>()).Returns([new RevokedRoleConsent("c1", Tenant, "analysts", "t1", "ADR020_ROLE_GRANTEE_UNSUPPORTED")]);
         repo.GetDeactivatedAssignmentsAsync(Arg.Any<CancellationToken>())
             .Returns([new DeactivatedProfileAssignment(Tenant, "p1", Grantee, "User", "OD32_PROFILE_ASSIGNMENT_REQUIRES_APPROVAL")]);
 
@@ -122,7 +121,6 @@ public sealed class AuthzMigrationTests
         var ok = result.ShouldBeAssignableTo<IValueHttpResult>()!;
         var json = System.Text.Json.JsonSerializer.Serialize(ok.Value);
         json.ShouldContain("OD32_PROFILE_ASSIGNMENT_REQUIRES_APPROVAL");
-        json.ShouldContain("analysts");
     }
 
     [Theory]
@@ -137,7 +135,6 @@ public sealed class AuthzMigrationTests
         var result = await AuthzMigrationReportEndpoints.GetAsync(Context(role), repo, CancellationToken.None);
 
         ((IStatusCodeHttpResult)result).StatusCode.ShouldBe(StatusCodes.Status403Forbidden);
-        await repo.DidNotReceiveWithAnyArgs().GetRevokedRoleConsentsAsync(default);
         await repo.DidNotReceiveWithAnyArgs().GetDeactivatedAssignmentsAsync(default);
     }
 

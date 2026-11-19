@@ -49,7 +49,7 @@ public sealed class ConsentDecisionResolverTests : IDisposable
             TableIdentifier = table.Value,
             RequesterSid = new Sid(sid),
             RequestedGranteeType = grantee,
-            RequestedGranteeRef = grantee == GranteeType.Role ? "Analysts" : sid,
+            RequestedGranteeRef = sid,
             BusinessJustification = "WP-0 test",
             RequestedValidTo = DateTimeOffset.UtcNow.AddDays(validDays)
         });

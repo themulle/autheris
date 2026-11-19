@@ -46,6 +46,21 @@ public class ClientListMutationTests
         Assert.Equal(2, ListSlots(compiled, "e").Count);
     }
 
+    [Theory]
+    [MemberData(nameof(ClientListHarness.DialectData), MemberType = typeof(ClientListHarness))]
+    public void ListParameterNamedP0_ExpandsToFreshOrdinalSlots(TargetSqlDialect dialect)
+    {
+        var compiled = _h.Compile(dialect, "SELECT id FROM orders WHERE id IN (__param_p0)", Shapes(("p0", 3)));
+
+        var slots = ListSlots(compiled, "p0");
+        Assert.Equal(3, slots.Count);
+        Assert.All(slots, s => Assert.Null(s.Value));
+        Assert.Equal(compiled.Parameters.Length, compiled.Parameters.Select(p => p.Ordinal).Distinct().Count());
+        Assert.Equal(compiled.Parameters.Length, compiled.Parameters.Select(p => p.Marker).Distinct().Count());
+        Assert.Contains(compiled.Parameters, p => p.Origin == ParameterOrigin.Tenant);
+        Assert.DoesNotContain(compiled.Parameters, p => p.Origin != ParameterOrigin.ClientNamed && p.SourceName == "p0");
+    }
+
     // M-2
     [Fact]
     public void Mutation_ExpanderAfterSecurityVisitor_FailsM1()

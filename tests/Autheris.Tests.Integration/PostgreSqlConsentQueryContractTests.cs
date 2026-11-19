@@ -101,7 +101,6 @@ public sealed class PostgreSqlConsentQueryContractTests : ConsentQueryContractTe
     [Theory]
     [InlineData("ix_consents_tenant_table")]
     [InlineData("ix_consents_tenant_grantee")]
-    [InlineData("ix_consents_tenant_role")]
     [InlineData("ix_consent_column_rules_consent")]
     [InlineData("ix_consent_row_filters_consent")]
     [InlineData("ix_table_owners_owner")]

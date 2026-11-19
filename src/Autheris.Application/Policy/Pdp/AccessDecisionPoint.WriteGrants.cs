@@ -537,7 +537,6 @@ public sealed partial class AccessDecisionPoint
             }
         }
 
-        var userRoles = principal.GetUserRoles();
         var matchingAllows = new List<Consent>();
         var denyRowFilters = new List<Consent>();
         var allMatchingDenies = new List<Consent>();
@@ -553,7 +552,7 @@ public sealed partial class AccessDecisionPoint
                 }
             }
             else if (consent.Effect == ConsentEffect.Deny
-                && GranteeMatcher.MatchesRestriction(consent.GranteeType, consent.GranteeSid, consent.RoleName, consent.RoleId, subject.UserSid, groupSids, userRoles, allUserSids))
+                && GranteeMatcher.MatchesRestriction(consent.GranteeType, consent.GranteeSid, subject.UserSid, groupSids, allUserSids))
             {
                 allMatchingDenies.Add(consent);
                 if (consent.ColumnRules.Count == 0 && consent.RowFilters.Count == 0 && consent.WriteRules.Count == 0)

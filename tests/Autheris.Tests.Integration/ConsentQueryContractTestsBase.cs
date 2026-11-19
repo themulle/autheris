@@ -13,7 +13,7 @@ using Xunit;
 
 /// <summary>
 /// WP-SC-01 / SEC-SC-01 on a real engine: the indexed consent query returns exactly the former in-memory filter result
-/// (case-insensitive SIDs, role and alias consents, validity, revocation, tenant). Every test seeds its own table, so tests do not interfere.
+/// (case-insensitive SIDs, alias consents, validity, revocation, tenant). Every test seeds its own table, so tests do not interfere.
 /// </summary>
 public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
 {
@@ -70,13 +70,13 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
         var consents = new List<Consent>();
         var revoked = new HashSet<Guid>();
 
-        async Task Add(Guid tid, TableIdentifier id, TenantId tenant, GranteeType type, string? sid, string? role,
+        async Task Add(Guid tid, TableIdentifier id, TenantId tenant, GranteeType type, string? sid,
             ConsentEffect effect, int fromDays, int toDays, bool revoke = false)
         {
             var c = await Repo.CreateConsentAsync(new Consent
             {
                 TableId = tid, TableIdentifier = id, TenantId = tenant, GranteeType = type,
-                GranteeSid = sid == null ? (Sid?)null : new Sid(sid), RoleName = role, Effect = effect,
+                GranteeSid = sid == null ? (Sid?)null : new Sid(sid), Effect = effect,
                 ValidFrom = now.AddDays(fromDays), ValidTo = now.AddDays(toDays)
             });
             if (revoke)
@@ -88,18 +88,16 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
             consents.Add(c);
         }
 
-        await Add(tableId, table, TenantA, GranteeType.User, "S-1-5-21-Alice", null, ConsentEffect.Allow, -1, 10);
-        await Add(tableId, table, TenantA, GranteeType.User, "s-1-5-21-bob", null, ConsentEffect.Allow, -1, 10);
-        await Add(tableId, table, TenantA, GranteeType.Group, "S-1-5-21-GROUP-1", null, ConsentEffect.Allow, -1, 10);
-        await Add(tableId, table, TenantA, GranteeType.User, "alias:alice@corp", null, ConsentEffect.Allow, -1, 10);
-        await Add(tableId, table, TenantA, GranteeType.Role, null, "analyst", ConsentEffect.Deny, -1, 10);
-        await Add(tableId, table, TenantA, GranteeType.User, "S-1-5-21-Alice", null, ConsentEffect.Deny, 2, 10);
-        await Add(tableId, table, TenantA, GranteeType.User, "S-1-5-21-Alice", null, ConsentEffect.Allow, 2, 10);
-        await Add(tableId, table, TenantA, GranteeType.User, "S-1-5-21-Alice", null, ConsentEffect.Allow, -10, -1);
-        await Add(tableId, table, TenantA, GranteeType.User, "S-1-5-21-Carol", null, ConsentEffect.Allow, -1, 10, revoke: true);
-        await Add(tableId, table, TenantB, GranteeType.User, "S-1-5-21-Alice", null, ConsentEffect.Allow, -1, 10);
-        await Add(tableId, table, TenantB, GranteeType.Role, null, "analyst", ConsentEffect.Deny, -1, 10);
-        await Add(otherId, other, TenantA, GranteeType.User, "S-1-5-21-Alice", null, ConsentEffect.Allow, -1, 10);
+        await Add(tableId, table, TenantA, GranteeType.User, "S-1-5-21-Alice", ConsentEffect.Allow, -1, 10);
+        await Add(tableId, table, TenantA, GranteeType.User, "s-1-5-21-bob", ConsentEffect.Allow, -1, 10);
+        await Add(tableId, table, TenantA, GranteeType.Group, "S-1-5-21-GROUP-1", ConsentEffect.Allow, -1, 10);
+        await Add(tableId, table, TenantA, GranteeType.User, "alias:alice@corp", ConsentEffect.Allow, -1, 10);
+        await Add(tableId, table, TenantA, GranteeType.User, "S-1-5-21-Alice", ConsentEffect.Deny, 2, 10);
+        await Add(tableId, table, TenantA, GranteeType.User, "S-1-5-21-Alice", ConsentEffect.Allow, 2, 10);
+        await Add(tableId, table, TenantA, GranteeType.User, "S-1-5-21-Alice", ConsentEffect.Allow, -10, -1);
+        await Add(tableId, table, TenantA, GranteeType.User, "S-1-5-21-Carol", ConsentEffect.Allow, -1, 10, revoke: true);
+        await Add(tableId, table, TenantB, GranteeType.User, "S-1-5-21-Alice", ConsentEffect.Allow, -1, 10);
+        await Add(otherId, other, TenantA, GranteeType.User, "S-1-5-21-Alice", ConsentEffect.Allow, -1, 10);
         return new Seed(now, table, other, tableId, consents, revoked);
     }
 
@@ -109,7 +107,7 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
         return seed.Consents
             .Where(c => !seed.Revoked.Contains(c.Id) && c.TableId == seed.TableId && (tenant == null || c.TenantId == tenant))
             .Where(c => seed.Now < c.ValidTo && !(seed.Now < c.ValidFrom && c.Effect != ConsentEffect.Deny))
-            .Where(c => c.GranteeType == GranteeType.Role || (c.GranteeSid != null && set.Contains(c.GranteeSid.Value.Value)))
+            .Where(c => c.GranteeSid != null && set.Contains(c.GranteeSid.Value.Value))
             .Select(c => c.Id).ToHashSet();
     }
 
@@ -156,19 +154,6 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
     }
 
     [Fact]
-    public async Task SEC_SC_01_RoleConsentIsReturnedWithoutSubjectMatch_ButNeverAcrossTenants()
-    {
-        if (!Available) return;
-        var seed = await SeedAsync();
-
-        var result = await Repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-Nobody")], seed.Table, seed.Now, TenantA);
-
-        result.Count.ShouldBe(1);
-        result[0].GranteeType.ShouldBe(GranteeType.Role);
-        result[0].TenantId.ShouldBe(TenantA);
-    }
-
-    [Fact]
     public async Task SEC_SC_01_ThousandsOfSubjects_AreChunkedAndStillExact()
     {
         if (!Available) return;
@@ -181,42 +166,13 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
         result.Select(c => c.Id).Distinct().Count().ShouldBe(result.Count);
     }
 
-    [Theory]
-    [InlineData("analyst", 1)]
-    [InlineData("ANALYST", 1)]
-    [InlineData("other", 0)]
-    public async Task SEC_SC_01_AllQuery_FiltersRolesCaseInsensitive_AndByTenant(string role, int expectedRoleConsents)
-    {
-        if (!Available) return;
-        var seed = await SeedAsync();
+    // ---- WP-SC-02 / SEC-SC-03: atomic replace ----
 
-        var result = await Repo.GetAllActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-Alice")], [role], seed.Now, TenantA);
-
-        result.Where(c => c.TableId == seed.TableId && c.GranteeType == GranteeType.Role).Count().ShouldBe(expectedRoleConsents);
-        result.ShouldAllBe(c => c.TenantId == TenantA);
-        result.ShouldNotContain(c => c.ValidTo <= seed.Now || c.ValidFrom > seed.Now);
-        result.ShouldContain(c => c.TableId == seed.TableId && c.GranteeType == GranteeType.User);
-    }
-
-    [Fact]
-    public async Task SEC_SC_01_AllQuery_WithoutSubjects_StillReturnsMatchingRoleConsents()
-    {
-        if (!Available) return;
-        var seed = await SeedAsync();
-
-        var result = await Repo.GetAllActiveConsentsForSubjectsAsync([], ["analyst"], seed.Now, TenantA);
-
-        result.ShouldContain(c => c.TableId == seed.TableId && c.GranteeType == GranteeType.Role);
-        result.ShouldNotContain(c => c.GranteeType != GranteeType.Role);
-    }
-
-    // ---- WP-SC-02 / SEC-SC-03: role lookup and atomic replace ----
-
-    private static Consent NewConsent(Seed seed, GranteeType type, string? sid, string? role, TenantId tenant,
+    private static Consent NewConsent(Seed seed, GranteeType type, string? sid, TenantId tenant,
         ConsentEffect effect = ConsentEffect.Allow, int fromDays = -1, double toDays = 30) => new()
     {
         TableId = seed.TableId, TableIdentifier = seed.Table, TenantId = tenant, GranteeType = type, Effect = effect,
-        GranteeSid = sid == null ? (Sid?)null : new Sid(sid), RoleName = role,
+        GranteeSid = sid == null ? (Sid?)null : new Sid(sid),
         ValidFrom = seed.Now.AddDays(fromDays), ValidTo = seed.Now.AddDays(toDays), CreatedBySid = new Sid("SYSTEM")
     };
 
@@ -227,20 +183,6 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
     };
 
     [Fact]
-    public async Task SEC_SC_03_GetActiveRoleConsents_MatchesRoleTenantAndTableOnly()
-    {
-        if (!Available) return;
-        var seed = await SeedAsync();
-        var expected = seed.Consents.Where(c => c.GranteeType == GranteeType.Role && c.TenantId == TenantA).Select(c => c.Id).ToList();
-
-        var result = await Repo.GetActiveRoleConsentsAsync(seed.Table, "ANALYST", TenantA, seed.Now);
-
-        result.Select(c => c.Id).ShouldBe(expected, ignoreOrder: true);
-        (await Repo.GetActiveRoleConsentsAsync(seed.Table, "nobody", TenantA, seed.Now)).ShouldBeEmpty();
-        (await Repo.GetActiveRoleConsentsAsync(seed.Other, "analyst", TenantA, seed.Now)).ShouldBeEmpty();
-    }
-
-    [Fact]
     public async Task SEC_SC_03_Replace_IsAtomic_AndBumpsTheEpochOnce()
     {
         if (!Available) return;
@@ -249,10 +191,10 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
         var old = seed.Consents.First(c => c.TenantId == TenantA && c.GranteeSid?.Value == "S-1-5-21-Alice" && c.Effect == ConsentEffect.Allow && c.ValidFrom < seed.Now && c.ValidTo > seed.Now);
         var before = await Repo.GetTableEpochAsync(seed.Table);
 
-        await Repo.ReplaceConsentsAsync([old.Id], [NewConsent(seed, GranteeType.User, "S-1-5-21-Dave", null, TenantA), NewConsent(seed, GranteeType.User, "S-1-5-21-Erin", null, TenantA)], alice, "apply", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null));
+        await Repo.ReplaceConsentsAsync([old.Id], [NewConsent(seed, GranteeType.User, "S-1-5-21-Dave", TenantA), NewConsent(seed, GranteeType.User, "S-1-5-21-Erin", TenantA)], alice, "apply", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null));
 
         (await Repo.GetConsentByIdAsync(old.Id))!.IsRevoked.ShouldBeTrue();
-        (await Repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-Dave"), new Sid("S-1-5-21-Erin")], seed.Table, seed.Now, TenantA)).Count(c => c.GranteeType != GranteeType.Role).ShouldBe(2);
+        (await Repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-Dave"), new Sid("S-1-5-21-Erin")], seed.Table, seed.Now, TenantA)).Count.ShouldBe(2);
         (await Repo.GetTableEpochAsync(seed.Table)).ShouldBe(before + 1);
     }
 
@@ -304,7 +246,7 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
 
         (await Repo.GetConsentByIdAsync(old.Id))!.IsRevoked.ShouldBeFalse();
         (await Repo.GetTableEpochAsync(seed.Table)).ShouldBe(before);
-        (await Repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-Frank")], seed.Table, seed.Now, TenantA)).ShouldNotContain(c => c.GranteeType != GranteeType.Role);
+        (await Repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-Frank")], seed.Table, seed.Now, TenantA)).ShouldBeEmpty();
     }
 
     [Fact]
@@ -316,12 +258,12 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
         var none = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null);
 
         await Should.ThrowAsync<Autheris.Domain.Exceptions.ConsentRevocationForbiddenException>(() =>
-            Repo.ReplaceConsentsAsync([old.Id], [NewConsent(seed, GranteeType.User, "S-1-5-21-Gina", null, TenantA)], new Sid("S-1-5-21-STRANGER"), "x", none));
+            Repo.ReplaceConsentsAsync([old.Id], [NewConsent(seed, GranteeType.User, "S-1-5-21-Gina", TenantA)], new Sid("S-1-5-21-STRANGER"), "x", none));
         await Should.ThrowAsync<KeyNotFoundException>(() =>
-            Repo.ReplaceConsentsAsync([Guid.NewGuid()], [NewConsent(seed, GranteeType.User, "S-1-5-21-Gina", null, TenantA)], new Sid("S-1-5-21-Alice"), "x", none));
+            Repo.ReplaceConsentsAsync([Guid.NewGuid()], [NewConsent(seed, GranteeType.User, "S-1-5-21-Gina", TenantA)], new Sid("S-1-5-21-Alice"), "x", none));
 
         (await Repo.GetConsentByIdAsync(old.Id))!.IsRevoked.ShouldBeFalse();
-        (await Repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-Gina")], seed.Table, seed.Now, TenantA)).ShouldNotContain(c => c.GranteeType != GranteeType.Role);
+        (await Repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-Gina")], seed.Table, seed.Now, TenantA)).ShouldBeEmpty();
     }
 
     [Fact]
@@ -334,8 +276,8 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
             if (!Available) return;
             var seed = await SeedAsync();
             var sid = new Sid("S-1-5-21-Legacy");
-            var deny = await Repo.CreateConsentAsync(NewConsent(seed, GranteeType.User, sid.Value, null, TenantA, ConsentEffect.Deny, -400, 365 * 50));
-            var allow = await Repo.CreateConsentAsync(NewConsent(seed, GranteeType.User, sid.Value, null, TenantA, ConsentEffect.Allow, -400, 365 * 50));
+            var deny = await Repo.CreateConsentAsync(NewConsent(seed, GranteeType.User, sid.Value, TenantA, ConsentEffect.Deny, -400, 365 * 50));
+            var allow = await Repo.CreateConsentAsync(NewConsent(seed, GranteeType.User, sid.Value, TenantA, ConsentEffect.Allow, -400, 365 * 50));
 
             var active = await Repo.GetActiveConsentsForSubjectsAsync([sid], seed.Table, seed.Now, TenantA);
 
@@ -353,8 +295,8 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
         // PERS-04: an expired consent is never returned (and never re-ticketed), on every provider.
         if (!Available) return;
         var seed = await SeedAsync();
-        var expired = await Repo.CreateConsentAsync(NewConsent(seed, GranteeType.User, "S-1-5-21-ExpA", null, TenantA, ConsentEffect.Allow, -200, -1));
-        var expiring = await Repo.CreateConsentAsync(NewConsent(seed, GranteeType.User, "S-1-5-21-ExpB", null, TenantA, ConsentEffect.Allow, -20, 5));
+        var expired = await Repo.CreateConsentAsync(NewConsent(seed, GranteeType.User, "S-1-5-21-ExpA", TenantA, ConsentEffect.Allow, -200, -1));
+        var expiring = await Repo.CreateConsentAsync(NewConsent(seed, GranteeType.User, "S-1-5-21-ExpB", TenantA, ConsentEffect.Allow, -20, 5));
 
         var result = await Repo.GetExpiringConsentsAsync(seed.Now.AddDays(30));
 
@@ -367,9 +309,9 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
     {
         if (!Available) return;
         var seed = await SeedAsync();
-        await Repo.CreateConsentAsync(NewConsent(seed, GranteeType.User, "S-1-5-21-Lim1", null, TenantA, ConsentEffect.Allow, -20, 3));
-        await Repo.CreateConsentAsync(NewConsent(seed, GranteeType.User, "S-1-5-21-Lim2", null, TenantA, ConsentEffect.Allow, -20, 4));
-        await Repo.CreateConsentAsync(NewConsent(seed, GranteeType.User, "S-1-5-21-Lim3", null, TenantA, ConsentEffect.Allow, -20, 5));
+        await Repo.CreateConsentAsync(NewConsent(seed, GranteeType.User, "S-1-5-21-Lim1", TenantA, ConsentEffect.Allow, -20, 3));
+        await Repo.CreateConsentAsync(NewConsent(seed, GranteeType.User, "S-1-5-21-Lim2", TenantA, ConsentEffect.Allow, -20, 4));
+        await Repo.CreateConsentAsync(NewConsent(seed, GranteeType.User, "S-1-5-21-Lim3", TenantA, ConsentEffect.Allow, -20, 5));
 
         var result = await Repo.GetExpiringConsentsAsync(seed.Now.AddDays(30), maxResults: 2);
 
@@ -399,7 +341,7 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
         seen.ShouldBe(expected, ignoreOrder: true);
         (await Repo.GetConsentPageAsync(query with { PageSize = 500, IncludeInactive = false, Grantee = "s-1-5-21-alice" }))
             .Items.ShouldAllBe(c => c.GranteeSid != null && c.GranteeSid.Value.Value.Equals("S-1-5-21-Alice", StringComparison.OrdinalIgnoreCase));
-        (await Repo.GetConsentPageAsync(query with { GranteeType = GranteeType.Role, PageSize = 500 })).Items.ShouldAllBe(c => c.GranteeType == GranteeType.Role);
+        (await Repo.GetConsentPageAsync(query with { GranteeType = GranteeType.Group, PageSize = 500 })).Items.ShouldAllBe(c => c.GranteeType == GranteeType.Group);
         await Should.ThrowAsync<ArgumentException>(() => Repo.GetConsentPageAsync(new Autheris.Application.Governance.Paging.ConsentPageQuery(default)));
     }
 }

@@ -280,7 +280,6 @@ public sealed partial class Mutation
             Effect = consent.Effect.ToString(),
             GranteeType = consent.GranteeType.ToString(),
             GranteeSid = consent.GranteeSid?.Value,
-            RoleName = consent.RoleName,
             ValidFrom = consent.ValidFrom,
             ValidTo = consent.ValidTo,
             Columns = consent.ColumnRules.Select(cr => cr.ColumnName).ToList(),

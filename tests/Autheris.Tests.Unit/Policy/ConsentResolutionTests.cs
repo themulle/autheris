@@ -18,8 +18,7 @@ public class ConsentResolutionTests
     private Consent CreateBaseConsent(
         ConsentEffect effect,
         GranteeType granteeType,
-        Sid? granteeSid = null,
-        string? roleName = null)
+        Sid? granteeSid = null)
     {
         return new Consent
         {
@@ -28,7 +27,6 @@ public class ConsentResolutionTests
             Effect = effect,
             GranteeType = granteeType,
             GranteeSid = granteeSid,
-            RoleName = roleName,
             ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
             ValidTo = DateTimeOffset.UtcNow.AddDays(30),
             IsRevoked = false
@@ -119,9 +117,9 @@ public class ConsentResolutionTests
     }
 
     [Fact]
-    public void ResolveAccess_GroupHasMask_UserHasAllow_RoleHasHardDenyOnColumn_YieldsDeny()
+    public void ResolveAccess_GroupHasMask_UserHasAllow_SecondGroupHasHardDenyOnColumn_YieldsDeny()
     {
-        // Rule: Group has salary = MASK, User has direct ALLOW, Role has hard DENY on salary -> salary is DENY
+        // Rule: Group has salary = MASK, User has direct ALLOW, a second group has a hard DENY on salary -> salary is DENY
         var groupAllow = new Consent
         {
             TenantId = Autheris.Tests.Common.TestTenants.Default,
@@ -144,8 +142,8 @@ public class ConsentResolutionTests
             TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableIdentifier = _testTable,
             Effect = ConsentEffect.Deny,
-            GranteeType = GranteeType.Role,
-            RoleName = _roleAnalyst,
+            GranteeType = GranteeType.Group,
+            GranteeSid = new Sid(_roleAnalyst),
             ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
             ValidTo = DateTimeOffset.UtcNow.AddDays(30),
             ColumnRules = new[]
@@ -156,7 +154,7 @@ public class ConsentResolutionTests
 
         var decision = _service.ResolveAccess(
             _userSid,
-            new HashSet<Sid> { _groupFinance },
+            new HashSet<Sid> { _groupFinance, new Sid(_roleAnalyst) },
             new HashSet<string> { _roleAnalyst },
             _testTable,
             new[] { groupAllow, userAllow, roleDeny }

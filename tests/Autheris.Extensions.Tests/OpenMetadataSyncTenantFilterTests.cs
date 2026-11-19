@@ -140,8 +140,8 @@ public sealed class OpenMetadataSyncTenantFilterTests
         {
             Id = Guid.NewGuid(),
             TableIdentifier = new TableIdentifier("svc_b", "dbo", "invoices"),
-            GranteeType = GranteeType.Role,
-            RoleName = "ReaderRole",
+            GranteeType = GranteeType.Group,
+            GranteeSid = new Sid("ReaderRole"),
             Effect = ConsentEffect.Allow,
             TenantId = TenantB,
             ConsentRequestId = OpenMetadataSyncService.OpenMetadataSyncConsentMarker,

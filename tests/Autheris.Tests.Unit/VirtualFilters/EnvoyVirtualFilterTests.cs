@@ -54,10 +54,10 @@ public sealed class EnvoyVirtualFilterTests
     }
 
     [Fact]
-    public async Task RoleProfiles_CannotBeCheckedHere_AndDeny()
+    public async Task UnsupportedGranteeTypeProfiles_CannotBeCheckedHere_AndDeny()
     {
-        var roleProfile = DavidProfile() with { GranteeType = GranteeType.Role, GranteeSid = null, RoleName = "CraneAnalyst" };
+        var unsupported = DavidProfile() with { GranteeType = (GranteeType)3, GranteeSid = null };
 
-        (await CheckAsync(Service(roleProfile), "S-1-5-21-OTHER")).HttpResponse.DeniedResponse.ShouldNotBeNull();
+        (await CheckAsync(Service(unsupported), "S-1-5-21-OTHER")).HttpResponse.DeniedResponse.ShouldNotBeNull();
     }
 }

@@ -8,7 +8,7 @@ using Autheris.Domain.Security;
 
 /// <summary>
 /// The single ordering and selection rule for the owner-authored consent description a caller sees on an object:
-/// most specific grantee first (user or service principal, then group, then role), then the earliest expiry, then the id.
+/// most specific grantee first (user or service principal, then group), then the earliest expiry, then the id.
 /// MCP and REST share it so they cannot drift. Output only through <see cref="ConsentDescriptionText.ForOutput"/>.
 /// </summary>
 internal static class ConsentDescriptionSelector
@@ -17,8 +17,7 @@ internal static class ConsentDescriptionSelector
     {
         GranteeType.User or GranteeType.ServicePrincipal => 0,
         GranteeType.Group => 1,
-        GranteeType.Role => 2,
-        _ => 3
+        _ => 2
     };
 
     internal static IEnumerable<Consent> Order(IEnumerable<Consent> applicableConsents) =>

@@ -130,17 +130,6 @@ public sealed class ExternalCatalogRowScopeDescriptionTests
         harness.Consents.Consents.Add(Grant(table, "user late", validFor: TimeSpan.FromDays(20), id: highId));
         harness.Consents.Consents.Add(Grant(table, "user late low id", validFor: TimeSpan.FromDays(20), id: lowId));
         harness.Consents.Consents.Add(Grant(table, "user earliest", validFor: TimeSpan.FromDays(10)));
-        harness.Consents.Consents.Add(new Consent
-        {
-            TableIdentifier = table.Identifier,
-            Effect = ConsentEffect.Allow,
-            GranteeType = GranteeType.Role,
-            RoleName = "Analyst",
-            TenantId = TenantA,
-            ValidFrom = ExternalCatalogTestHarness.FixedNow.AddDays(-1),
-            ValidTo = ExternalCatalogTestHarness.FixedNow.AddDays(2),
-            Description = "role text"
-        });
 
         Description(await GetCallerStateAsync(harness, table, User(inGroup: true))).ShouldBe("user earliest");
 
