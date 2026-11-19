@@ -62,6 +62,17 @@ public sealed class TableCacheQueryRouter : ITableCacheQueryRouter
         ValidateIdentifier(table.Schema);
         ValidateIdentifier(table.TableName);
 
+        // A product object has no source behind it: it is routed by the product result router only (never to a base table).
+        if (Autheris.Application.Products.ProductSource.IsProductSource(table.Domain))
+        {
+            return ValueTask.FromResult(new TableCacheRoutingDecision(
+                IsCached: false,
+                CanSatisfyFully: false,
+                InternalStorageTarget: null,
+                Metadata: null,
+                FallbackReason: "A product object is served by the product result router only."));
+        }
+
         if (!_catalog.TryGet(table, out var metadata) || metadata is null)
         {
             return ValueTask.FromResult(new TableCacheRoutingDecision(

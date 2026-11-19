@@ -9,7 +9,7 @@ using Autheris.Domain.Common;
 
 /// <summary>
 /// Database operations for <c>CONSUMER_APP_QUERYNAME_DAILY</c>.
-/// Dialect-compatible with SQLite, PostgreSQL, and SQL Server. Issue #286: the table is created by the
+/// Dialect-compatible with PostgreSQL and SQL Server. Issue #286: the table is created by the
 /// governance baseline migrations; this store never runs DDL.
 /// </summary>
 internal static class ConsumerAggregationStore

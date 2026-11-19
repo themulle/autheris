@@ -14,6 +14,9 @@ public sealed record ProcedureSecurityContext(string TenantId, string UserSid, s
 /// </summary>
 public sealed record RawProcedureResult(IReadOnlyList<string> Columns, IReadOnlyList<object?[]> Rows, bool MoreRowsAvailable);
 
+/// <summary>Outcome of a write procedure call: the affected-row count the driver reported (null when it reports none), never a value.</summary>
+public sealed record ProcedureWriteOutcome(long? RowsAffected);
+
 /// <summary>F-SQL-02: Executes a validated procedure call on the database (database specific).</summary>
 public interface IProcedureInvoker
 {
@@ -27,4 +30,14 @@ public interface IProcedureInvoker
         ProcedureSecurityContext security,
         int rowBudget,
         CancellationToken ct);
+
+    /// <summary>
+    /// Calls a write procedure with typed parameters only and no result set. Autheris adds no read-only flag and no connection restriction;
+    /// the database rights of the configured connection are the only technical limit. An invoker without write support refuses (fail closed).
+    /// </summary>
+    Task<ProcedureWriteOutcome> ExecuteWriteAsync(
+        ProcedureDefinition definition,
+        IReadOnlyDictionary<string, object?> clientValues,
+        ProcedureSecurityContext security,
+        CancellationToken ct) => throw new System.NotSupportedException("This procedure invoker does not execute write procedures.");
 }

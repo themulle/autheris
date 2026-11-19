@@ -46,6 +46,14 @@ public static class DataSourceAllowlistGuard
         bool globalRestricted = webSqlOptions.AllowedDataSources is { Count: > 0 } ||
                                 webSqlOptions.DataSourceMappings is { Count: > 0 };
         resolved = dataSourceName;
+
+        // the reserved product source is no configured data source: a product object is read from its cached result, decided by the
+        // caller's product grants, so neither allowlist names it (the tenant of the object is checked by the product router).
+        if (Autheris.Application.Products.ProductSource.IsProductSource(dataSourceName))
+        {
+            return null;
+        }
+
         if (globalRestricted &&
             !SqlDataSourceResolver.TryResolveGloballyAllowedDataSource(webSqlOptions, dataSourceName, out resolved))
         {
@@ -69,7 +77,7 @@ public static class DataSourceAllowlistGuard
         ArgumentNullException.ThrowIfNull(webSqlOptions);
         ArgumentNullException.ThrowIfNull(metadata);
         string source = !string.IsNullOrWhiteSpace(metadata.Table?.SourceName) ? metadata.Table!.SourceName! : metadata.Identifier.Domain;
-        return MapDataSource(webSqlOptions, source);
+        return Autheris.Application.Products.ProductSource.IsProductSource(source) ? Autheris.Application.Products.ProductSource.Name : MapDataSource(webSqlOptions, source);
     }
 
     /// <summary>
