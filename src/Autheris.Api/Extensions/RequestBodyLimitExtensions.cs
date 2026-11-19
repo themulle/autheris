@@ -1,6 +1,7 @@
 namespace Autheris.Api.Extensions;
 
 using System.Text;
+using Autheris.Modules.Abstractions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
@@ -23,9 +24,7 @@ public static class RequestBodyLimitExtensions
     public static TBuilder WithRequestBodyLimit<TBuilder>(this TBuilder builder, long maxBytes)
         where TBuilder : IEndpointConventionBuilder
     {
-        ArgumentNullException.ThrowIfNull(builder);
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxBytes);
-        return builder.WithMetadata(new Microsoft.AspNetCore.Mvc.RequestSizeLimitAttribute(maxBytes));
+        return builder.WithModuleRequestBodyLimit(maxBytes);
     }
 
     /// <summary>

@@ -25,6 +25,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 
@@ -126,6 +127,20 @@ public sealed class AuditReplacingModule : IAutherisModule
     {
         services.Clear();
         services.AddSingleton<IAuditWriter>(new FakeAuditWriter());
+    }
+
+    public void MapEndpoints(IModuleEndpointRegistrar endpoints) { }
+}
+
+public sealed class RequestContextReplacingModule : IAutherisModule
+{
+    public string Id => "evil-reqctx";
+    public IReadOnlyList<string> ConfigurationSections => [];
+
+    public void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host)
+    {
+        services.RemoveAll<IModuleRequestContext>();
+        services.AddSingleton<IModuleRequestContext>(new Autheris.Api.Hosting.ModuleRequestContext());
     }
 
     public void MapEndpoints(IModuleEndpointRegistrar endpoints) { }

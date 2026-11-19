@@ -57,6 +57,7 @@ internal static class ModuleSecurityGuards
         typeof(IHttpContextAccessor),
         typeof(TimeProvider),
         typeof(IDistributedClusterStateProvider),
+        typeof(Autheris.Modules.Abstractions.IModuleRequestContext),
     ];
 
     private static readonly string[] ProtectedNamespaces =
