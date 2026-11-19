@@ -4,7 +4,6 @@ Gateway:AllowInsecureWarnFlagsInProduction=False
 Gateway:AreUnsignedS3RequestsAllowed=False
 Gateway:AreUntrustedCertificatesAllowed=False
 Gateway:Audit:VerifyHashChainEnabled=True
-Gateway:Audit:Worm:EnforceObjectLock=True
 Gateway:Authentication:Adfs:Enabled=False
 Gateway:Authentication:Adfs:RequireHttpsMetadata=True
 Gateway:Authentication:BasicAuth:Enabled=False

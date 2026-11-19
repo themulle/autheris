@@ -97,7 +97,8 @@ public sealed class FederatedParameterContract
             var key = rawKey.TrimStart('@');
             if (normalizedValues.ContainsKey(key))
             {
-                continue; // First spelling wins
+                // Two spellings of one name (p0 and P0, @p0 and p0) are ambiguous; refuse instead of depending on key order.
+                throw new ArgumentException("SQL parameters must not repeat a name that differs only in case or in the leading @.");
             }
 
             // Embedded NUL check on raw strings
