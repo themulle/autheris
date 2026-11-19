@@ -78,30 +78,15 @@ public partial class GovernanceRepository
             }
         }
 
-        public async Task<IReadOnlyList<GrantRecord>> ReadTenantChainAsync(string tenantId, CancellationToken ct = default)
-        {
-            await using var conn = _dialect.CreateConnection();
-            await conn.OpenAsync(ct).ConfigureAwait(false);
-            using var cmd = conn.CreateCommand();
-            (cmd.CommandText, var items) = (SelectTenantChainSql, new List<GrantRecord>());
-            cmd.AddBound("@tenant_id", tenantId);
-            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-            while (await reader.ReadAsync(ct).ConfigureAwait(false)) items.Add(ReadRecord(reader));
-            return items;
-        }
+        public Task<IReadOnlyList<GrantRecord>> ReadTenantChainAsync(string tenantId, CancellationToken ct = default) =>
+            ReadRecordListAsync(SelectTenantChainSql, cmd => cmd.AddBound("@tenant_id", tenantId), ct);
 
-        public async Task<IReadOnlyList<GrantRecord>> ReadConsentChainAsync(string tenantId, Guid consentId, CancellationToken ct = default)
-        {
-            await using var conn = _dialect.CreateConnection();
-            await conn.OpenAsync(ct).ConfigureAwait(false);
-            using var cmd = conn.CreateCommand();
-            (cmd.CommandText, var items) = (SelectConsentChainSql, new List<GrantRecord>());
-            cmd.AddBound("@tenant_id", tenantId);
-            cmd.AddBound("@consent_id", consentId.ToString("D"));
-            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-            while (await reader.ReadAsync(ct).ConfigureAwait(false)) items.Add(ReadRecord(reader));
-            return items;
-        }
+        public Task<IReadOnlyList<GrantRecord>> ReadConsentChainAsync(string tenantId, Guid consentId, CancellationToken ct = default) =>
+            ReadRecordListAsync(SelectConsentChainSql, cmd =>
+            {
+                cmd.AddBound("@tenant_id", tenantId);
+                cmd.AddBound("@consent_id", consentId.ToString("D"));
+            }, ct);
 
         public async Task<GrantRecord?> ReadBySeqAsync(string tenantId, long seq, CancellationToken ct = default)
         {
@@ -115,15 +100,22 @@ public partial class GovernanceRepository
             return await reader.ReadAsync(ct).ConfigureAwait(false) ? ReadRecord(reader) : null;
         }
 
-        public async Task<IReadOnlyList<GrantRecord>> ReadRangeAsync(string tenantId, long fromSeq, long? toSeq, CancellationToken ct = default)
+        public Task<IReadOnlyList<GrantRecord>> ReadRangeAsync(string tenantId, long fromSeq, long? toSeq, CancellationToken ct = default) =>
+            ReadRecordListAsync(SelectRecordRangeSql, cmd =>
+            {
+                cmd.AddBound("@tenant_id", tenantId);
+                cmd.AddBound("@from_seq", fromSeq, DbType.Int64);
+                cmd.AddBound("@to_seq", toSeq.HasValue ? toSeq.Value : (object)DBNull.Value, DbType.Int64);
+            }, ct);
+
+        private async Task<IReadOnlyList<GrantRecord>> ReadRecordListAsync(string sql, Action<DbCommand> bind, CancellationToken ct)
         {
             await using var conn = _dialect.CreateConnection();
             await conn.OpenAsync(ct).ConfigureAwait(false);
             using var cmd = conn.CreateCommand();
-            (cmd.CommandText, var items) = (SelectRecordRangeSql, new List<GrantRecord>());
-            cmd.AddBound("@tenant_id", tenantId);
-            cmd.AddBound("@from_seq", fromSeq, DbType.Int64);
-            cmd.AddBound("@to_seq", toSeq.HasValue ? toSeq.Value : (object)DBNull.Value, DbType.Int64);
+            cmd.CommandText = sql;
+            bind(cmd);
+            var items = new List<GrantRecord>();
             await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
             while (await reader.ReadAsync(ct).ConfigureAwait(false)) items.Add(ReadRecord(reader));
             return items;

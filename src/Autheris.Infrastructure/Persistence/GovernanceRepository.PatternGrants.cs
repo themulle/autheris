@@ -24,91 +24,53 @@ public partial class GovernanceRepository
         "WHERE LOWER(t.source_name) = LOWER(@domain) AND LOWER(t.schema_name) = LOWER(@schema) AND LOWER(t.table_name) = LOWER(@table) " +
         "AND o.is_active = 1 AND d.valid_from <= @now AND d.valid_to >= @now";
 
-    public async Task<IReadOnlyList<Consent>> GetActivePatternConsentsAsync(
-        TenantId tenantId,
-        DateTimeOffset atTime,
-        CancellationToken ct = default)
-    {
-        var scoped = TenantScope.RequireTenant(tenantId, nameof(GovernanceTable.Consents));
-        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        var seen = new HashSet<Guid>();
-        var consents = new List<Consent>();
-        await ConsentPatternSql.ReadActivePatternConsentsForDomainAsync(
-            conn, domain: null, scoped, atTime, subjectSet: null, seen, consents, ct).ConfigureAwait(false);
-        consents.RemoveAll(c => !c.IsActive(atTime));
-        await HydrateConsentsBatchAsync(conn, consents, ct).ConfigureAwait(false);
-        return consents;
-    }
+    public Task<IReadOnlyList<Consent>> GetActivePatternConsentsAsync(TenantId tenantId, DateTimeOffset atTime, CancellationToken ct = default) =>
+        ReadAndHydratePatternConsentsAsync(TenantScope.RequireTenant(tenantId, nameof(GovernanceTable.Consents)), atTime, c => !c.IsActive(atTime), ct);
 
-    public async Task<IReadOnlyList<Consent>> GetActiveInternalPatternConsentsAsync(
-        DateTimeOffset atTime,
-        CancellationToken ct = default)
+    public Task<IReadOnlyList<Consent>> GetActiveInternalPatternConsentsAsync(DateTimeOffset atTime, CancellationToken ct = default) =>
+        ReadAndHydratePatternConsentsAsync(null, atTime, c => !c.IsActive(atTime) || c.Effect != ConsentEffect.Allow || c.WorkflowMode != ConsentWorkflowMode.Internal, ct);
+
+    private async Task<IReadOnlyList<Consent>> ReadAndHydratePatternConsentsAsync(TenantId? tenantId, DateTimeOffset atTime, Predicate<Consent> exclude, CancellationToken ct)
     {
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         var seen = new HashSet<Guid>();
         var consents = new List<Consent>();
         await ConsentPatternSql.ReadActivePatternConsentsForDomainAsync(
-            conn, domain: null, tenantId: null, atTime, subjectSet: null, seen, consents, ct).ConfigureAwait(false);
-        consents.RemoveAll(c =>
-            !c.IsActive(atTime) ||
-            c.Effect != ConsentEffect.Allow ||
-            c.WorkflowMode != ConsentWorkflowMode.Internal);
+            conn, domain: null, tenantId, atTime, subjectSet: null, seen, consents, ct).ConfigureAwait(false);
+        consents.RemoveAll(exclude);
         await HydrateConsentsBatchAsync(conn, consents, ct).ConfigureAwait(false);
         return consents;
     }
 
-    public async Task<IReadOnlySet<string>> GetAuthorizedApproverSidsForTableAsync(
-        TableIdentifier table,
-        DateTimeOffset atTime,
-        CancellationToken ct = default)
+    public async Task<IReadOnlySet<string>> GetAuthorizedApproverSidsForTableAsync(TableIdentifier table, DateTimeOffset atTime, CancellationToken ct = default)
     {
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        await using (var ownerCmd = conn.CreateCommand())
-        {
-            ownerCmd.CommandText = SelectActiveDirectOwnersForTableSql;
-            ownerCmd.AddBound("@domain", table.Domain);
-            ownerCmd.AddBound("@schema", table.Schema);
-            ownerCmd.AddBound("@table", table.TableName);
-
-            await using var reader = await ExecuteReaderAsync(ownerCmd, "PatternGrants.ReadDirectOwners", ct).ConfigureAwait(false);
-            while (await reader.ReadAsync(ct).ConfigureAwait(false))
-            {
-                if (!reader.IsDBNull(0))
-                {
-                    var sid = reader.GetString(0);
-                    if (!string.IsNullOrWhiteSpace(sid))
-                    {
-                        set.Add(sid);
-                    }
-                }
-            }
-        }
-
-        await using (var delCmd = conn.CreateCommand())
-        {
-            delCmd.CommandText = SelectActiveDelegatesForTableSql;
-            delCmd.AddBound("@domain", table.Domain);
-            delCmd.AddBound("@schema", table.Schema);
-            delCmd.AddBound("@table", table.TableName);
-            delCmd.AddBound("@now", atTime.ToString("O"));
-
-            await using var reader = await ExecuteReaderAsync(delCmd, "PatternGrants.ReadDelegates", ct).ConfigureAwait(false);
-            while (await reader.ReadAsync(ct).ConfigureAwait(false))
-            {
-                if (!reader.IsDBNull(0))
-                {
-                    var sid = reader.GetString(0);
-                    if (!string.IsNullOrWhiteSpace(sid))
-                    {
-                        set.Add(sid);
-                    }
-                }
-            }
-        }
-
+        await ReadApproverSidsAsync(conn, SelectActiveDirectOwnersForTableSql, "PatternGrants.ReadDirectOwners", table, atTime: null, set, ct).ConfigureAwait(false);
+        await ReadApproverSidsAsync(conn, SelectActiveDelegatesForTableSql, "PatternGrants.ReadDelegates", table, atTime, set, ct).ConfigureAwait(false);
         return set;
+    }
+
+    private async Task ReadApproverSidsAsync(DbConnection conn, string sql, string operationName, TableIdentifier table, DateTimeOffset? atTime, HashSet<string> target, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        cmd.AddBound("@domain", table.Domain);
+        cmd.AddBound("@schema", table.Schema);
+        cmd.AddBound("@table", table.TableName);
+        if (atTime is { } at)
+        {
+            cmd.AddBound("@now", at.ToString("O"));
+        }
+
+        await using var reader = await ExecuteReaderAsync(cmd, operationName, ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            if (!reader.IsDBNull(0) && reader.GetString(0) is { } sid && !string.IsNullOrWhiteSpace(sid))
+            {
+                target.Add(sid);
+            }
+        }
     }
 
     public async Task<bool> IsAnyApproverAuthorizedForTableAsync(
