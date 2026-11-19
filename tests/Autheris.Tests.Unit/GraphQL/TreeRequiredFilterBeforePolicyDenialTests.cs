@@ -12,6 +12,7 @@ using NSubstitute;
 using Shouldly;
 
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 namespace Autheris.Tests.Unit.GraphQL;
 
@@ -48,7 +49,7 @@ public sealed class TreeRequiredFilterBeforePolicyDenialTests
             }
         };
         return new GovernedTreeQueryService(
-            resolver, Substitute.For<ISqlConnectionFactory>(), Substitute.For<IAuditLogRepository>(),
+            resolver, Substitute.For<ISqlConnectionFactory>(), new InMemoryAuditLogRepository(),
             Substitute.For<IColumnMaskingProvider>(), Options.Create(options), securedSourceBuilder: _h.Builder);
     }
 

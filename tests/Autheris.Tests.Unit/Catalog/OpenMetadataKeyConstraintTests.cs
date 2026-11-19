@@ -11,6 +11,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>Issue #94 (D-8, SEC-94-11): OpenMetadata tableConstraints become the declared definition.</summary>
 public sealed class OpenMetadataKeyConstraintTests
@@ -28,7 +29,7 @@ public sealed class OpenMetadataKeyConstraintTests
         _client.GetUsersAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<OpenMetadataUser>>([]));
         _repo.UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>())
             .Returns(c => { _upserts.Add(c.Arg<TableMetadata>()); return Task.FromResult(c.Arg<TableMetadata>()); });
-        return new OpenMetadataSyncService(_client, _repo, Substitute.For<IConsentRepository>(), Substitute.For<IPolicyEpochRepository>(),
+        return new OpenMetadataSyncService(_client, _repo, new InMemoryConsentRepository(), Substitute.For<IPolicyEpochRepository>(),
             Options.Create(options), NullLogger<OpenMetadataSyncService>.Instance);
     }
 

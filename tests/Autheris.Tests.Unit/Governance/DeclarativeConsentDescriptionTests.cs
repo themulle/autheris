@@ -7,6 +7,7 @@ using Autheris.Domain.Model;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 namespace Autheris.Tests.Unit.Governance;
 
@@ -37,7 +38,7 @@ public sealed class DeclarativeConsentDescriptionTests
     private static (DeclarativeConsentApplyService Svc, FakeConsentRepository Repo) Create()
     {
         var repo = new FakeConsentRepository();
-        return (new DeclarativeConsentApplyService(Tables(), repo, Substitute.For<IAuditLogRepository>()), repo);
+        return (new DeclarativeConsentApplyService(Tables(), repo, new InMemoryAuditLogRepository()), repo);
     }
 
     [Fact]

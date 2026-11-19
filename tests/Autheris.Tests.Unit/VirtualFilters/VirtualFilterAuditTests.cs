@@ -17,6 +17,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>Virtual filters, phase 6: the audit entry of an access names the applied filters.</summary>
 public sealed class VirtualFilterAuditTests
@@ -34,8 +35,8 @@ public sealed class VirtualFilterAuditTests
     public async Task TableQuery_AuditNamesTheVirtualFilters()
     {
         var table = MandatoryRowFilterResolverTests.Table("fms", "air1", "id", "client_id");
-        var metadata = Substitute.For<ITableMetadataRepository>();
-        metadata.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(table);
+        var metadata = new InMemoryTableMetadataRepository();
+        metadata.Add(table);
         var consents = Substitute.For<IConsentRepository>();
         consents.GetActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<System.DateTimeOffset>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<Consent>>([]));

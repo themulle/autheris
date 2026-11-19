@@ -17,6 +17,7 @@ using Microsoft.Extensions.Hosting;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 namespace Autheris.Tests.Unit.Configuration;
 
@@ -56,7 +57,7 @@ public sealed class DevExperienceTests
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton(auth);
-        services.AddAuditWriterOver(Substitute.For<IAuditLogRepository>());
+        services.AddAuditWriterOver(new InMemoryAuditLogRepository());
         var context = new DefaultHttpContext { RequestServices = services.BuildServiceProvider() };
         context.Response.Body = new MemoryStream();
         return context;

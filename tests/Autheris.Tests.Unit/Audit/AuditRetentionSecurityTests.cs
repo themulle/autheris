@@ -21,6 +21,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 using Microsoft.Extensions.Logging.Abstractions;
+using Autheris.Tests.Common.Fakes;
 
 namespace Autheris.Tests.Unit.Audit;
 
@@ -96,9 +97,8 @@ public sealed class AuditRetentionSecurityTests
 
         var keyProvider = Substitute.For<IAuditPurgeKeyProvider>();
         keyProvider.GetAuditHmacKey().Returns(RandomNumberGenerator.GetBytes(32));
-        var optionsMonitor = Substitute.For<IOptionsMonitor<AuditRetentionOptions>>();
         var options = new AuditRetentionOptions { Enabled = true, RetentionDays = 90, BatchSize = 100, InterBatchDelay = TimeSpan.Zero };
-        optionsMonitor.CurrentValue.Returns(options);
+        var optionsMonitor = new TestOptionsMonitor<AuditRetentionOptions>(options);
 
         var worker = new AuditRetentionPurgeWorker(
             scopeFactory,

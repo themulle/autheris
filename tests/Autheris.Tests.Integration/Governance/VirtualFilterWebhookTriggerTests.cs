@@ -17,6 +17,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 public sealed class VirtualFilterWebhookTriggerTests : IDisposable
 {
@@ -38,7 +39,7 @@ public sealed class VirtualFilterWebhookTriggerTests : IDisposable
                 GitRef = "refs/heads/main"
             }
         });
-        _service = new VirtualFilterAdministrationService(_repository, Substitute.For<IAuditLogRepository>(), _options);
+        _service = new VirtualFilterAdministrationService(_repository, new InMemoryAuditLogRepository(), _options);
     }
 
     public void Dispose() => _repository.Dispose();

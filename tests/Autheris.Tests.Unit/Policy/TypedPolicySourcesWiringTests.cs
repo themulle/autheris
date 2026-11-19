@@ -120,11 +120,11 @@ public sealed class TypedPolicySourcesWiringTests
     [Fact]
     public async Task ProcedureService_ProducesATypedDecision()
     {
-        var tables = Substitute.For<ITableMetadataRepository>();
-        tables.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(Meta());
+        var tables = new InMemoryTableMetadataRepository();
+        tables.Add(Meta());
         var service = new GovernedProcedureExecutionService(
             new InMemoryProcedureRegistry(), Substitute.For<IProcedureInvoker>(), Options.Create(new GatewayOptions()),
-            Substitute.For<IAuditLogRepository>(), tables, Consents(), new ConsentResolutionService(), Substitute.For<IColumnMaskingProvider>(),
+            new InMemoryAuditLogRepository(), tables, Consents(), new ConsentResolutionService(), Substitute.For<IColumnMaskingProvider>(),
             typedPolicies: Sources());
 
         var result = await service.EvaluateTableAsync("sales", "main.orders", User(), UserSid, Tenant, consentBypassed: false, allowRowFilter: true, CancellationToken.None);
@@ -157,7 +157,7 @@ public sealed class TypedPolicySourcesWiringTests
     public async Task GatewayExecutionService_ProducesATypedDecision()
     {
         var service = new GatewayExecutionService(
-            Substitute.For<ITableMetadataRepository>(), Consents(), Substitute.For<IAuditLogRepository>(), new ConsentResolutionService(),
+            new InMemoryTableMetadataRepository(), Consents(), new InMemoryAuditLogRepository(), new ConsentResolutionService(),
             Autheris.Application.Policy.Services.NullConsentCacheService.Instance, Substitute.For<IColumnMaskingProvider>(),
             typedPolicies: Sources());
 

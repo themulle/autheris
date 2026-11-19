@@ -16,6 +16,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>MISC-11: the Art. 15 report lists the readers of the subject's table, never filters by the subject as actor, and never claims completeness it lacks.</summary>
 public sealed class GdprDisclosureReportTests
@@ -42,7 +43,7 @@ public sealed class GdprDisclosureReportTests
         var sut = new GdprDisclosureReportService(
             Substitute.For<IDataOwnershipRepository>(),
             audit,
-            Substitute.For<ITableMetadataRepository>(),
+            new InMemoryTableMetadataRepository(),
             cap == null ? null : Options.Create(new GdprReportOptions { MaxAuditEvents = cap.Value }));
         return (sut, audit);
     }

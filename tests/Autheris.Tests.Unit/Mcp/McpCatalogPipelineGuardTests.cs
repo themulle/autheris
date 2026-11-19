@@ -13,6 +13,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>
 /// Issue #111 (F-C11, early review of DWP-2): pipeline-level guards. The engine stamps every row it returns, so a non-admin row without a
@@ -37,7 +38,7 @@ public sealed class McpCatalogPipelineGuardTests
         var visibility = CatalogVisibilityTestFactory.Create(
             tables, consents, gateway, engineOutput: (_, _, _) => Task.FromResult<IReadOnlyList<TableMetadata>>(engineOutput));
         return new McpDatasetCatalog(
-            tables, consents, Substitute.For<IGatewayExecutionService>(), Substitute.For<IAuditLogRepository>(),
+            tables, consents, Substitute.For<IGatewayExecutionService>(), new InMemoryAuditLogRepository(),
             options: Options.Create(gateway), visibilityService: visibility);
     }
 

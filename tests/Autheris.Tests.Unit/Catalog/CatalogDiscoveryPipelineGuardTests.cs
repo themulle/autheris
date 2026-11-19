@@ -10,6 +10,7 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>
 /// Issue #111 (F-C11, early review of DWP-2): the engine stamps every row, so a non-admin row without a recognised view is fed to the real REST
@@ -30,7 +31,7 @@ public sealed class CatalogDiscoveryPipelineGuardTests
         var visibility = CatalogVisibilityTestFactory.Create(
             tables, consents, options, engineOutput: (_, _, _) => Task.FromResult<IReadOnlyList<TableMetadata>>(engineOutput));
         return new CatalogDiscoveryService(
-            tables, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), Microsoft.Extensions.Options.Options.Create(options), visibility);
+            tables, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(new InMemoryAuditLogRepository()), Microsoft.Extensions.Options.Options.Create(options), visibility);
     }
 
     private static RequestContext Subject() => Wp0.Context(Wp0.User("S-USER", "tenant-a"));

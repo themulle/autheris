@@ -21,6 +21,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>
 /// Issue #447 WP-3, SEC-ATR-05: the queued job carries the ingress of the submitting request; the worker scope is stamped from it and
@@ -31,7 +32,7 @@ public sealed class AsyncJobIngressBindingTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "autheris-atr-job-" + Guid.NewGuid().ToString("N"));
     private readonly IHostEnvironment _env = Substitute.For<IHostEnvironment>();
-    private readonly IAuditLogRepository _audit = Substitute.For<IAuditLogRepository>();
+    private readonly IAuditLogRepository _audit = new InMemoryAuditLogRepository();
 
     public AsyncJobIngressBindingTests()
     {

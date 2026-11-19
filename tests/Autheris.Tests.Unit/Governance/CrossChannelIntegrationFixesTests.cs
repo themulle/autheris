@@ -26,6 +26,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 [Collection("IndividualGrantLimits")]
 public sealed class CrossChannelIntegrationFixesTests
@@ -39,7 +40,7 @@ public sealed class CrossChannelIntegrationFixesTests
         var catalogDiscoveryService = Substitute.For<ICatalogDiscoveryService>();
         var apiDispatcherService = Substitute.For<IApiDispatcherService>();
         var lineageGraphStore = Substitute.For<ILineageGraphStore>();
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        ITableMetadataRepository metadataRepo = new InMemoryTableMetadataRepository();
 
         dataQueryService.ExecuteQueryAsync(
             Arg.Any<DatasetQueryRequest>(),

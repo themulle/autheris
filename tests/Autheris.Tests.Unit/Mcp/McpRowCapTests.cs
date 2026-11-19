@@ -22,6 +22,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>WP-SIMPL-53 PR 1 (#578): Mcp:MaxResultRows is enforced server-side on all five row tools.</summary>
 public sealed class McpRowCapTests
@@ -55,8 +56,7 @@ public sealed class McpRowCapTests
 
     internal static IOptionsMonitor<GatewayOptions> Options(int maxRows)
     {
-        var monitor = Substitute.For<IOptionsMonitor<GatewayOptions>>();
-        monitor.CurrentValue.Returns(new GatewayOptions { Mcp = new McpOptions { MaxResultRows = maxRows } });
+        var monitor = new TestOptionsMonitor<GatewayOptions>(new GatewayOptions { Mcp = new McpOptions { MaxResultRows = maxRows } });
         return monitor;
     }
 

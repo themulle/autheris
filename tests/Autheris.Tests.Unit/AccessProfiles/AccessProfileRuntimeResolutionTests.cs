@@ -29,6 +29,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 
 /// <summary>WP-SC-03 (H3): group/role mappings and every identity of the caller are resolved at runtime, most restrictive wins, one cached set lookup.</summary>
@@ -72,7 +73,7 @@ public sealed class AccessProfileRuntimeResolutionTests
         IMemoryCache? memoryCache = null,
         Autheris.Application.Policy.Interfaces.IAccessProfileCache? accessProfileCache = null)
     {
-        var consentRepo = Substitute.For<IConsentRepository>();
+        IConsentRepository consentRepo = new InMemoryConsentRepository();
         var resolutionService = Substitute.For<IConsentResolutionService>();
         // SR-M-07: an access profile never creates an allow; the underlying consent decision allows the table here.
         resolutionService.ResolveAccess(default!, default!, default!, default, default!, default, default, default)

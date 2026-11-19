@@ -9,6 +9,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 namespace Autheris.Extensions.Tests;
 
@@ -21,7 +22,7 @@ public sealed class OpenMetadataWebhookRetryExt12Tests
     public async Task FailedEvent_RetryWithSameId_IsProcessedAgain()
     {
         var client = Substitute.For<IOpenMetadataClient>();
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        ITableMetadataRepository metadataRepo = new InMemoryTableMetadataRepository();
         var epochRepo = Substitute.For<IPolicyEpochRepository>();
         var options = new GatewayOptions
         {
@@ -48,7 +49,7 @@ public sealed class OpenMetadataWebhookRetryExt12Tests
                 : Task.FromResult<OpenMetadataTable?>(table));
 
         var service = new OpenMetadataSyncService(
-            client, metadataRepo, Substitute.For<IConsentRepository>(), epochRepo,
+            client, metadataRepo, new InMemoryConsentRepository(), epochRepo,
             Options.Create(options), NullLogger<OpenMetadataSyncService>.Instance);
 
         await Should.ThrowAsync<HttpRequestException>(() => service.HandleWebhookEventAsync(payload, signature));

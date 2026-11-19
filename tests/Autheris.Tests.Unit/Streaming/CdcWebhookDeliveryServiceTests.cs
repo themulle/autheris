@@ -30,6 +30,7 @@ using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 [Trait("Category", "Security")]
 public sealed partial class CdcWebhookDeliveryServiceTests
@@ -146,8 +147,7 @@ public sealed partial class CdcWebhookDeliveryServiceTests
                 services.AddScoped(_ => RealmRegistry);
             }
 
-            var monitor = Substitute.For<IOptionsMonitor<CdcWebhooksOptions>>();
-            monitor.CurrentValue.Returns(_ => Options);
+            var monitor = new TestOptionsMonitor<CdcWebhooksOptions>(() => Options);
             return new CdcWebhookDeliveryService(
                 Channel, Store, services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(), new CloudEventTransformer(),
                 Outbox, Audit, monitor, Microsoft.Extensions.Options.Options.Create(Gateway), Time, logger ?? NullLogger<CdcWebhookDeliveryService>.Instance);

@@ -10,6 +10,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 namespace Autheris.Tests.Unit.CdcStream;
 
@@ -20,8 +21,7 @@ public sealed class KeyVaultCdcKekProviderTests
 
     private KeyVaultCdcKekProvider Create(GatewayOptions options, string env = "Production")
     {
-        var monitor = Substitute.For<IOptionsMonitor<GatewayOptions>>();
-        monitor.CurrentValue.Returns(options);
+        var monitor = new TestOptionsMonitor<GatewayOptions>(options);
         IHostEnvironment host = new TestHostEnvironment(env);
         return new KeyVaultCdcKekProvider(_secrets, monitor, host, NullLogger<KeyVaultCdcKekProvider>.Instance);
     }

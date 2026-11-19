@@ -14,6 +14,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 using static CallerAttributeTestSupport;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>GOV-12: the shared materialisation guard (A-10 across tenants, registry unavailable fails closed).</summary>
 [Trait("Category", "Security")]
@@ -32,7 +33,7 @@ public sealed class ConsentMaterializationGuardTests
     {
         var registry = Substitute.For<ICallerAttributeRegistry>();
         registry.GetAsync(Arg.Any<CancellationToken>()).Returns(_ => new ValueTask<CallerAttributeSnapshot>(snapshot()));
-        var tables = Substitute.For<ITableMetadataRepository>();
+        ITableMetadataRepository tables = new InMemoryTableMetadataRepository();
         return new CallerAttributeConsentGuard(
             () => registry, () => tables, Microsoft.Extensions.Options.Options.Create(new GatewayOptions { CallerAttributes = options ?? Options(true) }));
     }

@@ -24,6 +24,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>Issue #282: a dbt sync registers manifest items that have no catalog entry (inactive by default).</summary>
 public sealed class DbtSyncTableCreationTests
@@ -528,7 +529,7 @@ public sealed class DbtSyncTableCreationTests
         wideResult.SkippedItems.Single().Reason.ShouldBe(DbtSyncSkipReasons.Ineligible);
 
         var many = Enumerable.Range(0, 5001).Select(i => Model($"t{i}")).ToArray();
-        var dry = await Sync(Build(Substitute.For<ITableMetadataRepository>(), Options()), Manifest(many), dryRun: true);
+        var dry = await Sync(Build(new InMemoryTableMetadataRepository(), Options()), Manifest(many), dryRun: true);
         dry.CreatedTables.Count.ShouldBe(5000);
         dry.SkippedItems.Single().Reason.ShouldBe(DbtSyncSkipReasons.Ineligible);
     }
@@ -538,7 +539,7 @@ public sealed class DbtSyncTableCreationTests
     public async Task Sync_SkippedItemsAreCappedWithTruncatedFlag()
     {
         var items = Enumerable.Range(0, 501).Select(i => Model($"t{i}", db: "elsewhere")).ToArray();
-        var result = await Sync(Build(Substitute.For<ITableMetadataRepository>(), Options()), Manifest(items), dryRun: true);
+        var result = await Sync(Build(new InMemoryTableMetadataRepository(), Options()), Manifest(items), dryRun: true);
 
         result.SkippedItems.Count.ShouldBe(500);
         result.SkippedItemsTruncated.ShouldBeTrue();

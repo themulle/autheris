@@ -34,6 +34,7 @@ using TrinoSqlEngine.Ast.Capabilities;
 using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Governance;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 public sealed class WebSqlPagingTests
 {
@@ -156,7 +157,7 @@ public sealed class WebSqlPagingTests
 
         var service = GovernedSqlExecutionServiceFactory.Create(
             Options.Create(options),
-            Substitute.For<IAuditLogRepository>(),
+            new InMemoryAuditLogRepository(),
             executionGuard: GovernedTestSupport.Guard,
             consentResolution: resolution,
             tableRepository: repo,

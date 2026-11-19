@@ -22,7 +22,7 @@ public sealed class DeclarativeConsentApplyDatasetsTests
     private readonly IConsentRepository _consents = new InMemoryConsentRepository();
 
     private DeclarativeConsentApplyService Create(IDatasetCatalogAdminService? datasets = null) =>
-        new(Substitute.For<ITableMetadataRepository>(), _consents, Substitute.For<IAuditLogRepository>(), null, datasets);
+        new(new InMemoryTableMetadataRepository(), _consents, new InMemoryAuditLogRepository(), null, datasets);
 
     private static DeclarativeConsentManifest Manifest(params DeclarativeDatasetCatalog[] datasets) => new("1", [], datasets);
 

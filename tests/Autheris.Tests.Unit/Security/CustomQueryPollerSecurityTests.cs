@@ -37,6 +37,7 @@ using NSubstitute;
 using Shouldly;
 using TrinoSqlEngine;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 [Trait("Category", "Security")]
 public sealed class CustomQueryPollerSecurityTests : IDisposable
@@ -59,8 +60,7 @@ public sealed class CustomQueryPollerSecurityTests : IDisposable
     {
         _validator = new CustomQueryPollerValidator(_sqlEngine);
 
-        var monitor = Substitute.For<IOptionsMonitor<GatewayOptions>>();
-        monitor.CurrentValue.Returns(new GatewayOptions());
+        var monitor = new TestOptionsMonitor<GatewayOptions>(new GatewayOptions());
 
         var time = TimeProvider.System;
         _keyring = new CdcStreamKeyring(_keys, _keks, monitor, time);
@@ -251,13 +251,11 @@ public sealed class CustomQueryPollerSecurityTests : IDisposable
         // Verifies that source database connection is configured with read-only transaction semantics
         var poller = BaseOptions("SELECT id FROM customers WHERE id > @p_wm_id");
         poller.DataSource = "sqlite_src";
-        var monitor = Substitute.For<IOptionsMonitor<CustomQueryPollerOptions>>();
-        monitor.CurrentValue.Returns(new CustomQueryPollerOptions { Enabled = true, Pollers = [poller] });
+        var monitor = new TestOptionsMonitor<CustomQueryPollerOptions>(new CustomQueryPollerOptions { Enabled = true, Pollers = [poller] });
 
         var gateway = new GatewayOptions();
         gateway.DataSources.Connections["sqlite_src"] = new DataSourceConnectionOptions { Provider = "PostgreSql", ConnectionString = "Data Source=:memory:" };
-        var gwMonitor = Substitute.For<IOptionsMonitor<GatewayOptions>>();
-        gwMonitor.CurrentValue.Returns(gateway);
+        var gwMonitor = new TestOptionsMonitor<GatewayOptions>(gateway);
 
         var executedCommands = new List<string>();
         var fakeConn = new ReadOnlyTrackingDbConnection(executedCommands);
@@ -327,13 +325,11 @@ public sealed class CustomQueryPollerSecurityTests : IDisposable
         // Verifies events and stored row images are encrypted with stream DEKs
         var poller = BaseOptions("SELECT id FROM customers WHERE id > @p_wm_id");
         poller.DataSource = "sqlite_src";
-        var monitor = Substitute.For<IOptionsMonitor<CustomQueryPollerOptions>>();
-        monitor.CurrentValue.Returns(new CustomQueryPollerOptions { Enabled = true, Pollers = [poller] });
+        var monitor = new TestOptionsMonitor<CustomQueryPollerOptions>(new CustomQueryPollerOptions { Enabled = true, Pollers = [poller] });
 
         var gateway = new GatewayOptions();
         gateway.DataSources.Connections["sqlite_src"] = new DataSourceConnectionOptions { Provider = "PostgreSql", ConnectionString = "Data Source=:memory:" };
-        var gwMonitor = Substitute.For<IOptionsMonitor<GatewayOptions>>();
-        gwMonitor.CurrentValue.Returns(gateway);
+        var gwMonitor = new TestOptionsMonitor<GatewayOptions>(gateway);
 
         var rows = new List<Dictionary<string, object?>>
         {

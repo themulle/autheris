@@ -6,6 +6,7 @@ using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using NSubstitute;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>A table repository that knows <c>sales.public.orders</c>: applying an access plan writes grant records, which need a registered table.</summary>
 internal static class AccessPlanTestTables
@@ -20,8 +21,8 @@ internal static class AccessPlanTestTables
             Columns = [new TableColumn { TableId = id, ColumnName = "id", DataType = "int" }],
             PrimaryKeyColumns = ["id"]
         };
-        var repo = Substitute.For<ITableMetadataRepository>();
-        repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(meta);
+        var repo = new InMemoryTableMetadataRepository();
+        repo.Add(meta);
         return repo;
     }
 }

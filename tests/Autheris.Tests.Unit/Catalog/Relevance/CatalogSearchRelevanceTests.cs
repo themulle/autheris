@@ -22,6 +22,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 using Xunit.Abstractions;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>
 /// Relevance set of the catalog search (#624): a neutral sample catalog and queries with the expected tables and a maximum
@@ -227,7 +228,7 @@ public sealed class CatalogSearchRelevanceTests(ITestOutputHelper output)
             discovery,
             Substitute.For<IApiDispatcherService>(),
             Substitute.For<ILineageGraphStore>(),
-            Substitute.For<ITableMetadataRepository>());
+            new InMemoryTableMetadataRepository());
         var tool = new McpToolDefinition(McpDatasetTools.SearchCatalog, "Search catalog", "{}", TargetGraphQLOperation: "search_catalog");
         var session = new McpSessionContext("s1", "agent", "tenant-a", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, UserSid: "S-1-USER");
 

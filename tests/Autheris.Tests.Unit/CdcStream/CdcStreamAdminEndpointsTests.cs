@@ -46,8 +46,7 @@ public sealed class CdcStreamAdminEndpointsTests : IDisposable
 
     public CdcStreamAdminEndpointsTests()
     {
-        var monitor = Substitute.For<IOptionsMonitor<GatewayOptions>>();
-        monitor.CurrentValue.Returns(new GatewayOptions());
+        var monitor = new TestOptionsMonitor<GatewayOptions>(new GatewayOptions());
         _keyring = new CdcStreamKeyring(_keys, _keks, monitor, _time);
         _restarter.RestartAsync(Arg.Any<CdcStreamId>(), Arg.Any<CancellationToken>()).Returns(true);
     }

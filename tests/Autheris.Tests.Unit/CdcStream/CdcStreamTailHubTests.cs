@@ -12,6 +12,7 @@ using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 namespace Autheris.Tests.Unit.CdcStream;
 
@@ -34,8 +35,7 @@ public sealed class CdcStreamTailHubTests : IAsyncDisposable
 
     public CdcStreamTailHubTests()
     {
-        var monitor = Substitute.For<IOptionsMonitor<GatewayOptions>>();
-        monitor.CurrentValue.Returns(_ => _opts);
+        var monitor = new TestOptionsMonitor<GatewayOptions>(() => _opts);
         _monitor = monitor;
         _crypto = new CdcStreamCrypto(new CdcStreamKeyring(_keys, _keks, monitor, _time), NullLogger<CdcStreamCrypto>.Instance);
         _signal = new CdcStreamSignal(_state, NullLogger<CdcStreamSignal>.Instance);

@@ -11,6 +11,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>SEC-36-SP2-07: the catalog datasource registration is refused, before ingestion and secret storage, when its required audit write fails.</summary>
 [Trait("Category", "Security")]
@@ -23,7 +24,7 @@ public sealed class CatalogDiscoveryAuditTests
         writer.RecordRequiredAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>()).Returns(Task.FromException(new AuditUnavailableException("down")));
         var ingestion = Substitute.For<IOpenApiIngestionService>();
         var service = new CatalogDiscoveryService(
-            Substitute.For<ITableMetadataRepository>(), writer, Options.Create(new GatewayOptions()), openApiIngestionService: ingestion);
+            new InMemoryTableMetadataRepository(), writer, Options.Create(new GatewayOptions()), openApiIngestionService: ingestion);
         var request = new DatasourceRegistrationRequest("crane", "telemetry", SpecContent: "{}", BaseUrl: "https://api.example.test");
 
         await Should.ThrowAsync<AuditUnavailableException>(() => service.RegisterDatasourceAsync(request, new RequestContext(new TenantId("tenant-a"), new Sid("user:admin"), Roles: ["GovernanceAdmin"])));

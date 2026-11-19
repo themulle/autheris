@@ -27,6 +27,7 @@ using NSubstitute;
 using Shouldly;
 using TrinoSqlEngine.Analysis;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 namespace Autheris.Tests.Unit.Products;
 
@@ -136,7 +137,7 @@ public sealed class ProductCallerQueryTests : IDisposable
         var gate = Substitute.For<IDataSourceTransportGate>();
         var registry = Substitute.For<Autheris.Application.DataSources.Connectors.IAutherisConnectorRegistry>();
         var service = new FederatedStagingService(
-            registry, masking, Substitute.For<IAuditLogRepository>(), Options.Create(new GatewayOptions()), NullLogger<FederatedStagingService>.Instance,
+            registry, masking, new InMemoryAuditLogRepository(), Options.Create(new GatewayOptions()), NullLogger<FederatedStagingService>.Instance,
             transportGate: gate, productRouter: new ProductResultRouter(_h.Store, loader, _catalog), productCache: _store);
         return (service, gate);
     }
@@ -210,8 +211,8 @@ public sealed class ProductCallerQueryTests : IDisposable
     {
         var (product, _) = await LoadedProductAsync();
         var table = ProductCatalogProjector.Project(product, _time.GetUtcNow(), _time.GetUtcNow());
-        var repo = Substitute.For<ITableMetadataRepository>();
-        repo.GetTableMetadataAsync(table.Identifier, Arg.Any<CancellationToken>()).Returns(table);
+        var repo = new InMemoryTableMetadataRepository();
+        repo.Add(table);
         var web = new WebSqlOptions { DefaultDataSourceName = "default", AllowedDataSources = ["crm"] };
         var router = new CrossSourceQueryRouter(repo, new CrossSourceOptions { Enabled = false }, web);
         var target = new TableAccessTarget(table.Identifier.Domain, table.Identifier.Schema, table.Identifier.TableName, null, table.Identifier.ToString());

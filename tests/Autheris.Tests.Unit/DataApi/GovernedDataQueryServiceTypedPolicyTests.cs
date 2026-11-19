@@ -23,6 +23,7 @@ using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Nodes;
 using TrinoSqlEngine.Governance;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>
 /// WP-X0l: a typed row policy (marker text plus bound values) reaches the dataset query as a literal, because the dataset text is parsed
@@ -42,8 +43,8 @@ public sealed class GovernedDataQueryServiceTypedPolicyTests
             Columns = [new TableColumn { ColumnName = "id", DataType = "int" }, new TableColumn { ColumnName = "region", DataType = "varchar" }],
             PrimaryKeyColumns = ["id"]
         };
-        var repo = Substitute.For<ITableMetadataRepository>();
-        repo.GetTableMetadataAsync(Table, Arg.Any<CancellationToken>()).Returns(metadata);
+        var repo = new InMemoryTableMetadataRepository();
+        repo.Add(metadata);
 
         var namer = new PolicyParameterNamer();
         var predicate = PolicyPredicate.Create(

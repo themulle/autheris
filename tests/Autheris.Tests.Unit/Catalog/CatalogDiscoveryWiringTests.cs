@@ -16,6 +16,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>T-W0-9 (W0-C5): fail-closed wiring of the catalog discovery service from the real registration.</summary>
 [Trait("Category", "Security")]
@@ -29,7 +30,7 @@ public sealed class CatalogDiscoveryWiringTests
         services.AddSingleton(Wp0.Tables(
             Wp0.Table("sales", "orders_a", "Orders", ["id"]),
             Wp0.Table("sales", "invoices_b", "Invoices", ["id"])));
-        services.AddAuditWriterOver(Substitute.For<IAuditLogRepository>());
+        services.AddAuditWriterOver(new InMemoryAuditLogRepository());
         services.AddSingleton<IOptions<GatewayOptions>>(Options.Create(options ?? Wp0.Options(TenancyShape.Multi)));
         if (withConsentRepository)
         {
@@ -66,7 +67,7 @@ public sealed class CatalogDiscoveryWiringTests
     public void Constructor_RequiresConsentRepositoryAndOptions()
     {
         var tables = Wp0.Tables();
-        var audit = Substitute.For<IAuditLogRepository>();
+        IAuditLogRepository audit = new InMemoryAuditLogRepository();
 
         Should.Throw<ArgumentNullException>(() => new CatalogDiscoveryService(tables, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(audit), null!));
     }

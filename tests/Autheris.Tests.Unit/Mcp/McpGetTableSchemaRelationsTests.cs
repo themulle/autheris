@@ -18,6 +18,7 @@ using Autheris.Domain.Model;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>
 /// Issue #711 A: <c>get_table_schema</c> honours <c>include_relations</c> (default true). Only declared relations of the catalog
@@ -74,7 +75,7 @@ public sealed class McpGetTableSchemaRelationsTests
             _discovery,
             Substitute.For<IApiDispatcherService>(),
             Substitute.For<ILineageGraphStore>(),
-            Substitute.For<ITableMetadataRepository>(),
+            new InMemoryTableMetadataRepository(),
             graphQlMap: map ?? _map);
         var tool = new McpToolDefinition(McpDatasetTools.GetTableSchema, "Get schema", "{}", TargetGraphQLOperation: "get_table_schema");
         var json = await handler.ExecuteToolAsync(tool, arguments, Session);

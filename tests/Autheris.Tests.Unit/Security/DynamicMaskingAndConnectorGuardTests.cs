@@ -37,6 +37,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>
 /// Regression tests for Remediation Round 3 of repeated security review findings
@@ -209,7 +210,7 @@ public sealed class DynamicMaskingAndConnectorGuardTests
         IHostEnvironment env = new TestHostEnvironment("Production");
         var serviceProvider = Substitute.For<IServiceProvider>();
         serviceProvider.GetService(typeof(IHostEnvironment)).Returns(env);
-        serviceProvider.GetService(typeof(IAuditWriter)).Returns(AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()));
+        serviceProvider.GetService(typeof(IAuditWriter)).Returns(AuditWriterTestServices.Over(new InMemoryAuditLogRepository()));
         context.RequestServices = serviceProvider;
 
         var secContext = new SecurityPrincipalContext

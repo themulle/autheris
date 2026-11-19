@@ -9,6 +9,7 @@ using Autheris.Domain.Model;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 namespace Autheris.Tests.Unit.Governance;
 
@@ -125,7 +126,7 @@ public sealed class ConsentDescriptionOptInLoadingTests
     {
         var consent = Grant(GranteeType.User, 30, UserSid);
 
-        await ConsentDescriptionLoader.LoadAsync(Substitute.For<IConsentRepository>(), [consent], CancellationToken.None);
+        await ConsentDescriptionLoader.LoadAsync(new InMemoryConsentRepository(), [consent], CancellationToken.None);
 
         consent.Description.ShouldBeNull();
     }

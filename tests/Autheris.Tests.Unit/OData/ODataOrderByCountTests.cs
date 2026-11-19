@@ -76,8 +76,8 @@ public sealed class ODataOrderByCountTests
     private static (GatewayExecutionService Service, RecordingExecutor Executor) Gateway(DataSourceType type = DataSourceType.Sql, long? totalCount = 42)
     {
         var executor = new RecordingExecutor(type, totalCount);
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        metadataRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(InvoiceMetadata(type));
+        var metadataRepo = new InMemoryTableMetadataRepository();
+        metadataRepo.Add(InvoiceMetadata(type));
         var cache = Substitute.For<IConsentCacheService>();
         cache.GetCachedDecisionAsync(Arg.Any<TenantId>(), Arg.Any<Sid>(), Arg.Any<TableIdentifier>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
             .Returns(TableAccessDecision.Allowed(Invoices, Access, hasUnconstrainedColumnAllow: true));

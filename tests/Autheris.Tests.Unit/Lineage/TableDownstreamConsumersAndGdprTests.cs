@@ -15,13 +15,14 @@ using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 public class TableDownstreamConsumersAndGdprTests
 {
-    private readonly IConsentRepository _consentRepo = Substitute.For<IConsentRepository>();
+    private readonly IConsentRepository _consentRepo = new InMemoryConsentRepository();
     private readonly IDataOwnershipRepository _ownershipRepo = Substitute.For<IDataOwnershipRepository>();
     private readonly IAuditLogRepository _auditRepo = Substitute.For<IAuditLogRepository>();
-    private readonly ITableMetadataRepository _tableMetadataRepo = Substitute.For<ITableMetadataRepository>();
+    private readonly InMemoryTableMetadataRepository _tableMetadataRepo = new InMemoryTableMetadataRepository();
     private readonly LineageGraphStore _graphStore = new();
     private readonly LineageImpactAnalyzerService _sut;
 
@@ -165,7 +166,7 @@ public class TableDownstreamConsumersAndGdprTests
             }
         };
 
-        _tableMetadataRepo.GetTableMetadataAsync(table, Arg.Any<CancellationToken>()).Returns(meta);
+        _tableMetadataRepo.Add(meta);
 
         var now = DateTimeOffset.UtcNow;
         var auditLogs = new List<AuditLogEntry>

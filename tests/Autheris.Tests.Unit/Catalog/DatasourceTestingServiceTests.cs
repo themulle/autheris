@@ -18,13 +18,14 @@ using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 public sealed class DatasourceTestingServiceTests
 {
     private readonly ITableMetadataRepository _metadataRepo =
         global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
     private readonly IHttpClientFactory _httpClientFactory = Substitute.For<IHttpClientFactory>();
-    private readonly IAuditLogRepository _auditRepo = Substitute.For<IAuditLogRepository>();
+    private readonly IAuditLogRepository _auditRepo = new InMemoryAuditLogRepository();
     private readonly IKeyVaultSecretProvider _secretProvider = Substitute.For<IKeyVaultSecretProvider>();
     private readonly IHostEnvironment _environment = Substitute.For<IHostEnvironment>();
 

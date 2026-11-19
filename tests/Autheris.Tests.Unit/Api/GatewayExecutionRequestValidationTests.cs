@@ -72,8 +72,8 @@ public sealed class GatewayExecutionRequestValidationTests
         GatewayOptions? options = null,
         ITableReadConcurrencyGate? gate = null)
     {
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        metadataRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(CreateMetadata());
+        var metadataRepo = new InMemoryTableMetadataRepository();
+        metadataRepo.Add(CreateMetadata());
 
         var decision = TableAccessDecision.Allowed(
             Table,
@@ -205,8 +205,8 @@ public sealed class GatewayExecutionRequestValidationTests
     {
         // SR15-32: When filter contains a denied/masked column, it throws GatewayInvalidQueryException.
         // Audit MUST record TABLE_QUERY DENY with the filter expression, and MUST NOT record TABLE_QUERY ALLOW.
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        metadataRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(CreateMetadata());
+        var metadataRepo = new InMemoryTableMetadataRepository();
+        metadataRepo.Add(CreateMetadata());
 
         var decision = TableAccessDecision.Allowed(
             Table,
@@ -247,8 +247,8 @@ public sealed class GatewayExecutionRequestValidationTests
     {
         // SR15-32: When orderBy contains a denied/masked column, it throws GatewayInvalidQueryException.
         // Audit MUST record TABLE_QUERY DENY with order by details, and MUST NOT record TABLE_QUERY ALLOW.
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        metadataRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(CreateMetadata());
+        var metadataRepo = new InMemoryTableMetadataRepository();
+        metadataRepo.Add(CreateMetadata());
 
         var decision = TableAccessDecision.Allowed(
             Table,

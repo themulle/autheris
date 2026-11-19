@@ -9,6 +9,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 namespace Autheris.Extensions.Tests;
 
@@ -44,7 +45,7 @@ public sealed class OpenMetadataWebhookCollisionExt16Tests
             OpenMetadata = new OpenMetadataOptions { DefaultTenantId = "default-tenant", Enabled = true, WebhookSecret = Secret }
         };
         var service = new OpenMetadataSyncService(
-            client, metadataRepo, Substitute.For<IConsentRepository>(), epochRepo,
+            client, metadataRepo, new InMemoryConsentRepository(), epochRepo,
             Options.Create(options), NullLogger<OpenMetadataSyncService>.Instance);
 
         var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();

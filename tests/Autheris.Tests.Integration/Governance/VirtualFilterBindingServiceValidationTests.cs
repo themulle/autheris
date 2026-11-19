@@ -22,6 +22,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>
 /// The binding checks live in <see cref="VirtualFilterAdministrationService"/>, so every caller of
@@ -53,7 +54,7 @@ public sealed class VirtualFilterBindingServiceValidationTests : IDisposable
         {
             VirtualFilters = new VirtualFilterOptions { Federation = new VirtualFilterFederationOptions { MaxPushdownKeys = 50 } }
         });
-        _service = new VirtualFilterAdministrationService(_repository, Substitute.For<IAuditLogRepository>(), options, catalog: catalog);
+        _service = new VirtualFilterAdministrationService(_repository, new InMemoryAuditLogRepository(), options, catalog: catalog);
     }
 
     public void Dispose() => _repository.Dispose();
@@ -120,7 +121,7 @@ public sealed class VirtualFilterBindingServiceValidationTests : IDisposable
         await _service.SaveFilterAsync(Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter(), DbtActor);
         var dbt = new DbtMetadataIngestionService(
             Substitute.For<IDbtProposalRepository>(),
-            Substitute.For<ITableMetadataRepository>(),
+            new InMemoryTableMetadataRepository(),
             Substitute.For<ILineageGraphStore>(),
             epochRepository: null,
             gatewayOptions: null,
@@ -154,12 +155,12 @@ public sealed class VirtualFilterBindingServiceValidationTests : IDisposable
         });
         var approvalService = new VirtualFilterAdministrationService(
             _repository,
-            Substitute.For<IAuditLogRepository>(),
+            new InMemoryAuditLogRepository(),
             Options.Create(new GatewayOptions { VirtualFilters = new VirtualFilterOptions { RequireApproval = true } }),
             catalog: catalog);
         var dbt = new DbtMetadataIngestionService(
             Substitute.For<IDbtProposalRepository>(),
-            Substitute.For<ITableMetadataRepository>(),
+            new InMemoryTableMetadataRepository(),
             Substitute.For<ILineageGraphStore>(),
             epochRepository: null,
             gatewayOptions: null,

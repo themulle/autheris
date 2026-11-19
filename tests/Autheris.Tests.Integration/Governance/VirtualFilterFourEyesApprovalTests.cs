@@ -16,6 +16,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>
 /// SR15-06: Four-eyes principle and Last-Known-Good active enforcement for Virtual Filters and Access Profiles.
@@ -36,7 +37,7 @@ public sealed class VirtualFilterFourEyesApprovalTests : IDisposable
         Substitute.For<IEpochValidationService>(),
         Options.Create(new GatewayOptions()));
 
-    private readonly IAuditLogRepository _audit = Substitute.For<IAuditLogRepository>();
+    private readonly IAuditLogRepository _audit = new InMemoryAuditLogRepository();
     private readonly VirtualFilterAdministrationService _adminService;
     private readonly MandatoryRowFilterResolver _resolver;
 

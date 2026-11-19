@@ -19,6 +19,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 public sealed class CdcSubscriptionGovernorClusterTests
 {
@@ -59,7 +60,7 @@ public sealed class CdcSubscriptionGovernorClusterTests
                 return Task.FromResult(new ResolvedTableAccess(new TableMetadata { Identifier = table }, decision, new TenantId("tenant-a"), new Sid("S-1-USER"), ci.ArgAt<ClaimsPrincipal?>(0)!));
             });
 
-        var audit = Substitute.For<IAuditLogRepository>();
+        IAuditLogRepository audit = new InMemoryAuditLogRepository();
         var governor = new CdcSubscriptionGovernor(options, NullLogger<CdcSubscriptionGovernor>.Instance, clusterState);
 
         return (governor, audit, resolver);

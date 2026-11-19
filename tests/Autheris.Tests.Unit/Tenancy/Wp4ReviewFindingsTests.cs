@@ -32,6 +32,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>WP-DT-4 Phase 5 review findings: no "default" tenant bucket, one tenant claim reader, stable tenant source.</summary>
 [Trait("Category", "Security")]
@@ -45,7 +46,7 @@ public sealed class Wp4ReviewFindingsTests
         var audit = Substitute.For<IAuditLogRepository>();
         IHostEnvironment env = new TestHostEnvironment("Development");
         var service = new DatasourceTestingService(
-            Substitute.For<ITableMetadataRepository>(), Substitute.For<IHttpClientFactory>(), global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(audit),
+            new InMemoryTableMetadataRepository(), Substitute.For<IHttpClientFactory>(), global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(audit),
             Substitute.For<IKeyVaultSecretProvider>(), env, NullLogger<DatasourceTestingService>.Instance);
         var caller = Principal(new Claim(ClaimTypes.NameIdentifier, "u"), new Claim(ClaimTypes.Role, "Admin"));
 

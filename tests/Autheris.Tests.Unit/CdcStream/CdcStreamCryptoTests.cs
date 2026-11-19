@@ -11,6 +11,7 @@ using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 namespace Autheris.Tests.Unit.CdcStream;
 
@@ -27,8 +28,7 @@ public sealed class CdcStreamCryptoTests
 
     private CdcStreamKeyring Keyring()
     {
-        var monitor = Substitute.For<IOptionsMonitor<GatewayOptions>>();
-        monitor.CurrentValue.Returns(_ => _opts);
+        var monitor = new TestOptionsMonitor<GatewayOptions>(() => _opts);
         return new CdcStreamKeyring(_store, _keks, monitor, _time);
     }
 
@@ -206,8 +206,7 @@ public sealed class CdcStreamCryptoTests
     public async Task NoActiveKek_FailsClosed()
     {
         var keks = new FakeKekProvider();
-        var monitor = Substitute.For<IOptionsMonitor<GatewayOptions>>();
-        monitor.CurrentValue.Returns(_ => _opts);
+        var monitor = new TestOptionsMonitor<GatewayOptions>(() => _opts);
         var crypto = new CdcStreamCrypto(new CdcStreamKeyring(_store, keks, monitor, _time), NullLogger<CdcStreamCrypto>.Instance);
         var ex = await Should.ThrowAsync<CdcStreamKeyUnavailableException>(async () =>
             await crypto.ProtectEventAsync(Stream, 1, CdcStreamEventKind.Change, CdcTenantScope.Row, "acme", null, Plain));

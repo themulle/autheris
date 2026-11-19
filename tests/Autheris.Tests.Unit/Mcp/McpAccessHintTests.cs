@@ -20,6 +20,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>Every hint surface names only what the startup switches leave enabled.</summary>
 public sealed class McpAccessHintTests
@@ -42,7 +43,7 @@ public sealed class McpAccessHintTests
     private static McpDatasetCatalog Catalog(GatewayOptions o, IReadPathSwitches? switches = null)
     {
         var metadata = Substitute.For<ITableMetadataRepository>();
-        var consents = Substitute.For<IConsentRepository>();
+        IConsentRepository consents = new InMemoryConsentRepository();
         var golden = Substitute.For<IGoldenQueryService>();
         var graphQl = Substitute.For<IGraphQlCatalogMap>();
         metadata.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(

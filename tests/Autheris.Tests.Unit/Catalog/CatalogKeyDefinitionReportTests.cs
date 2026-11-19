@@ -18,6 +18,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>Issue #94 (SD-4): discovery and OpenAPI report the declared definition only as a whole, over listed columns.</summary>
 [Trait("Category", "Security")]
@@ -47,11 +48,11 @@ public sealed class CatalogKeyDefinitionReportTests
     {
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetTableMetadataAsync(Id, Arg.Any<CancellationToken>()).Returns(Table());
-        var consents = Substitute.For<IConsentRepository>();
+        IConsentRepository consents = new InMemoryConsentRepository();
         var options = Wp0.Options(Autheris.Tests.Common.TenancyShape.Single);
         var service = new CatalogDiscoveryService(
             repo,
-            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()),
+            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(new InMemoryAuditLogRepository()),
             Microsoft.Extensions.Options.Options.Create(options),
             Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(repo, consents, options),
             Substitute.For<IKeyVaultSecretProvider>(),

@@ -18,6 +18,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>
 /// NL-SC-20/23 (O-5b step 2, WP-5/6): reachable handlers and middleware answer an application/problem+json body with the expected status
@@ -151,7 +152,7 @@ public sealed class NoLegacyErrorBodiesPart3Tests
             [new Claim("sub", "S-1-5-21-ADMIN1"), new Claim("tenant_id", "home"), new Claim(ClaimTypes.Role, "ClusterAdmin")], "Bearer"));
 
         var result = await TenantRegistryAdminEndpoints.ResolveCollisionAsync(
-            tenantId + Canary, null, ctx, registry, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), default);
+            tenantId + Canary, null, ctx, registry, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(new InMemoryAuditLogRepository()), default);
 
         ShouldBeGovernedProblem(await Execute(result), status, code);
     }

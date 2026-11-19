@@ -21,6 +21,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>
 /// Issue #94 (SEC-94-01, SD-3): one corrupt key row loaded directly into the store must not let an ingestion path upsert the table
@@ -119,7 +120,7 @@ public sealed class CatalogIngestionUnavailableTableTests : IDisposable
         client.GetRolesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<OpenMetadataRole>>([]));
         client.GetTeamsAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<OpenMetadataTeam>>([]));
         client.GetUsersAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<OpenMetadataUser>>([]));
-        var sut = new OpenMetadataSyncService(client, _repo, Substitute.For<IConsentRepository>(), Substitute.For<IPolicyEpochRepository>(),
+        var sut = new OpenMetadataSyncService(client, _repo, new InMemoryConsentRepository(), Substitute.For<IPolicyEpochRepository>(),
             Options.Create(new GatewayOptions { OpenMetadata = new OpenMetadataOptions { Enabled = true } }), NullLogger<OpenMetadataSyncService>.Instance);
 
         var result = await sut.SyncPermissionsAsync(dryRun: false);

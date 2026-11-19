@@ -18,6 +18,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 public sealed class GovernedTableCacheConsentMaskTests
 {
@@ -25,7 +26,7 @@ public sealed class GovernedTableCacheConsentMaskTests
     private readonly ITableCacheStore _store = Substitute.For<ITableCacheStore>();
     private readonly IConsentResolutionService _consentService = Substitute.For<IConsentResolutionService>();
     private readonly IColumnMaskingProvider _maskingProvider = Substitute.For<IColumnMaskingProvider>();
-    private readonly IAuditLogRepository _auditRepo = Substitute.For<IAuditLogRepository>();
+    private readonly IAuditLogRepository _auditRepo = new InMemoryAuditLogRepository();
     private readonly TableCacheOptions _options = new() { Enabled = true, PersistentDirectory = "/tmp/cache" };
 
     private static readonly TableIdentifier TestTable = new("crm", "public", "customers");

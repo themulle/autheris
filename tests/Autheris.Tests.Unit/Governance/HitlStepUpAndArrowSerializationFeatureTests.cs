@@ -19,6 +19,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 public sealed class HitlStepUpAndArrowSerializationFeatureTests
 {
@@ -177,7 +178,7 @@ public sealed class HitlStepUpAndArrowSerializationFeatureTests
         var toolRegistry = Substitute.For<IMcpToolRegistry>();
         toolRegistry.FindTool("query_secret_data").Returns(tool);
 
-        var metaRepo = Substitute.For<ITableMetadataRepository>();
+        var metaRepo = new InMemoryTableMetadataRepository();
         var tableMeta = new TableMetadata
         {
             Table = new Table
@@ -188,7 +189,7 @@ public sealed class HitlStepUpAndArrowSerializationFeatureTests
             },
             Identifier = tableId
         };
-        metaRepo.GetTableMetadataAsync(tableId, Arg.Any<CancellationToken>()).Returns(tableMeta);
+        metaRepo.Add(tableMeta);
 
         var queryExecutor = Substitute.For<IMcpQueryExecutor>();
         queryExecutor.ExecuteOperationAsync(Arg.Any<McpToolDefinition>(), Arg.Any<string>(), Arg.Any<McpSessionContext>(), Arg.Any<CancellationToken>())

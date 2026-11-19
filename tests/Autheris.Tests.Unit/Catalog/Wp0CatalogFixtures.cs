@@ -18,6 +18,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>Shared fixtures of the WP-0 catalog disclosure tests (consent-based visibility, no tiers).</summary>
 internal static class Wp0
@@ -164,7 +165,7 @@ internal static class Wp0
         ILogger<CatalogDiscoveryService>? logger = null)
         => new(
             tables,
-            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()),
+            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(new InMemoryAuditLogRepository()),
             Microsoft.Extensions.Options.Options.Create(options ?? Options(TenancyShape.Multi)),
             Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(tables, consents, options ?? Options(TenancyShape.Multi)),
             Substitute.For<IKeyVaultSecretProvider>(),

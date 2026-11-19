@@ -22,6 +22,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>Issue #390 (WP-390-4, I390-SC-11): describe_dataset and the catalog detail report key directions only for a key wholly visible to the caller.</summary>
 [Trait("Category", "Security")]
@@ -138,7 +139,7 @@ public sealed class Issue390OutputDirectionTests
         var options = Wp0.Options(Autheris.Tests.Common.TenancyShape.Single);
         var service = new CatalogDiscoveryService(
             repo,
-            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()),
+            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(new InMemoryAuditLogRepository()),
             Microsoft.Extensions.Options.Options.Create(options),
             Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(repo, consents, options),
             Substitute.For<IKeyVaultSecretProvider>(),

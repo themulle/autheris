@@ -20,6 +20,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>VF-11 / VF-13: changesSince discloses removals only with proof of visibility, is bounded, and is not advertised without a change log.</summary>
 [Trait("Category", "Security")]
@@ -54,7 +55,7 @@ public sealed class ChangesSinceDisclosureTests
                 new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase) { ["id"] = ColumnAccessLevel.Clear, ["name"] = ColumnAccessLevel.Clear },
                 hasUnconstrainedColumnAllow: true));
         var service = new GovernedChangeDetectionService(
-            repo, pdp, provider, Substitute.For<IColumnMaskingProvider>(), Substitute.For<IAuditLogRepository>(),
+            repo, pdp, provider, Substitute.For<IColumnMaskingProvider>(), new InMemoryAuditLogRepository(),
             options: Options.Create(new ChangeDetectionOptions { MaxChangesPerCall = maxChanges }));
         return (service, provider, service.IssueCursor(Table, User(), Tenant, syncVersion: 1L));
     }

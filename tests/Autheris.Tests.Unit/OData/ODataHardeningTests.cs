@@ -73,8 +73,8 @@ public sealed class ODataHardeningTests
     private static (GatewayExecutionService Service, IAuditLogRepository AuditLog, CapturingExecutor Executor) CreateExecutionService()
     {
         var executor = new CapturingExecutor();
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        metadataRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(CreateSampleMetadata());
+        var metadataRepo = new InMemoryTableMetadataRepository();
+        metadataRepo.Add(CreateSampleMetadata());
 
         var decision = TableAccessDecision.Allowed(
             Table,
@@ -152,7 +152,7 @@ public sealed class ODataHardeningTests
     [InlineData(",,")]
     public async Task O1_ODataHandler_SelectEmptyOrWhitespace_Returns400InvalidQueryOption(string emptySelect)
     {
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = new InMemoryTableMetadataRepository();
         var execService = Substitute.For<IGatewayExecutionService>();
         var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
 
@@ -177,7 +177,7 @@ public sealed class ODataHardeningTests
     public async Task O1_ODataHandler_SelectUnknownColumn_Returns400InvalidQueryOption()
     {
         var (service, _, _) = CreateExecutionService();
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = new InMemoryTableMetadataRepository();
         var handler = new ODataHandler(metadataRepo, service, NullLogger<ODataHandler>.Instance);
 
         var result = await handler.ExecuteEntitySetQueryAsync(

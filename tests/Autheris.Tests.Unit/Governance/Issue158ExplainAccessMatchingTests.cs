@@ -19,6 +19,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 using static Autheris.Tests.Unit.Mcp.ScopeLevelTestKit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>
 /// Issue #158 INC-0 (PLAN-GOV-158-INC0): the access explanation derives <c>consentDescription</c> and <c>validTo</c> only from
@@ -232,7 +233,7 @@ public sealed class Issue158ExplainAccessMatchingTests : IDisposable
     }
 
     private static McpDatasetCatalog CatalogOver(EffectiveAccessExplanationService service, ITableMetadataRepository tables, IConsentRepository consents) =>
-        new(tables, consents, Substitute.For<IGatewayExecutionService>(), Substitute.For<IAuditLogRepository>(),
+        new(tables, consents, Substitute.For<IGatewayExecutionService>(), new InMemoryAuditLogRepository(),
             options: Options.Create(new Autheris.Domain.Options.GatewayOptions()), explanationService: service);
 
     [Fact]

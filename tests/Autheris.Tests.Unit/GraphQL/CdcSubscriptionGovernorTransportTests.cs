@@ -16,6 +16,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>Transport admission of CDC subscriptions is mandatory: a missing gate and the all-tables topic fail closed.</summary>
 [Trait("Category", "Security")]
@@ -52,13 +53,13 @@ public sealed class CdcSubscriptionGovernorTransportTests
     {
         var table = new TableIdentifier("default", "public", "orders");
         await Should.ThrowAsync<TransportNotAllowedException>(() =>
-            Governor().AdmitAsync(User(admin: false), "cdc_orders", table, AllowAllResolver(), Substitute.For<IAuditLogRepository>(), CancellationToken.None, transportGate: null));
+            Governor().AdmitAsync(User(admin: false), "cdc_orders", table, AllowAllResolver(), new InMemoryAuditLogRepository(), CancellationToken.None, transportGate: null));
     }
 
     /// <summary>All-tables topic: an admin without a usable ingress transport is denied, with one with a transport it is admitted.</summary>
     internal static async Task AssertAllTablesAdmissionAsync()
     {
-        var audit = Substitute.For<IAuditLogRepository>();
+        IAuditLogRepository audit = new InMemoryAuditLogRepository();
         var ex = await Should.ThrowAsync<GraphQLException>(() =>
             Governor().AdmitAsync(User(admin: true), "cdc_all", null, null, audit, CancellationToken.None, transportGate: null));
         ex.Errors[0].Code.ShouldBe("FORBIDDEN");
@@ -77,7 +78,7 @@ public sealed class CdcSubscriptionGovernorTransportTests
         var gate = Substitute.For<IDataSourceTransportGate>();
         gate.Ingress.Returns(ingress);
         var ex = await Should.ThrowAsync<GraphQLException>(() =>
-            Governor().AdmitAsync(User(admin: true), "cdc_all", null, null, Substitute.For<IAuditLogRepository>(), CancellationToken.None, transportGate: gate));
+            Governor().AdmitAsync(User(admin: true), "cdc_all", null, null, new InMemoryAuditLogRepository(), CancellationToken.None, transportGate: gate));
         ex.Errors[0].Code.ShouldBe("FORBIDDEN");
     }
 

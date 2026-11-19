@@ -23,6 +23,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>
 /// Virtual filters, phase 2: administration API. FilterAdmin writes, FilterSync applies the file repository state,
@@ -40,7 +41,7 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
 
     public VirtualFilterEndpointsTests()
     {
-        _service = new VirtualFilterAdministrationService(_repository, Substitute.For<IAuditLogRepository>());
+        _service = new VirtualFilterAdministrationService(_repository, new InMemoryAuditLogRepository());
     }
 
     public void Dispose() => _repository.Dispose();
@@ -49,7 +50,7 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
     {
         var context = new DefaultHttpContext
         {
-            RequestServices = new ServiceCollection().AddLogging().AddAuditWriterOver(Substitute.For<IAuditLogRepository>()).BuildServiceProvider()
+            RequestServices = new ServiceCollection().AddLogging().AddAuditWriterOver(new InMemoryAuditLogRepository()).BuildServiceProvider()
         };
         context.Items[SecurityPrincipalContext.ItemKey] = new SecurityPrincipalContext
         {
@@ -198,7 +199,7 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
     public async Task List_ExposesPendingHash_TheValueApprovalCompares()
     {
         var approvalOptions = Options.Create(new GatewayOptions { VirtualFilters = new VirtualFilterOptions { RequireApproval = true } });
-        var approvalService = new VirtualFilterAdministrationService(_repository, Substitute.For<IAuditLogRepository>(), approvalOptions);
+        var approvalService = new VirtualFilterAdministrationService(_repository, new InMemoryAuditLogRepository(), approvalOptions);
         var createContext = Context(Tenant, DavidFilterBody(), "FilterAdmin");
         await StatusAsync(await VirtualFilterEndpoints.PutFilterAsync("filter_pending_hash", createContext, approvalService), createContext);
         var stored = (await _repository.LoadSnapshotAsync()).Filters.Single();
@@ -308,7 +309,7 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
     public async Task PutFilter_WithRequireApproval_SavesPendingAndRequiresDistinctApprover()
     {
         var approvalOptions = Options.Create(new GatewayOptions { VirtualFilters = new VirtualFilterOptions { RequireApproval = true } });
-        var approvalService = new VirtualFilterAdministrationService(_repository, Substitute.For<IAuditLogRepository>(), approvalOptions);
+        var approvalService = new VirtualFilterAdministrationService(_repository, new InMemoryAuditLogRepository(), approvalOptions);
 
         // FilterAdmin creates filter -> saved as PendingApproval (HTTP 200)
         var createContext = Context(Tenant, DavidFilterBody(), "FilterAdmin");
@@ -352,7 +353,7 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
     public async Task Endpoint_ApproveWithoutHash_Returns400()
     {
         var approvalOptions = Options.Create(new GatewayOptions { VirtualFilters = new VirtualFilterOptions { RequireApproval = true } });
-        var approvalService = new VirtualFilterAdministrationService(_repository, Substitute.For<IAuditLogRepository>(), approvalOptions);
+        var approvalService = new VirtualFilterAdministrationService(_repository, new InMemoryAuditLogRepository(), approvalOptions);
         var createContext = Context(Tenant, DavidFilterBody(), "FilterAdmin");
         (await StatusAsync(await VirtualFilterEndpoints.PutFilterAsync("filter_nohash", createContext, approvalService), createContext)).ShouldBe(StatusCodes.Status200OK);
 
@@ -373,7 +374,7 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
     {
         // SR15-47: Dynamic status reporting based on filter states
         var approvalOptions = Options.Create(new GatewayOptions { VirtualFilters = new VirtualFilterOptions { RequireApproval = true } });
-        var approvalService = new VirtualFilterAdministrationService(_repository, Substitute.For<IAuditLogRepository>(), approvalOptions);
+        var approvalService = new VirtualFilterAdministrationService(_repository, new InMemoryAuditLogRepository(), approvalOptions);
 
         var createContext = Context(Tenant, DavidFilterBody(), "FilterAdmin");
         await VirtualFilterEndpoints.PutFilterAsync("filter_pending", createContext, approvalService);
@@ -396,7 +397,7 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
         var services = new ServiceCollection();
         services.AddSingleton(prodEnv);
         services.AddLogging();
-        services.AddAuditWriterOver(Substitute.For<IAuditLogRepository>());
+        services.AddAuditWriterOver(new InMemoryAuditLogRepository());
         var sp = services.BuildServiceProvider();
 
         var context = Context(Tenant, DavidFilterBody(), "FilterAdmin");
@@ -408,7 +409,7 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
         failingRepo.When(r => r.ApplyAsync(Arg.Any<VirtualFilterChangeSet>(), Arg.Any<CancellationToken>()))
             .Do(_ => throw new InvalidOperationException("internal database connection string or schema leak"));
 
-        var adminService = new VirtualFilterAdministrationService(failingRepo, Substitute.For<IAuditLogRepository>());
+        var adminService = new VirtualFilterAdministrationService(failingRepo, new InMemoryAuditLogRepository());
 
         var result = await VirtualFilterEndpoints.PutFilterAsync("test_filter", context, adminService);
         var status = await StatusAsync(result, context);
@@ -446,7 +447,7 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
         var provider = services.BuildServiceProvider();
         return new VirtualFilterAdministrationService(
             _repository,
-            Substitute.For<IAuditLogRepository>(),
+            new InMemoryAuditLogRepository(),
             provider.GetService<IOptions<GatewayOptions>>(),
             snapshots: null,
             catalog: provider.GetService<ITableMetadataRepository>());

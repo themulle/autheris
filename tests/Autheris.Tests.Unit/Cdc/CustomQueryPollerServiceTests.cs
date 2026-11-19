@@ -23,6 +23,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 public sealed class CustomQueryPollerServiceTests
 {
@@ -56,8 +57,7 @@ public sealed class CustomQueryPollerServiceTests
             Provider = "PostgreSql",
             ConnectionString = "Host=localhost"
         };
-        _gatewayOpt = Substitute.For<IOptionsMonitor<GatewayOptions>>();
-        _gatewayOpt.CurrentValue.Returns(gateway);
+        _gatewayOpt = new TestOptionsMonitor<GatewayOptions>(gateway);
 
         _builder = new CdcChangeEventBuilder(_streamStore, _crypto, _codec, _gatewayOpt);
     }
@@ -81,8 +81,7 @@ public sealed class CustomQueryPollerServiceTests
     [Fact]
     public void GetPartitions_WhenDisabled_ReturnsEmpty()
     {
-        var monitor = Substitute.For<IOptionsMonitor<CustomQueryPollerOptions>>();
-        monitor.CurrentValue.Returns(new CustomQueryPollerOptions { Enabled = false, Pollers = [SamplePoller()] });
+        var monitor = new TestOptionsMonitor<CustomQueryPollerOptions>(new CustomQueryPollerOptions { Enabled = false, Pollers = [SamplePoller()] });
 
         var factory = Substitute.For<IDataSourceConnectionFactory>();
         var service = new TestCustomQueryPollerService(monitor, _streamStore, _builder, factory, _signal, _clusterState);
@@ -94,8 +93,7 @@ public sealed class CustomQueryPollerServiceTests
     [Fact]
     public void GetPartitions_WhenEnabled_ReturnsPartitionsWithLeaseKeys()
     {
-        var monitor = Substitute.For<IOptionsMonitor<CustomQueryPollerOptions>>();
-        monitor.CurrentValue.Returns(new CustomQueryPollerOptions { Enabled = true, Pollers = [SamplePoller()] });
+        var monitor = new TestOptionsMonitor<CustomQueryPollerOptions>(new CustomQueryPollerOptions { Enabled = true, Pollers = [SamplePoller()] });
 
         var factory = Substitute.For<IDataSourceConnectionFactory>();
         var service = new TestCustomQueryPollerService(monitor, _streamStore, _builder, factory, _signal, _clusterState);
@@ -110,8 +108,7 @@ public sealed class CustomQueryPollerServiceTests
     public async Task PollStreamBatchAsync_ReadsRowsAndCommitsAppendBatchWithWatermarkState()
     {
         var poller = SamplePoller();
-        var monitor = Substitute.For<IOptionsMonitor<CustomQueryPollerOptions>>();
-        monitor.CurrentValue.Returns(new CustomQueryPollerOptions { Enabled = true, Pollers = [poller] });
+        var monitor = new TestOptionsMonitor<CustomQueryPollerOptions>(new CustomQueryPollerOptions { Enabled = true, Pollers = [poller] });
 
         var rows = new List<Dictionary<string, object?>>
         {
@@ -144,8 +141,7 @@ public sealed class CustomQueryPollerServiceTests
     public async Task PollStreamBatchAsync_EmptyRows_TouchesPolledAndReturnsZero()
     {
         var poller = SamplePoller();
-        var monitor = Substitute.For<IOptionsMonitor<CustomQueryPollerOptions>>();
-        monitor.CurrentValue.Returns(new CustomQueryPollerOptions { Enabled = true, Pollers = [poller] });
+        var monitor = new TestOptionsMonitor<CustomQueryPollerOptions>(new CustomQueryPollerOptions { Enabled = true, Pollers = [poller] });
 
         var conn = new FakeDbConnection([]);
         var factory = Substitute.For<IDataSourceConnectionFactory>();
@@ -163,8 +159,7 @@ public sealed class CustomQueryPollerServiceTests
     public async Task AllDuplicateBatch_PersistsAdvancedVector()
     {
         var poller = SamplePoller();
-        var monitor = Substitute.For<IOptionsMonitor<CustomQueryPollerOptions>>();
-        monitor.CurrentValue.Returns(new CustomQueryPollerOptions { Enabled = true, Pollers = [poller] });
+        var monitor = new TestOptionsMonitor<CustomQueryPollerOptions>(new CustomQueryPollerOptions { Enabled = true, Pollers = [poller] });
 
         // Poll 1: insert Alice at 05:00
         var rows1 = new List<Dictionary<string, object?>>
@@ -202,8 +197,7 @@ public sealed class CustomQueryPollerServiceTests
     public async Task AllDuplicateBatch_StaleFencingToken_Rejected()
     {
         var poller = SamplePoller();
-        var monitor = Substitute.For<IOptionsMonitor<CustomQueryPollerOptions>>();
-        monitor.CurrentValue.Returns(new CustomQueryPollerOptions { Enabled = true, Pollers = [poller] });
+        var monitor = new TestOptionsMonitor<CustomQueryPollerOptions>(new CustomQueryPollerOptions { Enabled = true, Pollers = [poller] });
 
         // Poll 1 at token 5
         var rows1 = new List<Dictionary<string, object?>>

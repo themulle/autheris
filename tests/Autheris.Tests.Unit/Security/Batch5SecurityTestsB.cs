@@ -611,8 +611,7 @@ public sealed class Batch5SecurityTestsB : IDisposable
         var channel = new FakeChannel();
         var store = new InMemoryCloudEventSubscriptionStore();
         var audit = Substitute.For<IAuditWriter>();
-        var optionsMonitor = Substitute.For<IOptionsMonitor<CdcWebhooksOptions>>();
-        optionsMonitor.CurrentValue.Returns(new CdcWebhooksOptions { Enabled = true, SubscriptionCacheSeconds = 5 });
+        var optionsMonitor = new TestOptionsMonitor<CdcWebhooksOptions>(new CdcWebhooksOptions { Enabled = true, SubscriptionCacheSeconds = 5 });
 
         // Non-default realm configured in the registry
         var realmRegistry = Substitute.For<IIdentityRealmRegistry>();

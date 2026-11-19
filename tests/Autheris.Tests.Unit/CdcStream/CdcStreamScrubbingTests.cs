@@ -10,6 +10,7 @@ using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 namespace Autheris.Tests.Unit.CdcStream;
 
@@ -40,8 +41,7 @@ public sealed class CdcStreamScrubbingTests
 
         var store = new FakeKeyStore();
         var keks = new FakeKekProvider().Add("k1");
-        var monitor = Substitute.For<IOptionsMonitor<GatewayOptions>>();
-        monitor.CurrentValue.Returns(new GatewayOptions());
+        var monitor = new TestOptionsMonitor<GatewayOptions>(new GatewayOptions());
         var log = new Capture();
         var crypto = new CdcStreamCrypto(new CdcStreamKeyring(store, keks, monitor, new FakeTimeProvider()), log);
 

@@ -33,6 +33,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 namespace Autheris.Tests.Unit.ConsentRequests;
 
@@ -104,8 +105,8 @@ public sealed class WriteConsentWorkflowTests
         List<ConsentRequest> created,
         IRowPolicyDependencyIndex? policyDeps = null)
     {
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        metadataRepo.GetTableMetadataAsync(meta.Identifier, Arg.Any<CancellationToken>()).Returns(meta);
+        var metadataRepo = new InMemoryTableMetadataRepository();
+        metadataRepo.Add(meta);
 
         var approvalsRepo = Substitute.For<IConsentApprovalRepository>();
         approvalsRepo.CreateConsentRequestAsync(Arg.Any<ConsentRequest>(), Arg.Any<CancellationToken>())
@@ -126,9 +127,9 @@ public sealed class WriteConsentWorkflowTests
         approval.GetConsentRequestAsync(req.Id, Arg.Any<CancellationToken>()).Returns(req);
         var ownership = Substitute.For<IDataOwnershipRepository>();
         ownership.IsAuthorizedApproverForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<Sid>(), Arg.Any<CancellationToken>()).Returns(true);
-        var consents = Substitute.For<IConsentRepository>();
-        var metadata = Substitute.For<ITableMetadataRepository>();
-        metadata.GetTableMetadataAsync(meta.Identifier, Arg.Any<CancellationToken>()).Returns(meta);
+        IConsentRepository consents = new InMemoryConsentRepository();
+        var metadata = new InMemoryTableMetadataRepository();
+        metadata.Add(meta);
         return (approval, ownership, consents, metadata);
     }
 

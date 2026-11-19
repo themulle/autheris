@@ -223,7 +223,7 @@ public sealed class Batch4AdvisoriesSecurityTests
         var tableId = new TableIdentifier(Tenant.Value, "public", "orders");
 
         await Should.ThrowAsync<TransportNotAllowedException>(() =>
-            governor.AdmitAsync(user, "cdc_orders", tableId, accessResolver, Substitute.For<IAuditLogRepository>(), CancellationToken.None, transportGate: gate));
+            governor.AdmitAsync(user, "cdc_orders", tableId, accessResolver, new InMemoryAuditLogRepository(), CancellationToken.None, transportGate: gate));
     }
 
     [Fact]

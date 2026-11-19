@@ -82,7 +82,7 @@ public sealed class McpSearchHitDatasetIdTests
 
     private CatalogDiscoveryService Discovery() => new(
         _metadata,
-        global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()),
+        global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(new InMemoryAuditLogRepository()),
         Options.Create(_options),
         CatalogVisibilityTestFactory.Create(_metadata, _consents, _options));
 

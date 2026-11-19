@@ -26,6 +26,7 @@ using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 [Trait("Category", "Security")]
 public sealed class TableCacheGovernanceSecurityTests : IDisposable
@@ -60,7 +61,7 @@ public sealed class TableCacheGovernanceSecurityTests : IDisposable
 
         _store = new InMemoryTableCacheStore(Options.Create(_options));
         _catalog = new TableCacheCatalog();
-        _auditRepo = Substitute.For<IAuditLogRepository>();
+        _auditRepo = new InMemoryAuditLogRepository();
         _consentService = Substitute.For<IConsentResolutionService>();
         _maskingProvider = Substitute.For<IColumnMaskingProvider>();
 

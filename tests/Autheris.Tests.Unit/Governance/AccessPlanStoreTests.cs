@@ -19,6 +19,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>ARC-C-05 / SR-L-06 Part C: access plans, confirmation tokens and secrets in shared state with TTL.</summary>
 [Trait("Category", "Security")]
@@ -28,7 +29,7 @@ public sealed class AccessPlanStoreTests
     private const string DatasetId = "sales.public.orders";
 
     private readonly IConsentRepository _consentRepo = Substitute.For<IConsentRepository>();
-    private readonly IAuditLogRepository _audit = Substitute.For<IAuditLogRepository>();
+    private readonly IAuditLogRepository _audit = new InMemoryAuditLogRepository();
     private readonly ITotpSecretStore _secrets = new InMemoryTotpSecretStore();
     private readonly TotpVerificationService _totp = new();
 

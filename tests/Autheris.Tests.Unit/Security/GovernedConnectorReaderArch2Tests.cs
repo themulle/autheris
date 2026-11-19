@@ -27,6 +27,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>
 /// Architecture 2 / SQL2-5: every connector read goes through one governed pipeline (row filter when the connector did
@@ -80,7 +81,7 @@ public sealed class GovernedConnectorReaderArch2Tests
         httpContext.User = new ClaimsPrincipal(new ClaimsIdentity(
             [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-USER"), new Claim("tenant_id", "tenant-a")], "Bearer"));
         httpContext.RequestServices = new ServiceCollection()
-            .AddAuditWriterOver(Substitute.For<IAuditLogRepository>())
+            .AddAuditWriterOver(new InMemoryAuditLogRepository())
             .BuildServiceProvider();
         httpContext.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new
         {

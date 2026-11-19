@@ -65,7 +65,7 @@ public sealed class TenantRegistryAdminEndpointTests
     {
         var registry = Substitute.For<ITenantRegistry>();
 
-        var result = await TenantRegistryAdminEndpoints.ResolveCollisionAsync("not valid!", null, Context("ClusterAdmin"), registry, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), default);
+        var result = await TenantRegistryAdminEndpoints.ResolveCollisionAsync("not valid!", null, Context("ClusterAdmin"), registry, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(new InMemoryAuditLogRepository()), default);
 
         Status(result).ShouldBe(StatusCodes.Status400BadRequest);
         await registry.DidNotReceiveWithAnyArgs().ResolveCollisionAsync(default, default, default);

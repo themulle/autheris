@@ -34,6 +34,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 public sealed class AccessProfileDistributedStateTests
 {
@@ -72,7 +73,7 @@ public sealed class AccessProfileDistributedStateTests
         IAccessProfileRepository? profileRepo = null,
         IMemoryCache? memoryCache = null)
     {
-        var consentRepo = Substitute.For<IConsentRepository>();
+        IConsentRepository consentRepo = new InMemoryConsentRepository();
         var resolutionService = Substitute.For<IConsentResolutionService>();
         // SR-M-07: an access profile never creates an allow; the underlying consent decision allows the table here.
         resolutionService.ResolveAccess(default!, default!, default!, default, default!, default, default, default)

@@ -24,6 +24,7 @@ using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Emit;
 using Xunit;
 using static Autheris.Tests.Unit.Sql.ClientListFixture;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>REQ-SQL-128 Phase 3: error mapping (C-15), provider errors (SEC-128-07) and the federation guard (SEC-128-12).</summary>
 public sealed class ClientListHardeningTests
@@ -97,7 +98,7 @@ public sealed class ClientListHardeningTests
     // ---- SEC-128-12 / M-10 --------------------------------------------------------------------------------------------------------
 
     private static FederatedDuckDbExecutionService Federated(out ICrossSourceQueryRouter router) =>
-        new(Options.Create(new GatewayOptions()), Substitute.For<IAuditLogRepository>(), router = Substitute.For<ICrossSourceQueryRouter>(),
+        new(Options.Create(new GatewayOptions()), new InMemoryAuditLogRepository(), router = Substitute.For<ICrossSourceQueryRouter>(),
             Substitute.For<ICrossSourcePlanner>(), Substitute.For<IFederatedStagingService>(), Substitute.For<IDuckDbOlapEngine>());
 
     [Theory]

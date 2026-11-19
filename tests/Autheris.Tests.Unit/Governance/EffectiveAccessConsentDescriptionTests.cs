@@ -20,6 +20,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 using static Autheris.Tests.Unit.Mcp.ScopeLevelTestKit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>PLAN-GOV-158-INC1 WP-158-4: the stored consent description in the access explanation (decisions 5, 9, 10; SEC-GOV158I1-08..10, 14).</summary>
 public sealed class EffectiveAccessConsentDescriptionTests
@@ -192,7 +193,7 @@ public sealed class EffectiveAccessConsentDescriptionTests
     {
         // T-GOV158I1-15 (SEC-GOV158I1-10).
         var (service, tables, repo, _) = CreateService([Grant(GranteeType.User, 30, "UNIQUE-DESC-TEXT", UserSid)]);
-        var catalog = new McpDatasetCatalog(tables, repo, Substitute.For<IGatewayExecutionService>(), Substitute.For<IAuditLogRepository>(),
+        var catalog = new McpDatasetCatalog(tables, repo, Substitute.For<IGatewayExecutionService>(), new InMemoryAuditLogRepository(),
             options: Options.Create(new GatewayOptions()), explanationService: service);
 
         var dto = await catalog.DescribeMyAccessAsync(Caller(), "sales.public.orders");

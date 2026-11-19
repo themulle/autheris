@@ -107,10 +107,10 @@ internal static class FederatedServiceHarness
         bool consentBypass = false,
         IMandatoryRowFilterResolver? resolverOverride = null)
     {
-        var repository = Substitute.For<ITableMetadataRepository>();
+        var repository = new InMemoryTableMetadataRepository();
         foreach (var (table, _) in tables)
         {
-            repository.GetTableMetadataAsync(table.Identifier, Arg.Any<CancellationToken>()).Returns(table);
+            repository.Add(table);
         }
 
         var options = new GatewayOptions

@@ -25,6 +25,7 @@ using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>WP-ARC-A-12: async job records shared across replicas through the cluster state.</summary>
 public sealed class AsyncJobClusterAccessTests : IDisposable
@@ -327,7 +328,7 @@ public sealed class AsyncJobClusterAccessTests : IDisposable
                 return AsyncJobWorkerConcurrencyTests.EmptyResult();
             });
         var worker = new AsyncQueryJobBackgroundWorker(
-            node, node, AsyncJobWorkerConcurrencyTests.Scopes(sql), Substitute.For<IAuditLogRepository>(),
+            node, node, AsyncJobWorkerConcurrencyTests.Scopes(sql), new InMemoryAuditLogRepository(),
             NullLogger<AsyncQueryJobBackgroundWorker>.Instance,
             clusterState: _state, topology: new ClusterStateTopology(ClusterStateMode.External));
         await worker.StartAsync(CancellationToken.None);
@@ -432,7 +433,7 @@ public sealed class AsyncJobClusterAccessTests : IDisposable
         sql.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
             .Returns(_ => { Interlocked.Increment(ref sqlCalls); return Task.FromResult(AsyncJobWorkerConcurrencyTests.EmptyResult()); });
         var worker = new AsyncQueryJobBackgroundWorker(
-            a, a, AsyncJobWorkerConcurrencyTests.Scopes(sql), Substitute.For<IAuditLogRepository>(),
+            a, a, AsyncJobWorkerConcurrencyTests.Scopes(sql), new InMemoryAuditLogRepository(),
             NullLogger<AsyncQueryJobBackgroundWorker>.Instance,
             clusterState: _state, topology: new ClusterStateTopology(ClusterStateMode.External));
         await worker.StartAsync(CancellationToken.None);
@@ -503,7 +504,7 @@ public sealed class AsyncJobClusterAccessTests : IDisposable
         sql.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
             .Returns(_ => { done.TrySetResult(); return Task.FromResult(AsyncJobWorkerConcurrencyTests.EmptyResult()); });
         var worker = new AsyncQueryJobBackgroundWorker(
-            node, node, AsyncJobWorkerConcurrencyTests.Scopes(sql), Substitute.For<IAuditLogRepository>(),
+            node, node, AsyncJobWorkerConcurrencyTests.Scopes(sql), new InMemoryAuditLogRepository(),
             NullLogger<AsyncQueryJobBackgroundWorker>.Instance,
             clusterState: state, topology: new ClusterStateTopology(ClusterStateMode.External));
         await SubmitAsync(node);
@@ -553,7 +554,7 @@ public sealed class AsyncJobClusterAccessTests : IDisposable
         sql.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
             .Returns(async _ => { running.TrySetResult(); await release.Task; return AsyncJobWorkerConcurrencyTests.EmptyResult(); });
         var worker = new AsyncQueryJobBackgroundWorker(
-            a, a, AsyncJobWorkerConcurrencyTests.Scopes(sql), Substitute.For<IAuditLogRepository>(),
+            a, a, AsyncJobWorkerConcurrencyTests.Scopes(sql), new InMemoryAuditLogRepository(),
             NullLogger<AsyncQueryJobBackgroundWorker>.Instance,
             clusterState: _state, topology: new ClusterStateTopology(ClusterStateMode.External));
         await worker.StartAsync(CancellationToken.None);

@@ -14,6 +14,7 @@ using NSubstitute;
 using Shouldly;
 using TrinoSqlEngine.Analysis;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>SQLA-07: the allowlist is checked on the data source a read really uses (catalog SourceName, mapped), not only on the identifier domain.</summary>
 [Trait("Category", "Security")]
@@ -45,10 +46,10 @@ public sealed class SqlaDataSourceAllowlistTests
 
     private static CrossSourceQueryRouter Router(WebSqlOptions web, params TableMetadata[] metas)
     {
-        var repo = Substitute.For<ITableMetadataRepository>();
+        var repo = new InMemoryTableMetadataRepository();
         foreach (var m in metas)
         {
-            repo.GetTableMetadataAsync(m.Identifier, Arg.Any<CancellationToken>()).Returns(m);
+            repo.Add(m);
         }
 
         return new CrossSourceQueryRouter(repo, new CrossSourceOptions { Enabled = true }, web);

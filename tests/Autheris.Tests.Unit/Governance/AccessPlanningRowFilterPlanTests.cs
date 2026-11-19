@@ -13,6 +13,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 namespace Autheris.Tests.Unit.Governance;
 
@@ -44,7 +45,7 @@ public sealed class AccessPlanningRowFilterPlanTests
         _admin.ValidateObjectAsync(Orders, Arg.Any<RowFilterEvaluationSettings?>(), Arg.Any<CancellationToken>())
             .Returns(new RowFilterEvaluationPreview(Orders, Stored));
         _service = new AccessPlanningService(
-            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), _tables, Substitute.For<IConsentRepository>(), _totp, _secrets,
+            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(new InMemoryAuditLogRepository()), _tables, new InMemoryConsentRepository(), _totp, _secrets,
             secretProvider: keyVault,
             planOptions: Options.Create(new AccessPlanOptions { SigningKeyRef = "accessplan-signing" }),
             accessPlanStore: _store,
@@ -264,7 +265,7 @@ public sealed class AccessPlanningRowFilterPlanTests
     [Fact]
     public async Task Service_WithoutAdminService_FailsClosed()
     {
-        var bare = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()));
+        var bare = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(new InMemoryAuditLogRepository()));
 
         await Should.ThrowAsync<SecurityException>(() => bare.PlanRowFilterEvaluationAsync(RuleRequest(), Admin, Tenant));
     }

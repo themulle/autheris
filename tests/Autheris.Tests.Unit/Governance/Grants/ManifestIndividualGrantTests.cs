@@ -10,6 +10,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 namespace Autheris.Tests.Unit.Governance.Grants;
 
@@ -48,7 +49,7 @@ public sealed class ManifestIndividualGrantTests
         var svc = new DeclarativeConsentApplyService(
             Tables(sensitivity),
             repo,
-            Substitute.For<IAuditLogRepository>(),
+            new InMemoryAuditLogRepository(),
             grantValidityPolicy: validityPolicy);
         Last = await svc.ApplyManifestAsync(Admin(), new DeclarativeConsentManifest("1", [p]), dryRun);
         return repo;

@@ -26,6 +26,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 [Trait("Category", "Security")]
 public sealed class AccessPlanningTenantBindingTests
@@ -64,7 +65,7 @@ public sealed class AccessPlanningTenantBindingTests
         secretProvider.GetSecretBytes(Arg.Any<string>()).Returns(Encoding.UTF8.GetBytes("key-32-bytes-long-for-hmac-sha256!"));
 
         var service = new AccessPlanningService(
-            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()),
+            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(new InMemoryAuditLogRepository()),
             tableMetadataRepository: tableRepo,
             consentRepository: consents,
             totpVerificationService: totpService,
@@ -171,7 +172,7 @@ public sealed class AccessPlanningTenantBindingTests
             .Returns(new RowFilterEvaluationPreview(orders, stored));
 
         var service = new AccessPlanningService(
-            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()),
+            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(new InMemoryAuditLogRepository()),
             tableMetadataRepository: tableRepo,
             totpVerificationService: totpService,
             totpSecretStore: secretStore,

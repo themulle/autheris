@@ -21,6 +21,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>
 /// Issue #111 WP-3 (A-4, A-1 G1, F-C9, F-C11, F-C12, BC-14): MCP output shaping. The allow-listed <c>Summary</c> description, admin rows that
@@ -56,7 +57,7 @@ public sealed class McpCatalogSummaryViewTests
         var tableRepo = Wp0.Tables(tables.ToArray());
         var consentRepo = Wp0.Consents(consents);
         return new McpDatasetCatalog(
-            tableRepo, consentRepo, Substitute.For<IGatewayExecutionService>(), Substitute.For<IAuditLogRepository>(),
+            tableRepo, consentRepo, Substitute.For<IGatewayExecutionService>(), new InMemoryAuditLogRepository(),
             options: Options.Create(options), graphQlMap: graphQl, dataOwnershipRepository: owners,
             visibilityService: Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(tableRepo, consentRepo, options));
     }

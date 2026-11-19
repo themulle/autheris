@@ -35,6 +35,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>
 /// Security regression tests for GraphQL subscriptions, CDC governors, and Apollo Federation signature validation.
@@ -296,7 +297,7 @@ public sealed class GraphQlSubscriptionAndFederationSecurityTests
             ownershipRepo,
             graphStore,
             auditRepo,
-            Substitute.For<ITableMetadataRepository>(),
+            new InMemoryTableMetadataRepository(),
             NullLogger<LineageImpactAnalyzerService>.Instance);
     }
 
@@ -327,7 +328,7 @@ public sealed class GraphQlSubscriptionAndFederationSecurityTests
         graph.UpdateGraph([new LineageNode(table.ToString(), "salaries", LineageNodeType.Table, [], "HR", "hr@corp.local")]);
         var ownership = Substitute.For<IDataOwnershipRepository>();
         ownership.IsAuthorizedApproverForTableAsync(table, Arg.Any<Sid>(), Arg.Any<CancellationToken>()).Returns(false);
-        var sut = CreateLineageService(Substitute.For<IConsentRepository>(), ownership, CreateAuditRepoWithReads(table.ToString()), graph);
+        var sut = CreateLineageService(new InMemoryConsentRepository(), ownership, CreateAuditRepoWithReads(table.ToString()), graph);
 
         var attacker = new CallerSecurityContext(new Sid("S-1-5-21-ATTACKER"), [], ["Analyst"], new TenantId("tenant-1"), false, false);
         var report = await sut.GetTableConsumersAsync(table, 3650, attacker);
@@ -348,7 +349,7 @@ public sealed class GraphQlSubscriptionAndFederationSecurityTests
         var caller = new CallerSecurityContext(new Sid("S-1-5-21-CALLER"), [], [role], new TenantId("tenant-1"), false, false);
         var ownership = Substitute.For<IDataOwnershipRepository>();
         ownership.IsAuthorizedApproverForTableAsync(table, caller.UserSid, Arg.Any<CancellationToken>()).Returns(isOwner);
-        var sut = CreateLineageService(Substitute.For<IConsentRepository>(), ownership, CreateAuditRepoWithReads(table.ToString()), graph);
+        var sut = CreateLineageService(new InMemoryConsentRepository(), ownership, CreateAuditRepoWithReads(table.ToString()), graph);
 
         var report = await sut.GetTableConsumersAsync(table, 30, caller);
 
@@ -377,7 +378,7 @@ public sealed class GraphQlSubscriptionAndFederationSecurityTests
         consentRepo.GetConsentByIdAsync(consentId, Arg.Any<CancellationToken>()).Returns(CreateConsent(consentId, table, new TenantId("tenant-a")));
         var ownership = Substitute.For<IDataOwnershipRepository>();
         ownership.IsAuthorizedApproverForTableAsync(table, Arg.Any<Sid>(), Arg.Any<CancellationToken>()).Returns(false);
-        var sut = CreateLineageService(consentRepo, ownership, Substitute.For<IAuditLogRepository>(), new LineageGraphStore());
+        var sut = CreateLineageService(consentRepo, ownership, new InMemoryAuditLogRepository(), new LineageGraphStore());
 
         var caller = new CallerSecurityContext(new Sid("S-1-5-21-ANALYST"), [], ["Analyst"], new TenantId("tenant-a"), false, false);
 
@@ -392,7 +393,7 @@ public sealed class GraphQlSubscriptionAndFederationSecurityTests
         var consentId = Guid.NewGuid();
         var consentRepo = Substitute.For<IConsentRepository>();
         consentRepo.GetConsentByIdAsync(consentId, Arg.Any<CancellationToken>()).Returns(CreateConsent(consentId, table, Autheris.Tests.Common.TestTenants.Default));
-        var sut = CreateLineageService(consentRepo, Substitute.For<IDataOwnershipRepository>(), Substitute.For<IAuditLogRepository>(), new LineageGraphStore());
+        var sut = CreateLineageService(consentRepo, Substitute.For<IDataOwnershipRepository>(), new InMemoryAuditLogRepository(), new LineageGraphStore());
 
         var caller = new CallerSecurityContext(new Sid("S-1-5-21-GOV"), [], ["GovernanceAdmin"], new TenantId("tenant-a"), true, false);
 
@@ -410,7 +411,7 @@ public sealed class GraphQlSubscriptionAndFederationSecurityTests
         var caller = new CallerSecurityContext(new Sid("S-1-5-21-OWNER"), [], ["Analyst"], new TenantId("tenant-a"), false, false);
         var ownership = Substitute.For<IDataOwnershipRepository>();
         ownership.IsAuthorizedApproverForTableAsync(table, caller.UserSid, Arg.Any<CancellationToken>()).Returns(true);
-        var sut = CreateLineageService(consentRepo, ownership, Substitute.For<IAuditLogRepository>(), new LineageGraphStore());
+        var sut = CreateLineageService(consentRepo, ownership, new InMemoryAuditLogRepository(), new LineageGraphStore());
 
         var report = await sut.CalculateConsentRevocationImpactAsync(new TenantId("tenant-a"), consentId, caller);
 

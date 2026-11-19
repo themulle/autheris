@@ -21,6 +21,7 @@ using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>06-FU-02 / WAVE3-SCIM-SC-01..06 and T-01..T-09: SCIM mass-deprovisioning guard.</summary>
 public sealed class ScimMassChangeGuardTests
@@ -37,8 +38,7 @@ public sealed class ScimMassChangeGuardTests
 
     private ScimMassChangeGuard Create()
     {
-        var monitor = Substitute.For<IOptionsMonitor<IdentityRealmsOptions>>();
-        monitor.CurrentValue.Returns(new IdentityRealmsOptions { Scim = new ScimOptions { MassChangeProtection = _settings } });
+        var monitor = new TestOptionsMonitor<IdentityRealmsOptions>(new IdentityRealmsOptions { Scim = new ScimOptions { MassChangeProtection = _settings } });
         return new ScimMassChangeGuard(_repo, monitor, _audit, _time, _logger);
     }
 

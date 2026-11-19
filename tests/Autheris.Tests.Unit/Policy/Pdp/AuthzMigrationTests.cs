@@ -20,6 +20,7 @@ using Autheris.Domain.Model;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>Grants are records: no relationship tuples are written anywhere, and nothing is converted into a grant automatically.</summary>
 public sealed class AuthzMigrationTests
@@ -48,7 +49,7 @@ public sealed class AuthzMigrationTests
         var secrets = new InMemoryTotpSecretStore();
         var totp = new TotpVerificationService();
         var service = new AccessPlanningService(
-            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), tables, consents, totp, secrets);
+            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(new InMemoryAuditLogRepository()), tables, consents, totp, secrets);
 
         var validUntil = DateTimeOffset.UtcNow.AddDays(30);
         var plan = await service.PlanAccessAsync(

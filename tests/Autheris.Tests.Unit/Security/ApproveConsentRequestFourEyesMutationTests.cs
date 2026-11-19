@@ -18,6 +18,7 @@ using Microsoft.Extensions.DependencyInjection;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>
 /// Security review (approveConsentRequest): four-eyes follows the canonical rule (flag OR CONFIDENTIAL/HIGH/RESTRICTED/SECRET sensitivity),
@@ -108,8 +109,8 @@ public sealed class ApproveConsentRequestFourEyesMutationTests
         var ownership = Substitute.For<IDataOwnershipRepository>();
         ownership.IsAuthorizedApproverForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<Sid>(), Arg.Any<CancellationToken>()).Returns(true);
         var consents = Substitute.For<IConsentRepository>();
-        var metadata = Substitute.For<ITableMetadataRepository>();
-        metadata.GetTableMetadataAsync(meta.Identifier, Arg.Any<CancellationToken>()).Returns(meta);
+        var metadata = new InMemoryTableMetadataRepository();
+        metadata.Add(meta);
         return (approval, ownership, consents, metadata);
     }
 
@@ -214,8 +215,8 @@ public sealed class ApproveConsentRequestFourEyesMutationTests
 
         var ownership = Substitute.For<IDataOwnershipRepository>();
         var consents = Substitute.For<IConsentRepository>();
-        var metadata = Substitute.For<ITableMetadataRepository>();
-        metadata.GetTableMetadataAsync(meta.Identifier, Arg.Any<CancellationToken>()).Returns(meta);
+        var metadata = new InMemoryTableMetadataRepository();
+        metadata.Add(meta);
 
         var accessor = CreateAccessor(); // caller is tenant "default"
         var mutation = new Mutation();

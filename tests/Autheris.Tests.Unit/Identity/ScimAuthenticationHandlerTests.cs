@@ -13,6 +13,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 public sealed class ScimAuthenticationHandlerTests
 {
@@ -36,8 +37,7 @@ public sealed class ScimAuthenticationHandlerTests
             }
         };
 
-        _realmOptionsMonitor = Substitute.For<IOptionsMonitor<IdentityRealmsOptions>>();
-        _realmOptionsMonitor.CurrentValue.Returns(_realmOptions);
+        _realmOptionsMonitor = new TestOptionsMonitor<IdentityRealmsOptions>(_realmOptions);
     }
 
     private async Task<AuthenticateResult> RunAuthenticateAsync(string? authHeader, string path = "/scim/v2/workforce-entra/Users")

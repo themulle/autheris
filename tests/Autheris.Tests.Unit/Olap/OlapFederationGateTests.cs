@@ -25,6 +25,7 @@ using NSubstitute;
 using Shouldly;
 using TrinoSqlEngine;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>
 /// PLAN-SEC-OLAP-01: federation gate, classification, ordering (authorize all before any read), guardrails, budgets and audit of the
@@ -669,7 +670,7 @@ public sealed partial class OlapFederationGateTests
         var limiter = new OlapRequestLimiter(options);
         var sut = new OlapStagingService(
             new DuckDbOlapEngine(options, NullLogger<DuckDbOlapEngine>.Instance),
-            Substitute.For<ITableMetadataRepository>(), Substitute.For<IAutherisConnectorRegistry>(), Substitute.For<ICrossDomainAccessResolver>(),
+            new InMemoryTableMetadataRepository(), Substitute.For<IAutherisConnectorRegistry>(), Substitute.For<ICrossDomainAccessResolver>(),
             Substitute.For<IColumnMaskingProvider>(), options, Substitute.For<IAuditWriter>(), NullLogger<OlapStagingService>.Instance,
             new FederationGate(options), FastSqlEngine.Default, limiter);
 

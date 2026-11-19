@@ -23,6 +23,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>PLAN-GOV-129 test 12 (endpoints), ST-129-13 (REST), ST-129-16 (BC-129-03, BC-129-10, BC-129-13): the administration API.</summary>
 [Trait("Category", "Security")]
@@ -41,7 +42,7 @@ public sealed class CallerAttributeAdminEndpointTests : IDisposable
     {
         var options = Options.Create(new GatewayOptions { CallerAttributes = new CallerAttributeOptions { Enabled = true, Claims = CallerAttributeTestSupport.Options().Claims } });
         _registry = new CallerAttributeRegistry(_store, options);
-        _service = new CallerAttributeAdministrationService(_store, _registry, Substitute.For<IAuditLogRepository>(), options, TimeProvider.System,
+        _service = new CallerAttributeAdministrationService(_store, _registry, new InMemoryAuditLogRepository(), options, TimeProvider.System,
             [new ClaimsAttributeDefinitionValidator(options)]);
     }
 
@@ -55,7 +56,7 @@ public sealed class CallerAttributeAdminEndpointTests : IDisposable
     {
         var context = new DefaultHttpContext
         {
-            RequestServices = new ServiceCollection().AddLogging().AddAuditWriterOver(Substitute.For<IAuditLogRepository>()).BuildServiceProvider()
+            RequestServices = new ServiceCollection().AddLogging().AddAuditWriterOver(new InMemoryAuditLogRepository()).BuildServiceProvider()
         };
         context.Items[SecurityPrincipalContext.ItemKey] = new SecurityPrincipalContext
         {
@@ -240,7 +241,7 @@ public sealed class CallerAttributeAdminEndpointTests : IDisposable
             {
                 ["cost_center"] = CallerAttributeResult.Resolved(new CallerAttributeValue(["clear-secret-9"], TrinoSqlEngine.Ast.Emit.SqlParameterType.String))
             }));
-        return new CallerAttributeSimulationService(resolver, Substitute.For<IAuditLogRepository>(),
+        return new CallerAttributeSimulationService(resolver, new InMemoryAuditLogRepository(),
             Options.Create(new GatewayOptions { CallerAttributes = new CallerAttributeOptions { Enabled = true } }));
     }
 

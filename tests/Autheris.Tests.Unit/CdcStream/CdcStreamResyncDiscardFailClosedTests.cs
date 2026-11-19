@@ -10,6 +10,7 @@ using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 namespace Autheris.Tests.Unit.CdcStream;
 
@@ -29,8 +30,7 @@ public sealed class CdcStreamResyncDiscardFailClosedTests : IDisposable
 
     public CdcStreamResyncDiscardFailClosedTests()
     {
-        var monitor = Substitute.For<IOptionsMonitor<GatewayOptions>>();
-        monitor.CurrentValue.Returns(new GatewayOptions());
+        var monitor = new TestOptionsMonitor<GatewayOptions>(new GatewayOptions());
         _keyring = new CdcStreamKeyring(_keys, _keks, monitor, new FakeTimeProvider());
         _store.GetStreamAsync(Id, Arg.Any<CancellationToken>()).Returns(_descriptorStore.Descriptor);
         _store.DiscardUnreadableAsync(Id, Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>()).Returns(3);

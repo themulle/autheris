@@ -24,6 +24,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>
 /// WP-0 (PLAN-GOV-111 A-0.3, A-0.6, A-0.7, A-0.8): the MCP channels (resources, tools, <c>invoke_api</c>, dataset tools) use the one caller
@@ -57,7 +58,7 @@ public sealed class McpCatalogChannelsWp0Tests
             Substitute.For<ILineageGraphStore>(),
             tables,
             gatewayOptions: gatewayOptions);
-        var datasets = new McpDatasetCatalog(tables, consentRepo, Substitute.For<IGatewayExecutionService>(), Substitute.For<IAuditLogRepository>(), options: gatewayOptions,
+        var datasets = new McpDatasetCatalog(tables, consentRepo, Substitute.For<IGatewayExecutionService>(), new InMemoryAuditLogRepository(), options: gatewayOptions,
             visibilityService: Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(tables, consentRepo, options));
         return new Harness(new McpResourceProvider(discovery, dispatcher), dispatcher, tools, datasets);
     }

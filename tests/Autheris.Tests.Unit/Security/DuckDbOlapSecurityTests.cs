@@ -555,7 +555,7 @@ public sealed class DuckDbOlapSecurityTests
         await Autheris.Tests.Unit.TestDoubles.OlapEndpointTestHost.HandleAsync(
             httpContext,
             Substitute.For<IDuckDbOlapEngine>(),
-            Substitute.For<ITableMetadataRepository>(),
+            new InMemoryTableMetadataRepository(),
             Substitute.For<IAutherisConnectorRegistry>(),
             Substitute.For<ICrossDomainAccessResolver>(),
             Substitute.For<IColumnMaskingProvider>(),

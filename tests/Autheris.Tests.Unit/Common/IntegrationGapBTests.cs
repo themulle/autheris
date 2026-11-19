@@ -32,6 +32,7 @@ using NSubstitute;
 using Shouldly;
 using StackExchange.Redis;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>
 /// Runde 3 / GAP-B: OpenSchema kein MCP-Bypass (GAP06), MCP isError (GAP07), Token-Entzug bei
@@ -126,7 +127,7 @@ public sealed class IntegrationGapBTests
             }
         }));
         Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(repo);
-        var consents = Substitute.For<IConsentRepository>();
+        IConsentRepository consents = new InMemoryConsentRepository();
         var options = Options.Create(new GatewayOptions());
         var compiler = new SemanticMcpCompiler(repo, NullLogger<SemanticMcpCompiler>.Instance, null, consents, options);
 

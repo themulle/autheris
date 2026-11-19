@@ -20,6 +20,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>
 /// #112 A1-13 (SEC-112-15, -22..-25): in Multi a semantic virtual table is visible only to the tenant whose <c>t_&lt;hash&gt;</c> schema it
@@ -260,7 +261,7 @@ public sealed class CatalogVirtualTableVisibilityTests
         var options = Wp0.Options(TenancyShape.Multi, foreign.Identifier.ToString());
         var service = CatalogVisibilityTestFactory.Create(repo, consents, options);
         var mcp = new McpDatasetCatalog(
-            repo, consents, Substitute.For<IGatewayExecutionService>(), Substitute.For<IAuditLogRepository>(),
+            repo, consents, Substitute.For<IGatewayExecutionService>(), new InMemoryAuditLogRepository(),
             options: Options.Create(options), visibilityService: service);
         var user = Wp0.User("S-USER", "tenant-a");
 
@@ -303,10 +304,10 @@ public sealed class CatalogVirtualTableVisibilityTests
         var options = Wp0.Options(TenancyShape.Multi);
         var service = CatalogVisibilityTestFactory.Create(tables, consents, options);
 
-        var rest = new CatalogDiscoveryService(tables, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), Options.Create(options), service);
+        var rest = new CatalogDiscoveryService(tables, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(new InMemoryAuditLogRepository()), Options.Create(options), service);
         var restNames = (await rest.ListDatasetsAsync(Wp0.Context(user))).Select(s => $"{s.Domain}.{s.Schema}.{s.Table}").Order().ToList();
         var mcp = new McpDatasetCatalog(
-            tables, consents, Substitute.For<IGatewayExecutionService>(), Substitute.For<IAuditLogRepository>(),
+            tables, consents, Substitute.For<IGatewayExecutionService>(), new InMemoryAuditLogRepository(),
             options: Options.Create(options), visibilityService: service);
         var mcpNames = (await mcp.ListDatasetsAsync(user)).Datasets.Select(d => d.Id).Order().ToList();
         var accessor = Substitute.For<IHttpContextAccessor>();

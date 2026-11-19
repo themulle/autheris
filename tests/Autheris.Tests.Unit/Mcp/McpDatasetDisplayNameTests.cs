@@ -25,6 +25,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>PLAN-CAT-146-A WP-A2: <c>displayName</c> in MCP <c>list_datasets</c> and <c>describe_dataset</c> (SEC-CAT146A-01, -05..07).</summary>
 public sealed class McpDatasetDisplayNameTests
@@ -51,7 +52,7 @@ public sealed class McpDatasetDisplayNameTests
         var tables = Wp0.Tables(rows);
         var consents = Wp0.Consents(rows.Take(consented).Select(r => Wp0.Allow(r.Identifier, "S-USER", Wp0.TenantA)).ToArray());
         return new McpDatasetCatalog(
-            tables, consents, Substitute.For<IGatewayExecutionService>(), Substitute.For<IAuditLogRepository>(),
+            tables, consents, Substitute.For<IGatewayExecutionService>(), new InMemoryAuditLogRepository(),
             options: Options.Create(options), logger: logger,
             visibilityService: CatalogVisibilityTestFactory.Create(tables, consents, options, visLogger));
     }
@@ -180,8 +181,8 @@ public sealed class McpDatasetDisplayNameTests
         var raw = $"Evil\u202E{tags}\nname";
         var table = Wp0.Table("sales", "orders", "", ["id"]);
         table = table with { Table = table.Table with { DisplayName = raw } };
-        var repo = Substitute.For<ITableMetadataRepository>();
-        repo.GetTableMetadataAsync(table.Identifier, Arg.Any<CancellationToken>()).Returns(table);
+        var repo = new InMemoryTableMetadataRepository();
+        repo.Add(table);
         var compiler = new SemanticMcpCompiler(repo, Microsoft.Extensions.Logging.Abstractions.NullLogger<SemanticMcpCompiler>.Instance);
 
         var tool = await compiler.CompileToolAsync("query_orders", table.Identifier);
@@ -200,8 +201,8 @@ public sealed class McpDatasetDisplayNameTests
     {
         // Review finding 3: the 107-unit cut must not split a surrogate pair.
         var table = Wp0.Table("sales", "orders", new string('a', 106) + "\U0001F600" + new string('b', 30), ["id"]);
-        var repo = Substitute.For<ITableMetadataRepository>();
-        repo.GetTableMetadataAsync(table.Identifier, Arg.Any<CancellationToken>()).Returns(table);
+        var repo = new InMemoryTableMetadataRepository();
+        repo.Add(table);
         var compiler = new SemanticMcpCompiler(repo, Microsoft.Extensions.Logging.Abstractions.NullLogger<SemanticMcpCompiler>.Instance);
 
         var tool = await compiler.CompileToolAsync("query_orders", table.Identifier);

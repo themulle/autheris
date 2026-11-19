@@ -17,6 +17,7 @@ using TrinoSqlEngine;
 using Autheris.Application.Sql.Services;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>L-A3 (later item): the provider execution guard has no silent pass-through fallback in the service either.</summary>
 public sealed class GovernedSqlExecutionServiceConstructionTests
@@ -81,9 +82,9 @@ public sealed class GovernedSqlExecutionServiceConstructionTests
             },
             Columns = [new TableColumn { ColumnName = "id", DataType = "varchar" }, new TableColumn { ColumnName = "status", DataType = "varchar" }]
         };
-        var repo = Substitute.For<ITableMetadataRepository>();
-        repo.GetTableMetadataAsync(orders.Identifier, Arg.Any<CancellationToken>()).Returns(orders);
-        repo.GetTableMetadataAsync(shipments.Identifier, Arg.Any<CancellationToken>()).Returns(shipments);
+        var repo = new InMemoryTableMetadataRepository();
+        repo.Add(orders);
+        repo.Add(shipments);
         var options = new GatewayOptions
         {
             Insecure = new InsecureGettingStartedOptions { danger_bypass_consent_checks = true },

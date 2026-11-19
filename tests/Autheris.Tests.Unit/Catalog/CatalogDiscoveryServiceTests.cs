@@ -18,6 +18,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 public sealed class CatalogDiscoveryServiceTests
 {
@@ -30,7 +31,7 @@ public sealed class CatalogDiscoveryServiceTests
     private CatalogDiscoveryService CreateService(ICatalogSearchEngine? searchEngine = null)
     {
         // Single-tenant deployment: a GovernanceAdmin without tenant claim is the unrestricted administrator view.
-        var consents = Substitute.For<IConsentRepository>();
+        IConsentRepository consents = new InMemoryConsentRepository();
         var options = Wp0.Options(Autheris.Tests.Common.TenancyShape.Single);
         return new CatalogDiscoveryService(
             _metadataRepository,

@@ -18,6 +18,7 @@ using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 namespace Autheris.Tests.Integration.Governance;
 
@@ -159,7 +160,7 @@ public sealed class DbtGovernanceOwnerImportTests : IDisposable
         var catalogTables = Wp0.Tables(Wp0.Table(_table.Domain, _table.TableName, "Visible", ["id"]));
         var consents = Wp0.Consents(Wp0.Allow(_table, "S-USER", Wp0.TenantA, "id"));
         var mcp = new Autheris.Application.Mcp.Services.McpDatasetCatalog(
-            catalogTables, consents, Substitute.For<Autheris.Application.Common.Interfaces.IGatewayExecutionService>(), Substitute.For<IAuditLogRepository>(),
+            catalogTables, consents, Substitute.For<Autheris.Application.Common.Interfaces.IGatewayExecutionService>(), new InMemoryAuditLogRepository(),
             options: Options.Create(gatewayOptions), dataOwnershipRepository: _repo,
             visibilityService: Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(catalogTables, consents, gatewayOptions, null));
         var description = await mcp.DescribeDatasetAsync(Wp0.User("S-USER", "tenant-a"), $"{_table.Domain}.{_table.Schema}.{_table.TableName}");

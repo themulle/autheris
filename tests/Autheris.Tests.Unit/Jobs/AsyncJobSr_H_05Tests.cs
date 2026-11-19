@@ -21,13 +21,14 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>SR-H-05: client MaxRows / Timeout of an async job never exceed the server-side bounds.</summary>
 public sealed class AsyncJobSr_H_05Tests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "autheris-sr-h-05-" + Guid.NewGuid().ToString("N"));
     private readonly IHostEnvironment _env = Substitute.For<IHostEnvironment>();
-    private readonly IAuditLogRepository _audit = Substitute.For<IAuditLogRepository>();
+    private readonly IAuditLogRepository _audit = new InMemoryAuditLogRepository();
 
     public AsyncJobSr_H_05Tests()
     {

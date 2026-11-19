@@ -60,8 +60,8 @@ public sealed class ODataFilterPushdownTests
     private static (GatewayExecutionService Service, RecordingExecutor Executor) Gateway(DataSourceType type = DataSourceType.Sql)
     {
         var executor = new RecordingExecutor(type, 100);
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        metadataRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(OrderMetadata(type));
+        var metadataRepo = new InMemoryTableMetadataRepository();
+        metadataRepo.Add(OrderMetadata(type));
         var cache = Substitute.For<IConsentCacheService>();
         cache.GetCachedDecisionAsync(Arg.Any<TenantId>(), Arg.Any<Sid>(), Arg.Any<TableIdentifier>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
             .Returns(TableAccessDecision.Allowed(Orders, Access, hasUnconstrainedColumnAllow: true));
@@ -139,8 +139,8 @@ public sealed class ODataFilterPushdownTests
         execution.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
             .Returns(new TableQueryPage([], TableAccessDecision.Allowed(Orders, Access), 0));
 
-        var metaRepo = Substitute.For<ITableMetadataRepository>();
-        metaRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(OrderMetadata());
+        var metaRepo = new InMemoryTableMetadataRepository();
+        metaRepo.Add(OrderMetadata());
 
         var handler = new ODataHandler(metaRepo, execution, NullLogger<ODataHandler>.Instance);
 

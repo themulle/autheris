@@ -24,6 +24,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>
 /// PLAN-DATA-112 WP-0 (standalone aggregation privacy hardening): SEC-112-01, -02, -03, -04, -07, F-1a, F-4 and F-7.
@@ -564,7 +565,7 @@ public sealed class AggregationPrivacyHardeningTests
         var service = new SemanticMetricQueryService(
             catalog,
             Substitute.For<IGovernedAggregationService>(),
-            Substitute.For<ITableMetadataRepository>(),
+            new InMemoryTableMetadataRepository(),
             auditLogRepository: new CapturingAuditLogRepository(),
             pdp: Autheris.Tests.Unit.TestSupport.AccessDecisionPointStubs.Denying());
 

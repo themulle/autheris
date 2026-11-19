@@ -24,6 +24,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>ARCH-MNT-06-T-06 (SC-01, SC-03): the SCIM caller allowlist (<c>AllowedIpRanges</c>) is enforced, fail closed and generic.</summary>
 [Trait("Category", "Security")]
@@ -48,8 +49,7 @@ public sealed class ScimAllowedIpRangesTests
     {
         var schemeOptions = Substitute.For<IOptionsMonitor<AuthenticationSchemeOptions>>();
         schemeOptions.Get(Arg.Any<string>()).Returns(new AuthenticationSchemeOptions());
-        var realms = Substitute.For<IOptionsMonitor<IdentityRealmsOptions>>();
-        realms.CurrentValue.Returns(options);
+        var realms = new TestOptionsMonitor<IdentityRealmsOptions>(options);
         var handler = new ScimAuthenticationHandler(schemeOptions, NullLoggerFactory.Instance, UrlEncoder.Default, realms, resolver);
         var context = new DefaultHttpContext();
         context.Request.Headers["Authorization"] = "Bearer " + token;

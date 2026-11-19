@@ -19,6 +19,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>
 /// #138 INC-1 P2: REST and MCP discovery run through one <see cref="ICatalogVisibilityService"/> (SEC-CAT138-03, -06, -07, -09, -13, -14,
@@ -45,10 +46,10 @@ public sealed class CatalogChannelMigrationTests
     {
         var service = serviceOverride ?? CatalogVisibilityTestFactory.Create(tables, consents, options);
         var mcp = new McpDatasetCatalog(
-            tables, consents, Substitute.For<IGatewayExecutionService>(), Substitute.For<IAuditLogRepository>(),
+            tables, consents, Substitute.For<IGatewayExecutionService>(), new InMemoryAuditLogRepository(),
             options: Options.Create(options), graphQlMap: graphQl, visibilityService: service);
         var rest = new CatalogDiscoveryService(
-            tables, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), Options.Create(options), service);
+            tables, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(new InMemoryAuditLogRepository()), Options.Create(options), service);
         return (mcp, rest, service);
     }
 
@@ -132,8 +133,8 @@ public sealed class CatalogChannelMigrationTests
         var tables = Wp0.Tables(Ok);
         var consents = ConsentsFor("S-USER", Ok);
         var mcp = new McpDatasetCatalog(
-            tables, consents, Substitute.For<IGatewayExecutionService>(), Substitute.For<IAuditLogRepository>(), options: Options.Create(Opts()));
-        var rest = new CatalogDiscoveryService(tables, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), Options.Create(Opts()));
+            tables, consents, Substitute.For<IGatewayExecutionService>(), new InMemoryAuditLogRepository(), options: Options.Create(Opts()));
+        var rest = new CatalogDiscoveryService(tables, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(new InMemoryAuditLogRepository()), Options.Create(Opts()));
         var user = Wp0.User("S-USER", "tenant-a");
 
         (await mcp.ListDatasetsAsync(user)).Total.ShouldBe(0);
@@ -149,7 +150,7 @@ public sealed class CatalogChannelMigrationTests
         var spy = Substitute.For<ICatalogVisibilityService>();
         var options = new GatewayOptions { Tenancy = Opts().Tenancy, Insecure = new InsecureGettingStartedOptions { danger_bypass_mcp_auth = true } };
         var mcp = new McpDatasetCatalog(
-            Wp0.Tables(Ok, unmarked), Wp0.Consents(), Substitute.For<IGatewayExecutionService>(), Substitute.For<IAuditLogRepository>(),
+            Wp0.Tables(Ok, unmarked), Wp0.Consents(), Substitute.For<IGatewayExecutionService>(), new InMemoryAuditLogRepository(),
             options: Options.Create(options), visibilityService: spy);
         var anonymous = new ClaimsPrincipal(new ClaimsIdentity());
 

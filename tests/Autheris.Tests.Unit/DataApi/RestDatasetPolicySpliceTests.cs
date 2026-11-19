@@ -32,6 +32,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 using static Autheris.Tests.Unit.VirtualFilters.Federation.FederatedVfPipelineHarness;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>
 /// WP-X0n (G-5, SEC-X1-17): REST datasets and MCP dataset tools no longer splice the decision's row-filter text into the
@@ -229,8 +230,8 @@ public sealed class RestDatasetPolicySpliceTests
         rec.Resolutions.Clear();
 
         // WebSQL side: the rewriter that applies the policy to the SQL the REST service builds.
-        var tableRepo = Substitute.For<ITableMetadataRepository>();
-        tableRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(meta);
+        var tableRepo = new InMemoryTableMetadataRepository();
+        tableRepo.Add(meta);
         Microsoft.Extensions.Hosting.IHostEnvironment env = new TestHostEnvironment("Development");
         var service = global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             Options.Create(options), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard, consentResolution: resolution, tableRepository: tableRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(tableRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
@@ -266,8 +267,8 @@ public sealed class RestDatasetPolicySpliceTests
             new RequestContext(Alice(), new TenantId(TenantValue)));
         var emitted = fx.Captured.ShouldHaveSingleItem().Sql;
 
-        var tableRepo = Substitute.For<ITableMetadataRepository>();
-        tableRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(meta);
+        var tableRepo = new InMemoryTableMetadataRepository();
+        tableRepo.Add(meta);
         Microsoft.Extensions.Hosting.IHostEnvironment env = new TestHostEnvironment("Development");
         var service = global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             Options.Create(Options_()), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard, consentResolution: resolution, tableRepository: tableRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(tableRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
@@ -313,7 +314,7 @@ public sealed class RestDatasetPolicySpliceTests
             });
         var handler = new McpToolExecutionHandler(
             Substitute.For<IGovernedSqlExecutionService>(), new Services(mcp), Substitute.For<ICatalogDiscoveryService>(),
-            Substitute.For<IApiDispatcherService>(), Substitute.For<ILineageGraphStore>(), Substitute.For<ITableMetadataRepository>());
+            Substitute.For<IApiDispatcherService>(), Substitute.For<ILineageGraphStore>(), new InMemoryTableMetadataRepository());
         var tool = McpDatasetTools.Definitions().First(t => t.Name == McpDatasetTools.QueryDataset);
         var session = new McpSessionContext("s", "S-1-5-21-REST-ALICE", TenantValue, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
             "S-1-5-21-REST-ALICE", ["analyst"], [], "10.0.0.1", false, new Dictionary<string, string> { ["purpose"] = "marketing" });
@@ -363,8 +364,8 @@ public sealed class RestDatasetPolicySpliceTests
     public async Task CrossSourceDataset_RowFilterStillApplied_AfterSpliceRemoval()
     {
         var pipeline = CrossSourcePipeline();
-        var metadata = Substitute.For<ITableMetadataRepository>();
-        metadata.GetTableMetadataAsync(CrmCustomers.Identifier, Arg.Any<CancellationToken>()).Returns(CrmCustomers);
+        var metadata = new InMemoryTableMetadataRepository();
+        metadata.Add(CrmCustomers);
         var pdp = Substitute.For<IAccessDecisionPoint>();
         // The REST decision carries the SAME consent filter as text, which the service must not splice any more.
         pdp.DecideAsync(Arg.Is<AccessRequest>(r => r.Object == CrmCustomers), Arg.Any<CancellationToken>())
@@ -419,8 +420,8 @@ public sealed class RestDatasetPolicySpliceTests
         var emitted = fx.Captured.ShouldHaveSingleItem().Sql;
 
         var (repo, resolution, _) = Recorders(AllowConsent());
-        var tableRepo = Substitute.For<ITableMetadataRepository>();
-        tableRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(meta);
+        var tableRepo = new InMemoryTableMetadataRepository();
+        tableRepo.Add(meta);
         Microsoft.Extensions.Hosting.IHostEnvironment env = new TestHostEnvironment("Development");
         var options = new GatewayOptions
         {

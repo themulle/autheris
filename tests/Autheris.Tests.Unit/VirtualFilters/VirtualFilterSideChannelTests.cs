@@ -22,6 +22,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>
 /// Virtual filters, phase 3: the two paths that resolve consents without <c>TableAccessPolicy</c>. CDC events cannot
@@ -72,11 +73,11 @@ public sealed class VirtualFilterSideChannelTests
     [MemberData(nameof(Outcomes))]
     public async Task CdcEvent_IsDropped_WhenAVirtualFilterApplies(string outcome, bool delivered)
     {
-        var metadata = Substitute.For<ITableMetadataRepository>();
-        metadata.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>()).Returns(Meta());
+        var metadata = new InMemoryTableMetadataRepository();
+        metadata.Add(Meta());
         var enforcer = new StreamRlsPolicyEnforcer(
             Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(), metadata, Substitute.For<IColumnMaskingProvider>(), Substitute.For<IEpochValidationService>(),
-            NullLogger<StreamRlsPolicyEnforcer>.Instance, Substitute.For<IConsentRepository>(), AllowAll(), Substitute.For<IConsentCacheService>(),
+            NullLogger<StreamRlsPolicyEnforcer>.Instance, new InMemoryConsentRepository(), AllowAll(), Substitute.For<IConsentCacheService>(),
             mandatoryFilters: new FixedOutcome(Outcome(outcome)));
         var subscriber = new ClaimsPrincipal(new ClaimsIdentity([new Claim("tenant_id", "tenant-1"), new Claim(ClaimTypes.PrimarySid, "S-1-5-21-STREAM-USER")], "Test"));
         var cdcEvent = new CdcEvent("ev-1", Orders, CdcOperation.Insert, "tenant-1", null, new Dictionary<string, object?> { ["id"] = 1, ["client_id"] = 7 }, DateTimeOffset.UtcNow);
@@ -90,8 +91,8 @@ public sealed class VirtualFilterSideChannelTests
     [MemberData(nameof(Outcomes))]
     public async Task IcebergRawAccess_IsRefused_WhenAVirtualFilterApplies(string outcome, bool delivered)
     {
-        var metadata = Substitute.For<ITableMetadataRepository>();
-        metadata.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(Meta(DataSourceType.LakehouseIceberg));
+        var metadata = new InMemoryTableMetadataRepository();
+        metadata.Add(Meta(DataSourceType.LakehouseIceberg));
         var consents = Substitute.For<IConsentRepository>();
         consents.GetActiveConsentsForSubjectsAsync(Arg.Any<IReadOnlyList<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<Consent>>(Array.Empty<Consent>()));

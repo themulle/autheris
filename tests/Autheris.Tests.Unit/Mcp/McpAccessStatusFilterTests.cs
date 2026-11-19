@@ -27,6 +27,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>Issues #798 / #804: accessStatus on search_catalog / find_relevant_tables and the accessStatus filter of the MCP catalog tools.</summary>
 public sealed class McpAccessStatusFilterTests
@@ -67,7 +68,7 @@ public sealed class McpAccessStatusFilterTests
             search,
             Substitute.For<IApiDispatcherService>(),
             Substitute.For<ILineageGraphStore>(),
-            Substitute.For<ITableMetadataRepository>());
+            new InMemoryTableMetadataRepository());
         return (handler, search);
     }
 

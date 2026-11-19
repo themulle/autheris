@@ -12,6 +12,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 internal static class WormTestEnvironment
 {
@@ -34,8 +35,7 @@ public sealed class WormConfigurationSealingKeyTests
             Classification = new ClassificationOptions(),
             GovernanceDb = new GovernanceDbOptions { AuditHmacKeyVaultRef = auditRef }
         };
-        var monitor = Substitute.For<IOptionsMonitor<GatewayOptions>>();
-        monitor.CurrentValue.Returns(opts);
+        var monitor = new TestOptionsMonitor<GatewayOptions>(opts);
         return monitor;
     }
 

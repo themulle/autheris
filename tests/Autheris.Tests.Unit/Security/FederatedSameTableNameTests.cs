@@ -24,6 +24,7 @@ using Shouldly;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Analysis;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>
 /// PARITY-GAP-017 / PARITY-GAP-018 reproduction (WP-F, SEC-PG-16): two sources register the same
@@ -288,7 +289,7 @@ public sealed class FederatedSameTableNameTests
         Wire(s.SecondMeta, "second", ["99.00", "98.00", "97.00"]);
 
         var service = new FederatedStagingService(
-            registry, maskingProvider, Substitute.For<IAuditLogRepository>(),
+            registry, maskingProvider, new InMemoryAuditLogRepository(),
             Options.Create(new GatewayOptions()), NullLogger<FederatedStagingService>.Instance);
 
         var budget = new FederationBudget(5, 1000, 5000, 32 * 1024 * 1024, 128 * 1024 * 1024, 30, 4);
@@ -509,7 +510,7 @@ public sealed class FederatedSameTableNameTests
         meta = meta with { Table = meta.Table with { RequiredFilterColumnGroups = [["region"], ["product", "qty"]] } };
         var request = (Microsoft.Extensions.Options.IOptions<GatewayOptions>)Options.Create(new GatewayOptions());
         var service = new FederatedStagingService(
-            Substitute.For<IAutherisConnectorRegistry>(), Substitute.For<IColumnMaskingProvider>(), Substitute.For<IAuditLogRepository>(),
+            Substitute.For<IAutherisConnectorRegistry>(), Substitute.For<IColumnMaskingProvider>(), new InMemoryAuditLogRepository(),
             request, NullLogger<FederatedStagingService>.Instance);
         var budget = new FederationBudget(5, 1000, 5000, 32 * 1024 * 1024, 128 * 1024 * 1024, 30, 4);
 

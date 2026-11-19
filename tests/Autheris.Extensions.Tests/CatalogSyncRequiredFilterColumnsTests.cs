@@ -17,6 +17,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>
 /// EXT-11: the OpenMetadata and OpenAPI re-ingest paths must keep the persisted RequiredFilterColumns
@@ -29,7 +30,7 @@ public sealed class CatalogSyncRequiredFilterColumnsTests
     {
         var client = Substitute.For<IOpenMetadataClient>();
         var repo = Substitute.For<ITableMetadataRepository>();
-        var consentRepo = Substitute.For<IConsentRepository>();
+        IConsentRepository consentRepo = new InMemoryConsentRepository();
         var epochRepo = Substitute.For<IPolicyEpochRepository>();
 
         var options = new GatewayOptions

@@ -16,6 +16,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>
 /// Issue #682 A: the GraphQL field a search hit suggests is the table's real root field from the catalog GraphQL schema
@@ -55,9 +56,9 @@ public sealed class CatalogSearchSuggestedGraphQlFieldTests
         _engine.IsIndexReady.Returns(indexReady);
         return new CatalogDiscoveryService(
             _metadata,
-            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()),
+            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(new InMemoryAuditLogRepository()),
             Options.Create(_options),
-            CatalogVisibilityTestFactory.Create(_metadata, Substitute.For<IConsentRepository>(), _options),
+            CatalogVisibilityTestFactory.Create(_metadata, new InMemoryConsentRepository(), _options),
             searchEngine: _engine,
             graphQlMap: new CatalogGraphQlMap(_metadata, Substitute.For<ITableRelationRepository>()));
     }

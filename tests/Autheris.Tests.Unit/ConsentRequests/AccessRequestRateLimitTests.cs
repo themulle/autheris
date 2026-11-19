@@ -16,12 +16,13 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>The one access-request limit per (tenant, sid) sits in <see cref="ConsentRequestService"/>, so REST, GraphQL and MCP share it.</summary>
 public sealed class AccessRequestRateLimitTests
 {
     private static ConsentRequestService Service(IRateLimiterService limiter) => new(
-        Substitute.For<ITableMetadataRepository>(),
+        new InMemoryTableMetadataRepository(),
         Substitute.For<IConsentApprovalRepository>(),
         gatewayOptions: Options.Create(new GatewayOptions { Tenancy = TenancyShape.Multi.Options() }),
         rateLimiter: limiter);

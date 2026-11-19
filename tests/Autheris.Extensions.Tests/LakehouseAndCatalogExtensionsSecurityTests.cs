@@ -38,6 +38,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>
 /// Regression tests for the extension findings of security review 2026-10-02 (H-18 .. H-20, M-32 .. M-35, low findings).
@@ -712,7 +713,7 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
 
         const string secret = "om-secret-m32";
         var options = Options.Create(new GatewayOptions { OpenMetadata = new OpenMetadataOptions { DefaultTenantId = "default-tenant", Enabled = true, WebhookSecret = secret } });
-        var service = new OpenMetadataSyncService(client, repo, Substitute.For<IConsentRepository>(), Substitute.For<IPolicyEpochRepository>(),
+        var service = new OpenMetadataSyncService(client, repo, new InMemoryConsentRepository(), Substitute.For<IPolicyEpochRepository>(),
             options, NullLogger<OpenMetadataSyncService>.Instance);
 
         var payload = $"{{\"id\":\"{Guid.NewGuid()}\",\"timestamp\":{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()},\"eventType\":\"entityUpdated\",\"entityType\":\"table\",\"entityFullyQualifiedName\":\"svc.db.schema.payroll\"}}";

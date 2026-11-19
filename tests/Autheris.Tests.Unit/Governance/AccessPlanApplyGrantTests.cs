@@ -22,6 +22,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 /// <summary>GOV-04: access-plan apply writes grant records, refuses self-grants and four-eyes grants.</summary>
 [Trait("Category", "Security")]
@@ -41,7 +42,7 @@ public sealed class AccessPlanApplyGrantTests
     public AccessPlanApplyGrantTests()
     {
         _service = new AccessPlanningService(
-            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), _tableRepo, _consents, _totp, _secrets);
+            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(new InMemoryAuditLogRepository()), _tableRepo, _consents, _totp, _secrets);
         _consents.CreateConsentAsync(Arg.Do<Consent>(c => _created.Add(c)), Arg.Any<CancellationToken>()).Returns(ci => Task.FromResult(ci.Arg<Consent>()));
         UseTable(sensitive: false);
     }

@@ -15,6 +15,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Fakes;
 
 [Trait("Category", "Security")]
 public sealed class OpenMetadataWebhookTests
@@ -24,8 +25,8 @@ public sealed class OpenMetadataWebhookTests
     private static (OpenMetadataSyncService Service, ITableMetadataRepository MetadataRepo, IOpenMetadataClient Client) CreateSyncService()
     {
         var client = Substitute.For<IOpenMetadataClient>();
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        var consentRepo = Substitute.For<IConsentRepository>();
+        ITableMetadataRepository metadataRepo = new InMemoryTableMetadataRepository();
+        IConsentRepository consentRepo = new InMemoryConsentRepository();
         var epochRepo = Substitute.For<IPolicyEpochRepository>();
 
         var options = new GatewayOptions
