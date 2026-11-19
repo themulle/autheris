@@ -6,6 +6,7 @@ using Autheris.Application.Catalog.Localization;
 using Autheris.Application.Catalog.Search;
 using Autheris.Application.Catalog.Services;
 using Autheris.Application.Governance.Analysis;
+using Autheris.Application.Security;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Options;
@@ -55,13 +56,14 @@ public static class GatewayCatalogServiceExtensions
         // Visibility Cache (INC-138-3)
         services.TryAddSingleton<ICatalogVisibilityCache, CatalogVisibilityLruCache>();
 
-        // Honest Embeddings & Search Engine (INC-138-5)
+        // Honest Embeddings & Search Engine (INC-138-5). The embeddings client follows the outbound egress policy (fail closed).
+        services.AddHttpClient(EgressIntegrations.CatalogEmbeddings).AddSecureOutboundHandlers(EgressIntegrations.CatalogEmbeddings);
         services.TryAddSingleton<ICatalogEmbeddingGenerator>(sp =>
         {
             var opts = sp.GetRequiredService<IOptions<CatalogSearchOptions>>().Value;
             var loggerFactory = sp.GetService<ILoggerFactory>();
             var httpFactory = sp.GetService<System.Net.Http.IHttpClientFactory>();
-            var httpClient = httpFactory?.CreateClient("CatalogEmbeddings");
+            var httpClient = httpFactory?.CreateClient(EgressIntegrations.CatalogEmbeddings);
             return CatalogEmbeddingGeneratorFactory.Create(opts, httpClient, loggerFactory);
         });
         services.TryAddSingleton<ILocalEmbeddingGenerator>(sp => sp.GetRequiredService<ICatalogEmbeddingGenerator>());

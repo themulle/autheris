@@ -201,6 +201,7 @@ public sealed class ProductLoadService(
         var state = StateOf(product, key, out var loadedAt);
         if (state == ProductFreshnessState.Fresh)
         {
+            await EnsureBaseObjectsActiveAsync(product, ct).ConfigureAwait(false);
             return new ProductResult(key, loadedAt!.Value, false);
         }
 
@@ -217,6 +218,23 @@ public sealed class ProductLoadService(
         }
 
         return await SingleFlightAsync(product, key, state, loadedAt, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>A cached result is never served once a base object was deactivated: the product turns invalid and the read fails like any unavailable product.</summary>
+    private async Task EnsureBaseObjectsActiveAsync(DataProduct product, CancellationToken ct)
+    {
+        if (baseObjects is null || await baseObjects.AllActiveAsync(product.BaseObjects, ct).ConfigureAwait(false))
+        {
+            return;
+        }
+
+        var current = await products.GetProductAsync(product.Tenant, product.Schema, product.Name, ct).ConfigureAwait(false);
+        if (current is not null && current.Status != DataProductStatus.Retired)
+        {
+            await SetStatusAsync(current, DataProductStatus.Invalid, ct).ConfigureAwait(false);
+        }
+
+        throw new ProductLoadException(ProductErrorCodes.BaseObjectInactive);
     }
 
     private async Task<ProductResult> SingleFlightAsync(DataProduct product, TableIdentifier key, ProductFreshnessState before, DateTimeOffset? loadedAt, CancellationToken ct)

@@ -30,7 +30,7 @@ internal sealed class RecordingDbConnection : DbConnection
 
     public bool Cancelled { get; private set; }
 
-    public bool Disposed { get; private set; }
+    public new bool Disposed { get; private set; }
 
     [AllowNull] public override string ConnectionString { get => string.Empty; set { } }
 

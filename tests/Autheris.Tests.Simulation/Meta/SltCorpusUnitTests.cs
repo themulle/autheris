@@ -386,19 +386,22 @@ public sealed class SltCorpusUnitTests
         runner.Run("SELECT count(*) FROM t").ShouldBeOfType<SltEngineRows>(); // fast query unaffected, connection still usable
     }
 
-    private sealed class HangingEngine : ISltEngine
+    [Fact]
+    [Trait("Category", "Security")]
+    public void SltCorpusRunner_RunEngine_RetriesAStallOnceAndKeepsEveryOtherOutcome()
     {
-        public int Calls { get; private set; }
+        // A stall on a starved runner recovers on the retry; a leak, a crash or a second hang is reported as seen.
+        var rows = new SltEngineRows([[1L]]);
+        var recovered = new StallOnceEngine(rows);
+        SltCorpusRunner.RunEngine(recovered, "SELECT 1").ShouldBeSameAs(rows);
+        recovered.Calls.ShouldBe(2);
 
-        public SltEngineOutcome Run(string sql)
-        {
-            Calls++;
-            return new SltEngineHung("Execute");
-        }
+        SltCorpusRunner.RunEngine(new StallOnceEngine(new SltEngineHung("Execute")), "SELECT 1").ShouldBeOfType<SltEngineHung>();
+        SltCorpusRunner.RunEngine(new StallOnceEngine(new SltEngineCrashed("Execute", "X", "m")), "SELECT 1").ShouldBeOfType<SltEngineCrashed>();
 
-        public void InvalidateCatalog()
-        {
-        }
+        var hanging = new HangingEngine();
+        SltCorpusRunner.RunEngine(hanging, "SELECT 1").ShouldBeOfType<SltEngineHung>();
+        hanging.Calls.ShouldBe(2);
     }
 
     [Fact]
@@ -413,7 +416,7 @@ public sealed class SltCorpusUnitTests
 
         var summary = await SltCorpusRunner.RunAsync(corpus, 1, int.MaxValue, classifier, "repro", engineFactory: (_, _) => engine, hangCircuitLimit: 3);
 
-        engine.Calls.ShouldBe(3);
+        engine.Calls.ShouldBe(6, "each hang is retried once before it counts");
         summary.Count(SltVerdict.Hang).ShouldBe(3);
         summary.Skipped["test/x.test"].ShouldBe(7);
         summary.OpenCircuits["test/x.test"].ShouldStartWith("Hang:Execute");
@@ -445,5 +448,31 @@ public sealed class SltCorpusUnitTests
 
         classifier.Classify(new SltObservation(FindingKind.WrongResult, cls, RowFilterScenario: true)).ShouldBe(SltVerdict.Finding);
         classifier.Classify(new SltObservation(FindingKind.WrongResult, cls, RowFilterScenario: false)).ShouldBe(SltVerdict.AcceptedDifference);
+    }
+
+    private sealed class HangingEngine : ISltEngine
+    {
+        public int Calls { get; private set; }
+
+        public SltEngineOutcome Run(string sql)
+        {
+            Calls++;
+            return new SltEngineHung("Execute");
+        }
+
+        public void InvalidateCatalog()
+        {
+        }
+    }
+
+    private sealed class StallOnceEngine(SltEngineOutcome second) : ISltEngine
+    {
+        public int Calls { get; private set; }
+
+        public SltEngineOutcome Run(string sql) => ++Calls == 1 ? new SltEngineHung("Execute") : second;
+
+        public void InvalidateCatalog()
+        {
+        }
     }
 }

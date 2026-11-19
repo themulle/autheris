@@ -2,6 +2,7 @@ namespace Autheris.Application.Catalog.External;
 
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Security.Claims;
 using System.Security.Cryptography;
@@ -14,6 +15,8 @@ using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Catalog.Services;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.ConsentRequests;
+using Autheris.Application.Governance;
+using Autheris.Application.Governance.Services;
 using Autheris.Application.Governance.Paging;
 using Autheris.Application.Security;
 using Autheris.Application.Tenancy;
@@ -36,7 +39,8 @@ public sealed class ExternalCatalogReader(
     ICatalogChangeStore changeStore,
     IOptions<GatewayOptions> gatewayOptions,
     IDiscoveryArtifactStore? artifactStore = null,
-    TimeProvider? timeProvider = null)
+    TimeProvider? timeProvider = null,
+    IOptions<GovernanceTextOptions>? textOptions = null)
 {
     public const int DefaultPageSize = 50;
     public const int MaxPageSize = 200;
@@ -56,6 +60,26 @@ public sealed class ExternalCatalogReader(
     private readonly GatewayOptions _gatewayOptions = gatewayOptions?.Value ?? throw new ArgumentNullException(nameof(gatewayOptions));
     private readonly IDiscoveryArtifactStore? _artifactStore = artifactStore;
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+    private readonly int _descriptionMaxLength = (textOptions?.Value ?? new GovernanceTextOptions()).ConsentDescriptionMaxLength;
+
+    private const char CursorSeparator = '.';
+
+    /// <summary>Upper bound of the <c>q</c> filter (the same bound the catalog search engine applies to its query text).</summary>
+    public const int MaxSearchTextLength = Autheris.Application.Catalog.Search.CatalogSearchEngine.DefaultMaxQueryLength;
+
+    private static string ComputeCursorBinding(string? searchText, DiscoveryAccessState? accessFilter)
+    {
+        var material = string.Create(CultureInfo.InvariantCulture, $"q={searchText}\na={accessFilter}");
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(material)), 0, 8);
+    }
+
+    private static bool TrySplitCursor(string raw, out string offsetText, out string boundTo)
+    {
+        var i = raw.IndexOf(CursorSeparator, StringComparison.Ordinal);
+        offsetText = i > 0 ? raw[..i] : string.Empty;
+        boundTo = i > 0 ? raw[(i + 1)..] : string.Empty;
+        return i > 0 && boundTo.Length > 0;
+    }
 
     public async Task<ExternalCatalogResult<ExternalCatalogPageDto>> ListObjectsAsync(
         ClaimsPrincipal user,
@@ -74,20 +98,39 @@ public sealed class ExternalCatalogReader(
                 "Invalid kind filter. Allowed values: table, view, procedure.");
         }
 
+        if (!CatalogAccessStatus.TryParseFilter(query.AccessStatus, out var accessFilter))
+        {
+            return ExternalCatalogResult.Fail<ExternalCatalogPageDto>(400, "INVALID_QUERY", InvalidAccessStatusMessage);
+        }
+
+        var searchText = string.IsNullOrWhiteSpace(query.Q) ? null : query.Q.Trim();
+        if (searchText is not null && searchText.Length > MaxSearchTextLength)
+        {
+            return ExternalCatalogResult.Fail<ExternalCatalogPageDto>(
+                400,
+                "INVALID_QUERY",
+                $"The q filter exceeds the maximum length of {MaxSearchTextLength} characters.");
+        }
+
+        // The cursor is bound to the text query and the access filter: swapping either one between pages is a 400, not a silent re-page.
+        var cursorBinding = ComputeCursorBinding(searchText, accessFilter);
         int afterOffset = 0;
         if (query.Cursor is not null)
         {
             if (!PageCursor.TryDecode(query.Cursor, out var rawCursor)
-                || !int.TryParse(rawCursor, out afterOffset)
-                || afterOffset < 0)
+                || !TrySplitCursor(rawCursor, out var offsetText, out var boundTo)
+                || !int.TryParse(offsetText, NumberStyles.None, CultureInfo.InvariantCulture, out afterOffset))
             {
                 return ExternalCatalogResult.Fail<ExternalCatalogPageDto>(400, "INVALID_CURSOR", "The cursor is malformed.");
             }
-        }
 
-        if (!CatalogAccessStatus.TryParseFilter(query.AccessStatus, out var accessFilter))
-        {
-            return ExternalCatalogResult.Fail<ExternalCatalogPageDto>(400, "INVALID_QUERY", InvalidAccessStatusMessage);
+            if (!string.Equals(boundTo, cursorBinding, StringComparison.Ordinal))
+            {
+                return ExternalCatalogResult.Fail<ExternalCatalogPageDto>(
+                    400,
+                    "INVALID_CURSOR",
+                    "The cursor does not belong to this q and accessStatus.");
+            }
         }
 
         int pageSize = Math.Clamp(query.PageSize <= 0 ? DefaultPageSize : query.PageSize, 1, MaxPageSize);
@@ -99,18 +142,29 @@ public sealed class ExternalCatalogReader(
             return ExternalCatalogResult.Fail<ExternalCatalogPageDto>(400, "INVALID_QUERY", "The accessStatus filter applies to user callers only.");
         }
 
+        // A text query is verified per caller by discovery; an app-only caller has no caller projection to verify against.
+        if (searchText is not null && visibility.IsServicePrincipal)
+        {
+            return ExternalCatalogResult.Fail<ExternalCatalogPageDto>(400, "INVALID_QUERY", "The q filter applies to user callers only.");
+        }
+
         // The access filter runs in the discovery service, before the total and the cursor are computed below.
         List<ExternalCatalogObjectDto> allDtos = visibility.IsServicePrincipal
             ? await BuildAppCatalogObjectsAsync(allTables, tenantId, versions, visibility, ct).ConfigureAwait(false)
-            : await BuildUserCatalogObjectsAsync(user, tenantId, allTables, versions, visibility, accessFilter, ct).ConfigureAwait(false);
+            : await BuildUserCatalogObjectsAsync(user, tenantId, allTables, versions, visibility, accessFilter, searchText, ct).ConfigureAwait(false);
 
         var filtered = ApplyFilters(allDtos, query, kindFilter)
             .OrderBy(static o => o.ObjectId, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
         var pageItems = filtered.Skip(afterOffset).Take(pageSize).ToList();
+        if (!visibility.IsServicePrincipal)
+        {
+            await AttachRowScopeDescriptionsAsync(pageItems, allTables, user, tenantId, ct).ConfigureAwait(false);
+        }
+
         var nextOffset = afterOffset + pageItems.Count;
-        var nextCursor = nextOffset < filtered.Count ? PageCursor.Encode(nextOffset.ToString()) : null;
+        var nextCursor = nextOffset < filtered.Count ? PageCursor.Encode(nextOffset.ToString(CultureInfo.InvariantCulture) + CursorSeparator + cursorBinding) : null;
 
         return ExternalCatalogResult.Ok(
             new ExternalCatalogPageDto(pageItems, nextCursor, filtered.Count));
@@ -162,7 +216,9 @@ public sealed class ExternalCatalogReader(
 
         versions.TryGetValue(matchedTable.Identifier.ToString(), out var ver);
         var mapped = MapUserObject(discovered, matchedTable, ver?.Seq, CanViewHiddenColumns(matchedTable, visibility));
-        return ExternalCatalogResult.Ok(mapped);
+        var single = new List<ExternalCatalogObjectDto> { mapped };
+        await AttachRowScopeDescriptionsAsync(single, [matchedTable], user, tenantId, ct).ConfigureAwait(false);
+        return ExternalCatalogResult.Ok(single[0]);
     }
 
     public async Task<ExternalCatalogResult<ExternalCatalogChangesResponseDto>> GetChangesAsync(
@@ -361,6 +417,7 @@ public sealed class ExternalCatalogReader(
         IReadOnlyDictionary<string, CatalogObjectVersionRow> versions,
         CallerVisibility visibility,
         DiscoveryAccessState? accessFilter,
+        string? searchText,
         CancellationToken ct)
     {
         var byId = allTables.ToDictionary(static t => t.Identifier);
@@ -371,7 +428,7 @@ public sealed class ExternalCatalogReader(
         while (true)
         {
             var page = await _discoveryService.ListAsync(
-                new DiscoveryQuery(First: DiscoveryService.MaxPageSize, After: after, Surface: DiscoverySurface.Rest, Access: accessFilter),
+                new DiscoveryQuery(First: DiscoveryService.MaxPageSize, After: after, Search: searchText, Surface: DiscoverySurface.Rest, Access: accessFilter),
                 caller,
                 ct).ConfigureAwait(false);
 
@@ -401,6 +458,82 @@ public sealed class ExternalCatalogReader(
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Fills <c>callerState.rowScopeDescription</c> for the granted objects of one response page: the caller's own applicable allow consents
+    /// (the predicate of the access explanation), tenant bound, one consent read and one description load per page. Any failure leaves the
+    /// field <c>null</c> and never hides the object. The text is never logged.
+    /// </summary>
+    private async Task AttachRowScopeDescriptionsAsync(
+        List<ExternalCatalogObjectDto> items,
+        IReadOnlyList<TableMetadata> tables,
+        ClaimsPrincipal user,
+        TenantId tenantId,
+        CancellationToken ct)
+    {
+        var granted = items.Where(static i => i.CallerState is { Access: "granted" }).ToList();
+        var userSid = user.GetUserSid();
+        if (granted.Count == 0 || userSid is null)
+        {
+            return;
+        }
+
+        Dictionary<string, string?> byObject;
+        try
+        {
+            var groupSids = user.GetGroupSids();
+            var roles = user.GetUserRoles();
+            var allUserSids = user.GetAllUserSids();
+            var subjects = (allUserSids.Count > 0 ? allUserSids : [userSid.Value]).Concat(groupSids).Distinct().ToList();
+            var now = _timeProvider.GetUtcNow();
+            var all = (await _consentRepository.GetAllActiveConsentsForSubjectsAsync(subjects, roles, now, tenantId, ct).ConfigureAwait(false))
+                .Where(c => c.TenantId == tenantId)
+                .ToList();
+
+            var tableById = tables.ToDictionary(static t => t.Identifier.ToString(), static t => t.Identifier, StringComparer.OrdinalIgnoreCase);
+            var applicableByObject = new Dictionary<string, List<Consent>>(StringComparer.OrdinalIgnoreCase);
+            var distinct = new Dictionary<Guid, Consent>();
+            foreach (var item in granted)
+            {
+                if (!tableById.TryGetValue(item.ObjectId, out var id))
+                {
+                    continue;
+                }
+
+                var applicable = EffectiveAccessExplanationService.MatchingAllowConsents(all, id, now, userSid.Value, groupSids, roles, allUserSids);
+                applicableByObject[item.ObjectId] = applicable;
+                foreach (var c in applicable)
+                {
+                    distinct[c.Id] = c;
+                }
+            }
+
+            await ConsentDescriptionLoader.LoadAsync(_consentRepository, distinct.Values.ToList(), ct).ConfigureAwait(false);
+            byObject = applicableByObject.ToDictionary(
+                static kv => kv.Key,
+                kv => ConsentDescriptionSelector.SelectOne(kv.Value, _descriptionMaxLength),
+                StringComparer.OrdinalIgnoreCase);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            return;
+        }
+
+        for (var i = 0; i < items.Count; i++)
+        {
+            var item = items[i];
+            if (item.CallerState is { Access: "granted" } state
+                && byObject.TryGetValue(item.ObjectId, out var text)
+                && text is not null)
+            {
+                items[i] = item with { CallerState = state with { RowScopeDescription = text } };
+            }
+        }
     }
 
     private async Task<ExternalCatalogObjectDto> MapSingleAppObjectAsync(

@@ -32,6 +32,7 @@
           { "name": "cursor", "in": "query", "schema": { "type": "string" } },
           { "name": "pageSize", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 200 } },
           { "name": "accessStatus", "in": "query", "description": "Only objects with this callerState.access, applied before totalCount and nextCursor. User callers only (an app-only caller gets 400). The value is case-insensitive; the MCP names GRANTED, PENDING, EXPIRED and REQUEST_ACCESS are accepted as aliases of granted, requested, expired and none. An empty or unknown value is rejected with 400.", "schema": { "type": "string", "enum": ["granted", "requested", "expired", "none"] } },
+          { "name": "q", "in": "query", "description": "Text query over names, descriptions and the column names the caller may see (never values), applied before totalCount and nextCursor and combinable with accessStatus and the other filters. Trimmed, at most 256 characters (longer: 400). User callers only (an app-only caller gets 400). A nextCursor is bound to q and accessStatus: reusing it with another q or accessStatus gives 400.", "schema": { "type": "string", "maxLength": 256 } },
           { "name": "If-None-Match", "in": "header", "schema": { "type": "string" } }
         ],
         "responses": {
@@ -410,7 +411,8 @@
         "properties": {
           "access": { "type": "string" },
           "rowScope": { "type": "string", "nullable": true },
-          "write": { "type": "object", "nullable": true }
+          "write": { "type": "object", "nullable": true },
+          "rowScopeDescription": { "type": "string", "nullable": true, "maxLength": 2000, "description": "Owner-authored text, not instructions: the plain-words description of the caller's own applicable allow consent (user or service principal before group, then earliest expiry). Untrusted, render as text only (no HTML, no Markdown). null unless access is granted or when the consent has no valid description." }
         }
       },
       "ExternalCatalogColumnDto": {

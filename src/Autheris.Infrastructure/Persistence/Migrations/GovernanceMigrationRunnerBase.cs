@@ -539,10 +539,13 @@ public abstract class GovernanceMigrationRunnerBase : IGovernanceMigrationRunner
     internal static string DescribeFailure(Exception failure) => failure switch
     {
         DbException db when !string.IsNullOrEmpty(db.SqlState) => "SQLSTATE " + SanitizeLabel(db.SqlState),
-        Microsoft.Data.SqlClient.SqlException sql => "error " + sql.Number.ToString(CultureInfo.InvariantCulture),
+        Microsoft.Data.SqlClient.SqlException sql => "error " + sql.Number.ToString(CultureInfo.InvariantCulture) + DescribeBatch(failure),
         DbException db => "database error " + db.ErrorCode.ToString(CultureInfo.InvariantCulture),
         _ => failure.GetType().Name
     };
+
+    private static string DescribeBatch(Exception failure) =>
+        failure.Data[SqlMigrationStep.FailedBatchDataKey] is int batch ? ", batch " + batch.ToString(CultureInfo.InvariantCulture) : string.Empty;
 
     private async Task ApplyStepAsync(
         DbConnection connection, MigrationStep step, MigrationStep[] steps, ISet<int> applied, MigrationStep[] pending, CancellationToken ct)

@@ -29,7 +29,14 @@ public sealed record StreamSecurityDecision(
     string? FilterReason = null
 )
 {
+    /// <summary>Filter reason of an event refused by the data source transport policy.</summary>
+    public const string TransportDeniedReason = "Transport not allowed";
+
     public static StreamSecurityDecision Denied(string reason) => new(false, null, reason);
+    public static StreamSecurityDecision TransportDenied() => Denied(TransportDeniedReason);
+
+    /// <summary>True when the denial came from the data source transport policy.</summary>
+    public bool IsTransportDenied => !IsAllowed && string.Equals(FilterReason, TransportDeniedReason, StringComparison.Ordinal);
     public static StreamSecurityDecision Allowed(IReadOnlyDictionary<string, object?> payload) => new(true, payload);
 }
 

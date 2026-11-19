@@ -172,6 +172,17 @@ probe_curl() {
   esac
 }
 
+# The governance store is PostgreSQL only. AUTHERIS_BENCH_GOVERNANCE_CONNECTION is an Npgsql connection string of an empty database
+# (the same variable the BenchmarkDotNet gateway benchmark reads). With AUTHERIS_BENCH_GOVERNANCE_ADMIN_URI (a libpq URI that can
+# drop and create databases) and AUTHERIS_BENCH_GOVERNANCE_DB the database is recreated before every restart, so each start is a true cold start.
+GOVERNANCE_CONNECTION="${AUTHERIS_BENCH_GOVERNANCE_CONNECTION:?set AUTHERIS_BENCH_GOVERNANCE_CONNECTION to the Npgsql connection string of an empty PostgreSQL governance database}"
+reset_governance_db() {
+  if [ -n "${AUTHERIS_BENCH_GOVERNANCE_ADMIN_URI:-}" ] && [ -n "${AUTHERIS_BENCH_GOVERNANCE_DB:-}" ]; then
+    psql "$AUTHERIS_BENCH_GOVERNANCE_ADMIN_URI" -v ON_ERROR_STOP=1 -q \
+      -c "DROP DATABASE IF EXISTS \"$AUTHERIS_BENCH_GOVERNANCE_DB\" WITH (FORCE)" -c "CREATE DATABASE \"$AUTHERIS_BENCH_GOVERNANCE_DB\""
+  fi
+}
+
 run_flavor_benchmarks() {
   local flavor="$1"
   local app_dir="$DIST_DIR/$flavor"
@@ -180,13 +191,13 @@ run_flavor_benchmarks() {
 
   echo "Executing cold-start loop for [$flavor] ($RESTARTS iterations)..."
   for ((r = 1; r <= RESTARTS; r++)); do
-    rm -f "$OUT_DIR/gov-$flavor-$r.db"*
+    reset_governance_db
     (
       cd "$app_dir"
       export ASPNETCORE_ENVIRONMENT=Development ASPNETCORE_URLS="$BASE"
       export Gateway__Authentication__EnableTestAuthHandler=true Gateway__Insecure__danger_bypass_mcp_auth=true
       export Gateway__Insecure__danger_allow_anonymous_access=true Gateway__Mcp__Enabled=true Gateway__Mcp__EndpointPath=/mcp
-      export Gateway__GovernanceDb__Provider=Sqlite "Gateway__GovernanceDb__ConnectionString=Data Source=$OUT_DIR/gov-$flavor-$r.db"
+      export Gateway__GovernanceDb__Provider=PostgreSql "Gateway__GovernanceDb__ConnectionString=$GOVERNANCE_CONNECTION"
       export Gateway__Startup__ColdPathTiming__Enabled=true
       exec dotnet Autheris.Api.dll > "$OUT_DIR/api-$flavor-$r.log" 2>&1
     ) &
