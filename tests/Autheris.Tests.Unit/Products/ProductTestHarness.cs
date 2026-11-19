@@ -1,3 +1,4 @@
+#pragma warning disable CA2012 // NSubstitute .Returns(...) configures a ValueTask member; the instance is not consumed here.
 using Autheris.Application.Audit;
 using Autheris.Application.ConsentRequests.Events;
 using Autheris.Application.Products;
@@ -20,7 +21,8 @@ internal sealed class InMemoryDataProductRepository : IDataProductRepository, IO
 
     public Task<IReadOnlyList<DataProduct>> ListProductsAsync(TenantId tenant, string? afterKey, int limit, CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<DataProduct>>(_products.Values.Where(p => p.Tenant == tenant)
-            .OrderBy(p => p.Schema, StringComparer.Ordinal).ThenBy(p => p.Name, StringComparer.Ordinal).Take(limit).ToList());
+            .OrderBy(p => p.Schema, StringComparer.Ordinal).ThenBy(p => p.Name, StringComparer.Ordinal)
+            .Where(p => afterKey is null || string.CompareOrdinal($"{p.Schema}/{p.Name}", afterKey) > 0).Take(limit).ToList());
 
     public Task<IReadOnlyList<DataProduct>> ListScheduledProductsAsync(DataProduct? after, int limit, CancellationToken ct = default)
     {

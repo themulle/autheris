@@ -46,6 +46,37 @@ public sealed class StepSqlLintTests
     }
 
     [Theory]
+    [InlineData("A1;\n-- batch\nB1;\n-- batch\nC1;\n")]
+    [InlineData("A1;\r\n-- batch\r\nB1;\r\n-- batch\r\nC1;\r\n")]
+    [InlineData("A1;\n  -- BATCH  \nB1;\n\t-- Batch\nC1;")]
+    [InlineData("-- header comment\nA1;\n-- batch\nB1;\n-- batch\n\n-- batch\nC1;\n-- batch\n")]
+    public void SqlServerBatches_SplitDeterministically_AndNeverYieldEmptyOrMarkerBatches(string text)
+    {
+        var step = SqlMigrationStep.Parse("sqlserver", 2, "add_x", text, EmptyDelta);
+
+        step.Batches.Count.ShouldBe(3);
+        step.Batches.ShouldAllBe(b => b.Length > 0 && !b.Contains("batch", StringComparison.OrdinalIgnoreCase) || b.StartsWith("-- header", StringComparison.Ordinal));
+        step.Batches.Select(b => b.Split('\n')[^1].Trim()).ShouldBe(["A1;", "B1;", "C1;"]);
+        SqlMigrationStep.Parse("sqlserver", 2, "add_x", text, EmptyDelta).Batches.ShouldBe(step.Batches);
+    }
+
+    [Fact]
+    public void SqlServerBatches_MarkerInsideALine_IsNotASplit()
+    {
+        var step = SqlMigrationStep.Parse("sqlserver", 2, "add_x", "SELECT 1; -- batch\nSELECT 2;\n", EmptyDelta);
+
+        step.Batches.ShouldHaveSingleItem();
+    }
+
+    [Fact]
+    public void PostgreSqlSteps_AreNeverSplit()
+    {
+        var step = SqlMigrationStep.Parse("postgresql", 2, "add_x", "SELECT 1;\n-- batch\nSELECT 2;\n", EmptyDelta);
+
+        step.Batches.ShouldHaveSingleItem().ShouldBe(step.Sql);
+    }
+
+    [Theory]
     [InlineData("TRUNCATE TABLE X;")]
     [InlineData("truncate  table [dbo].[X];")]
     [InlineData("CREATE INDEX CONCURRENTLY IX ON X (a);")]

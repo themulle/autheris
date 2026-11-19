@@ -266,7 +266,7 @@ public sealed class Batch4AdvisoriesSecurityTests
         var decision = await enforcer.EvaluateAndMaskAsync(cdcEvent, user);
         decision.IsAllowed.ShouldBeFalse();
         decision.MaskedPayload.ShouldBeNull();
-        decision.FilterReason.ShouldBe("Transport not allowed");
+        decision.IsTransportDenied.ShouldBeTrue();
     }
 
     private sealed class CatalogDenyingTransportGate(Exception denial) : IDataSourceTransportGate

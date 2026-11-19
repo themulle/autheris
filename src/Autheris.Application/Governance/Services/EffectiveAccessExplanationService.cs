@@ -7,6 +7,7 @@ using System.Linq;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Governance;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Services;
@@ -184,10 +185,7 @@ public sealed class EffectiveAccessExplanationService(
 
         // INC1 decision 9: descriptions come only from the contributing consents (the set above), the most specific
         // grantee first (user or service principal, then group, then role), then the earliest expiry, then the id. Output only through ForOutput.
-        var describing = applicableConsents
-            .OrderBy(c => GranteeSpecificity(c.GranteeType))
-            .ThenBy(c => c.EffectiveValidTo)
-            .ThenBy(c => c.Id)
+        var describing = ConsentDescriptionSelector.Order(applicableConsents)
             .Select(c => ConsentDescriptionText.ForOutput(c.Description, DescriptionMaxLength))
             .ToList();
         var descriptions = describing.OfType<string>().Distinct(StringComparer.Ordinal).Take(MaxDescriptions).ToList();
@@ -209,13 +207,6 @@ public sealed class EffectiveAccessExplanationService(
             ConsentDescriptions = descriptions
         };
     }
-
-    private static int GranteeSpecificity(GranteeType type) => type switch
-    {
-        GranteeType.User or GranteeType.ServicePrincipal => 0,
-        GranteeType.Group => 1,
-        _ => 2
-    };
 
     /// <summary>
     /// Allow consents that apply to the caller, by the very predicate of the access decision

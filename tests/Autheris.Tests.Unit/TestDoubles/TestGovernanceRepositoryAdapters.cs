@@ -62,7 +62,7 @@ public class PostgreSqlGovernanceRepository : GovernanceRepository
         public static string RevokeTarget => GovernanceRepository.ConsentGrantPostgreSql.RevokeTarget;
     }
 
-    public static class AuditSql
+    public new static class AuditSql
     {
         public static string InsertPurgeCheckpoint => GovernanceRepository.AuditSql.InsertPurgeCheckpointPg;
     }
@@ -114,7 +114,7 @@ public class SqlServerGovernanceRepository : GovernanceRepository
         public static string RevokeTarget => GovernanceRepository.ConsentGrantSqlServer.RevokeTarget;
     }
 
-    public static class AuditSql
+    public new static class AuditSql
     {
         public static string InsertPurgeCheckpoint => GovernanceRepository.AuditSql.InsertPurgeCheckpointSs;
     }
