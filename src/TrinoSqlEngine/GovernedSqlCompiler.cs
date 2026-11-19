@@ -221,10 +221,11 @@ internal sealed class GovernedSqlCompiler
             CancellationToken = token
         };
         var secured = (SqlStatement)visitor.Visit(typedLiterals);
+        IReadOnlyDictionary<string, BindFamily>? bindFamilies = null;
         if (visitor.RowPolicyApplied && !CompilerHooks.IsDisabled(SecurityControl.RowPolicyExpressionAllowlist))
         {
             // Details: private advisory. The user tree (without any injected predicate) is checked.
-            Ast.Security.RowPolicyErrorGuard.Enforce(typedLiterals, policy.Catalog);
+            bindFamilies = Ast.Security.RowPolicyErrorGuard.Enforce(typedLiterals, policy.Catalog);
         }
 
         CheckBudget(request, clock, token);
@@ -279,6 +280,22 @@ internal sealed class GovernedSqlCompiler
         }
 
         CheckBudget(request, clock, token);
+
+        // 10b. client binds that meet a typed column under a row policy carry the family the binder checks the value against
+        if (bindFamilies is { Count: > 0 })
+        {
+            var patched = compiled.Parameters.ToBuilder();
+            for (int i = 0; i < patched.Count; i++)
+            {
+                var parameter = patched[i];
+                if (parameter.Origin == ParameterOrigin.ClientNamed && parameter.SourceName is { } sourceName && bindFamilies.TryGetValue(sourceName, out var family))
+                {
+                    patched[i] = parameter with { RequiredFamily = family };
+                }
+            }
+
+            compiled = compiled with { Parameters = patched.MoveToImmutable() };
+        }
 
         // 11. only verified output is cached, value-free
         var templateToCache = CompiledSqlTemplate.From(keyMaterial, compiled, typed.Dependencies);

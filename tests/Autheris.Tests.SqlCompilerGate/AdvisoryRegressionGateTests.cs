@@ -165,14 +165,6 @@ public sealed class AdvisoryRegressionGateTests
     [InlineData("sqlserver", "case_19", "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN CAST('12:30' AS timestamp) ELSE CAST('2024-01-01' AS timestamp) END IS NULL")]
     [InlineData("oracle", "case_19", "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN CAST('12:30' AS timestamp) ELSE CAST('2024-01-01' AS timestamp) END IS NULL")]
     [InlineData("databricks", "case_19", "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN CAST('12:30' AS timestamp) ELSE CAST('2024-01-01' AS timestamp) END IS NULL")]
-    [InlineData("postgresql", "case_21", "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN id = __param_p ELSE 1 = 0 END")]
-    [InlineData("sqlserver", "case_21", "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN id = __param_p ELSE 1 = 0 END")]
-    [InlineData("oracle", "case_21", "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN id = __param_p ELSE 1 = 0 END")]
-    [InlineData("databricks", "case_21", "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN id = __param_p ELSE 1 = 0 END")]
-    [InlineData("postgresql", "case_22", "SELECT id FROM orders WHERE id = __param_p")]
-    [InlineData("sqlserver", "case_22", "SELECT id FROM orders WHERE id = __param_p")]
-    [InlineData("oracle", "case_22", "SELECT id FROM orders WHERE id = __param_p")]
-    [InlineData("databricks", "case_22", "SELECT id FROM orders WHERE id = __param_p")]
     [InlineData("postgresql", "case_17", "SELECT id FROM orders WHERE id = 42 AND sqrt(-1) > 0")]
     [InlineData("sqlserver", "case_17", "SELECT id FROM orders WHERE id = 42 AND sqrt(-1) > 0")]
     [InlineData("oracle", "case_17", "SELECT id FROM orders WHERE id = 42 AND sqrt(-1) > 0")]
@@ -198,5 +190,22 @@ public sealed class AdvisoryRegressionGateTests
         const string sql = "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN DATE '2020-13-45' END IS NULL";
 
         Should.Throw<Exception>(() => engine.Compile(sql.AsMemory(), Request(dialect, PolicyScenario.Tenant), CancellationToken.None));
+    }
+
+    [Theory]
+    [InlineData("postgresql", "case_23")]
+    [InlineData("sqlserver", "case_23")]
+    [InlineData("oracle", "case_23")]
+    [InlineData("databricks", "case_23")]
+    public void Regression_bind_family_case(string dialect, string item)
+    {
+        Assert.NotNull(item);
+        var engine = new FastSqlEngine();
+        const string sql = "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN id = __param_p ELSE 1 = 0 END";
+
+        // The gate compiles without client values: the plan marks the slot, and the binder refuses a value that is not numeric (engine tests, ClientBindFamilyTests).
+        var compiled = engine.Compile(sql.AsMemory(), Request(dialect, PolicyScenario.Tenant), CancellationToken.None);
+
+        compiled.Parameters.ShouldContain(p => p.Origin == ParameterOrigin.ClientNamed && p.SourceName == "p" && p.RequiredFamily == BindFamily.Numeric);
     }
 }

@@ -11,7 +11,6 @@ namespace TrinoSqlEngine.Tests.Compiler;
 /// <summary>REQ-SQL-128 Phase 3: order, position, per-statement cap and output allowance, each pinned by a mutation control.</summary>
 [Trait("Category", "Security")]
 [Trait("Category", "SqlGate")]
-[RowPolicyGuardOff]
 public class ClientListMutationTests
 {
     private const StatementPermissions Dml = StatementPermissions.Update | StatementPermissions.Delete;
@@ -19,7 +18,7 @@ public class ClientListMutationTests
     private readonly ClientListHarness _h = new();
 
     private static IDisposable Mutant(SecurityControl control) =>
-        CompilerHooks.Use(new MutantHooks { DisabledControls = new HashSet<SecurityControl> { control, SecurityControl.RowPolicyExpressionAllowlist } });
+        CompilerHooks.Use(new MutantHooks { DisabledControls = new HashSet<SecurityControl> { control } });
 
     // SEC-128-01 / M-1
     [Theory]
@@ -75,7 +74,7 @@ public class ClientListMutationTests
     {
         string sql = "SELECT id FROM orders WHERE " + string.Join(" OR ", Enumerable.Repeat("id IN (__param_l)", uses));
         var passes = new List<string>();
-        using var _ = CompilerHooks.Use(new MutantHooks { OnPass = passes.Add, DisabledControls = new HashSet<SecurityControl> { SecurityControl.RowPolicyExpressionAllowlist } });
+        using var _ = CompilerHooks.Use(new MutantHooks { OnPass = passes.Add });
 
         var ex = Assert.Throws<ClientListException>(() => _h.Compile(dialect, sql, Shapes(("l", count))));
 
@@ -97,7 +96,7 @@ public class ClientListMutationTests
     {
         string sql = "SELECT id FROM orders WHERE " + string.Join(" OR ", Enumerable.Repeat("id IN (__param_l)", 11));
         var passes = new List<string>();
-        using var _ = CompilerHooks.Use(new MutantHooks { OnPass = passes.Add, DisabledControls = new HashSet<SecurityControl> { SecurityControl.RowPolicyExpressionAllowlist, SecurityControl.ClientListMaxExpanded } });
+        using var _ = CompilerHooks.Use(new MutantHooks { OnPass = passes.Add, DisabledControls = new HashSet<SecurityControl> { SecurityControl.ClientListMaxExpanded } });
         try
         {
             _h.Compile(TargetSqlDialect.PostgreSql, sql, Shapes(("l", 1000)));

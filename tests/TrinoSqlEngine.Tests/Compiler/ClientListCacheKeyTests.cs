@@ -7,7 +7,6 @@ namespace TrinoSqlEngine.Tests.Compiler;
 
 /// <summary>REQ-SQL-128: the list shape (never the values) is part of the template cache key (SEC-128-04, M-13).</summary>
 [Trait("Category", "SqlGate")]
-[RowPolicyGuardOff]
 public class ClientListCacheKeyTests
 {
     private const string Sql = "SELECT id FROM orders WHERE id IN (__param_ids)";
@@ -45,7 +44,7 @@ public class ClientListCacheKeyTests
     {
         // The control matters: without the shape in the key the second request would be served the first request's SQL text.
         var compiler = Compiler();
-        using var seam = CompilerHooks.Use(new MutantHooks { OmittedCacheKeyFields = new HashSet<string> { "ClientLists" }, DisabledControls = new HashSet<SecurityControl> { SecurityControl.RowPolicyExpressionAllowlist } });
+        using var seam = CompilerHooks.Use(new MutantHooks { OmittedCacheKeyFields = new HashSet<string> { "ClientLists" } });
         var three = compiler.Compile(Sql.AsMemory(), _h.Request(TargetSqlDialect.PostgreSql, Shapes(("ids", 3))), CancellationToken.None);
         var five = compiler.Compile(Sql.AsMemory(), _h.Request(TargetSqlDialect.PostgreSql, Shapes(("ids", 5))), CancellationToken.None);
 

@@ -8,7 +8,6 @@ namespace TrinoSqlEngine.Tests.Compiler;
 
 /// <summary>REQ-SQL-128 WP-1: expansion of a client list in an IN / NOT IN list on the AST (PLAN-SQL-128 A-1, A-2).</summary>
 [Trait("Category", "SqlGate")]
-[RowPolicyGuardOff]
 public class ClientListExpansionTests
 {
     private readonly ClientListHarness _h = new();

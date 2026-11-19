@@ -248,6 +248,14 @@ public abstract class DbCommandCompiledSqlBinder : ICompiledSqlBinder
                 throw new SecurityException("A PageOffset slot requires a server-issued bound value.");
             }
 
+            if (bound.RequiredFamily is { } family && bound.Origin == ParameterOrigin.ClientNamed && !ClientBindFamilyCheck.Conforms(family, value)
+                && !CompilerHooks.IsDisabled(SecurityControl.RowPolicyExpressionAllowlist))
+            {
+                // The statement compares this client value with a typed column under a row policy; a value that does not convert would raise on
+                // whichever row is evaluated. Fixed message, no value.
+                throw new SecurityException(Ast.Security.RowPolicyErrorGuard.Message);
+            }
+
             ValidateValue(bound, value);
             if (RejectsEmbeddedNul && value is string text && text.Contains('\0', StringComparison.Ordinal))
             {

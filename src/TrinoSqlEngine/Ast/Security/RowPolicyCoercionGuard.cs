@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security;
+using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Nodes;
 using TrinoSqlEngine.Ast.Visitors;
 using TrinoSqlEngine.Governance;
@@ -20,6 +21,47 @@ internal sealed class RowPolicyCoercionGuard(ITableCatalog catalog) : ColumnScop
 
     private readonly Dictionary<string, Dictionary<string, Fam>> _derived = new(StringComparer.Ordinal);
     private readonly Dictionary<QuerySpecification, List<(string? Name, Fam Family)>> _outputs = new(ReferenceEqualityComparer.Instance);
+
+    private readonly Dictionary<string, BindFamily> _requirements = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The family each client bind (by client parameter or list name) must conform to, as found while visiting the statement.</summary>
+    public IReadOnlyDictionary<string, BindFamily> Requirements => _requirements;
+
+    private static BindFamily? RequiredFamilyOf(Fam family) => family switch
+    {
+        Fam.Numeric => BindFamily.Numeric,
+        Fam.Temporal => BindFamily.Temporal,
+        Fam.Boolean => BindFamily.Boolean,
+        _ => null
+    };
+
+    /// <summary>Records that a bind operand meets <paramref name="other"/>; a bind that needs two families, or an unnamed bind marker that needs one, is refused.</summary>
+    private void Record(Expression operand, Fam other)
+    {
+        if (RequiredFamilyOf(other) is not { } required) return;
+        switch (Unwrap(operand))
+        {
+            case ParameterReference parameter:
+                if (_requirements.TryGetValue(parameter.Name, out var existing) && existing != required) throw Refuse();
+                _requirements[parameter.Name] = required;
+                break;
+            case NamedBindMarkerExpression:
+                throw Refuse();
+        }
+    }
+
+    /// <summary>Records, for every bind operand, the family of the other operands.</summary>
+    private void Bind(IReadOnlyList<Expression> operands)
+    {
+        var others = new List<Fam>();
+        foreach (var operand in operands)
+        {
+            if (Unwrap(operand) is not (ParameterReference or NamedBindMarkerExpression)) others.Add(Of(operand));
+        }
+
+        var family = Combine(others);
+        foreach (var operand in operands) Record(operand, family);
+    }
 
     private static SecurityException Refuse() => new(RowPolicyErrorGuard.Message);
 
@@ -45,11 +87,10 @@ internal sealed class RowPolicyCoercionGuard(ITableCatalog catalog) : ColumnScop
     private static bool Compatible(Fam a, Fam b)
     {
         if (a == Fam.Unknown || b == Fam.Unknown) return false;
-        if (a == Fam.Any || b == Fam.Any || a == b) return true;
-        // A client bind carries a value that is only known at execution (the plan is cached): it may only meet text, because a value
-        // that does not convert would raise on whichever row is evaluated.
-        return (a, b) is (Fam.StringLiteral, Fam.Text or Fam.Temporal or Fam.Bind) or (Fam.Text or Fam.Temporal or Fam.Bind, Fam.StringLiteral)
-            or (Fam.Bind, Fam.Text) or (Fam.Text, Fam.Bind);
+        if (a == Fam.Any || b == Fam.Any || a == Fam.Bind || b == Fam.Bind || a == b) return true;
+        // A client bind carries a value that is only known at execution (the plan is cached): it is compatible with every family, and the
+        // family it must conform to is recorded on its slot (see Requirements) so the binder checks the value before any command exists.
+        return (a, b) is (Fam.StringLiteral, Fam.Text or Fam.Temporal) or (Fam.Text or Fam.Temporal, Fam.StringLiteral);
     }
 
     private static Fam Combine(IEnumerable<Fam> families)
@@ -248,8 +289,16 @@ internal sealed class RowPolicyCoercionGuard(ITableCatalog catalog) : ColumnScop
     public override SqlNode VisitBinaryExpression(BinaryExpression node)
     {
         var result = (BinaryExpression)base.VisitBinaryExpression(node);
-        if (IsComparison(result.Operator)) Require(Of(result.Left), Of(result.Right));
-        else if (result.Operator is BinaryOperator.Divide or BinaryOperator.Modulo) Require(Fam.Numeric, Of(result.Left));
+        if (IsComparison(result.Operator))
+        {
+            Require(Of(result.Left), Of(result.Right));
+            Bind([result.Left, result.Right]);
+        }
+        else if (result.Operator is BinaryOperator.Divide or BinaryOperator.Modulo)
+        {
+            Require(Fam.Numeric, Of(result.Left));
+            Record(result.Left, Fam.Numeric);
+        }
         return result;
     }
 
@@ -257,6 +306,7 @@ internal sealed class RowPolicyCoercionGuard(ITableCatalog catalog) : ColumnScop
     {
         var result = (InSubqueryExpression)base.VisitInSubqueryExpression(node);
         Require(Of(result.Operand), FirstFamily(result.Subquery));
+        Record(result.Operand, FirstFamily(result.Subquery));
         return result;
     }
 
@@ -264,6 +314,7 @@ internal sealed class RowPolicyCoercionGuard(ITableCatalog catalog) : ColumnScop
     {
         var result = (QuantifiedComparisonExpression)base.VisitQuantifiedComparisonExpression(node);
         Require(Of(result.Left), FirstFamily(result.Subquery));
+        Record(result.Left, FirstFamily(result.Subquery));
         return result;
     }
 
@@ -283,6 +334,7 @@ internal sealed class RowPolicyCoercionGuard(ITableCatalog catalog) : ColumnScop
     {
         var result = (IsDistinctFromExpression)base.VisitIsDistinctFromExpression(node);
         Require(Of(result.Left), Of(result.Right));
+        Bind([result.Left, result.Right]);
         return result;
     }
 
@@ -290,6 +342,7 @@ internal sealed class RowPolicyCoercionGuard(ITableCatalog catalog) : ColumnScop
     {
         var result = (BetweenExpression)base.VisitBetweenExpression(node);
         Require(Of(result.Operand), Of(result.Lower), Of(result.Upper));
+        Bind([result.Operand, result.Lower, result.Upper]);
         return result;
     }
 
@@ -297,6 +350,7 @@ internal sealed class RowPolicyCoercionGuard(ITableCatalog catalog) : ColumnScop
     {
         var result = (InListExpression)base.VisitInListExpression(node);
         Require([Of(result.Operand), .. result.Items.Select(Of)]);
+        Bind([result.Operand, .. result.Items]);
         return result;
     }
 
@@ -304,7 +358,12 @@ internal sealed class RowPolicyCoercionGuard(ITableCatalog catalog) : ColumnScop
     {
         var result = (CaseExpression)base.VisitCaseExpression(node);
         Require(result.WhenClauses.Select(w => Of(w.Result)).Concat(result.ElseResult is null ? [] : [Of(result.ElseResult)]).ToArray());
-        if (result.Operand is not null) Require([Of(result.Operand), .. result.WhenClauses.Select(w => Of(w.Condition))]);
+        Bind([.. result.WhenClauses.Select(w => w.Result), .. (result.ElseResult is null ? [] : new[] { result.ElseResult })]);
+        if (result.Operand is not null)
+        {
+            Require([Of(result.Operand), .. result.WhenClauses.Select(w => Of(w.Condition))]);
+            Bind([result.Operand, .. result.WhenClauses.Select(w => w.Condition)]);
+        }
         return result;
     }
 
@@ -316,9 +375,14 @@ internal sealed class RowPolicyCoercionGuard(ITableCatalog catalog) : ColumnScop
         {
             case "coalesce" or "nullif" or "greatest" or "least":
                 Require(result.Arguments.Select(Of).ToArray());
+                Bind(result.Arguments);
                 break;
             case "year" or "month" or "day" or "hour" or "minute" or "second" or "quarter" or "week" or "day_of_week" or "day_of_month" or "day_of_year":
-                foreach (var argument in result.Arguments) Require(Fam.Temporal, Of(argument));
+                foreach (var argument in result.Arguments)
+                {
+                    Require(Fam.Temporal, Of(argument));
+                    Record(argument, Fam.Temporal);
+                }
                 break;
         }
 
@@ -349,6 +413,7 @@ internal sealed class RowPolicyCoercionGuard(ITableCatalog catalog) : ColumnScop
     {
         var result = (ExtractExpression)base.VisitExtractExpression(node);
         Require(Fam.Temporal, Of(result.Source));
+        Record(result.Source, Fam.Temporal);
         return result;
     }
 
@@ -356,6 +421,7 @@ internal sealed class RowPolicyCoercionGuard(ITableCatalog catalog) : ColumnScop
     {
         var result = (DateFunctionExpression)base.VisitDateFunction(node);
         Require(Fam.Temporal, Of(result.Source));
+        Record(result.Source, Fam.Temporal);
         return result;
     }
 }

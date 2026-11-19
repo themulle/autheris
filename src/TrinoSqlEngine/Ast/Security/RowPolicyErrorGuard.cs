@@ -1,6 +1,7 @@
 namespace TrinoSqlEngine.Ast.Security;
 
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Globalization;
 using System.Security;
@@ -17,7 +18,8 @@ public static class RowPolicyErrorGuard
 {
     public const string Message = "The statement uses an expression that is not permitted on a table with a row policy.";
 
-    public static void Enforce(SqlNode userTree, ITableCatalog catalog)
+    /// <summary>Refuses the statement or returns the family each client bind must conform to (empty when none).</summary>
+    public static IReadOnlyDictionary<string, BindFamily> Enforce(SqlNode userTree, ITableCatalog catalog)
     {
         ArgumentNullException.ThrowIfNull(userTree);
         ArgumentNullException.ThrowIfNull(catalog);
@@ -32,7 +34,9 @@ public static class RowPolicyErrorGuard
             return true;
         });
 
-        new RowPolicyCoercionGuard(catalog).Visit(userTree);
+        var coercion = new RowPolicyCoercionGuard(catalog);
+        coercion.Visit(userTree);
+        return coercion.Requirements;
     }
 
     private static bool IsAllowed(Expression expression) => expression switch

@@ -27,7 +27,8 @@ public sealed record SqlSlot(
     int? ListIndex = null,
     int? ListCount = null,
     bool ZoneArgument = false,
-    bool EscapeLikePattern = false);
+    bool EscapeLikePattern = false,
+    BindFamily? RequiredFamily = null);
 
 /// <summary>
 /// Value-free cached compile output (INV-12). It holds the SQL text and slot descriptors; tenant, policy and
@@ -67,7 +68,7 @@ public sealed record CompiledSqlTemplate(
         {
             slots.Add(new SqlSlot(
                 p.Marker, p.Name, p.Ordinal, p.Type, p.Origin, p.SourceName,
-                p.Origin == ParameterOrigin.QueryLiteral ? p.Value : null, p.ColumnType, p.ListIndex, p.ListCount, p.ZoneArgument, p.EscapeLikePattern));
+                p.Origin == ParameterOrigin.QueryLiteral ? p.Value : null, p.ColumnType, p.ListIndex, p.ListCount, p.ZoneArgument, p.EscapeLikePattern, p.RequiredFamily));
         }
 
         return slots.MoveToImmutable();
@@ -123,7 +124,7 @@ public sealed record CompiledSqlTemplate(
                 }
             }
 
-            parameters.Add(new BoundParameter(slot.Marker, slot.Name, slot.Ordinal, value, type, slot.Origin, slot.SourceName, slot.ColumnType, slot.ListIndex, slot.ListCount, slot.ZoneArgument, slot.EscapeLikePattern));
+            parameters.Add(new BoundParameter(slot.Marker, slot.Name, slot.Ordinal, value, type, slot.Origin, slot.SourceName, slot.ColumnType, slot.ListIndex, slot.ListCount, slot.ZoneArgument, slot.EscapeLikePattern, slot.RequiredFamily));
         }
 
         if (pageOffset.HasValue && !hasOffsetSlot)

@@ -500,7 +500,6 @@ public sealed class GovernedSqlExecutorX1Tests
     [Fact]
     public async Task Audit_CompiledDigest_NoValues()
     {
-        using var guardOff = RowPolicyGuardOff.Scope();
         var master = Encoding.UTF8.GetBytes("master-hmac-secret-0123456789abcdef");
         var secrets = Substitute.For<IKeyVaultSecretProvider>();
         secrets.GetSecretBytes("GQL-HMAC").Returns(master);
@@ -511,7 +510,7 @@ public sealed class GovernedSqlExecutorX1Tests
 
         await ExecuteAsync(h, compiled,
             new GovernedSqlQueryRequest("SELECT id FROM orders WHERE id = @who"),
-            clientValues: new Dictionary<string, object?> { ["who"] = "client-secret-value-77" });
+            clientValues: new Dictionary<string, object?> { ["who"] = "7700123456" });
 
         var entry = h.Audit.Single(e => e.EventType == "WEBSQL_QUERY");
         using var json = System.Text.Json.JsonDocument.Parse(entry.DetailsJson);
@@ -522,7 +521,7 @@ public sealed class GovernedSqlExecutorX1Tests
         string digest = root.GetProperty("sql.compiled_digest").GetString()!;
         digest.ShouldBe(CompiledSqlDigest.Compute(CompiledSqlAuditDigester.DeriveKey(CompiledSqlAuditDigester.DeriveAuditKeyFromMaster(master)), compiled));
         digest.Length.ShouldBe(64);
-        entry.DetailsJson.ShouldNotContain("client-secret-value-77");
+        entry.DetailsJson.ShouldNotContain("7700123456");
         entry.DetailsJson.ShouldNotContain(Tenant + "'");              // no value of the statement is part of the record
         root.TryGetProperty("compiledSql", out _).ShouldBeFalse();     // Audit:StoreCompiledSql defaults to false
         root.TryGetProperty("securedSql", out _).ShouldBeFalse();

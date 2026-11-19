@@ -14,7 +14,6 @@ namespace TrinoSqlEngine.Tests.Compiler;
 
 /// <summary>REQ-SQL-128 WP-2: indexed element binding, exact count, element type from the list (PLAN-SQL-128 A-3).</summary>
 [Trait("Category", "SqlGate")]
-[RowPolicyGuardOff]
 public class ClientListBinderTests
 {
     private readonly ClientListHarness _h = new();
