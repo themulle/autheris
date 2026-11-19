@@ -22,7 +22,8 @@ public sealed partial class CrossSourceRelationResolver : ICrossSourceRelationRe
     private static readonly MaskingRule DefaultRedactRule = new() { RuleType = "REDACT", Replacement = "[REDACTED]" };
 
     private readonly ITableMetadataRepository _metadataRepository;
-    private readonly IUnifiedPolicyDecisionPoint _pdp;
+    private readonly Autheris.Application.Policy.Pdp.IAccessDecisionPoint _pdp;
+    private readonly Microsoft.Extensions.Logging.ILogger? _logger;
     private readonly ICrossSourceRowReader _rowReader;
     private readonly IColumnMaskingProvider _maskingProvider;
     private readonly IAuditLogRepository _auditLogRepository;
@@ -31,13 +32,15 @@ public sealed partial class CrossSourceRelationResolver : ICrossSourceRelationRe
 
     public CrossSourceRelationResolver(
         ITableMetadataRepository metadataRepository,
-        IUnifiedPolicyDecisionPoint pdp,
+        Autheris.Application.Policy.Pdp.IAccessDecisionPoint pdp,
         ICrossSourceRowReader rowReader,
         IColumnMaskingProvider maskingProvider,
         IAuditLogRepository auditLogRepository,
         IParameterBudgetProvider? parameterBudgetProvider = null,
-        IOptions<CrossSourceRelationOptions>? options = null)
+        IOptions<CrossSourceRelationOptions>? options = null,
+        Microsoft.Extensions.Logging.ILogger<CrossSourceRelationResolver>? logger = null)
     {
+        _logger = logger;
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _pdp = pdp ?? throw new ArgumentNullException(nameof(pdp));
         _rowReader = rowReader ?? throw new ArgumentNullException(nameof(rowReader));

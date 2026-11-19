@@ -64,7 +64,6 @@ public sealed partial class CallerAttributeArchitectureTests
         // The unified PDP (MCP RAG) has no ClaimsPrincipal in its SecurityPrincipalContext: an attribute filter there is the fail-closed constant.
         string[] allowlist =
         [
-            "src/Autheris.Application/Policy/UnifiedPolicyDecisionPoint.cs",
             "src/Autheris.Application/Policy/Pdp/AccessDecisionPoint.cs"
         ];
         var offenders = new List<string>();

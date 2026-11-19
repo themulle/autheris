@@ -483,8 +483,8 @@ internal sealed partial class CrossTransportParityHarness : IAsyncDisposable
             options, dataSourceExecutors: [new FixedRowsSqlExecutor()], clientIpResolver: ipResolver, concurrencyGate: new TableReadConcurrencyGate(),
             mandatoryFilters: mandatory, accessProfileRepository: profiles,
             typedPolicies: typed, transportGate: AllowingTransportGate.Instance, accessDecisionPoint: pdp);
-        var svc = new GovernedAggregationService(metaRepo, auditRepo, accessResolver: rest, gatewayExecutionService: rest,
-            consentRepository: consentRepo, resolutionService: resolution, transportGate: AllowingTransportGate.Instance);
+        var svc = new GovernedAggregationService(metaRepo, auditRepo, pdp, gatewayExecutionService: rest,
+            transportGate: AllowingTransportGate.Instance);
         var query = new AggregationQuery(s.Table.Identifier, GroupBy: ["region"], Aggregates: [new AggregateSelection(AggregateFunction.Count, "id", "cnt")]);
         try
         {

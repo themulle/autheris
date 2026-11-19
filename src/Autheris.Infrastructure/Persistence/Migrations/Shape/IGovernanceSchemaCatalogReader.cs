@@ -47,16 +47,24 @@ internal static class SchemaCatalogReaderSupport
     {
         var rows = new List<object?[]>();
         await using var cmd = Command(session, sql, parameters);
-        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        try
         {
-            var row = new object?[columns];
-            for (var i = 0; i < columns; i++)
+            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
             {
-                row[i] = reader.IsDBNull(i) ? null : reader.GetValue(i);
-            }
+                var row = new object?[columns];
+                for (var i = 0; i < columns; i++)
+                {
+                    row[i] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                }
 
-            rows.Add(row);
+                rows.Add(row);
+            }
+        }
+        catch (DbException ex)
+        {
+            SqlMigrationStep.AnnotateStatement(ex, sql);
+            throw;
         }
 
         return rows;

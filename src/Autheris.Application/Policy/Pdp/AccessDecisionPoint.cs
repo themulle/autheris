@@ -256,7 +256,7 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
                     ct).ConfigureAwait(false);
                 if (mandatory.IsDenied)
                 {
-                    return TableAccessDecision.Denied(table, mandatory.DenyReason ?? "Denied by virtual filters.");
+                    return TableAccessDecision.Denied(table, mandatory.DenyReason ?? "Denied by virtual filters.") with { EvaluatedByPdp = true };
                 }
                 if (mandatory.PredicateSql != null)
                 {

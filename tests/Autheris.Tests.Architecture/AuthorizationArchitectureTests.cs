@@ -2,6 +2,7 @@ namespace Autheris.Tests.Architecture;
 
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using Autheris.Application.DataSources.Connectors.CrossDomain;
@@ -19,6 +20,102 @@ using Xunit;
 public sealed class AuthorizationArchitectureTests
 {
     private const string ExpectedPdpConstructionFile = "src/Autheris.Application/Policy/Pdp/AccessDecisionPoint.cs";
+
+    [Fact]
+    public void Architecture_NoUnifiedPolicyDecisionPointReferences()
+    {
+        // Built from parts so this test file does not match its own scan.
+        var retiredNames = new[] { "Unified" + "PolicyDecisionPoint", "IUnified" + "PolicyDecisionPoint" };
+        var offenders = new List<string>();
+        foreach (var file in RepositoryScan.ProductionFiles)
+        {
+            if (retiredNames.Any(name => file.Text.Contains(name, StringComparison.Ordinal)))
+            {
+                offenders.Add(file.RelativePath);
+            }
+        }
+
+        foreach (var path in RepositoryScan.EnumerateFiles("tests", "*.cs"))
+        {
+            if (path.EndsWith("AuthorizationArchitectureTests.cs", StringComparison.Ordinal))
+            {
+                continue; // this ratchet names the retired type in its own test name
+            }
+
+            var text = File.ReadAllText(Path.Combine(RepositoryScan.RepoRoot, path));
+            if (retiredNames.Any(name => text.Contains(name, StringComparison.Ordinal)))
+            {
+                offenders.Add(path);
+            }
+        }
+
+        offenders.ShouldBeEmpty("The unified policy decision point adapter was removed; every consumer uses IAccessDecisionPoint.");
+        typeof(IAccessDecisionPoint).Assembly.GetTypes()
+            .Where(t => retiredNames.Contains(t.Name, StringComparer.Ordinal))
+            .ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Architecture_MigratedReadConsumers_UseReadDecisionsWithTheExpectedTransport()
+    {
+        string[] analytics =
+        [
+            "src/Autheris.Application/Analytics/GovernedAggregationService.ValidationAndExecution.cs",
+            "src/Autheris.Application/Analytics/SemanticMetricQueryService.ConsentAndEvaluation.cs"
+        ];
+        string[] rest =
+        [
+            "src/Autheris.Application/Policy/GovernedQueryStages.cs",
+            "src/Autheris.Application/DataSources/Relations/CrossSourceRelationResolver.Helpers.cs"
+        ];
+        string[] viaStage =
+        [
+            "src/Autheris.Api/Endpoints/TableStreamEndpoints.cs",
+            "src/Autheris.Application/DataSources/Services/GovernedDataQueryService.cs",
+            "src/Autheris.Application/DataSources/Changes/GovernedChangeDetectionService.cs"
+        ];
+        var files = RepositoryScan.ProductionFiles.ToDictionary(f => f.RelativePath, f => f.Text, StringComparer.Ordinal);
+        var problems = new List<string>();
+
+        foreach (var path in analytics.Concat(rest).Concat(viaStage))
+        {
+            var text = files[path];
+            if (text.Contains("new AccessRequest(", StringComparison.Ordinal) || text.Contains("AccessOperation.", StringComparison.Ordinal))
+            {
+                problems.Add($"{path}: builds its own request; read consumers go through ReadAccessDecisions (always Read).");
+            }
+
+            if (text.Contains("AccessTransport.Internal", StringComparison.Ordinal))
+            {
+                problems.Add($"{path}: caller-facing reads never use the Internal transport.");
+            }
+        }
+
+        problems.AddRange(analytics.Where(p => !files[p].Contains("AccessTransport.Analytics", StringComparison.Ordinal))
+            .Select(p => $"{p}: must decide with the Analytics transport."));
+        problems.AddRange(analytics.Where(p => files[p].Contains("AccessTransport.Rest", StringComparison.Ordinal))
+            .Select(p => $"{p}: must not use the Rest transport."));
+        problems.AddRange(rest.Where(p => !files[p].Contains("AccessTransport.Rest", StringComparison.Ordinal))
+            .Select(p => $"{p}: must decide with the Rest transport."));
+        problems.AddRange(viaStage.Where(p => !files[p].Contains("AuthorizeTableAsync(", StringComparison.Ordinal))
+            .Select(p => $"{p}: must authorize through GovernedQueryStages.AuthorizeTableAsync (Rest)."));
+
+        problems.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Architecture_PdpProvenance_IsStampedOnlyInsideThePdpNamespace()
+    {
+        var offenders = RepositoryScan.ProductionFiles
+            .Where(f => f.Text.Contains("EvaluatedByPdp = true", StringComparison.Ordinal))
+            .Select(f => f.RelativePath)
+            .Where(path => !path.StartsWith("src/Autheris.Application/Policy/Pdp/", StringComparison.Ordinal))
+            // Federated execution builds an unconstrained allow for tables it resolved itself, to run the masked-column guardrails; it is never handed on as a caller decision.
+            .Where(path => path != "src/Autheris.Application/Sql/Services/FederatedDuckDbExecutionService.cs")
+            .ToList();
+
+        offenders.ShouldBeEmpty("Only the access decision point may mark a decision as evaluated by the PDP.");
+    }
 
     [Fact]
     public void Only_Pdp_Constructs_TableAccessPolicy()

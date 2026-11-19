@@ -43,7 +43,7 @@ public class PostgreSqlGovernanceRepository : GovernanceRepository
     {
     }
 
-    public static class WebhookOutboxSql
+    public new static class WebhookOutboxSql
     {
         public static string ClaimBatch() => GovernanceRepository.WebhookOutboxPostgreSql.ClaimBatch();
         public static string Enqueue => GovernanceRepository.WebhookOutboxPostgreSql.Enqueue;
@@ -95,7 +95,7 @@ public class SqlServerGovernanceRepository : GovernanceRepository
     {
     }
 
-    public static class WebhookOutboxSql
+    public new static class WebhookOutboxSql
     {
         public static string ClaimBatch() => GovernanceRepository.WebhookOutboxSqlServer.ClaimBatch();
         public static string Enqueue => GovernanceRepository.WebhookOutboxSqlServer.Enqueue;

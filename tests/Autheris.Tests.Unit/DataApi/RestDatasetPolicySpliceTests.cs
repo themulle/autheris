@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.DataApi;
 
+using Autheris.Application.Policy.Pdp;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -97,7 +98,7 @@ public sealed class RestDatasetPolicySpliceTests
     private sealed class Fixture
     {
         public ITableMetadataRepository Metadata { get; } = Substitute.For<ITableMetadataRepository>();
-        public IUnifiedPolicyDecisionPoint Pdp { get; } = Substitute.For<IUnifiedPolicyDecisionPoint>();
+        public IAccessDecisionPoint Pdp { get; } = Substitute.For<IAccessDecisionPoint>();
         public IGovernedSqlExecutionService Sql { get; } = Substitute.For<IGovernedSqlExecutionService>();
         public IFederatedQueryExecutionService Federated { get; } = Substitute.For<IFederatedQueryExecutionService>();
         public List<GovernedSqlQueryRequest> Captured { get; } = [];
@@ -106,8 +107,8 @@ public sealed class RestDatasetPolicySpliceTests
         {
             var meta = CustomersMeta();
             Metadata.GetTableMetadataAsync(Customers, Arg.Any<CancellationToken>()).Returns(meta);
-            Pdp.EvaluateAccessAsync(Customers, meta, Arg.Any<SecurityPrincipalContext>(), Arg.Any<IReadOnlyList<string>?>(), Arg.Any<CancellationToken>())
-                .Returns(decision ?? SqlServerPolicyDecision());
+            Pdp.DecideAsync(Arg.Is<AccessRequest>(r => r.Object == meta), Arg.Any<CancellationToken>())
+            .Returns(decision ?? SqlServerPolicyDecision());
             Sql.ExecuteQueryBufferedAsync(Arg.Do<GovernedSqlQueryRequest>(Captured.Add), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
                 .Returns(new GovernedSqlResult("q", ["id"], [], 0, 1));
         }
@@ -218,11 +219,11 @@ public sealed class RestDatasetPolicySpliceTests
         var meta = CustomersMeta();
 
         // REST side: the unified PDP as GovernedDataQueryService calls it.
-        var pdp = new UnifiedPolicyDecisionPoint(
-            repo, resolution, Substitute.For<IConsentCacheService>(), Options.Create(options),
-            NullLogger<UnifiedPolicyDecisionPoint>.Instance);
-        var restDecision = await pdp.EvaluateAccessAsync(
-            Customers, meta, SecurityPrincipalContext.FromPrincipal(user, new TenantId(TenantValue)), ["id", "name"], CancellationToken.None);
+        var pdp = new AccessDecisionPoint(
+            Options.Create(options), resolution, repo, Substitute.For<IConsentCacheService>());
+        var restDecision = await pdp.DecideAsync(
+            new AccessRequest(SecurityPrincipalContext.FromPrincipal(user, new TenantId(TenantValue)), meta, AccessOperation.Read, AccessTransport.Rest, ["id", "name"]),
+            CancellationToken.None);
         var restResolution = rec.Resolutions.Single();
         rec.Resolutions.Clear();
 
@@ -365,9 +366,9 @@ public sealed class RestDatasetPolicySpliceTests
         var pipeline = CrossSourcePipeline();
         var metadata = Substitute.For<ITableMetadataRepository>();
         metadata.GetTableMetadataAsync(CrmCustomers.Identifier, Arg.Any<CancellationToken>()).Returns(CrmCustomers);
-        var pdp = Substitute.For<IUnifiedPolicyDecisionPoint>();
+        var pdp = Substitute.For<IAccessDecisionPoint>();
         // The REST decision carries the SAME consent filter as text, which the service must not splice any more.
-        pdp.EvaluateAccessAsync(CrmCustomers.Identifier, CrmCustomers, Arg.Any<SecurityPrincipalContext>(), Arg.Any<IReadOnlyList<string>?>(), Arg.Any<CancellationToken>())
+        pdp.DecideAsync(Arg.Is<AccessRequest>(r => r.Object == CrmCustomers), Arg.Any<CancellationToken>())
             .Returns(TableAccessDecision.Allowed(CrmCustomers.Identifier, new Dictionary<string, ColumnAccessLevel>(), "[status] = @p0", hasUnconstrainedColumnAllow: true));
         GovernedSqlQueryRequest? seen = null;
         var federated = Substitute.For<IFederatedQueryExecutionService>();
@@ -412,7 +413,7 @@ public sealed class RestDatasetPolicySpliceTests
         var meta = baseMeta with { Columns = [.. baseMeta.Columns, new TableColumn { ColumnName = "tenant_id", DataType = "varchar" }] };
         var fx = new Fixture();
         fx.Metadata.GetTableMetadataAsync(Customers, Arg.Any<CancellationToken>()).Returns(meta);
-        fx.Pdp.EvaluateAccessAsync(Customers, meta, Arg.Any<SecurityPrincipalContext>(), Arg.Any<IReadOnlyList<string>?>(), Arg.Any<CancellationToken>())
+        fx.Pdp.DecideAsync(Arg.Is<AccessRequest>(r => r.Object == meta), Arg.Any<CancellationToken>())
             .Returns(SqlServerPolicyDecision());
         await fx.Service().ExecuteQueryAsync(
             new DatasetQueryRequest(Customers, SelectColumns: ["id"], Limit: 10), new RequestContext(Alice(), new TenantId(TenantValue)));

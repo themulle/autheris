@@ -413,7 +413,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
 
             if (existingMeta == null && !metadataUnavailable && _gatewayOptions?.Value is { } gatewayValue)
             {
-                existingMeta = await TryRegisterMissingTableAsync(model, tableId, gatewayValue, dryRun, creation, warnings, ct).ConfigureAwait(false);
+                existingMeta = await TryRegisterMissingTableAsync(model, tableId, gatewayValue, dryRun, creation, warnings, caller.IsClusterAdmin, ct).ConfigureAwait(false);
             }
 
             if (existingMeta != null)
@@ -623,7 +623,8 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                         SmallGroupStrategy = existingMeta.Table.SmallGroupStrategy,
                         RequiredFilterColumns = reqCols,
                         RequiredFilterColumnGroups = reqGroups,
-                        ExpectedRows = existingMeta.Table.ExpectedRows
+                        ExpectedRows = existingMeta.Table.ExpectedRows,
+                        ObjectKind = caller.IsClusterAdmin ? DbtObjectKindResolver.Resolve(model, warnings) : existingMeta.Table.ObjectKind
                     };
 
                     var updatedColumns = new List<TableColumn>();
@@ -800,6 +801,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         bool dryRun,
         CatalogCreationRun run,
         List<string> warnings,
+        bool applyObjectKind,
         CancellationToken ct)
     {
         var kind = string.Equals(model.Materialization, "source", StringComparison.OrdinalIgnoreCase) ? "source" : "model";
@@ -834,7 +836,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
             return null;
         }
 
-        if (!DbtCatalogTableFactory.TryBuild(model, options, out var built, out var reason) || built is null)
+        if (!DbtCatalogTableFactory.TryBuild(model, options, out var built, out var reason, applyObjectKind, warnings) || built is null)
         {
             Skip(reason ?? DbtSyncSkipReasons.Ineligible);
             return null;
@@ -1334,7 +1336,8 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                     SmallGroupStrategy = existingMeta.Table.SmallGroupStrategy,
                     RequiredFilterColumns = reqCols,
                     RequiredFilterColumnGroups = reqGroups,
-                    ExpectedRows = existingMeta.Table.ExpectedRows
+                    ExpectedRows = existingMeta.Table.ExpectedRows,
+                    ObjectKind = existingMeta.Table.ObjectKind
                 };
 
                 var updatedCols = new List<TableColumn>();

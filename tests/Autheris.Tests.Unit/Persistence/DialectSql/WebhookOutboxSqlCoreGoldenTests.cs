@@ -92,7 +92,7 @@ public sealed class WebhookOutboxSqlCoreGoldenTests
         var kit = DialectKit.Of(dialect);
         using var conn = kit.NewConnection();
 
-        var inserted = await WebhookOutboxSqlCore.EnqueueAsync(conn, EnqueueSql(dialect), Message(), CancellationToken.None);
+        var inserted = await GovernanceRepository.WebhookOutboxSql.EnqueueAsync(conn, EnqueueSql(dialect), Message(), CancellationToken.None);
 
         inserted.ShouldBeTrue();
         var command = conn.Commands.Single();
@@ -112,7 +112,7 @@ public sealed class WebhookOutboxSqlCoreGoldenTests
         var kit = DialectKit.Of(dialect);
         using var conn = kit.NewConnection();
 
-        await WebhookOutboxSqlCore.EnqueueAsync(conn, EnqueueSql(dialect), Message(owner: null, eventTenant: null), CancellationToken.None);
+        await GovernanceRepository.WebhookOutboxSql.EnqueueAsync(conn, EnqueueSql(dialect), Message(owner: null, eventTenant: null), CancellationToken.None);
 
         var parameters = conn.Commands.Single().Parameters;
         parameters.Single(p => p.Name == "@owner").Value.ShouldBe(DBNull.Value);
@@ -128,7 +128,7 @@ public sealed class WebhookOutboxSqlCoreGoldenTests
         using var conn = kit.NewConnection();
         var lease = TimeSpan.FromSeconds(30);
 
-        var rows = await WebhookOutboxSqlCore.ClaimBatchAsync(conn, ClaimSql(dialect), 5000, Now, lease, "worker-1", CancellationToken.None);
+        var rows = await GovernanceRepository.WebhookOutboxSql.ClaimBatchAsync(conn, ClaimSql(dialect), 5000, Now, lease, "worker-1", CancellationToken.None);
 
         rows.ShouldBeEmpty();
         var command = conn.Commands.Single();
@@ -170,7 +170,7 @@ public sealed class WebhookOutboxSqlCoreGoldenTests
         };
         var values = new WebhookFencedValues(setClause, status, error, next, Now);
 
-        var updated = await WebhookOutboxSqlCore.FencedUpdateAsync(conn, FencedSql(dialect, setClause), "w1", "worker-1", values, Binder(dialect), CancellationToken.None);
+        var updated = await GovernanceRepository.WebhookOutboxSql.FencedUpdateAsync(conn, FencedSql(dialect, setClause), "w1", "worker-1", values, Binder(dialect), CancellationToken.None);
 
         updated.ShouldBeTrue();
         var command = conn.Commands.Single();
@@ -228,7 +228,7 @@ public sealed class WebhookOutboxSqlCoreGoldenTests
         var kit = DialectKit.Of(dialect);
         using var conn = kit.NewConnection();
 
-        var affected = await WebhookOutboxSqlCore.DeferSubscriptionAsync(conn, DeferSql(dialect), WebhookSubscriptionSource.CloudEvent, "sub1", Later, CancellationToken.None);
+        var affected = await GovernanceRepository.WebhookOutboxSql.DeferSubscriptionAsync(conn, DeferSql(dialect), WebhookSubscriptionSource.CloudEvent, "sub1", Later, CancellationToken.None);
 
         affected.ShouldBe(1);
         var command = conn.Commands.Single();
@@ -245,7 +245,7 @@ public sealed class WebhookOutboxSqlCoreGoldenTests
         using var conn = kit.NewConnection();
         var scope = new WebhookOwnerScope("tenant-a", false);
 
-        await WebhookOutboxSqlCore.ListDeadLettersAsync(conn, ListSql(dialect, scope), scope, 0, CancellationToken.None);
+        await GovernanceRepository.WebhookOutboxSql.ListDeadLettersAsync(conn, ListSql(dialect, scope), scope, 0, CancellationToken.None);
 
         var command = conn.Commands.Single();
         command.CommandText.ShouldBe(ExpectedListSql(kit, "owner_tenant_id = @tenant"));
@@ -262,7 +262,7 @@ public sealed class WebhookOutboxSqlCoreGoldenTests
         using var conn = kit.NewConnection();
         var scope = new WebhookOwnerScope(null, true);
 
-        await WebhookOutboxSqlCore.ListDeadLettersAsync(conn, ListSql(dialect, scope), scope, 50, CancellationToken.None);
+        await GovernanceRepository.WebhookOutboxSql.ListDeadLettersAsync(conn, ListSql(dialect, scope), scope, 50, CancellationToken.None);
 
         var command = conn.Commands.Single();
         command.CommandText.ShouldBe(ExpectedListSql(kit, "owner_tenant_id IS NULL"));
@@ -287,7 +287,7 @@ public sealed class WebhookOutboxSqlCoreGoldenTests
         using var conn = kit.NewConnection();
         conn.ScalarResult = 7;
 
-        var count = await WebhookOutboxSqlCore.CountPendingAsync(conn, CountSql(dialect), CancellationToken.None);
+        var count = await GovernanceRepository.WebhookOutboxSql.CountPendingAsync(conn, CountSql(dialect), CancellationToken.None);
 
         count.ShouldBe(7L);
         conn.Commands.Single().CommandText.ShouldBe(kit.Golden(Area).Fragment("CountPendingAsync", "SELECT COUNT(*)"));
@@ -301,7 +301,7 @@ public sealed class WebhookOutboxSqlCoreGoldenTests
         var kit = DialectKit.Of(dialect);
         using var conn = kit.NewConnection();
 
-        await WebhookOutboxSqlCore.PurgeAsync(conn, PurgeSql(dialect), Now, Later, CancellationToken.None);
+        await GovernanceRepository.WebhookOutboxSql.PurgeAsync(conn, PurgeSql(dialect), Now, Later, CancellationToken.None);
 
         var command = conn.Commands.Single();
         command.CommandText.ShouldBe(kit.Golden(Area).Fragment("PurgeAsync(DateTimeOffset)", "DELETE FROM"));

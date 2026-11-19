@@ -11,6 +11,7 @@ using Autheris.Application.DataSources.Interfaces;
 using Autheris.Application.DataSources.Services;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
+using Autheris.Application.Policy.Pdp;
 using Autheris.Application.Services;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Common;
@@ -30,59 +31,14 @@ public sealed partial class GovernedAggregationService
         AggregationQuery query,
         CancellationToken ct)
     {
-        // MISC-06: a pre-evaluated decision is trusted only when the unified PDP produced it; anything else is evaluated normally.
+        // MISC-06: a pre-evaluated decision is trusted only when the access decision point produced it; anything else is evaluated normally.
         if (query.PreEvaluatedDecision is { EvaluatedByPdp: true } preEvaluated)
         {
             return preEvaluated;
         }
 
-        TableAccessDecision? decision = null;
-
-        if (_pdp != null)
-        {
-            var secContext = SecurityPrincipalContext.FromPrincipal(principal, tenantId);
-            decision = await _pdp.EvaluateAccessAsync(query.Table, metadata, secContext, requestedColumns: null, ct).ConfigureAwait(false);
-        }
-        else if (_accessResolver != null)
-        {
-            var resolved = await _accessResolver.ResolveTableAccessAsync(principal, query.Table, null, null, ct).ConfigureAwait(false);
-            decision = resolved.Decision;
-        }
-        else if (_gatewayExecutionService != null)
-        {
-            decision = await _gatewayExecutionService.CheckTableAccessAsync(principal, metadata, recordAudit: false, ct).ConfigureAwait(false);
-        }
-        else if (_consentRepository != null && _resolutionService != null)
-        {
-            var allSids = principal.GetAllUserSids();
-            var groupSids = principal.GetGroupSids();
-            var roles = principal.GetUserRoles();
-            var subjects = (allSids.Count > 0 ? allSids : (IEnumerable<Sid>)[userSid])
-                .Concat(groupSids)
-                .Distinct()
-                .ToList();
-            var consents = (await _consentRepository.GetActiveConsentsForSubjectsAsync(subjects, query.Table, DateTimeOffset.UtcNow, tenantId, ct).ConfigureAwait(false))
-                .Where(c => c.TenantId == tenantId)
-                .ToList();
-            var scopes = TokenAccessScope.GetScopeSet(principal.Claims);
-            decision = _resolutionService.ResolveAccess(
-                userSid,
-                groupSids,
-                roles,
-                query.Table,
-                consents,
-                metadata.Dialect,
-                allSids.Count > 1 ? allSids : null,
-                scopes.Count > 0 ? scopes : null);
-        }
-
-        // MISC-06: no consent bypass and no reason-text matching here; metric consents are resolved inside the PDP pipeline upstream.
-        if (decision == null)
-        {
-            return TableAccessDecision.Denied(query.Table, "No policy decision point or consent resolver is configured (fail-closed).");
-        }
-
-        return decision;
+        var secContext = SecurityPrincipalContext.FromPrincipal(principal, tenantId);
+        return await _pdp.DecideReadAsync(metadata, secContext, AccessTransport.Analytics, requestedColumns: null, _logger, ct).ConfigureAwait(false);
     }
 
     /// <summary>True when the aggregation is planned as SQL (the only path that refuses a group-key type). One helper so validation and execution cannot drift.</summary>
