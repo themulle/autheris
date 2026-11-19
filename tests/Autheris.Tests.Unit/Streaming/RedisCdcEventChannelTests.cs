@@ -375,7 +375,8 @@ public sealed class RedisCdcEventChannelTests
             new TableIdentifier("default", "public", "orders"),
             resolver,
             NullAuditLogRepository.Instance,
-            CancellationToken.None);
+            CancellationToken.None,
+            transportGate: Substitute.For<Autheris.Application.DataSources.IDataSourceTransportGate>());
 
         await lease.DisposeAsync();
 
@@ -393,7 +394,8 @@ public sealed class RedisCdcEventChannelTests
                 new TableIdentifier("default", "public", "orders"),
                 resolver,
                 NullAuditLogRepository.Instance,
-                CancellationToken.None));
+                CancellationToken.None,
+                transportGate: Substitute.For<Autheris.Application.DataSources.IDataSourceTransportGate>()));
         ex.Errors[0].Code.ShouldBe("SERVICE_UNAVAILABLE");
     }
 

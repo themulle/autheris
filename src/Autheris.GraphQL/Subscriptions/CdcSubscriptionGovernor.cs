@@ -88,6 +88,7 @@ public sealed class CdcSubscriptionGovernor
         Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null)
     {
         ArgumentNullException.ThrowIfNull(principal);
+        transportGate ??= Autheris.Application.DataSources.DenyAllTransportGate.Instance;
         var tenant = principal.GetTenantId();
         var sid = principal.GetUserSid() ?? throw Denied("AUTH_NOT_AUTHENTICATED", "Unauthorized: no user SID in the token.");
 
@@ -100,6 +101,11 @@ public sealed class CdcSubscriptionGovernor
             if (!isGovAdmin && !isClusterAdmin)
             {
                 denial = "cdc_all requires a global governance role";
+            }
+            else if (!Autheris.Application.DataSources.IngressTransportContext.IsSingleKnownFlag(transportGate.Ingress))
+            {
+                // All-tables admission: no ingress transport (fail-closed); each event is still gated per source by the enforcer.
+                denial = "transport not allowed";
             }
         }
         else if (accessResolver == null)
@@ -115,7 +121,7 @@ public sealed class CdcSubscriptionGovernor
                 {
                     denial = "no access to table";
                 }
-                else if (transportGate != null)
+                else
                 {
                     var source = Autheris.Application.Sql.Services.DataSourceAllowlistGuard.LogicalDataSource(access.Metadata);
                     await transportGate.EnsureCatalogSourceAsync(source, ct).ConfigureAwait(false);

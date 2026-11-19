@@ -97,7 +97,8 @@ public sealed class SecurityReviewG5Tests : IDisposable
             .AddSingleton(Options.Create(new GatewayOptions()))
             .AddSingleton<CdcSubscriptionGovernor>()
             .AddSingleton(resolver)
-            .AddSingleton(Substitute.For<IAuditLogRepository>());
+            .AddSingleton(Substitute.For<IAuditLogRepository>())
+            .AddSingleton(Substitute.For<Autheris.Application.DataSources.IDataSourceTransportGate>());
     }
 
     private static ClaimsPrincipal TokenPrincipal(DateTimeOffset exp) => new(new ClaimsIdentity(
