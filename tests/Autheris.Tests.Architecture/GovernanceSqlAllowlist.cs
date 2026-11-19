@@ -20,6 +20,8 @@ internal static class GovernanceSqlAllowlist
         [("GovernanceRepository.WebhookOutbox.cs", "ClaimBatch")] = "interpolates constant returning/output column projection into claim statement",
         [("GovernanceRepository.WebhookOutbox.cs", "FencedUpdate")] = "interpolates validated set clause into constant UPDATE statement",
         [("GovernanceRepository.WebhookOutbox.cs", "ListDeadLetters")] = "interpolates validated owner scope predicate into constant SELECT statement",
+        [("GovernanceRepository.CdcStreams.cs", "Rows")] = "repeats a constant row template with only the integer parameter-name suffix spliced (bounded chunk)",
+        [("GovernanceRepository.CdcStreams.cs", "InList")] = "appends generated @prefixN placeholder names only (bounded chunk), values stay bound",
         [("PostgreSqlGovernanceDialect.cs", "Upsert")] = "identifiers pass GovernanceSqlInput.Identifier (SEC-SIMPL-21) before being appended",
         [("PostgreSqlGovernanceDialect.cs", "UpsertAccumulate")] = "identifiers pass GovernanceSqlInput.Identifier (SEC-SIMPL-21) before being appended",
         [("SqlServerGovernanceDialect.cs", "Upsert")] = "identifiers pass GovernanceSqlInput.Identifier (SEC-SIMPL-21) before being appended",

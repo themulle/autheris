@@ -109,9 +109,9 @@ src/Autheris.Infrastructure/Idempotency/InMemoryIdempotencyStore.cs|3
 src/Autheris.Infrastructure/Persistence/AccessProfileStore.cs|2
 src/Autheris.Infrastructure/Persistence/AuditChainAnchorStores.cs|2
 src/Autheris.Infrastructure/Persistence/AuditWormExportService.cs|4
-src/Autheris.Infrastructure/Persistence/CdcStreamSqlCore.cs|3
 src/Autheris.Infrastructure/Persistence/CloudEventSubscriptionMapping.cs|1
 src/Autheris.Infrastructure/Persistence/DatasetCatalogStore.cs|1
+src/Autheris.Infrastructure/Persistence/GovernanceRepository.CdcStreams.cs|3
 src/Autheris.Infrastructure/Persistence/IdentityStore.cs|4
 src/Autheris.Infrastructure/Persistence/InMemoryAccessProfileRepository.cs|5
 src/Autheris.Infrastructure/Persistence/InMemoryDbtProposalRepository.cs|1
