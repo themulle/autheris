@@ -161,4 +161,11 @@ public sealed partial class GovernedSqlRewriter
             writeGrant.WritableColumns.ToImmutableHashSet(StringComparer.OrdinalIgnoreCase),
             protectedCols.ToImmutableHashSet(StringComparer.OrdinalIgnoreCase));
     }
+
+    // A DML target without a tenant column is exempt only by its exact schema-qualified name (case-insensitive, never by suffix or bare table name).
+    private static bool IsDmlTenantExempt(TableIdentifier id, IEnumerable<string>? exemptTables)
+    {
+        string qualified = id.ToQualifiedName();
+        return exemptTables != null && exemptTables.Any(e => string.Equals(e?.Trim(), qualified, StringComparison.OrdinalIgnoreCase));
+    }
 }

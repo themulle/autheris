@@ -184,9 +184,7 @@ ON CONFLICT (id) DO UPDATE SET
     meta_json = COALESCE(EXCLUDED.meta_json, TABLE_COLUMNS.meta_json),
     display_name = EXCLUDED.display_name,
     texts_json = EXCLUDED.texts_json,
-    ""collation"" = EXCLUDED.""collation"",
-    length_semantics = EXCLUDED.length_semantics,
-    column_role = EXCLUDED.column_role";
+    ""collation"" = EXCLUDED.""collation"", length_semantics = EXCLUDED.length_semantics, column_role = EXCLUDED.column_role";
 
         public const string InsertColumnSqlSs = @"MERGE dbo.TABLE_COLUMNS WITH (HOLDLOCK) AS t
 USING (SELECT @id AS id, (SELECT COALESCE(MAX(ordinal), 0) + 1 FROM dbo.TABLE_COLUMNS WHERE table_id = @tableId) AS ordinal) AS s
@@ -199,9 +197,7 @@ WHEN MATCHED THEN UPDATE SET
     meta_json = COALESCE(@metaJson, t.meta_json),
     display_name = @displayName,
     texts_json = @textsJson,
-    [collation] = @collation,
-    length_semantics = @lengthSemantics,
-    column_role = @columnRole
+    [collation] = @collation, length_semantics = @lengthSemantics, column_role = @columnRole
 WHEN NOT MATCHED THEN INSERT (id, table_id, column_name, data_type, description, long_description, doc_source, meta_json, display_name, texts_json, [collation], length_semantics, column_role, ordinal)
     VALUES (@id, @tableId, @columnName, @dataType, @description, @longDescription, @docSource, @metaJson, @displayName, @textsJson, @collation, @lengthSemantics, @columnRole, s.ordinal);";
 

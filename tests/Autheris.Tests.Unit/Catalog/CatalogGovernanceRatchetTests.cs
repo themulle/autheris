@@ -79,7 +79,7 @@ public sealed class CatalogGovernanceRatchetTests
         nameof(Table.SourceType), nameof(Table.SourceName), nameof(Table.SchemaName), nameof(Table.TableName),
         nameof(Table.DisplayName), nameof(Table.Description), nameof(Table.LongDescription), nameof(Table.Texts),
         nameof(Table.DocumentationSource), nameof(Table.Sensitivity), nameof(Table.RequiresFourEyes), nameof(Table.IsActive),
-        nameof(Table.ObjectKind)
+        nameof(Table.ObjectKind), nameof(Table.MetricViewCountMeasure)
     };
 
     private static TableMetadata FullyPopulatedExisting(TableIdentifier id) => new()
@@ -118,7 +118,8 @@ public sealed class CatalogGovernanceRatchetTests
             ExpectedRows = 1_000_000,
             DiscoveryHidden = true,
             SamplesDisabled = true,
-            ObjectKind = DiscoveryObjectKind.View
+            ObjectKind = DiscoveryObjectKind.View,
+            MetricViewCountMeasure = "row_count"
         },
         Columns =
         [
@@ -133,9 +134,10 @@ public sealed class CatalogGovernanceRatchetTests
                 Texts = new LocalizedTexts(new Dictionary<string, LocalizedTextEntry> { ["de"] = new("Spalte A") }),
                 DocumentationSource = "Admin",
                 Meta = new Dictionary<string, string> { ["role"] = "dimension" },
-                DiscoveryHidden = true
+                DiscoveryHidden = true,
+                Role = MetricViewColumnRole.Dimension
             },
-            new TableColumn { Id = Guid.NewGuid(), ColumnName = "b", DisplayName = "Column B", DataType = "varchar" }
+            new TableColumn { Id = Guid.NewGuid(), ColumnName = "b", DisplayName = "Column B", DataType = "varchar", Role = MetricViewColumnRole.Measure }
         ],
         ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
         {
@@ -199,6 +201,7 @@ public sealed class CatalogGovernanceRatchetTests
         merged.Table.Sensitivity.ShouldBe("HIGH");
         merged.Table.RequiresFourEyes.ShouldBeTrue();
         merged.Table.DocumentationSource.ShouldBe("DataCatalog");
+        merged.Table.MetricViewCountMeasure.ShouldBe("row_count");
 
         // Column properties the catalog does not deliver survive.
         var colA = merged.Columns.Single(c => c.ColumnName == "a");
@@ -211,7 +214,10 @@ public sealed class CatalogGovernanceRatchetTests
         colA.LongDescription.ShouldBe("persisted long a");
         colA.DocumentationSource.ShouldBe("Admin");
         colA.Meta["role"].ShouldBe("dimension");
-        merged.Columns.Single(c => c.ColumnName == "b").DisplayName.ShouldBe("Column B");
+        colA.Role.ShouldBe(MetricViewColumnRole.Dimension);
+        var colB = merged.Columns.Single(c => c.ColumnName == "b");
+        colB.DisplayName.ShouldBe("Column B");
+        colB.Role.ShouldBe(MetricViewColumnRole.Measure);
 
         // Metadata-level settings survive.
         merged.OwnerTenantId.ShouldBe("tenant-a");
@@ -428,5 +434,68 @@ public sealed class CatalogGovernanceRatchetTests
         ClassificationMetadata.IsColumnSensitive(merged, "a").ShouldBeTrue();
         ClassificationMetadata.IsColumnSensitive(merged, "b").ShouldBeTrue();
         ClassificationMetadata.IsColumnSensitive(CatalogGovernanceRatchet.Merge(new TableMetadata { Identifier = id, Table = existing.Table, Columns = existing.Columns }, existing), "a").ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Merge_MetricViewCountMeasureAndColumnRole_CatalogValuesApplyAndMissingIncomingPreservesExisting()
+    {
+        var id = new TableIdentifier("d", "s", "mv");
+        var existing = new TableMetadata
+        {
+            Identifier = id,
+            Table = new Table
+            {
+                SourceName = "d",
+                SchemaName = "s",
+                TableName = "mv",
+                ObjectKind = DiscoveryObjectKind.MetricView,
+                MetricViewCountMeasure = "row_count"
+            },
+            Columns =
+            [
+                new TableColumn { ColumnName = "region", DataType = "string", Role = MetricViewColumnRole.Dimension },
+                new TableColumn { ColumnName = "row_count", DataType = "bigint", Role = MetricViewColumnRole.Measure }
+            ]
+        };
+
+        var syncWithoutMvFields = new TableMetadata
+        {
+            Identifier = id,
+            Table = new Table { SourceName = "d", SchemaName = "s", TableName = "mv" },
+            Columns =
+            [
+                new TableColumn { ColumnName = "region", DataType = "string" },
+                new TableColumn { ColumnName = "row_count", DataType = "bigint" }
+            ]
+        };
+
+        var preserved = CatalogGovernanceRatchet.Merge(syncWithoutMvFields, existing);
+        preserved.Table.ObjectKind.ShouldBe(DiscoveryObjectKind.MetricView);
+        preserved.Table.MetricViewCountMeasure.ShouldBe("row_count");
+        preserved.Columns.Single(c => c.ColumnName == "region").Role.ShouldBe(MetricViewColumnRole.Dimension);
+        preserved.Columns.Single(c => c.ColumnName == "row_count").Role.ShouldBe(MetricViewColumnRole.Measure);
+
+        var syncWithUpdatedMvFields = new TableMetadata
+        {
+            Identifier = id,
+            Table = new Table
+            {
+                SourceName = "d",
+                SchemaName = "s",
+                TableName = "mv",
+                ObjectKind = DiscoveryObjectKind.MetricView,
+                MetricViewCountMeasure = "orders_count"
+            },
+            Columns =
+            [
+                new TableColumn { ColumnName = "region", DataType = "string", Role = MetricViewColumnRole.Dimension },
+                new TableColumn { ColumnName = "orders_count", DataType = "bigint", Role = MetricViewColumnRole.Measure }
+            ]
+        };
+
+        var updated = CatalogGovernanceRatchet.Merge(syncWithUpdatedMvFields, existing);
+        updated.Table.MetricViewCountMeasure.ShouldBe("orders_count");
+        updated.Columns.Single(c => c.ColumnName == "orders_count").Role.ShouldBe(MetricViewColumnRole.Measure);
+        updated.Columns.Single(c => c.ColumnName == "row_count").Role.ShouldBe(MetricViewColumnRole.Measure);
     }
 }

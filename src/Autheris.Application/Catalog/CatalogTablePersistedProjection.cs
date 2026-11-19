@@ -54,6 +54,7 @@ public sealed class CatalogTablePersistedProjection
         "Table.DataSourceType", "Table.HttpEndpoint", "Table.PluginName", "Table.MinGroupSize", "Table.NonPersonal", "Table.RequiredFilterColumns",
         "Table.DbtUniqueId", "Table.ObjectKind",
         "TableColumn.ColumnName", "TableColumn.DisplayName", "TableColumn.DataType", "TableColumn.Collation", "TableColumn.LengthSemantics",
+        "TableColumn.Role",
         "TableColumn.Description", "TableColumn.LongDescription", "TableColumn.Texts", "TableColumn.DocumentationSource",
         "TableColumn.Meta",
         "MaskingRule.RuleType", "MaskingRule.PatternOrFormat", "MaskingRule.Replacement", "MaskingRule.HmacKeyId",
@@ -83,7 +84,8 @@ public sealed class CatalogTablePersistedProjection
         ["TABLE_COLUMNS.description"] = "column.description", ["TABLE_COLUMNS.long_description"] = "column.long_description",
         ["TABLE_COLUMNS.doc_source"] = "column.doc_source", ["TABLE_COLUMNS.meta_json"] = "column.meta", ["TABLE_COLUMNS.display_name"] = "column.display_name",
         ["TABLE_COLUMNS.texts_json"] = "column.texts", ["TABLE_COLUMNS.collation"] = "column.collation",
-        ["TABLE_COLUMNS.length_semantics"] = "column.length_semantics", ["TABLE_COLUMNS.ordinal"] = "(order of columns is not compared)"
+        ["TABLE_COLUMNS.length_semantics"] = "column.length_semantics", ["TABLE_COLUMNS.column_role"] = "column.role",
+        ["TABLE_COLUMNS.ordinal"] = "(order of columns is not compared)"
     };
 
     private static readonly HashSet<string> AdditiveTableFields = new(StringComparer.Ordinal)
@@ -176,6 +178,7 @@ public sealed class CatalogTablePersistedProjection
             values[prefix + ".data_type"] = column.DataType;
             values[prefix + ".collation"] = column.Collation;
             values[prefix + ".length_semantics"] = column.LengthSemantics;
+            values[prefix + ".role"] = column.Role?.ToWireName();
             values[prefix + ".display_name"] = column.DisplayName;
             values[prefix + ".description"] = column.Description;
             values[prefix + ".long_description"] = column.LongDescription;
@@ -426,7 +429,7 @@ public sealed class CatalogTablePersistedProjection
             ["MaskingRule.Id"] = surrogate, ["MaskingRule.TableColumnId"] = surrogate,
             ["Table.EnforcementMode"] = notWritten, ["Table.PhysicalDatabaseName"] = notWritten, ["Table.Location"] = notWritten,
             ["Table.RlsExpression"] = notWritten, ["Table.SmallGroupStrategy"] = notWritten, ["Table.RequiredFilterColumnGroups"] = notWritten,
-            ["Table.ExpectedRows"] = notWritten, ["Table.Tags"] = overlay,
+            ["Table.ExpectedRows"] = notWritten, ["Table.MetricViewCountMeasure"] = notWritten, ["Table.Tags"] = overlay,
             ["Table.DiscoveryHidden"] = overlay, ["Table.SamplesDisabled"] = overlay,
             ["Table.IsDelegatedSource"] = derived, ["Table.IsHighlySensitive"] = derived, ["Table.Dialect"] = derived,
             ["TableColumn.Name"] = derived, ["TableColumn.Semantics"] = derived, ["TableColumn.WriteProtected"] = notWritten,
