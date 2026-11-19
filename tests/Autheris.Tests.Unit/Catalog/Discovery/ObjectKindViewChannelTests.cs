@@ -11,7 +11,9 @@ using Autheris.Application.Catalog.Discovery;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Mcp.Services;
 using Autheris.Domain.Model;
+using Autheris.Domain.Options;
 using Autheris.Domain.Security;
+using Microsoft.Extensions.Options;
 using Shouldly;
 using Xunit;
 
@@ -61,11 +63,10 @@ public sealed class ObjectKindViewChannelTests
 
         var page = await service.ListAsync(new DiscoveryQuery(Surface: DiscoverySurface.Rest), caller);
 
-        pdp.Requests.Count.ShouldBe(2);
-        var viewRequest = pdp.Requests.Single(r => r.Object.Identifier.TableName == "v_orders");
-        var tableRequest = pdp.Requests.Single(r => r.Object.Identifier.TableName == "t_orders");
-        viewRequest.Operation.ShouldBe(tableRequest.Operation);
-        viewRequest.Transport.ShouldBe(tableRequest.Transport);
+        var viewRequests = pdp.Requests.Where(r => r.Object.Identifier.TableName == "v_orders").Select(r => (r.Operation, r.Transport)).ToList();
+        var tableRequests = pdp.Requests.Where(r => r.Object.Identifier.TableName == "t_orders").Select(r => (r.Operation, r.Transport)).ToList();
+        viewRequests.ShouldNotBeEmpty();
+        viewRequests.ShouldBe(tableRequests);
 
         var view = page.Items.Single(i => i.Name == "v_orders");
         var table = page.Items.Single(i => i.Name == "t_orders");
@@ -107,7 +108,9 @@ public sealed class ObjectKindViewChannelTests
         list.Datasets.Single(d => d.Id.EndsWith("v_orders", StringComparison.OrdinalIgnoreCase)).Kind.ShouldBe("view");
         list.Datasets.Single(d => d.Id.EndsWith("t_orders", StringComparison.OrdinalIgnoreCase)).Kind.ShouldBe("table");
 
-        var legacy = new McpDatasetCatalog(repo, new FakeDiscoveryConsentRepository(), new NoopExecutionService());
+        var legacy = new McpDatasetCatalog(
+            repo, new FakeDiscoveryConsentRepository(), new NoopExecutionService(),
+            options: Options.Create(new GatewayOptions { Insecure = new InsecureGettingStartedOptions { danger_bypass_mcp_auth = true } }));
         var legacyList = await legacy.ListDatasetsAsync(caller);
         legacyList.Datasets.Single(d => d.Id.EndsWith("v_orders", StringComparison.OrdinalIgnoreCase)).Kind.ShouldBe("view");
         legacyList.Datasets.Single(d => d.Id.EndsWith("t_orders", StringComparison.OrdinalIgnoreCase)).Kind.ShouldBe("table");

@@ -89,7 +89,8 @@ public sealed record ExternalCatalogListQuery(
     long? ChangedSince = null,
     string? Cursor = null,
     int PageSize = 50,
-    string? AccessStatus = null);
+    string? AccessStatus = null,
+    string? Q = null);
 
 public sealed record ExternalCatalogOwnerDto(
     string DisplayName,
