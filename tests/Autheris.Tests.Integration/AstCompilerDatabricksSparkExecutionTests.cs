@@ -445,7 +445,7 @@ public sealed class AstCompilerDatabricksSparkExecutionTests : IClassFixture<Spa
     [InlineData("SELECT region, GROUPING(region) AS g, count(*) AS n FROM orders GROUP BY ROLLUP (region)")]
     [InlineData("SELECT extract(year FROM date '2024-05-06') AS y, extract(dow FROM date '2024-05-06') AS w FROM orders")]
     [InlineData("SELECT a.id FROM orders a WHERE a.amount IS DISTINCT FROM 20.00")]
-    [InlineData("SELECT approx_distinct(region) AS d, arbitrary(status) AS a FROM orders")]
+    [InlineData("SELECT approx_distinct('EU') AS d, arbitrary('open') AS a FROM orders")]
     public async Task UserQueryShapes_CompileAndExecute(string sql)
     {
         RequireSpark();

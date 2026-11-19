@@ -87,6 +87,13 @@ public static class RowPolicyErrorGuard
 
     private static bool IsAllowedFunction(FunctionCallExpression call)
     {
+        // A call whose arguments hold no column does not depend on row data: the engine's function policy already limits which
+        // functions a dialect accepts, and an error of a constant call is the same whether or not a hidden row exists.
+        if (call.Window is null && call.Filter is null && call.OrderWithin is null && !call.Arguments.Any(HasColumn))
+        {
+            return true;
+        }
+
         if (call.Name.Parts.Count == 1 && call.Window is null && call.Name.Parts[0].Value.ToLowerInvariant() is "substring" or "substr")
         {
             return call.Arguments.Count is 2 or 3 && IsNonNegativeIntegerLiteral(call.Arguments[1], allowNegative: true)

@@ -118,6 +118,29 @@ public sealed class AdvisoryRegressionGateTests
         Assert.NotNull(item);
         var engine = new FastSqlEngine();
 
-        Should.Throw<Exception>(() => engine.Compile(sql.AsMemory(), Request(dialect, PolicyScenario.Tenant), CancellationToken.None));
+        Should.Throw<SecurityException>(() => engine.Compile(sql.AsMemory(), Request(dialect, PolicyScenario.Tenant), CancellationToken.None))
+            .Message.ShouldBe(RowPolicyErrorGuard.Message);
+    }
+
+    [Theory]
+    [InlineData("postgresql", "case_11", "SELECT id FROM orders WHERE id = (SELECT max(status) FROM orders)")]
+    [InlineData("sqlserver", "case_11", "SELECT id FROM orders WHERE id = (SELECT max(status) FROM orders)")]
+    [InlineData("oracle", "case_11", "SELECT id FROM orders WHERE id = (SELECT max(status) FROM orders)")]
+    [InlineData("databricks", "case_11", "SELECT id FROM orders WHERE id = (SELECT max(status) FROM orders)")]
+    [InlineData("postgresql", "case_12", "SELECT id FROM orders WHERE id IN (SELECT status FROM orders)")]
+    [InlineData("sqlserver", "case_12", "SELECT id FROM orders WHERE id IN (SELECT status FROM orders)")]
+    [InlineData("oracle", "case_12", "SELECT id FROM orders WHERE id IN (SELECT status FROM orders)")]
+    [InlineData("databricks", "case_12", "SELECT id FROM orders WHERE id IN (SELECT status FROM orders)")]
+    [InlineData("postgresql", "case_13", "SELECT id FROM orders UNION ALL SELECT status FROM orders")]
+    [InlineData("sqlserver", "case_13", "SELECT id FROM orders UNION ALL SELECT status FROM orders")]
+    [InlineData("oracle", "case_13", "SELECT id FROM orders UNION ALL SELECT status FROM orders")]
+    [InlineData("databricks", "case_13", "SELECT id FROM orders UNION ALL SELECT status FROM orders")]
+    public void Regression_subquery_coercion_case(string dialect, string item, string sql)
+    {
+        Assert.NotNull(item);
+        var engine = new FastSqlEngine();
+
+        Should.Throw<SecurityException>(() => engine.Compile(sql.AsMemory(), Request(dialect, PolicyScenario.Tenant), CancellationToken.None))
+            .Message.ShouldBe(RowPolicyErrorGuard.Message);
     }
 }

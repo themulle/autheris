@@ -503,9 +503,25 @@ public sealed class AstCompilerOracleExecutionTests
 
     // ---- WP-X0-fix: function mappings executed against the real engine, compared with Trino semantics ----
 
+    private static readonly (string Name, string Literal)[] RowLiterals =
+    {
+        ("email", "'alice.smith@acme.example'"), ("region", "'EU'"), ("status", "'open'"), ("amount", "10.5"), ("id", "1")
+    };
+
+    /// <summary>Row values of order 1 as literals: a function mapping is checked on constants, since a tenant predicate refuses raising functions of columns.</summary>
+    private static string WithRowLiterals(string expression)
+    {
+        foreach (var (name, literal) in RowLiterals)
+        {
+            expression = System.Text.RegularExpressions.Regex.Replace(expression, $@"\b{name}\b", literal);
+        }
+
+        return expression;
+    }
+
     private async Task<object?> ScalarAsync(string expression, bool translateDates = false)
     {
-        var rows = await RunAsync($"SELECT {expression} AS r FROM orders WHERE id = 1", "acme", translateDates: translateDates);
+        var rows = await RunAsync($"SELECT {WithRowLiterals(expression)} AS r FROM orders WHERE id = 1", "acme", translateDates: translateDates);
         rows.Count.ShouldBe(1);
         return rows[0][0];
     }

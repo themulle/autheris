@@ -70,7 +70,8 @@ internal sealed class RowPolicyCoercionGuard(ITableCatalog catalog) : ColumnScop
                 };
             case TypedLiteralExpression or CurrentDateTimeExpression or DateFunctionExpression: return Fam.Temporal;
             case IntervalLiteralExpression or ParameterReference or NamedBindMarkerExpression or PolicyParameterExpression
-                or ScalarSubqueryExpression or PageOffsetParameterExpression: return Fam.Any;
+                or PageOffsetParameterExpression: return Fam.Any;
+            case ScalarSubqueryExpression scalar: return FirstFamily(scalar.Subquery);
             case BinaryExpression b:
                 return b.Operator switch
                 {
@@ -166,6 +167,10 @@ internal sealed class RowPolicyCoercionGuard(ITableCatalog catalog) : ColumnScop
         return map;
     }
 
+    /// <summary>The family of the single output column of a subquery; unknown when it has none or several.</summary>
+    private Fam FirstFamily(SelectStatement subquery) =>
+        LeftMost(subquery.Body) is { } spec && _outputs.TryGetValue(spec, out var outputs) && outputs.Count == 1 ? outputs[0].Family : Fam.Unknown;
+
     private static QuerySpecification? LeftMost(QueryBody body) => body switch
     {
         QuerySpecification q => q,
@@ -234,6 +239,32 @@ internal sealed class RowPolicyCoercionGuard(ITableCatalog catalog) : ColumnScop
         var result = (BinaryExpression)base.VisitBinaryExpression(node);
         if (IsComparison(result.Operator)) Require(Of(result.Left), Of(result.Right));
         else if (result.Operator is BinaryOperator.Divide or BinaryOperator.Modulo) Require(Fam.Numeric, Of(result.Left));
+        return result;
+    }
+
+    public override SqlNode VisitInSubqueryExpression(InSubqueryExpression node)
+    {
+        var result = (InSubqueryExpression)base.VisitInSubqueryExpression(node);
+        Require(Of(result.Operand), FirstFamily(result.Subquery));
+        return result;
+    }
+
+    public override SqlNode VisitQuantifiedComparisonExpression(QuantifiedComparisonExpression node)
+    {
+        var result = (QuantifiedComparisonExpression)base.VisitQuantifiedComparisonExpression(node);
+        Require(Of(result.Left), FirstFamily(result.Subquery));
+        return result;
+    }
+
+    public override SqlNode VisitSetOperationQuery(SetOperationQuery node)
+    {
+        var result = (SetOperationQuery)base.VisitSetOperationQuery(node);
+        if (LeftMost(result.Left) is { } left && LeftMost(result.Right) is { } right
+            && _outputs.TryGetValue(left, out var l) && _outputs.TryGetValue(right, out var r) && l.Count == r.Count)
+        {
+            for (int i = 0; i < l.Count; i++) Require(l[i].Family, r[i].Family);
+        }
+
         return result;
     }
 

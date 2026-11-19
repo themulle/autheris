@@ -73,6 +73,11 @@ public class RowPolicyExpressionAllowlistTests
         { "case_33", "SELECT sqrt(Id), Id / Amount FROM Orders WHERE Id > 3" },
         { "case_34", "SELECT Id FROM (SELECT Status AS s, Id FROM Orders) AS d WHERE d.s = 5" },
         { "case_35", "SELECT Id FROM Orders WHERE Id = Status" },
+        { "case_41", "SELECT log10(Id) FROM Orders" },
+        { "case_37", "SELECT Id FROM Orders WHERE Id = (SELECT max(Status) FROM Orders)" },
+        { "case_38", "SELECT Id FROM Orders WHERE Id IN (SELECT Status FROM Orders)" },
+        { "case_39", "SELECT Id FROM Orders WHERE Id > ANY (SELECT Status FROM Orders)" },
+        { "case_40", "SELECT Id FROM Orders UNION ALL SELECT Status FROM Orders" },
         { "case_36", "SELECT Id FROM Orders WHERE Id BETWEEN Amount AND Status" },
     };
 
@@ -94,6 +99,9 @@ public class RowPolicyExpressionAllowlistTests
         { "case_14", "SELECT Id FROM Orders WHERE Amount > 1.5" },
         { "case_15", "WITH c AS (SELECT Id AS k, Status AS t FROM Orders) SELECT k FROM c WHERE k > 3 AND t = 'open'" },
         { "case_16", "SELECT Id, Status, count(*) FROM Orders WHERE Id > 3 GROUP BY Id, Status" },
+        { "case_17", "SELECT Id FROM Orders WHERE Id = (SELECT max(Id) FROM Orders) AND Id IN (SELECT Id FROM Entitlements)" },
+        { "case_18", "SELECT Id FROM Orders UNION ALL SELECT Id FROM Entitlements" },
+        { "case_19", "SELECT log10(100), octet_length('x') FROM Orders" },
     };
 
     [Theory]
