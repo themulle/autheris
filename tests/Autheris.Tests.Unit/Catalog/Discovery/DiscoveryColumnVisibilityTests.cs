@@ -18,8 +18,9 @@ using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
+using Autheris.Domain.Security;
+using Autheris.Domain.Tenancy;
 using Autheris.GraphQL.Types;
-using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -78,20 +79,17 @@ public sealed class DiscoveryColumnVisibilityTests
         (await discovery.GetAsync(id, Caller(principal ?? User()), CancellationToken.None))!;
 
     private static McpDatasetCatalog CatalogOf(DiscoveryService discovery, FakeDiscoveryTableRepository repo) =>
-        new(repo, new FakeDiscoveryConsentRepository(), Substitute.For<IGatewayExecutionService>(), discoveryService: discovery);
+        new(repo, new FakeDiscoveryConsentRepository(), new UnusedGatewayExecution(), discoveryService: discovery);
 
     private static McpToolExecutionHandler Handler(CatalogDatasetDetail? detail)
     {
-        var catalog = Substitute.For<ICatalogDiscoveryService>();
-        catalog.GetDatasetDetailAsync(Arg.Any<TableIdentifier>(), Arg.Any<RequestContext>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(detail));
         return new McpToolExecutionHandler(
-            Substitute.For<IGovernedSqlExecutionService>(),
-            Substitute.For<IGovernedDataQueryService>(),
-            catalog,
-            Substitute.For<IApiDispatcherService>(),
-            Substitute.For<ILineageGraphStore>(),
-            Substitute.For<ITableMetadataRepository>());
+            new UnusedSqlExecutionService(),
+            new UnusedDataQueryService(),
+            new DetailCatalogDiscoveryService(detail),
+            new UnusedApiDispatcherService(),
+            new UnusedLineageGraphStore(),
+            new EmptyTableMetadataRepository());
     }
 
     private static async Task<JsonElement> RunAsync(McpToolExecutionHandler handler, string tool, string arguments)
@@ -283,23 +281,7 @@ public sealed class DiscoveryColumnVisibilityTests
         DiscoveryColumnVisibility.VisibleColumns(detail with { Columns = [column with { MaskingState = "HMAC_SHA256" }] }).Count.ShouldBe(1);
     }
 
-    private static IConsentResolutionService Resolver()
-    {
-        var resolver = Substitute.For<IConsentResolutionService>();
-        resolver.ResolveAccess(
-                Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(), Arg.Any<TableIdentifier>(),
-                Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<Autheris.Domain.Common.DatabaseDialect>(), Arg.Any<IReadOnlySet<Sid>?>(), Arg.Any<IReadOnlySet<string>?>())
-            .Returns(call => TableAccessDecision.Allowed(
-                call.ArgAt<TableIdentifier>(3),
-                new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
-                {
-                    ["id"] = ColumnAccessLevel.Clear,
-                    ["fullname"] = ColumnAccessLevel.Clear,
-                    ["email"] = ColumnAccessLevel.Mask,
-                    [Denied] = ColumnAccessLevel.Deny
-                }));
-        return resolver;
-    }
+    private static IConsentResolutionService Resolver() => new FixedLevelsResolver();
 
     [Fact]
     public void GraphQlCatalog_DeniedColumn_IsNotListed()
@@ -330,5 +312,84 @@ public sealed class DiscoveryColumnVisibilityTests
 
         dto!.Columns.ShouldBeEmpty();
         dto.ColumnNames.ShouldBeEmpty();
+    }
+
+    private sealed class FixedLevelsResolver : IConsentResolutionService
+    {
+        public TableAccessDecision ResolveAccess(
+            Sid userSid, IReadOnlySet<Sid> subjectGroupSids, IReadOnlySet<string> userRoles, TableIdentifier table,
+            IReadOnlyList<Consent> activeConsents, DatabaseDialect dialect, IReadOnlySet<Sid>? allUserSids, IReadOnlySet<string>? callerScopes) =>
+            TableAccessDecision.Allowed(
+                table,
+                new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["id"] = ColumnAccessLevel.Clear,
+                    ["fullname"] = ColumnAccessLevel.Clear,
+                    ["email"] = ColumnAccessLevel.Mask,
+                    [Denied] = ColumnAccessLevel.Deny
+                });
+    }
+
+    private sealed class UnusedGatewayExecution : IGatewayExecutionService
+    {
+        public Task<(IReadOnlyList<IReadOnlyDictionary<string, object?>> Rows, TableAccessDecision Decision)> ExecuteTableQueryAsync(
+            ClaimsPrincipal? principal, TableIdentifier table, int? first = null, int? after = null, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+
+        public Task<(IReadOnlyList<IReadOnlyDictionary<string, object?>> Rows, TableAccessDecision Decision)> ExecuteTableQueryAsync(
+            ClaimsPrincipal? principal, TableIdentifier table, int? first, int? after, IReadOnlyDictionary<string, object?>? queryArguments, IReadOnlyList<string>? requestedFields = null, IReadOnlyDictionary<string, string[]>? requestHeaders = null, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+
+        public Task<TableAccessDecision> CheckTableAccessAsync(ClaimsPrincipal? principal, TableIdentifier table, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+    }
+
+    private sealed class DetailCatalogDiscoveryService(CatalogDatasetDetail? detail) : ICatalogDiscoveryService
+    {
+        public Task<IReadOnlyList<CatalogDatasetSummary>> ListDatasetsAsync(RequestContext context, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<CatalogDatasetDetail?> GetDatasetDetailAsync(TableIdentifier table, RequestContext context, CancellationToken ct = default) => Task.FromResult(detail);
+        public Task<IReadOnlyList<CatalogDatasetSummary>> SearchCatalogAsync(string query, string? domain, RequestContext context, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<CatalogSearchHit>> SearchCatalogDetailedAsync(CatalogSearchQuery query, RequestContext context, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<CatalogDatasourceSummary>> ListDatasourcesAsync(RequestContext context, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<DatasourceRegistrationResult> RegisterDatasourceAsync(DatasourceRegistrationRequest request, RequestContext context, CancellationToken ct = default) => throw new NotSupportedException();
+    }
+
+    private sealed class UnusedSqlExecutionService : IGovernedSqlExecutionService
+    {
+        public Task<GovernedSqlResult> ExecuteQueryBufferedAsync(GovernedSqlQueryRequest request, ClaimsPrincipal user, TenantId tenantId, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task ValidateAsync(string rawSql, ClaimsPrincipal user, TenantId tenantId, CancellationToken ct = default) => throw new NotSupportedException();
+    }
+
+    private sealed class UnusedDataQueryService : IGovernedDataQueryService
+    {
+        public Task<DatasetQueryEnvelope> ExecuteQueryAsync(DatasetQueryRequest request, RequestContext context, CancellationToken ct = default) => throw new NotSupportedException();
+    }
+
+    private sealed class UnusedApiDispatcherService : IApiDispatcherService
+    {
+        public Task<string> DescribeApiAsync(string endpoint, string? method = null, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<string> InvokeApiAsync(string endpoint, string method, IReadOnlyDictionary<string, object?>? parameters = null, object? body = null, RequestContext? context = null, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<string> GetOpenApiJsonAsync(CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<string> GetEndpointsDocumentationAsync(CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<string> GetMcpToolsDocumentationAsync(CancellationToken ct = default) => throw new NotSupportedException();
+    }
+
+    private sealed class UnusedLineageGraphStore : ILineageGraphStore
+    {
+        public int Count => 0;
+        public LineageNode? GetNode(string nodeId) => null;
+        public bool ContainsNode(string nodeId) => false;
+        public void UpdateGraph(IEnumerable<LineageNode> nodes) => throw new NotSupportedException();
+        public IReadOnlyCollection<LineageNode> GetAllNodes() => [];
+    }
+
+    private sealed class EmptyTableMetadataRepository : ITableMetadataRepository
+    {
+        public Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default) => Task.FromResult<TableMetadata?>(null);
+        public Task<IReadOnlyList<TableMetadata>> GetAllTablesAsync(CancellationToken ct = default) => Task.FromResult<IReadOnlyList<TableMetadata>>([]);
+        public Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default) => Task.FromResult(metadata);
+        public Task<TableKeyDefinitionChange?> ReplaceTableKeyDefinitionAsync(
+            TableIdentifier table, IReadOnlyList<string> primaryKey, IReadOnlyList<TableIndexDefinition> indexes,
+            IReadOnlyList<KeyColumnDirection>? primaryKeyDirections = null, CancellationToken ct = default) => Task.FromResult<TableKeyDefinitionChange?>(null);
     }
 }
