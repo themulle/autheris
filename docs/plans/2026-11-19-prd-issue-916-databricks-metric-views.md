@@ -1,6 +1,6 @@
 # PRD: Databricks metric views, governed read access (Issue #916)
 
-Phase 1 (product manager). Status: PRD DRAFT, Phase 2 and Phase 3 pending. Decision: owner chose **option A** (queryable object, read only). Options B and C are out of scope for this PRD.
+Phase 1 (product manager). Status: PRD DRAFT, Phase 2 done (plan [`2026-11-19-plan-issue-916-databricks-metric-views.md`](2026-11-19-plan-issue-916-databricks-metric-views.md)), Phase 3 pending. Decision: owner chose **option A** (queryable object, read only). Options B and C are out of scope for this PRD.
 
 ## 1. Qualification
 
@@ -106,3 +106,4 @@ Phase 1 (product manager). Status: PRD DRAFT, Phase 2 and Phase 3 pending. Decis
 ## 12. Changelog
 
 - 2026-11-19: PRD drafted (Phase 1), option A chosen by the owner.
+- 2026-11-19: Phase 2 plan written: [`2026-11-19-plan-issue-916-databricks-metric-views.md`](2026-11-19-plan-issue-916-databricks-metric-views.md) (step `0032`, decisions D-MV-1..10, work packages WP-MV-1..6).

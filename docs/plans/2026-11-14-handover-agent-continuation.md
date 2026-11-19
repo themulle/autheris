@@ -73,8 +73,8 @@ Pushed feature branches on `origin` (state at the 2026-11-15 handover; the rollu
 - **In progress:** `WP-SIMPL-29` PR 2a (config sections) and PR 2b (CDC producers to Infrastructure), `WP-SIMPL-28` PR 3 (dbt module).
 - **Remaining after these (audit 2026-11-19, 25 PRs in total):** WP-23 last PR; WP-28 PR 4; WP-29 PR 3, 4, 4b (owner review) and 5; WP-32 PR 2-6 and the baseline PR; WP-20 PR A; WP-52b.
 - **Still open:**
-  - `WP-SIMPL-20` PR A: fold the ConsentPattern and GrantRecord cores after #900, then recompute `MaxAllowedLoc`.
-  - `WP-SIMPL-52b`: the profile items migration replaces `access_profiles.masking_mode/target_tables`. It takes step `0031`, after #904. `consent_row_filters.key_set_*` stays (D-PI-7).
+  - `WP-SIMPL-20` PR A: fold the ConsentPattern and GrantRecord cores after #900, then recompute `MaxAllowedLoc`. The local branch `refactor/simpl-20-fold-consent-cores` also carries both #899 review Lows. `fix/915-watermark-lock-order` (#915) is stacked on it.
+  - `WP-SIMPL-52b`: the profile items migration replaces `access_profiles.masking_mode/target_tables`. It takes step `0031`, after #904. `consent_row_filters.key_set_*` stays (D-PI-7). The next step after it, `0032`, is planned for #916 (Databricks metric views).
 - **Private advisory filed:** GHSA-ff36-3926-36r5 (private, unpublished).
 
 **Update 2026-11-18 night:**
@@ -97,9 +97,19 @@ Pushed feature branches on `origin` (state at the 2026-11-15 handover; the rollu
   - A5 (Git sync) is in progress; A6 is still open.
   - The governance repository LOC budget is raised by the products partial.
 - **New follow-up issues:**
-  - #835: GraphQL rebuild on restrictive changes.
+  - #835: GraphQL rebuild on restrictive changes. Fixed by #866, including the Low items: the issue can be closed.
   - #838: GraphQL discovery lists denied columns.
   - #847: SQL user expressions before the row and tenant predicates.
+  - Planned 2026-11-19 (master plan ranks 30-38; implementation after the v1.9.0 tag):
+    - #887 review follow-ups (rank 30);
+    - #889 (rank 31);
+    - #891 (rank 32);
+    - #849 (rank 33);
+    - #915 (rank 34);
+    - #909 (rank 35);
+    - #910-#912 (rank 36);
+    - #899/#904/#913 review Lows (rank 37);
+    - #916 (rank 38).
 - **WP-52 follow-ups still open** (live readers):
   - `consents.role_id/role_name`: Role grantee removal.
   - `access_profiles.masking_mode/target_tables`: profile items migration.
