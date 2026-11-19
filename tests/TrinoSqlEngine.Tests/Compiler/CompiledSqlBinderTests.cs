@@ -131,7 +131,9 @@ public class CompiledSqlBinderTests
 
     private static void AssertCallerValueOnlyInItsOwnSlot(TargetSqlDialect dialect, ParameterOrigin internalOrigin)
     {
-        const string evil = "evil-caller-value";
+        // The caller p0 is compared with the numeric id column, so the bind-time type check requires a numeric value.
+        // A distinctive number still proves the value lands only in the caller's own slot.
+        const long evil = 987_654_321L;
         var compiled = CompileWithInternalSlots(dialect);
 
         var client = Assert.Single(compiled.Parameters, p => p.Origin == ParameterOrigin.ClientNamed);
