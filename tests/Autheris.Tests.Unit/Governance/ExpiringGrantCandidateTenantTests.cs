@@ -46,7 +46,7 @@ public sealed class ExpiringGrantCandidateTenantTests
         var t = new DataTable();
         foreach (var name in new[]
                  {
-                     "id", "table_id", "consent_request_id", "effect", "grantee_type", "grantee_sid", "role_id", "role_name", "valid_from",
+                     "id", "table_id", "consent_request_id", "effect", "grantee_type", "grantee_sid", "valid_from",
                      "valid_to", "is_revoked", "source_name", "schema_name", "table_name", "tenant_id", "renewal_count", "grant_source",
                      "grant_record_seq", "profile_assignment_id", "expiry_notice_sent_at", "workflow_mode", "external_system_id"
                  })
@@ -55,7 +55,7 @@ public sealed class ExpiringGrantCandidateTenantTests
         }
 
         t.Rows.Add(
-            Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), DBNull.Value, "Allow", "User", "S-1-5-21-1", DBNull.Value, DBNull.Value,
+            Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), DBNull.Value, "Allow", "User", "S-1-5-21-1",
             "2026-01-01T00:00:00.0000000+00:00", DateTimeOffset.MaxValue.ToString("O"), 0, "sales", "dbo", "orders", tenant, 0, "OWNER", 1L,
             DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value);
         return t;

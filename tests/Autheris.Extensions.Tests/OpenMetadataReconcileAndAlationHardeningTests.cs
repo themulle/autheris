@@ -78,8 +78,7 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
         Id = Guid.NewGuid(),
         TableIdentifier = table,
         GranteeType = type,
-        RoleName = type == GranteeType.Role ? grantee : null,
-        GranteeSid = type == GranteeType.Role ? (Sid?)null : new Sid(grantee),
+        GranteeSid = new Sid(grantee),
         Effect = effect,
         ConsentRequestId = OpenMetadataSyncService.OpenMetadataSyncConsentMarker,
         ValidFrom = DateTimeOffset.UtcNow.AddDays(-30),
@@ -204,9 +203,9 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
     [Fact]
     public async Task E05_Reconcile_LoadsAllMarkerConsents_RevokesDeletedGranteesAndFilteredTables()
     {
-        var rawOmRole = SyncConsent(OrdersId, GranteeType.Role, "RawOmRoleName");               // legacy consent on a raw OM role name
+        var rawOmRole = SyncConsent(OrdersId, GranteeType.Group, "RawOmRoleName");               // legacy consent on a raw OM role name
         var deletedUser = SyncConsent(new TableIdentifier("sales_svc", "dbo", "dropped_table"), GranteeType.User, "S-1-5-21-DELETED");
-        var legacyRoleAllow = SyncConsent(OrdersId, GranteeType.Role, "OrderReaderRole");           // a role Allow from an earlier sync is no longer desired
+        var legacyRoleAllow = SyncConsent(OrdersId, GranteeType.Group, "OrderReaderRole");           // an Allow from an earlier sync is no longer desired
         var stillGranted = SyncConsent(OrdersId, GranteeType.Group, OrderTeamSid, validTo: DateTimeOffset.UtcNow.AddMinutes(10));
 
         var f = CreateOm(Om(), [Orders()], teams: [OrderTeam()], existingSyncConsents: [rawOmRole, deletedUser, legacyRoleAllow, stillGranted]);
@@ -224,12 +223,13 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
     [Fact]
     public async Task E05_Migration_AutoCreateDisabled_RevokesExistingAllowMarkerConsents_KeepsDeny()
     {
-        var formerAutoGrant = SyncConsent(OrdersId, GranteeType.Role, "OrderReaderRole");
-        var syncedDeny = SyncConsent(OrdersId, GranteeType.Role, "OrderReaderRole", ConsentEffect.Deny);
+        var formerAutoGrant = SyncConsent(OrdersId, GranteeType.Group, OrderTeamSid);
+        var syncedDeny = SyncConsent(OrdersId, GranteeType.Group, OrderTeamSid, ConsentEffect.Deny);
 
         var f = CreateOm(
             Om(autoCreate: false),
             [Orders()],
+            teams: [OrderTeam()],
             rules: [ViewAllTables(), new OpenMetadataRule { Name = "DenyOrders", Effect = "deny", Resources = ["orders"], Operations = ["ViewAll"] }],
             existingSyncConsents: [formerAutoGrant, syncedDeny]);
 
@@ -246,6 +246,7 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
         var f = CreateOm(
             Om(autoCreate: false),
             [Orders()],
+            teams: [OrderTeam()],
             rules: [new OpenMetadataRule { Name = "DenyOrders", Effect = "deny", Resources = ["orders"], Operations = ["ViewAll"] }]);
 
         await f.Service.SyncPermissionsAsync();
@@ -258,7 +259,7 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
     [Fact]
     public async Task E05_FourEyesTable_ExistingAutoGrantIsRevoked()
     {
-        var existing = SyncConsent(OrdersId, GranteeType.Role, "OrderReaderRole");
+        var existing = SyncConsent(OrdersId, GranteeType.Group, "OrderReaderRole");
         var f = CreateOm(Om(), [Orders(tags: [new OpenMetadataTag { TagFQN = "Governance.FourEyes" }])], existingSyncConsents: [existing]);
 
         await f.Service.SyncPermissionsAsync();
@@ -270,7 +271,7 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
     [Fact]
     public async Task EX02_PrincipalFetchFailure_ReportsFailure_AndNeitherCreatesNorRevokes()
     {
-        var stale = SyncConsent(OrdersId, GranteeType.Role, "RawOmRoleName");
+        var stale = SyncConsent(OrdersId, GranteeType.Group, "RawOmRoleName");
         var f = CreateOm(Om(), [Orders()], existingSyncConsents: [stale], usersFail: true);
 
         var result = await f.Service.SyncPermissionsAsync();
@@ -293,6 +294,24 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
 
         result.Success.ShouldBeTrue();
         f.Created.ShouldBeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Security_DbtAndOpenMetadata_RoleGrantee_SkippedNeverMapped_OpenMetadata()
+    {
+        // An allowlisted role carrying a Deny policy used to become a role grantee; now the entry is skipped, reported and never written.
+        var f = CreateOm(
+            Om(autoCreate: true),
+            [Orders()],
+            rules: [new OpenMetadataRule { Name = "DenyOrders", Effect = "deny", Resources = ["orders"], Operations = ["ViewAll"] }]);
+
+        var result = await f.Service.SyncPermissionsAsync();
+
+        result.Success.ShouldBeTrue();
+        f.Created.ShouldBeEmpty("a role entry is never mapped to a group or user");
+        result.Warnings.ShouldContain(w => w.Contains("role grantees are not supported", StringComparison.Ordinal));
+        result.Warnings.ShouldNotContain(w => w.Contains("OrderReader", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -563,7 +582,6 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
         var result = await f.Service.SyncPermissionsAsync();
 
         result.Success.ShouldBeTrue();
-        f.Created.ShouldNotContain(c => c.GranteeType == GranteeType.Role);   // roles never grant data access
         f.Created.ShouldContain(c => c.GranteeType == GranteeType.Group && c.GranteeSid!.Value.Value == "S-1-5-21-FINANCE");
         f.Created.ShouldContain(c => c.GranteeType == GranteeType.User && c.GranteeSid!.Value.Value == "S-1-5-21-BOB");
     }

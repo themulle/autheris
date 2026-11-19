@@ -237,7 +237,7 @@ public sealed class PatternCoverageMonitor : BackgroundService
                 TableIdentifier = tableMeta.Identifier,
                 RequesterSid = requesterSid,
                 RequestedGranteeType = consent.GranteeType,
-                RequestedGranteeRef = consent.GranteeSid?.Value ?? consent.RoleName ?? string.Empty,
+                RequestedGranteeRef = consent.GranteeSid?.Value ?? string.Empty,
                 BusinessJustification = $"Internal pattern grant {consent.Id:D} matched a new object requiring owner approval.",
                 Status = "PENDING",
                 RequestedAt = now,
@@ -272,7 +272,7 @@ public sealed class PatternCoverageMonitor : BackgroundService
 
         if (auditRepo != null)
         {
-            var actorSid = consent.GranteeSid ?? new Sid(consent.RoleName ?? "SYSTEM");
+            var actorSid = consent.GranteeSid ?? new Sid("SYSTEM");
             var audit = new AuditLogEntry
             {
                 TenantId = consent.TenantId,

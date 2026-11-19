@@ -38,7 +38,7 @@ internal static class DialectSqlFragmentExtractor
         ]),
         new("ConsentGrants",
         [
-            "GetActiveRoleConsentsAsync", "UpdateConsentDescriptionInTransactionAsync", "RevokeConsentInTransactionAsync"
+            "UpdateConsentDescriptionInTransactionAsync", "RevokeConsentInTransactionAsync"
         ],
         "ConsentGrant")
     ];

@@ -173,7 +173,7 @@ public static partial class VirtualFilterEndpoints
         id = p.Id,
         tenant = p.TenantId.Value,
         name = p.Name,
-        grantee = new { type = p.GranteeType.ToString().ToLowerInvariant(), sid = p.GranteeSid?.Value, role = p.RoleName },
+        grantee = new { type = p.GranteeType.ToString().ToLowerInvariant(), sid = p.GranteeSid?.Value },
         scope = p.Scope,
         uncovered = p.Uncovered is { } uncovered ? VirtualFilterBindingValidator.FormatEnum(uncovered) : null,
         bindings = p.Bindings.Select(b => new
@@ -308,7 +308,6 @@ public static partial class VirtualFilterEndpoints
     {
         [JsonPropertyName("type")] public string Type { get; set; } = "user";
         [JsonPropertyName("sid")] public string? Sid { get; set; }
-        [JsonPropertyName("role")] public string? Role { get; set; }
     }
 
     internal sealed class BindingBody
@@ -385,9 +384,9 @@ public static partial class VirtualFilterEndpoints
             {
                 "user" => GranteeType.User,
                 "group" => GranteeType.Group,
-                "role" => GranteeType.Role,
                 "service_principal" => GranteeType.ServicePrincipal,
-                _ => throw new ArgumentException($"Unknown grantee type '{grantee.Type}'.")
+                "role" => throw new ArgumentException(GranteeTypeParsing.RoleRefusedMessage),
+                _ => throw new ArgumentException("The grantee type is not supported.")
             };
 
             return new VirtualFilterAccessProfile
@@ -396,7 +395,6 @@ public static partial class VirtualFilterEndpoints
                 Name = name,
                 GranteeType = type,
                 GranteeSid = string.IsNullOrWhiteSpace(grantee.Sid) ? (Sid?)null : new Sid(grantee.Sid),
-                RoleName = grantee.Role,
                 Scope = Scope,
                 Uncovered = Uncovered == null ? null : VirtualFilterBindingValidator.ParseEnum<UncoveredPolicy>(Uncovered, "uncovered", ignoreCase: true),
                 Bindings = (Bindings ?? []).Select(b => b.ToModel()).ToList()

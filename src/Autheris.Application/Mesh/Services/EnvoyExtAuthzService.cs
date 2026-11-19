@@ -189,15 +189,13 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
         }
 
         // Virtual filters (decision 7): ext_authz enforces no row filters. A caller whose access profile has the table in
-        // its scope must read it through a channel that applies the filter. A role profile
-        // covering the table denies as well (fail closed).
+        // its scope must read it through a channel that applies the filter.
         if (_virtualFilters != null)
         {
             var snapshot = await _virtualFilters.GetAsync(ct).ConfigureAwait(false);
             var covering = snapshot.Profiles.FirstOrDefault(p =>
                 p.TenantId == tenantId &&
-                (p.GranteeType == GranteeType.Role ||
-                 Autheris.Application.Policy.GranteeMatcher.MatchesGrant(p.GranteeType, p.GranteeSid, userSid, subject.GroupSids)) &&
+                Autheris.Application.Policy.GranteeMatcher.MatchesRestriction(p.GranteeType, p.GranteeSid, userSid, subject.GroupSids) &&
                 ObjectPattern.Parse(p.Scope).MatchesObject(targetTable));
             if (covering != null)
             {

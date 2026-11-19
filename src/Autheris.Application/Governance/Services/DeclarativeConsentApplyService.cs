@@ -105,10 +105,21 @@ public sealed class DeclarativeConsentApplyService(
         }
 
         var policies = manifest.Policies ?? [];
+
+        // The document is rejected as a whole before anything is read or written (dry-run included): a retired role grantee or any
+        // other unsupported grantee type is never skipped and never mapped to a user or group.
+        for (var i = 0; i < policies.Count; i++)
+        {
+            if (!string.IsNullOrWhiteSpace(policies[i].GranteeType) && !GranteeTypeParsing.TryParse(policies[i].GranteeType, out _))
+            {
+                throw new DeclarativeManifestValidationException(i, DeclarativeManifestViolation.GranteeType);
+            }
+        }
+
         var seenTargets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var p in policies)
         {
-            var key = $"{p.Domain}|{p.Schema}|{p.TableName}|{(string.Equals(p.GranteeType, "Role", StringComparison.OrdinalIgnoreCase) ? "Role" : "Sid")}|{p.GranteeRef}";
+            var key = $"{p.Domain}|{p.Schema}|{p.TableName}|{p.GranteeRef}";
             if (!seenTargets.Add(key))
             {
                 throw new ArgumentException(
@@ -166,9 +177,9 @@ public sealed class DeclarativeConsentApplyService(
             var metadata = await metadataRepository.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
             if (metadata == null)
             {
-                if (Enum.TryParse<GranteeType>(policy.GranteeType, ignoreCase: true, out var parsedType))
+                if (GranteeTypeParsing.TryParse(policy.GranteeType, out var parsedType))
                 {
-                    if (parsedType != GranteeType.Role && !string.IsNullOrWhiteSpace(policy.GranteeRef))
+                    if (!string.IsNullOrWhiteSpace(policy.GranteeRef))
                     {
                         var skippedSid = new Sid(policy.GranteeRef);
                         manifestGrantees.Add((parsedType, skippedSid));
@@ -186,14 +197,9 @@ public sealed class DeclarativeConsentApplyService(
                 continue;
             }
 
-            if (!Enum.TryParse<GranteeType>(policy.GranteeType, ignoreCase: true, out var granteeType))
+            if (!GranteeTypeParsing.TryParse(policy.GranteeType, out var granteeType))
             {
                 granteeType = GranteeType.User;
-            }
-
-            if (granteeType == GranteeType.Role)
-            {
-                throw new ArgumentException($"Role grantees are not supported (table '{tableId}'); grant to a group or a user instead.", nameof(manifest));
             }
 
             if (!Enum.TryParse<ConsentEffect>(policy.Effect, ignoreCase: true, out var effect))

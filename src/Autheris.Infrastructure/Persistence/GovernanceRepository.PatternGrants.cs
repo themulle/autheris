@@ -32,7 +32,7 @@ public partial class GovernanceRepository
         var seen = new HashSet<Guid>();
         var consents = new List<Consent>();
         await ConsentPatternSqlCore.ReadActivePatternConsentsForDomainAsync(
-            conn, domain: null, scoped, atTime, subjectSet: null, roleSet: null, seen, consents, ct).ConfigureAwait(false);
+            conn, domain: null, scoped, atTime, subjectSet: null, seen, consents, ct).ConfigureAwait(false);
         consents.RemoveAll(c => !c.IsActive(atTime));
         await HydrateConsentsBatchAsync(conn, consents, ct).ConfigureAwait(false);
         return consents;
@@ -46,7 +46,7 @@ public partial class GovernanceRepository
         var seen = new HashSet<Guid>();
         var consents = new List<Consent>();
         await ConsentPatternSqlCore.ReadActivePatternConsentsForDomainAsync(
-            conn, domain: null, tenantId: null, atTime, subjectSet: null, roleSet: null, seen, consents, ct).ConfigureAwait(false);
+            conn, domain: null, tenantId: null, atTime, subjectSet: null, seen, consents, ct).ConfigureAwait(false);
         consents.RemoveAll(c =>
             !c.IsActive(atTime) ||
             c.Effect != ConsentEffect.Allow ||

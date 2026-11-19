@@ -94,7 +94,7 @@ internal sealed class FakeConsentRepository : IConsentRepository, IConsentDescri
     private static Consent Clone(Consent c, bool revoked, DateTimeOffset? validTo = null, int renewalCountDelta = 0, string? revokeReason = null) => new()
     {
         Id = c.Id, TableId = c.TableId, TableIdentifier = c.TableIdentifier, TenantId = c.TenantId, Effect = c.Effect,
-        GranteeType = c.GranteeType, GranteeSid = c.GranteeSid, RoleId = c.RoleId, RoleName = c.RoleName, ValidFrom = c.ValidFrom, ValidTo = validTo ?? c.ValidTo,
+        GranteeType = c.GranteeType, GranteeSid = c.GranteeSid, ValidFrom = c.ValidFrom, ValidTo = validTo ?? c.ValidTo,
         IsRevoked = revoked, RevokeReason = revokeReason ?? c.RevokeReason, RenewalCount = c.RenewalCount + renewalCountDelta,
         GrantSource = c.GrantSource, GrantRecordSeq = c.GrantRecordSeq, ProfileAssignmentId = c.ProfileAssignmentId, ExpiryNoticeSentAt = c.ExpiryNoticeSentAt,
         ColumnRules = c.ColumnRules, RowFilters = c.RowFilters, Description = c.Description,
@@ -121,9 +121,8 @@ internal sealed class FakeConsentRepository : IConsentRepository, IConsentDescri
     {
         var at = atTime ?? DateTimeOffset.UtcNow;
         var sids = subjects.Select(s => s.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var rs = (roles ?? []).ToHashSet(StringComparer.OrdinalIgnoreCase);
         IReadOnlyList<Consent> r = _consents.Where(c => c.IsActive(at) && (tenantId is null || c.TenantId == tenantId.Value)
-            && (c.GranteeType == GranteeType.Role ? c.RoleName is { } n && rs.Contains(n) : c.GranteeSid is { } g && sids.Contains(g.Value))).ToList();
+            && c.GranteeSid is { } g && sids.Contains(g.Value)).ToList();
         return Task.FromResult(r);
     }
 

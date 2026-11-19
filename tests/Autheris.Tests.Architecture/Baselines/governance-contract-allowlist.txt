@@ -4,11 +4,5 @@ ICdcStreamKeyStore
 ICdcStreamStore
 ICdcWatermarkRepository
 ICloudEventSubscriptionStore
-IConsumerAggregationRepository
-IDataOwnerAssignmentRepository
-IDataOwnershipRepository
-IFunctionalRightRepository
-IIdentityStoreRepository
-IRecertificationRepository
 ISemanticManifestStore
 IWebhookOutbox

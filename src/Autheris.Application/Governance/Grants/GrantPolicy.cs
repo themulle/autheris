@@ -10,7 +10,7 @@ using Microsoft.Extensions.Options;
 /// 16 time-bound individual grant policy. Individual grants (<see cref="GranteeType.User"/>, <see cref="GranteeType.ServicePrincipal"/>)
 /// always need an explicit <c>ValidTo</c> within their effective maximum: the minimum of the operator-configured class limit
 /// (<see cref="IndividualGrantOptions"/>, optional) and the required tenant maximum of <see cref="IGrantValidityPolicy"/>. There
-/// are no compiled-in ceilings. Group and role grants are standing and take no class limit (the validity policy bounds them).
+/// are no compiled-in ceilings. Group grants are standing and take no class limit (the validity policy bounds them).
 /// Renewal is a new approval, never by the grantee. Any unexpected state denies.
 /// </summary>
 public sealed class GrantPolicy(IOptions<IndividualGrantOptions>? options = null, IGrantValidityPolicy? validityPolicy = null) : IGrantPolicy
@@ -46,7 +46,7 @@ public sealed class GrantPolicy(IOptions<IndividualGrantOptions>? options = null
             return new GrantDecision(true, null, false, GrantRecertClass.None, GrantClass.Standing, "Deny grants only restrict access and have no maximum.");
         }
 
-        if (r.GranteeType is GranteeType.Group or GranteeType.Role)
+        if (r.GranteeType is GranteeType.Group)
         {
             // Standing grants take no class limit, but an explicit expiry is bounded by the tenant maximum like everyone else.
             var tenantMax = GrantTimeMath.AddSaturating(r.Now, TenantMaximum(r.Kind));
@@ -56,7 +56,7 @@ public sealed class GrantPolicy(IOptions<IndividualGrantOptions>? options = null
                     $"The requested expiry exceeds the maximum of {FormatSpan(TenantMaximum(r.Kind))}.", GrantClass.Standing, tenantMax);
             }
 
-            return new GrantDecision(true, null, false, GrantRecertClass.None, GrantClass.Standing, "Standing group/role grant.");
+            return new GrantDecision(true, null, false, GrantRecertClass.None, GrantClass.Standing, "Standing group grant.");
         }
 
         var cls = Classify(r);

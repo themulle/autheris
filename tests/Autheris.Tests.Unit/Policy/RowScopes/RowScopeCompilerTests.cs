@@ -296,23 +296,19 @@ public sealed class RowScopeCompilerTests
         outcome.DenyCode.ShouldBe(RowScopeCompiler.HardPolicyUncoveredCode);
         outcome.DenyStep.ShouldBe(DecisionStep.ExplicitDeny);
 
-        // Role grantee on hard row policy is rejected (OD-30 semantics).
-        var roleProfile = new VirtualFilterAccessProfile
+        // An unsupported grantee type on a hard row policy is never skipped: the compile throws, so the decision denies.
+        var unsupportedProfile = new VirtualFilterAccessProfile
         {
             TenantId = Tenant,
-            Name = "role-hard",
-            GranteeType = GranteeType.Role,
-            RoleName = "analyst",
+            Name = "unsupported-hard",
+            GranteeType = (GranteeType)3,
             Scope = "prod.sales.*",
             Uncovered = UncoveredPolicy.Skip,
             Bindings = [new FilterBinding { FilterName = "hard_region_policy" }]
         };
-        var roleCompiler = CreateCompiler(new VirtualFilterSnapshot(1, [hardPolicy], [roleProfile]));
-        var roleOutcome = await roleCompiler.CompileAsync(new RowScopeCompileRequest(
-            Tenant, UserSid, new HashSet<Sid>(), OrdersTable(includeRegion: true), [ownerGrant]));
-        roleOutcome.IsDenied.ShouldBeTrue();
-        roleOutcome.DenyCode.ShouldBe(RowScopeCompiler.HardPolicyRoleRejectedCode);
-        roleOutcome.DenyStep.ShouldBe(DecisionStep.ExplicitDeny);
+        var unsupportedCompiler = CreateCompiler(new VirtualFilterSnapshot(1, [hardPolicy], [unsupportedProfile]));
+        await Should.ThrowAsync<ArgumentOutOfRangeException>(async () => await unsupportedCompiler.CompileAsync(new RowScopeCompileRequest(
+            Tenant, UserSid, new HashSet<Sid>(), OrdersTable(includeRegion: true), [ownerGrant])));
     }
 
     [Theory]

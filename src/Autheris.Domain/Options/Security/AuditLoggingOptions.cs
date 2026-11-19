@@ -2,21 +2,6 @@ using System.ComponentModel.DataAnnotations;
 
 namespace Autheris.Domain.Options;
 
-public sealed class WormAuditOptions
-{
-    public bool Enabled { get; init; } = false;
-    public string StorageType { get; init; } = "Local"; // "Local" | "S3"
-    public string ExportPath { get; init; } = string.Empty;
-    public string S3Endpoint { get; init; } = string.Empty;
-    public string S3Bucket { get; init; } = string.Empty;
-    public string S3Prefix { get; init; } = "audit-worm-archives/";
-    public string S3AccessKey { get; init; } = string.Empty;
-    public string S3SecretKey { get; init; } = string.Empty;
-    [Range(1, 7300)] public int RetentionDays { get; init; } = 3650;
-    public string ObjectLockMode { get; init; } = "COMPLIANCE"; // "COMPLIANCE" | "GOVERNANCE"
-    public bool EnforceObjectLock { get; init; } = true;
-}
-
 public sealed class AuditRetentionOptions
 {
     public const string SectionName = GatewaySections.AuditRetention;
@@ -73,7 +58,6 @@ public sealed class AuditOptions
 
     /// <summary>Review E-11: a broken audit hash chain turns the readiness probe unhealthy (set false to only log it).</summary>
     public bool FailReadinessOnChainViolation { get; init; } = true;
-    public WormAuditOptions Worm { get; init; } = new();
 
     /// <summary>
     /// SEC H-17: Path of the externally kept (outside the governance DB), HMAC-signed tail anchor file of the

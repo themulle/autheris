@@ -536,7 +536,6 @@
           "effect": { "type": "string" },
           "granteeType": { "type": "string" },
           "granteeSid": { "type": "string", "nullable": true },
-          "roleName": { "type": "string", "nullable": true },
           "validFrom": { "type": "string", "format": "date-time" },
           "validTo": { "type": "string", "format": "date-time" },
           "isRevoked": { "type": "boolean" },

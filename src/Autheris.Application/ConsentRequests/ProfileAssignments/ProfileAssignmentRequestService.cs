@@ -209,11 +209,11 @@ public sealed class ProfileAssignmentRequestService(
             ExtendingItemNo: itemNo);
 
         var requestId = Guid.NewGuid();
-        var requesterSid = patternConsent.GranteeSid ?? new Sid(patternConsent.RoleName ?? "SYSTEM");
+        var requesterSid = patternConsent.GranteeSid ?? new Sid("SYSTEM");
         var justification = $"Pattern grant '{patternConsent.Id:D}' matched new object '{newTable.Identifier}' requiring owner approval.";
         var grantDecision = _grantPolicy.Evaluate(new GrantRequest(
             patternConsent.GranteeType,
-            patternConsent.GranteeSid?.Value ?? patternConsent.RoleName ?? string.Empty,
+            patternConsent.GranteeSid?.Value ?? string.Empty,
             GrantKind.Consent,
             patternConsent.ValidTo,
             now,
@@ -233,7 +233,7 @@ public sealed class ProfileAssignmentRequestService(
             TableIdentifier = newTable.Identifier,
             RequesterSid = requesterSid,
             RequestedGranteeType = patternConsent.GranteeType,
-            RequestedGranteeRef = patternConsent.GranteeSid?.Value ?? patternConsent.RoleName ?? string.Empty,
+            RequestedGranteeRef = patternConsent.GranteeSid?.Value ?? string.Empty,
             BusinessJustification = justification,
             Status = "PENDING",
             RequestedAt = now,
@@ -480,16 +480,15 @@ public sealed class ProfileAssignmentRequestService(
 
     private static (GranteeType Type, string Ref) ResolveAndValidateGrantee(ProfileAssignmentSubmission submission)
     {
-        if (!string.IsNullOrWhiteSpace(submission.GranteeType) &&
-            Enum.TryParse<GranteeType>(submission.GranteeType.Trim(), true, out var parsedType))
+        if (GranteeTypeParsing.IsRetiredRole(submission.GranteeType))
         {
-            if (parsedType == GranteeType.Role)
-            {
-                throw new ConsentRequestException(
-                    AccessProfileAssignmentRules.RoleSubjectUnsupported,
-                    "Role assignees are not supported; assign the profile to a group or a user instead.");
-            }
+            throw new ConsentRequestException(
+                AccessProfileAssignmentRules.RoleSubjectUnsupported,
+                "Role assignees are not supported; assign the profile to a group or a user instead.");
+        }
 
+        if (GranteeTypeParsing.TryParse(submission.GranteeType, out var parsedType))
+        {
             var targetRef = string.IsNullOrWhiteSpace(submission.GranteeRef) ? submission.CallerSid.Value : submission.GranteeRef.Trim();
             return (parsedType, targetRef);
         }
@@ -947,5 +946,5 @@ public sealed class ProfileAssignmentRequestService(
 internal static class ConsentExtensionsForProfileMonitor
 {
     public static string RequestedGranteeOrSystem(this Consent consent) =>
-        consent.GranteeSid?.Value ?? consent.RoleName ?? "SYSTEM";
+        consent.GranteeSid?.Value ?? "SYSTEM";
 }
