@@ -38,6 +38,7 @@ public sealed class ProductWriteTests
         """;
 
     private readonly InMemoryDataProductRepository _store = new();
+    private readonly Autheris.Application.State.IDistributedClusterStateProvider _cluster = new Autheris.Application.State.InMemoryClusterStateProvider();
     private readonly ITableMetadataRepository _tables = Substitute.For<ITableMetadataRepository>();
     private readonly IConsentRepository _consents = Substitute.For<IConsentRepository>();
     private readonly IConsentResolutionService _resolution = Substitute.For<IConsentResolutionService>();
@@ -75,7 +76,7 @@ public sealed class ProductWriteTests
     private static WriteRule ExecuteWrite() => new(Guid.NewGuid(), WriteOperation.ExecuteWrite, [], WriteRowScope.AllRows);
 
     private async Task<GovernedProcedureExecutionService> CreateAsync(
-        IReadOnlyList<Consent> consents, bool readGrant = false, Func<AuditLogEntry, Task>? onAudit = null)
+        IReadOnlyList<Consent> consents, bool readGrant = false, Func<AuditLogEntry, Task>? onAudit = null, bool noCluster = false, Autheris.Application.State.IDistributedClusterStateProvider? cluster = null)
     {
         var definition = Autheris.Tests.Unit.Procedures.TestProcedureYaml.Definition(Yaml) with { Mode = ProcedureMode.Write, ProductSchema = "sales" };
         _registry.Register(definition);
@@ -122,7 +123,8 @@ public sealed class ProductWriteTests
 
         return new GovernedProcedureExecutionService(
             _registry, _invoker, Options.Create(new GatewayOptions()), _audit, _tables, _consents, _resolution,
-            concurrencyGate: Gate(), productRepository: _store);
+            concurrencyGate: Gate(), productRepository: _store,
+            clusterState: noCluster ? null : cluster ?? _cluster);
     }
 
     private static ITableReadConcurrencyGate Gate()
@@ -248,6 +250,30 @@ public sealed class ProductWriteTests
         }
 
         await Should.ThrowAsync<GatewayThrottledException>(() => RunAsync(service));
+    }
+
+    [Fact]
+    public async Task WriteRateLimit_IsClusterWide_AndFailsClosed()
+    {
+        // two nodes (two service instances) share one cluster counter
+        var shared = new Autheris.Application.State.InMemoryClusterStateProvider();
+        var nodeA = await CreateAsync([Grant(ExecuteWrite())], cluster: shared);
+        var nodeB = await CreateAsync([Grant(ExecuteWrite())], cluster: shared);
+        for (var i = 0; i < ProductWriteRateLimiter.MaxCallsPerWindow; i++)
+        {
+            await RunAsync(i % 2 == 0 ? nodeA : nodeB);
+        }
+
+        await Should.ThrowAsync<GatewayThrottledException>(() => RunAsync(nodeA));
+        await Should.ThrowAsync<GatewayThrottledException>(() => RunAsync(nodeB));
+
+        // no reachable counter: nothing is written
+        var callsBefore = _order.Count(o => o == "CALL");
+        var unavailable = await CreateAsync([Grant(ExecuteWrite())], noCluster: true);
+        await Should.ThrowAsync<ProcedureUnavailableException>(() => RunAsync(unavailable));
+        _order.Count(o => o == "CALL").ShouldBe(callsBefore, "a write never runs without a reachable counter");
+        callsBefore.ShouldBe(ProductWriteRateLimiter.MaxCallsPerWindow);
+        (await ProductWriteRateLimiter.TryAcquireAsync(null, Tenant, Guid.NewGuid(), DateTimeOffset.UtcNow)).ShouldBeNull();
     }
 
     [Fact]
