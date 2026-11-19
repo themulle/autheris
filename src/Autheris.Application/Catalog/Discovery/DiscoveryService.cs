@@ -946,6 +946,13 @@ public sealed partial class DiscoveryService : IDiscoveryService
         return false;
     }
 
+    private static bool HasEffectiveTag(TableMetadata table, string tag)
+    {
+        var primary = DiscoveryTextSanitizer.SanitizeTags(table.CatalogTags);
+        var effective = primary.Count > 0 ? primary : table.Table.Tags;
+        return effective.Any(tg => string.Equals(tg, tag, StringComparison.OrdinalIgnoreCase));
+    }
+
     private ScopeMemoKey BuildScopeMemoKey(Sid sid, CatalogCaller caller)
     {
         var sb = new StringBuilder();

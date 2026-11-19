@@ -24,10 +24,14 @@ public static class PageCursor
     public static string Encode(long position) => Encode(position.ToString(CultureInfo.InvariantCulture));
 
     /// <summary>Returns false for a missing, malformed or foreign cursor (callers answer 400, never fall back to the first page silently).</summary>
-    public static bool TryDecode(string? cursor, out string position)
+    public static bool TryDecode(string? cursor, out string position) =>
+        TryDecode(cursor, 256, out position);
+
+    /// <summary>Returns false for a missing, oversized, malformed or foreign cursor.</summary>
+    public static bool TryDecode(string? cursor, int maxLength, out string position)
     {
         position = string.Empty;
-        if (string.IsNullOrEmpty(cursor) || cursor.Length > 256 || !cursor.StartsWith(Prefix, StringComparison.Ordinal))
+        if (string.IsNullOrEmpty(cursor) || cursor.Length > maxLength || !cursor.StartsWith(Prefix, StringComparison.Ordinal))
         {
             return false;
         }

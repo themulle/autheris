@@ -95,7 +95,12 @@ internal sealed class ExternalCatalogTestHarness : IAsyncDisposable
     public CatalogChangedSignal ChangedSignal { get; }
     public GatewayOptions GatewayOptions { get; }
 
-    public static ExternalCatalogTestHarness Create(bool multiTenant = true)
+    public static ExternalCatalogTestHarness Create(
+        bool multiTenant = true,
+        string? cursorSigningKey = null,
+        CatalogDiscoveryOptions? discoveryOptions = null,
+        IRateLimiterService? rateLimiter = null,
+        long? maxResponseBytes = null)
     {
         var clock = new FakeTimeProvider(FixedNow);
         var tables = new FakeDiscoveryTableRepository();
@@ -111,9 +116,16 @@ internal sealed class ExternalCatalogTestHarness : IAsyncDisposable
 
         var gatewayOptions = new GatewayOptions
         {
-            Tenancy = multiTenant ? TenancyShape.Multi.Options() : TenancyShape.Single.Options()
+            Tenancy = multiTenant ? TenancyShape.Multi.Options() : TenancyShape.Single.Options(),
+            RestApi = cursorSigningKey is null
+                ? new RestApiOptions()
+                : new RestApiOptions { BulkStream = new BulkStreamOptions { SigningKey = cursorSigningKey } },
+            GraphQL = maxResponseBytes is null
+                ? new GraphQLOptions()
+                : new GraphQLOptions { MaxResponseBytes = maxResponseBytes.Value }
         };
 
+        var effectiveDiscoveryOptions = discoveryOptions ?? new CatalogDiscoveryOptions();
         var discoveryService = new DiscoveryService(
             tables,
             pdp,
@@ -123,8 +135,8 @@ internal sealed class ExternalCatalogTestHarness : IAsyncDisposable
             artifacts,
             audit,
             Options.Create(gatewayOptions),
-            Options.Create(new CatalogDiscoveryOptions()),
-            rateLimiter: null,
+            Options.Create(effectiveDiscoveryOptions),
+            rateLimiter: rateLimiter,
             logger: NullLogger<DiscoveryService>.Instance);
 
         var services = new ServiceCollection();
@@ -145,7 +157,7 @@ internal sealed class ExternalCatalogTestHarness : IAsyncDisposable
         services.AddSingleton<IIdentitySubjectResolver, IdentitySubjectResolver>();
         services.AddSingleton<IConsentDecisionGuard>(sp =>
             new ConsentDecisionGuard(sp.GetRequiredService<IIdentitySubjectResolver>()));
-        services.AddSingleton<IRateLimiterService>(new FakeDiscoveryRateLimiter());
+        services.AddSingleton<IRateLimiterService>(rateLimiter ?? new FakeDiscoveryRateLimiter());
         services.AddSingleton<ExternalCatalogReader>();
         services.AddSingleton<IAuthorizationHandler, ExternalSystemRequirementHandler>();
         services.AddAuthorization(options => options.AddGatewayAuthorizationPolicies());
@@ -338,6 +350,28 @@ internal sealed class ExternalCatalogTestHarness : IAsyncDisposable
             pageSize,
             accessStatus,
             q,
+            CancellationToken.None);
+        return await ExecuteResultAsync(ctx, result);
+    }
+
+    public ExternalCatalogReader GetReader() => _services.GetRequiredService<ExternalCatalogReader>();
+
+    public async Task<ExecutedCatalogResponse> GetFacetsAsync(
+        ClaimsPrincipal caller,
+        string? accessStatus = null,
+        string? ifNoneMatch = null)
+    {
+        if (!(await AuthorizeAsync(caller, GatewayPolicies.CatalogRead)).Succeeded)
+        {
+            return ForbiddenResponse();
+        }
+
+        var ctx = CreateHttpContext(caller, ifNoneMatch);
+        var reader = _services.GetRequiredService<ExternalCatalogReader>();
+        var result = await ExternalCatalogApiEndpoints.GetFacetsAsync(
+            ctx,
+            reader,
+            accessStatus,
             CancellationToken.None);
         return await ExecuteResultAsync(ctx, result);
     }
@@ -591,7 +625,7 @@ internal sealed class PerUserOwnershipRepository : IDataOwnershipRepository
     private readonly Dictionary<TableIdentifier, List<DataOwner>> _owners = [];
     private readonly Dictionary<string, HashSet<TableIdentifier>> _ownedBySid = new(StringComparer.OrdinalIgnoreCase);
 
-    public void AssignOwner(TableIdentifier table, string ownerSid, string displayName, string? email = null)
+    public void AssignOwner(TableIdentifier table, string ownerSid, string displayName, string? email = null, bool isActive = true)
     {
         if (!_owners.TryGetValue(table, out var list))
         {
@@ -605,7 +639,8 @@ internal sealed class PerUserOwnershipRepository : IDataOwnershipRepository
             AdSid = new Sid(ownerSid),
             AdAccount = ownerSid,
             DisplayName = displayName,
-            Email = email ?? $"{ownerSid}@example.test"
+            Email = email ?? $"{ownerSid}@example.test",
+            IsActive = isActive
         });
 
         if (!_ownedBySid.TryGetValue(ownerSid, out var owned))
