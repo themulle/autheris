@@ -69,7 +69,7 @@ public class SqlCompilerBenchmarks
     }
 
     /// <summary>
-    /// Deterministic corpus. Every query is a join over the two secured tables with a flat projection (no literal binds, so the 64 KB
+    /// Deterministic corpus. Every query is a join over the two secured tables with a flat projection (no literal binds and no arithmetic over columns, which the row policy error guard refuses, so the 64 KB
     /// statements stay far below the bind budget) padded to the target size, with a different shape per index.
     /// </summary>
     internal static string[] BuildBucket(int count, int targetBytes)
@@ -82,7 +82,7 @@ public class SqlCompilerBenchmarks
             int column = 0;
             while (sb.Length < targetBytes - 220)
             {
-                sb.Append(CultureInfo.InvariantCulture, $", o.amount + e.orderid * {column % 7 + 1} AS c{column}");
+                sb.Append(CultureInfo.InvariantCulture, $", {(column % 2 == 0 ? "o.amount" : "e.orderid")} AS c{column}");
                 column++;
             }
 
