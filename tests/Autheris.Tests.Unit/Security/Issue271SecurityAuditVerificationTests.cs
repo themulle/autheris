@@ -20,6 +20,7 @@ using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Mcp.Services;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.Sql.Services;
+using Autheris.Tests.Unit.Sql;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
@@ -254,7 +255,10 @@ public sealed class Issue271SecurityAuditVerificationTests
             tenantId,
             metaRepo,
             consentRepo,
-            CancellationToken.None);
+            gatewayOptions: null,
+            consentResolver: null,
+            visibility: TrinoMetadataVisibilityFakes.AllowAll(meta),
+            ct: CancellationToken.None);
 
         result.ShouldNotBeNull();
         result.Rows.Count.ShouldBe(1);

@@ -27,6 +27,7 @@ using Autheris.Application.Policy;
 using Autheris.Application.Policy.RowScopes;
 using Autheris.Application.Sql.Policy;
 using Autheris.Application.Sql.Services;
+using Autheris.Tests.Unit.Sql;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -317,12 +318,13 @@ public sealed class CatalogCallerMigrationBatch2Tests
             ValidTo = DateTimeOffset.UtcNow.AddDays(1)
         };
         var consents = new StubConsentRepository([consent]);
+        var visibility = TrinoMetadataVisibilityFakes.AllowAll(active, inactive, other);
 
-        var showTables = await TrinoMetadataQueryHandler.TryExecuteAsync("SHOW TABLES FROM sales.dbo", UserWithSid(), TestTenants.Default, repo, consents, null, null);
+        var showTables = await TrinoMetadataQueryHandler.TryExecuteAsync("SHOW TABLES FROM sales.dbo", UserWithSid(), TestTenants.Default, repo, consents, null, null, visibility);
         showTables.ShouldNotBeNull();
         showTables!.Rows.Select(r => r["Table"]).ShouldBe(["orders"]);
 
-        var showSchemas = await TrinoMetadataQueryHandler.TryExecuteAsync("SHOW SCHEMAS FROM sales", UserWithSid(), TestTenants.Default, repo, consents, null, null);
+        var showSchemas = await TrinoMetadataQueryHandler.TryExecuteAsync("SHOW SCHEMAS FROM sales", UserWithSid(), TestTenants.Default, repo, consents, null, null, visibility);
         showSchemas.ShouldNotBeNull();
 
         repo.GetAllCalls.ShouldBe(0);

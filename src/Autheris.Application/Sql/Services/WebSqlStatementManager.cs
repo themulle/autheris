@@ -52,9 +52,23 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
         IOptions<GatewayOptions>? options = null,
         TimeSpan? retentionPeriod = null,
         int? maxSessionsPerUser = null,
-        int? maxTotalSessions = null)
+        int? maxTotalSessions = null,
+        IServiceProviderIsService? servicePresence = null)
     {
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
+        if (servicePresence is not null)
+        {
+            if (!servicePresence.IsService(typeof(Autheris.Application.Catalog.Discovery.IDiscoveryService)))
+            {
+                throw new InvalidOperationException("IDiscoveryService must be registered to construct WebSqlStatementManager.");
+            }
+
+            if (!servicePresence.IsService(typeof(Autheris.Application.Policy.Pdp.IAccessDecisionPoint)))
+            {
+                throw new InvalidOperationException("IAccessDecisionPoint must be registered to construct WebSqlStatementManager.");
+            }
+        }
+
         _logger = logger;
         _gatewayOptions = options?.Value;
 
@@ -221,16 +235,17 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
             }
 
             GovernedSqlResult? metadataResult = null;
+            var metadataRowLimit = (int)Math.Min(int.MaxValue, (request.RowLimit ?? SqlRowLimit.For(_gatewayOptions?.WebSql ?? new WebSqlOptions())).Effective(null));
             if (string.Equals(request.Transport, SqlTransports.Trino, StringComparison.Ordinal))
             {
                 var metadataRepo = scope.ServiceProvider.GetService<ITableMetadataRepository>();
                 var consentRepo = scope.ServiceProvider.GetService<IConsentRepository>();
                 var consentResolver = scope.ServiceProvider.GetService<IConsentResolutionService>();
-                var discovery = scope.ServiceProvider.GetService<Autheris.Application.Catalog.Discovery.IDiscoveryService>();
-                var decisionPoint = scope.ServiceProvider.GetService<Autheris.Application.Policy.Pdp.IAccessDecisionPoint>();
-                var visibility = discovery != null && decisionPoint != null ? new TrinoMetadataVisibility(discovery, decisionPoint) : null;
+                var discovery = scope.ServiceProvider.GetRequiredService<Autheris.Application.Catalog.Discovery.IDiscoveryService>();
+                var decisionPoint = scope.ServiceProvider.GetRequiredService<Autheris.Application.Policy.Pdp.IAccessDecisionPoint>();
+                var visibility = new TrinoMetadataVisibility(discovery, decisionPoint);
                 metadataResult = await TrinoMetadataQueryHandler.TryExecuteAsync(
-                    request.Sql, user, tenantId, metadataRepo, consentRepo, _gatewayOptions, consentResolver, visibility, sessionCts.Token).ConfigureAwait(false);
+                    request.Sql, user, tenantId, metadataRepo, consentRepo, _gatewayOptions, consentResolver, visibility, metadataRowLimit, sessionCts.Token).ConfigureAwait(false);
             }
             if (metadataResult != null)
             {
@@ -246,7 +261,6 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
                     }
                     catch { }
                 }
-                var metadataRowLimit = (int)Math.Min(int.MaxValue, (request.RowLimit ?? SqlRowLimit.For(_gatewayOptions?.WebSql ?? new WebSqlOptions())).Effective(null));
                 if (metadataResult.Rows.Count > metadataRowLimit)
                 {
                     metadataResult = metadataResult with
