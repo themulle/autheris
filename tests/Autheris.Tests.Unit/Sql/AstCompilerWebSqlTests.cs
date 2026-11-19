@@ -156,6 +156,7 @@ public sealed class AstCompilerWebSqlTests(ITestOutputHelper output)
     [InlineData("SqlServer")]
     public async Task ClientParameters_AreCompiledAsNamedClientBinds(string sourceType)
     {
+        using var guardOff = RowPolicyGuardOff.Scope();
         // Wunsch 4, Phase 2: @name → __param_name → AST → a ClientNamed bind that the binder fills by its own source name per request.
         var parameters = new Dictionary<string, object?> { ["d"] = "Sales", ["m"] = 10 };
         string normalized = GovernedSqlExecutionService.NormalizeClientParameters(

@@ -390,7 +390,7 @@ internal static class SecurityProbes
         Add("ClientList_LongerListThanCompiled_IsRefusedNotTruncated", "client-list-count", () =>
         {
             var h = new Compiler.ClientListHarness();
-            var compiled = h.Compile(TargetSqlDialect.PostgreSql, "SELECT id FROM orders WHERE id IN (__param_ids)", Compiler.ClientListHarness.Shapes(("ids", 2)));
+            var compiled = h.Compile(TargetSqlDialect.PostgreSql, "SELECT id FROM orders WHERE status IN (__param_ids)", Compiler.ClientListHarness.Shapes(("ids", 2)));
             var longer = ClientListValue.Create(new object[] { 1L, 2L, 3L }, SqlParameterType.Int64);
             Assert.Throws<ClientListException>(() => CompiledSqlBinders.For(TargetSqlDialect.PostgreSql)
                 .Bind(new Compiler.BinderMutationTests.RecCommand(), compiled, new Dictionary<string, object?> { ["ids"] = longer }));

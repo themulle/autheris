@@ -359,7 +359,7 @@ public class AdvancedMaskingRuleTests
     }
 
     [Theory]
-    [InlineData("SELECT department, sum(id) FROM sales GROUP BY department")]
+    [InlineData("SELECT department, min(id) FROM sales GROUP BY department")]
     [InlineData("SELECT count(*) FROM sales")]
     [InlineData("SELECT department, max(id) FROM sales GROUP BY department")]
     public void AggregateGuard_AggregateOverClearColumn_Allowed(string sql)

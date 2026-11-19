@@ -16,7 +16,7 @@ using TrinoSqlEngine.Governance;
 /// </summary>
 internal sealed class RowPolicyCoercionGuard(ITableCatalog catalog) : ColumnScopeTracker(catalog)
 {
-    private enum Fam { Unknown, Any, Text, StringLiteral, Numeric, Temporal, Boolean }
+    private enum Fam { Unknown, Any, Text, StringLiteral, Bind, Numeric, Temporal, Boolean }
 
     private readonly Dictionary<string, Dictionary<string, Fam>> _derived = new(StringComparer.Ordinal);
     private readonly Dictionary<QuerySpecification, List<(string? Name, Fam Family)>> _outputs = new(ReferenceEqualityComparer.Instance);
@@ -46,7 +46,10 @@ internal sealed class RowPolicyCoercionGuard(ITableCatalog catalog) : ColumnScop
     {
         if (a == Fam.Unknown || b == Fam.Unknown) return false;
         if (a == Fam.Any || b == Fam.Any || a == b) return true;
-        return (a, b) is (Fam.StringLiteral, Fam.Text or Fam.Temporal) or (Fam.Text or Fam.Temporal, Fam.StringLiteral);
+        // A client bind carries a value that is only known at execution (the plan is cached): it may only meet text, because a value
+        // that does not convert would raise on whichever row is evaluated.
+        return (a, b) is (Fam.StringLiteral, Fam.Text or Fam.Temporal or Fam.Bind) or (Fam.Text or Fam.Temporal or Fam.Bind, Fam.StringLiteral)
+            or (Fam.Bind, Fam.Text) or (Fam.Text, Fam.Bind);
     }
 
     private static Fam Combine(IEnumerable<Fam> families)
@@ -55,7 +58,7 @@ internal sealed class RowPolicyCoercionGuard(ITableCatalog catalog) : ColumnScop
         foreach (var f in families)
         {
             if (!Compatible(result, f)) return Fam.Unknown;
-            if (result is Fam.Any or Fam.StringLiteral && f != Fam.Any) result = f;
+            if (result is Fam.Any or Fam.StringLiteral or Fam.Bind && f != Fam.Any) result = f;
         }
 
         return result;
@@ -77,8 +80,8 @@ internal sealed class RowPolicyCoercionGuard(ITableCatalog catalog) : ColumnScop
                     _ => Fam.Unknown
                 };
             case TypedLiteralExpression or CurrentDateTimeExpression or DateFunctionExpression: return Fam.Temporal;
-            case IntervalLiteralExpression or ParameterReference or NamedBindMarkerExpression or PolicyParameterExpression
-                or PageOffsetParameterExpression: return Fam.Any;
+            case ParameterReference or NamedBindMarkerExpression: return Fam.Bind;
+            case IntervalLiteralExpression or PolicyParameterExpression or PageOffsetParameterExpression: return Fam.Any;
             case ScalarSubqueryExpression scalar: return FirstFamily(scalar.Subquery);
             case BinaryExpression b:
                 return b.Operator switch

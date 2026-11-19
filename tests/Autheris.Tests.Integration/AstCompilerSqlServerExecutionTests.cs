@@ -709,15 +709,20 @@ public sealed class AstCompilerSqlServerExecutionTests : IClassFixture<AstCompil
 
     private static ClientListValue Ints(params int[] values) => ClientListValue.Create(values.Select(v => (object)v).ToList(), SqlParameterType.Int32);
 
+    private static ClientListValue Texts(params string[] values) => ClientListValue.Create(values.Cast<object>().ToList(), SqlParameterType.String);
+
     [Fact]
     public async Task ClientList_IntegerList_ReturnsOnlyTheTenantsRows_AndNotInIsItsComplement()
     {
         if (!_db.IsAvailable) return;
-        var ids = new Dictionary<string, ClientListValue> { ["ids"] = Ints(1, 2, 3, 5) };
-        Ids(await RunListAsync("SELECT id FROM orders WHERE id IN (__param_ids)", "acme", ids)).ShouldBe(new List<int> { 1, 2 });
-        Ids(await RunListAsync("SELECT id FROM orders WHERE id NOT IN (__param_ids)", "acme", new() { ["ids"] = Ints(1) })).ShouldBe(new List<int> { 2, 6 });
-        Ids(await RunListAsync("SELECT id FROM orders WHERE id NOT IN (__param_ids)", "acme", new() { ["ids"] = Ints() })).ShouldBe(new List<int> { 1, 2, 6 });
-        Ids(await RunListAsync("SELECT id FROM orders WHERE id IN (__param_ids)", "acme", new() { ["ids"] = Ints() })).ShouldBeEmpty();
+        // A client bind against a numeric column is refused under a tenant predicate (a value that does not convert would raise on row data).
+        await Should.ThrowAsync<System.Security.SecurityException>(() => RunListAsync("SELECT id FROM orders WHERE id IN (__param_ids)", "acme", new() { ["ids"] = Ints(1, 2) }));
+
+        var ids = new Dictionary<string, ClientListValue> { ["ids"] = Texts("open", "pending") };
+        Ids(await RunListAsync("SELECT id FROM orders WHERE status IN (__param_ids)", "acme", ids)).ShouldBe(new List<int> { 1, 2 });
+        Ids(await RunListAsync("SELECT id FROM orders WHERE status NOT IN (__param_ids)", "acme", new() { ["ids"] = Texts("open") })).ShouldBe(new List<int> { 6 });
+        Ids(await RunListAsync("SELECT id FROM orders WHERE status NOT IN (__param_ids)", "acme", new() { ["ids"] = Texts() })).ShouldBe(new List<int> { 1, 2, 6 });
+        Ids(await RunListAsync("SELECT id FROM orders WHERE status IN (__param_ids)", "acme", new() { ["ids"] = Texts() })).ShouldBeEmpty();
     }
 
     [Fact]
@@ -725,13 +730,13 @@ public sealed class AstCompilerSqlServerExecutionTests : IClassFixture<AstCompil
     {
         if (!_db.IsAvailable) return;
         // 1,999 values and the tenant bind stay below the 2,100-parameter limit of one RPC.
-        var many = new Dictionary<string, ClientListValue> { ["ids"] = Ints(Enumerable.Range(1, 1999).ToArray()) };
-        Ids(await RunListAsync("SELECT id FROM orders WHERE id IN (__param_ids)", "acme", many)).ShouldBe(new List<int> { 1, 2, 6 });
+        var many = new Dictionary<string, ClientListValue> { ["ids"] = Texts(Enumerable.Range(1, 1997).Select(i => "v" + i).Concat(["open", "closed"]).ToArray()) };
+        Ids(await RunListAsync("SELECT id FROM orders WHERE status IN (__param_ids)", "acme", many)).ShouldBe(new List<int> { 1, 2, 6 });
 
         // AC-128-3: a list that fits the maximum but not the budget together with literal and tenant binds is refused, never truncated.
         string literals = string.Join(", ", Enumerable.Range(1000, 150));
         var ex = await Should.ThrowAsync<SqlLimitExceededException>(() =>
-            RunListAsync($"SELECT id FROM orders WHERE id IN (__param_ids) AND amount IN ({literals})", "acme", many));
+            RunListAsync($"SELECT id FROM orders WHERE status IN (__param_ids) AND amount IN ({literals})", "acme", many));
         ex.Kind.ShouldBe(SqlLimitKind.BindParameters);
     }
 }

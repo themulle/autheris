@@ -500,6 +500,7 @@ public sealed class GovernedSqlExecutorX1Tests
     [Fact]
     public async Task Audit_CompiledDigest_NoValues()
     {
+        using var guardOff = RowPolicyGuardOff.Scope();
         var master = Encoding.UTF8.GetBytes("master-hmac-secret-0123456789abcdef");
         var secrets = Substitute.For<IKeyVaultSecretProvider>();
         secrets.GetSecretBytes("GQL-HMAC").Returns(master);

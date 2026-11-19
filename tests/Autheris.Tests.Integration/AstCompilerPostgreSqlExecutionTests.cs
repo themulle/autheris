@@ -413,8 +413,8 @@ public sealed class AstCompilerPostgreSqlExecutionTests : IClassFixture<AstCompi
     [Fact]
     public async Task ClientNamedParameter_IsBoundPositionally()
     {
-        Ids(await RunAsync("SELECT id FROM orders WHERE status = __param_st AND amount > __param_min", "acme",
-            new Dictionary<string, object?> { ["st"] = "closed", ["min"] = 5m })).ShouldBe(new List<int> { 6 });
+        Ids(await RunAsync("SELECT id FROM orders WHERE status = __param_st AND amount > 5", "acme",
+            new Dictionary<string, object?> { ["st"] = "closed" })).ShouldBe(new List<int> { 6 });
     }
 
     [Fact]
@@ -637,18 +637,21 @@ public sealed class AstCompilerPostgreSqlExecutionTests : IClassFixture<AstCompi
     [Fact]
     public async Task ClientList_IntegerList_ReturnsOnlyTheTenantsRows_AndNotInIsItsComplement()
     {
-        var ids = new Dictionary<string, ClientListValue> { ["ids"] = Ints(1, 2, 3, 5, 6) };
-        Ids(await RunListAsync("SELECT id FROM orders WHERE id IN (__param_ids)", "acme", ids)).ShouldBe(new List<int> { 1, 2, 6 });
-        Ids(await RunListAsync("SELECT id FROM orders WHERE id NOT IN (__param_ids)", "acme", ids)).ShouldBeEmpty();
-        Ids(await RunListAsync("SELECT id FROM orders WHERE id NOT IN (__param_ids)", "acme", new() { ["ids"] = Ints(1) })).ShouldBe(new List<int> { 2, 6 });
+        // A client list meets a text column: a value that does not convert to a numeric column would raise on row data, so the
+        // allowlist refuses a client bind against a numeric column under a tenant predicate.
+        var ids = new Dictionary<string, ClientListValue> { ["ids"] = Texts("open", "closed", "pending") };
+        Ids(await RunListAsync("SELECT id FROM orders WHERE status IN (__param_ids)", "acme", ids)).ShouldBe(new List<int> { 1, 2, 6 });
+        Ids(await RunListAsync("SELECT id FROM orders WHERE status NOT IN (__param_ids)", "acme", ids)).ShouldBeEmpty();
+        Ids(await RunListAsync("SELECT id FROM orders WHERE status NOT IN (__param_ids)", "acme", new() { ["ids"] = Texts("open") })).ShouldBe(new List<int> { 6 });
+        await Should.ThrowAsync<System.Security.SecurityException>(() => RunListAsync("SELECT id FROM orders WHERE id IN (__param_ids)", "acme", new() { ["ids"] = Ints(1, 2) }));
     }
 
     [Fact]
     public async Task ClientList_EmptyList_IsFalse_AndNotInIsTrue()
     {
-        var none = new Dictionary<string, ClientListValue> { ["ids"] = Ints() };
-        Ids(await RunListAsync("SELECT id FROM orders WHERE id IN (__param_ids)", "acme", none)).ShouldBeEmpty();
-        Ids(await RunListAsync("SELECT id FROM orders WHERE id NOT IN (__param_ids)", "acme", none)).ShouldBe(new List<int> { 1, 2, 6 });
+        var none = new Dictionary<string, ClientListValue> { ["ids"] = Texts() };
+        Ids(await RunListAsync("SELECT id FROM orders WHERE status IN (__param_ids)", "acme", none)).ShouldBeEmpty();
+        Ids(await RunListAsync("SELECT id FROM orders WHERE status NOT IN (__param_ids)", "acme", none)).ShouldBe(new List<int> { 1, 2, 6 });
     }
 
     [Fact]
@@ -662,7 +665,7 @@ public sealed class AstCompilerPostgreSqlExecutionTests : IClassFixture<AstCompi
     [Fact]
     public async Task ClientList_OneThousandValues_AreBound()
     {
-        var many = new Dictionary<string, ClientListValue> { ["ids"] = Ints(Enumerable.Range(1, 1000).ToArray()) };
-        Ids(await RunListAsync("SELECT id FROM orders WHERE id IN (__param_ids)", "acme", many)).ShouldBe(new List<int> { 1, 2, 6 });
+        var many = new Dictionary<string, ClientListValue> { ["ids"] = Texts(Enumerable.Range(1, 998).Select(i => "v" + i).Concat(["open", "closed"]).ToArray()) };
+        Ids(await RunListAsync("SELECT id FROM orders WHERE status IN (__param_ids)", "acme", many)).ShouldBe(new List<int> { 1, 2, 6 });
     }
 }

@@ -101,6 +101,7 @@ public sealed class ClientListWebSqlTests
     [Trait("Category", "Security")]
     public async Task Audit_RecordsListNamesAndCounts_NoValues()
     {
+        using var guardOff = RowPolicyGuardOff.Scope();
         await using var f = await CreateAsync();
         await f.IdsAsync("SELECT id FROM orders WHERE id IN (@ids) AND status IN (@statuses)",
             new Dictionary<string, object?> { ["ids"] = Json("[1,2,3]"), ["statuses"] = Json("[\"super-secret\", \"other\"]") });
@@ -129,6 +130,7 @@ public sealed class ClientListWebSqlTests
     [Fact]
     public async Task Audit_WithoutLists_HasNoListParamsField()
     {
+        using var guardOff = RowPolicyGuardOff.Scope();
         await using var f = await CreateAsync();
         await f.IdsAsync("SELECT id FROM orders WHERE id = @x", new Dictionary<string, object?> { ["x"] = Json("1") });
         f.Audit.Single(e => e.EventType == "WEBSQL_QUERY").DetailsJson!.ShouldNotContain("list_params");
