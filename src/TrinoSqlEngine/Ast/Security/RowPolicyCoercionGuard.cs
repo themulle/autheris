@@ -300,6 +300,11 @@ internal sealed class RowPolicyCoercionGuard(ITableCatalog catalog) : ColumnScop
             Require(Of(result.Left), Of(result.Right));
             Bind([result.Left, result.Right]);
         }
+        else if (result.Operator is BinaryOperator.And or BinaryOperator.Or)
+        {
+            Record(result.Left, Fam.Boolean);
+            Record(result.Right, Fam.Boolean);
+        }
         else if (result.Operator is BinaryOperator.Divide or BinaryOperator.Modulo)
         {
             Require(Fam.Numeric, Of(result.Left));
@@ -333,6 +338,13 @@ internal sealed class RowPolicyCoercionGuard(ITableCatalog catalog) : ColumnScop
             for (int i = 0; i < l.Count; i++) Require(l[i].Family, r[i].Family);
         }
 
+        return result;
+    }
+
+    public override SqlNode VisitUnaryExpression(UnaryExpression node)
+    {
+        var result = (UnaryExpression)base.VisitUnaryExpression(node);
+        if (result.Operator == UnaryOperator.Not) Record(result.Operand, Fam.Boolean);
         return result;
     }
 

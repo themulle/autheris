@@ -102,6 +102,23 @@ public class ClientBindFamilyTests
         Assert.Throws<SecurityException>(() => new ClientListHarness().Compile(dialect, "SELECT id FROM orders WHERE __param_a = NULL"));
     }
 
+    [Theory]
+    [MemberData(nameof(Dialects))]
+    public void Bare_bind_operand_of_and_or_not_must_be_boolean(TargetSqlDialect dialect)
+    {
+        foreach (string shape in new[]
+        {
+            "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN __param_p AND id = 1 ELSE 1 = 0 END",
+            "SELECT id FROM orders WHERE id = 1 OR __param_p",
+            "SELECT id FROM orders WHERE NOT __param_p"
+        })
+        {
+            var compiled = new ClientListHarness().Compile(dialect, shape);
+            Assert.Throws<SecurityException>(() => Bind(dialect, compiled, new() { ["p"] = "abc" }));
+            Bind(dialect, compiled, new() { ["p"] = true });
+        }
+    }
+
     [Fact]
     public void Databricks_binder_applies_the_same_checks()
     {
