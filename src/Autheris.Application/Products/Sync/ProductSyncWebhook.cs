@@ -200,11 +200,31 @@ public sealed class ProductSyncWebhookService(
         return true;
     }
 
+    /// <summary>True when the tenant has a webhook secret configured (only such a tenant is a real one).</summary>
+    private bool HasSecret(TenantId tenant)
+    {
+        byte[] secret = [];
+        try
+        {
+            secret = secrets?.GetSecretBytes(SecretRef(tenant)) ?? [];
+            return secret.Length > 0;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            return false;
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(secret);
+        }
+    }
+
     /// <summary>
     /// Rejected deliveries are anonymous input, so their audit rows are throttled per tenant: the first rejection of a minute is audited and
-    /// carries the number of rejections the previous minute suppressed. Without a reachable counter every rejection is audited (never silent).
+    /// carries the number of rejections the previous minute suppressed. The route tenant is attacker-chosen, so only a tenant with a configured
+    /// secret gets its own bucket; every other tenant string shares one bucket. Without a reachable counter every rejection is audited (never silent).
     /// </summary>
-    private async Task<(bool Audit, long Suppressed)> ShouldAuditRejectionAsync(TenantId tenant, CancellationToken ct)
+    private async Task<(bool Audit, long Suppressed)> ShouldAuditRejectionAsync(TenantId tenant, bool known, CancellationToken ct)
     {
         if (state is null)
         {
@@ -214,7 +234,7 @@ public sealed class ProductSyncWebhookService(
         try
         {
             var minute = _time.GetUtcNow().ToUnixTimeSeconds() / RejectionAuditWindowSeconds;
-            var prefix = RejectionKeyPrefix + tenant.Value + ":";
+            var prefix = RejectionKeyPrefix + (known ? tenant.Value : "unknown") + ":";
             var ttl = TimeSpan.FromSeconds(RejectionAuditWindowSeconds * 3);
             var count = await state.IncrementAsync(prefix + minute, 1, ttl, ct).ConfigureAwait(false);
             if (count is null)
@@ -240,7 +260,8 @@ public sealed class ProductSyncWebhookService(
     {
         try
         {
-            var (write, suppressed) = await ShouldAuditRejectionAsync(tenant, ct).ConfigureAwait(false);
+            var known = HasSecret(tenant);
+            var (write, suppressed) = await ShouldAuditRejectionAsync(tenant, known, ct).ConfigureAwait(false);
             if (!write)
             {
                 return status;
@@ -249,10 +270,10 @@ public sealed class ProductSyncWebhookService(
             await audit.RecordBestEffortAsync(new AuditLogEntry
             {
                 EventType = AuditEventTypes.ProductSyncWebhookRejected,
-                TenantId = tenant,
+                TenantId = known ? tenant : TenantId.Platform,
                 TargetTable = "products.sync",
                 Decision = "DENY",
-                DetailsJson = JsonSerializer.Serialize(new { reason, suppressedPreviousWindow = suppressed }),
+                DetailsJson = JsonSerializer.Serialize(new { reason, suppressedPreviousWindow = suppressed, tenantKnown = known }),
                 OccurredAt = _time.GetUtcNow()
             }, ct).ConfigureAwait(false);
         }
