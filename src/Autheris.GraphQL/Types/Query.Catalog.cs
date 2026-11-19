@@ -127,6 +127,7 @@ public sealed partial class Query
         [Service] IOptions<Autheris.Domain.Options.CatalogLocalizationOptions>? localizationOptions = null,
         [Service] IDiscoveryService? discoveryService = null,
         [Service] IClassificationRepository? classificationRepository = null,
+        [Service] IConsentResolutionService? consentResolution = null,
         CancellationToken ct = default)
     {
         var httpContext = httpContextAccessor?.HttpContext;
@@ -263,7 +264,7 @@ public sealed partial class Query
             }
         }
 
-        var catalogList = ToCatalogDtos(visible.Tables, visible.IsAdminView, activeConsents, pendingRequests, isAdmin, targetLang, hiddenText);
+        var catalogList = ToCatalogDtos(visible.Tables, visible.IsAdminView, activeConsents, pendingRequests, isAdmin, targetLang, hiddenText, principal, consentResolution);
 
         return FilterAndPaginateCatalog(catalogList, domain, search, tag, first, after);
     }
@@ -409,8 +410,11 @@ public sealed partial class Query
         return new GraphQLException(error.Build());
     }
 
-    internal static TableMetadataDto ToTableMetadataDto(DiscoveryObject obj, string? language = null) =>
-        new()
+    internal static TableMetadataDto ToTableMetadataDto(DiscoveryObject obj, string? language = null)
+    {
+        // Columns and names come from the shared visible set only: a column the caller has no access to is neither listed nor named.
+        var visibleColumns = Autheris.Application.Catalog.Discovery.DiscoveryColumnVisibility.VisibleColumns(obj);
+        return new()
         {
             Kind = obj.Kind,
             Domain = obj.Domain,
@@ -419,8 +423,8 @@ public sealed partial class Query
             DisplayName = obj.DisplayName ?? obj.Name,
             Sensitivity = obj.Sensitivity,
             Description = obj.Description,
-            Columns = obj.Columns,
-            ColumnNames = obj.Columns.Select(static c => c.Name).ToList(),
+            Columns = visibleColumns,
+            ColumnNames = visibleColumns.Select(static c => c.Name).ToList(),
             Tags = obj.Tags,
             AccessStatus = obj.Access switch
             {
@@ -442,17 +446,20 @@ public sealed partial class Query
             Applications = obj.Applications,
             DocumentsTruncated = obj.DocumentsTruncated
         };
+    }
 
     /// <summary>The shaping loop of the catalog query: rows that do not exist for the caller are dropped before filtering and paging (F-C11).</summary>
     internal static List<TableMetadataDto> ToCatalogDtos(
         IEnumerable<TableMetadata> visibleTables, bool isAdminView, IReadOnlyList<Consent> activeConsents, IReadOnlyList<ConsentRequest> pendingRequests, bool isAdmin, string? language = null,
-        IReadOnlyDictionary<TableIdentifier, IReadOnlySet<string>>? hiddenText = null)
+        IReadOnlyDictionary<TableIdentifier, IReadOnlySet<string>>? hiddenText = null,
+        ClaimsPrincipal? principal = null,
+        IConsentResolutionService? consentResolution = null)
     {
         var catalogList = new List<TableMetadataDto>();
         foreach (var t in visibleTables)
         {
             var status = Autheris.Application.Services.CatalogVisibility.ComputeAccessStatus(t.Identifier, activeConsents, pendingRequests, isAdmin);
-            var dto = ToCatalogDto(t, isAdminView, status, language, hiddenText);
+            var dto = ToCatalogDto(t, isAdminView, status, language, hiddenText, principal, consentResolution, activeConsents, isAdmin);
             if (dto != null)
             {
                 catalogList.Add(dto);
@@ -467,7 +474,11 @@ public sealed partial class Query
     /// does not exist for the caller (a non-administrator row without a recognised view).
     /// </summary>
     internal static TableMetadataDto? ToCatalogDto(TableMetadata t, bool isAdminView, string status, string? language = null,
-        IReadOnlyDictionary<TableIdentifier, IReadOnlySet<string>>? hiddenText = null)
+        IReadOnlyDictionary<TableIdentifier, IReadOnlySet<string>>? hiddenText = null,
+        ClaimsPrincipal? principal = null,
+        IConsentResolutionService? consentResolution = null,
+        IReadOnlyList<Consent>? activeConsents = null,
+        bool? callerIsAdmin = null)
     {
         var shape = Autheris.Application.Services.CatalogViewShaping.Resolve(isAdminView, t.CatalogView);
         if (shape == Autheris.Application.Services.CatalogOutputShape.NotFound)
@@ -477,8 +488,10 @@ public sealed partial class Query
 
         var resolved = !string.IsNullOrWhiteSpace(language) ? t.Table.Texts.Resolve(language) : null;
 
-        var columnNames = t.Columns.Select(c => c.ColumnName).ToList();
-        IReadOnlyList<DiscoveryColumn> columns = t.Columns.Select(c =>
+        // The caller's own column levels: a table that is not granted lists no column, an administrator view is Clear, any other caller is
+        // resolved like MCP describe_dataset. A level that cannot be resolved is no access.
+        var levels = ResolveCallerLevels(t, status, callerIsAdmin ?? isAdminView, principal, consentResolution, activeConsents);
+        IReadOnlyList<DiscoveryColumn> allColumns = t.Columns.Select(c =>
             {
                 var colResolved = !string.IsNullOrWhiteSpace(language) ? c.Texts.Resolve(language) : null;
                 var isSens = ClassificationMetadata.IsColumnSensitive(t, c);
@@ -495,12 +508,21 @@ public sealed partial class Query
                     hideText ? null : (colResolved?.Description ?? c.Description),
                     pii,
                     clearSep,
-                    isSens ? DiscoveryColumnState.Masked : DiscoveryColumnState.Clear,
+                    levels is null || !levels.TryGetValue(c.ColumnName, out var level)
+                        ? DiscoveryColumnState.NoAccess
+                        : level switch
+                        {
+                            ColumnAccessLevel.Clear => isSens ? DiscoveryColumnState.Masked : DiscoveryColumnState.Clear,
+                            ColumnAccessLevel.Mask => DiscoveryColumnState.Masked,
+                            _ => DiscoveryColumnState.NoAccess
+                        },
                     null,
                     WriteProtected: c.WriteProtected,
                     Classifications: classifications,
                     ClearRequestable: clearRequestable);
             }).ToList();
+        var columns = Autheris.Application.Catalog.Discovery.DiscoveryColumnVisibility.VisibleColumns(allColumns);
+        var columnNames = columns.Select(static c => c.Name).ToList();
 
         return new TableMetadataDto
         {
@@ -516,6 +538,23 @@ public sealed partial class Query
             AccessStatus = status,
             Language = language
         };
+    }
+
+    private static IReadOnlyDictionary<string, ColumnAccessLevel>? ResolveCallerLevels(
+        TableMetadata t, string status, bool isAdminView, ClaimsPrincipal? principal, IConsentResolutionService? consentResolution, IReadOnlyList<Consent>? activeConsents)
+    {
+        if (!string.Equals(status, "GRANTED", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        if (!isAdminView && (principal is null || consentResolution is null))
+        {
+            return null;
+        }
+
+        return Autheris.Application.Services.CatalogCallerColumnLevels.Resolve(
+            consentResolution!, principal!, t, activeConsents ?? [], isAdmin: isAdminView, isGranted: true, bypass: false, logger: null);
     }
 
     private static IReadOnlyList<TableMetadataDto> FilterAndPaginateCatalog(
