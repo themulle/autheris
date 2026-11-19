@@ -188,6 +188,28 @@ public sealed class ReleaseWorkflowTests
 
     [Fact]
     [Trait("Category", "Security")]
+    public void Workflow_signs_dbt_module_without_allow_unsigned()
+    {
+        var workflow = ReadRepoFile(".github/workflows/docker-publish.yml");
+
+        // Both the image build job and the module-e2e job publish and sign the dbt module with the same signer as Lakehouse.
+        Regex.Count(workflow, @"modules/Autheris\.Modules\.Dbt/Autheris\.Modules\.Dbt\.csproj").ShouldBe(2);
+        Regex.Count(workflow, @"(?m)^\s*--id dbt \\$|--id dbt --version").ShouldBe(2);
+        workflow.ShouldContain("-o ./dist/modules/dbt");
+        workflow.ShouldContain("--dir ./dist/modules/dbt");
+        workflow.ShouldNotContain("AllowUnsigned", Case.Insensitive);
+        workflow.ShouldNotContain("allow-unsigned", Case.Insensitive);
+
+        var script = ReadRepoFile(".github/scripts/module-e2e.sh");
+        script.ShouldContain("Gateway__Modules__Enabled__1=dbt");
+        script.ShouldContain("/modules/dbt/health");
+        script.ShouldContain("/api/extensions/dbt/health");
+        script.ShouldContain("/api/webhooks/dbt-cloud");
+        script.ShouldNotContain("AllowUnsigned", Case.Insensitive);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
     public void Image_verify_uses_embedded_release_key()
     {
         var dockerfile = ReadRepoFile("Dockerfile");

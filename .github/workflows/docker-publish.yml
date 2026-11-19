@@ -121,6 +121,16 @@ jobs:
               --id lakehouse \
               --version "$HOST_VERSION" \
               --host-version "$HOST_VERSION"
+            dotnet publish modules/Autheris.Modules.Dbt/Autheris.Modules.Dbt.csproj \
+              -c Release \
+              --no-restore \
+              -p:Version="$VERSION" \
+              -o ./dist/modules/dbt
+            dotnet run --project tools/Autheris.ModuleSigner/Autheris.ModuleSigner.csproj -c Release --no-build -- \
+              --dir ./dist/modules/dbt \
+              --id dbt \
+              --version "$HOST_VERSION" \
+              --host-version "$HOST_VERSION"
           fi
 
       - name: Verify TestAuthHandler is Excluded from Publish Output (SC-04)
@@ -433,7 +443,7 @@ jobs:
       - name: Restore with Locked Mode
         run: dotnet restore Autheris.sln --locked-mode
 
-      - name: Publish Autheris and sign the Lakehouse module
+      - name: Publish Autheris and sign the modules
         env:
           AUTHERIS_MODULE_SIGNING_KEY_PEM: ${{ secrets.AUTHERIS_MODULE_SIGNING_KEY_PEM }}
         run: |
@@ -454,11 +464,15 @@ jobs:
           find ./dist/modules/lakehouse -type f -size +64M -print >&2
           dotnet run --project tools/Autheris.ModuleSigner/Autheris.ModuleSigner.csproj -c Release --no-build -- \
             --dir ./dist/modules/lakehouse --id lakehouse --version "$VERSION" --host-version "$VERSION"
+          dotnet publish modules/Autheris.Modules.Dbt/Autheris.Modules.Dbt.csproj -c Release --no-restore \
+            -p:Version="$VERSION" -o ./dist/modules/dbt
+          dotnet run --project tools/Autheris.ModuleSigner/Autheris.ModuleSigner.csproj -c Release --no-build -- \
+            --dir ./dist/modules/dbt --id dbt --version "$VERSION" --host-version "$VERSION"
 
       - name: Build local image
         run: docker build -f Dockerfile --build-arg FLAVOR=full -t autheris:module-e2e .
 
-      - name: Start container with signed Lakehouse module and assert endpoints
+      - name: Start container with signed modules and assert endpoints
         env:
           IMAGE_REF: autheris:module-e2e
         run: bash .github/scripts/module-e2e.sh

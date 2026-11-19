@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Starts a container image with the signed Lakehouse module against a throwaway PostgreSQL sidecar (verified TLS) and asserts the module routes.
+# Starts a container image with the signed Lakehouse and dbt modules against a throwaway PostgreSQL sidecar (verified TLS) and asserts the module routes.
 # Usage: IMAGE_REF=<image reference> bash .github/scripts/module-e2e.sh
 # The gateway requires a governance database (PostgreSQL or SQL Server) and, outside Development, a verified-TLS connection to it; the
 # sidecar setup mirrors benchmarks/scripts/footprint.sh (throwaway CA and server certificate valid one day, random password per run).
@@ -104,6 +104,7 @@ RUN_ENV=(
   -e Gateway__GovernanceDb__ConnectionString="$PG_CONN"
   -e Gateway__Modules__Path=/app/modules
   -e Gateway__Modules__Enabled__0=lakehouse
+  -e Gateway__Modules__Enabled__1=dbt
 )
 
 echo "Applying governance schema migrations (one-off job)..."
@@ -147,6 +148,25 @@ fi
 legacy_cfg_code="$(curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/v1/config)"
 if [ "$legacy_cfg_code" != "404" ]; then
   echo "Error: Expected HTTP 404 on /v1/config, got $legacy_cfg_code" >&2
+  exit 1
+fi
+dbt_health_code="$(curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/modules/dbt/health)"
+if [ "$dbt_health_code" != "401" ]; then
+  dump_logs "$APP_NAME"
+  echo "Error: Expected HTTP 401 on anonymous /modules/dbt/health, got $dbt_health_code" >&2
+  exit 1
+fi
+
+legacy_dbt_code="$(curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/api/extensions/dbt/health)"
+if [ "$legacy_dbt_code" != "404" ]; then
+  echo "Error: Expected HTTP 404 on /api/extensions/dbt/health, got $legacy_dbt_code" >&2
+  exit 1
+fi
+
+dbt_webhook_code="$(curl -sS -o /dev/null -w "%{http_code}" -X POST -H "Content-Type: application/json" -d '{}' http://127.0.0.1:8080/api/webhooks/dbt-cloud)"
+if [ "$dbt_webhook_code" != "401" ]; then
+  dump_logs "$APP_NAME"
+  echo "Error: Expected HTTP 401 on unsigned POST /api/webhooks/dbt-cloud with dbt enabled, got $dbt_webhook_code" >&2
   exit 1
 fi
 echo "Signed module container e2e passed."
