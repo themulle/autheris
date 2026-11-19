@@ -26,7 +26,7 @@ using Xunit;
 
 /// <summary>
 /// A column the caller has no access to is never named and never counted on MCP get_table_schema, get_my_permissions,
-/// describe_dataset, list_datasets and GraphQL catalog discovery. The REST dataset detail keeps its request-access listing.
+/// describe_dataset, list_datasets and GraphQL catalog discovery.
 /// </summary>
 [Trait("Category", "Security")]
 public sealed class DiscoveryColumnVisibilityTests
@@ -120,7 +120,7 @@ public sealed class DiscoveryColumnVisibilityTests
     {
         var (discovery, _) = Create(Mode.NoConsent);
         var detail = DetailOf(await ObjectAsync(discovery, Patients));
-        detail.Columns.ShouldNotBeEmpty("the REST detail keeps the request-access listing");
+        detail.Columns.ShouldBeEmpty("an ungranted table lists no column on the REST detail either");
 
         var result = await RunAsync(Handler(detail), McpDatasetTools.GetTableSchema, $$"""{"dataset":"{{DatasetId}}"}""");
 
@@ -259,14 +259,13 @@ public sealed class DiscoveryColumnVisibilityTests
     }
 
     [Fact]
-    public async Task RestDetail_UngrantedTable_StillListsDenyColumns()
+    public async Task RestDetail_UngrantedTable_ListsNoColumns()
     {
         var (discovery, _) = Create(Mode.NoConsent);
 
         var detail = DetailOf(await ObjectAsync(discovery, Patients));
 
-        detail.Columns.Select(c => c.Name).ShouldContain(Denied);
-        detail.Columns.ShouldAllBe(c => c.MaskingState == "Deny");
+        detail.Columns.ShouldBeEmpty();
     }
 
     [Fact]

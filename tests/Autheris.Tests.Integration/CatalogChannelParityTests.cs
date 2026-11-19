@@ -168,10 +168,10 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
 
         var list = await client.GetAsync("/api/v1/catalog/datasets");
         list.StatusCode.ShouldBe(HttpStatusCode.OK);
-        // Authorized discovery: the caller's own tenant objects are listed without access (every column Deny), a foreign tenant's table is absent.
+        // Authorized discovery: the caller's own tenant objects are listed without access (table-level metadata only, no column), a foreign tenant's table is absent.
         var listBody = await BodyAsync(list);
         listBody.ShouldNotContain("orders_a");
-        MaskingStatesOf(await BodyAsync(await client.GetAsync("/api/v1/catalog/datasets/dom_b.main.invoices_b"))).Values.ShouldAllBe(state => state == "Deny");
+        MaskingStatesOf(await BodyAsync(await client.GetAsync("/api/v1/catalog/datasets/dom_b.main.invoices_b"))).ShouldBeEmpty();
         (await client.GetAsync("/api/v1/catalog/datasets/dom_a.main.orders_a")).StatusCode.ShouldBe(HttpStatusCode.NotFound);
         (await client.GetAsync("/api/v1/catalog/datasets/dom_a.main.does_not_exist")).StatusCode.ShouldBe(HttpStatusCode.NotFound);
         (await BodyAsync(await client.GetAsync("/api/v1/catalog/search?q=orders"))).ShouldBe("[]");
@@ -312,10 +312,10 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
     }
 
     // Authorized discovery (OD-19): the persisted tier is ignored; an in-scope table (shared, owned by the caller's tenant or consented
-    // to it) is listed for every authenticated caller and a column the caller may not read carries the state Deny. A table outside the
+    // to it) is listed for every authenticated caller without any column the caller may not read (an ungranted table lists none). A table outside the
     // caller's tenant scope is absent and answers exactly like a nonexistent dataset.
     [Fact]
-    public async Task Rest_Discovery_SharedTablesAreListedWithDeniedColumns_UnsharedTableIsOutOfScope()
+    public async Task Rest_Discovery_SharedTablesAreListedWithoutColumns_UnsharedTableIsOutOfScope()
     {
         var (_, client) = await TierFactoryAsync();
 
@@ -329,7 +329,7 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
         {
             var detail = await client.GetAsync("/api/v1/catalog/datasets/dom_s.main." + shared);
             detail.StatusCode.ShouldBe(HttpStatusCode.OK);
-            MaskingStatesOf(await BodyAsync(detail)).Values.ShouldAllBe(state => state == "Deny");
+            MaskingStatesOf(await BodyAsync(detail)).ShouldBeEmpty();
         }
 
         var unshared = await client.GetAsync("/api/v1/catalog/datasets/dom_s.main.unshared_full_t");
@@ -341,7 +341,7 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
     }
 
     [Fact]
-    public async Task Rest_Discovery_ConsentedColumnIsClear_EveryOtherColumnStaysDeny_ForTheConsentedCallerOnly()
+    public async Task Rest_Discovery_ConsentedColumnIsClear_EveryOtherColumnIsAbsent_ForTheConsentedCallerOnly()
     {
         var (factory, client) = await TierFactoryAsync(sid: "S-T-CONSENTED");
         using (var scope = factory.Services.CreateScope())
@@ -354,7 +354,7 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
         granted.ShouldNotContainKey("tier_secret_col");
 
         var other = await ClientAsync("S-T-OTHER", TenantB, "Reader", factory);
-        MaskingStatesOf(await BodyAsync(await other.GetAsync("/api/v1/catalog/datasets/dom_s.main.hid_t"))).Values.ShouldAllBe(state => state == "Deny");
+        MaskingStatesOf(await BodyAsync(await other.GetAsync("/api/v1/catalog/datasets/dom_s.main.hid_t"))).ShouldBeEmpty();
     }
 
     private static Dictionary<string, string> MaskingStatesOf(string detailJson)
@@ -459,6 +459,102 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
         describe.ShouldNotContain(DeniedColumn);
         permissions.ShouldNotContain(DeniedColumn);
         SchemaColumnNames(schema).ShouldContain("amount");
+    }
+
+    private static readonly TableIdentifier VaultA = new("dom_a", "main", "vault_a");
+    private const string DeniedDescription = "zebracornmarker internal remark";
+
+    private async Task SeedVaultTableAsync()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IGovernanceRepository>();
+        if (await repo.GetTableMetadataAsync(VaultA) != null)
+        {
+            return;
+        }
+
+        await repo.UpsertTableMetadataAsync(new TableMetadata
+        {
+            Table = new Table { Id = Guid.NewGuid(), DisplayName = VaultA.TableName, TableName = VaultA.TableName, SchemaName = VaultA.Schema, SourceType = "PostgreSql", SourceName = VaultA.Domain, Description = "Ungranted vault" },
+            Identifier = VaultA,
+            Columns = new List<TableColumn>
+            {
+                new() { ColumnName = "id", DataType = "integer" },
+                new() { ColumnName = DeniedColumn, DataType = "varchar", Description = DeniedDescription }
+            }
+        });
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task DeniedColumn_IsAbsentOnEveryChannel_ForGrantedAndUngrantedObject()
+    {
+        await SeedVaultTableAsync();
+        const string vaultDataset = "dom_a.main.vault_a";
+        var client = await ClientAsync("S-A-USER", TenantA, "Reader");
+
+        // REST dataset detail and search.
+        foreach (var dataset in new[] { OrdersDataset, vaultDataset })
+        {
+            var detail = await BodyAsync(await client.GetAsync("/api/v1/catalog/datasets/" + dataset));
+            detail.ShouldNotContain(DeniedColumn);
+            detail.ShouldNotContain(DeniedDescription);
+            MaskingStatesOf(detail).Values.ShouldAllBe(state => state == "Clear" || state == "Masked");
+        }
+
+        MaskingStatesOf(await BodyAsync(await client.GetAsync("/api/v1/catalog/datasets/" + vaultDataset))).ShouldBeEmpty();
+        var search = await BodyAsync(await client.GetAsync("/api/v1/catalog/search?q=" + DeniedColumn));
+        search.ShouldNotContain(DeniedColumn);
+        search.ShouldNotContain(DeniedDescription);
+
+        // REST objects (person view).
+        var objectsClient = await ClientAsync("S-A-USER", TenantA, "Reader");
+        objectsClient.DefaultRequestHeaders.Add("X-Test-Scope", "Autheris.Catalog.Read");
+        var objects = await objectsClient.GetAsync("/api/v1/catalog/objects");
+        objects.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var objectsBody = await BodyAsync(objects);
+        objectsBody.ShouldContain("vault_a");
+        objectsBody.ShouldNotContain(DeniedColumn);
+        objectsBody.ShouldNotContain(DeniedDescription);
+        objectsBody.ToLowerInvariant().ShouldNotContain("noaccess");
+
+        // GraphQL.
+        var graphQl = await PostGraphQlAsync(client,
+            "query { catalog { tableName columnNames columns { name description } } "
+            + "catalogObject(domain: \"dom_a\", schema: \"main\", name: \"vault_a\") { columnNames columns { name description } } }");
+        graphQl.ShouldNotContain(DeniedColumn);
+        graphQl.ShouldNotContain(DeniedDescription);
+
+        // MCP.
+        await using var mcp = await McpTestClient.ConnectAsync(client);
+        foreach (var dataset in new[] { OrdersDataset, vaultDataset })
+        {
+            var (_, schema) = await McpTestClient.CallAsync(mcp, "get_table_schema", new { dataset });
+            var (_, describe) = await McpTestClient.CallAsync(mcp, "describe_dataset", new { dataset });
+            schema.ShouldNotContain(DeniedColumn);
+            schema.ShouldNotContain(DeniedDescription);
+            describe.ShouldNotContain(DeniedColumn);
+            describe.ShouldNotContain(DeniedDescription);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task RestCatalogObjects_PersonTokenWithSidAndAppId_ReturnsPersonView()
+    {
+        await SeedVaultTableAsync();
+        var client = await ClientAsync("S-A-USER", TenantA, "Reader");
+        client.DefaultRequestHeaders.Add("X-Test-AppId", "web-client");
+        client.DefaultRequestHeaders.Add("X-Test-Scope", "Autheris.Catalog.Read");
+
+        var response = await client.GetAsync("/api/v1/catalog/objects");
+
+        // A token with a user subject and a client id never receives the unfiltered service-principal view.
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var body = await BodyAsync(response);
+        body.ShouldContain("vault_a");
+        body.ShouldNotContain(DeniedColumn);
+        body.ShouldNotContain(DeniedDescription);
     }
 
     private static readonly TableIdentifier ScopedA = new("dom_a", "main", "scoped_a");
