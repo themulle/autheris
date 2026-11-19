@@ -19,7 +19,10 @@ public sealed partial class OptionsBudgetTests(ITestOutputHelper output)
     internal const int TargetUndocumentedProperties = 0;
 
     private const int CeilingOptionsClasses = 165;
-    private const int CeilingSettableProperties = 945;
+    // Raised by 3 (945 to 948) for issue #853 (freeze-exception): IdentityRealmConfigOptions gains SubjectRoles, AllowPrivilegedSubjectRoles
+    // and Jwks, the only configuration surface of workload subject roles and the static JWKS source. The entry types (SubjectRoleMapping,
+    // StaticJwksSource) are not *Options classes and add no counted class. No existing property could be removed in exchange.
+    private const int CeilingSettableProperties = 948;
     private const int CeilingEnabledFlags = 70;
     private const int CeilingUndocumentedProperties = 462;
 

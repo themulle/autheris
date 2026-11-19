@@ -33,6 +33,39 @@ public sealed class IdentityRealmConfigOptions
     public ScimRealmSecretOptions? Scim { get; set; }
     public List<string> AllowedGatewayRoles { get; set; } = [];
     public bool Delegable { get; set; }
+
+    /// <summary>Exact OIDC subjects of workload identities and the gateway roles each one receives (GenericOidc realms only; configuration is the only way to define a mapping).</summary>
+    public List<SubjectRoleMapping> SubjectRoles { get; set; } = [];
+
+    /// <summary>Whether a subject mapping may grant ClusterAdmin. Default false; ClusterAdmin must also be listed in AllowedGatewayRoles and the realm needs a FixedTenantId.</summary>
+    public bool AllowPrivilegedSubjectRoles { get; set; }
+
+    /// <summary>Static signing keys of the realm read from a local JWKS file (mutually exclusive with MetadataAddress). Null when keys come from MetadataAddress.</summary>
+    public StaticJwksSource? Jwks { get; set; }
+}
+
+/// <summary>One workload subject and its gateway roles (list entry, because subjects contain colons and cannot be configuration keys).</summary>
+public sealed class SubjectRoleMapping
+{
+    /// <summary>The exact value of the token's single sub claim (ordinal, case-sensitive, no pattern).</summary>
+    public string Subject { get; set; } = string.Empty;
+
+    /// <summary>Canonical GatewayRole names granted to the subject, a subset of the realm's AllowedGatewayRoles.</summary>
+    public List<string> Roles { get; set; } = [];
+}
+
+/// <summary>Static JWKS key source of a realm (file only).</summary>
+public sealed class StaticJwksSource
+{
+    public const int DefaultReloadIntervalMinutes = 5;
+    public const int MinReloadIntervalMinutes = 1;
+    public const int MaxReloadIntervalMinutes = 60;
+
+    /// <summary>Absolute path of the JWKS file (at most 256 KiB, at most 16 public keys).</summary>
+    public string? File { get; set; }
+
+    /// <summary>Minutes between re-reads of the file (1..60, default 5). A failed re-read keeps the last good key set.</summary>
+    public int ReloadIntervalMinutes { get; set; } = DefaultReloadIntervalMinutes;
 }
 
 public sealed class ScimRealmSecretOptions
