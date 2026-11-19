@@ -24,16 +24,17 @@ public sealed class CatalogGovernanceRatchetTests
     };
 
     [Theory]
-    [InlineData(DiscoveryObjectKind.View, DiscoveryObjectKind.Table)]
-    [InlineData(DiscoveryObjectKind.Table, DiscoveryObjectKind.View)]
-    public void Merge_ObjectKind_TheIncomingSyncIsTheSourceOfTruth(DiscoveryObjectKind existingKind, DiscoveryObjectKind incomingKind)
+    [InlineData(DiscoveryObjectKind.View, DiscoveryObjectKind.Table, DiscoveryObjectKind.View)]
+    [InlineData(DiscoveryObjectKind.Table, DiscoveryObjectKind.View, DiscoveryObjectKind.View)]
+    [InlineData(DiscoveryObjectKind.Table, DiscoveryObjectKind.Table, DiscoveryObjectKind.Table)]
+    public void Merge_ObjectKind_AnIncomingViewWinsAndAnIncomingTableNeverDowngradesAView(DiscoveryObjectKind existingKind, DiscoveryObjectKind incomingKind, DiscoveryObjectKind expected)
     {
         var existing = Meta(["a"], [], replace: false);
         existing = existing with { Table = new Table { SourceName = "d", SchemaName = "s", TableName = "t", DisplayName = "t", ObjectKind = existingKind } };
         var incoming = Meta(["a"], [], replace: false);
         incoming = incoming with { Table = new Table { SourceName = "d", SchemaName = "s", TableName = "t", DisplayName = "t", ObjectKind = incomingKind } };
 
-        CatalogGovernanceRatchet.Merge(incoming, existing).Table.ObjectKind.ShouldBe(incomingKind);
+        CatalogGovernanceRatchet.Merge(incoming, existing).Table.ObjectKind.ShouldBe(expected);
     }
 
     [Fact]

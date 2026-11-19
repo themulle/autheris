@@ -61,6 +61,12 @@ public sealed class ObjectKindViewChannelTests
 
         var page = await service.ListAsync(new DiscoveryQuery(Surface: DiscoverySurface.Rest), caller);
 
+        pdp.Requests.Count.ShouldBe(2);
+        var viewRequest = pdp.Requests.Single(r => r.Object.Identifier.TableName == "v_orders");
+        var tableRequest = pdp.Requests.Single(r => r.Object.Identifier.TableName == "t_orders");
+        viewRequest.Operation.ShouldBe(tableRequest.Operation);
+        viewRequest.Transport.ShouldBe(tableRequest.Transport);
+
         var view = page.Items.Single(i => i.Name == "v_orders");
         var table = page.Items.Single(i => i.Name == "t_orders");
         view.Kind.ShouldBe(DiscoveryObjectKind.View);
@@ -100,6 +106,11 @@ public sealed class ObjectKindViewChannelTests
         var list = await viaDiscovery.ListDatasetsAsync(caller);
         list.Datasets.Single(d => d.Id.EndsWith("v_orders", StringComparison.OrdinalIgnoreCase)).Kind.ShouldBe("view");
         list.Datasets.Single(d => d.Id.EndsWith("t_orders", StringComparison.OrdinalIgnoreCase)).Kind.ShouldBe("table");
+
+        var legacy = new McpDatasetCatalog(repo, new FakeDiscoveryConsentRepository(), new NoopExecutionService());
+        var legacyList = await legacy.ListDatasetsAsync(caller);
+        legacyList.Datasets.Single(d => d.Id.EndsWith("v_orders", StringComparison.OrdinalIgnoreCase)).Kind.ShouldBe("view");
+        legacyList.Datasets.Single(d => d.Id.EndsWith("t_orders", StringComparison.OrdinalIgnoreCase)).Kind.ShouldBe("table");
     }
 
     private sealed class NoopExecutionService : IGatewayExecutionService

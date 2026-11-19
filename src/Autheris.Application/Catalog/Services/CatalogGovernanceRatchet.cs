@@ -68,7 +68,7 @@ public static class CatalogGovernanceRatchet
             ExpectedRows = inTable.ExpectedRows ?? exTable.ExpectedRows,
             DiscoveryHidden = exTable.DiscoveryHidden || inTable.DiscoveryHidden,
             SamplesDisabled = exTable.SamplesDisabled || inTable.SamplesDisabled,
-            ObjectKind = inTable.ObjectKind
+            ObjectKind = inTable.ObjectKind == DiscoveryObjectKind.View ? DiscoveryObjectKind.View : exTable.ObjectKind
         };
 
         var existingColumns = new Dictionary<string, TableColumn>(StringComparer.OrdinalIgnoreCase);
