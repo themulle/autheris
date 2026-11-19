@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.Analytics;
 
 using Autheris.Application.Policy.Pdp;
+using Autheris.Tests.Common.Fakes;
 using System;
 using Autheris.Application.Catalog.Semantic;
 using System.Collections.Generic;
@@ -69,7 +70,7 @@ public sealed class SemanticMetricConsentPdpTests
         var service = new SemanticMetricQueryService(
             Substitute.For<ISemanticCatalogService>(),
             Substitute.For<IGovernedAggregationService>(),
-            Substitute.For<ITableMetadataRepository>(),
+            new InMemoryTableMetadataRepository(),
             pdp,
             consentRepository: repo);
 
@@ -169,8 +170,8 @@ public sealed class SemanticMetricConsentPdpTests
         var pdp = Substitute.For<IAccessDecisionPoint>();
         pdp.DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>())
             .Returns(TableAccessDecision.Denied(Orders, "Casbin ABAC Policy Denial"));
-        var audit = Substitute.For<IAuditLogRepository>();
-        var service = new GovernedAggregationService(Substitute.For<ITableMetadataRepository>(), audit, pdp);
+        var audit = new InMemoryAuditLogRepository();
+        var service = new GovernedAggregationService(new InMemoryTableMetadataRepository(), audit, pdp);
         var forged = Allowed();
         var query = new AggregationQuery(Orders, PreEvaluatedDecision: forged, BypassTableConsent: true);
 

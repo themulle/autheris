@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.Security;
 
 using System.Collections.Generic;
+using Autheris.Tests.Common.Fakes;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
@@ -75,7 +76,7 @@ public sealed class FederatedHttpAuthModeAllowlistTests
         var service = new FederatedStagingService(
             registry,
             Substitute.For<IColumnMaskingProvider>(),
-            Substitute.For<IAuditLogRepository>(),
+            new InMemoryAuditLogRepository(),
             Options.Create(options),
             NullLogger<FederatedStagingService>.Instance);
         return (service, registry);

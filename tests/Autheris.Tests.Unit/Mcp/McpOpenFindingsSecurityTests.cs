@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.Mcp;
 
 using Autheris.Domain.Security;
+using Autheris.Tests.Common.Fakes;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -195,7 +196,7 @@ public sealed class McpOpenFindingsSecurityTests
             discovery,
             Substitute.For<IApiDispatcherService>(),
             Substitute.For<ILineageGraphStore>(),
-            Substitute.For<ITableMetadataRepository>());
+            new InMemoryTableMetadataRepository());
         return (handler, discovery);
     }
 
@@ -517,7 +518,7 @@ public sealed class McpOpenFindingsSecurityTests
             .Returns(new TableMetadata { Identifier = Orders, Table = new Table { TableName = "orders", SchemaName = "public", IsActive = true } });
         ITotpSecretStore secrets = new InMemoryTotpSecretStore();
         ITotpVerificationService totp = new TotpVerificationService();
-        var service = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), tableRepo, Substitute.For<IConsentRepository>(), totp, secrets);
+        var service = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(new InMemoryAuditLogRepository()), tableRepo, new InMemoryConsentRepository(), totp, secrets);
         const string args = """{"datasetId":"sales.public.orders","state":"quarantined","reason":"drift"}""";
 
         // Phase 1: plan only.

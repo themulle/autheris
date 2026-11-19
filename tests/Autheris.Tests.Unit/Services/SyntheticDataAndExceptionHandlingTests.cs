@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Autheris.Tests.Common.Fakes;
 using System.Text.Json;
 using Autheris.Api.Middleware;
 using Autheris.Application.Common.Interfaces;
@@ -21,8 +22,8 @@ namespace Autheris.Tests.Unit.Services;
 public sealed class SyntheticDataAndExceptionHandlingTests
 {
     private readonly ITableMetadataRepository _metadataRepo = Substitute.For<ITableMetadataRepository>();
-    private readonly IConsentRepository _consentRepo = Substitute.For<IConsentRepository>();
-    private readonly IAuditLogRepository _auditRepo = Substitute.For<IAuditLogRepository>();
+    private readonly IConsentRepository _consentRepo = new InMemoryConsentRepository();
+    private readonly IAuditLogRepository _auditRepo = new InMemoryAuditLogRepository();
     private readonly IConsentResolutionService _resolutionService = Substitute.For<IConsentResolutionService>();
     private readonly IConsentCacheService _cacheService = Substitute.For<IConsentCacheService>();
     private readonly IColumnMaskingProvider _maskingProvider = Substitute.For<IColumnMaskingProvider>();

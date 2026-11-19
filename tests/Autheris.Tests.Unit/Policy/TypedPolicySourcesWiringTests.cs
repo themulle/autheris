@@ -1,4 +1,5 @@
 using Autheris.Application.Policy.Pdp;
+using Autheris.Tests.Common.Fakes;
 using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
@@ -145,7 +146,7 @@ public sealed class TypedPolicySourcesWiringTests
     public async Task FederatedService_ProducesATypedDecision()
     {
         var service = new FederatedDuckDbExecutionService(
-            Options.Create(new GatewayOptions()), Substitute.For<IAuditLogRepository>(), Substitute.For<ICrossSourceQueryRouter>(),
+            Options.Create(new GatewayOptions()), new InMemoryAuditLogRepository(), Substitute.For<ICrossSourceQueryRouter>(),
             Substitute.For<ICrossSourcePlanner>(), Substitute.For<IFederatedStagingService>(), Substitute.For<IDuckDbOlapEngine>(),
             consentResolution: new ConsentResolutionService(), consentRepository: Consents(), typedPolicies: Sources());
 

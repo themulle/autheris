@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.Security;
 
 using Microsoft.Extensions.DependencyInjection;
+using Autheris.Tests.Common.Fakes;
 using Autheris.Tests.Unit.TestDoubles;
 using System;
 using System.Collections.Generic;
@@ -154,7 +155,7 @@ public sealed class DataSourceAllowlistSrH06Tests
         var service = new FederatedStagingService(
             registry,
             Substitute.For<IColumnMaskingProvider>(),
-            Substitute.For<IAuditLogRepository>(),
+            new InMemoryAuditLogRepository(),
             Options.Create(new GatewayOptions { WebSql = web }),
             NullLogger<FederatedStagingService>.Instance);
         return (service, registry);
@@ -193,7 +194,7 @@ public sealed class DataSourceAllowlistSrH06Tests
     {
         var httpContext = new DefaultHttpContext
         {
-            RequestServices = new ServiceCollection().AddAuditWriterOver(Substitute.For<IAuditLogRepository>()).BuildServiceProvider()
+            RequestServices = new ServiceCollection().AddAuditWriterOver(new InMemoryAuditLogRepository()).BuildServiceProvider()
         };
         httpContext.Response.Body = new MemoryStream();
         httpContext.User = new ClaimsPrincipal(new ClaimsIdentity(

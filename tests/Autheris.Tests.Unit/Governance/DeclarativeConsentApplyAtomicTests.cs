@@ -1,4 +1,5 @@
 using Autheris.Tests.Unit.TestSupport;
+using Autheris.Tests.Common.Fakes;
 using System.Security.Claims;
 using Autheris.Application.Governance.Services;
 using Autheris.Application.Common.Interfaces;
@@ -39,7 +40,7 @@ public sealed class DeclarativeConsentApplyAtomicTests
     public async Task SEC_SC_03_RoleManifest_AppliedTwice_SecondApplyIsUnchanged()
     {
         var repo = new FakeConsentRepository();
-        var svc = new DeclarativeConsentApplyService(Tables(), repo, Substitute.For<IAuditLogRepository>());
+        var svc = new DeclarativeConsentApplyService(Tables(), repo, new InMemoryAuditLogRepository());
         var manifest = new DeclarativeConsentManifest("1", [RolePolicy()]);
 
         var first = await svc.ApplyManifestAsync(Admin(), manifest);
@@ -57,7 +58,7 @@ public sealed class DeclarativeConsentApplyAtomicTests
     public async Task SEC_SC_03_RoleManifest_Changed_RevokesOldRoleConsent()
     {
         var repo = new FakeConsentRepository();
-        var svc = new DeclarativeConsentApplyService(Tables(), repo, Substitute.For<IAuditLogRepository>());
+        var svc = new DeclarativeConsentApplyService(Tables(), repo, new InMemoryAuditLogRepository());
         await svc.ApplyManifestAsync(Admin(), new DeclarativeConsentManifest("1", [RolePolicy()]));
 
         var changed = RolePolicy() with { ColumnRules = [new DeclarativeColumnRule("id", "Mask")] };
@@ -108,7 +109,7 @@ public sealed class DeclarativeConsentApplyAtomicTests
     public async Task SEC_SC_03_DryRun_NeverCallsReplace()
     {
         var repo = new FakeConsentRepository();
-        var svc = new DeclarativeConsentApplyService(Tables(), repo, Substitute.For<IAuditLogRepository>());
+        var svc = new DeclarativeConsentApplyService(Tables(), repo, new InMemoryAuditLogRepository());
 
         var result = await svc.ApplyManifestAsync(Admin(), new DeclarativeConsentManifest("1", [RolePolicy()]), dryRun: true);
 
@@ -121,7 +122,7 @@ public sealed class DeclarativeConsentApplyAtomicTests
     public async Task SEC_SC_03_DuplicateTargetInManifest_IsRejected_BeforeAnyChange()
     {
         var repo = new FakeConsentRepository();
-        var svc = new DeclarativeConsentApplyService(Tables(), repo, Substitute.For<IAuditLogRepository>());
+        var svc = new DeclarativeConsentApplyService(Tables(), repo, new InMemoryAuditLogRepository());
 
         await Should.ThrowAsync<ArgumentException>(() => svc.ApplyManifestAsync(Admin(),
             new DeclarativeConsentManifest("1", [RolePolicy(), RolePolicy() with { Effect = "Deny" }])));

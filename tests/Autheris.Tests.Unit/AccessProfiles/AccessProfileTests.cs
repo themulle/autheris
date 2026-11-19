@@ -2,6 +2,7 @@
 namespace Autheris.Tests.Unit.AccessProfiles;
 
 using Autheris.Tests.Unit.TestDoubles;
+using Autheris.Tests.Common.Fakes;
 using System;
 using System.Collections.Generic;
 using System.Net;
@@ -71,7 +72,7 @@ public sealed class AccessProfileTests
         IMemoryCache? memoryCache = null,
         Autheris.Application.Policy.Interfaces.IAccessProfileCache? accessProfileCache = null)
     {
-        var consentRepo = Substitute.For<IConsentRepository>();
+        var consentRepo = new InMemoryConsentRepository();
         var resolutionService = Substitute.For<IConsentResolutionService>();
         // SR-M-07: an access profile never creates an allow; the underlying consent decision allows the table here.
         resolutionService.ResolveAccess(default!, default!, default!, default, default!, default, default, default)
@@ -242,7 +243,7 @@ public sealed class AccessProfileTests
         resolution.ResolveAccess(default!, default!, default!, default, default!, default, default, default)
             .ReturnsForAnyArgs(consentDecision);
         return new TableAccessPolicy(
-            Substitute.For<IConsentRepository>(),
+            new InMemoryConsentRepository(),
             resolution,
             Substitute.For<IConsentCacheService>(),
             new GatewayOptions(),
@@ -287,7 +288,7 @@ public sealed class AccessProfileTests
         var meta = CreateTelemetryTableMetadata();
         // The substitute resolution service returns no decision, which is a denial.
         var resolutionless = new TableAccessPolicy(
-            Substitute.For<IConsentRepository>(),
+            new InMemoryConsentRepository(),
             Substitute.For<IConsentResolutionService>(),
             Substitute.For<IConsentCacheService>(),
             new GatewayOptions(),

@@ -1,4 +1,5 @@
 using Autheris.Tests.Common;
+using Autheris.Tests.Common.Fakes;
 using System.IO;
 using System.Security.Claims;
 using System.Text.Json;
@@ -109,7 +110,7 @@ public sealed class PreAuthRateLimitAndProtocolKillSwitchTests
     {
         // Arrange
         var metaRepo = Substitute.For<ITableMetadataRepository>();
-        var consentRepo = Substitute.For<IConsentRepository>();
+        var consentRepo = new InMemoryConsentRepository();
         var execService = Substitute.For<IGatewayExecutionService>();
 
         metaRepo.StubAllTables(new System.Collections.Generic.List<TableMetadata>());
@@ -145,7 +146,7 @@ public sealed class PreAuthRateLimitAndProtocolKillSwitchTests
     {
         // Arrange
         var metaRepo = Substitute.For<ITableMetadataRepository>();
-        var consentRepo = Substitute.For<IConsentRepository>();
+        var consentRepo = new InMemoryConsentRepository();
         var execService = Substitute.For<IGatewayExecutionService>();
 
         metaRepo.StubAllTables(new System.Collections.Generic.List<TableMetadata>());

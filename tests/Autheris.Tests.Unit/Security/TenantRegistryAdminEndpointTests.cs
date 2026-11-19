@@ -2,6 +2,7 @@
 namespace Autheris.Tests.Unit.Security;
 
 using System.Security.Claims;
+using Autheris.Tests.Common.Fakes;
 using Autheris.Api.Endpoints;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
@@ -128,7 +129,7 @@ public sealed class TenantRegistryAdminEndpointTests
         registry.ResolveCollisionAsync(Arg.Any<TenantId>(), Arg.Any<string?>(), Arg.Any<CancellationToken>()).Returns(Resolved("acme"));
 
         await TenantRegistryAdminEndpoints.ResolveCollisionAsync(
-            "ACME", new TenantRegistryAdminEndpoints.ResolveCollisionRequest("acme"), Context("ClusterAdmin"), registry, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), default);
+            "ACME", new TenantRegistryAdminEndpoints.ResolveCollisionRequest("acme"), Context("ClusterAdmin"), registry, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(new InMemoryAuditLogRepository()), default);
 
         await registry.Received(1).ResolveCollisionAsync(new TenantId("ACME"), "acme", Arg.Any<CancellationToken>());
     }

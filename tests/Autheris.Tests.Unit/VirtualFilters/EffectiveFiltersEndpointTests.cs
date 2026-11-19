@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.VirtualFilters;
 
 using Autheris.Tests.Unit.TestDoubles;
+using Autheris.Tests.Common.Fakes;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -46,7 +47,7 @@ public sealed class EffectiveFiltersEndpointTests
 
     private static HttpContext Context(string query, params string[] roles)
     {
-        var context = new DefaultHttpContext { RequestServices = new ServiceCollection().AddLogging().AddAuditWriterOver(Substitute.For<IAuditLogRepository>()).BuildServiceProvider() };
+        var context = new DefaultHttpContext { RequestServices = new ServiceCollection().AddLogging().AddAuditWriterOver(new InMemoryAuditLogRepository()).BuildServiceProvider() };
         context.Items[SecurityPrincipalContext.ItemKey] = new SecurityPrincipalContext
         {
             UserSid = new Sid("S-1-5-21-AUDITOR"),
@@ -64,7 +65,7 @@ public sealed class EffectiveFiltersEndpointTests
     private static async Task<(int Status, JsonDocument? Body)> GetAsync(string query, params string[] roles)
     {
         var context = Context(query, roles);
-        var result = await VirtualFilterEndpoints.EffectiveFiltersAsync(context, new EffectiveFilterInspector(Resolver(), Catalog(), AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>())));
+        var result = await VirtualFilterEndpoints.EffectiveFiltersAsync(context, new EffectiveFilterInspector(Resolver(), Catalog(), AuditWriterTestServices.Over(new InMemoryAuditLogRepository())));
         await result.ExecuteAsync(context);
         context.Response.Body.Position = 0;
         var text = await new StreamReader(context.Response.Body).ReadToEndAsync();

@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.OData;
 
 using Autheris.Tests.Common;
+using Autheris.Tests.Common.Fakes;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -878,7 +879,7 @@ public sealed class ODataTests
         execService ??= Substitute.For<IGatewayExecutionService>();
         execService.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
             .Returns<Task<TableQueryPage>>(_ => throw exception);
-        return new ODataHandler(Substitute.For<ITableMetadataRepository>(), execService, NullLogger<ODataHandler>.Instance, DevEnv("Production"));
+        return new ODataHandler(new InMemoryTableMetadataRepository(), execService, NullLogger<ODataHandler>.Instance, DevEnv("Production"));
     }
 
     private static Task<ODataQueryResult> QueryAsync(ODataHandler handler, int? skip = 0, bool includeCount = false, CancellationToken ct = default) =>
@@ -905,7 +906,7 @@ public sealed class ODataTests
         var decision = TableAccessDecision.Allowed(new TableIdentifier("lwetem_prod", "fms", "air1"), new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true);
         execService.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
             .Returns(new TableQueryPage(rows, decision, TotalCount: null));
-        var handler = new ODataHandler(Substitute.For<ITableMetadataRepository>(), execService, NullLogger<ODataHandler>.Instance);
+        var handler = new ODataHandler(new InMemoryTableMetadataRepository(), execService, NullLogger<ODataHandler>.Instance);
 
         var result = await QueryAsync(handler, includeCount: true);
 
@@ -919,7 +920,7 @@ public sealed class ODataTests
     public async Task ODataHandler_SkipAboveMaximum_Returns400()
     {
         var execService = Substitute.For<IGatewayExecutionService>();
-        var handler = new ODataHandler(Substitute.For<ITableMetadataRepository>(), execService, NullLogger<ODataHandler>.Instance);
+        var handler = new ODataHandler(new InMemoryTableMetadataRepository(), execService, NullLogger<ODataHandler>.Instance);
 
         var result = await QueryAsync(handler, skip: ODataHandler.MaxSkip + 1);
 

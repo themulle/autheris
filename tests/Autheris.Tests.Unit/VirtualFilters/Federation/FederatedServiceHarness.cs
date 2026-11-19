@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.VirtualFilters.Federation;
 
 using System;
+using Autheris.Tests.Common.Fakes;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -130,7 +131,7 @@ internal static class FederatedServiceHarness
             new MandatoryRowFilterResolverTests.FixedSnapshot(snapshot ?? new VirtualFilterSnapshot(1, [], [])),
             new MandatoryRowFilterResolverTests.PlaceholderPredicates());
 
-        var audit = Substitute.For<IAuditLogRepository>();
+        var audit = new InMemoryAuditLogRepository();
         var keySetProvider = keySets ?? new FakeKeySetProvider();
 
         var service = new FederatedDuckDbExecutionService(

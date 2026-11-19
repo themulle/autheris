@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.Dbt;
 
 using System;
+using Autheris.Tests.Common.Fakes;
 using System.IO;
 using System.Text;
 using System.Threading;
@@ -58,7 +59,7 @@ public class DbtGovernanceTenantBindingTests
     public async Task IngestManifest_NonAdmin_RejectsForeignTenantModel()
     {
         var proposalRepo = Substitute.For<IDbtProposalRepository>();
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = new InMemoryTableMetadataRepository();
         var graphStore = Substitute.For<ILineageGraphStore>();
         var testTargetMap = Substitute.For<IDbtTestTargetMap>();
         var service = new DbtMetadataIngestionService(proposalRepo, metadataRepo, graphStore, NullLogger<DbtMetadataIngestionService>.Instance, testTargetMap: testTargetMap);
@@ -83,7 +84,7 @@ public class DbtGovernanceTenantBindingTests
     public async Task IngestManifest_ClusterAdmin_AdmitsAllTenantModels()
     {
         var proposalRepo = Substitute.For<IDbtProposalRepository>();
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = new InMemoryTableMetadataRepository();
         var graphStore = Substitute.For<ILineageGraphStore>();
         var testTargetMap = Substitute.For<IDbtTestTargetMap>();
         var service = new DbtMetadataIngestionService(proposalRepo, metadataRepo, graphStore, NullLogger<DbtMetadataIngestionService>.Instance, testTargetMap: testTargetMap);

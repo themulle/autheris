@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.Security;
 
 using Autheris.Tests.Common;
+using Autheris.Tests.Common.Fakes;
 using System;
 using System.Collections.Generic;
 using System.Security;
@@ -28,7 +29,7 @@ public sealed class AccessPlanBindingAndBoundsTests
     private const string DatasetId = "sales.public.orders";
 
     private readonly IConsentRepository _consentRepo = Substitute.For<IConsentRepository>();
-    private readonly IAuditLogRepository _audit = Substitute.For<IAuditLogRepository>();
+    private readonly IAuditLogRepository _audit = new InMemoryAuditLogRepository();
     private readonly ITotpSecretStore _secrets = new InMemoryTotpSecretStore();
     private readonly TotpVerificationService _totp = new();
     private readonly MutableTimeProvider _time = new();

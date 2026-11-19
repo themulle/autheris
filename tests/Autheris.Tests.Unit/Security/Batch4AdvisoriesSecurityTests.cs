@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.Security;
 
 using System;
+using Autheris.Tests.Common.Fakes;
 using System.Collections.Generic;
 using System.Security.Claims;
 using System.Threading;
@@ -77,7 +78,7 @@ public sealed class Batch4AdvisoriesSecurityTests
 
         var service = new GovernedAggregationService(
             metaRepo,
-            Substitute.For<IAuditLogRepository>(),
+            new InMemoryAuditLogRepository(),
             Autheris.Tests.Unit.TestSupport.AccessDecisionPointStubs.Returning(r => TableAccessDecision.Allowed(meta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)),
             analyticsOptions: Options.Create(new AnalyticsOptions { MinimumGroupSize = 5 }));
 
@@ -151,7 +152,7 @@ public sealed class Batch4AdvisoriesSecurityTests
             Insecure = new InsecureGettingStartedOptions { danger_bypass_consent_checks = true },
             DataSources = new() { MaxConcurrentReadsPerUserAndTable = 0 }
         });
-        var audit = Substitute.For<IAuditLogRepository>();
+        var audit = new InMemoryAuditLogRepository();
         var tableRepo = Substitute.For<ITableMetadataRepository>();
         tableRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(ci => new TableMetadata
@@ -190,7 +191,7 @@ public sealed class Batch4AdvisoriesSecurityTests
             metaRepo,
             options,
             NullLogger<IcebergRestCatalogFederationService>.Instance,
-            Substitute.For<IAuditLogRepository>(),
+            new InMemoryAuditLogRepository(),
             adp,
             transportGate: gate);
 
@@ -244,7 +245,7 @@ public sealed class Batch4AdvisoriesSecurityTests
             Substitute.For<IColumnMaskingProvider>(),
             Substitute.For<IEpochValidationService>(),
             NullLogger<StreamRlsPolicyEnforcer>.Instance,
-            Substitute.For<IConsentRepository>(),
+            new InMemoryConsentRepository(),
             Substitute.For<IConsentResolutionService>(),
             Substitute.For<IConsentCacheService>(),
             transportGate: gate);
