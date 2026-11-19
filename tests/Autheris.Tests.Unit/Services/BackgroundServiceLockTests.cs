@@ -199,21 +199,10 @@ public sealed class BackgroundServiceLockTests
             TimeSpan.FromMilliseconds(50));
 
         // Act: advance the fake clock past several intervals
-        try
-        {
-            await service.StartAsync(CancellationToken.None);
-            for (var i = 0; i < 4; i++)
-            {
-                time.Advance(TimeSpan.FromMilliseconds(50));
-                await Task.Yield();
-            }
-        }
-        finally
-        {
-            await service.StopAsync(CancellationToken.None);
-        }
+        await RunAsync(service, time, TimeSpan.FromSeconds(3));
 
-        // Assert
+        // Assert: the service cycled (lock attempted) yet never scanned without the lock
+        await clusterState.Received().TryAcquireLockAsync(Arg.Is<string>(s => s.Contains("grant-expiry:scan")), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>());
         await expiryStore.DidNotReceive().GetGrantsWithoutExpiryNoticeAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
     }
 }
