@@ -34,6 +34,12 @@ public sealed class CatalogSearchOptionsValidator : IValidateOptions<CatalogSear
                 return ValidateOptionsResult.Fail($"OllamaEndpoint '{options.OllamaEndpoint}' is not a valid absolute URI.");
             }
 
+            if (OllamaEmbeddingGenerator.IsLoopbackHost(uri.Host))
+            {
+                return ValidateOptionsResult.Fail(
+                    "OllamaEndpoint must not be a loopback address: the outbound egress policy refuses it. Use a host name or address that is listed in Gateway:Egress:TrustedInternalHosts or TrustedInternalNetworks, with CatalogEmbeddings in Gateway:Egress:TrustedIntegrations.");
+            }
+
             if (uri.Scheme != Uri.UriSchemeHttps && !options.OllamaInsecureAllowHttp)
             {
                 return ValidateOptionsResult.Fail("OllamaEndpoint requires HTTPS unless OllamaInsecureAllowHttp is true.");
