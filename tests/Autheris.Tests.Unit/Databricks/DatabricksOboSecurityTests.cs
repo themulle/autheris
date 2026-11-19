@@ -376,6 +376,176 @@ public sealed class DatabricksOboSecurityTests
         provider.SupportsCorrelationTag.ShouldBeTrue();
     }
 
+    [Theory]
+    [InlineData("https://evil.example/t", null)]
+    [InlineData("http://login.microsoftonline.com/t", null)]
+    [InlineData("https://login.microsoftonline.com/t?x=1", null)]
+    [InlineData(null, "t/../../evil")]
+    [Trait("Category", "Security")]
+    public async Task Obo_UntrustedAuthority_NoHttpRequestSent(string? authority, string? tenantId)
+    {
+        var recordedRequests = new List<HttpRequestMessage>();
+        var fakeHandler = new FakeHttpMessageHandler((req, ct) =>
+        {
+            recordedRequests.Add(req);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+        });
+
+        using var http = new HttpClient(fakeHandler);
+        var provider = new DatabricksOboTokenProvider(http, null, Vault(), Env("Production"));
+        var dbOptions = new DatabricksDataSourceOptions
+        {
+            Host = DatabricksTestSupport.Host,
+            WarehouseId = "wh-1",
+            Auth = new DatabricksAuthOptions
+            {
+                Mode = DatabricksAuthMode.OAuthObo,
+                Obo = new DatabricksOboOptions
+                {
+                    TenantId = tenantId,
+                    ClientId = "obo-client-id",
+                    ClientSecretRef = "kv://dbx-obo-secret",
+                    Authority = authority,
+                    Scopes = "2ff814a6-3304-4ab8-85cb-cd0e6f879c1d/.default"
+                }
+            }
+        };
+
+        var userAssertion = CreateMockJwt("user-alice", DateTimeOffset.UtcNow.AddHours(1));
+        var ex = await Should.ThrowAsync<DatabricksProviderException>(
+            () => provider.AcquireTokenAsync(dbOptions, new DelegationContext(CallerToken: userAssertion), CancellationToken.None));
+
+        ex.Code.ShouldBe(DatabricksErrorCodes.Configuration);
+        recordedRequests.ShouldBeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Obo_SecretUnresolved_NeverSendsEmptyClientSecret()
+    {
+        var recordedRequests = new List<HttpRequestMessage>();
+        var fakeHandler = new FakeHttpMessageHandler((req, ct) =>
+        {
+            recordedRequests.Add(req);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+        });
+
+        using var http = new HttpClient(fakeHandler);
+        var provider = new DatabricksOboTokenProvider(http, null, Vault(), Env("Production"));
+        var userAssertion = CreateMockJwt("user-alice", DateTimeOffset.UtcNow.AddHours(1));
+        var delegation = new DelegationContext(CallerToken: userAssertion);
+
+        // 1. Certificate-only configuration must fail closed without sending client_secret=""
+        var certOnlyDb = new DatabricksDataSourceOptions
+        {
+            Host = DatabricksTestSupport.Host,
+            WarehouseId = "wh-1",
+            Auth = new DatabricksAuthOptions
+            {
+                Mode = DatabricksAuthMode.OAuthObo,
+                Obo = new DatabricksOboOptions
+                {
+                    TenantId = "tenant-123",
+                    ClientId = "obo-client-id",
+#pragma warning disable CS0618
+                    ClientCertificateRef = "kv://dbx-obo-cert",
+#pragma warning restore CS0618
+                    Scopes = "2ff814a6-3304-4ab8-85cb-cd0e6f879c1d/.default"
+                }
+            }
+        };
+
+        var certEx = await Should.ThrowAsync<DatabricksProviderException>(
+            () => provider.AcquireTokenAsync(certOnlyDb, delegation, CancellationToken.None));
+        certEx.Code.ShouldBe(DatabricksErrorCodes.Configuration);
+
+        // 2. Missing ClientSecretRef fails closed with Configuration error
+        var missingSecretDb = new DatabricksDataSourceOptions
+        {
+            Host = DatabricksTestSupport.Host,
+            WarehouseId = "wh-1",
+            Auth = new DatabricksAuthOptions
+            {
+                Mode = DatabricksAuthMode.OAuthObo,
+                Obo = new DatabricksOboOptions
+                {
+                    TenantId = "tenant-123",
+                    ClientId = "obo-client-id",
+                    ClientSecretRef = null,
+                    Scopes = "2ff814a6-3304-4ab8-85cb-cd0e6f879c1d/.default"
+                }
+            }
+        };
+
+        var missingEx = await Should.ThrowAsync<DatabricksProviderException>(
+            () => provider.AcquireTokenAsync(missingSecretDb, delegation, CancellationToken.None));
+        missingEx.Code.ShouldBe(DatabricksErrorCodes.Configuration);
+
+        // 3. Unresolvable vault secret fails closed before any outbound HTTP call
+        var providerWithEmptyVault = new DatabricksOboTokenProvider(http, null, new EmptyTestVault(), Env("Production"));
+        var unresolvableDb = new DatabricksDataSourceOptions
+        {
+            Host = DatabricksTestSupport.Host,
+            WarehouseId = "wh-1",
+            Auth = new DatabricksAuthOptions
+            {
+                Mode = DatabricksAuthMode.OAuthObo,
+                Obo = new DatabricksOboOptions
+                {
+                    TenantId = "tenant-123",
+                    ClientId = "obo-client-id",
+                    ClientSecretRef = "kv://missing-obo-secret",
+                    Scopes = "2ff814a6-3304-4ab8-85cb-cd0e6f879c1d/.default"
+                }
+            }
+        };
+
+        await Should.ThrowAsync<System.Security.SecurityException>(
+            () => providerWithEmptyVault.AcquireTokenAsync(unresolvableDb, delegation, CancellationToken.None));
+
+        recordedRequests.ShouldBeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Obo_NationalCloudAuthority_PostsToValidatedTokenEndpoint()
+    {
+        Uri? capturedUri = null;
+        var fakeHandler = new FakeHttpMessageHandler((req, ct) =>
+        {
+            capturedUri = req.RequestUri;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"access_token\":\"gov-obo-tok\",\"expires_in\":3600}", Encoding.UTF8, "application/json")
+            });
+        });
+
+        using var http = new HttpClient(fakeHandler);
+        var provider = new DatabricksOboTokenProvider(http, null, Vault(), Env("Production"));
+        var dbOptions = new DatabricksDataSourceOptions
+        {
+            Host = DatabricksTestSupport.Host,
+            WarehouseId = "wh-1",
+            Auth = new DatabricksAuthOptions
+            {
+                Mode = DatabricksAuthMode.OAuthObo,
+                Obo = new DatabricksOboOptions
+                {
+                    ClientId = "obo-client-id",
+                    ClientSecretRef = "kv://dbx-obo-secret",
+                    Authority = "https://login.microsoftonline.us/gov-tenant-123/",
+                    Scopes = "2ff814a6-3304-4ab8-85cb-cd0e6f879c1d/.default"
+                }
+            }
+        };
+
+        var userAssertion = CreateMockJwt("user-gov", DateTimeOffset.UtcNow.AddHours(1));
+        var token = await provider.AcquireTokenAsync(dbOptions, new DelegationContext(CallerToken: userAssertion), CancellationToken.None);
+
+        token.ShouldBe("gov-obo-tok");
+        capturedUri.ShouldBe(new Uri("https://login.microsoftonline.us/gov-tenant-123/oauth2/v2.0/token"));
+    }
+
     // ---- INF-07: 401/403 evicts exactly the cache entry the failed call used ----
 
     private sealed class EvictionHarness
@@ -542,5 +712,11 @@ public sealed class DatabricksOboSecurityTests
 
         var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(alice)));
         h.Logger.Lines.ShouldNotContain(l => l.Contains(hash, StringComparison.OrdinalIgnoreCase) || l.Contains(alice, StringComparison.Ordinal));
+    }
+
+    // Helper types placed after all [Fact]/[Theory] methods so SecurityTestInventoryTests records outer class FQN cleanly.
+    private sealed class EmptyTestVault : IKeyVaultSecretProvider
+    {
+        public byte[] GetSecretBytes(string secretRef) => [];
     }
 }

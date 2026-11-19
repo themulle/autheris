@@ -294,7 +294,8 @@ public sealed class DatabricksOboOptions
     /// <summary>Key Vault reference or secret value for the confidential client application.</summary>
     public string? ClientSecretRef { get; init; }
 
-    /// <summary>Key Vault reference to a client certificate used for client assertion.</summary>
+    /// <summary>Unsupported and rejected at startup; configure <see cref="ClientSecretRef"/> instead.</summary>
+    [Obsolete("Databricks OBO client certificate assertions are not supported; configure ClientSecretRef instead.")]
     public string? ClientCertificateRef { get; init; }
 
     /// <summary>Azure Databricks resource scope (default: 2ff814a6-3304-4ab8-85cb-cd0e6f879c1d/.default).</summary>
