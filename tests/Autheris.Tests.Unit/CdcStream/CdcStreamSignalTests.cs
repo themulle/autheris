@@ -1,3 +1,4 @@
+#pragma warning disable CA2012 // NSubstitute .Returns(...) configures a ValueTask member; the instance is not consumed here.
 using System.Text.Json;
 using Autheris.Application.State;
 using Autheris.Application.Streaming.Services;
