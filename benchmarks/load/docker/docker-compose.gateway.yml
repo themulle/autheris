@@ -104,9 +104,10 @@ services:
       DOTNET_ReadyToRun: 1
       Gateway__Authentication__EnableTestAuthHandler: "true"
       Gateway__Insecure__danger_bypass_consent_checks: "true"
-      Gateway__GovernanceDb__Provider: "Sqlite"
+      # The governance store is PostgreSQL only: an empty database named "governance" on the data host (created by configs/governance-db.sql).
+      Gateway__GovernanceDb__Provider: "PostgreSql"
       Gateway__GovernanceDb__SeedDemoData: "true"
-      Gateway__GovernanceDb__ConnectionString: "Data Source=:memory:;Mode=Memory;Cache=Shared"
+      Gateway__GovernanceDb__ConnectionString: "Host=${DB_HOST:-10.0.1.10};Port=5432;Database=governance;Username=postgres;Password=${BENCH_DB_PASSWORD:?run scripts via lib_secrets.sh};Pooling=true;Maximum Pool Size=20"
       Gateway__ResourceGroups__Enabled: "false"
       Gateway__Insecure__warn_disable_rate_limiting: "true"
       Gateway__RateLimiting__PreAuthIpRateLimit__PermitLimit: "100000"

@@ -27,6 +27,7 @@ public sealed class PaginationTruncationSecurityTests
             .UseRequest<PaginationTruncationMiddleware>()
             .UseDefaultPipeline()
             .BuildRequestExecutorAsync()
+            .AsTask()
             .GetAwaiter()
             .GetResult();
     }

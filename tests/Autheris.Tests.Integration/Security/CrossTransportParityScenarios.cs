@@ -69,9 +69,12 @@ internal sealed partial class CrossTransportParityHarness
             new(ParityScenarioId.S19_UnauthenticatedDenied, new ClaimsPrincipal(new ClaimsIdentity()), TenantA, table, [AllowUser(AliceSid, now)], [], VirtualFilterSnapshot.Empty, false, false, new(false)),
             new(ParityScenarioId.S20_InvalidTenantClaimDenied, InvalidTenantUser(AliceSid), TenantA, table, [AllowUser(AliceSid, now)], [], VirtualFilterSnapshot.Empty, false, false, new(false)),
             new(ParityScenarioId.S21_MissingUserSidDenied, MissingSidUser(), TenantA, table, [AllowUser(AliceSid, now)], [], VirtualFilterSnapshot.Empty, false, false, new(false)),
-            new(ParityScenarioId.S22_ForeignTenantObject, user, TenantA, DefaultOrdersTable(), [AllowUser(AliceSid, now, tenant: TenantB)], [], VirtualFilterSnapshot.Empty, false, false, new(false))
+            new(ParityScenarioId.S22_ForeignTenantObject, user, TenantA, DefaultOrdersTable(), [AllowUser(AliceSid, now, tenant: TenantB)], [], VirtualFilterSnapshot.Empty, false, false, new(false)),
+            ..BuildGrantModelScenarios(now)
         ];
     }
+
+    private static IReadOnlyList<ParityScenario> BuildGrantModelScenarios(DateTimeOffset now) => CrossTransportParityGrantModelRows.Build(now);
 
     /// <summary>A decision point with an authorization hook host: the only core extension point that can restrict a read by client address.</summary>
     internal static AccessDecisionPoint BuildPdpWithAuthorizationHook(ParityScenario s, IAuthPluginHost host) =>
@@ -284,7 +287,7 @@ internal sealed partial class CrossTransportParityHarness
     }
 
     // Minimal In-Memory Test Collaborators (Zero Substitute.For)
-    private sealed class InMemoryTableRepo(IReadOnlyList<TableMetadata> tables) : ITableMetadataRepository
+    internal sealed class InMemoryTableRepo(IReadOnlyList<TableMetadata> tables) : ITableMetadataRepository
     {
         public Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default)
             => Task.FromResult(tables.FirstOrDefault(t => t.Identifier.Equals(table)));
@@ -294,11 +297,11 @@ internal sealed partial class CrossTransportParityHarness
             => Task.FromResult<TableKeyDefinitionChange?>(null);
     }
 
-    private sealed class InMemoryConsentRepo(IReadOnlyList<Consent> consents) : IConsentRepository
+    internal sealed class InMemoryConsentRepo(IReadOnlyList<Consent> consents) : IConsentRepository
     {
         public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, CancellationToken ct = default) => Task.FromResult(consents);
         public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, TenantId? tenantId, CancellationToken ct = default)
-            => Task.FromResult<IReadOnlyList<Consent>>(consents.Where(c => c.TenantId == tenantId && c.TableIdentifier.Equals(table)).ToList());
+            => Task.FromResult<IReadOnlyList<Consent>>(consents.Where(c => c.TenantId == tenantId && (c.IsPatternGrant || c.TableIdentifier.Equals(table))).ToList());
         public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? roles = null, DateTimeOffset? atTime = null, CancellationToken ct = default) => Task.FromResult(consents);
         public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? roles, DateTimeOffset? atTime, TenantId? tenantId, CancellationToken ct = default)
             => Task.FromResult<IReadOnlyList<Consent>>(consents.Where(c => c.TenantId == tenantId).ToList());

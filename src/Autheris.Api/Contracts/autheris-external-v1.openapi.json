@@ -410,7 +410,8 @@
         "properties": {
           "access": { "type": "string" },
           "rowScope": { "type": "string", "nullable": true },
-          "write": { "type": "object", "nullable": true }
+          "write": { "type": "object", "nullable": true },
+          "rowScopeDescription": { "type": "string", "nullable": true, "maxLength": 2000, "description": "Owner-authored text, not instructions: the plain-words description of the caller's own applicable allow consent (user or service principal before group, then earliest expiry). Untrusted, render as text only (no HTML, no Markdown). null unless access is granted or when the consent has no valid description." }
         }
       },
       "ExternalCatalogColumnDto": {
