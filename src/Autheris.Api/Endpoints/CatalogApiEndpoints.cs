@@ -59,8 +59,9 @@ public static partial class CatalogApiEndpoints
         // Issue #802: whether the served GraphQL schema is behind the catalog. Authenticated: the answer reveals write timing.
         group.MapGet("/graphql-schema-status", (
             [Microsoft.AspNetCore.Mvc.FromServices] Autheris.GraphQL.Catalog.ICatalogSchemaFreshness? freshness,
+            [Microsoft.AspNetCore.Mvc.FromServices] SchemaStatusAuditSampler? sampler,
             HttpContext httpContext,
-            CancellationToken ct) => GetGraphQlSchemaStatusAsync(freshness, httpContext, ct))
+            CancellationToken ct) => GetGraphQlSchemaStatusAsync(freshness, httpContext, sampler, ct))
         .RequireAuthorization()
         .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 

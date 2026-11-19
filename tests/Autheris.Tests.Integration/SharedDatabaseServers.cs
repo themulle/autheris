@@ -59,6 +59,21 @@ internal static class SharedDatabaseServers
         return (await PostgreSql.Value).GetConnectionString();
     }
 
+    /// <summary>
+    /// Server log (stdout and stderr) of the shared PostgreSQL container since <paramref name="sinceUtc"/>; null when an external server
+    /// (<c>AUTHERIS_TEST_POSTGRES</c>) is used, because its log is not reachable from the test process.
+    /// </summary>
+    public static async Task<string?> PostgreSqlLogsSinceAsync(DateTime sinceUtc)
+    {
+        if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("AUTHERIS_TEST_POSTGRES")))
+        {
+            return null;
+        }
+
+        var (stdout, stderr) = await (await PostgreSql.Value).GetLogsAsync(sinceUtc, default, false);
+        return stdout + "\n" + stderr;
+    }
+
     /// <summary>Connection string of the shared SQL Server (sa, master).</summary>
     public static async Task<string> SqlServerServerAsync()
     {
