@@ -136,6 +136,12 @@ public sealed record IdentityRealm(
 {
     public RealmScimSettings ScimSettings { get; init; } = new RealmScimSettings();
 
+    /// <summary>Immutable subject-to-roles snapshot built from configuration at startup (ordinal subject keys); null or empty when the realm maps no workload subject.</summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<GatewayRole>>? SubjectRoles { get; init; }
+
+    /// <summary>Whether the realm allows a subject mapping to grant ClusterAdmin.</summary>
+    public bool AllowPrivilegedSubjectRoles { get; init; }
+
     public string RealmId => Id;
 
     public IdentityRealm(

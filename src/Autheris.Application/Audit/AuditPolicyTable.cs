@@ -167,6 +167,7 @@ public static class AuditPolicyTable
         [AuditEventTypes.ScimGroupDeleted] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.ScimGroupMembershipChanged] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.IdentityCorrelationAmbiguous] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.WorkloadRoleMappingApplied] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.UsageTariffVersionAdded] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.UsageReportRead] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.UsageDataErased] = AuditFailurePolicy.FailClosed,

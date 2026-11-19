@@ -20,9 +20,27 @@ public static class GatewayAuthSchemes
     /// chooses the JWT scheme for a bearer token. Only routing: the issuer is read without validation, the selected
     /// scheme validates issuer, audience and signature. Without both IdPs enabled there is a single scheme.
     /// </summary>
-    public static string SelectJwtScheme(string token, Autheris.Domain.Options.GatewayOptions options)
+    public static string SelectJwtScheme(string token, Autheris.Domain.Options.GatewayOptions options, GenericOidcSchemeMap? genericOidc = null)
     {
         System.ArgumentNullException.ThrowIfNull(options);
+        if (genericOidc is { IsEmpty: false })
+        {
+            // A configured GenericOidc issuer selects its realm scheme; any other issuer falls through to the Entra / AD FS schemes,
+            // whose issuer validation rejects it.
+            try
+            {
+                var tokenIssuer = new Microsoft.IdentityModel.JsonWebTokens.JsonWebTokenHandler().ReadJsonWebToken(token.Trim()).Issuer;
+                if (tokenIssuer != null && genericOidc.TryGetScheme(tokenIssuer, out var realmScheme))
+                {
+                    return realmScheme;
+                }
+            }
+            catch (System.ArgumentException)
+            {
+                return JwtBearer;
+            }
+        }
+
         var adfs = options.Authentication.Adfs;
         if (!options.Authentication.EntraId.Enabled || !adfs.Enabled || string.IsNullOrWhiteSpace(adfs.Authority))
         {

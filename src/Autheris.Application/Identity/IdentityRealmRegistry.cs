@@ -158,10 +158,18 @@ public sealed class IdentityRealmRegistry : IIdentityRealmRegistry
                         ? TenantBindingSpecification.ClaimMapped(config.TenantClaimName, config.TenantClaimMapping.ToDictionary(k => k.Key, v => new TenantId(v.Value)))
                         : TenantBindingSpecification.Unbound());
 
+                var hasSubjectRoles = config.SubjectRoles is { Count: > 0 };
                 var allowedRoles = new HashSet<GatewayRole>();
                 foreach (var r in config.AllowedGatewayRoles)
                 {
-                    if (Enum.TryParse<GatewayRole>(r, true, out var role))
+                    if (hasSubjectRoles)
+                    {
+                        // A realm that maps workload subjects never drops a role name silently (numbers and unknown names fail startup).
+                        allowedRoles.Add(SubjectRoleMapper.TryParseRoleName(r, out var strictRole)
+                            ? strictRole
+                            : throw new InvalidOperationException($"Realm '{realmId}': AllowedGatewayRoles contains an unknown or numeric role name."));
+                    }
+                    else if (Enum.TryParse<GatewayRole>(r, true, out var role))
                     {
                         allowedRoles.Add(role);
                     }
@@ -184,6 +192,8 @@ public sealed class IdentityRealmRegistry : IIdentityRealmRegistry
                     Delegable: config.Delegable
                 )
                 {
+                    SubjectRoles = hasSubjectRoles ? BuildSubjectRoles(realmId, config.SubjectRoles) : null,
+                    AllowPrivilegedSubjectRoles = config.AllowPrivilegedSubjectRoles,
                     ScimSettings = new RealmScimSettings(
                         AllowUpnCorrelation: config.Scim?.AllowUpnCorrelation ?? false,
                         RequireCorrelation: config.Scim?.RequireCorrelation ?? true,
@@ -194,6 +204,28 @@ public sealed class IdentityRealmRegistry : IIdentityRealmRegistry
                 RegisterRealm(realm);
             }
         }
+    }
+
+    private static Dictionary<string, IReadOnlyList<GatewayRole>> BuildSubjectRoles(string realmId, List<SubjectRoleMapping> entries)
+    {
+        var snapshot = new Dictionary<string, IReadOnlyList<GatewayRole>>(StringComparer.Ordinal);
+        foreach (var entry in entries)
+        {
+            var roles = new List<GatewayRole>(entry.Roles.Count);
+            foreach (var name in entry.Roles)
+            {
+                roles.Add(SubjectRoleMapper.TryParseRoleName(name, out var role)
+                    ? role
+                    : throw new InvalidOperationException($"Realm '{realmId}': SubjectRoles contains an unknown or numeric role name."));
+            }
+
+            if (string.IsNullOrEmpty(entry.Subject) || !snapshot.TryAdd(entry.Subject, roles.AsReadOnly()))
+            {
+                throw new InvalidOperationException($"Realm '{realmId}': SubjectRoles contains an empty or duplicate subject.");
+            }
+        }
+
+        return snapshot;
     }
 
     private static string NormalizeIssuer(string issuer) =>

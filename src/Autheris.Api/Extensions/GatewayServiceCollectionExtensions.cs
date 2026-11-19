@@ -149,7 +149,8 @@ public static partial class GatewayServiceCollectionExtensions
         ConfigureForwardAuth(authBuilder, services);
         ConfigureNegotiateAndDevAuth(authBuilder, gatewayOptions, environment, out var isDevAuthAllowed);
         ConfigureJwtBearerAndMcpAuth(authBuilder, gatewayOptions, environment);
-        ConfigureDefaultPolicyScheme(authBuilder, gatewayOptions, isBasicSessionAllowed, basicSessionCookieName, isDevAuthAllowed);
+        var genericOidc = ConfigureGenericOidcRealmSchemes(authBuilder, services, environment);
+        ConfigureDefaultPolicyScheme(authBuilder, gatewayOptions, isBasicSessionAllowed, basicSessionCookieName, isDevAuthAllowed, genericOidc);
         ConfigureAuthorizationAndErrorHandling(services, gatewayOptions, environment);
 
         return services;
@@ -254,6 +255,90 @@ public static partial class GatewayServiceCollectionExtensions
         {
             authBuilder.AddJwtBearer(GatewayAuthSchemes.JwtBearerAdfs, options => ConfigureJwtBearer(options, entraConfig, adfsConfig, environment, useEntra: false, useAdfs: true));
         }
+    }
+
+    // One JwtBearer scheme per GenericOidc realm that lists issuers: issuers, audiences and signing keys (metadata or a static JWKS file)
+    // come from the realm only. A token whose issuer no realm lists never selects such a scheme and is rejected by issuer validation.
+    private static GenericOidcSchemeMap ConfigureGenericOidcRealmSchemes(AuthenticationBuilder authBuilder, IServiceCollection services, IHostEnvironment environment)
+    {
+        var map = new GenericOidcSchemeMap();
+        services.AddSingleton(map);
+        var realms = (services.FirstOrDefault(d => d.ServiceType == typeof(IConfiguration))?.ImplementationInstance as IConfiguration)
+            ?.GetSection(Autheris.Domain.Options.Security.IdentityRealmsOptions.SectionName)
+            .Get<Autheris.Domain.Options.Security.IdentityRealmsOptions>()?.Realms;
+        if (realms is null)
+        {
+            return map;
+        }
+
+        var any = false;
+        foreach (var (realmId, realm) in realms)
+        {
+            if (realm.Kind != Autheris.Domain.Identity.IdentityRealmKind.GenericOidc || realm.Issuers is not { Count: > 0 })
+            {
+                continue;
+            }
+
+            var scheme = GenericOidcSchemeMap.SchemeName(realmId);
+            foreach (var issuer in realm.Issuers)
+            {
+                if (!string.IsNullOrWhiteSpace(issuer))
+                {
+                    map.Add(issuer, scheme);
+                }
+            }
+
+            var captured = realm;
+            var capturedId = realmId;
+            authBuilder.AddJwtBearer(scheme, _ => { });
+            services.AddOptions<Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerOptions>(scheme)
+                .Configure<StaticJwksKeySources>((options, sources) => ConfigureGenericOidcJwtBearer(options, captured, sources.Get(capturedId), environment));
+            any = true;
+        }
+
+        if (any)
+        {
+            services.AddSingleton<StaticJwksKeySources>();
+            services.AddHostedService<StaticJwksStartupLoader>();
+        }
+
+        return map;
+    }
+
+    internal static void ConfigureGenericOidcJwtBearer(
+        Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerOptions options,
+        Autheris.Domain.Options.Security.IdentityRealmConfigOptions realm,
+        StaticJwksKeySource? staticKeys,
+        IHostEnvironment environment)
+    {
+        // sub and iss keep their JWT names (no inbound mapping): the subject mapping reads the validated sub claim as is.
+        options.MapInboundClaims = false;
+        options.RequireHttpsMetadata = !environment.IsDevelopment();
+        options.IncludeErrorDetails = false;
+        if (staticKeys is null && !string.IsNullOrWhiteSpace(realm.MetadataAddress))
+        {
+            options.MetadataAddress = realm.MetadataAddress;
+        }
+
+        // Issuer, audience, lifetime and signature are always validated; empty issuers or audiences accept no token.
+        var parameters = new Microsoft.IdentityModel.Tokens.TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidIssuers = realm.Issuers.Count > 0 ? [.. realm.Issuers] : null,
+            ValidateAudience = true,
+            ValidAudiences = realm.Audiences.Count > 0 ? [.. realm.Audiences] : null,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            RequireSignedTokens = true,
+            ClockSkew = TimeSpan.FromMinutes(2)
+        };
+        if (staticKeys is not null)
+        {
+            parameters.ValidAlgorithms = StaticJwksKeySource.AllowedAlgorithms;
+            parameters.IssuerSigningKeyResolver = (_, _, kid, _) => staticKeys.ResolveKeys(kid);
+        }
+
+        options.TokenValidationParameters = parameters;
     }
 
     private static void ConfigureJwtBearer(
@@ -371,13 +456,14 @@ public static partial class GatewayServiceCollectionExtensions
         GatewayOptions gatewayOptions,
         bool isBasicSessionAllowed,
         string basicSessionCookieName,
-        bool isDevAuthAllowed)
+        bool isDevAuthAllowed,
+        GenericOidcSchemeMap? genericOidc = null)
     {
         // 5. Smart Dynamic Policy Scheme: Route requests based on Authorization header or ForwardAuth
         authBuilder.AddPolicyScheme(GatewayAuthSchemes.DefaultScheme, "Gateway Smart Authentication", options =>
         {
             options.ForwardDefaultSelector = context => GatewayAuthSchemeSelector.Select(
-                context, gatewayOptions, isBasicSessionAllowed, basicSessionCookieName, isDevAuthAllowed);
+                context, gatewayOptions, isBasicSessionAllowed, basicSessionCookieName, isDevAuthAllowed, genericOidc);
         });
     }
 

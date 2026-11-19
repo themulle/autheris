@@ -8,11 +8,15 @@ using System.Security.Claims;
 using System.Security.Cryptography.X509Certificates;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Text.Json;
+using Autheris.Application.Audit;
 using Autheris.Application.Governance.Rights;
 using Autheris.Application.Identity;
 using Autheris.Application.Tenancy;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Identity;
+using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Domain.Tenancy;
 using Microsoft.Extensions.Logging;
@@ -64,6 +68,7 @@ public sealed class IdentityPipeline : IIdentityPipeline
     private readonly IOptions<GatewayOptions>? _options;
     private readonly ILogger<IdentityPipeline> _logger;
     private readonly TimeProvider _time;
+    private readonly IAuditWriter? _auditWriter;
 
     public IdentityPipeline(
         IIdentityRealmRegistry? realmRegistry,
@@ -73,8 +78,10 @@ public sealed class IdentityPipeline : IIdentityPipeline
         ITenantResolver? tenantResolver = null,
         IOptions<GatewayOptions>? options = null,
         ILogger<IdentityPipeline>? logger = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IAuditWriter? auditWriter = null)
     {
+        _auditWriter = auditWriter;
         _time = timeProvider ?? TimeProvider.System;
         _realmRegistry = realmRegistry;
         _groupResolver = groupResolver ?? throw new ArgumentNullException(nameof(groupResolver));
@@ -354,22 +361,32 @@ public sealed class IdentityPipeline : IIdentityPipeline
             return "role provider unavailable";
         }
 
+        var roles = new HashSet<string>(rolesResolution.Roles, StringComparer.OrdinalIgnoreCase);
         foreach (var role in rolesResolution.Roles)
         {
             identity.AddClaim(new Claim(ClaimTypes.Role, role));
+        }
+
+        // Workload subject mapping: additive only, audited on every authentication (role cache hits included) before any mapped role is applied.
+        foreach (var mappedRole in await ResolveMappedRolesAsync(identity, realm, realmId, tenantId, ct).ConfigureAwait(false))
+        {
+            if (roles.Add(mappedRole))
+            {
+                identity.AddClaim(new Claim(ClaimTypes.Role, mappedRole));
+            }
         }
 
         // PERS-09: functional-right claims come only from FunctionalRightMapper (four-eyes for privileged rights, customer-realm ceiling);
         // a mapper failure yields no functional-right claims (fail closed). The mapper receives canonical group SIDs and roles.
         if (_functionalRightMapper != null)
         {
-            var groupsAndRoles = new HashSet<string>(groups.Count + rolesResolution.Roles.Count, StringComparer.Ordinal);
+            var groupsAndRoles = new HashSet<string>(groups.Count + roles.Count, StringComparer.Ordinal);
             foreach (var group in groups)
             {
                 groupsAndRoles.Add(group.Value);
             }
 
-            groupsAndRoles.UnionWith(rolesResolution.Roles);
+            groupsAndRoles.UnionWith(roles);
             try
             {
                 var rights = await _functionalRightMapper.GetRightsForGroupsAndRolesAsync(tenantId, realmId, groupsAndRoles, ct).ConfigureAwait(false);
@@ -385,6 +402,72 @@ public sealed class IdentityPipeline : IIdentityPipeline
         }
 
         return null;
+    }
+
+    // The mapped role names of the identity (canonical GatewayRole names), or none. Without a required audit record nothing is applied.
+    private async ValueTask<IReadOnlyList<string>> ResolveMappedRolesAsync(
+        ClaimsIdentity identity, IdentityRealm realm, string realmId, TenantId tenantId, CancellationToken ct)
+    {
+        var mapped = SubjectRoleMapper.Resolve(realm, identity);
+        if (mapped.Count == 0)
+        {
+            return [];
+        }
+
+        var names = new string[mapped.Count];
+        for (var i = 0; i < names.Length; i++)
+        {
+            names[i] = mapped[i].ToString();
+        }
+
+        if (_auditWriter is null)
+        {
+            _logger.LogWarning("Workload role mapping for realm {RealmId} is not applied: no audit writer (fail-closed).", realmId);
+            return [];
+        }
+
+        var subject = identity.FindFirst("sub")?.Value ?? string.Empty;
+        try
+        {
+            await _auditWriter.RecordRequiredAsync(new AuditLogEntry
+            {
+                TenantId = tenantId,
+                EventType = AuditEventTypes.WorkloadRoleMappingApplied,
+                Decision = "ALLOW",
+                TargetTable = "IDENTITY_REALMS",
+                TraceId = System.Diagnostics.Activity.Current?.TraceId.ToString() ?? string.Empty,
+                DetailsJson = JsonSerializer.Serialize(new
+                {
+                    realm_id = realmId,
+                    subject = SanitizeSubject(subject),
+                    roles = names
+                })
+            }, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            _logger.LogWarning("Workload role mapping for realm {RealmId} is not applied: the audit record could not be written (fail-closed).", realmId);
+            return [];
+        }
+
+        return names;
+    }
+
+    // Subject values come from a validated token but stay untrusted text: control characters are replaced, the length is capped.
+    private static string SanitizeSubject(string subject)
+    {
+        var length = Math.Min(subject.Length, SubjectRoleMapper.MaxSubjectLength);
+        return string.Create(length, subject, static (span, source) =>
+        {
+            for (var i = 0; i < span.Length; i++)
+            {
+                span[i] = char.IsControl(source[i]) ? '?' : source[i];
+            }
+        });
     }
 
     private void MarkDegraded(ClaimsIdentity identity, string realmId, string reason)

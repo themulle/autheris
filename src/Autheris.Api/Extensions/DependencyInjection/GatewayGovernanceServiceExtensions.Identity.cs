@@ -42,6 +42,9 @@ public static partial class GatewayGovernanceServiceExtensions
         {
             var registry = new Autheris.Application.Identity.IdentityRealmRegistry();
             registry.Initialize(sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.Security.IdentityRealmsOptions>>().Value);
+            Autheris.Application.Identity.SubjectRoleStartupLog.Write(
+                sp.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>().CreateLogger("Autheris.Identity.SubjectRoles"),
+                registry.GetAllRealms());
             return registry;
         });
         // The node-local cache plus its broadcasting decorator: invalidations also go out on IEventBus (best effort; the TTL is the backstop).
@@ -52,6 +55,7 @@ public static partial class GatewayGovernanceServiceExtensions
         // Graph and LDAPS providers answer "failed" and the resolution is degraded (never an empty group set).
         services.AddSingleton<Autheris.Application.Identity.IRoleProvider, Autheris.Application.Identity.Providers.ScimStoreRoleProvider>();
         services.AddSingleton<Autheris.Application.Identity.IRoleProvider, Autheris.Application.Identity.Providers.StaticMappingRoleProvider>();
+        services.AddSingleton<Autheris.Application.Identity.IRoleProvider, Autheris.Application.Identity.Providers.SubjectRoleProvider>();
         services.AddSingleton<Autheris.Application.Identity.IRoleProvider, Autheris.Application.Identity.Providers.EntraAppRoleProvider>();
         services.TryAddSingleton<Autheris.Application.Identity.Providers.IGraphClientAdapter, Autheris.Application.Identity.Providers.UnconfiguredGraphClientAdapter>();
         services.AddSingleton<Autheris.Application.Identity.IRoleProvider>(sp => new Autheris.Application.Identity.Providers.GraphRoleProvider(
