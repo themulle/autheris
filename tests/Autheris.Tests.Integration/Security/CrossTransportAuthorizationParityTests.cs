@@ -34,7 +34,7 @@ public sealed class CrossTransportAuthorizationParityTests
     {
         foreach (var surface in CrossTransportParityHarness.AllSurfaces)
         {
-            foreach (var scenario in Scenarios)
+            foreach (var scenario in Scenarios.Where(s => s.GrantModel is null))
             {
                 yield return [surface, scenario.Id];
             }
@@ -107,7 +107,59 @@ public sealed class CrossTransportAuthorizationParityTests
     }
 
     public static IEnumerable<object[]> RestAndAnalyticsScenarios() =>
-        Scenarios.Select(s => new object[] { s.Id });
+        Scenarios.Where(s => s.GrantModel is null).Select(s => new object[] { s.Id });
+
+    public static IEnumerable<object[]> GrantModelRows() =>
+        Scenarios.Where(s => s.GrantModel is not null).Select(s => new object[] { s.Id });
+
+    /// <summary>
+    /// Rows S30..S37 (grant and pattern model): each asserts allowed, the row set, the per-cell column state and the set of contributing
+    /// grant ids on the decision point, and that explain reports the same allowed flag and grant ids.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(GrantModelRows))]
+    public async Task Grant_model_rows_match_expected_decision_and_explain(ParityScenarioId scenarioId)
+    {
+        var scenario = ScenarioById[scenarioId];
+        var expected = scenario.Expected;
+
+        var outcome = await CrossTransportParityGrantModelRows.EvaluateAsync(scenario, CancellationToken.None);
+
+        outcome.Allowed.ShouldBe(expected.Allowed, $"Scenario={scenarioId} Allowed mismatch.");
+        outcome.ExplainAllowed.ShouldBe(outcome.Allowed, $"Scenario={scenarioId} explain must equal the decision.");
+        outcome.ExplainGrantIds.OrderBy(g => g).ToArray().ShouldBe(outcome.DecisionGrantIds.OrderBy(g => g).ToArray(), $"Scenario={scenarioId} explain grants.");
+        if (expected.GrantIds is not null)
+        {
+            outcome.DecisionGrantIds.OrderBy(g => g).ToArray().ShouldBe(expected.GrantIds.OrderBy(g => g).ToArray(), $"Scenario={scenarioId} contributing grants.");
+        }
+
+        if (expected.RowSet is not null)
+        {
+            outcome.RowSet.ShouldBe(expected.RowSet.Value, $"Scenario={scenarioId} row set.");
+        }
+
+        if (expected.ColumnState is not null)
+        {
+            foreach (var (column, level) in expected.ColumnState)
+            {
+                outcome.ColumnState[column].ShouldBe(level, $"Scenario={scenarioId} column {column}.");
+            }
+        }
+
+        if (expected.PredicateSqlFragments is not null)
+        {
+            foreach (var fragment in expected.PredicateSqlFragments)
+            {
+                outcome.PredicateSql.ShouldContain(fragment, customMessage: $"Scenario={scenarioId} predicate shape.");
+            }
+        }
+
+        if (expected.PredicateParameterValues is not null)
+        {
+            outcome.ParameterValues.OrderBy(v => v, StringComparer.Ordinal).ToArray()
+                .ShouldBe(expected.PredicateParameterValues.OrderBy(v => v, StringComparer.Ordinal).ToArray(), $"Scenario={scenarioId} parameters.");
+        }
+    }
 
     [Fact]
     public async Task Degraded_groups_without_principal_denies_across_pdp_and_olap()

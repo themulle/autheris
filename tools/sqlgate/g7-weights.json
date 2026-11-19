@@ -27,7 +27,6 @@
  "src/TrinoSqlEngine/Ast/Security/PostCompileTableTargetAssertionVisitor.cs": 68,
  "src/TrinoSqlEngine/Ast/Security/SecurityCoverageVerifier.Dml.cs": 229,
  "src/TrinoSqlEngine/Ast/Security/SecurityCoverageVerifier.cs": 221,
- "src/TrinoSqlEngine/Ast/Security/SqliteTypeAffinity.cs": 26,
  "src/TrinoSqlEngine/Ast/Security/TenantPredicateFactory.cs": 35,
  "src/TrinoSqlEngine/Ast/Visitors/AstSecurityVisitor.AggregateTypeGuards.cs": 181,
  "src/TrinoSqlEngine/Ast/Visitors/AstSecurityVisitor.Dml.cs": 12,

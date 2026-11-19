@@ -114,6 +114,7 @@ public sealed class Issue177SecurityConditionsTests : IDisposable
             .UseRequest<CostAndQuotaMiddleware>()
             .UseDefaultPipeline()
             .BuildRequestExecutorAsync()
+            .AsTask()
             .GetAwaiter()
             .GetResult();
     }

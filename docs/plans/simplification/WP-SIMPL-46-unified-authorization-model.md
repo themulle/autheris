@@ -130,7 +130,7 @@ git grep -n -E "IsInRole|ClusterAdminPolicy" -- src/Autheris.Application/Policy 
 - [ ] ADR-020 Accepted (OD-30); OD-7 revised in the PRD; SEC-SIMPL-85 replaced by the SEC-AZ conditions.
 - [ ] One `IAccessDecisionPoint`; `IUnifiedPolicyDecisionPoint` and `UnifiedPolicyDecisionPoint` deleted; all greps of section 7 as stated.
 - [ ] Every allow decision carries the complete `Grants` list (OD-42); `Decision_ExposesContributingGrantIds` green.
-- [ ] Parity matrix 19 x 15 green (27 x 15 once WP-SIMPL-48 adds S20..S27); explain result equals `DecideAsync` for every scenario.
+- [ ] Parity matrix 19 x 15 green (27 x 15 once WP-SIMPL-48 adds S30..S37); explain result equals `DecideAsync` for every scenario.
 - [ ] Access-profile templates never grant; only materialized, approved grant records do; owners read only through owner grant records.
 - [ ] Writes are decided without a read allow; transports without write wiring deny writes in the precondition step.
 - [ ] Auth hooks only narrow, at the `Narrowing` step after the grant union; plugin enrichment never affects a data decision.

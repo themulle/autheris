@@ -1,3 +1,4 @@
+#pragma warning disable CA2012 // NSubstitute .Returns(...) configures a ValueTask member; the instance is not consumed here.
 #pragma warning disable CS0618 // StackExchange.Redis exception constructors without CommandFlags are fine for test doubles
 namespace Autheris.Tests.Unit.Security;
 
