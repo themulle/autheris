@@ -104,7 +104,7 @@ public sealed class CdcStreamCompatFeedTests
                 yield return d;
             }
 
-            await Task.Delay(Timeout.Infinite, ct).ConfigureAwait(false);
+            await Autheris.Tests.Common.Hang.UntilCancelledAsync(ct).ConfigureAwait(false);
         }
     }
 
@@ -206,7 +206,7 @@ public sealed class CdcStreamCompatFeedTests
         async IAsyncEnumerable<CdcEvent> Channel([EnumeratorCancellation] CancellationToken ct)
         {
             yield return channelEvent;
-            await Task.Delay(Timeout.Infinite, ct);
+            await Autheris.Tests.Common.Hang.UntilCancelledAsync(ct);
         }
 
         var hub = new FakeHub(new() { [Id.Value] = [Change(1, CdcOperation.Insert, "acme", after: Row("x"))] });

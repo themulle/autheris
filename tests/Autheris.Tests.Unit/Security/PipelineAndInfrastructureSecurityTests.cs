@@ -57,10 +57,11 @@ public class PipelineAndInfrastructureSecurityTests
         // Finding F: Slow or hanging subscribers must not freeze the event bus consumer loop
         var bus = new InProcessChannelEventBus(capacity: 10);
 
-        // 1. Slow subscriber that delays 10 seconds
+        // 1. Slow subscriber that blocks until the test releases it
+        var slowGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         using var slowSub = bus.Subscribe<string>("test_event", async _ =>
         {
-            await Task.Delay(10_000);
+            await slowGate.Task;
         });
 
         // 2. Fast subscriber that immediately signals completion
@@ -75,9 +76,9 @@ public class PipelineAndInfrastructureSecurityTests
         await bus.PublishAsync("test_event", "hello_event");
 
         // The fast subscriber must receive the event quickly, even though slowSub delays 10s
-        var completed = await Task.WhenAny(fastReceivedTcs.Task, Task.Delay(3000));
-        completed.ShouldBe(fastReceivedTcs.Task, "Fast subscriber should have received event without waiting 10s for slow subscriber");
+        (await fastReceivedTcs.Task.WaitAsync(TimeSpan.FromSeconds(3))).ShouldBeTrue("Fast subscriber should have received event without waiting for the slow subscriber");
 
+        slowGate.TrySetResult();
         await bus.DisposeAsync();
     }
 

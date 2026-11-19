@@ -245,7 +245,7 @@ public sealed class X1StartupTests
 
         var start = reporter.StartAsync(CancellationToken.None);
 
-        (await Task.WhenAny(start, Task.Delay(TimeSpan.FromSeconds(2)))).ShouldBeSameAs(start, "StartAsync waited for the store");
+        await start.WaitAsync(TimeSpan.FromSeconds(2)); // StartAsync must not wait for the store
         release.SetResult([Orders()]);
         await reporter.ExecuteTask!;
         await reporter.StopAsync(CancellationToken.None);

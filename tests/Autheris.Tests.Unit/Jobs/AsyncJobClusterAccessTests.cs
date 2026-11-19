@@ -323,7 +323,7 @@ public sealed class AsyncJobClusterAccessTests : IDisposable
             {
                 var ct = call.Arg<CancellationToken>();
                 tokenSeen.TrySetResult(ct);
-                await Task.Delay(Timeout.Infinite, ct);
+                await Autheris.Tests.Common.Hang.UntilCancelledAsync(ct);
                 return AsyncJobWorkerConcurrencyTests.EmptyResult();
             });
         var worker = new AsyncQueryJobBackgroundWorker(

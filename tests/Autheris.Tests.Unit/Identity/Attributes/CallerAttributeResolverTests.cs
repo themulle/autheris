@@ -410,7 +410,7 @@ public sealed class CallerAttributeResolverTests : IDisposable
     [Fact]
     public async Task ProviderTimeout_IsFailed_AndCountsAsAnInfrastructureFailure()
     {
-        var provider = new FakeProvider { Behavior = async (_, _, ct) => { await Task.Delay(Timeout.Infinite, ct); return Raw("x"); } };
+        var provider = new FakeProvider { Behavior = async (_, _, ct) => { await Autheris.Tests.Common.Hang.UntilCancelledAsync(ct); return Raw("x"); } };
         var resolver = Create(null, Registry(Def()), provider);
         var pending = Resolve(resolver, User());
         await WaitHelper.WaitUntil(() => Volatile.Read(ref provider.Calls) >= 1, WaitHelper.HangGuard, "the provider was never invoked");

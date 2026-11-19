@@ -563,7 +563,7 @@ public sealed class WebSqlHeterogeneousJoinTests
             .Returns(async callInfo =>
             {
                 var token = callInfo.Arg<CancellationToken>();
-                await Task.Delay(5000, token);
+                await Autheris.Tests.Common.Hang.UntilCancelledAsync(token);
                 return (IReadOnlyList<OlapTableSource>)Array.Empty<OlapTableSource>();
             });
 

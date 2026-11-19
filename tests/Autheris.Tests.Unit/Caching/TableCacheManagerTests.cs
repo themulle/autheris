@@ -28,11 +28,12 @@ public sealed class TableCacheManagerTests
         var table = new TableIdentifier("crm", "public", "customers");
 
         int upstreamCallCount = 0;
+        var loadGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         loader.LoadTableDataAsync(table, Arg.Any<CancellationToken>())
             .Returns(async _ =>
             {
                 Interlocked.Increment(ref upstreamCallCount);
-                await Task.Delay(100); // Artificial latency
+                await loadGate.Task; // upstream stays in flight until the test releases it
 
                 async IAsyncEnumerable<IReadOnlyList<object?>> Rows()
                 {
@@ -84,6 +85,8 @@ public sealed class TableCacheManagerTests
             tasks.Add(Task.Run(async () => await manager.GetOrLoadAsync(table)));
         }
 
+        SpinWait.SpinUntil(() => Volatile.Read(ref upstreamCallCount) > 0, TimeSpan.FromSeconds(10)).ShouldBeTrue();
+        loadGate.TrySetResult();
         var results = await Task.WhenAll(tasks);
 
         // Assert

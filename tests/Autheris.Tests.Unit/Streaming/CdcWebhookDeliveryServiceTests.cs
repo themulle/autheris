@@ -511,7 +511,7 @@ public sealed partial class CdcWebhookDeliveryServiceTests
             yield return e;
             try
             {
-                await Task.Delay(Timeout.Infinite, ct);
+                await Autheris.Tests.Common.Hang.UntilCancelledAsync(ct);
             }
             catch (OperationCanceledException)
             {
@@ -537,7 +537,7 @@ public sealed partial class CdcWebhookDeliveryServiceTests
         {
             try
             {
-                await Task.Delay(Timeout.Infinite, ct);
+                await Autheris.Tests.Common.Hang.UntilCancelledAsync(ct);
             }
             catch (OperationCanceledException)
             {

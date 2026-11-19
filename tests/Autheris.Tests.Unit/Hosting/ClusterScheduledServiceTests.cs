@@ -245,7 +245,7 @@ public sealed class ClusterScheduledServiceTests
         var lease = new FakeLease(1);
         h.State.TryAcquireLeaseAsync(Arg.Any<string>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<IDistributedLease?>(lease));
-        h.Probe.Behaviour = ct => Task.Delay(Timeout.Infinite, ct);
+        h.Probe.Behaviour = ct => Autheris.Tests.Common.Hang.UntilCancelledAsync(ct);
 
         await h.StartAsync();
         await h.AdvanceAsync(TimeSpan.FromSeconds(6));
@@ -372,7 +372,7 @@ public sealed class ClusterScheduledServiceTests
         var lease = new FakeLease(1);
         h.State.TryAcquireLeaseAsync(Arg.Any<string>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<IDistributedLease?>(lease));
-        h.Probe.Behaviour = ct => Task.Delay(Timeout.Infinite, ct);
+        h.Probe.Behaviour = ct => Autheris.Tests.Common.Hang.UntilCancelledAsync(ct);
 
         await h.StartAsync();
         await h.AdvanceAsync(TimeSpan.FromSeconds(6));

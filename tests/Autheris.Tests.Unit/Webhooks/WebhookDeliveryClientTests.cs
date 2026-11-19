@@ -440,7 +440,7 @@ public sealed class WebhookDeliveryClientTests
     [Fact]
     public async Task Delivery_EgressValidationHang_IsBoundedByTheDeliveryTimeout()
     {
-        var f = new Fixture(timeoutSeconds: 1, validator: async (_, _, ct) => await Task.Delay(Timeout.Infinite, ct));
+        var f = new Fixture(timeoutSeconds: 1, validator: async (_, _, ct) => await Autheris.Tests.Common.Hang.UntilCancelledAsync(ct));
 
         var result = await f.Client.DeliverAsync(Message(), Target(), CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
 
