@@ -458,10 +458,10 @@ public static class ModuleSignerCli
         int sepIdx = trimmed.IndexOfAny(['-', '+']);
         string core = sepIdx >= 0 ? trimmed[..sepIdx] : trimmed;
         string[] parts = core.Split('.');
-        if (parts.Length < 2 || parts.Length > 3 ||
+        if (parts.Length != 3 ||
             !int.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out int major) || major < 0 ||
             !int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out int minor) || minor < 0 ||
-            (parts.Length == 3 && (!int.TryParse(parts[2], NumberStyles.None, CultureInfo.InvariantCulture, out int patch) || patch < 0)))
+            !int.TryParse(parts[2], NumberStyles.None, CultureInfo.InvariantCulture, out int patch) || patch < 0)
         {
             throw new ArgumentException($"Invalid semantic version '{value}'.", paramName);
         }

@@ -99,11 +99,8 @@ public static class ExternalApiPermissions
             return true;
         }
 
-        return !IsServicePrincipal(principal)
-            && !HasAnyExternalScope(principal)
-            && (GatewayPolicies.HasAnyRole(principal, GatewayPolicies.DataStewardOrAdminRoles)
-                || GatewayPolicies.HasAnyRole(principal, GatewayPolicies.SchemaPublisherRoles)
-                || GatewayPolicies.HasAnyRole(principal, GatewayPolicies.McpCallerRoles));
+        // Interactive person tokens may read; discovery decides what each caller sees.
+        return !IsServicePrincipal(principal) && !HasAnyExternalScope(principal);
     }
 
     public static bool AllowsCatalogReadAdmin(ClaimsPrincipal? principal)

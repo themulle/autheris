@@ -334,6 +334,162 @@ public sealed class ModuleLoaderTests : IDisposable
         ex.Reason.ShouldContain("abstractionsVersion");
     }
 
+    [Fact]
+    [Trait("Category", "Security")]
+    public void HostVersion_patch_mismatch_fails_startup()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        CreateSignedSampleModuleDirectory(key, hostVersion: "1.2.0");
+        var loader = new ModuleLoader(publicKeyOverride: key, hostVersion: "1.2.1", isDirectoryWritableOverride: _ => false);
+
+        var ex = Should.Throw<ModuleLoadException>(() => loader.LoadAndConfigureServices(
+            new ServiceCollection(), BuildEnabledConfig("sample"), new FakeHostEnvironment { EnvironmentName = Environments.Production }));
+        ex.Reason.ShouldContain("hostVersion");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void HostVersion_prerelease_mismatch_fails_startup()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        CreateSignedSampleModuleDirectory(key, hostVersion: "1.2.0-rc.1");
+        var loader = new ModuleLoader(publicKeyOverride: key, hostVersion: "1.2.0", isDirectoryWritableOverride: _ => false);
+
+        var ex = Should.Throw<ModuleLoadException>(() => loader.LoadAndConfigureServices(
+            new ServiceCollection(), BuildEnabledConfig("sample"), new FakeHostEnvironment { EnvironmentName = Environments.Production }));
+        ex.Reason.ShouldContain("hostVersion");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void HostVersion_build_metadata_is_ignored()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        CreateSignedSampleModuleDirectory(key, hostVersion: "1.2.0+abc1234");
+        var loader = new ModuleLoader(publicKeyOverride: key, hostVersion: "1.2.0+def5678", isDirectoryWritableOverride: _ => false);
+
+        var result = loader.LoadAndConfigureServices(
+            new ServiceCollection(), BuildEnabledConfig("sample"), new FakeHostEnvironment { EnvironmentName = Environments.Production });
+        result.LoadedModuleIds.ShouldBe(["sample"]);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void ModuleDirectory_not_root_owned_fails_startup()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        CreateSignedSampleModuleDirectory(key);
+        var loader = new ModuleLoader(publicKeyOverride: key, isDirectoryWritableOverride: _ => false, ownerUidProbe: _ => 1000u);
+
+        var ex = Should.Throw<ModuleLoadException>(() => loader.LoadAndConfigureServices(
+            new ServiceCollection(), BuildEnabledConfig("sample"), new FakeHostEnvironment { EnvironmentName = Environments.Production }));
+        ex.Reason.ShouldContain("not owned by root");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void ModuleDirectory_symlink_root_fails_startup()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        CreateSignedSampleModuleDirectory(key);
+        var linkRoot = Path.Combine(Path.GetTempPath(), "autheris_modlink_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateSymbolicLink(linkRoot, _tempRoot);
+        try
+        {
+            var config = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Gateway:Modules:Path"] = linkRoot,
+                    ["Gateway:Modules:Enabled:0"] = "sample",
+                })
+                .Build();
+            var loader = new ModuleLoader(publicKeyOverride: key, isDirectoryWritableOverride: _ => false);
+
+            var ex = Should.Throw<ModuleLoadException>(() => loader.LoadAndConfigureServices(
+                new ServiceCollection(), config, new FakeHostEnvironment { EnvironmentName = Environments.Production }));
+            ex.Reason.ShouldContain("symbolic link");
+        }
+        finally
+        {
+            Directory.Delete(linkRoot);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void ModuleFile_group_or_other_writable_fails_startup()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        CreateSignedSampleModuleDirectory(key);
+        var loader = new ModuleLoader(
+            publicKeyOverride: key,
+            isDirectoryWritableOverride: path => path.EndsWith("Sample.TestModule01.dll", StringComparison.Ordinal));
+
+        var ex = Should.Throw<ModuleLoadException>(() => loader.LoadAndConfigureServices(
+            new ServiceCollection(), BuildEnabledConfig("sample"), new FakeHostEnvironment { EnvironmentName = Environments.Production }));
+        ex.Reason.ShouldContain("Sample.TestModule01.dll");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void ModuleFile_world_writable_bit_fails_startup_on_real_filesystem()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var moduleDir = CreateSignedSampleModuleDirectory(key);
+        File.SetUnixFileMode(Path.Combine(moduleDir, "Sample.TestModule01.dll"), (UnixFileMode)0b110_100_110);
+
+        var ex = Should.Throw<ModuleLoadException>(() => ModuleDirectoryPermissionCheck.VerifyFiles(
+            moduleDir, ["Sample.TestModule01.dll"], isProduction: true, moduleId: "sample"));
+        ex.Reason.ShouldContain("group or others");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Config_cannot_add_trusted_key()
+    {
+        var keyConstants = typeof(ModuleLoader)
+            .GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
+            .Where(f => f.IsLiteral && f.FieldType == typeof(string) && ((string)f.GetRawConstantValue()!).StartsWith("Gateway:Modules:", StringComparison.Ordinal))
+            .Select(f => (string)f.GetRawConstantValue()!)
+            .ToList();
+
+        keyConstants.ShouldNotBeEmpty();
+        foreach (var key in keyConstants)
+        {
+            key.ShouldNotContain("Trusted", Case.Insensitive);
+            key.ShouldNotContain("PublicKey", Case.Insensitive);
+            key.ShouldNotContain("Keyring", Case.Insensitive);
+        }
+
+        // A configured foreign key id or PEM must not make a module signed by another key load.
+        using var embedded = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using var foreign = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        CreateSignedSampleModuleDirectory(foreign);
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Gateway:Modules:Path"] = _tempRoot,
+                ["Gateway:Modules:Enabled:0"] = "sample",
+                ["Gateway:Modules:TrustedKeys:0"] = Convert.ToBase64String(foreign.ExportSubjectPublicKeyInfo()),
+                ["Gateway:Modules:PublicKey"] = foreign.ExportSubjectPublicKeyInfoPem(),
+            })
+            .Build();
+        var loader = new ModuleLoader(publicKeyOverride: embedded, isDirectoryWritableOverride: _ => false);
+
+        Should.Throw<ModuleLoadException>(() => loader.LoadAndConfigureServices(
+            new ServiceCollection(), config, new FakeHostEnvironment { EnvironmentName = Environments.Production }));
+    }
+
     private IConfiguration BuildEnabledConfig(string moduleId) =>
         new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
