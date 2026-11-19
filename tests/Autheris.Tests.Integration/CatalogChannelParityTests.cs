@@ -360,7 +360,8 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
     private static Dictionary<string, string> MaskingStatesOf(string detailJson)
     {
         using var doc = JsonDocument.Parse(detailJson);
-        return doc.RootElement.GetProperty("columns").EnumerateArray()
+        doc.RootElement.TryGetProperty("columns", out var columns).ShouldBeTrue(detailJson);
+        return columns.EnumerateArray()
             .ToDictionary(c => c.GetProperty("name").GetString()!, c => c.GetProperty("maskingState").GetString()!);
     }
 
@@ -371,7 +372,11 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
         var cluster = await ClientAsync("S-ROOT", TenantB, "ClusterAdmin", factory);
         var clusterList = await BodyAsync(await cluster.GetAsync("/api/v1/catalog/datasets"));
         clusterList.ShouldContain("hid_t");
-        (await BodyAsync(await cluster.GetAsync("/api/v1/catalog/datasets/dom_s.main.sum_t"))).ShouldContain("tier_secret_col");
+        // The administrator sees the table, but a column is listed only when the caller holds access to it (no administrator bypass).
+        var clusterDetail = await cluster.GetAsync("/api/v1/catalog/datasets/dom_s.main.sum_t");
+        clusterDetail.StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await BodyAsync(clusterDetail)).ShouldContain("sum_t");
+        MaskingStatesOf(await BodyAsync(clusterDetail)).ShouldBeEmpty();
 
         // WP-DT-4: a truly tenant-less principal (Multi, no default tenant) is refused at the gate (S6, 403 TENANT_UNRESOLVED) ...
         var tenantless = await ClientAsync("S-ADM", null, "GovernanceAdmin", factory);
@@ -435,7 +440,7 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
     }
 
     private static Task<string> GraphQlCatalogAsync(HttpClient client) => PostGraphQlAsync(client,
-        "query { catalog { tableName columnNames columns { name } } catalogObject(domain: \"dom_a\", schema: \"main\", name: \"orders_a\") { columnNames columns { name } } }");
+        "query { catalog(first: 10) { tableName columnNames columns { name } } catalogObject(domain: \"dom_a\", schema: \"main\", name: \"orders_a\") { columnNames columns { name } } }");
 
     private static IReadOnlyList<string> SchemaColumnNames(string json)
     {
@@ -477,6 +482,7 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
         {
             Table = new Table { Id = Guid.NewGuid(), DisplayName = VaultA.TableName, TableName = VaultA.TableName, SchemaName = VaultA.Schema, SourceType = "PostgreSql", SourceName = VaultA.Domain, Description = "Ungranted vault" },
             Identifier = VaultA,
+            OwnerTenantId = TenantA,
             Columns = new List<TableColumn>
             {
                 new() { ColumnName = "id", DataType = "integer" },
@@ -510,7 +516,7 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
         // REST objects (person view).
         var objectsClient = await ClientAsync("S-A-USER", TenantA, "Reader");
         objectsClient.DefaultRequestHeaders.Add("X-Test-Scope", "Autheris.Catalog.Read");
-        var objects = await objectsClient.GetAsync("/api/v1/catalog/objects");
+        var objects = await objectsClient.GetAsync("/api/v1/catalog/objects?pageSize=100");
         objects.StatusCode.ShouldBe(HttpStatusCode.OK);
         var objectsBody = await BodyAsync(objects);
         objectsBody.ShouldContain("vault_a");
@@ -520,7 +526,7 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
 
         // GraphQL.
         var graphQl = await PostGraphQlAsync(client,
-            "query { catalog { tableName columnNames columns { name description } } "
+            "query { catalog(first: 10) { tableName columnNames columns { name description } } "
             + "catalogObject(domain: \"dom_a\", schema: \"main\", name: \"vault_a\") { columnNames columns { name description } } }");
         graphQl.ShouldNotContain(DeniedColumn);
         graphQl.ShouldNotContain(DeniedDescription);
@@ -547,7 +553,7 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
         client.DefaultRequestHeaders.Add("X-Test-AppId", "web-client");
         client.DefaultRequestHeaders.Add("X-Test-Scope", "Autheris.Catalog.Read");
 
-        var response = await client.GetAsync("/api/v1/catalog/objects");
+        var response = await client.GetAsync("/api/v1/catalog/objects?pageSize=100");
 
         // A token with a user subject and a client id never receives the unfiltered service-principal view.
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
@@ -609,7 +615,7 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
         var scoped = await ClientAsync("S-A-USER", TenantA, "Reader");
         scoped.DefaultRequestHeaders.Add("X-Test-Scope", "Agent.Read");
         const string dataset = "dom_a.main.scoped_a";
-        const string graphQlQuery = "query { catalogObject(domain: \"dom_a\", schema: \"main\", name: \"scoped_a\") { columnNames } catalog { tableName columnNames } }";
+        const string graphQlQuery = "query { catalogObject(domain: \"dom_a\", schema: \"main\", name: \"scoped_a\") { columnNames } catalog(first: 10) { tableName columnNames } }";
 
         // Reference: without the scope the column is listed on both channels, so its absence below is caused by the scope.
         await using (var plainMcp = await McpTestClient.ConnectAsync(plain))
@@ -644,7 +650,7 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
 
         var (_, schema) = await McpTestClient.CallAsync(mcp, "get_table_schema", new { dataset = "dom_b.main.invoices_b" });
         var (_, permissions) = await McpTestClient.CallAsync(mcp, "get_my_permissions", new { dataset = "dom_b.main.invoices_b" });
-        var graphQl = await PostGraphQlAsync(client, "query { catalog { tableName columnNames columns { name } } }");
+        var graphQl = await PostGraphQlAsync(client, "query { catalog(first: 10) { tableName columnNames columns { name } } }");
 
         foreach (var column in new[] { "secret_note", "amount" })
         {
