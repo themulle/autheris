@@ -1,4 +1,5 @@
 using System;
+using System.Data;
 using System.Data.Common;
 using System.Globalization;
 using System.Text;
@@ -92,10 +93,14 @@ internal sealed class AccessProfileStore(
         var pairs = new List<(string ProfileId, AccessProfileAssignment Assignment)>();
         await using var scope = await open(false, ct).ConfigureAwait(false);
 
+        // One snapshot for the profile rows and the item rows, so a concurrent upsert is never seen half applied (old mode with new tables).
+        await using var readTx = await scope.Connection.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct).ConfigureAwait(false);
+
         for (var offset = 0; offset < terms.Count; offset += MaxTermsPerStatement)
         {
             var chunk = terms.Skip(offset).Take(MaxTermsPerStatement).ToList();
             await using var cmd = scope.Connection.CreateCommand();
+            cmd.Transaction = readTx;
             var sql = new StringBuilder($"SELECT {ProfileColumns}, {AssignmentColumns} FROM ACCESS_PROFILES p JOIN ACCESS_PROFILE_ASSIGNMENTS a " +
                                         "ON p.tenant_id = a.tenant_id AND p.profile_id = a.profile_id WHERE p.tenant_id = @tenantId AND (");
             AddParam(cmd, "@tenantId", tenantId.Value);
@@ -136,7 +141,7 @@ internal sealed class AccessProfileStore(
         if (rows.Count > 0)
         {
             // The mode and the table entries come from the item tables (one batched, tenant-filtered query each); a failure throws, so no profile is built from a partial read.
-            var details = await LoadProfileDetailsAsync(scope.Connection, tenantId, rows.Keys.ToList(), null, ct).ConfigureAwait(false);
+            var details = await LoadProfileDetailsAsync(scope.Connection, tenantId, rows.Keys.ToList(), readTx, ct).ConfigureAwait(false);
             var built = new Dictionary<string, AccessProfile>(StringComparer.Ordinal);
             foreach (var (profileId, assignment) in pairs)
             {
@@ -160,19 +165,28 @@ internal sealed class AccessProfileStore(
             }
         }
 
+        await readTx.CommitAsync(ct).ConfigureAwait(false);
         return AccessProfileAssignmentRules.Order(byId.Values);
     }
 
     public async Task<IReadOnlyList<AccessProfile>> GetAllProfilesAsync(TenantId tenantId, CancellationToken ct)
     {
         await using var scope = await open(false, ct).ConfigureAwait(false);
-        return await LoadProfilesAsync(scope.Connection, tenantId, null, ct).ConfigureAwait(false);
+        return await LoadProfilesSnapshotAsync(scope.Connection, tenantId, null, ct).ConfigureAwait(false);
     }
 
     public async Task<AccessProfile?> GetProfileAsync(TenantId tenantId, string profileId, CancellationToken ct)
     {
         await using var scope = await open(false, ct).ConfigureAwait(false);
-        return (await LoadProfilesAsync(scope.Connection, tenantId, profileId, ct).ConfigureAwait(false)).FirstOrDefault();
+        return (await LoadProfilesSnapshotAsync(scope.Connection, tenantId, profileId, ct).ConfigureAwait(false)).FirstOrDefault();
+    }
+
+    private async Task<List<AccessProfile>> LoadProfilesSnapshotAsync(DbConnection conn, TenantId tenantId, string? profileId, CancellationToken ct)
+    {
+        await using var tx = await conn.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct).ConfigureAwait(false);
+        var profiles = await LoadProfilesAsync(conn, tenantId, profileId, ct, tx).ConfigureAwait(false);
+        await tx.CommitAsync(ct).ConfigureAwait(false);
+        return profiles;
     }
 
     private async Task<List<AccessProfile>> LoadProfilesAsync(DbConnection conn, TenantId tenantId, string? profileId, CancellationToken ct, DbTransaction? tx = null)

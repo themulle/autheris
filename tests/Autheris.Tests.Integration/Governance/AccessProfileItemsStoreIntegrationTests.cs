@@ -1,21 +1,37 @@
 namespace Autheris.Tests.Integration.Governance;
 
 using System;
+using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
+using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
-using Npgsql;
-using NSubstitute;
+using Autheris.Tests.Common;
+using Autheris.Tests.Integration.Governance.Contract;
 using Shouldly;
 using Xunit;
 
-/// <summary>Profile items store (PostgreSQL): the table entries and the masking level live in item rows, tenant isolated, atomic and removed with the profile.</summary>
-[Trait("Category", "Security")]
-public sealed class AccessProfileItemsStoreIntegrationTests
+/// <summary>Profile items store on PostgreSQL and SQL Server: the table entries and the masking level live in item rows, tenant isolated, atomic and removed with the profile.</summary>
+public abstract class AccessProfileItemsStoreIntegrationTests : IAsyncLifetime
 {
-    private static readonly TenantId TenantA = new("tenant-a");
-    private static readonly TenantId TenantB = new("tenant-b");
+    protected GovernanceTestStore Store { get; private set; } = null!;
+
+    private IAccessProfileRepository Repo => Store.AccessProfiles;
+
+    protected abstract Task<GovernanceTestStore> CreateStoreAsync();
+
+    public async Task InitializeAsync() => Store = await CreateStoreAsync();
+
+    public async Task DisposeAsync()
+    {
+        if (Store is not null)
+        {
+            await Store.DisposeAsync();
+        }
+    }
+
+    private static string Id(string prefix) => prefix + "-" + Guid.NewGuid().ToString("N")[..10];
 
     private static AccessProfile Profile(TenantId tenant, string id, MaskingPolicyMode mode, params string[] tables) => new()
     {
@@ -28,24 +44,25 @@ public sealed class AccessProfileItemsStoreIntegrationTests
         CreatedBy = "admin@autheris.internal"
     };
 
-    private static async Task<long> ScalarAsync(string connectionString, string sql)
+    private async Task<long> CountAsync(string sql)
     {
-        await using var raw = new NpgsqlConnection(connectionString);
-        await raw.OpenAsync();
-        await using var cmd = raw.CreateCommand();
+        await using var conn = await Store.OpenConnectionAsync();
+        await using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
         return Convert.ToInt64(await cmd.ExecuteScalarAsync());
     }
 
-    [Fact]
+    [RequiresContainerRuntimeFact]
+    [Trait("Category", "Security")]
     public async Task Items_TenantA_NeverVisibleToTenantB()
     {
-        using var repo = GovernanceTestDatabase.CreateRepository(Substitute.For<IEpochValidationService>());
-        await repo.UpsertProfileAsync(Profile(TenantA, "shared-id", MaskingPolicyMode.Unmasked, "sales.*", "hr.people"));
-        await repo.UpsertProfileAsync(Profile(TenantB, "shared-id", MaskingPolicyMode.Strict, "ops.*"));
+        if (!Store.IsAvailable) return;
+        var id = Id("shared");
+        await Repo.UpsertProfileAsync(Profile(Store.TenantA, id, MaskingPolicyMode.Unmasked, "sales.*", "hr.people"));
+        await Repo.UpsertProfileAsync(Profile(Store.TenantB, id, MaskingPolicyMode.Strict, "ops.*"));
 
-        var a = (await repo.GetProfileAsync(TenantA, "shared-id"))!;
-        var b = (await repo.GetProfileAsync(TenantB, "shared-id"))!;
+        var a = (await Repo.GetProfileAsync(Store.TenantA, id))!;
+        var b = (await Repo.GetProfileAsync(Store.TenantB, id))!;
 
         a.TargetTables.ShouldBe(["sales.*", "hr.people"]);
         a.MaskingMode.ShouldBe(MaskingPolicyMode.Unmasked);
@@ -53,47 +70,101 @@ public sealed class AccessProfileItemsStoreIntegrationTests
         b.MaskingMode.ShouldBe(MaskingPolicyMode.Strict);
     }
 
-    [Fact]
+    [RequiresContainerRuntimeFact]
+    [Trait("Category", "Security")]
     public async Task DeleteProfile_RemovesItemsAndClassificationRows()
     {
-        using var repo = GovernanceTestDatabase.CreateRepository(Substitute.For<IEpochValidationService>(), out var connectionString);
-        await repo.UpsertProfileAsync(Profile(TenantA, "to-delete", MaskingPolicyMode.Default, "sales.*", "hr.*"));
-        (await ScalarAsync(connectionString, "SELECT COUNT(*) FROM access_profile_items WHERE profile_id = 'to-delete'")).ShouldBe(2);
+        if (!Store.IsAvailable) return;
+        var id = Id("del");
+        await Repo.UpsertProfileAsync(Profile(Store.TenantA, id, MaskingPolicyMode.Default, "sales.*", "hr.*"));
+        (await CountAsync($"SELECT COUNT(*) FROM ACCESS_PROFILE_ITEMS WHERE profile_id = '{id}'")).ShouldBe(2);
 
-        (await repo.DeleteProfileAsync(TenantA, "to-delete")).ShouldBeTrue();
+        (await Repo.DeleteProfileAsync(Store.TenantA, id)).ShouldBeTrue();
 
-        (await ScalarAsync(connectionString, "SELECT COUNT(*) FROM access_profile_items WHERE profile_id = 'to-delete'")).ShouldBe(0);
-        (await ScalarAsync(connectionString, "SELECT COUNT(*) FROM access_profile_classification_access WHERE profile_id = 'to-delete'")).ShouldBe(0);
+        (await CountAsync($"SELECT COUNT(*) FROM ACCESS_PROFILE_ITEMS WHERE profile_id = '{id}'")).ShouldBe(0);
+        (await CountAsync($"SELECT COUNT(*) FROM ACCESS_PROFILE_CLASSIFICATION_ACCESS WHERE profile_id = '{id}'")).ShouldBe(0);
     }
 
-    [Fact]
+    [RequiresContainerRuntimeFact]
+    [Trait("Category", "Security")]
     public async Task ConcurrentUpsertSameProfile_ResultIsOneWritersCompleteState()
     {
-        using var repo = GovernanceTestDatabase.CreateRepository(Substitute.For<IEpochValidationService>());
-        await repo.UpsertProfileAsync(Profile(TenantA, "race", MaskingPolicyMode.Default, "seed.*"));
-        var writerOne = Profile(TenantA, "race", MaskingPolicyMode.Strict, "one.a", "one.b", "one.c");
-        var writerTwo = Profile(TenantA, "race", MaskingPolicyMode.Unmasked, "two.a", "two.b");
+        if (!Store.IsAvailable) return;
+        var id = Id("race");
+        await Repo.UpsertProfileAsync(Profile(Store.TenantA, id, MaskingPolicyMode.Default, "seed.*"));
+        var writerOne = Profile(Store.TenantA, id, MaskingPolicyMode.Strict, "one.a", "one.b", "one.c");
+        var writerTwo = Profile(Store.TenantA, id, MaskingPolicyMode.Unmasked, "two.a", "two.b");
 
-        await Task.WhenAll(Enumerable.Range(0, 10).Select(i => repo.UpsertProfileAsync(i % 2 == 0 ? writerOne : writerTwo)));
+        await Task.WhenAll(Enumerable.Range(0, 10).Select(i => Repo.UpsertProfileAsync(i % 2 == 0 ? writerOne : writerTwo)));
 
-        var result = (await repo.GetProfileAsync(TenantA, "race"))!;
-        var one = result.MaskingMode == MaskingPolicyMode.Strict && result.TargetTables.SequenceEqual(["one.a", "one.b", "one.c"]);
-        var two = result.MaskingMode == MaskingPolicyMode.Unmasked && result.TargetTables.SequenceEqual(["two.a", "two.b"]);
-        (one || two).ShouldBeTrue("the stored profile is always one writer's complete state");
+        IsCompleteState((await Repo.GetProfileAsync(Store.TenantA, id))!).ShouldBeTrue("the stored profile is always one writer's complete state");
     }
 
-    [Fact]
+    [RequiresContainerRuntimeFact]
+    [Trait("Category", "Security")]
+    public async Task ConcurrentReadsDuringUpserts_NeverSeeAMixedState()
+    {
+        if (!Store.IsAvailable) return;
+        var id = Id("mix");
+        await Repo.UpsertProfileAsync(Profile(Store.TenantA, id, MaskingPolicyMode.Strict, "one.a", "one.b", "one.c"));
+        var writerOne = Profile(Store.TenantA, id, MaskingPolicyMode.Strict, "one.a", "one.b", "one.c");
+        var writerTwo = Profile(Store.TenantA, id, MaskingPolicyMode.Unmasked, "two.a", "two.b");
+        var mixed = 0;
+
+        var writers = Task.Run(async () =>
+        {
+            for (var i = 0; i < 20; i++)
+            {
+                await Repo.UpsertProfileAsync(i % 2 == 0 ? writerTwo : writerOne);
+            }
+        });
+        var readers = Enumerable.Range(0, 3).Select(_ => Task.Run(async () =>
+        {
+            for (var i = 0; i < 40; i++)
+            {
+                var read = await Repo.GetProfileAsync(Store.TenantA, id);
+                if (read is null || !IsCompleteState(read))
+                {
+                    Interlocked.Increment(ref mixed);
+                }
+            }
+        })).ToArray();
+
+        await Task.WhenAll(readers.Append(writers));
+
+        mixed.ShouldBe(0, "a read never combines the mode of one write with the tables of another");
+    }
+
+    [RequiresContainerRuntimeFact]
+    [Trait("Category", "Security")]
     public async Task UpsertFailureMidway_RollsBackItemsAndLevel()
     {
-        using var repo = GovernanceTestDatabase.CreateRepository(Substitute.For<IEpochValidationService>());
-        await repo.UpsertProfileAsync(Profile(TenantA, "atomic", MaskingPolicyMode.Default, "keep.*"));
-        var failing = Profile(TenantA, "atomic", MaskingPolicyMode.Strict, "replaced.*");
+        if (!Store.IsAvailable) return;
+        var id = Id("atomic");
+        await Repo.UpsertProfileAsync(Profile(Store.TenantA, id, MaskingPolicyMode.Default, "keep.*"));
+        var failing = Profile(Store.TenantA, id, MaskingPolicyMode.Strict, "replaced.*");
         failing.Assignments.Add(new AccessProfileAssignment { Subject = "analysts", SubjectType = AccessProfileSubjectType.Role });
 
-        await Should.ThrowAsync<Exception>(() => repo.UpsertProfileAsync(failing));
+        await Should.ThrowAsync<Exception>(() => Repo.UpsertProfileAsync(failing));
 
-        var stored = (await repo.GetProfileAsync(TenantA, "atomic"))!;
+        var stored = (await Repo.GetProfileAsync(Store.TenantA, id))!;
         stored.TargetTables.ShouldBe(["keep.*"]);
         stored.MaskingMode.ShouldBe(MaskingPolicyMode.Default);
     }
+
+    private static bool IsCompleteState(AccessProfile p) =>
+        (p.MaskingMode == MaskingPolicyMode.Strict && p.TargetTables.SequenceEqual(["one.a", "one.b", "one.c"])) ||
+        (p.MaskingMode == MaskingPolicyMode.Unmasked && p.TargetTables.SequenceEqual(["two.a", "two.b"]));
+}
+
+[Collection(GovernancePostgresCollection.Name)]
+public sealed class PostgreSqlAccessProfileItemsStoreIntegrationTests(GovernancePostgresFixture fixture) : AccessProfileItemsStoreIntegrationTests
+{
+    protected override Task<GovernanceTestStore> CreateStoreAsync() => GovernanceTestStore.CreatePostgreSqlAsync(fixture, "access_profile_items");
+}
+
+[Collection(GovernanceSqlServerCollection.Name)]
+public sealed class SqlServerAccessProfileItemsStoreIntegrationTests(GovernanceSqlServerFixture fixture) : AccessProfileItemsStoreIntegrationTests
+{
+    protected override Task<GovernanceTestStore> CreateStoreAsync() => GovernanceTestStore.CreateSqlServerAsync(fixture, "access_profile_items");
 }

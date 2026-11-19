@@ -4,7 +4,7 @@
 -- duplicates collapsed); ACCESS_PROFILE_CLASSIFICATION_ACCESS holds the masking mode as the PII level (Strict 0 DENY, Default 1 MASK, Unmasked 2 CLEAR).
 -- Backfill is fail closed: a masking mode that is not Default, Unmasked or Strict, a target_tables value that is not a JSON array, and an entry that
 -- is not a string, is blank or is longer than 512 characters abort the step with the first affected profile id only (never the entry text), nothing is
--- changed and no default is invented. The JSON checks need PostgreSQL 16 or later (IS JSON), so a malformed value never raises a text-echoing cast error.
+-- changed and no default is invented. The JSON checks need PostgreSQL 16 or later (IS JSON), so a malformed value never raises a text-echoing cast error; a \u0000 or surrogate escape (which the jsonb cast would refuse with the entry text) aborts the step here too.
 -- Then the two columns are dropped. The step runs once, in one transaction (a failed run changes nothing).
 -- Rolling upgrade: all nodes must run this build before the step applies. Older builds read and write the dropped masking_mode and target_tables
 -- columns and would fail with an error (fail closed) once the step ran, so no older node may be left running. No dual write, no read fallback to the old columns.
@@ -46,7 +46,7 @@ SELECT CAST('MIG-0031 aborted - target tables are not a JSON array in access pro
 FROM (
     SELECT p.profile_id
     FROM access_profiles p
-    WHERE p.target_tables IS NULL OR NOT (p.target_tables IS JSON ARRAY)
+    WHERE p.target_tables IS NULL OR NOT (p.target_tables IS JSON ARRAY) OR p.target_tables ~* '\\u(0000|d[89a-f])'
     ORDER BY p.tenant_id, p.profile_id
     LIMIT 1
 ) f;
