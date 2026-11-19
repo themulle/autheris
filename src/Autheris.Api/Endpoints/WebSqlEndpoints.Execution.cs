@@ -30,6 +30,28 @@ public static partial class WebSqlEndpoints
     internal const string InvalidRequestBodyMessage = "The request body must be a JSON object with a string 'sql' and an optional 'parameters' object of scalar values.";
     internal const string MissingSqlMessage = "A non-empty SQL statement is required.";
 
+    private const string DuplicateParameterNameMessage = "A parameter name is repeated; names are compared without case and without a leading @.";
+
+    /// <summary>True when two keys name the same parameter after the leading @ is dropped and case is ignored.</summary>
+    internal static bool HasCaseOnlyDuplicateParameterNames(IReadOnlyDictionary<string, object?>? parameters)
+    {
+        if (parameters is null || parameters.Count < 2)
+        {
+            return false;
+        }
+
+        var seen = new HashSet<string>(parameters.Count, StringComparer.OrdinalIgnoreCase);
+        foreach (var key in parameters.Keys)
+        {
+            if (!seen.Add(key.TrimStart('@')))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static async Task WriteRequestValidationErrorAsync(HttpContext httpContext, string code, string message, CancellationToken ct)
     {
         await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, code, message, ct);
@@ -133,6 +155,13 @@ public static partial class WebSqlEndpoints
         if (string.IsNullOrWhiteSpace(sql))
         {
             await WriteRequestValidationErrorAsync(httpContext, Errors.ApiErrorCodes.MissingRequiredField, MissingSqlMessage, ct);
+            return;
+        }
+
+        if (HasCaseOnlyDuplicateParameterNames(parameters))
+        {
+            // Two spellings of one name are ambiguous; the names are not echoed.
+            await WriteRequestValidationErrorAsync(httpContext, ApiErrorCodes.BadRequest, DuplicateParameterNameMessage, ct);
             return;
         }
 
