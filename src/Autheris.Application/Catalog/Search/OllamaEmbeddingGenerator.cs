@@ -59,6 +59,12 @@ public sealed class OllamaEmbeddingGenerator : ICatalogEmbeddingGenerator
             return false;
         }
 
+        // Loopback targets are always refused by the outbound egress policy: fail at configuration time instead of at call time.
+        if (IsLoopbackHost(uri.Host))
+        {
+            return false;
+        }
+
         // SSRF Defense: reject cloud metadata endpoints (e.g. AWS/GCP/Azure 169.254.169.254)
         var host = uri.Host;
         if (string.Equals(host, "169.254.169.254", StringComparison.OrdinalIgnoreCase) ||
@@ -69,6 +75,16 @@ public sealed class OllamaEmbeddingGenerator : ICatalogEmbeddingGenerator
         }
 
         return true;
+    }
+
+    /// <summary>True for <c>localhost</c> and loopback IP literals (127.0.0.0/8, ::1).</summary>
+    public static bool IsLoopbackHost(string host)
+    {
+        var h = host.Trim().TrimEnd('.');
+        if (h.Length > 1 && h[0] == '[' && h[^1] == ']') h = h[1..^1];
+        return string.Equals(h, "localhost", StringComparison.OrdinalIgnoreCase) ||
+               h.EndsWith(".localhost", StringComparison.OrdinalIgnoreCase) ||
+               (System.Net.IPAddress.TryParse(h, out var ip) && System.Net.IPAddress.IsLoopback(ip.IsIPv4MappedToIPv6 ? ip.MapToIPv4() : ip));
     }
 
     public ReadOnlyMemory<float> GenerateNormalizedEmbedding(string text)

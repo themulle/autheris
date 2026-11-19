@@ -24,9 +24,10 @@ public static class EgressIntegrations
     public const string Cdn = "Cdn";
     public const string Databricks = "Databricks";
     public const string Webhooks = "Webhooks";
+    public const string CatalogEmbeddings = "CatalogEmbeddings";
 
     /// <summary>Integrations that may be listed in <see cref="OutboundEgressOptions.TrustedIntegrations"/>.</summary>
-    public static IReadOnlyList<string> AllowlistCapable { get; } = [OpenApiIngestion, OpenMetadata, Lineage, Cdn, Webhooks];
+    public static IReadOnlyList<string> AllowlistCapable { get; } = [OpenApiIngestion, OpenMetadata, Lineage, Cdn, Webhooks, CatalogEmbeddings];
 }
 
 /// <summary>

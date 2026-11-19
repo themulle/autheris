@@ -152,7 +152,7 @@ public sealed class CatalogSearchQueryHardeningTests
     public async Task Ollama_SyncEmbedding_IsBoundedByTheTimeout_InsteadOfBlockingIndefinitely()
     {
         using var httpClient = new HttpClient(new HangingHandler()) { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
-        var generator = new OllamaEmbeddingGenerator("http://localhost:11434", "nomic-embed-text", 384, httpClient, null, TimeSpan.FromMilliseconds(200));
+        var generator = new OllamaEmbeddingGenerator("https://ollama.example.net:11434", "nomic-embed-text", 384, httpClient, null, TimeSpan.FromMilliseconds(200));
 
         // The handler hangs forever: the call only returns (inside the hang guard) if the 200 ms timeout is enforced.
         var vector = await WaitHelper.RunGuarded(() => generator.GenerateNormalizedEmbedding("customer orders"));
@@ -164,7 +164,7 @@ public sealed class CatalogSearchQueryHardeningTests
     public async Task Ollama_AsyncEmbedding_PropagatesCallerCancellation()
     {
         using var httpClient = new HttpClient(new HangingHandler()) { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
-        var generator = new OllamaEmbeddingGenerator("http://localhost:11434", "nomic-embed-text", 384, httpClient);
+        var generator = new OllamaEmbeddingGenerator("https://ollama.example.net:11434", "nomic-embed-text", 384, httpClient);
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
 
         var ex = await Record.ExceptionAsync(() => generator.GenerateNormalizedEmbeddingsAsync(["a", "b"], cts.Token));
