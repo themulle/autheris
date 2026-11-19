@@ -66,33 +66,31 @@ public sealed class WorkloadIdentitySubjectRoleTests : IClassFixture<WorkloadIde
                 builder.UseSetting("Gateway:Authentication:Mode", "Direct");
                 builder.ConfigureServices(services => services.PostConfigure<Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerOptions>(
                     "Bearer:realm:cluster-a", MarkReadOnlyForScope));
-                builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new System.Collections.Generic.Dictionary<string, string?>
-                {
-                    ["Gateway:Tenancy:DefaultTenantId"] = TenantA,
-                    ["Authentication:Realms:Realms:cluster-a:Kind"] = "GenericOidc",
-                    ["Authentication:Realms:Realms:cluster-a:Issuers:0"] = IssuerA,
-                    ["Authentication:Realms:Realms:cluster-a:Audiences:0"] = Audience,
-                    ["Authentication:Realms:Realms:cluster-a:UserKeyClaim"] = "sub",
-                    ["Authentication:Realms:Realms:cluster-a:FixedTenantId"] = TenantA,
-                    ["Authentication:Realms:Realms:cluster-a:Provisioning"] = "None",
-                    ["Authentication:Realms:Realms:cluster-a:ResolverChain:0"] = "subject-roles",
-                    ["Authentication:Realms:Realms:cluster-a:AllowedGatewayRoles:0"] = "ClusterAdmin",
-                    ["Authentication:Realms:Realms:cluster-a:AllowPrivilegedSubjectRoles"] = "true",
-                    ["Authentication:Realms:Realms:cluster-a:Jwks:File"] = fileA,
-                    ["Authentication:Realms:Realms:cluster-a:SubjectRoles:0:Subject"] = MappedSubject,
-                    ["Authentication:Realms:Realms:cluster-a:SubjectRoles:0:Roles:0"] = "ClusterAdmin",
-                    ["Authentication:Realms:Realms:cluster-b:Kind"] = "GenericOidc",
-                    ["Authentication:Realms:Realms:cluster-b:Issuers:0"] = IssuerB,
-                    ["Authentication:Realms:Realms:cluster-b:Audiences:0"] = Audience,
-                    ["Authentication:Realms:Realms:cluster-b:UserKeyClaim"] = "sub",
-                    ["Authentication:Realms:Realms:cluster-b:FixedTenantId"] = TenantB,
-                    ["Authentication:Realms:Realms:cluster-b:Provisioning"] = "None",
-                    ["Authentication:Realms:Realms:cluster-b:ResolverChain:0"] = "subject-roles",
-                    ["Authentication:Realms:Realms:cluster-b:AllowedGatewayRoles:0"] = "TenantAdmin",
-                    ["Authentication:Realms:Realms:cluster-b:Jwks:File"] = fileB,
-                    ["Authentication:Realms:Realms:cluster-b:SubjectRoles:0:Subject"] = MappedSubject,
-                    ["Authentication:Realms:Realms:cluster-b:SubjectRoles:0:Roles:0"] = "TenantAdmin"
-                }));
+                // Host settings (not ConfigureAppConfiguration): the realm schemes are registered from the configuration available at service registration.
+                builder.UseSetting("Gateway:Tenancy:DefaultTenantId", TenantA);
+                builder.UseSetting("Authentication:Realms:Realms:cluster-a:Kind", "GenericOidc");
+                builder.UseSetting("Authentication:Realms:Realms:cluster-a:Issuers:0", IssuerA);
+                builder.UseSetting("Authentication:Realms:Realms:cluster-a:Audiences:0", Audience);
+                builder.UseSetting("Authentication:Realms:Realms:cluster-a:UserKeyClaim", "sub");
+                builder.UseSetting("Authentication:Realms:Realms:cluster-a:FixedTenantId", TenantA);
+                builder.UseSetting("Authentication:Realms:Realms:cluster-a:Provisioning", "None");
+                builder.UseSetting("Authentication:Realms:Realms:cluster-a:ResolverChain:0", "subject-roles");
+                builder.UseSetting("Authentication:Realms:Realms:cluster-a:AllowedGatewayRoles:0", "ClusterAdmin");
+                builder.UseSetting("Authentication:Realms:Realms:cluster-a:AllowPrivilegedSubjectRoles", "true");
+                builder.UseSetting("Authentication:Realms:Realms:cluster-a:Jwks:File", fileA);
+                builder.UseSetting("Authentication:Realms:Realms:cluster-a:SubjectRoles:0:Subject", MappedSubject);
+                builder.UseSetting("Authentication:Realms:Realms:cluster-a:SubjectRoles:0:Roles:0", "ClusterAdmin");
+                builder.UseSetting("Authentication:Realms:Realms:cluster-b:Kind", "GenericOidc");
+                builder.UseSetting("Authentication:Realms:Realms:cluster-b:Issuers:0", IssuerB);
+                builder.UseSetting("Authentication:Realms:Realms:cluster-b:Audiences:0", Audience);
+                builder.UseSetting("Authentication:Realms:Realms:cluster-b:UserKeyClaim", "sub");
+                builder.UseSetting("Authentication:Realms:Realms:cluster-b:FixedTenantId", TenantB);
+                builder.UseSetting("Authentication:Realms:Realms:cluster-b:Provisioning", "None");
+                builder.UseSetting("Authentication:Realms:Realms:cluster-b:ResolverChain:0", "subject-roles");
+                builder.UseSetting("Authentication:Realms:Realms:cluster-b:AllowedGatewayRoles:0", "TenantAdmin");
+                builder.UseSetting("Authentication:Realms:Realms:cluster-b:Jwks:File", fileB);
+                builder.UseSetting("Authentication:Realms:Realms:cluster-b:SubjectRoles:0:Subject", MappedSubject);
+                builder.UseSetting("Authentication:Realms:Realms:cluster-b:SubjectRoles:0:Roles:0", "TenantAdmin");
             });
             return Task.CompletedTask;
         }
