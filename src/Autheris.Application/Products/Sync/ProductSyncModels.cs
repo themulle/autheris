@@ -44,6 +44,9 @@ public static class ProductSyncReasons
     public const string ColumnUnknown = "COLUMN_UNKNOWN";
     public const string TooManyRetirements = "TOO_MANY_RETIREMENTS";
     public const string NotAllowed = "NOT_ALLOWED";
+
+    /// <summary>The drift and retirement scan hit its page limit: the tenant has more products than one scan covers, so the commit is refused instead of scanned partially.</summary>
+    public const string TooManyProducts = "PRODUCT_SYNC_TOO_MANY_PRODUCTS";
 }
 
 /// <summary>The whole commit is refused; nothing was written. <see cref="Reason"/> and <see cref="FileIndex"/> never echo file content.</summary>
