@@ -23,6 +23,7 @@ namespace Autheris.Tests.Integration.Governance.Contract;
 /// Contract suite for <c>IConsumerAggregationRepository</c> (query-name counters and their retention purge) across PostgreSQL and SQL Server engines.
 /// The counter key starts with the tenant; a repeated key accumulates instead of failing; the purge is global, bounded to 1..400 days and decoupled
 /// from every other table. The usage reads that sit on the same counters are covered through <c>IUsageRepository</c>.
+/// Owns the integration cases of SEC-286 (consumer aggregation tables in the governance baselines, bound upserts, visible flush failures).
 /// </summary>
 public abstract class ConsumerAggregationContract : GovernanceContractBase
 {
