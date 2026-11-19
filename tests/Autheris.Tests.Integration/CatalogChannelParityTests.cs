@@ -142,6 +142,7 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
         var client = (factory ?? _factory).CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", sid);
         client.DefaultRequestHeaders.Add("X-Test-Roles", roles);
+        client.DefaultRequestHeaders.Add("GraphQL-Preflight", "1");
         if (tenant != null)
         {
             client.DefaultRequestHeaders.Add("X-Test-Tenant", tenant);
@@ -423,14 +424,18 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
     private const string OrdersDataset = "dom_a.main.orders_a";
     private const string DeniedColumn = "secret_note";
 
-    private static async Task<string> GraphQlCatalogAsync(HttpClient client)
+    // Posts a GraphQL query and fails unless the call succeeded with a data payload, so an error body can never satisfy a ShouldNotContain.
+    private static async Task<string> PostGraphQlAsync(HttpClient client, string query)
     {
-        var response = await client.PostAsJsonAsync("/graphql", new
-        {
-            query = "query { catalog { tableName columnNames columns { name } } catalogObject(domain: \"dom_a\", schema: \"main\", name: \"orders_a\") { columnNames columns { name } } }"
-        });
-        return await BodyAsync(response);
+        var response = await client.PostAsJsonAsync("/graphql", new { query });
+        var body = await BodyAsync(response);
+        response.IsSuccessStatusCode.ShouldBeTrue(body);
+        body.ShouldContain("\"data\"");
+        return body;
     }
+
+    private static Task<string> GraphQlCatalogAsync(HttpClient client) => PostGraphQlAsync(client,
+        "query { catalog { tableName columnNames columns { name } } catalogObject(domain: \"dom_a\", schema: \"main\", name: \"orders_a\") { columnNames columns { name } } }");
 
     private static IReadOnlyList<string> SchemaColumnNames(string json)
     {
@@ -517,7 +522,7 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
             SchemaColumnNames(plainSchema).ShouldContain("ssn");
         }
 
-        (await BodyAsync(await plain.PostAsJsonAsync("/graphql", new { query = graphQlQuery }))).ShouldContain("ssn");
+        (await PostGraphQlAsync(plain, graphQlQuery)).ShouldContain("ssn");
 
         await using var mcp = await McpTestClient.ConnectAsync(scoped);
         var (_, schema) = await McpTestClient.CallAsync(mcp, "get_table_schema", new { dataset });
@@ -532,7 +537,7 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
         permissionNames.ShouldBe(describeNames, ignoreOrder: true);
         describeNames.ShouldNotContain("ssn");
         describeNames.ShouldContain("amount");
-        (await BodyAsync(await scoped.PostAsJsonAsync("/graphql", new { query = graphQlQuery }))).ShouldNotContain("ssn");
+        (await PostGraphQlAsync(scoped, graphQlQuery)).ShouldNotContain("ssn");
     }
 
     [Fact]
@@ -543,7 +548,7 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
 
         var (_, schema) = await McpTestClient.CallAsync(mcp, "get_table_schema", new { dataset = "dom_b.main.invoices_b" });
         var (_, permissions) = await McpTestClient.CallAsync(mcp, "get_my_permissions", new { dataset = "dom_b.main.invoices_b" });
-        var graphQl = await BodyAsync(await client.PostAsJsonAsync("/graphql", new { query = "query { catalog { tableName columnNames columns { name } } }" }));
+        var graphQl = await PostGraphQlAsync(client, "query { catalog { tableName columnNames columns { name } } }");
 
         foreach (var column in new[] { "secret_note", "amount" })
         {
