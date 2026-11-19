@@ -65,3 +65,29 @@
 4. Parameter count limits: each caller name takes exactly one slot (lists take one per element) against `MaxBindParameters` (`SqlEmitterContext.cs:254-257`). Overflow throws `SqlLimitExceededException`. The rename adds no slots.
 5. Unbound emission (`SqlDialectGeneratorBase.Expressions.cs:411-439`) prints raw non-synthetic names for SQL Server and Oracle. The parser never produces a non-synthetic named reference from caller text. Phase 3 confirms that no executable path emits unbound.
 6. Synthetic-reference forgery: `__param_` in the caller text stays refused (`GovernedSqlExecutionService.cs:559-562`), and `__` stays reserved in the emitter regex.
+
+## 6. Phase 3 security conditions
+
+**Verdict: APPROVED WITH CONDITIONS.** Phase 4 must never put `WP-`, `SEC-` or `OD-` identifiers into `src/Autheris.Api` or `src/Autheris.Application` comments.
+
+Verified: caller names reach a slot only through `BindClient` (`SqlEmitterContext.cs:178`), which hard-codes `ParameterOrigin.ClientNamed`. Policy, tenant, mask and page slots use other `Bind` callers with their own origin. The shared binder reads the client map only when `Origin == ClientNamed` (`ICompiledSqlBinder.cs:210`) and fails closed with `MissingClientParameterException` otherwise. The DuckDB fallback (`DuckDbOlapEngine.cs:218`) throws on a `ClientNamed` slot without the compiled binder. Databricks and the checked DML executor use the same `BindCore`. Marker names come only from `MarkerAndName` (ordinal), so a caller name never becomes a marker. The unbound branch of `FormatParameter` (`SqlDialectGeneratorBase.Expressions.cs:420`) is skipped for synthetic references, and every caller-derived reference is synthetic (`SqlAstBuilder.cs:1106`). Plan claims confirmed; one wording correction: threat 5 "prints raw caller names" is unreachable from caller text.
+
+- **SEC-869-01** Narrowing the regex to `\A(__|gql_|autheris)` is approved; `ClientNameRegex` stays ASCII `[A-Za-z0-9_]`, and the reserved regex stays case-insensitive and culture-invariant. (default taken: option b)
+- **SEC-869-02** `Bind`, `BindClient`, `BindZoneClient` and `ICompiledSqlBinder` are not changed by this fix. `bound.Origin == ClientNamed` stays the only branch that reads the client map; no lookup by marker name or ordinal may be added.
+- **SEC-869-03** A caller value must never satisfy or alter a Policy, Tenant, Mask or PageOffset slot. Tests prove it per dialect, with the caller key `p0` colliding with the internal slot of ordinal 0.
+- **SEC-869-04** Case-only duplicate keys (`p0` and `P0`, or `@p0` and `p0`) are refused with 400 now. In `FederatedParameterContract.Create` (`:96-101`) replace the silent `continue` ("first spelling wins") with an `ArgumentException` (same 400 mapping as "cannot be an object"); the message must not echo values. (default taken: 400 now; one-line change, removes dependence on JSON key order.)
+- **SEC-869-05** The unbound emitter stays diagnostic only: a test proves no production path executes SQL produced by a non-bound `SqlEmitterContext`.
+- **SEC-869-06** Reserved-prefix rejection stays 403 `SQL_POLICY_VIOLATION` for `__`, `gql_`, `autheris` and the Application gates; the message must not echo the supplied name or value.
+- **SEC-869-07** The bind budget is unchanged: `MaxBindParameters` still bounds caller plus internal slots (`SqlLimitExceededException`).
+
+Mandatory tests, all `[Trait("Category","Security")]` (the plan's names stay):
+- Unit, local (`TrinoSqlEngine.Tests`, `CompiledSqlBinderTests`), each a `[Theory]` over SqlServer `@p0`, Oracle `:p0`, Postgres, MySQL, SQLite, Databricks, DuckDB:
+  - `ClientParameterNamedP0_DoesNotSatisfyRowFilterBind_PerDialect`
+  - `ClientParameterNamedP0_DoesNotAlterTenantBind_PerDialect`
+  - `ClientParameterNamedP0_DoesNotAlterMaskBind_PerDialect`
+  - `ClientParameterNamedP0_MissingValue_FailsClosed_NoFallbackToInternalSlot`
+  - `ClientParameterNamedP0_InUnboundEmitter_NeverPrintsCallerName`
+- Unit, local (`Autheris.Tests.Unit`): `FederatedParameterContract_CaseOnlyDuplicateKeys_AreRefused`, `ReservedPrefixError_DoesNotEchoNameOrValue`, `DuckDbOlap_ClientNamedSlot_WithoutCompiledBinder_Throws` (if not covered).
+- Architecture, local: `UnboundEmitterContext_IsNeverUsedForExecution`.
+- Integration, GitHub Actions only (compile-check locally), one per dialect with a live container in CI (SQL Server, Oracle, Postgres, MySQL; DuckDB in-process): `Post_Sql_ParameterNamedP0_DoesNotAlterInjectedRowFilter_<Dialect>` (a user with a row filter sends `@p0` with a match-all value; only filtered rows return), plus `Post_Sql_CaseDuplicateParameterKeys_Returns400` and `Post_Sql_ReservedPrefixParameter_Returns403`.
+- Add the new names to `security-tests-base.txt` if the ratchet requires it.

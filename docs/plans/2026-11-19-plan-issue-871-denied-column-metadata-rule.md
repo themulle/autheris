@@ -72,3 +72,34 @@
 - D-T3 Primary keys, required filters and indexes (`QueryShape`, #826) that name a hidden column: Phase 3 decides whether those names are filtered too (recommended: yes, by the same helper; follow-up if it is out of scope).
 - D-T4 `/catalog/changes` reveals that object metadata changed (representation hash includes all columns, `ExternalCatalogReader.cs:207-248`). This is an object-level signal without names; accepted.
 - D-T5 Service-principal view lists every column (D5); Phase 3 confirms that persons can never obtain `IsServicePrincipal`.
+
+## 6. Phase 3 security conditions
+
+**Verdict: CHANGES REQUIRED** (one leak path and one fail-open principal heuristic must join the scope; the rest is approved with the conditions below). Phase 4 must never put `WP-`, `SEC-` or `OD-` identifiers into `src/Autheris.Api` or `src/Autheris.Application` comments.
+
+Verified against `fix/845-838-noaccess-columns`:
+- D-T3 is largely closed already: `DiscoveryAccessMapper.MapQueryShape` (`:154-192`) lists primary keys and indexes only over Clear columns (`DatasetIndexProjection` omits an index whole) and required filters only over listed columns (group only when every member is listed). Residual: `listed` uses `State != NoAccess`, not `IsVisible`.
+- ETags hash the response body; `/catalog/changes` carries ids and seq only. Accepted. GraphQL `columns`, `columnNames` and the `search` over `ColumnNames` (`Query.Catalog.cs:427,525,593`) use the filtered list.
+- **Plan gap, leak:** `DiscoveryAccessMapper.cs:47-51` filters `DiscoveryTableStatistics.PartitionColumns` only by `DiscoveryHidden`, before caller states exist. A denied partition column is named in table statistics on REST `/objects`, GraphQL (`Query.Catalog.cs:439`) and MCP, for granted and ungranted objects.
+- **Plan claim wrong (D5/D-T5):** two different "service principal" predicates exist. `ExternalApiPermissions.IsServicePrincipal` refuses the heuristic branch when a person-id claim exists (`:70-75`). `ExternalCatalogReader.IsAppOnlyPrincipal` (`:743-760`) uses `client id && no scopes && GetUserSid() is null`. A person token with `azp`, no scope claim and no resolvable SID gets the unfiltered app view (it still needs `Autheris.Catalog.Read`, then sees every non-hidden column of every in-scope table). `idtyp=app` and `gty=client-credentials` come from the token issuer, not the caller.
+
+Conditions:
+- **SEC-871-01** D1 to D4 and D6 are approved as written. (default taken: least privilege.) `DiscoveryColumnVisibility.IsVisible` is the only predicate for person-facing column projection; the architecture test in WP-871-3 is binding.
+- **SEC-871-02** `MapQueryShape` uses `IsVisible` for the `listed` set. Primary keys, indexes, required columns and required groups never name a column that is not Clear (keys, indexes) or not visible (filters). Binding, not optional.
+- **SEC-871-03** `PartitionColumns` is filtered to caller-visible columns after states are computed, on every channel (REST, GraphQL, MCP). An ungranted object lists none. An empty list stays empty.
+- **SEC-871-04** Counts (column count, `relevantColumns` length, statistics column counts, score inputs) derive only from the visible list. A term found only in a hidden column's name, description or statistics gives no hit, no highlight and no score change.
+- **SEC-871-05** No error message, audit detail or validation text on a catalog or access-request path contains a column name the caller cannot see. `DiscoveryAccessRequestService` keeps its uniform `InvalidColumns()` for unknown, denied and non-requestable names (verified `:160-175`; pin with a test).
+- **SEC-871-06** Unreachable `default` arms (dataset detail, person view) throw `InvalidOperationException`; they never map to `"Deny"` or `"noaccess"`. The person view emits no hidden-column appendix for any person, including owners and `AllHiddenAllowed`.
+- **SEC-871-07** D5 output stays unchanged, but the trigger is tightened. `IsAppOnlyPrincipal` returns true only on `idtyp=app`, `gty=client-credentials`, or the heuristic branch with no person-id claim (same claim set as `ExternalApiPermissions`). Unify both into one shared predicate so they cannot drift. Ambiguous means person view. A token with a valid SID never gets the app view.
+- **SEC-871-08** Ungranted objects (D3) list table-level metadata only, and a table request needs no column name (pin it).
+
+Mandatory tests, all `[Trait("Category","Security")]`; the plan's WP-871-1..3 names stay and are binding:
+- Unit, local:
+  - `MapQueryShape_UnknownColumnState_NamesNoColumn`, `MapQueryShape_DeniedColumnInCompositeIndex_OmitsIndexWhole`
+  - `Statistics_PartitionColumn_Denied_IsNotNamed_Granted`, `Statistics_PartitionColumn_Denied_IsNotNamed_Ungranted` (mapper), the same assertion on the `ExternalCatalogReader` person view, the GraphQL projection and MCP `describe_dataset`
+  - `Search_HitOnlyInDeniedColumnStatistics_ReturnsNoHit`
+  - `AccessRequest_DeniedAndUnknownColumn_SameErrorShape_NoNameEcho`
+  - `IsAppOnlyPrincipal_PersonWithAzpNoScopeNoSid_IsNotAppView`, `IsAppOnlyPrincipal_PersonWithSid_IsNeverAppView`, `IsAppOnlyPrincipal_IdtypApp_IsAppView`, `IsAppOnlyPrincipal_ClientCredentialsGty_IsAppView`, `AppOnlyPredicate_AgreesWith_ExternalApiPermissions` (theory over the same claim sets)
+  - `GetObject_Person_NeverEmitsNoAccessAccessState`
+- Architecture, local: `NoAccessStateIsOnlyComparedInVisibilityHelperAndMapper` (plan), plus `PartitionColumns_AreOnlyWrittenThroughVisibilityFilter`.
+- Integration, GitHub Actions only (compile-check locally): `DeniedColumn_IsAbsentOnEveryChannel_ForGrantedAndUngrantedObject` (plan) also asserts absence from `statistics.partitionColumns`, `primaryKeyColumns`, `indexes` and `requiredFilterColumns` on REST, GraphQL and MCP; plus `RestCatalogObjects_PersonTokenWithAzpNoScope_ReturnsPersonView`.
