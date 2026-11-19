@@ -24,7 +24,7 @@ public partial class GovernanceRepository
     private async Task HydrateConsentsBatchAsync(DbConnection conn, List<Consent> consents, CancellationToken ct)
     {
         await ConsentSqlCore.HydrateConsentsBatchAsync(conn, consents, ct).ConfigureAwait(false);
-        await ConsentPatternSqlCore.HydrateApprovingOwnersBatchAsync(conn, consents, ct).ConfigureAwait(false);
+        await ConsentPatternSql.HydrateApprovingOwnersBatchAsync(conn, consents, ct).ConfigureAwait(false);
     }
 
     private async Task<IReadOnlyCollection<string>> ResolveDataOwnerIdsInternalAsync(IEnumerable<string> identifiers, CancellationToken ct)

@@ -184,7 +184,7 @@ public partial class GovernanceRepository
             ConsentSqlCore.ReadSubjectConsentRows(reader, table, atTime, subjectSet, seen, consents);
         }
 
-        await ConsentPatternSqlCore.ReadActivePatternConsentsForDomainAsync(
+        await ConsentPatternSql.ReadActivePatternConsentsForDomainAsync(
             conn, table.Domain, tenantId, atTime, subjectSet, seen, consents, ct).ConfigureAwait(false);
         consents.RemoveAll(c => !c.IsActive(atTime) && !(c.Effect == ConsentEffect.Deny && c.ValidFrom > atTime));
         await HydrateConsentsBatchAsync(conn, consents, ct).ConfigureAwait(false);
@@ -243,7 +243,7 @@ public partial class GovernanceRepository
             ConsentSqlCore.ReadAllSubjectConsentRows(reader, effectiveAt, subjectSet, seen, consents);
         }
 
-        await ConsentPatternSqlCore.ReadActivePatternConsentsForDomainAsync(
+        await ConsentPatternSql.ReadActivePatternConsentsForDomainAsync(
             conn, domain: null, tenantId, effectiveAt, subjectSet, seen, consents, ct).ConfigureAwait(false);
         consents.RemoveAll(c => !c.IsActive(effectiveAt) && !(c.Effect == ConsentEffect.Deny && c.ValidFrom > effectiveAt));
         await HydrateConsentsBatchAsync(conn, consents, ct).ConfigureAwait(false);
@@ -431,7 +431,7 @@ public partial class GovernanceRepository
     {
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         var consent = await ConsentSqlCore.ReadConsentByIdRowAsync(conn, consentId, ct).ConfigureAwait(false)
-            ?? await ConsentPatternSqlCore.ReadPatternConsentByIdRowAsync(conn, consentId, ct).ConfigureAwait(false);
+            ?? await ConsentPatternSql.ReadPatternConsentByIdRowAsync(conn, consentId, ct).ConfigureAwait(false);
         if (consent != null)
         {
             await HydrateConsentsBatchAsync(conn, [consent], ct).ConfigureAwait(false);
