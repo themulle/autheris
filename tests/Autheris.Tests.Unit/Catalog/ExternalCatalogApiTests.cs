@@ -50,6 +50,29 @@ public sealed class ExternalCatalogApiTests
     }
 
     [Fact]
+    public async Task CatalogObjects_ViewObject_ReportsKindViewOnListByIdAndKindFilter()
+    {
+        await using var harness = ExternalCatalogTestHarness.Create();
+        var view = harness.AddTable("pg", "v_customers", ownerTenantId: "tenant-a", kind: DiscoveryObjectKind.View);
+        harness.AddTable("pg", "customers", ownerTenantId: "tenant-a");
+        var person = ExternalCatalogTestHarness.BuildDelegatedUserPrincipal("tenant-a", "S-1-5-21-PERSON", scopes: "Apps.Read");
+
+        var list = await harness.ListObjectsAsync(person);
+        var items = list.ReadJson().GetProperty("items").EnumerateArray().ToList();
+        items.Single(i => i.GetProperty("objectId").GetString() == view.Identifier.ToString()).GetProperty("kind").GetString().Should().Be("view");
+        items.Count(i => i.GetProperty("kind").GetString() == "table").Should().Be(1);
+
+        var filtered = await harness.ListObjectsAsync(person, kind: "view");
+        var viewOnly = filtered.ReadJson().GetProperty("items").EnumerateArray().ToList();
+        viewOnly.Should().ContainSingle();
+        viewOnly[0].GetProperty("objectId").GetString().Should().Be(view.Identifier.ToString());
+
+        var byId = await harness.GetObjectByIdAsync(person, view.Table.Id.ToString());
+        byId.StatusCode.Should().Be(StatusCodes.Status200OK);
+        byId.ReadJson().GetProperty("kind").GetString().Should().Be("view");
+    }
+
+    [Fact]
     public async Task CatalogObjects_PersonTokenWithOtherExternalScope_StaysForbidden()
     {
         await using var harness = ExternalCatalogTestHarness.Create();

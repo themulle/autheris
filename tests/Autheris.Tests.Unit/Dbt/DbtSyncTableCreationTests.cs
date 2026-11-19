@@ -37,7 +37,11 @@ public sealed class DbtSyncTableCreationTests
         string Materialized = "table",
         string Kind = "model",
         Col[]? Columns = null,
-        string? Description = null);
+        string? Description = null,
+        string? ObjectKind = null);
+
+    private static Dictionary<string, string> KindMeta(Item item)
+        => item.ObjectKind is null ? [] : new() { ["autheris.object_kind"] = item.ObjectKind };
 
     private static string Manifest(params Item[] items)
     {
@@ -55,7 +59,7 @@ public sealed class DbtSyncTableCreationTests
                 sources[$"source.proj.{item.Database}.{item.Schema}.{item.Name}.{index}"] = new
                 {
                     name = item.Name, database = item.Database, schema = item.Schema, description = item.Description,
-                    tags = new[] { "raw" }, meta = new { }, columns
+                    tags = new[] { "raw" }, meta = KindMeta(item), columns
                 };
             }
             else
@@ -63,7 +67,7 @@ public sealed class DbtSyncTableCreationTests
                 nodes[$"model.proj.{item.Name}.{index}"] = new
                 {
                     name = item.Name, database = item.Database, schema = item.Schema, description = item.Description,
-                    config = new { materialized = item.Materialized }, tags = new[] { "finance" }, meta = new { }, columns,
+                    config = new { materialized = item.Materialized }, tags = new[] { "finance" }, meta = KindMeta(item), columns,
                     depends_on = new { nodes = Array.Empty<string>() }
                 };
             }
@@ -567,5 +571,79 @@ public sealed class DbtSyncTableCreationTests
         result.CreatedTables.ShouldBe(["warehouse.public.fine"]);
         result.SkippedItems.Single().Reason.ShouldBe(DbtSyncSkipReasons.InvalidIdentifier);
         result.SkippedItems.Single().Name.Any(char.IsControl).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Sync_ViewMaterialization_RegistersViewAndOtherMaterializationsTable()
+    {
+        var h = new Harness(Options());
+        await Sync(h.Service, Manifest(
+            Model("v1") with { Materialized = "view" },
+            Model("t1") with { Materialized = "table" },
+            Model("i1") with { Materialized = "incremental" },
+            Model("m1") with { Materialized = "materialized_view" }));
+
+        h.Store["warehouse.public.v1"].Table.ObjectKind.ShouldBe(DiscoveryObjectKind.View);
+        h.Store["warehouse.public.t1"].Table.ObjectKind.ShouldBe(DiscoveryObjectKind.Table);
+        h.Store["warehouse.public.i1"].Table.ObjectKind.ShouldBe(DiscoveryObjectKind.Table);
+        h.Store["warehouse.public.m1"].Table.ObjectKind.ShouldBe(DiscoveryObjectKind.Table);
+    }
+
+    [Fact]
+    public async Task Sync_SourceObjectKindMeta_ViewIsHonouredAndModelMetaIsIgnored()
+    {
+        var h = new Harness(Options());
+        await Sync(h.Service, Manifest(
+            new Item("warehouse", "raw", "v_src", "source", "source", null, null, " VIEW "),
+            new Item("warehouse", "raw", "t_src", "source", "source", null, null, "table"),
+            Model("tbl_model") with { ObjectKind = "view" }));
+
+        h.Store["warehouse.raw.v_src"].Table.ObjectKind.ShouldBe(DiscoveryObjectKind.View);
+        h.Store["warehouse.raw.t_src"].Table.ObjectKind.ShouldBe(DiscoveryObjectKind.Table);
+        h.Store["warehouse.public.tbl_model"].Table.ObjectKind.ShouldBe(DiscoveryObjectKind.Table);
+    }
+
+    [Theory]
+    [InlineData("materialized_view")]
+    [InlineData("")]
+    [InlineData("vie\u0000w")]
+    [InlineData("viewwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww")]
+    [Trait("Category", "Security")]
+    public async Task Sync_InvalidSourceObjectKind_BecomesTableWithBoundedWarningAndDoesNotFailTheSync(string raw)
+    {
+        var h = new Harness(Options());
+        var result = await Sync(h.Service, Manifest(
+            new Item("warehouse", "raw", "odd", "source", "source", null, null, raw),
+            Model("other")));
+
+        result.Success.ShouldBeTrue();
+        h.Store["warehouse.raw.odd"].Table.ObjectKind.ShouldBe(DiscoveryObjectKind.Table);
+        h.Store.ContainsKey("warehouse.public.other").ShouldBeTrue();
+        var warning = result.Warnings.Single(w => w.Contains("autheris.object_kind"));
+        warning.ShouldNotContain("\u0000");
+        var echoed = warning[(warning.IndexOf("kind '", StringComparison.Ordinal) + 6)..warning.IndexOf("', registered", StringComparison.Ordinal)];
+        echoed.Length.ShouldBeLessThanOrEqualTo(64);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Sync_NonClusterAdminCaller_CannotSetKindOnNewOrExistingTables()
+    {
+        var h = new Harness(Options());
+        var caller = new DbtGovernanceImportCaller(new VirtualFilterActor(new Sid("user:bob"), IsSync: false, null), new TenantId("warehouse"));
+        var manifest = Manifest(
+            Model("v1") with { Materialized = "view" },
+            new Item("warehouse", "raw", "v_src", "source", "source", null, null, "view"));
+
+        await h.Service.IngestManifestStreamAsync(new MemoryStream(Encoding.UTF8.GetBytes(manifest)), caller);
+        h.Store["warehouse.public.v1"].Table.ObjectKind.ShouldBe(DiscoveryObjectKind.Table);
+        h.Store["warehouse.raw.v_src"].Table.ObjectKind.ShouldBe(DiscoveryObjectKind.Table);
+
+        await Sync(h.Service, manifest);
+        h.Store["warehouse.public.v1"].Table.ObjectKind.ShouldBe(DiscoveryObjectKind.View);
+
+        var asTable = Manifest(Model("v1"));
+        await h.Service.IngestManifestStreamAsync(new MemoryStream(Encoding.UTF8.GetBytes(asTable)), caller);
+        h.Store["warehouse.public.v1"].Table.ObjectKind.ShouldBe(DiscoveryObjectKind.View);
     }
 }

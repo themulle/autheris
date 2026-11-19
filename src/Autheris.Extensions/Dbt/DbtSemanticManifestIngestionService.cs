@@ -476,7 +476,8 @@ public sealed class DbtSemanticManifestIngestionService : IDbtSemanticManifestIn
                         DisplayName = model.Name,
                         Description = model.Description,
                         DocumentationSource = SemanticVirtualTables.SourceMarker,
-                        IsActive = true
+                        IsActive = true,
+                        ObjectKind = Autheris.Domain.Model.DiscoveryObjectKind.View
                     },
                     Columns = columns,
                     PrimaryKeyColumns = primaryKeys

@@ -80,7 +80,10 @@ internal static class CatalogRowHydrator
             RequiredFilterColumns = reqFilters,
             MinGroupSize = minGroupSize,
             NonPersonal = nonPersonal,
-            DbtUniqueId = reader.FieldCount > o + 19 && !reader.IsDBNull(o + 19) ? reader.GetString(o + 19) : null
+            DbtUniqueId = reader.FieldCount > o + 19 && !reader.IsDBNull(o + 19) ? reader.GetString(o + 19) : null,
+            ObjectKind = reader.FieldCount > o + 20 && !reader.IsDBNull(o + 20) && string.Equals(reader.GetString(o + 20), "view", StringComparison.Ordinal)
+                ? DiscoveryObjectKind.View
+                : DiscoveryObjectKind.Table
         };
     }
 
