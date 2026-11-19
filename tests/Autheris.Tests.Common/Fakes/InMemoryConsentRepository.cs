@@ -37,9 +37,16 @@ public sealed class InMemoryConsentRepository : IConsentRepository
         (c.IsActive(at) || (c.Effect == ConsentEffect.Deny && c.ValidFrom > at));
 
     public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, CancellationToken ct = default)
-        => GetActiveConsentsForSubjectsAsync(subjects, table, atTime, null, ct);
+        => GetActiveConsentsForSubjectsCore(subjects, table, atTime, null);
 
     public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, TenantId? tenantId, CancellationToken ct = default)
+    {
+        // As the SQL repository: the tenant overloads require a tenant.
+        if (tenantId is null) { throw new ArgumentException("A tenant is required.", nameof(tenantId)); }
+        return GetActiveConsentsForSubjectsCore(subjects, table, atTime, tenantId);
+    }
+
+    private Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsCore(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, TenantId? tenantId)
     {
         var sids = subjects.ToHashSet();
         return Task.FromResult<IReadOnlyList<Consent>>(Snapshot()
@@ -48,9 +55,15 @@ public sealed class InMemoryConsentRepository : IConsentRepository
     }
 
     public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? roles = null, DateTimeOffset? atTime = null, CancellationToken ct = default)
-        => GetAllActiveConsentsForSubjectsAsync(subjects, roles, atTime, null, ct);
+        => GetAllActiveConsentsForSubjectsCore(subjects, atTime, null);
 
     public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? roles, DateTimeOffset? atTime, TenantId? tenantId, CancellationToken ct = default)
+    {
+        if (tenantId is null) { throw new ArgumentException("A tenant is required.", nameof(tenantId)); }
+        return GetAllActiveConsentsForSubjectsCore(subjects, atTime, tenantId);
+    }
+
+    private Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsCore(IEnumerable<Sid> subjects, DateTimeOffset? atTime, TenantId? tenantId)
     {
         var sids = subjects.ToHashSet();
         var at = atTime ?? DateTimeOffset.UtcNow;

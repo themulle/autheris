@@ -43,12 +43,12 @@ public sealed class InMemoryAuditLogRepository : IAuditLogRepository
         TenantId? tenantId = null,
         CancellationToken ct = default)
     {
-        IEnumerable<AuditLogEntry> q = Entries;
+        IEnumerable<AuditLogEntry> q = Entries.Reverse(); // newest insertion first, like rowid DESC
         if (tenantId is { } t) { q = q.Where(e => e.TenantId == t); }
         if (targetTable is not null) { q = q.Where(e => string.Equals(e.TargetTable, targetTable, StringComparison.OrdinalIgnoreCase)); }
         if (actorSid is { } a) { q = q.Where(e => e.ActorSid == a); }
         if (since is { } s) { q = q.Where(e => e.OccurredAt >= s); }
-        return Task.FromResult<IReadOnlyList<AuditLogEntry>>(q.OrderByDescending(e => e.OccurredAt).Take(limit).ToList());
+        return Task.FromResult<IReadOnlyList<AuditLogEntry>>(q.Take(Math.Max(1, limit)).ToList());
     }
 
     public Task<bool> VerifyAuditHashChainAsync(CancellationToken ct = default)
