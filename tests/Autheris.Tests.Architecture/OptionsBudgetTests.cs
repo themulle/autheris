@@ -21,7 +21,7 @@ public sealed partial class OptionsBudgetTests(ITestOutputHelper output)
     private const int CeilingOptionsClasses = 166;
     private const int CeilingSettableProperties = 956;
     private const int CeilingEnabledFlags = 71;
-    private const int CeilingUndocumentedProperties = 474;
+    private const int CeilingUndocumentedProperties = 473;
 
     [GeneratedRegex(@"\bclass\s+(\w+Options)\b")]
     private static partial Regex OptionsClassDeclaration();

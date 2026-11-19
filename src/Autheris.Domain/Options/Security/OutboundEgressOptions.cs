@@ -18,7 +18,7 @@ public sealed class OutboundEgressOptions
 
     /// <summary>
     /// SEC E-02: integrations that may use the trusted hosts/networks above. Null (not configured) = default
-    /// <c>OpenMetadata, Lineage</c>. Allowed names: OpenApiIngestion, OpenMetadata, Lineage, AuditWorm, Cdn, Webhooks.
+    /// <c>OpenMetadata, Lineage</c>. Allowed names: OpenApiIngestion, OpenMetadata, Lineage, AuditWorm, Cdn, Webhooks, CatalogEmbeddings.
     /// Lakehouse can never use the allowlist (its target URLs come from Iceberg manifests, i.e. producer data).
     /// Nullable on purpose: the configuration binder appends to pre-filled lists, so a non-empty default could not be narrowed.
     /// </summary>

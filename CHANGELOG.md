@@ -30,7 +30,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Configuration key `Gateway:CatalogSearch:Enabled`. Catalog search validation and the index warm-up are always active; use `Gateway:CatalogSearch:WarmupOnStartup` to control the startup warm-up. The key fails startup with any value, including `false` or empty.
 - Governance schema step `0027_drop_legacy_governance_columns` (PostgreSQL and SQL Server) drops `CONSENT_REQUESTS.itsm_ticket_id` with its unique index `ux_consent_requests_ticket` and `TABLE_CATALOG_SETTINGS.visibility`. The GraphQL consent request types no longer expose `itsmTicketId`. All nodes must run this build before the step applies.
 
+### Changed (breaking)
+- A loopback `Gateway:CatalogSearch:OllamaEndpoint` (`localhost`, `127.0.0.0/8`, `::1`) is refused at startup validation, because the outbound egress policy never allowed it. Private Ollama hosts need `Gateway:Egress:TrustedInternalHosts` or `TrustedInternalNetworks` plus `CatalogEmbeddings` in `Gateway:Egress:TrustedIntegrations`.
+
 ### Fixed
+- Catalog keyword search now computes its BM25 corpus statistics (document count, term frequency, partial-match vocabulary) over the tables the caller may see, so tables the caller cannot see no longer move scores. The catalog embedding client now follows the outbound egress policy (integration name `CatalogEmbeddings`, usable in `Gateway:Egress:TrustedIntegrations`); private targets are refused unless allowlisted.
 - `GET /api/v1/catalog/objects` and `/catalog/objects/{id}` answer interactive person tokens without a gateway role or `Autheris.*` scope, like MCP and `/catalog/datasets`. Discovery still decides what each caller sees; app-only and service-principal tokens still need `Autheris.Catalog.Read` or a gateway role (#856).
 - Data products hardening (#851): a cached result is no longer served after a base object was deactivated, the Git sync scan rejects with `PRODUCT_SYNC_TOO_MANY_PRODUCTS` instead of truncating, the write procedure rate limit is cluster wide and fails closed, rejected webhook deliveries are audited at most once per tenant and minute, and the webhook answers "Delivery accepted".
 - Re-importing a dbt semantic manifest no longer loosens stored governance of an existing virtual table (GHSA-jw88-9j35-3c96): stricter settings, deactivation and masking rules are kept.
