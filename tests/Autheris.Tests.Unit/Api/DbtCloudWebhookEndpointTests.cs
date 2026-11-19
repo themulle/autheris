@@ -163,6 +163,7 @@ public sealed class DbtCloudWebhookEndpointTests
         i.Status.ShouldBe(StatusCodes.Status401Unauthorized);
         i.Body.ShouldBe(m.Body);
         JsonDocument.Parse(m.Body).RootElement.GetProperty("success").GetBoolean().ShouldBeFalse();
+        m.Body.ShouldContain("Invalid or missing HMAC signature");
     }
 
     [Fact]

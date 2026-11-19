@@ -431,6 +431,7 @@ public sealed class ModuleLoader
 
             var scopedConfig = BuildScopedModuleConfiguration(moduleId, moduleInstance.ConfigurationSections, configuration);
             var protectedSnapshot = ModuleSecurityGuards.CaptureProtectedServicesSnapshot(services);
+            var webhookHandlersBefore = ModuleSecurityGuards.CaptureDbtCloudWebhookHandlers(services);
 
             try
             {
@@ -442,7 +443,7 @@ public sealed class ModuleLoader
             }
 
             ModuleSecurityGuards.VerifyProtectedServicesUnchanged(moduleId, services, protectedSnapshot);
-            ModuleSecurityGuards.VerifyDbtCloudWebhookHandler(moduleId, services);
+            ModuleSecurityGuards.VerifyDbtCloudWebhookHandler(moduleId, services, webhookHandlersBefore);
 
             _logger.LogInformation("Loaded signed module '{ModuleId}' v{Version} (keyId: {KeyId}).", moduleId, manifest.Version, manifest.KeyId);
             _logger.LogInformation("ModuleLoaded: Id '{ModuleId}', Version '{Version}', KeyId '{KeyId}', Signed '{Signed}'", manifest.Id, manifest.Version, manifest.KeyId, true);
@@ -836,6 +837,7 @@ public sealed class ModuleLoader
 
             var scopedConfig = BuildScopedModuleConfiguration(moduleId, moduleInstance.ConfigurationSections, configuration);
             var protectedSnapshot = ModuleSecurityGuards.CaptureProtectedServicesSnapshot(services);
+            var webhookHandlersBefore = ModuleSecurityGuards.CaptureDbtCloudWebhookHandlers(services);
 
             try
             {
@@ -847,7 +849,7 @@ public sealed class ModuleLoader
             }
 
             ModuleSecurityGuards.VerifyProtectedServicesUnchanged(moduleId, services, protectedSnapshot);
-            ModuleSecurityGuards.VerifyDbtCloudWebhookHandler(moduleId, services);
+            ModuleSecurityGuards.VerifyDbtCloudWebhookHandler(moduleId, services, webhookHandlersBefore);
 
             _logger.LogWarning("Module '{ModuleId}' loaded from workspace path (unsigned)", moduleId);
             _logger.LogInformation("ModuleLoaded: Id '{ModuleId}', Version '{Version}', KeyId '{KeyId}', Signed '{Signed}'", manifest.Id, manifest.Version, manifest.KeyId, false);
