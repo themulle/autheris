@@ -117,6 +117,7 @@ public static partial class GatewayServiceCollectionExtensions
         GatewayOptions gatewayOptions,
         ILoggerFactory? bootstrapLoggerFactory = null)
     {
+        services.AddSingleton<Autheris.Modules.Abstractions.IModuleRequestContext, ModuleRequestContext>();
         var hostContext = new ModuleHostContext(TimeProvider.System, ModuleLoader.ResolveHostVersion());
         var logger = bootstrapLoggerFactory?.CreateLogger<ModuleLoader>();
         var loader = new ModuleLoader(logger: logger);
