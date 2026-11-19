@@ -135,6 +135,57 @@ public sealed class ModuleEndpointSecurityTests
     }
 
     [Fact]
+    [Trait("Category", "Security")]
+    public void Module_endpoint_with_audit_exemption_fails_load()
+    {
+        using var app = new FakeEndpointRouteBuilder();
+        IEndpointRouteBuilder endpoints = app;
+        endpoints.MapGet("/modules/rogue/exempt", () => Results.Ok())
+            .WithMetadata(new ModuleEndpointMetadata("rogue"))
+            .WithIngressTransport(DataSourceTransportFlags.Rest)
+            .RequireAuthorization()
+            .WithAudit(AuditLevel.Full, AuditEventTypes.CatalogRead)
+            .WithMetadata(new AuditExemption("x"));
+
+        var ex = Should.Throw<ModuleLoadException>(() => ModuleEndpointRegistrar.VerifyModuleEndpoints(endpoints, "rogue"));
+        ex.Message.ShouldContain("audit exemption");
+    }
+
+    [Fact]
+    public void Module_endpoint_with_disabled_body_limit_fails_load()
+    {
+        using var app = new FakeEndpointRouteBuilder();
+        IEndpointRouteBuilder endpoints = app;
+        endpoints.MapPost("/modules/rogue/unbounded", () => Results.Ok())
+            .WithMetadata(new ModuleEndpointMetadata("rogue"))
+            .WithIngressTransport(DataSourceTransportFlags.Rest)
+            .RequireAuthorization()
+            .WithAudit(AuditLevel.Full, AuditEventTypes.CatalogRead)
+            .WithMetadata(new Microsoft.AspNetCore.Mvc.DisableRequestSizeLimitAttribute());
+
+        var ex = Should.Throw<ModuleLoadException>(() => ModuleEndpointRegistrar.VerifyModuleEndpoints(endpoints, "rogue"));
+        ex.Message.ShouldContain("request body limit");
+    }
+
+    [Theory]
+    [InlineData(0L)]
+    [InlineData(-1L)]
+    public void Module_endpoint_with_non_positive_body_limit_fails_load(long limit)
+    {
+        using var app = new FakeEndpointRouteBuilder();
+        IEndpointRouteBuilder endpoints = app;
+        endpoints.MapPost("/modules/rogue/zero", () => Results.Ok())
+            .WithMetadata(new ModuleEndpointMetadata("rogue"))
+            .WithIngressTransport(DataSourceTransportFlags.Rest)
+            .RequireAuthorization()
+            .WithAudit(AuditLevel.Full, AuditEventTypes.CatalogRead)
+            .WithMetadata(new Microsoft.AspNetCore.Mvc.RequestSizeLimitAttribute(limit));
+
+        var ex = Should.Throw<ModuleLoadException>(() => ModuleEndpointRegistrar.VerifyModuleEndpoints(endpoints, "rogue"));
+        ex.Message.ShouldContain("request body limit");
+    }
+
+    [Fact]
     public void Module_endpoint_body_limit_at_ceiling_is_accepted()
     {
         using var app = new FakeEndpointRouteBuilder();

@@ -190,6 +190,13 @@ public sealed class ModuleEndpointRegistrar : IModuleEndpointRegistrar
                         $"Endpoint '{endpoint.DisplayName}' in module '{taggedModuleId}' is missing required audit policy metadata.");
                 }
 
+                if (endpoint.Metadata.GetMetadata<AuditExemption>() is not null)
+                {
+                    throw new ModuleLoadException(
+                        taggedModuleId,
+                        $"Endpoint '{endpoint.DisplayName}' in module '{taggedModuleId}' carries an audit exemption, which is reserved for the host.");
+                }
+
                 foreach (var audit in endpoint.Metadata.GetOrderedMetadata<AuditPolicy>())
                 {
                     if (audit.Level == AuditLevel.Delegated)
