@@ -128,34 +128,70 @@ public static class WebhookEndpoints
         return true;
     }
 
-    internal static async Task<IResult> HandleOpenMetadataWebhookAsync(
-        HttpContext context,
-        IOpenMetadataSyncService syncService)
+    private const int OpenMetadataWebhookMaxBytes = 2 * 1024 * 1024;
+
+    internal static async Task<IResult> HandleOpenMetadataWebhookAsync(HttpContext context, CancellationToken ct = default)
     {
-        string? signature = context.Request.Headers["X-OpenMetadata-Signature"].FirstOrDefault() ??
-                            context.Request.Headers["X-OM-Signature"].FirstOrDefault();
-        if (string.IsNullOrWhiteSpace(signature))
+        // Step 1: the module decides presence; an absent module answers 404 before any header, body or option is read.
+        if (context.RequestServices.GetService<IServiceProviderIsService>()?.IsService(typeof(IOpenMetadataWebhookHandler)) != true)
         {
-            return ApiProblems.BadRequest(ApiErrorCodes.WebhookSignatureOrFormatInvalid, "Missing signature header.");
+            return Results.NotFound();
         }
 
-        // SEC M-07: Bounded read instead of a bypassable Content-Length check (capped at 2 MB for unauthenticated webhook).
+        // Step 2: signature header (bounded before the body is read). Each header is tested separately, so an empty
+        // primary header falls through to the second one. A header is required even when the bypass flag is set.
+        var signature = SelectOpenMetadataSignatureHeader(context.Request.Headers);
+        if (string.IsNullOrWhiteSpace(signature))
+        {
+            return OpenMetadataUnauthorized();
+        }
+
+        // Step 3: bounded read (2 MB cap for an unauthenticated webhook).
         var (payload, tooLarge) = await EndpointSecurity.TryReadBodyAsync(
             context.Request,
-            2 * 1024 * 1024,
+            OpenMetadataWebhookMaxBytes,
             "Payload size exceeds maximum allowed size (2 MB).",
-            context.RequestAborted);
+            ct);
         if (payload == null)
         {
             return tooLarge!;
         }
 
-        var success = await syncService.HandleWebhookEventAsync(payload, signature, context.RequestAborted);
-        if (!success)
+        // Step 4: constant-time HMAC verification against the configured secret only.
+        var options = context.RequestServices.GetRequiredService<IOptions<GatewayOptions>>().Value;
+        var bypass = options.IsWebhookSignatureBypassed;
+        var logger = context.RequestServices.GetService<ILoggerFactory>()?.CreateLogger(typeof(WebhookEndpoints).FullName!);
+        if (bypass)
         {
-            return ApiProblems.BadRequest(ApiErrorCodes.WebhookSignatureOrFormatInvalid, "Failed to process webhook or invalid signature.");
+            logger?.LogWarning("OpenMetadata webhook signature validation is bypassed by dangerous configuration.");
         }
 
-        return Results.Ok(new { status = "Processed" });
+        if (!OpenMetadataWebhookSignature.Verify(payload, signature, options.OpenMetadata.WebhookSecret, bypass, logger))
+        {
+            logger?.LogWarning("Unauthorized OpenMetadata webhook call: invalid HMAC signature.");
+            return OpenMetadataUnauthorized();
+        }
+
+        // Step 5: only a verified payload reaches the module; the handler is resolved here, never earlier.
+        var handler = context.RequestServices.GetRequiredService<IOpenMetadataWebhookHandler>();
+        var success = await handler.HandleVerifiedAsync(payload, ct);
+        return success
+            ? Results.Ok(new { status = "Processed" })
+            : ApiProblems.BadRequest(ApiErrorCodes.WebhookSignatureOrFormatInvalid, "Failed to process webhook.");
+    }
+
+    private static IResult OpenMetadataUnauthorized() =>
+        Results.Json(new { error = "Invalid or missing HMAC signature." }, statusCode: StatusCodes.Status401Unauthorized);
+
+    private static string? SelectOpenMetadataSignatureHeader(IHeaderDictionary headers)
+    {
+        if (headers.TryGetValue("X-OpenMetadata-Signature", out var primary) && !string.IsNullOrWhiteSpace(primary))
+        {
+            return primary.ToString();
+        }
+
+        return headers.TryGetValue("X-OM-Signature", out var secondary) && !string.IsNullOrWhiteSpace(secondary)
+            ? secondary.ToString()
+            : null;
     }
 }

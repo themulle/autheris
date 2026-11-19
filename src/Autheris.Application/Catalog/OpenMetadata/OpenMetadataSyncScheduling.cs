@@ -1,12 +1,11 @@
 using Autheris.Application.Runtime.Hosting;
-using Autheris.Application.Catalog.OpenMetadata;
 using Autheris.Application.State;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
-namespace Autheris.Extensions.OpenMetadata;
+namespace Autheris.Application.Catalog.OpenMetadata;
 
 /// <summary>
 /// Periodic OpenMetadata permission sync, run by exactly one cluster replica at a time under a renewed lease.
