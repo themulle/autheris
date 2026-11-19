@@ -103,7 +103,7 @@ public sealed class RoleIndependenceTests
 
     [Fact]
     [Trait("Category", "Security")]
-    public void Security_ActiveRoleDenyRow_BeforeStep_StillDeniesInScope()
+    public void Security_ActiveRoleDenyRow_BeforeStep_DeniesTable()
     {
         // Before step 0029 runs, a stored role Deny row reaches the readers as text: the load throws (fail closed) instead of
         // dropping the row, so no decision on that table can allow.
@@ -126,6 +126,30 @@ public sealed class RoleIndependenceTests
         Should.Throw<ArgumentException>(() => Autheris.Infrastructure.Persistence.ConsentSqlCore.ReadSubjectConsentRows(
             reader, new TableIdentifier("d", "s", "t"), now, new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "x" }, new HashSet<Guid>(), consents));
         consents.ShouldBeEmpty();
+    }
+
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData("1")]
+    [InlineData("2")]
+    [InlineData("3")]
+    [InlineData("99")]
+    [InlineData("-1")]
+    [InlineData("Role")]
+    [InlineData("")]
+    public void Security_StoredGranteeType_RefusesNumericUndefinedAndRetiredValues(string stored)
+    {
+        Should.Throw<ArgumentException>(() => GranteeTypeParsing.ParseStored(stored));
+    }
+
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData("user", GranteeType.User)]
+    [InlineData("Group", GranteeType.Group)]
+    [InlineData("SERVICEPRINCIPAL", GranteeType.ServicePrincipal)]
+    public void StoredGranteeType_ParsesDefinedNamesIgnoringCase(string stored, GranteeType expected)
+    {
+        GranteeTypeParsing.ParseStored(stored).ShouldBe(expected);
     }
 
     [Fact]

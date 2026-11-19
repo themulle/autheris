@@ -98,7 +98,7 @@ public partial class GovernanceRepository
                         new TableIdentifier(reader.GetString(11), reader.GetString(12), reader.GetString(13)),
                         reader.IsDBNull(2) ? null : Guid.Parse(reader.GetString(2)),
                         Enum.Parse<ConsentEffect>(reader.GetString(3), true),
-                        Enum.Parse<GranteeType>(reader.GetString(4), true),
+                        GranteeTypeParsing.ParseStored(reader.GetString(4)),
                         reader.IsDBNull(5) ? (Sid?)null : new Sid(reader.GetString(5)),
                         DateTimeOffset.Parse(reader.GetString(6), System.Globalization.CultureInfo.InvariantCulture),
                         DateTimeOffset.Parse(reader.GetString(7), System.Globalization.CultureInfo.InvariantCulture),

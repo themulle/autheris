@@ -40,6 +40,13 @@ public sealed class DropRoleGrantee0029Tests
         sql.IndexOf("DELETE FROM " + (engine == "sqlserver" ? "dbo.CONSENT_ROW_FILTERS" : "consent_row_filters"), StringComparison.Ordinal)
             .ShouldBeLessThan(sql.IndexOf("DELETE FROM " + (engine == "sqlserver" ? "dbo.CONSENTS" : "consents"), StringComparison.Ordinal));
         firstDrop.ShouldBeGreaterThan(firstDelete);
+
+        // Pending role requests are retired (terminal REJECTED, no names) after the pre-checks and before the columns go.
+        var retire = sql.IndexOf("SET status = " + (engine == "sqlserver" ? "N'REJECTED'" : "'REJECTED'"), StringComparison.Ordinal);
+        retire.ShouldBeGreaterThan(0);
+        sql.IndexOf("active role grantee in access profile assignment", StringComparison.Ordinal).ShouldBeLessThan(retire);
+        retire.ShouldBeLessThan(firstDrop);
+        sql.Substring(retire, 300).ShouldContain("PENDING_SECOND_APPROVAL");
         sql.ShouldContain(engine == "sqlserver" ? "COL_LENGTH" : "DROP COLUMN IF EXISTS");
         sql.ShouldNotContain("role_name' +", Case.Insensitive);
         sql.ShouldNotContain("tenant_id ||", Case.Insensitive);

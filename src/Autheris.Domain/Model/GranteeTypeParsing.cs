@@ -27,4 +27,13 @@ public static class GranteeTypeParsing
 
         return Enum.TryParse(text, ignoreCase: true, out type) && Enum.IsDefined(type);
     }
+
+    /// <summary>
+    /// Parses a grantee type read from storage. A row that holds an undefined, numeric or retired literal fails the read
+    /// with a fixed message (never echoing the stored text), so the row cannot be mistaken for a defined grantee.
+    /// </summary>
+    public static GranteeType ParseStored(string? value) =>
+        TryParse(value, out var type)
+            ? type
+            : throw new ArgumentException("A stored grantee type is not a supported value.", nameof(value));
 }

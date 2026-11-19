@@ -617,7 +617,7 @@ internal static class ConsentGrantSqlCore
         DateTimeOffset now,
         CancellationToken ct)
     {
-        var granteeType = Enum.TryParse<GranteeType>(target.RawGranteeType, true, out var parsedGrantee)
+        var granteeType = GranteeTypeParsing.TryParse(target.RawGranteeType, out var parsedGrantee)
             ? parsedGrantee
             : GranteeType.User;
         var effect = Enum.TryParse<ConsentEffect>(target.RawEffect, true, out var parsedEffect)

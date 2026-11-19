@@ -4,6 +4,8 @@
 -- access profile assignment aborts the step with the row id, nothing is changed. No conversion and no automatic retirement:
 -- turning a role into a group or user would change who is covered, and retiring a Deny would remove a restriction.
 -- Remediation is an explicit operator action before the upgrade (revoke the row, or recreate it as a group or user Deny).
+-- Pending consent requests for a role grantee carry no grant: the step sets them to the terminal REJECTED status (the request
+-- table has no reason column, so the status is the whole record) so the request readers never meet the retired literal on an open request.
 -- After the pre-check the step deletes the already revoked role rows (child rows first) and drops the two role columns.
 -- Idempotent and re-runnable. All nodes must run this build before the step applies: older builds still write the dropped columns.
 
@@ -24,6 +26,11 @@ FROM access_profile_assignments a
 WHERE LOWER(a.subject_type) = 'role' AND a.deactivated_reason IS NULL
 ORDER BY a.profile_id
 LIMIT 1;
+
+UPDATE consent_requests
+SET status = 'REJECTED', version = version + 1
+WHERE LOWER(requested_grantee_type) = 'role'
+  AND status IN ('PENDING', 'PENDING_SECOND_APPROVAL', 'PENDING_EXTERNAL_APPROVAL');
 
 DELETE FROM consent_column_rules
 WHERE consent_id IN (SELECT c.id FROM consents c WHERE LOWER(c.grantee_type) = 'role');

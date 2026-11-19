@@ -20,6 +20,10 @@ using Autheris.Infrastructure.Persistence.Dialects;
 
 public partial class GovernanceRepository
 {
+    /// <summary>
+    /// Subject prefilter. Rows that still carry the retired role grantee text pass on purpose: the reader throws on them before the
+    /// schema step has run, instead of the prefilter silently dropping a row that could be a restriction.
+    /// </summary>
     internal const string SubjectPredicate =
         " AND (c.grantee_type = 'Role' OR c.grantee_sid_norm IS NULL OR c.grantee_sid_norm = ANY(@subjects))";
 

@@ -31,6 +31,7 @@ public sealed class RoleGranteeRemovalMigration0029Tests
         CREATE TABLE consent_row_scopes (consent_id TEXT NOT NULL REFERENCES consents (id) ON DELETE CASCADE, entry_no INTEGER NOT NULL, PRIMARY KEY (consent_id, entry_no));
         CREATE TABLE virtual_filter_access_profiles (id TEXT PRIMARY KEY, definition_json TEXT NOT NULL);
         CREATE TABLE access_profile_assignments (profile_id TEXT NOT NULL, subject_type TEXT NOT NULL, deactivated_reason TEXT NULL);
+        CREATE TABLE consent_requests (id TEXT PRIMARY KEY, requested_grantee_type TEXT NOT NULL, status TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1);
         """;
 
     private const string SqlServerShape = """
@@ -41,6 +42,7 @@ public sealed class RoleGranteeRemovalMigration0029Tests
         CREATE TABLE dbo.CONSENT_ROW_SCOPES (consent_id NVARCHAR(128) NOT NULL REFERENCES dbo.CONSENTS (id) ON DELETE CASCADE, entry_no INT NOT NULL, PRIMARY KEY (consent_id, entry_no));
         CREATE TABLE dbo.VIRTUAL_FILTER_ACCESS_PROFILES (id NVARCHAR(128) NOT NULL PRIMARY KEY, definition_json NVARCHAR(MAX) NOT NULL);
         CREATE TABLE dbo.ACCESS_PROFILE_ASSIGNMENTS (profile_id NVARCHAR(128) NOT NULL, subject_type NVARCHAR(32) NOT NULL, deactivated_reason NVARCHAR(64) NULL);
+        CREATE TABLE dbo.CONSENT_REQUESTS (id NVARCHAR(128) NOT NULL PRIMARY KEY, requested_grantee_type NVARCHAR(64) NOT NULL, status NVARCHAR(32) NOT NULL, version INT NOT NULL DEFAULT 1);
         """;
 
     private sealed record Db(string Engine, DbConnection Connection, SqlMigrationStep Step, Func<ValueTask> Dispose);
@@ -127,6 +129,29 @@ public sealed class RoleGranteeRemovalMigration0029Tests
         (await ScalarAsync(c, $"SELECT COUNT(*) FROM {Consents(engine)}")).ShouldBe(2);
         (await ColumnCountAsync(db, "role_name")).ShouldBe(1);
         (await ColumnCountAsync(db, "role_id")).ShouldBe(1);
+    }
+
+    [Theory]
+    [InlineData("postgresql")]
+    [InlineData("sqlserver")]
+    public async Task Security_Step0029_PendingRoleRequest_IsRetired(string engine)
+    {
+        var db = await OpenAsync(engine);
+        if (db is null) return;
+        await using var _ = new AsyncDisposer(db.Dispose);
+
+        var c = db.Connection;
+        var requests = Table(engine, "consent_requests");
+        await ExecAsync(c, $"INSERT INTO {requests} (id, requested_grantee_type, status) VALUES ('pending-role', 'Role', 'PENDING')");
+        await ExecAsync(c, $"INSERT INTO {requests} (id, requested_grantee_type, status) VALUES ('second-role', 'Role', 'PENDING_SECOND_APPROVAL')");
+        await ExecAsync(c, $"INSERT INTO {requests} (id, requested_grantee_type, status) VALUES ('approved-role', 'Role', 'APPROVED')");
+        await ExecAsync(c, $"INSERT INTO {requests} (id, requested_grantee_type, status) VALUES ('pending-group', 'Group', 'PENDING')");
+
+        await RunStepAsync(db);
+
+        (await ScalarAsync(c, $"SELECT COUNT(*) FROM {requests} WHERE id IN ('pending-role', 'second-role') AND status = 'REJECTED'")).ShouldBe(2);
+        (await ScalarAsync(c, $"SELECT COUNT(*) FROM {requests} WHERE id = 'approved-role' AND status = 'APPROVED'")).ShouldBe(1);
+        (await ScalarAsync(c, $"SELECT COUNT(*) FROM {requests} WHERE id = 'pending-group' AND status = 'PENDING'")).ShouldBe(1);
     }
 
     [Theory]

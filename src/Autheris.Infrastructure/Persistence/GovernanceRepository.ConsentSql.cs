@@ -74,7 +74,7 @@ internal static class ConsentSqlCore
             var isDeny = Enum.TryParse<ConsentEffect>(gEffectStr, true, out var parsedEffect) && parsedEffect == ConsentEffect.Deny;
             if (atTime < validFrom && !isDeny) continue;
 
-            var granteeType = Enum.Parse<GranteeType>(reader.GetString(4), true);
+            var granteeType = GranteeTypeParsing.ParseStored(reader.GetString(4));
             var granteeSidStr = reader.IsDBNull(5) ? null : reader.GetString(5);
             if (granteeSidStr == null || !subjectSet.Contains(granteeSidStr)) continue;
 
@@ -106,7 +106,7 @@ internal static class ConsentSqlCore
             var validTo = DateTimeOffset.Parse(reader.GetString(7), CultureInfo.InvariantCulture);
             if (effectiveAt < validFrom || effectiveAt >= validTo) continue;
 
-            var granteeType = Enum.Parse<GranteeType>(reader.GetString(4), true);
+            var granteeType = GranteeTypeParsing.ParseStored(reader.GetString(4));
             var granteeSidStr = reader.IsDBNull(5) ? null : reader.GetString(5);
             if (granteeSidStr == null || !subjectSet.Contains(granteeSidStr)) continue;
 
@@ -157,7 +157,7 @@ internal static class ConsentSqlCore
                 new TableIdentifier(reader.GetString(9), reader.GetString(10), reader.GetString(11)),
                 reader.IsDBNull(2) ? null : Guid.Parse(reader.GetString(2)),
                 Enum.Parse<ConsentEffect>(reader.GetString(3), true),
-                Enum.Parse<GranteeType>(reader.GetString(4), true),
+                GranteeTypeParsing.ParseStored(reader.GetString(4)),
                 granteeSidStr != null ? new Sid(granteeSidStr) : (Sid?)null,
                 validFrom,
                 validTo,
@@ -193,7 +193,7 @@ internal static class ConsentSqlCore
             new TableIdentifier(reader.GetString(12), reader.GetString(13), reader.GetString(14)),
             reader.IsDBNull(2) ? null : Guid.Parse(reader.GetString(2)),
             Enum.Parse<ConsentEffect>(reader.GetString(3), true),
-            Enum.Parse<GranteeType>(reader.GetString(4), true),
+            GranteeTypeParsing.ParseStored(reader.GetString(4)),
             granteeSidStr != null ? new Sid(granteeSidStr) : (Sid?)null,
             DateTimeOffset.Parse(reader.GetString(6), CultureInfo.InvariantCulture),
             DateTimeOffset.Parse(reader.GetString(7), CultureInfo.InvariantCulture),
@@ -226,7 +226,7 @@ internal static class ConsentSqlCore
                 new TableIdentifier(reader.GetString(9), reader.GetString(10), reader.GetString(11)),
                 reader.IsDBNull(2) ? null : Guid.Parse(reader.GetString(2)),
                 Enum.Parse<ConsentEffect>(reader.GetString(3), true),
-                Enum.Parse<GranteeType>(reader.GetString(4), true),
+                GranteeTypeParsing.ParseStored(reader.GetString(4)),
                 granteeSidStr != null ? new Sid(granteeSidStr) : (Sid?)null,
                 DateTimeOffset.Parse(reader.GetString(6), CultureInfo.InvariantCulture),
                 DateTimeOffset.Parse(reader.GetString(7), CultureInfo.InvariantCulture),
@@ -500,7 +500,7 @@ internal static class ConsentSqlCore
         var rawTenant = reader.IsDBNull(3) ? null : reader.GetString(3);
         var tableGuid = reader.FieldCount > 4 && !reader.IsDBNull(4) ? Guid.Parse(reader.GetString(4)) : Guid.Empty;
         var effect = reader.FieldCount > 5 && !reader.IsDBNull(5) ? Enum.Parse<ConsentEffect>(reader.GetString(5), true) : ConsentEffect.Allow;
-        var granteeType = reader.FieldCount > 6 && !reader.IsDBNull(6) ? Enum.Parse<GranteeType>(reader.GetString(6), true) : GranteeType.User;
+        var granteeType = reader.FieldCount > 6 && !reader.IsDBNull(6) ? GranteeTypeParsing.ParseStored(reader.GetString(6)) : GranteeType.User;
         var granteeSidStr = ConsentWorkflowSql.ReadOptionalString(reader, 7);
         var grantSource = ConsentWorkflowSql.ReadGrantSource(reader, 8);
         var profileAssignmentId = ConsentWorkflowSql.ReadOptionalGuid(reader, 9);
@@ -615,7 +615,7 @@ internal static class ConsentSqlCore
             Guid.Parse(reader.GetString(0)),
             Guid.Parse(reader.GetString(1)),
             new Sid(reader.GetString(2)),
-            Enum.Parse<GranteeType>(reader.GetString(3), true),
+            GranteeTypeParsing.ParseStored(reader.GetString(3)),
             reader.GetString(4),
             reader.GetString(5),
             reader.GetString(6),
@@ -639,7 +639,7 @@ internal static class ConsentSqlCore
             Guid.Parse(reader.GetString(0)),
             Guid.Parse(reader.GetString(1)),
             new Sid(reader.GetString(2)),
-            Enum.Parse<GranteeType>(reader.GetString(3), true),
+            GranteeTypeParsing.ParseStored(reader.GetString(3)),
             reader.GetString(4),
             reader.GetString(5),
             reader.GetString(6),

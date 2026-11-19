@@ -167,7 +167,7 @@ internal static class ConsentPatternSqlCore
                 continue;
             }
 
-            var granteeType = Enum.Parse<GranteeType>(reader.GetString(4), ignoreCase: true);
+            var granteeType = GranteeTypeParsing.ParseStored(reader.GetString(4));
             var granteeSidStr = reader.IsDBNull(5) ? null : reader.GetString(5);
 
             if (subjectSet != null && (granteeSidStr == null || !subjectSet.Contains(granteeSidStr)))
@@ -231,7 +231,7 @@ internal static class ConsentPatternSqlCore
             TableIdentifier = new TableIdentifier(dataSource ?? string.Empty, string.Empty, string.Empty),
             ConsentRequestId = ConsentWorkflowSql.ReadOptionalGuid(reader, 2),
             Effect = Enum.Parse<ConsentEffect>(reader.GetString(3), ignoreCase: true),
-            GranteeType = Enum.Parse<GranteeType>(reader.GetString(4), ignoreCase: true),
+            GranteeType = GranteeTypeParsing.ParseStored(reader.GetString(4)),
             GranteeSid = granteeSidStr != null ? new Sid(granteeSidStr) : (Sid?)null,
             ValidFrom = DateTimeOffset.Parse(reader.GetString(6), CultureInfo.InvariantCulture),
             ValidTo = DateTimeOffset.Parse(reader.GetString(7), CultureInfo.InvariantCulture),

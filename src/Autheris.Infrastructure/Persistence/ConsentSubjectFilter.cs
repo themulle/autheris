@@ -28,15 +28,16 @@ internal static class ConsentSubjectFilter
     internal static string? NormalizeOrNull(Sid? sid) => sid is { } s ? Normalize(s.Value) : null;
 
     /// <summary>
-    /// Prefilter (SQL Server) (<c>IN (@s0, ...)</c> over the chunk; no IN list when the chunk is empty). Role consents and rows without a
-    /// normalised SID always pass.
+    /// Prefilter (SQL Server) (<c>IN (@s0, ...)</c> over the chunk; no IN list when the chunk is empty). Rows without a normalised SID always pass.
+    /// Rows that still carry the retired role grantee text pass on purpose as well: the reader then throws on them before the schema
+    /// step has run, instead of the prefilter silently dropping a row that could be a restriction.
     /// </summary>
     internal static string InListPredicate(int subjectCount) => subjectCount == 0
         ? " AND (c.grantee_type = 'Role' OR c.grantee_sid_norm IS NULL)"
         : " AND (c.grantee_type = 'Role' OR c.grantee_sid_norm IS NULL OR c.grantee_sid_norm IN ("
           + string.Join(",", Enumerable.Range(0, subjectCount).Select(i => "@s" + i)) + "))";
 
-    /// <summary>Parameter value for <c>grantee_sid_norm</c>: the normalised SID, or <see cref="DBNull"/> when there is none (role consents).</summary>
+    /// <summary>Parameter value for <c>grantee_sid_norm</c>: the normalised SID, or <see cref="DBNull"/> when there is none.</summary>
     internal static object NormalizeParameter(object? sid) => sid is string s ? Normalize(s) : DBNull.Value;
 
     /// <summary>Distinct normalised subject keys, in a stable order.</summary>
