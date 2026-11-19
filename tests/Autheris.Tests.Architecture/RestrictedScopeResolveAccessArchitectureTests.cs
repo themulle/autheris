@@ -174,9 +174,7 @@ public sealed class RestrictedScopeResolveAccessArchitectureTests
                  {
                      "Autheris.Application.Policy.TableAccessPolicy",
                      "Autheris.Application.Streaming.Services.StreamRlsPolicyEnforcer",
-                     "Autheris.Application.Governance.Services.EffectiveAccessExplanationService",
-                     "Autheris.Application.Analytics.GovernedAggregationService",
-                     "Autheris.Application.Analytics.SemanticMetricQueryService"
+                     "Autheris.Application.Governance.Services.EffectiveAccessExplanationService"
                  })
         {
             scan.ShouldContainKey(known);

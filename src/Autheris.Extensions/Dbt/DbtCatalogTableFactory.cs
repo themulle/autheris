@@ -27,7 +27,9 @@ internal static partial class DbtCatalogTableFactory
         DbtModelDefinition model,
         GatewayOptions options,
         out TableMetadata? metadata,
-        out string? reason)
+        out string? reason,
+        bool applyObjectKind = true,
+        ICollection<string>? warnings = null)
     {
         metadata = null;
         reason = null;
@@ -83,7 +85,8 @@ internal static partial class DbtCatalogTableFactory
             Sensitivity = "NORMAL",
             RequiresFourEyes = false,
             IsActive = options.Dbt.ActivateNewTables,
-            DataSourceType = DataSourceType.Sql
+            DataSourceType = DataSourceType.Sql,
+            ObjectKind = applyObjectKind ? DbtObjectKindResolver.Resolve(model, warnings) : DiscoveryObjectKind.Table
         };
 
         var columns = new List<TableColumn>(model.Columns.Count);

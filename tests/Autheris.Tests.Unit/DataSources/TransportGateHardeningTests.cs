@@ -1,6 +1,7 @@
 #pragma warning disable CA2012 // NSubstitute .Returns(...) configures a ValueTask member; the instance is not consumed here.
 namespace Autheris.Tests.Unit.DataSources;
 
+using Autheris.Application.Policy.Pdp;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -94,12 +95,12 @@ public sealed class TransportGateHardeningTests
         };
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetTableMetadataAsync(Table, Arg.Any<CancellationToken>()).Returns(metadata);
-        var pdp = Substitute.For<IUnifiedPolicyDecisionPoint>();
-        pdp.EvaluateAccessAsync(Table, Arg.Any<TableMetadata>(), Arg.Any<SecurityPrincipalContext>(), Arg.Any<IReadOnlyList<string>?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(TableAccessDecision.Allowed(
+        var pdp = Substitute.For<IAccessDecisionPoint>();
+        pdp.DecideAsync(Arg.Is<AccessRequest>(r => r.Object.Identifier == Table), Arg.Any<CancellationToken>())
+            .Returns(TableAccessDecision.Allowed(
                 Table,
                 new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase) { ["id"] = ColumnAccessLevel.Clear },
-                hasUnconstrainedColumnAllow: true)));
+                hasUnconstrainedColumnAllow: true));
         var provider = Substitute.For<IChangeVersionProvider>();
         var gate = Substitute.For<IDataSourceTransportGate>();
         gate.EnsureCatalogSourceAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>())

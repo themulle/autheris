@@ -13,11 +13,13 @@ using Autheris.Application.Policy.Lint;
 using Autheris.Application.Sql.Tree;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
+using Autheris.Application.Policy.Pdp;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using TrinoSqlEngine.Governance;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -41,9 +43,8 @@ public sealed partial class SemanticMetricQueryService : ISemanticMetricQuerySer
     private readonly IGovernedAggregationService _aggregationService;
     private readonly ITableMetadataRepository _metadataRepository;
     private readonly IConsentRepository? _consentRepository;
-    private readonly IConsentResolutionService? _resolutionService;
-    private readonly IUnifiedPolicyDecisionPoint? _pdp;
-    private readonly ITableAccessResolver? _accessResolver;
+    private readonly IAccessDecisionPoint _pdp;
+    private readonly ILogger<SemanticMetricQueryService>? _logger;
     private readonly IAuditWriter? _auditWriter;
     private readonly SemanticTenancy _tenancy;
     private readonly IPolicyExpressionParser _policyParser;
@@ -54,13 +55,12 @@ public sealed partial class SemanticMetricQueryService : ISemanticMetricQuerySer
         IGovernedAggregationService aggregationService,
         ITableMetadataRepository metadataRepository,
         IAuditLogRepository auditLogRepository,
+        IAccessDecisionPoint pdp,
         IConsentRepository? consentRepository = null,
-        IConsentResolutionService? resolutionService = null,
-        IUnifiedPolicyDecisionPoint? pdp = null,
-        ITableAccessResolver? accessResolver = null,
         IAuditWriter? auditWriter = null,
         IOptions<GatewayOptions>? gatewayOptions = null,
-        IPolicyExpressionParser? policyParser = null)
+        IPolicyExpressionParser? policyParser = null,
+        ILogger<SemanticMetricQueryService>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(auditLogRepository);
         _tenancy = SemanticTenancy.FromOptions(gatewayOptions);
@@ -69,9 +69,8 @@ public sealed partial class SemanticMetricQueryService : ISemanticMetricQuerySer
         _aggregationService = aggregationService ?? throw new ArgumentNullException(nameof(aggregationService));
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _consentRepository = consentRepository ?? (metadataRepository as IConsentRepository);
-        _resolutionService = resolutionService;
-        _pdp = pdp;
-        _accessResolver = accessResolver;
+        _pdp = pdp ?? throw new ArgumentNullException(nameof(pdp));
+        _logger = logger;
         _auditWriter = auditWriter ?? new AuditWriter(auditLogRepository, NullLogger<AuditWriter>.Instance);
     }
 
@@ -79,13 +78,12 @@ public sealed partial class SemanticMetricQueryService : ISemanticMetricQuerySer
         ISemanticCatalogService catalogService,
         IGovernedAggregationService aggregationService,
         ITableMetadataRepository metadataRepository,
+        IAccessDecisionPoint pdp,
         IConsentRepository? consentRepository = null,
-        IConsentResolutionService? resolutionService = null,
-        IUnifiedPolicyDecisionPoint? pdp = null,
-        ITableAccessResolver? accessResolver = null,
         IAuditWriter? auditWriter = null,
         IOptions<GatewayOptions>? gatewayOptions = null,
-        IPolicyExpressionParser? policyParser = null)
+        IPolicyExpressionParser? policyParser = null,
+        ILogger<SemanticMetricQueryService>? logger = null)
     {
         _tenancy = SemanticTenancy.FromOptions(gatewayOptions);
         _policyParser = policyParser ?? PolicyParserSetup.CreateParser();
@@ -93,9 +91,8 @@ public sealed partial class SemanticMetricQueryService : ISemanticMetricQuerySer
         _aggregationService = aggregationService ?? throw new ArgumentNullException(nameof(aggregationService));
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _consentRepository = consentRepository ?? (metadataRepository as IConsentRepository);
-        _resolutionService = resolutionService;
-        _pdp = pdp;
-        _accessResolver = accessResolver;
+        _pdp = pdp ?? throw new ArgumentNullException(nameof(pdp));
+        _logger = logger;
         _auditWriter = auditWriter ?? (metadataRepository is IAuditLogRepository repoAudit ? new AuditWriter(repoAudit, NullLogger<AuditWriter>.Instance) : null);
     }
 

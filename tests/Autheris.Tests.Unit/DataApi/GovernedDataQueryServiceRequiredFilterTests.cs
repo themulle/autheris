@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.DataApi;
 
+using Autheris.Application.Policy.Pdp;
 using System;
 using System.Collections.Generic;
 using System.Security.Claims;
@@ -35,9 +36,15 @@ public sealed class GovernedDataQueryServiceRequiredFilterTests
         public Task<TableKeyDefinitionChange?> ReplaceTableKeyDefinitionAsync(TableIdentifier t, IReadOnlyList<string> pk, IReadOnlyList<TableIndexDefinition> idx, IReadOnlyList<KeyColumnDirection>? dir = null, CancellationToken ct = default) => Task.FromResult<TableKeyDefinitionChange?>(null);
     }
 
-    private sealed class FixedAllowPdp(TableAccessDecision decision) : IUnifiedPolicyDecisionPoint
+    private sealed class FixedAllowPdp(TableAccessDecision decision) : IAccessDecisionPoint
     {
-        public Task<TableAccessDecision> EvaluateAccessAsync(TableIdentifier t, TableMetadata m, SecurityPrincipalContext c, IReadOnlyList<string>? cols = null, CancellationToken ct = default) => Task.FromResult(decision);
+        public ValueTask<TableAccessDecision> DecideAsync(AccessRequest request, CancellationToken ct = default) => ValueTask.FromResult(decision);
+
+        public ValueTask<IReadOnlyList<TableAccessDecision>> DecideManyAsync(SecurityPrincipalContext subject, IReadOnlyList<TableMetadata> objects, AccessOperation operation, AccessTransport transport, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+
+        public ValueTask<AccessExplanation> ExplainAsync(AccessRequest request, CancellationToken ct = default) =>
+            throw new NotSupportedException();
     }
 
     private sealed class StubGovernedSqlService : IGovernedSqlExecutionService

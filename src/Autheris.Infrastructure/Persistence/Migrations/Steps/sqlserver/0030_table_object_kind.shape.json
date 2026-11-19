@@ -1,0 +1,5 @@
+{
+  "ops": [
+    { "op": "addColumn", "table": "TABLES", "column": { "name": "object_kind", "type": "NVARCHAR", "family": "string", "nullable": false } }
+  ]
+}

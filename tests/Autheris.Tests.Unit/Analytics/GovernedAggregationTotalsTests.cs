@@ -98,6 +98,7 @@ public sealed class GovernedAggregationTotalsTests
         var service = new GovernedAggregationService(
             metaRepo,
             new NullAudit(),
+            Autheris.Tests.Unit.TestSupport.AccessDecisionPointStubs.Denying(),
             sqlExecutionService: sql,
             analyticsOptions: Options.Create(new AnalyticsOptions { Privacy = new AnalyticsPrivacyOptions { DefaultMinGroupSize = 1 } }));
         var query = new AggregationQuery(

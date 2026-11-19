@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Endpoints;
 
+using Autheris.Application.Policy.Pdp;
 using System;
 using System.Collections.Generic;
 using System.Data;
@@ -98,7 +99,7 @@ public sealed class TableStreamEndpointsTests
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<TableMetadata?>(null));
 
-        var pdp = Substitute.For<IUnifiedPolicyDecisionPoint>();
+        var pdp = Substitute.For<IAccessDecisionPoint>();
         var planner = new GovernedTableReadPlanner();
         var sqlExecution = Substitute.For<IGovernedSqlExecutionService>();
         var encoder = new KeysetCursorEncoder("endpoint-planner-shared-signing-key-0123456789");
@@ -122,7 +123,7 @@ public sealed class TableStreamEndpointsTests
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<TableMetadata?>(hiddenTable));
 
-        var pdp = Substitute.For<IUnifiedPolicyDecisionPoint>();
+        var pdp = Substitute.For<IAccessDecisionPoint>();
         var planner = new GovernedTableReadPlanner();
         var sqlExecution = Substitute.For<IGovernedSqlExecutionService>();
         var encoder = new KeysetCursorEncoder("endpoint-planner-shared-signing-key-0123456789");
@@ -145,9 +146,7 @@ public sealed class TableStreamEndpointsTests
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<TableMetadata?>(table));
 
-        var pdp = Substitute.For<IUnifiedPolicyDecisionPoint>();
-        pdp.EvaluateAccessAsync(Arg.Any<TableIdentifier>(), Arg.Any<TableMetadata>(), Arg.Any<SecurityPrincipalContext>(), Arg.Any<IReadOnlyList<string>?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(TableAccessDecision.Denied(table.Identifier, "Forbidden")));
+        var pdp = Autheris.Tests.Unit.TestSupport.AccessDecisionPointStubs.Returning(_ => TableAccessDecision.Denied(table.Identifier, "Forbidden"));
 
         var planner = new GovernedTableReadPlanner();
         var sqlExecution = Substitute.For<IGovernedSqlExecutionService>();
@@ -169,7 +168,7 @@ public sealed class TableStreamEndpointsTests
         context.Request.QueryString = new QueryString("?offset=50");
 
         var repo = Substitute.For<ITableMetadataRepository>();
-        var pdp = Substitute.For<IUnifiedPolicyDecisionPoint>();
+        var pdp = Substitute.For<IAccessDecisionPoint>();
         var planner = new GovernedTableReadPlanner();
         var sqlExecution = Substitute.For<IGovernedSqlExecutionService>();
         var encoder = new KeysetCursorEncoder("endpoint-planner-shared-signing-key-0123456789");
@@ -192,9 +191,7 @@ public sealed class TableStreamEndpointsTests
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<TableMetadata?>(table));
 
-        var pdp = Substitute.For<IUnifiedPolicyDecisionPoint>();
-        pdp.EvaluateAccessAsync(Arg.Any<TableIdentifier>(), Arg.Any<TableMetadata>(), Arg.Any<SecurityPrincipalContext>(), Arg.Any<IReadOnlyList<string>?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(TableAccessDecision.Allowed(table.Identifier, new Dictionary<string, ColumnAccessLevel>(), null, true)));
+        var pdp = Autheris.Tests.Unit.TestSupport.AccessDecisionPointStubs.Returning(_ => TableAccessDecision.Allowed(table.Identifier, new Dictionary<string, ColumnAccessLevel>(), null, true));
 
         var planner = new GovernedTableReadPlanner();
         var sqlExecution = Substitute.For<IGovernedSqlExecutionService>();
@@ -254,9 +251,7 @@ public sealed class TableStreamEndpointsTests
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<TableMetadata?>(table));
 
-        var pdp = Substitute.For<IUnifiedPolicyDecisionPoint>();
-        pdp.EvaluateAccessAsync(Arg.Any<TableIdentifier>(), Arg.Any<TableMetadata>(), Arg.Any<SecurityPrincipalContext>(), Arg.Any<IReadOnlyList<string>?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(TableAccessDecision.Allowed(table.Identifier, new Dictionary<string, ColumnAccessLevel>(), null, true)));
+        var pdp = Autheris.Tests.Unit.TestSupport.AccessDecisionPointStubs.Returning(_ => TableAccessDecision.Allowed(table.Identifier, new Dictionary<string, ColumnAccessLevel>(), null, true));
 
         // One DI-style encoder (configured signing key) shared by the endpoint and the planner, as in production.
         var encoder = new KeysetCursorEncoder("endpoint-planner-shared-signing-key-0123456789");
@@ -346,9 +341,7 @@ public sealed class TableStreamEndpointsTests
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<TableMetadata?>(table));
 
-        var pdp = Substitute.For<IUnifiedPolicyDecisionPoint>();
-        pdp.EvaluateAccessAsync(Arg.Any<TableIdentifier>(), Arg.Any<TableMetadata>(), Arg.Any<SecurityPrincipalContext>(), Arg.Any<IReadOnlyList<string>?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(TableAccessDecision.Allowed(table.Identifier, new Dictionary<string, ColumnAccessLevel>(), null, true)));
+        var pdp = Autheris.Tests.Unit.TestSupport.AccessDecisionPointStubs.Returning(_ => TableAccessDecision.Allowed(table.Identifier, new Dictionary<string, ColumnAccessLevel>(), null, true));
 
         var rateLimiter = Substitute.For<IRateLimiterService>();
         rateLimiter.ReserveCostQuotaAsync(Arg.Any<string>(), Arg.Any<int>(), Arg.Any<ClientQuotaPolicy>(), Arg.Any<CancellationToken>())
@@ -438,9 +431,7 @@ public sealed class TableStreamEndpointsTests
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<TableMetadata?>(table));
 
-        var pdp = Substitute.For<IUnifiedPolicyDecisionPoint>();
-        pdp.EvaluateAccessAsync(Arg.Any<TableIdentifier>(), Arg.Any<TableMetadata>(), Arg.Any<SecurityPrincipalContext>(), Arg.Any<IReadOnlyList<string>?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(TableAccessDecision.Allowed(table.Identifier, new Dictionary<string, ColumnAccessLevel>(), null, true)));
+        var pdp = Autheris.Tests.Unit.TestSupport.AccessDecisionPointStubs.Returning(_ => TableAccessDecision.Allowed(table.Identifier, new Dictionary<string, ColumnAccessLevel>(), null, true));
 
         var reserved = new List<int>();
         var rateLimiter = limiter ?? Substitute.For<IRateLimiterService>();

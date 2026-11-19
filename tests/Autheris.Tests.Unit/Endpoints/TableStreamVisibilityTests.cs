@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Endpoints;
 
+using Autheris.Application.Policy.Pdp;
 using System;
 using System.Collections.Generic;
 using System.Data;
@@ -50,12 +51,16 @@ public sealed class TableStreamVisibilityTests
             Task.FromResult<TableKeyDefinitionChange?>(null);
     }
 
-    private sealed class FixedAllowPdp(TableIdentifier tableId) : IUnifiedPolicyDecisionPoint
+    private sealed class FixedAllowPdp(TableIdentifier tableId) : IAccessDecisionPoint
     {
-        public Task<TableAccessDecision> EvaluateAccessAsync(
-            TableIdentifier table, TableMetadata metadata, SecurityPrincipalContext caller,
-            IReadOnlyList<string>? requestedColumns = null, CancellationToken ct = default) =>
-            Task.FromResult(TableAccessDecision.Allowed(tableId, new Dictionary<string, ColumnAccessLevel>(), null, true));
+        public ValueTask<TableAccessDecision> DecideAsync(AccessRequest request, CancellationToken ct = default) =>
+            ValueTask.FromResult(TableAccessDecision.Allowed(tableId, new Dictionary<string, ColumnAccessLevel>(), null, true));
+
+        public ValueTask<IReadOnlyList<TableAccessDecision>> DecideManyAsync(SecurityPrincipalContext subject, IReadOnlyList<TableMetadata> objects, AccessOperation operation, AccessTransport transport, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+
+        public ValueTask<AccessExplanation> ExplainAsync(AccessRequest request, CancellationToken ct = default) =>
+            throw new NotSupportedException();
     }
 
     private sealed class EmptyConsentRepo : IConsentRepository

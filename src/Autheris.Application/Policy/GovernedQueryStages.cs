@@ -63,18 +63,19 @@ public static class GovernedQueryStages
     }
 
     /// <summary>
-    /// Evaluates the unified policy decision point for one table and fails closed: a denied decision and a non-canonical
+    /// Evaluates the access decision point for one table and fails closed: a denied decision and a non-canonical
     /// ClusterAdmin claim both throw <see cref="UnauthorizedAccessException"/>. Returns the allowed decision.
     /// </summary>
     public static async Task<TableAccessDecision> AuthorizeTableAsync(
-        IUnifiedPolicyDecisionPoint pdp,
+        Autheris.Application.Policy.Pdp.IAccessDecisionPoint pdp,
         TableIdentifier table,
         TableMetadata metadata,
         ClaimsPrincipal user,
         TenantId tenantId,
         string? clientIp,
         IReadOnlyList<string>? requestedColumns,
-        CancellationToken ct)
+        CancellationToken ct,
+        Microsoft.Extensions.Logging.ILogger? logger = null)
     {
         ArgumentNullException.ThrowIfNull(pdp);
         ArgumentNullException.ThrowIfNull(metadata);
@@ -83,7 +84,8 @@ public static class GovernedQueryStages
         var ip = !string.IsNullOrWhiteSpace(clientIp) && IPAddress.TryParse(clientIp, out var parsed) ? parsed : null;
         var securityContext = SecurityPrincipalContext.FromPrincipal(user, tenantId, clientIp: ip);
 
-        var decision = await pdp.EvaluateAccessAsync(table, metadata, securityContext, requestedColumns, ct).ConfigureAwait(false);
+        var decision = await Autheris.Application.Policy.Pdp.ReadAccessDecisions.DecideReadAsync(
+            pdp, metadata, securityContext, Autheris.Application.Policy.Pdp.AccessTransport.Rest, requestedColumns, logger, ct).ConfigureAwait(false);
         if (!decision.IsAllowed)
         {
             var reasons = decision.DeniedReasons.Count > 0 ? string.Join("; ", decision.DeniedReasons) : "Access denied by governance policy.";

@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Analytics;
 
+using Autheris.Application.Policy.Pdp;
 using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
@@ -73,21 +74,21 @@ public sealed class SemanticMetricQueryServiceP2Tests
         repo.GetTableMetadataAsync(table.Identifier, Arg.Any<CancellationToken>()).Returns(table);
         repo.StubAllTables([table]);
 
-        var pdp = Substitute.For<IUnifiedPolicyDecisionPoint>();
+        var pdp = Substitute.For<IAccessDecisionPoint>();
         var decision = allow
             ? TableAccessDecision.Allowed(table.Identifier, new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
             {
                 ["id"] = ColumnAccessLevel.Clear, ["status"] = ColumnAccessLevel.Clear, ["amount"] = ColumnAccessLevel.Clear
             })
             : TableAccessDecision.Denied(table.Identifier, "no consent");
-        pdp.EvaluateAccessAsync(Arg.Any<TableIdentifier>(), Arg.Any<TableMetadata>(), Arg.Any<SecurityPrincipalContext>(), Arg.Any<IReadOnlyList<string>?>(), Arg.Any<CancellationToken>())
+        pdp.DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>())
             .Returns(decision);
 
         var aggregation = Substitute.For<IGovernedAggregationService>();
         var rig = new Rig
         {
             Service = new SemanticMetricQueryService(
-                catalog, aggregation, repo, consentRepository: null, resolutionService: null, pdp: pdp, accessResolver: null,
+                catalog, aggregation, repo, consentRepository: null, pdp: pdp,
                 auditWriter: Substitute.For<IAuditWriter>(), gatewayOptions: options),
             Catalog = catalog,
             Aggregation = aggregation
