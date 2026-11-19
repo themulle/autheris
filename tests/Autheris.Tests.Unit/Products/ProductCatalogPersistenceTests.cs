@@ -55,6 +55,32 @@ public sealed class ProductCatalogPersistenceTests
         writer.Written.ShouldBeEmpty();
     }
 
+    [Fact]
+    public async Task ProductCatalogWriter_ForeignOwnerTenant_IsRejected()
+    {
+        var product = await CreateAsync();
+        var projected = ProductCatalogProjector.Project(product, null, DateTimeOffset.UnixEpoch);
+        var writer = new RecordingCatalogObjectWriter();
+
+        await Should.ThrowAsync<ArgumentException>(() => writer.UpsertAsync(ProductHarness.Tenant, projected with { OwnerTenantId = "tenant-b" }));
+        await Should.ThrowAsync<ArgumentException>(() => writer.UpsertAsync(ProductHarness.Tenant, projected with { OwnerTenantId = null }));
+        writer.Written.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void ProductCatalogWriter_ReservedName_IsRejected()
+    {
+        var reserved = ProductSource.ObjectOf(ProductHarness.Tenant, "sales", "pg_orders");
+        var metadata = new TableMetadata
+        {
+            Identifier = reserved,
+            OwnerTenantId = ProductHarness.Tenant.Value,
+            Table = new Table { SourceName = reserved.Domain, SchemaName = reserved.Schema, TableName = reserved.TableName, IsActive = true }
+        };
+
+        Should.Throw<ArgumentException>(() => ProductSource.EnsureProductObject(ProductHarness.Tenant, metadata));
+    }
+
     private async Task<DataProduct> CreateAsync(string sql = "SELECT c.id, c.email, c.segment FROM crm.public.customers c")
     {
         var admin = _h.Caller(ProductHarness.Admin, admin: true);

@@ -246,6 +246,21 @@ public sealed class GovernedSqlExecutionParameterSecurityTests
         ex.Message.ShouldNotContain("zz9");
     }
 
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData("p0", "P0")]
+    [InlineData("@p0", "p0")]
+    public void MergeGatewayParameters_CaseOnlyDuplicateClientKeys_FailClosed(string first, string second)
+    {
+        var client = new Dictionary<string, object?>(StringComparer.Ordinal) { [first] = "a", [second] = "SENTINEL-869-DUP" };
+        var request = Planned("SELECT 1", new Dictionary<string, object?> { ["@__gql_tf_0"] = Sentinel }, client);
+
+        var ex = Should.Throw<SecurityException>(() => GovernedSqlExecutionService.MergeGatewayParameters(request));
+
+        ex.Message.ShouldNotContain("SENTINEL-869-DUP");
+        ex.Message.ShouldNotContain("p0", Case.Insensitive);
+    }
+
     [Fact]
     [Trait("Category", "Security")]
     public void CyrillicLookalikeP0_IsNotAParameter()
@@ -253,15 +268,11 @@ public sealed class GovernedSqlExecutionParameterSecurityTests
         // U+0440 (Cyrillic er) looks like p. The grammar is ASCII-only, so neither spelling turns into a parameter placeholder.
         var supplied = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase) { ["\u0440" + "0"] = "evil" };
 
-        var cyrillicText = GovernedSqlExecutionService.NormalizeClientParameters(
-            "SELECT id FROM orders WHERE id = @\u04400", supplied, null, out var cyrillicNames);
-        var asciiText = GovernedSqlExecutionService.NormalizeClientParameters(
-            "SELECT id FROM orders WHERE id = @p0", supplied, null, out var asciiNames);
-
-        cyrillicNames.ShouldBeEmpty();
-        asciiNames.ShouldBeEmpty();
-        cyrillicText.ShouldNotContain("__param_");
-        asciiText.ShouldNotContain("__param_");
+        foreach (var sql in new[] { "SELECT id FROM orders WHERE id = @\u04400", "SELECT id FROM orders WHERE id = @p0" })
+        {
+            GovernedSqlExecutionService.NormalizeClientParameters(sql, supplied, null, out var names).ShouldNotContain("__param_");
+            names.ShouldBeEmpty();
+        }
     }
 
     [Fact]
@@ -270,8 +281,7 @@ public sealed class GovernedSqlExecutionParameterSecurityTests
     {
         var service = CreateService(CreateTable(new TableIdentifier(DataSource, "public", "orders")));
         var supplied = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase) { ["p0"] = "evil" };
-        var text = GovernedSqlExecutionService.NormalizeClientParameters(
-            "SELECT id FROM orders WHERE region = @p0", supplied, null, out var names);
+        var text = GovernedSqlExecutionService.NormalizeClientParameters("SELECT id FROM orders WHERE region = @p0", supplied, null, out var names);
 
         var compiled = await service.CompileAsync(text, CreateUser(), new TenantId(Tenant));
 

@@ -468,7 +468,10 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
         {
             foreach (var (name, value) in request.Parameters)
             {
-                merged.TryAdd(name.TrimStart('@'), value);
+                if (!merged.TryAdd(name.TrimStart('@'), value))
+                {
+                    throw new System.Security.SecurityException("A statement parameter name is bound twice (fail-closed).");
+                }
             }
         }
 

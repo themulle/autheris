@@ -344,8 +344,8 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<GovernedWebSq
         var (status, body) = await PostSqlWithParametersAsync("SELECT id FROM orders WHERE id = @p0", "tenant_123",
             new Dictionary<string, object?> { ["p0"] = "5", ["P0"] = "9999" });
 
-        status.ShouldNotBe(HttpStatusCode.OK, body);
-        ((int)status).ShouldBeInRange(400, 499);
+        status.ShouldBe(HttpStatusCode.BadRequest, body);
+        Code(body).ShouldBe("BAD_REQUEST");
         body.ShouldNotContain("9999");
     }
 

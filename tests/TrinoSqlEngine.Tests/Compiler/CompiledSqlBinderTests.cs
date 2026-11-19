@@ -90,7 +90,8 @@ public class CompiledSqlBinderTests
 
     // ---- a client parameter named p0 is an ordinary name; it never reaches an internal slot ----
 
-    public static IEnumerable<object[]> InternalSlotDialects() => ClientListHarness.DialectData();
+    public static IEnumerable<object[]> InternalSlotDialects() =>
+        ClientListHarness.DialectData().Append(new object[] { TargetSqlDialect.Databricks });
 
     /// <summary>SqlServer, DuckDb and PostgreSql binders work on the recording command; Oracle needs BindByName on a provider command.</summary>
     private static DbCommandCompiledSqlBinder? RecordingBinderOf(TargetSqlDialect dialect) => dialect switch
@@ -98,6 +99,7 @@ public class CompiledSqlBinderTests
         TargetSqlDialect.SqlServer => new SqlServerCompiledSqlBinder(),
         TargetSqlDialect.DuckDb => new DuckDbCompiledSqlBinder(),
         TargetSqlDialect.PostgreSql => new PostgreSqlCompiledSqlBinder(),
+        TargetSqlDialect.Databricks => new DatabricksCompiledSqlBinder(),
         _ => null
     };
 
