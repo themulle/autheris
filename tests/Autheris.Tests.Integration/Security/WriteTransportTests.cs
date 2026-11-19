@@ -19,6 +19,7 @@ using Autheris.Tests.Common.Hosting;
 using Autheris.Tests.Integration.Governance;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using Shouldly;
@@ -246,6 +247,7 @@ public sealed class WriteTransportTests : IClassFixture<WriteTransportTests.Fixt
                 b.UseSetting("Gateway:OData:Enabled", "true");
                 b.UseSetting("Gateway:Mcp:Enabled", "true");
                 b.UseSetting("Gateway:Mcp:EndpointPath", "/mcp");
+                b.ConfigureTestServices(s => s.AddSingleton<Autheris.Application.Common.Interfaces.IIdempotencyStore, ClusterWideTestIdempotencyStore>());
                 b.ConfigureServices(services =>
                 {
                     var original = services.Single(d => d.ServiceType == typeof(ISqlConnectionFactory));

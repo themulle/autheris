@@ -245,8 +245,8 @@ public sealed class GovernedWriteIntegrationTests
             }
             catch (SqlException ex)
             {
-                // 229 object/column permission denied, 262 CREATE TABLE denied, 2760 schema missing or no permission.
-                return ex.Number is 229 or 262 or 2760;
+                // 229 object permission denied, 230 column permission denied, 262 CREATE TABLE denied, 2760 schema missing or no permission.
+                return ex.Number is 229 or 230 or 262 or 2760;
             }
         }
 

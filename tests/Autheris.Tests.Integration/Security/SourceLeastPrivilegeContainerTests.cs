@@ -114,7 +114,9 @@ public sealed class SourceLeastPrivilegeContainerTests
 
         statements.ShouldNotBeEmpty("the trace must have captured the statements of the service login");
         statements.Any(s => s.Contains("orders", StringComparison.OrdinalIgnoreCase)).ShouldBeTrue("the governed read must appear in the trace");
-        statements.Where(s => CatalogStatement.IsMatch(s)).ShouldBeEmpty("Autheris must not issue a catalog statement");
+        // The only match is the session hardening statement that sets search_path (it names pg_catalog as a path entry and reads no catalog);
+        // everything else is checked.
+        statements.Where(s => !s.Contains("SELECT set_config('search_path'", StringComparison.Ordinal) && CatalogStatement.IsMatch(s)).ShouldBeEmpty("Autheris must not issue a catalog statement");
     }
 
     private static async Task RunGovernedReadAsync(TemplateRoleEnvironment env)
