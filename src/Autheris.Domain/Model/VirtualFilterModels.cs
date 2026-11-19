@@ -452,7 +452,6 @@ public sealed record VirtualFilterAccessProfile
     public string Name { get; init; } = string.Empty;
     public GranteeType GranteeType { get; init; } = GranteeType.User;
     public Sid? GranteeSid { get; init; }
-    public string? RoleName { get; init; }
 
     /// <summary>Pattern <c>source.schema.object</c> (three segments) the profile governs.</summary>
     public string Scope { get; init; } = string.Empty;
@@ -479,12 +478,14 @@ public sealed record VirtualFilterAccessProfile
     public void Validate()
     {
         VirtualFilterNames.ValidateFilterName(Name, nameof(Name));
-        switch (GranteeType)
+        if (!Enum.IsDefined(GranteeType))
         {
-            case GranteeType.Role when string.IsNullOrWhiteSpace(RoleName):
-                throw new ArgumentException("A role profile needs a role name.", nameof(RoleName));
-            case GranteeType.User or GranteeType.Group or GranteeType.ServicePrincipal when GranteeSid == null:
-                throw new ArgumentException("A user, group or service principal profile needs a SID.", nameof(GranteeSid));
+            throw new ArgumentException("The grantee type is not supported.", nameof(GranteeType));
+        }
+
+        if (GranteeSid == null)
+        {
+            throw new ArgumentException("A user, group or service principal profile needs a SID.", nameof(GranteeSid));
         }
 
         if (!ObjectPattern.TryParse(Scope, out var scope, out var scopeError))
@@ -523,7 +524,7 @@ public sealed record VirtualFilterAccessProfile
     {
         var sb = new StringBuilder()
             .Append("name=").Append(Name).Append('\n')
-            .Append("grantee=").Append(GranteeType).Append(':').Append(GranteeSid?.Value).Append(':').Append(RoleName).Append('\n')
+            .Append("grantee=").Append(GranteeType).Append(':').Append(GranteeSid?.Value).Append(':').Append('\n')
             .Append("scope=").Append(Scope).Append('\n')
             .Append("uncovered=").Append(Uncovered).Append('\n');
         foreach (var binding in Bindings.OrderBy(b => b.FilterName, StringComparer.Ordinal).ThenBy(b => b.TargetPattern, StringComparer.Ordinal))

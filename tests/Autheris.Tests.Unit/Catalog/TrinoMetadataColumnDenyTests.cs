@@ -16,31 +16,32 @@ using Xunit;
 
 /// <summary>
 /// Security review (information_schema.columns): Deny columns are hidden for every subject the data path evaluates
-/// (user SID, group SIDs, roles), loaded in one batch call instead of one consent query per table.
+/// (user SID, group SIDs), loaded in one batch call instead of one consent query per table.
 /// </summary>
 public sealed class TrinoMetadataColumnDenyTests
 {
     private const string UserSid = "S-1-5-21-USER";
     private const string GroupSid = "S-1-5-21-1-2-3-1001";
+    private const string SecondGroupSid = "S-1-5-21-1-2-3-1002";
     private const string Role = "Analyst";
 
     private static readonly TenantId Tenant = Wp0.TenantA;
 
-    private static Consent Grant(TableIdentifier table, GranteeType type, string? sid, string? roleName, params (string Column, ColumnAccessLevel Level)[] rules) => new()
+    private static Consent Grant(TableIdentifier table, GranteeType type, string? sid, params (string Column, ColumnAccessLevel Level)[] rules) => new()
     {
         TableIdentifier = table,
         TenantId = Tenant,
         Effect = ConsentEffect.Allow,
         GranteeType = type,
         GranteeSid = sid == null ? (Sid?)null : new Sid(sid),
-        RoleName = roleName,
         ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
         ValidTo = DateTimeOffset.UtcNow.AddDays(1),
         ColumnRules = rules.Select(r => new ConsentColumnRule { ColumnName = r.Column, AccessLevel = r.Level }).ToList()
     };
 
     private static ClaimsPrincipal Caller() => Wp0.User(
-        UserSid, Tenant.Value, [Role], "Bearer", Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim(GroupSid));
+        UserSid, Tenant.Value, [Role], "Bearer", Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim(GroupSid),
+        Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim(SecondGroupSid));
 
     private static IConsentRepository Repository(params Consent[] consents)
     {
@@ -60,13 +61,13 @@ public sealed class TrinoMetadataColumnDenyTests
     }
 
     [Fact]
-    public async Task DenyColumns_FromGroupAndRoleConsents_AreHidden()
+    public async Task DenyColumns_FromGroupConsents_AreHidden()
     {
         var table = Wp0.Table("hr", "employees", columns: ["id", "email", "salary"]);
         var consents = Repository(
-            Grant(table.Identifier, GranteeType.User, UserSid, null, ("id", ColumnAccessLevel.Clear), ("email", ColumnAccessLevel.Clear), ("salary", ColumnAccessLevel.Clear)),
-            Grant(table.Identifier, GranteeType.Group, GroupSid, null, ("salary", ColumnAccessLevel.Deny)),
-            Grant(table.Identifier, GranteeType.Role, null, Role, ("email", ColumnAccessLevel.Deny)));
+            Grant(table.Identifier, GranteeType.User, UserSid, ("id", ColumnAccessLevel.Clear), ("email", ColumnAccessLevel.Clear), ("salary", ColumnAccessLevel.Clear)),
+            Grant(table.Identifier, GranteeType.Group, GroupSid, ("salary", ColumnAccessLevel.Deny)),
+            Grant(table.Identifier, GranteeType.Group, SecondGroupSid, ("email", ColumnAccessLevel.Deny)));
 
         var columns = await ColumnsAsync(consents, table);
 
@@ -79,12 +80,12 @@ public sealed class TrinoMetadataColumnDenyTests
         var first = Wp0.Table("hr", "employees", columns: ["id"]);
         var second = Wp0.Table("hr", "contracts", columns: ["id"]);
         var consents = Repository(
-            Grant(first.Identifier, GranteeType.User, UserSid, null),
-            Grant(second.Identifier, GranteeType.User, UserSid, null));
+            Grant(first.Identifier, GranteeType.User, UserSid),
+            Grant(second.Identifier, GranteeType.User, UserSid));
 
         await ColumnsAsync(consents, first, second);
 
-        // Batch calls with the full subject set (user SID, group SIDs, roles); never the per-table query.
+        // Batch calls with the full subject set (user SID, group SIDs); never the per-table query.
         await consents.Received().GetAllActiveConsentsForSubjectsAsync(
             Arg.Is<IEnumerable<Sid>>(s => s.Contains(new Sid(UserSid)) && s.Contains(new Sid(GroupSid))),
             Arg.Is<IEnumerable<string>?>(r => r != null && r.Contains(Role)),
@@ -99,7 +100,7 @@ public sealed class TrinoMetadataColumnDenyTests
     public async Task ColumnsWithoutAnyDenyRule_StayListed()
     {
         var table = Wp0.Table("hr", "employees", columns: ["id", "email"]);
-        var consents = Repository(Grant(table.Identifier, GranteeType.User, UserSid, null));
+        var consents = Repository(Grant(table.Identifier, GranteeType.User, UserSid));
 
         var columns = await ColumnsAsync(consents, table);
 

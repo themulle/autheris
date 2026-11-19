@@ -399,7 +399,7 @@ public partial class GovernanceRepository
         using var trans = conn.BeginTransaction();
         try
         {
-            // Idempotent on the natural keys (ad_sid, role_name, ...): a restart must not abort the seed on a unique violation.
+            // Idempotent on the natural keys (ad_sid, ...): a restart must not abort the seed on a unique violation.
             string EnsureOwner(string sid, string account, string name, string email)
             {
                 using var cmd = conn.CreateCommand();

@@ -231,8 +231,6 @@ public sealed class DeclarativeConsentApplyPruneSecurityTests
             Effect = c.Effect,
             GranteeType = c.GranteeType,
             GranteeSid = c.GranteeSid,
-            RoleId = c.RoleId,
-            RoleName = c.RoleName,
             ValidFrom = c.ValidFrom,
             ValidTo = c.ValidTo,
             IsRevoked = revoked ?? c.IsRevoked,
@@ -324,6 +322,31 @@ public sealed class DeclarativeConsentApplyPruneSecurityTests
         IDataOwnershipRepository? ownership = null,
         IGatewayRoleEvaluator? roles = null) =>
         new(new StubTableMetadataRepository(), repo, new NullAuditLogRepository(), dataOwnershipRepository: ownership, roleEvaluator: roles);
+
+    [Theory]
+    [InlineData("Role", false)]
+    [InlineData("role", true)]
+    [InlineData("ROLE", false)]
+    [InlineData("3", true)]
+    public async Task Security_DeclarativeApply_RoleGrantee_RejectsWholeDocumentWithoutWrites(string granteeType, bool dryRun)
+    {
+        var repo = new InMemoryPruneConsentRepository();
+        var svc = CreateService(repo);
+        var manifest = new DeclarativeConsentManifest(
+            "1",
+            [
+                new DeclarativeConsentPolicy("default", "sales", "orders", "Group", GroupAlpha, "Allow", ValidUntil: DateTimeOffset.UtcNow.AddDays(30)),
+                new DeclarativeConsentPolicy("default", "sales", "missing_table_is_not_a_loophole", granteeType, "analysts", "Deny", ValidUntil: DateTimeOffset.UtcNow.AddDays(30))
+            ]);
+
+        var ex = await Should.ThrowAsync<DeclarativeManifestValidationException>(() => svc.ApplyManifestAsync(AdminPrincipal(), manifest, dryRun));
+
+        ex.PolicyIndex.ShouldBe(1);
+        ex.Violation.ShouldBe(DeclarativeManifestViolation.GranteeType);
+        ex.Message.ShouldNotContain("analysts");
+        repo.ReplaceCalls.ShouldBe(0);
+        repo.Consents.ShouldBeEmpty();
+    }
 
     [Fact]
     public async Task Prune_False_KeepsUnlistedGrants()

@@ -211,7 +211,6 @@ public sealed partial class Query
                 Effect = c.Effect.ToString(),
                 GranteeType = c.GranteeType.ToString(),
                 GranteeSid = c.GranteeSid?.Value,
-                RoleName = c.RoleName,
                 ValidFrom = c.ValidFrom,
                 ValidTo = c.ValidTo,
                 Columns = c.ColumnRules.Select(cr => cr.ColumnName).ToList(),

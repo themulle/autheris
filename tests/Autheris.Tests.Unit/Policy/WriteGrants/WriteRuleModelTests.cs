@@ -87,26 +87,6 @@ public sealed class WriteRuleModelTests
     }
 
     [Fact]
-    public void RoleGrantee_WithWriteRules_IsRejected()
-    {
-        var consent = new Consent
-        {
-            TableId = Guid.NewGuid(),
-            TableIdentifier = new TableIdentifier("corp", "sales", "orders"),
-            TenantId = "tenant-1",
-            Effect = ConsentEffect.Allow,
-            GranteeType = GranteeType.Role,
-            RoleId = Guid.NewGuid(),
-            RoleName = "SalesManager",
-            ValidFrom = DateTimeOffset.UtcNow.AddHours(-1),
-            ValidTo = DateTimeOffset.UtcNow.AddHours(2),
-            WriteRules = [new WriteRule(Guid.NewGuid(), WriteOperation.Insert, ["name"], WriteRowScope.OwnRows)]
-        };
-
-        Should.Throw<InvalidOperationException>(() => consent.Validate());
-    }
-
-    [Fact]
     public void DenyConsent_WithWriteRules_IsRejected()
     {
         var consent = new Consent
