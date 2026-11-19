@@ -6,6 +6,7 @@ using System.Text;
 using Autheris.Application.Sql.Indexing;
 using Autheris.Domain.Common;
 using Autheris.Domain.Diagnostics;
+using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 
 namespace Autheris.Application.Sql.Tree;
@@ -114,27 +115,51 @@ public static partial class TreeSqlCompiler
         return result;
     }
 
+    /// <summary>The primary key, else the first unique index, whose columns are all effectively Clear (see <see cref="ResolveClearKey"/>).</summary>
     private static List<string>? GetClearUniqueKeyColumns(NodePlan plan)
     {
         var meta = plan.Access.Metadata;
         var decision = plan.Access.Decision;
 
-        if (meta.PrimaryKeyColumns.Count > 0 &&
-            meta.PrimaryKeyColumns.All(c => decision.GetEffectiveColumnAccess(c, meta) == ColumnAccessLevel.Clear))
+        if (ResolveClearKey(meta, decision, meta.PrimaryKeyColumns) is { } primaryKey)
         {
-            return meta.PrimaryKeyColumns.ToList();
+            return primaryKey;
         }
 
         foreach (var idx in meta.Indexes)
         {
-            if (idx.IsUnique && idx.Columns.Count > 0 &&
-                idx.Columns.All(c => decision.GetEffectiveColumnAccess(c, meta) == ColumnAccessLevel.Clear))
+            if (idx.IsUnique && ResolveClearKey(meta, decision, idx.Columns) is { } uniqueKey)
             {
-                return idx.Columns.ToList();
+                return uniqueKey;
             }
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// #836: the key columns in catalog spelling (the SQL projects and orders by that name), with the access checked on that
+    /// name. An empty key, or a column that is unknown, not a safe name, or not effectively Clear, disqualifies the key (null).
+    /// </summary>
+    private static List<string>? ResolveClearKey(TableMetadata meta, TableAccessDecision decision, IReadOnlyList<string> columns)
+    {
+        if (columns.Count == 0)
+        {
+            return null;
+        }
+
+        var resolved = new List<string>(columns.Count);
+        foreach (var column in columns)
+        {
+            var name = meta.GetColumn(column)?.ColumnName;
+            if (name is null || !SafeNameRegex().IsMatch(name) ||
+                decision.GetEffectiveColumnAccess(name, meta) != ColumnAccessLevel.Clear)
+            {
+                return null;
+            }
+            resolved.Add(name);
+        }
+        return resolved;
     }
 
     private static bool CollidesWithReservedName(string column)
@@ -302,7 +327,18 @@ public static partial class TreeSqlCompiler
         var limit = node.ExecutionLimit ?? node.Limit;
 
         var sb = new StringBuilder("SELECT ");
-        sb.Append(string.Join(", ", plan.InnerColumns.Select(c => $"{target}.{Q(context, c)} AS {Q(context, c)}")));
+        // #836: the page and the outer JSON are ordered by the tie-break key too, so the page carries it even when it is not
+        // selected. It is not returned: the outer projection is built from plan.Outputs only.
+        var projected = new List<string>(plan.InnerColumns.Count + rootOrderWithTieBreaks.Count);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var column in plan.InnerColumns.Concat(rootOrderWithTieBreaks.Select(o => o.Column)))
+        {
+            if (seen.Add(column))
+            {
+                projected.Add(column);
+            }
+        }
+        sb.Append(string.Join(", ", projected.Select(c => $"{target}.{Q(context, c)} AS {Q(context, c)}")));
 
         var securedSource = plan.Access.SecuredSource;
         if (securedSource != null)
@@ -378,17 +414,13 @@ public static partial class TreeSqlCompiler
             orderTerms.Add($"{childTarget}.{Q(context, col)}{(desc ? " DESC" : string.Empty)}");
         }
 
-        var childMeta = child.Access.Metadata;
-        var childDecision = child.Access.Decision;
-        if (childMeta.PrimaryKeyColumns.Count > 0 &&
-            childMeta.PrimaryKeyColumns.All(c => childDecision.GetEffectiveColumnAccess(c, childMeta) == ColumnAccessLevel.Clear))
+        if (ResolveClearKey(child.Access.Metadata, child.Access.Decision, child.Access.Metadata.PrimaryKeyColumns) is { } childKey)
         {
-            foreach (var pkCol in childMeta.PrimaryKeyColumns)
+            foreach (var pkCol in childKey)
             {
                 if (!child.Order.Any(o => string.Equals(o.Column, pkCol, StringComparison.OrdinalIgnoreCase)))
                 {
-                    var canonCol = childMeta.GetColumn(pkCol)?.ColumnName ?? pkCol;
-                    orderTerms.Add($"{childTarget}.{Q(context, canonCol)}");
+                    orderTerms.Add($"{childTarget}.{Q(context, pkCol)}");
                 }
             }
         }
