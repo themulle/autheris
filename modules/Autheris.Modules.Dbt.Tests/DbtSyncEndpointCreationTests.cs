@@ -21,7 +21,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
-/// <summary>Issue #282 (SEC-282-8 authorization, SEC-282-9 audit): authorization and audit details of POST /api/extensions/dbt/sync.</summary>
+/// <summary>Issue #282 (SEC-282-8 authorization, SEC-282-9 audit): authorization and audit details of POST /modules/dbt/sync.</summary>
 public sealed class DbtSyncEndpointCreationTests
 {
     private static DefaultHttpContext Context(string role)

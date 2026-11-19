@@ -59,7 +59,7 @@ sequenceDiagram
 
 ## 3. REST-Endpunkte Referenz
 
-Die dbt-Integration ist ein Laufzeitmodul (`dbt`, Konfiguration `Gateway:Dbt`) und muss unter `Gateway:Modules:Enabled` aktiviert sein; ohne das Modul antworten alle Routen mit 404, und `Gateway:Dbt` ohne Modul bricht den Start ab. Alle dbt-Endpunkte unter `/modules/dbt/` erfordern Authentifizierung. Der dbt-Cloud-Webhook ist eine Kernroute (`POST /api/webhooks/dbt-cloud`): Die HMAC-SHA256-Signatur wird im Kern geprüft (Header `X-Dbt-Signature`, `X-Hub-Signature-256` oder `Authorization` mit dem reinen 64-stelligen Hex-Wert), ausschließlich gegen `Gateway:Dbt:WebhookSecret` (kein Umgebungsvariablen-Fallback), bevor das Modul den Payload sieht:
+The dbt integration is a runtime module (`dbt`, configuration `Gateway:Dbt`). Enable it under `Gateway:Modules:Enabled`; without the module every dbt route answers 404 and `Gateway:Dbt` without the module fails startup. All endpoints under `/modules/dbt/` require authentication. The dbt Cloud webhook is a core route: the HMAC-SHA256 signature is verified in core before the module sees the payload, against `Gateway:Dbt:WebhookSecret` only (no environment fallback). Accepted headers: `X-Dbt-Signature`, `X-Hub-Signature-256` (optional `sha256=` prefix) or `Authorization` carrying the bare 64-character hex digest.
 
 | Endpunkt | Methode | Beschreibung |
 | :--- | :---: | :--- |
@@ -69,6 +69,7 @@ Die dbt-Integration ist ein Laufzeitmodul (`dbt`, Konfiguration `Gateway:Dbt`) u
 | `/modules/dbt/proposals/{id}/approve` | `POST` | Genehmigt einen PII-Maskierungsvorschlag, aktualisiert `TableMetadata` und invalidiert die Policy-Epoche. |
 | `/modules/dbt/proposals/{id}/reject` | `POST` | Weist einen vorgeschlagenen Governance-Eintrag ab. |
 | `/modules/dbt/exposures` | `GET` | Generiert ein valides `exposures.yaml` zur Rückführung aktiver GraphQL-Abhängigkeiten in dbt Docs. |
+| `/api/webhooks/dbt-cloud` | `POST` | Core route, anonymous but HMAC-signed (see above). Max. 2 MB; 404 without module `dbt`. |
 
 ---
 

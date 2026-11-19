@@ -206,13 +206,30 @@ internal static class ModuleSecurityGuards
     /// <summary>Assembly that may implement <see cref="IDbtCloudWebhookHandler"/>.</summary>
     internal const string DbtCloudWebhookHandlerAssembly = "Autheris.Modules.Dbt";
 
+    /// <summary>Module id that may register <see cref="IDbtCloudWebhookHandler"/>.</summary>
+    internal const string DbtCloudWebhookHandlerModuleId = "dbt";
+
     /// <summary>
     /// The core webhook route trusts <see cref="IDbtCloudWebhookHandler"/> with verified payloads only, so at most one
     /// descriptor may exist and its implementation type must live in the dbt module assembly.
     /// </summary>
-    internal static void VerifyDbtCloudWebhookHandler(string moduleId, IServiceCollection services)
+    internal static List<ServiceDescriptor> CaptureDbtCloudWebhookHandlers(IServiceCollection services) =>
+        services.Where(d => d.ServiceType == typeof(IDbtCloudWebhookHandler)).ToList();
+
+    internal static void VerifyDbtCloudWebhookHandler(
+        string moduleId,
+        IServiceCollection services,
+        IReadOnlyCollection<ServiceDescriptor>? handlersBefore = null)
     {
-        var handlers = services.Where(d => d.ServiceType == typeof(IDbtCloudWebhookHandler)).ToList();
+        var handlers = CaptureDbtCloudWebhookHandlers(services);
+        if (!string.Equals(moduleId, DbtCloudWebhookHandlerModuleId, StringComparison.Ordinal) &&
+            handlers.Any(d => handlersBefore is null || !handlersBefore.Contains(d)))
+        {
+            throw new ModuleLoadException(
+                moduleId,
+                $"Module '{moduleId}' registered '{typeof(IDbtCloudWebhookHandler).FullName}', which only module '{DbtCloudWebhookHandlerModuleId}' may do.");
+        }
+
         if (handlers.Count > 1)
         {
             throw new ModuleLoadException(
