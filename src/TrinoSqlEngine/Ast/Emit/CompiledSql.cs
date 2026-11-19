@@ -10,7 +10,7 @@ using TrinoSqlEngine.Governance;
 public enum ParameterOrigin { ClientNamed, ClientPositional, QueryLiteral, Tenant, Policy, Mask, PageOffset }
 
 /// <summary>The value family a client bind must conform to because the statement compares it with a typed column under a row policy (checked by the binder).</summary>
-public enum BindFamily { Numeric, Temporal, Boolean }
+public enum BindFamily { Numeric, Temporal, Boolean, Text }
 
 public enum SqlStatementClass { Select, Insert, Update, Delete, Merge }
 

@@ -32,6 +32,7 @@ internal sealed class RowPolicyCoercionGuard(ITableCatalog catalog) : ColumnScop
         Fam.Numeric => BindFamily.Numeric,
         Fam.Temporal => BindFamily.Temporal,
         Fam.Boolean => BindFamily.Boolean,
+        Fam.Text or Fam.StringLiteral => BindFamily.Text,
         _ => null
     };
 
@@ -60,6 +61,11 @@ internal sealed class RowPolicyCoercionGuard(ITableCatalog catalog) : ColumnScop
         }
 
         var family = Combine(others);
+        bool hasBind = operands.Any(o => Unwrap(o) is ParameterReference or NamedBindMarkerExpression);
+
+        // Operands that are all binds or untyped constants leave nothing to take the family from: the engine would coerce one value to the other.
+        if (hasBind && family is Fam.Any or Fam.Bind) throw Refuse();
+
         foreach (var operand in operands) Record(operand, family);
     }
 

@@ -208,4 +208,22 @@ public sealed class AdvisoryRegressionGateTests
 
         compiled.Parameters.ShouldContain(p => p.Origin == ParameterOrigin.ClientNamed && p.SourceName == "p" && p.RequiredFamily == BindFamily.Numeric);
     }
+
+    [Theory]
+    [InlineData("postgresql", "case_24")]
+    [InlineData("sqlserver", "case_24")]
+    [InlineData("oracle", "case_24")]
+    [InlineData("databricks", "case_24")]
+    public void Regression_text_bind_family_case(string dialect, string item)
+    {
+        Assert.NotNull(item);
+        var engine = new FastSqlEngine();
+        const string sql = "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN status = __param_p ELSE 1 = 0 END";
+
+        var compiled = engine.Compile(sql.AsMemory(), Request(dialect, PolicyScenario.Tenant), CancellationToken.None);
+
+        compiled.Parameters.ShouldContain(p => p.Origin == ParameterOrigin.ClientNamed && p.SourceName == "p" && p.RequiredFamily == BindFamily.Text);
+        Should.Throw<SecurityException>(() => engine.Compile("SELECT id FROM orders WHERE __param_a = __param_b".AsMemory(), Request(dialect, PolicyScenario.Tenant), CancellationToken.None))
+            .Message.ShouldBe(RowPolicyErrorGuard.Message);
+    }
 }

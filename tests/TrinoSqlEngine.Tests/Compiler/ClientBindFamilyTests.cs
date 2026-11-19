@@ -75,11 +75,41 @@ public class ClientBindFamilyTests
 
     [Theory]
     [MemberData(nameof(Dialects))]
-    public void Text_slot_needs_no_family(TargetSqlDialect dialect)
+    public void Text_slot_requires_a_string_value(TargetSqlDialect dialect)
     {
-        var compiled = new ClientListHarness().Compile(dialect, "SELECT id FROM orders WHERE status = __param_p");
+        var compiled = new ClientListHarness().Compile(dialect, "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN status = __param_p ELSE 1 = 0 END");
 
         Bind(dialect, compiled, new() { ["p"] = "abc" });
+        var ex = Assert.Throws<SecurityException>(() => Bind(dialect, compiled, new() { ["p"] = 5L }));
+        Assert.Equal(RowPolicyErrorGuard.Message, ex.Message);
+    }
+
+    [Theory]
+    [MemberData(nameof(Dialects))]
+    public void Text_literal_against_a_bind_makes_the_slot_text(TargetSqlDialect dialect)
+    {
+        var compiled = new ClientListHarness().Compile(dialect, "SELECT id FROM orders WHERE __param_p = 'x'");
+
+        Assert.Throws<SecurityException>(() => Bind(dialect, compiled, new() { ["p"] = 1L }));
+        Bind(dialect, compiled, new() { ["p"] = "x" });
+    }
+
+    [Theory]
+    [MemberData(nameof(Dialects))]
+    public void Comparison_of_binds_only_is_refused_at_compile(TargetSqlDialect dialect)
+    {
+        Assert.Throws<SecurityException>(() => new ClientListHarness().Compile(dialect, "SELECT id FROM orders WHERE __param_a = __param_b"));
+        Assert.Throws<SecurityException>(() => new ClientListHarness().Compile(dialect, "SELECT id FROM orders WHERE __param_a = NULL"));
+    }
+
+    [Fact]
+    public void Databricks_binder_applies_the_same_checks()
+    {
+        const TargetSqlDialect dialect = TargetSqlDialect.Databricks;
+        var compiled = new ClientListHarness().Compile(dialect, BranchShape);
+
+        Assert.Throws<SecurityException>(() => Bind(dialect, compiled, new() { ["p"] = "abc" }));
+        Bind(dialect, compiled, new() { ["p"] = "42" });
     }
 }
 

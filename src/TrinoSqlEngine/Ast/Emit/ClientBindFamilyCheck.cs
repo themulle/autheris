@@ -19,6 +19,8 @@ internal static class ClientBindFamilyCheck
             BindFamily.Temporal => value is DateTime or DateTimeOffset or DateOnly or TimeOnly or TimeSpan
                 || (value is string t && DateTime.TryParseExact(t, DateTimeFormats, invariant, DateTimeStyles.None, out _)),
             BindFamily.Boolean => value is bool,
+            // A number bound against a text column makes SQL Server and Oracle convert the column, which raises on non-numeric text.
+            BindFamily.Text => value is string or Guid or char,
             _ => false
         };
     }
