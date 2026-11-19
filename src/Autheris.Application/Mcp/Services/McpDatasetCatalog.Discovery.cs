@@ -154,6 +154,7 @@ public sealed partial class McpDatasetCatalog
     private async Task<McpDatasetSummary> BuildDiscoverySummaryAsync(DiscoveryObject obj, CancellationToken ct)
     {
         var id = new TableIdentifier(obj.Domain, obj.Schema, obj.Name);
+        var visibleColumnCount = DiscoveryColumnVisibility.VisibleCount(obj);
         var summaryOnly = obj.Columns.Count == 0;
         var graphQl = graphQlMap == null || summaryOnly ? null : await graphQlMap.GetTableAsync(id, ct).ConfigureAwait(false);
         var displayName = DiscoveryTextSanitizer.SanitizeText(obj.DisplayName, DiscoveryTextSanitizer.MaxDisplayNameRunes) ?? McpCatalogText.DisplayName(null, obj.Name);
@@ -164,7 +165,7 @@ public sealed partial class McpDatasetCatalog
             displayName,
             description,
             obj.Sensitivity,
-            summaryOnly ? 0 : obj.Columns.Count,
+            visibleColumnCount,
             graphQl?.QueryField,
             Tags: obj.Tags,
             AccessStatus: status,
@@ -186,7 +187,7 @@ public sealed partial class McpDatasetCatalog
                 sensitivity = resMeta.Table.Sensitivity ?? "NORMAL";
                 var (activeConsents, _, isAdmin) = await GetCallerConsentsAndRequestsAsync(principal, ct).ConfigureAwait(false);
                 var levels = ResolveColumnLevels(principal, resMeta, activeConsents, isAdmin, isGranted: true, bypass: IsBypassed);
-                columnCount = resMeta.Columns.Count(col => !levels.TryGetValue(col.ColumnName, out var lvl) || lvl != Autheris.Domain.Interfaces.ColumnAccessLevel.Deny);
+                columnCount = resMeta.Columns.Count(col => levels.TryGetValue(col.ColumnName, out var lvl) && lvl != Autheris.Domain.Interfaces.ColumnAccessLevel.Deny);
             }
         }
 
@@ -310,8 +311,7 @@ public sealed partial class McpDatasetCatalog
         var shape = obj.QueryShape ?? DiscoveryQueryShape.Empty;
         var primaryKeys = new HashSet<string>(shape.PrimaryKeyColumns, StringComparer.OrdinalIgnoreCase);
 
-        var columns = obj.Columns
-            .Where(static c => c.State != DiscoveryColumnState.NoAccess)
+        var columns = DiscoveryColumnVisibility.VisibleColumns(obj)
             .Select(c =>
             {
                 var access = c.State == DiscoveryColumnState.Clear ? "clear" : "mask";

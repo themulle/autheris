@@ -349,7 +349,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
                     displayName,
                     description,
                     t.Table.Sensitivity,
-                    t.Columns.Count,
+                    VisibleColumnCount(principal, t, activeConsents, isAdmin, status),
                     graphQl?.QueryField,
                     Tags: t.CatalogTags,
                     AccessStatus: status,
@@ -368,7 +368,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
                     {
                         sensitivity = resMeta.Table.Sensitivity ?? "NORMAL";
                         var levels = ResolveColumnLevels(principal, resMeta, activeConsents, isAdmin, isGranted: true, bypass: options?.Value.IsMcpAuthBypassed == true);
-                        columnCount = resMeta.Columns.Count(col => !levels.TryGetValue(col.ColumnName, out var lvl) || lvl != ColumnAccessLevel.Deny);
+                        columnCount = resMeta.Columns.Count(col => levels.TryGetValue(col.ColumnName, out var lvl) && lvl != ColumnAccessLevel.Deny);
                     }
                 }
 
@@ -865,6 +865,15 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         }
 
         return semantics with { RawMeta = descriptive };
+    }
+
+    /// <summary>Columns the caller may see for the table: a column whose level is Deny or not resolved is not counted.</summary>
+    private int VisibleColumnCount(ClaimsPrincipal principal, TableMetadata table, IReadOnlyList<Consent> activeConsents, bool isAdmin, string accessStatus)
+    {
+        var levels = ResolveColumnLevels(principal, table, activeConsents, isAdmin,
+            isGranted: options?.Value.IsMcpAuthBypassed != true && string.Equals(accessStatus, "GRANTED", StringComparison.OrdinalIgnoreCase),
+            bypass: options?.Value.IsMcpAuthBypassed == true);
+        return table.Columns.Count(c => levels.TryGetValue(c.ColumnName, out var level) && level != Autheris.Domain.Interfaces.ColumnAccessLevel.Deny);
     }
 
     /// <summary>

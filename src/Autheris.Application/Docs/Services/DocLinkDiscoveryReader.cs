@@ -40,7 +40,7 @@ public sealed record DocLinkView(
         ArgumentNullException.ThrowIfNull(obj);
         var columns = ColumnDocuments.Count == 0
             ? obj.Columns
-            : obj.Columns.Select(c => c.State != DiscoveryColumnState.NoAccess && ColumnDocuments.TryGetValue(c.Name, out var docs) ? c with { Documents = docs } : c).ToList();
+            : obj.Columns.Select(c => DiscoveryColumnVisibility.IsVisible(c.State) && ColumnDocuments.TryGetValue(c.Name, out var docs) ? c with { Documents = docs } : c).ToList();
         return obj with
         {
             Columns = columns,

@@ -96,7 +96,7 @@ internal static class DiscoveryVisibleTextMatcher
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var column in projected.Columns)
         {
-            if (column.State != DiscoveryColumnState.NoAccess)
+            if (DiscoveryColumnVisibility.IsVisible(column.State))
             {
                 names.Add(column.Name);
             }
@@ -145,7 +145,7 @@ internal static class DiscoveryVisibleTextMatcher
                 }
             }
 
-            if (column.State == DiscoveryColumnState.NoAccess)
+            if (!DiscoveryColumnVisibility.IsVisible(column.State))
             {
                 continue;
             }
