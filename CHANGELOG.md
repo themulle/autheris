@@ -33,6 +33,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Governance schema step `0027_drop_legacy_governance_columns` (PostgreSQL and SQL Server) drops `CONSENT_REQUESTS.itsm_ticket_id` with its unique index `ux_consent_requests_ticket` and `TABLE_CATALOG_SETTINGS.visibility`. The GraphQL consent request types no longer expose `itsmTicketId`. All nodes must run this build before the step applies.
 
 ### Changed (breaking)
+- The in-process event bus options moved from `Gateway:Events` to `Gateway:EventBus` (`DeliveryMode`, `SubscriberQueueCapacity`), because `Gateway:Events` is the section of the `events` module. The old keys fail startup with a message naming the new path.
 - A loopback `Gateway:CatalogSearch:OllamaEndpoint` (`localhost`, `127.0.0.0/8`, `::1`) is refused at startup validation, because the outbound egress policy never allowed it. Private Ollama hosts need `Gateway:Egress:TrustedInternalHosts` or `TrustedInternalNetworks` plus `CatalogEmbeddings` in `Gateway:Egress:TrustedIntegrations`.
 
 ### Fixed

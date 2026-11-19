@@ -34,7 +34,7 @@ public static class GatewayConfigurationSchema
         ("Gateway:CatalogSearch", typeof(CatalogSearchOptions)),
         ("Gateway:CdcWebhooks", typeof(CdcWebhooksOptions)),
         ("Gateway:DataSources:Configuration", typeof(DataSourceConfigurationOptions)),
-        ("Gateway:Events", typeof(EventBusOptions)),
+        ("Gateway:EventBus", typeof(EventBusOptions)),
         ("Gateway:ExtensibilityPipeline", typeof(ExtensibilityPipelineOptions)),
         ("Gateway:GdprReport", typeof(GdprReportOptions)),
         ("Gateway:Governance:AccessPlanning", typeof(AccessPlanOptions)),
