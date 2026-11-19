@@ -140,12 +140,12 @@ public sealed class AstCompilerWebSqlTests(ITestOutputHelper output)
     [InlineData("SqlServer", "COALESCE([amount], ")]
     public async Task Aggregates_AndBuiltins_AreEmittedUnquoted(string sourceType, string coalesce)
     {
-        var compiled = await CompileAsync(sourceType, "SELECT dept, COUNT(*) AS n, SUM(COALESCE(amount, 0)) FROM orders GROUP BY dept HAVING COUNT(*) > 1");
+        var compiled = await CompileAsync(sourceType, "SELECT dept, COUNT(*) AS n, MAX(COALESCE(amount, 0)) FROM orders GROUP BY dept HAVING COUNT(*) > 1");
 
         // The literals 0 and 1 are bound (X1); the function names stay unquoted.
         compiled.Sql.ShouldContain("COUNT(*)");
         compiled.Sql.ShouldContain("HAVING COUNT(*) >");
-        compiled.Sql.ShouldContain($"SUM({coalesce}");
+        compiled.Sql.ShouldContain($"MAX({coalesce}");
         compiled.ValuesOf(TrinoSqlEngine.Ast.Emit.ParameterOrigin.QueryLiteral).Select(Convert.ToInt64).ShouldBeSubsetOf([0L, 1L, 100L]);   // SQLite also binds the enforced row limit
         compiled.ValuesOf(TrinoSqlEngine.Ast.Emit.ParameterOrigin.QueryLiteral).Select(Convert.ToInt64).ShouldContain(0L);
         compiled.ValuesOf(TrinoSqlEngine.Ast.Emit.ParameterOrigin.QueryLiteral).Select(Convert.ToInt64).ShouldContain(1L);

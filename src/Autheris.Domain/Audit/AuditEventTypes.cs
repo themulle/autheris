@@ -207,6 +207,9 @@ public static class AuditEventTypes
     public const string ScimGroupMembershipChanged = "SCIM_GROUP_MEMBERSHIP_CHANGED";
     public const string IdentityCorrelationAmbiguous = "IDENTITY_CORRELATION_AMBIGUOUS";
 
+    // Workload identity: gateway roles applied to an authentication from the configured subject mapping (Tier A: fail-closed)
+    public const string WorkloadRoleMappingApplied = "WORKLOAD_ROLE_MAPPING_APPLIED";
+
     // Usage Accounting & Tariffs (Tier A — Required Audit)
     public const string UsageTariffVersionAdded = "USAGE_TARIFF_VERSION_ADDED";
     public const string UsageReportRead = "USAGE_REPORT_READ";

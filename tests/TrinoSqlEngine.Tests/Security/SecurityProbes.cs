@@ -100,6 +100,12 @@ internal static class SecurityProbes
         });
 
         // ---- verifier, text checker, literals ----------------------------------------------------------------------------
+        PerDialect("RowPolicy_RefusesARaisingExpression", "row-policy-expression", d =>
+        {
+            var env = new ProbeEnv(d);
+            Assert.Throws<System.Security.SecurityException>(() => env.Compile("SELECT id FROM orders WHERE id + 1 > 3"));
+        });
+
         PerDialect("Verifier_RejectsAnUnsecuredStatement", "verifier", d =>
         {
             var env = new ProbeEnv(d);

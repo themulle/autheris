@@ -375,6 +375,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         var tenant = typed.BuildTenantPredicate(entry);
         if (tenant != null)
         {
+            RowPolicyApplied = true;
             predicates.Add(new SecurityPredicateExpression(Qualify(tenant, qualifier), new SecurityPredicateId(tid.ToString(), 0), scope));
         }
 
@@ -390,6 +391,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
     /// <summary>The row policy of a DML target as an expression over the target's columns (parameters registered); a correlated policy is rejected.</summary>
     private Expression BuildPolicyExpression(TableCatalogEntry entry)
     {
+        RowPolicyApplied = true;
         var typed = _typed;
         var predicate = typed.RowFilters.GetPredicate(entry.Identity);
         typed.AddValues(predicate.Parameters);

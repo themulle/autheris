@@ -17,7 +17,8 @@ internal static class GatewayAuthSchemeSelector
         GatewayOptions gatewayOptions,
         bool isBasicSessionAllowed,
         string basicSessionCookieName,
-        bool isDevAuthAllowed)
+        bool isDevAuthAllowed,
+        GenericOidcSchemeMap? genericOidc = null)
     {
         // SCIM provisioning endpoints accept only the dedicated SCIM opaque-secret scheme in every Authentication:Mode
         // (never JwtBearer, ForwardAuth, Basic, or Negotiate), and never trigger user pre-auth IP rate limiting.
@@ -64,7 +65,7 @@ internal static class GatewayAuthSchemeSelector
 
         if (authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
         {
-            return GatewayAuthSchemes.SelectJwtScheme(authHeader["Bearer ".Length..], gatewayOptions);
+            return GatewayAuthSchemes.SelectJwtScheme(authHeader["Bearer ".Length..], gatewayOptions, genericOidc);
         }
 
         if (authHeader.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase))

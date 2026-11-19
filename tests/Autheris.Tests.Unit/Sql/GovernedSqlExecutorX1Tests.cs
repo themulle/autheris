@@ -49,7 +49,7 @@ public sealed class GovernedSqlExecutorX1Tests
     }
 
     private const string RecursiveSql =
-        "WITH RECURSIVE t(id) AS (SELECT id FROM orders WHERE id = 1 UNION ALL SELECT id + 1 FROM t WHERE id < 3) SELECT id FROM t";
+        "WITH RECURSIVE t(id) AS (SELECT id FROM orders WHERE id = 1 UNION ALL SELECT id FROM t WHERE id < 3) SELECT id FROM t";
 
     internal static ClaimsPrincipal Writer() =>
         Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(new ClaimsPrincipal(new ClaimsIdentity(
@@ -510,7 +510,7 @@ public sealed class GovernedSqlExecutorX1Tests
 
         await ExecuteAsync(h, compiled,
             new GovernedSqlQueryRequest("SELECT id FROM orders WHERE id = @who"),
-            clientValues: new Dictionary<string, object?> { ["who"] = "client-secret-value-77" });
+            clientValues: new Dictionary<string, object?> { ["who"] = "7700123456" });
 
         var entry = h.Audit.Single(e => e.EventType == "WEBSQL_QUERY");
         using var json = System.Text.Json.JsonDocument.Parse(entry.DetailsJson);
@@ -521,7 +521,7 @@ public sealed class GovernedSqlExecutorX1Tests
         string digest = root.GetProperty("sql.compiled_digest").GetString()!;
         digest.ShouldBe(CompiledSqlDigest.Compute(CompiledSqlAuditDigester.DeriveKey(CompiledSqlAuditDigester.DeriveAuditKeyFromMaster(master)), compiled));
         digest.Length.ShouldBe(64);
-        entry.DetailsJson.ShouldNotContain("client-secret-value-77");
+        entry.DetailsJson.ShouldNotContain("7700123456");
         entry.DetailsJson.ShouldNotContain(Tenant + "'");              // no value of the statement is part of the record
         root.TryGetProperty("compiledSql", out _).ShouldBeFalse();     // Audit:StoreCompiledSql defaults to false
         root.TryGetProperty("securedSql", out _).ShouldBeFalse();

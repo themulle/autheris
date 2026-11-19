@@ -64,7 +64,7 @@ builder.Services.AddGatewayTelemetry(builder.Configuration);
 builder.Services.AddDataSourceHierarchicalConfiguration(builder.Configuration);
 var gatewayOptions = builder.Services.AddGatewayOptions(builder.Configuration, builder.Environment);
 builder.Services.AddGatewayInfrastructure(gatewayOptions, builder.Environment);
-builder.Services.AddGatewayAuth(gatewayOptions, builder.Environment);
+builder.Services.AddGatewayAuth(gatewayOptions, builder.Environment, builder.Configuration);
 // One switch for all sample content (demo catalog, finance/hr GraphQL types, demo MCP tools, golden queries)
 var demoDataEnabled = Autheris.Domain.Options.DemoDataSwitch.Resolve(gatewayOptions, builder.Environment.EnvironmentName);
 builder.Services.AddSingleton<Autheris.Domain.Options.IDemoDataSwitch>(new Autheris.Domain.Options.DemoDataSwitch(demoDataEnabled));

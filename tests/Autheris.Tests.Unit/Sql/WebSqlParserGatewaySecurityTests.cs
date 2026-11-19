@@ -175,6 +175,7 @@ public sealed class WebSqlParserGatewaySecurityTests
     [Fact]
     public async Task SQ06_AnalyticsQuery_WithAllowlistedFunctions_IsRewritten()
     {
+        using var guardOff = RowPolicyGuardOff.Scope();
         var service = CreatePostgreSqlService();
 
         var compiled = await service.CompileAsync(
@@ -227,6 +228,7 @@ public sealed class WebSqlParserGatewaySecurityTests
     [Fact]
     public async Task SQ06_AllowlistDependsOnTargetDialect()
     {
+        using var guardOff = RowPolicyGuardOff.Scope();
         var sqlServer = CreateService(CreateOptions(), CreateRepository(CreateTable("orders", "SqlServer")));
         var secured = await RewriteAsync(sqlServer, "SELECT len(name), isnull(region, 'n/a') FROM orders");
         secured.ShouldContain("LEN(", Case.Insensitive);

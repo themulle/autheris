@@ -1,8 +1,2 @@
 # Shrink-only allowlist of governance repository interfaces slated for WP-SIMPL-19 PR-C.
 # Remove entries as abstract *Contract classes + PostgreSql/SqlServer subclasses are added.
-ICdcStreamKeyStore
-ICdcStreamStore
-ICdcWatermarkRepository
-ICloudEventSubscriptionStore
-ISemanticManifestStore
-IWebhookOutbox

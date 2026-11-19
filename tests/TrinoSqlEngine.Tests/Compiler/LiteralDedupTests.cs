@@ -10,6 +10,7 @@ namespace TrinoSqlEngine.Tests.Compiler;
 
 /// <summary>CR-ADG-05: the deduplication key of bound literals must never merge two distinct values.</summary>
 [Trait("Category", "SqlGate")]
+[RowPolicyGuardOff]
 public class LiteralDedupTests
 {
     private static SqlEmitterContext Context(TargetSqlDialect dialect = TargetSqlDialect.PostgreSql) =>

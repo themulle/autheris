@@ -11,6 +11,7 @@ namespace TrinoSqlEngine.Tests.Compiler;
 /// runner used the legacy per-dialect allowlist and reported a rejection that the production path never produced).
 /// </summary>
 [Trait("Category", "SqlGate")]
+[RowPolicyGuardOff]
 public class DateAddCompileConsistencyTests
 {
     private static readonly TableIdentity Orders = new("dbo", "Orders");
@@ -28,7 +29,7 @@ public class DateAddCompileConsistencyTests
     [InlineData(TargetSqlDialect.DuckDb)]
     public void DateAdd_IsAcceptedByTheCompilerFunctionMap(TargetSqlDialect dialect)
     {
-        var compiled = new FastSqlEngine().Compile("SELECT id FROM orders WHERE ts > date_add('day', -1, ts)".AsMemory(), new CompileRequest
+        var compiled = new FastSqlEngine().Compile("SELECT date_add('day', -1, ts) AS r FROM orders".AsMemory(), new CompileRequest
         {
             TargetDialect = dialect,
             TokenGuards = SqlTokenSecurityOptions.Strict,

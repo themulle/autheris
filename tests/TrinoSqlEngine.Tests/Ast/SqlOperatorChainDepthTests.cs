@@ -19,6 +19,7 @@ using Xunit;
 using static TrinoSqlEngine.Tests.Compiler.PolicyFixtures;
 
 [Trait("Category", "SqlGate")]
+[RowPolicyGuardOff]
 public sealed class SqlOperatorChainDepthTests
 {
     private const int ExpectedChainCap = SqlAstBuilder.MaxOperatorChainTerms;

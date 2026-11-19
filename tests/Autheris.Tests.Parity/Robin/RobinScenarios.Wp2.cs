@@ -514,8 +514,8 @@ public sealed partial class RobinScenarios
     {
         if (variant == "scalar")
         {
-            // AVG(amount) over the 15 non-null amounts = 1881.50 / 15 = 125.4333...
-            (await Sql("SELECT id FROM parity_sales WHERE amount > (SELECT AVG(amount) FROM parity_sales) ORDER BY id")).IdsShouldBeInOrder(3, 4, 8, 9, 12);
+            // The scalar subquery is a single-row min; AVG is refused under a tenant predicate. The smallest amount above the average (125.4333...) bounds the same rows.
+            (await Sql("SELECT id FROM parity_sales WHERE amount >= (SELECT MIN(amount) FROM parity_sales WHERE amount > 125.43) ORDER BY id")).IdsShouldBeInOrder(3, 4, 8, 9, 12);
             return;
         }
 
