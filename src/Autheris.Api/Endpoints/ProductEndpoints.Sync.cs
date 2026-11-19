@@ -103,7 +103,7 @@ public static partial class ProductEndpoints
         var status = await service.HandleAsync(tenantId, body, delivery, context.RequestAborted).ConfigureAwait(false);
         return status switch
         {
-            ProductSyncWebhookStatus.Accepted => Results.Json(new { status = "Accepted", message = "Sync triggered" }, statusCode: StatusCodes.Status202Accepted),
+            ProductSyncWebhookStatus.Accepted => Results.Json(new { status = "Accepted", message = "Delivery accepted" }, statusCode: StatusCodes.Status202Accepted),
             ProductSyncWebhookStatus.Duplicate => ApiProblems.Conflict("PRODUCT_SYNC_REPLAY", "The delivery was already processed.", context),
             ProductSyncWebhookStatus.BadRequest => ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The webhook body is invalid.", context),
             ProductSyncWebhookStatus.TooLarge => ApiProblems.PayloadTooLarge("The webhook body is too large.", context),

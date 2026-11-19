@@ -271,4 +271,25 @@ public sealed class ModuleSignerRoundTripTests : IDisposable
         pub.ImportSubjectPublicKeyInfo(key.ExportSubjectPublicKeyInfo(), out _);
         return pub;
     }
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Signer_rejects_two_part_host_version()
+    {
+        using var signingKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        string pem = signingKey.ExportPkcs8PrivateKeyPem();
+        string moduleDir = CreateSyntheticModuleDir("sample");
+
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+        int exitCode = ModuleSignerCli.Run(
+            ["--dir", moduleDir, "--id", "sample", "--version", "1.0.0", "--host-version", "1.5"],
+            new StringReader(string.Empty),
+            stdout,
+            stderr,
+            getEnvironmentVariable: _ => pem);
+
+        exitCode.ShouldNotBe(0);
+        File.Exists(Path.Combine(moduleDir, "module.json")).ShouldBeFalse();
+    }
+
 }

@@ -14,8 +14,8 @@
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <RestoreLockedMode Condition="('$(ContinuousIntegrationBuild)' == 'true' Or '$(GITHUB_ACTIONS)' == 'true') And '$(RuntimeIdentifier)' == ''">true</RestoreLockedMode>
     <WarningsAsErrors>$(WarningsAsErrors);NU1901;NU1902;NU1903;NU1904</WarningsAsErrors>
-    <!-- XML doc CS suppressions, culture formatting rules (CA1307/CA1309/CA1310 stay errors under src/), style/analyzer suppressions, and deferred CS0108/CA2012 (0 src hits; 271 test/benchmark hits). -->
-    <NoWarn>$(NoWarn);CS0419;CS1570;CS1571;CS1572;CS1573;CS1574;CS1584;CS1587;CS1589;CS1590;CS1591;CS1592;CS1710;CS1711;CS1712;CS1734;CS1735;CA1304;CA1305;CA1311;CA1515;CA1707;CA1711;CA1716;CA1805;CA1816;CA1822;CA1826;CA1848;CA1850;CA1859;CA1861;CA1865;CA1870;CA1873;CS0108;CA2012</NoWarn>
+    <!-- XML doc CS suppressions, culture formatting rules (CA1307/CA1309/CA1310 stay errors under src/), style/analyzer suppressions. -->
+    <NoWarn>$(NoWarn);CS0419;CS1570;CS1571;CS1572;CS1573;CS1574;CS1584;CS1587;CS1589;CS1590;CS1591;CS1592;CS1710;CS1711;CS1712;CS1734;CS1735;CA1304;CA1305;CA1311;CA1515;CA1707;CA1711;CA1716;CA1805;CA1816;CA1822;CA1826;CA1848;CA1850;CA1859;CA1861;CA1865;CA1870;CA1873</NoWarn>
     <AutherisIncludeTestAuth Condition="'$(AutherisIncludeTestAuth)' == ''">false</AutherisIncludeTestAuth>
   </PropertyGroup>
 
