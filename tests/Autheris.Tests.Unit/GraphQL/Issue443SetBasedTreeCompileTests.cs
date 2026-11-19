@@ -689,4 +689,86 @@ public sealed class Issue443SetBasedTreeCompileTests
         Should.Throw<GatewayInvalidQueryException>(() =>
             TreeSqlCompiler.Compile(root, CreateAccess(childIndexed: false), DatabaseDialect.SqlServer));
     }
+
+    // Issue #836: the page CTE orders by the unique-key tie-break, so it must project it even when the query neither
+    // selects nor joins on it; the key must still stay out of the JSON.
+    private static TreeQueryNode TieBreakRoot(string[] selection) => new(Parents, selection)
+    {
+        Relations = [new TreeRelationNode("children", ParentColumns: ["tenant_id"], ChildColumns: ["tenant_id"], IsList: true, new TreeQueryNode(Children, ["value"])
+        {
+            OrderBy = [new TreeOrder("ts", Descending: true)],
+            Limit = 3
+        })],
+        OrderBy = [new TreeOrder("name")],
+        Limit = 5
+    };
+
+    private static (string PageCte, string Outer) SplitPageCte(string sql)
+    {
+        var childCte = sql.IndexOf("autheris_k0", StringComparison.Ordinal);
+        var pageEnd = sql.LastIndexOf(",\n", childCte, StringComparison.Ordinal);
+        var outerStart = sql.LastIndexOf("\nSELECT ", StringComparison.Ordinal);
+        return (sql[..pageEnd], sql[outerStart..]);
+    }
+
+    // The part of the outer statement that builds the JSON objects (before its ORDER BY and FROM).
+    private static string OutputList(string outer)
+    {
+        var end = outer.IndexOf(" ORDER BY ", StringComparison.Ordinal);
+        var from = outer.IndexOf(" FROM ", StringComparison.Ordinal);
+        return outer[..(end >= 0 && end < from ? end : from)];
+    }
+
+    [Theory]
+    [InlineData(DatabaseDialect.SqlServer, "[id]")]
+    [InlineData(DatabaseDialect.PostgreSql, "\"id\"")]
+    public void TieBreakKeyNotSelected_IsProjectedInPageCte_AndAbsentFromOutput(DatabaseDialect dialect, string quotedId)
+    {
+        var access = CreateAccess(childIndexed: false);
+        var compiled = TreeSqlCompiler.Compile(TieBreakRoot(["name"]), access, dialect);
+
+        compiled.Lists[0].Strategy.ShouldBe(TreeListStrategy.SetBased);
+        var (page, outer) = SplitPageCte(compiled.Sql);
+        page.ShouldContain($"AS {quotedId}");
+        page.ShouldContain($".{quotedId}");
+        outer.ShouldContain($".{quotedId}");
+
+        // The outer select list is built from the selected outputs, so the key is not part of the JSON.
+        var select = OutputList(outer);
+        select.ShouldNotContain(quotedId);
+        select.ShouldNotContain("'id'");
+    }
+
+    [Theory]
+    [InlineData(DatabaseDialect.SqlServer, "[id]")]
+    [InlineData(DatabaseDialect.PostgreSql, "\"id\"")]
+    public void TieBreakKeySelected_IsProjectedOnce_AndPresentInOutput(DatabaseDialect dialect, string quotedId)
+    {
+        var access = CreateAccess(childIndexed: false);
+        var compiled = TreeSqlCompiler.Compile(TieBreakRoot(["id", "name"]), access, dialect);
+
+        var (page, outer) = SplitPageCte(compiled.Sql);
+        var projections = page.Split($"AS {quotedId}").Length - 1;
+        projections.ShouldBe(1, "a selected key is not projected twice");
+        OutputList(outer).ShouldContain(quotedId);
+    }
+
+    [Theory]
+    [InlineData(DatabaseDialect.SqlServer)]
+    [InlineData(DatabaseDialect.PostgreSql)]
+    public void EveryOuterOrderByColumn_IsProjectedByThePageCte(DatabaseDialect dialect)
+    {
+        var access = CreateAccess(childIndexed: false);
+        var compiled = TreeSqlCompiler.Compile(TieBreakRoot(["name"]), access, dialect);
+
+        var (page, outer) = SplitPageCte(compiled.Sql);
+        var projectionList = page[(page.IndexOf("SELECT ", StringComparison.Ordinal) + 7)..page.IndexOf(" FROM ", StringComparison.Ordinal)];
+        var orderBy = outer[(outer.LastIndexOf(" ORDER BY ", StringComparison.Ordinal) + 10)..];
+        orderBy = orderBy[..orderBy.IndexOfAny([')', 'F'])];
+        foreach (var term in orderBy.Split(','))
+        {
+            var column = term.Trim().Split('.').Last().Split(' ')[0].TrimEnd(')', ' ');
+            projectionList.ShouldContain($"AS {column}");
+        }
+    }
 }
