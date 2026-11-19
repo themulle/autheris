@@ -321,28 +321,16 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService
             }
         }
 
-        // 2a. Role policies (EX-01: only roles in RoleToGatewayRoleMap allowlist are mapped to Gateway roles)
-        foreach (var role in roles)
+        // 2a. Role policies: a role is not a grantee. Such an entry is skipped and counted in the run summary; it is never mapped
+        // to a group or user and never written (a user reaches the policies of its roles only through the explicit user mapping in 2c).
+        var skippedRolePolicies = roles.Count(role =>
+            omOptions.RoleToGatewayRoleMap.TryGetValue(role.Name, out var mapped) && !string.IsNullOrWhiteSpace(mapped) &&
+            ResolvePolicies(role.Policies, policyById, policyByName).Count > 0);
+        if (skippedRolePolicies > 0)
         {
-            if (!omOptions.RoleToGatewayRoleMap.TryGetValue(role.Name, out var gatewayRole) ||
-                string.IsNullOrWhiteSpace(gatewayRole))
-            {
-                _logger.LogDebug("OpenMetadata role '{Role}' is not mapped in RoleToGatewayRoleMap allowlist. Skipping consent generation.", role.Name);
-                continue;
-            }
-
-            // Roles never grant data access: only a role Deny (a restriction) is mapped; the reconcile revokes role Allow consents of earlier syncs.
-            string mappedRoleName = gatewayRole;
-            var allowSkipped = false;
-            AddForPolicies(ResolvePolicies(role.Policies, policyById, policyByName), (meta, tenantId, effect) =>
-            {
-                allowSkipped |= effect != ConsentEffect.Deny;
-                return effect == ConsentEffect.Deny ? CreateConsentForRole(mappedRoleName, meta, tenantId, effect, validFrom, denyValidTo) : null;
-            });
-            if (allowSkipped)
-            {
-                _logger.LogWarning("OpenMetadata role '{Role}' has allow rules: roles do not grant data access, so no consent is created. Grant access through a team or a user.", role.Name);
-            }
+            var warning = $"Skipped {skippedRolePolicies} OpenMetadata role policy entries: role grantees are not supported; map the access to a team or a user.";
+            _logger.LogWarning("{Warning}", warning);
+            warnings.Add(warning);
         }
 
         // 2b. Team policies (SEC E-07: grantee taken directly from the resolved explicit mapping)
@@ -948,9 +936,7 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService
     {
         public static SyncConsentKey From(Consent consent)
         {
-            var grantee = consent.GranteeType == GranteeType.Role
-                ? (consent.RoleName ?? string.Empty).ToUpperInvariant()
-                : (consent.GranteeSid?.Value ?? string.Empty).ToUpperInvariant();
+            var grantee = (consent.GranteeSid?.Value ?? string.Empty).ToUpperInvariant();
             return new SyncConsentKey(consent.TenantId, consent.TableIdentifier, consent.GranteeType, grantee, consent.Effect);
         }
     }

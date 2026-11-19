@@ -99,8 +99,7 @@ public sealed class VirtualFilterModelTests
         Should.Throw<ArgumentException>(() => (DavidProfile() with { Scope = "a.b" }).Validate());
         Should.Throw<ArgumentException>(() => (DavidProfile() with { Scope = "lwetem_prod.*.*.client_id" }).Validate());
         Should.Throw<ArgumentException>(() => (DavidProfile() with { GranteeSid = null }).Validate());
-        Should.Throw<ArgumentException>(() => (DavidProfile() with { GranteeType = GranteeType.Role, GranteeSid = null, RoleName = null }).Validate());
-        Should.NotThrow(() => (DavidProfile() with { GranteeType = GranteeType.Role, GranteeSid = null, RoleName = "Analyst" }).Validate());
+        Should.Throw<ArgumentException>(() => (DavidProfile() with { GranteeType = (GranteeType)3 }).Validate());
     }
 
     [Fact]

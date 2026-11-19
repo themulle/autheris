@@ -140,7 +140,6 @@ type ConsentDto {
   effect: String!
   granteeType: String!
   granteeSid: String
-  roleName: String
   validFrom: DateTime!
   validTo: DateTime!
   columns: [String!]!

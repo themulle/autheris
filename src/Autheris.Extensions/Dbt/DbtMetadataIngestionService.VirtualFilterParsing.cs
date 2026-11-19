@@ -123,14 +123,14 @@ public sealed partial class DbtMetadataIngestionService
         };
     }
 
-    private static List<VirtualFilterAccessProfile> ParseAccessProfiles(JsonElement element, TenantId defaultTenant)
+    private static List<VirtualFilterAccessProfile> ParseAccessProfiles(JsonElement element, TenantId defaultTenant, List<string> warnings)
     {
         var result = new List<VirtualFilterAccessProfile>();
         if (element.ValueKind == JsonValueKind.Object)
         {
             foreach (var prop in element.EnumerateObject())
             {
-                var profile = ParseSingleProfile(prop.Name, prop.Value, defaultTenant);
+                var profile = ParseSingleProfile(prop.Name, prop.Value, defaultTenant, warnings);
                 if (profile != null) result.Add(profile);
             }
         }
@@ -140,14 +140,14 @@ public sealed partial class DbtMetadataIngestionService
             {
                 var name = item.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
                 if (string.IsNullOrWhiteSpace(name)) continue;
-                var profile = ParseSingleProfile(name, item, defaultTenant);
+                var profile = ParseSingleProfile(name, item, defaultTenant, warnings);
                 if (profile != null) result.Add(profile);
             }
         }
         return result;
     }
 
-    private static VirtualFilterAccessProfile? ParseSingleProfile(string name, JsonElement val, TenantId defaultTenant)
+    private static VirtualFilterAccessProfile? ParseSingleProfile(string name, JsonElement val, TenantId defaultTenant, List<string> warnings)
     {
         // A missing tenant is the caller's request tenant (never the legacy tenant); the caller checks explicit ones.
         var tenantStr = val.TryGetProperty("tenant", out var tProp) ? tProp.GetString() : null;
@@ -162,25 +162,28 @@ public sealed partial class DbtMetadataIngestionService
 
         GranteeType granteeType = GranteeType.User;
         Sid? granteeSid = null;
-        string? roleName = null;
 
         if (val.TryGetProperty("grantee", out var gProp) && gProp.ValueKind == JsonValueKind.Object)
         {
             var gTypeStr = gProp.TryGetProperty("type", out var gt) ? gt.GetString() : "user";
-            granteeType = (gTypeStr?.ToLowerInvariant()) switch
+            var parsedType = (gTypeStr?.ToLowerInvariant()) switch
             {
+                "user" => GranteeType.User,
                 "group" => GranteeType.Group,
-                "role" => GranteeType.Role,
                 "serviceprincipal" => GranteeType.ServicePrincipal,
-                _ => GranteeType.User
+                _ => (GranteeType?)null
             };
+            if (parsedType is null)
+            {
+                // A retired role grantee (or any unsupported type) is skipped and reported; it is never mapped to a user or group.
+                warnings.Add($"Access profile '{name}': the grantee type is not supported (use user, group or serviceprincipal); the entry was skipped.");
+                return null;
+            }
+
+            granteeType = parsedType.Value;
             if (gProp.TryGetProperty("sid", out var gs) && gs.GetString() is string s)
             {
                 granteeSid = new Sid(s);
-            }
-            if (gProp.TryGetProperty("role", out var gr) && gr.GetString() is string r)
-            {
-                roleName = r;
             }
         }
 
@@ -217,7 +220,6 @@ public sealed partial class DbtMetadataIngestionService
             Name = name,
             GranteeType = granteeType,
             GranteeSid = granteeSid,
-            RoleName = roleName,
             Scope = scope,
             Uncovered = uncovered,
             Bindings = bindings

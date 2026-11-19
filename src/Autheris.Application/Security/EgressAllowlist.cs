@@ -21,14 +21,13 @@ public static class EgressIntegrations
     public const string OpenMetadata = "OpenMetadata";
     public const string Lineage = "Lineage";
     public const string Lakehouse = "Lakehouse";
-    public const string AuditWorm = "AuditWorm";
     public const string Cdn = "Cdn";
     public const string Databricks = "Databricks";
     public const string Webhooks = "Webhooks";
     public const string CatalogEmbeddings = "CatalogEmbeddings";
 
     /// <summary>Integrations that may be listed in <see cref="OutboundEgressOptions.TrustedIntegrations"/>.</summary>
-    public static IReadOnlyList<string> AllowlistCapable { get; } = [OpenApiIngestion, OpenMetadata, Lineage, AuditWorm, Cdn, Webhooks, CatalogEmbeddings];
+    public static IReadOnlyList<string> AllowlistCapable { get; } = [OpenApiIngestion, OpenMetadata, Lineage, Cdn, Webhooks, CatalogEmbeddings];
 }
 
 /// <summary>

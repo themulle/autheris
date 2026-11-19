@@ -379,4 +379,28 @@ public sealed class TreeSqlCompilerIntegrationTests
         result[0].GetProperty("c119").GetInt32().ShouldBe(119);
         result[0].GetProperty("c50").ValueKind.ShouldBe(JsonValueKind.Null);
     }
+
+    [RequiresContainerRuntimeFact]
+    public async Task RootOrderWithoutKey_AndKeyNotSelected_WithSetBasedList_ExecutesAndOmitsTheKey()
+    {
+        await using var db = await PostgreSqlTestDatabase.CreateAsync();
+        if (!db.IsAvailable) return;
+        await SeedAsync(db.ConnectionString);
+
+        // The relation joins on non-key columns, so the unique key is neither selected nor joined: only the tie-break uses it.
+        var child = new TreeQueryNode(Articles, ["title"]) { OrderBy = [new TreeOrder("id")] };
+        var root = new TreeQueryNode(Authors, ["name"])
+        {
+            Relations = [new TreeRelationNode("articles", ParentColumns: ["rating"], ChildColumns: ["published"], IsList: true, child)],
+            OrderBy = [new TreeOrder("name")],
+            Limit = 10
+        };
+
+        var compiled = TreeSqlCompiler.Compile(root, Access(), DatabaseDialect.PostgreSql);
+        var result = await ExecuteAsync(db.ConnectionString, compiled);
+
+        result.GetArrayLength().ShouldBe(4);
+        result.EnumerateArray().Select(a => a.GetProperty("name").GetString()).ShouldBe(["Ann", "Bob", "Eve", "O'Brien"], ignoreOrder: false);
+        result[0].TryGetProperty("id", out _).ShouldBeFalse();
+    }
 }

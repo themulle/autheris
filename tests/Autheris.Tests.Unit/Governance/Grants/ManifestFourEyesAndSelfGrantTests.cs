@@ -262,10 +262,12 @@ public sealed class ManifestFourEyesAndSelfGrantTests
     [Fact]
     public async Task SR_M_10_GrantToARoleTheActorHolds_IsRefused()
     {
-        var ex = await Should.ThrowAsync<ArgumentException>(() =>
+        var ex = await Should.ThrowAsync<DeclarativeManifestValidationException>(() =>
             ApplyAsync(new FakeConsentRepository(), Policy("Role", "governance_admin")));
 
-        ex.Message.ShouldContain("Role grantees are not supported");
+        ex.Violation.ShouldBe(DeclarativeManifestViolation.GranteeType);
+        ex.Message.ShouldContain("unsupported grantee type");
+        ex.Message.ShouldNotContain("governance_admin");
     }
 
     [Fact]

@@ -2,6 +2,7 @@ using System.Text.Json;
 using Autheris.Api.Endpoints;
 using Autheris.Application.Catalog;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Model;
 using Autheris.GraphQL.Catalog;
 using Autheris.Tests.Common;
@@ -38,6 +39,9 @@ public sealed class CatalogGraphQlChangeSignalTests
         Columns = [new TableColumn { ColumnName = "id", DataType = "integer" }],
         PrimaryKeyColumns = ["id"]
     };
+
+    private static Task<CatalogSchemaModel> BuildModelAsync(int tables) =>
+        CatalogSchemaModel.BuildAsync(new MetadataRepository(Tables(tables)), new RelationRepository());
 
     private static List<TableMetadata> Tables(int count) => Enumerable.Range(0, count).Select(i => MakeTable($"t{i}")).ToList();
 
@@ -142,6 +146,7 @@ public sealed class CatalogGraphQlChangeSignalTests
         // One event per second for six minutes: the quiet period (2 s) never passes.
         for (var second = 0; second <= 360; second++)
         {
+            h.Meta.SetTables(Tables(1)); // a committed write without schema effect: the version moves, the schema does not
             await h.PublishAsync();
             h.Time.Advance(TimeSpan.FromSeconds(1));
             if (second == 0)
@@ -175,6 +180,78 @@ public sealed class CatalogGraphQlChangeSignalTests
             Wait,
             "the quiet follow-up check ends the burst (the request is already outstanding, so it coalesces)");
         h.Module.HasScheduledSignalCheck.ShouldBeFalse("one follow-up, not a chain");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task RestrictiveChange_InBurst_RebuildsWithoutWaitingForQuietPeriod()
+    {
+        using var d = new Harness(Tables(3));
+        await d.Module.CreateTypesAsync(null!, CancellationToken.None);
+        var requests = 0;
+        d.Module.TypesChanged += (_, _) => requests++;
+
+        d.Meta.SetTables(Tables(4));
+        d.Version.Current = d.Meta.Version;
+        (await d.Module.CheckForCatalogChangesAsync()).ShouldBeTrue(); // leading edge: requested
+        d.Meta.SetTables(Tables(5));
+        d.Version.Current = d.Meta.Version;
+        (await d.Module.CheckForCatalogChangesAsync()).ShouldBeTrue(); // additive burst change: deferred
+        d.Log.Entries.Count(e => e.Message.Contains("deferred until the changes settle", StringComparison.Ordinal)).ShouldBe(1);
+
+        d.Meta.SetTables(Tables(2)); // restrictive: two tables disappear
+        d.Version.Current = d.Meta.Version;
+        (await d.Module.CheckForCatalogChangesAsync()).ShouldBeTrue();
+
+        d.Log.Entries.Count(e => e.Message.Contains("deferred until the changes settle", StringComparison.Ordinal))
+            .ShouldBe(1, "a restrictive change is never deferred");
+        d.Log.Entries.Count(e => e.Message.Contains("rebuild request coalesced", StringComparison.Ordinal))
+            .ShouldBe(1, "it goes through the single-outstanding latch instead of bypassing it");
+        requests.ShouldBe(1, "no second request: no rebuild storm");
+
+        // The next build serves the restricted model (the pending model was replaced, not queued).
+        await d.Module.CreateTypesAsync(null!, CancellationToken.None);
+        d.Module.BuiltFingerprint.ShouldBe((await BuildModelAsync(2)).Fingerprint());
+    }
+
+    [Fact]
+    public async Task AdditiveChange_InBurst_StillWaitsForQuietPeriod()
+    {
+        using var h = new Harness(Tables(1));
+        await h.DeferWithoutRebuildAsync();
+
+        h.Log.Entries.Count(e => e.Message.Contains("deferred until the changes settle", StringComparison.Ordinal))
+            .ShouldBe(1, "control: an additive change in a burst is deferred");
+        h.Log.Entries.Any(e => e.Message.Contains("rebuild request coalesced", StringComparison.Ordinal)).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task DropsBuiltSchemaElements_DetectsRemovedTablesAndKeepsAdditionsAdditive()
+    {
+        var three = await BuildModelAsync(3);
+        var two = await BuildModelAsync(2);
+        var four = await BuildModelAsync(4);
+
+        CatalogGraphQlTypeModule.DropsBuiltSchemaElements(three, two).ShouldBeTrue();
+        CatalogGraphQlTypeModule.DropsBuiltSchemaElements(three, four).ShouldBeFalse();
+        CatalogGraphQlTypeModule.DropsBuiltSchemaElements(three, three).ShouldBeFalse();
+        CatalogGraphQlTypeModule.DropsBuiltSchemaElements(null, two).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task SignalledCheck_StoreVersionUnchanged_ShortCircuitsWithoutCandidateBuild()
+    {
+        using var h = new Harness(Tables(2));
+        await h.StartAsync();
+        var reads = h.Meta.GetAllTablesCalls;
+
+        // A signal without any committed write: the store version equals the built version, so no candidate model is built.
+        await h.PublishAsync();
+        h.Time.Advance(CatalogGraphQlTypeModule.ChangeSignalDebounce);
+        await WaitHelper.WaitUntil(h.StatusAsync, Wait);
+
+        h.Meta.GetAllTablesCalls.ShouldBe(reads, "the unchanged store version short-circuits the full check");
+        h.Meta.VersionReads.ShouldBeGreaterThan(0, "the version came from the store, not the provider cache");
     }
 
     [Fact]
@@ -334,6 +411,68 @@ public sealed class CatalogGraphQlChangeSignalTests
         doc.RootElement.GetProperty("status").GetString().ShouldBe(expectedText);
     }
 
+    private static async Task<AuditContext> PollAsync(SchemaStatusAuditSampler sampler, string sid, string tenant = "tenant-a")
+    {
+        var audit = new AuditContext { ActorSid = new Autheris.Domain.Common.Sid(sid), TenantId = new Autheris.Domain.Common.TenantId(tenant) };
+        var context = new DefaultHttpContext { RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider() };
+        context.Features.Set(audit);
+        await CatalogApiEndpoints.GetGraphQlSchemaStatusAsync(new FixedFreshness(false), context, sampler, CancellationToken.None);
+        return audit;
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task StatusEndpoint_FirstPollOfEachCaller_IsAudited()
+    {
+        var sampler = new SchemaStatusAuditSampler(new FakeTimeProvider());
+
+        (await PollAsync(sampler, "S-1-5-21-1")).IsHandled.ShouldBeFalse();
+        (await PollAsync(sampler, "S-1-5-21-2")).IsHandled.ShouldBeFalse("another caller's first poll is never suppressed by the first caller");
+        (await PollAsync(sampler, "S-1-5-21-1", tenant: "tenant-b")).IsHandled.ShouldBeFalse("the key includes the tenant");
+        (await PollAsync(sampler, "S-1-5-21-1")).IsHandled.ShouldBeTrue("the same caller is aggregated");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task StatusEndpoint_RepeatedPolls_SameCaller_AreAggregated()
+    {
+        var time = new FakeTimeProvider();
+        var sampler = new SchemaStatusAuditSampler(time);
+        var audited = 0;
+        for (var i = 0; i < 50; i++)
+        {
+            if (!(await PollAsync(sampler, "S-1-5-21-1")).IsHandled)
+            {
+                audited++;
+            }
+
+            time.Advance(TimeSpan.FromMilliseconds(100));
+        }
+
+        audited.ShouldBe(1, "50 polls within one interval produce a single audit row");
+
+        time.Advance(SchemaStatusAuditSampler.Interval);
+        var next = await PollAsync(sampler, "S-1-5-21-1");
+        next.IsHandled.ShouldBeFalse("the next interval audits again");
+        next.AdditionalDetails["aggregatedPolls"].ShouldBe(50, "the row says how many polls it stands for");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task StatusEndpoint_SamplerOverflow_AuditsEveryRequest()
+    {
+        var sampler = new SchemaStatusAuditSampler(new FakeTimeProvider(), maxEntries: 2);
+        await PollAsync(sampler, "S-1-5-21-1");
+        await PollAsync(sampler, "S-1-5-21-2");
+
+        for (var i = 0; i < 5; i++)
+        {
+            (await PollAsync(sampler, "S-1-5-21-3")).IsHandled.ShouldBeFalse("a full map never suppresses an untracked caller");
+        }
+
+        (await PollAsync(sampler, "S-1-5-21-1")).IsHandled.ShouldBeTrue("tracked callers stay aggregated");
+    }
+
     [Fact]
     public async Task StatusEndpoint_NoModule_Returns404()
     {
@@ -448,7 +587,7 @@ public sealed class CatalogGraphQlChangeSignalTests
     private static async Task<(int Status, string Body, HttpContext Context)> ExecuteStatusAsync(ICatalogSchemaFreshness? freshness)
     {
         var context = new DefaultHttpContext { RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider() };
-        var result = await CatalogApiEndpoints.GetGraphQlSchemaStatusAsync(freshness, context, CancellationToken.None);
+        var result = await CatalogApiEndpoints.GetGraphQlSchemaStatusAsync(freshness, context, null, CancellationToken.None);
         var body = new MemoryStream();
         context.Response.Body = body;
         await result.ExecuteAsync(context);
@@ -547,7 +686,12 @@ public sealed class CatalogGraphQlChangeSignalTests
 
         public int VersionReads => Volatile.Read(ref _versionReads);
 
-        public void SetTables(IReadOnlyList<TableMetadata> tables) => _tables = tables;
+        /// <summary>A catalog write: replaces the tables and bumps the structure version, like every committed write does.</summary>
+        public void SetTables(IReadOnlyList<TableMetadata> tables)
+        {
+            _tables = tables;
+            Version = new CatalogVersion(Version.StructureVersion + 1, Version.ContentVersion);
+        }
 
         public Task<IReadOnlyList<TableMetadata>> GetAllTablesAsync(CancellationToken ct = default)
         {

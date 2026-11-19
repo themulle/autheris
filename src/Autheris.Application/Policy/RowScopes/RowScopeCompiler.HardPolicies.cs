@@ -35,25 +35,8 @@ public sealed partial class RowScopeCompiler
             .OrderBy(p => p.Name, StringComparer.Ordinal)
             .ToList();
 
-        // Reject role grantees on hard row policies (role grantees are unsupported).
-        foreach (var roleProfile in activeProfiles.Where(p => p.GranteeType == GranteeType.Role))
-        {
-            if (MatchesScope(roleProfile.Scope, table))
-            {
-                return (
-                    RowScopeCompileOutcome.Deny(
-                        HardPolicyRoleRejectedCode,
-                        $"Hard row policy '{roleProfile.Name}' uses a role grantee, which is rejected.",
-                        DecisionStep.ExplicitDeny),
-                    null,
-                    Array.Empty<string>(),
-                    Array.Empty<AppliedVirtualFilterBinding>());
-            }
-        }
-
         var matchedProfiles = activeProfiles
-            .Where(p => p.GranteeType != GranteeType.Role &&
-                        GranteeMatcher.MatchesGrant(p.GranteeType, p.GranteeSid, request.UserSid, request.GroupSids, request.AllUserSids))
+            .Where(p => GranteeMatcher.MatchesRestriction(p.GranteeType, p.GranteeSid, request.UserSid, request.GroupSids, request.AllUserSids))
             .ToList();
 
         if (matchedProfiles.Count == 0)

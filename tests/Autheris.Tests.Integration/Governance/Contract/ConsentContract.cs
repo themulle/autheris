@@ -88,7 +88,6 @@ public abstract class ConsentContract : GovernanceContractBase
         TenantId tenant,
         Sid? granteeSid = null,
         GranteeType granteeType = GranteeType.User,
-        string? roleName = null,
         DateTimeOffset? validFrom = null,
         DateTimeOffset? validTo = null,
         Guid? requestId = null) =>
@@ -97,10 +96,9 @@ public abstract class ConsentContract : GovernanceContractBase
             Id = Guid.NewGuid(),
             TableIdentifier = table,
             ConsentRequestId = requestId,
-            Effect = granteeType == GranteeType.Role ? ConsentEffect.Deny : ConsentEffect.Allow,   // role grantees only restrict
+            Effect = ConsentEffect.Allow,
             GranteeType = granteeType,
-            GranteeSid = granteeType == GranteeType.Role ? (Sid?)null : (granteeSid ?? GranteeSid),
-            RoleName = granteeType == GranteeType.Role ? (roleName ?? "DataAnalyst") : null,
+            GranteeSid = granteeSid ?? GranteeSid,
             ValidFrom = validFrom ?? DateTimeOffset.UtcNow.AddMinutes(-10),
             ValidTo = validTo ?? DateTimeOffset.UtcNow.AddDays(10),
             IsRevoked = false,
@@ -141,24 +139,16 @@ public abstract class ConsentContract : GovernanceContractBase
         var consentA = await Store.Consents.CreateConsentAsync(NewConsent(tableA.Identifier, Store.TenantA, GranteeSid));
         var consentB = await Store.Consents.CreateConsentAsync(NewConsent(tableB.Identifier, Store.TenantB, GranteeSid));
 
-        var roleConsentA = await Store.Consents.CreateConsentAsync(
-            NewConsent(tableA.Identifier, Store.TenantA, granteeType: GranteeType.Role, roleName: "AnalystRole"));
-        _ = await Store.Consents.CreateConsentAsync(
-            NewConsent(tableB.Identifier, Store.TenantB, granteeType: GranteeType.Role, roleName: "AnalystRole"));
-
         var bySubjectA = await Store.Consents.GetActiveConsentsForSubjectsAsync([GranteeSid], tableA.Identifier, now, Store.TenantA);
         bySubjectA.Where(c => c.GranteeType == GranteeType.User).Select(c => c.Id).Should().ContainSingle().Which.Should().Be(consentA.Id);
-        bySubjectA.Select(c => c.Id).Should().BeEquivalentTo([consentA.Id, roleConsentA.Id]);
+        bySubjectA.Select(c => c.Id).Should().BeEquivalentTo([consentA.Id]);
 
         var crossTableRead = await Store.Consents.GetActiveConsentsForSubjectsAsync([GranteeSid], tableB.Identifier, now, Store.TenantA);
         crossTableRead.Should().BeEmpty();
 
-        var allForTenantA = await Store.Consents.GetAllActiveConsentsForSubjectsAsync([GranteeSid], ["AnalystRole"], now, Store.TenantA);
-        allForTenantA.Where(c => c.TableIdentifier.Equals(tableA.Identifier)).Select(c => c.Id).Should().BeEquivalentTo([consentA.Id, roleConsentA.Id]);
+        var allForTenantA = await Store.Consents.GetAllActiveConsentsForSubjectsAsync([GranteeSid], null, now, Store.TenantA);
+        allForTenantA.Where(c => c.TableIdentifier.Equals(tableA.Identifier)).Select(c => c.Id).Should().BeEquivalentTo([consentA.Id]);
         allForTenantA.Select(c => c.Id).Should().NotContain(consentB.Id);
-
-        var roleForTenantA = await Store.Consents.GetActiveRoleConsentsAsync(tableA.Identifier, "AnalystRole", Store.TenantA, now);
-        roleForTenantA.Select(c => c.Id).Should().ContainSingle().Which.Should().Be(roleConsentA.Id);
 
         var tablesForTenantA = await Store.Consents.GetTablesWithConsentsForTenantAsync(Store.TenantA);
         tablesForTenantA.Should().Contain(tableA.Identifier).And.NotContain(tableB.Identifier);
