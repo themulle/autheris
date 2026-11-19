@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 - `callerState.rowScopeDescription` on `GET /api/v1/catalog/objects/{id}` and the list route: the owner-authored description of the caller's own applicable allow consent (the one `describe_my_access` shows; user or service principal before group, then earliest expiry), `null` unless `access` is `granted` (#858).
+- `GET /api/v1/catalog/objects` accepts a text query `q` over names, descriptions and the column names the caller may see (never values). It is applied before `totalCount` and `nextCursor`, combines with `accessStatus` and the other filters, and is verified per caller like the other catalog channels. The `nextCursor` is bound to `q` and `accessStatus` (another value gives 400); `q` is trimmed, at most 256 characters, and for user callers only (#857).
 - Linked documents and applications appear on discovery objects (`documents`, `applications`, per-column `documents`; GraphQL and MCP `describe_dataset`, `documentCount` in `list_datasets`). A document is returned only when it is readable for the caller (official or same tenant), not hidden from discovery, and its target is discoverable. At most 10 documents per object and 5 per column, newest first.
 - MCP tool `read_document` returns one whole document as sanitised Markdown with `trust`, the untrusted-content notice for tenant text and a 64 KiB window (`truncated`, `nextOffset`). `search_docs` accepts `dataset` and `column` filters and lists the discoverable `linkedTargets` of each hit.
 - `search_catalog` hits and `find_relevant_tables` candidates carry `accessStatus`, the caller's own status as `list_datasets` reports it (`GRANTED`, `PENDING`, `EXPIRED`, `REQUEST_ACCESS`); the REST `/api/v1/catalog/search` hits carry it too. `find_relevant_tables` recommends an access request instead of the query tools for candidates the caller cannot read (#804).
@@ -56,6 +57,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [1.8.5] - 2026-11-17
 
 ### Added
+- `GET /api/v1/catalog/objects` accepts a text query `q` over names, descriptions and the column names the caller may see (never values). It is applied before `totalCount` and `nextCursor`, combines with `accessStatus` and the other filters, and is verified per caller like the other catalog channels. The `nextCursor` is bound to `q` and `accessStatus` (another value gives 400); `q` is trimmed, at most 256 characters, and for user callers only (#857).
 - `get_table_schema` columns carry `access` (`clear` or `mask`), the caller's own column state (#711).
 - The DML intent and executed audit records carry `sql.bound_values_digest`, a keyed HMAC-SHA256 over the client and literal values the statement binds, so a record is tied to the exact new values without storing any (#505).
 
@@ -101,6 +103,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [1.8.1] - 2026-11-17
 
 ### Added
+- `GET /api/v1/catalog/objects` accepts a text query `q` over names, descriptions and the column names the caller may see (never values). It is applied before `totalCount` and `nextCursor`, combines with `accessStatus` and the other filters, and is verified per caller like the other catalog channels. The `nextCursor` is bound to `q` and `accessStatus` (another value gives 400); `q` is trimmed, at most 256 characters, and for user callers only (#857).
 - MCP discovery ergonomics: `list_datasets` and `search_catalog` return short summaries; `describe_dataset` selects sections and columns and filters relations by term; `search_catalog` filters by tag; over-budget results are shortened by whole datasets; `get_table_schema` reports the GraphQL field per table and visible column.
 
 ### Fixed
@@ -116,6 +119,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - SQLite data-source support removed (OD-2): `Gateway:DataSources:*` with `Provider = "Sqlite"` (or `"sqlite3"`) or an empty `Provider` fails startup fail-closed with `UnsupportedDataSourceDialectException`; `Microsoft.Data.Sqlite` is removed from production and module projects.
 
 ### Added
+- `GET /api/v1/catalog/objects` accepts a text query `q` over names, descriptions and the column names the caller may see (never values). It is applied before `totalCount` and `nextCursor`, combines with `accessStatus` and the other filters, and is verified per caller like the other catalog channels. The `nextCursor` is bound to `q` and `accessStatus` (another value gives 400); `q` is trimmed, at most 256 characters, and for user callers only (#857).
 - Authorized data discovery replaces the anonymous OpenSchema: catalog listing, search and describe tools return only what the caller may see, with per-column access states (`Clear`, `Mask`, `Deny`).
 - External catalog and consent API with a configurable workflow mode, time-limited signed grants (grant records with a verifiable hash chain), owner grants, profile assignments, consent events and a webhook with HMAC signatures.
 - Unified authorization model: one grant model and one decision point for REST, GraphQL, MCP, SQL, Envoy ext_authz, streaming, Lakehouse and federation; row policies, dynamic object coverage and per-cell column state.
