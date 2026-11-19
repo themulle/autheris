@@ -138,7 +138,6 @@ public sealed class GovernedAggregationAndMetricsTests
         var euPrincipal = CreatePrincipal("S-1-5-21-EU-USER");
         var usPrincipal = CreatePrincipal("S-1-5-21-US-USER");
 
-        var resolver = Substitute.For<ITableAccessResolver>();
         var clearCols = new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
         {
             ["id"] = ColumnAccessLevel.Clear,
@@ -148,26 +147,12 @@ public sealed class GovernedAggregationAndMetricsTests
             ["discount_secret"] = ColumnAccessLevel.Mask
         };
 
-        resolver.ResolveTableAccessAsync(euPrincipal, OrdersTableId, Arg.Any<IReadOnlyList<string>?>(), Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<CancellationToken>())
-            .Returns(new ResolvedTableAccess(
-                metadata,
-                TableAccessDecision.Allowed(OrdersTableId, clearCols, rowFilterSql: "region = 'EU'"),
-                new TenantId("tenant-a"),
-                new Sid("S-1-5-21-EU-USER"),
-                euPrincipal));
-
-        resolver.ResolveTableAccessAsync(usPrincipal, OrdersTableId, Arg.Any<IReadOnlyList<string>?>(), Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<CancellationToken>())
-            .Returns(new ResolvedTableAccess(
-                metadata,
-                TableAccessDecision.Allowed(OrdersTableId, clearCols, rowFilterSql: "region = 'US'"),
-                new TenantId("tenant-a"),
-                new Sid("S-1-5-21-US-USER"),
-                usPrincipal));
-
         var auditRepo = new CapturingAuditLogRepository();
         var service = new GovernedAggregationService(
             metadataRepository: metaRepo,
-            accessResolver: resolver,
+            pdp: Autheris.Tests.Unit.TestSupport.AccessDecisionPointStubs.Returning(r => r.Subject.Principal == euPrincipal
+                ? TableAccessDecision.Allowed(OrdersTableId, clearCols, rowFilterSql: "region = 'EU'")
+                : TableAccessDecision.Allowed(OrdersTableId, clearCols, rowFilterSql: "region = 'US'")),
             dataSourceExecutors: [new InMemoryRowExecutor(rows)],
             auditLogRepository: auditRepo,
             analyticsOptions: Options.Create(new AnalyticsOptions { MinimumGroupSize = 1 }));
@@ -245,6 +230,7 @@ public sealed class GovernedAggregationAndMetricsTests
 
         var service = new GovernedAggregationService(
             metadataRepository: metaRepo,
+            pdp: Autheris.Tests.Unit.TestSupport.AccessDecisionPointStubs.Denying(),
             dataSourceExecutors: [new InMemoryRowExecutor([])]);
 
         AggregationQuery query = clauseKind switch
@@ -299,7 +285,7 @@ public sealed class GovernedAggregationAndMetricsTests
                 ["amount"] = ColumnAccessLevel.Clear
             });
         var executor = new RecordingRowExecutor();
-        var service = new GovernedAggregationService(metadataRepository: metaRepo, dataSourceExecutors: [executor]);
+        var service = new GovernedAggregationService(metadataRepository: metaRepo, pdp: Autheris.Tests.Unit.TestSupport.AccessDecisionPointStubs.Denying(), dataSourceExecutors: [executor]);
 
         var query = clauseKind == "groupBy"
             ? new AggregationQuery(
@@ -391,6 +377,7 @@ public sealed class GovernedAggregationAndMetricsTests
 
         var service = new GovernedAggregationService(
             metadataRepository: metaRepo,
+            pdp: Autheris.Tests.Unit.TestSupport.AccessDecisionPointStubs.Denying(),
             dataSourceExecutors: [new InMemoryRowExecutor(rows)],
             analyticsOptions: Options.Create(new AnalyticsOptions { MinimumGroupSize = 5, Privacy = new AnalyticsPrivacyOptions { ExposeSuppressedGroupsCount = true } }));
 
@@ -468,6 +455,7 @@ public sealed class GovernedAggregationAndMetricsTests
 
         var service = new GovernedAggregationService(
             metadataRepository: metaRepo,
+            pdp: Autheris.Tests.Unit.TestSupport.AccessDecisionPointStubs.Denying(),
             dataSourceExecutors: [new InMemoryRowExecutor(rows)],
             analyticsOptions: Options.Create(new AnalyticsOptions
             {
@@ -714,18 +702,15 @@ public sealed class GovernedAggregationAndMetricsTests
         var auditRepo = new CapturingAuditLogRepository();
 
         // MISC-06: metric consents are only evaluated inside the PDP pipeline (the metric-consent branch needs a PDP).
-        var pdp = new Autheris.Application.Policy.UnifiedPolicyDecisionPoint(
-            consentRepo,
-            resolutionService,
-            new Autheris.Application.Policy.Services.NullConsentCacheService(),
+        var pdp = new Autheris.Application.Policy.Pdp.AccessDecisionPoint(
             Options.Create(new GatewayOptions()),
-            NullLogger<Autheris.Application.Policy.UnifiedPolicyDecisionPoint>.Instance);
+            resolutionService,
+            consentRepo,
+            new Autheris.Application.Policy.Services.NullConsentCacheService());
 
         var aggService = new GovernedAggregationService(
             metadataRepository: metaRepo,
             pdp: pdp,
-            consentRepository: consentRepo,
-            resolutionService: resolutionService,
             dataSourceExecutors: [new InMemoryRowExecutor(rows)],
             auditLogRepository: auditRepo,
             analyticsOptions: Options.Create(new AnalyticsOptions { MinimumGroupSize = 5, Privacy = new AnalyticsPrivacyOptions { ExposeSuppressedGroupsCount = true } }));
@@ -735,7 +720,6 @@ public sealed class GovernedAggregationAndMetricsTests
             aggregationService: aggService,
             metadataRepository: metaRepo,
             consentRepository: consentRepo,
-            resolutionService: resolutionService,
             pdp: pdp,
             auditLogRepository: auditRepo);
 

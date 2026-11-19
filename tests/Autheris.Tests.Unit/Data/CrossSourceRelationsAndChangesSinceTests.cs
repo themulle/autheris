@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Data;
 
+using Autheris.Application.Policy.Pdp;
 using System;
 using System.Collections.Generic;
 using System.Data.Common;
@@ -820,27 +821,29 @@ public sealed class CrossSourceRelationsAndChangesSinceTests
         }
     }
 
-    private sealed class FakePolicyDecisionPoint : IUnifiedPolicyDecisionPoint
+    private sealed class FakePolicyDecisionPoint : IAccessDecisionPoint
     {
         private readonly Dictionary<TableIdentifier, TableAccessDecision> _decisions = new();
 
         public void SetDecision(TableIdentifier table, TableAccessDecision decision) =>
             _decisions[table] = decision;
 
-        public Task<TableAccessDecision> EvaluateAccessAsync(
-            TableIdentifier table,
-            TableMetadata metadata,
-            SecurityPrincipalContext securityContext,
-            IReadOnlyList<string>? requestedColumns,
-            CancellationToken ct)
+        public ValueTask<TableAccessDecision> DecideAsync(AccessRequest request, CancellationToken ct = default)
         {
+            var table = request.Object.Identifier;
             if (_decisions.TryGetValue(table, out var decision))
             {
-                return Task.FromResult(decision);
+                return ValueTask.FromResult(decision);
             }
 
-            return Task.FromResult(TableAccessDecision.Denied(table, "No decision configured."));
+            return ValueTask.FromResult(TableAccessDecision.Denied(table, "No decision configured."));
         }
+
+        public ValueTask<IReadOnlyList<TableAccessDecision>> DecideManyAsync(SecurityPrincipalContext subject, IReadOnlyList<TableMetadata> objects, AccessOperation operation, AccessTransport transport, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+
+        public ValueTask<AccessExplanation> ExplainAsync(AccessRequest request, CancellationToken ct = default) =>
+            throw new NotSupportedException();
     }
 
     private sealed class SimpleMaskingProvider : IColumnMaskingProvider

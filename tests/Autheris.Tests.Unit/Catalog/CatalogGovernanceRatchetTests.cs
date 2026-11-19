@@ -23,6 +23,20 @@ public sealed class CatalogGovernanceRatchetTests
         ReplaceKeyDefinition = replace
     };
 
+    [Theory]
+    [InlineData(DiscoveryObjectKind.View, DiscoveryObjectKind.Table, DiscoveryObjectKind.View)]
+    [InlineData(DiscoveryObjectKind.Table, DiscoveryObjectKind.View, DiscoveryObjectKind.View)]
+    [InlineData(DiscoveryObjectKind.Table, DiscoveryObjectKind.Table, DiscoveryObjectKind.Table)]
+    public void Merge_ObjectKind_AnIncomingViewWinsAndAnIncomingTableNeverDowngradesAView(DiscoveryObjectKind existingKind, DiscoveryObjectKind incomingKind, DiscoveryObjectKind expected)
+    {
+        var existing = Meta(["a"], [], replace: false);
+        existing = existing with { Table = new Table { SourceName = "d", SchemaName = "s", TableName = "t", DisplayName = "t", ObjectKind = existingKind } };
+        var incoming = Meta(["a"], [], replace: false);
+        incoming = incoming with { Table = new Table { SourceName = "d", SchemaName = "s", TableName = "t", DisplayName = "t", ObjectKind = incomingKind } };
+
+        CatalogGovernanceRatchet.Merge(incoming, existing).Table.ObjectKind.ShouldBe(expected);
+    }
+
     [Fact]
     public void Merge_CarriesIncomingDefinitionOnlyWhenFlagged()
     {
@@ -64,7 +78,8 @@ public sealed class CatalogGovernanceRatchetTests
     {
         nameof(Table.SourceType), nameof(Table.SourceName), nameof(Table.SchemaName), nameof(Table.TableName),
         nameof(Table.DisplayName), nameof(Table.Description), nameof(Table.LongDescription), nameof(Table.Texts),
-        nameof(Table.DocumentationSource), nameof(Table.Sensitivity), nameof(Table.RequiresFourEyes), nameof(Table.IsActive)
+        nameof(Table.DocumentationSource), nameof(Table.Sensitivity), nameof(Table.RequiresFourEyes), nameof(Table.IsActive),
+        nameof(Table.ObjectKind)
     };
 
     private static TableMetadata FullyPopulatedExisting(TableIdentifier id) => new()

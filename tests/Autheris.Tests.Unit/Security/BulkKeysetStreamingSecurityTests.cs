@@ -1,3 +1,4 @@
+using Autheris.Application.Policy.Pdp;
 using Autheris.Tests.Unit.TestSupport;
 namespace Autheris.Tests.Unit.Security;
 
@@ -289,9 +290,7 @@ public sealed class BulkKeysetStreamingSecurityTests
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<TableMetadata?>(table));
 
-        var pdp = Substitute.For<IUnifiedPolicyDecisionPoint>();
-        pdp.EvaluateAccessAsync(Arg.Any<TableIdentifier>(), Arg.Any<TableMetadata>(), Arg.Any<SecurityPrincipalContext>(), Arg.Any<IReadOnlyList<string>?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(TableAccessDecision.Allowed(table.Identifier, new Dictionary<string, ColumnAccessLevel>(), null, true)));
+        var pdp = Autheris.Tests.Unit.TestSupport.AccessDecisionPointStubs.Returning(_ => TableAccessDecision.Allowed(table.Identifier, new Dictionary<string, ColumnAccessLevel>(), null, true));
 
         var planner = new GovernedTableReadPlanner();
         var sqlExecution = Substitute.For<IGovernedSqlExecutionService>();
@@ -357,9 +356,7 @@ public sealed class BulkKeysetStreamingSecurityTests
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<TableMetadata?>(table));
 
-        var pdp = Substitute.For<IUnifiedPolicyDecisionPoint>();
-        pdp.EvaluateAccessAsync(Arg.Any<TableIdentifier>(), Arg.Any<TableMetadata>(), Arg.Any<SecurityPrincipalContext>(), Arg.Any<IReadOnlyList<string>?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(TableAccessDecision.Allowed(table.Identifier, new Dictionary<string, ColumnAccessLevel>(), null, true)));
+        var pdp = Autheris.Tests.Unit.TestSupport.AccessDecisionPointStubs.Returning(_ => TableAccessDecision.Allowed(table.Identifier, new Dictionary<string, ColumnAccessLevel>(), null, true));
 
         var planner = new GovernedTableReadPlanner();
         var sqlExecution = Substitute.For<IGovernedSqlExecutionService>();

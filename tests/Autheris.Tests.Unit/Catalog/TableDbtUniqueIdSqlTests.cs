@@ -33,7 +33,7 @@ public sealed class TableDbtUniqueIdSqlTests
     public void Upsert_InsertsTheUniqueId(string field)
     {
         var sql = Sql(field);
-        sql.ShouldContain("non_personal, dbt_unique_id)");
+        sql.ShouldContain("non_personal, dbt_unique_id, object_kind)");
         sql.ShouldContain("@dbtUniqueId");
     }
 

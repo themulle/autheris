@@ -1,0 +1,5 @@
+{
+  "ops": [
+    { "op": "addColumn", "table": "tables", "column": { "name": "object_kind", "type": "CHARACTER VARYING(16)", "family": "string", "nullable": false } }
+  ]
+}

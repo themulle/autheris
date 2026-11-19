@@ -1,0 +1,2 @@
+-- Governance schema step 0030 (SQL Server): descriptive object kind of a catalog table (table or view). Additive and idempotent; existing rows read as table until the next sync.
+IF COL_LENGTH(N'dbo.TABLES', N'object_kind') IS NULL ALTER TABLE dbo.TABLES ADD object_kind NVARCHAR(16) NOT NULL CONSTRAINT DF_TABLES_object_kind DEFAULT N'table' CONSTRAINT CK_TABLES_object_kind CHECK (object_kind IN (N'table', N'view'));

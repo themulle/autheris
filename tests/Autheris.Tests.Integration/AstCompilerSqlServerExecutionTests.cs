@@ -658,7 +658,10 @@ public sealed class AstCompilerSqlServerExecutionTests : IClassFixture<AstCompil
     public async Task FunctionMapping_WithoutAnExactEquivalent_IsRejectedBeforeTheDatabase(string expression)
     {
         if (!_db.IsAvailable) return;
-        await Should.ThrowAsync<SqlCompileNotSupportedException>(() => ScalarAsync(expression));
+        // Rejected at compile, before any command exists. On a tenant table the expression allowlist refuses the function first (a
+        // SecurityException); the precise "no equivalent" error of the function mapping is covered by the engine unit tests.
+        var ex = await Should.ThrowAsync<Exception>(() => ScalarAsync(expression));
+        (ex is SqlCompileNotSupportedException or System.Security.SecurityException).ShouldBeTrue();
     }
 
     [Theory]

@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using Autheris.Application.Audit;
 using Autheris.Application.DataSources;
 using Autheris.Application.Policy;
+using Autheris.Application.Policy.Pdp;
 using Autheris.Application.Services;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
@@ -37,36 +38,8 @@ public sealed partial class SemanticMetricQueryService
             .ToList();
 
         // 1. Check standard table-level decision first
-        TableAccessDecision? tableDecision = null;
-        if (_pdp != null)
-        {
-            var secCtx = SecurityPrincipalContext.FromPrincipal(principal, tenantId);
-            tableDecision = await _pdp.EvaluateAccessAsync(table, tableMetadata, secCtx, requestedColumns: null, ct).ConfigureAwait(false);
-        }
-        else if (_accessResolver != null)
-        {
-            var resolved = await _accessResolver.ResolveTableAccessAsync(principal, table, null, null, ct).ConfigureAwait(false);
-            tableDecision = resolved.Decision;
-        }
-        else if (_consentRepository != null && _resolutionService != null)
-        {
-            var tableConsents = (await _consentRepository.GetActiveConsentsForSubjectsAsync(subjects, table, DateTimeOffset.UtcNow, tenantId, ct).ConfigureAwait(false))
-                .Where(c => c.TenantId == tenantId)
-                .ToList();
-            if (tableConsents.Count > 0)
-            {
-                var scopes = TokenAccessScope.GetScopeSet(principal.Claims);
-                tableDecision = _resolutionService.ResolveAccess(
-                    userSid,
-                    groupSids,
-                    roles,
-                    table,
-                    tableConsents,
-                    tableMetadata.Dialect,
-                    allSids.Count > 1 ? allSids : null,
-                    scopes.Count > 0 ? scopes : null);
-            }
-        }
+        var secCtx = SecurityPrincipalContext.FromPrincipal(principal, tenantId);
+        var tableDecision = await _pdp.DecideReadAsync(tableMetadata, secCtx, AccessTransport.Analytics, requestedColumns: null, _logger, ct).ConfigureAwait(false);
 
         if (tableDecision is { IsAllowed: true })
         {
@@ -74,11 +47,10 @@ public sealed partial class SemanticMetricQueryService
         }
 
         // MISC-06: a metric consent can only cure a missing table consent. Any other denial (DENY consent, contract,
-        // virtual filter, plugin, profile source) is final; the kind is typed, never matched on reason text. Without a PDP there is no
-        // authoritative pipeline to re-evaluate through, so the denial stands.
-        if (_pdp == null || tableDecision is not { DenialKind: TableAccessDenialKind.ConsentMissing })
+        // virtual filter, plugin, profile source) is final; the kind is typed, never matched on reason text.
+        if (tableDecision is not { DenialKind: TableAccessDenialKind.ConsentMissing })
         {
-            return (tableDecision ?? TableAccessDecision.Denied(table, "No policy decision point available for metric access (fail-closed)."), false);
+            return (tableDecision, false);
         }
 
         // 2. Check metric-scoped consents (e.g. "metric:<metricName>") for every requested metric
@@ -154,8 +126,7 @@ public sealed partial class SemanticMetricQueryService
 
                 // MISC-06: the projected metric consents join the repository consents inside the full PDP pipeline (contract,
                 // hooks, virtual filters, profiles), so virtual-filter predicates and row filters still apply.
-                var secCtx = SecurityPrincipalContext.FromPrincipal(principal, tenantId);
-                var metricDecision = await _pdp.EvaluateAccessAsync(table, tableMetadata, secCtx, requestedColumns: null, projectedConsents, ct).ConfigureAwait(false);
+                var metricDecision = await _pdp.DecideReadAsync(tableMetadata, secCtx, AccessTransport.Analytics, requestedColumns: null, _logger, ct, supplementalConsents: projectedConsents).ConfigureAwait(false);
 
                 if (metricDecision is { IsAllowed: true })
                 {
@@ -164,7 +135,7 @@ public sealed partial class SemanticMetricQueryService
             }
         }
 
-        return (tableDecision ?? TableAccessDecision.Denied(table, "No active table or metric consent found."), false);
+        return (tableDecision, false);
     }
 
     private static bool MatchesMetricIdentifier(TableIdentifier id, string metricName)

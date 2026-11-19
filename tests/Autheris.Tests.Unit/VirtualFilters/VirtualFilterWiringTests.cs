@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.VirtualFilters;
 
+using Autheris.Application.Policy.Pdp;
 using System;
 using System.Linq;
 using System.Reflection;
@@ -61,7 +62,7 @@ public sealed class VirtualFilterWiringTests
     [InlineData(typeof(IGatewayExecutionService))]
     [InlineData(typeof(IGovernedSqlExecutionService))]
     [InlineData(typeof(IProcedureExecutionService))]
-    [InlineData(typeof(IUnifiedPolicyDecisionPoint))]
+    [InlineData(typeof(IAccessDecisionPoint))]
     [InlineData(typeof(Autheris.Application.Streaming.Interfaces.IStreamRlsPolicyEnforcer))]
     public async Task DecisionPoints_GetTheRealResolver(Type serviceType)
     {

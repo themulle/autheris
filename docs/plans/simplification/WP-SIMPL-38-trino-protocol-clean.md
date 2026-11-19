@@ -134,3 +134,6 @@ Src about +900 / -330 (net about +570); tests about +1,400 / -370. 5 person-days
 6. Transport-denial errors keep `errorName = TransportNotAllowedException.Code` (REQ-ATR-04 contract) but use the standard code 4 (PERMISSION_DENIED); the former code 3 collides with USER_CANCELED.
 7. Paging uses a fixed 4,096-row page and the existing row limit bounds memory; no new option.
 8. Interop runs nightly and on `workflow_dispatch`, not on every PR (container cost); PR 5 requires one green dispatch run on its branch before merge.
+
+## Changelog
+- 2026-11-18 (PR 4): `WHERE` additionally accepts `col IN ('lit', ...)` (at most 64 values) because the Trino JDBC driver emits it for `TABLE_TYPE`. Table access status is exposed in `system.jdbc.tables.REMARKS` as `access: granted` or `access: not accessible`; table descriptions are not exposed there. `ORDER BY` is limited to projected columns. Any metadata relation reference outside the handler grammar (including quoted or commented spellings) is `NotSupported`. The WebSQL row limit is applied to metadata results.
