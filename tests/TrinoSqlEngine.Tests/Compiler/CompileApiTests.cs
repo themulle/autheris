@@ -205,6 +205,7 @@ public class CompileApiTests
     }
 
     [Fact]
+    [RowPolicyGuardOff]
     public void Lateral_IsRejected_AsNotSupportedOnSqlServer()
     {
         var ex = Assert.Throws<SqlCompileNotSupportedException>(() =>

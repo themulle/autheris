@@ -9,6 +9,9 @@ using TrinoSqlEngine.Governance;
 /// <summary>Origin of a bound value (plan 4.2). It decides how the binder and the plan cache treat the value.</summary>
 public enum ParameterOrigin { ClientNamed, ClientPositional, QueryLiteral, Tenant, Policy, Mask, PageOffset }
 
+/// <summary>The value family a client bind must conform to because the statement compares it with a typed column under a row policy (checked by the binder).</summary>
+public enum BindFamily { Numeric, Temporal, Boolean, Text }
+
 public enum SqlStatementClass { Select, Insert, Update, Delete, Merge }
 
 /// <summary>
@@ -29,7 +32,8 @@ public readonly record struct BoundParameter(
     int? ListIndex = null,
     int? ListCount = null,
     bool ZoneArgument = false,
-    bool EscapeLikePattern = false)
+    bool EscapeLikePattern = false,
+    BindFamily? RequiredFamily = null)
 {
     // INV-16: bound values never appear in logs, spans or exception text.
     public override string ToString() => $"BoundParameter {{ Marker = {Marker}, Type = {Type}, Origin = {Origin} }}";

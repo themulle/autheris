@@ -13,6 +13,7 @@ using Xunit;
 /// failed with an ArgumentNullException (500). They are now translated per dialect.
 /// </summary>
 [Trait("Category", "SqlGate")]
+[RowPolicyGuardOff]
 public sealed class SpecialFormEmissionTests
 {
     private static string Generate(string sql, TargetSqlDialect dialect, IReadOnlySet<string>? allowedFunctions = null) =>

@@ -10,6 +10,7 @@ using TrinoSqlEngine.Tests.Compiler;
 using Xunit;
 
 [Trait("Category", "SqlGate")]
+[RowPolicyGuardOff]
 public sealed class SqlServerSubstrStartTests
 {
     private static readonly TableIdentity Orders = new("dbo", "Orders");

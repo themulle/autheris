@@ -426,11 +426,25 @@ public abstract class AstCompilerDmlContract
     }
 
     [DmlFact]
+    public async Task WebSql_UserDivisionPredicate_DoesNotObserveRowsOutsideRowPolicy()
+    {
+        if (!Available()) return;
+        var before = await SnapshotAsync();
+
+        // The expression could raise on a row of another tenant; it is refused before any row is read or changed.
+        await SecurityRejectedAsync(() => ExecAsync($"UPDATE {O} SET status = 'x' WHERE 1 / (id - id + 1) = 1", "acme"));
+        await SecurityRejectedAsync(() => ExecAsync($"DELETE FROM {O} WHERE 1 / (id - id + 1) = 1", "acme"));
+        await SecurityRejectedAsync(() => ExecAsync($"UPDATE {O} SET status = 'x' WHERE id + 1 > 3", "acme"));
+
+        (await SnapshotAsync()).ShouldBe(before);
+    }
+
+    [DmlFact]
     public async Task InsertSelect_CopiesOnlyTheCallersSourceRows_AsTheCallersTenant()
     {
         if (!Available()) return;
         await InsertedAsync(
-            $"INSERT INTO {O} (id, tenantid, region, status, amount) SELECT id + 100, 'acme', 'EU', 'copied', 1 FROM {E}", "acme", 2);   // entitlements 1 and 3
+            $"INSERT INTO {O} (id, tenantid, region, status, amount) SELECT CASE WHEN id = 1 THEN 101 ELSE 103 END, 'acme', 'EU', 'copied', 1 FROM {E}", "acme", 2);   // entitlements 1 and 3
         var rows = await OrdersAsync();
         rows.Where(r => r.Status == "copied").Select(r => (r.Id, r.Tenant)).ShouldBe(new[] { (101, "acme"), (103, "acme") });
     }
@@ -452,7 +466,7 @@ public abstract class AstCompilerDmlContract
         MaskEmail();
         // reading a masked column as the source of a written (unmasked) column yields the mask, never the clear text
         await InsertedAsync(
-            $"INSERT INTO {O} (id, tenantid, region, status, amount) SELECT id + 300, 'acme', 'EU', email, 1 FROM {O} WHERE id = 1", "acme", 1);
+            $"INSERT INTO {O} (id, tenantid, region, status, amount) SELECT 301, 'acme', 'EU', email, 1 FROM {O} WHERE id = 1", "acme", 1);
         (await OrdersAsync()).Single(r => r.Id == 301).Status.ShouldBe("[REDACTED]");
         await SecurityRejectedAsync(() => ExecAsync($"INSERT INTO {O} (id, tenantid, region, status, amount, email) VALUES (400, 'acme', 'EU', 'x', 1, 'w@x.y')", "acme"));
     }

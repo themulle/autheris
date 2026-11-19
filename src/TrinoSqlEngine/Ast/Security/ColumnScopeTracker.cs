@@ -133,9 +133,25 @@ internal abstract class ColumnScopeTracker(ITableCatalog catalog) : SqlAstRewrit
     {
         table = null;
         if (expression is not ColumnReference column || _scopes.Count == 0) return null;
+        return ResolveIn(_scopes.Peek(), column, out table);
+    }
+
+    /// <summary>Resolves a column of an enclosing query block (a correlated reference), innermost enclosing block first.</summary>
+    protected CatalogColumn? ResolveOuterColumn(ColumnReference column)
+    {
+        foreach (var sources in _scopes.Skip(1))
+        {
+            if (ResolveIn(sources, column, out _) is { } found) return found;
+        }
+
+        return null;
+    }
+
+    private static CatalogColumn? ResolveIn(IReadOnlyList<Source> sources, ColumnReference column, out TableCatalogEntry? table)
+    {
+        table = null;
         var parts = column.Name.Parts;
         string name = parts[^1].Value;
-        var sources = _scopes.Peek();
 
         if (parts.Count >= 2)
         {

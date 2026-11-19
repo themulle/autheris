@@ -11,6 +11,7 @@ namespace TrinoSqlEngine.Tests.Compiler;
 /// a comparison across families is rejected instead of letting the database convert the column (ORA-01722 side channel).
 /// </summary>
 [Trait("Category", "SqlGate")]
+[RowPolicyGuardOff]
 public class LiteralBindTypeTests
 {
     private static readonly TableIdentity Orders = new("dbo", "Orders");

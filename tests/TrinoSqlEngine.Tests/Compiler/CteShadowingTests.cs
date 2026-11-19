@@ -9,6 +9,7 @@ namespace TrinoSqlEngine.Tests.Compiler;
 
 /// <summary>CR-ADG-01: a CTE name must never shadow a physical table differently in the gateway and in the database.</summary>
 [Trait("Category", "SqlGate")]
+[RowPolicyGuardOff]
 public class CteShadowingTests
 {
     private readonly FastSqlEngine _engine = new();
@@ -88,7 +89,7 @@ public class CteShadowingTests
     }
 
     private const string RecursiveChain =
-        "WITH RECURSIVE chain (id, n) AS (SELECT id, 1 FROM orders UNION ALL SELECT c.id, c.n + 1 FROM chain c WHERE c.n < 3) SELECT id, n FROM chain";
+        "WITH RECURSIVE chain (id, n) AS (SELECT id, 1 FROM orders UNION ALL SELECT c.id, c.n FROM chain c WHERE c.n < 3) SELECT id, n FROM chain";
 
     /// <summary>CR-ADG-29: a recursive CTE resolves its own name, and the physical tables of both members stay secured.</summary>
     [Theory]
@@ -108,7 +109,7 @@ public class CteShadowingTests
     public void RecursiveCte_JoiningAnotherCatalogTable_SecuresIt(TargetSqlDialect dialect)
     {
         var c = Compile(
-            "WITH RECURSIVE chain (id, n) AS (SELECT id, 1 FROM orders UNION ALL SELECT c.id, c.n + 1 FROM chain c JOIN orders o ON o.id = c.id WHERE c.n < 3) SELECT id FROM chain",
+            "WITH RECURSIVE chain (id, n) AS (SELECT id, 1 FROM orders UNION ALL SELECT c.id, c.n FROM chain c JOIN orders o ON o.id = c.id WHERE c.n < 3) SELECT id FROM chain",
             dialect);
         Assert.Equal(2, Regex.Count(c.Sql, @"(?i)dbo\W+orders\W"));   // both members read the secured physical table
     }
@@ -118,10 +119,10 @@ public class CteShadowingTests
     public void RecursiveCte_NamedLikeACatalogTable_IsRejected(TargetSqlDialect dialect)
     {
         Assert.Throws<System.Security.SecurityException>(() => Compile(
-            "WITH RECURSIVE orders (id, n) AS (SELECT id, 1 FROM orders UNION ALL SELECT o.id, o.n + 1 FROM orders o WHERE o.n < 3) SELECT id FROM orders",
+            "WITH RECURSIVE orders (id, n) AS (SELECT id, 1 FROM orders UNION ALL SELECT o.id, o.n FROM orders o WHERE o.n < 3) SELECT id FROM orders",
             dialect));
         Assert.Throws<System.Security.SecurityException>(() => Compile(
-            "WITH RECURSIVE \"Orders\" (id, n) AS (SELECT 1, 1 UNION ALL SELECT o.id, o.n + 1 FROM \"Orders\" o WHERE o.n < 3) SELECT id FROM \"Orders\"",
+            "WITH RECURSIVE \"Orders\" (id, n) AS (SELECT 1, 1 UNION ALL SELECT o.id, o.n FROM \"Orders\" o WHERE o.n < 3) SELECT id FROM \"Orders\"",
             dialect));
     }
 
@@ -145,8 +146,8 @@ public class CteShadowingTests
     {
         foreach (string sql in new[]
         {
-            "WITH chain (id, n) AS (SELECT id, 1 FROM orders UNION ALL SELECT c.id, c.n + 1 FROM chain c WHERE c.n < 3) SELECT id, n FROM chain",
-            "WITH orders (id, n) AS (SELECT id, 1 FROM orders UNION ALL SELECT o.id, o.n + 1 FROM orders o WHERE o.n < 3) SELECT id FROM orders",
+            "WITH chain (id, n) AS (SELECT id, 1 FROM orders UNION ALL SELECT c.id, c.n FROM chain c WHERE c.n < 3) SELECT id, n FROM chain",
+            "WITH orders (id, n) AS (SELECT id, 1 FROM orders UNION ALL SELECT o.id, o.n FROM orders o WHERE o.n < 3) SELECT id FROM orders",
             "WITH \"chain\" AS (SELECT id FROM (SELECT id FROM \"chain\") x) SELECT id FROM \"chain\""
         })
         {
@@ -171,10 +172,10 @@ public class CteShadowingTests
     [MemberData(nameof(Dialects))]
     public void RecursiveCte_InDml_ThrowsConstructNotSupported(TargetSqlDialect dialect)
     {
-        const string Recursive = "WITH RECURSIVE r (n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM r WHERE n < 3) SELECT n FROM r";
+        const string Recursive = "WITH RECURSIVE r (n) AS (SELECT 1 UNION ALL SELECT n FROM r WHERE n < 3) SELECT n FROM r";
         foreach (string sql in new[]
         {
-            "INSERT INTO orders (id, status) " + Recursive.Replace("SELECT n FROM r", "SELECT n, 'x' FROM r"),
+            "INSERT INTO orders (id, status) " + Recursive.Replace(") SELECT n FROM r", ") SELECT n, 'x' FROM r"),
             "UPDATE orders SET status = 'x' WHERE id IN (" + Recursive + ")",
             "DELETE FROM orders WHERE id IN (" + Recursive + ")",
             "MERGE INTO orders t USING (" + Recursive + ") s ON t.id = s.n WHEN MATCHED THEN UPDATE SET status = 'x'"

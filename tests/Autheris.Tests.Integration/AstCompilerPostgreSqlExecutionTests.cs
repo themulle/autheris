@@ -312,14 +312,14 @@ public sealed class AstCompilerPostgreSqlExecutionTests : IClassFixture<AstCompi
     {
         // CR-ADG-29: the CTE name resolves to itself; the anchor reads the secured table.
         var rows = await RunAsync(
-            "WITH RECURSIVE chain (id, n) AS (SELECT id, 1 FROM orders UNION ALL SELECT id, n + 1 FROM chain WHERE n < 3) SELECT id, n FROM chain",
+            "WITH RECURSIVE chain (id, n) AS (SELECT id, 1 FROM orders UNION ALL SELECT id, CASE WHEN n = 1 THEN 2 ELSE 3 END FROM chain WHERE n < 3) SELECT id, n FROM chain",
             "acme");
         rows.ShouldNotBeEmpty();
         rows.Select(r => Convert.ToInt32(r[0])).ShouldAllBe(id => id == 1 || id == 2 || id == 6);
         rows.Max(r => Convert.ToInt32(r[1])).ShouldBe(3);
         (rows.Count % 3).ShouldBe(0);
         await Should.ThrowAsync<System.Security.SecurityException>(() => RunAsync(
-            "WITH RECURSIVE orders (id, n) AS (SELECT id, 1 FROM orders UNION ALL SELECT id, n + 1 FROM orders WHERE n < 3) SELECT id FROM orders",
+            "WITH RECURSIVE orders (id, n) AS (SELECT id, 1 FROM orders UNION ALL SELECT id, CASE WHEN n = 1 THEN 2 ELSE 3 END FROM orders WHERE n < 3) SELECT id FROM orders",
             "acme"));
     }
 
@@ -366,22 +366,29 @@ public sealed class AstCompilerPostgreSqlExecutionTests : IClassFixture<AstCompi
     }
 
     [Theory]
-    [InlineData("SELECT status, count(*) AS n, sum(amount) AS total FROM orders GROUP BY status ORDER BY status")]
+    [InlineData("SELECT id FROM orders WHERE 1 / (id - id + 1) = 1")]
+    [InlineData("SELECT id FROM orders WHERE id + 1 > 3")]
+    [InlineData("SELECT id FROM orders WHERE sqrt(id) > 1")]
+    public async Task WebSql_UserDivisionPredicate_DoesNotObserveRowsOutsideRowPolicy(string sql) =>
+        await Should.ThrowAsync<System.Security.SecurityException>(() => RunAsync(sql, "acme"));
+
+    [Theory]
+    [InlineData("SELECT status, count(*) AS n, max(amount) AS total FROM orders GROUP BY status ORDER BY status")]
     [InlineData("SELECT id FROM orders WHERE status = 'open' AND amount > 10.5 ORDER BY id OFFSET 1 LIMIT 5")]
     [InlineData("SELECT id FROM orders ORDER BY id FETCH FIRST 2 ROWS WITH TIES")]
-    [InlineData("SELECT id, sum(amount) OVER (PARTITION BY status ORDER BY amount ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS rn FROM orders")]
+    [InlineData("SELECT id, max(amount) OVER (PARTITION BY status ORDER BY amount ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS rn FROM orders")]
     [InlineData("SELECT id, CASE WHEN amount > 15 THEN 'big' ELSE 'small' END AS size FROM orders")]
     [InlineData("SELECT id FROM orders WHERE email LIKE '%@acme.example' OR email IS NULL")]
-    [InlineData("SELECT id, cast(1.5 AS integer) AS a, cast('x' AS varchar) AS t FROM orders")]
+    [InlineData("SELECT id, cast('x' AS varchar) AS t FROM orders")]
     [InlineData("SELECT id, amount > 15 AS flag FROM orders")]
     [InlineData("SELECT id FROM orders WHERE id BETWEEN 1 AND 6 AND status IN ('open', 'closed') AND NOT (amount < 0)")]
     [InlineData("SELECT * FROM (VALUES (1, 'a'), (2, 'b')) AS v (x, y)")]
     [InlineData("SELECT date '2024-01-15' AS d, timestamp '2024-01-15 10:30:00' AS ts, time '10:30:00' AS tm FROM orders")]
-    [InlineData("SELECT substring(email FROM 1 FOR 3) AS s, upper(status) AS u, length(status) AS l, strpos(email, '@') AS p FROM orders")]
+    [InlineData("SELECT substring(email FROM 1 FOR 3) AS s, upper(status) AS u, length(status) AS l FROM orders")]
     [InlineData("SELECT DISTINCT region FROM orders ORDER BY region")]
     [InlineData("SELECT id FROM orders GROUP BY id, status HAVING count(*) > 0")]
     [InlineData("SELECT id FROM orders ORDER BY amount DESC NULLS LAST, id")]
-    [InlineData("SELECT count(*) FILTER (WHERE amount > 15) AS n, array_agg(id ORDER BY id) AS ids FROM orders")]
+    [InlineData("SELECT count(*) FILTER (WHERE amount > 15) AS n FROM orders")]
     [InlineData("SELECT region, GROUPING(region) AS g, count(*) AS n FROM orders GROUP BY ROLLUP (region)")]
     [InlineData("SELECT o.id FROM orders o CROSS JOIN LATERAL (SELECT e.id FROM entitlements e WHERE e.orderid = o.id) l")]
     [InlineData("SELECT extract(year FROM date '2024-05-06') AS y, extract(dow FROM date '2024-05-06') AS w FROM orders")]
@@ -556,21 +563,6 @@ public sealed class AstCompilerPostgreSqlExecutionTests : IClassFixture<AstCompi
 
     // ---- WP-X0-fix: function mappings executed against the real engine, compared with Trino semantics ----
 
-    private async Task<object?> ScalarAsync(string expression, bool translateDates = false)
-    {
-        var rows = await RunAsync($"SELECT {expression} AS r FROM orders WHERE id = 1", "acme", translateDates: translateDates);
-        rows.Count.ShouldBe(1);
-        return rows[0][0];
-    }
-
-    [Theory]
-    [InlineData("replace(email, '@acme.example')", "alice.smith")]
-    [InlineData("replace(email, 'zzz')", "alice.smith@acme.example")]
-    [InlineData("replace(email, '')", "alice.smith@acme.example")]
-    [InlineData("replace(email, '@acme.example', '@x')", "alice.smith@x")]
-    public async Task FunctionMapping_MatchesTrinoSemantics(string expression, string expected) =>
-        ((string?)await ScalarAsync(expression)).ShouldBe(expected);
-
     [Theory]
     [InlineData("date_add('day', 1, current_timestamp) > current_timestamp")]
     [InlineData("date_add('day', -1, current_timestamp) < current_timestamp")]
@@ -588,26 +580,26 @@ public sealed class AstCompilerPostgreSqlExecutionTests : IClassFixture<AstCompi
     // ---- WP-X0-fix item 5: a string literal compared with a non-text column is typed by the server, like an unknown literal ----
 
     [Theory]
-    [InlineData("SELECT id FROM orders WHERE id = '2'", "2")]
-    [InlineData("SELECT id FROM orders WHERE '2' = id", "2")]
-    [InlineData("SELECT id FROM orders WHERE id IN ('1', '2')", "1,2")]
-    [InlineData("SELECT id FROM orders WHERE id BETWEEN '1' AND '2'", "1,2")]
-    [InlineData("SELECT id FROM orders WHERE id <> '2'", "1,6")]
-    [InlineData("SELECT id FROM orders WHERE id IS NOT DISTINCT FROM '2'", "2")]
-    [InlineData("SELECT id FROM orders WHERE amount = '20.00'", "2")]
-    [InlineData("SELECT id FROM orders WHERE amount < '20'", "1")]
     [InlineData("SELECT id FROM events WHERE created_at < '2020-01-01'", "1")]
     [InlineData("SELECT id FROM events WHERE created_at >= '2020-01-01 00:00:00'", "2")]
     [InlineData("SELECT id FROM events WHERE created_at IS NOT DISTINCT FROM '2024-03-15'", "2")]
-    [InlineData("SELECT id FROM orders WHERE status = 'open' AND id = '1'", "1")]
     public async Task StringLiteralVsNonTextColumn_IsExecutable(string sql, string expectedIds) =>
         string.Join(',', Ids(await RunAsync(sql, "acme"))).ShouldBe(expectedIds);
 
-    [Fact]
-    public async Task StringLiteralVsNonTextColumn_WithANonConvertibleValue_FailsInTheDatabaseNotAsALeak()
-    {
-        await Should.ThrowAsync<PostgresException>(() => RunAsync("SELECT id FROM orders WHERE id = 'abc'", "acme"));
-    }
+    // A text literal against a numeric column is an implicit conversion that can fail on row data: refused under a tenant predicate.
+    [Theory]
+    [InlineData("SELECT id FROM orders WHERE id = '2'")]
+    [InlineData("SELECT id FROM orders WHERE '2' = id")]
+    [InlineData("SELECT id FROM orders WHERE id IN ('1', '2')")]
+    [InlineData("SELECT id FROM orders WHERE id BETWEEN '1' AND '2'")]
+    [InlineData("SELECT id FROM orders WHERE id <> '2'")]
+    [InlineData("SELECT id FROM orders WHERE id IS NOT DISTINCT FROM '2'")]
+    [InlineData("SELECT id FROM orders WHERE amount = '20.00'")]
+    [InlineData("SELECT id FROM orders WHERE amount < '20'")]
+    [InlineData("SELECT id FROM orders WHERE status = 'open' AND id = '1'")]
+    [InlineData("SELECT id FROM orders WHERE id = 'abc'")]
+    public async Task StringLiteralVsNumericColumn_IsRefusedUnderTenantPredicate(string sql) =>
+        await Should.ThrowAsync<System.Security.SecurityException>(() => RunAsync(sql, "acme"));
 
     [Fact]
     public async Task StringLiteralVsCitextTenantColumn_KeepsTextEquality()

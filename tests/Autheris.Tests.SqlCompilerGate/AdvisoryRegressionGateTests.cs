@@ -18,7 +18,7 @@ public sealed class AdvisoryRegressionGateTests
 {
     private const string Probe = "SELECT 1 FROM orders WHERE 1 / (id - id + 1) = 1";
 
-    private static CompileRequest Request(string dialect, PolicyScenario scenario)
+    private static CompileRequest Request(string dialect, PolicyScenario scenario, string? statementClass = null, string? sql = null)
     {
         var (gate, target) = dialect switch
         {
@@ -29,7 +29,7 @@ public sealed class AdvisoryRegressionGateTests
             _ => throw new ArgumentOutOfRangeException(nameof(dialect), dialect, null)
         };
         var schema = gate switch { GateDialect.SqlServer => "dbo", GateDialect.Oracle => "GATE_APP", _ => "public" };
-        var request = new GatePolicies(gate, schema, scenario).AstRequest(StatementPermissions.ReadOnly);
+        var request = new GatePolicies(gate, schema, scenario).AstRequest(statementClass is null ? StatementPermissions.ReadOnly : GatePolicies.PermissionsOf(statementClass), statementClass, sql);
         return target == request.TargetDialect
             ? request
             : request with
@@ -64,5 +64,166 @@ public sealed class AdvisoryRegressionGateTests
 
         // control: statements without a data-dependent failure still compile (the Databricks case reuses the PostgreSQL catalog types, so it only proves the refusal)
         if (dialect != "databricks") engine.Compile("SELECT id FROM orders WHERE id > 3 AND id / 2 = 1".AsMemory(), Request(dialect, scenario), CancellationToken.None).Sql.ShouldNotBeNullOrEmpty();
+    }
+
+    [Theory]
+    [InlineData("postgresql", "case_03", "SELECT id FROM orders WHERE sqrt(id) > 1")]
+    [InlineData("sqlserver", "case_03", "SELECT id FROM orders WHERE sqrt(id) > 1")]
+    [InlineData("oracle", "case_03", "SELECT id FROM orders WHERE sqrt(id) > 1")]
+    [InlineData("databricks", "case_03", "SELECT id FROM orders WHERE sqrt(id) > 1")]
+    [InlineData("postgresql", "case_04", "SELECT id FROM orders WHERE power(id, 2) = 4")]
+    [InlineData("sqlserver", "case_04", "SELECT id FROM orders WHERE power(id, 2) = 4")]
+    [InlineData("oracle", "case_04", "SELECT id FROM orders WHERE power(id, 2) = 4")]
+    [InlineData("databricks", "case_04", "SELECT id FROM orders WHERE power(id, 2) = 4")]
+    [InlineData("postgresql", "case_05", "SELECT id FROM orders WHERE id + 1 > 3")]
+    [InlineData("sqlserver", "case_05", "SELECT id FROM orders WHERE id + 1 > 3")]
+    [InlineData("oracle", "case_05", "SELECT id FROM orders WHERE id + 1 > 3")]
+    [InlineData("databricks", "case_05", "SELECT id FROM orders WHERE id + 1 > 3")]
+    public void Regression_allowlist_case(string dialect, string item, string sql)
+    {
+        Assert.NotNull(item);
+        var engine = new FastSqlEngine();
+
+        Should.Throw<SecurityException>(() => engine.Compile(sql.AsMemory(), Request(dialect, PolicyScenario.Tenant), CancellationToken.None))
+            .Message.ShouldBe(RowPolicyErrorGuard.Message);
+    }
+
+    [Theory]
+    [InlineData("postgresql", "case_06", "update", "UPDATE orders SET status = 'x' WHERE id + 1 > 3")]
+    [InlineData("sqlserver", "case_06", "update", "UPDATE orders SET status = 'x' WHERE id + 1 > 3")]
+    [InlineData("oracle", "case_06", "update", "UPDATE orders SET status = 'x' WHERE id + 1 > 3")]
+    [InlineData("postgresql", "case_07", "delete", "DELETE FROM orders WHERE 1 / (id - id + 1) = 1")]
+    [InlineData("sqlserver", "case_07", "delete", "DELETE FROM orders WHERE 1 / (id - id + 1) = 1")]
+    [InlineData("oracle", "case_07", "delete", "DELETE FROM orders WHERE 1 / (id - id + 1) = 1")]
+    [InlineData("postgresql", "case_08", "update", "UPDATE orders SET status = lower(status) || 'x' WHERE id > 3")]
+    [InlineData("sqlserver", "case_08", "update", "UPDATE orders SET status = lower(status) || 'x' WHERE id > 3")]
+    [InlineData("oracle", "case_08", "update", "UPDATE orders SET status = lower(status) || 'x' WHERE id > 3")]
+    public void Regression_dml_case(string dialect, string item, string statementClass, string sql)
+    {
+        Assert.NotNull(item);
+        var engine = new FastSqlEngine();
+
+        Should.Throw<SecurityException>(() => engine.Compile(sql.AsMemory(), Request(dialect, PolicyScenario.Tenant, statementClass, sql), CancellationToken.None))
+            .Message.ShouldBe(RowPolicyErrorGuard.Message);
+    }
+
+    [Theory]
+    [InlineData("postgresql", "case_09", "SELECT id FROM orders WHERE status = 5")]
+    [InlineData("sqlserver", "case_09", "SELECT id FROM orders WHERE id = '5'")]
+    [InlineData("oracle", "case_09", "SELECT id FROM orders WHERE id = '5'")]
+    [InlineData("postgresql", "case_10", "SELECT id FROM orders WHERE coalesce(id, 'x') = 1")]
+    [InlineData("oracle", "case_10", "SELECT id FROM orders WHERE coalesce(status, id) = 'x'")]
+    public void Regression_coercion_case(string dialect, string item, string sql)
+    {
+        Assert.NotNull(item);
+        var engine = new FastSqlEngine();
+
+        Should.Throw<SecurityException>(() => engine.Compile(sql.AsMemory(), Request(dialect, PolicyScenario.Tenant), CancellationToken.None))
+            .Message.ShouldBe(RowPolicyErrorGuard.Message);
+    }
+
+    [Theory]
+    [InlineData("postgresql", "case_11", "SELECT id FROM orders WHERE id = (SELECT max(status) FROM orders)")]
+    [InlineData("sqlserver", "case_11", "SELECT id FROM orders WHERE id = (SELECT max(status) FROM orders)")]
+    [InlineData("oracle", "case_11", "SELECT id FROM orders WHERE id = (SELECT max(status) FROM orders)")]
+    [InlineData("databricks", "case_11", "SELECT id FROM orders WHERE id = (SELECT max(status) FROM orders)")]
+    [InlineData("postgresql", "case_12", "SELECT id FROM orders WHERE id IN (SELECT status FROM orders)")]
+    [InlineData("sqlserver", "case_12", "SELECT id FROM orders WHERE id IN (SELECT status FROM orders)")]
+    [InlineData("oracle", "case_12", "SELECT id FROM orders WHERE id IN (SELECT status FROM orders)")]
+    [InlineData("databricks", "case_12", "SELECT id FROM orders WHERE id IN (SELECT status FROM orders)")]
+    [InlineData("postgresql", "case_13", "SELECT id FROM orders UNION ALL SELECT status FROM orders")]
+    [InlineData("sqlserver", "case_13", "SELECT id FROM orders UNION ALL SELECT status FROM orders")]
+    [InlineData("oracle", "case_13", "SELECT id FROM orders UNION ALL SELECT status FROM orders")]
+    [InlineData("databricks", "case_13", "SELECT id FROM orders UNION ALL SELECT status FROM orders")]
+    public void Regression_subquery_coercion_case(string dialect, string item, string sql)
+    {
+        Assert.NotNull(item);
+        var engine = new FastSqlEngine();
+
+        Should.Throw<SecurityException>(() => engine.Compile(sql.AsMemory(), Request(dialect, PolicyScenario.Tenant), CancellationToken.None))
+            .Message.ShouldBe(RowPolicyErrorGuard.Message);
+    }
+
+    [Theory]
+    [InlineData("postgresql", "case_14", "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN sqrt(-1) ELSE 0 END = 0")]
+    [InlineData("sqlserver", "case_14", "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN sqrt(-1) ELSE 0 END = 0")]
+    [InlineData("oracle", "case_14", "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN sqrt(-1) ELSE 0 END = 0")]
+    [InlineData("databricks", "case_14", "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN sqrt(-1) ELSE 0 END = 0")]
+    [InlineData("postgresql", "case_15", "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN 9223372036854775807 + 1 ELSE 0 END = 0")]
+    [InlineData("sqlserver", "case_15", "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN 9223372036854775807 + 1 ELSE 0 END = 0")]
+    [InlineData("oracle", "case_15", "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN 9223372036854775807 + 1 ELSE 0 END = 0")]
+    [InlineData("databricks", "case_15", "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN 9223372036854775807 + 1 ELSE 0 END = 0")]
+    [InlineData("postgresql", "case_16", "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN CAST('abc' AS integer) ELSE 0 END = 0")]
+    [InlineData("sqlserver", "case_16", "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN CAST('abc' AS integer) ELSE 0 END = 0")]
+    [InlineData("oracle", "case_16", "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN CAST('abc' AS integer) ELSE 0 END = 0")]
+    [InlineData("databricks", "case_16", "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN CAST('abc' AS integer) ELSE 0 END = 0")]
+    [InlineData("postgresql", "case_18", "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN CAST(__param_p AS integer) ELSE 0 END = 0")]
+    [InlineData("sqlserver", "case_18", "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN CAST(__param_p AS integer) ELSE 0 END = 0")]
+    [InlineData("oracle", "case_18", "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN CAST(__param_p AS integer) ELSE 0 END = 0")]
+    [InlineData("databricks", "case_18", "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN CAST(__param_p AS integer) ELSE 0 END = 0")]
+    [InlineData("postgresql", "case_19", "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN CAST('12:30' AS timestamp) ELSE CAST('2024-01-01' AS timestamp) END IS NULL")]
+    [InlineData("sqlserver", "case_19", "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN CAST('12:30' AS timestamp) ELSE CAST('2024-01-01' AS timestamp) END IS NULL")]
+    [InlineData("oracle", "case_19", "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN CAST('12:30' AS timestamp) ELSE CAST('2024-01-01' AS timestamp) END IS NULL")]
+    [InlineData("databricks", "case_19", "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN CAST('12:30' AS timestamp) ELSE CAST('2024-01-01' AS timestamp) END IS NULL")]
+    [InlineData("postgresql", "case_17", "SELECT id FROM orders WHERE id = 42 AND sqrt(-1) > 0")]
+    [InlineData("sqlserver", "case_17", "SELECT id FROM orders WHERE id = 42 AND sqrt(-1) > 0")]
+    [InlineData("oracle", "case_17", "SELECT id FROM orders WHERE id = 42 AND sqrt(-1) > 0")]
+    [InlineData("databricks", "case_17", "SELECT id FROM orders WHERE id = 42 AND sqrt(-1) > 0")]
+    public void Regression_constant_behind_row_branch_case(string dialect, string item, string sql)
+    {
+        Assert.NotNull(item);
+        var engine = new FastSqlEngine();
+
+        Should.Throw<SecurityException>(() => engine.Compile(sql.AsMemory(), Request(dialect, PolicyScenario.Tenant), CancellationToken.None))
+            .Message.ShouldBe(RowPolicyErrorGuard.Message);
+    }
+
+    [Theory]
+    [InlineData("postgresql", "case_20")]
+    [InlineData("sqlserver", "case_20")]
+    [InlineData("oracle", "case_20")]
+    [InlineData("databricks", "case_20")]
+    public void Regression_invalid_typed_literal_case(string dialect, string item)
+    {
+        Assert.NotNull(item);
+        var engine = new FastSqlEngine();
+        const string sql = "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN DATE '2020-13-45' END IS NULL";
+
+        Should.Throw<Exception>(() => engine.Compile(sql.AsMemory(), Request(dialect, PolicyScenario.Tenant), CancellationToken.None));
+    }
+
+    [Theory]
+    [InlineData("postgresql", "case_23")]
+    [InlineData("sqlserver", "case_23")]
+    [InlineData("oracle", "case_23")]
+    [InlineData("databricks", "case_23")]
+    public void Regression_bind_family_case(string dialect, string item)
+    {
+        Assert.NotNull(item);
+        var engine = new FastSqlEngine();
+        const string sql = "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN id = __param_p ELSE 1 = 0 END";
+
+        // The gate compiles without client values: the plan marks the slot, and the binder refuses a value that is not numeric (engine tests, ClientBindFamilyTests).
+        var compiled = engine.Compile(sql.AsMemory(), Request(dialect, PolicyScenario.Tenant), CancellationToken.None);
+
+        compiled.Parameters.ShouldContain(p => p.Origin == ParameterOrigin.ClientNamed && p.SourceName == "p" && p.RequiredFamily == BindFamily.Numeric);
+    }
+
+    [Theory]
+    [InlineData("postgresql", "case_24")]
+    [InlineData("sqlserver", "case_24")]
+    [InlineData("oracle", "case_24")]
+    [InlineData("databricks", "case_24")]
+    public void Regression_text_bind_family_case(string dialect, string item)
+    {
+        Assert.NotNull(item);
+        var engine = new FastSqlEngine();
+        const string sql = "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN status = __param_p ELSE 1 = 0 END";
+
+        var compiled = engine.Compile(sql.AsMemory(), Request(dialect, PolicyScenario.Tenant), CancellationToken.None);
+
+        compiled.Parameters.ShouldContain(p => p.Origin == ParameterOrigin.ClientNamed && p.SourceName == "p" && p.RequiredFamily == BindFamily.Text);
+        Should.Throw<SecurityException>(() => engine.Compile("SELECT id FROM orders WHERE __param_a = __param_b".AsMemory(), Request(dialect, PolicyScenario.Tenant), CancellationToken.None))
+            .Message.ShouldBe(RowPolicyErrorGuard.Message);
     }
 }

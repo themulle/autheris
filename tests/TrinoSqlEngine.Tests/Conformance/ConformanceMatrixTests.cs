@@ -9,6 +9,7 @@ namespace TrinoSqlEngine.Tests.Conformance;
 /// accepted by regenerating them (<c>CONFORMANCE_UPDATE=1</c>) and reviewing the diff.
 /// </summary>
 [Trait("Category", "SqlGate")]
+[RowPolicyGuardOff]
 public class ConformanceMatrixTests
 {
     public static IEnumerable<object[]> Cases()

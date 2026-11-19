@@ -76,6 +76,19 @@ public static class SqlFunctionPolicy
     }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
+    /// Function names (lower case, unqualified) that user expressions may use while a row policy or tenant predicate applies: none of them
+    /// can raise a data-dependent error or run for a data-dependent time on any supported dialect. Everything else is
+    /// refused by <c>RowPolicyErrorGuard</c>; arguments are judged separately.
+    /// </summary>
+    public static readonly IReadOnlySet<string> RowPolicySafeFunctions = new[]
+    {
+        "coalesce", "nullif", "greatest", "least",
+        "lower", "upper", "trim", "ltrim", "rtrim", "length", "char_length", "character_length", "concat",
+        "count", "min", "max",
+        "year", "month", "day", "hour", "minute", "second", "quarter", "week", "day_of_week", "day_of_month", "day_of_year",
+    }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Function name prefixes (lower case, unqualified) that are rejected by default.
     /// </summary>
     public static readonly IReadOnlyList<string> DefaultDeniedPrefixes = new[]

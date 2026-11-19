@@ -16,6 +16,7 @@ namespace TrinoSqlEngine.Tests.Compiler;
 /// expression and query position, and a literal-only or tautological DML condition is rejected for the right reason.
 /// </summary>
 [Trait("Category", "SqlGate")]
+[RowPolicyGuardOff]
 public class TypedGuardMutationTests
 {
     private readonly FastSqlEngine _engine = new();
