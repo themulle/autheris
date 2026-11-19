@@ -64,3 +64,51 @@
 - T6 facets endpoint: read-only token GET, `CatalogRead` policy, `DiscoveryCallerGate` rate limit, route shadowing of `/objects/{id}`, and response size (one entry per domain/schema; consider a cap of 10,000 schemas with a `truncated` flag — default taken: no cap, because the response is bounded by the visible catalog).
 - T7 kind import: `meta.autheris.object_kind` is supplied by the ClusterAdmin sync. Values are validated against a closed set, the CHECK constraint backs this, and kind never becomes an authorization input (decision 12).
 - T8 migration: the forward-only step is idempotent (`IF NOT EXISTS` / `COL_LENGTH` guard), checksum goldens are updated in the same PR, and the step number does not collide at merge.
+
+## Phase 3 security conditions
+
+Verdict: APPROVED WITH CONDITIONS. Reviewed against origin/main plus #865 (fix/845-838-noaccess-columns) and #880 (fix/857-catalog-objects-search). Verified: #880's cursor is plain base64 with an unkeyed hash binding over `q` and `accessStatus` only (ExternalCatalogReader.cs:70-121), and `PageCursor` elsewhere carries only positions. Every decision below is "default taken". Phase 4 developers must never put `WP-`, `SEC-` or `OD-` identifiers into `src/Autheris.Api` or `src/Autheris.Application` comments.
+
+### Cursor (T1)
+- SEC-894-01 (default taken): the v2 cursor is authenticated with HMAC-SHA256 (constant-time compare, `CryptographicOperations.FixedTimeEquals`) over `v2|lastKey|count|binding`, using a server-held key that survives restarts and is shared across nodes. The developer reuses an existing server secret/key facility (data-protection or the audit-chain key family) and derives a purpose-specific subkey; no new plaintext config key. An unkeyed hash is not enough once the cursor carries `count`, because a client could forge `totalCount`.
+- SEC-894-02: if no persistent shared key is available at runtime, the cursor does not carry `count` and every page recomputes it. The service never falls back to an unkeyed cursor or a per-process random key that breaks on multi-node.
+- SEC-894-03: the binding covers every filter value in canonical form (trimmed, lower-invariant, fixed field order, length-prefixed so `a|b` cannot collide), the tenant id and the caller scope key hash. An anonymous or app-only caller binds its own principal id. Any mismatch, bad MAC, wrong version, offset cursor, v1 cursor, non-decodable, over 512 chars, or a negative or non-numeric count is `400 INVALID_CURSOR` with a fixed message that does not say which part failed and never echoes the cursor.
+- SEC-894-04: the cursor is never an authority. `lastKey` only positions inside the already scoped, filtered, verified set; the `lastKey` is never looked up outside `VisibleTables`. A stale cursor (object deleted or hidden since) continues from the next key and never errors in a way that distinguishes hidden from absent.
+- SEC-894-05: the echoed `count` is used only for the response `totalCount`; it never bounds a loop or an allocation.
+
+### Counts (T2, T3, T4)
+- SEC-894-06: `totalCount` and every facet count come from `ScopedCatalog.VisibleTables` after the tenant, hidden and `accessStatus` rules, and after the same `KeepCallerVisibleMatchesAsync` verifier for `q`, and after visible-columns-only evaluation for `pii` (#871 rule). The count pass and the page fill share one predicate implementation (no second copy).
+- SEC-894-07: `owner`, `tag`, `sensitivity` and `pii` match only metadata the caller may see: a NoAccess column's PII flag, tag or name never makes an object match or count; a match that exists only in hidden text or hidden columns counts as no match.
+- SEC-894-08: a pre-projection filter on object-level metadata (`domain`, `schema`, `kind`) runs only over already visible objects, so hidden objects can never be inferred by comparing counts. Counts are exact; no estimate, no rounding differences by caller class.
+- SEC-894-09 (side channel): the count pass cost depends only on the visible set. Hidden objects are removed before any per-object work, so response time does not depend on hidden-object count. A `q` on a restricted object that fails verification is excluded from count, page, and facets identically.
+- SEC-894-10 (DoS): the count pass and facet pass run once per first request, run under the existing request cancellation token, and are bounded by the visible catalog. `pageSize` keeps its current max; the window size is capped at 200. `changedSince` and `q` length keep the existing validation.
+
+### Audit (T5)
+- SEC-894-11 (default taken): decision 7 is acceptable on one condition: the discovery audit records every object whose metadata is returned in the response (the page), and the page-count and applied filter names; objects only counted or only examined during the count pass or fill are not audited, since no per-object content leaves the server for them. If a page fill projects an object that is dropped by a post-projection filter, it is not audited as disclosed. The facets endpoint writes one audit event (caller, tenant, `accessStatus`, result totals only, no names beyond what is returned). Audit entries carry identifiers only, never `q` free text beyond the existing truncation rule.
+- SEC-894-12: audit failure behaviour is unchanged (existing fail-closed rule for a missing actor; no placeholder SID).
+
+### Facets endpoint (T6)
+- SEC-898-01: `GET /api/v1/catalog/objects/facets` keeps `RequireAuthorization(GatewayPolicies.CatalogRead)`, the REST ingress transport and the same `DiscoveryCallerGate` and rate-limit policy as `/objects`. Anonymous callers are rejected as on `/objects`. A read-only token is allowed on this GET only through the baseline rows in WP-898-3 (rows are exact, no wildcard).
+- SEC-898-02: tenant resolution comes from the authenticated principal only (`DiscoveryTenantScope`); no tenant, domain or schema query parameter selects another scope. Unknown query parameters are ignored, never echoed.
+- SEC-898-03 (default taken): no cap of schemas, with `truncated` omitted, only if the number of entries is bounded by the visible catalog; domain and schema strings are returned as stored, JSON-encoded, never concatenated into headers. If a caller has more than 10,000 visible schemas the endpoint still returns the full set but must not exceed the global response size limit; exceeding it is `413`-style fail-closed rather than a silent cut.
+- SEC-898-04: the literal route is mapped before `/objects/{id}` and a test proves `/objects/facets` never reaches the by-id handler; baseline raise to 341 uses `freeze-exception` (owner-mandated, approved).
+- SEC-898-05: `/catalog/domains` keeps its response shape and its existing policy; its counts equal the facet counts and never exceed what `/objects` would return for the same caller.
+
+### #896 kind (T7, T8)
+- SEC-896-01 (default taken): imported kind is parsed with a closed set `table|view`, case-insensitive after trim, length at most 16 before parsing. Anything else (empty, other materializations, over-length, control characters) becomes `Table` plus a sync warning that echoes at most 64 sanitized characters. An unknown value never fails the whole sync and never yields `View` by default.
+- SEC-896-02: kind is descriptive only. No code path in the PDP, row filter, masking, consent, write state, `accessStatus` or visibility uses `ObjectKind` except the explicit `kind` filter and display; a unit test with `View` and `Table` of equal grants proves identical decisions. The `kind` filter is pre-projection over visible objects only.
+- SEC-896-03: the governance step is forward-only, idempotent (`IF NOT EXISTS` / `COL_LENGTH`), `NOT NULL DEFAULT 'table'` with `CHECK (object_kind IN ('table','view'))` on both PostgreSQL and SQL Server, with `.shape.json` and both checksum goldens updated in the same PR. A step must not edit an earlier step. The hydrator maps a stored non-`view` value to `Table` (fail-closed to the less specific kind).
+- SEC-896-04: a sync from a lower-privileged or non-ClusterAdmin source cannot set kind; `meta.autheris.object_kind` is read only on the existing ClusterAdmin import paths.
+
+### Mandatory tests (`[Trait("Category","Security")]`)
+Local unit:
+- `ExternalCatalogCursorSecurityTests`: `Cursor_ForgedCount_Is400`, `Cursor_TamperedMac_Is400`, `Cursor_OtherTenant_Is400`, `Cursor_OtherCaller_Is400`, `Cursor_EveryFilterChangeBreaksBinding`, `Cursor_OffsetAndV1_Are400`, `Cursor_NegativeOrHugeCount_Is400`, `Cursor_ErrorBodyDoesNotEchoCursor`, `Cursor_BindingFieldsAreLengthPrefixed`, `Cursor_WithoutPersistentKey_DoesNotCarryCount`.
+- `DiscoveryCountSecurityTests`: `TotalCount_ExcludesHiddenAndForeignTenantObjects`, `TotalCount_Q_ExcludesObjectsMatchingOnlyHiddenText`, `TotalCount_Pii_IgnoresNoAccessColumns`, `TotalCount_Owner_IgnoresHiddenOwnership`, `Facets_SumEqualsListTotalForSameAccessStatus`, `Facets_NeverNameNoAccessColumnsOrHiddenObjects`, `CountPassAndPageFill_ShareOnePredicate`, `StaleCursor_HiddenKey_ContinuesWithoutDistinguishing`.
+- `DiscoveryAuditPagingTests`: `Audit_RecordsEveryReturnedObject`, `Audit_DoesNotRecordFilteredOutObjects`, `Facets_WritesOneAuditEvent`.
+- `ObjectKindSecurityTests`: `ObjectKind_UnknownValue_BecomesTableWithWarning`, `ObjectKind_OverLongValue_IsTruncatedInWarning`, `ObjectKind_DoesNotChangeAccessDecision`, `ObjectKind_StoredUnknown_HydratesAsTable`.
+- Architecture (local): `ReadOnlyTokenGetRouteTests` and `ProgramRatchetTests` cover the new baseline rows; `GovernanceStepChecksumTests` covers goldens.
+
+GitHub Actions integration:
+- `CatalogFacetsSecurityIntegrationTests`: `Facets_Anonymous_Is401`, `Facets_ReadOnlyToken_Allowed`, `Facets_ForeignTenantObjectsNeverCounted`, `Facets_RouteNotShadowedByObjectId`, `Facets_RateLimited`.
+- `CatalogObjectsCursorSecurityIntegrationTests`: `Cursor_ReplayAcrossCallers_Is400`, `Cursor_ReplayAcrossTenants_Is400`, `Cursor_PagesOverLargeCatalog_NoHiddenObjectLeak`.
+- `GovernanceObjectKindMigrationIntegrationTests` (PostgreSQL and SQL Server containers): `Step_IsIdempotent`, `Step_CheckConstraintRejectsOtherKinds`, `Step_ExistingRowsReadTable`.
