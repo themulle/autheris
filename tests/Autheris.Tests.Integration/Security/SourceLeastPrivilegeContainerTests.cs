@@ -122,7 +122,7 @@ public sealed class SourceLeastPrivilegeContainerTests
         var orders = GovernedPipelineHarness.Orders(env.Provider, "core", env.OrdersTable);
         var service = GovernedPipelineHarness.Create(env.Provider, env.ServiceConnectionString, null, "core", orders, [], new List<AuditLogEntry>(), allowDml: false);
 
-        var result = await GovernedPipelineHarness.QueryAsync(service, "SELECT id, amount FROM " + env.OrdersTable);
+        var result = await GovernedPipelineHarness.QueryAsync(service, "SELECT id, amount FROM core." + env.OrdersTable);
 
         // Three rows belong to the caller's tenant; the fourth belongs to another tenant and is filtered by the governed query.
         result.RowCount.ShouldBe(3);

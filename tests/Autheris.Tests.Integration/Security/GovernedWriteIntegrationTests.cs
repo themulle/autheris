@@ -35,10 +35,10 @@ public sealed class GovernedWriteIntegrationTests
         var audit = new List<AuditLogEntry>();
         var service = env.Service(audit);
 
-        await GovernedPipelineHarness.ExecuteAsync(service, $"INSERT INTO {env.Table} (id, tenant_id, amount) VALUES (10, 'tenant_a', 42)");
+        await GovernedPipelineHarness.ExecuteAsync(service, $"INSERT INTO {env.QualifiedTable} (id, tenant_id, amount) VALUES (10, 'tenant_a', 42)");
         (await env.ScalarAsync("SELECT COUNT(*) FROM " + env.QualifiedTable + " WHERE id = 10 AND tenant_id = 'tenant_a' AND amount = 42")).ShouldBe(1);
 
-        await GovernedPipelineHarness.ExecuteAsync(service, $"UPDATE {env.Table} SET amount = 7 WHERE id = 10");
+        await GovernedPipelineHarness.ExecuteAsync(service, $"UPDATE {env.QualifiedTable} SET amount = 7 WHERE id = 10");
         (await env.ScalarAsync("SELECT COUNT(*) FROM " + env.QualifiedTable + " WHERE id = 10 AND amount = 7")).ShouldBe(1);
 
         audit.ShouldContain(e => e.EventType == "WEBSQL_DML_EXECUTED");
@@ -55,7 +55,7 @@ public sealed class GovernedWriteIntegrationTests
         var service = env.Service(new List<AuditLogEntry>());
 
         // Row 4 belongs to another tenant: the governed statement carries the caller's tenant predicate, so nothing matches.
-        await GovernedPipelineHarness.ExecuteAsync(service, $"UPDATE {env.Table} SET amount = 0 WHERE id = 4");
+        await GovernedPipelineHarness.ExecuteAsync(service, $"UPDATE {env.QualifiedTable} SET amount = 0 WHERE id = 4");
 
         (await env.ScalarAsync("SELECT amount FROM " + env.QualifiedTable + " WHERE id = 4")).ShouldBe(20);
         (await env.ScalarAsync("SELECT COUNT(*) FROM " + env.QualifiedTable + " WHERE amount = 0")).ShouldBe(0);
@@ -200,7 +200,7 @@ public sealed class GovernedWriteIntegrationTests
                          "CREATE TABLE core.Secret (id int)",
                          $"CREATE USER [{_login}] FOR LOGIN [{_login}]",
                          $"GRANT SELECT ON core.Orders (id, tenant_id) TO [{_login}]",
-                         $"GRANT INSERT ON core.Orders (id, amount, tenant_id) TO [{_login}]",
+                         $"GRANT INSERT ON core.Orders TO [{_login}]",
                          $"GRANT UPDATE ON core.Orders (amount) TO [{_login}]"
                      })
             {

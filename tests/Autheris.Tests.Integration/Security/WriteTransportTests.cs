@@ -58,7 +58,8 @@ public sealed class WriteTransportTests : IClassFixture<WriteTransportTests.Fixt
                 Columns =
                 [
                     new TableColumn { ColumnName = "id", DataType = "integer" },
-                    new TableColumn { ColumnName = "name", DataType = "varchar" }
+                    new TableColumn { ColumnName = "name", DataType = "varchar" },
+                    new TableColumn { ColumnName = "tenant_id", DataType = "varchar" }
                 ]
             });
 
@@ -175,7 +176,7 @@ public sealed class WriteTransportTests : IClassFixture<WriteTransportTests.Fixt
         // Trino: INSERT on /v1/statement.
         using var trinoRequest = new HttpRequestMessage(HttpMethod.Post, "/v1/statement")
         {
-            Content = new StringContent($"INSERT INTO {Source}.main.{Table} VALUES (3, 'written')", Encoding.UTF8, "text/plain")
+            Content = new StringContent($"INSERT INTO {Source}.main.{Table} VALUES (3, 'written', 'default')", Encoding.UTF8, "text/plain")
         };
         using var trino = await client.SendAsync(trinoRequest);
         var trinoBody = await trino.Content.ReadAsStringAsync();
@@ -184,7 +185,7 @@ public sealed class WriteTransportTests : IClassFixture<WriteTransportTests.Fixt
         // MCP: query_sql INSERT.
         await using (var mcp = await McpTestClient.ConnectAsync(client))
         {
-            var (isError, text) = await McpTestClient.CallAsync(mcp, "query_sql", new { query = $"INSERT INTO {Source}.main.{Table} VALUES (3, 'written')" });
+            var (isError, text) = await McpTestClient.CallAsync(mcp, "query_sql", new { query = $"INSERT INTO {Source}.main.{Table} VALUES (3, 'written', 'default')" });
             isError.ShouldBeTrue(text);
         }
 
@@ -220,7 +221,7 @@ public sealed class WriteTransportTests : IClassFixture<WriteTransportTests.Fixt
 
         public Fixture()
         {
-            SourceConnection = PostgresDataSource.Create("wtr", $"CREATE TABLE {Table} (id INTEGER PRIMARY KEY, name TEXT NOT NULL); INSERT INTO {Table} VALUES (1,'row-one'),(2,'row-two');");
+            SourceConnection = PostgresDataSource.Create("wtr", $"CREATE TABLE {Table} (id INTEGER PRIMARY KEY, name TEXT NOT NULL, tenant_id TEXT NOT NULL); INSERT INTO {Table} VALUES (1,'row-one','default'),(2,'row-two','default');");
             var marker = new NpgsqlConnectionStringBuilder(SourceConnection).Database!;
             var connections = Connections;
             Factory = _root.WithWebHostBuilder(b =>
@@ -239,6 +240,7 @@ public sealed class WriteTransportTests : IClassFixture<WriteTransportTests.Fixt
                 b.UseSetting("Gateway:DataSources:Connections:" + Source + ":WriteConnectionString", SourceConnection);
                 b.UseSetting("Gateway:WebSql:Enabled", "true");
                 b.UseSetting("Gateway:WebSql:AllowDml", "true");
+                b.UseSetting("Gateway:DataSources:RequireTenantColumn", "true");
                 b.UseSetting("Gateway:WebSql:DefaultDataSourceName", Source);
                 b.UseSetting("Gateway:WebSql:AllowedDataSources:0", Source);
                 b.UseSetting("Gateway:OData:Enabled", "true");
