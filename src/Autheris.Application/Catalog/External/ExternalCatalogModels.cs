@@ -99,7 +99,8 @@ public sealed record ExternalCatalogOwnerDto(
 public sealed record ExternalCatalogCallerStateDto(
     string Access,
     string? RowScope,
-    DiscoveryWriteState? Write);
+    DiscoveryWriteState? Write,
+    string? RowScopeDescription = null);
 
 public sealed record ExternalCatalogColumnDto(
     string Name,

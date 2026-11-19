@@ -22,6 +22,7 @@ services:
       POSTGRES_DB: postgres
     volumes:
       - ../configs/chinook.sql:/docker-entrypoint-initdb.d/01-chinook.sql:ro
+      - ../configs/governance-db.sql:/docker-entrypoint-initdb.d/02-governance-db.sql:ro
     command: >
       postgres
       -c max_connections=500
@@ -158,9 +159,9 @@ services:
       DOTNET_ReadyToRun: 1
       Gateway__Authentication__EnableTestAuthHandler: "true"
       Gateway__Insecure__danger_bypass_consent_checks: "true"
-      Gateway__GovernanceDb__Provider: "Sqlite"
+      Gateway__GovernanceDb__Provider: "PostgreSql"
       Gateway__GovernanceDb__SeedDemoData: "true"
-      Gateway__GovernanceDb__ConnectionString: "Data Source=:memory:;Mode=Memory;Cache=Shared"
+      Gateway__GovernanceDb__ConnectionString: "Host=postgres;Port=5432;Database=governance;Username=postgres;Password=${BENCH_DB_PASSWORD:?run scripts via lib_secrets.sh};Pooling=true;Maximum Pool Size=20"
       Gateway__RateLimiting__PreAuthIpRateLimit__PermitLimit: "100000"
       Gateway__RateLimiting__PostAuthSidRateLimit__TokenBucketCapacity: "100000"
       Gateway__RateLimiting__PostAuthSidRateLimit__TokensPerSecond: "10000"
