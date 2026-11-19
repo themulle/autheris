@@ -2,6 +2,10 @@ using Autheris.Domain.Common;
 
 namespace Autheris.Application.Catalog.OpenMetadata;
 
+/// <summary>
+/// Core port implemented by the OpenMetadata module: the on-demand and scheduled permission sync. Without the module no
+/// implementation is registered and callers answer "not available".
+/// </summary>
 public interface IOpenMetadataSyncService
 {
     /// <param name="restrictToTenant">
@@ -9,5 +13,4 @@ public interface IOpenMetadataSyncService
     /// reconciled (tenant-scoped administrators). <c>null</c> synchronises every tenant (cluster administrators, background sync).
     /// </param>
     Task<OpenMetadataSyncResult> SyncPermissionsAsync(bool dryRun = false, TenantId? restrictToTenant = null, CancellationToken ct = default);
-    Task<bool> HandleWebhookEventAsync(string eventPayload, string? signatureHeader = null, CancellationToken ct = default);
 }

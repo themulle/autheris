@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Autheris.Application.Common.Interfaces;
@@ -13,7 +12,7 @@ using Autheris.Application.State;
 
 namespace Autheris.Extensions.OpenMetadata;
 
-public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService
+public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService, IOpenMetadataWebhookHandler
 {
     private readonly IOpenMetadataClient _client;
     private readonly ITableMetadataRepository _metadataRepo;
@@ -594,7 +593,7 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService
                ClassificationMetadata.IsTableSensitive(metadata);
     }
 
-    public async Task<bool> HandleWebhookEventAsync(string eventPayload, string? signatureHeader = null, CancellationToken ct = default)
+    public async Task<bool> HandleVerifiedAsync(string eventPayload, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(eventPayload) || eventPayload.Length > 2 * 1024 * 1024 || Encoding.UTF8.GetByteCount(eventPayload) > 2 * 1024 * 1024)
         {
@@ -603,33 +602,6 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService
         }
 
         var omOptions = _options.Value.OpenMetadata;
-
-        bool bypassSignature = _options.Value.IsWebhookSignatureBypassed;
-        if (!bypassSignature)
-        {
-            // Enforce signature verification (fail closed)
-            if (string.IsNullOrWhiteSpace(omOptions.WebhookSecret))
-            {
-                _logger.LogWarning("Rejecting OpenMetadata webhook: WebhookSecret is not configured.");
-                return false;
-            }
-
-            if (string.IsNullOrWhiteSpace(signatureHeader))
-            {
-                _logger.LogWarning("Rejecting OpenMetadata webhook: missing signature header.");
-                return false;
-            }
-
-            if (!VerifyWebhookSignature(eventPayload, signatureHeader, omOptions.WebhookSecret, _logger))
-            {
-                _logger.LogWarning("Rejecting OpenMetadata webhook: signature verification failed.");
-                return false;
-            }
-        }
-        else
-        {
-            _logger.LogWarning("[INSECURE GETTING STARTED] Bypassing OpenMetadata webhook signature verification.");
-        }
 
         OpenMetadataWebhookEvent? webhookEvent;
         try
@@ -693,7 +665,10 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    _logger.LogWarning(ex, "OpenMetadata webhook cluster state unavailable; falling back to in-memory deduplication.");
+                    // Fail closed: without the shared replay store another node could accept the same event again.
+                    ProcessedWebhookEvents.TryRemove(webhookEvent.Id.Value, out _);
+                    _logger.LogWarning(ex, "Rejecting OpenMetadata webhook: the shared replay store is unavailable.");
+                    return false;
                 }
             }
         }
@@ -849,28 +824,6 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService
         }
 
         return true;
-    }
-
-    public static bool VerifyWebhookSignature(string payload, string signatureHeader, string secret, ILogger? logger = null)
-    {
-        try
-        {
-            var cleanSignature = signatureHeader.Trim();
-            if (cleanSignature.StartsWith("sha256=", StringComparison.OrdinalIgnoreCase))
-                cleanSignature = cleanSignature[7..];
-
-            var expectedBytes = HMACSHA256.HashData(Encoding.UTF8.GetBytes(secret), Encoding.UTF8.GetBytes(payload));
-            var expectedHex = Convert.ToHexStringLower(expectedBytes);
-
-            return CryptographicOperations.FixedTimeEquals(
-                Encoding.UTF8.GetBytes(expectedHex),
-                Encoding.UTF8.GetBytes(cleanSignature.ToLowerInvariant()));
-        }
-        catch (Exception ex)
-        {
-            logger?.LogWarning(ex, "OpenMetadata webhook signature verification failed due to an exception.");
-            return false;
-        }
     }
 
     private static List<OpenMetadataPolicy> ResolvePolicies(

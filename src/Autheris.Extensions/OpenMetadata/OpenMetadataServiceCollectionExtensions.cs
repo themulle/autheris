@@ -24,6 +24,7 @@ public static class OpenMetadataServiceCollectionExtensions
 
         AddOpenMetadataHttpClient(services);
         services.TryAddScoped<IOpenMetadataSyncService, OpenMetadataSyncService>();
+        services.TryAddScoped<IOpenMetadataWebhookHandler, OpenMetadataSyncService>();
 
         if (gatewayOptions.OpenMetadata.Enabled)
         {

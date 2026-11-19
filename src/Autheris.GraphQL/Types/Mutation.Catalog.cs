@@ -11,6 +11,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Security;
 using HotChocolate;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Autheris.GraphQL.Types;
@@ -82,9 +83,15 @@ public sealed partial class Mutation
         return true;
     }
 
+    private static bool IsServiceRegistered<T>(IServiceProvider? serviceProvider) =>
+        serviceProvider?.GetService<IServiceProviderIsService>()?.IsService(typeof(T)) == true;
+
+    private static GraphQLException UnavailableError(string message) =>
+        new(ErrorBuilder.New().SetCode("UNAVAILABLE").SetMessage(message).Build());
+
     public async Task<OpenMetadataSyncPayload> SyncOpenMetadataAsync(
         bool dryRun = false,
-        [Service] IOpenMetadataSyncService syncService = default!,
+        [Service] IServiceProvider serviceProvider = default!,
         [Service] IHttpContextAccessor httpContextAccessor = default!,
         CancellationToken ct = default)
     {
@@ -125,6 +132,13 @@ public sealed partial class Mutation
             }
         }
 
+        // The module owns the sync; authentication, role and tenant are decided first so only administrators learn whether it is loaded.
+        if (!IsServiceRegistered<IOpenMetadataSyncService>(serviceProvider))
+        {
+            throw UnavailableError("OpenMetadata is not available.");
+        }
+
+        var syncService = serviceProvider.GetRequiredService<IOpenMetadataSyncService>();
         OpenMetadataSyncResult result;
         try
         {
@@ -151,7 +165,7 @@ public sealed partial class Mutation
 
     public async Task<DataCatalogSyncPayload> SyncDataCatalogAsync(
         bool dryRun = false,
-        [Service] IDataCatalogSyncService catalogSyncService = default!,
+        [Service] IServiceProvider serviceProvider = default!,
         [Service] IHttpContextAccessor httpContextAccessor = default!,
         [Service] Autheris.Application.Audit.IAuditWriter? auditWriter = null,
         [Service] Autheris.Application.Common.Interfaces.IAuditLogRepository? auditLog = null,
@@ -243,6 +257,13 @@ public sealed partial class Mutation
             }
         }
 
+        // The catalog client is owned by a module; resolve the sync service only after authentication, role and tenant passed.
+        if (!IsServiceRegistered<IDataCatalogClient>(serviceProvider))
+        {
+            throw UnavailableError("The data catalog is not available.");
+        }
+
+        var catalogSyncService = serviceProvider.GetRequiredService<IDataCatalogSyncService>();
         TenantId auditTenant = restrictToTenant ?? TenantId.Platform; // cluster-wide record: platform bucket (DT-A-6)
         var writeAheadEntry = new AuditLogEntry
         {
