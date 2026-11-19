@@ -177,4 +177,18 @@ public sealed class AdvisoryRegressionGateTests
         Should.Throw<SecurityException>(() => engine.Compile(sql.AsMemory(), Request(dialect, PolicyScenario.Tenant), CancellationToken.None))
             .Message.ShouldBe(RowPolicyErrorGuard.Message);
     }
+
+    [Theory]
+    [InlineData("postgresql", "case_20")]
+    [InlineData("sqlserver", "case_20")]
+    [InlineData("oracle", "case_20")]
+    [InlineData("databricks", "case_20")]
+    public void Regression_invalid_typed_literal_case(string dialect, string item)
+    {
+        Assert.NotNull(item);
+        var engine = new FastSqlEngine();
+        const string sql = "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN DATE '2020-13-45' END IS NULL";
+
+        Should.Throw<Exception>(() => engine.Compile(sql.AsMemory(), Request(dialect, PolicyScenario.Tenant), CancellationToken.None));
+    }
 }

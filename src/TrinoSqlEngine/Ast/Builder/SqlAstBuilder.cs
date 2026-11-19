@@ -1301,13 +1301,38 @@ public sealed partial class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
             _ => throw Unsupported($"{type} literal")
         };
 
-        if (!pattern.IsMatch(value))
+        if (!pattern.IsMatch(value) || !IsValidTypedLiteralValue(kind, value))
         {
             // the submitted text is not echoed.
             throw Unsupported($"{type} literal (expected ISO format without time zone)");
         }
 
         return new TypedLiteralExpression(kind, value);
+    }
+
+    /// <summary>The value names a real date and time (a month 13 or hour 25 would raise in the database, on whatever row evaluates it).</summary>
+    private static bool IsValidTypedLiteralValue(TypedLiteralKind kind, string value)
+    {
+        var invariant = System.Globalization.CultureInfo.InvariantCulture;
+        string datePart = kind == TypedLiteralKind.Time ? string.Empty : value[..10];
+        string timePart = kind switch
+        {
+            TypedLiteralKind.Date => string.Empty,
+            TypedLiteralKind.Time => value,
+            _ => value[11..]
+        };
+
+        if (datePart.Length > 0 && !DateTime.TryParseExact(datePart, "yyyy-MM-dd", invariant, System.Globalization.DateTimeStyles.None, out _))
+        {
+            return false;
+        }
+
+        if (timePart.Length == 0) return true;
+
+        // the engine types keep up to 7 fractional digits; longer fractions are cut before the check.
+        int dot = timePart.IndexOf('.', StringComparison.Ordinal);
+        if (dot >= 0 && timePart.Length - dot - 1 > 7) timePart = timePart[..(dot + 8)];
+        return TimeOnly.TryParseExact(timePart, ["HH:mm", "HH:mm:ss", "HH:mm:ss.F", "HH:mm:ss.FF", "HH:mm:ss.FFF", "HH:mm:ss.FFFF", "HH:mm:ss.FFFFF", "HH:mm:ss.FFFFFF", "HH:mm:ss.FFFFFFF"], invariant, System.Globalization.DateTimeStyles.None, out _);
     }
 
     /// <summary>Wunsch 4: <c>INTERVAL 'n' FIELD</c> with one unsigned field and an integer value.</summary>

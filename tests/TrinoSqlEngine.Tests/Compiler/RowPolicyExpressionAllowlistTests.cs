@@ -159,4 +159,24 @@ public class RowPolicyExpressionAllowlistTests
         Assert.Throws<SecurityException>(() => Compile(
             "SELECT Id FROM Orders o WHERE EXISTS (SELECT 1 FROM Entitlements e WHERE e.OrderId = o.Status)"));
     }
+
+    [Theory]
+    [InlineData("case_01", "SELECT Id FROM Orders WHERE CASE WHEN Id = 42 THEN DATE '2020-13-45' END IS NULL")]
+    [InlineData("case_02", "SELECT Id FROM Orders WHERE CASE WHEN Id = 42 THEN TIMESTAMP '2020-01-01 25:00:00' END IS NULL")]
+    [InlineData("case_03", "SELECT Id FROM Orders WHERE CASE WHEN Id = 42 THEN TIME '12:61' END IS NULL")]
+    [InlineData("case_04", "SELECT Id FROM Orders WHERE CASE WHEN Id = 42 THEN DATE '2023-02-29' END IS NULL")]
+    public void Invalid_typed_literal_is_rejected_when_the_statement_is_built(string item, string sql)
+    {
+        Assert.NotNull(item);
+        Assert.ThrowsAny<Exception>(() => Compile(sql));
+    }
+
+    [Theory]
+    [InlineData("case_01", "SELECT Id FROM Orders WHERE Id = 1 AND CASE WHEN Id = 2 THEN DATE '2024-02-29' END IS NULL")]
+    [InlineData("case_02", "SELECT Id FROM Orders WHERE Id = 1 AND CASE WHEN Id = 2 THEN TIMESTAMP '2024-01-01 23:59:59.123456789' END IS NULL")]
+    public void Valid_typed_literal_compiles(string item, string sql)
+    {
+        Assert.NotNull(item);
+        Assert.False(string.IsNullOrEmpty(Compile(sql).Sql));
+    }
 }
