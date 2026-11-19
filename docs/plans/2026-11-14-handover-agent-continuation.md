@@ -62,17 +62,19 @@ Pushed feature branches on `origin` (state at the 2026-11-15 handover; the rollu
   - #872, #884, #885: `WP-SIMPL-25` sign-off, hardening, and the core/full image flavors (#885 was merged with the owner's approval).
   - #874: security addenda (WP-38/46/52, profile items).
   - #895: `WP-SIMPL-19` PR-C slice 1.
-- **v1.9.0 scope:** #868 (`WP-SIMPL-36` 6b, Worm export removed, breaking) and #900 (`WP-SIMPL-52a` role grantee removal, step `0029`, breaking). #900 lands alone in its own DDL batch, and #904 (step `0030`) lands after it.
+  - #888: `WP-SIMPL-44/45` container and integration suites.
+- **v1.9.0 scope:** #868 (`WP-SIMPL-36` 6b, Worm export removed, breaking) and #900 (`WP-SIMPL-52a` role grantee removal, step `0029`, breaking). #900 lands alone in its own DDL batch, and #904 (renumbered to step `0030`) lands after it.
 - **Held until after the 1.9.0 cut:**
   - #883: `WP-SIMPL-46`, `IUnifiedPolicyDecisionPoint` removed.
   - #887: `WP-SIMPL-38` PR 4, `system.jdbc`.
-  - #888: `WP-SIMPL-44/45` container and integration suites.
   - #899: `WP-SIMPL-20` PR B.
   - #902 and #905: `WP-SIMPL-19` PR-C slices 2 and 3 (stacked).
-- **Owner review (do not merge):** `WP-SIMPL-38` PR 5, the Trino client interop nightly workflow, on branch `ci/simpl-38-pr5-trino-interop-owner-review`.
+- **Owner review (do not merge):** #908 `WP-SIMPL-38` PR 5 (Trino client interop nightly workflow; stacked on #887; approved; the owner runs the suite locally or dispatches it once after merge).
+- **In progress:** `WP-SIMPL-29` PR 2a (config sections) and PR 2b (CDC producers to Infrastructure), `WP-SIMPL-28` PR 3 (dbt module).
+- **Remaining after these (audit 2026-11-19, 25 PRs in total):** WP-23 last PR; WP-28 PR 4; WP-29 PR 3, 4, 4b (owner review) and 5; WP-32 PR 2-6 and the baseline PR; WP-20 PR A; WP-52b.
 - **Still open:**
   - `WP-SIMPL-20` PR A: fold the ConsentPattern and GrantRecord cores after #900, then recompute `MaxAllowedLoc`.
-  - `WP-SIMPL-52b`: the profile items migration replaces `access_profiles.masking_mode/target_tables`. It takes the next free step after #904. `consent_row_filters.key_set_*` stays (D-PI-7).
+  - `WP-SIMPL-52b`: the profile items migration replaces `access_profiles.masking_mode/target_tables`. It takes step `0031`, after #904. `consent_row_filters.key_set_*` stays (D-PI-7).
 - **Private advisory filed:** GHSA-ff36-3926-36r5 (private, unpublished).
 
 **Update 2026-11-18 night:**
