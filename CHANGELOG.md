@@ -42,6 +42,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed (breaking)
 - The in-process event bus options moved from `Gateway:Events` to `Gateway:EventBus` (`DeliveryMode`, `SubscriberQueueCapacity`), because `Gateway:Events` is the section of the `events` module. The old keys fail startup with a message naming the new path.
+- CDC event delivery moved into the `events` module (`Autheris.Modules.Events`). The routes `/api/v1/cdc/events`, `/api/v1/cdc/subscriptions[/{id}]` and `/api/v1/cdc/streams[/{id}/...]` are now `/modules/events/v1/cdc/...` and answer 404 on the old paths and without the module. `Gateway:CdcWebhooks` moved to `Gateway:Events:CdcWebhooks` (the old section fails startup with a message naming the new path). Configured `Gateway:Webhooks:Subscriptions` need the `events` module and fail startup without it. The webhook dispatcher, the event bridge and the delivery workers run from the module and idle while their feature is disabled. The secret protector is always registered by the host and fails closed. The CDC stream, the stores, the enforcer, the stream crypto and the webhook outbox stay in the host.
 - A loopback `Gateway:CatalogSearch:OllamaEndpoint` (`localhost`, `127.0.0.0/8`, `::1`) is refused at startup validation, because the outbound egress policy never allowed it. Private Ollama hosts need `Gateway:Egress:TrustedInternalHosts` or `TrustedInternalNetworks` plus `CatalogEmbeddings` in `Gateway:Egress:TrustedIntegrations`.
 
 ### Fixed

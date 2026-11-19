@@ -1,6 +1,7 @@
 namespace Autheris.Application.Webhooks;
 
 using System;
+using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -57,7 +58,7 @@ public sealed class WebhookDispatcherService : IWebhookDispatcherService
             return;
         }
 
-        var matching = webhooks.Subscriptions.FindAll(s => s.MatchesEvent(@event.EventType, @event.TenantId));
+        var matching = webhooks.Subscriptions.Where(s => s.MatchesEvent(@event.EventType, @event.TenantId)).ToList();
         if (matching.Count == 0)
         {
             return;

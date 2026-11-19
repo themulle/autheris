@@ -8,6 +8,7 @@ using Autheris.Application.Events.Interfaces;
 using Autheris.Application.Streaming.Services;
 using Autheris.Application.Webhooks;
 using Autheris.Domain.Options;
+using Autheris.Modules.Events;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -27,7 +28,7 @@ public sealed class CdcWebhookRegistrationTests
         var config = new Dictionary<string, string?>();
         if (enabled is { } value)
         {
-            config["Gateway:CdcWebhooks:Enabled"] = value ? "true" : "false";
+            config["Gateway:Events:CdcWebhooks:Enabled"] = value ? "true" : "false";
         }
 
         services.AddSingleton<IConfiguration>(new ConfigurationBuilder().AddInMemoryCollection(config).Build());
@@ -46,52 +47,88 @@ public sealed class CdcWebhookRegistrationTests
         return services;
     }
 
-    private static bool HasHostedService(ServiceCollection s) =>
+    private static bool HasHostedService(IServiceCollection s) =>
         s.Any(d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(CdcWebhookDeliveryService));
 
+    private static bool HasHosted<T>(IServiceCollection s) =>
+        s.Any(d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(T));
+
+    private static ServiceCollection RegisterModule(bool? enabled)
+    {
+        var config = new Dictionary<string, string?>();
+        if (enabled is { } value)
+        {
+            config["Gateway:Events:CdcWebhooks:Enabled"] = value ? "true" : "false";
+        }
+
+        var services = new ServiceCollection();
+        services.AddEventsModule(new ConfigurationBuilder().AddInMemoryCollection(config).Build());
+        return services;
+    }
+
     [Fact]
-    public void Enabled_RegistersDeliveryServiceDurableStoreAndProtector()
+    public void Host_enabled_registers_durable_store_and_protector_but_no_delivery_service()
     {
         var services = Register(true);
 
-        HasHostedService(services).ShouldBeTrue();
+        HasHostedService(services).ShouldBeFalse();
         services.Any(d => d.ServiceType == typeof(ICloudEventSubscriptionStore)).ShouldBeTrue();
         services.Any(d => d.ServiceType == typeof(IWebhookSecretProtector)).ShouldBeTrue();
         services.Any(d => d.ImplementationType == typeof(Autheris.Application.Events.Services.InMemoryCloudEventSubscriptionStore)).ShouldBeFalse();
     }
 
     [Fact]
-    public void OptionsValidation_RunsOnStart_EvenWhenDisabled_AndStartupCheckIsRegisteredWhenEnabled()
-    {
-        var disabled = Register(false);
-        var enabled = Register(true);
-
-        disabled.Any(d => d.ServiceType == typeof(IValidateOptions<CdcWebhooksOptions>)).ShouldBeTrue();
-        enabled.Any(d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(Autheris.Api.Hosting.CdcWebhookStartupCheck)).ShouldBeTrue();
-        disabled.Any(d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(Autheris.Api.Hosting.CdcWebhookStartupCheck)).ShouldBeFalse();
-        // ValidateOnStart registers a startup validator hosted service of the options infrastructure.
-        disabled.Any(d => d.ServiceType.Name.Contains("IStartupValidator")).ShouldBeTrue();
-    }
-
-    [Fact]
-    public void Disabled_RegistersNoDeliveryServiceStoreOrProtector()
+    public void Host_disabled_registers_no_store_but_keeps_the_secret_protector()
     {
         var services = Register(false);
 
-        HasHostedService(services).ShouldBeFalse();
         services.Any(d => d.ServiceType == typeof(ICloudEventSubscriptionStore)).ShouldBeFalse();
-        services.Any(d => d.ServiceType == typeof(IWebhookSecretProtector)).ShouldBeFalse();
+        services.Any(d => d.ServiceType == typeof(IWebhookSecretProtector)).ShouldBeTrue();
     }
 
     [Fact]
-    public void Enabled_IsDetected_WhenConfigurationIsRegisteredThroughAFactory_LikeTheRealHostBuilder()
+    public void Module_enabled_registers_delivery_service_startup_check_and_outbox_worker()
+    {
+        var services = RegisterModule(true);
+
+        HasHostedService(services).ShouldBeTrue();
+        HasHosted<Autheris.Api.Hosting.CdcWebhookStartupCheck>(services).ShouldBeTrue();
+        HasHosted<WebhookDeliveryHostedService>(services).ShouldBeTrue();
+        HasHosted<WebhookEventBridgeHostedService>(services).ShouldBeTrue();
+        services.Any(d => d.ServiceType == typeof(IValidateOptions<CdcWebhooksOptions>)).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Module_disabled_registers_no_delivery_service_but_validates_options()
+    {
+        var disabled = RegisterModule(false);
+
+        HasHostedService(disabled).ShouldBeFalse();
+        HasHosted<Autheris.Api.Hosting.CdcWebhookStartupCheck>(disabled).ShouldBeFalse();
+        disabled.Any(d => d.ServiceType == typeof(IValidateOptions<CdcWebhooksOptions>)).ShouldBeTrue();
+        // ValidateOnStart registers a startup validator of the options infrastructure.
+        disabled.Any(d => d.ServiceType.Name.Contains("IStartupValidator")).ShouldBeTrue();
+        // The workers read their options at run time and idle while disabled, so they stay registered.
+        HasHosted<WebhookDeliveryHostedService>(disabled).ShouldBeTrue();
+        disabled.Single(d => d.ServiceType == typeof(CdcWebhooksFeatureFlag)).ImplementationInstance.ShouldBe(new CdcWebhooksFeatureFlag(false));
+    }
+
+    [Fact]
+    public void Module_default_configuration_enables_cdc_webhooks()
+    {
+        new CdcWebhooksOptions().Enabled.ShouldBeTrue();
+        HasHostedService(RegisterModule(null)).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Host_flag_is_detected_when_configuration_is_registered_through_a_factory_like_the_real_host_builder()
     {
         // The real host builder registers IConfiguration with a factory (no ImplementationInstance); the flag must still be honoured.
         var services = new ServiceCollection();
         var env = Substitute.For<IHostEnvironment>();
         env.EnvironmentName.Returns(Environments.Development);
         services.AddSingleton(env);
-        var cfg = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Gateway:CdcWebhooks:Enabled"] = "true", ["Gateway:GovernanceDb:Provider"] = "PostgreSql", ["Gateway:GovernanceDb:ConnectionString"] = Autheris.Tests.Common.Governance.GovernanceTestConnectionStrings.NonConnectingPostgreSql }).Build();
+        var cfg = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Gateway:Events:CdcWebhooks:Enabled"] = "true", ["Gateway:GovernanceDb:Provider"] = "PostgreSql", ["Gateway:GovernanceDb:ConnectionString"] = Autheris.Tests.Common.Governance.GovernanceTestConnectionStrings.NonConnectingPostgreSql }).Build();
         services.AddSingleton<IConfiguration>(_ => cfg);
         services.AddLogging();
         var options = services.AddGatewayOptions(cfg, env);
@@ -102,31 +139,16 @@ public sealed class CdcWebhookRegistrationTests
         services.AddAutherisExecution(options, env);
         services.AddAutherisEvents(options);
 
-        HasHostedService(services).ShouldBeTrue();
         services.Any(d => d.ServiceType == typeof(ICloudEventSubscriptionStore)).ShouldBeTrue();
     }
 
     [Fact]
-    public void DefaultConfiguration_RegistersCdcWebhookService()
+    public void Host_default_configuration_registers_the_durable_store()
     {
-        // G-2: with no Gateway:CdcWebhooks section at all the feature is on (the default of the options class), at BOTH registration read sites.
+        // With no Gateway:Events:CdcWebhooks section at all the feature is on at BOTH registration read sites.
         var services = Register(null);
 
-        new CdcWebhooksOptions().Enabled.ShouldBeTrue();
-        HasHostedService(services).ShouldBeTrue();
         services.Any(d => d.ServiceType == typeof(ICloudEventSubscriptionStore)).ShouldBeTrue();
-        services.Any(d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(WebhookDeliveryHostedService)).ShouldBeTrue();
-    }
-
-    [Fact]
-    public void ExplicitlyDisabled_StillRegistersNothing_AfterTheDefaultFlip() =>
-        HasHostedService(Register(false)).ShouldBeFalse();
-
-    [Fact]
-    public void Enabled_RegistersOutboxDeliveryWorker_EvenWhenConfiguredWebhooksAreOff()
-    {
-        var services = Register(true);
-
-        services.Any(d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(WebhookDeliveryHostedService)).ShouldBeTrue();
+        HasHosted<WebhookDeliveryHostedService>(services).ShouldBeFalse();
     }
 }

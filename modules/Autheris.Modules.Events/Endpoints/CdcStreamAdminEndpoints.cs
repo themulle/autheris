@@ -1,12 +1,10 @@
 namespace Autheris.Api.Endpoints;
 
-using Autheris.Api.Errors;
 using System;
 using System.Text.Json;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Api.Extensions;
-using Autheris.Api.Security;
 using Autheris.Application.Audit;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Streaming;
@@ -14,8 +12,12 @@ using Autheris.Application.Streaming.Services;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using Autheris.Domain.Security;
+using Autheris.Modules.Abstractions;
+using Autheris.Modules.Events;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 
 /// <summary>
@@ -24,36 +26,37 @@ using Microsoft.AspNetCore.Routing;
 /// </summary>
 public static class CdcStreamAdminEndpoints
 {
-    public static IEndpointRouteBuilder MapCdcStreamAdminEndpoints(this IEndpointRouteBuilder app)
+    internal static void MapEndpoints(RouteGroupBuilder app)
     {
-        app.MapGet("/api/v1/cdc/streams", (HttpContext context, CdcStreamAdminService service, CancellationToken ct) => ListAsync(context, service, ct))
-            .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
-            .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
+        app.MapGet(EventsRoutes.CdcPrefix + "/streams", (HttpContext context, CdcStreamAdminService service, CancellationToken ct) => ListAsync(context, service, ct))
+            .RequireAuthorization(GovernanceAdminPolicy)
+            .WithModuleAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
-        app.MapPost("/api/v1/cdc/streams/{id}/resync", (
+        app.MapPost(EventsRoutes.CdcPrefix + "/streams/{id}/resync", (
                 string id, bool? discardUnreadable, string? confirmStreamId, HttpContext context, CdcStreamAdminService service, IAuditWriter audit, CancellationToken ct)
             => ResyncAsync(id, discardUnreadable ?? false, confirmStreamId, context, service, audit, ct))
-            .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
-            .WithAudit(AuditLevel.Full, AuditEventTypes.CdcStreamResync);
+            .RequireAuthorization(GovernanceAdminPolicy)
+            .WithModuleAudit(AuditLevel.Full, AuditEventTypes.CdcStreamResync);
 
-        app.MapPost("/api/v1/cdc/streams/{id}/rotate-image-key", (
+        app.MapPost(EventsRoutes.CdcPrefix + "/streams/{id}/rotate-image-key", (
                 string id, HttpContext context, CdcStreamAdminService service, IAuditWriter audit, CancellationToken ct)
             => RotateImageKeyAsync(id, context, service, audit, ct))
-            .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
-            .WithAudit(AuditLevel.Full, AuditEventTypes.CdcStreamKeyRotated);
+            .RequireAuthorization(GovernanceAdminPolicy)
+            .WithModuleAudit(AuditLevel.Full, AuditEventTypes.CdcStreamKeyRotated);
 
-        app.MapPost("/api/v1/cdc/streams/{id}/reset-watermark", (
+        app.MapPost(EventsRoutes.CdcPrefix + "/streams/{id}/reset-watermark", (
                 string id, ResetWatermarkRequest request, HttpContext context, CdcStreamAdminService service, IAuditWriter audit, CancellationToken ct)
             => ResetWatermarkAsync(id, request, context, service, audit, ct))
-            .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
-            .WithAudit(AuditLevel.Full, AuditEventTypes.CdcStreamWatermarkReset);
-
-        return app;
+            .RequireAuthorization(GovernanceAdminPolicy)
+            .WithModuleAudit(AuditLevel.Full, AuditEventTypes.CdcStreamWatermarkReset);
     }
+
+    /// <summary>Name of the host policy that admits global governance administrators (equal to the host policy constant).</summary>
+    internal const string GovernanceAdminPolicy = "GovernanceAdmin";
 
     private static bool IsAuthorizedAdmin(HttpContext context)
     {
-        return EndpointSecurity.IsCanonicalClusterAdmin(context.User);
+        return ClusterAdminPolicy.IsCanonicalClusterAdmin(context.User);
     }
 
     internal static async Task<IResult> ListAsync(HttpContext context, CdcStreamAdminService service, CancellationToken ct)
@@ -83,7 +86,7 @@ public static class CdcStreamAdminEndpoints
         // the destructive variant needs an explicit confirmation naming the stream.
         if (discardUnreadable && !string.Equals(confirmStreamId, streamId.Value, StringComparison.Ordinal))
         {
-            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "discardUnreadable requires confirmStreamId equal to the stream id.");
+            return EventsProblems.BadRequest(ModuleErrorCodes.BadRequest, "discardUnreadable requires confirmStreamId equal to the stream id.", context);
         }
 
         var outcome = await service.ResyncAsync(streamId, discardUnreadable, ct).ConfigureAwait(false);
@@ -117,9 +120,9 @@ public static class CdcStreamAdminEndpoints
         return outcome.Status switch
         {
             CdcResyncStatus.Done => Results.Ok(new { streamId = streamId.Value, discardedEvents = outcome.DiscardedEvents }),
-            CdcResyncStatus.KeyUnavailable => ApiProblems.ServiceUnavailable(CdcActivationCodes.KeyUnavailable, "The stream encryption key is unavailable."),
-            CdcResyncStatus.Unavailable => ApiProblems.Problem(StatusCodes.Status503ServiceUnavailable, ApiErrorCodes.ServiceUnavailable, "The stream could not be restarted now; retry later.",
-                extraExtensions: new Dictionary<string, object?> { ["discardedEvents"] = outcome.DiscardedEvents }),
+            CdcResyncStatus.KeyUnavailable => EventsProblems.Problem(StatusCodes.Status503ServiceUnavailable, CdcActivationCodes.KeyUnavailable, "The stream encryption key is unavailable.", context),
+            CdcResyncStatus.Unavailable => EventsProblems.RequestContext(context).Problem(StatusCodes.Status503ServiceUnavailable, ModuleErrorCodes.ServiceUnavailable, "The stream could not be restarted now; retry later.", context,
+                new Dictionary<string, object?> { ["discardedEvents"] = outcome.DiscardedEvents }),
             _ => throw new InvalidOperationException("Unhandled CDC resync status.")
         };
     }
@@ -156,7 +159,7 @@ public static class CdcStreamAdminEndpoints
 
         if (request is null || string.IsNullOrWhiteSpace(request.Justification) || request.Dimensions is null)
         {
-            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Justification and Dimensions are required.");
+            return EventsProblems.BadRequest(ModuleErrorCodes.BadRequest, "Justification and Dimensions are required.", context);
         }
 
         if (!await service.ResetWatermarkAsync(streamId, request.Dimensions, request.Justification, ct).ConfigureAwait(false))
@@ -179,7 +182,7 @@ public static class CdcStreamAdminEndpoints
         TenantId tenant;
         try
         {
-            tenant = context.User.GetTenantId();
+            tenant = EventsProblems.RequestContext(context).GetRequestTenant(context);
         }
         catch (Exception ex) when (ex is System.Security.SecurityException or Autheris.Domain.Exceptions.GatewaySecurityException)
         {

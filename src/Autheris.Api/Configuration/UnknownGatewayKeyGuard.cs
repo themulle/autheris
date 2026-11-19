@@ -39,6 +39,12 @@ public static class UnknownGatewayKeyGuard
         (GatewayConfigurationSchema.Root + ":Events:SubscriberQueueCapacity", "Gateway:Events:SubscriberQueueCapacity (removed; moved to Gateway:EventBus:SubscriberQueueCapacity)")
     ];
 
+    // Whole sections that moved into a module: every key under the old section fails startup and names the new path.
+    private static readonly (string Prefix, string Message)[] RemovedModuleSections =
+    [
+        (GatewayConfigurationSchema.Root + ":CdcWebhooks", "Gateway:CdcWebhooks (removed; moved to Gateway:Events:CdcWebhooks, provided by the events module)")
+    ];
+
     private static readonly (string Key, string Message)[] AllRemovedKeysWithMessage = [.. RemovedProcedureDeclaredKeys, .. RemovedFlagKeys];
 
     private const string RemovedAuthzReplacement = "removed by ADR-020; data access is granted by grant records";
@@ -99,6 +105,17 @@ public static class UnknownGatewayKeyGuard
             }
         }
 
+        foreach (var (prefix, message) in RemovedModuleSections)
+        {
+            if (configuration.AsEnumerable().Any(kv =>
+                    !string.IsNullOrEmpty(kv.Key) &&
+                    (kv.Key.Equals(prefix, StringComparison.OrdinalIgnoreCase) ||
+                     kv.Key.StartsWith(prefix + ":", StringComparison.OrdinalIgnoreCase))))
+            {
+                found.Add(message);
+            }
+        }
+
         if (found.Count > 0)
         {
             throw new InvalidOperationException(BuildMessage(found));
@@ -110,7 +127,11 @@ public static class UnknownGatewayKeyGuard
         ArgumentNullException.ThrowIfNull(configuration);
 
         ThrowIfRemovedEventBusKeys(configuration);
-        var unknown = FindUnknownKeys(configuration);
+
+        // This early pass runs before the modules load. The sections of the modules enabled in Gateway:Modules:Enabled are not judged
+        // here: the module-aware pass after loading checks them against the sections the loaded modules actually claim, so an
+        // enabled module that fails to load still stops startup, and a module that is not enabled never gets its keys accepted.
+        var unknown = FindUnknownKeys(configuration, EnabledModuleSections(configuration));
         if (unknown.Count > 0)
         {
             foreach (var key in unknown)
@@ -125,6 +146,16 @@ public static class UnknownGatewayKeyGuard
 
             throw new InvalidOperationException(BuildMessage(unknown));
         }
+    }
+
+    private static string[] EnabledModuleSections(IConfiguration configuration)
+    {
+        var enabledIds = Autheris.Api.Hosting.ModuleLoader.ReadEnabledModuleIds(configuration)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return GatewayConfigurationSchema.KnownModuleSections
+            .Where(kv => enabledIds.Contains(kv.Value))
+            .Select(kv => kv.Key)
+            .ToArray();
     }
 
     public static void ThrowIfUnknownKeys(

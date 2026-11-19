@@ -1,4 +1,4 @@
-namespace Autheris.Infrastructure.Streaming.Producers;
+namespace Autheris.Application.Streaming;
 
 using System;
 using System.Collections.Generic;

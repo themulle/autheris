@@ -1,6 +1,7 @@
 #pragma warning disable CA2012 // NSubstitute .Returns(...) configures a ValueTask member; the instance is not consumed here.
 namespace Autheris.Tests.Unit.Security;
 
+using Microsoft.Extensions.DependencyInjection;
 using System;
 using System.Collections.Generic;
 using System.Data;
@@ -85,11 +86,16 @@ public sealed class CustomQueryPollerSecurityTests : IDisposable
     private CdcStreamAdminService CreateAdminService() => new(_streamStore, _keys, _keyring);
     private IAuditWriter CreateAuditWriter() => AuditWriterTestServices.Over(_auditRepo);
 
+    // The module endpoints take their problem and tenant helpers from the host request context.
+    private static readonly IServiceProvider ModuleRequestContextServices = new ServiceCollection()
+        .AddSingleton<Autheris.Modules.Abstractions.IModuleRequestContext, Autheris.Api.Hosting.ModuleRequestContext>()
+        .BuildServiceProvider();
+
     private static DefaultHttpContext Ctx(params string[] roles)
     {
         var claims = new List<Claim> { new("sub", "S-1-5-21-ADMIN1"), new("tenant_id", "home") };
         claims.AddRange(roles.Select(r => new Claim(ClaimTypes.Role, r)));
-        var context = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Bearer")) };
+        var context = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Bearer")), RequestServices = ModuleRequestContextServices };
         context.Items[SecurityPrincipalContext.ItemKey] = new SecurityPrincipalContext
         {
             UserSid = new Sid("S-1-5-21-ADMIN1"),
@@ -106,7 +112,7 @@ public sealed class CustomQueryPollerSecurityTests : IDisposable
     {
         var claims = new List<Claim> { new("sub", "S-1-5-21-ADMIN1") };
         claims.AddRange(roles.Select(r => new Claim(ClaimTypes.Role, r)));
-        var context = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Bearer")) };
+        var context = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Bearer")), RequestServices = ModuleRequestContextServices };
         context.Items[SecurityPrincipalContext.ItemKey] = new SecurityPrincipalContext
         {
             UserSid = new Sid("S-1-5-21-ADMIN1"),

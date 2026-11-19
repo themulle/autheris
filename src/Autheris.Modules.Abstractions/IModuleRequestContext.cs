@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Security.Claims;
 using Autheris.Domain.Common;
 using Autheris.Domain.Security;
@@ -38,5 +39,5 @@ public interface IModuleRequestContext
 
     IResult ServiceUnavailable(string detail, HttpContext? ctx = null);
 
-    IResult Problem(int status, string code, string detail, HttpContext? ctx = null);
+    IResult Problem(int status, string code, string detail, HttpContext? ctx = null, IDictionary<string, object?>? extraExtensions = null);
 }

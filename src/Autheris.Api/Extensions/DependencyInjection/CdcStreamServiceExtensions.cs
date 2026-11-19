@@ -11,7 +11,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 
 /// <summary>
 /// 99 I1-C registrations: stream crypto over the key vault, the wake-up signal, the shared tail hub, retention, the I1
-/// compatibility feed and the stream admin service. The persistence (<c>ICdcStreamStore</c>, <c>ICdcStreamKeyStore</c>) is registered with the
+/// compatibility feed. The persistence (<c>ICdcStreamStore</c>, <c>ICdcStreamKeyStore</c>) is registered with the
 /// governance repositories and the producer/restarter with the CDC source integration.
 /// </summary>
 public static class CdcStreamServiceExtensions
@@ -29,7 +29,6 @@ public static class CdcStreamServiceExtensions
         services.TryAddSingleton<ICdcStreamStore>(sp => sp.GetRequiredService<Autheris.Infrastructure.Streaming.InMemoryCdcStreamStore>());
         services.TryAddSingleton<ICdcStreamKeyStore>(sp => sp.GetRequiredService<Autheris.Infrastructure.Streaming.InMemoryCdcStreamStore>());
         services.TryAddSingleton<CdcStreamCompatFeed>();
-        services.TryAddSingleton<CdcStreamAdminService>();
         services.TryAddScoped<CdcStreamRetentionJob>();
         services.AddHostedService<CdcStreamRetentionService>();
 

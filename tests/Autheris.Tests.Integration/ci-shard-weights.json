@@ -147,6 +147,7 @@
   "KeyDirectionSyncPathContainerTests": 0.1,
   "LakehouseIntegrationTests": 12.8,
   "LakehouseModuleAbsentSecurityTests": 6.6,
+  "EventsModuleAbsentTests": 6.6,
   "M2mIdentityIntegrationTests": 17,
   "McpDatasetToolsEndToEndTests": 8.8,
   "McpDatasetToolsIntegrationTests": 16.1,

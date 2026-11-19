@@ -57,6 +57,7 @@ public sealed class CdcSubscriptionEndpointTests
         env.EnvironmentName.Returns(environment);
 
         var services = new ServiceCollection();
+        services.AddSingleton<Autheris.Modules.Abstractions.IModuleRequestContext, Autheris.Api.Hosting.ModuleRequestContext>();
         services.AddLogging();
         services.AddSingleton<IOptions<CdcWebhooksOptions>>(Options.Create(options ?? new CdcWebhooksOptions { Enabled = true }));
         services.AddSingleton(store);

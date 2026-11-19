@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Autheris.Api.Configuration;
+using Autheris.Domain.Options;
 using Microsoft.Extensions.Configuration;
 using Shouldly;
 
@@ -172,7 +173,8 @@ public sealed partial class ShippedConfigurationKeysTests
             found += keys.Count;
             foreach (var key in keys.Distinct(StringComparer.OrdinalIgnoreCase))
             {
-                if (UnknownGatewayKeyGuard.FindUnknownKeys(Config([key])).Count > 0)
+                // The test hosts load the events module, which owns Gateway:Events (the module-aware pass accepts its keys).
+                if (UnknownGatewayKeyGuard.FindUnknownKeys(Config([key]), [GatewaySections.Events]).Count > 0)
                 {
                     problems.Add($"{Path.GetRelativePath(RepositoryScan.RepoRoot, file)}: {key}");
                 }

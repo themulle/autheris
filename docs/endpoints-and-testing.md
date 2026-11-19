@@ -31,7 +31,7 @@ CSRF Protection: Mandatory for GraphQL; required for REST when browser indicator
 | **MCP Admin Tools (Two-Phase HitL)** | `admin_plan_access`, `admin_apply_access`, `admin_register_datasource`, `admin_set_dataset_state`, `admin_resolve_principal` | `ClusterAdmin`, `GovernanceAdmin` + TOTP 2FA Step-Up | `Mcp.Enabled` | `AdminMcpToolsTests`, `AccessPlanningServiceTests` |
 | **dbt Ingestion & Workflows** | `/api/extensions/dbt/*` (`sync?mode=replace`, `exposures`, `proposals`, `validate-contract`, `run-results`, `webhook`) | `DbtAdmin`, `GovernanceAdmin`, `ClusterAdmin` | Always active | `DbtIntegration`, `DbtTests` |
 | **Governance & Compliance** | `/api/governance/{catalog/ingest-openapi, sunsetting/*, differential-privacy/*, gdpr/export-pdf}`, `/api/lineage/openlineage/sync` | Role-gated (`PrivacyAdmin`, `Auditor`) | Always active | `GovernanceAdvancedMoats` |
-| **CDC Streaming** | `/api/v1/cdc/{events,subscriptions}` | Role-gated | Always active | `RealtimeStreamingSubscription` |
+| **CDC Streaming** | `/modules/events/v1/cdc/{events,subscriptions}` | Role-gated | Active with the events module | `RealtimeStreamingSubscription` |
 | **Human-in-the-Loop (HITL)** | `/api/governance/hitl/{pending,approve,reject}` | Approver roles | `HitLStepUp.Enabled` | Unit tests |
 | **Token Revocation** | `POST /api/admin/tokens/revoke` | `GovernanceAdmin` | Always active | Unit tests |
 | **Trusted GraphQL Documents (app-scoped)** | `PUT/DELETE /api/admin/trusted-documents/{appId}/{version}`, `GET /api/admin/trusted-documents/{appId}` | `ClusterAdmin` + scope `trusted-documents:write` (GET: `read` or `write`) | `GraphQL.AppScopedTrustedDocuments.Enabled` | `TrustedDocumentAdminEndpointsTests`, `TrustedDocumentsOnlyMiddlewareAppScopeTests` |

@@ -33,6 +33,8 @@ public sealed partial class ModuleBoundaryArchitectureTests
         "SqliteConnection",
         "DuckDBConnection",
         "DatabricksStatementClient",
+        // Governance store type: modules resolve the core ports (ICdcStreamStore, IWebhookOutbox, ...) and never see the store itself.
+        "GovernanceRepository",
     ];
 
     [GeneratedRegex(@"<ProjectReference\s+Include\s*=\s*""([^""]+)""", RegexOptions.IgnoreCase)]

@@ -1,6 +1,6 @@
 namespace Autheris.Tests.Unit.Cdc;
 
-using Autheris.Infrastructure.Streaming.Producers;
+using Autheris.Application.Streaming;
 using Shouldly;
 using Xunit;
 

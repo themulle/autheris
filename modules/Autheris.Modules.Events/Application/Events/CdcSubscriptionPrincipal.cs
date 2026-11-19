@@ -48,7 +48,7 @@ public static class CdcSubscriptionPrincipal
 
         if (admin is not null && restrictedScopePolicy is not null)
         {
-            var callerScopes = TokenAccessScope.GetScopeSet(admin.Claims);
+            var callerScopes = TokenAccessScope.GetScopeSet(admin);
             if (restrictedScopePolicy.HeldBy(callerScopes).Count > 0)
             {
                 return new CdcSnapshotCapture(null, null, null, CdcSnapshotCaptureError.RestrictedScope);

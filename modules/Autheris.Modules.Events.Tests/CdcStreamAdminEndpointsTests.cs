@@ -10,6 +10,8 @@ using Autheris.Application.Streaming;
 using Autheris.Application.Streaming.Crypto;
 using Autheris.Application.Streaming.Interfaces;
 using Autheris.Application.Streaming.Services;
+using Autheris.Modules.Events;
+using Microsoft.AspNetCore.Builder;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -68,7 +70,7 @@ public sealed class CdcStreamAdminEndpointsTests : IDisposable
             claims.Add(new("tenant_id", "home"));
         }
         claims.AddRange(roles.Select(r => new Claim(ClaimTypes.Role, r)));
-        var context = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Bearer")) };
+        var context = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Bearer")), RequestServices = EventsTestServices.RequestContextOnly() };
         context.Items[SecurityPrincipalContext.ItemKey] = new SecurityPrincipalContext
         {
             UserSid = new Sid("S-1-5-21-ADMIN1"),
@@ -104,7 +106,7 @@ public sealed class CdcStreamAdminEndpointsTests : IDisposable
             new("tenant_id", "tenant-a"),
             new(ClaimTypes.Role, "GovernanceAdmin")
         };
-        var context = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Bearer")) };
+        var context = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Bearer")), RequestServices = EventsTestServices.RequestContextOnly() };
         context.Items[SecurityPrincipalContext.ItemKey] = new SecurityPrincipalContext
         {
             UserSid = new Sid("S-1-5-21-TENANTADMIN"),
@@ -283,16 +285,19 @@ public sealed class CdcStreamAdminEndpointsTests : IDisposable
     }
 
     [Theory]
-    [InlineData("GET", "/api/v1/cdc/streams")]
-    [InlineData("POST", "/api/v1/cdc/streams/{id}/resync")]
-    [InlineData("POST", "/api/v1/cdc/streams/{id}/rotate-image-key")]
+    [InlineData("GET", "/modules/events/v1/cdc/streams")]
+    [InlineData("POST", "/modules/events/v1/cdc/streams/{id}/resync")]
+    [InlineData("POST", "/modules/events/v1/cdc/streams/{id}/rotate-image-key")]
     public void Routes_RequireGovernanceAdmin_NeverAnonymous(string method, string pattern)
     {
-        using var routes = new TestEndpointRouteBuilder(services =>
-        {
-            services.AddSingleton(Service());
-        }, permissiveServices: true);
-        routes.MapCdcStreamAdminEndpoints();
+        var provider = new ServiceCollection()
+            .AddLogging()
+            .AddRouting()
+            .AddSingleton(Service())
+            .AddSingleton(Audit())
+            .BuildServiceProvider();
+        var routes = new RouteBuilder(provider);
+        CdcStreamAdminEndpoints.MapEndpoints(routes.MapGroup(EventsRoutes.Prefix));
 
         var endpoint = routes.DataSources
             .SelectMany(d => d.Endpoints)
@@ -301,5 +306,14 @@ public sealed class CdcStreamAdminEndpointsTests : IDisposable
 
         endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>().ShouldContain(a => a.Policy == GatewayPolicies.GovernanceAdmin);
         endpoint.Metadata.GetMetadata<IAllowAnonymous>().ShouldBeNull();
+    }
+
+    private sealed class RouteBuilder(IServiceProvider serviceProvider) : IEndpointRouteBuilder
+    {
+        public IServiceProvider ServiceProvider { get; } = serviceProvider;
+
+        public ICollection<EndpointDataSource> DataSources { get; } = new List<EndpointDataSource>();
+
+        public IApplicationBuilder CreateApplicationBuilder() => new ApplicationBuilder(ServiceProvider);
     }
 }

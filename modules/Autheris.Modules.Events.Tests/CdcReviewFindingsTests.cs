@@ -16,7 +16,8 @@ using Autheris.Application.Webhooks;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
-using Autheris.Infrastructure.Streaming.Producers;
+using Autheris.Application.Streaming;
+using Autheris.Modules.Events;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.DependencyInjection;
@@ -34,6 +35,7 @@ public sealed class CdcReviewFindingsTests
     private static DefaultHttpContext GuardCtx(bool? flag, bool optionsEnabled)
     {
         var services = new ServiceCollection();
+        services.AddSingleton<Autheris.Modules.Abstractions.IModuleRequestContext, Autheris.Api.Hosting.ModuleRequestContext>();
         services.AddSingleton<IOptions<CdcWebhooksOptions>>(Options.Create(new CdcWebhooksOptions { Enabled = optionsEnabled }));
         if (flag is { } f)
         {

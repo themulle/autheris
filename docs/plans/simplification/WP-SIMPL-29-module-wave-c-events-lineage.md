@@ -206,3 +206,14 @@ Local unit tests unless marked IT (GitHub Actions only).
 ## Changelog
 
 - 2026-11-19 PR 2a: event bus moved from Gateway:Events to Gateway:EventBus because Gateway:Events is the events module section; default taken.
+- 2026-11-19 PR 3 (WP-29-B) drift and decisions, all taken as defaults:
+  - `DebeziumCdcParser` moved from `Infrastructure/Streaming/Producers` to `Application/Streaming` (namespace `Autheris.Application.Streaming`): a module may reference only Application, the parser is pure, and the ingest route is its only non-producer caller. The producers stay in Infrastructure.
+  - `CdcWebhooksFeature` stays in core as `CdcWebhookStoreFeature` (move guard: the governance repositories read the flag to register the subscription view). It reads `Gateway:Events:CdcWebhooks:Enabled` (default true); the options, the endpoints and the delivery service moved. The module keeps its own `CdcWebhooksFeatureFlag` read from its section.
+  - `IModuleRequestContext.Problem` gained an optional `extraExtensions` argument (the resync 503 carries `discardedEvents`).
+  - `IWebhookSecretProtector` is registered unconditionally by the host; subscription store and `ICloudEventTransformer` keep the old flag.
+  - The module registers `WebhookDeliveryHostedService` and `WebhookEventBridgeHostedService` unconditionally; both read `Gateway:Webhooks` and `Gateway:Events:CdcWebhooks` at run time and idle while disabled (the module sees only its own section).
+  - Early key pass (`Program.cs`, before modules load): keys under the section of a module listed in `Gateway:Modules:Enabled` are deferred to the module-aware pass after loading; a module that is not enabled never gets its keys accepted.
+  - All seven CDC rows of `ingress-exemptions.txt` are deleted (not re-pathed): the registrar stamps every module route, so a re-pathed row would be a stale exemption.
+  - `CdcWebhookDeliveryServiceTests` (both partial files) stays in Unit with the module reference, because `AdvisoryRegressionTests` calls one of its helpers. `CdcWebhookStartupCheckTests` moved with the module tests.
+  - Moved types keep their namespaces, so test names and the coverage map are unchanged; only the assembly changed.
+  - Open for PR 4b: workflow signing loop for `events`, module-e2e script assertions, CODEOWNERS entries.

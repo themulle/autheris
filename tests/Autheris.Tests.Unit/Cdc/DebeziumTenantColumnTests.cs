@@ -5,7 +5,7 @@ using System.Collections.Generic;
 using Autheris.Api.Endpoints;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
-using Autheris.Infrastructure.Streaming.Producers;
+using Autheris.Application.Streaming;
 using Microsoft.AspNetCore.Http;
 using Shouldly;
 using Xunit;
@@ -50,7 +50,7 @@ public sealed class DebeziumTenantColumnTests
     [Fact]
     public void NonAdmin_RowWithoutTenantValue_ForTenantTable_Rejected()
     {
-        var rejection = StreamingCdcEndpoints.ApplyIngestTenantPolicy(Event(null), false, "tenant-a", true, false, out var resolved);
+        var rejection = StreamingCdcEndpoints.ApplyIngestTenantPolicy(new Autheris.Api.Hosting.ModuleRequestContext(), new Microsoft.AspNetCore.Http.DefaultHttpContext(), Event(null), false, "tenant-a", true, false, out var resolved);
 
         rejection.ShouldNotBeNull();
         rejection.ShouldBeAssignableTo<IStatusCodeHttpResult>()!.StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
@@ -60,16 +60,16 @@ public sealed class DebeziumTenantColumnTests
     [Fact]
     public void NonAdmin_RowWithoutTenantValue_UntenantedTable_IsStamped_UnlessRequired()
     {
-        StreamingCdcEndpoints.ApplyIngestTenantPolicy(Event(null), false, "tenant-a", false, false, out var stamped).ShouldBeNull();
+        StreamingCdcEndpoints.ApplyIngestTenantPolicy(new Autheris.Api.Hosting.ModuleRequestContext(), new Microsoft.AspNetCore.Http.DefaultHttpContext(), Event(null), false, "tenant-a", false, false, out var stamped).ShouldBeNull();
         stamped.TenantId.ShouldBe("tenant-a");
 
-        StreamingCdcEndpoints.ApplyIngestTenantPolicy(Event(null), false, "tenant-a", false, true, out _).ShouldNotBeNull();
+        StreamingCdcEndpoints.ApplyIngestTenantPolicy(new Autheris.Api.Hosting.ModuleRequestContext(), new Microsoft.AspNetCore.Http.DefaultHttpContext(), Event(null), false, "tenant-a", false, true, out _).ShouldNotBeNull();
     }
 
     [Fact]
     public void NonAdmin_ForeignTenantValue_Forbidden()
     {
-        var rejection = StreamingCdcEndpoints.ApplyIngestTenantPolicy(Event("tenant-b"), false, "tenant-a", true, false, out _);
+        var rejection = StreamingCdcEndpoints.ApplyIngestTenantPolicy(new Autheris.Api.Hosting.ModuleRequestContext(), new Microsoft.AspNetCore.Http.DefaultHttpContext(), Event("tenant-b"), false, "tenant-a", true, false, out _);
 
         rejection.ShouldNotBeNull();
         rejection.ShouldBeAssignableTo<IStatusCodeHttpResult>()!.StatusCode.ShouldBe(StatusCodes.Status403Forbidden);

@@ -23,6 +23,7 @@ public sealed class CdcWebhookSubscriptionGuardTests
         var claims = roles.Select(r => new Claim(ClaimTypes.Role, r)).ToList();
         claims.Add(new Claim("tenant_id", "tenant-a"));
         var services = new ServiceCollection();
+        services.AddSingleton<Autheris.Modules.Abstractions.IModuleRequestContext, Autheris.Api.Hosting.ModuleRequestContext>();
         services.AddSingleton<IOptions<CdcWebhooksOptions>>(Options.Create(new CdcWebhooksOptions { Enabled = enabled }));
         if (store != null)
         {
@@ -60,7 +61,7 @@ public sealed class CdcWebhookSubscriptionGuardTests
 
         var detail = result.ShouldBeOfType<Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult>().ProblemDetails.Detail;
         detail.ShouldNotBeNull();
-        detail.ShouldContain("Gateway:CdcWebhooks:Enabled");
+        detail.ShouldContain("Gateway:Events:CdcWebhooks:Enabled");
         detail.ShouldContain("disabled");
         detail.ShouldNotContain("once delivery is supported");
     }
@@ -88,7 +89,7 @@ public sealed class CdcWebhookSubscriptionGuardTests
     [Fact]
     public async Task Post_WhenOptionsMissing_FailsClosedWith501()
     {
-        var ctx = new DefaultHttpContext { RequestServices = new ServiceCollection().BuildServiceProvider() };
+        var ctx = new DefaultHttpContext { RequestServices = EventsTestServices.RequestContextOnly() };
 
         var result = await StreamingCdcEndpoints.ListSubscriptionsAsync(ctx);
 

@@ -58,6 +58,14 @@ internal static class ModuleSecurityGuards
         typeof(TimeProvider),
         typeof(IDistributedClusterStateProvider),
         typeof(Autheris.Modules.Abstractions.IModuleRequestContext),
+        // Decision-bearing and secret-bearing ports of the change-stream substrate and the webhook outbox: registered by the host only.
+        typeof(Autheris.Application.Streaming.Interfaces.IStreamRlsPolicyEnforcer),
+        typeof(Autheris.Application.Streaming.Interfaces.ICdcStreamCrypto),
+        typeof(Autheris.Application.Streaming.Interfaces.ICdcStreamKeyStore),
+        typeof(Autheris.Application.Streaming.Interfaces.ICdcStreamStore),
+        typeof(Autheris.Application.Streaming.Interfaces.ICdcKeyEncryptionKeyProvider),
+        typeof(Autheris.Application.Webhooks.IWebhookSecretProtector),
+        typeof(Autheris.Application.Webhooks.IWebhookOutbox),
     ];
 
     private static readonly string[] ProtectedNamespaces =
@@ -172,12 +180,20 @@ internal static class ModuleSecurityGuards
     internal static List<ServiceDescriptor> CaptureProtectedServicesSnapshot(IServiceCollection services) =>
         services.Where(d => IsProtectedServiceType(d.ServiceType)).ToList();
 
+    /// <summary>
+    /// Fails when the module added, removed or replaced a protected service. One addition is allowed: a hosted service whose
+    /// implementation type is declared in the module's own assembly (a module may run its own background work, but never
+    /// remove or replace a host hosted service).
+    /// </summary>
     internal static void VerifyProtectedServicesUnchanged(
         string moduleId,
         IServiceCollection services,
-        List<ServiceDescriptor> beforeSnapshot)
+        List<ServiceDescriptor> beforeSnapshot,
+        Assembly? moduleAssembly = null)
     {
-        var afterSnapshot = services.Where(d => IsProtectedServiceType(d.ServiceType)).ToList();
+        var afterSnapshot = services
+            .Where(d => IsProtectedServiceType(d.ServiceType) && !IsOwnHostedServiceAddition(d, beforeSnapshot, moduleAssembly))
+            .ToList();
         if (beforeSnapshot.Count != afterSnapshot.Count)
         {
             var diffDescriptor = afterSnapshot.FirstOrDefault(d => !beforeSnapshot.Contains(d))
@@ -201,6 +217,13 @@ internal static class ModuleSecurityGuards
             }
         }
     }
+
+    private static bool IsOwnHostedServiceAddition(ServiceDescriptor descriptor, List<ServiceDescriptor> beforeSnapshot, Assembly? moduleAssembly) =>
+        moduleAssembly is not null &&
+        descriptor.ServiceType == typeof(IHostedService) &&
+        descriptor.ImplementationType is { } implementation &&
+        implementation.Assembly == moduleAssembly &&
+        !beforeSnapshot.Contains(descriptor);
 
     private static bool IsProtectedNamespace(string? ns)
     {

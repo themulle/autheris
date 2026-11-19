@@ -26,6 +26,7 @@ public sealed class StreamingCdcEndpointErrorTests
     private static DefaultHttpContext CreateAdminContext(ICloudEventSubscriptionStore store)
     {
         var services = new ServiceCollection();
+        services.AddSingleton<Autheris.Modules.Abstractions.IModuleRequestContext, Autheris.Api.Hosting.ModuleRequestContext>();
         services.AddLogging();
         services.AddSingleton<IOptions<CdcWebhooksOptions>>(Options.Create(new CdcWebhooksOptions { Enabled = true }));
         services.AddSingleton(store);

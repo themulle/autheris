@@ -1,14 +1,14 @@
 namespace Autheris.Domain.Options;
 
 /// <summary>
-/// Options of the CDC webhook subscription endpoints (<c>/api/v1/cdc/subscriptions</c>) and the CDC webhook delivery service.
+/// Options of the CDC webhook subscription endpoints (<c>/modules/events/v1/cdc/subscriptions</c>) and the CDC webhook delivery service.
 /// Enabled by default. While disabled the endpoints answer 501 Not Implemented, no subscription store is registered
 /// and no delivery service runs.
 /// Bound to the configuration section <see cref="SectionName"/>.
 /// </summary>
 public sealed class CdcWebhooksOptions
 {
-    public const string SectionName = "Gateway:CdcWebhooks";
+    public const string SectionName = "Gateway:Events:CdcWebhooks";
 
     /// <summary>Enables the CDC webhook subscription endpoints and the delivery service. Default: <c>true</c>.</summary>
     public bool Enabled { get; init; } = true;
