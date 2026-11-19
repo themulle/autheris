@@ -522,6 +522,32 @@ public sealed class AccessProfileTests
         body.ShouldContain("Segregation of Duties (SoD) violation");
     }
 
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData("Role")]
+    [InlineData("role")]
+    [InlineData("3")]
+    public async Task Security_RoleGranteeInput_Refused_Bulk(string subjectType)
+    {
+        var repo = new InMemoryAccessProfileRepository();
+        var context = CreateEndpointContext(callerSid: "admin", callerName: "admin");
+        var req = new BulkConsentRequest
+        {
+            Subject = "analysts",
+            SubjectType = subjectType,
+            MaskingMode = "Strict",
+            Tables = ["tem.*"],
+            Justification = "Role grantees are refused for bulk grants",
+            ValidDays = 30
+        };
+
+        var result = await GovernanceEndpoints.CreateBulkConsentAsync(req, context, repo, CancellationToken.None);
+        var (status, body) = await ExecuteResultAsync(result, context);
+
+        status.ShouldBe(StatusCodes.Status400BadRequest);
+        body.ShouldNotContain("analysts", Case.Insensitive);
+    }
+
     private static readonly System.Text.Json.JsonSerializerOptions WebJson = new(System.Text.Json.JsonSerializerDefaults.Web);
 
     [Fact]

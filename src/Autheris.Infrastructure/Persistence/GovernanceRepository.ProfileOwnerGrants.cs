@@ -88,7 +88,7 @@ WHERE request_id = @requestId AND owner_decision = 'PENDING' AND UPPER(owner_sid
 
     private const string SelectActiveOwnerGrantsSql = @"
 SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
-       c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to,
+       c.grantee_sid, c.valid_from, c.valid_to,
        c.is_revoked, c.tenant_id, c.renewal_count,
        c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at,
        t.source_name, t.schema_name, t.table_name
@@ -106,7 +106,7 @@ WHERE table_id = @tid AND data_owner_id = @oid";
 
     private const string SelectActiveProfileConsentsSql = @"
 SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
-       c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to,
+       c.grantee_sid, c.valid_from, c.valid_to,
        c.is_revoked, c.tenant_id, c.renewal_count,
        c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at,
        t.source_name, t.schema_name, t.table_name,
@@ -439,9 +439,9 @@ WHERE c.tenant_id = @tenantId
     {
         var granteeSidStr = reader.IsDBNull(5) ? null : reader.GetString(5);
         var tableId = reader.IsDBNull(1) ? Guid.Empty : Guid.Parse(reader.GetString(1));
-        var table = reader.IsDBNull(17)
+        var table = reader.IsDBNull(15)
             ? default
-            : new TableIdentifier(reader.GetString(17), reader.GetString(18), reader.GetString(19));
+            : new TableIdentifier(reader.GetString(15), reader.GetString(16), reader.GetString(17));
 
         return new Consent
         {
@@ -452,26 +452,24 @@ WHERE c.tenant_id = @tenantId
             Effect = Enum.Parse<ConsentEffect>(reader.GetString(3), ignoreCase: true),
             GranteeType = Enum.Parse<GranteeType>(reader.GetString(4), ignoreCase: true),
             GranteeSid = !string.IsNullOrEmpty(granteeSidStr) ? new Sid(granteeSidStr) : (Sid?)null,
-            RoleId = ConsentWorkflowSql.ReadOptionalGuid(reader, 6),
-            RoleName = ConsentWorkflowSql.ReadOptionalString(reader, 7),
-            ValidFrom = ConsentWorkflowSql.ReadOptionalTimestamp(reader, 8) ?? DateTimeOffset.MinValue,
-            ValidTo = ConsentWorkflowSql.ReadOptionalTimestamp(reader, 9) ?? DateTimeOffset.MaxValue,
-            IsRevoked = Convert.ToInt32(reader.GetValue(10), CultureInfo.InvariantCulture) == 1,
-            TenantId = StoredTenant.ParseAudit(ConsentWorkflowSql.ReadOptionalString(reader, 11)),
-            RenewalCount = Convert.ToInt32(reader.GetValue(12), CultureInfo.InvariantCulture),
-            GrantSource = ConsentWorkflowSql.ReadGrantSource(reader, 13),
-            GrantRecordSeq = ConsentWorkflowSql.ReadInt64OrZero(reader, 14),
-            ProfileAssignmentId = ConsentWorkflowSql.ReadOptionalGuid(reader, 15),
-            ExpiryNoticeSentAt = ConsentWorkflowSql.ReadOptionalTimestamp(reader, 16),
-            ObjectPattern = hasPatternCols ? ConsentWorkflowSql.ReadOptionalString(reader, 20) : null,
-            DataSource = hasPatternCols ? ConsentWorkflowSql.ReadOptionalString(reader, 21) : null,
+            ValidFrom = ConsentWorkflowSql.ReadOptionalTimestamp(reader, 6) ?? DateTimeOffset.MinValue,
+            ValidTo = ConsentWorkflowSql.ReadOptionalTimestamp(reader, 7) ?? DateTimeOffset.MaxValue,
+            IsRevoked = Convert.ToInt32(reader.GetValue(8), CultureInfo.InvariantCulture) == 1,
+            TenantId = StoredTenant.ParseAudit(ConsentWorkflowSql.ReadOptionalString(reader, 9)),
+            RenewalCount = Convert.ToInt32(reader.GetValue(10), CultureInfo.InvariantCulture),
+            GrantSource = ConsentWorkflowSql.ReadGrantSource(reader, 11),
+            GrantRecordSeq = ConsentWorkflowSql.ReadInt64OrZero(reader, 12),
+            ProfileAssignmentId = ConsentWorkflowSql.ReadOptionalGuid(reader, 13),
+            ExpiryNoticeSentAt = ConsentWorkflowSql.ReadOptionalTimestamp(reader, 14),
+            ObjectPattern = hasPatternCols ? ConsentWorkflowSql.ReadOptionalString(reader, 18) : null,
+            DataSource = hasPatternCols ? ConsentWorkflowSql.ReadOptionalString(reader, 19) : null,
             ColumnSetMode = hasPatternCols
-                ? ColumnSetModeExtensions.ParseColumnSetModeOrDefault(ConsentWorkflowSql.ReadOptionalString(reader, 22))
+                ? ColumnSetModeExtensions.ParseColumnSetModeOrDefault(ConsentWorkflowSql.ReadOptionalString(reader, 20))
                 : ColumnSetMode.Explicit,
             WorkflowMode = hasPatternCols
-                ? ConsentWorkflowSqlMapping.ParseWorkflowModeOrDefault(ConsentWorkflowSql.ReadOptionalString(reader, 23))
+                ? ConsentWorkflowSqlMapping.ParseWorkflowModeOrDefault(ConsentWorkflowSql.ReadOptionalString(reader, 21))
                 : ConsentWorkflowMode.Internal,
-            ProfileItemNo = hasPatternCols && reader.FieldCount > 24 && !reader.IsDBNull(24) ? reader.GetInt32(24) : null
+            ProfileItemNo = hasPatternCols && reader.FieldCount > 22 && !reader.IsDBNull(22) ? reader.GetInt32(22) : null
         };
     }
 }

@@ -28,7 +28,6 @@ using TrinoSqlEngine.Governance;
 public sealed partial class RowScopeCompiler
 {
     public const string HardPolicyUncoveredCode = "HARD_ROW_POLICY_UNCOVERED";
-    public const string HardPolicyRoleRejectedCode = "HARD_ROW_POLICY_ROLE_UNSUPPORTED";
     public const string NoContributingGrantCode = "ROW_SCOPE_NO_CONTRIBUTING_GRANT";
 
     private readonly IVirtualFilterSnapshotProvider? _snapshots;

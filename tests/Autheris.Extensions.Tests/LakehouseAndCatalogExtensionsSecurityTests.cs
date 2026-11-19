@@ -570,8 +570,8 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
             TenantId = Autheris.Tests.Common.TestTenants.Default,
             Id = Guid.NewGuid(),
             TableIdentifier = table,
-            GranteeType = GranteeType.Role,
-            RoleName = "HrSpecialist",
+            GranteeType = GranteeType.Group,
+            GranteeSid = new Sid("HrSpecialist"),
             Effect = ConsentEffect.Allow,
             ConsentRequestId = OpenMetadataSyncService.OpenMetadataSyncConsentMarker,
             ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
@@ -582,8 +582,8 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
             TenantId = Autheris.Tests.Common.TestTenants.Default,
             Id = Guid.NewGuid(),
             TableIdentifier = table,
-            GranteeType = GranteeType.Role,
-            RoleName = "HrSpecialist",
+            GranteeType = GranteeType.Group,
+            GranteeSid = new Sid("HrSpecialist"),
             Effect = ConsentEffect.Allow,
             ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
             ValidTo = DateTimeOffset.UtcNow.AddDays(300)
@@ -1129,11 +1129,11 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
                     Rules = [new OpenMetadataRule { Name = "DenyAll", Effect = "deny", Resources = ["table"], Operations = ["ViewAll"] }]
                 }
             ]));
-        client.GetRolesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<OpenMetadataRole>>([
-                new OpenMetadataRole { Name = "BlockedRole", Policies = [new OpenMetadataEntityReference { Id = policyId, Name = "DenyPolicy" }] }
+        client.GetRolesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<OpenMetadataRole>>([]));
+        client.GetTeamsAsync(Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<OpenMetadataTeam>>([
+                new OpenMetadataTeam { Id = Guid.NewGuid(), Name = "BlockedTeam", Policies = [new OpenMetadataEntityReference { Id = policyId, Name = "DenyPolicy" }] }
             ]));
-        client.GetTeamsAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<OpenMetadataTeam>>([]));
         client.GetUsersAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<OpenMetadataUser>>([]));
 
         var created = new List<Consent>();
@@ -1147,8 +1147,8 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
             TableIdentifier = new TableIdentifier("other-service", "dbo", "records"),
             ConsentRequestId = OpenMetadataSyncService.OpenMetadataSyncConsentMarker,
             TenantId = new TenantId("tenant-unrelated"),
-            GranteeType = GranteeType.Role,
-            RoleName = "BlockedRole",
+            GranteeType = GranteeType.Group,
+            GranteeSid = new Sid("BlockedRole"),
             Effect = ConsentEffect.Deny,
             ValidFrom = DateTimeOffset.UtcNow.AddHours(-1),
             ValidTo = DateTimeOffset.UtcNow.AddHours(1)
@@ -1162,7 +1162,7 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
             {
                 DefaultTenantId = "default-tenant",
                 Enabled = true,
-                RoleToGatewayRoleMap = new Dictionary<string, string> { ["BlockedRole"] = "GatewayBlocked" },
+                TeamToGroupSidMap = new Dictionary<string, string> { ["name:BlockedTeam"] = "S-1-5-21-BLOCKED" },
                 ServiceDatabaseToTenantMap = new Dictionary<string, string>
                 {
                     ["health-service.clinical"] = "tenant-clinical",

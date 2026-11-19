@@ -66,8 +66,8 @@ internal static class ConsentSqlCore
     {
         while (reader.Read())
         {
-            var validFrom = DateTimeOffset.Parse(reader.GetString(8), CultureInfo.InvariantCulture);
-            var validTo = DateTimeOffset.Parse(reader.GetString(9), CultureInfo.InvariantCulture);
+            var validFrom = DateTimeOffset.Parse(reader.GetString(6), CultureInfo.InvariantCulture);
+            var validTo = DateTimeOffset.Parse(reader.GetString(7), CultureInfo.InvariantCulture);
             if (atTime >= validTo) continue;
 
             var gEffectStr = reader.GetString(3);
@@ -76,7 +76,7 @@ internal static class ConsentSqlCore
 
             var granteeType = Enum.Parse<GranteeType>(reader.GetString(4), true);
             var granteeSidStr = reader.IsDBNull(5) ? null : reader.GetString(5);
-            if (granteeType != GranteeType.Role && (granteeSidStr == null || !subjectSet.Contains(granteeSidStr))) continue;
+            if (granteeSidStr == null || !subjectSet.Contains(granteeSidStr)) continue;
 
             var id = Guid.Parse(reader.GetString(0));
             if (!seen.Add(id)) continue;
@@ -89,36 +89,26 @@ internal static class ConsentSqlCore
                 Enum.Parse<ConsentEffect>(gEffectStr, true),
                 granteeType,
                 granteeSidStr != null ? new Sid(granteeSidStr) : (Sid?)null,
-                reader.IsDBNull(6) ? null : Guid.Parse(reader.GetString(6)),
-                reader.IsDBNull(7) ? null : reader.GetString(7),
                 validFrom,
                 validTo,
-                reader.GetInt32(10) == 1,
-                StoredTenant.Parse(reader.IsDBNull(14) ? null : reader.GetString(14)),
+                reader.GetInt32(8) == 1,
+                StoredTenant.Parse(reader.IsDBNull(12) ? null : reader.GetString(12)),
                 reader,
-                15));
+                13));
         }
     }
 
-    public static void ReadAllSubjectConsentRows(DbDataReader reader, DateTimeOffset effectiveAt, HashSet<string> subjectSet, HashSet<string> roleSet, HashSet<Guid> seen, List<Consent> consents)
+    public static void ReadAllSubjectConsentRows(DbDataReader reader, DateTimeOffset effectiveAt, HashSet<string> subjectSet, HashSet<Guid> seen, List<Consent> consents)
     {
         while (reader.Read())
         {
-            var validFrom = DateTimeOffset.Parse(reader.GetString(8), CultureInfo.InvariantCulture);
-            var validTo = DateTimeOffset.Parse(reader.GetString(9), CultureInfo.InvariantCulture);
+            var validFrom = DateTimeOffset.Parse(reader.GetString(6), CultureInfo.InvariantCulture);
+            var validTo = DateTimeOffset.Parse(reader.GetString(7), CultureInfo.InvariantCulture);
             if (effectiveAt < validFrom || effectiveAt >= validTo) continue;
 
             var granteeType = Enum.Parse<GranteeType>(reader.GetString(4), true);
             var granteeSidStr = reader.IsDBNull(5) ? null : reader.GetString(5);
-            if (granteeType == GranteeType.Role)
-            {
-                var roleName = reader.IsDBNull(7) ? null : reader.GetString(7);
-                if (roleName == null || !roleSet.Contains(roleName)) continue;
-            }
-            else if (granteeSidStr == null || !subjectSet.Contains(granteeSidStr))
-            {
-                continue;
-            }
+            if (granteeSidStr == null || !subjectSet.Contains(granteeSidStr)) continue;
 
             var id = Guid.Parse(reader.GetString(0));
             if (!seen.Add(id)) continue;
@@ -126,19 +116,17 @@ internal static class ConsentSqlCore
             consents.Add(ConsentWorkflowSql.BuildConsent(
                 id,
                 Guid.Parse(reader.GetString(1)),
-                new TableIdentifier(reader.GetString(11), reader.GetString(12), reader.GetString(13)),
+                new TableIdentifier(reader.GetString(9), reader.GetString(10), reader.GetString(11)),
                 reader.IsDBNull(2) ? null : Guid.Parse(reader.GetString(2)),
                 Enum.Parse<ConsentEffect>(reader.GetString(3), true),
                 granteeType,
                 granteeSidStr != null ? new Sid(granteeSidStr) : (Sid?)null,
-                reader.IsDBNull(6) ? null : Guid.Parse(reader.GetString(6)),
-                reader.IsDBNull(7) ? null : reader.GetString(7),
                 validFrom,
                 validTo,
-                reader.GetInt32(10) == 1,
-                StoredTenant.Parse(reader.IsDBNull(14) ? null : reader.GetString(14)),
+                reader.GetInt32(8) == 1,
+                StoredTenant.Parse(reader.IsDBNull(12) ? null : reader.GetString(12)),
                 reader,
-                15));
+                13));
         }
     }
 
@@ -147,7 +135,7 @@ internal static class ConsentSqlCore
         var consents = new List<Consent>();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
-                                   c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to,
+                                   c.grantee_sid, c.valid_from, c.valid_to,
                                    c.is_revoked, t.source_name, t.schema_name, t.table_name,
                                    c.tenant_id, c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at
                             FROM CONSENTS c
@@ -158,27 +146,25 @@ internal static class ConsentSqlCore
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
-            var validFrom = DateTimeOffset.Parse(reader.GetString(8), CultureInfo.InvariantCulture);
-            var validTo = DateTimeOffset.Parse(reader.GetString(9), CultureInfo.InvariantCulture);
+            var validFrom = DateTimeOffset.Parse(reader.GetString(6), CultureInfo.InvariantCulture);
+            var validTo = DateTimeOffset.Parse(reader.GetString(7), CultureInfo.InvariantCulture);
             if (atTime >= validTo || (!includeNotYetValid && atTime < validFrom)) continue;
 
             var granteeSidStr = reader.IsDBNull(5) ? null : reader.GetString(5);
             consents.Add(ConsentWorkflowSql.BuildConsent(
                 Guid.Parse(reader.GetString(0)),
                 Guid.Parse(reader.GetString(1)),
-                new TableIdentifier(reader.GetString(11), reader.GetString(12), reader.GetString(13)),
+                new TableIdentifier(reader.GetString(9), reader.GetString(10), reader.GetString(11)),
                 reader.IsDBNull(2) ? null : Guid.Parse(reader.GetString(2)),
                 Enum.Parse<ConsentEffect>(reader.GetString(3), true),
                 Enum.Parse<GranteeType>(reader.GetString(4), true),
                 granteeSidStr != null ? new Sid(granteeSidStr) : (Sid?)null,
-                reader.IsDBNull(6) ? null : Guid.Parse(reader.GetString(6)),
-                reader.IsDBNull(7) ? null : reader.GetString(7),
                 validFrom,
                 validTo,
-                reader.GetInt32(10) == 1,
-                StoredTenant.Parse(reader.IsDBNull(14) ? null : reader.GetString(14)),
+                reader.GetInt32(8) == 1,
+                StoredTenant.Parse(reader.IsDBNull(12) ? null : reader.GetString(12)),
                 reader,
-                15));
+                13));
         }
 
         return consents;
@@ -188,7 +174,7 @@ internal static class ConsentSqlCore
     {
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
-                                   c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to,
+                                   c.grantee_sid, c.valid_from, c.valid_to,
                                    c.is_revoked, c.revoked_by_sid, c.revoked_at, c.revoke_reason,
                                    t.source_name, t.schema_name, t.table_name, c.tenant_id, c.renewal_count,
                                    c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at
@@ -204,23 +190,21 @@ internal static class ConsentSqlCore
         return ConsentWorkflowSql.BuildConsent(
             Guid.Parse(reader.GetString(0)),
             Guid.Parse(reader.GetString(1)),
-            new TableIdentifier(reader.GetString(14), reader.GetString(15), reader.GetString(16)),
+            new TableIdentifier(reader.GetString(12), reader.GetString(13), reader.GetString(14)),
             reader.IsDBNull(2) ? null : Guid.Parse(reader.GetString(2)),
             Enum.Parse<ConsentEffect>(reader.GetString(3), true),
             Enum.Parse<GranteeType>(reader.GetString(4), true),
             granteeSidStr != null ? new Sid(granteeSidStr) : (Sid?)null,
-            reader.IsDBNull(6) ? null : Guid.Parse(reader.GetString(6)),
-            reader.IsDBNull(7) ? null : reader.GetString(7),
-            DateTimeOffset.Parse(reader.GetString(8), CultureInfo.InvariantCulture),
-            DateTimeOffset.Parse(reader.GetString(9), CultureInfo.InvariantCulture),
-            reader.GetInt32(10) == 1,
-            StoredTenant.Parse(reader.IsDBNull(17) ? null : reader.GetString(17)),
+            DateTimeOffset.Parse(reader.GetString(6), CultureInfo.InvariantCulture),
+            DateTimeOffset.Parse(reader.GetString(7), CultureInfo.InvariantCulture),
+            reader.GetInt32(8) == 1,
+            StoredTenant.Parse(reader.IsDBNull(15) ? null : reader.GetString(15)),
             reader,
-            19,
-            renewalCount: reader.GetInt32(18),
-            revokedBySid: reader.IsDBNull(11) ? (Sid?)null : new Sid(reader.GetString(11)),
-            revokedAt: reader.IsDBNull(12) ? null : DateTimeOffset.Parse(reader.GetString(12), CultureInfo.InvariantCulture),
-            revokeReason: reader.IsDBNull(13) ? null : reader.GetString(13));
+            17,
+            renewalCount: reader.GetInt32(16),
+            revokedBySid: reader.IsDBNull(9) ? (Sid?)null : new Sid(reader.GetString(9)),
+            revokedAt: reader.IsDBNull(10) ? null : DateTimeOffset.Parse(reader.GetString(10), CultureInfo.InvariantCulture),
+            revokeReason: reader.IsDBNull(11) ? null : reader.GetString(11));
     }
 
     public static async Task<List<Consent>> ReadExpiringConsentRowsAsync(DbConnection conn, string sql, DateTimeOffset now, DateTimeOffset threshold, int maxResults, CancellationToken ct)
@@ -239,20 +223,18 @@ internal static class ConsentSqlCore
             consents.Add(ConsentWorkflowSql.BuildConsent(
                 Guid.Parse(reader.GetString(0)),
                 Guid.Parse(reader.GetString(1)),
-                new TableIdentifier(reader.GetString(11), reader.GetString(12), reader.GetString(13)),
+                new TableIdentifier(reader.GetString(9), reader.GetString(10), reader.GetString(11)),
                 reader.IsDBNull(2) ? null : Guid.Parse(reader.GetString(2)),
                 Enum.Parse<ConsentEffect>(reader.GetString(3), true),
                 Enum.Parse<GranteeType>(reader.GetString(4), true),
                 granteeSidStr != null ? new Sid(granteeSidStr) : (Sid?)null,
-                reader.IsDBNull(6) ? null : Guid.Parse(reader.GetString(6)),
-                reader.IsDBNull(7) ? null : reader.GetString(7),
-                DateTimeOffset.Parse(reader.GetString(8), CultureInfo.InvariantCulture),
-                DateTimeOffset.Parse(reader.GetString(9), CultureInfo.InvariantCulture),
-                reader.GetInt32(10) == 1,
-                StoredTenant.Parse(reader.IsDBNull(14) ? null : reader.GetString(14)),
+                DateTimeOffset.Parse(reader.GetString(6), CultureInfo.InvariantCulture),
+                DateTimeOffset.Parse(reader.GetString(7), CultureInfo.InvariantCulture),
+                reader.GetInt32(8) == 1,
+                StoredTenant.Parse(reader.IsDBNull(12) ? null : reader.GetString(12)),
                 reader,
-                16,
-                renewalCount: reader.GetInt32(15)));
+                14,
+                renewalCount: reader.GetInt32(13)));
         }
 
         return consents;
@@ -520,11 +502,10 @@ internal static class ConsentSqlCore
         var effect = reader.FieldCount > 5 && !reader.IsDBNull(5) ? Enum.Parse<ConsentEffect>(reader.GetString(5), true) : ConsentEffect.Allow;
         var granteeType = reader.FieldCount > 6 && !reader.IsDBNull(6) ? Enum.Parse<GranteeType>(reader.GetString(6), true) : GranteeType.User;
         var granteeSidStr = ConsentWorkflowSql.ReadOptionalString(reader, 7);
-        var roleName = ConsentWorkflowSql.ReadOptionalString(reader, 8);
-        var grantSource = ConsentWorkflowSql.ReadGrantSource(reader, 9);
-        var profileAssignmentId = ConsentWorkflowSql.ReadOptionalGuid(reader, 10);
-        var validFrom = ConsentWorkflowSql.ReadOptionalTimestamp(reader, 11) ?? DateTimeOffset.MinValue;
-        var validTo = ConsentWorkflowSql.ReadOptionalTimestamp(reader, 12) ?? DateTimeOffset.MaxValue;
+        var grantSource = ConsentWorkflowSql.ReadGrantSource(reader, 8);
+        var profileAssignmentId = ConsentWorkflowSql.ReadOptionalGuid(reader, 9);
+        var validFrom = ConsentWorkflowSql.ReadOptionalTimestamp(reader, 10) ?? DateTimeOffset.MinValue;
+        var validTo = ConsentWorkflowSql.ReadOptionalTimestamp(reader, 11) ?? DateTimeOffset.MaxValue;
         var consent = new Consent
         {
             Id = consentId,
@@ -535,7 +516,6 @@ internal static class ConsentSqlCore
             TenantId = TenantId.TryParse(rawTenant, out var parsedTenant) ? parsedTenant : default,
             GranteeType = granteeType,
             GranteeSid = !string.IsNullOrWhiteSpace(granteeSidStr) ? new Sid(granteeSidStr) : (Sid?)null,
-            RoleName = roleName,
             ValidFrom = validFrom,
             ValidTo = validTo,
             GrantSource = grantSource,
@@ -872,8 +852,7 @@ internal static class ConsentSqlCore
         }
 
         var consentId = Guid.NewGuid();
-        var granteeSid = req.RequestedGranteeType != GranteeType.Role ? new Sid(req.RequestedGranteeRef) : (Sid?)null;
-        var roleName = req.RequestedGranteeType == GranteeType.Role ? req.RequestedGranteeRef : null;
+        var granteeSid = new Sid(req.RequestedGranteeRef);
         var grantSource = req.RequestKind == ConsentRequestKind.ProfileAssignment
             ? ConsentGrantSource.AccessProfile
             : ConsentGrantSource.ConsentRequest;
@@ -890,7 +869,6 @@ internal static class ConsentSqlCore
             GranteeType = req.RequestedGranteeType,
             GranteeSid = granteeSid,
             CreatedBySid = req.RequesterSid,
-            RoleName = roleName,
             ValidFrom = now,
             ValidTo = req.RequestedValidTo.ToUniversalTime(),
             GrantSource = grantSource,

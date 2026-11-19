@@ -214,8 +214,7 @@ public sealed class EffectiveAccessExplanationService(
     {
         GranteeType.User or GranteeType.ServicePrincipal => 0,
         GranteeType.Group => 1,
-        GranteeType.Role => 2,
-        _ => 3
+        _ => 2
     };
 
     /// <summary>

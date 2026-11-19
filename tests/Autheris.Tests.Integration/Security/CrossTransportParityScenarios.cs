@@ -325,7 +325,6 @@ internal sealed partial class CrossTransportParityHarness
         public Task<AccessProfileAssignment> ApproveAssignmentAsync(TenantId tenantId, string profileId, AccessProfileSubjectType subjectType, string subject, string approvedBy, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<AccessProfileAssignment> RenewAssignmentAsync(TenantId tenantId, string profileId, AccessProfileSubjectType subjectType, string subject, DateTimeOffset newExpiresAt, string approvedBy, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<bool> RemoveAssignmentAsync(TenantId tenantId, string profileId, AccessProfileSubjectType subjectType, string subject, CancellationToken ct = default) => Task.FromResult(false);
-        public Task<IReadOnlyList<RevokedRoleConsent>> GetRevokedRoleConsentsAsync(CancellationToken ct = default) => Task.FromResult<IReadOnlyList<RevokedRoleConsent>>([]);
         public Task<IReadOnlyList<DeactivatedProfileAssignment>> GetDeactivatedAssignmentsAsync(CancellationToken ct = default) => Task.FromResult<IReadOnlyList<DeactivatedProfileAssignment>>([]);
     }
 

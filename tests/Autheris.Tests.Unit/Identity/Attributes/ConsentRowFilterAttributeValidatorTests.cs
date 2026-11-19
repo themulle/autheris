@@ -32,7 +32,7 @@ public sealed class ConsentRowFilterAttributeValidatorTests
 
     private static Consent ConsentOn(TableIdentifier table, TenantId tenant, params ConsentRowFilter[] filters) => new()
     {
-        TableIdentifier = table, TenantId = tenant, GranteeType = GranteeType.Role, RoleName = "analyst", Effect = ConsentEffect.Allow,
+        TableIdentifier = table, TenantId = tenant, GranteeType = GranteeType.Group, GranteeSid = new Sid("analyst"), Effect = ConsentEffect.Allow,
         ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(1), RowFilters = filters
     };
 

@@ -21,7 +21,7 @@ internal static class ConsentPatternSqlCore
 
     private const string SelectPatternColumnsPrefix =
         "SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type, " +
-        "c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to, " +
+        "c.grantee_sid, c.valid_from, c.valid_to, " +
         "c.is_revoked, c.tenant_id, c.grant_source, c.grant_record_seq, " +
         "c.profile_assignment_id, c.expiry_notice_sent_at, c.object_pattern, " +
         "c.data_source, c.column_set_mode, c.workflow_mode, c.profile_item_no, " +
@@ -128,7 +128,6 @@ internal static class ConsentPatternSqlCore
         TenantId? tenantId,
         DateTimeOffset atTime,
         HashSet<string>? subjectSet,
-        HashSet<string>? roleSet,
         HashSet<Guid> seen,
         List<Consent> consents,
         CancellationToken ct)
@@ -155,8 +154,8 @@ internal static class ConsentPatternSqlCore
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
-            var validFrom = DateTimeOffset.Parse(reader.GetString(8), CultureInfo.InvariantCulture);
-            var validTo = DateTimeOffset.Parse(reader.GetString(9), CultureInfo.InvariantCulture);
+            var validFrom = DateTimeOffset.Parse(reader.GetString(6), CultureInfo.InvariantCulture);
+            var validTo = DateTimeOffset.Parse(reader.GetString(7), CultureInfo.InvariantCulture);
             if (atTime >= validTo)
             {
                 continue;
@@ -170,21 +169,10 @@ internal static class ConsentPatternSqlCore
 
             var granteeType = Enum.Parse<GranteeType>(reader.GetString(4), ignoreCase: true);
             var granteeSidStr = reader.IsDBNull(5) ? null : reader.GetString(5);
-            var roleName = reader.IsDBNull(7) ? null : reader.GetString(7);
 
-            if (subjectSet != null || roleSet != null)
+            if (subjectSet != null && (granteeSidStr == null || !subjectSet.Contains(granteeSidStr)))
             {
-                if (granteeType == GranteeType.Role)
-                {
-                    if (roleSet == null || roleName == null || !roleSet.Contains(roleName))
-                    {
-                        continue;
-                    }
-                }
-                else if (subjectSet == null || granteeSidStr == null || !subjectSet.Contains(granteeSidStr))
-                {
-                    continue;
-                }
+                continue;
             }
 
             var id = Guid.Parse(reader.GetString(0));
@@ -230,11 +218,11 @@ internal static class ConsentPatternSqlCore
     private static Consent MapPatternConsentRow(DbDataReader reader)
     {
         var granteeSidStr = reader.IsDBNull(5) ? null : reader.GetString(5);
-        var dataSource = ConsentWorkflowSql.ReadOptionalString(reader, 17);
-        var columnSetRaw = ConsentWorkflowSql.ReadOptionalString(reader, 18);
-        var profileItemNo = reader.IsDBNull(20)
+        var dataSource = ConsentWorkflowSql.ReadOptionalString(reader, 15);
+        var columnSetRaw = ConsentWorkflowSql.ReadOptionalString(reader, 16);
+        var profileItemNo = reader.IsDBNull(18)
             ? (int?)null
-            : Convert.ToInt32(reader.GetValue(20), CultureInfo.InvariantCulture);
+            : Convert.ToInt32(reader.GetValue(18), CultureInfo.InvariantCulture);
 
         return new Consent
         {
@@ -245,25 +233,23 @@ internal static class ConsentPatternSqlCore
             Effect = Enum.Parse<ConsentEffect>(reader.GetString(3), ignoreCase: true),
             GranteeType = Enum.Parse<GranteeType>(reader.GetString(4), ignoreCase: true),
             GranteeSid = granteeSidStr != null ? new Sid(granteeSidStr) : (Sid?)null,
-            RoleId = ConsentWorkflowSql.ReadOptionalGuid(reader, 6),
-            RoleName = ConsentWorkflowSql.ReadOptionalString(reader, 7),
-            ValidFrom = DateTimeOffset.Parse(reader.GetString(8), CultureInfo.InvariantCulture),
-            ValidTo = DateTimeOffset.Parse(reader.GetString(9), CultureInfo.InvariantCulture),
-            IsRevoked = Convert.ToInt32(reader.GetValue(10), CultureInfo.InvariantCulture) == 1,
-            TenantId = StoredTenant.Parse(ConsentWorkflowSql.ReadOptionalString(reader, 11)),
-            GrantSource = ConsentWorkflowSql.ReadGrantSource(reader, 12),
-            GrantRecordSeq = ConsentWorkflowSql.ReadInt64OrZero(reader, 13),
-            ProfileAssignmentId = ConsentWorkflowSql.ReadOptionalGuid(reader, 14),
-            ExpiryNoticeSentAt = ConsentWorkflowSql.ReadOptionalTimestamp(reader, 15),
-            ObjectPattern = ConsentWorkflowSql.ReadOptionalString(reader, 16),
+            ValidFrom = DateTimeOffset.Parse(reader.GetString(6), CultureInfo.InvariantCulture),
+            ValidTo = DateTimeOffset.Parse(reader.GetString(7), CultureInfo.InvariantCulture),
+            IsRevoked = Convert.ToInt32(reader.GetValue(8), CultureInfo.InvariantCulture) == 1,
+            TenantId = StoredTenant.Parse(ConsentWorkflowSql.ReadOptionalString(reader, 9)),
+            GrantSource = ConsentWorkflowSql.ReadGrantSource(reader, 10),
+            GrantRecordSeq = ConsentWorkflowSql.ReadInt64OrZero(reader, 11),
+            ProfileAssignmentId = ConsentWorkflowSql.ReadOptionalGuid(reader, 12),
+            ExpiryNoticeSentAt = ConsentWorkflowSql.ReadOptionalTimestamp(reader, 13),
+            ObjectPattern = ConsentWorkflowSql.ReadOptionalString(reader, 14),
             DataSource = dataSource,
             ColumnSetMode = ColumnSetModeExtensions.ParseColumnSetModeOrDefault(columnSetRaw),
-            WorkflowMode = ConsentWorkflowSql.ReadWorkflowMode(reader, 19),
+            WorkflowMode = ConsentWorkflowSql.ReadWorkflowMode(reader, 17),
             ProfileItemNo = profileItemNo,
-            RenewalCount = reader.IsDBNull(21) ? 0 : Convert.ToInt32(reader.GetValue(21), CultureInfo.InvariantCulture),
-            RevokedBySid = reader.IsDBNull(22) ? (Sid?)null : new Sid(reader.GetString(22)),
-            RevokedAt = ConsentWorkflowSql.ReadOptionalTimestamp(reader, 23),
-            RevokeReason = ConsentWorkflowSql.ReadOptionalString(reader, 24)
+            RenewalCount = reader.IsDBNull(19) ? 0 : Convert.ToInt32(reader.GetValue(19), CultureInfo.InvariantCulture),
+            RevokedBySid = reader.IsDBNull(20) ? (Sid?)null : new Sid(reader.GetString(20)),
+            RevokedAt = ConsentWorkflowSql.ReadOptionalTimestamp(reader, 21),
+            RevokeReason = ConsentWorkflowSql.ReadOptionalString(reader, 22)
         };
     }
 }

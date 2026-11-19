@@ -521,13 +521,11 @@ internal sealed class InMemoryExternalConsentRepository : IConsentRepository
         CancellationToken ct = default)
     {
         var sidSet = subjects.Select(s => s.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var roleSet = roles?.ToHashSet(StringComparer.OrdinalIgnoreCase) ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var list = Consents.Where(c =>
                 !c.IsRevoked
                 && (!atTime.HasValue || (c.ValidFrom <= atTime.Value && c.ValidTo > atTime.Value))
                 && (!tenantId.HasValue || c.TenantId == tenantId.Value)
-                && ((c.GranteeSid is not null && sidSet.Contains(c.GranteeSid.Value))
-                    || (!string.IsNullOrWhiteSpace(c.RoleName) && roleSet.Contains(c.RoleName))))
+                && c.GranteeSid is not null && sidSet.Contains(c.GranteeSid.Value))
             .ToList();
         return Task.FromResult<IReadOnlyList<Consent>>(list);
     }

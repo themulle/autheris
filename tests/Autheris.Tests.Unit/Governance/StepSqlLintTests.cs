@@ -167,7 +167,8 @@ public sealed class StepSqlLintTests
                 (25, "golden_queries"),
                 (26, "doc_links"),
                 (27, "drop_legacy_governance_columns"),
-                (28, "data_products")
+                (28, "data_products"),
+                (29, "drop_role_grantee")
             ]);
         }
     }

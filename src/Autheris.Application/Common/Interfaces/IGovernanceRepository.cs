@@ -270,26 +270,7 @@ public interface IConsentRepository
         => Task.FromResult<IReadOnlyList<TableIdentifier>>(Array.Empty<TableIdentifier>());
 
     /// <summary>
-    /// active (non-revoked, in-window) consents of exactly one role grantee on one table within<paramref name="tenantId"/>.
-    /// Role consents carry no subject SID, so the subject-based lookup never returns them. The default filters
-    /// <see cref="GetAllActiveConsentsForSubjectsAsync(IEnumerable{Sid}, IEnumerable{string}?, DateTimeOffset?, TenantId?, CancellationToken)"/>;
-    /// persistence overrides it with an indexed query.
-    /// </summary>
-    async Task<IReadOnlyList<Consent>> GetActiveRoleConsentsAsync(
-        TableIdentifier table, string roleName, TenantId? tenantId, DateTimeOffset atTime, CancellationToken ct = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(roleName);
-        var all = await GetAllActiveConsentsForSubjectsAsync(Array.Empty<Sid>(), new[] { roleName }, atTime, tenantId, ct).ConfigureAwait(false);
-        return all
-            .Where(c => c.GranteeType == GranteeType.Role
-                && c.TableIdentifier.Equals(table)
-                && string.Equals(c.RoleName, roleName, StringComparison.OrdinalIgnoreCase)
-                && (tenantId is null || c.TenantId == tenantId.Value))
-            .ToList();
-    }
-
-    /// <summary>
-    /// one keyset page of the consents of a tenant (ordered by id), including role and group grants, optionally filtered by
+    /// one keyset page of the consents of a tenant (ordered by id), including group and user grants, optionally filtered by
     /// table and grantee. The tenant predicate is mandatory. Every persistence provider implements it with an indexed query; there is no
     /// default, so a consent listing can never load every consent into memory.
     /// </summary>
