@@ -13,7 +13,6 @@ using Autheris.Application.Security;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
-using Autheris.Domain.Security;
 using Microsoft.Extensions.Configuration;
 
 internal static class ExternalCatalogCursor

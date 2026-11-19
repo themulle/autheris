@@ -9,7 +9,6 @@ using System.Threading.Tasks;
 using Autheris.Application.Catalog.Discovery;
 using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Catalog.Services;
-using Autheris.Application.Security;
 using Autheris.Application.Tenancy;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -44,7 +43,7 @@ public sealed partial class ExternalCatalogReader
         var candidates = FilterAppCandidates(inScope, visibility, query, kindFilter, versions);
         candidates.Sort(static (a, b) => DiscoveryService.CompareTableKeys(a.Identifier.ToString(), b.Identifier.ToString()));
 
-        var startIndex = string.IsNullOrEmpty(afterKey) ? 0 : FindFirstIndexAfter(candidates, afterKey);
+        var startIndex = string.IsNullOrEmpty(afterKey) ? 0 : DiscoveryService.FindFirstIndexAfter(candidates, afterKey);
         var ownerFilter = string.IsNullOrWhiteSpace(query.Owner) ? null : query.Owner.Trim();
 
         List<TableMetadata> pageTables;
@@ -365,26 +364,6 @@ public sealed partial class ExternalCatalogReader
         }
 
         return false;
-    }
-
-    private static int FindFirstIndexAfter(List<TableMetadata> sorted, string afterKey)
-    {
-        var lo = 0;
-        var hi = sorted.Count;
-        while (lo < hi)
-        {
-            var mid = lo + ((hi - lo) >> 1);
-            if (DiscoveryService.CompareTableKeys(sorted[mid].Identifier.ToString(), afterKey) <= 0)
-            {
-                lo = mid + 1;
-            }
-            else
-            {
-                hi = mid;
-            }
-        }
-
-        return lo;
     }
 
     private static ExternalCatalogResult<T> MapDiscoveryFailure<T>(DiscoveryStatusException ex)

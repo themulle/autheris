@@ -139,7 +139,7 @@
           { "name": "status", "in": "query", "schema": { "type": "string" } },
           { "name": "externalSystemId", "in": "query", "schema": { "type": "string", "format": "uuid" } },
           { "name": "updatedSince", "in": "query", "schema": { "type": "string", "format": "date-time" } },
-          { "name": "cursor", "in": "query", "description": "Opaque HMAC-authenticated keyset cursor returned as nextCursor on the previous page (at most 512 characters). Bound to all active query filters, tenant and caller scope; passing a malformed, stale-version or mismatched cursor returns 400 INVALID_CURSOR.", "schema": { "type": "string", "maxLength": 512 } },
+          { "name": "cursor", "in": "query", "schema": { "type": "string" } },
           { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 50 } },
           { "name": "domain", "in": "query", "schema": { "type": "string" } },
           { "name": "schema", "in": "query", "schema": { "type": "string" } },
@@ -267,7 +267,7 @@
         "parameters": [
           { "name": "table", "in": "query", "schema": { "type": "string" } },
           { "name": "grantee", "in": "query", "schema": { "type": "string" } },
-          { "name": "cursor", "in": "query", "description": "Opaque HMAC-authenticated keyset cursor returned as nextCursor on the previous page (at most 512 characters). Bound to all active query filters, tenant and caller scope; passing a malformed, stale-version or mismatched cursor returns 400 INVALID_CURSOR.", "schema": { "type": "string", "maxLength": 512 } },
+          { "name": "cursor", "in": "query", "schema": { "type": "string" } },
           { "name": "pageSize", "in": "query", "schema": { "type": "integer" } },
           { "name": "includeInactive", "in": "query", "schema": { "type": "boolean" } },
           { "name": "clamped", "in": "query", "schema": { "type": "boolean" } }

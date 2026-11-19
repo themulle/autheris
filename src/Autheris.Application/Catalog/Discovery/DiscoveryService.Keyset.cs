@@ -122,7 +122,7 @@ public sealed partial class DiscoveryService
         return cmp != 0 ? cmp : StringComparer.Ordinal.Compare(a, b);
     }
 
-    private static int FindFirstIndexAfter(List<TableMetadata> sorted, string afterKey)
+    internal static int FindFirstIndexAfter(List<TableMetadata> sorted, string afterKey)
     {
         var lo = 0;
         var hi = sorted.Count;

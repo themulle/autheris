@@ -2,7 +2,6 @@ namespace Autheris.Application.Catalog.External;
 
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 using System.Security.Claims;
 using System.Security.Cryptography;
@@ -17,7 +16,6 @@ using Autheris.Application.Common.Interfaces;
 using Autheris.Application.ConsentRequests;
 using Autheris.Application.Governance;
 using Autheris.Application.Governance.Services;
-using Autheris.Application.Governance.Paging;
 using Autheris.Application.Security;
 using Autheris.Application.Tenancy;
 using Autheris.Domain.Common;
