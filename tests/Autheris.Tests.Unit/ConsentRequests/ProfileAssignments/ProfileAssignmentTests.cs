@@ -412,7 +412,6 @@ public sealed class ProfileAssignmentTests
         public Task<AccessProfileAssignment> ApproveAssignmentAsync(TenantId tenantId, string profileId, AccessProfileSubjectType subjectType, string subject, string approvedBy, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<AccessProfileAssignment> RenewAssignmentAsync(TenantId tenantId, string profileId, AccessProfileSubjectType subjectType, string subject, DateTimeOffset newExpiresAt, string approvedBy, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<bool> RemoveAssignmentAsync(TenantId tenantId, string profileId, AccessProfileSubjectType subjectType, string subject, CancellationToken ct = default) => Task.FromResult(true);
-        public Task<IReadOnlyList<RevokedRoleConsent>> GetRevokedRoleConsentsAsync(CancellationToken ct = default) => Task.FromResult<IReadOnlyList<RevokedRoleConsent>>([]);
         public Task<IReadOnlyList<DeactivatedProfileAssignment>> GetDeactivatedAssignmentsAsync(CancellationToken ct = default) => Task.FromResult<IReadOnlyList<DeactivatedProfileAssignment>>([]);
 
         public Task<IReadOnlyList<TableMetadata>> GetAllTablesAsync(CancellationToken ct = default) => Task.FromResult<IReadOnlyList<TableMetadata>>(Tables);
@@ -551,7 +550,7 @@ public sealed class ProfileAssignmentTests
             string? revokeReason = null, long? grantRecordSeq = null, IReadOnlyList<string>? approvingOwners = null) => new()
         {
             Id = c.Id, TableId = c.TableId, TableIdentifier = c.TableIdentifier, ConsentRequestId = c.ConsentRequestId,
-            Effect = c.Effect, TenantId = c.TenantId, GranteeType = c.GranteeType, GranteeSid = c.GranteeSid, RoleName = c.RoleName,
+            Effect = c.Effect, TenantId = c.TenantId, GranteeType = c.GranteeType, GranteeSid = c.GranteeSid,
             CreatedBySid = c.CreatedBySid, ValidFrom = c.ValidFrom, ValidTo = c.ValidTo,
             IsRevoked = isRevoked ?? c.IsRevoked, RevokedBySid = revokedBy ?? c.RevokedBySid, RevokedAt = revokedAt ?? c.RevokedAt,
             RevokeReason = revokeReason ?? c.RevokeReason, Description = c.Description, WriteRules = c.WriteRules,

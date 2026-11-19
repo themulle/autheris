@@ -167,48 +167,6 @@ public sealed class AuditAnchorTruncationGovernanceTests : IDisposable
         (await restarted.VerifyAuditHashChainAsync()).ShouldBeFalse();
     }
 
-    [Fact]
-    public async Task M31_WormExport_ExportsMoreThan5000Entries_WithSequenceRangeInManifest()
-    {
-        const int total = 5100;
-        using var repo = GovernanceTestDatabase.CreateRepository(new EpochValidationService(), Options.Create(new GatewayOptions
-        {
-            GovernanceDb = new GovernanceDbOptions { SeedDemoData = false }
-        }));
-
-        for (var i = 1; i <= total; i++)
-        {
-            await repo.RecordAuditEventAsync(NewAuditEntry(i));
-        }
-
-        using var httpClient = new HttpClient(new OkHandler());
-        var exporter = new AuditWormExportService(repo, WormOptions(), httpClient, NullLogger<AuditWormExportService>.Instance);
-
-        var result = await exporter.ExportAuditSnapshotAsync(DateTimeOffset.UtcNow.AddHours(-1), DateTimeOffset.UtcNow.AddHours(1));
-
-        result.Success.ShouldBeTrue(result.ErrorMessage);
-        result.RecordCount.ShouldBe(total);
-        using var manifest = JsonDocument.Parse(result.ManifestJson);
-        manifest.RootElement.GetProperty("firstSequence").GetInt64().ShouldBe(1);
-        manifest.RootElement.GetProperty("lastSequence").GetInt64().ShouldBe(total);
-        manifest.RootElement.GetProperty("expectedRecordCount").GetInt64().ShouldBe(total);
-        manifest.RootElement.GetProperty("chainAnchor").GetProperty("sequence").GetInt64().ShouldBe(total);
-    }
-
-    private sealed class OkHandler : HttpMessageHandler
-    {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-            => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
-    }
-
-    private IOptions<GatewayOptions> WormOptions() => Options.Create(new GatewayOptions
-    {
-        Audit = new AuditOptions
-        {
-            Worm = new WormAuditOptions { Enabled = true, StorageType = "Local", ExportPath = Path.Combine(_tempDir, "worm"), RetentionDays = 30 }
-        }
-    });
-
     private (IOptions<GatewayOptions> Options, string DbFile, string AnchorFile) CreateFileAuditOptions()
     {
         var dbFile = Path.Combine(_tempDir, $"audit_{Guid.NewGuid():N}.db");

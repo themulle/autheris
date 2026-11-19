@@ -9,36 +9,36 @@ using Xunit;
 namespace Autheris.Tests.Unit.Persistence.Migrations;
 
 [Trait("Category", "Security")]
-public sealed class TableObjectKindMigration0029Tests
+public sealed class TableObjectKindMigration0030Tests
 {
     [Fact]
-    public void Migration0029_ExistsPassesStepSqlLintAndAddsAGuardedNotNullColumn()
+    public void Migration0030_ExistsPassesStepSqlLintAndAddsAGuardedNotNullColumn()
     {
         foreach (var engine in new[] { "postgresql", "sqlserver" })
         {
             var steps = SqlMigrationStep.LoadEmbedded(engine);
-            var step = steps.Single(s => s.Version == 29 && s.Name == "table_object_kind");
+            var step = steps.Single(s => s.Version == 30 && s.Name == "table_object_kind");
             StepSqlLint.Validate(step.Sql, step.GuardSql, step.Phase3Marker).ShouldBeEmpty();
             step.Sql.ShouldContain("object_kind");
             step.Sql.ShouldContain("'table'");
             step.Sql.ShouldContain("CHECK (object_kind IN (");
             step.Sql.ShouldContain(engine == "postgresql" ? "IF NOT EXISTS" : "COL_LENGTH");
 
-            var shape = GovernanceSchemaShapeLoader.LoadAt(engine, 29, steps.ToDictionary(s => s.Version, s => s.ShapeDelta));
+            var shape = GovernanceSchemaShapeLoader.LoadAt(engine, 30, steps.ToDictionary(s => s.Version, s => s.ShapeDelta));
             var tables = shape.Tables.Single(t => string.Equals(t.Name, "TABLES", StringComparison.OrdinalIgnoreCase));
             tables.Columns.Single(c => c.Name == "object_kind").Nullable.ShouldBeFalse();
         }
     }
 
     [Fact]
-    public void Migration0029_ChecksumMatchesGoldenFile()
+    public void Migration0030_ChecksumMatchesGoldenFile()
     {
         var repoRoot = FindRepoRoot();
         foreach (var engine in new[] { "postgresql", "sqlserver" })
         {
-            var step = SqlMigrationStep.LoadEmbedded(engine).Single(s => s.Version == 29 && s.Name == "table_object_kind");
+            var step = SqlMigrationStep.LoadEmbedded(engine).Single(s => s.Version == 30 && s.Name == "table_object_kind");
             var checksumsPath = Path.Combine(repoRoot, "tests", "Autheris.Tests.Architecture", "Golden", "GovernanceSteps", $"checksums.{engine}.txt");
-            var line = File.ReadAllLines(checksumsPath).Single(l => l.StartsWith("0029 table_object_kind ", StringComparison.Ordinal));
+            var line = File.ReadAllLines(checksumsPath).Single(l => l.StartsWith("0030 table_object_kind ", StringComparison.Ordinal));
             step.Checksum.ShouldBe(line.Split(' ', StringSplitOptions.RemoveEmptyEntries)[2]);
         }
     }

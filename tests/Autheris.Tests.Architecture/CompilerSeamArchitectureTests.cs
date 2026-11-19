@@ -223,4 +223,65 @@ public sealed class CompilerSeamArchitectureTests
         type.GetConstructors(BindingFlags.Instance | BindingFlags.Public).ShouldBeEmpty();
         type.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic).ShouldNotBeEmpty();
     }
+
+    // The unbound emitter (ISqlDialectGenerator.GenerateSql(SqlStatement), or a SqlEmitterContext built without capabilities and a
+    // parameter source) writes text only: caller parameters are not bound there. The call sites below are reviewed: each one renders
+    // text for analysis, policy-predicate framing or a canonical re-parse that goes through the governed compile again. A new site
+    // needs the same review, and its text must never reach a command.
+    private static readonly string[] UnboundEmitterCallers =
+    [
+        "Autheris.Application.Governance.Analysis.QueryAnalysisService",
+        "Autheris.Application.Sql.Federation.Subtrees.SubtreeCompiler",
+        "Autheris.Application.Sql.Policy.PolicyPredicateRenderer",
+        "Autheris.Application.VirtualFilters.SqlFilterCompiler",
+        "TrinoSqlEngine.Ast.Generators.SqlDialectGeneratorBase"
+    ];
+
+    private static string TopLevel(TypeDefinition type)
+    {
+        while (type.DeclaringType is not null) type = type.DeclaringType;
+        return type.FullName;
+    }
+
+    private static HashSet<string> CallersOfTheUnboundEmitter(string assemblyPath)
+    {
+        var callers = new HashSet<string>(StringComparer.Ordinal);
+        var module = CecilModuleCache.For(assemblyPath);
+        foreach (var type in module.GetTypes().Where(t => TopLevel(t) != "TrinoSqlEngine.Ast.Buffer.SqlEmitterContext"))   // its bound constructor chains to the legacy one
+        {
+            foreach (var method in type.Methods.Where(m => m.HasBody))
+            {
+                foreach (var instruction in method.Body.Instructions)
+                {
+                    if (instruction.OpCode.Code is not (Code.Call or Code.Callvirt or Code.Newobj) || instruction.Operand is not MethodReference called) continue;
+                    bool unboundText = called.Name == "GenerateSql" && called.Parameters.Count == 1 &&
+                                       called.Parameters[0].ParameterType.FullName == "TrinoSqlEngine.Ast.Nodes.SqlStatement" &&
+                                       called.DeclaringType.FullName is "TrinoSqlEngine.Ast.Generators.ISqlDialectGenerator" or "TrinoSqlEngine.Ast.Generators.SqlDialectGeneratorBase";
+                    bool unboundContext = called.Name == ".ctor" && called.DeclaringType.FullName == "TrinoSqlEngine.Ast.Buffer.SqlEmitterContext" &&
+                                          called.Parameters.Count == 2;
+                    if (unboundText || unboundContext) callers.Add(TopLevel(type));
+                }
+            }
+        }
+
+        return callers;
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void UnboundEmitterContext_IsNeverUsedForExecution()
+    {
+        var found = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var assembly in ProductionAssemblies)
+        {
+            found.UnionWith(CallersOfTheUnboundEmitter(assembly.Location));
+        }
+
+        // Positive control: the scanner sees the base generator that creates the unbound context.
+        found.ShouldContain("TrinoSqlEngine.Ast.Generators.SqlDialectGeneratorBase");
+        var unexpected = found.Except(UnboundEmitterCallers).OrderBy(x => x, StringComparer.Ordinal).ToList();
+        unexpected.ShouldBeEmpty("Unbound emission is diagnostic text only and must not feed a DbCommand. Unreviewed callers: " + string.Join(", ", unexpected));
+        var stale = UnboundEmitterCallers.Except(found).ToList();
+        stale.ShouldBeEmpty("Remove callers that no longer use the unbound emitter: " + string.Join(", ", stale));
+    }
 }

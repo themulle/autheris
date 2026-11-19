@@ -232,7 +232,6 @@ public sealed class OwnerGrantTests
             TenantId = c.TenantId,
             GranteeType = c.GranteeType,
             GranteeSid = c.GranteeSid,
-            RoleName = c.RoleName,
             CreatedBySid = c.CreatedBySid,
             ValidFrom = c.ValidFrom,
             ValidTo = c.ValidTo,

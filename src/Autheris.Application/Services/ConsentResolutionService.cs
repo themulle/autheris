@@ -93,7 +93,7 @@ public sealed class ConsentResolutionService : IConsentResolutionService
                             c.ValidFrom <= now &&
                             now < c.ValidTo &&
                             now >= c.EffectiveValidTo &&
-                            IsSubjectMatch(c, userSid, subjectGroupSids, userRoles, allUserSids))
+                            IsSubjectMatch(c, userSid, subjectGroupSids, allUserSids))
                 .OrderByDescending(c => c.EffectiveValidTo)
                 .FirstOrDefault();
 
@@ -682,7 +682,7 @@ public sealed class ConsentResolutionService : IConsentResolutionService
         IReadOnlySet<Sid> subjectGroupSids,
         IReadOnlySet<string> userRoles,
         IReadOnlySet<Sid>? allUserSids = null) =>
-        consent.IsActive(now) && IsTableTargetMatch(consent, table) && IsSubjectMatch(consent, userSid, subjectGroupSids, userRoles, allUserSids);
+        consent.IsActive(now) && IsTableTargetMatch(consent, table) && IsSubjectMatch(consent, userSid, subjectGroupSids, allUserSids);
 
     internal static bool IsTableTargetMatch(Consent consent, TableIdentifier table)
     {
@@ -699,11 +699,9 @@ public sealed class ConsentResolutionService : IConsentResolutionService
         Consent consent,
         Sid userSid,
         IReadOnlySet<Sid> subjectGroupSids,
-        IReadOnlySet<string> userRoles,
         IReadOnlySet<Sid>? allUserSids = null) =>
-        // A role-bound Deny still restricts (fail closed); a role never matches a grant.
         consent.Effect == ConsentEffect.Deny
             ? Autheris.Application.Policy.GranteeMatcher.MatchesRestriction(
-                consent.GranteeType, consent.GranteeSid, consent.RoleName, consent.RoleId, userSid, subjectGroupSids, userRoles, allUserSids)
+                consent.GranteeType, consent.GranteeSid, userSid, subjectGroupSids, allUserSids)
             : Autheris.Application.Policy.GranteeMatcher.MatchesGrant(consent.GranteeType, consent.GranteeSid, userSid, subjectGroupSids, allUserSids);
 }

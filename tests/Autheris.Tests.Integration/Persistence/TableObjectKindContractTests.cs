@@ -20,7 +20,7 @@ using Npgsql;
 using Shouldly;
 using Xunit;
 
-/// <summary>Issue #896: TABLES.object_kind (step 0029) defaults to table, round-trips a view and rejects a value outside the closed set.</summary>
+/// <summary>Issue #896: TABLES.object_kind (step 0030) defaults to table, round-trips a view and rejects a value outside the closed set.</summary>
 public abstract class TableObjectKindContractBase
 {
     protected abstract Task<string?> CreateDatabaseAsync();
@@ -57,7 +57,7 @@ public abstract class TableObjectKindContractBase
 
         try
         {
-            await MigrateAsync(cs, 28);
+            await MigrateAsync(cs, 29);
             await using (var raw = OpenRaw(cs))
             {
                 await ExecAsync(raw, "INSERT INTO TABLES (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active) VALUES ('3f2a1c0e-5b7d-4e21-9a64-0d8c1b2e7f90', 'Test', 'kind_896', 'sales', 'ord_896', 'orders', 'NORMAL', 0, 1)");

@@ -65,7 +65,6 @@ ProductionAuthentication_EntraIdIncomplete [Production]: ValidationException: Se
 ProductionAuthentication_AdfsIncomplete [Production]: ValidationException: Security violation: Outside Development, Adfs.Audience and Authority must be configured.
 ProductionAuthentication_AdfsWithoutAllowedClients [Production]: ValidationException: Security violation: Outside Development, Adfs requires AllowedClientIds to be configured with at least one authorized client ID.
 ProductionAuthentication_WellFormedHashAccepted [Production]: OK
-ProductionStorage_WormWithoutS3Keys [Production]: ValidationException: Security violation: Outside Development, S3 WORM with EnforceObjectLock requires S3AccessKey and S3SecretKey to be configured.
 ProductionStorage_FallbackAuditKey [Production]: ValidationException: CRITICAL SECURITY VIOLATION: Hardcoded or fallback HMAC audit keys are strictly prohibited in production.
 ProductionStorage_AnchorMissing [Production]: ValidationException: CRITICAL AUDIT MISCONFIGURATION (AU-01/AU-03): In production environments, a persistent audit anchor store (ChainAnchorPath, ChainAnchorWormDirectory, or KMS Signer) is mandatory. In-memory anchor stores are strictly prohibited outside Development/Test.
 ProductionStorage_AuditChecksSkippedInTestEnvironment [Production]: OK

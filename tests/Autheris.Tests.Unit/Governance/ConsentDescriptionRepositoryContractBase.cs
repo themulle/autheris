@@ -63,13 +63,13 @@ public abstract class ConsentDescriptionRepositoryContractBase : IAsyncLifetime
         })).Table.Id;
     }
 
-    private static Consent NewConsent(Guid tableId, TableIdentifier table, GranteeType type, string? description, string? roleName = null, DateTimeOffset? validTo = null) => new()
+    private static Consent NewConsent(Guid tableId, TableIdentifier table, GranteeType type, string? description, DateTimeOffset? validTo = null) => new()
     {
         TableId = tableId, TableIdentifier = table, TenantId = Tenant, GranteeType = type,
-        GranteeSid = type == GranteeType.Role ? (Sid?)null : Alice, RoleName = roleName,
+        GranteeSid = Alice,
         ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = validTo ?? DateTimeOffset.UtcNow.AddDays(30),
         CreatedBySid = Admin, Description = description,
-        Effect = type == GranteeType.Role ? ConsentEffect.Deny : ConsentEffect.Allow   // role grantees only restrict
+        Effect = ConsentEffect.Allow
     };
 
     protected async Task<(TableIdentifier Table, Guid TableId)> SeedTableAsync()
@@ -84,7 +84,7 @@ public abstract class ConsentDescriptionRepositoryContractBase : IAsyncLifetime
         if (!Available) return;
         var (table, tableId) = await SeedTableAsync();
         var user = await Repo.CreateConsentAsync(NewConsent(tableId, table, GranteeType.User, "Sales analysts read orders", validTo: DateTimeOffset.UtcNow.AddHours(2)));
-        var role = await Repo.CreateConsentAsync(NewConsent(tableId, table, GranteeType.Role, "Role text", roleName: "Analyst"));
+        var role = await Repo.CreateConsentAsync(NewConsent(tableId, table, GranteeType.Group, "Group text"));
         var none = await Repo.CreateConsentAsync(NewConsent(tableId, table, GranteeType.User, null));
         user.Description.ShouldBe("Sales analysts read orders");
 
@@ -105,15 +105,13 @@ public abstract class ConsentDescriptionRepositoryContractBase : IAsyncLifetime
         await Desc.LoadDescriptionsAsync(all);
         all.Single(c => c.Id == user.Id).Description.ShouldBe("Sales analysts read orders");
 
-        var roles = await Repo.GetActiveRoleConsentsAsync(table, "Analyst", Tenant, now);
-        await Desc.LoadDescriptionsAsync(roles);
-        roles.Single(c => c.Id == role.Id).Description.ShouldBe("Role text");
+        all.Single(c => c.Id == role.Id).Description.ShouldBe("Group text");
 
         var page = await Repo.GetConsentPageAsync(new ConsentPageQuery(Tenant, table));
         page.Items.ShouldAllBe(c => c.Description == null);
         await Desc.LoadDescriptionsAsync(page.Items);
         page.Items.Single(c => c.Id == user.Id).Description.ShouldBe("Sales analysts read orders");
-        page.Items.Single(c => c.Id == role.Id).Description.ShouldBe("Role text");
+        page.Items.Single(c => c.Id == role.Id).Description.ShouldBe("Group text");
 
         var expiring = await Repo.GetExpiringConsentsAsync(now.AddHours(3));
         expiring.ShouldAllBe(c => c.Description == null);

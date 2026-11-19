@@ -23,16 +23,7 @@ public partial class GovernanceRepository
 {
     internal static class ConsentGrantPostgreSql
     {
-        public static string ActiveRoleConsents(bool withTenant) => @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
-                                       c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to,
-                                       c.is_revoked, c.tenant_id
-                                FROM CONSENTS c
-                                JOIN TABLES t ON c.table_id = t.id
-                                WHERE LOWER(t.source_name) = LOWER(@domain) AND LOWER(t.schema_name) = LOWER(@schema) AND LOWER(t.table_name) = LOWER(@table)
-                                  AND c.is_revoked = 0" + (withTenant ? " AND c.tenant_id = @tenantId" : "") + @"
-                                  AND c.grantee_type = 'Role' AND LOWER(c.role_name) = LOWER(@role)";
-
-        public const string RevokeTarget = @"SELECT t.source_name, t.schema_name, t.table_name, c.tenant_id, c.grantee_type, c.grantee_sid, c.is_revoked, c.grant_source, c.role_name, c.consent_request_id, c.profile_assignment_id, c.valid_from, c.valid_to, c.table_id, c.effect, c.object_pattern, c.data_source
+        public const string RevokeTarget = @"SELECT t.source_name, t.schema_name, t.table_name, c.tenant_id, c.grantee_type, c.grantee_sid, c.is_revoked, c.grant_source, c.consent_request_id, c.profile_assignment_id, c.valid_from, c.valid_to, c.table_id, c.effect, c.object_pattern, c.data_source
                                 FROM CONSENTS c 
                                 LEFT JOIN TABLES t ON c.table_id = t.id
                                 WHERE c.id = @id
@@ -41,16 +32,7 @@ public partial class GovernanceRepository
 
     internal static class ConsentGrantSqlServer
     {
-        public static string ActiveRoleConsents(bool withTenant) => @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
-                                       c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to,
-                                       c.is_revoked, c.tenant_id
-                                FROM CONSENTS c
-                                JOIN TABLES t ON c.table_id = t.id
-                                WHERE t.source_name_lc = LOWER(@domain) AND t.schema_name_lc = LOWER(@schema) AND t.table_name_lc = LOWER(@table)
-                                  AND c.is_revoked = 0" + (withTenant ? " AND c.tenant_id = @tenantId" : "") + @"
-                                  AND c.grantee_type = 'Role' AND LOWER(c.role_name) = LOWER(@role)";
-
-        public const string RevokeTarget = @"SELECT t.source_name, t.schema_name, t.table_name, c.tenant_id, c.grantee_type, c.grantee_sid, c.is_revoked, c.grant_source, c.role_name, c.consent_request_id, c.profile_assignment_id, c.valid_from, c.valid_to, c.table_id, c.effect, c.object_pattern, c.data_source
+        public const string RevokeTarget = @"SELECT t.source_name, t.schema_name, t.table_name, c.tenant_id, c.grantee_type, c.grantee_sid, c.is_revoked, c.grant_source, c.consent_request_id, c.profile_assignment_id, c.valid_from, c.valid_to, c.table_id, c.effect, c.object_pattern, c.data_source
                                 FROM CONSENTS c WITH (UPDLOCK, ROWLOCK)
                                 LEFT JOIN TABLES t ON c.table_id = t.id
                                 WHERE c.id = @id";
@@ -59,27 +41,6 @@ public partial class GovernanceRepository
     private string RevokeTargetSql => _dialect is PostgreSqlGovernanceDialect
         ? ConsentGrantPostgreSql.RevokeTarget
         : ConsentGrantSqlServer.RevokeTarget;
-
-    private string ActiveRoleConsentsSql(bool withTenant) => _dialect is PostgreSqlGovernanceDialect
-        ? ConsentGrantPostgreSql.ActiveRoleConsents(withTenant)
-        : ConsentGrantSqlServer.ActiveRoleConsents(withTenant);
-
-    public async Task<IReadOnlyList<Consent>> GetActiveRoleConsentsAsync(
-        TableIdentifier table,
-        string roleName,
-        TenantId? tenantId,
-        DateTimeOffset atTime,
-        CancellationToken ct = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(roleName);
-        TenantScope.RequireTenant(tenantId, nameof(GovernanceTable.Consents)); // no cross-tenant role read
-
-        var sql = ActiveRoleConsentsSql(tenantId != null);
-        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        var consents = await ConsentGrantSqlCore.ReadActiveRoleConsentsAsync(conn, sql, table, roleName, tenantId, atTime, ct).ConfigureAwait(false);
-        await HydrateConsentsBatchAsync(conn, consents, ct).ConfigureAwait(false);
-        return consents;
-    }
 
     internal const string PrunedByManifestReason = "PRUNED_BY_MANIFEST";
 
@@ -589,7 +550,6 @@ internal readonly record struct RevokeTarget(
     string? RawGrantSource,
     string? RawGranteeType = null,
     string? RawGranteeSid = null,
-    string? RoleName = null,
     Guid? ConsentRequestId = null,
     Guid? ProfileAssignmentId = null,
     DateTimeOffset? ValidFrom = null,
@@ -606,48 +566,6 @@ internal static class ConsentGrantSqlCore
     public const string RevokedDecision = "REVOKED";
     public const string MarkRevoked = @"UPDATE CONSENTS SET is_revoked = 1, revoked_by_sid = @by, revoked_at = @now, revoke_reason = @reason
                                 WHERE id = @id AND is_revoked = 0";
-
-    public static async Task<List<Consent>> ReadActiveRoleConsentsAsync(
-        DbConnection conn, string sql, TableIdentifier table, string roleName, TenantId? tenantId, DateTimeOffset atTime, CancellationToken ct)
-    {
-        var consents = new List<Consent>();
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = sql;
-        cmd.AddBound("@domain", table.Domain);
-        cmd.AddBound("@schema", table.Schema);
-        cmd.AddBound("@table", table.TableName);
-        if (tenantId != null)
-        {
-            cmd.AddBound("@tenantId", tenantId.Value.Value);
-        }
-        cmd.AddBound("@role", roleName);
-
-        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        while (await reader.ReadAsync(ct).ConfigureAwait(false))
-        {
-            var validFrom = DateTimeOffset.Parse(reader.GetString(8), CultureInfo.InvariantCulture);
-            var validTo = DateTimeOffset.Parse(reader.GetString(9), CultureInfo.InvariantCulture);
-            if (atTime < validFrom || atTime >= validTo) continue;
-
-            consents.Add(new Consent
-            {
-                Id = Guid.Parse(reader.GetString(0)),
-                TableId = Guid.Parse(reader.GetString(1)),
-                TableIdentifier = table,
-                ConsentRequestId = reader.IsDBNull(2) ? null : Guid.Parse(reader.GetString(2)),
-                Effect = Enum.Parse<ConsentEffect>(reader.GetString(3), true),
-                GranteeType = GranteeType.Role,
-                GranteeSid = reader.IsDBNull(5) ? (Sid?)null : new Sid(reader.GetString(5)),
-                RoleId = reader.IsDBNull(6) ? null : Guid.Parse(reader.GetString(6)),
-                RoleName = reader.IsDBNull(7) ? null : reader.GetString(7),
-                ValidFrom = validFrom,
-                ValidTo = validTo,
-                IsRevoked = reader.GetInt32(10) == 1,
-                TenantId = StoredTenant.Parse(reader.IsDBNull(11) ? null : reader.GetString(11))
-            });
-        }
-        return consents;
-    }
 
     public static async Task<RevokeTarget?> ReadRevokeTargetAsync(
         DbConnection conn, DbTransaction tx, string sql, Guid consentId, Sid actor, CancellationToken ct)
@@ -672,19 +590,18 @@ internal static class ConsentGrantSqlCore
                             string.Equals(rawGranteeSid, actor.Value, StringComparison.OrdinalIgnoreCase);
         var isRevoked = reader.GetInt32(6) == 1;
         var rawGrantSource = reader.FieldCount > 7 && !reader.IsDBNull(7) ? reader.GetString(7) : null;
-        var roleName = ConsentWorkflowSql.ReadOptionalString(reader, 8);
-        var consentRequestId = ConsentWorkflowSql.ReadOptionalGuid(reader, 9);
-        var profileAssignmentId = ConsentWorkflowSql.ReadOptionalGuid(reader, 10);
-        var validFrom = ConsentWorkflowSql.ReadOptionalTimestamp(reader, 11);
-        var validTo = ConsentWorkflowSql.ReadOptionalTimestamp(reader, 12);
-        var tableId = ConsentWorkflowSql.ReadOptionalGuid(reader, 13) ?? Guid.Empty;
-        var rawEffect = ConsentWorkflowSql.ReadOptionalString(reader, 14);
-        var objectPattern = ConsentWorkflowSql.ReadOptionalString(reader, 15);
-        var dataSource = ConsentWorkflowSql.ReadOptionalString(reader, 16);
+        var consentRequestId = ConsentWorkflowSql.ReadOptionalGuid(reader, 8);
+        var profileAssignmentId = ConsentWorkflowSql.ReadOptionalGuid(reader, 9);
+        var validFrom = ConsentWorkflowSql.ReadOptionalTimestamp(reader, 10);
+        var validTo = ConsentWorkflowSql.ReadOptionalTimestamp(reader, 11);
+        var tableId = ConsentWorkflowSql.ReadOptionalGuid(reader, 12) ?? Guid.Empty;
+        var rawEffect = ConsentWorkflowSql.ReadOptionalString(reader, 13);
+        var objectPattern = ConsentWorkflowSql.ReadOptionalString(reader, 14);
+        var dataSource = ConsentWorkflowSql.ReadOptionalString(reader, 15);
 
         return new RevokeTarget(
             table, rawTenant, isGranteeSelf, isRevoked, rawGrantSource,
-            granteeType, rawGranteeSid, roleName, consentRequestId, profileAssignmentId, validFrom, validTo, tableId, rawEffect,
+            granteeType, rawGranteeSid, consentRequestId, profileAssignmentId, validFrom, validTo, tableId, rawEffect,
             objectPattern, dataSource);
     }
 
@@ -700,7 +617,7 @@ internal static class ConsentGrantSqlCore
         DateTimeOffset now,
         CancellationToken ct)
     {
-        var granteeType = Enum.TryParse<GranteeType>(target.RawGranteeType, true, out var parsedGrantee)
+        var granteeType = GranteeTypeParsing.TryParse(target.RawGranteeType, out var parsedGrantee)
             ? parsedGrantee
             : GranteeType.User;
         var effect = Enum.TryParse<ConsentEffect>(target.RawEffect, true, out var parsedEffect)
@@ -718,7 +635,6 @@ internal static class ConsentGrantSqlCore
             TenantId = tenant,
             GranteeType = granteeType,
             GranteeSid = !string.IsNullOrWhiteSpace(target.RawGranteeSid) ? new Sid(target.RawGranteeSid) : (Sid?)null,
-            RoleName = target.RoleName,
             ValidFrom = target.ValidFrom ?? DateTimeOffset.MinValue,
             ValidTo = target.ValidTo ?? DateTimeOffset.MaxValue,
             GrantSource = grantSource,
@@ -733,8 +649,8 @@ internal static class ConsentGrantSqlCore
             System.Text.Json.JsonSerializer.Serialize(new { Action = RevokedDecision, Reason = reason }),
             now,
             ObjectId: objectId,
-            GranteeType: granteeType.ToString(),
-            GranteeRef: target.RawGranteeSid ?? target.RoleName ?? consentId.ToString("D"),
+            GranteeType: target.RawGranteeType ?? granteeType.ToString(),
+            GranteeRef: target.RawGranteeSid ?? consentId.ToString("D"),
             RequestId: target.ConsentRequestId,
             GrantSource: grantSource,
             ProfileAssignmentId: target.ProfileAssignmentId,

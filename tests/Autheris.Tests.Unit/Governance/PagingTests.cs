@@ -98,8 +98,7 @@ public sealed class PagingTests : IDisposable
         TenantId = new TenantId(tenant),
         TableIdentifier = Orders,
         GranteeType = type,
-        GranteeSid = type == GranteeType.Role ? (Sid?)null : new Sid($"S-1-5-21-{n}"),
-        RoleName = type == GranteeType.Role ? $"role{n}" : null,
+        GranteeSid = new Sid($"S-1-5-21-{n}"),
         ValidFrom = validFrom ?? Now.AddDays(-1),
         ValidTo = validTo ?? Now.AddDays(10)
     };
@@ -143,7 +142,7 @@ public sealed class PagingTests : IDisposable
         var legacyActive = C(1, validFrom: Now.AddDays(-10), validTo: DateTimeOffset.MaxValue);           // clamped to From+180d, still active
         var legacyExpired = C(2, validFrom: Now.AddDays(-400), validTo: DateTimeOffset.MaxValue);          // clamped, already inactive
         var normal = C(3);
-        var role = C(4, GranteeType.Role, validFrom: Now.AddDays(-400), validTo: DateTimeOffset.MaxValue); // standing, never clamped
+        var role = C(4, GranteeType.Group, validFrom: Now.AddDays(-400), validTo: DateTimeOffset.MaxValue); // standing, never clamped
         var repo = new ConsentPages([legacyActive, legacyExpired, normal, role]);
         var q = new ConsentPageQuery(new TenantId("t1"));
 
