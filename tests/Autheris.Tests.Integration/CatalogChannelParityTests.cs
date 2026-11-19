@@ -453,9 +453,7 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
 
     private static Task<string> GraphQlCatalogAsync(HttpClient client) => PostGraphQlAllAsync(client,
         "query { catalog(first: 10) { tableName columnNames } }",
-        "query { catalog(first: 10) { tableName columns { name } } }",
-        "query { catalogObject(domain: \"dom_a\", schema: \"main\", name: \"orders_a\") { columnNames } }",
-        "query { catalogObject(domain: \"dom_a\", schema: \"main\", name: \"orders_a\") { columns { name } } }");
+        "query { catalogObject(domain: \"dom_a\", schema: \"main\", name: \"orders_a\") { columnNames columns { name } } }");
 
     private static IReadOnlyList<string> SchemaColumnNames(string json)
     {
@@ -544,9 +542,8 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
         // GraphQL.
         var graphQl = await PostGraphQlAllAsync(client,
             "query { catalog(first: 10) { tableName columnNames } }",
-            "query { catalog(first: 10) { tableName columns { name description } } }",
-            "query { catalogObject(domain: \"dom_a\", schema: \"main\", name: \"vault_a\") { columnNames } }",
-            "query { catalogObject(domain: \"dom_a\", schema: \"main\", name: \"vault_a\") { columns { name description } } }");
+            "query { catalogObject(domain: \"dom_a\", schema: \"main\", name: \"orders_a\") { columnNames columns { name description } } }",
+            "query { catalogObject(domain: \"dom_a\", schema: \"main\", name: \"vault_a\") { columnNames columns { name description } } }");
         graphQl.ShouldNotContain(DeniedColumn);
         graphQl.ShouldNotContain(DeniedDescription);
 
@@ -671,7 +668,7 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
         var (_, permissions) = await McpTestClient.CallAsync(mcp, "get_my_permissions", new { dataset = "dom_b.main.invoices_b" });
         var graphQl = await PostGraphQlAllAsync(client,
             "query { catalog(first: 10) { tableName columnNames } }",
-            "query { catalog(first: 10) { tableName columns { name } } }");
+            "query { catalogObject(domain: \"dom_b\", schema: \"main\", name: \"invoices_b\") { columnNames columns { name } } }");
 
         foreach (var column in new[] { "secret_note", "amount" })
         {
