@@ -75,7 +75,7 @@ public sealed class DiscoveryArchitectureTests
             typeof(Autheris.Application.Catalog.Discovery.DiscoveryService).Assembly,
             typeof(Autheris.Api.Errors.ApiErrorCodes).Assembly,
             typeof(Autheris.GraphQL.Types.Query).Assembly,
-            typeof(Autheris.Extensions.Dbt.DbtArtifactStreamingParser).Assembly
+            typeof(Autheris.Modules.Dbt.DbtArtifactStreamingParser).Assembly
         };
 
         var forbidden = new[]

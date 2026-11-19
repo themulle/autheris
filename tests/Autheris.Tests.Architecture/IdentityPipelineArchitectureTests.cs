@@ -88,7 +88,7 @@ public sealed class IdentityPipelineArchitectureTests
         "Autheris.Api.Endpoints.UsageEndpoints",
         "Autheris.GraphQL.Catalog.AggregateGraphQlTypes",
         "Autheris.GraphQL.Catalog.MetricGraphQlTypes",
-        "Autheris.Extensions.Dbt.DbtOwnerSpecValidator"
+        "Autheris.Modules.Dbt.DbtOwnerSpecValidator"
     ];
 
     [Fact]

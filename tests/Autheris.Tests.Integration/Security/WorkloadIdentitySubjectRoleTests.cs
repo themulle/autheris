@@ -60,6 +60,7 @@ public sealed class WorkloadIdentitySubjectRoleTests : IClassFixture<WorkloadIde
             Factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
             {
                 builder.UseEnvironment("Development");
+                Autheris.Tests.Integration.DbtWorkspaceTestSettings.Apply((k, v) => builder.UseSetting(k, v));
                 builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
                 builder.UseSetting("Gateway:GovernanceDb:ConnectionString", connectionString);
                 builder.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "1000");
@@ -147,7 +148,7 @@ public sealed class WorkloadIdentitySubjectRoleTests : IClassFixture<WorkloadIde
     private async Task<HttpStatusCode> PostGovernanceAsync(string token)
     {
         using var client = _fixture.Factory.CreateClient();
-        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/extensions/dbt/governance?dryRun=true")
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/modules/dbt/governance?dryRun=true")
         {
             Content = new StringContent("{}", Encoding.UTF8, "application/json")
         };

@@ -70,19 +70,24 @@ public sealed class TypedAggregationEndToEndTests : IClassFixture<TypedAggregati
             try { Directory.Delete(_workDir, true); } catch { /* best effort */ }
         }
 
-        private static Dictionary<string, string?> Settings(string govPath, string dataPath) => new()
+        private static Dictionary<string, string?> Settings(string govPath, string dataPath)
         {
-            ["Gateway:Authentication:EnableTestAuthHandler"] = "true",
-            ["Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit"] = "100000",
-            ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
-            ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.CreateStable(govPath),
-            ["Gateway:Insecure:danger_bypass_consent_checks"] = "true",
-            // The count of suppressed groups is not exposed by default (privacy); this test asserts it.
-            ["Analytics:Privacy:ExposeSuppressedGroupsCount"] = "true",
-            ["Gateway:DataSources:Connections:default:Provider"] = "PostgreSql",
-            ["Gateway:DataSources:Connections:default:DefaultSchema"] = "main",
-            ["Gateway:DataSources:Connections:default:ConnectionString"] = dataPath,
-        };
+            var settings = new Dictionary<string, string?>
+            {
+                ["Gateway:Authentication:EnableTestAuthHandler"] = "true",
+                ["Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit"] = "100000",
+                ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
+                ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.CreateStable(govPath),
+                ["Gateway:Insecure:danger_bypass_consent_checks"] = "true",
+                // The count of suppressed groups is not exposed by default (privacy); this test asserts it.
+                ["Analytics:Privacy:ExposeSuppressedGroupsCount"] = "true",
+                ["Gateway:DataSources:Connections:default:Provider"] = "PostgreSql",
+                ["Gateway:DataSources:Connections:default:DefaultSchema"] = "main",
+                ["Gateway:DataSources:Connections:default:ConnectionString"] = dataPath,
+            };
+            DbtWorkspaceTestSettings.Apply((k, v) => settings[k] = v);
+            return settings;
+        }
     }
 
     // Groups: A 99,991 rows, B 5, C 4, D 1 = 100,001 rows.
@@ -216,7 +221,7 @@ public sealed class TypedAggregationEndToEndTests : IClassFixture<TypedAggregati
     {
         var first = await StartHostAsync();
         var import = await Client(first, roles: "GovernanceAdmin,ClusterAdmin,DbtAdmin")
-            .PostAsync("/api/extensions/dbt/semantic-manifest", new StringContent(Manifest, Encoding.UTF8, "application/json"));
+            .PostAsync("/modules/dbt/semantic-manifest", new StringContent(Manifest, Encoding.UTF8, "application/json"));
         import.StatusCode.ShouldBe(HttpStatusCode.OK, await import.Content.ReadAsStringAsync());
 
         using var restarted = NewHost();
@@ -238,7 +243,7 @@ public sealed class TypedAggregationEndToEndTests : IClassFixture<TypedAggregati
     {
         var host = await StartHostAsync();
         (await Client(host, roles: "GovernanceAdmin,ClusterAdmin,DbtAdmin", tenant: "tenant_a")
-            .PostAsync("/api/extensions/dbt/semantic-manifest", new StringContent(Manifest, Encoding.UTF8, "application/json")))
+            .PostAsync("/modules/dbt/semantic-manifest", new StringContent(Manifest, Encoding.UTF8, "application/json")))
             .StatusCode.ShouldBe(HttpStatusCode.OK);
 
         using var doc = await GraphQlAsync(Client(host, tenant: "tenant_b"), "{ queryMetrics(metrics: [\"revenue\"]) { count } }");

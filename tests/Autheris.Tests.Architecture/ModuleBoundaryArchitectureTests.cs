@@ -303,7 +303,11 @@ public sealed partial class ModuleBoundaryArchitectureTests
             .ToList();
         violations.ShouldBeEmpty("No module may implement IModuleRequestContext:\n" + string.Join("\n", violations));
 
-        var moduleAssemblies = new[] { typeof(Autheris.Modules.Lakehouse.LakehouseModule).Assembly };
+        var moduleAssemblies = new[]
+        {
+            typeof(Autheris.Modules.Lakehouse.LakehouseModule).Assembly,
+            typeof(Autheris.Modules.Dbt.DbtModule).Assembly,
+        };
         moduleAssemblies
             .SelectMany(a => a.GetTypes())
             .Where(t => typeof(IModuleRequestContext).IsAssignableFrom(t))
@@ -314,6 +318,65 @@ public sealed partial class ModuleBoundaryArchitectureTests
             .Where(t => typeof(IModuleRequestContext).IsAssignableFrom(t) && t.IsClass)
             .Select(t => t.Name)
             .ShouldBe([nameof(ModuleRequestContext)]);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Dbt_webhook_handler_referenced_only_by_core_webhook_endpoint()
+    {
+        var root = RepositoryScan.FindRepositoryRoot();
+        var allowedCore = new[]
+        {
+            "src/Autheris.Application/Catalog/Semantic/IDbtCloudWebhookHandler.cs",
+            "src/Autheris.Api/Endpoints/WebhookEndpoints.cs",
+            "src/Autheris.Api/Hosting/ModuleSecurityGuards.cs",
+        };
+
+        var violations = new List<string>();
+        foreach (var file in RepositoryScan.ProductionFiles.Where(f => f.Text.Contains("IDbtCloudWebhookHandler", StringComparison.Ordinal)))
+        {
+            if (!allowedCore.Contains(file.RelativePath, StringComparer.Ordinal))
+            {
+                violations.Add(file.RelativePath);
+            }
+        }
+
+        violations.ShouldBeEmpty("Only the core webhook route (and the module guard) may reference IDbtCloudWebhookHandler:\n" + string.Join("\n", violations));
+
+        var module = Path.Combine(root, "modules", "Autheris.Modules.Dbt");
+        var implementations = Directory.EnumerateFiles(module, "*.cs", SearchOption.AllDirectories)
+            .Where(f => !f.Contains("/obj/", StringComparison.Ordinal) && !f.Contains("/bin/", StringComparison.Ordinal))
+            .Where(f => File.ReadAllText(f).Contains("IDbtCloudWebhookHandler", StringComparison.Ordinal))
+            .Select(f => Path.GetFileName(f))
+            .OrderBy(n => n, StringComparer.Ordinal)
+            .ToList();
+        implementations.ShouldBe(["DbtServiceCollectionExtensions.cs", "DbtWebhookReceiver.cs"]);
+
+        var receiver = typeof(Autheris.Modules.Dbt.DbtModule).Assembly.GetType("Autheris.Modules.Dbt.DbtWebhookReceiver");
+        receiver.ShouldNotBeNull().IsPublic.ShouldBeFalse("The webhook handler implementation must be internal.");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Signature_verifier_uses_fixed_time_compare()
+    {
+        var verifier = RepositoryScan.ProductionFiles
+            .Single(f => f.RelativePath == "src/Autheris.Application/Catalog/Semantic/DbtCloudWebhookSignature.cs");
+        verifier.Text.ShouldContain("CryptographicOperations.FixedTimeEquals");
+        verifier.Text.ShouldNotContain("SequenceEqual");
+        verifier.Text.ShouldNotContain("string.Equals");
+        verifier.Text.ShouldNotContain("== computed");
+        verifier.Text.ShouldNotContain("ILogger");
+
+        typeof(Autheris.Application.Catalog.Semantic.DbtCloudWebhookSignature).IsAbstract.ShouldBeTrue("The verifier must be a static class.");
+        typeof(Autheris.Application.Catalog.Semantic.DbtCloudWebhookSignature).IsSealed.ShouldBeTrue();
+
+        var webhooks = RepositoryScan.ProductionFiles.Single(f => f.RelativePath == "src/Autheris.Api/Endpoints/WebhookEndpoints.cs");
+        webhooks.Text.ShouldNotContain("DBT_WEBHOOK_SECRET");
+        RepositoryScan.ProductionFiles
+            .Where(f => f.Text.Contains("DBT_WEBHOOK_SECRET", StringComparison.Ordinal))
+            .Select(f => f.RelativePath)
+            .ShouldBeEmpty("The environment secret fallback was removed; only Gateway:Dbt:WebhookSecret counts.");
     }
 
     [Fact]

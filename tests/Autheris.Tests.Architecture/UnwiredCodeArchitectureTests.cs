@@ -6,7 +6,7 @@ using System.Reflection;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Mcp.Services;
 using Autheris.Domain.Model;
-using Autheris.Extensions.Dbt;
+using Autheris.Modules.Dbt;
 using Autheris.Application.State.Caching.TableCache.Governance;
 using Shouldly;
 using Xunit;

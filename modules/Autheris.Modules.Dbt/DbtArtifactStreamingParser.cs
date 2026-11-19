@@ -1,0 +1,936 @@
+using Autheris.Application.Catalog.Services;
+using Autheris.Domain.Common;
+namespace Autheris.Modules.Dbt;
+
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
+using Autheris.Domain.Model;
+
+public static class DbtArtifactStreamingParser
+{
+    public static async Task<IReadOnlyList<DbtModelDefinition>> ParseManifestStreamAsync(Stream stream, CancellationToken ct = default)
+    {
+        var result = await ParseManifestWithRelationshipsAsync(stream, ct).ConfigureAwait(false);
+        return result.Models;
+    }
+
+    public static async Task<DbtManifestParseResult> ParseManifestWithRelationshipsAsync(
+        Stream stream,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+
+        var models = new List<DbtModelDefinition>();
+        var relations = new RelationCollector();
+        // Issue #392: node index and relations collected during the node pass, resolved once models and sources are indexed.
+        var resolver = new DbtManifestReferenceResolver();
+        var pending = new List<DbtPendingRelation>();
+        // Issue #94 (D-8): declared keys per model unique id (constraints and unique tests may arrive in any node order).
+        var keyBuilders = new Dictionary<string, CatalogKeyDefinitionImport.Collector>(StringComparer.OrdinalIgnoreCase);
+        // Issue #459: config.meta.indexes (fallback meta.indexes) per model/source unique id (takes precedence over key tests).
+        var metaIndexBuilders = new Dictionary<string, CatalogKeyDefinitionImport.Collector>(StringComparer.OrdinalIgnoreCase);
+
+        // Parse JsonDocument asynchronously using streaming options
+        var jsonDocOptions = new JsonDocumentOptions
+        {
+            AllowTrailingCommas = true,
+            CommentHandling = JsonCommentHandling.Skip,
+            MaxDepth = 64
+        };
+
+        using var document = await JsonDocument.ParseAsync(stream, jsonDocOptions, ct).ConfigureAwait(false);
+        var root = document.RootElement;
+        var testToModels = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+
+        if (root.TryGetProperty("nodes", out var nodesElement) && nodesElement.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var nodeProperty in nodesElement.EnumerateObject())
+            {
+                ct.ThrowIfCancellationRequested();
+                var node = nodeProperty.Value;
+
+                // R-31: Inspect test nodes for relationship tests
+                if (nodeProperty.Name.StartsWith("test.", StringComparison.OrdinalIgnoreCase))
+                {
+                    DbtRelationImport.CollectTest(node, root, relations, pending);
+
+                    CollectUniqueTest(nodeProperty.Name, node, keyBuilders, relations);
+
+                    // EXT-08: collect test target model mappings for circuit breaker attribution
+                    var testUniqueId = nodeProperty.Name;
+                    var targetModels = new List<string>();
+                    if (node.TryGetProperty("attached_node", out var anProp2) && anProp2.GetString() is string anStr && !string.IsNullOrWhiteSpace(anStr))
+                    {
+                        targetModels.Add(anStr);
+                    }
+                    if (node.TryGetProperty("depends_on", out var depProp2) &&
+                        depProp2.TryGetProperty("nodes", out var depNodes2) &&
+                        depNodes2.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var dn in depNodes2.EnumerateArray())
+                        {
+                            var dnStr = dn.GetString();
+                            if (!string.IsNullOrWhiteSpace(dnStr) &&
+                                (dnStr.StartsWith("model.", StringComparison.OrdinalIgnoreCase) ||
+                                 dnStr.StartsWith("source.", StringComparison.OrdinalIgnoreCase) ||
+                                 dnStr.StartsWith("seed.", StringComparison.OrdinalIgnoreCase)))
+                            {
+                                if (!targetModels.Contains(dnStr, StringComparer.OrdinalIgnoreCase))
+                                {
+                                    targetModels.Add(dnStr);
+                                }
+                            }
+                        }
+                    }
+                    if (targetModels.Count > 0)
+                    {
+                        testToModels[testUniqueId] = targetModels;
+                    }
+
+                    continue;
+                }
+
+                // Issue #392: every model, seed and snapshot is a possible ref() target.
+                if (nodeProperty.Name.StartsWith("model.", StringComparison.OrdinalIgnoreCase) ||
+                    nodeProperty.Name.StartsWith("seed.", StringComparison.OrdinalIgnoreCase) ||
+                    nodeProperty.Name.StartsWith("snapshot.", StringComparison.OrdinalIgnoreCase))
+                {
+                    resolver.RegisterNode(
+                        nodeProperty.Name,
+                        node.TryGetProperty("name", out var idxName) && idxName.ValueKind == JsonValueKind.String ? idxName.GetString() ?? "" : "",
+                        ReadString(node, "package_name"),
+                        node.TryGetProperty("version", out var idxVersion) && idxVersion.ValueKind is JsonValueKind.Number or JsonValueKind.String
+                            ? idxVersion.ValueKind == JsonValueKind.String ? idxVersion.GetString() : idxVersion.GetRawText()
+                            : null);
+                }
+
+                // Only inspect model and seed nodes (e.g. "model.my_project.customers")
+                if (!nodeProperty.Name.StartsWith("model.", StringComparison.OrdinalIgnoreCase) &&
+                    !nodeProperty.Name.StartsWith("seed.", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var uniqueId = nodeProperty.Name;
+                var name = node.TryGetProperty("name", out var nameProp) ? nameProp.GetString() ?? "" : "";
+                var physicalName = ReadPhysicalName(node, "alias", name);
+                var database = node.TryGetProperty("database", out var dbProp) ? dbProp.GetString() ?? "" : "";
+                var schema = node.TryGetProperty("schema", out var schemaProp) ? schemaProp.GetString() ?? "" : "";
+                var description = node.TryGetProperty("description", out var descProp) ? descProp.GetString() : null;
+
+                // Materialization
+                var materialization = "table";
+                if (node.TryGetProperty("config", out var configProp) &&
+                    configProp.TryGetProperty("materialized", out var matProp))
+                {
+                    materialization = matProp.GetString() ?? "table";
+                }
+
+                // Contract Enforced
+                var contractEnforced = false;
+                if (node.TryGetProperty("contract", out var contractProp) &&
+                    contractProp.TryGetProperty("enforced", out var enfProp) &&
+                    enfProp.ValueKind == JsonValueKind.True)
+                {
+                    contractEnforced = true;
+                }
+
+                // Tags
+                var tags = new List<string>();
+                if (node.TryGetProperty("tags", out var tagsProp) && tagsProp.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var tag in tagsProp.EnumerateArray())
+                    {
+                        var tagStr = tag.GetString();
+                        if (!string.IsNullOrWhiteSpace(tagStr))
+                        {
+                            tags.Add(tagStr);
+                        }
+                    }
+                }
+
+                // Meta
+                var meta = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                if (node.TryGetProperty("meta", out var metaProp) && metaProp.ValueKind == JsonValueKind.Object)
+                {
+                    foreach (var m in metaProp.EnumerateObject())
+                    {
+                        meta[m.Name] = JsonValueText.From(m.Value);
+                    }
+                }
+
+                // R-31: Model-level constraints (foreign_key); issue #94: primary_key and unique
+                var modelKeys = GetBuilder(keyBuilders, uniqueId);
+                var ownDependsOn = DbtRelationReferenceResolution.ReadDependsOn(node);
+                if (node.TryGetProperty("constraints", out var modelConsProp) && modelConsProp.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var con in modelConsProp.EnumerateArray())
+                    {
+                        CollectKeyConstraint(modelKeys, con, columnName: null);
+                        if (con.TryGetProperty("type", out var typeProp) &&
+                            string.Equals(typeProp.GetString(), "foreign_key", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var toRaw = ReadConstraintTarget(con);
+                            var childCols = ReadKeyArray(con, "columns");
+                            var parentCols = ReadKeyArray(con, "to_columns");
+                            var toModel = ExtractModelName(toRaw);
+                            var relName = toModel.StartsWith("stg_", StringComparison.Ordinal) ? toModel[4..] : toModel;
+                            if (childCols.Count == 0 && con.TryGetProperty("expression", out _))
+                            {
+                                relations.Skip(relName, name, toModel, "UNSUPPORTED_FORM");
+                            }
+                            else if (string.IsNullOrWhiteSpace(toRaw))
+                            {
+                                relations.Skip(relName, name, toModel, "MISSING_TARGET");
+                            }
+                            else if (relations.Reserve() && relations.ReserveDependsOn(ownDependsOn.Count))
+                            {
+                                pending.Add(new DbtPendingRelation(toRaw, null, ownDependsOn, parentCols, childCols, null, uniqueId, name));
+                            }
+                        }
+                    }
+                }
+
+                // Columns
+                var columns = new Dictionary<string, DbtColumnDefinition>(StringComparer.OrdinalIgnoreCase);
+                var columnLevelPrimaryKey = new List<string>();
+                if (node.TryGetProperty("columns", out var colsProp) && colsProp.ValueKind == JsonValueKind.Object)
+                {
+                    foreach (var colProp in colsProp.EnumerateObject())
+                    {
+                        var colName = colProp.Name;
+                        var colVal = colProp.Value;
+                        var colType = colVal.TryGetProperty("data_type", out var dtProp) ? dtProp.GetString() : null;
+                        var colDesc = colVal.TryGetProperty("description", out var cdProp) ? cdProp.GetString() : null;
+
+                        var colTags = new List<string>();
+                        if (colVal.TryGetProperty("tags", out var ctProp) && ctProp.ValueKind == JsonValueKind.Array)
+                        {
+                            foreach (var ctItem in ctProp.EnumerateArray())
+                            {
+                                var s = ctItem.GetString();
+                                if (!string.IsNullOrWhiteSpace(s)) colTags.Add(s);
+                            }
+                        }
+
+                        var colMeta = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                        if (colVal.TryGetProperty("meta", out var cmProp) && cmProp.ValueKind == JsonValueKind.Object)
+                        {
+                            foreach (var cm in cmProp.EnumerateObject())
+                            {
+                                colMeta[cm.Name] = JsonValueText.From(cm.Value);
+                            }
+                        }
+
+                        // R-31: Column-level constraints (foreign_key)
+                        if (colVal.TryGetProperty("constraints", out var colConsProp) && colConsProp.ValueKind == JsonValueKind.Array)
+                        {
+                            foreach (var con in colConsProp.EnumerateArray())
+                            {
+                                CollectKeyConstraint(modelKeys, con, columnName: colName, columnLevelPrimaryKey);
+                                if (con.TryGetProperty("type", out var typeProp) &&
+                                    string.Equals(typeProp.GetString(), "foreign_key", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    var toRaw = ReadConstraintTarget(con);
+                                    var toModel = ExtractModelName(toRaw);
+                                    var parentCols = new List<string>(1);
+                                    if (con.TryGetProperty("field", out var fP) && fP.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(fP.GetString()))
+                                    {
+                                        parentCols.Add(fP.GetString()!);
+                                    }
+                                    else
+                                    {
+                                        foreach (var tc in ReadKeyArray(con, "to_columns"))
+                                        {
+                                            if (!string.IsNullOrWhiteSpace(tc)) { parentCols.Add(tc); break; }
+                                        }
+                                    }
+
+                                    var relName = toModel.StartsWith("stg_", StringComparison.Ordinal) ? toModel[4..] : toModel;
+                                    if (string.IsNullOrWhiteSpace(toRaw))
+                                    {
+                                        relations.Skip(relName, name, toModel, "MISSING_TARGET");
+                                    }
+                                    else if (parentCols.Count == 0 && con.TryGetProperty("expression", out _))
+                                    {
+                                        relations.Skip(relName, name, toModel, "UNSUPPORTED_FORM");
+                                    }
+                                    else if (relations.Reserve() && relations.ReserveDependsOn(ownDependsOn.Count))
+                                    {
+                                        pending.Add(new DbtPendingRelation(toRaw, null, ownDependsOn, parentCols, [colName], null, uniqueId, name));
+                                    }
+                                }
+                            }
+                        }
+
+                        columns[colName] = new DbtColumnDefinition(colName, colType, colDesc, colTags, colMeta);
+                    }
+                }
+
+                if (columnLevelPrimaryKey.Count > 0)
+                {
+                    modelKeys.AddPrimaryKey(columnLevelPrimaryKey);
+                }
+
+                CollectMetaIndexes(uniqueId, node, metaIndexBuilders, relations);
+
+                // Depends On
+                var dependsOn = new List<string>();
+                if (node.TryGetProperty("depends_on", out var dependsProp) &&
+                    dependsProp.TryGetProperty("nodes", out var depNodesProp) &&
+                    depNodesProp.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var depNode in depNodesProp.EnumerateArray())
+                    {
+                        var s = depNode.GetString();
+                        if (!string.IsNullOrWhiteSpace(s)) dependsOn.Add(s);
+                    }
+                }
+
+                models.Add(new DbtModelDefinition(
+                    uniqueId,
+                    name,
+                    database,
+                    schema,
+                    materialization,
+                    description,
+                    tags,
+                    meta,
+                    columns,
+                    dependsOn,
+                    contractEnforced
+                ) { PhysicalName = physicalName, SyntheticSamples = ExtractSyntheticSamplesFromNode(node, columns.Keys), GoldenQueries = DbtGoldenQueryMetaReader.Read(node, uniqueId, relations) });
+            }
+        }
+
+        // B-04: Support source tables from dbt manifest
+        if (root.TryGetProperty("sources", out var sourcesElement) && sourcesElement.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var srcProp in sourcesElement.EnumerateObject())
+            {
+                ct.ThrowIfCancellationRequested();
+                var srcNode = srcProp.Value;
+                var uniqueId = srcProp.Name;
+                var name = srcNode.TryGetProperty("name", out var np) ? np.GetString() ?? "" : "";
+                var physicalName = ReadPhysicalName(srcNode, "identifier", name);
+                var database = srcNode.TryGetProperty("database", out var dbp) ? dbp.GetString() ?? "" : "";
+                var schema = srcNode.TryGetProperty("schema", out var sp) ? sp.GetString() ?? "" : "";
+                var description = srcNode.TryGetProperty("description", out var dp) ? dp.GetString() : null;
+
+                var tags = new List<string>();
+                if (srcNode.TryGetProperty("tags", out var tp) && tp.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var tag in tp.EnumerateArray())
+                    {
+                        var s = tag.GetString();
+                        if (!string.IsNullOrWhiteSpace(s)) tags.Add(s);
+                    }
+                }
+
+                var meta = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                if (srcNode.TryGetProperty("meta", out var mp) && mp.ValueKind == JsonValueKind.Object)
+                {
+                    foreach (var m in mp.EnumerateObject())
+                    {
+                        meta[m.Name] = JsonValueText.From(m.Value);
+                    }
+                }
+
+                var columns = new Dictionary<string, DbtColumnDefinition>(StringComparer.OrdinalIgnoreCase);
+                if (srcNode.TryGetProperty("columns", out var cp) && cp.ValueKind == JsonValueKind.Object)
+                {
+                    foreach (var colProp in cp.EnumerateObject())
+                    {
+                        var colName = colProp.Name;
+                        var colVal = colProp.Value;
+                        var colType = colVal.TryGetProperty("data_type", out var dtp) ? dtp.GetString() : null;
+                        var colDesc = colVal.TryGetProperty("description", out var cdp) ? cdp.GetString() : null;
+                        var colTags = new List<string>();
+                        if (colVal.TryGetProperty("tags", out var ctp) && ctp.ValueKind == JsonValueKind.Array)
+                        {
+                            foreach (var item in ctp.EnumerateArray()) if (item.GetString() is string s) colTags.Add(s);
+                        }
+                        var colMeta = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                        if (colVal.TryGetProperty("meta", out var cmp) && cmp.ValueKind == JsonValueKind.Object)
+                        {
+                            foreach (var cm in cmp.EnumerateObject()) colMeta[cm.Name] = JsonValueText.From(cm.Value);
+                        }
+                        columns[colName] = new DbtColumnDefinition(colName, colType, colDesc, colTags, colMeta);
+                    }
+                }
+
+                CollectMetaIndexes(uniqueId, srcNode, metaIndexBuilders, relations);
+
+                resolver.RegisterSource(uniqueId, ReadString(srcNode, "source_name") ?? "", name, ReadString(srcNode, "package_name"));
+
+                models.Add(new DbtModelDefinition(
+                    uniqueId,
+                    name,
+                    database,
+                    schema,
+                    "source",
+                    description,
+                    tags,
+                    meta,
+                    columns,
+                    [],
+                    false
+                ) { PhysicalName = physicalName, SyntheticSamples = ExtractSyntheticSamplesFromNode(srcNode, columns.Keys), GoldenQueries = DbtGoldenQueryMetaReader.Read(srcNode, uniqueId, relations) });
+            }
+        }
+
+        DbtRelationImport.ResolveAll(pending, resolver, relations);
+
+        for (var i = 0; i < models.Count; i++)
+        {
+            var id = models[i].UniqueId;
+            var builder = metaIndexBuilders.TryGetValue(id, out var metaBuilder)
+                ? metaBuilder
+                : keyBuilders.TryGetValue(id, out var keyBuilder) ? keyBuilder : null;
+            if (builder is not null && ToDeclaredKeys(builder) is { } keys)
+            {
+                models[i] = models[i] with { DeclaredKeys = keys };
+            }
+        }
+
+        return new DbtManifestParseResult(models, relations.Relationships, relations.Finish(), testToModels);
+    }
+
+    private static string ReadConstraintTarget(JsonElement constraint) =>
+        constraint.TryGetProperty("to", out var to) && to.ValueKind == JsonValueKind.String ? to.GetString() ?? "" : "";
+
+    /// <summary>Issue #666: the dbt alias (models, seeds) or identifier (sources); absent, null or blank falls back to the name, anything else is validated later.</summary>
+    private static string ReadPhysicalName(JsonElement owner, string property, string name) =>
+        ReadString(owner, property) is { } value && !string.IsNullOrWhiteSpace(value) ? value : name;
+
+    private static string? ReadString(JsonElement owner, string property) =>
+        owner.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+
+    /// <summary>
+    /// Reads an ordered string array for a relation key. At most <c>MaxKeyColumns + 1</c> elements are read (one more than allowed
+    /// is enough to report TOO_WIDE); a non-string element becomes an empty string and is rejected later as invalid.
+    /// </summary>
+    internal static List<string> ReadKeyArray(JsonElement owner, string property)
+    {
+        var result = new List<string>();
+        if (!owner.TryGetProperty(property, out var array) || array.ValueKind != JsonValueKind.Array)
+        {
+            return result;
+        }
+
+        foreach (var item in array.EnumerateArray())
+        {
+            result.Add(item.ValueKind == JsonValueKind.String ? item.GetString() ?? "" : "");
+            if (result.Count > RelationKeyRules.MaxKeyColumns)
+            {
+                break;
+            }
+        }
+
+        return result;
+    }
+
+    private static CatalogKeyDefinitionImport.Collector GetBuilder(Dictionary<string, CatalogKeyDefinitionImport.Collector> builders, string uniqueId)
+    {
+        if (!builders.TryGetValue(uniqueId, out var builder))
+        {
+            builder = new CatalogKeyDefinitionImport.Collector();
+            builders[uniqueId] = builder;
+        }
+
+        return builder;
+    }
+
+    /// <summary>Reads a string array of at most the key limit; null (invalid) for any other shape. The length is checked before enumerating.</summary>
+    private static List<string>? ReadColumnArray(JsonElement owner, string property)
+    {
+        if (!owner.TryGetProperty(property, out var array) || array.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        var length = array.GetArrayLength();
+        if (length is 0 or > TableKeyDefinitionValidator.MaxColumnsPerKey)
+        {
+            return null;
+        }
+
+        var result = new List<string>(length);
+        foreach (var item in array.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(item.GetString()))
+            {
+                return null;
+            }
+
+            result.Add(item.GetString()!);
+        }
+
+        return result;
+    }
+
+    /// <summary>A model-level (<paramref name="columnName"/> null) or column-level dbt constraint of type primary_key or unique.</summary>
+    private static void CollectKeyConstraint(CatalogKeyDefinitionImport.Collector builder, JsonElement constraint, string? columnName, List<string>? columnLevelPrimaryKey = null)
+    {
+        if (constraint.ValueKind != JsonValueKind.Object ||
+            !constraint.TryGetProperty("type", out var typeProp) ||
+            typeProp.ValueKind != JsonValueKind.String)
+        {
+            return;
+        }
+
+        var type = typeProp.GetString();
+        var isPrimaryKey = string.Equals(type, "primary_key", StringComparison.OrdinalIgnoreCase);
+        var isUnique = string.Equals(type, "unique", StringComparison.OrdinalIgnoreCase);
+        if (!isPrimaryKey && !isUnique)
+        {
+            return;
+        }
+
+        if (columnName is not null)
+        {
+            if (isPrimaryKey)
+            {
+                columnLevelPrimaryKey?.Add(columnName);
+            }
+            else
+            {
+                builder.AddUnique([columnName]);
+            }
+
+            return;
+        }
+
+        // Issue #390: a constraint column may end in ASC/DESC (strict shared grammar); any other shape drops the whole definition.
+        var columns = ReadKeyColumnArray(constraint, "columns", out var directions);
+        if (isPrimaryKey)
+        {
+            builder.AddPrimaryKey(columns, directions);
+        }
+        else
+        {
+            builder.AddUnique(columns, directions);
+        }
+    }
+
+    /// <summary>
+    /// Like <see cref="ReadColumnArray"/> for constraint columns that may carry a direction (<see cref="KeyColumnSpec"/>). Null (invalid) for any
+    /// other shape; <paramref name="directions"/> is null when no column is descending.
+    /// </summary>
+    private static List<string>? ReadKeyColumnArray(JsonElement owner, string property, out List<KeyColumnDirection>? directions)
+    {
+        directions = null;
+        if (!owner.TryGetProperty(property, out var array) || array.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        var length = array.GetArrayLength();
+        if (length is 0 or > TableKeyDefinitionValidator.MaxColumnsPerKey)
+        {
+            return null;
+        }
+
+        var names = new List<string>(length);
+        var parsedDirections = new List<KeyColumnDirection>(length);
+        foreach (var item in array.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.String || !KeyColumnSpec.TryParse(item.GetString(), out var column, out var direction))
+            {
+                return null;
+            }
+
+            names.Add(column);
+            parsedDirections.Add(direction);
+        }
+
+        directions = KeyDirections.AnyDescending(parsedDirections) ? parsedDirections : null;
+        return names;
+    }
+
+    /// <summary>dbt <c>unique</c> and <c>unique_combination_of_columns</c> (or alias <c>unique_combination</c>) tests declare a unique constraint on the attached model.</summary>
+    private static void CollectUniqueTest(string testId, JsonElement node, Dictionary<string, CatalogKeyDefinitionImport.Collector> builders, RelationCollector warnings)
+    {
+        if (!node.TryGetProperty("test_metadata", out var testMetadata) ||
+            !testMetadata.TryGetProperty("name", out var nameProp) ||
+            nameProp.ValueKind != JsonValueKind.String)
+        {
+            return;
+        }
+
+        var testName = nameProp.GetString();
+        var isUnique = string.Equals(testName, "unique", StringComparison.OrdinalIgnoreCase);
+        var isCombination = string.Equals(testName, "unique_combination_of_columns", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(testName, "unique_combination", StringComparison.OrdinalIgnoreCase);
+        if (!isUnique && !isCombination)
+        {
+            return;
+        }
+
+        string? attached = node.TryGetProperty("attached_node", out var attachedProp) && attachedProp.ValueKind == JsonValueKind.String
+            ? attachedProp.GetString()
+            : null;
+        if (string.IsNullOrWhiteSpace(attached))
+        {
+            // I392-SC-04: without attached_node the key attaches only to the single eligible depends_on node (model, seed, snapshot or source).
+            var eligible = DbtRelationReferenceResolution.DistinctEligible(DbtRelationReferenceResolution.ReadDependsOn(node));
+            if (eligible.Count != 1)
+            {
+                warnings.Warn($"Key test '{DbtIdentifierSanitizer.ForLog(testId)}' skipped: AMBIGUOUS_ATTACHMENT");
+                return;
+            }
+
+            attached = eligible[0];
+        }
+
+        if (!testMetadata.TryGetProperty("kwargs", out var kwargs) || kwargs.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+
+        var builder = GetBuilder(builders, attached!);
+        if (isCombination)
+        {
+            var target = kwargs;
+            if (!target.TryGetProperty("combination_of_columns", out _) &&
+                kwargs.TryGetProperty("arguments", out var argsProp) &&
+                argsProp.ValueKind == JsonValueKind.Object &&
+                argsProp.TryGetProperty("combination_of_columns", out _))
+            {
+                target = argsProp;
+            }
+
+            var columns = ReadKeyColumnArray(target, "combination_of_columns", out var directions);
+            builder.AddUnique(columns, directions);
+        }
+        else if (kwargs.TryGetProperty("column_name", out var columnProp) && columnProp.ValueKind == JsonValueKind.String &&
+                 !string.IsNullOrWhiteSpace(columnProp.GetString()))
+        {
+            builder.AddUnique([columnProp.GetString()!]);
+        }
+    }
+
+    private static void CollectMetaIndexes(
+        string uniqueId,
+        JsonElement node,
+        Dictionary<string, CatalogKeyDefinitionImport.Collector> builders,
+        RelationCollector warnings)
+    {
+        if (!TryGetMetaIndexes(node, out var indexesElem))
+        {
+            return;
+        }
+
+        var collector = new CatalogKeyDefinitionImport.Collector();
+        builders[uniqueId] = collector;
+
+        if (indexesElem.ValueKind != JsonValueKind.Array)
+        {
+            FailMetaIndexes(collector, warnings, uniqueId, "META_INDEXES_INVALID_SHAPE");
+            return;
+        }
+
+        var count = indexesElem.GetArrayLength();
+        if (count > TableKeyDefinitionValidator.MaxIndexesPerTable + 1)
+        {
+            FailMetaIndexes(collector, warnings, uniqueId, "INDEXES_TOO_MANY");
+            return;
+        }
+
+        foreach (var entry in indexesElem.EnumerateArray())
+        {
+            if (!TryCollectMetaIndexEntry(entry, collector, out var rule))
+            {
+                FailMetaIndexes(collector, warnings, uniqueId, rule);
+                return;
+            }
+        }
+
+        if (collector.HasDeclaration)
+        {
+            var knownColumns = (collector.PrimaryKey ?? [])
+                .Concat(collector.Indexes!.SelectMany(static idx => idx.Columns))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Select(static c => new TableColumn { ColumnName = c })
+                .ToArray();
+            try
+            {
+                TableKeyDefinitionValidator.Validate(new TableMetadata
+                {
+                    Identifier = new TableIdentifier("dbt", "meta", "validation"),
+                    Columns = knownColumns,
+                    PrimaryKeyColumns = collector.PrimaryKey ?? Array.Empty<string>(),
+                    PrimaryKeyDirections = collector.PrimaryKeyDirections ?? Array.Empty<KeyColumnDirection>(),
+                    Indexes = collector.Indexes!
+                });
+            }
+            catch (TableDefinitionException ex)
+            {
+                FailMetaIndexes(collector, warnings, uniqueId, ex.RuleCode);
+            }
+        }
+    }
+
+    private static bool TryCollectMetaIndexEntry(
+        JsonElement entry,
+        CatalogKeyDefinitionImport.Collector collector,
+        out string errorRule)
+    {
+        errorRule = "META_INDEXES_INVALID_ENTRY";
+        if (entry.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        var hasPrimaryKeyFlag = TryReadOptionalBool(entry, "primary_key", out var isPrimaryKey, out var pkValid);
+        var hasUniqueFlag = TryReadOptionalBool(entry, "unique", out var isUnique, out var uniqueValid);
+        _ = TryReadOptionalBool(entry, "clustered", out _, out var clusteredValid);
+        if (!pkValid || !uniqueValid || !clusteredValid)
+        {
+            errorRule = "META_INDEXES_INVALID_FLAG";
+            return false;
+        }
+
+        if (hasPrimaryKeyFlag && isPrimaryKey && hasUniqueFlag && !isUnique)
+        {
+            errorRule = "META_INDEXES_CONFLICTING_FLAGS";
+            return false;
+        }
+
+        string? explicitName = null;
+        if (entry.TryGetProperty("name", out var nameProp) && nameProp.ValueKind != JsonValueKind.Null)
+        {
+            if (nameProp.ValueKind != JsonValueKind.String || !TableKeyDefinitionValidator.IsValidIndexName(nameProp.GetString()))
+            {
+                errorRule = "INDEX_NAME_INVALID";
+                return false;
+            }
+
+            explicitName = nameProp.GetString();
+        }
+
+        var columns = ReadKeyColumnArray(entry, "columns", out var directions);
+        if (columns is null)
+        {
+            errorRule = "META_INDEXES_INVALID_COLUMNS";
+            return false;
+        }
+
+        if (isPrimaryKey)
+        {
+            collector.AddPrimaryKey(columns, directions);
+        }
+        else
+        {
+            collector.AddIndex(columns, isUnique, explicitName, directions);
+        }
+
+        if (collector.Invalid)
+        {
+            errorRule = collector.InvalidRule ?? "META_INDEXES_INVALID_ENTRY";
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool TryGetMetaIndexes(JsonElement node, out JsonElement indexesElem)
+    {
+        if (node.TryGetProperty("config", out var cfg) &&
+            cfg.ValueKind == JsonValueKind.Object &&
+            cfg.TryGetProperty("meta", out var cfgMeta) &&
+            cfgMeta.ValueKind == JsonValueKind.Object &&
+            cfgMeta.TryGetProperty("indexes", out indexesElem))
+        {
+            return true;
+        }
+
+        if (node.TryGetProperty("meta", out var meta) &&
+            meta.ValueKind == JsonValueKind.Object &&
+            meta.TryGetProperty("indexes", out indexesElem))
+        {
+            return true;
+        }
+
+        indexesElem = default;
+        return false;
+    }
+
+    private static bool TryReadOptionalBool(JsonElement owner, string property, out bool value, out bool isValid)
+    {
+        if (!owner.TryGetProperty(property, out var prop) || prop.ValueKind == JsonValueKind.Null)
+        {
+            value = false;
+            isValid = true;
+            return false;
+        }
+
+        if (prop.ValueKind is JsonValueKind.True or JsonValueKind.False)
+        {
+            value = prop.GetBoolean();
+            isValid = true;
+            return true;
+        }
+
+        value = false;
+        isValid = false;
+        return false;
+    }
+
+    private static void FailMetaIndexes(
+        CatalogKeyDefinitionImport.Collector collector,
+        RelationCollector warnings,
+        string uniqueId,
+        string ruleCode)
+    {
+        collector.MarkInvalid(ruleCode);
+        warnings.Warn($"Node '{uniqueId}' declared an invalid meta.indexes entry ({ruleCode}); the declaration was dropped.");
+    }
+
+    private static DbtDeclaredKeys? ToDeclaredKeys(CatalogKeyDefinitionImport.Collector collector) =>
+        collector.Invalid ? new DbtDeclaredKeys(null, [], true, InvalidRule: collector.InvalidRule)
+        : !collector.HasDeclaration ? null
+        : new DbtDeclaredKeys(
+            collector.PrimaryKey,
+            collector.Indexes!.Where(static i => i.IsUnique).Select(static i => i.Columns).ToList(),
+            false,
+            collector.PrimaryKeyDirections,
+            collector.Indexes!.Where(static i => i.IsUnique).Select(static i => i.Directions).ToList(),
+            collector.Indexes);
+
+    public static string ExtractModelName(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return "";
+        var trimmed = raw.Trim();
+        var refMatch = System.Text.RegularExpressions.Regex.Match(
+            trimmed,
+            @"ref\s*\(\s*['""]([^'""]+)['""]\s*\)",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (refMatch.Success)
+        {
+            return refMatch.Groups[1].Value;
+        }
+
+        // B-04: Support source('source_name', 'table_name')
+        var sourceMatch = System.Text.RegularExpressions.Regex.Match(
+            trimmed,
+            @"source\s*\(\s*['""]([^'""]+)['""]\s*,\s*['""]([^'""]+)['""]\s*\)",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (sourceMatch.Success)
+        {
+            return $"{sourceMatch.Groups[1].Value}.{sourceMatch.Groups[2].Value}";
+        }
+
+        var parts = trimmed.Split('.');
+        return parts[^1];
+    }
+
+    private const int MaxSyntheticSampleKeysPerRow = 256;
+    private const int MaxSyntheticSampleStringLength = 1024;
+
+    /// <summary>
+    /// Reads the <c>meta</c> object of a node and extracts inline synthetic samples against the node's columns.
+    /// </summary>
+    private static IReadOnlyList<IReadOnlyDictionary<string, object?>>? ExtractSyntheticSamplesFromNode(
+        JsonElement node,
+        IReadOnlyCollection<string> modelColumns) =>
+        node.TryGetProperty("meta", out var metaProp) && metaProp.ValueKind == JsonValueKind.Object
+            ? ExtractSyntheticSamples(metaProp, modelColumns)
+            : null;
+
+    /// <summary>
+    /// Extracts inline synthetic sample rows from a dbt <c>meta</c> object (MCP-02). Only inline JSON arrays of
+    /// objects are accepted; string values (including would-be file paths) are never interpreted, so the file system
+    /// is never touched. Rows are capped, keys that are not model columns are dropped, and only scalar values of
+    /// bounded size are kept.
+    /// </summary>
+    internal static IReadOnlyList<IReadOnlyDictionary<string, object?>>? ExtractSyntheticSamples(
+        JsonElement metaProp,
+        IReadOnlyCollection<string> modelColumns)
+    {
+        if (!metaProp.TryGetProperty("synthetic_samples", out var sampleElem) &&
+            !metaProp.TryGetProperty("syntheticSamples", out sampleElem) &&
+            !metaProp.TryGetProperty("sample_rows", out sampleElem) &&
+            !metaProp.TryGetProperty("sampleRows", out sampleElem))
+        {
+            return null;
+        }
+
+        if (sampleElem.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        var allowedColumns = new HashSet<string>(modelColumns, StringComparer.OrdinalIgnoreCase);
+        var list = new List<IReadOnlyDictionary<string, object?>>();
+        const int maxExtractedSampleRows = 100;
+        foreach (var item in sampleElem.EnumerateArray())
+        {
+            if (list.Count >= maxExtractedSampleRows)
+            {
+                break;
+            }
+
+            if (item.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            var dict = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            var keys = 0;
+            foreach (var prop in item.EnumerateObject())
+            {
+                if (++keys > MaxSyntheticSampleKeysPerRow)
+                {
+                    break;
+                }
+
+                if (!allowedColumns.Contains(prop.Name))
+                {
+                    continue;
+                }
+
+                switch (prop.Value.ValueKind)
+                {
+                    case JsonValueKind.String:
+                        var text = prop.Value.GetString();
+                        if (text is null || text.Length <= MaxSyntheticSampleStringLength)
+                        {
+                            dict[prop.Name] = text;
+                        }
+                        break;
+                    case JsonValueKind.Number:
+                    case JsonValueKind.True:
+                    case JsonValueKind.False:
+                    case JsonValueKind.Null:
+                        dict[prop.Name] = ConvertJsonElement(prop.Value);
+                        break;
+                }
+            }
+
+            if (dict.Count > 0)
+            {
+                list.Add(dict);
+            }
+        }
+
+        return list.Count > 0 ? list : null;
+    }
+
+    private static object? ConvertJsonElement(JsonElement elem) =>
+        elem.ValueKind switch
+        {
+            JsonValueKind.String => elem.GetString(),
+            JsonValueKind.Number => elem.TryGetInt64(out var l) ? l : elem.TryGetDouble(out var d) ? d : elem.GetRawText(),
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.Null => null,
+            _ => elem.GetRawText()
+        };
+}

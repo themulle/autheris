@@ -23,7 +23,7 @@ public sealed class BoundedCacheCallSiteArchitectureTests
         typeof(BoundedCache<,>).Assembly,
         typeof(Autheris.Infrastructure.Persistence.GovernanceRepository).Assembly,
         typeof(Autheris.GraphQL.Subscriptions.CdcSubscriptionGovernor).Assembly,
-        typeof(Autheris.Extensions.Dbt.DbtWebhookReceiver).Assembly,
+        typeof(Autheris.Modules.Dbt.DbtWebhookReceiver).Assembly,
         typeof(Autheris.Modules.Abstractions.IAutherisModule).Assembly,
         typeof(Autheris.Modules.Lakehouse.LakehouseModule).Assembly,
         typeof(TrinoSqlEngine.FastSqlEngine).Assembly,

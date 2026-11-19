@@ -17,19 +17,6 @@ route /api/catalog/datasets/{id}/required-filters | direct catalog dataset metad
 route /api/dev/info | auth, dev-persona or portal route; no governed data access
 route /api/dev/login/{persona} | auth, dev-persona or portal route; no governed data access
 route /api/dev/personas | auth, dev-persona or portal route; no governed data access
-route /api/extensions/dbt/exposures | dbt extension; uses static semantic-model helpers only, no query execution
-route /api/extensions/dbt/governance | dbt extension; uses static semantic-model helpers only, no query execution
-route /api/extensions/dbt/health | dbt extension; uses static semantic-model helpers only, no query execution
-route /api/extensions/dbt/health/reset | dbt extension; uses static semantic-model helpers only, no query execution
-route /api/extensions/dbt/metrics | dbt extension; uses static semantic-model helpers only, no query execution
-route /api/extensions/dbt/proposals | dbt extension; uses static semantic-model helpers only, no query execution
-route /api/extensions/dbt/proposals/{id:guid}/approve | dbt extension; uses static semantic-model helpers only, no query execution
-route /api/extensions/dbt/proposals/{id:guid}/reject | dbt extension; uses static semantic-model helpers only, no query execution
-route /api/extensions/dbt/run-results | dbt extension; uses static semantic-model helpers only, no query execution
-route /api/extensions/dbt/semantic-manifest | dbt extension; uses static semantic-model helpers only, no query execution
-route /api/extensions/dbt/sync | dbt extension; uses static semantic-model helpers only, no query execution
-route /api/extensions/dbt/validate-contract | dbt extension; uses static semantic-model helpers only, no query execution
-route /api/extensions/dbt/webhooks/dbt-cloud | dbt extension; uses static semantic-model helpers only, no query execution
 route /api/governance/catalog/ingest-openapi | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
 route /api/governance/classification/assign-owner | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
 route /api/governance/classification/classify-table | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
@@ -146,6 +133,7 @@ route /api/v1/tenants/{tenantId}/governance/rights/{realmId}/approve | governanc
 route /api/v1/tenants/{tenantId}/lifecycle/deprovision | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/tenants/{tenantId}/lifecycle/locks/{realmId}/{userKey} | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/webhooks/config-sync | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
+route /api/webhooks/dbt-cloud | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
 route /api/webhooks/openmetadata | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
 route /docs | static docs, swagger or Nitro portal page; no data access
 route /health/live | health probe or metrics; no governed data access

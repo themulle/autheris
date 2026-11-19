@@ -9,7 +9,7 @@ using Autheris.Application.Catalog.Semantic;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
-using Autheris.Extensions.Dbt;
+using Autheris.Modules.Dbt;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using Shouldly;

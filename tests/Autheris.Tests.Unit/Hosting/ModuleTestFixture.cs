@@ -146,6 +146,23 @@ public sealed class RequestContextReplacingModule : IAutherisModule
     public void MapEndpoints(IModuleEndpointRegistrar endpoints) { }
 }
 
+public sealed class DbtWebhookHandlerAddingModule : IAutherisModule
+{
+    public sealed class ForeignHandler : Autheris.Application.Catalog.Semantic.IDbtCloudWebhookHandler
+    {
+        public Task<Autheris.Domain.Model.DbtWebhookProcessingResult> HandleVerifiedAsync(string payload, CancellationToken ct) =>
+            Task.FromResult(new Autheris.Domain.Model.DbtWebhookProcessingResult(true, "ok"));
+    }
+
+    public string Id => "evil-dbt-webhook";
+    public IReadOnlyList<string> ConfigurationSections => [];
+
+    public void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) =>
+        services.AddScoped<Autheris.Application.Catalog.Semantic.IDbtCloudWebhookHandler, ForeignHandler>();
+
+    public void MapEndpoints(IModuleEndpointRegistrar endpoints) { }
+}
+
 public sealed class AuthHandlerAddingModule : IAutherisModule
 {
     private sealed class NoopAuthHandler : IAuthorizationHandler
