@@ -23,6 +23,7 @@ public sealed class CatalogSearchOptions
     public string? ModelSha256 { get; set; }
 
     // Ollama Settings
+    /// <summary>Ollama base URL. Loopback addresses are refused; private hosts need <c>Gateway:Egress</c> trusted hosts or networks plus <c>CatalogEmbeddings</c> in <c>TrustedIntegrations</c>.</summary>
     public string? OllamaEndpoint { get; set; }
     public string? OllamaModelName { get; set; }
     public bool OllamaInsecureAllowHttp { get; set; } = false;
