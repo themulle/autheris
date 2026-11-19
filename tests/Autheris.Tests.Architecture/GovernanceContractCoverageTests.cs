@@ -22,7 +22,7 @@ public sealed class GovernanceContractCoverageTests
     private const string AllowlistFileName = "governance-contract-allowlist.txt";
 
     private static readonly Regex AbstractContractClassRegex = new(
-        @"public\s+abstract\s+class\s+(?<name>\w+Contract)\s*:\s*GovernanceContractBase\b",
+        @"public\s+abstract\s+(?:partial\s+)?class\s+(?<name>\w+Contract)\s*:\s*GovernanceContractBase\b",
         RegexOptions.Compiled);
 
     private static readonly Regex PostgreSqlSubclassRegex = new(

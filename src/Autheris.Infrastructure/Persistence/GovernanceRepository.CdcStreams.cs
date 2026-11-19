@@ -115,7 +115,8 @@ public partial class GovernanceRepository : ICdcStreamStore
     /// <summary>
     /// Engine-neutral SQL of the governed CDC stream store and key store (99 D-A4). The governance repository hands a
     /// connection (and owns connection lifetime, gating and pooling); this class owns the statements and the append transaction. Only the
-    /// few statements that genuinely differ per engine (insert-if-absent, the fenced watermark upsert, row limits) are dialect branches. All values are parameters; identifiers are constants.
+    /// few statements that genuinely differ per engine (insert-if-absent, the fenced watermark upsert, row limits) are dialect branches.
+    /// All values are parameters; identifiers are constants.
     /// </summary>
     private sealed partial class CdcStreamSql(bool sqlServer)
     {
@@ -419,7 +420,7 @@ public partial class GovernanceRepository : ICdcStreamStore
         public async Task ResetWatermarkAsync(DbConnection conn, CdcStreamId id, string? watermarkState, CancellationToken ct)
         {
             var sql = sqlServer
-                // Resolve the watermark key in its own statement so no stream-row lock is held while the watermark row is locked (append locks the watermark first, then the stream row).
+                // Resolve the watermark key in its own statement so no stream-row lock is held while the watermark row is locked (the reset never holds the stream lock and the watermark lock at the same time).
                 ? @"
                     DECLARE @src NVARCHAR(32), @dom NVARCHAR(128), @sch NVARCHAR(128), @tbl NVARCHAR(128);
                     SELECT @src = source, @dom = domain_name, @sch = schema_name, @tbl = table_name FROM %streams% WHERE stream_id = @id;

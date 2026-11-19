@@ -18,7 +18,7 @@ using Xunit;
 /// linked there). A subclass returns <c>null</c> from <see cref="OpenAsync"/> when its database is unavailable. Calling
 /// <see cref="OpenAsync"/> twice yields two store instances over the SAME data (restart simulation).
 /// </summary>
-public abstract partial class CdcStreamStoreContractTests : IAsyncLifetime
+public abstract class CdcStreamStoreContractTests : IAsyncLifetime
 {
     protected const string Source = "mssql_ct";
     private static readonly DateTimeOffset T0 = DateTimeOffset.FromUnixTimeMilliseconds(1_760_000_000_000);

@@ -1,17 +1,18 @@
 using System;
-namespace Autheris.Tests.Unit.Cdc;
-
 using System.Linq;
 using System.Threading.Tasks;
+using Autheris.Tests.Common;
 using Shouldly;
-using Xunit;
 
-public abstract partial class CdcStreamStoreContractTests
+namespace Autheris.Tests.Integration.Governance.Contract;
+
+public abstract partial class CdcStreamsContract
 {
-    [Fact]
+    [RequiresContainerRuntimeFact]
     public async Task Reset_concurrent_with_append_completes_without_deadlock()
     {
-        if (await Open() is not var (store, _)) return;
+        if (!Store.IsAvailable) return;
+        var store = Store.CdcStreams;
         var s = await store.EnsureStreamAsync(Source, Orders);
         const int iterations = 20;
 
