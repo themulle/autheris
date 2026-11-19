@@ -253,17 +253,37 @@ if ! sed -n '/^  reverse-proxy:/,/^  load-generator:/p' "${REPO_ROOT}/deploy/pod
     FAILURES=$((FAILURES + 1))
 fi
 
-# 8. Every container base image is pinned to a full patch tag plus digest (SEC2-08)
+# 8. Every container base image is pinned to a full patch tag plus digest (SEC2-08).
+# A FROM that names an earlier build stage of the same file (directly, or as <stage-prefix>${ARG} for a
+# build-arg selected stage) is not an external image and is exempt; an unknown bare name is still an error.
 echo "--> Checking base image pins..."
-while IFS= read -r line; do
-    file="${line%%:*}"
-    from="${line#*:}"
-    if ! grep -Eq '^FROM[[:space:]]+(--platform=[^[:space:]]+[[:space:]]+)?[^[:space:]@]+:[0-9]+\.[0-9]+\.[0-9]+[^@[:space:]]*@sha256:[0-9a-f]{64}' <<<"${from}"; then
-        echo "ERROR: ${file#"${REPO_ROOT}"/}: base image is not pinned to <major>.<minor>.<patch>@sha256: (${from})" >&2
-        FAILURES=$((FAILURES + 1))
-    fi
-done < <(grep -rEn --include='Dockerfile*' --include='Containerfile*' '^FROM[[:space:]]' "${REPO_ROOT}" \
-    --exclude-dir=.git --exclude-dir=bin --exclude-dir=obj --exclude-dir=node_modules | sed -E 's/^([^:]+):[0-9]+:/\1:/')
+PIN_RE='^FROM[[:space:]]+(--platform=[^[:space:]]+[[:space:]]+)?[^[:space:]@]+:[0-9]+\.[0-9]+\.[0-9]+[^@[:space:]]*@sha256:[0-9a-f]{64}'
+while IFS= read -r dockerfile; do
+    stages=()
+    while IFS= read -r from; do
+        ref="$(sed -E 's/^FROM[[:space:]]+(--platform=[^[:space:]]+[[:space:]]+)?([^[:space:]]+).*/\2/' <<<"${from}")"
+        alias="$(sed -nE 's/.*[[:space:]][Aa][Ss][[:space:]]+([^[:space:]]+)[[:space:]]*$/\1/p' <<<"${from}")"
+        ok=0
+        if grep -Eq "${PIN_RE}" <<<"${from}"; then
+            ok=1
+        elif [[ "${ref}" != *:* && "${ref}" != *@* ]]; then
+            for st in "${stages[@]}"; do
+                if [ "${ref}" = "${st}" ]; then ok=1; break; fi
+            done
+            if [ "${ok}" -eq 0 ] && [[ "${ref}" =~ ^([A-Za-z0-9._-]+)\$\{[A-Za-z_][A-Za-z0-9_]*\}$ ]]; then
+                prefix="${BASH_REMATCH[1]}"
+                for st in "${stages[@]}"; do
+                    if [[ "${st}" == "${prefix}"* ]]; then ok=1; break; fi
+                done
+            fi
+        fi
+        if [ "${ok}" -eq 0 ]; then
+            echo "ERROR: ${dockerfile#"${REPO_ROOT}"/}: base image is not pinned to <major>.<minor>.<patch>@sha256: (${from})" >&2
+            FAILURES=$((FAILURES + 1))
+        fi
+        if [ -n "${alias}" ]; then stages+=("${alias}"); fi
+    done < <(grep -E '^FROM[[:space:]]' "${dockerfile}")
+done < <(find "${REPO_ROOT}" \( -name .git -o -name bin -o -name obj -o -name node_modules \) -prune -o -type f \( -name 'Dockerfile*' -o -name 'Containerfile*' \) -print)
 
 if [ "$FAILURES" -gt 0 ]; then
     echo "❌ Container hardening verification FAILED with ${FAILURES} error(s)." >&2
