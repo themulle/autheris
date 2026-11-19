@@ -123,6 +123,12 @@ public sealed class TrinoMetadataJdbcTests
     [InlineData("SELECT * FROM system /* x */ . jdbc.tables")]
     [InlineData("SELECT * FROM `system`.jdbc.tables")]
     [InlineData("SELECT TABLE_NAME FROM system.jdbc.tables ORDER BY TABLE_TYPE")]
+    [InlineData("SELECT '--', x FROM system.runtime.nodes")]
+    [InlineData("SELECT \"a--b\" FROM system.runtime.nodes")]
+    [InlineData("SELECT 1 /* -- */ FROM system.runtime.nodes")]
+    [InlineData("SELECT 'it''s --' AS c FROM \"system\".runtime.nodes")]
+    [InlineData("SELECT * FROM U&\"\\0073ystem\".\"jdbc\".\"tables\"")]
+    [InlineData("SELECT * FROM U&\"inform\\0061tion_schema\".tables")]
     [Theory]
     [Trait("Category", "Security")]
     public async Task SystemJdbc_UnsupportedShape_IsNotSupported_NotForwarded(string sql)
@@ -133,7 +139,7 @@ public sealed class TrinoMetadataJdbcTests
 
         ex.Message.ShouldBe("The metadata statement shape is not supported.");
         ex.Message.ShouldNotContain("orders");
-        await rig.DecisionPoint.DidNotReceiveWithAnyArgs().DecideManyAsync(default!, default!, default, default, default);
+        rig.DecisionPoint.ManyCalls.ShouldBe(0);
     }
 
     [Fact]
@@ -224,8 +230,8 @@ public sealed class TrinoMetadataJdbcTests
             await Should.ThrowAsync<NotSupportedException>(async () => await rig.RunAsync(sql));
         }
 
-        await rig.Discovery.DidNotReceiveWithAnyArgs().ListAsync(default!, default!, default);
-        await rig.DecisionPoint.DidNotReceiveWithAnyArgs().DecideManyAsync(default!, default!, default, default, default);
+        rig.Discovery.ListCalls.ShouldBe(0);
+        rig.DecisionPoint.ManyCalls.ShouldBe(0);
     }
 
     [Fact]
@@ -322,8 +328,7 @@ public sealed class TrinoMetadataJdbcTests
         Column(info!, "table_name").ShouldBe(["salaries", "invoices", "orders"]);
 
         // One decision call per statement.
-        await rig.DecisionPoint.Received(2).DecideManyAsync(
-            Arg.Any<SecurityPrincipalContext>(), Arg.Any<IReadOnlyList<TableMetadata>>(), AccessOperation.Discover, AccessTransport.Trino, Arg.Any<CancellationToken>());
+        rig.DecisionPoint.ManyCalls.ShouldBe(2);
     }
 
     [Fact]
@@ -337,9 +342,9 @@ public sealed class TrinoMetadataJdbcTests
 
     private sealed class Rig
     {
-        public IDiscoveryService Discovery { get; } = Substitute.For<IDiscoveryService>();
+        public StubDiscovery Discovery { get; }
 
-        public IAccessDecisionPoint DecisionPoint { get; } = Substitute.For<IAccessDecisionPoint>();
+        public StubDecisionPoint DecisionPoint { get; }
 
         public ITableMetadataRepository Repository { get; }
 
@@ -350,16 +355,44 @@ public sealed class TrinoMetadataJdbcTests
         {
             Repository = Wp0.Tables([.. catalog]);
             _consents = Wp0.Consents([.. catalog.Select(t => Wp0.Allow(t.Identifier, "S-1-5-21-USER", Tenant, [.. t.Columns.Select(c => c.ColumnName)]))]);
-            Discovery.ListAsync(Arg.Any<DiscoveryQuery>(), Arg.Any<CatalogCaller>(), Arg.Any<CancellationToken>())
-                .Returns(_ => new ValueTask<DiscoveryPage>(new DiscoveryPage(visible, visible.Count, false)));
+            Discovery = new StubDiscovery(visible);
             decide ??= t => Decision(t, allowed: true);
-            DecisionPoint.DecideManyAsync(
-                    Arg.Any<SecurityPrincipalContext>(), Arg.Any<IReadOnlyList<TableMetadata>>(), Arg.Any<AccessOperation>(), Arg.Any<AccessTransport>(), Arg.Any<CancellationToken>())
-                .Returns(ci => new ValueTask<IReadOnlyList<TableAccessDecision>>(many != null ? many(ci.ArgAt<IReadOnlyList<TableMetadata>>(1) ?? []) : (ci.ArgAt<IReadOnlyList<TableMetadata>>(1) ?? []).Select(decide).ToList()));
+            DecisionPoint = new StubDecisionPoint(tables => many != null ? many(tables) : tables.Select(decide).ToList());
         }
 
         public Task<GovernedSqlResult?> RunAsync(string sql) =>
             TrinoMetadataQueryHandler.TryExecuteAsync(
                 sql, Caller, Tenant, Repository, _consents, Wp0.Options(), null, new TrinoMetadataVisibility(Discovery, DecisionPoint));
+    }
+
+    private sealed class StubDiscovery(IReadOnlyList<DiscoveryObject> visible) : IDiscoveryService
+    {
+        public int ListCalls { get; private set; }
+
+        public ValueTask<DiscoveryPage> ListAsync(DiscoveryQuery query, CatalogCaller caller, CancellationToken ct = default)
+        {
+            ListCalls++;
+            return new(new DiscoveryPage(visible, visible.Count, false));
+        }
+
+        public ValueTask<DiscoveryObject?> GetAsync(TableIdentifier id, CatalogCaller caller, CancellationToken ct = default) => throw new NotSupportedException();
+
+        public ValueTask<IReadOnlyList<DiscoveryObject>> SearchAsync(string text, DiscoverySearchOptions options, CatalogCaller caller, CancellationToken ct = default) => throw new NotSupportedException();
+    }
+
+    private sealed class StubDecisionPoint(Func<IReadOnlyList<TableMetadata>, IReadOnlyList<TableAccessDecision>> many) : IAccessDecisionPoint
+    {
+        public int ManyCalls { get; private set; }
+
+        public ValueTask<IReadOnlyList<TableAccessDecision>> DecideManyAsync(
+            SecurityPrincipalContext subject, IReadOnlyList<TableMetadata> objects, AccessOperation operation, AccessTransport transport, CancellationToken ct = default)
+        {
+            ManyCalls++;
+            return new(many(objects));
+        }
+
+        public ValueTask<TableAccessDecision> DecideAsync(AccessRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+
+        public ValueTask<AccessExplanation> ExplainAsync(AccessRequest request, CancellationToken ct = default) => throw new NotSupportedException();
     }
 }

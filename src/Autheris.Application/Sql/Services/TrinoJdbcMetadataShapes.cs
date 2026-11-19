@@ -58,17 +58,6 @@ internal static class TrinoJdbcMetadataShapes
         RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled,
         RegexTimeout);
 
-    // Any reference to a system.* or information_schema.* relation, used to refuse (not forward) shapes the handler does not own.
-    private static readonly Regex MetadataReferenceRegex = new(
-        @"(?<![A-Za-z0-9_$])[""`]?(?:system|information_schema)[""`]?\s*\.",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled,
-        RegexTimeout);
-
-    private static readonly Regex BlockCommentRegex = new(
-        @"/\*.*?(?:\*/|$)",
-        RegexOptions.Singleline | RegexOptions.Compiled,
-        RegexTimeout);
-
     private static readonly Regex MixedShapeRegex = new(
         @"\b(?:join|union|intersect|except|select)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled,
@@ -113,9 +102,131 @@ internal static class TrinoJdbcMetadataShapes
         _ => ColumnsColumns
     };
 
-    /// <summary>True when the statement references a <c>system.*</c> or <c>information_schema.*</c> relation.</summary>
-    internal static bool ReferencesMetadataRelation(string normalizedSql) =>
-        MetadataReferenceRegex.IsMatch(BlockCommentRegex.Replace(normalizedSql, " "));
+    /// <summary>
+    /// True when the statement references a <c>system.*</c> or <c>information_schema.*</c> relation. Comments are skipped
+    /// and quoted identifiers decoded only outside string literals; a Unicode-escape identifier (<c>U&amp;"..."</c>) is
+    /// always treated as a reference because its name cannot be read without decoding.
+    /// </summary>
+    internal static bool ReferencesMetadataRelation(string sql)
+    {
+        var i = 0;
+        while (i < sql.Length)
+        {
+            var c = sql[i];
+            if (c == '-' && i + 1 < sql.Length && sql[i + 1] == '-')
+            {
+                while (i < sql.Length && sql[i] != '\n')
+                {
+                    i++;
+                }
+            }
+            else if (c == '/' && i + 1 < sql.Length && sql[i + 1] == '*')
+            {
+                SkipTrivia(sql, ref i);
+            }
+            else if (c == '\'')
+            {
+                i = SkipQuoted(sql, i, '\'', out _);
+            }
+            else if (c is '"' or '`')
+            {
+                if (c == '"' && i >= 2 && sql[i - 1] == '&' && (sql[i - 2] is 'U' or 'u'))
+                {
+                    return true;
+                }
+
+                i = SkipQuoted(sql, i, c, out var name);
+                if (IsMetadataName(name) && FollowedByDot(sql, i))
+                {
+                    return true;
+                }
+            }
+            else if (char.IsAsciiLetter(c) || c == '_')
+            {
+                var start = i;
+                while (i < sql.Length && (char.IsAsciiLetterOrDigit(sql[i]) || sql[i] == '_' || sql[i] == '$'))
+                {
+                    i++;
+                }
+
+                if (IsMetadataName(sql[start..i]) && FollowedByDot(sql, i))
+                {
+                    return true;
+                }
+            }
+            else
+            {
+                i++;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsMetadataName(string name) =>
+        string.Equals(name, "system", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(name, "information_schema", StringComparison.OrdinalIgnoreCase);
+
+    private static bool FollowedByDot(string sql, int index)
+    {
+        SkipTrivia(sql, ref index);
+        return index < sql.Length && sql[index] == '.';
+    }
+
+    /// <summary>Skips whitespace and comments.</summary>
+    private static void SkipTrivia(string sql, ref int i)
+    {
+        while (i < sql.Length)
+        {
+            if (char.IsWhiteSpace(sql[i]))
+            {
+                i++;
+            }
+            else if (sql[i] == '-' && i + 1 < sql.Length && sql[i + 1] == '-')
+            {
+                while (i < sql.Length && sql[i] != '\n')
+                {
+                    i++;
+                }
+            }
+            else if (sql[i] == '/' && i + 1 < sql.Length && sql[i + 1] == '*')
+            {
+                var end = sql.IndexOf("*/", i + 2, StringComparison.Ordinal);
+                i = end < 0 ? sql.Length : end + 2;
+            }
+            else
+            {
+                return;
+            }
+        }
+    }
+
+    /// <summary>Returns the index after the closing quote (a doubled quote is an escape); an unterminated quote runs to the end.</summary>
+    private static int SkipQuoted(string sql, int start, char quote, out string content)
+    {
+        var sb = new StringBuilder();
+        var i = start + 1;
+        while (i < sql.Length)
+        {
+            if (sql[i] == quote)
+            {
+                if (i + 1 < sql.Length && sql[i + 1] == quote)
+                {
+                    sb.Append(quote);
+                    i += 2;
+                    continue;
+                }
+
+                content = sb.ToString();
+                return i + 1;
+            }
+
+            sb.Append(sql[i++]);
+        }
+
+        content = sb.ToString();
+        return sql.Length;
+    }
 
     /// <summary>
     /// An <c>information_schema</c> statement that also joins, unions or nests another relation is a mixed statement and

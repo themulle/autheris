@@ -131,7 +131,7 @@ public static partial class TrinoMetadataQueryHandler
             }
 
             // A metadata relation outside the handler grammar is refused here; it must never reach a source.
-            if (TrinoJdbcMetadataShapes.ReferencesMetadataRelation(normalized))
+            if (TrinoJdbcMetadataShapes.ReferencesMetadataRelation(rawSql) || TrinoJdbcMetadataShapes.ReferencesMetadataRelation(normalized))
             {
                 throw TrinoJdbcMetadataShapes.NotSupported();
             }
