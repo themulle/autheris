@@ -1,5 +1,6 @@
 namespace Autheris.Modules.Lakehouse.Tests;
 
+using Autheris.Application.Policy.Pdp;
 using Autheris.Modules.Lakehouse.Models;
 using System;
 using System.Collections.Generic;
@@ -414,7 +415,7 @@ public sealed class LakehouseGovernanceTests
 
         var relationResolver = new CrossSourceRelationResolver(
             metadataRepo,
-            new FixedUnifiedPolicyDecisionPoint(decisions),
+            new FixedAccessDecisionPoint(decisions),
             rowReader,
             new RedactingMaskingProvider(),
             auditRepo);
@@ -673,17 +674,19 @@ private sealed class StubDeltaMetadataReader(DeltaSnapshot snapshot) : IDeltaMet
             => Task.FromResult(true);
     }
 
-    private sealed class FixedUnifiedPolicyDecisionPoint(Dictionary<TableIdentifier, TableAccessDecision> decisions) : IUnifiedPolicyDecisionPoint
+    private sealed class FixedAccessDecisionPoint(Dictionary<TableIdentifier, TableAccessDecision> decisions) : IAccessDecisionPoint
     {
-        public Task<TableAccessDecision> EvaluateAccessAsync(
-            TableIdentifier table,
-            TableMetadata metadata,
-            SecurityPrincipalContext securityContext,
-            IReadOnlyList<string>? requestedColumns,
-            CancellationToken ct)
-            => Task.FromResult(decisions.TryGetValue(table, out var decision)
+        public ValueTask<TableAccessDecision> DecideAsync(AccessRequest request, CancellationToken ct = default)
+            => ValueTask.FromResult(decisions.TryGetValue(request.Object.Identifier, out var decision)
                 ? decision
-                : TableAccessDecision.Denied(table, "Denied"));
+                : TableAccessDecision.Denied(request.Object.Identifier, "Denied"));
+
+        public ValueTask<IReadOnlyList<TableAccessDecision>> DecideManyAsync(
+            SecurityPrincipalContext subject, IReadOnlyList<TableMetadata> objects, AccessOperation operation, AccessTransport transport, CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public ValueTask<AccessExplanation> ExplainAsync(AccessRequest request, CancellationToken ct = default)
+            => throw new NotSupportedException();
     }
 
     private sealed class StubLakehouseStorageProvider(string metadataJson) : ILakehouseStorageProvider
