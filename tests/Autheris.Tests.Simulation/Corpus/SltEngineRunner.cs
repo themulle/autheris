@@ -90,6 +90,7 @@ public sealed class SltEngineRunner(SltScenario scenario, DbConnection connectio
             using var cmd = connection.CreateCommand();
             cmd.CommandTimeout = executeTimeoutSeconds;
             _binder.Bind(cmd, compiled, new Dictionary<string, object?>());
+            NameParametersForSqlite(cmd);
             return new SltEngineRows(SltReference.Read(cmd, executeTimeoutSeconds));
         }
         catch (Exception ex) when (ex is SecurityException or GovernedSqlException)
@@ -107,6 +108,18 @@ public sealed class SltEngineRunner(SltScenario scenario, DbConnection connectio
         catch (Exception ex)
         {
             return new SltEngineCrashed("Execute", ex.GetType().Name, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// The PostgreSQL binder adds positional parameters with an empty name (Npgsql, markers <c>$1..$n</c>); SQLite refuses an unnamed
+    /// parameter, so the harness names them <c>1..n</c> in ordinal order, which Microsoft.Data.Sqlite resolves to the <c>$n</c> markers.
+    /// </summary>
+    private static void NameParametersForSqlite(DbCommand cmd)
+    {
+        for (var i = 0; i < cmd.Parameters.Count; i++)
+        {
+            cmd.Parameters[i].ParameterName = (i + 1).ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
     }
 
