@@ -63,4 +63,24 @@ public sealed class CatalogSearchOptionsValidatorTests
         result.FailureMessage.ShouldNotBeNull();
         result.FailureMessage!.ShouldContain("LocalOnnx embedding provider is not available in this build.");
     }
+
+    [Theory]
+    [InlineData("https://localhost:11434")]
+    [InlineData("http://127.0.0.1:11434")]
+    [InlineData("https://[::1]:11434")]
+    public void OllamaEndpoint_Loopback_Rejected(string endpoint)
+    {
+        var options = new CatalogSearchOptions
+        {
+            EmbeddingProvider = CatalogEmbeddingProvider.Ollama,
+            OllamaEndpoint = endpoint,
+            OllamaModelName = "nomic-embed-text",
+            OllamaInsecureAllowHttp = true
+        };
+
+        var result = _validator.Validate(null, options);
+
+        result.Failed.ShouldBeTrue();
+        result.FailureMessage.ShouldContain("loopback");
+    }
 }
