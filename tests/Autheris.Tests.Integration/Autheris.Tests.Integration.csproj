@@ -48,11 +48,8 @@
   <ItemGroup>
     <!-- Demo-catalog SQL tables have no database behind them; workflow tests read deterministic synthetic rows. -->
     <Compile Include="..\Autheris.Tests.Unit\TestDoubles\SyntheticSqlDataSourceExecutor.cs" Link="TestDoubles\SyntheticSqlDataSourceExecutor.cs" />
-    <Compile Include="..\Autheris.Tests.Unit\Webhooks\WebhookOutboxContractTests.cs" Link="Webhooks\WebhookOutboxContractTests.cs" />
-    <Compile Include="..\Autheris.Tests.Unit\Persistence\CloudEventSubscriptionStoreContractTests.cs" Link="Persistence\CloudEventSubscriptionStoreContractTests.cs" />
     <!-- REQ-CDC-99: stream store, crypto and codec test doubles of the producer tests (the real ones are built by I1-A/I1-C). -->
     <Compile Include="..\Autheris.Tests.Unit\Cdc\CdcStreamTestDoubles.cs" Link="Cdc\CdcStreamTestDoubles.cs" />
-    <Compile Include="..\Autheris.Tests.Unit\Cdc\CdcStreamStoreContractTests.cs" Link="Cdc\CdcStreamStoreContractTests.cs" />
     <Compile Include="..\Autheris.Tests.Unit\VirtualFilters\VirtualFilterTestData.cs" Link="VirtualFilterTestData.cs" />
     <Compile Include="..\Autheris.Tests.Unit\Catalog\Wp0CatalogFixtures.cs" Link="Catalog\Wp0CatalogFixtures.cs" />
     <Compile Include="..\Autheris.Tests.Unit\Catalog\CatalogRepositoryStubs.cs" Link="Catalog\CatalogRepositoryStubs.cs" />
