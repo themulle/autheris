@@ -50,6 +50,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `describe_dataset` reports `requiredFilterColumns` and `requiredFilterColumnGroups` again; the REST catalog detail gains both members (omitted when the dataset has none). A required filter column is named only when the caller has at least masked access to it and it is not discovery-hidden (the REST detail lists columns without access with masking state `Deny`, but never names them as required filters); a group only when every member qualifies (#807).
 - New datasets are queryable within seconds after a dbt sync, a governance import or another catalog write instead of after the next periodic catalog check (about 60 s of `GRAPHQL_VALIDATION_FAILED`): the GraphQL catalog module now listens to `catalog:changed` and runs a debounced check (1 s after the first change, at the end of a burst after a quiet period of the last build's duration, 2 to 60 s). Rebuilds stay coalesced as in #786, a write without schema effect (for example a consent apply) never rebuilds, and the `reloadSchema` mutation now reaches the module. Other instances learn about the change through the Redis event bus, or at their periodic check without Redis (#802).
 
+### Fixed
+- A tree query whose root has a set-based list child no longer fails with an invalid column when the root `orderBy` omits the unique key and the key is not selected: the page CTE now projects the tie-break key columns it orders by; they are not returned unless selected. The root and child tie-break keys are resolved to their catalog spelling, and access is checked on that name: a key declared as `ID` for column `id` is written as `id` (the same column on SQL Server, a fix on PostgreSQL), and a key column that is unknown, not a safe name, masked or denied is never used as tie-break (the next clear unique index is used, else the list stays correlated) (#836).
+
 ## [1.8.5] - 2026-11-17
 
 ### Added
