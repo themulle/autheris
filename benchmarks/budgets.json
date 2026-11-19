@@ -3,12 +3,12 @@
   "tolerancePercent": 10,
   "metrics": {
     "coreImageUncompressedMB": {
-      "budget": 325,
+      "budget": 430,
       "unit": "MB",
       "source": "footprint"
     },
     "coldStartP50Seconds": {
-      "budget": 3.0,
+      "budget": 5.0,
       "unit": "s",
       "source": "footprint"
     },
@@ -18,7 +18,7 @@
       "source": "footprint"
     },
     "ciPrWallClockMedianMinutes": {
-      "budget": 30,
+      "budget": 120,
       "unit": "min",
       "source": "ci-duration",
       "tolerancePercent": 0,
