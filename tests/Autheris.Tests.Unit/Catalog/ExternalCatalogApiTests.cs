@@ -292,7 +292,7 @@ public sealed class ExternalCatalogApiTests
         items[0].GetProperty("objectId").GetString().Should().Be(ownedHidden.Identifier.ToString());
         items[0].GetProperty("hidden").GetBoolean().Should().BeTrue();
         items[0].GetProperty("columns").EnumerateArray().Select(c => c.GetProperty("name").GetString())
-            .Should().Contain("secret_col");
+            .Should().NotContain("secret_col");
 
         var otherResp = await harness.GetObjectByIdAsync(ownerCaller, otherHidden.Table.Id.ToString());
         otherResp.StatusCode.Should().Be(StatusCodes.Status404NotFound);
