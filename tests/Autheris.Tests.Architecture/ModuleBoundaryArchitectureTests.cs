@@ -194,31 +194,96 @@ public sealed partial class ModuleBoundaryArchitectureTests
         typeof(ModuleLoadResult).GetMethod("ConfigureGraphQL").ShouldBeNull();
     }
 
-    [Fact]
-    [Trait("Category", "Security")]
-    public void Modules_do_not_resolve_tenant_from_http_items()
+    private static readonly (string Name, Regex Pattern)[] ForbiddenTenantResolution =
+    [
+        ("TenantIdItemKey", new Regex(@"\bTenantIdItemKey\b", RegexOptions.CultureInvariant)),
+        ("SecurityPrincipalContext.ItemKey", new Regex(@"\bSecurityPrincipalContext\s*\.\s*ItemKey\b", RegexOptions.CultureInvariant)),
+        ("using static SecurityPrincipalContext", new Regex(@"\busing\s+static\s+[\w.]*\bSecurityPrincipalContext\b", RegexOptions.CultureInvariant)),
+        ("OfType<SecurityPrincipalContext>", new Regex(@"\bOfType\s*<\s*[\w.]*\bSecurityPrincipalContext\s*>", RegexOptions.CultureInvariant)),
+        ("GetTenantId", new Regex(@"\bGetTenantId\s*\(", RegexOptions.CultureInvariant)),
+        ("claim lookup", new Regex(@"\.\s*(FindFirst|FindFirstValue|FindAll|HasClaim)\s*[(<]", RegexOptions.CultureInvariant)),
+        (".Claims", new Regex(@"(?<!\bSecurity)\.\s*Claims\b", RegexOptions.CultureInvariant)),
+        ("Items indexer read", new Regex(@"\bItems\s*\[[^\]]*\](?!\s*=(?!=))", RegexOptions.CultureInvariant)),
+        ("Items lookup", new Regex(@"\bItems\s*\.\s*(TryGetValue|Values|Keys|ContainsKey|GetValueOrDefault)\b", RegexOptions.CultureInvariant)),
+    ];
+
+    private static readonly Regex ModuleRequestContextImplementation = new(
+        @"\b(class|record|struct|interface)\b[^{;=]*:[^{;]*\bIModuleRequestContext\b",
+        RegexOptions.CultureInvariant | RegexOptions.Singleline);
+
+    private static IEnumerable<(string Rel, string Content)> ModuleSources()
     {
         var root = RepositoryScan.FindRepositoryRoot();
-        var modulesDir = Path.Combine(root, "modules");
-        string[] forbidden = ["SecurityPrincipalContext.ItemKey", "TenantIdItemKey", ".GetTenantId(", ".FindFirst("];
-
-        var violations = new List<string>();
-        foreach (var csFile in Directory.EnumerateFiles(modulesDir, "*.cs", SearchOption.AllDirectories))
+        foreach (var csFile in Directory.EnumerateFiles(Path.Combine(root, "modules"), "*.cs", SearchOption.AllDirectories))
         {
             var rel = Path.GetRelativePath(root, csFile).Replace('\\', '/');
-            var moduleDir = rel.Split('/')[1];
-            if (moduleDir.EndsWith(".Tests", StringComparison.Ordinal) ||
-                rel.Contains("/bin/", StringComparison.Ordinal) || rel.Contains("/obj/", StringComparison.Ordinal))
+            if (rel.Contains("/bin/", StringComparison.Ordinal) || rel.Contains("/obj/", StringComparison.Ordinal) ||
+                rel.Split('/')[1].EndsWith(".Tests", StringComparison.Ordinal))
             {
                 continue;
             }
 
-            var content = File.ReadAllText(csFile);
-            foreach (var token in forbidden)
+            yield return (rel, File.ReadAllText(csFile));
+        }
+    }
+
+    [Theory]
+    [InlineData("TenantIdItemKey", "var t = ctx.Items[SecurityPrincipalContext.TenantIdItemKey];")]
+    [InlineData("TenantIdItemKey", "const string k = TenantIdItemKey;")]
+    [InlineData("SecurityPrincipalContext.ItemKey", "x = SecurityPrincipalContext . ItemKey;")]
+    [InlineData("using static SecurityPrincipalContext", "using static Autheris.Domain.Security.SecurityPrincipalContext;")]
+    [InlineData("OfType<SecurityPrincipalContext>", "ctx.Items.Values.OfType<Autheris.Domain.Security.SecurityPrincipalContext>()")]
+    [InlineData("GetTenantId", "var t = user.GetTenantId();")]
+    [InlineData("claim lookup", "user.FindFirst(\"tid\")")]
+    [InlineData("claim lookup", "user.FindFirstValue(\"tid\")")]
+    [InlineData("claim lookup", "user.FindAll(\"tid\")")]
+    [InlineData("claim lookup", "user.HasClaim(\"tid\", \"x\")")]
+    [InlineData(".Claims", "foreach (var c in user.Claims) { }")]
+    [InlineData("Items indexer read", "var v = context.Items[\"k\"];")]
+    [InlineData("Items indexer read", "if (context.Items[\"k\"] == null) { }")]
+    [InlineData("Items lookup", "context.Items.TryGetValue(\"k\", out var v);")]
+    [InlineData("Items lookup", "context.Items.Values.ToList();")]
+    public void Tenant_resolution_patterns_catch_known_evasions(string patternName, string sample)
+    {
+        ForbiddenTenantResolution.Single(p => p.Name == patternName).Pattern.IsMatch(sample)
+            .ShouldBeTrue($"pattern '{patternName}' must match: {sample}");
+    }
+
+    [Theory]
+    [InlineData("context.Items[\"k\"] = value;")]
+    [InlineData("context.Items [ \"k\" ]=value;")]
+    [InlineData("using System.Security.Claims;")]
+    [InlineData("var tenant = requestContext.GetRequestTenant(context);")]
+    [InlineData("var sec = requestContext.GetSecurityContext(context);")]
+    public void Tenant_resolution_patterns_allow_writes_and_request_context(string sample)
+    {
+        ForbiddenTenantResolution.Where(p => p.Pattern.IsMatch(sample)).Select(p => p.Name).ShouldBeEmpty();
+    }
+
+    [Theory]
+    [InlineData("public sealed class Fake : IModuleRequestContext { }")]
+    [InlineData("internal sealed record Fake(int A) : IModuleRequestContext;")]
+    [InlineData("public record struct Fake : IModuleRequestContext { }")]
+    [InlineData("public readonly struct Fake : IDisposable, IModuleRequestContext { }")]
+    [InlineData("public interface IMore : IModuleRequestContext { }")]
+    [InlineData("class Fake\n    : Base,\n      Autheris.Modules.Abstractions.IModuleRequestContext\n{ }")]
+    public void Request_context_implementation_pattern_catches_all_type_kinds(string sample)
+    {
+        ModuleRequestContextImplementation.IsMatch(sample).ShouldBeTrue(sample);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Modules_do_not_resolve_tenant_from_http_items()
+    {
+        var violations = new List<string>();
+        foreach (var (rel, content) in ModuleSources())
+        {
+            foreach (var (name, pattern) in ForbiddenTenantResolution)
             {
-                if (content.Contains(token, StringComparison.Ordinal))
+                if (pattern.IsMatch(content))
                 {
-                    violations.Add($"{rel} resolves tenant or principal via '{token}'");
+                    violations.Add($"{rel} resolves tenant or principal via '{name}'");
                 }
             }
         }
@@ -232,24 +297,18 @@ public sealed partial class ModuleBoundaryArchitectureTests
     [Trait("Category", "Security")]
     public void No_module_type_implements_module_request_context()
     {
-        var root = RepositoryScan.FindRepositoryRoot();
-        var violations = new List<string>();
-        foreach (var csFile in Directory.EnumerateFiles(Path.Combine(root, "modules"), "*.cs", SearchOption.AllDirectories))
-        {
-            var rel = Path.GetRelativePath(root, csFile).Replace('\\', '/');
-            if (rel.Contains("/bin/", StringComparison.Ordinal) || rel.Contains("/obj/", StringComparison.Ordinal) ||
-                rel.Split('/')[1].EndsWith(".Tests", StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            if (Regex.IsMatch(File.ReadAllText(csFile), @"class\s+\w+[^{;]*:\s*[^{;]*\bIModuleRequestContext\b"))
-            {
-                violations.Add(rel);
-            }
-        }
-
+        var violations = ModuleSources()
+            .Where(f => ModuleRequestContextImplementation.IsMatch(f.Content))
+            .Select(f => f.Rel)
+            .ToList();
         violations.ShouldBeEmpty("No module may implement IModuleRequestContext:\n" + string.Join("\n", violations));
+
+        var moduleAssemblies = new[] { typeof(Autheris.Modules.Lakehouse.LakehouseModule).Assembly };
+        moduleAssemblies
+            .SelectMany(a => a.GetTypes())
+            .Where(t => typeof(IModuleRequestContext).IsAssignableFrom(t))
+            .Select(t => t.FullName)
+            .ShouldBeEmpty();
 
         typeof(ModuleLoader).Assembly.GetTypes()
             .Where(t => typeof(IModuleRequestContext).IsAssignableFrom(t) && t.IsClass)

@@ -58,6 +58,32 @@ public sealed class ModuleRequestContextTests
 
     [Fact]
     [Trait("Category", "Security")]
+    public void Request_tenant_matches_endpoint_security_for_claim_empty_and_blank_shapes()
+    {
+        var claimOnly = ContextWith(new Claim("tenant_id", "tenant-c"));
+        _sut.GetRequestTenant(claimOnly).ShouldBe(EndpointSecurity.GetRequestTenant(claimOnly));
+        _sut.GetRequestTenant(claimOnly).Value.ShouldBe("tenant-c");
+
+        var empty = new DefaultHttpContext();
+        var emptyExpected = Should.Throw<Exception>(() => EndpointSecurity.GetRequestTenant(empty));
+        Should.Throw<Exception>(() => _sut.GetRequestTenant(empty)).GetType().ShouldBe(emptyExpected.GetType());
+
+        var blank = new DefaultHttpContext();
+        blank.Items[SecurityPrincipalContext.ItemKey] = new SecurityPrincipalContext
+        {
+            UserSid = new Sid("S-1-5-21-CTX"),
+            GroupSids = new HashSet<Sid>(),
+            TenantRoles = new HashSet<string>(),
+            ClusterRoles = new HashSet<string>(),
+            AuthenticationScheme = "Bearer",
+        };
+        blank.Items[SecurityPrincipalContext.TenantIdItemKey] = new TenantId("tenant-from-items");
+        var blankExpected = Should.Throw<Exception>(() => EndpointSecurity.GetRequestTenant(blank));
+        Should.Throw<Exception>(() => _sut.GetRequestTenant(blank)).GetType().ShouldBe(blankExpected.GetType());
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
     public void Malformed_tenant_claim_fails_closed()
     {
         var ctx = ContextWith(new Claim("tenant_id", "not a valid tenant!!"));
