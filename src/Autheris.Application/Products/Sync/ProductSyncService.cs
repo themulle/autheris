@@ -31,8 +31,13 @@ public sealed partial class ProductSyncService(
     /// <summary>A retirement is final (the name stays taken), so one commit retires only a bounded number of products.</summary>
     internal const int MaxRetirementsPerSync = 25;
 
-    private const int PageSize = 200;
-    private const int MaxPages = 50;
+    private const int DefaultPageSize = 200;
+    private const int DefaultMaxPages = 50;
+
+    /// <summary>Page size and page limit of the drift and retirement scan (fixed limits of the gateway, set per instance by tests only).</summary>
+    internal int ScanPageSize { get; init; } = DefaultPageSize;
+
+    internal int ScanMaxPages { get; init; } = DefaultMaxPages;
 
     private readonly DataProductService _products = products ?? throw new ArgumentNullException(nameof(products));
     private readonly IDataProductRepository _repository = repository ?? throw new ArgumentNullException(nameof(repository));
@@ -138,18 +143,26 @@ public sealed partial class ProductSyncService(
         var declared = entries.Select(static e => (e.Schema, e.Name)).ToHashSet();
         var retirements = new List<Work>();
         var after = (string?)null;
-        for (var page = 0; page < MaxPages; page++)
+        var exhausted = false;
+        for (var page = 0; page < ScanMaxPages; page++)
         {
-            var batch = await _repository.ListProductsAsync(caller.Tenant, after, PageSize, ct).ConfigureAwait(false);
+            var batch = await _repository.ListProductsAsync(caller.Tenant, after, ScanPageSize, ct).ConfigureAwait(false);
             retirements.AddRange(batch
                 .Where(p => p.ManagedBy is not null && p.Status != DataProductStatus.Retired && !declared.Contains((p.Schema, p.Name)))
                 .Select(static p => new Work(new ProductSyncItem(p.Schema, p.Name, ProductSyncAction.Retire), null, null, [])));
-            if (batch.Count < PageSize)
+            if (batch.Count < ScanPageSize)
             {
+                exhausted = true;
                 break;
             }
 
             after = $"{batch[^1].Schema}/{batch[^1].Name}";
+        }
+
+        if (!exhausted)
+        {
+            // never a silent partial scan: products beyond the limit would escape the drift and retirement check
+            throw new ProductSyncRejectedException(ProductSyncReasons.TooManyProducts);
         }
 
         if (retirements.Count > MaxRetirementsPerSync)

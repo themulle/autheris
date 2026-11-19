@@ -61,6 +61,7 @@ public sealed partial class GovernedProcedureExecutionService : IProcedureExecut
     private readonly Autheris.Application.Policy.Interfaces.IAccessProfileCache? _accessProfileCache;
     private readonly Autheris.Application.Policy.Pdp.IAccessDecisionPoint? _accessDecisionPoint;
     private readonly Autheris.Application.Usage.IUsageRecorder? _usageRecorder;
+    private readonly Autheris.Application.State.IDistributedClusterStateProvider? _clusterState;
 
     public GovernedProcedureExecutionService(
         IProcedureRegistry registry,
@@ -86,8 +87,10 @@ public sealed partial class GovernedProcedureExecutionService : IProcedureExecut
         Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null,
         Autheris.Application.Policy.Pdp.IAccessDecisionPoint? accessDecisionPoint = null,
         Autheris.Application.Usage.IUsageRecorder? usageRecorder = null,
-        Autheris.Application.Products.IDataProductRepository? productRepository = null)
+        Autheris.Application.Products.IDataProductRepository? productRepository = null,
+        Autheris.Application.State.IDistributedClusterStateProvider? clusterState = null)
     {
+        _clusterState = clusterState;
         _products = productRepository;
         _accessDecisionPoint = accessDecisionPoint ?? new Autheris.Application.Policy.Pdp.AccessDecisionPoint(
             options,

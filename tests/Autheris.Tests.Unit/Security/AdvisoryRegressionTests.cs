@@ -300,6 +300,10 @@ public sealed partial class AdvisoryRegressionTests
     [InlineData("table_source_gated")]
     [InlineData("empty_table_source_still_gated")]
     [InlineData("denied_source_never_reaches_invoker")]
+    [InlineData("subscription_without_registered_gate_denied")]
+    [InlineData("all_tables_subscription_admission")]
+    [InlineData("iceberg_list_hides_denied_sources")]
+    [InlineData("webhook_drop_is_recorded")]
     public async Task Ghsa_92vp_pp52_regression(string bullet)
     {
         switch (bullet)
@@ -320,6 +324,18 @@ public sealed partial class AdvisoryRegressionTests
             case "denied_source_never_reaches_invoker":
                 // Every denial case above asserts the invoker and the row-scope resolver were not called.
                 await Procedures.ProcedureTransportGateTests.AssertSourceDeniedBeforeInvokeAsync("table_source");
+                break;
+            case "subscription_without_registered_gate_denied":
+                await Autheris.Tests.Unit.GraphQL.CdcSubscriptionGovernorTransportTests.AssertNoGateDeniesTableSubscriptionAsync();
+                break;
+            case "all_tables_subscription_admission":
+                await Autheris.Tests.Unit.GraphQL.CdcSubscriptionGovernorTransportTests.AssertAllTablesAdmissionAsync();
+                break;
+            case "iceberg_list_hides_denied_sources":
+                await Autheris.Tests.Unit.Federation.IcebergListTransportGateTests.AssertListHidesDeniedSourcesAsync();
+                break;
+            case "webhook_drop_is_recorded":
+                await Autheris.Tests.Unit.Streaming.CdcWebhookDeliveryServiceTests.AssertTransportDropIsRecordedAsync();
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(bullet));
