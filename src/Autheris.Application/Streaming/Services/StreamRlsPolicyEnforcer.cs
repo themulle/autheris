@@ -168,7 +168,7 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
             catch (Autheris.Domain.Exceptions.TransportNotAllowedException)
             {
                 _logger.LogDebug("Streaming event '{EventId}' dropped: transport not allowed for source '{Source}'", cdcEvent.EventId, logicalSource);
-                return StreamSecurityDecision.Denied("Transport not allowed");
+                return StreamSecurityDecision.TransportDenied();
             }
 
             // 5. Consent decision (same chain as GatewayExecutionService)

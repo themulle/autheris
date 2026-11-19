@@ -191,7 +191,16 @@ public sealed partial class GovernedProcedureExecutionService
             throw new ArgumentException("Invalid parameter.");
         }
 
-        if (!ProductWriteRateLimiter.TryAcquire(tenantId, product.Id))
+        var acquired = await ProductWriteRateLimiter.TryAcquireAsync(_clusterState, tenantId, product.Id, TimeProvider.System.GetUtcNow(), ct).ConfigureAwait(false);
+        if (acquired is null)
+        {
+            // fail closed: without a shared counter no write runs
+            RecordProcedureUsage(definition, tenantId, userSid, Autheris.Application.Usage.UsageOutcome.DenyOther, 0, false);
+            await AuditAsync("PROCEDURE_THROTTLED", "DENY", definition, tenantId, userSid, new { reason = "write-rate-unavailable", productId = product.Id }, traceId, ct).ConfigureAwait(false);
+            throw new ProcedureUnavailableException(UnavailableMessage);
+        }
+
+        if (!acquired.Value)
         {
             RecordProcedureUsage(definition, tenantId, userSid, Autheris.Application.Usage.UsageOutcome.DenyRateLimit, 0, false);
             await AuditAsync("PROCEDURE_THROTTLED", "DENY", definition, tenantId, userSid, new { reason = "write-rate", productId = product.Id }, traceId, ct).ConfigureAwait(false);

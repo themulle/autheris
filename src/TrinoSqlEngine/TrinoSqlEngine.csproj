@@ -13,6 +13,7 @@
     <TieredPGO>true</TieredPGO>
     <OptimizationPreference>Speed</OptimizationPreference>
     <GarbageCollectionAdaptationMode>1</GarbageCollectionAdaptationMode> <!-- DATAS GC -->
+    <!-- CS0108: ANTLR-generated SqlBaseParser contexts hide ParserRuleContext.EMPTY. -->
     <NoWarn>$(NoWarn);CS0108;CA1711</NoWarn>
   </PropertyGroup>
 
