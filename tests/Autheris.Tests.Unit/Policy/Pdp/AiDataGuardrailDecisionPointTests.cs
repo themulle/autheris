@@ -129,6 +129,7 @@ public sealed class AiDataGuardrailDecisionPointTests
             Arg.Any<CancellationToken>());
         // Audited with reason codes only: neither the policy text nor a predicate value reaches the audit trail.
         h.Audit.Entries.ShouldContain(e => e.Decision == "DENY" && e.DetailsJson!.Contains("DEFAULT_DENY") && !e.DetailsJson.Contains("EU-secret"));
+        h.Audit.Entries.ShouldAllBe(e => !e.DetailsJson!.Contains("EU-secret"));
         await h.Bus.Received(1).PublishAsync(Arg.Any<PolicyDeniedEvent>(), Arg.Any<CancellationToken>());
     }
 
@@ -176,6 +177,7 @@ public sealed class AiDataGuardrailDecisionPointTests
         result.IsSuccess.ShouldBeFalse();
         read.ShouldBeFalse();
         h.Audit.Entries.ShouldContain(e => e.Decision == "DENY" && e.DetailsJson!.Contains("DEFAULT_DENY") && !e.DetailsJson.Contains("EU-secret"));
+        h.Audit.Entries.ShouldAllBe(e => !e.DetailsJson!.Contains("EU-secret"));
     }
 
     [Fact]
