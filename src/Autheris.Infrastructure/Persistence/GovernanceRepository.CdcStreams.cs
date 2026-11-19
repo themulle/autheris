@@ -317,13 +317,7 @@ public partial class GovernanceRepository : ICdcStreamStore
 
             await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
 
-            // (a) the fenced watermark upsert comes first: it serialises concurrent producers and rejects a stale token before anything else.
-            if (!await UpsertWatermarkAsync(conn, tx, batch, ct).ConfigureAwait(false))
-            {
-                throw new FencingTokenRejectedException(resource, batch.FencingToken);
-            }
-
-            // (b) head compare-and-set fenced by the stream's producer token.
+            // (a) head compare-and-set fenced by the stream's producer token: it takes the stream row first and so serialises concurrent producers.
             await using (var cas = Cmd(conn, tx, @"UPDATE %streams%
                     SET head_offset = @newHead, producer_fencing_token = @token, updated_ms = @now
                   WHERE stream_id = @id AND head_offset = @expected AND producer_fencing_token <= @token"))
@@ -337,6 +331,12 @@ public partial class GovernanceRepository : ICdcStreamStore
                 {
                     await ThrowCasFailureAsync(conn, tx, id, batch.FencingToken, resource, ct).ConfigureAwait(false);
                 }
+            }
+
+            // (b) the fenced watermark upsert follows the CAS: descriptor readers lock stream then watermark, the opposite order deadlocked (SQL Server 1205).
+            if (!await UpsertWatermarkAsync(conn, tx, batch, ct).ConfigureAwait(false))
+            {
+                throw new FencingTokenRejectedException(resource, batch.FencingToken);
             }
 
             // (c) events (PK (stream_id, event_offset) makes a duplicate impossible), (d) row images.
