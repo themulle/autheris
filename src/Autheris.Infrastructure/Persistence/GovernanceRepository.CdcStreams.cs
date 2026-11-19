@@ -420,7 +420,7 @@ public partial class GovernanceRepository : ICdcStreamStore
         public async Task ResetWatermarkAsync(DbConnection conn, CdcStreamId id, string? watermarkState, CancellationToken ct)
         {
             var sql = sqlServer
-                // Resolve the watermark key in its own statement so no stream-row lock is held while the watermark row is locked (the reset never holds the stream lock and the watermark lock at the same time).
+                // Resolve the watermark key in its own statement: the reset never holds the stream lock and the watermark lock at the same time.
                 ? @"
                     DECLARE @src NVARCHAR(32), @dom NVARCHAR(128), @sch NVARCHAR(128), @tbl NVARCHAR(128);
                     SELECT @src = source, @dom = domain_name, @sch = schema_name, @tbl = table_name FROM %streams% WHERE stream_id = @id;

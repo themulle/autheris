@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using Autheris.Tests.Common;
 using Shouldly;
 
+// Kept outside Governance/Contract/ on purpose: the coverage guard scans that folder for contract roots, and this partial adds a case to CdcStreamsContract.
 namespace Autheris.Tests.Integration.Governance.Contract;
 
 public abstract partial class CdcStreamsContract
