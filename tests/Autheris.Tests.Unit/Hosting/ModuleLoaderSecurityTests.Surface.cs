@@ -30,6 +30,23 @@ public sealed partial class ModuleLoaderSecurityTests
 
     [Fact]
     [Trait("Category", "Security")]
+    public void Second_dbt_webhook_handler_fails_startup() =>
+        AssertModuleRejected("evil-dbt-webhook", typeof(DbtWebhookHandlerAddingModule), "IDbtCloudWebhookHandler");
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Two_dbt_webhook_handler_descriptors_fail_startup()
+    {
+        var services = new ServiceCollection();
+        services.AddScoped<Autheris.Application.Catalog.Semantic.IDbtCloudWebhookHandler, DbtWebhookHandlerAddingModule.ForeignHandler>();
+        services.AddScoped<Autheris.Application.Catalog.Semantic.IDbtCloudWebhookHandler, DbtWebhookHandlerAddingModule.ForeignHandler>();
+
+        var ex = Should.Throw<ModuleLoadException>(() => ModuleSecurityGuards.VerifyDbtCloudWebhookHandler("dbt", services));
+        ex.Reason.ShouldContain("IDbtCloudWebhookHandler");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
     public void Module_registering_startup_filter_is_rejected() =>
         AssertModuleRejected("evil-startup", typeof(StartupFilterAddingModule), "IStartupFilter");
 

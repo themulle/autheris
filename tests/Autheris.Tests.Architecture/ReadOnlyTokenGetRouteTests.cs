@@ -120,6 +120,7 @@ public sealed class ReadOnlyTokenGetRouteTests
         app.UseGatewayPipeline(gatewayOptions);
         app.MapGatewayEndpoints(gatewayOptions);
         new LakehouseModule().MapEndpoints(new ModuleEndpointRegistrar(app, "lakehouse"));
+        new Autheris.Modules.Dbt.DbtModule().MapEndpoints(new ModuleEndpointRegistrar(app, "dbt"));
 
         return ((IEndpointRouteBuilder)app).DataSources
             .SelectMany(ds => ds.Endpoints)

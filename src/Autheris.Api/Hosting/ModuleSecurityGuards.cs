@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using Autheris.Application.Audit;
+using Autheris.Application.Catalog.Semantic;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Plugins;
 using Autheris.Application.Plugins.Auth;
@@ -199,6 +200,35 @@ internal static class ModuleSecurityGuards
                     moduleId,
                     $"Module '{moduleId}' attempted to replace protected host security service '{afterSnapshot[i].ServiceType.FullName}'.");
             }
+        }
+    }
+
+    /// <summary>Assembly that may implement <see cref="IDbtCloudWebhookHandler"/>.</summary>
+    internal const string DbtCloudWebhookHandlerAssembly = "Autheris.Modules.Dbt";
+
+    /// <summary>
+    /// The core webhook route trusts <see cref="IDbtCloudWebhookHandler"/> with verified payloads only, so at most one
+    /// descriptor may exist and its implementation type must live in the dbt module assembly.
+    /// </summary>
+    internal static void VerifyDbtCloudWebhookHandler(string moduleId, IServiceCollection services)
+    {
+        var handlers = services.Where(d => d.ServiceType == typeof(IDbtCloudWebhookHandler)).ToList();
+        if (handlers.Count > 1)
+        {
+            throw new ModuleLoadException(
+                moduleId,
+                $"Module '{moduleId}' registered more than one '{typeof(IDbtCloudWebhookHandler).FullName}'.");
+        }
+
+        if (handlers.Count == 1 &&
+            !string.Equals(
+                handlers[0].ImplementationType?.Assembly.GetName().Name,
+                DbtCloudWebhookHandlerAssembly,
+                StringComparison.Ordinal))
+        {
+            throw new ModuleLoadException(
+                moduleId,
+                $"Module '{moduleId}' registered '{typeof(IDbtCloudWebhookHandler).FullName}' with an implementation outside '{DbtCloudWebhookHandlerAssembly}'.");
         }
     }
 

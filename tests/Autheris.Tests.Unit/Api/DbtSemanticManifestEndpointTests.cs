@@ -3,6 +3,7 @@ namespace Autheris.Tests.Unit.Api;
 
 using Autheris.Tests.Common;
 using System;
+using Autheris.Api.Hosting;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -13,7 +14,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Endpoints;
 using Autheris.Application.Catalog.Semantic;
-using Autheris.Extensions.Dbt;
+using Autheris.Modules.Dbt;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
@@ -103,7 +104,7 @@ public sealed class DbtSemanticManifestEndpointTests
         var host = NewHost(TenancyShape.Multi);
         var admin = Context(Principal("tenant-a", "GovernanceAdmin"), Manifest);
 
-        var import = await RunAsync(await DbtEndpoints.HandleImportSemanticManifestAsync(admin, host.Ingestion, host.Tenancy), admin);
+        var import = await RunAsync(await DbtEndpoints.HandleImportSemanticManifestAsync(admin, new ModuleRequestContext(), host.Ingestion, host.Tenancy), admin);
 
         import.Status.ShouldBe(200);
         (await host.Catalog.GetMetricAsync("revenue", new TenantId("tenant-a"))).ShouldNotBeNull();
@@ -111,7 +112,7 @@ public sealed class DbtSemanticManifestEndpointTests
         (await host.Catalog.GetMetricAsync("revenue", new TenantId("tenant-b"))).ShouldBeNull();
 
         var listB = Context(Principal("tenant-b", "Analyst"));
-        var listed = await RunAsync(await DbtEndpoints.HandleListDbtMetricsAsync(listB, host.Catalog, host.Tenancy), listB);
+        var listed = await RunAsync(await DbtEndpoints.HandleListDbtMetricsAsync(listB, new ModuleRequestContext(), host.Catalog, host.Tenancy), listB);
         listed.Body.ShouldBe("[]");
 
         var restB = Context(Principal("tenant-b", "Analyst"));
@@ -128,12 +129,12 @@ public sealed class DbtSemanticManifestEndpointTests
         var host = NewHost(TenancyShape.Multi);
         var claimless = Context(Principal(null, "GovernanceAdmin"), Manifest);
 
-        var import = await RunAsync(await DbtEndpoints.HandleImportSemanticManifestAsync(claimless, host.Ingestion, host.Tenancy), claimless);
+        var import = await RunAsync(await DbtEndpoints.HandleImportSemanticManifestAsync(claimless, new ModuleRequestContext(), host.Ingestion, host.Tenancy), claimless);
 
         import.Status.ShouldBe(403);
         (await host.Catalog.ListMetricsAsync(null, Autheris.Tests.Common.TestTenants.Default)).ShouldBeEmpty();
         var list = Context(Principal(null, "Analyst"));
-        (await RunAsync(await DbtEndpoints.HandleListDbtMetricsAsync(list, host.Catalog, host.Tenancy), list)).Body.ShouldBe("[]");
+        (await RunAsync(await DbtEndpoints.HandleListDbtMetricsAsync(list, new ModuleRequestContext(), host.Catalog, host.Tenancy), list)).Body.ShouldBe("[]");
     }
 
     [Theory]
@@ -145,10 +146,10 @@ public sealed class DbtSemanticManifestEndpointTests
         var host = NewHost(mode);
         var noSid = Context(Principal("tenant-a", "GovernanceAdmin", sid: false), Manifest);
 
-        (await RunAsync(await DbtEndpoints.HandleImportSemanticManifestAsync(noSid, host.Ingestion, host.Tenancy), noSid)).Status.ShouldBe(403);
+        (await RunAsync(await DbtEndpoints.HandleImportSemanticManifestAsync(noSid, new ModuleRequestContext(), host.Ingestion, host.Tenancy), noSid)).Status.ShouldBe(403);
 
         var list = Context(Principal("tenant-a", "Analyst", sid: false));
-        (await RunAsync(await DbtEndpoints.HandleListDbtMetricsAsync(list, host.Catalog, host.Tenancy), list)).Body.ShouldBe("[]");
+        (await RunAsync(await DbtEndpoints.HandleListDbtMetricsAsync(list, new ModuleRequestContext(), host.Catalog, host.Tenancy), list)).Body.ShouldBe("[]");
     }
 
     [Fact]
@@ -157,13 +158,13 @@ public sealed class DbtSemanticManifestEndpointTests
         var host = NewHost(TenancyShape.Single);
         var admin = Context(Principal(DefaultTenantCaller.Claim.Value, "GovernanceAdmin"), Manifest);
 
-        (await RunAsync(await DbtEndpoints.HandleImportSemanticManifestAsync(admin, host.Ingestion, host.Tenancy), admin)).Status.ShouldBe(200);
+        (await RunAsync(await DbtEndpoints.HandleImportSemanticManifestAsync(admin, new ModuleRequestContext(), host.Ingestion, host.Tenancy), admin)).Status.ShouldBe(200);
 
         var analyst = Context(Principal("tenant-b", "Analyst"));
-        var list = await RunAsync(await DbtEndpoints.HandleListDbtMetricsAsync(analyst, host.Catalog, host.Tenancy), analyst);
+        var list = await RunAsync(await DbtEndpoints.HandleListDbtMetricsAsync(analyst, new ModuleRequestContext(), host.Catalog, host.Tenancy), analyst);
         list.Body.ShouldNotContain("revenue");
         var sameTenant = Context(Principal(DefaultTenantCaller.Claim.Value, "Analyst"));
-        (await RunAsync(await DbtEndpoints.HandleListDbtMetricsAsync(sameTenant, host.Catalog, host.Tenancy), sameTenant)).Body.ShouldContain("revenue");
+        (await RunAsync(await DbtEndpoints.HandleListDbtMetricsAsync(sameTenant, new ModuleRequestContext(), host.Catalog, host.Tenancy), sameTenant)).Body.ShouldContain("revenue");
     }
 
     [Fact]
@@ -172,7 +173,7 @@ public sealed class DbtSemanticManifestEndpointTests
         var host = NewHost(TenancyShape.Multi);
         var analyst = Context(Principal("tenant-a", "Analyst"), Manifest);
 
-        (await RunAsync(await DbtEndpoints.HandleImportSemanticManifestAsync(analyst, host.Ingestion, host.Tenancy), analyst)).Status.ShouldBe(403);
+        (await RunAsync(await DbtEndpoints.HandleImportSemanticManifestAsync(analyst, new ModuleRequestContext(), host.Ingestion, host.Tenancy), analyst)).Status.ShouldBe(403);
         (await host.Catalog.ListMetricsAsync(null, new TenantId("tenant-a"))).ShouldBeEmpty();
     }
 
@@ -185,7 +186,7 @@ public sealed class DbtSemanticManifestEndpointTests
         ingestion.ParseAndIngestAsync(Arg.Any<string>(), Arg.Any<TenantId>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
             .Returns<Task<DbtSemanticManifest>>(_ => throw new SemanticManifestInvalidException(["TEMPLATE_INVALID"]));
         var c1 = Context(Principal("tenant-a", "GovernanceAdmin"), Manifest);
-        var r1 = await RunAsync(await DbtEndpoints.HandleImportSemanticManifestAsync(c1, ingestion, host.Tenancy), c1);
+        var r1 = await RunAsync(await DbtEndpoints.HandleImportSemanticManifestAsync(c1, new ModuleRequestContext(), ingestion, host.Tenancy), c1);
         r1.Status.ShouldBe(400);
         r1.Body.ShouldContain("DBT_MANIFEST_INVALID");
         r1.Body.ShouldNotContain("TEMPLATE_INVALID");
@@ -193,14 +194,14 @@ public sealed class DbtSemanticManifestEndpointTests
         ingestion.ParseAndIngestAsync(Arg.Any<string>(), Arg.Any<TenantId>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
             .Returns<Task<DbtSemanticManifest>>(_ => throw new SemanticManifestPartialException(new InvalidOperationException("x")));
         var c2 = Context(Principal("tenant-a", "GovernanceAdmin"), Manifest);
-        var r2 = await RunAsync(await DbtEndpoints.HandleImportSemanticManifestAsync(c2, ingestion, host.Tenancy), c2);
+        var r2 = await RunAsync(await DbtEndpoints.HandleImportSemanticManifestAsync(c2, new ModuleRequestContext(), ingestion, host.Tenancy), c2);
         r2.Status.ShouldBe(500);
         r2.Body.ShouldContain("DBT_MANIFEST_PARTIAL");
 
         ingestion.ParseAndIngestAsync(Arg.Any<string>(), Arg.Any<TenantId>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
             .Returns<Task<DbtSemanticManifest>>(_ => throw new GatewayForbiddenException());
         var c3 = Context(Principal("tenant-a", "GovernanceAdmin"), Manifest);
-        (await RunAsync(await DbtEndpoints.HandleImportSemanticManifestAsync(c3, ingestion, host.Tenancy), c3)).Status.ShouldBe(403);
+        (await RunAsync(await DbtEndpoints.HandleImportSemanticManifestAsync(c3, new ModuleRequestContext(), ingestion, host.Tenancy), c3)).Status.ShouldBe(403);
     }
 
     [Fact]
@@ -209,7 +210,7 @@ public sealed class DbtSemanticManifestEndpointTests
     {
         var host = NewHost(TenancyShape.Multi);
         var import = Context(Principal("tenant-a", "GovernanceAdmin"), Manifest);
-        await RunAsync(await DbtEndpoints.HandleImportSemanticManifestAsync(import, host.Ingestion, host.Tenancy), import);
+        await RunAsync(await DbtEndpoints.HandleImportSemanticManifestAsync(import, new ModuleRequestContext(), host.Ingestion, host.Tenancy), import);
 
         var analyst = Context(Principal("tenant-a", "Analyst"));
         var analystJson = (await RunAsync(await AnalyticsEndpoints.HandleListMetricsAsync(analyst, host.Catalog, host.Tenancy), analyst)).Body;

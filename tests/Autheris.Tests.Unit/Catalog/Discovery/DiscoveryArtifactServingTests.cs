@@ -18,7 +18,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
-using Autheris.Extensions.Dbt;
+using Autheris.Modules.Dbt;
 using Autheris.GraphQL.Types;
 using Autheris.Infrastructure.Persistence;
 using Autheris.Tests.Common;

@@ -11,7 +11,7 @@ using Autheris.Application.Lineage;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
-using Autheris.Extensions.Dbt;
+using Autheris.Modules.Dbt;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using Shouldly;

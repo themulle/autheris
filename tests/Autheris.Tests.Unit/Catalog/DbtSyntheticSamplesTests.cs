@@ -6,7 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using Autheris.Extensions.Dbt;
+using Autheris.Modules.Dbt;
 using Shouldly;
 using Xunit;
 

@@ -11,8 +11,8 @@ Moderne Data-Mesh- und Analytics-Teams nutzen dbt für Transformationen, Datenqu
 Das Modul `Dbt` schlägt die Brücke zwischen Data Engineering und GraphQL-API-Governance:
 1. **Streaming Ingestion von `manifest.json`**: Modelle, Seeds und Quellen (top-level `sources`), Spaltentypen, DSGVO-Tags und Abhängigkeiten fließen direkt in den [`LineageGraphStore`](../../src/Autheris.Application/Lineage/ILineageGraphStore.cs) und den Governance-Katalog.
 2. **Zero-Trust Proposal & Freigabe-Workflow**: Erkannte PII- und DSGVO-Attribute werden nicht ungeprüft aktiv, sondern erzeugen [`DbtMetadataProposal`](../../src/Autheris.Domain/Model/DbtMetadataModels.cs)-Einträge (`PendingReview`). Nach 4-Augen-Freigabe werden Maskierungsregeln im [`ITableMetadataRepository`](../../src/Autheris.Application/Common/Interfaces/IGovernanceRepository.cs) aktiviert und die Policy-Epoche invalidiert.
-3. **CI/CD Breaking-Change Contract Enforcement**: Der [`DbtContractValidator`](../../src/Autheris.Extensions/Dbt/DbtContractValidator.cs) gleicht neue dbt-Manifeste im Pull-Request-CI gegen aktive GraphQL-Schemata ab und verhindert Breaking Changes (entfernte Pflichtfelder, Typ-Inkompatibilitäten).
-4. **Bidirektionale Exposures**: Der [`DbtExposurePublisher`](../../src/Autheris.Extensions/Dbt/DbtExposurePublisher.cs) meldet aktive GraphQL-Entitäten und Konsumenten als `exposures.yaml` an dbt zurück.
+3. **CI/CD Breaking-Change Contract Enforcement**: Der [`DbtContractValidator`](../../modules/Autheris.Modules.Dbt/DbtContractValidator.cs) gleicht neue dbt-Manifeste im Pull-Request-CI gegen aktive GraphQL-Schemata ab und verhindert Breaking Changes (entfernte Pflichtfelder, Typ-Inkompatibilitäten).
+4. **Bidirektionale Exposures**: Der [`DbtExposurePublisher`](../../modules/Autheris.Modules.Dbt/DbtExposurePublisher.cs) meldet aktive GraphQL-Entitäten und Konsumenten als `exposures.yaml` an dbt zurück.
 
 ---
 
@@ -31,23 +31,23 @@ sequenceDiagram
     actor Steward as Data Steward / Security Officer
 
     Note over DevOps,Validator: 1. Pre-Deployment: Contract Gate (PR CI)
-    DevOps->>GW: POST /api/extensions/dbt/validate-contract (manifest.json)
+    DevOps->>GW: POST /modules/dbt/validate-contract (manifest.json)
     GW->>Validator: ValidateContractsStreamAsync(stream)
     Validator->>Meta: Compare Columns with Active Schemas
     Validator-->>GW: DbtContractValidationResult (IsCompatible: true/false)
     GW-->>DevOps: 200 OK / 422 Unprocessable (Breaking Changes)
 
     Note over DevOps,Repo: 2. Post-Deployment: Manifest & Lineage Ingestion
-    DevOps->>GW: POST /api/extensions/dbt/sync (manifest.json)
+    DevOps->>GW: POST /modules/dbt/sync (manifest.json)
     GW->>Ingest: IngestManifestStreamAsync(stream)
     Ingest->>Repo: Deduplicate & Add Pending Proposals (PII / DSGVO)
     Ingest-->>GW: DbtSyncResult (Models: 42, Proposals: 3)
     GW-->>DevOps: 200 OK
 
     Note over Steward,Epoch: 3. Zero-Trust Approval Workflow
-    Steward->>GW: GET /api/extensions/dbt/proposals
+    Steward->>GW: GET /modules/dbt/proposals
     GW-->>Steward: List of Pending Proposals
-    Steward->>GW: POST /api/extensions/dbt/proposals/{id}/approve
+    Steward->>GW: POST /modules/dbt/proposals/{id}/approve
     GW->>Ingest: ApproveProposalAsync(id, reviewer)
     Ingest->>Repo: UpdateStatus(Approved)
     Ingest->>Meta: UpsertTableMetadata(ColumnMaskingRules)
@@ -59,16 +59,16 @@ sequenceDiagram
 
 ## 3. REST-Endpunkte Referenz
 
-Alle dbt-Endpunkte erfordern Authentifizierung (`.RequireAuthorization()`):
+Die dbt-Integration ist ein Laufzeitmodul (`dbt`, Konfiguration `Gateway:Dbt`) und muss unter `Gateway:Modules:Enabled` aktiviert sein; ohne das Modul antworten alle Routen mit 404, und `Gateway:Dbt` ohne Modul bricht den Start ab. Alle dbt-Endpunkte unter `/modules/dbt/` erfordern Authentifizierung. Der dbt-Cloud-Webhook ist eine Kernroute (`POST /api/webhooks/dbt-cloud`): Die HMAC-SHA256-Signatur wird im Kern geprüft (Header `X-Dbt-Signature`, `X-Hub-Signature-256` oder `Authorization` mit dem reinen 64-stelligen Hex-Wert), ausschließlich gegen `Gateway:Dbt:WebhookSecret` (kein Umgebungsvariablen-Fallback), bevor das Modul den Payload sieht:
 
 | Endpunkt | Methode | Beschreibung |
 | :--- | :---: | :--- |
-| `/api/extensions/dbt/sync` | `POST` | Ingestion des dbt `manifest.json`. Unterstützt Query-Parameter `?dryRun=true`. Max. 100 MB. |
-| `/api/extensions/dbt/validate-contract` | `POST` | Prüft dbt Model Contracts (`contract.enforced: true`) gegen aktive Tabellenschemata auf Breaking Changes. |
-| `/api/extensions/dbt/proposals` | `GET` | Listet ausstehende Governance-Vorschläge (`PendingReview`). Optional gefiltert nach `?database=X&schema=Y&table=Z`. |
-| `/api/extensions/dbt/proposals/{id}/approve` | `POST` | Genehmigt einen PII-Maskierungsvorschlag, aktualisiert `TableMetadata` und invalidiert die Policy-Epoche. |
-| `/api/extensions/dbt/proposals/{id}/reject` | `POST` | Weist einen vorgeschlagenen Governance-Eintrag ab. |
-| `/api/extensions/dbt/exposures` | `GET` | Generiert ein valides `exposures.yaml` zur Rückführung aktiver GraphQL-Abhängigkeiten in dbt Docs. |
+| `/modules/dbt/sync` | `POST` | Ingestion des dbt `manifest.json`. Unterstützt Query-Parameter `?dryRun=true`. Max. 100 MB. |
+| `/modules/dbt/validate-contract` | `POST` | Prüft dbt Model Contracts (`contract.enforced: true`) gegen aktive Tabellenschemata auf Breaking Changes. |
+| `/modules/dbt/proposals` | `GET` | Listet ausstehende Governance-Vorschläge (`PendingReview`). Optional gefiltert nach `?database=X&schema=Y&table=Z`. |
+| `/modules/dbt/proposals/{id}/approve` | `POST` | Genehmigt einen PII-Maskierungsvorschlag, aktualisiert `TableMetadata` und invalidiert die Policy-Epoche. |
+| `/modules/dbt/proposals/{id}/reject` | `POST` | Weist einen vorgeschlagenen Governance-Eintrag ab. |
+| `/modules/dbt/exposures` | `GET` | Generiert ein valides `exposures.yaml` zur Rückführung aktiver GraphQL-Abhängigkeiten in dbt Docs. |
 
 ---
 
@@ -91,7 +91,7 @@ models:
         data_type: varchar
 ```
 
-Prüft der [`DbtContractValidator`](../../src/Autheris.Extensions/Dbt/DbtContractValidator.cs):
+Prüft der [`DbtContractValidator`](../../modules/Autheris.Modules.Dbt/DbtContractValidator.cs):
 1. **Entfernte Spalten (`DROPPED_COLUMN`)**: Wurde eine Spalte gelöscht, die in aktiven GraphQL-Clients abgefragt wird?
 2. **Datentyp-Mismatches (`DATA_TYPE_MISMATCH`)**: Wurde ein Typ inkompatibel geändert (z. B. `integer` zu `varchar`), der Serialisierer oder Client-Typen bricht?
 
@@ -118,7 +118,7 @@ Rückgabe bei Inkompatibilität (HTTP 422):
 
 ## 5. Streaming Ingestion & Performance
 
-Da dbt-Manifeste in großen Projekten Hunderte Megabytes groß sein können, liest [`DbtArtifactStreamingParser`](../../src/Autheris.Extensions/Dbt/DbtArtifactStreamingParser.cs) den Stream asynchron mit konfigurierbarer Tiefen- und Kommentar-Toleranz (`JsonDocumentOptions.MaxDepth = 64`, `CommentHandling = Skip`).
+Da dbt-Manifeste in großen Projekten Hunderte Megabytes groß sein können, liest [`DbtArtifactStreamingParser`](../../modules/Autheris.Modules.Dbt/DbtArtifactStreamingParser.cs) den Stream asynchron mit konfigurierbarer Tiefen- und Kommentar-Toleranz (`JsonDocumentOptions.MaxDepth = 64`, `CommentHandling = Skip`).
 
 - **Selektive Node- & Source-Verarbeitung**: Der Parser verarbeitet `model.*`- und `seed.*`-Knoten aus `nodes` sowie alle deklarierten Tabellen unter dem Top-Level-Objekt `sources`. Makros, Tests und Operationen werden im Lesepfad übersprungen.
 - **Mapping von dbt Sources**:

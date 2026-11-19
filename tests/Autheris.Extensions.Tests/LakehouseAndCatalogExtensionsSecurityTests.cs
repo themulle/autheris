@@ -26,7 +26,7 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Extensions.DataCatalog;
-using Autheris.Extensions.Dbt;
+using Autheris.Modules.Dbt;
 using Autheris.Extensions.Lakehouse.Interfaces;
 using Autheris.Extensions.Lakehouse.Services;
 using Autheris.Extensions.OpenMetadata;
@@ -737,8 +737,8 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
         var noTimestamp = $"{{\"eventId\":\"evt_{Guid.NewGuid():N}\",\"eventType\":\"job_run.completed\"}}";
         var noEventId = $"{{\"eventType\":\"job_run.completed\",\"timestamp\":\"{DateTimeOffset.UtcNow:O}\"}}";
 
-        (await receiver.ProcessWebhookAsync(noTimestamp, "sha256=" + Hmac(noTimestamp, secret))).Success.ShouldBeFalse();
-        (await receiver.ProcessWebhookAsync(noEventId, "sha256=" + Hmac(noEventId, secret))).Success.ShouldBeFalse();
+        (await receiver.HandleVerifiedAsync(noTimestamp)).Success.ShouldBeFalse();
+        (await receiver.HandleVerifiedAsync(noEventId)).Success.ShouldBeFalse();
     }
 
     // ------------------------------------------------------------------ Low findings

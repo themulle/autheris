@@ -3,7 +3,7 @@ namespace Autheris.Tests.Integration;
 using System.Collections.Generic;
 using System.Text;
 using Autheris.Application.Catalog.Semantic;
-using Autheris.Extensions.Dbt;
+using Autheris.Modules.Dbt;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -17,7 +17,7 @@ using Autheris.Tests.Common.Hosting;
 using Autheris.Tests.Integration.Governance;
 
 /// <summary>
-/// EXT-05: POST /api/extensions/dbt/sync hands the server-resolved request tenant and the canonical ClusterAdmin flag to the
+/// EXT-05: POST /modules/dbt/sync hands the server-resolved request tenant and the canonical ClusterAdmin flag to the
 /// ingestion service (the caller can no longer widen the tenant scope through the manifest).
 /// </summary>
 [Trait("Category", "Security")]
@@ -45,6 +45,7 @@ public sealed class DbtSyncEndpointCallerTests : IClassFixture<DbtSyncEndpointCa
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseEnvironment("Development");
+            DbtWorkspaceTestSettings.Apply((k, v) => builder.UseSetting(k, v));
             base.ConfigureWebHost(builder);
         }
 
@@ -72,7 +73,7 @@ public sealed class DbtSyncEndpointCallerTests : IClassFixture<DbtSyncEndpointCa
         client.DefaultRequestHeaders.Add("X-Test-Roles", roles);
         client.DefaultRequestHeaders.Add("X-Test-Tenant", tenant);
 
-        var response = await client.PostAsync("/api/extensions/dbt/sync", new StringContent("{}", Encoding.UTF8, "application/json"));
+        var response = await client.PostAsync("/modules/dbt/sync", new StringContent("{}", Encoding.UTF8, "application/json"));
         response.IsSuccessStatusCode.ShouldBeTrue();
 
         var call = _service.ReceivedCalls().Single(c => c.GetMethodInfo().Name == nameof(IDbtMetadataIngestionService.IngestManifestStreamAsync));

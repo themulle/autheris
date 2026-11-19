@@ -1087,7 +1087,7 @@ Identity realms are read from `Authentication:Realms` once at start and register
 | Everybody else | consent path: tables and columns allowed by the caller's active consents | same |
 | No principal, unauthenticated, invalid tenant claim | nothing | nothing |
 
-**Semantic metric catalog.** The in-memory semantic catalog (dbt semantic manifest, `GET /api/extensions/dbt/metrics`, metric queries) is partitioned per tenant. A tenant sees only its own partition; the default tenant is the partition of principals without tenant claim. `GET /api/extensions/dbt/metrics` and `GET /api/v1/analytics/metrics` return the full metric definition (filter template, type parameters, meta) only to `GovernanceAdmin` and `DbtAdmin`; everybody else gets name, type, label, description and unit.
+**Semantic metric catalog.** The in-memory semantic catalog (dbt semantic manifest, `GET /modules/dbt/metrics`, metric queries) is partitioned per tenant. A tenant sees only its own partition; the default tenant is the partition of principals without tenant claim. `GET /modules/dbt/metrics` and `GET /api/v1/analytics/metrics` return the full metric definition (filter template, type parameters, meta) only to `GovernanceAdmin` and `DbtAdmin`; everybody else gets name, type, label, description and unit.
 
 The tenant signal of the tenant administrator view is derived from consent records and is not a hard tenant boundary; a dedicated tenant-owner attribute for tables is a separate topic.
 
@@ -1102,7 +1102,7 @@ The tenant signal of the tenant administrator view is derived from consent recor
 - `sample_rows(synthetic: true)` needs the administrator view or an active table consent.
 - Search recall is reduced for column-restricted callers.
 - Known limitation: the tenant-scoped administrator sees only the tables on which its tenant holds a consent plus `Gateway:Catalog:SharedTables`.
-- The semantic manifest import (`POST /api/extensions/dbt/semantic-manifest`) writes into the tenant of the caller's token, or the default tenant for a principal without tenant claim.
+- The semantic manifest import (`POST /modules/dbt/semantic-manifest`) writes into the tenant of the caller's token, or the default tenant for a principal without tenant claim.
 
 ---
 
@@ -1110,7 +1110,7 @@ The tenant signal of the tenant administrator view is derived from consent recor
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `Gateway:Dbt:ImportDataOwners` | bool | `false` | Allows `POST /api/extensions/dbt/governance` to write table data owners (`owner` / `owners` per table item). Data owners act as consent approvers, so the switch is explicit configuration and never a request parameter. |
+| `Gateway:Dbt:ImportDataOwners` | bool | `false` | Allows `POST /modules/dbt/governance` to write table data owners (`owner` / `owners` per table item). Data owners act as consent approvers, so the switch is explicit configuration and never a request parameter. |
 
 With the default `false`, a payload that carries `owner`, `owners`, `group` or `groups` is rejected as a whole (`dbt_owner_import_disabled`); nothing is written. With `true`, the caller must additionally hold the `GovernanceAdmin` role (re-checked in the import service; `DbtAdmin` alone is rejected), and the write repository and the audit repository must be registered. The manifest sync (`/sync`) never writes owners. See the dbt module documentation for the payload and its limits.
 

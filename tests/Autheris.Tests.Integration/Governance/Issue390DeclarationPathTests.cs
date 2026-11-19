@@ -9,7 +9,7 @@ using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
-using Autheris.Extensions.Dbt;
+using Autheris.Modules.Dbt;
 using Autheris.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;

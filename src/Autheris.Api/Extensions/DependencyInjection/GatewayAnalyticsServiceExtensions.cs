@@ -5,7 +5,6 @@ using Autheris.Application.DataSources;
 using Autheris.Application.DataSources.Interfaces;
 using Autheris.Application.DataSources.Services;
 using Autheris.Application.Catalog.Semantic;
-using Autheris.Extensions.Dbt;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -31,7 +30,6 @@ public static class GatewayAnalyticsServiceExtensions
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<SemanticOptions>, SemanticOptionsValidator>());
         services.TryAddSingleton<IGovernedTableReadPlanner, GovernedTableReadPlanner>();
         services.AddSemanticCatalog();
-        services.TryAddScoped<IDbtSemanticManifestIngestionService, DbtSemanticManifestIngestionService>();
         services.TryAddScoped<IGovernedAggregationService, GovernedAggregationService>();
         services.TryAddScoped<ISemanticMetricQueryService, SemanticMetricQueryService>();
         return services;

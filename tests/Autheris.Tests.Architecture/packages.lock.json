@@ -1225,6 +1225,14 @@
           "Autheris.Domain": "[0.0.0-dev, )"
         }
       },
+      "autheris.modules.dbt": {
+        "type": "Project",
+        "dependencies": {
+          "Autheris.Application": "[0.0.0-dev, )",
+          "Autheris.Domain": "[0.0.0-dev, )",
+          "Autheris.Modules.Abstractions": "[0.0.0-dev, )"
+        }
+      },
       "autheris.modules.lakehouse": {
         "type": "Project",
         "dependencies": {

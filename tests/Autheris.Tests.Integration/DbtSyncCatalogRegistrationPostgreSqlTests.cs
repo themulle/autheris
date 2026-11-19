@@ -44,6 +44,7 @@ public sealed class DbtSyncCatalogRegistrationPostgreSqlTests : IClassFixture<Po
     private WebApplicationFactory<Program> CreateHost() => new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
     {
         builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
+        DbtWorkspaceTestSettings.Apply((k, v) => builder.UseSetting(k, v));
         builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
         builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("DbtSyncCatalogRegistrationPostgreSqlTests"));
         builder.UseSetting("Gateway:DataSources:Connections:warehouse:Provider", "PostgreSql");
@@ -69,7 +70,7 @@ public sealed class DbtSyncCatalogRegistrationPostgreSqlTests : IClassFixture<Po
         var id = new TableIdentifier("warehouse", "public", "orders");
 
         // 1. Sync registers the missing table, inactive.
-        var sync = await client.PostAsync("/api/extensions/dbt/sync", new StringContent(Manifest, Encoding.UTF8, "application/json"));
+        var sync = await client.PostAsync("/modules/dbt/sync", new StringContent(Manifest, Encoding.UTF8, "application/json"));
         sync.StatusCode.ShouldBe(HttpStatusCode.OK);
         var body = await sync.Content.ReadFromJsonAsync<JsonElement>();
         body.GetProperty("createdTables").GetArrayLength().ShouldBe(1);
@@ -116,7 +117,7 @@ public sealed class DbtSyncCatalogRegistrationPostgreSqlTests : IClassFixture<Po
             await repo.UpsertTableMetadataAsync(new TableMetadata { Identifier = id, Table = activated, Columns = current.Columns });
         }
 
-        var second = await client.PostAsync("/api/extensions/dbt/sync", new StringContent(Manifest, Encoding.UTF8, "application/json"));
+        var second = await client.PostAsync("/modules/dbt/sync", new StringContent(Manifest, Encoding.UTF8, "application/json"));
         second.StatusCode.ShouldBe(HttpStatusCode.OK);
         (await second.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("createdTables").GetArrayLength().ShouldBe(0);
 
@@ -133,7 +134,7 @@ public sealed class DbtSyncCatalogRegistrationPostgreSqlTests : IClassFixture<Po
         using var host = CreateHost();
         var client = Client(host);
 
-        var sync = await client.PostAsync("/api/extensions/dbt/sync?dryRun=true", new StringContent(Manifest, Encoding.UTF8, "application/json"));
+        var sync = await client.PostAsync("/modules/dbt/sync?dryRun=true", new StringContent(Manifest, Encoding.UTF8, "application/json"));
         sync.StatusCode.ShouldBe(HttpStatusCode.OK);
         (await sync.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("createdTables").GetArrayLength().ShouldBe(1);
 

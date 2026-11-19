@@ -22,11 +22,11 @@ public class CoreMetricModelArchitectureTests
     {
         var api = Types.InAssembly(typeof(Autheris.Api.Endpoints.AnalyticsEndpoints).Assembly)
             .That().HaveName("AnalyticsEndpoints")
-            .ShouldNot().HaveDependencyOn("Autheris.Extensions.Dbt")
+            .ShouldNot().HaveDependencyOn("Autheris.Modules.Dbt")
             .GetResult();
         var mcp = Types.InAssembly(typeof(Autheris.Application.Mcp.Services.McpSemanticTools).Assembly)
             .That().HaveName("McpSemanticTools")
-            .ShouldNot().HaveDependencyOn("Autheris.Extensions.Dbt")
+            .ShouldNot().HaveDependencyOn("Autheris.Modules.Dbt")
             .GetResult();
 
         api.IsSuccessful.ShouldBeTrue();

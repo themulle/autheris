@@ -23,7 +23,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Extensions.DataCatalog;
-using Autheris.Extensions.Dbt;
+using Autheris.Modules.Dbt;
 using Autheris.Extensions.OpenMetadata;
 using Autheris.Infrastructure.Persistence;
 using Autheris.Tests.Common;

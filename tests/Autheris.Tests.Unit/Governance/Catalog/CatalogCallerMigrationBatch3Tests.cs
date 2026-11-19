@@ -29,7 +29,7 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Domain.Security;
-using Autheris.Extensions.Dbt;
+using Autheris.Modules.Dbt;
 using Autheris.Tests.Common;
 using Autheris.Tests.Unit.Catalog;
 using Microsoft.AspNetCore.Http;

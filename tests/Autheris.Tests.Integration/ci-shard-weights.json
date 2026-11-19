@@ -23,6 +23,8 @@
   "DataClassificationWorkflowIntegrationTests": 51.6,
   "Databricks.DatabricksStatementExecutionContractTests": 1.1,
   "DbtIntegrationTests": 69.1,
+  "DbtModuleAbsentTests": 6.6,
+  "DbtModuleSecurityTests": 6.6,
   "DbtSyncCatalogRegistrationPostgreSqlTests": 11.7,
   "DbtSyncEndpointCallerTests": 5.9,
   "DefaultTenantIngressHttpTests": 13.3,
