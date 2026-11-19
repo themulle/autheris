@@ -14,7 +14,7 @@ using Autheris.Infrastructure.Persistence.Dialects;
 public partial class GovernanceRepository
 {
     private const string SelectConsentPagePrefix =
-        "SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type, c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to, c.is_revoked, c.tenant_id, c.renewal_count, t.source_name, t.schema_name, t.table_name, c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at FROM CONSENTS c JOIN TABLES t ON c.table_id = t.id WHERE ";
+        "SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type, c.grantee_sid, c.valid_from, c.valid_to, c.is_revoked, c.tenant_id, c.renewal_count, t.source_name, t.schema_name, t.table_name, c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at FROM CONSENTS c JOIN TABLES t ON c.table_id = t.id WHERE ";
 
     private const string SelectConsentPageSuffix =
         " ORDER BY c.id OFFSET 0 ROWS FETCH NEXT @take ROWS ONLY";
@@ -39,7 +39,7 @@ public partial class GovernanceRepository
         var granteeNorm = string.IsNullOrWhiteSpace(query.Grantee) ? null : ConsentSubjectFilter.Normalize(query.Grantee.Trim());
         if (granteeNorm != null)
         {
-            where.Append(" AND (c.grantee_sid_norm = @gnorm OR UPPER(c.role_name) = @gnorm)");
+            where.Append(" AND c.grantee_sid_norm = @gnorm");
         }
 
         if (!query.IncludeInactive)
@@ -95,20 +95,18 @@ public partial class GovernanceRepository
                     consents.Add(ConsentWorkflowSql.BuildConsent(
                         Guid.Parse(reader.GetString(0)),
                         Guid.Parse(reader.GetString(1)),
-                        new TableIdentifier(reader.GetString(13), reader.GetString(14), reader.GetString(15)),
+                        new TableIdentifier(reader.GetString(11), reader.GetString(12), reader.GetString(13)),
                         reader.IsDBNull(2) ? null : Guid.Parse(reader.GetString(2)),
                         Enum.Parse<ConsentEffect>(reader.GetString(3), true),
-                        Enum.Parse<GranteeType>(reader.GetString(4), true),
+                        GranteeTypeParsing.ParseStored(reader.GetString(4)),
                         reader.IsDBNull(5) ? (Sid?)null : new Sid(reader.GetString(5)),
-                        reader.IsDBNull(6) ? null : Guid.Parse(reader.GetString(6)),
-                        reader.IsDBNull(7) ? null : reader.GetString(7),
-                        DateTimeOffset.Parse(reader.GetString(8), System.Globalization.CultureInfo.InvariantCulture),
-                        DateTimeOffset.Parse(reader.GetString(9), System.Globalization.CultureInfo.InvariantCulture),
-                        reader.GetInt32(10) == 1,
-                        StoredTenant.Parse(reader.IsDBNull(11) ? null : reader.GetString(11)),
+                        DateTimeOffset.Parse(reader.GetString(6), System.Globalization.CultureInfo.InvariantCulture),
+                        DateTimeOffset.Parse(reader.GetString(7), System.Globalization.CultureInfo.InvariantCulture),
+                        reader.GetInt32(8) == 1,
+                        StoredTenant.Parse(reader.IsDBNull(9) ? null : reader.GetString(9)),
                         reader,
-                        16,
-                        renewalCount: reader.GetInt32(12)));
+                        14,
+                        renewalCount: reader.GetInt32(10)));
                 }
             }
         }

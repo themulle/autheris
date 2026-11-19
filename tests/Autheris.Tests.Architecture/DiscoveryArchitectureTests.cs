@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Text.RegularExpressions;
 using Shouldly;
 using Xunit;
 
@@ -95,5 +96,51 @@ public sealed class DiscoveryArchitectureTests
         {
             existingNames.Contains(typeName).ShouldBeFalse($"Removed type '{typeName}' must not exist in production assemblies.");
         }
+    }
+
+    private static readonly Regex NoAccessComparison = new(
+        @"(==|!=|\bis\s+(not\s+)?|\bcase\s+)\s*(Autheris\.Application\.Catalog\.Discovery\.)?DiscoveryColumnState\.NoAccess\b|DiscoveryColumnState\.NoAccess\s*=>",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void NoAccessStateIsOnlyComparedInVisibilityHelperAndMapper()
+    {
+        var files = RepositoryScan.ProductionFiles
+            .Where(static f => f.RelativePath.StartsWith("src/Autheris.Application/", StringComparison.Ordinal)
+                || f.RelativePath.StartsWith("src/Autheris.Api/", StringComparison.Ordinal)
+                || f.RelativePath.StartsWith("src/Autheris.GraphQL/", StringComparison.Ordinal))
+            .ToList();
+        files.ShouldNotBeEmpty();
+
+        foreach (var file in files)
+        {
+            if (file.RelativePath.EndsWith("/Catalog/Discovery/DiscoveryAccessMapper.cs", StringComparison.Ordinal)
+                || file.RelativePath.EndsWith("/Catalog/Discovery/DiscoveryColumnVisibility.cs", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            NoAccessComparison.IsMatch(file.Text).ShouldBeFalse(
+                $"{file.RelativePath} compares a column state with NoAccess; use DiscoveryColumnVisibility.IsVisible for every person-facing column projection.");
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void PartitionColumns_AreOnlyWrittenThroughVisibilityFilter()
+    {
+        var writers = RepositoryScan.ProductionFiles
+            .Where(static f => f.RelativePath.StartsWith("src/Autheris.Application/", StringComparison.Ordinal)
+                || f.RelativePath.StartsWith("src/Autheris.Api/", StringComparison.Ordinal)
+                || f.RelativePath.StartsWith("src/Autheris.GraphQL/", StringComparison.Ordinal))
+            .Where(static f => Regex.IsMatch(f.Text, @"PartitionColumns\s*(=[^=]|:)"))
+            .Select(static f => f.RelativePath)
+            .ToList();
+
+        writers.ShouldBe(["src/Autheris.Application/Catalog/Discovery/DiscoveryAccessMapper.cs"], ignoreOrder: true);
+
+        var mapper = RepositoryScan.ProductionFiles.Single(static f => f.RelativePath.EndsWith("/Catalog/Discovery/DiscoveryAccessMapper.cs", StringComparison.Ordinal));
+        mapper.Text.ShouldContain("FilterPartitionColumns(tableStats, mappedCols)");
     }
 }

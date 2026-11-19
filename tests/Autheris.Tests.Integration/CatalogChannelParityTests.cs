@@ -142,6 +142,7 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
         var client = (factory ?? _factory).CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", sid);
         client.DefaultRequestHeaders.Add("X-Test-Roles", roles);
+        client.DefaultRequestHeaders.Add("GraphQL-Preflight", "1");
         if (tenant != null)
         {
             client.DefaultRequestHeaders.Add("X-Test-Tenant", tenant);
@@ -167,10 +168,10 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
 
         var list = await client.GetAsync("/api/v1/catalog/datasets");
         list.StatusCode.ShouldBe(HttpStatusCode.OK);
-        // Authorized discovery: the caller's own tenant objects are listed without access (every column Deny), a foreign tenant's table is absent.
+        // Authorized discovery: the caller's own tenant objects are listed without access (table-level metadata only, no column), a foreign tenant's table is absent.
         var listBody = await BodyAsync(list);
         listBody.ShouldNotContain("orders_a");
-        MaskingStatesOf(await BodyAsync(await client.GetAsync("/api/v1/catalog/datasets/dom_b.main.invoices_b"))).Values.ShouldAllBe(state => state == "Deny");
+        MaskingStatesOf(await BodyAsync(await client.GetAsync("/api/v1/catalog/datasets/dom_b.main.invoices_b"))).ShouldBeEmpty();
         (await client.GetAsync("/api/v1/catalog/datasets/dom_a.main.orders_a")).StatusCode.ShouldBe(HttpStatusCode.NotFound);
         (await client.GetAsync("/api/v1/catalog/datasets/dom_a.main.does_not_exist")).StatusCode.ShouldBe(HttpStatusCode.NotFound);
         (await BodyAsync(await client.GetAsync("/api/v1/catalog/search?q=orders"))).ShouldBe("[]");
@@ -311,10 +312,10 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
     }
 
     // Authorized discovery (OD-19): the persisted tier is ignored; an in-scope table (shared, owned by the caller's tenant or consented
-    // to it) is listed for every authenticated caller and a column the caller may not read carries the state Deny. A table outside the
+    // to it) is listed for every authenticated caller without any column the caller may not read (an ungranted table lists none). A table outside the
     // caller's tenant scope is absent and answers exactly like a nonexistent dataset.
     [Fact]
-    public async Task Rest_Discovery_SharedTablesAreListedWithDeniedColumns_UnsharedTableIsOutOfScope()
+    public async Task Rest_Discovery_SharedTablesAreListedWithoutColumns_UnsharedTableIsOutOfScope()
     {
         var (_, client) = await TierFactoryAsync();
 
@@ -328,7 +329,7 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
         {
             var detail = await client.GetAsync("/api/v1/catalog/datasets/dom_s.main." + shared);
             detail.StatusCode.ShouldBe(HttpStatusCode.OK);
-            MaskingStatesOf(await BodyAsync(detail)).Values.ShouldAllBe(state => state == "Deny");
+            MaskingStatesOf(await BodyAsync(detail)).ShouldBeEmpty();
         }
 
         var unshared = await client.GetAsync("/api/v1/catalog/datasets/dom_s.main.unshared_full_t");
@@ -340,7 +341,7 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
     }
 
     [Fact]
-    public async Task Rest_Discovery_ConsentedColumnIsClear_EveryOtherColumnStaysDeny_ForTheConsentedCallerOnly()
+    public async Task Rest_Discovery_ConsentedColumnIsClear_EveryOtherColumnIsAbsent_ForTheConsentedCallerOnly()
     {
         var (factory, client) = await TierFactoryAsync(sid: "S-T-CONSENTED");
         using (var scope = factory.Services.CreateScope())
@@ -353,13 +354,14 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
         granted.ShouldNotContainKey("tier_secret_col");
 
         var other = await ClientAsync("S-T-OTHER", TenantB, "Reader", factory);
-        MaskingStatesOf(await BodyAsync(await other.GetAsync("/api/v1/catalog/datasets/dom_s.main.hid_t"))).Values.ShouldAllBe(state => state == "Deny");
+        MaskingStatesOf(await BodyAsync(await other.GetAsync("/api/v1/catalog/datasets/dom_s.main.hid_t"))).ShouldBeEmpty();
     }
 
     private static Dictionary<string, string> MaskingStatesOf(string detailJson)
     {
         using var doc = JsonDocument.Parse(detailJson);
-        return doc.RootElement.GetProperty("columns").EnumerateArray()
+        doc.RootElement.TryGetProperty("columns", out var columns).ShouldBeTrue(detailJson);
+        return columns.EnumerateArray()
             .ToDictionary(c => c.GetProperty("name").GetString()!, c => c.GetProperty("maskingState").GetString()!);
     }
 
@@ -370,7 +372,11 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
         var cluster = await ClientAsync("S-ROOT", TenantB, "ClusterAdmin", factory);
         var clusterList = await BodyAsync(await cluster.GetAsync("/api/v1/catalog/datasets"));
         clusterList.ShouldContain("hid_t");
-        (await BodyAsync(await cluster.GetAsync("/api/v1/catalog/datasets/dom_s.main.sum_t"))).ShouldContain("tier_secret_col");
+        // The administrator sees the table, but a column is listed only when the caller holds access to it (no administrator bypass).
+        var clusterDetail = await cluster.GetAsync("/api/v1/catalog/datasets/dom_s.main.sum_t");
+        clusterDetail.StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await BodyAsync(clusterDetail)).ShouldContain("sum_t");
+        MaskingStatesOf(await BodyAsync(clusterDetail)).ShouldBeEmpty();
 
         // WP-DT-4: a truly tenant-less principal (Multi, no default tenant) is refused at the gate (S6, 403 TENANT_UNRESOLVED) ...
         var tenantless = await ClientAsync("S-ADM", null, "GovernanceAdmin", factory);
@@ -414,5 +420,279 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
         var viaDefault = await Autheris.Application.Services.CatalogVisibility.VisibleTablesAsync(tables, user, new TenantId(TenantB), consents);
 
         viaDefault.ShouldBeEmpty();
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------------------
+    // #845 / #838: a column the caller has no access to is neither named nor counted on MCP or GraphQL (REST keeps its request-access listing).
+    // ---------------------------------------------------------------------------------------------------------------------------
+
+    private const string OrdersDataset = "dom_a.main.orders_a";
+    private const string DeniedColumn = "secret_note";
+
+    // Posts a GraphQL query and fails unless the call succeeded with a data payload, so an error body can never satisfy a ShouldNotContain.
+    private static async Task<string> PostGraphQlAsync(HttpClient client, string query)
+    {
+        var response = await client.PostAsJsonAsync("/graphql", new { query });
+        var body = await BodyAsync(response);
+        response.IsSuccessStatusCode.ShouldBeTrue(body);
+        body.ShouldContain("\"data\"");
+        return body;
+    }
+
+    // One nested list per request keeps every query inside the cost budget; the bodies are joined so a single assertion covers all of them.
+    private static async Task<string> PostGraphQlAllAsync(HttpClient client, params string[] queries)
+    {
+        var bodies = new List<string>(queries.Length);
+        foreach (var query in queries)
+        {
+            bodies.Add(await PostGraphQlAsync(client, query));
+        }
+
+        return string.Join("\n", bodies);
+    }
+
+    private static Task<string> GraphQlCatalogAsync(HttpClient client) => PostGraphQlAllAsync(client,
+        "query { catalog(first: 10) { tableName columnNames } }",
+        "query { catalogObject(domain: \"dom_a\", schema: \"main\", name: \"orders_a\") { columnNames columns { name } } }");
+
+    private static IReadOnlyList<string> SchemaColumnNames(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        return doc.RootElement.GetProperty("tables")[0].GetProperty("columns").EnumerateArray().Select(c => c.GetProperty("name").GetString()!).ToList();
+    }
+
+    [Fact]
+    public async Task Parity_DeniedColumn_NotNamedOnRestFilteredMcpGetTableSchemaDescribeDatasetAndGraphQl()
+    {
+        var client = await ClientAsync("S-A-USER", TenantA, "Reader");
+
+        MaskingStatesOf(await BodyAsync(await client.GetAsync("/api/v1/catalog/datasets/" + OrdersDataset))).ShouldNotContainKey(DeniedColumn);
+        (await GraphQlCatalogAsync(client)).ShouldNotContain(DeniedColumn);
+
+        await using var mcp = await McpTestClient.ConnectAsync(client);
+        var (_, schema) = await McpTestClient.CallAsync(mcp, "get_table_schema", new { dataset = OrdersDataset });
+        var (_, describe) = await McpTestClient.CallAsync(mcp, "describe_dataset", new { dataset = OrdersDataset });
+        var (_, permissions) = await McpTestClient.CallAsync(mcp, "get_my_permissions", new { dataset = OrdersDataset });
+        schema.ShouldNotContain(DeniedColumn);
+        describe.ShouldNotContain(DeniedColumn);
+        permissions.ShouldNotContain(DeniedColumn);
+        SchemaColumnNames(schema).ShouldContain("amount");
+    }
+
+    private static readonly TableIdentifier VaultA = new("dom_a", "main", "vault_a");
+    private const string DeniedDescription = "zebracornmarker internal remark";
+
+    private async Task SeedVaultTableAsync()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IGovernanceRepository>();
+        if (await repo.GetTableMetadataAsync(VaultA) != null)
+        {
+            return;
+        }
+
+        await repo.UpsertTableMetadataAsync(new TableMetadata
+        {
+            Table = new Table { Id = Guid.NewGuid(), DisplayName = VaultA.TableName, TableName = VaultA.TableName, SchemaName = VaultA.Schema, SourceType = "PostgreSql", SourceName = VaultA.Domain, Description = "Ungranted vault" },
+            Identifier = VaultA,
+            Columns = new List<TableColumn>
+            {
+                new() { ColumnName = "id", DataType = "integer" },
+                new() { ColumnName = DeniedColumn, DataType = "varchar", Description = DeniedDescription }
+            }
+        });
+
+        // A grant of another person puts the table into the tenant's discovery scope; the caller under test holds no grant.
+        await ConsentAsync(repo, VaultA, "S-A-OTHER", TenantA, "id");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task DeniedColumn_IsAbsentOnEveryChannel_ForGrantedAndUngrantedObject()
+    {
+        await SeedVaultTableAsync();
+        const string vaultDataset = "dom_a.main.vault_a";
+        var client = await ClientAsync("S-A-USER", TenantA, "Reader");
+
+        // REST dataset detail and search.
+        foreach (var dataset in new[] { OrdersDataset, vaultDataset })
+        {
+            var detail = await BodyAsync(await client.GetAsync("/api/v1/catalog/datasets/" + dataset));
+            detail.ShouldNotContain(DeniedColumn);
+            detail.ShouldNotContain(DeniedDescription);
+            MaskingStatesOf(detail).Values.ShouldAllBe(state => state == "Clear" || state == "Masked");
+        }
+
+        MaskingStatesOf(await BodyAsync(await client.GetAsync("/api/v1/catalog/datasets/" + vaultDataset))).ShouldBeEmpty();
+        var search = await BodyAsync(await client.GetAsync("/api/v1/catalog/search?q=" + DeniedColumn));
+        search.ShouldNotContain(DeniedColumn);
+        search.ShouldNotContain(DeniedDescription);
+
+        // REST objects (person view).
+        var objectsClient = await ClientAsync("S-A-USER", TenantA, "Reader");
+        objectsClient.DefaultRequestHeaders.Add("X-Test-Scope", "Autheris.Catalog.Read");
+        var objects = await objectsClient.GetAsync("/api/v1/catalog/objects?pageSize=100");
+        objects.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var objectsBody = await BodyAsync(objects);
+        objectsBody.ShouldContain("vault_a");
+        objectsBody.ShouldNotContain(DeniedColumn);
+        objectsBody.ShouldNotContain(DeniedDescription);
+        objectsBody.ToLowerInvariant().ShouldNotContain("noaccess");
+
+        // GraphQL.
+        var graphQl = await PostGraphQlAllAsync(client,
+            "query { catalog(first: 10) { tableName columnNames } }",
+            "query { catalogObject(domain: \"dom_a\", schema: \"main\", name: \"orders_a\") { columnNames columns { name description } } }",
+            "query { catalogObject(domain: \"dom_a\", schema: \"main\", name: \"vault_a\") { columnNames columns { name description } } }");
+        graphQl.ShouldNotContain(DeniedColumn);
+        graphQl.ShouldNotContain(DeniedDescription);
+
+        // MCP.
+        await using var mcp = await McpTestClient.ConnectAsync(client);
+        foreach (var dataset in new[] { OrdersDataset, vaultDataset })
+        {
+            var (_, schema) = await McpTestClient.CallAsync(mcp, "get_table_schema", new { dataset });
+            var (_, describe) = await McpTestClient.CallAsync(mcp, "describe_dataset", new { dataset });
+            schema.ShouldNotContain(DeniedColumn);
+            schema.ShouldNotContain(DeniedDescription);
+            describe.ShouldNotContain(DeniedColumn);
+            describe.ShouldNotContain(DeniedDescription);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task RestCatalogObjects_PersonTokenWithSidAndAppId_ReturnsPersonView()
+    {
+        await SeedVaultTableAsync();
+        var client = await ClientAsync("S-A-USER", TenantA, "Reader");
+        client.DefaultRequestHeaders.Add("X-Test-AppId", "web-client");
+        client.DefaultRequestHeaders.Add("X-Test-Scope", "Autheris.Catalog.Read");
+
+        var response = await client.GetAsync("/api/v1/catalog/objects?pageSize=100");
+
+        // A token with a user subject and a client id never receives the unfiltered service-principal view.
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var body = await BodyAsync(response);
+        body.ShouldContain("vault_a");
+        body.ShouldNotContain(DeniedColumn);
+        body.ShouldNotContain(DeniedDescription);
+    }
+
+    private static readonly TableIdentifier ScopedA = new("dom_a", "main", "scoped_a");
+
+    /// <summary>A table whose column <c>ssn</c> is readable, except for a token that carries the <c>Agent.Read</c> scope (a scope-bound Deny rule).</summary>
+    private async Task SeedScopedTableAsync()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IGovernanceRepository>();
+        if (await repo.GetTableMetadataAsync(ScopedA) != null)
+        {
+            return;
+        }
+
+        await repo.UpsertTableMetadataAsync(new TableMetadata
+        {
+            Table = new Table { Id = Guid.NewGuid(), DisplayName = ScopedA.TableName, TableName = ScopedA.TableName, SchemaName = ScopedA.Schema, SourceType = "PostgreSql", SourceName = ScopedA.Domain, Description = "Scoped table" },
+            Identifier = ScopedA,
+            Columns = new List<TableColumn>
+            {
+                new() { ColumnName = "id", DataType = "integer" },
+                new() { ColumnName = "amount", DataType = "integer" },
+                new() { ColumnName = "ssn", DataType = "varchar" }
+            }
+        });
+        var meta = await repo.GetTableMetadataAsync(ScopedA);
+        await repo.CreateConsentAsync(new Consent
+        {
+            TableId = meta!.Table.Id,
+            TableIdentifier = ScopedA,
+            TenantId = new TenantId(TenantA),
+            Effect = ConsentEffect.Allow,
+            GranteeType = GranteeType.User,
+            GranteeSid = new Sid("S-A-USER"),
+            ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
+            ValidTo = DateTimeOffset.UtcNow.AddDays(1),
+            ColumnRules =
+            [
+                new ConsentColumnRule { ColumnName = "id", AccessLevel = ColumnAccessLevel.Clear },
+                new ConsentColumnRule { ColumnName = "amount", AccessLevel = ColumnAccessLevel.Clear },
+                new ConsentColumnRule { ColumnName = "ssn", AccessLevel = ColumnAccessLevel.Clear },
+                new ConsentColumnRule { ColumnName = "ssn", AccessLevel = ColumnAccessLevel.Deny, ApplicableScopes = ["Agent.Read"] }
+            ]
+        });
+    }
+
+    [Fact]
+    public async Task Parity_AgentReadScope_ColumnSetEqualAcrossMcpTools()
+    {
+        var plain = await ClientAsync("S-A-USER", TenantA, "Reader");
+        await SeedScopedTableAsync();
+        var scoped = await ClientAsync("S-A-USER", TenantA, "Reader");
+        scoped.DefaultRequestHeaders.Add("X-Test-Scope", "Agent.Read");
+        const string dataset = "dom_a.main.scoped_a";
+        const string graphQlQuery = "query { catalogObject(domain: \"dom_a\", schema: \"main\", name: \"scoped_a\") { columnNames } catalog(first: 10) { tableName columnNames } }";
+
+        // Reference: without the scope the column is listed on both channels, so its absence below is caused by the scope.
+        await using (var plainMcp = await McpTestClient.ConnectAsync(plain))
+        {
+            var (_, plainSchema) = await McpTestClient.CallAsync(plainMcp, "get_table_schema", new { dataset });
+            SchemaColumnNames(plainSchema).ShouldContain("ssn");
+        }
+
+        (await PostGraphQlAsync(plain, graphQlQuery)).ShouldContain("ssn");
+
+        await using var mcp = await McpTestClient.ConnectAsync(scoped);
+        var (_, schema) = await McpTestClient.CallAsync(mcp, "get_table_schema", new { dataset });
+        var (_, describe) = await McpTestClient.CallAsync(mcp, "describe_dataset", new { dataset });
+        var (_, permissions) = await McpTestClient.CallAsync(mcp, "get_my_permissions", new { dataset });
+
+        using var describeDoc = JsonDocument.Parse(describe);
+        var describeNames = describeDoc.RootElement.GetProperty("columns").EnumerateArray().Select(c => c.GetProperty("name").GetString()!).ToList();
+        using var permissionsDoc = JsonDocument.Parse(permissions);
+        var permissionNames = permissionsDoc.RootElement.GetProperty("columns").EnumerateArray().Select(c => c.GetProperty("name").GetString()!).ToList();
+        SchemaColumnNames(schema).ShouldBe(describeNames, ignoreOrder: true);
+        permissionNames.ShouldBe(describeNames, ignoreOrder: true);
+        describeNames.ShouldNotContain("ssn");
+        describeNames.ShouldContain("amount");
+        (await PostGraphQlAsync(scoped, graphQlQuery)).ShouldNotContain("ssn");
+    }
+
+    [Fact]
+    public async Task Parity_ConsentlessCaller_NoColumnNamesOnMcpOrGraphQl()
+    {
+        var client = await ClientAsync("S-B-USER", TenantB, "Reader");
+        await using var mcp = await McpTestClient.ConnectAsync(client);
+
+        var (_, schema) = await McpTestClient.CallAsync(mcp, "get_table_schema", new { dataset = "dom_b.main.invoices_b" });
+        var (_, permissions) = await McpTestClient.CallAsync(mcp, "get_my_permissions", new { dataset = "dom_b.main.invoices_b" });
+        var graphQl = await PostGraphQlAllAsync(client,
+            "query { catalog(first: 10) { tableName columnNames } }",
+            "query { catalogObject(domain: \"dom_b\", schema: \"main\", name: \"invoices_b\") { columnNames columns { name } } }");
+
+        foreach (var column in new[] { "secret_note", "amount" })
+        {
+            schema.ShouldNotContain(column);
+            permissions.ShouldNotContain(column);
+            graphQl.ShouldNotContain(column);
+        }
+    }
+
+    [Fact]
+    public async Task Parity_ColumnCount_ListDatasetsEqualsDescribeDatasetColumns()
+    {
+        var client = await ClientAsync("S-A-USER", TenantA, "Reader");
+        await using var mcp = await McpTestClient.ConnectAsync(client);
+
+        var (_, list) = await McpTestClient.CallAsync(mcp, "list_datasets", new { });
+        var (_, describe) = await McpTestClient.CallAsync(mcp, "describe_dataset", new { dataset = OrdersDataset });
+
+        using var describeDoc = JsonDocument.Parse(describe);
+        var described = describeDoc.RootElement.GetProperty("columns").GetArrayLength();
+        using var listDoc = JsonDocument.Parse(list);
+        var datasets = listDoc.RootElement.TryGetProperty("datasets", out var d) ? d : listDoc.RootElement;
+        var row = datasets.EnumerateArray().Single(x => x.GetProperty("id").GetString() == OrdersDataset);
+        row.GetProperty("columnCount").GetInt32().ShouldBe(described);
+        described.ShouldBe(2);
     }
 }

@@ -29,11 +29,11 @@ public sealed class EffectiveAccessConsentDescriptionTests
     private static readonly DateTimeOffset Start = DateTimeOffset.UtcNow;
 
     private static Consent Grant(
-        GranteeType type, double validToDays, string? description, string? sid = null, string? roleName = null,
+        GranteeType type, double validToDays, string? description, string? sid = null,
         ConsentEffect effect = ConsentEffect.Allow, string tenant = Tenant, TableIdentifier? table = null, bool revoked = false) => new()
     {
         TableIdentifier = table ?? Orders, TenantId = new TenantId(tenant), Effect = effect, GranteeType = type,
-        GranteeSid = sid == null ? (Sid?)null : new Sid(sid), RoleName = roleName,
+        GranteeSid = sid == null ? (Sid?)null : new Sid(sid),
         ValidFrom = Start.AddDays(-1), ValidTo = Start.AddDays(validToDays), IsRevoked = revoked, Description = description,
         ColumnRules = [new ConsentColumnRule { ColumnName = "id", AccessLevel = ColumnAccessLevel.Clear }]
     };
@@ -66,15 +66,13 @@ public sealed class EffectiveAccessConsentDescriptionTests
         CreateService(consents, maxLength).Service.ExplainMyAccessAsync(caller, Orders);
 
     [Fact]
-    public async Task Explain_PersonGroup_ReturnsExactText_RoleNeverGrants()
+    public async Task Explain_PersonGroup_ReturnsExactText()
     {
         var user = await Explain([Grant(GranteeType.User, 30, "Person text", UserSid)], Caller());
         var group = await Explain([Grant(GranteeType.Group, 30, "Group text", Group)], Caller(groups: [Group]));
-        var role = await Explain([Grant(GranteeType.Role, 30, "Role text", roleName: "analyst")], Caller(roles: ["analyst"]));
 
         user.ConsentDescription.ShouldBe("Person text");
         group.ConsentDescription.ShouldBe("Group text");
-        role.Decision.ShouldBe("DENIED", "a role grantee never grants");
         group.ConsentDescriptions.ShouldBe(["Group text"]);
     }
 
@@ -140,7 +138,6 @@ public sealed class EffectiveAccessConsentDescriptionTests
         [
             Grant(GranteeType.User, 30, "own allow", UserSid),
             Grant(GranteeType.Group, 30, "SECRET-GROUP", ForeignGroup),
-            Grant(GranteeType.Role, 30, "SECRET-ROLE", roleName: "foreign-role"),
             Grant(GranteeType.User, 30, "SECRET-USER", "S-1-OTHER")
         ], Caller(roles: ["analyst"], groups: [Group]));
 

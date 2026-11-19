@@ -320,7 +320,7 @@ internal sealed class InMemoryConsentStore(
         var unsigned = new GrantRecord(
             consent.TenantId.Value, seq, Guid.NewGuid(), type, consent.Id, consent.ConsentRequestId,
             consent.GrantSource, consent.ProfileAssignmentId, consent.GranteeType.ToString(),
-            consent.GranteeSid?.Value ?? consent.RoleName ?? string.Empty, consent.TableIdentifier.ToString(),
+            consent.GranteeSid?.Value ?? string.Empty, consent.TableIdentifier.ToString(),
             "{\"allow\":true}", consent.ValidFrom, consent.ValidTo, actor, "{}", clock.GetUtcNow(), clock.GetUtcNow(), prevHash);
         var hash = GrantRecordChain.ComputeRecordHash(unsigned);
         var sig = signer.Sign(System.Text.Encoding.UTF8.GetBytes(hash));
@@ -342,7 +342,7 @@ internal sealed class InMemoryConsentStore(
         new()
         {
             Id = c.Id, TableId = c.TableId, TableIdentifier = c.TableIdentifier, ConsentRequestId = c.ConsentRequestId,
-            Effect = c.Effect, GranteeType = c.GranteeType, GranteeSid = c.GranteeSid, RoleName = c.RoleName,
+            Effect = c.Effect, GranteeType = c.GranteeType, GranteeSid = c.GranteeSid,
             ValidFrom = c.ValidFrom, ValidTo = c.ValidTo, IsRevoked = true, RevokedAt = revokedAt,
             RevokeReason = reason, TenantId = c.TenantId, GrantSource = c.GrantSource, GrantRecordSeq = c.GrantRecordSeq
         };

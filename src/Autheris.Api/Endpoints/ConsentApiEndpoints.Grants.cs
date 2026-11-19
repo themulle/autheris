@@ -262,7 +262,7 @@ public static partial class ConsentApiEndpoints
                         consent.TenantId.Value,
                         Guid.NewGuid(),
                         ConsentEventTypes.GrantRevoked,
-                        consent.GranteeSid?.Value ?? consent.RoleName ?? actorSid.Value,
+                        consent.GranteeSid?.Value ?? actorSid.Value,
                         ConsentEventPayloads.Serialize(payload),
                         now,
                         callerSystem.Id),

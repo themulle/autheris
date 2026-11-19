@@ -67,6 +67,16 @@ public class DataPathSecurityTests : IDisposable
             new Autheris.Domain.Options.GatewayOptions { Tenancy = new Autheris.Domain.Options.TenancyOptions { DefaultTenantId = "default-tenant" } });
     }
 
+    private Task<IReadOnlyList<TableMetadataDto>> GetCatalogWithCallerLevelsAsync(IHttpContextAccessor accessor)
+        => _query.GetCatalogAsync(
+            metadataRepository: _repository,
+            consentRepository: _repository,
+            approvalRepository: _repository,
+            dataOwnershipRepository: _repository,
+            httpContextAccessor: accessor,
+            visibilityService: _visibility,
+            consentResolution: _resolutionService);
+
     public void Dispose()
     {
         _repository.Dispose();
@@ -273,7 +283,7 @@ public class DataPathSecurityTests : IDisposable
         });
 
         var accessor = CreateAccessor(userSid);
-        var catalog = await _query.GetCatalogAsync(_repository, accessor, null, _visibility);
+        var catalog = await GetCatalogWithCallerLevelsAsync(accessor);
 
         var tableDto = catalog.FirstOrDefault(t => t.TableName == "finance_table_1");
         tableDto.ShouldNotBeNull();
@@ -492,7 +502,7 @@ public class DataPathSecurityTests : IDisposable
         });
 
         var accessor = CreateAccessor(userSid);
-        var catalog = await _query.GetCatalogAsync(_repository, accessor, null, _visibility);
+        var catalog = await GetCatalogWithCallerLevelsAsync(accessor);
 
         var financeTable = catalog.FirstOrDefault(t => t.TableName == "finance_table_1");
         financeTable.ShouldNotBeNull();

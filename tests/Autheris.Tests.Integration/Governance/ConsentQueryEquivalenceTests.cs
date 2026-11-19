@@ -49,13 +49,13 @@ public sealed class ConsentQueryEquivalenceTests : IDisposable
         _tableId = await UpsertTableAsync(_table);
         _otherId = await UpsertTableAsync(_other);
 
-        async Task Add(Guid tableId, TableIdentifier id, TenantId tenant, GranteeType type, string? sid, string? role,
+        async Task Add(Guid tableId, TableIdentifier id, TenantId tenant, GranteeType type, string? sid,
             ConsentEffect effect, int fromDays, int toDays, bool revoke = false)
         {
             var c = await _repo.CreateConsentAsync(new Consent
             {
                 TableId = tableId, TableIdentifier = id, TenantId = tenant, GranteeType = type,
-                GranteeSid = sid == null ? (Sid?)null : new Sid(sid), RoleName = role, Effect = effect,
+                GranteeSid = sid == null ? (Sid?)null : new Sid(sid), Effect = effect,
                 ValidFrom = Now.AddDays(fromDays), ValidTo = Now.AddDays(toDays)
             });
             if (revoke)
@@ -71,19 +71,17 @@ public sealed class ConsentQueryEquivalenceTests : IDisposable
             _seeded.Add(c);
         }
 
-        // users in mixed case, group, alias SID, role consent
-        await Add(_tableId, _table, TenantA, GranteeType.User, "S-1-5-21-Alice", null, ConsentEffect.Allow, -1, 10);
-        await Add(_tableId, _table, TenantA, GranteeType.User, "s-1-5-21-bob", null, ConsentEffect.Allow, -1, 10);
-        await Add(_tableId, _table, TenantA, GranteeType.Group, "S-1-5-21-GROUP-1", null, ConsentEffect.Allow, -1, 10);
-        await Add(_tableId, _table, TenantA, GranteeType.User, "alias:alice@corp", null, ConsentEffect.Allow, -1, 10);
-        await Add(_tableId, _table, TenantA, GranteeType.Role, null, "analyst", ConsentEffect.Deny, -1, 10);
-        await Add(_tableId, _table, TenantA, GranteeType.User, "S-1-5-21-Alice", null, ConsentEffect.Deny, 2, 10); // future deny
-        await Add(_tableId, _table, TenantA, GranteeType.User, "S-1-5-21-Alice", null, ConsentEffect.Allow, 2, 10); // future allow
-        await Add(_tableId, _table, TenantA, GranteeType.User, "S-1-5-21-Alice", null, ConsentEffect.Allow, -10, -1); // expired
-        await Add(_tableId, _table, TenantA, GranteeType.User, "S-1-5-21-Carol", null, ConsentEffect.Allow, -1, 10, revoke: true);
-        await Add(_tableId, _table, TenantB, GranteeType.User, "S-1-5-21-Alice", null, ConsentEffect.Allow, -1, 10); // other tenant
-        await Add(_tableId, _table, TenantB, GranteeType.Role, null, "analyst", ConsentEffect.Deny, -1, 10);
-        await Add(_otherId, _other, TenantA, GranteeType.User, "S-1-5-21-Alice", null, ConsentEffect.Allow, -1, 10); // other table
+        // users in mixed case, group, alias SID
+        await Add(_tableId, _table, TenantA, GranteeType.User, "S-1-5-21-Alice", ConsentEffect.Allow, -1, 10);
+        await Add(_tableId, _table, TenantA, GranteeType.User, "s-1-5-21-bob", ConsentEffect.Allow, -1, 10);
+        await Add(_tableId, _table, TenantA, GranteeType.Group, "S-1-5-21-GROUP-1", ConsentEffect.Allow, -1, 10);
+        await Add(_tableId, _table, TenantA, GranteeType.User, "alias:alice@corp", ConsentEffect.Allow, -1, 10);
+        await Add(_tableId, _table, TenantA, GranteeType.User, "S-1-5-21-Alice", ConsentEffect.Deny, 2, 10); // future deny
+        await Add(_tableId, _table, TenantA, GranteeType.User, "S-1-5-21-Alice", ConsentEffect.Allow, 2, 10); // future allow
+        await Add(_tableId, _table, TenantA, GranteeType.User, "S-1-5-21-Alice", ConsentEffect.Allow, -10, -1); // expired
+        await Add(_tableId, _table, TenantA, GranteeType.User, "S-1-5-21-Carol", ConsentEffect.Allow, -1, 10, revoke: true);
+        await Add(_tableId, _table, TenantB, GranteeType.User, "S-1-5-21-Alice", ConsentEffect.Allow, -1, 10); // other tenant
+        await Add(_otherId, _other, TenantA, GranteeType.User, "S-1-5-21-Alice", ConsentEffect.Allow, -1, 10); // other table
     }
 
     private static HashSet<Guid> OracleForTable(IEnumerable<Consent> all, Guid tableId, IEnumerable<string> subjects, TenantId? tenant)
@@ -93,7 +91,7 @@ public sealed class ConsentQueryEquivalenceTests : IDisposable
             .Where(c => c.TableId == tableId && (tenant == null || c.TenantId == tenant))
             .Where(c => Now < c.ValidTo)
             .Where(c => !(Now < c.ValidFrom && c.Effect != ConsentEffect.Deny))
-            .Where(c => c.GranteeType == GranteeType.Role || (c.GranteeSid != null && set.Contains(c.GranteeSid.Value.Value)))
+            .Where(c => c.GranteeSid != null && set.Contains(c.GranteeSid.Value.Value))
             .Select(c => c.Id)
             .ToHashSet();
     }
@@ -160,18 +158,6 @@ public sealed class ConsentQueryEquivalenceTests : IDisposable
     }
 
     [Fact]
-    public async Task SubjectQuery_RoleConsentIsReturnedWithoutSubjectMatch_ButNeverAcrossTenants()
-    {
-        await SeedAsync();
-
-        var result = await _repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-Nobody")], _table, Now, TenantA);
-
-        result.Count.ShouldBe(1);
-        result[0].GranteeType.ShouldBe(GranteeType.Role);
-        result[0].TenantId.ShouldBe(TenantA);
-    }
-
-    [Fact]
     public async Task SubjectQuery_ManySubjects_AreChunkedAndStillExact()
     {
         await SeedAsync();
@@ -180,30 +166,6 @@ public sealed class ConsentQueryEquivalenceTests : IDisposable
         var result = await _repo.GetActiveConsentsForSubjectsAsync(sids, _table, Now, TenantA);
 
         result.ShouldContain(c => c.GranteeSid != null && c.GranteeSid.Value.Value == "S-1-5-21-Alice");
-    }
-
-    [Theory]
-    [InlineData("analyst")]
-    [InlineData("ANALYST")]
-    [InlineData("other")]
-    public async Task AllQuery_RoleConsentsAreFilteredByRole_CaseInsensitive(string role)
-    {
-        await SeedAsync();
-
-        var result = await _repo.GetAllActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-Alice")], [role], Now, TenantA);
-
-        var roleConsents = result.Where(c => c.GranteeType == GranteeType.Role).ToList();
-        if (role.Equals("other", StringComparison.Ordinal))
-        {
-            roleConsents.ShouldBeEmpty();
-        }
-        else
-        {
-            roleConsents.Count.ShouldBe(1);
-        }
-
-        result.ShouldAllBe(c => c.TenantId == TenantA);
-        result.ShouldNotContain(c => c.ValidTo <= Now || c.ValidFrom > Now);
     }
 
     [Fact]
@@ -216,9 +178,7 @@ public sealed class ConsentQueryEquivalenceTests : IDisposable
 
         var expected = _seeded
             .Where(c => c.TenantId == TenantA && !IsRevoked(c) && Now >= c.ValidFrom && Now < c.ValidTo)
-            .Where(c => c.GranteeType == GranteeType.Role
-                ? string.Equals(c.RoleName, "analyst", StringComparison.OrdinalIgnoreCase)
-                : c.GranteeSid != null && new[] { "S-1-5-21-ALICE", "S-1-5-21-GROUP-1" }.Contains(c.GranteeSid.Value.Value, StringComparer.OrdinalIgnoreCase))
+            .Where(c => c.GranteeSid != null && new[] { "S-1-5-21-ALICE", "S-1-5-21-GROUP-1" }.Contains(c.GranteeSid.Value.Value, StringComparer.OrdinalIgnoreCase))
             .Select(c => c.Id).ToHashSet();
         result.Select(c => c.Id).ToHashSet().ShouldBe(expected, ignoreOrder: true);
     }
