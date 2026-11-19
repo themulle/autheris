@@ -21,6 +21,41 @@ internal sealed partial class SqlMigrationStep
     /// <summary><see cref="Exception.Data"/> key that carries the 1-based number of the batch that failed.</summary>
     internal const string FailedBatchDataKey = "autheris.migration.failed-batch";
 
+    /// <summary><see cref="Exception.Data"/> key that carries the first <see cref="StatementPrefixLength"/> characters of the failing statement.</summary>
+    internal const string FailedStatementDataKey = "autheris.migration.failed-statement";
+
+    /// <summary><see cref="Exception.Data"/> key that names the phase of the step that failed (for example <c>apply</c> or <c>shape-verify</c>).</summary>
+    internal const string FailedPhaseDataKey = "autheris.migration.failed-phase";
+
+    /// <summary>Length of the statement prefix reported on a failure; migration and catalog statements are static text with bound parameters, so no value can be in it.</summary>
+    internal const int StatementPrefixLength = 200;
+
+    /// <summary>Records the statement prefix on a provider failure (the first, innermost statement wins) so the failure report can name it.</summary>
+    internal static void AnnotateStatement(Exception failure, string? sql)
+    {
+        if (sql is null || failure.Data.Contains(FailedStatementDataKey))
+        {
+            return;
+        }
+
+        var prefix = sql.AsSpan().Trim();
+        failure.Data[FailedStatementDataKey] = SanitizeStatement(prefix.Length > StatementPrefixLength ? prefix[..StatementPrefixLength] : prefix);
+    }
+
+    private static string SanitizeStatement(ReadOnlySpan<char> text)
+    {
+        var buffer = text.ToArray();
+        for (var i = 0; i < buffer.Length; i++)
+        {
+            if (char.IsControl(buffer[i]))
+            {
+                buffer[i] = ' ';
+            }
+        }
+
+        return new string(buffer);
+    }
+
     private SqlMigrationStep(
         string engine, int version, string name, string sql, string checksum, string? guardSql, string? phase3Marker,
         IReadOnlyList<string> batches, GovernanceSchemaShapeDelta shapeDelta)
@@ -201,7 +236,17 @@ internal sealed partial class SqlMigrationStep
             await using var guard = ctx.Connection.CreateCommand();
             guard.Transaction = ctx.Transaction;
             guard.CommandText = GuardSql;
-            var already = await guard.ExecuteScalarAsync(ctx.CancellationToken).ConfigureAwait(false);
+            object? already;
+            try
+            {
+                already = await guard.ExecuteScalarAsync(ctx.CancellationToken).ConfigureAwait(false);
+            }
+            catch (System.Data.Common.DbException ex)
+            {
+                AnnotateStatement(ex, GuardSql);
+                throw;
+            }
+
             if (already is not null and not DBNull && Convert.ToInt64(already, CultureInfo.InvariantCulture) != 0)
             {
                 return;
@@ -219,8 +264,9 @@ internal sealed partial class SqlMigrationStep
             }
             catch (System.Data.Common.DbException ex)
             {
-                // Position only (never SQL text): the failure report names the batch so an intermittent driver error is attributable.
+                // The failure report names the batch and the statement prefix so an intermittent driver error is attributable.
                 ex.Data[FailedBatchDataKey] = index + 1;
+                AnnotateStatement(ex, Batches[index]);
                 throw;
             }
         }
