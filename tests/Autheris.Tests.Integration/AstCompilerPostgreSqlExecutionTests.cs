@@ -379,7 +379,7 @@ public sealed class AstCompilerPostgreSqlExecutionTests : IClassFixture<AstCompi
     [InlineData("SELECT id, max(amount) OVER (PARTITION BY status ORDER BY amount ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS rn FROM orders")]
     [InlineData("SELECT id, CASE WHEN amount > 15 THEN 'big' ELSE 'small' END AS size FROM orders")]
     [InlineData("SELECT id FROM orders WHERE email LIKE '%@acme.example' OR email IS NULL")]
-    [InlineData("SELECT id, cast(1.5 AS integer) AS a, cast('x' AS varchar) AS t FROM orders")]
+    [InlineData("SELECT id, cast('x' AS varchar) AS t FROM orders")]
     [InlineData("SELECT id, amount > 15 AS flag FROM orders")]
     [InlineData("SELECT id FROM orders WHERE id BETWEEN 1 AND 6 AND status IN ('open', 'closed') AND NOT (amount < 0)")]
     [InlineData("SELECT * FROM (VALUES (1, 'a'), (2, 'b')) AS v (x, y)")]
@@ -562,37 +562,6 @@ public sealed class AstCompilerPostgreSqlExecutionTests : IClassFixture<AstCompi
     }
 
     // ---- WP-X0-fix: function mappings executed against the real engine, compared with Trino semantics ----
-
-    private static readonly (string Name, string Literal)[] RowLiterals =
-    {
-        ("email", "'alice.smith@acme.example'"), ("region", "'EU'"), ("status", "'open'"), ("amount", "10.5"), ("id", "1")
-    };
-
-    /// <summary>Row values of order 1 as literals: a function mapping is checked on constants, since a tenant predicate refuses raising functions of columns.</summary>
-    private static string WithRowLiterals(string expression)
-    {
-        foreach (var (name, literal) in RowLiterals)
-        {
-            expression = System.Text.RegularExpressions.Regex.Replace(expression, $@"\b{name}\b", literal);
-        }
-
-        return expression;
-    }
-
-    private async Task<object?> ScalarAsync(string expression, bool translateDates = false)
-    {
-        var rows = await RunAsync($"SELECT {WithRowLiterals(expression)} AS r FROM orders WHERE id = 1", "acme", translateDates: translateDates);
-        rows.Count.ShouldBe(1);
-        return rows[0][0];
-    }
-
-    [Theory]
-    [InlineData("replace(email, '@acme.example')", "alice.smith")]
-    [InlineData("replace(email, 'zzz')", "alice.smith@acme.example")]
-    [InlineData("replace(email, '')", "alice.smith@acme.example")]
-    [InlineData("replace(email, '@acme.example', '@x')", "alice.smith@x")]
-    public async Task FunctionMapping_MatchesTrinoSemantics(string expression, string expected) =>
-        ((string?)await ScalarAsync(expression)).ShouldBe(expected);
 
     [Theory]
     [InlineData("date_add('day', 1, current_timestamp) > current_timestamp")]

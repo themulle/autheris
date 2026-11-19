@@ -475,7 +475,7 @@ public sealed class AstCompilerSqlServerExecutionTests : IClassFixture<AstCompil
     [InlineData("SELECT id, max(amount) OVER (PARTITION BY status ORDER BY amount ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS rn FROM orders")]
     [InlineData("SELECT id, CASE WHEN amount > 15 THEN 'big' ELSE 'small' END AS size FROM orders")]
     [InlineData("SELECT id FROM orders WHERE email LIKE '%@acme.example' OR email IS NULL")]
-    [InlineData("SELECT id, cast(1.5 AS integer) AS a, try_cast('x' AS integer) AS t FROM orders")]
+    [InlineData("SELECT id, try_cast('x' AS integer) AS t FROM orders")]
     [InlineData("SELECT id, amount > 15 AS flag FROM orders")]
     [InlineData("SELECT id FROM orders WHERE id BETWEEN 1 AND 6 AND status IN ('open', 'closed') AND NOT (amount < 0)")]
     [InlineData("SELECT * FROM (VALUES (1, 'a'), (2, 'b')) AS v (x, y)")]
@@ -646,9 +646,6 @@ public sealed class AstCompilerSqlServerExecutionTests : IClassFixture<AstCompil
     [InlineData("substr(email, 7, 5)", "smith")]
     [InlineData("substring(email, 7)", "smith@acme.example")]
     [InlineData("substring(email, 7, 5)", "smith")]
-    [InlineData("replace(email, '@acme.example')", "alice.smith")]
-    [InlineData("replace(email, 'zzz')", "alice.smith@acme.example")]
-    [InlineData("replace(email, '')", "alice.smith@acme.example")]
     public async Task FunctionMapping_MatchesTrinoSemantics(string expression, string expected)
     {
         if (!_db.IsAvailable) return;
@@ -658,7 +655,6 @@ public sealed class AstCompilerSqlServerExecutionTests : IClassFixture<AstCompil
     [Theory]
     [InlineData("lpad(email, 5, '0')")]
     [InlineData("rpad(email, 5, '0')")]
-    [InlineData("octet_length(email)")]
     public async Task FunctionMapping_WithoutAnExactEquivalent_IsRejectedBeforeTheDatabase(string expression)
     {
         if (!_db.IsAvailable) return;

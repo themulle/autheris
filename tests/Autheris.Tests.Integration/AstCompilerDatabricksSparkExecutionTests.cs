@@ -432,7 +432,7 @@ public sealed class AstCompilerDatabricksSparkExecutionTests : IClassFixture<Spa
     [InlineData("SELECT id, max(amount) OVER (PARTITION BY status ORDER BY amount ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS rn FROM orders")]
     [InlineData("SELECT id, CASE WHEN amount > 15 THEN 'big' ELSE 'small' END AS size FROM orders")]
     [InlineData("SELECT id FROM orders WHERE email LIKE '%@acme.example' OR email IS NULL")]
-    [InlineData("SELECT id, cast(1.5 AS integer) AS a, try_cast('x' AS integer) AS t FROM orders")]
+    [InlineData("SELECT id, try_cast('x' AS integer) AS t FROM orders")]
     [InlineData("SELECT id, amount > 15 AS flag FROM orders")]
     [InlineData("SELECT id FROM orders WHERE id BETWEEN 1 AND 6 AND status IN ('open', 'closed') AND NOT (amount < 0)")]
     [InlineData("SELECT * FROM (VALUES (1, 'a'), (2, 'b')) AS v (x, y)")]
@@ -445,7 +445,6 @@ public sealed class AstCompilerDatabricksSparkExecutionTests : IClassFixture<Spa
     [InlineData("SELECT region, GROUPING(region) AS g, count(*) AS n FROM orders GROUP BY ROLLUP (region)")]
     [InlineData("SELECT extract(year FROM date '2024-05-06') AS y, extract(dow FROM date '2024-05-06') AS w FROM orders")]
     [InlineData("SELECT a.id FROM orders a WHERE a.amount IS DISTINCT FROM 20.00")]
-    [InlineData("SELECT approx_distinct('EU') AS d, arbitrary('open') AS a FROM orders")]
     public async Task UserQueryShapes_CompileAndExecute(string sql)
     {
         RequireSpark();

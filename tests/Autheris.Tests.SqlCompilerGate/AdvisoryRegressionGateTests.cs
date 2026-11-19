@@ -143,4 +143,30 @@ public sealed class AdvisoryRegressionGateTests
         Should.Throw<SecurityException>(() => engine.Compile(sql.AsMemory(), Request(dialect, PolicyScenario.Tenant), CancellationToken.None))
             .Message.ShouldBe(RowPolicyErrorGuard.Message);
     }
+
+    [Theory]
+    [InlineData("postgresql", "case_14", "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN sqrt(-1) ELSE 0 END = 0")]
+    [InlineData("sqlserver", "case_14", "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN sqrt(-1) ELSE 0 END = 0")]
+    [InlineData("oracle", "case_14", "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN sqrt(-1) ELSE 0 END = 0")]
+    [InlineData("databricks", "case_14", "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN sqrt(-1) ELSE 0 END = 0")]
+    [InlineData("postgresql", "case_15", "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN 9223372036854775807 + 1 ELSE 0 END = 0")]
+    [InlineData("sqlserver", "case_15", "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN 9223372036854775807 + 1 ELSE 0 END = 0")]
+    [InlineData("oracle", "case_15", "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN 9223372036854775807 + 1 ELSE 0 END = 0")]
+    [InlineData("databricks", "case_15", "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN 9223372036854775807 + 1 ELSE 0 END = 0")]
+    [InlineData("postgresql", "case_16", "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN CAST('abc' AS integer) ELSE 0 END = 0")]
+    [InlineData("sqlserver", "case_16", "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN CAST('abc' AS integer) ELSE 0 END = 0")]
+    [InlineData("oracle", "case_16", "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN CAST('abc' AS integer) ELSE 0 END = 0")]
+    [InlineData("databricks", "case_16", "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN CAST('abc' AS integer) ELSE 0 END = 0")]
+    [InlineData("postgresql", "case_17", "SELECT id FROM orders WHERE id = 42 AND sqrt(-1) > 0")]
+    [InlineData("sqlserver", "case_17", "SELECT id FROM orders WHERE id = 42 AND sqrt(-1) > 0")]
+    [InlineData("oracle", "case_17", "SELECT id FROM orders WHERE id = 42 AND sqrt(-1) > 0")]
+    [InlineData("databricks", "case_17", "SELECT id FROM orders WHERE id = 42 AND sqrt(-1) > 0")]
+    public void Regression_constant_behind_row_branch_case(string dialect, string item, string sql)
+    {
+        Assert.NotNull(item);
+        var engine = new FastSqlEngine();
+
+        Should.Throw<SecurityException>(() => engine.Compile(sql.AsMemory(), Request(dialect, PolicyScenario.Tenant), CancellationToken.None))
+            .Message.ShouldBe(RowPolicyErrorGuard.Message);
+    }
 }

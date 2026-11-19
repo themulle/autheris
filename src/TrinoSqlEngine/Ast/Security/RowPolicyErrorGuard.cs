@@ -45,12 +45,12 @@ public static class RowPolicyErrorGuard
         ScalarSubqueryExpression scalar => ReturnsExactlyOneRow(scalar.Subquery),
         LiteralExpression literal => IsConsistentLiteral(literal),
         BinaryExpression binary => IsAllowedBinary(binary),
-        UnaryExpression unary => unary.Operator != UnaryOperator.Negate || !HasColumn(unary.Operand),
+        UnaryExpression unary => unary.Operator != UnaryOperator.Negate || TryEvaluate(unary, out _),
         LikeExpression like => IsConstant(like.Pattern) && (like.Escape is null || IsConstant(like.Escape)),
         FunctionCallExpression call => IsAllowedFunction(call),
         SubstringExpression sub => IsNonNegativeIntegerLiteral(sub.Start, allowNegative: true) && (sub.Length is null || IsNonNegativeIntegerLiteral(sub.Length, allowNegative: false)),
         TrimExpression trim => trim.Characters is null || IsConstant(trim.Characters),
-        CastExpression cast => cast.IsTryCast || !HasColumn(cast.Operand),
+        CastExpression => true,   // judged by the coercion stage (target family against operand family)
         DateFunctionExpression date => date.Kind == DateFunctionKind.Trunc || !HasColumn(date.Source),
         // Everything else (subscript, unknown node kinds) can raise on row data: refused.
         _ => false
@@ -68,8 +68,8 @@ public static class RowPolicyErrorGuard
             or BinaryOperator.GreaterThan or BinaryOperator.GreaterThanOrEqual => true,
         // A concatenation of row data can exceed a length limit (Oracle), so it is allowed only between constants.
         BinaryOperator.Concat => !HasColumn(binary.Left) && !HasColumn(binary.Right),
-        // Arithmetic can overflow: only without any column operand (a literal expression does not depend on row data).
-        BinaryOperator.Add or BinaryOperator.Subtract or BinaryOperator.Multiply => !HasColumn(binary.Left) && !HasColumn(binary.Right),
+        // Arithmetic can overflow: only a literal expression that folds within the 64-bit range (a raising constant could sit behind a row-dependent branch).
+        BinaryOperator.Add or BinaryOperator.Subtract or BinaryOperator.Multiply => TryEvaluate(binary, out _),
         BinaryOperator.Divide or BinaryOperator.Modulo => IsSafeDivisor(binary.Right),
         _ => false
     };
@@ -87,13 +87,6 @@ public static class RowPolicyErrorGuard
 
     private static bool IsAllowedFunction(FunctionCallExpression call)
     {
-        // A call whose arguments hold no column does not depend on row data: the engine's function policy already limits which
-        // functions a dialect accepts, and an error of a constant call is the same whether or not a hidden row exists.
-        if (call.Window is null && call.Filter is null && call.OrderWithin is null && !call.Arguments.Any(HasColumn))
-        {
-            return true;
-        }
-
         if (call.Name.Parts.Count == 1 && call.Window is null && call.Name.Parts[0].Value.ToLowerInvariant() is "substring" or "substr")
         {
             return call.Arguments.Count is 2 or 3 && IsNonNegativeIntegerLiteral(call.Arguments[1], allowNegative: true)
@@ -120,6 +113,41 @@ public static class RowPolicyErrorGuard
         if (call.Name.Parts.Count != 1 || !SqlFunctionPolicy.RowPolicySafeFunctions.Contains(call.Name.Parts[0].Value)) return false;
         if (call.Window is not null && call.Name.Parts[0].Value.ToLowerInvariant() is not ("count" or "min" or "max")) return false;
         return true;
+    }
+
+    /// <summary>Folds a literal-only +, -, * or negation with checked semantics; false when an operand is not a number literal or a result leaves the 64-bit range.</summary>
+    private static bool TryEvaluate(Expression expression, out decimal value)
+    {
+        const decimal Limit = 9.2e18m;
+        value = 0m;
+        switch (Unwrap(expression))
+        {
+            case LiteralExpression { Type: LiteralType.Integer or LiteralType.Decimal } literal:
+                return TryNumber(literal, out value) && Math.Abs(value) < Limit;
+            case UnaryExpression { Operator: UnaryOperator.Negate } negate:
+                if (!TryEvaluate(negate.Operand, out value)) return false;
+                value = -value;
+                return true;
+            case BinaryExpression { Operator: BinaryOperator.Add or BinaryOperator.Subtract or BinaryOperator.Multiply } binary
+                when TryEvaluate(binary.Left, out var left) && TryEvaluate(binary.Right, out var right):
+                try
+                {
+                    value = binary.Operator switch
+                    {
+                        BinaryOperator.Add => checked(left + right),
+                        BinaryOperator.Subtract => checked(left - right),
+                        _ => checked(left * right)
+                    };
+                }
+                catch (OverflowException)
+                {
+                    return false;
+                }
+
+                return Math.Abs(value) < Limit;
+            default:
+                return false;
+        }
     }
 
     private static bool HasColumn(Expression expression) => AstReflection.Collect<ColumnReference>(expression).Count > 0;

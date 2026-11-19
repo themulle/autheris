@@ -74,6 +74,11 @@ public class RowPolicyExpressionAllowlistTests
         { "case_34", "SELECT Id FROM (SELECT Status AS s, Id FROM Orders) AS d WHERE d.s = 5" },
         { "case_35", "SELECT Id FROM Orders WHERE Id = Status" },
         { "case_41", "SELECT abs(Id) FROM Orders" },
+        { "case_42", "SELECT Id FROM Orders WHERE CASE WHEN Id = 42 THEN sqrt(-1) ELSE 0 END = 0" },
+        { "case_43", "SELECT Id FROM Orders WHERE CASE WHEN Id = 42 THEN 9223372036854775807 + 1 ELSE 0 END = 0" },
+        { "case_44", "SELECT Id FROM Orders WHERE CASE WHEN Id = 42 THEN CAST('abc' AS integer) ELSE 0 END = 0" },
+        { "case_45", "SELECT Id FROM Orders WHERE Id = 42 AND sqrt(-1) > 0" },
+        { "case_46", "SELECT Id FROM Orders WHERE CAST(Amount AS integer) = 1" },
         { "case_37", "SELECT Id FROM Orders WHERE Id = (SELECT max(Status) FROM Orders)" },
         { "case_38", "SELECT Id FROM Orders WHERE Id IN (SELECT Status FROM Orders)" },
         { "case_39", "SELECT Id FROM Orders WHERE Id > ANY (SELECT Status FROM Orders)" },
@@ -101,7 +106,8 @@ public class RowPolicyExpressionAllowlistTests
         { "case_16", "SELECT Id, Status, count(*) FROM Orders WHERE Id > 3 GROUP BY Id, Status" },
         { "case_17", "SELECT Id FROM Orders WHERE Id = (SELECT max(Id) FROM Orders) AND Id IN (SELECT Id FROM Entitlements)" },
         { "case_18", "SELECT Id FROM Orders UNION ALL SELECT Id FROM Entitlements" },
-        { "case_19", "SELECT abs(-5), power(2, 3) FROM Orders" },
+        { "case_19", "SELECT lower('A'), length('x') FROM Orders" },
+        { "case_20", "SELECT Id FROM Orders WHERE CASE WHEN Id = 42 THEN 1 + 2 * 3 ELSE 0 END = 0 AND CAST(Status AS varchar) = 'a'" },
     };
 
     [Theory]

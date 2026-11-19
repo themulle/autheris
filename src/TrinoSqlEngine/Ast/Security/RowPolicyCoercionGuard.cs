@@ -23,6 +23,12 @@ internal sealed class RowPolicyCoercionGuard(ITableCatalog catalog) : ColumnScop
 
     private static SecurityException Refuse() => new(RowPolicyErrorGuard.Message);
 
+    private static Expression Unwrap(Expression expression)
+    {
+        while (expression is ParenthesizedExpression p) expression = p.Expression;
+        return expression;
+    }
+
     private static string Fold(SqlIdentifier id) => id.Value.ToLowerInvariant();
 
     private static Fam OfType(string? dataType) => AggregateTypeClasses.Classify(dataType) switch
@@ -86,7 +92,7 @@ internal sealed class RowPolicyCoercionGuard(ITableCatalog catalog) : ColumnScop
             case SubstringExpression or TrimExpression: return Fam.Text;
             case CaseExpression c:
                 return Combine(c.WhenClauses.Select(w => Of(w.Result)).Concat(c.ElseResult is null ? [] : [Of(c.ElseResult)]));
-            case CastExpression cast: return cast.IsTryCast ? OfType(cast.TargetType) : Fam.Unknown;
+            case CastExpression cast: return OfType(cast.TargetType);
             case FunctionCallExpression call: return OfFunction(call);
             default: return Fam.Unknown;
         }
@@ -312,6 +318,26 @@ internal sealed class RowPolicyCoercionGuard(ITableCatalog catalog) : ColumnScop
         }
 
         return result;
+    }
+
+    public override SqlNode VisitCastExpression(CastExpression node)
+    {
+        var result = (CastExpression)base.VisitCastExpression(node);
+        if (result.IsTryCast) return result;
+
+        // A cast raises on a value that does not convert: only to text, between temporal values, or of NULL.
+        var target = OfType(result.TargetType);
+        var source = Of(result.Operand);
+        if (target == Fam.Text || source == Fam.Any || (target == Fam.Temporal && source == Fam.Temporal)) return result;
+
+        // A date or time literal that parses cannot fail, wherever the cast sits.
+        if (target == Fam.Temporal && Unwrap(result.Operand) is LiteralExpression { Type: LiteralType.String, Value: string text }
+            && DateTimeOffset.TryParse(text, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out _))
+        {
+            return result;
+        }
+
+        throw Refuse();
     }
 
     public override SqlNode VisitExtractExpression(ExtractExpression node)
