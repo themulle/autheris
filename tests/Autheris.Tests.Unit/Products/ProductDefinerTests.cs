@@ -1,16 +1,26 @@
+using System.Security.Claims;
+using Autheris.Application.Olap;
 using Autheris.Application.Products;
 using Autheris.Application.Sql;
+using Autheris.Application.Sql.Federation.Parameters;
 using Autheris.Application.Sql.Interfaces;
+using Autheris.Application.Sql.Services;
 using Autheris.Application.State;
 using Autheris.Application.State.Caching.TableCache;
+using Autheris.Application.VirtualFilters.Federation;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Options.TableCache;
+using Autheris.Tests.Unit.TestDoubles;
 using Autheris.Tests.Unit.VirtualFilters.Federation;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
 using Shouldly;
+using TrinoSqlEngine;
+using TrinoSqlEngine.Analysis;
+using TrinoSqlEngine.Ast.Nodes;
 using Xunit;
 using static Autheris.Tests.Unit.VirtualFilters.Federation.FederatedVfPipelineHarness;
 
@@ -135,5 +145,99 @@ public sealed class ProductDefinerTests
         var ex = await Should.ThrowAsync<ProductLoadException>(() => runner.RunAsync(new ProductDefiner(Product(Join), ProductLimits.Default), default));
 
         ex.Code.ShouldBe(ProductErrorCodes.LoadFailed);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task DefinerDecision_CarriesDefinerProvenance_NotPdpProvenance()
+    {
+        var tables = new (TableMetadata Table, StubTableConnector Stub)[]
+        {
+            (Customers, new StubTableConnector("crm", [Row(("id", "1"), ("name", "Alpha"))])),
+            (Orders, new StubTableConnector("erp", [Row(("id", "1"), ("total", "10"))]))
+        };
+        var repository = new InMemoryTableMetadataRepository(Customers, Orders);
+
+        var options = new GatewayOptions
+        {
+            WebSql = new WebSqlOptions
+            {
+                Enabled = true,
+                DefaultDataSourceName = Customers.Identifier.Domain,
+                AllowedDataSources = [Customers.Identifier.Domain, Orders.Identifier.Domain],
+                CrossSource = new CrossSourceOptions { Enabled = true, AllowedTransports = ["WebSql"] }
+            },
+            DuckDbOlap = new DuckDbOlapOptions { Enabled = true, MaxMemory = "256MB", MaxTempDirectorySize = "0B" }
+        };
+
+        var audit = NullAuditLogRepository.Instance;
+        var capturingPlanner = new CapturingPlanner(new CrossSourcePlanner(FastSqlEngine.Default));
+        var service = new FederatedDuckDbExecutionService(
+            Options.Create(options),
+            audit,
+            new CrossSourceQueryRouter(repository, options.WebSql.CrossSource, options.WebSql),
+            capturingPlanner,
+            Staging(StubRegistry.For(tables), options, audit),
+            new DuckDbOlapEngine(options.DuckDbOlap, NullLogger<DuckDbOlapEngine>.Instance),
+            sqlEngine: FastSqlEngine.Default);
+
+        var result = await ((IProductDefinerExecutor)service).ExecuteAsync(
+            new ProductDefiner(Product(Join), ProductLimits.Default),
+            Request(Join),
+            default);
+
+        result.Rows.Count.ShouldBe(1);
+        capturingPlanner.LastDecisions.ShouldNotBeNull();
+        capturingPlanner.LastDecisions.Count.ShouldBe(2);
+
+        foreach (var expectedTable in new[] { Customers.Identifier, Orders.Identifier })
+        {
+            capturingPlanner.LastDecisions.TryGetValue(expectedTable, out var decision).ShouldBeTrue();
+            decision.ShouldNotBeNull();
+            decision.IsAllowed.ShouldBeTrue();
+            decision.EvaluatedAsProductDefiner.ShouldBeTrue();
+            decision.EvaluatedByPdp.ShouldBeFalse();
+        }
+    }
+
+    private sealed class InMemoryTableMetadataRepository(params TableMetadata[] tables) : ITableMetadataRepository
+    {
+        public Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default) =>
+            Task.FromResult(tables.FirstOrDefault(t => t.Identifier.Equals(table)));
+
+        public Task<IReadOnlyList<TableMetadata>> GetAllTablesAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<TableMetadata>>(tables);
+
+        public Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default) =>
+            Task.FromResult(metadata);
+
+        public Task<TableKeyDefinitionChange?> ReplaceTableKeyDefinitionAsync(
+            TableIdentifier table,
+            IReadOnlyList<string> primaryKey,
+            IReadOnlyList<TableIndexDefinition> indexes,
+            IReadOnlyList<KeyColumnDirection>? primaryKeyDirections = null,
+            CancellationToken ct = default) =>
+            Task.FromResult<TableKeyDefinitionChange?>(null);
+    }
+
+    private sealed class CapturingPlanner(ICrossSourcePlanner inner) : ICrossSourcePlanner
+    {
+        public IReadOnlyDictionary<TableIdentifier, TableAccessDecision>? LastDecisions { get; private set; }
+
+        public CrossSourcePlan Plan(
+            string rawSql,
+            SqlQueryMetadata metadata,
+            IReadOnlyList<ResolvedSourceTable> tables,
+            IReadOnlyDictionary<TableIdentifier, TableAccessDecision> decisions,
+            CrossSourceOptions options,
+            ClaimsPrincipal user,
+            TenantId tenantId,
+            IReadOnlyDictionary<TableIdentifier, VirtualFilterTablePlan>? virtualFilterPlans = null,
+            SqlStatement? statement = null,
+            FederatedParameterContract? parameters = null)
+        {
+            LastDecisions = new Dictionary<TableIdentifier, TableAccessDecision>(decisions);
+            return inner.Plan(rawSql, metadata, tables, decisions, options, user, tenantId, virtualFilterPlans, statement, parameters);
+        }
     }
 }
