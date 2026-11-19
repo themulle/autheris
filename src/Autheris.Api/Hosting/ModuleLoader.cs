@@ -450,6 +450,7 @@ public sealed class ModuleLoader
             loadedModules.Add(new LoadedModuleDescriptor(moduleId, manifest, moduleInstance, alc));
         }
 
+        ModuleSecurityGuards.VerifyFinalDbtCloudWebhookHandler(services, loadedModules.Select(m => m.Id).ToList());
         services.AddSingleton(new ModuleLoadResult(loadedModules));
         return new ModuleLoadResult(loadedModules);
     }
@@ -857,6 +858,7 @@ public sealed class ModuleLoader
             loadedModules.Add(new LoadedModuleDescriptor(moduleId, manifest, moduleInstance, alc));
         }
 
+        ModuleSecurityGuards.VerifyFinalDbtCloudWebhookHandler(services, loadedModules.Select(m => m.Id).ToList());
         result = new ModuleLoadResult(loadedModules);
         services.AddSingleton(result);
         return true;
