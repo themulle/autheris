@@ -214,6 +214,18 @@ public sealed class ExternalCatalogDeniedColumnTests
     }
 
     [Fact]
+    public void IsAppOnlyPrincipal_PersonWithSidAndServiceAccountName_IsNotAppView()
+    {
+        var person = Token(
+            new Claim("azp", "web-client"),
+            new Claim("preferred_username", "service-account-x"),
+            new Claim(ClaimTypes.PrimarySid, "S-1-5-21-PERSON"));
+
+        ExternalCatalogReader.IsAppOnlyPrincipal(person).ShouldBeFalse();
+        ExternalApiPermissions.IsServicePrincipal(person).ShouldBeFalse();
+    }
+
+    [Fact]
     public void IsAppOnlyPrincipal_IdtypApp_IsAppView() =>
         ExternalCatalogReader.IsAppOnlyPrincipal(Token(new Claim("idtyp", "app"))).ShouldBeTrue();
 

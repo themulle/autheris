@@ -53,7 +53,10 @@ public static class AppOnlyPrincipal
             return true;
         }
 
-        if (principal.FindFirst("preferred_username")?.Value?.StartsWith("service-account-", StringComparison.OrdinalIgnoreCase) == true)
+        if (principal.FindFirst("preferred_username")?.Value?.StartsWith("service-account-", StringComparison.OrdinalIgnoreCase) == true
+            && !string.IsNullOrWhiteSpace(GetClientId(principal))
+            && TokenAccessScope.GetScopeSet(principal.Claims).Count == 0
+            && principal.GetUserSid() is null)
         {
             return true;
         }

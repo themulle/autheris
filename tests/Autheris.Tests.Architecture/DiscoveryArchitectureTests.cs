@@ -99,7 +99,7 @@ public sealed class DiscoveryArchitectureTests
     }
 
     private static readonly Regex NoAccessComparison = new(
-        @"(==|!=|\bis\s+(not\s+)?)\s*(Autheris\.Application\.Catalog\.Discovery\.)?DiscoveryColumnState\.NoAccess\b",
+        @"(==|!=|\bis\s+(not\s+)?|\bcase\s+)\s*(Autheris\.Application\.Catalog\.Discovery\.)?DiscoveryColumnState\.NoAccess\b|DiscoveryColumnState\.NoAccess\s*=>",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     [Fact]

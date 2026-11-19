@@ -511,13 +511,12 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
         var objectsClient = await ClientAsync("S-A-USER", TenantA, "Reader");
         objectsClient.DefaultRequestHeaders.Add("X-Test-Scope", "Autheris.Catalog.Read");
         var objects = await objectsClient.GetAsync("/api/v1/catalog/objects");
-        if (objects.IsSuccessStatusCode)
-        {
-            var objectsBody = await BodyAsync(objects);
-            objectsBody.ShouldNotContain(DeniedColumn);
-            objectsBody.ShouldNotContain(DeniedDescription);
-            objectsBody.ToLowerInvariant().ShouldNotContain("noaccess");
-        }
+        objects.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var objectsBody = await BodyAsync(objects);
+        objectsBody.ShouldContain("vault_a");
+        objectsBody.ShouldNotContain(DeniedColumn);
+        objectsBody.ShouldNotContain(DeniedDescription);
+        objectsBody.ToLowerInvariant().ShouldNotContain("noaccess");
 
         // GraphQL.
         var graphQl = await PostGraphQlAsync(client,
@@ -541,16 +540,21 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
 
     [Fact]
     [Trait("Category", "Security")]
-    public async Task RestCatalogObjects_PersonTokenWithAzpNoScope_ReturnsPersonView()
+    public async Task RestCatalogObjects_PersonTokenWithSidAndAppId_ReturnsPersonView()
     {
+        await SeedVaultTableAsync();
         var client = await ClientAsync("S-A-USER", TenantA, "Reader");
         client.DefaultRequestHeaders.Add("X-Test-AppId", "web-client");
+        client.DefaultRequestHeaders.Add("X-Test-Scope", "Autheris.Catalog.Read");
 
         var response = await client.GetAsync("/api/v1/catalog/objects");
 
-        // A person token (resolvable user sid) with a client id and no scope never receives the unfiltered service-principal view.
+        // A token with a user subject and a client id never receives the unfiltered service-principal view.
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
         var body = await BodyAsync(response);
+        body.ShouldContain("vault_a");
         body.ShouldNotContain(DeniedColumn);
+        body.ShouldNotContain(DeniedDescription);
     }
 
     private static readonly TableIdentifier ScopedA = new("dom_a", "main", "scoped_a");
