@@ -201,7 +201,7 @@ public abstract class GovernedDialectEndToEndBase : IDisposable
         if (!await EnsureHostAsync()) return;
         if (!Target!.ConversionFails) return;   // SQLite converts silently
 
-        var ex = await Should.ThrowAsync<GovernedSqlException>(() => QueryAsync("SELECT CAST('abc' AS integer)", "acme"));   // no table: no row policy or tenant predicate applies, so the cast reaches the engine
+        var ex = await Should.ThrowAsync<GovernedSqlException>(() => QueryAsync($"SELECT id FROM {Ref} WHERE id = __param_p", "acme", new Dictionary<string, object?> { ["p"] = "abc" }));   // a client value the engine cannot convert; the guard allows a parameter compared with a column
 
         ex.Code.ShouldBeOneOf("SQL_DATA_ERROR", "SQL_PROVIDER_ERROR");
         ex.Message.ShouldBe(GovernedSqlErrorCodes.FixedMessage(ex.Code));   // no driver text, value or object name
