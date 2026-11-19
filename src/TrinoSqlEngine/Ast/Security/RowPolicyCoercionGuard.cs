@@ -23,6 +23,8 @@ internal sealed class RowPolicyCoercionGuard(ITableCatalog catalog) : ColumnScop
 
     private static SecurityException Refuse() => new(RowPolicyErrorGuard.Message);
 
+    private static readonly string[] IsoFormats = ["yyyy-MM-dd", "yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd HH:mm:ss.FFF"];
+
     private static Expression Unwrap(Expression expression)
     {
         while (expression is ParenthesizedExpression p) expression = p.Expression;
@@ -328,11 +330,11 @@ internal sealed class RowPolicyCoercionGuard(ITableCatalog catalog) : ColumnScop
         // A cast raises on a value that does not convert: only to text, between temporal values, or of NULL.
         var target = OfType(result.TargetType);
         var source = Of(result.Operand);
-        if (target == Fam.Text || source == Fam.Any || (target == Fam.Temporal && source == Fam.Temporal)) return result;
+        if (target == Fam.Text || (target == Fam.Temporal && source == Fam.Temporal) || Unwrap(result.Operand) is LiteralExpression { Type: LiteralType.Null }) return result;
 
         // A date or time literal that parses cannot fail, wherever the cast sits.
         if (target == Fam.Temporal && Unwrap(result.Operand) is LiteralExpression { Type: LiteralType.String, Value: string text }
-            && DateTimeOffset.TryParse(text, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out _))
+            && DateTimeOffset.TryParseExact(text, IsoFormats, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out _))
         {
             return result;
         }

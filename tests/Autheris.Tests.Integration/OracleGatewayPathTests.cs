@@ -328,10 +328,10 @@ public sealed class OracleGatewayPathTests : IDisposable
         using var other = await RunAs("other", $"SELECT id FROM {AstCompilerOracleFixture.AppUser}.ORDERS ORDER BY id");
         IdsOf(other).ShouldBe(new List<int> { 5 });
 
-        // a provider error is a stable code with a fixed message (ORA-01722 text never reaches the caller)
+        // a provider error is a stable code with a fixed message (ORA-01722 text never reaches the caller); the statement has no table, so no row policy or tenant predicate applies and the cast reaches Oracle
         var failing = _host.CreateClient();
         failing.DefaultRequestHeaders.Add("X-Tenant-Id", "acme");
-        var error = await failing.PostAsJsonAsync("/api/v1/sql", new { sql = $"SELECT CAST('abc' AS integer) FROM {AstCompilerOracleFixture.AppUser}.ORDERS", dataSource = Source });
+        var error = await failing.PostAsJsonAsync("/api/v1/sql", new { sql = "SELECT CAST('abc' AS integer)", dataSource = Source });
         var errorBody = await error.Content.ReadAsStringAsync();
         errorBody.ShouldNotContain("ORA-");
         errorBody.ShouldContain("code");
