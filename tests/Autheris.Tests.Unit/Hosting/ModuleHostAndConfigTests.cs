@@ -176,14 +176,66 @@ public sealed class ModuleConfigurationTests
     }
 
     [Theory]
-    [InlineData("events", "Gateway:Webhooks")]
-    [InlineData("events", "Gateway:CdcStream")]
-    [InlineData("events", "Gateway:PostgreSqlCdc")]
-    [InlineData("events", "Gateway:MssqlChangeTracking")]
-    [InlineData("cdc", "Gateway:CdcStream")]
-    public void Cdc_sections_are_host_sections_not_module_claimable(string moduleId, string section)
+    [InlineData("Gateway:Webhooks")]
+    [InlineData("Gateway:CdcStream")]
+    [InlineData("Gateway:PostgreSqlCdc")]
+    [InlineData("Gateway:MssqlChangeTracking")]
+    public void Cdc_sections_are_host_sections_not_module_claimable(string section)
     {
-        Should.Throw<ModuleLoadException>(() => ModuleSecurityGuards.ValidateConfigClaim(moduleId, section));
+        ModuleSecurityGuards.IsHostConfigSection(section).ShouldBeTrue();
+        Should.Throw<ModuleLoadException>(() => ModuleSecurityGuards.ValidateConfigClaim("events", section));
+    }
+
+    [Fact]
+    public void Module_with_cdc_stream_id_collides_with_host_section()
+    {
+        var method = typeof(ModuleLoader).GetMethod(
+            "BuildScopedModuleConfiguration",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+        var root = new ConfigurationBuilder().Build();
+
+        var ex = Should.Throw<System.Reflection.TargetInvocationException>(() =>
+            method.Invoke(null, ["cdc-stream", Array.Empty<string>(), root]));
+        ex.InnerException.ShouldBeOfType<ModuleLoadException>();
+        ex.InnerException!.Message.ShouldContain("collides with the host configuration section");
+    }
+
+    [Fact]
+    public void Core_event_bus_keys_accepted_under_event_bus_section()
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Gateway:EventBus:DeliveryMode"] = "Queued",
+                ["Gateway:EventBus:SubscriberQueueCapacity"] = "512",
+            })
+            .Build();
+
+        Should.NotThrow(() =>
+            UnknownGatewayKeyGuard.Validate(
+                config,
+                loadedModuleIds: Array.Empty<string>(),
+                claimedModuleSections: Array.Empty<string>()));
+    }
+
+    [Theory]
+    [InlineData("Gateway:Events:DeliveryMode", false)]
+    [InlineData("Gateway:Events:SubscriberQueueCapacity", false)]
+    [InlineData("Gateway:Events:DeliveryMode", true)]
+    public void Old_event_bus_keys_fail_with_new_path_message(string key, bool eventsModuleLoaded)
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { [key] = "x" })
+            .Build();
+        var loaded = eventsModuleLoaded ? new[] { "events" } : Array.Empty<string>();
+        var claimed = eventsModuleLoaded ? new[] { "Gateway:Events" } : Array.Empty<string>();
+
+        var ex = Should.Throw<InvalidOperationException>(() =>
+            UnknownGatewayKeyGuard.Validate(config, loaded, claimed));
+
+        ex.Message.ShouldContain(key);
+        ex.Message.ShouldContain("Gateway:EventBus:" + key["Gateway:Events:".Length..]);
+        ex.Message.ShouldNotContain("is not installed");
     }
 }
 

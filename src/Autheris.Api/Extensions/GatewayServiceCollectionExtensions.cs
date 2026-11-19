@@ -124,12 +124,7 @@ public static partial class GatewayServiceCollectionExtensions
         Autheris.Api.Configuration.UnknownGatewayKeyGuard.ThrowIfUnknownKeys(
             configuration,
             moduleLoadResult,
-            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-            {
-                [Autheris.Domain.Options.GatewaySections.Lakehouse] = "lakehouse",
-                [Autheris.Domain.Options.GatewaySections.Events] = "events",
-                [Autheris.Domain.Options.GatewaySections.Lineage] = "lineage"
-            });
+            Autheris.Api.Configuration.GatewayConfigurationSchema.KnownModuleSections);
         return services;
     }
     public static IServiceCollection AddGatewayAuth(

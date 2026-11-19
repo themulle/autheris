@@ -33,6 +33,12 @@ public static class UnknownGatewayKeyGuard
         (GatewayConfigurationSchema.Root + ":CatalogSearch:Enabled", "CatalogSearch:Enabled (removed; catalog search validation and warm-up are always active, tune CatalogSearch:WarmupOnStartup instead)")
     ];
 
+    private static readonly (string Key, string Message)[] RemovedEventBusKeys =
+    [
+        (GatewayConfigurationSchema.Root + ":Events:DeliveryMode", "Gateway:Events:DeliveryMode (removed; moved to Gateway:EventBus:DeliveryMode)"),
+        (GatewayConfigurationSchema.Root + ":Events:SubscriberQueueCapacity", "Gateway:Events:SubscriberQueueCapacity (removed; moved to Gateway:EventBus:SubscriberQueueCapacity)")
+    ];
+
     private static readonly (string Key, string Message)[] AllRemovedKeysWithMessage = [.. RemovedProcedureDeclaredKeys, .. RemovedFlagKeys];
 
     private const string RemovedAuthzReplacement = "removed by ADR-020; data access is granted by grant records";
@@ -81,10 +87,29 @@ public static class UnknownGatewayKeyGuard
         GatewayConfigurationSchema.Root + ":HitLStepUp:PreferredItsmSystem"
     ];
 
+    // Runs before any module-section check: the removed key must be named even when the events module is absent or claims Gateway:Events.
+    private static void ThrowIfRemovedEventBusKeys(IConfiguration configuration)
+    {
+        var found = new List<string>();
+        foreach (var (removedKey, message) in RemovedEventBusKeys)
+        {
+            if (configuration.AsEnumerable().Any(kv => string.Equals(kv.Key, removedKey, StringComparison.OrdinalIgnoreCase)))
+            {
+                found.Add(message);
+            }
+        }
+
+        if (found.Count > 0)
+        {
+            throw new InvalidOperationException(BuildMessage(found));
+        }
+    }
+
     public static void ThrowIfUnknownKeys(IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(configuration);
 
+        ThrowIfRemovedEventBusKeys(configuration);
         var unknown = FindUnknownKeys(configuration);
         if (unknown.Count > 0)
         {
@@ -126,6 +151,7 @@ public static class UnknownGatewayKeyGuard
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentNullException.ThrowIfNull(loadedModuleIds);
 
+        ThrowIfRemovedEventBusKeys(configuration);
         var loadedSet = new HashSet<string>(loadedModuleIds, StringComparer.OrdinalIgnoreCase);
         var claimedSet = claimedModuleSections is not null
             ? new HashSet<string>(claimedModuleSections, StringComparer.OrdinalIgnoreCase)

@@ -21,7 +21,7 @@ public enum EventBusDeliveryMode
 /// </summary>
 public sealed class EventBusOptions
 {
-    public const string SectionName = "Gateway:Events";
+    public const string SectionName = "Gateway:EventBus";
 
     /// <summary>Default capacity of each subscriber queue.</summary>
     public const int DefaultSubscriberQueueCapacity = 1024;
