@@ -4,6 +4,7 @@ namespace Autheris.Extensions.Tests;
 using Autheris.Modules.Lakehouse.Models;
 using Autheris.Application.Sql.Catalog;
 using Autheris.Application.Audit;
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -764,8 +765,7 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
 
             await Should.ThrowAsync<SecurityException>(async () => await provider.ReadTextAsync("link.json"));
 
-            var prodEnv = Substitute.For<IHostEnvironment>();
-            prodEnv.EnvironmentName.Returns("Production");
+            IHostEnvironment prodEnv = new TestHostEnvironment("Production");
             var unconfigured = new LocalStorageProvider(Options.Create(new GatewayOptions()), prodEnv);
             await Should.ThrowAsync<SecurityException>(async () => await unconfigured.ReadTextAsync("anything.json"));
         }

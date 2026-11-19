@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.VirtualFilters.Federation;
 
+using Autheris.Tests.Common;
 using System;
 using System.Threading.Tasks;
 using Autheris.Api.Extensions;
@@ -34,8 +35,7 @@ public sealed class VirtualFilterKeySetProviderWiringTests
             VirtualFilters = keySource.VirtualFilters
         };
         var services = new ServiceCollection();
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        IHostEnvironment env = new TestHostEnvironment("Development");
         services.AddSingleton(env);
         services.AddSingleton(Options.Create(options));
         services.AddLogging();

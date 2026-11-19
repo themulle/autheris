@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Tenancy;
 
+using Autheris.Tests.Common;
 using Autheris.Tests.Unit.Security;
 using System;
 using System.Collections.Generic;
@@ -42,8 +43,7 @@ public sealed class Wp4ReviewFindingsTests
     public async Task DT_SC_03_Datasource_Test_Audit_Of_Claimless_Caller_Is_Not_Written_Under_Default_Tenant()
     {
         var audit = Substitute.For<IAuditLogRepository>();
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        IHostEnvironment env = new TestHostEnvironment("Development");
         var service = new DatasourceTestingService(
             Substitute.For<ITableMetadataRepository>(), Substitute.For<IHttpClientFactory>(), global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(audit),
             Substitute.For<IKeyVaultSecretProvider>(), env, NullLogger<DatasourceTestingService>.Instance);

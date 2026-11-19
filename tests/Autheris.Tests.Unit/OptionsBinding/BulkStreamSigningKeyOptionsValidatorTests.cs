@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.OptionsBinding;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -22,8 +23,7 @@ public sealed class BulkStreamSigningKeyOptionsValidatorTests
 
     private static IHostEnvironment Env(string name)
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(name);
+        IHostEnvironment env = new TestHostEnvironment(name);
         return env;
     }
 

@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.DependencyInjection;
 
+using Autheris.Tests.Common;
 using System.Reflection;
 using System.Threading.Tasks;
 using Autheris.Api.Extensions;
@@ -21,8 +22,7 @@ public sealed class McpAccessHintsCompositionTests
     public async Task Production_registration_resolves_catalog_hints_with_switches()
     {
         var services = new ServiceCollection();
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(Environments.Development);
+        IHostEnvironment env = new TestHostEnvironment(Environments.Development);
         services.AddSingleton(env);
         services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
         services.AddLogging();

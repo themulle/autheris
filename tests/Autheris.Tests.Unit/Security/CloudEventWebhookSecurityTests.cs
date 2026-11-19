@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Security;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -122,8 +123,7 @@ public sealed class CloudEventWebhookSecurityTests
     {
         var handler = new Capturing();
         var options = Options.Create(new GatewayOptions());
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Production");
+        IHostEnvironment env = new TestHostEnvironment("Production");
         var client = new WebhookDeliveryClient(
             new HttpClient(handler), options, new WebhookRetryPolicy(options.Value.Webhooks, TimeProvider.System),
             NullLogger<WebhookDeliveryClient>.Instance, env, null,

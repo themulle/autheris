@@ -279,8 +279,7 @@ public sealed class SecurityReviewG5Tests : IDisposable
     [Fact]
     public void Secrets_Development_StillAllowsPlaintextFallback()
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        IHostEnvironment env = new TestHostEnvironment("Development");
 
         SecretReferenceResolver.Resolve(null, "literal-secret", env).ShouldBe("literal-secret");
     }

@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.VirtualFilters.Federation;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Net;
@@ -56,8 +57,7 @@ public sealed class DeclarativeHttpPagedResponseTests
         var client = new HttpClient(new ResponseSizeLimitingHandler(10 * 1024 * 1024) { InnerHandler = new PageHandler(pages: 3) });
         var factory = Substitute.For<IHttpClientFactory>();
         factory.CreateClient(Arg.Any<string>()).Returns(client);
-        var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        Microsoft.Extensions.Hosting.IHostEnvironment env = new TestHostEnvironment("Development");
         var executor = new DeclarativeHttpDataSourceExecutor(factory, NullLogger<DeclarativeHttpDataSourceExecutor>.Instance, environment: env);
         var descriptor = new HttpEndpointDescriptor
         {

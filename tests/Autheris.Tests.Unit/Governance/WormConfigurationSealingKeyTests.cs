@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Governance;
 
+using Autheris.Tests.Common;
 using System;
 using System.Threading.Tasks;
 using Autheris.Application.Governance.Services;
@@ -18,8 +19,7 @@ internal static class WormTestEnvironment
 
     public static IHostEnvironment Create(string name)
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(name);
+        IHostEnvironment env = new TestHostEnvironment(name);
         return env;
     }
 }

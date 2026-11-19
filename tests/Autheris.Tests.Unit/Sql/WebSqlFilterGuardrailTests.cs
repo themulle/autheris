@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Sql;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -85,8 +86,7 @@ public sealed class WebSqlFilterGuardrailTests
                 return TableAccessDecision.Allowed(tableId, columnAccess, null, hasUnconstrainedColumnAllow: false);
             });
 
-        var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        Microsoft.Extensions.Hosting.IHostEnvironment env = new TestHostEnvironment("Development");
 
         var secretProvider = Substitute.For<IKeyVaultSecretProvider>();
         secretProvider.GetSecretBytes(Arg.Any<string>())

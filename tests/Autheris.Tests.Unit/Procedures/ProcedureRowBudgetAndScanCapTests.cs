@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 using Autheris.Tests.Unit.TestSupport;
 using System.Data;
 using System.Diagnostics;
@@ -426,8 +427,7 @@ public class ProcedureRowBudgetAndScanCapTests
 
     private static Microsoft.Extensions.Options.ValidateOptionsResult Validate(ProcedureEndpointsOptions procedures)
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Production");
+        IHostEnvironment env = new TestHostEnvironment("Production");
         var validator = new Autheris.Api.Configuration.Validation.GatewayStorageOptionsValidator(env);
         return validator.Validate(null, new GatewayOptions { SqlEndpoints = new SqlEndpointsOptions { Procedures = procedures } });
     }

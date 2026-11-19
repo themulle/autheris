@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.DependencyInjection;
 
+using Autheris.Tests.Common;
 using System.Security.Claims;
 using Autheris.Api.Extensions;
 using Autheris.Api.Extensions.DependencyInjection;
@@ -29,8 +30,7 @@ public sealed class IdentityRealmRegistryWiringTests
     private static ServiceProvider Build(IdentityRealmsOptions realms)
     {
         var services = new ServiceCollection();
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(Environments.Development);
+        IHostEnvironment env = new TestHostEnvironment(Environments.Development);
         services.AddSingleton(env);
         services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
         services.AddLogging();

@@ -1,4 +1,5 @@
 using Autheris.Application.Policy.Pdp;
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -251,8 +252,7 @@ public sealed class TypedPolicySourcesWiringTests
             SqlEndpoints = new SqlEndpointsOptions { Procedures = new ProcedureEndpointsOptions { Enabled = true } },
             GovernanceDb = new GovernanceDbOptions { Provider = "PostgreSql", ConnectionString = Autheris.Tests.Common.Governance.GovernanceTestConnectionStrings.NonConnectingPostgreSql }
         };
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        IHostEnvironment env = new TestHostEnvironment("Development");
         services.AddSingleton(env);
         services.AddSingleton(Options.Create(options));
         services.AddLogging();

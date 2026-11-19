@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Configuration;
 
+using Autheris.Tests.Common;
 using System.Linq;
 using Autheris.Api.Configuration.Validation;
 using Autheris.Api.Extensions.DependencyInjection;
@@ -15,8 +16,7 @@ public sealed class WebSqlRecursionOptionsValidationTests
 {
     private static string[] Validate(WebSqlOptions webSql)
     {
-        var environment = Substitute.For<IHostEnvironment>();
-        environment.EnvironmentName.Returns("Production");
+        IHostEnvironment environment = new TestHostEnvironment("Production");
         var result = new GatewayCoreOptionsValidator(environment).Validate(null, new GatewayOptions { WebSql = webSql });
         return result.Failures?.ToArray() ?? [];
     }

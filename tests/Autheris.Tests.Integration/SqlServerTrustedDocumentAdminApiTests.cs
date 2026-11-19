@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Integration;
 
+using Autheris.Tests.Common;
 using System;
 using System.Linq;
 using System.Threading.Tasks;
@@ -42,8 +43,7 @@ public sealed class SqlServerTrustedDocumentAdminApiTests : IAsyncLifetime
 
     private SqlServerGovernanceRepository NewRepository()
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        IHostEnvironment env = new TestHostEnvironment("Development");
         return GovernanceStoreFactory.CreateSqlServer(Substitute.For<IEpochValidationService>(), Options.Create(new GatewayOptions
         {
             GovernanceDb = new GovernanceDbOptions { Provider = "SqlServer", ConnectionString = _db!.ConnectionString, SeedDemoData = false }

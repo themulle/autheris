@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.GraphQL;
 
 using Autheris.Api.Middleware;
+using Autheris.Tests.Common;
 using HotChocolate;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -14,8 +15,7 @@ public sealed class ErrorSanitizingFilterCodeTests
 {
     private static ErrorSanitizingFilter CreateFilter(string envName)
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(envName);
+        IHostEnvironment env = new TestHostEnvironment(envName);
         return new ErrorSanitizingFilter(env, NullLogger<ErrorSanitizingFilter>.Instance);
     }
 
@@ -165,8 +165,7 @@ public sealed class ErrorSanitizingFilterCodeTests
     {
         var logger = Substitute.For<Microsoft.Extensions.Logging.ILogger<ErrorSanitizingFilter>>();
         logger.IsEnabled(Arg.Any<Microsoft.Extensions.Logging.LogLevel>()).Returns(true);
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Production");
+        IHostEnvironment env = new TestHostEnvironment("Production");
         var filter = new ErrorSanitizingFilter(env, logger);
 
         filter.OnError(ErrorBuilder.New().SetMessage("Column 'ssn' is masked.").SetCode("MASKED").Build());

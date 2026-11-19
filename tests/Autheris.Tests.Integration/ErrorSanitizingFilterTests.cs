@@ -1,10 +1,12 @@
 using Autheris.Api.Middleware;
+using Autheris.Tests.Common;
 using HotChocolate;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Autheris.Tests.Integration;
 
@@ -14,10 +16,9 @@ public class ErrorSanitizingFilterTests
     public void ErrorSanitizingFilter_InNonDevelopment_StripsExceptionsFromGraphQLException()
     {
         // Finding C: In non-development, GraphQLException must not leak internal exceptions or stack traces
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Staging"); // Non-development
+        IHostEnvironment env = new TestHostEnvironment("Staging"); // Non-development
 
-        var logger = Substitute.For<ILogger<ErrorSanitizingFilter>>();
+        var logger = NullLogger<ErrorSanitizingFilter>.Instance;
         var filter = new ErrorSanitizingFilter(env, logger);
 
         var innerException = new InvalidOperationException("Internal database schema leak: table xyz crashed!");
@@ -38,10 +39,9 @@ public class ErrorSanitizingFilterTests
     public void ErrorSanitizingFilter_NonWhitelistedCode_MaskedAsInternalServerError()
     {
         // Finding C: Unknown or technical error codes must be converted to INTERNAL_SERVER_ERROR in non-dev
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Production");
+        IHostEnvironment env = new TestHostEnvironment("Production");
 
-        var logger = Substitute.For<ILogger<ErrorSanitizingFilter>>();
+        var logger = NullLogger<ErrorSanitizingFilter>.Instance;
         var filter = new ErrorSanitizingFilter(env, logger);
 
         var error = ErrorBuilder.New()
@@ -60,10 +60,9 @@ public class ErrorSanitizingFilterTests
     [Fact]
     public void ErrorSanitizingFilter_InDevelopment_PreservesExceptionsForDebugging()
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        IHostEnvironment env = new TestHostEnvironment("Development");
 
-        var logger = Substitute.For<ILogger<ErrorSanitizingFilter>>();
+        var logger = NullLogger<ErrorSanitizingFilter>.Instance;
         var filter = new ErrorSanitizingFilter(env, logger);
 
         var inner = new InvalidOperationException("Dev error detail");

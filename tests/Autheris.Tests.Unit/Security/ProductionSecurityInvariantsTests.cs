@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Security;
 
+using Autheris.Tests.Common;
 using System.ComponentModel.DataAnnotations;
 using Autheris.Api.Extensions;
 using Autheris.Domain.Options;
@@ -15,8 +16,7 @@ public class ProductionSecurityInvariantsTests
     public void ValidateSecurityInvariants_InProduction_EnableTestAuthHandler_ThrowsValidationException()
     {
         // Arrange
-        var mockEnv = Substitute.For<IHostEnvironment>();
-        mockEnv.EnvironmentName.Returns("Production");
+        IHostEnvironment mockEnv = new TestHostEnvironment("Production");
 
         var options = new GatewayOptions
         {
@@ -36,8 +36,7 @@ public class ProductionSecurityInvariantsTests
     public void ValidateSecurityInvariants_InProduction_EnableTestAuthHandler_EvenWithAnonymous_ThrowsValidationException()
     {
         // Arrange
-        var mockEnv = Substitute.For<IHostEnvironment>();
-        mockEnv.EnvironmentName.Returns("Production");
+        IHostEnvironment mockEnv = new TestHostEnvironment("Production");
 
         var options = new GatewayOptions
         {
@@ -61,8 +60,7 @@ public class ProductionSecurityInvariantsTests
     public void ValidateSecurityInvariants_InProduction_AnonymousAccess_ThrowsValidationException()
     {
         // Arrange
-        var mockEnv = Substitute.For<IHostEnvironment>();
-        mockEnv.EnvironmentName.Returns("Production");
+        IHostEnvironment mockEnv = new TestHostEnvironment("Production");
 
         var options = new GatewayOptions
         {
@@ -81,8 +79,7 @@ public class ProductionSecurityInvariantsTests
     [Fact]
     public void ValidateSecurityInvariants_InProduction_UntrustedCertificatesAllowed_ThrowsValidationException()
     {
-        var mockEnv = Substitute.For<IHostEnvironment>();
-        mockEnv.EnvironmentName.Returns("Production");
+        IHostEnvironment mockEnv = new TestHostEnvironment("Production");
 
         var options = new GatewayOptions
         {
@@ -100,8 +97,7 @@ public class ProductionSecurityInvariantsTests
     [Fact]
     public void ValidateSecurityInvariants_InProduction_DisableRateLimiting_ThrowsValidationException()
     {
-        var mockEnv = Substitute.For<IHostEnvironment>();
-        mockEnv.EnvironmentName.Returns("Production");
+        IHostEnvironment mockEnv = new TestHostEnvironment("Production");
 
         var options = new GatewayOptions
         {
@@ -120,8 +116,7 @@ public class ProductionSecurityInvariantsTests
     [Fact]
     public void ValidateGatewayOptions_InProduction_WarnRelaxedQueryLimits_IsPermittedAsWarning()
     {
-        var mockEnv = Substitute.For<IHostEnvironment>();
-        mockEnv.EnvironmentName.Returns("Production");
+        IHostEnvironment mockEnv = new TestHostEnvironment("Production");
 
         var options = new GatewayOptions
         {
@@ -149,8 +144,7 @@ public class ProductionSecurityInvariantsTests
             }
         };
 
-        var prodEnv = Substitute.For<IHostEnvironment>();
-        prodEnv.EnvironmentName.Returns(Environments.Production);
+        IHostEnvironment prodEnv = new TestHostEnvironment(Environments.Production);
 
         var ex = Should.Throw<ValidationException>(() =>
             GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, prodEnv));
@@ -172,8 +166,7 @@ public class ProductionSecurityInvariantsTests
             }
         };
 
-        var prodEnv = Substitute.For<IHostEnvironment>();
-        prodEnv.EnvironmentName.Returns(Environments.Production);
+        IHostEnvironment prodEnv = new TestHostEnvironment(Environments.Production);
 
         var ex = Should.Throw<ValidationException>(() =>
             GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, prodEnv));
@@ -191,8 +184,7 @@ public class ProductionSecurityInvariantsTests
             }
         };
 
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Production");
+        IHostEnvironment env = new TestHostEnvironment("Production");
 
         var ex = Should.Throw<ValidationException>(() =>
             GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, env));
@@ -217,8 +209,7 @@ public class ProductionSecurityInvariantsTests
             }
         };
 
-        var prodEnv = Substitute.For<IHostEnvironment>();
-        prodEnv.EnvironmentName.Returns(Environments.Production);
+        IHostEnvironment prodEnv = new TestHostEnvironment(Environments.Production);
 
         var ex = Should.Throw<ValidationException>(() =>
             GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, prodEnv));
@@ -240,8 +231,7 @@ public class ProductionSecurityInvariantsTests
             }
         };
 
-        var prodEnv = Substitute.For<IHostEnvironment>();
-        prodEnv.EnvironmentName.Returns(Environments.Production);
+        IHostEnvironment prodEnv = new TestHostEnvironment(Environments.Production);
 
         Should.NotThrow(() =>
             GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, prodEnv));

@@ -1,6 +1,7 @@
 #pragma warning disable CA2012 // NSubstitute .Returns(...) configures a ValueTask member; the instance is not consumed here.
 namespace Autheris.Tests.Unit.Api;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -68,8 +69,7 @@ public sealed class RawExceptionMessageNeverReachesClientTests
         };
         claims.AddRange((roles ?? []).Select(r => new Claim(ClaimTypes.Role, r)));
         var services = new ServiceCollection().AddLogging();
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(development ? Environments.Development : Environments.Production);
+        IHostEnvironment env = new TestHostEnvironment(development ? Environments.Development : Environments.Production);
         services.AddSingleton(env);
         configure?.Invoke(services);
         var ctx = new DefaultHttpContext

@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Sql;
 
+using Autheris.Tests.Common;
 using System.Collections.Immutable;
 using System.Security.Cryptography;
 using System.Text;
@@ -31,8 +32,7 @@ public sealed class CompiledSqlAuditDigesterTests
 
     private static IHostEnvironment Env(string name)
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(name);
+        IHostEnvironment env = new TestHostEnvironment(name);
         return env;
     }
 

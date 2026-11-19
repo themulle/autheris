@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 using System;
 using System.IO;
 using System.Threading.Tasks;
@@ -52,8 +53,7 @@ public sealed class AuditPurgeChainIntegrityTests : IDisposable
             Audit = new AuditOptions { ChainAnchorPath = _anchorFile }
         });
 
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Test");
+        IHostEnvironment env = new TestHostEnvironment("Test");
 
         var store = new FileAuditChainAnchorStore(_anchorFile);
         var repo = GovernanceTestDatabase.CreateRepository(

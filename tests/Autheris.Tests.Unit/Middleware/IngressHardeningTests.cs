@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.Middleware;
 
 using Autheris.Api.Extensions;
+using Autheris.Tests.Common;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -22,8 +23,7 @@ public class IngressHardeningTests
             ["Gateway:DataMasking:HmacSecretKeyVaultRef"] = "vault://keys/prod-hmac"
         };
         var config = new ConfigurationBuilder().AddInMemoryCollection(inMemory).Build();
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(Environments.Production);
+        IHostEnvironment env = new TestHostEnvironment(Environments.Production);
 
         services.AddGatewayOptions(config, env);
 

@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -52,8 +53,7 @@ public sealed class DeclarativeHttpDataSourceExecutorTests
         var factory = Substitute.For<IHttpClientFactory>();
         factory.CreateClient(Arg.Any<string>()).Returns(httpClient);
 
-        var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
-        env.EnvironmentName.Returns(isDev ? "Development" : "Production");
+        Microsoft.Extensions.Hosting.IHostEnvironment env = new TestHostEnvironment(isDev ? "Development" : "Production");
 
         var executor = new DeclarativeHttpDataSourceExecutor(
             factory,

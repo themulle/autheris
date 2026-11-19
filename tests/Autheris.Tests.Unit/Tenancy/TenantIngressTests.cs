@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Tenancy;
 
+using Autheris.Tests.Common;
 using Autheris.Tests.Unit.Security;
 using System;
 using System.Collections.Generic;
@@ -447,8 +448,7 @@ public sealed class TenantIngressTests
     [Fact]
     public async Task TestAuth_Outside_Development_Rejects_And_Ignores_Header_Tenant()
     {
-        var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
-        env.EnvironmentName.Returns("Production");
+        Microsoft.Extensions.Hosting.IHostEnvironment env = new TestHostEnvironment("Production");
         var optionsMonitor = Substitute.For<IOptionsMonitor<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions>>();
         optionsMonitor.Get(Arg.Any<string>()).Returns(new Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions());
         var handler = new TestAuthHandler(optionsMonitor, Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance, System.Text.Encodings.Web.UrlEncoder.Default, null, env);

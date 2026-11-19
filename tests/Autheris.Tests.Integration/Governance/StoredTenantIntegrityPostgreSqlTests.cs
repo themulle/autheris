@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Integration.Governance;
 
+using Autheris.Tests.Common;
 using System;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
@@ -20,8 +21,7 @@ public sealed class StoredTenantIntegrityPostgreSqlTests
 {
     private static PostgreSqlGovernanceRepository CreateRepository(out string connectionString)
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Test");
+        IHostEnvironment env = new TestHostEnvironment("Test");
         return GovernanceTestDatabase.CreateRepository(new EpochValidationService(), out connectionString, environment: env);
     }
 

@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 using System.Text;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -86,8 +87,7 @@ public sealed class MarkerConsentRevocationAndSecretRedactionTests : IDisposable
 
     private static DefaultEnvironmentSecretProvider CreateSecretProvider(string environmentName)
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(environmentName);
+        IHostEnvironment env = new TestHostEnvironment(environmentName);
         return new DefaultEnvironmentSecretProvider(new ConfigurationBuilder().Build(), env);
     }
 
@@ -120,8 +120,7 @@ public sealed class MarkerConsentRevocationAndSecretRedactionTests : IDisposable
     [Fact]
     public void EX16_ResolvedSecret_StillWorks()
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(Environments.Production);
+        IHostEnvironment env = new TestHostEnvironment(Environments.Production);
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection([new KeyValuePair<string, string?>("r4:om-token", "resolved")])
             .Build();

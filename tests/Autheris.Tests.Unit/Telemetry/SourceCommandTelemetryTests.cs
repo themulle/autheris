@@ -11,6 +11,7 @@ using Microsoft.Extensions.Logging;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Microsoft.Extensions.Logging.Abstractions;
 
 public sealed class SourceCommandTelemetryTests
 {
@@ -157,7 +158,7 @@ public sealed class SourceCommandTelemetryTests
         var policyProvider = Substitute.For<IDataSourceTelemetryPolicyProvider>();
         policyProvider.GetPolicy("test_source").Returns(policy);
 
-        var mockLogger = Substitute.For<ILogger>();
+        var mockLogger = NullLogger.Instance;
         var dataLoggers = Substitute.For<IDataSourceLoggers>();
         dataLoggers.Get("test_source").Returns(mockLogger);
 
@@ -184,7 +185,7 @@ public sealed class SourceCommandTelemetryTests
     public void DataSourceLoggersService_ProducesNormalizedCategoryLoggers()
     {
         var factory = Substitute.For<ILoggerFactory>();
-        var logger = Substitute.For<ILogger>();
+        var logger = NullLogger.Instance;
         factory.CreateLogger("Autheris.DataSource.sales_db").Returns(logger);
 
         var service = new DataSourceLoggersService(factory);

@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Integration;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Immutable;
 using System.Threading.Tasks;
@@ -97,8 +98,7 @@ public sealed class PostgreSqlCatalogRequiredFilterRatchetContractTests : Catalo
                     return;
                 }
 
-                var env = Substitute.For<IHostEnvironment>();
-                env.EnvironmentName.Returns("Development");
+                IHostEnvironment env = new TestHostEnvironment("Development");
                 var options = Options.Create(new GatewayOptions
                 {
                     GovernanceDb = new GovernanceDbOptions { Provider = "PostgreSql", ConnectionString = _db.ConnectionString, SeedDemoData = false }
@@ -148,8 +148,7 @@ public sealed class SqlServerCatalogRequiredFilterRatchetContractTests : Catalog
                 return;
             }
 
-            var env = Substitute.For<IHostEnvironment>();
-            env.EnvironmentName.Returns("Development");
+            IHostEnvironment env = new TestHostEnvironment("Development");
             var options = Options.Create(new GatewayOptions
             {
                 GovernanceDb = new GovernanceDbOptions { Provider = "SqlServer", ConnectionString = _db.ConnectionString, SeedDemoData = false }

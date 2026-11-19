@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Integration;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
@@ -37,8 +38,7 @@ public sealed class SqlServerConsentContractTests : IAsyncLifetime
 
     private SqlServerGovernanceRepository NewRepository()
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        IHostEnvironment env = new TestHostEnvironment("Development");
         var options = Options.Create(new GatewayOptions
         {
             GovernanceDb = new GovernanceDbOptions

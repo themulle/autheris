@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Integration;
 
+using Autheris.Tests.Common;
 using System.Data.Common;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
@@ -25,8 +26,7 @@ public sealed class PostgreSqlConsentDescriptionRepositoryContractTests : Consen
             return null;
         }
 
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        IHostEnvironment env = new TestHostEnvironment("Development");
         var options = Options.Create(new GatewayOptions
         {
             GovernanceDb = new GovernanceDbOptions { Provider = "PostgreSql", ConnectionString = _db.ConnectionString, SeedDemoData = false }

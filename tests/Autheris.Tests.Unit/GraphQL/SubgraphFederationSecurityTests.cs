@@ -1,6 +1,7 @@
 #pragma warning disable CA2012 // NSubstitute .Returns(...) configures a ValueTask member; the instance is not consumed here.
 namespace Autheris.Tests.Unit.GraphQL;
 
+using Autheris.Tests.Common;
 using System;
 using System.Linq;
 using System.Net.Http;
@@ -556,8 +557,7 @@ public sealed class SubgraphFederationSecurityTests
             }
         };
 
-        var prodEnv = Substitute.For<IHostEnvironment>();
-        prodEnv.EnvironmentName.Returns("Production");
+        IHostEnvironment prodEnv = new TestHostEnvironment("Production");
 
         var service = new SubgraphContextPropagationService(
             Options.Create(options),
@@ -586,8 +586,7 @@ public sealed class SubgraphFederationSecurityTests
             }
         };
 
-        var prodEnv = Substitute.For<IHostEnvironment>();
-        prodEnv.EnvironmentName.Returns("Production");
+        IHostEnvironment prodEnv = new TestHostEnvironment("Production");
 
         var service = new SubgraphContextPropagationService(
             Options.Create(options),
@@ -615,8 +614,7 @@ public sealed class SubgraphFederationSecurityTests
             }
         };
 
-        var prodEnv = Substitute.For<IHostEnvironment>();
-        prodEnv.EnvironmentName.Returns("Production");
+        IHostEnvironment prodEnv = new TestHostEnvironment("Production");
 
         Should.Throw<System.ComponentModel.DataAnnotations.ValidationException>(() =>
             Autheris.Api.Extensions.GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, prodEnv))

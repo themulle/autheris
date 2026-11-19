@@ -20,6 +20,7 @@ using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Autheris.Tests.Unit.Audit;
 
@@ -105,7 +106,7 @@ public sealed class AuditRetentionSecurityTests
             optionsMonitor,
             Substitute.For<IAuditWriter>(),
             anchorStore,
-            Substitute.For<ILogger<AuditRetentionPurgeWorker>>(),
+            NullLogger<AuditRetentionPurgeWorker>.Instance,
             keyProvider,
             null,
             new FakeTimeProvider(DateTimeOffset.UtcNow));

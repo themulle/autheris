@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Security;
 
+using Autheris.Tests.Common;
 using System;
 using System.Globalization;
 using System.Security.Claims;
@@ -45,8 +46,7 @@ public class TotpFirstEnrollmentGuardTests
 
     private static (DefaultHttpContext Context, IAuditWriter Audit) CreateContext(ClaimsPrincipal user, string environment = "Production", int maxAgeMinutes = 5)
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(environment);
+        IHostEnvironment env = new TestHostEnvironment(environment);
         var audit = Substitute.For<IAuditWriter>();
 
         var services = new ServiceCollection();

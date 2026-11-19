@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Mcp;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -339,8 +340,7 @@ public sealed class AdminMcpTwoPhaseTests
     public async Task AdminResolvePrincipal_FuzzySearch_ReturnsMatchingPrincipals()
     {
         // Arrange: the demo directory is only available on a Development host (SR-L-06 Part D)
-        var devEnv = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
-        devEnv.EnvironmentName.Returns("Development");
+        Microsoft.Extensions.Hosting.IHostEnvironment devEnv = new TestHostEnvironment("Development");
         var service = new AccessPlanningService(
             global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), _tableRepo, _consentRepo, _totpService, _totpSecretStore, hostEnvironment: devEnv);
 

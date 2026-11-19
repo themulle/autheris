@@ -3,6 +3,7 @@ namespace Autheris.Tests.Unit.Identity;
 using Autheris.Api.Extensions;
 using Autheris.Api.Security;
 using Autheris.Domain.Options;
+using Autheris.Tests.Common;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
@@ -18,8 +19,7 @@ public class GatewayAuthIssuerAudienceTests
     {
         var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
         var options = new GatewayOptions();
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(Environments.Development);
+        IHostEnvironment env = new TestHostEnvironment(Environments.Development);
 
         services.AddGatewayAuth(options, env);
         var sp = services.BuildServiceProvider();
@@ -51,8 +51,7 @@ public class GatewayAuthIssuerAudienceTests
                 }
             }
         };
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(Environments.Development);
+        IHostEnvironment env = new TestHostEnvironment(Environments.Development);
 
         services.AddGatewayAuth(options, env);
         var sp = services.BuildServiceProvider();

@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Configuration;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -85,8 +86,7 @@ internal static class StartupValidatorGoldenSupport
 
     internal static IHostEnvironment HostEnvironment(string name)
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(name);
+        IHostEnvironment env = new TestHostEnvironment(name);
         return env;
     }
 

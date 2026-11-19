@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Integration.Governance;
 
+using Autheris.Tests.Common;
 using Autheris.Tests.Unit.TestDoubles;
 using System;
 using System.Collections.Generic;
@@ -390,8 +391,7 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
     public async Task PutFilter_InProduction_SanitizesInvalidOperationException()
     {
         // SR15-49: InvalidOperationException messages should not leak internal database details in production
-        var prodEnv = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
-        prodEnv.EnvironmentName.Returns("Production");
+        Microsoft.Extensions.Hosting.IHostEnvironment prodEnv = new TestHostEnvironment("Production");
 
         var services = new ServiceCollection();
         services.AddSingleton(prodEnv);

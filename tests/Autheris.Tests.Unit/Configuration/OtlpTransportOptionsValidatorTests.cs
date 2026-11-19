@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Configuration;
 
+using Autheris.Tests.Common;
 using System.Linq;
 using Autheris.Api.Telemetry;
 using Autheris.Domain.Options.Observability;
@@ -17,8 +18,7 @@ public sealed class OtlpTransportOptionsValidatorTests
 
     private static OtlpTransportOptionsValidator Validator(string? traces, string? metrics = null, string? logs = null, string environment = "Production")
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(environment);
+        IHostEnvironment env = new TestHostEnvironment(environment);
         return new OtlpTransportOptionsValidator(env, null, (_, signal) => signal switch
         {
             "TRACES" => traces,

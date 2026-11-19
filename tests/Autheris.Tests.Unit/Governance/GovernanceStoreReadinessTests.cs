@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 using Autheris.Tests.Unit.TestSupport;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Audit;
@@ -26,8 +27,7 @@ public sealed class GovernanceStoreReadinessTests
 
     private static IHostEnvironment TestEnvironment()
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Test");
+        IHostEnvironment env = new TestHostEnvironment("Test");
         return env;
     }
 

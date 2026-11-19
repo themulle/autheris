@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Integration;
 
+using Autheris.Tests.Common;
 using System;
 using System.Linq;
 using System.Threading.Tasks;
@@ -54,8 +55,7 @@ public sealed class PostgreSqlGovernanceContractTests : IAsyncLifetime
     private PostgreSqlGovernanceRepository NewRepository()
     {
         var epoch = Substitute.For<IEpochValidationService>();
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        IHostEnvironment env = new TestHostEnvironment("Development");
         var options = Options.Create(new GatewayOptions
         {
             GovernanceDb = new GovernanceDbOptions

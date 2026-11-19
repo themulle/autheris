@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.GraphQL;
 
+using Autheris.Tests.Common;
 using System.Threading.Tasks;
 using Autheris.Api.Middleware;
 using Autheris.GraphQL.Interceptors;
@@ -39,8 +40,7 @@ public sealed class GraphQlQueryDefenseShieldTests
 
     private static async Task<IRequestExecutor> CreateExecutorAsync(string environmentName)
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(environmentName);
+        IHostEnvironment env = new TestHostEnvironment(environmentName);
 
         return await new ServiceCollection()
             .AddSingleton(env)

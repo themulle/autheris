@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Policy;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
@@ -43,8 +44,7 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
 
     private static IHostEnvironment Env(string name)
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(name);
+        IHostEnvironment env = new TestHostEnvironment(name);
         return env;
     }
 

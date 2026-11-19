@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.DataApi;
 
 using Autheris.Application.Policy.Pdp;
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -230,8 +231,7 @@ public sealed class RestDatasetPolicySpliceTests
         // WebSQL side: the rewriter that applies the policy to the SQL the REST service builds.
         var tableRepo = Substitute.For<ITableMetadataRepository>();
         tableRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(meta);
-        var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        Microsoft.Extensions.Hosting.IHostEnvironment env = new TestHostEnvironment("Development");
         var service = global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             Options.Create(options), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard, consentResolution: resolution, tableRepository: tableRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(tableRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             connectionFactory: null, clientIpResolver: null, environment: env, logger: NullLogger<GovernedSqlExecutionService>.Instance,
@@ -268,8 +268,7 @@ public sealed class RestDatasetPolicySpliceTests
 
         var tableRepo = Substitute.For<ITableMetadataRepository>();
         tableRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(meta);
-        var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        Microsoft.Extensions.Hosting.IHostEnvironment env = new TestHostEnvironment("Development");
         var service = global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             Options.Create(Options_()), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard, consentResolution: resolution, tableRepository: tableRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(tableRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             connectionFactory: null, clientIpResolver: null, environment: env, logger: NullLogger<GovernedSqlExecutionService>.Instance,
@@ -422,8 +421,7 @@ public sealed class RestDatasetPolicySpliceTests
         var (repo, resolution, _) = Recorders(AllowConsent());
         var tableRepo = Substitute.For<ITableMetadataRepository>();
         tableRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(meta);
-        var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        Microsoft.Extensions.Hosting.IHostEnvironment env = new TestHostEnvironment("Development");
         var options = new GatewayOptions
         {
             WebSql = new WebSqlOptions { Enabled = true, DefaultMaxRows = 100, MaxAllowedRows = 500 },

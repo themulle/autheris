@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Webhooks;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -79,8 +80,7 @@ public sealed class WebhookDeliveryClientTests
         public Fixture(string environment = "Production", bool? requireSecret = null, Func<Uri, bool, CancellationToken, Task>? validator = null, int timeoutSeconds = 5)
         {
             var options = new GatewayOptions { Webhooks = new WebhooksOptions { RequireSecret = requireSecret, DefaultTimeoutSeconds = timeoutSeconds } };
-            var env = Substitute.For<IHostEnvironment>();
-            env.EnvironmentName.Returns(environment);
+            IHostEnvironment env = new TestHostEnvironment(environment);
             Client = new WebhookDeliveryClient(
                 new HttpClient(Handler),
                 Options.Create(options),

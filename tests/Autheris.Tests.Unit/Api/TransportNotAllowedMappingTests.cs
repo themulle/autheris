@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Api;
 
+using Autheris.Tests.Common;
 using System.Text.Json;
 using Autheris.Api.Middleware;
 using Autheris.Domain.Exceptions;
@@ -34,8 +35,7 @@ public sealed class TransportNotAllowedMappingTests
     [Fact]
     public void TransportNotAllowed_FixedTextAndCode()
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Production");
+        IHostEnvironment env = new TestHostEnvironment("Production");
         var filter = new ErrorSanitizingFilter(env, NullLogger<ErrorSanitizingFilter>.Instance);
         var error = ErrorBuilder.New()
             .SetMessage("placeholder")

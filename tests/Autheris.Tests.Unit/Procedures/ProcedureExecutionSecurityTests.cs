@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 using Autheris.Tests.Unit.TestSupport;
 using System.Data.Common;
 using System.Diagnostics;
@@ -998,8 +999,7 @@ public partial class ProcedureExecutionSecurityTests
     [InlineData(1001, false)]
     public void GatewayStorageOptionsValidator_RejectsOutOfRangeProcedureConcurrency(int limit, bool valid)
     {
-        var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
-        env.EnvironmentName.Returns("Production");
+        Microsoft.Extensions.Hosting.IHostEnvironment env = new TestHostEnvironment("Production");
         var validator = new Autheris.Api.Configuration.Validation.GatewayStorageOptionsValidator(env);
 
         var result = validator.Validate(null, new GatewayOptions { DataSources = new SqlDataSourceOptions { MaxConcurrentReadsPerUserAndTable = limit } });

@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Security;
 
+using Autheris.Tests.Common;
 using System;
 using System.Text;
 using Autheris.Api.Extensions;
@@ -59,8 +60,7 @@ public sealed class JwtSchemeSelectionApi14Tests
     [Fact]
     public void BothIdps_RegisterOneSchemePerAuthority()
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(Environments.Development);
+        IHostEnvironment env = new TestHostEnvironment(Environments.Development);
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddGatewayAuth(BothIdps(), env);

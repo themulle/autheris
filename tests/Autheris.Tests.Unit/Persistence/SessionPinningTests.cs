@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Persistence;
 
+using Autheris.Tests.Common;
 using System.ComponentModel.DataAnnotations;
 using Autheris.Api.Extensions.DependencyInjection;
 using Autheris.Application.Common.Interfaces;
@@ -18,8 +19,7 @@ public sealed class SessionPinningTests
 
     private static IHostEnvironment Dev()
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(Environments.Development);
+        IHostEnvironment env = new TestHostEnvironment(Environments.Development);
         return env;
     }
 

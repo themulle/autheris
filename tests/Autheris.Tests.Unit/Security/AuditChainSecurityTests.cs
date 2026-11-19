@@ -5,6 +5,7 @@ using Autheris.Application.Audit;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;
+using Autheris.Tests.Common;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using NSubstitute;
@@ -17,8 +18,7 @@ public sealed class AuditChainSecurityTests
 {
     private static IHostEnvironment Env(string name = "Development")
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(name);
+        IHostEnvironment env = new TestHostEnvironment(name);
         return env;
     }
 

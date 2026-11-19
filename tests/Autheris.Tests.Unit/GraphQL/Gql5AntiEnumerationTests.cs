@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.GraphQL;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using Autheris.Api.Middleware;
@@ -16,8 +17,7 @@ public sealed class Gql5AntiEnumerationTests
 {
     private static ErrorSanitizingFilter CreateFilter(string envName)
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(envName);
+        IHostEnvironment env = new TestHostEnvironment(envName);
         return new ErrorSanitizingFilter(env, NullLogger<ErrorSanitizingFilter>.Instance);
     }
 

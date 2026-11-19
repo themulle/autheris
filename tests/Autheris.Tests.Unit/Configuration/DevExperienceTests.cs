@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 using System.Security.Claims;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Tests.Unit.TestDoubles;
@@ -45,8 +46,7 @@ public sealed class DevExperienceTests
 
     private static IHostEnvironment Env(string name)
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(name);
+        IHostEnvironment env = new TestHostEnvironment(name);
         return env;
     }
 
