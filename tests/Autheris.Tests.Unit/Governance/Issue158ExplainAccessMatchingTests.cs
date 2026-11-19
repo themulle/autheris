@@ -45,8 +45,6 @@ public sealed class Issue158ExplainAccessMatchingTests : IDisposable
         GranteeType type,
         double validToDays,
         string? sid = null,
-        string? roleName = null,
-        Guid? roleId = null,
         ConsentEffect effect = ConsentEffect.Allow,
         string tenant = Tenant,
         TableIdentifier? table = null,
@@ -58,18 +56,17 @@ public sealed class Issue158ExplainAccessMatchingTests : IDisposable
         Effect = effect,
         GranteeType = type,
         GranteeSid = sid == null ? (Sid?)null : new Sid(sid),
-        RoleName = roleName,
-        RoleId = roleId,
         ValidFrom = Start.AddDays(validFromDays),
         ValidTo = Start.AddDays(validToDays),
         IsRevoked = revoked,
         ColumnRules = [new ConsentColumnRule { ColumnName = "id", AccessLevel = ColumnAccessLevel.Clear }]
     };
 
-    private static Consent UserGrant(double days, string sid = UserSid, string? roleName = null) =>
-        Grant(GranteeType.User, days, sid, roleName);
+    private static Consent UserGrant(double days, string sid = UserSid) =>
+        Grant(GranteeType.User, days, sid);
 
-    private static Consent RoleGrant(string role, double days) => Grant(GranteeType.Role, days, roleName: role);
+    // A grant of a group the caller does not hold (a retired role grantee no longer exists).
+    private static Consent RoleGrant(string role, double days) => Grant(GranteeType.Group, days, "S-1-FOREIGN-" + role);
 
     private static ClaimsPrincipal Caller(string[]? roles = null, string[]? groups = null, string[]? linked = null)
     {
@@ -198,17 +195,6 @@ public sealed class Issue158ExplainAccessMatchingTests : IDisposable
     }
 
     [Fact]
-    public async Task RoleGrant_MatchedByRoleId_Counts()
-    {
-        var id = Guid.NewGuid();
-        var byId = Grant(GranteeType.Role, 30, roleName: "stored-label", roleId: id);
-        var dto = await Explain([byId], Caller(roles: [id.ToString()]));
-
-        dto.Decision.ShouldBe("DENIED");   // a role grant never grants access, whether matched by name or id
-        (dto.ConsentDescription ?? "").ShouldNotContain("stored-label");
-    }
-
-    [Fact]
     public async Task ExpiredAndNotYetValidMatchingGrants_AreIgnored()
     {
         var active = UserGrant(30);
@@ -224,19 +210,11 @@ public sealed class Issue158ExplainAccessMatchingTests : IDisposable
     {
         var own = UserGrant(30);
         var dto = await Explain(
-            [Grant(GranteeType.User, 1, UserSid, effect: ConsentEffect.Deny, roleName: "deny-label"), Grant(GranteeType.User, 2, UserSid, table: new TableIdentifier("sales", "public", "other")), own],
+            [Grant(GranteeType.User, 1, UserSid, effect: ConsentEffect.Deny), Grant(GranteeType.User, 2, UserSid, table: new TableIdentifier("sales", "public", "other")), own],
             Caller());
 
         dto.Decision.ShouldBe("ALLOWED");
         ShouldBeSameWithin(dto.ValidTo, own.EffectiveValidTo);
-        dto.ConsentDescription.ShouldBeNull();
-    }
-
-    [Fact]
-    public async Task NonRoleConsentWithRoleName_IsNotUsedAsDescription()
-    {
-        var dto = await Explain([UserGrant(30, roleName: "stale-user-label")], Caller());
-
         dto.ConsentDescription.ShouldBeNull();
     }
 
@@ -301,7 +279,7 @@ public sealed class Issue158ExplainAccessMatchingTests : IDisposable
     [Fact]
     public async Task UnknownGranteeType_NeverMatchesNorDiscloses()
     {
-        var unknown = Grant((GranteeType)99, 1, UserSid, roleName: RoleB);
+        var unknown = Grant((GranteeType)99, 1, UserSid);
         var caller = Caller(roles: [RoleB]);
         var own = UserGrant(30);
 
@@ -315,7 +293,7 @@ public sealed class Issue158ExplainAccessMatchingTests : IDisposable
 
     public static IEnumerable<object[]> ParityCases()
     {
-        foreach (var type in new[] { GranteeType.User, GranteeType.Group, GranteeType.Role, GranteeType.ServicePrincipal, (GranteeType)99 })
+        foreach (var type in new[] { GranteeType.User, GranteeType.Group, GranteeType.ServicePrincipal, (GranteeType)99 })
         foreach (var match in new[] { true, false })
         foreach (var timing in new[] { "active", "expired", "notyet", "revoked" })
         foreach (var sameTable in new[] { true, false })
@@ -331,7 +309,6 @@ public sealed class Issue158ExplainAccessMatchingTests : IDisposable
         var sid = match ? (type == GranteeType.Group ? GroupMember : UserSid) : "S-1-NOPE";
         var consent = Grant(
             type, timing == "expired" ? -0.5 : 10, sid,
-            roleName: match ? RoleA : "other-role",
             table: sameTable ? Orders : new TableIdentifier("sales", "public", "other"),
             validFromDays: timing == "notyet" ? 2 : -1,
             revoked: timing == "revoked");
@@ -365,7 +342,7 @@ public sealed class Issue158ExplainAccessMatchingTests : IDisposable
     [Fact]
     public async Task GroupGrant_NotInToken_NotDisclosed()
     {
-        var foreign = Grant(GranteeType.Group, 1, GroupForeign, roleName: RoleB);
+        var foreign = Grant(GranteeType.Group, 1, GroupForeign);
         var dto = await Explain([foreign, UserGrant(30)], Caller(groups: [GroupMember]));
 
         dto.ConsentDescription.ShouldBeNull();
@@ -376,7 +353,7 @@ public sealed class Issue158ExplainAccessMatchingTests : IDisposable
     public async Task OtherTenantConsent_NeverUsed()
     {
         var own = UserGrant(30);
-        var dto = await Explain([Grant(GranteeType.User, 1, UserSid, tenant: "tenant-other"), Grant(GranteeType.Role, 1, roleName: RoleA, tenant: "tenant-other"), own], Caller(roles: [RoleA]));
+        var dto = await Explain([Grant(GranteeType.User, 1, UserSid, tenant: "tenant-other"), Grant(GranteeType.Group, 1, GroupMember, tenant: "tenant-other"), own], Caller(roles: [RoleA]));
 
         dto.ConsentDescription.ShouldBeNull();
         ShouldBeSameWithin(dto.ValidTo, own.EffectiveValidTo);
@@ -397,20 +374,6 @@ public sealed class Issue158ExplainAccessMatchingTests : IDisposable
         hidden.ValidTo.ShouldBeNull();
         unknown.Decision.ShouldNotBe("ALLOWED");
         JsonSerializer.Serialize(hidden).ShouldNotContain(RoleB);
-    }
-
-    [Fact]
-    public async Task RoleGrantMatchedByRoleId_ShowsOnlyCallersHeldRoleGrant()
-    {
-        var held = Guid.NewGuid();
-        var other = Guid.NewGuid();
-        var dto = await Explain(
-            [Grant(GranteeType.Role, 1, roleName: "label-of-other-id", roleId: other), Grant(GranteeType.Role, 30, roleName: "label-of-held-id", roleId: held)],
-            Caller(roles: [held.ToString()]));
-
-        dto.Decision.ShouldBe("DENIED");
-        JsonSerializer.Serialize(dto).ShouldNotContain("label-of-other-id");
-        JsonSerializer.Serialize(dto).ShouldNotContain("label-of-held-id");
     }
 
     [Fact]

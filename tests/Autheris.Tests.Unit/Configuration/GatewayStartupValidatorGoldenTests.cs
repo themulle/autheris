@@ -152,7 +152,6 @@ public sealed class GatewayStartupValidatorGoldenTests : IDisposable
             Prod("ProductionAuthentication_WellFormedHashAccepted", user(Hash)),
 
             // 18 ProductionStorageAndAudit
-            Prod("ProductionStorage_WormWithoutS3Keys", ("Audit:Worm:Enabled", "true"), ("Audit:Worm:StorageType", "S3"), ("Audit:Worm:EnforceObjectLock", "true")),
             Prod("ProductionStorage_FallbackAuditKey", ("Audit:HmacKeyIsFallback", "true")),
             Prod("ProductionStorage_AnchorMissing", ("Audit:ChainAnchorPath", "")),
             ProdEnv("ProductionStorage_AuditChecksSkippedInTestEnvironment", [("ASPNETCORE_ENVIRONMENT", "Test")], ("Audit:ChainAnchorPath", "")),

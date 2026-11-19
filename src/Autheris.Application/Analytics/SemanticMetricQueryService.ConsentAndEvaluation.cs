@@ -116,8 +116,6 @@ public sealed partial class SemanticMetricQueryService
                         TenantId = c.TenantId,
                         GranteeType = c.GranteeType,
                         GranteeSid = c.GranteeSid,
-                        RoleId = c.RoleId,
-                        RoleName = c.RoleName,
                         ValidFrom = c.ValidFrom,
                         ValidTo = c.ValidTo,
                         IsRevoked = c.IsRevoked,

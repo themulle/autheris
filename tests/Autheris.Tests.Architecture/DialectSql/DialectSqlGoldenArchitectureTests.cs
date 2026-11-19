@@ -101,7 +101,6 @@ public sealed class DialectSqlGoldenArchitectureTests
         // locked row), (b) the ITSM outbox, a system queue without tenant filter. The webhook claim/fence statements are id-keyed system queue
         // statements as before. Everything else asserted below must keep its tenant predicate.
         var consent = LoadGolden(dialect, "ConsentGrants").Set;
-        consent.ShouldContain(f => f.Contains("c.tenant_id = @tenantId", StringComparison.Ordinal));
         consent.Count(f => f.Contains("tenant_id = @t AND is_revoked = 0", StringComparison.Ordinal)).ShouldBe(2);
 
         var webhook = LoadGolden(dialect, "WebhookOutbox").Set;
@@ -130,12 +129,10 @@ public sealed class DialectSqlGoldenArchitectureTests
             .ToList();
         var withoutTenant = consentStatements.Where(f => !f.Contains("tenant_id = @", StringComparison.Ordinal)).ToList();
 
-        // Allow-list (a): the revoke select under the row lock and the revoke update, both id-keyed. The active-role query takes its
-        // tenant predicate as a separate optional fragment (" AND c.tenant_id = @tenantId", asserted by TenantScopedStatements_...).
-        var (total, byId, update, active) = (4, 2, 1, 1); // the revoke-target select appears once per engine form: the selecting member inlines both dialect holders
+        // Allow-list (a): the revoke select under the row lock and the revoke update, both id-keyed.
+        var (total, byId, update) = (3, 2, 1); // the revoke-target select appears once per engine form: the selecting member inlines both dialect holders
         withoutTenant.Count(f => f.Contains("c.id = @id", StringComparison.Ordinal)).ShouldBe(byId);
         withoutTenant.Count(f => f.Contains("UPDATE CONSENTS SET is_revoked = 1", StringComparison.Ordinal)).ShouldBe(update);
-        withoutTenant.Count(f => f.Contains("c.is_revoked = 0", StringComparison.Ordinal)).ShouldBe(active);
         withoutTenant.Count.ShouldBe(total, "a new CONSENTS statement without a tenant predicate needs a documented exemption (ARCH-MNT-22-SC-04)");
     }
 

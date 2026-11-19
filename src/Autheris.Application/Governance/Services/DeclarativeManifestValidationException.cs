@@ -7,7 +7,10 @@ public enum DeclarativeManifestViolation
     Description = 0,
 
     /// <summary>A column rule has a blank scope entry or a scope entry that contains a comma.</summary>
-    ScopeEntry = 1
+    ScopeEntry = 1,
+
+    /// <summary>The grantee type is the retired role type or is not a supported type.</summary>
+    GranteeType = 2
 }
 
 /// <summary>
@@ -26,6 +29,8 @@ public sealed class DeclarativeManifestValidationException(int policyIndex, Decl
     {
         DeclarativeManifestViolation.ScopeEntry =>
             $"Manifest policy at index {policyIndex} has a column rule with a blank scope entry or a scope entry that contains a comma; list scope names only (an empty list sets the base level for all scopes).",
+        DeclarativeManifestViolation.GranteeType =>
+            $"Manifest policy at index {policyIndex} has an unsupported grantee type; use user, group or service principal.",
         _ => $"Manifest policy at index {policyIndex} has an invalid description.",
     };
 }

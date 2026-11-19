@@ -19,7 +19,6 @@ public sealed class ConsentIndexUsageTests : IDisposable
     [Theory]
     [InlineData("CONSENTS", "ix_consents_tenant_table", "tenant_id,table_id,is_revoked")]
     [InlineData("CONSENTS", "ix_consents_tenant_grantee", "tenant_id,grantee_sid_norm,is_revoked")]
-    [InlineData("CONSENTS", "ix_consents_tenant_role", "tenant_id,role_name")]
     [InlineData("CONSENT_COLUMN_RULES", "ix_consent_column_rules_consent", "consent_id")]
     [InlineData("CONSENT_ROW_FILTERS", "ix_consent_row_filters_consent", "consent_id")]
     [InlineData("TABLE_OWNERS", "ix_table_owners_owner", "data_owner_id")]

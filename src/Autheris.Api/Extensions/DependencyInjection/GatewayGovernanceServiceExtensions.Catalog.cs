@@ -77,7 +77,6 @@ public static partial class GatewayGovernanceServiceExtensions
     private static void AddOpenApiCatalogAndEnterpriseMoats(IServiceCollection services)
     {
         // Outbound SSRF protection (HIGH-03) & OpenAPI ingestion (P1).
-        services.AddHttpClient<IAuditWormExportService, AuditWormExportService>().AddSecureOutboundHandlers(EgressIntegrations.AuditWorm);
         services.AddSingleton<IOpenApiIngestionService, OpenApiIngestionService>();
         services.AddAutherisCatalog();
 

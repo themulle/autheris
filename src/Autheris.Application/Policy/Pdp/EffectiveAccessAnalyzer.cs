@@ -241,8 +241,7 @@ internal static class EffectiveAccessAnalyzer
             .ToList();
 
         var matchedProfiles = activeProfiles
-            .Where(p => p.GranteeType != GranteeType.Role &&
-                        GranteeMatcher.MatchesGrant(p.GranteeType, p.GranteeSid, subject.UserSid, subject.GroupSids, null))
+            .Where(p => GranteeMatcher.MatchesRestriction(p.GranteeType, p.GranteeSid, subject.UserSid, subject.GroupSids, null))
             .ToList();
 
         if (matchedProfiles.Count == 0)
