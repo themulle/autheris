@@ -94,7 +94,7 @@ class IntegrationShardFilterTests(unittest.TestCase):
             self.assertTrue(isf.matches_category_filter(isf.BASE_FILTER, cats), f"Expected BASE_FILTER to select {cats}")
 
         # Non-security Oracle, Stress, Spark, and Parity tests are excluded from the PR shard filter.
-        for excluded_cats in ({"Oracle"}, {"Stress"}, {"Oracle", "Stress"}, {"Spark"}, {"Parity"}):
+        for excluded_cats in ({"Oracle"}, {"Stress"}, {"Oracle", "Stress"}, {"Spark"}, {"Parity"}, {"TrinoInterop"}):
             self.assertFalse(isf.matches_category_filter(isf.BASE_FILTER, excluded_cats), f"Expected BASE_FILTER to exclude {excluded_cats}")
 
         # Across 6 shards, every Security-tagged test method is selected by at least one PR job (shard filter or Spark job).

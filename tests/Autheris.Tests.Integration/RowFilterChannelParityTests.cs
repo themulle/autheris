@@ -301,6 +301,9 @@ public sealed class RowFilterChannelParityTests : IClassFixture<RowFilterChannel
 
         protected virtual Task SeedExtraGovernanceAsync(IGovernanceRepository repo) => Task.CompletedTask;
 
+        /// <summary>Hook for variants: configure the factory before its host starts (for example a real Kestrel listener).</summary>
+        protected virtual void ConfigureFactory(WebApplicationFactory<Program> factory) { }
+
         public const string DavidSid = "S-1-5-21-LWE-DAVID";
         public const string Tenant = "tenant_parity";
 
@@ -360,6 +363,7 @@ public sealed class RowFilterChannelParityTests : IClassFixture<RowFilterChannel
                 b.UseSetting("Gateway:Mcp:EndpointPath", "/mcp");
                 ConfigureHost(b);
             });
+            ConfigureFactory(_factory);
 
             await SeedGovernanceAsync();
             await TestSupport.GraphQlSchemaReadiness.AwaitCatalogSchemaAsync(

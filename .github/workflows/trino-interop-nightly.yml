@@ -1,0 +1,90 @@
+name: Trino interop nightly
+
+# Official Trino clients (JDBC driver and trino-python-client) against a live gateway on HTTPS loopback (tests/Autheris.Tests.Integration/Interop/Trino).
+# This file must never get a pull_request, pull_request_target, push or workflow_run trigger and must never reference secrets (SEC-TRINO-08).
+# The JDBC jar is pinned by version and SHA-256, the Python packages by --require-hashes. No retries, no inputs.
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  trino-interop:
+    name: Trino client interop (JDBC + Python)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      TRINO_JDBC_VERSION: '484'
+      TRINO_JDBC_SHA256: '46476af2968e6f3234e8b22d7e29c26e6d7213ce88ab546a29c4c318c921cd34'
+      CI: 'true'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET 11
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: global.json
+
+      - name: Fetch the pinned Trino JDBC driver
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/trino-interop"
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+            --output "$RUNNER_TEMP/trino-interop/trino-jdbc.jar" \
+            "https://repo1.maven.org/maven2/io/trino/trino-jdbc/${TRINO_JDBC_VERSION}/trino-jdbc-${TRINO_JDBC_VERSION}.jar"
+          echo "${TRINO_JDBC_SHA256}  $RUNNER_TEMP/trino-interop/trino-jdbc.jar" | sha256sum --check --strict -
+          echo "AUTHERIS_TRINO_JDBC_JAR=$RUNNER_TEMP/trino-interop/trino-jdbc.jar" >> "$GITHUB_ENV"
+
+      - name: Install the pinned Trino Python client
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/trino-interop/venv"
+          "$RUNNER_TEMP/trino-interop/venv/bin/python" -m pip install --require-hashes --only-binary=:all: --no-deps --disable-pip-version-check \
+            -r tests/Autheris.Tests.Integration/Interop/Trino/requirements-trino-interop.txt
+          echo "AUTHERIS_TRINO_PYTHON=$RUNNER_TEMP/trino-interop/venv/bin/python" >> "$GITHUB_ENV"
+
+      - name: Restore with Locked Mode
+        run: dotnet restore tests/Autheris.Tests.Integration --locked-mode
+
+      - name: Trino interop tests
+        run: |
+          set -euo pipefail
+          dotnet test tests/Autheris.Tests.Integration -c Release --no-restore -p:AutherisIncludeTestAuth=true --filter "Category=TrinoInterop" --logger "trx" --results-directory "$RUNNER_TEMP/trino-interop/results" --verbosity normal
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: trino-interop-results
+          path: ${{ runner.temp }}/trino-interop/results
+          retention-days: 14
+          if-no-files-found: ignore
+
+  # Opens or updates one issue per workflow when a scheduled run fails (only the run URL and failed job ids are posted).
+  report-failure:
+    name: Report scheduled failure
+    needs: [trino-interop]
+    if: failure() && github.event_name == 'schedule' && github.event.repository.fork == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+      - name: Open or update the failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: bash .github/scripts/report-scheduled-failure.sh

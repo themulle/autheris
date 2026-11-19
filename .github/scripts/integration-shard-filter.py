@@ -18,7 +18,7 @@ import sys
 NAMESPACE = "Autheris.Tests.Integration."
 FALLBACK_WEIGHT = 10.0
 UNWEIGHTED_WARN_THRESHOLD = 0.10
-BASE_FILTER = "Category!=Spark&Category!=Parity&((Category!=Oracle&Category!=Stress)|Category=Security)"
+BASE_FILTER = "Category!=Spark&Category!=Parity&Category!=TrinoInterop&((Category!=Oracle&Category!=Stress)|Category=Security)"
 
 root = pathlib.Path(__file__).resolve().parents[2]
 project = root / "tests" / "Autheris.Tests.Integration"

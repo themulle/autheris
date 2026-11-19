@@ -214,7 +214,7 @@ public sealed partial class CiWorkflowArchitectureTests
     {
         // WP-OI-CI-5 (#522) & SEC-OI-522-1/2: BASE_FILTER keeps all non-Spark/Parity Security tests in PR shards, even when tagged Oracle or Stress.
         string baseFilter = ReadBaseFilter();
-        baseFilter.ShouldBe("Category!=Spark&Category!=Parity&((Category!=Oracle&Category!=Stress)|Category=Security)");
+        baseFilter.ShouldBe("Category!=Spark&Category!=Parity&Category!=TrinoInterop&((Category!=Oracle&Category!=Stress)|Category=Security)");
 
         EvaluateCategoryFilter(baseFilter, new HashSet<string> { "Security" }).ShouldBeTrue();
         EvaluateCategoryFilter(baseFilter, new HashSet<string> { "Security", "Oracle" }).ShouldBeTrue();
@@ -224,6 +224,7 @@ public sealed partial class CiWorkflowArchitectureTests
         EvaluateCategoryFilter(baseFilter, new HashSet<string> { "Stress" }).ShouldBeFalse();
         EvaluateCategoryFilter(baseFilter, new HashSet<string> { "Spark" }).ShouldBeFalse();
         EvaluateCategoryFilter(baseFilter, new HashSet<string> { "Parity" }).ShouldBeFalse();
+        EvaluateCategoryFilter(baseFilter, new HashSet<string> { "TrinoInterop" }).ShouldBeFalse();
 
         var (classes, methods) = ScanIntegrationTraits();
         var allowedSparkSecurity = LoadSecurityNightlyCombinationsBaseline();
