@@ -33,7 +33,7 @@ public sealed class SubtreeDateTranslationTests
             SourceName = "tsql",
             IsActive = true
         },
-        Columns = columns.Select(c => new TableColumn { ColumnName = c, DataType = "varchar" }).ToList()
+        Columns = columns.Select(c => new TableColumn { ColumnName = c, DataType = c == "created" ? "timestamp" : "varchar" }).ToList()
     };
 
     private static SubtreeExecutionPlan Compile(string sql)
