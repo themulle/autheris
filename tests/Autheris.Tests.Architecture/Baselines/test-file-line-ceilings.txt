@@ -23,7 +23,6 @@ tests/Autheris.Tests.Unit/Serialization/ParquetOutputNegotiationTests.cs	1086
 tests/Autheris.Tests.Unit/Procedures/ProcedureEndpointTests.cs	1393
 tests/Autheris.Tests.Unit/Procedures/ProcedureExecutionSecurityTests.cs	1068
 tests/Autheris.Tests.Unit/Procedures/ProcedureRowBudgetAndScanCapTests.cs	1452
-tests/Autheris.Tests.Unit/Security/SecurityFindingsRemediationTests.cs	1408
 tests/Autheris.Tests.Unit/Sql/WebSqlExecutorAndConnectorSecurityTests.cs	1264
 tests/TrinoSqlEngine.Tests/Compiler/CatalogTypeMapGoldenTests.cs	1486
 tests/TrinoSqlEngine.Tests/Compiler/DmlCompileTests.cs	1162
