@@ -1,5 +1,6 @@
-namespace Autheris.Extensions.Cdc;
+namespace Autheris.Infrastructure.Streaming.Producers;
 
+using System.Linq;
 using Autheris.Application.Streaming.Interfaces;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.DependencyInjection;
@@ -19,10 +20,12 @@ public static class CdcSourceServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(gatewayOptions);
 
-        if (!ExtensionRegistration.TryBegin<CdcSourceIntegrationMarker>(services))
+        if (services.Any(d => d.ServiceType == typeof(CdcSourceIntegrationMarker)))
         {
             return services;
         }
+
+        services.AddSingleton(new CdcSourceIntegrationMarker());
 
         services.TryAddSingleton<ICdcTableActivator, CdcTableActivator>();
         services.TryAddSingleton<CdcChangeEventBuilder>();

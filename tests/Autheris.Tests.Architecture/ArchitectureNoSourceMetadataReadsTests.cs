@@ -43,7 +43,7 @@ public sealed class ArchitectureNoSourceMetadataReadsTests
     /// <summary>Permanent exact-path allowlist (relative to <c>src</c>, forward slashes), each with its reason.</summary>
     private static readonly Dictionary<string, string> Allowlist = new(StringComparer.Ordinal)
     {
-        ["Autheris.Extensions/Cdc/CdcSourceQueries.cs"] =
+        ["Autheris.Infrastructure/Streaming/Producers/CdcSourceQueries.cs"] =
             "The only metadata function: CHANGE_TRACKING_MIN_VALID_VERSION(OBJECT_ID(@t)) resolves a declared, granted object and has no data-only alternative.",
         ["Autheris.Application/Sql/SourceMetadataGuard.cs"] = "The runtime guard holds the rule vocabulary; it rejects, never sends.",
         ["Autheris.Infrastructure/Persistence/MetadataGuardedConnection.cs"] = "Rejects CommandBehavior.KeyInfo/SchemaOnly; never sets them.",
@@ -166,10 +166,10 @@ public sealed class ArchitectureNoSourceMetadataReadsTests
         scanned.ShouldContain(f => f.StartsWith("Autheris.Infrastructure/Persistence/Catalog/", StringComparison.Ordinal));
         scanned.ShouldContain(f => f.StartsWith("Autheris.Application/DataSources/", StringComparison.Ordinal));
         scanned.ShouldContain(f => f.StartsWith("Autheris.Application/OData/", StringComparison.Ordinal));
-        scanned.ShouldContain(f => f.StartsWith("Autheris.Extensions/Cdc/", StringComparison.Ordinal));
-        scanned.ShouldContain("Autheris.Extensions/Cdc/MssqlChangeTrackingPoller.cs");
-        scanned.ShouldContain("Autheris.Extensions/Cdc/CdcTableActivator.cs");
-        scanned.ShouldContain("Autheris.Extensions/Cdc/CdcSourceQueries.cs");
+        scanned.ShouldContain(f => f.StartsWith("Autheris.Infrastructure/Streaming/Producers/", StringComparison.Ordinal));
+        scanned.ShouldContain("Autheris.Infrastructure/Streaming/Producers/MssqlChangeTrackingPoller.cs");
+        scanned.ShouldContain("Autheris.Infrastructure/Streaming/Producers/CdcTableActivator.cs");
+        scanned.ShouldContain("Autheris.Infrastructure/Streaming/Producers/CdcSourceQueries.cs");
         scanned.ShouldContain("Autheris.Infrastructure/Persistence/SqlConnectionFactory.cs");
     }
 

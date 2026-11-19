@@ -1,4 +1,4 @@
-namespace Autheris.Extensions.Cdc;
+namespace Autheris.Infrastructure.Streaming.Producers;
 
 using System;
 using System.Collections.Generic;

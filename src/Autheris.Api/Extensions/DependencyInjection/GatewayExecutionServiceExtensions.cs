@@ -23,6 +23,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Extensions;
+using Autheris.Infrastructure.Streaming.Producers;
 using Autheris.GraphQL.Subscriptions;
 using Autheris.Infrastructure.Connectors;
 using Autheris.Domain.Diagnostics;
@@ -123,6 +124,7 @@ public static class GatewayExecutionServiceExtensions
 
         // Connectors to foreign systems (Autheris.Extensions)
         services.AddGatewayExtensions(gatewayOptions);
+        services.AddCdcSourceIntegration(gatewayOptions);
 
         // Realtime Event Subscriptions & In-Stream RLS (P5, F-CDC-03)
         services.AddAutherisStreaming();

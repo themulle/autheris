@@ -1,4 +1,4 @@
-namespace Autheris.Extensions.Cdc.CustomQuery;
+namespace Autheris.Infrastructure.Streaming.Producers.CustomQuery;
 
 using System;
 using System.Collections.Generic;

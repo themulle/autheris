@@ -3,7 +3,6 @@ namespace Autheris.Extensions;
 using System;
 using Autheris.Application.Security;
 using Autheris.Domain.Options;
-using Autheris.Extensions.Cdc;
 using Autheris.Extensions.DataCatalog;
 using Autheris.Extensions.Dbt;
 using Autheris.Extensions.Lineage;
@@ -36,7 +35,6 @@ public static class ExtensionsServiceCollectionExtensions
         services.AddDataCatalogIntegration(gatewayOptions);
         services.AddDbtIntegration(gatewayOptions);
         services.AddLineageExportIntegration(gatewayOptions);
-        services.AddCdcSourceIntegration(gatewayOptions);
 
         return services;
     }

@@ -19,7 +19,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Extensions;
-using Autheris.Extensions.Cdc;
+using Autheris.Infrastructure.Streaming.Producers;
 using Autheris.Extensions.DataCatalog;
 using Autheris.Extensions.Lineage;
 using Autheris.Extensions.OpenMetadata;
@@ -96,8 +96,7 @@ public sealed class ExtensionsRegistrationTests
 
         Type[] typeBasedServices =
         [
-            typeof(IDataCatalogSyncService),
-            typeof(IMssqlChangeTrackingPoller)
+            typeof(IDataCatalogSyncService)
         ];
 
         foreach (var serviceType in typeBasedServices)
@@ -107,6 +106,10 @@ public sealed class ExtensionsRegistrationTests
             descriptors[0].ImplementationType.ShouldNotBeNull(serviceType.Name);
             descriptors[0].ImplementationType!.Assembly.ShouldBe(ExtensionsAssembly, serviceType.Name);
         }
+
+        var pollers = services.Where(d => d.ServiceType == typeof(IMssqlChangeTrackingPoller)).ToList();
+        pollers.Count.ShouldBe(1);
+        pollers[0].ImplementationType.ShouldBe(typeof(MssqlChangeTrackingPoller));
 
         services.Count(d => d.ServiceType == typeof(IOpenLineageClient)).ShouldBe(1);
 

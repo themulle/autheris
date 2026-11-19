@@ -88,8 +88,8 @@ src/Autheris.Domain/Model/AccessProfile.cs|1
 src/Autheris.Domain/Model/AccessProfileAssignment.cs|1
 src/Autheris.Domain/Model/GovernanceModels.cs|3
 src/Autheris.Domain/Model/VirtualFilterModels.cs|2
-src/Autheris.Extensions/Cdc/CustomQuery/CustomQueryPollerService.cs|5
-src/Autheris.Extensions/Cdc/DebeziumCdcParser.cs|1
+src/Autheris.Infrastructure/Streaming/Producers/CustomQuery/CustomQueryPollerService.cs|5
+src/Autheris.Infrastructure/Streaming/Producers/DebeziumCdcParser.cs|1
 src/Autheris.Extensions/Dbt/DbtHealthCircuitBreaker.cs|3
 src/Autheris.Extensions/Dbt/DbtMetadataIngestionService.cs|4
 src/Autheris.Extensions/Dbt/DbtWebhookReceiver.cs|3
