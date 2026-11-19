@@ -223,6 +223,32 @@ public sealed partial class GovernanceMigrationFreezeTests(ITestOutputHelper out
         result.ExitCode.ShouldBe(0, result.Output);
     }
 
+    [Fact]
+    public void ShapeReadRetry_IsUsedOnlyByTheSqlServerSchemaCatalogReader()
+    {
+        const string allowedCaller = "src/Autheris.Infrastructure/Persistence/Migrations/Shape/SqlServerSchemaCatalogReader.cs";
+        const string policyFile = "src/Autheris.Infrastructure/Persistence/Migrations/Shape/ShapeReadRetryPolicy.cs";
+        string[] forbiddenFiles =
+        [
+            "src/Autheris.Infrastructure/Persistence/Migrations/SqlMigrationStep.cs",
+            "src/Autheris.Infrastructure/Persistence/Migrations/GovernanceMigrationRunnerBase.cs",
+            "src/Autheris.Infrastructure/Persistence/Migrations/SqlServerGovernanceMigrationRunner.cs"
+        ];
+
+        var policyReference = ShapeReadRetryPolicyReference();
+        var hits = RepositoryScan.ProductionFiles
+            .Where(f => !string.Equals(f.RelativePath, policyFile, StringComparison.Ordinal))
+            .Where(f => policyReference.IsMatch(StripComments(f.Text)))
+            .Select(f => f.RelativePath)
+            .ToArray();
+
+        hits.ShouldBe([allowedCaller], "ShapeReadRetryPolicy is scoped exclusively to SqlServerSchemaCatalogReader and must never retry DDL or runner statements.");
+        foreach (var forbidden in forbiddenFiles)
+        {
+            policyReference.IsMatch(Read(forbidden)).ShouldBeFalse($"{forbidden} must never reference ShapeReadRetryPolicy.");
+        }
+    }
+
     private static IReadOnlyList<(string Version, string Name, string Checksum)> Catalogue(string engine)
     {
         var steps = new List<(string, string, string)>
@@ -306,4 +332,7 @@ public sealed partial class GovernanceMigrationFreezeTests(ITestOutputHelper out
 
     [GeneratedRegex(@"\b(CREATE\s+(UNIQUE\s+)?(TABLE|INDEX)|ALTER\s+TABLE|DROP\s+TABLE)\b", RegexOptions.IgnoreCase)]
     private static partial Regex DdlLiteral();
+
+    [GeneratedRegex(@"\bShapeReadRetryPolicy\b", RegexOptions.CultureInvariant)]
+    private static partial Regex ShapeReadRetryPolicyReference();
 }
