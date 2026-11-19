@@ -60,7 +60,7 @@ public abstract class TableObjectKindContractBase
             await MigrateAsync(cs, 28);
             await using (var raw = OpenRaw(cs))
             {
-                await ExecAsync(raw, "INSERT INTO TABLES (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active) VALUES ('t896', 'Test', 'kind_896', 'sales', 'ord_896', 'orders', 'NORMAL', 0, 1)");
+                await ExecAsync(raw, "INSERT INTO TABLES (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active) VALUES ('3f2a1c0e-5b7d-4e21-9a64-0d8c1b2e7f90', 'Test', 'kind_896', 'sales', 'ord_896', 'orders', 'NORMAL', 0, 1)");
             }
 
             await MigrateAsync(cs, null);
