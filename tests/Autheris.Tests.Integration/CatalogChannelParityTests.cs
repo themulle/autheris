@@ -439,8 +439,23 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
         return body;
     }
 
-    private static Task<string> GraphQlCatalogAsync(HttpClient client) => PostGraphQlAsync(client,
-        "query { catalog(first: 10) { tableName columnNames columns { name } } catalogObject(domain: \"dom_a\", schema: \"main\", name: \"orders_a\") { columnNames columns { name } } }");
+    // One nested list per request keeps every query inside the cost budget; the bodies are joined so a single assertion covers all of them.
+    private static async Task<string> PostGraphQlAllAsync(HttpClient client, params string[] queries)
+    {
+        var bodies = new List<string>(queries.Length);
+        foreach (var query in queries)
+        {
+            bodies.Add(await PostGraphQlAsync(client, query));
+        }
+
+        return string.Join("\n", bodies);
+    }
+
+    private static Task<string> GraphQlCatalogAsync(HttpClient client) => PostGraphQlAllAsync(client,
+        "query { catalog(first: 10) { tableName columnNames } }",
+        "query { catalog(first: 10) { tableName columns { name } } }",
+        "query { catalogObject(domain: \"dom_a\", schema: \"main\", name: \"orders_a\") { columnNames } }",
+        "query { catalogObject(domain: \"dom_a\", schema: \"main\", name: \"orders_a\") { columns { name } } }");
 
     private static IReadOnlyList<string> SchemaColumnNames(string json)
     {
@@ -482,13 +497,15 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
         {
             Table = new Table { Id = Guid.NewGuid(), DisplayName = VaultA.TableName, TableName = VaultA.TableName, SchemaName = VaultA.Schema, SourceType = "PostgreSql", SourceName = VaultA.Domain, Description = "Ungranted vault" },
             Identifier = VaultA,
-            OwnerTenantId = TenantA,
             Columns = new List<TableColumn>
             {
                 new() { ColumnName = "id", DataType = "integer" },
                 new() { ColumnName = DeniedColumn, DataType = "varchar", Description = DeniedDescription }
             }
         });
+
+        // A grant of another person puts the table into the tenant's discovery scope; the caller under test holds no grant.
+        await ConsentAsync(repo, VaultA, "S-A-OTHER", TenantA, "id");
     }
 
     [Fact]
@@ -525,9 +542,11 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
         objectsBody.ToLowerInvariant().ShouldNotContain("noaccess");
 
         // GraphQL.
-        var graphQl = await PostGraphQlAsync(client,
-            "query { catalog(first: 10) { tableName columnNames columns { name description } } "
-            + "catalogObject(domain: \"dom_a\", schema: \"main\", name: \"vault_a\") { columnNames columns { name description } } }");
+        var graphQl = await PostGraphQlAllAsync(client,
+            "query { catalog(first: 10) { tableName columnNames } }",
+            "query { catalog(first: 10) { tableName columns { name description } } }",
+            "query { catalogObject(domain: \"dom_a\", schema: \"main\", name: \"vault_a\") { columnNames } }",
+            "query { catalogObject(domain: \"dom_a\", schema: \"main\", name: \"vault_a\") { columns { name description } } }");
         graphQl.ShouldNotContain(DeniedColumn);
         graphQl.ShouldNotContain(DeniedDescription);
 
@@ -650,7 +669,9 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
 
         var (_, schema) = await McpTestClient.CallAsync(mcp, "get_table_schema", new { dataset = "dom_b.main.invoices_b" });
         var (_, permissions) = await McpTestClient.CallAsync(mcp, "get_my_permissions", new { dataset = "dom_b.main.invoices_b" });
-        var graphQl = await PostGraphQlAsync(client, "query { catalog(first: 10) { tableName columnNames columns { name } } }");
+        var graphQl = await PostGraphQlAllAsync(client,
+            "query { catalog(first: 10) { tableName columnNames } }",
+            "query { catalog(first: 10) { tableName columns { name } } }");
 
         foreach (var column in new[] { "secret_note", "amount" })
         {
