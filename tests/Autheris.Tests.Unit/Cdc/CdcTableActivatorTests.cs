@@ -9,7 +9,7 @@ using Autheris.Application.Catalog;
 using Autheris.Application.Streaming;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
-using Autheris.Extensions.Cdc;
+using Autheris.Infrastructure.Streaming.Producers;
 using NSubstitute;
 using Shouldly;
 using Xunit;

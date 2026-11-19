@@ -1,0 +1,433 @@
+namespace Autheris.Api.Endpoints;
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Security.Claims;
+using System.Threading.Tasks;
+using Autheris.Application.Events.Interfaces;
+using Autheris.Application.Events.Services;
+using Autheris.Application.Webhooks;
+using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Security;
+using Autheris.Application.Streaming;
+using Autheris.Application.Streaming.Interfaces;
+using Autheris.Modules.Abstractions;
+using Autheris.Modules.Events;
+using Autheris.Domain.Audit;
+using Autheris.Domain.Model;
+using Autheris.Domain.Options;
+using Autheris.Domain.Security;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+
+public static class StreamingCdcEndpoints
+{
+    internal static void MapEndpoints(RouteGroupBuilder app)
+    {
+        // CDC & Realtime Streaming Ingestion Endpoint (P5)
+        app.MapPost(EventsRoutes.CdcPrefix + "/events", async (
+            HttpRequest request,
+            [FromServices] IModuleRequestContext requestContext,
+            ICdcEventIngestionService ingestionService,
+            ILoggerFactory loggerFactory) =>
+        {
+            var user = request.HttpContext.User;
+
+            var isClusterAdmin = IsCdcClusterAdmin(user);
+            if (!IsAuthorizedCdcIngestion(user))
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
+            // SEC M-07: Bounded read (Content-Length alone is bypassable via chunked transfer encoding).
+            var (body, tooLarge) = await requestContext.TryReadBodyAsync(
+                request,
+                10 * 1024 * 1024,
+                "CDC payload exceeds maximum allowed size (10 MB).",
+                request.HttpContext.RequestAborted);
+            if (tooLarge != null)
+            {
+                return tooLarge;
+            }
+
+            if (string.IsNullOrWhiteSpace(body))
+            {
+                return requestContext.BadRequest(ModuleErrorCodes.BadRequest, "Empty CDC payload.", request.HttpContext);
+            }
+
+            try
+            {
+                // A-1: caller tenant comes from the resolved request context (same source as the rest of the pipeline).
+                var callerTenant = requestContext.GetRequestTenant(request.HttpContext).Value;
+
+                // SR-L-20: the row tenant is read from the registered tenant column of the target table.
+                var cdcEvent = DebeziumCdcParser.Parse(body);
+                var services = request.HttpContext.RequestServices;
+                var metadataRepository = services.GetService<ITableMetadataRepository>();
+                var metadata = metadataRepository == null
+                    ? null
+                    : await metadataRepository.GetTableMetadataAsync(cdcEvent.Table, request.HttpContext.RequestAborted);
+                var tenantColumn = metadata?.TenantColumnName;
+                if (tenantColumn != null)
+                {
+                    cdcEvent = DebeziumCdcParser.Parse(body, null, tenantColumn);
+                }
+
+                var requireTenantColumn = services.GetService<IOptions<GatewayOptions>>()?.Value.DataSources.RequireTenantColumn == true;
+                var rejection = ApplyIngestTenantPolicy(requestContext, request.HttpContext, cdcEvent, isClusterAdmin, callerTenant, tenantColumn != null, requireTenantColumn, out cdcEvent);
+                if (rejection != null)
+                {
+                    return rejection;
+                }
+
+                await ingestionService.PublishEventAsync(cdcEvent, request.HttpContext.RequestAborted);
+                return Results.Accepted(value: new { status = "Ingested", eventId = cdcEvent.EventId });
+            }
+            catch (Exception ex)
+            {
+                var logger = loggerFactory.CreateLogger("Autheris.CdcEndpoint");
+                logger.LogWarning(ex, "Failed to parse or ingest CDC event payload.");
+                return requestContext.BadRequest(ModuleErrorCodes.BadRequest, "Invalid CDC event format.", request.HttpContext);
+            }
+        }).RequireAuthorization()
+          .WithModuleRequestBodyLimit(10 * 1024 * 1024) // SEC M-01: explicit large-body exception to the global Kestrel limit
+          .WithModuleAudit(AuditLevel.Full, AuditEventTypes.StreamSubscribe);
+
+        // F-EVT-01: CloudEvents Outbound Webhook Subscriptions (answer 501 when Gateway:Events:CdcWebhooks:Enabled is false;
+        // the subscription store and the delivery service are not registered while disabled).
+        app.MapGet(EventsRoutes.CdcPrefix + "/subscriptions", (Delegate)ListSubscriptionsAsync)
+            .RequireAuthorization().WithModuleAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
+
+        app.MapPost(EventsRoutes.CdcPrefix + "/subscriptions", CreateSubscriptionAsync)
+            .RequireAuthorization().WithModuleAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
+
+        app.MapDelete(EventsRoutes.CdcPrefix + "/subscriptions/{id}", DeleteSubscriptionAsync)
+            .RequireAuthorization().WithModuleAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
+    }
+
+    /// <summary>
+    /// A-1 / SR-L-20: fail-closed tenant policy for ingested CDC events. Returns a rejection result or<c>null</c>;
+    /// <paramref name="resolved"/> is the (possibly tenant-stamped) event.
+    /// </summary>
+    internal static IResult? ApplyIngestTenantPolicy(
+        IModuleRequestContext requestContext,
+        HttpContext context,
+        CdcEvent cdcEvent,
+        bool isClusterAdmin,
+        string? callerTenant,
+        bool tableHasTenantColumn,
+        bool requireTenantColumn,
+        out CdcEvent resolved)
+    {
+        resolved = cdcEvent;
+
+        // A-1: even canonical cluster admins must name the target tenant explicitly (no implicit/null tenant).
+        if (isClusterAdmin && string.IsNullOrWhiteSpace(cdcEvent.TenantId))
+        {
+            return requestContext.BadRequest(ModuleErrorCodes.BadRequest, "CDC event must carry an explicit tenant.", context);
+        }
+
+        if (isClusterAdmin)
+        {
+            return null;
+        }
+
+        // Enforce strict fail-closed tenant isolation on ingested CDC events
+        if (string.IsNullOrWhiteSpace(callerTenant))
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        if (!string.IsNullOrWhiteSpace(cdcEvent.TenantId))
+        {
+            return string.Equals(cdcEvent.TenantId, callerTenant, StringComparison.Ordinal)
+                ? null
+                : Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        // No tenant value on the row: never stamp the caller tenant onto a tenant-scoped table.
+        if (tableHasTenantColumn)
+        {
+            return requestContext.BadRequest(ModuleErrorCodes.BadRequest, "CDC row must carry a tenant value.", context);
+        }
+
+        if (requireTenantColumn)
+        {
+            return requestContext.BadRequest(ModuleErrorCodes.BadRequest, "CDC target table has no tenant column.", context);
+        }
+
+        resolved = cdcEvent with { TenantId = callerTenant };
+        return null;
+    }
+
+    /// <summary>Returns a 501 problem result while the CDC webhook feature flag is off; otherwise <c>null</c>.</summary>
+    internal static IResult? GuardCdcWebhooksDisabled(HttpContext context)
+    {
+        // The registration-time flag is the single source of truth (it decides whether the store and delivery service exist).
+        // Changing the configuration later has no effect until a restart. Without a registered flag (unit hosts) the options decide.
+        var flag = context.RequestServices.GetService<CdcWebhooksFeatureFlag>();
+        var enabled = flag is not null
+            ? flag.Enabled
+            : context.RequestServices.GetService<IOptions<CdcWebhooksOptions>>()?.Value is { Enabled: true };
+        if (enabled)
+        {
+            return null;
+        }
+
+        return Results.Problem(
+            title: "CDC webhook subscriptions are not enabled",
+            detail: "Outbound CDC webhook delivery is disabled. Set Gateway:Events:CdcWebhooks:Enabled to true to enable it.",
+            statusCode: StatusCodes.Status501NotImplemented);
+    }
+
+    // DT-A-9: the request tenant is the resolved tenant; an unresolved request has none (GetRequestTenant throws) and is never mapped to a literal.
+    private static string ResolveTenant(HttpContext context) => EventsProblems.RequestContext(context).GetRequestTenant(context).Value;
+
+    internal static async Task<IResult> ListSubscriptionsAsync(HttpContext context)
+    {
+        var guard = GuardCdcWebhooksDisabled(context);
+        if (guard != null)
+        {
+            return guard;
+        }
+
+        if (!IsAuthorizedSubscriptionAdmin(context.User))
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        var store = context.RequestServices.GetRequiredService<ICloudEventSubscriptionStore>();
+        var subs = await store.ListSubscriptionsAsync(ResolveTenant(context), context.RequestAborted);
+        // SEC M-5: never return HMAC secrets or the creator's group list in GET responses.
+        return Results.Ok(subs.Select(CdcSubscriptionView.From));
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex TableFilterPattern =
+        new(@"^(\*|[\w$#\-]+(\.[\w$#\-]+){0,2})$", System.Text.RegularExpressions.RegexOptions.CultureInvariant | System.Text.RegularExpressions.RegexOptions.NonBacktracking);
+
+    internal static async Task<IResult> CreateSubscriptionAsync(HttpContext context, CloudEventWebhookSubscription subscription)
+    {
+        var guard = GuardCdcWebhooksDisabled(context);
+        if (guard != null)
+        {
+            return guard;
+        }
+
+        if (!IsAuthorizedSubscriptionAdmin(context.User))
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        var services = context.RequestServices;
+        var store = services.GetRequiredService<ICloudEventSubscriptionStore>();
+        var options = services.GetRequiredService<IOptions<CdcWebhooksOptions>>().Value;
+        var tenantId = ResolveTenant(context);
+        // Fail closed: without a host environment the deployment is treated as production.
+        var isDev = services.GetService<IHostEnvironment>()?.IsDevelopment() == true;
+
+        if (subscription is null || string.IsNullOrWhiteSpace(subscription.TargetUrl) || !Uri.TryCreate(subscription.TargetUrl, UriKind.Absolute, out var targetUri))
+        {
+            return EventsProblems.BadRequest(ModuleErrorCodes.BadRequest, "Invalid absolute target URL.", context);
+        }
+
+        if (subscription.TargetUrl.Length > 2048
+            || string.IsNullOrEmpty(subscription.FilterTable)
+            || subscription.FilterTable.Length > 512
+            || !TableFilterPattern.IsMatch(subscription.FilterTable)
+            || (subscription.FilterOperations ?? []).Any(o => !Enum.IsDefined(o)))
+        {
+            return EventsProblems.BadRequest("CDC_FILTER_INVALID", "The table or operation filter is invalid.", context);
+        }
+
+        try
+        {
+            await Autheris.Application.Security.EgressUrlPolicy.ValidateResolvedAsync(targetUri, isDev: isDev, ct: context.RequestAborted);
+        }
+        catch (Exception ex)
+        {
+            EventsProblems.LogFailure(context, ex, "CDC_TARGET_URL_NOT_ALLOWED");
+            return EventsProblems.BadRequest("CDC_TARGET_URL_NOT_ALLOWED", "The target URL is not allowed.", context);
+        }
+
+        if (!CdcCustomHeaders.WithinBounds(subscription.CustomHeaders)
+            || (subscription.CustomHeaders is { } headers
+            && headers.Any(h => Autheris.Application.Webhooks.WebhookDeliveryClient.IsForbiddenCustomHeader(h.Key)
+                                || h.Value is null || h.Value.Contains('\r', StringComparison.Ordinal) || h.Value.Contains('\n', StringComparison.Ordinal) || h.Key.Contains('\r', StringComparison.Ordinal) || h.Key.Contains('\n', StringComparison.Ordinal))))
+        {
+            return EventsProblems.BadRequest("CDC_CUSTOM_HEADER_NOT_ALLOWED", "A custom header is not allowed.", context);
+        }
+
+        // SEC M-5: Server-side ID generation; client-chosen ID is ignored to prevent overwrite attacks
+        var serverId = Guid.NewGuid().ToString("N");
+
+        // Secret: required (32..512 chars) outside Development, stored only KEK-protected; never persist plaintext (fail closed).
+        // Custom header values (tokens) are protected the same way.
+        var secret = subscription.HmacSecret ?? string.Empty;
+        var protectedSecret = string.Empty;
+        var hasHeaders = subscription.CustomHeaders is { Count: > 0 };
+        if (secret.Length == 0 && !isDev)
+        {
+            return EventsProblems.BadRequest("CDC_SECRET_REQUIRED", "A signing secret of 32 to 512 characters is required.", context);
+        }
+
+        if (secret.Length > 512 || (secret.Length > 0 && !isDev && secret.Length < 32))
+        {
+            return EventsProblems.BadRequest("CDC_SECRET_REQUIRED", "A signing secret of 32 to 512 characters is required.", context);
+        }
+
+        IReadOnlyDictionary<string, string>? protectedHeaders = null;
+        if (secret.Length > 0 || hasHeaders)
+        {
+            var protector = services.GetService<IWebhookSecretProtector>();
+            if (protector is null || !protector.IsAvailable)
+            {
+                return EventsProblems.Problem(
+                    StatusCodes.Status503ServiceUnavailable, "CDC_SECRET_STORE_UNAVAILABLE", "The secret store is not available.", context);
+            }
+
+            try
+            {
+                if (secret.Length > 0)
+                {
+                    protectedSecret = protector.Protect(tenantId, serverId, secret);
+                }
+
+                if (hasHeaders)
+                {
+                    protectedHeaders = new Dictionary<string, string>
+                    {
+                        [CdcCustomHeaders.ProtectedKey] = protector.Protect(tenantId, serverId, System.Text.Json.JsonSerializer.Serialize(subscription.CustomHeaders))
+                    };
+                }
+            }
+            catch (WebhookSecretUnavailableException ex)
+            {
+                EventsProblems.LogFailure(context, ex, "CDC_SECRET_STORE_UNAVAILABLE");
+                return EventsProblems.Problem(
+                    StatusCodes.Status503ServiceUnavailable, "CDC_SECRET_STORE_UNAVAILABLE", "The secret store is not available.", context);
+            }
+        }
+
+        // Creator snapshot: authorisation of every delivered event is evaluated as this principal. Never taken from the request body.
+        var restrictedScopes = services.GetService<Autheris.Domain.Security.IRestrictedScopePolicy>() ?? Autheris.Domain.Security.RestrictedScopePolicy.Default;
+        var capture = CdcSubscriptionPrincipal.Capture(context.User, options, restrictedScopes);
+        if (capture.Error == CdcSnapshotCaptureError.MissingSid)
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        if (capture.Error == CdcSnapshotCaptureError.GroupsUnresolved)
+        {
+            return EventsProblems.Problem(
+                StatusCodes.Status403Forbidden, "identity.groups_unresolved",
+                "The groups of the caller could not be resolved.", context);
+        }
+
+        if (capture.Error == CdcSnapshotCaptureError.RestrictedScope)
+        {
+            return EventsProblems.Problem(
+                StatusCodes.Status403Forbidden, "CDC_RESTRICTED_SCOPE_FORBIDDEN",
+                "Tokens with restricted scopes cannot create CDC webhook subscriptions.", context);
+        }
+
+        if (!capture.IsSuccess)
+        {
+            return EventsProblems.BadRequest("CDC_SNAPSHOT_TOO_LARGE", "The creator principal has too many group memberships.", context);
+        }
+
+        var time = services.GetService<TimeProvider>() ?? TimeProvider.System;
+        var securedSub = subscription with
+        {
+            Id = serverId,
+            TenantId = tenantId,
+            IsEnabled = true,
+            HmacSecret = protectedSecret,
+            CustomHeaders = protectedHeaders,
+            FilterOperations = subscription.FilterOperations ?? [],
+            CreatedBySid = capture.Sid,
+            CreatedByGroupSids = capture.GroupSids,
+            CreatedByRoles = capture.Roles,
+            CreatedAt = time.GetUtcNow()
+        };
+        try
+        {
+            await store.RegisterSubscriptionAsync(securedSub, options.MaxSubscriptionsPerTenant, context.RequestAborted);
+        }
+        catch (CloudEventSubscriptionStoreBusyException ex)
+        {
+            EventsProblems.LogFailure(context, ex, "CDC_STORE_BUSY");
+            return EventsProblems.Problem(StatusCodes.Status503ServiceUnavailable, "CDC_STORE_BUSY", "The subscription store is busy; retry.", context);
+        }
+        catch (InvalidOperationException ex)
+        {
+            EventsProblems.LogFailure(context, ex, "CDC_SUBSCRIPTION_QUOTA_EXCEEDED");
+            return EventsProblems.TooManyRequests("CDC_SUBSCRIPTION_QUOTA_EXCEEDED", "The subscription limit has been reached.", context);
+        }
+
+        return Results.Created($"{EventsRoutes.Prefix}{EventsRoutes.CdcPrefix}/subscriptions/{securedSub.Id}", CdcSubscriptionView.From(securedSub));
+    }
+
+    internal static async Task<IResult> DeleteSubscriptionAsync(string id, HttpContext context)
+    {
+        var guard = GuardCdcWebhooksDisabled(context);
+        if (guard != null)
+        {
+            return guard;
+        }
+
+        if (!IsAuthorizedSubscriptionAdmin(context.User))
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        var store = context.RequestServices.GetRequiredService<ICloudEventSubscriptionStore>();
+        var removed = await store.RemoveSubscriptionAsync(ResolveTenant(context), id, context.RequestAborted);
+        return removed ? Results.NoContent() : Results.NotFound();
+    }
+
+    private static readonly IGatewayRoleEvaluator RoleEvaluator = new GatewayRoleEvaluator();
+
+    private static bool IsAuthorizedSubscriptionAdmin(ClaimsPrincipal user)
+        => RoleEvaluator.HasAnyRole(user, [GatewayRole.GovernanceAdmin, GatewayRole.TenantAdmin]);
+
+    /// <summary>
+    /// SEC H-04: Cross-tenant CDC ingestion is decided by roles only. The former substring check ("ADMIN" in SID or
+    /// user name) promoted accounts such as "CORP\badminton" to cluster admin and has been removed.
+    /// </summary>
+    internal static bool IsCdcClusterAdmin(ClaimsPrincipal user)
+        => ClusterAdminPolicy.IsCanonicalClusterAdmin(user);
+
+    // A-1: PlatformAdmin is a tenant-scoped administrator: authorized to ingest, but only into its own tenant.
+    internal static bool IsAuthorizedCdcIngestion(ClaimsPrincipal user)
+        => IsCdcClusterAdmin(user) ||
+           user.IsInRole("CdcIngestionService") ||
+           user.IsInRole("PlatformAdmin") ||
+           RoleEvaluator.HasAnyRole(user, [GatewayRole.TenantAdmin, GatewayRole.GovernanceAdmin]);
+}
+
+/// <summary>Redacted subscription representation: no secret (not even the ciphertext) and no creator group list.</summary>
+internal sealed record CdcSubscriptionView(
+    string Id,
+    string TenantId,
+    string TargetUrl,
+    string FilterTable,
+    IReadOnlyList<CdcOperation> FilterOperations,
+    string HmacSecret,
+    bool IsEnabled,
+    bool HasCustomHeaders,
+    string? CreatedBySid,
+    int CreatedByRoleCount,
+    DateTimeOffset? CreatedAt)
+{
+    public static CdcSubscriptionView From(CloudEventWebhookSubscription s) => new(
+        s.Id, s.TenantId, s.TargetUrl, s.FilterTable, s.FilterOperations,
+        string.IsNullOrEmpty(s.HmacSecret) ? string.Empty : "[REDACTED]",
+        s.IsEnabled, s.CustomHeaders is { Count: > 0 }, s.CreatedBySid, s.CreatedByRoles?.Count ?? 0, s.CreatedAt);
+}

@@ -19,7 +19,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Extensions;
-using Autheris.Extensions.Cdc;
+using Autheris.Infrastructure.Streaming.Producers;
 using Autheris.Extensions.DataCatalog;
 using Autheris.Extensions.Lineage;
 using Autheris.Extensions.OpenMetadata;
@@ -96,8 +96,7 @@ public sealed class ExtensionsRegistrationTests
 
         Type[] typeBasedServices =
         [
-            typeof(IDataCatalogSyncService),
-            typeof(IMssqlChangeTrackingPoller)
+            typeof(IDataCatalogSyncService)
         ];
 
         foreach (var serviceType in typeBasedServices)
@@ -113,6 +112,21 @@ public sealed class ExtensionsRegistrationTests
         var provider = services.BuildServiceProvider();
         using var scope = provider.CreateScope();
         scope.ServiceProvider.GetRequiredService<IOpenLineageClient>().ShouldBeOfType<OpenLineageClient>();
+    }
+
+    [Fact]
+    public void CdcSourceIntegration_IsIdempotent_AndPollerLivesInInfrastructure()
+    {
+        var options = new GatewayOptions { MssqlChangeTracking = new MssqlChangeTrackingOptions { Enabled = true } };
+        var services = new ServiceCollection();
+        services.AddCdcSourceIntegration(options);
+        services.AddCdcSourceIntegration(options);
+
+        var pollers = services.Where(d => d.ServiceType == typeof(IMssqlChangeTrackingPoller)).ToList();
+        pollers.Count.ShouldBe(1);
+        pollers[0].ImplementationType.ShouldBe(typeof(MssqlChangeTrackingPoller));
+        HostedServiceCount<CdcProducerService>(services).ShouldBe(1);
+        services.Count(d => d.ServiceType.Name == "CdcSourceIntegrationMarker").ShouldBe(1);
     }
 
     [Fact]

@@ -117,6 +117,7 @@ public static partial class GatewayServiceCollectionExtensions
         GatewayOptions gatewayOptions,
         ILoggerFactory? bootstrapLoggerFactory = null)
     {
+        services.AddSingleton<Autheris.Modules.Abstractions.IModuleRequestContext, ModuleRequestContext>();
         var hostContext = new ModuleHostContext(TimeProvider.System, ModuleLoader.ResolveHostVersion());
         var logger = bootstrapLoggerFactory?.CreateLogger<ModuleLoader>();
         var loader = new ModuleLoader(logger: logger);
@@ -124,12 +125,30 @@ public static partial class GatewayServiceCollectionExtensions
         Autheris.Api.Configuration.UnknownGatewayKeyGuard.ThrowIfUnknownKeys(
             configuration,
             moduleLoadResult,
-            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-            {
-                [Autheris.Domain.Options.GatewaySections.Lakehouse] = "lakehouse"
-            });
+            Autheris.Api.Configuration.GatewayConfigurationSchema.EnforcedModuleSections);
+        ThrowIfWebhookSubscriptionsWithoutEventsModule(gatewayOptions, moduleLoadResult);
         return services;
     }
+    /// <summary>
+    /// Configured event webhook subscriptions are dispatched and delivered by the events module only. Without that module they would
+    /// silently never fire, so startup fails (fail closed, independent of any module code, before any hosted service starts).
+    /// </summary>
+    internal static void ThrowIfWebhookSubscriptionsWithoutEventsModule(
+        GatewayOptions gatewayOptions,
+        ModuleLoadResult moduleLoadResult)
+    {
+        ArgumentNullException.ThrowIfNull(gatewayOptions);
+        ArgumentNullException.ThrowIfNull(moduleLoadResult);
+
+        if (gatewayOptions.Webhooks.Subscriptions.Count > 0 &&
+            !moduleLoadResult.LoadedModuleIds.Contains("events", StringComparer.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "Gateway:Webhooks:Subscriptions is configured but module events (Autheris.Modules.Events) is not loaded. " +
+                "Install and enable the events module (Gateway:Modules:Enabled) or remove the subscriptions.");
+        }
+    }
+
     public static IServiceCollection AddGatewayAuth(
         this IServiceCollection services,
         GatewayOptions gatewayOptions,

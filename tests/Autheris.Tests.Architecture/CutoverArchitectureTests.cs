@@ -403,7 +403,7 @@ public sealed class CutoverArchitectureTests
         // -- statements of the gateway itself (no client text) --
         ("Autheris.Application.Services.DbSessionContextInitializer", "fixed session-initialisation statements (tenant and user session context)"),
         ("Autheris.Infrastructure.Persistence.SqlConnectionFactory", "fixed session pinning and hardening statements of a new connection"),
-        ("Autheris.Extensions.Cdc.CdcSourceQueries", "CDC producer: fixed change-tracking statements over validated declared table and column names, bound values, no client text"),
+        ("Autheris.Infrastructure.Streaming.Producers.CdcSourceQueries", "CDC producer: fixed change-tracking statements over validated declared table and column names, bound values, no client text"),
         ("Autheris.Application.Procedures.Services.ProcedureInvoker", "stored-procedure call by a validated catalog name with bound parameters (not a WebSQL statement)"),
         ("Autheris.Application.Procedures.Services.SqlProcedureRowScopeResolver", "procedure row-scope key query over validated catalog identifiers, bound values, read-only; splices validated policy row-filter text (§7.3 consumer)"),
         ("Autheris.Infrastructure.Persistence.Catalog.*", "column-metadata readers: fixed information_schema/PRAGMA queries of the governed catalog provider"),
@@ -429,7 +429,7 @@ public sealed class CutoverArchitectureTests
         ("Autheris.Infrastructure.Persistence.AuditSqlCore", "audit statement execution (ARCH-MNT-22 Step 2): the dialect repositories hand in fixed statements, the core binds values and maps rows only; no client text"),
         ("Autheris.Infrastructure.Persistence.ConsentSqlCore", "consent statement execution (ARCH-MNT-22 Step 4): the dialect repositories hand in dialect statements, the core binds values and maps rows only; no client text"),
         ("Autheris.Infrastructure.Persistence.GrantRecordSqlCore", "grant record store: fixed statements with bound values, no client text"),
-        ("Autheris.Extensions.Cdc.CustomQuery.CustomQueryPollerService", "CDC custom query poller service (Issue #101, Issue #210): reads watermark batches using configured poller queries, bound parameters, no client text"),
+        ("Autheris.Infrastructure.Streaming.Producers.CustomQuery.CustomQueryPollerService", "CDC custom query poller service (Issue #101, Issue #210): reads watermark batches using configured poller queries, bound parameters, no client text"),
         ("Autheris.Application.DataSources.Relations.GovernedCrossSourceRowReader", "Cross-source GraphQL relation row reader (Issue #75, Issue #223): executes batched key lookups over child data sources (VF-02): quoted catalog identifiers, explicit projection, bound key values and bound tenant predicate, session initialized per read, no client text"),
         ("Autheris.Application.State.Caching.TableCache.Governance.GovernedTableCacheExecutionService", "Governed table cache execution service (BL-04, REQ-DATA-BL04): executes governed SELECT queries with AST tenant pushdown and bound parameters over embedded cache store; no client text"),
         ("Autheris.Infrastructure.Caching.TableCache.DuckDbPersistentTableCacheStore", "DuckDB persistent table cache store (BL-04, REQ-DATA-BL04): executes internal staging, swapping, insertion and drop statements on embedded cache database with bound parameters; no client text"),

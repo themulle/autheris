@@ -170,6 +170,95 @@ public sealed class PackageBoundaryArchitectureTests
 
     [Fact]
     [Trait("Category", "Security")]
+    public void Events_module_types_do_not_bypass_access_decision_point()
+    {
+        var moduleDef = CecilModuleCache.For(typeof(Autheris.Modules.Events.EventsModule).Assembly);
+
+        var tableAccessPolicyRefs = new System.Collections.Generic.List<string>();
+        var enforcerCallers = new System.Collections.Generic.List<string>();
+
+        foreach (var type in moduleDef.GetTypes())
+        {
+            foreach (var field in type.Fields)
+            {
+                if (field.FieldType.FullName == "Autheris.Application.Policy.TableAccessPolicy")
+                {
+                    tableAccessPolicyRefs.Add($"{type.FullName}.{field.Name}");
+                }
+            }
+
+            foreach (var method in type.Methods.Where(m => m.HasBody))
+            {
+                foreach (var instruction in method.Body.Instructions)
+                {
+                    if (instruction.Operand is Mono.Cecil.MemberReference memberRef)
+                    {
+                        var declaringFullName = memberRef.DeclaringType?.FullName ?? string.Empty;
+                        if (declaringFullName == "Autheris.Application.Policy.TableAccessPolicy")
+                        {
+                            tableAccessPolicyRefs.Add($"{type.FullName}.{method.Name} -> {memberRef.FullName}");
+                        }
+                        else if (declaringFullName == "Autheris.Application.Streaming.Interfaces.IStreamRlsPolicyEnforcer" &&
+                                 type.FullName.StartsWith("Autheris.Application.Streaming.Services.CdcWebhookDeliveryService", StringComparison.Ordinal))
+                        {
+                            enforcerCallers.Add($"{type.FullName}.{method.Name} -> {memberRef.Name}");
+                        }
+                    }
+                }
+            }
+        }
+
+        tableAccessPolicyRefs.ShouldBeEmpty(
+            "Autheris.Modules.Events must decide only through IStreamRlsPolicyEnforcer and never construct or invoke TableAccessPolicy directly:\n" +
+            string.Join("\n", tableAccessPolicyRefs));
+
+        enforcerCallers.ShouldContain(
+            c => c.EndsWith("-> EvaluateAndMaskAsync", StringComparison.Ordinal),
+            "Positive control: CdcWebhookDeliveryService must call IStreamRlsPolicyEnforcer.EvaluateAndMaskAsync.");
+    }
+
+    [Fact]
+    public void Core_has_no_event_delivery_or_openlineage_types()
+    {
+        // The delivery surfaces live in the events module only (the OpenLineage names join this list with the lineage module).
+        string[] moved =
+        [
+            "CdcStreamAdminService", "CdcWebhookDeliveryService", "WebhookDispatcherService", "IWebhookDispatcherService",
+            "WebhookDeliveryHostedService", "WebhookEventBridgeHostedService", "WebhookSubscriptionResolver", "CdcSubscriptionPrincipal",
+            "CdcWebhooksOptionsValidator", "CdcCustomHeaders", "CdcWebhooksOptions", "StreamingCdcEndpoints", "CdcStreamAdminEndpoints",
+            "CdcWebhookStartupCheck"
+        ];
+        var core = new[]
+        {
+            typeof(Autheris.Domain.Options.GatewayOptions).Assembly,
+            typeof(Autheris.Application.Services.ConsentResolutionService).Assembly,
+            typeof(Autheris.Infrastructure.Persistence.GovernanceRepository).Assembly,
+            typeof(Program).Assembly,
+        };
+
+        var present = core
+            .SelectMany(a => a.GetTypes().Select(t => $"{a.GetName().Name}:{t.Name}"))
+            .Where(n => moved.Contains(n[(n.IndexOf(':', StringComparison.Ordinal) + 1)..], StringComparer.Ordinal))
+            .ToList();
+
+        present.ShouldBeEmpty("Event delivery types moved to Autheris.Modules.Events; none may remain in the core assemblies.");
+        typeof(Autheris.Modules.Events.EventsModule).Assembly.GetTypes().Select(t => t.Name).ShouldContain("CdcWebhookDeliveryService");
+    }
+
+    [Fact]
+    public void Webhook_primitives_stay_core()
+    {
+        var application = typeof(Autheris.Application.Services.ConsentResolutionService).Assembly;
+        string[] primitives = ["IWebhookOutbox", "IWebhookSecretProtector", "WebhookDeliveryClient", "WebhookRetryPolicy", "WebhookSignature"];
+
+        foreach (var primitive in primitives)
+        {
+            application.GetTypes().ShouldContain(t => t.Name == primitive && t.Namespace == "Autheris.Application.Webhooks", primitive);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
     public void No_Microsoft_Data_Sqlite_reference()
     {
         var files = RepositoryScan.EnumerateFiles("", "*.csproj")

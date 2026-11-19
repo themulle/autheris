@@ -116,6 +116,144 @@ public sealed class ModuleConfigurationTests
 
         ex.Message.ShouldContain("Gateway:CompletelyUnknownSection");
     }
+
+    [Theory]
+    [InlineData("Gateway:Events:CdcWebhooks:Enabled", "events")]
+    [InlineData("Gateway:Events:Anything", "events")]
+    public void Events_section_without_events_module_fails_fast(string key, string moduleId)
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { [key] = "true" })
+            .Build();
+
+        var ex = Should.Throw<InvalidOperationException>(() =>
+            UnknownGatewayKeyGuard.Validate(
+                config,
+                loadedModuleIds: Array.Empty<string>(),
+                claimedModuleSections: Array.Empty<string>()));
+
+        ex.Message.ShouldContain("Gateway:Events");
+        ex.Message.ShouldContain($"module {moduleId} is not installed");
+    }
+
+    [Theory]
+    [InlineData("Gateway:Lineage:Endpoint", "lineage")]
+    [InlineData("Gateway:Lineage:ApiKey", "lineage")]
+    public void Lineage_section_without_lineage_module_fails_fast(string key, string moduleId)
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { [key] = "x" })
+            .Build();
+
+        var ex = Should.Throw<InvalidOperationException>(() =>
+            UnknownGatewayKeyGuard.Validate(
+                config,
+                loadedModuleIds: Array.Empty<string>(),
+                claimedModuleSections: Array.Empty<string>()));
+
+        ex.Message.ShouldContain("Gateway:Lineage");
+        ex.Message.ShouldContain($"module {moduleId} is not installed");
+    }
+
+    [Fact]
+    public void Core_cdc_sections_accepted_without_events_module()
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Gateway:Webhooks:Enabled"] = "true",
+                ["Gateway:CdcStream:RetentionHours"] = "72",
+                ["Gateway:PostgreSqlCdc:Enabled"] = "true",
+                ["Gateway:MssqlChangeTracking:Enabled"] = "true",
+            })
+            .Build();
+
+        Should.NotThrow(() =>
+            UnknownGatewayKeyGuard.Validate(
+                config,
+                loadedModuleIds: Array.Empty<string>(),
+                claimedModuleSections: Array.Empty<string>()));
+    }
+
+    [Theory]
+    [InlineData("Gateway:Webhooks")]
+    [InlineData("Gateway:CdcStream")]
+    [InlineData("Gateway:PostgreSqlCdc")]
+    [InlineData("Gateway:MssqlChangeTracking")]
+    public void Cdc_sections_are_host_sections_not_module_claimable(string section)
+    {
+        ModuleSecurityGuards.IsHostConfigSection(section).ShouldBeTrue();
+        Should.Throw<ModuleLoadException>(() => ModuleSecurityGuards.ValidateConfigClaim("events", section));
+    }
+
+    [Fact]
+    public void Module_with_cdc_stream_id_collides_with_host_section()
+    {
+        var ex = Should.Throw<ModuleLoadException>(() =>
+            ModuleLoader.BuildScopedModuleConfiguration("cdc-stream", Array.Empty<string>(), new ConfigurationBuilder().Build()));
+        ex.Message.ShouldContain("collides with the host configuration section");
+    }
+
+    [Fact]
+    public void Unmodularised_dbt_and_openmetadata_sections_stay_accepted()
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Gateway:Dbt:Enabled"] = "true",
+                ["Gateway:OpenMetadata:Enabled"] = "true",
+            })
+            .Build();
+        var result = ModuleLoader.LoadModules(new ServiceCollection(), config, new FakeHostEnvironment(), NullLogger<ModuleLoader>.Instance);
+
+        Should.NotThrow(() =>
+            UnknownGatewayKeyGuard.ThrowIfUnknownKeys(config, result, GatewayConfigurationSchema.EnforcedModuleSections));
+
+        var lineage = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Gateway:Lineage:Endpoint"] = "x" })
+            .Build();
+        Should.Throw<InvalidOperationException>(() =>
+            UnknownGatewayKeyGuard.ThrowIfUnknownKeys(lineage, result, GatewayConfigurationSchema.EnforcedModuleSections))
+            .Message.ShouldContain("module lineage is not installed");
+    }
+
+    [Fact]
+    public void Core_event_bus_keys_accepted_under_event_bus_section()
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Gateway:EventBus:DeliveryMode"] = "Queued",
+                ["Gateway:EventBus:SubscriberQueueCapacity"] = "512",
+            })
+            .Build();
+
+        Should.NotThrow(() =>
+            UnknownGatewayKeyGuard.Validate(
+                config,
+                loadedModuleIds: Array.Empty<string>(),
+                claimedModuleSections: Array.Empty<string>()));
+    }
+
+    [Theory]
+    [InlineData("Gateway:Events:DeliveryMode", false)]
+    [InlineData("Gateway:Events:SubscriberQueueCapacity", false)]
+    [InlineData("Gateway:Events:DeliveryMode", true)]
+    public void Old_event_bus_keys_fail_with_new_path_message(string key, bool eventsModuleLoaded)
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { [key] = "x" })
+            .Build();
+        var loaded = eventsModuleLoaded ? new[] { "events" } : Array.Empty<string>();
+        var claimed = eventsModuleLoaded ? new[] { "Gateway:Events" } : Array.Empty<string>();
+
+        var ex = Should.Throw<InvalidOperationException>(() =>
+            UnknownGatewayKeyGuard.Validate(config, loaded, claimed));
+
+        ex.Message.ShouldContain(key);
+        ex.Message.ShouldContain("Gateway:EventBus:" + key["Gateway:Events:".Length..]);
+        ex.Message.ShouldNotContain("is not installed");
+    }
 }
 
 [Trait("Category", "Security")]

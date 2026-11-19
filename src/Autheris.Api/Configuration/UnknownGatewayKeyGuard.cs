@@ -33,6 +33,18 @@ public static class UnknownGatewayKeyGuard
         (GatewayConfigurationSchema.Root + ":CatalogSearch:Enabled", "CatalogSearch:Enabled (removed; catalog search validation and warm-up are always active, tune CatalogSearch:WarmupOnStartup instead)")
     ];
 
+    private static readonly (string Key, string Message)[] RemovedEventBusKeys =
+    [
+        (GatewayConfigurationSchema.Root + ":Events:DeliveryMode", "Gateway:Events:DeliveryMode (removed; moved to Gateway:EventBus:DeliveryMode)"),
+        (GatewayConfigurationSchema.Root + ":Events:SubscriberQueueCapacity", "Gateway:Events:SubscriberQueueCapacity (removed; moved to Gateway:EventBus:SubscriberQueueCapacity)")
+    ];
+
+    // Whole sections that moved into a module: every key under the old section fails startup and names the new path.
+    private static readonly (string Prefix, string Message)[] RemovedModuleSections =
+    [
+        (GatewayConfigurationSchema.Root + ":CdcWebhooks", "Gateway:CdcWebhooks (removed; moved to Gateway:Events:CdcWebhooks, provided by the events module)")
+    ];
+
     private static readonly (string Key, string Message)[] AllRemovedKeysWithMessage = [.. RemovedProcedureDeclaredKeys, .. RemovedFlagKeys];
 
     private const string RemovedAuthzReplacement = "removed by ADR-020; data access is granted by grant records";
@@ -81,11 +93,45 @@ public static class UnknownGatewayKeyGuard
         GatewayConfigurationSchema.Root + ":HitLStepUp:PreferredItsmSystem"
     ];
 
+    // Runs before any module-section check: the removed key must be named even when the events module is absent or claims Gateway:Events.
+    private static void ThrowIfRemovedEventBusKeys(IConfiguration configuration)
+    {
+        var found = new List<string>();
+        foreach (var (removedKey, message) in RemovedEventBusKeys)
+        {
+            if (configuration.AsEnumerable().Any(kv => string.Equals(kv.Key, removedKey, StringComparison.OrdinalIgnoreCase)))
+            {
+                found.Add(message);
+            }
+        }
+
+        foreach (var (prefix, message) in RemovedModuleSections)
+        {
+            if (configuration.AsEnumerable().Any(kv =>
+                    !string.IsNullOrEmpty(kv.Key) &&
+                    (kv.Key.Equals(prefix, StringComparison.OrdinalIgnoreCase) ||
+                     kv.Key.StartsWith(prefix + ":", StringComparison.OrdinalIgnoreCase))))
+            {
+                found.Add(message);
+            }
+        }
+
+        if (found.Count > 0)
+        {
+            throw new InvalidOperationException(BuildMessage(found));
+        }
+    }
+
     public static void ThrowIfUnknownKeys(IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(configuration);
 
-        var unknown = FindUnknownKeys(configuration);
+        ThrowIfRemovedEventBusKeys(configuration);
+
+        // This early pass runs before the modules load. The sections of the modules enabled in Gateway:Modules:Enabled are not judged
+        // here: the module-aware pass after loading checks them against the sections the loaded modules actually claim, so an
+        // enabled module that fails to load still stops startup, and a module that is not enabled never gets its keys accepted.
+        var unknown = FindUnknownKeys(configuration, EnabledModuleSections(configuration));
         if (unknown.Count > 0)
         {
             foreach (var key in unknown)
@@ -100,6 +146,16 @@ public static class UnknownGatewayKeyGuard
 
             throw new InvalidOperationException(BuildMessage(unknown));
         }
+    }
+
+    private static string[] EnabledModuleSections(IConfiguration configuration)
+    {
+        var enabledIds = Autheris.Api.Hosting.ModuleLoader.ReadEnabledModuleIds(configuration)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return GatewayConfigurationSchema.KnownModuleSections
+            .Where(kv => enabledIds.Contains(kv.Value))
+            .Select(kv => kv.Key)
+            .ToArray();
     }
 
     public static void ThrowIfUnknownKeys(
@@ -126,6 +182,7 @@ public static class UnknownGatewayKeyGuard
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentNullException.ThrowIfNull(loadedModuleIds);
 
+        ThrowIfRemovedEventBusKeys(configuration);
         var loadedSet = new HashSet<string>(loadedModuleIds, StringComparer.OrdinalIgnoreCase);
         var claimedSet = claimedModuleSections is not null
             ? new HashSet<string>(claimedModuleSections, StringComparer.OrdinalIgnoreCase)

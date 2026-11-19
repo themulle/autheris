@@ -15,7 +15,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Security;
-using Autheris.Extensions.Cdc.CustomQuery;
+using Autheris.Infrastructure.Streaming.Producers.CustomQuery;
 using Autheris.Tests.Unit.Catalog;
 using NSubstitute;
 using Shouldly;

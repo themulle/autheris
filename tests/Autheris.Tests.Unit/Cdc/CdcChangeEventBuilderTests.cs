@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Autheris.Domain.Model;
-using Autheris.Extensions.Cdc;
+using Autheris.Infrastructure.Streaming.Producers;
 using Shouldly;
 using Xunit;
 using static CdcProducerHarness;

@@ -77,6 +77,7 @@ src/Autheris.Application/Sql/Services/TrinoMetadataQueryHandler.cs|1
 src/Autheris.Application/Sql/Services/WebSqlStatementManager.cs|3
 src/Autheris.Application/Sql/Tree/GovernedTreeQueryService.cs|2
 src/Autheris.Application/State/Caching/Services/ClientTierResolver.cs|2
+src/Autheris.Application/Streaming/DebeziumCdcParser.cs|1
 src/Autheris.Application/Streaming/Services/StreamRlsPolicyEnforcer.cs|2
 src/Autheris.Application/VirtualFilters/EffectiveFilterInspector.cs|3
 src/Autheris.Application/VirtualFilters/Federation/VirtualFilterKeySetCache.cs|1
@@ -88,8 +89,6 @@ src/Autheris.Domain/Model/AccessProfile.cs|1
 src/Autheris.Domain/Model/AccessProfileAssignment.cs|1
 src/Autheris.Domain/Model/GovernanceModels.cs|3
 src/Autheris.Domain/Model/VirtualFilterModels.cs|2
-src/Autheris.Extensions/Cdc/CustomQuery/CustomQueryPollerService.cs|5
-src/Autheris.Extensions/Cdc/DebeziumCdcParser.cs|1
 src/Autheris.Extensions/Dbt/DbtHealthCircuitBreaker.cs|3
 src/Autheris.Extensions/Dbt/DbtMetadataIngestionService.cs|4
 src/Autheris.Extensions/Dbt/DbtWebhookReceiver.cs|3
@@ -120,3 +119,4 @@ src/Autheris.Infrastructure/Persistence/RightsAndPoliciesStore.cs|1
 src/Autheris.Infrastructure/Persistence/RowFilterEvaluationStore.cs|2
 src/Autheris.Infrastructure/Persistence/TenantRegistryStore.cs|1
 src/Autheris.Infrastructure/Plugins/PluginManager.cs|2
+src/Autheris.Infrastructure/Streaming/Producers/CustomQuery/CustomQueryPollerService.cs|5
