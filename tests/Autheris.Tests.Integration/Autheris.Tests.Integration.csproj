@@ -34,12 +34,10 @@
     <ProjectReference Include="..\..\src\Autheris.Api\Autheris.Api.csproj" />
     <ProjectReference Include="..\Autheris.Tests.Common\Autheris.Tests.Common.csproj" />
     <Compile Include="..\Autheris.Tests.Unit\AccessProfiles\TestAssign.cs" Link="TestAssign.cs" />
-    <Compile Include="..\Autheris.Tests.Unit\AccessProfiles\AccessProfileRepositoryContractBase.cs" Link="AccessProfileRepositoryContractBase.cs" />
     <Compile Include="..\Autheris.Tests.Unit\Governance\GovernanceStoresContractBase.cs" Link="GovernanceStoresContractBase.cs" />
     <Compile Include="..\Autheris.Tests.Unit\ConsentRequests\ConsentDecisionStatusGuardContractBase.cs" Link="ConsentDecisionStatusGuardContractBase.cs" />
     <Compile Include="..\Autheris.Tests.Unit\Governance\RowFilterEvaluationRepositoryContractTestsBase.cs" Link="RowFilterEvaluationRepositoryContractTestsBase.cs" />
     <Compile Include="..\Autheris.Tests.Unit\Governance\CatalogSettingsRepositoryContractTestsBase.cs" Link="CatalogSettingsRepositoryContractTestsBase.cs" />
-    <Compile Include="..\Autheris.Tests.Unit\Governance\RelationRepositoryContractTestsBase.cs" Link="RelationRepositoryContractTestsBase.cs" />
     <Compile Include="..\Autheris.Tests.Unit\Dbt\DbtSyncTestExtensions.cs" Link="DbtSyncTestExtensions.cs" />
     <Compile Include="..\Autheris.Tests.Unit\Governance\DataOwnerAssignmentRepositoryContractTestsBase.cs" Link="DataOwnerAssignmentRepositoryContractTestsBase.cs" />
     <Compile Include="..\Autheris.Tests.Unit\Governance\ConsentDescriptionRepositoryContractBase.cs" Link="ConsentDescriptionRepositoryContractBase.cs" />

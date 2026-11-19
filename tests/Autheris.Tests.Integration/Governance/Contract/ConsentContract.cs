@@ -582,6 +582,43 @@ public abstract class ConsentContract : GovernanceContractBase
         var active = await Store.Consents.GetActiveConsentsForSubjectsAsync([GranteeSid], table.Identifier, DateTimeOffset.UtcNow, Store.TenantA);
         active.Should().ContainSingle();
     }
+
+    [RequiresContainerRuntimeFact]
+    public async Task ActivateConsent_ForGroupGrantee_PersistsGranteeSid()
+    {
+        if (!Store.IsAvailable) return;
+        var repo = Store.Repository;
+        var tableId = new TableIdentifier("sales", "public", "orders");
+        var table = new Table { Id = Guid.NewGuid(), SourceName = "sales", SchemaName = "public", TableName = "orders" };
+        await repo.UpsertTableMetadataAsync(new TableMetadata
+        {
+            Table = table,
+            Identifier = tableId,
+            Columns = [new TableColumn { TableId = table.Id, ColumnName = "id", DataType = "int" }]
+        });
+
+        var groupSid = new Sid("S-1-5-21-GROUP-ANALYTICS");
+        var reqGroup = await repo.CreateConsentRequestAsync(new ConsentRequest
+        {
+            TableId = table.Id,
+            TableIdentifier = tableId,
+            RequesterSid = new Sid("S-1-5-21-REQ"),
+            RequestedGranteeType = GranteeType.Group,
+            RequestedGranteeRef = groupSid.Value,
+            BusinessJustification = "Group grantee auto-approve",
+            RequestedValidTo = DateTimeOffset.UtcNow.AddDays(7),
+            Status = "PENDING",
+            TenantId = Store.TenantA
+        });
+
+        await repo.ActivateConsentForAutoApproveAsync(reqGroup.Id);
+
+        var activeConsents = await repo.GetActiveConsentsForSubjectsAsync([groupSid], tableId, DateTimeOffset.UtcNow, Store.TenantA);
+
+        var groupConsent = activeConsents.Should().ContainSingle().Which;
+        groupConsent.GranteeType.Should().Be(GranteeType.Group);
+        groupConsent.GranteeSid.Should().Be(groupSid);
+    }
 }
 
 [Collection(GovernancePostgresCollection.Name)]

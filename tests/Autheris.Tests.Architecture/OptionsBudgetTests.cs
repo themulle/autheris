@@ -24,7 +24,7 @@ public sealed partial class OptionsBudgetTests(ITestOutputHelper output)
     // StaticJwksSource) are not *Options classes and add no counted class. No existing property could be removed in exchange.
     private const int CeilingSettableProperties = 959;
     private const int CeilingEnabledFlags = 71;
-    private const int CeilingUndocumentedProperties = 474;
+    private const int CeilingUndocumentedProperties = 473;
 
     [GeneratedRegex(@"\bclass\s+(\w+Options)\b")]
     private static partial Regex OptionsClassDeclaration();
