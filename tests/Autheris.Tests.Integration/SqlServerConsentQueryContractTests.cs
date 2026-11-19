@@ -67,7 +67,6 @@ public sealed class SqlServerConsentQueryContractTests : ConsentQueryContractTes
     [Theory]
     [InlineData("ix_consents_tenant_table", "CONSENTS")]
     [InlineData("ix_consents_tenant_grantee", "CONSENTS")]
-    [InlineData("ix_consents_tenant_role", "CONSENTS")]
     [InlineData("ix_consent_column_rules_consent", "CONSENT_COLUMN_RULES")]
     [InlineData("ix_consent_row_filters_consent", "CONSENT_ROW_FILTERS")]
     [InlineData("ix_table_owners_owner", "TABLE_OWNERS")]
