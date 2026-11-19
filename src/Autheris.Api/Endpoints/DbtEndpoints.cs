@@ -549,7 +549,10 @@ public static class DbtEndpoints
         var result = await webhookReceiver.ProcessWebhookAsync(payload, signatureHeader, context.RequestAborted);
         if (!result.Success)
         {
-            return Results.Json(result, statusCode: StatusCodes.Status401Unauthorized);
+            var statusCode = result.StoreUnavailable
+                ? StatusCodes.Status503ServiceUnavailable
+                : StatusCodes.Status401Unauthorized;
+            return Results.Json(result, statusCode: statusCode);
         }
 
         return Results.Ok(result);
