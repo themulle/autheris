@@ -60,16 +60,32 @@ public class ParameterAccountingTests
     }
 
     [Theory]
-    [InlineData("p1")]
-    [InlineData("P12")]
     [InlineData("__x")]
     [InlineData("gql_limit")]
     [InlineData("autheris_tenant")]
     [InlineData("Autheris_x")]
+    [Trait("Category", "Security")]
     public void ClientParameterName_WithReservedPrefix_IsRejected(string name)
     {
-        Assert.Throws<System.Security.SecurityException>(() =>
+        var ex = Assert.Throws<System.Security.SecurityException>(() =>
             CompilerTestHelpers.GenerateSqlServer($"SELECT id FROM t WHERE a = __param_{name}"));
+        Assert.DoesNotContain(name, ex.Message, StringComparison.OrdinalIgnoreCase);   // the message never echoes the supplied name
+    }
+
+    [Theory]
+    [InlineData("p0")]
+    [InlineData("p1")]
+    [InlineData("P12")]
+    [InlineData("p1x")]
+    [Trait("Category", "Security")]
+    public void ClientParameterName_LikeAnOrdinalMarker_IsAnOrdinaryName(string name)
+    {
+        var compiled = CompilerTestHelpers.GenerateSqlServer($"SELECT id FROM t WHERE a = __param_{name}");
+
+        var slot = Assert.Single(compiled.Parameters);
+        Assert.Equal(ParameterOrigin.ClientNamed, slot.Origin);
+        Assert.Equal(name, slot.SourceName);
+        Assert.Null(slot.Value);
     }
 
     [Fact]

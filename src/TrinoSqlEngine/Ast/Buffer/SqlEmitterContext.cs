@@ -25,9 +25,10 @@ public sealed class SqlEmitterContext
     private static readonly Regex ClientNameRegex = new(
         @"\A[A-Za-z_][A-Za-z0-9_]{0,127}\z", RegexOptions.Compiled | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
 
-    // client names that could look like internal markers or reserved parameters are rejected.
+    // Internal markers are ordinal and client names are bound by source name only, so a client name such as p0 cannot alias a marker.
+    // Only names in the internal prefix namespaces are rejected.
     private static readonly Regex ReservedClientNameRegex = new(
-        @"\A(p[0-9]|__|gql_|autheris)", RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(100));
+        @"\A(__|gql_|autheris)", RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(100));
 
     private readonly List<BoundParameter>? _bound;
     private readonly Dictionary<DedupKey, int>? _dedup;
