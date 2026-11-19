@@ -20,7 +20,12 @@ public partial class GovernanceRepository : ICdcStreamStore
 {
     public bool IsDurable => true;
 
-    private CdcStreamSql CdcCore => _cdcCore ??= new CdcStreamSql(_dialect is not PostgreSqlGovernanceDialect);
+    private CdcStreamSql CdcCore => _cdcCore ??= new CdcStreamSql(_dialect switch
+    {
+        PostgreSqlGovernanceDialect => false,
+        SqlServerGovernanceDialect => true,
+        _ => throw new NotSupportedException($"CDC stream SQL is not available for dialect '{_dialect.GetType().Name}'.")
+    });
     private CdcStreamSql? _cdcCore;
 
     public async Task<CdcStreamDescriptor> EnsureStreamAsync(string source, TableIdentifier table, CancellationToken ct = default)

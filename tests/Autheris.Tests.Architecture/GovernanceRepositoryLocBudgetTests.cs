@@ -11,7 +11,7 @@ public sealed class GovernanceRepositoryLocBudgetTests
     // Post-consolidation budget ceiling with appropriate headroom (parent guidance WP-SIMPL-20d).
     // Original AD-1 target was 7,000 lines; Wave 4-7 unified governance store extensions
     // (WP-SIMPL-41/42/45/47/48/52) temporarily raised the total and WP-SIMPL-52 PR 6 will ratchet it back down when legacy tables/repos are dropped.
-    public const int MaxAllowedLoc = 15_842;
+    public const int MaxAllowedLoc = 15_841;
 
     [Fact]
     [Trait("Category", "Architecture")]
@@ -36,8 +36,7 @@ public sealed class GovernanceRepositoryLocBudgetTests
     [Trait("Category", "Architecture")]
     public void Only_AuditSqlCore_keeps_the_SqlCore_suffix()
     {
-        // Follow-up: ConsentPatternSqlCore.cs and GrantRecordSqlCore.cs fold into GovernanceRepository partials in the sibling refactor; then this list shrinks to AuditSqlCore.cs.
-        var allowed = new[] { "AuditSqlCore.cs", "ConsentPatternSqlCore.cs", "GrantRecordSqlCore.cs" };
+        var allowed = new[] { "AuditSqlCore.cs" };
         var actual = Directory.GetFiles(Path.Combine(RepositoryScan.RepoRoot, "src"), "*SqlCore.cs", SearchOption.AllDirectories)
             .Select(Path.GetFileName)
             .OrderBy(n => n, StringComparer.Ordinal)
