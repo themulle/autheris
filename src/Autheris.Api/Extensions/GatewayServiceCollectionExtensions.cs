@@ -126,7 +126,9 @@ public static partial class GatewayServiceCollectionExtensions
             moduleLoadResult,
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
-                [Autheris.Domain.Options.GatewaySections.Lakehouse] = "lakehouse"
+                [Autheris.Domain.Options.GatewaySections.Lakehouse] = "lakehouse",
+                [Autheris.Domain.Options.GatewaySections.Events] = "events",
+                [Autheris.Domain.Options.GatewaySections.Lineage] = "lineage"
             });
         return services;
     }

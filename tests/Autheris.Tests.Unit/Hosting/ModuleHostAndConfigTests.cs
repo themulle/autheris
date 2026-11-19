@@ -116,6 +116,75 @@ public sealed class ModuleConfigurationTests
 
         ex.Message.ShouldContain("Gateway:CompletelyUnknownSection");
     }
+
+    [Theory]
+    [InlineData("Gateway:Events:CdcWebhooks:Enabled", "events")]
+    [InlineData("Gateway:Events:Anything", "events")]
+    public void Events_section_without_events_module_fails_fast(string key, string moduleId)
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { [key] = "true" })
+            .Build();
+
+        var ex = Should.Throw<InvalidOperationException>(() =>
+            UnknownGatewayKeyGuard.Validate(
+                config,
+                loadedModuleIds: Array.Empty<string>(),
+                claimedModuleSections: Array.Empty<string>()));
+
+        ex.Message.ShouldContain("Gateway:Events");
+        ex.Message.ShouldContain($"module {moduleId} is not installed");
+    }
+
+    [Theory]
+    [InlineData("Gateway:Lineage:Endpoint", "lineage")]
+    [InlineData("Gateway:Lineage:ApiKey", "lineage")]
+    public void Lineage_section_without_lineage_module_fails_fast(string key, string moduleId)
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { [key] = "x" })
+            .Build();
+
+        var ex = Should.Throw<InvalidOperationException>(() =>
+            UnknownGatewayKeyGuard.Validate(
+                config,
+                loadedModuleIds: Array.Empty<string>(),
+                claimedModuleSections: Array.Empty<string>()));
+
+        ex.Message.ShouldContain("Gateway:Lineage");
+        ex.Message.ShouldContain($"module {moduleId} is not installed");
+    }
+
+    [Fact]
+    public void Core_cdc_sections_accepted_without_events_module()
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Gateway:Webhooks:Enabled"] = "true",
+                ["Gateway:CdcStream:RetentionHours"] = "72",
+                ["Gateway:PostgreSqlCdc:Enabled"] = "true",
+                ["Gateway:MssqlChangeTracking:Enabled"] = "true",
+            })
+            .Build();
+
+        Should.NotThrow(() =>
+            UnknownGatewayKeyGuard.Validate(
+                config,
+                loadedModuleIds: Array.Empty<string>(),
+                claimedModuleSections: Array.Empty<string>()));
+    }
+
+    [Theory]
+    [InlineData("events", "Gateway:Webhooks")]
+    [InlineData("events", "Gateway:CdcStream")]
+    [InlineData("events", "Gateway:PostgreSqlCdc")]
+    [InlineData("events", "Gateway:MssqlChangeTracking")]
+    [InlineData("cdc", "Gateway:CdcStream")]
+    public void Cdc_sections_are_host_sections_not_module_claimable(string moduleId, string section)
+    {
+        Should.Throw<ModuleLoadException>(() => ModuleSecurityGuards.ValidateConfigClaim(moduleId, section));
+    }
 }
 
 [Trait("Category", "Security")]
