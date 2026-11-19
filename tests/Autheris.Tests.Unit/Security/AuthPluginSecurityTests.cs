@@ -532,8 +532,8 @@ public sealed class AuthPluginSecurityTests
                 {
                     TableIdentifier = new TableIdentifier("data_source", "public", "customers"),
                     TenantId = new TenantId("tenant-1"),
-                    GranteeType = GranteeType.Role,
-                    RoleName = "Analyst",
+                    GranteeType = GranteeType.Group,
+                    GranteeSid = new Sid("Analyst"),
                     Effect = ConsentEffect.Deny,
                     ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
                     ValidTo = DateTimeOffset.UtcNow.AddDays(1)

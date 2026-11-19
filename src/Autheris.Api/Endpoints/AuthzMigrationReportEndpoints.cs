@@ -33,12 +33,10 @@ public static class AuthzMigrationReportEndpoints
             return Results.StatusCode(StatusCodes.Status403Forbidden);
         }
 
-        var consents = await repository.GetRevokedRoleConsentsAsync(ct).ConfigureAwait(false);
         var assignments = await repository.GetDeactivatedAssignmentsAsync(ct).ConfigureAwait(false);
         var revokedRowFilterConsents = await repository.GetRevokedRowFilterConsentsAsync(ct).ConfigureAwait(false);
         return Results.Ok(new
         {
-            revokedRoleConsents = consents,
             deactivatedProfileAssignments = assignments,
             revokedRowFilterConsents
         });

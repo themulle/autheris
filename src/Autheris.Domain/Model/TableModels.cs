@@ -13,7 +13,6 @@ public enum GranteeType
 {
     User = 1,
     Group = 2,
-    Role = 3,
     ServicePrincipal = 4
 }
 

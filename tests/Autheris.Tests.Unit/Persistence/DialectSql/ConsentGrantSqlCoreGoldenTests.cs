@@ -19,46 +19,12 @@ public sealed class ConsentGrantSqlCoreGoldenTests
 
     public static TheoryData<string> Dialects() => DialectKit.Names();
 
-    private static string ActiveSql(string dialect, bool withTenant) => dialect switch
-    {
-        "PostgreSql" => PostgreSqlGovernanceRepository.ConsentGrantSql.ActiveRoleConsents(withTenant),
-        "SqlServer" => SqlServerGovernanceRepository.ConsentGrantSql.ActiveRoleConsents(withTenant),
-        _ => throw new ArgumentOutOfRangeException(nameof(dialect))
-    };
-
     private static string RevokeTargetSql(string dialect) => dialect switch
     {
         "PostgreSql" => PostgreSqlGovernanceRepository.ConsentGrantSql.RevokeTarget,
         "SqlServer" => SqlServerGovernanceRepository.ConsentGrantSql.RevokeTarget,
         _ => throw new ArgumentOutOfRangeException(nameof(dialect))
     };
-
-    private static string ExpectedActiveSql(DialectKit kit, bool withTenant)
-    {
-        var f = kit.Golden(Area).Of("GetActiveRoleConsentsAsync");
-        var head = f.Single(x => x.Contains("SELECT c.id", StringComparison.Ordinal));
-        var tail = f.Single(x => x.Contains("c.grantee_type = 'Role'", StringComparison.Ordinal));
-        var tenant = f.Single(x => x == " AND c.tenant_id = @tenantId");
-        return head + (withTenant ? tenant : string.Empty) + tail;
-    }
-
-    private static DataTable ConsentRows(DateTimeOffset validFrom, DateTimeOffset validTo, string? tenant)
-    {
-        var table = new DataTable();
-        foreach (var (name, type) in new (string, Type)[]
-                 {
-                     ("id", typeof(string)), ("table_id", typeof(string)), ("consent_request_id", typeof(string)), ("effect", typeof(string)),
-                     ("grantee_type", typeof(string)), ("grantee_sid", typeof(string)), ("role_id", typeof(string)), ("role_name", typeof(string)),
-                     ("valid_from", typeof(string)), ("valid_to", typeof(string)), ("is_revoked", typeof(int)), ("tenant_id", typeof(string))
-                 })
-        {
-            table.Columns.Add(name, type);
-        }
-
-        table.Rows.Add(Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), DBNull.Value, "Allow", "Role", DBNull.Value, DBNull.Value, "Analyst",
-            validFrom.ToString("O"), validTo.ToString("O"), 0, (object?)tenant ?? DBNull.Value);
-        return table;
-    }
 
     [Trait("Category", "Security")]
     [Theory]
@@ -72,99 +38,38 @@ public sealed class ConsentGrantSqlCoreGoldenTests
         var clock = new FakeTimeProvider(Now);
         var consentId = Guid.Parse("11111111-2222-3333-4444-555555555555");
 
-        await ConsentGrantSqlCore.ReadActiveRoleConsentsAsync(conn, ActiveSql(dialect, true), Table, "Analyst", Tenant, Now, CancellationToken.None);
         await ConsentGrantSqlCore.ReadRevokeTargetAsync(conn, tx, RevokeTargetSql(dialect), consentId, Actor, CancellationToken.None);
         await ConsentGrantSqlCore.MarkRevokedAsync(conn, tx, consentId, Actor, "because", clock, CancellationToken.None);
         conn.ScalarResult = Now.AddDays(1).ToString("O");
         var updated = await ConsentGrantSqlCore.UpdateDescriptionAsync(conn, tx, new ConsentDescriptionUpdate(consentId, Tenant, "desc"), clock, CancellationToken.None);
 
         updated.ShouldBeTrue();
-        conn.Commands.Count.ShouldBe(5);
+        conn.Commands.Count.ShouldBe(4);
         var golden = kit.Golden(Area);
 
-        conn.Commands[0].CommandText.ShouldBe(ExpectedActiveSql(kit, true));
-        conn.Commands[0].TransactionSet.ShouldBeFalse();
-        kit.ShouldBindExactly(conn.Commands[0], ("@domain", "Sales"), ("@schema", "Crm"), ("@table", "Orders"), ("@tenantId", "tenant-a"), ("@role", "Analyst"));
+        conn.Commands[0].CommandText.ShouldBe(golden.Of("RevokeConsentInTransactionAsync").Single(f => f.Contains("SELECT t.source_name", StringComparison.Ordinal) && f.Contains("UPDLOCK", StringComparison.Ordinal) == (dialect == "SqlServer")));
+        conn.Commands[0].TransactionSet.ShouldBeTrue();
+        kit.ShouldBindExactly(conn.Commands[0], ("@id", consentId.ToString()));
 
-        conn.Commands[1].CommandText.ShouldBe(golden.Of("RevokeConsentInTransactionAsync").Single(f => f.Contains("SELECT t.source_name", StringComparison.Ordinal) && f.Contains("UPDLOCK", StringComparison.Ordinal) == (dialect == "SqlServer")));
+        conn.Commands[1].CommandText.ShouldBe(golden.Fragment("RevokeConsentInTransactionAsync", "UPDATE CONSENTS SET is_revoked = 1"));
         conn.Commands[1].TransactionSet.ShouldBeTrue();
-        kit.ShouldBindExactly(conn.Commands[1], ("@id", consentId.ToString()));
-
-        conn.Commands[2].CommandText.ShouldBe(golden.Fragment("RevokeConsentInTransactionAsync", "UPDATE CONSENTS SET is_revoked = 1"));
-        conn.Commands[2].TransactionSet.ShouldBeTrue();
         kit.ShouldBindExactly(
-            conn.Commands[2], ("@id", consentId.ToString()), ("@by", Actor.Value), ("@now", Now.ToString("O")), ("@reason", "because"));
+            conn.Commands[1], ("@id", consentId.ToString()), ("@by", Actor.Value), ("@now", Now.ToString("O")), ("@reason", "because"));
 
-        conn.Commands[3].CommandText.ShouldBe(golden.Fragment("UpdateConsentDescriptionInTransactionAsync", "SELECT valid_to"));
+        conn.Commands[2].CommandText.ShouldBe(golden.Fragment("UpdateConsentDescriptionInTransactionAsync", "SELECT valid_to"));
+        conn.Commands[2].TransactionSet.ShouldBeTrue();
+        kit.ShouldBindExactly(conn.Commands[2], ("@id", consentId.ToString()), ("@t", "tenant-a"));
+
+        conn.Commands[3].CommandText.ShouldBe(golden.Fragment("UpdateConsentDescriptionInTransactionAsync", "UPDATE CONSENTS SET description"));
         conn.Commands[3].TransactionSet.ShouldBeTrue();
-        kit.ShouldBindExactly(conn.Commands[3], ("@id", consentId.ToString()), ("@t", "tenant-a"));
-
-        conn.Commands[4].CommandText.ShouldBe(golden.Fragment("UpdateConsentDescriptionInTransactionAsync", "UPDATE CONSENTS SET description"));
-        conn.Commands[4].TransactionSet.ShouldBeTrue();
-        kit.ShouldBindExactly(conn.Commands[4], ("@d", "desc"), ("@id", consentId.ToString()), ("@t", "tenant-a"));
+        kit.ShouldBindExactly(conn.Commands[3], ("@d", "desc"), ("@id", consentId.ToString()), ("@t", "tenant-a"));
         conn.TransactionSetCount.ShouldBe(4);
-    }
-
-    [Trait("Category", "Security")]
-    [Theory]
-    [MemberData(nameof(Dialects))]
-    public async Task ReadActiveRoleConsents_WithTenant_BindsTenantPredicate(string dialect)
-    {
-        var kit = DialectKit.Of(dialect);
-        using var conn = kit.NewConnection();
-
-        await ConsentGrantSqlCore.ReadActiveRoleConsentsAsync(conn, ActiveSql(dialect, true), Table, "Analyst", Tenant, Now, CancellationToken.None);
-
-        var command = conn.Commands.Single();
-        command.CommandText.ShouldContain("c.tenant_id = @tenantId");
-        command.Parameters.Single(p => p.Name == "@tenantId").Value.ShouldBe("tenant-a");
-    }
-
-    [Theory]
-    [MemberData(nameof(Dialects))]
-    public async Task ReadActiveRoleConsents_WithoutTenant_OmitsPredicateAndBinding(string dialect)
-    {
-        var kit = DialectKit.Of(dialect);
-        using var conn = kit.NewConnection();
-
-        await ConsentGrantSqlCore.ReadActiveRoleConsentsAsync(conn, ActiveSql(dialect, false), Table, "Analyst", null, Now, CancellationToken.None);
-
-        var command = conn.Commands.Single();
-        command.CommandText.ShouldBe(ExpectedActiveSql(kit, false));
-        command.CommandText.ShouldNotContain("@tenantId");
-        kit.ShouldBindExactly(command, ("@domain", "Sales"), ("@schema", "Crm"), ("@table", "Orders"), ("@role", "Analyst"));
-    }
-
-    [Fact]
-    public async Task ReadActiveRoleConsents_MapsRowsAndKeepsOnlyActive()
-    {
-        using var conn = DialectKit.PostgreSql.NewConnection();
-        conn.EnqueueReader(ConsentRows(Now.AddDays(-1), Now.AddDays(5), "tenant-a"));
-
-        var active = await ConsentGrantSqlCore.ReadActiveRoleConsentsAsync(
-            conn, PostgreSqlGovernanceRepository.ConsentGrantSql.ActiveRoleConsents(true), Table, "Analyst", Tenant, Now, CancellationToken.None);
-
-        var consent = active.Single();
-        consent.TenantId.ShouldBe(Tenant);
-        consent.RoleName.ShouldBe("Analyst");
-        consent.TableIdentifier.ShouldBe(Table);
-
-        using var conn2 = DialectKit.PostgreSql.NewConnection();
-        conn2.EnqueueReader(ConsentRows(Now.AddDays(-10), Now.AddDays(-1), "tenant-a"));
-        (await ConsentGrantSqlCore.ReadActiveRoleConsentsAsync(
-            conn2, PostgreSqlGovernanceRepository.ConsentGrantSql.ActiveRoleConsents(false), Table, "Analyst", null, Now, CancellationToken.None)).ShouldBeEmpty();
-
-        // DT-SC-16: a NULL stored tenant is an integrity error, never the legacy tenant
-        using var conn3 = DialectKit.PostgreSql.NewConnection();
-        conn3.EnqueueReader(ConsentRows(Now.AddDays(-1), Now.AddDays(5), null));
-        await Should.ThrowAsync<Autheris.Domain.Exceptions.StoredTenantIntegrityException>(() => ConsentGrantSqlCore.ReadActiveRoleConsentsAsync(
-            conn3, PostgreSqlGovernanceRepository.ConsentGrantSql.ActiveRoleConsents(false), Table, "Analyst", null, Now, CancellationToken.None));
     }
 
     [Theory]
     [InlineData("User", "s-1-5-21-admin", 0, true, false)]
     [InlineData("User", "S-1-5-21-OTHER", 1, false, true)]
-    [InlineData("Role", "S-1-5-21-ADMIN", 0, false, false)]
+    [InlineData("Group", "S-1-5-21-ADMIN", 0, false, false)]
     public async Task ReadRevokeTarget_MapsTheLockedRow_WithoutDecidingAnything(string granteeType, string granteeSid, int isRevoked, bool expectSelf, bool expectAlreadyRevoked)
     {
         using var conn = DialectKit.PostgreSql.NewConnection();

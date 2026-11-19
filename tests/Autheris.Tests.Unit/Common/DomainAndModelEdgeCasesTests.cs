@@ -272,21 +272,20 @@ public class DomainAndModelEdgeCasesTests
     }
 
     [Fact]
-    public void Consent_Validate_WhenGranteeIsRole_ThrowsInvalidOperationException()
+    public void Consent_Validate_WhenGranteeTypeIsUndefined_ThrowsInvalidOperationException()
     {
         var consent = new Consent
         {
             TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableIdentifier = new TableIdentifier("finance", "dbo", "invoices"),
-            GranteeType = GranteeType.Role,
-            RoleId = null,
-            RoleName = null,
+            GranteeType = (GranteeType)3,
+            GranteeSid = new Sid("S-1-5-21-X"),
             ValidFrom = DateTimeOffset.UtcNow,
             ValidTo = DateTimeOffset.UtcNow.AddDays(7)
         };
 
         var ex = Should.Throw<InvalidOperationException>(() => consent.Validate());
-        ex.Message.ShouldContain("Role grantees are not supported");
+        ex.Message.ShouldContain("grantee type is not supported");
     }
 
     [Fact]

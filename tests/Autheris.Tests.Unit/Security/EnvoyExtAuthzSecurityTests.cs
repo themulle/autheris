@@ -648,14 +648,13 @@ public sealed class EnvoyExtAuthzSecurityTests
 
     [Trait("Category", "Security")]
     [Fact]
-    public async Task Role_scoped_virtual_filter_profile_denies()
+    public async Task Unsupported_grantee_type_virtual_filter_profile_denies()
     {
         var policy = Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll();
         var profile = Autheris.Tests.Unit.VirtualFilters.MandatoryRowFilterResolverTests.Profile(Autheris.Domain.Model.UncoveredPolicy.Skip) with
         {
-            GranteeType = GranteeType.Role,
+            GranteeType = (GranteeType)3,
             GranteeSid = null,
-            RoleName = "Analyst",
             Scope = "default.*.*",
             TenantId = new TenantId("corp")
         };
@@ -663,8 +662,10 @@ public sealed class EnvoyExtAuthzSecurityTests
             new Autheris.Application.VirtualFilters.VirtualFilterSnapshot(1, [], [profile]));
         var service = new EnvoyExtAuthzService(policy, Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable(), NullLogger<EnvoyExtAuthzService>.Instance, snapshot);
 
-        var response = await CheckAsync(service, CompleteSubject() with { TenantRoles = new HashSet<string> { "Analyst" } });
+        var response = await CheckAsync(service, CompleteSubject());
 
-        Assert.Equal(403, response.HttpResponse.DeniedResponse!.Status.Code);
+        // The unsupported type is never skipped: the check throws and the request is refused (never allowed).
+        Assert.Null(response.HttpResponse.OkResponse);
+        Assert.NotNull(response.HttpResponse.DeniedResponse);
     }
 }

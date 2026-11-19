@@ -71,7 +71,7 @@ public sealed class GrantWriter(IGrantRecordStore store, IGrantRecordSigner sign
     {
         var tenantId = !string.IsNullOrWhiteSpace(consent?.TenantId.Value) ? consent!.TenantId.Value : input?.TenantId ?? string.Empty;
         var objectId = !string.IsNullOrWhiteSpace(input?.ObjectId) ? input.ObjectId : consent is not null ? (!string.IsNullOrWhiteSpace(consent.TableIdentifier.TableName) ? consent.TableIdentifier.ToString() : consent.TableId.ToString("D")) : null;
-        var (granteeType, granteeRef) = (input?.GranteeType ?? consent?.GranteeType.ToString(), input?.GranteeRef ?? consent?.GranteeSid?.Value ?? consent?.RoleName);
+        var (granteeType, granteeRef) = (input?.GranteeType ?? consent?.GranteeType.ToString(), input?.GranteeRef ?? consent?.GranteeSid?.Value);
         if (string.IsNullOrWhiteSpace(objectId) || string.IsNullOrWhiteSpace(granteeType) || string.IsNullOrWhiteSpace(granteeRef))
             throw new ArgumentException("ObjectId, GranteeType, and GranteeRef are required.", nameof(input));
         var validUntil = input?.ValidUntil
