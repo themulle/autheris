@@ -67,6 +67,7 @@ public sealed class QueryCostQuotaTests : IDisposable
             .UseRequest<CostAndQuotaMiddleware>()
             .UseDefaultPipeline()
             .BuildRequestExecutorAsync()
+            .AsTask()
             .GetAwaiter()
             .GetResult();
     }

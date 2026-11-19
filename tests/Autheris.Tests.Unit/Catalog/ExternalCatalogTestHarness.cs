@@ -471,9 +471,24 @@ internal sealed class MutableAccessDecisionPoint : IAccessDecisionPoint
         throw new NotSupportedException();
 }
 
-internal sealed class InMemoryExternalConsentRepository : IConsentRepository
+internal sealed class InMemoryExternalConsentRepository : IConsentRepository, IConsentDescriptionRepository
 {
     public List<Consent> Consents { get; } = [];
+    public int DescriptionLoadCalls { get; private set; }
+    public int ConsentReadCalls { get; private set; }
+    public bool FailDescriptionLoad { get; set; }
+
+    public Task LoadDescriptionsAsync(IReadOnlyCollection<Consent> consents, CancellationToken ct = default)
+    {
+        DescriptionLoadCalls++;
+        return FailDescriptionLoad ? throw new InvalidOperationException("description store down") : Task.CompletedTask;
+    }
+
+    public Task<bool> UpdateConsentDescriptionWithAuditAsync(Guid consentId, TenantId tenant, string? description, AuditLogEntry audit, CancellationToken ct = default) =>
+        throw new NotSupportedException();
+
+    public Task ReplaceConsentsAsync(IReadOnlyList<Guid> revokeConsentIds, IReadOnlyList<Consent> create, Sid actor, string reason, ConsentRevocationAuthority authority, IReadOnlyList<AuditLogEntry>? auditEntries, IReadOnlyList<ConsentDescriptionUpdate>? descriptionUpdates, CancellationToken ct) =>
+        throw new NotSupportedException();
     public Dictionary<string, HashSet<TableIdentifier>> RecentlyExpiredByUser { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     public Task<IReadOnlySet<TableIdentifier>> GetRecentlyExpiredTableIdsAsync(
@@ -520,6 +535,7 @@ internal sealed class InMemoryExternalConsentRepository : IConsentRepository
         TenantId? tenantId,
         CancellationToken ct = default)
     {
+        ConsentReadCalls++;
         var sidSet = subjects.Select(s => s.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var roleSet = roles?.ToHashSet(StringComparer.OrdinalIgnoreCase) ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var list = Consents.Where(c =>
