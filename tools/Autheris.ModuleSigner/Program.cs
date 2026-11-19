@@ -53,6 +53,11 @@ public static class ModuleSignerCli
         ArgumentNullException.ThrowIfNull(stdout);
         ArgumentNullException.ThrowIfNull(stderr);
 
+        if (args.Length > 0 && string.Equals(args[0], "verify", StringComparison.Ordinal))
+        {
+            return ModuleVerifyCommand.Run(args[1..], stdout, stderr);
+        }
+
         if (ContainsCliKeyArgument(args))
         {
             stderr.WriteLine(

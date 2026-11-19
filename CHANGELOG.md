@@ -139,6 +139,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `is_active` is bound as a boolean, so classification reads work on PostgreSQL; timestamps of consent and virtual filter writes are bound as `timestamptz`.
 
 ### Security
+
+- Container images come in two flavors: `autheris` (core, no modules) and `autheris-full` (signed modules, verified offline against the embedded release key at image build). The module signing key is only reachable from jobs in a protected environment.
 - GET on a SQL endpoint refuses every definition that is not a single SELECT (#730).
 - A hard row policy whose stored pattern cannot be evaluated denies access (`VF_PATTERN_EVALUATION_FAILED`) instead of failing open.
 - Streaming applies the stricter column level of the decision point (strict access profile) over the consent level.
