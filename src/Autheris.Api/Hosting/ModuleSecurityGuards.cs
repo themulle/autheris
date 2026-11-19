@@ -209,13 +209,14 @@ internal static class ModuleSecurityGuards
     /// <summary>Module id that may register <see cref="IDbtCloudWebhookHandler"/>.</summary>
     internal const string DbtCloudWebhookHandlerModuleId = "dbt";
 
-    /// <summary>
-    /// The core webhook route trusts <see cref="IDbtCloudWebhookHandler"/> with verified payloads only, so at most one
-    /// descriptor may exist and its implementation type must live in the dbt module assembly.
-    /// </summary>
     internal static List<ServiceDescriptor> CaptureDbtCloudWebhookHandlers(IServiceCollection services) =>
         services.Where(d => d.ServiceType == typeof(IDbtCloudWebhookHandler)).ToList();
 
+    /// <summary>
+    /// The core webhook route trusts <see cref="IDbtCloudWebhookHandler"/> with verified payloads only, so at most one
+    /// descriptor may exist, its implementation type must live in the dbt module assembly, and only module id
+    /// <c>dbt</c> may add it.
+    /// </summary>
     internal static void VerifyDbtCloudWebhookHandler(
         string moduleId,
         IServiceCollection services,
@@ -247,6 +248,28 @@ internal static class ModuleSecurityGuards
                 moduleId,
                 $"Module '{moduleId}' registered '{typeof(IDbtCloudWebhookHandler).FullName}' with an implementation outside '{DbtCloudWebhookHandlerAssembly}'.");
         }
+    }
+
+    /// <summary>
+    /// Final whole-collection check after the module loop: a module that kept its <see cref="IServiceCollection"/> and added the
+    /// handler after <c>ConfigureServices</c> returned is caught here. At most one handler, implemented in the dbt assembly, and
+    /// only when module <c>dbt</c> actually loaded.
+    /// </summary>
+    internal static void VerifyFinalDbtCloudWebhookHandler(IServiceCollection services, IReadOnlyCollection<string> loadedModuleIds)
+    {
+        var handlers = CaptureDbtCloudWebhookHandlers(services);
+        if (handlers.Count == 0)
+        {
+            return;
+        }
+
+        var dbtLoaded = loadedModuleIds.Contains(DbtCloudWebhookHandlerModuleId, StringComparer.Ordinal);
+        if (!dbtLoaded)
+        {
+            throw new ModuleLoadException("host", $"'{typeof(IDbtCloudWebhookHandler).FullName}' is registered but module '{DbtCloudWebhookHandlerModuleId}' did not load.");
+        }
+
+        VerifyDbtCloudWebhookHandler(DbtCloudWebhookHandlerModuleId, services, handlers);
     }
 
     private static bool IsProtectedNamespace(string? ns)

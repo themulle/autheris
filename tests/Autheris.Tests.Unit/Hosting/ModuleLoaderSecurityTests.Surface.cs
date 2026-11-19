@@ -59,6 +59,24 @@ public sealed partial class ModuleLoaderSecurityTests
 
     [Fact]
     [Trait("Category", "Security")]
+    public void Late_added_dbt_webhook_handler_fails_final_check()
+    {
+        var services = new ServiceCollection();
+        services.AddScoped<Autheris.Application.Catalog.Semantic.IDbtCloudWebhookHandler, Autheris.Modules.Dbt.DbtWebhookReceiver>();
+
+        Should.Throw<ModuleLoadException>(() => ModuleSecurityGuards.VerifyFinalDbtCloudWebhookHandler(services, ["lakehouse"]));
+        Should.NotThrow(() => ModuleSecurityGuards.VerifyFinalDbtCloudWebhookHandler(services, ["dbt"]));
+
+        services.AddScoped<Autheris.Application.Catalog.Semantic.IDbtCloudWebhookHandler, Autheris.Modules.Dbt.DbtWebhookReceiver>();
+        Should.Throw<ModuleLoadException>(() => ModuleSecurityGuards.VerifyFinalDbtCloudWebhookHandler(services, ["dbt"]));
+
+        var foreign = new ServiceCollection();
+        foreign.AddScoped<Autheris.Application.Catalog.Semantic.IDbtCloudWebhookHandler, DbtWebhookHandlerAddingModule.ForeignHandler>();
+        Should.Throw<ModuleLoadException>(() => ModuleSecurityGuards.VerifyFinalDbtCloudWebhookHandler(foreign, ["dbt"]));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
     public void Module_registering_startup_filter_is_rejected() =>
         AssertModuleRejected("evil-startup", typeof(StartupFilterAddingModule), "IStartupFilter");
 
