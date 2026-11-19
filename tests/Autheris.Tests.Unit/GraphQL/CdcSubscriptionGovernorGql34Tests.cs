@@ -1,3 +1,4 @@
+#pragma warning disable CA2012 // NSubstitute .Returns(...) configures a ValueTask member; the instance is not consumed here.
 namespace Autheris.Tests.Unit.GraphQL;
 
 using System;
@@ -76,8 +77,16 @@ public sealed class CdcSubscriptionGovernorGql34Tests
             .AddSingleton(governor)
             .AddSingleton(resolver)
             .AddSingleton(audit)
+            .AddSingleton(AllowingGate())
             .BuildServiceProvider();
         return (services, audit, governor);
+    }
+
+    private static Autheris.Application.DataSources.IDataSourceTransportGate AllowingGate()
+    {
+        var gate = Substitute.For<Autheris.Application.DataSources.IDataSourceTransportGate>();
+        gate.Ingress.Returns(Autheris.Domain.Options.DataSources.DataSourceTransportFlags.GraphQL);
+        return gate;
     }
 
     private static IStreamRlsPolicyEnforcer AllowAll()

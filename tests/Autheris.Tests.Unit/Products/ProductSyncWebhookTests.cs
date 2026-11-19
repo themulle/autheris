@@ -263,9 +263,141 @@ public sealed class ProductSyncWebhookTests
         entry.DetailsJson.ShouldNotContain("SELECT");
         _h.Audit.Entries.First(e => e.EventType == AuditEventTypes.ProductSyncRejected).DetailsJson.ShouldContain("\"commit\":\"invalid\"");
     }
+
+    [Fact]
+    public async Task Webhook_RejectionAudit_IsThrottledPerTenant()
+    {
+        var body = Body();
+        var bad = new ProductSyncWebhookDelivery(Now(), "d-1", "sha256=" + new string('0', 64));
+
+        for (var i = 0; i < 5; i++)
+        {
+            (await _webhook.HandleAsync(TenantA, body, bad)).ShouldBe(ProductSyncWebhookStatus.Unauthorized);
+        }
+
+        _audit.Entries.Count(e => e.EventType == AuditEventTypes.ProductSyncWebhookRejected && e.TenantId == TenantA).ShouldBe(1, "one row per tenant and minute");
+
+        (await _webhook.HandleAsync(TenantB, body, bad)).ShouldBe(ProductSyncWebhookStatus.Unauthorized);
+        _audit.Entries.Count(e => e.TenantId == TenantB && e.EventType == AuditEventTypes.ProductSyncWebhookRejected).ShouldBe(1, "another tenant has its own budget");
+
+        _time.Advance(TimeSpan.FromSeconds(ProductSyncWebhookService.RejectionAuditWindowSeconds + 1));
+        var later = new ProductSyncWebhookDelivery(Now(), "d-1", "sha256=" + new string('0', 64));
+        (await _webhook.HandleAsync(TenantA, body, later)).ShouldBe(ProductSyncWebhookStatus.Unauthorized);
+
+        var rows = _audit.Entries.Where(e => e.EventType == AuditEventTypes.ProductSyncWebhookRejected && e.TenantId == TenantA).ToList();
+        rows.Count.ShouldBe(2);
+        rows[1].DetailsJson.ShouldContain("\"suppressedPreviousWindow\":4");
+    }
+
+    [Fact]
+    public async Task Webhook_RejectionAudit_UnknownTenantsShareOneBoundedBucket()
+    {
+        var body = Body();
+        var bad = new ProductSyncWebhookDelivery(Now(), "d-1", "sha256=" + new string('0', 64));
+
+        for (var i = 0; i < 50; i++)
+        {
+            (await _webhook.HandleAsync(new TenantId("attacker-" + i), body, bad)).ShouldBe(ProductSyncWebhookStatus.Unauthorized);
+        }
+
+        var rows = _audit.Entries.Where(e => e.EventType == AuditEventTypes.ProductSyncWebhookRejected).ToList();
+        rows.Count.ShouldBe(1, "all unknown tenants share one budget per minute");
+        rows[0].TenantId.ShouldBe(TenantId.Platform);
+        rows[0].DetailsJson.ShouldNotContain("attacker");
+    }
+
+    [Fact]
+    public async Task Webhook_RejectionAudit_KnownTenantStillAuditedDuringUnknownFlood()
+    {
+        var body = Body();
+        var bad = new ProductSyncWebhookDelivery(Now(), "d-1", "sha256=" + new string('0', 64));
+
+        for (var i = 0; i < 20; i++)
+        {
+            await _webhook.HandleAsync(new TenantId("attacker-" + i), body, bad);
+        }
+
+        (await _webhook.HandleAsync(TenantA, body, bad)).ShouldBe(ProductSyncWebhookStatus.Unauthorized);
+
+        _audit.Entries.Count(e => e.EventType == AuditEventTypes.ProductSyncWebhookRejected && e.TenantId == TenantA).ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Webhook_RejectionAudit_CounterUnavailable_AuditsEveryRejection()
+    {
+        var secrets = new FakeSecrets(new Dictionary<string, byte[]> { [ProductSyncWebhookService.SecretRef(TenantA)] = SecretA });
+        var body = Body();
+        var bad = new ProductSyncWebhookDelivery(Now(), "d-1", "sha256=" + new string('0', 64));
+        var modes = new Func<IDistributedClusterStateProvider?>[]
+        {
+            () => null,
+            () => new UnavailableCounterState(returnNull: true),
+            () => new UnavailableCounterState(returnNull: false)
+        };
+
+        foreach (var mode in modes)
+        {
+            var audit = new RecordingAuditWriter();
+            var webhook = new ProductSyncWebhookService(secrets, mode(), audit, _time);
+            for (var i = 0; i < 3; i++)
+            {
+                (await webhook.HandleAsync(TenantA, body, bad)).ShouldBe(ProductSyncWebhookStatus.Unauthorized);
+            }
+
+            audit.Entries.Count(e => e.EventType == AuditEventTypes.ProductSyncWebhookRejected).ShouldBe(3, "an unreachable counter never silences the audit");
+        }
+    }
+
+    [Fact]
+    public async Task Sync_ScanLimitHit_RejectsWithStableCode()
+    {
+        var admin = _h.Caller(ProductHarness.Admin, admin: true);
+        foreach (var name in new[] { "a_view", "b_view", "c_view" })
+        {
+            await _h.Service.PutAsync(new ProductPutRequest(admin, "sales", name, DataProductKind.View, "SELECT id FROM crm.public.orders", ProductHarness.Bob, null, null));
+        }
+
+        var limited = new ProductSyncService(_h.Service, _h.Store, _h.Audit) { ScanPageSize = 2, ScanMaxPages = 1 };
+        var ex = await Should.ThrowAsync<ProductSyncRejectedException>(() => limited.PlanAsync(Request()));
+        ex.Reason.ShouldBe(ProductSyncReasons.TooManyProducts);
+        ProductSyncReasons.TooManyProducts.ShouldBe("PRODUCT_SYNC_TOO_MANY_PRODUCTS");
+
+        var wide = new ProductSyncService(_h.Service, _h.Store, _h.Audit) { ScanPageSize = 2, ScanMaxPages = 2 };
+        (await wide.PlanAsync(Request())).Applied.ShouldBeFalse("a scan that reaches the end of the list is complete");
+    }
 }
 
 internal sealed class FakeSecrets(Dictionary<string, byte[]> secrets) : IKeyVaultSecretProvider
 {
     public byte[] GetSecretBytes(string secretRef) => secrets.TryGetValue(secretRef, out var value) ? (byte[])value.Clone() : throw new KeyNotFoundException();
+
+}
+
+internal sealed class UnavailableCounterState(bool returnNull) : IDistributedClusterStateProvider
+{
+    public ValueTask<T?> GetAsync<T>(string key, CancellationToken ct = default) => throw new NotSupportedException();
+
+    public ValueTask SetAsync<T>(string key, T value, TimeSpan ttl, CancellationToken ct = default) => throw new NotSupportedException();
+
+    public ValueTask<bool> RemoveAsync(string key, CancellationToken ct = default) => throw new NotSupportedException();
+
+    public ValueTask<long?> IncrementAsync(string key, long delta, TimeSpan ttl, CancellationToken ct = default) =>
+        returnNull ? ValueTask.FromResult<long?>(null) : throw new ClusterStateUnavailableException("down");
+
+    public ValueTask<(BudgetConsumeOutcome Outcome, long ConsumedAfter)> TryConsumeBudgetAsync(string key, long cost, long limit, TimeSpan ttl, CancellationToken ct = default) =>
+        throw new NotSupportedException();
+
+    public ValueTask PublishEventAsync<T>(string channel, T payload, CancellationToken ct = default) => throw new NotSupportedException();
+
+    public IAsyncDisposable SubscribeAsync<T>(string channel, Func<T, ValueTask> handler, CancellationToken ct = default) => throw new NotSupportedException();
+
+    public ValueTask<IAsyncDisposable?> TryAcquireLockAsync(string resourceKey, TimeSpan expiry, CancellationToken ct = default) => throw new NotSupportedException();
+
+    public ValueTask<IDistributedLease?> TryAcquireLeaseAsync(string resourceKey, TimeSpan ttl, CancellationToken ct = default) => throw new NotSupportedException();
+
+    public ValueTask<bool?> TryAcquireSlotAsync(string setKey, string member, int limit, TimeSpan ttl, CancellationToken ct = default) => throw new NotSupportedException();
+
+    public ValueTask<bool> RenewSlotAsync(string setKey, string member, TimeSpan ttl, CancellationToken ct = default) => throw new NotSupportedException();
+
+    public ValueTask ReleaseSlotAsync(string setKey, string member, CancellationToken ct = default) => throw new NotSupportedException();
 }

@@ -1,3 +1,4 @@
+#pragma warning disable CA2012 // NSubstitute .Returns(...) configures a ValueTask member; the instance is not consumed here.
 using Autheris.Tests.Common;
 namespace Autheris.Tests.Unit.Security;
 

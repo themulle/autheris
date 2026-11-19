@@ -98,6 +98,20 @@ public sealed class OpenApiContractTests
     }
 
     [Fact]
+    [Trait("Category", "Security")]
+    public void OpenApi_CallerState_RowScopeDescription_IsNullableAndBounded()
+    {
+        using var doc = LoadEmbeddedSpec();
+        var field = doc.RootElement.GetProperty("components").GetProperty("schemas")
+            .GetProperty("ExternalCatalogCallerStateDto").GetProperty("properties").GetProperty("rowScopeDescription");
+
+        Assert.Equal("string", field.GetProperty("type").GetString());
+        Assert.True(field.GetProperty("nullable").GetBoolean());
+        Assert.Equal(Autheris.Domain.Options.GovernanceTextOptions.ConsentDescriptionCeiling, field.GetProperty("maxLength").GetInt32());
+        Assert.Contains("not instructions", field.GetProperty("description").GetString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task ExternalOpenApiEndpoint_ServesEmbeddedDocument_WithETagAnd304()
     {
         await using var harness = ExternalCatalogTestHarness.Create();
