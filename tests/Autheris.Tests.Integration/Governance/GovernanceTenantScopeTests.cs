@@ -125,6 +125,5 @@ public sealed class GovernanceTenantScopeTests
 
         await Should.ThrowAsync<ArgumentException>(async () => await repo.GetActiveConsentsForSubjectsAsync(subjects, table, DateTimeOffset.UtcNow, (TenantId?)null));
         await Should.ThrowAsync<ArgumentException>(async () => await repo.GetAllActiveConsentsForSubjectsAsync(subjects, null, null, (TenantId?)null));
-        await Should.ThrowAsync<ArgumentException>(async () => await repo.GetActiveRoleConsentsAsync(table, "role", (TenantId?)null, DateTimeOffset.UtcNow));
     }
 }

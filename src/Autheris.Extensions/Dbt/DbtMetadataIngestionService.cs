@@ -1145,7 +1145,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
              root.TryGetProperty("accessProfiles", out profilesProp) ||
              root.TryGetProperty("profiles", out profilesProp)))
         {
-            profiles = ParseAccessProfiles(profilesProp, caller.Tenant);
+            profiles = ParseAccessProfiles(profilesProp, caller.Tenant, warnings);
         }
 
         if (!caller.IsClusterAdmin)

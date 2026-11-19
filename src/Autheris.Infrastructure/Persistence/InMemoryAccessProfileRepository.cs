@@ -116,7 +116,6 @@ public sealed class InMemoryAccessProfileRepository : IAccessProfileRepository
         return Task.FromResult(renewed);
     }
 
-    public Task<IReadOnlyList<RevokedRoleConsent>> GetRevokedRoleConsentsAsync(CancellationToken ct = default) => Task.FromResult<IReadOnlyList<RevokedRoleConsent>>([]);
 
     public Task<IReadOnlyList<DeactivatedProfileAssignment>> GetDeactivatedAssignmentsAsync(CancellationToken ct = default) => Task.FromResult<IReadOnlyList<DeactivatedProfileAssignment>>([]);
 

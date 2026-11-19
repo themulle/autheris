@@ -407,7 +407,7 @@ WHERE event_id IN (SELECT id FROM CONSENT_EVENTS WHERE created_at < @cutoff)";
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = isPg
             ? @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
-       c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to,
+       c.grantee_sid, c.valid_from, c.valid_to,
        c.is_revoked, t.source_name, t.schema_name, t.table_name,
        c.tenant_id, c.renewal_count,
        c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at,
@@ -419,7 +419,7 @@ WHERE c.is_revoked = 0 AND c.expiry_notice_sent_at IS NULL AND c.valid_to > @now
 ORDER BY c.valid_to
 LIMIT 500"
             : @"SELECT TOP (500) c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
-       c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to,
+       c.grantee_sid, c.valid_from, c.valid_to,
        c.is_revoked, t.source_name, t.schema_name, t.table_name,
        c.tenant_id, c.renewal_count,
        c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at,
@@ -518,7 +518,7 @@ WHERE id = @id AND tenant_id = @tenant AND is_revoked = 0 AND expiry_notice_sent
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = isPg
             ? @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
-       c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to,
+       c.grantee_sid, c.valid_from, c.valid_to,
        c.is_revoked, t.source_name, t.schema_name, t.table_name,
        c.tenant_id, c.renewal_count,
        c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at,
@@ -534,7 +534,7 @@ WHERE c.is_revoked = 0 AND c.valid_to <= @now
 ORDER BY c.valid_to
 LIMIT 500"
             : @"SELECT TOP (500) c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
-       c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to,
+       c.grantee_sid, c.valid_from, c.valid_to,
        c.is_revoked, t.source_name, t.schema_name, t.table_name,
        c.tenant_id, c.renewal_count,
        c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at,
@@ -583,9 +583,7 @@ WHERE tenant_id = @tenant AND consent_id = @consentId AND record_type = 'EXPIRED
                 }
             }
 
-            var granteeRef = consent.GranteeType == GranteeType.Role
-                ? consent.RoleName ?? string.Empty
-                : consent.GranteeSid?.Value ?? string.Empty;
+            var granteeRef = consent.GranteeSid?.Value ?? string.Empty;
             var requestedBy = consent.CreatedBySid is { } creatorSid && !string.IsNullOrWhiteSpace(creatorSid.Value)
                 ? creatorSid.Value
                 : "SYSTEM";
@@ -778,23 +776,21 @@ WHERE id = @id AND tenant_id = @tenant
             var consent = ConsentWorkflowSql.BuildConsent(
                 Guid.Parse(reader.GetString(0)),
                 Guid.Parse(reader.GetString(1)),
-                new TableIdentifier(reader.GetString(11), reader.GetString(12), reader.GetString(13)),
+                new TableIdentifier(reader.GetString(9), reader.GetString(10), reader.GetString(11)),
                 reader.IsDBNull(2) ? null : Guid.Parse(reader.GetString(2)),
                 Enum.Parse<ConsentEffect>(reader.GetString(3), ignoreCase: true),
-                Enum.Parse<GranteeType>(reader.GetString(4), ignoreCase: true),
+                GranteeTypeParsing.ParseStored(reader.GetString(4)),
                 !string.IsNullOrEmpty(granteeSidStr) ? new Sid(granteeSidStr) : (Sid?)null,
-                reader.IsDBNull(6) ? null : Guid.Parse(reader.GetString(6)),
-                reader.IsDBNull(7) ? null : reader.GetString(7),
-                ConsentWorkflowSql.ReadOptionalTimestamp(reader, 8) ?? DateTimeOffset.UnixEpoch,
-                ConsentWorkflowSql.ReadOptionalTimestamp(reader, 9) ?? DateTimeOffset.MaxValue,
-                Convert.ToInt32(reader.GetValue(10), CultureInfo.InvariantCulture) != 0,
+                ConsentWorkflowSql.ReadOptionalTimestamp(reader, 6) ?? DateTimeOffset.UnixEpoch,
+                ConsentWorkflowSql.ReadOptionalTimestamp(reader, 7) ?? DateTimeOffset.MaxValue,
+                Convert.ToInt32(reader.GetValue(8), CultureInfo.InvariantCulture) != 0,
                 // Owner grants of a catalog-wide assignment live in the platform bucket; the sweep reads every tenant.
-                StoredTenant.ParseAudit(reader.GetString(14)),
+                StoredTenant.ParseAudit(reader.GetString(12)),
                 reader,
-                16,
-                Convert.ToInt32(reader.GetValue(15), CultureInfo.InvariantCulture));
-            var workflowMode = ConsentWorkflowSql.ReadWorkflowMode(reader, 20);
-            var externalSystemId = ConsentWorkflowSql.ReadOptionalGuid(reader, 21);
+                14,
+                Convert.ToInt32(reader.GetValue(13), CultureInfo.InvariantCulture));
+            var workflowMode = ConsentWorkflowSql.ReadWorkflowMode(reader, 18);
+            var externalSystemId = ConsentWorkflowSql.ReadOptionalGuid(reader, 19);
             results.Add(new ExpiringGrantCandidate(consent, workflowMode, externalSystemId));
         }
 
@@ -814,7 +810,7 @@ WHERE id = @id AND tenant_id = @tenant
             Guid.Parse(reader.GetString(0)),
             Guid.Parse(reader.GetString(1)),
             new Sid(reader.GetString(2)),
-            Enum.Parse<GranteeType>(reader.GetString(3), ignoreCase: true),
+            GranteeTypeParsing.ParseStored(reader.GetString(3)),
             reader.GetString(4),
             reader.GetString(5),
             reader.GetString(6),

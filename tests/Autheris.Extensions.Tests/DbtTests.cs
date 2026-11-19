@@ -878,7 +878,7 @@ public sealed class DbtTests
         ColumnMaskingRules = rules ?? new Dictionary<string, MaskingRule>()
     };
 
-    private static (DbtMetadataIngestionService Service, ITableMetadataRepository Repo) GovernanceService(params TableMetadata[] tables)
+    internal static (DbtMetadataIngestionService Service, ITableMetadataRepository Repo) GovernanceService(params TableMetadata[] tables)
     {
         var metadataRepo = Substitute.For<ITableMetadataRepository>();
         foreach (var table in tables)
