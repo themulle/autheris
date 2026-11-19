@@ -85,6 +85,27 @@ public sealed class CrossTransportAuthorizationParityTests
         }
     }
 
+    /// <summary>
+    /// Allow and deny agree on the REST and Analytics read paths, both decided by the access decision point.
+    /// The harness projects only the table decision for an aggregation (it groups by a visible column and counts),
+    /// so column-level state is compared on the REST surface by the matrix theory, not here.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(RestAndAnalyticsScenarios))]
+    public async Task Security_RestAndAnalyticsReads_DecisionParityAfterAdapterRemoval(ParityScenarioId scenarioId)
+    {
+        var scenario = ScenarioById[scenarioId];
+        await using var harness = new CrossTransportParityHarness();
+
+        var rest = await harness.EvaluateAsync(ParitySurface.Rest, scenario, CancellationToken.None);
+        var analytics = await harness.EvaluateAsync(ParitySurface.Analytics, scenario, CancellationToken.None);
+
+        analytics.Allowed.ShouldBe(rest.Allowed, $"Scenario={scenarioId}: REST and Analytics must agree on allow/deny. Diagnostic: {analytics.Diagnostic ?? "none"}");
+    }
+
+    public static IEnumerable<object[]> RestAndAnalyticsScenarios() =>
+        Scenarios.Where(s => s.GrantModel is null).Select(s => new object[] { s.Id });
+
     public static IEnumerable<object[]> GrantModelRows() =>
         Scenarios.Where(s => s.GrantModel is not null).Select(s => new object[] { s.Id });
 

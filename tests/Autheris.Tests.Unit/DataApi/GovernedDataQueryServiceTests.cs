@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.DataApi;
 
+using Autheris.Application.Policy.Pdp;
 using System;
 using System.Collections.Generic;
 using System.Security.Claims;
@@ -23,7 +24,7 @@ using Xunit;
 public sealed class GovernedDataQueryServiceTests
 {
     private readonly ITableMetadataRepository _metadataRepo = Substitute.For<ITableMetadataRepository>();
-    private readonly IUnifiedPolicyDecisionPoint _pdp = Substitute.For<IUnifiedPolicyDecisionPoint>();
+    private readonly IAccessDecisionPoint _pdp = Substitute.For<IAccessDecisionPoint>();
     private readonly IGovernedSqlExecutionService _sqlExecutionService = Substitute.For<IGovernedSqlExecutionService>();
     private readonly IFederatedQueryExecutionService _federatedExecutionService = Substitute.For<IFederatedQueryExecutionService>();
     private readonly IColumnMaskingProvider _maskingProvider = Substitute.For<IColumnMaskingProvider>();
@@ -76,12 +77,7 @@ public sealed class GovernedDataQueryServiceTests
             },
             hasUnconstrainedColumnAllow: true);
 
-        _pdp.EvaluateAccessAsync(
-            _customerTable,
-            metadata,
-            Arg.Any<Autheris.Domain.Security.SecurityPrincipalContext>(),
-            Arg.Any<IReadOnlyList<string>?>(),
-            Arg.Any<CancellationToken>())
+        _pdp.DecideAsync(Arg.Is<AccessRequest>(r => r.Object == metadata), Arg.Any<CancellationToken>())
             .Returns(decision);
 
         var rows = new List<IReadOnlyDictionary<string, object?>>
@@ -146,12 +142,7 @@ public sealed class GovernedDataQueryServiceTests
 
         var deniedDecision = TableAccessDecision.Denied(_customerTable, "Access Denied: Caller holds no grant on sales.dbo.customers");
 
-        _pdp.EvaluateAccessAsync(
-            _customerTable,
-            metadata,
-            Arg.Any<Autheris.Domain.Security.SecurityPrincipalContext>(),
-            Arg.Any<IReadOnlyList<string>?>(),
-            Arg.Any<CancellationToken>())
+        _pdp.DecideAsync(Arg.Is<AccessRequest>(r => r.Object == metadata), Arg.Any<CancellationToken>())
             .Returns(deniedDecision);
 
         var service = new GovernedDataQueryService(
@@ -190,12 +181,7 @@ public sealed class GovernedDataQueryServiceTests
             },
             hasUnconstrainedColumnAllow: true);
 
-        _pdp.EvaluateAccessAsync(
-            _customerTable,
-            metadata,
-            Arg.Any<Autheris.Domain.Security.SecurityPrincipalContext>(),
-            Arg.Any<IReadOnlyList<string>?>(),
-            Arg.Any<CancellationToken>())
+        _pdp.DecideAsync(Arg.Is<AccessRequest>(r => r.Object == metadata), Arg.Any<CancellationToken>())
             .Returns(decision);
 
         var service = new GovernedDataQueryService(
@@ -241,8 +227,8 @@ public sealed class GovernedDataQueryServiceTests
                 ["name"] = ColumnAccessLevel.Clear
             },
             hasUnconstrainedColumnAllow: true);
-        _pdp.EvaluateAccessAsync(_customerTable, metadata, Arg.Any<Autheris.Domain.Security.SecurityPrincipalContext>(),
-            Arg.Any<IReadOnlyList<string>?>(), Arg.Any<CancellationToken>()).Returns(decision);
+        _pdp.DecideAsync(Arg.Is<AccessRequest>(r => r.Object == metadata), Arg.Any<CancellationToken>())
+            .Returns(decision);
         var service = new GovernedDataQueryService(_metadataRepo, _pdp, _sqlExecutionService, _federatedExecutionService, _maskingProvider);
         var user = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim("sub", "user-123") }, "TestAuth"));
 
@@ -258,12 +244,7 @@ public sealed class GovernedDataQueryServiceTests
     private void AllowAll(TableMetadata metadata)
     {
         _metadataRepo.GetTableMetadataAsync(_customerTable, Arg.Any<CancellationToken>()).Returns(metadata);
-        _pdp.EvaluateAccessAsync(
-            _customerTable,
-            metadata,
-            Arg.Any<Autheris.Domain.Security.SecurityPrincipalContext>(),
-            Arg.Any<IReadOnlyList<string>?>(),
-            Arg.Any<CancellationToken>())
+        _pdp.DecideAsync(Arg.Is<AccessRequest>(r => r.Object == metadata), Arg.Any<CancellationToken>())
             .Returns(TableAccessDecision.Allowed(
                 _customerTable,
                 new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
@@ -577,12 +558,7 @@ public sealed class GovernedDataQueryServiceTests
     {
         var metadata = CreateCustomerTableMetadata();
         _metadataRepo.GetTableMetadataAsync(_customerTable, Arg.Any<CancellationToken>()).Returns(metadata);
-        _pdp.EvaluateAccessAsync(
-                _customerTable,
-                metadata,
-                Arg.Any<Autheris.Domain.Security.SecurityPrincipalContext>(),
-                Arg.Any<IReadOnlyList<string>?>(),
-                Arg.Any<CancellationToken>())
+        _pdp.DecideAsync(Arg.Is<AccessRequest>(r => r.Object == metadata), Arg.Any<CancellationToken>())
             .Returns(TableAccessDecision.Allowed(
                 _customerTable,
                 new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
@@ -631,12 +607,7 @@ public sealed class GovernedDataQueryServiceTests
             }
         };
         _metadataRepo.GetTableMetadataAsync(_customerTable, Arg.Any<CancellationToken>()).Returns(metadata);
-        _pdp.EvaluateAccessAsync(
-                _customerTable,
-                metadata,
-                Arg.Any<Autheris.Domain.Security.SecurityPrincipalContext>(),
-                Arg.Any<IReadOnlyList<string>?>(),
-                Arg.Any<CancellationToken>())
+        _pdp.DecideAsync(Arg.Is<AccessRequest>(r => r.Object == metadata), Arg.Any<CancellationToken>())
             .Returns(TableAccessDecision.Allowed(
                 _customerTable,
                 new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)

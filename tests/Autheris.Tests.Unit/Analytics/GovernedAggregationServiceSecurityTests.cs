@@ -98,6 +98,7 @@ public sealed class GovernedAggregationServiceSecurityTests
         var service = new GovernedAggregationService(
             metaRepo,
             audit,
+            Autheris.Tests.Unit.TestSupport.AccessDecisionPointStubs.Denying(),
             dataSourceExecutors: [executor],
             analyticsOptions: Options.Create(options ?? new AnalyticsOptions()));
         return (service, audit);

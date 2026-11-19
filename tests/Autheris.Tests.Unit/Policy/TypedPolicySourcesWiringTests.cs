@@ -1,3 +1,4 @@
+using Autheris.Application.Policy.Pdp;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -88,11 +89,10 @@ public sealed class TypedPolicySourcesWiringTests
     }
 
     [Fact]
-    public async Task UnifiedPolicyDecisionPoint_ProducesATypedDecision()
+    public async Task AccessDecisionPoint_ProducesATypedDecision()
     {
-        var pdp = new UnifiedPolicyDecisionPoint(Consents(), new ConsentResolutionService(),
-            Autheris.Application.Policy.Services.NullConsentCacheService.Instance, Options.Create(new GatewayOptions()),
-            NullLogger<UnifiedPolicyDecisionPoint>.Instance, typedPolicies: Sources());
+        var pdp = new AccessDecisionPoint(Options.Create(new GatewayOptions()), new ConsentResolutionService(), Consents(),
+            Autheris.Application.Policy.Services.NullConsentCacheService.Instance, typedPolicies: Sources());
         var context = new SecurityPrincipalContext
         {
             UserSid = UserSid,
@@ -104,7 +104,7 @@ public sealed class TypedPolicySourcesWiringTests
             AuthenticationScheme = "Bearer"
         };
 
-        AssertTyped(await pdp.EvaluateAccessAsync(Orders, Meta(), context, null, CancellationToken.None));
+        AssertTyped(await pdp.DecideAsync(new AccessRequest(context, Meta(), AccessOperation.Read, AccessTransport.Rest), CancellationToken.None));
     }
 
     [Fact]
@@ -193,11 +193,10 @@ public sealed class TypedPolicySourcesWiringTests
     }
 
     [Fact]
-    public async Task UnifiedPolicyDecisionPoint_AppliesTheAccessProfile()
+    public async Task AccessDecisionPoint_AppliesTheAccessProfile()
     {
-        var pdp = new UnifiedPolicyDecisionPoint(Consents(), new ConsentResolutionService(),
-            Autheris.Application.Policy.Services.NullConsentCacheService.Instance, Options.Create(new GatewayOptions()),
-            NullLogger<UnifiedPolicyDecisionPoint>.Instance, typedPolicies: Sources(),
+        var pdp = new AccessDecisionPoint(Options.Create(new GatewayOptions()), new ConsentResolutionService(), Consents(),
+            Autheris.Application.Policy.Services.NullConsentCacheService.Instance, typedPolicies: Sources(),
             accessProfileRepository: await StrictProfileAsync());
         var context = new SecurityPrincipalContext
         {
@@ -211,7 +210,7 @@ public sealed class TypedPolicySourcesWiringTests
         };
         var meta = MetaWithSensitiveColumn();
 
-        var decision = await pdp.EvaluateAccessAsync(Orders, meta, context, null, CancellationToken.None);
+        var decision = await pdp.DecideAsync(new AccessRequest(context, meta, AccessOperation.Read, AccessTransport.Rest), CancellationToken.None);
 
         // Without the profile the sensitive column would only be masked by the catalog default.
         decision.IsAllowed.ShouldBeTrue();
@@ -278,7 +277,7 @@ public sealed class TypedPolicySourcesWiringTests
     [Theory]
     [InlineData(typeof(IGatewayExecutionService))]
     [InlineData(typeof(IProcedureExecutionService))]
-    [InlineData(typeof(IUnifiedPolicyDecisionPoint))]
+    [InlineData(typeof(IAccessDecisionPoint))]
     [InlineData(typeof(IFederatedQueryExecutionService))]
     public async Task DecisionPoints_GetTheTypedPolicySources(Type serviceType)
     {
@@ -330,11 +329,11 @@ public sealed class TypedPolicySourcesWiringTests
     }
 
     [Fact]
-    public async Task UnifiedPolicyDecisionPoint_GetsTheAccessProfileCache()
+    public async Task AccessDecisionPoint_GetsTheAccessProfileCache()
     {
         await using var provider = BuildProvider();
         await using var scope = provider.CreateAsyncScope();
-        var pdp = scope.ServiceProvider.GetRequiredService<IUnifiedPolicyDecisionPoint>();
+        var pdp = scope.ServiceProvider.GetRequiredService<IAccessDecisionPoint>();
 
         FieldsOf(pdp, typeof(Autheris.Application.Policy.Interfaces.IAccessProfileCache)).ShouldHaveSingleItem()
             .ShouldBeSameAs(provider.GetRequiredService<Autheris.Application.Policy.Interfaces.IAccessProfileCache>());

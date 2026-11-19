@@ -122,6 +122,7 @@ public sealed class AggregationPlannerRoutingTests
         var service = new GovernedAggregationService(
             metaRepo,
             new NullAudit(),
+            Autheris.Tests.Unit.TestSupport.AccessDecisionPointStubs.Denying(),
             sqlExecutionService: sql,
             dataSourceExecutors: [executor],
             analyticsOptions: Options.Create(new AnalyticsOptions

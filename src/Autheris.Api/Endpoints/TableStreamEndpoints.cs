@@ -84,7 +84,7 @@ public static class TableStreamEndpoints
         string table,
         HttpContext httpContext,
         ITableMetadataRepository metadataRepository,
-        IUnifiedPolicyDecisionPoint pdp,
+        Autheris.Application.Policy.Pdp.IAccessDecisionPoint pdp,
         IGovernedTableReadPlanner planner,
         IGovernedSqlExecutionService sqlExecutionService,
         IKeysetCursorEncoder cursorEncoder,
@@ -195,7 +195,8 @@ public static class TableStreamEndpoints
                 tenant,
                 clientIp,
                 request.Select,
-                ct).ConfigureAwait(false);
+                ct,
+                logger).ConfigureAwait(false);
         }
         catch (UnauthorizedAccessException)
         {

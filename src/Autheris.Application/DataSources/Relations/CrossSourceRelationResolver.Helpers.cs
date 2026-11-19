@@ -92,7 +92,8 @@ public sealed partial class CrossSourceRelationResolver
         GovernedQueryStages.EnsureCanonicalClusterAdminClaim(user, table);
         var ip = !string.IsNullOrWhiteSpace(clientIp) && IPAddress.TryParse(clientIp, out var parsed) ? parsed : null;
         var securityContext = SecurityPrincipalContext.FromPrincipal(user, tenantId, clientIp: ip);
-        return await _pdp.EvaluateAccessAsync(table, metadata, securityContext, requestedColumns, ct).ConfigureAwait(false);
+        return await Autheris.Application.Policy.Pdp.ReadAccessDecisions.DecideReadAsync(
+            _pdp, metadata, securityContext, Autheris.Application.Policy.Pdp.AccessTransport.Rest, requestedColumns, _logger, ct).ConfigureAwait(false);
     }
 
     private void ValidateCrossSourceOptIn(TableRelation relation, TableMetadata parentMetadata, TableMetadata childMetadata)

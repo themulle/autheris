@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Analytics;
 
+using Autheris.Application.Policy.Pdp;
 using System;
 using Autheris.Application.Catalog.Semantic;
 using System.Collections.Generic;
@@ -50,7 +51,7 @@ public sealed class SemanticMetricConsentPdpTests
     private static TableAccessDecision ConsentMissing() =>
         TableAccessDecision.Denied(Orders, "Zero Trust: No active ALLOW consent granted to subject.") with { DenialKind = TableAccessDenialKind.ConsentMissing };
 
-    private static async Task<(TableAccessDecision Decision, bool HasMetricConsent, IUnifiedPolicyDecisionPoint Pdp)> RunAsync(
+    private static async Task<(TableAccessDecision Decision, bool HasMetricConsent, IAccessDecisionPoint Pdp)> RunAsync(
         TableAccessDecision pdpTableDecision,
         TableAccessDecision? pdpMetricDecision = null)
     {
@@ -60,20 +61,17 @@ public sealed class SemanticMetricConsentPdpTests
         repo.GetAllActiveConsentsForSubjectsAsync(default!, default, default, default, default)
             .ReturnsForAnyArgs(Task.FromResult<IReadOnlyList<Consent>>([MetricConsent()]));
 
-        var pdp = Substitute.For<IUnifiedPolicyDecisionPoint>();
-        pdp.EvaluateAccessAsync(Arg.Any<TableIdentifier>(), Arg.Any<TableMetadata>(), Arg.Any<SecurityPrincipalContext>(),
-                Arg.Any<IReadOnlyList<string>?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(pdpTableDecision));
-        pdp.EvaluateAccessAsync(Arg.Any<TableIdentifier>(), Arg.Any<TableMetadata>(), Arg.Any<SecurityPrincipalContext>(),
-                Arg.Any<IReadOnlyList<string>?>(), Arg.Any<IReadOnlyList<Consent>?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(pdpMetricDecision ?? TableAccessDecision.Denied(Orders, "metric pipeline denied")));
+        var pdp = Substitute.For<IAccessDecisionPoint>();
+        var metricDecision = pdpMetricDecision ?? TableAccessDecision.Denied(Orders, "metric pipeline denied");
+        pdp.DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>())
+            .Returns(ci => ci.Arg<AccessRequest>().SupplementalConsents is { Count: > 0 } ? metricDecision : pdpTableDecision);
 
         var service = new SemanticMetricQueryService(
             Substitute.For<ISemanticCatalogService>(),
             Substitute.For<IGovernedAggregationService>(),
             Substitute.For<ITableMetadataRepository>(),
-            consentRepository: repo,
-            pdp: pdp);
+            pdp,
+            consentRepository: repo);
 
         var task = (Task<(TableAccessDecision Decision, bool HasMetricConsent)>)typeof(SemanticMetricQueryService)
             .GetMethod("ResolveMetricAndTableDecisionAsync", BindingFlags.NonPublic | BindingFlags.Instance)!
@@ -90,7 +88,7 @@ public sealed class SemanticMetricConsentPdpTests
 
         decision.IsAllowed.ShouldBeFalse();
         hasMetricConsent.ShouldBeFalse();
-        await pdp.DidNotReceiveWithAnyArgs().EvaluateAccessAsync(default!, default!, default!, default, (IReadOnlyList<Consent>?)null, default);
+        await pdp.DidNotReceive().DecideAsync(Arg.Is<AccessRequest>(r => r.SupplementalConsents != null), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -122,7 +120,7 @@ public sealed class SemanticMetricConsentPdpTests
         var (decision, _, pdp) = await RunAsync(denial, Allowed());
 
         decision.IsAllowed.ShouldBeFalse();
-        await pdp.DidNotReceiveWithAnyArgs().EvaluateAccessAsync(default!, default!, default!, default, (IReadOnlyList<Consent>?)null, default);
+        await pdp.DidNotReceive().DecideAsync(Arg.Is<AccessRequest>(r => r.SupplementalConsents != null), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -136,9 +134,8 @@ public sealed class SemanticMetricConsentPdpTests
         decision.IsAllowed.ShouldBeTrue();
         hasMetricConsent.ShouldBeTrue();
         decision.MandatoryRowPredicateSql.ShouldBe("tenant_scope = 7");
-        await pdp.Received(1).EvaluateAccessAsync(
-            Arg.Any<TableIdentifier>(), Arg.Any<TableMetadata>(), Arg.Any<SecurityPrincipalContext>(), Arg.Any<IReadOnlyList<string>?>(),
-            Arg.Is<IReadOnlyList<Consent>?>(c => c != null && c.Count == 1),
+        await pdp.Received(1).DecideAsync(
+            Arg.Is<AccessRequest>(r => r.SupplementalConsents != null && r.SupplementalConsents.Count == 1 && r.Operation == AccessOperation.Read && r.Transport == AccessTransport.Analytics),
             Arg.Any<CancellationToken>());
     }
 
@@ -169,12 +166,11 @@ public sealed class SemanticMetricConsentPdpTests
     [Trait("Category", "Security")]
     public async Task Aggregation_PreEvaluatedDecisionWithoutPdpProvenance_IsReevaluated()
     {
-        var pdp = Substitute.For<IUnifiedPolicyDecisionPoint>();
-        pdp.EvaluateAccessAsync(Arg.Any<TableIdentifier>(), Arg.Any<TableMetadata>(), Arg.Any<SecurityPrincipalContext>(),
-                Arg.Any<IReadOnlyList<string>?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(TableAccessDecision.Denied(Orders, "Casbin ABAC Policy Denial")));
+        var pdp = Substitute.For<IAccessDecisionPoint>();
+        pdp.DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>())
+            .Returns(TableAccessDecision.Denied(Orders, "Casbin ABAC Policy Denial"));
         var audit = Substitute.For<IAuditLogRepository>();
-        var service = new GovernedAggregationService(Substitute.For<ITableMetadataRepository>(), audit, pdp: pdp);
+        var service = new GovernedAggregationService(Substitute.For<ITableMetadataRepository>(), audit, pdp);
         var forged = Allowed();
         var query = new AggregationQuery(Orders, PreEvaluatedDecision: forged, BypassTableConsent: true);
 

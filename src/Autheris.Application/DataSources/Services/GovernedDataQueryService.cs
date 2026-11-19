@@ -39,7 +39,8 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
     private const int DefaultDuckDbMaxResultRows = 50_000;
 
     private readonly ITableMetadataRepository _metadataRepository;
-    private readonly IUnifiedPolicyDecisionPoint _pdp;
+    private readonly Autheris.Application.Policy.Pdp.IAccessDecisionPoint _pdp;
+    private readonly Microsoft.Extensions.Logging.ILogger? _logger;
     private readonly IGovernedSqlExecutionService _sqlExecutionService;
     private readonly IFederatedQueryExecutionService _federatedExecutionService;
     private readonly IColumnMaskingProvider _maskingProvider;
@@ -49,14 +50,16 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
 
     public GovernedDataQueryService(
         ITableMetadataRepository metadataRepository,
-        IUnifiedPolicyDecisionPoint pdp,
+        Autheris.Application.Policy.Pdp.IAccessDecisionPoint pdp,
         IGovernedSqlExecutionService sqlExecutionService,
         IFederatedQueryExecutionService federatedExecutionService,
         IColumnMaskingProvider maskingProvider,
         IOptions<GatewayOptions>? options = null,
         IOptions<AnalyticsOptions>? analyticsOptions = null,
-        IGovernedTableReadPlanner? planner = null)
+        IGovernedTableReadPlanner? planner = null,
+        Microsoft.Extensions.Logging.ILogger<GovernedDataQueryService>? logger = null)
     {
+        _logger = logger;
         _planner = planner ?? new GovernedTableReadPlanner();
         _options = options?.Value ?? new GatewayOptions();
         _maxOffset = analyticsOptions?.Value?.DatasetApi?.MaxOffset ?? DatasetApiOptions.DefaultMaxOffset;
@@ -104,7 +107,8 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
             context.TenantId,
             context.ClientIp,
             request.SelectColumns,
-            ct).ConfigureAwait(false);
+            ct,
+            _logger).ConfigureAwait(false);
 
         if (!metadata.Table.IsActive)
         {

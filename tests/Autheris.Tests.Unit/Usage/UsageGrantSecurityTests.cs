@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Usage;
 
+using Autheris.Application.Policy.Pdp;
 using System;
 using System.Collections.Generic;
 using System.Data;
@@ -183,9 +184,9 @@ public sealed class UsageGrantSecurityTests
                 ? Task.FromResult<TableMetadata?>(metadata)
                 : NullFake.UseDefault);
 
-        var pdp = NullFake.Create<IUnifiedPolicyDecisionPoint>((method, _) =>
-            method.Name == nameof(IUnifiedPolicyDecisionPoint.EvaluateAccessAsync)
-                ? Task.FromResult(decision)
+        var pdp = NullFake.Create<IAccessDecisionPoint>((method, _) =>
+            method.Name == nameof(IAccessDecisionPoint.DecideAsync)
+                ? new ValueTask<TableAccessDecision>(decision)
                 : NullFake.UseDefault);
 
         var sqlExec = NullFake.Create<IGovernedSqlExecutionService>((method, args) =>
