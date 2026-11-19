@@ -48,7 +48,6 @@ src/Autheris.Application/Catalog/OpenMetadata/  @themulle
 src/Autheris.Application/Lineage/  @themulle
 src/Autheris.Extensions/DataCatalog/  @themulle
 src/Autheris.Extensions/OpenMetadata/  @themulle
-src/Autheris.Extensions/Dbt/  @themulle
 src/Autheris.Extensions/Lineage/  @themulle
 
 # Subsystem 9: Governance persistence
@@ -147,6 +146,8 @@ src/Autheris.Application/Docs/  @themulle
 # subsystem: modules | primary: @themulle | backup: vacant
 modules/Autheris.Modules.Lakehouse/        @themulle
 modules/Autheris.Modules.Lakehouse.Tests/  @themulle
+modules/Autheris.Modules.Dbt/              @themulle
+modules/Autheris.Modules.Dbt.Tests/        @themulle
 src/Autheris.Modules.Abstractions/        @themulle
 
 # Security (SEC-SIMPL-71)
