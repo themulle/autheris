@@ -110,6 +110,17 @@ public abstract class SemanticManifestContract : GovernanceContractBase
     }
 
     [RequiresContainerRuntimeFact]
+    public async Task FullLengthSha256Hash_RoundTripsExactly()
+    {
+        if (!Store.IsAvailable) return;
+        var hash = new string('a', 32) + new string('f', 32);
+
+        await Manifests.SaveAsync(Store.TenantA, Sample(Store.TenantA, "v64", "{\"h\":64}", hash), default);
+
+        (await Manifests.GetAsync(Store.TenantA, default))!.ContentHash.ShouldBe(hash);
+    }
+
+    [RequiresContainerRuntimeFact]
     [Trait("Category", "Security")]
     public override async Task Reads_never_return_other_tenant_rows()
     {

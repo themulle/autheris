@@ -52,7 +52,7 @@ public partial class GovernanceRepository : ISemanticManifestStore
         return new StoredSemanticManifest(
             tenantId,
             reader.GetString(0),
-            reader.GetString(1),
+            reader.GetString(1).TrimEnd(), // the SQL Server column is CHAR(64) and pads a shorter value with blanks
             reader.GetInt32(2),
             reader.GetInt32(3),
             reader.GetInt32(4),
