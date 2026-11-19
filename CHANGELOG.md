@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- Breaking (governance schema): step 0031 `access_profile_items` moves the masking mode and the target tables of an access profile into the new tables `access_profile_items` (one row per table entry) and `access_profile_classification_access` (the mode as the PII level), then drops `access_profiles.masking_mode` and `access_profiles.target_tables`. The profile API is unchanged except that an entry in `tables` must be non-blank, at most 512 characters long, and at most 1000 entries are accepted (`400` otherwise).
+
+### Upgrade notes
+- Step 0031 runs only after every node runs this build: older builds read and write the dropped columns and fail with an error until they are replaced. Every `masking_mode` must be `Default`, `Unmasked` or `Strict` and every `target_tables` a JSON array of non-blank strings of at most 512 characters; otherwise the step aborts with the first profile id and changes nothing (fix the row, then restart). PostgreSQL 16 or later is required for the JSON check.
+
 ## [1.9.0] - 2026-11-19
 
 ### Added

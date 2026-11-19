@@ -25,7 +25,7 @@ internal sealed class AccessProfileStoreScope(DbConnection connection, Func<Valu
 }
 
 /// <summary>
-/// the persisted access profiles (<c>ACCESS_PROFILES</c>, <c>ACCESS_PROFILE_ASSIGNMENTS</c>) shared by the three governance repositories.
+/// the persisted access profiles (<c>ACCESS_PROFILES</c>, <c>ACCESS_PROFILE_ITEMS</c>, <c>ACCESS_PROFILE_CLASSIFICATION_ACCESS</c>, <c>ACCESS_PROFILE_ASSIGNMENTS</c>) shared by the three governance repositories.
 /// The SQL differs only in the upsert statements and the timestamp representation. A store failure always propagates (never an empty result),
 /// so a database outage denies. Which assignments are effective, and in what order, is decided by <see cref="AccessProfileAssignmentRules"/>.
 /// </summary>
@@ -39,7 +39,21 @@ internal sealed class AccessProfileStore(
     private const AccessProfileAssignmentKind UnknownAssignmentKind = (AccessProfileAssignmentKind)(-1);
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
 
-    private const string ProfileColumns = "p.profile_id, p.tenant_id, p.name, p.masking_mode, p.target_tables, p.row_scope_json, p.justification, p.created_by, p.created_at, p.valid_to";
+    private const string ProfileColumns = "p.profile_id, p.tenant_id, p.name, p.row_scope_json, p.justification, p.created_by, p.created_at, p.valid_to";
+    private const int ProfileColumnCount = 8;
+
+    /// <summary>The one classification code a profile carries: its profile-wide masking mode (Strict 0, Default 1, Unmasked 2).</summary>
+    internal const string PiiCode = "PII";
+
+    /// <summary>The longest stored table entry (the <c>object_ref</c> column is 512 characters).</summary>
+    internal const int MaxTableEntryLength = 512;
+
+    internal const string ItemsSelectSql = "SELECT profile_id, item_no, object_ref FROM ACCESS_PROFILE_ITEMS WHERE tenant_id = @tenantId AND profile_id IN ({0}) ORDER BY profile_id, item_no";
+    internal const string LevelsSelectSql = "SELECT profile_id, code, access_level FROM ACCESS_PROFILE_CLASSIFICATION_ACCESS WHERE tenant_id = @tenantId AND profile_id IN ({0})";
+    internal const string ItemsDeleteSql = "DELETE FROM ACCESS_PROFILE_ITEMS WHERE tenant_id = @tenantId AND profile_id = @profileId";
+    internal const string LevelsDeleteSql = "DELETE FROM ACCESS_PROFILE_CLASSIFICATION_ACCESS WHERE tenant_id = @tenantId AND profile_id = @profileId";
+    internal const string ItemInsertSql = "INSERT INTO ACCESS_PROFILE_ITEMS (tenant_id, profile_id, item_no, object_ref) VALUES (@tenantId, @profileId, @itemNo, @objectRef)";
+    internal const string LevelInsertSql = "INSERT INTO ACCESS_PROFILE_CLASSIFICATION_ACCESS (tenant_id, profile_id, code, access_level) VALUES (@tenantId, @profileId, @code, @accessLevel)";
     private const string AssignmentColumns = "a.subject, a.subject_type, a.assigned_at, a.expires_at, a.created_by, a.approved_by, a.approved_at, a.justification, a.kind, a.renewal_count";
 
     // ---------------------------------------------------------------- reads
@@ -74,7 +88,8 @@ internal sealed class AccessProfileStore(
 
         var wanted = terms.Select(t => (t.Type, t.Norm)).ToHashSet();
         var now = _time.GetUtcNow();
-        var byId = new Dictionary<string, AccessProfile>(StringComparer.Ordinal);
+        var rows = new Dictionary<string, ProfileRow>(StringComparer.Ordinal);
+        var pairs = new List<(string ProfileId, AccessProfileAssignment Assignment)>();
         await using var scope = await open(false, ct).ConfigureAwait(false);
 
         for (var offset = 0; offset < terms.Count; offset += MaxTermsPerStatement)
@@ -105,24 +120,42 @@ internal sealed class AccessProfileStore(
             await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
             {
-                var profile = ReadProfile(reader, 0);
-                var assignment = ReadAssignment(reader, 10);
-                if (!wanted.Contains((assignment.SubjectType, ConsentSubjectFilter.Normalize(assignment.Subject.Trim()))) ||
-                    !AccessProfileAssignmentRules.IsEffective(profile, assignment, now))
+                var row = ReadProfileRow(reader, 0);
+                var assignment = ReadAssignment(reader, ProfileColumnCount);
+                if (!wanted.Contains((assignment.SubjectType, ConsentSubjectFilter.Normalize(assignment.Subject.Trim()))))
                 {
                     continue;
                 }
 
-                if (!byId.TryGetValue(profile.ProfileId, out var existing))
+                rows.TryAdd(row.ProfileId, row);
+                pairs.Add((row.ProfileId, assignment));
+            }
+        }
+
+        var byId = new Dictionary<string, AccessProfile>(StringComparer.Ordinal);
+        if (rows.Count > 0)
+        {
+            // The mode and the table entries come from the item tables (one batched, tenant-filtered query each); a failure throws, so no profile is built from a partial read.
+            var details = await LoadProfileDetailsAsync(scope.Connection, tenantId, rows.Keys.ToList(), null, ct).ConfigureAwait(false);
+            var built = new Dictionary<string, AccessProfile>(StringComparer.Ordinal);
+            foreach (var (profileId, assignment) in pairs)
+            {
+                if (!built.TryGetValue(profileId, out var profile))
                 {
-                    existing = profile;
-                    byId[profile.ProfileId] = existing;
+                    profile = ToProfile(rows[profileId], details);
+                    built[profileId] = profile;
                 }
 
-                if (!existing.Assignments.Any(a => a.SubjectType == assignment.SubjectType &&
-                                                   string.Equals(a.Subject, assignment.Subject, StringComparison.OrdinalIgnoreCase)))
+                if (!AccessProfileAssignmentRules.IsEffective(profile, assignment, now))
                 {
-                    existing.Assignments.Add(assignment);
+                    continue;
+                }
+
+                byId.TryAdd(profileId, profile);
+                if (!profile.Assignments.Any(a => a.SubjectType == assignment.SubjectType &&
+                                                  string.Equals(a.Subject, assignment.Subject, StringComparison.OrdinalIgnoreCase)))
+                {
+                    profile.Assignments.Add(assignment);
                 }
             }
         }
@@ -146,6 +179,7 @@ internal sealed class AccessProfileStore(
     {
         var profiles = new List<AccessProfile>();
         var map = new Dictionary<string, AccessProfile>(StringComparer.Ordinal);
+        var rows = new List<ProfileRow>();
         await using (var cmd = conn.CreateCommand())
         {
             cmd.Transaction = tx;
@@ -160,7 +194,16 @@ internal sealed class AccessProfileStore(
             await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
             {
-                var p = ReadProfile(reader, 0);
+                rows.Add(ReadProfileRow(reader, 0));
+            }
+        }
+
+        if (rows.Count > 0)
+        {
+            var details = await LoadProfileDetailsAsync(conn, tenantId, rows.Select(r => r.ProfileId).ToList(), tx, ct).ConfigureAwait(false);
+            foreach (var row in rows)
+            {
+                var p = ToProfile(row, details);
                 profiles.Add(p);
                 map[p.ProfileId] = p;
             }
@@ -207,6 +250,9 @@ internal sealed class AccessProfileStore(
             throw new ArgumentOutOfRangeException(nameof(profile), "The access profile masking mode is not a defined value.");
         }
 
+        var items = DistinctItems(profile.TargetTables);
+        var level = ToAccessLevel(profile.MaskingMode);
+
         var now = _time.GetUtcNow();
         await using var scope = await open(true, ct).ConfigureAwait(false);
         var conn = scope.Connection;
@@ -214,9 +260,11 @@ internal sealed class AccessProfileStore(
 
         await ExecAsync(conn, tx, ProfileUpsertSql, ct,
             ("@profileId", profile.ProfileId), ("@tenantId", profile.TenantId.Value), ("@name", profile.Name),
-            ("@maskingMode", profile.MaskingMode.ToString()), ("@targetTables", JsonSerializer.Serialize(profile.TargetTables ?? [])),
             ("@rowScopeJson", profile.RowScope.Count == 0 ? null : JsonSerializer.Serialize(profile.RowScope)), ("@justification", profile.Justification),
             ("@createdBy", profile.CreatedBy ?? "unknown"), ("@createdAt", Ts(profile.CreatedAt)), ("@validTo", Ts(profile.ValidTo))).ConfigureAwait(false);
+
+        // The table entries and the profile-wide masking level replace the stored rows in this same transaction (the profile row above holds the lock).
+        await ReplaceItemsAsync(conn, tx, profile, items, level, ct).ConfigureAwait(false);
 
         // O-5d: the typed assignments are authoritative (validated, period restarted now); an empty list clears every stored assignment.
         var desired = new Dictionary<(AccessProfileSubjectType, string), AccessProfileAssignment>();
@@ -247,6 +295,8 @@ internal sealed class AccessProfileStore(
         ArgumentException.ThrowIfNullOrWhiteSpace(profileId);
         await using var scope = await open(true, ct).ConfigureAwait(false);
         await using var tx = await scope.Connection.BeginTransactionAsync(ct).ConfigureAwait(false);
+        await ExecAsync(scope.Connection, tx, ItemsDeleteSql, ct, ("@tenantId", tenantId.Value), ("@profileId", profileId)).ConfigureAwait(false);
+        await ExecAsync(scope.Connection, tx, LevelsDeleteSql, ct, ("@tenantId", tenantId.Value), ("@profileId", profileId)).ConfigureAwait(false);
         await ExecAsync(scope.Connection, tx, "DELETE FROM ACCESS_PROFILE_ASSIGNMENTS WHERE tenant_id = @tenantId AND profile_id = @profileId", ct,
             ("@tenantId", tenantId.Value), ("@profileId", profileId)).ConfigureAwait(false);
         var rows = await ExecAsync(scope.Connection, tx, "DELETE FROM ACCESS_PROFILES WHERE tenant_id = @tenantId AND profile_id = @profileId", ct,
@@ -367,13 +417,13 @@ internal sealed class AccessProfileStore(
     private string ProfileUpsertSql => dialect == AccessProfileDialect.SqlServer
         ? @"MERGE ACCESS_PROFILES WITH (HOLDLOCK) AS t
             USING (SELECT @profileId AS profile_id, @tenantId AS tenant_id) AS s ON t.tenant_id = s.tenant_id AND t.profile_id = s.profile_id
-            WHEN MATCHED THEN UPDATE SET name = @name, masking_mode = @maskingMode, target_tables = @targetTables, row_scope_json = @rowScopeJson,
+            WHEN MATCHED THEN UPDATE SET name = @name, row_scope_json = @rowScopeJson,
                 justification = @justification, created_by = @createdBy, created_at = @createdAt, valid_to = @validTo
-            WHEN NOT MATCHED THEN INSERT (profile_id, tenant_id, name, masking_mode, target_tables, row_scope_json, justification, created_by, created_at, valid_to)
-                VALUES (@profileId, @tenantId, @name, @maskingMode, @targetTables, @rowScopeJson, @justification, @createdBy, @createdAt, @validTo);"
-        : @"INSERT INTO ACCESS_PROFILES (profile_id, tenant_id, name, masking_mode, target_tables, row_scope_json, justification, created_by, created_at, valid_to)
-            VALUES (@profileId, @tenantId, @name, @maskingMode, @targetTables, @rowScopeJson, @justification, @createdBy, @createdAt, @validTo)
-            ON CONFLICT (tenant_id, profile_id) DO UPDATE SET name = excluded.name, masking_mode = excluded.masking_mode, target_tables = excluded.target_tables,
+            WHEN NOT MATCHED THEN INSERT (profile_id, tenant_id, name, row_scope_json, justification, created_by, created_at, valid_to)
+                VALUES (@profileId, @tenantId, @name, @rowScopeJson, @justification, @createdBy, @createdAt, @validTo);"
+        : @"INSERT INTO ACCESS_PROFILES (profile_id, tenant_id, name, row_scope_json, justification, created_by, created_at, valid_to)
+            VALUES (@profileId, @tenantId, @name, @rowScopeJson, @justification, @createdBy, @createdAt, @validTo)
+            ON CONFLICT (tenant_id, profile_id) DO UPDATE SET name = excluded.name,
                 row_scope_json = excluded.row_scope_json, justification = excluded.justification, created_by = excluded.created_by,
                 created_at = excluded.created_at, valid_to = excluded.valid_to";
 
@@ -406,31 +456,171 @@ internal sealed class AccessProfileStore(
         return reader.GetFieldValue<DateTimeOffset>(ordinal);
     }
 
-    internal AccessProfile ReadProfile(DbDataReader reader, int o)
-    {
-        // Unknown or undefined (e.g. a numeric "7", which Enum.TryParse accepts) mode: most restrictive.
-        var mode = Enum.TryParse<MaskingPolicyMode>(reader.GetString(o + 3), true, out var m) && Enum.IsDefined(m) ? m : MaskingPolicyMode.Strict;
-        var targets = reader.IsDBNull(o + 4) || string.IsNullOrWhiteSpace(reader.GetString(o + 4))
+    /// <summary>The profile columns of a row; the masking mode and table entries come from the item tables (see <see cref="LoadProfileDetailsAsync"/>).</summary>
+    internal sealed record ProfileRow(
+        string ProfileId, TenantId TenantId, string Name, List<GrantRowScopeEntry> RowScope, string? Justification, string? CreatedBy,
+        DateTimeOffset CreatedAt, DateTimeOffset? ValidTo);
+
+    internal ProfileRow ReadProfileRow(DbDataReader reader, int o) => new(
+        reader.GetString(o),
+        // DEF-SC-14: an unparsable stored tenant never becomes the caller's tenant (that would expose a foreign or corrupt row); both loading
+        // queries are tenant-filtered, so such a row is an integrity failure: refuse with a governed code and no echo.
+        TenantId.TryParse(reader.GetString(o + 1), out var t) ? t : throw new AccessProfileTenantIntegrityException(),
+        reader.GetString(o + 2),
+        reader.IsDBNull(o + 3) || string.IsNullOrWhiteSpace(reader.GetString(o + 3))
             ? []
-            : JsonSerializer.Deserialize<List<string>>(reader.GetString(o + 4)) ?? [];
+            : JsonSerializer.Deserialize<List<GrantRowScopeEntry>>(reader.GetString(o + 3)) ?? [],
+        reader.IsDBNull(o + 4) ? null : reader.GetString(o + 4),
+        reader.IsDBNull(o + 5) ? null : reader.GetString(o + 5),
+        ReadTs(reader, o + 6) ?? DateTimeOffset.UtcNow,
+        ReadTs(reader, o + 7));
+
+    private static AccessProfile ToProfile(ProfileRow row, Dictionary<string, (MaskingPolicyMode Mode, List<string> Tables)> details)
+    {
+        // A profile without detail rows reads as the most restrictive mode with no tables (it matches nothing and is refused at assignment).
+        var (mode, tables) = details.TryGetValue(row.ProfileId, out var d) ? d : (MaskingPolicyMode.Strict, new List<string>());
         return new AccessProfile
         {
-            ProfileId = reader.GetString(o),
-            // DEF-SC-14: an unparsable stored tenant never becomes the caller's tenant (that would expose a foreign or corrupt row); both loading
-            // queries are tenant-filtered, so such a row is an integrity failure: refuse with a governed code and no echo.
-            TenantId = TenantId.TryParse(reader.GetString(o + 1), out var t) ? t : throw new AccessProfileTenantIntegrityException(),
-            Name = reader.GetString(o + 2),
+            ProfileId = row.ProfileId,
+            TenantId = row.TenantId,
+            Name = row.Name,
             MaskingMode = mode,
-            TargetTables = targets,
-            RowScope = reader.IsDBNull(o + 5) || string.IsNullOrWhiteSpace(reader.GetString(o + 5))
-                ? []
-                : JsonSerializer.Deserialize<List<GrantRowScopeEntry>>(reader.GetString(o + 5)) ?? [],
-            Justification = reader.IsDBNull(o + 6) ? null : reader.GetString(o + 6),
-            CreatedBy = reader.IsDBNull(o + 7) ? null : reader.GetString(o + 7),
-            CreatedAt = ReadTs(reader, o + 8) ?? DateTimeOffset.UtcNow,
-            ValidTo = ReadTs(reader, o + 9),
+            TargetTables = tables,
+            RowScope = row.RowScope,
+            Justification = row.Justification,
+            CreatedBy = row.CreatedBy,
+            CreatedAt = row.CreatedAt,
+            ValidTo = row.ValidTo,
             Assignments = []
         };
+    }
+
+    /// <summary>Strict 0 (DENY), Default 1 (MASK), Unmasked 2 (CLEAR). An undefined mode is never stored.</summary>
+    internal static short ToAccessLevel(MaskingPolicyMode mode) => mode switch
+    {
+        MaskingPolicyMode.Strict => 0,
+        MaskingPolicyMode.Default => 1,
+        MaskingPolicyMode.Unmasked => 2,
+        _ => throw new ArgumentOutOfRangeException(nameof(mode), "The access profile masking mode is not a defined value.")
+    };
+
+    /// <summary>
+    /// The masking mode of the stored classification rows of one profile, fail closed: exactly one row with the <c>PII</c> code and a level 0..2 maps to its mode;
+    /// a missing row, extra or other rows, duplicates and a level outside 0..2 all resolve to <see cref="MaskingPolicyMode.Strict"/> (never a less restrictive mode).
+    /// </summary>
+    internal static MaskingPolicyMode ToMaskingMode(IReadOnlyList<(string Code, short Level)> rows)
+    {
+        if (rows.Count != 1 || !string.Equals(rows[0].Code, PiiCode, StringComparison.Ordinal))
+        {
+            return MaskingPolicyMode.Strict;
+        }
+
+        return rows[0].Level switch
+        {
+            1 => MaskingPolicyMode.Default,
+            2 => MaskingPolicyMode.Unmasked,
+            _ => MaskingPolicyMode.Strict
+        };
+    }
+
+    /// <summary>The table entries stored verbatim in first-occurrence order, duplicates collapsed (set semantics); a null, blank or over-long entry is refused without echoing it.</summary>
+    internal static List<string> DistinctItems(IReadOnlyList<string>? tables)
+    {
+        var result = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var entry in tables ?? [])
+        {
+            if (string.IsNullOrWhiteSpace(entry) || entry.Length > MaxTableEntryLength)
+            {
+                throw new ArgumentException("A table entry of the access profile is blank or longer than 512 characters.", nameof(tables));
+            }
+
+            // SQL Server compares without trailing blanks, so the collapse key ignores them too (the stored text stays verbatim).
+            if (seen.Add(entry.TrimEnd(' ')))
+            {
+                result.Add(entry);
+            }
+        }
+
+        return result;
+    }
+
+    private async Task ReplaceItemsAsync(DbConnection conn, DbTransaction tx, AccessProfile profile, List<string> items, short level, CancellationToken ct)
+    {
+        var tenant = profile.TenantId.Value;
+        await ExecAsync(conn, tx, ItemsDeleteSql, ct, ("@tenantId", tenant), ("@profileId", profile.ProfileId)).ConfigureAwait(false);
+        await ExecAsync(conn, tx, LevelsDeleteSql, ct, ("@tenantId", tenant), ("@profileId", profile.ProfileId)).ConfigureAwait(false);
+        await ExecAsync(conn, tx, LevelInsertSql, ct,
+            ("@tenantId", tenant), ("@profileId", profile.ProfileId), ("@code", PiiCode), ("@accessLevel", level)).ConfigureAwait(false);
+        for (var i = 0; i < items.Count; i++)
+        {
+            await ExecAsync(conn, tx, ItemInsertSql, ct,
+                ("@tenantId", tenant), ("@profileId", profile.ProfileId), ("@itemNo", i + 1), ("@objectRef", items[i])).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// The masking mode and table entries of the given profiles: one tenant-filtered query per table and id chunk (no N+1), grouped by profile id.
+    /// Any failure throws, so a profile is never built from a partial read.
+    /// </summary>
+    private async Task<Dictionary<string, (MaskingPolicyMode Mode, List<string> Tables)>> LoadProfileDetailsAsync(
+        DbConnection conn, TenantId tenantId, IReadOnlyList<string> profileIds, DbTransaction? tx, CancellationToken ct)
+    {
+        var levels = new Dictionary<string, List<(string Code, short Level)>>(StringComparer.Ordinal);
+        var tables = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        for (var offset = 0; offset < profileIds.Count; offset += MaxTermsPerStatement)
+        {
+            var chunk = profileIds.Skip(offset).Take(MaxTermsPerStatement).ToList();
+            await ReadDetailRowsAsync(conn, tx, tenantId, chunk, LevelsSelectSql, r =>
+            {
+                var id = r.GetString(0);
+                if (!levels.TryGetValue(id, out var list))
+                {
+                    levels[id] = list = [];
+                }
+
+                list.Add((r.GetString(1), r.GetInt16(2)));
+            }, ct).ConfigureAwait(false);
+            await ReadDetailRowsAsync(conn, tx, tenantId, chunk, ItemsSelectSql, r =>
+            {
+                var id = r.GetString(0);
+                if (!tables.TryGetValue(id, out var list))
+                {
+                    tables[id] = list = [];
+                }
+
+                list.Add(r.GetString(2));
+            }, ct).ConfigureAwait(false);
+        }
+
+        var result = new Dictionary<string, (MaskingPolicyMode, List<string>)>(StringComparer.Ordinal);
+        foreach (var id in profileIds)
+        {
+            result[id] = (ToMaskingMode(levels.TryGetValue(id, out var l) ? l : []), tables.TryGetValue(id, out var t) ? t : []);
+        }
+
+        return result;
+    }
+
+    private static async Task ReadDetailRowsAsync(
+        DbConnection conn, DbTransaction? tx, TenantId tenantId, List<string> ids, string sqlTemplate, Action<DbDataReader> onRow, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        AddParam(cmd, "@tenantId", tenantId.Value);
+        var names = new string[ids.Count];
+        for (var i = 0; i < ids.Count; i++)
+        {
+            names[i] = "@i" + i;
+            AddParam(cmd, names[i], ids[i]);
+        }
+
+        cmd.CommandText = string.Format(CultureInfo.InvariantCulture, sqlTemplate, string.Join(",", names));
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            onRow(reader);
+        }
     }
 
     private AccessProfileAssignment ReadAssignment(DbDataReader reader, int o) => new()

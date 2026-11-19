@@ -25,6 +25,9 @@ using TrinoSqlEngine;
 
 public static partial class GovernanceEndpoints
 {
+    private const int MaxProfileTableEntries = 1000;
+    private const int MaxProfileTableEntryLength = 512;
+
     private static readonly string[] SelfGrantClaimTypes =
     [
         ClaimTypes.PrimarySid, ClaimTypes.NameIdentifier, "objectSid", "onprem_sid", "oid", "sub",
@@ -165,6 +168,22 @@ public static partial class GovernanceEndpoints
         if (req.Tables == null || req.Tables.Count == 0)
         {
             return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "At least one target table pattern must be provided in 'tables'.", context);
+        }
+
+        // The entries are stored one per row (512 characters, at most 1000 per profile): a blank, over-long or surplus entry is refused before any write, without echoing it.
+        if (req.Tables.Count > MaxProfileTableEntries)
+        {
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, $"'tables' must not contain more than {MaxProfileTableEntries} entries.", context);
+        }
+
+        if (req.Tables.Any(t => string.IsNullOrWhiteSpace(t)))
+        {
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Every entry in 'tables' must be a non-blank table pattern.", context);
+        }
+
+        if (req.Tables.Any(t => t.Trim().Length > MaxProfileTableEntryLength))
+        {
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, $"Every entry in 'tables' must be at most {MaxProfileTableEntryLength} characters long.", context);
         }
 
         // Overbroad wildcard restriction: *.* or * is forbidden for Unmasked
