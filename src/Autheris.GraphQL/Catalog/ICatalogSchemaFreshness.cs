@@ -2,7 +2,7 @@ namespace Autheris.GraphQL.Catalog;
 
 /// <summary>
 /// Issue #802: whether the GraphQL schema this instance serves reflects every catalog change it knows about. Reports state
-/// only (no catalog names, counts or versions), so it may back an anonymous status endpoint.
+/// only (no catalog names, counts or versions), so it backs an authenticated status endpoint (the answer reveals write timing).
 /// </summary>
 public interface ICatalogSchemaFreshness
 {

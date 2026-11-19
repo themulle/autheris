@@ -152,4 +152,134 @@ public sealed class ReleaseWorkflowTests
             sectionChunk.ShouldContain("> Unsupported upgrade base. Oldest supported migration base: v1.5.0.");
         }
     }
+
+    private const string SigningKeySecret = "AUTHERIS_MODULE_SIGNING_KEY_PEM";
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Image_build_rejects_unsigned_module()
+    {
+        var dockerfile = ReadRepoFile("Dockerfile");
+
+        dockerfile.ShouldContain("ARG FLAVOR=core");
+        dockerfile.ShouldContain("FROM dotnet-base AS modules-core");
+        dockerfile.ShouldContain("FROM dotnet-base AS modules-full");
+        dockerfile.ShouldContain("FROM modules-${FLAVOR} AS modules-selected");
+        dockerfile.ShouldContain("core|full) ;; *) echo \"Error: FLAVOR must be core or full\"");
+
+        var core = StageBlock(dockerfile, "modules-core");
+        core.ShouldNotContain("dist/modules");
+        core.ShouldNotContain("/payload/modules");
+
+        // The full stage verifies every module and aborts the build on a non-zero verify, on an empty set and on any unsigned module.
+        var full = StageBlock(dockerfile, "modules-full");
+        full.ShouldContain("COPY dist/modules/ /payload/modules/");
+        full.ShouldContain("set -eu");
+        full.ShouldContain("Autheris.ModuleSigner.dll verify --pub /tools/module-release-pub.pem --dir \"$module_dir\" || exit 1");
+        full.ShouldContain("[ \"$count\" -gt 0 ]");
+        full.IndexOf("verify --pub", StringComparison.Ordinal).ShouldBeLessThan(full.IndexOf("chmod 0555", StringComparison.Ordinal));
+        full.ShouldContain("chmod 0555");
+        full.ShouldContain("chmod 0444");
+
+        // Only the selected flavor payload reaches the runtime image, root-owned; no unconditional module copy remains.
+        dockerfile.ShouldContain("COPY --from=modules-selected --chown=0:0 /payload/ /app/");
+        dockerfile.ShouldNotContain("COPY dist/modules/ /app/modules/");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Image_verify_uses_embedded_release_key()
+    {
+        var dockerfile = ReadRepoFile("Dockerfile");
+        var full = StageBlock(dockerfile, "modules-full");
+
+        // The pinned key is the file embedded into Autheris.Api as the Keys/module-release-*.pem resource.
+        var apiProject = ReadRepoFile("src/Autheris.Api/Autheris.Api.csproj");
+        apiProject.ShouldContain("Hosting\\Keys\\module-release-");
+        File.Exists(Path.Combine(RepositoryScan.RepoRoot, "src", "Autheris.Api", "Hosting", "Keys", "module-release-pub.pem")).ShouldBeTrue();
+        full.ShouldContain("COPY src/Autheris.Api/Hosting/Keys/module-release-pub.pem /tools/module-release-pub.pem");
+
+        // No key material or key location can be injected through build args, environment or secrets.
+        foreach (var line in dockerfile.Split('\n'))
+        {
+            var trimmed = line.TrimStart();
+            if (trimmed.StartsWith("ARG ", StringComparison.Ordinal) || trimmed.StartsWith("ENV ", StringComparison.Ordinal))
+            {
+                trimmed.ShouldNotContain("PEM", Case.Insensitive);
+                trimmed.ShouldNotContain("KEY", Case.Insensitive);
+                trimmed.ShouldNotContain("PUB", Case.Insensitive);
+            }
+        }
+
+        dockerfile.ShouldNotContain("--mount=type=secret");
+        dockerfile.ShouldNotContain("--mount=type=bind");
+        full.ShouldNotContain("$PUB");
+        full.ShouldNotContain("${PUB");
+        ReadRepoFile(".github/workflows/docker-publish.yml").ShouldNotContain("build-args: |\n            PUB");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Signing_key_secret_only_in_protected_environment_jobs()
+    {
+        string[] workflows = ["docker-publish.yml", "release.yml"];
+        var referencing = 0;
+        foreach (var workflow in workflows)
+        {
+            var content = ReadRepoFile(".github/workflows/" + workflow);
+            foreach (var (name, block) in JobBlocks(content))
+            {
+                if (!block.Contains($"secrets.{SigningKeySecret}", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                referencing++;
+                Regex.IsMatch(block, @"(?m)^    environment:\s*(release|module-release)\s*$")
+                    .ShouldBeTrue($"{workflow} job '{name}' references the module signing key without a protected environment");
+            }
+        }
+
+        referencing.ShouldBeGreaterThanOrEqualTo(3);
+
+        // No other workflow, script or composite action may read the signing key.
+        foreach (var path in Directory.EnumerateFiles(Path.Combine(RepositoryScan.RepoRoot, ".github"), "*", SearchOption.AllDirectories))
+        {
+            var name = Path.GetFileName(path);
+            if (name is "docker-publish.yml" or "release.yml")
+            {
+                continue;
+            }
+
+            File.ReadAllText(path).ShouldNotContain($"secrets.{SigningKeySecret}", customMessage: path);
+        }
+
+        // Only tag, dispatch or main-bound triggers: no pull_request_target and no fork-reachable trigger carries the secret.
+        ReadRepoFile(".github/workflows/release.yml").ShouldNotContain("pull_request_target");
+        ReadRepoFile(".github/workflows/docker-publish.yml").ShouldNotContain("pull_request_target");
+    }
+
+    private static string ReadRepoFile(string relativePath) =>
+        File.ReadAllText(Path.Combine(RepositoryScan.RepoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+
+    private static string StageBlock(string dockerfile, string stage)
+    {
+        var start = dockerfile.IndexOf($" AS {stage}\n", StringComparison.Ordinal);
+        start.ShouldBeGreaterThan(0, $"stage {stage} not found");
+        var next = dockerfile.IndexOf("\nFROM ", start, StringComparison.Ordinal);
+        return next < 0 ? dockerfile[start..] : dockerfile[start..next];
+    }
+
+    private static IEnumerable<(string Name, string Block)> JobBlocks(string workflow)
+    {
+        var jobsStart = workflow.IndexOf("\njobs:\n", StringComparison.Ordinal);
+        jobsStart.ShouldBeGreaterThan(0);
+        var matches = Regex.Matches(workflow[jobsStart..], @"(?m)^  ([A-Za-z0-9_-]+):\s*$");
+        for (var i = 0; i < matches.Count; i++)
+        {
+            var begin = matches[i].Index;
+            var end = i + 1 < matches.Count ? matches[i + 1].Index : workflow.Length - jobsStart;
+            yield return (matches[i].Groups[1].Value, workflow.Substring(jobsStart + begin, end - begin));
+        }
+    }
 }
