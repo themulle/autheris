@@ -11,8 +11,7 @@ namespace Autheris.Application.Sql.Tree;
 
 /// <summary>
 /// G2/G4 (docs/plans/rls-subquery-in-strategy.md): compiles a GraphQL selection tree into ONE statement whose single
-/// result value is the finished JSON array (SQL Server <c>FOR JSON PATH</c>, PostgreSQL <c>jsonb_agg</c>, SQLite
-/// <c>json_group_array</c>).
+/// result value is the finished JSON array (SQL Server <c>FOR JSON PATH</c>, PostgreSQL <c>jsonb_agg</c>).
 /// <para>Every table level reads from its own derived table
 /// <c>(SELECT … FROM table AS autheris_target WHERE tenant AND (row filter) AND join AND where ORDER BY … LIMIT …)</c>,
 /// so row filters bind to the reserved alias exactly as in WebSQL and OData, nested limits apply per parent row, and the
