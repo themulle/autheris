@@ -204,4 +204,16 @@ public sealed class ClientListWebSqlIntegrationTests
         var result = await f.QueryAsync("SELECT id FROM orders WHERE id IN (@ids) ORDER BY id", parameters, transport: SqlTransports.Trino);
         result.Rows.Count.ShouldBe(2);
     }
+
+    [RequiresContainerRuntimeFact]
+    [Trait("Category", "Security")]
+    public async Task WebSql_ParameterNamedP0_AsAList_BindsOnlyItsOwnSlots_AndTenantScopeStays()
+    {
+        await using var f = await CreateAsync();
+        if (f is null) return;
+        const string sql = "SELECT id FROM orders WHERE id IN (@p0) ORDER BY id";
+        (await f.IdsAsync(sql, P("p0", "[1,6,7]"), tenant: TenantA)).ShouldBe([1]);
+        (await f.IdsAsync(sql, P("P0", "[1,6,7]"), tenant: TenantB)).ShouldBe([6, 7]);
+        (await f.IdsAsync(sql, P("@p0", "[]"), tenant: TenantB)).ShouldBeEmpty();
+    }
 }

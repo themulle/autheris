@@ -23,7 +23,7 @@ Virtual filters define reusable filter predicates independently of target tables
 ## 2. Business Value
 
 - **Universal Cross-Channel Parity**: Exactly identical row filtering semantics are enforced regardless of whether an analyst accesses data through Power BI (OData), Python (Arrow IPC), WebSQL, or web applications (GraphQL).
-- **Zero-Drift Access Profiles**: Grantees (Users, Groups, Roles, Service Principals) are assigned `AccessProfile`s governing broad object patterns (`sales.*.*`). Any new table matching the pattern inherits the mandatory filter immediately.
+- **Zero-Drift Access Profiles**: Grantees (Users, Groups, Service Principals) are assigned `AccessProfile`s governing broad object patterns (`sales.*.*`). Any new table matching the pattern inherits the mandatory filter immediately.
 - **Fail-Closed Uncovered Object Governance**: If a table within a profile's scope is not covered by any binding, the profile explicitly dictates whether access is denied (`UncoveredPolicy.Deny` - fail closed) or left to explicit consents alone (`UncoveredPolicy.Skip`).
 - **Auditability & Explainability**: The `/api/v1/governance/effective-filters` endpoint allows compliance officers and auditors to simulate and explain exactly which virtual filters apply to a given user and table, showing generated target dialect SQL.
 - **Low-Latency In-Memory Resolution**: Snapshots are cached in-memory and synchronized atomically across cluster nodes via monotonic generation counters.
@@ -43,7 +43,7 @@ Virtual filters define reusable filter predicates independently of target tables
 │ 1. Resolve Data-Owner Consents (Allow/Deny, Column Masking)            │
 │ 2. Evaluate grants, deny consents and access profiles                  │
 │ 3. Resolve Virtual Filters via MandatoryRowFilterResolver:             │
-│    - Identify active AccessProfiles for caller (User, Groups, Roles)   │
+│    - Identify active AccessProfiles for caller (User, Groups)          │
 │    - Match target against profile Scope and FilterBinding patterns     │
 │    - Apply Supersedes replacements                                     │
 │    - Render Structured or SQL Predicates for target Dialect (target)   │
@@ -75,7 +75,7 @@ A `VirtualFilter` is scoped to a catalog data source and specifies either:
 ### 3.2 Access Profiles & Binding Matching
 
 An `AccessProfile` binds virtual filters to a specific grantee:
-- **Grantee**: User SID, Group SID, Service Principal SID, or Role Name.
+- **Grantee**: User SID, Group SID, or Service Principal SID. Role grantees were removed in 1.9.0 (migration step 0029 refuses to run while an active role grantee exists); assign the profile to the group that carries the role instead.
 - **Scope**: 3-segment pattern `source.schema.object` (e.g. `sales.dbo.*`).
 - **Uncovered Policy**: `Deny` (caller denied on any table in scope lacking a matching filter binding) or `Skip` (table remains governed by consent alone).
 - **Bindings**: Specific filter bindings with optional target pattern overrides, object kinds (`Relation`, `ProcedureResult`), time window columns (`TimeColumn`), and column remappings (`ColumnMap`).
@@ -115,8 +115,7 @@ Authorization: Bearer <token>
   "profiles": [
     {
       "name": "analyst_emea_sales",
-      "granteeType": "Role",
-      "roleName": "SalesAnalyst",
+      "grantee": { "type": "group", "sid": "S-1-5-21-1004336348-1177238915-682003330-5120" },
       "scope": "sales.dbo.*",
       "uncovered": "deny",
       "bindings": [
@@ -152,8 +151,7 @@ Content-Type: application/json
 Authorization: Bearer <token>
 
 {
-  "granteeType": "Role",
-  "roleName": "SalesAnalyst",
+  "grantee": { "type": "group", "sid": "S-1-5-21-1004336348-1177238915-682003330-5120" },
   "scope": "sales.dbo.*",
   "uncovered": "deny",
   "bindings": [

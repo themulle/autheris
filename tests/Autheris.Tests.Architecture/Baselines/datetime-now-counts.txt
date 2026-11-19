@@ -108,7 +108,6 @@ src/Autheris.Infrastructure/Caching/TableCache/InMemoryTableCacheStore.cs|1
 src/Autheris.Infrastructure/Idempotency/InMemoryIdempotencyStore.cs|3
 src/Autheris.Infrastructure/Persistence/AccessProfileStore.cs|2
 src/Autheris.Infrastructure/Persistence/AuditChainAnchorStores.cs|2
-src/Autheris.Infrastructure/Persistence/AuditWormExportService.cs|4
 src/Autheris.Infrastructure/Persistence/CloudEventSubscriptionMapping.cs|1
 src/Autheris.Infrastructure/Persistence/DatasetCatalogStore.cs|1
 src/Autheris.Infrastructure/Persistence/GovernanceRepository.CdcStreams.cs|3

@@ -28,7 +28,7 @@ public sealed class ColumnLevelParityTests
     private static readonly string[] ScopeClaimTypes = ["scp", "scope", "http://schemas.microsoft.com/identity/claims/scope"];
 
     // Consent shapes: single, two unfiltered, row-filtered + unfiltered, two with different row filters, plus a role grantee.
-    private enum Shape { Single, TwoUnfiltered, FilteredPlusUnfilteredMask, TwoFiltered, RoleGrantee }
+    private enum Shape { Single, TwoUnfiltered, FilteredPlusUnfilteredMask, TwoFiltered }
 
     private static IEnumerable<(ColumnAccessLevel? Base, ColumnAccessLevel? ScopeRule, string[] Scopes, Shape Shape, bool DenyEffectMask, bool Sensitive, string ClaimType)> Cases()
     {
@@ -81,9 +81,6 @@ public sealed class ColumnLevelParityTests
             case Shape.TwoFiltered:
                 consents.Add(Allow(primaryRules).WithFilters(RowFilter("1")));
                 consents.Add(Allow(Rule("id", ColumnAccessLevel.Clear), Rule("grade", ColumnAccessLevel.Clear)).WithFilters(RowFilter("2")));
-                break;
-            case Shape.RoleGrantee:
-                consents.Add(Allow(primaryRules).AsRole("analyst"));
                 break;
         }
 
@@ -204,7 +201,7 @@ public sealed class ColumnLevelParityTests
 
         skipped.ShouldBe(0, "the oracle must evaluate every enumerated combination: " + skippedReasons.FirstOrDefault());
         checkedCases.ShouldBe(total);
-        total.ShouldBe(4 * 4 * 4 * 5 * 2 * 2);
+        total.ShouldBe(4 * 4 * 4 * 4 * 2 * 2);
         mismatches.ShouldBeEmpty(string.Join('\n', mismatches.Take(20)));
     }
 
@@ -238,16 +235,4 @@ internal static class ConsentTestExtensions
         consent.RowFilters = filters;
         return consent;
     }
-
-    public static Consent AsRole(this Consent consent, string role) => new()
-    {
-        TableIdentifier = consent.TableIdentifier,
-        TenantId = consent.TenantId,
-        Effect = consent.Effect,
-        GranteeType = GranteeType.Role,
-        RoleName = role,
-        ValidFrom = consent.ValidFrom,
-        ValidTo = consent.ValidTo,
-        ColumnRules = consent.ColumnRules
-    };
 }

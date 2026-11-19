@@ -41,7 +41,6 @@ public sealed class ConsentDto
     public string Effect { get; init; } = string.Empty;
     public string GranteeType { get; init; } = string.Empty;
     public string? GranteeSid { get; init; }
-    public string? RoleName { get; init; }
     public DateTimeOffset ValidFrom { get; init; }
     public DateTimeOffset ValidTo { get; init; }
     public IReadOnlyList<string> Columns { get; init; } = [];

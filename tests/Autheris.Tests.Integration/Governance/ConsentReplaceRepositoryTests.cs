@@ -47,9 +47,9 @@ public sealed class ConsentReplaceRepositoryTests : IDisposable
         await cmd.ExecuteNonQueryAsync();
     }
 
-    private Consent RoleConsent(string role, TenantId tenant, int fromDays = -1, int toDays = 30) => new()
+    private Consent GroupConsent(string group, TenantId tenant, int fromDays = -1, int toDays = 30) => new()
     {
-        TableId = _tableId, TableIdentifier = _table, TenantId = tenant, GranteeType = GranteeType.Role, RoleName = role, Effect = ConsentEffect.Deny,
+        TableId = _tableId, TableIdentifier = _table, TenantId = tenant, GranteeType = GranteeType.Group, GranteeSid = new Sid(group), Effect = ConsentEffect.Deny,
         ValidFrom = DateTimeOffset.UtcNow.AddDays(fromDays), ValidTo = DateTimeOffset.UtcNow.AddDays(toDays), CreatedBySid = Admin
     };
 
@@ -58,38 +58,6 @@ public sealed class ConsentReplaceRepositoryTests : IDisposable
         TableId = _tableId, TableIdentifier = _table, TenantId = TenantA, GranteeType = GranteeType.User, GranteeSid = new Sid(sid), Effect = effect,
         ValidFrom = DateTimeOffset.UtcNow.AddDays(fromDays), ValidTo = DateTimeOffset.UtcNow.AddDays(toDays), CreatedBySid = Admin
     };
-
-    [Fact]
-    public async Task GetActiveRoleConsents_ReturnsOnlyTheRoleInTheTenantOnTheTable()
-    {
-        await EnsureTableAsync();
-        var match = await _repo.CreateConsentAsync(RoleConsent("Analyst", TenantA));
-        await _repo.CreateConsentAsync(RoleConsent("Analyst", TenantB));
-        await _repo.CreateConsentAsync(RoleConsent("Other", TenantA));
-        await _repo.CreateConsentAsync(RoleConsent("Analyst", TenantA, fromDays: -10, toDays: -1));
-        await _repo.CreateConsentAsync(RoleConsent("Analyst", TenantA, fromDays: 2, toDays: 9));
-        await _repo.CreateConsentAsync(UserConsent("S-1-5-21-Alice"));
-
-        var result = await _repo.GetActiveRoleConsentsAsync(_table, "analyst", TenantA, DateTimeOffset.UtcNow);
-
-        result.Select(c => c.Id).ShouldContain(match.Id);
-        result.ShouldAllBe(c => c.GranteeType == GranteeType.Role && c.TenantId == TenantA && c.RoleName!.Equals("Analyst", StringComparison.OrdinalIgnoreCase));
-        result.ShouldAllBe(c => c.ValidFrom <= DateTimeOffset.UtcNow && c.ValidTo > DateTimeOffset.UtcNow);
-    }
-
-    [Fact]
-    public async Task GetActiveRoleConsents_IsCaseInsensitiveOnTableAndRole_AndOmitsRevoked()
-    {
-        await EnsureTableAsync();
-        var revoked = await _repo.CreateConsentAsync(RoleConsent("Analyst", TenantA));
-        await _repo.ReplaceConsentsAsync([revoked.Id], [], Admin, "revoke", AdminAuth());
-        var kept = await _repo.CreateConsentAsync(RoleConsent("ANALYST", TenantA));
-        var upper = new TableIdentifier(_table.Domain.ToUpperInvariant(), _table.Schema.ToUpperInvariant(), _table.TableName.ToUpperInvariant());
-
-        var result = await _repo.GetActiveRoleConsentsAsync(upper, "analyst", TenantA, DateTimeOffset.UtcNow);
-
-        result.Select(c => c.Id).ShouldBe([kept.Id]);
-    }
 
     [Fact]
     public async Task Replace_RevokesAndCreatesInOneTransaction_AndBumpsTheEpochOnce()
@@ -263,8 +231,8 @@ public sealed class ConsentReplaceRepositoryTests : IDisposable
             created.Add(await _repo.CreateConsentAsync(UserConsent("S-1-5-21-U" + i)));
         }
 
-        created.Add(await _repo.CreateConsentAsync(RoleConsent("Analyst", TenantA)));
-        await _repo.CreateConsentAsync(RoleConsent("Analyst", TenantB));
+        created.Add(await _repo.CreateConsentAsync(GroupConsent("Analyst", TenantA)));
+        await _repo.CreateConsentAsync(GroupConsent("Analyst", TenantB));
 
         var seen = new List<Guid>();
         Guid? after = null;
@@ -290,11 +258,11 @@ public sealed class ConsentReplaceRepositoryTests : IDisposable
         await EnsureTableAsync();
         var alice = await _repo.CreateConsentAsync(UserConsent("S-1-5-21-Alice"));
         await _repo.CreateConsentAsync(UserConsent("S-1-5-21-Bob"));
-        var role = await _repo.CreateConsentAsync(RoleConsent("Analyst", TenantA));
+        var role = await _repo.CreateConsentAsync(GroupConsent("Analyst", TenantA));
         await _repo.RevokeConsentAsync(alice.Id, new Sid("S-1-5-21-Alice"), "self", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null));
         var tenant = new Autheris.Application.Governance.Paging.ConsentPageQuery(TenantA, Table: _table);
 
-        (await _repo.GetConsentPageAsync(tenant with { GranteeType = GranteeType.Role })).Items.Select(c => c.Id).ShouldBe([role.Id]);
+        (await _repo.GetConsentPageAsync(tenant with { GranteeType = GranteeType.Group })).Items.Select(c => c.Id).ShouldBe([role.Id]);
         (await _repo.GetConsentPageAsync(tenant with { Grantee = "s-1-5-21-alice" })).Items.ShouldBeEmpty();
         (await _repo.GetConsentPageAsync(tenant with { Grantee = "s-1-5-21-alice", IncludeInactive = true })).Items.Single().RenewalCount.ShouldBe(0);
         (await _repo.GetConsentPageAsync(tenant with { Grantee = "ANALYST" })).Items.Single().Id.ShouldBe(role.Id);

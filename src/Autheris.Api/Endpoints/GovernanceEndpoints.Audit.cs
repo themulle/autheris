@@ -162,9 +162,9 @@ public static partial class GovernanceEndpoints
         GranteeType? typeFilter = null;
         if (!string.IsNullOrWhiteSpace(granteeType))
         {
-            if (!Enum.TryParse<GranteeType>(granteeType, ignoreCase: true, out var parsedType) || !Enum.IsDefined(parsedType))
+            if (!GranteeTypeParsing.TryParse(granteeType, out var parsedType))
             {
-                return ApiProblems.BadRequest(ApiErrorCodes.InvalidGranteeType, "Supported values: User, Group, Role, ServicePrincipal.", context);
+                return ApiProblems.BadRequest(ApiErrorCodes.InvalidGranteeType, "Supported values: User, Group, ServicePrincipal.", context);
             }
 
             typeFilter = parsedType;
@@ -207,7 +207,7 @@ public static partial class GovernanceEndpoints
                 table = c.TableIdentifier.ToString(),
                 description = Autheris.Domain.Security.ConsentDescriptionText.ForOutput(c.Description, descriptionMax),
                 granteeType = c.GranteeType.ToString(),
-                grantee = c.GranteeType == Autheris.Domain.Model.GranteeType.Role ? c.RoleName : c.GranteeSid?.Value,
+                grantee = c.GranteeSid?.Value,
                 effect = c.Effect.ToString(),
                 validFrom = c.ValidFrom,
                 validTo = c.ValidTo,

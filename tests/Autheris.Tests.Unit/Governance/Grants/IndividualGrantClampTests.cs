@@ -20,7 +20,6 @@ public sealed class IndividualGrantClampTests : IDisposable
         TenantId = Autheris.Tests.Common.TestTenants.Default,
         GranteeType = type,
         GranteeSid = type is GranteeType.User or GranteeType.ServicePrincipal ? new Sid("S-1-5-21-X") : (Sid?)null,
-        RoleName = type == GranteeType.Role ? "R" : null,
         ValidFrom = From,
         ValidTo = validTo
     };
@@ -65,7 +64,7 @@ public sealed class IndividualGrantClampTests : IDisposable
             TableIdentifier = table, Effect = ConsentEffect.Deny, GranteeType = GranteeType.User, GranteeSid = new Sid("S-1-5-21-X"),
             ValidFrom = now.AddDays(-400), ValidTo = now.AddYears(50)
         };
-        var roleAllow = new Consent { TenantId = Autheris.Tests.Common.TestTenants.Default, TableIdentifier = table, GranteeType = GranteeType.Role, RoleName = "analyst", ValidFrom = now.AddDays(-400), ValidTo = now.AddYears(1) };
+        var roleAllow = new Consent { TenantId = Autheris.Tests.Common.TestTenants.Default, TableIdentifier = table, GranteeType = GranteeType.Group, GranteeSid = new Sid("analyst"), ValidFrom = now.AddDays(-400), ValidTo = now.AddYears(1) };
 
         var decision = new Autheris.Application.Services.ConsentResolutionService().ResolveAccess(
             new Sid("S-1-5-21-X"), new HashSet<Sid>(), new HashSet<string> { "analyst" }, table, [deny, roleAllow]);
@@ -121,7 +120,6 @@ public sealed class IndividualGrantClampTests : IDisposable
 
     [Theory]
     [InlineData(GranteeType.Group)]
-    [InlineData(GranteeType.Role)]
     public void SEC_SC_20_StandingGrants_AreNeverClamped(GranteeType type)
     {
         var to = From.AddDays(1000);

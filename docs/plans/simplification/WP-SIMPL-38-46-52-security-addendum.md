@@ -61,5 +61,5 @@ Defaults: step `0029_drop_role_grantee` (PostgreSQL and SQL Server, paired `.sql
 - **SEC-52-C6 (no leakage):** The abort message contains only the step id and the consent id, not names or tenant data.
 
 Mandatory tests:
-- Unit: `Security_RoleGranteeInput_Refused_AllEntryPoints` (REST, GraphQL, bulk, virtual filter), `Security_DeclarativeApply_RoleGrantee_RejectsWholeDocumentWithoutWrites`, `Security_DbtAndOpenMetadata_RoleGrantee_SkippedNeverMapped`, `Security_UnknownGranteeType_OnActiveRow_ThrowsAndDecisionDenies`, `Security_ActiveRoleDenyRow_BeforeStep_StillDeniesInScope`, `Architecture_GranteeType_HasNoRoleMember`.
+- Unit: `Security_RoleGranteeInput_Refused_AllEntryPoints` (REST, GraphQL, bulk, virtual filter), `Security_DeclarativeApply_RoleGrantee_RejectsWholeDocumentWithoutWrites`, `Security_DbtAndOpenMetadata_RoleGrantee_SkippedNeverMapped`, `Security_UnknownGranteeType_OnActiveRow_ThrowsAndDecisionDenies`, `Security_ActiveRoleDenyRow_BeforeStep_DeniesTable`, `Architecture_GranteeType_HasNoRoleMember`.
 - CI (PostgreSQL and SQL Server containers): `Security_Step0029_ActiveRoleConsent_AbortsWithoutChange`, `Security_Step0029_ActiveRoleProfile_AbortsWithoutChange`, `Security_Step0029_RevokedRoleRows_RemovedAndColumnsDropped_IdempotentRerun`, `Security_Step0029_ShapeJson_MatchesSqlOnBothProviders`.

@@ -28,7 +28,7 @@ The table below lists every capability removed (`DELETE`) or extracted into an o
 | **CDN cache purge** | DELETE | `Gateway:Cdn`, `Gateway:Cdn:PurgeMode` | `Unknown configuration keys under 'Gateway'` | Manage HTTP cache invalidation in upstream reverse proxies or CDN control planes. |
 | **SchemaRegistry** | DELETE | `Gateway:SchemaRegistry` | `Unknown configuration keys under 'Gateway'` | Manage schema contracts through the core Catalog API or the dbt module. |
 | **Anonymous OpenSchema flag** | DELETE (replaced) | `Gateway:OpenSchema` | `Unknown configuration keys under 'Gateway'` | Replaced by Authorized Data Discovery for authenticated users and AI agents (`Gateway:Catalog:Discovery`). |
-| **WORM archive S3/file export** | DELETE | `Gateway:Audit:Worm:Enabled` | `Audit:Worm:Enabled is no longer supported` | Core retains HMAC-chained audit logs and signed retention purge checkpoints; export long-term archives via SIEM or DB backup. |
+| **WORM archive S3/file export** | DELETE | `Gateway:Audit:Worm` (every key, any value) | `Gateway:Audit:Worm was removed; ...` | Core retains HMAC-chained audit logs and signed retention purge checkpoints; export long-term archives via SIEM or DB backup. |
 | **Lakehouse (Delta / Apache Iceberg)** | MODULE | `Gateway:Lakehouse`, `Gateway:Lakehouse:MaxConcurrentFileScans` | `Unknown configuration keys under 'Gateway'` (when module is not loaded) | Enable `Lakehouse` in `Gateway:Modules:Enabled` or deploy the `autheris-full` image (`Autheris.Module.Lakehouse`). |
 | **dbt and OpenMetadata** | MODULE | `Gateway:Dbt`, `Gateway:OpenMetadata` | `Unknown configuration keys under 'Gateway'` (when module is not loaded) | Enable `Dbt` / `OpenMetadata` in `Gateway:Modules:Enabled` or deploy the `autheris-full` image. |
 | **CDC / Streaming and event webhooks** | MODULE | `Gateway:CdcStream`, `Gateway:CdcWebhooks`, `Gateway:CustomQueryPoller`, `Gateway:Webhooks` (event delivery) | `Unknown configuration keys under 'Gateway'` (when module is not loaded) | Enable `Cdc` in `Gateway:Modules:Enabled` or deploy the `autheris-full` image (consent workflow webhooks remain in core). |
@@ -145,7 +145,11 @@ Governance step `0011_role_grantee_and_profile_assignment_retirement` runs once 
 - Role `Deny` consents are not touched and keep restricting access.
 - Access profile assignments are deactivated: role assignments with `ADR020_ROLE_GRANTEE_UNSUPPORTED`, all other assignments with `OD32_PROFILE_ASSIGNMENT_REQUIRES_APPROVAL`.
 
-The canonical `ClusterAdmin` lists what the step revoked or deactivated with `GET /api/v1/admin/authz/migration-report` (`revokedRoleConsents` with `consentId`, `tenantId`, `roleName`, `tableId` and `revokeReason`; `deactivatedProfileAssignments`). Use the report to re-create the access as group grants.
+The canonical `ClusterAdmin` lists what the step deactivated with `GET /api/v1/admin/authz/migration-report` (`deactivatedProfileAssignments`, `revokedRowFilterConsents`). Use the report to re-create the access as group grants.
+
+### Removal of the role grantee (governance step `0029_drop_role_grantee`)
+
+Step `0029_drop_role_grantee` removes role grantees from the data model. Before it changes anything it checks for an active (unrevoked) role grantee in consents, in virtual filter access profiles and in access profile assignments. If one exists the step aborts with the id of the first row (no names, no tenant data) and changes nothing: revoke the row, or recreate it as a group or user `Deny`, and start the upgrade again. Revoked role rows and their child rows are then deleted and `consents.role_id`, `consents.role_name` and the index `ix_consents_tenant_role` are dropped; a re-run is a no-op. All nodes must run the new build before the step applies. The report no longer lists revoked role consents (`revokedRoleConsents` was removed).
 
 ### Consent manifests (`POST /api/v1/governance/consents/apply`)
 

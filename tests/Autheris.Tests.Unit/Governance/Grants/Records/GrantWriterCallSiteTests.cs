@@ -44,8 +44,8 @@ public sealed class GrantWriterCallSiteTests
             TableIdentifier = OrdersTable,
             TenantId = Tenant,
             Effect = ConsentEffect.Deny,
-            GranteeType = GranteeType.Role,
-            RoleName = "Analysts",
+            GranteeType = GranteeType.Group,
+            GranteeSid = new Sid("Analysts"),
             ValidFrom = FixedNow,
             ValidTo = FixedNow.AddDays(14),
             GrantSource = ConsentGrantSource.Declarative
@@ -86,8 +86,8 @@ public sealed class GrantWriterCallSiteTests
             TableIdentifier = OrdersTable,
             TenantId = Tenant,
             Effect = ConsentEffect.Allow,
-            GranteeType = GranteeType.Role,
-            RoleName = "Analysts",
+            GranteeType = GranteeType.Group,
+            GranteeSid = new Sid("Analysts"),
             ValidFrom = precise,
             ValidTo = precise.AddDays(14),
             GrantSource = ConsentGrantSource.Declarative

@@ -59,7 +59,6 @@ public class PostgreSqlGovernanceRepository : GovernanceRepository
 
     public static class ConsentGrantSql
     {
-        public static string ActiveRoleConsents(bool withTenant) => GovernanceRepository.ConsentGrantPostgreSql.ActiveRoleConsents(withTenant);
         public static string RevokeTarget => GovernanceRepository.ConsentGrantPostgreSql.RevokeTarget;
     }
 
@@ -112,7 +111,6 @@ public class SqlServerGovernanceRepository : GovernanceRepository
 
     public static class ConsentGrantSql
     {
-        public static string ActiveRoleConsents(bool withTenant) => GovernanceRepository.ConsentGrantSqlServer.ActiveRoleConsents(withTenant);
         public static string RevokeTarget => GovernanceRepository.ConsentGrantSqlServer.RevokeTarget;
     }
 

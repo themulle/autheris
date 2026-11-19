@@ -30,7 +30,7 @@ internal static class VirtualFilterStore
         VirtualFilterExecutionStrategy? Strategy = null, PushdownParameterFormat? PushdownFormat = null,
         int? MaxPushdownKeys = null);
     private sealed record ProfileDto(
-        GranteeType GranteeType, string? GranteeSid, string? RoleName, string Scope, UncoveredPolicy? Uncovered, List<BindingDto> Bindings,
+        GranteeType GranteeType, string? GranteeSid, string Scope, UncoveredPolicy? Uncovered, List<BindingDto> Bindings,
         FilterApprovalStatus? Status = null, string? CreatedBy = null, string? ApprovedBy = null, DateTimeOffset? ApprovedAt = null,
         ProfileDto? Draft = null, bool PendingDeletion = false, string? DeletionRequestedBy = null);
 
@@ -255,7 +255,6 @@ internal static class VirtualFilterStore
     private static ProfileDto ProfileToDto(VirtualFilterAccessProfile profile) => new(
         profile.GranteeType,
         profile.GranteeSid?.Value,
-        profile.RoleName,
         profile.Scope,
         profile.Uncovered,
         profile.Bindings.Select(b => new BindingDto(
@@ -313,7 +312,6 @@ internal static class VirtualFilterStore
         Name = name,
         GranteeType = dto.GranteeType,
         GranteeSid = string.IsNullOrWhiteSpace(dto.GranteeSid) ? (Sid?)null : new Sid(dto.GranteeSid!),
-        RoleName = dto.RoleName,
         Scope = dto.Scope,
         Uncovered = dto.Uncovered,
         Bindings = (dto.Bindings ?? []).Select(b => new FilterBinding
@@ -358,6 +356,12 @@ internal static class VirtualFilterStore
     {
         var dto = JsonSerializer.Deserialize<ProfileDto>(reader.GetString(3))
             ?? throw new InvalidOperationException("Access profile definition is empty.");
+        if (!Enum.IsDefined(dto.GranteeType) || (dto.Draft is { } draft && !Enum.IsDefined(draft.GranteeType)))
+        {
+            // Never skipped or mapped to another grantee type: the snapshot load fails and the decision that needs it denies.
+            throw new InvalidOperationException("Access profile definition has an unsupported grantee type.");
+        }
+
         var id = Guid.Parse(reader.GetString(0));
         var tenantId = new TenantId(reader.GetString(1));
         var name = reader.GetString(2);

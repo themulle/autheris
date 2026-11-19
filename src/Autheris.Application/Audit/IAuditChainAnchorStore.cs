@@ -48,7 +48,7 @@ public sealed record AuditChainRecord(long RowId, long? Sequence, AuditLogEntry 
 public sealed record AuditChainRange(long FirstRowId, long LastRowId, long Count);
 
 /// <summary>
-/// SEC M-31: Gap-free, paged access to the audit chain for WORM exports (no silent result capping).
+/// SEC M-31: Gap-free, paged access to the audit chain for audit exports (no silent result capping).
 /// </summary>
 public interface IAuditChainExportSource
 {

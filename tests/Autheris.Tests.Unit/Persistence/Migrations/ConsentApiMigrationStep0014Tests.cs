@@ -157,8 +157,6 @@ public sealed class ConsentApiMigrationStep0014Tests
             "Allow",
             "User",
             "S-1-5-21-500",
-            null,
-            null,
             now.AddHours(-1).ToString("O"),
             now.AddDays(10).ToString("O"),
             0,
@@ -177,7 +175,6 @@ public sealed class ConsentApiMigrationStep0014Tests
             subjectReader,
             now,
             new HashSet<string>(["S-1-5-21-500"], StringComparer.OrdinalIgnoreCase),
-            new HashSet<string>(StringComparer.OrdinalIgnoreCase),
             new HashSet<Guid>(),
             list);
 

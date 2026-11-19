@@ -20,8 +20,7 @@ using Autheris.Infrastructure.Persistence.Dialects;
 
 public partial class GovernanceRepository
 {
-    internal const string SubjectPredicate =
-        " AND (c.grantee_type = 'Role' OR c.grantee_sid_norm IS NULL OR c.grantee_sid_norm = ANY(@subjects))";
+    internal const string SubjectPredicate = " AND (c.grantee_type = 'Role' OR c.grantee_sid_norm IS NULL OR c.grantee_sid_norm = ANY(@subjects))"; // Role rows pass on purpose: the reader throws on them before the step has run.
 
     private const int ConsentHydrateBatchSize = 500;
 
@@ -31,7 +30,7 @@ public partial class GovernanceRepository
             "SELECT id FROM TABLES WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)";
 
         public const string SelectExpiringConsentsSql = @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
-                                   c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to,
+                                   c.grantee_sid, c.valid_from, c.valid_to,
                                    c.is_revoked, t.source_name, t.schema_name, t.table_name,
                                    c.tenant_id, c.renewal_count, c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at
                             FROM CONSENTS c
@@ -127,7 +126,7 @@ public partial class GovernanceRepository
             : "SELECT status FROM CONSENT_REQUESTS WHERE id = @id FOR UPDATE";
 
     private string SelectSystemRevokeTargetSql =>
-        BuildLockRowsQuery("t.source_name, t.schema_name, t.table_name, c.tenant_id, c.table_id, c.effect, c.grantee_type, c.grantee_sid, c.role_name, c.grant_source, c.profile_assignment_id, c.valid_from, c.valid_to", "CONSENTS c", "JOIN TABLES t ON c.table_id = t.id WHERE c.id = @id AND c.consent_request_id = @reqId AND c.is_revoked = 0", null);
+        BuildLockRowsQuery("t.source_name, t.schema_name, t.table_name, c.tenant_id, c.table_id, c.effect, c.grantee_type, c.grantee_sid, c.grant_source, c.profile_assignment_id, c.valid_from, c.valid_to", "CONSENTS c", "JOIN TABLES t ON c.table_id = t.id WHERE c.id = @id AND c.consent_request_id = @reqId AND c.is_revoked = 0", null);
 
     public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(
         IEnumerable<Sid> subjects,
@@ -161,7 +160,7 @@ public partial class GovernanceRepository
             await using var cmd = conn.CreateCommand();
             var tenantFilter = tenantId != null ? " AND c.tenant_id = @tenantId" : "";
             cmd.CommandText = @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
-                                       c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to,
+                                       c.grantee_sid, c.valid_from, c.valid_to,
                                        c.is_revoked, c.revoked_by_sid, c.revoked_at, c.revoke_reason,
                                        c.tenant_id, " + ConsentWorkflowSql.ConsentColumns + @"
                                 FROM CONSENTS c
@@ -186,7 +185,7 @@ public partial class GovernanceRepository
         }
 
         await ConsentPatternSqlCore.ReadActivePatternConsentsForDomainAsync(
-            conn, table.Domain, tenantId, atTime, subjectSet, roleSet: null, seen, consents, ct).ConfigureAwait(false);
+            conn, table.Domain, tenantId, atTime, subjectSet, seen, consents, ct).ConfigureAwait(false);
         consents.RemoveAll(c => !c.IsActive(atTime) && !(c.Effect == ConsentEffect.Deny && c.ValidFrom > atTime));
         await HydrateConsentsBatchAsync(conn, consents, ct).ConfigureAwait(false);
         return consents;
@@ -198,15 +197,14 @@ public partial class GovernanceRepository
         DateTimeOffset? atTime = null,
         CancellationToken ct = default) =>
         // Explicit cross-tenant read path of the tenant-less interface overload; the tenant overload below fails closed.
-        AllActiveCoreAsync(subjects, roles, atTime, null, ct);
+        AllActiveCoreAsync(subjects, atTime, null, ct);
 
     public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(
         IEnumerable<Sid> subjects, IEnumerable<string>? roles, DateTimeOffset? atTime, TenantId? tenantId, CancellationToken ct = default) =>
-        AllActiveCoreAsync(subjects, roles, atTime, TenantScope.RequireTenant(tenantId, nameof(GovernanceTable.Consents)), ct);
+        AllActiveCoreAsync(subjects, atTime, TenantScope.RequireTenant(tenantId, nameof(GovernanceTable.Consents)), ct);
 
     private async Task<IReadOnlyList<Consent>> AllActiveCoreAsync(
         IEnumerable<Sid> subjects,
-        IEnumerable<string>? roles,
         DateTimeOffset? atTime,
         TenantId? tenantId,
         CancellationToken ct)
@@ -214,8 +212,7 @@ public partial class GovernanceRepository
         var effectiveAt = atTime ?? TimeProvider.System.GetUtcNow();
         var subjectEnumerated = subjects.ToList();
         var subjectSet = subjectEnumerated.Select(s => s.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var roleSet = roles?.ToHashSet(StringComparer.OrdinalIgnoreCase) ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        if (subjectSet.Count == 0 && roleSet.Count == 0) return Array.Empty<Consent>();
+        if (subjectSet.Count == 0) return Array.Empty<Consent>();
 
         var normalized = ConsentSubjectFilter.DistinctNormalized(subjectEnumerated);
         var consents = new List<Consent>();
@@ -226,7 +223,7 @@ public partial class GovernanceRepository
             await using var cmd = conn.CreateCommand();
             var tenantFilter = tenantId != null ? " AND c.tenant_id = @tenantId" : "";
             cmd.CommandText = @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
-                                       c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to,
+                                       c.grantee_sid, c.valid_from, c.valid_to,
                                        c.is_revoked, t.source_name, t.schema_name, t.table_name,
                                        c.tenant_id, " + ConsentWorkflowSql.ConsentColumns + @"
                                 FROM CONSENTS c
@@ -243,11 +240,11 @@ public partial class GovernanceRepository
             }
 
             await using var reader = await ExecuteReaderAsync(cmd, "Consent.GetAllActiveForSubjects", ct).ConfigureAwait(false);
-            ConsentSqlCore.ReadAllSubjectConsentRows(reader, effectiveAt, subjectSet, roleSet, seen, consents);
+            ConsentSqlCore.ReadAllSubjectConsentRows(reader, effectiveAt, subjectSet, seen, consents);
         }
 
         await ConsentPatternSqlCore.ReadActivePatternConsentsForDomainAsync(
-            conn, domain: null, tenantId, effectiveAt, subjectSet, roleSet, seen, consents, ct).ConfigureAwait(false);
+            conn, domain: null, tenantId, effectiveAt, subjectSet, seen, consents, ct).ConfigureAwait(false);
         consents.RemoveAll(c => !c.IsActive(effectiveAt) && !(c.Effect == ConsentEffect.Deny && c.ValidFrom > effectiveAt));
         await HydrateConsentsBatchAsync(conn, consents, ct).ConfigureAwait(false);
         return consents;
@@ -328,8 +325,6 @@ public partial class GovernanceRepository
             GranteeType = source.GranteeType,
             GranteeSid = source.GranteeSid,
             CreatedBySid = source.CreatedBySid,
-            RoleId = source.RoleId,
-            RoleName = source.RoleName,
             ValidFrom = source.ValidFrom,
             ValidTo = source.ValidTo,
             IsRevoked = source.IsRevoked,
@@ -368,7 +363,7 @@ public partial class GovernanceRepository
                 ? consent.ObjectPattern!
                 : (!string.IsNullOrWhiteSpace(consent.TableIdentifier.TableName) ? consent.TableIdentifier.ToString() : consent.TableId.ToString("D")),
             GranteeType: consent.GranteeType.ToString(),
-            GranteeRef: consent.GranteeSid?.Value ?? consent.RoleName ?? consent.RoleId?.ToString("D"),
+            GranteeRef: consent.GranteeSid?.Value,
             RequestId: consent.ConsentRequestId,
             GrantSource: consent.GrantSource,
             ProfileAssignmentId: consent.ProfileAssignmentId,
@@ -386,7 +381,7 @@ public partial class GovernanceRepository
         var tenantIdStr = StoredTenant.RequireWritable(consent.TenantId);
 
         var draft = BuildPersistedConsent(consent, consentId, tableId, consent.GrantRecordSeq);
-        var requestedBy = consent.CreatedBySid?.Value ?? consent.GranteeSid?.Value ?? consent.RoleName ?? "SYSTEM";
+        var requestedBy = consent.CreatedBySid?.Value ?? consent.GranteeSid?.Value ?? "SYSTEM";
         var now = TimeProvider.System.GetUtcNow();
         var recordType = consent.RenewalCount > 0 ? GrantRecordType.Renewed : GrantRecordType.Issued;
         var input = BuildConsentGrantInput(
@@ -405,7 +400,7 @@ public partial class GovernanceRepository
         {
             TenantId = consent.TenantId,
             EventType = AuditEventTypes.ConsentGranted,
-            ActorSid = consent.GranteeSid ?? new Sid(consent.RoleName ?? "UNKNOWN"),
+            ActorSid = consent.GranteeSid ?? new Sid("UNKNOWN"),
             TargetTable = consent.IsPatternGrant ? consent.ObjectPattern! : consent.TableIdentifier.ToString(),
             Decision = "ALLOW",
             TraceId = Guid.NewGuid().ToString("N"),
@@ -414,7 +409,7 @@ public partial class GovernanceRepository
                 ConsentId = consentId,
                 TableId = tableId,
                 consent.Effect,
-                Grantee = consent.GranteeSid?.Value ?? consent.RoleName,
+                Grantee = consent.GranteeSid?.Value,
                 Scope = consent.IsPatternGrant ? consent.ObjectPattern! : consent.TableIdentifier.ToString(),
                 consent.ValidFrom,
                 consent.ValidTo
@@ -423,7 +418,7 @@ public partial class GovernanceRepository
         await RecordAuditEventAsync(auditEntry, tx, ct).ConfigureAwait(false);
         if (created.WriteRules.Count > 0)
         {
-            var actorSid = consent.CreatedBySid ?? consent.GranteeSid ?? new Sid(consent.RoleName ?? "UNKNOWN");
+            var actorSid = consent.CreatedBySid ?? consent.GranteeSid ?? new Sid("UNKNOWN");
             await RecordAuditEventAsync(ConsentWriteRulesSql.BuildWriteGrantChangedAudit(created, actorSid), tx, ct).ConfigureAwait(false);
         }
 

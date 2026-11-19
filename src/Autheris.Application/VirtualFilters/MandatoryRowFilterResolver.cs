@@ -378,7 +378,7 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
         var profiles = snapshot.Profiles
             .Where(p => p.TenantId == query.Tenant &&
                         p.Status == FilterApprovalStatus.Active &&
-                        GranteeMatcher.MatchesRestriction(p.GranteeType, p.GranteeSid, p.RoleName, null, query.UserSid, query.GroupSids, query.Roles, query.AllUserSids))
+                        GranteeMatcher.MatchesRestriction(p.GranteeType, p.GranteeSid, query.UserSid, query.GroupSids, query.AllUserSids))
             .OrderBy(p => p.Name, StringComparer.Ordinal)
             .ToList();
 
