@@ -36,7 +36,7 @@ public sealed partial class CatalogGraphQlTypeModule
         since != NoTimestamp && _timeProvider.GetElapsedTime(since, _timeProvider.GetTimestamp()) >= span;
 
     /// <param name="fromTimer">True for the refresh timer: the tick is skipped while a check still runs.</param>
-    /// <param name="forceFull">Skips the unchanged-version early exit; for fixtures that write catalog rows without a version bump.</param>
+    /// <param name="forceFull">Reads the catalog version from the store instead of the provider's cache (which may predate a write). The unchanged-version early exit still applies to that fresh read.</param>
     /// <param name="ct">Cancels the wait for the check gate and the check.</param>
     internal async Task<bool> CheckForCatalogChangesAsync(bool fromTimer, bool forceFull, CancellationToken ct = default)
     {
@@ -81,7 +81,6 @@ public sealed partial class CatalogGraphQlTypeModule
                         ? await _metadataRepo.GetCatalogVersionAsync(ct).ConfigureAwait(false)
                         : await _versionProvider.GetCatalogVersionAsync(ct).ConfigureAwait(false);
                     if (!transportChanged &&
-                        !forceFull &&
                         builtStruct >= 0 &&
                         currentVer.Value.StructureVersion == builtStruct &&
                         currentVer.Value.ContentVersion == builtContent &&
@@ -153,6 +152,12 @@ public sealed partial class CatalogGraphQlTypeModule
                 forceRaise = true;
                 raise = true;
             }
+            else if (DropsBuiltSchemaElements(_currentSchemaModel, candidateModel))
+            {
+                // Issue #835: a hide, deny or retire must not wait for the quiet period or the deferral cap. The request still
+                // goes through the single-outstanding latch, so a burst of restrictive changes cannot storm the rebuild.
+                raise = true;
+            }
             else if (deferralStart == NoTimestamp && Volatile.Read(ref _lastCheckSawChange) == 0)
             {
                 raise = true;
@@ -208,6 +213,58 @@ public sealed partial class CatalogGraphQlTypeModule
         }
 
         return changed;
+    }
+
+    /// <summary>
+    /// Issue #835: true when the candidate no longer has a root field, type, column or relation field that the served schema
+    /// has. Additive changes are not restrictive; they may wait for the quiet period.
+    /// </summary>
+    internal static bool DropsBuiltSchemaElements(CatalogSchemaModel? built, CatalogSchemaModel candidate)
+    {
+        if (built is null)
+        {
+            return false;
+        }
+
+        foreach (var table in built.Tables)
+        {
+            if (!candidate.TablesByIdentifier.TryGetValue(table.Identifier, out var next) ||
+                !string.Equals(next.QueryFieldName, table.QueryFieldName, StringComparison.Ordinal) ||
+                !string.Equals(next.TypeName, table.TypeName, StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            var columns = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var c in next.Columns)
+            {
+                columns.Add(c.FieldName);
+            }
+
+            foreach (var c in table.Columns)
+            {
+                if (!columns.Contains(c.FieldName))
+                {
+                    return true;
+                }
+            }
+
+            var relations = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var r in next.Relations)
+            {
+                relations.Add(r.FieldName);
+            }
+
+            foreach (var r in table.Relations)
+            {
+                if (!relations.Contains(r.FieldName))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
