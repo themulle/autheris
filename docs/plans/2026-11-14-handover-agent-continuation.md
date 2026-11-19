@@ -100,7 +100,7 @@ Pushed feature branches on `origin` (state at the 2026-11-15 handover; the rollu
   - #835: GraphQL rebuild on restrictive changes. Fixed by #866, including the Low items: the issue can be closed.
   - #838: GraphQL discovery lists denied columns.
   - #847: SQL user expressions before the row and tenant predicates.
-  - Planned 2026-11-19 (master plan ranks 30-38; implementation after the v1.9.0 tag):
+  - Planned 2026-11-19 (master plan ranks 30-39; implementation after the v1.9.0 tag):
     - #887 review follow-ups (rank 30);
     - #889 (rank 31);
     - #891 (rank 32);
@@ -109,7 +109,8 @@ Pushed feature branches on `origin` (state at the 2026-11-15 handover; the rollu
     - #909 (rank 35);
     - #910-#912 (rank 36);
     - #899/#904/#913 review Lows (rank 37);
-    - #916 (rank 38).
+    - #916 (rank 38);
+    - #918 (rank 39).
 - **WP-52 follow-ups still open** (live readers):
   - `consents.role_id/role_name`: Role grantee removal.
   - `access_profiles.masking_mode/target_tables`: profile items migration.
