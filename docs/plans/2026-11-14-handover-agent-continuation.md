@@ -74,7 +74,7 @@ Pushed feature branches on `origin` (state at the 2026-11-15 handover; the rollu
 - **Remaining after these (audit 2026-11-19, 25 PRs in total):** WP-23 last PR; WP-28 PR 4; WP-29 PR 3, 4, 4b (owner review) and 5; WP-32 PR 2-6 and the baseline PR; WP-20 PR A; WP-52b.
 - **Still open:**
   - `WP-SIMPL-20` PR A: fold the ConsentPattern and GrantRecord cores after #900, then recompute `MaxAllowedLoc`. The local branch `refactor/simpl-20-fold-consent-cores` also carries both #899 review Lows. `fix/915-watermark-lock-order` (#915) is stacked on it.
-  - `WP-SIMPL-52b`: the profile items migration replaces `access_profiles.masking_mode/target_tables`. It takes step `0031`, after #904. `consent_row_filters.key_set_*` stays (D-PI-7). The next step after it, `0032`, is planned for #916 (Databricks metric views).
+  - `WP-SIMPL-52b`: the profile items migration replaces `access_profiles.masking_mode/target_tables`. It takes step `0031`, after #904. `consent_row_filters.key_set_*` stays (D-PI-7). The next step after it, `0032`, goes to the bug fix #922 (default Q-922-1). #916 (Databricks metric views) then takes `0033`.
 - **Private advisory filed:** GHSA-ff36-3926-36r5 (private, unpublished).
 
 **Update 2026-11-18 night:**
@@ -110,7 +110,12 @@ Pushed feature branches on `origin` (state at the 2026-11-15 handover; the rollu
     - #910-#912 (rank 36);
     - #899/#904/#913 review Lows (rank 37);
     - #916 (rank 38);
-    - #918 (rank 39).
+    - #918 (rank 39);
+    - #922 (rank 40; governance step `0032`, after WP-SIMPL-52b `0031`; #916 moves to `0033`);
+    - #921 (rank 41);
+    - #923 (rank 42);
+    - #924 (rank 43; before #916 WP-MV-6);
+    - #925 (rank 44; before #916 WP-MV-6).
 - **WP-52 follow-ups still open** (live readers):
   - `consents.role_id/role_name`: Role grantee removal.
   - `access_profiles.masking_mode/target_tables`: profile items migration.
