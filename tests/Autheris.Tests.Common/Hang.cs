@@ -9,7 +9,8 @@ public static class Hang
         var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         if (ct.CanBeCanceled)
         {
-            ct.Register(static state => ((TaskCompletionSource)state!).TrySetCanceled(), tcs);
+            var registration = ct.Register(() => tcs.TrySetCanceled(ct));
+            _ = tcs.Task.ContinueWith(_ => registration.Dispose(), CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
         }
 
         return tcs.Task;

@@ -263,7 +263,7 @@ public sealed class AuthPluginAuthorizationHookTests
         var decideTask = policy.DecideAsync(CreateQuery(), CancellationToken.None);
         timeProvider.Advance(TimeSpan.FromSeconds(1));
 
-        var decision = await decideTask;
+        var decision = await decideTask.WaitAsync(TimeSpan.FromSeconds(30));
         decision.IsAllowed.ShouldBeFalse();
         decision.DeniedReasons.ShouldContain(r => r.Contains("AUTH_PLUGIN_TIMEOUT"));
     }
