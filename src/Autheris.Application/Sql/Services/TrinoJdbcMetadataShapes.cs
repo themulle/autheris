@@ -423,7 +423,7 @@ internal static class TrinoJdbcMetadataShapes
                     var ordinal = 1;
                     foreach (var column in o.Columns)
                     {
-                        if (column.State == DiscoveryColumnState.NoAccess || !e.AllowedColumns.Contains(column.Name))
+                        if (!Autheris.Application.Catalog.Discovery.DiscoveryColumnVisibility.IsVisible(column.State) || !e.AllowedColumns.Contains(column.Name))
                         {
                             continue;
                         }
