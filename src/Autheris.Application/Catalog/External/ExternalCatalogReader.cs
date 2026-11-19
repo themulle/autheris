@@ -478,11 +478,14 @@ public sealed class ExternalCatalogReader(
             return;
         }
 
-        foreach (var item in granted)
+        for (var i = 0; i < items.Count; i++)
         {
-            if (byObject.TryGetValue(item.ObjectId, out var text) && text is not null)
+            var item = items[i];
+            if (item.CallerState is { Access: "granted" } state
+                && byObject.TryGetValue(item.ObjectId, out var text)
+                && text is not null)
             {
-                items[items.IndexOf(item)] = item with { CallerState = item.CallerState! with { RowScopeDescription = text } };
+                items[i] = item with { CallerState = state with { RowScopeDescription = text } };
             }
         }
     }

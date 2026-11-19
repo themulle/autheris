@@ -278,4 +278,39 @@ public sealed class ExternalCatalogRowScopeDescriptionTests
             .OrderBy(static t => t, StringComparer.Ordinal)
             .ShouldBe(["text one", "text three", "text two"]);
     }
+
+    [Fact]
+    public async Task CallerState_TopRankedBadDescription_FallsThroughToNextOwnConsent_NeverAForeignOne()
+    {
+        await using var harness = Create(out var table);
+        harness.Consents.Consents.Add(Grant(table, "bad\u0007text"));
+        harness.Consents.Consents.Add(Grant(table, "valid group text", GranteeType.Group, GroupSid));
+        harness.Consents.Consents.Add(Grant(table, "foreign text", sid: OtherSid));
+
+        Description(await GetCallerStateAsync(harness, table, User(inGroup: true))).ShouldBe("valid group text");
+        Description(await GetCallerStateAsync(harness, table, User(inGroup: false))).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task CallerState_AllowPlusDenyOnSameTable_IsNotGrantedAndHasNoDescription()
+    {
+        await using var harness = Create(out var table, allowAll: false);
+        harness.Consents.Consents.Add(Grant(table, "allow text"));
+        harness.Consents.Consents.Add(new Consent
+        {
+            TableIdentifier = table.Identifier,
+            Effect = ConsentEffect.Deny,
+            GranteeType = GranteeType.User,
+            GranteeSid = new Sid(UserSid),
+            TenantId = TenantA,
+            ValidFrom = ExternalCatalogTestHarness.FixedNow.AddDays(-1),
+            ValidTo = ExternalCatalogTestHarness.FixedNow.AddDays(30),
+            Description = "deny text"
+        });
+
+        var state = await GetCallerStateAsync(harness, table, User());
+
+        state.GetProperty("access").GetString().ShouldNotBe("granted");
+        Description(state).ShouldBeNull();
+    }
 }
