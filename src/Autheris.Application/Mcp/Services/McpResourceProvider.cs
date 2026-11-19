@@ -171,7 +171,7 @@ public sealed class McpResourceProvider : IMcpResourceProvider
                     sb.AppendLine($"- **Active:** {detail.IsActive}\n");
                     sb.AppendLine("| Column | Type | Sensitivity | Masking | PK | PII |");
                     sb.AppendLine("|---|---|---|---|---|---|");
-                    foreach (var c in detail.Columns)
+                    foreach (var c in Autheris.Application.Catalog.Discovery.DiscoveryColumnVisibility.VisibleColumns(detail))
                     {
                         sb.AppendLine($"| `{McpMarkdown.EscapeCell(c.Name)}` | {McpMarkdown.EscapeCell(c.Type)} | {McpMarkdown.EscapeCell(c.Sensitivity)} | {McpMarkdown.EscapeCell(c.MaskingState)} | {(c.IsPrimaryKey ? "✓" : "-")} | {(c.IsPiiIndicator ? "✓" : "-")} |");
                     }

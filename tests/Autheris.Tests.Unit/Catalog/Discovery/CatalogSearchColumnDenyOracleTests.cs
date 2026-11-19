@@ -176,6 +176,24 @@ public sealed class CatalogSearchColumnDenyOracleTests
         list.Total.ShouldBe(1);
     }
 
+    [Fact]
+    public async Task Search_TermMatchingOnlyDeniedColumnDescription_ReturnsNoHit()
+    {
+        var (discovery, _) = await CreateAsync(Caller.DenyOneColumn, BuildTable("patients"));
+
+        (await SearchAsync(discovery, Marker, "keyword")).ShouldBeEmpty();
+        (await SearchAsync(discovery, Marker, null)).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Search_HitOnlyInDeniedColumnStatistics_ReturnsNoHit()
+    {
+        // Statistics of a denied column are never part of the searchable text: the denied name finds nothing for the denied caller.
+        var (discovery, _) = await CreateAsync(Caller.DenyOneColumn, BuildTable("patients"));
+
+        (await SearchAsync(discovery, DeniedColumn, "keyword")).ShouldBeEmpty();
+    }
+
     [Theory]
     [InlineData("keyword", DeniedColumn)]
     [InlineData("keyword", Marker)]

@@ -40,7 +40,8 @@ public sealed class CatalogDiscoveryFlagTests
         return new Query().GetCatalogAsync(
             domain: null, first: null, after: null, search: null, tag: null,
             tables, consentRepo, approvalRepository: null, dataOwnershipRepository: null,
-            accessor, Options.Create(gateway), CatalogVisibilityTestFactory.Create(tables, consentRepo, gateway));
+            accessor, Options.Create(gateway), CatalogVisibilityTestFactory.Create(tables, consentRepo, gateway),
+            consentResolution: new Autheris.Application.Services.ConsentResolutionService());
     }
 
     [Fact]
