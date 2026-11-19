@@ -135,7 +135,7 @@ src/Autheris.Domain/Model/  @themulle
 src/Autheris.Domain/Options/  @themulle
 src/Autheris.Domain/Options/Integrations/  @themulle
 src/Autheris.Domain/Plugins/  @themulle
-src/Autheris.Extensions/Cdc/  @themulle
+src/Autheris.Infrastructure/Streaming/Producers/  @themulle
 
 # Subsystem 14: Docs
 # subsystem: docs | primary: @themulle | backup: vacant

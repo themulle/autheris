@@ -17,8 +17,8 @@ using Autheris.Application.Streaming.Validation;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
-using Autheris.Extensions.Cdc;
-using Autheris.Extensions.Cdc.CustomQuery;
+using Autheris.Infrastructure.Streaming.Producers;
+using Autheris.Infrastructure.Streaming.Producers.CustomQuery;
 using Autheris.Infrastructure.Streaming;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -104,6 +104,26 @@ public sealed class CustomQueryPollerReadOnlyTests
             gatewayOptions: gatewayOptions,
             validator: validator ?? new CustomQueryPollerValidator(FastSqlEngine.Default),
             tableMetadataRepository: metadataRepository);
+    }
+
+    [Theory]
+    [InlineData("DELETE FROM customers WHERE id > @p_wm_id")]
+    [InlineData("SELECT id FROM customers WHERE id > @p_wm_id; DROP TABLE customers")]
+    public async Task Streaming_producers_move_keeps_read_only_poller_guard(string query)
+    {
+        typeof(CustomQueryPollerService).Namespace.ShouldBe("Autheris.Infrastructure.Streaming.Producers.CustomQuery");
+
+        var poller = ValidPoller("src", query);
+        var monitor = new MutableOptionsMonitor<CustomQueryPollerOptions>(new CustomQueryPollerOptions { Enabled = true, Pollers = [poller] });
+        var gateway = CreateGatewayMonitor("src", "PostgreSql", "Host=localhost");
+        var conn = new TrackingDbConnection("Data Source=:memory:");
+        var factory = Substitute.For<IDataSourceConnectionFactory>();
+        factory.CreateConnectionAsync("src", Arg.Any<CancellationToken>()).Returns(conn);
+
+        using var service = CreateService(monitor, factory, gateway);
+
+        await Should.ThrowAsync<Exception>(() => service.PollStreamBatchAsync(poller, fencingToken: 1));
+        conn.ExecutedCommands.ShouldNotContain(c => c.Contains("DELETE", StringComparison.OrdinalIgnoreCase) || c.Contains("DROP", StringComparison.OrdinalIgnoreCase));
     }
 
     [Theory]

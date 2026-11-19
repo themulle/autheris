@@ -2,7 +2,7 @@ namespace Autheris.Tests.Unit.Cdc;
 
 using System;
 using Autheris.Domain.Model;
-using Autheris.Extensions.Cdc;
+using Autheris.Infrastructure.Streaming.Producers;
 using Shouldly;
 using Xunit;
 
