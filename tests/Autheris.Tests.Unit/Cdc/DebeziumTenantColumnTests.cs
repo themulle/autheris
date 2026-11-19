@@ -5,7 +5,7 @@ using System.Collections.Generic;
 using Autheris.Api.Endpoints;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
-using Autheris.Extensions.Cdc;
+using Autheris.Infrastructure.Streaming.Producers;
 using Microsoft.AspNetCore.Http;
 using Shouldly;
 using Xunit;
