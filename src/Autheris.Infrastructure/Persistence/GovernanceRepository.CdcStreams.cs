@@ -115,8 +115,7 @@ public partial class GovernanceRepository : ICdcStreamStore
     /// <summary>
     /// Engine-neutral SQL of the governed CDC stream store and key store (99 D-A4). The governance repository hands a
     /// connection (and owns connection lifetime, gating and pooling); this class owns the statements and the append transaction. Only the
-    /// few statements that genuinely differ per engine (insert-if-absent, the fenced watermark upsert, row limits) are dialect branches.
-    /// All values are parameters; identifiers are constants.
+    /// few statements that genuinely differ per engine (insert-if-absent, the fenced watermark upsert, row limits) are dialect branches. All values are parameters; identifiers are constants.
     /// </summary>
     private sealed partial class CdcStreamSql(bool sqlServer)
     {
@@ -420,12 +419,13 @@ public partial class GovernanceRepository : ICdcStreamStore
         public async Task ResetWatermarkAsync(DbConnection conn, CdcStreamId id, string? watermarkState, CancellationToken ct)
         {
             var sql = sqlServer
+                // Resolve the watermark key in its own statement so no stream-row lock is held while the watermark row is locked (append locks the watermark first, then the stream row).
                 ? @"
-                    UPDATE w
+                    DECLARE @src NVARCHAR(32), @dom NVARCHAR(128), @sch NVARCHAR(128), @tbl NVARCHAR(128);
+                    SELECT @src = source, @dom = domain_name, @sch = schema_name, @tbl = table_name FROM %streams% WHERE stream_id = @id;
+                    UPDATE %watermarks%
                        SET watermark = 0, fencing_token = 0, watermark_state = @state, updated_at = @now, updated_by = @by
-                      FROM %watermarks% w
-                      JOIN %streams% s ON w.source = s.source AND w.domain_name = s.domain_name AND w.schema_name = s.schema_name AND w.table_name = s.table_name
-                     WHERE s.stream_id = @id"
+                     WHERE source = @src AND domain_name = @dom AND schema_name = @sch AND table_name = @tbl;"
                 : @"
                     UPDATE %watermarks%
                        SET watermark = 0, fencing_token = 0, watermark_state = @state, updated_at = @now, updated_by = @by
