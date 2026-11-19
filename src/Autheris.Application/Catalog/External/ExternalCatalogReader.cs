@@ -440,7 +440,7 @@ public sealed class ExternalCatalogReader(
             language: null,
             isHidden: table.Table.DiscoveryHidden);
 
-        var cols = BuildExternalColumns(table, baseObj.Columns, includeHiddenColumns, includeAccessState: false);
+        var cols = BuildExternalColumns(table, baseObj.Columns, includeHiddenColumns, includeAccessState: false, personView: false);
         var write = baseObj.Write ?? DiscoveryWriteState.None;
         return new ExternalCatalogObjectDto(
             ObjectId: table.Identifier.ToString(),
@@ -470,7 +470,7 @@ public sealed class ExternalCatalogReader(
         long? changeSeq,
         bool includeHiddenColumns)
     {
-        var cols = BuildExternalColumns(table, obj.Columns, includeHiddenColumns, includeAccessState: true);
+        var cols = BuildExternalColumns(table, DiscoveryColumnVisibility.VisibleColumns(obj), includeHiddenColumns, includeAccessState: true, personView: true);
         var callerState = new ExternalCatalogCallerStateDto(
             Access: obj.Access.ToString().ToLowerInvariant(),
             RowScope: obj.RowScope?.ToString(),
@@ -498,11 +498,19 @@ public sealed class ExternalCatalogReader(
             ChangeSeq: changeSeq);
     }
 
+    private static string PersonAccessState(DiscoveryColumnState state) => state switch
+    {
+        DiscoveryColumnState.Clear => "clear",
+        DiscoveryColumnState.Masked => "masked",
+        _ => throw new InvalidOperationException("A column that is not visible must never be projected.")
+    };
+
     private static IReadOnlyList<ExternalCatalogColumnDto> BuildExternalColumns(
         TableMetadata table,
         IReadOnlyList<DiscoveryColumn> visibleCols,
         bool includeHiddenColumns,
-        bool includeAccessState)
+        bool includeAccessState,
+        bool personView)
     {
         var byName = table.Columns.ToDictionary(static c => c.ColumnName, StringComparer.OrdinalIgnoreCase);
         var list = new List<ExternalCatalogColumnDto>(visibleCols.Count + 4);
@@ -532,14 +540,15 @@ public sealed class ExternalCatalogReader(
                 ColumnSecurity: columnSecurity,
                 Hidden: colHidden,
                 WriteProtected: vc.WriteProtected,
-                AccessState: includeAccessState ? vc.State.ToString().ToLowerInvariant() : null,
+                AccessState: includeAccessState ? PersonAccessState(vc.State) : null,
                 ClearInSomeRows: vc.ClearInSomeRows,
                 Statistics: vc.Statistics,
                 Classifications: exposeClassifications ? vc.Classifications : [],
                 ClearRequestable: exposeClassifications ? vc.ClearRequestable : []));
         }
 
-        if (includeHiddenColumns)
+        // A person never receives the appended hidden columns: they carry no caller state, so they stay hidden.
+        if (includeHiddenColumns && !personView)
         {
             foreach (var col in table.Columns)
             {
@@ -562,7 +571,7 @@ public sealed class ExternalCatalogReader(
                     ColumnSecurity: classified,
                     Hidden: true,
                     WriteProtected: col.WriteProtected,
-                    AccessState: includeAccessState ? DiscoveryColumnState.NoAccess.ToString().ToLowerInvariant() : null,
+                    AccessState: null,
                     ClearInSomeRows: false,
                     Statistics: null,
                     Classifications: [],
@@ -743,29 +752,9 @@ public sealed class ExternalCatalogReader(
     private static string NormalizeChangeKind(string kind) =>
         string.Equals(kind, "REMOVED", StringComparison.OrdinalIgnoreCase) ? "removed" : "upsert";
 
-    private static bool IsAppOnlyPrincipal(ClaimsPrincipal user)
-    {
-        if (string.Equals(user.FindFirst("idtyp")?.Value, "app", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
+    internal static bool IsAppOnlyPrincipal(ClaimsPrincipal user) => AppOnlyPrincipal.Is(user);
 
-        var gty = user.FindFirst("gty")?.Value;
-        if (string.Equals(gty, "client-credentials", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(gty, "client_credentials", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        return !string.IsNullOrWhiteSpace(GetClientId(user))
-            && TokenAccessScope.GetScopeSet(user.Claims).Count == 0
-            && user.GetUserSid() is null;
-    }
-
-    private static string? GetClientId(ClaimsPrincipal user) =>
-        user.FindFirst("azp")?.Value
-        ?? user.FindFirst("appid")?.Value
-        ?? user.FindFirst("client_id")?.Value;
+    private static string? GetClientId(ClaimsPrincipal user) => AppOnlyPrincipal.GetClientId(user);
 
     private static bool HasAppRole(ClaimsPrincipal user, string role)
     {

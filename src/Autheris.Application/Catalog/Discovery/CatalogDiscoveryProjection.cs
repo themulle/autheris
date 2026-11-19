@@ -31,10 +31,8 @@ public static class CatalogDiscoveryProjection
         // #805/#807: keys, indexes and required filters as projected for this caller by the discovery core.
         var shape = obj.QueryShape ?? DiscoveryQueryShape.Empty;
         var primaryKeys = new HashSet<string>(shape.PrimaryKeyColumns, StringComparer.OrdinalIgnoreCase);
-        // Without access every column is listed as Deny, so the caller can see what to request; with access a column the caller is
-        // denied is not listed at all.
-        var granted = obj.Access == DiscoveryAccessState.Granted;
-        var columns = obj.Columns.Where(c => !granted || c.State != DiscoveryColumnState.NoAccess).Select(c => new CatalogColumnDetail(
+        // Only a column the caller can see is listed: a denied column and every column of an ungranted object are omitted.
+        var columns = DiscoveryColumnVisibility.VisibleColumns(obj).Select(c => new CatalogColumnDetail(
             Name: c.Name,
             Type: c.DataType,
             Sensitivity: c.Pii ? "Sensitive" : "Public",
@@ -42,7 +40,7 @@ public static class CatalogDiscoveryProjection
             {
                 DiscoveryColumnState.Clear => "Clear",
                 DiscoveryColumnState.Masked => "Masked",
-                _ => "Deny"
+                _ => throw new InvalidOperationException("A column that is not visible must never be projected.")
             },
             IsPrimaryKey: primaryKeys.Contains(c.Name), IsPiiIndicator: c.Pii,
             DisplayName: obj.HiddenTextColumns.Contains(c.Name) ? null : (c.DisplayName ?? c.Name),

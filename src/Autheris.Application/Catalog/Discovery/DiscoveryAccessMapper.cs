@@ -42,13 +42,6 @@ public static class DiscoveryAccessMapper
         var (accessState, rowScope) = MapAccessAndRowScope(decision, isPendingRequest, isRecentlyExpired);
         var (tableStats, colStatsByName) = ParseStatistics(artifacts);
         var visibleCols = table.Columns.Where(static c => !c.DiscoveryHidden).ToList();
-        var visibleColNames = new HashSet<string>(visibleCols.Select(static c => c.ColumnName), StringComparer.OrdinalIgnoreCase);
-
-        if (tableStats?.PartitionColumns is { Count: > 0 } partCols)
-        {
-            var filteredPartitions = partCols.Where(visibleColNames.Contains).ToList();
-            tableStats = tableStats with { PartitionColumns = filteredPartitions };
-        }
 
         var defs = classificationDefinitions
             ?? ClassificationAccessResolver.BuiltInCatalog(tenantId ?? ClassificationScopes.Global).Definitions;
@@ -104,6 +97,8 @@ public static class DiscoveryAccessMapper
             }
         }
 
+        tableStats = FilterPartitionColumns(tableStats, mappedCols);
+
         var tableLocalized = !string.IsNullOrWhiteSpace(language) ? table.Table.Texts.Resolve(language) : null;
         var tableDisplayName = DiscoveryTextSanitizer.SanitizeText(
             tableLocalized?.Title ?? table.Table.DisplayName,
@@ -146,6 +141,26 @@ public static class DiscoveryAccessMapper
         };
     }
 
+    // Partition columns are named in the table statistics: only a column the caller can see may be named (none for an ungranted object).
+    private static DiscoveryTableStatistics? FilterPartitionColumns(DiscoveryTableStatistics? stats, IReadOnlyList<DiscoveryColumn> columns)
+    {
+        if (stats?.PartitionColumns is not { Count: > 0 } partCols)
+        {
+            return stats;
+        }
+
+        var visible = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var column in columns)
+        {
+            if (DiscoveryColumnVisibility.IsVisible(column.State))
+            {
+                visible.Add(column.Name);
+            }
+        }
+
+        return stats with { PartitionColumns = partCols.Where(visible.Contains).ToList() };
+    }
+
     /// <summary>
     /// Issues #805/#807: keys and indexes over the listed columns whose state is <see cref="DiscoveryColumnState.Clear"/>
     /// (the shared <see cref="DatasetIndexProjection"/> rule), required filters over the listed columns the caller has any access to.
@@ -165,7 +180,7 @@ public static class DiscoveryAccessMapper
         HashSet<string>? clear = null;
         foreach (var column in columns)
         {
-            if (hasFilters && column.State != DiscoveryColumnState.NoAccess)
+            if (hasFilters && DiscoveryColumnVisibility.IsVisible(column.State))
             {
                 (listed ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase)).Add(column.Name);
             }

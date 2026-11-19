@@ -3,6 +3,7 @@ namespace Autheris.Api.Security;
 using System;
 using System.Collections.Generic;
 using System.Security.Claims;
+using Autheris.Application.Catalog.External;
 using Autheris.Application.Governance.ConsentRequests;
 using Autheris.Domain.Security;
 
@@ -18,21 +19,7 @@ public static class ExternalApiPermissions
     public const string GrantsRevoke = "Autheris.Grants.Revoke";
     public const string GrantsVerify = "Autheris.Grants.Verify";
 
-    private static readonly string[] PersonIdClaimTypes =
-    [
-        ClaimTypes.PrimarySid,
-        "objectSid",
-        "onprem_sid",
-        "primarysid",
-        "http://schemas.microsoft.com/ws/2008/06/identity/claims/primarysid",
-        "oid",
-        "http://schemas.microsoft.com/identity/claims/objectidentifier",
-        ClaimTypes.Upn,
-        "upn",
-        "preferred_username",
-        ClaimTypes.Email,
-        "email"
-    ];
+    private static readonly IReadOnlyList<string> PersonIdClaimTypes = AppOnlyPrincipal.PersonIdClaimTypes;
 
     private static readonly string[] InteractiveReadConsentRoles =
     [
@@ -42,45 +29,10 @@ public static class ExternalApiPermissions
         "SecurityAuditor", "Auditor", "PrivacyAdmin", "DataProtectionOfficer"
     ];
 
-    public static bool IsServicePrincipal(ClaimsPrincipal? principal)
-    {
-        if (principal?.Identity?.IsAuthenticated != true)
-        {
-            return false;
-        }
+    public static bool IsServicePrincipal(ClaimsPrincipal? principal) =>
+        principal?.Identity?.IsAuthenticated == true && AppOnlyPrincipal.Is(principal);
 
-        if (string.Equals(principal.FindFirst("idtyp")?.Value, "app", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        var gty = principal.FindFirst("gty")?.Value;
-        if (string.Equals(gty, "client-credentials", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(gty, "client_credentials", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        var preferred = principal.FindFirst("preferred_username")?.Value;
-        if (preferred?.StartsWith("service-account-", StringComparison.OrdinalIgnoreCase) == true)
-        {
-            return true;
-        }
-
-        if (!string.IsNullOrWhiteSpace(GetClientId(principal))
-            && TokenAccessScope.GetScopeSet(principal.Claims).Count == 0
-            && !HasAnyClaim(principal, PersonIdClaimTypes))
-        {
-            return true;
-        }
-
-        return false;
-    }
-
-    public static string? GetClientId(ClaimsPrincipal? principal) =>
-        principal?.FindFirst("azp")?.Value
-        ?? principal?.FindFirst("appid")?.Value
-        ?? principal?.FindFirst("client_id")?.Value;
+    public static string? GetClientId(ClaimsPrincipal? principal) => AppOnlyPrincipal.GetClientId(principal);
 
     public static bool HasAppRole(ClaimsPrincipal? principal, string permission)
     {
@@ -217,18 +169,7 @@ public static class ExternalApiPermissions
                     || GatewayPolicies.HasAnyRole(principal, GatewayPolicies.AdminOnlyRoles)));
     }
 
-    private static bool HasAnyClaim(ClaimsPrincipal principal, IEnumerable<string> claimTypes)
-    {
-        foreach (var type in claimTypes)
-        {
-            if (!string.IsNullOrWhiteSpace(principal.FindFirst(type)?.Value))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
+    private static bool HasAnyClaim(ClaimsPrincipal principal, IEnumerable<string> claimTypes) => AppOnlyPrincipal.HasAnyClaim(principal, claimTypes);
 
     private static IEnumerable<string> SplitClaimTokens(string value)
     {

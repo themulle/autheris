@@ -8,10 +8,11 @@ using Autheris.Domain.Model;
 
 /// <summary>
 /// The one source of column lists and column counts on the metadata discovery surfaces (MCP <c>describe_dataset</c>,
-/// <c>get_table_schema</c>, <c>get_my_permissions</c>, the schema resource, GraphQL catalog discovery). A column the caller has no
+/// <c>get_table_schema</c>, <c>get_my_permissions</c>, the schema resource, GraphQL catalog discovery, the REST dataset detail, search and the
+/// external catalog person view). A column the caller has no
 /// access to is never named and never counted. The rule is fail-closed: only an explicit Clear or Masked state is visible, a missing
 /// column list or an unknown state lists nothing. There is no administrator bypass: the visibility is the state computed for the
-/// caller. The REST dataset detail keeps its own request-access projection and does not use this type.
+/// caller. An object the caller has no access to lists no column.
 /// </summary>
 public static class DiscoveryColumnVisibility
 {
