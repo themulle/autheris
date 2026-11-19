@@ -413,7 +413,7 @@ jobs:
           persist-credentials: false
           sparse-checkout: .github/scripts
 
-      - name: Start published container with signed Lakehouse module and assert endpoints
+      - name: Start published container with signed modules and assert endpoints
         env:
           IMAGE_REF: ghcr.io/${{ github.repository }}-full@${{ needs.build-and-push.outputs.image_digest_full }}
         run: bash .github/scripts/module-e2e.sh

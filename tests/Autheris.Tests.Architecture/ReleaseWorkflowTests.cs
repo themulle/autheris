@@ -194,7 +194,9 @@ public sealed class ReleaseWorkflowTests
 
         // Both the image build job and the module-e2e job publish and sign the dbt module with the same signer as Lakehouse.
         Regex.Count(workflow, @"modules/Autheris\.Modules\.Dbt/Autheris\.Modules\.Dbt\.csproj").ShouldBe(2);
-        Regex.Count(workflow, @"(?m)^\s*--id dbt \\$|--id dbt --version").ShouldBe(2);
+        // Host version binding: the tag job signs with the stripped HOST_VERSION, the branch job with VERSION.
+        Regex.Count(workflow, @"--id dbt \\\s+--version ""\$HOST_VERSION"" \\\s+--host-version ""\$HOST_VERSION""").ShouldBe(1);
+        Regex.Count(workflow, @"--id dbt --version ""\$VERSION"" --host-version ""\$VERSION""").ShouldBe(1);
         workflow.ShouldContain("-o ./dist/modules/dbt");
         workflow.ShouldContain("--dir ./dist/modules/dbt");
         workflow.ShouldNotContain("AllowUnsigned", Case.Insensitive);
