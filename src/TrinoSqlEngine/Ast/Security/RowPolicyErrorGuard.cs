@@ -1,11 +1,12 @@
 namespace TrinoSqlEngine.Ast.Security;
 
 using System;
-using System.Collections.Generic;
+using System.Linq;
 using System.Globalization;
 using System.Security;
 using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Nodes;
+using TrinoSqlEngine.Governance;
 
 /// <summary>
 /// Fail-closed allowlist for user expressions on statements that involve a row policy or a tenant predicate: only operators and functions
@@ -16,43 +17,22 @@ public static class RowPolicyErrorGuard
 {
     public const string Message = "The statement uses an expression that is not permitted on a table with a row policy.";
 
-    public static void Enforce(SqlNode userTree)
+    public static void Enforce(SqlNode userTree, ITableCatalog catalog)
     {
         ArgumentNullException.ThrowIfNull(userTree);
+        ArgumentNullException.ThrowIfNull(catalog);
 
-        var exempt = OutermostProjectionExpressions(userTree);
         AstReflection.Walk(userTree, node =>
         {
-            if (node is Expression expression && !exempt.Contains(expression) && !IsAllowed(expression))
+            if (node is Expression expression && !IsAllowed(expression))
             {
                 throw new SecurityException(Message);
             }
 
             return true;
         });
-    }
 
-    /// <summary>
-    /// Expressions of the select list of the outermost query block (not those of nested subqueries). They are evaluated after every filter of
-    /// their own block on the rows that are returned, and nothing outside the block can inline them into a predicate, so they cannot
-    /// observe a row that the policy or tenant predicate excludes.
-    /// </summary>
-    private static HashSet<Expression> OutermostProjectionExpressions(SqlNode userTree)
-    {
-        var exempt = new HashSet<Expression>(ReferenceEqualityComparer.Instance);
-        if (userTree is not SelectStatement { Body: QuerySpecification block }) return exempt;
-
-        foreach (var item in block.Projections)
-        {
-            AstReflection.Walk(item, node =>
-            {
-                if (node is SelectStatement or QueryBody) return false;
-                if (node is Expression expression) exempt.Add(expression);
-                return true;
-            });
-        }
-
-        return exempt;
+        new RowPolicyCoercionGuard(catalog).Visit(userTree);
     }
 
     private static bool IsAllowed(Expression expression) => expression switch
@@ -83,9 +63,11 @@ public static class RowPolicyErrorGuard
 
     private static bool IsAllowedBinary(BinaryExpression binary) => binary.Operator switch
     {
-        BinaryOperator.And or BinaryOperator.Or or BinaryOperator.Concat
+        BinaryOperator.And or BinaryOperator.Or
             or BinaryOperator.Equal or BinaryOperator.NotEqual or BinaryOperator.LessThan or BinaryOperator.LessThanOrEqual
             or BinaryOperator.GreaterThan or BinaryOperator.GreaterThanOrEqual => true,
+        // A concatenation of row data can exceed a length limit (Oracle), so it is allowed only between constants.
+        BinaryOperator.Concat => !HasColumn(binary.Left) && !HasColumn(binary.Right),
         // Arithmetic can overflow: only without any column operand (a literal expression does not depend on row data).
         BinaryOperator.Add or BinaryOperator.Subtract or BinaryOperator.Multiply => !HasColumn(binary.Left) && !HasColumn(binary.Right),
         BinaryOperator.Divide or BinaryOperator.Modulo => IsSafeDivisor(binary.Right),
@@ -111,7 +93,8 @@ public static class RowPolicyErrorGuard
                 && (call.Arguments.Count == 2 || IsNonNegativeIntegerLiteral(call.Arguments[2], allowNegative: false));
         }
 
-        // Zone conversion with literal zone names cannot fail on row data (the gateway's time bucketing relies on it).
+        // Zone conversion with literal zone names does not fail on valid values; timestamps at the extremes of the type range could
+        // still fall outside it after the offset is applied. Accepted: the gateway's time bucketing relies on it.
         if (call.Name.Parts.Count == 1 && call.Window is null && call.Name.Parts[0].Value.Equals("convert_timezone", StringComparison.OrdinalIgnoreCase))
         {
             for (int i = 0; i < call.Arguments.Count - 1; i++)
@@ -120,6 +103,11 @@ public static class RowPolicyErrorGuard
             }
 
             return call.Arguments.Count is 2 or 3;
+        }
+
+        if (call.Name.Parts.Count == 1 && call.Name.Parts[0].Value.Equals("concat", StringComparison.OrdinalIgnoreCase) && call.Arguments.Any(HasColumn))
+        {
+            return false;
         }
 
         if (call.Name.Parts.Count != 1 || !SqlFunctionPolicy.RowPolicySafeFunctions.Contains(call.Name.Parts[0].Value)) return false;
@@ -148,8 +136,8 @@ public static class RowPolicyErrorGuard
             && decimal.TryParse(Convert.ToString(literal.Value, CultureInfo.InvariantCulture), NumberStyles.Float, CultureInfo.InvariantCulture, out value);
     }
 
-    /// <summary>A non-zero number literal other than minus one (the one divisor that overflows on the minimum integer).</summary>
-    private static bool IsSafeDivisor(Expression expression) => TryNumber(expression, out var value) && value != 0m && value != -1m;
+    /// <summary>A number literal with magnitude of at least one: not zero, and a fraction cannot turn a bounded value into an overflow.</summary>
+    private static bool IsSafeDivisor(Expression expression) => TryNumber(expression, out var value) && Math.Abs(value) >= 1m;
 
     private static bool IsNonNegativeIntegerLiteral(Expression expression, bool allowNegative) =>
         TryNumber(expression, out var value) && (allowNegative || value >= 0m);

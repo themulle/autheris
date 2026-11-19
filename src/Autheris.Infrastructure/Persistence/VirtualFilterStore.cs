@@ -8,7 +8,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 
 /// <summary>
-/// Virtual filters: storage shared by the SQLite and PostgreSQL governance repositories (portable SQL: ON CONFLICT, MERGE on SQL Server,
+/// Virtual filters: storage shared by the governance repositories (portable SQL: ON CONFLICT, MERGE on SQL Server,
 /// named parameters). Definitions are stored as JSON with their hash; a change set is one transaction and increments
 /// the generation once.
 /// </summary>
@@ -34,7 +34,7 @@ internal static class VirtualFilterStore
         FilterApprovalStatus? Status = null, string? CreatedBy = null, string? ApprovedBy = null, DateTimeOffset? ApprovedAt = null,
         ProfileDto? Draft = null, bool PendingDeletion = false, string? DeletionRequestedBy = null);
 
-    /// <param name="snapshot">A read transaction the caller opened (SQLite: deferred, so it takes no write lock); the store then neither begins nor commits one.</param>
+    /// <param name="snapshot">A read transaction the caller opened (deferred, so it takes no write lock); the store then neither begins nor commits one.</param>
     public static async Task<VirtualFilterSnapshot> LoadSnapshotAsync(DbConnection connection, CancellationToken ct, DbTransaction? snapshot = null)
     {
         await using var ownedTx = snapshot == null ? await connection.BeginTransactionAsync(ct).ConfigureAwait(false) : null;

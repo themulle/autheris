@@ -13,6 +13,7 @@ namespace TrinoSqlEngine.Tests.Properties;
 [Trait("Category", "Security")]
 [Trait("Category", "Metamorphic")]
 [Trait("Category", "NightlyGate")]
+[RowPolicyGuardOff]
 public class CompilerInvariantPropertyTests(ITestOutputHelper output)
 {
     private static readonly CompileFn Production = ProductionCompiler.Compile;
@@ -25,8 +26,8 @@ public class CompilerInvariantPropertyTests(ITestOutputHelper output)
         Report(result);
         result.ThrowIfFailed(nameof(EmittedSql_SatisfiesEverySecurityInvariant_ForGeneratedStatements));
 
-        // The generator must not be vacuous: a good share of the cases compiles (the row-policy expression allowlist refuses many generated expressions), and the rejections are typed.
-        Assert.True(result.Compiled >= result.Cases / 4, $"only {result.Compiled} of {result.Cases} generated statements compiled");
+        // The generator must not be vacuous: most cases compile (the allowlist for statements with a row policy is off here: the properties are about emitted SQL, and the allowlist has its own tests), and the rejections are typed.
+        Assert.True(result.Compiled >= result.Cases / 2, $"only {result.Compiled} of {result.Cases} generated statements compiled");
     }
 
     [Fact]

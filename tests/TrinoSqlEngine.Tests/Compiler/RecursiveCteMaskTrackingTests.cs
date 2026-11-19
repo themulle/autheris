@@ -15,6 +15,7 @@ namespace TrinoSqlEngine.Tests.Compiler;
 /// </summary>
 [Trait("Category", "SqlGate")]
 [Trait("Category", "Security")]
+[RowPolicyGuardOff]
 public class RecursiveCteMaskTrackingTests
 {
     private readonly FastSqlEngine _engine = new();

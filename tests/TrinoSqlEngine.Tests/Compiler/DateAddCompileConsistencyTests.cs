@@ -11,6 +11,7 @@ namespace TrinoSqlEngine.Tests.Compiler;
 /// runner used the legacy per-dialect allowlist and reported a rejection that the production path never produced).
 /// </summary>
 [Trait("Category", "SqlGate")]
+[RowPolicyGuardOff]
 public class DateAddCompileConsistencyTests
 {
     private static readonly TableIdentity Orders = new("dbo", "Orders");

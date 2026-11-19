@@ -221,10 +221,10 @@ internal sealed class GovernedSqlCompiler
             CancellationToken = token
         };
         var secured = (SqlStatement)visitor.Visit(typedLiterals);
-        if (visitor.RowPolicyApplied)
+        if (visitor.RowPolicyApplied && !CompilerHooks.IsDisabled(SecurityControl.RowPolicyExpressionAllowlist))
         {
             // Details: private advisory. The user tree (without any injected predicate) is checked.
-            Ast.Security.RowPolicyErrorGuard.Enforce(typedLiterals);
+            Ast.Security.RowPolicyErrorGuard.Enforce(typedLiterals, policy.Catalog);
         }
 
         CheckBudget(request, clock, token);

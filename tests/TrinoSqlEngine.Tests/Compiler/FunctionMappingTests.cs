@@ -11,6 +11,7 @@ namespace TrinoSqlEngine.Tests.Compiler;
 /// <c>Autheris.Tests.Integration</c> (<c>FunctionMapping_*</c>).
 /// </summary>
 [Trait("Category", "SqlGate")]
+[RowPolicyGuardOff]
 public class FunctionMappingTests
 {
     private static readonly TableIdentity Orders = new("dbo", "Orders");

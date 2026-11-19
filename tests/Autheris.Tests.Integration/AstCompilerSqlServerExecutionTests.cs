@@ -470,9 +470,9 @@ public sealed class AstCompilerSqlServerExecutionTests : IClassFixture<AstCompil
     // ---- user query shapes in bound mode ----
 
     [Theory]
-    [InlineData("SELECT status, count(*) AS n, sum(amount) AS total FROM orders GROUP BY status ORDER BY status")]
+    [InlineData("SELECT status, count(*) AS n, max(amount) AS total FROM orders GROUP BY status ORDER BY status")]
     [InlineData("SELECT id FROM orders WHERE status = 'open' AND amount > 10.5 ORDER BY id OFFSET 1 ROWS FETCH NEXT 5 ROWS ONLY")]
-    [InlineData("SELECT id, sum(amount) OVER (PARTITION BY status ORDER BY amount ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS rn FROM orders")]
+    [InlineData("SELECT id, max(amount) OVER (PARTITION BY status ORDER BY amount ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS rn FROM orders")]
     [InlineData("SELECT id, CASE WHEN amount > 15 THEN 'big' ELSE 'small' END AS size FROM orders")]
     [InlineData("SELECT id FROM orders WHERE email LIKE '%@acme.example' OR email IS NULL")]
     [InlineData("SELECT id, cast(1.5 AS integer) AS a, try_cast('x' AS integer) AS t FROM orders")]

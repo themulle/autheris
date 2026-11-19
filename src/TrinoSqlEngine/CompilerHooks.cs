@@ -160,6 +160,9 @@ internal enum SecurityControl
     /// <summary>A string literal is emitted inline instead of bound.</summary>
     UnboundStringLiteral,
 
+    /// <summary>The expression allowlist for statements with a row policy or tenant predicate is not applied.</summary>
+    RowPolicyExpressionAllowlist,
+
     /// <summary>The CTE scope is case-insensitive (a quoted physical name resolves to a CTE).</summary>
     CteCaseInsensitiveScope,
 

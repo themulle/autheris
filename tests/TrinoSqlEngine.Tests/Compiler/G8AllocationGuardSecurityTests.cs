@@ -19,6 +19,7 @@ namespace TrinoSqlEngine.Tests.Compiler;
 /// </summary>
 [Trait("Category", "SqlGate")]
 [Trait("Category", "Security")]
+[RowPolicyGuardOff]
 public class G8AllocationGuardSecurityTests
 {
     private static readonly MaskSpec Nullify = new(MaskKind.Nullify, new MaskArguments(), FrozenDictionary<string, PolicyValue>.Empty);

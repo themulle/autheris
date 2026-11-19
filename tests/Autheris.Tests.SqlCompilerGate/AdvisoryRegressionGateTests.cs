@@ -18,7 +18,7 @@ public sealed class AdvisoryRegressionGateTests
 {
     private const string Probe = "SELECT 1 FROM orders WHERE 1 / (id - id + 1) = 1";
 
-    private static CompileRequest Request(string dialect, PolicyScenario scenario)
+    private static CompileRequest Request(string dialect, PolicyScenario scenario, string? statementClass = null, string? sql = null)
     {
         var (gate, target) = dialect switch
         {
@@ -29,7 +29,7 @@ public sealed class AdvisoryRegressionGateTests
             _ => throw new ArgumentOutOfRangeException(nameof(dialect), dialect, null)
         };
         var schema = gate switch { GateDialect.SqlServer => "dbo", GateDialect.Oracle => "GATE_APP", _ => "public" };
-        var request = new GatePolicies(gate, schema, scenario).AstRequest(StatementPermissions.ReadOnly);
+        var request = new GatePolicies(gate, schema, scenario).AstRequest(statementClass is null ? StatementPermissions.ReadOnly : GatePolicies.PermissionsOf(statementClass), statementClass, sql);
         return target == request.TargetDialect
             ? request
             : request with
@@ -86,5 +86,38 @@ public sealed class AdvisoryRegressionGateTests
 
         Should.Throw<SecurityException>(() => engine.Compile(sql.AsMemory(), Request(dialect, PolicyScenario.Tenant), CancellationToken.None))
             .Message.ShouldBe(RowPolicyErrorGuard.Message);
+    }
+
+    [Theory]
+    [InlineData("postgresql", "case_06", "update", "UPDATE orders SET status = 'x' WHERE id + 1 > 3")]
+    [InlineData("sqlserver", "case_06", "update", "UPDATE orders SET status = 'x' WHERE id + 1 > 3")]
+    [InlineData("oracle", "case_06", "update", "UPDATE orders SET status = 'x' WHERE id + 1 > 3")]
+    [InlineData("postgresql", "case_07", "delete", "DELETE FROM orders WHERE 1 / (id - id + 1) = 1")]
+    [InlineData("sqlserver", "case_07", "delete", "DELETE FROM orders WHERE 1 / (id - id + 1) = 1")]
+    [InlineData("oracle", "case_07", "delete", "DELETE FROM orders WHERE 1 / (id - id + 1) = 1")]
+    [InlineData("postgresql", "case_08", "update", "UPDATE orders SET status = lower(status) || 'x' WHERE id > 3")]
+    [InlineData("sqlserver", "case_08", "update", "UPDATE orders SET status = lower(status) || 'x' WHERE id > 3")]
+    [InlineData("oracle", "case_08", "update", "UPDATE orders SET status = lower(status) || 'x' WHERE id > 3")]
+    public void Regression_dml_case(string dialect, string item, string statementClass, string sql)
+    {
+        Assert.NotNull(item);
+        var engine = new FastSqlEngine();
+
+        Should.Throw<SecurityException>(() => engine.Compile(sql.AsMemory(), Request(dialect, PolicyScenario.Tenant, statementClass, sql), CancellationToken.None))
+            .Message.ShouldBe(RowPolicyErrorGuard.Message);
+    }
+
+    [Theory]
+    [InlineData("postgresql", "case_09", "SELECT id FROM orders WHERE status = 5")]
+    [InlineData("sqlserver", "case_09", "SELECT id FROM orders WHERE id = '5'")]
+    [InlineData("oracle", "case_09", "SELECT id FROM orders WHERE id = '5'")]
+    [InlineData("postgresql", "case_10", "SELECT id FROM orders WHERE coalesce(id, 'x') = 1")]
+    [InlineData("oracle", "case_10", "SELECT id FROM orders WHERE coalesce(status, id) = 'x'")]
+    public void Regression_coercion_case(string dialect, string item, string sql)
+    {
+        Assert.NotNull(item);
+        var engine = new FastSqlEngine();
+
+        Should.Throw<Exception>(() => engine.Compile(sql.AsMemory(), Request(dialect, PolicyScenario.Tenant), CancellationToken.None));
     }
 }

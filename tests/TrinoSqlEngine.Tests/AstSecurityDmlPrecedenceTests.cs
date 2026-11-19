@@ -12,6 +12,7 @@ using Xunit;
 /// </summary>
 [Trait("Category", "SqlGate")]
 [Trait("Category", "Security")]
+[RowPolicyGuardOff]
 public sealed class AstSecurityDmlPrecedenceTests
 {
     private static CompiledSql Compile(TargetSqlDialect dialect, string sql) => new ProbeEnv(dialect).Compile(sql);

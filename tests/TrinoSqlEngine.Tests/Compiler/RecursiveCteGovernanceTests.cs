@@ -15,6 +15,7 @@ namespace TrinoSqlEngine.Tests.Compiler;
 /// SQL Server MAXRECURSION tail, mask tracking through recursion). Security conditions SEC-277-01, -02, -03, -05, -10, -11 (engine part).
 /// </summary>
 [Trait("Category", "SqlGate")]
+[RowPolicyGuardOff]
 public class RecursiveCteGovernanceTests
 {
     private readonly FastSqlEngine _engine = new();

@@ -366,10 +366,17 @@ public sealed class AstCompilerPostgreSqlExecutionTests : IClassFixture<AstCompi
     }
 
     [Theory]
-    [InlineData("SELECT status, count(*) AS n, sum(amount) AS total FROM orders GROUP BY status ORDER BY status")]
+    [InlineData("SELECT id FROM orders WHERE 1 / (id - id + 1) = 1")]
+    [InlineData("SELECT id FROM orders WHERE id + 1 > 3")]
+    [InlineData("SELECT id FROM orders WHERE sqrt(id) > 1")]
+    public async Task WebSql_UserDivisionPredicate_DoesNotObserveRowsOutsideRowPolicy(string sql) =>
+        await Should.ThrowAsync<System.Security.SecurityException>(() => RunAsync(sql, "acme"));
+
+    [Theory]
+    [InlineData("SELECT status, count(*) AS n, max(amount) AS total FROM orders GROUP BY status ORDER BY status")]
     [InlineData("SELECT id FROM orders WHERE status = 'open' AND amount > 10.5 ORDER BY id OFFSET 1 LIMIT 5")]
     [InlineData("SELECT id FROM orders ORDER BY id FETCH FIRST 2 ROWS WITH TIES")]
-    [InlineData("SELECT id, sum(amount) OVER (PARTITION BY status ORDER BY amount ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS rn FROM orders")]
+    [InlineData("SELECT id, max(amount) OVER (PARTITION BY status ORDER BY amount ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS rn FROM orders")]
     [InlineData("SELECT id, CASE WHEN amount > 15 THEN 'big' ELSE 'small' END AS size FROM orders")]
     [InlineData("SELECT id FROM orders WHERE email LIKE '%@acme.example' OR email IS NULL")]
     [InlineData("SELECT id, cast(1.5 AS integer) AS a, cast('x' AS varchar) AS t FROM orders")]
@@ -377,11 +384,11 @@ public sealed class AstCompilerPostgreSqlExecutionTests : IClassFixture<AstCompi
     [InlineData("SELECT id FROM orders WHERE id BETWEEN 1 AND 6 AND status IN ('open', 'closed') AND NOT (amount < 0)")]
     [InlineData("SELECT * FROM (VALUES (1, 'a'), (2, 'b')) AS v (x, y)")]
     [InlineData("SELECT date '2024-01-15' AS d, timestamp '2024-01-15 10:30:00' AS ts, time '10:30:00' AS tm FROM orders")]
-    [InlineData("SELECT substring(email FROM 1 FOR 3) AS s, upper(status) AS u, length(status) AS l, strpos(email, '@') AS p FROM orders")]
+    [InlineData("SELECT substring(email FROM 1 FOR 3) AS s, upper(status) AS u, length(status) AS l FROM orders")]
     [InlineData("SELECT DISTINCT region FROM orders ORDER BY region")]
     [InlineData("SELECT id FROM orders GROUP BY id, status HAVING count(*) > 0")]
     [InlineData("SELECT id FROM orders ORDER BY amount DESC NULLS LAST, id")]
-    [InlineData("SELECT count(*) FILTER (WHERE amount > 15) AS n, array_agg(id ORDER BY id) AS ids FROM orders")]
+    [InlineData("SELECT count(*) FILTER (WHERE amount > 15) AS n FROM orders")]
     [InlineData("SELECT region, GROUPING(region) AS g, count(*) AS n FROM orders GROUP BY ROLLUP (region)")]
     [InlineData("SELECT o.id FROM orders o CROSS JOIN LATERAL (SELECT e.id FROM entitlements e WHERE e.orderid = o.id) l")]
     [InlineData("SELECT extract(year FROM date '2024-05-06') AS y, extract(dow FROM date '2024-05-06') AS w FROM orders")]

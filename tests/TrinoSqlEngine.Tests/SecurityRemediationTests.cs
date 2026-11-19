@@ -372,6 +372,7 @@ public class SecurityRemediationTests
     }
 
     [Fact]
+    [RowPolicyGuardOff]
     public void C01_OracleDefaultAllowlist_AllowsStandardOracleFunctionsAndDeniesRest()
     {
         var env = Env(TargetSqlDialect.Oracle);
@@ -773,6 +774,7 @@ public class SecurityRemediationTests
     }
 
     [Fact]
+    [RowPolicyGuardOff]
     public void R4_SQ06_AnalyticsQuery_WithPostgreSqlAllowlist_Works()
     {
         var env = Env(TargetSqlDialect.PostgreSql);

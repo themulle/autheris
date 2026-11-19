@@ -56,7 +56,7 @@ public abstract class GovernanceMigrationRunnerBase : IGovernanceMigrationRunner
     /// <summary>Returns a positive count when the history table exists.</summary>
     protected abstract string HistoryTableExistsSql { get; }
 
-    /// <summary>When false the connection is owned by the caller (SQLite shared governance connection) and not disposed.</summary>
+    /// <summary>When false the connection is owned by the caller (shared governance connection) and not disposed.</summary>
     protected virtual bool OwnsConnection => true;
 
     /// <summary>Opens the connection; <paramref name="verifyOnly"/> runs with the runtime login, never with the DDL login.</summary>
@@ -81,7 +81,7 @@ public abstract class GovernanceMigrationRunnerBase : IGovernanceMigrationRunner
     protected GovernanceMigrationOptions Options => _options;
 
     /// <summary>
-    /// Label of the database for the drift message (08g): the SQLite file name or the database name, never a connection
+    /// Label of the database for the drift message (08g): the file name or the database name, never a connection
     /// string, host, user or directory path.
     /// </summary>
     protected virtual string DatabaseLabel(DbConnection connection) => SanitizeLabel(connection.Database);
@@ -106,16 +106,16 @@ public abstract class GovernanceMigrationRunnerBase : IGovernanceMigrationRunner
     /// <summary>Applies the timeouts of a step transaction (PostgreSQL <c>SET LOCAL</c>, SQL Server <c>SET LOCK_TIMEOUT</c>/<c>XACT_ABORT</c>; I388-SC-08).</summary>
     protected virtual Task BeginStepBoundsAsync(DbConnection connection, DbTransaction transaction, CancellationToken ct) => Task.CompletedTask;
 
-    /// <summary>Extra checks after a file-based step (SQLite: <c>PRAGMA foreign_key_check</c>).</summary>
+    /// <summary>Extra checks after a file-based step (for example a foreign key check).</summary>
     protected virtual Task AfterStepAsync(DbConnection connection, DbTransaction? transaction, MigrationStep step, CancellationToken ct) => Task.CompletedTask;
 
-    /// <summary>False when the whole run is already one transaction (SQLite), so steps must not open their own.</summary>
+    /// <summary>False when the whole run is already one transaction, so steps must not open their own.</summary>
     protected virtual bool UseStepTransactions => true;
 
     /// <summary>True in the Production environment (I388-SC-13 runtime-DDL warning applies only there).</summary>
     internal bool IsProduction { get; init; }
 
-    /// <summary>True when an Apply would run DDL with the runtime login (no separate <c>MigrationConnectionString</c>); false for SQLite and for engines with a migration login.</summary>
+    /// <summary>True when an Apply would run DDL with the runtime login (no separate <c>MigrationConnectionString</c>); false for engines with a migration login.</summary>
     protected virtual bool RuntimeLoginRunsDdl => false;
 
     /// <summary>Test seam (never set in production code): overrides <see cref="RuntimeLoginRunsDdl"/>.</summary>
@@ -131,7 +131,7 @@ public abstract class GovernanceMigrationRunnerBase : IGovernanceMigrationRunner
 
     /// <summary>
     /// Verify mode, runtime login: describes a privilege that exceeds least privilege (write on the history table, DDL rights), or null
-    /// (I388-SC-13, plan Q-2). Must only read. SQLite does not implement it.
+    /// (I388-SC-13, plan Q-2). Must only read.
     /// </summary>
     protected virtual Task<string?> DescribeExcessPrivilegeAsync(DbConnection connection, CancellationToken ct) => Task.FromResult<string?>(null);
 

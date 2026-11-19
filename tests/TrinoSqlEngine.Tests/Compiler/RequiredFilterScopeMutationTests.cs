@@ -15,6 +15,7 @@ namespace TrinoSqlEngine.Tests.Compiler;
 /// policy satisfy the requirement. An unconstrained column is rejected with <see cref="RequiredFilterColumnMissingException"/> (fail closed).
 /// </summary>
 [Trait("Category", "SqlGate")]
+[RowPolicyGuardOff]
 public class RequiredFilterScopeMutationTests
 {
     private static readonly TableIdentity Orders = new("dbo", "orders");

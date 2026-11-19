@@ -11,6 +11,7 @@ namespace TrinoSqlEngine.Tests.Compiler;
 /// a comparison across families is rejected instead of letting the database convert the column (ORA-01722 side channel).
 /// </summary>
 [Trait("Category", "SqlGate")]
+[RowPolicyGuardOff]
 public class LiteralBindTypeTests
 {
     private static readonly TableIdentity Orders = new("dbo", "Orders");
@@ -80,23 +81,26 @@ public class LiteralBindTypeTests
     }
 
     [Fact]
-    public void Oracle_NumericLookingStringLiteralVsNumber_IsRefusedUnderTenantPredicate()
+    public void Oracle_NumericLookingStringLiteralVsNumber_BindsAsNumber()
     {
-        // A text literal against a numeric column is an implicit conversion that fails on row data; the tenant predicate refuses it.
-        Assert.Throws<System.Security.SecurityException>(() => Compile("SELECT id FROM orders WHERE amount = '42'", Catalog(amountType: "NUMBER(10)"), TargetSqlDialect.Oracle));
+        var compiled = Compile("SELECT id FROM orders WHERE amount = '42'", Catalog(amountType: "NUMBER(10)"), TargetSqlDialect.Oracle);
+        var bound = BindAll(compiled, new OracleCompiledSqlBinderProbe());
+        var literal = Assert.Single(Literals(compiled));
+        Assert.Equal("NUMBER(10)", literal.ColumnType);
+        Assert.Equal(42m, bound[literal.Ordinal].Value);
     }
 
     [Fact]
     public void Oracle_UnknownColumnType_LiteralRejected()
     {
-        Assert.Throws<System.Security.SecurityException>(() => Compile("SELECT id FROM orders WHERE region = 'EU'", Catalog(regionType: ""), TargetSqlDialect.Oracle));
+        AssertRejected(() => Compile("SELECT id FROM orders WHERE region = 'EU'", Catalog(regionType: ""), TargetSqlDialect.Oracle));
         AssertRejected(() => Compile("SELECT id FROM orders WHERE region = 5", Catalog(regionType: "no such type!"), TargetSqlDialect.Oracle));
     }
 
     [Fact]
     public void Oracle_LiteralNotComparedWithAColumn_IsUnaffected()
     {
-        var compiled = Compile("SELECT 5 AS five, id FROM orders WHERE amount = coalesce(amount, 1)", Catalog(regionType: ""), TargetSqlDialect.Oracle);
+        var compiled = Compile("SELECT 5 AS five, id FROM orders WHERE amount = amount + 1", Catalog(regionType: ""), TargetSqlDialect.Oracle);
         Assert.NotEmpty(Literals(compiled));
     }
 
@@ -162,7 +166,7 @@ public class LiteralBindTypeTests
     {
         foreach (var dialect in new[] { TargetSqlDialect.SqlServer, TargetSqlDialect.PostgreSql, TargetSqlDialect.DuckDb })
         {
-            var compiled = Compile("SELECT 'x' AS s, id FROM orders WHERE amount = 5", Catalog(regionType: "", amountType: ""), dialect);
+            var compiled = Compile("SELECT id FROM orders WHERE region = 'EU' AND amount = 5", Catalog(regionType: "", amountType: ""), dialect);
             var literals = Literals(compiled).ToList();
             Assert.Equal(2, literals.Count);
             Assert.All(literals, l => Assert.Null(l.ColumnType));

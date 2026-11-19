@@ -8,7 +8,7 @@ using static TrinoSqlEngine.Tests.Compiler.PolicyFixtures;
 
 namespace TrinoSqlEngine.Tests.Compiler;
 
-/// <summary>Allowlist of non-raising user expressions while a tenant predicate applies (issue 847, GHSA-66xj-4459-x8gx).</summary>
+/// <summary>Allowlist of non-raising user expressions while a tenant predicate applies (issue 847).</summary>
 [Trait("Category", "SqlGate")]
 [Trait("Category", "Security")]
 public class RowPolicyExpressionAllowlistTests
@@ -62,6 +62,18 @@ public class RowPolicyExpressionAllowlistTests
         { "case_22", "SELECT Id FROM Orders WHERE Id / 0 > 3" },
         { "case_23", "SELECT Id FROM Orders WHERE substring(Status, Id, 2) = 'a'" },
         { "case_24", "SELECT Id FROM Orders WHERE from_base(Status, 16) = 1" },
+        { "case_25", "SELECT Id FROM Orders WHERE coalesce(Id, Status) = 1" },
+        { "case_26", "SELECT Id FROM Orders WHERE CASE WHEN Id > 1 THEN Status ELSE Amount END = 'a'" },
+        { "case_27", "SELECT Id FROM Orders WHERE Status || Region = 'x'" },
+        { "case_28", "SELECT Id FROM Orders WHERE concat(Status, Region) = 'x'" },
+        { "case_29", "SELECT Id FROM Orders WHERE year(Status) = 2020" },
+        { "case_30", "SELECT Id FROM Orders WHERE Id / 0.5 > 3" },
+        { "case_31", "SELECT sum(Amount) FROM Orders" },
+        { "case_32", "SELECT Id + 1 FROM Orders" },
+        { "case_33", "SELECT sqrt(Id), Id / Amount FROM Orders WHERE Id > 3" },
+        { "case_34", "SELECT Id FROM (SELECT Status AS s, Id FROM Orders) AS d WHERE d.s = 5" },
+        { "case_35", "SELECT Id FROM Orders WHERE Id = Status" },
+        { "case_36", "SELECT Id FROM Orders WHERE Id BETWEEN Amount AND Status" },
     };
 
     public static TheoryData<string, string> Allowed() => new()
@@ -74,13 +86,14 @@ public class RowPolicyExpressionAllowlistTests
         { "case_06", "SELECT Id FROM Orders WHERE coalesce(Status, 'x') = 'x' AND nullif(Region, 'EU') IS NULL" },
         { "case_07", "SELECT Id FROM Orders WHERE CASE WHEN Id > 3 THEN 1 ELSE 0 END = 1" },
         { "case_08", "SELECT Id FROM Orders WHERE lower(Status) = 'a' AND upper(Region) = 'B' AND length(Email) > 3" },
-        { "case_09", "SELECT Id FROM Orders WHERE substring(Status, 1, 2) = 'ab' AND concat(Status, Region) = 'x'" },
+        { "case_09", "SELECT Id FROM Orders WHERE substring(Status, 1, 2) = 'ab'" },
         { "case_10", "SELECT count(*), min(Id), max(Id) FROM Orders" },
         { "case_11", "SELECT Id FROM Orders WHERE Id / 2 = 1 AND Id % 3 = 0" },
         { "case_12", "SELECT Id FROM Orders WHERE trim(Status) = 'a'" },
         { "case_13", "SELECT Id FROM Orders WHERE TRY_CAST(Status AS INTEGER) = 1" },
         { "case_14", "SELECT Id FROM Orders WHERE Amount > 1.5" },
-        { "case_15", "SELECT sqrt(Id), Id / Amount, Id + 1 FROM Orders WHERE Id > 3" },
+        { "case_15", "WITH c AS (SELECT Id AS k, Status AS t FROM Orders) SELECT k FROM c WHERE k > 3 AND t = 'open'" },
+        { "case_16", "SELECT Id, Status, count(*) FROM Orders WHERE Id > 3 GROUP BY Id, Status" },
     };
 
     [Theory]
@@ -117,5 +130,19 @@ public class RowPolicyExpressionAllowlistTests
     {
         Assert.NotNull(item);
         Assert.False(string.IsNullOrEmpty(Compile(sql).Sql));
+    }
+
+    [Fact]
+    public void Correlated_lateral_comparison_of_same_family_compiles()
+    {
+        Assert.False(string.IsNullOrEmpty(Compile(
+            "SELECT o.Id FROM Orders o CROSS JOIN LATERAL (SELECT e.Id FROM Entitlements e WHERE e.OrderId = o.Id) l", TargetSqlDialect.PostgreSql).Sql));
+    }
+
+    [Fact]
+    public void Correlated_exists_comparison_of_mixed_family_is_refused()
+    {
+        Assert.Throws<SecurityException>(() => Compile(
+            "SELECT Id FROM Orders o WHERE EXISTS (SELECT 1 FROM Entitlements e WHERE e.OrderId = o.Status)"));
     }
 }

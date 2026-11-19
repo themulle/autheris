@@ -17,6 +17,7 @@ using static TrinoSqlEngine.Tests.Compiler.PolicyFixtures;
 /// </summary>
 [Trait("Category", "SqlGate")]
 [Trait("Category", "Security")]
+[RowPolicyGuardOff]
 public sealed class AstSecurityVisitorRlsTests
 {
     public static TheoryData<TargetSqlDialect> Dialects => new()

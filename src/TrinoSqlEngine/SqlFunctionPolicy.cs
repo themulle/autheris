@@ -77,7 +77,7 @@ public static class SqlFunctionPolicy
 
     /// <summary>
     /// Function names (lower case, unqualified) that user expressions may use while a row policy or tenant predicate applies: none of them
-    /// can raise a data-dependent error or run for a data-dependent time on any supported dialect (GHSA-66xj-4459-x8gx). Everything else is
+    /// can raise a data-dependent error or run for a data-dependent time on any supported dialect. Everything else is
     /// refused by <c>RowPolicyErrorGuard</c>; arguments are judged separately.
     /// </summary>
     public static readonly IReadOnlySet<string> RowPolicySafeFunctions = new[]

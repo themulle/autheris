@@ -21,6 +21,7 @@ namespace TrinoSqlEngine.Tests.Compiler;
 /// </summary>
 [Trait("Category", "SqlGate")]
 [Trait("Category", "Security")]
+[RowPolicyGuardOff]
 public class MaskGuardSkipSecurityTests
 {
     // ---- configuration under test: the caller-supplied set and the typed provider can disagree ----
