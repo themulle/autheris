@@ -506,6 +506,7 @@ internal static class CatalogBatchUpsertHelper
         upsertCmd.AddBound("@minGroupSize", (object?)metadata.Table.MinGroupSize ?? DBNull.Value);
         upsertCmd.AddBound("@nonPersonal", metadata.Table.NonPersonal);
         upsertCmd.AddBound("@dbtUniqueId", (object?)metadata.Table.DbtUniqueId ?? DBNull.Value);
+        upsertCmd.AddBound("@objectKind", metadata.Table.ObjectKind == DiscoveryObjectKind.View ? "view" : "table");
         await upsertCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
