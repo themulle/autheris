@@ -18,6 +18,9 @@ internal sealed partial class SqlMigrationStep
     internal const string ResourcePrefix = "governance-step.";
     private const string BatchMarker = "-- batch";
 
+    /// <summary><see cref="Exception.Data"/> key that carries the 1-based number of the batch that failed.</summary>
+    internal const string FailedBatchDataKey = "autheris.migration.failed-batch";
+
     private SqlMigrationStep(
         string engine, int version, string name, string sql, string checksum, string? guardSql, string? phase3Marker,
         IReadOnlyList<string> batches, GovernanceSchemaShapeDelta shapeDelta)
@@ -205,12 +208,21 @@ internal sealed partial class SqlMigrationStep
             }
         }
 
-        foreach (var batch in Batches)
+        for (var index = 0; index < Batches.Count; index++)
         {
             await using var cmd = ctx.Connection.CreateCommand();
             cmd.Transaction = ctx.Transaction;
-            cmd.CommandText = batch;
-            await cmd.ExecuteNonQueryAsync(ctx.CancellationToken).ConfigureAwait(false);
+            cmd.CommandText = Batches[index];
+            try
+            {
+                await cmd.ExecuteNonQueryAsync(ctx.CancellationToken).ConfigureAwait(false);
+            }
+            catch (System.Data.Common.DbException ex)
+            {
+                // Position only (never SQL text): the failure report names the batch so an intermittent driver error is attributable.
+                ex.Data[FailedBatchDataKey] = index + 1;
+                throw;
+            }
         }
     }
 

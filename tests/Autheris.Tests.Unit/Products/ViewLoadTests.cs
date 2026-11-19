@@ -104,6 +104,14 @@ internal sealed class ScriptedRunner : IProductQueryRunner
     }
 }
 
+/// <summary>Base object check whose answer a test flips after the first load.</summary>
+internal sealed class SwitchableBaseObjects : IProductBaseObjectCheck
+{
+    public bool Active { get; set; } = true;
+
+    public Task<bool> AllActiveAsync(IReadOnlyList<TableIdentifier> baseObjects, CancellationToken ct = default) => Task.FromResult(Active);
+}
+
 [Trait("Category", "Security")]
 public sealed class ViewLoadTests
 {
@@ -325,5 +333,22 @@ public sealed class ViewLoadTests
 
         (await Should.ThrowAsync<ProductLoadException>(() => Service().LoadAsync(product))).Code.ShouldBe(ProductErrorCodes.Unavailable);
         _runner.Calls.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task CachedResult_BaseObjectDeactivated_IsNotServed()
+    {
+        var product = await CreateAsync(new LoadSettings(LoadMode.Schedule, Interval: TimeSpan.FromHours(1)));
+        var baseObjects = new SwitchableBaseObjects();
+        var service = new ProductLoadService(_h.Store, _runner, _store, _catalog, _cluster, _h.Audit, _time, baseObjects: baseObjects);
+        await service.LoadAsync(product);
+        var current = (await _h.Store.GetProductAsync(product.Tenant, "sales", "orders_view"))!;
+        (await service.GetResultAsync(current)).Stale.ShouldBeFalse("a fresh result of active base objects is served");
+
+        baseObjects.Active = false;
+        var ex = await Should.ThrowAsync<ProductLoadException>(() => service.GetResultAsync(current));
+
+        ex.Code.ShouldBe(ProductErrorCodes.BaseObjectInactive);
+        (await _h.Store.GetProductAsync(product.Tenant, "sales", "orders_view"))!.Status.ShouldBe(DataProductStatus.Invalid);
     }
 }

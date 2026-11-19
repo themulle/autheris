@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # PLAN-OPS-150 WP-A: manual cold-path measurement. NOT part of CI or publish output (SEC-OPS150-14).
 #
-# Starts the Release build of Autheris.Api on 127.0.0.1 (Development, test auth, anonymous dev access, SQLite governance db,
+# Starts the Release build of Autheris.Api on 127.0.0.1 (Development, test auth, anonymous dev access, PostgreSQL governance db,
 # no credentials), then for each restart:
 #   1. measures process start -> first /health/ready 200 (50 ms polling),
 #   2. waits SETTLE_SECONDS, then sends the first request and WARM_REQUESTS warm requests per probe (curl -w time_total):
@@ -24,6 +24,17 @@ OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
 BASE="http://127.0.0.1:$PORT"
 DATASET="${DATASET:-billing.dbo.billing_table_1}"
 
+# The governance store is PostgreSQL only. AUTHERIS_BENCH_GOVERNANCE_CONNECTION is an Npgsql connection string of an empty database
+# (the same variable the BenchmarkDotNet gateway benchmark reads). With AUTHERIS_BENCH_GOVERNANCE_ADMIN_URI (a libpq URI that can
+# drop and create databases) and AUTHERIS_BENCH_GOVERNANCE_DB the database is recreated before every restart, so each start is a true cold start.
+GOVERNANCE_CONNECTION="${AUTHERIS_BENCH_GOVERNANCE_CONNECTION:?set AUTHERIS_BENCH_GOVERNANCE_CONNECTION to the Npgsql connection string of an empty PostgreSQL governance database}"
+reset_governance_db() {
+  if [ -n "${AUTHERIS_BENCH_GOVERNANCE_ADMIN_URI:-}" ] && [ -n "${AUTHERIS_BENCH_GOVERNANCE_DB:-}" ]; then
+    psql "$AUTHERIS_BENCH_GOVERNANCE_ADMIN_URI" -v ON_ERROR_STOP=1 -q \
+      -c "DROP DATABASE IF EXISTS \"$AUTHERIS_BENCH_GOVERNANCE_DB\" WITH (FORCE)" -c "CREATE DATABASE \"$AUTHERIS_BENCH_GOVERNANCE_DB\""
+  fi
+}
+
 mkdir -p "$OUT_DIR"
 : > "$OUT_DIR/cold-start.csv"
 echo "restart,probe,kind,index,ms" > "$OUT_DIR/cold-start.csv"
@@ -43,13 +54,13 @@ probe_curl() {
 ORDERS=("gql describe_dataset describe_my_access" "describe_dataset describe_my_access gql" "describe_my_access gql describe_dataset")
 
 for ((r = 1; r <= RESTARTS; r++)); do
-  rm -f "$OUT_DIR/gov-$r.db"*
+  reset_governance_db
   (
     cd "$API_DIR"
     export ASPNETCORE_ENVIRONMENT=Development ASPNETCORE_URLS="$BASE"
     export Gateway__Authentication__EnableTestAuthHandler=true Gateway__Insecure__danger_bypass_mcp_auth=true
     export Gateway__Insecure__danger_allow_anonymous_access=true Gateway__Mcp__Enabled=true Gateway__Mcp__EndpointPath=/mcp
-    export Gateway__GovernanceDb__Provider=Sqlite "Gateway__GovernanceDb__ConnectionString=Data Source=$OUT_DIR/gov-$r.db"
+    export Gateway__GovernanceDb__Provider=PostgreSql "Gateway__GovernanceDb__ConnectionString=$GOVERNANCE_CONNECTION"
     export Gateway__Startup__ColdPathTiming__Enabled="$COLDPATH_TIMING"
     exec dotnet Autheris.Api.dll > "$OUT_DIR/api-$r.log" 2>&1
   ) &
