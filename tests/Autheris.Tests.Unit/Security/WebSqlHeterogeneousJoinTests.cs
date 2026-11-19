@@ -583,6 +583,6 @@ public sealed class WebSqlHeterogeneousJoinTests
 
         // Act & Assert (INV-13)
         await Should.ThrowAsync<OperationCanceledException>(async () =>
-            await federatedService.ExecuteQueryBufferedAsync(request, CreateUser(), new TenantId(Tenant), cts.Token));
+            await federatedService.ExecuteQueryBufferedAsync(request, CreateUser(), new TenantId(Tenant), cts.Token).WaitAsync(TimeSpan.FromSeconds(30)));
     }
 }

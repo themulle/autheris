@@ -108,7 +108,7 @@ public sealed class TableCacheCatalogTests
             }));
         }
 
-        SpinWait.SpinUntil(() => Volatile.Read(ref reads) >= 5000, TimeSpan.FromSeconds(30)).ShouldBeTrue(); // scenario: stress window ends after a fixed amount of concurrent reads
+        await Autheris.Tests.Common.WaitHelper.WaitUntil(() => Volatile.Read(ref reads) >= 5000, TimeSpan.FromSeconds(30)); // scenario: stress window ends after a fixed amount of concurrent reads
         done = true;
 
         await Task.WhenAll(writeTasks);

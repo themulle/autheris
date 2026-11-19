@@ -185,6 +185,7 @@ public sealed class BackgroundServiceLockTests
         var expiryStore = Substitute.For<IGrantExpiryStore>();
         var workflowRouter = Substitute.For<IConsentWorkflowRouter>();
 
+        var time = new FakeTimeProvider();
         var clusterState = Substitute.For<IDistributedClusterStateProvider>();
         clusterState.TryAcquireLockAsync(Arg.Is<string>(s => s.Contains("grant-expiry:scan")), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<IAsyncDisposable?>((IAsyncDisposable?)null));
@@ -194,18 +195,19 @@ public sealed class BackgroundServiceLockTests
             workflowRouter,
             NullLogger<GrantExpiryHostedService>.Instance,
             clusterState,
-            TimeProvider.System,
+            time,
             TimeSpan.FromMilliseconds(50));
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(150));
-
-        // Act
+        // Act: advance the fake clock past several intervals
         try
         {
-            await service.StartAsync(cts.Token);
-            await Autheris.Tests.Common.Hang.UntilCancelledAsync(cts.Token);
+            await service.StartAsync(CancellationToken.None);
+            for (var i = 0; i < 4; i++)
+            {
+                time.Advance(TimeSpan.FromMilliseconds(50));
+                await Task.Yield();
+            }
         }
-        catch (OperationCanceledException) { }
         finally
         {
             await service.StopAsync(CancellationToken.None);

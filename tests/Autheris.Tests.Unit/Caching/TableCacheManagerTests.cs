@@ -80,12 +80,17 @@ public sealed class TableCacheManagerTests
 
         // Act: 100 concurrent requests for an un-cached / expired table
         var tasks = new List<Task<TableCacheEntryMetadata?>>();
+        var started = 0;
         for (int i = 0; i < 100; i++)
         {
-            tasks.Add(Task.Run(async () => await manager.GetOrLoadAsync(table)));
+            tasks.Add(Task.Run(async () =>
+            {
+                Interlocked.Increment(ref started);
+                return await manager.GetOrLoadAsync(table);
+            }));
         }
 
-        SpinWait.SpinUntil(() => Volatile.Read(ref upstreamCallCount) > 0, TimeSpan.FromSeconds(10)).ShouldBeTrue();
+        await Autheris.Tests.Common.WaitHelper.WaitUntil(() => Volatile.Read(ref started) == 100 && Volatile.Read(ref upstreamCallCount) > 0, TimeSpan.FromSeconds(30));
         loadGate.TrySetResult();
         var results = await Task.WhenAll(tasks);
 
