@@ -133,7 +133,8 @@ public static partial class GatewayServiceCollectionExtensions
     public static IServiceCollection AddGatewayAuth(
         this IServiceCollection services,
         GatewayOptions gatewayOptions,
-        IHostEnvironment environment)
+        IHostEnvironment environment,
+        IConfiguration? configuration = null)
     {
         services.AddSingleton<ITrustedProxyValidator, TrustedProxyValidator>();
         services.AddSingleton<IIdentityPipeline, IdentityPipeline>();
@@ -149,7 +150,7 @@ public static partial class GatewayServiceCollectionExtensions
         ConfigureForwardAuth(authBuilder, services);
         ConfigureNegotiateAndDevAuth(authBuilder, gatewayOptions, environment, out var isDevAuthAllowed);
         ConfigureJwtBearerAndMcpAuth(authBuilder, gatewayOptions, environment);
-        var genericOidc = ConfigureGenericOidcRealmSchemes(authBuilder, services, environment);
+        var genericOidc = ConfigureGenericOidcRealmSchemes(authBuilder, services, environment, configuration);
         ConfigureDefaultPolicyScheme(authBuilder, gatewayOptions, isBasicSessionAllowed, basicSessionCookieName, isDevAuthAllowed, genericOidc);
         ConfigureAuthorizationAndErrorHandling(services, gatewayOptions, environment);
 
@@ -259,13 +260,13 @@ public static partial class GatewayServiceCollectionExtensions
 
     // One JwtBearer scheme per GenericOidc realm that lists issuers: issuers, audiences and signing keys (metadata or a static JWKS file)
     // come from the realm only. A token whose issuer no realm lists never selects such a scheme and is rejected by issuer validation.
-    private static GenericOidcSchemeMap ConfigureGenericOidcRealmSchemes(AuthenticationBuilder authBuilder, IServiceCollection services, IHostEnvironment environment)
+    private static GenericOidcSchemeMap ConfigureGenericOidcRealmSchemes(AuthenticationBuilder authBuilder, IServiceCollection services, IHostEnvironment environment, IConfiguration? configuration)
     {
         var map = new GenericOidcSchemeMap();
         services.AddSingleton(map);
         // Startup fails when a realm that needs a scheme has none (for example when the registration-time configuration was not available).
         services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Autheris.Domain.Options.Security.IdentityRealmsOptions>, GenericOidcSchemeCoverageValidator>();
-        var realms = (services.FirstOrDefault(d => d.ServiceType == typeof(IConfiguration))?.ImplementationInstance as IConfiguration)
+        var realms = (configuration ?? services.FirstOrDefault(d => d.ServiceType == typeof(IConfiguration))?.ImplementationInstance as IConfiguration)
             ?.GetSection(Autheris.Domain.Options.Security.IdentityRealmsOptions.SectionName)
             .Get<Autheris.Domain.Options.Security.IdentityRealmsOptions>()?.Realms;
         if (realms is null)
