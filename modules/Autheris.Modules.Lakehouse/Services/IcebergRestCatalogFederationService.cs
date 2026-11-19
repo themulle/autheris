@@ -119,7 +119,45 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
             _options.Value.Catalog.SharedTables,
             ct).ConfigureAwait(false);
 
-        return visible;
+        return await FilterByTransportAsync(visible, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Hides tables of data sources whose transport policy denies this ingress (same gate as load-table); Iceberg is served as the REST transport.</summary>
+    private async ValueTask<IReadOnlyList<TableMetadata>> FilterByTransportAsync(IReadOnlyList<TableMetadata> tables, CancellationToken ct)
+    {
+        if (tables.Count == 0)
+        {
+            return tables;
+        }
+
+        var verdicts = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        var allowed = new List<TableMetadata>(tables.Count);
+        foreach (var table in tables)
+        {
+            var source = Autheris.Application.Sql.Services.DataSourceAllowlistGuard.LogicalDataSource(table);
+            var key = source ?? string.Empty;
+            if (!verdicts.TryGetValue(key, out var ok))
+            {
+                try
+                {
+                    await _transportGate.EnsureCatalogSourceAsync(source, ct).ConfigureAwait(false);
+                    ok = true;
+                }
+                catch (Autheris.Domain.Exceptions.TransportNotAllowedException)
+                {
+                    ok = false;
+                }
+
+                verdicts[key] = ok;
+            }
+
+            if (ok)
+            {
+                allowed.Add(table);
+            }
+        }
+
+        return allowed;
     }
 
     public ValueTask<IcebergLoadTableResponse> LoadTableAsync(

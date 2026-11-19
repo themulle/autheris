@@ -64,6 +64,9 @@ public static class SltRowFilterProbes
                     break;
                 case SltEngineRejected:
                     break;
+                case SltEngineCrashed crashed:
+                    violations.Add($"crash: {probe.Sql} ({crashed.Stage}/{crashed.ExceptionType}: {crashed.Message})");
+                    break;
                 default:
                     violations.Add($"crash or hang: {probe.Sql}");
                     break;

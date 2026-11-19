@@ -1,3 +1,4 @@
+#pragma warning disable CA2012 // NSubstitute .Returns(...) configures a ValueTask member; the instance is not consumed here.
 namespace Autheris.Tests.Unit.Cache;
 
 using System;
@@ -54,7 +55,7 @@ public sealed class EpochRevokeRedisFailureTests
         bus.Subscribe(Arg.Any<string>(), Arg.Any<Func<string, Task>>()).Returns(ci =>
         {
             harness!.InvalidationHandler = ci.ArgAt<Func<string, Task>>(1);
-            return Substitute.For<IDisposable>();
+            return new NoopDisposable();
         });
 
         harness = new Harness
@@ -239,5 +240,12 @@ public sealed class EpochRevokeRedisFailureTests
         var authEpochs = await h.Service.TryGetAuthoritativeEpochsAsync([A]);
         authEpochs.ShouldNotBeNull();
         authEpochs[A].ShouldBe(5);
+    }
+
+    private sealed class NoopDisposable : IDisposable
+    {
+        public void Dispose()
+        {
+        }
     }
 }

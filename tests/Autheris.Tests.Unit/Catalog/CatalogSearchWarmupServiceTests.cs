@@ -1,3 +1,4 @@
+#pragma warning disable CA2012 // NSubstitute .Returns(...) configures a ValueTask member; the instance is not consumed here.
 namespace Autheris.Tests.Unit.Catalog;
 
 using System;
@@ -74,7 +75,7 @@ public sealed class CatalogSearchWarmupServiceTests
         Func<object, Task>? eventHandler = null;
         var eventBus = Substitute.For<IEventBus>();
         eventBus.Subscribe<object>(ICatalogVersionProvider.CatalogChangedEventChannel, Arg.Do<Func<object, Task>>(h => eventHandler = h))
-            .Returns(Substitute.For<IDisposable>());
+            .Returns(new NoopDisposable());
 
         var options = Options.Create(new CatalogSearchOptions
         {
@@ -571,5 +572,12 @@ public sealed class CatalogSearchWarmupServiceTests
         public IReadOnlyList<CatalogSearchHit> Search(CatalogSearchQuery query, Func<TableIdentifier, bool> isVisiblePredicate, Func<TableIdentifier, bool>? isColumnRestricted = null) => [];
         public Task<IReadOnlyList<CatalogSearchHit>> SearchAsync(CatalogSearchQuery query, Func<TableIdentifier, bool> isVisiblePredicate, Func<TableIdentifier, bool>? isColumnRestricted = null, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<CatalogSearchHit>>([]);
+    }
+
+    private sealed class NoopDisposable : IDisposable
+    {
+        public void Dispose()
+        {
+        }
     }
 }
