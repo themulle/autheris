@@ -35,10 +35,11 @@ public sealed class TrinoJdbcInteropTests : IClassFixture<TrinoInteropGatewayFix
                             int n = 0;
                             String first = null;
                             while (rs.next()) {
-                                if (n == 0) {
+                                if (n == 0 || n < 5) {
                                     StringBuilder row = new StringBuilder();
                                     for (int i = 1; i <= md.getColumnCount(); i++) { row.append(i > 1 ? "|" : "").append(rs.getString(i)); }
-                                    first = row.toString();
+                                    if (n == 0) { first = row.toString(); }
+                                    System.out.println("ROW " + row);
                                 }
                                 n++;
                             }
@@ -55,7 +56,7 @@ public sealed class TrinoJdbcInteropTests : IClassFixture<TrinoInteropGatewayFix
                         DatabaseMetaData md = c.getMetaData();
                         try (ResultSet rs = md.getCatalogs()) { while (rs.next()) { System.out.println("CATALOG " + rs.getString(1)); } }
                         try (ResultSet rs = md.getSchemas("default", null)) { while (rs.next()) { System.out.println("SCHEMA " + rs.getString(1)); } }
-                        try (ResultSet rs = md.getTables("default", "main", null, null)) { while (rs.next()) { System.out.println("TABLE " + rs.getString("TABLE_NAME")); } }
+                        try (ResultSet rs = md.getTables("default", "main", null, null)) { while (rs.next()) { String r = rs.getString("REMARKS"); System.out.println("TABLE " + rs.getString("TABLE_NAME") + (r != null && r.contains("not accessible") ? " access: not accessible" : "")); } }
                         try (ResultSet rs = md.getColumns("default", "main", "big_t", null)) { while (rs.next()) { System.out.println("COLUMN " + rs.getString("COLUMN_NAME")); } }
                     }
                 } catch (SQLException e) {
@@ -107,9 +108,10 @@ public sealed class TrinoJdbcInteropTests : IClassFixture<TrinoInteropGatewayFix
     {
         var lines = await RunAsync(TrinoInteropGatewayFixture.ReaderToken, "select", "SELECT id, secret FROM default.main.big_t WHERE id <= 3 ORDER BY id");
 
-        var first = lines.Single(l => l.StartsWith("FIRST ", System.StringComparison.Ordinal));
-        first.ShouldStartWith("FIRST 1|");
-        first.ShouldNotContain("secret-1");
+        var secrets = lines.Where(l => l.StartsWith("ROW ", System.StringComparison.Ordinal)).Select(l => l.Split('|')[1]).ToList();
+        secrets.Count.ShouldBe(3);
+        secrets.ShouldAllBe(v => !v.Contains("secret-", System.StringComparison.Ordinal));
+        secrets.Distinct().Count().ShouldBe(1, "every masked value is the mask output");
     }
 
     [Fact]
@@ -141,6 +143,14 @@ public sealed class TrinoJdbcInteropTests : IClassFixture<TrinoInteropGatewayFix
         lines.ShouldContain("TABLE big_t");
         lines.ShouldContain("COLUMN id");
         lines.ShouldContain("COLUMN secret");
+        AssertVaultNotReadable(lines);
+    }
+
+    private static void AssertVaultNotReadable(IReadOnlyList<string> lines)
+    {
+        // An unreadable table is either not listed or carries no readable access status.
+        lines.Where(l => l.StartsWith("TABLE vault_t", System.StringComparison.Ordinal))
+            .ShouldAllBe(l => l.Contains("access: not accessible", System.StringComparison.Ordinal));
     }
 
     [Fact]
@@ -151,5 +161,13 @@ public sealed class TrinoJdbcInteropTests : IClassFixture<TrinoInteropGatewayFix
 
         var cancel = await RunAsync(TrinoInteropGatewayFixture.ReadOnlyToken, "cancel", "SELECT id, label FROM default.main.big_t");
         cancel.ShouldContain("CANCELED", string.Join('\n', cancel));
+
+        // The JDBC client ignores the cancel response, so the server side record is the proof.
+        var requests = _fixture.Requests.Entries.Where(e => e.Alias == TrinoInteropGatewayFixture.ReadOnlyToken).ToList();
+        requests.ShouldContain(e => e.Method == "POST" && e.Path == "/v1/statement" && e.Status >= 200 && e.Status < 300);
+        requests.ShouldContain(
+            e => e.Method == "DELETE" && e.Path.StartsWith("/v1/statement/", System.StringComparison.Ordinal) && e.Status >= 200 && e.Status < 300,
+            string.Join('\n', requests));
+        _fixture.Requests.ReadOnlyMarks.ShouldBeGreaterThan(0, "the read-only marker must have been applied to the principal");
     }
 }

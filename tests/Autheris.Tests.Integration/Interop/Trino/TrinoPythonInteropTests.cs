@@ -105,8 +105,7 @@ public sealed class TrinoPythonInteropTests : IClassFixture<TrinoInteropGatewayF
         var lines = await RunAsync("error", "SELECT id FROM " + TrinoInteropGatewayFixture.DeniedTable);
 
         var error = lines.Single(l => l.StartsWith("USERERROR ", System.StringComparison.Ordinal));
-        error.ShouldContain("USER_ERROR");
-        error.ShouldContain("4");
+        error.ShouldBe("USERERROR 4 PERMISSION_DENIED USER_ERROR");
         string.Join('\n', lines).ShouldNotContain("vault_t");
     }
 }

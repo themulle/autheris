@@ -1,9 +1,11 @@
 namespace Autheris.Tests.Integration.Interop.Trino;
 
 using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Threading;
 using System.Linq;
 using System.Net;
-using System.Net.Sockets;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
@@ -16,6 +18,8 @@ using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
@@ -43,9 +47,12 @@ public sealed class TrinoInteropGatewayFixture : RowFilterChannelParityTests.Fix
     private X509Certificate2? _certificate;
     private int _port;
 
-    public int Port => _port;
+    /// <summary>The loopback port Kestrel bound (listening on port 0; valid after initialization).</summary>
+    public int Port => _port != 0 ? _port : _port = new Uri(
+        Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.First(a => a.StartsWith("https://", StringComparison.Ordinal))).Port;
 
-    public string BaseUrl => $"https://127.0.0.1:{_port}";
+    /// <summary>Every request that carried an interop alias, with its final status (the clients ignore cancel responses).</summary>
+    public InteropRequestLog Requests => Services.GetRequiredService<InteropRequestLog>();
 
     protected override void SeedExtraData(NpgsqlConnection connection)
     {
@@ -89,28 +96,26 @@ public sealed class TrinoInteropGatewayFixture : RowFilterChannelParityTests.Fix
         builder.ConfigureTestServices(services =>
         {
             services.AddHttpContextAccessor();
+            services.AddSingleton<InteropRequestLog>();
             services.AddTransient<IStartupFilter, BearerAliasBridgeStartupFilter>();
             var existing = services.Last(d => d.ServiceType == typeof(IClaimsTransformation));
             services.Remove(existing);
             services.AddTransient<IClaimsTransformation>(sp => new ReadOnlyMarkingTransformation(
                 existing.ImplementationType is { } type
                     ? (IClaimsTransformation)ActivatorUtilities.CreateInstance(sp, type)
-                    : (IClaimsTransformation)existing.ImplementationFactory!(sp),
-                sp.GetRequiredService<IHttpContextAccessor>()));
+                    : existing.ImplementationFactory is { } factory
+                        ? (IClaimsTransformation)factory(sp)
+                        : (IClaimsTransformation)existing.ImplementationInstance!,
+                sp.GetRequiredService<IHttpContextAccessor>(),
+                sp.GetRequiredService<InteropRequestLog>()));
         });
     }
 
     protected override void ConfigureFactory(WebApplicationFactory<Program> factory)
     {
-        using var probe = new TcpListener(IPAddress.Loopback, 0);
-        probe.Start();
-        _port = ((IPEndPoint)probe.LocalEndpoint).Port;
-        probe.Stop();
-
         _certificate = CreateSelfSignedCertificate();
         var certificate = _certificate;
-        var port = _port;
-        factory.UseKestrel(k => k.Listen(IPAddress.Loopback, port, listen => listen.UseHttps(certificate)));
+        factory.UseKestrel(k => k.Listen(IPAddress.Loopback, 0, listen => listen.UseHttps(certificate)));
     }
 
     private static X509Certificate2 CreateSelfSignedCertificate()
@@ -132,8 +137,8 @@ public sealed class TrinoInteropGatewayFixture : RowFilterChannelParityTests.Fix
             app.Use(async (context, nextMiddleware) =>
             {
                 var authorization = context.Request.Headers.Authorization.ToString();
-                if (authorization.StartsWith("Bearer " + ReaderToken, StringComparison.Ordinal)
-                    || authorization.StartsWith("Bearer " + ReadOnlyToken, StringComparison.Ordinal))
+                var alias = authorization.StartsWith("Bearer ", StringComparison.Ordinal) ? authorization["Bearer ".Length..] : string.Empty;
+                if (alias is ReaderToken or ReadOnlyToken)
                 {
                     var headers = context.Request.Headers;
                     headers.Remove("Authorization");
@@ -141,10 +146,15 @@ public sealed class TrinoInteropGatewayFixture : RowFilterChannelParityTests.Fix
                     headers["X-Test-Roles"] = "Reader";
                     headers["X-Test-Group-Sids"] = ReadersGroupSid;
                     headers["X-Test-Tenant"] = Tenant;
-                    if (authorization.StartsWith("Bearer " + ReadOnlyToken, StringComparison.Ordinal))
+                    if (alias == ReadOnlyToken)
                     {
                         context.Items[ReadOnlyMarkingTransformation.ItemKey] = true;
                     }
+
+                    await nextMiddleware();
+                    context.RequestServices.GetRequiredService<InteropRequestLog>()
+                        .Add(alias, context.Request.Method, context.Request.Path.Value ?? string.Empty, context.Response.StatusCode);
+                    return;
                 }
 
                 await nextMiddleware();
@@ -153,7 +163,7 @@ public sealed class TrinoInteropGatewayFixture : RowFilterChannelParityTests.Fix
         };
     }
 
-    internal sealed class ReadOnlyMarkingTransformation(IClaimsTransformation inner, IHttpContextAccessor accessor) : IClaimsTransformation
+    internal sealed class ReadOnlyMarkingTransformation(IClaimsTransformation inner, IHttpContextAccessor accessor, InteropRequestLog log) : IClaimsTransformation
     {
         public const string ItemKey = "interop.readonly";
 
@@ -165,9 +175,25 @@ public sealed class TrinoInteropGatewayFixture : RowFilterChannelParityTests.Fix
                 var identity = new ClaimsIdentity();
                 TokenAccessScope.MarkReadOnly(identity);
                 result.AddIdentity(identity);
+                log.CountReadOnlyMark();
             }
 
             return result;
         }
     }
+}
+
+/// <summary>Thread-safe record of the requests the interop bridge served and how often the read-only marker was applied.</summary>
+public sealed class InteropRequestLog
+{
+    private readonly ConcurrentQueue<(string Alias, string Method, string Path, int Status)> _entries = new();
+    private int _readOnlyMarks;
+
+    public int ReadOnlyMarks => Volatile.Read(ref _readOnlyMarks);
+
+    public IReadOnlyList<(string Alias, string Method, string Path, int Status)> Entries => [.. _entries];
+
+    internal void Add(string alias, string method, string path, int status) => _entries.Enqueue((alias, method, path, status));
+
+    internal void CountReadOnlyMark() => Interlocked.Increment(ref _readOnlyMarks);
 }

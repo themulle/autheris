@@ -2,6 +2,8 @@ name: Trino interop nightly
 
 # Official Trino clients (JDBC driver and trino-python-client) against a live gateway on HTTPS loopback (tests/Autheris.Tests.Integration/Interop/Trino).
 # This file must never get a pull_request, pull_request_target, push or workflow_run trigger and must never reference secrets (SEC-TRINO-08).
+# workflow_dispatch only works once this file is on the default branch: before merge the owner runs the suite locally (Java 17+, a venv
+# with tests/Autheris.Tests.Integration/Interop/Trino/requirements-trino-interop.txt) or dispatches it once right after merge.
 # The JDBC jar is pinned by version and SHA-256, the Python packages by --require-hashes. No retries, no inputs.
 on:
   schedule:
@@ -13,7 +15,7 @@ permissions: {}
 jobs:
   trino-interop:
     name: Trino client interop (JDBC + Python)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
       contents: read
@@ -41,6 +43,11 @@ jobs:
             "https://repo1.maven.org/maven2/io/trino/trino-jdbc/${TRINO_JDBC_VERSION}/trino-jdbc-${TRINO_JDBC_VERSION}.jar"
           echo "${TRINO_JDBC_SHA256}  $RUNNER_TEMP/trino-interop/trino-jdbc.jar" | sha256sum --check --strict -
           echo "AUTHERIS_TRINO_JDBC_JAR=$RUNNER_TEMP/trino-interop/trino-jdbc.jar" >> "$GITHUB_ENV"
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.12'
 
       - name: Install the pinned Trino Python client
         run: |
@@ -72,7 +79,7 @@ jobs:
     name: Report scheduled failure
     needs: [trino-interop]
     if: failure() && github.event_name == 'schedule' && github.event.repository.fork == false
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: read

@@ -104,7 +104,7 @@ Phase 3 conditions (binding per sec plan section 11.2, row 38; each mapped to th
 - [ ] Every Trino response has an absolute `nextUri` (when not final), only Trino states, standard error codes, fixed messages.
 - [ ] A 10,000-row result is delivered in 3 pages through JDBC and python clients; cancel via `DELETE nextUri` works.
 - [ ] JDBC `DatabaseMetaData` and SQLAlchemy inspector list exactly the OD-19 visible objects (hidden objects absent) with access status from the decision point; writes over `/v1/statement` are rejected fail-closed.
-- [ ] `trino-interop-nightly.yml` exists (schedule + `workflow_dispatch`, `permissions: {}`, no secrets) and its last run on the PR branch is green before the final PR merges.
+- [ ] `trino-interop-nightly.yml` exists (schedule + `workflow_dispatch`, `permissions: {}`, no secrets) and the interop suite passed once, run locally by the owner before merge or dispatched right after merge.
 - [ ] All [Security] tests listed in section 6 exist and pass; `WebSqlTrinoProtocolTests.cs` is deleted, its cases covered by the new classes.
 - [ ] Release build with `-warnaserror` and Unit + Architecture suites green.
 
@@ -133,7 +133,7 @@ Src about +900 / -330 (net about +570); tests about +1,400 / -370. 5 person-days
 5. No new switch to disable the protocol: `WebSql:Enabled=false` still disables it (`DataSourceTransportConfigurationReporter.cs:76`), and operators restrict it per source with `AllowedTransports` (omit `Trino`).
 6. Transport-denial errors keep `errorName = TransportNotAllowedException.Code` (REQ-ATR-04 contract) but use the standard code 4 (PERMISSION_DENIED); the former code 3 collides with USER_CANCELED.
 7. Paging uses a fixed 4,096-row page and the existing row limit bounds memory; no new option.
-8. Interop runs nightly and on `workflow_dispatch`, not on every PR (container cost); PR 5 requires one green dispatch run on its branch before merge.
+8. Interop runs nightly and on `workflow_dispatch`, not on every PR (container cost); `workflow_dispatch` only works once the workflow file is on the default branch, so before merge the owner runs the interop suite locally (Java 17+, a venv with the pinned requirements) or dispatches it once right after merge; a failing nightly is filed as an issue by the `report-failure` job.
 
 ## Changelog
 - 2026-11-18 (PR 4): `WHERE` additionally accepts `col IN ('lit', ...)` (at most 64 values) because the Trino JDBC driver emits it for `TABLE_TYPE`. Table access status is exposed in `system.jdbc.tables.REMARKS` as `access: granted` or `access: not accessible`; table descriptions are not exposed there. `ORDER BY` is limited to projected columns. Any metadata relation reference outside the handler grammar (including quoted or commented spellings) is `NotSupported`. The WebSQL row limit is applied to metadata results.

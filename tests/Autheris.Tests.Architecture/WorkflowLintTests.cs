@@ -55,6 +55,56 @@ public sealed partial class WorkflowLintTests
             violations.Add("top-level permissions must be {}");
         }
 
+        foreach (Match inline in Regex.Matches(code, @"(?m)^[ \t]+permissions:[ \t]*(?<value>\S.*)$"))
+        {
+            violations.Add($"job-level permissions must use the block form, found inline value: {inline.Groups["value"].Value.Trim()}");
+        }
+
+        foreach (Match flow in Regex.Matches(code, @"\{[^}\n]*\bwrite\b[^}\n]*\}"))
+        {
+            violations.Add($"flow map with a write permission: {flow.Value}");
+        }
+
+        if (Regex.IsMatch(code, @"(?m)^[ \t]+inputs:[ \t]*$") || code.Contains("github.event.inputs", StringComparison.Ordinal))
+        {
+            violations.Add("workflow_dispatch must not take inputs");
+        }
+
+        var steps = Regex.Split(code, @"(?m)^[ \t]+- name:").Skip(1).ToList();
+        foreach (var step in steps)
+        {
+            var lines = step.Split('\n');
+            var runIndex = Array.FindIndex(lines, l => Regex.IsMatch(l, @"^[ \t]+run:"));
+            if (runIndex < 0)
+            {
+                continue;
+            }
+
+            var indent = lines[runIndex].Length - lines[runIndex].TrimStart().Length;
+            var runLines = new List<string> { lines[runIndex] };
+            runLines.AddRange(lines.Skip(runIndex + 1).TakeWhile(l => l.Trim().Length == 0 || l.Length - l.TrimStart().Length > indent));
+            var runText = string.Join('\n', runLines);
+            if (runText.Contains("${{", StringComparison.Ordinal))
+            {
+                violations.Add("run blocks must not interpolate expressions: " + lines[0].Trim());
+            }
+
+            var export = runText.IndexOf("AUTHERIS_TRINO_JDBC_JAR=", StringComparison.Ordinal);
+            if (export >= 0)
+            {
+                var check = runText.IndexOf("sha256sum --check", StringComparison.Ordinal);
+                if (check < 0 || check > export)
+                {
+                    violations.Add("sha256sum --check must run before the jar is exported");
+                }
+
+                if (!runText.Contains("set -euo pipefail", StringComparison.Ordinal))
+                {
+                    violations.Add("the jar download block must use set -euo pipefail");
+                }
+            }
+        }
+
         foreach (Match write in Regex.Matches(code, @"(?m)^\s+(?<scope>[a-z-]+):\s*write\s*$"))
         {
             if (write.Groups["scope"].Value != "issues")
@@ -113,8 +163,26 @@ public sealed partial class WorkflowLintTests
         WorkflowViolations(good.Replace("--require-hashes", string.Empty, StringComparison.Ordinal)).ShouldNotBeEmpty();
         WorkflowViolations(good.Replace("sha256sum --check", "echo", StringComparison.Ordinal)).ShouldNotBeEmpty();
         WorkflowViolations(good.Replace("contents: read", "contents: write", StringComparison.Ordinal)).ShouldNotBeEmpty();
+        WorkflowViolations(good.Replace("failure() && github.event_name == 'schedule'", "github.event_name == 'pull_request'", StringComparison.Ordinal)).ShouldNotBeEmpty();
+        WorkflowViolations(good.Replace("    permissions:\n      contents: read\n    env:", "    permissions: write-all\n    env:", StringComparison.Ordinal)).ShouldNotBeEmpty();
+        WorkflowViolations(good.Replace("    permissions:\n      contents: read\n    env:", "    permissions: { contents: write }\n    env:", StringComparison.Ordinal)).ShouldNotBeEmpty();
+        WorkflowViolations(good.Replace("  workflow_dispatch:\n", "  workflow_dispatch:\n    inputs:\n      x:\n        type: string\n", StringComparison.Ordinal)).ShouldNotBeEmpty();
+        WorkflowViolations(good.Replace("run: dotnet restore tests/Autheris.Tests.Integration --locked-mode", "run: echo ${{ github.head_ref }}", StringComparison.Ordinal)).ShouldNotBeEmpty();
+        WorkflowViolations(good.Replace("          set -euo pipefail\n          mkdir -p", "          mkdir -p", StringComparison.Ordinal)).ShouldNotBeEmpty();
+        WorkflowViolations(SwapJarCheckAndExport(good)).ShouldNotBeEmpty();
+        WorkflowViolations("on:\n  schedule:\n    - cron: '0 3 * * *'\n  workflow_dispatch:\npermissions: {}\n").ShouldContain("no actions found: the scanner fails closed");
+        WorkflowViolations(good.Replace("pip install", "pip3 fetch", StringComparison.Ordinal)).ShouldContain("no pip install found: the scanner fails closed");
         RequirementViolations("trino==0.340.0\n").ShouldNotBeEmpty();
         RequirementViolations("trino>=0.340.0 --hash=sha256:" + new string('a', 64)).ShouldNotBeEmpty();
         RequirementViolations(string.Empty).ShouldNotBeEmpty();
+    }
+
+    private static string SwapJarCheckAndExport(string workflow)
+    {
+        const string check = "          echo \"${TRINO_JDBC_SHA256}  $RUNNER_TEMP/trino-interop/trino-jdbc.jar\" | sha256sum --check --strict -\n";
+        const string export = "          echo \"AUTHERIS_TRINO_JDBC_JAR=$RUNNER_TEMP/trino-interop/trino-jdbc.jar\" >> \"$GITHUB_ENV\"\n";
+        workflow.ShouldContain(check);
+        workflow.ShouldContain(export);
+        return workflow.Replace(check + export, export + check, StringComparison.Ordinal);
     }
 }
