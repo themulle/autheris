@@ -539,18 +539,36 @@ public abstract class GovernanceMigrationRunnerBase : IGovernanceMigrationRunner
     internal static string DescribeFailure(Exception failure) => failure switch
     {
         DbException db when !string.IsNullOrEmpty(db.SqlState) => "SQLSTATE " + SanitizeLabel(db.SqlState),
-        Microsoft.Data.SqlClient.SqlException sql => "error " + sql.Number.ToString(CultureInfo.InvariantCulture) + DescribeBatch(failure),
+        Microsoft.Data.SqlClient.SqlException sql => "error " + sql.Number.ToString(CultureInfo.InvariantCulture) + DescribeLine(sql) + DescribeBatch(failure),
         DbException db => "database error " + db.ErrorCode.ToString(CultureInfo.InvariantCulture),
         _ => failure.GetType().Name
     };
 
-    private static string DescribeBatch(Exception failure) =>
-        failure.Data[SqlMigrationStep.FailedBatchDataKey] is int batch ? ", batch " + batch.ToString(CultureInfo.InvariantCulture) : string.Empty;
+    private static string DescribeLine(Microsoft.Data.SqlClient.SqlException failure) =>
+        failure.LineNumber > 0 ? ", line " + failure.LineNumber.ToString(CultureInfo.InvariantCulture) : string.Empty;
+
+    /// <summary>Phase, batch number and the first characters of the failing statement; the statements are static migration or catalog text with bound parameters.</summary>
+    private static string DescribeBatch(Exception failure)
+    {
+        var text = failure.Data[SqlMigrationStep.FailedPhaseDataKey] is string phase ? ", phase " + SanitizeLabel(phase) : string.Empty;
+        if (failure.Data[SqlMigrationStep.FailedBatchDataKey] is int batch)
+        {
+            text += ", batch " + batch.ToString(CultureInfo.InvariantCulture);
+        }
+
+        if (failure.Data[SqlMigrationStep.FailedStatementDataKey] is string statement)
+        {
+            text += ", statement \"" + statement + "\"";
+        }
+
+        return text;
+    }
 
     private async Task ApplyStepAsync(
         DbConnection connection, MigrationStep step, MigrationStep[] steps, ISet<int> applied, MigrationStep[] pending, CancellationToken ct)
     {
         DbTransaction? tx = null;
+        var phase = "begin";
         if (step.Transactional && UseStepTransactions)
         {
             tx = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
@@ -560,13 +578,16 @@ public abstract class GovernanceMigrationRunnerBase : IGovernanceMigrationRunner
         {
             if (tx is not null && step.Version >= 2)
             {
+                phase = "step-bounds";
                 await BeginStepBoundsAsync(connection, tx, ct).ConfigureAwait(false);
             }
 
             Trace?.Invoke("apply:" + step.Version.ToString(CultureInfo.InvariantCulture));
+            phase = "apply";
             await step.Apply(new MigrationContext(connection, tx, _logger, ct)).ConfigureAwait(false);
 
             // The shape of this version and the audit post-conditions are checked inside the step before its history row (I388-SC-06, plan D-5 b).
+            phase = "shape-verify";
             var result = await ShapeVerifier.VerifyAsync(connection, ExpectedAt(steps, step.Version, withHistory: true), ct, tx).ConfigureAwait(false);
             LogExtraTables(result);
             if (result.Deviations.Count > 0)
@@ -574,16 +595,25 @@ public abstract class GovernanceMigrationRunnerBase : IGovernanceMigrationRunner
                 throw BuildDrift(connection, GovernanceMigrationCodes.Drift, applied, pending, result.Deviations, null);
             }
 
+            phase = "post-conditions";
             await VerifyPostConditionsAsync(connection, tx, ct).ConfigureAwait(false);
+            phase = "after-step";
             await AfterStepAsync(connection, tx, step, ct).ConfigureAwait(false);
+            phase = "history-record";
             await RecordAsync(connection, tx, step, ct).ConfigureAwait(false);
+            phase = "commit";
             if (tx is not null)
             {
                 await tx.CommitAsync(ct).ConfigureAwait(false);
             }
         }
-        catch
+        catch (Exception failure)
         {
+            if (failure is DbException && !failure.Data.Contains(SqlMigrationStep.FailedPhaseDataKey))
+            {
+                failure.Data[SqlMigrationStep.FailedPhaseDataKey] = phase;
+            }
+
             if (tx is not null)
             {
                 try
@@ -617,7 +647,15 @@ public abstract class GovernanceMigrationRunnerBase : IGovernanceMigrationRunner
         AddParameter(cmd, "@checksum", step.Checksum);
         AddParameter(cmd, "@applied_at", DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
         AddParameter(cmd, "@applied_by", Environment.MachineName + "/" + Environment.UserName);
-        await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+        catch (DbException ex)
+        {
+            SqlMigrationStep.AnnotateStatement(ex, InsertVersionSql);
+            throw;
+        }
     }
 
     private async Task<bool> HistoryTableExistsAsync(DbConnection connection, CancellationToken ct) =>
@@ -662,7 +700,15 @@ public abstract class GovernanceMigrationRunnerBase : IGovernanceMigrationRunner
             cmd.CommandTimeout = timeout;
         }
 
-        await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+        catch (DbException ex)
+        {
+            SqlMigrationStep.AnnotateStatement(ex, sql);
+            throw;
+        }
     }
 
     protected static async Task<object?> ScalarAsync(DbConnection connection, string sql, CancellationToken ct, DbTransaction? tx = null)
@@ -670,7 +716,15 @@ public abstract class GovernanceMigrationRunnerBase : IGovernanceMigrationRunner
         await using var cmd = connection.CreateCommand();
         cmd.Transaction = tx;
         cmd.CommandText = sql;
-        return await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        try
+        {
+            return await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        }
+        catch (DbException ex)
+        {
+            SqlMigrationStep.AnnotateStatement(ex, sql);
+            throw;
+        }
     }
 
     private static void AddParameter(DbCommand cmd, string name, object value)
