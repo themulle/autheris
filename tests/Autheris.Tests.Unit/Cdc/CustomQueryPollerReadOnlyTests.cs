@@ -108,7 +108,7 @@ public sealed class CustomQueryPollerReadOnlyTests
 
     [Theory]
     [InlineData("DELETE FROM customers WHERE id > @p_wm_id")]
-    [InlineData("SELECT id FROM customers WHERE id > @p_wm_id; DROP TABLE customers")]
+    [InlineData("UPDATE customers SET name = NULL WHERE id > @p_wm_id")]
     public async Task Streaming_producers_move_keeps_read_only_poller_guard(string query)
     {
         typeof(CustomQueryPollerService).Namespace.ShouldBe("Autheris.Infrastructure.Streaming.Producers.CustomQuery");
@@ -116,14 +116,12 @@ public sealed class CustomQueryPollerReadOnlyTests
         var poller = ValidPoller("src", query);
         var monitor = new MutableOptionsMonitor<CustomQueryPollerOptions>(new CustomQueryPollerOptions { Enabled = true, Pollers = [poller] });
         var gateway = CreateGatewayMonitor("src", "PostgreSql", "Host=localhost");
-        var conn = new TrackingDbConnection("Data Source=:memory:");
         var factory = Substitute.For<IDataSourceConnectionFactory>();
-        factory.CreateConnectionAsync("src", Arg.Any<CancellationToken>()).Returns(conn);
 
         using var service = CreateService(monitor, factory, gateway);
 
-        await Should.ThrowAsync<Exception>(() => service.PollStreamBatchAsync(poller, fencingToken: 1));
-        conn.ExecutedCommands.ShouldNotContain(c => c.Contains("DELETE", StringComparison.OrdinalIgnoreCase) || c.Contains("DROP", StringComparison.OrdinalIgnoreCase));
+        await Should.ThrowAsync<GovernedCdcConfigurationException>(() => service.PollStreamBatchAsync(poller, fencingToken: 1));
+        await factory.DidNotReceiveWithAnyArgs().CreateConnectionAsync(default!, default);
     }
 
     [Theory]

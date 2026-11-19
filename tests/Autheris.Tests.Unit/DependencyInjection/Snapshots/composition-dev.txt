@@ -571,10 +571,10 @@
 0570 Microsoft.Extensions.Options.IConfigureOptions<Microsoft.Extensions.Http.HttpClientFactoryOptions> Singleton key=- instance:Microsoft.Extensions.Options.ConfigureNamedOptions<Microsoft.Extensions.Http.HttpClientFactoryOptions>
 0571 Microsoft.Extensions.Options.IConfigureOptions<Microsoft.Extensions.Http.HttpClientFactoryOptions> Singleton key=- instance:Microsoft.Extensions.Options.ConfigureNamedOptions<Microsoft.Extensions.Http.HttpClientFactoryOptions>
 0572 Autheris.Application.Lineage.IOpenLineageClient Scoped key=- factory:Autheris.Application.Lineage.IOpenLineageClient
-0573 Autheris.Extensions.Cdc.CdcSourceServiceCollectionExtensions.CdcSourceIntegrationMarker Singleton key=- instance:Autheris.Extensions.Cdc.CdcSourceServiceCollectionExtensions.CdcSourceIntegrationMarker
-0574 Autheris.Extensions.Cdc.ICdcTableActivator Singleton key=- type:Autheris.Extensions.Cdc.CdcTableActivator
-0575 Autheris.Extensions.Cdc.CdcChangeEventBuilder Singleton key=- type:Autheris.Extensions.Cdc.CdcChangeEventBuilder
-0576 Autheris.Application.Streaming.Interfaces.IMssqlChangeTrackingPoller Singleton key=- type:Autheris.Extensions.Cdc.MssqlChangeTrackingPoller
+0573 Autheris.Infrastructure.Streaming.Producers.CdcSourceServiceCollectionExtensions.CdcSourceIntegrationMarker Singleton key=- instance:Autheris.Infrastructure.Streaming.Producers.CdcSourceServiceCollectionExtensions.CdcSourceIntegrationMarker
+0574 Autheris.Infrastructure.Streaming.Producers.ICdcTableActivator Singleton key=- type:Autheris.Infrastructure.Streaming.Producers.CdcTableActivator
+0575 Autheris.Infrastructure.Streaming.Producers.CdcChangeEventBuilder Singleton key=- type:Autheris.Infrastructure.Streaming.Producers.CdcChangeEventBuilder
+0576 Autheris.Application.Streaming.Interfaces.IMssqlChangeTrackingPoller Singleton key=- type:Autheris.Infrastructure.Streaming.Producers.MssqlChangeTrackingPoller
 0577 Autheris.Infrastructure.Streaming.InMemoryCdcEventChannel Singleton key=- type:Autheris.Infrastructure.Streaming.InMemoryCdcEventChannel
 0578 Autheris.Application.Streaming.Interfaces.ICdcEventChannel Singleton key=- factory:Autheris.Application.Streaming.Interfaces.ICdcEventChannel
 0579 Autheris.GraphQL.Subscriptions.CdcSubscriptionGovernor Singleton key=- factory:Autheris.GraphQL.Subscriptions.CdcSubscriptionGovernor
