@@ -189,8 +189,8 @@ public sealed class SqlLoginCircuitBreakerTests
         try
         {
             string path = SqlServerWindowsAuthConfigurator.MaterializeNtlmUserFile("DOM", "svc", "pw", dir);
+            File.SetLastWriteTimeUtc(path, File.GetLastWriteTimeUtc(path).AddMinutes(-5)); // backdate so an unwanted rewrite is detectable without waiting
             var firstWrite = File.GetLastWriteTimeUtc(path);
-            Thread.Sleep(20);
 
             SqlServerWindowsAuthConfigurator.MaterializeNtlmUserFile("DOM", "svc", "pw", dir).ShouldBe(path);
 

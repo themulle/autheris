@@ -203,7 +203,7 @@ public sealed class BackgroundServiceLockTests
         try
         {
             await service.StartAsync(cts.Token);
-            await Task.Delay(80, cts.Token);
+            await Autheris.Tests.Common.Hang.UntilCancelledAsync(cts.Token);
         }
         catch (OperationCanceledException) { }
         finally

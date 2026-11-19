@@ -176,7 +176,7 @@ public sealed class CatalogSearchQueryHardeningTests
     {
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
+            await Autheris.Tests.Common.Hang.UntilCancelledAsync(cancellationToken).ConfigureAwait(false);
             return new HttpResponseMessage(System.Net.HttpStatusCode.OK);
         }
     }

@@ -102,7 +102,7 @@ public sealed class DistributedLeaseTests
         await lease.DisposeAsync();
         lease.Extend.SetResult(false); // the late answer must not signal a loss
 
-        await Task.Delay(50); // quiet period before a negative assertion: no late loss signal may arrive
+        await Task.Yield(); // let the late answer be observed before the assertion
         lease.LeaseLost.IsCancellationRequested.ShouldBeTrue(); // cancelled by dispose itself
     }
 

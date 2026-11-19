@@ -74,7 +74,7 @@ public sealed class SecurityReviewG5Tests : IDisposable
     {
         public async IAsyncEnumerable<CdcEvent> SubscribeAsync(string topic, [EnumeratorCancellation] CancellationToken ct = default)
         {
-            await Task.Delay(Timeout.Infinite, ct).ConfigureAwait(false);
+            await Autheris.Tests.Common.Hang.UntilCancelledAsync(ct).ConfigureAwait(false);
             yield break;
         }
 
@@ -136,9 +136,7 @@ public sealed class SecurityReviewG5Tests : IDisposable
             SubscriptionServices().BuildServiceProvider(), TokenPrincipal(DateTimeOffset.UtcNow.AddSeconds(2)), CancellationToken.None).GetAsyncEnumerator();
 
         var moveNext = enumerator.MoveNextAsync().AsTask();
-        var finished = await Task.WhenAny(moveNext, Task.Delay(TimeSpan.FromSeconds(10)));
-        finished.ShouldBe(moveNext);
-        (await moveNext).ShouldBeFalse();
+        (await moveNext.WaitAsync(TimeSpan.FromSeconds(10))).ShouldBeFalse();
     }
 
     [Fact]
@@ -157,9 +155,7 @@ public sealed class SecurityReviewG5Tests : IDisposable
 
         var moveNext = enumerator.MoveNextAsync().AsTask();
         Volatile.Write(ref revoked, 1);
-        var finished = await Task.WhenAny(moveNext, Task.Delay(TimeSpan.FromSeconds(10)));
-        finished.ShouldBe(moveNext);
-        (await moveNext).ShouldBeFalse();
+        (await moveNext.WaitAsync(TimeSpan.FromSeconds(10))).ShouldBeFalse();
     }
 
     // ---------------------------------------------------------------- A-4
