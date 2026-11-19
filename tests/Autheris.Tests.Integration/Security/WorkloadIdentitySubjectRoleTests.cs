@@ -64,6 +64,8 @@ public sealed class WorkloadIdentitySubjectRoleTests : IClassFixture<WorkloadIde
                 builder.UseSetting("Gateway:GovernanceDb:ConnectionString", connectionString);
                 builder.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "1000");
                 builder.UseSetting("Gateway:Authentication:Mode", "Direct");
+                builder.ConfigureServices(services => services.PostConfigure<Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerOptions>(
+                    "Bearer:realm:cluster-a", MarkReadOnlyForScope));
                 builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new System.Collections.Generic.Dictionary<string, string?>
                 {
                     ["Gateway:Tenancy:DefaultTenantId"] = TenantA,
@@ -95,6 +97,22 @@ public sealed class WorkloadIdentitySubjectRoleTests : IClassFixture<WorkloadIde
             return Task.CompletedTask;
         }
 
+        // The realm schemes mint no read-only marker themselves; the host stands in for a token policy that does (a token carrying the
+        // read-only scope), so the test proves the mapped principal is still held to it.
+        private static void MarkReadOnlyForScope(Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerOptions options)
+        {
+            options.Events ??= new Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerEvents();
+            options.Events.OnTokenValidated = ctx =>
+            {
+                if (ctx.Principal?.Identity is ClaimsIdentity identity && identity.HasClaim("scp", "App.Read"))
+                {
+                    Autheris.Domain.Security.TokenAccessScope.MarkReadOnly(identity);
+                }
+
+                return Task.CompletedTask;
+            };
+        }
+
         public Task DisposeAsync()
         {
             Factory.Dispose();
@@ -116,13 +134,15 @@ public sealed class WorkloadIdentitySubjectRoleTests : IClassFixture<WorkloadIde
         }
     }
 
-    private static string Token(RSA key, string kid, string issuer, string subject) =>
+    private static string Token(RSA key, string kid, string issuer, string subject, string? scope = null) =>
         new JsonWebTokenHandler().CreateToken(new SecurityTokenDescriptor
         {
             Issuer = issuer,
             Audience = Audience,
             Expires = DateTime.UtcNow.AddMinutes(10),
-            Claims = new System.Collections.Generic.Dictionary<string, object> { ["sub"] = subject },
+            Claims = scope is null
+                ? new System.Collections.Generic.Dictionary<string, object> { ["sub"] = subject }
+                : new System.Collections.Generic.Dictionary<string, object> { ["sub"] = subject, ["scp"] = scope },
             SigningCredentials = new SigningCredentials(new RsaSecurityKey(key) { KeyId = kid }, SecurityAlgorithms.RsaSha256)
         });
 
@@ -150,6 +170,14 @@ public sealed class WorkloadIdentitySubjectRoleTests : IClassFixture<WorkloadIde
     public async Task Dbt_Governance_WithOtherSubjectToken_Forbidden()
     {
         var status = await PostGovernanceAsync(Token(_fixture.KeyA, "kid-a", IssuerA, OtherSubject));
+
+        status.ShouldBe(HttpStatusCode.Forbidden);
+    }
+
+    [Fact]
+    public async Task MappedPrincipal_ReadOnlyScope_StillDeniedOnWrite()
+    {
+        var status = await PostGovernanceAsync(Token(_fixture.KeyA, "kid-a", IssuerA, MappedSubject, scope: "App.Read"));
 
         status.ShouldBe(HttpStatusCode.Forbidden);
     }

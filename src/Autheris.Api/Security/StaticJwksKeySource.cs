@@ -34,7 +34,7 @@ public sealed class StaticJwksKeySource
     private readonly TimeProvider _time;
     private readonly ILogger _logger;
     private readonly object _gate = new();
-    private IReadOnlyDictionary<string, JsonWebKey> _keys;
+    private volatile IReadOnlyDictionary<string, SecurityKey[]> _keys;
     private DateTimeOffset _lastReload;
     private DateTimeOffset _lastUnknownKidReload = DateTimeOffset.MinValue;
 
@@ -50,7 +50,7 @@ public sealed class StaticJwksKeySource
         _reloadInterval = reloadInterval;
         _time = time ?? throw new ArgumentNullException(nameof(time));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _keys = LoadFile(_path);
+        _keys = Index(LoadFile(_path));
         _lastReload = _time.GetUtcNow();
     }
 
@@ -71,7 +71,18 @@ public sealed class StaticJwksKeySource
             Reload(now, unknownKid: true);
         }
 
-        return !string.IsNullOrEmpty(kid) && _keys.TryGetValue(kid, out var key) ? [key] : [];
+        return !string.IsNullOrEmpty(kid) && _keys.TryGetValue(kid, out var keys) ? keys : [];
+    }
+
+    private static Dictionary<string, SecurityKey[]> Index(IReadOnlyDictionary<string, JsonWebKey> parsed)
+    {
+        var indexed = new Dictionary<string, SecurityKey[]>(parsed.Count, StringComparer.Ordinal);
+        foreach (var (kid, key) in parsed)
+        {
+            indexed[kid] = [key];
+        }
+
+        return indexed;
     }
 
     /// <summary>Parses and validates a JWKS document; throws <see cref="StaticJwksException"/> on any violation.</summary>
@@ -227,7 +238,7 @@ public sealed class StaticJwksKeySource
             }
 
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-            var buffer = new byte[MaxFileBytes + 1];
+            var buffer = new byte[(int)Math.Min(info.Length, MaxFileBytes) + 1];
             var read = 0;
             int n;
             while (read < buffer.Length && (n = stream.Read(buffer, read, buffer.Length - read)) > 0)
@@ -264,7 +275,7 @@ public sealed class StaticJwksKeySource
             _lastReload = now;
             try
             {
-                _keys = LoadFile(_path);
+                _keys = Index(LoadFile(_path));
             }
             catch (StaticJwksException)
             {

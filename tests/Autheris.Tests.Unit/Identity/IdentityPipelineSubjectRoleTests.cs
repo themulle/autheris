@@ -184,6 +184,28 @@ public sealed class IdentityPipelineSubjectRoleTests
     }
 
     [Fact]
+    public async Task MappedPrincipal_ReadOnlyScope_StillDeniedOnWrite()
+    {
+        var token = SubjectRoleMappingTests.Token();
+        TokenAccessScope.MarkReadOnly(token);
+
+        var principal = await Run(Pipeline(SubjectRoleMappingTests.Realm(), Resolver(), Audit()), token);
+
+        ClusterAdminPolicy.IsCanonicalClusterAdmin(principal).ShouldBeTrue();
+        principal.IsReadOnly().ShouldBeTrue();
+        var nextCalled = false;
+        var middleware = new Autheris.Api.Middleware.ReadOnlyTokenMiddleware(_ => { nextCalled = true; return Task.CompletedTask; }, "/graphql", "/mcp");
+        var context = new Microsoft.AspNetCore.Http.DefaultHttpContext { User = principal };
+        context.Request.Method = "POST";
+        context.Request.Path = "/api/extensions/dbt/governance";
+
+        await middleware.InvokeAsync(context);
+
+        nextCalled.ShouldBeFalse();
+        context.Response.StatusCode.ShouldBe(403);
+    }
+
+    [Fact]
     public void StartupSummary_LogsCountsOnly_NoSubjects()
     {
         var logger = new CapturingLogger();

@@ -11,6 +11,8 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Extensions;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Autheris.Api.Security;
 using Autheris.Domain.Identity;
 using Autheris.Domain.Options;
@@ -321,6 +323,64 @@ public sealed class StaticJwksKeySourceTests : IDisposable
         // The fallback scheme has no issuer for it: Entra and AD FS are disabled, so no ValidIssuers exist.
         var fallback = new JwtBearerOptions();
         fallback.TokenValidationParameters.ValidIssuers.ShouldBeNull();
+    }
+
+    private static IdentityRealmConfigOptions Realm(bool optIn) => new()
+    {
+        Kind = IdentityRealmKind.GenericOidc,
+        Issuers = [Issuer],
+        Audiences = [Audience],
+        UserKeyClaim = "sub",
+        SubjectRoles = optIn ? [new SubjectRoleMapping { Subject = "a:b", Roles = ["TenantAdmin"] }] : []
+    };
+
+    private static (GenericOidcSchemeMap Map, IdentityRealmsOptions Options) RegisterRealm(IdentityRealmConfigOptions realm, bool withConfiguration)
+    {
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        if (withConfiguration)
+        {
+            var values = new Dictionary<string, string?> { ["Authentication:Realms:Realms:wl:Kind"] = "GenericOidc", ["Authentication:Realms:Realms:wl:Issuers:0"] = Issuer };
+            if (realm.SubjectRoles.Count > 0)
+            {
+                values["Authentication:Realms:Realms:wl:SubjectRoles:0:Subject"] = "a:b";
+                values["Authentication:Realms:Realms:wl:SubjectRoles:0:Roles:0"] = "TenantAdmin";
+            }
+
+            services.AddSingleton<Microsoft.Extensions.Configuration.IConfiguration>(
+                new Microsoft.Extensions.Configuration.ConfigurationBuilder().AddInMemoryCollection(values).Build());
+        }
+
+        services.AddGatewayAuth(new GatewayOptions(), new ProductionEnvironment());
+        var map = services.BuildServiceProvider().GetRequiredService<GenericOidcSchemeMap>();
+        return (map, new IdentityRealmsOptions { Realms = new(StringComparer.OrdinalIgnoreCase) { ["wl"] = realm } });
+    }
+
+    [Fact]
+    public void GenericOidcRealm_WithoutSubjectRolesOrJwks_GetsNoRealmScheme()
+    {
+        var (map, options) = RegisterRealm(Realm(optIn: false), withConfiguration: true);
+
+        map.IsEmpty.ShouldBeTrue();
+        GatewayAuthSchemes.SelectJwtScheme(Token(NewRsa(), "k1"), new GatewayOptions(), map).ShouldBe(GatewayAuthSchemes.JwtBearer);
+        new GenericOidcSchemeCoverageValidator(map).Validate(null, options).Failed.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void GenericOidcRealm_WithSubjectRoles_GetsRealmScheme()
+    {
+        var (map, options) = RegisterRealm(Realm(optIn: true), withConfiguration: true);
+
+        map.TryGetScheme(Issuer, out var scheme).ShouldBeTrue();
+        scheme.ShouldBe(GenericOidcSchemeMap.SchemeName("wl"));
+        new GenericOidcSchemeCoverageValidator(map).Validate(null, options).Failed.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void GenericOidcRealm_WithSubjectRoles_ButNoRegistrationConfiguration_FailsStartup()
+    {
+        var (map, options) = RegisterRealm(Realm(optIn: true), withConfiguration: false);
+
+        new GenericOidcSchemeCoverageValidator(map).Validate(null, options).Failed.ShouldBeTrue();
     }
 
     private sealed class ProductionEnvironment : IHostEnvironment

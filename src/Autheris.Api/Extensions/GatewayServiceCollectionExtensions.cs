@@ -263,6 +263,8 @@ public static partial class GatewayServiceCollectionExtensions
     {
         var map = new GenericOidcSchemeMap();
         services.AddSingleton(map);
+        // Startup fails when a realm that needs a scheme has none (for example when the registration-time configuration was not available).
+        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Autheris.Domain.Options.Security.IdentityRealmsOptions>, GenericOidcSchemeCoverageValidator>();
         var realms = (services.FirstOrDefault(d => d.ServiceType == typeof(IConfiguration))?.ImplementationInstance as IConfiguration)
             ?.GetSection(Autheris.Domain.Options.Security.IdentityRealmsOptions.SectionName)
             .Get<Autheris.Domain.Options.Security.IdentityRealmsOptions>()?.Realms;
@@ -274,7 +276,9 @@ public static partial class GatewayServiceCollectionExtensions
         var any = false;
         foreach (var (realmId, realm) in realms)
         {
-            if (realm.Kind != Autheris.Domain.Identity.IdentityRealmKind.GenericOidc || realm.Issuers is not { Count: > 0 })
+            // Only realms that opt in (workload subject roles or a static JWKS) get their own scheme; every other GenericOidc realm keeps its current path.
+            if (realm.Kind != Autheris.Domain.Identity.IdentityRealmKind.GenericOidc || realm.Issuers is not { Count: > 0 }
+                || (realm.SubjectRoles is not { Count: > 0 } && realm.Jwks is null))
             {
                 continue;
             }

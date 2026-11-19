@@ -16,6 +16,8 @@ public static class GatewayAuthSchemes
     /// <summary>separate scheme for AD FS when Entra ID is enabled as well.</summary>
     public const string JwtBearerAdfs = "BearerAdfs";
 
+    private static readonly Microsoft.IdentityModel.JsonWebTokens.JsonWebTokenHandler RoutingHandler = new();
+
     /// <summary>
     /// chooses the JWT scheme for a bearer token. Only routing: the issuer is read without validation, the selected
     /// scheme validates issuer, audience and signature. Without both IdPs enabled there is a single scheme.
@@ -29,7 +31,13 @@ public static class GatewayAuthSchemes
             // whose issuer validation rejects it.
             try
             {
-                var tokenIssuer = new Microsoft.IdentityModel.JsonWebTokens.JsonWebTokenHandler().ReadJsonWebToken(token.Trim()).Issuer;
+                var trimmed = token.Trim();
+                if (!RoutingHandler.CanReadToken(trimmed))
+                {
+                    return JwtBearer;
+                }
+
+                var tokenIssuer = RoutingHandler.ReadJsonWebToken(trimmed).Issuer;
                 if (tokenIssuer != null && genericOidc.TryGetScheme(tokenIssuer, out var realmScheme))
                 {
                     return realmScheme;
