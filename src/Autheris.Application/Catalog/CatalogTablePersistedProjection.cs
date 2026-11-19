@@ -128,7 +128,14 @@ public sealed class CatalogTablePersistedProjection
         values["table.min_group_size"] = table.MinGroupSize?.ToString(CultureInfo.InvariantCulture);
         values["table.non_personal"] = Flag(table.NonPersonal);
         values["table.dbt_unique_id"] = table.DbtUniqueId;
-        values["table.object_kind"] = table.ObjectKind == DiscoveryObjectKind.View ? "view" : "table";
+        values["table.object_kind"] = table.ObjectKind switch
+        {
+            DiscoveryObjectKind.Table => "table",
+            DiscoveryObjectKind.View => "view",
+            DiscoveryObjectKind.MetricView => "metric_view",
+            DiscoveryObjectKind.Procedure => "procedure",
+            _ => throw new ArgumentOutOfRangeException(nameof(metadata), table.ObjectKind, "Unknown DiscoveryObjectKind.")
+        };
         values["table.required_filter_columns"] = table.RequiredFilterColumns.IsDefault
             ? string.Empty
             : string.Join(ListSeparator, table.RequiredFilterColumns);

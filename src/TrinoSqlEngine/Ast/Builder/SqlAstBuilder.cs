@@ -537,10 +537,14 @@ public sealed partial class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         }
 
         GroupByClause? groupBy = null;
-        if (context.groupBy() != null)
+        if (context.groupBy() is SqlBaseParser.GroupByAllContext)
         {
-            bool groupByDistinct = context.groupBy().setQuantifier()?.DISTINCT() != null;
-            var groupingElements = context.groupBy().groupingElement();
+            groupBy = new GroupByClause([], IsAll: true);
+        }
+        else if (context.groupBy() is SqlBaseParser.GroupByElementsContext groupByElements)
+        {
+            bool groupByDistinct = groupByElements.setQuantifier()?.DISTINCT() != null;
+            var groupingElements = groupByElements.groupingElement();
             var groupingExpressions = new List<Expression>();
             List<GroupingElement>? advanced = null;
             foreach (var ge in groupingElements)

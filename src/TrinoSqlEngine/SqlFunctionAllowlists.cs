@@ -137,6 +137,11 @@ public static class SqlFunctionAllowlists
             if (!SqlFunctionPolicy.IsDeniedByDefault(name)) names.Add(name);
         }
 
+        if (dialect is TargetSqlDialect.Databricks)
+        {
+            names.Add("measure");
+        }
+
         return names.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
     }
 

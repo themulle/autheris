@@ -1,0 +1,5 @@
+{
+  "ops": [
+    { "op": "addColumn", "table": "table_columns", "column": { "name": "column_role", "type": "CHARACTER VARYING(16)", "family": "string", "nullable": true } }
+  ]
+}

@@ -94,6 +94,22 @@ public abstract class TableObjectKindContractBase
 
             await governance.UpsertTableMetadataAsync(Metadata(id, DiscoveryObjectKind.Table));
             (await StoredAsync(governance)).ShouldBe(DiscoveryObjectKind.Table);
+
+            var mv = new TableMetadata
+            {
+                Table = new Table { Id = id, DisplayName = "sales_mv", TableName = "ord_896", SchemaName = "sales", SourceType = "Databricks", SourceName = "kind_896", Description = "mv", ObjectKind = DiscoveryObjectKind.MetricView },
+                Identifier = new TableIdentifier("kind_896", "sales", "ord_896"),
+                Columns =
+                [
+                    new TableColumn { ColumnName = "region", DataType = "string", Role = MetricViewColumnRole.Dimension },
+                    new TableColumn { ColumnName = "revenue", DataType = "decimal", Role = MetricViewColumnRole.Measure }
+                ]
+            };
+            await governance.UpsertTableMetadataAsync(mv);
+            var stored = (await governance.GetTableMetadataAsync(new TableIdentifier("kind_896", "sales", "ord_896")))!;
+            stored.Table.ObjectKind.ShouldBe(DiscoveryObjectKind.MetricView);
+            stored.Columns.Single(c => c.ColumnName == "region").Role.ShouldBe(MetricViewColumnRole.Dimension);
+            stored.Columns.Single(c => c.ColumnName == "revenue").Role.ShouldBe(MetricViewColumnRole.Measure);
         }
         finally
         {
@@ -117,6 +133,9 @@ public abstract class TableObjectKindContractBase
             await using var raw = OpenRaw(cs);
             var act = () => ExecAsync(raw, "INSERT INTO TABLES (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, object_kind) VALUES ('t896b', 'Test', 'kind_896', 'sales', 'bad', 'bad', 'NORMAL', 0, 1, 'procedure')");
             await Should.ThrowAsync<DbException>(act);
+
+            var badRole = () => ExecAsync(raw, "INSERT INTO TABLE_COLUMNS (id, table_id, column_name, data_type, ordinal, column_role) VALUES ('c916b', 'missing', 'x', 'varchar', 0, 'invalid_role')");
+            await Should.ThrowAsync<DbException>(badRole);
         }
         finally
         {

@@ -376,6 +376,9 @@ internal static class TrinoJdbcMetadataShapes
         return (outputNames, outputRows);
     }
 
+    internal static List<object?[]> BuildForTest(TrinoJdbcView view, IReadOnlyList<TrinoJdbcEntry> entries) =>
+        BuildRows(view, entries);
+
     private static List<object?[]> BuildRows(TrinoJdbcView view, IReadOnlyList<TrinoJdbcEntry> entries)
     {
         var rows = new List<object?[]>();
@@ -409,8 +412,14 @@ internal static class TrinoJdbcMetadataShapes
                 foreach (var e in tables)
                 {
                     var o = e.Object;
+                    var tableType = o.Kind switch
+                    {
+                        DiscoveryObjectKind.Table => "TABLE",
+                        DiscoveryObjectKind.View or DiscoveryObjectKind.MetricView => "VIEW",
+                        _ => throw new ArgumentOutOfRangeException(nameof(entries), o.Kind, "Unsupported DiscoveryObjectKind for JDBC TABLES.")
+                    };
                     rows.Add([
-                        o.Domain, o.Schema, o.Name, o.Kind == DiscoveryObjectKind.View ? "VIEW" : "TABLE",
+                        o.Domain, o.Schema, o.Name, tableType,
                         e.Accessible ? AccessGranted : AccessNotAccessible, null, null, null, null, null
                     ]);
                 }

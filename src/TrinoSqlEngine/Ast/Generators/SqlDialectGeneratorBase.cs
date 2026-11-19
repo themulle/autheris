@@ -355,7 +355,7 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
             context.InPredicateContext = prevWherePred;
         }
 
-        if (spec.GroupBy != null && (spec.GroupBy.GroupingExpressions.Count > 0 || spec.GroupBy.AdvancedElements is { Count: > 0 }))
+        if (spec.GroupBy != null && (spec.GroupBy.IsAll || spec.GroupBy.GroupingExpressions.Count > 0 || spec.GroupBy.AdvancedElements is { Count: > 0 }))
         {
             GenerateGroupBy(spec.GroupBy, ref builder, context);
         }

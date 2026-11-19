@@ -68,7 +68,13 @@ public static class CatalogGovernanceRatchet
             ExpectedRows = inTable.ExpectedRows ?? exTable.ExpectedRows,
             DiscoveryHidden = exTable.DiscoveryHidden || inTable.DiscoveryHidden,
             SamplesDisabled = exTable.SamplesDisabled || inTable.SamplesDisabled,
-            ObjectKind = inTable.ObjectKind == DiscoveryObjectKind.View ? DiscoveryObjectKind.View : exTable.ObjectKind
+            ObjectKind = inTable.ObjectKind switch
+            {
+                DiscoveryObjectKind.View or DiscoveryObjectKind.MetricView => inTable.ObjectKind,
+                DiscoveryObjectKind.Table => exTable.ObjectKind,
+                DiscoveryObjectKind.Procedure => DiscoveryObjectKind.Procedure,
+                _ => throw new ArgumentOutOfRangeException(nameof(incoming), inTable.ObjectKind, "Unknown DiscoveryObjectKind.")
+            }
         };
 
         var existingColumns = new Dictionary<string, TableColumn>(StringComparer.OrdinalIgnoreCase);

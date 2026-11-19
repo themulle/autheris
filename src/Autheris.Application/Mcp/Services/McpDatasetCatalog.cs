@@ -353,7 +353,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
                     graphQl?.QueryField,
                     Tags: t.CatalogTags,
                     AccessStatus: status,
-                    Kind: t.Table.ObjectKind.ToString().ToLowerInvariant(),
+                    Kind: t.Table.ObjectKind.ToWireName(),
                     Size: DatasetSizeClassifier.Resolve(t)));
             }
             else if (c.Proc is { } proc)

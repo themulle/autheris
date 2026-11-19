@@ -81,8 +81,13 @@ internal static class CatalogRowHydrator
             MinGroupSize = minGroupSize,
             NonPersonal = nonPersonal,
             DbtUniqueId = reader.FieldCount > o + 19 && !reader.IsDBNull(o + 19) ? reader.GetString(o + 19) : null,
-            ObjectKind = reader.FieldCount > o + 20 && !reader.IsDBNull(o + 20) && string.Equals(reader.GetString(o + 20), "view", StringComparison.Ordinal)
-                ? DiscoveryObjectKind.View
+            ObjectKind = reader.FieldCount > o + 20 && !reader.IsDBNull(o + 20)
+                ? reader.GetString(o + 20) switch
+                {
+                    "view" => DiscoveryObjectKind.View,
+                    "metric_view" => DiscoveryObjectKind.MetricView,
+                    _ => DiscoveryObjectKind.Table
+                }
                 : DiscoveryObjectKind.Table
         };
     }
@@ -193,6 +198,17 @@ internal static class CatalogRowHydrator
             lengthSemantics = reader.GetString(o + 14);
         }
 
+        MetricViewColumnRole? columnRole = null;
+        if (reader.FieldCount > o + 15 && !reader.IsDBNull(o + 15))
+        {
+            columnRole = reader.GetString(o + 15) switch
+            {
+                "dimension" => MetricViewColumnRole.Dimension,
+                "measure" => MetricViewColumnRole.Measure,
+                _ => null
+            };
+        }
+
         return new TableColumn
         {
             Id = colId,
@@ -206,7 +222,8 @@ internal static class CatalogRowHydrator
             LongDescription = longDesc,
             Texts = colTexts,
             DocumentationSource = docSource,
-            Meta = metaDict
+            Meta = metaDict,
+            Role = columnRole
         };
     }
 
@@ -980,6 +997,13 @@ ORDER BY c.table_id, c.column_name, cc.code";
                 insertColCmd.AddBound("@textsJson", (object?)CatalogLocalizationPersistence.SerializeLocalizedTexts(col.Texts) ?? DBNull.Value);
                 insertColCmd.AddBound("@collation", (object?)col.Collation ?? DBNull.Value);
                 insertColCmd.AddBound("@lengthSemantics", (object?)col.LengthSemantics ?? DBNull.Value);
+                insertColCmd.AddBound("@columnRole", col.Role switch
+                {
+                    MetricViewColumnRole.Dimension => (object)"dimension",
+                    MetricViewColumnRole.Measure => "measure",
+                    null => DBNull.Value,
+                    _ => throw new ArgumentOutOfRangeException(nameof(metadata), col.Role, "Unknown MetricViewColumnRole.")
+                });
                 await insertColCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 

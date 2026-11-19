@@ -282,6 +282,12 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
     protected virtual void GenerateGroupBy(GroupByClause groupBy, ref ValueStringBuilder builder, SqlEmitterContext context)
     {
         builder.Append(" GROUP BY ");
+        if (groupBy.IsAll)
+        {
+            builder.Append("ALL");
+            return;
+        }
+
         if (groupBy.Distinct)
         {
             if (!SupportsGroupByDistinct)

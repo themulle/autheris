@@ -766,6 +766,13 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
         {
             throw new WebSqlPolicyException(SqlDialectMapper.UnsupportedDialectMessage);
         }
+
+        var mvGuard = Autheris.Application.Sql.Security.MetricViewStatementGuard.Enforce(rawSql, decidedTableMetadata, decisions, targetDatabaseDialect.Value);
+        if (mvGuard.AugmentedSql is not null)
+        {
+            rawSql = mvGuard.AugmentedSql;
+        }
+
         TargetSqlDialect targetSqlDialect = SqlDialectMapper.ToTargetDialect(targetDatabaseDialect.Value);
 
         EnforceEffectiveListMaximum(clientLists, targetSqlDialect, webSqlOptions);
@@ -773,6 +780,12 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
         // GAP-013 / governed WebSQL translates the Trino date functions (date_trunc, date_add, now, year(x).. second(x), date_part).
         IReadOnlySet<string> allowedFunctions = SqlFunctionAllowlists.WithDateTranslation(
             SqlFunctionAllowlists.Build(targetSqlDialect, webSqlOptions.AdditionalAllowedFunctions));
+        if (targetSqlDialect == TargetSqlDialect.Databricks &&
+            decidedTableMetadata.Values.Any(static t => t.Table.ObjectKind == DiscoveryObjectKind.MetricView))
+        {
+            var mvAllowed = new HashSet<string>(allowedFunctions, StringComparer.OrdinalIgnoreCase) { "measure" };
+            allowedFunctions = mvAllowed;
+        }
         if (metadata.FunctionCalls is { Count: > 0 })
         {
             // G-9: the three-argument overload; no RlsOptions bag.
@@ -874,7 +887,7 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
 
         var maskedAudit = decisions.Values.SelectMany(d => d.MaskedColumnsAudit).ToList();
         var grantAudit = decisions.Values.SelectMany(d => d.GrantClassificationsAudit).ToList();
-        return new GovernedRewrite(compiled, accessedTables, effectiveDataSourceName, deliveredRowLimit, virtualFilters, assembly.KeySets.Outcomes, callerAttributes, metadata, pagingUnavailable, bindPageOffset, indexHints, dmlMaxRowsCap, maskedAudit, grantAudit);
+        return new GovernedRewrite(compiled, accessedTables, effectiveDataSourceName, deliveredRowLimit, virtualFilters, assembly.KeySets.Outcomes, callerAttributes, metadata, pagingUnavailable, bindPageOffset, indexHints, dmlMaxRowsCap, maskedAudit, grantAudit, mvGuard.HiddenCountColumnAlias, mvGuard.EffectiveMinGroupSize);
     }
 
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<TargetSqlDialect, byte> ClampWarned = new();

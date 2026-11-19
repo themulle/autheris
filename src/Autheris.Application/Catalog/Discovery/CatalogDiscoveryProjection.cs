@@ -83,7 +83,7 @@ public static class CatalogDiscoveryProjection
             SuggestedGraphQlField: null,
             EffectiveMode: effectiveMode,
             Language: language,
-            Kind: obj.Kind.ToString().ToLowerInvariant(),
+            Kind: obj.Kind.ToWireName(),
             DatasetId: $"{obj.Domain}.{obj.Schema}.{obj.Name}",
             AccessStatus: CatalogAccessStatus.Of(obj.Access));
 

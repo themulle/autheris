@@ -506,7 +506,13 @@ internal static class CatalogBatchUpsertHelper
         upsertCmd.AddBound("@minGroupSize", (object?)metadata.Table.MinGroupSize ?? DBNull.Value);
         upsertCmd.AddBound("@nonPersonal", metadata.Table.NonPersonal);
         upsertCmd.AddBound("@dbtUniqueId", (object?)metadata.Table.DbtUniqueId ?? DBNull.Value);
-        upsertCmd.AddBound("@objectKind", metadata.Table.ObjectKind == DiscoveryObjectKind.View ? "view" : "table");
+        upsertCmd.AddBound("@objectKind", metadata.Table.ObjectKind switch
+        {
+            DiscoveryObjectKind.Table => "table",
+            DiscoveryObjectKind.View => "view",
+            DiscoveryObjectKind.MetricView => "metric_view",
+            _ => throw new ArgumentOutOfRangeException(nameof(metadata), metadata.Table.ObjectKind, "Unsupported DiscoveryObjectKind for persistence.")
+        });
         await upsertCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 

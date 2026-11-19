@@ -114,7 +114,8 @@ public sealed record McpDatasetColumn(
     string? DisplayName = null,
     IReadOnlyList<DiscoveryColumnClassification>? Classifications = null,
     IReadOnlyList<string>? ClearRequestable = null,
-    string? LongDescription = null)
+    string? LongDescription = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Role = null)
 {
     /// <summary>Documents linked to this column that the caller may see; null when there are none.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

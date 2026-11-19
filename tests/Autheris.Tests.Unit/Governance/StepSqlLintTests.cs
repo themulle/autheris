@@ -200,7 +200,8 @@ public sealed class StepSqlLintTests
                 (27, "drop_legacy_governance_columns"),
                 (28, "data_products"),
                 (29, "drop_role_grantee"),
-                (30, "table_object_kind")
+                (30, "table_object_kind"),
+                (31, "metric_view_kind_and_column_role")
             ]);
         }
     }

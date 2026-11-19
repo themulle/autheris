@@ -59,6 +59,9 @@ public sealed partial class ODataHandler(
     /// check); every other tenant only its domain and the shared <c>default</c> domain. An unresolved tenant (no claim, no default,
     /// invalid claim, no resolver) has no candidates (fail closed).
     /// </summary>
+    internal static bool IsExposableObjectKind(DiscoveryObjectKind kind) =>
+        kind != DiscoveryObjectKind.MetricView && kind != DiscoveryObjectKind.Procedure;
+
     private List<Autheris.Domain.Model.TableMetadata> CandidateTablesFor(
         ClaimsPrincipal principal, IEnumerable<Autheris.Domain.Model.TableMetadata> allTables)
     {
@@ -77,6 +80,7 @@ public sealed partial class ODataHandler(
         var transport = _ingress?.Current ?? Autheris.Domain.Options.DataSources.DataSourceTransportFlags.None;
         return Autheris.Application.Services.CatalogVisibility.DropForeignVirtualTables(allTables, tenant)
             .Where(t => t.Table.IsActive &&
+                        IsExposableObjectKind(t.Table.ObjectKind) &&
                         (isOwner ||
                          string.Equals(t.Identifier.Domain, tenant.Value, StringComparison.OrdinalIgnoreCase) ||
                          string.Equals(t.Identifier.Domain, "default", StringComparison.OrdinalIgnoreCase)) &&
