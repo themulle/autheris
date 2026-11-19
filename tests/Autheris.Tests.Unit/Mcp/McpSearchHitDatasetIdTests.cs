@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.Mcp;
 
 using Autheris.Tests.Unit.Catalog;
+using Autheris.Tests.Common.Fakes;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -40,7 +41,7 @@ public sealed class McpSearchHitDatasetIdTests
     private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
     private readonly ITableMetadataRepository _metadata = Substitute.For<ITableMetadataRepository>();
-    private readonly IConsentRepository _consents = Substitute.For<IConsentRepository>();
+    private readonly IConsentRepository _consents = new InMemoryConsentRepository();
     private readonly GatewayOptions _options = new()
     {
         Catalog = new DataCatalogOptions { SharedTables = ["fleet.live.telematic_unit", "fleet.archive.telematic_unit", "fleet.live.crane"] }

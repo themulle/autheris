@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.Security;
 
 using System.Collections.Generic;
+using Autheris.Tests.Common.Fakes;
 using System.IO;
 using System.Security.Claims;
 using System.Threading.Tasks;
@@ -87,7 +88,7 @@ public sealed class SqlEndpointGetSelectOnlyTests
     public async Task Register_GetDefinitionWithNonSelect_IsRejected(string sql)
     {
         var registry = new InMemorySqlEndpointRegistry();
-        var context = CreateContext(new ServiceCollection().AddAuditWriterOver(Substitute.For<IAuditLogRepository>()), "ClusterAdmin");
+        var context = CreateContext(new ServiceCollection().AddAuditWriterOver(new InMemoryAuditLogRepository()), "ClusterAdmin");
         var loader = new SqlEndpointLoader(registry, NullLogger<SqlEndpointLoader>.Instance);
 
         var result = await SqlEndpointRoutes.HandleRegisterEndpoint(new RegisterSqlEndpointRequest(Name: "ep", Sql: sql, HttpMethod: "GET"), registry, context, loader);
@@ -100,7 +101,7 @@ public sealed class SqlEndpointGetSelectOnlyTests
     public async Task Register_PostDefinitionWithDml_IsUnchanged()
     {
         var registry = new InMemorySqlEndpointRegistry();
-        var context = CreateContext(new ServiceCollection().AddAuditWriterOver(Substitute.For<IAuditLogRepository>()), "ClusterAdmin");
+        var context = CreateContext(new ServiceCollection().AddAuditWriterOver(new InMemoryAuditLogRepository()), "ClusterAdmin");
         var loader = new SqlEndpointLoader(registry, NullLogger<SqlEndpointLoader>.Instance);
 
         var result = await SqlEndpointRoutes.HandleRegisterEndpoint(

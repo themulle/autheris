@@ -1,4 +1,5 @@
 using Autheris.Tests.Common;
+using Autheris.Tests.Common.Fakes;
 namespace Autheris.Tests.Unit.Sql.Errors;
 
 using System;
@@ -265,7 +266,7 @@ public sealed class SqlErrorSurfacesTests
         {
             var env = Substitute.For<IHostEnvironment>();
             env.ContentRootPath = scratch;
-            var audit = Substitute.For<IAuditLogRepository>();
+            var audit = new InMemoryAuditLogRepository();
             var manager = new AsyncQueryJobManager(audit, environment: env);
             var sql = Substitute.For<IGovernedSqlExecutionService>();
             sql.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())

@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.Jobs;
 
 using System;
+using Autheris.Tests.Common.Fakes;
 using System.IO;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
@@ -33,7 +34,7 @@ public sealed class AsyncQueryJobResultPathTraversalTests : IDisposable
     {
         var environment = Substitute.For<IHostEnvironment>();
         environment.ContentRootPath.Returns(_root);
-        var manager = new AsyncQueryJobManager(Substitute.For<IAuditLogRepository>(), environment: environment);
+        var manager = new AsyncQueryJobManager(new InMemoryAuditLogRepository(), environment: environment);
 
         var outside = Path.Combine(_root, "secret.txt");
         await File.WriteAllTextAsync(outside, "secret");
@@ -78,7 +79,7 @@ public sealed class AsyncQueryJobResultPathTraversalTests : IDisposable
     {
         var environment = Substitute.For<IHostEnvironment>();
         environment.ContentRootPath.Returns(_root);
-        var manager = new AsyncQueryJobManager(Substitute.For<IAuditLogRepository>(), environment: environment);
+        var manager = new AsyncQueryJobManager(new InMemoryAuditLogRepository(), environment: environment);
 
         var inside = Path.Combine(manager.ScratchDirectory, "ok.json");
         await File.WriteAllTextAsync(inside, "{}");

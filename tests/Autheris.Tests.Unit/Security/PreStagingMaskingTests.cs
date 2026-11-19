@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.Security;
 
 using System;
+using Autheris.Tests.Common.Fakes;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Claims;
@@ -328,7 +329,7 @@ public sealed class PreStagingMaskingTests
         var service = new FederatedStagingService(
             registry,
             Substitute.For<IColumnMaskingProvider>(),
-            Substitute.For<IAuditLogRepository>(),
+            new InMemoryAuditLogRepository(),
             Options.Create(new GatewayOptions()),
             NullLogger<FederatedStagingService>.Instance);
 

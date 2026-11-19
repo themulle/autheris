@@ -2,6 +2,7 @@
 namespace Autheris.Tests.Unit.Security;
 
 using System;
+using Autheris.Tests.Common.Fakes;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
@@ -283,7 +284,7 @@ public sealed class Batch5SecurityTestsB : IDisposable
     {
         var client = Substitute.For<IOpenMetadataClient>();
         var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        var consentRepo = Substitute.For<IConsentRepository>();
+        var consentRepo = new InMemoryConsentRepository();
         var epochRepo = Substitute.For<IPolicyEpochRepository>();
 
         var tableId = new TableIdentifier("sales", "public", "orders");

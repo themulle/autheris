@@ -1,4 +1,5 @@
 using Autheris.Tests.Unit.TestSupport;
+using Autheris.Tests.Common.Fakes;
 using System;
 using Microsoft.Extensions.DependencyInjection;
 using Autheris.Tests.Unit.TestDoubles;
@@ -410,7 +411,7 @@ public sealed class DuckDbOlapSecurityTests
     {
         var httpContext = new DefaultHttpContext
         {
-            RequestServices = new ServiceCollection().AddAuditWriterOver(Substitute.For<IAuditLogRepository>()).BuildServiceProvider()
+            RequestServices = new ServiceCollection().AddAuditWriterOver(new InMemoryAuditLogRepository()).BuildServiceProvider()
         };
         httpContext.Response.Body = new MemoryStream();
         httpContext.User = new ClaimsPrincipal(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "S-1-5-21-USER")], "Bearer"));
@@ -533,7 +534,7 @@ public sealed class DuckDbOlapSecurityTests
     {
         var httpContext = new DefaultHttpContext
         {
-            RequestServices = new ServiceCollection().AddAuditWriterOver(Substitute.For<IAuditLogRepository>()).BuildServiceProvider()
+            RequestServices = new ServiceCollection().AddAuditWriterOver(new InMemoryAuditLogRepository()).BuildServiceProvider()
         };
         httpContext.User = new ClaimsPrincipal(new ClaimsIdentity(
             [new Claim("tid", "tenant-1"), new Claim("sub", "user-1"), new Claim("name", "Alice")],

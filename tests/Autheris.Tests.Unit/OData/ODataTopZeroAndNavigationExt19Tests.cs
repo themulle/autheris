@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.OData;
 
 using System.Collections.Generic;
+using Autheris.Tests.Common.Fakes;
 using System.Linq;
 using System.Security.Claims;
 using System.Threading;
@@ -32,7 +33,7 @@ public sealed class ODataTopZeroAndNavigationExt19Tests
         var execution = Substitute.For<IGatewayExecutionService>();
         execution.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
             .Returns(new TableQueryPage(rows, TableAccessDecision.Allowed(Plain, Access), 42, false));
-        var handler = new ODataHandler(Substitute.For<ITableMetadataRepository>(), execution, NullLogger<ODataHandler>.Instance);
+        var handler = new ODataHandler(new InMemoryTableMetadataRepository(), execution, NullLogger<ODataHandler>.Instance);
 
         var result = await handler.ExecuteEntitySetQueryAsync(
             User(), "https://gw/odata/v4", Plain, top: 0, skip: null, select: null, includeCount: true, headers: null);

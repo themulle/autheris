@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.Security;
 
 using Autheris.Tests.Unit.Catalog;
+using Autheris.Tests.Common.Fakes;
 using System;
 using System.Collections.Generic;
 using System.Data.Common;
@@ -121,7 +122,7 @@ public sealed partial class AdvisoryRegressionTests
                 secrets.DidNotReceiveWithAnyArgs().SetSecret(default!, default!);
                 break;
             case "mcp_registration_is_tenant_bound":
-                var planning = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), Substitute.For<ITableMetadataRepository>(),
+                var planning = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(new InMemoryAuditLogRepository()), new InMemoryTableMetadataRepository(),
                     Substitute.For<IConsentRepository>(), new TotpVerificationService(), new InMemoryTotpSecretStore(), secretProvider: secrets);
                 var mcp = new AdminRegisterDatasourceRequest("crane", "telemetry", Auth: new DatasourceAuthDto("apiKey", Secret: "s"));
                 await Should.ThrowAsync<UnauthorizedAccessException>(() => planning.RegisterDatasourceAsync(mcp, "admin", "tenant-a"));
@@ -130,7 +131,7 @@ public sealed partial class AdvisoryRegressionTests
                 break;
             case "mcp_registration_refuses_existing_secret":
                 secrets.GetSecretBytes("datasource:telemetry:tenant-a:crane:auth_secret").Returns([9]);
-                var existing = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), Substitute.For<ITableMetadataRepository>(),
+                var existing = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(new InMemoryAuditLogRepository()), new InMemoryTableMetadataRepository(),
                     Substitute.For<IConsentRepository>(), new TotpVerificationService(), new InMemoryTotpSecretStore(), secretProvider: secrets);
                 await Should.ThrowAsync<ArgumentException>(() => existing.RegisterDatasourceAsync(
                     new AdminRegisterDatasourceRequest("crane", "telemetry", Auth: new DatasourceAuthDto("apiKey", Secret: "s")), "admin", "tenant-a", isClusterAdmin: true));
@@ -138,7 +139,7 @@ public sealed partial class AdvisoryRegressionTests
                 break;
             case "ingestion_refuses_existing_secret":
                 secrets.GetSecretBytes(default!).ReturnsForAnyArgs([9]);
-                var direct = new OpenApiIngestionService(Substitute.For<ITableMetadataRepository>(), NullLogger<OpenApiIngestionService>.Instance, secretProvider: secrets);
+                var direct = new OpenApiIngestionService(new InMemoryTableMetadataRepository(), NullLogger<OpenApiIngestionService>.Instance, secretProvider: secrets);
                 foreach (var (type, scheme) in new[] { ("apiKey", (string?)null), ("http", "bearer"), ("oauth2", null) })
                 {
                     var auth = new DatasourceAuthDto(type, Scheme: scheme, Value: "v", ClientSecret: "v", SecretRef: "datasource:telemetry:tenant-a:crane:secret");
@@ -178,7 +179,7 @@ public sealed partial class AdvisoryRegressionTests
         }
 
         var audit = Substitute.For<IAuditLogRepository>();
-        var service = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(audit), repo, Substitute.For<IConsentRepository>(),
+        var service = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(audit), repo, new InMemoryConsentRepository(),
             new TotpVerificationService(), new InMemoryTotpSecretStore());
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(bullet.Contains("foreign", StringComparison.Ordinal) ? Table("tenant-b") : null);

@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.Security;
 
 using System;
+using Autheris.Tests.Common.Fakes;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -317,8 +318,8 @@ public sealed class Batch5SecurityTestsA
 
         var gdprService = new GdprDisclosureReportService(
             ownershipRepo,
-            Substitute.For<IAuditLogRepository>(),
-            Substitute.For<ITableMetadataRepository>());
+            new InMemoryAuditLogRepository(),
+            new InMemoryTableMetadataRepository());
 
         var callerContext = new CallerSecurityContext(
             callerSid,
@@ -375,7 +376,7 @@ public sealed class Batch5SecurityTestsA
         var gdprService = new GdprDisclosureReportService(
             ownershipRepo,
             auditRepo,
-            Substitute.For<ITableMetadataRepository>());
+            new InMemoryTableMetadataRepository());
 
         var callerContext = new CallerSecurityContext(
             callerSid,

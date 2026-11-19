@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.OData;
 
 using System;
+using Autheris.Tests.Common.Fakes;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -66,8 +67,8 @@ public sealed class ODataFilterPushdownTests
             .Returns(TableAccessDecision.Allowed(Orders, Access, hasUnconstrainedColumnAllow: true));
         var service = new GatewayExecutionService(
             metadataRepo,
-            Substitute.For<IConsentRepository>(),
-            Substitute.For<IAuditLogRepository>(),
+            new InMemoryConsentRepository(),
+            new InMemoryAuditLogRepository(),
             Substitute.For<IConsentResolutionService>(),
             cache,
             Substitute.For<IColumnMaskingProvider>(),

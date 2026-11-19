@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.Mcp;
 
 using System;
+using Autheris.Tests.Common.Fakes;
 using System.Collections.Generic;
 using System.Security.Claims;
 using System.Text.Json;
@@ -34,7 +35,7 @@ public sealed class McpHybridToolsTests
     private readonly ICatalogDiscoveryService _catalogDiscoveryService = Substitute.For<ICatalogDiscoveryService>();
     private readonly IApiDispatcherService _apiDispatcherService = Substitute.For<IApiDispatcherService>();
     private readonly ILineageGraphStore _lineageGraphStore = Substitute.For<ILineageGraphStore>();
-    private readonly ITableMetadataRepository _metadataRepo = Substitute.For<ITableMetadataRepository>();
+    private readonly ITableMetadataRepository _metadataRepo = new InMemoryTableMetadataRepository();
 
     private McpSessionContext CreateSessionContext(string userSid = "user-1", string tenant = "tenant-a") =>
         new(

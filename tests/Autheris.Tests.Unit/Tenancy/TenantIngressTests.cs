@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.Tenancy;
 
 using Autheris.Tests.Common;
+using Autheris.Tests.Common.Fakes;
 using Autheris.Tests.Unit.Security;
 using System;
 using System.Collections.Generic;
@@ -357,11 +358,11 @@ public sealed class TenantIngressTests
 
     private static GatewayExecutionService Execution(GatewayOptions options)
     {
-        var metadata = Substitute.For<ITableMetadataRepository>();
+        var metadata = new InMemoryTableMetadataRepository();
         return new GatewayExecutionService(
             metadata,
-            Substitute.For<IConsentRepository>(),
-            Substitute.For<IAuditLogRepository>(),
+            new InMemoryConsentRepository(),
+            new InMemoryAuditLogRepository(),
             Substitute.For<IConsentResolutionService>(),
             Substitute.For<IConsentCacheService>(),
             Substitute.For<IColumnMaskingProvider>(),

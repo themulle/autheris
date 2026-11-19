@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.OData;
 
 using System;
+using Autheris.Tests.Common.Fakes;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -82,8 +83,8 @@ public sealed class ODataOrderByCountTests
             .Returns(TableAccessDecision.Allowed(Invoices, Access, hasUnconstrainedColumnAllow: true));
         var service = new GatewayExecutionService(
             metadataRepo,
-            Substitute.For<IConsentRepository>(),
-            Substitute.For<IAuditLogRepository>(),
+            new InMemoryConsentRepository(),
+            new InMemoryAuditLogRepository(),
             Substitute.For<IConsentResolutionService>(),
             cache,
             Substitute.For<IColumnMaskingProvider>(),
@@ -169,7 +170,7 @@ public sealed class ODataOrderByCountTests
         var execution = Substitute.For<IGatewayExecutionService>();
         execution.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
             .Returns(page);
-        return (new ODataHandler(Substitute.For<ITableMetadataRepository>(), execution, NullLogger<ODataHandler>.Instance), execution);
+        return (new ODataHandler(new InMemoryTableMetadataRepository(), execution, NullLogger<ODataHandler>.Instance), execution);
     }
 
     [Fact]
@@ -225,7 +226,7 @@ public sealed class ODataOrderByCountTests
         var execution = Substitute.For<IGatewayExecutionService>();
         execution.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
             .Returns<Task<TableQueryPage>>(_ => throw new GatewayNotImplementedException("The total row count cannot be determined for this data source."));
-        var handler = new ODataHandler(Substitute.For<ITableMetadataRepository>(), execution, NullLogger<ODataHandler>.Instance);
+        var handler = new ODataHandler(new InMemoryTableMetadataRepository(), execution, NullLogger<ODataHandler>.Instance);
 
         var result = await handler.ExecuteEntitySetQueryAsync(User(), "https://gw/odata/v4", Invoices, null, null, null, true, null);
 

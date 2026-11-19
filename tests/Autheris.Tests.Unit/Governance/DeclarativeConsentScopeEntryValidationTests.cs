@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Autheris.Tests.Common.Fakes;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Tests.Unit.TestSupport;
 using Autheris.Application.Governance.Services;
@@ -50,7 +51,7 @@ public sealed class DeclarativeConsentScopeEntryValidationTests
     {
         var tables = Tables();
         var repo = new FakeConsentRepository();
-        var svc = new DeclarativeConsentApplyService(tables, repo, Substitute.For<IAuditLogRepository>());
+        var svc = new DeclarativeConsentApplyService(tables, repo, new InMemoryAuditLogRepository());
         var manifest = new DeclarativeConsentManifest("1",
         [
             Policy("orders", new DeclarativeColumnRule("id", "Clear")),
@@ -71,7 +72,7 @@ public sealed class DeclarativeConsentScopeEntryValidationTests
     public async Task EmptyScopeListAndPaddedScopeName_AreAccepted()
     {
         var repo = new FakeConsentRepository();
-        var svc = new DeclarativeConsentApplyService(Tables(), repo, Substitute.For<IAuditLogRepository>());
+        var svc = new DeclarativeConsentApplyService(Tables(), repo, new InMemoryAuditLogRepository());
 
         var result = await svc.ApplyManifestAsync(Admin(), new DeclarativeConsentManifest("1",
             [Policy("orders", new DeclarativeColumnRule("email", "Clear", []), new DeclarativeColumnRule("email", "Mask", [" Agent.Read "]))]));

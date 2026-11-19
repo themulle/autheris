@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.Security;
 
 using System;
+using Autheris.Tests.Common.Fakes;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Autheris.Application.Governance.Interfaces;
@@ -17,7 +18,7 @@ using Xunit;
 public sealed class EuAiActArticle10ComplianceSecurityTests
 {
     private readonly IAuditChainExportSource _auditSource = Substitute.For<IAuditChainExportSource>();
-    private readonly IAuditLogRepository _auditRepo = Substitute.For<IAuditLogRepository>();
+    private readonly IAuditLogRepository _auditRepo = new InMemoryAuditLogRepository();
 
     [Fact]
     public async Task GenerateCertificateAsync_ProducesTamperEvidentCertificateWithArticle10Fields()

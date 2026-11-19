@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.Security;
 
 using System;
+using Autheris.Tests.Common.Fakes;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -569,7 +570,7 @@ public sealed class WebSqlHeterogeneousJoinTests
 
         var federatedService = new FederatedDuckDbExecutionService(
             Options.Create(options),
-            Substitute.For<IAuditLogRepository>(),
+            new InMemoryAuditLogRepository(),
             new CrossSourceQueryRouter(tableRepo, options.WebSql.CrossSource, options.WebSql),
             new CrossSourcePlanner(FastSqlEngine.Default),
             stagingService,

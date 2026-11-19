@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.Security;
 
 using System;
+using Autheris.Tests.Common.Fakes;
 using System.Collections.Generic;
 using System.Security.Claims;
 using System.Threading;
@@ -92,8 +93,8 @@ public sealed class QueryAnalysisBucketSecurityTests
         // SEC-GOV175B-02: Read-only tokens can access /analyze and receive callerQuota,
         // while remaining strictly prohibited from mutation routes.
         var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
-        var consentRepo = Substitute.For<IConsentRepository>();
-        var auditRepo = Substitute.For<IAuditLogRepository>();
+        var consentRepo = new InMemoryConsentRepository();
+        var auditRepo = new InMemoryAuditLogRepository();
 
         var tableId = new TableIdentifier("sales", "public", "orders");
         var table = new TableMetadata

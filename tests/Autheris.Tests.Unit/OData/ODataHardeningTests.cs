@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.OData;
 
 using System;
+using Autheris.Tests.Common.Fakes;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Claims;
@@ -88,7 +89,7 @@ public sealed class ODataHardeningTests
 
         var service = new GatewayExecutionService(
             metadataRepo,
-            Substitute.For<IConsentRepository>(),
+            new InMemoryConsentRepository(),
             auditLog,
             Substitute.For<IConsentResolutionService>(),
             cache,
@@ -241,7 +242,7 @@ public sealed class ODataHardeningTests
     public async Task O6_ODataHandler_SkipExceedingMaxSkip_Returns400()
     {
         var execService = Substitute.For<IGatewayExecutionService>();
-        var handler = new ODataHandler(Substitute.For<ITableMetadataRepository>(), execService, NullLogger<ODataHandler>.Instance);
+        var handler = new ODataHandler(new InMemoryTableMetadataRepository(), execService, NullLogger<ODataHandler>.Instance);
 
         var result = await handler.ExecuteEntitySetQueryAsync(
             CreateUser(),
@@ -278,7 +279,7 @@ public sealed class ODataHardeningTests
         execService.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
             .Returns<Task<TableQueryPage>>(_ => throw new FakeDbException(number, internalDbMessage));
 
-        var handler = new ODataHandler(Substitute.For<ITableMetadataRepository>(), execService, NullLogger<ODataHandler>.Instance);
+        var handler = new ODataHandler(new InMemoryTableMetadataRepository(), execService, NullLogger<ODataHandler>.Instance);
 
         var result = await handler.ExecuteEntitySetQueryAsync(
             CreateUser(),
@@ -312,7 +313,7 @@ public sealed class ODataHardeningTests
         execService.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
             .Returns<Task<TableQueryPage>>(_ => throw new FakeDbException(number, internalDbMessage));
 
-        var handler = new ODataHandler(Substitute.For<ITableMetadataRepository>(), execService, NullLogger<ODataHandler>.Instance);
+        var handler = new ODataHandler(new InMemoryTableMetadataRepository(), execService, NullLogger<ODataHandler>.Instance);
 
         var result = await handler.ExecuteEntitySetQueryAsync(
             CreateUser(),

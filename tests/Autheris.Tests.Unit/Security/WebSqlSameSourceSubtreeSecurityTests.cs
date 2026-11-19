@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.Security;
 
 using System;
+using Autheris.Tests.Common.Fakes;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Claims;
@@ -327,7 +328,7 @@ public sealed class WebSqlSameSourceSubtreeSecurityTests
         var stagingService = new FederatedStagingService(
             registry,
             Substitute.For<IColumnMaskingProvider>(),
-            Substitute.For<IAuditLogRepository>(),
+            new InMemoryAuditLogRepository(),
             Options.Create(new GatewayOptions()),
             NullLogger<FederatedStagingService>.Instance);
 
@@ -567,7 +568,7 @@ public sealed class WebSqlSameSourceSubtreeSecurityTests
         var registry = Substitute.For<IAutherisConnectorRegistry>();
         registry.TryGetConnectorForTable(Arg.Any<TableIdentifier>(), out Arg.Any<IAutherisConnector>()!)
             .Returns(x => { x[1] = connector; return true; });
-        var stagingService = new FederatedStagingService(registry, Substitute.For<IColumnMaskingProvider>(), Substitute.For<IAuditLogRepository>(),
+        var stagingService = new FederatedStagingService(registry, Substitute.For<IColumnMaskingProvider>(), new InMemoryAuditLogRepository(),
             Options.Create(new GatewayOptions()), NullLogger<FederatedStagingService>.Instance);
 
         await stagingService.StageAsync([subtreeRequest], CreateUser(), new TenantId(Tenant), CreateBudget(maxRows: 100));

@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.Security;
 
 using Autheris.Tests.Common;
+using Autheris.Tests.Common.Fakes;
 using Autheris.Tests.Unit.Catalog;
 using System;
 using System.Collections.Generic;
@@ -110,7 +111,7 @@ public sealed class SrH03DatasourceSecretRefTests
     public async Task SR_H_03_OpenApiIngestion_ForeignSecretRef_IsRejected(string type, string? scheme)
     {
         var secrets = Substitute.For<IKeyVaultSecretProvider>();
-        var service = new OpenApiIngestionService(Substitute.For<ITableMetadataRepository>(),
+        var service = new OpenApiIngestionService(new InMemoryTableMetadataRepository(),
             NullLogger<OpenApiIngestionService>.Instance, secretProvider: secrets);
         var auth = new DatasourceAuthDto(type, Scheme: scheme, Value: "v", ClientSecret: "v", SecretRef: "audit-hmac-key");
 
@@ -122,7 +123,7 @@ public sealed class SrH03DatasourceSecretRefTests
     [Fact]
     public async Task SR_H_03_AccessPlanning_ForeignSecretRef_IsRejected()
     {
-        var service = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), Substitute.For<ITableMetadataRepository>(),
+        var service = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(new InMemoryAuditLogRepository()), new InMemoryTableMetadataRepository(),
             Substitute.For<IConsentRepository>(), new TotpVerificationService(), new InMemoryTotpSecretStore());
         var request = new AdminRegisterDatasourceRequest("crane", "telemetry",
             Auth: new DatasourceAuthDto("apiKey", SecretRef: "ConnectionStrings:Default"));
@@ -133,7 +134,7 @@ public sealed class SrH03DatasourceSecretRefTests
     [Fact]
     public async Task RegisterDatasource_ForeignSecretRef_IsRejected()
     {
-        var service = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), Substitute.For<ITableMetadataRepository>(),
+        var service = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(new InMemoryAuditLogRepository()), new InMemoryTableMetadataRepository(),
             Substitute.For<IConsentRepository>(), new TotpVerificationService(), new InMemoryTotpSecretStore());
         var request = new AdminRegisterDatasourceRequest("crane", "telemetry",
             Auth: new DatasourceAuthDto("apiKey", SecretRef: "datasource:other-domain:crane:auth_secret"));
@@ -144,7 +145,7 @@ public sealed class SrH03DatasourceSecretRefTests
     [Fact]
     public async Task SR_H_03_AccessPlanning_OwnNamespaceRef_IsAccepted()
     {
-        var service = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), Substitute.For<ITableMetadataRepository>(),
+        var service = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(new InMemoryAuditLogRepository()), new InMemoryTableMetadataRepository(),
             Substitute.For<IConsentRepository>(), new TotpVerificationService(), new InMemoryTotpSecretStore());
         var request = new AdminRegisterDatasourceRequest("crane", "telemetry",
             Auth: new DatasourceAuthDto("apiKey", SecretRef: "datasource:telemetry:crane:auth_secret"));
@@ -156,7 +157,7 @@ public sealed class SrH03DatasourceSecretRefTests
     [Fact]
     public async Task RegisterDatasource_InvalidBaseUrl_IsRejected()
     {
-        var service = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), Substitute.For<ITableMetadataRepository>(),
+        var service = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(new InMemoryAuditLogRepository()), new InMemoryTableMetadataRepository(),
             Substitute.For<IConsentRepository>(), new TotpVerificationService(), new InMemoryTotpSecretStore());
         var request = new AdminRegisterDatasourceRequest("crane", "telemetry",
             BaseUrl: "not-a-valid-uri");
@@ -170,7 +171,7 @@ public sealed class SrH03DatasourceSecretRefTests
     [InlineData("https://169.254.169.254/latest/meta-data")]
     public async Task RegisterDatasource_RestrictedBaseUrl_IsRejected(string restrictedUrl)
     {
-        var service = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), Substitute.For<ITableMetadataRepository>(),
+        var service = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(new InMemoryAuditLogRepository()), new InMemoryTableMetadataRepository(),
             Substitute.For<IConsentRepository>(), new TotpVerificationService(), new InMemoryTotpSecretStore());
         var request = new AdminRegisterDatasourceRequest("crane", "telemetry",
             BaseUrl: restrictedUrl);
@@ -186,7 +187,7 @@ public sealed class SrH03DatasourceSecretRefTests
         auditWriter.RecordRequiredAsync(Arg.Do<AuditLogEntry>(e => capturedAudit = e), Arg.Any<CancellationToken>())
             .Returns(Task.CompletedTask);
 
-        var service = new AccessPlanningService(auditWriter, Substitute.For<ITableMetadataRepository>(),
+        var service = new AccessPlanningService(auditWriter, new InMemoryTableMetadataRepository(),
             Substitute.For<IConsentRepository>(), new TotpVerificationService(), new InMemoryTotpSecretStore());
         var request = new AdminRegisterDatasourceRequest("crane", "telemetry",
             BaseUrl: "https://admin:super-secret-password@api.example.com/v1");
@@ -242,7 +243,7 @@ public sealed class SrH03DatasourceSecretRefTests
         factory.CreateClient("DeclarativeHttp").Returns(new HttpClient(new CapturingHandler(r => sentKey = r.Headers.TryGetValues("X-Api-Key", out var v) ? v.First() : null)));
         var claims = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
             [new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.NameIdentifier, "a"), new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Role, "Admin"), new System.Security.Claims.Claim("tenant_id", "t")], "T"));
-        var service = new DatasourceTestingService(repo, factory, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), secrets, Env("Development"),
+        var service = new DatasourceTestingService(repo, factory, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(new InMemoryAuditLogRepository()), secrets, Env("Development"),
             NullLogger<DatasourceTestingService>.Instance);
 
         await service.TestDatasourceAsync("crm.dbo.customers", new DatasourceTestRequest(), claims);

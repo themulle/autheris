@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.Procedures;
 
 using System;
+using Autheris.Tests.Common.Fakes;
 using System.Collections.Generic;
 using System.Security.Claims;
 using System.Threading;
@@ -207,7 +208,7 @@ public class PureYamlProcedureGovernanceTests
             }
         });
 
-        var audit = Substitute.For<IAuditLogRepository>();
+        var audit = new InMemoryAuditLogRepository();
         var executionService = new GovernedProcedureExecutionService(
             registry,
             invoker,
@@ -309,7 +310,7 @@ public class PureYamlProcedureGovernanceTests
             }
         });
 
-        var audit = Substitute.For<IAuditLogRepository>();
+        var audit = new InMemoryAuditLogRepository();
         var executionService = new GovernedProcedureExecutionService(
             registry,
             invoker,
@@ -411,7 +412,7 @@ public class PureYamlProcedureGovernanceTests
             }
         });
 
-        var audit = Substitute.For<IAuditLogRepository>();
+        var audit = new InMemoryAuditLogRepository();
         var executionService = new GovernedProcedureExecutionService(
             registry,
             invoker,

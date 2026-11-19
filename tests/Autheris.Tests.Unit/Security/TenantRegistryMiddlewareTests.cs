@@ -2,6 +2,7 @@
 namespace Autheris.Tests.Unit.Security;
 
 using Autheris.Tests.Unit.TestDoubles;
+using Autheris.Tests.Common.Fakes;
 using System.Security.Claims;
 using Autheris.Api.Middleware;
 using Autheris.Application.Common.Interfaces;
@@ -178,7 +179,7 @@ public sealed class TenantRegistryMiddlewareTests
             WebSql = new WebSqlOptions { TenantDataSourceAllowlist = new Dictionary<string, List<string>>(StringComparer.Ordinal) { ["acme"] = ["ds"], ["ACME"] = ["ds"] } }
         };
         context.RequestServices = new ServiceCollection()
-            .AddSingleton<IOptionsMonitor<GatewayOptions>>(new Monitor(options)).AddAuditWriterOver(Substitute.For<IAuditLogRepository>()).AddSingleton(registry).BuildServiceProvider();
+            .AddSingleton<IOptionsMonitor<GatewayOptions>>(new Monitor(options)).AddAuditWriterOver(new InMemoryAuditLogRepository()).AddSingleton(registry).BuildServiceProvider();
 
         var (nextInvoked, _) = await Run(context);
 

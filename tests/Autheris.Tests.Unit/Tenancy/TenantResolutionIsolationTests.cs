@@ -1,4 +1,5 @@
 using Autheris.Tests.Unit.TestSupport;
+using Autheris.Tests.Common.Fakes;
 namespace Autheris.Tests.Unit.Tenancy;
 
 using Autheris.Tests.Common;
@@ -152,7 +153,7 @@ public class TenantResolutionIsolationTests
         // Finding F-02 Verification:
         // A CDC event with null or empty TenantId must fail closed and be denied.
         var policyEnforcement = Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll();
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = new InMemoryTableMetadataRepository();
         var maskingProvider = Substitute.For<IColumnMaskingProvider>();
         var epochService = Substitute.For<IEpochValidationService>();
 
@@ -162,7 +163,7 @@ public class TenantResolutionIsolationTests
             maskingProvider,
             epochService,
             NullLogger<StreamRlsPolicyEnforcer>.Instance,
-            Substitute.For<IConsentRepository>(),
+            new InMemoryConsentRepository(),
             Substitute.For<IConsentResolutionService>(),
             Substitute.For<IConsentCacheService>());
 
