@@ -150,6 +150,7 @@ public static partial class GatewayServiceCollectionExtensions
         services.AddSingleton<Autheris.GraphQL.Catalog.CatalogSchemaBuildDiagnosticListener>();
         services.AddSingleton<ICatalogSchemaDiagnostics>(sp => sp.GetRequiredService<CatalogGraphQlTypeModule>());
         services.AddSingleton<Autheris.GraphQL.Catalog.ICatalogSchemaFreshness>(sp => sp.GetRequiredService<CatalogGraphQlTypeModule>());
+        services.AddSingleton(sp => new Autheris.Api.Endpoints.SchemaStatusAuditSampler(sp.GetService<TimeProvider>()));
         services.AddSingleton<ISocketTokenValidator, JwtSocketTokenValidator>();
         services.AddOptions<RevocationWatchOptions>()
             .BindConfiguration(RevocationWatchOptions.SectionName)
