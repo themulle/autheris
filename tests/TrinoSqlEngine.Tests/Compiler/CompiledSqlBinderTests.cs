@@ -1,7 +1,11 @@
 using System.Collections.Immutable;
+using System.Collections.Frozen;
 using System.Data;
 using DuckDB.NET.Data;
 using TrinoSqlEngine.Ast.Emit;
+using TrinoSqlEngine.Ast.Generators;
+using TrinoSqlEngine.Ast.Nodes;
+using TrinoSqlEngine.Governance;
 using Xunit;
 
 namespace TrinoSqlEngine.Tests.Compiler;
@@ -82,6 +86,203 @@ public class CompiledSqlBinderTests
 
         Assert.Equal("acme", cmd.Parameters[0].Value);
         Assert.Equal("bar", cmd.Parameters[1].Value);
+    }
+
+    // ---- a client parameter named p0 is an ordinary name; it never reaches an internal slot ----
+
+    public static IEnumerable<object[]> InternalSlotDialects() => ClientListHarness.DialectData();
+
+    /// <summary>SqlServer, DuckDb and PostgreSql binders work on the recording command; Oracle needs BindByName on a provider command.</summary>
+    private static DbCommandCompiledSqlBinder? RecordingBinderOf(TargetSqlDialect dialect) => dialect switch
+    {
+        TargetSqlDialect.SqlServer => new SqlServerCompiledSqlBinder(),
+        TargetSqlDialect.DuckDb => new DuckDbCompiledSqlBinder(),
+        TargetSqlDialect.PostgreSql => new PostgreSqlCompiledSqlBinder(),
+        _ => null
+    };
+
+    /// <summary>Compiles a statement with a row filter, a tenant guard and a column mask around the caller parameter <paramref name="callerName"/>.</summary>
+    private static CompiledSql CompileWithInternalSlots(TargetSqlDialect dialect, string callerName = "p0")
+    {
+        var h = new ClientListHarness();
+        h.RowFilters.NoPolicy.Remove(PolicyFixtures.Orders);
+        h.RowFilters.Predicates[PolicyFixtures.Orders] = PolicyPredicate.Create(
+            new BinaryExpression(
+                new ColumnReference(new SqlQualifiedName([new SqlIdentifier("Region", true)])),
+                BinaryOperator.Equal, new PolicyParameterExpression("__pol_region", SqlParameterType.String)),
+            new Dictionary<string, PolicyValue> { ["__pol_region"] = new("EU", SqlParameterType.String) });
+        h.Masks.Masks[(PolicyFixtures.Orders, "email")] = new MaskSpec(
+            MaskKind.Redact,
+            new MaskArguments(Constant: new PolicyParameterExpression("m_redact", SqlParameterType.String, ParameterOrigin.Mask)),
+            new Dictionary<string, PolicyValue> { ["m_redact"] = new("[REDACTED]", SqlParameterType.String) }.ToFrozenDictionary());
+        return h.Compile(dialect, $"SELECT id, email FROM orders WHERE id = __param_{callerName}");
+    }
+
+    private static List<object?> BoundValues(DbCommandCompiledSqlBinder binder, CompiledSql compiled, IReadOnlyDictionary<string, object?> client)
+    {
+        using var cmd = new TrinoSqlEngine.Tests.Compiler.BinderMutationTests.RecCommand();
+        binder.Bind(cmd, compiled, client);
+        return cmd.Parameters.Cast<System.Data.Common.DbParameter>().Select(p => p.Value).ToList();
+    }
+
+    private static Dictionary<string, object?> CallerP0(object? value) => new(StringComparer.OrdinalIgnoreCase) { ["p0"] = value };
+
+    private static void AssertCallerValueOnlyInItsOwnSlot(TargetSqlDialect dialect, ParameterOrigin internalOrigin)
+    {
+        const string evil = "evil-caller-value";
+        var compiled = CompileWithInternalSlots(dialect);
+
+        var client = Assert.Single(compiled.Parameters, p => p.Origin == ParameterOrigin.ClientNamed);
+        Assert.Equal("p0", client.SourceName);
+        Assert.Null(client.Value);   // a client slot never carries a value at compile time
+        var internalSlots = compiled.Parameters.Where(p => p.Origin == internalOrigin).ToList();
+        Assert.NotEmpty(internalSlots);
+        Assert.All(internalSlots, s => Assert.NotEqual(client.Marker, s.Marker));
+        Assert.Equal(compiled.Parameters.Length, compiled.Parameters.Select(p => p.Ordinal).Distinct().Count());
+
+        if (RecordingBinderOf(dialect) is not { } binder)
+        {
+            return;
+        }
+
+        var values = BoundValues(binder, compiled, CallerP0(evil));
+        Assert.Equal(compiled.Parameters.Length, values.Count);
+        for (int i = 0; i < compiled.Parameters.Length; i++)
+        {
+            if (compiled.Parameters[i].Origin == ParameterOrigin.ClientNamed)
+            {
+                Assert.Equal(evil, values[i]);
+            }
+            else
+            {
+                Assert.NotEqual(evil, values[i]);
+                Assert.Equal(compiled.Parameters[i].Value, values[i]);
+            }
+        }
+    }
+
+    [Fact]
+    public void ClientParameterNamedP0_BindsCallerValue_ToItsOwnSlotOnly()
+    {
+        using var cmd = new TrinoSqlEngine.Tests.Compiler.BinderMutationTests.RecCommand();
+        var compiled = Compiled("SELECT 1",
+            Param(0, "EU", SqlParameterType.String, ParameterOrigin.Policy, "__pol_region"),
+            Param(1, null, SqlParameterType.String, ParameterOrigin.ClientNamed, "p0"),
+            Param(2, null, SqlParameterType.String, ParameterOrigin.ClientNamed, "p1"));
+
+        _binder.Bind(cmd, compiled, new Dictionary<string, object?> { ["p0"] = "caller0", ["p1"] = "caller1" });
+
+        Assert.Equal("EU", cmd.Parameters[0].Value);
+        Assert.Equal("caller0", cmd.Parameters[1].Value);
+        Assert.Equal("caller1", cmd.Parameters[2].Value);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void ClientParameterNamedP0_NextToPolicySlotP0_PolicyValueUnchanged()
+    {
+        // The policy slot has ordinal 0 (marker p0) and the caller key is p0: the policy value stays.
+        using var cmd = new TrinoSqlEngine.Tests.Compiler.BinderMutationTests.RecCommand();
+        var compiled = Compiled("SELECT 1",
+            Param(0, "EU", SqlParameterType.String, ParameterOrigin.Policy, "__pol_region"),
+            Param(1, null, SqlParameterType.String, ParameterOrigin.ClientNamed, "p0"));
+
+        _binder.Bind(cmd, compiled, new Dictionary<string, object?> { ["p0"] = "evil", ["@p0"] = "evil" });
+
+        Assert.Equal("EU", cmd.Parameters[0].Value);
+        Assert.Equal("evil", cmd.Parameters[1].Value);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void ClientParameterNamedUpperP0_BindsToOneClientSlot_NeverToAnInternalSlot()
+    {
+        using var cmd = new TrinoSqlEngine.Tests.Compiler.BinderMutationTests.RecCommand();
+        var compiled = Compiled("SELECT 1",
+            Param(0, "acme", SqlParameterType.String, ParameterOrigin.Tenant, "__autheris_tenant"),
+            Param(1, "EU", SqlParameterType.String, ParameterOrigin.Policy, "__pol_region"),
+            Param(2, null, SqlParameterType.String, ParameterOrigin.ClientNamed, "P0"));
+
+        _binder.Bind(cmd, compiled, new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase) { ["p0"] = "evil" });
+
+        Assert.Equal("acme", cmd.Parameters[0].Value);
+        Assert.Equal("EU", cmd.Parameters[1].Value);
+        Assert.Equal("evil", cmd.Parameters[2].Value);
+        Assert.Single(cmd.Parameters.Cast<System.Data.Common.DbParameter>(), p => Equals(p.Value, "evil"));
+    }
+
+    [Theory]
+    [MemberData(nameof(InternalSlotDialects))]
+    [Trait("Category", "Security")]
+    public void ClientParameterNamedP0_DoesNotSatisfyRowFilterBind_PerDialect(TargetSqlDialect dialect) =>
+        AssertCallerValueOnlyInItsOwnSlot(dialect, ParameterOrigin.Policy);
+
+    [Theory]
+    [MemberData(nameof(InternalSlotDialects))]
+    [Trait("Category", "Security")]
+    public void ClientParameterNamedP0_DoesNotAlterTenantBind_PerDialect(TargetSqlDialect dialect) =>
+        AssertCallerValueOnlyInItsOwnSlot(dialect, ParameterOrigin.Tenant);
+
+    [Theory]
+    [MemberData(nameof(InternalSlotDialects))]
+    [Trait("Category", "Security")]
+    public void ClientParameterNamedP0_DoesNotAlterMaskBind_PerDialect(TargetSqlDialect dialect) =>
+        AssertCallerValueOnlyInItsOwnSlot(dialect, ParameterOrigin.Mask);
+
+    [Theory]
+    [MemberData(nameof(InternalSlotDialects))]
+    [Trait("Category", "Security")]
+    public void ClientParameterNamedP0_DoesNotAlterPageOffsetBind_PerDialect(TargetSqlDialect dialect)
+    {
+        // The page offset slot is created outside the statement compile; model it next to a caller p0 with the same shape.
+        var compiled = Compiled("SELECT 1",
+            Param(0, 20L, SqlParameterType.Int64, ParameterOrigin.PageOffset),
+            Param(1, null, SqlParameterType.String, ParameterOrigin.ClientNamed, "p0")) with { Dialect = dialect };
+        if (RecordingBinderOf(dialect) is not { } binder)
+        {
+            Assert.Equal(20L, compiled.Parameters[0].Value);
+            Assert.Null(compiled.Parameters[1].Value);
+            return;
+        }
+
+        var values = BoundValues(binder, compiled, CallerP0("evil"));
+        Assert.Equal(20L, Convert.ToInt64(values[0]));
+        Assert.Equal("evil", values[1]);
+    }
+
+    [Theory]
+    [MemberData(nameof(InternalSlotDialects))]
+    [Trait("Category", "Security")]
+    public void ClientParameterNamedP0_MissingValue_FailsClosed_NoFallbackToInternalSlot(TargetSqlDialect dialect)
+    {
+        var compiled = CompileWithInternalSlots(dialect);
+        if (RecordingBinderOf(dialect) is not { } binder)
+        {
+            Assert.Single(compiled.Parameters, p => p.Origin == ParameterOrigin.ClientNamed);
+            return;
+        }
+
+        // Only unrelated keys (including the marker spellings of the internal slots) are supplied.
+        using var cmd = new TrinoSqlEngine.Tests.Compiler.BinderMutationTests.RecCommand();
+        var client = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase) { ["p1"] = "x", ["p2"] = "y", ["__autheris_tenant"] = "z" };
+        Assert.ThrowsAny<System.Security.SecurityException>(() => binder.Bind(cmd, compiled, client));
+    }
+
+    [Theory]
+    [InlineData(TargetSqlDialect.SqlServer)]
+    [InlineData(TargetSqlDialect.Oracle)]
+    [InlineData(TargetSqlDialect.PostgreSql)]
+    [InlineData(TargetSqlDialect.DuckDb)]
+    [Trait("Category", "Security")]
+    public void ClientParameterNamedP0_InUnboundEmitter_NeverPrintsCallerName(TargetSqlDialect dialect)
+    {
+        // The unbound emitter is diagnostic only: a synthetic caller reference becomes the next ordinal marker, never its own name.
+        var statement = CompilerTestHelpers.Build("SELECT 1 WHERE 1 = __param_callerzz AND 2 = __param_p7");
+        var sql = SqlDialectGeneratorFactory.GetGenerator(dialect).GenerateSql(statement);
+
+        Assert.DoesNotContain("callerzz", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("p7", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("__param_", sql, StringComparison.Ordinal);
     }
 
     [Fact]

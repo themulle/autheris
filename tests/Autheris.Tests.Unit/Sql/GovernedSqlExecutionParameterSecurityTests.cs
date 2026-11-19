@@ -199,6 +199,88 @@ public sealed class GovernedSqlExecutionParameterSecurityTests
         ex.Message.ShouldContain("reserved gateway parameter name");
     }
 
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData("__x")]
+    [InlineData("gql_x")]
+    [InlineData("autheris_x")]
+    [InlineData("rls_x")]
+    public async Task ReservedPrefixes_StillRejected_403(string name)
+    {
+        var service = CreateService(CreateTable(new TableIdentifier(DataSource, "public", "orders")));
+        var request = new GovernedSqlQueryRequest(
+            Sql: $"SELECT id FROM orders WHERE id = @{name}",
+            Parameters: new Dictionary<string, object?> { [name] = 42 },
+            DataSourceName: DataSource);
+
+        var ex = await Should.ThrowAsync<Exception>(async () =>
+            await service.ExecuteQueryBufferedAsync(request, CreateUser(), new TenantId(Tenant)));
+
+        Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(ex, out var mapping).ShouldBeTrue();
+        mapping.Status.ShouldBe(403);
+        mapping.Code.ShouldBe("SQL_POLICY_VIOLATION");
+    }
+
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData("__zz9")]
+    [InlineData("gql_zz9")]
+    [InlineData("autheris_zz9")]
+    [InlineData("rls_zz9")]
+    public async Task ReservedPrefixError_DoesNotEchoNameOrValue(string name)
+    {
+        const string value = "SENTINEL-869-VALUE";
+        var service = CreateService(CreateTable(new TableIdentifier(DataSource, "public", "orders")));
+        var request = new GovernedSqlQueryRequest(
+            Sql: $"SELECT id FROM orders WHERE region = @{name}",
+            Parameters: new Dictionary<string, object?> { [name] = value },
+            DataSourceName: DataSource);
+
+        var ex = await Should.ThrowAsync<Exception>(async () =>
+            await service.ExecuteQueryBufferedAsync(request, CreateUser(), new TenantId(Tenant)));
+
+        Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(ex, out var mapping).ShouldBeTrue();
+        mapping.Title.ShouldNotContain("zz9");
+        mapping.Title.ShouldNotContain(value);
+        ex.Message.ShouldNotContain(value);
+        ex.Message.ShouldNotContain("zz9");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void CyrillicLookalikeP0_IsNotAParameter()
+    {
+        // U+0440 (Cyrillic er) looks like p. The grammar is ASCII-only, so neither spelling turns into a parameter placeholder.
+        var supplied = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase) { ["\u0440" + "0"] = "evil" };
+
+        var cyrillicText = GovernedSqlExecutionService.NormalizeClientParameters(
+            "SELECT id FROM orders WHERE id = @\u04400", supplied, null, out var cyrillicNames);
+        var asciiText = GovernedSqlExecutionService.NormalizeClientParameters(
+            "SELECT id FROM orders WHERE id = @p0", supplied, null, out var asciiNames);
+
+        cyrillicNames.ShouldBeEmpty();
+        asciiNames.ShouldBeEmpty();
+        cyrillicText.ShouldNotContain("__param_");
+        asciiText.ShouldNotContain("__param_");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task ClientParameterNamedP0_Compiles_AsAClientSlot_NextToTheTenantSlot()
+    {
+        var service = CreateService(CreateTable(new TableIdentifier(DataSource, "public", "orders")));
+        var supplied = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase) { ["p0"] = "evil" };
+        var text = GovernedSqlExecutionService.NormalizeClientParameters(
+            "SELECT id FROM orders WHERE region = @p0", supplied, null, out var names);
+
+        var compiled = await service.CompileAsync(text, CreateUser(), new TenantId(Tenant));
+
+        names.ShouldContain("p0");
+        compiled.Parameters.ShouldContain(p => p.Origin == ParameterOrigin.ClientNamed && p.SourceName == "p0" && p.Value == null);
+        compiled.Parameters.Where(p => p.Origin != ParameterOrigin.ClientNamed).ShouldAllBe(p => !Equals(p.Value, "evil"));
+        compiled.Sql.ShouldNotContain("evil");
+    }
+
     [Fact]
     public void RowFilterSqlBuilder_Uses_Internal_Gql_Prefix_For_Parameters()
     {

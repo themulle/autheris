@@ -303,6 +303,70 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<GovernedWebSq
         result.Rows.ShouldAllBe(r => Equals(r["tenant_id"], "tenant_123"));
     }
 
+    private async Task<(HttpStatusCode Status, string Body)> PostSqlWithParametersAsync(string sql, string tenant, Dictionary<string, object?> parameters)
+    {
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-WEBSQL");
+        client.DefaultRequestHeaders.Add("X-Test-Tenant", tenant);
+        var response = await client.PostAsJsonAsync("/api/v1/sql", new { sql, parameters });
+        return (response.StatusCode, await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Post_Sql_ParameterNamedP0_Returns200_AndRowFilterStillApplies()
+    {
+        await RegisterTableAsync("orders", "id", "total", "email", "ssn", "tenant_id");
+
+        // The tenant guard is an internal bind with ordinal 0. A caller parameter named p0 is its own slot and never replaces it.
+        var (status, body) = await PostSqlWithParametersAsync("SELECT id, tenant_id FROM orders WHERE id = @p0", "tenant_123",
+            new Dictionary<string, object?> { ["p0"] = "9999" });
+
+        status.ShouldBe(HttpStatusCode.OK, body);
+        using var doc = JsonDocument.Parse(body);
+        doc.RootElement.GetProperty("rowCount").GetInt32().ShouldBe(0);   // id 9999 belongs to tenant_other
+        body.ShouldNotContain("tenant_other");
+
+        var (ownStatus, ownBody) = await PostSqlWithParametersAsync("SELECT id, tenant_id FROM orders WHERE id = @P0", "tenant_123",
+            new Dictionary<string, object?> { ["@p0"] = "5" });
+
+        ownStatus.ShouldBe(HttpStatusCode.OK, ownBody);
+        using var ownDoc = JsonDocument.Parse(ownBody);
+        ownDoc.RootElement.GetProperty("rowCount").GetInt32().ShouldBe(1);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Post_Sql_CaseDuplicateParameterKeys_Returns400()
+    {
+        await RegisterTableAsync("orders", "id", "total", "email", "ssn", "tenant_id");
+
+        var (status, body) = await PostSqlWithParametersAsync("SELECT id FROM orders WHERE id = @p0", "tenant_123",
+            new Dictionary<string, object?> { ["p0"] = "5", ["P0"] = "9999" });
+
+        status.ShouldNotBe(HttpStatusCode.OK, body);
+        ((int)status).ShouldBeInRange(400, 499);
+        body.ShouldNotContain("9999");
+    }
+
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData("__zz1")]
+    [InlineData("gql_zz1")]
+    [InlineData("autheris_zz1")]
+    public async Task Post_Sql_ReservedPrefixParameter_Returns403(string name)
+    {
+        await RegisterTableAsync("orders", "id", "total", "email", "ssn", "tenant_id");
+
+        var (status, body) = await PostSqlWithParametersAsync($"SELECT id FROM orders WHERE id = @{name}", "tenant_123",
+            new Dictionary<string, object?> { [name] = "SENTINEL-869-VALUE" });
+
+        status.ShouldBe(HttpStatusCode.Forbidden, body);
+        Code(body).ShouldBe("SQL_POLICY_VIOLATION");
+        body.ShouldNotContain("zz1");
+        body.ShouldNotContain("SENTINEL-869-VALUE");
+    }
+
     [Fact]
     public async Task WebSql_ColumnMaskingRules_AreAppliedInTheResult()
     {
