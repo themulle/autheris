@@ -12,12 +12,14 @@ using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Catalog.Services;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Lineage;
+using Autheris.Application.Mcp.Services;
 using Autheris.Application.Security;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Security;
 using Autheris.Modules.Dbt;
 using Autheris.GraphQL.Types;
 using Autheris.Infrastructure.Persistence;
@@ -25,6 +27,7 @@ using Autheris.Tests.Common;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -321,6 +324,316 @@ public sealed class DiscoveryArtifactServingTests
         var oversizedResult = await svc.IngestManifestStreamAsClusterAdminAsync(msOversized, dryRun: false);
         oversizedResult.Warnings.ShouldContain(w => w.Contains("SAMPLE_ROW_LIMIT_EXCEEDED", StringComparison.Ordinal));
         artifactStore.UpsertCalls.Count.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task RestrictedScope_WithholdsValueBearingArtifacts_ForNonClearColumns_AcrossRestGraphQlAndMcp()
+    {
+        var tables = new FakeDiscoveryTableRepository();
+        var orders = DiscoveryTestBuilder.MakeTable(
+            "sales",
+            "orders",
+            ownerTenantId: "tenant-a",
+            columns:
+            [
+                ("id", false, false),
+                ("ssn", true, false),
+                ("cleared_secret", true, false),
+                ("denied_col", true, false)
+            ]);
+        tables.Tables.Add(orders);
+
+        const string canaryTop = "CANARY_TOP_VAL";
+        const string canaryMin = "CANARY_MIN_VAL";
+        const string canaryMax = "CANARY_MAX_VAL";
+        const string canarySample = "CANARY_SAMPLE_VAL";
+
+        var store = new FakeDiscoveryArtifactStore();
+        var artifact = new DiscoveryArtifacts(
+            orders.Table.Id,
+            "tenant-a",
+            SamplesJson: JsonSerializer.Serialize(new[]
+            {
+                new Dictionary<string, object?>
+                {
+                    ["id"] = 1,
+                    ["ssn"] = canarySample,
+                    ["cleared_secret"] = "CLEARED_SAMPLE_VAL",
+                    ["denied_col"] = "DENIED_SAMPLE_VAL"
+                }
+            }),
+            StatisticsJson: JsonSerializer.Serialize(new
+            {
+                table = new { approxRowCount = 500, sizeBytes = 4096 },
+                columns = new Dictionary<string, object>
+                {
+                    ["id"] = new
+                    {
+                        nullable = false,
+                        nullRatio = 0.0,
+                        approxDistinctCount = 500,
+                        minLength = 1,
+                        maxLength = 4,
+                        minValue = "1",
+                        maxValue = "500",
+                        topValues = new[] { "1", "2" }
+                    },
+                    ["ssn"] = new
+                    {
+                        nullable = false,
+                        nullRatio = 0.05,
+                        approxDistinctCount = 450,
+                        minLength = 11,
+                        maxLength = 11,
+                        minValue = canaryMin,
+                        maxValue = canaryMax,
+                        topValues = new[] { canaryTop }
+                    },
+                    ["cleared_secret"] = new
+                    {
+                        nullable = true,
+                        nullRatio = 0.1,
+                        approxDistinctCount = 50,
+                        minLength = 4,
+                        maxLength = 16,
+                        minValue = "CLEARED_MIN",
+                        maxValue = "CLEARED_MAX",
+                        topValues = new[] { "CLEARED_TOP" }
+                    },
+                    ["denied_col"] = new
+                    {
+                        nullRatio = 0.25,
+                        topValues = new[] { "DENIED_TOP" }
+                    }
+                }
+            }),
+            ContentSha256: "sha1",
+            UploadedBy: "up",
+            UploadedAt: DateTimeOffset.UtcNow,
+            SchemaVersion: 1);
+        store.Artifacts[orders.Table.Id] = artifact;
+
+        var capturingStore = new CapturingArtifactStore();
+        capturingStore.Items[orders.Table.Id] = artifact;
+
+        var restrictedPolicy = RestrictedScopePolicy.FromOptions(new RestrictedScopeOptions
+        {
+            Enabled = true,
+            Scopes = ["Agent.Read"]
+        });
+
+        var pdp = new FakeAccessDecisionPoint(req =>
+        {
+            var isRestricted = req.Subject.Claims?.Any(c =>
+                (c.Type == "scp" || c.Type == "scope") &&
+                c.Value.Contains("Agent.Read", StringComparison.OrdinalIgnoreCase)) == true;
+
+            var colAccess = new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["id"] = ColumnAccessLevel.Clear,
+                ["ssn"] = ColumnAccessLevel.Clear,
+                ["cleared_secret"] = ColumnAccessLevel.Clear,
+                ["denied_col"] = ColumnAccessLevel.Deny
+            };
+
+            return new TableAccessDecision(
+                req.Object.Identifier,
+                IsAllowed: true,
+                ColumnAccess: colAccess,
+                CombinedRowFilterSql: null,
+                DeniedReasons: [])
+            {
+                ScopeClearance = isRestricted
+                    ? new RestrictedScopeClearance(
+                        new HashSet<string>(["Agent.Read"], StringComparer.OrdinalIgnoreCase),
+                        new HashSet<string>(["cleared_secret"], StringComparer.OrdinalIgnoreCase))
+                    : null
+            };
+        });
+
+        var discovery = DiscoveryTestBuilder.CreateService(tables: tables, pdp: pdp, artifacts: store);
+        var artifactService = new DiscoveryArtifactService(
+            tables,
+            capturingStore,
+            new FakeDiscoveryOwnershipRepository(),
+            new FakeAuditWriter(),
+            new GatewayRoleEvaluator(),
+            Options.Create(new GatewayOptions { Tenancy = TenancyShape.Multi.Options() }),
+            Options.Create(new CatalogDiscoveryOptions()),
+            decisionPoint: pdp,
+            restrictedScopes: restrictedPolicy);
+        var mcp = new McpDatasetCatalog(
+            tables,
+            new FakeDiscoveryConsentRepository(),
+            Substitute.For<IGatewayExecutionService>(),
+            discoveryService: discovery);
+
+        var restrictedUser = DiscoveryTestBuilder.User("S-AGENT", "tenant-a", scopes: "api://app/Agent.Read");
+        var restrictedCaller = DiscoveryTestBuilder.Caller(restrictedUser, new TenantId("tenant-a"));
+
+        // 1. REST Discovery statistics: non-value stats remain served, value-bearing members withheld for non-Clear columns
+        var restObj = await discovery.GetAsync(orders.Identifier, restrictedCaller);
+        restObj.ShouldNotBeNull();
+        restObj!.SamplesAvailable.ShouldBeTrue();
+        var ssnRest = restObj.Columns.Single(c => c.Name == "ssn");
+        ssnRest.State.ShouldBe(DiscoveryColumnState.Masked);
+        ssnRest.Statistics.ShouldNotBeNull();
+        ssnRest.Statistics!.Nullable.ShouldBe(false);
+        ssnRest.Statistics.NullRatio.ShouldBe(0.05);
+        ssnRest.Statistics.ApproxDistinctCount.ShouldBe(450L);
+        ssnRest.Statistics.MinLength.ShouldBe(11);
+        ssnRest.Statistics.MaxLength.ShouldBe(11);
+        ssnRest.Statistics.MinValue.ShouldBeNull();
+        ssnRest.Statistics.MaxValue.ShouldBeNull();
+        ssnRest.Statistics.TopValues.ShouldBeNull();
+
+        var clearedRest = restObj.Columns.Single(c => c.Name == "cleared_secret");
+        clearedRest.State.ShouldBe(DiscoveryColumnState.Clear);
+        clearedRest.Statistics!.MinValue.ShouldBe("CLEARED_MIN");
+        clearedRest.Statistics.MaxValue.ShouldBe("CLEARED_MAX");
+        clearedRest.Statistics.TopValues.ShouldBe(["CLEARED_TOP"]);
+
+        var idRest = restObj.Columns.Single(c => c.Name == "id");
+        idRest.State.ShouldBe(DiscoveryColumnState.Clear);
+        idRest.Statistics!.MinValue.ShouldBe("1");
+        idRest.Statistics.TopValues.ShouldBe(["1", "2"]);
+
+        restObj.Columns.Single(c => c.Name == "denied_col").Statistics.ShouldBeNull();
+
+        // 2. GraphQL Discovery statistics
+        var gqlDto = Query.ToTableMetadataDto(restObj);
+        var ssnGql = gqlDto.Columns.Single(c => c.Name == "ssn");
+        ssnGql.Statistics!.MinValue.ShouldBeNull();
+        ssnGql.Statistics.MaxValue.ShouldBeNull();
+        ssnGql.Statistics.TopValues.ShouldBeNull();
+        ssnGql.Statistics.NullRatio.ShouldBe(0.05);
+
+        // 3. MCP Discovery value profile
+        var mcpDesc = await mcp.DescribeDatasetAsync(restrictedUser, orders.Identifier.ToString());
+        mcpDesc.ShouldNotBeNull();
+        var ssnMcp = mcpDesc!.Columns.Single(c => c.Name == "ssn");
+        ssnMcp.ValueProfile.ShouldNotBeNull();
+        ssnMcp.ValueProfile!.MinValue.ShouldBeNull();
+        ssnMcp.ValueProfile.MaxValue.ShouldBeNull();
+        ssnMcp.ValueProfile.AllowedValues.ShouldBeNull();
+        ssnMcp.ValueProfile.EmptyShare.ShouldBe(0.05);
+        ssnMcp.ValueProfile.TypicalLength.ShouldBe(11);
+        ssnMcp.ValueProfile.ApproximateDistinctCount.ShouldBe(450L);
+
+        var serializedMcp = JsonSerializer.Serialize(mcpDesc);
+        serializedMcp.ShouldNotContain(canaryTop);
+        serializedMcp.ShouldNotContain(canaryMin);
+        serializedMcp.ShouldNotContain(canaryMax);
+        serializedMcp.ShouldNotContain(canarySample);
+
+        // 4. REST Samples: only Clear columns are served; masked/denied columns are stripped
+        var restSamples = await artifactService.GetSamplesAsync(restrictedUser, orders.Identifier.ToString(), surface: DiscoverySurface.Rest);
+        restSamples.Outcome.ShouldBe(DiscoveryArtifactOutcome.Ok);
+        restSamples.Payload!.Available.ShouldBeTrue();
+        restSamples.Payload.Samples.Count.ShouldBe(1);
+        restSamples.Payload.Samples[0].ContainsKey("id").ShouldBeTrue();
+        restSamples.Payload.Samples[0].ContainsKey("cleared_secret").ShouldBeTrue();
+        restSamples.Payload.Samples[0].ContainsKey("ssn").ShouldBeFalse();
+        restSamples.Payload.Samples[0].ContainsKey("denied_col").ShouldBeFalse();
+
+        // 5. GraphQL Samples: no canary in serialized sample output
+        var gqlAccessor = new HttpContextAccessor { HttpContext = new DefaultHttpContext { User = restrictedUser } };
+        var gqlSamples = await new Query().GetCatalogSamplesAsync("sales", "dbo", "orders", limit: 5, artifactService, gqlAccessor);
+        gqlSamples.Available.ShouldBeTrue();
+        var gqlSamplesJson = JsonSerializer.Serialize(gqlSamples);
+        gqlSamplesJson.ShouldNotContain(canarySample);
+        gqlSamplesJson.ShouldNotContain("DENIED_SAMPLE_VAL");
+        gqlSamplesJson.ShouldContain("CLEARED_SAMPLE_VAL");
+
+        // 6. Unrestricted caller still receives full value-bearing artifacts
+        var normalUser = DiscoveryTestBuilder.User("S-USER", "tenant-a");
+        var normalObj = await discovery.GetAsync(orders.Identifier, DiscoveryTestBuilder.Caller(normalUser));
+        normalObj!.Columns.Single(c => c.Name == "ssn").Statistics!.TopValues.ShouldBe([canaryTop]);
+        var normalSamples = await artifactService.GetSamplesAsync(normalUser, orders.Identifier.ToString());
+        normalSamples.Payload!.Samples[0].ContainsKey("ssn").ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task RestrictedScope_AllColumnsMaskedOrDenied_ReturnsSamplesUnavailable_AndFailsClosedWithoutPdp()
+    {
+        var tables = new FakeDiscoveryTableRepository();
+        var secrets = DiscoveryTestBuilder.MakeTable(
+            "sales",
+            "secrets",
+            ownerTenantId: "tenant-a",
+            columns: [("ssn", true, false)]);
+        tables.Tables.Add(secrets);
+
+        var artifact = new DiscoveryArtifacts(
+            secrets.Table.Id,
+            "tenant-a",
+            SamplesJson: """[{"ssn":"CANARY_ONLY_MASKED"}]""",
+            StatisticsJson: JsonSerializer.Serialize(new
+            {
+                columns = new Dictionary<string, object>
+                {
+                    ["ssn"] = new { nullRatio = 0.0, minValue = "CANARY", topValues = new[] { "CANARY" } }
+                }
+            }),
+            ContentSha256: "sha2",
+            UploadedBy: "up",
+            UploadedAt: DateTimeOffset.UtcNow,
+            SchemaVersion: 1);
+
+        var store = new FakeDiscoveryArtifactStore();
+        store.Artifacts[secrets.Table.Id] = artifact;
+        var capturingStore = new CapturingArtifactStore();
+        capturingStore.Items[secrets.Table.Id] = artifact;
+
+        var pdp = new FakeAccessDecisionPoint(req => new TableAccessDecision(
+            req.Object.Identifier,
+            IsAllowed: true,
+            ColumnAccess: new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["ssn"] = ColumnAccessLevel.Mask
+            },
+            CombinedRowFilterSql: null,
+            DeniedReasons: [])
+        {
+            ScopeClearance = new RestrictedScopeClearance(
+                new HashSet<string>(["Agent.Read"], StringComparer.OrdinalIgnoreCase),
+                new HashSet<string>(StringComparer.OrdinalIgnoreCase))
+        });
+
+        var discovery = DiscoveryTestBuilder.CreateService(tables: tables, pdp: pdp, artifacts: store);
+        var restrictedUser = DiscoveryTestBuilder.User("S-AGENT", "tenant-a", scopes: "Agent.Read");
+        var obj = await discovery.GetAsync(secrets.Identifier, DiscoveryTestBuilder.Caller(restrictedUser));
+        obj.ShouldNotBeNull();
+        obj!.SamplesAvailable.ShouldBeFalse();
+        obj.Columns.Single(c => c.Name == "ssn").Statistics!.TopValues.ShouldBeNull();
+        obj.Columns.Single(c => c.Name == "ssn").Statistics!.MinValue.ShouldBeNull();
+        obj.Columns.Single(c => c.Name == "ssn").Statistics!.NullRatio.ShouldBe(0.0);
+
+        var withPdp = new DiscoveryArtifactService(
+            tables,
+            capturingStore,
+            new FakeDiscoveryOwnershipRepository(),
+            new FakeAuditWriter(),
+            new GatewayRoleEvaluator(),
+            Options.Create(new GatewayOptions { Tenancy = TenancyShape.Multi.Options() }),
+            Options.Create(new CatalogDiscoveryOptions()),
+            decisionPoint: pdp);
+        var resWithPdp = await withPdp.GetSamplesAsync(restrictedUser, secrets.Identifier.ToString());
+        resWithPdp.Payload!.Available.ShouldBeFalse();
+        resWithPdp.Payload.Samples.ShouldBeEmpty();
+
+        // Fail-closed when IAccessDecisionPoint is not provided for a restricted-scope caller
+        var withoutPdp = new DiscoveryArtifactService(
+            tables,
+            capturingStore,
+            new FakeDiscoveryOwnershipRepository(),
+            new FakeAuditWriter(),
+            new GatewayRoleEvaluator(),
+            Options.Create(new GatewayOptions { Tenancy = TenancyShape.Multi.Options() }),
+            Options.Create(new CatalogDiscoveryOptions()));
+        var resWithoutPdp = await withoutPdp.GetSamplesAsync(restrictedUser, secrets.Identifier.ToString());
+        resWithoutPdp.Payload!.Available.ShouldBeFalse();
+        resWithoutPdp.Payload.Samples.ShouldBeEmpty();
     }
 
     private sealed class InMemoryDbtTableRepo(Dictionary<TableIdentifier, TableMetadata> store) : ITableMetadataRepository

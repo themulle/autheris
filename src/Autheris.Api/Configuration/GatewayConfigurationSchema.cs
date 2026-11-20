@@ -84,7 +84,6 @@ public static class GatewayConfigurationSchema
     [
         "Gateway:GovernanceDb:AuditHmacKey",
         "Gateway:Audit:AuditHmacKey",
-        "Gateway:Audit:ActorPseudonymizationKey",
         "Gateway:Cluster:Secret",
         // DefaultEnvironmentSecretProvider resolves these well-known secret references from configuration.
         "Gateway:DataMasking:HmacSecret",

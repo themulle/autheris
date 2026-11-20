@@ -207,4 +207,53 @@ public sealed class AuditRetentionPurgeWorkerTests
         // Verification: did not record audit completion because it aborted early
         await _auditWriter.DidNotReceive().RecordRequiredAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>());
     }
+
+    [Fact]
+    public async Task ExecutePurgeCycle_IncludesAuditLogRetentionDaysInEffectiveThreshold()
+    {
+        var fixedNow = new DateTimeOffset(2026, 11, 20, 12, 0, 0, TimeSpan.Zero);
+        var timeProvider = new FakeTimeProvider(fixedNow);
+        var gatewayOptionsMonitor = Substitute.For<IOptionsMonitor<GatewayOptions>>();
+        gatewayOptionsMonitor.CurrentValue.Returns(new GatewayOptions
+        {
+            Audit = new AuditOptions
+            {
+                AuditLogRetentionDays = 5000
+            }
+        });
+
+        var worker = new AuditRetentionPurgeWorker(
+            _scopeFactory,
+            _clusterState,
+            _optionsMonitor,
+            _auditWriter,
+            _anchorStore,
+            _logger,
+            _keyProvider,
+            null,
+            timeProvider,
+            gatewayOptionsMonitor);
+
+        var options = new AuditRetentionOptions
+        {
+            Enabled = true,
+            RetentionDays = 3650,
+            SecurityDays = 3650,
+            DataAccessDays = 400,
+            OperationsDays = 30,
+            AggregatedDays = 90,
+            BatchSize = 100,
+            InterBatchDelay = TimeSpan.Zero
+        };
+
+        DateTimeOffset? capturedThreshold = null;
+        _repository.PlanPurgePrefixAsync(
+                Arg.Do<DateTimeOffset>(t => capturedThreshold = t),
+                Arg.Any<CancellationToken>())
+            .Returns(((long, long, string, long)?)null);
+
+        await worker.ExecutePurgeCycleAsync(options, CancellationToken.None);
+
+        capturedThreshold.ShouldBe(fixedNow - TimeSpan.FromDays(5000));
+    }
 }
