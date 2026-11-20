@@ -2,19 +2,39 @@ using System.ComponentModel.DataAnnotations;
 
 namespace Autheris.Domain.Options;
 
+/// <summary>Audit log retention and purge worker settings (<c>Gateway:Audit:Retention</c>).</summary>
 public sealed class AuditRetentionOptions
 {
     public const string SectionName = GatewaySections.AuditRetention;
 
+    /// <summary>Enables periodic audit log retention enforcement and purging.</summary>
     public bool Enabled { get; init; } = true;
+
+    /// <summary>Default retention period in days for audit entries without a category-specific override.</summary>
     public int RetentionDays { get; init; } = 3650;
+
+    /// <summary>Retention period in days for security and administrative (Tier-A) audit events.</summary>
     public int SecurityDays { get; init; } = 3650;
+
+    /// <summary>Retention period in days for data-access (Tier-B) audit events.</summary>
     public int DataAccessDays { get; init; } = 400;
+
+    /// <summary>Retention period in days for aggregated audit summary records.</summary>
     public int AggregatedDays { get; init; } = 90;
+
+    /// <summary>Retention period in days for operational and diagnostic audit events.</summary>
     public int OperationsDays { get; init; } = 30;
+
+    /// <summary>Maximum number of expired audit rows deleted per purge batch.</summary>
     public int BatchSize { get; init; } = 5000;
+
+    /// <summary>Interval between scheduled audit retention purge runs.</summary>
     public TimeSpan PurgeInterval { get; init; } = TimeSpan.FromHours(24);
+
+    /// <summary>Distributed lease timeout for the audit retention purge job.</summary>
     public TimeSpan LockTimeout { get; init; } = TimeSpan.FromMinutes(30);
+
+    /// <summary>Delay between consecutive delete batches to limit database write contention.</summary>
     public TimeSpan InterBatchDelay { get; init; } = TimeSpan.FromMilliseconds(50);
 }
 
@@ -43,6 +63,8 @@ public sealed class AuditOptions
     public AuditChainViolationPolicy? OnChainViolation { get; init; }
 
     [Range(365, 7300)] public int AuditLogRetentionDays { get; init; } = 3650;
+
+    /// <summary>Audit log retention and purge worker settings (<c>Gateway:Audit:Retention</c>).</summary>
     public AuditRetentionOptions Retention { get; init; } = new();
 
     /// <summary>
@@ -105,6 +127,9 @@ public sealed class AuditOptions
 /// </summary>
 public sealed class LoggingOptions
 {
+    /// <summary>When true, logs compiled SQL statements emitted by the query engine.</summary>
     public bool LogGeneratedSql { get; set; } = false;
+
+    /// <summary>Controls whether SQL statement text may be included in diagnostic and audit log entries.</summary>
     public bool AllowStatementText { get; set; } = true;
 }

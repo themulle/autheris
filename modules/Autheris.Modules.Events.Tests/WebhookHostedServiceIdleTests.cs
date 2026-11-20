@@ -19,15 +19,15 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
-/// <summary>The module registers its workers unconditionally; they read the host feature flags at run time and idle while disabled.</summary>
+/// <summary>The module registers its workers unconditionally; webhook delivery and event bridge run unconditionally.</summary>
 public sealed class WebhookHostedServiceIdleTests
 {
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
 
-    private static DeliveryHarness Delivery(bool webhooksEnabled, bool cdcEnabled, IWebhookOutbox outbox, TimeProvider? timeProvider = null)
+    private static DeliveryHarness Delivery(bool cdcEnabled, IWebhookOutbox outbox, TimeProvider? timeProvider = null)
     {
         var effectiveTime = timeProvider ?? TimeProvider.System;
-        var webhooks = new WebhooksOptions { Enabled = webhooksEnabled, PollIntervalSeconds = 1 };
+        var webhooks = new WebhooksOptions { PollIntervalSeconds = 1 };
         var options = Options.Create(new GatewayOptions { Webhooks = webhooks });
         var policy = new WebhookRetryPolicy(webhooks, effectiveTime);
         var httpClient = new HttpClient();
@@ -41,25 +41,10 @@ public sealed class WebhookHostedServiceIdleTests
         return new DeliveryHarness(service, httpClient, provider);
     }
 
-    [Fact]
-    public async Task Delivery_worker_idles_when_webhooks_and_cdc_webhooks_disabled()
-    {
-        var outbox = Substitute.For<IWebhookOutbox>();
-        using var harness = Delivery(webhooksEnabled: false, cdcEnabled: false, outbox);
-        var service = harness.Service;
-
-        await service.StartAsync(CancellationToken.None);
-
-        await service.ExecuteTask!.WaitAsync(TestTimeout);
-        service.ExecuteTask.IsCompletedSuccessfully.ShouldBeTrue();
-        await outbox.DidNotReceiveWithAnyArgs().ClaimBatchAsync(default, default, default, default!, default);
-        await service.StopAsync(CancellationToken.None);
-    }
-
     [Theory]
-    [InlineData(true, false)]
-    [InlineData(false, true)]
-    public async Task Delivery_worker_runs_when_either_feature_is_enabled(bool webhooksEnabled, bool cdcEnabled)
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Delivery_worker_runs_unconditionally(bool cdcEnabled)
     {
         var claimed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var outbox = Substitute.For<IWebhookOutbox>();
@@ -71,7 +56,7 @@ public sealed class WebhookHostedServiceIdleTests
             });
 
         var time = new SignalingTimeProvider();
-        using var harness = Delivery(webhooksEnabled, cdcEnabled, outbox, time);
+        using var harness = Delivery(cdcEnabled, outbox, time);
         var service = harness.Service;
 
         await service.StartAsync(CancellationToken.None);
@@ -84,23 +69,14 @@ public sealed class WebhookHostedServiceIdleTests
     }
 
     [Fact]
-    public async Task Bridge_idles_when_webhooks_disabled_and_subscribes_when_enabled()
+    public async Task Bridge_subscribes_unconditionally()
     {
-        var disabledBus = Substitute.For<IGatewayEventBus>();
-        var disabled = new WebhookEventBridgeHostedService(
-            disabledBus,
-            Substitute.For<IWebhookDispatcherService>(),
-            NullLogger<WebhookEventBridgeHostedService>.Instance,
-            Options.Create(new GatewayOptions { Webhooks = new WebhooksOptions { Enabled = false } }));
-        await ((IHostedService)disabled).StartAsync(CancellationToken.None);
-        disabledBus.ReceivedCalls().ShouldBeEmpty();
-
         var enabledBus = Substitute.For<IGatewayEventBus>();
         var enabled = new WebhookEventBridgeHostedService(
             enabledBus,
             Substitute.For<IWebhookDispatcherService>(),
             NullLogger<WebhookEventBridgeHostedService>.Instance,
-            Options.Create(new GatewayOptions { Webhooks = new WebhooksOptions { Enabled = true } }));
+            Options.Create(new GatewayOptions { Webhooks = new WebhooksOptions() }));
         await ((IHostedService)enabled).StartAsync(CancellationToken.None);
         enabledBus.ReceivedCalls().ShouldNotBeEmpty();
     }

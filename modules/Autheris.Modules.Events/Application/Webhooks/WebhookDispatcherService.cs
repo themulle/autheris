@@ -53,7 +53,7 @@ public sealed class WebhookDispatcherService : IWebhookDispatcherService
         ArgumentNullException.ThrowIfNull(@event);
 
         var webhooks = _options.Value.Webhooks;
-        if (!webhooks.Enabled || webhooks.Subscriptions.Count == 0)
+        if (webhooks.Subscriptions.Count == 0)
         {
             return;
         }

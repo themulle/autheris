@@ -87,18 +87,6 @@ public sealed class WebhookDeliveryHostedServiceTests : IDisposable
         await Outbox.ListDeadLettersAsync(new WebhookOwnerScope(tenant, tenant is null), 50);
 
     [Fact]
-    public async Task Idles_when_webhooks_and_cdc_webhooks_disabled()
-    {
-        Build(new WebhooksOptions { Enabled = false });
-
-        await _service.StartAsync(CancellationToken.None);
-
-        await _service.ExecuteTask!.WaitAsync(TimeSpan.FromSeconds(5));
-        _service.ExecuteTask.IsCompletedSuccessfully.ShouldBeTrue();
-        await _service.StopAsync(CancellationToken.None);
-    }
-
-    [Fact]
     public async Task Success_CompletesRow_AndSendsOnce()
     {
         Build(Config());

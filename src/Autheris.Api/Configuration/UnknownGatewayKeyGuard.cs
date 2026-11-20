@@ -30,7 +30,10 @@ public static class UnknownGatewayKeyGuard
 
     private static readonly (string Key, string Message)[] RemovedFlagKeys =
     [
-        (GatewayConfigurationSchema.Root + ":CatalogSearch:Enabled", "CatalogSearch:Enabled (removed; catalog search validation and warm-up are always active, tune CatalogSearch:WarmupOnStartup instead)")
+        (GatewayConfigurationSchema.Root + ":CatalogSearch:Enabled", "CatalogSearch:Enabled (removed; catalog search validation and warm-up are always active, tune CatalogSearch:WarmupOnStartup instead)"),
+        (GatewayConfigurationSchema.Root + ":Extensibility:Enabled", "Extensibility:Enabled (removed; the extensibility pipeline is always active)"),
+        (GatewayConfigurationSchema.Root + ":Governance:QueryAnalysis:Enabled", "Governance:QueryAnalysis:Enabled (removed; the static query analysis endpoint is always mapped)"),
+        (GatewayConfigurationSchema.Root + ":Webhooks:Enabled", "Webhooks:Enabled (removed; webhook delivery and dispatch are always active)")
     ];
 
     private static readonly (string Key, string Message)[] RemovedEventBusKeys =

@@ -37,7 +37,6 @@ public static class GatewayConfigurationSchema
         ("Gateway:ExtensibilityPipeline", typeof(ExtensibilityPipelineOptions)),
         ("Gateway:GdprReport", typeof(GdprReportOptions)),
         ("Gateway:Governance:AccessPlanning", typeof(AccessPlanOptions)),
-        ("Gateway:Governance:QueryAnalysis", typeof(GovernanceQueryAnalysisOptions)),
         ("Gateway:Governance:IndividualGrants", typeof(IndividualGrantOptions)),
         (ExternalApiSettings.SectionName, typeof(ExternalApiSettings)),
         (GrantValidityOptions.SectionName, typeof(GrantValidityOptions)),
