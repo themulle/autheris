@@ -228,6 +228,10 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
 
         var entry = _typed.Catalog.Resolve(target.Name)
             ?? throw new SecurityException("A DML target could not be resolved against the catalog.");
+        if (entry.IsMetricView)
+        {
+            throw new SecurityException("DML statements are not permitted on a metric view.");
+        }
         _typed.RecordDependency(target.Name, entry);
         return entry;
     }

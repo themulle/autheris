@@ -247,7 +247,7 @@ public sealed partial class CatalogSchemaModel
                 continue;
             }
 
-            if (!candidate.Table.IsActive || candidate.DataSourceType != DataSourceType.Sql)
+            if (!candidate.Table.IsActive || candidate.DataSourceType != DataSourceType.Sql || candidate.Table.ObjectKind == DiscoveryObjectKind.MetricView)
             {
                 continue;
             }

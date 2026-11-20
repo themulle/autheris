@@ -202,6 +202,7 @@ type DiscoveryColumn {
   clearInSomeRows: Boolean!
   writeProtected: Boolean!
   longDescription: String
+  role: MetricViewColumnRole
   classifications: [DiscoveryColumnClassification!]!
   clearRequestable: [String!]!
   documents: [DiscoveryDocumentRef!]!
@@ -441,6 +442,7 @@ enum DiscoveryObjectKind {
   TABLE
   VIEW
   PROCEDURE
+  METRIC_VIEW
 }
 
 enum DiscoveryRowScope {
@@ -454,6 +456,11 @@ enum LineageNodeType {
   DASHBOARD
   PIPELINE
   EXTERNAL_SERVICE
+}
+
+enum MetricViewColumnRole {
+  DIMENSION
+  MEASURE
 }
 
 enum WriteOperation {

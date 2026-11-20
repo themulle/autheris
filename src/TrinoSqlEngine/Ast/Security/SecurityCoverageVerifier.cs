@@ -57,7 +57,8 @@ public sealed record TableCoverageRequirement(
     string? TenantColumn = null,
     ImmutableHashSet<string>? PolicyColumns = null,
     ImmutableDictionary<string, string>? ColumnTypes = null,
-    PerCellTableCoverage? PerCell = null);
+    PerCellTableCoverage? PerCell = null,
+    bool IsMetricView = false);
 
 /// <summary>
 /// Production post-condition of the compiler (runs on every compile). It walks the final AST and proves that every physical
@@ -312,6 +313,7 @@ public sealed partial class SecurityCoverageVerifier
                     }
 
                     break;
+                case NamedTableSource named when !IsCte(named, cte): CollectMetricViewMaskedSource(named, ref into); break;
             }
         }
 
@@ -426,7 +428,7 @@ public sealed partial class SecurityCoverageVerifier
 
             VerifyShape(requirement, spec, enclosing, policyScope);
 
-            if (!policyScope && requirement.MaskedColumns is { Count: > 0 } masked)
+            if (!policyScope && !requirement.IsMetricView && requirement.MaskedColumns is { Count: > 0 } masked)
             {
                 VerifyMasks(masked, requirement.PerCell, projections);
             }
@@ -528,6 +530,7 @@ public sealed partial class SecurityCoverageVerifier
         /// </summary>
         private static void VerifyShape(TableCoverageRequirement requirement, QuerySpecification spec, SelectStatement? enclosing, bool policyScope)
         {
+            if (requirement.IsMetricView) { VerifyMetricViewShape(requirement, spec, enclosing, policyScope); return; }
             var required = policyScope ? requirement.PolicySubqueryPredicates : requirement.RootPredicates;
             if (policyScope && required.IsEmpty)
             {

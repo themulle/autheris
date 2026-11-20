@@ -30,20 +30,22 @@ public sealed record CatalogColumn(string Name, string DataType, string? Collati
 /// <param name="RequiredFilterColumns">Table-level required filter columns (issue #163).</param>
 /// <param name="Version">Catalog version of this entry; part of every cache key.</param>
 /// <param name="RequiredFilterColumnGroups">Table-level required filter column groups (issue #221).</param>
+/// <param name="IsMetricView">True when the entry represents a Databricks metric view compiled via direct FROM pushdown.</param>
 public sealed record TableCatalogEntry(
     TableIdentity Identity,
     ImmutableArray<CatalogColumn> Columns,
     string? TenantColumn,
     ImmutableArray<string> RequiredFilterColumns = default,
     long Version = 0,
-    ImmutableArray<ImmutableArray<string>> RequiredFilterColumnGroups = default)
+    ImmutableArray<ImmutableArray<string>> RequiredFilterColumnGroups = default,
+    bool IsMetricView = false)
 {
     public TableCatalogEntry(
         TableIdentity identity,
         ImmutableArray<CatalogColumn> columns,
         string? tenantColumn,
         long version)
-        : this(identity, columns, tenantColumn, ImmutableArray<string>.Empty, version, ImmutableArray<ImmutableArray<string>>.Empty)
+        : this(identity, columns, tenantColumn, ImmutableArray<string>.Empty, version, ImmutableArray<ImmutableArray<string>>.Empty, false)
     {
     }
 

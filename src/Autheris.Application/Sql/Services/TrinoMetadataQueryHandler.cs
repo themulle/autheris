@@ -259,7 +259,7 @@ public static partial class TrinoMetadataQueryHandler
                     ["table_schema"] = t.Identifier.Schema,
                     ["table_name"] = t.Identifier.TableName,
                     // the same helper as the visibility engine; never a schema string alone.
-                    ["table_type"] = Autheris.Application.Catalog.Semantic.SemanticVirtualTables.IsVirtualTable(t) ? "VIEW" : "BASE TABLE"
+                    ["table_type"] = t.Table.ObjectKind == DiscoveryObjectKind.MetricView || Autheris.Application.Catalog.Semantic.SemanticVirtualTables.IsVirtualTable(t) ? "VIEW" : "BASE TABLE"
                 })
                 .ToList();
 
@@ -317,6 +317,8 @@ public static partial class TrinoMetadataQueryHandler
                 {
                     var col = table.Columns[i];
                     if ((deniedColumns != null && deniedColumns.Contains(col.ColumnName)) ||
+                        (deniedColumns == null && table.Table.ObjectKind == DiscoveryObjectKind.MetricView &&
+                         (col.DiscoveryHidden || col.Role != MetricViewColumnRole.Dimension)) ||
                         !visibleDiscoveryCols.Contains(col.ColumnName) ||
                         decision.GetEffectiveColumnAccess(col.ColumnName, table) == ColumnAccessLevel.Deny)
                     {
@@ -387,7 +389,15 @@ public static partial class TrinoMetadataQueryHandler
     {
         if (!subjects.ConsentsByTable.TryGetValue(table.Identifier, out var tableConsents) || tableConsents.Count == 0)
         {
-            return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (table.Table.ObjectKind != DiscoveryObjectKind.MetricView)
+            {
+                return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            return table.Columns
+                .Where(static c => c.DiscoveryHidden || c.Role != MetricViewColumnRole.Dimension)
+                .Select(static c => c.ColumnName)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
         }
 
         var denied = tableConsents
@@ -396,13 +406,33 @@ public static partial class TrinoMetadataQueryHandler
             .Select(cr => cr.ColumnName)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        var decision = resolver.ResolveAccess(
-            subjects.UserSid, subjects.GroupSids, subjects.Roles, table.Identifier, tableConsents, table.Dialect, allUserSids: null, callerScopes);
+        var decision = (tableConsents.Any(static c => c.IsPatternGrant) || table.Table.ObjectKind == DiscoveryObjectKind.MetricView)
+            ? resolver.ResolveAccess(
+                subjects.UserSid, subjects.GroupSids, subjects.Roles, table.Identifier, tableConsents, table.Dialect, allUserSids: null, callerScopes, table)
+            : resolver.ResolveAccess(
+                subjects.UserSid, subjects.GroupSids, subjects.Roles, table.Identifier, tableConsents, table.Dialect, allUserSids: null, callerScopes);
         if (decision is { IsAllowed: true })
         {
             foreach (var column in table.Columns)
             {
+                if (table.Table.ObjectKind == DiscoveryObjectKind.MetricView &&
+                    (column.DiscoveryHidden || column.Role is null))
+                {
+                    denied.Add(column.ColumnName);
+                    continue;
+                }
+
                 if (decision.GetEffectiveColumnAccess(column.ColumnName, table) == ColumnAccessLevel.Deny)
+                {
+                    denied.Add(column.ColumnName);
+                }
+            }
+        }
+        else if (table.Table.ObjectKind == DiscoveryObjectKind.MetricView)
+        {
+            foreach (var column in table.Columns)
+            {
+                if (column.DiscoveryHidden || column.Role != MetricViewColumnRole.Dimension)
                 {
                     denied.Add(column.ColumnName);
                 }

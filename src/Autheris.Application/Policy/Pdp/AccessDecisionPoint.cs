@@ -217,6 +217,10 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
                 // Definer semantics: the policy above only looked at grants, denies and hard row policies of the product object itself.
                 decision = await ApplyProductColumnClassesAsync(decision, subject.TenantId, ct).ConfigureAwait(false);
             }
+            if (metadata.Table.ObjectKind == DiscoveryObjectKind.MetricView)
+            {
+                decision = ApplyMetricViewMeasureDefaults(decision, metadata);
+            }
 
             return decision with { EvaluatedByPdp = true };
         }
@@ -270,6 +274,10 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
             if (isProduct)
             {
                 allowed = await ApplyProductColumnClassesAsync(allowed, subject.TenantId, ct).ConfigureAwait(false);
+            }
+            if (metadata.Table.ObjectKind == DiscoveryObjectKind.MetricView)
+            {
+                allowed = ApplyMetricViewMeasureDefaults(allowed, metadata);
             }
 
             return allowed with { EvaluatedByPdp = true };
@@ -325,6 +333,38 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
         return tightened
             ? decision with { ColumnAccess = access, PerCellColumns = null, ColumnSignatures = null, RowDependentColumns = null }
             : decision;
+    }
+
+    /// <summary>
+    /// Issue #916 (D-MV-6): on a metric view, measure columns and undeclared-role columns default to Deny unless an explicit
+    /// column-level grant allows the measure. Object grants alone expose dimensions only.
+    /// </summary>
+    internal static TableAccessDecision ApplyMetricViewMeasureDefaults(TableAccessDecision decision, TableMetadata metadata)
+    {
+        if (!decision.IsAllowed || metadata.Table.ObjectKind != DiscoveryObjectKind.MetricView)
+        {
+            return decision;
+        }
+
+        var access = new Dictionary<string, ColumnAccessLevel>(decision.ColumnAccess, StringComparer.OrdinalIgnoreCase);
+        var changed = false;
+
+        foreach (var col in metadata.Columns)
+        {
+            if (col.Role is null)
+            {
+                access[col.ColumnName] = ColumnAccessLevel.Deny;
+                changed = true;
+            }
+            else if (col.Role == MetricViewColumnRole.Measure &&
+                     (!decision.ColumnAccess.TryGetValue(col.ColumnName, out var explicitLevel) || explicitLevel == ColumnAccessLevel.Deny))
+            {
+                access[col.ColumnName] = ColumnAccessLevel.Deny;
+                changed = true;
+            }
+        }
+
+        return changed ? decision with { ColumnAccess = access } : decision;
     }
 
     private static readonly IReadOnlySet<string> NoRoles =

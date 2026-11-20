@@ -49,6 +49,12 @@ public sealed record GovernedPolicyInput(
     /// Governed DML write permit produced by the access decision point when compiling a write statement.
     /// </summary>
     public DmlWritePermit? WritePermit { get; init; }
+
+    /// <summary>
+    /// Optional internal count measure column injected server-side for metric-view min-group-size enforcement
+    /// (stripped before returning rows; exempted from Nullify on Deny when not explicitly Masked).
+    /// </summary>
+    public string? MetricViewInternalCountColumn { get; init; }
 }
 
 /// <summary>
@@ -138,7 +144,7 @@ public sealed class GovernancePolicyFactory(
         foreach (var (identity, decision) in input.Decisions)
         {
             var metadata = input.Metadata is { } all && all.TryGetValue(identity, out var m) ? m : null;
-            if (!TryAdmit(catalog, unusableDependents, identity, decision, metadata, input.TablesWithoutRls.Contains(identity), out var rowPolicy, out var tableMasks, out var perCellPolicy))
+            if (!TryAdmit(catalog, unusableDependents, identity, decision, metadata, input.TablesWithoutRls.Contains(identity), input.MetricViewInternalCountColumn, out var rowPolicy, out var tableMasks, out var perCellPolicy))
             {
                 continue;
             }
@@ -440,6 +446,7 @@ public sealed class GovernancePolicyFactory(
         TableAccessDecision decision,
         TableMetadata? metadata,
         bool declaredWithoutRls,
+        string? metricViewInternalCountColumn,
         out PolicyPredicateRowPolicy? rowPolicy,
         out ColumnMaskPolicy? masks,
         out PerCellTablePolicy? perCell)
@@ -501,7 +508,7 @@ public sealed class GovernancePolicyFactory(
             perCell = perCellPolicy.TypedPolicy;
         }
 
-        return TryBuildMasks(entry, typed, metadata, out masks);
+        return TryBuildMasks(entry, typed, metadata, metricViewInternalCountColumn, out masks);
     }
 
     private static IEnumerable<TrinoSqlEngine.Ast.Nodes.SqlQualifiedName> CollectDecisionSubqueryNames(TableAccessDecision decision)
@@ -581,13 +588,36 @@ public sealed class GovernancePolicyFactory(
     /// The typed masks of a table: the decision's typed mask for every column whose effective level is Mask, and a typed Nullify for
     /// every denied column (the legacy projection answered a denied column with NULL). Null when no column is masked.
     /// </summary>
-    private static bool TryBuildMasks(TableCatalogEntry entry, TableAccessDecision decision, TableMetadata? metadata, out ColumnMaskPolicy? masks)
+    private static bool TryBuildMasks(
+        TableCatalogEntry entry,
+        TableAccessDecision decision,
+        TableMetadata? metadata,
+        string? metricViewInternalCountColumn,
+        out ColumnMaskPolicy? masks)
     {
         masks = null;
         var specs = new Dictionary<string, MaskSpec>(StringComparer.OrdinalIgnoreCase);
+        bool isMetricView = metadata?.Table.ObjectKind == DiscoveryObjectKind.MetricView || entry.IsMetricView;
         foreach (var column in entry.Columns)
         {
-            switch (decision.GetEffectiveColumnAccess(column.Name, metadata))
+            var access = decision.GetEffectiveColumnAccess(column.Name, metadata);
+            if (isMetricView &&
+                !string.IsNullOrWhiteSpace(metricViewInternalCountColumn) &&
+                string.Equals(column.Name, metricViewInternalCountColumn, StringComparison.OrdinalIgnoreCase))
+            {
+                if (access == ColumnAccessLevel.Mask)
+                {
+                    return false;
+                }
+
+                if (access == ColumnAccessLevel.Deny)
+                {
+                    // Internal server-side count column is stripped by MetricViewGroupSizeDataReader before client delivery.
+                    continue;
+                }
+            }
+
+            switch (access)
             {
                 case ColumnAccessLevel.Deny:
                     specs[column.Name] = new MaskSpec(MaskKind.Nullify, new MaskArguments(), FrozenDictionary<string, PolicyValue>.Empty);

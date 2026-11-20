@@ -114,6 +114,12 @@ public static class RowPolicyErrorGuard
             return false;
         }
 
+        if (call.Name.Parts.Count == 1 && call.Window is null && call.Filter is null && !call.Distinct
+            && call.Name.Parts[0].Value.Equals("measure", StringComparison.OrdinalIgnoreCase))
+        {
+            return call.Arguments.Count == 1 && call.Arguments[0] is ColumnReference;
+        }
+
         if (call.Name.Parts.Count != 1 || !SqlFunctionPolicy.RowPolicySafeFunctions.Contains(call.Name.Parts[0].Value)) return false;
         if (call.Window is not null && call.Name.Parts[0].Value.ToLowerInvariant() is not ("count" or "min" or "max")) return false;
         return true;

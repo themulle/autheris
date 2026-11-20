@@ -458,7 +458,8 @@
           "classifications": { "type": "array", "nullable": true, "items": { "type": "object" } },
           "clearInSomeRows": { "type": "boolean" },
           "clearRequestable": { "type": "array", "nullable": true, "items": { "type": "string" } },
-          "statistics": { "type": "object", "nullable": true }
+          "statistics": { "type": "object", "nullable": true },
+          "role": { "type": "string", "nullable": true, "enum": ["dimension", "measure"] }
         }
       },
       "ExternalCatalogObjectDto": {
@@ -466,7 +467,7 @@
         "required": ["objectId", "kind", "domain", "schema", "name", "tags", "sensitivity", "owners", "linkedDocuments", "write", "statisticsAvailable", "samplesAvailable", "hidden", "columns"],
         "properties": {
           "objectId": { "type": "string" },
-          "kind": { "type": "string", "enum": ["table", "view", "procedure"] },
+          "kind": { "type": "string", "enum": ["table", "view", "procedure", "metric_view"] },
           "domain": { "type": "string" },
           "schema": { "type": "string" },
           "name": { "type": "string" },

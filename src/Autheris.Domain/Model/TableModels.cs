@@ -152,6 +152,8 @@ public sealed record Table
     public bool DiscoveryHidden { get; init; }
     public bool SamplesDisabled { get; init; }
     public DiscoveryObjectKind ObjectKind { get; init; } = DiscoveryObjectKind.Table;
+    /// <summary>Issue #916: Optional measure column name used for minimum group size enforcement on a metric view.</summary>
+    public string? MetricViewCountMeasure { get; init; }
     public string? RlsExpression { get; init; }
     public int? MinGroupSize { get; init; }
     public bool NonPersonal { get; init; } = false;
@@ -216,6 +218,7 @@ public sealed class TableColumn
     public string? LengthSemantics { get; init; }
     public bool WriteProtected { get; init; }
     public bool DiscoveryHidden { get; init; }
+    public MetricViewColumnRole? Role { get; init; }
     public string? Description { get; init; }
     public string? LongDescription { get; init; }
     public LocalizedTexts Texts { get; init; } = LocalizedTexts.Empty;

@@ -655,3 +655,4 @@ ast;ast-013;@mask-constant
 ast;ast-014;@mask-geojitter
 ast;ast-015;@parenthesized
 ast;ast-016;@page-offset
+functions;fn-measure-001;SELECT a, MEASURE(b) FROM t GROUP BY a

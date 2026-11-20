@@ -143,4 +143,17 @@ public sealed class DiscoveryArchitectureTests
         var mapper = RepositoryScan.ProductionFiles.Single(static f => f.RelativePath.EndsWith("/Catalog/Discovery/DiscoveryAccessMapper.cs", StringComparison.Ordinal));
         mapper.Text.ShouldContain("FilterPartitionColumns(tableStats, mappedCols)");
     }
+
+    [Fact]
+    public void ObjectKind_HasNoBinaryViewTernary()
+    {
+        var offenders = RepositoryScan.ProductionFiles
+            .Where(static f => f.RelativePath.StartsWith("src/", StringComparison.Ordinal))
+            .Where(static f => f.Text.Contains("== DiscoveryObjectKind.View ?", StringComparison.Ordinal)
+                            || f.Text.Contains("!= DiscoveryObjectKind.View ?", StringComparison.Ordinal))
+            .Select(static f => f.RelativePath)
+            .ToList();
+
+        offenders.ShouldBeEmpty($"Use an exhaustive switch on DiscoveryObjectKind instead of a binary View ternary: {string.Join(", ", offenders)}");
+    }
 }

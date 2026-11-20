@@ -766,13 +766,19 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
         {
             throw new WebSqlPolicyException(SqlDialectMapper.UnsupportedDialectMessage);
         }
+
+        (rawSql, var mvGuard) = EnforceMetricViewGuard(rawSql, decidedTableMetadata, decisions, targetDatabaseDialect.Value);
+
         TargetSqlDialect targetSqlDialect = SqlDialectMapper.ToTargetDialect(targetDatabaseDialect.Value);
 
         EnforceEffectiveListMaximum(clientLists, targetSqlDialect, webSqlOptions);
 
         // GAP-013 / governed WebSQL translates the Trino date functions (date_trunc, date_add, now, year(x).. second(x), date_part).
-        IReadOnlySet<string> allowedFunctions = SqlFunctionAllowlists.WithDateTranslation(
-            SqlFunctionAllowlists.Build(targetSqlDialect, webSqlOptions.AdditionalAllowedFunctions));
+        IReadOnlySet<string> allowedFunctions = ApplyMetricViewAllowedFunctions(
+            SqlFunctionAllowlists.WithDateTranslation(
+                SqlFunctionAllowlists.Build(targetSqlDialect, webSqlOptions.AdditionalAllowedFunctions)),
+            targetSqlDialect,
+            decidedTableMetadata);
         if (metadata.FunctionCalls is { Count: > 0 })
         {
             // G-9: the three-argument overload; no RlsOptions bag.
@@ -796,7 +802,8 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
                 Metadata = decidedTableMetadata,
                 ConnectionKey = connectionKey,
                 KeySetStatement = new RowFilterKeySetStatement(isRead, rawSql.Length, CompileRequestFactory.DefaultMaxExpansionFactor, disabled),
-                WritePermit = writePermit
+                WritePermit = writePermit,
+                MetricViewInternalCountColumn = mvGuard.InternalCountMeasureColumn
             };
 
         var assembly = await policyFactory.CreateAssemblyAsync(PolicyInput(disabled: false), ct).ConfigureAwait(false);
@@ -836,163 +843,12 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
             LogKeySets(assembly.KeySets);
         }
 
-        IReadOnlyList<Autheris.Domain.Model.WebSqlIndexHint>? indexHints = null;
-        if (metadata.StatementType == SqlStatementType.Select && !isDml)
-        {
-            var costOpts = _options.Value.QueryCost ?? new QueryCostOptions();
-            var analysisOpts = new Autheris.Application.Governance.Analysis.QueryAnalysisOptions();
-            var webSqlCost = _options.Value.WebSql?.Cost ?? new WebSqlCostOptions();
-            var effectiveRowLimit = rowLimit ?? SqlRowLimit.For(_options.Value.WebSql ?? new WebSqlOptions());
-
-            TableMetadata? GetTableMeta(string name)
-            {
-                return decidedTableMetadata.Values.FirstOrDefault(m =>
-                    string.Equals(m.Table.TableName, name, StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(m.Identifier.ToString(), name, StringComparison.OrdinalIgnoreCase));
-            }
-
-            IReadOnlySet<string>? GetDenied(string name) =>
-                decisions.FirstOrDefault(kv => string.Equals(kv.Key.Table, name, StringComparison.OrdinalIgnoreCase)).Value?.ColumnAccess
-                    .Where(cl => cl.Value == ColumnAccessLevel.Deny)
-                    .Select(cl => cl.Key)
-                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-            var (_, hints) = Autheris.Application.Sql.Cost.SqlStatementCostEstimator.EstimateCostWithHints(
-                metadata,
-                effectiveRowLimit,
-                costOpts,
-                analysisOpts,
-                webSqlCost,
-                getTableMetadata: GetTableMeta,
-                getDeniedColumns: GetDenied);
-
-            if (hints.Count > 0)
-            {
-                indexHints = hints;
-            }
-        }
+        IReadOnlyList<Autheris.Domain.Model.WebSqlIndexHint>? indexHints = metadata.StatementType == SqlStatementType.Select && !isDml
+            ? EstimateQueryIndexHints(metadata, rowLimit, webSqlOptions, decidedTableMetadata, decisions)
+            : null;
 
         var maskedAudit = decisions.Values.SelectMany(d => d.MaskedColumnsAudit).ToList();
         var grantAudit = decisions.Values.SelectMany(d => d.GrantClassificationsAudit).ToList();
-        return new GovernedRewrite(compiled, accessedTables, effectiveDataSourceName, deliveredRowLimit, virtualFilters, assembly.KeySets.Outcomes, callerAttributes, metadata, pagingUnavailable, bindPageOffset, indexHints, dmlMaxRowsCap, maskedAudit, grantAudit);
-    }
-
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<TargetSqlDialect, byte> ClampWarned = new();
-
-    /// <summary>
-    /// Stage 2 of the list limits (128 A-6): the dialect is known now, so each list is checked against
-    /// <c>min(configured, MaxBindParameters - 100, MaxInListItems)</c>. A configured value above that is clamped at runtime and logged once
-    /// per dialect, with numbers only. Nothing is truncated: a larger list is refused.
-    /// </summary>
-    private void EnforceEffectiveListMaximum(ClientListShapes? clientLists, TargetSqlDialect dialect, WebSqlOptions webSqlOptions)
-    {
-        if (clientLists is null)
-        {
-            return;
-        }
-
-        int largest = clientLists.MaxCount();
-        if (largest == 0)
-        {
-            return;
-        }
-
-        var limits = Autheris.Application.Sql.ListParameters.ListParameterLimits.From(webSqlOptions);
-        int effective = Autheris.Application.Sql.ListParameters.ListParameterLimits.EffectiveMax(
-            limits.ConfiguredMaxValues, TrinoSqlEngine.Ast.Capabilities.DialectCapabilityTable.Default.Get(dialect));
-        if (effective < limits.ConfiguredMaxValues && ClampWarned.TryAdd(dialect, 0))
-        {
-            _logger?.LogWarning("WebSQL list parameter maximum {Configured} is clamped to {Effective} for dialect {Dialect}.", limits.ConfiguredMaxValues, effective, dialect);
-        }
-
-        if (largest > effective)
-        {
-            throw new ClientListException(GovernedSqlErrorCodes.ListParamTooLarge);
-        }
-    }
-
-    private CompileRequest CreateCompileRequest(
-        GovernancePolicy policy,
-        Dictionary<TableIdentity, TableAccessTarget> decidedTargets,
-        TargetSqlDialect targetSqlDialect,
-        WebSqlOptions webSqlOptions,
-        bool isDml,
-        long enforcedMaxRows,
-        IReadOnlySet<string> allowedFunctions,
-        ClientListShapes? clientLists,
-        IReadOnlySet<string>? gatewayLikePatternParameters,
-        bool bindPageOffset = false, long? pageOffset = null,
-        long maxOffset = 1_000_000)
-    {
-        // a table that stage 3 admitted but the assembly dropped (no typed policy, catalog load failure, missing column)
-        // is denied here with the same exception as every other "table not usable" cause, before the compiler could answer differently.
-        foreach (var (identity, deniedTarget) in decidedTargets)
-        {
-            if (policy.Catalog.Resolve(identity.ToQualifiedName()) is null)
-            {
-                _logger?.LogWarning("WebSQL rejected table {Table}: it is not part of the verified governance catalog.", deniedTarget.FullName);
-                throw SqlDataSourceResolver.TableDenied(deniedTarget);
-            }
-        }
-
-        return CompileRequestFactory.Create(policy, targetSqlDialect, webSqlOptions, isDml, enforcedMaxRows, allowedFunctions, clientLists,
-            timeZoneConversionAvailable: _timeZoneState?.IsAvailable(targetSqlDialect) ?? false,
-            translateDateFunctions: true, gatewayLikePatternParameters: gatewayLikePatternParameters,
-            bindPageOffset: bindPageOffset, pageOffset: pageOffset, maxOffset: maxOffset);
-    }
-
-    private CompiledSql CompileStatement(string rawSql, CompileRequest request, bool mayRetry, CancellationToken ct)
-    {
-        try
-        {
-            return _sqlEngine.Compile(rawSql.AsMemory(), request, ct);
-        }
-        catch (Exception ex) when (ex is SecurityException or TrinoSqlEngine.Ast.Builder.AstBuildException
-                                   && !(mayRetry && ex is SqlLimitExceededException limit && IsRetryableLimit(limit.Kind)))
-        {
-            // A retryable limit of a statement with substituted key sets is handled by the caller without logging (15 b).
-            _logger?.Warning(ex, "WebSQL statement rejected by the SQL compiler.");
-            throw;
-        }
-    }
-
-    // A DML target without a tenant column is exempt only by its exact schema-qualified name (case-insensitive, never by suffix or bare table name).
-    private static bool IsDmlTenantExempt(TableIdentifier id, IEnumerable<string>? exemptTables)
-    {
-        string qualified = id.ToQualifiedName();
-        return exemptTables != null && exemptTables.Any(e => string.Equals(e?.Trim(), qualified, StringComparison.OrdinalIgnoreCase));
-    }
-
-    private static bool IsRetryableLimit(SqlLimitKind kind) => kind is SqlLimitKind.BindParameters or SqlLimitKind.PolicyExpansionFactor;
-
-    private static void RecordRetryMetrics(RowFilterKeySetReport report, TargetSqlDialect dialect)
-    {
-        foreach (var o in report.Outcomes)
-        {
-            if (o.Reason is KeySetFallbackReason.BindLimitRetry or KeySetFallbackReason.ExpansionLimitRetry)
-            {
-                Autheris.Domain.Diagnostics.GatewayDiagnostics.RowFilterKeySetFallbacks.Add(
-                    1,
-                    new KeyValuePair<string, object?>("dialect", dialect.ToString()),
-                    new KeyValuePair<string, object?>("outcome", "Fallback"),
-                    new KeyValuePair<string, object?>("reason", o.Reason.ToString()));
-            }
-        }
-    }
-
-    /// <summary>A-14: one Debug line per site after the compiled SQL line. Counts are allowed here (09 c); never values or hashes.</summary>
-    private void LogKeySets(RowFilterKeySetReport report)
-    {
-        foreach (var o in report.Outcomes)
-        {
-            _logger?.LogDebug(
-                "GovernedSqlExecutionService: Row-filter key set site {Table} outcome={Outcome} reason={Reason} keys={Keys} padded={Padded} ageSeconds={Age}",
-                o.Table, o.Outcome, o.Reason, o.KeyCount, o.PaddedCount, o.AgeSeconds);
-        }
-    }
-
-    private System.Net.IPAddress ResolveClientIp()
-    {
-        return _clientIpResolver?.ResolveClientIp() ?? System.Net.IPAddress.None;
+        return new GovernedRewrite(compiled, accessedTables, effectiveDataSourceName, deliveredRowLimit, virtualFilters, assembly.KeySets.Outcomes, callerAttributes, metadata, pagingUnavailable, bindPageOffset, indexHints, dmlMaxRowsCap, maskedAudit, grantAudit, mvGuard.HiddenCountColumnAlias, mvGuard.EffectiveMinGroupSize);
     }
 }

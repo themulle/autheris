@@ -1,6 +1,26 @@
 namespace Autheris.Domain.Model;
 
-public enum DiscoveryObjectKind { Table, View, Procedure }
+public enum DiscoveryObjectKind { Table, View, Procedure, MetricView }
+public enum MetricViewColumnRole { Dimension, Measure }
+
+public static class DiscoveryObjectKindExtensions
+{
+    public static string ToWireName(this DiscoveryObjectKind kind) => kind switch
+    {
+        DiscoveryObjectKind.Table => "table",
+        DiscoveryObjectKind.View => "view",
+        DiscoveryObjectKind.Procedure => "procedure",
+        DiscoveryObjectKind.MetricView => "metric_view",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown DiscoveryObjectKind.")
+    };
+
+    public static string ToWireName(this MetricViewColumnRole role) => role switch
+    {
+        MetricViewColumnRole.Dimension => "dimension",
+        MetricViewColumnRole.Measure => "measure",
+        _ => throw new ArgumentOutOfRangeException(nameof(role), role, "Unknown MetricViewColumnRole.")
+    };
+}
 public enum DiscoveryAccessState { None, Requested, Granted, Expired }
 public enum DiscoveryRowScope { Full, RowRestricted }
 public enum DiscoveryColumnState { NoAccess, Masked, Clear }
@@ -48,7 +68,8 @@ public sealed record DiscoveryColumn(
     bool WriteProtected = false,
     IReadOnlyList<DiscoveryColumnClassification>? Classifications = null,
     IReadOnlyList<string>? ClearRequestable = null,
-    string? LongDescription = null)
+    string? LongDescription = null,
+    MetricViewColumnRole? Role = null)
 {
     public IReadOnlyList<DiscoveryColumnClassification> Classifications { get; init; } = Classifications ?? [];
     public IReadOnlyList<string> ClearRequestable { get; init; } = ClearRequestable ?? [];

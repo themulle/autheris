@@ -346,6 +346,7 @@ public sealed class DuckDbDialectGenerator : SqlDialectGeneratorBase
     protected override bool SupportsAggregateFilter => true;
     protected override bool SupportsOrderedAggregates => true;
     protected override bool SupportsGroupByDistinct => true;
+    protected override bool SupportsGroupByAll => true;
 
     // The inline structural positions of this generator are registered with the emitter context ( for DuckDB).
     protected override bool BindLiterals => true;
