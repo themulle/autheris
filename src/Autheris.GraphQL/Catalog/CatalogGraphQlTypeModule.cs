@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Security.Claims;
 using System.Text.Json;
 using Autheris.Application.Analytics;
@@ -53,6 +54,62 @@ public sealed partial class CatalogGraphQlTypeModule : ITypeModule, IDisposable,
 
     private readonly CatalogTableFingerprintCache _tableFingerprintCache = new();
     internal CatalogTableFingerprintCache FingerprintCache => _tableFingerprintCache;
+
+    private sealed record CachedColumnRecipe(
+        CatalogColumnField Column,
+        ITypeNode EntityFieldType,
+        ITypeNode FilterFieldType);
+
+    private sealed record CachedTableRecipe(
+        string Hash,
+        string LogicalSource,
+        string FilterDescription,
+        string OrderByDescription,
+        string EntityDescription,
+        IReadOnlyList<CachedColumnRecipe> Columns,
+        NamedTypeNode FilterTypeNode,
+        NamedTypeNode OrderByTypeNode,
+        NamedTypeNode EntityTypeNode,
+        ListTypeNode FilterListTypeNode,
+        ListTypeNode OrderByListTypeNode);
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<TableIdentifier, CachedTableRecipe> _tableRecipeCache = new();
+    private int _lastBuildRecipeRebuildCount;
+    private int _totalRecipeRebuildCount;
+
+    internal int LastBuildRecipeRebuildCount => Volatile.Read(ref _lastBuildRecipeRebuildCount);
+    internal int TotalRecipeRebuildCount => Volatile.Read(ref _totalRecipeRebuildCount);
+
+    private static readonly NamedTypeNode SortDirectionTypeNode = new("AutherisSortDirection");
+    private static readonly System.Collections.Frozen.FrozenDictionary<CatalogFieldType, NamedTypeNode> FilterTypeNodes =
+        new Dictionary<CatalogFieldType, NamedTypeNode>
+        {
+            [CatalogFieldType.String] = new("AutherisStringFilter"),
+            [CatalogFieldType.Int] = new("AutherisIntFilter"),
+            [CatalogFieldType.Long] = new("AutherisLongFilter"),
+            [CatalogFieldType.Float] = new("AutherisFloatFilter"),
+            [CatalogFieldType.Decimal] = new("AutherisDecimalFilter"),
+            [CatalogFieldType.Boolean] = new("AutherisBooleanFilter"),
+            [CatalogFieldType.DateTime] = new("AutherisDateTimeFilter"),
+        }.ToFrozenDictionary();
+
+    private static readonly System.Collections.Frozen.FrozenDictionary<CatalogFieldType, (ITypeNode Nullable, ITypeNode NonNull)> ScalarTypeNodes =
+        new Dictionary<CatalogFieldType, (ITypeNode, ITypeNode)>
+        {
+            [CatalogFieldType.String] = CreateScalarPair("String"),
+            [CatalogFieldType.Int] = CreateScalarPair("Int"),
+            [CatalogFieldType.Long] = CreateScalarPair("Long"),
+            [CatalogFieldType.Float] = CreateScalarPair("Float"),
+            [CatalogFieldType.Decimal] = CreateScalarPair("Decimal"),
+            [CatalogFieldType.Boolean] = CreateScalarPair("Boolean"),
+            [CatalogFieldType.DateTime] = CreateScalarPair("String"),
+        }.ToFrozenDictionary();
+
+    private static (ITypeNode Nullable, ITypeNode NonNull) CreateScalarPair(string scalarName)
+    {
+        var nullable = new NamedTypeNode(scalarName);
+        return (nullable, new NonNullTypeNode(nullable));
+    }
 
     /// <summary>
     /// Issue #421: Ambient table metadata lookup for GraphQL cost analysis.
@@ -332,89 +389,38 @@ public sealed partial class CatalogGraphQlTypeModule : ITypeModule, IDisposable,
         }
 
         int registeredTables = 0;
+        int rebuiltRecipes = 0;
+        var activeTableIds = new HashSet<TableIdentifier>(schemaModel.Tables.Count);
         foreach (var table in schemaModel.Tables)
         {
-            types.Add(new InputObjectType(d =>
+            activeTableIds.Add(table.Identifier);
+            var tableHash = _tableFingerprintCache.TryGetTableHash(table.Identifier, out var cachedHash)
+                ? cachedHash
+                : CatalogSchemaModel.ComputeTableFingerprint(table);
+
+            if (!_tableRecipeCache.TryGetValue(table.Identifier, out var recipe) ||
+                !string.Equals(recipe.Hash, tableHash, StringComparison.Ordinal))
             {
-                d.Name(table.FilterTypeName);
-                d.Description($"Filter input for {table.TypeName}.");
-                d.Field("and").Type(new ListTypeNode(new NonNullTypeNode(new NamedTypeNode(table.FilterTypeName))));
-                d.Field("or").Type(new ListTypeNode(new NonNullTypeNode(new NamedTypeNode(table.FilterTypeName))));
-                d.Field("not").Type(new NamedTypeNode(table.FilterTypeName));
-
-                foreach (var col in table.Columns)
-                {
-                    d.Field(col.FieldName).Type(new NamedTypeNode(GetFilterTypeName(col.FieldType)));
-                }
-            }));
-
-            types.Add(new InputObjectType(d =>
-            {
-                d.Name(table.OrderByTypeName);
-                d.Description($"Order-by input for {table.TypeName}.");
-                foreach (var col in table.Columns)
-                {
-                    d.Field(col.FieldName).Type(new NamedTypeNode("AutherisSortDirection"));
-                }
-            }));
-
-            types.Add(new ObjectType(d =>
-            {
-                d.Name(table.TypeName);
-                d.Description($"Entity type for {table.Metadata.Identifier}.");
-                var entityLogicalSource = Autheris.Application.Sql.Services.DataSourceAllowlistGuard.LogicalDataSource(table.Metadata);
-                d.Extend().OnBeforeCreate(definition =>
-                    definition.Features.Set(new Autheris.GraphQL.Interceptors.TransportSourceFeature(entityLogicalSource)));
-
-                foreach (var col in table.Columns)
-                {
-                    var scalarName = GetScalarName(col.FieldType);
-                    ITypeNode typeNode = col.IsNullable
-                        ? new NamedTypeNode(scalarName)
-                        : new NonNullTypeNode(new NamedTypeNode(scalarName));
-
-                    var fieldDesc = d.Field(col.FieldName)
-                        .Type(typeNode)
-                        .Resolve(ctx => ResolveColumnValue(ctx, col));
-
-                    if (!string.IsNullOrWhiteSpace(col.Description))
-                    {
-                        fieldDesc.Description(col.Description);
-                    }
-                }
-
-                foreach (var rel in table.Relations)
-                {
-                    CatalogRelationRegistry.Register(table.TypeName, rel.FieldName, rel.Cardinality);
-                    if (rel.IsList)
-                    {
-                        d.Field(rel.FieldName)
-                            .Type(new ListTypeNode(new NonNullTypeNode(new NamedTypeNode(rel.TargetTypeName))))
-                            .Argument("where", a => a.Type(new NamedTypeNode($"{rel.TargetTypeName}_filter")))
-                            .Argument("orderBy", a => a.Type(new ListTypeNode(new NonNullTypeNode(new NamedTypeNode($"{rel.TargetTypeName}_order_by")))))
-                            .Argument("first", a => a.Type(new NamedTypeNode("Int")).DefaultValue(100))
-                            .Argument("offset", a => a.Type(new NamedTypeNode("Int")).DefaultValue(0))
-                            .Resolve(ctx => ResolveRelationValue(ctx, rel));
-                    }
-                    else
-                    {
-                        d.Field(rel.FieldName)
-                            .Type(new NamedTypeNode(rel.TargetTypeName))
-                            .Argument("where", a => a.Type(new NamedTypeNode($"{rel.TargetTypeName}_filter")))
-                            .Resolve(ctx => ResolveRelationValue(ctx, rel));
-                    }
-                }
-            }));
-
-            if (_aggregationEnabled)
-            {
-                AggregateGraphQlTypes.RegisterTable(types, table);
+                recipe = BuildTableRecipe(table, tableHash);
+                _tableRecipeCache[table.Identifier] = recipe;
+                rebuiltRecipes++;
             }
 
-            ConnectionGraphQlTypes.RegisterTable(types, table);
+            RegisterTableTypes(types, table, recipe);
             registeredTables++;
             CatalogSchemaModel.MaybeLogBuildProgress(_logger, _timeProvider, buildStartTimestamp, ref lastProgressTimestamp, registeredTables, "rebuild");
         }
+
+        foreach (var staleId in _tableRecipeCache.Keys)
+        {
+            if (!activeTableIds.Contains(staleId))
+            {
+                _tableRecipeCache.TryRemove(staleId, out _);
+            }
+        }
+
+        Volatile.Write(ref _lastBuildRecipeRebuildCount, rebuiltRecipes);
+        Interlocked.Add(ref _totalRecipeRebuildCount, rebuiltRecipes);
 
         if (schemaModel.Tables.Count > 0)
         {
@@ -432,7 +438,7 @@ public sealed partial class CatalogGraphQlTypeModule : ITypeModule, IDisposable,
                 foreach (var table in schemaModel.Tables)
                 {
                     var pk = table.Metadata.PrimaryKeyColumns.Count > 0 ? table.Metadata.PrimaryKeyColumns[0] : "id";
-                    if (string.IsNullOrWhiteSpace(pk) || !System.Text.RegularExpressions.Regex.IsMatch(pk, @"^[a-zA-Z_][a-zA-Z0-9_]*$"))
+                    if (string.IsNullOrWhiteSpace(pk) || !ValidPkFieldRegex().IsMatch(pk))
                     {
                         pk = "id";
                     }
@@ -455,26 +461,138 @@ public sealed partial class CatalogGraphQlTypeModule : ITypeModule, IDisposable,
                     // Issue #447: every root field of this table names its logical data source, so the transport gate
                     // middleware can check the whole operation before any resolver runs.
                     var logicalSource = Autheris.Application.Sql.Services.DataSourceAllowlistGuard.LogicalDataSource(table.Metadata);
-                    var rootFieldNames = new List<string> { table.QueryFieldName, $"{table.QueryFieldName}Connection" };
+                    AttachRootFieldFeatures(d, table.QueryFieldName, logicalSource, table, schemaModel);
+                    AttachRootFieldFeatures(d, $"{table.QueryFieldName}Connection", logicalSource, table, schemaModel);
                     if (_aggregationEnabled)
                     {
-                        rootFieldNames.Add(AggregateTypeNames.For(table.TypeName).Field);
-                    }
-
-                    foreach (var rootFieldName in rootFieldNames)
-                    {
-                        d.Field(rootFieldName).Extend().OnBeforeCreate(
-                            definition =>
-                            {
-                                definition.Features.Set(new Autheris.GraphQL.Interceptors.TransportSourceFeature(logicalSource));
-                                definition.Features.Set(new CatalogRootFieldFeature(table, schemaModel));
-                            });
+                        AttachRootFieldFeatures(d, AggregateTypeNames.For(table.TypeName).Field, logicalSource, table, schemaModel);
                     }
                 }
             }));
         }
 
         return types;
+    }
+
+    private static CachedTableRecipe BuildTableRecipe(CatalogTableType table, string tableHash)
+    {
+        var cols = new CachedColumnRecipe[table.Columns.Count];
+        for (var i = 0; i < table.Columns.Count; i++)
+        {
+            var col = table.Columns[i];
+            var pair = ScalarTypeNodes.TryGetValue(col.FieldType, out var p) ? p : ScalarTypeNodes[CatalogFieldType.String];
+            var entityFieldType = col.IsNullable ? pair.Nullable : pair.NonNull;
+            var filterFieldType = FilterTypeNodes.TryGetValue(col.FieldType, out var f) ? f : FilterTypeNodes[CatalogFieldType.String];
+            cols[i] = new CachedColumnRecipe(col, entityFieldType, filterFieldType);
+        }
+
+        var filterTypeNode = new NamedTypeNode(table.FilterTypeName);
+        var orderByTypeNode = new NamedTypeNode(table.OrderByTypeName);
+        var entityTypeNode = new NamedTypeNode(table.TypeName);
+        return new CachedTableRecipe(
+            tableHash,
+            Autheris.Application.Sql.Services.DataSourceAllowlistGuard.LogicalDataSource(table.Metadata),
+            $"Filter input for {table.TypeName}.",
+            $"Order-by input for {table.TypeName}.",
+            $"Entity type for {table.Metadata.Identifier}.",
+            cols,
+            filterTypeNode,
+            orderByTypeNode,
+            entityTypeNode,
+            new ListTypeNode(new NonNullTypeNode(filterTypeNode)),
+            new ListTypeNode(new NonNullTypeNode(orderByTypeNode)));
+    }
+
+    private void RegisterTableTypes(List<ITypeSystemMember> tableTypes, CatalogTableType table, CachedTableRecipe recipe)
+    {
+        tableTypes.Add(new InputObjectType(d =>
+        {
+            d.Name(table.FilterTypeName);
+            d.Description(recipe.FilterDescription);
+            d.Field("and").Type(recipe.FilterListTypeNode);
+            d.Field("or").Type(recipe.FilterListTypeNode);
+            d.Field("not").Type(recipe.FilterTypeNode);
+
+            foreach (var col in recipe.Columns)
+            {
+                d.Field(col.Column.FieldName).Type(col.FilterFieldType);
+            }
+        }));
+
+        tableTypes.Add(new InputObjectType(d =>
+        {
+            d.Name(table.OrderByTypeName);
+            d.Description(recipe.OrderByDescription);
+            foreach (var col in recipe.Columns)
+            {
+                d.Field(col.Column.FieldName).Type(SortDirectionTypeNode);
+            }
+        }));
+
+        tableTypes.Add(new ObjectType(d =>
+        {
+            d.Name(table.TypeName);
+            d.Description(recipe.EntityDescription);
+            d.Extend().OnBeforeCreate(definition =>
+                definition.Features.Set(new Autheris.GraphQL.Interceptors.TransportSourceFeature(recipe.LogicalSource)));
+
+            foreach (var col in recipe.Columns)
+            {
+                var c = col.Column;
+                var fieldDesc = d.Field(c.FieldName)
+                    .Type(col.EntityFieldType)
+                    .Resolve(ctx => ResolveColumnValue(ctx, c));
+
+                if (!string.IsNullOrWhiteSpace(c.Description))
+                {
+                    fieldDesc.Description(c.Description);
+                }
+            }
+
+            foreach (var rel in table.Relations)
+            {
+                CatalogRelationRegistry.Register(table.TypeName, rel.FieldName, rel.Cardinality);
+                if (rel.IsList)
+                {
+                    d.Field(rel.FieldName)
+                        .Type(new ListTypeNode(new NonNullTypeNode(new NamedTypeNode(rel.TargetTypeName))))
+                        .Argument("where", a => a.Type(new NamedTypeNode($"{rel.TargetTypeName}_filter")))
+                        .Argument("orderBy", a => a.Type(new ListTypeNode(new NonNullTypeNode(new NamedTypeNode($"{rel.TargetTypeName}_order_by")))))
+                        .Argument("first", a => a.Type(new NamedTypeNode("Int")).DefaultValue(100))
+                        .Argument("offset", a => a.Type(new NamedTypeNode("Int")).DefaultValue(0))
+                        .Resolve(ctx => ResolveRelationValue(ctx, rel));
+                }
+                else
+                {
+                    d.Field(rel.FieldName)
+                        .Type(new NamedTypeNode(rel.TargetTypeName))
+                        .Argument("where", a => a.Type(new NamedTypeNode($"{rel.TargetTypeName}_filter")))
+                        .Resolve(ctx => ResolveRelationValue(ctx, rel));
+                }
+            }
+        }));
+
+        if (_aggregationEnabled)
+        {
+            AggregateGraphQlTypes.RegisterTable(tableTypes, table);
+        }
+
+        ConnectionGraphQlTypes.RegisterTable(tableTypes, table);
+    }
+
+    private static void AttachRootFieldFeatures(
+        IObjectTypeDescriptor d,
+        string rootFieldName,
+        string logicalSource,
+        CatalogTableType table,
+        CatalogSchemaModel schemaModel)
+    {
+        d.Field(rootFieldName).Extend().OnBeforeCreate(
+            definition =>
+            {
+                definition.Features.Set(new Autheris.GraphQL.Interceptors.TransportSourceFeature(logicalSource));
+                definition.Features.Set(new CatalogRootFieldFeature(table, schemaModel));
+            });
     }
 
     private static void RegisterOperatorFilterTypes(List<ITypeSystemMember> types)
@@ -868,6 +986,9 @@ public sealed partial class CatalogGraphQlTypeModule : ITypeModule, IDisposable,
             throw;
         }
     }
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"^[a-zA-Z_][a-zA-Z0-9_]*$")]
+    private static partial System.Text.RegularExpressions.Regex ValidPkFieldRegex();
 
     private static readonly System.Text.RegularExpressions.Regex HmacRegex =
         new("^[a-fA-F0-9]{64}$", System.Text.RegularExpressions.RegexOptions.Compiled);

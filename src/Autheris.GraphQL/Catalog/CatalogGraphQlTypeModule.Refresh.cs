@@ -67,6 +67,7 @@ public sealed partial class CatalogGraphQlTypeModule
             if (transportChanged)
             {
                 _tableFingerprintCache.Clear();
+                _tableRecipeCache.Clear();
                 Volatile.Write(ref _pendingBuild, null);
                 Volatile.Write(ref _deferralStartTimestamp, NoTimestamp);
             }
