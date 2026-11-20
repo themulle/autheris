@@ -9,6 +9,7 @@ using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Mcp.Services;
 using Autheris.Application.Services;
 using Autheris.Application.Sql.Services;
+using Autheris.Tests.Unit.Sql;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -207,7 +208,9 @@ public sealed class CatalogVirtualTableVisibilityTests
     {
         var own = VirtualTable(TenantA);
         var foreign = VirtualTable(TenantB);
-        var repo = Wp0.Tables(own, foreign, Wp0.Table("sales", "real_table"));
+        var realTable = Wp0.Table("sales", "real_table");
+        var repo = Wp0.Tables(own, foreign, realTable);
+        var visibility = TrinoMetadataVisibilityFakes.AllowAll(own, foreign, realTable);
         var consents = Wp0.Consents(
             Wp0.Allow(own.Identifier, "S-USER", TenantA, "id"),
             Wp0.Allow(foreign.Identifier, "S-USER", TenantA, "id"));
@@ -223,14 +226,14 @@ public sealed class CatalogVirtualTableVisibilityTests
             "SHOW CATALOGS"
         })
         {
-            var result = await TrinoMetadataQueryHandler.TryExecuteAsync(sql, user, TenantA, repo, consents, options);
+            var result = await TrinoMetadataQueryHandler.TryExecuteAsync(sql, user, TenantA, repo, consents, options, null, visibility);
 
             result.ShouldNotBeNull(sql);
             var text = string.Join('|', result.Rows.SelectMany(r => r.Values.Select(v => v?.ToString())));
             text.ShouldNotContain(SemanticVirtualTables.TenantSchema(TenantB), customMessage: sql);
         }
 
-        var tables = await TrinoMetadataQueryHandler.TryExecuteAsync("SELECT table_schema, table_name, table_type FROM information_schema.tables", user, TenantA, repo, consents, options);
+        var tables = await TrinoMetadataQueryHandler.TryExecuteAsync("SELECT table_schema, table_name, table_type FROM information_schema.tables", user, TenantA, repo, consents, options, null, visibility);
         tables!.Rows.Select(r => (string?)r["table_schema"]).ShouldContain(SemanticVirtualTables.TenantSchema(TenantA));
         tables.Rows.Single(r => (string?)r["table_schema"] == SemanticVirtualTables.TenantSchema(TenantA))["table_type"].ShouldBe("VIEW");
     }
@@ -246,7 +249,7 @@ public sealed class CatalogVirtualTableVisibilityTests
         var consents = Wp0.Consents(Wp0.Allow(real.Identifier, "S-USER", TenantA, "id"));
 
         var result = await TrinoMetadataQueryHandler.TryExecuteAsync(
-            "SELECT table_schema, table_name, table_type FROM information_schema.tables", Wp0.User("S-USER", "tenant-a"), TenantA, repo, consents, Wp0.Options(TenancyShape.Multi));
+            "SELECT table_schema, table_name, table_type FROM information_schema.tables", Wp0.User("S-USER", "tenant-a"), TenantA, repo, consents, Wp0.Options(TenancyShape.Multi), null, TrinoMetadataVisibilityFakes.AllowAll(real));
 
         result!.Rows.Single()["table_type"].ShouldBe("BASE TABLE");
     }
