@@ -26,23 +26,33 @@ internal static class ModuleHttpClientGuard
         List<ServiceDescriptor> beforeSnapshot)
     {
         var added = services.Where(d => IsClientConfiguration(d) && !beforeSnapshot.Contains(d)).ToList();
+
+        foreach (var descriptor in added)
+        {
+            if (descriptor.ServiceType.GetGenericTypeDefinition() == typeof(IPostConfigureOptions<>))
+            {
+                throw new ModuleLoadException(
+                    moduleId,
+                    $"Module '{moduleId}' registered a post-configuration for HttpClientFactoryOptions that the host cannot verify; use AddSecureOutboundHandlers.");
+            }
+
+            if (descriptor.ImplementationInstance is not ConfigureNamedOptions<HttpClientFactoryOptions> named ||
+                string.IsNullOrEmpty(named.Name))
+            {
+                throw new ModuleLoadException(
+                    moduleId,
+                    $"Module '{moduleId}' registered an HttpClient configuration the host cannot verify; use AddSecureOutboundHandlers.");
+            }
+        }
+
         var names = added
-            .Select(d => (d.ImplementationInstance as ConfigureNamedOptions<HttpClientFactoryOptions>)?.Name)
-            .Where(n => n is not null)
+            .Select(d => ((ConfigureNamedOptions<HttpClientFactoryOptions>)d.ImplementationInstance!).Name!)
             .Distinct(StringComparer.Ordinal)
             .ToList();
 
-        // A client configuration the check cannot read (an options configurator that is not a plain named action) is refused.
-        if (added.Any(d => d.ImplementationInstance is not ConfigureNamedOptions<HttpClientFactoryOptions>))
-        {
-            throw new ModuleLoadException(
-                moduleId,
-                $"Module '{moduleId}' registered an HttpClient configuration the host cannot verify; use AddSecureOutboundHandlers.");
-        }
-
         foreach (var name in names)
         {
-            if (!ChainHasSsrfHandler(services, name!))
+            if (!ChainHasSsrfHandler(services, name))
             {
                 throw new ModuleLoadException(
                     moduleId,
@@ -58,7 +68,8 @@ internal static class ModuleHttpClientGuard
         var options = new HttpClientFactoryOptions();
         foreach (var descriptor in services.Where(IsClientConfiguration))
         {
-            if (descriptor.ImplementationInstance is ConfigureNamedOptions<HttpClientFactoryOptions> named &&
+            if (descriptor.ServiceType.GetGenericTypeDefinition() == typeof(IConfigureOptions<>) &&
+                descriptor.ImplementationInstance is ConfigureNamedOptions<HttpClientFactoryOptions> named &&
                 string.Equals(named.Name, clientName, StringComparison.Ordinal))
             {
                 named.Action?.Invoke(options);
@@ -66,7 +77,7 @@ internal static class ModuleHttpClientGuard
         }
 
         using var emptyProvider = new ServiceCollection().BuildServiceProvider();
-        var probe = new ProbeHandlerBuilder(emptyProvider) { Name = clientName };
+        using var probe = new ProbeHandlerBuilder(emptyProvider) { Name = clientName };
         try
         {
             foreach (var action in options.HttpMessageHandlerBuilderActions)
@@ -87,19 +98,43 @@ internal static class ModuleHttpClientGuard
 
     private static bool IsClientConfiguration(ServiceDescriptor descriptor) =>
         descriptor.ServiceType.IsConstructedGenericType &&
-        descriptor.ServiceType.GetGenericTypeDefinition() == typeof(IConfigureOptions<>) &&
-        descriptor.ServiceType.GetGenericArguments()[0] == typeof(HttpClientFactoryOptions);
+        descriptor.ServiceType.GetGenericArguments()[0] == typeof(HttpClientFactoryOptions) &&
+        (descriptor.ServiceType.GetGenericTypeDefinition() == typeof(IConfigureOptions<>) ||
+         descriptor.ServiceType.GetGenericTypeDefinition() == typeof(IPostConfigureOptions<>));
 
-    private sealed class ProbeHandlerBuilder(IServiceProvider services) : HttpMessageHandlerBuilder
+    private sealed class ProbeHandlerBuilder(IServiceProvider services) : HttpMessageHandlerBuilder, IDisposable
     {
+        private HttpMessageHandler _primaryHandler = new HttpClientHandler();
+
         public override string? Name { get; set; }
 
-        public override HttpMessageHandler PrimaryHandler { get; set; } = new HttpClientHandler();
+        public override HttpMessageHandler PrimaryHandler
+        {
+            get => _primaryHandler;
+            set
+            {
+                if (!ReferenceEquals(_primaryHandler, value))
+                {
+                    _primaryHandler?.Dispose();
+                }
+
+                _primaryHandler = value;
+            }
+        }
 
         public override IList<DelegatingHandler> AdditionalHandlers { get; } = [];
 
         public override IServiceProvider Services { get; } = services;
 
         public override HttpMessageHandler Build() => throw new NotSupportedException("The probe builder never builds a handler.");
+
+        public void Dispose()
+        {
+            _primaryHandler?.Dispose();
+            foreach (var handler in AdditionalHandlers)
+            {
+                handler.Dispose();
+            }
+        }
     }
 }

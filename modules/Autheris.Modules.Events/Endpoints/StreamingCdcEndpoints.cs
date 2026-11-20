@@ -62,11 +62,11 @@ public static class StreamingCdcEndpoints
                 return requestContext.BadRequest(ModuleErrorCodes.BadRequest, "Empty CDC payload.", request.HttpContext);
             }
 
+            // A-1: caller tenant comes from the resolved request context (same source as the rest of the pipeline).
+            var callerTenant = requestContext.GetRequestTenant(request.HttpContext).Value;
+
             try
             {
-                // A-1: caller tenant comes from the resolved request context (same source as the rest of the pipeline).
-                var callerTenant = requestContext.GetRequestTenant(request.HttpContext).Value;
-
                 // SR-L-20: the row tenant is read from the registered tenant column of the target table.
                 var cdcEvent = DebeziumCdcParser.Parse(body);
                 var services = request.HttpContext.RequestServices;
@@ -89,6 +89,10 @@ public static class StreamingCdcEndpoints
 
                 await ingestionService.PublishEventAsync(cdcEvent, request.HttpContext.RequestAborted);
                 return Results.Accepted(value: new { status = "Ingested", eventId = cdcEvent.EventId });
+            }
+            catch (OperationCanceledException) when (request.HttpContext.RequestAborted.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex)
             {

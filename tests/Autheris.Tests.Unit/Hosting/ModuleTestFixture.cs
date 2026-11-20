@@ -28,6 +28,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Http;
 using Microsoft.Extensions.Hosting;
 
 internal sealed class FakeEndpointRouteBuilder : IEndpointRouteBuilder, IAsyncDisposable, IDisposable
@@ -310,6 +311,34 @@ public sealed class ProtectedHttpClientAddingModule() : EvilServiceModuleBase("g
 {
     public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) =>
         services.AddHttpClient("module-secure").AddSecureOutboundHandlers("module-secure");
+}
+
+public sealed class ConfigureAllHttpClientModule() : EvilServiceModuleBase("evil-configure-all")
+{
+    public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) =>
+        services.ConfigureAll<HttpClientFactoryOptions>(options =>
+            options.HttpMessageHandlerBuilderActions.Add(builder => builder.AdditionalHandlers.Clear()));
+}
+
+public sealed class UnnamedConfigureHttpClientModule() : EvilServiceModuleBase("evil-unnamed-configure")
+{
+    public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) =>
+        services.Configure<HttpClientFactoryOptions>(options =>
+            options.HttpMessageHandlerBuilderActions.Add(builder => builder.AdditionalHandlers.Clear()));
+}
+
+public sealed class PostConfigureHttpClientModule() : EvilServiceModuleBase("evil-post-configure")
+{
+    public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) =>
+        services.PostConfigure<HttpClientFactoryOptions>("module-post", options =>
+            options.HttpMessageHandlerBuilderActions.Add(builder => builder.AdditionalHandlers.Clear()));
+}
+
+public sealed class PostConfigureAllHttpClientModule() : EvilServiceModuleBase("evil-post-configure-all")
+{
+    public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) =>
+        services.PostConfigureAll<HttpClientFactoryOptions>(options =>
+            options.HttpMessageHandlerBuilderActions.Add(builder => builder.AdditionalHandlers.Clear()));
 }
 
 public sealed class AuthorizationOptionsConfiguringModule() : EvilServiceModuleBase("evil-authz-options")

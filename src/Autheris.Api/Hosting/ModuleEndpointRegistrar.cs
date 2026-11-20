@@ -379,7 +379,11 @@ public sealed class ModuleEndpointRegistrar : IModuleEndpointRegistrar
         {
             state.Tenant = EndpointSecurity.GetRequestTenant(httpContext);
         }
-        catch (Exception ex) when (ex is System.Security.SecurityException or Autheris.Domain.Exceptions.TenantUnresolvedException)
+        catch (Autheris.Domain.Exceptions.GatewayUnauthorizedException)
+        {
+            return Results.StatusCode(StatusCodes.Status401Unauthorized);
+        }
+        catch (Exception ex) when (ex is System.Security.SecurityException or Autheris.Domain.Exceptions.GatewaySecurityException)
         {
             return Results.StatusCode(StatusCodes.Status403Forbidden);
         }
@@ -409,7 +413,7 @@ public sealed class ModuleEndpointRegistrar : IModuleEndpointRegistrar
         {
             return EndpointSecurity.GetRequestTenant(httpContext);
         }
-        catch (Exception ex) when (ex is System.Security.SecurityException or Autheris.Domain.Exceptions.TenantUnresolvedException)
+        catch (Exception ex) when (ex is System.Security.SecurityException or Autheris.Domain.Exceptions.GatewaySecurityException)
         {
             return null;
         }

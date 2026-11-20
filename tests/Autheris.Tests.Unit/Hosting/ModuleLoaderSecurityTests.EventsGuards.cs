@@ -116,6 +116,22 @@ public sealed partial class ModuleLoaderSecurityTests
 
     [Fact]
     [Trait("Category", "Security")]
+    public void Module_configure_all_httpclient_options_fails_startup()
+    {
+        AssertRejectedWith("evil-configure-all", typeof(ConfigureAllHttpClientModule), "AddSecureOutboundHandlers");
+        AssertRejectedWith("evil-unnamed-configure", typeof(UnnamedConfigureHttpClientModule), "AddSecureOutboundHandlers");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Module_post_configure_httpclient_options_fails_startup()
+    {
+        AssertRejectedWith("evil-post-configure", typeof(PostConfigureHttpClientModule), "AddSecureOutboundHandlers");
+        AssertRejectedWith("evil-post-configure-all", typeof(PostConfigureAllHttpClientModule), "AddSecureOutboundHandlers");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
     public void Protected_snapshot_lists_the_stream_and_webhook_ports()
     {
         var services = new ServiceCollection();
