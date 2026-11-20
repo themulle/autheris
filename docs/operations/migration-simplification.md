@@ -166,3 +166,4 @@ Details and an example manifest: [F-GOV-15, Apply Semantics](../features/f-gov-1
 ### Removal of consent row filter key-set cache (`Gateway:RowFilters:KeySetCache`)
 
 - `Gateway:RowFilters:KeySetCache` (and `Gateway:DataSources:Connections:*:KeySetCacheAllowed`) was removed as part of key-set consolidation onto row policies (`VirtualFilter.EvaluationMode = KeySet`, `KeySetMaxAge`, `KeySetMaxKeys`, and `Gateway:VirtualFilters:Federation:*`). Setting any key under `Gateway:RowFilters:KeySetCache` fails startup.
+- `Gateway:SqlEndpoints:MaxQueryTimeoutSeconds` was removed (unconsumed; SQL endpoints execute via `GovernedSqlExecutionService` using `Gateway:WebSql:ExecutionTimeoutSeconds`).

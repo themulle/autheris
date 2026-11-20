@@ -99,7 +99,8 @@ public static class UnknownGatewayKeyGuard
         GatewayConfigurationSchema.Root + ":Governance:IndividualGrants:MaxBreakGlassDurationHours",
         GatewayConfigurationSchema.Root + ":HitLStepUp:AutoCreateItsmTicket",
         GatewayConfigurationSchema.Root + ":HitLStepUp:PreferredItsmSystem",
-        GatewayConfigurationSchema.Root + ":RowFilters:KeySetCache"
+        GatewayConfigurationSchema.Root + ":RowFilters:KeySetCache",
+        GatewayConfigurationSchema.Root + ":SqlEndpoints:MaxQueryTimeoutSeconds"
     ];
 
     // Runs before any module-section check: the removed key must be named even when the events module is absent or claims Gateway:Events.

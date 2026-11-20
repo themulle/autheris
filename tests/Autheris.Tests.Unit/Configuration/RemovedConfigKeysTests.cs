@@ -92,6 +92,8 @@ public sealed class RemovedConfigKeysTests
     [InlineData("Gateway:RowFilters:KeySetCache:MaxKeys", "2000")]
     [InlineData("Gateway:DataSources:Connections:default:KeySetCacheAllowed", "true")]
     [InlineData("Gateway:DataSources:Connections:default:KeySetCacheAllowed", "false")]
+    [InlineData("Gateway:SqlEndpoints:MaxQueryTimeoutSeconds", "60")]
+    [InlineData("Gateway:SqlEndpoints:MaxQueryTimeoutSeconds", "")]
     public void Every_removed_key_fails_startup(string key, string value)
     {
         var configuration = Config(key, value);
