@@ -77,9 +77,11 @@ public sealed class DbtHealthExecutionMiddleware
 
         var accessResolver = context.RequestServices.GetService<ITableAccessResolver>();
         var tableRepo = context.RequestServices.GetService<ITableMetadataRepository>();
+        var ownershipRepo = context.RequestServices.GetService<IDataOwnershipRepository>();
 
-        // 1. Extract referenced models (field names, nested selections, and name arguments)
-        var referencedModels = ExtractReferencedModels(doc);
+        // 1. Extract referenced models (field names, nested selections, and name arguments / variables)
+        System.Text.Json.JsonElement? rawVariables = (context.Request as OperationRequest)?.VariableValues?.Document.RootElement;
+        var referencedModels = ExtractReferencedModels(doc, context.VariableValues, rawVariables);
         var degradedModels = new List<DbtHealthState>();
 
         // 2. Check health for each referenced model
@@ -105,56 +107,32 @@ public sealed class DbtHealthExecutionMiddleware
                 }
             }
 
+            bool isPrivileged = false;
             if (health.Status == DbtModelHealthStatus.Quarantined || health.Status == DbtModelHealthStatus.Degraded)
             {
-                bool isPrivileged = principal?.IsInRole("GovernanceAdmin") == true ||
-                                    principal?.IsInRole("DataOwner") == true ||
-                                    Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
+                var targetTable = await ResolveTargetTableAsync(tableRepo, tableId, modelName, context.RequestAborted).ConfigureAwait(false);
+                bool isGlobalAdmin = principal.IsInRole("GovernanceAdmin") ||
+                                     Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
+                bool isTableOwner = false;
+                if (!isGlobalAdmin && ownershipRepo != null && principal.GetUserSid() is { } userSid)
+                {
+                    try
+                    {
+                        isTableOwner = await ownershipRepo.IsAuthorizedApproverForTableAsync(targetTable, userSid, context.RequestAborted).ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        isTableOwner = false;
+                    }
+                }
 
+                isPrivileged = isGlobalAdmin || isTableOwner;
                 if (!isPrivileged)
                 {
                     if (accessResolver == null)
                     {
                         // Do not disclose quarantine or degraded status if access cannot be verified; pass through to downstream
                         continue;
-                    }
-
-                    var targetTable = tableId;
-                    if (tableRepo != null)
-                    {
-                        try
-                        {
-                            if (TableIdentifier.TryParse(modelName, out var parsedTable))
-                            {
-                                var exact = await tableRepo.GetTableMetadataAsync(parsedTable, context.RequestAborted).ConfigureAwait(false);
-                                if (exact != null)
-                                {
-                                    targetTable = exact.Identifier;
-                                }
-                            }
-                            else if (!string.IsNullOrWhiteSpace(modelName) &&
-                                     modelName.AsSpan().IndexOfAny('\0', '\r', '\n') < 0)
-                            {
-                                var prefix = modelName.Length <= Autheris.Application.Catalog.CatalogTableQuery.MaxFilterLength
-                                    ? modelName
-                                    : modelName[..Autheris.Application.Catalog.CatalogTableQuery.MaxFilterLength];
-                                var match = await Autheris.Application.Catalog.CatalogTablePageReader.FindFirstAsync(
-                                    tableRepo,
-                                    new Autheris.Application.Catalog.CatalogTableQuery(
-                                        NamePrefix: prefix,
-                                        Limit: Autheris.Application.Catalog.CatalogTableQuery.MaxLimit),
-                                    t => string.Equals(t.Identifier.TableName, modelName, StringComparison.OrdinalIgnoreCase),
-                                    ct: context.RequestAborted).ConfigureAwait(false);
-                                if (match != null)
-                                {
-                                    targetTable = match.Identifier;
-                                }
-                            }
-                        }
-                        catch
-                        {
-                            // Ignore catalog lookup error
-                        }
                     }
 
                     try
@@ -176,10 +154,6 @@ public sealed class DbtHealthExecutionMiddleware
 
             if (health.Status == DbtModelHealthStatus.Quarantined)
             {
-                bool isPrivileged = principal?.IsInRole("GovernanceAdmin") == true ||
-                                    principal?.IsInRole("DataOwner") == true ||
-                                    Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
-
                 var errBuilder = ErrorBuilder.New()
                     .SetMessage($"The requested table/model '{modelName}' is quarantined due to failed dbt tests.")
                     .SetCode("TABLE_IN_QUARANTINE")
@@ -235,7 +209,58 @@ public sealed class DbtHealthExecutionMiddleware
         }
     }
 
-    private static HashSet<string> ExtractReferencedModels(DocumentNode document)
+    private static async Task<TableIdentifier> ResolveTargetTableAsync(
+        ITableMetadataRepository? tableRepo,
+        TableIdentifier fallback,
+        string modelName,
+        System.Threading.CancellationToken ct)
+    {
+        if (tableRepo == null)
+        {
+            return fallback;
+        }
+
+        try
+        {
+            if (TableIdentifier.TryParse(modelName, out var parsedTable))
+            {
+                var exact = await tableRepo.GetTableMetadataAsync(parsedTable, ct).ConfigureAwait(false);
+                if (exact != null)
+                {
+                    return exact.Identifier;
+                }
+            }
+            else if (!string.IsNullOrWhiteSpace(modelName) &&
+                     modelName.AsSpan().IndexOfAny('\0', '\r', '\n') < 0)
+            {
+                var prefix = modelName.Length <= Autheris.Application.Catalog.CatalogTableQuery.MaxFilterLength
+                    ? modelName
+                    : modelName[..Autheris.Application.Catalog.CatalogTableQuery.MaxFilterLength];
+                var match = await Autheris.Application.Catalog.CatalogTablePageReader.FindFirstAsync(
+                    tableRepo,
+                    new Autheris.Application.Catalog.CatalogTableQuery(
+                        NamePrefix: prefix,
+                        Limit: Autheris.Application.Catalog.CatalogTableQuery.MaxLimit),
+                    t => string.Equals(t.Identifier.TableName, modelName, StringComparison.OrdinalIgnoreCase),
+                    ct: ct).ConfigureAwait(false);
+                if (match != null)
+                {
+                    return match.Identifier;
+                }
+            }
+        }
+        catch
+        {
+            // Ignore catalog lookup error
+        }
+
+        return fallback;
+    }
+
+    private static HashSet<string> ExtractReferencedModels(
+        DocumentNode document,
+        IReadOnlyList<IVariableValueCollection>? variableCollections,
+        System.Text.Json.JsonElement? rawVariables)
     {
         var models = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var fragments = new Dictionary<string, FragmentDefinitionNode>(StringComparer.Ordinal);
@@ -255,7 +280,7 @@ public sealed class DbtHealthExecutionMiddleware
         {
             if (definition is OperationDefinitionNode opDef)
             {
-                CollectModelsFromSelections(opDef.SelectionSet.Selections, models, fragments, visited);
+                CollectModelsFromSelections(opDef.SelectionSet.Selections, models, fragments, visited, variableCollections, rawVariables);
             }
         }
 
@@ -266,21 +291,23 @@ public sealed class DbtHealthExecutionMiddleware
         IEnumerable<ISelectionNode> selections,
         HashSet<string> models,
         Dictionary<string, FragmentDefinitionNode> fragments,
-        HashSet<string> visited)
+        HashSet<string> visited,
+        IReadOnlyList<IVariableValueCollection>? variableCollections,
+        System.Text.Json.JsonElement? rawVariables)
     {
         foreach (var selection in selections)
         {
             // GQL-14: type-agnostic traversal; type conditions are never evaluated (over-collection fails closed).
             if (selection is InlineFragmentNode inlineFragment)
             {
-                CollectModelsFromSelections(inlineFragment.SelectionSet.Selections, models, fragments, visited);
+                CollectModelsFromSelections(inlineFragment.SelectionSet.Selections, models, fragments, visited, variableCollections, rawVariables);
             }
             else if (selection is FragmentSpreadNode spread)
             {
                 var fragmentName = spread.Name.Value;
                 if (fragments.TryGetValue(fragmentName, out var fragmentDef) && visited.Add(fragmentName))
                 {
-                    CollectModelsFromSelections(fragmentDef.SelectionSet.Selections, models, fragments, visited);
+                    CollectModelsFromSelections(fragmentDef.SelectionSet.Selections, models, fragments, visited, variableCollections, rawVariables);
                 }
             }
             else if (selection is FieldNode fieldNode)
@@ -300,13 +327,35 @@ public sealed class DbtHealthExecutionMiddleware
                             {
                                 models.Add(strVal.Value);
                             }
+                            else if (arg.Value is VariableNode varNode)
+                            {
+                                if (variableCollections != null)
+                                {
+                                    foreach (var variables in variableCollections)
+                                    {
+                                        if (variables.TryGetValue<StringValueNode>(varNode.Name.Value, out var strVarNode) && strVarNode != null)
+                                        {
+                                            models.Add(strVarNode.Value);
+                                        }
+                                    }
+                                }
+
+                                if (rawVariables is { ValueKind: System.Text.Json.JsonValueKind.Object } rawObj &&
+                                    rawObj.TryGetProperty(varNode.Name.Value, out var rawProp) &&
+                                    rawProp.ValueKind == System.Text.Json.JsonValueKind.String &&
+                                    rawProp.GetString() is { } rawStr &&
+                                    !string.IsNullOrWhiteSpace(rawStr))
+                                {
+                                    models.Add(rawStr);
+                                }
+                            }
                         }
                     }
 
                     // Traverse nested selections (e.g. table { jsonRows } under fragments)
                     if (fieldNode.SelectionSet != null)
                     {
-                        CollectModelsFromSelections(fieldNode.SelectionSet.Selections, models, fragments, visited);
+                        CollectModelsFromSelections(fieldNode.SelectionSet.Selections, models, fragments, visited, variableCollections, rawVariables);
                     }
                 }
             }

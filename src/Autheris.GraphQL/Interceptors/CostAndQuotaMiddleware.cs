@@ -694,9 +694,16 @@ public sealed class CostAndQuotaMiddleware
             executedDepth = Math.Max(1, dInt);
         }
 
-        if (context.Result is OperationResult opResult && opResult.Data is not null)
+        if (context.Result is OperationResult opResult && opResult.Data is { IsValueNull: false } opData)
         {
-            var counted = CountResultRows(opResult.Data.Value);
+            var counted = CountResultRows(opData.Value);
+            if (counted <= 1 &&
+                opData.Value is not null and not string and not System.Collections.IEnumerable and not System.Collections.IDictionary &&
+                opData.Formatter is { } formatter)
+            {
+                counted = Math.Max(counted, CountFormattedResultRows(formatter));
+            }
+
             if (counted > 0)
             {
                 rowsReturned = Math.Max(rowsReturned, counted);
@@ -713,7 +720,105 @@ public sealed class CostAndQuotaMiddleware
     internal static long CountResultRows(object? data)
     {
         if (data is null) return 0;
+        if (data is System.Text.Json.JsonDocument jsonDoc) return CountJsonRootRows(jsonDoc.RootElement, 0);
+        if (data is System.Text.Json.JsonElement jsonElem) return CountJsonRootRows(jsonElem, 0);
         return CountRootRows(data, 0);
+    }
+
+    private static long CountFormattedResultRows(IRawJsonFormatter formatter)
+    {
+        try
+        {
+            var buffer = new System.Buffers.ArrayBufferWriter<byte>();
+            var writer = new HotChocolate.Text.Json.JsonWriter(buffer, default, default);
+            formatter.WriteDataTo(writer);
+            if (buffer.WrittenCount == 0)
+            {
+                return 0;
+            }
+
+            using var doc = System.Text.Json.JsonDocument.Parse(buffer.WrittenMemory);
+            return CountJsonRootRows(doc.RootElement, 0);
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    private static long CountJsonRootRows(System.Text.Json.JsonElement element, int depth)
+    {
+        if (depth > 32) return 0;
+        switch (element.ValueKind)
+        {
+            case System.Text.Json.JsonValueKind.Null:
+            case System.Text.Json.JsonValueKind.Undefined:
+                return 0;
+            case System.Text.Json.JsonValueKind.Array:
+                return CountJsonArrayRows(element, depth + 1);
+            case System.Text.Json.JsonValueKind.Object:
+                long total = 0;
+                foreach (var prop in element.EnumerateObject())
+                {
+                    if (prop.Value.ValueKind is System.Text.Json.JsonValueKind.Null or System.Text.Json.JsonValueKind.Undefined)
+                    {
+                        continue;
+                    }
+
+                    if (prop.Value.ValueKind == System.Text.Json.JsonValueKind.Array)
+                    {
+                        total += CountJsonArrayRows(prop.Value, depth + 1);
+                    }
+                    else if (prop.Value.ValueKind == System.Text.Json.JsonValueKind.Object)
+                    {
+                        total += 1 + CountJsonNestedChildren(prop.Value, depth + 1);
+                    }
+                    else
+                    {
+                        total += 1;
+                    }
+                }
+                return total;
+            default:
+                return 1;
+        }
+    }
+
+    private static long CountJsonArrayRows(System.Text.Json.JsonElement array, int depth)
+    {
+        if (depth > 32) return 0;
+        long count = 0;
+        foreach (var item in array.EnumerateArray())
+        {
+            count += 1;
+            if (item.ValueKind == System.Text.Json.JsonValueKind.Object)
+            {
+                count += CountJsonNestedChildren(item, depth + 1);
+            }
+            else if (item.ValueKind == System.Text.Json.JsonValueKind.Array)
+            {
+                count += CountJsonArrayRows(item, depth + 1);
+            }
+        }
+        return count;
+    }
+
+    private static long CountJsonNestedChildren(System.Text.Json.JsonElement obj, int depth)
+    {
+        if (depth > 32) return 0;
+        long count = 0;
+        foreach (var prop in obj.EnumerateObject())
+        {
+            if (prop.Value.ValueKind == System.Text.Json.JsonValueKind.Array)
+            {
+                count += CountJsonArrayRows(prop.Value, depth + 1);
+            }
+            else if (prop.Value.ValueKind == System.Text.Json.JsonValueKind.Object)
+            {
+                count += 1 + CountJsonNestedChildren(prop.Value, depth + 1);
+            }
+        }
+        return count;
     }
 
     private static long CountRootRows(object data, int depth)

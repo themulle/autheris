@@ -43,7 +43,7 @@ public partial class GovernanceRepository
         }
         return await UpsertValidatedBatchAsync(validated, ct).ConfigureAwait(false);
     }
-
+    public Task<CatalogTableUpsertResult> InsertTableMetadataIfAbsentAsync(TableMetadata metadata, CancellationToken ct = default) => CatalogBatchUpsertHelper.InsertIfAbsentAsync(this, metadata, IsTransientChunkConflict, ct);
     internal async Task<IReadOnlyList<CatalogTableUpsertResult>> UpsertValidatedBatchAsync(TableMetadata[] validated, CancellationToken ct)
     {
         // Deduplicate by case-insensitive identifier (latest entry wins) while preserving input-to-slot mapping.

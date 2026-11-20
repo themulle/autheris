@@ -23,13 +23,14 @@ public class DbtHealthExecutionMiddlewareTests
 {
     public sealed class DummyQuery
     {
-        public string Orders() => "ok";
+        public string Orders(string? name = null) => name ?? "ok";
     }
 
     private static async Task<IRequestExecutor> CreateExecutorAsync(
         IDbtHealthCircuitBreaker circuitBreaker,
         ITableMetadataRepository tableRepo,
-        ITableAccessResolver? accessResolver = null)
+        ITableAccessResolver? accessResolver = null,
+        IDataOwnershipRepository? ownershipRepo = null)
     {
         var services = new ServiceCollection()
             .AddSingleton(circuitBreaker)
@@ -38,6 +39,11 @@ public class DbtHealthExecutionMiddlewareTests
         if (accessResolver != null)
         {
             services.AddSingleton(accessResolver);
+        }
+
+        if (ownershipRepo != null)
+        {
+            services.AddSingleton(ownershipRepo);
         }
 
         return await services
@@ -302,5 +308,149 @@ public class DbtHealthExecutionMiddlewareTests
             "{ ...A ...B } fragment A on Query { ...C } fragment B on Query { ...C } fragment C on Query { orders }",
             DbtModelHealthStatus.Quarantined);
         json.ShouldContain("TABLE_IN_QUARANTINE");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Gql14_GlobalDataOwnerRoleWithoutTableOwnership_CannotBypassOrReadActiveFailures()
+    {
+        var circuitBreaker = Substitute.For<IDbtHealthCircuitBreaker>();
+        var tableRepo = Substitute.For<ITableMetadataRepository>();
+        var accessResolver = Substitute.For<ITableAccessResolver>();
+        var ownershipRepo = Substitute.For<IDataOwnershipRepository>();
+
+        var tableId = new TableIdentifier("tenant-1", "default", "orders");
+        var meta = new TableMetadata
+        {
+            Identifier = tableId,
+            Table = new Table { Id = Guid.NewGuid(), SourceName = "tenant-1", SchemaName = "default", TableName = "orders", IsActive = true },
+            Columns = []
+        };
+        tableRepo.StubAllTables(new[] { meta });
+        tableRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+            .Returns(ci => ci.Arg<TableIdentifier>().TableName == "orders" ? meta : null);
+        Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(tableRepo);
+        circuitBreaker.GetTableHealthAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+            .Returns(new DbtHealthState(
+                tableId,
+                DbtModelHealthStatus.Quarantined,
+                [new DbtTestFailure("not_null_orders_id", "orders", "id", "error", "secret failure detail", 5)],
+                DateTimeOffset.UtcNow));
+
+        // Caller holds global "DataOwner" role, is NOT an owner of orders in IDataOwnershipRepository, and has no access.
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+            new[] { DefaultTenantCaller.Claim, new Claim(ClaimTypes.NameIdentifier, "user-1"), new Claim(ClaimTypes.Role, "DataOwner") },
+            "TestAuth"));
+        ownershipRepo.IsAuthorizedApproverForTableAsync(tableId, Arg.Any<Sid>(), Arg.Any<CancellationToken>())
+            .Returns(false);
+        accessResolver.ResolveTableAccessAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<string>?>(), Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<CancellationToken>())
+            .Returns(new ResolvedTableAccess(
+                meta,
+                TableAccessDecision.Denied(tableId, "No consent"),
+                new TenantId("tenant-1"),
+                new Sid("user-1"),
+                principal));
+
+        var executor = await CreateExecutorAsync(circuitBreaker, tableRepo, accessResolver, ownershipRepo);
+        var request = OperationRequestBuilder.New()
+            .SetDocument("{ orders }")
+            .SetGlobalState("ClaimsPrincipal", principal)
+            .Build();
+
+        await using var result = await executor.ExecuteAsync(request);
+        var json = result.ToJson();
+        json.ShouldNotContain("TABLE_IN_QUARANTINE");
+        json.ShouldNotContain("activeFailures");
+        json.ShouldNotContain("secret failure detail");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Gql14_AuthorizedTableOwnerViaOwnershipRepo_ReceivesActiveFailures()
+    {
+        var circuitBreaker = Substitute.For<IDbtHealthCircuitBreaker>();
+        var tableRepo = Substitute.For<ITableMetadataRepository>();
+        var accessResolver = Substitute.For<ITableAccessResolver>();
+        var ownershipRepo = Substitute.For<IDataOwnershipRepository>();
+
+        var tableId = new TableIdentifier("tenant-1", "default", "orders");
+        var meta = new TableMetadata
+        {
+            Identifier = tableId,
+            Table = new Table { Id = Guid.NewGuid(), SourceName = "tenant-1", SchemaName = "default", TableName = "orders", IsActive = true },
+            Columns = []
+        };
+        tableRepo.StubAllTables(new[] { meta });
+        tableRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+            .Returns(ci => ci.Arg<TableIdentifier>().TableName == "orders" ? meta : null);
+        Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(tableRepo);
+        circuitBreaker.GetTableHealthAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+            .Returns(new DbtHealthState(
+                tableId,
+                DbtModelHealthStatus.Quarantined,
+                [new DbtTestFailure("not_null_orders_id", "orders", "id", "error", "secret failure detail", 5)],
+                DateTimeOffset.UtcNow));
+
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+            new[] { DefaultTenantCaller.Claim, new Claim(ClaimTypes.NameIdentifier, "owner-1") },
+            "TestAuth"));
+        ownershipRepo.IsAuthorizedApproverForTableAsync(tableId, Arg.Any<Sid>(), Arg.Any<CancellationToken>())
+            .Returns(true);
+
+        var executor = await CreateExecutorAsync(circuitBreaker, tableRepo, accessResolver, ownershipRepo);
+        var request = OperationRequestBuilder.New()
+            .SetDocument("{ orders }")
+            .SetGlobalState("ClaimsPrincipal", principal)
+            .Build();
+
+        await using var result = await executor.ExecuteAsync(request);
+        var json = result.ToJson();
+        json.ShouldContain("TABLE_IN_QUARANTINE");
+        json.ShouldContain("activeFailures");
+        json.ShouldContain("not_null_orders_id");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Gql14_VariableModelName_ReturnsTableInQuarantine()
+    {
+        var circuitBreaker = Substitute.For<IDbtHealthCircuitBreaker>();
+        var tableRepo = Substitute.For<ITableMetadataRepository>();
+        var accessResolver = Substitute.For<ITableAccessResolver>();
+
+        var tableId = new TableIdentifier("tenant-1", "default", "secret_orders");
+        var meta = new TableMetadata
+        {
+            Identifier = tableId,
+            Table = new Table { Id = Guid.NewGuid(), SourceName = "tenant-1", SchemaName = "default", TableName = "secret_orders", IsActive = true },
+            Columns = []
+        };
+        tableRepo.StubAllTables(new[] { meta });
+        tableRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+            .Returns(ci => ci.Arg<TableIdentifier>().TableName == "secret_orders" ? meta : null);
+        Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(tableRepo);
+        circuitBreaker.GetTableHealthAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+            .Returns(ci => ci.Arg<TableIdentifier>().TableName == "secret_orders"
+                ? new DbtHealthState(tableId, DbtModelHealthStatus.Quarantined, [], DateTimeOffset.UtcNow)
+                : new DbtHealthState(ci.Arg<TableIdentifier>(), DbtModelHealthStatus.Healthy, [], DateTimeOffset.UtcNow));
+
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(new[] { DefaultTenantCaller.Claim, new Claim(ClaimTypes.Name, "Alice") }, "TestAuth"));
+        accessResolver.ResolveTableAccessAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<string>?>(), Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<CancellationToken>())
+            .Returns(new ResolvedTableAccess(
+                meta,
+                TableAccessDecision.Allowed(tableId, new Dictionary<string, ColumnAccessLevel>(), null, true),
+                new TenantId("tenant-1"),
+                new Sid("user-1"),
+                principal));
+
+        var executor = await CreateExecutorAsync(circuitBreaker, tableRepo, accessResolver);
+        var request = OperationRequestBuilder.New()
+            .SetDocument("query ($tbl: String) { orders(name: $tbl) }")
+            .SetVariableValues(new Dictionary<string, object?> { ["tbl"] = "secret_orders" })
+            .SetGlobalState("ClaimsPrincipal", principal)
+            .Build();
+
+        await using var result = await executor.ExecuteAsync(request);
+        result.ToJson().ShouldContain("TABLE_IN_QUARANTINE");
     }
 }
