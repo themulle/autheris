@@ -292,4 +292,61 @@ public sealed class ModuleSignerRoundTripTests : IDisposable
         File.Exists(Path.Combine(moduleDir, "module.json")).ShouldBeFalse();
     }
 
+    [Fact]
+    public void SignDirectory_ResolvesMixedCaseEntryAssemblyAndType_WhenIdIsLowercase()
+    {
+        using var signingKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using var verifyOnlyKey = CreatePublicOnlyKey(signingKey);
+        string pem = signingKey.ExportPkcs8PrivateKeyPem();
+        string moduleDir = CreateSyntheticModuleDir("openmetadata", entryDll: "Autheris.Modules.OpenMetadata.dll");
+
+        var result = ModuleSignerCli.SignDirectory(
+            moduleDir,
+            id: "openmetadata",
+            version: "1.10.1",
+            hostVersion: "1.10.1",
+            abstractionsVersion: "1.10.1",
+            entryAssembly: null,
+            entryType: null,
+            signingKey);
+
+        result.Manifest.EntryAssembly.ShouldBe("Autheris.Modules.OpenMetadata.dll");
+        result.Manifest.EntryType.ShouldBe("Autheris.Modules.OpenMetadata.OpenMetadataModule");
+        ManifestSignatureVerifier.VerifyManifest(result.Manifest, verifyOnlyKey, out var failureReason).ShouldBeTrue(failureReason);
+
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+        int exitCode = ModuleSignerCli.Run(
+            ["--dir", moduleDir, "--id", "openmetadata", "--version", "1.10.1", "--host-version", "1.10.1", "--abstractions-version", "1.10.1"],
+            new StringReader(string.Empty),
+            stdout,
+            stderr,
+            getEnvironmentVariable: name => string.Equals(name, ModuleSignerCli.SigningKeyEnvVar, StringComparison.Ordinal) ? pem : null);
+
+        exitCode.ShouldBe(0);
+        var parsed = ModuleManifest.Parse(File.ReadAllText(Path.Combine(moduleDir, "module.json")));
+        parsed.EntryAssembly.ShouldBe("Autheris.Modules.OpenMetadata.dll");
+        parsed.EntryType.ShouldBe("Autheris.Modules.OpenMetadata.OpenMetadataModule");
+    }
+
+    [Fact]
+    public void SignDirectory_DoesNotMatchNestedEntryAssembly_WhenTopLevelMissing()
+    {
+        using var signingKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        string moduleDir = Path.Combine(_tempRoot, "nested-openmetadata");
+        string subDir = Path.Combine(moduleDir, "sub");
+        Directory.CreateDirectory(subDir);
+        File.WriteAllBytes(Path.Combine(subDir, "Autheris.Modules.OpenMetadata.dll"), [0x4D, 0x5A, 0x90, 0x00]);
+
+        Should.Throw<InvalidOperationException>(() =>
+            ModuleSignerCli.SignDirectory(
+                moduleDir,
+                id: "openmetadata",
+                version: "1.10.1",
+                hostVersion: "1.10.1",
+                abstractionsVersion: "1.10.1",
+                entryAssembly: null,
+                entryType: null,
+                signingKey));
+    }
 }
