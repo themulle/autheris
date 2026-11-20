@@ -41,6 +41,7 @@
 /api/v1/catalog/domains|GET|no side effect: lists catalog domains
 /api/v1/catalog/graphql-schema-status|GET|no side effect: reads the GraphQL schema freshness state
 /api/v1/catalog/objects|GET|no side effect: lists external catalog objects with visibility filtering
+/api/v1/catalog/objects/facets|GET|no side effect: counts caller-visible catalog objects per domain and schema
 /api/v1/catalog/objects/{id}|GET|no side effect: reads external catalog object metadata by id or identifier
 /api/v1/catalog/search|GET|no side effect: searches catalog metadata
 /api/v1/cdc/streams|GET|no side effect: lists CDC streams

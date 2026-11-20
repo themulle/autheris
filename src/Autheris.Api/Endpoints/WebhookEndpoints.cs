@@ -85,9 +85,15 @@ public static class WebhookEndpoints
         // Step 5: only a verified payload reaches the module; the handler is resolved here, never earlier.
         var handler = context.RequestServices.GetRequiredService<IDbtCloudWebhookHandler>();
         var result = await handler.HandleVerifiedAsync(payload, ct);
-        return result.Success
-            ? Results.Ok(result)
-            : Results.Json(result, statusCode: StatusCodes.Status401Unauthorized);
+        if (!result.Success)
+        {
+            var statusCode = result.StoreUnavailable
+                ? StatusCodes.Status503ServiceUnavailable
+                : StatusCodes.Status401Unauthorized;
+            return Results.Json(result, statusCode: statusCode);
+        }
+
+        return Results.Ok(result);
     }
 
     private static IResult DbtCloudUnauthorized() =>
@@ -174,10 +180,13 @@ public static class WebhookEndpoints
 
         // Step 5: only a verified payload reaches the module; the handler is resolved here, never earlier.
         var handler = context.RequestServices.GetRequiredService<IOpenMetadataWebhookHandler>();
-        var success = await handler.HandleVerifiedAsync(payload, ct);
-        return success
-            ? Results.Ok(new { status = "Processed" })
-            : ApiProblems.BadRequest(ApiErrorCodes.WebhookSignatureOrFormatInvalid, "Failed to process webhook.");
+        var outcome = await handler.HandleVerifiedAsync(payload, ct);
+        return outcome switch
+        {
+            OpenMetadataWebhookOutcome.Processed => Results.Ok(new { status = "Processed" }),
+            OpenMetadataWebhookOutcome.Unavailable => ApiProblems.ServiceUnavailable(detail: "The webhook replay store is unavailable.", httpContext: context),
+            _ => ApiProblems.BadRequest(ApiErrorCodes.WebhookSignatureOrFormatInvalid, "Failed to process webhook.", context)
+        };
     }
 
     private static IResult OpenMetadataUnauthorized() =>

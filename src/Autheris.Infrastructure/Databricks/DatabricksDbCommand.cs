@@ -60,7 +60,13 @@ public sealed class DatabricksDbCommand : DbCommand, Autheris.Application.Usage.
     public override async Task<object?> ExecuteScalarAsync(CancellationToken cancellationToken)
     {
         var result = await RunAsync(cancellationToken).ConfigureAwait(false);
-        return result.Rows.Count > 0 && result.Rows[0].Length > 0 ? (object?)result.Rows[0][0] ?? DBNull.Value : null;
+        if (result.Rows.Count == 0 || result.Rows[0].Length == 0)
+        {
+            return null;
+        }
+
+        var column = result.Columns.Length > 0 ? result.Columns[0] : new DatabricksColumn(string.Empty, "STRING");
+        return DatabricksTypeMap.ParseCell(result.Rows[0][0], column.TypeName, column.Precision);
     }
 
     protected override DbParameter CreateDbParameter() => new DatabricksDbParameter();
@@ -72,30 +78,49 @@ public sealed class DatabricksDbCommand : DbCommand, Autheris.Application.Usage.
     {
         var result = await RunAsync(cancellationToken).ConfigureAwait(false);
         var table = new DataTable { Locale = CultureInfo.InvariantCulture };
-        var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var column in result.Columns)
+        try
         {
-            var name = column.Name;
-            for (var i = 1; !used.Add(name); i++)
+            var schema = new List<(string Name, DatabricksColumn Column, Type ClrType)>(result.Columns.Length);
+            var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var column in result.Columns)
             {
-                name = $"{column.Name}_{i.ToString(CultureInfo.InvariantCulture)}";
+                var name = column.Name;
+                for (var i = 1; !used.Add(name); i++)
+                {
+                    name = $"{column.Name}_{i.ToString(CultureInfo.InvariantCulture)}";
+                }
+
+                var clrType = DatabricksTypeMap.ResolveClrType(column.TypeName, column.Precision);
+                var dataCol = table.Columns.Add(name, clrType);
+                if (clrType == typeof(DateTime))
+                {
+                    dataCol.DateTimeMode = DataSetDateTime.Unspecified;
+                }
+
+                schema.Add((name, column, clrType));
             }
 
-            table.Columns.Add(name, typeof(string));
-        }
-
-        foreach (var row in result.Rows)
-        {
-            var values = new object[table.Columns.Count];
-            for (var i = 0; i < values.Length; i++)
+            foreach (var row in result.Rows)
             {
-                values[i] = i < row.Length && row[i] is { } cell ? cell : DBNull.Value;
+                var values = new object[table.Columns.Count];
+                for (var i = 0; i < values.Length; i++)
+                {
+                    var col = result.Columns[i];
+                    values[i] = i < row.Length
+                        ? DatabricksTypeMap.ParseCell(row[i], col.TypeName, col.Precision)
+                        : DBNull.Value;
+                }
+
+                table.Rows.Add(values);
             }
 
-            table.Rows.Add(values);
+            return new DatabricksDataReader(table, schema);
         }
-
-        return table.CreateDataReader();
+        catch
+        {
+            table.Dispose();
+            throw;
+        }
     }
 
     private async Task<DatabricksStatementResult> RunAsync(CancellationToken cancellationToken)

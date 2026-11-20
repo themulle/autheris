@@ -6,6 +6,6 @@ namespace Autheris.Application.Catalog.OpenMetadata;
 /// </summary>
 public interface IOpenMetadataWebhookHandler
 {
-    /// <returns><c>true</c> when the event was accepted and processed; <c>false</c> when it was rejected (format, replay, window) or failed.</returns>
-    Task<bool> HandleVerifiedAsync(string payload, CancellationToken ct);
+    /// <returns>Outcome indicating whether the event was processed, rejected (format, replay, window), or failed closed because the replay store is unavailable.</returns>
+    Task<OpenMetadataWebhookOutcome> HandleVerifiedAsync(string payload, CancellationToken ct);
 }

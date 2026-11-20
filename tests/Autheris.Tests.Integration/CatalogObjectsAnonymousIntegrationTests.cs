@@ -37,6 +37,7 @@ public sealed class CatalogObjectsAnonymousIntegrationTests : IClassFixture<Cata
 
     [Theory]
     [InlineData("/api/v1/catalog/objects")]
+    [InlineData("/api/v1/catalog/objects/facets")]
     [InlineData("/api/v1/catalog/objects/pg.dbo.orders")]
     [InlineData("/api/v1/catalog/changes")]
     public async Task Anonymous_Returns401(string url)

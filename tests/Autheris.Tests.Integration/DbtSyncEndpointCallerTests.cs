@@ -15,6 +15,7 @@ using Shouldly;
 using Xunit;
 using Autheris.Tests.Common.Hosting;
 using Autheris.Tests.Integration.Governance;
+using Autheris.Tests.Integration.Modules;
 
 /// <summary>
 /// EXT-05: POST /modules/dbt/sync hands the server-resolved request tenant and the canonical ClusterAdmin flag to the
@@ -61,7 +62,7 @@ public sealed class DbtSyncEndpointCallerTests : IClassFixture<DbtSyncEndpointCa
 
         protected override void ConfigureHostServices(IServiceCollection services)
         {
-            services.AddSingleton(Service);
+            services.ReplaceModuleService(Service);
         }
     }
 

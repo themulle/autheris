@@ -1,5 +1,6 @@
 using System.Reflection;
 using Autheris.Infrastructure.Persistence.Migrations;
+using Autheris.Tests.Unit.Support;
 using Microsoft.Data.SqlClient;
 using Shouldly;
 using Xunit;
@@ -19,22 +20,35 @@ public sealed class MigrationFailureDiagnosticsTests
     public void DescribeFailure_NamesPhaseBatchLineAndStatementPrefix_ForASqlServerError()
     {
         var sql = "IF COL_LENGTH('dbo.IDENTITY_USERS', 'object_sid') IS NULL\n    ALTER TABLE dbo.IDENTITY_USERS ADD object_sid NVARCHAR(184) NULL;";
-        var failure = CreateSqlException(102, lineNumber: 2);
+        var failure = new InvalidOperationException("Incorrect syntax near 'secret-token'.");
         failure.Data[SqlMigrationStep.FailedPhaseDataKey] = "apply";
         failure.Data[SqlMigrationStep.FailedBatchDataKey] = 6;
         SqlMigrationStep.AnnotateStatement(failure, sql);
 
-        var text = GovernanceMigrationRunnerBase.DescribeFailure(failure);
+        var text = GovernanceMigrationRunnerBase.DescribeFailure(new GovernanceMigrationRunnerBase.SqlFailureInfo(102, 2), failure);
 
         text.ShouldStartWith("error 102, line 2, phase apply, batch 6, statement \"IF COL_LENGTH(");
         text.ShouldNotContain("\n");
+        text.ShouldNotContain("secret-token");
         text.ShouldNotContain(failure.Message, Case.Sensitive, "the server message can carry values and stays out of the report");
     }
 
     [Fact]
     public void DescribeFailure_WithoutAnnotations_KeepsTheErrorNumberOnly()
     {
-        GovernanceMigrationRunnerBase.DescribeFailure(CreateSqlException(102, lineNumber: 0)).ShouldBe("error 102");
+        GovernanceMigrationRunnerBase.DescribeFailure(new GovernanceMigrationRunnerBase.SqlFailureInfo(102, 0)).ShouldBe("error 102");
+    }
+
+    [RuntimeSkippableFact]
+    public void RealSqlException_MapsNumberAndLine()
+    {
+        var failure = TryCreateSqlException(102, lineNumber: 2)
+            ?? throw new RuntimeSkipException($"SqlClient {SqlClientVersion()} changed its internal SqlError API");
+
+        var text = GovernanceMigrationRunnerBase.DescribeFailure(failure);
+
+        text.ShouldBe("error 102, line 2");
+        text.ShouldNotContain(failure.Message, Case.Sensitive, "the server message can carry values and stays out of the report");
     }
 
     [Fact]
@@ -81,17 +95,44 @@ public sealed class MigrationFailureDiagnosticsTests
         SqlMigrationStep.Parse("sqlserver", 2, "x", "A1;\n-- batch\nB1;", EmptyDelta).Batches.Count.ShouldBe(2);
     }
 
-    private static SqlException CreateSqlException(int number, int lineNumber)
+    internal static string SqlClientVersion() =>
+        typeof(SqlException).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+        ?? typeof(SqlException).Assembly.GetName().Version?.ToString()
+        ?? "unknown";
+
+    internal static SqlException? TryCreateSqlException(int number, int lineNumber)
     {
-        var errorType = typeof(SqlError);
-        var ctor = errorType.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-            .Single(c => c.GetParameters().Select(p => p.ParameterType).SequenceEqual(
-                [typeof(int), typeof(byte), typeof(byte), typeof(string), typeof(string), typeof(string), typeof(int), typeof(int), typeof(Exception)]));
-        var error = ctor.Invoke([number, (byte)1, (byte)15, "server", "Incorrect syntax near 'secret-token'.", "proc", lineNumber, 0, null]);
-        var collection = (SqlErrorCollection)Activator.CreateInstance(typeof(SqlErrorCollection), nonPublic: true)!;
-        typeof(SqlErrorCollection).GetMethod("Add", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)!.Invoke(collection, [error]);
-        var create = typeof(SqlException).GetMethod(
-            "CreateException", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public, [typeof(SqlErrorCollection), typeof(string)])!;
-        return (SqlException)create.Invoke(null, [collection, "16.0"])!;
+        try
+        {
+            var ctor = typeof(SqlError)
+                .GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+                .SingleOrDefault(c => c.GetParameters().Select(p => p.ParameterType).SequenceEqual(
+                    [typeof(int), typeof(byte), typeof(byte), typeof(string), typeof(string), typeof(string), typeof(int), typeof(int), typeof(Exception)]));
+            if (ctor is null)
+            {
+                return null;
+            }
+
+            var error = ctor.Invoke([number, (byte)1, (byte)15, "server", "Incorrect syntax near 'secret-token'.", "proc", lineNumber, 0, null]);
+            if (Activator.CreateInstance(typeof(SqlErrorCollection), nonPublic: true) is not SqlErrorCollection collection)
+            {
+                return null;
+            }
+
+            var add = typeof(SqlErrorCollection).GetMethod("Add", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+            if (add is null)
+            {
+                return null;
+            }
+
+            add.Invoke(collection, [error]);
+            var create = typeof(SqlException).GetMethod(
+                "CreateException", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public, [typeof(SqlErrorCollection), typeof(string)]);
+            return create?.Invoke(null, [collection, "16.0"]) as SqlException;
+        }
+        catch (Exception ex) when (ex is TargetInvocationException or MissingMethodException or MemberAccessException or ArgumentException or InvalidOperationException)
+        {
+            return null;
+        }
     }
 }

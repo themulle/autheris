@@ -14,6 +14,7 @@ using Shouldly;
 using Xunit;
 using Autheris.Tests.Common.Hosting;
 using Autheris.Tests.Integration.Governance;
+using Autheris.Tests.Integration.Modules;
 
 namespace Autheris.Tests.Integration;
 
@@ -47,7 +48,7 @@ public class OpenMetadataIntegrationTests : IClassFixture<OpenMetadataIntegratio
 
         protected override void ConfigureHostServices(IServiceCollection services)
         {
-            services.AddSingleton<IOpenMetadataClient>(MockOmClient);
+            services.ReplaceModuleService<IOpenMetadataClient>(MockOmClient);
         }
     }
 

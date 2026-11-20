@@ -1,6 +1,8 @@
 using System.Security.Cryptography;
 using System.Text;
+using Autheris.Application.Catalog.OpenMetadata;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.State;
 using Autheris.Domain.Options;
 using Autheris.Modules.OpenMetadata;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -44,14 +46,15 @@ public sealed class OpenMetadataWebhookCollisionExt16Tests
         };
         var service = new OpenMetadataSyncService(
             client, metadataRepo, Substitute.For<IConsentRepository>(), epochRepo,
-            Options.Create(options), NullLogger<OpenMetadataSyncService>.Instance);
+            Options.Create(options), NullLogger<OpenMetadataSyncService>.Instance,
+            clusterState: new InMemoryClusterStateProvider());
 
         var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var payload = $"{{\"id\":\"{Guid.NewGuid()}\",\"timestamp\":{nowMs},\"eventType\":\"entityUpdated\",\"entityType\":\"table\",\"entityFullyQualifiedName\":\"{db2.FullyQualifiedName}\"}}";
 
         var result = await service.HandleVerifiedAsync(payload);
 
-        result.ShouldBeTrue();
+        result.ShouldBe(OpenMetadataWebhookOutcome.Processed);
         await metadataRepo.DidNotReceive().UpsertTableMetadataAsync(Arg.Any<Autheris.Domain.Model.TableMetadata>(), Arg.Any<CancellationToken>());
         await epochRepo.DidNotReceive().IncrementTableEpochAsync(Arg.Any<Autheris.Domain.Common.TableIdentifier>(), Arg.Any<CancellationToken>());
     }

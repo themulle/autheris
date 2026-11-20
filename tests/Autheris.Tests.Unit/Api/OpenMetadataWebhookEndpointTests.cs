@@ -228,7 +228,7 @@ public sealed class OpenMetadataWebhookEndpointTests
     [Fact]
     public async Task Processing_failure_returns_400()
     {
-        var h = Create(handlerResult: false);
+        var h = Create(handlerOutcome: OpenMetadataWebhookOutcome.Rejected);
         h.Context.Request.Headers["X-OpenMetadata-Signature"] = Hex(Payload, Secret);
 
         var (status, body) = await InvokeAsync(h);
@@ -238,16 +238,16 @@ public sealed class OpenMetadataWebhookEndpointTests
         h.Handler.Calls.ShouldBe(1);
     }
 
-    private sealed class RecordingHandler(bool result) : IOpenMetadataWebhookHandler
+    private sealed class RecordingHandler(OpenMetadataWebhookOutcome outcome) : IOpenMetadataWebhookHandler
     {
         public int Calls { get; private set; }
         public string? LastPayload { get; private set; }
 
-        public Task<bool> HandleVerifiedAsync(string payload, CancellationToken ct)
+        public Task<OpenMetadataWebhookOutcome> HandleVerifiedAsync(string payload, CancellationToken ct)
         {
             Calls++;
             LastPayload = payload;
-            return Task.FromResult(result);
+            return Task.FromResult(outcome);
         }
     }
 
@@ -321,10 +321,10 @@ public sealed class OpenMetadataWebhookEndpointTests
         string? secret = Secret,
         bool bypass = false,
         bool register = true,
-        bool handlerResult = true,
+        OpenMetadataWebhookOutcome handlerOutcome = OpenMetadataWebhookOutcome.Processed,
         byte[]? rawBody = null)
     {
-        var handler = new RecordingHandler(handlerResult);
+        var handler = new RecordingHandler(handlerOutcome);
         var logs = new CapturingLoggerFactory();
         var resolutions = 0;
         var services = new ServiceCollection();

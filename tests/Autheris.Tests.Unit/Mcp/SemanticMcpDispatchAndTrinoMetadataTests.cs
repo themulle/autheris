@@ -17,6 +17,7 @@ using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Mcp.Services;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.Sql.Services;
+using Autheris.Tests.Unit.Sql;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -280,24 +281,26 @@ public sealed class SemanticMcpDispatchAndTrinoMetadataTests
             new Claim("tid", tenantId.Value)
         ], "Bearer"));
 
+        var visibility = TrinoMetadataVisibilityFakes.AllowAll(visibleTable, hiddenTable);
+
         var catalogsResult = await TrinoMetadataQueryHandler.TryExecuteAsync(
-            "SHOW CATALOGS;", user, tenantId, tableRepo, consentRepo);
+            "SHOW CATALOGS;", user, tenantId, tableRepo, consentRepo, null, null, visibility);
         catalogsResult.Should().NotBeNull();
         catalogsResult!.Columns.Should().BeEquivalentTo(["Catalog"]);
         catalogsResult.Rows.Select(r => r["Catalog"]?.ToString()).Should().BeEquivalentTo(["sales", "system"]);
 
         var schemasResult = await TrinoMetadataQueryHandler.TryExecuteAsync(
-            "SHOW SCHEMAS FROM sales", user, tenantId, tableRepo, consentRepo);
+            "SHOW SCHEMAS FROM sales", user, tenantId, tableRepo, consentRepo, null, null, visibility);
         schemasResult.Should().NotBeNull();
         schemasResult!.Rows.Select(r => r["Schema"]?.ToString()).Should().BeEquivalentTo(["information_schema", "public"]);
 
         var tablesResult = await TrinoMetadataQueryHandler.TryExecuteAsync(
-            "SHOW TABLES FROM sales.public", user, tenantId, tableRepo, consentRepo);
+            "SHOW TABLES FROM sales.public", user, tenantId, tableRepo, consentRepo, null, null, visibility);
         tablesResult.Should().NotBeNull();
         tablesResult!.Rows.Select(r => r["Table"]?.ToString()).Should().ContainSingle().Which.Should().Be("orders");
 
         var colsResult = await TrinoMetadataQueryHandler.TryExecuteAsync(
-            "SELECT * FROM information_schema.columns", user, tenantId, tableRepo, consentRepo);
+            "SELECT * FROM information_schema.columns", user, tenantId, tableRepo, consentRepo, null, null, visibility);
         colsResult.Should().NotBeNull();
         colsResult!.Columns.Should().BeEquivalentTo(["table_catalog", "table_schema", "table_name", "column_name", "ordinal_position", "is_nullable", "data_type"]);
         colsResult.Rows.Select(r => r["column_name"]?.ToString()).Should().BeEquivalentTo(["id", "amount"]);

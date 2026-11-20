@@ -217,6 +217,8 @@ The command-line jobs ignore `Migrations:Mode`: `Autheris.Api --migrate-governan
 
 Per-step checks: before the first pending step the actual schema must equal the expected shape of the highest applied version; inside each step the shape of that version (including column nullability) is verified before its history row is written, so a step whose result differs from its declared shape rolls back. Exactly one process migrates at a time (PostgreSQL advisory lock, SQL Server application lock, SQLite write transaction); the others wait up to `LockTimeoutSeconds`, then re-read the history and only verify. Error codes:
 
+PostgreSQL 16 or later is required for the governance store: step `0031_access_profile_items` validates stored JSON with `IS JSON`, which older versions reject. The step also needs every node to run the new build first (see the migration guide).
+
 | Code | Meaning |
 | :--- | :--- |
 | `GOVERNANCE_SCHEMA_PENDING` | `Verify`: steps are pending. Run the migration job or start in `Apply`. |

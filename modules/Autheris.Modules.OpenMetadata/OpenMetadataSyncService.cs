@@ -39,9 +39,6 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService, 
     private static readonly HashSet<string> DenyDataOperations = new(StringComparer.OrdinalIgnoreCase) { "All", "ViewAll", "ViewSampleData" };
 
     private static readonly SemaphoreSlim SyncLock = new(1, 1);
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, DateTimeOffset> ProcessedWebhookEvents = new();
-    internal static int ProcessedWebhookEventsCount => ProcessedWebhookEvents.Count;
-    internal static void ClearProcessedWebhookEvents() => ProcessedWebhookEvents.Clear();
 
     public OpenMetadataSyncService(
         IOpenMetadataClient client, ITableMetadataRepository metadataRepo,
@@ -593,12 +590,12 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService, 
                ClassificationMetadata.IsTableSensitive(metadata);
     }
 
-    public async Task<bool> HandleVerifiedAsync(string payload, CancellationToken ct = default)
+    public async Task<OpenMetadataWebhookOutcome> HandleVerifiedAsync(string payload, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(payload) || payload.Length > 2 * 1024 * 1024 || Encoding.UTF8.GetByteCount(payload) > 2 * 1024 * 1024)
         {
             _logger.LogWarning("Rejecting OpenMetadata webhook: empty payload or payload exceeds maximum allowed size (2 MB).");
-            return false;
+            return OpenMetadataWebhookOutcome.Rejected;
         }
 
         var omOptions = _options.Value.OpenMetadata;
@@ -611,13 +608,13 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService, 
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to deserialize OpenMetadata webhook payload.");
-            return false;
+            return OpenMetadataWebhookOutcome.Rejected;
         }
 
         if (webhookEvent == null)
         {
             _logger.LogWarning("OpenMetadata webhook event payload is null.");
-            return false;
+            return OpenMetadataWebhookOutcome.Rejected;
         }
 
         bool ignoreTimestampTolerance = _options.Value.IsWebhookTimestampToleranceIgnored;
@@ -627,7 +624,7 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService, 
             if (!webhookEvent.Id.HasValue || !webhookEvent.Timestamp.HasValue)
             {
                 _logger.LogWarning("Rejecting OpenMetadata webhook: mandatory event 'Id' or 'Timestamp' is missing (fail-closed replay defense).");
-                return false;
+                return OpenMetadataWebhookOutcome.Rejected;
             }
 
             // Validate timestamp to prevent replay attacks (tolerance: 5 minutes)
@@ -635,71 +632,44 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService, 
                 ? DateTimeOffset.FromUnixTimeMilliseconds(webhookEvent.Timestamp.Value)
                 : DateTimeOffset.FromUnixTimeSeconds(webhookEvent.Timestamp.Value);
 
-            var skew = Math.Abs((DateTimeOffset.UtcNow - eventTime).TotalMinutes);
+            var skew = Math.Abs((_timeProvider.GetUtcNow() - eventTime).TotalMinutes);
             if (skew > 5)
             {
                 _logger.LogWarning("Rejecting OpenMetadata webhook: event timestamp is skewed or outside acceptable replay window ({Skew:F1} minutes).", skew);
-                return false;
+                return OpenMetadataWebhookOutcome.Rejected;
             }
         }
 
-        // Event ID deduplication and replay prevention (similar to dbt replay prevention)
+        // Event ID deduplication and replay prevention via the shared cluster store only (fail-closed when unavailable).
         if (webhookEvent.Id.HasValue)
         {
-            if (!ProcessedWebhookEvents.TryAdd(webhookEvent.Id.Value, DateTimeOffset.UtcNow))
+            if (_clusterState is null)
             {
-                _logger.LogWarning("Rejecting OpenMetadata webhook: event {EventId} has already been processed (replay detected).", webhookEvent.Id.Value);
-                return false;
+                _logger.LogWarning("OpenMetadata webhook replay store is not configured; rejecting webhook as unavailable.");
+                return OpenMetadataWebhookOutcome.Unavailable;
             }
 
-            if (_clusterState != null)
+            long? count;
+            try
             {
-                try
-                {
-                    var count = await _clusterState.IncrementAsync($"om:dedup:{webhookEvent.Id.Value}", 1, TimeSpan.FromMinutes(15), ct).ConfigureAwait(false);
-                    if (count is null)
-                    {
-                        ProcessedWebhookEvents.TryRemove(webhookEvent.Id.Value, out _);
-                        _logger.LogWarning("Rejecting OpenMetadata webhook: the shared replay store is unavailable.");
-                        return false;
-                    }
-
-                    if (count > 1)
-                    {
-                        _logger.LogWarning("Rejecting cluster OpenMetadata webhook: event {EventId} has already been processed (replay detected).", webhookEvent.Id.Value);
-                        return false;
-                    }
-                }
-                catch (OperationCanceledException)
-                {
-                    ProcessedWebhookEvents.TryRemove(webhookEvent.Id.Value, out _);
-                    throw;
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    // Fail closed: without the shared replay store another node could accept the same event again.
-                    ProcessedWebhookEvents.TryRemove(webhookEvent.Id.Value, out _);
-                    _logger.LogWarning(ex, "Rejecting OpenMetadata webhook: the shared replay store is unavailable.");
-                    return false;
-                }
+                count = await _clusterState.IncrementAsync($"om:dedup:{webhookEvent.Id.Value}", 1, TimeSpan.FromMinutes(15), ct).ConfigureAwait(false);
             }
-        }
-
-        // Bound the size of the deduplication dictionary
-        if (ProcessedWebhookEvents.Count > 10_000)
-        {
-            var cutoff = DateTimeOffset.UtcNow.AddMinutes(-30);
-            foreach (var (k, v) in ProcessedWebhookEvents)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                if (v < cutoff) ProcessedWebhookEvents.TryRemove(k, out _);
+                _logger.LogWarning(ex, "OpenMetadata webhook replay store is unavailable.");
+                return OpenMetadataWebhookOutcome.Unavailable;
             }
 
-            if (ProcessedWebhookEvents.Count > 10_000)
+            if (count is null)
             {
-                foreach (var (k, _) in ProcessedWebhookEvents.OrderBy(kv => kv.Value).Take(ProcessedWebhookEvents.Count - 10_000))
-                {
-                    ProcessedWebhookEvents.TryRemove(k, out _);
-                }
+                _logger.LogWarning("OpenMetadata webhook replay store returned null; rejecting webhook as unavailable.");
+                return OpenMetadataWebhookOutcome.Unavailable;
+            }
+
+            if (count > 1)
+            {
+                _logger.LogWarning("Rejecting cluster OpenMetadata webhook: event {EventId} has already been processed (replay detected).", webhookEvent.Id.Value);
+                return OpenMetadataWebhookOutcome.Rejected;
             }
         }
 
@@ -710,9 +680,10 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService, 
             if (!processed)
             {
                 await ReleaseWebhookEventAsync(webhookEvent.Id).ConfigureAwait(false);
+                return OpenMetadataWebhookOutcome.Rejected;
             }
 
-            return processed;
+            return OpenMetadataWebhookOutcome.Processed;
         }
         catch
         {
@@ -723,13 +694,7 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService, 
 
     private async Task ReleaseWebhookEventAsync(Guid? eventId)
     {
-        if (!eventId.HasValue)
-        {
-            return;
-        }
-
-        ProcessedWebhookEvents.TryRemove(eventId.Value, out _);
-        if (_clusterState == null)
+        if (!eventId.HasValue || _clusterState is null)
         {
             return;
         }

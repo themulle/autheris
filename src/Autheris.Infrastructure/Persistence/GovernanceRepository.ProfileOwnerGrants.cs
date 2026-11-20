@@ -340,7 +340,7 @@ WHERE c.tenant_id = @tenantId
         DbTransaction transaction, Consent consent, IReadOnlyCollection<string> ownerSids, CancellationToken ct)
     {
         consent.ApprovingOwners = [.. ownerSids];
-        await ConsentPatternSqlCore.InsertApprovingOwnersAsync(transaction, consent, ct).ConfigureAwait(false);
+        await ConsentPatternSql.InsertApprovingOwnersAsync(transaction, consent, ct).ConfigureAwait(false);
     }
 
     Task IProfileAssignmentStore.IncrementTableEpochInTransactionAsync(

@@ -167,6 +167,38 @@ public sealed class OpenMetadataModuleContractTests
         ex.Message.ShouldContain("openmetadata");
     }
 
+    [Fact]
+    public void OpenMetadata_early_and_module_key_passes_accept_config_when_enabled()
+    {
+        var services = new ServiceCollection();
+        services.AddAuthorization();
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Gateway:Modules:Enabled:0"] = "openmetadata",
+                ["Gateway:Modules:AllowUnsignedInDevelopment"] = "true",
+                ["Gateway:Modules:WorkspacePath"] = Path.Combine(FindRepositoryRoot(), "modules", "Autheris.Modules.OpenMetadata", "bin"),
+                ["Gateway:OpenMetadata:Enabled"] = "true",
+                ["Gateway:OpenMetadata:WebhookSecret"] = "configured-secret",
+            })
+            .Build();
+        var env = new FakeHostEnvironment { EnvironmentName = Environments.Development };
+
+        Should.NotThrow(() => UnknownGatewayKeyGuard.ThrowIfUnknownKeys(config));
+
+        var loader = new ModuleLoader(isDirectoryWritableOverride: _ => false);
+        var result = loader.LoadAndConfigureServices(services, config, env);
+
+        Should.NotThrow(() =>
+            UnknownGatewayKeyGuard.ThrowIfUnknownKeys(
+                config,
+                result,
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    [GatewaySections.OpenMetadata] = "openmetadata"
+                }));
+    }
+
     private static string FindRepositoryRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);

@@ -25,6 +25,12 @@ public sealed class CallbackDbConnection(
 {
     private ConnectionState _state = ConnectionState.Closed;
 
+    /// <summary>Observes every executed command with the transaction it was enrolled in (null when none).</summary>
+    public Action<string, DbTransaction?>? OnCommandExecuting { get; set; }
+
+    /// <summary>Observes every transaction begun on the connection with its isolation level.</summary>
+    public Action<IsolationLevel>? OnBeginTransaction { get; set; }
+
     [AllowNull]
     public override string ConnectionString { get; set; } = string.Empty;
 
@@ -55,8 +61,11 @@ public sealed class CallbackDbConnection(
         _state = ConnectionState.Open;
     }
 
-    protected override DbTransaction BeginDbTransaction(IsolationLevel isolationLevel) =>
-        new NoOpTransaction(this, isolationLevel, onCommit, onRollback);
+    protected override DbTransaction BeginDbTransaction(IsolationLevel isolationLevel)
+    {
+        OnBeginTransaction?.Invoke(isolationLevel);
+        return new NoOpTransaction(this, isolationLevel, onCommit, onRollback);
+    }
 
     protected override DbCommand CreateDbCommand() =>
         new CallbackDbCommand(this, executeReader, executeNonQuery);
@@ -93,7 +102,13 @@ public sealed class CallbackDbConnection(
 
         public override void Cancel() { }
         public override int ExecuteNonQuery() =>
-            executeNonQuery is not null ? executeNonQuery(CommandText, _parameters.ToReadOnlyDictionary()) : 0;
+            Observe() + (executeNonQuery is not null ? executeNonQuery(CommandText, _parameters.ToReadOnlyDictionary()) : 0);
+
+        private int Observe()
+        {
+            (DbConnection as CallbackDbConnection)?.OnCommandExecuting?.Invoke(CommandText, DbTransaction);
+            return 0;
+        }
 
         public override object? ExecuteScalar()
         {
@@ -104,8 +119,11 @@ public sealed class CallbackDbConnection(
         public override void Prepare() { }
         protected override DbParameter CreateDbParameter() => new StubDbParameter();
 
-        protected override DbDataReader ExecuteDbDataReader(CommandBehavior behavior) =>
-            executeReader(CommandText, _parameters.ToReadOnlyDictionary());
+        protected override DbDataReader ExecuteDbDataReader(CommandBehavior behavior)
+        {
+            Observe();
+            return executeReader(CommandText, _parameters.ToReadOnlyDictionary());
+        }
     }
 
     private sealed class StubDbParameter : DbParameter

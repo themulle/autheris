@@ -97,4 +97,19 @@ public sealed class WebSqlValueWriterTests
         rendered.ShouldNotContain("Autheris");
         rendered.ShouldBe("null");
     }
+
+    [Theory]
+    [InlineData("de-DE")]
+    [InlineData("en-US")]
+    public void Write_SByteAndNonFiniteFloats_HandledCleanly(string culture)
+    {
+        Render((sbyte)-12, culture).ShouldBe("-12");
+        Render((sbyte)127, culture).ShouldBe("127");
+        Render(float.NaN, culture).ShouldBe("\"NaN\"");
+        Render(float.PositiveInfinity, culture).ShouldBe("\"Infinity\"");
+        Render(float.NegativeInfinity, culture).ShouldBe("\"-Infinity\"");
+        Render(double.NaN, culture).ShouldBe("\"NaN\"");
+        Render(double.PositiveInfinity, culture).ShouldBe("\"Infinity\"");
+        Render(double.NegativeInfinity, culture).ShouldBe("\"-Infinity\"");
+    }
 }

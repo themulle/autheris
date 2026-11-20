@@ -17,6 +17,7 @@ using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Catalog.Models;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Catalog.OpenMetadata;
+using Autheris.Application.State;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -147,7 +148,7 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
         var options = Options.Create(new GatewayOptions { OpenMetadata = omOptions });
         var fixture = new OmFixture
         {
-            Service = new OpenMetadataSyncService(client, metadataRepo, consentRepo, epochRepo, options, NullLogger<OpenMetadataSyncService>.Instance),
+            Service = new OpenMetadataSyncService(client, metadataRepo, consentRepo, epochRepo, options, NullLogger<OpenMetadataSyncService>.Instance, clusterState: new InMemoryClusterStateProvider()),
             Client = client,
             ConsentRepo = consentRepo
         };
@@ -657,9 +658,9 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
             .Returns(Task.FromResult<OpenMetadataTable?>(foreign));
 
         var payload = TableEvent(foreign.FullyQualifiedName);
-        var ok = await f.Service.HandleVerifiedAsync(payload);
+        var outcome = await f.Service.HandleVerifiedAsync(payload);
 
-        ok.ShouldBeTrue();
+        outcome.ShouldBe(OpenMetadataWebhookOutcome.Processed);
         f.Upserted.ShouldBeEmpty();
     }
 
@@ -673,9 +674,9 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
             .Returns(Task.FromResult<OpenMetadataTable?>(orders));
 
         var payload = TableEvent(orders.FullyQualifiedName);
-        var ok = await f.Service.HandleVerifiedAsync(payload);
+        var outcome = await f.Service.HandleVerifiedAsync(payload);
 
-        ok.ShouldBeTrue();
+        outcome.ShouldBe(OpenMetadataWebhookOutcome.Processed);
         var meta = f.Upserted.ShouldHaveSingleItem();
         meta.Identifier.ShouldBe(OrdersId);
         meta.Table.IsActive.ShouldBeFalse();
@@ -708,7 +709,7 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
             .Returns(Task.FromResult<OpenMetadataTable?>(orders));
 
         var payload = TableEvent(orders.FullyQualifiedName);
-        (await f.Service.HandleVerifiedAsync(payload)).ShouldBeTrue();
+        (await f.Service.HandleVerifiedAsync(payload)).ShouldBe(OpenMetadataWebhookOutcome.Processed);
 
         f.Upserted.ShouldHaveSingleItem().Table.SourceName.ShouldBe("sales_readonly_conn");
     }

@@ -154,7 +154,7 @@ public sealed class OpenMetadataModuleSecurityTests(OpenMetadataModuleSecurityTe
 
         protected override void ConfigureHostServices(IServiceCollection services)
         {
-            services.AddSingleton<IOpenMetadataClient>(FakeClient);
+            services.ReplaceModuleService<IOpenMetadataClient>(FakeClient);
         }
     }
 

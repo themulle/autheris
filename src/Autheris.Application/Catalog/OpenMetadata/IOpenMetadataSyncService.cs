@@ -3,6 +3,16 @@ using Autheris.Domain.Common;
 namespace Autheris.Application.Catalog.OpenMetadata;
 
 /// <summary>
+/// Result of handling a signature-verified OpenMetadata webhook payload.
+/// </summary>
+public enum OpenMetadataWebhookOutcome
+{
+    Processed,
+    Rejected,
+    Unavailable
+}
+
+/// <summary>
 /// Core port implemented by the OpenMetadata module: the on-demand and scheduled permission sync. Without the module no
 /// implementation is registered and callers answer "not available".
 /// </summary>

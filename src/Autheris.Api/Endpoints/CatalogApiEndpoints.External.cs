@@ -13,11 +13,14 @@ using Autheris.Api.Security;
 using Autheris.Application.Catalog.External;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
+using Autheris.Domain.Options;
 using Autheris.Domain.Options.DataSources;
 using Autheris.Domain.Tenancy;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 public static class ExternalCatalogApiEndpoints
 {
@@ -33,6 +36,10 @@ public static class ExternalCatalogApiEndpoints
             .WithIngressTransport(DataSourceTransportFlags.Rest);
 
         catalogGroup.MapGet("/objects", ListObjectsAsync)
+            .RequireAuthorization(GatewayPolicies.CatalogRead)
+            .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
+
+        catalogGroup.MapGet("/objects/facets", GetFacetsAsync)
             .RequireAuthorization(GatewayPolicies.CatalogRead)
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
@@ -93,6 +100,38 @@ public static class ExternalCatalogApiEndpoints
 
         var result = await reader.ListObjectsAsync(context.User, tenantId, query, ct).ConfigureAwait(false);
         return ToJsonOrProblemResult(context, result);
+    }
+
+    internal static async Task<IResult> GetFacetsAsync(
+        HttpContext context,
+        ExternalCatalogReader reader,
+        string? accessStatus = null,
+        CancellationToken ct = default)
+    {
+        if (!TryResolveTenant(context, out var tenantId, out var denied))
+        {
+            return denied!;
+        }
+
+        var result = await reader.GetFacetsAsync(context.User, tenantId, accessStatus, ct).ConfigureAwait(false);
+        if (!result.IsSuccess)
+        {
+            return ToJsonOrProblemResult(context, result);
+        }
+
+        var json = JsonSerializer.Serialize(result.Value!, JsonOptions);
+        if (Encoding.UTF8.GetByteCount(json) > ResolveMaxResponseBytes(context))
+        {
+            return ApiProblems.PayloadTooLarge("Catalog facets response exceeds the maximum allowed size.", context);
+        }
+
+        return RespondWithETag(context, json);
+    }
+
+    private static long ResolveMaxResponseBytes(HttpContext context)
+    {
+        var configured = context.RequestServices?.GetService<IOptions<GatewayOptions>>()?.Value?.GraphQL?.MaxResponseBytes;
+        return configured is > 0 ? configured.Value : 10L * 1024 * 1024;
     }
 
     internal static async Task<IResult> GetObjectByIdAsync(
@@ -163,6 +202,11 @@ public static class ExternalCatalogApiEndpoints
         if (!result.IsSuccess)
         {
             var err = result.Error!;
+            if (err.StatusCode == StatusCodes.Status429TooManyRequests)
+            {
+                return ApiProblems.TooManyRequests(err.Code, err.Detail, context, err.RetryAfterSeconds ?? 1);
+            }
+
             return ApiProblems.Problem(err.StatusCode, err.Code, err.Detail, context);
         }
 

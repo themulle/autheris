@@ -362,6 +362,10 @@ public sealed class CatalogCallerMigrationBatch3Tests
     {
         public ValueTask<DiscoveryPage> ListAsync(DiscoveryQuery query, CatalogCaller caller, CancellationToken ct = default) =>
             ValueTask.FromResult(new DiscoveryPage([], 0, false));
+        public ValueTask<DiscoveryKeysetPage> ListKeysetAsync(DiscoveryKeysetQuery query, CatalogCaller caller, CancellationToken ct = default) =>
+            ValueTask.FromResult(new DiscoveryKeysetPage([], 0, null));
+        public ValueTask<DiscoveryFacets> FacetsAsync(DiscoveryAccessState? access, CatalogCaller caller, CancellationToken ct = default) =>
+            ValueTask.FromResult(new DiscoveryFacets(0, []));
         public ValueTask<DiscoveryObject?> GetAsync(TableIdentifier id, CatalogCaller caller, CancellationToken ct = default) =>
             ValueTask.FromResult<DiscoveryObject?>(null);
         public ValueTask<IReadOnlyList<DiscoveryObject>> SearchAsync(string text, DiscoverySearchOptions options, CatalogCaller caller, CancellationToken ct = default) =>

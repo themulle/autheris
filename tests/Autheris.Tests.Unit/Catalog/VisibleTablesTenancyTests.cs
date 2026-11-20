@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Autheris.Application.Services;
 using Autheris.Application.Sql.Services;
+using Autheris.Tests.Unit.Sql;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -74,17 +75,18 @@ public sealed class VisibleTablesTenancyTests
     public async Task TrinoShowTables_FollowsTheSameRule()
     {
         var tables = Wp0.Tables(OrdersA, InvoicesB);
+        var visibility = TrinoMetadataVisibilityFakes.AllowAll(OrdersA, InvoicesB);
         var consents = Wp0.Consents(Wp0.Allow(InvoicesB.Identifier, "S-B-OWNER", Wp0.TenantB));
         var adminB = Wp0.User("S-B-ADMIN", "tenant-b", ["GovernanceAdmin"]);
         var claimless = Wp0.User("S-ADM", null, ["GovernanceAdmin"]);
 
-        var confined = await TrinoMetadataQueryHandler.TryExecuteAsync("SHOW TABLES FROM sales.dbo", adminB, Wp0.TenantB, tables, consents, Wp0.Options(TenancyShape.Multi));
+        var confined = await TrinoMetadataQueryHandler.TryExecuteAsync("SHOW TABLES FROM sales.dbo", adminB, Wp0.TenantB, tables, consents, Wp0.Options(TenancyShape.Multi), null, visibility);
         confined!.Rows.Select(r => r["Table"]?.ToString()).ShouldBe(["invoices_b"]);
 
-        var multi = await TrinoMetadataQueryHandler.TryExecuteAsync("SHOW TABLES FROM sales.dbo", claimless, Autheris.Tests.Common.TestTenants.Default, tables, consents, Wp0.Options(TenancyShape.Multi));
+        var multi = await TrinoMetadataQueryHandler.TryExecuteAsync("SHOW TABLES FROM sales.dbo", claimless, Autheris.Tests.Common.TestTenants.Default, tables, consents, Wp0.Options(TenancyShape.Multi), null, visibility);
         multi!.Rows.ShouldBeEmpty();
 
-        var single = await TrinoMetadataQueryHandler.TryExecuteAsync("SHOW TABLES FROM sales.dbo", claimless, Autheris.Tests.Common.TestTenants.Default, tables, consents, Wp0.Options(TenancyShape.Single));
+        var single = await TrinoMetadataQueryHandler.TryExecuteAsync("SHOW TABLES FROM sales.dbo", claimless, Autheris.Tests.Common.TestTenants.Default, tables, consents, Wp0.Options(TenancyShape.Single), null, visibility);
         single!.Rows.Select(r => r["Table"]?.ToString()).ShouldBe(["orders_a", "invoices_b"], ignoreOrder: true);
     }
 }

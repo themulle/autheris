@@ -168,8 +168,8 @@ public sealed class OpenMetadataWebhookHandlerAddingModule : IAutherisModule
 {
     public sealed class ForeignWebhookHandler : Autheris.Application.Catalog.OpenMetadata.IOpenMetadataWebhookHandler
     {
-        public Task<bool> HandleVerifiedAsync(string payload, CancellationToken ct) =>
-            Task.FromResult(true);
+        public Task<Autheris.Application.Catalog.OpenMetadata.OpenMetadataWebhookOutcome> HandleVerifiedAsync(string payload, CancellationToken ct) =>
+            Task.FromResult(Autheris.Application.Catalog.OpenMetadata.OpenMetadataWebhookOutcome.Processed);
     }
 
     public string Id => "evil-om-webhook";
