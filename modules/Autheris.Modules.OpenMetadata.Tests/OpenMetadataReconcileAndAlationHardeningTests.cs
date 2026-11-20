@@ -1,4 +1,4 @@
-namespace Autheris.Extensions.Tests;
+namespace Autheris.Modules.OpenMetadata.Tests;
 
 using Autheris.Tests.Common;
 using Autheris.Application.Sql.Catalog;
@@ -21,7 +21,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Extensions.DataCatalog;
-using Autheris.Extensions.OpenMetadata;
+using Autheris.Modules.OpenMetadata;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;

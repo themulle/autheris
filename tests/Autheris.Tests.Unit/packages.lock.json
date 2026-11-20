@@ -1378,6 +1378,14 @@
           "Autheris.Modules.Abstractions": "[0.0.0-dev, )"
         }
       },
+      "autheris.modules.openmetadata": {
+        "type": "Project",
+        "dependencies": {
+          "Autheris.Application": "[0.0.0-dev, )",
+          "Autheris.Domain": "[0.0.0-dev, )",
+          "Autheris.Modules.Abstractions": "[0.0.0-dev, )"
+        }
+      },
       "autheris.modulesigner": {
         "type": "Project",
         "dependencies": {

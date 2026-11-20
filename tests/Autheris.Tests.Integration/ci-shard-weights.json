@@ -164,6 +164,8 @@
   "OpenApiDocsEndToEndTests": 100.5,
   "OpenApiIntegrationTests": 73.7,
   "OpenMetadataIntegrationTests": 31.1,
+  "OpenMetadataModuleAbsentTests": 6.6,
+  "OpenMetadataModuleSecurityTests": 6.6,
   "OpenTelemetryPiiScannerTests": 0,
   "OracleGatewayPathTests": 101.1,
   "OracleGovernedEndToEndTests": 37.6,

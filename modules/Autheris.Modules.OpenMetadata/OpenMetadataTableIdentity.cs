@@ -1,8 +1,7 @@
-using Autheris.Application.Catalog.OpenMetadata;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
 
-namespace Autheris.Extensions.OpenMetadata;
+namespace Autheris.Modules.OpenMetadata;
 
 /// <summary>
 /// SEC E-09 / EX-06: Shared mapping of an OpenMetadata table to a gateway <see cref="TableIdentifier"/> for the

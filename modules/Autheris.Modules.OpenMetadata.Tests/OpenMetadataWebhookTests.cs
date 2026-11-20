@@ -1,4 +1,4 @@
-namespace Autheris.Extensions.Tests;
+namespace Autheris.Modules.OpenMetadata.Tests;
 
 using System;
 using System.Text;
@@ -9,7 +9,7 @@ using Autheris.Application.Common.Interfaces;
 using Autheris.Application.State;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
-using Autheris.Extensions.OpenMetadata;
+using Autheris.Modules.OpenMetadata;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;

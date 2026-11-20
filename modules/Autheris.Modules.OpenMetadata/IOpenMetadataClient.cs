@@ -1,6 +1,4 @@
-using Autheris.Application.Catalog.OpenMetadata;
-
-namespace Autheris.Extensions.OpenMetadata;
+namespace Autheris.Modules.OpenMetadata;
 
 public interface IOpenMetadataClient
 {

@@ -7,7 +7,6 @@ using Autheris.Api.Extensions.DependencyInjection;
 using Autheris.Api.Hosting;
 using Autheris.Api.Middleware;
 using Autheris.Application.Common.Interfaces;
-using Autheris.Application.Catalog.OpenMetadata;
 using Autheris.Application.Policy;
 using Autheris.Application.Security;
 using Autheris.Application.Services;
@@ -127,7 +126,9 @@ public static partial class GatewayServiceCollectionExtensions
             moduleLoadResult,
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
-                [Autheris.Domain.Options.GatewaySections.Lakehouse] = "lakehouse"
+                [Autheris.Domain.Options.GatewaySections.Lakehouse] = "lakehouse",
+                [Autheris.Domain.Options.GatewaySections.Dbt] = "dbt",
+                [Autheris.Domain.Options.GatewaySections.OpenMetadata] = "openmetadata"
             });
         return services;
     }

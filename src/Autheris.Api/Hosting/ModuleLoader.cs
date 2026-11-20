@@ -231,6 +231,7 @@ public sealed class ModuleLoader
         if (enabledIds.Count == 0)
         {
             ModuleSecurityGuards.VerifyFinalModuleOwnedPorts(services, []);
+            ModuleSecurityGuards.VerifyCatalogClientWhenEnabled(services, configuration);
             return new ModuleLoadResult([]);
         }
 
@@ -454,6 +455,7 @@ public sealed class ModuleLoader
         }
 
         ModuleSecurityGuards.VerifyFinalModuleOwnedPorts(services, loadedModules.Select(m => m.Id).ToList());
+        ModuleSecurityGuards.VerifyCatalogClientWhenEnabled(services, configuration);
         services.AddSingleton(new ModuleLoadResult(loadedModules));
         return new ModuleLoadResult(loadedModules);
     }
@@ -751,6 +753,8 @@ public sealed class ModuleLoader
                 return false;
             }
 
+            var actualFileName = Path.GetFileName(moduleDllPath);
+
             try
             {
                 FileHashVerifier.EnsureNoSymlinkEscape(workspaceRoot, moduleDllPath);
@@ -763,7 +767,7 @@ public sealed class ModuleLoader
             byte[] dllBytes = File.ReadAllBytes(moduleDllPath);
             var filesDict = new Dictionary<string, byte[]>(StringComparer.Ordinal)
             {
-                [assemblyFileName] = dllBytes
+                [actualFileName] = dllBytes
             };
 
             if (moduleBinDir is not null && Directory.Exists(moduleBinDir))
@@ -777,7 +781,7 @@ public sealed class ModuleLoader
                 {
                     var peerName = Path.GetFileName(peerDll);
                     var peerSimple = Path.GetFileNameWithoutExtension(peerDll);
-                    if (!string.Equals(peerName, assemblyFileName, StringComparison.OrdinalIgnoreCase)
+                    if (!string.Equals(peerName, actualFileName, StringComparison.OrdinalIgnoreCase)
                         && !hostAssemblyNames.Contains(peerSimple))
                     {
                         filesDict[peerName] = File.ReadAllBytes(peerDll);
@@ -791,9 +795,9 @@ public sealed class ModuleLoader
                 Version: _hostVersion,
                 HostVersion: _hostVersion,
                 AbstractionsVersion: _abstractionsVersion,
-                EntryAssembly: assemblyFileName,
+                EntryAssembly: actualFileName,
                 EntryType: $"Autheris.Modules.{pascal}.{pascal}Module",
-                Files: [new ModuleManifestFile(assemblyFileName, IntegrityHashHelper.ComputeSha256HexLower(dllBytes))],
+                Files: [new ModuleManifestFile(actualFileName, IntegrityHashHelper.ComputeSha256HexLower(dllBytes))],
                 KeyId: "workspace",
                 Signature: string.Empty);
 
@@ -864,6 +868,7 @@ public sealed class ModuleLoader
         }
 
         ModuleSecurityGuards.VerifyFinalModuleOwnedPorts(services, loadedModules.Select(m => m.Id).ToList());
+        ModuleSecurityGuards.VerifyCatalogClientWhenEnabled(services, configuration);
         result = new ModuleLoadResult(loadedModules);
         services.AddSingleton(result);
         return true;
@@ -877,7 +882,10 @@ public sealed class ModuleLoader
             return null;
         }
 
-        var found = Directory.EnumerateFiles(workspaceRoot, assemblyFileName, SearchOption.AllDirectories)
+        var found = Directory.EnumerateFiles(
+                workspaceRoot,
+                assemblyFileName,
+                new EnumerationOptions { RecurseSubdirectories = true, MatchCasing = MatchCasing.CaseInsensitive })
             .FirstOrDefault();
         if (found is not null)
         {

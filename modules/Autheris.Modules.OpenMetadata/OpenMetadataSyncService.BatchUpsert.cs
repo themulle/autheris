@@ -1,4 +1,4 @@
-namespace Autheris.Extensions.OpenMetadata;
+namespace Autheris.Modules.OpenMetadata;
 
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Model;

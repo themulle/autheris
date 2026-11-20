@@ -482,12 +482,14 @@ public sealed class OutboundEgressAllowlistHardeningTests
     {
         var services = new ServiceCollection();
         services.AddSingleton(Env(Environments.Production));
-        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        var config = new ConfigurationBuilder().Build();
+        services.AddSingleton<IConfiguration>(config);
         services.AddLogging();
         var options = new GatewayOptions();
         services.AddSingleton(Options.Create(options));
         services.AddGatewayInfrastructure(options);
         Autheris.Modules.Lakehouse.LakehouseServiceCollectionExtensions.AddLakehouseIntegration(services, options);
+        new Autheris.Modules.OpenMetadata.OpenMetadataModule().ConfigureServices(services, config, new StubModuleHostContext());
         return services.BuildServiceProvider();
     }
 
@@ -525,5 +527,11 @@ public sealed class OutboundEgressAllowlistHardeningTests
         options.GetEffectiveTrustedIntegrations().ShouldNotContain(EgressIntegrations.OpenApiIngestion);
         options.GetEffectiveTrustedIntegrations().ShouldBe(["OpenMetadata", "Lineage"]);
         EgressIntegrations.AllowlistCapable.ShouldContain(EgressIntegrations.OpenApiIngestion);
+    }
+
+    private sealed class StubModuleHostContext : Autheris.Modules.Abstractions.IModuleHostContext
+    {
+        public TimeProvider Time => TimeProvider.System;
+        public string HostVersion => "0.0.0-test";
     }
 }

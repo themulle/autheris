@@ -15,7 +15,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Modules.Dbt;
-using Autheris.Extensions.OpenMetadata;
+using Autheris.Modules.OpenMetadata;
 using Autheris.Tests;
 using Autheris.Tests.Unit.Catalog;
 using Autheris.Tests.Unit.TestDoubles;

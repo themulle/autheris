@@ -10,7 +10,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Autheris.Application.State;
 
-namespace Autheris.Extensions.OpenMetadata;
+namespace Autheris.Modules.OpenMetadata;
 
 public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService, IOpenMetadataWebhookHandler
 {

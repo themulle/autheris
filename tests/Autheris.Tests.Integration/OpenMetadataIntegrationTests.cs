@@ -4,7 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Autheris.Application.Catalog.OpenMetadata;
-using Autheris.Extensions.OpenMetadata;
+using Autheris.Modules.OpenMetadata;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
@@ -34,13 +34,15 @@ public class OpenMetadataIntegrationTests : IClassFixture<OpenMetadataIntegratio
 
         protected override void ConfigureHostConfiguration(IConfigurationBuilder config)
         {
-            config.AddInMemoryCollection(new Dictionary<string, string?>
+            var settings = new Dictionary<string, string?>
             {
                 ["Gateway:Authentication:EnableTestAuthHandler"] = "true",
                 ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
                 ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.Create("OpenMetadataIntegrationTests"),
                 ["Gateway:OpenMetadata:WebhookSecret"] = "test-webhook-secret-999",
-            });
+            };
+            OpenMetadataWorkspaceTestSettings.Apply((k, v) => settings[k] = v);
+            config.AddInMemoryCollection(settings);
         }
 
         protected override void ConfigureHostServices(IServiceCollection services)

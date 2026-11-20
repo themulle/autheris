@@ -29,7 +29,7 @@ using Autheris.Extensions.DataCatalog;
 using Autheris.Modules.Dbt;
 using Autheris.Extensions.Lakehouse.Interfaces;
 using Autheris.Extensions.Lakehouse.Services;
-using Autheris.Extensions.OpenMetadata;
+using Autheris.Modules.OpenMetadata;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;

@@ -27,6 +27,7 @@
     <ProjectReference Include="..\..\src\Autheris.Extensions\Autheris.Extensions.csproj" />
     <ProjectReference Include="..\..\modules\Autheris.Modules.Lakehouse\Autheris.Modules.Lakehouse.csproj" />
     <ProjectReference Include="..\..\modules\Autheris.Modules.Dbt\Autheris.Modules.Dbt.csproj" />
+    <ProjectReference Include="..\..\modules\Autheris.Modules.OpenMetadata\Autheris.Modules.OpenMetadata.csproj" />
   </ItemGroup>
 
 </Project>

@@ -43,7 +43,7 @@ using Autheris.Domain.Options;
 using Autheris.Domain.Security;
 using Autheris.Extensions.DataCatalog;
 using Autheris.Modules.Dbt;
-using Autheris.Extensions.OpenMetadata;
+using Autheris.Modules.OpenMetadata;
 using Autheris.Infrastructure.Cache;
 using Autheris.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Http;

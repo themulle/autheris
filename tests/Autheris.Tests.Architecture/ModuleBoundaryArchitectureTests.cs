@@ -360,13 +360,12 @@ public sealed partial class ModuleBoundaryArchitectureTests
     [Trait("Category", "Security")]
     public void OpenMetadata_webhook_handler_referenced_only_by_core_webhook_endpoint()
     {
+        var root = RepositoryScan.FindRepositoryRoot();
         var allowedCore = new[]
         {
             "src/Autheris.Application/Catalog/OpenMetadata/IOpenMetadataWebhookHandler.cs",
             "src/Autheris.Api/Endpoints/WebhookEndpoints.cs",
             "src/Autheris.Api/Hosting/ModuleSecurityGuards.cs",
-            "src/Autheris.Extensions/OpenMetadata/OpenMetadataServiceCollectionExtensions.cs",
-            "src/Autheris.Extensions/OpenMetadata/OpenMetadataSyncService.cs",
         };
 
         var violations = new List<string>();
@@ -379,6 +378,15 @@ public sealed partial class ModuleBoundaryArchitectureTests
         }
 
         violations.ShouldBeEmpty("Only the core webhook route (and the module guard) may reference IOpenMetadataWebhookHandler:\n" + string.Join("\n", violations));
+
+        var module = Path.Combine(root, "modules", "Autheris.Modules.OpenMetadata");
+        var implementations = Directory.EnumerateFiles(module, "*.cs", SearchOption.AllDirectories)
+            .Where(f => !f.Contains("/obj/", StringComparison.Ordinal) && !f.Contains("/bin/", StringComparison.Ordinal))
+            .Where(f => File.ReadAllText(f).Contains("IOpenMetadataWebhookHandler", StringComparison.Ordinal))
+            .Select(f => Path.GetFileName(f))
+            .OrderBy(n => n, StringComparer.Ordinal)
+            .ToList();
+        implementations.ShouldBe(["OpenMetadataModule.cs", "OpenMetadataSyncService.cs"]);
     }
 
     [Fact]

@@ -14,7 +14,7 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Extensions.DataCatalog;
 using Autheris.Modules.Dbt;
-using Autheris.Extensions.OpenMetadata;
+using Autheris.Modules.OpenMetadata;
 using Autheris.Infrastructure.Persistence;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;

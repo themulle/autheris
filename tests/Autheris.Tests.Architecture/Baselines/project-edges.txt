@@ -15,6 +15,7 @@ Autheris.Extensions->Autheris.Domain
 Autheris.Extensions.Tests->Autheris.Extensions
 Autheris.Extensions.Tests->Autheris.Modules.Dbt
 Autheris.Extensions.Tests->Autheris.Modules.Lakehouse
+Autheris.Extensions.Tests->Autheris.Modules.OpenMetadata
 Autheris.GraphQL->Autheris.Application
 Autheris.GraphQL->Autheris.Domain
 Autheris.Infrastructure->Autheris.Application
@@ -25,6 +26,10 @@ Autheris.Modules.Dbt->Autheris.Application
 Autheris.Modules.Dbt->Autheris.Domain
 Autheris.Modules.Dbt->Autheris.Modules.Abstractions
 Autheris.Modules.Dbt.Tests->Autheris.Modules.Dbt
+Autheris.Modules.OpenMetadata->Autheris.Application
+Autheris.Modules.OpenMetadata->Autheris.Domain
+Autheris.Modules.OpenMetadata->Autheris.Modules.Abstractions
+Autheris.Modules.OpenMetadata.Tests->Autheris.Modules.OpenMetadata
 Autheris.Sim.ApiHost->Autheris.Api
 Autheris.Tests.Architecture->Autheris.Api
 Autheris.Tests.Architecture->Autheris.Application
@@ -35,6 +40,7 @@ Autheris.Tests.Architecture->Autheris.Infrastructure
 Autheris.Tests.Architecture->Autheris.Modules.Abstractions
 Autheris.Tests.Architecture->Autheris.Modules.Dbt
 Autheris.Tests.Architecture->Autheris.Modules.Lakehouse
+Autheris.Tests.Architecture->Autheris.Modules.OpenMetadata
 Autheris.Tests.Architecture->TrinoSqlEngine
 Autheris.Tests.Common->Autheris.Api
 Autheris.Tests.Common->Autheris.Application
@@ -44,6 +50,7 @@ Autheris.Tests.Integration->Autheris.Extensions
 Autheris.Tests.Integration->Autheris.Modules.Abstractions
 Autheris.Tests.Integration->Autheris.Modules.Dbt
 Autheris.Tests.Integration->Autheris.Modules.Lakehouse
+Autheris.Tests.Integration->Autheris.Modules.OpenMetadata
 Autheris.Tests.Integration->Autheris.Tests.Common
 Autheris.Tests.Parity->Autheris.Api
 Autheris.Tests.Parity->Autheris.Tests.Common
@@ -64,6 +71,7 @@ Autheris.Tests.Unit->Autheris.ModuleSigner
 Autheris.Tests.Unit->Autheris.Modules.Abstractions
 Autheris.Tests.Unit->Autheris.Modules.Dbt
 Autheris.Tests.Unit->Autheris.Modules.Lakehouse
+Autheris.Tests.Unit->Autheris.Modules.OpenMetadata
 Autheris.Tests.Unit->Autheris.Tests.Common
 Autheris.Tests.Unit->TrinoSqlEngine
 TrinoSqlEngine.Tests->TrinoSqlEngine

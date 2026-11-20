@@ -1,16 +1,15 @@
 using System.Security.Cryptography;
 using System.Text;
 using Autheris.Application.Common.Interfaces;
-using Autheris.Application.Catalog.OpenMetadata;
 using Autheris.Domain.Options;
-using Autheris.Extensions.OpenMetadata;
+using Autheris.Modules.OpenMetadata;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
 
-namespace Autheris.Extensions.Tests;
+namespace Autheris.Modules.OpenMetadata.Tests;
 
 /// <summary>EXT-12: a failed webhook event is released from deduplication so the provider's retry is processed.</summary>
 public sealed class OpenMetadataWebhookRetryExt12Tests

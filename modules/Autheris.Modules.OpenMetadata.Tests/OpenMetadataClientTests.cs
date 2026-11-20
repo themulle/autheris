@@ -1,13 +1,12 @@
 using System.Net;
 using System.Text.Json;
-using Autheris.Application.Catalog.OpenMetadata;
 using Autheris.Domain.Options;
-using Autheris.Extensions.OpenMetadata;
+using Autheris.Modules.OpenMetadata;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Xunit;
 
-namespace Autheris.Extensions.Tests;
+namespace Autheris.Modules.OpenMetadata.Tests;
 
 public sealed class OpenMetadataClientTests
 {

@@ -197,4 +197,86 @@ public sealed class ModuleParityTests
         var moduleTestFiles = RepositoryScan.EnumerateFiles("modules/Autheris.Modules.Lakehouse.Tests", "*.cs").ToList();
         moduleTestFiles.Count.ShouldBeGreaterThanOrEqualTo(13);
     }
+
+    private static readonly string[] ExpectedOpenMetadataSecurityTests =
+    [
+        "Autheris.Modules.OpenMetadata.Tests.Fixture.RestrictedSync_DoesNotRevokeOtherTenantsSyncConsents",
+        "Autheris.Modules.OpenMetadata.Tests.Fixture.RestrictedSync_OnlyUpsertsTablesOfTheCallerTenant",
+        "Autheris.Modules.OpenMetadata.Tests.Fixture.SanitizedWarnings_AreCodesWithCounts_WithoutTableNamesOrExceptionText",
+        "Autheris.Modules.OpenMetadata.Tests.Fixture.UnrestrictedSync_TouchesEveryTenant",
+        "Autheris.Modules.OpenMetadata.Tests.OmFixture.PERS_04_Sync_ConcurrentlyRevokedConsent_IsNotRecreated",
+        "Autheris.Modules.OpenMetadata.Tests.OmFixture.PERS_04_Sync_ExpiredSyncConsent_IsRecreated_NeverExtended",
+        "Autheris.Modules.OpenMetadata.Tests.OmFixture.PERS_04_Sync_RevokeReturnedFalse_DoesNotCreate",
+        "Autheris.Modules.OpenMetadata.Tests.OmFixture.RoleAllowPolicy_NeverCreatesAConsent_RolesDoNotGrantDataAccess",
+        "Autheris.Modules.OpenMetadata.Tests.OmFixture.Security_DbtAndOpenMetadata_RoleGrantee_SkippedNeverMapped_OpenMetadata",
+        "Autheris.Modules.OpenMetadata.Tests.OpenMetadataWebhookCollisionExt16Tests.TableOfAnotherDatabaseWithTheSameIdentity_IsNotMergedByTheWebhook",
+        "Autheris.Modules.OpenMetadata.Tests.OpenMetadataWebhookTests.Buffer_is_bounded",
+        "Autheris.Modules.OpenMetadata.Tests.OpenMetadataWebhookTests.Replayed_event_is_rejected",
+        "Autheris.Modules.OpenMetadata.Tests.OpenMetadataWebhookTests.Cluster_dedup_unavailable_rejects_webhook",
+        "Autheris.Modules.OpenMetadata.Tests.OpenMetadataModuleContractTests.OpenMetadata_module_registers_ports_with_implementation_types",
+        "Autheris.Modules.OpenMetadata.Tests.OpenMetadataModuleContractTests.OpenMetadata_http_client_uses_secure_outbound_handlers",
+        "Autheris.Modules.OpenMetadata.Tests.OpenMetadataModuleContractTests.OpenMetadata_module_registers_no_hosted_service",
+        "Autheris.Modules.OpenMetadata.Tests.OpenMetadataModuleContractTests.OpenMetadata_module_registers_only_its_typed_http_client",
+        "Autheris.Modules.OpenMetadata.Tests.OpenMetadataModuleContractTests.OpenMetadata_module_loads_under_the_service_guard",
+        "Autheris.Modules.OpenMetadata.Tests.OpenMetadataModuleContractTests.OpenMetadata_config_without_module_fails_fast",
+        "Autheris.Tests.Unit.Api.OpenMetadataWebhookEndpointTests.Handler_absent_returns_404_before_header_or_body_read",
+        "Autheris.Tests.Unit.Api.OpenMetadataWebhookEndpointTests.Missing_header_returns_401_even_when_bypass_set",
+        "Autheris.Tests.Unit.Api.OpenMetadataWebhookEndpointTests.Empty_primary_header_falls_back_to_om_signature_header",
+        "Autheris.Tests.Unit.Api.OpenMetadataWebhookEndpointTests.Body_not_read_before_signature_header_present",
+        "Autheris.Tests.Unit.Api.OpenMetadataWebhookEndpointTests.Handler_not_resolved_before_signature_verified",
+        "Autheris.Tests.Unit.Api.OpenMetadataWebhookEndpointTests.Blank_secret_rejects_all_webhooks",
+        "Autheris.Tests.Unit.Api.OpenMetadataWebhookEndpointTests.Missing_and_invalid_signature_return_identical_401_body",
+        "Autheris.Tests.Unit.Api.OpenMetadataWebhookEndpointTests.Signature_bypass_flag_honored_only_when_set",
+        "Autheris.Tests.Unit.Api.OpenMetadataWebhookEndpointTests.Body_over_2_mb_returns_413",
+        "Autheris.Tests.Unit.Api.OpenMetadataWebhookEndpointTests.Secret_and_signature_never_logged",
+        "Autheris.Tests.Unit.Api.OpenMetadataWebhookEndpointTests.Route_keeps_anonymous_2mb_limit_and_full_audit",
+        "Autheris.Tests.Unit.Api.FakeDbtWebhookReceiver.OpenMetadata_MissingSignature_RejectsBeforeBufferingBody",
+        "Autheris.Tests.Unit.Api.FakeDbtWebhookReceiver.OpenMetadata_BodyExceeds2Mb_ReturnsPayloadTooLarge",
+        "Autheris.Tests.Unit.Catalog.OpenMetadataWebhookSignatureTests.Valid_hmac_with_and_without_sha256_prefix_accepted",
+        "Autheris.Tests.Unit.Catalog.OpenMetadataWebhookSignatureTests.Non_hex_or_wrong_length_signature_rejected",
+        "Autheris.Tests.Unit.Catalog.OpenMetadataWebhookSignatureTests.Blank_secret_returns_false",
+        "Autheris.Tests.Unit.Catalog.OpenMetadataWebhookSignatureTests.Literal_bypassed_signature_is_rejected_when_bypass_off",
+        "Autheris.Tests.Unit.Catalog.OpenMetadataWebhookSignatureTests.Exception_returns_false_without_secret_in_log",
+        "Autheris.Tests.Unit.GraphQL.SyncOpenMetadataSanitisationTests.Availability_checked_after_role_and_tenant_check",
+        "Autheris.Tests.Unit.GraphQL.SyncOpenMetadataSanitisationTests.Non_admin_without_module_gets_forbidden_not_unavailable",
+        "Autheris.Tests.Unit.GraphQL.SyncOpenMetadataSanitisationTests.SyncDataCatalog_without_client_does_not_fail_before_authentication",
+        "Autheris.Tests.Unit.GraphQL.SyncOpenMetadataSanitisationTests.Unavailable_error_has_fixed_message",
+        "Autheris.Tests.Unit.Hosting.ModuleLoaderSecurityTests.Module_httpclient_without_ssrf_handler_fails_startup",
+        "Autheris.Tests.Unit.Hosting.ModuleLoaderSecurityTests.OpenMetadata_port_from_other_module_fails_startup",
+        "Autheris.Tests.Unit.Hosting.ModuleLoaderSecurityTests.Second_openmetadata_webhook_handler_fails_startup",
+        "Autheris.Tests.Unit.Hosting.ModuleLoaderSecurityTests.Catalog_enabled_without_openmetadata_module_fails_startup",
+        "Autheris.Tests.Unit.Hosting.ModuleLoaderSecurityTests.OpenMetadata_port_with_factory_registration_fails_startup",
+        "Autheris.Tests.Unit.Hosting.ModuleLoaderSecurityTests.OpenMetadata_port_without_loaded_module_fails_startup",
+        "Autheris.Tests.Unit.Hosting.ModuleLoaderSecurityTests.OpenMetadata_module_client_without_ssrf_handler_fails_startup",
+        "Autheris.Tests.Integration.Modules.OpenMetadataModuleAbsentTests.OpenMetadata_webhook_returns_404_without_module_before_body_read",
+        "Autheris.Tests.Integration.Modules.OpenMetadataModuleAbsentTests.OpenMetadata_config_without_module_fails_fast",
+        "Autheris.Tests.Integration.Modules.OpenMetadataModuleAbsentTests.Legacy_insecure_switches_fail_fast_without_module",
+        "Autheris.Tests.Integration.Modules.OpenMetadataModuleAbsentTests.Catalog_enabled_without_module_fails_fast",
+        "Autheris.Tests.Integration.Modules.OpenMetadataModuleAbsentTests.Non_admin_sync_without_module_returns_forbidden",
+        "Autheris.Tests.Integration.Modules.OpenMetadataModuleSecurityTests.Unsigned_webhook_returns_401_when_enabled",
+        "Autheris.Tests.Integration.Modules.OpenMetadataModuleSecurityTests.Signed_webhook_reaches_handler_when_enabled",
+        "Autheris.Tests.Integration.Modules.OpenMetadataModuleSecurityTests.Replayed_event_is_rejected_when_enabled",
+        "Autheris.Tests.Integration.Modules.OpenMetadataModuleSecurityTests.Invalid_signature_returns_identical_401_body_when_enabled",
+        "Autheris.Tests.Integration.Modules.OpenMetadataModuleSecurityTests.Body_over_2_mb_returns_413_when_enabled",
+        "Autheris.Tests.Architecture.ModuleBoundaryArchitectureTests.OpenMetadata_webhook_handler_referenced_only_by_core_webhook_endpoint",
+        "Autheris.Tests.Architecture.ModuleBoundaryArchitectureTests.Signature_verifier_uses_fixed_time_compare"
+    ];
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void OpenMetadata_security_tests_migrated()
+    {
+        var (_, securityTests) = TestInventoryScanner.ScanRepository();
+
+        var missing = ExpectedOpenMetadataSecurityTests
+            .Where(t => !securityTests.Contains(t))
+            .ToList();
+
+        missing.ShouldBeEmpty(
+            "Every OpenMetadata security test must exist and carry [Trait(\"Category\", \"Security\")]:\n" +
+            string.Join("\n", missing));
+
+        var moduleTestFiles = RepositoryScan.EnumerateFiles("modules/Autheris.Modules.OpenMetadata.Tests", "*.cs").ToList();
+        moduleTestFiles.Count.ShouldBeGreaterThanOrEqualTo(8);
+    }
 }

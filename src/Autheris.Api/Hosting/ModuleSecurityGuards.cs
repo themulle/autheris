@@ -5,6 +5,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using Autheris.Application.Audit;
+using Autheris.Application.Catalog.Interfaces;
+using Autheris.Application.Catalog.OpenMetadata;
 using Autheris.Application.Catalog.Semantic;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Plugins;
@@ -13,12 +15,14 @@ using Autheris.Application.Policy;
 using Autheris.Application.Security;
 using Autheris.Application.State;
 using Autheris.Domain.Interfaces;
+using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Builder;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
@@ -209,6 +213,9 @@ internal static class ModuleSecurityGuards
     internal static readonly IReadOnlyList<ModuleOwnedPort> ModuleOwnedPorts =
     [
         new(typeof(IDbtCloudWebhookHandler), "dbt", "Autheris.Modules.Dbt"),
+        new(typeof(IOpenMetadataWebhookHandler), "openmetadata", "Autheris.Modules.OpenMetadata"),
+        new(typeof(IOpenMetadataSyncService), "openmetadata", "Autheris.Modules.OpenMetadata"),
+        new(typeof(IDataCatalogClient), "openmetadata", "Autheris.Modules.OpenMetadata"),
     ];
 
     internal static List<ServiceDescriptor> CaptureModuleOwnedPortDescriptors(IServiceCollection services)
@@ -275,13 +282,7 @@ internal static class ModuleSecurityGuards
 
             if (current.Count == 1)
             {
-                var implAssembly = current[0].ImplementationType?.Assembly.GetName().Name;
-                if (!string.Equals(implAssembly, port.AssemblyName, StringComparison.Ordinal))
-                {
-                    throw new ModuleLoadException(
-                        moduleId,
-                        $"Module '{moduleId}' registered '{port.ServiceType.FullName}' with an implementation outside '{port.AssemblyName}'.");
-                }
+                ValidatePortImplementationType(current[0], port);
             }
         }
     }
@@ -314,13 +315,36 @@ internal static class ModuleSecurityGuards
                     $"Module '{port.ModuleId}' registered more than one '{port.ServiceType.FullName}'.");
             }
 
-            var implAssembly = current[0].ImplementationType?.Assembly.GetName().Name;
-            if (!string.Equals(implAssembly, port.AssemblyName, StringComparison.Ordinal))
-            {
-                throw new ModuleLoadException(
-                    port.ModuleId,
-                    $"Module '{port.ModuleId}' registered '{port.ServiceType.FullName}' with an implementation outside '{port.AssemblyName}'.");
-            }
+            ValidatePortImplementationType(current[0], port);
+        }
+    }
+
+    private static void ValidatePortImplementationType(ServiceDescriptor descriptor, ModuleOwnedPort port)
+    {
+        if (descriptor.ImplementationType is null)
+        {
+            throw new ModuleLoadException(
+                port.ModuleId,
+                $"Module '{port.ModuleId}' registered '{port.ServiceType.FullName}' without an explicit ImplementationType.");
+        }
+
+        var implAssembly = descriptor.ImplementationType.Assembly.GetName().Name;
+        if (!string.Equals(implAssembly, port.AssemblyName, StringComparison.Ordinal))
+        {
+            throw new ModuleLoadException(
+                port.ModuleId,
+                $"Module '{port.ModuleId}' registered '{port.ServiceType.FullName}' with an implementation outside '{port.AssemblyName}'.");
+        }
+    }
+
+    internal static void VerifyCatalogClientWhenEnabled(IServiceCollection services, IConfiguration configuration)
+    {
+        if (configuration.GetValue<bool>($"{GatewaySections.Catalog}:Enabled") &&
+            !services.Any(d => d.ServiceType == typeof(IDataCatalogClient)))
+        {
+            throw new ModuleLoadException(
+                "host",
+                "Gateway:Catalog:Enabled requires module 'openmetadata' to provide IDataCatalogClient, but the module is not loaded.");
         }
     }
 

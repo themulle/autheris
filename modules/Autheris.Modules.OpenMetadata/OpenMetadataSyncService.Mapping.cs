@@ -1,9 +1,8 @@
-namespace Autheris.Extensions.OpenMetadata;
+namespace Autheris.Modules.OpenMetadata;
 
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Autheris.Application.Catalog.OpenMetadata;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;

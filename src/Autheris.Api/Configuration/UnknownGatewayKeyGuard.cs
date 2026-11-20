@@ -449,6 +449,11 @@ public static class UnknownGatewayKeyGuard
             return string.Empty;
         }
 
+        if (string.Equals(moduleId, "openmetadata", StringComparison.OrdinalIgnoreCase))
+        {
+            return "OpenMetadata";
+        }
+
         var parts = moduleId.Split(['-', '_'], StringSplitOptions.RemoveEmptyEntries);
         return string.Concat(parts.Select(p => char.ToUpperInvariant(p[0]) + p[1..]));
     }

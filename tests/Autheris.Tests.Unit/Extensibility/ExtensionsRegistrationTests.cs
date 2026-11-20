@@ -23,7 +23,8 @@ using Autheris.Extensions;
 using Autheris.Extensions.Cdc;
 using Autheris.Extensions.DataCatalog;
 using Autheris.Extensions.Lineage;
-using Autheris.Extensions.OpenMetadata;
+using Autheris.Modules.Abstractions;
+using Autheris.Modules.OpenMetadata;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -116,10 +117,19 @@ public sealed class ExtensionsRegistrationTests
         scope.ServiceProvider.GetRequiredService<IOpenLineageClient>().ShouldBeOfType<OpenLineageClient>();
     }
 
+    private sealed class StubModuleHostContext : IModuleHostContext
+    {
+        public TimeProvider Time => TimeProvider.System;
+        public string HostVersion => "0.0.0-test";
+    }
+
     [Fact]
     public void EXT_DataCatalogClient_IsOpenMetadataAdapter()
     {
         var services = CreateServices(new GatewayOptions());
+        services.Any(d => d.ServiceType == typeof(IDataCatalogClient)).ShouldBeFalse();
+
+        new OpenMetadataModule().ConfigureServices(services, new ConfigurationBuilder().Build(), new StubModuleHostContext());
         var provider = services.BuildServiceProvider();
         using var scope = provider.CreateScope();
         var client = scope.ServiceProvider.GetRequiredService<IDataCatalogClient>();
@@ -131,6 +141,7 @@ public sealed class ExtensionsRegistrationTests
     public void EXT_EX12_ExtensionHttpClients_HaveSsrfProtectionHandler()
     {
         var services = CreateServices(new GatewayOptions());
+        new OpenMetadataModule().ConfigureServices(services, new ConfigurationBuilder().Build(), new StubModuleHostContext());
         var provider = services.BuildServiceProvider();
         var handlerFactory = provider.GetRequiredService<IHttpMessageHandlerFactory>();
 
@@ -167,6 +178,7 @@ public sealed class ExtensionsRegistrationTests
     public async Task EXT_EX12_OpenMetadataTypedClient_BlocksMetadataEndpoint()
     {
         var services = CreateServices(new GatewayOptions());
+        new OpenMetadataModule().ConfigureServices(services, new ConfigurationBuilder().Build(), new StubModuleHostContext());
         var provider = services.BuildServiceProvider();
         using var client = provider.GetRequiredService<IHttpClientFactory>().CreateClient("IOpenMetadataClient");
 

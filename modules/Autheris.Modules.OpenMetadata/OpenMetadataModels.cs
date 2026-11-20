@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Text.Json.Serialization;
 using Autheris.Domain.Common;
 
-namespace Autheris.Application.Catalog.OpenMetadata;
+namespace Autheris.Modules.OpenMetadata;
 
 public sealed record OpenMetadataEntityReference
 {

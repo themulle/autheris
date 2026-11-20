@@ -80,6 +80,7 @@ public sealed class WebSqlDbtMappedTableTests : IAsyncLifetime
 
         var host = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
+            DbtWorkspaceTestSettings.Apply((k, v) => builder.UseSetting(k, v));
             builder.UseSetting("Gateway:Insecure:danger_allow_anonymous_access", "true");
             builder.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
             builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");

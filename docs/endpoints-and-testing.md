@@ -30,6 +30,7 @@ CSRF Protection: Mandatory for GraphQL; required for REST when browser indicator
 | **MCP Hybrid Tools & Resources** | Tools (`query_sql`, `query_dataset`, `search_catalog`, `get_my_permissions`, `list_datasources`, `get_data_lineage`, `describe_api`, `invoke_api`), Resources (`autheris://*`), Prompts (`explore_dataset`, `audit_access_compliance`) | Authenticated (PDP Governed) | `Mcp.Enabled` | `HybridMcpToolTests`, `McpResourceTests` |
 | **MCP Admin Tools (Two-Phase HitL)** | `admin_plan_access`, `admin_apply_access`, `admin_register_datasource`, `admin_set_dataset_state`, `admin_resolve_principal` | `ClusterAdmin`, `GovernanceAdmin` + TOTP 2FA Step-Up | `Mcp.Enabled` | `AdminMcpToolsTests`, `AccessPlanningServiceTests` |
 | **dbt Ingestion & Workflows** | `/modules/dbt/*` (`sync?mode=replace`, `exposures`, `proposals`, `validate-contract`, `run-results`, `health`, `semantic-manifest`, `metrics`; module `dbt`) and `POST /api/webhooks/dbt-cloud` (HMAC-signed, core route) | `DbtAdmin`, `GovernanceAdmin`, `ClusterAdmin` | Active when module `dbt` is enabled (`Gateway:Modules:Enabled`); without it all dbt routes and the webhook answer 404 | `DbtIntegration`, `DbtTests` |
+| **OpenMetadata Webhook & Sync** | `POST /api/webhooks/openmetadata` (HMAC-signed anonymous core route); GraphQL `syncOpenMetadata` & `syncDataCatalog` mutations | Webhook: HMAC (`X-OpenMetadata-Signature` / `X-OM-Signature`); Sync: `ClusterAdmin` / `GovernanceAdmin` | Active when module `openmetadata` is enabled (`Gateway:Modules:Enabled`); without it the webhook answers 404 and sync returns `UNAVAILABLE` | `OpenMetadataModuleSecurityTests`, `OpenMetadataModuleAbsentTests`, `OpenMetadataWebhookEndpointTests` |
 | **Governance & Compliance** | `/api/governance/{catalog/ingest-openapi, sunsetting/*, differential-privacy/*, gdpr/export-pdf}`, `/api/lineage/openlineage/sync` | Role-gated (`PrivacyAdmin`, `Auditor`) | Always active | `GovernanceAdvancedMoats` |
 | **CDC Streaming** | `/api/v1/cdc/{events,subscriptions}` | Role-gated | Always active | `RealtimeStreamingSubscription` |
 | **Human-in-the-Loop (HITL)** | `/api/governance/hitl/{pending,approve,reject}` | Approver roles | `HitLStepUp.Enabled` | Unit tests |
@@ -57,7 +58,9 @@ Autheris maintains a comprehensive test suite of **5,600+ automated tests** veri
 | [`TrinoSqlEngine.Tests`](../tests/TrinoSqlEngine.Tests) | Parser & Compiler | **1,421** | SQL AST generation, dialect pushdown (T-SQL, PostgreSQL, SQLite, DuckDB, Oracle, Snowflake), constant folding, keyword support, and injection prevention. |
 | [`Autheris.Tests.Architecture`](../tests/Autheris.Tests.Architecture) | Architecture & Layering | **13** | Clean / Onion Architecture constraints, zero-dependency domain, no foreign SDK leaks into core, and isolation rules. |
 | [`Autheris.Tests.Integration`](../tests/Autheris.Tests.Integration) | End-to-End Integration | **239** | HTTP endpoints via `WebApplicationFactory<Program>`, SQLite/PostgreSQL flows, OData, WebSQL, and ForwardAuth. |
-| [`Autheris.Extensions.Tests`](../tests/Autheris.Extensions.Tests) | Foreign Connectors | **90+** | Iceberg Lakehouse, OpenMetadata Data Catalog, and dbt Cloud. |
+| [`Autheris.Extensions.Tests`](../tests/Autheris.Extensions.Tests) | Foreign Connectors | **60+** | Iceberg Lakehouse, DataCatalog orchestration, and OpenLineage. |
+| [`Autheris.Modules.Dbt.Tests`](../modules/Autheris.Modules.Dbt.Tests) | dbt Module | **40+** | dbt manifest sync, model contracts, proposals, exposures, and Cloud webhooks. |
+| [`Autheris.Modules.OpenMetadata.Tests`](../modules/Autheris.Modules.OpenMetadata.Tests) | OpenMetadata Module | **50+** | OpenMetadata sync, consent reconciliation, tenant filtering, and replay protection. |
 
 ### 2.2 Executing Tests Locally
 

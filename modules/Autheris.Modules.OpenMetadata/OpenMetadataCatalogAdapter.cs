@@ -1,4 +1,4 @@
-namespace Autheris.Extensions.DataCatalog;
+namespace Autheris.Modules.OpenMetadata;
 
 using System;
 using System.Collections.Generic;
@@ -7,11 +7,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Catalog.Models;
-using Autheris.Application.Catalog.OpenMetadata;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
-using Autheris.Extensions.OpenMetadata;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 

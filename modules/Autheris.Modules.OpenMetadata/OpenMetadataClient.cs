@@ -3,14 +3,13 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Autheris.Application.Catalog.OpenMetadata;
 using Autheris.Application.Security;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
-namespace Autheris.Extensions.OpenMetadata;
+namespace Autheris.Modules.OpenMetadata;
 
 public sealed class OpenMetadataClient : IOpenMetadataClient
 {
@@ -95,7 +94,7 @@ public sealed class OpenMetadataClient : IOpenMetadataClient
 
         response.EnsureSuccessStatusCode();
 
-        await using var stream = await BoundedHttpContent.ReadBoundedStreamAsync(response, "OpenMetadata", MaxAllowedResponseBytes, ct);
+        await using var stream = await BoundedHttpContentReader.ReadBoundedStreamAsync(response, "OpenMetadata", MaxAllowedResponseBytes, ct);
         return await JsonSerializer.DeserializeAsync<OpenMetadataTable>(stream, JsonOptions, ct);
     }
 
@@ -143,7 +142,7 @@ public sealed class OpenMetadataClient : IOpenMetadataClient
                 using var response = await _httpClient.GetAsync(url, ct);
                 response.EnsureSuccessStatusCode();
 
-                await using var stream = await BoundedHttpContent.ReadBoundedStreamAsync(response, "OpenMetadata", MaxAllowedResponseBytes, ct);
+                await using var stream = await BoundedHttpContentReader.ReadBoundedStreamAsync(response, "OpenMetadata", MaxAllowedResponseBytes, ct);
                 var paged = await JsonSerializer.DeserializeAsync<PagedResponse<T>>(stream, JsonOptions, ct);
 
                 if (paged?.Data == null || paged.Data.Count == 0)

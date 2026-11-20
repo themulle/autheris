@@ -59,6 +59,7 @@
     <InternalsVisibleTo Include="Autheris.Tests.Unit" />
     <InternalsVisibleTo Include="Autheris.Tests.Integration" />
     <InternalsVisibleTo Include="Autheris.Tests.Architecture" />
+    <InternalsVisibleTo Include="Autheris.Modules.OpenMetadata.Tests" />
   </ItemGroup>
 
 </Project>
