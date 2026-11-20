@@ -11,7 +11,7 @@ public sealed class AuditRetentionOptions
     public bool Enabled { get; init; } = true;
 
     /// <summary>Default retention period in days for audit entries without a category-specific override.</summary>
-    public int RetentionDays { get; init; } = 90;
+    public int RetentionDays { get; init; } = 3650;
 
     /// <summary>Retention period in days for security and administrative (Tier-A) audit events.</summary>
     public int SecurityDays { get; init; } = 3650;

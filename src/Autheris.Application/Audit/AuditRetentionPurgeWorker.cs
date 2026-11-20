@@ -28,6 +28,7 @@ public sealed class AuditRetentionPurgeWorker : BackgroundService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IDistributedClusterStateProvider _clusterState;
     private readonly IOptionsMonitor<AuditRetentionOptions> _optionsMonitor;
+    private readonly IOptionsMonitor<GatewayOptions>? _gatewayOptions;
     private readonly IAuditWriter _auditWriter;
     private readonly IAuditChainAnchorStore _anchorStore;
     private readonly IAuditPurgeKeyProvider? _keyProvider;
@@ -44,7 +45,8 @@ public sealed class AuditRetentionPurgeWorker : BackgroundService
         ILogger<AuditRetentionPurgeWorker> logger,
         IAuditPurgeKeyProvider? keyProvider = null,
         IAuditAnchorSigner? externalSigner = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IOptionsMonitor<GatewayOptions>? gatewayOptions = null)
     {
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _clusterState = clusterState ?? throw new ArgumentNullException(nameof(clusterState));
@@ -55,6 +57,7 @@ public sealed class AuditRetentionPurgeWorker : BackgroundService
         _keyProvider = keyProvider;
         _externalSigner = externalSigner;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _gatewayOptions = gatewayOptions;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -144,11 +147,13 @@ public sealed class AuditRetentionPurgeWorker : BackgroundService
         }
 
         var now = _timeProvider.GetUtcNow();
+        int auditLogRetentionDays = _gatewayOptions?.CurrentValue?.Audit?.AuditLogRetentionDays ?? 0;
         var effectiveRetentionDays = Math.Max(
             options.RetentionDays,
             Math.Max(options.SecurityDays,
             Math.Max(options.DataAccessDays,
-            Math.Max(options.OperationsDays, options.AggregatedDays))));
+            Math.Max(options.OperationsDays,
+            Math.Max(options.AggregatedDays, auditLogRetentionDays)))));
         var thresholdUtc = now - TimeSpan.FromDays(effectiveRetentionDays);
 
         var plan = await repo.PlanPurgePrefixAsync(thresholdUtc, ct).ConfigureAwait(false);
