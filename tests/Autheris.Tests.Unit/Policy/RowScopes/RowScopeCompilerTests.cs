@@ -194,6 +194,19 @@ public sealed class RowScopeCompilerTests
         var deniedOutcome = await compiler.CompileAsync(new RowScopeCompileRequest(
             Tenant, UserSid, new HashSet<Sid>(), tableWithoutRegion, [denyGrant]));
         deniedOutcome.IsDenied.ShouldBeTrue();
+        deniedOutcome.DenyCode.ShouldBe(RowScopeCompiler.NoContributingGrantCode);
+        deniedOutcome.Predicate.ShouldBeNull();
+        deniedOutcome.RowPolicy.ShouldBeNull();
+
+        // Multiple grants all with UncoveredPolicy.Deny -> no grant contributes -> denied with NoContributingGrantCode.
+        var denyGrant2 = new RowScopeGrant("g-deny-2", ConsentGrantSource.ConsentRequest,
+            [new GrantRowScopeEntry("region_policy", Params("regions", "US"), Uncovered: UncoveredPolicy.Deny)]);
+        var multiDeniedOutcome = await compiler.CompileAsync(new RowScopeCompileRequest(
+            Tenant, UserSid, new HashSet<Sid>(), tableWithoutRegion, [denyGrant, denyGrant2]));
+        multiDeniedOutcome.IsDenied.ShouldBeTrue();
+        multiDeniedOutcome.DenyCode.ShouldBe(RowScopeCompiler.NoContributingGrantCode);
+        multiDeniedOutcome.Predicate.ShouldBeNull();
+        multiDeniedOutcome.RowPolicy.ShouldBeNull();
 
         // When paired with a covered grant, the uncovered Deny grant does not contribute and the covered grant applies.
         var coveredGrant = new RowScopeGrant("g-ok", ConsentGrantSource.ConsentRequest,

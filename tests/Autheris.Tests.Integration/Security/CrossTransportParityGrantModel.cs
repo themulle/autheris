@@ -86,6 +86,16 @@ internal sealed partial class CrossTransportParityGrantModelRows
                 new(true, GrantIds: [GrantId(1), GrantId(2)], RowSet: ParityRowSet.Unfiltered, ColumnState: Cols(ColumnAccessLevel.Mask),
                     PredicateParameterValues: []), plain),
 
+            // S34b: every matching grant has UncoveredPolicy.Deny -> no grant contributes to the object -> denied with ROW_SCOPE_NO_CONTRIBUTING_GRANT and no row set.
+            new(ParityScenarioId.S34b_UncoveredDenyOnly, principal, tenant, table,
+                [
+                    GroupGrant(1, GroupA, now, [SegmentEntry("gold", UncoveredPolicy.Deny)]),
+                    GroupGrant(2, GroupB, now, [SegmentEntry("silver", UncoveredPolicy.Deny)])
+                ], [], VirtualFilterSnapshot.Empty, false, false,
+                new(false, GrantIds: [], ColumnState: Cols(ColumnAccessLevel.Deny),
+                    PredicateParameterValues: [],
+                    ReasonCodes: [RowScopeCompiler.NoContributingGrantCode]), plain),
+
             // S35: composite-key policy (both key columns are compared pair-wise).
             new(ParityScenarioId.S35_CompositeKeyPolicy, principal, tenant, table,
                 [GroupGrant(1, GroupA, now, [new GrantRowScopeEntry("composite_live", new Dictionary<string, JsonElement>())])], [],
@@ -117,10 +127,11 @@ internal sealed partial class CrossTransportParityGrantModelRows
         bool ExplainAllowed,
         IReadOnlyList<Guid> DecisionGrantIds,
         IReadOnlyList<Guid> ExplainGrantIds,
-        ParityRowSet RowSet,
+        ParityRowSet? RowSet,
         IReadOnlyDictionary<string, ColumnAccessLevel> ColumnState,
         IReadOnlyList<string> ParameterValues,
-        string PredicateSql);
+        string PredicateSql,
+        IReadOnlyList<string> DecisionReasonCodes);
 
     internal static async Task<GrantModelOutcome> EvaluateAsync(ParityScenario scenario, CancellationToken ct)
     {
@@ -142,9 +153,11 @@ internal sealed partial class CrossTransportParityGrantModelRows
         var decision = await pdp.DecideAsync(request, ct);
         var explanation = await pdp.ExplainAsync(request, ct);
 
-        var rowSet = decision.RowPolicy is null
-            ? ParityRowSet.Unfiltered
-            : decision.RowPolicy.Project().Sql.Trim() == "1 = 0" ? ParityRowSet.NoRows : ParityRowSet.Filtered;
+        ParityRowSet? rowSet = !decision.IsAllowed
+            ? null
+            : decision.RowPolicy is null
+                ? ParityRowSet.Unfiltered
+                : decision.RowPolicy.Project().Sql.Trim() == "1 = 0" ? ParityRowSet.NoRows : ParityRowSet.Filtered;
         var parameters = decision.RowPolicy?.Project().Parameters.Values
             .Select(v => v?.ToString() ?? string.Empty).ToList() ?? [];
         var columns = scenario.Table.Columns
@@ -164,7 +177,8 @@ internal sealed partial class CrossTransportParityGrantModelRows
             rowSet,
             columns,
             parameters,
-            decision.RowPolicy?.Project().Sql ?? string.Empty);
+            decision.RowPolicy?.Project().Sql ?? string.Empty,
+            [.. decision.Reasons.Select(r => r.Code)]);
     }
 
     private static ClaimsPrincipal GroupUser(Sid sid, params Sid[] groups)
