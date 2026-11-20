@@ -69,10 +69,7 @@ public sealed class TraceContextAndAuditSecurityTests
         using var activity = activitySource.StartActivity("EgressAuditOp");
         var expectedTraceId = activity!.TraceId.ToHexString();
 
-        var options = Microsoft.Extensions.Options.Options.Create(new GatewayOptions
-        {
-            Extensibility = new ExtensibilityOptions { Enabled = true }
-        });
+        var options = Microsoft.Extensions.Options.Options.Create(new GatewayOptions());
 
         var interceptor = new AuditLineageEgressInterceptor(options);
         var ingressContext = new IngressContext

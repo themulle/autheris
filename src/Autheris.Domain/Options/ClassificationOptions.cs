@@ -11,11 +11,19 @@ public sealed class ClassificationOptions
 {
     public const string SectionName = "Gateway:Classification";
 
+    /// <summary>Default sensitivity level key assigned when a column has no explicit classification.</summary>
     public string DefaultSensitivityKey { get; init; } = "L2_INTERNAL";
+
+    /// <summary>Minimum sensitivity rank at which four-eyes approval is required for consent grants.</summary>
     public int FourEyesThresholdRank { get; init; } = 3;
 
+    /// <summary>Configured sensitivity level taxonomy ordered by rank.</summary>
     public List<SensitivityLevelDefinition> SensitivityLevels { get; init; } = GetDefaultSensitivityLevels();
+
+    /// <summary>Configured PII category definitions and column-name matching patterns.</summary>
     public List<PiiCategoryDefinition> PiiCategories { get; init; } = GetDefaultPiiCategories();
+
+    /// <summary>Classification workflow profile selection and definitions (<c>Gateway:Classification:Workflow</c>).</summary>
     public WorkflowOptions Workflow { get; init; } = new();
 
     public static List<SensitivityLevelDefinition> GetDefaultSensitivityLevels() => new()
@@ -45,8 +53,10 @@ public sealed class ClassificationOptions
 /// </summary>
 public sealed class WorkflowOptions
 {
+    /// <summary>Name of the active classification workflow profile in <see cref="Profiles"/>.</summary>
     public string ActiveProfile { get; init; } = "ENTERPRISE_HYBRID";
 
+    /// <summary>Named classification workflow profiles controlling owner resolution, pre-classification and approval stages.</summary>
     public Dictionary<string, ClassificationWorkflowProfile> Profiles { get; init; } = new(StringComparer.OrdinalIgnoreCase)
     {
         ["ENTERPRISE_HYBRID"] = new(

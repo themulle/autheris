@@ -12,11 +12,9 @@ AnalyticsPrivacyOptions,AllowSourceDeclaredLowering,,False,keep opt-in,SEC-SIMPL
 DataSourceProfileOptions,AllowCeilingRelaxation,false,False,keep opt-in,SEC-SIMPL-32 opt-in safety ceiling relaxation guard,PR 5,src/Autheris.Domain/Options/DataSources/DataSourceProfileOptions.cs
 DataSourceSafetyCeilingsOptions,AllowGlobalCeilingRelaxation,false,False,keep opt-in,SEC-SIMPL-32 opt-in global safety ceiling relaxation guard,PR 5,src/Autheris.Domain/Options/DataSources/DataSourceSafetyCeilingsOptions.cs
 DemoDataSwitch,Enabled,,False,delete,Demo data toggle; delete or replace with Dev preset,PR 5,src/Autheris.Domain/Options/DemoDataSwitch.cs
-ExtensibilityOptions,Enabled,true,False,unconditional,Default-on core feature; remove flag and make unconditional,PR 1,src/Autheris.Domain/Options/ExtensibilityPipelineOptions.cs
 FederationOptions,Enabled,false,False,keep opt-in,R13 default-off opt-in switch of kept feature,PR 5,src/Autheris.Domain/Options/FederationOptions.cs
 GatewayOptions,AllowDevelopmentInContainer,false,False,keep opt-in,SEC-SIMPL-32 / SEC C-04 container Development opt-in guard,PR 5,src/Autheris.Domain/Options/GatewayOptions.cs
 GatewayOptions,AllowInsecureWarnFlagsInProduction,false,False,keep opt-in,SEC-SIMPL-32 production insecure warn-flag opt-in guard,PR 5,src/Autheris.Domain/Options/GatewayOptions.cs
-GovernanceQueryAnalysisOptions,Enabled,true,False,unconditional,Default-on core governance analysis; remove flag and make unconditional,PR 1,src/Autheris.Domain/Options/GovernanceOptions.cs
 IndividualGrantOptions,AllowCustomerPrivileged,,False,keep opt-in,SEC-SIMPL-32 individual grant privilege guard,PR 1,src/Autheris.Domain/Options/IndividualGrantOptions.cs
 IndividualGrantOptions,AllowCustomerUnmasked,,False,keep opt-in,SEC-SIMPL-32 individual grant unmasked data guard,PR 1,src/Autheris.Domain/Options/IndividualGrantOptions.cs
 DataCatalogOptions,AllowAuthenticatedCatalogDiscovery,false,True,keep opt-in,SEC-SIMPL-32 / R13 default-off authenticated catalog discovery,PR 2,src/Autheris.Domain/Options/Integrations/DataCatalogOptions.cs
@@ -90,7 +88,6 @@ AsyncJobOptions,Enabled,true,False,unconditional,Default-on async jobs; remove f
 SchemaContractsOptions,Enabled,false,False,keep opt-in,R13 default-off opt-in switch of kept feature,PR 3,src/Autheris.Domain/Options/Tenancy/MultiTenancyOptions.cs
 TenantRegistryOptions,Enabled,true,False,keep opt-in,SEC-SIMPL-32 tenant registry security control,PR 3,src/Autheris.Domain/Options/Tenancy/MultiTenancyOptions.cs
 VirtualFilterFederationOptions,PushdownEnabled,true,False,unconditional,Default-on virtual filter pushdown; remove flag and make unconditional,PR 5,src/Autheris.Domain/Options/VirtualFilterFederationOptions.cs
-WebhooksOptions,Enabled,true,False,unconditional,Default-on webhooks; remove flag and make unconditional,PR 1,src/Autheris.Domain/Options/WebhooksOptions.cs
 AstBuilderOptions,AllowInlineFunctionDefinitions,false,False,keep opt-in,SEC-SIMPL-32 SQL AST inline function guard,PR 4,src/TrinoSqlEngine/Ast/Builder/AstBuilderOptions.cs
 AstSecurityVisitorOptions,AllowRecursiveCte,,False,keep opt-in,SEC-SIMPL-32 SQL AST recursive CTE guard,PR 4,src/TrinoSqlEngine/Ast/Visitors/AstSecurityVisitorOptions.cs
 SqlTokenSecurityOptions,AllowTrailingStatementTerminator,,False,keep opt-in,SEC-SIMPL-32 SQL token security guard,PR 4,src/TrinoSqlEngine/SqlTokenSecurityOptions.cs

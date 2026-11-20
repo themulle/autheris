@@ -43,7 +43,7 @@ public static class QueryAnalysisAndProfilingEndpoints
     /// <c>Gateway:RestApi:DataEndpoint:Enabled</c> is on.
     /// </param>
     /// <param name="mapQueryAnalysis">
-    /// dedicated switch for<c>POST /api/v1/governance/queries/analyze</c>, gated by <c>Gateway:Governance:QueryAnalysis:Enabled</c>.
+    /// Whether to map <c>POST /api/v1/governance/queries/analyze</c> (always enabled in production; parameterized for endpoint tests).
     /// </param>
     public static IEndpointRouteBuilder MapQueryAnalysisAndProfilingEndpoints(
         this IEndpointRouteBuilder app,
