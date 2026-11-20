@@ -39,6 +39,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
     private readonly IGraphQlCostAnalysisEngine? _costAnalysisEngine;
     private readonly Autheris.Application.State.Caching.Interfaces.IClientTierResolver? _clientTierResolver;
     private readonly IRateLimiterService? _rateLimiterService;
+    private readonly QueryAnalysisSettings _queryAnalysisSettings;
     private readonly int _maxRootFields;
 
     [Microsoft.Extensions.DependencyInjection.ActivatorUtilitiesConstructor]
@@ -56,7 +57,8 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         Autheris.Domain.Security.IRestrictedScopePolicy? restrictedScopes = null,
         IGraphQlCostAnalysisEngine? costAnalysisEngine = null,
         Autheris.Application.State.Caching.Interfaces.IClientTierResolver? clientTierResolver = null,
-        IRateLimiterService? rateLimiterService = null)
+        IRateLimiterService? rateLimiterService = null,
+        IOptions<QueryAnalysisSettings>? queryAnalysisSettings = null)
     {
         // The default is the secure list, never "off".
         _restrictedScopes = restrictedScopes ?? Autheris.Domain.Security.RestrictedScopePolicy.Default;
@@ -73,6 +75,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         _costAnalysisEngine = costAnalysisEngine;
         _clientTierResolver = clientTierResolver;
         _rateLimiterService = rateLimiterService;
+        _queryAnalysisSettings = queryAnalysisSettings?.Value ?? new QueryAnalysisSettings();
         _maxRootFields = _gatewayOptions.GraphQL.MaxRootFieldsPerOperation > 0
             ? _gatewayOptions.GraphQL.MaxRootFieldsPerOperation
             : 10;
@@ -97,7 +100,8 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         Autheris.Domain.Security.IRestrictedScopePolicy? restrictedScopes = null,
         IGraphQlCostAnalysisEngine? costAnalysisEngine = null,
         Autheris.Application.State.Caching.Interfaces.IClientTierResolver? clientTierResolver = null,
-        IRateLimiterService? rateLimiterService = null)
+        IRateLimiterService? rateLimiterService = null,
+        IOptions<QueryAnalysisSettings>? queryAnalysisSettings = null)
     {
         // The default is the secure list, never "off".
         _restrictedScopes = restrictedScopes ?? Autheris.Domain.Security.RestrictedScopePolicy.Default;
@@ -113,6 +117,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         _costAnalysisEngine = costAnalysisEngine;
         _clientTierResolver = clientTierResolver;
         _rateLimiterService = rateLimiterService;
+        _queryAnalysisSettings = queryAnalysisSettings?.Value ?? new QueryAnalysisSettings();
         _maxRootFields = _gatewayOptions.GraphQL.MaxRootFieldsPerOperation > 0
             ? _gatewayOptions.GraphQL.MaxRootFieldsPerOperation
             : 10;
@@ -124,10 +129,18 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         };
     }
 
-    public async Task<QueryAnalysisResult> AnalyzeQueriesAsync(
+    public Task<QueryAnalysisResult> AnalyzeQueriesAsync(
         IReadOnlyList<QueryAnalysisItem> queries,
         ClaimsPrincipal callerPrincipal,
         ClaimsPrincipal? targetPrincipal = null,
+        CancellationToken ct = default) =>
+        AnalyzeQueriesAsync(queries, callerPrincipal, targetPrincipal, targetScope: null, ct);
+
+    public async Task<QueryAnalysisResult> AnalyzeQueriesAsync(
+        IReadOnlyList<QueryAnalysisItem> queries,
+        ClaimsPrincipal callerPrincipal,
+        ClaimsPrincipal? targetPrincipal,
+        string? targetScope,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(queries);
@@ -137,6 +150,12 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         if (callerSid == null)
         {
             throw new UnauthorizedAccessException("Authenticated principal is required to analyze queries.");
+        }
+
+        string? normalizedTargetScope = null;
+        if (targetScope is not null)
+        {
+            normalizedTargetScope = ValidateAndNormalizeTargetScope(targetScope);
         }
 
         if (targetPrincipal != null && !HasSimulatePrivilege(callerPrincipal))
@@ -426,12 +445,15 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         CallerBucketState? bucketState = null;
         if (_clientTierResolver != null && effectivePrincipal != null)
         {
-            var quotaCtx = await _clientTierResolver.ResolveAsync(effectivePrincipal, apiKey: null, clientIp: null, ct).ConfigureAwait(false);
+            var quotaPrincipal = normalizedTargetScope != null
+                ? CreateScopeQuotaPrincipal(effectivePrincipal, normalizedTargetScope)
+                : effectivePrincipal;
+            var quotaCtx = await _clientTierResolver.ResolveAsync(quotaPrincipal, apiKey: null, clientIp: null, ct).ConfigureAwait(false);
             if (quotaCtx?.Policy?.MaxCostPerQuery > 0)
             {
                 maxAllowedCost = quotaCtx.Policy.MaxCostPerQuery;
             }
-            if (_rateLimiterService != null && quotaCtx != null)
+            if (normalizedTargetScope == null && _rateLimiterService != null && quotaCtx != null)
             {
                 try
                 {
@@ -749,7 +771,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
             claims.Add(new Claim(ClaimTypes.Role, role.Trim()));
         }
 
-        return new ClaimsPrincipal(new ClaimsIdentity(claims, SimulatedTargetAuthenticationType));
+        return CreatePrincipalFromClaims(claims, SimulatedTargetAuthenticationType);
     }
 
     /// <summary>
@@ -848,4 +870,41 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         var idx = tableName.LastIndexOf('.', StringComparison.Ordinal);
         return idx >= 0 && idx < tableName.Length - 1 ? tableName[(idx + 1)..] : tableName;
     }
+
+    private string ValidateAndNormalizeTargetScope(string targetScope)
+    {
+        var trimmed = targetScope.Trim();
+        if (string.IsNullOrEmpty(trimmed))
+        {
+            throw new ArgumentException("targetScope must not be empty.", nameof(targetScope));
+        }
+
+        var bareTarget = ScopeNames.ToBareName(trimmed);
+        var allowed = _queryAnalysisSettings.AllowedTargetScopes;
+        if (allowed == null || allowed.Count == 0 ||
+            !allowed.Any(a => !string.IsNullOrWhiteSpace(a) &&
+                string.Equals(ScopeNames.ToBareName(a.Trim()), bareTarget, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new ArgumentException(
+                $"targetScope '{trimmed}' is not in the configured Gateway:Governance:QueryAnalysis:AllowedTargetScopes allowlist.",
+                nameof(targetScope));
+        }
+
+        return bareTarget;
+    }
+
+    private static ClaimsPrincipal CreateScopeQuotaPrincipal(ClaimsPrincipal source, string targetScope)
+    {
+        var claims = source.Claims
+            .Where(c =>
+                !string.Equals(c.Type, "scp", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(c.Type, "scope", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(c.Type, "http://schemas.microsoft.com/identity/claims/scope", StringComparison.OrdinalIgnoreCase))
+            .Append(new Claim("scp", targetScope));
+
+        return CreatePrincipalFromClaims(claims, source.Identity?.AuthenticationType ?? "TargetScopeAnalysis");
+    }
+
+    private static ClaimsPrincipal CreatePrincipalFromClaims(IEnumerable<Claim> claims, string authenticationType) =>
+        new ClaimsPrincipal(new ClaimsIdentity(claims, authenticationType));
 }
