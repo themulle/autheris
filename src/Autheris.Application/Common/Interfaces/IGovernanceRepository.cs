@@ -112,31 +112,15 @@ public interface ITableMetadataRepository : Autheris.Application.Catalog.ICatalo
             Autheris.Application.Catalog.CatalogWriteClassification.Restrictive);
     }
 
-    /// <summary>
-    /// Inserts <paramref name="metadata"/> only when no table with the same identifier exists yet.
-    /// When the table already exists, returns the persisted entry unchanged with
-    /// <see cref="Autheris.Application.Catalog.CatalogUpsertKind.Unchanged"/> without overwriting any existing columns,
-    /// sensitivity, activation state, masking rules, or consents.
-    /// </summary>
-    async Task<Autheris.Application.Catalog.CatalogTableUpsertResult> InsertTableMetadataIfAbsentAsync(
-        TableMetadata metadata,
-        CancellationToken ct = default)
+    /// <summary>Inserts <paramref name="metadata"/> only when absent; returns the existing entry unchanged otherwise.</summary>
+    async Task<Autheris.Application.Catalog.CatalogTableUpsertResult> InsertTableMetadataIfAbsentAsync(TableMetadata metadata, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(metadata);
         var existing = await GetTableMetadataAsync(metadata.Identifier, ct).ConfigureAwait(false);
         if (existing is not null)
-        {
-            return new Autheris.Application.Catalog.CatalogTableUpsertResult(
-                existing,
-                Autheris.Application.Catalog.CatalogUpsertKind.Unchanged,
-                Autheris.Application.Catalog.CatalogWriteClassification.Unchanged);
-        }
-
+            return new(existing, Autheris.Application.Catalog.CatalogUpsertKind.Unchanged, Autheris.Application.Catalog.CatalogWriteClassification.Unchanged);
         var stored = await UpsertTableMetadataAsync(metadata, ct).ConfigureAwait(false);
-        return new Autheris.Application.Catalog.CatalogTableUpsertResult(
-            stored,
-            Autheris.Application.Catalog.CatalogUpsertKind.Created,
-            Autheris.Application.Catalog.CatalogWriteClassification.Additive);
+        return new(stored, Autheris.Application.Catalog.CatalogUpsertKind.Created, Autheris.Application.Catalog.CatalogWriteClassification.Additive);
     }
 
     /// <summary>
@@ -721,4 +705,21 @@ public interface IConsentDescriptionRepository
         string? pruneReason = null,
         CancellationToken ct = default) =>
         ReplaceConsentsAsync(revokeConsentIds, create, actor, reason, authority, auditEntries, descriptionUpdates, ct);
+}
+
+public static partial class TableMetadataRepositoryExtensions
+{
+    public static async Task<IReadOnlyList<Autheris.Application.Catalog.CatalogTableUpsertResult>> UpsertBatchWithFallbackAsync(
+        this ITableMetadataRepository repository, IReadOnlyList<TableMetadata> batch, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(repository);
+        ArgumentNullException.ThrowIfNull(batch);
+        if (batch.Count == 0) return Array.Empty<Autheris.Application.Catalog.CatalogTableUpsertResult>();
+        var results = await repository.UpsertTableMetadataBatchAsync(batch, ct).ConfigureAwait(false);
+        if (results is { Count: var count } && count == batch.Count) return results;
+        var fallback = new Autheris.Application.Catalog.CatalogTableUpsertResult[batch.Count];
+        for (var i = 0; i < batch.Count; i++)
+            fallback[i] = new(await repository.UpsertTableMetadataAsync(batch[i], ct).ConfigureAwait(false), Autheris.Application.Catalog.CatalogUpsertKind.Updated, Autheris.Application.Catalog.CatalogWriteClassification.Restrictive);
+        return fallback;
+    }
 }
