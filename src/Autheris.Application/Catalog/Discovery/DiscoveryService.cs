@@ -61,6 +61,7 @@ public sealed partial class DiscoveryService : IDiscoveryService
     private readonly IClassificationRepository? _classificationRepository;
     private readonly Autheris.Application.Procedures.Interfaces.IProcedureCatalog? _procedureCatalog;
     private readonly Autheris.Application.Docs.Services.IDocLinkDiscoveryReader? _docLinks;
+    private readonly ICatalogSnapshotProvider? _snapshotProvider;
 
     private readonly Lock _memoLock = new();
     private readonly Dictionary<ScopeMemoKey, ScopedCatalog> _scopeMemo = [];
@@ -89,9 +90,11 @@ public sealed partial class DiscoveryService : IDiscoveryService
         ILogger<DiscoveryService>? logger = null,
         IClassificationRepository? classificationRepository = null,
         Autheris.Application.Procedures.Interfaces.IProcedureCatalog? procedureCatalog = null,
-        Autheris.Application.Docs.Services.IDocLinkDiscoveryReader? docLinks = null)
+        Autheris.Application.Docs.Services.IDocLinkDiscoveryReader? docLinks = null,
+        ICatalogSnapshotProvider? snapshotProvider = null)
     {
         _docLinks = docLinks;
+        _snapshotProvider = snapshotProvider;
         ArgumentNullException.ThrowIfNull(gatewayOptions);
         _metadataRepository = metadataRepository;
         _decisionPoint = decisionPoint;
@@ -131,7 +134,10 @@ public sealed partial class DiscoveryService : IDiscoveryService
         try
         {
             var scopeKey = BuildScopeMemoKey(sid, caller);
-            var scoped = await LoadScopedCatalogAsync(caller, sid, scopeKey, ct).ConfigureAwait(false);
+            var canFilterAtStore = !query.IncludeProcedures || _procedureCatalog is null;
+            var scoped = canFilterAtStore
+                ? await LoadScopedCatalogAsync(caller, sid, scopeKey, query.Domain, query.Schema, ct).ConfigureAwait(false)
+                : await LoadScopedCatalogAsync(caller, sid, scopeKey, ct).ConfigureAwait(false);
 
             IEnumerable<TableMetadata> filtered = scoped.VisibleTables;
             if (!string.IsNullOrWhiteSpace(query.Domain))
@@ -247,37 +253,32 @@ public sealed partial class DiscoveryService : IDiscoveryService
         try
         {
             var scopeKey = BuildScopeMemoKey(sid, caller);
-            var scoped = await LoadScopedCatalogAsync(caller, sid, scopeKey, ct).ConfigureAwait(false);
 
-            TableMetadata? match = null;
-            foreach (var candidate in scoped.VisibleTables)
+            if (string.Equals(id.Schema, "procedure", StringComparison.OrdinalIgnoreCase))
             {
-                if (candidate.Identifier.Equals(id))
+                var scoped = await LoadScopedCatalogAsync(caller, sid, scopeKey, ct).ConfigureAwait(false);
+                var matchedProc = (await LoadEligibleProceduresAsync(caller, scoped.VisibleTables, ct).ConfigureAwait(false))
+                    .FirstOrDefault(p =>
+                        string.Equals(p.Procedure.Definition.CatalogDomain, id.Domain, StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(p.Procedure.Definition.Name, id.TableName, StringComparison.OrdinalIgnoreCase));
+
+                if (matchedProc is not null)
                 {
-                    match = candidate;
-                    break;
+                    var procObjects = await ResolveProceduresBatchAsync(
+                        caller, sid, scopeKey, [matchedProc], ct).ConfigureAwait(false);
+                    await WriteDiscoveryAuditAsync(
+                        caller.Tenant, sid, DiscoverySurfaceOf(caller.Channel), procObjects, queryText: null, ct).ConfigureAwait(false);
+                    return procObjects.Count > 0 ? procObjects[0] : null;
                 }
+
+                await WriteDiscoveryAuditAsync(
+                    caller.Tenant, sid, DiscoverySurfaceOf(caller.Channel), [], queryText: null, ct).ConfigureAwait(false);
+                return null;
             }
 
+            var match = await FindSingleScopedTableAsync(id, caller, sid, scopeKey, ct).ConfigureAwait(false);
             if (match is null)
             {
-                if (string.Equals(id.Schema, "procedure", StringComparison.OrdinalIgnoreCase))
-                {
-                    var matchedProc = (await LoadEligibleProceduresAsync(caller, scoped.VisibleTables, ct).ConfigureAwait(false))
-                        .FirstOrDefault(p =>
-                            string.Equals(p.Procedure.Definition.CatalogDomain, id.Domain, StringComparison.OrdinalIgnoreCase) &&
-                            string.Equals(p.Procedure.Definition.Name, id.TableName, StringComparison.OrdinalIgnoreCase));
-
-                    if (matchedProc is not null)
-                    {
-                        var procObjects = await ResolveProceduresBatchAsync(
-                            caller, sid, scopeKey, [matchedProc], ct).ConfigureAwait(false);
-                        await WriteDiscoveryAuditAsync(
-                            caller.Tenant, sid, DiscoverySurfaceOf(caller.Channel), procObjects, queryText: null, ct).ConfigureAwait(false);
-                        return procObjects.Count > 0 ? procObjects[0] : null;
-                    }
-                }
-
                 await WriteDiscoveryAuditAsync(
                     caller.Tenant, sid, DiscoverySurfaceOf(caller.Channel), [], queryText: null, ct).ConfigureAwait(false);
                 return null;
@@ -328,7 +329,10 @@ public sealed partial class DiscoveryService : IDiscoveryService
         try
         {
             var scopeKey = BuildScopeMemoKey(sid, caller);
-            var scoped = await LoadScopedCatalogAsync(caller, sid, scopeKey, ct).ConfigureAwait(false);
+            var canFilterAtStore = _procedureCatalog is null;
+            var scoped = canFilterAtStore
+                ? await LoadScopedCatalogAsync(caller, sid, scopeKey, options.Domain, schemaFilter: null, ct).ConfigureAwait(false)
+                : await LoadScopedCatalogAsync(caller, sid, scopeKey, ct).ConfigureAwait(false);
 
             var limit = Math.Clamp(options.Limit <= 0 ? 25 : options.Limit, 1, MaxPageSize);
             var trimmed = text?.Trim() ?? string.Empty;
@@ -546,70 +550,6 @@ public sealed partial class DiscoveryService : IDiscoveryService
             .ListVisibleAsync(principal, caller.Tenant, ct)
             .ConfigureAwait(false);
         return DiscoveryProcedureResolver.FilterEligible(visibleProcedures, visibleTables, caller.Tenant);
-    }
-
-    private async Task<ScopedCatalog> LoadScopedCatalogAsync(
-        CatalogCaller caller,
-        Sid sid,
-        ScopeMemoKey scopeKey,
-        CancellationToken ct)
-    {
-        lock (_memoLock)
-        {
-            if (_scopeMemo.TryGetValue(scopeKey, out var cached))
-            {
-                return cached;
-            }
-        }
-
-        var allTables = await CatalogTablePageReader.ReadAllAsync(
-            _metadataRepository!, new CatalogTableQuery(IncludeInactive: false), ct: ct).ConfigureAwait(false);
-        var virtualFiltered = DiscoveryTenantScope.DropForeignVirtualTables(allTables, caller.Tenant);
-
-        var tenantConsentList = await _consentRepository!.GetTablesWithConsentsForTenantAsync(caller.Tenant, ct).ConfigureAwait(false);
-        var tenantAllowConsents = tenantConsentList as IReadOnlySet<TableIdentifier> ?? tenantConsentList.ToHashSet();
-        var catalogOwner = TenantResolver.EffectiveDefaultOf(_gatewayOptions.Tenancy);
-        var sharedTables = DiscoveryTenantScope.ParseSharedTables(_gatewayOptions.Catalog.SharedTables);
-
-        var inScope = new List<TableMetadata>(virtualFiltered.Count);
-        foreach (var table in virtualFiltered)
-        {
-            if (table.Table.IsActive &&
-                DiscoveryTenantScope.IsInScope(table, caller.Tenant, catalogOwner, sharedTables, tenantAllowConsents))
-            {
-                inScope.Add(table);
-            }
-        }
-
-        var callerScope = CallerScopeResolver.Resolve(caller.Principal!, catalogOwner);
-        var hiddenIds = inScope
-            .Where(static t => t.Table.DiscoveryHidden)
-            .Select(static t => t.Identifier)
-            .ToList();
-
-        IReadOnlySet<TableIdentifier> ownedTables = new HashSet<TableIdentifier>();
-        if (hiddenIds.Count > 0 && _ownershipRepository is not null)
-        {
-            ownedTables = await _ownershipRepository.GetOwnedOrDelegatedTablesAsync(
-                sid, hiddenIds, _timeProvider.GetUtcNow(), ct).ConfigureAwait(false);
-        }
-
-        var visible = new List<TableMetadata>(inScope.Count);
-        foreach (var table in inScope)
-        {
-            if (DiscoveryTenantScope.CanSeeHiddenObject(table, callerScope, caller.Tenant, catalogOwner, ownedTables))
-            {
-                visible.Add(table);
-            }
-        }
-
-        var result = new ScopedCatalog(visible, ownedTables);
-        lock (_memoLock)
-        {
-            _scopeMemo[scopeKey] = result;
-        }
-
-        return result;
     }
 
     private async Task<IReadOnlyList<DiscoveryObject>> ResolveObjectsBatchAsync(

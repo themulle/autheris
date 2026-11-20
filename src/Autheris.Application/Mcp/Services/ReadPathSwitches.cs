@@ -55,7 +55,7 @@ public sealed class ReadPathSwitches : IReadPathSwitches
         bool? bulkOption = options.BulkStream?.Enabled ?? options.RestApi?.BulkStream?.Enabled;
         bool bulkStream = bulkOption ?? restData;
         bool queryAnalysis = true;
-        bool asyncJobs = options.AsyncJobs?.Enabled ?? true;
+        bool asyncJobs = true;
         return new ReadPathSwitches(
             restData,
             bulkStream,

@@ -112,6 +112,17 @@ public interface ITableMetadataRepository : Autheris.Application.Catalog.ICatalo
             Autheris.Application.Catalog.CatalogWriteClassification.Restrictive);
     }
 
+    /// <summary>Inserts <paramref name="metadata"/> only when absent; returns the existing entry unchanged otherwise.</summary>
+    async Task<Autheris.Application.Catalog.CatalogTableUpsertResult> InsertTableMetadataIfAbsentAsync(TableMetadata metadata, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(metadata);
+        var existing = await GetTableMetadataAsync(metadata.Identifier, ct).ConfigureAwait(false);
+        if (existing is not null)
+            return new(existing, Autheris.Application.Catalog.CatalogUpsertKind.Unchanged, Autheris.Application.Catalog.CatalogWriteClassification.Unchanged);
+        var stored = await UpsertTableMetadataAsync(metadata, ct).ConfigureAwait(false);
+        return new(stored, Autheris.Application.Catalog.CatalogUpsertKind.Created, Autheris.Application.Catalog.CatalogWriteClassification.Additive);
+    }
+
     /// <summary>
     /// Validates and upserts a batch of table metadata entries using parameter-budget chunking, deterministic lock ordering,
     /// per-chunk transactions, persisted-state change classification, and transient conflict retries.
@@ -676,44 +687,19 @@ public interface IConsentDescriptionRepository
         ReplaceConsentsAsync(revokeConsentIds, create, actor, reason, authority, auditEntries, descriptionUpdates, ct);
 }
 
-/// <summary>
-/// Batch upsert helpers on <see cref="ITableMetadataRepository"/>.
-/// </summary>
-public static class TableMetadataRepositoryExtensions
+public static partial class TableMetadataRepositoryExtensions
 {
-    /// <summary>
-    /// Calls <see cref="ITableMetadataRepository.UpsertTableMetadataBatchAsync"/> and falls back to per-item
-    /// <see cref="ITableMetadataRepository.UpsertTableMetadataAsync"/> only when an unconfigured mock returns fewer
-    /// results than the batch count.
-    /// </summary>
     public static async Task<IReadOnlyList<Autheris.Application.Catalog.CatalogTableUpsertResult>> UpsertBatchWithFallbackAsync(
-        this ITableMetadataRepository repository,
-        IReadOnlyList<TableMetadata> batch,
-        CancellationToken ct = default)
+        this ITableMetadataRepository repository, IReadOnlyList<TableMetadata> batch, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(repository);
         ArgumentNullException.ThrowIfNull(batch);
-        if (batch.Count == 0)
-        {
-            return Array.Empty<Autheris.Application.Catalog.CatalogTableUpsertResult>();
-        }
-
+        if (batch.Count == 0) return Array.Empty<Autheris.Application.Catalog.CatalogTableUpsertResult>();
         var results = await repository.UpsertTableMetadataBatchAsync(batch, ct).ConfigureAwait(false);
-        if (results is { Count: var count } && count == batch.Count)
-        {
-            return results;
-        }
-
+        if (results is { Count: var count } && count == batch.Count) return results;
         var fallback = new Autheris.Application.Catalog.CatalogTableUpsertResult[batch.Count];
         for (var i = 0; i < batch.Count; i++)
-        {
-            var stored = await repository.UpsertTableMetadataAsync(batch[i], ct).ConfigureAwait(false);
-            fallback[i] = new Autheris.Application.Catalog.CatalogTableUpsertResult(
-                stored,
-                Autheris.Application.Catalog.CatalogUpsertKind.Updated,
-                Autheris.Application.Catalog.CatalogWriteClassification.Restrictive);
-        }
-
+            fallback[i] = new(await repository.UpsertTableMetadataAsync(batch[i], ct).ConfigureAwait(false), Autheris.Application.Catalog.CatalogUpsertKind.Updated, Autheris.Application.Catalog.CatalogWriteClassification.Restrictive);
         return fallback;
     }
 }

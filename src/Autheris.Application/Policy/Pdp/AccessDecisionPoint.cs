@@ -132,8 +132,13 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
         ArgumentNullException.ThrowIfNull(request);
 
         var subject = request.Subject;
-        var metadata = request.Object;
-        ArgumentNullException.ThrowIfNull(metadata);
+        ArgumentNullException.ThrowIfNull(request.Object);
+        var metadata = WithConnectionEnforcementMode(request.Object, _options.Value);
+        if (!ReferenceEquals(metadata, request.Object))
+        {
+            request = request with { Object = metadata };
+        }
+
         var table = metadata.Identifier;
         bool consentBypassed = _options.Value.IsConsentBypassed;
 
@@ -396,6 +401,18 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
         return merged;
     }
 
+    internal static TableMetadata WithConnectionEnforcementMode(TableMetadata metadata, GatewayOptions options)
+    {
+        if (metadata.Table.EnforcementMode == EnforcementMode.AutherisEnforced &&
+            Autheris.Application.Sql.Services.SqlDataSourceResolver.ResolveConnectionOptions(options, metadata.Identifier.Domain) is
+                { EnforcementMode: not EnforcementMode.AutherisEnforced } conn)
+        {
+            return metadata with { Table = metadata.Table with { EnforcementMode = conn.EnforcementMode } };
+        }
+
+        return metadata;
+    }
+
     private static TableAccessDecision PreconditionDenied(
         TableIdentifier table,
         string code,
@@ -430,9 +447,16 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
     public async ValueTask<AccessExplanation> ExplainAsync(AccessRequest request, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(request.Object);
+
+        var effectiveObject = WithConnectionEnforcementMode(request.Object, _options.Value);
+        if (!ReferenceEquals(effectiveObject, request.Object))
+        {
+            request = request with { Object = effectiveObject };
+        }
 
         var decision = await DecideAsync(request, ct).ConfigureAwait(false);
-        var sourceColumns = request.Object.Columns;
+        var sourceColumns = effectiveObject.Columns;
         var cols = sourceColumns.Count > 0
             ? sourceColumns
                 .Select(c =>

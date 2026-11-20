@@ -10,6 +10,8 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Catalog;
+using Autheris.Application.Catalog.Semantic;
+using Autheris.Application.Catalog.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
@@ -55,6 +57,124 @@ internal static class CatalogBatchUpsertHelper
                 repo.LogCatalogNotice($"Transient conflict while upserting catalog batch chunk (attempt {attempt} of {MaxBatchChunkAttempts}); retrying.");
             }
         }
+    }
+
+    internal static async Task<CatalogTableUpsertResult> InsertIfAbsentAsync(
+        GovernanceRepository repo,
+        TableMetadata metadata,
+        Func<Exception, bool> isTransient,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(metadata);
+        CatalogSourceNameValidator.Validate(metadata);
+        metadata.ValidateRequiredFilterColumns();
+        SemanticVirtualTables.EnsureNamespaceRespected(metadata);
+        var item = metadata.ReplaceKeyDefinition ? TableKeyDefinitionValidator.Validate(metadata) : metadata;
+        var chunk = new[] { item };
+        var writeScope = CatalogWriteScopeContext.TryGetActive(repo);
+
+        ChunkItemOutcome outcome;
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                outcome = await ExecuteInsertIfAbsentAsync(repo, item, chunk, writeScope, ct).ConfigureAwait(false);
+                break;
+            }
+            catch (Exception ex) when (attempt < MaxBatchChunkAttempts && isTransient(ex))
+            {
+                repo.LogCatalogNotice($"Transient conflict while inserting catalog table if absent (attempt {attempt} of {MaxBatchChunkAttempts}); retrying.");
+            }
+        }
+
+        return (await HydrateChunkResultsAsync(repo, chunk, [outcome], ct).ConfigureAwait(false))[0];
+    }
+
+    private static async Task<ChunkItemOutcome> ExecuteInsertIfAbsentAsync(
+        GovernanceRepository repo,
+        TableMetadata item,
+        TableMetadata[] chunk,
+        CatalogWriteScope? writeScope,
+        CancellationToken ct)
+    {
+        var tableId = item.Table.Id == Guid.Empty ? Guid.NewGuid() : item.Table.Id;
+        var inserted = false;
+
+        await using var conn = await repo.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var existingTables = await SelectChunkTablesAsync(repo, conn, tx, chunk, lockForUpdate: true, ct).ConfigureAwait(false);
+            if (existingTables.TryGetValue(NormalizedIdentifierKey.From(item.Identifier), out var found))
+            {
+                await SafeRollbackAsync(tx, ct).ConfigureAwait(false);
+                repo.InvalidateTableMetadata(item.Identifier.ToString().ToLowerInvariant());
+                return new ChunkItemOutcome(found.Id, false, CatalogWriteClassification.Unchanged);
+            }
+
+            var docs = new CatalogRowHydrator.TableDocumentation(
+                item.Table.Description,
+                item.Table.LongDescription,
+                item.Table.DocumentationSource);
+            var insertSql = repo.IsPostgreSql ? InsertTableIfAbsentSqlPg : InsertTableIfAbsentSqlSs;
+            var affected = await ExecuteTableWriteRowAsync(conn, tx, insertSql, tableId, item, docs, ct).ConfigureAwait(false);
+            if (affected == 0)
+            {
+                await SafeRollbackAsync(tx, ct).ConfigureAwait(false);
+                repo.InvalidateTableMetadata(item.Identifier.ToString().ToLowerInvariant());
+                return new ChunkItemOutcome(Guid.Empty, false, CatalogWriteClassification.Unchanged);
+            }
+
+            inserted = true;
+            var emptyCols = new Dictionary<string, (Guid Id, string DataType, string? Description, string? LongDescription, string? DocSource, string? Collation, string? LengthSemantics)>(StringComparer.OrdinalIgnoreCase);
+            var emptyColIds = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+            await CatalogRowHydrator.UpsertColumnsAndMaskingRulesAsync(
+                conn, tx, repo.InsertColumnSql, tableId, item, emptyCols, emptyColIds, ct).ConfigureAwait(false);
+
+            if (item.ReplaceKeyDefinition)
+            {
+                await CatalogKeyDefinitionStore.ReplaceAsync(conn, tx, repo.KeyDialect, tableId, item, emptyColIds, ct).ConfigureAwait(false);
+            }
+
+            var deferVersionToScope = writeScope is not null;
+            CatalogVersion? newVersion = null;
+            long? changeVersion = null;
+            if (!deferVersionToScope)
+            {
+                newVersion = await repo.BumpCatalogVersionInternalAsync(conn, tx, 1, 0, ct).ConfigureAwait(false);
+                changeVersion = newVersion.Value.StructureVersion + newVersion.Value.ContentVersion;
+            }
+
+            await repo.IncrementTableEpochInternalAsync(conn, tx, item.Identifier, ct, changeVersion).ConfigureAwait(false);
+            await tx.CommitAsync(ct).ConfigureAwait(false);
+
+            if (deferVersionToScope)
+            {
+                repo.RecordDeferredEpochTables([item.Identifier]);
+            }
+
+            if (newVersion.HasValue)
+            {
+                await repo.PublishCatalogChangedEventAsync(newVersion.Value, ct).ConfigureAwait(false);
+            }
+        }
+        catch
+        {
+            await SafeRollbackAsync(tx, ct).ConfigureAwait(false);
+            throw;
+        }
+
+        if (inserted)
+        {
+            if (writeScope is not null)
+            {
+                await writeScope.RecordAdditiveWriteAsync(1, 0, ct).ConfigureAwait(false);
+            }
+
+            await repo.InvalidateTableEpochAsync(item.Identifier, ct).ConfigureAwait(false);
+        }
+
+        return new ChunkItemOutcome(tableId, true, CatalogWriteClassification.Additive);
     }
 
     private static async Task<ChunkItemOutcome[]> ExecuteChunkAsync(
@@ -676,6 +796,63 @@ internal static class CatalogBatchUpsertHelper
             repo.LogCatalogNotice("The stored table state could not be projected for no-op detection; the write proceeds.");
             return null;
         }
+    }
+
+    private const string InsertTableIfAbsentSqlPg = @"INSERT INTO TABLES (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json, min_group_size, non_personal, dbt_unique_id, object_kind, metric_view_count_measure)
+VALUES (@id, @sourceType, @domain, @schema, @tableName, @displayName, @sensitivity, @fourEyes, @active, @dst, @httpJson, @plugin, @desc, @longDesc, @docSource, @requiredFilterColumnsJson, @textsJson, @minGroupSize, @nonPersonal, @dbtUniqueId, @objectKind, @metricViewCountMeasure)
+ON CONFLICT DO NOTHING";
+
+    private const string InsertTableIfAbsentSqlSs = @"MERGE dbo.TABLES WITH (HOLDLOCK) AS t
+USING (SELECT @domain AS source_name, @schema AS schema_name, @tableName AS table_name) AS s
+ON LOWER(t.source_name) = LOWER(s.source_name) AND LOWER(t.schema_name) = LOWER(s.schema_name) AND LOWER(t.table_name) = LOWER(s.table_name)
+WHEN NOT MATCHED THEN INSERT (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json, min_group_size, non_personal, dbt_unique_id, object_kind, metric_view_count_measure)
+    VALUES (@id, @sourceType, @domain, @schema, @tableName, @displayName, @sensitivity, @fourEyes, @active, @dst, @httpJson, @plugin, @desc, @longDesc, @docSource, @requiredFilterColumnsJson, @textsJson, @minGroupSize, @nonPersonal, @dbtUniqueId, @objectKind, @metricViewCountMeasure);";
+
+    private static async Task<int> ExecuteTableWriteRowAsync(
+        DbConnection conn,
+        DbTransaction tx,
+        string sql,
+        Guid tableId,
+        TableMetadata metadata,
+        CatalogRowHydrator.TableDocumentation docs,
+        CancellationToken ct)
+    {
+        var httpEndpointJson = metadata.Table.HttpEndpoint != null
+            ? JsonSerializer.Serialize(metadata.Table.HttpEndpoint)
+            : null;
+
+        await using var upsertCmd = conn.CreateCommand();
+        upsertCmd.Transaction = tx;
+        upsertCmd.CommandText = sql;
+        upsertCmd.AddBound("@id", tableId.ToString());
+        upsertCmd.AddBound("@sourceType", metadata.Table.SourceType);
+        upsertCmd.AddBound("@domain", metadata.Identifier.Domain);
+        upsertCmd.AddBound("@schema", metadata.Identifier.Schema);
+        upsertCmd.AddBound("@tableName", metadata.Identifier.TableName);
+        upsertCmd.AddBound("@displayName", metadata.Table.DisplayName);
+        upsertCmd.AddBound("@sensitivity", metadata.Table.Sensitivity);
+        upsertCmd.AddBound("@fourEyes", metadata.Table.RequiresFourEyes ? 1 : 0);
+        upsertCmd.AddBound("@active", metadata.Table.IsActive ? 1 : 0);
+        upsertCmd.AddBound("@dst", (int)metadata.Table.DataSourceType);
+        upsertCmd.AddBound("@httpJson", (object?)httpEndpointJson ?? DBNull.Value);
+        upsertCmd.AddBound("@plugin", (object?)metadata.Table.PluginName ?? DBNull.Value);
+        upsertCmd.AddBound("@desc", (object?)docs.Description ?? DBNull.Value);
+        upsertCmd.AddBound("@longDesc", (object?)docs.LongDescription ?? DBNull.Value);
+        upsertCmd.AddBound("@docSource", (object?)docs.Source ?? DBNull.Value);
+        upsertCmd.AddBound("@requiredFilterColumnsJson", metadata.RequiredFilterColumns.IsDefaultOrEmpty ? (object)DBNull.Value : JsonSerializer.Serialize(metadata.RequiredFilterColumns));
+        upsertCmd.AddBound("@textsJson", (object?)CatalogLocalizationPersistence.SerializeLocalizedTexts(metadata.Table.Texts) ?? DBNull.Value);
+        upsertCmd.AddBound("@minGroupSize", (object?)metadata.Table.MinGroupSize ?? DBNull.Value);
+        upsertCmd.AddBound("@nonPersonal", metadata.Table.NonPersonal);
+        upsertCmd.AddBound("@dbtUniqueId", (object?)metadata.Table.DbtUniqueId ?? DBNull.Value);
+        upsertCmd.AddBound("@objectKind", metadata.Table.ObjectKind switch
+        {
+            DiscoveryObjectKind.Table => "table",
+            DiscoveryObjectKind.View => "view",
+            DiscoveryObjectKind.MetricView => "metric_view",
+            _ => throw new ArgumentOutOfRangeException(nameof(metadata), metadata.Table.ObjectKind, "Unsupported DiscoveryObjectKind for persistence.")
+        });
+        upsertCmd.AddBound("@metricViewCountMeasure", (object?)metadata.Table.MetricViewCountMeasure ?? DBNull.Value);
+        return await upsertCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
     private static async Task<Dictionary<NormalizedIdentifierKey, Table>> SelectChunkTablesAsync(

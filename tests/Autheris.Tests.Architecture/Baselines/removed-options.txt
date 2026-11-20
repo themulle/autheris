@@ -7,6 +7,7 @@ Autheris.Domain.Options.AlationOptions.ApiToken
 Autheris.Domain.Options.AlationOptions.BaseUrl
 Autheris.Domain.Options.AlationOptions.CustomFieldIdPii
 Autheris.Domain.Options.AlationOptions.DataSourceToDomainMap
+Autheris.Domain.Options.AsyncJobOptions.Enabled
 Autheris.Domain.Options.AuditOptions.CatalogReadMode
 Autheris.Domain.Options.AuditOptions.CatalogSummaryWindowSeconds
 Autheris.Domain.Options.AuditOptions.ElasticsearchSinkUrl
@@ -29,6 +30,7 @@ Autheris.Domain.Options.DataCatalogOptions.SyncMode
 Autheris.Domain.Options.DataCatalogOptions.WebhookSecret
 Autheris.Domain.Options.DataMaskingOptions.MaskingCacheTtlHours
 Autheris.Domain.Options.DatabricksOboOptions.AllowLongRunning
+Autheris.Domain.Options.DynamicKeySetOptions.Enabled
 Autheris.Domain.Options.ExtensibilityOptions.BreakGlassAllowedRoles
 Autheris.Domain.Options.ExtensibilityOptions.BreakGlassHeaderName
 Autheris.Domain.Options.ExtensibilityOptions.EnableBreakGlass
@@ -44,11 +46,16 @@ Autheris.Domain.Options.GatewayOptions.Backstage
 Autheris.Domain.Options.GatewayOptions.CustomQueryPoller
 Autheris.Domain.Options.GatewayOptions.Extensibility
 Autheris.Domain.Options.GatewayOptions.Itsm
+Autheris.Domain.Options.GoldenQueryOptions.Enabled
 Autheris.Domain.Options.GovernanceDbOptions.EnableOutboxProcessor
 Autheris.Domain.Options.GovernanceOptions.QueryAnalysis
 Autheris.Domain.Options.GovernanceQueryAnalysisOptions.Enabled
+Autheris.Domain.Options.GraphQLAggregationOptions.Enabled
+Autheris.Domain.Options.GraphQLMetricsOptions.Enabled
+Autheris.Domain.Options.GraphQLOptions.Metrics
 Autheris.Domain.Options.HitLStepUpOptions.AutoCreateItsmTicket
 Autheris.Domain.Options.HitLStepUpOptions.PreferredItsmSystem
+Autheris.Domain.Options.IncrementalDeliveryOptions.Enabled
 Autheris.Domain.Options.IndividualGrantOptions.BreakGlassMaxHours
 Autheris.Domain.Options.ItsmOptions.AuthHeader
 Autheris.Domain.Options.ItsmOptions.Enabled
@@ -70,6 +77,7 @@ Autheris.Domain.Options.Observability.MetricsOptions.DataSourceCardinalityLimit
 Autheris.Domain.Options.Observability.MetricsOptions.DefaultCardinalityLimit
 Autheris.Domain.Options.Observability.MetricsOptions.TenantCardinalityLimit
 Autheris.Domain.Options.Observability.RedactionOptions.AttributeValueLengthLimit
+Autheris.Domain.Options.PredicatePushdownOptions.Enabled
 Autheris.Domain.Options.PurviewOptions.ClientId
 Autheris.Domain.Options.PurviewOptions.ClientSecret
 Autheris.Domain.Options.PurviewOptions.Endpoint
@@ -81,4 +89,6 @@ Autheris.Domain.Options.RebacOptions.OpenFgaApiUrl
 Autheris.Domain.Options.RebacOptions.OpenFgaStoreId
 Autheris.Domain.Options.SqlEndpointsOptions.MaxQueryTimeoutSeconds
 Autheris.Domain.Options.TableCache.TableCacheTargetOptions.CronExpression
+Autheris.Domain.Options.WebSqlCostOptions.Enabled
+Autheris.Domain.Options.WebSqlPagingOptions.Enabled
 Autheris.Domain.Options.WebhooksOptions.Enabled

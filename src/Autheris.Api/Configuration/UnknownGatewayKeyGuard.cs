@@ -35,7 +35,16 @@ public static class UnknownGatewayKeyGuard
         (GatewayConfigurationSchema.Root + ":Governance:QueryAnalysis:Enabled", "Governance:QueryAnalysis:Enabled (removed; the static query analysis endpoint is always mapped)"),
         (GatewayConfigurationSchema.Root + ":Webhooks:Enabled", "Webhooks:Enabled (removed; webhook delivery and dispatch are always active)"),
         ("Analytics:Aggregation:Enabled", "Analytics:Aggregation:Enabled (removed; governed aggregation is always active)"),
-        (GatewayConfigurationSchema.Root + ":Analytics:Aggregation:Enabled", "Analytics:Aggregation:Enabled (removed; governed aggregation is always active)")
+        (GatewayConfigurationSchema.Root + ":Analytics:Aggregation:Enabled", "Analytics:Aggregation:Enabled (removed; governed aggregation is always active)"),
+        (GatewayConfigurationSchema.Root + ":AsyncJobs:Enabled", "AsyncJobs:Enabled (removed; asynchronous query jobs are always active)"),
+        (GatewayConfigurationSchema.Root + ":GraphQL:Aggregation:Enabled", "GraphQL:Aggregation:Enabled (removed; typed GraphQL aggregation is always active)"),
+        (GatewayConfigurationSchema.Root + ":GraphQL:Metrics:Enabled", "GraphQL:Metrics:Enabled (removed; GraphQL queryMetrics field is always active)"),
+        (GatewayConfigurationSchema.Root + ":IncrementalDelivery:Enabled", "IncrementalDelivery:Enabled (removed; GraphQL incremental delivery is always active)"),
+        (GatewayConfigurationSchema.Root + ":GoldenQueries:Enabled", "GoldenQueries:Enabled (removed; golden query catalog is always active)"),
+        (GatewayConfigurationSchema.Root + ":WebSql:Paging:Enabled", "WebSql:Paging:Enabled (removed; WebSQL paging is always active)"),
+        (GatewayConfigurationSchema.Root + ":WebSql:Cost:Enabled", "WebSql:Cost:Enabled (removed; WebSQL cost estimation is always active)"),
+        (GatewayConfigurationSchema.Root + ":WebSql:CrossSource:DynamicKeySet:Enabled", "WebSql:CrossSource:DynamicKeySet:Enabled (removed; dynamic key-set planning is always active)"),
+        (GatewayConfigurationSchema.Root + ":WebSql:CrossSource:PredicatePushdown:Enabled", "WebSql:CrossSource:PredicatePushdown:Enabled (removed; predicate pushdown is always active)")
     ];
 
     private static readonly (string Key, string Message)[] RemovedEventBusKeys =

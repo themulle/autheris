@@ -177,7 +177,7 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
         var sessionCts = new CancellationTokenSource();
         var sw = Stopwatch.StartNew();
 
-        if (!request.PlannedTableRead && request.Admission == null && (_gatewayOptions?.WebSql?.Cost?.Enabled ?? true))
+        if (!request.PlannedTableRead && request.Admission == null)
         {
             using var admitScope = _scopeFactory.CreateScope();
             var costQuota = admitScope.ServiceProvider.GetService<Autheris.Application.Common.Quota.IQueryCostQuota>();

@@ -159,7 +159,7 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
 
     private AsyncJobOptions JobOptions => _jobOptionsMonitor?.CurrentValue ?? _jobOptions?.Value ?? _options?.Value?.AsyncJobs ?? new AsyncJobOptions();
 
-    private bool IsAsyncJobsEnabled() => (_switches?.AsyncJobsEnabled ?? true) && JobOptions.Enabled;
+    private bool IsAsyncJobsEnabled() => _switches?.AsyncJobsEnabled ?? true;
 
     /// <summary>A job still queued at shutdown is cancelled: the in-memory queue does not survive the process.</summary>
     private async Task DiscardQueuedAsync(AsyncJobExecutionItem item)

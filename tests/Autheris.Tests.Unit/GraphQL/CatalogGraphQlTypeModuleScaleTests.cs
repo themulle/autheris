@@ -168,6 +168,129 @@ public sealed class CatalogGraphQlTypeModuleScaleTests
     }
 
     [Fact]
+    public async Task UnchangedTables_DoNotRebuildGraphQlTypes()
+    {
+        var orders = MakeTable("orders");
+        var customers = MakeTable("customers");
+        var products = MakeTable("products");
+
+        var meta = new FakeMetadataRepository([orders, customers, products]);
+        var rel = new FakeRelationRepository();
+        var versionProvider = new FakeCatalogVersionProvider(new CatalogVersion(1, 1));
+
+        using var module = new CatalogGraphQlTypeModule(
+            meta,
+            rel,
+            versionProvider: versionProvider);
+
+        var resolver = CreateExecutorProvider(module);
+        var initial = await resolver.GetExecutorAsync();
+        initial.Schema.Types.ContainsName("sales_public_orders").ShouldBeTrue();
+
+        module.LastBuildRecipeRebuildCount.ShouldBe(3);
+        module.TotalRecipeRebuildCount.ShouldBe(3);
+
+        // Update only customers (add a column) -> only 1 table's recipe is rebuilt; orders and products are reused.
+        meta.SetTables([orders, MakeTable("customers", extraColumns: "email"), products]);
+        versionProvider.Current = new CatalogVersion(2, 1);
+
+        (await module.CheckForCatalogChangesAsync()).ShouldBeTrue();
+        var rebuilt = await WaitForExecutorConditionAsync(
+            resolver,
+            e => e.Schema.Types.TryGetType<HotChocolate.Types.ObjectType>("sales_public_customers", out var obj)
+                 && obj.Fields.ContainsField("email"));
+
+        rebuilt.Schema.Types.ContainsName("sales_public_orders").ShouldBeTrue();
+        rebuilt.Schema.Types.ContainsName("sales_public_products").ShouldBeTrue();
+        module.LastBuildRecipeRebuildCount.ShouldBe(1);
+        module.TotalRecipeRebuildCount.ShouldBe(4);
+    }
+
+    [Fact]
+    public async Task PartitionedSchema_At50000Tables_BuildsUnderOneMinute_AndRebuildsOnlyChangedTable()
+    {
+        const int totalTables = 50_000;
+        const int domainCount = 50;
+        var tables = new List<TableMetadata>(totalTables);
+        for (var i = 0; i < totalTables; i++)
+        {
+            var domain = $"domain_{i % domainCount:D2}";
+            var tableName = $"t_{i:D5}";
+            tables.Add(new TableMetadata
+            {
+                Identifier = new TableIdentifier(domain, "public", tableName),
+                Table = new Table
+                {
+                    SourceName = "pg_main",
+                    SourceType = "PostgreSql",
+                    SchemaName = "public",
+                    TableName = tableName,
+                    IsActive = true
+                },
+                Columns =
+                [
+                    new TableColumn { ColumnName = "id", DataType = "integer" },
+                    new TableColumn { ColumnName = "name", DataType = "text" },
+                    new TableColumn { ColumnName = "amount", DataType = "decimal(18,2)" }
+                ],
+                PrimaryKeyColumns = ["id"]
+            });
+        }
+
+        var meta = new FakeMetadataRepository(tables);
+        var rel = new FakeRelationRepository();
+        var versionProvider = new FakeCatalogVersionProvider(new CatalogVersion(1, 1));
+        var options = new Autheris.Domain.Options.GraphQLOptions
+        {
+            SchemaPartitioning = Autheris.Domain.Options.GraphQlSchemaPartitioningMode.ByPermissionTier,
+            PartitionAllowedDomains = ["domain_00"]
+        };
+
+        using var module = new CatalogGraphQlTypeModule(
+            meta,
+            rel,
+            versionProvider: versionProvider,
+            graphQlOptions: options);
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var resolver = CreateExecutorProvider(module);
+        var executor = await resolver.GetExecutorAsync();
+        sw.Stop();
+
+        sw.Elapsed.ShouldBeLessThan(TimeSpan.FromMinutes(1));
+        executor.Schema.Types.ContainsName("domain_00_public_t_00000").ShouldBeTrue();
+        executor.Schema.Types.ContainsName("domain_01_public_t_00001").ShouldBeFalse();
+        module.LastBuildRecipeRebuildCount.ShouldBe(totalTables / domainCount);
+
+        // Add 1 table in domain_00 -> only 1 table's recipe is rebuilt.
+        var added = new TableMetadata
+        {
+            Identifier = new TableIdentifier("domain_00", "public", "t_added"),
+            Table = new Table
+            {
+                SourceName = "pg_main",
+                SourceType = "PostgreSql",
+                SchemaName = "public",
+                TableName = "t_added",
+                IsActive = true
+            },
+            Columns = [new TableColumn { ColumnName = "id", DataType = "integer" }],
+            PrimaryKeyColumns = ["id"]
+        };
+        tables.Add(added);
+        meta.SetTables(tables);
+        versionProvider.Current = new CatalogVersion(2, 1);
+
+        (await module.CheckForCatalogChangesAsync()).ShouldBeTrue();
+        var rebuilt = await WaitForExecutorConditionAsync(
+            resolver,
+            e => e.Schema.Types.ContainsName("domain_00_public_t_added"));
+
+        rebuilt.Schema.Types.ContainsName("domain_00_public_t_added").ShouldBeTrue();
+        module.LastBuildRecipeRebuildCount.ShouldBe(1);
+    }
+
+    [Fact]
     public async Task StartupBuild_LogsProgress()
     {
         var fakeTime = new FakeTimeProvider(new DateTimeOffset(2026, 11, 15, 12, 0, 0, TimeSpan.Zero));

@@ -30,12 +30,8 @@ AuthPluginOptions,Enabled,true,True,keep opt-in,SEC-SIMPL-32 security-named auth
 AppScopedTrustedDocumentsOptions,Enabled,,False,keep opt-in,SEC-SIMPL-32 / R13 trusted documents security control,PR 4,src/Autheris.Domain/Options/Protocols/AppScopedTrustedDocumentsOptions.cs
 CustomQueryPollerOptions,Enabled,false,False,keep opt-in,R13 default-off opt-in switch of kept feature,PR 5,src/Autheris.Domain/Options/Protocols/CustomQueryPollerOptions.cs
 SoftDeleteDefinition,Enabled,true,False,unconditional,Default-on soft-delete behavior; remove flag and make unconditional,PR 5,src/Autheris.Domain/Options/Protocols/CustomQueryPollerOptions.cs
-GoldenQueryOptions,Enabled,true,False,unconditional,Default-on golden query support; remove flag and make unconditional,PR 4,src/Autheris.Domain/Options/Protocols/GraphQlOptions.cs
-GraphQLAggregationOptions,Enabled,true,False,unconditional,Default-on GraphQL aggregation; remove flag and make unconditional,PR 4,src/Autheris.Domain/Options/Protocols/GraphQlOptions.cs
-GraphQLMetricsOptions,Enabled,true,False,unconditional,Default-on GraphQL metrics; remove flag and make unconditional,PR 4,src/Autheris.Domain/Options/Protocols/GraphQlOptions.cs
 GraphQLSlowListReportOptions,Enabled,false,False,keep opt-in,R13 default-off opt-in switch of kept feature,PR 4,src/Autheris.Domain/Options/Protocols/GraphQlOptions.cs
 GraphQLSubscriptionOptions,Enabled,false,False,keep opt-in,R13 default-off opt-in switch of kept feature,PR 4,src/Autheris.Domain/Options/Protocols/GraphQlOptions.cs
-IncrementalDeliveryOptions,Enabled,true,False,unconditional,Default-on incremental delivery; remove flag and make unconditional,PR 4,src/Autheris.Domain/Options/Protocols/GraphQlOptions.cs
 McpOptions,Enabled,false,False,keep opt-in,R13 default-off opt-in switch of kept feature,PR 4,src/Autheris.Domain/Options/Protocols/McpOptions.cs
 ArrowExportOptions,Enabled,true,False,unconditional,Default-on Arrow export; remove flag and make unconditional,PR 4,src/Autheris.Domain/Options/Protocols/ODataOptions.cs
 ODataOptions,Enabled,true,False,keep opt-in,Operational kill switch for OData protocol (A7.3),PR 4,src/Autheris.Domain/Options/Protocols/ODataOptions.cs
@@ -43,16 +39,12 @@ ParquetEgressOptions,Enabled,true,False,unconditional,Default-on Parquet egress;
 CoLocationOptions,Enabled,false,False,keep opt-in,R13 default-off opt-in switch of kept feature,PR 4,src/Autheris.Domain/Options/Protocols/RestApiOptions.cs
 CrossSourceOptions,AllowNonEquiJoins,false,False,keep opt-in,SEC-SIMPL-32 default-off non-equi join guard,PR 4,src/Autheris.Domain/Options/Protocols/RestApiOptions.cs
 CrossSourceOptions,Enabled,false,False,keep opt-in,R13 default-off opt-in switch of kept feature,PR 4,src/Autheris.Domain/Options/Protocols/RestApiOptions.cs
-DynamicKeySetOptions,Enabled,true,False,unconditional,Default-on dynamic keyset paging; remove flag and make unconditional,PR 4,src/Autheris.Domain/Options/Protocols/RestApiOptions.cs
-PredicatePushdownOptions,Enabled,true,False,unconditional,Default-on predicate pushdown; remove flag and make unconditional,PR 4,src/Autheris.Domain/Options/Protocols/RestApiOptions.cs
 ProcedureEndpointsOptions,Enabled,false,False,keep opt-in,OD-18 / WP-SIMPL-39 / R13 opt-in switch of kept feature,PR 4,src/Autheris.Domain/Options/Protocols/RestApiOptions.cs
 RestDataEndpointOptions,Enabled,true,False,keep opt-in,SEC-115 / A7.3 operational kill switch,PR 4,src/Autheris.Domain/Options/Protocols/RestApiOptions.cs
 SqlEndpointsOptions,Enabled,true,False,keep opt-in,A7.3 operational kill switch for SQL endpoints,PR 4,src/Autheris.Domain/Options/Protocols/RestApiOptions.cs
-WebSqlCostOptions,Enabled,true,False,unconditional,Default-on WebSql cost estimation; remove flag and make unconditional,PR 4,src/Autheris.Domain/Options/Protocols/RestApiOptions.cs
 WebSqlOptions,AllowDml,false,False,keep opt-in,OD-3 / OD-26 / R13 default-off write switch,PR 4,src/Autheris.Domain/Options/Protocols/RestApiOptions.cs
 WebSqlOptions,AllowRecursiveCte,false,False,keep opt-in,SEC-SIMPL-32 default-off recursive CTE guard,PR 4,src/Autheris.Domain/Options/Protocols/RestApiOptions.cs
 WebSqlOptions,Enabled,false,False,keep opt-in,R13 / WP-SIMPL-38 default-off opt-in switch,PR 4,src/Autheris.Domain/Options/Protocols/RestApiOptions.cs
-WebSqlPagingOptions,Enabled,true,False,unconditional,Default-on WebSql paging; remove flag and make unconditional,PR 4,src/Autheris.Domain/Options/Protocols/RestApiOptions.cs
 MssqlChangeTrackingOptions,AllowNonSnapshotRead,false,False,module,CDC module option; moves with StreamingCdcOptions in PR 6,PR 6,src/Autheris.Domain/Options/Protocols/StreamingCdcOptions.cs
 MssqlChangeTrackingOptions,Enabled,false,False,module,CDC module option; module presence replaces flag in PR 6,PR 6,src/Autheris.Domain/Options/Protocols/StreamingCdcOptions.cs
 PostgreSqlCdcOptions,Enabled,false,False,module,CDC module option; module presence replaces flag in PR 6,PR 6,src/Autheris.Domain/Options/Protocols/StreamingCdcOptions.cs
@@ -83,7 +75,6 @@ EpochValidationOptions,PipelinedMGetEnabled,true,False,keep opt-in,SEC-SIMPL-32 
 RedisOptions,Enabled,false,False,keep opt-in,R13 default-off opt-in switch of kept feature,PR 5,src/Autheris.Domain/Options/Storage/RedisOptions.cs
 TableCacheEncryptionOptions,Enabled,true,False,keep opt-in,SEC-SIMPL-32 table cache encryption control,PR 5,src/Autheris.Domain/Options/TableCache/TableCacheEncryptionOptions.cs
 TableCacheOptions,Enabled,false,False,keep opt-in,R13 default-off opt-in switch of kept feature,PR 5,src/Autheris.Domain/Options/TableCache/TableCacheOptions.cs
-AsyncJobOptions,Enabled,true,False,unconditional,Default-on async jobs; remove flag and make unconditional,PR 3,src/Autheris.Domain/Options/Tenancy/MultiTenancyOptions.cs
 SchemaContractsOptions,Enabled,false,False,keep opt-in,R13 default-off opt-in switch of kept feature,PR 3,src/Autheris.Domain/Options/Tenancy/MultiTenancyOptions.cs
 TenantRegistryOptions,Enabled,true,False,keep opt-in,SEC-SIMPL-32 tenant registry security control,PR 3,src/Autheris.Domain/Options/Tenancy/MultiTenancyOptions.cs
 VirtualFilterFederationOptions,PushdownEnabled,true,False,unconditional,Default-on virtual filter pushdown; remove flag and make unconditional,PR 5,src/Autheris.Domain/Options/VirtualFilterFederationOptions.cs

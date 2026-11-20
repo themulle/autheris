@@ -5,7 +5,10 @@ namespace Autheris.Domain.Options;
 /// <summary>REST read-path switches (startup only; a restart is required).</summary>
 public sealed class RestApiOptions
 {
+    /// <summary>REST data endpoint kill-switch settings (<c>Gateway:RestApi:DataEndpoint</c>).</summary>
     public RestDataEndpointOptions DataEndpoint { get; init; } = new();
+
+    /// <summary>Bulk keyset streaming endpoint settings (<c>Gateway:RestApi:BulkStream</c>).</summary>
     public BulkStreamOptions BulkStream { get; init; } = new();
 }
 
@@ -15,6 +18,7 @@ public sealed class RestApiOptions
 /// </summary>
 public sealed class RestDataEndpointOptions
 {
+    /// <summary>Enables the REST data endpoint family.</summary>
     public bool Enabled { get; init; } = true;
 }
 
@@ -23,6 +27,7 @@ public sealed class RestDataEndpointOptions
 /// </summary>
 public sealed class BulkStreamOptions
 {
+    /// <summary>Enables bulk keyset streaming endpoints (null inherits <see cref="RestDataEndpointOptions.Enabled"/>).</summary>
     public bool? Enabled { get; init; }
 
     /// <summary>
@@ -34,18 +39,38 @@ public sealed class BulkStreamOptions
     public string? SigningKey { get; init; }
 }
 
+/// <summary>Governed WebSQL REST execution, DML, cost, and paging options (<c>Gateway:WebSql</c>).</summary>
 public sealed class WebSqlOptions
 {
     // SEC C-01/C-03: WebSQL is opt-in (secure default).
+    /// <summary>Enables the governed WebSQL REST endpoints.</summary>
     public bool Enabled { get; init; } = false;
+
+    /// <summary>Enables governed DML write statements (INSERT/UPDATE/DELETE) through WebSQL.</summary>
     public bool AllowDml { get; init; } = false;
+
+    /// <summary>Default row limit applied when a WebSQL query omits an explicit limit.</summary>
     public long DefaultMaxRows { get; init; } = 1000;
+
+    /// <summary>Hard upper bound on rows returned by a single WebSQL query.</summary>
     public long MaxAllowedRows { get; init; } = 10000;
+
+    /// <summary>Maximum permitted SQL statement length in characters.</summary>
     public int MaxQueryLength { get; init; } = 64_000;
+
+    /// <summary>Default execution timeout in seconds for WebSQL statements.</summary>
     public int ExecutionTimeoutSeconds { get; init; } = 30;
+
+    /// <summary>Default data source connection key targeted when no explicit data source is specified.</summary>
     public string DefaultDataSourceName { get; init; } = "default";
+
+    /// <summary>Maximum concurrent prepared statement sessions permitted per caller identity.</summary>
     public int MaxConcurrentSessionsPerUser { get; init; } = 10;
+
+    /// <summary>Maximum total prepared statement sessions held across all callers.</summary>
     public int MaxTotalStatementSessions { get; init; } = 1000;
+
+    /// <summary>Retention window in minutes for prepared WebSQL statement sessions.</summary>
     public int StatementRetentionMinutes { get; init; } = 5;
 
     /// <summary>
@@ -129,46 +154,54 @@ public sealed class WebSqlOptions
     public WebSqlPagingOptions Paging { get; init; } = new();
 }
 
+/// <summary>HMAC-bound statement paging options for WebSQL statements (<c>Gateway:WebSql:Paging</c>).</summary>
 public sealed class WebSqlPagingOptions
 {
     public const string SectionName = "Paging";
 
-    public bool Enabled { get; init; } = true;
-
+    /// <summary>Maximum permitted OFFSET value for offset-based WebSQL paging.</summary>
     [Range(0, 1_000_000)]
     public long MaxOffset { get; init; } = 10_000;
 
+    /// <summary>Lifetime in minutes for signed WebSQL page tokens.</summary>
     [Range(1, 1440)]
     public int TokenLifetimeMinutes { get; init; } = 15;
 }
 
+/// <summary>Cost estimation, quota admission and settlement options for WebSQL statements (<c>Gateway:WebSql:Cost</c>).</summary>
 public sealed class WebSqlCostOptions
 {
     public const string SectionName = "Cost";
 
-    public bool Enabled { get; init; } = true;
-
+    /// <summary>Maximum estimated cost permitted for a single WebSQL statement.</summary>
     [Range(1, 1_000_000)]
     public int MaxStatementCost { get; init; } = 2000;
 
+    /// <summary>Cost weight added per cross join in a WebSQL statement.</summary>
     [Range(0, 100_000)]
     public int CrossJoinCost { get; init; } = 250;
 
+    /// <summary>Cost weight added per set operation (UNION/INTERSECT/EXCEPT) in a WebSQL statement.</summary>
     [Range(0, 10_000)]
     public int SetOperationCost { get; init; } = 25;
 
+    /// <summary>Number of OFFSET rows corresponding to one cost unit.</summary>
     [Range(1, 1_000_000)]
     public int OffsetRowsPerCostUnit { get; init; } = 100;
 
+    /// <summary>Cost weight charged per second of actual statement execution.</summary>
     [Range(0, 10_000)]
     public int ExecutionSecondCost { get; init; } = 10;
 
+    /// <summary>Base cost weight charged for a WebSQL DML statement.</summary>
     [Range(0, 100_000)]
     public int DmlStatementCost { get; init; } = 50;
 }
 
+/// <summary>Heterogeneous cross-source federation options (<c>Gateway:WebSql:CrossSource</c>).</summary>
 public sealed class CrossSourceOptions
 {
+    /// <summary>Enables cross-source federated query execution.</summary>
     public bool Enabled { get; init; } = false;
     /// <summary>
     /// Transport opt-in for federated (cross-source) queries. Valid names are the constants of <c>SqlTransports</c>:
@@ -184,11 +217,22 @@ public sealed class CrossSourceOptions
 
     /// <summary>Configured <see cref="AllowedTransports"/> or the default list (WebSql, Trino).</summary>
     public IReadOnlyList<string> GetEffectiveAllowedTransports() => AllowedTransports ?? (IReadOnlyList<string>)DefaultAllowedTransports;
+    /// <summary>Maximum number of tables allowed in a single cross-source federated query.</summary>
     public int MaxTableCount { get; init; } = 5;
+
+    /// <summary>Maximum number of rows staged per source table in a cross-source query.</summary>
     public int MaxStagedRowsPerTable { get; init; } = 50000;
+
+    /// <summary>Maximum total rows staged across all tables in a cross-source query.</summary>
     public int MaxTotalStagedRows { get; init; } = 200000;
+
+    /// <summary>Maximum bytes staged per source table in a cross-source query.</summary>
     public long MaxStagedBytesPerTable { get; init; } = 32 * 1024 * 1024;
+
+    /// <summary>Maximum total bytes staged across all tables in a cross-source query.</summary>
     public long MaxTotalStagedBytes { get; init; } = 128 * 1024 * 1024;
+
+    /// <summary>Execution timeout in seconds for cross-source federated queries.</summary>
     public int TimeoutSeconds { get; init; } = 30;
 
     /// <summary>
@@ -201,6 +245,7 @@ public sealed class CrossSourceOptions
     /// DuckDB memory and spill limits are configured with <c>Gateway:DuckDbOlap:MaxMemory</c> and <c>MaxTempDirectorySize</c>.
     /// </summary>
     public int MaxParallelSourceReads { get; init; } = 4;
+    /// <summary>Allows non-equi joins in cross-source federated queries (default false).</summary>
     public bool AllowNonEquiJoins { get; init; } = false;
 
     /// <summary>
@@ -229,29 +274,43 @@ public sealed class CrossSourceOptions
     public CoLocationOptions CoLocation { get; init; } = new();
 }
 
+/// <summary>Dynamic key-set filter options for cross-source WebSQL joins.</summary>
 public sealed class DynamicKeySetOptions
 {
-    public bool Enabled { get; init; } = true;
+    /// <summary>Maximum number of distinct keys extracted for a dynamic key-set join filter.</summary>
     public int MaxKeySetKeys { get; init; } = 2000;
+
+    /// <summary>Maximum number of key-set batches issued against a driven source table.</summary>
     public int MaxKeySetBatches { get; init; } = 10;
+
+    /// <summary>Maximum number of keys included in a single key-set batch.</summary>
     public int MaxKeySetBatchSize { get; init; } = 500;
 }
 
+/// <summary>Co-located SQL Server data source execution options.</summary>
 public sealed class CoLocationOptions
 {
+    /// <summary>Enables co-located execution for eligible same-server SQL data sources.</summary>
     public bool Enabled { get; init; } = false;
 }
 
+/// <summary>Remote relational SQL filter pushdown options.</summary>
 public sealed class PredicatePushdownOptions
 {
-    public bool Enabled { get; init; } = true;
+    /// <summary>Maximum number of literals permitted in a pushed-down IN list predicate.</summary>
     public int MaxInListCount { get; init; } = 1000;
 }
 
+/// <summary>File-backed governed SQL endpoint options (<c>Gateway:SqlEndpoints</c>).</summary>
 public sealed class SqlEndpointsOptions
 {
+    /// <summary>Enables file-backed governed SQL endpoints.</summary>
     public bool Enabled { get; init; } = true;
+
+    /// <summary>Directory scanned for governed SQL endpoint definition files.</summary>
     public string Directory { get; init; } = "queries";
+
+    /// <summary>Enables automatic hot-reload when SQL endpoint files change on disk.</summary>
     public bool EnableHotReload { get; init; } = true;
 
     /// <summary>
@@ -271,6 +330,7 @@ public sealed class SqlEndpointsOptions
 /// </summary>
 public sealed class ProcedureEndpointsOptions
 {
+    /// <summary>Enables governed stored procedure endpoints.</summary>
     public bool Enabled { get; init; } = false;
 
     /// <summary>Directory containing <c>*.proc.yaml</c> and <c>*.proc.yml</c> declaration files.</summary>

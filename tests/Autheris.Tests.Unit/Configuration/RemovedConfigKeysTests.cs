@@ -85,6 +85,9 @@ public sealed class RemovedConfigKeysTests
     [InlineData("Analytics:Aggregation:Enabled", "true")]
     [InlineData("Analytics:Aggregation:Enabled", "false")]
     [InlineData("Analytics:Aggregation:Enabled", "")]
+    [InlineData("Gateway:AsyncJobs:Enabled", "true")]
+    [InlineData("Gateway:AsyncJobs:Enabled", "false")]
+    [InlineData("Gateway:AsyncJobs:Enabled", "")]
     [InlineData("Gateway:RowFilters:KeySetCache", "true")]
     [InlineData("Gateway:RowFilters:KeySetCache", "false")]
     [InlineData("Gateway:RowFilters:KeySetCache", "")]
@@ -94,6 +97,30 @@ public sealed class RemovedConfigKeysTests
     [InlineData("Gateway:DataSources:Connections:default:KeySetCacheAllowed", "false")]
     [InlineData("Gateway:SqlEndpoints:MaxQueryTimeoutSeconds", "60")]
     [InlineData("Gateway:SqlEndpoints:MaxQueryTimeoutSeconds", "")]
+    [InlineData("Gateway:GraphQL:Aggregation:Enabled", "true")]
+    [InlineData("Gateway:GraphQL:Aggregation:Enabled", "false")]
+    [InlineData("Gateway:GraphQL:Aggregation:Enabled", "")]
+    [InlineData("Gateway:GraphQL:Metrics:Enabled", "true")]
+    [InlineData("Gateway:GraphQL:Metrics:Enabled", "false")]
+    [InlineData("Gateway:GraphQL:Metrics:Enabled", "")]
+    [InlineData("Gateway:IncrementalDelivery:Enabled", "true")]
+    [InlineData("Gateway:IncrementalDelivery:Enabled", "false")]
+    [InlineData("Gateway:IncrementalDelivery:Enabled", "")]
+    [InlineData("Gateway:GoldenQueries:Enabled", "true")]
+    [InlineData("Gateway:GoldenQueries:Enabled", "false")]
+    [InlineData("Gateway:GoldenQueries:Enabled", "")]
+    [InlineData("Gateway:WebSql:Paging:Enabled", "true")]
+    [InlineData("Gateway:WebSql:Paging:Enabled", "false")]
+    [InlineData("Gateway:WebSql:Paging:Enabled", "")]
+    [InlineData("Gateway:WebSql:Cost:Enabled", "true")]
+    [InlineData("Gateway:WebSql:Cost:Enabled", "false")]
+    [InlineData("Gateway:WebSql:Cost:Enabled", "")]
+    [InlineData("Gateway:WebSql:CrossSource:DynamicKeySet:Enabled", "true")]
+    [InlineData("Gateway:WebSql:CrossSource:DynamicKeySet:Enabled", "false")]
+    [InlineData("Gateway:WebSql:CrossSource:DynamicKeySet:Enabled", "")]
+    [InlineData("Gateway:WebSql:CrossSource:PredicatePushdown:Enabled", "true")]
+    [InlineData("Gateway:WebSql:CrossSource:PredicatePushdown:Enabled", "false")]
+    [InlineData("Gateway:WebSql:CrossSource:PredicatePushdown:Enabled", "")]
     public void Every_removed_key_fails_startup(string key, string value)
     {
         var configuration = Config(key, value);
@@ -320,5 +347,48 @@ public sealed class RemovedConfigKeysTests
         var configuration = Config(key, value);
         var ex = Should.Throw<InvalidOperationException>(() => UnknownGatewayKeyGuard.ThrowIfUnknownKeys(configuration));
         ex.Message.ShouldContain("Analytics:Aggregation:Enabled (removed;");
+    }
+
+    [Theory]
+    [InlineData("true")]
+    [InlineData("false")]
+    [InlineData("")]
+    public void Removed_async_jobs_switch_fails_with_replacement_message_for_any_value(string value)
+    {
+        var configuration = Config("Gateway:AsyncJobs:Enabled", value);
+        var ex = Should.Throw<InvalidOperationException>(() => UnknownGatewayKeyGuard.ThrowIfUnknownKeys(configuration));
+        ex.Message.ShouldContain("AsyncJobs:Enabled (removed;");
+    }
+
+    [Theory]
+    [InlineData("Gateway:GraphQL:Aggregation:Enabled", "true", "GraphQL:Aggregation:Enabled (removed;")]
+    [InlineData("Gateway:GraphQL:Aggregation:Enabled", "false", "GraphQL:Aggregation:Enabled (removed;")]
+    [InlineData("Gateway:GraphQL:Aggregation:Enabled", "", "GraphQL:Aggregation:Enabled (removed;")]
+    [InlineData("Gateway:GraphQL:Metrics:Enabled", "true", "GraphQL:Metrics:Enabled (removed;")]
+    [InlineData("Gateway:GraphQL:Metrics:Enabled", "false", "GraphQL:Metrics:Enabled (removed;")]
+    [InlineData("Gateway:GraphQL:Metrics:Enabled", "", "GraphQL:Metrics:Enabled (removed;")]
+    [InlineData("Gateway:IncrementalDelivery:Enabled", "true", "IncrementalDelivery:Enabled (removed;")]
+    [InlineData("Gateway:IncrementalDelivery:Enabled", "false", "IncrementalDelivery:Enabled (removed;")]
+    [InlineData("Gateway:IncrementalDelivery:Enabled", "", "IncrementalDelivery:Enabled (removed;")]
+    [InlineData("Gateway:GoldenQueries:Enabled", "true", "GoldenQueries:Enabled (removed;")]
+    [InlineData("Gateway:GoldenQueries:Enabled", "false", "GoldenQueries:Enabled (removed;")]
+    [InlineData("Gateway:GoldenQueries:Enabled", "", "GoldenQueries:Enabled (removed;")]
+    [InlineData("Gateway:WebSql:Paging:Enabled", "true", "WebSql:Paging:Enabled (removed;")]
+    [InlineData("Gateway:WebSql:Paging:Enabled", "false", "WebSql:Paging:Enabled (removed;")]
+    [InlineData("Gateway:WebSql:Paging:Enabled", "", "WebSql:Paging:Enabled (removed;")]
+    [InlineData("Gateway:WebSql:Cost:Enabled", "true", "WebSql:Cost:Enabled (removed;")]
+    [InlineData("Gateway:WebSql:Cost:Enabled", "false", "WebSql:Cost:Enabled (removed;")]
+    [InlineData("Gateway:WebSql:Cost:Enabled", "", "WebSql:Cost:Enabled (removed;")]
+    [InlineData("Gateway:WebSql:CrossSource:DynamicKeySet:Enabled", "true", "WebSql:CrossSource:DynamicKeySet:Enabled (removed;")]
+    [InlineData("Gateway:WebSql:CrossSource:DynamicKeySet:Enabled", "false", "WebSql:CrossSource:DynamicKeySet:Enabled (removed;")]
+    [InlineData("Gateway:WebSql:CrossSource:DynamicKeySet:Enabled", "", "WebSql:CrossSource:DynamicKeySet:Enabled (removed;")]
+    [InlineData("Gateway:WebSql:CrossSource:PredicatePushdown:Enabled", "true", "WebSql:CrossSource:PredicatePushdown:Enabled (removed;")]
+    [InlineData("Gateway:WebSql:CrossSource:PredicatePushdown:Enabled", "false", "WebSql:CrossSource:PredicatePushdown:Enabled (removed;")]
+    [InlineData("Gateway:WebSql:CrossSource:PredicatePushdown:Enabled", "", "WebSql:CrossSource:PredicatePushdown:Enabled (removed;")]
+    public void Removed_query_sql_switches_fail_with_replacement_message_for_any_value(string key, string value, string expectedMessage)
+    {
+        var configuration = Config(key, value);
+        var ex = Should.Throw<InvalidOperationException>(() => UnknownGatewayKeyGuard.ThrowIfUnknownKeys(configuration));
+        ex.Message.ShouldContain(expectedMessage);
     }
 }

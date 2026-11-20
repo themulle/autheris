@@ -20,10 +20,7 @@ public sealed class ReadPathInventoryTests
     [Fact]
     public void GraphqlAggregate_flag_follows_the_option_SEC_112_10()
     {
-        var off = new GatewayOptions { GraphQL = new GraphQLOptions { Aggregation = new GraphQLAggregationOptions { Enabled = false } } };
-
-        ReadPathInventory.Describe(off).ShouldContain("graphql=on graphql_aggregate=off rest_data=");
-        ReadPathInventory.Describe(new GatewayOptions()).ShouldContain("graphql_aggregate=on");
+        ReadPathInventory.Describe(new GatewayOptions()).ShouldContain("graphql=on graphql_aggregate=on rest_data=");
     }
 
     [Fact]

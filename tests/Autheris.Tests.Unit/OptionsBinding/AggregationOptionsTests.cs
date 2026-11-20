@@ -15,7 +15,6 @@ public sealed class AggregationOptionsTests
     {
         var o = new GraphQLOptions().Aggregation;
 
-        o.Enabled.ShouldBeTrue();
         o.MaxFieldsPerOperation.ShouldBe(3);
     }
 
@@ -24,13 +23,11 @@ public sealed class AggregationOptionsTests
     {
         var cfg = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
-            ["Gateway:GraphQL:Aggregation:Enabled"] = "false",
             ["Gateway:GraphQL:Aggregation:MaxFieldsPerOperation"] = "7"
         }).Build();
         var gateway = new GatewayOptions();
         cfg.GetSection("Gateway").Bind(gateway);
 
-        gateway.GraphQL.Aggregation.Enabled.ShouldBeFalse();
         gateway.GraphQL.Aggregation.MaxFieldsPerOperation.ShouldBe(7);
     }
 

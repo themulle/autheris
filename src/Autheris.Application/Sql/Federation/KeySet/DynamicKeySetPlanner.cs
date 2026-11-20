@@ -42,7 +42,7 @@ public static class DynamicKeySetPlanner
         ArgumentNullException.ThrowIfNull(decisions);
         ArgumentNullException.ThrowIfNull(options);
 
-        if (statement == null || tables.Count < 2 || options.DynamicKeySet?.Enabled == false)
+        if (statement == null || tables.Count < 2)
         {
             return Array.Empty<KeySetJoinPlan>();
         }

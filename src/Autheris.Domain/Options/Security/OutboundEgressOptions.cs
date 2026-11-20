@@ -38,8 +38,10 @@ public sealed class OutboundEgressOptions
     public IReadOnlyList<string> GetEffectiveTrustedIntegrations() => TrustedIntegrations ?? (IReadOnlyList<string>)DefaultTrustedIntegrations;
 }
 
+/// <summary>ASP.NET Core forwarded headers middleware settings (<c>Gateway:ReverseProxy</c>).</summary>
 public sealed class ReverseProxyOptions
 {
+    /// <summary>Enables processing of <c>X-Forwarded-*</c> headers from trusted reverse proxies.</summary>
     public bool Enabled { get; init; } = true;
 
     /// <summary>
@@ -56,6 +58,7 @@ public sealed class ReverseProxyOptions
     /// <summary>Configured <see cref="KnownNetworks"/> or the loopback default.</summary>
     public IReadOnlyList<string> GetEffectiveKnownNetworks() => KnownNetworks ?? (IReadOnlyList<string>)DefaultKnownNetworks;
 
+    /// <summary>IP addresses of trusted reverse proxies permitted to supply forwarded headers.</summary>
     public List<string> KnownProxies { get; init; } = [];
 }
 
