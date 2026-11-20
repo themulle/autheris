@@ -113,7 +113,10 @@ public sealed class McpSdkTransportTests : IClassFixture<McpSdkTransportTests.Fi
         names.ShouldContain("list_datasets");
         names.ShouldContain("describe_dataset");
         names.ShouldContain("sample_rows");
-        tools.Single(t => t.Name == "describe_dataset").JsonSchema.GetProperty("required")[0].GetString().ShouldBe("dataset");
+        tools.Single(t => t.Name == "sample_rows").JsonSchema.GetProperty("required")[0].GetString().ShouldBe("dataset");
+        var describeProps = tools.Single(t => t.Name == "describe_dataset").JsonSchema.GetProperty("properties");
+        describeProps.TryGetProperty("dataset", out _).ShouldBeTrue();
+        describeProps.TryGetProperty("graphQlField", out _).ShouldBeTrue();
 
         // Issue #706: every tool reaches a standard client with its behaviour hints.
         tools.ShouldAllBe(t => t.ProtocolTool.Annotations != null && t.ProtocolTool.Annotations.ReadOnlyHint != null);

@@ -267,9 +267,59 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
             return new McpToolCallResult(IsSuccess: !isError, ContentJson: scrubbedDocJson, ErrorMessage: isError ? scrubbedDocJson : null, EstimatedTokens: docTokens, IsMasked: docWasMasked, TruncatedDueToBudget: docTruncated);
         }
 
+        if (string.Equals(tool.Name, McpDatasetTools.SampleRows, StringComparison.OrdinalIgnoreCase))
+        {
+            if (!McpDatasetTools.TryGetStringArgument(request.ArgumentsJson, "dataset", out var dsArg) || string.IsNullOrWhiteSpace(dsArg))
+            {
+                return new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: $"Missing or invalid required argument 'dataset' for tool '{tool.Name}'.");
+            }
+        }
+
         string? sqlSyntaxError = null;
         IReadOnlyList<TableIdentifier>? resolvedTables;
-        if (string.Equals(tool.Name, McpDatasetTools.QueryGraphQl, StringComparison.OrdinalIgnoreCase))
+        bool unresolvedDescribeGraphQlField = false;
+        if (string.Equals(tool.Name, McpDatasetTools.DescribeDataset, StringComparison.OrdinalIgnoreCase))
+        {
+            bool hasDataset = McpDatasetTools.TryGetStringArgument(request.ArgumentsJson, "dataset", out var dsArg) && !string.IsNullOrWhiteSpace(dsArg);
+            bool hasGraphQlField = McpDatasetTools.TryGetStringArgument(request.ArgumentsJson, "graphQlField", out var gqlArg) && !string.IsNullOrWhiteSpace(gqlArg);
+            if (hasDataset && hasGraphQlField)
+            {
+                return new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: $"Invalid arguments for tool '{tool.Name}': specify either 'dataset' or 'graphQlField', not both.");
+            }
+            if (!hasDataset && !hasGraphQlField)
+            {
+                return new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: $"Missing or invalid required argument 'dataset' or 'graphQlField' for tool '{tool.Name}'.");
+            }
+
+            if (hasGraphQlField)
+            {
+                var target = _graphQlCatalogMap is null
+                    ? null
+                    : await _graphQlCatalogMap.ResolveRootFieldAsync(gqlArg!, cancellationToken).ConfigureAwait(false);
+                if (target is { } tableId)
+                {
+                    resolvedTables = [tableId];
+                }
+                else if (_options.Value.IsMcpAuthBypassed || McpDatasetTools.IsBriefRequested(request.ArgumentsJson))
+                {
+                    // Unknown and invisible GraphQL fields must behave identically on the value-free/bypassed path.
+                    resolvedTables = null;
+                    unresolvedDescribeGraphQlField = true;
+                }
+                else
+                {
+                    activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
+                    McpDiagnostics.RecordGuardrailVerdict("deny", tool.Name, false, false);
+                    await RecordAuditEventAsync(tool.Name, sessionContext, "DENY", "Access denied by access policy: DEFAULT_DENY", false, false, 0, cancellationToken).ConfigureAwait(false);
+                    return new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: $"Access denied to tool '{tool.Name}' by ABAC security policy.");
+                }
+            }
+            else
+            {
+                resolvedTables = ParseTablesFromTool(tool, request.ArgumentsJson, _sqlEngine, _options.Value.WebSql?.DefaultDataSourceName);
+            }
+        }
+        else if (string.Equals(tool.Name, McpDatasetTools.QueryGraphQl, StringComparison.OrdinalIgnoreCase))
         {
             resolvedTables = await ResolveGraphQlTablesAsync(request.ArgumentsJson, cancellationToken).ConfigureAwait(false);
         }
@@ -305,19 +355,10 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
             return new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: $"SQL_SYNTAX_ERROR: target data table could not be resolved: {sqlSyntaxError}");
         }
 
-        if (string.Equals(tool.Name, McpDatasetTools.DescribeDataset, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(tool.Name, McpDatasetTools.SampleRows, StringComparison.OrdinalIgnoreCase))
-        {
-            if (!McpDatasetTools.TryGetStringArgument(request.ArgumentsJson, "dataset", out var dsArg) || string.IsNullOrWhiteSpace(dsArg))
-            {
-                return new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: $"Missing or invalid required argument 'dataset' for tool '{tool.Name}'.");
-            }
-        }
-
         bool isSelfAccessTool = string.Equals(tool.Name, McpDatasetTools.DescribeMyAccess, StringComparison.OrdinalIgnoreCase) ||
                                 string.Equals(tool.Name, McpDatasetTools.GetMyPermissions, StringComparison.OrdinalIgnoreCase);
 
-        if (resolvedTables == null && !isSelfAccessTool &&
+        if (resolvedTables == null && !isSelfAccessTool && !unresolvedDescribeGraphQlField &&
             (tool.Name.StartsWith("query_", StringComparison.OrdinalIgnoreCase) || !string.IsNullOrWhiteSpace(tool.TargetGraphQLOperation) || McpDatasetTools.IsDatasetTool(tool.Name)))
         {
             activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
