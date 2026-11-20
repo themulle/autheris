@@ -54,6 +54,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
     private readonly ISemanticCatalogService? _semanticCatalog;
     private readonly Autheris.Application.Analytics.ISemanticMetricQueryService? _metricQueryService;
     private readonly TenantId? _catalogOwner;
+    private readonly GatewayOptions? _gatewayOptions;
     private readonly Autheris.Application.Procedures.Interfaces.IProcedureCatalog? _procedureCatalog;
     private readonly Autheris.Application.Procedures.Interfaces.IProcedureExecutionService? _procedureExecutionService;
     private readonly IGraphQlCatalogMap? _graphQlMap;
@@ -77,6 +78,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
         ILogger<McpToolExecutionHandler>? logger = null)
     {
         _catalogOwner = TenantResolver.EffectiveDefaultOf(gatewayOptions?.Value.Tenancy);
+        _gatewayOptions = gatewayOptions?.Value;
         _sqlExecutionService = sqlExecutionService ?? throw new ArgumentNullException(nameof(sqlExecutionService));
         _dataQueryService = dataQueryService ?? throw new ArgumentNullException(nameof(dataQueryService));
         _catalogDiscoveryService = catalogDiscoveryService ?? throw new ArgumentNullException(nameof(catalogDiscoveryService));
@@ -298,6 +300,9 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
             var payloadItems = results.Select(h => new
             {
                 table = McpDatasetCatalog.DatasetIdOf(h),
+                sqlName = string.Equals(h.Kind, CatalogEntryKey.KindProcedure, StringComparison.Ordinal)
+                    ? null
+                    : McpDatasetCatalog.SqlNameOf(h.TableIdentifier, _gatewayOptions),
                 domain = h.Domain,
                 display_name = DiscoveryTextSanitizer.SanitizeText(h.DisplayName, DiscoveryTextSanitizer.MaxDisplayNameRunes),
                 description = DiscoveryTextSanitizer.Summarize(h.Description),
@@ -306,6 +311,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
                 accessStatus = h.AccessStatus,
                 matched_terms = h.MatchedTerms.Select(t => DiscoveryTextSanitizer.SanitizeRequiredText(t, string.Empty, DiscoveryTextSanitizer.MaxDisplayNameRunes)).ToList(),
                 matched_columns = h.RelevantColumns,
+                columns = h.RelevantColumns.Select(c => new { name = c, sqlName = c }).ToList(),
                 join_relations = h.RelatedJoinPaths.Select(r => new
                 {
                     target_table = McpDatasetCatalog.DatasetId(r.ToTable),
