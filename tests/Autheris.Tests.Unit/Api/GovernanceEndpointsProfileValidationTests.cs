@@ -16,21 +16,6 @@ public sealed class GovernanceEndpointsProfileValidationTests
 {
     private const string Canary = "CANARY-9d2e-secret-table";
 
-    private static DefaultHttpContext AdminContext()
-    {
-        var ctx = new DefaultHttpContext { RequestServices = new ServiceCollection().BuildServiceProvider() };
-        ctx.User = new ClaimsPrincipal(new ClaimsIdentity(
-            [new Claim(ClaimTypes.PrimarySid, "S-1-ADMIN"), new Claim(ClaimTypes.NameIdentifier, "admin"), new Claim("tenant_id", "t1"),
-             new Claim(ClaimTypes.Role, "ClusterAdmin"), new Claim(ClaimTypes.Role, "GovernanceAdmin")], "Test"));
-        return ctx;
-    }
-
-    private static async Task<(int Status, string ContentType, System.Text.Json.JsonElement Json, string Body)> PostAsync(List<string> tables, IAccessProfileRepository repo)
-    {
-        var req = new BulkConsentRequest { Subject = "alice", MaskingMode = "Default", Tables = tables, ValidDays = 30, Justification = "A sufficiently long justification." };
-        return await ErrorBodyMigrationEndpointTests.ExecAsync(await GovernanceEndpoints.CreateBulkConsentAsync(req, AdminContext(), repo, default));
-    }
-
     [Fact]
     public async Task Profile_TablesEntryOver512_Returns400()
     {
@@ -61,6 +46,7 @@ public sealed class GovernanceEndpointsProfileValidationTests
         var r = await PostAsync(Enumerable.Range(0, 1001).Select(i => "s.t" + i).ToList(), repo);
 
         ErrorBodyMigrationEndpointTests.AssertGovernedProblem(r, 400, "BAD_REQUEST");
+        await repo.DidNotReceiveWithAnyArgs().UpsertProfileAsync(default!, default);
     }
 
     [Fact]
@@ -73,5 +59,20 @@ public sealed class GovernanceEndpointsProfileValidationTests
 
         over.Body.ShouldNotContain("CANARY");
         blank.Body.ShouldNotContain("CANARY");
+    }
+
+    private static DefaultHttpContext AdminContext()
+    {
+        var ctx = new DefaultHttpContext { RequestServices = new ServiceCollection().BuildServiceProvider() };
+        ctx.User = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.PrimarySid, "S-1-ADMIN"), new Claim(ClaimTypes.NameIdentifier, "admin"), new Claim("tenant_id", "t1"),
+             new Claim(ClaimTypes.Role, "ClusterAdmin"), new Claim(ClaimTypes.Role, "GovernanceAdmin")], "Test"));
+        return ctx;
+    }
+
+    private static async Task<(int Status, string ContentType, System.Text.Json.JsonElement Json, string Body)> PostAsync(List<string> tables, IAccessProfileRepository repo)
+    {
+        var req = new BulkConsentRequest { Subject = "alice", MaskingMode = "Default", Tables = tables, ValidDays = 30, Justification = "A sufficiently long justification." };
+        return await ErrorBodyMigrationEndpointTests.ExecAsync(await GovernanceEndpoints.CreateBulkConsentAsync(req, AdminContext(), repo, default));
     }
 }

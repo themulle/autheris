@@ -31,6 +31,115 @@ public sealed class AccessProfileItemsMigrationStep0031Tests
             CONSTRAINT PK_ACCESS_PROFILES PRIMARY KEY (tenant_id, profile_id))
         """;
 
+    [Theory]
+    [InlineData("postgresql")]
+    [InlineData("sqlserver")]
+    public async Task Step0031_Backfill_MapsModesAndDedupes(string engine)
+    {
+        await using var db = await OpenAsync(engine, withPreShape: true);
+        if (db is null) return;
+        await InsertProfileAsync(db, "t1", "p-unmasked", "unmasked", "[\"tem.*\",\"md.x\",\"tem.*\"]");
+        await InsertProfileAsync(db, "t1", "p-default", "Default", "[\"z.b\",\"a.b\"]");
+        await InsertProfileAsync(db, "t2", "p-strict", "STRICT", "[]");
+        await InsertProfileAsync(db, "t2", "p-default", "Strict", "[\"Case.X\",\"case.x\"]");
+
+        await RunStepAsync(db);
+
+        var c = db.Connection;
+        var levels = Table(engine, "access_profile_classification_access");
+        var items = Table(engine, "access_profile_items");
+        (await ScalarAsync(c, $"SELECT access_level FROM {levels} WHERE tenant_id = 't1' AND profile_id = 'p-unmasked' AND code = 'PII'")).ShouldBe(2);
+        (await ScalarAsync(c, $"SELECT access_level FROM {levels} WHERE tenant_id = 't1' AND profile_id = 'p-default' AND code = 'PII'")).ShouldBe(1);
+        (await ScalarAsync(c, $"SELECT access_level FROM {levels} WHERE tenant_id = 't2' AND profile_id = 'p-strict' AND code = 'PII'")).ShouldBe(0);
+        (await ScalarAsync(c, $"SELECT access_level FROM {levels} WHERE tenant_id = 't2' AND profile_id = 'p-default' AND code = 'PII'")).ShouldBe(0);
+        (await ScalarAsync(c, $"SELECT COUNT(*) FROM {items} WHERE profile_id = 'p-unmasked'")).ShouldBe(2);
+        (await ScalarAsync(c, $"SELECT item_no FROM {items} WHERE profile_id = 'p-unmasked' AND object_ref = 'md.x'")).ShouldBe(2);
+        (await ScalarAsync(c, $"SELECT item_no FROM {items} WHERE tenant_id = 't1' AND profile_id = 'p-default' AND object_ref = 'z.b'")).ShouldBe(1);
+        (await ScalarAsync(c, $"SELECT COUNT(*) FROM {items} WHERE profile_id = 'p-strict'")).ShouldBe(0);
+        (await ScalarAsync(c, $"SELECT COUNT(*) FROM {items} WHERE tenant_id = 't2' AND profile_id = 'p-default'")).ShouldBe(2);
+        (await ColumnCountAsync(db)).ShouldBe(0);
+    }
+
+    [Theory]
+    [MemberData(nameof(BadRows))]
+    public async Task Step0031_BadRow_AbortsAndLeavesColumnsIntact(string engine, string? mode, string? tables)
+    {
+        await using var db = await OpenAsync(engine, withPreShape: true);
+        if (db is null) return;
+        var bad = tables == "OVERLONG" ? "[\"" + new string('x', 513) + "\"]" : tables;
+        await InsertProfileAsync(db, "t1", "p-good", "Default", "[\"a.b\"]");
+        await InsertProfileAsync(db, "t1", "p-bad", mode, bad);
+
+        var failure = await Should.ThrowAsync<DbException>(() => RunStepAsync(db));
+
+        failure.Message.ShouldContain("MIG-0031");
+        failure.Message.ShouldContain("p-bad");
+        failure.Message.ShouldNotContain("not json");
+        failure.Message.ShouldNotContain("xxxxx");
+        (await ColumnCountAsync(db)).ShouldBe(2);
+        (await TableExistsAsync(db, "access_profile_items")).ShouldBeFalse();
+        (await TableExistsAsync(db, "access_profile_classification_access")).ShouldBeFalse();
+    }
+
+    [Theory]
+    [InlineData("postgresql")]
+    [InlineData("sqlserver")]
+    public async Task Step0031_FreshInstallMatchesShape(string engine)
+    {
+        await using var db = await OpenAsync(engine, withPreShape: false);
+        if (db is null) return;
+        var c = db.Connection;
+
+        if (engine == "postgresql")
+        {
+            (await ScalarAsync(c, "SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'access_profiles' AND column_name IN ('masking_mode', 'target_tables')")).ShouldBe(0);
+            (await ScalarAsync(c, "SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'access_profile_items' AND column_name IN ('tenant_id', 'profile_id', 'item_no', 'object_ref')")).ShouldBe(4);
+            (await ScalarAsync(c, "SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'access_profile_classification_access' AND column_name IN ('tenant_id', 'profile_id', 'code', 'access_level')")).ShouldBe(4);
+        }
+        else
+        {
+            // A fresh SQL Server database holds the frozen base plus the steps only when a runner applied them; check the step shape on the base tables.
+            await RunBaselineAndStepAsync(db);
+            (await ScalarAsync(c, "SELECT COUNT(*) FROM sys.columns WHERE object_id = OBJECT_ID(N'dbo.ACCESS_PROFILES') AND name IN (N'masking_mode', N'target_tables')")).ShouldBe(0);
+            (await ScalarAsync(c, "SELECT COUNT(*) FROM sys.columns WHERE object_id = OBJECT_ID(N'dbo.ACCESS_PROFILE_ITEMS') AND name IN (N'tenant_id', N'profile_id', N'item_no', N'object_ref')")).ShouldBe(4);
+            (await ScalarAsync(c, "SELECT COUNT(*) FROM sys.columns WHERE object_id = OBJECT_ID(N'dbo.ACCESS_PROFILE_CLASSIFICATION_ACCESS') AND name IN (N'tenant_id', N'profile_id', N'code', N'access_level')")).ShouldBe(4);
+            (await ScalarAsync(c, "SELECT COUNT(*) FROM sys.default_constraints WHERE parent_object_id = OBJECT_ID(N'dbo.ACCESS_PROFILES') AND name IN (N'DF_ACCESS_PROFILES_mode', N'DF_ACCESS_PROFILES_tables')")).ShouldBe(0);
+        }
+    }
+
+    private static readonly (string? Mode, string? Tables)[] BadCases =
+    [
+        ("Bogus", "[\"a.b\"]"),
+        ("Default", "not json"),
+        ("Default", "\"a.b\""),
+        ("Default", "[\"a.b\", 5]"),
+        ("Default", "[\"a.b\", null]"),
+        ("Default", "[\"a.b\", \"   \"]"),
+        ("Default", "OVERLONG"),
+        ("Default", "[\"a\\u0000b\"]"),
+        (null, "[\"a.b\"]"),
+        ("Default", null)
+    ];
+
+    public static TheoryData<string, string?, string?> BadRows()
+    {
+        var data = new TheoryData<string, string?, string?>();
+        foreach (var engine in new[] { "postgresql", "sqlserver" })
+        {
+            foreach (var (mode, tables) in BadCases)
+            {
+                if (engine == "sqlserver" && tables is not null && tables.Contains("u0000", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                data.Add(engine, mode, tables);
+            }
+        }
+
+        return data;
+    }
+
     private static async Task<Db?> OpenAsync(string engine, bool withPreShape)
     {
         var step = SqlMigrationStep.LoadEmbedded(engine).Single(s => s.Version == 31 && s.Name == StepName);
@@ -87,9 +196,20 @@ public sealed class AccessProfileItemsMigrationStep0031Tests
 
     private static async Task RunStepAsync(Db db)
     {
-        foreach (var batch in db.Step.Batches)
+        await using var tx = await db.Connection.BeginTransactionAsync();
+        try
         {
-            await ExecAsync(db.Connection, batch);
+            foreach (var batch in db.Step.Batches)
+            {
+                await ExecAsync(db.Connection, batch, tx);
+            }
+
+            await tx.CommitAsync();
+        }
+        catch
+        {
+            await tx.RollbackAsync();
+            throw;
         }
     }
 
@@ -97,112 +217,12 @@ public sealed class AccessProfileItemsMigrationStep0031Tests
         ? "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'pre_step' AND table_name = 'access_profiles' AND column_name IN ('masking_mode', 'target_tables')"
         : "SELECT COUNT(*) FROM sys.columns WHERE object_id = OBJECT_ID(N'dbo.ACCESS_PROFILES') AND name IN (N'masking_mode', N'target_tables')");
 
-    [Theory]
-    [InlineData("postgresql")]
-    [InlineData("sqlserver")]
-    public async Task Step0031_Backfill_MapsModesAndDedupes(string engine)
+    private static async Task<bool> TableExistsAsync(Db db, string name)
     {
-        await using var db = await OpenAsync(engine, withPreShape: true);
-        if (db is null) return;
-        await InsertProfileAsync(db, "t1", "p-unmasked", "unmasked", "[\"tem.*\",\"md.x\",\"tem.*\"]");
-        await InsertProfileAsync(db, "t1", "p-default", "Default", "[\"z.b\",\"a.b\"]");
-        await InsertProfileAsync(db, "t2", "p-strict", "STRICT", "[]");
-        await InsertProfileAsync(db, "t2", "p-default", "Strict", "[\"Case.X\",\"case.x\"]");
-
-        await RunStepAsync(db);
-
-        var c = db.Connection;
-        var levels = Table(engine, "access_profile_classification_access");
-        var items = Table(engine, "access_profile_items");
-        (await ScalarAsync(c, $"SELECT access_level FROM {levels} WHERE tenant_id = 't1' AND profile_id = 'p-unmasked' AND code = 'PII'")).ShouldBe(2);
-        (await ScalarAsync(c, $"SELECT access_level FROM {levels} WHERE tenant_id = 't1' AND profile_id = 'p-default' AND code = 'PII'")).ShouldBe(1);
-        (await ScalarAsync(c, $"SELECT access_level FROM {levels} WHERE tenant_id = 't2' AND profile_id = 'p-strict' AND code = 'PII'")).ShouldBe(0);
-        (await ScalarAsync(c, $"SELECT access_level FROM {levels} WHERE tenant_id = 't2' AND profile_id = 'p-default' AND code = 'PII'")).ShouldBe(0);
-        (await ScalarAsync(c, $"SELECT COUNT(*) FROM {items} WHERE profile_id = 'p-unmasked'")).ShouldBe(2);
-        (await ScalarAsync(c, $"SELECT item_no FROM {items} WHERE profile_id = 'p-unmasked' AND object_ref = 'md.x'")).ShouldBe(2);
-        (await ScalarAsync(c, $"SELECT item_no FROM {items} WHERE tenant_id = 't1' AND profile_id = 'p-default' AND object_ref = 'z.b'")).ShouldBe(1);
-        (await ScalarAsync(c, $"SELECT COUNT(*) FROM {items} WHERE profile_id = 'p-strict'")).ShouldBe(0);
-        (await ScalarAsync(c, $"SELECT COUNT(*) FROM {items} WHERE tenant_id = 't2' AND profile_id = 'p-default'")).ShouldBe(2);
-        (await ColumnCountAsync(db)).ShouldBe(0);
-    }
-
-    private static readonly (string? Mode, string? Tables)[] BadCases =
-    [
-        ("Bogus", "[\"a.b\"]"),
-        ("Default", "not json"),
-        ("Default", "\"a.b\""),
-        ("Default", "[\"a.b\", 5]"),
-        ("Default", "[\"a.b\", null]"),
-        ("Default", "[\"a.b\", \"   \"]"),
-        ("Default", "OVERLONG"),
-        ("Default", "[\"a\\u0000b\"]"),
-        (null, "[\"a.b\"]"),
-        ("Default", null)
-    ];
-
-    public static TheoryData<string, string?, string?> BadRows()
-    {
-        var data = new TheoryData<string, string?, string?>();
-        foreach (var engine in new[] { "postgresql", "sqlserver" })
-        {
-            foreach (var (mode, tables) in BadCases)
-            {
-                if (engine == "sqlserver" && tables is not null && tables.Contains("u0000", StringComparison.Ordinal))
-                {
-                    continue;
-                }
-
-                data.Add(engine, mode, tables);
-            }
-        }
-
-        return data;
-    }
-
-    [Theory]
-    [MemberData(nameof(BadRows))]
-    public async Task Step0031_BadRow_AbortsAndLeavesColumnsIntact(string engine, string? mode, string? tables)
-    {
-        await using var db = await OpenAsync(engine, withPreShape: true);
-        if (db is null) return;
-        var bad = tables == "OVERLONG" ? "[\"" + new string('x', 513) + "\"]" : tables;
-        await InsertProfileAsync(db, "t1", "p-good", "Default", "[\"a.b\"]");
-        await InsertProfileAsync(db, "t1", "p-bad", mode, bad);
-
-        var failure = await Should.ThrowAsync<DbException>(() => RunStepAsync(db));
-
-        failure.Message.ShouldContain("MIG-0031");
-        failure.Message.ShouldContain("p-bad");
-        failure.Message.ShouldNotContain("not json");
-        failure.Message.ShouldNotContain("xxxxx");
-        (await ColumnCountAsync(db)).ShouldBe(2);
-        (await ScalarAsync(db.Connection, $"SELECT COUNT(*) FROM {Table(engine, "access_profile_items")}")).ShouldBe(0);
-    }
-
-    [Theory]
-    [InlineData("postgresql")]
-    [InlineData("sqlserver")]
-    public async Task Step0031_FreshInstallMatchesShape(string engine)
-    {
-        await using var db = await OpenAsync(engine, withPreShape: false);
-        if (db is null) return;
-        var c = db.Connection;
-
-        if (engine == "postgresql")
-        {
-            (await ScalarAsync(c, "SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'access_profiles' AND column_name IN ('masking_mode', 'target_tables')")).ShouldBe(0);
-            (await ScalarAsync(c, "SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'access_profile_items' AND column_name IN ('tenant_id', 'profile_id', 'item_no', 'object_ref')")).ShouldBe(4);
-            (await ScalarAsync(c, "SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'access_profile_classification_access' AND column_name IN ('tenant_id', 'profile_id', 'code', 'access_level')")).ShouldBe(4);
-        }
-        else
-        {
-            // A fresh SQL Server database holds the frozen base plus the steps only when a runner applied them; check the step shape on the base tables.
-            await RunBaselineAndStepAsync(db);
-            (await ScalarAsync(c, "SELECT COUNT(*) FROM sys.columns WHERE object_id = OBJECT_ID(N'dbo.ACCESS_PROFILES') AND name IN (N'masking_mode', N'target_tables')")).ShouldBe(0);
-            (await ScalarAsync(c, "SELECT COUNT(*) FROM sys.columns WHERE object_id = OBJECT_ID(N'dbo.ACCESS_PROFILE_ITEMS') AND name IN (N'tenant_id', N'profile_id', N'item_no', N'object_ref')")).ShouldBe(4);
-            (await ScalarAsync(c, "SELECT COUNT(*) FROM sys.columns WHERE object_id = OBJECT_ID(N'dbo.ACCESS_PROFILE_CLASSIFICATION_ACCESS') AND name IN (N'tenant_id', N'profile_id', N'code', N'access_level')")).ShouldBe(4);
-            (await ScalarAsync(c, "SELECT COUNT(*) FROM sys.default_constraints WHERE parent_object_id = OBJECT_ID(N'dbo.ACCESS_PROFILES') AND name IN (N'DF_ACCESS_PROFILES_mode', N'DF_ACCESS_PROFILES_tables')")).ShouldBe(0);
-        }
+        var expr = db.Engine == "postgresql"
+            ? $"to_regclass('pre_step.{name}')"
+            : $"OBJECT_ID(N'dbo.{name.ToUpperInvariant()}', N'U')";
+        return await ScalarAsync(db.Connection, $"SELECT CASE WHEN {expr} IS NULL THEN 0 ELSE 1 END") != 0;
     }
 
     private static async Task RunBaselineAndStepAsync(Db db)
@@ -212,9 +232,10 @@ public sealed class AccessProfileItemsMigrationStep0031Tests
         await RunStepAsync(db);
     }
 
-    private static async Task ExecAsync(DbConnection conn, string sql)
+    private static async Task ExecAsync(DbConnection conn, string sql, DbTransaction? tx = null)
     {
         await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
         cmd.CommandText = sql;
         await cmd.ExecuteNonQueryAsync();
     }

@@ -13,6 +13,37 @@ namespace Autheris.Tests.Unit.Persistence;
 [Trait("Category", "Security")]
 public sealed class AccessProfileStoreSnapshotReadTests
 {
+    [Fact]
+    public async Task GetProfile_ReadsProfileLevelAndItemsInOneRepeatableReadTransaction()
+    {
+        var (store, begun, commands) = Harness(joined: false);
+
+        var profile = await store.GetProfileAsync(new TenantId("tenant-a"), "p1", default);
+
+        profile.ShouldNotBeNull();
+        profile.MaskingMode.ShouldBe(MaskingPolicyMode.Default);
+        profile.TargetTables.ShouldBe(["sales.*"]);
+        begun.ShouldBe([IsolationLevel.RepeatableRead]);
+        commands.Count.ShouldBeGreaterThanOrEqualTo(4);
+        commands.ShouldAllBe(c => c.Tx != null);
+        commands.Select(c => c.Tx).Distinct().Count().ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task GetProfilesForSubjects_ReadsJoinLevelAndItemsInOneRepeatableReadTransaction()
+    {
+        var (store, begun, commands) = Harness(joined: true);
+
+        var profiles = await store.GetProfilesForSubjectsAsync(new TenantId("tenant-a"), [], ["grp"], [], default);
+
+        profiles.Count.ShouldBe(1);
+        profiles[0].TargetTables.ShouldBe(["sales.*"]);
+        begun.ShouldBe([IsolationLevel.RepeatableRead]);
+        commands.Count.ShouldBe(3);
+        commands.ShouldAllBe(c => c.Tx != null);
+        commands.Select(c => c.Tx).Distinct().Count().ShouldBe(1);
+    }
+
     private static readonly string[] ProfileColumns = ["profile_id", "tenant_id", "name", "row_scope_json", "justification", "created_by", "created_at", "valid_to"];
 
     private static (AccessProfileStore Store, List<IsolationLevel> Begun, List<(string Sql, DbTransaction? Tx)> Commands) Harness(bool joined)
@@ -51,36 +82,5 @@ public sealed class AccessProfileStoreSnapshotReadTests
         };
         var store = new AccessProfileStore(AccessProfileDialect.PostgreSql, (_, _) => Task.FromResult(new AccessProfileStoreScope(conn, () => ValueTask.CompletedTask)));
         return (store, begun, commands);
-    }
-
-    [Fact]
-    public async Task GetProfile_ReadsProfileLevelAndItemsInOneRepeatableReadTransaction()
-    {
-        var (store, begun, commands) = Harness(joined: false);
-
-        var profile = await store.GetProfileAsync(new TenantId("tenant-a"), "p1", default);
-
-        profile.ShouldNotBeNull();
-        profile.MaskingMode.ShouldBe(MaskingPolicyMode.Default);
-        profile.TargetTables.ShouldBe(["sales.*"]);
-        begun.ShouldBe([IsolationLevel.RepeatableRead]);
-        commands.Count.ShouldBeGreaterThanOrEqualTo(4);
-        commands.ShouldAllBe(c => c.Tx != null);
-        commands.Select(c => c.Tx).Distinct().Count().ShouldBe(1);
-    }
-
-    [Fact]
-    public async Task GetProfilesForSubjects_ReadsJoinLevelAndItemsInOneRepeatableReadTransaction()
-    {
-        var (store, begun, commands) = Harness(joined: true);
-
-        var profiles = await store.GetProfilesForSubjectsAsync(new TenantId("tenant-a"), [], ["grp"], [], default);
-
-        profiles.Count.ShouldBe(1);
-        profiles[0].TargetTables.ShouldBe(["sales.*"]);
-        begun.ShouldBe([IsolationLevel.RepeatableRead]);
-        commands.Count.ShouldBe(3);
-        commands.ShouldAllBe(c => c.Tx != null);
-        commands.Select(c => c.Tx).Distinct().Count().ShouldBe(1);
     }
 }

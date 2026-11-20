@@ -10,11 +10,6 @@ public sealed class AccessProfileItems0031Tests
 {
     private const string StepName = "access_profile_items";
 
-    private static SqlMigrationStep Step(string engine) =>
-        SqlMigrationStep.LoadEmbedded(engine).Single(s => s.Version == 31 && s.Name == StepName);
-
-    private static int Index(string sql, string text) => sql.IndexOf(text, StringComparison.Ordinal);
-
     [Theory]
     [InlineData("postgresql")]
     [InlineData("sqlserver")]
@@ -120,6 +115,11 @@ public sealed class AccessProfileItems0031Tests
         concatenations.Count.ShouldBe(3);
         concatenations.ShouldAllBe(l => engine == "sqlserver" ? l.Contains("+ @first", StringComparison.Ordinal) : l.Contains("|| f.profile_id", StringComparison.Ordinal));
     }
+
+    private static SqlMigrationStep Step(string engine) =>
+        SqlMigrationStep.LoadEmbedded(engine).Single(s => s.Version == 31 && s.Name == StepName);
+
+    private static int Index(string sql, string text) => sql.IndexOf(text, StringComparison.Ordinal);
 
     private static void AbortComesBeforeBackfillAndDrop(string sql, string message)
     {

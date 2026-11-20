@@ -31,27 +31,6 @@ public abstract class AccessProfileItemsStoreIntegrationTests : IAsyncLifetime
         }
     }
 
-    private static string Id(string prefix) => prefix + "-" + Guid.NewGuid().ToString("N")[..10];
-
-    private static AccessProfile Profile(TenantId tenant, string id, MaskingPolicyMode mode, params string[] tables) => new()
-    {
-        ProfileId = id,
-        Name = id,
-        TenantId = tenant,
-        MaskingMode = mode,
-        TargetTables = [.. tables],
-        ValidTo = DateTimeOffset.UtcNow.AddDays(10),
-        CreatedBy = "admin@autheris.internal"
-    };
-
-    private async Task<long> CountAsync(string sql)
-    {
-        await using var conn = await Store.OpenConnectionAsync();
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = sql;
-        return Convert.ToInt64(await cmd.ExecuteScalarAsync());
-    }
-
     [RequiresContainerRuntimeFact]
     [Trait("Category", "Security")]
     public async Task Items_TenantA_NeverVisibleToTenantB()
@@ -150,6 +129,27 @@ public abstract class AccessProfileItemsStoreIntegrationTests : IAsyncLifetime
         var stored = (await Repo.GetProfileAsync(Store.TenantA, id))!;
         stored.TargetTables.ShouldBe(["keep.*"]);
         stored.MaskingMode.ShouldBe(MaskingPolicyMode.Default);
+    }
+
+    private static string Id(string prefix) => prefix + "-" + Guid.NewGuid().ToString("N")[..10];
+
+    private static AccessProfile Profile(TenantId tenant, string id, MaskingPolicyMode mode, params string[] tables) => new()
+    {
+        ProfileId = id,
+        Name = id,
+        TenantId = tenant,
+        MaskingMode = mode,
+        TargetTables = [.. tables],
+        ValidTo = DateTimeOffset.UtcNow.AddDays(10),
+        CreatedBy = "admin@autheris.internal"
+    };
+
+    private async Task<long> CountAsync(string sql)
+    {
+        await using var conn = await Store.OpenConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        return Convert.ToInt64(await cmd.ExecuteScalarAsync());
     }
 
     private static bool IsCompleteState(AccessProfile p) =>
