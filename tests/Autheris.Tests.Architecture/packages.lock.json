@@ -1241,6 +1241,14 @@
           "Autheris.Modules.Abstractions": "[0.0.0-dev, )"
         }
       },
+      "autheris.modules.lineage": {
+        "type": "Project",
+        "dependencies": {
+          "Autheris.Application": "[0.0.0-dev, )",
+          "Autheris.Domain": "[0.0.0-dev, )",
+          "Autheris.Modules.Abstractions": "[0.0.0-dev, )"
+        }
+      },
       "FastSqlEngine": {
         "type": "Project",
         "dependencies": {

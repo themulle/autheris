@@ -305,7 +305,12 @@ public sealed partial class ModuleBoundaryArchitectureTests
             .ToList();
         violations.ShouldBeEmpty("No module may implement IModuleRequestContext:\n" + string.Join("\n", violations));
 
-        var moduleAssemblies = new[] { typeof(Autheris.Modules.Lakehouse.LakehouseModule).Assembly };
+        var moduleAssemblies = new[]
+        {
+            typeof(Autheris.Modules.Lakehouse.LakehouseModule).Assembly,
+            typeof(Autheris.Modules.Events.EventsModule).Assembly,
+            typeof(Autheris.Modules.Lineage.LineageModule).Assembly
+        };
         moduleAssemblies
             .SelectMany(a => a.GetTypes())
             .Where(t => typeof(IModuleRequestContext).IsAssignableFrom(t))

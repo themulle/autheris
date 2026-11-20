@@ -173,8 +173,8 @@ public sealed partial class ShippedConfigurationKeysTests
             found += keys.Count;
             foreach (var key in keys.Distinct(StringComparer.OrdinalIgnoreCase))
             {
-                // The test hosts load the events module, which owns Gateway:Events (the module-aware pass accepts its keys).
-                if (UnknownGatewayKeyGuard.FindUnknownKeys(Config([key]), [GatewaySections.Events]).Count > 0)
+                // The test hosts load the events and lineage modules, which own Gateway:Events and Gateway:Lineage (the module-aware pass accepts their keys).
+                if (UnknownGatewayKeyGuard.FindUnknownKeys(Config([key]), [GatewaySections.Events, GatewaySections.Lineage]).Count > 0)
                 {
                     problems.Add($"{Path.GetRelativePath(RepositoryScan.RepoRoot, file)}: {key}");
                 }

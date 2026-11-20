@@ -11,6 +11,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Extensions.Lineage;
+using Autheris.Modules.Lineage.Domain;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -38,12 +39,9 @@ public sealed class OpenLineageClientTenantFilterTests
         var handler = new CapturingHandler();
         var store = Substitute.For<ILineageGraphStore>();
         store.GetAllNodes().Returns(nodes);
-        var options = Options.Create(new GatewayOptions
-        {
-            Tenancy = new TenancyOptions { DefaultTenantId = defaultTenant },
-            Catalog = new DataCatalogOptions { OpenLineageEndpoint = "https://openlineage.internal/api/v1/lineage" }
-        });
-        return (new OpenLineageClient(new HttpClient(handler), store, options, NullLogger<OpenLineageClient>.Instance), handler);
+        var options = Options.Create(new LineageModuleOptions { OpenLineageEndpoint = "https://openlineage.internal/api/v1/lineage" });
+        var gatewayOptions = Options.Create(new GatewayOptions { Tenancy = new TenancyOptions { DefaultTenantId = defaultTenant } });
+        return (new OpenLineageClient(new HttpClient(handler), store, options, NullLogger<OpenLineageClient>.Instance, gatewayOptions), handler);
     }
 
     private static LineageNode Node(string id, string? tenant, params string[] downstream)

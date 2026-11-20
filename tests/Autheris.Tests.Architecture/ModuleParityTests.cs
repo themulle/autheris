@@ -76,6 +76,49 @@ public sealed class ModuleParityTests
         "Autheris.Tests.Integration.Security.EventsModuleParityTests.Cdc_graphql_subscription_unchanged_without_events_module"
     ];
 
+    private static readonly string[] ExpectedLineageSecurityTests =
+    [
+        // Pre-move OpenLineage security tests migrated to Autheris.Modules.Lineage.Tests (names and namespaces unchanged)
+        "Autheris.Extensions.Tests.CapturingHandler.Push_OtherTenantNodes_AreExcluded",
+        "Autheris.Extensions.Tests.CapturingHandler.Push_UntenantedNodes_ExcludedForNonLegacyTenant",
+        "Autheris.Extensions.Tests.CapturingHandler.Push_UntenantedNodes_IncludedForLegacyTenant",
+        "Autheris.Extensions.Tests.CapturingHandler.Push_UntenantedNodes_BelongToTheConfiguredDefaultTenantOnly",
+        "Autheris.Extensions.Tests.CapturingHandler.Push_UntenantedNodes_ExcludedForEveryTenantWithoutDefaultTenant",
+        "Autheris.Extensions.Tests.CapturingHandler.Push_DownstreamReferenceToOtherTenant_DoesNotMakeNodeAnInput",
+        "Autheris.Tests.Unit.Lineage.RecordingLogger.Bearer_key_not_sent_over_http",
+        "Autheris.Tests.Unit.Lineage.RecordingLogger.Bearer_key_allowed_over_loopback_in_development",
+        "Autheris.Tests.Unit.Lineage.RecordingLogger.Endpoint_with_userinfo_rejected",
+        "Autheris.Tests.Unit.Lineage.RecordingLogger.Log_contains_no_query_string",
+        "Autheris.Tests.Unit.Lineage.RecordingLogger.Http_endpoint_refused_outside_development",
+        "Autheris.Tests.Unit.Lineage.RecordingLogger.Unset_endpoint_disables_push",
+        "Autheris.Tests.Unit.Lineage.RecordingLogger.Validation_failure_disables_client_with_one_startup_error",
+        "Autheris.Tests.Unit.Lineage.RecordingLogger.Https_endpoint_outside_development_sends_bearer_key",
+        "Autheris.Tests.Unit.Security.OpenLineageSyncTenantTests.Sync_UsesRealmBoundTenant_NotTenantIdClaim",
+        "Autheris.Tests.Unit.Security.OpenLineageSyncTenantTests.Sync_EntraTidCaller_PushesTidTenant",
+        "Autheris.Tests.Unit.Security.OpenLineageSyncTenantTests.Sync_DataOwnerOnly_Returns403",
+        "Autheris.Tests.Unit.Security.OpenLineageSyncTenantTests.Sync_MalformedTenantClaim_DoesNotReturn500",
+
+        // WP-SIMPL-29 lineage module contract, SSRF, secret redaction, and boundary tests
+        "Autheris.Modules.Lineage.Tests.LineageModuleTests.OpenLineage_client_uses_secure_outbound_handlers",
+        "Autheris.Modules.Lineage.Tests.LineageModuleTests.OpenLineage_endpoint_to_private_address_is_blocked",
+        "Autheris.Modules.Lineage.Tests.LineageModuleTests.Lineage_sync_route_requires_governance_admin_and_audits",
+        "Autheris.Modules.Lineage.Tests.LineageModuleTests.OpenLineage_api_key_not_in_logs_or_config_dump",
+        "Autheris.Modules.Lineage.Tests.LineageModuleTests.Lineage_module_loads_under_the_service_guard",
+        "Autheris.Modules.Lineage.Tests.LineageModuleTests.Lineage_module_has_no_data_source_or_governance_connection_reference",
+
+        // Host guards
+        "Autheris.Tests.Unit.Hosting.ModuleLoaderSecurityTests.Module_httpclient_without_ssrf_handler_fails_startup",
+        "Autheris.Tests.Unit.Hosting.ModuleLoaderSecurityTests.Lineage_client_chain_has_ssrf_handler_when_lineage_module_loaded",
+        "Autheris.Tests.Unit.Hosting.EventsModuleConfigGuardTests.Removed_cdc_webhooks_and_openlineage_keys_fail_with_new_path_message",
+        "Autheris.Tests.Unit.Hosting.EventsModuleConfigGuardTests.Lineage_keys_pass_the_early_pass_only_when_the_lineage_module_is_enabled",
+        "Autheris.Tests.Unit.Hosting.ModuleConfigurationTests.Lineage_section_without_lineage_module_fails_fast",
+
+        // Integration (GitHub Actions)
+        "Autheris.Tests.Integration.Modules.LineageModuleAbsentTests.Lineage_routes_return_404_without_module",
+        "Autheris.Tests.Integration.Modules.LineageModuleAbsentTests.Lineage_config_section_fails_fast_without_module",
+        "Autheris.Tests.Integration.Modules.LineageModuleAbsentTests.Gdpr_report_route_still_served_without_lineage_module"
+    ];
+
     [Fact]
     [Trait("Category", "Security")]
     public void Events_security_tests_migrated()
@@ -109,5 +152,22 @@ public sealed class ModuleParityTests
 
         var moduleTestFiles = RepositoryScan.EnumerateFiles("modules/Autheris.Modules.Lakehouse.Tests", "*.cs").ToList();
         moduleTestFiles.Count.ShouldBeGreaterThanOrEqualTo(13);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Lineage_security_tests_migrated()
+    {
+        var (_, securityTests) = TestInventoryScanner.ScanRepository();
+
+        var missing = ExpectedLineageSecurityTests
+            .Where(t => !securityTests.Contains(t))
+            .ToList();
+
+        missing.ShouldBeEmpty(
+            "Every lineage module security test must exist and carry [Trait(\"Category\", \"Security\")]:\n" +
+            string.Join("\n", missing));
+
+        RepositoryScan.EnumerateFiles("modules/Autheris.Modules.Lineage.Tests", "*.cs").ToList().Count.ShouldBeGreaterThanOrEqualTo(4);
     }
 }

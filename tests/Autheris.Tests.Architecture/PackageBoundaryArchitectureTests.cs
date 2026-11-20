@@ -220,19 +220,22 @@ public sealed class PackageBoundaryArchitectureTests
     [Fact]
     public void Core_has_no_event_delivery_or_openlineage_types()
     {
-        // The delivery surfaces live in the events module only (the OpenLineage names join this list with the lineage module).
+        // Event delivery and OpenLineage export types live in their respective modules only.
         string[] moved =
         [
             "CdcStreamAdminService", "CdcWebhookDeliveryService", "WebhookDispatcherService", "IWebhookDispatcherService",
             "WebhookDeliveryHostedService", "WebhookEventBridgeHostedService", "WebhookSubscriptionResolver", "CdcSubscriptionPrincipal",
             "CdcWebhooksOptionsValidator", "CdcCustomHeaders", "CdcWebhooksOptions", "StreamingCdcEndpoints", "CdcStreamAdminEndpoints",
-            "CdcWebhookStartupCheck"
+            "CdcWebhookStartupCheck",
+            "OpenLineageClient", "IOpenLineageClient", "OpenLineageDataset", "OpenLineageRunEvent",
+            "LineageExportServiceCollectionExtensions", "LineageModuleOptions", "LineageEndpoints"
         ];
         var core = new[]
         {
             typeof(Autheris.Domain.Options.GatewayOptions).Assembly,
             typeof(Autheris.Application.Services.ConsentResolutionService).Assembly,
             typeof(Autheris.Infrastructure.Persistence.GovernanceRepository).Assembly,
+            typeof(Autheris.Extensions.ExtensionsServiceCollectionExtensions).Assembly,
             typeof(Program).Assembly,
         };
 
@@ -241,8 +244,9 @@ public sealed class PackageBoundaryArchitectureTests
             .Where(n => moved.Contains(n[(n.IndexOf(':', StringComparison.Ordinal) + 1)..], StringComparer.Ordinal))
             .ToList();
 
-        present.ShouldBeEmpty("Event delivery types moved to Autheris.Modules.Events; none may remain in the core assemblies.");
+        present.ShouldBeEmpty("Event delivery and OpenLineage export types moved to modules; none may remain in the core assemblies.");
         typeof(Autheris.Modules.Events.EventsModule).Assembly.GetTypes().Select(t => t.Name).ShouldContain("CdcWebhookDeliveryService");
+        typeof(Autheris.Modules.Lineage.LineageModule).Assembly.GetTypes().Select(t => t.Name).ShouldContain("OpenLineageClient");
     }
 
     [Fact]

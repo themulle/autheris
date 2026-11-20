@@ -12,7 +12,6 @@ using System.Threading.Tasks;
 using Autheris.Api.Extensions;
 using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Common.Interfaces;
-using Autheris.Application.Lineage;
 using Autheris.Application.Security;
 using Autheris.Application.Streaming.Interfaces;
 using Autheris.Domain.Common;
@@ -21,7 +20,6 @@ using Autheris.Domain.Options;
 using Autheris.Extensions;
 using Autheris.Infrastructure.Streaming.Producers;
 using Autheris.Extensions.DataCatalog;
-using Autheris.Extensions.Lineage;
 using Autheris.Extensions.OpenMetadata;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -107,11 +105,7 @@ public sealed class ExtensionsRegistrationTests
             descriptors[0].ImplementationType!.Assembly.ShouldBe(ExtensionsAssembly, serviceType.Name);
         }
 
-        services.Count(d => d.ServiceType == typeof(IOpenLineageClient)).ShouldBe(1);
-
-        var provider = services.BuildServiceProvider();
-        using var scope = provider.CreateScope();
-        scope.ServiceProvider.GetRequiredService<IOpenLineageClient>().ShouldBeOfType<OpenLineageClient>();
+        services.Any(d => d.ServiceType.Name == "IOpenLineageClient").ShouldBeFalse();
     }
 
     [Fact]
@@ -149,8 +143,7 @@ public sealed class ExtensionsRegistrationTests
 
         string[] clientNames =
         [
-            "IOpenMetadataClient",
-            nameof(OpenLineageClient)
+            "IOpenMetadataClient"
         ];
 
         foreach (var name in clientNames)

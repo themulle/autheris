@@ -16,6 +16,7 @@ using Autheris.Application.Security;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Modules.Lineage.Domain;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -31,8 +32,10 @@ public sealed class OpenLineageClient : IOpenLineageClient
 
     private readonly HttpClient _httpClient;
     private readonly ILineageGraphStore _graphStore;
-    private readonly IOptions<GatewayOptions> _options;
+    private readonly IOptions<LineageModuleOptions> _options;
+    private readonly IOptions<GatewayOptions>? _gatewayOptions;
     private readonly ILogger<OpenLineageClient> _logger;
+    private readonly TimeProvider _timeProvider;
     private readonly bool _isDevelopment;
     private readonly bool _hasConfiguredEndpoint;
     private readonly Uri? _endpoint;
@@ -40,19 +43,23 @@ public sealed class OpenLineageClient : IOpenLineageClient
     public OpenLineageClient(
         HttpClient httpClient,
         ILineageGraphStore graphStore,
-        IOptions<GatewayOptions> options,
+        IOptions<LineageModuleOptions> options,
         ILogger<OpenLineageClient> logger,
-        IHostEnvironment? environment = null)
+        IOptions<GatewayOptions>? gatewayOptions = null,
+        IHostEnvironment? environment = null,
+        TimeProvider? timeProvider = null)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _graphStore = graphStore ?? throw new ArgumentNullException(nameof(graphStore));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _gatewayOptions = gatewayOptions;
+        _timeProvider = timeProvider ?? TimeProvider.System;
         _isDevelopment = environment?.IsDevelopment() == true;
 
-        var rawEndpoint = _options.Value.Catalog.OpenLineageEndpoint;
+        var rawEndpoint = _options.Value.OpenLineageEndpoint;
         _hasConfiguredEndpoint = !string.IsNullOrWhiteSpace(rawEndpoint);
-        _endpoint = ValidateAndResolveEndpoint(rawEndpoint, _options.Value.Catalog.OpenLineageApiKey, _isDevelopment, _logger);
+        _endpoint = ValidateAndResolveEndpoint(rawEndpoint, _options.Value.OpenLineageApiKey, _isDevelopment, _logger);
     }
 
     public async Task<bool> PushLineageGraphAsync(TenantId tenant, CancellationToken ct = default)
@@ -73,7 +80,8 @@ public sealed class OpenLineageClient : IOpenLineageClient
 
         // SEC SR-L-19: only this tenant's nodes are pushed. Nodes without a tenant are legacy (single-tenant) data and are
         // pushed only for the default tenant (fail-closed; none without a default tenant).
-        var defaultTenant = Autheris.Application.Tenancy.TenantResolver.EffectiveDefaultOf(_options.Value.Tenancy);
+        var tenancy = _gatewayOptions?.Value.Tenancy ?? new TenancyOptions();
+        var defaultTenant = Autheris.Application.Tenancy.TenantResolver.EffectiveDefaultOf(tenancy);
         var tenantNodes = _graphStore.GetAllNodes().Where(node => BelongsToTenant(node, tenant, defaultTenant)).ToList();
         var tenantNodeIds = new HashSet<string>(tenantNodes.Select(n => n.Id), StringComparer.Ordinal);
 
@@ -98,7 +106,7 @@ public sealed class OpenLineageClient : IOpenLineageClient
 
         var runEvent = new OpenLineageRunEvent(
             EventType: "COMPLETE",
-            EventTime: DateTimeOffset.UtcNow,
+            EventTime: _timeProvider.GetUtcNow(),
             Producer: "https://github.com/themulle/gql/autheris",
             SchemaUrl: "https://openlineage.io/spec/1-0-2/OpenLineage.json",
             Job: new
@@ -139,7 +147,7 @@ public sealed class OpenLineageClient : IOpenLineageClient
             Content = new StringContent(json, Encoding.UTF8, "application/json")
         };
 
-        var apiKey = _options.Value.Catalog.OpenLineageApiKey;
+        var apiKey = _options.Value.OpenLineageApiKey;
         var canSendBearer = string.Equals(_endpoint.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
             || (_isDevelopment && IsLoopbackHost(_endpoint));
         if (!string.IsNullOrWhiteSpace(apiKey) && canSendBearer)
@@ -180,20 +188,20 @@ public sealed class OpenLineageClient : IOpenLineageClient
         var trimmed = rawEndpoint.Trim();
         if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var uri))
         {
-            logger.LogError("OpenLineage endpoint configuration (Gateway:Catalog:OpenLineageEndpoint) is not a valid absolute URI; OpenLineage export is disabled.");
+            logger.LogError("OpenLineage endpoint configuration (Gateway:Lineage:OpenLineageEndpoint) is not a valid absolute URI; OpenLineage export is disabled.");
             return null;
         }
 
         if (!string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) &&
             !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
         {
-            logger.LogError("OpenLineage endpoint configuration (Gateway:Catalog:OpenLineageEndpoint) has unsupported scheme '{Scheme}'; OpenLineage export is disabled.", uri.Scheme);
+            logger.LogError("OpenLineage endpoint configuration (Gateway:Lineage:OpenLineageEndpoint) has unsupported scheme '{Scheme}'; OpenLineage export is disabled.", uri.Scheme);
             return null;
         }
 
         if (HasEmbeddedUserInfo(trimmed, uri))
         {
-            logger.LogError("OpenLineage endpoint configuration (Gateway:Catalog:OpenLineageEndpoint) must not contain embedded userinfo credentials; OpenLineage export is disabled.");
+            logger.LogError("OpenLineage endpoint configuration (Gateway:Lineage:OpenLineageEndpoint) must not contain embedded userinfo credentials; OpenLineage export is disabled.");
             return null;
         }
 

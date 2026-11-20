@@ -6,11 +6,13 @@ using System.IO;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Api.Endpoints;
+using Autheris.Api.Hosting;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Lineage;
 using Autheris.Domain.Common;
 using Autheris.Domain.Identity;
+using Autheris.Modules.Abstractions;
+using Autheris.Modules.Lineage.Endpoints;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.DependencyInjection;
@@ -49,7 +51,8 @@ public sealed class OpenLineageSyncTenantTests
             new Claim("tenant_id", "ignored-tenant-claim")
         ], "TestAuth"));
 
-        var result = await GovernanceEndpoints.SyncOpenLineageAsync(client, context, CancellationToken.None);
+        IModuleRequestContext requestContext = new ModuleRequestContext();
+        var result = await LineageEndpoints.SyncOpenLineageAsync(client, requestContext, context, CancellationToken.None);
         var status = await GetStatusCodeAsync(result, context);
         status.ShouldBe(StatusCodes.Status200OK);
 
@@ -72,7 +75,8 @@ public sealed class OpenLineageSyncTenantTests
             new Claim("tid", "tenant-entra-guid")
         ], "TestAuth"));
 
-        var result = await GovernanceEndpoints.SyncOpenLineageAsync(client, context, CancellationToken.None);
+        IModuleRequestContext requestContext = new ModuleRequestContext();
+        var result = await LineageEndpoints.SyncOpenLineageAsync(client, requestContext, context, CancellationToken.None);
         var status = await GetStatusCodeAsync(result, context);
         status.ShouldBe(StatusCodes.Status200OK);
 
@@ -93,7 +97,8 @@ public sealed class OpenLineageSyncTenantTests
             new Claim("tenant_id", "tenant-1")
         ], "TestAuth"));
 
-        var result = await GovernanceEndpoints.SyncOpenLineageAsync(client, context, CancellationToken.None);
+        IModuleRequestContext requestContext = new ModuleRequestContext();
+        var result = await LineageEndpoints.SyncOpenLineageAsync(client, requestContext, context, CancellationToken.None);
         var status = await GetStatusCodeAsync(result, context);
 
         status.ShouldBe(StatusCodes.Status403Forbidden);
@@ -112,10 +117,12 @@ public sealed class OpenLineageSyncTenantTests
             new Claim("tenant_id", "malformed/tenant/spaces and illegal!")
         ], "TestAuth"));
 
+        IModuleRequestContext requestContext = new ModuleRequestContext();
+
         // Fail closed (DT-A-3): the invalid claim raises TenantClaimInvalidException, which the exception handler answers with 403
         // TENANT_CLAIM_INVALID (never 500); nothing is pushed.
         await Should.ThrowAsync<Autheris.Domain.Exceptions.TenantClaimInvalidException>(
-            () => GovernanceEndpoints.SyncOpenLineageAsync(client, context, CancellationToken.None));
+            () => LineageEndpoints.SyncOpenLineageAsync(client, requestContext, context, CancellationToken.None));
         await client.DidNotReceiveWithAnyArgs().PushLineageGraphAsync(default, default);
     }
 }

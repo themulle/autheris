@@ -5,7 +5,6 @@ using Autheris.Application.Security;
 using Autheris.Domain.Options;
 using Autheris.Extensions.DataCatalog;
 using Autheris.Extensions.Dbt;
-using Autheris.Extensions.Lineage;
 using Autheris.Extensions.OpenMetadata;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -34,7 +33,6 @@ public static class ExtensionsServiceCollectionExtensions
         services.AddOpenMetadataIntegration(gatewayOptions);
         services.AddDataCatalogIntegration(gatewayOptions);
         services.AddDbtIntegration(gatewayOptions);
-        services.AddLineageExportIntegration(gatewayOptions);
 
         return services;
     }

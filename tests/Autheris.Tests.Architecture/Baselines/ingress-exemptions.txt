@@ -57,7 +57,6 @@ route /api/governance/sunsetting/rules | governance admin route (CatalogApiEndpo
 route /api/governance/system/health | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
 route /api/governance/system/metrics | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
 route /api/governance/system/resource-groups | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
-route /api/lineage/openlineage/sync | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
 route /api/v1/admin/consent/routes/{scopeKind}/{scopeRef} | governance admin route; no C1..C5 choke point
 route /api/v1/admin/consent/external-systems/{id:guid} | governance admin route; no C1..C5 choke point
 route /api/v1/admin/consent/external-systems/{id:guid}:disable | governance admin route; no C1..C5 choke point

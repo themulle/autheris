@@ -25,24 +25,48 @@ public sealed class EventsModuleConfigGuardTests
         return new ConfigurationBuilder().AddInMemoryCollection(dict).Build();
     }
 
+    [InlineData("Gateway:CdcWebhooks:Enabled", "Gateway:CdcWebhooks", "Gateway:Events:CdcWebhooks")]
+    [InlineData("Gateway:CdcWebhooks:MaxSubscriptionsPerTenant", "Gateway:CdcWebhooks", "Gateway:Events:CdcWebhooks")]
+    [InlineData("Gateway:CdcWebhooks", "Gateway:CdcWebhooks", "Gateway:Events:CdcWebhooks")]
+    [InlineData("Gateway:Catalog:OpenLineageEndpoint", "Gateway:Catalog:OpenLineageEndpoint", "Gateway:Lineage:OpenLineageEndpoint")]
+    [InlineData("Gateway:Catalog:OpenLineageApiKey", "Gateway:Catalog:OpenLineageApiKey", "Gateway:Lineage:OpenLineageApiKey")]
+    [InlineData("Gateway:Catalog:OpenLineage:Endpoint", "Gateway:Catalog:OpenLineage", "Gateway:Lineage")]
     [Theory]
-    [InlineData("Gateway:CdcWebhooks:Enabled")]
-    [InlineData("Gateway:CdcWebhooks:MaxSubscriptionsPerTenant")]
-    [InlineData("Gateway:CdcWebhooks")]
-    public void Removed_cdc_webhooks_and_openlineage_keys_fail_with_new_path_message(string key)
+    public void Removed_cdc_webhooks_and_openlineage_keys_fail_with_new_path_message(string key, string expectedOldPath, string expectedNewPath)
     {
-        // The CdcWebhooks half; the OpenLineage keys move with the lineage module.
-        var config = Config((key, "true"));
+        var config = Config((key, "https://openlineage.example.com/api/v1/lineage"));
 
         var early = Should.Throw<InvalidOperationException>(() => UnknownGatewayKeyGuard.ThrowIfUnknownKeys(config));
-        early.Message.ShouldContain("Gateway:CdcWebhooks");
-        early.Message.ShouldContain("Gateway:Events:CdcWebhooks");
+        early.Message.ShouldContain(expectedOldPath);
+        early.Message.ShouldContain(expectedNewPath);
 
-        // The removed-key message wins even when the events module is loaded (the old section is never accepted).
+        // The removed-key message wins even when both modules are loaded (the old keys are never accepted).
         var loaded = Should.Throw<InvalidOperationException>(() =>
-            UnknownGatewayKeyGuard.Validate(config, ["events"], ["Gateway:Events"]));
-        loaded.Message.ShouldContain("Gateway:Events:CdcWebhooks");
-        loaded.Message.ShouldNotContain("true");
+            UnknownGatewayKeyGuard.Validate(
+                config,
+                ["events", "lineage"],
+                ["Gateway:Events", "Gateway:Lineage"]));
+        loaded.Message.ShouldContain(expectedNewPath);
+        loaded.Message.ShouldNotContain("https://openlineage.example.com/api/v1/lineage");
+    }
+
+    [Fact]
+    public void Lineage_keys_pass_the_early_pass_only_when_the_lineage_module_is_enabled()
+    {
+        var withModule = Config(
+            ("Gateway:Modules:Enabled:0", "lineage"),
+            ("Gateway:Lineage:OpenLineageEndpoint", "https://openlineage.example.com/api/v1/lineage"),
+            ("Gateway:Lineage:OpenLineageApiKey", "secret"));
+        Should.NotThrow(() => UnknownGatewayKeyGuard.ThrowIfUnknownKeys(withModule));
+
+        var withoutModule = Config(("Gateway:Lineage:OpenLineageEndpoint", "https://openlineage.example.com/api/v1/lineage"));
+        var ex = Should.Throw<InvalidOperationException>(() => UnknownGatewayKeyGuard.ThrowIfUnknownKeys(withoutModule));
+        ex.Message.ShouldContain("module lineage is not installed");
+
+        var otherModule = Config(
+            ("Gateway:Modules:Enabled:0", "events"),
+            ("Gateway:Lineage:OpenLineageEndpoint", "https://openlineage.example.com/api/v1/lineage"));
+        Should.Throw<InvalidOperationException>(() => UnknownGatewayKeyGuard.ThrowIfUnknownKeys(otherModule));
     }
 
     [Fact]

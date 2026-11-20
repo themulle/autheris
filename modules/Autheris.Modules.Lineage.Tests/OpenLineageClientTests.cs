@@ -14,6 +14,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Extensions.Lineage;
+using Autheris.Modules.Lineage.Domain;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -107,14 +108,14 @@ public sealed class OpenLineageClientTests
         RecordingLogger<OpenLineageClient>? logger = null,
         ILineageGraphStore? graphStore = null)
     {
-        var options = Options.Create(new GatewayOptions
+        var options = Options.Create(new LineageModuleOptions
         {
-            Tenancy = new TenancyOptions { DefaultTenantId = "tenant-a" },
-            Catalog = new DataCatalogOptions
-            {
-                OpenLineageEndpoint = endpoint!,
-                OpenLineageApiKey = apiKey
-            }
+            OpenLineageEndpoint = endpoint!,
+            OpenLineageApiKey = apiKey
+        });
+        var gatewayOptions = Options.Create(new GatewayOptions
+        {
+            Tenancy = new TenancyOptions { DefaultTenantId = "tenant-a" }
         });
 
         return new OpenLineageClient(
@@ -122,6 +123,7 @@ public sealed class OpenLineageClientTests
             graphStore ?? new StubGraphStore(new LineageNode("finance.dbo.invoices", "dbo.invoices", LineageNodeType.Table, [], TenantId: "tenant-a")),
             options,
             logger ?? new RecordingLogger<OpenLineageClient>(),
+            gatewayOptions,
             environment);
     }
 
@@ -264,11 +266,11 @@ public sealed class OpenLineageClientTests
     [Fact]
     public async Task Unset_endpoint_disables_push()
     {
-        new DataCatalogOptions().OpenLineageEndpoint.ShouldBeEmpty();
+        new LineageModuleOptions().OpenLineageEndpoint.ShouldBeEmpty();
 
         var handler = new CapturingHttpHandler();
         var logger = new RecordingLogger<OpenLineageClient>();
-        var client = CreateClient(new DataCatalogOptions().OpenLineageEndpoint, environment: new StubHostEnvironment(Environments.Production), handler: handler, logger: logger);
+        var client = CreateClient(new LineageModuleOptions().OpenLineageEndpoint, environment: new StubHostEnvironment(Environments.Production), handler: handler, logger: logger);
 
         (await client.PushLineageEventAsync(SampleEvent())).ShouldBeFalse();
         (await client.PushLineageGraphAsync(new TenantId("tenant-a"))).ShouldBeFalse();

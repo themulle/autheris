@@ -36,13 +36,16 @@ public static class UnknownGatewayKeyGuard
     private static readonly (string Key, string Message)[] RemovedEventBusKeys =
     [
         (GatewayConfigurationSchema.Root + ":Events:DeliveryMode", "Gateway:Events:DeliveryMode (removed; moved to Gateway:EventBus:DeliveryMode)"),
-        (GatewayConfigurationSchema.Root + ":Events:SubscriberQueueCapacity", "Gateway:Events:SubscriberQueueCapacity (removed; moved to Gateway:EventBus:SubscriberQueueCapacity)")
+        (GatewayConfigurationSchema.Root + ":Events:SubscriberQueueCapacity", "Gateway:Events:SubscriberQueueCapacity (removed; moved to Gateway:EventBus:SubscriberQueueCapacity)"),
+        (GatewayConfigurationSchema.Root + ":Catalog:OpenLineageEndpoint", "Gateway:Catalog:OpenLineageEndpoint (removed; moved to Gateway:Lineage:OpenLineageEndpoint, provided by the lineage module)"),
+        (GatewayConfigurationSchema.Root + ":Catalog:OpenLineageApiKey", "Gateway:Catalog:OpenLineageApiKey (removed; moved to Gateway:Lineage:OpenLineageApiKey, provided by the lineage module)")
     ];
 
     // Whole sections that moved into a module: every key under the old section fails startup and names the new path.
     private static readonly (string Prefix, string Message)[] RemovedModuleSections =
     [
-        (GatewayConfigurationSchema.Root + ":CdcWebhooks", "Gateway:CdcWebhooks (removed; moved to Gateway:Events:CdcWebhooks, provided by the events module)")
+        (GatewayConfigurationSchema.Root + ":CdcWebhooks", "Gateway:CdcWebhooks (removed; moved to Gateway:Events:CdcWebhooks, provided by the events module)"),
+        (GatewayConfigurationSchema.Root + ":Catalog:OpenLineage", "Gateway:Catalog:OpenLineage (removed; moved to Gateway:Lineage, provided by the lineage module)")
     ];
 
     private static readonly (string Key, string Message)[] AllRemovedKeysWithMessage = [.. RemovedProcedureDeclaredKeys, .. RemovedFlagKeys];

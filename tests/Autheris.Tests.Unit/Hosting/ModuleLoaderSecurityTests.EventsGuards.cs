@@ -103,6 +103,19 @@ public sealed partial class ModuleLoaderSecurityTests
 
     [Fact]
     [Trait("Category", "Security")]
+    public void Lineage_client_chain_has_ssrf_handler_when_lineage_module_loaded()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        Autheris.Modules.Lineage.LineageServiceCollectionExtensions.AddLineageModule(
+            services,
+            new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build());
+
+        ModuleHttpClientGuard.ChainHasSsrfHandler(services, nameof(Autheris.Extensions.Lineage.OpenLineageClient)).ShouldBeTrue();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
     public void Protected_snapshot_lists_the_stream_and_webhook_ports()
     {
         var services = new ServiceCollection();

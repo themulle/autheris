@@ -137,6 +137,8 @@ public sealed class ModuleConfigurationTests
     }
 
     [Theory]
+    [InlineData("Gateway:Lineage:OpenLineageEndpoint", "lineage")]
+    [InlineData("Gateway:Lineage:OpenLineageApiKey", "lineage")]
     [InlineData("Gateway:Lineage:Endpoint", "lineage")]
     [InlineData("Gateway:Lineage:ApiKey", "lineage")]
     public void Lineage_section_without_lineage_module_fails_fast(string key, string moduleId)

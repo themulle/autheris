@@ -39,6 +39,7 @@
     <ProjectReference Include="..\..\src\Autheris.Modules.Abstractions\Autheris.Modules.Abstractions.csproj" />
     <ProjectReference Include="..\..\modules\Autheris.Modules.Lakehouse\Autheris.Modules.Lakehouse.csproj" />
     <ProjectReference Include="..\..\modules\Autheris.Modules.Events\Autheris.Modules.Events.csproj" />
+    <ProjectReference Include="..\..\modules\Autheris.Modules.Lineage\Autheris.Modules.Lineage.csproj" />
     <ProjectReference Include="..\..\tools\Autheris.ModuleSigner\Autheris.ModuleSigner.csproj" />
     <ProjectReference Include="..\..\src\TrinoSqlEngine\TrinoSqlEngine.csproj" />
   </ItemGroup>
