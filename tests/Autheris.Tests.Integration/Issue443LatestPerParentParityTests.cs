@@ -36,10 +36,15 @@ public sealed class Issue443LatestPerParentParityTests
             parentWhere: new TreeComparison("device_id", TreeFilterOperator.Lt, 5));
 
         var setBased = TreeSqlCompiler.Compile(root, harness.CreateAccess(childIndexed: false, tenant: "t1"), dialect);
-        var correlated = TreeSqlCompiler.Compile(root, harness.CreateAccess(childIndexed: true, tenant: "t1"), dialect);
+        var correlated = TreeSqlCompiler.Compile(
+            root,
+            harness.CreateAccess(childIndexed: false, tenant: "t1"),
+            dialect,
+            maskingDisabled: false,
+            options: new TreeCompileOptions { FailSetBasedFor = "readings" });
 
         setBased.Lists.ShouldHaveSingleItem().Strategy.ShouldBe(TreeListStrategy.SetBased);
-        correlated.Lists.ShouldHaveSingleItem().Strategy.ShouldBe(TreeListStrategy.CorrelatedIndexed);
+        correlated.Lists.ShouldHaveSingleItem().Strategy.ShouldBe(TreeListStrategy.CorrelatedUnindexed);
 
         var setBasedJson = await harness.ExecuteAsync(setBased);
         var correlatedJson = await harness.ExecuteAsync(correlated);
@@ -65,10 +70,15 @@ public sealed class Issue443LatestPerParentParityTests
             parentWhere: new TreeComparison("device_id", TreeFilterOperator.Lt, 5));
 
         var setBased = TreeSqlCompiler.Compile(root, harness.CreateAccess(childIndexed: false, tenant: "t1"), dialect);
-        var correlated = TreeSqlCompiler.Compile(root, harness.CreateAccess(childIndexed: true, tenant: "t1"), dialect);
+        var correlated = TreeSqlCompiler.Compile(
+            root,
+            harness.CreateAccess(childIndexed: false, tenant: "t1"),
+            dialect,
+            maskingDisabled: false,
+            options: new TreeCompileOptions { FailSetBasedFor = "readings" });
 
         setBased.Lists.ShouldHaveSingleItem().Strategy.ShouldBe(TreeListStrategy.SetBased);
-        correlated.Lists.ShouldHaveSingleItem().Strategy.ShouldBe(TreeListStrategy.CorrelatedIndexed);
+        correlated.Lists.ShouldHaveSingleItem().Strategy.ShouldBe(TreeListStrategy.CorrelatedUnindexed);
 
         var setBasedJson = await harness.ExecuteAsync(setBased);
         var correlatedJson = await harness.ExecuteAsync(correlated);
@@ -93,10 +103,15 @@ public sealed class Issue443LatestPerParentParityTests
             parentWhere: new TreeComparison("device_id", TreeFilterOperator.Lt, 5));
 
         var setBased = TreeSqlCompiler.Compile(root, harness.CreateAccess(childIndexed: false, tenant: "t1"), dialect);
-        var correlated = TreeSqlCompiler.Compile(root, harness.CreateAccess(childIndexed: true, tenant: "t1"), dialect);
+        var correlated = TreeSqlCompiler.Compile(
+            root,
+            harness.CreateAccess(childIndexed: false, tenant: "t1"),
+            dialect,
+            maskingDisabled: false,
+            options: new TreeCompileOptions { FailSetBasedFor = "readings" });
 
         setBased.Lists.ShouldHaveSingleItem().Strategy.ShouldBe(TreeListStrategy.SetBased);
-        correlated.Lists.ShouldHaveSingleItem().Strategy.ShouldBe(TreeListStrategy.CorrelatedIndexed);
+        correlated.Lists.ShouldHaveSingleItem().Strategy.ShouldBe(TreeListStrategy.CorrelatedUnindexed);
 
         var setBasedJson = await harness.ExecuteAsync(setBased);
         var correlatedJson = await harness.ExecuteAsync(correlated);
@@ -222,10 +237,15 @@ public sealed class Issue443LatestPerParentParityTests
             childColumns: ["id", "ts", "val", "secret"]);
 
         var setBased = TreeSqlCompiler.Compile(root, harness.CreateAccess(childIndexed: false, tenant: "t1"), dialect);
-        var correlated = TreeSqlCompiler.Compile(root, harness.CreateAccess(childIndexed: true, tenant: "t1"), dialect);
+        var correlated = TreeSqlCompiler.Compile(
+            root,
+            harness.CreateAccess(childIndexed: false, tenant: "t1"),
+            dialect,
+            maskingDisabled: false,
+            options: new TreeCompileOptions { FailSetBasedFor = "readings" });
 
         setBased.Lists.ShouldHaveSingleItem().Strategy.ShouldBe(TreeListStrategy.SetBased);
-        correlated.Lists.ShouldHaveSingleItem().Strategy.ShouldBe(TreeListStrategy.CorrelatedIndexed);
+        correlated.Lists.ShouldHaveSingleItem().Strategy.ShouldBe(TreeListStrategy.CorrelatedUnindexed);
 
         setBased.HmacColumns.ShouldBe(correlated.HmacColumns, ignoreOrder: false);
         var setBasedJson = await harness.ExecuteAsync(setBased);
