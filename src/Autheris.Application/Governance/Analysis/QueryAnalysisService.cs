@@ -15,6 +15,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Domain.Security;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -58,7 +59,8 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         IGraphQlCostAnalysisEngine? costAnalysisEngine = null,
         Autheris.Application.State.Caching.Interfaces.IClientTierResolver? clientTierResolver = null,
         IRateLimiterService? rateLimiterService = null,
-        IOptions<QueryAnalysisSettings>? queryAnalysisSettings = null)
+        IOptions<QueryAnalysisSettings>? queryAnalysisSettings = null,
+        IConfiguration? configuration = null)
     {
         // The default is the secure list, never "off".
         _restrictedScopes = restrictedScopes ?? Autheris.Domain.Security.RestrictedScopePolicy.Default;
@@ -75,7 +77,9 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         _costAnalysisEngine = costAnalysisEngine;
         _clientTierResolver = clientTierResolver;
         _rateLimiterService = rateLimiterService;
-        _queryAnalysisSettings = queryAnalysisSettings?.Value ?? new QueryAnalysisSettings();
+        _queryAnalysisSettings = queryAnalysisSettings?.Value
+            ?? configuration?.GetSection(QueryAnalysisSettings.SectionName).Get<QueryAnalysisSettings>()
+            ?? new QueryAnalysisSettings();
         _maxRootFields = _gatewayOptions.GraphQL.MaxRootFieldsPerOperation > 0
             ? _gatewayOptions.GraphQL.MaxRootFieldsPerOperation
             : 10;

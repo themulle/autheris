@@ -134,8 +134,6 @@ public static class GatewayCatalogServiceExtensions
                 : sp.GetService<Autheris.Application.Catalog.Discovery.IDiscoveryService>()));
         services.TryAddScoped<IPrincipalResolverService, PrincipalResolverService>();
         services.TryAddScoped<IDatasourceTestingService, DatasourceTestingService>();
-        services.AddOptions<Autheris.Domain.Options.QueryAnalysisSettings>()
-            .BindConfiguration(Autheris.Domain.Options.QueryAnalysisSettings.SectionName);
         services.TryAddScoped<IQueryAnalysisService, QueryAnalysisService>();
         services.TryAddScoped<IGraphQlCostAnalysisEngine, Autheris.GraphQL.Analysis.HotChocolateGraphQlCostAnalysisEngine>();
         services.TryAddScoped<IBundledConsentRequestService, BundledConsentRequestService>();
