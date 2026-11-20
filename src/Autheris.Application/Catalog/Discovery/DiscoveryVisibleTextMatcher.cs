@@ -98,19 +98,27 @@ internal static class DiscoveryVisibleTextMatcher
         if (!string.IsNullOrWhiteSpace(table.Identifier.TableName)) yield return table.Identifier.TableName;
         if (!string.IsNullOrWhiteSpace(table.Identifier.Domain)) yield return table.Identifier.Domain;
         if (!string.IsNullOrWhiteSpace(table.Identifier.Schema)) yield return table.Identifier.Schema;
-        if (!string.IsNullOrWhiteSpace(table.Table.DisplayName)) yield return table.Table.DisplayName;
         if (!string.IsNullOrWhiteSpace(table.Table.Description)) yield return table.Table.Description;
-        foreach (var tag in table.CatalogTags)
+        if (table.Table.Texts.Entries.Count > 0)
         {
-            if (!string.IsNullOrWhiteSpace(tag)) yield return tag;
+            foreach (var entry in table.Table.Texts.Entries.Values)
+            {
+                if (!string.IsNullOrWhiteSpace(entry.Description)) yield return entry.Description;
+            }
         }
 
         foreach (var col in table.Columns)
         {
             if (col.DiscoveryHidden) continue;
             if (!string.IsNullOrWhiteSpace(col.ColumnName)) yield return col.ColumnName;
-            if (!string.IsNullOrWhiteSpace(col.DisplayName)) yield return col.DisplayName;
             if (!string.IsNullOrWhiteSpace(col.Description)) yield return col.Description;
+            if (col.Texts.Entries.Count > 0)
+            {
+                foreach (var entry in col.Texts.Entries.Values)
+                {
+                    if (!string.IsNullOrWhiteSpace(entry.Description)) yield return entry.Description;
+                }
+            }
         }
     }
 
