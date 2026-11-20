@@ -109,7 +109,7 @@ public sealed class GrantWriterCallSiteTests
         using var conn = new StubDbConnection();
         await using var tx = await conn.BeginTransactionAsync();
         var dialect = new PostgreSqlGovernanceDialect(() => conn);
-        var core = new GrantRecordSqlCore(dialect);
+        var core = new GovernanceRepository.GrantRecordStore(dialect);
         var consent = new Consent
         {
             Id = Guid.NewGuid(),
@@ -186,7 +186,7 @@ public sealed class GrantWriterCallSiteTests
 
         await using var sp = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
 
-        sp.GetRequiredService<IGrantRecordStore>().ShouldBeOfType<GrantRecordSqlCore>();
+        sp.GetRequiredService<IGrantRecordStore>().ShouldBeOfType<GovernanceRepository.GrantRecordStore>();
         sp.GetRequiredService<IGrantWriter>().ShouldBeOfType<GrantWriter>();
         sp.GetRequiredService<GovernanceRepository>().ShouldNotBeNull();
     }

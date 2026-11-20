@@ -27,6 +27,9 @@ internal static class WebSqlValueWriter
             case bool b:
                 writer.WriteBooleanValue(b);
                 break;
+            case sbyte sb:
+                writer.WriteNumberValue(sb);
+                break;
             case byte by:
                 writer.WriteNumberValue(by);
                 break;
@@ -40,10 +43,26 @@ internal static class WebSqlValueWriter
                 writer.WriteNumberValue(l);
                 break;
             case float f:
-                writer.WriteNumberValue(f);
+                if (float.IsFinite(f))
+                {
+                    writer.WriteNumberValue(f);
+                }
+                else
+                {
+                    writer.WriteStringValue(f.ToString(CultureInfo.InvariantCulture));
+                }
+
                 break;
             case double d:
-                writer.WriteNumberValue(d);
+                if (double.IsFinite(d))
+                {
+                    writer.WriteNumberValue(d);
+                }
+                else
+                {
+                    writer.WriteStringValue(d.ToString(CultureInfo.InvariantCulture));
+                }
+
                 break;
             case decimal dec:
                 writer.WriteNumberValue(dec);

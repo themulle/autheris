@@ -1,0 +1,103 @@
+{
+  "ops": [
+    {
+      "op": "addTable",
+      "table": "access_profile_items",
+      "newTable": {
+        "name": "access_profile_items",
+        "columns": [
+          {
+            "name": "tenant_id",
+            "type": "CHARACTER VARYING(64)",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "profile_id",
+            "type": "CHARACTER VARYING(128)",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "item_no",
+            "type": "INTEGER",
+            "family": "integer",
+            "nullable": false
+          },
+          {
+            "name": "object_ref",
+            "type": "CHARACTER VARYING(512)",
+            "family": "string",
+            "nullable": false
+          }
+        ],
+        "primaryKey": [
+          "tenant_id",
+          "profile_id",
+          "item_no"
+        ],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addIndex",
+      "table": "access_profile_items",
+      "name": "ux_access_profile_items_ref",
+      "unique": true,
+      "columns": [
+        "tenant_id",
+        "profile_id",
+        "object_ref"
+      ]
+    },
+    {
+      "op": "addTable",
+      "table": "access_profile_classification_access",
+      "newTable": {
+        "name": "access_profile_classification_access",
+        "columns": [
+          {
+            "name": "tenant_id",
+            "type": "CHARACTER VARYING(64)",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "profile_id",
+            "type": "CHARACTER VARYING(128)",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "code",
+            "type": "CHARACTER VARYING(64)",
+            "family": "string",
+            "nullable": false
+          },
+          {
+            "name": "access_level",
+            "type": "SMALLINT",
+            "family": "integer",
+            "nullable": false
+          }
+        ],
+        "primaryKey": [
+          "tenant_id",
+          "profile_id",
+          "code"
+        ],
+        "indexes": []
+      }
+    },
+    {
+      "op": "dropColumn",
+      "table": "access_profiles",
+      "name": "masking_mode"
+    },
+    {
+      "op": "dropColumn",
+      "table": "access_profiles",
+      "name": "target_tables"
+    }
+  ]
+}

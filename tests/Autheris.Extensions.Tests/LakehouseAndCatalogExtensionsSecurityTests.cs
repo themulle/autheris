@@ -21,6 +21,7 @@ using Autheris.Application.Catalog.Models;
 using Autheris.Application.Catalog.Semantic;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Catalog.OpenMetadata;
+using Autheris.Application.State;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -712,13 +713,13 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
         const string secret = "om-secret-m32";
         var options = Options.Create(new GatewayOptions { OpenMetadata = new OpenMetadataOptions { DefaultTenantId = "default-tenant", Enabled = true, WebhookSecret = secret } });
         var service = new OpenMetadataSyncService(client, repo, Substitute.For<IConsentRepository>(), Substitute.For<IPolicyEpochRepository>(),
-            options, NullLogger<OpenMetadataSyncService>.Instance);
+            options, NullLogger<OpenMetadataSyncService>.Instance, clusterState: new InMemoryClusterStateProvider());
 
         var payload = $"{{\"id\":\"{Guid.NewGuid()}\",\"timestamp\":{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()},\"eventType\":\"entityUpdated\",\"entityType\":\"table\",\"entityFullyQualifiedName\":\"svc.db.schema.payroll\"}}";
 
-        var ok = await service.HandleWebhookEventAsync(payload, "sha256=" + Hmac(payload, secret));
+        var outcome = await service.HandleWebhookEventAsync(payload, "sha256=" + Hmac(payload, secret));
 
-        ok.ShouldBeTrue();
+        outcome.ShouldBe(OpenMetadataWebhookOutcome.Processed);
         upserted.ShouldNotBeNull();
         AssertProtectionRetained(upserted);
     }
@@ -732,7 +733,8 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
         var receiver = new DbtWebhookReceiver(
             Options.Create(new GatewayOptions { Dbt = new DbtOptions { WebhookSecret = secret } }),
             Substitute.For<IDbtHealthCircuitBreaker>(),
-            NullLogger<DbtWebhookReceiver>.Instance);
+            NullLogger<DbtWebhookReceiver>.Instance,
+            clusterState: new InMemoryClusterStateProvider());
 
         var noTimestamp = $"{{\"eventId\":\"evt_{Guid.NewGuid():N}\",\"eventType\":\"job_run.completed\"}}";
         var noEventId = $"{{\"eventType\":\"job_run.completed\",\"timestamp\":\"{DateTimeOffset.UtcNow:O}\"}}";

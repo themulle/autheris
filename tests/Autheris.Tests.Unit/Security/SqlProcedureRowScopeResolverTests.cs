@@ -74,12 +74,53 @@ public sealed class SqlProcedureRowScopeResolverTests
             Definition(), table, Decision(table, null), ["serial_number"], [["200"]], Caller, CancellationToken.None));
     }
 
+    public static TheoryData<DatabaseDialect, string> QuotedKeyQueries => new()
+    {
+        {
+            DatabaseDialect.SqlServer,
+            "SELECT [serial_number] FROM (SELECT [serial_number], CASE WHEN [tenant_id] = @rs_tenant AND (f) THEN 1 ELSE 0 END AS [autheris_rs_ok] FROM [main].[crane] AS [autheris_target] WHERE (([serial_number] = @rs_0_0) OR ([serial_number] = @rs_1_0))) AS [autheris_rs] GROUP BY [serial_number] HAVING COUNT(*) = SUM([autheris_rs_ok])"
+        },
+        {
+            DatabaseDialect.PostgreSql,
+            "SELECT \"serial_number\" FROM (SELECT \"serial_number\", CASE WHEN \"tenant_id\" = @rs_tenant AND (f) THEN 1 ELSE 0 END AS \"autheris_rs_ok\" FROM \"main\".\"crane\" AS \"autheris_target\" WHERE ((\"serial_number\" = @rs_0_0) OR (\"serial_number\" = @rs_1_0))) AS \"autheris_rs\" GROUP BY \"serial_number\" HAVING COUNT(*) = SUM(\"autheris_rs_ok\")"
+        }
+    };
+
     [Theory]
-    [InlineData(DatabaseDialect.SqlServer, "SELECT [serial_number] FROM [main].[crane] AS [autheris_target] WHERE (([serial_number] = @rs_0_0) OR ([serial_number] = @rs_1_0)) GROUP BY [serial_number] HAVING COUNT(*) = SUM(CASE WHEN [tenant_id] = @rs_tenant AND (f) THEN 1 ELSE 0 END)")]
-    [InlineData(DatabaseDialect.PostgreSql, "SELECT \"serial_number\" FROM \"main\".\"crane\" AS \"autheris_target\" WHERE ((\"serial_number\" = @rs_0_0) OR (\"serial_number\" = @rs_1_0)) GROUP BY \"serial_number\" HAVING COUNT(*) = SUM(CASE WHEN \"tenant_id\" = @rs_tenant AND (f) THEN 1 ELSE 0 END)")]
+    [MemberData(nameof(QuotedKeyQueries))]
     public void KeyQuery_IsQuotedPerDialect(DatabaseDialect dialect, string expected)
     {
         SqlProcedureRowScopeResolver.BuildKeyQuery(dialect, Table("crane"), ["serial_number"], "tenant_id", "f", 2).ShouldBe(expected);
+    }
+
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData(DatabaseDialect.SqlServer, "autheris_rs_ok")]
+    [InlineData(DatabaseDialect.SqlServer, "Autheris_Rs_Ok")]
+    [InlineData(DatabaseDialect.PostgreSql, "AUTHERIS_RS_OK")]
+    public void BuildKeyQuery_KeyColumnNamedLikeReservedFlag_Throws(DatabaseDialect dialect, string keyColumn)
+    {
+        Should.Throw<InvalidOperationException>(() =>
+            SqlProcedureRowScopeResolver.BuildKeyQuery(dialect, Table("crane"), ["serial_number", keyColumn], "tenant_id", "f", 1));
+    }
+
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData(DatabaseDialect.SqlServer)]
+    [InlineData(DatabaseDialect.PostgreSql)]
+    public void BuildKeyQuery_NullFilterResult_CountsAsNotAllowed(DatabaseDialect dialect)
+    {
+        string filter = dialect switch
+        {
+            DatabaseDialect.SqlServer => "[autheris_target].[region] = N'DE'",
+            _ => "\"autheris_target\".\"region\" = 'DE'"
+        };
+
+        string sql = SqlProcedureRowScopeResolver.BuildKeyQuery(dialect, Table("crane"), ["serial_number"], "tenant_id", filter, 1);
+
+        string qFlag = dialect.QuoteIdentifier("autheris_rs_ok");
+        sql.ShouldContain($"CASE WHEN {dialect.QuoteIdentifier("tenant_id")} = @rs_tenant AND ({filter}) THEN 1 ELSE 0 END AS {qFlag}");
+        sql.ShouldContain($"HAVING COUNT(*) = SUM({qFlag})");
     }
 
     [Fact]

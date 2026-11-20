@@ -2,7 +2,6 @@ namespace Autheris.Application.Catalog.External;
 
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 using System.Security.Claims;
 using System.Security.Cryptography;
@@ -17,20 +16,20 @@ using Autheris.Application.Common.Interfaces;
 using Autheris.Application.ConsentRequests;
 using Autheris.Application.Governance;
 using Autheris.Application.Governance.Services;
-using Autheris.Application.Governance.Paging;
 using Autheris.Application.Security;
 using Autheris.Application.Tenancy;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Domain.Security;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 
 /// <summary>
 /// Read-only external catalog service supporting user tokens (via <see cref="IDiscoveryService"/>) and
 /// registered app-only service principals with strict hidden-object visibility rules and caller-specific hashing.
 /// </summary>
-public sealed class ExternalCatalogReader(
+public sealed partial class ExternalCatalogReader(
     ITableMetadataRepository metadataRepository,
     IDiscoveryService discoveryService,
     IConsentRepository consentRepository,
@@ -40,7 +39,9 @@ public sealed class ExternalCatalogReader(
     IOptions<GatewayOptions> gatewayOptions,
     IDiscoveryArtifactStore? artifactStore = null,
     TimeProvider? timeProvider = null,
-    IOptions<GovernanceTextOptions>? textOptions = null)
+    IOptions<GovernanceTextOptions>? textOptions = null,
+    IKeyVaultSecretProvider? secretProvider = null,
+    IConfiguration? configuration = null)
 {
     public const int DefaultPageSize = 50;
     public const int MaxPageSize = 200;
@@ -60,26 +61,16 @@ public sealed class ExternalCatalogReader(
     private readonly GatewayOptions _gatewayOptions = gatewayOptions?.Value ?? throw new ArgumentNullException(nameof(gatewayOptions));
     private readonly IDiscoveryArtifactStore? _artifactStore = artifactStore;
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+    private readonly byte[]? _cursorKey = ExternalCatalogCursor.ResolvePersistentKey(
+        (gatewayOptions ?? throw new ArgumentNullException(nameof(gatewayOptions))).Value,
+        secretProvider,
+        configuration);
     private readonly int _descriptionMaxLength = (textOptions?.Value ?? new GovernanceTextOptions()).ConsentDescriptionMaxLength;
 
-    private const char CursorSeparator = '.';
+    private const string InvalidCursorMessage = "The cursor is invalid.";
 
     /// <summary>Upper bound of the <c>q</c> filter (the same bound the catalog search engine applies to its query text).</summary>
     public const int MaxSearchTextLength = Autheris.Application.Catalog.Search.CatalogSearchEngine.DefaultMaxQueryLength;
-
-    private static string ComputeCursorBinding(string? searchText, DiscoveryAccessState? accessFilter)
-    {
-        var material = string.Create(CultureInfo.InvariantCulture, $"q={searchText}\na={accessFilter}");
-        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(material)), 0, 8);
-    }
-
-    private static bool TrySplitCursor(string raw, out string offsetText, out string boundTo)
-    {
-        var i = raw.IndexOf(CursorSeparator, StringComparison.Ordinal);
-        offsetText = i > 0 ? raw[..i] : string.Empty;
-        boundTo = i > 0 ? raw[(i + 1)..] : string.Empty;
-        return i > 0 && boundTo.Length > 0;
-    }
 
     public async Task<ExternalCatalogResult<ExternalCatalogPageDto>> ListObjectsAsync(
         ClaimsPrincipal user,
@@ -90,7 +81,7 @@ public sealed class ExternalCatalogReader(
         ArgumentNullException.ThrowIfNull(user);
         ArgumentNullException.ThrowIfNull(query);
 
-        if (!TryParseKindFilter(query.Kind, out var kindFilter))
+        if (!TryParseKindFilter(query.Kind, out var kindFilter, out var kindEnum))
         {
             return ExternalCatalogResult.Fail<ExternalCatalogPageDto>(
                 400,
@@ -112,62 +103,39 @@ public sealed class ExternalCatalogReader(
                 $"The q filter exceeds the maximum length of {MaxSearchTextLength} characters.");
         }
 
-        // The cursor is bound to the text query and the access filter: swapping either one between pages is a 400, not a silent re-page.
-        var cursorBinding = ComputeCursorBinding(searchText, accessFilter);
-        int afterOffset = 0;
+        var cursorBinding = ExternalCatalogCursor.ComputeBinding(query, kindFilter, accessFilter, searchText, tenantId, user);
+        string? afterKey = null;
+        int? cursorCount = null;
         if (query.Cursor is not null)
         {
-            if (!PageCursor.TryDecode(query.Cursor, out var rawCursor)
-                || !TrySplitCursor(rawCursor, out var offsetText, out var boundTo)
-                || !int.TryParse(offsetText, NumberStyles.None, CultureInfo.InvariantCulture, out afterOffset))
+            if (!ExternalCatalogCursor.TryDecode(query.Cursor, cursorBinding, _cursorKey, out var decodedKey, out var decodedCount))
             {
-                return ExternalCatalogResult.Fail<ExternalCatalogPageDto>(400, "INVALID_CURSOR", "The cursor is malformed.");
+                return ExternalCatalogResult.Fail<ExternalCatalogPageDto>(400, "INVALID_CURSOR", InvalidCursorMessage);
             }
 
-            if (!string.Equals(boundTo, cursorBinding, StringComparison.Ordinal))
+            afterKey = decodedKey;
+            cursorCount = decodedCount;
+        }
+
+        bool isServicePrincipal = IsAppOnlyPrincipal(user);
+        if (isServicePrincipal)
+        {
+            if (accessFilter is not null)
             {
-                return ExternalCatalogResult.Fail<ExternalCatalogPageDto>(
-                    400,
-                    "INVALID_CURSOR",
-                    "The cursor does not belong to this q and accessStatus.");
+                return ExternalCatalogResult.Fail<ExternalCatalogPageDto>(400, "INVALID_QUERY", "The accessStatus filter applies to user callers only.");
+            }
+
+            if (searchText is not null)
+            {
+                return ExternalCatalogResult.Fail<ExternalCatalogPageDto>(400, "INVALID_QUERY", "The q filter applies to user callers only.");
             }
         }
 
         int pageSize = Math.Clamp(query.PageSize <= 0 ? DefaultPageSize : query.PageSize, 1, MaxPageSize);
-        var (allTables, versions, visibility) = await LoadContextAsync(user, tenantId, ct).ConfigureAwait(false);
 
-        // Issue #798: an app-only caller has no caller access state (callerState is null), so there is nothing to filter on.
-        if (accessFilter is not null && visibility.IsServicePrincipal)
-        {
-            return ExternalCatalogResult.Fail<ExternalCatalogPageDto>(400, "INVALID_QUERY", "The accessStatus filter applies to user callers only.");
-        }
-
-        // A text query is verified per caller by discovery; an app-only caller has no caller projection to verify against.
-        if (searchText is not null && visibility.IsServicePrincipal)
-        {
-            return ExternalCatalogResult.Fail<ExternalCatalogPageDto>(400, "INVALID_QUERY", "The q filter applies to user callers only.");
-        }
-
-        // The access filter runs in the discovery service, before the total and the cursor are computed below.
-        List<ExternalCatalogObjectDto> allDtos = visibility.IsServicePrincipal
-            ? await BuildAppCatalogObjectsAsync(allTables, tenantId, versions, visibility, ct).ConfigureAwait(false)
-            : await BuildUserCatalogObjectsAsync(user, tenantId, allTables, versions, visibility, accessFilter, searchText, ct).ConfigureAwait(false);
-
-        var filtered = ApplyFilters(allDtos, query, kindFilter)
-            .OrderBy(static o => o.ObjectId, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        var pageItems = filtered.Skip(afterOffset).Take(pageSize).ToList();
-        if (!visibility.IsServicePrincipal)
-        {
-            await AttachRowScopeDescriptionsAsync(pageItems, allTables, user, tenantId, ct).ConfigureAwait(false);
-        }
-
-        var nextOffset = afterOffset + pageItems.Count;
-        var nextCursor = nextOffset < filtered.Count ? PageCursor.Encode(nextOffset.ToString(CultureInfo.InvariantCulture) + CursorSeparator + cursorBinding) : null;
-
-        return ExternalCatalogResult.Ok(
-            new ExternalCatalogPageDto(pageItems, nextCursor, filtered.Count));
+        return isServicePrincipal
+            ? await ListAppObjectsKeysetAsync(user, tenantId, query, kindEnum, afterKey, cursorCount, pageSize, cursorBinding, ct).ConfigureAwait(false)
+            : await ListUserObjectsKeysetAsync(user, tenantId, query, kindEnum, accessFilter, searchText, afterKey, cursorCount, pageSize, cursorBinding, ct).ConfigureAwait(false);
     }
 
     public async Task<ExternalCatalogResult<ExternalCatalogObjectDto>> GetObjectAsync(
@@ -376,88 +344,11 @@ public sealed class ExternalCatalogReader(
         return new CallerVisibility(false, allHiddenAllowed, ownedHidden);
     }
 
-    private async Task<List<ExternalCatalogObjectDto>> BuildAppCatalogObjectsAsync(
-        IReadOnlyList<TableMetadata> allTables,
-        TenantId tenantId,
-        IReadOnlyDictionary<string, CatalogObjectVersionRow> versions,
-        CallerVisibility visibility,
-        CancellationToken ct)
+    private static bool HasAppEffectiveTag(TableMetadata table, string tag)
     {
-        var inScope = await FilterInScopeTablesAsync(allTables, tenantId, ct).ConfigureAwait(false);
-        var visibleTables = inScope
-            .Where(t => !t.Table.DiscoveryHidden || CanViewHiddenTable(t, visibility))
-            .ToList();
-
-        if (visibleTables.Count == 0)
-        {
-            return [];
-        }
-
-        var ownersByTable = await _ownershipRepository.GetDataOwnersForTablesAsync(
-            visibleTables.Select(static t => t.Identifier).ToList(), ct).ConfigureAwait(false);
-
-        var result = new List<ExternalCatalogObjectDto>(visibleTables.Count);
-        foreach (var table in visibleTables)
-        {
-            var owners = ownersByTable.TryGetValue(table.Identifier, out var list) ? list : Array.Empty<DataOwner>();
-            var artifacts = _artifactStore is null
-                ? null
-                : await _artifactStore.GetAsync(table.Table.Id, ct).ConfigureAwait(false);
-            versions.TryGetValue(table.Identifier.ToString(), out var ver);
-            result.Add(MapAppObject(table, owners, artifacts, ver?.Seq, CanViewHiddenColumns(table, visibility)));
-        }
-
-        return result;
-    }
-
-    private async Task<List<ExternalCatalogObjectDto>> BuildUserCatalogObjectsAsync(
-        ClaimsPrincipal user,
-        TenantId tenantId,
-        IReadOnlyList<TableMetadata> allTables,
-        IReadOnlyDictionary<string, CatalogObjectVersionRow> versions,
-        CallerVisibility visibility,
-        DiscoveryAccessState? accessFilter,
-        string? searchText,
-        CancellationToken ct)
-    {
-        var byId = allTables.ToDictionary(static t => t.Identifier);
-        var caller = new CatalogCaller(user, tenantId, CatalogChannel.Rest);
-        var result = new List<ExternalCatalogObjectDto>();
-        int after = 0;
-
-        while (true)
-        {
-            var page = await _discoveryService.ListAsync(
-                new DiscoveryQuery(First: DiscoveryService.MaxPageSize, After: after, Search: searchText, Surface: DiscoverySurface.Rest, Access: accessFilter),
-                caller,
-                ct).ConfigureAwait(false);
-
-            foreach (var obj in page.Items)
-            {
-                var id = new TableIdentifier(obj.Domain, obj.Schema, obj.Name);
-                if (!byId.TryGetValue(id, out var table))
-                {
-                    continue;
-                }
-
-                if (obj.IsHidden && !CanViewHiddenTable(table, visibility))
-                {
-                    continue;
-                }
-
-                versions.TryGetValue(id.ToString(), out var ver);
-                result.Add(MapUserObject(obj, table, ver?.Seq, CanViewHiddenColumns(table, visibility)));
-            }
-
-            if (!page.HasNextPage || page.Items.Count == 0)
-            {
-                break;
-            }
-
-            after += page.Items.Count;
-        }
-
-        return result;
+        var sanitizedTags = DiscoveryTextSanitizer.SanitizeTags(table.CatalogTags);
+        var effectiveTags = sanitizedTags.Count > 0 ? sanitizedTags : table.Table.Tags;
+        return effectiveTags.Any(t => string.Equals(t, tag, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>
@@ -776,81 +667,34 @@ public sealed class ExternalCatalogReader(
         visibility.AllHiddenAllowed
         || visibility.OwnedHiddenTables.Contains(table.Identifier);
 
-    private static IEnumerable<ExternalCatalogObjectDto> ApplyFilters(
-        IEnumerable<ExternalCatalogObjectDto> items,
-        ExternalCatalogListQuery query,
-        string? kindFilter)
-    {
-        if (!string.IsNullOrEmpty(kindFilter))
-        {
-            items = items.Where(o => string.Equals(o.Kind, kindFilter, StringComparison.OrdinalIgnoreCase));
-        }
-
-        if (!string.IsNullOrWhiteSpace(query.Domain))
-        {
-            var d = query.Domain.Trim();
-            items = items.Where(o => string.Equals(o.Domain, d, StringComparison.OrdinalIgnoreCase));
-        }
-
-        if (!string.IsNullOrWhiteSpace(query.Schema))
-        {
-            var s = query.Schema.Trim();
-            items = items.Where(o => string.Equals(o.Schema, s, StringComparison.OrdinalIgnoreCase));
-        }
-
-        if (!string.IsNullOrWhiteSpace(query.Owner))
-        {
-            var owner = query.Owner.Trim();
-            items = items.Where(o => o.Owners.Any(ow =>
-                string.Equals(ow.DisplayName, owner, StringComparison.OrdinalIgnoreCase)
-                || string.Equals(ow.Email, owner, StringComparison.OrdinalIgnoreCase)));
-        }
-
-        if (!string.IsNullOrWhiteSpace(query.Tag))
-        {
-            var tag = query.Tag.Trim();
-            items = items.Where(o => o.Tags.Any(t => string.Equals(t, tag, StringComparison.OrdinalIgnoreCase)));
-        }
-
-        if (!string.IsNullOrWhiteSpace(query.Sensitivity))
-        {
-            var sens = query.Sensitivity.Trim();
-            items = items.Where(o => string.Equals(o.Sensitivity, sens, StringComparison.OrdinalIgnoreCase));
-        }
-
-        if (query.Pii.HasValue)
-        {
-            items = query.Pii.Value
-                ? items.Where(static o => o.Columns.Any(static c => c.Pii))
-                : items.Where(static o => o.Columns.All(static c => !c.Pii));
-        }
-
-        if (query.ChangedSince.HasValue)
-        {
-            var minSeq = query.ChangedSince.Value;
-            items = items.Where(o => (o.ChangeSeq ?? 0L) > minSeq);
-        }
-
-        return items;
-    }
-
-    private static bool TryParseKindFilter(string? rawKind, out string? normalized)
+    private static bool TryParseKindFilter(string? rawKind, out string? normalized, out DiscoveryObjectKind? kindEnum)
     {
         if (string.IsNullOrWhiteSpace(rawKind))
         {
             normalized = null;
+            kindEnum = null;
             return true;
         }
 
-        var trimmed = rawKind.Trim().ToLowerInvariant();
-        if (trimmed is "table" or "view" or "procedure")
+        switch (rawKind.Trim().ToLowerInvariant())
         {
-            normalized = trimmed;
-            return true;
+            case "table":
+                normalized = "table";
+                kindEnum = DiscoveryObjectKind.Table;
+                return true;
+            case "view":
+                normalized = "view";
+                kindEnum = DiscoveryObjectKind.View;
+                return true;
+            case "procedure":
+                normalized = "procedure";
+                kindEnum = DiscoveryObjectKind.Procedure;
+                return true;
+            default:
+                normalized = null;
+                kindEnum = null;
+                return false;
         }
-
-        normalized = null;
-        return false;
     }
 
     private static string DefaultMaskingState(TableMetadata table, TableColumn column)

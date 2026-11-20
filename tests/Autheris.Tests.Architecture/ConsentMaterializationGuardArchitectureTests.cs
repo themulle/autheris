@@ -24,7 +24,7 @@ public sealed class ConsentMaterializationGuardArchitectureTests
     private const string SharedInsert = "InsertConsentCoreAsync";
     private const string GrantWriterInsert = "InsertAndGrantAsync";
 
-    private static readonly Regex MemberStart = new(@"^    (?:public|private|internal|protected)[^=;(]*\s(\w+)\(", RegexOptions.Compiled);
+    private static readonly Regex MemberStart = new(@"^ {4}(?: {4})?(?:public|private|internal|protected)(?!.*\bclass\b)[^=;(]*\s(\w+)\(", RegexOptions.Compiled);
 
     private static string FindRepositoryRoot()
     {
@@ -70,7 +70,7 @@ public sealed class ConsentMaterializationGuardArchitectureTests
         var persistenceDir = Path.Combine(root, "src", "Autheris.Infrastructure", "Persistence");
         var violations = new List<string>();
 
-        // 1. All raw INSERT INTO CONSENTS SQL is centralized in GrantRecordSqlCore.cs and executed only by InsertConsentRowAsync.
+        // 1. All raw INSERT INTO CONSENTS SQL is centralized in GovernanceRepository.GrantRecords.cs and executed only by InsertConsentRowAsync.
         var nonMigrationFiles = Directory.EnumerateFiles(persistenceDir, "*.cs", SearchOption.AllDirectories)
             .Where(p => !p.Replace('\\', '/').Contains("/Migrations/", StringComparison.Ordinal))
             .ToList();
@@ -78,9 +78,9 @@ public sealed class ConsentMaterializationGuardArchitectureTests
             .Where(f => File.ReadAllText(f).Contains("INSERT INTO CONSENTS", StringComparison.Ordinal))
             .Select(f => Path.GetFileName(f))
             .ToList();
-        rawInsertFiles.ShouldBe(["GrantRecordSqlCore.cs"]);
+        rawInsertFiles.ShouldBe(["GovernanceRepository.GrantRecords.cs"]);
 
-        var grantCoreMethods = Methods(Path.Combine(persistenceDir, "GrantRecordSqlCore.cs"));
+        var grantCoreMethods = Methods(Path.Combine(persistenceDir, "GovernanceRepository.GrantRecords.cs"));
         var rowInsertCallers = grantCoreMethods
             .Where(kv => kv.Value.Contains("InsertConsentSql", StringComparison.Ordinal))
             .Select(kv => kv.Key)

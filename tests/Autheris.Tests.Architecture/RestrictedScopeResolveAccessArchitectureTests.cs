@@ -44,6 +44,7 @@ public sealed class RestrictedScopeResolveAccessArchitectureTests
         bool CallsGetScopeSetClaims,
         bool CallsGetScopeSetPrincipal,
         bool CallsGetScopes,
+        bool CallsGetTokenScopes,
         bool AppliesUnknown,
         bool OmitsScopeArgument,
         bool CallsCatalogResolver);
@@ -70,7 +71,7 @@ public sealed class RestrictedScopeResolveAccessArchitectureTests
             foreach (var type in module.GetTypes())
             {
                 var key = TopLevelName(type);
-                var u = usage.TryGetValue(key, out var existing) ? existing : new Usage(false, false, false, false, false, false, false);
+                var u = usage.TryGetValue(key, out var existing) ? existing : new Usage(false, false, false, false, false, false, false, false);
                 foreach (var method in type.Methods.Where(m => m.HasBody))
                 {
                     var il = method.Body.Instructions;
@@ -103,6 +104,10 @@ public sealed class RestrictedScopeResolveAccessArchitectureTests
                         else if (declaring == "Autheris.Domain.Security.TokenAccessScope" && callee.Name == "GetScopes")
                         {
                             u = u with { CallsGetScopes = true };
+                        }
+                        else if (declaring == "Autheris.Domain.Security.TokenAccessScope" && callee.Name == "GetTokenScopes")
+                        {
+                            u = u with { CallsGetTokenScopes = true };
                         }
                         else if (declaring == "Autheris.Domain.Model.RestrictedScopeClearance" && callee.Name == "Unknown")
                         {
@@ -144,9 +149,9 @@ public sealed class RestrictedScopeResolveAccessArchitectureTests
                 violations.Add($"{type}: omits the callerScopes argument of ResolveAccess");
             }
 
-            if (u.CallsGetScopes || u.CallsGetScopeSetPrincipal)
+            if (u.CallsGetScopes || u.CallsGetScopeSetPrincipal || u.CallsGetTokenScopes)
             {
-                violations.Add($"{type}: reads scopes with GetScopes / GetScopeSet(ClaimsPrincipal) instead of the claims overload");
+                violations.Add($"{type}: reads scopes with GetScopes / GetTokenScopes / GetScopeSet(ClaimsPrincipal) instead of the claims overload");
             }
         }
 
@@ -163,6 +168,19 @@ public sealed class RestrictedScopeResolveAccessArchitectureTests
             .ToList();
 
         violations.ShouldBeEmpty("GetScopes reads 'scp' only; use TokenAccessScope.GetScopeSet(principal.Claims): " + string.Join("; ", violations));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void ProductionCode_CallsGetTokenScopesOnlyFromRealmTokenScopePolicy()
+    {
+        var callers = Scan()
+            .Where(kv => kv.Value.CallsGetTokenScopes)
+            .Select(kv => kv.Key)
+            .OrderBy(k => k, StringComparer.Ordinal)
+            .ToList();
+
+        callers.ShouldBe(["Autheris.Api.Security.RealmTokenScopePolicy"]);
     }
 
     [Fact]

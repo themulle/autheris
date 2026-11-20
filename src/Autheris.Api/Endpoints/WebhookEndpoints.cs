@@ -46,12 +46,12 @@ public static class WebhookEndpoints
             return tooLarge!;
         }
 
-        var success = await syncService.HandleWebhookEventAsync(payload, signature, context.RequestAborted);
-        if (!success)
+        var outcome = await syncService.HandleWebhookEventAsync(payload, signature, context.RequestAborted);
+        return outcome switch
         {
-            return ApiProblems.BadRequest(ApiErrorCodes.WebhookSignatureOrFormatInvalid, "Failed to process webhook or invalid signature.");
-        }
-
-        return Results.Ok(new { status = "Processed" });
+            OpenMetadataWebhookOutcome.Processed => Results.Ok(new { status = "Processed" }),
+            OpenMetadataWebhookOutcome.Unavailable => ApiProblems.ServiceUnavailable(detail: "The webhook replay store is unavailable.", httpContext: context),
+            _ => ApiProblems.BadRequest(ApiErrorCodes.WebhookSignatureOrFormatInvalid, "Failed to process webhook or invalid signature.", context)
+        };
     }
 }

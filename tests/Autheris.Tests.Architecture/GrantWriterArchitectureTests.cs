@@ -8,7 +8,7 @@ namespace Autheris.Tests.Architecture;
 
 /// <summary>
 /// Structural enforcement for grant ledger integrity: all CONSENTS row insertions flow exclusively through
-/// <c>GrantRecordSqlCore</c> / <c>GrantWriter</c>, and in-place expiry extensions are forbidden.
+/// <c>GrantRecordStore</c> / <c>GrantWriter</c>, and in-place expiry extensions are forbidden.
 /// </summary>
 public sealed class GrantWriterArchitectureTests
 {
@@ -24,7 +24,7 @@ public sealed class GrantWriterArchitectureTests
 
     private static readonly HashSet<string> AllowedInsertFiles = new(StringComparer.Ordinal)
     {
-        "Autheris.Infrastructure/Persistence/GrantRecordSqlCore.cs",
+        "Autheris.Infrastructure/Persistence/GovernanceRepository.GrantRecords.cs",
         "Autheris.Application/Governance/Grants/Records/GrantWriter.cs"
     };
 
@@ -61,12 +61,12 @@ public sealed class GrantWriterArchitectureTests
 
                 if (!AllowedInsertFiles.Contains(rel) && ForbiddenInsertRegex.IsMatch(value))
                 {
-                    violations.Add($"{rel}:{line} inserts into CONSENTS outside GrantRecordSqlCore/GrantWriter.");
+                    violations.Add($"{rel}:{line} inserts into CONSENTS outside GrantRecordStore/GrantWriter.");
                 }
             }
         }
 
-        violations.ShouldBeEmpty("All CONSENTS inserts must go through IGrantWriter/GrantRecordSqlCore and in-place valid_to updates are forbidden.");
+        violations.ShouldBeEmpty("All CONSENTS inserts must go through IGrantWriter/GrantRecordStore and in-place valid_to updates are forbidden.");
     }
 
     private static string FindRepositoryRoot()

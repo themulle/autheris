@@ -7,9 +7,11 @@ using System.Security;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Sql;
 using Autheris.Application.Sql.Errors;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.Sql.Services;
+using Autheris.Tests.Unit.Catalog;
 using Autheris.Domain.Common;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
@@ -397,8 +399,13 @@ public sealed class WebSqlStatementManagerTests : IDisposable
     [Fact]
     public async Task MetadataEmulation_OnlyOnTrinoTransport()
     {
+        var visibility = TrinoMetadataVisibilityFakes.AllowAll();
         _serviceProvider.GetService(typeof(Autheris.Application.Common.Interfaces.ITableMetadataRepository))
             .Returns(new FakeTableMetadataRepository());
+        _serviceProvider.GetService(typeof(Autheris.Application.Catalog.Discovery.IDiscoveryService))
+            .Returns(visibility.Discovery);
+        _serviceProvider.GetService(typeof(Autheris.Application.Policy.Pdp.IAccessDecisionPoint))
+            .Returns(visibility.DecisionPoint);
 
         var trinoRequest = new GovernedSqlQueryRequest("SHOW CATALOGS", Transport: SqlTransports.Trino);
         var statusTrino = await _manager.SubmitOrWaitAsync(trinoRequest, TestUser, TestOwner, TestTenant, TimeSpan.FromSeconds(2));
@@ -432,6 +439,50 @@ public sealed class WebSqlStatementManagerTests : IDisposable
 
         var statusNonTruncated = await _manager.SubmitOrWaitAsync(request, TestUser, TestOwner, TestTenant, TimeSpan.FromSeconds(2));
         statusNonTruncated.Truncated.ShouldBeFalse();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task MetadataQuery_WithoutDiscoveryInScope_FailsClosed()
+    {
+        _serviceProvider.GetService(typeof(Autheris.Application.Common.Interfaces.ITableMetadataRepository))
+            .Returns(new FakeTableMetadataRepository());
+
+        var trinoRequest = new GovernedSqlQueryRequest("SHOW CATALOGS", Transport: SqlTransports.Trino);
+        var status = await _manager.SubmitOrWaitAsync(trinoRequest, TestUser, TestOwner, TestTenant, TimeSpan.FromSeconds(2));
+
+        status.State.ShouldBe("FAILED");
+        status.Data.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task MetadataQuery_RespectsRequestRowLimit_AndMarksTruncated()
+    {
+        var tables = new[]
+        {
+            Wp0.Table("sales", "t1", columns: ["id"]),
+            Wp0.Table("sales", "t2", columns: ["id"]),
+            Wp0.Table("sales", "t3", columns: ["id"])
+        };
+        var visibility = TrinoMetadataVisibilityFakes.AllowAll(tables);
+        var repo = Wp0.Tables(tables);
+        _serviceProvider.GetService(typeof(Autheris.Application.Common.Interfaces.ITableMetadataRepository))
+            .Returns(repo);
+        _serviceProvider.GetService(typeof(Autheris.Application.Catalog.Discovery.IDiscoveryService))
+            .Returns(visibility.Discovery);
+        _serviceProvider.GetService(typeof(Autheris.Application.Policy.Pdp.IAccessDecisionPoint))
+            .Returns(visibility.DecisionPoint);
+
+        var request = new GovernedSqlQueryRequest(
+            "SELECT TABLE_NAME FROM system.jdbc.tables",
+            RowLimit: new SqlRowLimit(2, 2),
+            Transport: SqlTransports.Trino);
+        var status = await _manager.SubmitOrWaitAsync(request, TestUser, TestOwner, TestTenant, TimeSpan.FromSeconds(2));
+
+        status.State.ShouldBe("FINISHED");
+        status.Data.ShouldNotBeNull();
+        status.Data.Count.ShouldBe(2);
+        status.Truncated.ShouldBeTrue();
     }
 
     private sealed class FakeTableMetadataRepository : Autheris.Application.Common.Interfaces.ITableMetadataRepository
