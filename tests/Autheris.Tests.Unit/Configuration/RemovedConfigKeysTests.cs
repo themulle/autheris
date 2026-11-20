@@ -85,6 +85,9 @@ public sealed class RemovedConfigKeysTests
     [InlineData("Analytics:Aggregation:Enabled", "true")]
     [InlineData("Analytics:Aggregation:Enabled", "false")]
     [InlineData("Analytics:Aggregation:Enabled", "")]
+    [InlineData("Gateway:AsyncJobs:Enabled", "true")]
+    [InlineData("Gateway:AsyncJobs:Enabled", "false")]
+    [InlineData("Gateway:AsyncJobs:Enabled", "")]
     [InlineData("Gateway:RowFilters:KeySetCache", "true")]
     [InlineData("Gateway:RowFilters:KeySetCache", "false")]
     [InlineData("Gateway:RowFilters:KeySetCache", "")]
@@ -320,5 +323,16 @@ public sealed class RemovedConfigKeysTests
         var configuration = Config(key, value);
         var ex = Should.Throw<InvalidOperationException>(() => UnknownGatewayKeyGuard.ThrowIfUnknownKeys(configuration));
         ex.Message.ShouldContain("Analytics:Aggregation:Enabled (removed;");
+    }
+
+    [Theory]
+    [InlineData("true")]
+    [InlineData("false")]
+    [InlineData("")]
+    public void Removed_async_jobs_switch_fails_with_replacement_message_for_any_value(string value)
+    {
+        var configuration = Config("Gateway:AsyncJobs:Enabled", value);
+        var ex = Should.Throw<InvalidOperationException>(() => UnknownGatewayKeyGuard.ThrowIfUnknownKeys(configuration));
+        ex.Message.ShouldContain("AsyncJobs:Enabled (removed;");
     }
 }

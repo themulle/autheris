@@ -22,6 +22,7 @@ public sealed class EpochValidationService : IEpochValidationService, IHostedSer
     private readonly ConcurrentDictionary<string, DateTimeOffset> _lastEpochRefresh = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, LocalEpochEntry> _microCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly EpochValidationOptions _options;
+    private readonly GatewayOptions? _gatewayOptions;
     private readonly TimeProvider _time;
     private readonly IEventBus _eventBus;
     private readonly string _invalidationChannel;
@@ -86,6 +87,7 @@ end";
     {
         _time = timeProvider ?? TimeProvider.System;
         _logger = logger;
+        _gatewayOptions = options?.Value;
         _options = options?.Value?.Caching?.EpochValidation ?? new EpochValidationOptions();
         _invalidationChannel = options?.Value?.Caching?.Redis?.InvalidationChannel ?? "consent:invalidations";
         _eventBus = eventBus ?? new Messaging.InProcessChannelEventBus();
@@ -392,7 +394,10 @@ end";
 
             // the staleness budget applies to non-sensitive tables of Autheris-enforced sources only. Sensitive
             // tables (flagged by the caller or by the metadata lookup, which fails closed) and delegated sources always read Redis.
-            if (!check.IsHighlySensitive && !check.IsDelegatedSource && budgetMs > 0 && !_epochFloors.ContainsKey(key) &&
+            var isDelegated = check.IsDelegatedSource ||
+                (_gatewayOptions is not null &&
+                 Autheris.Application.Sql.Services.SqlDataSourceResolver.ResolveConnectionOptions(_gatewayOptions, check.Table.Domain)?.EnforcementMode == EnforcementMode.Delegated);
+            if (!check.IsHighlySensitive && !isDelegated && budgetMs > 0 && !_epochFloors.ContainsKey(key) &&
                 _microCache.TryGetValue(key, out var entry) &&
                 (now - entry.CachedAt).TotalMilliseconds <= budgetMs)
             {

@@ -287,6 +287,66 @@ public sealed class DbtMetaIndexesTests
         repo.Stored(OrdersId).PrimaryKeyColumns.ShouldBe(["id"]);
     }
 
+    [Theory]
+    [InlineData("SqlServer")]
+    [InlineData("PostgreSql")]
+    [InlineData("Oracle")]
+    [InlineData("Databricks")]
+    [InlineData("DuckDB")]
+    public async Task MetaIndexes_OnSource_ProducesIdenticalKeysAndIndexes_AcrossAllEngines(string sourceType)
+    {
+        var gpsId = new TableIdentifier("telemetry", "dbo", "gps_position");
+        const string manifest = """
+        {
+          "metadata": { "dbt_version": "1.8.0" },
+          "nodes": {},
+          "sources": {
+            "source.proj.telemetry.gps_position": {
+              "name": "gps_position", "database": "telemetry", "schema": "dbo", "description": "GPS positions",
+              "meta": {
+                "indexes": [
+                  { "name": "pk_gps_position", "columns": ["device_id", "ts DESC"], "primary_key": true },
+                  { "name": "ix_gps_region", "columns": ["region", "ts DESC"], "unique": false }
+                ]
+              },
+              "columns": {
+                "device_id": { "name": "device_id", "data_type": "varchar", "meta": {}, "tags": [] },
+                "ts": { "name": "ts", "data_type": "timestamp", "meta": {}, "tags": [] },
+                "region": { "name": "region", "data_type": "varchar", "meta": {}, "tags": [] }
+              }
+            }
+          }
+        }
+        """;
+
+        var repo = new InMemoryTableRepo();
+        var seeded = ExistingTable(gpsId, "device_id", "ts", "region");
+        repo.Seed(seeded with { Table = seeded.Table with { SourceType = sourceType } });
+        var service = CreateService(repo, new RecordingLogger<DbtMetadataIngestionService>());
+
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(manifest));
+        await service.IngestManifestStreamAsClusterAdminAsync(stream, dryRun: false);
+
+        var stored = repo.Stored(gpsId);
+        stored.ReplaceKeyDefinition.ShouldBeTrue();
+        stored.PrimaryKeyColumns.ShouldBe(["device_id", "ts"]);
+        stored.PrimaryKeyDirections.ShouldBe([KeyColumnDirection.Ascending, KeyColumnDirection.Descending]);
+        stored.Indexes.Count.ShouldBe(1);
+        stored.Indexes[0].Name.ShouldBe("ix_gps_region");
+        stored.Indexes[0].IsUnique.ShouldBeFalse();
+        stored.Indexes[0].Columns.ShouldBe(["region", "ts"]);
+        stored.Indexes[0].Directions.ShouldBe([KeyColumnDirection.Ascending, KeyColumnDirection.Descending]);
+
+        var projected = Autheris.Application.DataSources.Services.DatasetIndexProjection.Project(
+            stored,
+            new HashSet<string>(["device_id", "ts", "region"], StringComparer.OrdinalIgnoreCase));
+        projected.PrimaryKeyColumns.ShouldBe(["device_id", "ts"]);
+        projected.PrimaryKeyDirections.ShouldBe([KeyColumnDirection.Ascending, KeyColumnDirection.Descending]);
+        projected.Indexes.Count.ShouldBe(1);
+        projected.Indexes[0].Unique.ShouldBeFalse();
+        projected.Indexes[0].Columns.ShouldBe(["region", "ts"]);
+    }
+
     private static DbtMetadataIngestionService CreateService(InMemoryTableRepo repo, ILogger<DbtMetadataIngestionService> logger) =>
         new(new InMemoryProposalRepo(), repo, new InMemoryLineageStore(), logger);
 
