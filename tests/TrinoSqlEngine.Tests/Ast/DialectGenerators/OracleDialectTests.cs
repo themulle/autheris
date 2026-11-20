@@ -168,4 +168,15 @@ public sealed class OracleDialectTests
         // 4. Oracle pagination
         Assert.Contains("OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY", sql, StringComparison.Ordinal);
     }
+
+    [Theory]
+    [InlineData("SELECT substr(email, 0, 3) FROM orders", "''")]
+    [InlineData("SELECT substring(email, 0) FROM orders", "''")]
+    [InlineData("SELECT substr(email, 1, 3) FROM orders", "SUBSTR(\"EMAIL\", 1, 3)")]
+    [InlineData("SELECT substr(email, -2, 2) FROM orders", "SUBSTR(\"EMAIL\", -2, 2)")]
+    public void Oracle_Substr_ZeroStartEmitsEmptyString_NonZeroEmitsSubstr(string sql, string expected)
+    {
+        string generated = AstEmit.Inline(sql, TargetSqlDialect.Oracle);
+        Assert.Contains(expected, generated, StringComparison.Ordinal);
+    }
 }

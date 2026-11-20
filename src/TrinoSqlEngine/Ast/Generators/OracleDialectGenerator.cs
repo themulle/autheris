@@ -100,8 +100,11 @@ public sealed class OracleDialectGenerator : SqlDialectGeneratorBase
 
                     GenerateExpression(nested, ref builder, context);
                     return;
-                case "substring" when count is 2 or 3:
-                    base.GenerateFunctionCall(fn with { Name = new SqlQualifiedName("SUBSTR") }, ref builder, context);
+                case "substr" or "substring" when count is 2 or 3:
+                    FormatSubstring(
+                        ref builder,
+                        new SubstringExpression(fn.Arguments[0], fn.Arguments[1], count == 3 ? fn.Arguments[2] : null),
+                        context);
                     return;
                 case "octet_length" when count == 1:
                     base.GenerateFunctionCall(fn with { Name = new SqlQualifiedName("LENGTHB") }, ref builder, context);
@@ -163,6 +166,18 @@ public sealed class OracleDialectGenerator : SqlDialectGeneratorBase
 
     protected override void FormatPosition(ref ValueStringBuilder builder, PositionExpression position, SqlEmitterContext context) =>
         FormatInstr(ref builder, position, context);
+
+    /// <summary>Oracle <c>SUBSTR(s, 0[, len])</c> treats 0 as 1; Trino returns <c>''</c>.</summary>
+    protected override void FormatSubstring(ref ValueStringBuilder builder, SubstringExpression substring, SqlEmitterContext context)
+    {
+        if (TryGetIntegerLiteral(substring.Start, out long start) && start == 0)
+        {
+            AppendConstantFragment(ref builder, context, "''");
+            return;
+        }
+
+        base.FormatSubstring(ref builder, substring, context);
+    }
 
     /// <summary>
     /// Wunsch 4: Oracle EXTRACT knows YEAR…SECOND (time fields only from TIMESTAMP); quarter, ISO week and day of year via
