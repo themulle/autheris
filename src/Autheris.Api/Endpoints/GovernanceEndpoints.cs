@@ -24,7 +24,6 @@ public static partial class GovernanceEndpoints
           .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         MapAuditAndComplianceEndpoints(app);
-        MapRowFilterEvaluationEndpoints(app);
 
         // =========================================================================
         // Declarative Access Profiles & Subject Cleartext Exceptions (R-52 & R-50)

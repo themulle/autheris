@@ -16,9 +16,6 @@ internal static class GatewayDenialStatusMapper
     {
         GatewayUnauthorizedException => (StatusCodes.Status401Unauthorized, "Authentication required."),
         { ErrorCode: "RESPONSE_TOO_LARGE" } => (StatusCodes.Status400BadRequest, "The response exceeds the size limit."),
-        // Issue #107: a failed key-set load is an availability problem, not a policy denial; fixed message, no table or rule.
-        { ErrorCode: Autheris.Application.Sql.Policy.RowFilterKeySets.RowFilterKeySetErrorCodes.KeySetUnavailable } =>
-            (StatusCodes.Status503ServiceUnavailable, Autheris.Application.Sql.Policy.RowFilterKeySets.RowFilterKeySetErrorCodes.UnavailableMessage),
         _ => (StatusCodes.Status403Forbidden, "Access denied.")
     };
 

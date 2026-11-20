@@ -144,7 +144,6 @@ public sealed class CatalogGovernanceRatchetTests
             ["a"] = new MaskingRule { RuleType = "REDACT" }
         },
         PrimaryKeyColumns = ["a"],
-        RowFilterEvaluation = new RowFilterEvaluationSettings(RowFilterEvaluationStrategy.KeySetCache, 60, 100),
         CatalogTags = ["dbt"],
         CatalogView = CatalogView.Granted,
         EstimatedRowCount = 42,
@@ -223,7 +222,6 @@ public sealed class CatalogGovernanceRatchetTests
         merged.OwnerTenantId.ShouldBe("tenant-a");
         merged.ColumnMaskingRules["a"].RuleType.ShouldBe("REDACT");
         merged.PrimaryKeyColumns.ShouldBe(["a"]);
-        merged.RowFilterEvaluation.ShouldBe(existing.RowFilterEvaluation);
         merged.CatalogTags.ShouldBe(["dbt"]);
         merged.EstimatedRowCount.ShouldBe(42);
         merged.ExpectedRows.ShouldBe(43);

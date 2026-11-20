@@ -115,9 +115,6 @@ public partial class GovernanceRepository
                 throw;
             }
 
-            var rowFilterEvaluation = await RowFilterEvaluationStore.ReadObjectAsync(
-                conn, null, KeyDialect, tableId.Value, ct).ConfigureAwait(false);
-
             var classifications = await CatalogRowHydrator.ReadTableClassificationsAsync(conn, tableId.Value, ct).ConfigureAwait(false);
 
             var result = new TableMetadata
@@ -129,8 +126,7 @@ public partial class GovernanceRepository
                 ColumnClassifications = classifications,
                 PrimaryKeyColumns = pkColumns,
                 PrimaryKeyDirections = pkDirections,
-                Indexes = indexes,
-                RowFilterEvaluation = rowFilterEvaluation
+                Indexes = indexes
             };
             result.ValidateRequiredFilterColumns();
 
@@ -240,8 +236,7 @@ public partial class GovernanceRepository
         HashSet<Guid> corruptedTableIds,
         Dictionary<Guid, long>? epochs,
         Func<Guid, string, (bool Hit, TableMetadata? Metadata)>? tryGetCached,
-        CancellationToken ct,
-        Dictionary<Guid, RowFilterEvaluationSettings>? prefetchedRowFilterStrategies = null)
+        CancellationToken ct)
     {
         Dictionary<Guid, CatalogKeyDefinitionStore.TableKeyRows>? prefetchedKeys = null;
         var allActiveTableIds = activeTables.Select(t => t.Id).ToList();
@@ -249,9 +244,6 @@ public partial class GovernanceRepository
         {
             prefetchedKeys = await CatalogKeyDefinitionStore.ReadBatchAsync(conn, null, KeyDialect, allActiveTableIds, ct).ConfigureAwait(false);
         }
-
-        var rowFilterStrategies = prefetchedRowFilterStrategies
-            ?? await RowFilterEvaluationStore.ReadBatchObjectAsync(conn, null, KeyDialect, ct).ConfigureAwait(false);
 
         var classificationsByTable = await CatalogRowHydrator.ReadAllClassificationsAsync(conn, ct).ConfigureAwait(false);
 
@@ -300,8 +292,6 @@ public partial class GovernanceRepository
                 continue;
             }
 
-            rowFilterStrategies.TryGetValue(tid, out var rowFilterEvaluation);
-
             var meta = new TableMetadata
             {
                 Identifier = identifier,
@@ -311,8 +301,7 @@ public partial class GovernanceRepository
                 ColumnClassifications = CatalogRowHydrator.ClassificationsOf(classificationsByTable, tid),
                 PrimaryKeyColumns = pkColumns,
                 PrimaryKeyDirections = pkDirections,
-                Indexes = indexes,
-                RowFilterEvaluation = rowFilterEvaluation
+                Indexes = indexes
             };
 
             try
@@ -362,41 +351,6 @@ public partial class GovernanceRepository
             {
                 change = await CatalogKeyDefinitionStore.ReplaceNarrowAsync(
                     conn, tx, KeyDialect, table, primaryKey, indexes, primaryKeyDirections,
-                    () => IncrementTableEpochInternalAsync(conn, tx, table, ct), ct).ConfigureAwait(false);
-                if (change is null)
-                {
-                    await tx.RollbackAsync(ct).ConfigureAwait(false);
-                    return null;
-                }
-
-                var newVersion = await BumpCatalogVersionInternalAsync(conn, tx, 1, 0, ct).ConfigureAwait(false);
-                await SetTableEpochChangeVersionInternalAsync(conn, tx, table, newVersion.StructureVersion + newVersion.ContentVersion, ct).ConfigureAwait(false);
-                await tx.CommitAsync(ct).ConfigureAwait(false);
-                await PublishCatalogChangedEventAsync(newVersion, ct).ConfigureAwait(false);
-                await FlushScopePendingAsync(ct).ConfigureAwait(false);
-            }
-            catch
-            {
-                await tx.RollbackAsync(ct).ConfigureAwait(false);
-                throw;
-            }
-        }
-
-        await InvalidateTableEpochAsync(table, ct).ConfigureAwait(false);
-        return change;
-    }
-
-    public async Task<RowFilterEvaluationChange?> SetRowFilterEvaluationAsync(
-        TableIdentifier table, RowFilterEvaluationSettings? settings, Sid actor, CancellationToken ct = default)
-    {
-        RowFilterEvaluationChange? change;
-        await using (var conn = await OpenConnectionAsync(ct).ConfigureAwait(false))
-        {
-            await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
-            try
-            {
-                change = await RowFilterEvaluationStore.SetObjectAsync(
-                    conn, tx, KeyDialect, table, settings, actor,
                     () => IncrementTableEpochInternalAsync(conn, tx, table, ct), ct).ConfigureAwait(false);
                 if (change is null)
                 {

@@ -17,7 +17,6 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Tests.Common;
-using Autheris.Tests.Unit.Sql.Policy;
 using Microsoft.Extensions.Options;
 using Npgsql;
 using Shouldly;
@@ -271,14 +270,14 @@ public sealed class GovernancePolicyFactoryIntegrationTests
         await using var db = await PostgreSqlTestDatabase.CreateAsync();
         if (!db.IsAvailable) return;
 
-        var predicate = TestCorrelatedPredicateBuilder.BuildSingle(
-            fkColumn: "id",
-            domain: "default",
-            schema: "main",
-            table: "invoices",
-            alias: "dep",
-            pkColumn: "id",
-            whereColumn: null);
+        var filter = new VirtualFilter
+        {
+            TenantId = new TenantId("t"),
+            Name = "f",
+            Source = "default",
+            Sql = "from main.invoices dep where dep.id = target.id"
+        };
+        var predicate = Autheris.Application.VirtualFilters.SqlFilterCompiler.CompileTyped(filter, DatabaseDialect.PostgreSql, FastSqlEngine.Default);
         var policy = new PolicyPredicateRowPolicy(predicate, TargetSqlDialect.PostgreSql, Renderer);
         var factory = Factory(Catalog(Entry(Orders), Entry(Invoices)), out _);
         var gp = await factory.CreateAsync(Input(new Dictionary<TableIdentity, TableAccessDecision> { [Orders] = Allowed(OrdersId, policy) }), CancellationToken.None);
