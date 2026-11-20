@@ -364,17 +364,23 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
 
             object result = tool.Name.ToLowerInvariant() switch
             {
-                McpDatasetTools.ListDatasets => accessStatus is not null
+                McpDatasetTools.ListDatasets => Text("graphQlField") is { } listGraphQlField
+                    ? await _datasetCatalog.ListDatasetsAsync(principal, Text("search"), Text("domain"), Number("offset"), Number("limit"), Text("tag"), Text("language"), Bool("overview"), Text("format"), accessStatus, listGraphQlField, cancellationToken).ConfigureAwait(false)
+                    : accessStatus is not null
                     ? await _datasetCatalog.ListDatasetsAsync(principal, Text("search"), Text("domain"), Number("offset"), Number("limit"), Text("tag"), Text("language"), Bool("overview"), Text("format"), accessStatus, cancellationToken).ConfigureAwait(false)
                     : (Text("language") != null || Bool("overview") != null || Text("format") != null)
                     ? await _datasetCatalog.ListDatasetsAsync(principal, Text("search"), Text("domain"), Number("offset"), Number("limit"), Text("tag"), Text("language"), Bool("overview"), Text("format"), cancellationToken).ConfigureAwait(false)
                     : (Number("offset") != null || Number("limit") != null || Text("tag") != null)
                         ? await _datasetCatalog.ListDatasetsAsync(principal, Text("search"), Text("domain"), Number("offset"), Number("limit"), Text("tag"), cancellationToken).ConfigureAwait(false)
                         : await _datasetCatalog.ListDatasetsAsync(principal, Text("search"), Text("domain"), cancellationToken).ConfigureAwait(false),
-                McpDatasetTools.DescribeDataset => (Text("language") != null || Bool("brief") != null)
+                McpDatasetTools.DescribeDataset => Text("graphQlField") != null || Text("dataset") == null
+                    ? await _datasetCatalog.DescribeDatasetAsync(principal, Text("dataset"), Text("graphQlField"), Text("language"), Bool("brief") ?? false, cancellationToken).ConfigureAwait(false)
+                    : (Text("language") != null || Bool("brief") != null)
                     ? await _datasetCatalog.DescribeDatasetAsync(principal, Text("dataset") ?? string.Empty, Text("language"), Bool("brief") ?? false, cancellationToken).ConfigureAwait(false)
                     : await _datasetCatalog.DescribeDatasetAsync(principal, Text("dataset") ?? string.Empty, cancellationToken).ConfigureAwait(false),
-                McpDatasetTools.DescribeMyAccess => await _datasetCatalog.DescribeMyAccessAsync(principal, Text("dataset") ?? Text("table") ?? string.Empty, cancellationToken).ConfigureAwait(false),
+                McpDatasetTools.DescribeMyAccess => Text("graphQlField") != null || (Text("dataset") == null && Text("table") == null)
+                    ? await _datasetCatalog.DescribeMyAccessAsync(principal, Text("dataset") ?? Text("table"), Text("graphQlField"), cancellationToken).ConfigureAwait(false)
+                    : await _datasetCatalog.DescribeMyAccessAsync(principal, Text("dataset") ?? Text("table") ?? string.Empty, cancellationToken).ConfigureAwait(false),
                 McpDatasetTools.SampleRows => await _datasetCatalog.SampleRowsAsync(principal, Text("dataset") ?? string.Empty, ToCount(variables) is { } requestedCount ? McpRowCap.Effective(requestedCount, Math.Min(RowCap(), McpDatasetCatalog.MaxSampleRows)) : null, cancellationToken).ConfigureAwait(false),
                 _ => await _datasetCatalog.SampleRowsAsync(principal, Text("dataset") ?? string.Empty, ToCount(variables), cancellationToken).ConfigureAwait(false)
             };

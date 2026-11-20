@@ -88,9 +88,10 @@ public sealed partial class GovernanceRepositoryBatchUpsertTests
         results[3].Metadata.Table.Description.ShouldBe("Latest A");
         results[3].Metadata.Table.Sensitivity.ShouldBe("HIGH");
 
-        var tableUpserts = harness.Commands
-            .Where(c => c.Sql.StartsWith("INSERT INTO TABLES ", StringComparison.Ordinal))
-            .Select(c => $"{c.Params["@domain"]}.{c.Params["@schema"]}.{c.Params["@tableName"]}")
+        var tableInsert = harness.Commands
+            .Single(c => c.Sql.StartsWith("INSERT INTO TABLES ", StringComparison.Ordinal));
+        var tableUpserts = Enumerable.Range(0, 3)
+            .Select(i => $"{tableInsert.Params[$"@domain{i}"]}.{tableInsert.Params[$"@schema{i}"]}.{tableInsert.Params[$"@tableName{i}"]}")
             .ToList();
 
         tableUpserts.ShouldBe(["alpha.dbo.t_a", "mid.dbo.t_m", "zeta.dbo.t_z"]);
@@ -321,6 +322,39 @@ public sealed partial class GovernanceRepositoryBatchUpsertTests
 
         epochService.Invalidations.ShouldNotContain(tUnchanged.Identifier);
         epochService.Invalidations.Count(id => id.Equals(tUpdated.Identifier)).ShouldBe(1);
+    }
+
+    [Fact]
+    [Trait("Category", "Scale")]
+    public async Task BatchUpsert_1000Tables_RoundTripsPerTableAtMostOne_AndLinearTimeAcrossScales()
+    {
+        var harness = new RecordingBatchHarness(_dbName);
+        var repo = CreateRepository(harness);
+
+        var batch200 = Enumerable.Range(0, 200)
+            .Select(i => BuildTable("scale_a", "dbo", $"tbl_{i:D4}"))
+            .ToList();
+        var sw200 = System.Diagnostics.Stopwatch.StartNew();
+        var res200 = await repo.UpsertTableMetadataBatchAsync(batch200, CancellationToken.None);
+        sw200.Stop();
+        res200.Count.ShouldBe(200);
+
+        harness.ResetCounters();
+        var batch1000 = Enumerable.Range(0, 1000)
+            .Select(i => BuildTable("scale_b", "dbo", $"tbl_{i:D4}"))
+            .ToList();
+        var sw1000 = System.Diagnostics.Stopwatch.StartNew();
+        var res1000 = await repo.UpsertTableMetadataBatchAsync(batch1000, CancellationToken.None);
+        sw1000.Stop();
+
+        res1000.Count.ShouldBe(1000);
+        res1000.ShouldAllBe(r => r.Kind == CatalogUpsertKind.Created && r.Classification == CatalogWriteClassification.Additive);
+
+        var avgRoundTripsPerTable = harness.Commands.Count / 1000.0;
+        avgRoundTripsPerTable.ShouldBeLessThanOrEqualTo(1.0);
+
+        // 5x table count must not exhibit quadratic blowup (allow generous 15x wall-clock ceiling for CI jitter).
+        sw1000.ElapsedMilliseconds.ShouldBeLessThanOrEqualTo(Math.Max(sw200.ElapsedMilliseconds * 15, 5_000));
     }
 
     private GovernanceRepository CreateRepository(

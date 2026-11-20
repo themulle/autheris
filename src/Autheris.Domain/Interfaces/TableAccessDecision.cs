@@ -116,9 +116,13 @@ public record TableAccessDecision(
 
     /// <summary>True when catalog text (description, display name, semantics, value profile, examples) must be omitted for <paramref name="columnName"/>.</summary>
     public bool IsCatalogTextHidden(string columnName) =>
+        IsCatalogTextHidden(columnName, metadata: null);
+
+    /// <summary>True when catalog text must be omitted for <paramref name="columnName"/> given effective column access on <paramref name="metadata"/>.</summary>
+    public bool IsCatalogTextHidden(string columnName, TableMetadata? metadata) =>
         HiddenCatalogTextColumns is { Count: > 0 } hidden &&
         hidden.Contains(columnName) &&
-        GetColumnAccess(columnName) != ColumnAccessLevel.Clear;
+        (metadata is not null ? GetEffectiveColumnAccess(columnName, metadata) : GetColumnAccess(columnName)) != ColumnAccessLevel.Clear;
 
     /// <summary>
     /// Typed variant of <see cref="WithAdditionalRowFilter"/>: AND-merges <paramref name="policy"/> into <see cref="RowPolicy"/> and

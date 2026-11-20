@@ -20,7 +20,9 @@ public readonly record struct TableAccessTarget(
     string? Alias,
     string FullName,
     bool SchemaQuoted = false,
-    bool TableNameQuoted = false);
+    bool TableNameQuoted = false,
+    bool CatalogQuoted = false,
+    Ast.Nodes.SqlQualifiedName? QualifiedName = null);
 
 public readonly record struct JoinColumnReference(string? TableOrAlias, string ColumnName);
 public readonly record struct FilterColumnReference(string? TableOrAlias, string ColumnName);

@@ -198,10 +198,23 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         CancellationToken ct = default) =>
         ListDatasetsAsync(principal, search, domain, offset, limit, tag, language, overview, format, accessStatus: null, ct);
 
+    public Task<McpDatasetList> ListDatasetsAsync(
+        ClaimsPrincipal principal,
+        string? search,
+        string? domain,
+        int? offset,
+        int? limit,
+        string? tag,
+        string? language,
+        bool? overview,
+        string? format,
+        string? accessStatus,
+        CancellationToken ct = default) =>
+        ListDatasetsAsync(principal, search, domain, offset, limit, tag, language, overview, format, accessStatus, graphQlField: null, ct);
+
     /// <summary>
-    /// Issue #798: <paramref name="accessStatus"/> (<c>GRANTED</c>, <c>PENDING</c>, <c>EXPIRED</c>, <c>REQUEST_ACCESS</c>; null: no filter)
-    /// keeps only datasets the caller has in that state, before the total, the paging and the overview counts. An unknown value throws
-    /// <see cref="ArgumentException"/> (never ignored).
+    /// Issue #798 / #682: <paramref name="accessStatus"/> filters by caller access state; <paramref name="graphQlField"/>
+    /// filters by exact case-sensitive GraphQL root field (zero or one dataset).
     /// </summary>
     public async Task<McpDatasetList> ListDatasetsAsync(
         ClaimsPrincipal principal,
@@ -214,12 +227,25 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         bool? overview,
         string? format,
         string? accessStatus,
+        string? graphQlField,
         CancellationToken ct = default)
     {
         var accessFilter = CatalogAccessStatus.ParseFilter(accessStatus);
+        TableIdentifier? graphQlTarget = null;
+        if (graphQlField is not null)
+        {
+            graphQlTarget = graphQlMap == null || string.IsNullOrWhiteSpace(graphQlField)
+                ? null
+                : await graphQlMap.ResolveRootFieldAsync(graphQlField, ct).ConfigureAwait(false);
+            if (graphQlTarget is null)
+            {
+                return EmptyDatasetList(offset, limit, language, overview);
+            }
+        }
+
         if (_discoveryService != null && !IsBypassed)
         {
-            return await ListDatasetsWithDiscoveryAsync(principal, search, domain, offset, limit, tag, language, overview, format, accessFilter, ct).ConfigureAwait(false);
+            return await ListDatasetsWithDiscoveryAsync(principal, search, domain, offset, limit, tag, language, overview, format, accessFilter, graphQlTarget, ct).ConfigureAwait(false);
         }
 
         // F-C11: the service has already dropped every row the shaping rule maps to NotFound; the check below is the second line of
@@ -227,6 +253,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         var (allVisible, isAdminView) = await VisibleSetAsync(principal, ct).ConfigureAwait(false);
         var visible = allVisible
             .Where(t => Shape(isAdminView, t) != CatalogOutputShape.NotFound)
+            .Where(t => graphQlTarget is not { } target || SameTable(t.Identifier, target))
             .ToList();
 
         // Issue #798: the caller's consents are read once; the filter runs on the visible set, before every count and page.
@@ -289,8 +316,8 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         }
 
         var candidateProcedures = new List<(string Id, RegisteredProcedure Proc)>();
-        // Procedures are listed as GRANTED; any other access filter leaves them out.
-        if (_procedureCatalog != null && accessFilter is null or DiscoveryAccessState.Granted)
+        // Procedures are listed as GRANTED; any other access filter (or a GraphQL root field filter) leaves them out.
+        if (_procedureCatalog != null && graphQlField is null && accessFilter is null or DiscoveryAccessState.Granted)
         {
             var visibleProcedures = await _procedureCatalog.ListVisibleAsync(principal, principal.GetTenantId(), ct).ConfigureAwait(false);
             foreach (var proc in visibleProcedures.Where(p => p.Definition.Mode == ProcedureMode.Read && !string.IsNullOrWhiteSpace(p.Definition.ResultTable)))
@@ -418,20 +445,32 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
     public Task<McpDatasetDescription> DescribeDatasetAsync(ClaimsPrincipal principal, string dataset, string? language, CancellationToken ct = default) =>
         DescribeDatasetAsync(principal, dataset, language, brief: false, ct);
 
-    public async Task<McpDatasetDescription> DescribeDatasetAsync(ClaimsPrincipal principal, string dataset, string? language, bool brief, CancellationToken ct = default)
+    public Task<McpDatasetDescription> DescribeDatasetAsync(ClaimsPrincipal principal, string dataset, string? language, bool brief, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(dataset);
-        if (dataset.TrimStart().StartsWith("procedure:", StringComparison.OrdinalIgnoreCase))
+        return DescribeDatasetAsync(principal, dataset, graphQlField: null, language, brief, ct);
+    }
+
+    public async Task<McpDatasetDescription> DescribeDatasetAsync(
+        ClaimsPrincipal principal,
+        string? dataset,
+        string? graphQlField,
+        string? language,
+        bool brief,
+        CancellationToken ct = default)
+    {
+        var effectiveDataset = await ResolveDescribeTargetAsync(dataset, graphQlField, ct).ConfigureAwait(false);
+        if (effectiveDataset.TrimStart().StartsWith("procedure:", StringComparison.OrdinalIgnoreCase))
         {
-            return await DescribeProcedureDatasetAsync(principal, dataset.Trim(), ct).ConfigureAwait(false);
+            return await DescribeProcedureDatasetAsync(principal, effectiveDataset.Trim(), ct).ConfigureAwait(false);
         }
 
         if (_discoveryService != null && !IsBypassed)
         {
-            return await DescribeDatasetWithDiscoveryAsync(principal, dataset, language, brief, ct).ConfigureAwait(false);
+            return await DescribeDatasetWithDiscoveryAsync(principal, effectiveDataset, language, brief, ct).ConfigureAwait(false);
         }
 
-        var (table, shape) = await FindVisibleAsync(principal, dataset, ct).ConfigureAwait(false);
+        var (table, shape) = await FindVisibleAsync(principal, effectiveDataset, ct).ConfigureAwait(false);
         var id = table.Identifier;
 
         var (activeConsents, pendingRequests, isAdmin) = await GetCallerConsentsAndRequestsAsync(principal, ct).ConfigureAwait(false);
@@ -949,20 +988,22 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         TableIdentifier table, IReadOnlyList<Consent> activeConsents, IReadOnlyList<ConsentRequest> pendingRequests, bool isAdmin, bool authBypassed) =>
         authBypassed ? "GRANTED" : CatalogVisibility.ComputeAccessStatus(table, activeConsents, pendingRequests, isAdmin);
 
-    public async Task<EffectiveTableAccessDto> DescribeMyAccessAsync(ClaimsPrincipal principal, string dataset, CancellationToken ct = default)
+    public Task<EffectiveTableAccessDto> DescribeMyAccessAsync(ClaimsPrincipal principal, string dataset, CancellationToken ct = default) =>
+        DescribeMyAccessAsync(principal, dataset, graphQlField: null, ct);
+
+    public async Task<EffectiveTableAccessDto> DescribeMyAccessAsync(
+        ClaimsPrincipal principal,
+        string? dataset,
+        string? graphQlField,
+        CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(principal);
-        if (!TryParseDatasetId(dataset, out var tableId))
+        if (explanationService == null)
         {
-            throw new ArgumentException($"Invalid dataset format: '{dataset}'. Expected 'domain.schema.table' or 'domain.table'.", nameof(dataset));
+            throw new InvalidOperationException("EffectiveAccessExplanationService is not configured.");
         }
 
-        if (explanationService != null)
-        {
-            return await explanationService.ExplainMyAccessAsync(principal, tableId, ct).ConfigureAwait(false);
-        }
-
-        throw new InvalidOperationException("EffectiveAccessExplanationService is not configured.");
+        return await DescribeMyAccessCoreAsync(principal, dataset, graphQlField, ct).ConfigureAwait(false);
     }
 
     public async Task<McpDatasetSample> SampleRowsAsync(ClaimsPrincipal principal, string dataset, int? count, CancellationToken ct = default)
