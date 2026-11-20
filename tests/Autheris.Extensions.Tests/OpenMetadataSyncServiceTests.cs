@@ -6,9 +6,10 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Extensions.OpenMetadata;
+using Autheris.Extensions.Tests.TestSupport;
+using Autheris.Tests.Common.Fakes;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -16,10 +17,10 @@ namespace Autheris.Extensions.Tests;
 
 public sealed class OpenMetadataSyncServiceTests
 {
-    private readonly IOpenMetadataClient _client = Substitute.For<IOpenMetadataClient>();
-    private readonly ITableMetadataRepository _metadataRepo = Substitute.For<ITableMetadataRepository>();
-    private readonly IConsentRepository _consentRepo = Substitute.For<IConsentRepository>();
-    private readonly IPolicyEpochRepository _epochRepo = Substitute.For<IPolicyEpochRepository>();
+    private readonly StubOpenMetadataClient _client = new();
+    private readonly InMemoryTableMetadataRepository _metadataRepo = new();
+    private readonly RecordingConsentRepository _consentRepo = new();
+    private readonly InMemoryPolicyEpochRepository _epochRepo = new();
 
     private GatewayOptions CreateOptions(string? webhookSecret = "om-test-secret-42", bool bypassSignature = false)
     {
@@ -169,34 +170,11 @@ public sealed class OpenMetadataSyncServiceTests
             }
         };
 
-        _client.GetTablesAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<OpenMetadataTable>>(tables));
-        _client.GetPoliciesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<OpenMetadataPolicy>>(policies));
-        _client.GetRolesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<OpenMetadataRole>>(roles));
-        _client.GetTeamsAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<OpenMetadataTeam>>(teams));
-        _client.GetUsersAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<OpenMetadataUser>>(users));
-
-        TableMetadata? capturedMetadata = null;
-        _metadataRepo.UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>())
-            .Returns(callInfo =>
-            {
-                var meta = callInfo.Arg<TableMetadata>();
-                capturedMetadata = meta;
-                return Task.FromResult(meta);
-            });
-
-        var createdConsents = new List<Consent>();
-        _consentRepo.CreateConsentAsync(Arg.Any<Consent>(), Arg.Any<CancellationToken>())
-            .Returns(callInfo =>
-            {
-                var cons = callInfo.Arg<Consent>();
-                createdConsents.Add(cons);
-                return Task.FromResult(cons);
-            });
+        _client.Tables = tables;
+        _client.Policies = policies;
+        _client.Roles = roles;
+        _client.Teams = teams;
+        _client.Users = users;
 
         var syncService = new OpenMetadataSyncService(
             _client,
@@ -214,7 +192,7 @@ public sealed class OpenMetadataSyncServiceTests
         result.SyncedConsents.ShouldBe(2);   // team and user; the role allow rule creates no consent (roles never grant data access)
 
         // Check table metadata
-        capturedMetadata.ShouldNotBeNull();
+        var capturedMetadata = _metadataRepo.UpsertedTables.ShouldHaveSingleItem();
         capturedMetadata.Identifier.Domain.ShouldBe("hr_service");
         capturedMetadata.Identifier.Schema.ShouldBe("dbo");
         capturedMetadata.Identifier.TableName.ShouldBe("employees");
@@ -229,10 +207,10 @@ public sealed class OpenMetadataSyncServiceTests
         // is created automatically even with AutoCreateConsents=true (the positive case for a non-sensitive table is
         // covered in OpenMetadataReconcileAndAlationHardeningTests.E07_TeamAndUserGrantees_ResolvedFromSeparateKeyMaps).
         ClassificationMetadata.IsColumnSensitive(capturedMetadata, "email").ShouldBeTrue();
-        createdConsents.ShouldBeEmpty();
+        _consentRepo.CreatedConsents.ShouldBeEmpty();
 
         // Check epoch bumped
-        await _epochRepo.Received().IncrementTableEpochAsync(capturedMetadata.Identifier, Arg.Any<CancellationToken>());
+        (await _epochRepo.GetTableEpochAsync(capturedMetadata.Identifier)).ShouldBeGreaterThan(0);
     }
 
     [Fact]
@@ -249,16 +227,7 @@ public sealed class OpenMetadataSyncServiceTests
             }
         };
 
-        _client.GetTablesAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<OpenMetadataTable>>(tables));
-        _client.GetPoliciesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<OpenMetadataPolicy>>([]));
-        _client.GetRolesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<OpenMetadataRole>>([]));
-        _client.GetTeamsAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<OpenMetadataTeam>>([]));
-        _client.GetUsersAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<OpenMetadataUser>>([]));
+        _client.Tables = tables;
 
         var syncService = new OpenMetadataSyncService(
             _client,
@@ -274,9 +243,9 @@ public sealed class OpenMetadataSyncServiceTests
         result.SyncedTables.ShouldBe(1);
 
         // Verify repos were NOT called
-        await _metadataRepo.DidNotReceive().UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>());
-        await _consentRepo.DidNotReceive().CreateConsentAsync(Arg.Any<Consent>(), Arg.Any<CancellationToken>());
-        await _epochRepo.DidNotReceive().IncrementTableEpochAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>());
+        _metadataRepo.UpsertCalls.ShouldBe(0);
+        _consentRepo.CreatedConsents.ShouldBeEmpty();
+        _epochRepo.IncrementCalls.ShouldBe(0);
     }
 
     [Fact]
@@ -326,8 +295,7 @@ public sealed class OpenMetadataSyncServiceTests
             ]
         };
 
-        _client.GetTableByFqnAsync("service.db.schema.products", Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<OpenMetadataTable?>(table));
+        _client.Tables = [table];
 
         var syncService = new OpenMetadataSyncService(
             _client,
@@ -340,8 +308,8 @@ public sealed class OpenMetadataSyncServiceTests
         var success = await syncService.HandleWebhookEventAsync(payload, $"sha256={hash}");
 
         success.ShouldBeTrue();
-        await _metadataRepo.Received().UpsertTableMetadataAsync(Arg.Is<TableMetadata>(t => t.Identifier.TableName == "products"), Arg.Any<CancellationToken>());
-        await _epochRepo.Received().IncrementTableEpochAsync(Arg.Is<TableIdentifier>(t => t.TableName == "products"), Arg.Any<CancellationToken>());
+        _metadataRepo.UpsertedTables.ShouldContain(t => t.Identifier.TableName == "products");
+        _epochRepo.IncrementCalls.ShouldBe(1);
     }
 
     [Fact]
@@ -365,7 +333,7 @@ public sealed class OpenMetadataSyncServiceTests
 
         // Stale timestamp outside 5-minute replay window must be rejected
         success.ShouldBeFalse();
-        await _metadataRepo.DidNotReceiveWithAnyArgs().UpsertTableMetadataAsync(default!, default);
+        _metadataRepo.UpsertCalls.ShouldBe(0);
     }
 
     [Fact]
@@ -385,8 +353,7 @@ public sealed class OpenMetadataSyncServiceTests
             FullyQualifiedName = "service.db.schema.dedup_table",
             Columns = [new OpenMetadataColumn { Name = "id", DataType = "INT" }]
         };
-        _client.GetTableByFqnAsync("service.db.schema.dedup_table", Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<OpenMetadataTable?>(table));
+        _client.Tables = [table];
 
         var syncService = new OpenMetadataSyncService(
             _client,
@@ -399,12 +366,12 @@ public sealed class OpenMetadataSyncServiceTests
         // First delivery: processes successfully
         var firstResult = await syncService.HandleWebhookEventAsync(payload, $"sha256={hash}");
         firstResult.ShouldBeTrue();
+        var callsAfterFirst = _metadataRepo.UpsertCalls;
 
         // Duplicate delivery with same event ID: rejected (replay protection) without re-invoking repo
-        _metadataRepo.ClearReceivedCalls();
         var duplicateResult = await syncService.HandleWebhookEventAsync(payload, $"sha256={hash}");
         duplicateResult.ShouldBeFalse();
-        await _metadataRepo.DidNotReceiveWithAnyArgs().UpsertTableMetadataAsync(default!, default);
+        _metadataRepo.UpsertCalls.ShouldBe(callsAfterFirst);
     }
 
     [Fact]
@@ -477,20 +444,10 @@ public sealed class OpenMetadataSyncServiceTests
             Roles = [new OpenMetadataEntityReference { Id = unmappedRoleGuid, Name = "UnmappedRole" }]
         };
 
-        _client.GetTablesAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<OpenMetadataTable>>([table]));
-        _client.GetPoliciesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<OpenMetadataPolicy>>([policy]));
-        _client.GetRolesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<OpenMetadataRole>>([unmappedRole]));
-        _client.GetTeamsAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<OpenMetadataTeam>>([]));
-        _client.GetUsersAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<OpenMetadataUser>>([user]));
-
-        var createdConsents = new List<Consent>();
-        _consentRepo.CreateConsentAsync(Arg.Any<Consent>(), Arg.Any<CancellationToken>())
-            .Returns(callInfo =>
-            {
-                var cons = callInfo.Arg<Consent>();
-                createdConsents.Add(cons);
-                return Task.FromResult(cons);
-            });
+        _client.Tables = [table];
+        _client.Policies = [policy];
+        _client.Roles = [unmappedRole];
+        _client.Users = [user];
 
         var syncService = new OpenMetadataSyncService(
             _client,
@@ -502,7 +459,7 @@ public sealed class OpenMetadataSyncServiceTests
 
         await syncService.SyncPermissionsAsync(dryRun: false);
 
-        createdConsents.ShouldNotContain(c => c.GranteeSid == new Sid("S-1-5-21-ALICE-SID"));
+        _consentRepo.CreatedConsents.ShouldNotContain(c => c.GranteeSid == new Sid("S-1-5-21-ALICE-SID"));
     }
 
     [Fact]

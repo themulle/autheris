@@ -16,11 +16,11 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Extensions.Cdc;
 using Autheris.Tests.Common;
+using Autheris.Tests.Common.Fakes;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
-using NSubstitute;
 using Shouldly;
 using Xunit;
 using static CdcProducerHarness;
@@ -41,18 +41,26 @@ public sealed class CdcProducerServiceTests
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
-    private static IDistributedClusterStateProvider Cluster(Dictionary<string, long> tokens, List<(string Key, TimeSpan Ttl)>? acquired = null)
+    private sealed class RecordingPoller(Func<TableIdentifier, long, int>? onPoll = null) : IMssqlChangeTrackingPoller
     {
-        var state = Substitute.For<IDistributedClusterStateProvider>();
-        state.TryAcquireLeaseAsync(Arg.Any<string>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
-            .Returns(call =>
-            {
-                var key = call.ArgAt<string>(0);
-                acquired?.Add((key, call.ArgAt<TimeSpan>(1)));
-                return new ValueTask<IDistributedLease?>(tokens.TryGetValue(key, out var t) ? new FakeLease(key, t) : null);
-            });
-        return state;
+        public List<(TableIdentifier Table, long FencingToken)> Calls { get; } = [];
+
+        public Task<int> PollTableChangesAsync(TableIdentifier table, long fencingToken, CancellationToken ct = default)
+        {
+            Calls.Add((table, fencingToken));
+            return Task.FromResult(onPoll?.Invoke(table, fencingToken) ?? 0);
+        }
     }
+
+    private static IDistributedClusterStateProvider Cluster(Dictionary<string, long> tokens, List<(string Key, TimeSpan Ttl)>? acquired = null) =>
+        new StubClusterStateProvider
+        {
+            OnTryAcquireLease = (key, ttl, _) =>
+            {
+                acquired?.Add((key, ttl));
+                return new ValueTask<IDistributedLease?>(tokens.TryGetValue(key, out var t) ? new FakeLease(key, t) : null);
+            }
+        };
 
     private static IHostEnvironment Env(string name)
     {
@@ -72,9 +80,8 @@ public sealed class CdcProducerServiceTests
     [InlineData("Staging")]
     public async Task NonDurableStore_OutsideDevelopment_FailsStart(string environment)
     {
-        var store = Substitute.For<ICdcStreamStore>();
-        store.IsDurable.Returns(false);
-        var service = Service(Substitute.For<IMssqlChangeTrackingPoller>(), store, Options("a.dbo.t"), Cluster([]), environment);
+        var store = new FakeCdcStreamStore { IsDurable = false };
+        var service = Service(new RecordingPoller(), store, Options("a.dbo.t"), Cluster([]), environment);
 
         await Should.ThrowAsync<InvalidOperationException>(() => service.StartAsync(CancellationToken.None));
     }
@@ -82,9 +89,8 @@ public sealed class CdcProducerServiceTests
     [Fact]
     public async Task NonDurableStore_InDevelopment_Starts()
     {
-        var store = Substitute.For<ICdcStreamStore>();
-        store.IsDurable.Returns(false);
-        var service = Service(Substitute.For<IMssqlChangeTrackingPoller>(), store, Options("a.dbo.t"), Cluster([]));
+        var store = new FakeCdcStreamStore { IsDurable = false };
+        var service = Service(new RecordingPoller(), store, Options("a.dbo.t"), Cluster([]));
 
         await service.StartAsync(CancellationToken.None);
         await service.StopAsync(CancellationToken.None);
@@ -93,9 +99,8 @@ public sealed class CdcProducerServiceTests
     [Fact]
     public async Task DurableStore_InProduction_Starts()
     {
-        var store = Substitute.For<ICdcStreamStore>();
-        store.IsDurable.Returns(true);
-        var service = Service(Substitute.For<IMssqlChangeTrackingPoller>(), store, Options("a.dbo.t"), Cluster([]), "Production");
+        var store = new FakeCdcStreamStore { IsDurable = true };
+        var service = Service(new RecordingPoller(), store, Options("a.dbo.t"), Cluster([]), "Production");
 
         await service.StartAsync(CancellationToken.None);
         await service.StopAsync(CancellationToken.None);
@@ -104,32 +109,31 @@ public sealed class CdcProducerServiceTests
     [Fact]
     public async Task RunOnce_PollsEveryTableUnderItsOwnLease_AndPassesItsFencingToken()
     {
-        var poller = Substitute.For<IMssqlChangeTrackingPoller>();
-        poller.PollTableChangesAsync(Arg.Any<TableIdentifier>(), Arg.Any<long>(), Arg.Any<CancellationToken>()).Returns(1);
+        var poller = new RecordingPoller((_, _) => 1);
         var acquired = new List<(string, TimeSpan)>();
         var service = Service(
             poller,
-            Substitute.For<ICdcStreamStore>(),
+            new FakeCdcStreamStore(),
             Options("fin.dbo.Orders", "fin.dbo.Invoices"),
             Cluster(new() { ["cdc:mssql:poll:fin.dbo.orders"] = 11, ["cdc:mssql:poll:fin.dbo.invoices"] = 22 }, acquired));
 
         await service.RunOnceAsync();
 
         acquired.Select(a => a.Item1).Order().ToArray().ShouldBe(["cdc:mssql:poll:fin.dbo.invoices", "cdc:mssql:poll:fin.dbo.orders"]);
-        await poller.Received(1).PollTableChangesAsync(new TableIdentifier("fin", "dbo", "Orders"), 11, Arg.Any<CancellationToken>());
-        await poller.Received(1).PollTableChangesAsync(new TableIdentifier("fin", "dbo", "Invoices"), 22, Arg.Any<CancellationToken>());
+        poller.Calls.Count(c => c == (new TableIdentifier("fin", "dbo", "Orders"), 11L)).ShouldBe(1);
+        poller.Calls.Count(c => c == (new TableIdentifier("fin", "dbo", "Invoices"), 22L)).ShouldBe(1);
     }
 
     [Fact]
     public async Task RunOnce_TableLeaseHeldElsewhere_IsNotPolledHere()
     {
-        var poller = Substitute.For<IMssqlChangeTrackingPoller>();
-        var service = Service(poller, Substitute.For<ICdcStreamStore>(), Options("fin.dbo.Orders", "fin.dbo.Invoices"), Cluster(new() { ["cdc:mssql:poll:fin.dbo.invoices"] = 22 }));
+        var poller = new RecordingPoller();
+        var service = Service(poller, new FakeCdcStreamStore(), Options("fin.dbo.Orders", "fin.dbo.Invoices"), Cluster(new() { ["cdc:mssql:poll:fin.dbo.invoices"] = 22 }));
 
         await service.RunOnceAsync();
 
-        await poller.DidNotReceive().PollTableChangesAsync(new TableIdentifier("fin", "dbo", "Orders"), Arg.Any<long>(), Arg.Any<CancellationToken>());
-        await poller.Received(1).PollTableChangesAsync(new TableIdentifier("fin", "dbo", "Invoices"), 22, Arg.Any<CancellationToken>());
+        poller.Calls.ShouldNotContain(c => c.Table == new TableIdentifier("fin", "dbo", "Orders"));
+        poller.Calls.Count(c => c == (new TableIdentifier("fin", "dbo", "Invoices"), 22L)).ShouldBe(1);
     }
 
     [Fact]
@@ -145,7 +149,7 @@ public sealed class CdcProducerServiceTests
                 Tables = [new CdcTrackedTableOptions { Table = "fin.dbo.fast", PollingIntervalMilliseconds = 250 }, new CdcTrackedTableOptions { Table = "fin.dbo.rare", PollingIntervalMilliseconds = 20_000 }]
             }
         };
-        var service = Service(Substitute.For<IMssqlChangeTrackingPoller>(), Substitute.For<ICdcStreamStore>(), options, Cluster([]));
+        var service = Service(new RecordingPoller(), new FakeCdcStreamStore(), options, Cluster([]));
 
         var partitions = (IReadOnlyList<ClusterPartitionView>)Partitions(service);
 
@@ -154,7 +158,7 @@ public sealed class CdcProducerServiceTests
         partitions.Single(p => p.Key.EndsWith("fast")).Interval.ShouldBe(TimeSpan.FromMilliseconds(250));
         partitions.Single(p => p.Key.EndsWith("rare")).LeaseTtl.ShouldBe(TimeSpan.FromSeconds(60)); // 3 x interval
 
-        var disabled = Service(Substitute.For<IMssqlChangeTrackingPoller>(), Substitute.For<ICdcStreamStore>(), new GatewayOptions(), Cluster([]));
+        var disabled = Service(new RecordingPoller(), new FakeCdcStreamStore(), new GatewayOptions(), Cluster([]));
         Partitions(disabled).ShouldBeEmpty();
     }
 
@@ -170,34 +174,30 @@ public sealed class CdcProducerServiceTests
     [Fact]
     public async Task PersistentFailure_BacksOffExponentially_AndIsAttemptedAgainAfterwards()
     {
-        var poller = Substitute.For<IMssqlChangeTrackingPoller>();
-        poller.PollTableChangesAsync(Arg.Any<TableIdentifier>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
-            .Returns<Task<int>>(_ => throw new CdcSourceConfigurationException(CdcActivationCodes.TrackingDisabled));
+        var poller = new RecordingPoller((_, _) => throw new CdcSourceConfigurationException(CdcActivationCodes.TrackingDisabled));
         var time = new FakeTimeProvider();
         var service = Service(
-            poller, Substitute.For<ICdcStreamStore>(), Options("fin.dbo.Orders"), Cluster(new() { ["cdc:mssql:poll:fin.dbo.orders"] = 1 }),
+            poller, new FakeCdcStreamStore(), Options("fin.dbo.Orders"), Cluster(new() { ["cdc:mssql:poll:fin.dbo.orders"] = 1 }),
             tracker: new CdcPollFailureTracker(time), time: time);
 
         await service.RunOnceAsync();
         await service.RunOnceAsync();
         await service.RunOnceAsync();
-        await poller.Received(1).PollTableChangesAsync(Arg.Any<TableIdentifier>(), Arg.Any<long>(), Arg.Any<CancellationToken>());
+        poller.Calls.Count.ShouldBe(1);
 
         time.Advance(TimeSpan.FromMinutes(6));
         await service.RunOnceAsync();
 
-        await poller.Received(2).PollTableChangesAsync(Arg.Any<TableIdentifier>(), Arg.Any<long>(), Arg.Any<CancellationToken>());
+        poller.Calls.Count.ShouldBe(2);
     }
 
     [Fact]
     public async Task FailureLog_CarriesOnlyTheStableCode()
     {
         var logger = new CapturingLogger<CdcProducerService>();
-        var poller = Substitute.For<IMssqlChangeTrackingPoller>();
-        poller.PollTableChangesAsync(Arg.Any<TableIdentifier>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
-            .Returns<Task<int>>(_ => throw new CdcSourceConfigurationException(CdcActivationCodes.PkMismatch));
+        var poller = new RecordingPoller((_, _) => throw new CdcSourceConfigurationException(CdcActivationCodes.PkMismatch));
         var service = new CdcProducerService(
-            poller, Substitute.For<ICdcStreamStore>(), new StaticOptionsMonitor<GatewayOptions>(Options("fin.dbo.Orders")),
+            poller, new FakeCdcStreamStore(), new StaticOptionsMonitor<GatewayOptions>(Options("fin.dbo.Orders")),
             Cluster(new() { ["cdc:mssql:poll:fin.dbo.orders"] = 1 }), Env("Development"), logger);
 
         await service.RunOnceAsync();
@@ -208,11 +208,11 @@ public sealed class CdcProducerServiceTests
     [Fact]
     public async Task FencedAndTransientFailures_AreContained()
     {
-        var poller = Substitute.For<IMssqlChangeTrackingPoller>();
         var calls = 0;
-        poller.PollTableChangesAsync(Arg.Any<TableIdentifier>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
-            .Returns<Task<int>>(_ => ++calls == 1 ? throw new InvalidOperationException("transient") : throw new FencingTokenRejectedException("t", 1));
-        var service = Service(poller, Substitute.For<ICdcStreamStore>(), Options("fin.dbo.Orders"), Cluster(new() { ["cdc:mssql:poll:fin.dbo.orders"] = 1 }));
+        var poller = new RecordingPoller((_, _) => ++calls == 1
+            ? throw new InvalidOperationException("transient")
+            : throw new FencingTokenRejectedException("t", 1));
+        var service = Service(poller, new FakeCdcStreamStore(), Options("fin.dbo.Orders"), Cluster(new() { ["cdc:mssql:poll:fin.dbo.orders"] = 1 }));
 
         await service.RunOnceAsync();
         await service.RunOnceAsync();
@@ -223,14 +223,14 @@ public sealed class CdcProducerServiceTests
     [Fact]
     public async Task TableRemovedFromOptions_IsNotPolled()
     {
-        var poller = Substitute.For<IMssqlChangeTrackingPoller>();
-        var service = Service(poller, Substitute.For<ICdcStreamStore>(), Options("fin.dbo.Orders"), Cluster(new() { ["cdc:mssql:poll:fin.dbo.gone"] = 1 }));
+        var poller = new RecordingPoller();
+        var service = Service(poller, new FakeCdcStreamStore(), Options("fin.dbo.Orders"), Cluster(new() { ["cdc:mssql:poll:fin.dbo.gone"] = 1 }));
         var partition = new Autheris.Application.Runtime.Hosting.ClusterPartition(
             "cdc:mssql:poll:fin.dbo.gone", new Autheris.Application.Runtime.Hosting.ClusterSchedule(true, TimeSpan.FromSeconds(1), TimeSpan.Zero, TimeSpan.FromSeconds(15), TimeSpan.Zero));
 
         await service.RunPartitionCycleAsync(partition, CancellationToken.None);
 
-        await poller.DidNotReceiveWithAnyArgs().PollTableChangesAsync(default, 0, default);
+        poller.Calls.ShouldBeEmpty();
     }
 
     // ---- AC-14: MSSQL changes never travel over the broadcast channel
@@ -264,7 +264,7 @@ public sealed class CdcProducerServiceTests
         services.AddSingleton<ICdcPayloadCodec>(h.Codec);
         services.AddSingleton<ICdcStreamSignal>(h.Signal);
         services.AddSingleton<Microsoft.Extensions.Options.IOptionsMonitor<GatewayOptions>>(h.Monitor);
-        services.AddSingleton(Substitute.For<IDistributedClusterStateProvider>());
+        services.AddSingleton<IDistributedClusterStateProvider>(new InMemoryClusterStateProvider());
         services.AddSingleton(Env("Development"));
         services.AddLogging();
         services.AddCdcSourceIntegration(h.Options);

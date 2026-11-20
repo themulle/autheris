@@ -31,6 +31,8 @@ using Autheris.Extensions.Dbt;
 using Autheris.Extensions.Lakehouse.Interfaces;
 using Autheris.Extensions.Lakehouse.Services;
 using Autheris.Extensions.OpenMetadata;
+using Autheris.Extensions.Tests.TestSupport;
+using Autheris.Tests.Common.Fakes;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -443,19 +445,16 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
 
     // ------------------------------------------------------------------ H-19
 
-    private static (OpenMetadataSyncService Service, IConsentRepository ConsentRepo, List<Consent> Created) CreateOmSync(
+    private static (OpenMetadataSyncService Service, RecordingConsentRepository ConsentRepo) CreateOmSync(
         IReadOnlyList<OpenMetadataRule> rules,
         bool autoCreateConsents,
         IReadOnlyList<Consent>? activeConsents = null)
     {
-        var client = Substitute.For<IOpenMetadataClient>();
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        var consentRepo = Substitute.For<IConsentRepository>();
-        var epochRepo = Substitute.For<IPolicyEpochRepository>();
-
         var policyId = Guid.NewGuid();
-        client.GetTablesAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<OpenMetadataTable>>([
+        var client = new StubOpenMetadataClient
+        {
+            Tables =
+            [
                 new OpenMetadataTable
                 {
                     Id = Guid.NewGuid(),
@@ -464,40 +463,23 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
                     Service = new OpenMetadataEntityReference { Name = "hr_service" },
                     DatabaseSchema = new OpenMetadataEntityReference { Name = "dbo" }
                 }
-            ]));
-        client.GetPoliciesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<OpenMetadataPolicy>>([
+            ],
+            Policies =
+            [
                 new OpenMetadataPolicy { Id = policyId, Name = "HrPolicy", Enabled = true, Rules = rules.ToList() }
-            ]));
-        client.GetRolesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<OpenMetadataRole>>([
+            ],
+            Roles =
+            [
                 new OpenMetadataRole { Name = "HrSpecialist", Policies = [new OpenMetadataEntityReference { Id = policyId, Name = "HrPolicy" }] }
-            ]));
-        client.GetTeamsAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<OpenMetadataTeam>>([
+            ],
+            Teams =
+            [
                 new OpenMetadataTeam { Id = Guid.NewGuid(), Name = "HrTeam", Policies = [new OpenMetadataEntityReference { Id = policyId, Name = "HrPolicy" }] }
-            ]));
-        client.GetUsersAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<OpenMetadataUser>>([]));
-
-        metadataRepo.UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>())
-            .Returns(ci => Task.FromResult(ci.Arg<TableMetadata>()));
-
-        consentRepo.GetAllActiveConsentsForSubjectsAsync(
-                Arg.Any<IEnumerable<Sid>>(), Arg.Any<IEnumerable<string>?>(), Arg.Any<DateTimeOffset?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(activeConsents ?? (IReadOnlyList<Consent>)Array.Empty<Consent>()));
-        // SEC E-05: the reconcile loads all sync-marked consents without subject/table filter.
-        consentRepo.GetActiveConsentsByConsentRequestIdAsync(Arg.Any<Guid>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
-            .Returns(ci => Task.FromResult<IReadOnlyList<Consent>>(
-                (activeConsents ?? Array.Empty<Consent>()).Where(c => c.ConsentRequestId == ci.Arg<Guid>()).ToList()));
-
-        var created = new List<Consent>();
-        consentRepo.CreateConsentAsync(Arg.Any<Consent>(), Arg.Any<CancellationToken>())
-            .Returns(ci =>
-            {
-                var c = ci.Arg<Consent>();
-                created.Add(c);
-                return Task.FromResult(c);
-            });
+            ]
+        };
+        var metadataRepo = new InMemoryTableMetadataRepository();
+        var consentRepo = new RecordingConsentRepository(activeConsents?.ToArray() ?? []);
+        var epochRepo = new InMemoryPolicyEpochRepository();
 
         var options = Options.Create(new GatewayOptions
         {
@@ -513,13 +495,13 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
         });
 
         var service = new OpenMetadataSyncService(client, metadataRepo, consentRepo, epochRepo, options, NullLogger<OpenMetadataSyncService>.Instance);
-        return (service, consentRepo, created);
+        return (service, consentRepo);
     }
 
     [Fact]
     public async Task H19_MetadataOnlyOperations_ConditionalRules_AndResourceAll_DoNotCreateConsents()
     {
-        var (service, _, created) = CreateOmSync(
+        var (service, consentRepo) = CreateOmSync(
         [
             new OpenMetadataRule { Name = "EditDocs", Effect = "allow", Resources = ["table"], Operations = ["EditDescription", "EditTags"] },
             new OpenMetadataRule { Name = "OwnerOnly", Effect = "allow", Resources = ["table"], Operations = ["ViewAll"], Condition = "isOwner()" },
@@ -530,7 +512,7 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
         var result = await service.SyncPermissionsAsync();
 
         result.Success.ShouldBeTrue();
-        created.ShouldBeEmpty();
+        consentRepo.CreatedConsents.ShouldBeEmpty();
     }
 
     [Fact]
@@ -538,24 +520,25 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
     {
         new OpenMetadataOptions { DefaultTenantId = "default-tenant" }.AutoCreateConsents.ShouldBeFalse();
 
-        var (service, _, created) = CreateOmSync(
+        var (service, consentRepo) = CreateOmSync(
             [new OpenMetadataRule { Name = "ViewEmployees", Effect = "allow", Resources = ["employees"], Operations = ["ViewAll"] }],
             autoCreateConsents: false);
 
         await service.SyncPermissionsAsync();
 
-        created.ShouldBeEmpty();
+        consentRepo.CreatedConsents.ShouldBeEmpty();
     }
 
     [Fact]
     public async Task H19_ExplicitDataReadRule_WithAutoCreate_CreatesMarkedConsent()
     {
-        var (service, _, created) = CreateOmSync(
+        var (service, consentRepo) = CreateOmSync(
             [new OpenMetadataRule { Name = "ViewEmployees", Effect = "allow", Resources = ["employees"], Operations = ["ViewSampleData"] }],
             autoCreateConsents: true);
 
         await service.SyncPermissionsAsync();
 
+        var created = consentRepo.CreatedConsents;
         created.Count.ShouldBe(1);
         created[0].GranteeType.ShouldBe(GranteeType.Group);   // roles never grant data access: the allow rule of the role creates nothing
         created[0].GranteeSid!.Value.Value.ShouldBe("S-1-5-21-HR-TEAM");
@@ -592,7 +575,7 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
         };
 
         // The policy now only contains a metadata rule -> the earlier data grant has no source anymore
-        var (service, consentRepo, _) = CreateOmSync(
+        var (service, consentRepo) = CreateOmSync(
             [new OpenMetadataRule { Name = "EditDocs", Effect = "allow", Resources = ["employees"], Operations = ["EditDescription"] }],
             autoCreateConsents: true,
             activeConsents: [staleSyncConsent, manualConsent]);
@@ -600,9 +583,7 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
         await service.SyncPermissionsAsync();
 
         // SEC E-05: sync consents are revoked through the marker-bound system revocation.
-        await consentRepo.Received(1).RevokeSystemConsentAsync(Arg.Is(staleSyncConsent.Id), Arg.Is(OpenMetadataSyncService.OpenMetadataSyncConsentMarker), Arg.Any<Sid>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
-        await consentRepo.DidNotReceive().RevokeSystemConsentAsync(Arg.Is(manualConsent.Id), Arg.Any<Guid>(), Arg.Any<Sid>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
-        await consentRepo.DidNotReceive().RevokeConsentAsync(manualConsent.Id, Arg.Any<Sid>(), Arg.Any<string>(), Arg.Any<Autheris.Domain.Security.ConsentRevocationAuthority>(), Arg.Any<CancellationToken>());
+        consentRepo.RevokedIds.ShouldBe([staleSyncConsent.Id]);
     }
 
     // ------------------------------------------------------------------ M-32
@@ -650,69 +631,49 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
     public async Task M32_CatalogMirrorSync_CannotDowngradeGovernanceFlags()
     {
         var id = new TableIdentifier("finance", "dbo", "payroll");
-        var client = Substitute.For<IDataCatalogClient>();
-        client.ProviderType.Returns(DataCatalogProviderType.OpenMetadata);
-        client.GetTablesAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>())
-            .Returns(new List<CatalogTableAsset>
-            {
-                // Tags removed and empty column list in the catalog (downgrade attempt)
-                new() { Identifier = id, SourceType = "PostgreSQL", Columns = [new CatalogColumnAsset { ColumnName = "ssn" }] }
-            });
-
-        var repo = Substitute.For<ITableMetadataRepository>();
-        repo.GetTableMetadataAsync(id, Arg.Any<CancellationToken>()).Returns(Task.FromResult<TableMetadata?>(ProtectedExistingTable(id)));
-        TableMetadata? upserted = null;
-        repo.UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>())
-            .Returns(ci =>
-            {
-                var m = ci.Arg<TableMetadata>();
-                upserted = m;
-                return Task.FromResult(m);
-            });
+        var client = new StubDataCatalogClient
+        {
+            Tables = [new() { Identifier = id, SourceType = "PostgreSQL", Columns = [new CatalogColumnAsset { ColumnName = "ssn" }] }]
+        };
+        var repo = new UnfilteredSingleTableRepo(ProtectedExistingTable(id));
 
         var sut = new DataCatalogSyncService(
             client,
             repo,
-            Substitute.For<IEpochValidationService>(),
+            new FakeEpochValidationService(),
             Options.Create(new GatewayOptions { Catalog = new DataCatalogOptions { Provider = DataCatalogProviderType.OpenMetadata } }),
-            Substitute.For<IAuditWriter>(), NullLogger<DataCatalogSyncService>.Instance);
+            new InMemoryAuditWriter(), NullLogger<DataCatalogSyncService>.Instance);
 
         var result = await sut.SyncCatalogAsync();
 
         result.Success.ShouldBeTrue();
-        upserted.ShouldNotBeNull();
-        AssertProtectionRetained(upserted);
-        upserted.Columns.ShouldContain(c => c.ColumnName == "name"); // column missing upstream is retained
+        repo.Upserted.ShouldNotBeNull();
+        AssertProtectionRetained(repo.Upserted);
+        repo.Upserted.Columns.ShouldContain(c => c.ColumnName == "name"); // column missing upstream is retained
     }
 
     [Fact]
     public async Task M32_OpenMetadataWebhookTableUpdate_CannotDowngradeGovernanceFlags()
     {
         var id = new TableIdentifier("svc", "schema", "payroll");
-        var client = Substitute.For<IOpenMetadataClient>();
-        client.GetTableByFqnAsync("svc.db.schema.payroll", Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<OpenMetadataTable?>(new OpenMetadataTable
-            {
-                Id = Guid.NewGuid(),
-                Name = "payroll",
-                FullyQualifiedName = "svc.db.schema.payroll",
-                Columns = [new OpenMetadataColumn { Name = "ssn", DataType = "VARCHAR" }]
-            }));
-
-        var repo = Substitute.For<ITableMetadataRepository>();
-        repo.GetTableMetadataAsync(id, Arg.Any<CancellationToken>()).Returns(Task.FromResult<TableMetadata?>(ProtectedExistingTable(id)));
-        TableMetadata? upserted = null;
-        repo.UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>())
-            .Returns(ci =>
-            {
-                var m = ci.Arg<TableMetadata>();
-                upserted = m;
-                return Task.FromResult(m);
-            });
+        var client = new StubOpenMetadataClient
+        {
+            Tables =
+            [
+                new OpenMetadataTable
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "payroll",
+                    FullyQualifiedName = "svc.db.schema.payroll",
+                    Columns = [new OpenMetadataColumn { Name = "ssn", DataType = "VARCHAR" }]
+                }
+            ]
+        };
+        var repo = new UnfilteredSingleTableRepo(ProtectedExistingTable(id));
 
         const string secret = "om-secret-m32";
         var options = Options.Create(new GatewayOptions { OpenMetadata = new OpenMetadataOptions { DefaultTenantId = "default-tenant", Enabled = true, WebhookSecret = secret } });
-        var service = new OpenMetadataSyncService(client, repo, Substitute.For<IConsentRepository>(), Substitute.For<IPolicyEpochRepository>(),
+        var service = new OpenMetadataSyncService(client, repo, new RecordingConsentRepository(), new InMemoryPolicyEpochRepository(),
             options, NullLogger<OpenMetadataSyncService>.Instance);
 
         var payload = $"{{\"id\":\"{Guid.NewGuid()}\",\"timestamp\":{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()},\"eventType\":\"entityUpdated\",\"entityType\":\"table\",\"entityFullyQualifiedName\":\"svc.db.schema.payroll\"}}";
@@ -720,8 +681,8 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
         var ok = await service.HandleWebhookEventAsync(payload, "sha256=" + Hmac(payload, secret));
 
         ok.ShouldBeTrue();
-        upserted.ShouldNotBeNull();
-        AssertProtectionRetained(upserted);
+        repo.Upserted.ShouldNotBeNull();
+        AssertProtectionRetained(repo.Upserted);
     }
 
     // ------------------------------------------------------------------ M-34
@@ -799,18 +760,12 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
     [Fact]
     public async Task EX01_UserNameStartingWithS1_IsNotAcceptedAsSid()
     {
-        var client = Substitute.For<IOpenMetadataClient>();
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        var consentRepo = Substitute.For<IConsentRepository>();
-        var epochRepo = Substitute.For<IPolicyEpochRepository>();
-
         var policyId = Guid.NewGuid();
-        client.GetTablesAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<OpenMetadataTable>>([
-                new OpenMetadataTable { Id = Guid.NewGuid(), Name = "orders", FullyQualifiedName = "corp.dbo.orders" }
-            ]));
-        client.GetPoliciesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<OpenMetadataPolicy>>([
+        var client = new StubOpenMetadataClient
+        {
+            Tables = [new OpenMetadataTable { Id = Guid.NewGuid(), Name = "orders", FullyQualifiedName = "corp.dbo.orders" }],
+            Policies =
+            [
                 new OpenMetadataPolicy
                 {
                     Id = policyId,
@@ -818,26 +773,20 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
                     Enabled = true,
                     Rules = [new OpenMetadataRule { Name = "AllOrders", Effect = "allow", Resources = ["table"], Operations = ["ViewAll"] }]
                 }
-            ]));
-        client.GetRolesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<OpenMetadataRole>>([
-                new OpenMetadataRole { Name = "OrderReader", Policies = [new OpenMetadataEntityReference { Id = policyId, Name = "OrderPolicy" }] }
-            ]));
-        client.GetTeamsAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<OpenMetadataTeam>>([]));
-        client.GetUsersAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<OpenMetadataUser>>([
-            new OpenMetadataUser
-            {
-                Id = Guid.NewGuid(),
-                Name = "S-1-5-21-ATTACKER-SID",
-                Email = "attacker@evil.local",
-                Roles = [new OpenMetadataEntityReference { Name = "OrderReader" }]
-            }
-        ]));
-
-        var created = new List<Consent>();
-        consentRepo.CreateConsentAsync(Arg.Any<Consent>(), Arg.Any<CancellationToken>())
-            .Returns(ci => { var c = ci.Arg<Consent>(); created.Add(c); return Task.FromResult(c); });
-
+            ],
+            Roles = [new OpenMetadataRole { Name = "OrderReader", Policies = [new OpenMetadataEntityReference { Id = policyId, Name = "OrderPolicy" }] }],
+            Users =
+            [
+                new OpenMetadataUser
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "S-1-5-21-ATTACKER-SID",
+                    Email = "attacker@evil.local",
+                    Roles = [new OpenMetadataEntityReference { Name = "OrderReader" }]
+                }
+            ]
+        };
+        var consentRepo = new RecordingConsentRepository();
         var options = Options.Create(new GatewayOptions
         {
             OpenMetadata = new OpenMetadataOptions
@@ -849,29 +798,23 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
             }
         });
 
-        var service = new OpenMetadataSyncService(client, metadataRepo, consentRepo, epochRepo, options, NullLogger<OpenMetadataSyncService>.Instance);
+        var service = new OpenMetadataSyncService(client, new InMemoryTableMetadataRepository(), consentRepo, new InMemoryPolicyEpochRepository(), options, NullLogger<OpenMetadataSyncService>.Instance);
         var result = await service.SyncPermissionsAsync();
 
         result.Success.ShouldBeTrue();
         // User should NOT have received a consent via S-1- fallback name spoofing
-        created.ShouldNotContain(c => c.GranteeType == GranteeType.User);
+        consentRepo.CreatedConsents.ShouldNotContain(c => c.GranteeType == GranteeType.User);
     }
 
     [Fact]
     public async Task EX01_UserNameMatchingMappedEmail_DoesNotInheritSid()
     {
-        var client = Substitute.For<IOpenMetadataClient>();
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        var consentRepo = Substitute.For<IConsentRepository>();
-        var epochRepo = Substitute.For<IPolicyEpochRepository>();
-
         var policyId = Guid.NewGuid();
-        client.GetTablesAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<OpenMetadataTable>>([
-                new OpenMetadataTable { Id = Guid.NewGuid(), Name = "orders", FullyQualifiedName = "corp.dbo.orders" }
-            ]));
-        client.GetPoliciesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<OpenMetadataPolicy>>([
+        var client = new StubOpenMetadataClient
+        {
+            Tables = [new OpenMetadataTable { Id = Guid.NewGuid(), Name = "orders", FullyQualifiedName = "corp.dbo.orders" }],
+            Policies =
+            [
                 new OpenMetadataPolicy
                 {
                     Id = policyId,
@@ -879,26 +822,20 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
                     Enabled = true,
                     Rules = [new OpenMetadataRule { Name = "AllOrders", Effect = "allow", Resources = ["table"], Operations = ["ViewAll"] }]
                 }
-            ]));
-        client.GetRolesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<OpenMetadataRole>>([
-                new OpenMetadataRole { Name = "OrderReader", Policies = [new OpenMetadataEntityReference { Id = policyId, Name = "OrderPolicy" }] }
-            ]));
-        client.GetTeamsAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<OpenMetadataTeam>>([]));
-        client.GetUsersAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<OpenMetadataUser>>([
-            new OpenMetadataUser
-            {
-                Id = Guid.NewGuid(),
-                Name = "admin@corp.local", // Name is spoofed to match admin's email
-                Email = "attacker@evil.local",
-                Roles = [new OpenMetadataEntityReference { Name = "OrderReader" }]
-            }
-        ]));
-
-        var created = new List<Consent>();
-        consentRepo.CreateConsentAsync(Arg.Any<Consent>(), Arg.Any<CancellationToken>())
-            .Returns(ci => { var c = ci.Arg<Consent>(); created.Add(c); return Task.FromResult(c); });
-
+            ],
+            Roles = [new OpenMetadataRole { Name = "OrderReader", Policies = [new OpenMetadataEntityReference { Id = policyId, Name = "OrderPolicy" }] }],
+            Users =
+            [
+                new OpenMetadataUser
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "admin@corp.local", // Name is spoofed to match admin's email
+                    Email = "attacker@evil.local",
+                    Roles = [new OpenMetadataEntityReference { Name = "OrderReader" }]
+                }
+            ]
+        };
+        var consentRepo = new RecordingConsentRepository();
         var options = Options.Create(new GatewayOptions
         {
             OpenMetadata = new OpenMetadataOptions
@@ -911,28 +848,22 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
             }
         });
 
-        var service = new OpenMetadataSyncService(client, metadataRepo, consentRepo, epochRepo, options, NullLogger<OpenMetadataSyncService>.Instance);
+        var service = new OpenMetadataSyncService(client, new InMemoryTableMetadataRepository(), consentRepo, new InMemoryPolicyEpochRepository(), options, NullLogger<OpenMetadataSyncService>.Instance);
         await service.SyncPermissionsAsync();
 
         // Attacker user MUST NOT inherit admin's SID through user name matching
-        created.ShouldNotContain(c => c.GranteeType == GranteeType.User && c.GranteeSid.HasValue && c.GranteeSid.Value.Value == "S-1-5-21-ADMIN-SID");
+        consentRepo.CreatedConsents.ShouldNotContain(c => c.GranteeType == GranteeType.User && c.GranteeSid.HasValue && c.GranteeSid.Value.Value == "S-1-5-21-ADMIN-SID");
     }
 
     [Fact]
     public async Task EX01_RoleWithoutMappingInRoleToGatewayRoleMap_DoesNotCreateConsent()
     {
-        var client = Substitute.For<IOpenMetadataClient>();
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        var consentRepo = Substitute.For<IConsentRepository>();
-        var epochRepo = Substitute.For<IPolicyEpochRepository>();
-
         var policyId = Guid.NewGuid();
-        client.GetTablesAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<OpenMetadataTable>>([
-                new OpenMetadataTable { Id = Guid.NewGuid(), Name = "orders", FullyQualifiedName = "corp.dbo.orders" }
-            ]));
-        client.GetPoliciesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<OpenMetadataPolicy>>([
+        var client = new StubOpenMetadataClient
+        {
+            Tables = [new OpenMetadataTable { Id = Guid.NewGuid(), Name = "orders", FullyQualifiedName = "corp.dbo.orders" }],
+            Policies =
+            [
                 new OpenMetadataPolicy
                 {
                     Id = policyId,
@@ -940,18 +871,10 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
                     Enabled = true,
                     Rules = [new OpenMetadataRule { Name = "AllOrders", Effect = "allow", Resources = ["table"], Operations = ["ViewAll"] }]
                 }
-            ]));
-        client.GetRolesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<OpenMetadataRole>>([
-                new OpenMetadataRole { Name = "UnmappedMaliciousRole", Policies = [new OpenMetadataEntityReference { Id = policyId, Name = "OrderPolicy" }] }
-            ]));
-        client.GetTeamsAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<OpenMetadataTeam>>([]));
-        client.GetUsersAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<OpenMetadataUser>>([]));
-
-        var created = new List<Consent>();
-        consentRepo.CreateConsentAsync(Arg.Any<Consent>(), Arg.Any<CancellationToken>())
-            .Returns(ci => { var c = ci.Arg<Consent>(); created.Add(c); return Task.FromResult(c); });
-
+            ],
+            Roles = [new OpenMetadataRole { Name = "UnmappedMaliciousRole", Policies = [new OpenMetadataEntityReference { Id = policyId, Name = "OrderPolicy" }] }]
+        };
+        var consentRepo = new RecordingConsentRepository();
         var options = Options.Create(new GatewayOptions
         {
             OpenMetadata = new OpenMetadataOptions
@@ -963,23 +886,20 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
             }
         });
 
-        var service = new OpenMetadataSyncService(client, metadataRepo, consentRepo, epochRepo, options, NullLogger<OpenMetadataSyncService>.Instance);
+        var service = new OpenMetadataSyncService(client, new InMemoryTableMetadataRepository(), consentRepo, new InMemoryPolicyEpochRepository(), options, NullLogger<OpenMetadataSyncService>.Instance);
         await service.SyncPermissionsAsync();
 
-        created.ShouldBeEmpty();
+        consentRepo.CreatedConsents.ShouldBeEmpty();
     }
 
     [Fact]
     public async Task EX01_SensitiveOrFourEyesOrArt9Table_NeverAutoCreatesAllowConsent()
     {
-        var client = Substitute.For<IOpenMetadataClient>();
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        var consentRepo = Substitute.For<IConsentRepository>();
-        var epochRepo = Substitute.For<IPolicyEpochRepository>();
-
         var policyId = Guid.NewGuid();
-        client.GetTablesAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<OpenMetadataTable>>([
+        var client = new StubOpenMetadataClient
+        {
+            Tables =
+            [
                 new OpenMetadataTable
                 {
                     Id = Guid.NewGuid(),
@@ -987,9 +907,9 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
                     FullyQualifiedName = "health.dbo.patient_health",
                     Tags = [new OpenMetadataTag { TagFQN = "GDPR.Art9_HealthData" }, new OpenMetadataTag { TagFQN = "Governance.FourEyes" }]
                 }
-            ]));
-        client.GetPoliciesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<OpenMetadataPolicy>>([
+            ],
+            Policies =
+            [
                 new OpenMetadataPolicy
                 {
                     Id = policyId,
@@ -997,18 +917,10 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
                     Enabled = true,
                     Rules = [new OpenMetadataRule { Name = "ReadHealth", Effect = "allow", Resources = ["table"], Operations = ["ViewAll"] }]
                 }
-            ]));
-        client.GetRolesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<OpenMetadataRole>>([
-                new OpenMetadataRole { Name = "DoctorRole", Policies = [new OpenMetadataEntityReference { Id = policyId, Name = "HealthPolicy" }] }
-            ]));
-        client.GetTeamsAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<OpenMetadataTeam>>([]));
-        client.GetUsersAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<OpenMetadataUser>>([]));
-
-        var created = new List<Consent>();
-        consentRepo.CreateConsentAsync(Arg.Any<Consent>(), Arg.Any<CancellationToken>())
-            .Returns(ci => { var c = ci.Arg<Consent>(); created.Add(c); return Task.FromResult(c); });
-
+            ],
+            Roles = [new OpenMetadataRole { Name = "DoctorRole", Policies = [new OpenMetadataEntityReference { Id = policyId, Name = "HealthPolicy" }] }]
+        };
+        var consentRepo = new RecordingConsentRepository();
         var options = Options.Create(new GatewayOptions
         {
             OpenMetadata = new OpenMetadataOptions
@@ -1020,27 +932,23 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
             }
         });
 
-        var service = new OpenMetadataSyncService(client, metadataRepo, consentRepo, epochRepo, options, NullLogger<OpenMetadataSyncService>.Instance);
+        var service = new OpenMetadataSyncService(client, new InMemoryTableMetadataRepository(), consentRepo, new InMemoryPolicyEpochRepository(), options, NullLogger<OpenMetadataSyncService>.Instance);
         await service.SyncPermissionsAsync();
 
         // Four-Eyes / Art. 9 tables MUST NOT be granted via AutoCreateConsents
-        created.ShouldBeEmpty();
+        consentRepo.CreatedConsents.ShouldBeEmpty();
     }
 
     [Fact]
     public async Task SG12_OpenMetadataSync_AutoCreateConsents_SkipsInactiveTables()
     {
-        var client = Substitute.For<IOpenMetadataClient>();
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        var consentRepo = Substitute.For<IConsentRepository>();
-        var epochRepo = Substitute.For<IPolicyEpochRepository>();
-
         var tableId = Guid.NewGuid();
         var policyId = Guid.NewGuid();
-
         // Non-sensitive table, but inactive (newly imported without ActivateNewTables)
-        client.GetTablesAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<OpenMetadataTable>>([
+        var client = new StubOpenMetadataClient
+        {
+            Tables =
+            [
                 new OpenMetadataTable
                 {
                     Id = tableId,
@@ -1048,9 +956,9 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
                     FullyQualifiedName = "analytics.default.public.inactive_orders",
                     Columns = [new OpenMetadataColumn { Name = "id", DataType = "INT" }]
                 }
-            ]));
-        client.GetPoliciesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<OpenMetadataPolicy>>([
+            ],
+            Policies =
+            [
                 new OpenMetadataPolicy
                 {
                     Id = policyId,
@@ -1058,18 +966,10 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
                     Enabled = true,
                     Rules = [new OpenMetadataRule { Name = "ReadOrders", Effect = "allow", Resources = ["table"], Operations = ["ViewAll"] }]
                 }
-            ]));
-        client.GetRolesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<OpenMetadataRole>>([
-                new OpenMetadataRole { Name = "OrderReaderRole", Policies = [new OpenMetadataEntityReference { Id = policyId, Name = "OrderPolicy" }] }
-            ]));
-        client.GetTeamsAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<OpenMetadataTeam>>([]));
-        client.GetUsersAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<OpenMetadataUser>>([]));
-
-        var created = new List<Consent>();
-        consentRepo.CreateConsentAsync(Arg.Any<Consent>(), Arg.Any<CancellationToken>())
-            .Returns(ci => { var c = ci.Arg<Consent>(); created.Add(c); return Task.FromResult(c); });
-
+            ],
+            Roles = [new OpenMetadataRole { Name = "OrderReaderRole", Policies = [new OpenMetadataEntityReference { Id = policyId, Name = "OrderPolicy" }] }]
+        };
+        var consentRepo = new RecordingConsentRepository();
         var options = Options.Create(new GatewayOptions
         {
             OpenMetadata = new OpenMetadataOptions
@@ -1082,21 +982,16 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
             }
         });
 
-        var service = new OpenMetadataSyncService(client, metadataRepo, consentRepo, epochRepo, options, NullLogger<OpenMetadataSyncService>.Instance);
+        var service = new OpenMetadataSyncService(client, new InMemoryTableMetadataRepository(), consentRepo, new InMemoryPolicyEpochRepository(), options, NullLogger<OpenMetadataSyncService>.Instance);
         await service.SyncPermissionsAsync();
 
         // SG-12: Inactive tables MUST NOT be auto-granted consents
-        created.ShouldBeEmpty();
+        consentRepo.CreatedConsents.ShouldBeEmpty();
     }
 
     [Fact]
     public async Task EX03_OpenMetadataSync_AssignsTargetTenant_AndScopesReconcileByTenant()
     {
-        var client = Substitute.For<IOpenMetadataClient>();
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        var consentRepo = Substitute.For<IConsentRepository>();
-        var epochRepo = Substitute.For<IPolicyEpochRepository>();
-
         var table1 = new OpenMetadataTable
         {
             Id = Guid.NewGuid(),
@@ -1115,13 +1010,12 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
             Database = new OpenMetadataEntityReference { Name = "ledger" },
             DatabaseSchema = new OpenMetadataEntityReference { Name = "dbo" }
         };
-
-        client.GetTablesAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<OpenMetadataTable>>([table1, table2]));
-
         var policyId = Guid.NewGuid();
-        client.GetPoliciesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<OpenMetadataPolicy>>([
+        var client = new StubOpenMetadataClient
+        {
+            Tables = [table1, table2],
+            Policies =
+            [
                 new OpenMetadataPolicy
                 {
                     Id = policyId,
@@ -1129,17 +1023,9 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
                     Enabled = true,
                     Rules = [new OpenMetadataRule { Name = "DenyAll", Effect = "deny", Resources = ["table"], Operations = ["ViewAll"] }]
                 }
-            ]));
-        client.GetRolesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<OpenMetadataRole>>([]));
-        client.GetTeamsAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<OpenMetadataTeam>>([
-                new OpenMetadataTeam { Id = Guid.NewGuid(), Name = "BlockedTeam", Policies = [new OpenMetadataEntityReference { Id = policyId, Name = "DenyPolicy" }] }
-            ]));
-        client.GetUsersAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<OpenMetadataUser>>([]));
-
-        var created = new List<Consent>();
-        consentRepo.CreateConsentAsync(Arg.Any<Consent>(), Arg.Any<CancellationToken>())
-            .Returns(ci => { var c = ci.Arg<Consent>(); created.Add(c); return Task.FromResult(c); });
+            ],
+            Teams = [new OpenMetadataTeam { Id = Guid.NewGuid(), Name = "BlockedTeam", Policies = [new OpenMetadataEntityReference { Id = policyId, Name = "DenyPolicy" }] }]
+        };
 
         var foreignConsent = new Consent
         {
@@ -1154,8 +1040,7 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
             ValidFrom = DateTimeOffset.UtcNow.AddHours(-1),
             ValidTo = DateTimeOffset.UtcNow.AddHours(1)
         };
-        consentRepo.GetActiveConsentsByConsentRequestIdAsync(Arg.Any<Guid>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<Consent>>([foreignConsent]));
+        var consentRepo = new RecordingConsentRepository(foreignConsent);
 
         var options = Options.Create(new GatewayOptions
         {
@@ -1172,10 +1057,11 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
             }
         });
 
-        var service = new OpenMetadataSyncService(client, metadataRepo, consentRepo, epochRepo, options, NullLogger<OpenMetadataSyncService>.Instance);
+        var service = new OpenMetadataSyncService(client, new InMemoryTableMetadataRepository(), consentRepo, new InMemoryPolicyEpochRepository(), options, NullLogger<OpenMetadataSyncService>.Instance);
         var result = await service.SyncPermissionsAsync();
 
         result.Success.ShouldBeTrue();
+        var created = consentRepo.CreatedConsents;
         created.Count.ShouldBe(2);
 
         var clinicalConsent = created.FirstOrDefault(c => c.TableIdentifier.Domain == "health-service");
@@ -1189,12 +1075,7 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
         financeConsent.Effect.ShouldBe(ConsentEffect.Deny);
 
         // foreignConsent for tenant-unrelated must NOT be revoked as it belongs to an unmanaged tenant
-        await consentRepo.DidNotReceive().RevokeSystemConsentAsync(
-            foreignConsent.Id,
-            Arg.Any<Guid>(),
-            Arg.Any<Sid>(),
-            Arg.Any<string>(),
-            Arg.Any<CancellationToken>());
+        consentRepo.RevokedIds.ShouldNotContain(foreignConsent.Id);
     }
 
     [Fact]
@@ -1244,5 +1125,23 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
         // 2 rows kept, and the returned column is properly masked
         matchRows.Count.ShouldBe(2);
         matchRows[0]["region"].ShouldBe("MASKED[REDACT]");
+    }
+
+    private sealed class UnfilteredSingleTableRepo(TableMetadata stored) : ITableMetadataRepository
+    {
+        public TableMetadata? Upserted { get; private set; }
+        public Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default)
+            => Task.FromResult<TableMetadata?>(table == stored.Identifier ? stored : null);
+        public Task<IReadOnlyList<TableMetadata>> GetAllTablesAsync(CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<TableMetadata>>([stored]);
+        public Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default)
+        {
+            Upserted = metadata;
+            return Task.FromResult(metadata);
+        }
+        public Task<TableKeyDefinitionChange?> ReplaceTableKeyDefinitionAsync(
+            TableIdentifier table, IReadOnlyList<string> primaryKey, IReadOnlyList<TableIndexDefinition> indexes,
+            IReadOnlyList<KeyColumnDirection>? primaryKeyDirections = null, CancellationToken ct = default)
+            => throw new NotSupportedException();
     }
 }

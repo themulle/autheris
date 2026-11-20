@@ -14,9 +14,10 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Extensions.DataCatalog;
+using Autheris.Tests.Common;
+using Autheris.Tests.Common.Fakes;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -26,15 +27,13 @@ using Xunit;
 /// </summary>
 public class DataCatalogSyncTests
 {
-    private readonly IDataCatalogClient _catalogClient = Substitute.For<IDataCatalogClient>();
-    private readonly ITableMetadataRepository _tableRepo = Substitute.For<ITableMetadataRepository>();
-    private readonly IEpochValidationService _epochService = Substitute.For<IEpochValidationService>();
+    private readonly StubDataCatalogClient _catalogClient = new(DataCatalogProviderType.OpenMetadata);
+    private readonly InMemoryTableMetadataRepository _tableRepo = new();
+    private readonly FakeEpochValidationService _epochService = new();
     private readonly DataCatalogSyncService _sut;
 
     public DataCatalogSyncTests()
     {
-        _catalogClient.ProviderType.Returns(DataCatalogProviderType.OpenMetadata);
-
         var gatewayOptions = new GatewayOptions
         {
             Catalog = new DataCatalogOptions
@@ -53,7 +52,7 @@ public class DataCatalogSyncTests
             _tableRepo,
             _epochService,
             Options.Create(gatewayOptions),
-            Substitute.For<IAuditWriter>(), NullLogger<DataCatalogSyncService>.Instance);
+            new InMemoryAuditWriter(), NullLogger<DataCatalogSyncService>.Instance);
     }
 
     [Fact]
@@ -83,8 +82,7 @@ public class DataCatalogSyncTests
             ]
         };
 
-        _catalogClient.GetTablesAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>())
-            .Returns(new List<CatalogTableAsset> { catalogTable });
+        _catalogClient.Tables = [catalogTable];
 
         var result = await _sut.SyncCatalogAsync(dryRun: false);
 
@@ -93,15 +91,13 @@ public class DataCatalogSyncTests
         result.Art9ProtectedTablesCount.ShouldBe(1);
         result.MaskedColumnsCount.ShouldBe(1);
 
-        await _tableRepo.Received(1).UpsertTableMetadataAsync(
-            Arg.Is<TableMetadata>(m =>
-                m.Identifier.Equals(tableId) &&
-                m.Table.Sensitivity == "HIGH" &&
-                m.Table.RequiresFourEyes == true &&
-                m.ColumnMaskingRules.ContainsKey("patient_email") &&
-                m.ColumnMaskingRules["patient_email"].RuleType == "MASK_EMAIL"),
-            Arg.Any<CancellationToken>());
-        await _epochService.Received(1).InvalidateEpochAsync(Arg.Is<TableIdentifier>(t => t.Equals(tableId)), Arg.Any<CancellationToken>());
+        var upserted = _tableRepo.UpsertedTables.ShouldHaveSingleItem();
+        upserted.Identifier.ShouldBe(tableId);
+        upserted.Table.Sensitivity.ShouldBe("HIGH");
+        upserted.Table.RequiresFourEyes.ShouldBeTrue();
+        upserted.ColumnMaskingRules.ContainsKey("patient_email").ShouldBeTrue();
+        upserted.ColumnMaskingRules["patient_email"].RuleType.ShouldBe("MASK_EMAIL");
+        _epochService.InvalidatedTables.Count(t => t.Equals(tableId)).ShouldBe(1);
     }
 
     [Theory]
@@ -125,41 +121,36 @@ public class DataCatalogSyncTests
             ]
         };
 
-        _catalogClient.GetTablesAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>())
-            .Returns(new List<CatalogTableAsset> { catalogTable });
+        _catalogClient.Tables = [catalogTable];
 
         var result = await _sut.SyncCatalogAsync(dryRun: false);
 
         result.Art9ProtectedTablesCount.ShouldBe(1);
-        await _tableRepo.Received(1).UpsertTableMetadataAsync(
-            Arg.Is<TableMetadata>(m =>
-                m.Identifier.Equals(tableId) &&
-                m.Table.Sensitivity == "HIGH" &&
-                m.Table.RequiresFourEyes &&
-                ClassificationMetadata.IsColumnSensitive(m, "diagnosis") &&
-                !ClassificationMetadata.IsColumnSensitive(m, "visit_id") &&
-                m.ColumnMaskingRules.ContainsKey("diagnosis") &&
-                m.ColumnMaskingRules["diagnosis"].RuleType == "REDACT"),
-            Arg.Any<CancellationToken>());
+        var m = _tableRepo.UpsertedTables.ShouldHaveSingleItem();
+        m.Identifier.ShouldBe(tableId);
+        m.Table.Sensitivity.ShouldBe("HIGH");
+        m.Table.RequiresFourEyes.ShouldBeTrue();
+        ClassificationMetadata.IsColumnSensitive(m, "diagnosis").ShouldBeTrue();
+        ClassificationMetadata.IsColumnSensitive(m, "visit_id").ShouldBeFalse();
+        m.ColumnMaskingRules.ContainsKey("diagnosis").ShouldBeTrue();
+        m.ColumnMaskingRules["diagnosis"].RuleType.ShouldBe("REDACT");
     }
 
     [Fact]
     public async Task EXT_2_SyncCatalogAsync_KeepsThePersistedSourceName()
     {
         var tableId = new TableIdentifier("sales", "dbo", "invoices");
-        _catalogClient.GetTablesAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<CatalogTableAsset>>([new CatalogTableAsset { Identifier = tableId }]));
-        _tableRepo.GetTableMetadataAsync(tableId, Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<TableMetadata?>(new TableMetadata
-            {
-                Identifier = tableId,
-                Table = new Table { SourceName = "sales_readonly_conn", SchemaName = "dbo", TableName = "invoices", IsActive = true }
-            }));
+        _catalogClient.Tables = [new CatalogTableAsset { Identifier = tableId }];
+        _tableRepo.Add(new TableMetadata
+        {
+            Identifier = tableId,
+            Table = new Table { SourceName = "sales_readonly_conn", SchemaName = "dbo", TableName = "invoices", IsActive = true }
+        });
 
         await _sut.SyncCatalogAsync();
 
-        await _tableRepo.Received(1).UpsertTableMetadataAsync(
-            Arg.Is<TableMetadata>(m => m.Table.SourceName == "sales_readonly_conn"), Arg.Any<CancellationToken>());
+        var m = _tableRepo.UpsertedTables.ShouldHaveSingleItem();
+        m.Table.SourceName.ShouldBe("sales_readonly_conn");
     }
 
     [Fact]
@@ -176,8 +167,7 @@ public class DataCatalogSyncTests
             ]
         };
 
-        _catalogClient.GetTablesAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>())
-            .Returns(new List<CatalogTableAsset> { catalogTable });
+        _catalogClient.Tables = [catalogTable];
 
         var result = await _sut.SyncCatalogAsync(dryRun: true);
 
@@ -185,8 +175,8 @@ public class DataCatalogSyncTests
         result.SyncedTablesCount.ShouldBe(1);
 
         // Dry-run must never persist or invalidate epochs
-        await _tableRepo.DidNotReceive().UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>());
-        await _epochService.DidNotReceive().InvalidateEpochAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>());
+        _tableRepo.UpsertCalls.ShouldBe(0);
+        _epochService.InvalidatedTables.ShouldBeEmpty();
     }
 
     [Fact]
@@ -196,32 +186,36 @@ public class DataCatalogSyncTests
         var failing = new TableIdentifier("sales", "dbo", "failing");
         var never = new TableIdentifier("sales", "dbo", "never");
 
-        _catalogClient.GetTablesAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>())
-            .Returns(new List<CatalogTableAsset>
+        _catalogClient.Tables =
+        [
+            new() { Identifier = first },
+            new() { Identifier = failing },
+            new() { Identifier = never }
+        ];
+        _tableRepo.SimulateEmptyBatchResult = true;
+        _tableRepo.OnUpsert = m =>
+        {
+            if (m.Identifier.Equals(failing))
             {
-                new() { Identifier = first },
-                new() { Identifier = failing },
-                new() { Identifier = never }
-            });
-        _tableRepo.UpsertTableMetadataAsync(Arg.Is<TableMetadata>(m => m.Identifier.Equals(failing)), Arg.Any<CancellationToken>())
-            .Returns<Task<TableMetadata>>(_ => throw new InvalidOperationException("database down"));
+                throw new InvalidOperationException("database down");
+            }
+        };
 
         await Should.ThrowAsync<InvalidOperationException>(() => _sut.SyncCatalogAsync(dryRun: false));
 
         // The table written before the failure (and the one whose write failed part-way) no longer serve stale decisions.
-        await _epochService.Received(1).InvalidateEpochAsync(Arg.Is<TableIdentifier>(t => t.Equals(first)), Arg.Any<CancellationToken>());
-        await _epochService.Received(1).InvalidateEpochAsync(Arg.Is<TableIdentifier>(t => t.Equals(failing)), Arg.Any<CancellationToken>());
-        await _epochService.DidNotReceive().InvalidateEpochAsync(Arg.Is<TableIdentifier>(t => t.Equals(never)), Arg.Any<CancellationToken>());
+        _epochService.InvalidatedTables.Count(t => t.Equals(first)).ShouldBe(1);
+        _epochService.InvalidatedTables.Count(t => t.Equals(failing)).ShouldBe(1);
+        _epochService.InvalidatedTables.ShouldNotContain(t => t.Equals(never));
     }
 
     [Fact]
     public async Task SyncCatalogAsync_ClientFailure_IsPropagated()
     {
-        _catalogClient.GetTablesAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>())
-            .Returns<Task<IReadOnlyList<CatalogTableAsset>>>(_ => throw new InvalidOperationException("catalog down"));
+        _catalogClient.OnGetTables = () => throw new InvalidOperationException("catalog down");
 
         await Should.ThrowAsync<InvalidOperationException>(() => _sut.SyncCatalogAsync(dryRun: false));
-        await _tableRepo.DidNotReceive().UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>());
+        _tableRepo.UpsertCalls.ShouldBe(0);
     }
 
     [Fact]
@@ -236,17 +230,14 @@ public class DataCatalogSyncTests
             Columns = [new() { ColumnName = "id", DataType = "int" }]
         };
 
-        _catalogClient.GetTablesAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>())
-            .Returns(new List<CatalogTableAsset> { catalogTable });
-        _tableRepo.GetTableMetadataAsync(tableId, Arg.Any<CancellationToken>())
-            .Returns((TableMetadata?)null); // New table
+        _catalogClient.Tables = [catalogTable];
 
         var result = await _sut.SyncCatalogAsync(dryRun: false);
 
         result.Success.ShouldBeTrue();
-        await _tableRepo.Received(1).UpsertTableMetadataAsync(
-            Arg.Is<TableMetadata>(m => m.Identifier.Equals(tableId) && m.Table.IsActive == false),
-            Arg.Any<CancellationToken>());
+        var m = _tableRepo.UpsertedTables.ShouldHaveSingleItem();
+        m.Identifier.ShouldBe(tableId);
+        m.Table.IsActive.ShouldBeFalse();
     }
 
     [Fact]
@@ -266,7 +257,7 @@ public class DataCatalogSyncTests
             _tableRepo,
             _epochService,
             Options.Create(gatewayOptions),
-            Substitute.For<IAuditWriter>(), NullLogger<DataCatalogSyncService>.Instance);
+            new InMemoryAuditWriter(), NullLogger<DataCatalogSyncService>.Instance);
 
         var tableId = new TableIdentifier("sales", "dbo", "leads_active");
         var catalogTable = new CatalogTableAsset
@@ -277,17 +268,14 @@ public class DataCatalogSyncTests
             Columns = [new() { ColumnName = "id", DataType = "int" }]
         };
 
-        _catalogClient.GetTablesAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>())
-            .Returns(new List<CatalogTableAsset> { catalogTable });
-        _tableRepo.GetTableMetadataAsync(tableId, Arg.Any<CancellationToken>())
-            .Returns((TableMetadata?)null);
+        _catalogClient.Tables = [catalogTable];
 
         var result = await sut.SyncCatalogAsync(dryRun: false);
 
         result.Success.ShouldBeTrue();
-        await _tableRepo.Received(1).UpsertTableMetadataAsync(
-            Arg.Is<TableMetadata>(m => m.Identifier.Equals(tableId) && m.Table.IsActive == true),
-            Arg.Any<CancellationToken>());
+        var m = _tableRepo.UpsertedTables.ShouldHaveSingleItem();
+        m.Identifier.ShouldBe(tableId);
+        m.Table.IsActive.ShouldBeTrue();
     }
 
     [Fact]
@@ -317,18 +305,13 @@ public class DataCatalogSyncTests
             Columns = [new() { ColumnName = "id", DataType = "int" }, new() { ColumnName = "tenant_id", DataType = "varchar" }]
         };
 
-        _catalogClient.GetTablesAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>())
-            .Returns(new List<CatalogTableAsset> { catalogTable });
-        _tableRepo.GetTableMetadataAsync(tableId, Arg.Any<CancellationToken>())
-            .Returns(existingTable);
-
-        TableMetadata? savedMeta = null;
-        await _tableRepo.UpsertTableMetadataAsync(Arg.Do<TableMetadata>(m => savedMeta = m), Arg.Any<CancellationToken>());
+        _catalogClient.Tables = [catalogTable];
+        _tableRepo.Add(existingTable);
 
         var result = await _sut.SyncCatalogAsync(dryRun: false);
 
         result.Success.ShouldBeTrue();
-        savedMeta.ShouldNotBeNull();
+        var savedMeta = _tableRepo.UpsertedTables.ShouldHaveSingleItem();
         savedMeta.RequiredFilterColumns.ShouldContain("tenant_id");
         savedMeta.Table.Description.ShouldBe("Updated description from catalog");
     }

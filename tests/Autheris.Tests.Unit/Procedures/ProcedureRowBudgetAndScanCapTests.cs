@@ -1,4 +1,6 @@
 using Autheris.Tests.Common;
+using Autheris.Tests.Common.Fakes;
+using Autheris.Tests.Unit.TestDoubles;
 using Autheris.Tests.Unit.TestSupport;
 using System.Data;
 using System.Diagnostics;
@@ -49,11 +51,11 @@ public class ProcedureRowBudgetAndScanCapTests
         public InMemoryProcedureRegistry Registry { get; } = new();
         public IProcedureInvoker Invoker { get; } = Substitute.For<IProcedureInvoker>();
         public IProcedureRowScopeResolver RowScope { get; } = Substitute.For<IProcedureRowScopeResolver>();
-        public ITableMetadataRepository Tables { get; } = Substitute.For<ITableMetadataRepository>();
-        public IConsentRepository Consents { get; } = Substitute.For<IConsentRepository>();
+        public InMemoryTableMetadataRepository Tables { get; } = new();
+        public InMemoryConsentRepository Consents { get; } = new();
         public IConsentResolutionService Resolution { get; } = Substitute.For<IConsentResolutionService>();
-        public IAuditLogRepository Audit { get; } = Substitute.For<IAuditLogRepository>();
-        public List<AuditLogEntry> AuditEntries { get; } = [];
+        public InMemoryAuditLogRepository Audit { get; } = new();
+        public IReadOnlyList<AuditLogEntry> AuditEntries => Audit.Entries;
         public List<int> Budgets { get; } = [];
         public ProcedureEndpointsOptions Procedures { get; set; } = new() { MaxRows = 10 };
         public global::Autheris.Application.Common.Interfaces.ITableReadConcurrencyGate? Gate { get; set; }
@@ -61,7 +63,6 @@ public class ProcedureRowBudgetAndScanCapTests
 
         public GovernedProcedureExecutionService Create()
         {
-            Audit.RecordAuditEventAsync(Arg.Do<AuditLogEntry>(AuditEntries.Add), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
             var options = new GatewayOptions { SqlEndpoints = new SqlEndpointsOptions { Procedures = Procedures } };
             return new GovernedProcedureExecutionService(
                 Registry, Invoker, Options.Create(options), Audit, Tables, Consents, Resolution, masking: null,
@@ -103,13 +104,11 @@ public class ProcedureRowBudgetAndScanCapTests
         var def = TestProcedureYaml.Definition(scoped ? ScopedHeader : UnscopedHeader, "x", false, 60) with { Mode = mode, ErrorCodes = errorCodes ?? [] };
         f.Registry.Register(def);
         f.Registry.MarkActive(def.Name, new ProcedureValidationResult(true, [], ["serial_number", "name"], ["md.crane"], new Dictionary<string, string>()));
-        f.Tables.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(new TableMetadata
+        f.Tables.Add(new TableMetadata
         {
             Identifier = new TableIdentifier("default", "md", "crane"),
             Columns = [new TableColumn { ColumnName = "serial_number" }, new TableColumn { ColumnName = "name" }]
         });
-        f.Consents.GetActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
-            .Returns(new List<Consent>());
         var columns = new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
         {
             ["serial_number"] = ColumnAccessLevel.Clear,
@@ -311,38 +310,30 @@ public class ProcedureRowBudgetAndScanCapTests
     private static InvokerHarness BuildInvoker(int totalRows, long maxResponseBytes = 10485760, string value = "x")
     {
         var h = new InvokerHarness();
-        var connFactory = Substitute.For<ISqlConnectionFactory>();
-        var conn = Substitute.For<DbConnection>();
-
-        var initCmd = Substitute.For<DbCommand>();
-        initCmd.Parameters.Returns(Substitute.For<DbParameterCollection>());
-        initCmd.CreateParameter().Returns(Substitute.For<DbParameter>());
-        initCmd.ExecuteNonQueryAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(0));
-
-        var execCmd = Substitute.For<DbCommand>();
-        execCmd.Parameters.Returns(Substitute.For<DbParameterCollection>());
-        execCmd.CreateParameter().Returns(Substitute.For<DbParameter>());
-        var reader = Substitute.For<DbDataReader>();
-        reader.FieldCount.Returns(1);
-        reader.GetName(0).Returns("v");
-        reader.IsDBNull(0).Returns(_ =>
+        var initCmd = new SpyDbCommand();
+        var reader = new SpyDbDataReader
         {
-            h.GetValueCalls++; // one call per value read (the extra row must never reach it)
-            return false;
-        });
-        reader.GetFieldType(0).Returns(typeof(string));
-        reader.GetChars(Arg.Any<int>(), Arg.Any<long>(), Arg.Any<char[]>(), Arg.Any<int>(), Arg.Any<int>()).Returns(ci =>
-        {
-            long offset = ci.ArgAt<long>(1);
-            var buffer = ci.ArgAt<char[]>(2);
-            int count = (int)Math.Max(0, Math.Min(ci.ArgAt<int>(4), value.Length - offset));
-            value.CopyTo((int)offset, buffer, ci.ArgAt<int>(3), count);
-            return (long)count;
-        });
-        reader.ReadAsync(Arg.Any<CancellationToken>()).Returns(_ => Task.FromResult(++h.Reads <= totalRows));
-        execCmd.ExecuteReaderAsync(Arg.Any<CommandBehavior>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult(reader));
-        conn.CreateCommand().Returns(initCmd, execCmd);
-        connFactory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult(conn));
+            ConfiguredFieldCount = 1,
+            OnGetName = _ => "v",
+            OnIsDBNull = _ =>
+            {
+                h.GetValueCalls++; // one call per value read (the extra row must never reach it)
+                return false;
+            },
+            OnGetFieldType = _ => typeof(string),
+            OnGetChars = (_, offset, buffer, bufferOffset, len) =>
+            {
+                int count = (int)Math.Max(0, Math.Min(len, value.Length - offset));
+                if (buffer is not null)
+                {
+                    value.CopyTo((int)offset, buffer, bufferOffset, count);
+                }
+                return count;
+            },
+            OnRead = _ => ++h.Reads <= totalRows
+        };
+        var execCmd = new SpyDbCommand { Reader = reader };
+        var connFactory = new SpySqlConnectionFactory(_ => new SpyDbConnection(initCmd, new SpyDbCommand(), execCmd));
 
         var options = Options.Create(new GatewayOptions
         {
@@ -409,7 +400,7 @@ public class ProcedureRowBudgetAndScanCapTests
         result.Rows.Count.ShouldBe(7);
         result.MoreRowsAvailable.ShouldBeTrue();
         h.Reads.ShouldBe(8);
-        h.ExecCmd.Received(1).Cancel();
+        ((SpyDbCommand)h.ExecCmd).CancelCalls.ShouldBe(1);
     }
 
     [Fact]
@@ -605,8 +596,7 @@ public class ProcedureRowBudgetAndScanCapTests
     public async Task T_PROC152I2_08_Limit_Invalid_LeaseDenied_Is429_NotValidation(string limit)
     {
         var f = Active(scoped: false, total: 100);
-        f.Gate = Substitute.For<global::Autheris.Application.Common.Interfaces.ITableReadConcurrencyGate>();
-        f.Gate.TryEnter(Arg.Any<string>(), Arg.Any<int>()).Returns((IDisposable?)null);
+        f.Gate = DenyingGate.Instance;
 
         await Should.ThrowAsync<GatewayThrottledException>(() => RunWith(f, Inputs(limit)));
 
@@ -748,9 +738,7 @@ public class ProcedureRowBudgetAndScanCapTests
             registry.MarkActive(d.Name, new ProcedureValidationResult(true, [], ["serial_number"], ["md.crane"], new Dictionary<string, string>()));
         }
 
-        var service = Substitute.For<IProcedureExecutionService>();
-        service.IsVisibleAsync(Arg.Any<RegisteredProcedure>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
-            .Returns(ci => Task.FromResult(ci.ArgAt<RegisteredProcedure>(0).Definition.Name == "get_cranes"));
+        var service = new StubProcedureExecutionService { OnIsVisible = p => p.Definition.Name == "get_cranes" };
         var http = new Microsoft.AspNetCore.Http.DefaultHttpContext { User = User() };
         var options = Options.Create(new GatewayOptions
         {
@@ -1043,9 +1031,10 @@ public class ProcedureRowBudgetAndScanCapTests
     [Fact]
     public async Task Route_MappedBusinessError_Writes422WithDeclaredCodeAndMessage()
     {
-        var service = Substitute.For<IProcedureExecutionService>();
-        service.ExecuteAsync(default!, default, default!, default, default)
-            .ThrowsAsyncForAnyArgs(new ProcedureBusinessException(50001, null, "abc123", "CRANE_LOCKED", "The crane is locked."));
+        var service = new StubProcedureExecutionService
+        {
+            OnExecuteThrow = _ => new ProcedureBusinessException(50001, null, "abc123", "CRANE_LOCKED", "The crane is locked.")
+        };
         var http = new Microsoft.AspNetCore.Http.DefaultHttpContext { User = User() };
         http.RequestServices = new Microsoft.Extensions.DependencyInjection.ServiceCollection().AddLogging().BuildServiceProvider();
         http.Response.Body = new MemoryStream();
@@ -1070,9 +1059,10 @@ public class ProcedureRowBudgetAndScanCapTests
     public async Task Route_Operator_MappedCode_Is_Restricted_To_Procedure_Codes(string mapped, string expected)
     {
         // NL-SC-30 (review fix): a governed but non-PROCEDURE_* operator code never surfaces on the 422.
-        var service = Substitute.For<IProcedureExecutionService>();
-        service.ExecuteAsync(default!, default, default!, default, default)
-            .ThrowsAsyncForAnyArgs(new ProcedureBusinessException(50001, null, "abc123", mapped, "Declared text."));
+        var service = new StubProcedureExecutionService
+        {
+            OnExecuteThrow = _ => new ProcedureBusinessException(50001, null, "abc123", mapped, "Declared text.")
+        };
         var http = new Microsoft.AspNetCore.Http.DefaultHttpContext { User = User() };
         http.RequestServices = new Microsoft.Extensions.DependencyInjection.ServiceCollection().AddLogging().BuildServiceProvider();
         http.Response.Body = new MemoryStream();
@@ -1131,12 +1121,9 @@ public class ProcedureRowBudgetAndScanCapTests
                 }
             }
         });
-        IHostEnvironment? env = null;
-        if (environmentName != null)
-        {
-            env = Substitute.For<IHostEnvironment>();
-            env.EnvironmentName.Returns(environmentName);
-        }
+        IHostEnvironment? env = environmentName != null
+            ? new Autheris.Tests.Common.TestHostEnvironment { EnvironmentName = environmentName }
+            : null;
 
         var registry = new InMemoryProcedureRegistry();
         var log = new CapturingLogger<ProcedureDefinitionLoader>();
@@ -1345,5 +1332,30 @@ public class ProcedureRowBudgetAndScanCapTests
         {
             Directory.Delete(dir, true);
         }
+    }
+
+    private sealed class DenyingGate : global::Autheris.Application.Common.Interfaces.ITableReadConcurrencyGate
+    {
+        public static readonly DenyingGate Instance = new();
+        public IDisposable? TryEnter(string key, int maxConcurrent) => null;
+    }
+
+    private sealed class StubProcedureExecutionService : IProcedureExecutionService
+    {
+        public Func<string, Exception>? OnExecuteThrow { get; init; }
+        public Func<RegisteredProcedure, bool>? OnIsVisible { get; init; }
+
+        public Task<GovernedProcedureResult> ExecuteAsync(
+            string name,
+            IReadOnlyDictionary<string, object?>? rawInputs,
+            ClaimsPrincipal user,
+            TenantId tenantId,
+            CancellationToken ct = default)
+            => OnExecuteThrow is not null
+                ? Task.FromException<GovernedProcedureResult>(OnExecuteThrow(name))
+                : Task.FromResult(new GovernedProcedureResult([], [], 0, false, 0));
+
+        public Task<bool> IsVisibleAsync(RegisteredProcedure procedure, ClaimsPrincipal user, TenantId tenantId, CancellationToken ct = default)
+            => Task.FromResult(OnIsVisible?.Invoke(procedure) ?? false);
     }
 }

@@ -12,9 +12,10 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Extensions.OpenMetadata;
+using Autheris.Extensions.Tests.TestSupport;
+using Autheris.Tests.Common.Fakes;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -27,41 +28,18 @@ public sealed class CatalogSyncRequiredFilterColumnsTests
     [Fact]
     public async Task OpenMetadataSync_KeepsRequiredFilterColumns()
     {
-        var client = Substitute.For<IOpenMetadataClient>();
-        var repo = Substitute.For<ITableMetadataRepository>();
-        var consentRepo = Substitute.For<IConsentRepository>();
-        var epochRepo = Substitute.For<IPolicyEpochRepository>();
-
         var options = new GatewayOptions
         {
             DataMasking = new DataMaskingOptions { HmacKeyId = "test-hmac-key" },
             OpenMetadata = new OpenMetadataOptions { DefaultTenantId = "default-tenant", Enabled = true, WebhookSecret = "om-test-secret-42" }
         };
 
-        var tables = new List<OpenMetadataTable>
-        {
-            new()
-            {
-                Id = Guid.NewGuid(),
-                Name = "employees",
-                FullyQualifiedName = "hr_service.corp.dbo.employees",
-                Service = new OpenMetadataEntityReference { Name = "hr_service" },
-                DatabaseSchema = new OpenMetadataEntityReference { Name = "dbo" },
-                Description = "Updated description from OpenMetadata",
-                Columns =
-                [
-                    new OpenMetadataColumn { Name = "id", DataType = "INT" },
-                    new OpenMetadataColumn { Name = "tenant_id", DataType = "VARCHAR" }
-                ]
-            }
-        };
-
         var existing = new TableMetadata
         {
-            Identifier = new TableIdentifier("corp", "dbo", "employees"),
+            Identifier = new TableIdentifier("hr_service", "dbo", "employees"),
             Table = new Table
             {
-                SourceName = "corp",
+                SourceName = "hr_service",
                 SchemaName = "dbo",
                 TableName = "employees",
                 DisplayName = "Employees",
@@ -70,21 +48,29 @@ public sealed class CatalogSyncRequiredFilterColumnsTests
             Columns = [new() { ColumnName = "id", DataType = "int" }, new() { ColumnName = "tenant_id", DataType = "varchar" }]
         };
 
-        client.GetTablesAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<OpenMetadataTable>>(tables));
-        client.GetPoliciesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<OpenMetadataPolicy>>([]));
-        client.GetRolesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<OpenMetadataRole>>([]));
-        client.GetTeamsAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<OpenMetadataTeam>>([]));
-        client.GetUsersAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<OpenMetadataUser>>([]));
-        repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<TableMetadata?>(existing));
-
-        TableMetadata? saved = null;
-        await repo.UpsertTableMetadataAsync(Arg.Do<TableMetadata>(m => saved = m), Arg.Any<CancellationToken>());
+        var client = new StubOpenMetadataClient
+        {
+            Tables =
+            [
+                new OpenMetadataTable
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "employees",
+                    FullyQualifiedName = "hr_service.corp.dbo.employees",
+                    Service = new OpenMetadataEntityReference { Name = "hr_service" },
+                    DatabaseSchema = new OpenMetadataEntityReference { Name = "dbo" },
+                    Description = "Updated description from OpenMetadata",
+                    Columns =
+                    [
+                        new OpenMetadataColumn { Name = "id", DataType = "INT" },
+                        new OpenMetadataColumn { Name = "tenant_id", DataType = "VARCHAR" }
+                    ]
+                }
+            ]
+        };
+        var repo = new InMemoryTableMetadataRepository(existing);
+        var consentRepo = new RecordingConsentRepository();
+        var epochRepo = new InMemoryPolicyEpochRepository();
 
         var sut = new OpenMetadataSyncService(
             client, repo, consentRepo, epochRepo, Options.Create(options), NullLogger<OpenMetadataSyncService>.Instance);
@@ -92,7 +78,7 @@ public sealed class CatalogSyncRequiredFilterColumnsTests
         var result = await sut.SyncPermissionsAsync(dryRun: false);
 
         result.Success.ShouldBeTrue();
-        saved.ShouldNotBeNull();
+        var saved = repo.UpsertedTables.ShouldHaveSingleItem();
         saved.RequiredFilterColumns.ShouldContain("tenant_id");
     }
 
@@ -120,7 +106,6 @@ public sealed class CatalogSyncRequiredFilterColumnsTests
         }
         """;
 
-        var repo = Substitute.For<ITableMetadataRepository>();
         var tableId = new TableIdentifier("payments", "api", "payment");
         var existing = new TableMetadata
         {
@@ -147,18 +132,12 @@ public sealed class CatalogSyncRequiredFilterColumnsTests
             ]
         };
 
-        repo.GetTableMetadataAsync(Arg.Is<TableIdentifier>(id => id.TableName == "payment"), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<TableMetadata?>(existing));
-
-        TableMetadata? saved = null;
-        repo.UpsertTableMetadataAsync(Arg.Do<TableMetadata>(t => saved = t), Arg.Any<CancellationToken>())
-            .Returns(callInfo => Task.FromResult(callInfo.Arg<TableMetadata>()));
-
+        var repo = new InMemoryTableMetadataRepository(existing);
         var service = new OpenApiIngestionService(repo, NullLogger<OpenApiIngestionService>.Instance);
         var result = await service.IngestOpenApiJsonAsync(openApi, domain: "payments");
 
         result.Success.ShouldBeTrue();
-        saved.ShouldNotBeNull();
+        var saved = repo.UpsertedTables.ShouldHaveSingleItem();
         saved.RequiredFilterColumns.ShouldContain("tenant_id");
     }
 }

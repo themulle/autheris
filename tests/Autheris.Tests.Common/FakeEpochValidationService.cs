@@ -14,6 +14,12 @@ using Autheris.Domain.Common;
 public sealed class FakeEpochValidationService : IEpochValidationService
 {
     private readonly ConcurrentDictionary<TableIdentifier, long> _epochs = new();
+    private readonly List<TableIdentifier> _invalidations = [];
+
+    public IReadOnlyList<TableIdentifier> InvalidatedTables
+    {
+        get { lock (_invalidations) { return _invalidations.ToArray(); } }
+    }
 
     public Task<bool> IsEpochValidAsync(TableIdentifier table, long cachedEpoch, CancellationToken ct = default)
     {
@@ -23,6 +29,7 @@ public sealed class FakeEpochValidationService : IEpochValidationService
 
     public Task InvalidateEpochAsync(TableIdentifier table, CancellationToken ct = default)
     {
+        lock (_invalidations) { _invalidations.Add(table); }
         _epochs.AddOrUpdate(table, 2L, static (_, current) => current + 1L);
         return Task.CompletedTask;
     }

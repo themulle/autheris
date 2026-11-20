@@ -22,11 +22,12 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Extensions.DataCatalog;
 using Autheris.Extensions.OpenMetadata;
+using Autheris.Extensions.Tests.TestSupport;
+using Autheris.Tests.Common.Fakes;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -88,11 +89,12 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
     private sealed class OmFixture
     {
         public required OpenMetadataSyncService Service { get; init; }
-        public required IOpenMetadataClient Client { get; init; }
-        public required IConsentRepository ConsentRepo { get; init; }
-        public List<Consent> Created { get; } = [];
-        public List<Guid> Revoked { get; } = [];
-        public List<TableMetadata> Upserted { get; } = [];
+        public required StubOpenMetadataClient Client { get; init; }
+        public required RecordingConsentRepository ConsentRepo { get; init; }
+        public required InMemoryTableMetadataRepository MetadataRepo { get; init; }
+        public IReadOnlyList<Consent> Created => ConsentRepo.CreatedConsents;
+        public IReadOnlyList<Guid> Revoked => ConsentRepo.RevokedIds;
+        public IReadOnlyList<TableMetadata> Upserted => MetadataRepo.UpsertedTables;
     }
 
     private static OmFixture CreateOm(
@@ -106,74 +108,32 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
         Func<TableIdentifier, TableMetadata?>? existingMetadata = null,
         bool usersFail = false)
     {
-        var client = Substitute.For<IOpenMetadataClient>();
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        var consentRepo = Substitute.For<IConsentRepository>();
-        var epochRepo = Substitute.For<IPolicyEpochRepository>();
-
         IReadOnlyList<OpenMetadataRule> effectiveRules = rules ?? [ViewAllTables()];
         IReadOnlyList<OpenMetadataRole> effectiveRoles = roles ?? [new OpenMetadataRole { Name = "OrderReader", Policies = [PolicyRef()] }];
         IReadOnlyList<OpenMetadataTeam> effectiveTeams = teams ?? [];
         IReadOnlyList<OpenMetadataUser> effectiveUsers = users ?? [];
-        IReadOnlyList<Consent> effectiveExisting = existingSyncConsents ?? [];
 
-        client.GetTablesAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(tables));
-        client.GetPoliciesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<OpenMetadataPolicy>>([
-                new OpenMetadataPolicy { Id = PolicyId, Name = "R4Policy", Enabled = true, Rules = effectiveRules.ToList() }
-            ]));
-        client.GetRolesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(effectiveRoles));
-        client.GetTeamsAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(effectiveTeams));
-        if (usersFail)
+        var client = new StubOpenMetadataClient
         {
-            client.GetUsersAsync(Arg.Any<CancellationToken>())
-                .Returns<Task<IReadOnlyList<OpenMetadataUser>>>(_ => throw new HttpRequestException("OpenMetadata returned 503"));
-        }
-        else
-        {
-            client.GetUsersAsync(Arg.Any<CancellationToken>())
-                .Returns(Task.FromResult(effectiveUsers));
-        }
-
-        metadataRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns(ci => Task.FromResult(existingMetadata?.Invoke(ci.Arg<TableIdentifier>())));
-
-        consentRepo.GetActiveConsentsByConsentRequestIdAsync(Arg.Any<Guid>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(effectiveExisting));
+            Tables = tables,
+            Policies = [new OpenMetadataPolicy { Id = PolicyId, Name = "R4Policy", Enabled = true, Rules = effectiveRules.ToList() }],
+            Roles = effectiveRoles,
+            Teams = effectiveTeams,
+            Users = effectiveUsers,
+            OnGetUsers = usersFail ? () => Task.FromException<IReadOnlyList<OpenMetadataUser>>(new HttpRequestException("OpenMetadata returned 503")) : null
+        };
+        var metadataRepo = new DelegatingTableRepo(existingMetadata);
+        var consentRepo = new RecordingConsentRepository(existingSyncConsents?.ToArray() ?? []);
+        var epochRepo = new InMemoryPolicyEpochRepository();
 
         var options = Options.Create(new GatewayOptions { OpenMetadata = omOptions });
-        var fixture = new OmFixture
+        return new OmFixture
         {
             Service = new OpenMetadataSyncService(client, metadataRepo, consentRepo, epochRepo, options, NullLogger<OpenMetadataSyncService>.Instance),
             Client = client,
-            ConsentRepo = consentRepo
+            ConsentRepo = consentRepo,
+            MetadataRepo = metadataRepo.Inner
         };
-
-        metadataRepo.UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>())
-            .Returns(ci =>
-            {
-                var m = ci.Arg<TableMetadata>();
-                fixture.Upserted.Add(m);
-                return Task.FromResult(m);
-            });
-        consentRepo.CreateConsentAsync(Arg.Any<Consent>(), Arg.Any<CancellationToken>())
-            .Returns(ci =>
-            {
-                var c = ci.Arg<Consent>();
-                fixture.Created.Add(c);
-                return Task.FromResult(c);
-            });
-        consentRepo.RevokeSystemConsentAsync(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<Sid>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns(ci =>
-            {
-                fixture.Revoked.Add(ci.ArgAt<Guid>(0));
-                return Task.FromResult(true);
-            });
-
-        return fixture;
     }
 
     private static OpenMetadataOptions Om(
@@ -215,9 +175,8 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
         result.Success.ShouldBeTrue();
         f.Revoked.ShouldBe(new[] { rawOmRole.Id, deletedUser.Id, legacyRoleAllow.Id, stillGranted.Id }, ignoreOrder: true);
         f.Created.Count.ShouldBe(1); // the still granted consent is refreshed via fail-closed revoke + recreate, not duplicated
-        await f.ConsentRepo.Received(1).GetActiveConsentsByConsentRequestIdAsync(
-            OpenMetadataSyncService.OpenMetadataSyncConsentMarker, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
-        await f.ConsentRepo.DidNotReceive().RevokeConsentAsync(Arg.Any<Guid>(), Arg.Any<Sid>(), Arg.Any<string>(), Arg.Any<Autheris.Domain.Security.ConsentRevocationAuthority>(), Arg.Any<CancellationToken>());
+        f.ConsentRepo.RequestedConsentRequestIds.ShouldBe([OpenMetadataSyncService.OpenMetadataSyncConsentMarker]);
+        f.ConsentRepo.UserRevokeCalls.ShouldBe(0);
     }
 
     [Fact]
@@ -280,7 +239,7 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
         result.Warnings.ShouldContain(w => w.Contains("policy/role/team", StringComparison.Ordinal));
         f.Revoked.ShouldBeEmpty();
         f.Created.ShouldBeEmpty();
-        await f.ConsentRepo.DidNotReceive().GetActiveConsentsByConsentRequestIdAsync(Arg.Any<Guid>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
+        f.ConsentRepo.RequestedConsentRequestIds.ShouldBeEmpty();
         f.Upserted.Count.ShouldBe(1); // table metadata sync is independent of the consent block
     }
 
@@ -362,8 +321,7 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
     {
         var existing = SyncConsent(OrdersId, GranteeType.Group, OrderTeamSid, validTo: DateTimeOffset.UtcNow.AddMinutes(5));
         var f = CreateOm(Om(), [Orders()], teams: [OrderTeam()], existingSyncConsents: [existing]);
-        f.ConsentRepo.RevokeSystemConsentAsync(existing.Id, Arg.Any<Guid>(), Arg.Any<Sid>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(false));
+        f.ConsentRepo.OnRevokeSystemConsent = id => id != existing.Id;
 
         await f.Service.SyncPermissionsAsync();
 
@@ -376,8 +334,7 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
     {
         var existing = SyncConsent(OrdersId, GranteeType.Group, OrderTeamSid);
         var f = CreateOm(Om(), [Orders()], teams: [OrderTeam()], existingSyncConsents: [existing]);
-        f.ConsentRepo.RevokeSystemConsentAsync(existing.Id, Arg.Any<Guid>(), Arg.Any<Sid>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(false));
+        f.ConsentRepo.OnRevokeSystemConsent = id => id != existing.Id;
 
         await f.Service.SyncPermissionsAsync();
 
@@ -657,8 +614,7 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
         const string secret = "r4-om-webhook-secret";
         var foreign = OmTable("other_svc", "db", "dbo", "secrets");
         var f = CreateOm(Om(serviceFilter: "sales_svc", webhookSecret: secret), []);
-        f.Client.GetTableByFqnAsync(foreign.FullyQualifiedName, Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<OpenMetadataTable?>(foreign));
+        f.Client.Tables = [foreign];
 
         var payload = SignedTableEvent(foreign.FullyQualifiedName, secret, out var signature);
         var ok = await f.Service.HandleWebhookEventAsync(payload, signature);
@@ -673,8 +629,7 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
         const string secret = "r4-om-webhook-secret-2";
         var orders = Orders();
         var f = CreateOm(Om(serviceFilter: "sales_svc", webhookSecret: secret, activateNewTables: false), []);
-        f.Client.GetTableByFqnAsync(orders.FullyQualifiedName, Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<OpenMetadataTable?>(orders));
+        f.Client.Tables = [orders];
 
         var payload = SignedTableEvent(orders.FullyQualifiedName, secret, out var signature);
         var ok = await f.Service.HandleWebhookEventAsync(payload, signature);
@@ -708,8 +663,7 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
         const string secret = "r4-om-webhook-secret-ext2";
         var orders = Orders();
         var f = CreateOm(Om(serviceFilter: "sales_svc", webhookSecret: secret), [], existingMetadata: _ => OrdersBoundTo("sales_readonly_conn"));
-        f.Client.GetTableByFqnAsync(orders.FullyQualifiedName, Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<OpenMetadataTable?>(orders));
+        f.Client.Tables = [orders];
 
         var payload = SignedTableEvent(orders.FullyQualifiedName, secret, out var signature);
         (await f.Service.HandleWebhookEventAsync(payload, signature)).ShouldBeTrue();
@@ -721,8 +675,7 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
 
     private static OpenMetadataCatalogAdapter CreateAdapter(OpenMetadataOptions omOptions, IReadOnlyList<OpenMetadataTable> tables)
     {
-        var client = Substitute.For<IOpenMetadataClient>();
-        client.GetTablesAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult(tables));
+        var client = new StubOpenMetadataClient { Tables = tables };
         return new OpenMetadataCatalogAdapter(client, NullLogger<OpenMetadataCatalogAdapter>.Instance,
             Options.Create(new GatewayOptions { OpenMetadata = omOptions }));
     }
@@ -757,35 +710,23 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
     [InlineData(DataCatalogProviderType.OpenMetadata, true, true)]
     public async Task E09_CatalogSync_NewOpenMetadataTables_AreInactiveByDefault(DataCatalogProviderType provider, bool activateNewTables, bool expectedActive)
     {
-        var client = Substitute.For<IDataCatalogClient>();
-        client.ProviderType.Returns(provider);
-        client.GetTablesAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<CatalogTableAsset>>([new CatalogTableAsset { Identifier = OrdersId }]));
-
-        var repo = Substitute.For<ITableMetadataRepository>();
-        repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult<TableMetadata?>(null));
-        TableMetadata? upserted = null;
-        repo.UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>())
-            .Returns(ci =>
-            {
-                upserted = ci.Arg<TableMetadata>();
-                return Task.FromResult(upserted);
-            });
+        var client = new StubDataCatalogClient(provider) { Tables = [new CatalogTableAsset { Identifier = OrdersId }] };
+        var repo = new InMemoryTableMetadataRepository();
 
         var sut = new DataCatalogSyncService(
             client,
             repo,
-            Substitute.For<IEpochValidationService>(),
+            new FakeEpochValidationService(),
             Options.Create(new GatewayOptions
             {
                 Catalog = new DataCatalogOptions { Provider = provider, ActivateNewTables = activateNewTables },
                 OpenMetadata = new OpenMetadataOptions { DefaultTenantId = "default-tenant", ActivateNewTables = activateNewTables }
             }),
-            Substitute.For<IAuditWriter>(), NullLogger<DataCatalogSyncService>.Instance);
+            new InMemoryAuditWriter(), NullLogger<DataCatalogSyncService>.Instance);
 
         await sut.SyncCatalogAsync();
 
-        upserted.ShouldNotBeNull();
+        var upserted = repo.UpsertedTables.ShouldHaveSingleItem();
         upserted.Table.IsActive.ShouldBe(expectedActive);
     }
 
@@ -803,8 +744,7 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
     [Fact]
     public void EX16_OpenMetadataClient_SecretLookupFailure_LogsNoExceptionMessage()
     {
-        var provider = Substitute.For<IKeyVaultSecretProvider>();
-        provider.GetSecretBytes(Arg.Any<string>()).Returns(_ => throw new InvalidOperationException("Secret 'raw-om-token-ABC' could not be resolved"));
+        var provider = new InMemoryKeyVaultSecretProvider(_ => new InvalidOperationException("Secret 'raw-om-token-ABC' could not be resolved"));
         var logger = new CapturingLogger<OpenMetadataClient>();
         var options = Options.Create(new GatewayOptions
         {
@@ -815,5 +755,19 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
 
         logger.Entries.ShouldNotBeEmpty();
         logger.Entries.ShouldAllBe(e => e.Exception == null && !e.Message.Contains("raw-om-token-ABC"));
+    }
+
+    private sealed class DelegatingTableRepo(Func<TableIdentifier, TableMetadata?>? existing) : ITableMetadataRepository
+    {
+        public InMemoryTableMetadataRepository Inner { get; } = new();
+        public Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default)
+            => Task.FromResult(existing?.Invoke(table) ?? Inner.Peek(table));
+        public Task<IReadOnlyList<TableMetadata>> GetAllTablesAsync(CancellationToken ct = default) => Inner.GetAllTablesAsync(ct);
+        public Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default)
+            => Inner.UpsertTableMetadataAsync(metadata, ct);
+        public Task<TableKeyDefinitionChange?> ReplaceTableKeyDefinitionAsync(
+            TableIdentifier table, IReadOnlyList<string> primaryKey, IReadOnlyList<TableIndexDefinition> indexes,
+            IReadOnlyList<KeyColumnDirection>? primaryKeyDirections = null, CancellationToken ct = default)
+            => Inner.ReplaceTableKeyDefinitionAsync(table, primaryKey, indexes, primaryKeyDirections, ct);
     }
 }

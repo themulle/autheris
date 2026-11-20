@@ -52,7 +52,7 @@ internal sealed class FakeCdcStreamStore : ICdcStreamStore
 
     public int TouchCalls { get; private set; }
 
-    public bool IsDurable => true;
+    public bool IsDurable { get; init; } = true;
 
     public StreamState Only => Streams.Values.Single();
 

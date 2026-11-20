@@ -15,6 +15,7 @@ using Autheris.Application.Policy;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.Sql.Services;
+using Autheris.Infrastructure.Connectors;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Connectors;
@@ -96,57 +97,59 @@ public sealed class WebSqlHeterogeneousJoinTests
         };
     }
 
+    private static readonly ICrossSourceQueryRouter PassiveRouter = Substitute.For<ICrossSourceQueryRouter>();
+    private static readonly ICrossSourcePlanner PassivePlanner = Substitute.For<ICrossSourcePlanner>();
+    private static readonly IFederatedStagingService PassiveStagingService = Substitute.For<IFederatedStagingService>();
+    private static readonly IDuckDbOlapEngine PassiveDuckDbEngine = Substitute.For<IDuckDbOlapEngine>();
+
+    private static FederatedDuckDbExecutionService CreateTransportGateService(string[] allowedTransports)
+    {
+        var options = new GatewayOptions
+        {
+            Insecure = new InsecureGettingStartedOptions { danger_bypass_consent_checks = true },
+            WebSql = new WebSqlOptions
+            {
+                Enabled = true,
+                AllowedDataSources = ["crm"],
+                CrossSource = new CrossSourceOptions
+                {
+                    Enabled = true,
+                    AllowedTransports = [.. allowedTransports]
+                }
+            }
+        };
+
+        return new FederatedDuckDbExecutionService(
+            Options.Create(options),
+            new InMemoryAuditLogRepository(),
+            PassiveRouter,
+            PassivePlanner,
+            PassiveStagingService,
+            PassiveDuckDbEngine);
+    }
+
     [Fact]
     public async Task Join_SqlOrders_And_HttpShipments_ExecutesEndToEnd_AndReturnsJoinedRows()
     {
         var ordersMeta = CreateOrdersTable();
         var shipmentsMeta = CreateShipmentsTable(completeResponse: true);
 
-        // Connector for SQL orders
-        var ordersConnector = Substitute.For<IAutherisConnector>();
-        ordersConnector.ConnectorId.Returns("crm");
-        var ordersRecordSource = Substitute.For<IConnectorRecordSource>();
-        ordersConnector.RecordSource.Returns(ordersRecordSource);
-        ordersConnector.SplitManager.GetSplitsAsync(Arg.Any<TableMetadata>(), Arg.Any<ConnectorSessionContext>(), Arg.Any<CancellationToken>())
-            .Returns([ConnectorSplit.Default("split-orders")]);
-
         var ordersRows = new List<IReadOnlyDictionary<string, object?>>
         {
             new Dictionary<string, object?> { ["id"] = 101, ["tracking_id"] = "TRK-1", ["amount"] = 99.50m },
             new Dictionary<string, object?> { ["id"] = 102, ["tracking_id"] = "TRK-2", ["amount"] = 150.00m }
         };
-        ordersRecordSource.ReadBatchAsync(Arg.Any<ConnectorSplit>(), Arg.Any<ConnectorSessionContext>(), Arg.Any<CancellationToken>())
-            .Returns(ordersRows);
-
-        // Connector for HTTP shipments
-        var shipmentsConnector = Substitute.For<IAutherisConnector>();
-        shipmentsConnector.ConnectorId.Returns("logistics");
-        var shipmentsRecordSource = Substitute.For<IConnectorRecordSource>();
-        shipmentsConnector.RecordSource.Returns(shipmentsRecordSource);
-        shipmentsConnector.SplitManager.GetSplitsAsync(Arg.Any<TableMetadata>(), Arg.Any<ConnectorSessionContext>(), Arg.Any<CancellationToken>())
-            .Returns([ConnectorSplit.Default("split-shipments")]);
-
         var shipmentsRows = new List<IReadOnlyDictionary<string, object?>>
         {
             new Dictionary<string, object?> { ["id"] = "TRK-1", ["carrier"] = "DHL", ["status"] = "DELIVERED" },
             new Dictionary<string, object?> { ["id"] = "TRK-2", ["carrier"] = "UPS", ["status"] = "IN_TRANSIT" }
         };
-        shipmentsRecordSource.ReadBatchAsync(Arg.Any<ConnectorSplit>(), Arg.Any<ConnectorSessionContext>(), Arg.Any<CancellationToken>())
-            .Returns(shipmentsRows);
 
-        // Connector Registry
-        var connectorRegistry = Substitute.For<IAutherisConnectorRegistry>();
-        connectorRegistry.TryGetConnectorForTable(ordersMeta.Identifier, out Arg.Any<IAutherisConnector>()!)
-            .Returns(x => { x[1] = ordersConnector; return true; });
-        connectorRegistry.TryGetConnectorForTable(shipmentsMeta.Identifier, out Arg.Any<IAutherisConnector>()!)
-            .Returns(x => { x[1] = shipmentsConnector; return true; });
+        var connectorRegistry = new InMemoryConnectorRegistry();
+        connectorRegistry.RegisterConnector("crm", new StubAutherisConnector("crm", ordersRows));
+        connectorRegistry.RegisterConnector("logistics", new StubAutherisConnector("logistics", shipmentsRows));
 
-        // Table Metadata Repository
-        var tableRepo = Substitute.For<ITableMetadataRepository>();
-        tableRepo.GetTableMetadataAsync(ordersMeta.Identifier, Arg.Any<CancellationToken>())
-            .Returns(ordersMeta);
-        tableRepo.GetTableMetadataAsync(shipmentsMeta.Identifier, Arg.Any<CancellationToken>())
-            .Returns(shipmentsMeta);
+        var tableRepo = new InMemoryTableMetadataRepository(ordersMeta, shipmentsMeta);
 
         // Gateway Options with CrossSource enabled
         var options = new GatewayOptions
@@ -171,8 +174,8 @@ public sealed class WebSqlHeterogeneousJoinTests
             }
         };
 
-        var auditRepo = Substitute.For<IAuditLogRepository>();
-        var maskingProvider = Substitute.For<IColumnMaskingProvider>();
+        var auditRepo = new InMemoryAuditLogRepository();
+        var maskingProvider = StubColumnMaskingProvider.Null;
 
         // Real DuckDB OLAP Engine
         var duckDbEngine = new DuckDbOlapEngine(options.DuckDbOlap, NullLogger<DuckDbOlapEngine>.Instance);
@@ -228,17 +231,11 @@ public sealed class WebSqlHeterogeneousJoinTests
 
         // Assert Audit Logs
         // 1. Start audit (WEBSQL_CROSS_SOURCE_QUERY)
-        await auditRepo.Received(1).RecordAuditEventAsync(
-            Arg.Is<AuditLogEntry>(e => e.EventType == AuditEventTypes.WebSqlCrossSourceQuery && e.Decision == "ALLOW"),
-            Arg.Any<CancellationToken>());
+        auditRepo.Entries.Count(e => e.EventType == AuditEventTypes.WebSqlCrossSourceQuery && e.Decision == "ALLOW").ShouldBe(1);
 
         // 2. Source read audits (WEBSQL_CROSS_SOURCE_SOURCE_READ) for both tables
-        await auditRepo.Received(1).RecordAuditEventAsync(
-            Arg.Is<AuditLogEntry>(e => e.EventType == AuditEventTypes.WebSqlCrossSourceSourceRead && e.TargetTable == ordersMeta.Identifier.ToString()),
-            Arg.Any<CancellationToken>());
-        await auditRepo.Received(1).RecordAuditEventAsync(
-            Arg.Is<AuditLogEntry>(e => e.EventType == AuditEventTypes.WebSqlCrossSourceSourceRead && e.TargetTable == shipmentsMeta.Identifier.ToString()),
-            Arg.Any<CancellationToken>());
+        auditRepo.Entries.Count(e => e.EventType == AuditEventTypes.WebSqlCrossSourceSourceRead && e.TargetTable == ordersMeta.Identifier.ToString()).ShouldBe(1);
+        auditRepo.Entries.Count(e => e.EventType == AuditEventTypes.WebSqlCrossSourceSourceRead && e.TargetTable == shipmentsMeta.Identifier.ToString()).ShouldBe(1);
     }
 
     [Fact]
@@ -246,10 +243,8 @@ public sealed class WebSqlHeterogeneousJoinTests
     {
         var shipmentsMeta = CreateShipmentsTable(completeResponse: false); // Incomplete response!
 
-        var connectorRegistry = Substitute.For<IAutherisConnectorRegistry>();
-        var tableRepo = Substitute.For<ITableMetadataRepository>();
-        tableRepo.GetTableMetadataAsync(shipmentsMeta.Identifier, Arg.Any<CancellationToken>())
-            .Returns(shipmentsMeta);
+        var connectorRegistry = new InMemoryConnectorRegistry();
+        var tableRepo = new InMemoryTableMetadataRepository(shipmentsMeta);
 
         var options = new GatewayOptions
         {
@@ -262,16 +257,14 @@ public sealed class WebSqlHeterogeneousJoinTests
             }
         };
 
-        var auditRepo = Substitute.For<IAuditLogRepository>();
-        var maskingProvider = Substitute.For<IColumnMaskingProvider>();
+        var auditRepo = new InMemoryAuditLogRepository();
         var stagingService = new FederatedStagingService(
             connectorRegistry,
-            maskingProvider,
+            StubColumnMaskingProvider.Null,
             auditRepo,
             Options.Create(options),
             NullLogger<FederatedStagingService>.Instance);
 
-        var duckDbEngine = Substitute.For<IDuckDbOlapEngine>();
         var sqlEngine = FastSqlEngine.Default;
         var router = new CrossSourceQueryRouter(tableRepo, options.WebSql.CrossSource, options.WebSql);
         var planner = new CrossSourcePlanner(sqlEngine);
@@ -282,7 +275,7 @@ public sealed class WebSqlHeterogeneousJoinTests
             router,
             planner,
             stagingService,
-            duckDbEngine,
+            PassiveDuckDbEngine,
             sqlEngine: sqlEngine);
 
         var query = "SELECT id, carrier FROM logistics.v1.shipments";
@@ -298,34 +291,7 @@ public sealed class WebSqlHeterogeneousJoinTests
     [Fact]
     public async Task Join_TransportGate_ArrowExport_IsRejected()
     {
-        var ordersMeta = CreateOrdersTable();
-        var tableRepo = Substitute.For<ITableMetadataRepository>();
-        tableRepo.GetTableMetadataAsync(ordersMeta.Identifier, Arg.Any<CancellationToken>())
-            .Returns(ordersMeta);
-
-        var options = new GatewayOptions
-        {
-            Insecure = new InsecureGettingStartedOptions { danger_bypass_consent_checks = true },
-            WebSql = new WebSqlOptions
-            {
-                Enabled = true,
-                AllowedDataSources = ["crm"],
-                CrossSource = new CrossSourceOptions
-                {
-                    Enabled = true,
-                    AllowedTransports = ["WebSql", "Trino"] // ArrowExport NOT in list
-                }
-            }
-        };
-
-        var auditRepo = Substitute.For<IAuditLogRepository>();
-        var federatedService = new FederatedDuckDbExecutionService(
-            Options.Create(options),
-            auditRepo,
-            Substitute.For<ICrossSourceQueryRouter>(),
-            Substitute.For<ICrossSourcePlanner>(),
-            Substitute.For<IFederatedStagingService>(),
-            Substitute.For<IDuckDbOlapEngine>());
+        var federatedService = CreateTransportGateService(["WebSql", "Trino"]);
 
         var request = new GovernedSqlQueryRequest("SELECT 1", Transport: "ArrowExport");
 
@@ -338,34 +304,7 @@ public sealed class WebSqlHeterogeneousJoinTests
     [Fact]
     public async Task Join_TransportGate_MissingTransport_IsRejected()
     {
-        var ordersMeta = CreateOrdersTable();
-        var tableRepo = Substitute.For<ITableMetadataRepository>();
-        tableRepo.GetTableMetadataAsync(ordersMeta.Identifier, Arg.Any<CancellationToken>())
-            .Returns(ordersMeta);
-
-        var options = new GatewayOptions
-        {
-            Insecure = new InsecureGettingStartedOptions { danger_bypass_consent_checks = true },
-            WebSql = new WebSqlOptions
-            {
-                Enabled = true,
-                AllowedDataSources = ["crm"],
-                CrossSource = new CrossSourceOptions
-                {
-                    Enabled = true,
-                    AllowedTransports = ["WebSql", "Trino"] // MissingTransport NOT in list
-                }
-            }
-        };
-
-        var auditRepo = Substitute.For<IAuditLogRepository>();
-        var federatedService = new FederatedDuckDbExecutionService(
-            Options.Create(options),
-            auditRepo,
-            Substitute.For<ICrossSourceQueryRouter>(),
-            Substitute.For<ICrossSourcePlanner>(),
-            Substitute.For<IFederatedStagingService>(),
-            Substitute.For<IDuckDbOlapEngine>());
+        var federatedService = CreateTransportGateService(["WebSql", "Trino"]);
 
         var request = new GovernedSqlQueryRequest("SELECT 1", Transport: null);
 
@@ -378,34 +317,7 @@ public sealed class WebSqlHeterogeneousJoinTests
     [Fact]
     public async Task Join_TransportGate_Rest_NotOptedIn_IsRejected()
     {
-        var ordersMeta = CreateOrdersTable();
-        var tableRepo = Substitute.For<ITableMetadataRepository>();
-        tableRepo.GetTableMetadataAsync(ordersMeta.Identifier, Arg.Any<CancellationToken>())
-            .Returns(ordersMeta);
-
-        var options = new GatewayOptions
-        {
-            Insecure = new InsecureGettingStartedOptions { danger_bypass_consent_checks = true },
-            WebSql = new WebSqlOptions
-            {
-                Enabled = true,
-                AllowedDataSources = ["crm"],
-                CrossSource = new CrossSourceOptions
-                {
-                    Enabled = true,
-                    AllowedTransports = ["WebSql", "Trino"] // Rest_NotOptedIn NOT in list
-                }
-            }
-        };
-
-        var auditRepo = Substitute.For<IAuditLogRepository>();
-        var federatedService = new FederatedDuckDbExecutionService(
-            Options.Create(options),
-            auditRepo,
-            Substitute.For<ICrossSourceQueryRouter>(),
-            Substitute.For<ICrossSourcePlanner>(),
-            Substitute.For<IFederatedStagingService>(),
-            Substitute.For<IDuckDbOlapEngine>());
+        var federatedService = CreateTransportGateService(["WebSql", "Trino"]);
 
         var request = new GovernedSqlQueryRequest("SELECT 1", Transport: "Rest");
 
@@ -432,34 +344,21 @@ public sealed class WebSqlHeterogeneousJoinTests
         var ordersMeta = CreateOrdersTable();
         var shipmentsMeta = CreateShipmentsTable(completeResponse: true);
 
-        var ordersConnector = Substitute.For<IAutherisConnector>();
-        ordersConnector.ConnectorId.Returns("crm");
-        var ordersRecordSource = Substitute.For<IConnectorRecordSource>();
-        ordersConnector.RecordSource.Returns(ordersRecordSource);
-        ordersConnector.SplitManager.GetSplitsAsync(Arg.Any<TableMetadata>(), Arg.Any<ConnectorSessionContext>(), Arg.Any<CancellationToken>())
-            .Returns([ConnectorSplit.Default("split-orders")]);
-        ordersRecordSource.ReadBatchAsync(Arg.Any<ConnectorSplit>(), Arg.Any<ConnectorSessionContext>(), Arg.Any<CancellationToken>())
-            .Returns(new List<IReadOnlyDictionary<string, object?>> { new Dictionary<string, object?> { ["id"] = 1 } });
+        var ordersConnector = new StubAutherisConnector(
+            "crm",
+            [new Dictionary<string, object?> { ["id"] = 1 }]);
 
         // Second source fails with an exception (e.g. HTTP 500 / network failure)
-        var shipmentsConnector = Substitute.For<IAutherisConnector>();
-        shipmentsConnector.ConnectorId.Returns("logistics");
-        var shipmentsRecordSource = Substitute.For<IConnectorRecordSource>();
-        shipmentsConnector.RecordSource.Returns(shipmentsRecordSource);
-        shipmentsConnector.SplitManager.GetSplitsAsync(Arg.Any<TableMetadata>(), Arg.Any<ConnectorSessionContext>(), Arg.Any<CancellationToken>())
-            .Returns([ConnectorSplit.Default("split-shipments")]);
-        shipmentsRecordSource.ReadBatchAsync(Arg.Any<ConnectorSplit>(), Arg.Any<ConnectorSessionContext>(), Arg.Any<CancellationToken>())
-            .ThrowsAsync(new InvalidOperationException("Upstream HTTP service returned 500 Internal Server Error"));
+        var shipmentsConnector = new StubAutherisConnector(
+            "logistics",
+            readBatch: (_, _, _) => Task.FromException<IReadOnlyList<IReadOnlyDictionary<string, object?>>>(
+                new InvalidOperationException("Upstream HTTP service returned 500 Internal Server Error")));
 
-        var connectorRegistry = Substitute.For<IAutherisConnectorRegistry>();
-        connectorRegistry.TryGetConnectorForTable(ordersMeta.Identifier, out Arg.Any<IAutherisConnector>()!)
-            .Returns(x => { x[1] = ordersConnector; return true; });
-        connectorRegistry.TryGetConnectorForTable(shipmentsMeta.Identifier, out Arg.Any<IAutherisConnector>()!)
-            .Returns(x => { x[1] = shipmentsConnector; return true; });
+        var connectorRegistry = new InMemoryConnectorRegistry();
+        connectorRegistry.RegisterConnector("crm", ordersConnector);
+        connectorRegistry.RegisterConnector("logistics", shipmentsConnector);
 
-        var tableRepo = Substitute.For<ITableMetadataRepository>();
-        tableRepo.GetTableMetadataAsync(ordersMeta.Identifier, Arg.Any<CancellationToken>()).Returns(ordersMeta);
-        tableRepo.GetTableMetadataAsync(shipmentsMeta.Identifier, Arg.Any<CancellationToken>()).Returns(shipmentsMeta);
+        var tableRepo = new InMemoryTableMetadataRepository(ordersMeta, shipmentsMeta);
 
         var options = new GatewayOptions
         {
@@ -472,10 +371,10 @@ public sealed class WebSqlHeterogeneousJoinTests
             }
         };
 
-        var auditRepo = Substitute.For<IAuditLogRepository>();
+        var auditRepo = new InMemoryAuditLogRepository();
         var stagingService = new FederatedStagingService(
             connectorRegistry,
-            Substitute.For<IColumnMaskingProvider>(),
+            StubColumnMaskingProvider.Null,
             auditRepo,
             Options.Create(options),
             NullLogger<FederatedStagingService>.Instance);
@@ -486,7 +385,7 @@ public sealed class WebSqlHeterogeneousJoinTests
             new CrossSourceQueryRouter(tableRepo, options.WebSql.CrossSource, options.WebSql),
             new CrossSourcePlanner(FastSqlEngine.Default),
             stagingService,
-            Substitute.For<IDuckDbOlapEngine>());
+            PassiveDuckDbEngine);
 
         var query = "SELECT o.id, s.carrier FROM crm.public.orders o JOIN logistics.v1.shipments s ON o.tracking_id = s.id";
         var request = new GovernedSqlQueryRequest(query, Transport: "WebSql");
@@ -502,9 +401,7 @@ public sealed class WebSqlHeterogeneousJoinTests
         var ordersMeta = CreateOrdersTable();
         var shipmentsMeta = CreateShipmentsTable(completeResponse: true);
 
-        var tableRepo = Substitute.For<ITableMetadataRepository>();
-        tableRepo.GetTableMetadataAsync(ordersMeta.Identifier, Arg.Any<CancellationToken>()).Returns(ordersMeta);
-        tableRepo.GetTableMetadataAsync(shipmentsMeta.Identifier, Arg.Any<CancellationToken>()).Returns(shipmentsMeta);
+        var tableRepo = new InMemoryTableMetadataRepository(ordersMeta, shipmentsMeta);
 
         var options = new GatewayOptions
         {
@@ -527,8 +424,8 @@ public sealed class WebSqlHeterogeneousJoinTests
             auditRepo,
             new CrossSourceQueryRouter(tableRepo, options.WebSql.CrossSource, options.WebSql),
             new CrossSourcePlanner(FastSqlEngine.Default),
-            Substitute.For<IFederatedStagingService>(),
-            Substitute.For<IDuckDbOlapEngine>());
+            PassiveStagingService,
+            PassiveDuckDbEngine);
 
         var query = "SELECT o.id, s.carrier FROM crm.public.orders o JOIN logistics.v1.shipments s ON o.tracking_id = s.id";
         var request = new GovernedSqlQueryRequest(query, Transport: "WebSql");
@@ -544,9 +441,7 @@ public sealed class WebSqlHeterogeneousJoinTests
         var ordersMeta = CreateOrdersTable();
         var shipmentsMeta = CreateShipmentsTable(completeResponse: true);
 
-        var tableRepo = Substitute.For<ITableMetadataRepository>();
-        tableRepo.GetTableMetadataAsync(ordersMeta.Identifier, Arg.Any<CancellationToken>()).Returns(ordersMeta);
-        tableRepo.GetTableMetadataAsync(shipmentsMeta.Identifier, Arg.Any<CancellationToken>()).Returns(shipmentsMeta);
+        var tableRepo = new InMemoryTableMetadataRepository(ordersMeta, shipmentsMeta);
 
         var options = new GatewayOptions
         {
@@ -574,7 +469,7 @@ public sealed class WebSqlHeterogeneousJoinTests
             new CrossSourceQueryRouter(tableRepo, options.WebSql.CrossSource, options.WebSql),
             new CrossSourcePlanner(FastSqlEngine.Default),
             stagingService,
-            Substitute.For<IDuckDbOlapEngine>());
+            PassiveDuckDbEngine);
 
         var query = "SELECT o.id, s.carrier FROM crm.public.orders o JOIN logistics.v1.shipments s ON o.tracking_id = s.id";
         var request = new GovernedSqlQueryRequest(query, Transport: "WebSql");

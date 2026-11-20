@@ -20,7 +20,9 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Tests.Common;
+using Autheris.Tests.Common.Fakes;
 using Autheris.Tests.Unit.Catalog;
+using Autheris.Tests.Unit.TestDoubles;
 using Autheris.Tests.Unit.TestSupport;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -57,37 +59,32 @@ public sealed class DatasetIndexVisibilityLeakTests
         ]
     };
 
+    private static readonly IOpenApiIngestionService UnusedIngestion = Substitute.For<IOpenApiIngestionService>();
+    private static readonly ICatalogSearchEngine UnusedSearch = Substitute.For<ICatalogSearchEngine>();
+
     private static McpDatasetCatalog Mcp(TableMetadata table, IConsentResolutionService? resolution = null)
     {
-        var metadata = Substitute.For<ITableMetadataRepository>();
-        metadata.StubTables([table]);
-        var consents = Substitute.For<IConsentRepository>();
-        consents.GetAllActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<IEnumerable<string>?>(), Arg.Any<DateTimeOffset?>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<Consent>>(
-            [
-                new Consent
-                {
-                    TableIdentifier = Orders,
-                    TenantId = new TenantId(Tenant),
-                    Effect = ConsentEffect.Allow,
-                    GranteeSid = new Sid("S-1-USER"),
-                    ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
-                    ValidTo = DateTimeOffset.UtcNow.AddDays(1),
-                    ColumnRules =
-                    [
-                        new ConsentColumnRule { ColumnName = "id", AccessLevel = ColumnAccessLevel.Clear },
-                        new ConsentColumnRule { ColumnName = "amount", AccessLevel = ColumnAccessLevel.Clear },
-                        new ConsentColumnRule { ColumnName = "email", AccessLevel = ColumnAccessLevel.Mask }
-                    ]
-                }
-            ]));
-        var golden = Substitute.For<IGoldenQueryService>();
-        golden.GetGoldenQueriesAsync(Arg.Any<GoldenQueryReadContext>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
-            .Returns(ValueTask.FromResult<IReadOnlyList<GoldenQuery>>([]));
-        return new McpDatasetCatalog(metadata, consents, Substitute.For<IGatewayExecutionService>(), golden,
-            Options.Create(new GatewayOptions()), Substitute.For<IGraphQlCatalogMap>(),
+        var metadata = new InMemoryTableMetadataRepository(table);
+        var consents = new InMemoryConsentRepository(
+            new Consent
+            {
+                TableIdentifier = Orders,
+                TenantId = new TenantId(Tenant),
+                Effect = ConsentEffect.Allow,
+                GranteeSid = new Sid("S-1-USER"),
+                ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
+                ValidTo = DateTimeOffset.UtcNow.AddDays(1),
+                ColumnRules =
+                [
+                    new ConsentColumnRule { ColumnName = "id", AccessLevel = ColumnAccessLevel.Clear },
+                    new ConsentColumnRule { ColumnName = "amount", AccessLevel = ColumnAccessLevel.Clear },
+                    new ConsentColumnRule { ColumnName = "email", AccessLevel = ColumnAccessLevel.Mask }
+                ]
+            });
+        return new McpDatasetCatalog(metadata, consents, new StubGatewayExecutionService(), StubGoldenQueryService.Instance,
+            Options.Create(new GatewayOptions()), StubGraphQlCatalogMap.Instance,
             consentResolution: resolution,
-            visibilityService: CatalogVisibilityTestFactory.Create(metadata.ServeSingleReadsFromCatalog(), consents));
+            visibilityService: CatalogVisibilityTestFactory.Create(metadata, consents));
     }
 
     private static ClaimsPrincipal User() => new(new ClaimsIdentity(
@@ -95,18 +92,17 @@ public sealed class DatasetIndexVisibilityLeakTests
 
     private static CatalogDiscoveryService Rest(TableMetadata table)
     {
-        var repo = Substitute.For<ITableMetadataRepository>();
-        repo.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>()).Returns(table);
-        var consents = Substitute.For<IConsentRepository>();
+        var repo = new InMemoryTableMetadataRepository(table);
+        var consents = new InMemoryConsentRepository();
         var options = Wp0.Options(TenancyShape.Single);
         return new CatalogDiscoveryService(
             repo,
-            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()),
+            AuditWriterTestServices.Over(new InMemoryAuditLogRepository()),
             Options.Create(options),
             CatalogVisibilityTestFactory.Create(repo, consents, options),
-            Substitute.For<IKeyVaultSecretProvider>(),
-            Substitute.For<IOpenApiIngestionService>(),
-            Substitute.For<ICatalogSearchEngine>(),
+            new InMemoryKeyVaultSecretProvider(),
+            UnusedIngestion,
+            UnusedSearch,
             NullLogger<CatalogDiscoveryService>.Instance);
     }
 
@@ -167,8 +163,7 @@ public sealed class DatasetIndexVisibilityLeakTests
         typeof(DatasetIndexInfo).GetProperties().Select(p => p.Name).Order().ShouldBe(new[] { "Columns", "Directions", "Unique" });
 
         // OpenAPI has no caller context: it emits no index and no index name at all.
-        var repo = Substitute.For<ITableMetadataRepository>();
-        repo.StubTables([Table()]);
+        var repo = new InMemoryTableMetadataRepository(Table());
         var openApi = await new DynamicOpenApiGenerator(repo, NullLogger<DynamicOpenApiGenerator>.Instance).GenerateOpenApiJsonAsync(null);
         openApi.ShouldNotContain("x-autheris-indexes");
         openApi.ShouldNotContain("ix_leaks_email_name");
@@ -251,12 +246,12 @@ public sealed class DatasetIndexVisibilityLeakTests
         var options = Wp0.Options(TenancyShape.Multi);
         var service = new CatalogDiscoveryService(
             tables,
-            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()),
+            AuditWriterTestServices.Over(new InMemoryAuditLogRepository()),
             Options.Create(options),
             CatalogVisibilityTestFactory.Create(tables, consents, options),
-            Substitute.For<IKeyVaultSecretProvider>(),
-            Substitute.For<IOpenApiIngestionService>(),
-            Substitute.For<ICatalogSearchEngine>(),
+            new InMemoryKeyVaultSecretProvider(),
+            UnusedIngestion,
+            UnusedSearch,
             NullLogger<CatalogDiscoveryService>.Instance,
             consentResolution: resolution,
             consentRepository: consents);
@@ -388,5 +383,32 @@ public sealed class DatasetIndexVisibilityLeakTests
         projected.Indexes[1].Columns.ShouldBe(["c1"]);
         projected.Indexes.Skip(2).ShouldAllBe(x => !x.Unique);
         projected.Indexes.Select(x => string.Join(",", x.Columns)).Distinct().Count().ShouldBe(32);
+    }
+
+    private sealed class StubGoldenQueryService : IGoldenQueryService
+    {
+        public static readonly StubGoldenQueryService Instance = new();
+        public void RegisterGoldenQuery(GoldenQuery query) { }
+        public ValueTask<IReadOnlyList<GoldenQuery>> GetGoldenQueriesAsync(string? domain = null, string? tableName = null, CancellationToken ct = default)
+            => ValueTask.FromResult<IReadOnlyList<GoldenQuery>>([]);
+        public ValueTask<IReadOnlyList<GoldenQuery>> GetGoldenQueriesAsync(string? domain, string? tableName, Func<GoldenQuery, bool>? visible, CancellationToken ct)
+            => ValueTask.FromResult<IReadOnlyList<GoldenQuery>>([]);
+        public ValueTask<IReadOnlyList<GoldenQuery>> GetGoldenQueriesAsync(GoldenQueryReadContext context, string? domain, string? tableName, CancellationToken ct)
+            => ValueTask.FromResult<IReadOnlyList<GoldenQuery>>([]);
+        public ValueTask<GoldenQuery?> GetByIdAsync(string id, CancellationToken ct = default)
+            => ValueTask.FromResult<GoldenQuery?>(null);
+    }
+
+    private sealed class StubGraphQlCatalogMap : IGraphQlCatalogMap
+    {
+        public static readonly StubGraphQlCatalogMap Instance = new();
+        public Task<GraphQlTableMapping?> GetTableAsync(TableIdentifier table, CancellationToken ct = default)
+            => Task.FromResult<GraphQlTableMapping?>(null);
+        public Task<string?> GetRootFieldAsync(TableIdentifier table, CancellationToken ct = default)
+            => Task.FromResult<string?>(null);
+        public Task<TableIdentifier?> ResolveRootFieldAsync(string field, CancellationToken ct = default)
+            => Task.FromResult<TableIdentifier?>(null);
+        public Task<IReadOnlyList<TableIdentifier>?> ResolveDocumentTablesAsync(string document, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<TableIdentifier>?>(null);
     }
 }

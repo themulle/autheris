@@ -9,7 +9,7 @@ using Xunit;
 namespace Autheris.Tests.Unit.Security;
 
 [Trait("Category", "Security")]
-public sealed class DuckDbOlapValidatorG1Tests
+public sealed class DuckDbOlapSqlValidatorSecurityTests
 {
     private static DuckDbOlapEngine CreateEngine() => new(
         new DuckDbOlapOptions { Enabled = true, MaxMemory = "256MB", QueryTimeoutSeconds = 10, MaxThreads = 1 },

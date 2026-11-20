@@ -3,6 +3,7 @@ using Autheris.Tests.Unit.TestSupport;
 namespace Autheris.Tests.Unit.Security;
 
 using Autheris.Tests.Common;
+using Autheris.Tests.Common.Fakes;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -47,7 +48,7 @@ using Xunit;
 
 /// <summary>Security review G5: subscriptions, MCP, SSRF/outbound HTTP, webhooks, ITSM, Iceberg guard, audit anchors.</summary>
 [Trait("Category", "Security")]
-public sealed class SecurityReviewG5Tests : IDisposable
+public sealed class SubscriptionAndIcebergSecurityTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "g5-" + Guid.NewGuid().ToString("N"));
 
@@ -84,21 +85,19 @@ public sealed class SecurityReviewG5Tests : IDisposable
     /// <summary>GQL-3/GQL-4: admitted subscriptions need the governor and an allowing access decision.</summary>
     private static IServiceCollection SubscriptionServices()
     {
-        var resolver = Substitute.For<ITableAccessResolver>();
-        resolver.ResolveTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<string>?>(), Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<CancellationToken>())
-            .Returns(ci => Task.FromResult(new ResolvedTableAccess(
-                new TableMetadata { Identifier = ci.ArgAt<TableIdentifier>(1) },
-                TableAccessDecision.Allowed(ci.ArgAt<TableIdentifier>(1), new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true),
-                Autheris.Tests.Common.TestTenants.Default,
-                new Sid("S-1-5-21-G5"),
-                ci.ArgAt<ClaimsPrincipal?>(0)!)));
+        var resolver = new StubTableAccessResolver((p, table) => new ResolvedTableAccess(
+            new TableMetadata { Identifier = table },
+            TableAccessDecision.Allowed(table, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true),
+            Autheris.Tests.Common.TestTenants.Default,
+            new Sid("S-1-5-21-G5"),
+            p!));
         return new ServiceCollection()
             .AddLogging()
             .AddSingleton(Options.Create(new GatewayOptions()))
             .AddSingleton<CdcSubscriptionGovernor>()
-            .AddSingleton(resolver)
-            .AddSingleton(Substitute.For<IAuditLogRepository>())
-            .AddSingleton(Substitute.For<Autheris.Application.DataSources.IDataSourceTransportGate>());
+            .AddSingleton<ITableAccessResolver>(resolver)
+            .AddSingleton<IAuditLogRepository>(new InMemoryAuditLogRepository())
+            .AddSingleton<Autheris.Application.DataSources.IDataSourceTransportGate>(global::Autheris.Tests.Unit.TestDoubles.AllowAllTransportGate.Instance);
     }
 
     private static ClaimsPrincipal TokenPrincipal(DateTimeOffset exp) => new(new ClaimsIdentity(
@@ -108,7 +107,7 @@ public sealed class SecurityReviewG5Tests : IDisposable
     public async Task A3_Subscription_ExpiredToken_IsRejected()
     {
         var enumerator = new Subscription().SubscribeToTableEventsAsync(
-            "orders", null, new BlockingChannel(), Substitute.For<IStreamRlsPolicyEnforcer>(),
+            "orders", null, new BlockingChannel(), NoopStreamRlsEnforcer.Instance,
             new ServiceCollection().BuildServiceProvider(), TokenPrincipal(DateTimeOffset.UtcNow.AddMinutes(-1)), CancellationToken.None).GetAsyncEnumerator();
 
         await Should.ThrowAsync<GraphQLException>(async () => await enumerator.MoveNextAsync());
@@ -117,12 +116,11 @@ public sealed class SecurityReviewG5Tests : IDisposable
     [Fact]
     public async Task A3_Subscription_RevokedToken_IsRejected()
     {
-        var revocation = Substitute.For<ITokenRevocationService>();
-        revocation.IsRevokedAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<CancellationToken>()).Returns(new ValueTask<bool>(true));
+        ITokenRevocationService revocation = new StubTokenRevocationService(() => true);
         var sp = new ServiceCollection().AddSingleton(revocation).BuildServiceProvider();
 
         var enumerator = new Subscription().SubscribeToTableEventsAsync(
-            "orders", null, new BlockingChannel(), Substitute.For<IStreamRlsPolicyEnforcer>(),
+            "orders", null, new BlockingChannel(), NoopStreamRlsEnforcer.Instance,
             sp, TokenPrincipal(DateTimeOffset.UtcNow.AddHours(1)), CancellationToken.None).GetAsyncEnumerator();
 
         await Should.ThrowAsync<GraphQLException>(async () => await enumerator.MoveNextAsync());
@@ -132,7 +130,7 @@ public sealed class SecurityReviewG5Tests : IDisposable
     public async Task A3_Subscription_StreamEndsWhenTokenExpiresMidStream()
     {
         var enumerator = new Subscription().SubscribeToTableEventsAsync(
-            "orders", null, new BlockingChannel(), Substitute.For<IStreamRlsPolicyEnforcer>(),
+            "orders", null, new BlockingChannel(), NoopStreamRlsEnforcer.Instance,
             SubscriptionServices().BuildServiceProvider(), TokenPrincipal(DateTimeOffset.UtcNow.AddSeconds(2)), CancellationToken.None).GetAsyncEnumerator();
 
         var moveNext = enumerator.MoveNextAsync().AsTask();
@@ -143,14 +141,12 @@ public sealed class SecurityReviewG5Tests : IDisposable
     public async Task A3_Subscription_StreamEndsWhenTokenIsRevokedMidStream()
     {
         var revoked = 0;
-        var revocation = Substitute.For<ITokenRevocationService>();
-        revocation.IsRevokedAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<CancellationToken>())
-            .Returns(_ => new ValueTask<bool>(Volatile.Read(ref revoked) == 1));
+        ITokenRevocationService revocation = new StubTokenRevocationService(() => Volatile.Read(ref revoked) == 1);
         var options = Options.Create(new GatewayOptions { GraphQL = new GraphQLOptions { SubscriptionRevalidationSeconds = 1 } });
         var sp = SubscriptionServices().AddSingleton(revocation).AddSingleton(options).BuildServiceProvider();
 
         var enumerator = new Subscription().SubscribeToTableEventsAsync(
-            "orders", null, new BlockingChannel(), Substitute.For<IStreamRlsPolicyEnforcer>(),
+            "orders", null, new BlockingChannel(), NoopStreamRlsEnforcer.Instance,
             sp, TokenPrincipal(DateTimeOffset.UtcNow.AddHours(1)), CancellationToken.None).GetAsyncEnumerator();
 
         var moveNext = enumerator.MoveNextAsync().AsTask();
@@ -331,20 +327,17 @@ public sealed class SecurityReviewG5Tests : IDisposable
             Table = new Table { SourceName = "tenant-1", SchemaName = "raw", TableName = "orders", DataSourceType = DataSourceType.LakehouseIceberg, IsActive = tableActive },
             Columns = [new TableColumn { ColumnName = "id" }]
         };
-        var metaRepo = Substitute.For<ITableMetadataRepository>();
-        metaRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult<TableMetadata?>(meta));
-        var consentRepo = Substitute.For<IConsentRepository>();
-        consentRepo.GetActiveConsentsForSubjectsAsync(Arg.Any<IReadOnlyList<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<Consent>>([new Consent
-            {
-                TableIdentifier = OrdersId,
-                TenantId = new TenantId("tenant-1"),
-                GranteeType = GranteeType.User,
-                GranteeSid = new Sid("analyst@corp.com"),
-                ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
-                ValidTo = DateTimeOffset.UtcNow.AddDays(1),
-                ColumnRules = Array.Empty<ConsentColumnRule>()
-            }]));
+        var metaRepo = new FixedTableRepo(meta);
+        var consentRepo = new InMemoryConsentRepository(new Consent
+        {
+            TableIdentifier = OrdersId,
+            TenantId = new TenantId("tenant-1"),
+            GranteeType = GranteeType.User,
+            GranteeSid = new Sid("analyst@corp.com"),
+            ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
+            ValidTo = DateTimeOffset.UtcNow.AddDays(1),
+            ColumnRules = Array.Empty<ConsentColumnRule>()
+        });
         var options = Options.Create(new GatewayOptions());
         var adp = new Autheris.Application.Policy.Pdp.AccessDecisionPoint(
             options,
@@ -380,4 +373,30 @@ public sealed class SecurityReviewG5Tests : IDisposable
 
     // ---------------------------------------------------------------- Consent external approval status
 
+    private sealed class NoopStreamRlsEnforcer : IStreamRlsPolicyEnforcer
+    {
+        public static readonly NoopStreamRlsEnforcer Instance = new();
+        public ValueTask<StreamSecurityDecision> EvaluateAndMaskAsync(CdcEvent cdcEvent, ClaimsPrincipal subscriber, CancellationToken ct = default)
+            => ValueTask.FromResult(new StreamSecurityDecision(false, null, "noop"));
+    }
+
+    private sealed class StubTokenRevocationService(Func<bool> isRevoked) : ITokenRevocationService
+    {
+        public ValueTask<bool> IsRevokedAsync(ClaimsPrincipal principal, CancellationToken ct = default) => ValueTask.FromResult(isRevoked());
+        public Task RevokeAsync(string subjectOrJti, DateTimeOffset until, CancellationToken ct = default) => Task.CompletedTask;
+    }
+
+    private sealed class FixedTableRepo(TableMetadata meta) : ITableMetadataRepository
+    {
+        public Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default)
+            => Task.FromResult<TableMetadata?>(meta);
+        public Task<IReadOnlyList<TableMetadata>> GetAllTablesAsync(CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<TableMetadata>>([meta]);
+        public Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default)
+            => Task.FromResult(metadata);
+        public Task<TableKeyDefinitionChange?> ReplaceTableKeyDefinitionAsync(
+            TableIdentifier table, IReadOnlyList<string> primaryKey, IReadOnlyList<TableIndexDefinition> indexes,
+            IReadOnlyList<KeyColumnDirection>? primaryKeyDirections = null, CancellationToken ct = default)
+            => throw new NotSupportedException();
+    }
 }

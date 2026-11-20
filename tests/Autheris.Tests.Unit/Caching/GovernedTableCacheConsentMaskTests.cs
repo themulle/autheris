@@ -13,6 +13,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options.TableCache;
+using Autheris.Tests.Common.Fakes;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -23,12 +24,13 @@ public sealed class GovernedTableCacheConsentMaskTests
 {
     private readonly ITableCacheCatalog _catalog = Substitute.For<ITableCacheCatalog>();
     private readonly ITableCacheStore _store = Substitute.For<ITableCacheStore>();
-    private readonly IConsentResolutionService _consentService = Substitute.For<IConsentResolutionService>();
-    private readonly IColumnMaskingProvider _maskingProvider = Substitute.For<IColumnMaskingProvider>();
-    private readonly IAuditLogRepository _auditRepo = Substitute.For<IAuditLogRepository>();
+    private readonly InMemoryAuditLogRepository _auditRepo = new();
     private readonly TableCacheOptions _options = new() { Enabled = true, PersistentDirectory = "/tmp/cache" };
 
     private static readonly TableIdentifier TestTable = new("crm", "public", "customers");
+
+    private static IConsentResolutionService AllowUnconstrainedResolution() =>
+        StubConsentResolutionService.AllowUnconstrained();
 
     [Fact]
     public void Constructor_WithoutConsentService_Throws()
@@ -41,7 +43,7 @@ public sealed class GovernedTableCacheConsentMaskTests
                 Options.Create(_options),
                 _auditRepo,
                 consentService: null!,
-                maskingProvider: _maskingProvider);
+                maskingProvider: StubColumnMaskingProvider.Asterisks);
         });
 
         Should.Throw<ArgumentNullException>(() =>
@@ -51,7 +53,7 @@ public sealed class GovernedTableCacheConsentMaskTests
                 _store,
                 Options.Create(_options),
                 _auditRepo,
-                consentService: _consentService,
+                consentService: AllowUnconstrainedResolution(),
                 maskingProvider: null!);
         });
     }
@@ -60,7 +62,7 @@ public sealed class GovernedTableCacheConsentMaskTests
     public async Task PrincipalWithoutSid_Denied()
     {
         var service = new GovernedTableCacheExecutionService(
-            _catalog, _store, Options.Create(_options), _auditRepo, _consentService, _maskingProvider);
+            _catalog, _store, Options.Create(_options), _auditRepo, AllowUnconstrainedResolution(), StubColumnMaskingProvider.Asterisks);
 
         var principal = new ClaimsPrincipal(new ClaimsIdentity()); // No claims at all
         var caller = new TableCacheCallerContext(principal, new TenantId("tenant-1"));
@@ -77,7 +79,7 @@ public sealed class GovernedTableCacheConsentMaskTests
     public async Task NameClaimEqualToGrantedSid_WithoutSidClaim_Denied()
     {
         var service = new GovernedTableCacheExecutionService(
-            _catalog, _store, Options.Create(_options), _auditRepo, _consentService, _maskingProvider);
+            _catalog, _store, Options.Create(_options), _auditRepo, AllowUnconstrainedResolution(), StubColumnMaskingProvider.Asterisks);
 
         // Only ClaimTypes.Name, NO ClaimTypes.PrimarySid
         var principal = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Name, "S-1-5-21-999")], "Auth"));
@@ -94,8 +96,14 @@ public sealed class GovernedTableCacheConsentMaskTests
     [Fact]
     public async Task GroupConsent_ViaGroupSid_Allowed()
     {
+        var seenCalls = new List<(Sid User, IReadOnlySet<Sid> Groups)>();
+        var consentService = new RecordingResolution((user, groups) =>
+        {
+            seenCalls.Add((user, groups));
+            return TableAccessDecision.Allowed(TestTable, new Dictionary<string, ColumnAccessLevel>());
+        });
         var service = new GovernedTableCacheExecutionService(
-            _catalog, _store, Options.Create(_options), _auditRepo, _consentService, _maskingProvider);
+            _catalog, _store, Options.Create(_options), _auditRepo, consentService, StubColumnMaskingProvider.Asterisks);
 
         var userSid = "S-1-5-21-1";
         var groupSid = "S-1-5-21-500";
@@ -107,28 +115,8 @@ public sealed class GovernedTableCacheConsentMaskTests
 
         var caller = new TableCacheCallerContext(principal, new TenantId("tenant-1"));
 
-        _consentService.ResolveAccess(
-                Arg.Is<Sid>(s => s.Value == userSid),
-                Arg.Is<IReadOnlySet<Sid>>(g => g.Contains(new Sid(groupSid))),
-                Arg.Any<IReadOnlySet<string>>(),
-                Arg.Any<TableIdentifier>(),
-                Arg.Any<IReadOnlyList<Consent>>(),
-                Arg.Any<DatabaseDialect>(),
-                Arg.Any<IReadOnlySet<Sid>?>(),
-                Arg.Any<IReadOnlySet<string>?>())
-            .Returns(TableAccessDecision.Allowed(TestTable, new Dictionary<string, ColumnAccessLevel>()));
-
-        // Setup store mock connection
-        var dbConn = Substitute.For<DbConnection>();
-        var dbCmd = Substitute.For<DbCommand>();
-        var dbReader = Substitute.For<DbDataReader>();
-
-        dbConn.CreateCommand().Returns(dbCmd);
-        dbCmd.ExecuteReaderAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(dbReader));
-        dbReader.FieldCount.Returns(1);
-        dbReader.GetName(0).Returns("id");
-        dbReader.ReadAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(false));
-
+        // Setup store connection returning 0 rows
+        DbConnection dbConn = new CallbackDbConnection((_, _) => new StubDbDataReader(["id"], []));
         _store.LeaseReaderConnectionAsync(TestTable, Arg.Any<CancellationToken>()).Returns(Task.FromResult(dbConn));
         var entryMeta = new TableCacheEntryMetadata(TestTable, TableCacheStorageTier.DuckDbDisk, "/tmp", "v_test", 1, DateTimeOffset.UtcNow, null, 0, 0, null, true, null, [], null, TableCacheOfflinePolicy.ServeStaleWithWarning);
         _catalog.TryGet(TestTable, out Arg.Any<TableCacheEntryMetadata?>()).Returns(x => { x[1] = entryMeta; return true; });
@@ -136,49 +124,35 @@ public sealed class GovernedTableCacheConsentMaskTests
         var result = await service.ExecuteGovernedQueryAsync(TestTable, "SELECT id FROM customers", caller);
 
         result.ShouldNotBeNull();
-        _consentService.Received(1).ResolveAccess(
-            Arg.Is<Sid>(s => s.Value == userSid),
-            Arg.Is<IReadOnlySet<Sid>>(g => g.Contains(new Sid(groupSid))),
-            Arg.Any<IReadOnlySet<string>>(),
-            Arg.Any<TableIdentifier>(),
-            Arg.Any<IReadOnlyList<Consent>>(),
-            Arg.Any<DatabaseDialect>(),
-            Arg.Any<IReadOnlySet<Sid>?>(),
-            Arg.Any<IReadOnlySet<string>?>());
+        seenCalls.ShouldHaveSingleItem();
+        seenCalls[0].User.Value.ShouldBe(userSid);
+        seenCalls[0].Groups.ShouldContain(new Sid(groupSid));
+    }
+
+    private sealed class RecordingResolution(Func<Sid, IReadOnlySet<Sid>, TableAccessDecision> resolve) : IConsentResolutionService
+    {
+        public TableAccessDecision ResolveAccess(
+            Sid userSid, IReadOnlySet<Sid> subjectGroupSids, IReadOnlySet<string> userRoles, TableIdentifier table,
+            IReadOnlyList<Consent> activeConsents, DatabaseDialect dialect = DatabaseDialect.SqlServer,
+            IReadOnlySet<Sid>? allUserSids = null, IReadOnlySet<string>? callerScopes = null)
+            => resolve(userSid, subjectGroupSids);
     }
 
     [Fact]
     public async Task UnknownMaskType_ValueIsNulled()
     {
+        // Masking provider returns raw value when unknown rule type is encountered
+        var masking = new StubColumnMaskingProvider((_, raw, _) => raw);
         var service = new GovernedTableCacheExecutionService(
-            _catalog, _store, Options.Create(_options), _auditRepo, _consentService, _maskingProvider);
+            _catalog, _store, Options.Create(_options), _auditRepo, AllowUnconstrainedResolution(), masking);
 
         var userSid = "S-1-5-21-1";
         var principal = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, userSid)], "Auth"));
         var caller = new TableCacheCallerContext(principal, new TenantId("tenant-1"));
 
-        _consentService.ResolveAccess(
-                Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(),
-                Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>(),
-                Arg.Any<IReadOnlySet<Sid>?>(), Arg.Any<IReadOnlySet<string>?>())
-            .Returns(TableAccessDecision.Allowed(TestTable, new Dictionary<string, ColumnAccessLevel>()));
-
-        // Masking provider returns raw value when unknown rule type is encountered
         var unknownRule = new MaskingRule { RuleType = "UNKNOWN_CUSTOM_TYPE" };
-        _maskingProvider.MaskValue("secret_col", "RAW_SECRET_DATA", unknownRule).Returns("RAW_SECRET_DATA");
 
-        var dbConn = Substitute.For<DbConnection>();
-        var dbCmd = Substitute.For<DbCommand>();
-        var dbReader = Substitute.For<DbDataReader>();
-
-        dbConn.CreateCommand().Returns(dbCmd);
-        dbCmd.ExecuteReaderAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(dbReader));
-        dbReader.FieldCount.Returns(1);
-        dbReader.GetName(0).Returns("secret_col");
-        dbReader.ReadAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(true), Task.FromResult(false));
-        dbReader.IsDBNull(0).Returns(false);
-        dbReader.GetValue(0).Returns("RAW_SECRET_DATA");
-
+        DbConnection dbConn = new CallbackDbConnection((_, _) => new StubDbDataReader(["secret_col"], [["RAW_SECRET_DATA"]]));
         _store.LeaseReaderConnectionAsync(TestTable, Arg.Any<CancellationToken>()).Returns(Task.FromResult(dbConn));
         var entryMeta = new TableCacheEntryMetadata(TestTable, TableCacheStorageTier.DuckDbDisk, "/tmp", "v_test", 1, DateTimeOffset.UtcNow, null, 1, 100, null, true, null, [], null, TableCacheOfflinePolicy.ServeStaleWithWarning);
         _catalog.TryGet(TestTable, out Arg.Any<TableCacheEntryMetadata?>()).Returns(x => { x[1] = entryMeta; return true; });
@@ -193,34 +167,21 @@ public sealed class GovernedTableCacheConsentMaskTests
     [Fact]
     public async Task HashMask_UsesKeyedProvider_NotPlainSha256()
     {
+        var hashRule = new MaskingRule { RuleType = "HASH", HmacKeyId = "vault-key-1" };
+        var calls = new List<(string Column, object? Raw, MaskingRule Rule)>();
+        var masking = new StubColumnMaskingProvider((col, raw, rule) =>
+        {
+            calls.Add((col, raw, rule));
+            return "KEYED_HMAC_RESULT";
+        });
         var service = new GovernedTableCacheExecutionService(
-            _catalog, _store, Options.Create(_options), _auditRepo, _consentService, _maskingProvider);
+            _catalog, _store, Options.Create(_options), _auditRepo, AllowUnconstrainedResolution(), masking);
 
         var userSid = "S-1-5-21-1";
         var principal = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, userSid)], "Auth"));
         var caller = new TableCacheCallerContext(principal, new TenantId("tenant-1"));
 
-        _consentService.ResolveAccess(
-                Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(),
-                Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>(),
-                Arg.Any<IReadOnlySet<Sid>?>(), Arg.Any<IReadOnlySet<string>?>())
-            .Returns(TableAccessDecision.Allowed(TestTable, new Dictionary<string, ColumnAccessLevel>()));
-
-        var hashRule = new MaskingRule { RuleType = "HASH", HmacKeyId = "vault-key-1" };
-        _maskingProvider.MaskValue("ssn", "123-45-6789", hashRule).Returns("KEYED_HMAC_RESULT");
-
-        var dbConn = Substitute.For<DbConnection>();
-        var dbCmd = Substitute.For<DbCommand>();
-        var dbReader = Substitute.For<DbDataReader>();
-
-        dbConn.CreateCommand().Returns(dbCmd);
-        dbCmd.ExecuteReaderAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(dbReader));
-        dbReader.FieldCount.Returns(1);
-        dbReader.GetName(0).Returns("ssn");
-        dbReader.ReadAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(true), Task.FromResult(false));
-        dbReader.IsDBNull(0).Returns(false);
-        dbReader.GetValue(0).Returns("123-45-6789");
-
+        DbConnection dbConn = new CallbackDbConnection((_, _) => new StubDbDataReader(["ssn"], [["123-45-6789"]]));
         _store.LeaseReaderConnectionAsync(TestTable, Arg.Any<CancellationToken>()).Returns(Task.FromResult(dbConn));
         var entryMeta = new TableCacheEntryMetadata(TestTable, TableCacheStorageTier.DuckDbDisk, "/tmp", "v_test", 1, DateTimeOffset.UtcNow, null, 1, 100, null, true, null, [], null, TableCacheOfflinePolicy.ServeStaleWithWarning);
         _catalog.TryGet(TestTable, out Arg.Any<TableCacheEntryMetadata?>()).Returns(x => { x[1] = entryMeta; return true; });
@@ -229,40 +190,23 @@ public sealed class GovernedTableCacheConsentMaskTests
         var result = await service.ExecuteGovernedQueryAsync(TestTable, "SELECT ssn FROM customers", caller, columnMasks: masks);
 
         result.Rows[0][0].ShouldBe("KEYED_HMAC_RESULT");
-        _maskingProvider.Received(1).MaskValue("ssn", "123-45-6789", hashRule);
+        calls.ShouldBe([("ssn", "123-45-6789", hashRule)]);
     }
 
     [Fact]
     public async Task MaskLookup_IsCaseInsensitive()
     {
+        var masking = new StubColumnMaskingProvider("***@***.***");
         var service = new GovernedTableCacheExecutionService(
-            _catalog, _store, Options.Create(_options), _auditRepo, _consentService, _maskingProvider);
+            _catalog, _store, Options.Create(_options), _auditRepo, AllowUnconstrainedResolution(), masking);
 
         var userSid = "S-1-5-21-1";
         var principal = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, userSid)], "Auth"));
         var caller = new TableCacheCallerContext(principal, new TenantId("tenant-1"));
 
-        _consentService.ResolveAccess(
-                Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(),
-                Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>(),
-                Arg.Any<IReadOnlySet<Sid>?>(), Arg.Any<IReadOnlySet<string>?>())
-            .Returns(TableAccessDecision.Allowed(TestTable, new Dictionary<string, ColumnAccessLevel>()));
-
         var rule = new MaskingRule { RuleType = "REDACT" };
-        _maskingProvider.MaskValue("EMAIL", "user@corp.com", rule).Returns("***@***.***");
 
-        var dbConn = Substitute.For<DbConnection>();
-        var dbCmd = Substitute.For<DbCommand>();
-        var dbReader = Substitute.For<DbDataReader>();
-
-        dbConn.CreateCommand().Returns(dbCmd);
-        dbCmd.ExecuteReaderAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(dbReader));
-        dbReader.FieldCount.Returns(1);
-        dbReader.GetName(0).Returns("EMAIL"); // UPPERCASE in DB
-        dbReader.ReadAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(true), Task.FromResult(false));
-        dbReader.IsDBNull(0).Returns(false);
-        dbReader.GetValue(0).Returns("user@corp.com");
-
+        DbConnection dbConn = new CallbackDbConnection((_, _) => new StubDbDataReader(["EMAIL"], [["user@corp.com"]]));
         _store.LeaseReaderConnectionAsync(TestTable, Arg.Any<CancellationToken>()).Returns(Task.FromResult(dbConn));
         var entryMeta = new TableCacheEntryMetadata(TestTable, TableCacheStorageTier.DuckDbDisk, "/tmp", "v_test", 1, DateTimeOffset.UtcNow, null, 1, 100, null, true, null, [], null, TableCacheOfflinePolicy.ServeStaleWithWarning);
         _catalog.TryGet(TestTable, out Arg.Any<TableCacheEntryMetadata?>()).Returns(x => { x[1] = entryMeta; return true; });

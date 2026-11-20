@@ -10,9 +10,10 @@ using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Extensions.OpenMetadata;
+using Autheris.Extensions.Tests.TestSupport;
+using Autheris.Tests.Common.Fakes;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -21,12 +22,12 @@ public sealed class OpenMetadataWebhookTests
 {
     private const string WebhookSecret = "om-webhook-test-secret-488";
 
-    private static (OpenMetadataSyncService Service, ITableMetadataRepository MetadataRepo, IOpenMetadataClient Client) CreateSyncService()
+    private static (OpenMetadataSyncService Service, InMemoryTableMetadataRepository MetadataRepo, StubOpenMetadataClient Client) CreateSyncService()
     {
-        var client = Substitute.For<IOpenMetadataClient>();
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        var consentRepo = Substitute.For<IConsentRepository>();
-        var epochRepo = Substitute.For<IPolicyEpochRepository>();
+        var client = new StubOpenMetadataClient();
+        var metadataRepo = new InMemoryTableMetadataRepository();
+        var consentRepo = new RecordingConsentRepository();
+        var epochRepo = new InMemoryPolicyEpochRepository();
 
         var options = new GatewayOptions
         {
@@ -63,7 +64,7 @@ public sealed class OpenMetadataWebhookTests
     [Trait("Category", "Security")]
     public async Task Replayed_event_is_rejected()
     {
-        var (service, metadataRepo, client) = CreateSyncService();
+        var (service, _, client) = CreateSyncService();
         var table = new OpenMetadataTable
         {
             Id = Guid.NewGuid(),
@@ -71,8 +72,7 @@ public sealed class OpenMetadataWebhookTests
             FullyQualifiedName = "service.db.schema.test_tbl",
             Columns = [new OpenMetadataColumn { Name = "id", DataType = "INT" }]
         };
-        client.GetTableByFqnAsync("service.db.schema.test_tbl", Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<OpenMetadataTable?>(table));
+        client.Tables = [table];
 
         var eventId = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;

@@ -16,7 +16,7 @@ using Xunit;
 
 /// <summary>EXT-18: the auth plugin host tolerates non-.NET DLLs and verifies "plugins"-style manifests.</summary>
 [Trait("Category", "Security")]
-public sealed class AuthPluginHostDirectoryExt18Tests
+public sealed class AuthPluginHostDirectoryTests
 {
     private sealed class DevEnvironment : IHostEnvironment
     {

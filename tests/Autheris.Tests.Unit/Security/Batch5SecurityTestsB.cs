@@ -47,6 +47,7 @@ using Autheris.Extensions.Dbt;
 using Autheris.Extensions.OpenMetadata;
 using Autheris.Infrastructure.Cache;
 using Autheris.Infrastructure.Persistence;
+using Autheris.Tests.Common;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.DependencyInjection;
@@ -158,9 +159,7 @@ public sealed class Batch5SecurityTestsB : IDisposable
 
     private void Case_xpw9_69pf_2()
     {
-        var maskingProvider = Substitute.For<IColumnMaskingProvider>();
-        maskingProvider.MaskValue(Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<MaskingRule>())
-            .Returns(ci => $"[MASKED:{ci.Arg<object?>()}]");
+        var maskingProvider = new StubColumnMaskingProvider((_, raw, _) => $"[MASKED:{raw}]");
 
         var options = Options.Create(new GatewayOptions
         {
@@ -283,9 +282,8 @@ public sealed class Batch5SecurityTestsB : IDisposable
     private async Task Case_jfrx_pfh5_1()
     {
         var client = Substitute.For<IOpenMetadataClient>();
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
         var consentRepo = new InMemoryConsentRepository();
-        var epochRepo = Substitute.For<IPolicyEpochRepository>();
+        var epochRepo = new InMemoryPolicyEpochRepository();
 
         var tableId = new TableIdentifier("sales", "public", "orders");
         var existingTable = new TableMetadata
@@ -294,7 +292,7 @@ public sealed class Batch5SecurityTestsB : IDisposable
             OwnerTenantId = "tenant-a",
             Table = new Table { TableName = "orders", SourceType = "PostgreSQL" }
         };
-        metadataRepo.GetTableMetadataAsync(tableId, Arg.Any<CancellationToken>()).Returns(existingTable);
+        var metadataRepo = new InMemoryTableMetadataRepository(existingTable);
 
         // OpenMetadata table whose identity resolves to tenant-b (via DefaultTenantId: tenant-b)
         var omTable = new OpenMetadataTable
@@ -328,7 +326,7 @@ public sealed class Batch5SecurityTestsB : IDisposable
             w.Contains("Cross-tenant overwrite prevented") &&
             w.Contains("tenant-a") &&
             w.Contains("tenant-b"));
-        await metadataRepo.DidNotReceiveWithAnyArgs().UpsertTableMetadataAsync(default!, default);
+        metadataRepo.UpsertCalls.ShouldBe(0);
     }
 
     private async Task Case_jfrx_pfh5_2()
@@ -344,16 +342,15 @@ public sealed class Batch5SecurityTestsB : IDisposable
         };
         client.GetTablesAsync(null, Arg.Any<CancellationToken>()).Returns([tableAsset]);
 
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
         var existingMeta = new TableMetadata
         {
             Identifier = tableId,
             OwnerTenantId = "tenant-a",
             Table = new Table { TableName = "invoices", IsActive = true }
         };
-        metadataRepo.GetTableMetadataAsync(tableId, Arg.Any<CancellationToken>()).Returns(existingMeta);
+        var metadataRepo = new InMemoryTableMetadataRepository(existingMeta);
 
-        var epochService = Substitute.For<IEpochValidationService>();
+        var epochService = new FakeEpochValidationService();
         var options = Options.Create(new GatewayOptions());
 
         var syncService = new DataCatalogSyncService(
@@ -361,7 +358,7 @@ public sealed class Batch5SecurityTestsB : IDisposable
             metadataRepo,
             epochService,
             options,
-            Substitute.For<IAuditWriter>(),
+            new InMemoryAuditWriter(),
             NullLogger<DataCatalogSyncService>.Instance);
 
         var result = await syncService.SyncCatalogAsync(dryRun: false);
@@ -372,7 +369,7 @@ public sealed class Batch5SecurityTestsB : IDisposable
             w.Contains("Cross-tenant overwrite prevented") &&
             w.Contains("tenant-a") &&
             w.Contains("tenant-b"));
-        await metadataRepo.DidNotReceiveWithAnyArgs().UpsertTableMetadataAsync(default!, default);
+        metadataRepo.UpsertCalls.ShouldBe(0);
     }
 
     // =========================================================================
@@ -402,22 +399,11 @@ public sealed class Batch5SecurityTestsB : IDisposable
             Columns = [new TableColumn { ColumnName = "id", DataType = "int" }]
         };
 
-        var proposalRepo = Substitute.For<IDbtProposalRepository>();
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        var graphStore = Substitute.For<ILineageGraphStore>();
-        var auditWriter = Substitute.For<IAuditWriter>();
-        var ownershipRepo = Substitute.For<IDataOwnershipRepository>();
-
-        metadataRepo.GetTableMetadataAsync(tableId, Arg.Any<CancellationToken>()).Returns(stored);
-        metadataRepo.StubAllTables([stored]);
-
-        TableMetadata? persisted = null;
-        metadataRepo.UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>())
-            .Returns(ci =>
-            {
-                persisted = ci.Arg<TableMetadata>();
-                return persisted;
-            });
+        var proposalRepo = new Autheris.Tests.Common.Fakes.InMemoryDbtProposalRepository();
+        var metadataRepo = new InMemoryTableMetadataRepository(stored);
+        var graphStore = new InMemoryLineageGraphStore();
+        var auditWriter = new InMemoryAuditWriter();
+        var ownershipRepo = new InMemoryDataOwnershipRepository();
 
         var gatewayOptions = Options.Create(new GatewayOptions
         {
@@ -425,9 +411,6 @@ public sealed class Batch5SecurityTestsB : IDisposable
         });
 
         var callerSid = new Sid("user-dataowner-unauthorized");
-        // Caller has DataOwner role globally, but is NOT the authorized owner/approver for this specific table
-        ownershipRepo.IsAuthorizedApproverForTableAsync(tableId, callerSid, Arg.Any<CancellationToken>())
-            .Returns(false);
 
         var service = new DbtMetadataIngestionService(
             proposalRepo,
@@ -442,7 +425,7 @@ public sealed class Batch5SecurityTestsB : IDisposable
             null,
             null,
             NullLogger<DbtMetadataIngestionService>.Instance,
-            auditLog: Substitute.For<IAuditLogRepository>(),
+            auditLog: new InMemoryAuditLogRepository(),
             ownerAssignments: null,
             ownerIdentityVerifier: null,
             auditWriter: auditWriter,
@@ -481,6 +464,8 @@ public sealed class Batch5SecurityTestsB : IDisposable
         var result = await service.IngestManifestStreamAsync(stream, caller, dryRun: false);
 
         result.Success.ShouldBeTrue();
+        metadataRepo.UpsertCalls.ShouldBeGreaterThan(0);
+        var persisted = await metadataRepo.GetTableMetadataAsync(tableId);
         persisted.ShouldNotBeNull();
         persisted.Table.MinGroupSize.ShouldBe(5); // Retained: cannot lower without table owner standing
         persisted.Table.NonPersonal.ShouldBeFalse(); // Retained: cannot set non_personal without table owner standing
@@ -610,9 +595,8 @@ public sealed class Batch5SecurityTestsB : IDisposable
         var outbox = new FakeOutbox();
         var channel = new FakeChannel();
         var store = new InMemoryCloudEventSubscriptionStore();
-        var audit = Substitute.For<IAuditWriter>();
-        var optionsMonitor = Substitute.For<IOptionsMonitor<CdcWebhooksOptions>>();
-        optionsMonitor.CurrentValue.Returns(new CdcWebhooksOptions { Enabled = true, SubscriptionCacheSeconds = 5 });
+        var audit = new InMemoryAuditWriter();
+        var optionsMonitor = new StaticOptionsMonitor<CdcWebhooksOptions>(new CdcWebhooksOptions { Enabled = true, SubscriptionCacheSeconds = 5 });
 
         // Non-default realm configured in the registry
         var realmRegistry = Substitute.For<IIdentityRealmRegistry>();

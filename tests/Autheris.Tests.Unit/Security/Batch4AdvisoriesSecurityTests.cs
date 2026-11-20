@@ -1,7 +1,9 @@
 namespace Autheris.Tests.Unit.Security;
 
 using System;
+using Autheris.Tests.Common;
 using Autheris.Tests.Common.Fakes;
+using Autheris.Tests.Unit.TestSupport;
 using System.Collections.Generic;
 using System.Security.Claims;
 using System.Threading;
@@ -72,9 +74,7 @@ public sealed class Batch4AdvisoriesSecurityTests
             PrimaryKeyColumns = ["id"]
         };
 
-        var metaRepo = Substitute.For<ITableMetadataRepository>();
-        metaRepo.GetTableMetadataAsync(meta.Identifier, Arg.Any<CancellationToken>())
-            .Returns(meta);
+        var metaRepo = new InMemoryTableMetadataRepository(meta);
 
         var service = new GovernedAggregationService(
             metaRepo,
@@ -122,11 +122,9 @@ public sealed class Batch4AdvisoriesSecurityTests
     [Fact]
     public async Task GovernedProcedureExecution_EnforcesTransportGate()
     {
-        var gate = Substitute.For<IDataSourceTransportGate>();
-        gate.EnsureCatalogSourcesAsync(Arg.Any<IEnumerable<string?>>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromException(new TransportNotAllowedException("test_source", DataSourceTransportFlags.Rest)));
+        var gate = new CatalogDenyingTransportGate(new TransportNotAllowedException("test_source", DataSourceTransportFlags.Rest));
 
-        var registry = Substitute.For<IProcedureRegistry>();
+        var registry = new InMemoryProcedureRegistry();
         var def = new ProcedureDefinition(
             Name: "get_orders",
             Summary: "Get orders",
@@ -142,22 +140,26 @@ public sealed class Batch4AdvisoriesSecurityTests
             TimeoutSeconds: 30);
 
         var validation = new ProcedureValidationResult(true, [], [], [], new Dictionary<string, string>(), null);
-        var reg = new RegisteredProcedure(def, ProcedureState.Active, validation, DateTimeOffset.UtcNow, null);
-        registry.TryGet("get_orders", out Arg.Any<RegisteredProcedure?>())
-            .Returns(x => { x[1] = reg; return true; });
+        registry.Register(def);
+        registry.MarkActive(def.Name, validation);
 
-        var invoker = Substitute.For<IProcedureInvoker>();
+        var invoker = NoopProcedureInvoker.Instance;
         var options = Options.Create(new GatewayOptions
         {
             Insecure = new InsecureGettingStartedOptions { danger_bypass_consent_checks = true },
             DataSources = new() { MaxConcurrentReadsPerUserAndTable = 0 }
         });
         var audit = new InMemoryAuditLogRepository();
-        var tableRepo = Substitute.For<ITableMetadataRepository>();
-        tableRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns(ci => new TableMetadata
+        var tableRepo = new InMemoryTableMetadataRepository(
+            new TableMetadata
             {
-                Identifier = ci.Arg<TableIdentifier>(),
+                Identifier = new TableIdentifier("test_source", "dbo", "orders"),
+                Columns = [new TableColumn { ColumnName = "id", DataType = "int" }],
+                Table = new() { IsActive = true }
+            },
+            new TableMetadata
+            {
+                Identifier = new TableIdentifier("default", "dbo", "orders"),
                 Columns = [new TableColumn { ColumnName = "id", DataType = "int" }],
                 Table = new() { IsActive = true }
             });
@@ -179,12 +181,10 @@ public sealed class Batch4AdvisoriesSecurityTests
         {
             Identifier = new TableIdentifier(Tenant.Value, "sales", "orders")
         };
-        var metaRepo = Substitute.For<ITableMetadataRepository>();
-        metaRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns(meta);
+        var metaRepo = new InMemoryTableMetadataRepository(meta);
 
         var options = Options.Create(new GatewayOptions());
-        var adp = Substitute.For<Autheris.Application.Policy.Pdp.IAccessDecisionPoint>();
+        var adp = AccessDecisionPointStubs.Denying();
 
         var service = new IcebergRestCatalogFederationService(
             Substitute.For<IIcebergMetadataReader>(),
@@ -214,16 +214,15 @@ public sealed class Batch4AdvisoriesSecurityTests
         {
             Identifier = new TableIdentifier(Tenant.Value, "public", "orders")
         };
-        var accessResolver = Substitute.For<ITableAccessResolver>();
-        accessResolver.ResolveTableAccessAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<TableIdentifier>(), null, null, Arg.Any<CancellationToken>())
-            .Returns(new ResolvedTableAccess(meta, TableAccessDecision.Allowed(meta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true), Tenant, new Sid("user-1"), Wp0.User("user-1", Tenant.Value)));
+        var accessResolver = new StubTableAccessResolver((_, _) =>
+            new ResolvedTableAccess(meta, TableAccessDecision.Allowed(meta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true), Tenant, new Sid("user-1"), Wp0.User("user-1", Tenant.Value)));
 
         var governor = new CdcSubscriptionGovernor(Options.Create(new GatewayOptions()), NullLogger<CdcSubscriptionGovernor>.Instance);
         var user = Wp0.User("user-1", Tenant.Value);
         var tableId = new TableIdentifier(Tenant.Value, "public", "orders");
 
         await Should.ThrowAsync<TransportNotAllowedException>(() =>
-            governor.AdmitAsync(user, "cdc_orders", tableId, accessResolver, Substitute.For<IAuditLogRepository>(), CancellationToken.None, transportGate: gate));
+            governor.AdmitAsync(user, "cdc_orders", tableId, accessResolver, new InMemoryAuditLogRepository(), CancellationToken.None, transportGate: gate));
     }
 
     [Fact]
@@ -235,19 +234,17 @@ public sealed class Batch4AdvisoriesSecurityTests
         {
             Identifier = new TableIdentifier(Tenant.Value, "sales", "orders")
         };
-        var metaRepo = Substitute.For<ITableMetadataRepository>();
-        metaRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns(meta);
+        var metaRepo = new InMemoryTableMetadataRepository(meta);
 
         var enforcer = new StreamRlsPolicyEnforcer(
-            Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(),
+            PdpTestDoubles.AllowAll(),
             metaRepo,
-            Substitute.For<IColumnMaskingProvider>(),
-            Substitute.For<IEpochValidationService>(),
+            StubColumnMaskingProvider.Null,
+            new FakeEpochValidationService(),
             NullLogger<StreamRlsPolicyEnforcer>.Instance,
             new InMemoryConsentRepository(),
-            Substitute.For<IConsentResolutionService>(),
-            Substitute.For<IConsentCacheService>(),
+            StubConsentResolutionService.Unconfigured,
+            new InMemoryConsentCacheService(),
             transportGate: gate);
 
         var user = Wp0.User("user-1", Tenant.Value);
@@ -264,6 +261,16 @@ public sealed class Batch4AdvisoriesSecurityTests
         decision.IsAllowed.ShouldBeFalse();
         decision.MaskedPayload.ShouldBeNull();
         decision.IsTransportDenied.ShouldBeTrue();
+    }
+
+    private sealed class NoopProcedureInvoker : IProcedureInvoker
+    {
+        public static readonly NoopProcedureInvoker Instance = new();
+
+        public Task<RawProcedureResult> ExecuteReadAsync(
+            ProcedureDefinition definition, IReadOnlyDictionary<string, object?> clientValues,
+            ProcedureSecurityContext security, int rowBudget, CancellationToken ct)
+            => throw new NotSupportedException();
     }
 
     private sealed class CatalogDenyingTransportGate(Exception denial) : IDataSourceTransportGate

@@ -1,8 +1,8 @@
 using System;
 using Autheris.Application.Audit;
 using Autheris.Domain.Options;
+using Autheris.Tests.Common;
 using Microsoft.Extensions.Hosting;
-using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -11,17 +11,8 @@ namespace Autheris.Tests.Unit.Audit;
 [Trait("Category", "Security")]
 public sealed class AuditRetentionOptionsValidatorTests
 {
-    private readonly IHostEnvironment _prodEnvironment;
-    private readonly IHostEnvironment _devEnvironment;
-
-    public AuditRetentionOptionsValidatorTests()
-    {
-        _prodEnvironment = Substitute.For<IHostEnvironment>();
-        _prodEnvironment.EnvironmentName.Returns("Production");
-
-        _devEnvironment = Substitute.For<IHostEnvironment>();
-        _devEnvironment.EnvironmentName.Returns("Development");
-    }
+    private readonly IHostEnvironment _prodEnvironment = new TestHostEnvironment { EnvironmentName = "Production" };
+    private readonly IHostEnvironment _devEnvironment = new TestHostEnvironment { EnvironmentName = "Development" };
 
     [Fact]
     public void Validate_Production_ValidDefaults_Passes()

@@ -15,9 +15,10 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Tests.Common.Fakes;
+using Autheris.Tests.Unit.TestDoubles;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -70,20 +71,11 @@ public sealed class GovernedSqlExecutionMultiSchemaShortNameTests
         var publicMeta = CreateTable(publicId, hasTenantColumn: true);
         var archiveMeta = CreateTable(archiveId, hasTenantColumn: false);
 
-        var repo = Substitute.For<ITableMetadataRepository>();
-        repo.GetTableMetadataAsync(Arg.Is<TableIdentifier>(t => t.Schema == "public"), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<TableMetadata?>(publicMeta));
-        repo.GetTableMetadataAsync(Arg.Is<TableIdentifier>(t => t.Schema == "archive"), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<TableMetadata?>(archiveMeta));
-
-        var consents = Substitute.For<IConsentRepository>();
-        consents.GetActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<Consent>>(Array.Empty<Consent>()));
-
-        var resolution = Substitute.For<IConsentResolutionService>();
-        resolution.ResolveAccess(Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>())
-            .Returns(ci => TableAccessDecision.Allowed(
-                ci.ArgAt<TableIdentifier>(3),
+        var repo = new InMemoryTableMetadataRepository(publicMeta, archiveMeta);
+        var consents = new InMemoryConsentRepository();
+        var resolution = new StubConsentResolutionService(tbl =>
+            TableAccessDecision.Allowed(
+                tbl,
                 new Dictionary<string, ColumnAccessLevel>
                 {
                     ["id"] = ColumnAccessLevel.Clear,
@@ -111,17 +103,8 @@ public sealed class GovernedSqlExecutionMultiSchemaShortNameTests
             }
         };
 
-        var factory = Substitute.For<ISqlConnectionFactory>();
-        var conn = Substitute.For<DbConnection>();
-        var cmd = Substitute.For<DbCommand>();
-        cmd.WireParameters();   // the binder owns the parameters of a governed command
-        var reader = Substitute.For<DbDataReader>();
-        reader.ReadAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(false));
-        reader.FieldCount.Returns(0);
-        cmd.ExecuteReaderAsync(Arg.Any<CommandBehavior>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult(reader));
-        conn.CreateCommand().Returns(cmd);
-        factory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(conn));
+        var cmd = new SpyDbCommand { Reader = new SpyDbDataReader { ConfiguredFieldCount = 0 } };
+        var factory = new SpySqlConnectionFactory(_ => new SpyDbConnection(cmd));
 
         var service = global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             Options.Create(options), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard,
@@ -133,7 +116,7 @@ public sealed class GovernedSqlExecutionMultiSchemaShortNameTests
             logger: NullLogger<GovernedSqlExecutionService>.Instance,
             consentRepository: consents,
             secretProvider: null,
-            sessionInitializer: Substitute.For<IDbSessionContextInitializer>(),
+            sessionInitializer: NoopSessionInitializer.Instance,
             mandatoryFilters: null);
 
         // Query referencing both public.orders and archive.orders
@@ -174,11 +157,7 @@ public sealed class GovernedSqlExecutionMultiSchemaShortNameTests
             ]
         };
 
-        var repo = Substitute.For<ITableMetadataRepository>();
-        repo.GetTableMetadataAsync(Arg.Is<TableIdentifier>(t => t.Domain == DataSource), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<TableMetadata?>(null));
-        repo.GetTableMetadataAsync(Arg.Is<TableIdentifier>(t => t.Domain == "default"), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<TableMetadata?>(defaultMeta));
+        var repo = new InMemoryTableMetadataRepository(defaultMeta);
 
         var options = new GatewayOptions
         {
@@ -197,10 +176,9 @@ public sealed class GovernedSqlExecutionMultiSchemaShortNameTests
             }
         };
 
-        var resolution = Substitute.For<IConsentResolutionService>();
-        resolution.ResolveAccess(Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>())
-            .Returns(ci => TableAccessDecision.Allowed(
-                ci.ArgAt<TableIdentifier>(3),
+        var resolution = new StubConsentResolutionService(tbl =>
+            TableAccessDecision.Allowed(
+                tbl,
                 new Dictionary<string, ColumnAccessLevel>
                 {
                     ["id"] = ColumnAccessLevel.Clear,
@@ -209,17 +187,8 @@ public sealed class GovernedSqlExecutionMultiSchemaShortNameTests
                 null,
                 hasUnconstrainedColumnAllow: true));
 
-        var factory = Substitute.For<ISqlConnectionFactory>();
-        var conn = Substitute.For<DbConnection>();
-        var cmd = Substitute.For<DbCommand>();
-        cmd.WireParameters();   // the binder owns the parameters of a governed command
-        var reader = Substitute.For<DbDataReader>();
-        reader.ReadAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(false));
-        reader.FieldCount.Returns(0);
-        cmd.ExecuteReaderAsync(Arg.Any<CommandBehavior>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult(reader));
-        conn.CreateCommand().Returns(cmd);
-        factory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(conn));
+        var cmd = new SpyDbCommand { Reader = new SpyDbDataReader { ConfiguredFieldCount = 0 } };
+        var factory = new SpySqlConnectionFactory(_ => new SpyDbConnection(cmd));
 
         var service = global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             Options.Create(options), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard,
@@ -229,9 +198,9 @@ public sealed class GovernedSqlExecutionMultiSchemaShortNameTests
             clientIpResolver: null,
             environment: null,
             logger: NullLogger<GovernedSqlExecutionService>.Instance,
-            consentRepository: Substitute.For<IConsentRepository>(),
+            consentRepository: new InMemoryConsentRepository(),
             secretProvider: null,
-            sessionInitializer: Substitute.For<IDbSessionContextInitializer>(),
+            sessionInitializer: NoopSessionInitializer.Instance,
             mandatoryFilters: null);
 
         var request = new GovernedSqlQueryRequest("SELECT id, name FROM crm.leads", null, DataSource);
@@ -239,5 +208,40 @@ public sealed class GovernedSqlExecutionMultiSchemaShortNameTests
         var ex = await Should.ThrowAsync<WebSqlPolicyException>(async () =>
             await service.ExecuteQueryBufferedAsync(request, CreateUser(), new TenantId(Tenant)));
         ex.Message.ShouldContain("is denied or the table is not registered");
+    }
+
+    private sealed class NoopSessionInitializer : IDbSessionContextInitializer
+    {
+        public static readonly NoopSessionInitializer Instance = new();
+
+        public Task<DbTransaction?> InitializeSessionAsync(
+            DbConnection connection,
+            DatabaseDialect dialect,
+            TenantId tenantId,
+            string? userSid = null,
+            string? purpose = null,
+            bool requireTransaction = true,
+            CancellationToken ct = default)
+            => Task.FromResult<DbTransaction?>(null);
+
+        public Task<DbTransaction?> InitializeSessionAsync(
+            DbConnection connection,
+            string? provider,
+            TenantId tenantId,
+            string? userSid = null,
+            string? purpose = null,
+            bool requireTransaction = true,
+            CancellationToken ct = default)
+            => Task.FromResult<DbTransaction?>(null);
+
+        public Task InitializeSessionAsync(
+            DbConnection connection,
+            DbTransaction? tx,
+            DatabaseDialect dialect,
+            TenantId tenantId,
+            string? userSid = null,
+            string? purpose = null,
+            CancellationToken ct = default)
+            => Task.CompletedTask;
     }
 }

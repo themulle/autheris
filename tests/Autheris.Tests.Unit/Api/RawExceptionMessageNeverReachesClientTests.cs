@@ -2,6 +2,9 @@
 namespace Autheris.Tests.Unit.Api;
 
 using Autheris.Tests.Common;
+using Autheris.Tests.Common.Fakes;
+using Autheris.Tests.Unit.TestDoubles;
+using Autheris.Tests.Unit.TestSupport;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -39,8 +42,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using NSubstitute;
-using NSubstitute.ExceptionExtensions;
 using Shouldly;
 using Xunit;
 
@@ -118,8 +119,10 @@ public sealed class RawExceptionMessageNeverReachesClientTests
     [Fact]
     public async Task RawExceptionMessage_NeverReachesTheClient_Catalog_InvalidSecretRef()
     {
-        var svc = Substitute.For<ICatalogDiscoveryService>();
-        svc.RegisterDatasourceAsync(default!, default!, default).ThrowsAsyncForAnyArgs(new ArgumentException(Sentinel, "secretRef"));
+        var svc = new StubCatalogDiscoveryService
+        {
+            OnRegisterDatasource = (_, _) => Task.FromException<DatasourceRegistrationResult>(new ArgumentException(Sentinel, "secretRef"))
+        };
         var ctx = Ctx(["GovernanceAdmin", "ClusterAdmin"]);
 
         var c = await RunAsync(await CatalogApiEndpoints.RegisterDatasourceHandler(new DatasourceRegistrationRequest("n", "d"), svc, ctx, CancellationToken.None), ctx);
@@ -131,8 +134,7 @@ public sealed class RawExceptionMessageNeverReachesClientTests
     [Fact]
     public async Task RawExceptionMessage_NeverReachesTheClient_DataContract_InvalidInput()
     {
-        var engine = Substitute.For<IDataContractEngine>();
-        engine.RegisterContractAsync(default!, default).ThrowsAsyncForAnyArgs(new ArgumentException(Sentinel));
+        var engine = new ThrowingDataContractEngine(() => new ArgumentException(Sentinel));
         var ctx = Ctx(["ClusterAdmin"]);
 
         var c = await RunAsync(await DataContractEndpoints.HandleApplyAsync(ctx, engine), ctx);
@@ -144,8 +146,7 @@ public sealed class RawExceptionMessageNeverReachesClientTests
     [Fact]
     public async Task UnexpectedException_Returns500_NotMapped400_DataContract()
     {
-        var engine = Substitute.For<IDataContractEngine>();
-        engine.RegisterContractAsync(default!, default).ThrowsAsyncForAnyArgs(new NotSupportedException(Sentinel));
+        var engine = new ThrowingDataContractEngine(() => new NotSupportedException(Sentinel));
         var ctx = Ctx(["ClusterAdmin"]);
 
         await Should.ThrowAsync<NotSupportedException>(async () => await DataContractEndpoints.HandleApplyAsync(ctx, engine));
@@ -154,8 +155,7 @@ public sealed class RawExceptionMessageNeverReachesClientTests
     [Fact]
     public async Task Cancellation_IsNotMappedToProblem_DataContract()
     {
-        var engine = Substitute.For<IDataContractEngine>();
-        engine.RegisterContractAsync(default!, default).ThrowsAsyncForAnyArgs(new OperationCanceledException(Sentinel));
+        var engine = new ThrowingDataContractEngine(() => new OperationCanceledException(Sentinel));
         var ctx = Ctx(["ClusterAdmin"]);
 
         await Should.ThrowAsync<OperationCanceledException>(async () => await DataContractEndpoints.HandleApplyAsync(ctx, engine));
@@ -168,8 +168,7 @@ public sealed class RawExceptionMessageNeverReachesClientTests
 
     private static async Task<(DefaultHttpContext Ctx, Captured Result)> RunOlapAsync(OlapStagingOutcome outcome, bool development, bool responseStarted = false)
     {
-        var staging = Substitute.For<IOlapStagingService>();
-        staging.ExecuteAsync(default!, default!, default!, default, default!, default).ReturnsForAnyArgs(outcome);
+        var staging = new FixedOlapStagingService(outcome);
         var ctx = Ctx(["GovernanceAdmin"], development, body: "{\"sql\":\"SELECT 1\"}");
         if (responseStarted)
         {
@@ -248,7 +247,7 @@ public sealed class RawExceptionMessageNeverReachesClientTests
     [Fact]
     public async Task RawExceptionMessage_NeverReachesTheClient_RowFilterSyntax_InDevelopment()
     {
-        var repo = Substitute.For<IAccessProfileRepository>();
+        var repo = new Autheris.Infrastructure.Persistence.InMemoryAccessProfileRepository();
         var ctx = Ctx(["GovernanceAdmin"], development: true);
         var req = new BulkConsentRequest { Subject = "alice", Justification = "A sufficiently long justification", ValidDays = 30, MaskingMode = "Default", Tables = ["sales.*"], RowFilter = $"x = '{Sentinel}' AND (" };
 
@@ -262,20 +261,17 @@ public sealed class RawExceptionMessageNeverReachesClientTests
     [Fact]
     public async Task AuditDetails_ContainTypeNotMessage_DeleteProfile()
     {
-        var entries = new List<AuditLogEntry>();
-        var writer = Substitute.For<IAuditWriter>();
-        writer.RecordRequiredAsync(Arg.Do<AuditLogEntry>(entries.Add), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
-        var cache = Substitute.For<IAccessProfileCache>();
-        cache.InvalidateTenantAsync(default, default).ThrowsAsyncForAnyArgs(new InvalidOperationException(Sentinel));
-        var repo = Substitute.For<IAccessProfileRepository>();
-        repo.GetProfileAsync(default, default!, default).ReturnsForAnyArgs(new AccessProfile { ProfileId = "p1", Name = "n", TenantId = new TenantId("tenant-1"), TargetTables = ["a.b"], Assignments = TestAssign.Users() });
-        var ctx = Ctx(["GovernanceAdmin"], configure: s => s.AddSingleton(writer).AddSingleton(cache));
+        var writer = new InMemoryAuditWriter();
+        var cache = new StubAccessProfileCache { OnInvalidateTenant = (_, _) => Task.FromException(new InvalidOperationException(Sentinel)) };
+        var repo = new Autheris.Infrastructure.Persistence.InMemoryAccessProfileRepository();
+        await repo.UpsertProfileAsync(new AccessProfile { ProfileId = "p1", Name = "n", TenantId = new TenantId("tenant-1"), TargetTables = ["a.b"], Assignments = TestAssign.Users() });
+        var ctx = Ctx(["GovernanceAdmin"], configure: s => s.AddSingleton<IAuditWriter>(writer).AddSingleton<IAccessProfileCache>(cache));
 
         var result = await GovernanceEndpoints.DeleteProfileAsync("p1", ctx, repo, CancellationToken.None);
         await result.ExecuteAsync(ctx);
 
         ctx.Response.StatusCode.ShouldBe(503);
-        var failure = entries.Single(e => e.EventType == AuditEventTypes.ProfileInvalidationFailed);
+        var failure = writer.Entries.Single(e => e.EventType == AuditEventTypes.ProfileInvalidationFailed);
         failure.DetailsJson.ShouldNotContain(Sentinel);
         using var doc = JsonDocument.Parse(failure.DetailsJson);
         doc.RootElement.GetProperty("reasonType").GetString().ShouldBe(nameof(InvalidOperationException));
@@ -285,19 +281,16 @@ public sealed class RawExceptionMessageNeverReachesClientTests
     [Fact]
     public async Task AuditDetails_ContainTypeNotMessage_BulkConsent()
     {
-        var entries = new List<AuditLogEntry>();
-        var writer = Substitute.For<IAuditWriter>();
-        writer.RecordRequiredAsync(Arg.Do<AuditLogEntry>(entries.Add), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
-        var cache = Substitute.For<IAccessProfileCache>();
-        cache.InvalidateTenantAsync(default, default).ThrowsAsyncForAnyArgs(new InvalidOperationException(Sentinel));
-        var repo = Substitute.For<IAccessProfileRepository>();
-        var ctx = Ctx(["GovernanceAdmin"], configure: s => s.AddSingleton(writer).AddSingleton(cache));
+        var writer = new InMemoryAuditWriter();
+        var cache = new StubAccessProfileCache { OnInvalidateTenant = (_, _) => Task.FromException(new InvalidOperationException(Sentinel)) };
+        var repo = new Autheris.Infrastructure.Persistence.InMemoryAccessProfileRepository();
+        var ctx = Ctx(["GovernanceAdmin"], configure: s => s.AddSingleton<IAuditWriter>(writer).AddSingleton<IAccessProfileCache>(cache));
         var req = new BulkConsentRequest { Subject = "alice", Justification = "A sufficiently long justification", ValidDays = 30, MaskingMode = "Default", Tables = ["sales.*"] };
 
         var result = await GovernanceEndpoints.CreateBulkConsentAsync(req, ctx, repo, CancellationToken.None);
         await result.ExecuteAsync(ctx);
 
-        var failure = entries.Single(e => e.EventType == AuditEventTypes.ProfileInvalidationFailed);
+        var failure = writer.Entries.Single(e => e.EventType == AuditEventTypes.ProfileInvalidationFailed);
         failure.DetailsJson.ShouldNotContain(Sentinel);
         using var doc = JsonDocument.Parse(failure.DetailsJson);
         doc.RootElement.GetProperty("reasonType").GetString().ShouldBe(nameof(InvalidOperationException));
@@ -306,8 +299,10 @@ public sealed class RawExceptionMessageNeverReachesClientTests
     [Fact]
     public async Task RawExceptionMessage_NeverReachesTheClient_Plan_Confirm_SecurityException_Is403()
     {
-        var svc = Substitute.For<IAccessPlanningService>();
-        svc.ConfirmPlanAsync(default!, default!, default!, default).ThrowsAsyncForAnyArgs(new SecurityException(Sentinel));
+        var svc = new StubAccessPlanningService
+        {
+            OnConfirmPlan = (_, _, _) => Task.FromException<AdminConfirmPlanResult>(new SecurityException(Sentinel))
+        };
         var ctx = Ctx(["GovernanceAdmin"]);
 
         var c = await RunAsync(await GovernancePlanEndpoints.HandleConfirmAsync("p1", new AdminConfirmPlanRequest("p1", "123456"), ctx, svc, CancellationToken.None), ctx);
@@ -320,8 +315,10 @@ public sealed class RawExceptionMessageNeverReachesClientTests
     [InlineData(typeof(InvalidOperationException))]
     public async Task RawExceptionMessage_NeverReachesTheClient_Plan_Confirm_InvalidInput_Is400(Type type)
     {
-        var svc = Substitute.For<IAccessPlanningService>();
-        svc.ConfirmPlanAsync(default!, default!, default!, default).ThrowsAsyncForAnyArgs((Exception)Activator.CreateInstance(type, Sentinel)!);
+        var svc = new StubAccessPlanningService
+        {
+            OnConfirmPlan = (_, _, _) => Task.FromException<AdminConfirmPlanResult>((Exception)Activator.CreateInstance(type, Sentinel)!)
+        };
         var ctx = Ctx(["GovernanceAdmin"]);
 
         var c = await RunAsync(await GovernancePlanEndpoints.HandleConfirmAsync("p1", new AdminConfirmPlanRequest("p1", "123456"), ctx, svc, CancellationToken.None), ctx);
@@ -332,8 +329,10 @@ public sealed class RawExceptionMessageNeverReachesClientTests
     [Fact]
     public async Task RawExceptionMessage_NeverReachesTheClient_Plan_Apply()
     {
-        var svc = Substitute.For<IAccessPlanningService>();
-        svc.ApplyAccessAsync(default!, default!, default, default, default).ThrowsAsyncForAnyArgs(new SecurityException(Sentinel));
+        var svc = new StubAccessPlanningService
+        {
+            OnApplyAccess = (_, _, _, _) => Task.FromException<AdminApplyAccessResult>(new SecurityException(Sentinel))
+        };
         var ctx = Ctx(["GovernanceAdmin"]);
 
         var c = await RunAsync(await GovernancePlanEndpoints.HandleApplyAsync("p1", new AdminApplyAccessRequest("p1", "tok"), ctx, svc, CancellationToken.None), ctx);
@@ -346,8 +345,10 @@ public sealed class RawExceptionMessageNeverReachesClientTests
     [InlineData(typeof(OperationCanceledException))]
     public async Task UnexpectedException_Returns500_NotMapped400_Plan(Type type)
     {
-        var svc = Substitute.For<IAccessPlanningService>();
-        svc.ConfirmPlanAsync(default!, default!, default!, default).ThrowsAsyncForAnyArgs((Exception)Activator.CreateInstance(type, Sentinel)!);
+        var svc = new StubAccessPlanningService
+        {
+            OnConfirmPlan = (_, _, _) => Task.FromException<AdminConfirmPlanResult>((Exception)Activator.CreateInstance(type, Sentinel)!)
+        };
         var ctx = Ctx(["GovernanceAdmin"]);
 
         var thrown = await Record.ExceptionAsync(async () => await GovernancePlanEndpoints.HandleConfirmAsync("p1", new AdminConfirmPlanRequest("p1", "123456"), ctx, svc, CancellationToken.None));
@@ -386,8 +387,7 @@ public sealed class RawExceptionMessageNeverReachesClientTests
     [Fact]
     public async Task RawExceptionMessage_NeverReachesTheClient_Procedure_ArgumentInvalid()
     {
-        var svc = Substitute.For<IProcedureExecutionService>();
-        svc.ExecuteAsync(default!, default, default!, default, default).ThrowsAsyncForAnyArgs(new ArgumentException(Sentinel));
+        var svc = new ThrowingProcedureExecutionService(() => new ArgumentException(Sentinel));
         var ctx = Ctx();
 
         await ProcedureEndpointRoutes.ExecuteAsync("proc", null, ctx, svc, NullLoggerFactory.Instance);
@@ -469,9 +469,7 @@ public sealed class RawExceptionMessageNeverReachesClientTests
     {
         var registry = new McpToolRegistry();
         var options = Options.Create(new GatewayOptions { Mcp = new McpOptions { Enabled = true } });
-        var pdp = Substitute.For<IAccessDecisionPoint>();
-        pdp.DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>())
-            .Returns<ValueTask<TableAccessDecision>>(_ => ValueTask.FromException<TableAccessDecision>(new InvalidOperationException(Sentinel)));
+        var pdp = AccessDecisionPointStubs.Throwing(() => new InvalidOperationException(Sentinel));
         var guardrail = new AiDataGuardrailService(
             registry,
             options,
@@ -528,5 +526,35 @@ public sealed class RawExceptionMessageNeverReachesClientTests
         // NL-SC-27: an ungoverned code is never echoed; the status default is used.
         c.Json.GetProperty("code").GetString().ShouldBe("BAD_REQUEST");
         c.Body.ShouldNotContain(Sentinel);
+    }
+
+    private sealed class ThrowingDataContractEngine(Func<Exception> create) : IDataContractEngine
+    {
+        public Task RegisterContractAsync(DataContract contract, CancellationToken cancellationToken = default) => Task.FromException(create());
+        public Task<DataContract?> GetContractAsync(TableIdentifier table, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<DataContract>> ListContractsAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<bool> UpdateAssertionResultAsync(string contractId, string assertionId, bool isPassing, string? failureReason = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<bool> IsTableHealthyAsync(TableIdentifier table, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    }
+
+    private sealed class FixedOlapStagingService(OlapStagingOutcome outcome) : IOlapStagingService
+    {
+        public Task<OlapStagingOutcome> ExecuteAsync(
+            ClaimsPrincipal user,
+            SecurityPrincipalContext caller,
+            OlapQueryCommand command,
+            bool isDevelopment,
+            string traceId,
+            CancellationToken ct)
+            => Task.FromResult(outcome);
+    }
+
+    private sealed class ThrowingProcedureExecutionService(Func<Exception> create) : IProcedureExecutionService
+    {
+        public Task<GovernedProcedureResult> ExecuteAsync(string name, IReadOnlyDictionary<string, object?>? rawInputs, ClaimsPrincipal user, TenantId tenantId, CancellationToken ct = default)
+            => Task.FromException<GovernedProcedureResult>(create());
+
+        public Task<bool> IsVisibleAsync(RegisteredProcedure procedure, ClaimsPrincipal user, TenantId tenantId, CancellationToken ct = default)
+            => Task.FromResult(false);
     }
 }

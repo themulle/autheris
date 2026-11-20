@@ -23,6 +23,7 @@ using Autheris.GraphQL.Mcp;
 using Autheris.GraphQL.Subscriptions;
 using Autheris.GraphQL.Types;
 using Autheris.Infrastructure.Lineage;
+using Autheris.Tests.Common.Fakes;
 using HotChocolate;
 using HotChocolate.AspNetCore.Subscriptions;
 using HotChocolate.AspNetCore.Subscriptions.Protocols;
@@ -243,6 +244,8 @@ public sealed class GraphQlSubscriptionAndFederationSecurityTests
         return (session, payload, httpContext);
     }
 
+    private static readonly IRequestExecutorProvider PassiveExecutorProvider = Substitute.For<IRequestExecutorProvider>();
+
     [Fact]
     public async Task M14_OnConnect_WithExpiredToken_IsRejected()
     {
@@ -250,10 +253,7 @@ public sealed class GraphQlSubscriptionAndFederationSecurityTests
         var expired = CreatePrincipal("S-1-5-21-WS-EXPIRED",
             extra: [new Claim("exp", DateTimeOffset.UtcNow.AddMinutes(-5).ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture))]);
 
-        var validator = Substitute.For<ISocketTokenValidator>();
-        validator.ValidateTokenAsync("expired-token", Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<(bool IsValid, ClaimsPrincipal? Principal)>((true, expired)));
-
+        var validator = new StubSocketTokenValidator(true, expired);
         var interceptor = new WebSocketAuthInterceptor(NullLogger<WebSocketAuthInterceptor>.Instance, validator);
 
         var status = await interceptor.OnConnectAsync(session, payload);
@@ -269,10 +269,7 @@ public sealed class GraphQlSubscriptionAndFederationSecurityTests
         var valid = CreatePrincipal("S-1-5-21-WS-VALID",
             extra: [new Claim("exp", exp.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture))]);
 
-        var validator = Substitute.For<ISocketTokenValidator>();
-        validator.ValidateTokenAsync("valid-token", Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<(bool IsValid, ClaimsPrincipal? Principal)>((true, valid)));
-
+        var validator = new StubSocketTokenValidator(true, valid);
         var interceptor = new WebSocketAuthInterceptor(NullLogger<WebSocketAuthInterceptor>.Instance, validator);
 
         var status = await interceptor.OnConnectAsync(session, payload);
@@ -296,26 +293,16 @@ public sealed class GraphQlSubscriptionAndFederationSecurityTests
             ownershipRepo,
             graphStore,
             auditRepo,
-            Substitute.For<ITableMetadataRepository>(),
+            new InMemoryTableMetadataRepository(),
             NullLogger<LineageImpactAnalyzerService>.Instance);
     }
 
-    private static IAuditLogRepository CreateAuditRepoWithReads(string rootId)
+    private static async Task<IAuditLogRepository> CreateAuditRepoWithReadsAsync(string rootId)
     {
-        var auditRepo = Substitute.For<IAuditLogRepository>();
+        var auditRepo = new InMemoryAuditLogRepository();
         var now = DateTimeOffset.UtcNow;
-        auditRepo.QueryAuditLogsAsync(
-                targetTable: rootId,
-                actorSid: null,
-                since: Arg.Any<DateTimeOffset>(),
-                limit: Arg.Any<int>(),
-                tenantId: Arg.Any<TenantId?>(),
-                ct: Arg.Any<CancellationToken>())
-            .Returns(new List<AuditLogEntry>
-            {
-                new() { OccurredAt = now.AddDays(-1), ActorSid = new Sid("S-1-5-21-VICTIM-1"), TargetTable = rootId, Decision = "ALLOW", EventType = "TABLE_QUERY" },
-                new() { OccurredAt = now.AddHours(-2), ActorSid = new Sid("S-1-5-21-VICTIM-2"), TargetTable = rootId, Decision = "ALLOW", EventType = "TABLE_QUERY" }
-            });
+        await auditRepo.RecordAuditEventAsync(new AuditLogEntry { TenantId = new TenantId("tenant-1"), OccurredAt = now.AddDays(-1), ActorSid = new Sid("S-1-5-21-VICTIM-1"), TargetTable = rootId, Decision = "ALLOW", EventType = "TABLE_QUERY" });
+        await auditRepo.RecordAuditEventAsync(new AuditLogEntry { TenantId = new TenantId("tenant-1"), OccurredAt = now.AddHours(-2), ActorSid = new Sid("S-1-5-21-VICTIM-2"), TargetTable = rootId, Decision = "ALLOW", EventType = "TABLE_QUERY" });
         return auditRepo;
     }
 
@@ -325,9 +312,8 @@ public sealed class GraphQlSubscriptionAndFederationSecurityTests
         var table = new TableIdentifier("hr", "dbo", "salaries");
         var graph = new LineageGraphStore();
         graph.UpdateGraph([new LineageNode(table.ToString(), "salaries", LineageNodeType.Table, [], "HR", "hr@corp.local")]);
-        var ownership = Substitute.For<IDataOwnershipRepository>();
-        ownership.IsAuthorizedApproverForTableAsync(table, Arg.Any<Sid>(), Arg.Any<CancellationToken>()).Returns(false);
-        var sut = CreateLineageService(Substitute.For<IConsentRepository>(), ownership, CreateAuditRepoWithReads(table.ToString()), graph);
+        var ownership = new InMemoryDataOwnershipRepository();
+        var sut = CreateLineageService(new InMemoryConsentRepository(), ownership, await CreateAuditRepoWithReadsAsync(table.ToString()), graph);
 
         var attacker = new CallerSecurityContext(new Sid("S-1-5-21-ATTACKER"), [], ["Analyst"], new TenantId("tenant-1"), false, false);
         var report = await sut.GetTableConsumersAsync(table, 3650, attacker);
@@ -346,9 +332,12 @@ public sealed class GraphQlSubscriptionAndFederationSecurityTests
         var graph = new LineageGraphStore();
         graph.UpdateGraph([new LineageNode(table.ToString(), "salaries", LineageNodeType.Table, [], "HR", "hr@corp.local")]);
         var caller = new CallerSecurityContext(new Sid("S-1-5-21-CALLER"), [], [role], new TenantId("tenant-1"), false, false);
-        var ownership = Substitute.For<IDataOwnershipRepository>();
-        ownership.IsAuthorizedApproverForTableAsync(table, caller.UserSid, Arg.Any<CancellationToken>()).Returns(isOwner);
-        var sut = CreateLineageService(Substitute.For<IConsentRepository>(), ownership, CreateAuditRepoWithReads(table.ToString()), graph);
+        var ownership = new InMemoryDataOwnershipRepository();
+        if (isOwner)
+        {
+            ownership.AssignOwner(table, new DataOwner { AdSid = caller.UserSid });
+        }
+        var sut = CreateLineageService(new InMemoryConsentRepository(), ownership, await CreateAuditRepoWithReadsAsync(table.ToString()), graph);
 
         var report = await sut.GetTableConsumersAsync(table, 30, caller);
 
@@ -373,11 +362,9 @@ public sealed class GraphQlSubscriptionAndFederationSecurityTests
     {
         var table = new TableIdentifier("finance", "dbo", "salaries");
         var consentId = Guid.NewGuid();
-        var consentRepo = Substitute.For<IConsentRepository>();
-        consentRepo.GetConsentByIdAsync(consentId, Arg.Any<CancellationToken>()).Returns(CreateConsent(consentId, table, new TenantId("tenant-a")));
-        var ownership = Substitute.For<IDataOwnershipRepository>();
-        ownership.IsAuthorizedApproverForTableAsync(table, Arg.Any<Sid>(), Arg.Any<CancellationToken>()).Returns(false);
-        var sut = CreateLineageService(consentRepo, ownership, Substitute.For<IAuditLogRepository>(), new LineageGraphStore());
+        var consentRepo = new InMemoryConsentRepository(CreateConsent(consentId, table, new TenantId("tenant-a")));
+        var ownership = new InMemoryDataOwnershipRepository();
+        var sut = CreateLineageService(consentRepo, ownership, new InMemoryAuditLogRepository(), new LineageGraphStore());
 
         var caller = new CallerSecurityContext(new Sid("S-1-5-21-ANALYST"), [], ["Analyst"], new TenantId("tenant-a"), false, false);
 
@@ -390,9 +377,8 @@ public sealed class GraphQlSubscriptionAndFederationSecurityTests
     {
         var table = new TableIdentifier("finance", "dbo", "salaries");
         var consentId = Guid.NewGuid();
-        var consentRepo = Substitute.For<IConsentRepository>();
-        consentRepo.GetConsentByIdAsync(consentId, Arg.Any<CancellationToken>()).Returns(CreateConsent(consentId, table, Autheris.Tests.Common.TestTenants.Default));
-        var sut = CreateLineageService(consentRepo, Substitute.For<IDataOwnershipRepository>(), Substitute.For<IAuditLogRepository>(), new LineageGraphStore());
+        var consentRepo = new InMemoryConsentRepository(CreateConsent(consentId, table, Autheris.Tests.Common.TestTenants.Default));
+        var sut = CreateLineageService(consentRepo, new InMemoryDataOwnershipRepository(), new InMemoryAuditLogRepository(), new LineageGraphStore());
 
         var caller = new CallerSecurityContext(new Sid("S-1-5-21-GOV"), [], ["GovernanceAdmin"], new TenantId("tenant-a"), true, false);
 
@@ -405,12 +391,11 @@ public sealed class GraphQlSubscriptionAndFederationSecurityTests
     {
         var table = new TableIdentifier("finance", "dbo", "salaries");
         var consentId = Guid.NewGuid();
-        var consentRepo = Substitute.For<IConsentRepository>();
-        consentRepo.GetConsentByIdAsync(consentId, Arg.Any<CancellationToken>()).Returns(CreateConsent(consentId, table, new TenantId("tenant-a")));
+        var consentRepo = new InMemoryConsentRepository(CreateConsent(consentId, table, new TenantId("tenant-a")));
         var caller = new CallerSecurityContext(new Sid("S-1-5-21-OWNER"), [], ["Analyst"], new TenantId("tenant-a"), false, false);
-        var ownership = Substitute.For<IDataOwnershipRepository>();
-        ownership.IsAuthorizedApproverForTableAsync(table, caller.UserSid, Arg.Any<CancellationToken>()).Returns(true);
-        var sut = CreateLineageService(consentRepo, ownership, Substitute.For<IAuditLogRepository>(), new LineageGraphStore());
+        var ownership = new InMemoryDataOwnershipRepository()
+            .AssignOwner(table, new DataOwner { AdSid = caller.UserSid });
+        var sut = CreateLineageService(consentRepo, ownership, new InMemoryAuditLogRepository(), new LineageGraphStore());
 
         var report = await sut.CalculateConsentRevocationImpactAsync(new TenantId("tenant-a"), consentId, caller);
 
@@ -487,7 +472,7 @@ public sealed class GraphQlSubscriptionAndFederationSecurityTests
         new("sess-m17", "svc-agent", "tenant-alpha", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, UserSid: "S-1-5-21-AGENT-USER");
 
     private static GatewayMcpQueryExecutor CreateMcpExecutor(IGatewayExecutionService executionService) =>
-        new(Substitute.For<IRequestExecutorProvider>(), executionService, NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100), persistedToolValidator: new Autheris.Application.Mcp.Services.PersistedToolValidator());
+        new(PassiveExecutorProvider, executionService, NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100), persistedToolValidator: new Autheris.Application.Mcp.Services.PersistedToolValidator());
 
     private static void AssertStructuredError(string json, string expectedCode)
     {
@@ -503,18 +488,11 @@ public sealed class GraphQlSubscriptionAndFederationSecurityTests
     [Fact]
     public async Task M17_FastPathForbidden_ReturnsStructuredForbiddenErrorInsteadOfMockData()
     {
-        var execution = Substitute.For<IGatewayExecutionService>();
-        execution.ExecuteTableQueryAsync(
-                Arg.Any<ClaimsPrincipal?>(),
-                Arg.Any<TableIdentifier>(),
-                Arg.Any<int?>(),
-                Arg.Any<int?>(),
-                Arg.Any<IReadOnlyDictionary<string, object?>?>(),
-                Arg.Any<IReadOnlyList<string>?>(),
-                Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
-                Arg.Any<CancellationToken>())
-            .Returns(Task.FromException<(IReadOnlyList<IReadOnlyDictionary<string, object?>> Rows, TableAccessDecision Decision)>(
-                new GatewayForbiddenException()));
+        var execution = new StubGatewayExecutionService
+        {
+            OnExecuteQuery = (_, _, _, _, _, _, _, _) =>
+                Task.FromException<(IReadOnlyList<IReadOnlyDictionary<string, object?>>, TableAccessDecision)>(new GatewayForbiddenException())
+        };
 
         var tool = new McpToolDefinition(
             "query_customers",
@@ -533,7 +511,7 @@ public sealed class GraphQlSubscriptionAndFederationSecurityTests
     {
         var tool = new McpToolDefinition("custom_report", "Custom", """{"type":"object","properties":{}}""", "query { doesNotExist }");
 
-        var json = await CreateMcpExecutor(Substitute.For<IGatewayExecutionService>()).ExecuteOperationAsync(tool, "{}", CreateMcpSession());
+        var json = await CreateMcpExecutor(new StubGatewayExecutionService()).ExecuteOperationAsync(tool, "{}", CreateMcpSession());
 
         AssertStructuredError(json, McpErrorCodes.ExecutionFailed);
     }
@@ -543,7 +521,7 @@ public sealed class GraphQlSubscriptionAndFederationSecurityTests
     {
         var tool = new McpToolDefinition("query_data_catalog", "Catalog", """{"type":"object","properties":{}}""", string.Empty);
 
-        var json = await CreateMcpExecutor(Substitute.For<IGatewayExecutionService>()).ExecuteOperationAsync(tool, "{}", CreateMcpSession());
+        var json = await CreateMcpExecutor(new StubGatewayExecutionService()).ExecuteOperationAsync(tool, "{}", CreateMcpSession());
 
         AssertStructuredError(json, McpErrorCodes.NotAvailable);
     }
@@ -553,7 +531,7 @@ public sealed class GraphQlSubscriptionAndFederationSecurityTests
     {
         var tool = new McpToolDefinition("simulate_query", "Simulator", """{"type":"object","properties":{"query":{"type":"string"}}}""", string.Empty);
 
-        var json = await CreateMcpExecutor(Substitute.For<IGatewayExecutionService>())
+        var json = await CreateMcpExecutor(new StubGatewayExecutionService())
             .ExecuteOperationAsync(tool, "{\"query\":\"{ table(domain: \\\"a\\\", name: \\\"b\\\") { tableName } }\"}", CreateMcpSession());
 
         json.ShouldNotContain("\"isAllowed\":true");
@@ -565,9 +543,7 @@ public sealed class GraphQlSubscriptionAndFederationSecurityTests
     [Fact]
     public async Task Low_RequestTableAccess_UnknownTable_ReturnsNeutralForbidden()
     {
-        var metadata = Substitute.For<ITableMetadataRepository>();
-        metadata.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<TableMetadata?>(null));
+        var metadata = new InMemoryTableMetadataRepository();
         var approvals = Substitute.For<IConsentApprovalRepository>();
         var accessor = new IsolatedHttpContextAccessor(new DefaultHttpContext { User = CreatePrincipal("S-1-5-21-ENUM") });
 
@@ -577,6 +553,12 @@ public sealed class GraphQlSubscriptionAndFederationSecurityTests
         ex.Errors.ShouldContain(e => e.Code == "FORBIDDEN");
         ex.Errors.ShouldNotContain(e => e.Code == "NOT_FOUND");
         ex.Errors.ShouldAllBe(e => !e.Message.Contains("secret_probe_table"));
+    }
+
+    private sealed class StubSocketTokenValidator(bool isValid, ClaimsPrincipal? principal) : ISocketTokenValidator
+    {
+        public Task<(bool IsValid, ClaimsPrincipal? Principal)> ValidateTokenAsync(string token, CancellationToken ct = default)
+            => Task.FromResult((isValid, principal));
     }
 
 }

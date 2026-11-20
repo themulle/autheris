@@ -71,12 +71,7 @@ public sealed class McpOpenFindingsSecurityTests
         });
 
     private static IMcpQueryExecutor Executor(string json = """{"totalTables":0,"tables":[]}""")
-    {
-        var executor = Substitute.For<IMcpQueryExecutor>();
-        executor.ExecuteOperationAsync(Arg.Any<McpToolDefinition>(), Arg.Any<string>(), Arg.Any<McpSessionContext>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(json));
-        return executor;
-    }
+        => new global::Autheris.Tests.Common.Fakes.StubMcpQueryExecutor(json);
 
     private static AiDataGuardrailService Guardrail(
         Autheris.Application.Policy.Pdp.IAccessDecisionPoint? policy = null,
@@ -153,7 +148,7 @@ public sealed class McpOpenFindingsSecurityTests
 
         result.IsSuccess.ShouldBeFalse();
         result.ErrorMessage!.ShouldContain("ABAC");
-        await executor.DidNotReceiveWithAnyArgs().ExecuteOperationAsync(default!, default!, default!, default);
+        ((global::Autheris.Tests.Common.Fakes.StubMcpQueryExecutor)executor).Calls.ShouldBeEmpty();
     }
 
     [Fact]
@@ -168,7 +163,7 @@ public sealed class McpOpenFindingsSecurityTests
 
         result.IsSuccess.ShouldBeFalse();
         result.ErrorMessage!.ShouldContain("fail-closed");
-        await executor.DidNotReceiveWithAnyArgs().ExecuteOperationAsync(default!, default!, default!, default);
+        ((global::Autheris.Tests.Common.Fakes.StubMcpQueryExecutor)executor).Calls.ShouldBeEmpty();
     }
 
     [Fact]
@@ -191,11 +186,11 @@ public sealed class McpOpenFindingsSecurityTests
         discovery.SearchCatalogDetailedAsync(Arg.Any<CatalogSearchQuery>(), Arg.Any<RequestContext>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<CatalogSearchHit>>([]));
         var handler = new McpToolExecutionHandler(
-            Substitute.For<IGovernedSqlExecutionService>(),
+            new global::Autheris.Tests.Common.Fakes.StubGovernedSqlExecutionService(),
             Substitute.For<IGovernedDataQueryService>(),
             discovery,
             Substitute.For<IApiDispatcherService>(),
-            Substitute.For<ILineageGraphStore>(),
+            new global::Autheris.Tests.Common.Fakes.InMemoryLineageGraphStore(),
             new InMemoryTableMetadataRepository());
         return (handler, discovery);
     }
@@ -250,7 +245,7 @@ public sealed class McpOpenFindingsSecurityTests
     [Fact]
     public async Task ResourceRead_DeniedByCasbin_NeverReadsAndIsAuditedAsDeny()
     {
-        var audit = Substitute.For<IAuditLogRepository>();
+        var audit = new InMemoryAuditLogRepository();
         var reads = 0;
 
         var result = await Guardrail(PolicyDenying(Payroll), audit: audit).ReadResourceWithGuardrailAsync(
@@ -261,14 +256,13 @@ public sealed class McpOpenFindingsSecurityTests
 
         result.IsSuccess.ShouldBeFalse();
         reads.ShouldBe(0);
-        await audit.Received(1).RecordAuditEventAsync(
-            Arg.Is<AuditLogEntry>(e => e.EventType == "MCP_TOOL_EXECUTION" && e.Decision == "DENY"), Arg.Any<CancellationToken>());
+        audit.Entries.Count(e => e.EventType == "MCP_TOOL_EXECUTION" && e.Decision == "DENY").ShouldBe(1);
     }
 
     [Fact]
     public async Task ResourceRead_Allowed_IsScrubbedAndAuditedAsAllow()
     {
-        var audit = Substitute.For<IAuditLogRepository>();
+        var audit = new InMemoryAuditLogRepository();
 
         var result = await Guardrail(PolicyDenying(), audit: audit).ReadResourceWithGuardrailAsync(
             "autheris://catalog/summary",
@@ -279,8 +273,7 @@ public sealed class McpOpenFindingsSecurityTests
         result.IsSuccess.ShouldBeTrue();
         result.IsMasked.ShouldBeTrue();
         result.ContentJson.ShouldNotContain("jane.doe@example.com");
-        await audit.Received(1).RecordAuditEventAsync(
-            Arg.Is<AuditLogEntry>(e => e.EventType == "MCP_TOOL_EXECUTION" && e.Decision == "ALLOW"), Arg.Any<CancellationToken>());
+        audit.Entries.Count(e => e.EventType == "MCP_TOOL_EXECUTION" && e.Decision == "ALLOW").ShouldBe(1);
     }
 
     [Fact]
@@ -313,8 +306,7 @@ public sealed class McpOpenFindingsSecurityTests
             User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-USER"), new Claim("tenant_id", "tenant-a")], "Bearer"))
         };
         http.Items[SecurityPrincipalContext.TenantIdItemKey] = new TenantId("tenant-a");
-        var accessor = Substitute.For<IHttpContextAccessor>();
-        accessor.HttpContext.Returns(http);
+        IHttpContextAccessor accessor = new HttpContextAccessor { HttpContext = http };
 
         var services = new ServiceCollection();
         services.AddSingleton(accessor);
@@ -513,9 +505,8 @@ public sealed class McpOpenFindingsSecurityTests
     [Fact]
     public async Task MutatingAdminTool_EndToEnd_RunsOnlyWithTheTotpConfirmedTokenForTheSameArguments()
     {
-        var tableRepo = Substitute.For<ITableMetadataRepository>();
-        tableRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns(new TableMetadata { Identifier = Orders, Table = new Table { TableName = "orders", SchemaName = "public", IsActive = true } });
+        var tableRepo = new InMemoryTableMetadataRepository(
+            new TableMetadata { Identifier = Orders, Table = new Table { TableName = "orders", SchemaName = "public", IsActive = true } });
         ITotpSecretStore secrets = new InMemoryTotpSecretStore();
         ITotpVerificationService totp = new TotpVerificationService();
         var service = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(new InMemoryAuditLogRepository()), tableRepo, new InMemoryConsentRepository(), totp, secrets);
@@ -526,7 +517,7 @@ public sealed class McpOpenFindingsSecurityTests
         planned.IsSuccess.ShouldBeTrue();
         using var plannedDoc = JsonDocument.Parse(planned.ContentJson);
         var planId = plannedDoc.RootElement.GetProperty("planId").GetString()!;
-        await tableRepo.DidNotReceiveWithAnyArgs().UpsertTableMetadataAsync(default!);
+        tableRepo.UpsertCalls.ShouldBe(0);
 
         // Confirmation with TOTP (the REST confirm endpoint calls the same method).
         var enrollment = totp.GenerateEnrollment(AdminSid, "admin@autheris.local");
@@ -537,7 +528,7 @@ public sealed class McpOpenFindingsSecurityTests
         var tampered = await McpAdminTools.ExecuteAdminToolAsync(McpAdminTools.SetDatasetState,
             JsonSerializer.Serialize(new { datasetId = "sales.public.orders", state = "active", reason = "drift", planId, confirmationToken = token }), AdminSession, service);
         tampered.IsSuccess.ShouldBeFalse();
-        await tableRepo.DidNotReceiveWithAnyArgs().UpsertTableMetadataAsync(default!);
+        tableRepo.UpsertCalls.ShouldBe(0);
 
         // Nor another operation.
         await Should.ThrowAsync<SecurityException>(() => service.ApplyAccessAsync(new AdminApplyAccessRequest(planId, token), AdminSid, "tenant-a"));
@@ -546,17 +537,17 @@ public sealed class McpOpenFindingsSecurityTests
         var confirmed = JsonSerializer.Serialize(new { datasetId = "sales.public.orders", state = "quarantined", reason = "drift", planId, confirmationToken = token });
         var applied = await McpAdminTools.ExecuteAdminToolAsync(McpAdminTools.SetDatasetState, confirmed, AdminSession, service);
         applied.IsSuccess.ShouldBeTrue(applied.ErrorMessage);
-        await tableRepo.Received(1).UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>());
+        tableRepo.UpsertCalls.ShouldBe(1);
 
         var replay = await McpAdminTools.ExecuteAdminToolAsync(McpAdminTools.SetDatasetState, confirmed, AdminSession, service);
         replay.IsSuccess.ShouldBeFalse();
-        await tableRepo.Received(1).UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>());
+        tableRepo.UpsertCalls.ShouldBe(1);
     }
 
     [Fact]
     public async Task AdminToolCall_WritesAnAllowAuditRow()
     {
-        var audit = Substitute.For<IAuditLogRepository>();
+        var audit = new InMemoryAuditLogRepository();
         var planning = Substitute.For<IAccessPlanningService>();
         planning.PlanAdminOperationAsync(default!, default!, default!, default!, default, default)
             .ReturnsForAnyArgs(new AdminPlanAccessResult("plan_1", "t", [], [], DateTimeOffset.UtcNow.AddMinutes(10)));
@@ -565,9 +556,7 @@ public sealed class McpOpenFindingsSecurityTests
             new McpToolCallRequest(McpAdminTools.SetDatasetState, """{"datasetId":"sales.public.orders","state":"quarantined"}"""), AdminSession);
 
         result.IsSuccess.ShouldBeTrue(result.ErrorMessage);
-        await audit.Received(1).RecordAuditEventAsync(
-            Arg.Is<AuditLogEntry>(e => e.EventType == "MCP_TOOL_EXECUTION" && e.Decision == "ALLOW" && e.TargetTable == McpAdminTools.SetDatasetState),
-            Arg.Any<CancellationToken>());
+        audit.Entries.Count(e => e.EventType == "MCP_TOOL_EXECUTION" && e.Decision == "ALLOW" && e.TargetTable == McpAdminTools.SetDatasetState).ShouldBe(1);
     }
 
     // ---- 5. Structured tool errors and the catalog search limit ----------------------------------------------------------------
@@ -592,14 +581,14 @@ public sealed class McpOpenFindingsSecurityTests
     [Fact]
     public async Task InvalidParams_AreAuditedAsDeny_AndReturnedAsToolErrors()
     {
-        var audit = Substitute.For<IAuditLogRepository>();
-        var executor = Executor("""{"tenantId":"tenant-a","tool":"query_dataset","isError":true,"error":{"code":"INVALID_PARAMS","message":"Missing or invalid required argument 'dataset'."}}""");
+        var audit = new InMemoryAuditLogRepository();
+        var executor = new global::Autheris.Tests.Common.Fakes.StubMcpQueryExecutor("""{"tenantId":"tenant-a","tool":"query_dataset","isError":true,"error":{"code":"INVALID_PARAMS","message":"Missing or invalid required argument 'dataset'."}}""");
 
         var result = await Guardrail(audit: audit, executor: executor).ExecuteToolWithGuardrailAsync(
             new McpToolCallRequest(McpDatasetTools.GetTableSchema, "{}"), UserSession());
 
         result.IsSuccess.ShouldBeFalse();
-        await audit.Received(1).RecordAuditEventAsync(Arg.Is<AuditLogEntry>(e => e.Decision == "DENY"), Arg.Any<CancellationToken>());
+        audit.Entries.Count(e => e.Decision == "DENY").ShouldBe(1);
     }
 
     [Theory]

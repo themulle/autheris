@@ -17,6 +17,7 @@ using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Infrastructure.Connectors;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -86,23 +87,23 @@ public sealed class PreStagingMaskingTests
             Columns = [new TableColumn { ColumnName = "id", DataType = "int" }]
         };
 
-        var connector1 = Substitute.For<IAutherisConnector>();
-        connector1.ConnectorId.Returns("crm");
-        var recordSource1 = Substitute.For<IConnectorRecordSource>();
-        connector1.RecordSource.Returns(recordSource1);
-        connector1.SplitManager.GetSplitsAsync(Arg.Any<TableMetadata>(), Arg.Any<ConnectorSessionContext>(), Arg.Any<CancellationToken>())
-            .Returns([ConnectorSplit.Default("s1")]);
+        var readCalls = 0;
+        var connector1 = new StubAutherisConnector(
+            "crm",
+            readBatch: (_, _, _) =>
+            {
+                readCalls++;
+                return Task.FromResult<IReadOnlyList<IReadOnlyDictionary<string, object?>>>([]);
+            });
 
-        var registry = Substitute.For<IAutherisConnectorRegistry>();
-        registry.TryGetConnectorForTable(meta1.Identifier, out Arg.Any<IAutherisConnector>()!)
-            .Returns(x => { x[1] = connector1; return true; });
+        var registry = new InMemoryConnectorRegistry();
+        registry.RegisterConnector("crm", connector1);
 
-        var auditRepo = Substitute.For<IAuditLogRepository>();
-        var maskingProvider = Substitute.For<IColumnMaskingProvider>();
+        var auditRepo = new InMemoryAuditLogRepository();
 
         var service = new FederatedStagingService(
             registry,
-            maskingProvider,
+            StubColumnMaskingProvider.Null,
             auditRepo,
             Options.Create(new GatewayOptions()),
             NullLogger<FederatedStagingService>.Instance);
@@ -127,23 +128,14 @@ public sealed class PreStagingMaskingTests
             await service.StageAsync([req1, req2], CreateUser(), new TenantId(Tenant), CreateBudget()));
 
         // Verification: Because Table 2 was denied, Table 1 must NEVER have been read!
-        await recordSource1.DidNotReceiveWithAnyArgs().ReadBatchAsync(default!, default!, default);
-        await auditRepo.DidNotReceiveWithAnyArgs().RecordAuditEventAsync(
-            Arg.Is<AuditLogEntry>(e => e.EventType == AuditEventTypes.WebSqlCrossSourceSourceRead),
-            Arg.Any<CancellationToken>());
+        readCalls.ShouldBe(0);
+        auditRepo.Entries.ShouldNotContain(e => e.EventType == AuditEventTypes.WebSqlCrossSourceSourceRead);
     }
 
     [Fact]
     public async Task StageAsync_MaskedColumn_IsMaskedBeforeStaging_AndDeniedColumnIsAbsent()
     {
         var meta = CreateCustomerTable();
-
-        var connector = Substitute.For<IAutherisConnector>();
-        connector.ConnectorId.Returns("crm");
-        var recordSource = Substitute.For<IConnectorRecordSource>();
-        connector.RecordSource.Returns(recordSource);
-        connector.SplitManager.GetSplitsAsync(Arg.Any<TableMetadata>(), Arg.Any<ConnectorSessionContext>(), Arg.Any<CancellationToken>())
-            .Returns([ConnectorSplit.Default("s1")]);
 
         var rawRows = new List<IReadOnlyDictionary<string, object?>>
         {
@@ -155,19 +147,18 @@ public sealed class PreStagingMaskingTests
                 ["salary"] = 100000
             }
         };
-        recordSource.ReadBatchAsync(Arg.Any<ConnectorSplit>(), Arg.Any<ConnectorSessionContext>(), Arg.Any<CancellationToken>())
-            .Returns(rawRows);
+        var connector = new StubAutherisConnector("crm", rawRows);
 
-        var registry = Substitute.For<IAutherisConnectorRegistry>();
-        registry.TryGetConnectorForTable(meta.Identifier, out Arg.Any<IAutherisConnector>()!)
-            .Returns(x => { x[1] = connector; return true; });
+        var registry = new InMemoryConnectorRegistry();
+        registry.RegisterConnector("crm", connector);
 
-        var auditRepo = Substitute.For<IAuditLogRepository>();
-        var maskingProvider = Substitute.For<IColumnMaskingProvider>();
-        maskingProvider.MaskValue(Arg.Is<string>("email"), Arg.Is<object?>("alice@secret.com"), Arg.Any<MaskingRule>())
-            .Returns("***REDACTED***");
-        maskingProvider.MaskValue(Arg.Is<string>("salary"), Arg.Is<object?>(100000), Arg.Any<MaskingRule>())
-            .Returns("***REDACTED_INT***");
+        var auditRepo = new InMemoryAuditLogRepository();
+        var maskingProvider = new StubColumnMaskingProvider((col, raw, _) => (col, raw) switch
+        {
+            ("email", "alice@secret.com") => "***REDACTED***",
+            ("salary", 100000) => "***REDACTED_INT***",
+            _ => null
+        });
 
         var service = new FederatedStagingService(
             registry,
@@ -217,33 +208,20 @@ public sealed class PreStagingMaskingTests
     {
         var meta = CreateCustomerTable();
 
-        var connector = Substitute.For<IAutherisConnector>();
-        connector.ConnectorId.Returns("crm");
-        var recordSource = Substitute.For<IConnectorRecordSource>();
-        connector.RecordSource.Returns(recordSource);
-        connector.SplitManager.GetSplitsAsync(Arg.Any<TableMetadata>(), Arg.Any<ConnectorSessionContext>(), Arg.Any<CancellationToken>())
-            .Returns([ConnectorSplit.Default("s1")]);
-
         var rawRows = Enumerable.Range(1, 10).Select(i => (IReadOnlyDictionary<string, object?>)new Dictionary<string, object?>
         {
             ["id"] = i,
             ["email"] = $"user{i}@test.com"
         }).ToList();
 
-        recordSource.ReadBatchAsync(Arg.Any<ConnectorSplit>(), Arg.Any<ConnectorSessionContext>(), Arg.Any<CancellationToken>())
-            .Returns(rawRows);
-
-        var registry = Substitute.For<IAutherisConnectorRegistry>();
-        registry.TryGetConnectorForTable(meta.Identifier, out Arg.Any<IAutherisConnector>()!)
-            .Returns(x => { x[1] = connector; return true; });
-
-        var auditRepo = Substitute.For<IAuditLogRepository>();
-        var maskingProvider = Substitute.For<IColumnMaskingProvider>();
+        var connector = new StubAutherisConnector("crm", rawRows);
+        var registry = new InMemoryConnectorRegistry();
+        registry.RegisterConnector("crm", connector);
 
         var service = new FederatedStagingService(
             registry,
-            maskingProvider,
-            auditRepo,
+            StubColumnMaskingProvider.Null,
+            new InMemoryAuditLogRepository(),
             Options.Create(new GatewayOptions()),
             NullLogger<FederatedStagingService>.Instance);
 
@@ -266,18 +244,9 @@ public sealed class PreStagingMaskingTests
     {
         var meta = CreateCustomerTable();
 
-        var connector = Substitute.For<IAutherisConnector>();
-        connector.ConnectorId.Returns("crm");
-        var recordSource = Substitute.For<IConnectorRecordSource>();
-        connector.RecordSource.Returns(recordSource);
-        connector.SplitManager.GetSplitsAsync(Arg.Any<TableMetadata>(), Arg.Any<ConnectorSessionContext>(), Arg.Any<CancellationToken>())
-            .Returns([ConnectorSplit.Default("s1")]);
-        recordSource.ReadBatchAsync(Arg.Any<ConnectorSplit>(), Arg.Any<ConnectorSessionContext>(), Arg.Any<CancellationToken>())
-            .Returns([new Dictionary<string, object?> { ["id"] = 1, ["email"] = "a@b.com" }]);
-
-        var registry = Substitute.For<IAutherisConnectorRegistry>();
-        registry.TryGetConnectorForTable(meta.Identifier, out Arg.Any<IAutherisConnector>()!)
-            .Returns(x => { x[1] = connector; return true; });
+        var connector = new StubAutherisConnector("crm", [new Dictionary<string, object?> { ["id"] = 1, ["email"] = "a@b.com" }]);
+        var registry = new InMemoryConnectorRegistry();
+        registry.RegisterConnector("crm", connector);
 
         var auditRepo = Substitute.For<IAuditLogRepository>();
         auditRepo.RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>())
@@ -285,7 +254,7 @@ public sealed class PreStagingMaskingTests
 
         var service = new FederatedStagingService(
             registry,
-            Substitute.For<IColumnMaskingProvider>(),
+            StubColumnMaskingProvider.Null,
             auditRepo,
             Options.Create(new GatewayOptions()),
             NullLogger<FederatedStagingService>.Instance);
@@ -319,16 +288,12 @@ public sealed class PreStagingMaskingTests
         };
 
         // Registry only has "default-sql"
-        var sqlConnector = Substitute.For<IAutherisConnector>();
-        sqlConnector.ConnectorId.Returns("default-sql");
-
-        var registry = Substitute.For<IAutherisConnectorRegistry>();
-        registry.TryGetConnectorForTable(httpMeta.Identifier, out Arg.Any<IAutherisConnector>()!)
-            .Returns(x => { x[1] = sqlConnector; return true; });
+        var registry = new InMemoryConnectorRegistry();
+        registry.RegisterConnector("default-sql", new StubAutherisConnector("default-sql"));
 
         var service = new FederatedStagingService(
             registry,
-            Substitute.For<IColumnMaskingProvider>(),
+            StubColumnMaskingProvider.Null,
             new InMemoryAuditLogRepository(),
             Options.Create(new GatewayOptions()),
             NullLogger<FederatedStagingService>.Instance);

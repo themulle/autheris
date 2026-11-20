@@ -13,6 +13,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Tests.Common;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -22,6 +23,14 @@ using Xunit;
 public class PureYamlProcedureGovernanceTests
 {
     private static readonly TenantId Tenant = new("tenant-pure-yaml");
+
+    private sealed class StubProcedureInvoker(RawProcedureResult result) : IProcedureInvoker
+    {
+        public Task<RawProcedureResult> ExecuteReadAsync(
+            ProcedureDefinition definition, IReadOnlyDictionary<string, object?> parameters,
+            ProcedureSecurityContext securityContext, int maxRows, CancellationToken ct = default)
+            => Task.FromResult(result);
+    }
 
     private static ClaimsPrincipal User(params string[] roles)
     {
@@ -102,7 +111,7 @@ public class PureYamlProcedureGovernanceTests
         var loader = new ProcedureDefinitionLoader(
             registry,
             Options.Create(new GatewayOptions()),
-            Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>());
+            new TestHostEnvironment());
 
         var scopeFactory = Substitute.For<IServiceScopeFactory>();
         var service = new ProcedureRegistrationService(
@@ -158,43 +167,35 @@ public class PureYamlProcedureGovernanceTests
 
         registry.MarkActive(def.Name, validation);
 
-        var invoker = Substitute.For<IProcedureInvoker>();
-        invoker.ExecuteReadAsync(Arg.Any<ProcedureDefinition>(), Arg.Any<IReadOnlyDictionary<string, object?>>(), Arg.Any<ProcedureSecurityContext>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
-            .Returns(new RawProcedureResult(
-                Columns: ["order_id", "sensitive_note", "unauthorized_leak"],
-                Rows:
-                [
-                    new object?[] { 100, "secret financial data", "should be dropped" }
-                ],
-                MoreRowsAvailable: false));
+        var invoker = new StubProcedureInvoker(new RawProcedureResult(
+            Columns: ["order_id", "sensitive_note", "unauthorized_leak"],
+            Rows:
+            [
+                new object?[] { 100, "secret financial data", "should be dropped" }
+            ],
+            MoreRowsAvailable: false));
 
-        var tables = Substitute.For<ITableMetadataRepository>();
-        tables.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns(new TableMetadata
-            {
-                Identifier = new TableIdentifier("default", "sales", "orders"),
-                Columns =
-                [
-                    new TableColumn { ColumnName = "id" },
-                    new TableColumn { ColumnName = "note" }
-                ]
-            });
+        var tables = new InMemoryTableMetadataRepository(new TableMetadata
+        {
+            Identifier = new TableIdentifier("default", "sales", "orders"),
+            Columns =
+            [
+                new TableColumn { ColumnName = "id" },
+                new TableColumn { ColumnName = "note" }
+            ]
+        });
 
-        var consents = Substitute.For<IConsentRepository>();
-        consents.GetActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
-            .Returns(new List<Consent>());
+        var consents = new InMemoryConsentRepository();
 
-        var resolution = Substitute.For<IConsentResolutionService>();
         var columnDecisions = new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
         {
             ["id"] = ColumnAccessLevel.Clear,
             ["note"] = ColumnAccessLevel.Mask
         };
-        resolution.ResolveAccess(Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>())
-            .Returns(ci => TableAccessDecision.Allowed(ci.ArgAt<TableIdentifier>(3), columnDecisions, null));
+        var resolution = StubConsentResolutionService.Fixed(
+            TableAccessDecision.Allowed(new TableIdentifier("default", "sales", "orders"), columnDecisions, null));
 
-        var masking = Substitute.For<IColumnMaskingProvider>();
-        masking.MaskValue(Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<MaskingRule>()).Returns("***MASKED***");
+        var masking = new StubColumnMaskingProvider("***MASKED***");
 
         var opt = Options.Create(new GatewayOptions
         {
@@ -265,43 +266,36 @@ public class PureYamlProcedureGovernanceTests
 
         registry.MarkActive(def.Name, validation);
 
-        var invoker = Substitute.For<IProcedureInvoker>();
-        invoker.ExecuteReadAsync(Arg.Any<ProcedureDefinition>(), Arg.Any<IReadOnlyDictionary<string, object?>>(), Arg.Any<ProcedureSecurityContext>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
-            .Returns(new RawProcedureResult(
-                Columns: ["order_id", "sensitive_note"],
-                Rows:
-                [
-                    new object?[] { 100, "secret financial data" }
-                ],
-                MoreRowsAvailable: false));
+        var invoker = new StubProcedureInvoker(new RawProcedureResult(
+            Columns: ["order_id", "sensitive_note"],
+            Rows:
+            [
+                new object?[] { 100, "secret financial data" }
+            ],
+            MoreRowsAvailable: false));
 
-        var tables = Substitute.For<ITableMetadataRepository>();
-        tables.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns(new TableMetadata
-            {
-                Identifier = new TableIdentifier("default", "sales", "orders"),
-                Columns =
-                [
-                    new TableColumn { ColumnName = "id" },
-                    new TableColumn { ColumnName = "note" }
-                ]
-            }.WithPii("note"));
+        var tables = new InMemoryTableMetadataRepository(new TableMetadata
+        {
+            Identifier = new TableIdentifier("default", "sales", "orders"),
+            Columns =
+            [
+                new TableColumn { ColumnName = "id" },
+                new TableColumn { ColumnName = "note" }
+            ]
+        }.WithPii("note"));
 
-        var consents = Substitute.For<IConsentRepository>();
-        consents.GetActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
-            .Returns(new List<Consent>());
+        var consents = new InMemoryConsentRepository();
 
-        var resolution = Substitute.For<IConsentResolutionService>();
         // Explicit Clear consent for both columns!
         var columnDecisions = new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
         {
             ["id"] = ColumnAccessLevel.Clear,
             ["note"] = ColumnAccessLevel.Clear
         };
-        resolution.ResolveAccess(Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>())
-            .Returns(ci => TableAccessDecision.Allowed(ci.ArgAt<TableIdentifier>(3), columnDecisions, null));
+        var resolution = StubConsentResolutionService.Fixed(
+            TableAccessDecision.Allowed(new TableIdentifier("default", "sales", "orders"), columnDecisions, null));
 
-        var masking = Substitute.For<IColumnMaskingProvider>();
+        var masking = StubColumnMaskingProvider.Asterisks;
         var opt = Options.Create(new GatewayOptions
         {
             SqlEndpoints = new SqlEndpointsOptions
@@ -365,44 +359,36 @@ public class PureYamlProcedureGovernanceTests
 
         registry.MarkActive(def.Name, validation);
 
-        var invoker = Substitute.For<IProcedureInvoker>();
-        invoker.ExecuteReadAsync(Arg.Any<ProcedureDefinition>(), Arg.Any<IReadOnlyDictionary<string, object?>>(), Arg.Any<ProcedureSecurityContext>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
-            .Returns(new RawProcedureResult(
-                Columns: ["order_id", "sensitive_note"],
-                Rows:
-                [
-                    new object?[] { 100, "secret financial data" }
-                ],
-                MoreRowsAvailable: false));
+        var invoker = new StubProcedureInvoker(new RawProcedureResult(
+            Columns: ["order_id", "sensitive_note"],
+            Rows:
+            [
+                new object?[] { 100, "secret financial data" }
+            ],
+            MoreRowsAvailable: false));
 
-        var tables = Substitute.For<ITableMetadataRepository>();
-        tables.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns(new TableMetadata
-            {
-                Identifier = new TableIdentifier("default", "sales", "orders"),
-                Columns =
-                [
-                    new TableColumn { ColumnName = "id" },
-                    new TableColumn { ColumnName = "note" }
-                ]
-            }.WithPii("note"));
+        var tables = new InMemoryTableMetadataRepository(new TableMetadata
+        {
+            Identifier = new TableIdentifier("default", "sales", "orders"),
+            Columns =
+            [
+                new TableColumn { ColumnName = "id" },
+                new TableColumn { ColumnName = "note" }
+            ]
+        }.WithPii("note"));
 
-        var consents = Substitute.For<IConsentRepository>();
-        consents.GetActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
-            .Returns(new List<Consent>());
+        var consents = new InMemoryConsentRepository();
 
-        var resolution = Substitute.For<IConsentResolutionService>();
         // Caller only has Mask for note on the underlying table
         var columnDecisions = new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
         {
             ["id"] = ColumnAccessLevel.Clear,
             ["note"] = ColumnAccessLevel.Mask
         };
-        resolution.ResolveAccess(Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>())
-            .Returns(ci => TableAccessDecision.Allowed(ci.ArgAt<TableIdentifier>(3), columnDecisions, null));
+        var resolution = StubConsentResolutionService.Fixed(
+            TableAccessDecision.Allowed(new TableIdentifier("default", "sales", "orders"), columnDecisions, null));
 
-        var masking = Substitute.For<IColumnMaskingProvider>();
-        masking.MaskValue(Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<MaskingRule>()).Returns("***MASKED***");
+        var masking = new StubColumnMaskingProvider("***MASKED***");
 
         var opt = Options.Create(new GatewayOptions
         {

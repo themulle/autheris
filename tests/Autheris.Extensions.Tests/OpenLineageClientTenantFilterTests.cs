@@ -11,9 +11,9 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Extensions.Lineage;
+using Autheris.Tests.Common.Fakes;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -36,8 +36,8 @@ public sealed class OpenLineageClientTenantFilterTests
     private static (OpenLineageClient Client, CapturingHandler Handler) CreateWithDefault(string? defaultTenant, params LineageNode[] nodes)
     {
         var handler = new CapturingHandler();
-        var store = Substitute.For<ILineageGraphStore>();
-        store.GetAllNodes().Returns(nodes);
+        var store = new InMemoryLineageGraphStore();
+        store.UpdateGraph(nodes);
         var options = Options.Create(new GatewayOptions
         {
             Tenancy = new TenancyOptions { DefaultTenantId = defaultTenant },

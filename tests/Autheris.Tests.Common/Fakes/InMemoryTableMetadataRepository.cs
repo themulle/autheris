@@ -1,3 +1,4 @@
+using Autheris.Application.Catalog;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Application.Common.Interfaces;
@@ -15,6 +16,24 @@ public sealed class InMemoryTableMetadataRepository : ITableMetadataRepository
 {
     private readonly object _gate = new();
     private readonly Dictionary<TableIdentifier, TableMetadata> _tables = [];
+    private readonly List<TableMetadata> _upserted = [];
+    private readonly List<TableIdentifier> _getCalls = [];
+    private int _upsertCalls;
+
+    public int UpsertCalls => Volatile.Read(ref _upsertCalls);
+
+    public IReadOnlyList<TableMetadata> UpsertedTables
+    {
+        get { lock (_gate) { return _upserted.ToArray(); } }
+    }
+
+    public IReadOnlyList<TableIdentifier> GetCalls
+    {
+        get { lock (_gate) { return _getCalls.ToArray(); } }
+    }
+
+    public Action<TableMetadata>? OnUpsert { get; set; }
+    public bool SimulateEmptyBatchResult { get; set; }
 
     public InMemoryTableMetadataRepository(params TableMetadata[] seed)
     {
@@ -28,10 +47,16 @@ public sealed class InMemoryTableMetadataRepository : ITableMetadataRepository
         return this;
     }
 
+    public TableMetadata? Peek(TableIdentifier table)
+    {
+        lock (_gate) { return _tables.TryGetValue(table, out var m) ? m : null; }
+    }
+
     public Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default)
     {
         lock (_gate)
         {
+            _getCalls.Add(table);
             return Task.FromResult(_tables.TryGetValue(table, out var m) && m.Table.IsActive ? m : null);
         }
     }
@@ -46,8 +71,40 @@ public sealed class InMemoryTableMetadataRepository : ITableMetadataRepository
 
     public Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default)
     {
-        Add(metadata);
+        OnUpsert?.Invoke(metadata);
+        Interlocked.Increment(ref _upsertCalls);
+        lock (_gate)
+        {
+            _tables[metadata.Identifier] = metadata;
+            _upserted.Add(metadata);
+        }
+
         return Task.FromResult(metadata);
+    }
+
+    public async Task<IReadOnlyList<CatalogTableUpsertResult>> UpsertTableMetadataBatchAsync(
+        IReadOnlyList<TableMetadata> batch,
+        CancellationToken ct = default)
+    {
+        if (SimulateEmptyBatchResult)
+        {
+            return Array.Empty<CatalogTableUpsertResult>();
+        }
+
+        ArgumentNullException.ThrowIfNull(batch);
+        if (batch.Count == 0)
+        {
+            return Array.Empty<CatalogTableUpsertResult>();
+        }
+
+        var results = new CatalogTableUpsertResult[batch.Count];
+        for (var i = 0; i < batch.Count; i++)
+        {
+            var stored = await UpsertTableMetadataAsync(batch[i], ct).ConfigureAwait(false);
+            results[i] = new CatalogTableUpsertResult(stored, CatalogUpsertKind.Updated, CatalogWriteClassification.Restrictive);
+        }
+
+        return results;
     }
 
     public Task<TableKeyDefinitionChange?> ReplaceTableKeyDefinitionAsync(
