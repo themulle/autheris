@@ -8,6 +8,7 @@ using System.Net.Http;
 using System.Security.Claims;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Autheris.Api.Security;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -15,6 +16,7 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Security;
 using Autheris.Tests.Integration.Governance;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -33,70 +35,6 @@ public sealed class CatalogFacetsSecurityIntegrationTests : IClassFixture<Catalo
 
     public CatalogFacetsSecurityIntegrationTests(HostFixture fixture) => _fixture = fixture;
 
-    private async Task SeedAsync()
-    {
-        if (_fixture.Seeded)
-        {
-            return;
-        }
-
-        using var scope = _fixture.Factory.Services.CreateScope();
-        var repo = scope.ServiceProvider.GetRequiredService<IGovernanceRepository>();
-        await repo.UpsertTableMetadataAsync(new TableMetadata
-        {
-            Table = new Table { Id = Guid.NewGuid(), DisplayName = OrdersA.TableName, TableName = OrdersA.TableName, SchemaName = OrdersA.Schema, SourceType = "PostgreSql", SourceName = OrdersA.Domain },
-            Identifier = OrdersA,
-            Columns = new List<TableColumn> { new() { ColumnName = "id", DataType = "integer" } }
-        });
-        await repo.UpsertTableMetadataAsync(new TableMetadata
-        {
-            Table = new Table { Id = Guid.NewGuid(), DisplayName = InvoicesB.TableName, TableName = InvoicesB.TableName, SchemaName = InvoicesB.Schema, SourceType = "PostgreSql", SourceName = InvoicesB.Domain },
-            Identifier = InvoicesB,
-            Columns = new List<TableColumn> { new() { ColumnName = "id", DataType = "integer" } }
-        });
-        var metaA = await repo.GetTableMetadataAsync(OrdersA);
-        var metaB = await repo.GetTableMetadataAsync(InvoicesB);
-        await repo.CreateConsentAsync(new Consent
-        {
-            TableId = metaA!.Table.Id,
-            TableIdentifier = OrdersA,
-            TenantId = new TenantId(TenantA),
-            Effect = ConsentEffect.Allow,
-            GranteeType = GranteeType.User,
-            GranteeSid = new Sid("S-FACET-A"),
-            ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
-            ValidTo = DateTimeOffset.UtcNow.AddDays(1),
-            ColumnRules = [new ConsentColumnRule { ColumnName = "id", AccessLevel = ColumnAccessLevel.Clear }]
-        });
-        await repo.CreateConsentAsync(new Consent
-        {
-            TableId = metaB!.Table.Id,
-            TableIdentifier = InvoicesB,
-            TenantId = new TenantId(TenantB),
-            Effect = ConsentEffect.Allow,
-            GranteeType = GranteeType.User,
-            GranteeSid = new Sid("S-FACET-B"),
-            ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
-            ValidTo = DateTimeOffset.UtcNow.AddDays(1),
-            ColumnRules = [new ConsentColumnRule { ColumnName = "id", AccessLevel = ColumnAccessLevel.Clear }]
-        });
-        _fixture.Seeded = true;
-    }
-
-    private HttpClient Client(string sid, string tenant, string? scopes = "Autheris.Catalog.Read")
-    {
-        var client = _fixture.Factory.CreateClient();
-        client.DefaultRequestHeaders.Add("X-Test-User-Sid", sid);
-        client.DefaultRequestHeaders.Add("X-Test-Roles", "Reader");
-        client.DefaultRequestHeaders.Add("X-Test-Tenant", tenant);
-        if (scopes is not null)
-        {
-            client.DefaultRequestHeaders.Add("X-Test-Scope", scopes);
-        }
-
-        return client;
-    }
-
     [Fact]
     public async Task Facets_Anonymous_Is401()
     {
@@ -112,6 +50,7 @@ public sealed class CatalogFacetsSecurityIntegrationTests : IClassFixture<Catalo
 
         var blockedWrite = await client.PostAsync("/api/v1/governance/consents/bundle", new StringContent("{}"));
         blockedWrite.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        (await blockedWrite.Content.ReadAsStringAsync()).ShouldContain("READ_ONLY_TOKEN");
 
         var response = await client.GetAsync("/api/v1/catalog/objects/facets");
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
@@ -181,6 +120,70 @@ public sealed class CatalogFacetsSecurityIntegrationTests : IClassFixture<Catalo
         throttled!.Headers.RetryAfter.ShouldNotBeNull();
     }
 
+    private async Task SeedAsync()
+    {
+        if (_fixture.Seeded)
+        {
+            return;
+        }
+
+        using var scope = _fixture.Factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IGovernanceRepository>();
+        await repo.UpsertTableMetadataAsync(new TableMetadata
+        {
+            Table = new Table { Id = Guid.NewGuid(), DisplayName = OrdersA.TableName, TableName = OrdersA.TableName, SchemaName = OrdersA.Schema, SourceType = "PostgreSql", SourceName = OrdersA.Domain },
+            Identifier = OrdersA,
+            Columns = new List<TableColumn> { new() { ColumnName = "id", DataType = "integer" } }
+        });
+        await repo.UpsertTableMetadataAsync(new TableMetadata
+        {
+            Table = new Table { Id = Guid.NewGuid(), DisplayName = InvoicesB.TableName, TableName = InvoicesB.TableName, SchemaName = InvoicesB.Schema, SourceType = "PostgreSql", SourceName = InvoicesB.Domain },
+            Identifier = InvoicesB,
+            Columns = new List<TableColumn> { new() { ColumnName = "id", DataType = "integer" } }
+        });
+        var metaA = await repo.GetTableMetadataAsync(OrdersA);
+        var metaB = await repo.GetTableMetadataAsync(InvoicesB);
+        await repo.CreateConsentAsync(new Consent
+        {
+            TableId = metaA!.Table.Id,
+            TableIdentifier = OrdersA,
+            TenantId = new TenantId(TenantA),
+            Effect = ConsentEffect.Allow,
+            GranteeType = GranteeType.User,
+            GranteeSid = new Sid("S-FACET-A"),
+            ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
+            ValidTo = DateTimeOffset.UtcNow.AddDays(1),
+            ColumnRules = [new ConsentColumnRule { ColumnName = "id", AccessLevel = ColumnAccessLevel.Clear }]
+        });
+        await repo.CreateConsentAsync(new Consent
+        {
+            TableId = metaB!.Table.Id,
+            TableIdentifier = InvoicesB,
+            TenantId = new TenantId(TenantB),
+            Effect = ConsentEffect.Allow,
+            GranteeType = GranteeType.User,
+            GranteeSid = new Sid("S-FACET-B"),
+            ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
+            ValidTo = DateTimeOffset.UtcNow.AddDays(1),
+            ColumnRules = [new ConsentColumnRule { ColumnName = "id", AccessLevel = ColumnAccessLevel.Clear }]
+        });
+        _fixture.Seeded = true;
+    }
+
+    private HttpClient Client(string sid, string tenant, string? scopes = "Autheris.Catalog.Read")
+    {
+        var client = _fixture.Factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Test-User-Sid", sid);
+        client.DefaultRequestHeaders.Add("X-Test-Roles", "Reader");
+        client.DefaultRequestHeaders.Add("X-Test-Tenant", tenant);
+        if (scopes is not null)
+        {
+            client.DefaultRequestHeaders.Add("X-Test-Scope", scopes);
+        }
+
+        return client;
+    }
+
     public sealed class HostFixture : IDisposable
     {
         public WebApplicationFactory<Program> Root { get; } = new();
@@ -220,16 +223,21 @@ public sealed class CatalogFacetsSecurityIntegrationTests : IClassFixture<Catalo
         }
     }
 
-    private sealed class ReadOnlyTestClaimsTransformation : IClaimsTransformation
+    private sealed class ReadOnlyTestClaimsTransformation(
+        IIdentityPipeline pipeline,
+        IHttpContextAccessor? httpContextAccessor = null) : IClaimsTransformation
     {
-        public Task<ClaimsPrincipal> TransformAsync(ClaimsPrincipal principal)
+        private readonly EnterpriseClaimsTransformation _inner = new(pipeline, httpContextAccessor);
+
+        public async Task<ClaimsPrincipal> TransformAsync(ClaimsPrincipal principal)
         {
-            if (principal.HasScope("ReadOnlyTest") && principal.Identity is ClaimsIdentity identity)
+            var transformed = await _inner.TransformAsync(principal).ConfigureAwait(false);
+            if (transformed.HasScope("ReadOnlyTest") && transformed.Identity is ClaimsIdentity identity)
             {
                 TokenAccessScope.MarkReadOnly(identity);
             }
 
-            return Task.FromResult(principal);
+            return transformed;
         }
     }
 }
