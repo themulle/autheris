@@ -20,7 +20,39 @@ public sealed class CatalogSearchOptionsValidator : IValidateOptions<CatalogSear
 
         if (options.EmbeddingProvider == CatalogEmbeddingProvider.LocalOnnx)
         {
-            return ValidateOptionsResult.Fail("LocalOnnx embedding provider is not available in this build.");
+            if (string.IsNullOrWhiteSpace(options.ModelPath))
+            {
+                return ValidateOptionsResult.Fail("ModelPath must be configured when EmbeddingProvider is LocalOnnx.");
+            }
+
+            if (options.ModelPath.Contains("..", StringComparison.Ordinal))
+            {
+                return ValidateOptionsResult.Fail("ModelPath must not contain path traversal segments ('..').");
+            }
+
+            if (!File.Exists(options.ModelPath))
+            {
+                return ValidateOptionsResult.Fail($"ONNX model file not found at ModelPath '{options.ModelPath}'.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(options.TokenizerPath))
+            {
+                if (options.TokenizerPath.Contains("..", StringComparison.Ordinal))
+                {
+                    return ValidateOptionsResult.Fail("TokenizerPath must not contain path traversal segments ('..').");
+                }
+
+                if (!File.Exists(options.TokenizerPath))
+                {
+                    return ValidateOptionsResult.Fail($"ONNX tokenizer file not found at TokenizerPath '{options.TokenizerPath}'.");
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(options.ModelSha256) &&
+                !LocalOnnxEmbeddingGenerator.ValidateModelFileIntegrity(options.ModelPath, options.ModelSha256))
+            {
+                return ValidateOptionsResult.Fail("ONNX model SHA-256 integrity validation failed for ModelPath.");
+            }
         }
         else if (options.EmbeddingProvider == CatalogEmbeddingProvider.Ollama)
         {

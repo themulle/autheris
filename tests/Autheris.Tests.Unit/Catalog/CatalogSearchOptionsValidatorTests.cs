@@ -51,7 +51,7 @@ public sealed class CatalogSearchOptionsValidatorTests
         var options = new CatalogSearchOptions
         {
             EmbeddingProvider = CatalogEmbeddingProvider.LocalOnnx,
-            ModelPath = "/models/model.onnx",
+            ModelPath = "/models/nonexistent-model.onnx",
             TokenizerPath = "/models/tokenizer.json",
             ModelSha256 = new string('a', 64),
             RefreshSeconds = 15
@@ -61,7 +61,7 @@ public sealed class CatalogSearchOptionsValidatorTests
 
         result.Failed.ShouldBeTrue();
         result.FailureMessage.ShouldNotBeNull();
-        result.FailureMessage!.ShouldContain("LocalOnnx embedding provider is not available in this build.");
+        result.FailureMessage!.ShouldContain("not found at ModelPath");
     }
 
     [Theory]
