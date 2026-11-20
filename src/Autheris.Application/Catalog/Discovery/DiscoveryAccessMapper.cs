@@ -74,7 +74,10 @@ public static class DiscoveryAccessMapper
                 colStatsByName != null &&
                 colStatsByName.TryGetValue(col.ColumnName, out var parsedColStats))
             {
-                stats = parsedColStats;
+                // Restricted-scope callers only receive value-bearing statistics for columns whose effective state is Clear.
+                stats = decision.ScopeClearance is not null && colState != DiscoveryColumnState.Clear
+                    ? parsedColStats with { MinValue = null, MaxValue = null, TopValues = null }
+                    : parsedColStats;
             }
 
             mappedCols.Add(new DiscoveryColumn(
@@ -116,7 +119,9 @@ public static class DiscoveryAccessMapper
                 Email: string.IsNullOrWhiteSpace(o.Email) ? null : DiscoveryTextSanitizer.SanitizeText(o.Email, DiscoveryTextSanitizer.MaxDisplayNameRunes)))
             .ToList();
 
-        var samplesAvailable = !table.Table.SamplesDisabled && HasSamples(artifacts?.SamplesJson);
+        var samplesAvailable = !table.Table.SamplesDisabled
+            && HasSamples(artifacts?.SamplesJson)
+            && (decision.ScopeClearance is null || mappedCols.Any(static c => c.State == DiscoveryColumnState.Clear));
         var writeState = MapWriteState(table, visibleCols, insertDecision, updateDecision, deleteDecision);
 
         return new DiscoveryObject(
@@ -329,7 +334,7 @@ public static class DiscoveryAccessMapper
         !string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql) ||
         !string.IsNullOrWhiteSpace(decision.MandatoryRowPredicateSql);
 
-    private static (DiscoveryColumnState State, bool ClearInSomeRows) MapColumnState(
+    internal static (DiscoveryColumnState State, bool ClearInSomeRows) MapColumnState(
         TableMetadata table,
         TableAccessDecision decision,
         string columnName)
