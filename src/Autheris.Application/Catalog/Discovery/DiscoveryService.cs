@@ -717,7 +717,8 @@ public sealed partial class DiscoveryService : IDiscoveryService
 
             var mapped = DiscoveryAccessMapper.Map(
                 table, decision, owners, isPending, isExpired, artifacts, language,
-                isHidden: table.Table.DiscoveryHidden, insertDecisions[i], updateDecisions[i], deleteDecisions[i], defs, repoColClasses, caller.Tenant.Value);
+                isHidden: table.Table.DiscoveryHidden, insertDecisions[i], updateDecisions[i], deleteDecisions[i], defs, repoColClasses, caller.Tenant.Value,
+                hideMaskedTextForRestrictedScopes: _discoveryOptions.Discovery?.HideMaskedColumnCatalogTextForRestrictedScopes == true);
 
             if (docLinks.TryGetValue(table.Identifier, out var linkView))
             {

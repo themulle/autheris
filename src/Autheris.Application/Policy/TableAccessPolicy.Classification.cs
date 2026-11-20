@@ -216,13 +216,33 @@ public sealed partial class TableAccessPolicy
             var codes = winner.ClassificationCodes ?? (winner.WinningClassificationCode is not null ? [winner.WinningClassificationCode] : Array.Empty<string>());
             maskedAudit.Add(new MaskedColumnAuditEntry(colName, codes, fnCode, winner.KeyRef));
         }
+        var hiddenText = CollectHiddenCatalogTextColumns(updatedColumns, perGrant, combinedWinners);
+        if (decision.ScopeClearance is { } scopeClearance &&
+            updatedColumns.Any(kv => kv.Value == ColumnAccessLevel.Clear && !scopeClearance.Permits(kv.Key) && ClassificationMetadata.IsColumnSensitive(query.Metadata, kv.Key)))
+        {
+            var ruleHidden = await ClassificationAccessResolver.ResolveIndexingHiddenTextColumnsAsync(
+                query.Metadata, _classificationResolver.Repository, ct).ConfigureAwait(false);
+            foreach (var (colName, lvl) in updatedColumns)
+            {
+                if (lvl == ColumnAccessLevel.Clear &&
+                    !scopeClearance.Permits(colName) &&
+                    ClassificationMetadata.IsColumnSensitive(query.Metadata, colName) &&
+                    ruleHidden.Contains(colName))
+                {
+                    var mutable = hiddenText as HashSet<string> ?? new HashSet<string>(hiddenText ?? (IEnumerable<string>)[], StringComparer.OrdinalIgnoreCase);
+                    mutable.Add(colName);
+                    hiddenText = mutable;
+                }
+            }
+        }
+
         return decision with
         {
             ColumnAccess = updatedColumns,
             ColumnMasks = specs.Count > 0 ? new ColumnMaskPolicy(specs) : decision.ColumnMasks,
             MaskedColumnsAudit = maskedAudit,
             GrantClassificationsAudit = await _classificationResolver.BuildGrantAuditEntriesAsync(allowGrants, query.Tenant, ct).ConfigureAwait(false),
-            HiddenCatalogTextColumns = CollectHiddenCatalogTextColumns(updatedColumns, perGrant, combinedWinners)
+            HiddenCatalogTextColumns = hiddenText
         };
     }
 
