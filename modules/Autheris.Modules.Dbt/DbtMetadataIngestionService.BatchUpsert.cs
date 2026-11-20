@@ -6,6 +6,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Catalog;
 using Autheris.Application.Catalog.Discovery;
 using Autheris.Application.Catalog.Services;
 using Autheris.Application.Common.Interfaces;
@@ -20,8 +21,16 @@ public sealed partial class DbtMetadataIngestionService
 {
     private const string DbtIngestionActor = "dbt-ingestion";
 
+    internal readonly record struct PendingModelUpdate(
+        TableMetadata Metadata,
+        IReadOnlyList<string> Tags,
+        IReadOnlyList<IReadOnlyDictionary<string, object?>>? SyntheticSamples,
+        bool UpsertMetadata,
+        bool SyncClassifications,
+        bool ImportTags);
+
     private async Task FlushPendingModelUpdatesAsync(
-        IReadOnlyList<(TableMetadata Metadata, IReadOnlyList<string> Tags, IReadOnlyList<IReadOnlyDictionary<string, object?>>? SyntheticSamples)> pendingModelUpdates,
+        IReadOnlyList<PendingModelUpdate> pendingModelUpdates,
         List<string> warnings,
         CancellationToken ct)
     {
@@ -31,14 +40,36 @@ public sealed partial class DbtMetadataIngestionService
         }
 
         await using var scope = Autheris.Application.Catalog.CatalogWriteScopeFactoryExtensions.BeginOrNoop(_catalogWriteScopes, "dbt-manifest-sync");
-        var batch = pendingModelUpdates.Select(static u => u.Metadata).ToList();
-        await _metadataRepository.UpsertBatchWithFallbackAsync(batch, ct).ConfigureAwait(false);
-        await SyncColumnClassificationsAsync(batch, warnings, ct).ConfigureAwait(false);
 
-        foreach (var (metadata, tags, syntheticSamples) in pendingModelUpdates)
+        var upsertBatch = pendingModelUpdates
+            .Where(static u => u.UpsertMetadata)
+            .Select(static u => u.Metadata)
+            .ToList();
+        if (upsertBatch.Count > 0)
         {
-            await ImportModelTagsAsync(metadata.Identifier, tags, warnings, ct).ConfigureAwait(false);
-            await IngestDbtSyntheticSamplesAsync(metadata, syntheticSamples, warnings, ct).ConfigureAwait(false);
+            await _metadataRepository.UpsertBatchWithFallbackAsync(upsertBatch, ct).ConfigureAwait(false);
+        }
+
+        var classificationBatch = pendingModelUpdates
+            .Where(static u => u.SyncClassifications)
+            .Select(static u => u.Metadata)
+            .ToList();
+        if (classificationBatch.Count > 0)
+        {
+            await SyncColumnClassificationsAsync(classificationBatch, warnings, ct).ConfigureAwait(false);
+        }
+
+        foreach (var update in pendingModelUpdates)
+        {
+            if (update.ImportTags)
+            {
+                await ImportModelTagsAsync(update.Metadata.Identifier, update.Tags, warnings, ct).ConfigureAwait(false);
+            }
+
+            if (update.SyntheticSamples is { Count: > 0 })
+            {
+                await IngestDbtSyntheticSamplesAsync(update.Metadata, update.SyntheticSamples, warnings, ct).ConfigureAwait(false);
+            }
         }
     }
 
@@ -67,6 +98,11 @@ public sealed partial class DbtMetadataIngestionService
             DiscoveryArtifactValidator.SupportedSchemaVersion,
             validation.SamplesJson,
             before?.StatisticsJson);
+
+        if (before is not null && string.Equals(before.ContentSha256, combinedSha, StringComparison.Ordinal))
+        {
+            return;
+        }
 
         var resolvedTenant = !string.IsNullOrWhiteSpace(metadata.OwnerTenantId) &&
                              TenantId.TryParse(metadata.OwnerTenantId, out var parsedOwner)
@@ -143,5 +179,68 @@ public sealed partial class DbtMetadataIngestionService
 
             throw;
         }
+    }
+
+    private static bool IsTableMetadataUnchanged(TableMetadata existingMeta, TableMetadata updatedMetadata)
+    {
+        if (existingMeta.Columns.Count != updatedMetadata.Columns.Count)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < existingMeta.Columns.Count; i++)
+        {
+            if (existingMeta.Columns[i].DiscoveryHidden != updatedMetadata.Columns[i].DiscoveryHidden)
+            {
+                return false;
+            }
+        }
+
+        if (!AreFilterGroupsEqual(existingMeta.RequiredFilterColumnGroups, updatedMetadata.RequiredFilterColumnGroups))
+        {
+            return false;
+        }
+
+        try
+        {
+            var before = CatalogTablePersistedProjection.From(existingMeta);
+            var after = CatalogTablePersistedProjection.From(updatedMetadata);
+            return CatalogTablePersistedProjection.Compare(before, after).Classification == CatalogWriteClassification.Unchanged;
+        }
+        catch (InvalidOperationException)
+        {
+            // Ambiguous or unprojectable state: fall back to writing.
+            return false;
+        }
+    }
+
+    private static bool AreFilterGroupsEqual(
+        System.Collections.Immutable.ImmutableArray<System.Collections.Immutable.ImmutableArray<string>> left,
+        System.Collections.Immutable.ImmutableArray<System.Collections.Immutable.ImmutableArray<string>> right)
+    {
+        if (left.Length != right.Length)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < left.Length; i++)
+        {
+            var lGroup = left[i];
+            var rGroup = right[i];
+            if (lGroup.Length != rGroup.Length)
+            {
+                return false;
+            }
+
+            for (var j = 0; j < lGroup.Length; j++)
+            {
+                if (!string.Equals(lGroup[j], rGroup[j], StringComparison.Ordinal))
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
     }
 }
