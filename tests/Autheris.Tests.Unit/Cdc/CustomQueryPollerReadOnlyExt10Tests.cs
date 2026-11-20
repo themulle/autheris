@@ -8,7 +8,7 @@ using System.Data;
 using System.Data.Common;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Extensions.Cdc.CustomQuery;
+using Autheris.Infrastructure.Streaming.Producers.CustomQuery;
 using Shouldly;
 using Xunit;
 

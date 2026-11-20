@@ -68,6 +68,8 @@ public sealed class EndToEndSqliteTests : IClassFixture<EndToEndSqliteTests.Fixt
                 b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "1000");
                 b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
                 b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("Fixture"));
+                // The CDC subscription routes belong to the events module.
+                EventsWorkspaceTestSettings.Apply((k, v) => b.UseSetting(k, v));
                 b.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
 
                 // Echte Datenquelle: PostgreSQL-Datenbank
@@ -328,7 +330,7 @@ public sealed class EndToEndSqliteTests : IClassFixture<EndToEndSqliteTests.Fixt
     [Theory]
     [InlineData("GET", "/api/extensions/dbt/exposures")]
     [InlineData("GET", "/api/governance/sunsetting/rules")]
-    [InlineData("GET", "/api/v1/cdc/subscriptions")]
+    [InlineData("GET", "/modules/events/v1/cdc/subscriptions")]
     public async Task RoleProtectedEndpoints_RejectPlainReader_AcceptAdmin(string method, string path)
     {
         var plain = await Client(roles: "Reader").SendAsync(new HttpRequestMessage(new HttpMethod(method), path));

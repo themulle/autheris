@@ -48,10 +48,11 @@ public static class IcebergRestCatalogEndpoints
         group.MapGet("/{prefix}/namespaces", async (
             string prefix,
             HttpContext context,
+            [FromServices] IModuleRequestContext requestContext,
             [FromServices] IIcebergRestCatalogFederationService catalogService,
             CancellationToken ct) =>
         {
-            var tenant = RequireTenant(context);
+            var tenant = RequireTenant(requestContext, context);
             var namespaces = await catalogService.ListNamespacesAsync(tenant, context.User, ct);
             var response = new IcebergListNamespacesResponse(namespaces.Select(ns => (IReadOnlyList<string>)new[] { ns }).ToList());
             return Results.Ok(response);
@@ -61,10 +62,11 @@ public static class IcebergRestCatalogEndpoints
             string prefix,
             string @namespace,
             HttpContext context,
+            [FromServices] IModuleRequestContext requestContext,
             [FromServices] IIcebergRestCatalogFederationService catalogService,
             CancellationToken ct) =>
         {
-            var tenant = RequireTenant(context);
+            var tenant = RequireTenant(requestContext, context);
             var tables = await catalogService.ListTablesAsync(tenant, @namespace, context.User, ct);
             var response = new IcebergListTablesResponse(
                 tables.Select(t => new IcebergRestTableIdentifier(new[] { @namespace }, t)).ToList());
@@ -76,10 +78,11 @@ public static class IcebergRestCatalogEndpoints
             string @namespace,
             string table,
             HttpContext context,
+            [FromServices] IModuleRequestContext requestContext,
             [FromServices] IIcebergRestCatalogFederationService catalogService,
             CancellationToken ct) =>
         {
-            var tenant = RequireTenant(context);
+            var tenant = RequireTenant(requestContext, context);
             try
             {
                 var response = await catalogService.LoadTableAsync(tenant, @namespace, table, context.User, ct);
@@ -100,10 +103,11 @@ public static class IcebergRestCatalogEndpoints
             string @namespace,
             string table,
             HttpContext context,
+            [FromServices] IModuleRequestContext requestContext,
             [FromServices] IIcebergRestCatalogFederationService catalogService,
             CancellationToken ct) =>
         {
-            var tenant = RequireTenant(context);
+            var tenant = RequireTenant(requestContext, context);
             try
             {
                 var credential = await catalogService.VendCredentialAsync(tenant, @namespace, table, context.User, ct);
@@ -140,33 +144,15 @@ public static class IcebergRestCatalogEndpoints
         return Results.Json(new { error = new { message, type = code, code = status } }, statusCode: status);
     }
 
-    internal static string RequireTenant(HttpContext context)
+    internal static string RequireTenant(IModuleRequestContext requestContext, HttpContext context)
     {
-        var tenant = GetRequestTenant(context);
+        var tenant = requestContext.GetRequestTenant(context);
         if (string.IsNullOrWhiteSpace(tenant.Value))
         {
             throw new TenantUnresolvedException();
         }
 
         return tenant.Value;
-    }
-
-    private static TenantId GetRequestTenant(HttpContext context)
-    {
-        if (context.Items.TryGetValue(SecurityPrincipalContext.ItemKey, out var item)
-            && item is SecurityPrincipalContext principalCtx
-            && !string.IsNullOrWhiteSpace(principalCtx.TenantId.Value))
-        {
-            return principalCtx.TenantId;
-        }
-
-        if (context.Items.TryGetValue(SecurityPrincipalContext.TenantIdItemKey, out var raw)
-            && raw is TenantId stamped)
-        {
-            return stamped;
-        }
-
-        return context.User.GetTenantId();
     }
 
     private static void LogFailure(HttpContext? context, int status, string code, Exception exception)
