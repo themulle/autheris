@@ -151,6 +151,10 @@ The canonical `ClusterAdmin` lists what the step deactivated with `GET /api/v1/a
 
 Step `0029_drop_role_grantee` removes role grantees from the data model. Before it changes anything it checks for an active (unrevoked) role grantee in consents, in virtual filter access profiles and in access profile assignments. If one exists the step aborts with the id of the first row (no names, no tenant data) and changes nothing: revoke the row, or recreate it as a group or user `Deny`, and start the upgrade again. Revoked role rows and their child rows are then deleted and `consents.role_id`, `consents.role_name` and the index `ix_consents_tenant_role` are dropped; a re-run is a no-op. All nodes must run the new build before the step applies. The report no longer lists revoked role consents (`revokedRoleConsents` was removed).
 
+### Access profile items (governance step `0031_access_profile_items`)
+
+Step `0031_access_profile_items` moves the masking mode and the target tables of an access profile into the tables `access_profile_items` and `access_profile_classification_access` and drops `access_profiles.masking_mode` and `target_tables`. Run it only after every node runs the new build: older nodes still read and write the dropped columns. Before the migration every profile must have a masking mode of `Default`, `Unmasked` or `Strict` and a `target_tables` value that is a JSON array of non-blank strings of at most 512 characters. Otherwise the step aborts with the id of the first affected profile (never the entry text) and changes nothing; correct that profile and restart. PostgreSQL 16 or later is required.
+
 ### Consent manifests (`POST /api/v1/governance/consents/apply`)
 
 - A policy with `granteeType: "Role"` for a table registered in the catalog is refused for every effect with `400 BAD_REQUEST` ("The manifest contains a policy that is not supported."); nothing of the manifest is applied. Replace the role with a group whose members should hold the access (`granteeType: "Group"`, `granteeRef` = group SID).

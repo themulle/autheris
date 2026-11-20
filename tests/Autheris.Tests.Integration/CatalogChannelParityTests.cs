@@ -695,4 +695,57 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
         row.GetProperty("columnCount").GetInt32().ShouldBe(described);
         described.ShouldBe(2);
     }
+
+    [Fact]
+    public async Task Parity_ExternalCatalogFacetsAndKeysetPaging_MatchListTotalsAndItems()
+    {
+        var objectsClient = await ClientAsync("S-A-USER", TenantA, "Reader");
+        objectsClient.DefaultRequestHeaders.Add("X-Test-Scope", "Autheris.Catalog.Read");
+
+        foreach (var status in new[] { (string?)null, "granted", "none" })
+        {
+            var suffix = status is null ? string.Empty : $"?accessStatus={status}";
+            var facetsResp = await objectsClient.GetAsync($"/api/v1/catalog/objects/facets{suffix}");
+            facetsResp.StatusCode.ShouldBe(HttpStatusCode.OK);
+            var listResp = await objectsClient.GetAsync($"/api/v1/catalog/objects{(status is null ? "?pageSize=200" : $"?accessStatus={status}&pageSize=200")}");
+            listResp.StatusCode.ShouldBe(HttpStatusCode.OK);
+
+            using var facetsDoc = JsonDocument.Parse(await BodyAsync(facetsResp));
+            using var listDoc = JsonDocument.Parse(await BodyAsync(listResp));
+
+            var facetTotal = facetsDoc.RootElement.GetProperty("totalCount").GetInt32();
+            var listTotal = listDoc.RootElement.GetProperty("totalCount").GetInt32();
+            facetTotal.ShouldBe(listTotal);
+
+            var summedSchemas = facetsDoc.RootElement.GetProperty("domains").EnumerateArray()
+                .Sum(d => d.GetProperty("schemas").EnumerateArray().Sum(s => s.GetProperty("count").GetInt32()));
+            summedSchemas.ShouldBe(facetTotal);
+        }
+
+        var fullResp = await objectsClient.GetAsync("/api/v1/catalog/objects?pageSize=200");
+        fullResp.StatusCode.ShouldBe(HttpStatusCode.OK);
+        using var fullDoc = JsonDocument.Parse(await BodyAsync(fullResp));
+        var expectedIds = fullDoc.RootElement.GetProperty("items").EnumerateArray()
+            .Select(i => i.GetProperty("objectId").GetString()!)
+            .ToList();
+
+        var pagedIds = new List<string>();
+        string? cursor = null;
+        do
+        {
+            var url = cursor is null
+                ? "/api/v1/catalog/objects?pageSize=1"
+                : $"/api/v1/catalog/objects?pageSize=1&cursor={Uri.EscapeDataString(cursor)}";
+            var pageResp = await objectsClient.GetAsync(url);
+            pageResp.StatusCode.ShouldBe(HttpStatusCode.OK);
+            using var pageDoc = JsonDocument.Parse(await BodyAsync(pageResp));
+            pagedIds.AddRange(pageDoc.RootElement.GetProperty("items").EnumerateArray().Select(i => i.GetProperty("objectId").GetString()!));
+            cursor = pageDoc.RootElement.TryGetProperty("nextCursor", out var nextProp) && nextProp.ValueKind == JsonValueKind.String
+                ? nextProp.GetString()
+                : null;
+        }
+        while (cursor is not null);
+
+        pagedIds.ShouldBe(expectedIds);
+    }
 }

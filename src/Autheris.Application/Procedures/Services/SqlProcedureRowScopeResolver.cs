@@ -21,7 +21,7 @@ using Microsoft.Extensions.Options;
 
 /// <summary>
 /// Evaluates the consent row filter of a procedure's result table in the database: for the keys found in the procedure
-/// result it runs a key-closure query <c>SELECT keys FROM table AS autheris_target WHERE (key tuples) GROUP BY keys HAVING COUNT(*) = SUM(CASE WHEN tenant AND (row filter) THEN 1 ELSE 0 END)</c>
+/// result it runs a key-closure query <c>SELECT keys FROM (SELECT keys, CASE WHEN tenant AND (row filter) THEN 1 ELSE 0 END AS autheris_rs_ok FROM table AS autheris_target WHERE (key tuples)) AS autheris_rs GROUP BY keys HAVING COUNT(*) = SUM(autheris_rs_ok)</c>
 /// in batches so a key tuple is admitted only when every row carrying that key satisfies both tenant isolation and the caller's row filter.
 /// <list type="bullet">
 /// <item>The lookup uses the governed read connection of the table's data source (the connection every governed table
@@ -32,6 +32,9 @@ using Microsoft.Extensions.Options;
 /// </summary>
 public sealed class SqlProcedureRowScopeResolver : IProcedureRowScopeResolver
 {
+    internal const string RowScopeDerivedAlias = "autheris_rs";
+    internal const string RowScopeFlagColumn = "autheris_rs_ok";
+
     private readonly ISqlConnectionFactory _connectionFactory;
     private readonly IOptions<GatewayOptions> _options;
     private readonly ILogger<SqlProcedureRowScopeResolver>? _logger;
@@ -233,8 +236,8 @@ public sealed class SqlProcedureRowScopeResolver : IProcedureRowScopeResolver
 
     /// <summary>
     /// Key-closure query:
-    /// <c>SELECT keys FROM table AS autheris_target WHERE ((k0 = @rs_0_0 AND ...) OR ...) GROUP BY keys HAVING COUNT(*) = SUM(CASE WHEN tenant = @rs_tenant AND (filter) THEN 1 ELSE 0 END)</c>.
-    /// Identifiers are quoted per dialect; correlated row filters bind to the reserved alias.
+    /// <c>SELECT keys FROM (SELECT keys, CASE WHEN tenant = @rs_tenant AND (filter) THEN 1 ELSE 0 END AS autheris_rs_ok FROM table AS autheris_target WHERE ((k0 = @rs_0_0 AND ...) OR ...)) AS autheris_rs GROUP BY keys HAVING COUNT(*) = SUM(autheris_rs_ok)</c>.
+    /// Identifiers are quoted per dialect; correlated row filters bind to the reserved alias, and the aggregate evaluates only the projected flag column.
     /// </summary>
     internal static string BuildKeyQuery(
         DatabaseDialect dialect,
@@ -244,8 +247,28 @@ public sealed class SqlProcedureRowScopeResolver : IProcedureRowScopeResolver
         string? filterSql,
         int tupleCount)
     {
+        ArgumentNullException.ThrowIfNull(table);
+        ArgumentNullException.ThrowIfNull(keyColumns);
+        if (keyColumns.Count == 0)
+        {
+            throw new ArgumentException("At least one key column is required.", nameof(keyColumns));
+        }
+
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(tupleCount);
+
+        foreach (string keyColumn in keyColumns)
+        {
+            if (string.Equals(keyColumn, RowScopeFlagColumn, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    $"Row scope key column '{keyColumn}' collides with reserved column '{RowScopeFlagColumn}'.");
+            }
+        }
+
         string keyList = string.Join(", ", keyColumns.Select(c => dialect.QuoteIdentifier(c)));
         string from = dialect.FormatTableIdentifier(table.Identifier) + " AS " + dialect.QuoteIdentifier(TrinoSqlEngine.RowFilterAliases.Target);
+        string qFlag = dialect.QuoteIdentifier(RowScopeFlagColumn);
+        string qDerived = dialect.QuoteIdentifier(RowScopeDerivedAlias);
 
         var predicateParts = new List<string>();
         if (tenantColumn != null)
@@ -258,7 +281,7 @@ public sealed class SqlProcedureRowScopeResolver : IProcedureRowScopeResolver
             predicateParts.Add($"({filterSql})");
         }
 
-        string havingCondition = predicateParts.Count > 0 ? string.Join(" AND ", predicateParts) : "1 = 1";
+        string rowCondition = predicateParts.Count > 0 ? string.Join(" AND ", predicateParts) : "1 = 1";
 
         var tupleSql = new StringBuilder();
         for (int i = 0; i < tupleCount; i++)
@@ -282,7 +305,7 @@ public sealed class SqlProcedureRowScopeResolver : IProcedureRowScopeResolver
             tupleSql.Append(')');
         }
 
-        return $"SELECT {keyList} FROM {from} WHERE ({tupleSql}) GROUP BY {keyList} HAVING COUNT(*) = SUM(CASE WHEN {havingCondition} THEN 1 ELSE 0 END)";
+        return $"SELECT {keyList} FROM (SELECT {keyList}, CASE WHEN {rowCondition} THEN 1 ELSE 0 END AS {qFlag} FROM {from} WHERE ({tupleSql})) AS {qDerived} GROUP BY {keyList} HAVING COUNT(*) = SUM({qFlag})";
     }
 
     private static void AddParameter(DbCommand cmd, string name, object? value, ISet<string>? bound = null)

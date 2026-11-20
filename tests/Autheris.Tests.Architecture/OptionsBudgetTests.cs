@@ -22,7 +22,9 @@ public sealed partial class OptionsBudgetTests(ITestOutputHelper output)
     // Raised by 3 (945 to 948) for issue #853 (freeze-exception): IdentityRealmConfigOptions gains SubjectRoles, AllowPrivilegedSubjectRoles
     // and Jwks, the only configuration surface of workload subject roles and the static JWKS source. The entry types (SubjectRoleMapping,
     // StaticJwksSource) are not *Options classes and add no counted class. No existing property could be removed in exchange.
-    private const int CeilingSettableProperties = 940;
+    // Raised by 1 (948 to 949) for issue #889: IdentityRealmConfigOptions gains ReadOnlyScopes (List<string>?) so GenericOidc realms
+    // honour read-only token scopes with the same per-realm override surface as EntraIdAuthOptions.
+    private const int CeilingSettableProperties = 941;
     private const int CeilingEnabledFlags = 69;
     private const int CeilingUndocumentedProperties = 460;
 

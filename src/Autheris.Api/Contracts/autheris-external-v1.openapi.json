@@ -29,7 +29,7 @@
           { "name": "sensitivity", "in": "query", "schema": { "type": "string" } },
           { "name": "pii", "in": "query", "schema": { "type": "boolean" } },
           { "name": "changedSince", "in": "query", "schema": { "type": "integer", "format": "int64" } },
-          { "name": "cursor", "in": "query", "schema": { "type": "string" } },
+          { "name": "cursor", "in": "query", "description": "Opaque HMAC-authenticated keyset cursor returned as nextCursor on the previous page (at most 512 characters). Bound to all active query filters, tenant and caller scope; passing a malformed, stale-version or mismatched cursor returns 400 INVALID_CURSOR.", "schema": { "type": "string", "maxLength": 512 } },
           { "name": "pageSize", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 200 } },
           { "name": "accessStatus", "in": "query", "description": "Only objects with this callerState.access, applied before totalCount and nextCursor. User callers only (an app-only caller gets 400). The value is case-insensitive; the MCP names GRANTED, PENDING, EXPIRED and REQUEST_ACCESS are accepted as aliases of granted, requested, expired and none. An empty or unknown value is rejected with 400.", "schema": { "type": "string", "enum": ["granted", "requested", "expired", "none"] } },
           { "name": "q", "in": "query", "description": "Text query over names, descriptions and the column names the caller may see (never values), applied before totalCount and nextCursor and combinable with accessStatus and the other filters. Trimmed, at most 256 characters (longer: 400). User callers only (an app-only caller gets 400). A nextCursor is bound to q and accessStatus: reusing it with another q or accessStatus gives 400.", "schema": { "type": "string", "maxLength": 256 } },
@@ -44,7 +44,31 @@
           "304": { "description": "Not Modified" },
           "400": { "description": "Invalid query or cursor", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/ProblemDetails" } } } },
           "401": { "description": "Unauthorized" },
-          "403": { "description": "Forbidden", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/ProblemDetails" } } } }
+          "403": { "description": "Forbidden", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/ProblemDetails" } } } },
+          "429": { "description": "Rate limit exceeded", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/ProblemDetails" } } } }
+        }
+      }
+    },
+    "/api/v1/catalog/objects/facets": {
+      "get": {
+        "operationId": "getCatalogObjectFacets",
+        "summary": "Count caller-visible catalog objects grouped by domain and schema",
+        "parameters": [
+          { "name": "accessStatus", "in": "query", "description": "Only objects with this callerState.access. User callers only (an app-only caller gets 400). Case-insensitive (granted, requested, expired, none and MCP aliases GRANTED, PENDING, EXPIRED, REQUEST_ACCESS).", "schema": { "type": "string", "enum": ["granted", "requested", "expired", "none"] } },
+          { "name": "If-None-Match", "in": "header", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Catalog domain and schema facet counts",
+            "headers": { "ETag": { "schema": { "type": "string" } } },
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ExternalCatalogFacetsDto" } } }
+          },
+          "304": { "description": "Not Modified" },
+          "400": { "description": "Invalid query", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/ProblemDetails" } } } },
+          "401": { "description": "Unauthorized" },
+          "403": { "description": "Forbidden", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/ProblemDetails" } } } },
+          "413": { "description": "Response exceeds maximum allowed byte budget", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/ProblemDetails" } } } },
+          "429": { "description": "Rate limit exceeded", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/ProblemDetails" } } } }
         }
       }
     },
@@ -469,6 +493,31 @@
           "items": { "type": "array", "items": { "$ref": "#/components/schemas/ExternalCatalogObjectDto" } },
           "nextCursor": { "type": "string", "nullable": true },
           "totalCount": { "type": "integer" }
+        }
+      },
+      "ExternalCatalogSchemaFacetDto": {
+        "type": "object",
+        "required": ["schema", "count"],
+        "properties": {
+          "schema": { "type": "string" },
+          "count": { "type": "integer" }
+        }
+      },
+      "ExternalCatalogDomainFacetDto": {
+        "type": "object",
+        "required": ["domain", "count", "schemas"],
+        "properties": {
+          "domain": { "type": "string" },
+          "count": { "type": "integer" },
+          "schemas": { "type": "array", "items": { "$ref": "#/components/schemas/ExternalCatalogSchemaFacetDto" } }
+        }
+      },
+      "ExternalCatalogFacetsDto": {
+        "type": "object",
+        "required": ["totalCount", "domains"],
+        "properties": {
+          "totalCount": { "type": "integer" },
+          "domains": { "type": "array", "items": { "$ref": "#/components/schemas/ExternalCatalogDomainFacetDto" } }
         }
       },
       "ExternalCatalogChangeDto": {

@@ -481,7 +481,7 @@ public sealed class WriteConsentWorkflowTests
             options: Options.Create(new GatewayOptions()),
             logger: NullLogger<GovernanceRepository>.Instance,
             auditAnchorStore: new InMemoryAuditChainAnchorStore(),
-            grantWriter: new DirectConsentGrantWriter(new GrantRecordSqlCore(dialect)));
+            grantWriter: new DirectConsentGrantWriter(new GovernanceRepository.GrantRecordStore(dialect)));
         repo.InitializeAudit();
 
         var rule = new WriteRule(Guid.NewGuid(), WriteOperation.Update, ["status", "amount"], WriteRowScope.OwnRows, null, 40);

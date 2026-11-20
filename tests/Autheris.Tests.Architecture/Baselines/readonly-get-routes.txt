@@ -13,6 +13,7 @@ src/Autheris.Api/Endpoints/CallerAttributeAdminEndpoints.cs|/service-sets
 src/Autheris.Api/Endpoints/CatalogApiEndpoints.External.cs|/changes
 src/Autheris.Api/Endpoints/CatalogApiEndpoints.External.cs|/external.json
 src/Autheris.Api/Endpoints/CatalogApiEndpoints.External.cs|/objects
+src/Autheris.Api/Endpoints/CatalogApiEndpoints.External.cs|/objects/facets
 src/Autheris.Api/Endpoints/CatalogApiEndpoints.External.cs|/objects/{id}
 src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs|/api/governance/principals
 src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs|/datasets

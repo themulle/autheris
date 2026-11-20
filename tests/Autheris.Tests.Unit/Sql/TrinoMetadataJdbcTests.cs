@@ -334,10 +334,212 @@ public sealed class TrinoMetadataJdbcTests
     [Fact]
     public async Task SystemJdbc_WithoutVisibleSet_FailsClosed()
     {
-        var result = Should.ThrowAsync<NotSupportedException>(async () => await TrinoMetadataQueryHandler.TryExecuteAsync(
-            "SELECT * FROM system.jdbc.tables", Caller, Tenant, Wp0.Tables(Orders), Wp0.Consents(), Wp0.Options()));
+        await Should.ThrowAsync<ArgumentNullException>(() => TrinoMetadataQueryHandler.TryExecuteAsync(
+            "SELECT * FROM system.jdbc.tables", Caller, Tenant, Wp0.Tables(Orders), Wp0.Consents(), Wp0.Options(), null, null!));
+    }
 
-        (await result).Message.ShouldBe("The metadata statement shape is not supported.");
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task ShowTables_HiddenByDiscovery_IsNotListed()
+    {
+        // Both tables are active and consented, but discovery hides Salaries from the caller.
+        var rig = new Rig([Orders, Salaries], [Obj(Orders)]);
+
+        var allTables = await rig.RunAsync("SHOW TABLES");
+        var hrTables = await rig.RunAsync("SHOW TABLES FROM hr.dbo");
+
+        Column(allTables!, "Table").ShouldBe(["orders"]);
+        hrTables!.Rows.ShouldBeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task InformationSchemaColumns_DeniedByPdp_IsNotListed()
+    {
+        var rig = new Rig(
+            [Orders, Invoices],
+            [Obj(Orders, false, ("ssn", DiscoveryColumnState.NoAccess)), Obj(Invoices)],
+            t => t.Identifier.TableName == "orders"
+                ? Decision(t, allowed: true, deniedColumns: "amount")
+                : Decision(t, allowed: false));
+
+        var result = await rig.RunAsync("SELECT table_name, column_name FROM information_schema.columns");
+
+        result.ShouldNotBeNull();
+        result.Rows.Select(r => $"{r["table_name"]}.{r["column_name"]}").ShouldBe(["orders.id"]);
+
+        var throwing = new Rig([Orders], [Obj(Orders)], many: _ => throw new InvalidOperationException("pdp down"));
+        (await throwing.RunAsync("SELECT table_name, column_name FROM information_schema.columns"))!.Rows.ShouldBeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task CaseVariantTables_AreBothOmitted()
+    {
+        var lower = Wp0.Table("sales", "orders", columns: ["id"]);
+        var upper = Wp0.Table("sales", "Orders", columns: ["secret"]);
+
+        // Collision in both discovery and metadata alongside an unrelated table.
+        var bothRig = new Rig([lower, upper, Invoices], [Obj(lower), Obj(upper), Obj(Invoices)]);
+        Column((await bothRig.RunAsync("SELECT TABLE_NAME FROM system.jdbc.tables"))!, "TABLE_NAME").ShouldBe(["invoices"]);
+        Column((await bothRig.RunAsync("SELECT TABLE_NAME FROM system.jdbc.columns"))!, "TABLE_NAME").ShouldBe(["invoices"]);
+        Column((await bothRig.RunAsync("SHOW TABLES FROM sales.dbo"))!, "Table").ShouldBe(["invoices"]);
+        Column((await bothRig.RunAsync("SELECT table_name FROM information_schema.tables"))!, "table_name").ShouldBe(["invoices"]);
+        Column((await bothRig.RunAsync("SELECT table_name FROM information_schema.columns"))!, "table_name").ShouldBe(["invoices"]);
+
+        // Single entry in discovery colliding with two case-variant active rows in metadata.
+        var metaCollisionRig = new Rig([lower, upper, Invoices], [Obj(lower), Obj(Invoices)]);
+        Column((await metaCollisionRig.RunAsync("SELECT TABLE_NAME FROM system.jdbc.tables"))!, "TABLE_NAME").ShouldBe(["invoices"]);
+        Column((await metaCollisionRig.RunAsync("SELECT TABLE_NAME FROM system.jdbc.columns"))!, "TABLE_NAME").ShouldBe(["invoices"]);
+        Column((await metaCollisionRig.RunAsync("SHOW TABLES FROM sales.dbo"))!, "Table").ShouldBe(["invoices"]);
+        Column((await metaCollisionRig.RunAsync("SELECT table_name FROM information_schema.tables"))!, "table_name").ShouldBe(["invoices"]);
+        Column((await metaCollisionRig.RunAsync("SELECT table_name FROM information_schema.columns"))!, "table_name").ShouldBe(["invoices"]);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task DiscoveryAndMetadataCaseMismatch_IsNotPaired()
+    {
+        var metaLower = Wp0.Table("sales", "orders", columns: ["id"]);
+        var discUpperName = Wp0.Table("sales", "Orders", columns: ["id"]);
+        var discUpperSchema = new TableMetadata
+        {
+            Identifier = new TableIdentifier("sales", "Dbo", "orders"),
+            Table = new Table { SourceName = "sales", SchemaName = "Dbo", TableName = "orders", IsActive = true },
+            Columns = [new TableColumn { ColumnName = "id", DataType = "varchar" }]
+        };
+        var discUpperDomain = Wp0.Table("Sales", "orders", columns: ["id"]);
+
+        foreach (var mismatched in new[] { discUpperName, discUpperSchema, discUpperDomain })
+        {
+            var rig = new Rig([metaLower], [Obj(mismatched)]);
+
+            var jdbcTables = await rig.RunAsync("SELECT TABLE_NAME, REMARKS FROM system.jdbc.tables");
+            var jdbcColumns = await rig.RunAsync("SELECT * FROM system.jdbc.columns");
+            var showTables = await rig.RunAsync("SHOW TABLES");
+            var infoTables = await rig.RunAsync("SELECT * FROM information_schema.tables");
+            var infoCols = await rig.RunAsync("SELECT * FROM information_schema.columns");
+
+            Column(jdbcTables!, "REMARKS").ShouldBe(["access: not accessible"]);
+            jdbcColumns!.Rows.ShouldBeEmpty();
+            showTables!.Rows.ShouldBeEmpty();
+            infoTables!.Rows.ShouldBeEmpty();
+            infoCols!.Rows.ShouldBeEmpty();
+            rig.DecisionPoint.ManyCalls.ShouldBe(0);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task UndefinedColumnState_IsNotListed()
+    {
+        var table = Wp0.Table("sales", "orders", columns: ["id", "mystery", "email", "ssn"]);
+        var rig = new Rig(
+            [table],
+            [Obj(table, false, ("mystery", (DiscoveryColumnState)99), ("ssn", DiscoveryColumnState.NoAccess))]);
+
+        var jdbcColumns = await rig.RunAsync("SELECT COLUMN_NAME, ORDINAL_POSITION FROM system.jdbc.columns WHERE TABLE_NAME = 'orders'");
+        var infoColumns = await rig.RunAsync("SELECT column_name, ordinal_position FROM information_schema.columns WHERE table_name = 'orders'");
+
+        Column(jdbcColumns!, "COLUMN_NAME").ShouldBe(["id", "email"]);
+        Column(jdbcColumns!, "ORDINAL_POSITION").ShouldBe(["1", "2"]);
+        Column(infoColumns!, "column_name").ShouldBe(["id", "email"]);
+        Column(infoColumns!, "ordinal_position").ShouldBe(["1", "2"]);
+    }
+
+    [Fact]
+    public async Task GetColumnsShape_DecidesOnlyMatchingTables()
+    {
+        var rig = new Rig([Orders, Invoices, Salaries], [Obj(Orders), Obj(Invoices), Obj(Salaries)]);
+
+        var single = await rig.RunAsync("SELECT TABLE_NAME, COLUMN_NAME FROM system.jdbc.columns WHERE TABLE_SCHEM = 'dbo' AND TABLE_NAME = 'orders'");
+        rig.DecisionPoint.ManyCalls.ShouldBe(1);
+        rig.DecisionPoint.DecidedTables.ShouldBe([Orders.Identifier]);
+        Column(single!, "TABLE_NAME").ShouldBe(["orders", "orders", "orders"]);
+
+        rig.DecisionPoint.DecidedTables.Clear();
+        var pair = await rig.RunAsync("SELECT TABLE_NAME, COLUMN_NAME FROM system.jdbc.columns WHERE TABLE_SCHEM = 'dbo' AND TABLE_NAME IN ('orders', 'invoices')");
+        rig.DecisionPoint.ManyCalls.ShouldBe(2);
+        rig.DecisionPoint.DecidedTables.ShouldBe([Orders.Identifier, Invoices.Identifier], ignoreOrder: true);
+        pair!.Rows.Select(r => r["TABLE_NAME"]?.ToString()).Distinct().ShouldBe(["invoices", "orders"], ignoreOrder: true);
+
+        var none = await rig.RunAsync("SELECT * FROM system.jdbc.columns WHERE TABLE_CAT = 'missing'");
+        rig.DecisionPoint.ManyCalls.ShouldBe(2);
+        none!.Rows.ShouldBeEmpty();
+
+        var infoSchema = await rig.RunAsync("SELECT TABLE_CATALOG, TABLE_SCHEM FROM system.jdbc.schemas WHERE TABLE_SCHEM = 'information_schema' ORDER BY TABLE_CATALOG");
+        Column(infoSchema!, "TABLE_CATALOG").ShouldBe(["hr", "sales"]);
+        Column(infoSchema!, "TABLE_SCHEM").ShouldBe(["information_schema", "information_schema"]);
+    }
+
+    [Fact]
+    public async Task Unordered_StopsAtLimitPlusOne_TruncatedSet()
+    {
+        TableMetadata[] catalog =
+        [
+            Wp0.Table("sales", "t1", columns: ["id"]),
+            Wp0.Table("sales", "t2", columns: ["id"]),
+            Wp0.Table("sales", "t3", columns: ["id"]),
+            Wp0.Table("sales", "t4", columns: ["id"]),
+            Wp0.Table("sales", "t5", columns: ["id"])
+        ];
+        var match = TrinoJdbcMetadataShapes.JdbcStatementRegex.Match("SELECT TABLE_NAME FROM system.jdbc.tables");
+        var query = TrinoJdbcMetadataShapes.Parse(match);
+        var entries = catalog.Select(t => new TrinoJdbcEntry(Obj(t), true, new HashSet<string>(["id"], StringComparer.OrdinalIgnoreCase))).ToList();
+
+        var shaped = TrinoJdbcMetadataShapes.Execute(query, entries, rowLimit: 2);
+        shaped.Rows.Count.ShouldBe(3);
+
+        var rig = new Rig(catalog, catalog.Select(t => Obj(t)).ToList());
+        var truncated = await rig.RunAsync("SELECT TABLE_NAME FROM system.jdbc.tables", rowLimit: 2);
+        truncated!.Rows.Count.ShouldBe(2);
+        truncated.RowCount.ShouldBe(2);
+        truncated.Truncated.ShouldBeTrue();
+        Column(truncated, "TABLE_NAME").ShouldBe(["t1", "t2"]);
+
+        var exact = await rig.RunAsync("SELECT TABLE_NAME FROM system.jdbc.tables", rowLimit: 5);
+        exact!.Rows.Count.ShouldBe(5);
+        exact.Truncated.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Ordered_StillSortsFullFilteredSet()
+    {
+        TableMetadata[] catalog =
+        [
+            Wp0.Table("sales", "alpha", columns: ["id"]),
+            Wp0.Table("sales", "beta", columns: ["id"]),
+            Wp0.Table("sales", "delta", columns: ["id"]),
+            Wp0.Table("sales", "gamma", columns: ["id"])
+        ];
+        const string sql = "SELECT TABLE_NAME FROM system.jdbc.tables ORDER BY TABLE_NAME DESC";
+        var query = TrinoJdbcMetadataShapes.Parse(TrinoJdbcMetadataShapes.JdbcStatementRegex.Match(sql));
+        var entries = catalog.Select(t => new TrinoJdbcEntry(Obj(t), true, new HashSet<string>(["id"], StringComparer.OrdinalIgnoreCase))).ToList();
+
+        var shaped = TrinoJdbcMetadataShapes.Execute(query, entries, rowLimit: 2);
+        shaped.Rows.Select(r => r["TABLE_NAME"]?.ToString()).ShouldBe(["gamma", "delta", "beta", "alpha"]);
+
+        var rig = new Rig(catalog, catalog.Select(t => Obj(t)).ToList());
+        var limited = await rig.RunAsync(sql, rowLimit: 2);
+        Column(limited!, "TABLE_NAME").ShouldBe(["gamma", "delta"]);
+        limited!.Truncated.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task LikePredicate_IsNotPushedDown()
+    {
+        const string sql = "SELECT TABLE_NAME, COLUMN_NAME FROM system.jdbc.columns WHERE TABLE_NAME LIKE 'ord%'";
+        var query = TrinoJdbcMetadataShapes.Parse(TrinoJdbcMetadataShapes.JdbcStatementRegex.Match(sql));
+        var pushdown = TrinoJdbcMetadataShapes.PushdownKeys(query);
+        pushdown.Catalogs.ShouldBeNull();
+        pushdown.Schemas.ShouldBeNull();
+        pushdown.Tables.ShouldBeNull();
+
+        var rig = new Rig([Orders, Invoices], [Obj(Orders), Obj(Invoices)]);
+        var result = await rig.RunAsync(sql);
+
+        rig.DecisionPoint.DecidedTables.ShouldBe([Orders.Identifier, Invoices.Identifier], ignoreOrder: true);
+        result!.Rows.Select(r => r["TABLE_NAME"]?.ToString()).Distinct().ShouldBe(["orders"]);
     }
 
     private sealed class Rig
@@ -360,9 +562,9 @@ public sealed class TrinoMetadataJdbcTests
             DecisionPoint = new StubDecisionPoint(tables => many != null ? many(tables) : tables.Select(decide).ToList());
         }
 
-        public Task<GovernedSqlResult?> RunAsync(string sql) =>
+        public Task<GovernedSqlResult?> RunAsync(string sql, int? rowLimit = null) =>
             TrinoMetadataQueryHandler.TryExecuteAsync(
-                sql, Caller, Tenant, Repository, _consents, Wp0.Options(), null, new TrinoMetadataVisibility(Discovery, DecisionPoint));
+                sql, Caller, Tenant, Repository, _consents, Wp0.Options(), null, new TrinoMetadataVisibility(Discovery, DecisionPoint), rowLimit);
     }
 
     private sealed class StubDiscovery(IReadOnlyList<DiscoveryObject> visible) : IDiscoveryService
@@ -375,6 +577,10 @@ public sealed class TrinoMetadataJdbcTests
             return new(new DiscoveryPage(visible, visible.Count, false));
         }
 
+        public ValueTask<DiscoveryKeysetPage> ListKeysetAsync(DiscoveryKeysetQuery query, CatalogCaller caller, CancellationToken ct = default) => throw new NotSupportedException();
+
+        public ValueTask<DiscoveryFacets> FacetsAsync(DiscoveryAccessState? access, CatalogCaller caller, CancellationToken ct = default) => throw new NotSupportedException();
+
         public ValueTask<DiscoveryObject?> GetAsync(TableIdentifier id, CatalogCaller caller, CancellationToken ct = default) => throw new NotSupportedException();
 
         public ValueTask<IReadOnlyList<DiscoveryObject>> SearchAsync(string text, DiscoverySearchOptions options, CatalogCaller caller, CancellationToken ct = default) => throw new NotSupportedException();
@@ -384,10 +590,13 @@ public sealed class TrinoMetadataJdbcTests
     {
         public int ManyCalls { get; private set; }
 
+        public List<TableIdentifier> DecidedTables { get; } = [];
+
         public ValueTask<IReadOnlyList<TableAccessDecision>> DecideManyAsync(
             SecurityPrincipalContext subject, IReadOnlyList<TableMetadata> objects, AccessOperation operation, AccessTransport transport, CancellationToken ct = default)
         {
             ManyCalls++;
+            DecidedTables.AddRange(objects.Select(static o => o.Identifier));
             return new(many(objects));
         }
 

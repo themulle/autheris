@@ -45,10 +45,10 @@ public sealed class ProcedureRowScopeKeyClosureTests
     [Trait("Category", "Security")]
     [InlineData(
         DatabaseDialect.SqlServer,
-        "SELECT [order_id] FROM [sales].[orders] AS [autheris_target] WHERE (([order_id] = @rs_0_0) OR ([order_id] = @rs_1_0)) GROUP BY [order_id] HAVING COUNT(*) = SUM(CASE WHEN [tenant_id] = @rs_tenant AND ([autheris_target].[status] = 'open') THEN 1 ELSE 0 END)")]
+        "SELECT [order_id] FROM (SELECT [order_id], CASE WHEN [tenant_id] = @rs_tenant AND ([autheris_target].[status] = 'open') THEN 1 ELSE 0 END AS [autheris_rs_ok] FROM [sales].[orders] AS [autheris_target] WHERE (([order_id] = @rs_0_0) OR ([order_id] = @rs_1_0))) AS [autheris_rs] GROUP BY [order_id] HAVING COUNT(*) = SUM([autheris_rs_ok])")]
     [InlineData(
         DatabaseDialect.PostgreSql,
-        "SELECT \"order_id\" FROM \"sales\".\"orders\" AS \"autheris_target\" WHERE ((\"order_id\" = @rs_0_0) OR (\"order_id\" = @rs_1_0)) GROUP BY \"order_id\" HAVING COUNT(*) = SUM(CASE WHEN \"tenant_id\" = @rs_tenant AND (\"autheris_target\".\"status\" = 'open') THEN 1 ELSE 0 END)")]
+        "SELECT \"order_id\" FROM (SELECT \"order_id\", CASE WHEN \"tenant_id\" = @rs_tenant AND (\"autheris_target\".\"status\" = 'open') THEN 1 ELSE 0 END AS \"autheris_rs_ok\" FROM \"sales\".\"orders\" AS \"autheris_target\" WHERE ((\"order_id\" = @rs_0_0) OR (\"order_id\" = @rs_1_0))) AS \"autheris_rs\" GROUP BY \"order_id\" HAVING COUNT(*) = SUM(\"autheris_rs_ok\")")]
     public void BuildKeyQuery_GroupsByKey_HavingAllRowsPassFilterAndTenant(DatabaseDialect dialect, string expectedSql)
     {
         string filter = dialect switch
@@ -69,6 +69,95 @@ public sealed class ProcedureRowScopeKeyClosureTests
         sql.ShouldNotContain("sys.indexes");
         sql.ShouldNotContain("pg_index");
         sql.ShouldNotContain("pragma_");
+    }
+
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData(DatabaseDialect.SqlServer)]
+    [InlineData(DatabaseDialect.PostgreSql)]
+    public void BuildKeyQuery_SubqueryFilter_IsNotInsideAggregate(DatabaseDialect dialect)
+    {
+        string filter = dialect switch
+        {
+            DatabaseDialect.SqlServer => "EXISTS (SELECT 1 FROM [dbo].[client] AS [c] WHERE [c].[client_id] = [autheris_target].[client_id] AND [c].[region] = N'DE')",
+            _ => "EXISTS (SELECT 1 FROM \"dbo\".\"client\" AS \"c\" WHERE \"c\".\"client_id\" = \"autheris_target\".\"client_id\" AND \"c\".\"region\" = 'DE')"
+        };
+
+        string sql = SqlProcedureRowScopeResolver.BuildKeyQuery(
+            dialect,
+            OrdersTable(dialect),
+            ["order_id"],
+            "tenant_id",
+            filter,
+            1);
+
+        int sumStart = sql.IndexOf("SUM(", StringComparison.Ordinal);
+        sumStart.ShouldBeGreaterThan(0);
+        int argStart = sumStart + 4;
+        int depth = 1;
+        int i = argStart;
+        while (i < sql.Length && depth > 0)
+        {
+            if (sql[i] == '(') depth++;
+            else if (sql[i] == ')') depth--;
+            i++;
+        }
+
+        depth.ShouldBe(0);
+        string sumArg = sql.Substring(argStart, i - 1 - argStart);
+        sumArg.ShouldBe(dialect.QuoteIdentifier(SqlProcedureRowScopeResolver.RowScopeFlagColumn));
+        SqlProcedureRowScopeResolver.RowScopeFlagColumn.ShouldBe("autheris_rs_ok");
+        SqlProcedureRowScopeResolver.RowScopeDerivedAlias.ShouldBe("autheris_rs");
+        sumArg.ShouldNotContain("SELECT", Case.Insensitive);
+        sumArg.ShouldNotContain("EXISTS", Case.Insensitive);
+    }
+
+    [Fact]
+    public async Task GetAllowedKeysAsync_ExistsFilterAndParameters_PreservesParameterOrder()
+    {
+        var conn = new RecordingDbConnection([["ord-2"]]);
+        var resolver = new SqlProcedureRowScopeResolver(
+            new SingleConnectionFactory(conn),
+            Options.Create(new GatewayOptions
+            {
+                DataSources = new SqlDataSourceOptions
+                {
+                    Connections = new Dictionary<string, DataSourceConnectionOptions>
+                    {
+                        ["erp"] = new() { Provider = "SqlServer", ConnectionString = "Server=localhost;Database=erp" }
+                    }
+                }
+            }));
+
+        var table = OrdersTable();
+        var definition = ProcedureDefinitionParser.ParseYaml(
+            "name: p\nprocedure: api.usp_P\nresult_table: sales.orders\ntables: [sales.orders]\noutputs: [order_id]\nrow_scope_key: order_id\n",
+            "erp",
+            allowRlsNone: false,
+            maxTimeoutSeconds: 60) with
+        {
+            DataSource = "erp"
+        };
+
+        var decision = TableAccessDecision.Allowed(
+            table.Identifier,
+            new Dictionary<string, ColumnAccessLevel>(),
+            rowFilterSql: "EXISTS (SELECT 1 FROM dbo.client r WHERE r.client_id = autheris_target.client_id AND r.region = @p_region)",
+            rowFilterParameters: new Dictionary<string, object?> { ["@p_region"] = "DE" },
+            hasUnconstrainedColumnAllow: true);
+
+        var allowed = await resolver.GetAllowedKeysAsync(
+            definition,
+            table,
+            decision,
+            ["order_id"],
+            [["ord-1"], ["ord-2"]],
+            new ProcedureSecurityContext("tenant-a", "S-1-5-21-1", null),
+            CancellationToken.None);
+
+        allowed.ShouldBe(new[] { RowScopeKeys.Normalize(["ord-2"])! });
+        conn.BoundParameterNames.ShouldBe(["@rs_tenant", "@p_region", "@rs_0_0", "@rs_1_0"]);
+        conn.BoundParameters["@p_region"].ShouldBe("DE");
     }
 
     [Fact]
@@ -115,8 +204,9 @@ public sealed class ProcedureRowScopeKeyClosureTests
 
         allowed.ShouldBe(new[] { RowScopeKeys.Normalize(["ord-2"])! });
         conn.ExecutedQueries.Count.ShouldBe(1);
+        conn.ExecutedQueries[0].ShouldContain("CASE WHEN [tenant_id] = @rs_tenant AND ([autheris_target].[status] = 'open') THEN 1 ELSE 0 END AS [autheris_rs_ok]");
         conn.ExecutedQueries[0].ShouldContain("GROUP BY [order_id]");
-        conn.ExecutedQueries[0].ShouldContain("HAVING COUNT(*) = SUM(CASE WHEN [tenant_id] = @rs_tenant AND ([autheris_target].[status] = 'open') THEN 1 ELSE 0 END)");
+        conn.ExecutedQueries[0].ShouldContain("HAVING COUNT(*) = SUM([autheris_rs_ok])");
         conn.ExecutedQueries.ShouldAllBe(q => !q.Contains("sys.indexes", StringComparison.OrdinalIgnoreCase));
         conn.BoundParameters["@rs_tenant"].ShouldBe("tenant-a");
         conn.BoundParameters["@rs_0_0"].ShouldBe("ord-1");
@@ -132,6 +222,7 @@ public sealed class ProcedureRowScopeKeyClosureTests
     private sealed class RecordingDbConnection(IReadOnlyList<object?[]> rows) : DbConnection
     {
         public List<string> ExecutedQueries { get; } = [];
+        public List<string> BoundParameterNames { get; } = [];
         public Dictionary<string, object?> BoundParameters { get; } = new(StringComparer.Ordinal);
 
         [AllowNull]
@@ -175,6 +266,7 @@ public sealed class ProcedureRowScopeKeyClosureTests
                 owner.ExecutedQueries.Add(CommandText);
                 foreach (RecordingParameter p in _parameters)
                 {
+                    owner.BoundParameterNames.Add(p.ParameterName);
                     owner.BoundParameters[p.ParameterName] = p.Value;
                 }
 

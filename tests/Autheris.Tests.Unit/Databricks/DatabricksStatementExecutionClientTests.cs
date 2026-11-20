@@ -11,6 +11,7 @@ using Autheris.Tests.Common;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Http;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
 using Shouldly;
 using Xunit;
@@ -50,7 +51,7 @@ public sealed class DatabricksStatementExecutionClientTests
         body.GetProperty("warehouse_id").GetString().ShouldBe("wh-1");
         body.GetProperty("catalog").GetString().ShouldBe("main");
         body.GetProperty("schema").GetString().ShouldBe("default");
-        body.GetProperty("on_wait_timeout").GetString().ShouldBe("CANCEL");
+        body.GetProperty("on_wait_timeout").GetString().ShouldBe("CONTINUE");
         body.GetProperty("byte_limit").GetInt64().ShouldBe(26214400);
     }
 
@@ -490,21 +491,211 @@ public sealed class DatabricksStatementExecutionClientTests
     }
 
     [Theory]
-    [InlineData(1, "5s")]
+    [InlineData(1, "0s")]
     [InlineData(5, "5s")]
     [InlineData(30, "30s")]
     [InlineData(50, "50s")]
     [InlineData(120, "50s")]
-    public async Task WaitTimeout_ClampedTo5To50s_OnWaitTimeoutCancel(int seconds, string expected)
+    public async Task WaitTimeout_ClampedToZeroOr5To50s_OnWaitTimeoutContinue(int seconds, string expected)
     {
         var handler = new FakeDatabricksHandler(Router(_ => Ok(Succeeded(StatementId, "[]"))));
-        var client = Client(handler);
+        var client = Client(handler, Options(commandTimeoutSeconds: 120));
 
         await client.ExecuteAsync(Request(wait: TimeSpan.FromSeconds(seconds)), CancellationToken.None);
 
         var body = Body(handler.Requests.Single(r => r.Uri.AbsolutePath == "/api/2.0/sql/statements/"));
         body.GetProperty("wait_timeout").GetString().ShouldBe(expected);
-        body.GetProperty("on_wait_timeout").GetString().ShouldBe("CANCEL");
+        body.GetProperty("on_wait_timeout").GetString().ShouldBe("CONTINUE");
+    }
+
+    [Fact]
+    public async Task Body_UsesOnWaitTimeoutContinue()
+    {
+        var handler = new FakeDatabricksHandler(Router(_ => Ok(Succeeded(StatementId, "[]"))));
+        var client = Client(handler);
+
+        await client.ExecuteAsync(Request(), CancellationToken.None);
+
+        var body = Body(handler.Requests.Single(r => r.Uri.AbsolutePath == "/api/2.0/sql/statements/"));
+        body.GetProperty("on_wait_timeout").GetString().ShouldBe("CONTINUE");
+    }
+
+    [Theory]
+    [InlineData(30, 20, "18s")]
+    [InlineData(30, 30, "28s")]
+    [InlineData(50, 120, "50s")]
+    [InlineData(120, 120, "50s")]
+    [InlineData(30, 7, "5s")]
+    public async Task Body_WaitTimeout_BoundedByCommandTimeout(int waitSeconds, int commandTimeoutSeconds, string expected)
+    {
+        var handler = new FakeDatabricksHandler(Router(_ => Ok(Succeeded(StatementId, "[]"))));
+        var client = Client(handler, Options(commandTimeoutSeconds: commandTimeoutSeconds));
+
+        await client.ExecuteAsync(Request(wait: TimeSpan.FromSeconds(waitSeconds)), CancellationToken.None);
+
+        var body = Body(handler.Requests.Single(r => r.Uri.AbsolutePath == "/api/2.0/sql/statements/"));
+        body.GetProperty("wait_timeout").GetString().ShouldBe(expected);
+    }
+
+    [Theory]
+    [InlineData(30, 1)]
+    [InlineData(30, 5)]
+    [InlineData(30, 6)]
+    [InlineData(4, 30)]
+    [InlineData(1, 30)]
+    public async Task Body_ShortCommandTimeout_SendsZeroWait(int waitSeconds, int commandTimeoutSeconds)
+    {
+        var handler = new FakeDatabricksHandler(Router(_ => Ok(Succeeded(StatementId, "[]"))));
+        var client = Client(handler, Options(commandTimeoutSeconds: commandTimeoutSeconds));
+
+        await client.ExecuteAsync(Request(wait: TimeSpan.FromSeconds(waitSeconds)), CancellationToken.None);
+
+        var body = Body(handler.Requests.Single(r => r.Uri.AbsolutePath == "/api/2.0/sql/statements/"));
+        body.GetProperty("wait_timeout").GetString().ShouldBe("0s");
+    }
+
+    [Fact]
+    public async Task RunningAfterFirstWait_IsPolledUntilSucceeded()
+    {
+        var time = new PollTrackingTimeProvider();
+        int polls = 0;
+        var handler = new FakeDatabricksHandler(Router(r =>
+        {
+            if (r.Method == HttpMethod.Post && r.Uri.AbsolutePath == "/api/2.0/sql/statements/")
+            {
+                return Ok(State(StatementId, "RUNNING"));
+            }
+
+            if (r.Method == HttpMethod.Get && r.Uri.AbsolutePath == $"/api/2.0/sql/statements/{StatementId}")
+            {
+                // 12 polls * 5s = 60s (> 50s API wait cap, < 120s command timeout)
+                return ++polls < 12
+                    ? Ok(State(StatementId, "RUNNING"))
+                    : Ok(Succeeded(StatementId, """[["42","long-ok"]]"""));
+            }
+
+            return null;
+        }));
+        var client = Client(handler, Options(commandTimeoutSeconds: 120, pollIntervalMilliseconds: 5000), timeProvider: time);
+
+        var executeTask = client.ExecuteAsync(Request(wait: TimeSpan.FromSeconds(50)), CancellationToken.None);
+        for (int i = 0; i < 12 && !executeTask.IsCompleted; i++)
+        {
+            (await time.DelayEntered.WaitAsync(TimeSpan.FromSeconds(5))).ShouldBeTrue();
+            time.Advance(TimeSpan.FromSeconds(5));
+        }
+
+        var result = await executeTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+        polls.ShouldBe(12);
+        result.StatementId.ShouldBe(StatementId);
+        result.Rows.Single().ShouldBe(["42", "long-ok"]);
+        var postBody = Body(handler.Requests.Single(r => r.Uri.AbsolutePath == "/api/2.0/sql/statements/"));
+        postBody.GetProperty("wait_timeout").GetString().ShouldBe("50s");
+        postBody.GetProperty("on_wait_timeout").GetString().ShouldBe("CONTINUE");
+        handler.Requests.ShouldNotContain(r => r.Uri.AbsolutePath.EndsWith("/cancel", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Deadline_CancelsStatement_AndThrowsTimeout()
+    {
+        var time = new PollTrackingTimeProvider();
+        var handler = new FakeDatabricksHandler(Router(r =>
+        {
+            if (r.Method == HttpMethod.Post && r.Uri.AbsolutePath == "/api/2.0/sql/statements/")
+            {
+                return Ok(State(StatementId, "RUNNING"));
+            }
+
+            if (r.Method == HttpMethod.Get && r.Uri.AbsolutePath == $"/api/2.0/sql/statements/{StatementId}")
+            {
+                return Ok(State(StatementId, "RUNNING"));
+            }
+
+            return r.Method == HttpMethod.Post && r.Uri.AbsolutePath == $"/api/2.0/sql/statements/{StatementId}/cancel"
+                ? Ok("{}")
+                : null;
+        }));
+        var client = Client(handler, Options(commandTimeoutSeconds: 15, pollIntervalMilliseconds: 5000), timeProvider: time);
+
+        var executeTask = client.ExecuteAsync(Request(wait: TimeSpan.FromSeconds(30)), CancellationToken.None);
+        for (int i = 0; i < 3 && !executeTask.IsCompleted; i++)
+        {
+            if (await time.DelayEntered.WaitAsync(TimeSpan.FromSeconds(2)))
+            {
+                time.Advance(TimeSpan.FromSeconds(5));
+            }
+        }
+
+        if (!executeTask.IsCompleted)
+        {
+            time.Advance(TimeSpan.FromSeconds(1));
+        }
+
+        var ex = await CaptureAsync(() => executeTask.WaitAsync(TimeSpan.FromSeconds(5)));
+
+        ex.ShouldBeOfType<DatabricksProviderException>().Code.ShouldBe(DatabricksErrorCodes.Timeout);
+        handler.Requests.Count(r => r.Method == HttpMethod.Post && r.Uri.AbsolutePath == $"/api/2.0/sql/statements/{StatementId}/cancel").ShouldBe(1);
+    }
+
+    [Theory]
+    [InlineData("changed-id", DatabricksErrorCodes.ProtocolViolation)]
+    [InlineData("bad-json", DatabricksErrorCodes.ProtocolViolation)]
+    [InlineData("unknown-state", DatabricksErrorCodes.ProtocolViolation)]
+    [InlineData("http-500", DatabricksErrorCodes.Http)]
+    [InlineData("too-large", DatabricksErrorCodes.ResultTooLarge)]
+    public async Task ProtocolErrorWhileRunning_CancelsStatement(string scenario, string expectedCode)
+    {
+        var handler = new FakeDatabricksHandler(Router(r =>
+        {
+            if (r.Method == HttpMethod.Post && r.Uri.AbsolutePath == "/api/2.0/sql/statements/")
+            {
+                return Ok(State(StatementId, "RUNNING"));
+            }
+
+            if (r.Method == HttpMethod.Get && r.Uri.AbsolutePath == $"/api/2.0/sql/statements/{StatementId}")
+            {
+                return scenario switch
+                {
+                    "changed-id" => Ok(State(OtherStatementId, "RUNNING")),
+                    "bad-json" => Ok("not-valid-json"),
+                    "unknown-state" => Ok(State(StatementId, "WAITING_FOR_UNICORN")),
+                    "http-500" => Json(HttpStatusCode.InternalServerError, "{\"message\":\"boom\"}"),
+                    "too-large" => Ok("{\"statement_id\":\"" + StatementId + "\",\"status\":{\"state\":\"RUNNING\"},\"pad\":\"" + new string('x', DatabricksStatementExecutionClient.ResponseOverheadBytes + 8192) + "\"}"),
+                    _ => null
+                };
+            }
+
+            return r.Method == HttpMethod.Post && r.Uri.AbsolutePath == $"/api/2.0/sql/statements/{StatementId}/cancel"
+                ? Ok("{}")
+                : null;
+        }));
+        var client = Client(handler, Options(byteLimit: 4096));
+
+        var ex = await CaptureAsync(() => client.ExecuteAsync(Request(), CancellationToken.None));
+
+        ex.ShouldBeAssignableTo<DatabricksProviderException>().Code.ShouldBe(expectedCode);
+        handler.Requests.Count(r => r.Method == HttpMethod.Post && r.Uri.AbsolutePath == $"/api/2.0/sql/statements/{StatementId}/cancel").ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task ReadColumns_ReadsPrecisionAndScale()
+    {
+        const string json = "{\"statement_id\":\"" + StatementId + "\",\"status\":{\"state\":\"SUCCEEDED\"}," +
+                            "\"manifest\":{\"format\":\"JSON_ARRAY\",\"truncated\":false,\"schema\":{\"column_count\":3,\"columns\":[" +
+                            "{\"name\":\"amt18\",\"type_name\":\"DECIMAL\",\"type_precision\":18,\"type_scale\":2,\"position\":0}," +
+                            "{\"name\":\"amt38\",\"type_name\":\"DECIMAL\",\"type_precision\":38,\"type_scale\":10,\"position\":1}," +
+                            "{\"name\":\"id\",\"type_name\":\"INT\",\"position\":2}]}}," +
+                            "\"result\":{\"chunk_index\":0,\"row_offset\":0,\"data_array\":[[\"12.34\",\"12345678901234567890.1234567890\",\"7\"]]}}";
+        var handler = new FakeDatabricksHandler(Router(_ => Ok(json)));
+        var client = Client(handler);
+
+        var result = await client.ExecuteAsync(Request(), CancellationToken.None);
+
+        result.Columns.Length.ShouldBe(3);
+        result.Columns[0].ShouldBe(new DatabricksColumn("amt18", "DECIMAL", 18, 2));
+        result.Columns[1].ShouldBe(new DatabricksColumn("amt38", "DECIMAL", 38, 10));
+        result.Columns[2].ShouldBe(new DatabricksColumn("id", "INT", null, null));
     }
 
     [Fact]
@@ -544,5 +735,21 @@ public sealed class DatabricksStatementExecutionClientTests
     public void Options_EnumDefaultsToOAuthM2M()
     {
         new DatabricksAuthOptions().Mode.ShouldBe(DatabricksAuthMode.OAuthM2M);
+    }
+
+    private sealed class PollTrackingTimeProvider : FakeTimeProvider
+    {
+        public SemaphoreSlim DelayEntered { get; } = new(0);
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            var timer = base.CreateTimer(callback, state, dueTime, period);
+            if (dueTime == TimeSpan.FromSeconds(5))
+            {
+                DelayEntered.Release();
+            }
+
+            return timer;
+        }
     }
 }

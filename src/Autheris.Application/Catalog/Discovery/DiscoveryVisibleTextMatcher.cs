@@ -54,6 +54,10 @@ internal static class DiscoveryVisibleTextMatcher
         return false;
     }
 
+    /// <summary>Shared visibility verifier for listing text filters: unrestricted objects keep their metadata match; restricted ones require a visible-field match.</summary>
+    public static bool MatchesVisibleSearch(TableMetadata table, DiscoveryObject projected, string query) =>
+        !IsRestricted(table, projected) || ContainsQuery(table, projected, query);
+
     /// <summary>At least one query term matches a token of the caller-visible text, with the same tokenization the index uses.</summary>
     public static bool MatchesAnyTerm(TableMetadata table, DiscoveryObject projected, string query) =>
         VisibleTermMatchCount(table, projected, query) > 0;

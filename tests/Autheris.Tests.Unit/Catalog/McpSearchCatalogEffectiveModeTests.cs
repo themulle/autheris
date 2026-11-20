@@ -141,6 +141,8 @@ public sealed class McpSearchCatalogEffectiveModeTests
     {
         public Task<IReadOnlyList<CatalogDatasetSummary>> ListDatasetsAsync(RequestContext context, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<CatalogDatasetSummary>>([]);
+        public Task<Autheris.Application.Catalog.Discovery.DiscoveryFacets> ListFacetsAsync(RequestContext context, CancellationToken ct = default) =>
+            Task.FromResult(new Autheris.Application.Catalog.Discovery.DiscoveryFacets(0, []));
         public Task<CatalogDatasetDetail?> GetDatasetDetailAsync(TableIdentifier table, RequestContext context, CancellationToken ct = default) =>
             Task.FromResult<CatalogDatasetDetail?>(null);
         public Task<IReadOnlyList<CatalogDatasetSummary>> SearchCatalogAsync(string query, string? domain, RequestContext context, CancellationToken ct = default) =>
