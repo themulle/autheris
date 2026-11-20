@@ -577,6 +577,10 @@ public sealed class TrinoMetadataJdbcTests
             return new(new DiscoveryPage(visible, visible.Count, false));
         }
 
+        public ValueTask<DiscoveryKeysetPage> ListKeysetAsync(DiscoveryKeysetQuery query, CatalogCaller caller, CancellationToken ct = default) => throw new NotSupportedException();
+
+        public ValueTask<DiscoveryFacets> FacetsAsync(DiscoveryAccessState? access, CatalogCaller caller, CancellationToken ct = default) => throw new NotSupportedException();
+
         public ValueTask<DiscoveryObject?> GetAsync(TableIdentifier id, CatalogCaller caller, CancellationToken ct = default) => throw new NotSupportedException();
 
         public ValueTask<IReadOnlyList<DiscoveryObject>> SearchAsync(string text, DiscoverySearchOptions options, CatalogCaller caller, CancellationToken ct = default) => throw new NotSupportedException();
