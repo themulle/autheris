@@ -441,7 +441,6 @@ public sealed class CatalogTablePersistedProjection
             ["MaskingRule.MaskChar"] = notWritten, ["MaskingRule.FixedLength"] = notWritten, ["MaskingRule.TokenDomain"] = notWritten,
             ["TableMetadata.Identifier"] = "persisted as Table.SourceName, SchemaName and TableName, which are projected",
             ["TableMetadata.EnforcementMode"] = derived, ["TableMetadata.IsDelegatedSource"] = derived, ["TableMetadata.OwnerTenantId"] = notWritten,
-            ["TableMetadata.RowFilterEvaluation"] = "written by the row filter evaluation settings API, never by the metadata upsert",
             ["TableMetadata.CatalogView"] = "set by the consent filter at read time", ["TableMetadata.CatalogTags"] = overlay,
             ["TableMetadata.ReplaceKeyDefinition"] = "write intent, not persisted", ["TableMetadata.ReplaceColumns"] = "write intent, not persisted",
             ["TableMetadata.EstimatedRowCount"] = notWritten,

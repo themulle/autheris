@@ -85,20 +85,8 @@ public static class GatewayDiagnostics
     public static readonly Histogram<double> LineageTraversalDuration =
         Meter.CreateHistogram<double>("autheris_lineage_traversal_duration_ms", "ms", description: "Duration of cycle-safe lineage traversal");
 
-    public static readonly Counter<long> RowFilterKeySetHits =
-        Meter.CreateCounter<long>("autheris.rowfilter.keyset.hits", description: "Correlated row-filter sites served from a cached key set");
-
-    public static readonly Counter<long> RowFilterKeySetMisses =
-        Meter.CreateCounter<long>("autheris.rowfilter.keyset.misses", description: "Correlated row-filter sites whose key set was loaded for the statement");
-
     public static readonly Counter<long> DiscoveryFailuresCounter =
         Meter.CreateCounter<long>("discovery_failures_total", description: "Catalog discovery evaluations that failed closed and returned empty or null");
-
-    public static readonly Counter<long> RowFilterKeySetFallbacks =
-        Meter.CreateCounter<long>("autheris.rowfilter.keyset.fallbacks", description: "Correlated row-filter sites that kept the exact EXISTS form, by reason");
-
-    public static readonly Histogram<double> RowFilterKeyQueryDuration =
-        Meter.CreateHistogram<double>("autheris.rowfilter.keyset.key_query.duration", "ms", description: "Duration of a row-filter key query");
 
     public static readonly Counter<long> CallerAttributeResolutions =
         Meter.CreateCounter<long>("autheris.callerattr.resolutions", description: "Caller attribute resolutions, by provider kind and outcome");

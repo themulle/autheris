@@ -527,50 +527,6 @@ public partial class GovernanceRepository
         return await ConsentSqlCore.ReadExpiringConsentRowsAsync(conn, ConsentSql.SelectExpiringConsentsSql, TimeProvider.System.GetUtcNow(), threshold, maxResults, ct).ConfigureAwait(false);
     }
 
-    public async Task<(ConsentRowFilter Filter, ConsentEffect Effect, TenantId Tenant, TableIdentifier Table)?> GetRowFilterAsync(
-        Guid rowFilterId, CancellationToken ct = default)
-    {
-        // Transitional: engine-type branch; replace with a dialect member.
-        var keyDialect = _dialect is PostgreSqlGovernanceDialect ? CatalogKeyDefinitionStore.PostgreSql : CatalogKeyDefinitionStore.SqlServer;
-        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        var row = await RowFilterEvaluationStore.ReadRuleAsync(conn, null, keyDialect, rowFilterId, ct).ConfigureAwait(false);
-        return row is null ? null : (row.Filter, row.Effect, row.Tenant, row.Table);
-    }
-
-    public async Task<RowFilterEvaluationChange?> UpdateRowFilterEvaluationAsync(
-        Guid rowFilterId, TenantId tenant, RowFilterEvaluationSettings settings, CancellationToken ct = default)
-    {
-        TenantScope.RequireTenant(tenant, nameof(GovernanceTable.ConsentRowFilters));
-        // Transitional: engine-type branch; replace with a dialect member.
-        var keyDialect = _dialect is PostgreSqlGovernanceDialect ? CatalogKeyDefinitionStore.PostgreSql : CatalogKeyDefinitionStore.SqlServer;
-        RowFilterEvaluationChange? change;
-        await using (var conn = await OpenConnectionAsync(ct).ConfigureAwait(false))
-        {
-            await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
-            try
-            {
-                change = await RowFilterEvaluationStore.UpdateRuleAsync(
-                    conn, tx, keyDialect, rowFilterId, tenant, settings,
-                    table => IncrementTableEpochInternalAsync(conn, tx, table, ct), ct).ConfigureAwait(false);
-                if (change is null)
-                {
-                    await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
-                    return null;
-                }
-
-                await CommitTransactionAsync(tx, ct).ConfigureAwait(false);
-            }
-            catch
-            {
-                await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
-                throw;
-            }
-        }
-
-        await InvalidateTableEpochAsync(change.TargetTable, ct).ConfigureAwait(false);
-        return change;
-    }
-
     public async Task<ConsentRequest> CreateConsentRequestAsync(ConsentRequest request, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);

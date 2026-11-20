@@ -132,27 +132,6 @@ public sealed partial class GovernedSqlExecutor
         }
     }
 
-    private static void AddKeySetAuditFields(Dictionary<string, object?> fields, GovernedRewrite rewrite)
-    {
-        if (rewrite.KeySets is not { Count: > 0 } outcomes)
-        {
-            return;
-        }
-
-        fields["row_filter_key_sets"] = outcomes.Select(o => new Dictionary<string, object?>
-        {
-            ["table"] = o.Table,
-            ["rule_id"] = o.RuleId,
-            ["source"] = o.Source.ToString(),
-            ["strategy_source"] = o.StrategySource.ToString(),
-            ["outcome"] = o.Outcome.ToString(),
-            ["reason"] = o.Reason?.ToString(),
-            ["key_count"] = o.KeyCount,
-            ["padded_count"] = o.PaddedCount,
-            ["age_seconds"] = o.AgeSeconds
-        }).ToList();
-    }
-
     internal static void AddDatabricksAuditFields(
         Dictionary<string, object?> fields,
         Autheris.Domain.Options.DatabricksDataSourceOptions db,

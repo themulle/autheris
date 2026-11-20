@@ -185,14 +185,15 @@ public sealed class TypedRowFilterBuilderTests
     [Fact]
     public void Renderer_RebasesTheTargetAlias()
     {
-        var predicate = TestCorrelatedPredicateBuilder.BuildSingle(
-            fkColumn: "customer_id",
-            domain: "erp",
-            schema: "main",
-            table: "customers",
-            alias: "c",
-            pkColumn: "id",
-            whereColumn: null);
+        var filter = new Autheris.Domain.Model.VirtualFilter
+        {
+            TenantId = new Autheris.Domain.Common.TenantId("t"),
+            Name = "f",
+            Source = "erp",
+            Sql = "from main.customers c where c.id = target.customer_id"
+        };
+        var predicate = Autheris.Application.VirtualFilters.SqlFilterCompiler.CompileTyped(
+            filter, DatabaseDialect.PostgreSql, TrinoSqlEngine.FastSqlEngine.Default);
 
         _renderer.Render(predicate, TargetSqlDialect.PostgreSql, "o").Sql.ShouldContain("\"o\".\"customer_id\"");
         _renderer.Render(predicate, TargetSqlDialect.PostgreSql, RowFilterAliases.Target).Sql.ShouldContain("\"autheris_target\".\"customer_id\"");

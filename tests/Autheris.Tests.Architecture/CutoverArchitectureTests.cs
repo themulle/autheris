@@ -399,7 +399,6 @@ public sealed class CutoverArchitectureTests
         ("Autheris.Application.Olap.OlapSqlInspector", "DuckDB parse-only (json_serialize_sql): the client text is passed as a quoted literal to the parser of a throw-away in-memory database; nothing is executed or staged"),
         ("Autheris.Infrastructure.Caching.TableCache.Storage.DuckDbConnectionPool", "DuckDB table cache connection pool: executes validated ATTACH statements on reader initialization; no client text"),
         ("Autheris.Application.VirtualFilters.Federation.SqlVirtualFilterKeySetProvider", "virtual-filter key set: the query is rendered from the typed key-source definition"),
-        ("Autheris.Application.Sql.Policy.RowFilterKeySets.RowFilterKeySetLoader", "row-filter key set (issue #107): fixed transaction-mode statements (SET TRANSACTION, PRAGMA query_only) only; the key query text is set by the binder through CompiledSqlBinders.BindKeyQuery"),
         // -- statements of the gateway itself (no client text) --
         ("Autheris.Application.Services.DbSessionContextInitializer", "fixed session-initialisation statements (tenant and user session context)"),
         ("Autheris.Infrastructure.Persistence.SqlConnectionFactory", "fixed session pinning and hardening statements of a new connection"),
@@ -412,7 +411,6 @@ public sealed class CutoverArchitectureTests
         ("Autheris.Infrastructure.Persistence.ConsentWriteRulesSql", "governance store: consent write rules SQL helpers (WP-SIMPL-45 PR 4A), fixed statements with bound values, no client text"),
         ("Autheris.Infrastructure.Persistence.Dialects.*", "governance SQL dialect implementations (WP-SIMPL-20)"),
         ("Autheris.Infrastructure.Persistence.CatalogKeyDefinitionStore", "governance store: declared key/index tables of the three engines (issue #94), fixed statements with bound values, no client text"),
-        ("Autheris.Infrastructure.Persistence.RowFilterEvaluationStore", "governance store: row filter evaluation settings (issue #107), fixed statements with bound values over the three engines, no client text"),
         ("Autheris.Infrastructure.Persistence.DatasetCatalogStore", "governance store: dataset catalog tags and visibility tier (issue #111), fixed statements with bound values over the three engines, no client text"),
         ("Autheris.Infrastructure.Persistence.DiscoveryArtifactStore", "governance store: catalog discovery artifacts, fixed statements with bound values, no client text"),
         ("Autheris.Infrastructure.Persistence.Migrations.*", "governance schema migrations (WP-ARC-B-12): fixed DDL and version-table statements, no client text"),

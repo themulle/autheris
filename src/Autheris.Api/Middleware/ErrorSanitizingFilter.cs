@@ -46,8 +46,6 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         "INVALID_QUERY_OPTION",
         "COST_LIMIT",
         "ROW_LIMIT",
-        // Issue #107: fixed message without table or rule names.
-        "ROW_FILTER_KEY_SET_UNAVAILABLE",
         // fixed messages without ids or names; expected business outcomes, not server faults.
         "DECISION_NOT_PERMITTED",
         "ACCESS_REQUEST_NOT_PENDING",

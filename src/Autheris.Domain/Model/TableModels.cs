@@ -361,9 +361,6 @@ public sealed record TableMetadata
     /// <summary>Declared secondary and unique indexes (used for default ordering). Empty when none was declared.</summary>
     public IReadOnlyList<TableIndexDefinition> Indexes { get; init; } = Array.Empty<TableIndexDefinition>();
 
-    /// <summary>Issue #107: object-level row filter evaluation settings (loaded from TABLE_ROW_FILTER_STRATEGIES, never written by the metadata upsert). Null = inherit global.</summary>
-    public RowFilterEvaluationSettings? RowFilterEvaluation { get; init; }
-
     /// <summary>Issue #111: which restriction applied to this row; set explicitly by the visibility filter, default <see cref="Model.CatalogView.Unmarked"/> (most restrictive).</summary>
     public CatalogView CatalogView { get; init; } = CatalogView.Unmarked;
 

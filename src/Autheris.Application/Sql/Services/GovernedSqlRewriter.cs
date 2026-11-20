@@ -17,7 +17,6 @@ using Autheris.Application.Sql.Internal;
 using Autheris.Application.Sql.Masking;
 using Autheris.Application.Sql.Pipeline;
 using Autheris.Application.Sql.Policy;
-using Autheris.Application.Sql.Policy.RowFilterKeySets;
 using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Common;
 using Autheris.Domain.Diagnostics;
@@ -794,44 +793,22 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
         // Fail closed when the typed assembly is not wired (a DI defect, never a silent downgrade to string policies).
         var policyFactory = _policyFactory ?? throw new SqlCompileConfigurationException();
 
-        // Issue #107 (D-WPC-1): IsRead comes from the same classification as isDml; the stage never runs for anything but a SELECT.
-        bool isRead = metadata.StatementType == SqlStatementType.Select && !isDml;
-        GovernedPolicyInput PolicyInput(bool disabled) =>
-            new(effectiveDataSourceName, tenantId, decisions, tablesWithoutRls, GovernedSubqueryStrategy.Correlated)
-            {
-                Metadata = decidedTableMetadata,
-                ConnectionKey = connectionKey,
-                KeySetStatement = new RowFilterKeySetStatement(isRead, rawSql.Length, CompileRequestFactory.DefaultMaxExpansionFactor, disabled),
-                WritePermit = writePermit,
-                MetricViewInternalCountColumn = mvGuard.InternalCountMeasureColumn
-            };
+        var input = new GovernedPolicyInput(effectiveDataSourceName, tenantId, decisions, tablesWithoutRls, GovernedSubqueryStrategy.Correlated)
+        {
+            Metadata = decidedTableMetadata,
+            ConnectionKey = connectionKey,
+            WritePermit = writePermit,
+            MetricViewInternalCountColumn = mvGuard.InternalCountMeasureColumn
+        };
 
-        var assembly = await policyFactory.CreateAssemblyAsync(PolicyInput(disabled: false), ct).ConfigureAwait(false);
-        var request = CreateCompileRequest(assembly.Policy, decidedTargets, targetSqlDialect, webSqlOptions, isDml, enforcedMaxRows, allowedFunctions, clientLists, gatewayLikePatternParameters, bindPageOffset, pageOffsetVal, maxOffset);
+        var policy = await policyFactory.CreateAsync(input, ct).ConfigureAwait(false);
+        var request = CreateCompileRequest(policy, decidedTargets, targetSqlDialect, webSqlOptions, isDml, enforcedMaxRows, allowedFunctions, clientLists, gatewayLikePatternParameters, bindPageOffset, pageOffsetVal, maxOffset);
 
         // -------------------------------------------------------------
         // Stage 5: Compile (Security invariant 2). Engine exceptions propagate unwrapped: SqlCompilerErrorMapper maps them to
         // stable codes with fixed messages at every error surface, and no Exception.Message is copied into a new exception.
         // -------------------------------------------------------------
-        CompiledSql compiled;
-        try
-        {
-            compiled = CompileStatement(rawSql, request, mayRetry: assembly.KeySets.HasSubstitution, ct);
-        }
-        catch (SqlLimitExceededException limit) when (IsRetryableLimit(limit.Kind) && assembly.KeySets.HasSubstitution)
-        {
-            // 19, D-WPC-4: once, only because a site was substituted, only for the bind or expansion limit. The values of the
-            // first exception (Actual, Maximum) are a function of the key-set size: only the kind is used, nothing is logged, audited or surfaced.
-            assembly.KeySets.MarkSubstitutedSitesAsRetried(
-                limit.Kind == SqlLimitKind.BindParameters ? KeySetFallbackReason.BindLimitRetry : KeySetFallbackReason.ExpansionLimitRetry);
-            RecordRetryMetrics(assembly.KeySets, targetSqlDialect);
-
-            // The retry starts from the original decisions and the unsubstituted predicates (never from the first assembly's provider), with the
-            // stage disabled: no epoch read, cache lookup or key query, same token and deadline. Its failure is not retried.
-            var retried = await policyFactory.CreateAssemblyAsync(PolicyInput(disabled: true), ct).ConfigureAwait(false);
-            request = CreateCompileRequest(retried.Policy, decidedTargets, targetSqlDialect, webSqlOptions, isDml, enforcedMaxRows, allowedFunctions, clientLists, gatewayLikePatternParameters, bindPageOffset, pageOffsetVal, maxOffset);
-            compiled = CompileStatement(rawSql, request, mayRetry: false, ct);
-        }
+        var compiled = CompileStatement(rawSql, request, ct);
 
         bool allowStatementText = _options.Value.Logging?.AllowStatementText ?? true;
         if (_options.Value.Logging?.LogGeneratedSql == true && allowStatementText && _logger != null && _logger.IsEnabled(LogLevel.Debug))
@@ -840,7 +817,6 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
             {
                 _logger.LogDebug("GovernedSqlExecutionService: Compiled secured SQL [{QueryHash}]: {StatementText}", queryHash, scrubbed);
             }
-            LogKeySets(assembly.KeySets);
         }
 
         IReadOnlyList<Autheris.Domain.Model.WebSqlIndexHint>? indexHints = metadata.StatementType == SqlStatementType.Select && !isDml
@@ -849,6 +825,6 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
 
         var maskedAudit = decisions.Values.SelectMany(d => d.MaskedColumnsAudit).ToList();
         var grantAudit = decisions.Values.SelectMany(d => d.GrantClassificationsAudit).ToList();
-        return new GovernedRewrite(compiled, accessedTables, effectiveDataSourceName, deliveredRowLimit, virtualFilters, assembly.KeySets.Outcomes, callerAttributes, metadata, pagingUnavailable, bindPageOffset, indexHints, dmlMaxRowsCap, maskedAudit, grantAudit, mvGuard.HiddenCountColumnAlias, mvGuard.EffectiveMinGroupSize);
+        return new GovernedRewrite(compiled, accessedTables, effectiveDataSourceName, deliveredRowLimit, virtualFilters, callerAttributes, metadata, pagingUnavailable, bindPageOffset, indexHints, dmlMaxRowsCap, maskedAudit, grantAudit, mvGuard.HiddenCountColumnAlias, mvGuard.EffectiveMinGroupSize);
     }
 }

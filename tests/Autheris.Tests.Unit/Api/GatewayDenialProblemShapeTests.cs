@@ -2,7 +2,6 @@ namespace Autheris.Tests.Unit.Api;
 
 using System.Text.Json;
 using Autheris.Api.Middleware;
-using Autheris.Application.Sql.Policy.RowFilterKeySets;
 using Autheris.Domain.Exceptions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -17,7 +16,6 @@ public sealed class GatewayDenialProblemShapeTests
     {
         { new GatewayUnauthorizedException(), 401, "UNAUTHORIZED" },
         { new GatewaySecurityException("secret detail", "RESPONSE_TOO_LARGE"), 400, "BAD_REQUEST" },
-        { RowFilterKeySetErrorCodes.Unavailable(), 503, "SERVICE_UNAVAILABLE" },
         { new GatewaySecurityException("secret detail table x"), 403, "ACCESS_DENIED" }
     };
 

@@ -145,61 +145,6 @@ public sealed class AccessPlanningTenantBindingTests
     }
 
     [Fact]
-    public async Task ApplyRowFilterEvaluation_CallerTenantDiffers_Throws()
-    {
-        var totpService = Substitute.For<ITotpVerificationService>();
-        totpService.VerifyAndConsumeTotpAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns(true);
-
-        var secretStore = Substitute.For<ITotpSecretStore>();
-        secretStore.GetSecretAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns("JBSWY3DPEHPK3PXP");
-
-        var secretProvider = Substitute.For<IKeyVaultSecretProvider>();
-        secretProvider.GetSecretBytes(Arg.Any<string>()).Returns(Encoding.UTF8.GetBytes("key-32-bytes-long-for-hmac-sha256!"));
-
-        var ruleId = Guid.NewGuid();
-        var orders = new TableIdentifier("sales", "dbo", "orders");
-        var stored = new RowFilterEvaluationSettings(RowFilterEvaluationStrategy.Exists, 30, null);
-
-        var tableRepo = Substitute.For<ITableMetadataRepository>();
-        tableRepo.GetActiveTableIdentifierAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns(orders);
-
-        var rowFilterAdmin = Substitute.For<IRowFilterEvaluationAdminService>();
-        rowFilterAdmin.ValidateRuleAsync(ruleId, Arg.Any<TenantId>(), Arg.Any<RowFilterEvaluationSettings>(), Arg.Any<CancellationToken>())
-            .Returns(new RowFilterEvaluationPreview(orders, stored));
-
-        var service = new AccessPlanningService(
-            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()),
-            tableMetadataRepository: tableRepo,
-            totpVerificationService: totpService,
-            totpSecretStore: secretStore,
-            secretProvider: secretProvider,
-            rowFilterEvaluationAdmin: rowFilterAdmin,
-            planOptions: Options.Create(new AccessPlanOptions { SigningKeyRef = "key" }));
-
-        var planReq = new AdminPlanRowFilterEvaluationRequest(
-            RowFilterId: ruleId.ToString("D"),
-            DatasetId: null,
-            Strategy: "KeySetCache",
-            DurationSeconds: 60,
-            MaxKeys: 100,
-            Reason: "Tuning");
-
-        var plan = await service.PlanRowFilterEvaluationAsync(planReq, AdminSid, "tenant-a");
-        var confirm = await service.ConfirmPlanAsync(plan.PlanId, "123456", AdminSid);
-
-        var ex = await Should.ThrowAsync<SecurityException>(() =>
-            service.ApplyRowFilterEvaluationAsync(
-                new AdminApplyAccessRequest(plan.PlanId, confirm.ConfirmationToken),
-                AdminSid,
-                new TenantId("tenant-b")));
-
-        ex.Message.ShouldContain("Plan belongs to a different tenant.");
-    }
-
-    [Fact]
     public async Task GovernancePlanEndpoints_Apply_PassesRequestTenant()
     {
         var planningService = Substitute.For<IAccessPlanningService>();

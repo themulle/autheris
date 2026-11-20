@@ -53,53 +53,6 @@ public sealed class VirtualFilterOptions
 }
 
 /// <summary>
-/// Row-Level Security row filter generation strategy options.
-/// </summary>
-public sealed class RowFilterOptions
-{
-    /// <summary>Issue #107: key-set cache strategy for correlated row filters (<c>Gateway:RowFilters:KeySetCache</c>).</summary>
-    public RowFilterKeySetCacheOptions KeySetCache { get; init; } = new();
-}
-
-/// <summary>
-/// Issue #107 global defaults and caps of the key-set cache strategy. Ranges (validated at startup, runtime values above a lowered cap are clamped):
-/// <c>1 s &lt;= DefaultDuration &lt;= MaxDuration &lt;= 24 h</c>, <c>1 &lt;= MaxKeys &lt;= 10,000</c>, <c>0 &lt;= BindParameterReserve &lt;= 1,000</c>,
-/// <c>1 &lt;= MaxConcurrentKeyQueries &lt;= 64</c>, <c>SizeLimitBytes &gt; 0</c>, <c>KeyQueryTimeout &gt; 0</c>.
-/// </summary>
-public sealed class RowFilterKeySetCacheOptions
-{
-    public const int MaxKeysCeiling = 10_000;
-    public const int BindParameterReserveCeiling = 1_000;
-    public const int MaxConcurrentKeyQueriesCeiling = 64;
-    public static readonly TimeSpan MinDuration = TimeSpan.FromSeconds(1);
-    public static readonly TimeSpan DurationCeiling = TimeSpan.FromHours(24);
-
-    /// <summary>Default SQL evaluation strategy used for correlated row-filter subqueries.</summary>
-    public RowFilterEvaluationStrategy DefaultStrategy { get; init; } = RowFilterEvaluationStrategy.Exists;
-
-    /// <summary>Default cache duration for resolved row-filter key sets.</summary>
-    public TimeSpan DefaultDuration { get; init; } = TimeSpan.FromMinutes(5);
-
-    /// <summary>Upper bound on the cache duration for resolved row-filter key sets.</summary>
-    public TimeSpan MaxDuration { get; init; } = TimeSpan.FromHours(1);
-
-    /// <summary>Maximum number of distinct keys cached per row-filter key set.</summary>
-    public int MaxKeys { get; init; } = 2000;
-
-    /// <summary>Maximum total memory in bytes allocated to the row-filter key-set cache.</summary>
-    public long SizeLimitBytes { get; init; } = 64L * 1024 * 1024;
-
-    /// <summary>Execution timeout for individual row-filter key-set queries.</summary>
-    public TimeSpan KeyQueryTimeout { get; init; } = TimeSpan.FromSeconds(5);
-
-    /// <summary>Number of SQL bind parameter slots reserved for non-key-set query predicates.</summary>
-    public int BindParameterReserve { get; init; } = 256;
-
-    /// <summary>concurrent key query loads per node.</summary>
-    public int MaxConcurrentKeyQueries { get; init; } = 4;
-}
-
-/// <summary>
 /// Issue #129 (129 C-4):<c>Gateway:CallerAttributes</c>. With <see cref="Enabled"/> false (default) nothing changes: a
 /// <c>USER_ATTRIBUTE</c> consent leaf and a <c>{{caller.x}}</c> placeholder stay constants (no rows), and definitions are refused.
 /// </summary>

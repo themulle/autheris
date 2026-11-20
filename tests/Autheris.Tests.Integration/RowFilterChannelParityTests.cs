@@ -277,9 +277,6 @@ public sealed class RowFilterChannelParityTests : IClassFixture<RowFilterChannel
         /// <summary>Virtual filters, phase 7: the same filter written as a sql definition (predicate with target).</summary>
         protected virtual bool UseSqlDefinition => false;
 
-        /// <summary>Issue #107: the key-set cache strategy is the global default and the data source carries the operator attestation.</summary>
-        protected virtual bool UseKeySetCache => false;
-
         /// <summary>Hook for variants: more tables and rows in the PostgreSQL data source (called after the base data was written).</summary>
         protected virtual void SeedExtraData(NpgsqlConnection connection) { }
 
@@ -340,12 +337,6 @@ public sealed class RowFilterChannelParityTests : IClassFixture<RowFilterChannel
                 b.UseSetting("Gateway:DataSources:Connections:default:Provider", "PostgreSql");
                 b.UseSetting("Gateway:DataSources:Connections:default:DefaultSchema", "main");
                 b.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", dbPath);
-
-                if (UseKeySetCache)
-                {
-                    b.UseSetting("Gateway:RowFilters:KeySetCache:DefaultStrategy", "KeySetCache");
-                    b.UseSetting("Gateway:DataSources:Connections:default:KeySetCacheAllowed", "true");
-                }
 
                 b.UseSetting("Gateway:WebSql:Enabled", "true");
                 b.UseSetting("Gateway:WebSql:DefaultDataSourceName", "default");
