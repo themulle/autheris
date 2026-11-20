@@ -75,14 +75,16 @@ internal static class DatabricksTestSupport
         string host = Host,
         long byteLimit = 26214400,
         Action<Dictionary<string, DataSourceConnectionOptions>>? extra = null,
-        string? oboModeAuthClientId = null)
+        string? oboModeAuthClientId = null,
+        int commandTimeoutSeconds = 30,
+        int pollIntervalMilliseconds = 10)
     {
         var connections = new Dictionary<string, DataSourceConnectionOptions>(StringComparer.OrdinalIgnoreCase)
         {
             ["dbx"] = new()
             {
                 Provider = "databricks",
-                CommandTimeoutSeconds = 30,
+                CommandTimeoutSeconds = commandTimeoutSeconds,
                 Databricks = new DatabricksDataSourceOptions
                 {
                     Host = host,
@@ -90,7 +92,7 @@ internal static class DatabricksTestSupport
                     Catalog = "main",
                     Schema = "default",
                     ByteLimit = byteLimit,
-                    PollIntervalMilliseconds = 10,
+                    PollIntervalMilliseconds = pollIntervalMilliseconds,
                     Auth = mode switch
                     {
                         DatabricksAuthMode.Pat => new DatabricksAuthOptions { Mode = DatabricksAuthMode.Pat, PatRef = "kv://dbx-pat" },
@@ -142,7 +144,8 @@ internal static class DatabricksTestSupport
         string environment = "Production",
         IKeyVaultSecretProvider? vault = null,
         ILogger<DatabricksStatementExecutionClient>? logger = null,
-        HttpMessageHandler? outer = null)
+        HttpMessageHandler? outer = null,
+        TimeProvider? timeProvider = null)
     {
         var http = new HttpClient(outer ?? handler);
         return new DatabricksStatementExecutionClient(
@@ -151,7 +154,8 @@ internal static class DatabricksTestSupport
             vault ?? Vault(),
             Env(environment),
             new DatabricksTokenCache(),
-            logger);
+            logger,
+            timeProvider);
     }
 
     public static DatabricksStatementRequest Request(

@@ -257,11 +257,23 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
             var sparkCols = sparkResp?["columns"]?.AsArray();
             int colCount = sparkCols?.Count ?? (dataArray.Count > 0 ? dataArray[0].Count : 0);
             var colDefinitions = Enumerable.Range(0, colCount)
-                .Select(i => new
+                .Select(i =>
                 {
-                    name = sparkCols != null && i < sparkCols.Count ? sparkCols[i]?.ToString() ?? $"col_{i}" : $"col_{i}",
-                    type_name = "STRING",
-                    position = i
+                    var name = sparkCols != null && i < sparkCols.Count ? sparkCols[i]?.ToString() ?? $"col_{i}" : $"col_{i}";
+                    var (typeName, precision, scale) = name.ToLowerInvariant() switch
+                    {
+                        "id" => ("INT", (int?)null, (int?)null),
+                        "amount" => ("DECIMAL", (int?)18, (int?)2),
+                        _ => ("STRING", (int?)null, (int?)null)
+                    };
+                    return new
+                    {
+                        name,
+                        type_name = typeName,
+                        type_precision = precision,
+                        type_scale = scale,
+                        position = i
+                    };
                 })
                 .ToArray();
 

@@ -60,7 +60,13 @@ public sealed class DatabricksDbCommand : DbCommand, Autheris.Application.Usage.
     public override async Task<object?> ExecuteScalarAsync(CancellationToken cancellationToken)
     {
         var result = await RunAsync(cancellationToken).ConfigureAwait(false);
-        return result.Rows.Count > 0 && result.Rows[0].Length > 0 ? (object?)result.Rows[0][0] ?? DBNull.Value : null;
+        if (result.Rows.Count == 0 || result.Rows[0].Length == 0)
+        {
+            return null;
+        }
+
+        var column = result.Columns.Length > 0 ? result.Columns[0] : new DatabricksColumn(string.Empty, "STRING");
+        return DatabricksTypeMap.ParseCell(result.Rows[0][0], column.TypeName, column.Precision);
     }
 
     protected override DbParameter CreateDbParameter() => new DatabricksDbParameter();
@@ -72,6 +78,7 @@ public sealed class DatabricksDbCommand : DbCommand, Autheris.Application.Usage.
     {
         var result = await RunAsync(cancellationToken).ConfigureAwait(false);
         var table = new DataTable { Locale = CultureInfo.InvariantCulture };
+        var schema = new List<(string Name, DatabricksColumn Column, Type ClrType)>(result.Columns.Length);
         var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var column in result.Columns)
         {
@@ -81,7 +88,14 @@ public sealed class DatabricksDbCommand : DbCommand, Autheris.Application.Usage.
                 name = $"{column.Name}_{i.ToString(CultureInfo.InvariantCulture)}";
             }
 
-            table.Columns.Add(name, typeof(string));
+            var clrType = DatabricksTypeMap.ResolveClrType(column.TypeName, column.Precision);
+            var dataCol = table.Columns.Add(name, clrType);
+            if (clrType == typeof(DateTime))
+            {
+                dataCol.DateTimeMode = DataSetDateTime.Unspecified;
+            }
+
+            schema.Add((name, column, clrType));
         }
 
         foreach (var row in result.Rows)
@@ -89,13 +103,16 @@ public sealed class DatabricksDbCommand : DbCommand, Autheris.Application.Usage.
             var values = new object[table.Columns.Count];
             for (var i = 0; i < values.Length; i++)
             {
-                values[i] = i < row.Length && row[i] is { } cell ? cell : DBNull.Value;
+                var col = result.Columns[i];
+                values[i] = i < row.Length
+                    ? DatabricksTypeMap.ParseCell(row[i], col.TypeName, col.Precision)
+                    : DBNull.Value;
             }
 
             table.Rows.Add(values);
         }
 
-        return table.CreateDataReader();
+        return new DatabricksDataReader(table, schema);
     }
 
     private async Task<DatabricksStatementResult> RunAsync(CancellationToken cancellationToken)
