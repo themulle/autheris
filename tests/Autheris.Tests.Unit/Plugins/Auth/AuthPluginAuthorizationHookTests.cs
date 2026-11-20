@@ -254,7 +254,7 @@ public sealed class AuthPluginAuthorizationHookTests
         var (policy, host, timeProvider) = CreateTestPolicy();
         var hook = new StubAuthHook("hanging_hook", 1, async (_, ct) =>
         {
-            await Task.Delay(TimeSpan.FromSeconds(30), ct);
+            await Autheris.Tests.Common.Hang.UntilCancelledAsync(ct);
             return PluginAuthorizationResult.Allow();
         });
 
@@ -263,7 +263,7 @@ public sealed class AuthPluginAuthorizationHookTests
         var decideTask = policy.DecideAsync(CreateQuery(), CancellationToken.None);
         timeProvider.Advance(TimeSpan.FromSeconds(1));
 
-        var decision = await decideTask;
+        var decision = await decideTask.WaitAsync(TimeSpan.FromSeconds(30));
         decision.IsAllowed.ShouldBeFalse();
         decision.DeniedReasons.ShouldContain(r => r.Contains("AUTH_PLUGIN_TIMEOUT"));
     }

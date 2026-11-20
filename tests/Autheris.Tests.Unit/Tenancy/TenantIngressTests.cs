@@ -1,5 +1,7 @@
 namespace Autheris.Tests.Unit.Tenancy;
 
+using Autheris.Tests.Common;
+using Autheris.Tests.Common.Fakes;
 using Autheris.Tests.Unit.Security;
 using System;
 using System.Collections.Generic;
@@ -356,11 +358,11 @@ public sealed class TenantIngressTests
 
     private static GatewayExecutionService Execution(GatewayOptions options)
     {
-        var metadata = Substitute.For<ITableMetadataRepository>();
+        var metadata = new InMemoryTableMetadataRepository();
         return new GatewayExecutionService(
             metadata,
-            Substitute.For<IConsentRepository>(),
-            Substitute.For<IAuditLogRepository>(),
+            new InMemoryConsentRepository(),
+            new InMemoryAuditLogRepository(),
             Substitute.For<IConsentResolutionService>(),
             Substitute.For<IConsentCacheService>(),
             Substitute.For<IColumnMaskingProvider>(),
@@ -447,8 +449,7 @@ public sealed class TenantIngressTests
     [Fact]
     public async Task TestAuth_Outside_Development_Rejects_And_Ignores_Header_Tenant()
     {
-        var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
-        env.EnvironmentName.Returns("Production");
+        Microsoft.Extensions.Hosting.IHostEnvironment env = new TestHostEnvironment("Production");
         var optionsMonitor = Substitute.For<IOptionsMonitor<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions>>();
         optionsMonitor.Get(Arg.Any<string>()).Returns(new Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions());
         var handler = new TestAuthHandler(optionsMonitor, Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance, System.Text.Encodings.Web.UrlEncoder.Default, null, env);

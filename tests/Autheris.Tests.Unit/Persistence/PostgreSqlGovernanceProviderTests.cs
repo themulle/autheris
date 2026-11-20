@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 using System.ComponentModel.DataAnnotations;
 using Autheris.Api.Extensions;
 using Autheris.Application.Common.Interfaces;
@@ -37,8 +38,7 @@ public class PostgreSqlGovernanceProviderTests
             }
         };
 
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        IHostEnvironment env = new TestHostEnvironment("Development");
 
         Should.NotThrow(() => GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, env));
     }
@@ -59,8 +59,7 @@ public class PostgreSqlGovernanceProviderTests
             }
         };
 
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        IHostEnvironment env = new TestHostEnvironment("Development");
 
         var ex = Should.Throw<ValidationException>(() =>
             GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, env));
@@ -76,8 +75,7 @@ public class PostgreSqlGovernanceProviderTests
     {
         // SEC-SIMPL-05: the governance provider allow-list is PostgreSql and SqlServer only.
         var options = new GatewayOptions { GovernanceDb = new GovernanceDbOptions { Provider = provider } };
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        IHostEnvironment env = new TestHostEnvironment("Development");
 
         var ex = Should.Throw<ValidationException>(() => GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, env));
         ex.Message.ShouldContain("GovernanceDb provider");
@@ -117,8 +115,7 @@ public class PostgreSqlGovernanceProviderTests
             }
         };
 
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        IHostEnvironment env = new TestHostEnvironment("Development");
 
         Should.NotThrow(() => GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, env));
     }
@@ -139,8 +136,7 @@ public class PostgreSqlGovernanceProviderTests
             }
         };
 
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        IHostEnvironment env = new TestHostEnvironment("Development");
         services.AddSingleton(env);
         services.AddSingleton(Options.Create(options));
         services.AddLogging();
@@ -168,8 +164,7 @@ public class PostgreSqlGovernanceProviderTests
             }
         };
 
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        IHostEnvironment env = new TestHostEnvironment("Development");
         services.AddSingleton(env);
         services.AddSingleton(Options.Create(options));
         services.AddLogging();
@@ -209,8 +204,7 @@ public class PostgreSqlGovernanceProviderTests
 
     private static IHostEnvironment TestEnvironment()
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Test");
+        IHostEnvironment env = new TestHostEnvironment("Test");
         return env;
     }
 }

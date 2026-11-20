@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Procedures;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
@@ -44,8 +45,7 @@ public sealed class ProcedureDialectAdmissionTests
 
     private static void RunCheck(GatewayOptions options)
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        IHostEnvironment env = new TestHostEnvironment("Development");
         ProcedureStartupChecks.DialectAdmission(new StartupCheckContext(options, env, _ => null, null));
     }
 

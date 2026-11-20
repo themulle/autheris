@@ -16,8 +16,8 @@ using Autheris.Extensions.DataCatalog;
 using Autheris.Modules.Dbt;
 using Autheris.Extensions.Lakehouse.Services;
 using Autheris.Application.OData;
+using Autheris.Tests.Common.Fakes;
 using Microsoft.Extensions.Logging.Abstractions;
-using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -28,33 +28,23 @@ public sealed class ExtensionsSecurityAuditRemediationTests
     public async Task ODataHandler_Unauthenticated_ReturnsEmptyMetadataAndDocument()
     {
         // CRIT-05: Unauthenticated access to OData metadata or service doc must return empty/restricted tables
-        var metaMock = Substitute.For<ITableMetadataRepository>();
-        var metaTables = new List<TableMetadata>
-        {
-            new()
+        var metaMock = new InMemoryTableMetadataRepository(
+            new TableMetadata
             {
                 Identifier = new TableIdentifier("corp", "sales", "invoices"),
                 Table = new Table { SchemaName = "sales", TableName = "invoices" },
                 Columns = [new TableColumn { ColumnName = "id", DataType = "integer" }]
             },
-            new()
+            new TableMetadata
             {
                 Identifier = new TableIdentifier("secret", "hr", "salaries"),
                 Table = new Table { SchemaName = "hr", TableName = "salaries" },
                 Columns = [new TableColumn { ColumnName = "id", DataType = "integer" }]
-            }
-        };
-        metaMock.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(metaTables));
-        metaMock.QueryTablesAsync(
-                Arg.Any<Autheris.Application.Catalog.CatalogTableQuery>(),
-                Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(new Autheris.Application.Catalog.CatalogTablePage(metaTables, null)));
+            });
 
-        var execMock = Substitute.For<IGatewayExecutionService>();
         // SR-M-16: a missing decision is a deny, so the access check must answer explicitly.
-        execMock.CheckTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableMetadata>(), false, Arg.Any<CancellationToken>())
-            .Returns(ci => Task.FromResult(TableAccessDecision.Allowed(
-                ci.Arg<TableMetadata>().Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)));
+        var execMock = StubGatewayExecutionService.WithAccessDecision(m =>
+            TableAccessDecision.Allowed(m.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true));
         var handler = new ODataHandler(metaMock, execMock, NullLogger<ODataHandler>.Instance);
 
         // 1. Unauthenticated principal
@@ -73,7 +63,7 @@ public sealed class ExtensionsSecurityAuditRemediationTests
     [Fact]
     public async Task Dbt_ValidateContractsStreamAsync_RejectsNullOrMalformedManifest()
     {
-        var metaMock = Substitute.For<ITableMetadataRepository>();
+        var metaMock = new InMemoryTableMetadataRepository();
         var validator = new DbtContractValidator(metaMock, NullLogger<DbtContractValidator>.Instance);
 
         await Should.ThrowAsync<ArgumentNullException>(() => validator.ValidateContractsStreamAsync(null!));

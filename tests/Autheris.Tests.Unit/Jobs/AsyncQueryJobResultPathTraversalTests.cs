@@ -3,13 +3,12 @@ namespace Autheris.Tests.Unit.Jobs;
 using System;
 using System.IO;
 using System.Threading.Tasks;
-using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Runtime.Jobs.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
-using Microsoft.Extensions.Hosting;
-using NSubstitute;
+using Autheris.Tests.Common;
+using Autheris.Tests.Common.Fakes;
 using Shouldly;
 using Xunit;
 
@@ -31,9 +30,8 @@ public sealed class AsyncQueryJobResultPathTraversalTests : IDisposable
     [Fact]
     public async Task GetJobResultStreamAsync_ResultPathOutsideScratch_ThrowsGatewaySecurityExceptionWithStableCode()
     {
-        var environment = Substitute.For<IHostEnvironment>();
-        environment.ContentRootPath.Returns(_root);
-        var manager = new AsyncQueryJobManager(Substitute.For<IAuditLogRepository>(), environment: environment);
+        var environment = new TestHostEnvironment { ContentRootPath = _root };
+        var manager = new AsyncQueryJobManager(new InMemoryAuditLogRepository(), environment: environment);
 
         var outside = Path.Combine(_root, "secret.txt");
         await File.WriteAllTextAsync(outside, "secret");
@@ -50,9 +48,8 @@ public sealed class AsyncQueryJobResultPathTraversalTests : IDisposable
     [Fact]
     public async Task GetJobResultStreamAsync_SiblingDirectoryWithScratchPrefix_IsDenied()
     {
-        var environment = Substitute.For<IHostEnvironment>();
-        environment.ContentRootPath.Returns(_root);
-        var audit = Substitute.For<IAuditLogRepository>();
+        var environment = new TestHostEnvironment { ContentRootPath = _root };
+        var audit = new InMemoryAuditLogRepository();
         var manager = new AsyncQueryJobManager(audit, environment: environment);
 
         // .../scratch/jobs-evil/x shares the string prefix of .../scratch/jobs but is a different directory.
@@ -68,17 +65,14 @@ public sealed class AsyncQueryJobResultPathTraversalTests : IDisposable
             () => manager.GetJobResultStreamAsync("job-2", new TenantId("tenant-a"), "alice"));
 
         ex.ErrorCode.ShouldBe("JOB_RESULT_PATH_FORBIDDEN");
-        await audit.Received(1).RecordAuditEventAsync(
-            Arg.Is<AuditLogEntry>(e => e.Decision == "DENY"),
-            Arg.Any<System.Threading.CancellationToken>());
+        audit.Entries.Count(e => e.Decision == "DENY").ShouldBe(1);
     }
 
     [Fact]
     public async Task GetJobResultStreamAsync_FileInsideScratch_IsStreamed()
     {
-        var environment = Substitute.For<IHostEnvironment>();
-        environment.ContentRootPath.Returns(_root);
-        var manager = new AsyncQueryJobManager(Substitute.For<IAuditLogRepository>(), environment: environment);
+        var environment = new TestHostEnvironment { ContentRootPath = _root };
+        var manager = new AsyncQueryJobManager(new InMemoryAuditLogRepository(), environment: environment);
 
         var inside = Path.Combine(manager.ScratchDirectory, "ok.json");
         await File.WriteAllTextAsync(inside, "{}");

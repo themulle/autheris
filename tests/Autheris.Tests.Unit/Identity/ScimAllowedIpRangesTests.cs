@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Identity;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -188,13 +189,11 @@ public sealed class ScimAllowedIpRangesTests
     {
         var logger = Substitute.For<ILogger<IdentityRealmsScimOptionsValidator>>();
         logger.IsEnabled(Arg.Any<LogLevel>()).Returns(true);
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Production");
+        IHostEnvironment env = new TestHostEnvironment("Production");
 
         new IdentityRealmsScimOptionsValidator(env, logger).Validate(null, Options()).Failed.ShouldBeTrue();
 
-        var devEnv = Substitute.For<IHostEnvironment>();
-        devEnv.EnvironmentName.Returns("Development");
+        IHostEnvironment devEnv = new TestHostEnvironment("Development");
         var devLogger = Substitute.For<ILogger<IdentityRealmsScimOptionsValidator>>();
         new IdentityRealmsScimOptionsValidator(devEnv, devLogger).Validate(null, Options()).Succeeded.ShouldBeTrue();
         devLogger.ReceivedCalls().Count(c => c.GetMethodInfo().Name == "Log").ShouldBe(0);

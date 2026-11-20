@@ -135,7 +135,7 @@ public sealed class ClusterPartitionedServiceTests
         service.Behaviour = async (_, _, ct) =>
         {
             started.SetResult();
-            await Task.Delay(Timeout.Infinite, ct);
+            await Autheris.Tests.Common.Hang.UntilCancelledAsync(ct);
         };
 
         var cycle = service.RunPartitionCycleAsync(P("cdc:a"), CancellationToken.None);

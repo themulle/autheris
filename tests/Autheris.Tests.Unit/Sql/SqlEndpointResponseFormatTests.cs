@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Sql;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -95,8 +96,7 @@ public sealed class SqlEndpointResponseFormatTests
     [Fact]
     public async Task HandleGetEndpoint_InProduction_SanitizesSecurityException()
     {
-        var prodEnv = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
-        prodEnv.EnvironmentName.Returns("Production");
+        Microsoft.Extensions.Hosting.IHostEnvironment prodEnv = new TestHostEnvironment("Production");
 
         var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
         services.AddSingleton(prodEnv);
@@ -124,8 +124,7 @@ public sealed class SqlEndpointResponseFormatTests
     [Fact]
     public async Task HandleGetEndpoint_InProduction_SanitizesArgumentException()
     {
-        var prodEnv = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
-        prodEnv.EnvironmentName.Returns("Production");
+        Microsoft.Extensions.Hosting.IHostEnvironment prodEnv = new TestHostEnvironment("Production");
 
         var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
         services.AddSingleton(prodEnv);

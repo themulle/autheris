@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Hosting;
 
+using Autheris.Tests.Common;
 using System;
 using Autheris.Api.Configuration.Validation;
 using Autheris.Api.Extensions.DependencyInjection;
@@ -22,8 +23,7 @@ public sealed class DistributedStateTests
 {
     private static IHostEnvironment Env(string environmentName)
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(environmentName);
+        IHostEnvironment env = new TestHostEnvironment(environmentName);
         return env;
     }
 

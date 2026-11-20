@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.VirtualFilters;
 
 using System;
+using Autheris.Tests.Common.Fakes;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -301,7 +302,7 @@ public sealed class TypedVirtualFilterTests
 
     private static TableAccessPolicy Policy(IMandatoryRowFilterResolver resolver, RowPolicyFactory? factory) =>
         new(
-            Substitute.For<IConsentRepository>(),
+            new InMemoryConsentRepository(),
             Substitute.For<IConsentResolutionService>(),
             Substitute.For<IConsentCacheService>(),
             new GatewayOptions { Insecure = new InsecureGettingStartedOptions { danger_bypass_consent_checks = true } },

@@ -74,6 +74,7 @@ public sealed class TableCacheCatalogTests
         var table = new TableIdentifier("crm", "public", "orders");
         catalog.Upsert(CreateMetadata(table, epoch: 1));
         var done = false;
+        var reads = 0;
 
         // Act - concurrent writers and readers
         var writeTasks = new List<Task>();
@@ -101,12 +102,13 @@ public sealed class TableCacheCatalogTests
                 {
                     var snapshot = catalog.GetSnapshot();
                     snapshot.ShouldNotBeNull();
+                    Interlocked.Increment(ref reads);
                     await Task.Yield();
                 }
             }));
         }
 
-        await Task.Delay(300); // scenario: fixed 300 ms stress window for concurrent readers and writers
+        await Autheris.Tests.Common.WaitHelper.WaitUntil(() => Volatile.Read(ref reads) >= 5000, TimeSpan.FromSeconds(30)); // scenario: stress window ends after a fixed amount of concurrent reads
         done = true;
 
         await Task.WhenAll(writeTasks);

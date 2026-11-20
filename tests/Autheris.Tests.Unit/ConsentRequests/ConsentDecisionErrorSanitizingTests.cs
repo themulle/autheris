@@ -1,4 +1,5 @@
 using Autheris.Api.Middleware;
+using Autheris.Tests.Common;
 using HotChocolate;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -21,8 +22,7 @@ public sealed class ConsentDecisionErrorSanitizingTests
     [InlineData("ACCESS_REQUEST_NOT_PENDING", NotPending, "Production")]
     public void DecisionCodes_PassThroughUnchangedOutsideDevelopment_AndAreNotLoggedAtError(string code, string message, string environment)
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(environment);
+        IHostEnvironment env = new TestHostEnvironment(environment);
         var logs = new CapturingLoggerProvider();
         using var factory = LoggerFactory.Create(b => b.SetMinimumLevel(LogLevel.Trace).AddProvider(logs));
         var filter = new ErrorSanitizingFilter(env, factory.CreateLogger<ErrorSanitizingFilter>());

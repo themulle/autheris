@@ -10,10 +10,11 @@ using Autheris.Application.Catalog.OpenMetadata;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Extensions.Tests.TestSupport;
 using Autheris.Modules.OpenMetadata;
+using Autheris.Tests.Common.Fakes;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -43,39 +44,34 @@ public sealed class OpenMetadataSyncTenantFilterTests
     private sealed class Fixture
     {
         public required OpenMetadataSyncService Service { get; init; }
-        public List<TableMetadata> Upserted { get; } = [];
-        public List<Consent> Created { get; } = [];
-        public List<Guid> Revoked { get; } = [];
+        public required InMemoryTableMetadataRepository MetadataRepo { get; init; }
+        public required RecordingConsentRepository ConsentRepo { get; init; }
+        public IReadOnlyList<TableMetadata> Upserted => MetadataRepo.UpsertedTables;
+        public IReadOnlyList<Consent> Created => ConsentRepo.CreatedConsents;
+        public IReadOnlyList<Guid> Revoked => ConsentRepo.RevokedIds;
     }
 
     private static Fixture Create(IReadOnlyList<Consent>? existing = null)
     {
-        var client = Substitute.For<IOpenMetadataClient>();
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        var consentRepo = Substitute.For<IConsentRepository>();
-        var epochRepo = Substitute.For<IPolicyEpochRepository>();
+        var client = new StubOpenMetadataClient
+        {
+            Tables = [OmTable("svc_a", "orders"), OmTable("svc_b", "invoices")],
+            Policies =
+            [
+                new OpenMetadataPolicy
+                {
+                    Id = PolicyId,
+                    Name = "P",
+                    Enabled = true,
+                    Rules = [new OpenMetadataRule { Name = "ReadTables", Effect = "allow", Resources = ["table"], Operations = ["ViewAll"] }]
+                }
+            ],
+            Roles = [new OpenMetadataRole { Name = "Reader", Policies = [new OpenMetadataEntityReference { Id = PolicyId, Name = "P" }] }]
+        };
 
-        IReadOnlyList<OpenMetadataTable> tables = [OmTable("svc_a", "orders"), OmTable("svc_b", "invoices")];
-        client.GetTablesAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult(tables));
-        client.GetPoliciesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<OpenMetadataPolicy>>([
-            new OpenMetadataPolicy
-            {
-                Id = PolicyId,
-                Name = "P",
-                Enabled = true,
-                Rules = [new OpenMetadataRule { Name = "ReadTables", Effect = "allow", Resources = ["table"], Operations = ["ViewAll"] }]
-            }
-        ]));
-        client.GetRolesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<OpenMetadataRole>>([
-            new OpenMetadataRole { Name = "Reader", Policies = [new OpenMetadataEntityReference { Id = PolicyId, Name = "P" }] }
-        ]));
-        client.GetTeamsAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<OpenMetadataTeam>>([]));
-        client.GetUsersAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<OpenMetadataUser>>([]));
-
-        metadataRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<TableMetadata?>(null));
-        consentRepo.GetActiveConsentsByConsentRequestIdAsync(Arg.Any<Guid>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<Consent>>(existing ?? []));
+        var metadataRepo = new InMemoryTableMetadataRepository();
+        var consentRepo = new RecordingConsentRepository(existing?.ToArray() ?? []);
+        var epochRepo = new InMemoryPolicyEpochRepository();
 
         var options = Options.Create(new GatewayOptions
         {
@@ -95,18 +91,12 @@ public sealed class OpenMetadataSyncTenantFilterTests
             }
         });
 
-        var fixture = new Fixture
+        return new Fixture
         {
-            Service = new OpenMetadataSyncService(client, metadataRepo, consentRepo, epochRepo, options, NullLogger<OpenMetadataSyncService>.Instance)
+            Service = new OpenMetadataSyncService(client, metadataRepo, consentRepo, epochRepo, options, NullLogger<OpenMetadataSyncService>.Instance),
+            MetadataRepo = metadataRepo,
+            ConsentRepo = consentRepo
         };
-
-        metadataRepo.UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>())
-            .Returns(ci => { var m = ci.Arg<TableMetadata>(); fixture.Upserted.Add(m); return Task.FromResult(m); });
-        consentRepo.CreateConsentAsync(Arg.Any<Consent>(), Arg.Any<CancellationToken>())
-            .Returns(ci => { var c = ci.Arg<Consent>(); fixture.Created.Add(c); return Task.FromResult(c); });
-        consentRepo.RevokeSystemConsentAsync(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<Sid>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns(ci => { fixture.Revoked.Add(ci.ArgAt<Guid>(0)); return Task.FromResult(true); });
-        return fixture;
     }
 
     [Fact]

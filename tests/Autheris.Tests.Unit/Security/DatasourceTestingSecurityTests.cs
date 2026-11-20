@@ -30,7 +30,7 @@ public sealed class DatasourceTestingSecurityTests
 {
     private readonly ITableMetadataRepository _metadataRepo =
         global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
-    private readonly IAuditLogRepository _auditRepo = Substitute.For<IAuditLogRepository>();
+    private readonly IAuditLogRepository _auditRepo = new InMemoryAuditLogRepository();
     private readonly ISqlConnectionFactory _connectionFactory = Substitute.For<ISqlConnectionFactory>();
 
     private static ClaimsPrincipal Admin() =>

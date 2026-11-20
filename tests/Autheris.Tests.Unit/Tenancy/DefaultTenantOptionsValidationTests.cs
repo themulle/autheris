@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Tenancy;
 
+using Autheris.Tests.Common;
 using System.Linq;
 using Autheris.Api.Configuration.Validation;
 using Autheris.Domain.Options;
@@ -15,8 +16,7 @@ public sealed class DefaultTenantOptionsValidationTests
 {
     private static string[] Failures(GatewayOptions options)
     {
-        var environment = Substitute.For<IHostEnvironment>();
-        environment.EnvironmentName.Returns("Production");
+        IHostEnvironment environment = new TestHostEnvironment("Production");
         var result = new GatewayCoreOptionsValidator(environment).Validate(null, options);
         return result.Failures?.Where(f => f.Contains("Gateway:Tenancy:DefaultTenantId")).ToArray() ?? [];
     }

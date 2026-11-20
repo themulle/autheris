@@ -315,8 +315,7 @@ public sealed class GovernedSqlExecutorX1Tests
         var compiled = await CompileAsync(sourceType, "UPDATE orders SET amount = 1 WHERE id = 1");
         var secrets = Substitute.For<IKeyVaultSecretProvider>();
         secrets.GetSecretBytes(Arg.Any<string>()).Returns(_ => throw new InvalidOperationException("vault down"));
-        var production = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
-        production.EnvironmentName.Returns("Production");
+        Microsoft.Extensions.Hosting.IHostEnvironment production = new TestHostEnvironment("Production");
         var h = CreateHarness(provider, sessionTransaction: sessionGivesTransaction, options: Gateway(provider, hmacRef: "GQL-HMAC"),
             secrets: secrets, environment: production);
 
@@ -625,8 +624,7 @@ public sealed class GovernedSqlExecutorX1Tests
         var resolution = Substitute.For<IConsentResolutionService>();
         resolution.ResolveAccess(Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>(), callerScopes: Arg.Any<IReadOnlySet<string>?>())
             .Returns(ci => TableAccessDecision.Allowed(ci.ArgAt<TableIdentifier>(3), new Dictionary<string, ColumnAccessLevel>(), null, hasUnconstrainedColumnAllow: true));
-        var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        Microsoft.Extensions.Hosting.IHostEnvironment env = new TestHostEnvironment("Development");
         return global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             Options.Create(new GatewayOptions { WebSql = new WebSqlOptions { Enabled = webSqlEnabled, DefaultDataSourceName = DataSource } }), auditLog, executionGuard: GovernedTestSupport.Guard,
             consentResolution: resolution,

@@ -18,7 +18,6 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Tests.Common.Fakes;
 using Microsoft.Extensions.Options;
-using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -32,8 +31,6 @@ public sealed class CrossSourceRelationsSecurityTests
     private static readonly TableIdentifier OrdersTableId = new("sales", "public", "orders");
     private static readonly TableIdentifier CustomersTableId = new("crm", "public", "customers");
     private static readonly TenantId DefaultTenant = new("tenant-gold");
-
-    private readonly string _connectionString = "Host=unused;Database=orders";
 
     private static ClaimsPrincipal CreatePrincipal(string sid = "S-1-5-21-USER", string tenant = "tenant-gold")
     {
@@ -156,6 +153,67 @@ public sealed class CrossSourceRelationsSecurityTests
             Task.FromResult<IReadOnlyList<TableRelation>>(relations);
     }
 
+    private static ResolvedTableAccess AllowedAccess(TableMetadata meta, ClaimsPrincipal? user = null, TenantId? tenant = null, Sid? sid = null, Dictionary<string, ColumnAccessLevel>? columns = null) =>
+        new(
+            meta,
+            TableAccessDecision.Allowed(meta.Identifier, columns ?? new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: columns is null),
+            tenant ?? DefaultTenant,
+            sid ?? new Sid("S-1-5-21-USER"),
+            user ?? CreatePrincipal());
+
+    private static GovernedTreeQueryService CreateService(
+        ITableAccessResolver accessResolver,
+        GatewayOptions options,
+        TableRelation relation,
+        ICrossSourceRelationResolver? resolver = null,
+        IAuditLogRepository? auditRepo = null,
+        string? json = null) =>
+        new(
+            accessResolver,
+            new CountingFactory("Host=unused;Database=orders", json),
+            auditRepo ?? new FakeAuditLogRepository(),
+            StubColumnMaskingProvider.Null,
+            Options.Create(options),
+            crossSourceResolver: resolver ?? new StubCrossSourceRelationResolver(),
+            relationRepository: new TestRelationRepo(relation));
+
+    private static TableRelation CustomerRelation(bool allowCrossDataSource = true) => new()
+    {
+        ParentTableIdentifier = OrdersTableId,
+        ChildTableIdentifier = CustomersTableId,
+        RelationName = "customer",
+        JoinKeysParent = ["customer_id"],
+        JoinKeysChild = ["id"],
+        AllowCrossDataSource = allowCrossDataSource
+    };
+
+    private static GatewayOptions DefaultOptions(bool crossSourceEnabled = true, int maxResponseRows = 1000) => new()
+    {
+        CrossSource = new CrossSourceOptions { Enabled = crossSourceEnabled },
+        GraphQL = new GraphQLOptions { MaxResponseRows = maxResponseRows },
+        DataSources = new SqlDataSourceOptions
+        {
+            Connections = new Dictionary<string, DataSourceConnectionOptions>
+            {
+                ["OrdersSource"] = new() { Provider = "PostgreSQL", ConnectionString = "Host=unused;Database=orders" }
+            }
+        }
+    };
+
+    private static TreeQueryNode RootNode(int limit = 100) => new(OrdersTableId, ["order_id", "customer_id", "total"])
+    {
+        Limit = limit,
+        Relations =
+        [
+            new TreeRelationNode(
+                ResponseKey: "customer",
+                ParentColumns: ["customer_id"],
+                ChildColumns: ["id"],
+                IsList: false,
+                Child: new TreeQueryNode(CustomersTableId, ["id", "name"]))
+        ]
+    };
+
     [Fact]
     [Trait("Category", "Security")]
     public async Task T_SEC_DATA75_01_ClearJoinKeysEnforced_MaskedParentKey_FailsClosed()
@@ -164,69 +222,13 @@ public sealed class CrossSourceRelationsSecurityTests
         var ordersMeta = CreateOrdersMetadata();
         var customersMeta = CreateCustomersMetadata();
 
-        var accessResolver = Substitute.For<ITableAccessResolver>();
-        accessResolver.ResolveTableAccessAsync(Arg.Any<ClaimsPrincipal>(), OrdersTableId, Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string[]>>(), Arg.Any<CancellationToken>())
-            .Returns(new ResolvedTableAccess(
-                ordersMeta,
-                TableAccessDecision.Allowed(OrdersTableId, new Dictionary<string, ColumnAccessLevel> { ["customer_id"] = ColumnAccessLevel.Mask }, hasUnconstrainedColumnAllow: false),
-                DefaultTenant,
-                new Sid("S-1-5-21-USER"),
-                CreatePrincipal()));
+        var accessResolver = new StubTableAccessResolver(
+            AllowedAccess(ordersMeta, columns: new Dictionary<string, ColumnAccessLevel> { ["customer_id"] = ColumnAccessLevel.Mask }),
+            AllowedAccess(customersMeta));
 
-        accessResolver.ResolveTableAccessAsync(Arg.Any<ClaimsPrincipal>(), CustomersTableId, Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string[]>>(), Arg.Any<CancellationToken>())
-            .Returns(new ResolvedTableAccess(
-                customersMeta,
-                TableAccessDecision.Allowed(CustomersTableId, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true),
-                DefaultTenant,
-                new Sid("S-1-5-21-USER"),
-                CreatePrincipal()));
+        var service = CreateService(accessResolver, DefaultOptions(), CustomerRelation(), json: """[{"order_id":1,"customer_id":10,"total":100.50}]""");
 
-        var options = new GatewayOptions
-        {
-            CrossSource = new CrossSourceOptions { Enabled = true },
-            DataSources = new SqlDataSourceOptions
-            {
-                Connections = new Dictionary<string, DataSourceConnectionOptions>
-                {
-                    ["OrdersSource"] = new() { Provider = "PostgreSQL", ConnectionString = _connectionString }
-                }
-            }
-        };
-
-        var relation = new TableRelation
-        {
-            ParentTableIdentifier = OrdersTableId,
-            ChildTableIdentifier = CustomersTableId,
-            RelationName = "customer",
-            JoinKeysParent = ["customer_id"],
-            JoinKeysChild = ["id"],
-            AllowCrossDataSource = true
-        };
-
-        var resolver = Substitute.For<ICrossSourceRelationResolver>();
-        var service = new GovernedTreeQueryService(
-            accessResolver,
-            new CountingFactory(_connectionString, """[{"order_id":1,"customer_id":10,"total":100.50}]"""),
-            new FakeAuditLogRepository(),
-            Substitute.For<IColumnMaskingProvider>(),
-            Options.Create(options),
-            crossSourceResolver: resolver,
-            relationRepository: new TestRelationRepo(relation));
-
-        var root = new TreeQueryNode(OrdersTableId, ["order_id", "customer_id", "total"])
-        {
-            Relations =
-            [
-                new TreeRelationNode(
-                    ResponseKey: "customer",
-                    ParentColumns: ["customer_id"],
-                    ChildColumns: ["id"],
-                    IsList: false,
-                    Child: new TreeQueryNode(CustomersTableId, ["id", "name"]))
-            ]
-        };
-
-        var act = () => service.ExecuteAsync(CreatePrincipal(), root, null, "op-sec75-01a");
+        var act = () => service.ExecuteAsync(CreatePrincipal(), RootNode(), null, "op-sec75-01a");
         var ex = await Should.ThrowAsync<CrossSourceRelationException>(act);
         ex.ErrorCode.ShouldBe(CrossSourceRelationErrorCodes.RelationKeyMasked);
     }
@@ -239,69 +241,13 @@ public sealed class CrossSourceRelationsSecurityTests
         var ordersMeta = CreateOrdersMetadata();
         var customersMeta = CreateCustomersMetadata();
 
-        var accessResolver = Substitute.For<ITableAccessResolver>();
-        accessResolver.ResolveTableAccessAsync(Arg.Any<ClaimsPrincipal>(), OrdersTableId, Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string[]>>(), Arg.Any<CancellationToken>())
-            .Returns(new ResolvedTableAccess(
-                ordersMeta,
-                TableAccessDecision.Allowed(OrdersTableId, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true),
-                DefaultTenant,
-                new Sid("S-1-5-21-USER"),
-                CreatePrincipal()));
+        var accessResolver = new StubTableAccessResolver(
+            AllowedAccess(ordersMeta),
+            AllowedAccess(customersMeta, columns: new Dictionary<string, ColumnAccessLevel> { ["id"] = ColumnAccessLevel.Mask }));
 
-        accessResolver.ResolveTableAccessAsync(Arg.Any<ClaimsPrincipal>(), CustomersTableId, Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string[]>>(), Arg.Any<CancellationToken>())
-            .Returns(new ResolvedTableAccess(
-                customersMeta,
-                TableAccessDecision.Allowed(CustomersTableId, new Dictionary<string, ColumnAccessLevel> { ["id"] = ColumnAccessLevel.Mask }, hasUnconstrainedColumnAllow: false),
-                DefaultTenant,
-                new Sid("S-1-5-21-USER"),
-                CreatePrincipal()));
+        var service = CreateService(accessResolver, DefaultOptions(), CustomerRelation(), json: """[{"order_id":1,"customer_id":10,"total":100.50}]""");
 
-        var options = new GatewayOptions
-        {
-            CrossSource = new CrossSourceOptions { Enabled = true },
-            DataSources = new SqlDataSourceOptions
-            {
-                Connections = new Dictionary<string, DataSourceConnectionOptions>
-                {
-                    ["OrdersSource"] = new() { Provider = "PostgreSQL", ConnectionString = _connectionString }
-                }
-            }
-        };
-
-        var relation = new TableRelation
-        {
-            ParentTableIdentifier = OrdersTableId,
-            ChildTableIdentifier = CustomersTableId,
-            RelationName = "customer",
-            JoinKeysParent = ["customer_id"],
-            JoinKeysChild = ["id"],
-            AllowCrossDataSource = true
-        };
-
-        var resolver = Substitute.For<ICrossSourceRelationResolver>();
-        var service = new GovernedTreeQueryService(
-            accessResolver,
-            new CountingFactory(_connectionString, """[{"order_id":1,"customer_id":10,"total":100.50}]"""),
-            new FakeAuditLogRepository(),
-            Substitute.For<IColumnMaskingProvider>(),
-            Options.Create(options),
-            crossSourceResolver: resolver,
-            relationRepository: new TestRelationRepo(relation));
-
-        var root = new TreeQueryNode(OrdersTableId, ["order_id", "customer_id", "total"])
-        {
-            Relations =
-            [
-                new TreeRelationNode(
-                    ResponseKey: "customer",
-                    ParentColumns: ["customer_id"],
-                    ChildColumns: ["id"],
-                    IsList: false,
-                    Child: new TreeQueryNode(CustomersTableId, ["id", "name"]))
-            ]
-        };
-
-        var act = () => service.ExecuteAsync(CreatePrincipal(), root, null, "op-sec75-01b");
+        var act = () => service.ExecuteAsync(CreatePrincipal(), RootNode(), null, "op-sec75-01b");
         var ex = await Should.ThrowAsync<CrossSourceRelationException>(act);
         ex.ErrorCode.ShouldBe(CrossSourceRelationErrorCodes.RelationKeyMasked);
     }
@@ -314,69 +260,10 @@ public sealed class CrossSourceRelationsSecurityTests
         var ordersMeta = CreateOrdersMetadata();
         var customersMeta = CreateCustomersMetadata();
 
-        var accessResolver = Substitute.For<ITableAccessResolver>();
-        accessResolver.ResolveTableAccessAsync(Arg.Any<ClaimsPrincipal>(), OrdersTableId, Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string[]>>(), Arg.Any<CancellationToken>())
-            .Returns(new ResolvedTableAccess(
-                ordersMeta,
-                TableAccessDecision.Allowed(OrdersTableId, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true),
-                DefaultTenant,
-                new Sid("S-1-5-21-USER"),
-                CreatePrincipal()));
+        var accessResolver = new StubTableAccessResolver(AllowedAccess(ordersMeta), AllowedAccess(customersMeta));
+        var service = CreateService(accessResolver, DefaultOptions(), CustomerRelation(allowCrossDataSource: false), json: """[{"order_id":1,"customer_id":10,"total":100.50}]""");
 
-        accessResolver.ResolveTableAccessAsync(Arg.Any<ClaimsPrincipal>(), CustomersTableId, Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string[]>>(), Arg.Any<CancellationToken>())
-            .Returns(new ResolvedTableAccess(
-                customersMeta,
-                TableAccessDecision.Allowed(CustomersTableId, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true),
-                DefaultTenant,
-                new Sid("S-1-5-21-USER"),
-                CreatePrincipal()));
-
-        var options = new GatewayOptions
-        {
-            CrossSource = new CrossSourceOptions { Enabled = true },
-            DataSources = new SqlDataSourceOptions
-            {
-                Connections = new Dictionary<string, DataSourceConnectionOptions>
-                {
-                    ["OrdersSource"] = new() { Provider = "PostgreSQL", ConnectionString = _connectionString }
-                }
-            }
-        };
-
-        var relation = new TableRelation
-        {
-            ParentTableIdentifier = OrdersTableId,
-            ChildTableIdentifier = CustomersTableId,
-            RelationName = "customer",
-            JoinKeysParent = ["customer_id"],
-            JoinKeysChild = ["id"],
-            AllowCrossDataSource = false // Disabled four-eyes!
-        };
-
-        var resolver = Substitute.For<ICrossSourceRelationResolver>();
-        var service = new GovernedTreeQueryService(
-            accessResolver,
-            new CountingFactory(_connectionString, """[{"order_id":1,"customer_id":10,"total":100.50}]"""),
-            new FakeAuditLogRepository(),
-            Substitute.For<IColumnMaskingProvider>(),
-            Options.Create(options),
-            crossSourceResolver: resolver,
-            relationRepository: new TestRelationRepo(relation));
-
-        var root = new TreeQueryNode(OrdersTableId, ["order_id", "customer_id", "total"])
-        {
-            Relations =
-            [
-                new TreeRelationNode(
-                    ResponseKey: "customer",
-                    ParentColumns: ["customer_id"],
-                    ChildColumns: ["id"],
-                    IsList: false,
-                    Child: new TreeQueryNode(CustomersTableId, ["id", "name"]))
-            ]
-        };
-
-        var act = () => service.ExecuteAsync(CreatePrincipal(), root, null, "op-sec75-02a");
+        var act = () => service.ExecuteAsync(CreatePrincipal(), RootNode(), null, "op-sec75-02a");
         var ex = await Should.ThrowAsync<CrossSourceRelationException>(act);
         ex.ErrorCode.ShouldBe(CrossSourceRelationErrorCodes.CrossSourceRelationNotEnabled);
     }
@@ -389,69 +276,10 @@ public sealed class CrossSourceRelationsSecurityTests
         var ordersMeta = CreateOrdersMetadata();
         var customersMeta = CreateCustomersMetadata();
 
-        var accessResolver = Substitute.For<ITableAccessResolver>();
-        accessResolver.ResolveTableAccessAsync(Arg.Any<ClaimsPrincipal>(), OrdersTableId, Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string[]>>(), Arg.Any<CancellationToken>())
-            .Returns(new ResolvedTableAccess(
-                ordersMeta,
-                TableAccessDecision.Allowed(OrdersTableId, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true),
-                DefaultTenant,
-                new Sid("S-1-5-21-USER"),
-                CreatePrincipal()));
+        var accessResolver = new StubTableAccessResolver(AllowedAccess(ordersMeta), AllowedAccess(customersMeta));
+        var service = CreateService(accessResolver, DefaultOptions(crossSourceEnabled: false), CustomerRelation(), json: """[{"order_id":1,"customer_id":10,"total":100.50}]""");
 
-        accessResolver.ResolveTableAccessAsync(Arg.Any<ClaimsPrincipal>(), CustomersTableId, Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string[]>>(), Arg.Any<CancellationToken>())
-            .Returns(new ResolvedTableAccess(
-                customersMeta,
-                TableAccessDecision.Allowed(CustomersTableId, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true),
-                DefaultTenant,
-                new Sid("S-1-5-21-USER"),
-                CreatePrincipal()));
-
-        var options = new GatewayOptions
-        {
-            CrossSource = new CrossSourceOptions { Enabled = false }, // Master switch disabled!
-            DataSources = new SqlDataSourceOptions
-            {
-                Connections = new Dictionary<string, DataSourceConnectionOptions>
-                {
-                    ["OrdersSource"] = new() { Provider = "PostgreSQL", ConnectionString = _connectionString }
-                }
-            }
-        };
-
-        var relation = new TableRelation
-        {
-            ParentTableIdentifier = OrdersTableId,
-            ChildTableIdentifier = CustomersTableId,
-            RelationName = "customer",
-            JoinKeysParent = ["customer_id"],
-            JoinKeysChild = ["id"],
-            AllowCrossDataSource = true
-        };
-
-        var resolver = Substitute.For<ICrossSourceRelationResolver>();
-        var service = new GovernedTreeQueryService(
-            accessResolver,
-            new CountingFactory(_connectionString, """[{"order_id":1,"customer_id":10,"total":100.50}]"""),
-            new FakeAuditLogRepository(),
-            Substitute.For<IColumnMaskingProvider>(),
-            Options.Create(options),
-            crossSourceResolver: resolver,
-            relationRepository: new TestRelationRepo(relation));
-
-        var root = new TreeQueryNode(OrdersTableId, ["order_id", "customer_id", "total"])
-        {
-            Relations =
-            [
-                new TreeRelationNode(
-                    ResponseKey: "customer",
-                    ParentColumns: ["customer_id"],
-                    ChildColumns: ["id"],
-                    IsList: false,
-                    Child: new TreeQueryNode(CustomersTableId, ["id", "name"]))
-            ]
-        };
-
-        var act = () => service.ExecuteAsync(CreatePrincipal(), root, null, "op-sec75-02b");
+        var act = () => service.ExecuteAsync(CreatePrincipal(), RootNode(), null, "op-sec75-02b");
         var ex = await Should.ThrowAsync<CrossSourceRelationException>(act);
         ex.ErrorCode.ShouldBe(CrossSourceRelationErrorCodes.CrossSourceRelationNotEnabled);
     }
@@ -464,80 +292,19 @@ public sealed class CrossSourceRelationsSecurityTests
         var ordersMeta = CreateOrdersMetadata();
         var customersMeta = CreateCustomersMetadata();
 
-        var accessResolver = Substitute.For<ITableAccessResolver>();
-        accessResolver.ResolveTableAccessAsync(Arg.Any<ClaimsPrincipal>(), OrdersTableId, Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string[]>>(), Arg.Any<CancellationToken>())
-            .Returns(new ResolvedTableAccess(
-                ordersMeta,
-                TableAccessDecision.Allowed(OrdersTableId, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true),
-                DefaultTenant,
-                new Sid("S-1-5-21-USER"),
-                CreatePrincipal()));
-
-        accessResolver.ResolveTableAccessAsync(Arg.Any<ClaimsPrincipal>(), CustomersTableId, Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string[]>>(), Arg.Any<CancellationToken>())
-            .Returns(new ResolvedTableAccess(
-                customersMeta,
-                TableAccessDecision.Allowed(CustomersTableId, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true),
-                DefaultTenant,
-                new Sid("S-1-5-21-USER"),
-                CreatePrincipal()));
-
-        var options = new GatewayOptions
-        {
-            CrossSource = new CrossSourceOptions { Enabled = true },
-            GraphQL = new GraphQLOptions { MaxResponseRows = 1 }, // Limit 1 row! (our database has 2 rows)
-            DataSources = new SqlDataSourceOptions
-            {
-                Connections = new Dictionary<string, DataSourceConnectionOptions>
-                {
-                    ["OrdersSource"] = new() { Provider = "PostgreSQL", ConnectionString = _connectionString }
-                }
-            }
-        };
-
-        var relation = new TableRelation
-        {
-            ParentTableIdentifier = OrdersTableId,
-            ChildTableIdentifier = CustomersTableId,
-            RelationName = "customer",
-            JoinKeysParent = ["customer_id"],
-            JoinKeysChild = ["id"],
-            AllowCrossDataSource = true
-        };
-
-        var resolver = Substitute.For<ICrossSourceRelationResolver>();
-        resolver.ResolveRelationAsync(Arg.Any<CrossSourceRelationRequest>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(new CrossSourceRelationResult(
-                relation,
-                ManyToOneByParentIndex: [new Dictionary<string, object?> { ["id"] = 10, ["name"] = "Alice" }],
-                OneToManyByParentIndex: [[]],
-                BatchesExecuted: 1,
-                TargetRowsMaterialized: 1,
-                QueryCost: 1.0)));
-        var service = new GovernedTreeQueryService(
-            accessResolver,
-            new CountingFactory(_connectionString, """[{"order_id":1,"customer_id":10,"total":100.50}]"""),
-            new FakeAuditLogRepository(),
-            Substitute.For<IColumnMaskingProvider>(),
-            Options.Create(options),
-            crossSourceResolver: resolver,
-            relationRepository: new TestRelationRepo(relation));
-
-        var root = new TreeQueryNode(OrdersTableId, ["order_id", "customer_id", "total"])
-        {
-            Limit = 1,
-            Relations =
-            [
-                new TreeRelationNode(
-                    ResponseKey: "customer",
-                    ParentColumns: ["customer_id"],
-                    ChildColumns: ["id"],
-                    IsList: false,
-                    Child: new TreeQueryNode(CustomersTableId, ["id", "name"]))
-            ]
-        };
+        var accessResolver = new StubTableAccessResolver(AllowedAccess(ordersMeta), AllowedAccess(customersMeta));
+        var relation = CustomerRelation();
+        var resolver = new StubCrossSourceRelationResolver(_ => new CrossSourceRelationResult(
+            relation,
+            ManyToOneByParentIndex: [new Dictionary<string, object?> { ["id"] = 10, ["name"] = "Alice" }],
+            OneToManyByParentIndex: [[]],
+            BatchesExecuted: 1,
+            TargetRowsMaterialized: 1,
+            QueryCost: 1.0));
+        var service = CreateService(accessResolver, DefaultOptions(maxResponseRows: 1), relation, resolver, json: """[{"order_id":1,"customer_id":10,"total":100.50}]""");
 
         // Query execution should check row cap
-        var act = () => service.ExecuteAsync(CreatePrincipal(), root, null, "op-sec75-03");
+        var act = () => service.ExecuteAsync(CreatePrincipal(), RootNode(limit: 1), null, "op-sec75-03");
         // Should execute and enforce bounds
         using var doc = await act();
         doc.ShouldNotBeNull();
@@ -553,85 +320,27 @@ public sealed class CrossSourceRelationsSecurityTests
 
         var callerUser = CreatePrincipal(sid: "S-1-5-21-BOB", tenant: "tenant-isolated");
         var callerTenant = new TenantId("tenant-isolated");
+        var callerSid = new Sid("S-1-5-21-BOB");
 
-        var accessResolver = Substitute.For<ITableAccessResolver>();
-        accessResolver.ResolveTableAccessAsync(Arg.Any<ClaimsPrincipal>(), OrdersTableId, Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string[]>>(), Arg.Any<CancellationToken>())
-            .Returns(new ResolvedTableAccess(
-                ordersMeta,
-                TableAccessDecision.Allowed(OrdersTableId, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true),
-                callerTenant,
-                new Sid("S-1-5-21-BOB"),
-                callerUser));
+        var accessResolver = new StubTableAccessResolver(
+            AllowedAccess(ordersMeta, callerUser, callerTenant, callerSid),
+            AllowedAccess(customersMeta, callerUser, callerTenant, callerSid));
+        var relation = CustomerRelation();
+        var resolver = new StubCrossSourceRelationResolver(_ => new CrossSourceRelationResult(
+            relation,
+            ManyToOneByParentIndex: [new Dictionary<string, object?> { ["id"] = 10, ["name"] = "Alice" }, null],
+            OneToManyByParentIndex: [[], []],
+            BatchesExecuted: 1,
+            TargetRowsMaterialized: 1,
+            QueryCost: 2.05));
+        var service = CreateService(accessResolver, DefaultOptions(), relation, resolver);
 
-        accessResolver.ResolveTableAccessAsync(Arg.Any<ClaimsPrincipal>(), CustomersTableId, Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string[]>>(), Arg.Any<CancellationToken>())
-            .Returns(new ResolvedTableAccess(
-                customersMeta,
-                TableAccessDecision.Allowed(CustomersTableId, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true),
-                callerTenant,
-                new Sid("S-1-5-21-BOB"),
-                callerUser));
+        using var doc = await service.ExecuteAsync(callerUser, RootNode(), null, "op-sec75-04");
 
-        var options = new GatewayOptions
-        {
-            CrossSource = new CrossSourceOptions { Enabled = true },
-            DataSources = new SqlDataSourceOptions
-            {
-                Connections = new Dictionary<string, DataSourceConnectionOptions>
-                {
-                    ["OrdersSource"] = new() { Provider = "PostgreSQL", ConnectionString = _connectionString }
-                }
-            }
-        };
-
-        var relation = new TableRelation
-        {
-            ParentTableIdentifier = OrdersTableId,
-            ChildTableIdentifier = CustomersTableId,
-            RelationName = "customer",
-            JoinKeysParent = ["customer_id"],
-            JoinKeysChild = ["id"],
-            AllowCrossDataSource = true
-        };
-
-        CrossSourceRelationRequest? capturedRequest = null;
-        var resolver = Substitute.For<ICrossSourceRelationResolver>();
-        resolver.ResolveRelationAsync(Arg.Do<CrossSourceRelationRequest>(r => capturedRequest = r), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(new CrossSourceRelationResult(
-                relation,
-                ManyToOneByParentIndex: [new Dictionary<string, object?> { ["id"] = 10, ["name"] = "Alice" }, null],
-                OneToManyByParentIndex: [[], []],
-                BatchesExecuted: 1,
-                TargetRowsMaterialized: 1,
-                QueryCost: 2.05)));
-
-        var service = new GovernedTreeQueryService(
-            accessResolver,
-            new CountingFactory(_connectionString),
-            new FakeAuditLogRepository(),
-            Substitute.For<IColumnMaskingProvider>(),
-            Options.Create(options),
-            crossSourceResolver: resolver,
-            relationRepository: new TestRelationRepo(relation));
-
-        var root = new TreeQueryNode(OrdersTableId, ["order_id", "customer_id", "total"])
-        {
-            Relations =
-            [
-                new TreeRelationNode(
-                    ResponseKey: "customer",
-                    ParentColumns: ["customer_id"],
-                    ChildColumns: ["id"],
-                    IsList: false,
-                    Child: new TreeQueryNode(CustomersTableId, ["id", "name"]))
-            ]
-        };
-
-        using var doc = await service.ExecuteAsync(callerUser, root, null, "op-sec75-04");
-
-        capturedRequest.ShouldNotBeNull();
-        capturedRequest!.TenantId.ShouldBe(callerTenant);
-        capturedRequest.User.ShouldBeSameAs(callerUser);
-        capturedRequest.ParentRows.Count.ShouldBe(2);
+        resolver.LastRequest.ShouldNotBeNull();
+        resolver.LastRequest!.TenantId.ShouldBe(callerTenant);
+        resolver.LastRequest.User.ShouldBeSameAs(callerUser);
+        resolver.LastRequest.ParentRows.Count.ShouldBe(2);
 
         // Result was stitched
         doc.RootElement[0].GetProperty("customer").GetProperty("name").GetString().ShouldBe("Alice");
@@ -645,83 +354,42 @@ public sealed class CrossSourceRelationsSecurityTests
         var ordersMeta = CreateOrdersMetadata();
         var customersMeta = CreateCustomersMetadata();
 
-        var accessResolver = Substitute.For<ITableAccessResolver>();
-        accessResolver.ResolveTableAccessAsync(Arg.Any<ClaimsPrincipal>(), OrdersTableId, Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string[]>>(), Arg.Any<CancellationToken>())
-            .Returns(new ResolvedTableAccess(
-                ordersMeta,
-                TableAccessDecision.Allowed(OrdersTableId, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true),
-                DefaultTenant,
-                new Sid("S-1-5-21-USER"),
-                CreatePrincipal()));
-
-        accessResolver.ResolveTableAccessAsync(Arg.Any<ClaimsPrincipal>(), CustomersTableId, Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string[]>>(), Arg.Any<CancellationToken>())
-            .Returns(new ResolvedTableAccess(
-                customersMeta,
-                TableAccessDecision.Allowed(CustomersTableId, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true),
-                DefaultTenant,
-                new Sid("S-1-5-21-USER"),
-                CreatePrincipal()));
-
-        var options = new GatewayOptions
-        {
-            CrossSource = new CrossSourceOptions { Enabled = true },
-            DataSources = new SqlDataSourceOptions
-            {
-                Connections = new Dictionary<string, DataSourceConnectionOptions>
-                {
-                    ["OrdersSource"] = new() { Provider = "PostgreSQL", ConnectionString = _connectionString }
-                }
-            }
-        };
-
-        var relation = new TableRelation
-        {
-            ParentTableIdentifier = OrdersTableId,
-            ChildTableIdentifier = CustomersTableId,
-            RelationName = "customer",
-            JoinKeysParent = ["customer_id"],
-            JoinKeysChild = ["id"],
-            AllowCrossDataSource = true
-        };
-
-        var resolver = Substitute.For<ICrossSourceRelationResolver>();
-        resolver.ResolveRelationAsync(Arg.Any<CrossSourceRelationRequest>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(new CrossSourceRelationResult(
-                relation,
-                ManyToOneByParentIndex: [new Dictionary<string, object?> { ["id"] = 10, ["name"] = "Alice" }, null],
-                OneToManyByParentIndex: [[], []],
-                BatchesExecuted: 1,
-                TargetRowsMaterialized: 1,
-                QueryCost: 2.05)));
-
+        var accessResolver = new StubTableAccessResolver(AllowedAccess(ordersMeta), AllowedAccess(customersMeta));
+        var relation = CustomerRelation();
+        var resolver = new StubCrossSourceRelationResolver(_ => new CrossSourceRelationResult(
+            relation,
+            ManyToOneByParentIndex: [new Dictionary<string, object?> { ["id"] = 10, ["name"] = "Alice" }, null],
+            OneToManyByParentIndex: [[], []],
+            BatchesExecuted: 1,
+            TargetRowsMaterialized: 1,
+            QueryCost: 2.05));
         var auditRepo = new FakeAuditLogRepository();
-        var service = new GovernedTreeQueryService(
-            accessResolver,
-            new CountingFactory(_connectionString),
-            auditRepo,
-            Substitute.For<IColumnMaskingProvider>(),
-            Options.Create(options),
-            crossSourceResolver: resolver,
-            relationRepository: new TestRelationRepo(relation));
+        var service = CreateService(accessResolver, DefaultOptions(), relation, resolver, auditRepo);
 
-        var root = new TreeQueryNode(OrdersTableId, ["order_id", "customer_id", "total"])
-        {
-            Relations =
-            [
-                new TreeRelationNode(
-                    ResponseKey: "customer",
-                    ParentColumns: ["customer_id"],
-                    ChildColumns: ["id"],
-                    IsList: false,
-                    Child: new TreeQueryNode(CustomersTableId, ["id", "name"]))
-            ]
-        };
-
-        using var doc = await service.ExecuteAsync(CreatePrincipal(), root, null, "op-sec75-05");
+        using var doc = await service.ExecuteAsync(CreatePrincipal(), RootNode(), null, "op-sec75-05");
 
         auditRepo.Entries.ShouldContain(e =>
             e.EventType == AuditEventTypes.CrossSourceRelationResolved &&
             e.TargetTable == CustomersTableId.ToString() &&
             e.Decision == "ALLOW");
+    }
+
+    private sealed class StubCrossSourceRelationResolver(Func<CrossSourceRelationRequest, CrossSourceRelationResult>? onResolve = null) : ICrossSourceRelationResolver
+    {
+        public CrossSourceRelationRequest? LastRequest { get; private set; }
+
+        public bool IsCrossDataSource(TableMetadata parentTable, TableMetadata childTable) => true;
+
+        public void ValidateNoCrossSourceSort(TableRelation relation, TableMetadata parentTable, TableMetadata childTable, IReadOnlyList<string>? sortByTargetColumns)
+        {
+        }
+
+        public Task<CrossSourceRelationResult> ResolveRelationAsync(CrossSourceRelationRequest request, CancellationToken ct = default)
+        {
+            LastRequest = request;
+            return onResolve is not null
+                ? Task.FromResult(onResolve(request))
+                : throw new NotSupportedException();
+        }
     }
 }

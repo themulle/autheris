@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Integration;
 
+using Autheris.Tests.Common;
 using System;
 using System.Linq;
 using System.Threading.Tasks;
@@ -44,8 +45,7 @@ public sealed class SqlServerGovernanceContractTests : IAsyncLifetime
     private SqlServerGovernanceRepository NewRepository(bool seed = false)
     {
         var epoch = Substitute.For<IEpochValidationService>();
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        IHostEnvironment env = new TestHostEnvironment("Development");
         var options = Options.Create(new GatewayOptions
         {
             GovernanceDb = new GovernanceDbOptions

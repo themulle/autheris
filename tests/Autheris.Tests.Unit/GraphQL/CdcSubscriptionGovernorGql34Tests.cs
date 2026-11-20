@@ -38,7 +38,7 @@ public sealed class CdcSubscriptionGovernorGql34Tests
         {
             Topics.Add(topic);
             yield return new CdcEvent("e1", new TableIdentifier("default", "public", "orders"), CdcOperation.Insert, "tenant-a", null, new Dictionary<string, object?> { ["id"] = 1 }, DateTimeOffset.UtcNow);
-            await Task.Delay(Timeout.Infinite, ct).ConfigureAwait(false);
+            await Autheris.Tests.Common.Hang.UntilCancelledAsync(ct).ConfigureAwait(false);
         }
 
         public ValueTask PublishAsync(CdcEvent cdcEvent, CancellationToken ct = default) => ValueTask.CompletedTask;

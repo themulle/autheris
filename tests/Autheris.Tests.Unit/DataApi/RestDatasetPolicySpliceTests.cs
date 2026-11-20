@@ -1,6 +1,8 @@
 namespace Autheris.Tests.Unit.DataApi;
 
 using Autheris.Application.Policy.Pdp;
+using Autheris.Tests.Common;
+using Autheris.Tests.Common.Fakes;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -188,18 +190,10 @@ public sealed class RestDatasetPolicySpliceTests
     private static (IConsentRepository Repo, IConsentResolutionService Resolution, Recorded Rec) Recorders(params Consent[] consents)
     {
         var rec = new Recorded();
-        var repo = Substitute.For<IConsentRepository>();
-        repo.GetActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<Consent>>(consents));
+        var repo = new global::Autheris.Tests.Common.Fakes.RecordingConsentRepository(consents);
 
         var real = new ConsentResolutionService();
-        var resolution = Substitute.For<IConsentResolutionService>();
-        resolution.ResolveAccess(Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>(), Arg.Any<IReadOnlySet<Sid>?>())
-            .Returns(ci =>
-            {
-                rec.Resolutions.Add((ci.ArgAt<Sid>(0), ci.ArgAt<IReadOnlySet<Sid>>(1), ci.ArgAt<IReadOnlySet<string>>(2), ci.ArgAt<TableIdentifier>(3), ci.ArgAt<IReadOnlyList<Consent>>(4)));
-                return real.ResolveAccess(ci.ArgAt<Sid>(0), ci.ArgAt<IReadOnlySet<Sid>>(1), ci.ArgAt<IReadOnlySet<string>>(2), ci.ArgAt<TableIdentifier>(3), ci.ArgAt<IReadOnlyList<Consent>>(4), ci.ArgAt<DatabaseDialect>(5), ci.ArgAt<IReadOnlySet<Sid>?>(6));
-            });
+        IConsentResolutionService resolution = new RecordingConsentResolution(real, rec);
 
         return (repo, resolution, rec);
     }
@@ -220,7 +214,7 @@ public sealed class RestDatasetPolicySpliceTests
 
         // REST side: the unified PDP as GovernedDataQueryService calls it.
         var pdp = new AccessDecisionPoint(
-            Options.Create(options), resolution, repo, Substitute.For<IConsentCacheService>());
+            Options.Create(options), resolution, repo, new global::Autheris.Tests.Common.Fakes.InMemoryConsentCacheService());
         var restDecision = await pdp.DecideAsync(
             new AccessRequest(SecurityPrincipalContext.FromPrincipal(user, new TenantId(TenantValue)), meta, AccessOperation.Read, AccessTransport.Rest, ["id", "name"]),
             CancellationToken.None);
@@ -228,10 +222,8 @@ public sealed class RestDatasetPolicySpliceTests
         rec.Resolutions.Clear();
 
         // WebSQL side: the rewriter that applies the policy to the SQL the REST service builds.
-        var tableRepo = Substitute.For<ITableMetadataRepository>();
-        tableRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(meta);
-        var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        var tableRepo = new InMemoryTableMetadataRepository(meta);
+        Microsoft.Extensions.Hosting.IHostEnvironment env = new TestHostEnvironment("Development");
         var service = global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             Options.Create(options), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard, consentResolution: resolution, tableRepository: tableRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(tableRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             connectionFactory: null, clientIpResolver: null, environment: env, logger: NullLogger<GovernedSqlExecutionService>.Instance,
@@ -266,10 +258,8 @@ public sealed class RestDatasetPolicySpliceTests
             new RequestContext(Alice(), new TenantId(TenantValue)));
         var emitted = fx.Captured.ShouldHaveSingleItem().Sql;
 
-        var tableRepo = Substitute.For<ITableMetadataRepository>();
-        tableRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(meta);
-        var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        var tableRepo = new InMemoryTableMetadataRepository(meta);
+        Microsoft.Extensions.Hosting.IHostEnvironment env = new TestHostEnvironment("Development");
         var service = global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             Options.Create(Options_()), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard, consentResolution: resolution, tableRepository: tableRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(tableRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             connectionFactory: null, clientIpResolver: null, environment: env, logger: NullLogger<GovernedSqlExecutionService>.Instance,
@@ -313,8 +303,8 @@ public sealed class RestDatasetPolicySpliceTests
                 return new GovernedSqlResult("q", ["id", "name"], rows, 2, 1);
             });
         var handler = new McpToolExecutionHandler(
-            Substitute.For<IGovernedSqlExecutionService>(), new Services(mcp), Substitute.For<ICatalogDiscoveryService>(),
-            Substitute.For<IApiDispatcherService>(), Substitute.For<ILineageGraphStore>(), Substitute.For<ITableMetadataRepository>());
+            new global::Autheris.Tests.Common.Fakes.StubGovernedSqlExecutionService(), new Services(mcp), Substitute.For<ICatalogDiscoveryService>(),
+            Substitute.For<IApiDispatcherService>(), new global::Autheris.Tests.Common.Fakes.InMemoryLineageGraphStore(), new InMemoryTableMetadataRepository());
         var tool = McpDatasetTools.Definitions().First(t => t.Name == McpDatasetTools.QueryDataset);
         var session = new McpSessionContext("s", "S-1-5-21-REST-ALICE", TenantValue, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
             "S-1-5-21-REST-ALICE", ["analyst"], [], "10.0.0.1", false, new Dictionary<string, string> { ["purpose"] = "marketing" });
@@ -364,17 +354,14 @@ public sealed class RestDatasetPolicySpliceTests
     public async Task CrossSourceDataset_RowFilterStillApplied_AfterSpliceRemoval()
     {
         var pipeline = CrossSourcePipeline();
-        var metadata = Substitute.For<ITableMetadataRepository>();
-        metadata.GetTableMetadataAsync(CrmCustomers.Identifier, Arg.Any<CancellationToken>()).Returns(CrmCustomers);
-        var pdp = Substitute.For<IAccessDecisionPoint>();
-        // The REST decision carries the SAME consent filter as text, which the service must not splice any more.
-        pdp.DecideAsync(Arg.Is<AccessRequest>(r => r.Object == CrmCustomers), Arg.Any<CancellationToken>())
-            .Returns(TableAccessDecision.Allowed(CrmCustomers.Identifier, new Dictionary<string, ColumnAccessLevel>(), "[status] = @p0", hasUnconstrainedColumnAllow: true));
+        var metadata = new InMemoryTableMetadataRepository(CrmCustomers);
+        var pdp = Autheris.Tests.Unit.TestSupport.AccessDecisionPointStubs.Returning(_ =>
+            TableAccessDecision.Allowed(CrmCustomers.Identifier, new Dictionary<string, ColumnAccessLevel>(), "[status] = @p0", hasUnconstrainedColumnAllow: true));
         GovernedSqlQueryRequest? seen = null;
         var federated = Substitute.For<IFederatedQueryExecutionService>();
         federated.ExecuteQueryBufferedAsync(Arg.Do<GovernedSqlQueryRequest>(r => seen = r), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
             .Returns(ci => pipeline.Service.ExecuteQueryBufferedAsync(ci.Arg<GovernedSqlQueryRequest>(), ci.Arg<ClaimsPrincipal>(), ci.Arg<TenantId>(), ci.Arg<CancellationToken>()));
-        var service = new GovernedDataQueryService(metadata, pdp, Substitute.For<IGovernedSqlExecutionService>(), federated, Substitute.For<IColumnMaskingProvider>());
+        var service = new GovernedDataQueryService(metadata, pdp, new global::Autheris.Tests.Common.Fakes.StubGovernedSqlExecutionService(), federated, global::Autheris.Tests.Common.Fakes.StubColumnMaskingProvider.Null);
 
         var envelope = await service.ExecuteQueryAsync(
             new DatasetQueryRequest(CrmCustomers.Identifier, SelectColumns: ["id", "name", "status"], Limit: 10, Transport: "WebSql"),
@@ -420,10 +407,8 @@ public sealed class RestDatasetPolicySpliceTests
         var emitted = fx.Captured.ShouldHaveSingleItem().Sql;
 
         var (repo, resolution, _) = Recorders(AllowConsent());
-        var tableRepo = Substitute.For<ITableMetadataRepository>();
-        tableRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(meta);
-        var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        var tableRepo = new InMemoryTableMetadataRepository(meta);
+        Microsoft.Extensions.Hosting.IHostEnvironment env = new TestHostEnvironment("Development");
         var options = new GatewayOptions
         {
             WebSql = new WebSqlOptions { Enabled = true, DefaultMaxRows = 100, MaxAllowedRows = 500 },
@@ -457,5 +442,22 @@ public sealed class RestDatasetPolicySpliceTests
         }
 
         return count;
+    }
+
+    private sealed class RecordingConsentResolution(ConsentResolutionService inner, Recorded rec) : IConsentResolutionService
+    {
+        public TableAccessDecision ResolveAccess(
+            Sid userSid,
+            IReadOnlySet<Sid> subjectGroupSids,
+            IReadOnlySet<string> userRoles,
+            TableIdentifier table,
+            IReadOnlyList<Consent> activeConsents,
+            DatabaseDialect dialect = DatabaseDialect.SqlServer,
+            IReadOnlySet<Sid>? allUserSids = null,
+            IReadOnlySet<string>? callerScopes = null)
+        {
+            rec.Resolutions.Add((userSid, subjectGroupSids, userRoles, table, activeConsents));
+            return inner.ResolveAccess(userSid, subjectGroupSids, userRoles, table, activeConsents, dialect, allUserSids, callerScopes);
+        }
     }
 }

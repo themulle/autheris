@@ -16,8 +16,8 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
 using Autheris.Modules.Dbt;
+using Autheris.Tests.Common.Fakes;
 using Microsoft.Extensions.Logging.Abstractions;
-using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -225,29 +225,27 @@ public sealed partial class DbtCompositeRelationTests
 
     private sealed class Harness
     {
-        public ITableRelationRepository Relations { get; } = Substitute.For<ITableRelationRepository>();
-        public ITableMetadataRepository Metadata { get; } = Substitute.For<ITableMetadataRepository>();
-        public List<TableRelation> Written { get; } = [];
+        private readonly InMemoryTableRelationRepository _relations = new();
+        private readonly InMemoryTableMetadataRepository _metadata = new();
+        public IReadOnlyList<TableRelation> Written => _relations.CreateCalls;
+        public Action<TableRelation>? OnCreateRelation
+        {
+            get => _relations.OnCreateRelation;
+            set => _relations.OnCreateRelation = value;
+        }
         public DbtMetadataIngestionService Service { get; }
 
         public Harness()
         {
-            Relations.CreateRelationAsync(Arg.Any<TableRelation>(), Arg.Any<CancellationToken>())
-                .Returns(ci =>
-                {
-                    var r = ci.Arg<TableRelation>();
-                    Written.Add(r);
-                    return Task.FromResult(new RelationWriteResult(r.Id, true, false));
-                });
             Service = new DbtMetadataIngestionService(
-                Substitute.For<IDbtProposalRepository>(), Metadata, Substitute.For<ILineageGraphStore>(), Relations,
+                new InMemoryDbtProposalRepository(), _metadata, new InMemoryLineageGraphStore(), _relations,
                 NullLogger<DbtMetadataIngestionService>.Instance);
         }
 
         public void Stored(string table, string[] columns, string[]? primaryKey = null, IReadOnlyList<TableIndexDefinition>? indexes = null)
         {
             var id = new TableIdentifier("db", "s", table);
-            Metadata.GetTableMetadataAsync(id, Arg.Any<CancellationToken>()).Returns(new TableMetadata
+            _metadata.Add(new TableMetadata
             {
                 Identifier = id,
                 Columns = columns.Select(c => new TableColumn { ColumnName = c }).ToList(),
@@ -334,9 +332,10 @@ public sealed partial class DbtCompositeRelationTests
     [Fact]
     public async Task Ingest_PersistFailure_ReportsPersistFailed()
     {
-        var h = new Harness();
-        h.Relations.CreateRelationAsync(Arg.Any<TableRelation>(), Arg.Any<CancellationToken>())
-            .Returns<Task<RelationWriteResult>>(_ => throw new InvalidRelationException(RelationKeyViolation.CountMismatch, "boom: sensitive detail"));
+        var h = new Harness
+        {
+            OnCreateRelation = _ => throw new InvalidRelationException(RelationKeyViolation.CountMismatch, "boom: sensitive detail")
+        };
         using var stream = Composite(["x"], ["a"]);
         var result = await h.Service.IngestManifestStreamAsClusterAdminAsync(stream);
         result.Success.ShouldBeTrue();

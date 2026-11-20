@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.DependencyInjection;
 
+using Autheris.Tests.Common;
 using System;
 using System.Linq;
 using Autheris.Api.Configuration;
@@ -19,9 +20,8 @@ public sealed class TimeProviderCompositionTests
     [Trait("Category", "Security")]
     public void WAVE3_TIME_SC_01_DiCompositionProduction_ResolvesTimeProviderSystem()
     {
-        var environment = Substitute.For<IHostEnvironment>();
-        environment.EnvironmentName.Returns(Environments.Development);
-        environment.ContentRootPath.Returns(System.IO.Path.GetTempPath());
+        IHostEnvironment environment = new TestHostEnvironment(Environments.Development);
+        environment.ContentRootPath = System.IO.Path.GetTempPath();
         var configuration = new ConfigurationManager();
         var services = new ServiceCollection();
         services.AddSingleton<IConfiguration>(configuration);

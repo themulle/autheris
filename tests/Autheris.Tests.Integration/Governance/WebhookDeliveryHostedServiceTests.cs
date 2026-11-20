@@ -54,8 +54,7 @@ public sealed class WebhookDeliveryHostedServiceTests : IDisposable
     private void Build(WebhooksOptions webhooks, string environment = "Development", Func<Uri, bool, CancellationToken, Task>? validator = null)
     {
         var options = Options.Create(new GatewayOptions { Webhooks = webhooks });
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(environment);
+        IHostEnvironment env = new TestHostEnvironment(environment);
         var policy = new WebhookRetryPolicy(webhooks, _clock, () => 1.0);
         var client = WebhookDeliveryHostedServiceTestExtensions.NewClient(
             new HttpClient(_handler), options, policy, _clientLogger, env, _clock, validator ?? ((_, _, _) => Task.CompletedTask));
@@ -367,8 +366,7 @@ public sealed class WebhookDeliveryHostedServiceTests : IDisposable
         throwing.GetSubscriptionAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns<ValueTask<CloudEventWebhookSubscription?>>(_ => throw new InvalidOperationException("Password=hunter2"));
         var options = Options.Create(new GatewayOptions { Webhooks = Config() });
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        IHostEnvironment env = new TestHostEnvironment("Development");
         var policy = new WebhookRetryPolicy(options.Value.Webhooks, _clock, () => 1.0);
         var client = WebhookDeliveryHostedServiceTestExtensions.NewClient(new HttpClient(_handler), options, policy, new WebhookCapturingLogger<WebhookDeliveryClient>(), env, _clock, (_, _, _) => Task.CompletedTask);
         var services = new ServiceCollection().AddSingleton(throwing).BuildServiceProvider();

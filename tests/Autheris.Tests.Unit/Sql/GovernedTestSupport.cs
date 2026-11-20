@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit;
 
 using System;
+using Autheris.Tests.Common.Fakes;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
@@ -33,7 +34,7 @@ internal static class GovernedTestSupport
 
     public static GovernancePolicyFactory PolicyFactory(
         ITableMetadataRepository? repository, IOptions<GatewayOptions>? options = null, Autheris.Application.Sql.Policy.RowFilterKeySets.IRowFilterKeySetStage? keySetStage = null) =>
-        new(new MetadataCatalogProvider(repository), repository ?? Substitute.For<ITableMetadataRepository>(), options ?? Options.Create(new GatewayOptions()), keySetStage);
+        new(new MetadataCatalogProvider(repository), repository ?? new InMemoryTableMetadataRepository(), options ?? Options.Create(new GatewayOptions()), keySetStage);
 
     /// <param name="options">The gateway options of the service under test (the HMAC key reference lives in them).</param>
     /// <param name="secrets">The secret provider of the service under test; without it an HMAC mask degrades to Redact (fail closed).</param>

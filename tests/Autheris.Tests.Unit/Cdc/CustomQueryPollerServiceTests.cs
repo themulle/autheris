@@ -18,46 +18,32 @@ using Autheris.Domain.Options;
 using Autheris.Infrastructure.Streaming.Producers;
 using Autheris.Infrastructure.Streaming.Producers.CustomQuery;
 using Autheris.Infrastructure.Streaming;
+using Autheris.Tests.Common;
+using Autheris.Tests.Common.Fakes;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using NSubstitute;
 using Shouldly;
 using Xunit;
 
 public sealed class CustomQueryPollerServiceTests
 {
     private readonly InMemoryCdcStreamStore _streamStore = new();
-    private readonly ICdcStreamSignal _signal = Substitute.For<ICdcStreamSignal>();
-    private readonly IDistributedClusterStateProvider _clusterState = Substitute.For<IDistributedClusterStateProvider>();
-    private readonly ICdcStreamCrypto _crypto;
-    private readonly ICdcPayloadCodec _codec;
+    private readonly RecordingStreamSignal _signal = new();
+    private readonly IDistributedClusterStateProvider _clusterState = new StubClusterStateProvider();
+    private readonly ICdcStreamCrypto _crypto = new TestCdcCrypto();
+    private readonly ICdcPayloadCodec _codec = Autheris.Application.Streaming.Crypto.CdcPayloadCodec.Instance;
     private readonly IOptionsMonitor<GatewayOptions> _gatewayOpt;
     private readonly CdcChangeEventBuilder _builder;
 
     public CustomQueryPollerServiceTests()
     {
-        _crypto = Substitute.For<ICdcStreamCrypto>();
-        _crypto.FingerprintAsync(Arg.Any<CdcStreamId>(), Arg.Any<IReadOnlyList<object?>>(), Arg.Any<CancellationToken>())
-            .Returns(call => ValueTask.FromResult(new byte[32]));
-        _crypto.ProtectEventAsync(Arg.Any<CdcStreamId>(), Arg.Any<long>(), Arg.Any<CdcStreamEventKind>(), Arg.Any<CdcTenantScope>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<ReadOnlyMemory<byte>>(), Arg.Any<CancellationToken>())
-            .Returns(call => ValueTask.FromResult(new CdcProtectedBlob("dek1", call.ArgAt<ReadOnlyMemory<byte>>(6).ToArray())));
-        _crypto.ProtectImageAsync(Arg.Any<CdcStreamId>(), Arg.Any<byte[]>(), Arg.Any<ReadOnlyMemory<byte>>(), Arg.Any<CancellationToken>())
-            .Returns(call => ValueTask.FromResult(new CdcProtectedBlob("dek1", call.ArgAt<ReadOnlyMemory<byte>>(2).ToArray())));
-        _crypto.UnprotectImageAsync(Arg.Any<CdcStreamId>(), Arg.Any<CdcRowImageRecord>(), Arg.Any<CancellationToken>())
-            .Returns(call => ValueTask.FromResult(call.ArgAt<CdcRowImageRecord>(1).Image.Data));
-        _crypto.UnprotectEventAsync(Arg.Any<CdcStreamEventRecord>(), Arg.Any<CancellationToken>())
-            .Returns(call => ValueTask.FromResult(call.ArgAt<CdcStreamEventRecord>(0).Payload.Data));
-
-        _codec = Autheris.Application.Streaming.Crypto.CdcPayloadCodec.Instance;
-
         var gateway = new GatewayOptions();
         gateway.DataSources.Connections["crm_db"] = new DataSourceConnectionOptions
         {
             Provider = "PostgreSql",
             ConnectionString = "Host=localhost"
         };
-        _gatewayOpt = Substitute.For<IOptionsMonitor<GatewayOptions>>();
-        _gatewayOpt.CurrentValue.Returns(gateway);
+        _gatewayOpt = new StaticOptionsMonitor<GatewayOptions>(gateway);
 
         _builder = new CdcChangeEventBuilder(_streamStore, _crypto, _codec, _gatewayOpt);
     }
@@ -81,10 +67,8 @@ public sealed class CustomQueryPollerServiceTests
     [Fact]
     public void GetPartitions_WhenDisabled_ReturnsEmpty()
     {
-        var monitor = Substitute.For<IOptionsMonitor<CustomQueryPollerOptions>>();
-        monitor.CurrentValue.Returns(new CustomQueryPollerOptions { Enabled = false, Pollers = [SamplePoller()] });
-
-        var factory = Substitute.For<IDataSourceConnectionFactory>();
+        var monitor = new StaticOptionsMonitor<CustomQueryPollerOptions>(new CustomQueryPollerOptions { Enabled = false, Pollers = [SamplePoller()] });
+        var factory = new StubDataSourceConnectionFactory(_ => throw new InvalidOperationException("unused"));
         var service = new TestCustomQueryPollerService(monitor, _streamStore, _builder, factory, _signal, _clusterState);
 
         var partitions = service.ExposePartitions();
@@ -94,10 +78,8 @@ public sealed class CustomQueryPollerServiceTests
     [Fact]
     public void GetPartitions_WhenEnabled_ReturnsPartitionsWithLeaseKeys()
     {
-        var monitor = Substitute.For<IOptionsMonitor<CustomQueryPollerOptions>>();
-        monitor.CurrentValue.Returns(new CustomQueryPollerOptions { Enabled = true, Pollers = [SamplePoller()] });
-
-        var factory = Substitute.For<IDataSourceConnectionFactory>();
+        var monitor = new StaticOptionsMonitor<CustomQueryPollerOptions>(new CustomQueryPollerOptions { Enabled = true, Pollers = [SamplePoller()] });
+        var factory = new StubDataSourceConnectionFactory(_ => throw new InvalidOperationException("unused"));
         var service = new TestCustomQueryPollerService(monitor, _streamStore, _builder, factory, _signal, _clusterState);
 
         var partitions = service.ExposePartitions();
@@ -110,8 +92,7 @@ public sealed class CustomQueryPollerServiceTests
     public async Task PollStreamBatchAsync_ReadsRowsAndCommitsAppendBatchWithWatermarkState()
     {
         var poller = SamplePoller();
-        var monitor = Substitute.For<IOptionsMonitor<CustomQueryPollerOptions>>();
-        monitor.CurrentValue.Returns(new CustomQueryPollerOptions { Enabled = true, Pollers = [poller] });
+        var monitor = new StaticOptionsMonitor<CustomQueryPollerOptions>(new CustomQueryPollerOptions { Enabled = true, Pollers = [poller] });
 
         var rows = new List<Dictionary<string, object?>>
         {
@@ -120,8 +101,7 @@ public sealed class CustomQueryPollerServiceTests
         };
 
         var conn = new FakeDbConnection(rows);
-        var factory = Substitute.For<IDataSourceConnectionFactory>();
-        factory.CreateConnectionAsync(poller.DataSource, Arg.Any<CancellationToken>()).Returns(conn);
+        var factory = new StubDataSourceConnectionFactory(_ => conn);
 
         var service = new CustomQueryPollerService(monitor, _streamStore, _builder, factory, _signal, _clusterState, NullLogger<CustomQueryPollerService>.Instance, _crypto, _codec, gatewayOptions: _gatewayOpt);
 
@@ -137,43 +117,39 @@ public sealed class CustomQueryPollerServiceTests
         vectorRecord.Vector.GetValue("updated_at").ShouldBe("2026-10-19T06:00:00Z");
 
         // Verify signal called
-        await _signal.Received(1).NotifyAdvancedAsync(desc.Id, 2, Arg.Any<CancellationToken>());
+        _signal.Notified.ShouldBe([(desc.Id, 2L)]);
     }
 
     [Fact]
     public async Task PollStreamBatchAsync_EmptyRows_TouchesPolledAndReturnsZero()
     {
         var poller = SamplePoller();
-        var monitor = Substitute.For<IOptionsMonitor<CustomQueryPollerOptions>>();
-        monitor.CurrentValue.Returns(new CustomQueryPollerOptions { Enabled = true, Pollers = [poller] });
+        var monitor = new StaticOptionsMonitor<CustomQueryPollerOptions>(new CustomQueryPollerOptions { Enabled = true, Pollers = [poller] });
 
         var conn = new FakeDbConnection([]);
-        var factory = Substitute.For<IDataSourceConnectionFactory>();
-        factory.CreateConnectionAsync(poller.DataSource, Arg.Any<CancellationToken>()).Returns(conn);
+        var factory = new StubDataSourceConnectionFactory(_ => conn);
 
         var service = new CustomQueryPollerService(monitor, _streamStore, _builder, factory, _signal, _clusterState, NullLogger<CustomQueryPollerService>.Instance, _crypto, _codec, gatewayOptions: _gatewayOpt);
 
         var count = await service.PollStreamBatchAsync(poller, fencingToken: 1);
 
         count.ShouldBe(0);
-        await _signal.DidNotReceive().NotifyAdvancedAsync(Arg.Any<CdcStreamId>(), Arg.Any<long>(), Arg.Any<CancellationToken>());
+        _signal.Notified.ShouldBeEmpty();
     }
 
     [Fact]
     public async Task AllDuplicateBatch_PersistsAdvancedVector()
     {
         var poller = SamplePoller();
-        var monitor = Substitute.For<IOptionsMonitor<CustomQueryPollerOptions>>();
-        monitor.CurrentValue.Returns(new CustomQueryPollerOptions { Enabled = true, Pollers = [poller] });
+        var monitor = new StaticOptionsMonitor<CustomQueryPollerOptions>(new CustomQueryPollerOptions { Enabled = true, Pollers = [poller] });
 
         // Poll 1: insert Alice at 05:00
         var rows1 = new List<Dictionary<string, object?>>
         {
             new() { ["id"] = 1L, ["name"] = "Alice", ["updated_at"] = "2026-10-19T05:00:00Z" }
         };
-        var conn1 = new FakeDbConnection(rows1);
-        var factory = Substitute.For<IDataSourceConnectionFactory>();
-        factory.CreateConnectionAsync(poller.DataSource, Arg.Any<CancellationToken>()).Returns(conn1);
+        DbConnection currentConn = new FakeDbConnection(rows1);
+        var factory = new StubDataSourceConnectionFactory(_ => currentConn);
 
         var service = new CustomQueryPollerService(monitor, _streamStore, _builder, factory, _signal, _clusterState, NullLogger<CustomQueryPollerService>.Instance, _crypto, _codec, gatewayOptions: _gatewayOpt);
         var count1 = await service.PollStreamBatchAsync(poller, fencingToken: 1);
@@ -184,8 +160,7 @@ public sealed class CustomQueryPollerServiceTests
         {
             new() { ["id"] = 1L, ["name"] = "Alice", ["updated_at"] = "2026-10-19T06:00:00Z" }
         };
-        var conn2 = new FakeDbConnection(rows2);
-        factory.CreateConnectionAsync(poller.DataSource, Arg.Any<CancellationToken>()).Returns(conn2);
+        currentConn = new FakeDbConnection(rows2);
 
         var count2 = await service.PollStreamBatchAsync(poller, fencingToken: 2);
         // Duplicate row -> no change events emitted
@@ -202,16 +177,15 @@ public sealed class CustomQueryPollerServiceTests
     public async Task AllDuplicateBatch_StaleFencingToken_Rejected()
     {
         var poller = SamplePoller();
-        var monitor = Substitute.For<IOptionsMonitor<CustomQueryPollerOptions>>();
-        monitor.CurrentValue.Returns(new CustomQueryPollerOptions { Enabled = true, Pollers = [poller] });
+        var monitor = new StaticOptionsMonitor<CustomQueryPollerOptions>(new CustomQueryPollerOptions { Enabled = true, Pollers = [poller] });
 
         // Poll 1 at token 5
         var rows1 = new List<Dictionary<string, object?>>
         {
             new() { ["id"] = 1L, ["name"] = "Alice", ["updated_at"] = "2026-10-19T05:00:00Z" }
         };
-        var factory = Substitute.For<IDataSourceConnectionFactory>();
-        factory.CreateConnectionAsync(poller.DataSource, Arg.Any<CancellationToken>()).Returns(new FakeDbConnection(rows1));
+        DbConnection currentConn = new FakeDbConnection(rows1);
+        var factory = new StubDataSourceConnectionFactory(_ => currentConn);
 
         var service = new CustomQueryPollerService(monitor, _streamStore, _builder, factory, _signal, _clusterState, NullLogger<CustomQueryPollerService>.Instance, _crypto, _codec, gatewayOptions: _gatewayOpt);
         await service.PollStreamBatchAsync(poller, fencingToken: 5);
@@ -221,7 +195,7 @@ public sealed class CustomQueryPollerServiceTests
         {
             new() { ["id"] = 1L, ["name"] = "Alice", ["updated_at"] = "2026-10-19T06:00:00Z" }
         };
-        factory.CreateConnectionAsync(poller.DataSource, Arg.Any<CancellationToken>()).Returns(new FakeDbConnection(rows2));
+        currentConn = new FakeDbConnection(rows2);
 
         // Stale token must throw FencingTokenRejectedException
         await Should.ThrowAsync<FencingTokenRejectedException>(async () =>
@@ -400,5 +374,11 @@ public sealed class CustomQueryPollerServiceTests
         public override string GetString(int ordinal) => GetValue(ordinal)?.ToString() ?? string.Empty;
         public override int GetValues(object[] values) => 0;
         public override bool NextResult() => false;
+    }
+
+    private sealed class StubDataSourceConnectionFactory(Func<string, DbConnection> create) : IDataSourceConnectionFactory
+    {
+        public Task<DbConnection> CreateConnectionAsync(string dataSourceName, CancellationToken ct = default)
+            => Task.FromResult(create(dataSourceName));
     }
 }

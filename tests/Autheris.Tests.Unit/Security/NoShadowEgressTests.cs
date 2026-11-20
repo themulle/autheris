@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Security;
 
+using Autheris.Tests.Common;
 using System;
 using System.Linq;
 using System.Net.Http;
@@ -19,8 +20,7 @@ public sealed class NoShadowEgressTests
     public void No_http_client_registered_for_shadow_target()
     {
         var services = new ServiceCollection();
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(Environments.Production);
+        IHostEnvironment env = new TestHostEnvironment(Environments.Production);
         var options = new GatewayOptions();
 
         services.AddLogging();

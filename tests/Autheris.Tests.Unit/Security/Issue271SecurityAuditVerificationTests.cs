@@ -1,4 +1,5 @@
 using Autheris.Tests.Unit.TestSupport;
+using Autheris.Tests.Common.Fakes;
 namespace Autheris.Tests.Unit.Security;
 
 using System;
@@ -72,7 +73,7 @@ public sealed class Issue271SecurityAuditVerificationTests
     {
         var metaRepo = Substitute.For<ITableMetadataRepository>();
         var consentRepo = Substitute.For<IConsentRepository>();
-        var auditRepo = Substitute.For<IAuditLogRepository>();
+        var auditRepo = new InMemoryAuditLogRepository();
         var grantPolicy = Substitute.For<IGrantPolicy>();
 
         var service = new DeclarativeConsentApplyService(metaRepo, consentRepo, auditRepo, grantPolicy);
@@ -183,7 +184,7 @@ public sealed class Issue271SecurityAuditVerificationTests
             Substitute.For<ICatalogDiscoveryService>(),
             Substitute.For<IApiDispatcherService>(),
             lineageStore,
-            Substitute.For<ITableMetadataRepository>());
+            new InMemoryTableMetadataRepository());
 
         var sessionTenantA = CreateSession("s1", "userA", "tenant-a", roles: ["Viewer"]);
         var toolDef = new McpToolDefinition(McpDatasetTools.GetDataLineage, "Lineage", "{}", "Lineage");

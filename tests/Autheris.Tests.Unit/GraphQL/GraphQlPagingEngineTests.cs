@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 using System.Security.Claims;
 using System.Text.Json;
 using Autheris.Api.Middleware;
@@ -112,8 +113,7 @@ public sealed class GraphQlPagingEngineTests
 
     private async Task<IRequestExecutor> CreateAsync(string environmentName)
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(environmentName);
+        IHostEnvironment env = new TestHostEnvironment(environmentName);
 
         var services = new ServiceCollection();
         services.AddSingleton(_metadataRepo);

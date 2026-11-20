@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Catalog;
 
+using Autheris.Tests.Common;
 using System.Security.Claims;
 using System.Text.Json;
 using Autheris.Api.Endpoints;
@@ -83,8 +84,7 @@ public sealed class TableMetadataUnavailableMappingTests
     [Fact]
     public void GraphQl_UnavailableAnswersLikeUnknown()
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Production");
+        IHostEnvironment env = new TestHostEnvironment("Production");
         var filter = new ErrorSanitizingFilter(env, NullLogger<ErrorSanitizingFilter>.Instance);
 
         IError Sanitize(Exception ex) => filter.OnError(ErrorBuilder.New().SetMessage(ex.Message).SetException(ex).SetCode(((GatewaySecurityException)ex).ErrorCode).Build());

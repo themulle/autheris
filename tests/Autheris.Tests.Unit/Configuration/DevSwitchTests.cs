@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 using System.ComponentModel.DataAnnotations;
 using System.Reflection;
 using Autheris.Api.Configuration;
@@ -18,8 +19,7 @@ public sealed class DevSwitchTests
 {
     private static IHostEnvironment Env(string name)
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(name);
+        IHostEnvironment env = new TestHostEnvironment(name);
         return env;
     }
 

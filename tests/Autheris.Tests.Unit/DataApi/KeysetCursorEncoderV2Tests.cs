@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.DataApi;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Security.Cryptography;
@@ -59,8 +60,7 @@ public sealed class KeysetCursorEncoderV2Tests
 
     private static IHostEnvironment Env(string name)
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(name);
+        IHostEnvironment env = new TestHostEnvironment(name);
         return env;
     }
 

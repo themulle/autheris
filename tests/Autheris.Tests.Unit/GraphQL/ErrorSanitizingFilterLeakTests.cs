@@ -2,6 +2,7 @@ namespace Autheris.Tests.Unit.GraphQL;
 
 using Autheris.Api.Middleware;
 using Autheris.Domain.Exceptions;
+using Autheris.Tests.Common;
 using HotChocolate;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -16,8 +17,7 @@ public sealed class ErrorSanitizingFilterLeakTests
 {
     private static ErrorSanitizingFilter CreateFilter(string envName, ILogger<ErrorSanitizingFilter>? logger = null)
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(envName);
+        IHostEnvironment env = new TestHostEnvironment(envName);
         return new ErrorSanitizingFilter(env, logger ?? NullLogger<ErrorSanitizingFilter>.Instance);
     }
 

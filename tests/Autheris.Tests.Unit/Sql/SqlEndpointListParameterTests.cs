@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Sql;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -292,8 +293,7 @@ public sealed class SqlEndpointListParameterTests
     public async Task Rest_Post_ListError_IsMappedWithAStableCode_InProductionToo()
     {
         var (context, execution, _) = RouteContext("");
-        var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
-        env.EnvironmentName.Returns("Production");
+        Microsoft.Extensions.Hosting.IHostEnvironment env = new TestHostEnvironment("Production");
         context.RequestServices = new ServiceCollection().AddSingleton(env).BuildServiceProvider();
         context.Request.Body = new MemoryStream(System.Text.Encoding.UTF8.GetBytes("{\"ids\":[1,2]}"));
         context.Request.ContentLength = 13;

@@ -1,6 +1,8 @@
 namespace Autheris.Tests.Unit.Security;
 
 using System;
+using Autheris.Infrastructure.Connectors;
+using Autheris.Tests.Common.Fakes;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Claims;
@@ -310,24 +312,17 @@ public sealed class WebSqlSameSourceSubtreeSecurityTests
             })
             .ToList();
 
-        var connector = Substitute.For<IAutherisConnector>();
-        var splitManager = Substitute.For<IConnectorSplitManager>();
-        var recordSource = Substitute.For<IConnectorRecordSource>();
-        connector.SplitManager.Returns(splitManager);
-        connector.RecordSource.Returns(recordSource);
-        splitManager.GetSplitsAsync(Arg.Any<TableMetadata>(), Arg.Any<ConnectorSessionContext>(), Arg.Any<CancellationToken>())
-            .Returns([ConnectorSplit.Default("split-1")]);
-        recordSource.ReadBatchAsync(Arg.Any<ConnectorSplit>(), Arg.Any<ConnectorSessionContext>(), Arg.Any<CancellationToken>())
-            .Returns(joinedRows);
-
-        var registry = Substitute.For<IAutherisConnectorRegistry>();
-        registry.TryGetConnectorForTable(Arg.Any<TableIdentifier>(), out Arg.Any<IAutherisConnector>()!)
-            .Returns(x => { x[1] = connector; return true; });
+        var connector = new StubAutherisConnector(
+            "pg",
+            rows: joinedRows,
+            getSplits: (_, _, _) => Task.FromResult<IReadOnlyList<ConnectorSplit>>([ConnectorSplit.Default("split-1")]));
+        var registry = new InMemoryConnectorRegistry();
+        registry.RegisterConnector("pg", connector);
 
         var stagingService = new FederatedStagingService(
             registry,
-            Substitute.For<IColumnMaskingProvider>(),
-            Substitute.For<IAuditLogRepository>(),
+            StubColumnMaskingProvider.Null,
+            new InMemoryAuditLogRepository(),
             Options.Create(new GatewayOptions()),
             NullLogger<FederatedStagingService>.Instance);
 
@@ -346,8 +341,11 @@ public sealed class WebSqlSameSourceSubtreeSecurityTests
             })
             .ToList();
 
-        recordSource.ReadBatchAsync(Arg.Any<ConnectorSplit>(), Arg.Any<ConnectorSessionContext>(), Arg.Any<CancellationToken>())
-            .Returns(excessiveRows);
+        var overflowConnector = new StubAutherisConnector(
+            "pg",
+            rows: excessiveRows,
+            getSplits: (_, _, _) => Task.FromResult<IReadOnlyList<ConnectorSplit>>([ConnectorSplit.Default("split-1")]));
+        registry.RegisterConnector("pg", overflowConnector);
 
         var ex = await Should.ThrowAsync<GatewaySecurityException>(async () =>
             await stagingService.StageAsync([subtreeRequest], CreateUser(), new TenantId(Tenant), budget));
@@ -386,33 +384,25 @@ public sealed class WebSqlSameSourceSubtreeSecurityTests
         var plan = planner.Plan(sql, metadata, tables, decisions, new CrossSourceOptions { Enabled = true }, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.User, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.Tenant);
         var subtreeRequest = plan.StagingRequests.Single(r => r.Subtree != null);
 
-        var connector = Substitute.For<IAutherisConnector>();
-        var splitManager = Substitute.For<IConnectorSplitManager>();
-        var recordSource = Substitute.For<IConnectorRecordSource>();
-        connector.SplitManager.Returns(splitManager);
-        connector.RecordSource.Returns(recordSource);
-        splitManager.GetSplitsAsync(Arg.Any<TableMetadata>(), Arg.Any<ConnectorSessionContext>(), Arg.Any<CancellationToken>())
-            .Returns([ConnectorSplit.Default("split-1")]);
-        recordSource.ReadBatchAsync(Arg.Any<ConnectorSplit>(), Arg.Any<ConnectorSessionContext>(), Arg.Any<CancellationToken>())
-            .Returns([new Dictionary<string, object?> { ["id"] = 1, ["item_name"] = "Widget" }]);
+        var connector = new StubAutherisConnector(
+            "pg",
+            rows: [new Dictionary<string, object?> { ["id"] = 1, ["item_name"] = "Widget" }],
+            getSplits: (_, _, _) => Task.FromResult<IReadOnlyList<ConnectorSplit>>([ConnectorSplit.Default("split-1")]));
+        var registry = new InMemoryConnectorRegistry();
+        registry.RegisterConnector("pg", connector);
 
-        var registry = Substitute.For<IAutherisConnectorRegistry>();
-        registry.TryGetConnectorForTable(Arg.Any<TableIdentifier>(), out Arg.Any<IAutherisConnector>()!)
-            .Returns(x => { x[1] = connector; return true; });
-
-        var auditEntries = new List<AuditLogEntry>();
-        var auditRepo = Substitute.For<IAuditLogRepository>();
-        auditRepo.RecordAuditEventAsync(Arg.Do<AuditLogEntry>(auditEntries.Add), Arg.Any<CancellationToken>())
-            .Returns(Task.CompletedTask);
+        var auditRepo = new InMemoryAuditLogRepository();
 
         var stagingService = new FederatedStagingService(
             registry,
-            Substitute.For<IColumnMaskingProvider>(),
+            StubColumnMaskingProvider.Null,
             auditRepo,
             Options.Create(new GatewayOptions()),
             NullLogger<FederatedStagingService>.Instance);
 
         await stagingService.StageAsync([subtreeRequest], CreateUser(), new TenantId(Tenant), CreateBudget());
+
+        var auditEntries = auditRepo.Entries;
 
         // 1. Statement-level audit event for subtree
         var subtreeEvent = auditEntries.SingleOrDefault(e => e.EventType == AuditEventTypes.WebSqlCrossSourceSubtreeRead);
@@ -555,19 +545,13 @@ public sealed class WebSqlSameSourceSubtreeSecurityTests
         var subtreeRequest = plan.StagingRequests.Single(r => r.Subtree != null);
 
         ConnectorSessionContext? captured = null;
-        var connector = Substitute.For<IAutherisConnector>();
-        var splitManager = Substitute.For<IConnectorSplitManager>();
-        var recordSource = Substitute.For<IConnectorRecordSource>();
-        connector.SplitManager.Returns(splitManager);
-        connector.RecordSource.Returns(recordSource);
-        splitManager.GetSplitsAsync(Arg.Any<TableMetadata>(), Arg.Any<ConnectorSessionContext>(), Arg.Any<CancellationToken>())
-            .Returns([ConnectorSplit.Default("split-1")]);
-        recordSource.ReadBatchAsync(Arg.Any<ConnectorSplit>(), Arg.Do<ConnectorSessionContext>(s => captured = s), Arg.Any<CancellationToken>())
-            .Returns(new List<IReadOnlyDictionary<string, object?>>());
-        var registry = Substitute.For<IAutherisConnectorRegistry>();
-        registry.TryGetConnectorForTable(Arg.Any<TableIdentifier>(), out Arg.Any<IAutherisConnector>()!)
-            .Returns(x => { x[1] = connector; return true; });
-        var stagingService = new FederatedStagingService(registry, Substitute.For<IColumnMaskingProvider>(), Substitute.For<IAuditLogRepository>(),
+        var connector = new StubAutherisConnector(
+            "pg",
+            readBatch: (_, s, _) => { captured = s; return Task.FromResult<IReadOnlyList<IReadOnlyDictionary<string, object?>>>([]); },
+            getSplits: (_, _, _) => Task.FromResult<IReadOnlyList<ConnectorSplit>>([ConnectorSplit.Default("split-1")]));
+        var registry = new InMemoryConnectorRegistry();
+        registry.RegisterConnector("pg", connector);
+        var stagingService = new FederatedStagingService(registry, StubColumnMaskingProvider.Null, new InMemoryAuditLogRepository(),
             Options.Create(new GatewayOptions()), NullLogger<FederatedStagingService>.Instance);
 
         await stagingService.StageAsync([subtreeRequest], CreateUser(), new TenantId(Tenant), CreateBudget(maxRows: 100));

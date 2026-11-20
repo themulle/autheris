@@ -43,8 +43,7 @@ public sealed class ExtensionsRegistrationTests
     private static ServiceCollection CreateServices(GatewayOptions options)
     {
         var services = new ServiceCollection();
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(Environments.Production);
+        IHostEnvironment env = new TestHostEnvironment(Environments.Production);
         services.AddSingleton(env);
         services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
         services.AddLogging();

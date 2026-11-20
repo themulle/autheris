@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.Security;
 
 using System.Threading.Tasks;
+using Autheris.Tests.Common.Fakes;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Domain.Exceptions;
@@ -25,9 +26,9 @@ public sealed class Gql03OffsetBoundTests
     public async Task GQL_03_OutOfRangeOffset_IsRejected(int offset)
     {
         var service = new GatewayExecutionService(
-            Substitute.For<ITableMetadataRepository>(),
-            Substitute.For<IConsentRepository>(),
-            Substitute.For<IAuditLogRepository>(),
+            new InMemoryTableMetadataRepository(),
+            new InMemoryConsentRepository(),
+            new InMemoryAuditLogRepository(),
             Substitute.For<IConsentResolutionService>(),
             Substitute.For<IConsentCacheService>(),
             Substitute.For<IColumnMaskingProvider>(),

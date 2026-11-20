@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.Security;
 
 using System;
+using Autheris.Tests.Common.Fakes;
 using System.Collections.Generic;
 using System.Security.Claims;
 using System.Threading;
@@ -149,8 +150,8 @@ public class Issue113AccessRequestsSecurityTests
 
         var approvalRepo = Substitute.For<IConsentApprovalRepository>();
         var ownershipRepo = Substitute.For<IDataOwnershipRepository>();
-        var consentRepo = Substitute.For<IConsentRepository>();
-        var metaRepo = Substitute.For<ITableMetadataRepository>();
+        var consentRepo = new InMemoryConsentRepository();
+        var metaRepo = new InMemoryTableMetadataRepository();
 
         var mutation = new Mutation();
         var ex = await Should.ThrowAsync<GraphQLException>(() => mutation.ApproveConsentRequestAsync(
@@ -253,7 +254,7 @@ public class Issue113AccessRequestsSecurityTests
     [Trait("Category", "Security")]
     public async Task SEC_TEST_113_08_MachineTokens_CannotSubmitAccessRequest(string tokenType)
     {
-        var metaRepo = Substitute.For<ITableMetadataRepository>();
+        var metaRepo = new InMemoryTableMetadataRepository();
         var approvalRepo = Substitute.For<IConsentApprovalRepository>();
         var service = new ConsentRequestService(metaRepo, approvalRepo);
 
@@ -277,7 +278,7 @@ public class Issue113AccessRequestsSecurityTests
     [Trait("Category", "Security")]
     public async Task SEC_TEST_113_09_MachineTokens_CannotWithdrawAccessRequest(string tokenType)
     {
-        var metaRepo = Substitute.For<ITableMetadataRepository>();
+        var metaRepo = new InMemoryTableMetadataRepository();
         var approvalRepo = Substitute.For<IConsentApprovalRepository>();
         var service = new ConsentRequestService(metaRepo, approvalRepo);
 
@@ -294,7 +295,7 @@ public class Issue113AccessRequestsSecurityTests
     [Trait("Category", "Security")]
     public async Task SEC_TEST_113_10_UserCannotWithdrawAnotherUsersAccessRequest()
     {
-        var metaRepo = Substitute.For<ITableMetadataRepository>();
+        var metaRepo = new InMemoryTableMetadataRepository();
         var approvalRepo = Substitute.For<IConsentApprovalRepository>();
         var service = new ConsentRequestService(metaRepo, approvalRepo);
 
@@ -325,7 +326,7 @@ public class Issue113AccessRequestsSecurityTests
     [Trait("Category", "Security")]
     public async Task SEC_TEST_113_11_NonPendingAccessRequest_CannotBeWithdrawn(string nonPendingStatus)
     {
-        var metaRepo = Substitute.For<ITableMetadataRepository>();
+        var metaRepo = new InMemoryTableMetadataRepository();
         var approvalRepo = Substitute.For<IConsentApprovalRepository>();
         var service = new ConsentRequestService(metaRepo, approvalRepo);
 

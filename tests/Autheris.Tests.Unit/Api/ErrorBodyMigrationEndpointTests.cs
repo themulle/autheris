@@ -11,9 +11,11 @@ using Autheris.Application.Governance.Services;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Sql.Interfaces;
-
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
+using Autheris.Tests.Common.Fakes;
+using Autheris.Tests.Unit.TestDoubles;
+using Autheris.Tests.Unit.TestSupport;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
@@ -72,13 +74,16 @@ public sealed class ErrorBodyMigrationEndpointTests
         return ctx;
     }
 
+    private static readonly IGovernedTableReadPlanner UnusedPlanner = Substitute.For<IGovernedTableReadPlanner>();
+    private static readonly IKeysetCursorEncoder UnusedCursor = Substitute.For<IKeysetCursorEncoder>();
+
     // ---------- WP-3 ----------
 
     [Fact]
     public async Task Bare_Error_Migration_Preserves_Status_And_Code_Per_Group_Catalog_SetDatasetState_StateRequired()
     {
         var ctx = NewContext();
-        var r = await ExecAsync(await CatalogApiEndpoints.SetDatasetStateHandler("a.b.c", new AdminSetDatasetStateDto(" "), Substitute.For<IAccessPlanningService>(), ctx, default));
+        var r = await ExecAsync(await CatalogApiEndpoints.SetDatasetStateHandler("a.b.c", new AdminSetDatasetStateDto(" "), new StubAccessPlanningService(), ctx, default));
 
         AssertGovernedProblem(r, 400, "BAD_REQUEST");
     }
@@ -86,8 +91,10 @@ public sealed class ErrorBodyMigrationEndpointTests
     [Fact]
     public async Task Migrated_Error_Bodies_Do_Not_Echo_Exception_Or_Input_Catalog_SetDatasetState_ServiceMessage()
     {
-        var service = Substitute.For<IAccessPlanningService>();
-        service.SetDatasetStateAsync(default!, default!, default!, default, default).ReturnsForAnyArgs(new AdminSetDatasetStateResult("a.b.c", "Active", "Active", false, Canary));
+        var service = new StubAccessPlanningService
+        {
+            OnSetDatasetState = (_, _, _, _) => Task.FromResult(new AdminSetDatasetStateResult("a.b.c", "Active", "Active", false, Canary))
+        };
 
         var r = await ExecAsync(await CatalogApiEndpoints.SetDatasetStateHandler("a.b.c", new AdminSetDatasetStateDto("Active"), service, NewContext(), default));
 
@@ -97,7 +104,7 @@ public sealed class ErrorBodyMigrationEndpointTests
     [Fact]
     public async Task Bare_Error_Migration_Preserves_Status_And_Code_Per_Group_Catalog_RegisterDatasource_NameRequired()
     {
-        var r = await ExecAsync(await CatalogApiEndpoints.RegisterDatasourceHandler(new DatasourceRegistrationRequest(" ", Canary), Substitute.For<ICatalogDiscoveryService>(), NewContext(), default));
+        var r = await ExecAsync(await CatalogApiEndpoints.RegisterDatasourceHandler(new DatasourceRegistrationRequest(" ", Canary), new Autheris.Tests.Unit.TestDoubles.StubCatalogDiscoveryService(), NewContext(), default));
 
         AssertGovernedProblem(r, 400, "BAD_REQUEST");
     }
@@ -109,12 +116,12 @@ public sealed class ErrorBodyMigrationEndpointTests
         ctx.Request.QueryString = new QueryString(query);
         await TableStreamEndpoints.HandleBulkStreamAsync(
             domain, schema, table, ctx,
-            repo ?? Substitute.For<ITableMetadataRepository>(),
-            Autheris.Tests.Unit.TestSupport.AccessDecisionPointStubs.Denying(),
-            Substitute.For<IGovernedTableReadPlanner>(),
-            Substitute.For<IGovernedSqlExecutionService>(),
-            Substitute.For<IKeysetCursorEncoder>(),
-            Substitute.For<IColumnMaskingProvider>(),
+            repo ?? new InMemoryTableMetadataRepository(),
+            AccessDecisionPointStubs.Denying(),
+            UnusedPlanner,
+            StubGovernedSqlExecutionService.Empty,
+            UnusedCursor,
+            StubColumnMaskingProvider.Null,
             NullLoggerFactory.Instance,
             default);
         return await ReadAsync(ctx);
@@ -139,8 +146,7 @@ public sealed class ErrorBodyMigrationEndpointTests
     [Fact]
     public async Task Migrated_Error_Bodies_Do_Not_Echo_Exception_Or_Input_TableStream_UnknownTable_IsFixed404()
     {
-        var repo = Substitute.For<ITableMetadataRepository>();
-        repo.GetTableMetadataAsync(default, default).ReturnsForAnyArgs((TableMetadata?)null);
+        var repo = new InMemoryTableMetadataRepository();
 
         var r = await BulkAsync("d", "s", Canary, string.Empty, repo);
 
@@ -162,7 +168,7 @@ public sealed class ErrorBodyMigrationEndpointTests
     [Fact]
     public async Task Bare_Error_Migration_Preserves_Status_And_Code_Per_Group_BulkConsent_BodyRequired()
     {
-        var r = await ExecAsync(await GovernanceEndpoints.CreateBulkConsentAsync(null!, AdminContext(), Substitute.For<IAccessProfileRepository>(), default));
+        var r = await ExecAsync(await GovernanceEndpoints.CreateBulkConsentAsync(null!, AdminContext(), new Autheris.Infrastructure.Persistence.InMemoryAccessProfileRepository(), default));
 
         AssertGovernedProblem(r, 400, "BAD_REQUEST");
     }
@@ -172,7 +178,7 @@ public sealed class ErrorBodyMigrationEndpointTests
     {
         var req = new BulkConsentRequest { Subject = "alice", MaskingMode = Canary, Tables = ["a.b"], ValidDays = 30, Justification = "A sufficiently long justification." };
 
-        var r = await ExecAsync(await GovernanceEndpoints.CreateBulkConsentAsync(req, AdminContext(), Substitute.For<IAccessProfileRepository>(), default));
+        var r = await ExecAsync(await GovernanceEndpoints.CreateBulkConsentAsync(req, AdminContext(), new Autheris.Infrastructure.Persistence.InMemoryAccessProfileRepository(), default));
 
         AssertGovernedProblem(r, 400, "BAD_REQUEST");
     }
@@ -182,7 +188,7 @@ public sealed class ErrorBodyMigrationEndpointTests
     {
         var req = new BulkConsentRequest { Subject = "alice", MaskingMode = "Default", Tables = ["a.b"], ValidDays = 30, Justification = "A sufficiently long justification.", RowFilter = "x = 1; DROP " + Canary };
 
-        var r = await ExecAsync(await GovernanceEndpoints.CreateBulkConsentAsync(req, AdminContext(), Substitute.For<IAccessProfileRepository>(), default));
+        var r = await ExecAsync(await GovernanceEndpoints.CreateBulkConsentAsync(req, AdminContext(), new Autheris.Infrastructure.Persistence.InMemoryAccessProfileRepository(), default));
 
         AssertGovernedProblem(r, 400, "ROW_FILTER_SYNTAX_INVALID");
     }
@@ -190,7 +196,7 @@ public sealed class ErrorBodyMigrationEndpointTests
     [Fact]
     public async Task Migrated_Error_Bodies_Do_Not_Echo_Exception_Or_Input_ProfileById_NotFound()
     {
-        var repo = Substitute.For<IAccessProfileRepository>();
+        var repo = new Autheris.Infrastructure.Persistence.InMemoryAccessProfileRepository();
 
         var r = await ExecAsync(await GovernanceEndpoints.GetProfileByIdAsync(Canary, AdminContext(), repo, default));
 
@@ -200,7 +206,7 @@ public sealed class ErrorBodyMigrationEndpointTests
     [Fact]
     public async Task Bare_Error_Migration_Preserves_Status_And_Code_Per_Group_ApproveAssignment_SubjectRequired()
     {
-        var r = await ExecAsync(await GovernanceEndpoints.ApproveProfileAssignmentAsync(Canary, new ApproveProfileAssignmentRequest(), AdminContext(), Substitute.For<IAccessProfileRepository>(), default));
+        var r = await ExecAsync(await GovernanceEndpoints.ApproveProfileAssignmentAsync(Canary, new ApproveProfileAssignmentRequest(), AdminContext(), new Autheris.Infrastructure.Persistence.InMemoryAccessProfileRepository(), default));
 
         AssertGovernedProblem(r, 400, "BAD_REQUEST");
     }
@@ -210,7 +216,7 @@ public sealed class ErrorBodyMigrationEndpointTests
     [InlineData("null")]
     public async Task Migrated_Error_Bodies_Do_Not_Echo_Exception_Or_Input_ConsentManifest_Invalid(string body)
     {
-        var r = await ExecAsync(await GovernanceEndpoints.ApplyConsentManifestAsync(AdminContext(body), Substitute.For<IDeclarativeConsentApplyService>(), default));
+        var r = await ExecAsync(await GovernanceEndpoints.ApplyConsentManifestAsync(AdminContext(body), StubDeclarativeConsentApplyService.Instance, default));
 
         AssertGovernedProblem(r, 400, body == "null" ? "BAD_REQUEST" : "INVALID_JSON");
     }
@@ -218,7 +224,7 @@ public sealed class ErrorBodyMigrationEndpointTests
     [Fact]
     public async Task Bare_Error_Migration_Preserves_Status_And_Code_Per_Group_Plan_TotpRequired()
     {
-        var r = await ExecAsync(await GovernancePlanEndpoints.HandleConfirmAsync(Canary, new AdminConfirmPlanRequest(Canary, string.Empty), AdminContext(), Substitute.For<IAccessPlanningService>(), default));
+        var r = await ExecAsync(await GovernancePlanEndpoints.HandleConfirmAsync(Canary, new AdminConfirmPlanRequest(Canary, string.Empty), AdminContext(), new StubAccessPlanningService(), default));
 
         AssertGovernedProblem(r, 400, "GOVERNANCE_PLAN_INVALID");
     }
@@ -227,5 +233,17 @@ public sealed class ErrorBodyMigrationEndpointTests
     public async Task Migrated_Error_Bodies_Do_Not_Echo_Exception_Or_Input_RowFilter_DatasetNotFound()
     {
         AssertGovernedProblem(await ExecAsync(GovernanceEndpoints.DatasetNotFound()), 404, "RESOURCE_NOT_FOUND");
+    }
+
+    private sealed class StubDeclarativeConsentApplyService : IDeclarativeConsentApplyService
+    {
+        public static readonly StubDeclarativeConsentApplyService Instance = new();
+        public Task<DeclarativeApplyResult> ApplyManifestAsync(
+            ClaimsPrincipal caller,
+            DeclarativeConsentManifest manifest,
+            bool dryRun = false,
+            Autheris.Domain.Security.SecurityPrincipalContext? callerContext = null,
+            DeclarativePruneMode pruneMode = DeclarativePruneMode.False,
+            CancellationToken ct = default) => throw new NotSupportedException();
     }
 }

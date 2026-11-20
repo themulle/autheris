@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 using Autheris.Tests.Unit.TestSupport;
 using System.Globalization;
 using Autheris.Application.Common.Interfaces;
@@ -145,8 +146,7 @@ public sealed class GovernanceMigrationCatalogContractTests
     [Fact]
     public void Catalogues_AreGapFreeAndStartAtOne_ForTheServerProviders()
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        IHostEnvironment env = new TestHostEnvironment("Development");
         var pgOptions = Options.Create(new GatewayOptions
         {
             GovernanceDb = new GovernanceDbOptions { Provider = "PostgreSql", ConnectionString = "Host=localhost;Database=autheris_test;Username=u;Password=p" }

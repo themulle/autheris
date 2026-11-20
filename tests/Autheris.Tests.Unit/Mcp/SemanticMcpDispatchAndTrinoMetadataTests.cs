@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.Mcp;
 
 using System;
+using Autheris.Tests.Common.Fakes;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Claims;
@@ -99,7 +100,7 @@ public sealed class SemanticMcpDispatchAndTrinoMetadataTests
             Substitute.For<ICatalogDiscoveryService>(),
             Substitute.For<IApiDispatcherService>(),
             Substitute.For<ILineageGraphStore>(),
-            Substitute.For<ITableMetadataRepository>(),
+            new InMemoryTableMetadataRepository(),
             catalog,
             metricQueryService,
             SingleMode);
@@ -118,7 +119,7 @@ public sealed class SemanticMcpDispatchAndTrinoMetadataTests
             new McpToolRegistry(),
             options,
             NullLogger<AiDataGuardrailService>.Instance,
-            Substitute.For<IAuditLogRepository>(),
+            new InMemoryAuditLogRepository(),
             queryExecutor: queryExecutor, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(), tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable(), semanticCatalog: catalog);
 
         var session = new McpSessionContext(

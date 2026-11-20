@@ -28,11 +28,12 @@ public sealed class TableCacheManagerTests
         var table = new TableIdentifier("crm", "public", "customers");
 
         int upstreamCallCount = 0;
+        var loadGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         loader.LoadTableDataAsync(table, Arg.Any<CancellationToken>())
             .Returns(async _ =>
             {
                 Interlocked.Increment(ref upstreamCallCount);
-                await Task.Delay(100); // Artificial latency
+                await loadGate.Task; // upstream stays in flight until the test releases it
 
                 async IAsyncEnumerable<IReadOnlyList<object?>> Rows()
                 {
@@ -79,11 +80,18 @@ public sealed class TableCacheManagerTests
 
         // Act: 100 concurrent requests for an un-cached / expired table
         var tasks = new List<Task<TableCacheEntryMetadata?>>();
+        var started = 0;
         for (int i = 0; i < 100; i++)
         {
-            tasks.Add(Task.Run(async () => await manager.GetOrLoadAsync(table)));
+            tasks.Add(Task.Run(async () =>
+            {
+                Interlocked.Increment(ref started);
+                return await manager.GetOrLoadAsync(table);
+            }));
         }
 
+        await Autheris.Tests.Common.WaitHelper.WaitUntil(() => Volatile.Read(ref started) == 100 && Volatile.Read(ref upstreamCallCount) > 0, TimeSpan.FromSeconds(30));
+        loadGate.TrySetResult();
         var results = await Task.WhenAll(tasks);
 
         // Assert

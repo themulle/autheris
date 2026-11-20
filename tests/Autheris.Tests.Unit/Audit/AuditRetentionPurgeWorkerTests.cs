@@ -18,6 +18,7 @@ using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Autheris.Tests.Unit.Audit;
 
@@ -56,7 +57,7 @@ public sealed class AuditRetentionPurgeWorkerTests
         _auditWriter = Substitute.For<IAuditWriter>();
         _anchorStore = Substitute.For<IAuditChainAnchorStore>();
         _keyProvider = Substitute.For<IAuditPurgeKeyProvider>();
-        _logger = Substitute.For<ILogger<AuditRetentionPurgeWorker>>();
+        _logger = NullLogger<AuditRetentionPurgeWorker>.Instance;
         _timeProvider = new FakeTimeProvider(DateTimeOffset.UtcNow);
 
         _hmacKey = RandomNumberGenerator.GetBytes(32);

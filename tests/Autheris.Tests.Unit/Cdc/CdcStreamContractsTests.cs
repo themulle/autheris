@@ -4,6 +4,7 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Application.Audit;
 using Autheris.Application.Streaming;
+using Autheris.Tests.Common;
 using Microsoft.Extensions.Hosting;
 using NSubstitute;
 using Shouldly;
@@ -16,8 +17,7 @@ public sealed class CdcStreamContractsTests
 {
     private static CdcStreamOptionsValidator Validator(string env = "Production")
     {
-        var host = Substitute.For<IHostEnvironment>();
-        host.EnvironmentName.Returns(env);
+        IHostEnvironment host = new TestHostEnvironment(env);
         return new CdcStreamOptionsValidator(host);
     }
 

@@ -7,7 +7,7 @@ using Xunit;
 
 /// <summary>EXT-02: the authorized-tables cache key covers the whole principal and refuses SID-less callers.</summary>
 [Trait("Category", "Security")]
-public sealed class ODataAuthorizedTablesCacheKeyExt02Tests
+public sealed class ODataAuthorizedTablesCacheKeyTests
 {
     private static ClaimsPrincipal User(string? sid, params string[] roles)
     {

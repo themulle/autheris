@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.Governance;
 
 using System;
+using Autheris.Tests.Common.Fakes;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -18,11 +19,11 @@ using Xunit;
 [Trait("Category", "Security")]
 public sealed class TableConsumersDualTierSecurityTests
 {
-    private readonly IConsentRepository _consentRepo = Substitute.For<IConsentRepository>();
+    private readonly IConsentRepository _consentRepo = new InMemoryConsentRepository();
     private readonly IDataOwnershipRepository _ownershipRepo = Substitute.For<IDataOwnershipRepository>();
     private readonly ILineageGraphStore _graphStore = Substitute.For<ILineageGraphStore>();
     private readonly IAuditLogRepository _auditRepo = Substitute.For<IAuditLogRepository>();
-    private readonly ITableMetadataRepository _tableMetadataRepo = Substitute.For<ITableMetadataRepository>();
+    private readonly ITableMetadataRepository _tableMetadataRepo = new InMemoryTableMetadataRepository();
     private readonly IUsageRepository _usageRepo = Substitute.For<IUsageRepository>();
 
     private LineageImpactAnalyzerService CreateService()

@@ -1,6 +1,7 @@
 #pragma warning disable CA2012 // NSubstitute .Returns(...) configures a ValueTask member; the instance is not consumed here.
 namespace Autheris.Tests.Unit.Security;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Security.Claims;
@@ -35,8 +36,7 @@ public sealed class CacheSecurityTests
 {
     private static IHostEnvironment CreateMockEnvironment(string environmentName = "Production")
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(environmentName);
+        IHostEnvironment env = new TestHostEnvironment(environmentName);
         return env;
     }
 

@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.Api;
 
 using Autheris.Api.Middleware;
+using Autheris.Tests.Common;
 using HotChocolate;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -18,8 +19,7 @@ public sealed class ConsentDecisionErrorMappingTests
     [InlineData("FOUR_EYES_SAME_APPROVER", "A different approver is required for the next approval step.")]
     public void DecisionCode_KeepsCodeAndFixedText_InProduction(string code, string expectedMessage)
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Production");
+        IHostEnvironment env = new TestHostEnvironment("Production");
         var filter = new ErrorSanitizingFilter(env, NullLogger<ErrorSanitizingFilter>.Instance);
         var error = ErrorBuilder.New().SetCode(code).SetMessage("Consent request '3f2504e0-4f89-41d3-9a0c-0305e82c3301' detail.").Build();
 

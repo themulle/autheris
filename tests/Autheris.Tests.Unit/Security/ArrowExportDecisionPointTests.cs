@@ -1,6 +1,7 @@
 #pragma warning disable CA2012 // NSubstitute .Returns(...) configures a ValueTask member; the instance is not consumed here.
 namespace Autheris.Tests.Unit.Security;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -221,8 +222,7 @@ public sealed class ArrowExportDecisionPointTests
     [Fact]
     public async Task In_production_a_websql_policy_exception_is_sanitized()
     {
-        var prodEnv = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
-        prodEnv.EnvironmentName.Returns("Production");
+        Microsoft.Extensions.Hosting.IHostEnvironment prodEnv = new TestHostEnvironment("Production");
         var services = new ServiceCollection();
         services.AddSingleton(prodEnv);
         services.AddLogging();

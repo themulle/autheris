@@ -65,3 +65,6 @@ Tests -10,000 to -20,000 (duplicate merges); tooling +600. 6 person-days.
 ## Decisions taken in this spec
 - Coverage map stored as CSV in `docs/plans/` (SEC-SIMPL-60), base commit `fe0e131d` (plan verification commit).
 - Ratchets use shrink-only baseline files in `Baselines/` (existing pattern) and fail on stale entries.
+
+## Changelog
+- 2026-11-19: Part b sleep reduction. The sleep ratchet baseline fell from 81 to 40 entries counted; about 9 of those 81 were stale baseline entries, so the real reduction is about 72 to 40. Added `Hang.UntilCancelledAsync` to `Autheris.Tests.Common` for "block until cancelled" test doubles.

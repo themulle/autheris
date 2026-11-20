@@ -9,10 +9,11 @@ using Autheris.Application.Common.Interfaces;
 using Autheris.Application.State;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Extensions.Tests.TestSupport;
 using Autheris.Modules.OpenMetadata;
+using Autheris.Tests.Common.Fakes;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -21,23 +22,16 @@ public sealed class OpenMetadataWebhookTests
 {
     private const string WebhookSecret = "om-webhook-test-secret-488";
 
-    private static (OpenMetadataSyncService Service, List<TableMetadata> Upserts, IOpenMetadataClient Client) CreateSyncService(
+    private static (OpenMetadataSyncService Service, List<TableMetadata> Upserts, StubOpenMetadataClient Client) CreateSyncService(
         IDistributedClusterStateProvider? clusterState = null,
         TimeProvider? timeProvider = null,
         bool omitClusterState = false)
     {
-        var client = Substitute.For<IOpenMetadataClient>();
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        var consentRepo = Substitute.For<IConsentRepository>();
-        var epochRepo = Substitute.For<IPolicyEpochRepository>();
+        var client = new StubOpenMetadataClient();
         var upserts = new List<TableMetadata>();
-        metadataRepo.UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>())
-            .Returns(ci =>
-            {
-                var meta = ci.Arg<TableMetadata>();
-                upserts.Add(meta);
-                return Task.FromResult(meta);
-            });
+        var metadataRepo = new InMemoryTableMetadataRepository { OnUpsert = upserts.Add };
+        var consentRepo = new RecordingConsentRepository();
+        var epochRepo = new InMemoryPolicyEpochRepository();
 
         var options = new GatewayOptions
         {
@@ -87,8 +81,7 @@ public sealed class OpenMetadataWebhookTests
     {
         var time = new MutableTimeProvider(DateTimeOffset.Parse("2026-11-19T12:00:00Z"));
         var (service, _, client) = CreateSyncService(timeProvider: time);
-        client.GetTableByFqnAsync("service.db.schema.test_tbl", Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<OpenMetadataTable?>(SampleTable()));
+        client.Tables = [SampleTable()];
 
         var eventId = Guid.NewGuid();
         var payload = BuildPayload(eventId, time.GetUtcNow());
@@ -117,10 +110,8 @@ public sealed class OpenMetadataWebhookTests
         var (serviceA, upsertsA, clientA) = CreateSyncService(clusterState: sharedStore, timeProvider: time);
         var (serviceB, upsertsB, clientB) = CreateSyncService(clusterState: sharedStore, timeProvider: time);
 
-        clientA.GetTableByFqnAsync("service.db.schema.test_tbl", Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<OpenMetadataTable?>(SampleTable()));
-        clientB.GetTableByFqnAsync("service.db.schema.test_tbl", Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<OpenMetadataTable?>(SampleTable()));
+        clientA.Tables = [SampleTable()];
+        clientB.Tables = [SampleTable()];
 
         var payload = BuildPayload(Guid.NewGuid(), time.GetUtcNow());
 
@@ -157,8 +148,7 @@ public sealed class OpenMetadataWebhookTests
         var time = new MutableTimeProvider(DateTimeOffset.Parse("2026-11-19T12:00:00Z"));
         var state = new UnavailableCounterState(returnNull, time);
         var (service, upserts, client) = CreateSyncService(clusterState: state, timeProvider: time);
-        client.GetTableByFqnAsync("service.db.schema.test_tbl", Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<OpenMetadataTable?>(SampleTable()));
+        client.Tables = [SampleTable()];
 
         var payload = BuildPayload(Guid.NewGuid(), time.GetUtcNow());
 
@@ -180,8 +170,7 @@ public sealed class OpenMetadataWebhookTests
     {
         var time = new MutableTimeProvider(DateTimeOffset.Parse("2026-11-19T12:00:00Z"));
         var (service, upserts, client) = CreateSyncService(omitClusterState: true, timeProvider: time);
-        client.GetTableByFqnAsync("service.db.schema.test_tbl", Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<OpenMetadataTable?>(SampleTable()));
+        client.Tables = [SampleTable()];
 
         var payload = BuildPayload(Guid.NewGuid(), time.GetUtcNow());
 
@@ -198,8 +187,7 @@ public sealed class OpenMetadataWebhookTests
         var historicalClock = DateTimeOffset.Parse("2020-01-01T00:00:00Z");
         var time = new MutableTimeProvider(historicalClock);
         var (service, _, client) = CreateSyncService(timeProvider: time);
-        client.GetTableByFqnAsync("service.db.schema.test_tbl", Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<OpenMetadataTable?>(SampleTable()));
+        client.Tables = [SampleTable()];
 
         var matchingPayload = BuildPayload(Guid.NewGuid(), historicalClock);
         (await service.HandleVerifiedAsync(matchingPayload))

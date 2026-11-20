@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.OData;
 
 using System;
+using Autheris.Tests.Common.Fakes;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Claims;
@@ -69,30 +70,25 @@ public sealed class ODataHardeningTests
         }
     }
 
-    private static (GatewayExecutionService Service, IAuditLogRepository AuditLog, CapturingExecutor Executor) CreateExecutionService()
+    private static (GatewayExecutionService Service, InMemoryAuditLogRepository AuditLog, CapturingExecutor Executor) CreateExecutionService()
     {
         var executor = new CapturingExecutor();
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        metadataRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(CreateSampleMetadata());
+        var metadataRepo = new InMemoryTableMetadataRepository(CreateSampleMetadata());
 
         var decision = TableAccessDecision.Allowed(
             Table,
             new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase) { ["secret_col"] = ColumnAccessLevel.Deny },
             hasUnconstrainedColumnAllow: true);
 
-        var cache = Substitute.For<IConsentCacheService>();
-        cache.GetCachedDecisionAsync(Arg.Any<TenantId>(), Arg.Any<Sid>(), Arg.Any<TableIdentifier>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
-            .Returns(decision);
-
-        var auditLog = Substitute.For<IAuditLogRepository>();
+        var auditLog = new InMemoryAuditLogRepository();
 
         var service = new GatewayExecutionService(
             metadataRepo,
-            Substitute.For<IConsentRepository>(),
+            new InMemoryConsentRepository(),
             auditLog,
-            Substitute.For<IConsentResolutionService>(),
-            cache,
-            Substitute.For<IColumnMaskingProvider>(),
+            StubConsentResolutionService.Fixed(decision),
+            new InMemoryConsentCacheService(),
+            StubColumnMaskingProvider.Null,
             options: Options.Create(new GatewayOptions()),
             dataSourceExecutors: [executor]);
 
@@ -116,9 +112,7 @@ public sealed class ODataHardeningTests
         ex.Message.ShouldContain("does not exist or is not accessible");
 
         // Should NOT record a COLUMN_ACCESS_DENIED event because the column doesn't exist at all
-        await auditLog.DidNotReceive().RecordAuditEventAsync(
-            Arg.Is<AuditLogEntry>(e => e.EventType == "COLUMN_ACCESS_DENIED"),
-            Arg.Any<CancellationToken>());
+        auditLog.Entries.ShouldNotContain(e => e.EventType == "COLUMN_ACCESS_DENIED");
     }
 
     [Fact]
@@ -137,12 +131,10 @@ public sealed class ODataHardeningTests
         exDenied.Message.Replace("secret_col", "X").ShouldBe(exUnknown.Message.Replace("no_such_col", "X"));
 
         // Must record audit entry with real reason
-        await auditLog.Received(1).RecordAuditEventAsync(
-            Arg.Is<AuditLogEntry>(e =>
-                e.EventType == "COLUMN_ACCESS_DENIED" &&
-                e.Decision == "DENY" &&
-                e.DetailsJson.Contains("secret_col")),
-            Arg.Any<CancellationToken>());
+        auditLog.Entries.Count(e =>
+            e.EventType == "COLUMN_ACCESS_DENIED" &&
+            e.Decision == "DENY" &&
+            e.DetailsJson.Contains("secret_col")).ShouldBe(1);
     }
 
     [Theory]
@@ -151,8 +143,8 @@ public sealed class ODataHardeningTests
     [InlineData(",,")]
     public async Task O1_ODataHandler_SelectEmptyOrWhitespace_Returns400InvalidQueryOption(string emptySelect)
     {
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        var execService = Substitute.For<IGatewayExecutionService>();
+        var metadataRepo = new InMemoryTableMetadataRepository();
+        var execService = new StubGatewayExecutionService();
         var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
 
         var result = await handler.ExecuteEntitySetQueryAsync(
@@ -169,14 +161,14 @@ public sealed class ODataHardeningTests
         result.StatusCode.ShouldBe(400);
         result.ErrorCode.ShouldBe("InvalidQueryOption");
         result.ErrorMessage.ShouldNotBeNull().ShouldContain("$select");
-        await execService.DidNotReceiveWithAnyArgs().ExecuteTablePageAsync(default, default, default!, default);
+        execService.PageCallCount.ShouldBe(0);
     }
 
     [Fact]
     public async Task O1_ODataHandler_SelectUnknownColumn_Returns400InvalidQueryOption()
     {
         var (service, _, _) = CreateExecutionService();
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = new InMemoryTableMetadataRepository();
         var handler = new ODataHandler(metadataRepo, service, NullLogger<ODataHandler>.Instance);
 
         var result = await handler.ExecuteEntitySetQueryAsync(
@@ -240,8 +232,8 @@ public sealed class ODataHardeningTests
     [Fact]
     public async Task O6_ODataHandler_SkipExceedingMaxSkip_Returns400()
     {
-        var execService = Substitute.For<IGatewayExecutionService>();
-        var handler = new ODataHandler(Substitute.For<ITableMetadataRepository>(), execService, NullLogger<ODataHandler>.Instance);
+        var execService = new StubGatewayExecutionService();
+        var handler = new ODataHandler(new InMemoryTableMetadataRepository(), execService, NullLogger<ODataHandler>.Instance);
 
         var result = await handler.ExecuteEntitySetQueryAsync(
             CreateUser(),
@@ -258,7 +250,7 @@ public sealed class ODataHardeningTests
         result.ErrorCode.ShouldBe("InvalidQueryOption");
         result.ErrorMessage.ShouldNotBeNull().ShouldContain("$skip");
         result.ErrorMessage.ShouldNotBeNull().ShouldContain(ODataHandler.MaxSkip.ToString());
-        await execService.DidNotReceiveWithAnyArgs().ExecuteTablePageAsync(default, default, default!, default);
+        execService.PageCallCount.ShouldBe(0);
     }
 
     // ==============================================================
@@ -274,11 +266,9 @@ public sealed class ODataHardeningTests
     [InlineData(-2, "Execution Timeout Expired. The timeout period elapsed prior to completion.")]
     public async Task O7_ODataHandler_TimeoutError_Returns504WithRetryAfterAndCleanJson(int number, string internalDbMessage)
     {
-        var execService = Substitute.For<IGatewayExecutionService>();
-        execService.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
-            .Returns<Task<TableQueryPage>>(_ => throw new FakeDbException(number, internalDbMessage));
+        var execService = StubGatewayExecutionService.Throwing(new FakeDbException(number, internalDbMessage));
 
-        var handler = new ODataHandler(Substitute.For<ITableMetadataRepository>(), execService, NullLogger<ODataHandler>.Instance);
+        var handler = new ODataHandler(new InMemoryTableMetadataRepository(), execService, NullLogger<ODataHandler>.Instance);
 
         var result = await handler.ExecuteEntitySetQueryAsync(
             CreateUser(),
@@ -308,11 +298,9 @@ public sealed class ODataHardeningTests
     [InlineData(40613, "Database 'lwetem_prod' on server is not currently available.")]
     public async Task O7_ODataHandler_UnavailableError_Returns503WithRetryAfterAndCleanJson(int number, string internalDbMessage)
     {
-        var execService = Substitute.For<IGatewayExecutionService>();
-        execService.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
-            .Returns<Task<TableQueryPage>>(_ => throw new FakeDbException(number, internalDbMessage));
+        var execService = StubGatewayExecutionService.Throwing(new FakeDbException(number, internalDbMessage));
 
-        var handler = new ODataHandler(Substitute.For<ITableMetadataRepository>(), execService, NullLogger<ODataHandler>.Instance);
+        var handler = new ODataHandler(new InMemoryTableMetadataRepository(), execService, NullLogger<ODataHandler>.Instance);
 
         var result = await handler.ExecuteEntitySetQueryAsync(
             CreateUser(),
@@ -368,8 +356,7 @@ public sealed class ODataHardeningTests
     [Fact]
     public void Api15_SwaggerAuth_RequiresChallengeForAnonymousOutsideDev()
     {
-        var env = Substitute.For<Microsoft.AspNetCore.Hosting.IWebHostEnvironment>();
-        env.EnvironmentName.Returns(Microsoft.Extensions.Hosting.Environments.Production);
+        var env = new ProdWebEnv();
         var anonymous = new DefaultHttpContext();
 
         var result = ODataEndpoints.CheckSwaggerAuth(new GatewayOptions(), env, anonymous);
@@ -381,8 +368,7 @@ public sealed class ODataHardeningTests
     [Fact]
     public void Api15_SwaggerAuth_ForbidsAuthenticatedNonAdminOutsideDev()
     {
-        var env = Substitute.For<Microsoft.AspNetCore.Hosting.IWebHostEnvironment>();
-        env.EnvironmentName.Returns(Microsoft.Extensions.Hosting.Environments.Production);
+        var env = new ProdWebEnv();
         var nonAdmin = new DefaultHttpContext
         {
             User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Role, "CatalogReader")], "TestAuth"))
@@ -397,8 +383,7 @@ public sealed class ODataHardeningTests
     [Fact]
     public void Api15_MetadataChallenge_RequiresChallengeForAnonymousOutsideDev()
     {
-        var env = Substitute.For<Microsoft.AspNetCore.Hosting.IWebHostEnvironment>();
-        env.EnvironmentName.Returns(Microsoft.Extensions.Hosting.Environments.Production);
+        var env = new ProdWebEnv();
         var anonymous = new DefaultHttpContext();
 
         ODataEndpoints.RequiresMetadataChallenge(new GatewayOptions(), env, anonymous).ShouldBeTrue();
@@ -431,6 +416,16 @@ public sealed class ODataHardeningTests
 
         var result = ODataEndpoints.ValidateSystemQueryOptions(query);
         result.ShouldBeNull();
+    }
+
+    private sealed class ProdWebEnv : Microsoft.AspNetCore.Hosting.IWebHostEnvironment
+    {
+        public string EnvironmentName { get; set; } = Microsoft.Extensions.Hosting.Environments.Production;
+        public string ApplicationName { get; set; } = "Autheris.Tests";
+        public string WebRootPath { get; set; } = string.Empty;
+        public Microsoft.Extensions.FileProviders.IFileProvider WebRootFileProvider { get; set; } = new Microsoft.Extensions.FileProviders.NullFileProvider();
+        public string ContentRootPath { get; set; } = string.Empty;
+        public Microsoft.Extensions.FileProviders.IFileProvider ContentRootFileProvider { get; set; } = new Microsoft.Extensions.FileProviders.NullFileProvider();
     }
 }
 

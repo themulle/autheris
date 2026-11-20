@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Integration.Governance;
 
+using Autheris.Tests.Common;
 using System;
 using System.Threading;
 using System.Threading.Tasks;
@@ -21,8 +22,7 @@ public sealed class AnchorStoreMonotonicityPostgreSqlTests
     [Fact]
     public async Task PostgreSql_OnTransactionCommitted_DoesNotRegressAnchor()
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Test");
+        IHostEnvironment env = new TestHostEnvironment("Test");
         var shared = new InMemoryAuditChainAnchorStore();
 
         using var replicaA = GovernanceTestDatabase.CreateRepository(new EpochValidationService(), out var csA, environment: env, auditAnchorStore: shared);

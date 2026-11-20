@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Integration.Governance;
 
+using Autheris.Tests.Common;
 using Autheris.Tests.Unit.Webhooks;
 using System;
 using System.Collections.Generic;
@@ -40,8 +41,7 @@ public sealed class WebhookSigningAndHygieneTests : IDisposable
 
     private WebhookDispatcherService Service(WebhooksOptions webhooks, string environment = "Development", WebhookCapturingLogger<WebhookDispatcherService>? logger = null)
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(environment);
+        IHostEnvironment env = new TestHostEnvironment(environment);
         return new WebhookDispatcherService(_repo, Options.Create(new GatewayOptions { Webhooks = webhooks }), logger ?? new WebhookCapturingLogger<WebhookDispatcherService>(), env);
     }
 

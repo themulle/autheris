@@ -2,6 +2,7 @@
 namespace Autheris.Tests.Unit.Security;
 
 using Autheris.Modules.Lakehouse.Models;
+using Autheris.Tests.Common.Fakes;
 using Autheris.Tests.Unit.TestDoubles;
 using System;
 using System.Collections.Generic;
@@ -46,7 +47,7 @@ using Autheris.Tests.Unit.Procedures;
 
 /// <summary>Review G4: E-3, D-1, D-2, D-3, D-4 and the related Low findings of the governed data paths.</summary>
 [Trait("Category", "Security")]
-public sealed class GovernedDataPathsG4Tests
+public sealed class LakehouseAndProcedureGovernedPathsSecurityTests
 {
     private static readonly TenantId Tenant1 = new("tenant-1");
 
@@ -107,7 +108,7 @@ public sealed class GovernedDataPathsG4Tests
             .Returns(new ValueTask<DeltaSnapshot>(snapshot));
 
         var executor = new DeltaLakeDataSourceExecutor(
-            reader, new DeltaPartitionPruner(NullLogger<DeltaPartitionPruner>.Instance), Substitute.For<IColumnMaskingProvider>(),
+            reader, new DeltaPartitionPruner(NullLogger<DeltaPartitionPruner>.Instance), StubColumnMaskingProvider.Null,
             Options.Create(new GatewayOptions()), NullLogger<DeltaLakeDataSourceExecutor>.Instance, new DemoDataSwitch(demoData));
 
         var tableId = new TableIdentifier("lake", "default", "delta_table");
@@ -194,18 +195,17 @@ public sealed class GovernedDataPathsG4Tests
     private sealed class ProcFixture
     {
         public InMemoryProcedureRegistry Registry { get; } = new();
-        public IProcedureInvoker Invoker { get; } = Substitute.For<IProcedureInvoker>();
-        public ITableMetadataRepository Tables { get; } = Substitute.For<ITableMetadataRepository>();
-        public IConsentRepository Consents { get; } = Substitute.For<IConsentRepository>();
-        public IConsentResolutionService Resolution { get; } = Substitute.For<IConsentResolutionService>();
-        public IColumnMaskingProvider Masking { get; } = Substitute.For<IColumnMaskingProvider>();
-        public IAuditLogRepository Audit { get; } = Substitute.For<IAuditLogRepository>();
+        public IProcedureInvoker Invoker { get; set; } = Substitute.For<IProcedureInvoker>();
+        public InMemoryTableMetadataRepository Tables { get; } = new();
+        public InMemoryConsentRepository Consents { get; } = new();
+        public IConsentResolutionService Resolution { get; set; } = StubConsentResolutionService.AllowUnconstrained();
+        public IColumnMaskingProvider Masking { get; set; } = StubColumnMaskingProvider.Asterisks;
+        public InMemoryAuditLogRepository Audit { get; } = new();
         public List<MaskingRule> MaskRules { get; } = [];
         public IClientIpResolver? IpResolver { get; set; }
 
         public GovernedProcedureExecutionService Create()
         {
-            Audit.RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
             return new GovernedProcedureExecutionService(
                 Registry, Invoker, Options.Create(new GatewayOptions()), Audit, Tables, Consents, Resolution, Masking, concurrencyGate: global::Autheris.Tests.Unit.TestDoubles.GrantAllReadConcurrencyGate.Instance, clientIpResolver: IpResolver);
         }
@@ -237,15 +237,8 @@ public sealed class GovernedDataPathsG4Tests
                 new Dictionary<string, string>(), sources));
         }
 
-        f.Tables.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(ci =>
-        {
-            var id = ci.Arg<TableIdentifier>();
-            return id.TableName == "orders"
-                ? new TableMetadata { Identifier = id, Columns = [new TableColumn { ColumnName = "order_id" }, new TableColumn { ColumnName = "salary" }] }
-                : new TableMetadata { Identifier = id, Columns = [new TableColumn { ColumnName = "name" }, new TableColumn { ColumnName = "title" }, new TableColumn { ColumnName = "order_id" }] };
-        });
-        f.Consents.GetActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
-            .Returns(new List<Consent>());
+        f.Tables.Add(new TableMetadata { Identifier = new("default", "sales", "orders"), Columns = [new TableColumn { ColumnName = "order_id" }, new TableColumn { ColumnName = "salary" }] });
+        f.Tables.Add(new TableMetadata { Identifier = new("default", "hr", "people"), Columns = [new TableColumn { ColumnName = "name" }, new TableColumn { ColumnName = "title" }, new TableColumn { ColumnName = "order_id" }] });
         var columns = new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
         {
             ["order_id"] = ColumnAccessLevel.Clear,
@@ -253,9 +246,8 @@ public sealed class GovernedDataPathsG4Tests
             ["name"] = ColumnAccessLevel.Mask,
             ["title"] = ColumnAccessLevel.Clear
         };
-        f.Resolution.ResolveAccess(Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>())
-            .Returns(ci => TableAccessDecision.Allowed(ci.ArgAt<TableIdentifier>(3), columns, null));
-        f.Masking.MaskValue(Arg.Any<string>(), Arg.Any<object?>(), Arg.Do<MaskingRule>(f.MaskRules.Add)).Returns("***");
+        f.Resolution = StubConsentResolutionService.Fixed(TableAccessDecision.Allowed(new("default", "sales", "orders"), columns, null));
+        f.Masking = new StubColumnMaskingProvider((_, _, r) => { f.MaskRules.Add(r); return "***"; });
         f.Invoker.ExecuteReadAsync(Arg.Any<ProcedureDefinition>(), Arg.Any<IReadOnlyDictionary<string, object?>>(), Arg.Any<ProcedureSecurityContext>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(new RawProcedureResult(resultColumns, [new object?[] { 1, "x", "y", "z" }[..resultColumns.Length]], false));
         return f;
@@ -318,8 +310,7 @@ public sealed class GovernedDataPathsG4Tests
         {
             User = new ClaimsPrincipal(new ClaimsIdentity([new Claim("ip", "10.0.0.5")], "Bearer"))
         };
-        var accessor = Substitute.For<IHttpContextAccessor>();
-        accessor.HttpContext.Returns(context);
+        IHttpContextAccessor accessor = new HttpContextAccessor { HttpContext = context };
 
         new HttpContextClientIpResolver(accessor).ResolveClientIp().ShouldBe(IPAddress.None);
     }
@@ -334,9 +325,9 @@ public sealed class GovernedDataPathsG4Tests
             ["salary"] = new("sales", "orders", "salary")
         };
         var f = NewProc(sources, ["salary"]);
-        f.Tables.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(ci => new TableMetadata
+        f.Tables.Add(new TableMetadata
         {
-            Identifier = ci.Arg<TableIdentifier>(),
+            Identifier = new("default", "sales", "orders"),
             Columns = [new TableColumn { ColumnName = "order_id" }, new TableColumn { ColumnName = "salary" }, new TableColumn { ColumnName = "name" }, new TableColumn { ColumnName = "title" }],
             ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
             {
@@ -379,9 +370,8 @@ public sealed class GovernedDataPathsG4Tests
         var id = new TableIdentifier("d", "s", "t");
         var meta = HmacMeta(id);
         var decision = TableAccessDecision.Allowed(id, new Dictionary<string, ColumnAccessLevel> { ["email"] = ColumnAccessLevel.Mask });
-        var provider = Substitute.For<IColumnMaskingProvider>();
         MaskingRule? seen = null;
-        provider.MaskValue(Arg.Any<string>(), Arg.Any<object?>(), Arg.Do<MaskingRule>(r => seen = r)).Returns("pseudo");
+        var provider = new StubColumnMaskingProvider((_, _, r) => { seen = r; return "pseudo"; });
 
         GovernedConnectorReader.ProjectRow(new Dictionary<string, object?> { ["email"] = "a@b.c" }, meta, decision, "tenant-1", new GovernedRowPolicy(provider, HmacKeyId: null), alreadyMasked: false);
 
@@ -394,8 +384,8 @@ public sealed class GovernedDataPathsG4Tests
         var id = new TableIdentifier("d", "s", "t");
         var meta = HmacMeta(id);
         var decision = TableAccessDecision.Allowed(id, new Dictionary<string, ColumnAccessLevel> { ["email"] = ColumnAccessLevel.Mask });
-        var provider = Substitute.For<IColumnMaskingProvider>();
-        provider.MaskValue(Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<MaskingRule>()).Returns("SECOND_MASK");
+        var maskCalls = 0;
+        var provider = new StubColumnMaskingProvider((_, _, _) => { maskCalls++; return "SECOND_MASK"; });
 
         var row = new Dictionary<string, object?> { ["email"] = "ALREADY_MASKED_PSEUDO" };
 
@@ -403,7 +393,7 @@ public sealed class GovernedDataPathsG4Tests
 
         // Value must remain the first pseudonym, MaskValue must not be invoked again
         result["email"].ShouldBe("ALREADY_MASKED_PSEUDO");
-        provider.DidNotReceive().MaskValue(Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<MaskingRule>());
+        maskCalls.ShouldBe(0);
     }
 
     // ------------------------------------------------------------------ D-4 (OLAP audit)
@@ -432,8 +422,8 @@ public sealed class GovernedDataPathsG4Tests
             .Returns(new OlapQueryResult(["x"], [new List<object?> { 1 }], 1, TimeSpan.FromMilliseconds(1)));
 
         await Autheris.Tests.Unit.TestDoubles.OlapEndpointTestHost.HandleAsync(
-            context, engine, Substitute.For<ITableMetadataRepository>(), Substitute.For<IAutherisConnectorRegistry>(),
-            Substitute.For<ICrossDomainAccessResolver>(), Substitute.For<IColumnMaskingProvider>(),
+            context, engine, new InMemoryTableMetadataRepository(), new Autheris.Infrastructure.Connectors.InMemoryConnectorRegistry(),
+            new NoopCrossDomainResolver(), StubColumnMaskingProvider.Null,
             Options.Create(new GatewayOptions { DuckDbOlap = new DuckDbOlapOptions { Enabled = true } }), NullLoggerFactory.Instance);
         return (context, engine);
     }
@@ -441,14 +431,12 @@ public sealed class GovernedDataPathsG4Tests
     [Fact]
     public async Task D4_OlapQuery_WritesAnAuditEventWithSqlHashBeforeReturningData()
     {
-        var entries = new List<AuditLogEntry>();
-        var audit = Substitute.For<IAuditLogRepository>();
-        audit.RecordAuditEventAsync(Arg.Do<AuditLogEntry>(entries.Add), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        var audit = new InMemoryAuditLogRepository();
 
         var (context, _) = await RunOlapAsync(audit);
 
         context.Response.StatusCode.ShouldBe(StatusCodes.Status200OK);
-        var entry = entries.Single(e => e.EventType == "OLAP_QUERY");
+        var entry = audit.Entries.Single(e => e.EventType == "OLAP_QUERY");
         entry.TenantId.ShouldBe(Tenant1);
         entry.ActorSid.Value.ShouldBe("S-1-U1");
         entry.DetailsJson.ShouldContain(Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes("SELECT 1"))));
@@ -458,15 +446,40 @@ public sealed class GovernedDataPathsG4Tests
     [Fact]
     public async Task D4_OlapQuery_FailsClosedWhenTheAuditWriteFails_OrNoAuditIsAvailable()
     {
-        var audit = Substitute.For<IAuditLogRepository>();
-        audit.RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>()).Returns(Task.FromException(new InvalidOperationException("db down")));
-
-        var (failed, _) = await RunOlapAsync(audit);
+        var (failed, _) = await RunOlapAsync(new ThrowingAuditRepo());
         failed.Response.StatusCode.ShouldBe(StatusCodes.Status503ServiceUnavailable);
         failed.Response.Body.Position = 0;
         new StreamReader(failed.Response.Body).ReadToEnd().ShouldNotContain("totalRows");
 
         // WP-ARC-A-06: a missing audit writer is a composition error, never a silently unaudited read.
         await Should.ThrowAsync<InvalidOperationException>(() => RunOlapAsync(null));
+    }
+
+    private sealed class ThrowingAuditRepo : IAuditLogRepository
+    {
+        public Task RecordAuditEventAsync(AuditLogEntry entry, CancellationToken ct = default)
+            => throw new InvalidOperationException("db down");
+        public Task RecordAuditEventAsync(AuditLogEntry entry, System.Data.Common.DbTransaction tx, CancellationToken ct = default)
+            => throw new InvalidOperationException("db down");
+        public Task<IReadOnlyList<AuditLogEntry>> GetAuditLogEntriesAsync(int limit = 100, TenantId? tenantId = null, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<AuditLogEntry>>([]);
+        public Task<IReadOnlyList<AuditLogEntry>> QueryAuditLogsAsync(string? targetTable = null, Sid? actorSid = null, DateTimeOffset? since = null, int limit = 1000, TenantId? tenantId = null, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<AuditLogEntry>>([]);
+        public Task<bool> VerifyAuditHashChainAsync(CancellationToken ct = default) => Task.FromResult(true);
+        public Task<global::Autheris.Domain.Audit.AuditPurgeCheckpoint?> GetLatestPurgeCheckpointAsync(CancellationToken ct = default) => Task.FromResult<global::Autheris.Domain.Audit.AuditPurgeCheckpoint?>(null);
+        public Task SavePurgeCheckpointAsync(global::Autheris.Domain.Audit.AuditPurgeCheckpoint checkpoint, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<(long MaxEligibleSequence, long FirstSurvivingSequence, string SurvivingPrevHash, long PurgeCount)?> PlanPurgePrefixAsync(DateTimeOffset thresholdUtc, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<int> ExecutePurgeBatchAsync(long maxSequenceInclusive, int batchSize, CancellationToken ct = default) => throw new NotSupportedException();
+    }
+
+    private sealed class NoopCrossDomainResolver : ICrossDomainAccessResolver
+    {
+        public Task<TableAccessDecision> ResolveAccessAsync(
+            ClaimsPrincipal principal,
+            TableIdentifier table,
+            TableMetadata metadata,
+            TenantId? tenant,
+            CancellationToken ct = default)
+            => throw new NotSupportedException();
     }
 }

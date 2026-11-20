@@ -111,7 +111,7 @@ public sealed class SingleFlightKeySetCacheTests : IDisposable
         {
             try
             {
-                await Task.Delay(Timeout.Infinite, token);
+                await Autheris.Tests.Common.Hang.UntilCancelledAsync(token);
             }
             catch (OperationCanceledException)
             {

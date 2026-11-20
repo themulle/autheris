@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.OData;
 
 using System.Collections.Generic;
+using Autheris.Tests.Common.Fakes;
 using System.Linq;
 using System.Security.Claims;
 using System.Text.Json;
@@ -34,7 +35,7 @@ public sealed class ODataNextLinkTests
         var execution = Substitute.For<IGatewayExecutionService>();
         execution.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
             .Returns(new TableQueryPage(Rows(rows), TableAccessDecision.Allowed(table, Access), null, unordered));
-        return new ODataHandler(Substitute.For<ITableMetadataRepository>(), execution, NullLogger<ODataHandler>.Instance);
+        return new ODataHandler(new InMemoryTableMetadataRepository(), execution, NullLogger<ODataHandler>.Instance);
     }
 
     [Fact]

@@ -4,6 +4,7 @@ using Autheris.Application.Identity;
 using Autheris.Domain.Identity;
 using Autheris.Domain.Options.Security;
 using Autheris.Domain.Options;
+using Autheris.Tests.Common;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -19,8 +20,7 @@ public sealed class AuthenticationModeOptionsValidatorTests
 
     private static IHostEnvironment Env(string name = "Production")
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(name);
+        IHostEnvironment env = new TestHostEnvironment(name);
         return env;
     }
 

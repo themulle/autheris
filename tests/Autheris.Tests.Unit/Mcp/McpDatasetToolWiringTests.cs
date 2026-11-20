@@ -16,6 +16,8 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.GraphQL.Mcp;
+using Autheris.Tests.Common.Fakes;
+using Autheris.Tests.Unit.TestSupport;
 using HotChocolate;
 using HotChocolate.Execution;
 using HotChocolate.Language;
@@ -90,24 +92,26 @@ public sealed class McpDatasetToolWiringTests
             .ShouldHaveSingleItem().ShouldBe(new TableIdentifier("governance", "catalog", "datasets"));
     }
 
+    private static readonly IRequestExecutorProvider PassiveExecutorProvider = Substitute.For<IRequestExecutorProvider>();
+
     [Theory]
     [InlineData("describe_dataset", true)]
     [InlineData("sample_rows", false)]
     public async Task FourEyesTable_BlocksRowReads_ButNotTheDescription(string name, bool allowed)
     {
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        metadataRepo.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>())
-            .Returns(new TableMetadata { Identifier = Orders, Table = new Table { TableName = "orders", RequiresFourEyes = true } });
-        var executor = Substitute.For<IMcpQueryExecutor>();
-        executor.ExecuteOperationAsync(Arg.Any<McpToolDefinition>(), Arg.Any<string>(), Arg.Any<McpSessionContext>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult("""{"id":"sales.public.orders"}"""));
+        var metadataRepo = new InMemoryTableMetadataRepository(new TableMetadata
+        {
+            Identifier = Orders,
+            Table = new Table { TableName = "orders", RequiresFourEyes = true }
+        });
+        var executor = new StubMcpQueryExecutor("""{"id":"sales.public.orders"}""");
 
         var guardrail = new AiDataGuardrailService(
             new McpToolRegistry(Options.Create(new GatewayOptions()), new FixedDemoData(false)),
             Options.Create(new GatewayOptions { Mcp = new McpOptions { Enabled = true } }),
             NullLogger<AiDataGuardrailService>.Instance,
             global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, queryExecutor: executor,
-            tableMetadataRepository: metadataRepo, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll());
+            tableMetadataRepository: metadataRepo, decisionPoint: PdpTestDoubles.AllowAll());
 
         var session = new McpSessionContext("s1", "agent", "tenant-a", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, UserSid: "S-1-USER");
         var result = await guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest(name, """{"dataset":"sales.public.orders"}"""), session);
@@ -119,18 +123,18 @@ public sealed class McpDatasetToolWiringTests
         }
     }
 
-    private static (AiDataGuardrailService Guardrail, Autheris.Application.Policy.Pdp.IAccessDecisionPoint Policy, IMcpQueryExecutor Executor) GraphQlGuardrail(
+    private static (AiDataGuardrailService Guardrail, List<Autheris.Application.Policy.Pdp.AccessRequest> PolicyCalls, StubMcpQueryExecutor Executor) GraphQlGuardrail(
         IReadOnlyList<TableIdentifier>? documentTables, bool fourEyes = false)
     {
-        var map = Substitute.For<IGraphQlCatalogMap>();
-        map.ResolveDocumentTablesAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult(documentTables));
-        var policy = Autheris.Tests.Unit.TestSupport.PdpTestDoubles.From(r => TableAccessDecision.Allowed(r.Object.Identifier, new Dictionary<string, ColumnAccessLevel>()));
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        metadataRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns(c => new TableMetadata { Identifier = c.Arg<TableIdentifier>(), Table = new Table { RequiresFourEyes = fourEyes } });
-        var executor = Substitute.For<IMcpQueryExecutor>();
-        executor.ExecuteOperationAsync(Arg.Any<McpToolDefinition>(), Arg.Any<string>(), Arg.Any<McpSessionContext>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult("""{"data":{}}"""));
+        var map = new StubGraphQlCatalogMap(documentTables);
+        var policyCalls = new List<Autheris.Application.Policy.Pdp.AccessRequest>();
+        var policy = AccessDecisionPointStubs.Returning(r =>
+        {
+            policyCalls.Add(r);
+            return TableAccessDecision.Allowed(r.Object.Identifier, new Dictionary<string, ColumnAccessLevel>());
+        });
+        var metadataRepo = new AnyTableMetadataRepo(fourEyes);
+        var executor = new StubMcpQueryExecutor("""{"data":{}}""");
 
         var guardrail = new AiDataGuardrailService(
             new McpToolRegistry(Options.Create(new GatewayOptions()), new FixedDemoData(false)),
@@ -140,7 +144,7 @@ public sealed class McpDatasetToolWiringTests
             decisionPoint: policy,
             tableMetadataRepository: metadataRepo,
             graphQlCatalogMap: map);
-        return (guardrail, policy, executor);
+        return (guardrail, policyCalls, executor);
     }
 
     private static ValueTask<McpToolCallResult> CallGraphQl(AiDataGuardrailService guardrail, string args) =>
@@ -152,13 +156,13 @@ public sealed class McpDatasetToolWiringTests
     public async Task QueryGraphQl_RunsAbacOnEveryTableOfTheDocument()
     {
         var customers = new TableIdentifier("crm", "dbo", "customers");
-        var (guardrail, policy, _) = GraphQlGuardrail([Orders, customers]);
+        var (guardrail, policyCalls, _) = GraphQlGuardrail([Orders, customers]);
 
         var result = await CallGraphQl(guardrail, """{"query":"{ sales_public_orders { id } }"}""");
 
         result.IsSuccess.ShouldBeTrue(result.ErrorMessage);
-        await policy.Received(1).DecideAsync(Arg.Is<Autheris.Application.Policy.Pdp.AccessRequest>(c => c.Object.Identifier == Orders), Arg.Any<CancellationToken>());
-        await policy.Received(1).DecideAsync(Arg.Is<Autheris.Application.Policy.Pdp.AccessRequest>(c => c.Object.Identifier == customers), Arg.Any<CancellationToken>());
+        policyCalls.Count(c => c.Object.Identifier == Orders).ShouldBe(1);
+        policyCalls.Count(c => c.Object.Identifier == customers).ShouldBe(1);
     }
 
     [Fact]
@@ -170,7 +174,7 @@ public sealed class McpDatasetToolWiringTests
 
         result.IsSuccess.ShouldBeFalse();
         result.ErrorMessage!.ShouldContain("Four-Eyes");
-        await executor.DidNotReceiveWithAnyArgs().ExecuteOperationAsync(default!, default!, default!, default);
+        executor.Calls.ShouldBeEmpty();
     }
 
     [Theory]
@@ -179,25 +183,25 @@ public sealed class McpDatasetToolWiringTests
     [InlineData("""{"query":"{ a }","Query":"{ b }"}""")]
     public async Task QueryGraphQl_UnresolvableDocument_FailsClosed(string args)
     {
-        var (guardrail, policy, executor) = GraphQlGuardrail(null);
+        var (guardrail, _, executor) = GraphQlGuardrail(null);
 
         var result = await CallGraphQl(guardrail, args);
 
         result.IsSuccess.ShouldBeFalse();
         result.ErrorMessage!.ShouldContain("fail-closed");
-        await executor.DidNotReceiveWithAnyArgs().ExecuteOperationAsync(default!, default!, default!, default);
+        executor.Calls.ShouldBeEmpty();
     }
 
     [Fact]
     public async Task QueryGraphQl_IntrospectionOnly_IsACatalogCall_WithoutADataDecision()
     {
-        var (guardrail, policy, _) = GraphQlGuardrail([]);
+        var (guardrail, policyCalls, _) = GraphQlGuardrail([]);
 
         var result = await CallGraphQl(guardrail, """{"query":"{ __schema { types { name } } }"}""");
 
         result.IsSuccess.ShouldBeTrue(result.ErrorMessage);
         // The catalog pseudo target is not a data table: no decision point request (the catalog is filtered by discovery visibility).
-        await policy.DidNotReceiveWithAnyArgs().DecideAsync(default!, default);
+        policyCalls.ShouldBeEmpty();
     }
 
     [Theory]
@@ -210,8 +214,8 @@ public sealed class McpDatasetToolWiringTests
     public async Task Executor_QueryGraphQl_RejectsAnythingButOneQuery(string args, string expected)
     {
         var provider = Substitute.For<IRequestExecutorProvider>();
-        var executor = new GatewayMcpQueryExecutor(provider, Substitute.For<IGatewayExecutionService>(), NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100),
-            datasetCatalog: Substitute.For<IMcpDatasetCatalog>(), persistedToolValidator: new Autheris.Application.Mcp.Services.PersistedToolValidator());
+        var executor = new GatewayMcpQueryExecutor(provider, new StubGatewayExecutionService(), NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100),
+            datasetCatalog: StubMcpDatasetCatalog.Empty, persistedToolValidator: new Autheris.Application.Mcp.Services.PersistedToolValidator());
 
         var json = await executor.ExecuteOperationAsync(Tool("query_graphql"), args, Session());
 
@@ -232,8 +236,8 @@ public sealed class McpDatasetToolWiringTests
         requestExecutor.ExecuteAsync(Arg.Do<IOperationRequest>(r => capturedRequest = r), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IExecutionResult>(OperationResult.FromError(ErrorBuilder.New().SetMessage("success").Build())));
 
-        var executor = new GatewayMcpQueryExecutor(provider, Substitute.For<IGatewayExecutionService>(), NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100),
-            datasetCatalog: Substitute.For<IMcpDatasetCatalog>(), persistedToolValidator: new Autheris.Application.Mcp.Services.PersistedToolValidator());
+        var executor = new GatewayMcpQueryExecutor(provider, new StubGatewayExecutionService(), NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100),
+            datasetCatalog: StubMcpDatasetCatalog.Empty, persistedToolValidator: new Autheris.Application.Mcp.Services.PersistedToolValidator());
 
         var args = """
         {
@@ -273,9 +277,9 @@ public sealed class McpDatasetToolWiringTests
         instructions.ShouldContain("describe_dataset");
     }
 
-    private static GatewayMcpQueryExecutor Executor(IMcpDatasetCatalog catalog) => new(
-        Substitute.For<IRequestExecutorProvider>(),
-        Substitute.For<IGatewayExecutionService>(),
+    private static GatewayMcpQueryExecutor Executor(IMcpDatasetCatalog catalog, IGatewayExecutionService? gateway = null) => new(
+        PassiveExecutorProvider,
+        gateway ?? new StubGatewayExecutionService(),
         NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100),
         datasetCatalog: catalog,
         persistedToolValidator: new Autheris.Application.Mcp.Services.PersistedToolValidator());
@@ -286,10 +290,11 @@ public sealed class McpDatasetToolWiringTests
     [Fact]
     public async Task Executor_DescribeDataset_ReturnsTheDescriptionAsCamelCaseJson()
     {
-        var catalog = Substitute.For<IMcpDatasetCatalog>();
-        catalog.DescribeDatasetAsync(Arg.Any<ClaimsPrincipal>(), "sales.public.orders", Arg.Any<CancellationToken>())
-            .Returns(new McpDatasetDescription("sales.public.orders", "orders", "sales", "public", "orders", "Orders", null, "INTERNAL", false,
-                [new McpDatasetColumn("id", "int", "Key", false, true)], []));
+        var catalog = new StubMcpDatasetCatalog
+        {
+            OnDescribe = (_, ds) => new McpDatasetDescription(ds, "orders", "sales", "public", "orders", "Orders", null, "INTERNAL", false,
+                [new McpDatasetColumn("id", "int", "Key", false, true)], [])
+        };
 
         var json = await Executor(catalog).ExecuteOperationAsync(Tool("describe_dataset"), """{"dataset":"sales.public.orders"}""", Session());
 
@@ -301,15 +306,18 @@ public sealed class McpDatasetToolWiringTests
     [Fact]
     public async Task Executor_SampleRows_PassesTheCallerAndTheCount()
     {
-        var catalog = Substitute.For<IMcpDatasetCatalog>();
-        ClaimsPrincipal? caller = null;
-        catalog.SampleRowsAsync(Arg.Do<ClaimsPrincipal>(p => caller = p), "sales.public.orders", 3, Arg.Any<CancellationToken>())
-            .Returns(new McpDatasetSample("sales.public.orders", 0, []));
+        var catalog = new StubMcpDatasetCatalog
+        {
+            OnSample = (_, ds, _) => new McpDatasetSample(ds, 0, [])
+        };
 
         var json = await Executor(catalog).ExecuteOperationAsync(Tool("sample_rows"), """{"dataset":"sales.public.orders","count":3}""", Session());
 
         json.ShouldContain("\"rowCount\":0");
-        caller.ShouldNotBeNull();
+        catalog.SampleCalls.Count.ShouldBe(1);
+        var (caller, ds, count) = catalog.SampleCalls[0];
+        ds.ShouldBe("sales.public.orders");
+        count.ShouldBe(3);
         caller.GetUserSid()!.Value.Value.ShouldBe("S-1-USER");
         caller.GetTenantId().Value.ShouldBe("tenant-a");
     }
@@ -321,26 +329,31 @@ public sealed class McpDatasetToolWiringTests
         var tool = Tool("sample_rows");
         tool.InputJsonSchema.Contains("\"synthetic\"", StringComparison.OrdinalIgnoreCase).ShouldBeFalse();
 
-        var catalog = Substitute.For<IMcpDatasetCatalog>();
-        catalog.SampleRowsAsync(Arg.Any<ClaimsPrincipal>(), "sales.public.orders", 3, Arg.Any<CancellationToken>())
-            .Returns(new McpDatasetSample("sales.public.orders", 0, [], IsSynthetic: false));
-        var gateway = Substitute.For<IGatewayExecutionService>();
-        var executor = new GatewayMcpQueryExecutor(
-            Substitute.For<IRequestExecutorProvider>(), gateway, NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100), datasetCatalog: catalog, persistedToolValidator: new Autheris.Application.Mcp.Services.PersistedToolValidator());
+        var catalog = new StubMcpDatasetCatalog
+        {
+            OnSample = (_, ds, _) => new McpDatasetSample(ds, 0, [], IsSynthetic: false)
+        };
+        var gateway = new StubGatewayExecutionService();
+        var executor = Executor(catalog, gateway);
 
         var json = await executor.ExecuteOperationAsync(tool, """{"dataset":"sales.public.orders","count":3}""", Session());
 
         json.ShouldContain("\"isSynthetic\":false");
-        await catalog.Received(1).SampleRowsAsync(Arg.Any<ClaimsPrincipal>(), "sales.public.orders", 3, Arg.Any<CancellationToken>());
-        gateway.ReceivedCalls().ShouldBeEmpty();
+        catalog.SampleCalls.Count.ShouldBe(1);
+        catalog.SampleCalls[0].Dataset.ShouldBe("sales.public.orders");
+        catalog.SampleCalls[0].Count.ShouldBe(3);
+        gateway.PageCallCount.ShouldBe(0);
     }
 
     [Fact]
     public async Task Executor_ListDatasets_PassesSearchAndDomain()
     {
-        var catalog = Substitute.For<IMcpDatasetCatalog>();
-        catalog.ListDatasetsAsync(Arg.Any<ClaimsPrincipal>(), "order", "sales", Arg.Any<CancellationToken>())
-            .Returns(new McpDatasetList([new McpDatasetSummary("sales.public.orders", "orders", "Orders", "INTERNAL", 3)], 1, false));
+        var catalog = new StubMcpDatasetCatalog
+        {
+            OnList = (_, search, domain) => search == "order" && domain == "sales"
+                ? new McpDatasetList([new McpDatasetSummary("sales.public.orders", "orders", "Orders", "INTERNAL", 3)], 1, false)
+                : new McpDatasetList([], 0, false)
+        };
 
         var json = await Executor(catalog).ExecuteOperationAsync(Tool("list_datasets"), """{"search":"order","domain":"sales"}""", Session());
 
@@ -350,9 +363,10 @@ public sealed class McpDatasetToolWiringTests
     [Fact]
     public async Task ListDatasets_Json_HasCamelCaseDisplayNameAfterId()
     {
-        var catalog = Substitute.For<IMcpDatasetCatalog>();
-        catalog.ListDatasetsAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
-            .Returns(new McpDatasetList([new McpDatasetSummary("sales.public.orders", "Aufträge", "Orders", "INTERNAL", 3)], 1, false));
+        var catalog = new StubMcpDatasetCatalog
+        {
+            OnList = (_, _, _) => new McpDatasetList([new McpDatasetSummary("sales.public.orders", "Aufträge", "Orders", "INTERNAL", 3)], 1, false)
+        };
 
         var json = await Executor(catalog).ExecuteOperationAsync(Tool("list_datasets"), "{}", Session());
 
@@ -365,9 +379,10 @@ public sealed class McpDatasetToolWiringTests
     [Fact]
     public async Task DescribeDataset_Json_HasDisplayName()
     {
-        var catalog = Substitute.For<IMcpDatasetCatalog>();
-        catalog.DescribeDatasetAsync(Arg.Any<ClaimsPrincipal>(), "sales.public.orders", Arg.Any<CancellationToken>())
-            .Returns(new McpDatasetDescription("sales.public.orders", "Aufträge", "sales", "public", "orders", "Orders", null, "INTERNAL", false, [], []));
+        var catalog = new StubMcpDatasetCatalog
+        {
+            OnDescribe = (_, _) => new McpDatasetDescription("sales.public.orders", "Aufträge", "sales", "public", "orders", "Orders", null, "INTERNAL", false, [], [])
+        };
 
         var json = await Executor(catalog).ExecuteOperationAsync(Tool("describe_dataset"), """{"dataset":"sales.public.orders"}""", Session());
 
@@ -378,9 +393,10 @@ public sealed class McpDatasetToolWiringTests
     [Fact]
     public async Task Executor_HiddenOrMissingDataset_IsReportedAsNotFound()
     {
-        var catalog = Substitute.For<IMcpDatasetCatalog>();
-        catalog.DescribeDatasetAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns<McpDatasetDescription>(_ => throw new TableNotFoundException(Orders));
+        var catalog = new StubMcpDatasetCatalog
+        {
+            OnDescribe = (_, _) => throw new TableNotFoundException(Orders)
+        };
 
         var json = await Executor(catalog).ExecuteOperationAsync(Tool("describe_dataset"), """{"dataset":"sales.public.orders"}""", Session());
 
@@ -392,9 +408,10 @@ public sealed class McpDatasetToolWiringTests
     [Fact]
     public async Task Executor_InvalidDatasetId_IsAnInvalidParamsError()
     {
-        var catalog = Substitute.For<IMcpDatasetCatalog>();
-        catalog.SampleRowsAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<CancellationToken>())
-            .Returns<McpDatasetSample>(_ => throw new ArgumentException("The dataset id must have the form 'domain.schema.table'."));
+        var catalog = new StubMcpDatasetCatalog
+        {
+            OnSample = (_, _, _) => throw new ArgumentException("The dataset id must have the form 'domain.schema.table'.")
+        };
 
         var json = await Executor(catalog).ExecuteOperationAsync(Tool("sample_rows"), """{"dataset":"orders"}""", Session());
 
@@ -405,12 +422,45 @@ public sealed class McpDatasetToolWiringTests
     [Fact]
     public async Task Executor_DeniedRead_IsForbidden()
     {
-        var catalog = Substitute.For<IMcpDatasetCatalog>();
-        catalog.SampleRowsAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<CancellationToken>())
-            .Returns<McpDatasetSample>(_ => throw new GatewayForbiddenException());
+        var catalog = new StubMcpDatasetCatalog
+        {
+            OnSample = (_, _, _) => throw new GatewayForbiddenException()
+        };
 
         var json = await Executor(catalog).ExecuteOperationAsync(Tool("sample_rows"), """{"dataset":"sales.public.orders"}""", Session());
 
         json.ShouldContain("FORBIDDEN");
+    }
+
+    private sealed class AnyTableMetadataRepo(bool requiresFourEyes) : ITableMetadataRepository
+    {
+        public Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default)
+            => Task.FromResult<TableMetadata?>(new TableMetadata { Identifier = table, Table = new Table { RequiresFourEyes = requiresFourEyes } });
+
+        public Task<IReadOnlyList<TableMetadata>> GetAllTablesAsync(CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<TableMetadata>>([]);
+
+        public Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default)
+            => Task.FromResult(metadata);
+
+        public Task<TableKeyDefinitionChange?> ReplaceTableKeyDefinitionAsync(
+            TableIdentifier table, IReadOnlyList<string> primaryKey, IReadOnlyList<TableIndexDefinition> indexes,
+            IReadOnlyList<KeyColumnDirection>? primaryKeyDirections = null, CancellationToken ct = default)
+            => throw new NotSupportedException();
+    }
+
+    private sealed class StubGraphQlCatalogMap(IReadOnlyList<TableIdentifier>? tables) : IGraphQlCatalogMap
+    {
+        public Task<GraphQlTableMapping?> GetTableAsync(TableIdentifier table, CancellationToken ct = default)
+            => Task.FromResult<GraphQlTableMapping?>(null);
+
+        public Task<string?> GetRootFieldAsync(TableIdentifier table, CancellationToken ct = default)
+            => Task.FromResult<string?>(null);
+
+        public Task<TableIdentifier?> ResolveRootFieldAsync(string field, CancellationToken ct = default)
+            => Task.FromResult<TableIdentifier?>(null);
+
+        public Task<IReadOnlyList<TableIdentifier>?> ResolveDocumentTablesAsync(string documentText, CancellationToken ct = default)
+            => Task.FromResult(tables);
     }
 }

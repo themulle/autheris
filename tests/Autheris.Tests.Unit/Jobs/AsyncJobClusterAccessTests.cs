@@ -19,10 +19,11 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Tests.Common;
+using Autheris.Tests.Common.Fakes;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
-using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -30,8 +31,8 @@ using Xunit;
 public sealed class AsyncJobClusterAccessTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "autheris-a12c-" + Guid.NewGuid().ToString("N"));
-    private readonly IAuditLogRepository _auditA = Substitute.For<IAuditLogRepository>();
-    private readonly IAuditLogRepository _auditB = Substitute.For<IAuditLogRepository>();
+    private readonly InMemoryAuditLogRepository _auditA = new();
+    private readonly InMemoryAuditLogRepository _auditB = new();
     private readonly FakeTimeProvider _time = new(DateTimeOffset.Parse("2026-10-14T10:00:00Z"));
     private readonly InMemoryClusterStateProvider _state;
     private readonly TenantId _tenant = new("t");
@@ -55,8 +56,7 @@ public sealed class AsyncJobClusterAccessTests : IDisposable
         string? scratch = null,
         int maxTimeout = 900)
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.ContentRootPath.Returns(Path.Combine(_root, name));
+        var env = new TestHostEnvironment { ContentRootPath = Path.Combine(_root, name) };
         return new AsyncQueryJobManager(
             audit,
             environment: env,
@@ -98,9 +98,7 @@ public sealed class AsyncJobClusterAccessTests : IDisposable
         var seen = await b.GetJobAsync(job.JobId, _tenant, "mallory");
 
         seen.ShouldBeNull();
-        await _auditB.Received(1).RecordAuditEventAsync(
-            Arg.Is<AuditLogEntry>(e => e.EventType == AuditEventTypes.AsyncJobAccessDenied && e.Decision == "DENY" && e.ActorSid.Value == "mallory"),
-            Arg.Any<CancellationToken>());
+        _auditB.Entries.Count(e => e.EventType == AuditEventTypes.AsyncJobAccessDenied && e.Decision == "DENY" && e.ActorSid.Value == "mallory").ShouldBe(1);
     }
 
     [Fact]
@@ -122,23 +120,12 @@ public sealed class AsyncJobClusterAccessTests : IDisposable
         (await b.GetJobAsync("not-a-guid", _tenant, "alice")).ShouldBeNull();
     }
 
-    private static IDistributedClusterStateProvider ThrowingState(bool onGet = true, bool onSet = true)
-    {
-        var state = Substitute.For<IDistributedClusterStateProvider>();
-        if (onGet)
+    private IDistributedClusterStateProvider ThrowingState(bool onGet = true, bool onSet = true) =>
+        new DelegatingClusterStateProvider(_state)
         {
-            state.GetAsync<AsyncJobClusterRecord>(Arg.Any<string>(), Arg.Any<CancellationToken>())
-                .Returns<ValueTask<AsyncJobClusterRecord?>>(_ => throw new ClusterStateUnavailableException());
-        }
-
-        if (onSet)
-        {
-            state.SetAsync(Arg.Any<string>(), Arg.Any<AsyncJobClusterRecord>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
-                .Returns<ValueTask>(_ => throw new ClusterStateUnavailableException());
-        }
-
-        return state;
-    }
+            OnGet = onGet ? _ => throw new ClusterStateUnavailableException() : null,
+            OnSet = onSet ? _ => throw new ClusterStateUnavailableException() : null
+        };
 
     [Fact]
     public async Task NodeB_StateUnavailable_Throws()
@@ -159,7 +146,7 @@ public sealed class AsyncJobClusterAccessTests : IDisposable
         await Should.ThrowAsync<ClusterStateUnavailableException>(() => SubmitAsync(a));
 
         a.Reader.TryRead(out _).ShouldBeFalse();
-        await _auditA.DidNotReceive().RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>());
+        _auditA.Entries.ShouldBeEmpty();
     }
 
     [Fact]
@@ -243,9 +230,7 @@ public sealed class AsyncJobClusterAccessTests : IDisposable
             await Should.ThrowAsync<GatewaySecurityException>(() => b.GetJobResultStreamAsync(job.JobId, _tenant, "alice"));
         }
 
-        await _auditB.Received().RecordAuditEventAsync(
-            Arg.Is<AuditLogEntry>(e => e.EventType == AuditEventTypes.AsyncJobDownloaded && e.Decision == "DENY"),
-            Arg.Any<CancellationToken>());
+        _auditB.Entries.ShouldContain(e => e.EventType == AuditEventTypes.AsyncJobDownloaded && e.Decision == "DENY");
     }
 
     [Fact]
@@ -305,8 +290,7 @@ public sealed class AsyncJobClusterAccessTests : IDisposable
     [Fact]
     public void ClusterWideTopology_WithoutStateProvider_ThrowsAtConstruction()
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.ContentRootPath.Returns(_root);
+        var env = new TestHostEnvironment { ContentRootPath = _root };
 
         Should.Throw<InvalidOperationException>(() => new AsyncQueryJobManager(
             _auditA, environment: env, topology: new ClusterStateTopology(ClusterStateMode.External)));
@@ -317,17 +301,17 @@ public sealed class AsyncJobClusterAccessTests : IDisposable
     private async Task<(AsyncQueryJobBackgroundWorker Worker, TaskCompletionSource<CancellationToken> Token)> StartWorkerAsync(AsyncQueryJobManager node)
     {
         var tokenSeen = new TaskCompletionSource<CancellationToken>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var sql = Substitute.For<IGovernedSqlExecutionService>();
-        sql.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
-            .Returns(async call =>
+        var sql = new StubGovernedSqlExecutionService
+        {
+            OnBuffered = async (req, _, _, ct) =>
             {
-                var ct = call.Arg<CancellationToken>();
                 tokenSeen.TrySetResult(ct);
-                await Task.Delay(Timeout.Infinite, ct);
+                await Autheris.Tests.Common.Hang.UntilCancelledAsync(ct);
                 return AsyncJobWorkerConcurrencyTests.EmptyResult();
-            });
+            }
+        };
         var worker = new AsyncQueryJobBackgroundWorker(
-            node, node, AsyncJobWorkerConcurrencyTests.Scopes(sql), Substitute.For<IAuditLogRepository>(),
+            node, node, AsyncJobWorkerConcurrencyTests.Scopes(sql), new InMemoryAuditLogRepository(),
             NullLogger<AsyncQueryJobBackgroundWorker>.Instance,
             clusterState: _state, topology: new ClusterStateTopology(ClusterStateMode.External));
         await worker.StartAsync(CancellationToken.None);
@@ -351,9 +335,7 @@ public sealed class AsyncJobClusterAccessTests : IDisposable
         var record = (await _state.GetAsync<AsyncJobClusterRecord>($"asyncjob:t:{job.JobId}"))!;
         record.State.ShouldBe(AsyncJobState.Cancelled);
         record.OwnerNodeId.ShouldBe(ownerNode);
-        await _auditB.Received(1).RecordAuditEventAsync(
-            Arg.Is<AuditLogEntry>(e => e.EventType == AuditEventTypes.AsyncJobCancelled && e.Decision == "ALLOW"),
-            Arg.Any<CancellationToken>());
+        _auditB.Entries.Count(e => e.EventType == AuditEventTypes.AsyncJobCancelled && e.Decision == "ALLOW").ShouldBe(1);
         await worker.StopAsync(CancellationToken.None);
     }
 
@@ -367,9 +349,7 @@ public sealed class AsyncJobClusterAccessTests : IDisposable
         (await b.CancelJobAsync(job.JobId, _tenant, "mallory")).ShouldBeFalse();
 
         (await _state.GetAsync<AsyncJobClusterRecord>($"asyncjob:t:{job.JobId}"))!.State.ShouldBe(AsyncJobState.Queued);
-        await _auditB.Received(1).RecordAuditEventAsync(
-            Arg.Is<AuditLogEntry>(e => e.EventType == AuditEventTypes.AsyncJobAccessDenied && e.Decision == "DENY"),
-            Arg.Any<CancellationToken>());
+        _auditB.Entries.Count(e => e.EventType == AuditEventTypes.AsyncJobAccessDenied && e.Decision == "DENY").ShouldBe(1);
     }
 
     [Fact]
@@ -428,11 +408,12 @@ public sealed class AsyncJobClusterAccessTests : IDisposable
         (await b.CancelJobAsync(job.JobId, _tenant, "alice")).ShouldBeTrue();
 
         var sqlCalls = 0;
-        var sql = Substitute.For<IGovernedSqlExecutionService>();
-        sql.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
-            .Returns(_ => { Interlocked.Increment(ref sqlCalls); return Task.FromResult(AsyncJobWorkerConcurrencyTests.EmptyResult()); });
+        var sql = new StubGovernedSqlExecutionService
+        {
+            OnBuffered = (_, _, _, _) => { Interlocked.Increment(ref sqlCalls); return Task.FromResult(AsyncJobWorkerConcurrencyTests.EmptyResult()); }
+        };
         var worker = new AsyncQueryJobBackgroundWorker(
-            a, a, AsyncJobWorkerConcurrencyTests.Scopes(sql), Substitute.For<IAuditLogRepository>(),
+            a, a, AsyncJobWorkerConcurrencyTests.Scopes(sql), new InMemoryAuditLogRepository(),
             NullLogger<AsyncQueryJobBackgroundWorker>.Instance,
             clusterState: _state, topology: new ClusterStateTopology(ClusterStateMode.External));
         await worker.StartAsync(CancellationToken.None);
@@ -494,16 +475,15 @@ public sealed class AsyncJobClusterAccessTests : IDisposable
     [Fact]
     public async Task Worker_SubscribeFailure_DoesNotStopProcessing()
     {
-        var state = Substitute.For<IDistributedClusterStateProvider>();
-        state.SubscribeAsync<AsyncJobCancelSignal>(Arg.Any<string>(), Arg.Any<Func<AsyncJobCancelSignal, ValueTask>>(), Arg.Any<CancellationToken>())
-            .Returns(_ => throw new ClusterStateUnavailableException());
+        var state = new DelegatingClusterStateProvider(_state) { OnSubscribe = _ => throw new ClusterStateUnavailableException() };
         var node = Node(_auditA, "a", state);
         var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var sql = Substitute.For<IGovernedSqlExecutionService>();
-        sql.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
-            .Returns(_ => { done.TrySetResult(); return Task.FromResult(AsyncJobWorkerConcurrencyTests.EmptyResult()); });
+        var sql = new StubGovernedSqlExecutionService
+        {
+            OnBuffered = (_, _, _, _) => { done.TrySetResult(); return Task.FromResult(AsyncJobWorkerConcurrencyTests.EmptyResult()); }
+        };
         var worker = new AsyncQueryJobBackgroundWorker(
-            node, node, AsyncJobWorkerConcurrencyTests.Scopes(sql), Substitute.For<IAuditLogRepository>(),
+            node, node, AsyncJobWorkerConcurrencyTests.Scopes(sql), new InMemoryAuditLogRepository(),
             NullLogger<AsyncQueryJobBackgroundWorker>.Instance,
             clusterState: state, topology: new ClusterStateTopology(ClusterStateMode.External));
         await SubmitAsync(node);
@@ -531,9 +511,10 @@ public sealed class AsyncJobClusterAccessTests : IDisposable
     [Fact]
     public async Task CancelSignal_WhileStateUnavailable_IsIgnored()
     {
-        var state = Substitute.For<IDistributedClusterStateProvider>();
-        state.GetAsync<AsyncJobCancelTombstone>(Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns<ValueTask<AsyncJobCancelTombstone?>>(_ => throw new ClusterStateUnavailableException());
+        var state = new DelegatingClusterStateProvider(_state)
+        {
+            OnGet = _ => throw new ClusterStateUnavailableException()
+        };
         var a = Node(_auditA, "a", state);
         var job = await SubmitAsync(a);
 
@@ -549,11 +530,12 @@ public sealed class AsyncJobClusterAccessTests : IDisposable
         var b = Node(_auditB, "b");
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var running = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var sql = Substitute.For<IGovernedSqlExecutionService>();
-        sql.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
-            .Returns(async _ => { running.TrySetResult(); await release.Task; return AsyncJobWorkerConcurrencyTests.EmptyResult(); });
+        var sql = new StubGovernedSqlExecutionService
+        {
+            OnBuffered = async (_, _, _, _) => { running.TrySetResult(); await release.Task; return AsyncJobWorkerConcurrencyTests.EmptyResult(); }
+        };
         var worker = new AsyncQueryJobBackgroundWorker(
-            a, a, AsyncJobWorkerConcurrencyTests.Scopes(sql), Substitute.For<IAuditLogRepository>(),
+            a, a, AsyncJobWorkerConcurrencyTests.Scopes(sql), new InMemoryAuditLogRepository(),
             NullLogger<AsyncQueryJobBackgroundWorker>.Instance,
             clusterState: _state, topology: new ClusterStateTopology(ClusterStateMode.External));
         await worker.StartAsync(CancellationToken.None);
@@ -573,17 +555,47 @@ public sealed class AsyncJobClusterAccessTests : IDisposable
     [Fact]
     public async Task CompletedTransition_RetriesTombstoneRead_BeforeFailingOpen()
     {
-        var state = Substitute.For<IDistributedClusterStateProvider>();
         var tombstone = new AsyncJobCancelTombstone("t", "x", "alice", _time.GetUtcNow());
-        state.GetAsync<AsyncJobCancelTombstone>(Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns(
-                _ => throw new ClusterStateUnavailableException(),
-                _ => ValueTask.FromResult<AsyncJobCancelTombstone?>(tombstone));
+        var reads = 0;
+        var state = new DelegatingClusterStateProvider(_state)
+        {
+            OnGet = _ => ++reads == 1 ? throw new ClusterStateUnavailableException() : tombstone
+        };
         var a = Node(_auditA, "a", state);
         var job = await SubmitAsync(a);
 
         var accepted = await a.TryTransitionAsync(job with { State = AsyncJobState.Completed, CompletedAt = _time.GetUtcNow() }, CancellationToken.None);
 
         accepted.ShouldBeFalse("the second read sees the tombstone");
+    }
+
+    private sealed class DelegatingClusterStateProvider(IDistributedClusterStateProvider inner) : IDistributedClusterStateProvider
+    {
+        public Func<string, object?>? OnGet { get; init; }
+        public Action<string>? OnSet { get; init; }
+        public Action<string>? OnSubscribe { get; init; }
+
+        public ValueTask<T?> GetAsync<T>(string key, CancellationToken ct = default)
+            => OnGet is not null ? ValueTask.FromResult((T?)OnGet(key)) : inner.GetAsync<T>(key, ct);
+        public ValueTask SetAsync<T>(string key, T value, TimeSpan ttl, CancellationToken ct = default)
+        {
+            OnSet?.Invoke(key);
+            return inner.SetAsync(key, value, ttl, ct);
+        }
+        public ValueTask<bool> RemoveAsync(string key, CancellationToken ct = default) => inner.RemoveAsync(key, ct);
+        public ValueTask<long?> IncrementAsync(string key, long delta, TimeSpan ttl, CancellationToken ct = default) => inner.IncrementAsync(key, delta, ttl, ct);
+        public ValueTask<(BudgetConsumeOutcome Outcome, long ConsumedAfter)> TryConsumeBudgetAsync(string key, long cost, long limit, TimeSpan ttl, CancellationToken ct = default)
+            => inner.TryConsumeBudgetAsync(key, cost, limit, ttl, ct);
+        public ValueTask PublishEventAsync<T>(string channel, T payload, CancellationToken ct = default) => inner.PublishEventAsync(channel, payload, ct);
+        public IAsyncDisposable SubscribeAsync<T>(string channel, Func<T, ValueTask> handler, CancellationToken ct = default)
+        {
+            OnSubscribe?.Invoke(channel);
+            return inner.SubscribeAsync(channel, handler, ct);
+        }
+        public ValueTask<IAsyncDisposable?> TryAcquireLockAsync(string resourceKey, TimeSpan expiry, CancellationToken ct = default) => inner.TryAcquireLockAsync(resourceKey, expiry, ct);
+        public ValueTask<IDistributedLease?> TryAcquireLeaseAsync(string resourceKey, TimeSpan ttl, CancellationToken ct = default) => inner.TryAcquireLeaseAsync(resourceKey, ttl, ct);
+        public ValueTask<bool?> TryAcquireSlotAsync(string setKey, string member, int limit, TimeSpan ttl, CancellationToken ct = default) => inner.TryAcquireSlotAsync(setKey, member, limit, ttl, ct);
+        public ValueTask<bool> RenewSlotAsync(string setKey, string member, TimeSpan ttl, CancellationToken ct = default) => inner.RenewSlotAsync(setKey, member, ttl, ct);
+        public ValueTask ReleaseSlotAsync(string setKey, string member, CancellationToken ct = default) => inner.ReleaseSlotAsync(setKey, member, ct);
     }
 }

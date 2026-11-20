@@ -12,12 +12,7 @@ public class ParseWorkerPoolTests
 
     private static void WaitFor(Func<bool> condition, string what)
     {
-        var deadline = DateTime.UtcNow.AddSeconds(10);
-        while (!condition())
-        {
-            Assert.True(DateTime.UtcNow < deadline, $"Timed out waiting for {what}.");
-            Thread.Sleep(5);
-        }
+        Assert.True(SpinWait.SpinUntil(condition, TimeSpan.FromSeconds(10)), $"Timed out waiting for {what}.");
     }
 
     [Fact]

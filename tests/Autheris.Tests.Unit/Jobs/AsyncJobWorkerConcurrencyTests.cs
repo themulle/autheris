@@ -447,7 +447,7 @@ public sealed class AsyncJobWorkerConcurrencyTests : IDisposable
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var sql = Substitute.For<IGovernedSqlExecutionService>();
         sql.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
-            .Returns(async call => { started.TrySetResult(); await Task.Delay(Timeout.Infinite, call.Arg<CancellationToken>()); return EmptyResult(); });
+            .Returns(async call => { started.TrySetResult(); await Autheris.Tests.Common.Hang.UntilCancelledAsync(call.Arg<CancellationToken>()); return EmptyResult(); });
         var worker = new AsyncQueryJobBackgroundWorker(manager, manager, Scopes(sql), _audit, NullLogger<AsyncQueryJobBackgroundWorker>.Instance,
             jobOptions: Options.Create(new AsyncJobOptions { MaxConcurrentJobs = 1, MaxConcurrentJobsPerTenant = 1 }));
         var first = await manager.SubmitJobAsync(new AsyncQueryJobRequest("SELECT 1"), User(), new TenantId("t"));
@@ -478,10 +478,8 @@ public sealed class AsyncJobWorkerConcurrencyTests : IDisposable
         }
 
         var overflow = manager.SubmitJobAsync(new AsyncQueryJobRequest("SELECT 1"), User(), new TenantId("t"));
-        var completed = await Task.WhenAny(overflow, Task.Delay(TimeSpan.FromSeconds(5)));
-
-        completed.ShouldBe(overflow, "a full queue must reject instead of blocking the request");
-        await Should.ThrowAsync<AsyncJobQueueLimitExceededException>(() => overflow);
+        // a full queue must reject instead of blocking the request
+        await Should.ThrowAsync<AsyncJobQueueLimitExceededException>(() => overflow.WaitAsync(TimeSpan.FromSeconds(5)));
     }
 
     [Fact]

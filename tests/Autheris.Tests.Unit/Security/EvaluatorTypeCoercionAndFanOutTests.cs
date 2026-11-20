@@ -19,7 +19,7 @@ using Xunit;
 
 /// <summary>Review M-9 (nested unpaginated list cost), E-5 (mandatory tenant column), E-6 (no coercion / LIKE wildcards in evaluators).</summary>
 [Trait("Category", "Security")]
-public sealed class CoercionAndFanOutReviewTests
+public sealed class EvaluatorTypeCoercionAndFanOutTests
 {
     private static readonly TableIdentifier Table = new("crm", "dbo", "customers");
 

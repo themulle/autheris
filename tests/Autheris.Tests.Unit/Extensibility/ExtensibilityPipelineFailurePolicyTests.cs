@@ -20,7 +20,7 @@ public sealed class ExtensibilityPipelineFailurePolicyTests
     {
         public async ValueTask<IngressResult> OnIngressAsync(IngressContext context, CancellationToken cancellationToken = default)
         {
-            await Task.Delay(Timeout.Infinite, CancellationToken.None);
+            await Autheris.Tests.Common.Hang.UntilCancelledAsync(CancellationToken.None);
             return IngressResult.Continue();
         }
     }

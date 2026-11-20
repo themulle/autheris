@@ -1,5 +1,7 @@
 namespace Autheris.Tests.Unit.OData;
 
+using Autheris.Tests.Common;
+using Autheris.Tests.Common.Fakes;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -12,7 +14,6 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Microsoft.Extensions.Logging.Abstractions;
-using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -188,9 +189,7 @@ public sealed class ODataTests
     [Fact]
     public async Task ODataHandler_ExecuteEntitySetQueryAsync_WhenAllowed_Returns200WithRows()
     {
-        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
-            Substitute.For<ITableMetadataRepository>());
-        var execService = Substitute.For<IGatewayExecutionService>();
+        var metadataRepo = new InMemoryTableMetadataRepository();
         var logger = NullLogger<ODataHandler>.Instance;
 
         var sampleRows = new List<IReadOnlyDictionary<string, object?>>
@@ -204,12 +203,12 @@ public sealed class ODataTests
             hasUnconstrainedColumnAllow: true
         );
 
-        execService.ExecuteTablePageAsync(
-            Arg.Any<ClaimsPrincipal?>(),
-            Arg.Is<TableIdentifier>(t => t.TableName == "invoices"),
-            Arg.Any<TablePageRequest>(),
-            Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(new TableQueryPage(sampleRows, decision, null)));
+        var execService = new StubGatewayExecutionService
+        {
+            OnExecutePage = (_, table, _, _) => table.TableName == "invoices"
+                ? Task.FromResult(new TableQueryPage(sampleRows, decision, null))
+                : Task.FromResult(new TableQueryPage([], TableAccessDecision.Denied(table, "Not found"), null))
+        };
 
         var handler = new ODataHandler(metadataRepo, execService, logger);
 
@@ -229,21 +228,19 @@ public sealed class ODataTests
         result.Payload.ShouldNotBeNull();
 
         // Verify execution service was called with parsed select fields
-        await execService.Received().ExecuteTablePageAsync(
-            Arg.Any<ClaimsPrincipal?>(),
-            Arg.Is<TableIdentifier>(t => t.TableName == "invoices"),
-            Arg.Is<TablePageRequest>(r => r.First == 51 && r.After == 0 && r.RequestHeaders == null &&
-                                          r.RequestedFields != null && r.RequestedFields.SequenceEqual(new[] { "id", "customer", "amount" })),
-            Arg.Any<CancellationToken>()
-        );
+        execService.PageCalls.Count.ShouldBe(1);
+        var call = execService.PageCalls[0];
+        call.Table.TableName.ShouldBe("invoices");
+        call.Request.First.ShouldBe(51);
+        call.Request.After.ShouldBe(0);
+        call.Request.RequestHeaders.ShouldBeNull();
+        call.Request.RequestedFields.ShouldNotBeNull().ShouldBe(["id", "customer", "amount"]);
     }
 
     [Fact]
     public async Task ODataHandler_ExecuteEntitySetQueryAsync_WhenMoreRowsExistThanTop_EmitsNextLink()
     {
-        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
-            Substitute.For<ITableMetadataRepository>());
-        var execService = Substitute.For<IGatewayExecutionService>();
+        var metadataRepo = new InMemoryTableMetadataRepository();
         var logger = NullLogger<ODataHandler>.Instance;
 
         var sampleRows = new List<IReadOnlyDictionary<string, object?>>
@@ -259,12 +256,7 @@ public sealed class ODataTests
             hasUnconstrainedColumnAllow: true
         );
 
-        execService.ExecuteTablePageAsync(
-            Arg.Any<ClaimsPrincipal?>(),
-            Arg.Any<TableIdentifier>(),
-            Arg.Any<TablePageRequest>(),
-            Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(new TableQueryPage(sampleRows, decision, null)));
+        var execService = StubGatewayExecutionService.WithPage(new TableQueryPage(sampleRows, decision, null));
 
         var handler = new ODataHandler(metadataRepo, execService, logger);
 
@@ -294,9 +286,7 @@ public sealed class ODataTests
     [Fact]
     public async Task ODataHandler_ExecuteEntitySetQueryAsync_WhenDenied_Returns403WithODataError()
     {
-        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
-            Substitute.For<ITableMetadataRepository>());
-        var execService = Substitute.For<IGatewayExecutionService>();
+        var metadataRepo = new InMemoryTableMetadataRepository();
         var logger = NullLogger<ODataHandler>.Instance;
 
         var decision = TableAccessDecision.Denied(
@@ -304,8 +294,7 @@ public sealed class ODataTests
             "No active consent granted for user SID"
         );
 
-        execService.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(new TableQueryPage(Array.Empty<IReadOnlyDictionary<string, object?>>(), decision, null)));
+        var execService = StubGatewayExecutionService.WithPage(new TableQueryPage(Array.Empty<IReadOnlyDictionary<string, object?>>(), decision, null));
 
         var handler = new ODataHandler(metadataRepo, execService, logger, DevEnv());
 
@@ -328,23 +317,21 @@ public sealed class ODataTests
 
     private static Microsoft.Extensions.Hosting.IHostEnvironment DevEnv(string name = "Development")
     {
-        var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
-        env.EnvironmentName.Returns(name);
+        Microsoft.Extensions.Hosting.IHostEnvironment env = new TestHostEnvironment(name);
         return env;
     }
 
     [Fact]
     public async Task ODataHandler_OutsideDevelopment_DeniedAndNotFoundAreGeneric403()
     {
-        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
-            Substitute.For<ITableMetadataRepository>());
-        var execService = Substitute.For<IGatewayExecutionService>();
+        var metadataRepo = new InMemoryTableMetadataRepository();
         var decision = TableAccessDecision.Denied(new TableIdentifier("sales", "dbo", "invoices"), "Casbin: sid S-1-5-21-1 tenant acme denied");
-        execService.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Is<TableIdentifier>(t => t.TableName == "invoices"), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(new TableQueryPage(Array.Empty<IReadOnlyDictionary<string, object?>>(), decision, null)));
-        execService.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Is<TableIdentifier>(t => t.TableName == "missing"), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
-            .Returns<Task<TableQueryPage>>(
-                _ => throw new Autheris.Domain.Exceptions.TableNotFoundException(new TableIdentifier("acme", "dbo", "missing")));
+        var execService = new StubGatewayExecutionService
+        {
+            OnExecutePage = (_, table, _, _) => table.TableName == "invoices"
+                ? Task.FromResult(new TableQueryPage(Array.Empty<IReadOnlyDictionary<string, object?>>(), decision, null))
+                : Task.FromException<TableQueryPage>(new Autheris.Domain.Exceptions.TableNotFoundException(new TableIdentifier("acme", "dbo", "missing")))
+        };
 
         foreach (var handler in new[]
         {
@@ -528,9 +515,7 @@ public sealed class ODataTests
     [Fact]
     public async Task ODataHandler_ExecuteEntitySetQueryAsync_DefaultPagination_Applies100And0()
     {
-        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
-            Substitute.For<ITableMetadataRepository>());
-        var execService = Substitute.For<IGatewayExecutionService>();
+        var metadataRepo = new InMemoryTableMetadataRepository();
         var logger = NullLogger<ODataHandler>.Instance;
 
         var decision = TableAccessDecision.Allowed(
@@ -539,8 +524,7 @@ public sealed class ODataTests
             hasUnconstrainedColumnAllow: true
         );
 
-        execService.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(new TableQueryPage(Array.Empty<IReadOnlyDictionary<string, object?>>(), decision, null)));
+        var execService = StubGatewayExecutionService.WithPage(new TableQueryPage(Array.Empty<IReadOnlyDictionary<string, object?>>(), decision, null));
 
         var handler = new ODataHandler(metadataRepo, execService, logger);
 
@@ -556,20 +540,18 @@ public sealed class ODataTests
         );
 
         result.Success.ShouldBeTrue();
-        await execService.Received().ExecuteTablePageAsync(
-            Arg.Any<ClaimsPrincipal?>(),
-            Arg.Any<TableIdentifier>(),
-            Arg.Is<TablePageRequest>(r => r.First == 101 && r.After == 0 && r.RequestedFields == null && r.RequestHeaders == null),
-            Arg.Any<CancellationToken>()
-        );
+        execService.PageCalls.Count.ShouldBe(1);
+        var req = execService.LastPageRequest!;
+        req.First.ShouldBe(101);
+        req.After.ShouldBe(0);
+        req.RequestedFields.ShouldBeNull();
+        req.RequestHeaders.ShouldBeNull();
     }
 
     [Fact]
     public async Task ODataHandler_ExecuteEntitySetQueryAsync_ClampsLargeTopTo1000()
     {
-        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
-            Substitute.For<ITableMetadataRepository>());
-        var execService = Substitute.For<IGatewayExecutionService>();
+        var metadataRepo = new InMemoryTableMetadataRepository();
         var logger = NullLogger<ODataHandler>.Instance;
 
         var decision = TableAccessDecision.Allowed(
@@ -578,8 +560,7 @@ public sealed class ODataTests
             hasUnconstrainedColumnAllow: true
         );
 
-        execService.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(new TableQueryPage(Array.Empty<IReadOnlyDictionary<string, object?>>(), decision, null)));
+        var execService = StubGatewayExecutionService.WithPage(new TableQueryPage(Array.Empty<IReadOnlyDictionary<string, object?>>(), decision, null));
 
         var handler = new ODataHandler(metadataRepo, execService, logger);
 
@@ -595,12 +576,12 @@ public sealed class ODataTests
         );
 
         result.Success.ShouldBeTrue();
-        await execService.Received().ExecuteTablePageAsync(
-            Arg.Any<ClaimsPrincipal?>(),
-            Arg.Any<TableIdentifier>(),
-            Arg.Is<TablePageRequest>(r => r.First == 1001 && r.After == 10 && r.RequestedFields == null && r.RequestHeaders == null),
-            Arg.Any<CancellationToken>()
-        );
+        execService.PageCalls.Count.ShouldBe(1);
+        var req = execService.LastPageRequest!;
+        req.First.ShouldBe(1001);
+        req.After.ShouldBe(10);
+        req.RequestedFields.ShouldBeNull();
+        req.RequestHeaders.ShouldBeNull();
     }
 
     [Theory]
@@ -608,9 +589,8 @@ public sealed class ODataTests
     [InlineData(10, -5, "$skip")]
     public async Task ODataHandler_ExecuteEntitySetQueryAsync_NegativeTopOrSkip_Returns400(int? top, int? skip, string paramName)
     {
-        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
-            Substitute.For<ITableMetadataRepository>());
-        var execService = Substitute.For<IGatewayExecutionService>();
+        var metadataRepo = new InMemoryTableMetadataRepository();
+        var execService = new StubGatewayExecutionService();
         var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
 
         var result = await handler.ExecuteEntitySetQueryAsync(
@@ -633,17 +613,14 @@ public sealed class ODataTests
     [Fact]
     public async Task ODataHandler_ExecuteEntitySetQueryAsync_SelectParsingAndTrimming()
     {
-        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
-            Substitute.For<ITableMetadataRepository>());
-        var execService = Substitute.For<IGatewayExecutionService>();
+        var metadataRepo = new InMemoryTableMetadataRepository();
         var decision = TableAccessDecision.Allowed(
             new TableIdentifier("sales", "dbo", "invoices"),
             new Dictionary<string, ColumnAccessLevel>(),
             hasUnconstrainedColumnAllow: true
         );
 
-        execService.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(new TableQueryPage(Array.Empty<IReadOnlyDictionary<string, object?>>(), decision, null)));
+        var execService = StubGatewayExecutionService.WithPage(new TableQueryPage(Array.Empty<IReadOnlyDictionary<string, object?>>(), decision, null));
 
         var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
 
@@ -659,12 +636,8 @@ public sealed class ODataTests
         );
 
         result.Success.ShouldBeTrue();
-        await execService.Received().ExecuteTablePageAsync(
-            Arg.Any<ClaimsPrincipal?>(),
-            Arg.Any<TableIdentifier>(),
-            Arg.Is<TablePageRequest>(r => r.RequestedFields != null && r.RequestedFields.SequenceEqual(new[] { "id", "customer", "amount" })),
-            Arg.Any<CancellationToken>()
-        );
+        execService.PageCalls.Count.ShouldBe(1);
+        execService.LastPageRequest!.RequestedFields.ShouldNotBeNull().ShouldBe(["id", "customer", "amount"]);
     }
 
     [Theory]
@@ -677,9 +650,8 @@ public sealed class ODataTests
     [InlineData("amount+1")]
     public async Task ODataHandler_ExecuteEntitySetQueryAsync_SelectWithInvalidCharacters_Returns400(string invalidSelect)
     {
-        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
-            Substitute.For<ITableMetadataRepository>());
-        var execService = Substitute.For<IGatewayExecutionService>();
+        var metadataRepo = new InMemoryTableMetadataRepository();
+        var execService = new StubGatewayExecutionService();
         var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
 
         var result = await handler.ExecuteEntitySetQueryAsync(
@@ -704,12 +676,8 @@ public sealed class ODataTests
     [Fact]
     public async Task ODataHandler_ExecuteEntitySetQueryAsync_TimeoutException_Returns504()
     {
-        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
-            Substitute.For<ITableMetadataRepository>());
-        var execService = Substitute.For<IGatewayExecutionService>();
-        execService.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
-            .Returns<Task<TableQueryPage>>(
-                _ => throw new TimeoutException("Database command timed out."));
+        var metadataRepo = new InMemoryTableMetadataRepository();
+        var execService = StubGatewayExecutionService.Throwing(new TimeoutException("Database command timed out."));
 
         var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
 
@@ -733,12 +701,8 @@ public sealed class ODataTests
     [Fact]
     public async Task ODataHandler_ExecuteEntitySetQueryAsync_DbTimeoutException_Returns504()
     {
-        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
-            Substitute.For<ITableMetadataRepository>());
-        var execService = Substitute.For<IGatewayExecutionService>();
-        execService.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
-            .Returns<Task<TableQueryPage>>(
-                _ => throw new TestDbTimeoutException("SqlException: Execution Timeout Expired. The timeout period elapsed."));
+        var metadataRepo = new InMemoryTableMetadataRepository();
+        var execService = StubGatewayExecutionService.Throwing(new TestDbTimeoutException("SqlException: Execution Timeout Expired. The timeout period elapsed."));
 
         var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
 
@@ -761,12 +725,8 @@ public sealed class ODataTests
     [Fact]
     public async Task ODataHandler_ExecuteEntitySetQueryAsync_UnexpectedException_Returns500()
     {
-        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
-            Substitute.For<ITableMetadataRepository>());
-        var execService = Substitute.For<IGatewayExecutionService>();
-        execService.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
-            .Returns<Task<TableQueryPage>>(
-                _ => throw new InvalidOperationException("Fatal unexpected engine crash"));
+        var metadataRepo = new InMemoryTableMetadataRepository();
+        var execService = StubGatewayExecutionService.Throwing(new InvalidOperationException("Fatal unexpected engine crash"));
 
         var handlerDev = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance, DevEnv("Development"));
         var resultDev = await handlerDev.ExecuteEntitySetQueryAsync(null, "https://gateway/odata/v4", new TableIdentifier("sales", "dbo", "invoices"), 10, 0, null, false, null);
@@ -788,12 +748,8 @@ public sealed class ODataTests
     [Fact]
     public async Task ODataHandler_ExecuteEntitySetQueryAsync_UnauthorizedException_Returns401()
     {
-        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
-            Substitute.For<ITableMetadataRepository>());
-        var execService = Substitute.For<IGatewayExecutionService>();
-        execService.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
-            .Returns<Task<TableQueryPage>>(
-                _ => throw new Autheris.Domain.Exceptions.GatewayUnauthorizedException("Authentication required"));
+        var metadataRepo = new InMemoryTableMetadataRepository();
+        var execService = StubGatewayExecutionService.Throwing(new Autheris.Domain.Exceptions.GatewayUnauthorizedException("Authentication required"));
 
         var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
 
@@ -808,12 +764,8 @@ public sealed class ODataTests
     [Fact]
     public async Task ODataHandler_ExecuteEntitySetQueryAsync_SecurityException_Returns403()
     {
-        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
-            Substitute.For<ITableMetadataRepository>());
-        var execService = Substitute.For<IGatewayExecutionService>();
-        execService.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
-            .Returns<Task<TableQueryPage>>(
-                _ => throw new Autheris.Domain.Exceptions.GatewaySecurityException("Zero-Trust policy violation"));
+        var metadataRepo = new InMemoryTableMetadataRepository();
+        var execService = StubGatewayExecutionService.Throwing(new Autheris.Domain.Exceptions.GatewaySecurityException("Zero-Trust policy violation"));
 
         var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance, DevEnv("Development"));
 
@@ -831,9 +783,8 @@ public sealed class ODataTests
     [InlineData("   ")]
     public async Task ODataHandler_ExecuteEntitySetQueryAsync_NullOrEmptyServiceRoot_Throws(string? rootUrl)
     {
-        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
-            Substitute.For<ITableMetadataRepository>());
-        var execService = Substitute.For<IGatewayExecutionService>();
+        var metadataRepo = new InMemoryTableMetadataRepository();
+        var execService = new StubGatewayExecutionService();
         var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
 
         await Should.ThrowAsync<ArgumentException>(() =>
@@ -843,17 +794,14 @@ public sealed class ODataTests
     [Fact]
     public async Task ODataHandler_ExecuteEntitySetQueryAsync_ForwardsHeaders()
     {
-        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
-            Substitute.For<ITableMetadataRepository>());
-        var execService = Substitute.For<IGatewayExecutionService>();
+        var metadataRepo = new InMemoryTableMetadataRepository();
         var decision = TableAccessDecision.Allowed(
             new TableIdentifier("sales", "dbo", "invoices"),
             new Dictionary<string, ColumnAccessLevel>(),
             hasUnconstrainedColumnAllow: true
         );
 
-        execService.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(new TableQueryPage(Array.Empty<IReadOnlyDictionary<string, object?>>(), decision, null)));
+        var execService = StubGatewayExecutionService.WithPage(new TableQueryPage(Array.Empty<IReadOnlyDictionary<string, object?>>(), decision, null));
 
         var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
         var headers = new Dictionary<string, string[]> { ["X-Tenant-ID"] = ["tenant_abc"] };
@@ -861,9 +809,8 @@ public sealed class ODataTests
         var result = await handler.ExecuteEntitySetQueryAsync(null, "https://gateway/odata/v4", new TableIdentifier("sales", "dbo", "invoices"), 10, 0, null, false, headers);
 
         result.Success.ShouldBeTrue();
-        await execService.Received().ExecuteTablePageAsync(
-            Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(),
-            Arg.Is<TablePageRequest>(r => r.RequestHeaders == headers), Arg.Any<CancellationToken>());
+        execService.PageCalls.Count.ShouldBe(1);
+        execService.LastPageRequest!.RequestHeaders.ShouldBe(headers);
     }
 
     // ---- OData-Härtung (docs/plans/rls-subquery-in-strategy.md, O1-O12) ----
@@ -873,13 +820,12 @@ public sealed class ODataTests
         public int Number { get; } = number;
     }
 
-    private static ODataHandler CreateHandlerThrowing(Exception exception, IGatewayExecutionService? execService = null)
-    {
-        execService ??= Substitute.For<IGatewayExecutionService>();
-        execService.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
-            .Returns<Task<TableQueryPage>>(_ => throw exception);
-        return new ODataHandler(Substitute.For<ITableMetadataRepository>(), execService, NullLogger<ODataHandler>.Instance, DevEnv("Production"));
-    }
+    private static ODataHandler CreateHandlerThrowing(Exception exception, IGatewayExecutionService? execService = null) =>
+        new(
+            new InMemoryTableMetadataRepository(),
+            execService ?? StubGatewayExecutionService.Throwing(exception),
+            NullLogger<ODataHandler>.Instance,
+            DevEnv("Production"));
 
     private static Task<ODataQueryResult> QueryAsync(ODataHandler handler, int? skip = 0, bool includeCount = false, CancellationToken ct = default) =>
         handler.ExecuteEntitySetQueryAsync(null, "https://gateway/odata/v4", new TableIdentifier("lwetem_prod", "fms", "air1"), 10, skip, null, includeCount, null, ct: ct);
@@ -900,33 +846,31 @@ public sealed class ODataTests
     public async Task ODataHandler_CountTrue_WithoutTotalFromSource_Returns501_InsteadOfPageCount()
     {
         // 4a.3: $count is the total of the data source; without it the page size is never reported as count.
-        var execService = Substitute.For<IGatewayExecutionService>();
         var rows = new List<IReadOnlyDictionary<string, object?>> { new Dictionary<string, object?> { ["id"] = 1 } };
         var decision = TableAccessDecision.Allowed(new TableIdentifier("lwetem_prod", "fms", "air1"), new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true);
-        execService.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
-            .Returns(new TableQueryPage(rows, decision, TotalCount: null));
-        var handler = new ODataHandler(Substitute.For<ITableMetadataRepository>(), execService, NullLogger<ODataHandler>.Instance);
+        var execService = StubGatewayExecutionService.WithPage(new TableQueryPage(rows, decision, TotalCount: null));
+        var handler = new ODataHandler(new InMemoryTableMetadataRepository(), execService, NullLogger<ODataHandler>.Instance);
 
         var result = await QueryAsync(handler, includeCount: true);
 
         result.StatusCode.ShouldBe(501);
         result.ErrorCode.ShouldBe("NotImplemented");
-        await execService.Received(1).ExecuteTablePageAsync(
-            Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Is<TablePageRequest>(r => r.IncludeTotalCount), Arg.Any<CancellationToken>());
+        execService.PageCalls.Count.ShouldBe(1);
+        execService.LastPageRequest!.IncludeTotalCount.ShouldBeTrue();
     }
 
     [Fact]
     public async Task ODataHandler_SkipAboveMaximum_Returns400()
     {
-        var execService = Substitute.For<IGatewayExecutionService>();
-        var handler = new ODataHandler(Substitute.For<ITableMetadataRepository>(), execService, NullLogger<ODataHandler>.Instance);
+        var execService = new StubGatewayExecutionService();
+        var handler = new ODataHandler(new InMemoryTableMetadataRepository(), execService, NullLogger<ODataHandler>.Instance);
 
         var result = await QueryAsync(handler, skip: ODataHandler.MaxSkip + 1);
 
         result.StatusCode.ShouldBe(400);
         result.ErrorCode.ShouldBe("InvalidQueryOption");
         result.ErrorMessage.ShouldNotBeNull().ShouldContain("$skip");
-        await execService.DidNotReceiveWithAnyArgs().ExecuteTablePageAsync(default, default, default!, default);
+        execService.PageCallCount.ShouldBe(0);
     }
 
     [Fact]
@@ -1018,13 +962,9 @@ public sealed class ODataTests
     [Fact]
     public async Task ODataHandler_GetMetadataCsdlAsync_ZeroTrust_OmitsDeniedColumns()
     {
-        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
-            Substitute.For<ITableMetadataRepository>());
-        var execService = Substitute.For<IGatewayExecutionService>();
         var sampleTable = CreateSampleTable();
+        var metadataRepo = new InMemoryTableMetadataRepository(sampleTable);
         var user = CreateAuthenticatedUser("sales");
-
-        metadataRepo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(new[] { sampleTable }));
 
         // Decision: allow id, customer, amount; deny invoice_date, created_at
         var decision = TableAccessDecision.Allowed(
@@ -1039,8 +979,8 @@ public sealed class ODataTests
             }
         );
 
-        execService.CheckTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Is<TableMetadata>(m => m.Identifier == sampleTable.Identifier), false, Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(decision));
+        var execService = StubGatewayExecutionService.WithAccessDecision(
+            m => m.Identifier == sampleTable.Identifier ? decision : TableAccessDecision.Denied(m.Identifier, "Denied"));
 
         var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
 
@@ -1056,9 +996,6 @@ public sealed class ODataTests
     [Fact]
     public async Task ODataHandler_GetServiceDocumentAsync_ZeroTrust_ExcludesDeniedTables()
     {
-        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
-            Substitute.For<ITableMetadataRepository>());
-        var execService = Substitute.For<IGatewayExecutionService>();
         var table1 = CreateSampleTable();
         var table2 = new TableMetadata
         {
@@ -1066,16 +1003,13 @@ public sealed class ODataTests
             Table = new Table { SchemaName = "dbo", TableName = "salaries" },
             Columns = [new TableColumn { ColumnName = "id", DataType = "integer" }]
         };
+        var metadataRepo = new InMemoryTableMetadataRepository(table1, table2);
         var user = CreateAuthenticatedUser("sales");
 
-        metadataRepo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(new[] { table1, table2 }));
-
         // table1 allowed, table2 denied
-        execService.CheckTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Is<TableMetadata>(m => m.Identifier == table1.Identifier), false, Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(TableAccessDecision.Allowed(table1.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)));
-
-        execService.CheckTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Is<TableMetadata>(m => m.Identifier == table2.Identifier), false, Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(TableAccessDecision.Denied(table2.Identifier, "Forbidden")));
+        var execService = StubGatewayExecutionService.WithAccessDecision(m => m.Identifier == table1.Identifier
+            ? TableAccessDecision.Allowed(table1.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)
+            : TableAccessDecision.Denied(table2.Identifier, "Forbidden"));
 
         var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
 
@@ -1090,14 +1024,16 @@ public sealed class ODataTests
     [Fact]
     public async Task SR_M_16_Metadata_AccessCheckThrows_TableOmitted_AndNotCached()
     {
-        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
-            Substitute.For<ITableMetadataRepository>());
-        var execService = Substitute.For<IGatewayExecutionService>();
-        using var memoryCache = new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions { SizeLimit = 1024 * 1024 });
         var sampleTable = CreateSampleTable();
-        metadataRepo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(new[] { sampleTable }));
-        execService.CheckTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableMetadata>(), Arg.Any<bool>(), Arg.Any<CancellationToken>())
-            .Returns<Task<TableAccessDecision>>(_ => throw new InvalidOperationException("boom"));
+        var metadataRepo = new InMemoryTableMetadataRepository(sampleTable);
+        var shouldThrow = true;
+        var execService = new StubGatewayExecutionService
+        {
+            OnCheckMetadataAccess = (_, _, _, _) => shouldThrow
+                ? Task.FromException<TableAccessDecision>(new InvalidOperationException("boom"))
+                : Task.FromResult(TableAccessDecision.Allowed(sampleTable.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true))
+        };
+        using var memoryCache = new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions { SizeLimit = 1024 * 1024 });
 
         var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance, environment: null, memoryCache: memoryCache);
         var user = CreateAuthenticatedUser("sales");
@@ -1108,19 +1044,16 @@ public sealed class ODataTests
         ((List<object>)doc["value"]!).Count.ShouldBe(0);
 
         // Failure must not be cached: once the check recovers, the table appears.
-        execService.CheckTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableMetadata>(), Arg.Any<bool>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(TableAccessDecision.Allowed(sampleTable.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)));
+        shouldThrow = false;
         (await handler.GetMetadataCsdlAsync(user)).ShouldContain("sales_dbo_invoices");
     }
 
     [Fact]
     public async Task SR_M_16_Metadata_NullDecision_TableOmitted()
     {
-        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
-            Substitute.For<ITableMetadataRepository>());
-        var execService = Substitute.For<IGatewayExecutionService>();
-        metadataRepo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(new[] { CreateSampleTable() }));
-
+        var metadataRepo = new InMemoryTableMetadataRepository(CreateSampleTable());
+        var execService = new StubGatewayExecutionService
+        { OnCheckMetadataAccess = (_, _, _, _) => Task.FromResult<TableAccessDecision>(null!) };
         var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
         var xml = await handler.GetMetadataCsdlAsync(CreateAuthenticatedUser("sales"));
         xml.ShouldNotContain("sales_dbo_invoices");
@@ -1129,14 +1062,12 @@ public sealed class ODataTests
     [Fact]
     public async Task OData_Caching_WithSizeLimitedSharedCache_DoesNotThrow()
     {
-        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
-            Substitute.For<ITableMetadataRepository>());
-        var execService = Substitute.For<IGatewayExecutionService>();
-        using var memoryCache = new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions { SizeLimit = 1024 * 1024 });
         var sampleTable = CreateSampleTable();
-        metadataRepo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(new[] { sampleTable }));
-        execService.CheckTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableMetadata>(), Arg.Any<bool>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(TableAccessDecision.Allowed(sampleTable.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)));
+        var metadataRepo = new InMemoryTableMetadataRepository(sampleTable);
+        var execService = StubGatewayExecutionService.WithAccessDecision(m => m.Identifier == sampleTable.Identifier
+            ? TableAccessDecision.Allowed(sampleTable.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)
+            : TableAccessDecision.Denied(m.Identifier, "Denied"));
+        using var memoryCache = new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions { SizeLimit = 1024 * 1024 });
 
         var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance, environment: null, memoryCache: memoryCache);
         var user = CreateAuthenticatedUser("sales");
@@ -1203,26 +1134,19 @@ public sealed class ODataTests
     [Fact]
     public async Task ODataHandler_GetMetadataCsdlAsync_UsesFastPathWithoutPerTableAudit_AndCachesResult()
     {
-        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
-            Substitute.For<ITableMetadataRepository>());
-        var execService = Substitute.For<IGatewayExecutionService>();
+        var sampleTable = CreateSampleTable();
+        var metadataRepo = new InMemoryTableMetadataRepository(sampleTable);
         var logger = NullLogger<ODataHandler>.Instance;
         var memoryCache = new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions());
-
-        var sampleTable = CreateSampleTable();
-        metadataRepo.StubAllTables([sampleTable]);
 
         var decision = TableAccessDecision.Allowed(
             sampleTable.Identifier,
             new Dictionary<string, ColumnAccessLevel>(),
             hasUnconstrainedColumnAllow: true);
 
-        execService.CheckTableAccessAsync(
-            Arg.Any<ClaimsPrincipal>(),
-            Arg.Is<TableMetadata>(m => m.Identifier == sampleTable.Identifier),
-            recordAudit: false,
-            Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(decision));
+        var execService = StubGatewayExecutionService.WithAccessDecision(m => m.Identifier == sampleTable.Identifier
+            ? decision
+            : TableAccessDecision.Denied(m.Identifier, "Denied"));
 
         var handler = new ODataHandler(metadataRepo, execService, logger, environment: null, memoryCache: memoryCache);
         var principal = new ClaimsPrincipal(new ClaimsIdentity(
@@ -1232,47 +1156,34 @@ public sealed class ODataTests
         var xml1 = await handler.GetMetadataCsdlAsync(principal);
         xml1.ShouldContain("EntityType Name=\"sales_dbo_invoices\"");
 
-        await execService.Received(1).CheckTableAccessAsync(
-            Arg.Any<ClaimsPrincipal>(),
-            Arg.Is<TableMetadata>(m => m.Identifier == sampleTable.Identifier),
-            recordAudit: false,
-            Arg.Any<CancellationToken>());
+        execService.MetadataAccessCalls.Count.ShouldBe(1);
+        execService.MetadataAccessCalls[0].Metadata.Identifier.ShouldBe(sampleTable.Identifier);
+        execService.MetadataAccessCalls[0].RecordAudit.ShouldBeFalse();
 
         // Second call: served directly from IMemoryCache without re-evaluating access
         var xml2 = await handler.GetMetadataCsdlAsync(principal);
         xml2.ShouldBe(xml1);
 
         // Verify CheckTableAccessAsync was NOT called a second time
-        await execService.Received(1).CheckTableAccessAsync(
-            Arg.Any<ClaimsPrincipal>(),
-            Arg.Is<TableMetadata>(m => m.Identifier == sampleTable.Identifier),
-            recordAudit: false,
-            Arg.Any<CancellationToken>());
+        execService.MetadataAccessCalls.Count.ShouldBe(1);
     }
 
     [Fact]
     public async Task ODataHandler_GetServiceDocumentAsync_UsesFastPathWithoutPerTableAudit_AndCachesResult()
     {
-        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
-            Substitute.For<ITableMetadataRepository>());
-        var execService = Substitute.For<IGatewayExecutionService>();
+        var sampleTable = CreateSampleTable();
+        var metadataRepo = new InMemoryTableMetadataRepository(sampleTable);
         var logger = NullLogger<ODataHandler>.Instance;
         var memoryCache = new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions());
-
-        var sampleTable = CreateSampleTable();
-        metadataRepo.StubAllTables([sampleTable]);
 
         var decision = TableAccessDecision.Allowed(
             sampleTable.Identifier,
             new Dictionary<string, ColumnAccessLevel>(),
             hasUnconstrainedColumnAllow: true);
 
-        execService.CheckTableAccessAsync(
-            Arg.Any<ClaimsPrincipal>(),
-            Arg.Is<TableMetadata>(m => m.Identifier == sampleTable.Identifier),
-            recordAudit: false,
-            Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(decision));
+        var execService = StubGatewayExecutionService.WithAccessDecision(m => m.Identifier == sampleTable.Identifier
+            ? decision
+            : TableAccessDecision.Denied(m.Identifier, "Denied"));
 
         var handler = new ODataHandler(metadataRepo, execService, logger, environment: null, memoryCache: memoryCache);
         var principal = new ClaimsPrincipal(new ClaimsIdentity(
@@ -1282,22 +1193,16 @@ public sealed class ODataTests
         var doc1 = await handler.GetServiceDocumentAsync("https://gateway/odata/v4", principal);
         doc1.ShouldNotBeNull();
 
-        await execService.Received(1).CheckTableAccessAsync(
-            Arg.Any<ClaimsPrincipal>(),
-            Arg.Is<TableMetadata>(m => m.Identifier == sampleTable.Identifier),
-            recordAudit: false,
-            Arg.Any<CancellationToken>());
+        execService.MetadataAccessCalls.Count.ShouldBe(1);
+        execService.MetadataAccessCalls[0].Metadata.Identifier.ShouldBe(sampleTable.Identifier);
+        execService.MetadataAccessCalls[0].RecordAudit.ShouldBeFalse();
 
         // Second call should hit the cache
         var doc2 = await handler.GetServiceDocumentAsync("https://gateway/odata/v4", principal);
         doc2.ShouldBeSameAs(doc1);
 
         // Still only 1 invocation to CheckTableAccessAsync
-        await execService.Received(1).CheckTableAccessAsync(
-            Arg.Any<ClaimsPrincipal>(),
-            Arg.Is<TableMetadata>(m => m.Identifier == sampleTable.Identifier),
-            recordAudit: false,
-            Arg.Any<CancellationToken>());
+        execService.MetadataAccessCalls.Count.ShouldBe(1);
     }
 }
 

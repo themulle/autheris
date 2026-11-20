@@ -1,6 +1,7 @@
 #pragma warning disable CA2012 // NSubstitute .Returns(...) configures a ValueTask member; the instance is not consumed here.
 namespace Autheris.Tests.Unit.Streaming;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -53,8 +54,7 @@ public sealed class CdcSubscriptionEndpointTests
     {
         store ??= new InMemoryCloudEventSubscriptionStore();
         protector ??= AvailableProtector();
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(environment);
+        IHostEnvironment env = new TestHostEnvironment(environment);
 
         var services = new ServiceCollection();
         services.AddSingleton<Autheris.Modules.Abstractions.IModuleRequestContext, Autheris.Api.Hosting.ModuleRequestContext>();

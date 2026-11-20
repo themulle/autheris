@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Configuration;
 
+using Autheris.Tests.Common;
 using System.Collections.Generic;
 using System.Linq;
 using Autheris.Api.Configuration.Validation;
@@ -17,8 +18,7 @@ public sealed class TeamToGroupSidMapValidationTests
 
     private static string[] Failures(Dictionary<string, string> map, string environmentName = "Production")
     {
-        var environment = Substitute.For<IHostEnvironment>();
-        environment.EnvironmentName.Returns(environmentName);
+        IHostEnvironment environment = new TestHostEnvironment(environmentName);
         var result = new GatewayCoreOptionsValidator(environment).Validate(null,
             new GatewayOptions { OpenMetadata = new OpenMetadataOptions { TeamToGroupSidMap = map } });
         return result.Failures?.Where(f => f.Contains("TeamToGroupSidMap")).ToArray() ?? [];

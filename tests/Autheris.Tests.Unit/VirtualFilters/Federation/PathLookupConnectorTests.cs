@@ -242,7 +242,7 @@ public sealed class PathLookupConnectorTests
 
                 try
                 {
-                    await Task.Delay(Timeout.Infinite, ci.ArgAt<CancellationToken>(2));
+                    await Autheris.Tests.Common.Hang.UntilCancelledAsync(ci.ArgAt<CancellationToken>(2));
                 }
                 catch (OperationCanceledException)
                 {

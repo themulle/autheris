@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Security;
 
+using Autheris.Tests.Common;
 using Microsoft.Extensions.Configuration;
 using System;
 using System.Collections.Generic;
@@ -26,6 +27,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Microsoft.Extensions.Logging.Abstractions;
 
 [Trait("Category", "Security")]
 public class DevPresetAndGovernanceFailClosedSecurityTests
@@ -38,8 +40,7 @@ public class DevPresetAndGovernanceFailClosedSecurityTests
             Dev = new DevOptions { Preset = DevOptions.PresetQuickstart }
         };
 
-        var prodEnv = Substitute.For<IHostEnvironment>();
-        prodEnv.EnvironmentName.Returns("Production");
+        IHostEnvironment prodEnv = new TestHostEnvironment("Production");
 
         var ex = Should.Throw<ValidationException>(() =>
         {
@@ -54,8 +55,7 @@ public class DevPresetAndGovernanceFailClosedSecurityTests
     {
         // The Quickstart relaxations are expanded into concrete Insecure.* values by DevConfiguration
         // (Dev:Preset), not implied by the accessors any more.
-        var devEnv = Substitute.For<IHostEnvironment>();
-        devEnv.EnvironmentName.Returns("Development");
+        IHostEnvironment devEnv = new TestHostEnvironment("Development");
 
         var config = new Microsoft.Extensions.Configuration.ConfigurationManager();
         config.AddInMemoryCollection(new Dictionary<string, string?> { ["Gateway:Dev:Preset"] = "Quickstart" });
@@ -74,9 +74,8 @@ public class DevPresetAndGovernanceFailClosedSecurityTests
     [Fact]
     public void ErrorSanitizingFilter_InDevelopment_AddsActionableFixItHints()
     {
-        var devEnv = Substitute.For<IHostEnvironment>();
-        devEnv.EnvironmentName.Returns("Development");
-        var logger = Substitute.For<ILogger<ErrorSanitizingFilter>>();
+        IHostEnvironment devEnv = new TestHostEnvironment("Development");
+        var logger = NullLogger<ErrorSanitizingFilter>.Instance;
         var filter = new ErrorSanitizingFilter(devEnv, logger);
 
         var unauthError = ErrorBuilder.New()
@@ -96,9 +95,8 @@ public class DevPresetAndGovernanceFailClosedSecurityTests
     [Fact]
     public void ErrorSanitizingFilter_InProduction_NeverExposesFixHints()
     {
-        var prodEnv = Substitute.For<IHostEnvironment>();
-        prodEnv.EnvironmentName.Returns("Production");
-        var logger = Substitute.For<ILogger<ErrorSanitizingFilter>>();
+        IHostEnvironment prodEnv = new TestHostEnvironment("Production");
+        var logger = NullLogger<ErrorSanitizingFilter>.Instance;
         var filter = new ErrorSanitizingFilter(prodEnv, logger);
 
         var unauthError = ErrorBuilder.New()

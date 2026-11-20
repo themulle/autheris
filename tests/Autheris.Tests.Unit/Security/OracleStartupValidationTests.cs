@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Security;
 
+using Autheris.Tests.Common;
 using System.ComponentModel.DataAnnotations;
 using System.Security;
 using System.Text;
@@ -21,8 +22,7 @@ public sealed class OracleStartupValidationTests
 
     private static IHostEnvironment Env(string name)
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(name);
+        IHostEnvironment env = new TestHostEnvironment(name);
         return env;
     }
 

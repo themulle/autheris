@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.OptionsBinding;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using Autheris.Api.Configuration.Validation;
@@ -19,8 +20,7 @@ public sealed class KeysetCursorKeyValidatorTests
 
     private static IHostEnvironment Env(string name)
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(name);
+        IHostEnvironment env = new TestHostEnvironment(name);
         return env;
     }
 

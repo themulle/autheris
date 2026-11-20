@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.DependencyInjection;
 
+using Autheris.Tests.Common;
 using System.Collections.Generic;
 using System.Linq;
 using Autheris.Api.Extensions;
@@ -22,8 +23,7 @@ public sealed class CdcWebhookRegistrationTests
     private static ServiceCollection Register(bool? enabled)
     {
         var services = new ServiceCollection();
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(Environments.Development);
+        IHostEnvironment env = new TestHostEnvironment(Environments.Development);
         services.AddSingleton(env);
         var config = new Dictionary<string, string?>();
         if (enabled is { } value)
@@ -125,8 +125,7 @@ public sealed class CdcWebhookRegistrationTests
     {
         // The real host builder registers IConfiguration with a factory (no ImplementationInstance); the flag must still be honoured.
         var services = new ServiceCollection();
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(Environments.Development);
+        IHostEnvironment env = new TestHostEnvironment(Environments.Development);
         services.AddSingleton(env);
         var cfg = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Gateway:Events:CdcWebhooks:Enabled"] = "true", ["Gateway:GovernanceDb:Provider"] = "PostgreSql", ["Gateway:GovernanceDb:ConnectionString"] = Autheris.Tests.Common.Governance.GovernanceTestConnectionStrings.NonConnectingPostgreSql }).Build();
         services.AddSingleton<IConfiguration>(_ => cfg);

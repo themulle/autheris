@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 using Autheris.Tests.Unit.TestSupport;
 using Autheris.Tests.Unit;
 using System.Security.Claims;
@@ -48,8 +49,7 @@ public class DataPathSecurityTests : IDisposable
             DataMasking = new DataMaskingOptions { HmacSecretKeyVaultRef = "Test-Key-Vault-Ref-12345" }
         });
         _maskingProvider = new ColumnMaskingProvider(gatewayOptions);
-        var devEnv = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
-        devEnv.EnvironmentName.Returns("Development");
+        Microsoft.Extensions.Hosting.IHostEnvironment devEnv = new TestHostEnvironment("Development");
         var sqlExecutor = new Autheris.Tests.Unit.TestDoubles.SyntheticSqlDataSourceExecutor();
         _executionService = new GatewayExecutionService(
             _repository,

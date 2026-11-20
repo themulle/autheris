@@ -1,4 +1,6 @@
 using Autheris.Application.Policy.Pdp;
+using Autheris.Tests.Common.Fakes;
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -144,7 +146,7 @@ public sealed class TypedPolicySourcesWiringTests
     public async Task FederatedService_ProducesATypedDecision()
     {
         var service = new FederatedDuckDbExecutionService(
-            Options.Create(new GatewayOptions()), Substitute.For<IAuditLogRepository>(), Substitute.For<ICrossSourceQueryRouter>(),
+            Options.Create(new GatewayOptions()), new InMemoryAuditLogRepository(), Substitute.For<ICrossSourceQueryRouter>(),
             Substitute.For<ICrossSourcePlanner>(), Substitute.For<IFederatedStagingService>(), Substitute.For<IDuckDbOlapEngine>(),
             consentResolution: new ConsentResolutionService(), consentRepository: Consents(), typedPolicies: Sources());
 
@@ -251,8 +253,7 @@ public sealed class TypedPolicySourcesWiringTests
             SqlEndpoints = new SqlEndpointsOptions { Procedures = new ProcedureEndpointsOptions { Enabled = true } },
             GovernanceDb = new GovernanceDbOptions { Provider = "PostgreSql", ConnectionString = Autheris.Tests.Common.Governance.GovernanceTestConnectionStrings.NonConnectingPostgreSql }
         };
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        IHostEnvironment env = new TestHostEnvironment("Development");
         services.AddSingleton(env);
         services.AddSingleton(Options.Create(options));
         services.AddLogging();

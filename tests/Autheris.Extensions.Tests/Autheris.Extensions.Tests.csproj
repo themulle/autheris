@@ -21,7 +21,22 @@
 
   <ItemGroup>
     <Compile Include="..\Autheris.Tests.Common\CapturingLogger.cs" Link="TestSupport\CapturingLogger.cs" />
+    <Compile Include="..\Autheris.Tests.Common\FakeEpochValidationService.cs" Link="TestSupport\FakeEpochValidationService.cs" />
+    <Compile Include="..\Autheris.Tests.Common\Fakes\InMemoryAuditLogRepository.cs" Link="TestSupport\Fakes\InMemoryAuditLogRepository.cs" />
+    <Compile Include="..\Autheris.Tests.Common\Fakes\InMemoryAuditWriter.cs" Link="TestSupport\Fakes\InMemoryAuditWriter.cs" />
+    <Compile Include="..\Autheris.Tests.Common\Fakes\InMemoryConsentRepository.cs" Link="TestSupport\Fakes\InMemoryConsentRepository.cs" />
+    <Compile Include="..\Autheris.Tests.Common\Fakes\InMemoryDbtProposalRepository.cs" Link="TestSupport\Fakes\InMemoryDbtProposalRepository.cs" />
+    <Compile Include="..\Autheris.Tests.Common\Fakes\InMemoryKeyVaultSecretProvider.cs" Link="TestSupport\Fakes\InMemoryKeyVaultSecretProvider.cs" />
+    <Compile Include="..\Autheris.Tests.Common\Fakes\InMemoryLineageGraphStore.cs" Link="TestSupport\Fakes\InMemoryLineageGraphStore.cs" />
+    <Compile Include="..\Autheris.Tests.Common\Fakes\InMemoryPolicyEpochRepository.cs" Link="TestSupport\Fakes\InMemoryPolicyEpochRepository.cs" />
+    <Compile Include="..\Autheris.Tests.Common\Fakes\InMemoryTableMetadataRepository.cs" Link="TestSupport\Fakes\InMemoryTableMetadataRepository.cs" />
+    <Compile Include="..\Autheris.Tests.Common\Fakes\InMemoryTableRelationRepository.cs" Link="TestSupport\Fakes\InMemoryTableRelationRepository.cs" />
+    <Compile Include="..\Autheris.Tests.Common\Fakes\RecordingConsentRepository.cs" Link="TestSupport\Fakes\RecordingConsentRepository.cs" />
+    <Compile Include="..\Autheris.Tests.Common\Fakes\StubDataCatalogClient.cs" Link="TestSupport\Fakes\StubDataCatalogClient.cs" />
+    <Compile Include="..\Autheris.Tests.Common\Fakes\StubGatewayExecutionService.cs" Link="TestSupport\Fakes\StubGatewayExecutionService.cs" />
+    <Compile Include="..\Autheris.Tests.Common\StaticOptionsMonitor.cs" Link="TestSupport\StaticOptionsMonitor.cs" />
     <Compile Include="..\Autheris.Tests.Common\StubHttpMessageHandler.cs" Link="TestSupport\StubHttpMessageHandler.cs" />
+    <Compile Include="..\Autheris.Tests.Common\TestHostEnvironment.cs" Link="TestSupport\TestHostEnvironment.cs" />
     <Compile Include="..\Autheris.Tests.Common\TestTenants.cs" Link="TestSupport\TestTenants.cs" />
     <Compile Include="..\Autheris.Tests.Common\Governance\TableMetadataClassificationTestExtensions.cs" Link="TestSupport\TableMetadataClassificationTestExtensions.cs" />
     <ProjectReference Include="..\..\src\Autheris.Extensions\Autheris.Extensions.csproj" />

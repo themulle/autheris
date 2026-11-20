@@ -1,4 +1,5 @@
 using Autheris.Tests.Unit.TestSupport;
+using Autheris.Tests.Common.Fakes;
 using System.Security.Claims;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Governance.Services;
@@ -18,7 +19,7 @@ public sealed class DeclarativeConsentApplyDatasetsTests
         [DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "S-1-5-21-ADMIN"), new Claim(ClaimTypes.Role, "GovernanceAdmin")], "test"));
 
     private readonly IDatasetCatalogAdminService _datasets = Substitute.For<IDatasetCatalogAdminService>();
-    private readonly IConsentRepository _consents = Substitute.For<IConsentRepository>();
+    private readonly IConsentRepository _consents = new InMemoryConsentRepository();
 
     private DeclarativeConsentApplyService Create(IDatasetCatalogAdminService? datasets = null) =>
         new(Substitute.For<ITableMetadataRepository>(), _consents, Substitute.For<IAuditLogRepository>(), null, datasets);
@@ -134,7 +135,7 @@ public sealed class DeclarativeConsentApplyDatasetsTests
             new Claim(ClaimTypes.PrimarySid, "S-1-5-21-TA"), new Claim("tenant_id", "tenant-a"),
             new Claim(ClaimTypes.Role, "GovernanceAdmin")
         ], "test"));
-        var apply = new DeclarativeConsentApplyService(Substitute.For<ITableMetadataRepository>(), _consents, Substitute.For<IAuditLogRepository>(), null, service);
+        var apply = new DeclarativeConsentApplyService(new InMemoryTableMetadataRepository(), _consents, new InMemoryAuditLogRepository(), null, service);
 
         var foreignResult = await apply.ApplyManifestAsync(tenantAdmin, Manifest(new DeclarativeDatasetCatalog("sales", "dbo", "foreign_t", ["x"])));
         var missingResult = await apply.ApplyManifestAsync(tenantAdmin, Manifest(new DeclarativeDatasetCatalog("sales", "dbo", "ghost_t", ["x"])));

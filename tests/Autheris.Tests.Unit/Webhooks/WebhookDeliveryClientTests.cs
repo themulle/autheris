@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Webhooks;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -79,8 +80,7 @@ public sealed class WebhookDeliveryClientTests
         public Fixture(string environment = "Production", bool? requireSecret = null, Func<Uri, bool, CancellationToken, Task>? validator = null, int timeoutSeconds = 5)
         {
             var options = new GatewayOptions { Webhooks = new WebhooksOptions { RequireSecret = requireSecret, DefaultTimeoutSeconds = timeoutSeconds } };
-            var env = Substitute.For<IHostEnvironment>();
-            env.EnvironmentName.Returns(environment);
+            IHostEnvironment env = new TestHostEnvironment(environment);
             Client = new WebhookDeliveryClient(
                 new HttpClient(Handler),
                 Options.Create(options),
@@ -440,7 +440,7 @@ public sealed class WebhookDeliveryClientTests
     [Fact]
     public async Task Delivery_EgressValidationHang_IsBoundedByTheDeliveryTimeout()
     {
-        var f = new Fixture(timeoutSeconds: 1, validator: async (_, _, ct) => await Task.Delay(Timeout.Infinite, ct));
+        var f = new Fixture(timeoutSeconds: 1, validator: async (_, _, ct) => await Autheris.Tests.Common.Hang.UntilCancelledAsync(ct));
 
         var result = await f.Client.DeliverAsync(Message(), Target(), CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
 

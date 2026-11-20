@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.Security;
 
 using Autheris.Tests.Unit.Catalog;
+using Autheris.Tests.Common.Fakes;
 using System;
 using System.Collections.Generic;
 using System.Data.Common;
@@ -26,7 +27,9 @@ using Autheris.Domain.Connectors;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Infrastructure.Connectors;
 using Autheris.Infrastructure.Persistence;
+using Autheris.Tests.Unit.TestDoubles;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -53,10 +56,13 @@ public sealed partial class AdvisoryRegressionTests
         return new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth")) };
     }
 
+    private static readonly ICatalogSearchEngine UnusedSearch = Substitute.For<ICatalogSearchEngine>();
+    private static readonly IHttpClientFactory UnusedHttpFactory = Substitute.For<IHttpClientFactory>();
+
     private static CatalogDiscoveryService Discovery(IKeyVaultSecretProvider provider, IOpenApiIngestionService ingestion) =>
-        new(Substitute.For<ITableMetadataRepository>(), global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()),
+        new(new InMemoryTableMetadataRepository(), AuditWriterTestServices.Over(new InMemoryAuditLogRepository()),
             Options.Create(new GatewayOptions()), null,
-            provider, ingestion, Substitute.For<ICatalogSearchEngine>(), NullLogger<CatalogDiscoveryService>.Instance);
+            provider, ingestion, UnusedSearch, NullLogger<CatalogDiscoveryService>.Instance);
 
     private static RequestContext Ctx() => new(TenantA, new Sid("admin"), Roles: ["GovernanceAdmin"]);
 
@@ -81,7 +87,9 @@ public sealed partial class AdvisoryRegressionTests
     [InlineData("ingestion_refuses_existing_secret")]
     public async Task Ghsa_v5c2_cc86_regression(string bullet)
     {
-        var secrets = Substitute.For<IKeyVaultSecretProvider>();
+        var secrets = bullet == "throwing_provider_denies_the_write"
+            ? new InMemoryKeyVaultSecretProvider(_ => throw new InvalidOperationException("backend unavailable"))
+            : new InMemoryKeyVaultSecretProvider();
         var ingestion = Substitute.For<IOpenApiIngestionService>();
         ingestion.IngestOpenApiJsonAsync(default!, default!, default, default, default, default).ReturnsForAnyArgs(
             new OpenApiIngestionResult(true, "T", 1, 1, ["a"], []));
@@ -91,61 +99,60 @@ public sealed partial class AdvisoryRegressionTests
         switch (bullet)
         {
             case "foreign_domain_is_forbidden":
-                var denied = Substitute.For<ICatalogDiscoveryService>();
+                var denied = new StubCatalogDiscoveryService();
                 var result = await CatalogApiEndpoints.RegisterDatasourceHandler(request, denied, Http("tenant-a", "GovernanceAdmin"), CancellationToken.None);
                 result.ShouldBeAssignableTo<IStatusCodeHttpResult>().StatusCode.ShouldBe(403);
-                await denied.DidNotReceiveWithAnyArgs().RegisterDatasourceAsync(default!, default!, default);
+                denied.RegisterCalls.ShouldBeEmpty();
                 break;
             case "cluster_admin_may_register_any_domain":
-                var allowed = Substitute.For<ICatalogDiscoveryService>();
+                var allowed = new StubCatalogDiscoveryService();
                 await CatalogApiEndpoints.RegisterDatasourceHandler(request, allowed, Http("tenant-a", "ClusterAdmin"), CancellationToken.None);
-                await allowed.ReceivedWithAnyArgs(1).RegisterDatasourceAsync(default!, default!, default);
+                allowed.RegisterCalls.Count.ShouldBe(1);
                 break;
             case "secret_namespace_is_bound_to_the_tenant":
                 (await Discovery(secrets, ingestion).RegisterDatasourceAsync(request, Ctx())).Success.ShouldBeTrue();
-                secrets.Received().SetSecret("datasource:telemetry:tenant-a:crane:secret", Arg.Any<byte[]>());
+                secrets.WrittenRefs.ShouldContain("datasource:telemetry:tenant-a:crane:secret");
                 break;
             case "foreign_tenant_secret_ref_is_rejected":
                 var foreign = request with { Auth = new DatasourceAuthDto("apiKey", Name: "X-K", SecretRef: "datasource:telemetry:tenant-b:crane:secret") };
                 await Should.ThrowAsync<ArgumentException>(() => Discovery(secrets, ingestion).RegisterDatasourceAsync(foreign, Ctx()));
-                secrets.DidNotReceiveWithAnyArgs().SetSecret(default!, default!);
+                secrets.WrittenRefs.ShouldBeEmpty();
                 break;
             case "existing_secret_is_never_overwritten":
-                secrets.GetSecretBytes("datasource:telemetry:tenant-a:crane:secret").Returns([9, 9, 9]);
+                secrets.Add("datasource:telemetry:tenant-a:crane:secret", [9, 9, 9]);
                 await Should.ThrowAsync<ArgumentException>(() => Discovery(secrets, ingestion).RegisterDatasourceAsync(request, Ctx()));
-                secrets.DidNotReceiveWithAnyArgs().SetSecret(default!, default!);
+                secrets.WrittenRefs.ShouldBeEmpty();
                 break;
             case "throwing_provider_denies_the_write":
-                secrets.GetSecretBytes(Arg.Any<string>()).Returns<byte[]>(_ => throw new InvalidOperationException("backend unavailable"));
                 await Should.ThrowAsync<ArgumentException>(() => Discovery(secrets, ingestion).RegisterDatasourceAsync(request, Ctx()));
-                secrets.DidNotReceiveWithAnyArgs().SetSecret(default!, default!);
+                secrets.WrittenRefs.ShouldBeEmpty();
                 break;
             case "mcp_registration_is_tenant_bound":
-                var planning = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), Substitute.For<ITableMetadataRepository>(),
-                    Substitute.For<IConsentRepository>(), new TotpVerificationService(), new InMemoryTotpSecretStore(), secretProvider: secrets);
+                var planning = new AccessPlanningService(AuditWriterTestServices.Over(new InMemoryAuditLogRepository()), new InMemoryTableMetadataRepository(),
+                    new InMemoryConsentRepository(), new TotpVerificationService(), new InMemoryTotpSecretStore(), secretProvider: secrets);
                 var mcp = new AdminRegisterDatasourceRequest("crane", "telemetry", Auth: new DatasourceAuthDto("apiKey", Secret: "s"));
                 await Should.ThrowAsync<UnauthorizedAccessException>(() => planning.RegisterDatasourceAsync(mcp, "admin", "tenant-a"));
                 var registered = await planning.RegisterDatasourceAsync(mcp, "admin", "tenant-a", isClusterAdmin: true);
                 registered.SecretRef.ShouldBe("datasource:telemetry:tenant-a:crane:auth_secret");
                 break;
             case "mcp_registration_refuses_existing_secret":
-                secrets.GetSecretBytes("datasource:telemetry:tenant-a:crane:auth_secret").Returns([9]);
-                var existing = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), Substitute.For<ITableMetadataRepository>(),
-                    Substitute.For<IConsentRepository>(), new TotpVerificationService(), new InMemoryTotpSecretStore(), secretProvider: secrets);
+                secrets.Add("datasource:telemetry:tenant-a:crane:auth_secret", [9]);
+                var existing = new AccessPlanningService(AuditWriterTestServices.Over(new InMemoryAuditLogRepository()), new InMemoryTableMetadataRepository(),
+                    new InMemoryConsentRepository(), new TotpVerificationService(), new InMemoryTotpSecretStore(), secretProvider: secrets);
                 await Should.ThrowAsync<ArgumentException>(() => existing.RegisterDatasourceAsync(
                     new AdminRegisterDatasourceRequest("crane", "telemetry", Auth: new DatasourceAuthDto("apiKey", Secret: "s")), "admin", "tenant-a", isClusterAdmin: true));
-                secrets.DidNotReceiveWithAnyArgs().SetSecret(default!, default!);
+                secrets.WrittenRefs.ShouldBeEmpty();
                 break;
             case "ingestion_refuses_existing_secret":
-                secrets.GetSecretBytes(default!).ReturnsForAnyArgs([9]);
-                var direct = new OpenApiIngestionService(Substitute.For<ITableMetadataRepository>(), NullLogger<OpenApiIngestionService>.Instance, secretProvider: secrets);
+                var existingSecrets = new InMemoryKeyVaultSecretProvider([9]);
+                var direct = new OpenApiIngestionService(new InMemoryTableMetadataRepository(), NullLogger<OpenApiIngestionService>.Instance, secretProvider: existingSecrets);
                 foreach (var (type, scheme) in new[] { ("apiKey", (string?)null), ("http", "bearer"), ("oauth2", null) })
                 {
                     var auth = new DatasourceAuthDto(type, Scheme: scheme, Value: "v", ClientSecret: "v", SecretRef: "datasource:telemetry:tenant-a:crane:secret");
                     await Should.ThrowAsync<ArgumentException>(() => direct.IngestOpenApiJsonAsync(Spec, "telemetry", defaultBaseUrl: null, auth: auth, dryRun: false));
                 }
 
-                secrets.DidNotReceiveWithAnyArgs().SetSecret(default!, default!);
+                existingSecrets.WrittenRefs.ShouldBeEmpty();
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(bullet), bullet, "Unknown regression case.");
@@ -159,36 +166,42 @@ public sealed partial class AdvisoryRegressionTests
     [InlineData("state_change_on_missing_table_is_not_found_and_unaudited")]
     public async Task Ghsa_9229_wvm9_regression(string bullet)
     {
-        var repo = Substitute.For<ITableMetadataRepository>();
+        var repo = new InMemoryTableMetadataRepository();
         if (bullet.StartsWith("datasource_test", StringComparison.Ordinal))
         {
             // The pre-flight case has no catalog table at all: only the operator-configured connection could match, and a confined caller never reaches it.
-            repo.StubTables(bullet.Contains("preflight", StringComparison.Ordinal) ? Array.Empty<TableMetadata>() : new[] { Table("tenant-b") });
-            var factory = Substitute.For<ISqlConnectionFactory>();
+            if (!bullet.Contains("preflight", StringComparison.Ordinal))
+            {
+                repo.Add(Table("tenant-b"));
+            }
+
+            var factory = new SpySqlConnectionFactory();
             var gateway = new GatewayOptions { DataSources = new SqlDataSourceOptions() };
             gateway.DataSources.Connections["src_b"] = new DataSourceConnectionOptions { Provider = "SqlServer", ConnectionString = "Server=h;Database=d;" };
             var testing = new DatasourceTestingService(
-                repo, Substitute.For<IHttpClientFactory>(), global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), null, null, null,
+                repo, UnusedHttpFactory, AuditWriterTestServices.Over(new InMemoryAuditLogRepository()), null, null, null,
                 factory, Options.Create(gateway), new SqlSourceDescriber());
 
             await Should.ThrowAsync<KeyNotFoundException>(() =>
                 testing.TestDatasourceAsync("src_b", new DatasourceTestRequest(), Http("tenant-a").User, TenantA, CancellationToken.None));
-            await factory.DidNotReceiveWithAnyArgs().CreateOpenConnectionAsync(default!, default);
+            factory.CreateCalls.ShouldBeEmpty();
             return;
         }
 
-        var audit = Substitute.For<IAuditLogRepository>();
-        var service = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(audit), repo, Substitute.For<IConsentRepository>(),
+        var audit = new InMemoryAuditLogRepository();
+        var service = new AccessPlanningService(AuditWriterTestServices.Over(audit), repo, new InMemoryConsentRepository(),
             new TotpVerificationService(), new InMemoryTotpSecretStore());
-        repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns(bullet.Contains("foreign", StringComparison.Ordinal) ? Table("tenant-b") : null);
+        if (bullet.Contains("foreign", StringComparison.Ordinal))
+        {
+            repo.Add(Table("tenant-b"));
+        }
 
         var state = await service.SetDatasetStateAsync(
             new AdminSetDatasetStateRequest("src_b.dbo.orders", "quarantined", "x"), "admin", "tenant-a", TenantA, CancellationToken.None);
 
         state.Success.ShouldBeFalse();
-        await repo.DidNotReceiveWithAnyArgs().UpsertTableMetadataAsync(default!, default);
-        await audit.DidNotReceiveWithAnyArgs().RecordAuditEventAsync(default!, default);
+        repo.UpsertCalls.ShouldBe(0);
+        audit.Entries.ShouldBeEmpty();
     }
 
     [Theory]
@@ -203,11 +216,11 @@ public sealed partial class AdvisoryRegressionTests
             ColumnMaskingRules = new Dictionary<string, MaskingRule> { ["pin"] = new MaskingRule { RuleType = ruleType } }
         };
 
-        var repo = Substitute.For<ITableMetadataRepository>();
+        var repo = new MutableTableRepo();
         var catalog = new CatalogFederatedMaskingCatalog(repo, Options.Create(new GatewayOptions()));
 
         void Returns(params TableMetadata[] tables) =>
-            repo.StubTables(tables);
+            repo.Tables = tables;
 
         if (bullet.StartsWith("rule_change", StringComparison.Ordinal))
         {
@@ -270,26 +283,20 @@ public sealed partial class AdvisoryRegressionTests
         var plan = new CrossSourcePlanner(engine).Plan(sql, metadata, tables, decisions, new CrossSourceOptions { Enabled = true },
             Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.User, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.Tenant);
 
-        var connector = Substitute.For<IAutherisConnector>();
-        var splits = Substitute.For<IConnectorSplitManager>();
-        var source = Substitute.For<IConnectorRecordSource>();
-        connector.SplitManager.Returns(splits);
-        connector.RecordSource.Returns(source);
-        splits.GetSplitsAsync(Arg.Any<TableMetadata>(), Arg.Any<ConnectorSessionContext>(), Arg.Any<CancellationToken>()).Returns([ConnectorSplit.Default("s")]);
-        source.ReadBatchAsync(Arg.Any<ConnectorSplit>(), Arg.Any<ConnectorSessionContext>(), Arg.Any<CancellationToken>())
-            .Returns([new Dictionary<string, object?> { ["id"] = 1, ["item_name"] = "Widget" }]);
-        var registry = Substitute.For<IAutherisConnectorRegistry>();
-        registry.TryGetConnectorForTable(Arg.Any<TableIdentifier>(), out Arg.Any<IAutherisConnector>()!).Returns(x => { x[1] = connector; return true; });
-        var entries = new List<AuditLogEntry>();
-        var audit = Substitute.For<IAuditLogRepository>();
-        audit.RecordAuditEventAsync(Arg.Do<AuditLogEntry>(entries.Add), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        var connector = new StubAutherisConnector(
+            "pg",
+            rows: [new Dictionary<string, object?> { ["id"] = 1, ["item_name"] = "Widget" }],
+            getSplits: (_, _, _) => Task.FromResult<IReadOnlyList<ConnectorSplit>>([ConnectorSplit.Default("s")]));
+        var registry = new InMemoryConnectorRegistry();
+        registry.RegisterConnector("pg", connector);
+        var audit = new InMemoryAuditLogRepository();
 
-        var staging = new FederatedStagingService(registry, Substitute.For<IColumnMaskingProvider>(), audit,
+        var staging = new FederatedStagingService(registry, StubColumnMaskingProvider.Null, audit,
             Options.Create(new GatewayOptions()), NullLogger<FederatedStagingService>.Instance);
         await staging.StageAsync([plan.StagingRequests.Single(r => r.Subtree != null)], user, TenantA,
             new FederationBudget(5, 1000, 5000, 32 * 1024 * 1024, 128 * 1024 * 1024, 30, 4));
 
-        var members = entries.Where(e => e.EventType == AuditEventTypes.WebSqlCrossSourceSourceRead).ToList();
+        var members = audit.Entries.Where(e => e.EventType == AuditEventTypes.WebSqlCrossSourceSourceRead).ToList();
         members.ShouldNotBeEmpty();
         members.ShouldAllBe(e => JsonDocument.Parse(e.DetailsJson!).RootElement.GetProperty("inDbMaskingExecuted").GetBoolean() == false);
     }
@@ -340,5 +347,20 @@ public sealed partial class AdvisoryRegressionTests
             default:
                 throw new ArgumentOutOfRangeException(nameof(bullet));
         }
+    }
+
+    private sealed class MutableTableRepo : ITableMetadataRepository
+    {
+        public IReadOnlyList<TableMetadata> Tables { get; set; } = [];
+        public Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default)
+            => Task.FromResult(Tables.FirstOrDefault(t => t.Identifier == table));
+        public Task<IReadOnlyList<TableMetadata>> GetAllTablesAsync(CancellationToken ct = default)
+            => Task.FromResult(Tables);
+        public Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default)
+            => throw new NotSupportedException();
+        public Task<TableKeyDefinitionChange?> ReplaceTableKeyDefinitionAsync(
+            TableIdentifier table, IReadOnlyList<string> primaryKey, IReadOnlyList<TableIndexDefinition> indexes,
+            IReadOnlyList<KeyColumnDirection>? primaryKeyDirections = null, CancellationToken ct = default)
+            => throw new NotSupportedException();
     }
 }

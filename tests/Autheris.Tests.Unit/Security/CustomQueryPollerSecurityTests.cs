@@ -28,13 +28,15 @@ using Autheris.Domain.Security;
 using Autheris.Infrastructure.Streaming.Producers;
 using Autheris.Infrastructure.Streaming.Producers.CustomQuery;
 using Autheris.Infrastructure.Streaming;
+using Autheris.Tests.Common;
+using Autheris.Tests.Common.Fakes;
+using Autheris.Tests.Unit.Cdc;
 using Autheris.Tests.Unit.CdcStream;
 using Autheris.Tests.Unit.TestDoubles;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using NSubstitute;
 using Shouldly;
 using TrinoSqlEngine;
 using Xunit;
@@ -51,34 +53,21 @@ public sealed class CustomQueryPollerSecurityTests : IDisposable
     private readonly FakeKeyStore _keys = new();
     private readonly FakeKekProvider _keks = new FakeKekProvider().Add("k1");
     private readonly CdcStreamKeyring _keyring;
-    private readonly IAuditLogRepository _auditRepo = Substitute.For<IAuditLogRepository>();
-    private readonly ICdcStreamSignal _signal = Substitute.For<ICdcStreamSignal>();
-    private readonly IDistributedClusterStateProvider _clusterState = Substitute.For<IDistributedClusterStateProvider>();
+    private readonly InMemoryAuditLogRepository _auditRepo = new();
+    private readonly RecordingStreamSignal _signal = new();
+    private readonly IDistributedClusterStateProvider _clusterState = new StubClusterStateProvider();
     private readonly CdcChangeEventBuilder _builder;
 
     public CustomQueryPollerSecurityTests()
     {
         _validator = new CustomQueryPollerValidator(_sqlEngine);
 
-        var monitor = Substitute.For<IOptionsMonitor<GatewayOptions>>();
-        monitor.CurrentValue.Returns(new GatewayOptions());
+        var monitor = new StaticOptionsMonitor<GatewayOptions>(new GatewayOptions());
 
         var time = TimeProvider.System;
         _keyring = new CdcStreamKeyring(_keys, _keks, monitor, time);
 
-        var crypto = Substitute.For<ICdcStreamCrypto>();
-        crypto.FingerprintAsync(Arg.Any<CdcStreamId>(), Arg.Any<IReadOnlyList<object?>>(), Arg.Any<CancellationToken>())
-            .Returns(call => ValueTask.FromResult(new byte[32]));
-        crypto.ProtectEventAsync(Arg.Any<CdcStreamId>(), Arg.Any<long>(), Arg.Any<CdcStreamEventKind>(), Arg.Any<CdcTenantScope>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<ReadOnlyMemory<byte>>(), Arg.Any<CancellationToken>())
-            .Returns(call => ValueTask.FromResult(new CdcProtectedBlob("dek1", call.ArgAt<ReadOnlyMemory<byte>>(6).ToArray())));
-        crypto.ProtectImageAsync(Arg.Any<CdcStreamId>(), Arg.Any<byte[]>(), Arg.Any<ReadOnlyMemory<byte>>(), Arg.Any<CancellationToken>())
-            .Returns(call => ValueTask.FromResult(new CdcProtectedBlob("dek1", call.ArgAt<ReadOnlyMemory<byte>>(2).ToArray())));
-
-        var codec = Substitute.For<ICdcPayloadCodec>();
-        codec.SerializeChange(Arg.Any<CdcChangePayload>()).Returns(new byte[16]);
-        codec.SerializeImage(Arg.Any<IReadOnlyDictionary<string, object?>>()).Returns(new byte[16]);
-
-        _builder = new CdcChangeEventBuilder(_streamStore, crypto, codec, monitor);
+        _builder = new CdcChangeEventBuilder(_streamStore, new FixedDekCdcCrypto(), new TestPayloadCodec(), monitor);
     }
 
     public void Dispose() => _keyring.Dispose();
@@ -257,18 +246,15 @@ public sealed class CustomQueryPollerSecurityTests : IDisposable
         // Verifies that source database connection is configured with read-only transaction semantics
         var poller = BaseOptions("SELECT id FROM customers WHERE id > @p_wm_id");
         poller.DataSource = "sqlite_src";
-        var monitor = Substitute.For<IOptionsMonitor<CustomQueryPollerOptions>>();
-        monitor.CurrentValue.Returns(new CustomQueryPollerOptions { Enabled = true, Pollers = [poller] });
+        var monitor = new StaticOptionsMonitor<CustomQueryPollerOptions>(new CustomQueryPollerOptions { Enabled = true, Pollers = [poller] });
 
         var gateway = new GatewayOptions();
         gateway.DataSources.Connections["sqlite_src"] = new DataSourceConnectionOptions { Provider = "PostgreSql", ConnectionString = "Data Source=:memory:" };
-        var gwMonitor = Substitute.For<IOptionsMonitor<GatewayOptions>>();
-        gwMonitor.CurrentValue.Returns(gateway);
+        var gwMonitor = new StaticOptionsMonitor<GatewayOptions>(gateway);
 
         var executedCommands = new List<string>();
         var fakeConn = new ReadOnlyTrackingDbConnection(executedCommands);
-        var factory = Substitute.For<IDataSourceConnectionFactory>();
-        factory.CreateConnectionAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(fakeConn);
+        var factory = new StubDataSourceConnectionFactory(fakeConn);
 
         var service = new CustomQueryPollerService(monitor, _streamStore, _builder, factory, _signal, _clusterState, NullLogger<CustomQueryPollerService>.Instance, gatewayOptions: gwMonitor);
         await service.PollStreamBatchAsync(poller, fencingToken: 1);
@@ -333,21 +319,18 @@ public sealed class CustomQueryPollerSecurityTests : IDisposable
         // Verifies events and stored row images are encrypted with stream DEKs
         var poller = BaseOptions("SELECT id FROM customers WHERE id > @p_wm_id");
         poller.DataSource = "sqlite_src";
-        var monitor = Substitute.For<IOptionsMonitor<CustomQueryPollerOptions>>();
-        monitor.CurrentValue.Returns(new CustomQueryPollerOptions { Enabled = true, Pollers = [poller] });
+        var monitor = new StaticOptionsMonitor<CustomQueryPollerOptions>(new CustomQueryPollerOptions { Enabled = true, Pollers = [poller] });
 
         var gateway = new GatewayOptions();
         gateway.DataSources.Connections["sqlite_src"] = new DataSourceConnectionOptions { Provider = "PostgreSql", ConnectionString = "Data Source=:memory:" };
-        var gwMonitor = Substitute.For<IOptionsMonitor<GatewayOptions>>();
-        gwMonitor.CurrentValue.Returns(gateway);
+        var gwMonitor = new StaticOptionsMonitor<GatewayOptions>(gateway);
 
         var rows = new List<Dictionary<string, object?>>
         {
             new() { ["id"] = 1L, ["name"] = "Confidential PII" }
         };
         var conn = new FakeQueryConnection(rows);
-        var factory = Substitute.For<IDataSourceConnectionFactory>();
-        factory.CreateConnectionAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(conn);
+        var factory = new StubDataSourceConnectionFactory(conn);
 
         var service = new CustomQueryPollerService(monitor, _streamStore, _builder, factory, _signal, _clusterState, NullLogger<CustomQueryPollerService>.Instance, gatewayOptions: gwMonitor);
         await service.PollStreamBatchAsync(poller, fencingToken: 1);
@@ -392,13 +375,11 @@ public sealed class CustomQueryPollerSecurityTests : IDisposable
         Status(result).ShouldBe(200);
 
         // Verify Tier A audit event recorded
-        await _auditRepo.Received(1).RecordAuditEventAsync(
-            Arg.Is<AuditLogEntry>(a =>
-                a.EventType == AuditEventTypes.CdcStreamWatermarkReset &&
-                a.DetailsJson.Contains("Disaster recovery reset") &&
-                !a.DetailsJson.Contains("password") &&
-                !a.DetailsJson.Contains("secret")),
-            Arg.Any<CancellationToken>());
+        _auditRepo.Entries.Count(a =>
+            a.EventType == AuditEventTypes.CdcStreamWatermarkReset &&
+            a.DetailsJson.Contains("Disaster recovery reset") &&
+            !a.DetailsJson.Contains("password") &&
+            !a.DetailsJson.Contains("secret")).ShouldBe(1);
     }
 
     private sealed class SecurityFakeCommand : DbCommand
@@ -604,5 +585,24 @@ public sealed class CustomQueryPollerSecurityTests : IDisposable
         public override string GetString(int ordinal) => GetValue(ordinal)?.ToString() ?? string.Empty;
         public override int GetValues(object[] values) => 0;
         public override bool NextResult() => false;
+    }
+
+    private sealed class StubDataSourceConnectionFactory(DbConnection conn) : IDataSourceConnectionFactory
+    {
+        public Task<DbConnection> CreateConnectionAsync(string dataSourceName, CancellationToken ct = default) => Task.FromResult(conn);
+    }
+
+    private sealed class FixedDekCdcCrypto : ICdcStreamCrypto
+    {
+        public ValueTask<byte[]> FingerprintAsync(CdcStreamId id, IReadOnlyList<object?> keyValues, CancellationToken ct = default)
+            => ValueTask.FromResult(new byte[32]);
+        public ValueTask<CdcProtectedBlob> ProtectEventAsync(CdcStreamId id, long offset, CdcStreamEventKind kind, CdcTenantScope scope, string? tenantId, string? priorTenantId, ReadOnlyMemory<byte> plaintext, CancellationToken ct = default)
+            => ValueTask.FromResult(new CdcProtectedBlob("dek1", plaintext.ToArray()));
+        public ValueTask<CdcProtectedBlob> ProtectImageAsync(CdcStreamId id, byte[] fingerprint, ReadOnlyMemory<byte> plaintext, CancellationToken ct = default)
+            => ValueTask.FromResult(new CdcProtectedBlob("dek1", plaintext.ToArray()));
+        public ValueTask<byte[]> UnprotectEventAsync(CdcStreamEventRecord record, CancellationToken ct = default)
+            => ValueTask.FromResult(record.Payload.Data);
+        public ValueTask<byte[]> UnprotectImageAsync(CdcStreamId id, CdcRowImageRecord image, CancellationToken ct = default)
+            => ValueTask.FromResult(image.Image.Data);
     }
 }

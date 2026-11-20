@@ -1,3 +1,5 @@
+using Autheris.Tests.Common;
+using Autheris.Tests.Unit.TestDoubles;
 using Autheris.Tests.Unit.TestSupport;
 using System.Security.Claims;
 using Autheris.Api.Endpoints;
@@ -534,15 +536,8 @@ public class ProcedureEndpointTests
             ]);
         var filterProvider = new StubFilterSnapshotProvider(snapshot);
 
-        var scopeFactory = Substitute.For<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>();
-        var scope = Substitute.For<Microsoft.Extensions.DependencyInjection.IServiceScope>();
-        var sp = Substitute.For<IServiceProvider>();
-        scopeFactory.CreateScope().Returns(scope);
-        scope.ServiceProvider.Returns(sp);
-        sp.GetService(typeof(Autheris.Application.VirtualFilters.IVirtualFilterSnapshotProvider)).Returns(filterProvider);
-
-        var logger = Substitute.For<Microsoft.Extensions.Logging.ILogger<ProcedureRegistrationService>>();
-        logger.IsEnabled(Arg.Any<Microsoft.Extensions.Logging.LogLevel>()).Returns(true);
+        var scopeFactory = new SingleServiceScopeFactory(filterProvider);
+        var logger = new global::Autheris.Tests.Common.CapturingLogger<ProcedureRegistrationService>();
 
         var loader = new ProcedureDefinitionLoader(registry, options);
         var svc = new ProcedureRegistrationService(loader, registry, scopeFactory, options, logger);
@@ -553,9 +548,7 @@ public class ProcedureEndpointTests
         registry.TryGet("get_orders", out var reg1).ShouldBeTrue();
         reg1!.State.ShouldBe(ProcedureState.Disabled);
 
-        logger.ReceivedCalls()
-            .Count(c => c.GetMethodInfo().Name == "Log" && (Microsoft.Extensions.Logging.LogLevel)c.GetArguments()[0]! == Microsoft.Extensions.Logging.LogLevel.Warning)
-            .ShouldBe(1);
+        logger.Count(Microsoft.Extensions.Logging.LogLevel.Warning).ShouldBe(1);
 
         // Round 2: Still Disabled (simulate retry interval passed)
         var internalItems = typeof(InMemoryProcedureRegistry)
@@ -566,9 +559,7 @@ public class ProcedureEndpointTests
         await svc.ValidateDueAsync(CancellationToken.None);
 
         // Warning count must NOT increase on re-validation of already disabled procedure
-        logger.ReceivedCalls()
-            .Count(c => c.GetMethodInfo().Name == "Log" && (Microsoft.Extensions.Logging.LogLevel)c.GetArguments()[0]! == Microsoft.Extensions.Logging.LogLevel.Warning)
-            .ShouldBe(1);
+        logger.Count(Microsoft.Extensions.Logging.LogLevel.Warning).ShouldBe(1);
     }
 
     // ---------- YAML parsing & declared mode tests ----------
@@ -708,9 +699,9 @@ public class ProcedureEndpointTests
         var def = ProcedureDefinitionParser.ParseYaml(ValidYamlDefinition, "telemetry", false, 60);
         registry.Register(def);
 
-        var connFactory = Substitute.For<ISqlConnectionFactory>();
-        var scopeFactory = Substitute.For<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>();
-        var logger = Substitute.For<Microsoft.Extensions.Logging.ILogger<ProcedureRegistrationService>>();
+        var connFactory = new SpySqlConnectionFactory();
+        var scopeFactory = new SingleServiceScopeFactory(null);
+        var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<ProcedureRegistrationService>.Instance;
 
         var loader = new ProcedureDefinitionLoader(registry, options);
         var svc = new ProcedureRegistrationService(loader, registry, scopeFactory, options, logger);
@@ -721,7 +712,7 @@ public class ProcedureEndpointTests
         reg!.State.ShouldBe(ProcedureState.Active);
         reg.Validation!.IsValid.ShouldBeTrue();
         reg.Validation.ResultColumns.ShouldBe(["timestamp", "device_id", "temperature", "battery_level"]);
-        await connFactory.DidNotReceiveWithAnyArgs().CreateOpenConnectionAsync(default!, default);
+        connFactory.CreateCalls.ShouldBeEmpty();
     }
 
     [Fact]
@@ -1204,10 +1195,7 @@ public class ProcedureEndpointTests
     [Fact]
     public async Task ProcedureInvoker_InvalidTenantIdentity_ThrowsGatewayForbiddenException()
     {
-        var connFactory = Substitute.For<ISqlConnectionFactory>();
-        var conn = Substitute.For<System.Data.Common.DbConnection>();
-        connFactory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(conn));
+        var connFactory = new SpySqlConnectionFactory();
 
         var options = Options.Create(new GatewayOptions
         {
@@ -1252,5 +1240,15 @@ public class ProcedureEndpointTests
             => new(snapshot);
 
         public void Invalidate() { }
+    }
+
+    private sealed class SingleServiceScopeFactory(Autheris.Application.VirtualFilters.IVirtualFilterSnapshotProvider? filterProvider)
+        : Microsoft.Extensions.DependencyInjection.IServiceScopeFactory, Microsoft.Extensions.DependencyInjection.IServiceScope, IServiceProvider
+    {
+        public Microsoft.Extensions.DependencyInjection.IServiceScope CreateScope() => this;
+        public IServiceProvider ServiceProvider => this;
+        public object? GetService(Type serviceType)
+            => serviceType == typeof(Autheris.Application.VirtualFilters.IVirtualFilterSnapshotProvider) ? filterProvider : null;
+        public void Dispose() { }
     }
 }

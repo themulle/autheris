@@ -1349,22 +1349,22 @@ SELECT lpad('A', 2000, 'A') AS big_col
 -- @id caf0bf768b12 class=select expected=reject source=tests/Autheris.Tests.Unit/Security/DuckDbOlapSecurityTests.cs
 SELECT * FROM sniff_csv('/tmp/foo')
 
--- @id 73279bdfd93f class=select expected=accept source=tests/Autheris.Tests.Unit/Security/DuckDbOlapValidatorG1Tests.cs
+-- @id 73279bdfd93f class=select expected=accept source=tests/Autheris.Tests.Unit/Security/DuckDbOlapSqlValidatorSecurityTests.cs
 SELECT 1; /* comment */ DROP TABLE users
 
--- @id 742c3df9bd43 class=select expected=reject source=tests/Autheris.Tests.Unit/Security/DuckDbOlapValidatorG1Tests.cs
+-- @id 742c3df9bd43 class=select expected=reject source=tests/Autheris.Tests.Unit/Security/DuckDbOlapSqlValidatorSecurityTests.cs
 SELECT * FROM generate_series  (1, 100000000)
 
--- @id 87b85939fd8b class=select expected=reject source=tests/Autheris.Tests.Unit/Security/DuckDbOlapValidatorG1Tests.cs
+-- @id 87b85939fd8b class=select expected=reject source=tests/Autheris.Tests.Unit/Security/DuckDbOlapSqlValidatorSecurityTests.cs
 SELECT 'a\' ; SELECT 2
 
--- @id c2f598d9d3d6 class=select expected=accept source=tests/Autheris.Tests.Unit/Security/DuckDbOlapValidatorG1Tests.cs
+-- @id c2f598d9d3d6 class=select expected=accept source=tests/Autheris.Tests.Unit/Security/DuckDbOlapSqlValidatorSecurityTests.cs
 SELECT * FROM range (1000000000)
 
--- @id da8ab9499ab5 class=select expected=accept source=tests/Autheris.Tests.Unit/Security/DuckDbOlapValidatorG1Tests.cs
+-- @id da8ab9499ab5 class=select expected=accept source=tests/Autheris.Tests.Unit/Security/DuckDbOlapSqlValidatorSecurityTests.cs
 SELECT 1 /* Inline comment */
 
--- @id e0dd78bb1327 class=select expected=reject source=tests/Autheris.Tests.Unit/Security/DuckDbOlapValidatorG1Tests.cs
+-- @id e0dd78bb1327 class=select expected=reject source=tests/Autheris.Tests.Unit/Security/DuckDbOlapSqlValidatorSecurityTests.cs
 SELECT 1; -- comment
 SELECT 2
 

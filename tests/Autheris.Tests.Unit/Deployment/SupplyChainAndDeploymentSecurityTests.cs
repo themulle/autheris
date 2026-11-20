@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 using System;
 using System.IO;
 using System.Linq;
@@ -399,8 +400,7 @@ public class SupplyChainAndDeploymentSecurityTests
     public void DefaultEnvironmentSecretProvider_FileReference_OutsideAllowlist_ThrowsException()
     {
         var config = new ConfigurationBuilder().Build();
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Production");
+        IHostEnvironment env = new TestHostEnvironment("Production");
 
         var provider = new DefaultEnvironmentSecretProvider(config, env);
 
@@ -412,8 +412,7 @@ public class SupplyChainAndDeploymentSecurityTests
     public void DefaultEnvironmentSecretProvider_FileReference_InsideAllowlist_ReadsAndTrims()
     {
         var config = new ConfigurationBuilder().Build();
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Production");
+        IHostEnvironment env = new TestHostEnvironment("Production");
 
         // Allow test directory override
         var tempFile = Path.GetTempFileName();

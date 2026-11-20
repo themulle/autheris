@@ -308,7 +308,7 @@ public sealed class ModuleParityTests
         "Autheris.Modules.OpenMetadata.Tests.OmFixture.PERS_04_Sync_RevokeReturnedFalse_DoesNotCreate",
         "Autheris.Modules.OpenMetadata.Tests.OmFixture.RoleAllowPolicy_NeverCreatesAConsent_RolesDoNotGrantDataAccess",
         "Autheris.Modules.OpenMetadata.Tests.OmFixture.Security_DbtAndOpenMetadata_RoleGrantee_SkippedNeverMapped_OpenMetadata",
-        "Autheris.Modules.OpenMetadata.Tests.OpenMetadataWebhookCollisionExt16Tests.TableOfAnotherDatabaseWithTheSameIdentity_IsNotMergedByTheWebhook",
+        "Autheris.Modules.OpenMetadata.Tests.OpenMetadataWebhookCollisionTests.TableOfAnotherDatabaseWithTheSameIdentity_IsNotMergedByTheWebhook",
         "Autheris.Modules.OpenMetadata.Tests.OpenMetadataWebhookTests.Missing_store_rejects_as_unavailable",
         "Autheris.Modules.OpenMetadata.Tests.OpenMetadataWebhookTests.Oversized_payload_is_rejected",
         "Autheris.Modules.OpenMetadata.Tests.OpenMetadataWebhookTests.Replay_across_two_service_instances_sharing_one_store_is_rejected",

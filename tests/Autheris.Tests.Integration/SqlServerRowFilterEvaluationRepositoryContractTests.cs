@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Integration;
 
+using Autheris.Tests.Common;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Options;
@@ -23,8 +24,7 @@ public sealed class SqlServerRowFilterEvaluationRepositoryContractTests : RowFil
             return null;
         }
 
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        IHostEnvironment env = new TestHostEnvironment("Development");
         var options = Options.Create(new GatewayOptions
         {
             GovernanceDb = new GovernanceDbOptions { Provider = "SqlServer", ConnectionString = _db.ConnectionString, SeedDemoData = false }

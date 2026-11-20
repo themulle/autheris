@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Streaming;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
@@ -25,8 +26,7 @@ public sealed class CdcWebhookStartupCheckTests
     {
         var protector = Substitute.For<IWebhookSecretProtector>();
         protector.IsAvailable.Returns(available);
-        var host = Substitute.For<IHostEnvironment>();
-        host.EnvironmentName.Returns(env);
+        IHostEnvironment host = new TestHostEnvironment(env);
         var log = new Capture();
         await new CdcWebhookStartupCheck(protector, host, log).StartAsync(default);
         return log.Levels;

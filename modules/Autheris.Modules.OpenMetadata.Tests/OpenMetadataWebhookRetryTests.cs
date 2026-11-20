@@ -4,26 +4,26 @@ using Autheris.Application.Catalog.OpenMetadata;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.State;
 using Autheris.Domain.Options;
+using Autheris.Extensions.Tests.TestSupport;
 using Autheris.Modules.OpenMetadata;
+using Autheris.Tests.Common.Fakes;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using NSubstitute;
 using Shouldly;
 using Xunit;
 
 namespace Autheris.Modules.OpenMetadata.Tests;
 
 /// <summary>EXT-12: a failed webhook event is released from deduplication so the provider's retry is processed.</summary>
-public sealed class OpenMetadataWebhookRetryExt12Tests
+public sealed class OpenMetadataWebhookRetryTests
 {
     private const string Secret = "webhook-secret-123";
 
     [Fact]
     public async Task FailedEvent_RetryWithSameId_IsProcessedAgain()
     {
-        var client = Substitute.For<IOpenMetadataClient>();
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        var epochRepo = Substitute.For<IPolicyEpochRepository>();
+        var metadataRepo = new InMemoryTableMetadataRepository();
+        var epochRepo = new InMemoryPolicyEpochRepository();
         var options = new GatewayOptions
         {
             DataMasking = new DataMaskingOptions { HmacKeyId = "test-hmac-key" },
@@ -42,13 +42,15 @@ public sealed class OpenMetadataWebhookRetryExt12Tests
         };
 
         var calls = 0;
-        client.GetTableByFqnAsync("service.db.schema.retry_t", Arg.Any<CancellationToken>())
-            .Returns(_ => ++calls == 1
-                ? Task.FromException<OpenMetadataTable?>(new HttpRequestException("transient"))
-                : Task.FromResult<OpenMetadataTable?>(table));
+        var client = new StubOpenMetadataClient
+        {
+            TableByFqnResolver = fqn => fqn == "service.db.schema.retry_t" && ++calls == 1
+                ? throw new HttpRequestException("transient")
+                : fqn == "service.db.schema.retry_t" ? table : null
+        };
 
         var service = new OpenMetadataSyncService(
-            client, metadataRepo, Substitute.For<IConsentRepository>(), epochRepo,
+            client, metadataRepo, new RecordingConsentRepository(), epochRepo,
             Options.Create(options), NullLogger<OpenMetadataSyncService>.Instance,
             clusterState: new InMemoryClusterStateProvider());
 
@@ -58,6 +60,6 @@ public sealed class OpenMetadataWebhookRetryExt12Tests
 
         retried.ShouldBe(OpenMetadataWebhookOutcome.Processed);
         calls.ShouldBe(2);
-        await epochRepo.Received(1).IncrementTableEpochAsync(Arg.Any<Autheris.Domain.Common.TableIdentifier>(), Arg.Any<CancellationToken>());
+        epochRepo.IncrementCalls.ShouldBe(1);
     }
 }

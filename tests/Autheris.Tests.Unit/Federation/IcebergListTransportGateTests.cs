@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.Federation;
 
 using System.Security.Claims;
+using Autheris.Tests.Common.Fakes;
 using Autheris.Application.Catalog;
 using Autheris.Application.DataSources;
 using Autheris.Domain.Common;
@@ -43,10 +44,10 @@ public sealed class IcebergListTransportGateTests
             .Returns(Task.FromException(denial));
 
         var options = Options.Create(new GatewayOptions { Tenancy = new TenancyOptions { DefaultTenantId = "default-tenant" } });
-        var consents = Substitute.For<IConsentRepository>();
+        var consents = new InMemoryConsentRepository();
         var service = new IcebergRestCatalogFederationService(
             Substitute.For<IIcebergMetadataReader>(), repo, options, NullLogger<IcebergRestCatalogFederationService>.Instance,
-            Substitute.For<IAuditLogRepository>(),
+            new InMemoryAuditLogRepository(),
             new Autheris.Application.Policy.Pdp.AccessDecisionPoint(options, null, consents),
             consentRepo: consents, transportGate: gate);
 

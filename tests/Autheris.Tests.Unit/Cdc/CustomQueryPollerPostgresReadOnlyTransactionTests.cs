@@ -14,7 +14,7 @@ using Xunit;
 
 /// <summary>EXT-10: the PostgreSQL poll runs inside an explicit READ ONLY transaction (the bare SET TRANSACTION was a no-op).</summary>
 [Trait("Category", "Security")]
-public sealed class CustomQueryPollerReadOnlyExt10Tests
+public sealed class CustomQueryPollerPostgresReadOnlyTransactionTests
 {
     private sealed class FakeNpgsqlConnection(List<string> log, bool failReadOnly = false) : DbConnection
     {

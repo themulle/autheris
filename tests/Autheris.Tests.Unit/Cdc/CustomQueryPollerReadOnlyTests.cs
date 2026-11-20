@@ -20,12 +20,13 @@ using Autheris.Domain.Options;
 using Autheris.Infrastructure.Streaming.Producers;
 using Autheris.Infrastructure.Streaming.Producers.CustomQuery;
 using Autheris.Infrastructure.Streaming;
+using Autheris.Tests.Common;
+using Autheris.Tests.Common.Fakes;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using NSubstitute;
 using Shouldly;
 using TrinoSqlEngine;
 using Xunit;
@@ -34,26 +35,14 @@ using Xunit;
 public sealed class CustomQueryPollerReadOnlyTests
 {
     private readonly InMemoryCdcStreamStore _streamStore = new();
-    private readonly ICdcStreamSignal _signal = Substitute.For<ICdcStreamSignal>();
-    private readonly IDistributedClusterStateProvider _clusterState = Substitute.For<IDistributedClusterStateProvider>();
+    private readonly RecordingStreamSignal _signal = new();
+    private readonly IDistributedClusterStateProvider _clusterState = new StubClusterStateProvider();
     private readonly CdcChangeEventBuilder _builder;
 
     public CustomQueryPollerReadOnlyTests()
     {
-        var crypto = Substitute.For<ICdcStreamCrypto>();
-        crypto.FingerprintAsync(Arg.Any<CdcStreamId>(), Arg.Any<IReadOnlyList<object?>>(), Arg.Any<CancellationToken>())
-            .Returns(call => ValueTask.FromResult(new byte[32]));
-        crypto.ProtectEventAsync(Arg.Any<CdcStreamId>(), Arg.Any<long>(), Arg.Any<CdcStreamEventKind>(), Arg.Any<CdcTenantScope>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<ReadOnlyMemory<byte>>(), Arg.Any<CancellationToken>())
-            .Returns(call => ValueTask.FromResult(new CdcProtectedBlob("dek1", call.ArgAt<ReadOnlyMemory<byte>>(6).ToArray())));
-        crypto.ProtectImageAsync(Arg.Any<CdcStreamId>(), Arg.Any<byte[]>(), Arg.Any<ReadOnlyMemory<byte>>(), Arg.Any<CancellationToken>())
-            .Returns(call => ValueTask.FromResult(new CdcProtectedBlob("dek1", call.ArgAt<ReadOnlyMemory<byte>>(2).ToArray())));
-
-        var codec = Substitute.For<ICdcPayloadCodec>();
-        codec.SerializeChange(Arg.Any<CdcChangePayload>()).Returns(new byte[16]);
-        codec.SerializeImage(Arg.Any<IReadOnlyDictionary<string, object?>>()).Returns(new byte[16]);
-
         var gatewayMonitor = CreateGatewayMonitor("src", "PostgreSql");
-        _builder = new CdcChangeEventBuilder(_streamStore, crypto, codec, gatewayMonitor);
+        _builder = new CdcChangeEventBuilder(_streamStore, new TestCdcCrypto(), new TestPayloadCodec(), gatewayMonitor);
     }
 
     private static CustomQueryPollerStreamOptions ValidPoller(string dataSource = "src", string query = "SELECT id, updated_at FROM customers WHERE id > @p_wm_id") => new()
@@ -80,9 +69,7 @@ public sealed class CustomQueryPollerReadOnlyTests
             Provider = provider,
             ConnectionString = connString
         };
-        var monitor = Substitute.For<IOptionsMonitor<GatewayOptions>>();
-        monitor.CurrentValue.Returns(gateway);
-        return monitor;
+        return new StaticOptionsMonitor<GatewayOptions>(gateway);
     }
 
     private CustomQueryPollerService CreateService(
@@ -116,12 +103,12 @@ public sealed class CustomQueryPollerReadOnlyTests
         var poller = ValidPoller("src", query);
         var monitor = new MutableOptionsMonitor<CustomQueryPollerOptions>(new CustomQueryPollerOptions { Enabled = true, Pollers = [poller] });
         var gateway = CreateGatewayMonitor("src", "PostgreSql", "Host=localhost");
-        var factory = Substitute.For<IDataSourceConnectionFactory>();
+        var factory = new StubDataSourceFactory(_ => throw new InvalidOperationException("must not be called"));
 
         using var service = CreateService(monitor, factory, gateway);
 
         await Should.ThrowAsync<GovernedCdcConfigurationException>(() => service.PollStreamBatchAsync(poller, fencingToken: 1));
-        await factory.DidNotReceiveWithAnyArgs().CreateConnectionAsync(default!, default);
+        factory.CallCount.ShouldBe(0);
     }
 
     [Theory]
@@ -134,8 +121,7 @@ public sealed class CustomQueryPollerReadOnlyTests
         var monitor = new MutableOptionsMonitor<CustomQueryPollerOptions>(new CustomQueryPollerOptions { Enabled = true, Pollers = [poller] });
         var gateway = CreateGatewayMonitor("src", provider);
         var conn = new TrackingDbConnection("Host=example;Database=test;");
-        var factory = Substitute.For<IDataSourceConnectionFactory>();
-        factory.CreateConnectionAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(conn);
+        var factory = new StubDataSourceFactory(_ => conn);
 
         using var service = CreateService(monitor, factory, gateway);
 
@@ -151,8 +137,7 @@ public sealed class CustomQueryPollerReadOnlyTests
         var gateway = CreateGatewayMonitor("sqlsrv_host_postgres", "SqlServer", "Server=postgres-db;Database=sqlite_trap;");
 
         var conn = new PostgresLookingTrackingConnection("Server=postgres-db;Data Source=sqlite_trap;");
-        var factory = Substitute.For<IDataSourceConnectionFactory>();
-        factory.CreateConnectionAsync("sqlsrv_host_postgres", Arg.Any<CancellationToken>()).Returns(conn);
+        var factory = new StubDataSourceFactory(_ => conn);
 
         using var service = CreateService(monitor, factory, gateway);
         await service.PollStreamBatchAsync(poller, fencingToken: 1);
@@ -173,8 +158,7 @@ public sealed class CustomQueryPollerReadOnlyTests
         var monitor = new MutableOptionsMonitor<CustomQueryPollerOptions>(new CustomQueryPollerOptions { Enabled = true, Pollers = [initialValid] });
         var gateway = CreateGatewayMonitor("src", "PostgreSql", "Host=localhost");
         var conn = new TrackingDbConnection("Data Source=:memory:");
-        var factory = Substitute.For<IDataSourceConnectionFactory>();
-        factory.CreateConnectionAsync("src", Arg.Any<CancellationToken>()).Returns(conn);
+        var factory = new StubDataSourceFactory(_ => conn);
 
         var spyEngine = new SpySqlEngine(FastSqlEngine.Default);
         var validator = new CustomQueryPollerValidator(spyEngine);
@@ -210,8 +194,7 @@ public sealed class CustomQueryPollerReadOnlyTests
         var gateway = CreateGatewayMonitor("src", "PostgreSql", "Host=localhost");
 
         var conn = new TrackingDbConnection("Data Source=:memory:");
-        var factory = Substitute.For<IDataSourceConnectionFactory>();
-        factory.CreateConnectionAsync("src", Arg.Any<CancellationToken>()).Returns(conn);
+        var factory = new StubDataSourceFactory(_ => conn);
 
         using var service = new TestablePollerService(
             monitor, _streamStore, _builder, factory, _signal, _clusterState, gateway, new CustomQueryPollerValidator(FastSqlEngine.Default));
@@ -233,12 +216,12 @@ public sealed class CustomQueryPollerReadOnlyTests
         var malicious = ValidPoller("sqlsrv", "SELECT id FROM customers WHERE id > @p_wm_id; DELETE FROM customers;");
         var monitor = new MutableOptionsMonitor<CustomQueryPollerOptions>(new CustomQueryPollerOptions { Enabled = true, Pollers = [malicious] });
         var gateway = CreateGatewayMonitor("sqlsrv", "SqlServer");
-        var factory = Substitute.For<IDataSourceConnectionFactory>();
+        var factory = new StubDataSourceFactory(_ => throw new InvalidOperationException("unexpected"));
 
         using var service = CreateService(monitor, factory, gateway);
 
         await Should.ThrowAsync<GovernedCdcConfigurationException>(() => service.PollStreamBatchAsync(malicious, fencingToken: 1));
-        await factory.DidNotReceiveWithAnyArgs().CreateConnectionAsync(default!, default);
+        factory.CallCount.ShouldBe(0);
     }
 
     [Fact]
@@ -253,17 +236,14 @@ public sealed class CustomQueryPollerReadOnlyTests
             Provider = "PostgreSql",
             ConnectionString = "Host=ro-replica;Database=crm;"
         };
-        var gatewayMonitor = Substitute.For<IOptionsMonitor<GatewayOptions>>();
-        gatewayMonitor.CurrentValue.Returns(gatewayOptions);
+        var gatewayMonitor = new StaticOptionsMonitor<GatewayOptions>(gatewayOptions);
 
-        var sqlConnFactory = Substitute.For<ISqlConnectionFactory>();
         var capturedOptions = new List<DataSourceConnectionOptions>();
-        sqlConnFactory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
-            .Returns(call =>
-            {
-                capturedOptions.Add(call.Arg<DataSourceConnectionOptions>());
-                return Task.FromResult<DbConnection>(new TrackingDbConnection("Host=ro-replica;"));
-            });
+        var sqlConnFactory = new StubSqlConnectionFactory(opts =>
+        {
+            capturedOptions.Add(opts);
+            return new TrackingDbConnection("Host=ro-replica;");
+        });
 
         var factory = new DefaultDataSourceConnectionFactory(sqlConnFactory, gatewayMonitor);
         using var service = CreateService(monitor, factory, gatewayMonitor);
@@ -285,8 +265,7 @@ public sealed class CustomQueryPollerReadOnlyTests
         var gateway = CreateGatewayMonitor("ora_src", "Oracle", "Data Source=ora-prod:1521/ORCL;");
 
         var conn = new TrackingDbConnection("Data Source=ora-prod:1521/ORCL;");
-        var factory = Substitute.For<IDataSourceConnectionFactory>();
-        factory.CreateConnectionAsync("ora_src", Arg.Any<CancellationToken>()).Returns(conn);
+        var factory = new StubDataSourceFactory(_ => conn);
 
         using var service = CreateService(monitor, factory, gateway);
         await service.PollStreamBatchAsync(poller, fencingToken: 1);
@@ -313,8 +292,7 @@ public sealed class CustomQueryPollerReadOnlyTests
             new() { ["id"] = 1L, ["updated_at"] = "2026-11-14T10:00:00Z" }
         };
         var conn = new TrackingDbConnection(gateway.CurrentValue.DataSources.Connections["sqlsrv"].ConnectionString, rows);
-        var factory = Substitute.For<IDataSourceConnectionFactory>();
-        factory.CreateConnectionAsync("sqlsrv", Arg.Any<CancellationToken>()).Returns(conn);
+        var factory = new StubDataSourceFactory(_ => conn);
 
         using var service = CreateService(monitor, factory, gateway);
         var published = await service.PollStreamBatchAsync(poller, fencingToken: 1);
@@ -337,27 +315,24 @@ public sealed class CustomQueryPollerReadOnlyTests
             })
             .Build();
 
-        services.AddSingleton(Substitute.For<ISqlConnectionFactory>());
-        services.AddSingleton(Substitute.For<ICdcStreamStore>());
-        services.AddSingleton(Substitute.For<ICdcStreamSignal>());
-        services.AddSingleton(Substitute.For<IDistributedClusterStateProvider>());
+        services.AddSingleton<ISqlConnectionFactory>(new StubSqlConnectionFactory(_ => throw new InvalidOperationException("unused")));
+        services.AddSingleton<ICdcStreamStore>(_streamStore);
+        services.AddSingleton<ICdcStreamSignal>(_signal);
+        services.AddSingleton(_clusterState);
         services.AddSingleton<ISqlEngine>(FastSqlEngine.Default);
 
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        metadataRepo.GetTableMetadataAsync(new TableIdentifier("crm", "dbo", "customers"), Arg.Any<CancellationToken>())
-            .Returns(new TableMetadata
-            {
-                Identifier = new TableIdentifier("crm", "dbo", "customers"),
-                OwnerTenantId = "tenant-a"
-            });
-        services.AddSingleton(metadataRepo);
+        var metadataRepo = new InMemoryTableMetadataRepository(new TableMetadata
+        {
+            Identifier = new TableIdentifier("crm", "dbo", "customers"),
+            OwnerTenantId = "tenant-a"
+        });
+        services.AddSingleton<ITableMetadataRepository>(metadataRepo);
 
         var gateway = new GatewayOptions();
         gateway.DataSources.Connections["db_bricks"] = new DataSourceConnectionOptions { Provider = "Databricks", ConnectionString = "Host=adb;" };
         gateway.DataSources.Connections["pg_ok"] = new DataSourceConnectionOptions { Provider = "PostgreSql", ConnectionString = "Host=pg;" };
-        var gwMonitor = Substitute.For<IOptionsMonitor<GatewayOptions>>();
-        gwMonitor.CurrentValue.Returns(gateway);
-        services.AddSingleton(gwMonitor);
+        var gwMonitor = new StaticOptionsMonitor<GatewayOptions>(gateway);
+        services.AddSingleton<IOptionsMonitor<GatewayOptions>>(gwMonitor);
         services.AddSingleton(Options.Create(gateway));
 
         services.AddCustomQueryPoller(config);
@@ -395,8 +370,7 @@ public sealed class CustomQueryPollerReadOnlyTests
 
         var secretMarker = "SECRET_SQL_FRAGMENT_AND_PASSWORD_DO_NOT_LOG";
         var conn = new ThrowingDbConnection(new FakeSqlDbException($"syntax error near '{secretMarker}'", "42601"));
-        var factory = Substitute.For<IDataSourceConnectionFactory>();
-        factory.CreateConnectionAsync("pg_src", Arg.Any<CancellationToken>()).Returns(conn);
+        var factory = new StubDataSourceFactory(_ => conn);
 
         var logger = new CapturingLogger<CustomQueryPollerService>();
         using var service = CreateService(monitor, factory, gateway, logger: logger);
@@ -437,7 +411,7 @@ public sealed class CustomQueryPollerReadOnlyTests
             var partition = new Autheris.Application.Runtime.Hosting.ClusterPartition(
                 $"cdc:query:poll:{streamName.ToLowerInvariant()}",
                 new Autheris.Application.Runtime.Hosting.ClusterSchedule(true, TimeSpan.FromSeconds(1), TimeSpan.Zero, TimeSpan.FromSeconds(10), TimeSpan.Zero));
-            var context = new Autheris.Application.Runtime.Hosting.ClusterJobContext(fencingToken, Substitute.For<IDistributedLease>());
+            var context = new Autheris.Application.Runtime.Hosting.ClusterJobContext(fencingToken, new DummyLease(fencingToken));
             return ExecutePartitionAsync(partition, context, CancellationToken.None);
         }
     }
@@ -714,5 +688,30 @@ public sealed class CustomQueryPollerReadOnlyTests
         public override long GetInt64(int ordinal) => Convert.ToInt64(GetValue(ordinal));
         public override string GetString(int ordinal) => Convert.ToString(GetValue(ordinal)) ?? string.Empty;
         public override System.Collections.IEnumerator GetEnumerator() => rows.GetEnumerator();
+    }
+
+    private sealed class StubDataSourceFactory(Func<string, DbConnection> create) : IDataSourceConnectionFactory
+    {
+        public int CallCount { get; private set; }
+        public Task<DbConnection> CreateConnectionAsync(string dataSourceName, CancellationToken ct = default)
+        {
+            CallCount++;
+            return Task.FromResult(create(dataSourceName));
+        }
+    }
+
+    private sealed class StubSqlConnectionFactory(Func<DataSourceConnectionOptions, DbConnection> create) : ISqlConnectionFactory
+    {
+        public Task<DbConnection> CreateOpenConnectionAsync(DataSourceConnectionOptions connectionOptions, CancellationToken ct = default)
+            => Task.FromResult(create(connectionOptions));
+    }
+
+    private sealed class DummyLease(long token) : IDistributedLease
+    {
+        public string ResourceKey => "k";
+        public long Token => token;
+        public CancellationToken LeaseLost => CancellationToken.None;
+        public DateTimeOffset LastConfirmedAt => DateTimeOffset.UtcNow;
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }

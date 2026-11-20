@@ -1,5 +1,7 @@
 namespace Autheris.Tests.Unit.Security;
 
+using Autheris.Tests.Common;
+using Autheris.Tests.Common.Fakes;
 using Autheris.Tests.Unit.TestDoubles;
 using System;
 using System.Collections.Generic;
@@ -113,7 +115,7 @@ public sealed class TableAccessPolicyArch1Tests
         var httpContext = new DefaultHttpContext();
         httpContext.Response.Body = new MemoryStream();
         httpContext.User = User();
-        httpContext.RequestServices = new ServiceCollection().AddAuditWriterOver(Substitute.For<IAuditLogRepository>()).BuildServiceProvider();
+        httpContext.RequestServices = new ServiceCollection().AddAuditWriterOver(new InMemoryAuditLogRepository()).BuildServiceProvider();
         httpContext.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { sql = "SELECT 1", tableNames = new[] { "sales.public.orders" } })));
 
         var metadataRepo = Substitute.For<ITableMetadataRepository>();
@@ -146,8 +148,7 @@ public sealed class TableAccessPolicyArch1Tests
     [Fact]
     public async Task WebSql_UsesTheConsentDecisionCache()
     {
-        var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        Microsoft.Extensions.Hosting.IHostEnvironment env = new TestHostEnvironment("Development");
         var tables = Substitute.For<ITableMetadataRepository>();
         tables.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(ci => Task.FromResult<TableMetadata?>(ci.Arg<TableIdentifier>().TableName == "orders" ? Meta() : null));

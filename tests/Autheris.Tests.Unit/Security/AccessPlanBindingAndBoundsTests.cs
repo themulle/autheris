@@ -1,5 +1,7 @@
 namespace Autheris.Tests.Unit.Security;
 
+using Autheris.Tests.Common;
+using Autheris.Tests.Common.Fakes;
 using System;
 using System.Collections.Generic;
 using System.Security;
@@ -27,7 +29,7 @@ public sealed class AccessPlanBindingAndBoundsTests
     private const string DatasetId = "sales.public.orders";
 
     private readonly IConsentRepository _consentRepo = Substitute.For<IConsentRepository>();
-    private readonly IAuditLogRepository _audit = Substitute.For<IAuditLogRepository>();
+    private readonly IAuditLogRepository _audit = new InMemoryAuditLogRepository();
     private readonly ITotpSecretStore _secrets = new InMemoryTotpSecretStore();
     private readonly TotpVerificationService _totp = new();
     private readonly MutableTimeProvider _time = new();
@@ -146,8 +148,7 @@ public sealed class AccessPlanBindingAndBoundsTests
     public async Task ResolvePrincipal_NonDevelopment_DoesNotReturnDemoDirectory()
     {
         var ownership = Substitute.For<IDataOwnershipRepository>();
-        var prod = Substitute.For<IHostEnvironment>();
-        prod.EnvironmentName.Returns("Production");
+        IHostEnvironment prod = new TestHostEnvironment("Production");
         var service = new AccessPlanningService(
             global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_audit), dataOwnershipRepository: ownership, hostEnvironment: prod, timeProvider: _time);
 
@@ -168,8 +169,7 @@ public sealed class AccessPlanBindingAndBoundsTests
     [Fact]
     public async Task ResolvePrincipal_Development_ReturnsDemoDirectory()
     {
-        var dev = Substitute.For<IHostEnvironment>();
-        dev.EnvironmentName.Returns("Development");
+        IHostEnvironment dev = new TestHostEnvironment("Development");
         var service = CreateService(env: dev);
 
         var result = await service.ResolvePrincipalAsync(new AdminResolvePrincipalRequest("David"), AdminA);

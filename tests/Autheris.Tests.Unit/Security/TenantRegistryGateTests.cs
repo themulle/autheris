@@ -1,10 +1,9 @@
-#pragma warning disable CA2012 // NSubstitute .Returns(...) configures a ValueTask member; the instance is not consumed here.
 namespace Autheris.Tests.Unit.Security;
 
 using Autheris.Application.Security;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
-using NSubstitute;
+using Autheris.Tests.Unit.TestDoubles;
 using Shouldly;
 using Xunit;
 
@@ -28,28 +27,33 @@ public sealed class TenantRegistryGateTests
     public async Task PositiveResult_IsCached_UntilTheTtlExpires()
     {
         var clock = new ManualClock();
-        var inner = Substitute.For<ITenantRegistry>();
-        inner.RegisterOrGetAsync(Acme, "iss", Arg.Any<CancellationToken>()).Returns(new ValueTask<TenantRegistration>(TenantRegistration.Registered));
+        var inner = new StubTenantRegistry();
         var gate = Gate(inner, clock);
 
         (await gate.RegisterOrGetAsync(Acme, "iss", default)).ShouldBe(TenantRegistration.Registered);
         (await gate.RegisterOrGetAsync(Acme, "iss", default)).ShouldBe(TenantRegistration.Existing);
-        await inner.Received(1).RegisterOrGetAsync(Acme, "iss", Arg.Any<CancellationToken>());
+        inner.RegisterCalls.Count(c => c.Tenant == Acme && c.Issuer == "iss").ShouldBe(1);
 
         clock.Advance(TimeSpan.FromSeconds(31));
         await gate.RegisterOrGetAsync(Acme, "iss", default);
-        await inner.Received(2).RegisterOrGetAsync(Acme, "iss", Arg.Any<CancellationToken>());
+        inner.RegisterCalls.Count(c => c.Tenant == Acme && c.Issuer == "iss").ShouldBe(2);
     }
 
     [Fact]
     public async Task Collision_IsNeverCached_AndEvictsTheCachedSiblingSpelling()
     {
-        var inner = Substitute.For<ITenantRegistry>();
         var lower = new TenantId("acme");
         var upper = new TenantId("ACME");
-        inner.RegisterOrGetAsync(lower, Arg.Any<string?>(), Arg.Any<CancellationToken>()).Returns(
-            new ValueTask<TenantRegistration>(TenantRegistration.Registered), new ValueTask<TenantRegistration>(TenantRegistration.Collision));
-        inner.RegisterOrGetAsync(upper, Arg.Any<string?>(), Arg.Any<CancellationToken>()).Returns(new ValueTask<TenantRegistration>(TenantRegistration.Collision));
+        var lowerCalls = 0;
+        var inner = new StubTenantRegistry
+        {
+            OnRegisterOrGet = (t, _, _) =>
+            {
+                if (t == lower) return ValueTask.FromResult(lowerCalls++ == 0 ? TenantRegistration.Registered : TenantRegistration.Collision);
+                if (t == upper) return ValueTask.FromResult(TenantRegistration.Collision);
+                return ValueTask.FromResult(TenantRegistration.Registered);
+            }
+        };
         var gate = Gate(inner, perIssuer: 10);
 
         (await gate.RegisterOrGetAsync(lower, "iss", default)).ShouldBe(TenantRegistration.Registered);
@@ -57,35 +61,37 @@ public sealed class TenantRegistryGateTests
         // the cached allow for the first spelling is gone: the store is asked again and denies
         (await gate.RegisterOrGetAsync(lower, "iss", default)).ShouldBe(TenantRegistration.Collision);
         (await gate.RegisterOrGetAsync(upper, "iss", default)).ShouldBe(TenantRegistration.Collision);
-        await inner.Received(2).RegisterOrGetAsync(upper, Arg.Any<string?>(), Arg.Any<CancellationToken>());
+        inner.RegisterCalls.Count(c => c.Tenant == upper).ShouldBe(2);
     }
 
     [Fact]
     public async Task RegistryUnavailable_NotCachedAsAllow()
     {
-        var inner = Substitute.For<ITenantRegistry>();
-        inner.RegisterOrGetAsync(Acme, Arg.Any<string?>(), Arg.Any<CancellationToken>()).Returns(
-            _ => throw new InvalidOperationException("down"),
-            _ => new ValueTask<TenantRegistration>(TenantRegistration.Collision));
+        var calls = 0;
+        var inner = new StubTenantRegistry
+        {
+            OnRegisterOrGet = (_, _, _) => calls++ == 0
+                ? throw new InvalidOperationException("down")
+                : ValueTask.FromResult(TenantRegistration.Collision)
+        };
         var gate = Gate(inner);
 
         await Should.ThrowAsync<InvalidOperationException>(async () => await gate.RegisterOrGetAsync(Acme, "iss", default));
         (await gate.RegisterOrGetAsync(Acme, "iss", default)).ShouldBe(TenantRegistration.Collision);
-        await inner.Received(2).RegisterOrGetAsync(Acme, Arg.Any<string?>(), Arg.Any<CancellationToken>());
+        inner.RegisterCalls.Count(c => c.Tenant == Acme).ShouldBe(2);
     }
 
     [Fact]
     public async Task RegistrationRateLimit_PerIssuer()
     {
         var clock = new ManualClock();
-        var inner = Substitute.For<ITenantRegistry>();
-        inner.RegisterOrGetAsync(Arg.Any<TenantId>(), Arg.Any<string?>(), Arg.Any<CancellationToken>()).Returns(new ValueTask<TenantRegistration>(TenantRegistration.Registered));
+        var inner = new StubTenantRegistry();
         var gate = Gate(inner, clock, perIssuer: 2);
 
         (await gate.RegisterOrGetAsync(new TenantId("t1"), "evil", default)).ShouldBe(TenantRegistration.Registered);
         (await gate.RegisterOrGetAsync(new TenantId("t2"), "evil", default)).ShouldBe(TenantRegistration.Registered);
         (await gate.RegisterOrGetAsync(new TenantId("t3"), "evil", default)).ShouldBe(TenantRegistration.RateLimited);
-        await inner.DidNotReceive().RegisterOrGetAsync(new TenantId("t3"), Arg.Any<string?>(), Arg.Any<CancellationToken>());
+        inner.RegisterCalls.ShouldNotContain(c => c.Tenant == new TenantId("t3"));
 
         // another issuer is unaffected, an already cached tenant of the limited issuer still passes
         (await gate.RegisterOrGetAsync(new TenantId("t4"), "good", default)).ShouldBe(TenantRegistration.Registered);
@@ -100,10 +106,10 @@ public sealed class TenantRegistryGateTests
     [Fact]
     public async Task ExistingTenant_IsNotRateLimited_WhenTheIssuerBudgetIsExhausted()
     {
-        var inner = Substitute.For<ITenantRegistry>();
-        inner.TryGetAsync(Arg.Any<TenantId>(), Arg.Any<CancellationToken>()).Returns(new ValueTask<TenantRegistration?>((TenantRegistration?)null));
-        inner.TryGetAsync(new TenantId("known"), Arg.Any<CancellationToken>()).Returns(new ValueTask<TenantRegistration?>(TenantRegistration.Existing));
-        inner.RegisterOrGetAsync(Arg.Any<TenantId>(), Arg.Any<string?>(), Arg.Any<CancellationToken>()).Returns(new ValueTask<TenantRegistration>(TenantRegistration.Registered));
+        var inner = new StubTenantRegistry
+        {
+            OnTryGet = (t, _) => ValueTask.FromResult<TenantRegistration?>(t == new TenantId("known") ? TenantRegistration.Existing : null)
+        };
         var gate = Gate(inner, perIssuer: 1);
 
         (await gate.RegisterOrGetAsync(new TenantId("new1"), "busy", default)).ShouldBe(TenantRegistration.Registered);
@@ -111,14 +117,16 @@ public sealed class TenantRegistryGateTests
 
         // a tenant that merely exists (another node registered it, or the cache expired) is a lookup, not a registration
         (await gate.RegisterOrGetAsync(new TenantId("known"), "busy", default)).ShouldBe(TenantRegistration.Existing);
-        await inner.DidNotReceive().RegisterOrGetAsync(new TenantId("known"), Arg.Any<string?>(), Arg.Any<CancellationToken>());
+        inner.RegisterCalls.ShouldNotContain(c => c.Tenant == new TenantId("known"));
     }
 
     [Fact]
     public async Task CollisionFoundByTheLookup_NeverConsumesBudget_AndIsNeverCachedAsAnAllow()
     {
-        var inner = Substitute.For<ITenantRegistry>();
-        inner.TryGetAsync(Acme, Arg.Any<CancellationToken>()).Returns(new ValueTask<TenantRegistration?>(TenantRegistration.Collision));
+        var inner = new StubTenantRegistry
+        {
+            OnTryGet = (t, _) => ValueTask.FromResult<TenantRegistration?>(t == Acme ? TenantRegistration.Collision : null)
+        };
         var gate = Gate(inner, perIssuer: 1);
 
         for (var i = 0; i < 3; i++)
@@ -126,39 +134,45 @@ public sealed class TenantRegistryGateTests
             (await gate.RegisterOrGetAsync(Acme, "busy", default)).ShouldBe(TenantRegistration.Collision);
         }
 
-        await inner.DidNotReceive().RegisterOrGetAsync(Acme, Arg.Any<string?>(), Arg.Any<CancellationToken>());
-        await inner.Received(3).TryGetAsync(Acme, Arg.Any<CancellationToken>());   // a collision is never cached
+        inner.RegisterCalls.ShouldNotContain(c => c.Tenant == Acme);
+        inner.TryGetCalls.Count(t => t == Acme).ShouldBe(3);   // a collision is never cached
     }
 
     [Fact]
     public async Task ExistingFoundByTheLookup_IsCached_PositiveOnly()
     {
-        var inner = Substitute.For<ITenantRegistry>();
-        inner.TryGetAsync(Acme, Arg.Any<CancellationToken>()).Returns(new ValueTask<TenantRegistration?>(TenantRegistration.Existing));
+        var inner = new StubTenantRegistry
+        {
+            OnTryGet = (t, _) => ValueTask.FromResult<TenantRegistration?>(t == Acme ? TenantRegistration.Existing : null)
+        };
         var gate = Gate(inner);
 
         await gate.RegisterOrGetAsync(Acme, "iss", default);
         await gate.RegisterOrGetAsync(Acme, "iss", default);
 
-        await inner.Received(1).TryGetAsync(Acme, Arg.Any<CancellationToken>());
+        inner.TryGetCalls.Count(t => t == Acme).ShouldBe(1);
     }
 
     [Fact]
     public async Task LookupUnavailable_FailsClosed_AndIsNotCached()
     {
-        var inner = Substitute.For<ITenantRegistry>();
-        inner.TryGetAsync(Acme, Arg.Any<CancellationToken>()).Returns<ValueTask<TenantRegistration?>>(_ => throw new InvalidOperationException("down"));
+        var inner = new StubTenantRegistry
+        {
+            OnTryGet = (_, _) => throw new InvalidOperationException("down")
+        };
         var gate = Gate(inner);
 
         await Should.ThrowAsync<InvalidOperationException>(async () => await gate.RegisterOrGetAsync(Acme, "iss", default));
-        await inner.DidNotReceive().RegisterOrGetAsync(Acme, Arg.Any<string?>(), Arg.Any<CancellationToken>());
+        inner.RegisterCalls.ShouldNotContain(c => c.Tenant == Acme);
     }
 
     [Fact]
     public async Task ExistingAndCollisionResults_DoNotConsumeTheRegistrationBudget()
     {
-        var inner = Substitute.For<ITenantRegistry>();
-        inner.RegisterOrGetAsync(Arg.Any<TenantId>(), Arg.Any<string?>(), Arg.Any<CancellationToken>()).Returns(new ValueTask<TenantRegistration>(TenantRegistration.Existing));
+        var inner = new StubTenantRegistry
+        {
+            OnRegisterOrGet = (_, _, _) => ValueTask.FromResult(TenantRegistration.Existing)
+        };
         var gate = Gate(inner, perIssuer: 1);
 
         for (var i = 0; i < 5; i++)
@@ -170,8 +184,7 @@ public sealed class TenantRegistryGateTests
     [Fact]
     public async Task UnknownAndManyIssuers_ShareBoundedBuckets()
     {
-        var inner = Substitute.For<ITenantRegistry>();
-        inner.RegisterOrGetAsync(Arg.Any<TenantId>(), Arg.Any<string?>(), Arg.Any<CancellationToken>()).Returns(new ValueTask<TenantRegistration>(TenantRegistration.Registered));
+        var inner = new StubTenantRegistry();
         var gate = Gate(inner, perIssuer: 1, maxIssuers: 2);
 
         (await gate.RegisterOrGetAsync(new TenantId("a1"), "i1", default)).ShouldBe(TenantRegistration.Registered);
@@ -186,51 +199,55 @@ public sealed class TenantRegistryGateTests
     [Fact]
     public async Task CacheIsBounded()
     {
-        var inner = Substitute.For<ITenantRegistry>();
-        inner.RegisterOrGetAsync(Arg.Any<TenantId>(), Arg.Any<string?>(), Arg.Any<CancellationToken>()).Returns(new ValueTask<TenantRegistration>(TenantRegistration.Existing));
+        var inner = new StubTenantRegistry
+        {
+            OnRegisterOrGet = (_, _, _) => ValueTask.FromResult(TenantRegistration.Existing)
+        };
         var gate = Gate(inner, maxCache: 2);
 
         foreach (var t in new[] { "c1", "c2", "c3" }) await gate.RegisterOrGetAsync(new TenantId(t), "iss", default);
         await gate.RegisterOrGetAsync(new TenantId("c3"), "iss", default); // not cached: asks the store again
-        await inner.Received(2).RegisterOrGetAsync(new TenantId("c3"), Arg.Any<string?>(), Arg.Any<CancellationToken>());
+        inner.RegisterCalls.Count(c => c.Tenant == new TenantId("c3")).ShouldBe(2);
         await gate.RegisterOrGetAsync(new TenantId("c1"), "iss", default);
-        await inner.Received(1).RegisterOrGetAsync(new TenantId("c1"), Arg.Any<string?>(), Arg.Any<CancellationToken>());
+        inner.RegisterCalls.Count(c => c.Tenant == new TenantId("c1")).ShouldBe(1);
     }
 
     [Fact]
     public async Task Preseed_IsForwarded()
     {
-        var inner = Substitute.For<ITenantRegistry>();
+        var inner = new StubTenantRegistry();
         var gate = Gate(inner);
         await gate.PreseedAsync(["a"], default);
-        await inner.Received(1).PreseedAsync(Arg.Any<IEnumerable<string>>(), Arg.Any<CancellationToken>());
+        inner.PreseedCalls.Count.ShouldBe(1);
     }
 
     [Fact]
     public async Task Lookup_IsAnsweredByTheStore_NeverRegistersAndNeverConsumesBudget()
     {
-        var inner = Substitute.For<ITenantRegistry>();
-        inner.TryGetAsync(Acme, Arg.Any<CancellationToken>()).Returns(new ValueTask<TenantRegistration?>(TenantRegistration.Existing));
+        var inner = new StubTenantRegistry
+        {
+            OnTryGet = (t, _) => ValueTask.FromResult<TenantRegistration?>(t == Acme ? TenantRegistration.Existing : null)
+        };
         var gate = Gate(inner, perIssuer: 0);
 
         (await gate.TryGetAsync(Acme, default)).ShouldBe(TenantRegistration.Existing);
         (await gate.TryGetAsync(new TenantId("unknown"), default)).ShouldBeNull();
-        await inner.DidNotReceiveWithAnyArgs().RegisterOrGetAsync(default, default, default);
+        inner.RegisterCalls.ShouldBeEmpty();
     }
 
     [Fact]
     public async Task ResolveCollision_IsForwarded_AndEvictsTheCachedGroup()
     {
-        var inner = Substitute.For<ITenantRegistry>();
-        inner.RegisterOrGetAsync(Acme, Arg.Any<string?>(), Arg.Any<CancellationToken>()).Returns(new ValueTask<TenantRegistration>(TenantRegistration.Registered));
-        inner.ResolveCollisionAsync(Acme, Arg.Any<string?>(), Arg.Any<CancellationToken>())
-            .Returns(new ValueTask<TenantCollisionResolution>(new TenantCollisionResolution(TenantCollisionResolutionStatus.Resolved, "acme")));
+        var inner = new StubTenantRegistry
+        {
+            OnResolveCollision = (t, _, _) => ValueTask.FromResult(new TenantCollisionResolution(TenantCollisionResolutionStatus.Resolved, "acme"))
+        };
         var gate = Gate(inner);
         await gate.RegisterOrGetAsync(Acme, "iss", default);   // cached positive
 
         (await gate.ResolveCollisionAsync(Acme, null, default)).Status.ShouldBe(TenantCollisionResolutionStatus.Resolved);
         await gate.RegisterOrGetAsync(Acme, "iss", default);
 
-        await inner.Received(2).RegisterOrGetAsync(Acme, Arg.Any<string?>(), Arg.Any<CancellationToken>());   // the cache was evicted
+        inner.RegisterCalls.Count(c => c.Tenant == Acme).ShouldBe(2);   // the cache was evicted
     }
 }

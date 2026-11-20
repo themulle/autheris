@@ -1,4 +1,5 @@
 using Autheris.Tests.Unit.TestSupport;
+using Autheris.Tests.Common.Fakes;
 using System.Security.Claims;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Services;
@@ -84,8 +85,8 @@ public sealed class GatewayExecutionRequestValidationTests
 
         return new GatewayExecutionService(
             metadataRepo,
-            Substitute.For<IConsentRepository>(),
-            Substitute.For<IAuditLogRepository>(),
+            new InMemoryConsentRepository(),
+            new InMemoryAuditLogRepository(),
             Substitute.For<IConsentResolutionService>(),
             cache,
             Substitute.For<IColumnMaskingProvider>(),
@@ -218,7 +219,7 @@ public sealed class GatewayExecutionRequestValidationTests
         var audit = Substitute.For<IAuditLogRepository>();
         var service = new GatewayExecutionService(
             metadataRepo,
-            Substitute.For<IConsentRepository>(),
+            new InMemoryConsentRepository(),
             audit,
             Substitute.For<IConsentResolutionService>(),
             cache,
@@ -260,7 +261,7 @@ public sealed class GatewayExecutionRequestValidationTests
         var audit = Substitute.For<IAuditLogRepository>();
         var service = new GatewayExecutionService(
             metadataRepo,
-            Substitute.For<IConsentRepository>(),
+            new InMemoryConsentRepository(),
             audit,
             Substitute.For<IConsentResolutionService>(),
             cache,

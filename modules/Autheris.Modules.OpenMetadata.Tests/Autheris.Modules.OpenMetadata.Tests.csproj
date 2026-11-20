@@ -24,6 +24,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="..\..\tests\Autheris.Extensions.Tests\TestSupport\StubOpenMetadataClient.cs" Link="TestSupport\StubOpenMetadataClient.cs" />
     <ProjectReference Include="..\Autheris.Modules.OpenMetadata\Autheris.Modules.OpenMetadata.csproj" />
     <ProjectReference Include="..\..\src\Autheris.Api\Autheris.Api.csproj" />
     <ProjectReference Include="..\..\src\Autheris.Application\Autheris.Application.csproj" />

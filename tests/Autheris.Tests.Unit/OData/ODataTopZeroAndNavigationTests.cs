@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.OData;
 
 using System.Collections.Generic;
+using Autheris.Tests.Common.Fakes;
 using System.Linq;
 using System.Security.Claims;
 using System.Threading;
@@ -12,12 +13,11 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Application.OData;
 using Microsoft.Extensions.Logging.Abstractions;
-using NSubstitute;
 using Shouldly;
 using Xunit;
 
 /// <summary>EXT-19: $top=0 returns no rows (count probe) and navigation paths in $filter are rejected.</summary>
-public sealed class ODataTopZeroAndNavigationExt19Tests
+public sealed class ODataTopZeroAndNavigationTests
 {
     private static readonly TableIdentifier Plain = new("erp", "main", "invoices");
     private static readonly Dictionary<string, ColumnAccessLevel> Access = new(System.StringComparer.OrdinalIgnoreCase) { ["id"] = ColumnAccessLevel.Clear };
@@ -29,10 +29,8 @@ public sealed class ODataTopZeroAndNavigationExt19Tests
     public async Task TopZero_ReturnsEmptyValue_WithCount_AndNoNextLink()
     {
         var rows = Enumerable.Range(1, 3).Select(i => (IReadOnlyDictionary<string, object?>)new Dictionary<string, object?> { ["id"] = i }).ToList();
-        var execution = Substitute.For<IGatewayExecutionService>();
-        execution.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
-            .Returns(new TableQueryPage(rows, TableAccessDecision.Allowed(Plain, Access), 42, false));
-        var handler = new ODataHandler(Substitute.For<ITableMetadataRepository>(), execution, NullLogger<ODataHandler>.Instance);
+        var execution = StubGatewayExecutionService.WithPage(new TableQueryPage(rows, TableAccessDecision.Allowed(Plain, Access), 42, false));
+        var handler = new ODataHandler(new InMemoryTableMetadataRepository(), execution, NullLogger<ODataHandler>.Instance);
 
         var result = await handler.ExecuteEntitySetQueryAsync(
             User(), "https://gw/odata/v4", Plain, top: 0, skip: null, select: null, includeCount: true, headers: null);

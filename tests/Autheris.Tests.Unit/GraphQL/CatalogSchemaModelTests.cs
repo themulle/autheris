@@ -3,7 +3,7 @@ using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.GraphQL.Catalog;
-using NSubstitute;
+using Autheris.Tests.Common.Fakes;
 using Xunit;
 
 namespace Autheris.Tests.Unit.GraphQL;
@@ -26,18 +26,13 @@ public sealed class CatalogSchemaModelTests
     [Fact]
     public async Task BuildAsync_FiltersInactiveNonSqlAndInvalidDialects()
     {
-        var metaRepo = Substitute.For<ITableMetadataRepository>();
-        var relRepo = Substitute.For<ITableRelationRepository>();
-
         var activeSql = CreateTable(new TableIdentifier("sales", "dbo", "customers"), isActive: true, dsType: DataSourceType.Sql, dialect: "PostgreSql");
         var inactiveSql = CreateTable(new TableIdentifier("sales", "dbo", "inactive_table"), isActive: false, dsType: DataSourceType.Sql, dialect: "PostgreSql");
         var nonSql = CreateTable(new TableIdentifier("sales", "dbo", "mongo_table"), isActive: true, dsType: DataSourceType.HttpDeclarative, dialect: "PostgreSql");
         var invalidDialect = CreateTable(new TableIdentifier("sales", "dbo", "bad_dialect"), isActive: true, dsType: DataSourceType.Sql, dialect: "UnknownDialect");
 
-        metaRepo.StubAllTables([activeSql, inactiveSql, nonSql, invalidDialect]);
-
-        relRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns([]);
+        var metaRepo = new AllTablesRepo(activeSql, inactiveSql, nonSql, invalidDialect);
+        var relRepo = new InMemoryTableRelationRepository();
 
         var model = await CatalogSchemaModel.BuildAsync(metaRepo, relRepo);
 
@@ -48,17 +43,12 @@ public sealed class CatalogSchemaModelTests
     [Fact]
     public async Task BuildAsync_CollidingTableNames_OmitsDuplicateAndPreservesCanonicalTable()
     {
-        var metaRepo = Substitute.For<ITableMetadataRepository>();
-        var relRepo = Substitute.For<ITableRelationRepository>();
-
         // Two tables that sanitize to the same base name "sales_dbo_orders_item"
         var table1 = CreateTable(new TableIdentifier("sales", "dbo", "orders_item"), dialect: "SqlServer");
         var table2 = CreateTable(new TableIdentifier("sales_dbo", "orders", "item"), dialect: "SqlServer");
 
-        metaRepo.StubAllTables([table1, table2]);
-
-        relRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns([]);
+        var metaRepo = new AllTablesRepo(table1, table2);
+        var relRepo = new InMemoryTableRelationRepository();
 
         var model = await CatalogSchemaModel.BuildAsync(metaRepo, relRepo);
 
@@ -71,16 +61,11 @@ public sealed class CatalogSchemaModelTests
     [Fact]
     public async Task BuildAsync_TableCollidingWithFilterNameOfEarlierTable_IsOmittedAndPreservesCanonicalTable()
     {
-        var metaRepo = Substitute.For<ITableMetadataRepository>();
-        var relRepo = Substitute.For<ITableRelationRepository>();
-
         var table1 = CreateTable(new TableIdentifier("db", "public", "orders"), dialect: "SqlServer");
         var table2 = CreateTable(new TableIdentifier("db", "public", "orders_filter"), dialect: "SqlServer");
 
-        metaRepo.StubAllTables([table1, table2]);
-
-        relRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns([]);
+        var metaRepo = new AllTablesRepo(table1, table2);
+        var relRepo = new InMemoryTableRelationRepository();
 
         var model = await CatalogSchemaModel.BuildAsync(metaRepo, relRepo);
 
@@ -94,16 +79,11 @@ public sealed class CatalogSchemaModelTests
     [Fact]
     public async Task BuildAsync_TableCollidingWithOrderByNameOfEarlierTable_IsOmittedAndPreservesCanonicalTable()
     {
-        var metaRepo = Substitute.For<ITableMetadataRepository>();
-        var relRepo = Substitute.For<ITableRelationRepository>();
-
         var table1 = CreateTable(new TableIdentifier("db", "public", "orders"), dialect: "SqlServer");
         var table2 = CreateTable(new TableIdentifier("db", "public", "orders_order_by"), dialect: "SqlServer");
 
-        metaRepo.StubAllTables([table1, table2]);
-
-        relRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns([]);
+        var metaRepo = new AllTablesRepo(table1, table2);
+        var relRepo = new InMemoryTableRelationRepository();
 
         var model = await CatalogSchemaModel.BuildAsync(metaRepo, relRepo);
 
@@ -117,9 +97,6 @@ public sealed class CatalogSchemaModelTests
     [Fact]
     public async Task BuildAsync_MapsDataTypesToCatalogFieldTypes()
     {
-        var metaRepo = Substitute.For<ITableMetadataRepository>();
-        var relRepo = Substitute.For<ITableRelationRepository>();
-
         var table = CreateTable(new TableIdentifier("inventory", "dbo", "items"), dialect: "PostgreSql", columns:
         [
             new TableColumn { ColumnName = "id", DataType = "bigint" },
@@ -131,10 +108,8 @@ public sealed class CatalogSchemaModelTests
             new TableColumn { ColumnName = "description", DataType = "text" }
         ]);
 
-        metaRepo.StubAllTables([table]);
-
-        relRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns([]);
+        var metaRepo = new AllTablesRepo(table);
+        var relRepo = new InMemoryTableRelationRepository();
 
         var model = await CatalogSchemaModel.BuildAsync(metaRepo, relRepo);
         var tableType = Assert.Single(model.Tables);
@@ -152,9 +127,6 @@ public sealed class CatalogSchemaModelTests
     [Fact]
     public async Task BuildAsync_ColumnWithHmacMaskingRule_IsTypedAsStringInSchema()
     {
-        var metaRepo = Substitute.For<ITableMetadataRepository>();
-        var relRepo = Substitute.For<ITableRelationRepository>();
-
         var table = CreateTable(
             new TableIdentifier("billing", "dbo", "payments"),
             dialect: "PostgreSql",
@@ -173,10 +145,8 @@ public sealed class CatalogSchemaModelTests
                 ["is_verified"] = new MaskingRule { RuleType = "HASH" }
             });
 
-        metaRepo.StubAllTables([table]);
-
-        relRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns([]);
+        var metaRepo = new AllTablesRepo(table);
+        var relRepo = new InMemoryTableRelationRepository();
 
         var model = await CatalogSchemaModel.BuildAsync(metaRepo, relRepo);
         var tableType = Assert.Single(model.Tables);
@@ -192,9 +162,6 @@ public sealed class CatalogSchemaModelTests
     [Fact]
     public async Task BuildAsync_CreatesBidirectionalRelationsWithCorrectJoinKeysAndListFlags()
     {
-        var metaRepo = Substitute.For<ITableMetadataRepository>();
-        var relRepo = Substitute.For<ITableRelationRepository>();
-
         var parentId = new TableIdentifier("sales", "dbo", "customers");
         var childId = new TableIdentifier("sales", "dbo", "orders");
 
@@ -205,7 +172,7 @@ public sealed class CatalogSchemaModelTests
             new TableColumn { ColumnName = "customer_id", DataType = "int" }
         ]);
 
-        metaRepo.StubAllTables([parentTable, childTable]);
+        var metaRepo = new AllTablesRepo(parentTable, childTable);
 
         var relation = new TableRelation
         {
@@ -217,10 +184,7 @@ public sealed class CatalogSchemaModelTests
             JoinKeysChild = ["customer_id"]
         };
 
-        relRepo.GetRelationsForTableAsync(parentId, Arg.Any<CancellationToken>())
-            .Returns([relation]);
-        relRepo.GetRelationsForTableAsync(childId, Arg.Any<CancellationToken>())
-            .Returns([]);
+        var relRepo = new InMemoryTableRelationRepository(relation);
 
         var model = await CatalogSchemaModel.BuildAsync(metaRepo, relRepo);
 
@@ -247,9 +211,6 @@ public sealed class CatalogSchemaModelTests
     [Fact]
     public async Task BuildAsync_AppendsRelSuffixOnRelationColumnNameCollision()
     {
-        var metaRepo = Substitute.For<ITableMetadataRepository>();
-        var relRepo = Substitute.For<ITableRelationRepository>();
-
         var parentId = new TableIdentifier("crm", "dbo", "users");
         var childId = new TableIdentifier("crm", "dbo", "profiles");
 
@@ -264,7 +225,7 @@ public sealed class CatalogSchemaModelTests
             new TableColumn { ColumnName = "user_id", DataType = "int" }
         ]);
 
-        metaRepo.StubAllTables([parentTable, childTable]);
+        var metaRepo = new AllTablesRepo(parentTable, childTable);
 
         var relation = new TableRelation
         {
@@ -276,10 +237,7 @@ public sealed class CatalogSchemaModelTests
             JoinKeysChild = ["user_id"]
         };
 
-        relRepo.GetRelationsForTableAsync(parentId, Arg.Any<CancellationToken>())
-            .Returns([relation]);
-        relRepo.GetRelationsForTableAsync(childId, Arg.Any<CancellationToken>())
-            .Returns([]);
+        var relRepo = new InMemoryTableRelationRepository(relation);
 
         var model = await CatalogSchemaModel.BuildAsync(metaRepo, relRepo);
         var parentModel = Assert.Single(model.Tables, t => t.Identifier == parentId);
@@ -292,13 +250,11 @@ public sealed class CatalogSchemaModelTests
     public async Task BuildAsync_TablesOfDialectsWithoutTreeCompiler_AreOmitted()
     {
         // R-GQL-13: Oracle and Databricks tables were in the schema, but every query failed with NotSupported.
-        var metaRepo = Substitute.For<ITableMetadataRepository>();
-        var relRepo = Substitute.For<ITableRelationRepository>();
         var pg = CreateTable(new TableIdentifier("sales", "public", "orders"), dialect: "PostgreSql");
         var oracle = CreateTable(new TableIdentifier("erp", "app", "invoices"), dialect: "Oracle");
         var databricks = CreateTable(new TableIdentifier("lake", "gold", "facts"), dialect: "Databricks");
-        metaRepo.StubAllTables([pg, oracle, databricks]);
-        relRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns([]);
+        var metaRepo = new AllTablesRepo(pg, oracle, databricks);
+        var relRepo = new InMemoryTableRelationRepository();
 
         var model = await CatalogSchemaModel.BuildAsync(metaRepo, relRepo);
 
@@ -309,15 +265,13 @@ public sealed class CatalogSchemaModelTests
     public async Task BuildAsync_ColumnsWithoutPlainNames_AreOmitted()
     {
         // R-GQL-13: "a-b" was offered as a_b but the tree compiler rejects such column names.
-        var metaRepo = Substitute.For<ITableMetadataRepository>();
-        var relRepo = Substitute.For<ITableRelationRepository>();
         var table = CreateTable(new TableIdentifier("sales", "public", "orders"), columns:
         [
             new TableColumn { ColumnName = "id", DataType = "int" },
             new TableColumn { ColumnName = "unit-price", DataType = "decimal" }
         ]);
-        metaRepo.StubAllTables([table]);
-        relRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns([]);
+        var metaRepo = new AllTablesRepo(table);
+        var relRepo = new InMemoryTableRelationRepository();
 
         var model = await CatalogSchemaModel.BuildAsync(metaRepo, relRepo);
 
@@ -352,11 +306,8 @@ public sealed class CatalogSchemaModelTests
         IReadOnlyList<TableRelation> relations,
         Microsoft.Extensions.Logging.ILogger? logger = null)
     {
-        var metaRepo = Substitute.For<ITableMetadataRepository>();
-        var relRepo = Substitute.For<ITableRelationRepository>();
-        metaRepo.StubAllTables(tables);
-        relRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns(ci => relations.Where(r => r.ParentTableIdentifier == ci.ArgAt<TableIdentifier>(0)).ToList());
+        var metaRepo = new AllTablesRepo(tables.ToArray());
+        var relRepo = new InMemoryTableRelationRepository(relations.ToArray());
         return await CatalogSchemaModel.BuildAsync(metaRepo, relRepo, logger);
     }
 
@@ -938,5 +889,25 @@ public sealed class CatalogSchemaModelTests
             Columns = columns ?? [new TableColumn { ColumnName = "id", DataType = "int" }],
             ColumnMaskingRules = columnMaskingRules ?? new Dictionary<string, MaskingRule>()
         };
+    }
+
+    private sealed class AllTablesRepo(params TableMetadata[] tables) : ITableMetadataRepository
+    {
+        public Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default)
+            => Task.FromResult(tables.FirstOrDefault(t => t.Identifier == table && t.Table.IsActive));
+
+        public Task<IReadOnlyList<TableMetadata>> GetAllTablesAsync(CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<TableMetadata>>(tables);
+
+        public Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default)
+            => Task.FromResult(metadata);
+
+        public Task<TableKeyDefinitionChange?> ReplaceTableKeyDefinitionAsync(
+            TableIdentifier table,
+            IReadOnlyList<string> primaryKey,
+            IReadOnlyList<TableIndexDefinition> indexes,
+            IReadOnlyList<KeyColumnDirection>? primaryKeyDirections = null,
+            CancellationToken ct = default)
+            => throw new NotSupportedException();
     }
 }

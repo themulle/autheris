@@ -84,8 +84,7 @@ public sealed class BackgroundServiceLockTests
 
     internal static IHostEnvironment DevelopmentEnvironment()
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        IHostEnvironment env = new TestHostEnvironment("Development");
         return env;
     }
 
@@ -184,6 +183,7 @@ public sealed class BackgroundServiceLockTests
         var expiryStore = Substitute.For<IGrantExpiryStore>();
         var workflowRouter = Substitute.For<IConsentWorkflowRouter>();
 
+        var time = new FakeTimeProvider();
         var clusterState = Substitute.For<IDistributedClusterStateProvider>();
         clusterState.TryAcquireLockAsync(Arg.Is<string>(s => s.Contains("grant-expiry:scan")), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<IAsyncDisposable?>((IAsyncDisposable?)null));
@@ -193,24 +193,14 @@ public sealed class BackgroundServiceLockTests
             workflowRouter,
             NullLogger<GrantExpiryHostedService>.Instance,
             clusterState,
-            TimeProvider.System,
+            time,
             TimeSpan.FromMilliseconds(50));
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(150));
+        // Act: advance the fake clock past several intervals
+        await RunAsync(service, time, TimeSpan.FromSeconds(3));
 
-        // Act
-        try
-        {
-            await service.StartAsync(cts.Token);
-            await Task.Delay(80, cts.Token);
-        }
-        catch (OperationCanceledException) { }
-        finally
-        {
-            await service.StopAsync(CancellationToken.None);
-        }
-
-        // Assert
+        // Assert: the service cycled (lock attempted) yet never scanned without the lock
+        await clusterState.Received().TryAcquireLockAsync(Arg.Is<string>(s => s.Contains("grant-expiry:scan")), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>());
         await expiryStore.DidNotReceive().GetGrantsWithoutExpiryNoticeAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
     }
 }

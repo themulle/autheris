@@ -2,6 +2,7 @@
 namespace Autheris.Tests.Unit.AccessProfiles;
 
 using Autheris.Tests.Unit.TestDoubles;
+using Autheris.Tests.Common.Fakes;
 using System;
 using System.Collections.Generic;
 using System.Net;
@@ -71,7 +72,7 @@ public sealed class AccessProfileTests
         IMemoryCache? memoryCache = null,
         Autheris.Application.Policy.Interfaces.IAccessProfileCache? accessProfileCache = null)
     {
-        var consentRepo = Substitute.For<IConsentRepository>();
+        var consentRepo = new InMemoryConsentRepository();
         var resolutionService = Substitute.For<IConsentResolutionService>();
         // SR-M-07: an access profile never creates an allow; the underlying consent decision allows the table here.
         resolutionService.ResolveAccess(default!, default!, default!, default, default!, default, default, default)
@@ -238,13 +239,10 @@ public sealed class AccessProfileTests
 
     private static TableAccessPolicy CreatePolicyWithConsent(IAccessProfileRepository repo, TableAccessDecision consentDecision)
     {
-        var resolution = Substitute.For<IConsentResolutionService>();
-        resolution.ResolveAccess(default!, default!, default!, default, default!, default, default, default)
-            .ReturnsForAnyArgs(consentDecision);
         return new TableAccessPolicy(
-            Substitute.For<IConsentRepository>(),
-            resolution,
-            Substitute.For<IConsentCacheService>(),
+            new InMemoryConsentRepository(),
+            StubConsentResolutionService.Fixed(consentDecision),
+            new InMemoryConsentCacheService(),
             new GatewayOptions(),
             NullMandatoryRowFilterResolver.Instance,
             contractManager: null,
@@ -285,11 +283,10 @@ public sealed class AccessProfileTests
     {
         var repo = await RepoWithProfileAsync("srm07-user2", MaskingPolicyMode.Unmasked);
         var meta = CreateTelemetryTableMetadata();
-        // The substitute resolution service returns no decision, which is a denial.
         var resolutionless = new TableAccessPolicy(
-            Substitute.For<IConsentRepository>(),
-            Substitute.For<IConsentResolutionService>(),
-            Substitute.For<IConsentCacheService>(),
+            new InMemoryConsentRepository(),
+            StubConsentResolutionService.Unconfigured,
+            new InMemoryConsentCacheService(),
             new GatewayOptions(),
             NullMandatoryRowFilterResolver.Instance,
             contractManager: null,
@@ -451,11 +448,9 @@ public sealed class AccessProfileTests
         var services = new ServiceCollection();
         if (profileCache != null) services.AddSingleton(profileCache);
         services.AddLogging();
-        services.AddAuditWriterOver(auditRepo ?? Substitute.For<IAuditLogRepository>());
+        services.AddAuditWriterOver(auditRepo ?? new InMemoryAuditLogRepository());
         if (clusterState != null)
         {
-            clusterState.IncrementAsync(Arg.Any<string>(), Arg.Any<long>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
-                .Returns(ValueTask.FromResult<long?>(1));
             services.AddSingleton(clusterState);
         }
         if (metaRepo != null) services.AddSingleton(metaRepo);
@@ -555,7 +550,7 @@ public sealed class AccessProfileTests
     [Trait("Category", "Security")]
     public async Task AccessProfile_Plain_Subjects_Are_Rejected()
     {
-        var repo = Substitute.For<IAccessProfileRepository>();
+        var repo = new InMemoryAccessProfileRepository();
         var context = CreateEndpointContext(callerSid: "admin", callerName: "admin");
         var req = System.Text.Json.JsonSerializer.Deserialize<BulkConsentRequest>(
             """{"subject":"david","maskingMode":"Strict","tables":["tem.*"],"justification":"Plain subjects must be refused","validDays":30,"assignedSubjects":["mallory"]}""",
@@ -567,7 +562,7 @@ public sealed class AccessProfileTests
         status.ShouldBe(StatusCodes.Status400BadRequest);
         body.ShouldContain("ACCESS_PROFILE_PLAIN_SUBJECTS_REMOVED");
         body.ShouldNotContain("mallory");
-        repo.ReceivedCalls().ShouldBeEmpty();
+        (await repo.GetAllProfilesAsync(TenantLiebherr)).ShouldBeEmpty();
     }
 
     [Fact]
@@ -797,11 +792,13 @@ public sealed class AccessProfileTests
     public async Task BulkConsent_ValidStrictRequest_CreatesProfileAndLogsAudit()
     {
         var repo = new InMemoryAccessProfileRepository();
-        var auditRepo = Substitute.For<IAuditLogRepository>();
-        var clusterState = Substitute.For<IDistributedClusterStateProvider>();
-        var metaRepo = Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
-            Substitute.For<ITableMetadataRepository>());
-        metaRepo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>([CreateTelemetryTableMetadata()]));
+        var auditRepo = new InMemoryAuditLogRepository();
+        var incrementCalls = new List<(string Key, long Delta)>();
+        var clusterState = new StubClusterStateProvider
+        {
+            OnIncrement = (k, d, _, _) => { incrementCalls.Add((k, d)); return ValueTask.FromResult<long?>(1); }
+        };
+        var metaRepo = new InMemoryTableMetadataRepository(CreateTelemetryTableMetadata());
 
         var memoryCache = new MemoryCache(new MemoryCacheOptions());
         var context = CreateEndpointContext(
@@ -837,19 +834,13 @@ public sealed class AccessProfileTests
         stored.Justification.ShouldBe(req.Justification);
 
         // Verify audit log recorded Tier-A CONSENT_GRANTED
-        await auditRepo.Received(1).RecordAuditEventAsync(
-            Arg.Is<AuditLogEntry>(e =>
-                e.EventType == "CONSENT_GRANTED" &&
-                e.Decision == "ALLOW" &&
-                e.TenantId == TenantLiebherr),
-            Arg.Any<CancellationToken>());
+        auditRepo.Entries.Count(e =>
+            e.EventType == "CONSENT_GRANTED" &&
+            e.Decision == "ALLOW" &&
+            e.TenantId == TenantLiebherr).ShouldBe(1);
 
         // Verify cluster state epoch incremented
-        await clusterState.Received(1).IncrementAsync(
-            $"profile_epoch:{TenantLiebherr.Value}",
-            1,
-            Arg.Any<TimeSpan>(),
-            Arg.Any<CancellationToken>());
+        incrementCalls.Count(c => c.Key == $"profile_epoch:{TenantLiebherr.Value}" && c.Delta == 1).ShouldBe(1);
     }
 
     [Fact]
@@ -889,8 +880,8 @@ public sealed class AccessProfileTests
     public async Task SEC_SC_04_ApproveAssignment_ByASecondAdmin_ApprovesAuditsAndBumpsTheEpoch()
     {
         var repo = await RepoWithPendingMappingAsync(MaskingPolicyMode.Unmasked, "adm1");
-        var auditRepo = Substitute.For<IAuditLogRepository>();
-        var cache = Substitute.For<Autheris.Application.Policy.Interfaces.IAccessProfileCache>();
+        var auditRepo = new InMemoryAuditLogRepository();
+        var cache = new StubAccessProfileCache();
         var context = CreateEndpointContext(callerSid: "adm2", callerName: "adm2", auditRepo: auditRepo, profileCache: cache);
 
         var result = await GovernanceEndpoints.ApproveProfileAssignmentAsync("prof-map", new ApproveProfileAssignmentRequest { Subject = "AUT-Unmask", SubjectType = "Group" }, context, repo, CancellationToken.None);
@@ -900,15 +891,15 @@ public sealed class AccessProfileTests
         var stored = (await repo.GetProfileAsync(TenantLiebherr, "prof-map"))!.Assignments.Single();
         stored.ApprovedBy.ShouldBe("adm2");
         stored.ApprovedAt.ShouldNotBeNull();
-        await auditRepo.Received().RecordAuditEventAsync(Arg.Is<Autheris.Domain.Model.AuditLogEntry>(e => e.EventType == Autheris.Domain.Audit.AuditEventTypes.ConsentApproved), Arg.Any<CancellationToken>());
-        await cache.Received(1).InvalidateTenantAsync(TenantLiebherr, Arg.Any<CancellationToken>());
+        auditRepo.Entries.ShouldContain(e => e.EventType == Autheris.Domain.Audit.AuditEventTypes.ConsentApproved);
+        cache.InvalidatedTenants.ShouldBe([TenantLiebherr]);
     }
 
     [Fact]
     public async Task SEC_SC_04_ApproveAssignment_ByTheCreator_IsForbidden_AndNothingChanges()
     {
         var repo = await RepoWithPendingMappingAsync(MaskingPolicyMode.Unmasked, "adm1");
-        var cache = Substitute.For<Autheris.Application.Policy.Interfaces.IAccessProfileCache>();
+        var cache = new StubAccessProfileCache();
         var context = CreateEndpointContext(callerSid: "adm1", callerName: "adm1", profileCache: cache);
 
         var result = await GovernanceEndpoints.ApproveProfileAssignmentAsync("prof-map", new ApproveProfileAssignmentRequest { Subject = "AUT-Unmask", SubjectType = "Group" }, context, repo, CancellationToken.None);
@@ -916,7 +907,7 @@ public sealed class AccessProfileTests
 
         status.ShouldBe(StatusCodes.Status403Forbidden);
         (await repo.GetProfileAsync(TenantLiebherr, "prof-map"))!.Assignments.Single().ApprovedBy.ShouldBeNull();
-        await cache.DidNotReceiveWithAnyArgs().InvalidateTenantAsync(default, default);
+        cache.InvalidatedTenants.ShouldBeEmpty();
     }
 
     [Fact]
@@ -985,8 +976,12 @@ public sealed class AccessProfileTests
         };
         await repo.UpsertProfileAsync(profile);
 
-        var auditRepo = Substitute.For<IAuditLogRepository>();
-        var clusterState = Substitute.For<IDistributedClusterStateProvider>();
+        var auditRepo = new InMemoryAuditLogRepository();
+        var incrementCalls = new List<(string Key, long Delta)>();
+        var clusterState = new StubClusterStateProvider
+        {
+            OnIncrement = (k, d, _, _) => { incrementCalls.Add((k, d)); return ValueTask.FromResult<long?>(1); }
+        };
         var memoryCache = new MemoryCache(new MemoryCacheOptions());
         var context = CreateEndpointContext(
             callerSid: "admin@autheris.internal",
@@ -1005,19 +1000,13 @@ public sealed class AccessProfileTests
         fetched.ShouldBeNull();
 
         // Verify audit log recorded Tier-A CONSENT_REVOKED
-        await auditRepo.Received(1).RecordAuditEventAsync(
-            Arg.Is<AuditLogEntry>(e =>
-                e.EventType == "CONSENT_REVOKED" &&
-                e.Decision == "DENY" &&
-                e.TenantId == TenantLiebherr),
-            Arg.Any<CancellationToken>());
+        auditRepo.Entries.Count(e =>
+            e.EventType == "CONSENT_REVOKED" &&
+            e.Decision == "DENY" &&
+            e.TenantId == TenantLiebherr).ShouldBe(1);
 
         // Verify epoch increment
-        await clusterState.Received(1).IncrementAsync(
-            $"profile_epoch:{TenantLiebherr.Value}",
-            1,
-            Arg.Any<TimeSpan>(),
-            Arg.Any<CancellationToken>());
+        incrementCalls.Count(c => c.Key == $"profile_epoch:{TenantLiebherr.Value}" && c.Delta == 1).ShouldBe(1);
     }
 
     [Fact]
@@ -1036,7 +1025,7 @@ public sealed class AccessProfileTests
     public async Task BulkConsent_StoresTypedTimeBoundAssignmentThroughStrictAssignApi()
     {
         var repo = new InMemoryAccessProfileRepository();
-        var auditRepo = Substitute.For<IAuditLogRepository>();
+        var auditRepo = new InMemoryAuditLogRepository();
         var context = CreateEndpointContext(callerSid: "S-1-5-21-ADMIN", callerName: "admin", auditRepo: auditRepo);
         var req = new BulkConsentRequest
         {
@@ -1054,7 +1043,7 @@ public sealed class AccessProfileTests
         assignment.SubjectType.ShouldBe(AccessProfileSubjectType.User);
         assignment.ExpiresAt.ShouldNotBeNull();
         assignment.CreatedBy.ShouldBe("S-1-5-21-ADMIN");
-        await auditRepo.Received().RecordAuditEventAsync(Arg.Is<AuditLogEntry>(e => e.EventType == Autheris.Domain.Audit.AuditEventTypes.ConsentGranted), Arg.Any<CancellationToken>());
+        auditRepo.Entries.ShouldContain(e => e.EventType == Autheris.Domain.Audit.AuditEventTypes.ConsentGranted);
     }
 
     [Fact]

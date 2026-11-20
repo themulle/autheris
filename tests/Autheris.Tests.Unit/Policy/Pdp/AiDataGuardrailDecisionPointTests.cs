@@ -2,6 +2,7 @@
 namespace Autheris.Tests.Unit.Policy.Pdp;
 
 using System;
+using Autheris.Tests.Common.Fakes;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -45,7 +46,7 @@ public sealed class AiDataGuardrailDecisionPointTests
     private sealed record Harness(
         AiDataGuardrailService Guardrail,
         IAccessDecisionPoint Pdp,
-        IAuditLogRepository Audit,
+        InMemoryAuditLogRepository Audit,
         IGatewayEventBus Bus,
         IMcpQueryExecutor Executor);
 
@@ -66,7 +67,7 @@ public sealed class AiDataGuardrailDecisionPointTests
         var map = Substitute.For<IGraphQlCatalogMap>();
         map.ResolveDocumentTablesAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<TableIdentifier>?>([Orders]));
-        var audit = Substitute.For<IAuditLogRepository>();
+        var audit = new InMemoryAuditLogRepository();
         var bus = Substitute.For<IGatewayEventBus>();
         var executor = Substitute.For<IMcpQueryExecutor>();
         executor.ExecuteOperationAsync(Arg.Any<McpToolDefinition>(), Arg.Any<string>(), Arg.Any<McpSessionContext>(), Arg.Any<CancellationToken>())
@@ -127,9 +128,8 @@ public sealed class AiDataGuardrailDecisionPointTests
             Arg.Is<AccessRequest>(r => r.Transport == AccessTransport.Mcp && r.Operation == AccessOperation.Read && r.Object.Identifier == Orders),
             Arg.Any<CancellationToken>());
         // Audited with reason codes only: neither the policy text nor a predicate value reaches the audit trail.
-        await h.Audit.Received().RecordAuditEventAsync(
-            Arg.Is<AuditLogEntry>(e => e.Decision == "DENY" && e.DetailsJson!.Contains("DEFAULT_DENY") && !e.DetailsJson.Contains("EU-secret")),
-            Arg.Any<CancellationToken>());
+        h.Audit.Entries.ShouldContain(e => e.Decision == "DENY" && e.DetailsJson!.Contains("DEFAULT_DENY") && !e.DetailsJson.Contains("EU-secret"));
+        h.Audit.Entries.ShouldAllBe(e => !e.DetailsJson!.Contains("EU-secret"));
         await h.Bus.Received(1).PublishAsync(Arg.Any<PolicyDeniedEvent>(), Arg.Any<CancellationToken>());
     }
 
@@ -176,9 +176,8 @@ public sealed class AiDataGuardrailDecisionPointTests
 
         result.IsSuccess.ShouldBeFalse();
         read.ShouldBeFalse();
-        await h.Audit.Received().RecordAuditEventAsync(
-            Arg.Is<AuditLogEntry>(e => e.Decision == "DENY" && e.DetailsJson!.Contains("DEFAULT_DENY") && !e.DetailsJson.Contains("EU-secret")),
-            Arg.Any<CancellationToken>());
+        h.Audit.Entries.ShouldContain(e => e.Decision == "DENY" && e.DetailsJson!.Contains("DEFAULT_DENY") && !e.DetailsJson.Contains("EU-secret"));
+        h.Audit.Entries.ShouldAllBe(e => !e.DetailsJson!.Contains("EU-secret"));
     }
 
     [Fact]
@@ -188,7 +187,7 @@ public sealed class AiDataGuardrailDecisionPointTests
             new McpToolRegistry(Options.Create(new GatewayOptions()), new FixedDemoData()),
             Options.Create(new GatewayOptions { Mcp = new McpOptions { Enabled = true } }),
             NullLogger<AiDataGuardrailService>.Instance,
-            Substitute.For<IAuditLogRepository>(),
+            new InMemoryAuditLogRepository(),
             decisionPoint: null));
 
         ex.ParamName.ShouldBe("decisionPoint");

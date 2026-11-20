@@ -1,6 +1,8 @@
 namespace Autheris.Tests.Unit.Endpoints;
 
 using Autheris.Application.Policy.Pdp;
+using Autheris.Tests.Common.Fakes;
+using Autheris.Tests.Unit.TestSupport;
 using System;
 using System.Collections.Generic;
 using System.Data;
@@ -30,7 +32,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -95,19 +96,14 @@ public sealed class TableStreamEndpointsTests
     public async Task HandleBulkStreamAsync_TableNotFound_Returns404()
     {
         var context = CreateHttpContext();
-        var repo = Substitute.For<ITableMetadataRepository>();
-        repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<TableMetadata?>(null));
-
-        var pdp = Substitute.For<IAccessDecisionPoint>();
+        var repo = new InMemoryTableMetadataRepository();
+        var pdp = AccessDecisionPointStubs.Denying();
         var planner = new GovernedTableReadPlanner();
-        var sqlExecution = Substitute.For<IGovernedSqlExecutionService>();
         var encoder = new KeysetCursorEncoder("endpoint-planner-shared-signing-key-0123456789");
-        var masking = Substitute.For<IColumnMaskingProvider>();
 
         await TableStreamEndpoints.HandleBulkStreamAsync(
             "sales", "dbo", "nonexistent",
-            context, repo, pdp, planner, sqlExecution, encoder, masking,
+            context, repo, pdp, planner, StubGovernedSqlExecutionService.Empty, encoder, StubColumnMaskingProvider.Null,
             NullLoggerFactory.Instance, CancellationToken.None);
 
         context.Response.StatusCode.ShouldBe(StatusCodes.Status404NotFound);
@@ -119,19 +115,14 @@ public sealed class TableStreamEndpointsTests
         var context = CreateHttpContext();
         var hiddenTable = CreateTableMetadata();
         hiddenTable = hiddenTable with { Table = hiddenTable.Table with { DiscoveryHidden = true } };
-        var repo = Substitute.For<ITableMetadataRepository>();
-        repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<TableMetadata?>(hiddenTable));
-
-        var pdp = Substitute.For<IAccessDecisionPoint>();
+        var repo = new InMemoryTableMetadataRepository(hiddenTable);
+        var pdp = AccessDecisionPointStubs.Denying();
         var planner = new GovernedTableReadPlanner();
-        var sqlExecution = Substitute.For<IGovernedSqlExecutionService>();
         var encoder = new KeysetCursorEncoder("endpoint-planner-shared-signing-key-0123456789");
-        var masking = Substitute.For<IColumnMaskingProvider>();
 
         await TableStreamEndpoints.HandleBulkStreamAsync(
             "sales", "dbo", "orders",
-            context, repo, pdp, planner, sqlExecution, encoder, masking,
+            context, repo, pdp, planner, StubGovernedSqlExecutionService.Empty, encoder, StubColumnMaskingProvider.Null,
             NullLoggerFactory.Instance, CancellationToken.None);
 
         context.Response.StatusCode.ShouldBe(StatusCodes.Status404NotFound);
@@ -142,20 +133,14 @@ public sealed class TableStreamEndpointsTests
     {
         var context = CreateHttpContext();
         var table = CreateTableMetadata();
-        var repo = Substitute.For<ITableMetadataRepository>();
-        repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<TableMetadata?>(table));
-
-        var pdp = Autheris.Tests.Unit.TestSupport.AccessDecisionPointStubs.Returning(_ => TableAccessDecision.Denied(table.Identifier, "Forbidden"));
-
+        var repo = new InMemoryTableMetadataRepository(table);
+        var pdp = AccessDecisionPointStubs.Returning(_ => TableAccessDecision.Denied(table.Identifier, "Forbidden"));
         var planner = new GovernedTableReadPlanner();
-        var sqlExecution = Substitute.For<IGovernedSqlExecutionService>();
         var encoder = new KeysetCursorEncoder("endpoint-planner-shared-signing-key-0123456789");
-        var masking = Substitute.For<IColumnMaskingProvider>();
 
         await TableStreamEndpoints.HandleBulkStreamAsync(
             "sales", "dbo", "orders",
-            context, repo, pdp, planner, sqlExecution, encoder, masking,
+            context, repo, pdp, planner, StubGovernedSqlExecutionService.Empty, encoder, StubColumnMaskingProvider.Null,
             NullLoggerFactory.Instance, CancellationToken.None);
 
         context.Response.StatusCode.ShouldBe(StatusCodes.Status404NotFound);
@@ -167,16 +152,14 @@ public sealed class TableStreamEndpointsTests
         var context = CreateHttpContext();
         context.Request.QueryString = new QueryString("?offset=50");
 
-        var repo = Substitute.For<ITableMetadataRepository>();
-        var pdp = Substitute.For<IAccessDecisionPoint>();
+        var repo = new InMemoryTableMetadataRepository();
+        var pdp = AccessDecisionPointStubs.Denying();
         var planner = new GovernedTableReadPlanner();
-        var sqlExecution = Substitute.For<IGovernedSqlExecutionService>();
         var encoder = new KeysetCursorEncoder("endpoint-planner-shared-signing-key-0123456789");
-        var masking = Substitute.For<IColumnMaskingProvider>();
 
         await TableStreamEndpoints.HandleBulkStreamAsync(
             "sales", "dbo", "orders",
-            context, repo, pdp, planner, sqlExecution, encoder, masking,
+            context, repo, pdp, planner, StubGovernedSqlExecutionService.Empty, encoder, StubColumnMaskingProvider.Null,
             NullLoggerFactory.Instance, CancellationToken.None);
 
         context.Response.StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
@@ -187,34 +170,22 @@ public sealed class TableStreamEndpointsTests
     {
         var context = CreateHttpContext();
         var table = CreateTableMetadata();
-        var repo = Substitute.For<ITableMetadataRepository>();
-        repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<TableMetadata?>(table));
-
-        var pdp = Autheris.Tests.Unit.TestSupport.AccessDecisionPointStubs.Returning(_ => TableAccessDecision.Allowed(table.Identifier, new Dictionary<string, ColumnAccessLevel>(), null, true));
-
+        var repo = new InMemoryTableMetadataRepository(table);
+        var pdp = AccessDecisionPointStubs.Returning(_ => TableAccessDecision.Allowed(table.Identifier, new Dictionary<string, ColumnAccessLevel>(), null, true));
         var planner = new GovernedTableReadPlanner();
-        var sqlExecution = Substitute.For<IGovernedSqlExecutionService>();
-
-        sqlExecution.ExecuteGovernedQueryAsync(
-            Arg.Any<GovernedSqlQueryRequest>(),
-            Arg.Any<ClaimsPrincipal>(),
-            Arg.Any<TenantId>(),
-            Arg.Any<Func<DbDataReader, CancellationToken, Task>>(),
-            Arg.Any<CancellationToken>())
-            .Returns(async callInfo =>
+        var sqlExecution = new StubGovernedSqlExecutionService
+        {
+            OnStream = async (_, _, _, writer, _) =>
             {
-                var writer = callInfo.Arg<Func<DbDataReader, CancellationToken, Task>>();
-                using var reader = CreateDataTableReader(5);
-                await writer(reader, CancellationToken.None);
-            });
-
+                using var dataReader = CreateDataTableReader(5);
+                await writer(dataReader, CancellationToken.None);
+            }
+        };
         var encoder = new KeysetCursorEncoder("endpoint-planner-shared-signing-key-0123456789");
-        var masking = Substitute.For<IColumnMaskingProvider>();
 
         await TableStreamEndpoints.HandleBulkStreamAsync(
             "sales", "dbo", "orders",
-            context, repo, pdp, planner, sqlExecution, encoder, masking,
+            context, repo, pdp, planner, sqlExecution, encoder, StubColumnMaskingProvider.Null,
             NullLoggerFactory.Instance, CancellationToken.None);
 
         context.Response.StatusCode.ShouldBe(StatusCodes.Status200OK);
@@ -247,32 +218,23 @@ public sealed class TableStreamEndpointsTests
     public async Task HandleBulkStreamAsync_EndpointIssuedCursor_DecodesInPlanner_AndReplayFailsClosed()
     {
         var table = CreateTableMetadata();
-        var repo = Substitute.For<ITableMetadataRepository>();
-        repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<TableMetadata?>(table));
-
-        var pdp = Autheris.Tests.Unit.TestSupport.AccessDecisionPointStubs.Returning(_ => TableAccessDecision.Allowed(table.Identifier, new Dictionary<string, ColumnAccessLevel>(), null, true));
+        var repo = new InMemoryTableMetadataRepository(table, CreateTableMetadata("invoices"));
+        var pdp = AccessDecisionPointStubs.Returning(_ => TableAccessDecision.Allowed(table.Identifier, new Dictionary<string, ColumnAccessLevel>(), null, true));
 
         // One DI-style encoder (configured signing key) shared by the endpoint and the planner, as in production.
         var encoder = new KeysetCursorEncoder("endpoint-planner-shared-signing-key-0123456789");
         var planner = new GovernedTableReadPlanner(encoder);
 
-        var captured = new List<GovernedSqlQueryRequest>();
-        var sqlExecution = Substitute.For<IGovernedSqlExecutionService>();
-        sqlExecution.ExecuteGovernedQueryAsync(
-            Arg.Any<GovernedSqlQueryRequest>(),
-            Arg.Any<ClaimsPrincipal>(),
-            Arg.Any<TenantId>(),
-            Arg.Any<Func<DbDataReader, CancellationToken, Task>>(),
-            Arg.Any<CancellationToken>())
-            .Returns(async callInfo =>
+        var sqlExecution = new StubGovernedSqlExecutionService
+        {
+            OnStream = async (_, _, _, writer, _) =>
             {
-                captured.Add(callInfo.Arg<GovernedSqlQueryRequest>());
-                var writer = callInfo.Arg<Func<DbDataReader, CancellationToken, Task>>();
                 using var reader = CreateDataTableReader(5);
                 await writer(reader, CancellationToken.None);
-            });
-        var masking = Substitute.For<IColumnMaskingProvider>();
+            }
+        };
+        var captured = sqlExecution.Requests;
+        var masking = StubColumnMaskingProvider.Null;
 
         // Page 1: the endpoint issues nextCursor for the last emitted row (id = 2).
         var first = CreateHttpContext(CreatePrincipal("alice", "tenant-a"));
@@ -323,8 +285,6 @@ public sealed class TableStreamEndpointsTests
         otherSelect.Response.StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
 
         // Other table (same key shape)
-        repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<TableMetadata?>(CreateTableMetadata("invoices")));
         var otherTable = await ContinueAsync(CreatePrincipal("alice", "tenant-a"), $"{{\"limit\":2,\"select\":[\"id\",\"item\"],\"cursor\":{cursorJson}}}", "invoices");
         otherTable.Response.StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
 
@@ -337,48 +297,40 @@ public sealed class TableStreamEndpointsTests
     {
         var context = CreateHttpContext();
         var table = CreateTableMetadata();
-        var repo = Substitute.For<ITableMetadataRepository>();
-        repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<TableMetadata?>(table));
+        var repo = new InMemoryTableMetadataRepository(table);
+        var pdp = AccessDecisionPointStubs.Returning(_ => TableAccessDecision.Allowed(table.Identifier, new Dictionary<string, ColumnAccessLevel>(), null, true));
 
-        var pdp = Autheris.Tests.Unit.TestSupport.AccessDecisionPointStubs.Returning(_ => TableAccessDecision.Allowed(table.Identifier, new Dictionary<string, ColumnAccessLevel>(), null, true));
-
-        var rateLimiter = Substitute.For<IRateLimiterService>();
-        rateLimiter.ReserveCostQuotaAsync(Arg.Any<string>(), Arg.Any<int>(), Arg.Any<ClientQuotaPolicy>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(new CostQuotaResult(true, 5000, 0)));
-        rateLimiter.SettleCostQuotaAsync(Arg.Any<string>(), Arg.Any<int>(), Arg.Any<int>(), Arg.Any<ClientQuotaPolicy>(), Arg.Any<CancellationToken>())
-            .Returns(callInfo =>
+        var rateLimiter = new StubRateLimiterService(
+            new CostQuotaResult(true, 5000, 0),
+            ct =>
             {
-                callInfo.ArgAt<CancellationToken>(4).ThrowIfCancellationRequested();
-                return Task.FromResult(new CostQuotaResult(true, 4990, 0));
+                ct.ThrowIfCancellationRequested();
+                return new CostQuotaResult(true, 4990, 0);
             });
 
         var services = new ServiceCollection();
         services.AddSingleton<IOptions<GatewayOptions>>(Options.Create(new GatewayOptions()));
-        services.AddSingleton(rateLimiter);
+        services.AddSingleton<IRateLimiterService>(rateLimiter);
         context.RequestServices = services.BuildServiceProvider();
 
         using var aborted = new CancellationTokenSource();
-        var sqlExecution = Substitute.For<IGovernedSqlExecutionService>();
-        sqlExecution.ExecuteGovernedQueryAsync(
-            Arg.Any<GovernedSqlQueryRequest>(),
-            Arg.Any<ClaimsPrincipal>(),
-            Arg.Any<TenantId>(),
-            Arg.Any<Func<DbDataReader, CancellationToken, Task>>(),
-            Arg.Any<CancellationToken>())
-            .Returns(_ =>
+        var sqlExecution = new StubGovernedSqlExecutionService
+        {
+            OnStream = (_, _, _, _, _) =>
             {
                 aborted.Cancel();
                 return Task.FromException(new IOException("client aborted"));
-            });
+            }
+        };
 
         // The original stream failure surfaces (not an OperationCanceledException from settlement) and the reservation is settled.
         await Should.ThrowAsync<IOException>(() => TableStreamEndpoints.HandleBulkStreamAsync(
             "sales", "dbo", "orders",
-            context, repo, pdp, new GovernedTableReadPlanner(), sqlExecution, new KeysetCursorEncoder("endpoint-planner-shared-signing-key-0123456789"), Substitute.For<IColumnMaskingProvider>(),
+            context, repo, pdp, new GovernedTableReadPlanner(), sqlExecution, new KeysetCursorEncoder("endpoint-planner-shared-signing-key-0123456789"), StubColumnMaskingProvider.Null,
             NullLoggerFactory.Instance, aborted.Token));
 
-        await rateLimiter.Received(1).SettleCostQuotaAsync(Arg.Any<string>(), Arg.Any<int>(), Arg.Any<int>(), Arg.Any<ClientQuotaPolicy>(), Arg.Is<CancellationToken>(t => !t.CanBeCanceled));
+        rateLimiter.SettleCancellationTokens.Count.ShouldBe(1);
+        rateLimiter.SettleCancellationTokens[0].CanBeCanceled.ShouldBeFalse();
     }
 
     // ---- Issue #418: default slice must be admissible for every tier ----
@@ -390,7 +342,7 @@ public sealed class TableStreamEndpointsTests
         public void Record(in UsageFact fact, TenantId tenant, Sid actor) => Recorded.Add((fact, tenant, actor));
     }
 
-    private sealed record SliceRun(DefaultHttpContext Context, IRateLimiterService Limiter, RecordingUsageRecorder Recorder, IClientTierResolver Resolver, ClaimsPrincipal Principal, string Body, List<int> Reserved);
+    private sealed record SliceRun(DefaultHttpContext Context, StubRateLimiterService Limiter, RecordingUsageRecorder Recorder, StubClientTierResolver Resolver, ClaimsPrincipal Principal, string Body, List<int> Reserved);
 
     private sealed class CapturingLoggerFactory : ILoggerFactory
     {
@@ -421,34 +373,23 @@ public sealed class TableStreamEndpointsTests
         string? bodyJson,
         Action<DefaultHttpContext>? configure = null,
         CostQuotaResult? reserveResult = null,
-        IRateLimiterService? limiter = null,
+        StubRateLimiterService? limiter = null,
         ILoggerFactory? loggerFactory = null,
         List<GovernedSqlQueryRequest>? capturedQueries = null)
     {
         var context = CreateHttpContext();
         var table = CreateTableMetadata();
-        var repo = Substitute.For<ITableMetadataRepository>();
-        repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<TableMetadata?>(table));
+        var repo = new InMemoryTableMetadataRepository(table);
+        var pdp = AccessDecisionPointStubs.Returning(_ => TableAccessDecision.Allowed(table.Identifier, new Dictionary<string, ColumnAccessLevel>(), null, true));
 
-        var pdp = Autheris.Tests.Unit.TestSupport.AccessDecisionPointStubs.Returning(_ => TableAccessDecision.Allowed(table.Identifier, new Dictionary<string, ColumnAccessLevel>(), null, true));
-
-        var reserved = new List<int>();
-        var rateLimiter = limiter ?? Substitute.For<IRateLimiterService>();
-        rateLimiter.ReserveCostQuotaAsync(Arg.Any<string>(), Arg.Do<int>(reserved.Add), Arg.Any<ClientQuotaPolicy>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(reserveResult ?? new CostQuotaResult(true, 1000, 0)));
-        rateLimiter.SettleCostQuotaAsync(Arg.Any<string>(), Arg.Any<int>(), Arg.Any<int>(), Arg.Any<ClientQuotaPolicy>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(new CostQuotaResult(true, 900, 0)));
-
-        var resolver = Substitute.For<IClientTierResolver>();
-        resolver.ResolveAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(new ClientQuotaContext("subject-418", policy.Tier, policy, "secret-scope")));
+        var rateLimiter = limiter ?? new StubRateLimiterService(reserveResult);
+        var resolver = new StubClientTierResolver(policy);
         var recorder = new RecordingUsageRecorder();
 
         var services = new ServiceCollection();
         services.AddSingleton<IOptions<GatewayOptions>>(Options.Create(new GatewayOptions()));
-        services.AddSingleton(rateLimiter);
-        services.AddSingleton(resolver);
+        services.AddSingleton<IRateLimiterService>(rateLimiter);
+        services.AddSingleton<IClientTierResolver>(resolver);
         services.AddSingleton<IUsageRecorder>(recorder);
         context.RequestServices = services.BuildServiceProvider();
 
@@ -462,37 +403,34 @@ public sealed class TableStreamEndpointsTests
 
         configure?.Invoke(context);
 
-        var sqlExecution = Substitute.For<IGovernedSqlExecutionService>();
-        sqlExecution.ExecuteGovernedQueryAsync(
-            Arg.Any<GovernedSqlQueryRequest>(),
-            Arg.Any<ClaimsPrincipal>(),
-            Arg.Any<TenantId>(),
-            Arg.Any<Func<DbDataReader, CancellationToken, Task>>(),
-            Arg.Any<CancellationToken>())
-            .Returns(async callInfo =>
+        var sqlExecution = new StubGovernedSqlExecutionService
+        {
+            OnStream = async (req, _, _, writer, _) =>
             {
-                capturedQueries?.Add(callInfo.Arg<GovernedSqlQueryRequest>());
+                capturedQueries?.Add(req);
                 using var reader = CreateDataTableReader(3);
-                await callInfo.Arg<Func<DbDataReader, CancellationToken, Task>>()(reader, CancellationToken.None);
-            });
+                await writer(reader, CancellationToken.None);
+            }
+        };
 
         await TableStreamEndpoints.HandleBulkStreamAsync(
             "sales", "dbo", "orders",
-            context, repo, pdp, new GovernedTableReadPlanner(), sqlExecution, new KeysetCursorEncoder("endpoint-planner-shared-signing-key-0123456789"), Substitute.For<IColumnMaskingProvider>(),
+            context, repo, pdp, new GovernedTableReadPlanner(), sqlExecution, new KeysetCursorEncoder("endpoint-planner-shared-signing-key-0123456789"), StubColumnMaskingProvider.Null,
             loggerFactory ?? NullLoggerFactory.Instance, CancellationToken.None);
 
         context.Response.Body.Position = 0;
         var text = await new StreamReader(context.Response.Body, Encoding.UTF8).ReadToEndAsync();
-        return new SliceRun(context, rateLimiter, recorder, resolver, context.User, text, reserved);
+        return new SliceRun(context, rateLimiter, recorder, resolver, context.User, text, rateLimiter.ReservedCosts);
     }
 
-    private static async Task AssertRejectedBeforeReservationAsync(SliceRun run)
+    private static Task AssertRejectedBeforeReservationAsync(SliceRun run)
     {
         run.Context.Response.StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
-        await run.Limiter.DidNotReceive().ReserveCostQuotaAsync(Arg.Any<string>(), Arg.Any<int>(), Arg.Any<ClientQuotaPolicy>(), Arg.Any<CancellationToken>());
+        run.Limiter.ReservedCosts.ShouldBeEmpty();
         run.Context.Response.Headers.ContainsKey("Retry-After").ShouldBeFalse();
         run.Context.Response.Headers.ContainsKey("X-RateLimit-Scope").ShouldBeFalse();
         run.Recorder.Recorded.ShouldNotContain(r => r.Fact.Outcome == UsageOutcome.DenyRateLimit);
+        return Task.CompletedTask;
     }
 
     [Theory]
@@ -597,7 +535,8 @@ public sealed class TableStreamEndpointsTests
             });
 
         await AssertRejectedBeforeReservationAsync(run);
-        await run.Resolver.Received(1).ResolveAsync(run.Principal, Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
+        run.Resolver.Calls.Count.ShouldBe(1);
+        run.Resolver.Calls[0].ShouldBe(run.Principal);
     }
 
     [Fact]
@@ -632,14 +571,14 @@ public sealed class TableStreamEndpointsTests
     {
         // I418-SC-01 / limiter independence: the slice is derived from the policy only.
         var policy = ClientQuotaPolicy.ForTier(ClientTier.Standard);
-        var inMemory = await RunSliceAsync(policy, null, limiter: Substitute.For<IRateLimiterService>());
-        var redis = await RunSliceAsync(policy, null, limiter: Substitute.For<IRateLimiterService>());
+        var inMemory = await RunSliceAsync(policy, null, limiter: new StubRateLimiterService());
+        var redis = await RunSliceAsync(policy, null, limiter: new StubRateLimiterService());
 
         inMemory.Reserved.ShouldBe(redis.Reserved);
         inMemory.Reserved.ShouldBe([1000]);
 
-        var rejectedA = await RunSliceAsync(policy, "{\"limit\":991}", limiter: Substitute.For<IRateLimiterService>());
-        var rejectedB = await RunSliceAsync(policy, "{\"limit\":991}", limiter: Substitute.For<IRateLimiterService>());
+        var rejectedA = await RunSliceAsync(policy, "{\"limit\":991}", limiter: new StubRateLimiterService());
+        var rejectedB = await RunSliceAsync(policy, "{\"limit\":991}", limiter: new StubRateLimiterService());
         rejectedA.Context.Response.StatusCode.ShouldBe(rejectedB.Context.Response.StatusCode);
     }
 
@@ -695,5 +634,51 @@ public sealed class TableStreamEndpointsTests
 
         b.ShouldBe(a);
         c.ShouldBe(a);
+    }
+
+    private sealed class StubRateLimiterService(
+        CostQuotaResult? reserveResult = null,
+        Func<CancellationToken, CostQuotaResult>? onSettle = null) : IRateLimiterService
+    {
+        public List<int> ReservedCosts { get; } = [];
+        public List<CancellationToken> SettleCancellationTokens { get; } = [];
+
+        public Task<RateLimitResult> CheckPreAuthIpAsync(string ip, PreAuthIpRateLimitOptions options, CancellationToken ct = default)
+            => Task.FromResult(new RateLimitResult(true, 0));
+
+        public Task<RateLimitResult> CheckPostAuthSidAsync(string sid, PostAuthSidRateLimitOptions options, CancellationToken ct = default)
+            => Task.FromResult(new RateLimitResult(true, 0));
+
+        public Task<CostQuotaResult> CheckCostQuotaAsync(string key, int requestedCost, ClientQuotaPolicy policy, CancellationToken ct = default)
+            => Task.FromResult(new CostQuotaResult(true, 1000, 0));
+
+        public Task<CostQuotaResult> ReserveCostQuotaAsync(string key, int reservedCost, ClientQuotaPolicy policy, CancellationToken ct = default)
+        {
+            ReservedCosts.Add(reservedCost);
+            return Task.FromResult(reserveResult ?? new CostQuotaResult(true, 1000, 0));
+        }
+
+        public Task<CostQuotaResult> SettleCostQuotaAsync(string key, int reservedCost, int actualCost, ClientQuotaPolicy policy, CancellationToken ct = default)
+        {
+            SettleCancellationTokens.Add(ct);
+            return Task.FromResult(onSettle is not null ? onSettle(ct) : new CostQuotaResult(true, 900, 0));
+        }
+
+        public Task<CallerBucketState?> GetBucketStateAsync(string key, ClientQuotaPolicy policy, CancellationToken ct = default)
+            => Task.FromResult<CallerBucketState?>(null);
+
+        public Task<CallerBucketState?> GetBucketStateAsync(string key, CancellationToken ct = default)
+            => Task.FromResult<CallerBucketState?>(null);
+    }
+
+    private sealed class StubClientTierResolver(ClientQuotaPolicy policy) : IClientTierResolver
+    {
+        public List<ClaimsPrincipal?> Calls { get; } = [];
+
+        public Task<ClientQuotaContext> ResolveAsync(ClaimsPrincipal? principal, string? apiKey, string? clientIp, CancellationToken ct = default)
+        {
+            Calls.Add(principal);
+            return Task.FromResult(new ClientQuotaContext("subject-418", policy.Tier, policy, "secret-scope"));
+        }
     }
 }

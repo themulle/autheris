@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 using System;
 using System.IO;
 using System.Security.Cryptography;
@@ -56,8 +57,7 @@ public sealed class AuditArchitectureHardeningAu01To19Tests : IDisposable
 
     private static IHostEnvironment CreateMockEnvironment(string environmentName)
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(environmentName);
+        IHostEnvironment env = new TestHostEnvironment(environmentName);
         return env;
     }
 

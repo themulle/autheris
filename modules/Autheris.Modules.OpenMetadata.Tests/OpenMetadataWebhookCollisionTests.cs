@@ -4,10 +4,11 @@ using Autheris.Application.Catalog.OpenMetadata;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.State;
 using Autheris.Domain.Options;
+using Autheris.Extensions.Tests.TestSupport;
 using Autheris.Modules.OpenMetadata;
+using Autheris.Tests.Common.Fakes;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -15,7 +16,7 @@ namespace Autheris.Modules.OpenMetadata.Tests;
 
 /// <summary>EXT-16: the webhook path applies the full sync's database-collision rejection.</summary>
 [Trait("Category", "Security")]
-public sealed class OpenMetadataWebhookCollisionExt16Tests
+public sealed class OpenMetadataWebhookCollisionTests
 {
     private const string Secret = "webhook-secret-123";
 
@@ -30,14 +31,11 @@ public sealed class OpenMetadataWebhookCollisionExt16Tests
     [Fact]
     public async Task TableOfAnotherDatabaseWithTheSameIdentity_IsNotMergedByTheWebhook()
     {
-        var client = Substitute.For<IOpenMetadataClient>();
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        var epochRepo = Substitute.For<IPolicyEpochRepository>();
         var db1 = Table("db1");
         var db2 = Table("db2");
-        client.GetTableByFqnAsync(db2.FullyQualifiedName, Arg.Any<CancellationToken>()).Returns(Task.FromResult<OpenMetadataTable?>(db2));
-        client.GetTablesAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<OpenMetadataTable>>([db1, db2]));
+        var client = new StubOpenMetadataClient { Tables = [db1, db2] };
+        var metadataRepo = new InMemoryTableMetadataRepository();
+        var epochRepo = new InMemoryPolicyEpochRepository();
 
         var options = new GatewayOptions
         {
@@ -45,7 +43,7 @@ public sealed class OpenMetadataWebhookCollisionExt16Tests
             OpenMetadata = new OpenMetadataOptions { DefaultTenantId = "default-tenant", Enabled = true, WebhookSecret = Secret }
         };
         var service = new OpenMetadataSyncService(
-            client, metadataRepo, Substitute.For<IConsentRepository>(), epochRepo,
+            client, metadataRepo, new RecordingConsentRepository(), epochRepo,
             Options.Create(options), NullLogger<OpenMetadataSyncService>.Instance,
             clusterState: new InMemoryClusterStateProvider());
 
@@ -55,7 +53,7 @@ public sealed class OpenMetadataWebhookCollisionExt16Tests
         var result = await service.HandleVerifiedAsync(payload);
 
         result.ShouldBe(OpenMetadataWebhookOutcome.Processed);
-        await metadataRepo.DidNotReceive().UpsertTableMetadataAsync(Arg.Any<Autheris.Domain.Model.TableMetadata>(), Arg.Any<CancellationToken>());
-        await epochRepo.DidNotReceive().IncrementTableEpochAsync(Arg.Any<Autheris.Domain.Common.TableIdentifier>(), Arg.Any<CancellationToken>());
+        metadataRepo.UpsertCalls.ShouldBe(0);
+        epochRepo.IncrementCalls.ShouldBe(0);
     }
 }

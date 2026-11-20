@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.Mcp;
 
 using System;
+using Autheris.Tests.Common.Fakes;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Claims;
@@ -33,7 +34,7 @@ public sealed class McpTokenEfficientRetrievalTests
     private static readonly TableIdentifier CustomersTable = new("sales", "public", "customers");
 
     private readonly ITableMetadataRepository _metadata = Substitute.For<ITableMetadataRepository>();
-    private readonly IConsentRepository _consents = Substitute.For<IConsentRepository>();
+    private readonly IConsentRepository _consents = new InMemoryConsentRepository();
     private readonly IGatewayExecutionService _gateway = Substitute.For<IGatewayExecutionService>();
 
     private static TableMetadata CreateTable(TableIdentifier id, string description, params (string Name, string Type, bool Pk)[] cols) => new()

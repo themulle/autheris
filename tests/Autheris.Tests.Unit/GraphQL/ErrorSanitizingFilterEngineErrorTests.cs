@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.GraphQL;
 
 using Autheris.Api.Middleware;
+using Autheris.Tests.Common;
 using HotChocolate;
 using HotChocolate.Execution;
 using Microsoft.Extensions.DependencyInjection;
@@ -24,8 +25,7 @@ public sealed class ErrorSanitizingFilterEngineErrorTests
 
     private static async Task<IRequestExecutor> CreateAsync(string environmentName)
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(environmentName);
+        IHostEnvironment env = new TestHostEnvironment(environmentName);
         return await new ServiceCollection()
             .AddSingleton(env)
             .AddSingleton(_ => new ErrorSanitizingFilter(env, NullLogger<ErrorSanitizingFilter>.Instance))

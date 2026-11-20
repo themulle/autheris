@@ -1,6 +1,7 @@
 #pragma warning disable CA2012 // NSubstitute .Returns(...) configures a ValueTask member; the instance is not consumed here.
 namespace Autheris.Tests.Unit.Hosting;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -395,8 +396,7 @@ public sealed class StartupWarmupTests
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton<IConfiguration>(config);
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Production");
+        IHostEnvironment env = new TestHostEnvironment("Production");
         services.AddSingleton(env);
         services.AddOptions<GatewayOptions>();
         services.AddSingleton(Substitute.For<IRequestExecutorProvider>());

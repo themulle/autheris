@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Security;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
@@ -235,8 +236,7 @@ public sealed class Phase1AndPhase2SecurityExpertTests
             }
         };
 
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Production");
+        IHostEnvironment env = new TestHostEnvironment("Production");
 
         var ex = Should.Throw<ValidationException>(() =>
             GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, env));
@@ -265,8 +265,7 @@ public sealed class Phase1AndPhase2SecurityExpertTests
             }
         };
 
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Production");
+        IHostEnvironment env = new TestHostEnvironment("Production");
 
         var ex = Should.Throw<ValidationException>(() =>
             GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, env));
@@ -292,8 +291,7 @@ public sealed class Phase1AndPhase2SecurityExpertTests
             }
         };
 
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Production");
+        IHostEnvironment env = new TestHostEnvironment("Production");
 
         var ex = Should.Throw<ValidationException>(() =>
             GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, env));
@@ -318,8 +316,7 @@ public sealed class Phase1AndPhase2SecurityExpertTests
             }
         };
 
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Production");
+        IHostEnvironment env = new TestHostEnvironment("Production");
 
         var ex = Should.Throw<ValidationException>(() =>
             GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, env));
@@ -344,8 +341,7 @@ public sealed class Phase1AndPhase2SecurityExpertTests
             }
         };
 
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Production");
+        IHostEnvironment env = new TestHostEnvironment("Production");
 
         Should.NotThrow(() =>
             GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, env));
@@ -356,8 +352,7 @@ public sealed class Phase1AndPhase2SecurityExpertTests
     {
         var services = new ServiceCollection();
         var options = new GatewayOptions();
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        IHostEnvironment env = new TestHostEnvironment("Development");
         services.AddSingleton<IHostEnvironment>(env);
 
         services.AddGatewayInfrastructure(options);
@@ -375,8 +370,7 @@ public sealed class Phase1AndPhase2SecurityExpertTests
     {
         var services = new ServiceCollection();
         var options = new GatewayOptions();
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Production");
+        IHostEnvironment env = new TestHostEnvironment("Production");
         services.AddSingleton<IHostEnvironment>(env);
 
         services.AddGatewayInfrastructure(options);

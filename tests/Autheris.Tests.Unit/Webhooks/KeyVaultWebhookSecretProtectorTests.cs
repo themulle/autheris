@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Webhooks;
 
+using Autheris.Tests.Common;
 using System;
 using System.Text;
 using Autheris.Application.Common.Interfaces;
@@ -115,8 +116,7 @@ public sealed class KeyVaultWebhookSecretProtectorTests
     public void DevelopmentFallbackKey_OfTheDefaultProvider_IsTooShort_SoTheProtectorIsUnavailable()
     {
         // In Development the default provider answers an unknown reference with the reference text itself (15 bytes).
-        var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        Microsoft.Extensions.Hosting.IHostEnvironment env = new TestHostEnvironment("Development");
         var provider = new DefaultEnvironmentSecretProvider(new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(), env);
 
         new KeyVaultWebhookSecretProtector(provider).IsAvailable.ShouldBeFalse();

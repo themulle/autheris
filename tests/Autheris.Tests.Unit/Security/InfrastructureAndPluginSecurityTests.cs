@@ -181,8 +181,7 @@ public sealed partial class InfrastructureAndPluginSecurityTests : IDisposable
     [Fact]
     public void H01_RedisWithoutPassword_OutsideDevelopment_IsRejected()
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Production");
+        IHostEnvironment env = new TestHostEnvironment("Production");
 
         Should.Throw<InvalidOperationException>(() =>
             RedisConnectionSecurity.Apply(ConfigurationOptions.Parse("redis:6379"), new RedisOptions(), null, env));
@@ -194,8 +193,7 @@ public sealed partial class InfrastructureAndPluginSecurityTests : IDisposable
             env);
         secured.Password.ShouldBe("s3cr3t");
 
-        var devEnv = Substitute.For<IHostEnvironment>();
-        devEnv.EnvironmentName.Returns("Development");
+        IHostEnvironment devEnv = new TestHostEnvironment("Development");
         Should.NotThrow(() => RedisConnectionSecurity.Apply(ConfigurationOptions.Parse("localhost:6379"), new RedisOptions(), null, devEnv));
     }
 
@@ -339,8 +337,7 @@ public sealed partial class InfrastructureAndPluginSecurityTests : IDisposable
         var handler = new StubHttpMessageHandler(responder);
         var factory = Substitute.For<IHttpClientFactory>();
         factory.CreateClient(Arg.Any<string>()).Returns(new HttpClient(handler));
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
+        IHostEnvironment env = new TestHostEnvironment("Development");
         return (new DeclarativeHttpDataSourceExecutor(factory, NullLogger<DeclarativeHttpDataSourceExecutor>.Instance, environment: env), handler);
     }
 

@@ -30,8 +30,7 @@ public sealed class X1StartupTests
 
     private static IHostEnvironment Env(string name = "Development")
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(name);
+        IHostEnvironment env = new TestHostEnvironment(name);
         return env;
     }
 
@@ -245,7 +244,7 @@ public sealed class X1StartupTests
 
         var start = reporter.StartAsync(CancellationToken.None);
 
-        (await Task.WhenAny(start, Task.Delay(TimeSpan.FromSeconds(2)))).ShouldBeSameAs(start, "StartAsync waited for the store");
+        await start.WaitAsync(TimeSpan.FromSeconds(2)); // StartAsync must not wait for the store
         release.SetResult([Orders()]);
         await reporter.ExecuteTask!;
         await reporter.StopAsync(CancellationToken.None);

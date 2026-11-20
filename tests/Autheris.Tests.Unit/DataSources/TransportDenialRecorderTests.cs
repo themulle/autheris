@@ -11,7 +11,7 @@ using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options.DataSources;
-using NSubstitute;
+using Autheris.Tests.Common.Fakes;
 using Shouldly;
 using Xunit;
 
@@ -39,13 +39,12 @@ public sealed class TransportDenialRecorderTests
     public async Task Denial_WritesExactlyOneAuditEventWithRequiredFields()
     {
         using var resolver = Resolver();
-        var writer = Substitute.For<IAuditWriter>();
+        var writer = new InMemoryAuditWriter();
         var recorder = new TransportDenialRecorder(writer, Context(), resolver);
 
         await recorder.RecordDenialAsync(new TransportDenial("sa\nles", "Sales", DataSourceTransportFlags.WebSql, TransportDecisionReason.FlagNotSet));
 
-        var call = writer.ReceivedCalls().ShouldHaveSingleItem();
-        var entry = (AuditLogEntry)call.GetArguments()[0]!;
+        var entry = writer.Entries.ShouldHaveSingleItem();
         entry.EventType.ShouldBe(AuditEventTypes.TransportNotAllowed);
         entry.Decision.ShouldBe("DENY");
         entry.ActorSid.ToString().ShouldContain("S-1-5-21-1");
@@ -63,9 +62,7 @@ public sealed class TransportDenialRecorderTests
     public async Task Gate_AuditWriterThrows_StillDenies()
     {
         using var resolver = Resolver();
-        var writer = Substitute.For<IAuditWriter>();
-        writer.RecordAsync(Arg.Any<AuditLogEntry>(), Arg.Any<System.Threading.CancellationToken>())
-            .Returns<Task>(_ => throw new InvalidOperationException("down"));
+        var writer = new InMemoryAuditWriter(new InvalidOperationException("down"), throwOnAllWrites: true);
         var recorder = new TransportDenialRecorder(writer, Context(), resolver);
 
         // the recorder never throws, so the gate still throws TransportNotAllowedException
@@ -77,9 +74,7 @@ public sealed class TransportDenialRecorderTests
     public async Task AuditFailure_StillCountsDenialMetric()
     {
         using var resolver = Resolver();
-        var writer = Substitute.For<IAuditWriter>();
-        writer.RecordAsync(Arg.Any<AuditLogEntry>(), Arg.Any<System.Threading.CancellationToken>())
-            .Returns<Task>(_ => throw new InvalidOperationException("down"));
+        var writer = new InMemoryAuditWriter(new InvalidOperationException("down"), throwOnAllWrites: true);
         var recorder = new TransportDenialRecorder(writer, Context(), resolver);
 
         var measurements = Capture(() => recorder.RecordDenialAsync(
@@ -92,7 +87,7 @@ public sealed class TransportDenialRecorderTests
     public async Task Metric_UnknownSourceTaggedUnknown()
     {
         using var resolver = Resolver();
-        var recorder = new TransportDenialRecorder(Substitute.For<IAuditWriter>(), Context(), resolver);
+        var recorder = new TransportDenialRecorder(new InMemoryAuditWriter(), Context(), resolver);
 
         var measurements = Capture(() => recorder.RecordDenialAsync(
             new TransportDenial("attacker-name", "attacker-name", DataSourceTransportFlags.Mcp, TransportDecisionReason.UnknownSource)));
