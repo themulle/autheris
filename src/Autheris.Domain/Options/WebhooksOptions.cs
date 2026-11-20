@@ -3,10 +3,13 @@ namespace Autheris.Domain.Options;
 using System;
 using System.Collections.Generic;
 
+/// <summary>Outbound CloudEvents webhook delivery and subscription options (<c>Gateway:Webhooks</c>).</summary>
 public sealed class WebhooksOptions
 {
-    public bool Enabled { get; init; } = true;
+    /// <summary>Default HTTP delivery timeout in seconds when not overridden per subscription.</summary>
     public int DefaultTimeoutSeconds { get; init; } = 5;
+
+    /// <summary>Configured outbound webhook subscriptions.</summary>
     public List<WebhookSubscription> Subscriptions { get; init; } = [];
 
     /// <summary>
