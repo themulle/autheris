@@ -28,16 +28,19 @@ public sealed class ExtensibilityPipelineOptions
     public int InterceptorTimeoutMs { get; init; } = 5000;
 }
 
+/// <summary>Plugin loading, integrity verification and auth plugin configuration (<c>Gateway:Plugins</c>).</summary>
 public sealed class PluginsOptions
 {
+    /// <summary>Directory scanned for plugin assemblies at startup.</summary>
     public string Directory { get; init; } = "plugins";
-    public bool RequireIntegrityManifest { get; init; } = false;
-    public Dictionary<string, string> TrustedPluginHashes { get; init; } = new(StringComparer.OrdinalIgnoreCase);
-    public Autheris.Domain.Options.Plugins.AuthPluginOptions Auth { get; init; } = new();
-}
 
-public sealed class ExtensibilityOptions
-{
-    public bool Enabled { get; init; } = true;
+    /// <summary>When true, plugins must carry a matching SHA-256 entry in <see cref="TrustedPluginHashes"/>.</summary>
+    public bool RequireIntegrityManifest { get; init; } = false;
+
+    /// <summary>Map of trusted plugin assembly file names to expected hex-encoded SHA-256 digests.</summary>
+    public Dictionary<string, string> TrustedPluginHashes { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Authentication plugin capability and enablement settings (<c>Gateway:Plugins:Auth</c>).</summary>
+    public Autheris.Domain.Options.Plugins.AuthPluginOptions Auth { get; init; } = new();
 }
 
