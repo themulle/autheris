@@ -169,24 +169,29 @@ public sealed class GovernedTableCacheExecutionService
         }
 
         // -------------------------------------------------------------------
-        // Tenant Isolation & RLS Predicate Injection
+        // Tenant Isolation & RLS Predicate Injection (Parameterized)
         // -------------------------------------------------------------------
+        var parameters = new List<(string Name, object Value)>();
         var injectedFilters = new List<string>
         {
-            $"\"tenant_id\" = '{caller.TenantId.Value.Replace("'", "''", StringComparison.Ordinal)}'"
+            "\"tenant_id\" = $p0"
         };
+        parameters.Add(("p0", caller.TenantId.Value));
 
         if (caller.Attributes != null)
         {
-            foreach (var (attrKey, attrVal) in caller.Attributes)
+            foreach (var (attrKey, attrVal) in caller.Attributes.OrderBy(static kv => kv.Key, StringComparer.Ordinal))
             {
                 TableCacheQueryRouter.ValidateIdentifier(attrKey);
-                injectedFilters.Add($"\"{attrKey}\" = '{attrVal.Replace("'", "''", StringComparison.Ordinal)}'");
+                var paramName = $"p{parameters.Count}";
+                injectedFilters.Add($"\"{attrKey}\" = ${paramName}");
+                parameters.Add((paramName, attrVal));
             }
         }
 
         // Build governed query against active view in DuckDB
         var activeView = metadata.ActiveViewName;
+        TableCacheQueryRouter.ValidateIdentifier(activeView);
         if (requestedColumns != null)
         {
             foreach (var col in requestedColumns)
@@ -212,6 +217,13 @@ public sealed class GovernedTableCacheExecutionService
         {
             using var cmd = connection.CreateCommand();
             cmd.CommandText = governedSql;
+            foreach (var (paramName, paramValue) in parameters)
+            {
+                var p = cmd.CreateParameter();
+                p.ParameterName = paramName;
+                p.Value = paramValue;
+                cmd.Parameters.Add(p);
+            }
             using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
 
             for (int i = 0; i < reader.FieldCount; i++)

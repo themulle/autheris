@@ -545,4 +545,28 @@ public sealed class TableCacheGovernanceSecurityTests : IDisposable
             smallStore.StageShadowGenerationAsync(table, 1, ["id"], Rows()).GetAwaiter().GetResult();
         }).Message.ShouldContain("limit exceeded");
     }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Query_UsesParameterizedTenantAndAttributeFilters_ResistingQuoteInjection()
+    {
+        var table = new TableIdentifier("crm", "public", "customers_param");
+        await SeedTableDataAsync(table, epoch: 1);
+
+        var service = CreateService();
+        var injectedCaller = new TableCacheCallerContext(
+            CreatePrincipal(),
+            new TenantId("tenant_alpha"),
+            Attributes: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["dept_code"] = "FIN' OR '1'='1"
+            });
+
+        var result = await service.ExecuteGovernedQueryAsync(
+            table,
+            "SELECT id, name FROM customers_param",
+            injectedCaller,
+            requestedColumns: ["id", "name"]);
+        result.Rows.ShouldBeEmpty();
+    }
 }
