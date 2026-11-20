@@ -37,6 +37,13 @@ public sealed class GatewaySecurityOptionsValidator : IValidateOptions<GatewayOp
             failures.Add("Security violation: Audit:AuditLogRetentionDays must be at least 365 days.");
         }
 
+        if (!isDev &&
+            opts.Audit.Retention.RetentionDays < opts.Audit.Retention.SecurityDays &&
+            string.IsNullOrWhiteSpace(opts.Audit.ChainAnchorWormDirectory))
+        {
+            failures.Add("Security violation: Audit:Retention:RetentionDays must be at least Audit:Retention:SecurityDays unless an external WORM archive sink (Audit:ChainAnchorWormDirectory) is configured.");
+        }
+
         if (opts.Authentication.RequireKerberosOnly && opts.Authentication.BasicAuth.Enabled)
         {
             failures.Add("Security conflict: BasicAuth must not be enabled when RequireKerberosOnly is set to true.");

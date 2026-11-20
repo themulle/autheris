@@ -6,14 +6,25 @@ using System.Diagnostics.Metrics;
 using System.IO;
 using System.Linq;
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Api.Configuration;
+using Autheris.Api.Extensions.DependencyInjection;
 using Autheris.Api.Middleware;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Usage;
 using Autheris.Domain.Common;
 using Autheris.Domain.Diagnostics;
+using Autheris.Domain.Options;
 using Autheris.Domain.Security;
+using Autheris.Tests.Common;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
+using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -175,5 +186,59 @@ public sealed class UsageAttributionSecurityTests
         recordedSync.ShouldBeTrue();
         typeof(IUsageRecorder).GetMethod(nameof(IUsageRecorder.Record))!.ReturnType.ShouldBe(typeof(void));
         UsageRequestScope.Current.ShouldBeNull();
+    }
+
+    [Fact]
+    public void Pseudonymization_key_resolves_from_vault_ref_and_fails_closed_when_missing()
+    {
+        var expectedKey = RandomNumberGenerator.GetBytes(32);
+        var secretProvider = Substitute.For<IKeyVaultSecretProvider>();
+        secretProvider.GetSecretBytes("kv://usage-pseudonym-key").Returns(expectedKey);
+
+        var services = new ServiceCollection();
+        services.AddSingleton<IHostEnvironment>(new TestHostEnvironment { EnvironmentName = "Production" });
+        services.AddSingleton(Options.Create(new UsageAccountingOptions
+        {
+            PseudonymizeUsers = true,
+            PseudonymizationKeyVaultRef = "kv://usage-pseudonym-key"
+        }));
+        services.AddSingleton(secretProvider);
+        using var sp = services.BuildServiceProvider();
+
+        var resolved = GatewayGovernanceServiceExtensions.ResolveUsagePseudonymizationKey(sp);
+        resolved.ShouldBe(expectedKey);
+
+        // Missing secret provider fails closed (no fallback to Cluster:Secret or random key).
+        var noProviderServices = new ServiceCollection();
+        noProviderServices.AddSingleton<IHostEnvironment>(new TestHostEnvironment { EnvironmentName = "Production" });
+        noProviderServices.AddSingleton(Options.Create(new UsageAccountingOptions
+        {
+            PseudonymizeUsers = true,
+            PseudonymizationKeyVaultRef = "kv://usage-pseudonym-key"
+        }));
+        using var noProviderSp = noProviderServices.BuildServiceProvider();
+        Should.Throw<InvalidOperationException>(() =>
+            GatewayGovernanceServiceExtensions.ResolveUsagePseudonymizationKey(noProviderSp));
+
+        // Short key outside Development fails closed.
+        var shortProvider = Substitute.For<IKeyVaultSecretProvider>();
+        shortProvider.GetSecretBytes("kv://usage-pseudonym-key").Returns(RandomNumberGenerator.GetBytes(8));
+        var shortKeyServices = new ServiceCollection();
+        shortKeyServices.AddSingleton<IHostEnvironment>(new TestHostEnvironment { EnvironmentName = "Production" });
+        shortKeyServices.AddSingleton(Options.Create(new UsageAccountingOptions
+        {
+            PseudonymizeUsers = true,
+            PseudonymizationKeyVaultRef = "kv://usage-pseudonym-key"
+        }));
+        shortKeyServices.AddSingleton(shortProvider);
+        using var shortKeySp = shortKeyServices.BuildServiceProvider();
+        Should.Throw<InvalidOperationException>(() =>
+            GatewayGovernanceServiceExtensions.ResolveUsagePseudonymizationKey(shortKeySp));
+
+        // Legacy Gateway:Audit:ActorPseudonymizationKey is rejected as an unknown key.
+        var legacyConfig = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Gateway:Audit:ActorPseudonymizationKey"] = "legacy" })
+            .Build();
+        Should.Throw<InvalidOperationException>(() => UnknownGatewayKeyGuard.ThrowIfUnknownKeys(legacyConfig));
     }
 }
