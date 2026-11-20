@@ -1,5 +1,6 @@
 using System.Collections.Frozen;
 using System.Collections.Immutable;
+using System.Runtime.InteropServices;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 
@@ -56,6 +57,30 @@ public sealed class CatalogSnapshot
         DegradedEntityCount = degradedEntityCount;
     }
 
+    private CatalogSnapshot(
+        CatalogVersion version,
+        DateTimeOffset capturedAt,
+        ImmutableArray<TableMetadata> tables,
+        IReadOnlyDictionary<CatalogEntryKey, int> ordinalByKey,
+        IReadOnlyDictionary<Guid, int> ordinalById,
+        IReadOnlyDictionary<TableIdentifier, int> ordinalByIdentifier,
+        ImmutableArray<TableRelation> relations,
+        IReadOnlyDictionary<Guid, IReadOnlyList<TableRelation>> relationsByParentTableId,
+        IReadOnlyDictionary<Guid, IReadOnlyList<TableRelation>> relationsByChildTableId,
+        int degradedEntityCount)
+    {
+        Version = version;
+        CapturedAt = capturedAt;
+        Tables = tables;
+        OrdinalByKey = ordinalByKey;
+        OrdinalById = ordinalById;
+        OrdinalByIdentifier = ordinalByIdentifier;
+        Relations = relations;
+        RelationsByParentTableId = relationsByParentTableId;
+        RelationsByChildTableId = relationsByChildTableId;
+        DegradedEntityCount = degradedEntityCount;
+    }
+
     public static CatalogSnapshot Create(
         CatalogVersion version,
         IReadOnlyList<TableMetadata> tables,
@@ -68,24 +93,229 @@ public sealed class CatalogSnapshot
 
         var immutableTables = ToImmutable(tables);
         var immutableRelations = ToImmutable(relations);
-        var timestamp = capturedAt ?? DateTimeOffset.UtcNow;
-        var keyOrdinals = new Dictionary<CatalogEntryKey, int>(immutableTables.Length);
-        var idOrdinals = new Dictionary<Guid, int>(immutableTables.Length);
-        var identOrdinals = new Dictionary<TableIdentifier, int>(immutableTables.Length);
+        var timestamp = ResolveCapturedAt(capturedAt);
+        var keyOrdinals = ImmutableDictionary.CreateBuilder<CatalogEntryKey, int>();
+        var idOrdinals = ImmutableDictionary.CreateBuilder<Guid, int>();
+        var identOrdinals = ImmutableDictionary.CreateBuilder<TableIdentifier, int>();
 
         for (int i = 0; i < immutableTables.Length; i++)
         {
-            var table = immutableTables[i];
-            var key = CatalogEntryKey.ForTable(table.Identifier);
-            keyOrdinals.TryAdd(key, i);
-            if (table.Table.Id != Guid.Empty)
-            {
-                idOrdinals.TryAdd(table.Table.Id, i);
-                keyOrdinals.TryAdd(CatalogEntryKey.ForTable(table.Table.Id), i);
-            }
-            identOrdinals.TryAdd(table.Identifier, i);
+            SetOrdinals(immutableTables[i], i, keyOrdinals, idOrdinals, identOrdinals);
         }
 
+        var (frozenParentGroup, frozenChildGroup) = BuildRelationMaps(immutableRelations);
+
+        return new CatalogSnapshot(
+            version,
+            timestamp,
+            immutableTables,
+            keyOrdinals.ToImmutable(),
+            idOrdinals.ToImmutable(),
+            identOrdinals.ToImmutable(),
+            immutableRelations,
+            frozenParentGroup,
+            frozenChildGroup,
+            degradedEntityCount);
+    }
+
+    public static CatalogSnapshot Empty(CatalogVersion? version = null) =>
+        Create(version ?? new CatalogVersion(1, 1), ImmutableArray<TableMetadata>.Empty, ImmutableArray<TableRelation>.Empty);
+
+    /// <summary>
+    /// Returns a new immutable <see cref="CatalogSnapshot"/> produced by removing or replacing
+    /// <paramref name="changedIdentifiers"/> and inserting active <paramref name="updatedTables"/>.
+    /// Existing snapshot collections and indices remain untouched for concurrent readers.
+    /// </summary>
+    public CatalogSnapshot WithDelta(
+        CatalogVersion version,
+        IReadOnlyCollection<TableIdentifier> changedIdentifiers,
+        IReadOnlyList<TableMetadata> updatedTables,
+        IReadOnlyList<TableRelation>? relations = null,
+        int degradedEntityCount = 0,
+        DateTimeOffset? capturedAt = null)
+    {
+        ArgumentNullException.ThrowIfNull(changedIdentifiers);
+        ArgumentNullException.ThrowIfNull(updatedTables);
+
+        var timestamp = ResolveCapturedAt(capturedAt);
+        var tablesList = new List<TableMetadata>(Tables.Count + updatedTables.Count);
+        tablesList.AddRange(Tables);
+
+        var keyBuilder = ToImmutableBuilder(OrdinalByKey);
+        var idBuilder = ToImmutableBuilder(OrdinalById);
+        var identBuilder = ToImmutableBuilder(OrdinalByIdentifier);
+
+        var activeUpdates = new Dictionary<TableIdentifier, TableMetadata>(updatedTables.Count);
+        HashSet<TableIdentifier>? inactiveUpdates = null;
+        for (var i = 0; i < updatedTables.Count; i++)
+        {
+            var updated = updatedTables[i];
+            if (updated.Table.IsActive)
+            {
+                activeUpdates[updated.Identifier] = updated;
+                inactiveUpdates?.Remove(updated.Identifier);
+            }
+            else
+            {
+                activeUpdates.Remove(updated.Identifier);
+                (inactiveUpdates ??= new HashSet<TableIdentifier>()).Add(updated.Identifier);
+            }
+        }
+
+        foreach (var changedId in changedIdentifiers)
+        {
+            if (!activeUpdates.ContainsKey(changedId))
+            {
+                RemoveAtIdentifier(changedId, tablesList, keyBuilder, idBuilder, identBuilder);
+            }
+        }
+
+        if (inactiveUpdates != null)
+        {
+            foreach (var inactiveId in inactiveUpdates)
+            {
+                RemoveAtIdentifier(inactiveId, tablesList, keyBuilder, idBuilder, identBuilder);
+            }
+        }
+
+        foreach (var (id, updated) in activeUpdates)
+        {
+            if (identBuilder.TryGetValue(id, out var existingOrd))
+            {
+                var previous = tablesList[existingOrd];
+                tablesList[existingOrd] = updated;
+                if (previous.Table.Id != updated.Table.Id)
+                {
+                    if (previous.Table.Id != Guid.Empty)
+                    {
+                        RemoveIfMappedTo(idBuilder, previous.Table.Id, existingOrd);
+                        RemoveIfMappedTo(keyBuilder, CatalogEntryKey.ForTable(previous.Table.Id), existingOrd);
+                    }
+
+                    if (updated.Table.Id != Guid.Empty)
+                    {
+                        idBuilder[updated.Table.Id] = existingOrd;
+                        keyBuilder[CatalogEntryKey.ForTable(updated.Table.Id)] = existingOrd;
+                    }
+                }
+            }
+            else
+            {
+                var newOrd = tablesList.Count;
+                tablesList.Add(updated);
+                SetOrdinals(updated, newOrd, keyBuilder, idBuilder, identBuilder);
+            }
+        }
+
+        ImmutableArray<TableRelation> nextRelations;
+        IReadOnlyDictionary<Guid, IReadOnlyList<TableRelation>> nextParentRelations;
+        IReadOnlyDictionary<Guid, IReadOnlyList<TableRelation>> nextChildRelations;
+        if (relations is null)
+        {
+            nextRelations = ToImmutable(Relations);
+            nextParentRelations = RelationsByParentTableId;
+            nextChildRelations = RelationsByChildTableId;
+        }
+        else
+        {
+            nextRelations = ToImmutable(relations);
+            (nextParentRelations, nextChildRelations) = BuildRelationMaps(nextRelations);
+        }
+
+        return new CatalogSnapshot(
+            version,
+            timestamp,
+            ImmutableCollectionsMarshal.AsImmutableArray(tablesList.ToArray()),
+            keyBuilder.ToImmutable(),
+            idBuilder.ToImmutable(),
+            identBuilder.ToImmutable(),
+            nextRelations,
+            nextParentRelations,
+            nextChildRelations,
+            degradedEntityCount);
+    }
+
+    private static void SetOrdinals(
+        TableMetadata table,
+        int ordinal,
+        ImmutableDictionary<CatalogEntryKey, int>.Builder keyOrdinals,
+        ImmutableDictionary<Guid, int>.Builder idOrdinals,
+        ImmutableDictionary<TableIdentifier, int>.Builder identOrdinals)
+    {
+        keyOrdinals[CatalogEntryKey.ForTable(table.Identifier)] = ordinal;
+        if (table.Table.Id != Guid.Empty)
+        {
+            idOrdinals[table.Table.Id] = ordinal;
+            keyOrdinals[CatalogEntryKey.ForTable(table.Table.Id)] = ordinal;
+        }
+
+        identOrdinals[table.Identifier] = ordinal;
+    }
+
+    private static void RemoveAtIdentifier(
+        TableIdentifier identifier,
+        List<TableMetadata> tablesList,
+        ImmutableDictionary<CatalogEntryKey, int>.Builder keyBuilder,
+        ImmutableDictionary<Guid, int>.Builder idBuilder,
+        ImmutableDictionary<TableIdentifier, int>.Builder identBuilder)
+    {
+        if (!identBuilder.TryGetValue(identifier, out var ord))
+        {
+            return;
+        }
+
+        var removed = tablesList[ord];
+        identBuilder.Remove(identifier);
+        RemoveIfMappedTo(keyBuilder, CatalogEntryKey.ForTable(identifier), ord);
+        if (removed.Table.Id != Guid.Empty)
+        {
+            RemoveIfMappedTo(idBuilder, removed.Table.Id, ord);
+            RemoveIfMappedTo(keyBuilder, CatalogEntryKey.ForTable(removed.Table.Id), ord);
+        }
+
+        var lastIdx = tablesList.Count - 1;
+        if (ord != lastIdx)
+        {
+            var lastTable = tablesList[lastIdx];
+            tablesList[ord] = lastTable;
+            SetOrdinals(lastTable, ord, keyBuilder, idBuilder, identBuilder);
+        }
+
+        tablesList.RemoveAt(lastIdx);
+    }
+
+    private static void RemoveIfMappedTo<TKey>(
+        ImmutableDictionary<TKey, int>.Builder builder,
+        TKey key,
+        int expectedOrdinal)
+        where TKey : notnull
+    {
+        if (builder.TryGetValue(key, out var current) && current == expectedOrdinal)
+        {
+            builder.Remove(key);
+        }
+    }
+
+    private static ImmutableDictionary<TKey, int>.Builder ToImmutableBuilder<TKey>(IReadOnlyDictionary<TKey, int> source)
+        where TKey : notnull
+    {
+        if (source is ImmutableDictionary<TKey, int> imm)
+        {
+            return imm.ToBuilder();
+        }
+
+        var builder = ImmutableDictionary.CreateBuilder<TKey, int>();
+        foreach (var kvp in source)
+        {
+            builder[kvp.Key] = kvp.Value;
+        }
+
+        return builder;
+    }
+
+    private static (IReadOnlyDictionary<Guid, IReadOnlyList<TableRelation>> Parent, IReadOnlyDictionary<Guid, IReadOnlyList<TableRelation>> Child)
+        BuildRelationMaps(ImmutableArray<TableRelation> immutableRelations)
+    {
         var parentGroup = new Dictionary<Guid, List<TableRelation>>();
         var childGroup = new Dictionary<Guid, List<TableRelation>>();
 
@@ -113,70 +343,11 @@ public sealed class CatalogSnapshot
             kvp => kvp.Key,
             kvp => (IReadOnlyList<TableRelation>)kvp.Value.ToImmutableArray());
 
-        return new CatalogSnapshot(
-            version,
-            timestamp,
-            immutableTables,
-            keyOrdinals.ToFrozenDictionary(),
-            idOrdinals.ToFrozenDictionary(),
-            identOrdinals.ToFrozenDictionary(),
-            immutableRelations,
-            frozenParentGroup,
-            frozenChildGroup,
-            degradedEntityCount);
+        return (frozenParentGroup, frozenChildGroup);
     }
 
-    public static CatalogSnapshot Empty(CatalogVersion? version = null) =>
-        Create(version ?? new CatalogVersion(1, 1), ImmutableArray<TableMetadata>.Empty, ImmutableArray<TableRelation>.Empty);
-
-    /// <summary>
-    /// Returns a new immutable <see cref="CatalogSnapshot"/> produced by removing or replacing
-    /// <paramref name="changedIdentifiers"/> and inserting active <paramref name="updatedTables"/>.
-    /// Existing snapshot collections and indices remain untouched for concurrent readers.
-    /// </summary>
-    public CatalogSnapshot WithDelta(
-        CatalogVersion version,
-        IReadOnlyCollection<TableIdentifier> changedIdentifiers,
-        IReadOnlyList<TableMetadata> updatedTables,
-        IReadOnlyList<TableRelation>? relations = null,
-        int degradedEntityCount = 0,
-        DateTimeOffset? capturedAt = null)
-    {
-        ArgumentNullException.ThrowIfNull(changedIdentifiers);
-        ArgumentNullException.ThrowIfNull(updatedTables);
-
-        var byIdentifier = new Dictionary<TableIdentifier, TableMetadata>(Tables.Count);
-        for (var i = 0; i < Tables.Count; i++)
-        {
-            var existing = Tables[i];
-            byIdentifier[existing.Identifier] = existing;
-        }
-
-        foreach (var changedId in changedIdentifiers)
-        {
-            byIdentifier.Remove(changedId);
-        }
-
-        for (var i = 0; i < updatedTables.Count; i++)
-        {
-            var updated = updatedTables[i];
-            if (updated.Table.IsActive)
-            {
-                byIdentifier[updated.Identifier] = updated;
-            }
-            else
-            {
-                byIdentifier.Remove(updated.Identifier);
-            }
-        }
-
-        return Create(
-            version,
-            byIdentifier.Values.ToList(),
-            relations ?? Relations,
-            degradedEntityCount,
-            capturedAt);
-    }
+    private static DateTimeOffset ResolveCapturedAt(DateTimeOffset? capturedAt) =>
+        capturedAt ?? DateTimeOffset.UtcNow;
 
     public bool TryGetOrdinal(CatalogEntryKey key, out int ordinal) =>
         OrdinalByKey.TryGetValue(key, out ordinal);

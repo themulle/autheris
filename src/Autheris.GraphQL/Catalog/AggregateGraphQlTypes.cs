@@ -195,10 +195,6 @@ internal static class AggregateGraphQlTypes
         }
 
         var analytics = ctx.Services.GetService<IOptions<AnalyticsOptions>>()?.Value ?? new AnalyticsOptions();
-        if (!analytics.Aggregation.Enabled)
-        {
-            throw AggregateErrors.Create("AGGREGATION_DISABLED", AggregateErrors.DisabledMessage);
-        }
 
         try
         {

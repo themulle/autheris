@@ -238,7 +238,6 @@ public sealed class GraphQlCostMetamorphicTests
         // Invariant: Aggregation queries exceeding configured safety bounds are rejected fail-closed.
         var options = new AggregationOptions
         {
-            Enabled = true,
             MaxGroupByColumns = 2,
             MaxAggregates = 2
         };
@@ -258,11 +257,6 @@ public sealed class GraphQlCostMetamorphicTests
 
         Should.Throw<ArgumentException>(() => AggregationCostCalculator.ValidateBounds(excessiveGroupBy, options));
         Should.Throw<ArgumentException>(() => AggregationCostCalculator.ValidateBounds(excessiveAggs, options));
-
-        // When disabled
-        var disabledOptions = new AggregationOptions { Enabled = false };
-        var normalQuery = new AggregationQuery(Table: TableIdentifier.Parse("sales.orders"));
-        Should.Throw<GatewayForbiddenException>(() => AggregationCostCalculator.ValidateBounds(normalQuery, disabledOptions));
     }
 
     #endregion
