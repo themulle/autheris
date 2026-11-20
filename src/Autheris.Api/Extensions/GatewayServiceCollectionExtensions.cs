@@ -344,6 +344,12 @@ public static partial class GatewayServiceCollectionExtensions
         }
 
         options.TokenValidationParameters = parameters;
+        options.Events ??= new Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerEvents();
+        options.Events.OnTokenValidated = ctx =>
+        {
+            RealmTokenScopePolicy.Apply(ctx.Principal, realm);
+            return Task.CompletedTask;
+        };
     }
 
     private static void ConfigureJwtBearer(
