@@ -324,7 +324,7 @@
 0323 Autheris.Domain.Interfaces.ILocalEmbeddingGenerator Singleton key=- factory:Autheris.Domain.Interfaces.ILocalEmbeddingGenerator
 0324 Autheris.Domain.Interfaces.ICatalogSearchEngine Singleton key=- type:Autheris.Application.Catalog.Search.CatalogSearchEngine
 0325 Microsoft.Extensions.Hosting.IHostedService Singleton key=- type:Autheris.Application.Catalog.Search.CatalogSearchWarmupService
-0326 Autheris.Application.Catalog.Interfaces.ICatalogVisibilityService Scoped key=- type:Autheris.Application.Catalog.Services.CatalogVisibilityService
+0326 Autheris.Application.Catalog.Interfaces.ICatalogVisibilityService Scoped key=- factory:Autheris.Application.Catalog.Interfaces.ICatalogVisibilityService
 0327 Autheris.Application.Catalog.Discovery.IDiscoveryArtifactService Scoped key=- type:Autheris.Application.Catalog.Discovery.DiscoveryArtifactService
 0328 Autheris.Application.Docs.Services.IDocLinkService Scoped key=- type:Autheris.Application.Docs.Services.DocLinkService
 0329 Autheris.Application.Docs.Services.IDocLinkDiscoveryReader Scoped key=- factory:Autheris.Application.Docs.Services.IDocLinkDiscoveryReader
