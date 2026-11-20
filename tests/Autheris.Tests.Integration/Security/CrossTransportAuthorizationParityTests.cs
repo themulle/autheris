@@ -130,9 +130,21 @@ public sealed class CrossTransportAuthorizationParityTests
             outcome.DecisionGrantIds.OrderBy(g => g).ToArray().ShouldBe(expected.GrantIds.OrderBy(g => g).ToArray(), $"Scenario={scenarioId} contributing grants.");
         }
 
+        if (!expected.Allowed)
+        {
+            outcome.RowSet.ShouldBeNull($"Scenario={scenarioId} denied decision must not carry a row set.");
+            outcome.PredicateSql.ShouldBeEmpty($"Scenario={scenarioId} denied decision must not carry a row predicate.");
+        }
+
         if (expected.RowSet is not null)
         {
             outcome.RowSet.ShouldBe(expected.RowSet.Value, $"Scenario={scenarioId} row set.");
+        }
+
+        if (expected.ReasonCodes is not null)
+        {
+            outcome.DecisionReasonCodes.OrderBy(c => c, StringComparer.Ordinal).ToArray()
+                .ShouldBe(expected.ReasonCodes.OrderBy(c => c, StringComparer.Ordinal).ToArray(), $"Scenario={scenarioId} reason codes.");
         }
 
         if (expected.ColumnState is not null)

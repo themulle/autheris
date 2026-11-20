@@ -111,6 +111,7 @@ public enum ParityScenarioId
     S32_HardPolicyWithUnfilteredGrant,
     S33_PatternGrantObjectCreatedLater,
     S34_UncoveredDenyVersusSkip,
+    S34b_UncoveredDenyOnly,
     S35_CompositeKeyPolicy,
     S36_CrossSourceKeySet,
     S37_ParametersFromTwoGrantsMerged
@@ -150,7 +151,9 @@ public sealed record ParityExpectation(
     // Grant-model rows: the parameter values bound into the row predicate, compared as a set (null = not asserted).
     IReadOnlyList<string>? PredicateParameterValues = null,
     // Grant-model rows: substrings the rendered row predicate must contain (null = not asserted).
-    IReadOnlyList<string>? PredicateSqlFragments = null);
+    IReadOnlyList<string>? PredicateSqlFragments = null,
+    // Grant-model rows: decision reason codes expected on a denied decision (null = not asserted).
+    IReadOnlyList<string>? ReasonCodes = null);
 
 public sealed record ParityOutcome(
     bool Allowed,
