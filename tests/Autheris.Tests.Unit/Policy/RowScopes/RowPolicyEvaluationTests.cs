@@ -252,6 +252,41 @@ public sealed class RowPolicyEvaluationTests
             options).ShouldBe(TimeSpan.FromSeconds(45));
     }
 
+    [Fact]
+    public async Task SaveFilter_KeySetMaxKeysExceedingGlobalMaxAuthorizedKeys_Rejected()
+    {
+        var repo = new SingleSnapshotRepo(new VirtualFilterSnapshot(0, [], []));
+        var opts = Options.Create(new GatewayOptions
+        {
+            VirtualFilters = new VirtualFilterOptions
+            {
+                Federation = new VirtualFilterFederationOptions { MaxAuthorizedKeys = 500 }
+            }
+        });
+        var admin = new VirtualFilterAdministrationService(repo, NullAuditLogRepository.Instance, opts);
+        var actor = new VirtualFilterActor(new Sid("S-1-5-21-ADMIN"), IsSync: false);
+        var overLimit = new VirtualFilter
+        {
+            TenantId = new TenantId("tenant_a"),
+            Name = "bounded_policy",
+            Source = "src",
+            KeyColumns = ["t.id"],
+            EvaluationMode = RowPolicyEvaluationMode.KeySet,
+            KeySetMaxKeys = 501,
+            Structured = new StructuredFilterDefinition
+            {
+                From = new TableIdentifier("src", "dbo", "t"),
+                FromAlias = "t"
+            }
+        };
+
+        await Should.ThrowAsync<ArgumentException>(() => admin.SaveFilterAsync(overLimit, actor));
+
+        var atLimit = overLimit with { KeySetMaxKeys = 500 };
+        var saved = await admin.SaveFilterAsync(atLimit, actor);
+        saved.KeySetMaxKeys.ShouldBe(500);
+    }
+
     private sealed class SingleSnapshotRepo(VirtualFilterSnapshot snap) : IVirtualFilterRepository
     {
         public Task<VirtualFilterSnapshot> LoadSnapshotAsync(CancellationToken ct = default) => Task.FromResult(snap);

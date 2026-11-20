@@ -450,6 +450,19 @@ public sealed class SltCorpusUnitTests
         classifier.Classify(new SltObservation(FindingKind.WrongResult, cls, RowFilterScenario: false)).ShouldBe(SltVerdict.AcceptedDifference);
     }
 
+    [Fact]
+    public void SltEngineRunner_ReplaceUnquotedCrossJoin_RewritesOnlyUnquotedKeywords()
+    {
+        SltEngineRunner.ReplaceUnquotedCrossJoin("""SELECT * FROM "t1" CROSS JOIN "t2" WHERE "t1"."a" = 1""")
+            .ShouldBe("""SELECT * FROM "t1" , "t2" WHERE "t1"."a" = 1""");
+
+        SltEngineRunner.ReplaceUnquotedCrossJoin("""SELECT 'a CROSS JOIN b', "CROSS JOIN" FROM "ACROSS JOIN" """)
+            .ShouldBe("""SELECT 'a CROSS JOIN b', "CROSS JOIN" FROM "ACROSS JOIN" """);
+
+        SltEngineRunner.ReplaceUnquotedCrossJoin("""SELECT 'it''s CROSS JOIN', "col""CROSS JOIN" FROM "t1" cross  join "t2" """)
+            .ShouldBe("""SELECT 'it''s CROSS JOIN', "col""CROSS JOIN" FROM "t1" , "t2" """);
+    }
+
     private sealed class HangingEngine : ISltEngine
     {
         public int Calls { get; private set; }

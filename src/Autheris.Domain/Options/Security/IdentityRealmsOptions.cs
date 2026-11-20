@@ -46,10 +46,10 @@ public sealed class IdentityRealmConfigOptions
     /// <summary>Delegated scopes (<c>scp</c> or RFC 9068 <c>scope</c>) that only permit reading on GenericOidc realms. Null applies the default (Agent.Read, App.Read); an empty list disables scope-based read-only marking and logs a startup warning.</summary>
     public List<string>? ReadOnlyScopes { get; set; }
 
-    private static readonly string[] DefaultReadOnlyScopes = ["Agent.Read", "App.Read"];
+    public static readonly IReadOnlyList<string> DefaultReadOnlyScopes = ["Agent.Read", "App.Read"];
 
     /// <summary>Configured <see cref="ReadOnlyScopes"/> or the default list (Agent.Read, App.Read).</summary>
-    public IReadOnlyList<string> GetEffectiveReadOnlyScopes() => ReadOnlyScopes ?? (IReadOnlyList<string>)DefaultReadOnlyScopes;
+    public IReadOnlyList<string> GetEffectiveReadOnlyScopes() => ReadOnlyScopes ?? DefaultReadOnlyScopes;
 }
 
 /// <summary>One workload subject and its gateway roles (list entry, because subjects contain colons and cannot be configuration keys).</summary>

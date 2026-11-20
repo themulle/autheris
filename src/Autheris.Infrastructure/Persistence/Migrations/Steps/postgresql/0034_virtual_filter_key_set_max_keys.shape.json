@@ -1,0 +1,5 @@
+{
+  "ops": [
+    { "op": "addColumn", "table": "virtual_filters", "column": { "name": "key_set_max_keys", "type": "INTEGER", "family": "integer", "nullable": true } }
+  ]
+}

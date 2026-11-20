@@ -76,31 +76,11 @@ public sealed class ReadPathSwitchesMetricsAndAnalyzeTests
 
     [Fact]
     [Trait("Category", "Security")]
-    public void ReadPathSwitches_DisabledQueryAnalysis_HasQueryAnalysisEnabledFalse()
-    {
-        var options = new GatewayOptions
-        {
-            Governance = new GovernanceOptions
-            {
-                QueryAnalysis = new GovernanceQueryAnalysisOptions
-                {
-                    Enabled = false
-                }
-            }
-        };
-
-        var switches = ReadPathSwitches.From(options);
-        switches.QueryAnalysisEnabled.ShouldBeFalse();
-    }
-
-    [Fact]
-    [Trait("Category", "Security")]
-    public void ReadPathSwitches_ConfigurationBinding_BindsBothSections()
+    public void ReadPathSwitches_ConfigurationBinding_BindsGraphQLMetricsSection()
     {
         var config = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                [GatewaySections.QueryAnalysis + ":Enabled"] = "false",
                 [GatewaySections.GraphQLMetrics + ":Enabled"] = "false"
             })
             .Build();
@@ -108,11 +88,7 @@ public sealed class ReadPathSwitchesMetricsAndAnalyzeTests
         var gatewayOptions = new GatewayOptions();
         config.GetSection(GatewaySections.Gateway).Bind(gatewayOptions);
 
-        gatewayOptions.Governance.QueryAnalysis.Enabled.ShouldBeFalse();
         gatewayOptions.GraphQL.Metrics.Enabled.ShouldBeFalse();
-
-        var switches = ReadPathSwitches.From(gatewayOptions);
-        switches.QueryAnalysisEnabled.ShouldBeFalse();
     }
 
     [Fact]

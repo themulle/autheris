@@ -19,7 +19,6 @@ public sealed class WebhookEventBridgeHostedService : IHostedService, IDisposabl
     private readonly IGatewayEventBus _eventBus;
     private readonly IWebhookDispatcherService _webhookDispatcher;
     private readonly ILogger<WebhookEventBridgeHostedService> _logger;
-    private readonly IOptions<GatewayOptions>? _options;
     private IDisposable? _subscription;
 
     public WebhookEventBridgeHostedService(
@@ -28,7 +27,7 @@ public sealed class WebhookEventBridgeHostedService : IHostedService, IDisposabl
         ILogger<WebhookEventBridgeHostedService> logger,
         IOptions<GatewayOptions>? options = null)
     {
-        _options = options;
+        _ = options;
         _eventBus = eventBus ?? throw new ArgumentNullException(nameof(eventBus));
         _webhookDispatcher = webhookDispatcher ?? throw new ArgumentNullException(nameof(webhookDispatcher));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -36,13 +35,6 @@ public sealed class WebhookEventBridgeHostedService : IHostedService, IDisposabl
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        // Registered unconditionally by the module: Gateway:Webhooks is a host section read at run time.
-        if (_options is { Value.Webhooks.Enabled: false })
-        {
-            _logger.LogDebug("WebhookEventBridgeHostedService idle: Gateway:Webhooks is disabled.");
-            return Task.CompletedTask;
-        }
-
         _logger.LogInformation("Starting WebhookEventBridgeHostedService and subscribing to IGatewayEventBus");
 
         _subscription = _eventBus.Subscribe<IGatewayEvent>(async (@event, ct) =>

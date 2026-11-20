@@ -695,10 +695,6 @@ public static class GatewayStartupValidator
     public static void ValidateWebhookSubscriptions(GatewayOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
-        if (!options.Webhooks.Enabled)
-        {
-            return;
-        }
 
         var seen = new HashSet<string>(StringComparer.Ordinal);
         for (var i = 0; i < options.Webhooks.Subscriptions.Count; i++)

@@ -77,10 +77,11 @@ public sealed partial class VirtualFilterEndpointsTests : IDisposable
         return context.Response.StatusCode;
     }
 
-    private static object DavidFilterBody(string? tenant = null, string? evaluationMode = null) => new
+    private static object DavidFilterBody(string? tenant = null, string? evaluationMode = null, int? keySetMaxKeys = null) => new
     {
         tenant,
         evaluation_mode = evaluationMode,
+        key_set_max_keys = keySetMaxKeys,
         source = "lwetem_prod",
         key_columns = new[] { "client.client_id" },
         from = new { table = "conf.client", alias = "client" },

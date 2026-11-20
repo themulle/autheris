@@ -8,22 +8,15 @@ using Microsoft.Extensions.Options;
 
 public sealed class AuditLineageEgressInterceptor : IEgressInterceptor
 {
-    private readonly GatewayOptions _options;
-
     public AuditLineageEgressInterceptor(IOptions<GatewayOptions> options)
     {
-        _options = options.Value;
+        _ = options;
     }
 
     public int Order => 100;
 
     public ValueTask<EgressResult> OnEgressAsync(EgressContext context, CancellationToken cancellationToken = default)
     {
-        if (!_options.Extensibility.Enabled)
-        {
-            return ValueTask.FromResult(EgressResult.Unmodified());
-        }
-
         var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["X-Governance-Status"] = "Evaluated",
