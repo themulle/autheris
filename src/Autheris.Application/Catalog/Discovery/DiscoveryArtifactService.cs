@@ -13,10 +13,12 @@ using Autheris.Application.Catalog.Semantic;
 using Autheris.Application.Catalog.Services;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Governance.Services;
+using Autheris.Application.Policy.Pdp;
 using Autheris.Application.Security;
 using Autheris.Application.Tenancy;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
+using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Domain.Security;
@@ -37,6 +39,8 @@ public sealed class DiscoveryArtifactService : IDiscoveryArtifactService
     private readonly IOptions<CatalogDiscoveryOptions> _discoveryOptions;
     private readonly IRateLimiterService? _rateLimiter;
     private readonly TimeProvider _timeProvider;
+    private readonly IAccessDecisionPoint? _decisionPoint;
+    private readonly IRestrictedScopePolicy _restrictedScopes;
 
     public DiscoveryArtifactService(
         ITableMetadataRepository metadata,
@@ -47,7 +51,9 @@ public sealed class DiscoveryArtifactService : IDiscoveryArtifactService
         IOptions<GatewayOptions> gatewayOptions,
         IOptions<CatalogDiscoveryOptions> discoveryOptions,
         IRateLimiterService? rateLimiter = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IAccessDecisionPoint? decisionPoint = null,
+        IRestrictedScopePolicy? restrictedScopes = null)
     {
         _metadata = metadata ?? throw new ArgumentNullException(nameof(metadata));
         _artifacts = artifacts ?? throw new ArgumentNullException(nameof(artifacts));
@@ -58,6 +64,8 @@ public sealed class DiscoveryArtifactService : IDiscoveryArtifactService
         _discoveryOptions = discoveryOptions ?? throw new ArgumentNullException(nameof(discoveryOptions));
         _rateLimiter = rateLimiter;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _decisionPoint = decisionPoint;
+        _restrictedScopes = restrictedScopes ?? RestrictedScopePolicy.Default;
     }
 
     public async Task<DiscoveryArtifactWriteResult> UpsertAsync(
@@ -256,9 +264,31 @@ public sealed class DiscoveryArtifactService : IDiscoveryArtifactService
             return new DiscoverySamplesReadResult(DiscoveryArtifactOutcome.Ok, unavailablePayload);
         }
 
+        var tokenScopes = TokenAccessScope.GetTokenScopes(principal)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var isRestrictedCaller = _restrictedScopes.HeldBy(tokenScopes).Count > 0;
+
+        TableAccessDecision? decision = null;
+        if (isRestrictedCaller)
+        {
+            if (_decisionPoint is null)
+            {
+                return new DiscoverySamplesReadResult(DiscoveryArtifactOutcome.Ok, unavailablePayload);
+            }
+
+            var subject = SecurityPrincipalContext.FromPrincipal(principal, resolution.Tenant!.Value);
+            decision = await _decisionPoint.DecideAsync(
+                new AccessRequest(subject, table, AccessOperation.Discover, AccessTransport.Discovery),
+                ct).ConfigureAwait(false);
+            if (!decision.IsAllowed)
+            {
+                return new DiscoverySamplesReadResult(DiscoveryArtifactOutcome.Ok, unavailablePayload);
+            }
+        }
+
         var maxRows = Math.Clamp(settings.MaxSampleRows, 1, CatalogDiscoverySettings.HardMaxSampleRows);
         var take = limit is > 0 ? Math.Min(limit.Value, maxRows) : maxRows;
-        var projected = ProjectVisibleSamples(stored.SamplesJson, table, take);
+        var projected = ProjectVisibleSamples(stored.SamplesJson, table, take, decision, isRestrictedCaller);
         if (projected.Count == 0)
         {
             return new DiscoverySamplesReadResult(DiscoveryArtifactOutcome.Ok, unavailablePayload);
@@ -378,15 +408,26 @@ public sealed class DiscoveryArtifactService : IDiscoveryArtifactService
     private static IReadOnlyList<IReadOnlyDictionary<string, object?>> ProjectVisibleSamples(
         string samplesJson,
         TableMetadata table,
-        int maxRows)
+        int maxRows,
+        TableAccessDecision? decision,
+        bool isRestrictedCaller)
     {
         var visibleColumns = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var col in table.Columns)
         {
-            if (!col.DiscoveryHidden)
+            if (col.DiscoveryHidden)
             {
-                visibleColumns.TryAdd(col.ColumnName, col.ColumnName);
+                continue;
             }
+
+            if (decision is not null &&
+                (isRestrictedCaller || decision.ScopeClearance is not null) &&
+                DiscoveryAccessMapper.MapColumnState(table, decision, col.ColumnName).State != DiscoveryColumnState.Clear)
+            {
+                continue;
+            }
+
+            visibleColumns.TryAdd(col.ColumnName, col.ColumnName);
         }
 
         if (visibleColumns.Count == 0)
