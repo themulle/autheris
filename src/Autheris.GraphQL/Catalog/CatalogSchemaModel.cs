@@ -767,6 +767,18 @@ internal sealed class CatalogTableFingerprintCache
 
     internal void Clear() => _entries.Clear();
 
+    internal bool TryGetTableHash(TableIdentifier id, out string hash)
+    {
+        if (_entries.TryGetValue(id, out var entry))
+        {
+            hash = entry.Hash;
+            return true;
+        }
+
+        hash = string.Empty;
+        return false;
+    }
+
     internal string ComputeModelFingerprint(
         IReadOnlyList<CatalogTableType> tables,
         IReadOnlyList<CatalogOmittedTable> omittedTables,

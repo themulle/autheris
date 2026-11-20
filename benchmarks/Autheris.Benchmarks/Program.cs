@@ -45,6 +45,15 @@ public static class BenchmarkRunnerApp
             return;
         }
 
+        if (args.Length > 0 && args[0].Equals("graphql-schema", StringComparison.OrdinalIgnoreCase))
+        {
+            int[]? counts = args.Length > 1
+                ? Array.ConvertAll(args[1].Split(',', StringSplitOptions.RemoveEmptyEntries), int.Parse)
+                : null;
+            await GraphQlSchemaScaleBenchmark.RunAsync(counts);
+            return;
+        }
+
         // 0. Full Scale Enterprise Spike (50,000 tables, 250,000 columns, 5,000 users)
         var scaleBenchmark = new ScaleCatalogBenchmark();
         scaleBenchmark.ExecuteFullScaleSpike();
