@@ -17,7 +17,7 @@ public sealed class OptionsAuditTests
         @"Enforce|Require|Allowed|Allow|Deny|Mask|Pii|Tls|Auth|Redaction",
         RegexOptions.CultureInvariant);
 
-    private const int RemovedOptionsCount = 81;
+    private const int RemovedOptionsCount = 82;
 
     [Fact]
     [Trait("Category", "Security")]

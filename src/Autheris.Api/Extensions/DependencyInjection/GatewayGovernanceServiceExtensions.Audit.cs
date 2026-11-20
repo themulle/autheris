@@ -62,6 +62,7 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<Autheris.Application.Usage.IUsageAggregator>(sp =>
             new Autheris.Application.Usage.UsageAggregator(
                 sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.UsageAccountingOptions>>(),
+                hmacKey: ResolveUsagePseudonymizationKey(sp),
                 expectedCostUnitResolver: BuildExpectedCostUnitResolver(sp),
                 timeProvider: sp.GetService<TimeProvider>()));
         services.AddSingleton<Autheris.Application.Usage.IUsageRecorder, Autheris.Application.Usage.UsageRecorder>();
@@ -88,17 +89,54 @@ public static partial class GatewayGovernanceServiceExtensions
                 sp.GetRequiredService<Autheris.Application.Usage.IUsageGroupNameResolver>(),
                 sp.GetRequiredService<Autheris.Application.Audit.IAuditWriter>(),
                 sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.UsageAccountingOptions>>(),
-                sp.GetService<TimeProvider>()));
+                sp.GetService<TimeProvider>(),
+                hmacKey: ResolveUsagePseudonymizationKey(sp)));
         services.AddSingleton<Autheris.Application.Usage.IUsageQuotaService>(sp =>
             new Autheris.Application.Usage.UsageQuotaService(
                 sp.GetRequiredService<Autheris.Application.Usage.IUsageRepository>(),
                 sp.GetRequiredService<Autheris.Application.Usage.IUsageAggregator>(),
                 sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.UsageAccountingOptions>>(),
+                hmacKey: ResolveUsagePseudonymizationKey(sp),
                 timeProvider: sp.GetService<TimeProvider>(),
                 logger: sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<Autheris.Application.Usage.UsageQuotaService>>()));
         services.AddHostedService<Autheris.Infrastructure.Usage.UsageFlushWorker>();
         services.AddHostedService<Autheris.Infrastructure.Usage.SourceCostCollectorWorker>();
         services.AddHostedService<Autheris.Infrastructure.Usage.UsageInitialTariffSeedService>();
+    }
+
+    internal static byte[]? ResolveUsagePseudonymizationKey(IServiceProvider sp)
+    {
+        var options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.UsageAccountingOptions>>().Value;
+        if (!options.PseudonymizeUsers)
+        {
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(options.PseudonymizationKeyVaultRef))
+        {
+            throw new InvalidOperationException(
+                "Gateway:UsageAccounting:PseudonymizationKeyVaultRef is required when PseudonymizeUsers is enabled.");
+        }
+
+        var secretProvider = sp.GetService<IKeyVaultSecretProvider>()
+            ?? throw new InvalidOperationException(
+                "IKeyVaultSecretProvider is required when Gateway:UsageAccounting:PseudonymizeUsers is enabled.");
+
+        var keyBytes = secretProvider.GetSecretBytes(options.PseudonymizationKeyVaultRef);
+        var env = sp.GetService<Microsoft.Extensions.Hosting.IHostEnvironment>();
+        bool isDev = env is not null && Microsoft.Extensions.Hosting.HostEnvironmentEnvExtensions.IsDevelopment(env);
+        SecretKeyRequirements.EnsureMinimumLength(
+            keyBytes,
+            "The usage pseudonymization HMAC key (Gateway:UsageAccounting:PseudonymizationKeyVaultRef)",
+            isDevelopment: isDev);
+
+        if (keyBytes is null || keyBytes.Length == 0)
+        {
+            throw new InvalidOperationException(
+                "The secret referenced by Gateway:UsageAccounting:PseudonymizationKeyVaultRef is missing or empty.");
+        }
+
+        return keyBytes;
     }
 
     private static Func<string, string?> BuildExpectedCostUnitResolver(IServiceProvider sp)

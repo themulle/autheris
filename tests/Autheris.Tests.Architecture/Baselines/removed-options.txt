@@ -1,6 +1,7 @@
 # WP-SIMPL-06 / WP-SIMPL-12: deleted options from src. Format: Namespace.Type.Property.
 Autheris.Domain.Model.EnvoyFilterExportOptions.PathPrefixes
 Autheris.Domain.Model.OpenApiDocumentOptions.IncludeGovernanceMetadata
+Autheris.Domain.Options.AggregationOptions.Enabled
 Autheris.Domain.Options.AlationOptions.AllowPlaintextApiTokenInDevelopment
 Autheris.Domain.Options.AlationOptions.ApiToken
 Autheris.Domain.Options.AlationOptions.BaseUrl

@@ -91,6 +91,15 @@ public sealed class DatasetTagImportService : IDatasetTagImportService
             _logger.LogWarning("dbt tags of a table were reduced: {Invalid} invalid and {Overflow} over the cap dropped.", invalid, overflow);
         }
 
+        var existingDbtTags = before.Tags
+            .Where(t => t.Source == DatasetTagSource.Dbt)
+            .Select(t => t.Tag)
+            .OrderBy(t => t, StringComparer.Ordinal);
+        if (existingDbtTags.SequenceEqual(kept, StringComparer.Ordinal))
+        {
+            return new DatasetTagImportResult(false, invalid, overflow, false);
+        }
+
         DatasetCatalogChange? change;
         try
         {

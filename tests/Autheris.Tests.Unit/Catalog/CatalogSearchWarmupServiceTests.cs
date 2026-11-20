@@ -412,6 +412,61 @@ public sealed class CatalogSearchWarmupServiceTests
         status.LastAttemptUtc.ShouldNotBeNull();
     }
 
+    [Fact]
+    public async Task IncrementalSync_EmbedsOnlyNewOrChangedTables()
+    {
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 11, 14, 12, 0, 0, TimeSpan.Zero));
+        var embedder = new CountingEmbeddingGenerator();
+        var searchOptions = Options.Create(new CatalogSearchOptions
+        {
+            WarmupOnStartup = true,
+            RefreshSeconds = 0,
+            EmbeddingProvider = CatalogEmbeddingProvider.Ollama
+        });
+        var engine = new CatalogSearchEngine(embedder, searchOptions, NullLogger<CatalogSearchEngine>.Instance, time);
+
+        var tables = Enumerable.Range(1, 30)
+            .Select(i => CreateTable($"table_{i:D2}"))
+            .ToList();
+        var repo = new DeltaTableMetadataRepository(tables);
+        var versionProvider = new SequenceCatalogVersionProvider(new CatalogVersion(1, 1));
+        Func<object, Task>? eventHandler = null;
+        var bus = Substitute.For<IEventBus>();
+        bus.Subscribe<object>(ICatalogVersionProvider.CatalogChangedEventChannel, Arg.Do<Func<object, Task>>(h => eventHandler = h))
+            .Returns(new NoopDisposable());
+
+        using var service = new CatalogSearchWarmupService(
+            repo,
+            engine,
+            searchOptions,
+            NullLogger<CatalogSearchWarmupService>.Instance,
+            eventBus: bus,
+            versionProvider: versionProvider,
+            timeProvider: time);
+
+        await service.StartAsync(CancellationToken.None);
+        await WaitHelper.WaitUntil(() => engine.IndexedTableCount == 30, TimeSpan.FromSeconds(5));
+
+        embedder.EmbeddedTextCount.ShouldBe(30);
+        embedder.ResetCounters();
+
+        // Sync 2: 28 tables unchanged, 1 table modified, 1 new table added (total 2 changed < 10% threshold).
+        var updatedTable = tables[0] with { Table = tables[0].Table with { Description = "updated orders description" } };
+        var newTable = CreateTable("table_31");
+        repo.ApplySyncChanges(changeVersion: 3, updatedTable, newTable);
+        versionProvider.AdvanceTo(new CatalogVersion(1, 2));
+        eventHandler.ShouldNotBeNull();
+        await eventHandler(new object());
+        await WaitHelper.WaitUntil(() => service.IsWaitingForCooldown, TimeSpan.FromSeconds(5));
+        time.Advance(CatalogSearchWarmupService.MinimumRebuildInterval);
+
+        await WaitHelper.WaitUntil(() => engine.IndexedTableCount == 31, TimeSpan.FromSeconds(5));
+        await service.StopAsync(CancellationToken.None);
+
+        embedder.EmbeddedTextCount.ShouldBe(2);
+        embedder.AsyncCallCount.ShouldBe(1);
+    }
+
     private sealed class SequenceCatalogVersionProvider : ICatalogVersionProvider
     {
         private readonly object _gate = new();
@@ -579,5 +634,96 @@ public sealed class CatalogSearchWarmupServiceTests
         public void Dispose()
         {
         }
+    }
+
+    private sealed class CountingEmbeddingGenerator : ILocalEmbeddingGenerator
+    {
+        private int _asyncCallCount;
+        private int _embeddedTextCount;
+
+        public int EmbeddingDimensions => 4;
+        public string ModelIdentifier => "counting-test";
+        public int AsyncCallCount => Volatile.Read(ref _asyncCallCount);
+        public int EmbeddedTextCount => Volatile.Read(ref _embeddedTextCount);
+
+        public void ResetCounters()
+        {
+            Interlocked.Exchange(ref _asyncCallCount, 0);
+            Interlocked.Exchange(ref _embeddedTextCount, 0);
+        }
+
+        public ReadOnlyMemory<float> GenerateNormalizedEmbedding(string text) => new[] { 1f, 0f, 0f, 0f };
+
+        public Task<IReadOnlyList<ReadOnlyMemory<float>>> GenerateNormalizedEmbeddingsAsync(IReadOnlyList<string> texts, CancellationToken ct = default)
+        {
+            Interlocked.Increment(ref _asyncCallCount);
+            Interlocked.Add(ref _embeddedTextCount, texts.Count);
+            IReadOnlyList<ReadOnlyMemory<float>> result = texts
+                .Select(_ => (ReadOnlyMemory<float>)new[] { 1f, 0f, 0f, 0f })
+                .ToArray();
+            return Task.FromResult(result);
+        }
+    }
+
+    private sealed class DeltaTableMetadataRepository(IReadOnlyList<TableMetadata> initialTables) : ITableMetadataRepository
+    {
+        private readonly object _gate = new();
+        private readonly Dictionary<TableIdentifier, (TableMetadata Meta, long ChangeVersion)> _tables =
+            initialTables.ToDictionary(t => t.Identifier, t => (t, 1L));
+
+        public void ApplySyncChanges(long changeVersion, params TableMetadata[] changed)
+        {
+            lock (_gate)
+            {
+                foreach (var item in changed)
+                {
+                    _tables[item.Identifier] = (item, changeVersion);
+                }
+            }
+        }
+
+        public Task<IReadOnlyList<TableMetadata>> GetAllTablesAsync(CancellationToken ct = default)
+        {
+            lock (_gate)
+            {
+                return Task.FromResult<IReadOnlyList<TableMetadata>>(_tables.Values.Select(v => v.Meta).ToList());
+            }
+        }
+
+        public Task<IReadOnlyList<TableIdentifier>> GetTablesChangedSinceAsync(long sinceVersion, CancellationToken ct = default)
+        {
+            lock (_gate)
+            {
+                return Task.FromResult<IReadOnlyList<TableIdentifier>>(
+                    _tables.Values.Where(v => v.ChangeVersion > sinceVersion).Select(v => v.Meta.Identifier).ToList());
+            }
+        }
+
+        public Task<IReadOnlyList<TableMetadata>> GetTablesAsync(IReadOnlyCollection<TableIdentifier> tables, CancellationToken ct = default)
+        {
+            lock (_gate)
+            {
+                var result = new List<TableMetadata>(tables.Count);
+                foreach (var id in tables)
+                {
+                    if (_tables.TryGetValue(id, out var entry))
+                    {
+                        result.Add(entry.Meta);
+                    }
+                }
+                return Task.FromResult<IReadOnlyList<TableMetadata>>(result);
+            }
+        }
+
+        public Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default) =>
+            Task.FromResult<TableMetadata?>(null);
+        public Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default) =>
+            Task.FromResult(metadata);
+        public Task<TableKeyDefinitionChange?> ReplaceTableKeyDefinitionAsync(
+            TableIdentifier table,
+            IReadOnlyList<string> primaryKey,
+            IReadOnlyList<TableIndexDefinition> indexes,
+            IReadOnlyList<KeyColumnDirection>? primaryKeyDirections = null,
+            CancellationToken ct = default) => Task.FromResult<TableKeyDefinitionChange?>(null);
     }
 }
