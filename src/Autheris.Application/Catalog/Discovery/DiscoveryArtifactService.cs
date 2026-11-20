@@ -264,8 +264,7 @@ public sealed class DiscoveryArtifactService : IDiscoveryArtifactService
             return new DiscoverySamplesReadResult(DiscoveryArtifactOutcome.Ok, unavailablePayload);
         }
 
-        var tokenScopes = TokenAccessScope.GetTokenScopes(principal)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var tokenScopes = TokenAccessScope.GetScopeSet(principal.Claims);
         var isRestrictedCaller = _restrictedScopes.HeldBy(tokenScopes).Count > 0;
 
         TableAccessDecision? decision = null;
