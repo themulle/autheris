@@ -204,7 +204,8 @@ public sealed class StepSqlLintTests
                 (31, "access_profile_items"),
                 (32, "functional_right_mapping_pending_approval"),
                 (33, "metric_view_kind_and_column_role"),
-                (34, "virtual_filter_key_set_max_keys")
+                (34, "virtual_filter_key_set_max_keys"),
+                (35, "drop_consent_row_filter_key_set_columns")
             ]);
         }
     }
