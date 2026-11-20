@@ -4,6 +4,18 @@ Purpose: everything a new agent (or human) needs to continue without the earlier
 status stays [`00-master-plan-overview.md`](00-master-plan-overview.md); this file records the working state, the rules the
 owner set, and the next steps in order. Read `CLAUDE.md` and `AGENTS.md` first.
 
+## 0b. Update 2026-11-20: v1.9.0 tagged & post-1.9.0 PR wave open
+
+- **`v1.9.0` tagged on `main` (`37578c014`, governance step `0030_table_object_kind`):**
+  - Merged since section 4 (`2026-11-19`): `#865` (`#845/#838/#871`), `#867` (`#847`), `#868` (`WP-SIMPL-36` 6b), `#883` (`WP-SIMPL-46`), `#886` (`#853`), `#887` (`WP-SIMPL-38` PR 4), `#890` (`#871`), `#892` (`#869`), `#899` (`WP-SIMPL-20` PR B), `#900` (`WP-SIMPL-52a`, step `0029`), `#902` (`WP-SIMPL-19` PR-C 2), `#904` (`#896`, step `0030`), `#905` (`WP-SIMPL-19` PR-C 3), `#906` (F-GOV-09 docs), `#907` (simpl tracker), `#913` (`#849` diagnostics), `#914` (`1.9.0` changelog), `#917` (interim footprint budgets `377 MB` / `4.0 s`), `#919` (`SqlCompilerBenchmarks`). Closed issues: `#869`, `#871`, `#910` (`WP-NF-1`, subsequent nightlies `44519413280` & `44536293614` green).
+- **Opened PRs in review / CI (`2026-11-20`):**
+  - Post-1.9.0 bug/feature/security queue: **#920** (`#916` Databricks metric views, step `0031` to rebase to `0033`), **#926** (`#849` bounded retry + `WP-L-2`), **#927** (`#891`), **#928** (`#889`), **#929** (`#887` Trino metadata follow-ups `WP-887-1..3`), **#930** (`#909` Roslyn inventory scanner), **#931** (`WP-SIMPL-20 PR A` + `#915` + `WP-L-3`), **#932** (`#921` SQL Server proc row scope), **#933** (`#918` webhook replay fail-closed), **#934** (`#894/#898` catalog paging & facets), **#935** (`#923` virtual filter `approval_reason`), **#936** (`#924` Databricks OBO authority/cert), **#937** (`WP-SIMPL-52b` step `0031` + `WP-L-1`), **#938** (`#925` Databricks typed results & `CONTINUE` polling), **#939** (`#922` step `0032`, stacked on `#937`).
+  - Simplification structural/module queue: **#940** (`WP-SIMPL-23` final test/mock ratchets), **#941** (`WP-SIMPL-29` Events & Lineage modules, removes `Autheris.Api -> Autheris.Extensions`), **#942** (`WP-SIMPL-28` dbt & OpenMetadata modules `PR 3a+3b+4a+4b`).
+- **Required merge ordering:**
+  1. **DDL queue (`main` at `0030`):** **PR #937** (`0031_profile_items`) -> retarget & merge **PR #939** (`0032_functional_right_mapping_pending_approval`) -> rebase **PR #920** to renumber its step `0031` to **`0033`** (and update checksum goldens + step tests).
+  2. **Module / Shared-file queue:** Merge **PR #933** (`#918` webhook replay fail-closed) and **PR #931** (`WP-SIMPL-20 PR A`) before **PR #942** (`WP-SIMPL-28`); coordinate shared `ModuleHttpClientGuard.cs`, `EnforcedModuleSections`, composition snapshots, and `.github/CODEOWNERS` between **PR #942** (`WP-SIMPL-28`) and **PR #941** (`WP-SIMPL-29`).
+- **Remaining manual / owner-review items:** `#911` & `#912` nightly budget/G8 investigations; `[WF]` workflow PRs (**#908** `WP-SIMPL-38 PR 5`, `WP-SIMPL-28 PR 3c/4c`, `WP-SIMPL-29 WP-29-D`); `#628b..d` (offline NuGet-blocked); `WP-SIMPL-32 PR 2+`; `WP-SIMPL-49`; `WP-SIMPL-54`; owner-only tasks in section 5.
+
 ## 0a. Update 2026-11-18: simplification track resumed on .NET 11
 
 - Merged on `main` (Phase 5 reviewed, CI green): PR #808 `WP-SIMPL-40 PR 40c` (GovernanceDocStore cutover, rebased; CRC fail-closed bundle reader, MCP deposit audit on every outcome, official bundle in one transaction), PR #809 `WP-SIMPL-52 PR 4b` (#571 masked catalog text incl. search, GraphQL and golden queries; search snapshot rebuild on rule changes), PR #810 `#678 PR 1` (`Gateway:Catalog:Cache` options, bounded provider cache; dead `TenantCatalogLookup` deleted), PR #811 `WP-SIMPL-31 PR 2c` (SQLite stand-ins removed from non-unit test projects; Parity and Simulation keep SQLite as reference oracle), PR #815 `WP-SIMPL-40 PR 40d` (legacy doc importer; `/app/shared-docs` removed from the Dockerfile with owner authorization).
@@ -73,8 +85,8 @@ Pushed feature branches on `origin` (state at the 2026-11-15 handover; the rollu
 - **In progress:** `WP-SIMPL-29` PR 2a (config sections) and PR 2b (CDC producers to Infrastructure), `WP-SIMPL-28` PR 3 (dbt module).
 - **Remaining after these (audit 2026-11-19, 25 PRs in total):** WP-23 last PR; WP-28 PR 4; WP-29 PR 3, 4, 4b (owner review) and 5; WP-32 PR 2-6 and the baseline PR; WP-20 PR A; WP-52b.
 - **Still open:**
-  - `WP-SIMPL-20` PR A: fold the ConsentPattern and GrantRecord cores after #900, then recompute `MaxAllowedLoc`.
-  - `WP-SIMPL-52b`: the profile items migration replaces `access_profiles.masking_mode/target_tables`. It takes step `0031`, after #904. `consent_row_filters.key_set_*` stays (D-PI-7).
+  - `WP-SIMPL-20` PR A: fold the ConsentPattern and GrantRecord cores after #900, then recompute `MaxAllowedLoc`. The local branch `refactor/simpl-20-fold-consent-cores` also carries both #899 review Lows. `fix/915-watermark-lock-order` (#915) is stacked on it.
+  - `WP-SIMPL-52b`: the profile items migration replaces `access_profiles.masking_mode/target_tables`. It takes step `0031`, after #904. `consent_row_filters.key_set_*` stays (D-PI-7). The next step after it, `0032`, goes to the bug fix #922 (default Q-922-1). #916 (Databricks metric views) then takes `0033`.
 - **Private advisory filed:** GHSA-ff36-3926-36r5 (private, unpublished).
 
 **Update 2026-11-18 night:**
@@ -97,9 +109,25 @@ Pushed feature branches on `origin` (state at the 2026-11-15 handover; the rollu
   - A5 (Git sync) is in progress; A6 is still open.
   - The governance repository LOC budget is raised by the products partial.
 - **New follow-up issues:**
-  - #835: GraphQL rebuild on restrictive changes.
+  - #835: GraphQL rebuild on restrictive changes. Fixed by #866, including the Low items: the issue can be closed.
   - #838: GraphQL discovery lists denied columns.
   - #847: SQL user expressions before the row and tenant predicates.
+  - Planned 2026-11-19 (master plan ranks 30-39; implementation after the v1.9.0 tag):
+    - #887 review follow-ups (rank 30);
+    - #889 (rank 31);
+    - #891 (rank 32);
+    - #849 (rank 33);
+    - #915 (rank 34);
+    - #909 (rank 35);
+    - #910-#912 (rank 36);
+    - #899/#904/#913 review Lows (rank 37);
+    - #916 (rank 38);
+    - #918 (rank 39);
+    - #922 (rank 40; governance step `0032`, after WP-SIMPL-52b `0031`; #916 moves to `0033`);
+    - #921 (rank 41);
+    - #923 (rank 42);
+    - #924 (rank 43; before #916 WP-MV-6);
+    - #925 (rank 44; before #916 WP-MV-6).
 - **WP-52 follow-ups still open** (live readers):
   - `consents.role_id/role_name`: Role grantee removal.
   - `access_profiles.masking_mode/target_tables`: profile items migration.
