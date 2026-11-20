@@ -2,7 +2,6 @@ class,property,default,security,decision,reason,owning_pr,file
 ColdPathTimingOptions,Enabled,,False,keep opt-in,Operational and test warmup timing seam (A7.3),PR 5,src/Autheris.Api/Hosting/Warmup/ColdPathTimingOptions.cs
 StartupWarmupOptions,Enabled,true,False,keep opt-in,Operational and test startup warmup kill switch (A7.3),PR 5,src/Autheris.Api/Hosting/Warmup/StartupWarmupOptions.cs
 StartupWarmupStepOptions,Enabled,true,False,keep opt-in,Operational per-step warmup kill switch (A7.3),PR 5,src/Autheris.Api/Hosting/Warmup/StartupWarmupOptions.cs
-OpenMetadataPolicy,Enabled,true,False,module,OpenMetadata module policy switch; module presence replaces flag,PR 2,src/Autheris.Application/Catalog/OpenMetadata/OpenMetadataModels.cs
 ReadPathSwitches,BulkStreamEnabled,,False,keep opt-in,PLAN-SEC-115 operational read-path kill switch,PR 4,src/Autheris.Application/Mcp/Services/ReadPathSwitches.cs
 ReadPathSwitches,QueryAnalysisEnabled,,False,keep opt-in,PLAN-SEC-115 operational read-path kill switch,PR 4,src/Autheris.Application/Mcp/Services/ReadPathSwitches.cs
 ReadPathSwitches,RestDataEndpointEnabled,,False,keep opt-in,PLAN-SEC-115 operational read-path kill switch,PR 4,src/Autheris.Application/Mcp/Services/ReadPathSwitches.cs
