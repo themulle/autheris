@@ -1,4 +1,5 @@
 using System.Data;
+using System.Text.RegularExpressions;
 using Autheris.Domain.Model;
 using Autheris.Infrastructure.Persistence.Catalog;
 using Autheris.Infrastructure.Persistence.Migrations;
@@ -23,6 +24,20 @@ public sealed class MetricViewMigration0031Tests
             step.Sql.ShouldContain("column_role");
             step.Sql.ShouldContain("dimension");
             step.Sql.ShouldContain("measure");
+
+            var nonCommentLines = step.Sql
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(l => !l.StartsWith("--", StringComparison.Ordinal))
+                .ToArray();
+            foreach (var line in nonCommentLines)
+            {
+                if (Regex.IsMatch(line, @"\bALTER\b", RegexOptions.IgnoreCase))
+                {
+                    Regex.IsMatch(line, @"\bALTER\s+TABLE\s+", RegexOptions.IgnoreCase).ShouldBeTrue($"Line must use 'ALTER TABLE ': {line}");
+                }
+
+                Regex.IsMatch(line, @"\bALTER\s+(?!TABLE\b)", RegexOptions.IgnoreCase).ShouldBeFalse($"Invalid ALTER target in: {line}");
+            }
 
             var shape = GovernanceSchemaShapeLoader.LoadAt(engine, 31, steps.ToDictionary(s => s.Version, s => s.ShapeDelta));
             var tablesTable = shape.Tables.Single(t => string.Equals(t.Name, "TABLES", StringComparison.OrdinalIgnoreCase));
