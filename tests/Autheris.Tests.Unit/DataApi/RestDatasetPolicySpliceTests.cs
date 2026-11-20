@@ -198,23 +198,6 @@ public sealed class RestDatasetPolicySpliceTests
         return (repo, resolution, rec);
     }
 
-    private sealed class RecordingConsentResolution(ConsentResolutionService inner, Recorded rec) : IConsentResolutionService
-    {
-        public TableAccessDecision ResolveAccess(
-            Sid userSid,
-            IReadOnlySet<Sid> subjectGroupSids,
-            IReadOnlySet<string> userRoles,
-            TableIdentifier table,
-            IReadOnlyList<Consent> activeConsents,
-            DatabaseDialect dialect = DatabaseDialect.SqlServer,
-            IReadOnlySet<Sid>? allUserSids = null,
-            IReadOnlySet<string>? callerScopes = null)
-        {
-            rec.Resolutions.Add((userSid, subjectGroupSids, userRoles, table, activeConsents));
-            return inner.ResolveAccess(userSid, subjectGroupSids, userRoles, table, activeConsents, dialect, allUserSids, callerScopes);
-        }
-    }
-
     private static GatewayOptions Options_() => new()
     {
         WebSql = new WebSqlOptions { Enabled = true, DefaultMaxRows = 100, MaxAllowedRows = 500 }
@@ -459,5 +442,22 @@ public sealed class RestDatasetPolicySpliceTests
         }
 
         return count;
+    }
+
+    private sealed class RecordingConsentResolution(ConsentResolutionService inner, Recorded rec) : IConsentResolutionService
+    {
+        public TableAccessDecision ResolveAccess(
+            Sid userSid,
+            IReadOnlySet<Sid> subjectGroupSids,
+            IReadOnlySet<string> userRoles,
+            TableIdentifier table,
+            IReadOnlyList<Consent> activeConsents,
+            DatabaseDialect dialect = DatabaseDialect.SqlServer,
+            IReadOnlySet<Sid>? allUserSids = null,
+            IReadOnlySet<string>? callerScopes = null)
+        {
+            rec.Resolutions.Add((userSid, subjectGroupSids, userRoles, table, activeConsents));
+            return inner.ResolveAccess(userSid, subjectGroupSids, userRoles, table, activeConsents, dialect, allUserSids, callerScopes);
+        }
     }
 }

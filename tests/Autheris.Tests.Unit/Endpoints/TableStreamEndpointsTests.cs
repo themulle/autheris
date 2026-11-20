@@ -214,52 +214,6 @@ public sealed class TableStreamEndpointsTests
         context.Request.ContentLength = bytes.Length;
     }
 
-    private sealed class StubRateLimiterService(
-        CostQuotaResult? reserveResult = null,
-        Func<CancellationToken, CostQuotaResult>? onSettle = null) : IRateLimiterService
-    {
-        public List<int> ReservedCosts { get; } = [];
-        public List<CancellationToken> SettleCancellationTokens { get; } = [];
-
-        public Task<RateLimitResult> CheckPreAuthIpAsync(string ip, PreAuthIpRateLimitOptions options, CancellationToken ct = default)
-            => Task.FromResult(new RateLimitResult(true, 0));
-
-        public Task<RateLimitResult> CheckPostAuthSidAsync(string sid, PostAuthSidRateLimitOptions options, CancellationToken ct = default)
-            => Task.FromResult(new RateLimitResult(true, 0));
-
-        public Task<CostQuotaResult> CheckCostQuotaAsync(string key, int requestedCost, ClientQuotaPolicy policy, CancellationToken ct = default)
-            => Task.FromResult(new CostQuotaResult(true, 1000, 0));
-
-        public Task<CostQuotaResult> ReserveCostQuotaAsync(string key, int reservedCost, ClientQuotaPolicy policy, CancellationToken ct = default)
-        {
-            ReservedCosts.Add(reservedCost);
-            return Task.FromResult(reserveResult ?? new CostQuotaResult(true, 1000, 0));
-        }
-
-        public Task<CostQuotaResult> SettleCostQuotaAsync(string key, int reservedCost, int actualCost, ClientQuotaPolicy policy, CancellationToken ct = default)
-        {
-            SettleCancellationTokens.Add(ct);
-            return Task.FromResult(onSettle is not null ? onSettle(ct) : new CostQuotaResult(true, 900, 0));
-        }
-
-        public Task<CallerBucketState?> GetBucketStateAsync(string key, ClientQuotaPolicy policy, CancellationToken ct = default)
-            => Task.FromResult<CallerBucketState?>(null);
-
-        public Task<CallerBucketState?> GetBucketStateAsync(string key, CancellationToken ct = default)
-            => Task.FromResult<CallerBucketState?>(null);
-    }
-
-    private sealed class StubClientTierResolver(ClientQuotaPolicy policy) : IClientTierResolver
-    {
-        public List<ClaimsPrincipal?> Calls { get; } = [];
-
-        public Task<ClientQuotaContext> ResolveAsync(ClaimsPrincipal? principal, string? apiKey, string? clientIp, CancellationToken ct = default)
-        {
-            Calls.Add(principal);
-            return Task.FromResult(new ClientQuotaContext("subject-418", policy.Tier, policy, "secret-scope"));
-        }
-    }
-
     [Fact]
     public async Task HandleBulkStreamAsync_EndpointIssuedCursor_DecodesInPlanner_AndReplayFailsClosed()
     {
@@ -680,5 +634,51 @@ public sealed class TableStreamEndpointsTests
 
         b.ShouldBe(a);
         c.ShouldBe(a);
+    }
+
+    private sealed class StubRateLimiterService(
+        CostQuotaResult? reserveResult = null,
+        Func<CancellationToken, CostQuotaResult>? onSettle = null) : IRateLimiterService
+    {
+        public List<int> ReservedCosts { get; } = [];
+        public List<CancellationToken> SettleCancellationTokens { get; } = [];
+
+        public Task<RateLimitResult> CheckPreAuthIpAsync(string ip, PreAuthIpRateLimitOptions options, CancellationToken ct = default)
+            => Task.FromResult(new RateLimitResult(true, 0));
+
+        public Task<RateLimitResult> CheckPostAuthSidAsync(string sid, PostAuthSidRateLimitOptions options, CancellationToken ct = default)
+            => Task.FromResult(new RateLimitResult(true, 0));
+
+        public Task<CostQuotaResult> CheckCostQuotaAsync(string key, int requestedCost, ClientQuotaPolicy policy, CancellationToken ct = default)
+            => Task.FromResult(new CostQuotaResult(true, 1000, 0));
+
+        public Task<CostQuotaResult> ReserveCostQuotaAsync(string key, int reservedCost, ClientQuotaPolicy policy, CancellationToken ct = default)
+        {
+            ReservedCosts.Add(reservedCost);
+            return Task.FromResult(reserveResult ?? new CostQuotaResult(true, 1000, 0));
+        }
+
+        public Task<CostQuotaResult> SettleCostQuotaAsync(string key, int reservedCost, int actualCost, ClientQuotaPolicy policy, CancellationToken ct = default)
+        {
+            SettleCancellationTokens.Add(ct);
+            return Task.FromResult(onSettle is not null ? onSettle(ct) : new CostQuotaResult(true, 900, 0));
+        }
+
+        public Task<CallerBucketState?> GetBucketStateAsync(string key, ClientQuotaPolicy policy, CancellationToken ct = default)
+            => Task.FromResult<CallerBucketState?>(null);
+
+        public Task<CallerBucketState?> GetBucketStateAsync(string key, CancellationToken ct = default)
+            => Task.FromResult<CallerBucketState?>(null);
+    }
+
+    private sealed class StubClientTierResolver(ClientQuotaPolicy policy) : IClientTierResolver
+    {
+        public List<ClaimsPrincipal?> Calls { get; } = [];
+
+        public Task<ClientQuotaContext> ResolveAsync(ClaimsPrincipal? principal, string? apiKey, string? clientIp, CancellationToken ct = default)
+        {
+            Calls.Add(principal);
+            return Task.FromResult(new ClientQuotaContext("subject-418", policy.Tier, policy, "secret-scope"));
+        }
     }
 }

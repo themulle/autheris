@@ -116,6 +116,6 @@ public sealed class StubGatewayExecutionService : IGatewayExecutionService
             return OnCheckAccess(principal, metadata.Identifier, ct);
         }
 
-        return Task.FromResult<TableAccessDecision>(null!);
+        return Task.FromResult(TableAccessDecision.Denied(metadata.Identifier, "Not configured"));
     }
 }

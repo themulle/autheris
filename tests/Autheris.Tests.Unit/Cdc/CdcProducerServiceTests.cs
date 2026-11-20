@@ -41,17 +41,6 @@ public sealed class CdcProducerServiceTests
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
-    private sealed class RecordingPoller(Func<TableIdentifier, long, int>? onPoll = null) : IMssqlChangeTrackingPoller
-    {
-        public List<(TableIdentifier Table, long FencingToken)> Calls { get; } = [];
-
-        public Task<int> PollTableChangesAsync(TableIdentifier table, long fencingToken, CancellationToken ct = default)
-        {
-            Calls.Add((table, fencingToken));
-            return Task.FromResult(onPoll?.Invoke(table, fencingToken) ?? 0);
-        }
-    }
-
     private static IDistributedClusterStateProvider Cluster(Dictionary<string, long> tokens, List<(string Key, TimeSpan Ttl)>? acquired = null) =>
         new StubClusterStateProvider
         {
@@ -290,5 +279,16 @@ public sealed class CdcProducerServiceTests
 
         public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
             Messages.Add(formatter(state, exception));
+    }
+
+    private sealed class RecordingPoller(Func<TableIdentifier, long, int>? onPoll = null) : IMssqlChangeTrackingPoller
+    {
+        public List<(TableIdentifier Table, long FencingToken)> Calls { get; } = [];
+
+        public Task<int> PollTableChangesAsync(TableIdentifier table, long fencingToken, CancellationToken ct = default)
+        {
+            Calls.Add((table, fencingToken));
+            return Task.FromResult(onPoll?.Invoke(table, fencingToken) ?? 0);
+        }
     }
 }

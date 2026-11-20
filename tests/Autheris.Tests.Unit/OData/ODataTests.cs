@@ -1052,8 +1052,8 @@ public sealed class ODataTests
     public async Task SR_M_16_Metadata_NullDecision_TableOmitted()
     {
         var metadataRepo = new InMemoryTableMetadataRepository(CreateSampleTable());
-        var execService = new StubGatewayExecutionService();
-
+        var execService = new StubGatewayExecutionService
+        { OnCheckMetadataAccess = (_, _, _, _) => Task.FromResult<TableAccessDecision>(null!) };
         var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
         var xml = await handler.GetMetadataCsdlAsync(CreateAuthenticatedUser("sales"));
         xml.ShouldNotContain("sales_dbo_invoices");

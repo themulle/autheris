@@ -129,15 +129,6 @@ public sealed class GovernedTableCacheConsentMaskTests
         seenCalls[0].Groups.ShouldContain(new Sid(groupSid));
     }
 
-    private sealed class RecordingResolution(Func<Sid, IReadOnlySet<Sid>, TableAccessDecision> resolve) : IConsentResolutionService
-    {
-        public TableAccessDecision ResolveAccess(
-            Sid userSid, IReadOnlySet<Sid> subjectGroupSids, IReadOnlySet<string> userRoles, TableIdentifier table,
-            IReadOnlyList<Consent> activeConsents, DatabaseDialect dialect = DatabaseDialect.SqlServer,
-            IReadOnlySet<Sid>? allUserSids = null, IReadOnlySet<string>? callerScopes = null)
-            => resolve(userSid, subjectGroupSids);
-    }
-
     [Fact]
     public async Task UnknownMaskType_ValueIsNulled()
     {
@@ -216,5 +207,14 @@ public sealed class GovernedTableCacheConsentMaskTests
         var result = await service.ExecuteGovernedQueryAsync(TestTable, "SELECT EMAIL FROM customers", caller, columnMasks: masks);
 
         result.Rows[0][0].ShouldBe("***@***.***");
+    }
+
+    private sealed class RecordingResolution(Func<Sid, IReadOnlySet<Sid>, TableAccessDecision> resolve) : IConsentResolutionService
+    {
+        public TableAccessDecision ResolveAccess(
+            Sid userSid, IReadOnlySet<Sid> subjectGroupSids, IReadOnlySet<string> userRoles, TableIdentifier table,
+            IReadOnlyList<Consent> activeConsents, DatabaseDialect dialect = DatabaseDialect.SqlServer,
+            IReadOnlySet<Sid>? allUserSids = null, IReadOnlySet<string>? callerScopes = null)
+            => resolve(userSid, subjectGroupSids);
     }
 }

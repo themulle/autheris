@@ -23,26 +23,6 @@ public sealed class CatalogSchemaModelTests
         Assert.Equal(expected, result);
     }
 
-    private sealed class AllTablesRepo(params TableMetadata[] tables) : ITableMetadataRepository
-    {
-        public Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default)
-            => Task.FromResult(tables.FirstOrDefault(t => t.Identifier == table && t.Table.IsActive));
-
-        public Task<IReadOnlyList<TableMetadata>> GetAllTablesAsync(CancellationToken ct = default)
-            => Task.FromResult<IReadOnlyList<TableMetadata>>(tables);
-
-        public Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default)
-            => Task.FromResult(metadata);
-
-        public Task<TableKeyDefinitionChange?> ReplaceTableKeyDefinitionAsync(
-            TableIdentifier table,
-            IReadOnlyList<string> primaryKey,
-            IReadOnlyList<TableIndexDefinition> indexes,
-            IReadOnlyList<KeyColumnDirection>? primaryKeyDirections = null,
-            CancellationToken ct = default)
-            => throw new NotSupportedException();
-    }
-
     [Fact]
     public async Task BuildAsync_FiltersInactiveNonSqlAndInvalidDialects()
     {
@@ -909,5 +889,25 @@ public sealed class CatalogSchemaModelTests
             Columns = columns ?? [new TableColumn { ColumnName = "id", DataType = "int" }],
             ColumnMaskingRules = columnMaskingRules ?? new Dictionary<string, MaskingRule>()
         };
+    }
+
+    private sealed class AllTablesRepo(params TableMetadata[] tables) : ITableMetadataRepository
+    {
+        public Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default)
+            => Task.FromResult(tables.FirstOrDefault(t => t.Identifier == table && t.Table.IsActive));
+
+        public Task<IReadOnlyList<TableMetadata>> GetAllTablesAsync(CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<TableMetadata>>(tables);
+
+        public Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default)
+            => Task.FromResult(metadata);
+
+        public Task<TableKeyDefinitionChange?> ReplaceTableKeyDefinitionAsync(
+            TableIdentifier table,
+            IReadOnlyList<string> primaryKey,
+            IReadOnlyList<TableIndexDefinition> indexes,
+            IReadOnlyList<KeyColumnDirection>? primaryKeyDirections = null,
+            CancellationToken ct = default)
+            => throw new NotSupportedException();
     }
 }

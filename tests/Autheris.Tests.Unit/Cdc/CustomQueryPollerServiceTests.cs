@@ -48,12 +48,6 @@ public sealed class CustomQueryPollerServiceTests
         _builder = new CdcChangeEventBuilder(_streamStore, _crypto, _codec, _gatewayOpt);
     }
 
-    private sealed class StubDataSourceConnectionFactory(Func<string, DbConnection> create) : IDataSourceConnectionFactory
-    {
-        public Task<DbConnection> CreateConnectionAsync(string dataSourceName, CancellationToken ct = default)
-            => Task.FromResult(create(dataSourceName));
-    }
-
     private static CustomQueryPollerStreamOptions SamplePoller() => new()
     {
         StreamName = "crm_customers",
@@ -380,5 +374,11 @@ public sealed class CustomQueryPollerServiceTests
         public override string GetString(int ordinal) => GetValue(ordinal)?.ToString() ?? string.Empty;
         public override int GetValues(object[] values) => 0;
         public override bool NextResult() => false;
+    }
+
+    private sealed class StubDataSourceConnectionFactory(Func<string, DbConnection> create) : IDataSourceConnectionFactory
+    {
+        public Task<DbConnection> CreateConnectionAsync(string dataSourceName, CancellationToken ct = default)
+            => Task.FromResult(create(dataSourceName));
     }
 }

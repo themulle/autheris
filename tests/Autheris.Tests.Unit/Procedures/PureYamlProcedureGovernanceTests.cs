@@ -24,14 +24,6 @@ public class PureYamlProcedureGovernanceTests
 {
     private static readonly TenantId Tenant = new("tenant-pure-yaml");
 
-    private sealed class StubProcedureInvoker(RawProcedureResult result) : IProcedureInvoker
-    {
-        public Task<RawProcedureResult> ExecuteReadAsync(
-            ProcedureDefinition definition, IReadOnlyDictionary<string, object?> parameters,
-            ProcedureSecurityContext securityContext, int maxRows, CancellationToken ct = default)
-            => Task.FromResult(result);
-    }
-
     private static ClaimsPrincipal User(params string[] roles)
     {
         var claims = new List<Claim>
@@ -415,5 +407,13 @@ public class PureYamlProcedureGovernanceTests
         result.Rows.Count.ShouldBe(1);
         result.Rows[0]["order_id"].ShouldBe(100);
         result.Rows[0]["sensitive_note"].ShouldBe("***MASKED***"); // SEC-PROC152-09: an explicit Mask is never lifted
+    }
+
+    private sealed class StubProcedureInvoker(RawProcedureResult result) : IProcedureInvoker
+    {
+        public Task<RawProcedureResult> ExecuteReadAsync(
+            ProcedureDefinition definition, IReadOnlyDictionary<string, object?> parameters,
+            ProcedureSecurityContext securityContext, int maxRows, CancellationToken ct = default)
+            => Task.FromResult(result);
     }
 }

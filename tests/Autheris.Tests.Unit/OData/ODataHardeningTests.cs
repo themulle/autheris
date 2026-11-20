@@ -70,16 +70,6 @@ public sealed class ODataHardeningTests
         }
     }
 
-    private sealed class ProdWebEnv : Microsoft.AspNetCore.Hosting.IWebHostEnvironment
-    {
-        public string EnvironmentName { get; set; } = Microsoft.Extensions.Hosting.Environments.Production;
-        public string ApplicationName { get; set; } = "Autheris.Tests";
-        public string WebRootPath { get; set; } = string.Empty;
-        public Microsoft.Extensions.FileProviders.IFileProvider WebRootFileProvider { get; set; } = new Microsoft.Extensions.FileProviders.NullFileProvider();
-        public string ContentRootPath { get; set; } = string.Empty;
-        public Microsoft.Extensions.FileProviders.IFileProvider ContentRootFileProvider { get; set; } = new Microsoft.Extensions.FileProviders.NullFileProvider();
-    }
-
     private static (GatewayExecutionService Service, InMemoryAuditLogRepository AuditLog, CapturingExecutor Executor) CreateExecutionService()
     {
         var executor = new CapturingExecutor();
@@ -426,6 +416,16 @@ public sealed class ODataHardeningTests
 
         var result = ODataEndpoints.ValidateSystemQueryOptions(query);
         result.ShouldBeNull();
+    }
+
+    private sealed class ProdWebEnv : Microsoft.AspNetCore.Hosting.IWebHostEnvironment
+    {
+        public string EnvironmentName { get; set; } = Microsoft.Extensions.Hosting.Environments.Production;
+        public string ApplicationName { get; set; } = "Autheris.Tests";
+        public string WebRootPath { get; set; } = string.Empty;
+        public Microsoft.Extensions.FileProviders.IFileProvider WebRootFileProvider { get; set; } = new Microsoft.Extensions.FileProviders.NullFileProvider();
+        public string ContentRootPath { get; set; } = string.Empty;
+        public Microsoft.Extensions.FileProviders.IFileProvider ContentRootFileProvider { get; set; } = new Microsoft.Extensions.FileProviders.NullFileProvider();
     }
 }
 

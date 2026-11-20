@@ -120,36 +120,6 @@ public sealed class AsyncJobClusterAccessTests : IDisposable
         (await b.GetJobAsync("not-a-guid", _tenant, "alice")).ShouldBeNull();
     }
 
-    private sealed class DelegatingClusterStateProvider(IDistributedClusterStateProvider inner) : IDistributedClusterStateProvider
-    {
-        public Func<string, object?>? OnGet { get; init; }
-        public Action<string>? OnSet { get; init; }
-        public Action<string>? OnSubscribe { get; init; }
-
-        public ValueTask<T?> GetAsync<T>(string key, CancellationToken ct = default)
-            => OnGet is not null ? ValueTask.FromResult((T?)OnGet(key)) : inner.GetAsync<T>(key, ct);
-        public ValueTask SetAsync<T>(string key, T value, TimeSpan ttl, CancellationToken ct = default)
-        {
-            OnSet?.Invoke(key);
-            return inner.SetAsync(key, value, ttl, ct);
-        }
-        public ValueTask<bool> RemoveAsync(string key, CancellationToken ct = default) => inner.RemoveAsync(key, ct);
-        public ValueTask<long?> IncrementAsync(string key, long delta, TimeSpan ttl, CancellationToken ct = default) => inner.IncrementAsync(key, delta, ttl, ct);
-        public ValueTask<(BudgetConsumeOutcome Outcome, long ConsumedAfter)> TryConsumeBudgetAsync(string key, long cost, long limit, TimeSpan ttl, CancellationToken ct = default)
-            => inner.TryConsumeBudgetAsync(key, cost, limit, ttl, ct);
-        public ValueTask PublishEventAsync<T>(string channel, T payload, CancellationToken ct = default) => inner.PublishEventAsync(channel, payload, ct);
-        public IAsyncDisposable SubscribeAsync<T>(string channel, Func<T, ValueTask> handler, CancellationToken ct = default)
-        {
-            OnSubscribe?.Invoke(channel);
-            return inner.SubscribeAsync(channel, handler, ct);
-        }
-        public ValueTask<IAsyncDisposable?> TryAcquireLockAsync(string resourceKey, TimeSpan expiry, CancellationToken ct = default) => inner.TryAcquireLockAsync(resourceKey, expiry, ct);
-        public ValueTask<IDistributedLease?> TryAcquireLeaseAsync(string resourceKey, TimeSpan ttl, CancellationToken ct = default) => inner.TryAcquireLeaseAsync(resourceKey, ttl, ct);
-        public ValueTask<bool?> TryAcquireSlotAsync(string setKey, string member, int limit, TimeSpan ttl, CancellationToken ct = default) => inner.TryAcquireSlotAsync(setKey, member, limit, ttl, ct);
-        public ValueTask<bool> RenewSlotAsync(string setKey, string member, TimeSpan ttl, CancellationToken ct = default) => inner.RenewSlotAsync(setKey, member, ttl, ct);
-        public ValueTask ReleaseSlotAsync(string setKey, string member, CancellationToken ct = default) => inner.ReleaseSlotAsync(setKey, member, ct);
-    }
-
     private IDistributedClusterStateProvider ThrowingState(bool onGet = true, bool onSet = true) =>
         new DelegatingClusterStateProvider(_state)
         {
@@ -597,5 +567,35 @@ public sealed class AsyncJobClusterAccessTests : IDisposable
         var accepted = await a.TryTransitionAsync(job with { State = AsyncJobState.Completed, CompletedAt = _time.GetUtcNow() }, CancellationToken.None);
 
         accepted.ShouldBeFalse("the second read sees the tombstone");
+    }
+
+    private sealed class DelegatingClusterStateProvider(IDistributedClusterStateProvider inner) : IDistributedClusterStateProvider
+    {
+        public Func<string, object?>? OnGet { get; init; }
+        public Action<string>? OnSet { get; init; }
+        public Action<string>? OnSubscribe { get; init; }
+
+        public ValueTask<T?> GetAsync<T>(string key, CancellationToken ct = default)
+            => OnGet is not null ? ValueTask.FromResult((T?)OnGet(key)) : inner.GetAsync<T>(key, ct);
+        public ValueTask SetAsync<T>(string key, T value, TimeSpan ttl, CancellationToken ct = default)
+        {
+            OnSet?.Invoke(key);
+            return inner.SetAsync(key, value, ttl, ct);
+        }
+        public ValueTask<bool> RemoveAsync(string key, CancellationToken ct = default) => inner.RemoveAsync(key, ct);
+        public ValueTask<long?> IncrementAsync(string key, long delta, TimeSpan ttl, CancellationToken ct = default) => inner.IncrementAsync(key, delta, ttl, ct);
+        public ValueTask<(BudgetConsumeOutcome Outcome, long ConsumedAfter)> TryConsumeBudgetAsync(string key, long cost, long limit, TimeSpan ttl, CancellationToken ct = default)
+            => inner.TryConsumeBudgetAsync(key, cost, limit, ttl, ct);
+        public ValueTask PublishEventAsync<T>(string channel, T payload, CancellationToken ct = default) => inner.PublishEventAsync(channel, payload, ct);
+        public IAsyncDisposable SubscribeAsync<T>(string channel, Func<T, ValueTask> handler, CancellationToken ct = default)
+        {
+            OnSubscribe?.Invoke(channel);
+            return inner.SubscribeAsync(channel, handler, ct);
+        }
+        public ValueTask<IAsyncDisposable?> TryAcquireLockAsync(string resourceKey, TimeSpan expiry, CancellationToken ct = default) => inner.TryAcquireLockAsync(resourceKey, expiry, ct);
+        public ValueTask<IDistributedLease?> TryAcquireLeaseAsync(string resourceKey, TimeSpan ttl, CancellationToken ct = default) => inner.TryAcquireLeaseAsync(resourceKey, ttl, ct);
+        public ValueTask<bool?> TryAcquireSlotAsync(string setKey, string member, int limit, TimeSpan ttl, CancellationToken ct = default) => inner.TryAcquireSlotAsync(setKey, member, limit, ttl, ct);
+        public ValueTask<bool> RenewSlotAsync(string setKey, string member, TimeSpan ttl, CancellationToken ct = default) => inner.RenewSlotAsync(setKey, member, ttl, ct);
+        public ValueTask ReleaseSlotAsync(string setKey, string member, CancellationToken ct = default) => inner.ReleaseSlotAsync(setKey, member, ct);
     }
 }
