@@ -1,6 +1,7 @@
 namespace Autheris.Application.Security;
 
 using System;
+using System.Buffers;
 using System.IO;
 using System.Net.Http;
 using System.Text;
@@ -43,6 +44,52 @@ public static class BoundedHttpContentReader
             }
 
             return new UTF8Encoding(false).GetString(buffer.GetBuffer(), 0, (int)buffer.Length);
+        }
+    }
+
+    public static async Task<MemoryStream> ReadBoundedStreamAsync(
+        HttpResponseMessage response,
+        string clientName,
+        long maxBytes,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(response);
+
+        var declaredLength = response.Content.Headers.ContentLength;
+        if (declaredLength.HasValue && declaredLength.Value > maxBytes)
+        {
+            throw new InvalidOperationException(
+                $"{clientName} response size ({declaredLength.Value} bytes) exceeds maximum allowed limit of {maxBytes} bytes.");
+        }
+
+        await using var source = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+        var buffer = new MemoryStream();
+        var chunk = ArrayPool<byte>.Shared.Rent(81920);
+        try
+        {
+            int read;
+            while ((read = await source.ReadAsync(chunk.AsMemory(), ct).ConfigureAwait(false)) > 0)
+            {
+                if (buffer.Length + read > maxBytes)
+                {
+                    throw new InvalidOperationException(
+                        $"{clientName} response exceeds maximum allowed limit of {maxBytes} bytes.");
+                }
+
+                buffer.Write(chunk, 0, read);
+            }
+
+            buffer.Position = 0;
+            return buffer;
+        }
+        catch
+        {
+            await buffer.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(chunk);
         }
     }
 }

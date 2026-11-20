@@ -198,7 +198,7 @@ public sealed class IdentityPipelineSubjectRoleTests
         var middleware = new Autheris.Api.Middleware.ReadOnlyTokenMiddleware(_ => { nextCalled = true; return Task.CompletedTask; }, "/graphql", "/mcp");
         var context = new Microsoft.AspNetCore.Http.DefaultHttpContext { User = principal };
         context.Request.Method = "POST";
-        context.Request.Path = "/api/extensions/dbt/governance";
+        context.Request.Path = "/modules/dbt/governance";
 
         await middleware.InvokeAsync(context);
 

@@ -135,9 +135,9 @@ public sealed class ReadOnlyTokenAggregateTests
 
     [Trait("Category", "Security")]
     [Theory]
-    [InlineData("POST", "/api/extensions/dbt/semantic-manifest")]
-    [InlineData("POST", "/api/extensions/dbt/sync")]
-    [InlineData("POST", "/api/extensions/dbt/governance")]
+    [InlineData("POST", "/modules/dbt/semantic-manifest")]
+    [InlineData("POST", "/modules/dbt/sync")]
+    [InlineData("POST", "/modules/dbt/governance")]
     [InlineData("PUT", "/api/v1/analytics/metrics")]
     public async Task ReadOnlyToken_CannotReachAnImportOrAnyOtherWriteRoute_C9(string method, string path)
     {

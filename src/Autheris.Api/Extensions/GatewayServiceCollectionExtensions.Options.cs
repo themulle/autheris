@@ -7,7 +7,6 @@ using Autheris.Api.Extensions.DependencyInjection;
 using Autheris.Api.Hosting;
 using Autheris.Api.Middleware;
 using Autheris.Application.Common.Interfaces;
-using Autheris.Application.Catalog.OpenMetadata;
 using Autheris.Application.Policy;
 using Autheris.Application.Security;
 using Autheris.Application.Services;

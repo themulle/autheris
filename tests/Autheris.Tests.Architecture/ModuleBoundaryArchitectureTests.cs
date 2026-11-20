@@ -308,6 +308,8 @@ public sealed partial class ModuleBoundaryArchitectureTests
         var moduleAssemblies = new[]
         {
             typeof(Autheris.Modules.Lakehouse.LakehouseModule).Assembly,
+            typeof(Autheris.Modules.Dbt.DbtModule).Assembly,
+            typeof(Autheris.Modules.OpenMetadata.OpenMetadataModule).Assembly,
             typeof(Autheris.Modules.Events.EventsModule).Assembly,
             typeof(Autheris.Modules.Lineage.LineageModule).Assembly
         };
@@ -321,6 +323,108 @@ public sealed partial class ModuleBoundaryArchitectureTests
             .Where(t => typeof(IModuleRequestContext).IsAssignableFrom(t) && t.IsClass)
             .Select(t => t.Name)
             .ShouldBe([nameof(ModuleRequestContext)]);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Dbt_webhook_handler_referenced_only_by_core_webhook_endpoint()
+    {
+        var root = RepositoryScan.FindRepositoryRoot();
+        var allowedCore = new[]
+        {
+            "src/Autheris.Application/Catalog/Semantic/IDbtCloudWebhookHandler.cs",
+            "src/Autheris.Api/Endpoints/WebhookEndpoints.cs",
+            "src/Autheris.Api/Hosting/ModuleSecurityGuards.cs",
+        };
+
+        var violations = new List<string>();
+        foreach (var file in RepositoryScan.ProductionFiles.Where(f => f.Text.Contains("IDbtCloudWebhookHandler", StringComparison.Ordinal)))
+        {
+            if (!allowedCore.Contains(file.RelativePath, StringComparer.Ordinal))
+            {
+                violations.Add(file.RelativePath);
+            }
+        }
+
+        violations.ShouldBeEmpty("Only the core webhook route (and the module guard) may reference IDbtCloudWebhookHandler:\n" + string.Join("\n", violations));
+
+        var module = Path.Combine(root, "modules", "Autheris.Modules.Dbt");
+        var implementations = Directory.EnumerateFiles(module, "*.cs", SearchOption.AllDirectories)
+            .Where(f => !f.Contains("/obj/", StringComparison.Ordinal) && !f.Contains("/bin/", StringComparison.Ordinal))
+            .Where(f => File.ReadAllText(f).Contains("IDbtCloudWebhookHandler", StringComparison.Ordinal))
+            .Select(f => Path.GetFileName(f))
+            .OrderBy(n => n, StringComparer.Ordinal)
+            .ToList();
+        implementations.ShouldBe(["DbtServiceCollectionExtensions.cs", "DbtWebhookReceiver.cs"]);
+
+        var receiver = typeof(Autheris.Modules.Dbt.DbtModule).Assembly.GetType("Autheris.Modules.Dbt.DbtWebhookReceiver");
+        receiver.ShouldNotBeNull().IsPublic.ShouldBeFalse("The webhook handler implementation must be internal.");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void OpenMetadata_webhook_handler_referenced_only_by_core_webhook_endpoint()
+    {
+        var root = RepositoryScan.FindRepositoryRoot();
+        var allowedCore = new[]
+        {
+            "src/Autheris.Application/Catalog/OpenMetadata/IOpenMetadataWebhookHandler.cs",
+            "src/Autheris.Api/Endpoints/WebhookEndpoints.cs",
+            "src/Autheris.Api/Hosting/ModuleSecurityGuards.cs",
+        };
+
+        var violations = new List<string>();
+        foreach (var file in RepositoryScan.ProductionFiles.Where(f => f.Text.Contains("IOpenMetadataWebhookHandler", StringComparison.Ordinal)))
+        {
+            if (!allowedCore.Contains(file.RelativePath, StringComparer.Ordinal))
+            {
+                violations.Add(file.RelativePath);
+            }
+        }
+
+        violations.ShouldBeEmpty("Only the core webhook route (and the module guard) may reference IOpenMetadataWebhookHandler:\n" + string.Join("\n", violations));
+
+        var module = Path.Combine(root, "modules", "Autheris.Modules.OpenMetadata");
+        var implementations = Directory.EnumerateFiles(module, "*.cs", SearchOption.AllDirectories)
+            .Where(f => !f.Contains("/obj/", StringComparison.Ordinal) && !f.Contains("/bin/", StringComparison.Ordinal))
+            .Where(f => File.ReadAllText(f).Contains("IOpenMetadataWebhookHandler", StringComparison.Ordinal))
+            .Select(f => Path.GetFileName(f))
+            .OrderBy(n => n, StringComparer.Ordinal)
+            .ToList();
+        implementations.ShouldBe(["OpenMetadataModule.cs", "OpenMetadataSyncService.cs"]);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Signature_verifier_uses_fixed_time_compare()
+    {
+        var dbtVerifier = RepositoryScan.ProductionFiles
+            .Single(f => f.RelativePath == "src/Autheris.Application/Catalog/Semantic/DbtCloudWebhookSignature.cs");
+        dbtVerifier.Text.ShouldContain("CryptographicOperations.FixedTimeEquals");
+        dbtVerifier.Text.ShouldNotContain("SequenceEqual");
+        dbtVerifier.Text.ShouldNotContain("string.Equals");
+        dbtVerifier.Text.ShouldNotContain("== computed");
+        dbtVerifier.Text.ShouldNotContain("ILogger");
+
+        typeof(Autheris.Application.Catalog.Semantic.DbtCloudWebhookSignature).IsAbstract.ShouldBeTrue("The verifier must be a static class.");
+        typeof(Autheris.Application.Catalog.Semantic.DbtCloudWebhookSignature).IsSealed.ShouldBeTrue();
+
+        var omVerifier = RepositoryScan.ProductionFiles
+            .Single(f => f.RelativePath == "src/Autheris.Application/Catalog/OpenMetadata/OpenMetadataWebhookSignature.cs");
+        omVerifier.Text.ShouldContain("CryptographicOperations.FixedTimeEquals");
+        omVerifier.Text.ShouldNotContain("SequenceEqual");
+        omVerifier.Text.ShouldNotContain("string.Equals");
+        omVerifier.Text.ShouldNotContain("== computed");
+
+        typeof(Autheris.Application.Catalog.OpenMetadata.OpenMetadataWebhookSignature).IsAbstract.ShouldBeTrue("The verifier must be a static class.");
+        typeof(Autheris.Application.Catalog.OpenMetadata.OpenMetadataWebhookSignature).IsSealed.ShouldBeTrue();
+
+        var webhooks = RepositoryScan.ProductionFiles.Single(f => f.RelativePath == "src/Autheris.Api/Endpoints/WebhookEndpoints.cs");
+        webhooks.Text.ShouldNotContain("DBT_WEBHOOK_SECRET");
+        RepositoryScan.ProductionFiles
+            .Where(f => f.Text.Contains("DBT_WEBHOOK_SECRET", StringComparison.Ordinal))
+            .Select(f => f.RelativePath)
+            .ShouldBeEmpty("The environment secret fallback was removed; only Gateway:Dbt:WebhookSecret counts.");
     }
 
     [Fact]

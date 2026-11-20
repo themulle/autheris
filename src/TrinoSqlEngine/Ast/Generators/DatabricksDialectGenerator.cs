@@ -23,6 +23,7 @@ public sealed class DatabricksDialectGenerator : SqlDialectGeneratorBase
     protected override bool BindLiterals => true;
     protected override bool SupportsTryCast => true;
     protected override bool SupportsAggregateFilter => true;
+    protected override bool SupportsGroupByAll => true;
 
     // ---- identifiers and literals ----
 

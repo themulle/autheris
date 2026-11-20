@@ -43,10 +43,6 @@ src/Autheris.Api/Endpoints/DataContractEndpoints.cs|/api/v1/governance/contracts
 src/Autheris.Api/Endpoints/DatasetDataEndpoints.cs|/api/v1/data/{datasetId}
 src/Autheris.Api/Endpoints/DatasetDataEndpoints.cs|/api/v1/data/{domain}/{schema}/{table}
 src/Autheris.Api/Endpoints/DatasetDataEndpoints.cs|/api/v1/data/{domain}/{schema}/{table}/{id}
-src/Autheris.Api/Endpoints/DbtEndpoints.cs|/api/extensions/dbt/exposures
-src/Autheris.Api/Endpoints/DbtEndpoints.cs|/api/extensions/dbt/health
-src/Autheris.Api/Endpoints/DbtEndpoints.cs|/api/extensions/dbt/metrics
-src/Autheris.Api/Endpoints/DbtEndpoints.cs|/api/extensions/dbt/proposals
 src/Autheris.Api/Endpoints/DevEndpoints.cs|/info
 src/Autheris.Api/Endpoints/DevEndpoints.cs|/personas
 src/Autheris.Api/Endpoints/DocIngestionEndpoints.cs|/api/v1/docs/apps

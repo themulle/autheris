@@ -1,0 +1,12 @@
+GET /modules/dbt/exposures
+GET /modules/dbt/health
+GET /modules/dbt/metrics
+GET /modules/dbt/proposals
+POST /modules/dbt/governance
+POST /modules/dbt/health/reset
+POST /modules/dbt/proposals/{id:guid}/approve
+POST /modules/dbt/proposals/{id:guid}/reject
+POST /modules/dbt/run-results
+POST /modules/dbt/semantic-manifest
+POST /modules/dbt/sync
+POST /modules/dbt/validate-contract

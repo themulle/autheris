@@ -7147,9 +7147,9 @@
     {
       "Id": "identifier-007",
       "Group": "identifier",
-      "Sql": "SELECT a AS \"été\" FROM t",
+      "Sql": "SELECT a AS \"\u00e9t\u00e9\" FROM t",
       "Outcome": "ok",
-      "Expected": "SELECT [a] AS [été] FROM [t]",
+      "Expected": "SELECT [a] AS [\u00e9t\u00e9] FROM [t]",
       "Parameters": []
     },
     {
@@ -7433,6 +7433,14 @@
           "ValueType": "null"
         }
       ]
+    },
+    {
+      "Id": "fn-measure-001",
+      "Group": "functions",
+      "Sql": "SELECT a, MEASURE(b) FROM t GROUP BY a",
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     }
   ]
 }

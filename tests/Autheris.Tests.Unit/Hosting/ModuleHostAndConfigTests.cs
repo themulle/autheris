@@ -197,26 +197,28 @@ public sealed class ModuleConfigurationTests
     }
 
     [Fact]
-    public void Unmodularised_dbt_and_openmetadata_sections_stay_accepted()
+    public void Modularised_dbt_openmetadata_and_lineage_sections_fail_without_module()
     {
-        var config = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["Gateway:Dbt:Enabled"] = "true",
-                ["Gateway:OpenMetadata:Enabled"] = "true",
-            })
-            .Build();
-        var result = ModuleLoader.LoadModules(new ServiceCollection(), config, new FakeHostEnvironment(), NullLogger<ModuleLoader>.Instance);
+        var emptyResult = ModuleLoader.LoadModules(
+            new ServiceCollection(),
+            new ConfigurationBuilder().Build(),
+            new FakeHostEnvironment(),
+            NullLogger<ModuleLoader>.Instance);
 
-        Should.NotThrow(() =>
-            UnknownGatewayKeyGuard.ThrowIfUnknownKeys(config, result, GatewayConfigurationSchema.EnforcedModuleSections));
-
-        var lineage = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?> { ["Gateway:Lineage:Endpoint"] = "x" })
-            .Build();
-        Should.Throw<InvalidOperationException>(() =>
-            UnknownGatewayKeyGuard.ThrowIfUnknownKeys(lineage, result, GatewayConfigurationSchema.EnforcedModuleSections))
-            .Message.ShouldContain("module lineage is not installed");
+        foreach (var (key, value, moduleId) in new[]
+        {
+            ("Gateway:Dbt:Enabled", "true", "dbt"),
+            ("Gateway:OpenMetadata:Enabled", "true", "openmetadata"),
+            ("Gateway:Lineage:Endpoint", "x", "lineage"),
+        })
+        {
+            var config = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?> { [key] = value })
+                .Build();
+            Should.Throw<InvalidOperationException>(() =>
+                UnknownGatewayKeyGuard.ThrowIfUnknownKeys(config, emptyResult, GatewayConfigurationSchema.EnforcedModuleSections))
+                .Message.ShouldContain($"module {moduleId} is not installed");
+        }
     }
 
     [Fact]

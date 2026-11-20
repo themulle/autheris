@@ -156,7 +156,7 @@ internal sealed class RowPolicyCoercionGuard(ITableCatalog catalog) : ColumnScop
         string name = call.Name.Parts[0].Value.ToLowerInvariant();
         return name switch
         {
-            "coalesce" or "nullif" or "greatest" or "least" or "min" or "max" => Combine(call.Arguments.Select(Of)),
+            "coalesce" or "nullif" or "greatest" or "least" or "min" or "max" or "measure" => Combine(call.Arguments.Select(Of)),
             "lower" or "upper" or "trim" or "ltrim" or "rtrim" or "concat" or "substring" or "substr" => Fam.Text,
             "length" or "char_length" or "character_length" or "count" or "year" or "month" or "day" or "hour" or "minute" or "second"
                 or "quarter" or "week" or "day_of_week" or "day_of_month" or "day_of_year" => Fam.Numeric,

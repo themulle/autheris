@@ -72,7 +72,7 @@ public sealed partial class TableAccessPolicy
             ? query.AllUserSids
             : null;
         var resolvedScopes = scopes is { Count: > 0 } ? scopes : null;
-        var decision = activeConsents.Any(static c => c.IsPatternGrant)
+        var decision = (activeConsents.Any(static c => c.IsPatternGrant) || query.Metadata.Table.ObjectKind == DiscoveryObjectKind.MetricView)
             ? _resolutionService.ResolveAccess(
                 query.UserSid,
                 query.GroupSids,

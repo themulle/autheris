@@ -5,7 +5,6 @@ using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Events.Interfaces;
 using Autheris.Application.Catalog.Services;
 using Autheris.Application.Catalog.Semantic;
-using Autheris.Extensions.Dbt;
 using Autheris.Application.Governance;
 using Autheris.Application.Governance.Contracts;
 using Autheris.Application.Governance.Interfaces;
@@ -38,7 +37,6 @@ public static partial class GatewayGovernanceServiceExtensions
     {
         services.AddSingleton<IAccessProfileCache, AccessProfileCache>();
         services.AddSingleton<IDbtProposalRepository, InMemoryDbtProposalRepository>();
-        services.AddSingleton<IDbtTestTargetMap, DbtTestTargetMap>();
         services.TryAddSingleton<IDbtHealthCircuitBreaker, NoDbtHealthData>();
 
         services.AddSingleton<VirtualFilterAdministrationService>();

@@ -1,11 +1,10 @@
 namespace Autheris.Extensions;
 
 using System;
+using Autheris.Application.Catalog.OpenMetadata;
 using Autheris.Application.Security;
 using Autheris.Domain.Options;
 using Autheris.Extensions.DataCatalog;
-using Autheris.Extensions.Dbt;
-using Autheris.Extensions.OpenMetadata;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
@@ -30,9 +29,13 @@ public static class ExtensionsServiceCollectionExtensions
         // SEC HIGH-03 / EX-12: shared SSRF handler for all outbound HttpClients of the extensions.
         services.TryAddTransient<SsrfProtectionHandler>();
 
-        services.AddOpenMetadataIntegration(gatewayOptions);
+        if (gatewayOptions.OpenMetadata.Enabled)
+        {
+            services.TryAddScoped<OpenMetadataSyncJob>();
+            services.AddHostedService<OpenMetadataSyncBackgroundService>();
+        }
+
         services.AddDataCatalogIntegration(gatewayOptions);
-        services.AddDbtIntegration(gatewayOptions);
 
         return services;
     }

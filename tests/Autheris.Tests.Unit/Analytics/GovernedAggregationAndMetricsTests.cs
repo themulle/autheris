@@ -10,7 +10,7 @@ using System.Threading.Tasks;
 using Autheris.Application.Analytics;
 using Autheris.Application.DataSources.Services;
 using Autheris.Application.Catalog.Semantic;
-using Autheris.Extensions.Dbt;
+using Autheris.Modules.Dbt;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Mcp.Services;
 using Autheris.Application.Services;

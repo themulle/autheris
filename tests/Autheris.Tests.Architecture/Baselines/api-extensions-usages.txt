@@ -1,7 +1,6 @@
 # WP-SIMPL-25: Baseline of files in src/Autheris.Api referencing Autheris.Extensions.
 # Count may only decrease as WP-SIMPL-26..29 move modules out of core, reaching 0.
 src/Autheris.Api/Endpoints/CatalogEndpoints.cs
-src/Autheris.Api/Endpoints/DbtEndpoints.cs
 src/Autheris.Api/Extensions/DependencyInjection/GatewayAnalyticsServiceExtensions.cs
 src/Autheris.Api/Extensions/DependencyInjection/GatewayCatalogServiceExtensions.cs
 src/Autheris.Api/Extensions/DependencyInjection/GatewayDataSourceServiceExtensions.cs

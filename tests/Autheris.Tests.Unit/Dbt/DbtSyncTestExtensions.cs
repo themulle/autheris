@@ -1,5 +1,5 @@
 using Autheris.Application.Catalog.Semantic;
-using Autheris.Extensions.Dbt;
+using Autheris.Modules.Dbt;
 using Autheris.Domain.Common;
 using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Model;

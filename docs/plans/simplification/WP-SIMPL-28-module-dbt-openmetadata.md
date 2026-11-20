@@ -215,6 +215,160 @@ Verdict: **APPROVED WITH CONDITIONS** (verified on `ae42895c1`). Consistent with
 
 Phase 4 reminder: never put `WP-`, `SEC-` or `OD-` identifiers into comments in `src/Autheris.Api` or `src/Autheris.Application`.
 
+## Addendum 2026-11-19 (PR 4 rework)
+Verified on `cc18af61f` (PR 3c head). Open decisions take the recommended default ("default taken"). Breaking changes are allowed with a CHANGELOG entry. This addendum replaces §5 step 4, the OpenMetadata parts of step 2 and of "Decisions taken in this spec", the OpenMetadata rows of §6, and the PR 4 item of §9. D-50h (no module GraphQL extension point) and WP-29 decision 3 (GraphQL stays core) are binding, so `IAutherisGraphQLModule` is not used.
+
+### Verified inventory
+- Moving to `modules/Autheris.Modules.OpenMetadata` (namespace `Autheris.Modules.OpenMetadata`, about 2,330 lines):
+  - `src/Autheris.Extensions/OpenMetadata/`: 9 files, 1,930 lines (not 5/1,838). These are `IOpenMetadataClient`, `OpenMetadataClient`, `OpenMetadataSyncService` (4 partials), `OpenMetadataTableIdentity` (internal), and `OpenMetadataServiceCollectionExtensions`. The body of the last one becomes `OpenMetadataModule.ConfigureServices` and the file is deleted.
+  - `src/Autheris.Extensions/DataCatalog/OpenMetadataCatalogAdapter.cs` (133 lines). It is the only `IDataCatalogClient`, because `DataCatalogProviderType` has only `OpenMetadata = 1`.
+  - `Application/Catalog/OpenMetadata/OpenMetadataModels.cs` (301 lines), except `OpenMetadataSyncResult` (`:267`), which is the only model type core uses (`Mutation.Catalog.cs:128`).
+- Staying core:
+  - `IOpenMetadataSyncService` (trimmed, decision 3), `OpenMetadataSyncResult` (new file `OpenMetadataSyncResult.cs`), `OpenMetadataSyncPayload` (`GraphQL/Types/Mutation.cs:11`).
+  - `OpenMetadataOptions` / `GatewayOptions.OpenMetadata`, `GatewayCoreOptionsValidator.cs:115-123`, `ProductionStartupChecks.cs:137-141`, `TenantCollisionGuard.cs:36-37`, `EgressIntegrations.OpenMetadata`, `LegacySwitchGuard.cs:25-27`, `KnownModuleSections` (`GatewayConfigurationSchema.cs:111`).
+  - `DataCatalogSyncService`, `DataCatalogSyncJob` and `DataCatalogSyncBackgroundService` (provider-neutral, `Extensions/DataCatalog`), `IDataCatalogClient`.
+- Moving within core: `OpenMetadataSyncBackgroundService` and `OpenMetadataSyncJob` (`ClusterScheduledService<T>` over the core port only) go to `src/Autheris.Application/Catalog/OpenMetadata/OpenMetadataSyncScheduling.cs`. Default taken: no module `IHostedService`, because `IHostedService` is in `ModuleSecurityGuards.ProtectedServiceTypes` (`:54`) on this chain and the SEC-29-03 allowance exists only on the WP-29 branch.
+- Wiring changes:
+  - `ExtensionsServiceCollectionExtensions.cs:34`: replace `AddOpenMetadataIntegration` with the core scheduling registration (only when `OpenMetadata.Enabled`).
+  - `DataCatalogServiceCollectionExtensions.cs:28-31`: drop the client and adapter lines.
+  - Remove the unused `using Autheris.Application.Catalog.OpenMetadata` lines in `GatewayServiceCollectionExtensions{,.GraphQL,.Options}.cs:10`.
+
+### Decisions
+1. **Module shape.** `OpenMetadataModule`: `Id = "openmetadata"`, `ConfigurationSections = ["Gateway:OpenMetadata"]`. References: Abstractions, Domain and Application only. The csproj files are copies of the dbt ones.
+   - `ConfigureServices` registers: `AddHttpClient<IOpenMetadataClient, OpenMetadataClient>().AddSecureOutboundHandlers(EgressIntegrations.OpenMetadata)`; `TryAddTransient<SsrfProtectionHandler>`; `TryAddScoped<IOpenMetadataSyncService, OpenMetadataSyncService>`; `TryAddScoped<IOpenMetadataWebhookHandler, OpenMetadataSyncService>`; `TryAddTransient<IDataCatalogClient, OpenMetadataCatalogAdapter>`. Each registration names its implementation type, so the ownership guard can see it.
+   - The module maps no routes.
+2. **Webhook receiver: core anonymous route with signature check and a module port, as for dbt (default taken).** The original "authenticated module route plus signature" cannot be configured in OpenMetadata.
+   - The OpenMetadata webhook `authType` (spec `entity/events/webhook.json`, fetched 2026-11-19) is `oneOf` none, `bearer` or `oauth2`. Despite its name, `bearer` is the HMAC `secretKey` sent in `X-OM-Signature`. `oauth2` (client credentials) sends a token but no HMAC. So one subscription cannot send both a token and a signature.
+   - Static custom `headers` would need a non-expiring JWT. That is weaker than the per-payload HMAC, so it is rejected.
+   - The route `POST /api/webhooks/openmetadata` keeps its path. It keeps `AllowAnonymous`, the 2 MB limit and `WithAudit(Full, AuditConfigChanged)`, and its `ingress-exemptions.txt:137` row is unchanged.
+   - `HandleOpenMetadataWebhookAsync(HttpContext, CancellationToken)` runs these steps in order:
+     1. `IServiceProviderIsService` says `IOpenMetadataWebhookHandler` is not registered: return 404 before reading any header, the body or an option.
+     2. Read `X-OpenMetadata-Signature`, then `X-OM-Signature`. If both are missing, return the fixed 401 body.
+     3. Bounded 2 MB read.
+     4. `OpenMetadataWebhookSignature.Verify(payload, header, options.OpenMetadata.WebhookSecret, bypass)`. On failure, return the same fixed 401 body. When the bypass is used, log the existing warning.
+     5. Resolve the handler, then call `HandleVerifiedAsync`. If it returns false, return 400 "Failed to process webhook." If it returns true, return 200 `{status="Processed"}`.
+   - Breaking: a missing or invalid signature now returns 401 instead of 400.
+   - New core files in `Application/Catalog/OpenMetadata/`:
+     - `IOpenMetadataWebhookHandler` with `Task<bool> HandleVerifiedAsync(string payload, CancellationToken ct)`.
+     - `OpenMetadataWebhookSignature`: a static class holding `OpenMetadataSyncService.VerifyWebhookSignature` (`:854-874`), moved unchanged. It keeps the optional `sha256=` prefix and `FixedTimeEquals`, and adds an early false for a blank secret.
+   - In the module, `OpenMetadataSyncService` loses `HandleWebhookEventAsync`, the signature block (`:607-631`) and `VerifyWebhookSignature`. It keeps JSON parsing, mandatory `Id`/`Timestamp`, the 5-minute skew window, `IsWebhookTimestampToleranceIgnored` and the event-id replay cache.
+3. **GraphQL `SyncOpenMetadataAsync`: keep it in core behind the core port (default taken; deleting it is rejected).** Deleting it would leave no on-demand sync, because the module has no REST route, and D-50h forbids a module GraphQL extension point.
+   - `IOpenMetadataSyncService` keeps only `SyncPermissionsAsync`.
+   - The mutation takes `[Service] IServiceProvider` instead of the service. The order of checks is: authentication, then role, then availability, then tenant, then sync. When `GetService<IOpenMetadataSyncService>()` is null, it returns the GraphQL error code `UNAVAILABLE` ("OpenMetadata is not available."). Error codes and messages are otherwise unchanged.
+   - `SyncCatalogAsync` (`Mutation.Catalog.cs:~150`) gets the same check for `IDataCatalogClient`.
+4. **Fail-closed configuration and ownership.**
+   - `LegacySwitchGuard.cs:25-27` stays in core unchanged.
+   - `Gateway:OpenMetadata` without the module fails startup, through the same path as `Dbt_config_without_module_fails_fast` on this chain.
+   - New host check after the module loop: `Gateway:Catalog:Enabled=true` with no `IDataCatalogClient` registered throws `ModuleLoadException("host", ...)` and names module `openmetadata`.
+   - `ModuleSecurityGuards.VerifyDbtCloudWebhookHandler` and `VerifyFinalDbtCloudWebhookHandler` become a table-driven `VerifyModuleOwnedPorts` / `VerifyFinalModuleOwnedPorts`. The table maps `{IDbtCloudWebhookHandler: dbt, IOpenMetadataWebhookHandler, IOpenMetadataSyncService, IDataCatalogClient: openmetadata}` to the owning module id and assembly. For each port the guard requires: at most one descriptor, an implementation type in the owning assembly, and the owning module loaded. Existing dbt test names stay green.
+   - `EnforcedModuleSections` (branch `feat/simpl-29-2a-config-guard`, `GatewayConfigurationSchema.cs:126`) must gain `[GatewaySections.Dbt] = "dbt"` and `[GatewaySections.OpenMetadata] = "openmetadata"` on the rebase that combines 2a with 3b and 4b. Its XML doc must be updated in the same change. Whichever of the two branches lands second makes this change.
+
+### PR slicing (replaces §9 item 4; each PR is green on its own)
+- **PR 4a: core seams** (about 450 lines, no move).
+  - Content: decision 2 (route, signature class, handler port), the trimmed port and the `OpenMetadataSyncResult` file, decision 3 (both mutations), the scheduling move, and the guard table without the OpenMetadata rows. In 4a, `Extensions` still registers the implementations.
+  - Filter: `FullyQualifiedName~OpenMetadataWebhook|FullyQualifiedName~SyncOpenMetadata|FullyQualifiedName~OpenMetadataSync|FullyQualifiedName~ModuleLoaderSecurityTests|FullyQualifiedName~BackgroundServiceLockTests`.
+  - Adapt: every `HandleWebhookEventAsync(payload, sig)` caller in `Extensions.Tests/OpenMetadataWebhook*Tests`, `OpenMetadataSyncServiceTests`, `Unit/Api/WebhookPreAuthBufferingTests` (missing-signature case: status 400 becomes 401) and `Unit/Security/Batch5SecurityTestsB`.
+  - Integration: compile check only. `OpenMetadataIntegrationTests`: missing signature now expects 401.
+- **PR 4b: move** (`size-exception: move-only`). Decision 1, the OpenMetadata rows of the guard, decision 4, tests, baselines, docs and CHANGELOG.
+  - `git mv` `Extensions.Tests/OpenMetadata{Client,ReconcileAndAlationHardening,SyncService,SyncTenantFilter,WebhookCollisionExt16,WebhookRetryExt12,Webhook}Tests.cs` to `modules/Autheris.Modules.OpenMetadata.Tests`, with names unchanged.
+  - Mixed classes stay with a module ProjectReference: `CatalogSyncRequiredFilterColumnsTests`, `LakehouseAndCatalogExtensionsSecurityTests`, `Unit/Catalog/{OpenMetadataKeyConstraint,CatalogWriterEventCount,IngestionCallersBatchUpsert}Tests`, `ClassificationIngestionSyncTests`, `Batch5SecurityTestsB`.
+  - Baselines:
+    - `datetime-now-counts.txt:98`, `test-file-line-ceilings.txt:4` and `security-tests-base.txt` (`:62-94` and the others): rename only.
+    - `project-edges.txt`: add `Autheris.Modules.OpenMetadata->{Abstractions,Application,Domain}` plus the test edges.
+    - `IndividualGrantPolicyArchitectureTests.cs:22`: update the path key.
+    - `.github/CODEOWNERS:50`: update the path.
+    - Regenerate `composition-{dev,production-like}.txt`, and rerun the coverage map.
+  - Integration: `OpenMetadataIntegrationTests` enables the module through a new `OpenMetadataWorkspaceTestSettings` (copied from `DbtWorkspaceTestSettings`). Check the namespaces in `IntegrationGapAEndpointMetadataTests` and `Governance/CatalogIngestionUnavailableTableTests`. Add the new classes to `ci-shard-weights.json`.
+  - Docs (current behavior only): OpenMetadata guide, `docs/configuration-guide.md`, `deploy/podman-compose.openmetadata.yaml` (`Enabled__N=openmetadata`).
+  - CHANGELOG: module `openmetadata` must be enabled for the OpenMetadata sync and the data catalog sync; the webhook returns 401 for a missing or invalid signature; both mutations return `UNAVAILABLE` without the module.
+- **PR 4c: protected files** (owner review, after 4b).
+  - `docker-publish.yml` publishes and signs `modules/openmetadata` (same pattern as `:128-130,468-470`).
+  - `module-e2e.sh:106-107` adds `Enabled__2=openmetadata` and asserts that an unsigned `POST /api/webhooks/openmetadata` returns 401.
+  - CODEOWNERS covers the module folders.
+
+### Mandatory tests (`[Trait("Category","Security")]` unless marked "plain")
+- 4a, Unit, `tests/Autheris.Tests.Unit/Api/OpenMetadataWebhookEndpointTests.cs`:
+  - `Handler_absent_returns_404_before_header_or_body_read`
+  - `Missing_and_invalid_signature_return_identical_401_body`
+  - `Handler_not_resolved_before_signature_verified`
+  - `Body_over_2_mb_returns_413`
+  - `Blank_secret_rejects_all_webhooks`
+  - `Signature_bypass_flag_honored_only_when_set`
+  - `Secret_and_signature_never_logged`
+  - `Processing_failure_returns_400` (plain)
+- 4a, Unit, `Unit/Catalog/OpenMetadataWebhookSignatureTests.cs`:
+  - `Valid_hmac_with_and_without_sha256_prefix_accepted`
+  - `Non_hex_or_wrong_length_signature_rejected`
+  - `Literal_bypassed_signature_is_rejected_when_bypass_off`: moved here from `OpenMetadataSyncServiceTests`; record the rename in `security-tests-base.txt`.
+- 4a, `SyncOpenMetadataSanitisationTests`:
+  - `Sync_mutation_returns_unavailable_without_module` (plain)
+  - `Availability_checked_after_role_check`
+  - `SyncCatalog_returns_unavailable_without_catalog_client` (plain)
+- 4a, Architecture, `ModuleBoundaryArchitectureTests`:
+  - `.OpenMetadata_webhook_handler_referenced_only_by_core_webhook_endpoint`
+  - `.Signature_verifier_uses_fixed_time_compare`, extended to `OpenMetadataWebhookSignature`
+- 4b, Module, `modules/Autheris.Modules.OpenMetadata.Tests/OpenMetadataModuleContractTests.cs`:
+  - `OpenMetadata_module_maps_no_routes`
+  - `OpenMetadata_module_registers_ports_with_implementation_types`
+  - `OpenMetadata_http_client_uses_secure_outbound_handlers`
+  - `OpenMetadata_module_registers_no_hosted_service`
+- 4b, Unit, `ModuleLoaderSecurityTests`:
+  - `.OpenMetadata_port_from_other_module_fails_startup`
+  - `.Second_openmetadata_webhook_handler_fails_startup`
+  - `.Catalog_enabled_without_openmetadata_module_fails_startup`
+- 4b, IT, `tests/Autheris.Tests.Integration/Modules/OpenMetadataModuleAbsentTests.cs`:
+  - `OpenMetadata_webhook_returns_404_without_module_before_body_read`
+  - `OpenMetadata_config_without_module_fails_fast`
+  - `Legacy_insecure_switches_fail_fast_without_module`
+  - `Sync_mutation_returns_unavailable_without_module` (plain)
+  - `GraphQL_queries_work_without_openmetadata_module` (plain)
+- 4b, IT, `Modules/OpenMetadataModuleSecurityTests.cs`:
+  - `Unsigned_webhook_returns_401_when_enabled`
+  - `Signed_webhook_reaches_handler_when_enabled`
+  - `Replayed_event_is_rejected_when_enabled`
+- 4b: `ModuleParityTests.OpenMetadata_security_tests_migrated`.
+- Removed from §6: `Webhook_receiver_requires_authenticated_caller` (replaced by decision 2) and `Sync_mutation_absent_without_module` (renamed above).
+
+### Questions for Phase 3
+1. Is changing a missing or invalid signature from 400 to 401 acceptable? It aligns with SEC-28-05.
+2. Is HMAC-only as the long-term auth for this anonymous route acceptable, given that OpenMetadata's `oauth2` mode drops the HMAC?
+3. SEC-28-09 forbade outbound HTTP for dbt. Here the module registers its own `HttpClient` with `AddSecureOutboundHandlers`. Is the module contract test enough until the SEC-29-06 host-side check lands, or must 4b wait for it?
+4. Is the order authentication, then role, then availability right for both mutations, so that a non-admin cannot probe whether the module is loaded? Is `UNAVAILABLE` the right code?
+5. Scheduling stays in core instead of adding a module `IHostedService` under SEC-29-03. Is that acceptable?
+6. Should `Gateway:Catalog:Enabled` without the module fail startup (proposed), or leave the catalog sync idle?
+7. Should `IOpenMetadataSyncService` and `IDataCatalogClient` be owner-guarded like the webhook handler (proposed)?
+
+## Security conditions (Phase 3, 2026-11-19, PR 4 rework)
+Verdict: **APPROVED WITH CONDITIONS** (verified on `a7a161f36`). Consistent with SEC-28-01..10, SEC-29-01..09, SEC-SIMPL-02/03/43/48/49 and the #637 webhook protections. Drift: the second mutation is `SyncDataCatalogAsync` in `src/Autheris.GraphQL/Types/Mutation.Catalog.cs:152` (not `SyncCatalogAsync`), and it takes `[Service] IDataCatalogSyncService`, whose constructor requires `IDataCatalogClient`.
+
+**Answers.** (1) Yes: 401 for missing or invalid signatures (SEC-28-05), 404 when the module is absent (SEC-SIMPL-49). (2) Yes. A per-payload HMAC bound to the 5-minute window and the event-id cache is stronger than an `oauth2` token, which gives no body integrity. Subscriptions with `none` or `oauth2` get 401. Adding a token-only path later needs a new Phase 3 review. The OpenMetadata guide must state `authType: bearer` with `secretKey`. (3) The contract test alone is not enough (WP-29 answer 4). 4b does not wait for WP-29: 4a carries the host check (SEC-28-47). (4) Use authentication, then role, then tenant, then availability (SEC-28-45). Only administrators can learn whether the module is present, and they already can from config and health. `UNAVAILABLE` is right because it is already on the `ErrorSanitizingFilter.cs:43` allowlist. (5) Yes, this is preferred. `IHostedService` stays protected without the SEC-29-03 allowance. (6) Yes, fail startup. An idle catalog sync would silently leave tag-driven masking stale. (7) Yes, guard all three ports: the sync writes consents and masking rules, and the catalog client feeds classifications.
+
+- **SEC-28-41 (absent module).** Without the `openmetadata` module, the webhook returns 404 before it reads any header, the body or `GatewayOptions`. `Gateway:OpenMetadata` (any key) and `Gateway:Catalog:Enabled=true` fail startup and name the module, and the `LegacySwitchGuard` OpenMetadata rows still fail first. Both mutations return `UNAVAILABLE`. Core keeps no fallback registration of `IOpenMetadataWebhookHandler`, `IOpenMetadataSyncService` or `IDataCatalogClient`.
+- **SEC-28-42 (webhook order, #637 kept).** Exactly the five addendum steps, in order. Each signature header is tested separately with `IsNullOrWhiteSpace`, so an empty `X-OpenMetadata-Signature` falls through to `X-OM-Signature`. A header is required even when the bypass is set; the bypass skips only `Verify`. The body is read only after a header is present, with a 2 MB cap and the 413 path unchanged. Missing signature, invalid signature and blank secret return one identical fixed 401 body. No JSON parse and no handler resolution happen before `Verify` returns true, and a 400 is possible only after verification. The route keeps `AllowAnonymous`, the 2 MB limit, `WithAudit(Full, AuditConfigChanged)`, the pre-auth IP limiter and its `ingress-exemptions.txt` row, with no new exemption.
+- **SEC-28-43 (signature and confidentiality).** `OpenMetadataWebhookSignature` is a static core class, not registered in DI, and uses `CryptographicOperations.FixedTimeEquals`. It returns false for a blank secret, a non-hex value, a wrong length or an exception, and never throws. `WebhookSecret`, `AuthToken`, signature header values and the payload never appear in logs, audit, responses, ProblemDetails or exception messages (SEC-28-07).
+- **SEC-28-44 (replay, module side).** The handler keeps unchanged: mandatory `Id`/`Timestamp`, the 5-minute skew window, `IsWebhookTimestampToleranceIgnored` semantics, the static cache bounded at 10,000 entries, `om:dedup:{id}` with its 15-minute TTL, and the EXT-12 release when processing fails. New in 4a, for consistency with SEC-28-06: when a cluster-state provider is configured but throws, the webhook is rejected and the in-memory entry is released, with a CHANGELOG entry. Today it falls back to in-memory dedup, which is a cross-node replay gap.
+- **SEC-28-45 (mutations).** The order is authentication, then role, then tenant validation (including the existing DENY audit of `SyncDataCatalogAsync`), then availability, then the write-ahead audit, then the sync. Neither mutation takes `IOpenMetadataSyncService`, `IDataCatalogSyncService` or `IDataCatalogClient` as a `[Service]` parameter. Availability is decided with `IServiceProviderIsService`, and services are resolved only after that check. `UNAVAILABLE` carries a fixed message and no exception detail.
+- **SEC-28-46 (port ownership).** The table-driven guard maps `IDbtCloudWebhookHandler` to `dbt`, and `IOpenMetadataWebhookHandler`, `IOpenMetadataSyncService` and `IDataCatalogClient` to `openmetadata`. For each port: at most one descriptor; a non-null `ImplementationType` declared in the owning assembly (factory or instance descriptors fail); the owning module loaded. Any add, remove or replace by another module fails startup and names that module. A final whole-collection check runs after the module loop. The dbt test names stay green.
+- **SEC-28-47 (egress, host-enforced).** 4a ports `ModuleHttpClientGuard` from `refactor/simpl-29-pr3-events-module` (`2113be999`) into both `ModuleLoader` loops, with the same semantics and test name. Of WP-29 PR 3 and PR 4a, whichever lands second keeps a single copy. The module's only client is the typed `IOpenMetadataClient` with `AddSecureOutboundHandlers(EgressIntegrations.OpenMetadata)`. It registers no other client name, no `ConfigureHttpClientDefaults`, no later handler or primary-handler override and no `IHttpMessageHandlerBuilderFilter`. It drops `TryAddTransient<SsrfProtectionHandler>`, because the builder creates that handler. The integration name, allowlist, `TrustedIntegrations` entry, no-redirect setting and untrusted-certificate path stay unchanged.
+- **SEC-28-48 (no data source; core scheduling).** The module references only Abstractions, Domain and Application, and reaches core repositories only through their ports. It has no `DbConnection`, `ISqlConnectionFactory`, Infrastructure reference, `IHostedService` or `BackgroundService`, and `Modules_open_no_data_source_connections` covers its assembly. Core scheduling is registered only when `OpenMetadata.Enabled`. It keeps the cluster lock and the system actor, resolves the port per run in a new scope, and keeps `restrictToTenant: null` as today.
+- **SEC-28-49 (move hygiene).** 4b is move-only. Behavior stays identical for tenant mapping (`ServiceDatabaseToTenantMap`, `DefaultTenantId`, `TenantCollisionGuard`), the `RoleToGatewayRoleMap` allowlist, `AutoCreateConsents` DANGER reporting (which stays core), the sync actor `system:openmetadata-sync`, the consent marker and `SyncLock`. SEC-28-08 applies: no tenant or principal is taken from the request, and none from the payload beyond today's mapping. SEC-28-10 applies to every moved test. `EnforcedModuleSections` follows decision 4. 4c signs `modules/openmetadata` without `AllowUnsigned`.
+
+**Mandatory tests** (`[Trait("Category","Security")]`; Unit, Architecture and Module tests run locally; IT runs only on GitHub Actions).
+- **PR 4a, Unit.**
+  - `OpenMetadataWebhookEndpointTests`: the addendum cases, plus `Empty_primary_header_falls_back_to_om_signature_header`, `Missing_header_returns_401_even_when_bypass_set`, `Body_not_read_before_signature_header_present` and `Route_keeps_anonymous_2mb_limit_and_full_audit`.
+  - `OpenMetadataWebhookSignatureTests`: the addendum cases, plus `Blank_secret_returns_false` and `Exception_returns_false_without_secret_in_log`.
+  - `OpenMetadataWebhookTests.Cluster_dedup_unavailable_rejects_webhook`. The existing `Replayed_event_is_rejected` and `Buffer_is_bounded` keep their names.
+  - `SyncOpenMetadataSanitisationTests`: `Availability_checked_after_role_and_tenant_check` (replaces `Availability_checked_after_role_check`), `Non_admin_without_module_gets_forbidden_not_unavailable`, `SyncDataCatalog_without_client_does_not_fail_before_authentication` and `Unavailable_error_has_fixed_message`.
+  - `ModuleLoaderSecurityTests.Module_httpclient_without_ssrf_handler_fails_startup` (ported), and the addendum's two Architecture tests. IT: compile check only.
+- **PR 4b.**
+  - Module: the addendum contract tests, plus `OpenMetadata_module_registers_only_its_typed_http_client` (no other name, no `SsrfProtectionHandler`, no handler filter).
+  - Unit, `ModuleLoaderSecurityTests`: the addendum cases, plus `.OpenMetadata_port_with_factory_registration_fails_startup`, `.OpenMetadata_port_without_loaded_module_fails_startup` and `.OpenMetadata_module_client_without_ssrf_handler_fails_startup`.
+  - Architecture: `Modules_open_no_data_source_connections` also covers `Autheris.Modules.OpenMetadata`. Also `ModuleParityTests.OpenMetadata_security_tests_migrated`.
+  - IT: `OpenMetadataModuleAbsentTests` (the addendum cases, plus `Catalog_enabled_without_module_fails_fast` and `Non_admin_sync_without_module_returns_forbidden`) and `OpenMetadataModuleSecurityTests` (the addendum cases, plus `Invalid_signature_returns_identical_401_body_when_enabled` and `Body_over_2_mb_returns_413_when_enabled`).
+- **PR 4c (GitHub Actions).** `module-e2e.sh` asserts that an unsigned webhook returns 401. `ReleaseWorkflowTests.Image_build_rejects_unsigned_module` is extended to `openmetadata`, and `CodeownersTests` covers the module folders.
+
+Phase 4 reminder: never put `WP-`, `SEC-` or `OD-` identifiers into comments in `src/Autheris.Api` or `src/Autheris.Application`.
+
 ## Changelog
 - 2026-11-18: PR 1 (#488 webhook items) was already on `main` (#637: signature header checked before body read, unauthenticated bodies capped at 2 MB, OpenMetadata event-id replay cache, dbt skew and event-id dedup). Re-verified; `OpenMetadataWebhookTests.Replayed_event_is_rejected` and `.Buffer_is_bounded` exist and are green; no code change.
 - 2026-11-18: PR 2 done: `ISemanticMetricImport` (core, implemented by the semantic catalogs, consumed by `DbtSemanticManifestIngestionService`); `IDbtHealthCircuitBreaker` core default `NoDbtHealthData`, replaced by `AddDbtIntegration`; `CoreMetricModelArchitectureTests` added. `AnalyticsEndpoints` and `McpSemanticTools` already referenced only `Autheris.Application.Catalog.Semantic`.
@@ -222,3 +376,7 @@ Phase 4 reminder: never put `WP-`, `SEC-` or `OD-` identifiers into comments in 
 - 2026-11-19: PR 3 rework addendum (Phase 2): shared module request helpers (PR 3a), core anonymous HMAC dbt Cloud receiver with module handler, routes under `/modules/dbt`, PR 3b/3c slicing.
 - 2026-11-19: Phase 3 security review of the PR 3 rework: APPROVED WITH CONDITIONS (SEC-28-01..10, mandatory tests per PR 3a/3b/3c).
 - 2026-11-19: PR 3a done (local): `IModuleRequestContext`/`ModuleErrorCodes`/`ModuleEndpointConventions` in Abstractions, host `ModuleRequestContext` (public sealed forwarder, registered in `AddGatewayModules`, protected), `VerifyModuleEndpoints` rejects delegated audit and body limits above 100 MiB, Lakehouse migrated. Drift: `ModuleSecurityGuardsTests`/`ModuleEndpointRegistrarTests` do not exist; the new tests live in `ModuleLoaderSecurityTests` and `ModuleEndpointSecurityTests`.
+- 2026-11-19: PR 3b (dbt move) implemented. Deviations from the addendum, all behavior-neutral: (1) `IModuleRequestContext` has no `HasRole`; the module uses the public `GatewayRoleEvaluator` (the same evaluator `GatewayPolicies.HasRole` wraps), so the surface is unchanged. (2) The core webhook decides module presence with `IServiceProviderIsService` and resolves `IDbtCloudWebhookHandler` only after the signature verified (`Handler_not_resolved_before_signature_verified`). (3) `ModuleSecurityGuards.VerifyDbtCloudWebhookHandler` runs after every module `ConfigureServices` (SEC-28-03). (4) `SemanticManifestValidator.CreateDefault()` replaces the module-side `new SemanticManifestValidator(PolicyParserSetup.CreateParser(), ...)` so the module needs no `TrinoSqlEngine` reference (SEC-28-09 edge set unchanged). (5) `DbtSemanticManifestEndpointTests` (uses internal core `AnalyticsEndpoints`) and `SemanticImportGovernanceHelper`/`SemanticCatalogTestKit` (shared with core tests) stay in Unit; the module tests link the helpers. `Unit/Catalog/Dbt*Tests` stay in Unit with a module reference. (6) `Autheris.Application` gains `InternalsVisibleTo Autheris.Modules.Dbt.Tests` for the linked `CatalogVisibilityTestFactory`. (7) CODEOWNERS now lives in 3b (owner-approved, module folders only) and `Every_src_and_module_folder_has_an_owner` is green.
+- 2026-11-19: PR 3c (CI, owner review): `module-e2e.sh` has no "webhook returns 404 without dbt" assertion because it runs a single enabled pass; `DbtModuleAbsentTests` covers it instead. CODEOWNERS relies on its directory rules for `DbtCloudWebhookSignature.cs` and `WebhookEndpoints.cs` (no separate file entries).
+- 2026-11-19: PR 4 rework addendum (Phase 2). The OpenMetadata webhook stays a core anonymous HMAC route that hands off to a module port. `SyncOpenMetadataAsync` stays in core behind the port and returns `UNAVAILABLE` when the module is absent (D-50h). Scheduling stays in core. PR 4a/4b/4c slicing.
+- 2026-11-19: Phase 3 security review of the PR 4 rework: APPROVED WITH CONDITIONS (SEC-28-41..49, mandatory tests per PR 4a/4b/4c).

@@ -9,7 +9,7 @@ using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
-using Autheris.Extensions.Dbt;
+using Autheris.Modules.Dbt;
 using Autheris.Infrastructure.Persistence;
 using Autheris.Tests.Governance;
 using Microsoft.Extensions.Logging.Abstractions;

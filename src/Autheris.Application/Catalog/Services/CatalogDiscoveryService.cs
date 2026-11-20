@@ -209,37 +209,21 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
             bool hideText = !callerClear.Contains(c.ColumnName) && hiddenCatalogTextCols.Contains(c.ColumnName);
             var colResolved = !hideText && !string.IsNullOrWhiteSpace(lang) ? c.Texts.Resolve(lang) : null;
             return new CatalogColumnDetail(
-                Name: c.ColumnName,
-                Type: c.DataType,
+                Name: c.ColumnName, Type: c.DataType,
                 Sensitivity: pii || ClassificationMetadata.IsColumnSensitive(metadata, c) ? "Sensitive" : "Public",
-                MaskingState: maskingState,
-                IsPrimaryKey: pkSet.Contains(c.ColumnName),
-                IsPiiIndicator: pii,
+                MaskingState: maskingState, IsPrimaryKey: pkSet.Contains(c.ColumnName), IsPiiIndicator: pii,
                 DisplayName: hideText ? null : (colResolved?.Title ?? c.DisplayName ?? c.ColumnName),
                 Description: hideText ? null : (colResolved?.Description ?? c.Description),
-                Classifications: classifications,
-                ClearRequestable: clearRequestable
-            );
+                Classifications: classifications, ClearRequestable: clearRequestable, Role: c.Role?.ToWireName());
         }).ToList();
 
         return Autheris.Application.DataSources.Services.RequiredFilterColumnProjection.WithRequiredFilters(metadata, new CatalogDatasetDetail(
-            DatasetId: metadata.Identifier.ToString(),
-            Domain: metadata.Identifier.Domain,
-            Schema: metadata.Identifier.Schema,
-            Table: metadata.Identifier.TableName,
-            Columns: columnDetails,
-            PrimaryKeys: keys.PrimaryKeyColumns,
-            Sensitivity: metadata.Table.Sensitivity.ToString(),
-            IsActive: metadata.Table.IsActive,
-            Indexes: keys.Indexes,
-            DisplayName: tableDisplayName,
-            Description: tableDescription,
-            LongDescription: tableLongDescription,
-            Language: lang,
+            DatasetId: metadata.Identifier.ToString(), Domain: metadata.Identifier.Domain, Schema: metadata.Identifier.Schema, Table: metadata.Identifier.TableName,
+            Columns: columnDetails, PrimaryKeys: keys.PrimaryKeyColumns, Sensitivity: metadata.Table.Sensitivity.ToString(), IsActive: metadata.Table.IsActive,
+            Indexes: keys.Indexes, DisplayName: tableDisplayName, Description: tableDescription, LongDescription: tableLongDescription, Language: lang,
             // Issue #390: parallel to PrimaryKeys; null unless a column is descending, and never for a key with a hidden column (Restrict drops it).
             PrimaryKeyDirections: KeyDirections.AnyDescending(keys.PrimaryKeyDirections) ? KeyDirections.ToWire(keys.PrimaryKeyDirections) : null,
-            Size: DatasetSizeClassifier.Resolve(metadata)
-        ));
+            Size: DatasetSizeClassifier.Resolve(metadata), Kind: metadata.Table.ObjectKind.ToWireName()));
     }
 
     /// <summary>

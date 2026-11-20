@@ -148,6 +148,92 @@ public sealed class RequestContextReplacingModule : IAutherisModule
     public void MapEndpoints(IModuleEndpointRegistrar endpoints) { }
 }
 
+public sealed class DbtWebhookHandlerAddingModule : IAutherisModule
+{
+    public sealed class ForeignHandler : Autheris.Application.Catalog.Semantic.IDbtCloudWebhookHandler
+    {
+        public Task<Autheris.Domain.Model.DbtWebhookProcessingResult> HandleVerifiedAsync(string payload, CancellationToken ct) =>
+            Task.FromResult(new Autheris.Domain.Model.DbtWebhookProcessingResult(true, "ok"));
+    }
+
+    public string Id => "evil-dbt-webhook";
+    public IReadOnlyList<string> ConfigurationSections => [];
+
+    public void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) =>
+        services.AddScoped<Autheris.Application.Catalog.Semantic.IDbtCloudWebhookHandler, ForeignHandler>();
+
+    public void MapEndpoints(IModuleEndpointRegistrar endpoints) { }
+}
+
+public sealed class OpenMetadataWebhookHandlerAddingModule : IAutherisModule
+{
+    public sealed class ForeignWebhookHandler : Autheris.Application.Catalog.OpenMetadata.IOpenMetadataWebhookHandler
+    {
+        public Task<Autheris.Application.Catalog.OpenMetadata.OpenMetadataWebhookOutcome> HandleVerifiedAsync(string payload, CancellationToken ct) =>
+            Task.FromResult(Autheris.Application.Catalog.OpenMetadata.OpenMetadataWebhookOutcome.Processed);
+    }
+
+    public string Id => "evil-om-webhook";
+    public IReadOnlyList<string> ConfigurationSections => [];
+
+    public void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) =>
+        services.AddScoped<Autheris.Application.Catalog.OpenMetadata.IOpenMetadataWebhookHandler, ForeignWebhookHandler>();
+
+    public void MapEndpoints(IModuleEndpointRegistrar endpoints) { }
+}
+
+public sealed class OpenMetadataSyncServiceAddingModule : IAutherisModule
+{
+    public sealed class ForeignSyncService : Autheris.Application.Catalog.OpenMetadata.IOpenMetadataSyncService
+    {
+        public Task<Autheris.Application.Catalog.OpenMetadata.OpenMetadataSyncResult> SyncPermissionsAsync(
+            bool dryRun = false,
+            Autheris.Domain.Common.TenantId? restrictToTenant = null,
+            CancellationToken ct = default) =>
+            Task.FromResult(new Autheris.Application.Catalog.OpenMetadata.OpenMetadataSyncResult(0, 0, 0, [], [], true));
+    }
+
+    public string Id => "evil-om-sync";
+    public IReadOnlyList<string> ConfigurationSections => [];
+
+    public void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) =>
+        services.AddScoped<Autheris.Application.Catalog.OpenMetadata.IOpenMetadataSyncService, ForeignSyncService>();
+
+    public void MapEndpoints(IModuleEndpointRegistrar endpoints) { }
+}
+
+public sealed class OpenMetadataCatalogClientAddingModule : IAutherisModule
+{
+    public sealed class ForeignCatalogClient : Autheris.Application.Catalog.Interfaces.IDataCatalogClient
+    {
+        public Autheris.Domain.Model.DataCatalogProviderType ProviderType => Autheris.Domain.Model.DataCatalogProviderType.OpenMetadata;
+
+        public Task<IReadOnlyList<Autheris.Application.Catalog.Models.CatalogTableAsset>> GetTablesAsync(
+            string? filter = null,
+            CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<Autheris.Application.Catalog.Models.CatalogTableAsset>>([]);
+
+        public Task<Autheris.Application.Catalog.Models.CatalogTableAsset?> GetTableAsync(
+            Autheris.Domain.Common.TableIdentifier table,
+            CancellationToken ct = default) =>
+            Task.FromResult<Autheris.Application.Catalog.Models.CatalogTableAsset?>(null);
+    }
+
+    public string Id => "evil-om-catalog";
+    public IReadOnlyList<string> ConfigurationSections => [];
+
+    public void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) =>
+        services.AddTransient<Autheris.Application.Catalog.Interfaces.IDataCatalogClient, ForeignCatalogClient>();
+
+    public void MapEndpoints(IModuleEndpointRegistrar endpoints) { }
+}
+
+public sealed class OpenMetadataClientWithoutSsrfModule() : EvilServiceModuleBase("openmetadata")
+{
+    public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) =>
+        services.AddHttpClient("IOpenMetadataClient").ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(5));
+}
+
 public sealed class AuthHandlerAddingModule : IAutherisModule
 {
     private sealed class NoopAuthHandler : IAuthorizationHandler
@@ -391,6 +477,23 @@ public sealed class ForeignGatewaySectionClaimingModule() : EvilServiceModuleBas
 public sealed class CoreSectionIdModule() : EvilServiceModuleBase("caching")
 {
     public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) { }
+}
+
+public sealed class HttpClientDefaultsAddingModule() : EvilServiceModuleBase("evil-httpclient-defaults")
+{
+    public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) =>
+        services.ConfigureHttpClientDefaults(b => b.ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(5)));
+}
+
+public sealed class HandlerBuilderFilterAddingModule() : EvilServiceModuleBase("evil-handler-filter")
+{
+    private sealed class NoopFilter : Microsoft.Extensions.Http.IHttpMessageHandlerBuilderFilter
+    {
+        public Action<Microsoft.Extensions.Http.HttpMessageHandlerBuilder> Configure(Action<Microsoft.Extensions.Http.HttpMessageHandlerBuilder> next) => next;
+    }
+
+    public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) =>
+        services.AddSingleton<Microsoft.Extensions.Http.IHttpMessageHandlerBuilderFilter, NoopFilter>();
 }
 
 internal static class ModulePackageBuilder

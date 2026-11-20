@@ -307,4 +307,40 @@ public class DatabricksGeneratorTests
         new FastSqlEngine().Parse(sql.AsMemory(), SqlTokenSecurityOptions.None);   // parses without the guard
         Assert.True(SqlTokenSecurityOptions.Strict.RejectVariableSubstitutionSequences);
     }
+
+    private static CompiledSql CompileMeasure(TargetSqlDialect dialect, string sql)
+    {
+        var filters = new DictPolicyProvider();
+        filters.NoPolicy.Add(PolicyFixtures.Orders);
+        return new FastSqlEngine().Compile(sql.AsMemory(), new CompileRequest
+        {
+            TargetDialect = dialect,
+            TokenGuards = SqlTokenSecurityOptions.Strict,
+            AllowExperimentalDialect = true,
+            Policy = new GovernancePolicy
+            {
+                RowFilters = filters,
+                Masks = new DictMaskProvider(),
+                Catalog = PolicyFixtures.Catalog(),
+                Tenant = new TenantBinding("__autheris_tenant", "acme", SqlParameterType.String)
+            }
+        }, CancellationToken.None);
+    }
+
+    [Fact]
+    public void Measure_IsEmittedVerbatim()
+    {
+        var c = CompileMeasure(TargetSqlDialect.Databricks, "SELECT Region, MEASURE(Amount) AS total_amount FROM Orders GROUP BY Region");
+        Assert.Contains("MEASURE(`Amount`) AS `total_amount`", c.Sql);
+    }
+
+    [Theory]
+    [InlineData(TargetSqlDialect.PostgreSql)]
+    [InlineData(TargetSqlDialect.SqlServer)]
+    [InlineData(TargetSqlDialect.Oracle)]
+    [InlineData(TargetSqlDialect.DuckDb)]
+    [InlineData(TargetSqlDialect.Ansi)]
+    public void Measure_IsRejected_OnOtherDialects(TargetSqlDialect dialect) =>
+        Assert.ThrowsAny<System.Security.SecurityException>(() =>
+            CompileMeasure(dialect, "SELECT Region, MEASURE(Amount) FROM Orders GROUP BY Region"));
 }

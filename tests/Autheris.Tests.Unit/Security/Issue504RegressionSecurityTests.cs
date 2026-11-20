@@ -31,7 +31,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
-using Autheris.Extensions.Dbt;
+using Autheris.Modules.Dbt;
 using Autheris.Tests.Common;
 using HotChocolate.AspNetCore;
 using Microsoft.AspNetCore.Http;

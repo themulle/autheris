@@ -13,7 +13,7 @@ using Autheris.Application.Lineage;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
-using Autheris.Extensions.Dbt;
+using Autheris.Modules.Dbt;
 using Autheris.Tests.Common;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;

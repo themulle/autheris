@@ -123,7 +123,7 @@ public class ArchitectureTests
             typeof(Autheris.Application.Catalog.Interfaces.IDataCatalogClient),
             typeof(Autheris.Application.Catalog.Interfaces.IDataCatalogSyncService),
             typeof(Autheris.Application.Lineage.IOpenLineageClient),
-            typeof(Autheris.Extensions.OpenMetadata.IOpenMetadataClient)
+            typeof(Autheris.Modules.OpenMetadata.IOpenMetadataClient)
         };
 
         var coreAssemblies = new[]

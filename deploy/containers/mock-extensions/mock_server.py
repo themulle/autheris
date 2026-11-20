@@ -121,7 +121,7 @@ class MockExtensionsHandler(http.server.BaseHTTPRequestHandler):
             return
 
         # 6. dbt: Exposures Endpoint
-        if path == "/api/extensions/dbt/exposures":
+        if path == "/modules/dbt/exposures":
             exposures_yaml = """version: 2
 exposures:
   - name: executive_sales_dashboard
@@ -145,7 +145,7 @@ exposures:
             return
 
         # 7. dbt: Proposals Endpoint
-        if path == "/api/extensions/dbt/proposals":
+        if path == "/modules/dbt/proposals":
             self.send_json(200, DBT_PROPOSALS)
             return
 
@@ -195,7 +195,7 @@ exposures:
             return
 
         # 3. dbt: Contract Validation Gate
-        if path == "/api/extensions/dbt/validate-contract":
+        if path == "/modules/dbt/validate-contract":
             self.send_json(200, {
                 "isCompatible": True,
                 "violations": [],
@@ -205,7 +205,7 @@ exposures:
             return
 
         # 4. dbt: Sync Manifest Endpoint
-        if path == "/api/extensions/dbt/sync":
+        if path == "/modules/dbt/sync":
             self.send_json(200, {
                 "modelsIngested": 2,
                 "proposalsCreated": 1,
@@ -214,7 +214,7 @@ exposures:
             return
 
         # 5. dbt: Proposal Approval
-        if path.startswith("/api/extensions/dbt/proposals/") and path.endswith("/approve"):
+        if path.startswith("/modules/dbt/proposals/") and path.endswith("/approve"):
             prop_id = path.split("/")[-2]
             self.send_json(200, {
                 "id": prop_id,

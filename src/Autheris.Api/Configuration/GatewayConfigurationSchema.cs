@@ -119,13 +119,14 @@ public static class GatewayConfigurationSchema
         };
 
     /// <summary>
-    /// The module sections whose absence fails startup in the host: only modules that exist or are planned now. Sections read by core
-    /// (for example Gateway:Dbt, Gateway:OpenMetadata) stay out until their module exists.
+    /// The module sections whose absence fails startup in the host.
     /// </summary>
     public static IReadOnlyDictionary<string, string> EnforcedModuleSections { get; } =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             [GatewaySections.Lakehouse] = "lakehouse",
+            [GatewaySections.Dbt] = "dbt",
+            [GatewaySections.OpenMetadata] = "openmetadata",
             [GatewaySections.Events] = "events",
             [GatewaySections.Lineage] = "lineage",
         };

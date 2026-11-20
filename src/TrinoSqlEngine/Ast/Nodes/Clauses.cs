@@ -34,7 +34,8 @@ public sealed record PaginationClause(
 public sealed record GroupByClause(
     IReadOnlyList<Expression> GroupingExpressions,
     IReadOnlyList<GroupingElement>? AdvancedElements = null,
-    bool Distinct = false) : SqlNode;
+    bool Distinct = false,
+    bool IsAll = false) : SqlNode;
 
 /// <summary>Wunsch 4: one ROLLUP/CUBE/GROUPING SETS element; each set is a list of expressions (may be empty in GROUPING SETS).</summary>
 public sealed record GroupingElement(

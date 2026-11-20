@@ -116,6 +116,108 @@ public sealed class ObjectKindViewChannelTests
         legacyList.Datasets.Single(d => d.Id.EndsWith("t_orders", StringComparison.OrdinalIgnoreCase)).Kind.ShouldBe("table");
     }
 
+    private static TableMetadata MakeMetricView(string name = "sales_mv")
+    {
+        var table = DiscoveryTestBuilder.MakeTable("sales", name, columns: [("region", false, false), ("revenue", false, false)], objectKind: DiscoveryObjectKind.MetricView);
+        var cols = new List<TableColumn>
+        {
+            new() { Id = table.Columns[0].Id, TableId = table.Table.Id, ColumnName = "region", DataType = "string", Role = MetricViewColumnRole.Dimension },
+            new() { Id = table.Columns[1].Id, TableId = table.Table.Id, ColumnName = "revenue", DataType = "decimal(18,2)", Role = MetricViewColumnRole.Measure }
+        };
+        return table with { Columns = cols };
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void ObjectGrantOnly_MeasureIsNoAccess()
+    {
+        var mv = MakeMetricView();
+        var objectGrantOnly = TableAccessDecision.Allowed(mv.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true);
+
+        var effective = Autheris.Application.Policy.Pdp.AccessDecisionPoint.ApplyMetricViewMeasureDefaults(objectGrantOnly, mv);
+        var mapped = DiscoveryAccessMapper.Map(mv, effective, [], false, false, null, language: null, isHidden: false);
+
+        mapped.Kind.ShouldBe(DiscoveryObjectKind.MetricView);
+        mapped.Columns.Single(c => c.Name == "region").State.ShouldBe(DiscoveryColumnState.Clear);
+        mapped.Columns.Single(c => c.Name == "revenue").State.ShouldBe(DiscoveryColumnState.NoAccess);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void MeasureGrant_MeasureIsClear()
+    {
+        var mv = MakeMetricView();
+        var withMeasureGrant = TableAccessDecision.Allowed(
+            mv.Identifier,
+            new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase) { ["revenue"] = ColumnAccessLevel.Clear },
+            hasUnconstrainedColumnAllow: true);
+
+        var effective = Autheris.Application.Policy.Pdp.AccessDecisionPoint.ApplyMetricViewMeasureDefaults(withMeasureGrant, mv);
+        var mapped = DiscoveryAccessMapper.Map(mv, effective, [], false, false, null, language: null, isHidden: false);
+
+        mapped.Columns.Single(c => c.Name == "region").State.ShouldBe(DiscoveryColumnState.Clear);
+        mapped.Columns.Single(c => c.Name == "revenue").State.ShouldBe(DiscoveryColumnState.Clear);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task DeniedMeasure_NameAbsentOnRestMcpTrino()
+    {
+        var mv = MakeMetricView();
+        var repo = new FakeDiscoveryTableRepository();
+        repo.Tables.Add(mv);
+        var pdp = new FakeAccessDecisionPoint(r =>
+            Autheris.Application.Policy.Pdp.AccessDecisionPoint.ApplyMetricViewMeasureDefaults(
+                TableAccessDecision.Allowed(r.Object.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true),
+                mv));
+        var discovery = DiscoveryTestBuilder.CreateService(tables: repo, pdp: pdp);
+        var callerUser = DiscoveryTestBuilder.User("S-USER", "tenant-a");
+        var caller = DiscoveryTestBuilder.Caller(callerUser);
+
+        var restObj = await discovery.GetAsync(mv.Identifier, caller);
+        restObj.ShouldNotBeNull();
+        DiscoveryColumnVisibility.VisibleColumns(restObj).Select(c => c.Name).ShouldBe(["region"]);
+        DiscoveryColumnVisibility.VisibleColumns(restObj).ShouldNotContain(c => c.Name == "revenue");
+
+        var mcp = new McpDatasetCatalog(repo, new FakeDiscoveryConsentRepository(), new NoopExecutionService(), discoveryService: discovery);
+        var desc = await mcp.DescribeDatasetAsync(callerUser, "sales.dbo.sales_mv");
+        desc.Kind.ShouldBe("metric_view");
+        desc.Columns.Select(c => c.Name).ShouldBe(["region"]);
+        desc.Columns.Single().Role.ShouldBe("dimension");
+
+        var allowedCols = new HashSet<string>(["region", "revenue"], StringComparer.OrdinalIgnoreCase);
+        var jdbcRows = Autheris.Application.Sql.Services.TrinoJdbcMetadataShapes.BuildForTest(
+            Autheris.Application.Sql.Services.TrinoJdbcView.Tables,
+            [new Autheris.Application.Sql.Services.TrinoJdbcEntry(restObj, Accessible: true, allowedCols)]);
+        jdbcRows.Single()[3].ShouldBe("VIEW");
+
+        var jdbcCols = Autheris.Application.Sql.Services.TrinoJdbcMetadataShapes.BuildForTest(
+            Autheris.Application.Sql.Services.TrinoJdbcView.Columns,
+            [new Autheris.Application.Sql.Services.TrinoJdbcEntry(restObj, Accessible: true, allowedCols)]);
+        jdbcCols.Select(r => (string?)r[3]).ShouldBe(["region"]);
+    }
+
+    [Fact]
+    public async Task GraphQl_MetricView_NotExposed()
+    {
+        var mv = MakeMetricView();
+        var repo = new FakeDiscoveryTableRepository();
+        repo.Tables.Add(mv);
+        var relRepo = NSubstitute.Substitute.For<ITableRelationRepository>();
+        var model = await Autheris.GraphQL.Catalog.CatalogSchemaModel.BuildAsync(
+            repo, relRepo, logger: null, dialectRegistry: null, crossSourceEnabled: false, tableFilter: null,
+            fingerprintCache: null, epochService: null, timeProvider: null);
+        model.Tables.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void OData_MetricView_NotExposed()
+    {
+        var mv = MakeMetricView();
+        Autheris.Application.OData.ODataHandler.IsExposableObjectKind(mv.Table.ObjectKind).ShouldBeFalse();
+        Autheris.Application.OData.ODataHandler.IsExposableObjectKind(DiscoveryObjectKind.Table).ShouldBeTrue();
+    }
+
     private sealed class NoopExecutionService : IGatewayExecutionService
     {
         public Task<(IReadOnlyList<IReadOnlyDictionary<string, object?>> Rows, TableAccessDecision Decision)> ExecuteTableQueryAsync(ClaimsPrincipal? principal, TableIdentifier table, int? first = null, int? after = null, CancellationToken ct = default) => throw new NotSupportedException();

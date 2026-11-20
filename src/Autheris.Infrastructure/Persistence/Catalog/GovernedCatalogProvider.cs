@@ -219,6 +219,7 @@ public sealed partial class GovernedCatalogProvider : IGovernedCatalogProvider
             metadata.Table.SourceName.ToLowerInvariant(),
             ((int)metadata.DataSourceType).ToString(System.Globalization.CultureInfo.InvariantCulture),
             ((int)metadata.Dialect).ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ((int)metadata.Table.ObjectKind).ToString(System.Globalization.CultureInfo.InvariantCulture),
             metadata.TenantColumnName?.ToLowerInvariant() ?? string.Empty,
             string.Join('\u001e', columns)
         });
@@ -294,7 +295,9 @@ public sealed partial class GovernedCatalogProvider : IGovernedCatalogProvider
             catalogColumns,
             tenantColumn,
             metadata.RequiredFilterColumns,
-            CatalogColumnVersion.Compute(metadata.Columns));
+            CatalogColumnVersion.Compute(metadata.Columns),
+            default,
+            IsMetricView: metadata.Table.ObjectKind == DiscoveryObjectKind.MetricView);
         return (entry, Fingerprint(connectionOptions, metadata));
     }
 }

@@ -9,10 +9,6 @@
 /api/catalog/datasets/{id}/catalog-settings|GET|no side effect: reads dataset catalog settings
 /api/dev/info|GET|no side effect: reads Development diagnostic configuration summary
 /api/dev/personas|GET|no side effect: lists Development login personas without signing in
-/api/extensions/dbt/exposures|GET|no side effect: lists dbt exposures metadata
-/api/extensions/dbt/health|GET|no side effect: reads dbt extension health status
-/api/extensions/dbt/metrics|GET|no side effect: lists dbt metrics metadata
-/api/extensions/dbt/proposals|GET|no side effect: lists dbt governance proposals
 /api/governance/classification/config-hash|GET|no side effect: reads classification config hash
 /api/governance/classification/proposals/pending|GET|no side effect: lists pending classification proposals
 /api/governance/classification/proposals/{proposalId:guid}|GET|no side effect: reads single classification proposal
@@ -122,6 +118,10 @@
 /health/live|GET|no side effect: liveness probe
 /health/ready|GET|no side effect: readiness probe
 /metrics|ANY|no side effect: Prometheus metrics scrape endpoint
+/modules/dbt/exposures|GET|no side effect: lists dbt exposures metadata
+/modules/dbt/health|GET|no side effect: reads dbt extension health status
+/modules/dbt/metrics|GET|no side effect: lists dbt metrics metadata
+/modules/dbt/proposals|GET|no side effect: lists dbt governance proposals
 /modules/lakehouse/iceberg/v1/{prefix}/namespaces/{namespace}/tables/{table}|GET|no side effect: reads Iceberg table metadata
 /modules/lakehouse/iceberg/v1/{prefix}/namespaces/{namespace}/tables|GET|no side effect: lists Iceberg namespace tables
 /modules/lakehouse/iceberg/v1/{prefix}/namespaces|GET|no side effect: lists Iceberg catalog namespaces
