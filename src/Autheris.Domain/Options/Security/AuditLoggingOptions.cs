@@ -7,7 +7,7 @@ public sealed class AuditRetentionOptions
     public const string SectionName = GatewaySections.AuditRetention;
 
     public bool Enabled { get; init; } = true;
-    public int RetentionDays { get; init; } = 90;
+    public int RetentionDays { get; init; } = 3650;
     public int SecurityDays { get; init; } = 3650;
     public int DataAccessDays { get; init; } = 400;
     public int AggregatedDays { get; init; } = 90;

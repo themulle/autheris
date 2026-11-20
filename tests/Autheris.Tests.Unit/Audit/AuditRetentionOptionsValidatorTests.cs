@@ -1,4 +1,5 @@
 using System;
+using Autheris.Api.Configuration.Validation;
 using Autheris.Application.Audit;
 using Autheris.Domain.Options;
 using Autheris.Tests.Common;
@@ -144,5 +145,54 @@ public sealed class AuditRetentionOptionsValidatorTests
 
         result.Failed.ShouldBeTrue();
         result.FailureMessage.ShouldContain("RetentionDays must be greater than zero");
+    }
+
+    [Fact]
+    public void Validate_Production_RetentionDaysBelowSecurityDays_WithoutWormSink_Fails()
+    {
+        var validator = new GatewaySecurityOptionsValidator(_prodEnvironment);
+        var options = new GatewayOptions
+        {
+            DataMasking = new DataMaskingOptions { HmacSecretKeyVaultRef = "kv://masking-hmac" },
+            Audit = new AuditOptions
+            {
+                ChainAnchorPath = "/var/autheris/anchor.json",
+                ChainAnchorWormDirectory = string.Empty,
+                Retention = new AuditRetentionOptions
+                {
+                    RetentionDays = 90,
+                    SecurityDays = 3650
+                }
+            }
+        };
+
+        var result = validator.Validate(null, options);
+
+        result.Failed.ShouldBeTrue();
+        result.FailureMessage.ShouldContain("RetentionDays");
+        result.FailureMessage.ShouldContain("ChainAnchorWormDirectory");
+    }
+
+    [Fact]
+    public void Validate_Production_RetentionDaysBelowSecurityDays_WithWormSink_Succeeds()
+    {
+        var validator = new GatewaySecurityOptionsValidator(_prodEnvironment);
+        var options = new GatewayOptions
+        {
+            DataMasking = new DataMaskingOptions { HmacSecretKeyVaultRef = "kv://masking-hmac" },
+            Audit = new AuditOptions
+            {
+                ChainAnchorWormDirectory = "/var/autheris/worm",
+                Retention = new AuditRetentionOptions
+                {
+                    RetentionDays = 90,
+                    SecurityDays = 3650
+                }
+            }
+        };
+
+        var result = validator.Validate(null, options);
+
+        result.Succeeded.ShouldBeTrue();
     }
 }
