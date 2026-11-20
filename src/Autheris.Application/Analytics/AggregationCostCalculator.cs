@@ -47,11 +47,6 @@ public static class AggregationCostCalculator
         ArgumentNullException.ThrowIfNull(query);
         var opts = options ?? new AggregationOptions();
 
-        if (!opts.Enabled)
-        {
-            throw new GatewayForbiddenException("Governed aggregation queries are disabled by configuration.");
-        }
-
         int groupByCount = query.GroupBy?.Count ?? 0;
         if (groupByCount > opts.MaxGroupByColumns)
         {

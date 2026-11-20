@@ -3,14 +3,27 @@ using Autheris.Domain.Common;
 
 namespace Autheris.Domain.Options;
 
+/// <summary>OpenMetadata catalog integration and webhook options (<c>Gateway:OpenMetadata</c>).</summary>
 public sealed class OpenMetadataOptions
 {
+    /// <summary>Enables OpenMetadata catalog synchronization and webhook ingestion.</summary>
     public bool Enabled { get; init; }
+
+    /// <summary>Base URL of the OpenMetadata REST API.</summary>
     public string ServerUrl { get; init; } = "http://localhost:8585/api/v1";
+
+    /// <summary>Bearer token used to authenticate against the OpenMetadata REST API.</summary>
     public string AuthToken { get; init; } = string.Empty;
+
+    /// <summary>Shared HMAC secret used to verify incoming OpenMetadata webhook signatures.</summary>
     public string WebhookSecret { get; init; } = string.Empty;
+
+    /// <summary>Optional OpenMetadata service name filter limiting which services are synchronized.</summary>
     public string ServiceFilter { get; init; } = string.Empty;
+
     [Range(1, 1440)] public int SyncIntervalMinutes { get; init; } = 30;
+
+    /// <summary>Mapping from OpenMetadata tag names to gateway masking rule identifiers.</summary>
     public Dictionary<string, string> TagToMaskingRuleMap { get; init; } = new()
     {
         ["PII.Sensitive"] = "REDACT",
@@ -18,7 +31,11 @@ public sealed class OpenMetadataOptions
         ["PII.Pseudonym"] = "HMAC_SHA256",
         ["PersonalData.Personal"] = "REDACT"
     };
+
+    /// <summary>Mapping from OpenMetadata team names to gateway group security identifiers (SIDs).</summary>
     public Dictionary<string, string> TeamToGroupSidMap { get; init; } = new();
+
+    /// <summary>Mapping from OpenMetadata user names to gateway user security identifiers (SIDs).</summary>
     public Dictionary<string, string> UserToUserSidMap { get; init; } = new();
 
     /// <summary>

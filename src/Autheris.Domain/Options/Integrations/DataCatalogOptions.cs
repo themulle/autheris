@@ -3,13 +3,16 @@ using Autheris.Domain.Model;
 
 namespace Autheris.Domain.Options;
 
+/// <summary>External data catalog synchronization and tag-mapping options (<c>Gateway:Catalog</c>).</summary>
 public sealed class DataCatalogOptions
 {
+    /// <summary>Enables external data catalog synchronization.</summary>
     public bool Enabled { get; init; } = false;
 
     /// <summary>Limits of the in-memory catalog caches (<c>Gateway:Catalog:Cache</c>).</summary>
     public CatalogCacheOptions Cache { get; init; } = new();
 
+    /// <summary>External catalog provider implementation to synchronize with.</summary>
     public DataCatalogProviderType Provider { get; init; } = DataCatalogProviderType.OpenMetadata;
     [Range(1, 1440)] public int SyncIntervalMinutes { get; init; } = 60;
 
@@ -50,6 +53,7 @@ public sealed class DataCatalogOptions
         "Default"
     ];
 
+    /// <summary>Mapping from external catalog tag names to gateway masking rule identifiers.</summary>
     public Dictionary<string, string> TagToMaskingRuleMap { get; init; } = new(StringComparer.OrdinalIgnoreCase)
     {
         ["PII.Sensitive"] = "REDACT",
@@ -62,6 +66,7 @@ public sealed class DataCatalogOptions
         ["Restricted"] = "REDACT"
     };
 
+    /// <summary>Catalog tag names recognized as GDPR Article 9 special-category personal data.</summary>
     public List<string> GdprArticle9Tags { get; init; } =
     [
         "GDPR.Article9", "GDPR.Art9", "Art9", "HealthData", "Biometric",
@@ -69,6 +74,7 @@ public sealed class DataCatalogOptions
         "SexualOrientation", "PoliticalOpinion", "SpecialCategoryData"
     ];
 
+    /// <summary>Catalog tag names recognized as general personally identifiable information (PII).</summary>
     public List<string> PiiTags { get; init; } =
     [
         "PII", "PersonalData", "Classification.PII", "Email", "Phone",
@@ -76,9 +82,13 @@ public sealed class DataCatalogOptions
     ];
 }
 
+/// <summary>dbt Cloud/manifest integration options (<c>Gateway:Dbt</c>).</summary>
 public sealed class DbtOptions
 {
+    /// <summary>Enables dbt manifest synchronization and webhook handling.</summary>
     public bool Enabled { get; init; } = true;
+
+    /// <summary>Shared HMAC secret used to verify incoming dbt Cloud webhook signatures.</summary>
     public string WebhookSecret { get; init; } = string.Empty;
 
     /// <summary>

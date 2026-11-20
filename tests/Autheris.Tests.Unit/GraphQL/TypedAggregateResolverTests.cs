@@ -235,18 +235,6 @@ public sealed class TypedAggregateResolverTests
     }
 
     [Fact]
-    public async Task AggregationDisabledByConfiguration_RejectsTheCall()
-    {
-        var host = new TypedAggregateTestHost();
-        host.Analytics.Aggregation.Enabled = false;
-
-        var (response, captured) = await RunAsync(host, $"{{ {Field}(aggregates: [{{ fn: COUNT, alias: \"n\" }}]) {{ count }} }}");
-
-        Errors(response).ShouldHaveSingleItem().Message.ShouldContain("disabled by configuration");
-        captured.ShouldBeNull();
-    }
-
-    [Fact]
     public async Task UnauthenticatedCaller_IsRejectedBeforeTheEngine()
     {
         var host = new TypedAggregateTestHost { User = new ClaimsPrincipal(new ClaimsIdentity()) };

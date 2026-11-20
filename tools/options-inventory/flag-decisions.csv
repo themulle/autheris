@@ -5,7 +5,6 @@ StartupWarmupStepOptions,Enabled,true,False,keep opt-in,Operational per-step war
 ReadPathSwitches,BulkStreamEnabled,,False,keep opt-in,PLAN-SEC-115 operational read-path kill switch,PR 4,src/Autheris.Application/Mcp/Services/ReadPathSwitches.cs
 ReadPathSwitches,QueryAnalysisEnabled,,False,keep opt-in,PLAN-SEC-115 operational read-path kill switch,PR 4,src/Autheris.Application/Mcp/Services/ReadPathSwitches.cs
 ReadPathSwitches,RestDataEndpointEnabled,,False,keep opt-in,PLAN-SEC-115 operational read-path kill switch,PR 4,src/Autheris.Application/Mcp/Services/ReadPathSwitches.cs
-AggregationOptions,Enabled,true,False,delete,Default-on analytics aggregation switch; candidate for removal or unconditional,PR 2,src/Autheris.Domain/Options/AnalyticsOptions.cs
 AnalyticsPrivacyOptions,AllowCatalogLowering,,False,keep opt-in,SEC-SIMPL-32 privacy relaxation guard,PR 2,src/Autheris.Domain/Options/AnalyticsOptions.cs
 AnalyticsPrivacyOptions,AllowDisabled,,False,keep opt-in,SEC-SIMPL-32 privacy relaxation guard,PR 2,src/Autheris.Domain/Options/AnalyticsOptions.cs
 AnalyticsPrivacyOptions,AllowSourceDeclaredLowering,,False,keep opt-in,SEC-SIMPL-32 privacy relaxation guard,PR 2,src/Autheris.Domain/Options/AnalyticsOptions.cs
