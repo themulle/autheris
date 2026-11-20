@@ -10,6 +10,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Catalog;
+using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
 using Autheris.Infrastructure.Persistence;
@@ -101,6 +102,13 @@ internal static class CatalogBatchUpsertHelper
             var precedence = repo.OptionsSnapshot?.Catalog?.DocumentationSourcePrecedence;
             var anyStoredBefore = false;
 
+            var tableRows = new List<CatalogBatchSqlBuilder.TableUpsertRow>(count);
+            var existingColsPerTable = new Dictionary<string, (Guid Id, string DataType, string? Description, string? LongDescription, string? DocSource, string? Collation, string? LengthSemantics)>[count];
+            var existingMasksPerTable = new Dictionary<string, MaskingRule>[count];
+            var colIdByNamePerTable = new Dictionary<string, Guid>[count];
+            var removedColIds = new List<Guid>();
+            var needMaxOrdinalTableIds = new List<Guid>();
+
             for (var i = 0; i < count; i++)
             {
                 var incoming = chunk[i];
@@ -109,10 +117,6 @@ internal static class CatalogBatchUpsertHelper
                     incoming.Table.Description,
                     incoming.Table.LongDescription,
                     incoming.Table.DocumentationSource);
-
-                Dictionary<string, (Guid Id, string DataType, string? Description, string? LongDescription, string? DocSource, string? Collation, string? LengthSemantics)> existingColsByName;
-                Dictionary<string, MaskingRule> existingMaskingRules;
-                Dictionary<string, Guid> colIdByName;
 
                 if (existed)
                 {
@@ -132,35 +136,240 @@ internal static class CatalogBatchUpsertHelper
                         anyStoredBefore = true;
                     }
 
-                    BuildColumnMaps(cols, masks, out existingColsByName, out existingMaskingRules, out colIdByName);
+                    BuildColumnMaps(cols, masks, out existingColsPerTable[i], out existingMasksPerTable[i], out colIdByNamePerTable[i]);
+
+                    if (incoming.ReplaceColumns)
+                    {
+                        var incomingNames = new HashSet<string>(incoming.Columns.Select(c => c.ColumnName), StringComparer.OrdinalIgnoreCase);
+                        foreach (var (existingName, existingInfo) in existingColsPerTable[i])
+                        {
+                            if (!incomingNames.Contains(existingName))
+                            {
+                                structuralChanges[i] = true;
+                                removedColIds.Add(existingInfo.Id);
+                            }
+                        }
+                    }
+
+                    if (incoming.Columns.Any(c => !existingColsPerTable[i].ContainsKey(c.ColumnName)))
+                    {
+                        needMaxOrdinalTableIds.Add(tableIds[i]);
+                    }
                 }
                 else
                 {
                     structuralChanges[i] = true;
-                    existingColsByName = new(StringComparer.OrdinalIgnoreCase);
-                    existingMaskingRules = new(StringComparer.OrdinalIgnoreCase);
-                    colIdByName = new(StringComparer.OrdinalIgnoreCase);
+                    existingColsPerTable[i] = new(StringComparer.OrdinalIgnoreCase);
+                    existingMasksPerTable[i] = new(StringComparer.OrdinalIgnoreCase);
+                    colIdByNamePerTable[i] = new(StringComparer.OrdinalIgnoreCase);
                 }
 
-                await ExecuteTableUpsertRowAsync(repo, conn, tx, tableIds[i], incoming, docs, ct).ConfigureAwait(false);
+                tableRows.Add(new CatalogBatchSqlBuilder.TableUpsertRow(tableIds[i], incoming, docs));
+            }
+
+            var nextOrdinals = needMaxOrdinalTableIds.Count > 0
+                ? await CatalogBatchSqlBuilder.LoadMaxColumnOrdinalsAsync(repo, conn, tx, needMaxOrdinalTableIds, ct).ConfigureAwait(false)
+                : new Dictionary<Guid, int>();
+
+            var columnRows = new List<CatalogBatchSqlBuilder.ColumnUpsertRow>();
+            var classificationRows = new List<CatalogBatchSqlBuilder.ClassificationInsertRow>();
+            var maskDeleteColIds = new List<Guid>();
+            var maskInsertRows = new List<CatalogBatchSqlBuilder.MaskOverrideInsertRow>();
+            var replaceKeyTableIds = new List<Guid>();
+            var pkInsertRows = new List<CatalogBatchSqlBuilder.PrimaryKeyInsertRow>();
+            var indexInsertRows = new List<CatalogBatchSqlBuilder.IndexInsertRow>();
+            var indexColumnInsertRows = new List<CatalogBatchSqlBuilder.IndexColumnInsertRow>();
+            var staleMarkerUpdates = new List<(string Id, string MetaJson)>();
+
+            for (var i = 0; i < count; i++)
+            {
+                var incoming = chunk[i];
+                var existingColsByName = existingColsPerTable[i];
+                var existingMaskingRules = existingMasksPerTable[i];
+                var colIdByName = colIdByNamePerTable[i];
+                var existingClassifications = ClassificationsOf(before, tableIds[i]);
+                var nextOrdinal = nextOrdinals.TryGetValue(tableIds[i], out var maxOrd) ? maxOrd : 0;
 
                 if (CatalogRowHydrator.HasMaskingRulesChanged(existingMaskingRules, incoming.ColumnMaskingRules))
                 {
                     structuralChanges[i] = true;
                 }
 
-                if (await CatalogRowHydrator.UpsertColumnsAndMaskingRulesAsync(
-                        conn, tx, repo.InsertColumnSql, tableIds[i], incoming, existingColsByName, colIdByName, ct,
-                        (existing, inc) => CatalogRowHydrator.ShouldOverwriteDocumentation(precedence, existing, inc)).ConfigureAwait(false))
+                foreach (var col in incoming.Columns)
                 {
-                    structuralChanges[i] = true;
+                    var colId = col.Id == Guid.Empty ? Guid.NewGuid() : col.Id;
+                    var incomingColSource = col.DocumentationSource ?? incoming.Table.DocumentationSource;
+                    var targetColDesc = col.Description;
+                    var targetColLongDesc = col.LongDescription;
+                    var targetColDocSource = incomingColSource;
+                    var colOrdinal = 0;
+
+                    if (existingColsByName.TryGetValue(col.ColumnName, out var existingCol))
+                    {
+                        colId = existingCol.Id;
+                        if (!string.Equals(existingCol.DataType, col.DataType, StringComparison.OrdinalIgnoreCase) ||
+                            !string.Equals(existingCol.Collation, col.Collation, StringComparison.Ordinal) ||
+                            !string.Equals(existingCol.LengthSemantics, col.LengthSemantics, StringComparison.OrdinalIgnoreCase))
+                        {
+                            structuralChanges[i] = true;
+                        }
+
+                        var canOverwriteColDesc = !string.IsNullOrWhiteSpace(col.Description) &&
+                            (string.IsNullOrWhiteSpace(existingCol.Description) ||
+                             CatalogRowHydrator.ShouldOverwriteDocumentation(precedence, existingCol.DocSource, incomingColSource));
+
+                        var canOverwriteColLongDesc = !string.IsNullOrWhiteSpace(col.LongDescription) &&
+                            (string.IsNullOrWhiteSpace(existingCol.LongDescription) ||
+                             CatalogRowHydrator.ShouldOverwriteDocumentation(precedence, existingCol.DocSource, incomingColSource));
+
+                        targetColDesc = canOverwriteColDesc ? col.Description : existingCol.Description;
+                        targetColLongDesc = canOverwriteColLongDesc ? col.LongDescription : existingCol.LongDescription;
+                        targetColDocSource = (canOverwriteColDesc || canOverwriteColLongDesc) ? (incomingColSource ?? existingCol.DocSource) : existingCol.DocSource;
+                    }
+                    else
+                    {
+                        structuralChanges[i] = true;
+                        colOrdinal = ++nextOrdinal;
+                    }
+
+                    IReadOnlyDictionary<string, string> effectiveMeta = incoming.ReplaceKeyDefinition
+                        ? CatalogKeyDefinitionStore.WithKeyMarkers(col.Meta, col.ColumnName, incoming.PrimaryKeyColumns)
+                        : col.Meta ?? new Dictionary<string, string>();
+
+                    var metaJson = effectiveMeta.Count > 0
+                        ? JsonSerializer.Serialize(effectiveMeta)
+                        : incoming.ReplaceKeyDefinition ? "{}" : null;
+
+                    columnRows.Add(new CatalogBatchSqlBuilder.ColumnUpsertRow(
+                        colId,
+                        tableIds[i],
+                        col.ColumnName,
+                        col.DataType,
+                        targetColDesc,
+                        targetColLongDesc,
+                        targetColDocSource,
+                        metaJson,
+                        col.DisplayName,
+                        CatalogLocalizationPersistence.SerializeLocalizedTexts(col.Texts),
+                        col.Collation,
+                        col.LengthSemantics,
+                        CatalogRowHydrator.FormatColumnRole(col.Role),
+                        colOrdinal));
+
+                    colIdByName[col.ColumnName] = colId;
+
+                    if (incoming.ColumnClassifications.TryGetValue(col.ColumnName, out var incomingClassifs))
+                    {
+                        existingClassifications.TryGetValue(col.ColumnName, out var existingColClassifs);
+                        foreach (var classification in incomingClassifs.Where(static c => ClassificationScopes.IsGlobal(c.Scope)))
+                        {
+                            if (existingColClassifs == null || !existingColClassifs.Any(ec => string.Equals(ec.Code, classification.Code, StringComparison.OrdinalIgnoreCase)))
+                            {
+                                structuralChanges[i] = true;
+                            }
+
+                            classificationRows.Add(new CatalogBatchSqlBuilder.ClassificationInsertRow(
+                                colId,
+                                classification.Code,
+                                string.IsNullOrWhiteSpace(classification.Source) ? "INGEST" : classification.Source,
+                                string.IsNullOrWhiteSpace(classification.AssignedBy) ? "system:catalog-upsert" : classification.AssignedBy));
+                        }
+                    }
+
+                    var hadMask = existingMaskingRules.ContainsKey(col.ColumnName);
+                    if (incoming.ColumnMaskingRules.TryGetValue(col.ColumnName, out var rule))
+                    {
+                        if (hadMask)
+                        {
+                            maskDeleteColIds.Add(colId);
+                        }
+
+                        var (functionCode, paramsJson, keyRef) = MaskingRuleOverrideMapper.FromRule(rule);
+                        maskInsertRows.Add(new CatalogBatchSqlBuilder.MaskOverrideInsertRow(colId, functionCode, paramsJson, keyRef));
+                    }
+                    else if (hadMask)
+                    {
+                        maskDeleteColIds.Add(colId);
+                    }
                 }
 
                 if (incoming.ReplaceKeyDefinition)
                 {
                     structuralChanges[i] = true;
-                    await CatalogKeyDefinitionStore.ReplaceAsync(conn, tx, repo.KeyDialect, tableIds[i], incoming, colIdByName, ct).ConfigureAwait(false);
+                    replaceKeyTableIds.Add(tableIds[i]);
+
+                    var validatedKeys = TableKeyDefinitionValidator.Validate(incoming);
+                    for (var pkOrd = 0; pkOrd < validatedKeys.PrimaryKeyColumns.Count; pkOrd++)
+                    {
+                        var pkColName = validatedKeys.PrimaryKeyColumns[pkOrd];
+                        if (!colIdByName.TryGetValue(pkColName, out var pkColId))
+                        {
+                            throw new InvalidOperationException($"Key column '{pkColName}' has no persisted column id for table '{incoming.Identifier}'.");
+                        }
+
+                        pkInsertRows.Add(new CatalogBatchSqlBuilder.PrimaryKeyInsertRow(
+                            tableIds[i],
+                            pkOrd + 1,
+                            pkColId.ToString(),
+                            KeyDirections.IsDescending(validatedKeys.PrimaryKeyDirections, pkOrd)));
+                    }
+
+                    foreach (var index in validatedKeys.Indexes)
+                    {
+                        var indexId = Guid.NewGuid().ToString();
+                        indexInsertRows.Add(new CatalogBatchSqlBuilder.IndexInsertRow(indexId, tableIds[i], index.Name, index.IsUnique));
+                        for (var icOrd = 0; icOrd < index.Columns.Count; icOrd++)
+                        {
+                            var idxColName = index.Columns[icOrd];
+                            if (!colIdByName.TryGetValue(idxColName, out var idxColId))
+                            {
+                                throw new InvalidOperationException($"Key column '{idxColName}' has no persisted column id for table '{incoming.Identifier}'.");
+                            }
+
+                            indexColumnInsertRows.Add(new CatalogBatchSqlBuilder.IndexColumnInsertRow(
+                                indexId,
+                                icOrd + 1,
+                                idxColId.ToString(),
+                                KeyDirections.IsDescending(index.Directions, icOrd)));
+                        }
+                    }
+
+                    if (!wasCreated[i] && before.ColumnsByTable.TryGetValue(tableIds[i], out var storedCols))
+                    {
+                        var incomingColNames = new HashSet<string>(incoming.Columns.Select(c => c.ColumnName), StringComparer.OrdinalIgnoreCase);
+                        var removedSet = removedColIds.Count > 0 ? new HashSet<Guid>(removedColIds) : null;
+                        foreach (var storedCol in storedCols)
+                        {
+                            if (incomingColNames.Contains(storedCol.ColumnName) || (removedSet != null && removedSet.Contains(storedCol.Id)))
+                            {
+                                continue;
+                            }
+
+                            var markers = CatalogKeyDefinitionStore.WithKeyMarkers(storedCol.Meta, storedCol.ColumnName, validatedKeys.PrimaryKeyColumns);
+                            if (markers.Count != storedCol.Meta.Count || !markers.All(kv => storedCol.Meta.TryGetValue(kv.Key, out var v) && v == kv.Value))
+                            {
+                                staleMarkerUpdates.Add((storedCol.Id.ToString(), markers.Count > 0 ? JsonSerializer.Serialize(markers) : "{}"));
+                            }
+                        }
+                    }
                 }
+            }
+
+            await CatalogBatchSqlBuilder.UpsertTablesBatchAsync(repo, conn, tx, tableRows, ct).ConfigureAwait(false);
+            await CatalogBatchSqlBuilder.DeleteRemovedColumnsBatchAsync(repo, conn, tx, removedColIds, ct).ConfigureAwait(false);
+            await CatalogBatchSqlBuilder.UpsertColumnsBatchAsync(repo, conn, tx, columnRows, ct).ConfigureAwait(false);
+            await CatalogBatchSqlBuilder.InsertGlobalClassificationsBatchAsync(repo, conn, tx, classificationRows, ct).ConfigureAwait(false);
+            await CatalogBatchSqlBuilder.ReplaceGlobalMaskOverridesBatchAsync(repo, conn, tx, maskDeleteColIds, maskInsertRows, ct).ConfigureAwait(false);
+            await CatalogBatchSqlBuilder.ReplaceKeyDefinitionsBatchAsync(repo, conn, tx, replaceKeyTableIds, pkInsertRows, indexInsertRows, indexColumnInsertRows, ct).ConfigureAwait(false);
+
+            foreach (var (colIdStr, metaJson) in staleMarkerUpdates)
+            {
+                await using var markerCmd = conn.CreateCommand();
+                markerCmd.Transaction = tx;
+                markerCmd.CommandText = $"UPDATE {repo.KeyDialect.Prefix}TABLE_COLUMNS SET meta_json = @meta WHERE id = @id";
+                markerCmd.AddBound("@meta", metaJson);
+                markerCmd.AddBound("@id", colIdStr);
+                await markerCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 
             Dictionary<NormalizedIdentifierKey, Table>? afterTables = null;
@@ -236,15 +445,18 @@ internal static class CatalogBatchUpsertHelper
                     changeVersion = newVersion.Value.StructureVersion + newVersion.Value.ContentVersion;
                 }
 
+                var epochRows = new List<CatalogBatchSqlBuilder.EpochUpsertRow>(count);
                 List<TableIdentifier>? deferredTables = deferVersionToScope ? new List<TableIdentifier>(count) : null;
                 for (var i = 0; i < count; i++)
                 {
                     if (classifications[i] != CatalogWriteClassification.Unchanged)
                     {
-                        await repo.IncrementTableEpochInternalAsync(conn, tx, chunk[i].Identifier, ct, changeVersion).ConfigureAwait(false);
+                        epochRows.Add(new CatalogBatchSqlBuilder.EpochUpsertRow(tableIds[i], chunk[i].Identifier));
                         deferredTables?.Add(chunk[i].Identifier);
                     }
                 }
+
+                await CatalogBatchSqlBuilder.IncrementTableEpochsBatchAsync(repo, conn, tx, epochRows, changeVersion, ct).ConfigureAwait(false);
 
                 await tx.CommitAsync(ct).ConfigureAwait(false);
 
@@ -464,53 +676,6 @@ internal static class CatalogBatchUpsertHelper
             repo.LogCatalogNotice("The stored table state could not be projected for no-op detection; the write proceeds.");
             return null;
         }
-    }
-
-    private static async Task ExecuteTableUpsertRowAsync(
-        GovernanceRepository repo,
-        DbConnection conn,
-        DbTransaction tx,
-        Guid tableId,
-        TableMetadata metadata,
-        CatalogRowHydrator.TableDocumentation docs,
-        CancellationToken ct)
-    {
-        var httpEndpointJson = metadata.Table.HttpEndpoint != null
-            ? JsonSerializer.Serialize(metadata.Table.HttpEndpoint)
-            : null;
-
-        await using var upsertCmd = conn.CreateCommand();
-        upsertCmd.Transaction = tx;
-        upsertCmd.CommandText = repo.UpsertTableSql;
-        upsertCmd.AddBound("@id", tableId.ToString());
-        upsertCmd.AddBound("@sourceType", metadata.Table.SourceType);
-        upsertCmd.AddBound("@domain", metadata.Identifier.Domain);
-        upsertCmd.AddBound("@schema", metadata.Identifier.Schema);
-        upsertCmd.AddBound("@tableName", metadata.Identifier.TableName);
-        upsertCmd.AddBound("@displayName", metadata.Table.DisplayName);
-        upsertCmd.AddBound("@sensitivity", metadata.Table.Sensitivity);
-        upsertCmd.AddBound("@fourEyes", metadata.Table.RequiresFourEyes ? 1 : 0);
-        upsertCmd.AddBound("@active", metadata.Table.IsActive ? 1 : 0);
-        upsertCmd.AddBound("@dst", (int)metadata.Table.DataSourceType);
-        upsertCmd.AddBound("@httpJson", (object?)httpEndpointJson ?? DBNull.Value);
-        upsertCmd.AddBound("@plugin", (object?)metadata.Table.PluginName ?? DBNull.Value);
-        upsertCmd.AddBound("@desc", (object?)docs.Description ?? DBNull.Value);
-        upsertCmd.AddBound("@longDesc", (object?)docs.LongDescription ?? DBNull.Value);
-        upsertCmd.AddBound("@docSource", (object?)docs.Source ?? DBNull.Value);
-        upsertCmd.AddBound("@requiredFilterColumnsJson", metadata.RequiredFilterColumns.IsDefaultOrEmpty ? (object)DBNull.Value : JsonSerializer.Serialize(metadata.RequiredFilterColumns));
-        upsertCmd.AddBound("@textsJson", (object?)CatalogLocalizationPersistence.SerializeLocalizedTexts(metadata.Table.Texts) ?? DBNull.Value);
-        upsertCmd.AddBound("@minGroupSize", (object?)metadata.Table.MinGroupSize ?? DBNull.Value);
-        upsertCmd.AddBound("@nonPersonal", metadata.Table.NonPersonal);
-        upsertCmd.AddBound("@dbtUniqueId", (object?)metadata.Table.DbtUniqueId ?? DBNull.Value);
-        upsertCmd.AddBound("@objectKind", metadata.Table.ObjectKind switch
-        {
-            DiscoveryObjectKind.Table => "table",
-            DiscoveryObjectKind.View => "view",
-            DiscoveryObjectKind.MetricView => "metric_view",
-            _ => throw new ArgumentOutOfRangeException(nameof(metadata), metadata.Table.ObjectKind, "Unsupported DiscoveryObjectKind for persistence.")
-        });
-        upsertCmd.AddBound("@metricViewCountMeasure", (object?)metadata.Table.MetricViewCountMeasure ?? DBNull.Value);
-        await upsertCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
     private static async Task<Dictionary<NormalizedIdentifierKey, Table>> SelectChunkTablesAsync(

@@ -49,6 +49,8 @@ public sealed class ClassificationAccessResolver
     private readonly IClassificationRepository? _repository;
     private readonly TimeProvider _timeProvider;
 
+    internal IClassificationRepository? Repository => _repository;
+
     public ClassificationAccessResolver(
         SqlDataMaskingProvider maskProvider,
         IClassificationRepository? repository = null,

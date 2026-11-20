@@ -215,7 +215,7 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
         AppendInlineInteger(ref builder, 1, context);
     }
 
-    private static bool TryGetIntegerLiteral(Expression expression, out long value)
+    protected static bool TryGetIntegerLiteral(Expression expression, out long value)
     {
         switch (expression)
         {

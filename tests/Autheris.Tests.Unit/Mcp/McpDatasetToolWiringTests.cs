@@ -56,9 +56,15 @@ public sealed class McpDatasetToolWiringTests
         tool.Description.ShouldNotBeNullOrWhiteSpace();
         using var schema = JsonDocument.Parse(tool.InputJsonSchema);
         schema.RootElement.GetProperty("type").GetString().ShouldBe("object");
-        if (name is "describe_dataset" or "sample_rows")
+        if (name is "sample_rows")
         {
             schema.RootElement.GetProperty("required").EnumerateArray().Select(e => e.GetString()).ShouldContain("dataset");
+        }
+        else if (name is "describe_dataset")
+        {
+            var props = schema.RootElement.GetProperty("properties");
+            props.TryGetProperty("dataset", out _).ShouldBeTrue();
+            props.TryGetProperty("graphQlField", out _).ShouldBeTrue();
         }
     }
 

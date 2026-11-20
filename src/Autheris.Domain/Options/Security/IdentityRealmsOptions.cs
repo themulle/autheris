@@ -4,34 +4,70 @@ using System.Collections.Generic;
 using Autheris.Domain.Identity;
 using Autheris.Domain.Security;
 
+/// <summary>Multi-realm identity provider and SCIM provisioning configuration (<c>Authentication:Realms</c>).</summary>
 public sealed class IdentityRealmsOptions
 {
     public const string SectionName = "Authentication:Realms";
 
+    /// <summary>Named identity realm configurations keyed by realm identifier.</summary>
     public Dictionary<string, IdentityRealmConfigOptions> Realms { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>Optional default realm name used when a request does not specify a realm.</summary>
     public string? DefaultRealm { get; set; }
 
+    /// <summary>Global SCIM 2.0 provisioning rate-limit and IP-allowlist settings (<c>Authentication:Realms:Scim</c>).</summary>
     public ScimOptions Scim { get; set; } = new();
 }
 
+/// <summary>Configuration of a single identity realm.</summary>
 public sealed class IdentityRealmConfigOptions
 {
+    /// <summary>Identity provider kind for this realm (EntraWorkforce, EntraExternalId, GenericOidc, etc.).</summary>
     public IdentityRealmKind Kind { get; set; } = IdentityRealmKind.EntraWorkforce;
+
+    /// <summary>Accepted OIDC token issuer URIs for this realm.</summary>
     public List<string> Issuers { get; set; } = [];
+
+    /// <summary>OIDC discovery metadata address for fetching signing keys.</summary>
     public string? MetadataAddress { get; set; }
+
+    /// <summary>Accepted JWT audience values for tokens issued by this realm.</summary>
     public List<string> Audiences { get; set; } = [];
+
+    /// <summary>Optional allowlist of OAuth client IDs (<c>azp</c>/<c>appid</c>) permitted to authenticate in this realm.</summary>
     public List<string>? AllowedClientIds { get; set; }
+
+    /// <summary>JWT claim name used as the primary user key (default <c>oid</c>).</summary>
     public string UserKeyClaim { get; set; } = "oid";
+
+    /// <summary>JWT claim name used to extract the user principal name (default <c>upn</c>).</summary>
     public string UpnClaim { get; set; } = "upn";
+
+    /// <summary>Optional fixed tenant ID assigned to all principals authenticating through this realm.</summary>
     public string? FixedTenantId { get; set; }
+
+    /// <summary>Optional JWT claim name from which the caller's tenant ID is extracted.</summary>
     public string? TenantClaimName { get; set; }
+
+    /// <summary>Optional mapping from raw tenant claim values to canonical gateway tenant IDs.</summary>
     public Dictionary<string, string>? TenantClaimMapping { get; set; }
+
+    /// <summary>Source used to resolve group memberships for callers in this realm.</summary>
     public RealmGroupSource GroupSource { get; set; } = RealmGroupSource.Resolver;
+
+    /// <summary>Ordered list of group resolver identifiers consulted when <see cref="GroupSource"/> uses resolvers.</summary>
     public List<string> ResolverChain { get; set; } = ["scim-store"];
+
+    /// <summary>User and group provisioning mode for this realm.</summary>
     public RealmProvisioningMode Provisioning { get; set; } = RealmProvisioningMode.Scim;
+
+    /// <summary>Per-realm SCIM 2.0 bearer secrets and correlation settings.</summary>
     public ScimRealmSecretOptions? Scim { get; set; }
+
+    /// <summary>Canonical gateway roles that callers in this realm are permitted to hold.</summary>
     public List<string> AllowedGatewayRoles { get; set; } = [];
+
+    /// <summary>When true, principals in this realm may participate in on-behalf-of delegation.</summary>
     public bool Delegable { get; set; }
 
     /// <summary>Exact OIDC subjects of workload identities and the gateway roles each one receives (GenericOidc realms only; configuration is the only way to define a mapping).</summary>
@@ -132,7 +168,12 @@ public sealed class ScimMassChangeProtectionOptions
     public const int WindowMinutesLowerBound = 1;
     public const int WindowMinutesUpperBound = 1440;
 
+    /// <summary>Enables SCIM mass-deprovisioning protection (set false only as an explicit opt-out).</summary>
     public bool Enabled { get; set; } = true;
+
+    /// <summary>Maximum number of destructive SCIM user-lock operations allowed within <see cref="WindowMinutes"/>.</summary>
     public int MaxDestructiveOperations { get; set; } = 100;
+
+    /// <summary>Sliding window duration in minutes over which destructive SCIM operations are counted.</summary>
     public int WindowMinutes { get; set; } = 60;
 }

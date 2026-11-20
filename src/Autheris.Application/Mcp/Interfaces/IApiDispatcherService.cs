@@ -25,4 +25,6 @@ public interface IApiDispatcherService
     Task<string> GetEndpointsDocumentationAsync(CancellationToken ct = default);
 
     Task<string> GetMcpToolsDocumentationAsync(CancellationToken ct = default);
+
+    Task<string> GetQueryGuideDocumentationAsync(CancellationToken ct = default);
 }

@@ -136,7 +136,8 @@ public static class GatewayMcpServer
         new() { Uri = "autheris://governance/my-access", Name = "My Access", Description = "Effective access profile, roles and policies of current caller", MimeType = "text/markdown" },
         new() { Uri = "autheris://api/openapi.json", Name = "OpenAPI Specification", Description = "OpenAPI 3.1 specification for Autheris REST endpoints", MimeType = "application/json" },
         new() { Uri = "autheris://api/docs/endpoints", Name = "API Endpoints Documentation", Description = "Markdown documentation of available REST endpoints", MimeType = "text/markdown" },
-        new() { Uri = "autheris://api/docs/mcp-tools", Name = "MCP Tools Reference", Description = "Markdown reference for available MCP tools", MimeType = "text/markdown" }
+        new() { Uri = "autheris://api/docs/mcp-tools", Name = "MCP Tools Reference", Description = "Markdown reference for available MCP tools", MimeType = "text/markdown" },
+        new() { Uri = McpResourceProvider.QueryGuideDocUri, Name = "Agent Query Guide", Description = "Markdown guide to the gateway's GraphQL dialect and enabled query features", MimeType = "text/markdown" }
     ];
 
     /// <summary>115 A-6: omits the native resources whose group is switched off (the same gate<c>ReadAsync</c> applies).</summary>

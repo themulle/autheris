@@ -195,7 +195,8 @@ public sealed class MaskedCatalogTextTests
         TableAccessPolicy policy,
         IClassificationRepository classStore,
         IReadOnlyList<Consent> consents,
-        DiscoveryArtifacts? artifacts = null)
+        DiscoveryArtifacts? artifacts = null,
+        CatalogDiscoveryOptions? discoveryOptions = null)
     {
         var tablesRepo = new FakeDiscoveryTableRepository();
         tablesRepo.Tables.Add(table);
@@ -217,7 +218,7 @@ public sealed class MaskedCatalogTextTests
             artifactStore,
             new FakeAuditWriter(),
             Options.Create(new GatewayOptions { Tenancy = TenancyShape.Multi.Options() }),
-            Options.Create(new CatalogDiscoveryOptions()),
+            Options.Create(discoveryOptions ?? new CatalogDiscoveryOptions()),
             classificationRepository: classStore);
     }
 
@@ -575,6 +576,134 @@ public sealed class MaskedCatalogTextTests
             _ => true);
         visibleTermHits.Count.ShouldBe(1);
         visibleTermHits[0].RelevantColumns.ShouldNotContain("ssn");
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task RestrictedScope_HideMaskedColumnCatalogTextOption_ControlsCatalogTextAndExamples_AcrossMcpRestAndGraphQl(bool hideOptionEnabled)
+    {
+        var table = BuildTable(Guid.NewGuid(), Guid.NewGuid());
+        var consents = new[] { BuildAllowConsent(includePiiSpecialClear: true) };
+        var (policy, classStore) = await CreatePolicyAsync(consents, CatalogTextVisibility.Visible);
+        var discovery = CreateDiscovery(
+            table,
+            policy,
+            classStore,
+            consents,
+            discoveryOptions: new CatalogDiscoveryOptions
+            {
+                Discovery = new CatalogDiscoverySettings
+                {
+                    HideMaskedColumnCatalogTextForRestrictedScopes = hideOptionEnabled
+                }
+            });
+
+        var restrictedUser = DiscoveryTestBuilder.User(UserSid.Value, Tenant.Value, scopes: "Agent.Read");
+        var restrictedCaller = DiscoveryTestBuilder.Caller(restrictedUser, Tenant);
+        var restrictedObj = await discovery.GetAsync(CustomersId, restrictedCaller);
+        restrictedObj.ShouldNotBeNull();
+
+        // 1. REST catalog
+        var restDetail = CatalogDiscoveryProjection.ToDatasetDetail(restrictedObj!, language: null);
+        var ssnRest = restDetail.Columns.Single(c => c.Name == "ssn");
+        restDetail.Columns.Single(c => c.Name == "id").Description.ShouldBe("Surrogate customer primary identifier.");
+        if (hideOptionEnabled)
+        {
+            ssnRest.DisplayName.ShouldBeNull();
+            ssnRest.Description.ShouldBeNull();
+        }
+        else
+        {
+            ssnRest.DisplayName.ShouldBe("Taxpayer National Secret Identifier");
+            ssnRest.Description.ShouldBe("Secret government tax number issued to taxpayers.");
+        }
+
+        // 2. GraphQL catalog
+        var gql = Query.ToTableMetadataDto(restrictedObj);
+        var ssnGql = gql.Columns.Single(c => c.Name == "ssn");
+        gql.Columns.Single(c => c.Name == "id").Description.ShouldBe("Surrogate customer primary identifier.");
+        if (hideOptionEnabled)
+        {
+            ssnGql.DisplayName.ShouldBeNull();
+            ssnGql.Description.ShouldBeNull();
+        }
+        else
+        {
+            ssnGql.DisplayName.ShouldBe("Taxpayer National Secret Identifier");
+            ssnGql.Description.ShouldBe("Secret government tax number issued to taxpayers.");
+        }
+
+        // 3. MCP describe_dataset (full & brief), list_datasets, and examples
+        var opts = Options.Create(new GatewayOptions { Tenancy = TenancyShape.Multi.Options(), Mcp = new McpOptions { Enabled = true } });
+        var golden = new GoldenQueryService(opts, NullLogger<GoldenQueryService>.Instance);
+        golden.RegisterGoldenQuery(new GoldenQuery("q-ssn", "crm", "customers", "Lookup SSN", "Selects SSN", "SELECT id, ssn FROM crm.dbo.customers", null, [], FixedNow));
+        golden.RegisterGoldenQuery(new GoldenQuery("q-safe", "crm", "customers", "List IDs", "Selects ID only", "SELECT id FROM crm.dbo.customers", null, [], FixedNow));
+
+        var mcp = new McpDatasetCatalog(
+            new FakeDiscoveryTableRepository { Tables = { table } },
+            new TestInMemoryConsentRepository(consents, filterWindow: false),
+            new FakeMcpGatewayExecution(),
+            new FakeMcpAuditRepo(),
+            goldenQueryService: golden,
+            options: opts,
+            graphQlMap: new FakeGraphQlMap(CustomersId),
+            discoveryService: discovery);
+
+        var descFull = await mcp.DescribeDatasetAsync(restrictedUser, "crm.dbo.customers", language: null, brief: false);
+        var ssnMcp = descFull.Columns.Single(c => c.Name == "ssn");
+        descFull.Columns.Single(c => c.Name == "id").Description.ShouldBe("Surrogate customer primary identifier.");
+        if (hideOptionEnabled)
+        {
+            ssnMcp.DisplayName.ShouldBeNull();
+            ssnMcp.Description.ShouldBeNull();
+            ssnMcp.LongDescription.ShouldBeNull();
+            descFull.Examples.Select(e => e.Title).ShouldBe(["List IDs"]);
+        }
+        else
+        {
+            ssnMcp.DisplayName.ShouldBe("Taxpayer National Secret Identifier");
+            ssnMcp.Description.ShouldBe("Secret government tax number issued to taxpayers.");
+            descFull.Examples.Select(e => e.Title).ShouldContain("Lookup SSN");
+        }
+
+        var descBrief = await mcp.DescribeDatasetAsync(restrictedUser, "crm.dbo.customers", language: null, brief: true);
+        descBrief.Columns.ShouldAllBe(c => c.Description == null && c.DisplayName == null);
+
+        var listMatch = await mcp.ListDatasetsAsync(restrictedUser, search: "Taxpayer", domain: null, offset: null, limit: null, tag: null, language: null, overview: null, format: null, accessStatus: null);
+        if (hideOptionEnabled)
+        {
+            listMatch.Datasets.ShouldBeEmpty();
+        }
+        else
+        {
+            listMatch.Datasets.Count.ShouldBe(1);
+        }
+
+        // 4. Unrestricted caller always sees catalog text even when HideMaskedColumnCatalogTextForRestrictedScopes is true
+        var unrestrictedUser = DiscoveryTestBuilder.User(UserSid.Value, Tenant.Value);
+        var unrestrictedObj = await discovery.GetAsync(CustomersId, DiscoveryTestBuilder.Caller(unrestrictedUser, Tenant));
+        unrestrictedObj!.Columns.Single(c => c.Name == "ssn").Description.ShouldBe("Secret government tax number issued to taxpayers.");
+    }
+
+    [Fact]
+    public async Task RestrictedScope_WithRuleLevelHiddenCatalogText_OmitsTextEvenWhenBaseConsentIsClear()
+    {
+        var table = BuildTable(Guid.NewGuid(), Guid.NewGuid());
+        var consents = new[] { BuildAllowConsent(includePiiSpecialClear: true) };
+        var (policy, classStore) = await CreatePolicyAsync(consents, CatalogTextVisibility.Hidden);
+        var discovery = CreateDiscovery(table, policy, classStore, consents);
+
+        var restrictedUser = DiscoveryTestBuilder.User(UserSid.Value, Tenant.Value, scopes: "Agent.Read");
+        var obj = await discovery.GetAsync(CustomersId, DiscoveryTestBuilder.Caller(restrictedUser, Tenant));
+        obj.ShouldNotBeNull();
+
+        var ssn = obj!.Columns.Single(c => c.Name == "ssn");
+        ssn.State.ShouldBe(DiscoveryColumnState.Masked);
+        ssn.DisplayName.ShouldBeNull();
+        ssn.Description.ShouldBeNull();
+        ssn.LongDescription.ShouldBeNull();
+        obj.HiddenTextColumns.ShouldContain("ssn");
     }
 
     private sealed class FakeGraphQlMap(TableIdentifier id) : IGraphQlCatalogMap

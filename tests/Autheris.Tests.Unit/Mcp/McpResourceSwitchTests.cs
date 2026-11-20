@@ -46,6 +46,7 @@ public sealed class McpResourceSwitchTests
         dispatcher.GetOpenApiJsonAsync(Arg.Any<CancellationToken>()).Returns("{}");
         dispatcher.GetEndpointsDocumentationAsync(Arg.Any<CancellationToken>()).Returns("docs");
         dispatcher.GetMcpToolsDocumentationAsync(Arg.Any<CancellationToken>()).Returns("tools");
+        dispatcher.GetQueryGuideDocumentationAsync(Arg.Any<CancellationToken>()).Returns("guide");
         return (new McpResourceProvider(discovery, dispatcher, switches), discovery, dispatcher);
     }
 
@@ -57,7 +58,8 @@ public sealed class McpResourceSwitchTests
         ["autheris://governance/my-access", McpToolGroup.Access],
         ["autheris://api/openapi.json", McpToolGroup.Api],
         ["autheris://api/docs/endpoints", McpToolGroup.Api],
-        ["autheris://api/docs/mcp-tools", McpToolGroup.Api]
+        ["autheris://api/docs/mcp-tools", McpToolGroup.Api],
+        ["autheris://api/docs/query-guide", McpToolGroup.Api]
     ];
 
     [Theory]
@@ -127,7 +129,8 @@ public sealed class McpResourceSwitchTests
         ListedUris(null).ShouldBe(
         [
             "autheris://catalog/summary", "autheris://catalog/datasources", "autheris://governance/my-access",
-            "autheris://api/openapi.json", "autheris://api/docs/endpoints", "autheris://api/docs/mcp-tools"
+            "autheris://api/openapi.json", "autheris://api/docs/endpoints", "autheris://api/docs/mcp-tools",
+            "autheris://api/docs/query-guide"
         ]);
         ListedUris(Switches()).ShouldBe(ListedUris(null));
     }

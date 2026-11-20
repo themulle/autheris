@@ -22,6 +22,7 @@ public sealed class McpResourceProvider : IMcpResourceProvider
     private const string OpenApiUri = "autheris://api/openapi.json";
     private const string EndpointsDocUri = "autheris://api/docs/endpoints";
     private const string McpToolsDocUri = "autheris://api/docs/mcp-tools";
+    public const string QueryGuideDocUri = "autheris://api/docs/query-guide";
     private const string SchemaPrefix = "autheris://catalog/datasets/";
     private const string SchemaSuffix = "/schema";
     private const string Markdown = "text/markdown";
@@ -99,7 +100,7 @@ public sealed class McpResourceProvider : IMcpResourceProvider
     /// budget, which would cut a JSON document in half, does not apply to them; ABAC, PII scrubbing and audit do.
     /// </summary>
     public static bool IsStaticDocumentation(string uri) =>
-        Is(uri, OpenApiUri) || Is(uri, EndpointsDocUri) || Is(uri, McpToolsDocUri);
+        Is(uri, OpenApiUri) || Is(uri, EndpointsDocUri) || Is(uri, McpToolsDocUri) || Is(uri, QueryGuideDocUri);
 
     /// <summary>
     /// The fixed catalog-level resources (catalog summary, data source list, the caller's own access, static API documentation): they read no
@@ -221,6 +222,11 @@ public sealed class McpResourceProvider : IMcpResourceProvider
         if (Is(uri, McpToolsDocUri))
         {
             return new McpResourceContent(uri, Markdown, await _dispatcher.GetMcpToolsDocumentationAsync(ct).ConfigureAwait(false));
+        }
+
+        if (Is(uri, QueryGuideDocUri))
+        {
+            return new McpResourceContent(uri, Markdown, await _dispatcher.GetQueryGuideDocumentationAsync(ct).ConfigureAwait(false));
         }
 
         throw new McpResourceNotFoundException(uri);

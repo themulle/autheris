@@ -31,6 +31,9 @@ public sealed class CatalogDiscoverySettings
     public int AccessRequestsPerHour { get; set; } = 30;
     public int MaxSampleRows { get; set; } = 20;
     public long MaxArtifactBytes { get; set; } = 262_144;
+
+    /// <summary>When true, catalog text and example fields of columns masked for a restricted-scope caller are omitted across all catalog paths.</summary>
+    public bool HideMaskedColumnCatalogTextForRestrictedScopes { get; set; }
 }
 
 /// <summary>Per-tenant overrides for discovery required roles and scopes.</summary>
