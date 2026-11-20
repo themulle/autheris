@@ -39,6 +39,7 @@ public static class GatewayConfigurationSchema
         ("Gateway:Governance:AccessPlanning", typeof(AccessPlanOptions)),
         ("Gateway:Governance:IndividualGrants", typeof(IndividualGrantOptions)),
         (ExternalApiSettings.SectionName, typeof(ExternalApiSettings)),
+        (QueryAnalysisSettings.SectionName, typeof(QueryAnalysisSettings)),
         (GrantValidityOptions.SectionName, typeof(GrantValidityOptions)),
         (ConsentEventsOptions.SectionName, typeof(ConsentEventsOptions)),
         ("Gateway:Governance:RestrictedScopes", typeof(RestrictedScopeOptions)),

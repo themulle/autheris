@@ -14,6 +14,20 @@ public sealed class GovernanceOptions
 }
 
 /// <summary>
+/// Configuration settings for static query analysis (<c>Gateway:Governance:QueryAnalysis</c>).
+/// </summary>
+public sealed class QueryAnalysisSettings
+{
+    public const string SectionName = GatewaySections.QueryAnalysis;
+
+    /// <summary>
+    /// Allowlist of read-only scope names that may be supplied via <c>targetScope</c> on
+    /// <c>POST /api/v1/governance/queries/analyze</c>. Empty by default (no target scopes allowed).
+    /// </summary>
+    public List<string> AllowedTargetScopes { get; init; } = [];
+}
+
+/// <summary>
 /// Configuration settings for the canonical <c>/api/v1/consent</c> REST endpoints.
 /// </summary>
 public sealed class ExternalApiSettings

@@ -23,6 +23,20 @@ public interface IQueryAnalysisService
         CancellationToken ct = default);
 
     /// <summary>
+    /// Analyzes a batch of queries against the quota policy of <paramref name="targetScope"/> (a read-only scope of the same person)
+    /// without mutating bucket state or reading source rows.
+    /// </summary>
+    Task<QueryAnalysisResult> AnalyzeQueriesAsync(
+        IReadOnlyList<QueryAnalysisItem> queries,
+        ClaimsPrincipal callerPrincipal,
+        ClaimsPrincipal? targetPrincipal,
+        string? targetScope,
+        CancellationToken ct = default) =>
+        targetScope is null
+            ? AnalyzeQueriesAsync(queries, callerPrincipal, targetPrincipal, ct)
+            : throw new System.NotSupportedException("Target scope analysis is not supported by this IQueryAnalysisService implementation.");
+
+    /// <summary>
     /// Evaluates access requirements for a batch of queries across a group of principals and returns only aggregate counts
     /// per dataset (never individual user names or SIDs).
     /// </summary>

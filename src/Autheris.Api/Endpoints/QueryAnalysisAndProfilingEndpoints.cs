@@ -21,7 +21,8 @@ using Microsoft.AspNetCore.Routing;
 public sealed record AnalyzeQueriesHttpRequest(
     IReadOnlyList<QueryAnalysisItem> Queries,
     string? TargetSubjectId = null,
-    IReadOnlyList<string>? TargetRoles = null);
+    IReadOnlyList<string>? TargetRoles = null,
+    string? TargetScope = null);
 
 /// <summary>
 /// HTTP request payload for <c>POST /api/v1/governance/consents/bundle</c> (Issue #79).
@@ -125,13 +126,25 @@ public static class QueryAnalysisAndProfilingEndpoints
 
         try
         {
-            var result = await analysisService.AnalyzeQueriesAsync(
-                request.Queries,
-                httpContext.User,
-                targetPrincipal,
-                ct).ConfigureAwait(false);
+            var result = request.TargetScope is null
+                ? await analysisService.AnalyzeQueriesAsync(
+                    request.Queries,
+                    httpContext.User,
+                    targetPrincipal,
+                    ct).ConfigureAwait(false)
+                : await analysisService.AnalyzeQueriesAsync(
+                    request.Queries,
+                    httpContext.User,
+                    targetPrincipal,
+                    request.TargetScope,
+                    ct).ConfigureAwait(false);
 
             return Results.Ok(result);
+        }
+        catch (ArgumentException ex)
+        {
+            SafeErrorResults.LogFailure(httpContext, ex, "INVALID_TARGET_SCOPE");
+            return SafeErrorResults.BadRequest("INVALID_TARGET_SCOPE", "The requested targetScope is invalid or not in the configured allowlist.", httpContext);
         }
         catch (UnauthorizedAccessException ex)
         {
