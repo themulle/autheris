@@ -52,6 +52,12 @@ public interface IMcpDatasetCatalog
             ? DescribeDatasetAsync(principal, dataset ?? string.Empty, language, brief, ct)
             : Task.FromException<McpDatasetDescription>(new System.NotSupportedException("Lookup by graphQlField is not supported by this dataset catalog."));
 
+    /// <summary>Issue #710: describes a dataset by <paramref name="dataset"/> id, exact case-sensitive <paramref name="graphQlField"/>, or three-part <paramref name="sqlName"/>.</summary>
+    Task<McpDatasetDescription> DescribeDatasetAsync(ClaimsPrincipal principal, string? dataset, string? graphQlField, string? sqlName, string? language, bool brief, CancellationToken ct = default)
+        => sqlName is null
+            ? DescribeDatasetAsync(principal, dataset, graphQlField, language, brief, ct)
+            : Task.FromException<McpDatasetDescription>(new System.NotSupportedException("Lookup by sqlName is not supported by this dataset catalog."));
+
     Task<EffectiveTableAccessDto> DescribeMyAccessAsync(ClaimsPrincipal principal, string dataset, CancellationToken ct = default);
 
     /// <summary>Issue #682: explains caller access by <paramref name="dataset"/> id or exact case-sensitive <paramref name="graphQlField"/>.</summary>
@@ -59,6 +65,12 @@ public interface IMcpDatasetCatalog
         => graphQlField is null
             ? DescribeMyAccessAsync(principal, dataset ?? string.Empty, ct)
             : Task.FromException<EffectiveTableAccessDto>(new System.NotSupportedException("Lookup by graphQlField is not supported by this dataset catalog."));
+
+    /// <summary>Issue #710: explains caller access by <paramref name="dataset"/> id, exact case-sensitive <paramref name="graphQlField"/>, or three-part <paramref name="sqlName"/>.</summary>
+    Task<EffectiveTableAccessDto> DescribeMyAccessAsync(ClaimsPrincipal principal, string? dataset, string? graphQlField, string? sqlName, CancellationToken ct = default)
+        => sqlName is null
+            ? DescribeMyAccessAsync(principal, dataset, graphQlField, ct)
+            : Task.FromException<EffectiveTableAccessDto>(new System.NotSupportedException("Lookup by sqlName is not supported by this dataset catalog."));
 
     Task<McpDatasetSample> SampleRowsAsync(ClaimsPrincipal principal, string dataset, int? count, CancellationToken ct = default);
 }
