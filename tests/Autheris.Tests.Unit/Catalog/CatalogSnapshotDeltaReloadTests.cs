@@ -242,6 +242,63 @@ public sealed class CatalogSnapshotDeltaReloadTests
         readerSnapshot.TableCount.ShouldBe(2);
     }
 
+    [Fact]
+    public void SingleTableDelta_At50000Tables_CompletesUnder100Ms_AndPreservesLookups()
+    {
+        const int tableCount = 50_000;
+        var tables = new TableMetadata[tableCount];
+        for (var i = 0; i < tableCount; i++)
+        {
+            tables[i] = CreateTable($"table_{i:D5}");
+        }
+
+        var baseSnapshot = CatalogSnapshot.Create(new CatalogVersion(1, 1), tables, Array.Empty<TableRelation>());
+
+        // Warm up JIT for WithDelta on a tiny snapshot before timing.
+        var warmup = CatalogSnapshot.Create(new CatalogVersion(1, 1), [tables[0], tables[1]], Array.Empty<TableRelation>());
+        _ = warmup.WithDelta(new CatalogVersion(1, 2), [tables[0].Identifier], [tables[0] with { Table = tables[0].Table with { DisplayName = "warm" } }]);
+
+        var target = tables[25_000];
+        var updatedTarget = target with { Table = target.Table with { DisplayName = "updated_25000" } };
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var afterUpdate = baseSnapshot.WithDelta(
+            new CatalogVersion(1, 2),
+            [target.Identifier],
+            [updatedTarget]);
+        sw.Stop();
+
+        sw.ElapsedMilliseconds.ShouldBeLessThan(100);
+        afterUpdate.TableCount.ShouldBe(tableCount);
+        afterUpdate.FindTable(target.Identifier)!.Table.DisplayName.ShouldBe("updated_25000");
+        afterUpdate.FindTable(target.Table.Id)!.Table.DisplayName.ShouldBe("updated_25000");
+        baseSnapshot.FindTable(target.Identifier)!.Table.DisplayName.ShouldBe("table_25000");
+
+        var added = CreateTable("table_added");
+        sw.Restart();
+        var afterAdd = afterUpdate.WithDelta(new CatalogVersion(1, 3), [added.Identifier], [added]);
+        sw.Stop();
+
+        sw.ElapsedMilliseconds.ShouldBeLessThan(100);
+        afterAdd.TableCount.ShouldBe(tableCount + 1);
+        afterAdd.FindTable(added.Identifier).ShouldNotBeNull();
+        afterAdd.FindTable(added.Table.Id).ShouldNotBeNull();
+
+        var removed = tables[10];
+        sw.Restart();
+        var afterRemove = afterAdd.WithDelta(new CatalogVersion(1, 4), [removed.Identifier], Array.Empty<TableMetadata>());
+        sw.Stop();
+
+        sw.ElapsedMilliseconds.ShouldBeLessThan(100);
+        afterRemove.TableCount.ShouldBe(tableCount);
+        afterRemove.FindTable(removed.Identifier).ShouldBeNull();
+        afterRemove.FindTable(removed.Table.Id).ShouldBeNull();
+        // Swapped-in element (previously at the end) must still be reachable by all keys.
+        afterRemove.FindTable(added.Identifier).ShouldNotBeNull();
+        afterRemove.FindTable(added.Table.Id).ShouldNotBeNull();
+        afterRemove.FindTable(CatalogEntryKey.ForTable(added.Table.Id)).ShouldNotBeNull();
+    }
+
 
     private sealed class FakeVersionProvider(CatalogVersion initial) : ICatalogVersionProvider
     {

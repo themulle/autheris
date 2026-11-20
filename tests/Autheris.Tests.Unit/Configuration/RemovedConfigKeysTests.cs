@@ -82,6 +82,9 @@ public sealed class RemovedConfigKeysTests
     [InlineData("Gateway:Webhooks:Enabled", "true")]
     [InlineData("Gateway:Webhooks:Enabled", "false")]
     [InlineData("Gateway:Webhooks:Enabled", "")]
+    [InlineData("Analytics:Aggregation:Enabled", "true")]
+    [InlineData("Analytics:Aggregation:Enabled", "false")]
+    [InlineData("Analytics:Aggregation:Enabled", "")]
     [InlineData("Gateway:RowFilters:KeySetCache", "true")]
     [InlineData("Gateway:RowFilters:KeySetCache", "false")]
     [InlineData("Gateway:RowFilters:KeySetCache", "")]
@@ -301,5 +304,19 @@ public sealed class RemovedConfigKeysTests
         var configuration = Config(key, value);
         var ex = Should.Throw<InvalidOperationException>(() => UnknownGatewayKeyGuard.ThrowIfUnknownKeys(configuration));
         ex.Message.ShouldContain(expectedMessage);
+    }
+
+    [Theory]
+    [InlineData("Analytics:Aggregation:Enabled", "true")]
+    [InlineData("Analytics:Aggregation:Enabled", "false")]
+    [InlineData("Analytics:Aggregation:Enabled", "")]
+    [InlineData("Gateway:Analytics:Aggregation:Enabled", "true")]
+    [InlineData("Gateway:Analytics:Aggregation:Enabled", "false")]
+    [InlineData("Gateway:Analytics:Aggregation:Enabled", "")]
+    public void Removed_catalog_aggregation_switch_fails_with_replacement_message_for_any_value(string key, string value)
+    {
+        var configuration = Config(key, value);
+        var ex = Should.Throw<InvalidOperationException>(() => UnknownGatewayKeyGuard.ThrowIfUnknownKeys(configuration));
+        ex.Message.ShouldContain("Analytics:Aggregation:Enabled (removed;");
     }
 }
