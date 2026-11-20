@@ -42,6 +42,7 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
     private readonly ILogger<CatalogVisibilityService> _logger;
     private readonly IIngressTransportContext? _ingress;
     private readonly IDataSourceOptionsResolver? _transportResolver;
+    private readonly ICatalogSnapshotProvider? _snapshotProvider;
     private readonly Lock _memoLock = new();
     private readonly Dictionary<MemoKey, CatalogVisibleSet> _memo = [];
 
@@ -52,10 +53,12 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
         IOptions<GatewayOptions>? gatewayOptions,
         ILogger<CatalogVisibilityService>? logger = null,
         IIngressTransportContext? ingress = null,
-        IDataSourceOptionsResolver? transportResolver = null)
+        IDataSourceOptionsResolver? transportResolver = null,
+        ICatalogSnapshotProvider? snapshotProvider = null)
     {
         _ingress = ingress;
         _transportResolver = transportResolver;
+        _snapshotProvider = snapshotProvider;
         _metadataRepository = metadataRepository;
         _consentRepository = consentRepository;
         _options = gatewayOptions?.Value;
@@ -90,11 +93,19 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
         IReadOnlyList<TableMetadata> all;
         try
         {
-            all = await CatalogTablePageReader.ReadAllAsync(
-                _metadataRepository!,
-                new CatalogTableQuery(IncludeInactive: false),
-                static t => t.Table.IsActive,
-                ct: ct).ConfigureAwait(false);
+            if (_snapshotProvider is not null)
+            {
+                var snapshot = await _snapshotProvider.GetSnapshotAsync(ct).ConfigureAwait(false);
+                all = snapshot.Tables.Where(static t => t.Table.IsActive).ToList();
+            }
+            else
+            {
+                all = await CatalogTablePageReader.ReadAllAsync(
+                    _metadataRepository!,
+                    new CatalogTableQuery(IncludeInactive: false),
+                    static t => t.Table.IsActive,
+                    ct: ct).ConfigureAwait(false);
+            }
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {

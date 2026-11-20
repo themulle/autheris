@@ -156,9 +156,9 @@ public sealed partial class DiscoveryService
         Func<TableMetadata, bool>? metadataPredicate,
         CancellationToken ct)
     {
-        var scoped = await LoadScopedCatalogAsync(caller, sid, scopeKey, ct).ConfigureAwait(false);
         var trimmedDomain = string.IsNullOrWhiteSpace(domain) ? null : domain.Trim();
         var trimmedSchema = string.IsNullOrWhiteSpace(schema) ? null : schema.Trim();
+        var scoped = await LoadScopedCatalogAsync(caller, sid, scopeKey, trimmedDomain, trimmedSchema, ct).ConfigureAwait(false);
         var trimmedTag = string.IsNullOrWhiteSpace(tag) ? null : tag.Trim();
         var trimmedSensitivity = string.IsNullOrWhiteSpace(sensitivity) ? null : sensitivity.Trim();
         var trimmedSearch = string.IsNullOrWhiteSpace(search) ? null : search.Trim();

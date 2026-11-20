@@ -40,21 +40,36 @@ public sealed partial class McpDatasetCatalog
 
         if (overview == true)
         {
-            var allPage = await _discoveryService!.ListAsync(
-                new DiscoveryQuery(domain, Schema: null, search, tag, negotiatedLanguage, First: 10_000, After: 0, DiscoverySurface.Mcp, access),
-                caller,
-                ct).ConfigureAwait(false);
-            var domainCounts = allPage.Items
-                .GroupBy(t => t.Domain, StringComparer.OrdinalIgnoreCase)
-                .Select(g => new McpDomainCount(g.Key, g.Count()))
-                .OrderByDescending(d => d.TableCount)
-                .ToList();
+            List<McpDomainCount> domainCounts;
+            int overviewTotal;
+            if (string.IsNullOrWhiteSpace(domain) && string.IsNullOrWhiteSpace(search) && string.IsNullOrWhiteSpace(tag))
+            {
+                var facets = await _discoveryService!.FacetsAsync(access, caller, ct).ConfigureAwait(false);
+                overviewTotal = facets.TotalCount;
+                domainCounts = facets.Domains
+                    .Select(d => new McpDomainCount(d.Domain, d.Count))
+                    .OrderByDescending(d => d.TableCount)
+                    .ToList();
+            }
+            else
+            {
+                var allPage = await _discoveryService!.ListAsync(
+                    new DiscoveryQuery(domain, Schema: null, search, tag, negotiatedLanguage, First: DiscoveryService.MaxPageSize, After: 0, DiscoverySurface.Mcp, access),
+                    caller,
+                    ct).ConfigureAwait(false);
+                overviewTotal = allPage.TotalCount;
+                domainCounts = allPage.Items
+                    .GroupBy(t => t.Domain, StringComparer.OrdinalIgnoreCase)
+                    .Select(g => new McpDomainCount(g.Key, g.Count()))
+                    .OrderByDescending(d => d.TableCount)
+                    .ToList();
+            }
 
             return new McpDatasetList(
                 Datasets: [],
-                Total: allPage.TotalCount,
+                Total: overviewTotal,
                 Truncated: false,
-                Guidance: _hints.OverviewGuidance(allPage.TotalCount, domainCounts.Count),
+                Guidance: _hints.OverviewGuidance(overviewTotal, domainCounts.Count),
                 Endpoints: null,
                 Offset: 0,
                 Limit: 0,
@@ -66,7 +81,6 @@ public sealed partial class McpDatasetCatalog
 
         var effectiveOffset = Math.Max(0, offset ?? 0);
         var effectiveLimit = Math.Clamp(limit ?? 50, 1, MaxListedDatasets);
-        var candidates = new List<(string Id, DiscoveryObject? Obj, RegisteredProcedure? Proc)>();
 
         if (_procedureCatalog == null)
         {
@@ -83,53 +97,84 @@ public sealed partial class McpDatasetCatalog
             return BuildDiscoveryListResult(pagedOnly, page.TotalCount, effectiveOffset, effectiveLimit, format, negotiatedLanguage, language);
         }
 
-        // The registered procedures are listed below; the discovery page carries tables only.
-        var tablePage = await _discoveryService!.ListAsync(
-            new DiscoveryQuery(domain, Schema: null, search, tag, negotiatedLanguage, First: 10_000, After: 0, DiscoverySurface.Mcp, access, IncludeProcedures: false),
-            caller,
-            ct).ConfigureAwait(false);
-        foreach (var obj in tablePage.Items)
-        {
-            if (obj.Kind == DiscoveryObjectKind.Procedure)
-            {
-                continue;
-            }
-
-            candidates.Add(($"{obj.Domain}.{obj.Schema}.{obj.Name}", obj, null));
-        }
-
         // Procedures are listed as GRANTED; any other access filter leaves them out.
-        var visibleProcs = access is null or DiscoveryAccessState.Granted
-            ? await _procedureCatalog.ListVisibleAsync(principal, principal.GetTenantId(), ct).ConfigureAwait(false)
-            : [];
-        foreach (var proc in visibleProcs.Where(p => p.Definition.Mode == ProcedureMode.Read && !string.IsNullOrWhiteSpace(p.Definition.ResultTable)))
+        var matchingProcs = new List<(string Id, RegisteredProcedure Proc)>();
+        if (access is null or DiscoveryAccessState.Granted && string.IsNullOrWhiteSpace(tag))
         {
-            var def = proc.Definition;
-            var procId = $"procedure:{def.Name}";
-            if (!string.IsNullOrWhiteSpace(domain) && !string.Equals(def.CatalogDomain, domain.Trim(), StringComparison.OrdinalIgnoreCase))
+            var visibleProcs = await _procedureCatalog.ListVisibleAsync(principal, principal.GetTenantId(), ct).ConfigureAwait(false);
+            foreach (var proc in visibleProcs.Where(p => p.Definition.Mode == ProcedureMode.Read && !string.IsNullOrWhiteSpace(p.Definition.ResultTable)))
             {
-                continue;
-            }
-
-            if (!string.IsNullOrWhiteSpace(tag))
-            {
-                continue;
-            }
-
-            if (!string.IsNullOrWhiteSpace(search))
-            {
-                var s = search.Trim();
-                bool matches = procId.Contains(s, StringComparison.OrdinalIgnoreCase)
-                    || def.Name.Contains(s, StringComparison.OrdinalIgnoreCase)
-                    || def.Summary.Contains(s, StringComparison.OrdinalIgnoreCase)
-                    || (def.Description?.Contains(s, StringComparison.OrdinalIgnoreCase) ?? false)
-                    || def.Parameters.Any(p => p.Name.Contains(s, StringComparison.OrdinalIgnoreCase));
-                if (!matches)
+                var def = proc.Definition;
+                var procId = $"procedure:{def.Name}";
+                if (!string.IsNullOrWhiteSpace(domain) && !string.Equals(def.CatalogDomain, domain.Trim(), StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
+
+                if (!string.IsNullOrWhiteSpace(search))
+                {
+                    var s = search.Trim();
+                    bool matches = procId.Contains(s, StringComparison.OrdinalIgnoreCase)
+                        || def.Name.Contains(s, StringComparison.OrdinalIgnoreCase)
+                        || def.Summary.Contains(s, StringComparison.OrdinalIgnoreCase)
+                        || (def.Description?.Contains(s, StringComparison.OrdinalIgnoreCase) ?? false)
+                        || def.Parameters.Any(p => p.Name.Contains(s, StringComparison.OrdinalIgnoreCase));
+                    if (!matches)
+                    {
+                        continue;
+                    }
+                }
+
+                matchingProcs.Add((procId, proc));
+            }
+        }
+
+        if (matchingProcs.Count == 0)
+        {
+            var page = await _discoveryService!.ListAsync(
+                new DiscoveryQuery(domain, Schema: null, search, tag, negotiatedLanguage, First: effectiveLimit, After: effectiveOffset, DiscoverySurface.Mcp, access, IncludeProcedures: false),
+                caller,
+                ct).ConfigureAwait(false);
+            var pagedOnly = new List<McpDatasetSummary>(page.Items.Count);
+            foreach (var obj in page.Items)
+            {
+                pagedOnly.Add(await BuildDiscoverySummaryAsync(obj, ct).ConfigureAwait(false));
             }
 
+            return BuildDiscoveryListResult(pagedOnly, page.TotalCount, effectiveOffset, effectiveLimit, format, negotiatedLanguage, language);
+        }
+
+        var candidates = new List<(string Id, DiscoveryObject? Obj, RegisteredProcedure? Proc)>(matchingProcs.Count + effectiveLimit);
+        var neededTables = effectiveOffset + effectiveLimit;
+        var tableTotalCount = 0;
+        var fetchedCount = 0;
+        while (fetchedCount < neededTables)
+        {
+            var batchSize = Math.Min(DiscoveryService.MaxPageSize, neededTables - fetchedCount);
+            var tablePage = await _discoveryService!.ListAsync(
+                new DiscoveryQuery(domain, Schema: null, search, tag, negotiatedLanguage, First: batchSize, After: fetchedCount, DiscoverySurface.Mcp, access, IncludeProcedures: false),
+                caller,
+                ct).ConfigureAwait(false);
+            tableTotalCount = tablePage.TotalCount;
+            foreach (var obj in tablePage.Items)
+            {
+                if (obj.Kind == DiscoveryObjectKind.Procedure)
+                {
+                    continue;
+                }
+
+                candidates.Add(($"{obj.Domain}.{obj.Schema}.{obj.Name}", obj, null));
+            }
+
+            fetchedCount += tablePage.Items.Count;
+            if (!tablePage.HasNextPage || tablePage.Items.Count == 0)
+            {
+                break;
+            }
+        }
+
+        foreach (var (procId, proc) in matchingProcs)
+        {
             candidates.Add((procId, null, proc));
         }
 
@@ -148,7 +193,7 @@ public sealed partial class McpDatasetCatalog
             }
         }
 
-        return BuildDiscoveryListResult(summaries, sorted.Count, effectiveOffset, effectiveLimit, format, negotiatedLanguage, language);
+        return BuildDiscoveryListResult(summaries, tableTotalCount + matchingProcs.Count, effectiveOffset, effectiveLimit, format, negotiatedLanguage, language);
     }
 
     private async Task<McpDatasetSummary> BuildDiscoverySummaryAsync(DiscoveryObject obj, CancellationToken ct)
