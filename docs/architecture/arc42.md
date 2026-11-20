@@ -174,8 +174,8 @@ Configures Hot Chocolate schema, dynamic query resolvers, mutations, REST Data A
 Capabilities outside the core access-enforcement pipeline are packaged as optional modules enabled via `Gateway:Modules:Enabled` (or shipped in the `autheris-full` image):
 - **Lakehouse (`Lakehouse`)**: Delta Lake and Apache Iceberg v2 connectors and metadata pruning.
 - **dbt & OpenMetadata (`Dbt`, `OpenMetadata`)**: Streaming dbt artifact ingestion, model contracts, and OpenMetadata catalog synchronization.
-- **CDC & Event Webhooks (`Cdc`)**: Change Data Capture streaming (SQL Server Change Tracking, PostgreSQL logical replication) and outbound event webhooks (consent workflow webhooks remain in core).
-- **Lineage (`Lineage`)**: Downstream impact analysis and OpenLineage export (GDPR Art. 15 disclosure reporting remains in core).
+- **Events (`events`)**: CDC event delivery and event webhooks (the CDC stream and consent workflow webhooks remain in core).
+- **Lineage (`lineage`)**: OpenLineage export (lineage impact analysis and GDPR Art. 15 disclosure reporting remain in core).
 
 ---
 

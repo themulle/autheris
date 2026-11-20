@@ -29,7 +29,7 @@ using Autheris.Tests.Common.Hosting;
 using Autheris.Tests.Integration.Governance;
 
 /// <summary>
-/// WP-ARC-A-03 end to end: POST a subscription as an admin, ingest a Debezium event through <c>/api/v1/cdc/events</c> and receive the masked
+/// WP-ARC-A-03 end to end: POST a subscription as an admin, ingest a Debezium event through <c>/modules/events/v1/cdc/events</c> and receive the masked
 /// CloudEvent, signed, from the durable outbox. The receiver listens on the container's private address because the egress policy never
 /// allows loopback (private addresses are allowed in Development only).
 /// Run: dotnet test tests/Autheris.Tests.Integration --filter "FullyQualifiedName~CdcWebhookEndToEnd"
@@ -69,19 +69,25 @@ public sealed class CdcWebhookEndToEndTests : IClassFixture<CdcWebhookEndToEndTe
             try { File.Delete(_dbPath); } catch { /* best effort */ }
         }
 
-        internal static Dictionary<string, string?> Settings(string dbPath) => new()
+        internal static Dictionary<string, string?> Settings(string dbPath)
         {
-            ["Gateway:Authentication:EnableTestAuthHandler"] = "true",
-            ["Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit"] = "1000",
-            ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
-            ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.CreateStable(dbPath),
-            ["Gateway:Insecure:danger_bypass_consent_checks"] = "true",
-            ["Gateway:CdcWebhooks:Enabled"] = "true",
-            ["Gateway:CdcWebhooks:SubscriptionCacheSeconds"] = "1",
-            ["Gateway:Webhooks:PollIntervalSeconds"] = "1",
-            // Operator-provisioned KEK of the secret protector (resolved by the default secret provider).
-            ["CDC_WEBHOOK_KEK"] = Kek,
-        };
+            var settings = new Dictionary<string, string?>
+            {
+                ["Gateway:Authentication:EnableTestAuthHandler"] = "true",
+                ["Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit"] = "1000",
+                ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
+                ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.CreateStable(dbPath),
+                ["Gateway:Insecure:danger_bypass_consent_checks"] = "true",
+                ["Gateway:Events:CdcWebhooks:Enabled"] = "true",
+                ["Gateway:Events:CdcWebhooks:SubscriptionCacheSeconds"] = "1",
+                ["Gateway:Webhooks:PollIntervalSeconds"] = "1",
+                // Operator-provisioned KEK of the secret protector (resolved by the default secret provider).
+                ["CDC_WEBHOOK_KEK"] = Kek,
+            };
+            // The events module serves the CDC routes and owns the delivery workers.
+            EventsWorkspaceTestSettings.Apply((k, v) => settings[k] = v);
+            return settings;
+        }
     }
 
     public void Dispose()
@@ -208,7 +214,7 @@ public sealed class CdcWebhookEndToEndTests : IClassFixture<CdcWebhookEndToEndTe
             hmacSecret = Secret,
             isEnabled = true
         });
-        var response = await admin.PostAsync("/api/v1/cdc/subscriptions", new StringContent(body, Encoding.UTF8, "application/json"));
+        var response = await admin.PostAsync("/modules/events/v1/cdc/subscriptions", new StringContent(body, Encoding.UTF8, "application/json"));
         response.StatusCode.ShouldBe(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
         var json = await response.Content.ReadAsStringAsync();
         json.ShouldNotContain(Secret);
@@ -224,7 +230,7 @@ public sealed class CdcWebhookEndToEndTests : IClassFixture<CdcWebhookEndToEndTe
         {"op":"c","source":{"schema":"crm","table":"customers","name":"salesdb","ts_ms":{{{EventMs}}}},
          "after":{"id":1,"name":"{{{name}}}","ssn":"123-45-6789","tenant_id":"{{{Tenant}}}"}}
         """;
-        var response = await ingest.PostAsync("/api/v1/cdc/events", new StringContent(payload, Encoding.UTF8, "application/json"));
+        var response = await ingest.PostAsync("/modules/events/v1/cdc/events", new StringContent(payload, Encoding.UTF8, "application/json"));
         response.StatusCode.ShouldBe(HttpStatusCode.Accepted, await response.Content.ReadAsStringAsync());
     }
 
@@ -305,7 +311,7 @@ public sealed class CdcWebhookEndToEndTests : IClassFixture<CdcWebhookEndToEndTe
         var admin = Client(host, "GovernanceAdmin", "S-1-5-E2E-ADMIN");
         var id = await CreateSubscriptionAsync(admin, receiver.Url);
 
-        (await admin.DeleteAsync($"/api/v1/cdc/subscriptions/{id}")).StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        (await admin.DeleteAsync($"/modules/events/v1/cdc/subscriptions/{id}")).StatusCode.ShouldBe(HttpStatusCode.NoContent);
         await Task.Delay(TimeSpan.FromSeconds(2)); // subscription cache TTL
         await IngestAsync(Client(host, "ClusterAdmin", "S-1-5-E2E-INGEST"));
 

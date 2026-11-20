@@ -16,7 +16,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.GraphQL.Types;
-using Autheris.Extensions.Cdc;
+using Autheris.Infrastructure.Streaming.Producers;
 using HotChocolate;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;

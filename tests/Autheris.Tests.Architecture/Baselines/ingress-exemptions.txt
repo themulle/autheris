@@ -57,20 +57,12 @@ route /api/governance/sunsetting/rules | governance admin route (CatalogApiEndpo
 route /api/governance/system/health | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
 route /api/governance/system/metrics | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
 route /api/governance/system/resource-groups | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
-route /api/lineage/openlineage/sync | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
 route /api/v1/admin/consent/routes/{scopeKind}/{scopeRef} | governance admin route; no C1..C5 choke point
 route /api/v1/admin/consent/external-systems/{id:guid} | governance admin route; no C1..C5 choke point
 route /api/v1/admin/consent/external-systems/{id:guid}:disable | governance admin route; no C1..C5 choke point
 route /api/v1/admin/consent/requests:reroute | governance admin route; no C1..C5 choke point
 route /api/v1/admin/consent/grant-records/{grantId:guid}/export | governance admin route; no C1..C5 choke point
 route /api/v1/admin/consent/grant-records:verify | governance admin route; no C1..C5 choke point
-route /api/v1/cdc/events | CDC ingestion: the caller pushes the event body and the response carries only an event id; no source is read (Streaming services have no source-reader dependency, CdcRoutesReachNoSourceReaderTests)
-route /api/v1/cdc/streams | CDC stream admin or change-detection route; reads governance/CDC state, no C1..C5 choke point
-route /api/v1/cdc/streams/{id}/reset-watermark | CDC stream admin or change-detection route; reads governance/CDC state, no C1..C5 choke point
-route /api/v1/cdc/streams/{id}/resync | CDC stream restart (consumer restart and key discard); no source read and no row data in the response (CdcRoutesReachNoSourceReaderTests)
-route /api/v1/cdc/streams/{id}/rotate-image-key | CDC stream admin or change-detection route; reads governance/CDC state, no C1..C5 choke point
-route /api/v1/cdc/subscriptions | CDC stream admin or change-detection route; reads governance/CDC state, no C1..C5 choke point
-route /api/v1/cdc/subscriptions/{id} | CDC stream admin or change-detection route; reads governance/CDC state, no C1..C5 choke point
 route /api/v1/consent/events | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/consent/grant-records/keys | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/consent/grant-records/proof | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
@@ -189,8 +181,6 @@ scope src/Autheris.Application/State/Caching/BoundedCache.cs | exempt: infrastru
 scope src/Autheris.Application/State/Caching/SingleFlightKeySetCache.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Application/State/Caching/TableCache/TableCacheManager.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Application/Streaming/Services/CdcStreamTailHub.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
-scope src/Autheris.Application/Streaming/Services/CdcWebhookDeliveryService.cs | copy: stamps Rest ingress for webhook outbox delivery
-scope src/Autheris.Application/Webhooks/WebhookDeliveryHostedService.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.GraphQL/Subscriptions/CdcSubscriptionGovernor.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Infrastructure/Connectors/SqlConnector.cs | copy: copies ConnectorSessionContext.Items into its scope
 scope src/Autheris.Infrastructure/Health/CachedGatewayHealthCheckService.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
