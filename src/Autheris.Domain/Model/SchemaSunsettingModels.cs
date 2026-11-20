@@ -11,8 +11,10 @@ public enum SunsettingPhase
     HardSunset = 3
 }
 
+/// <summary>Schema field deprecation and sunsetting rules (<c>Gateway:FieldSunsetting</c>).</summary>
 public sealed class FieldSunsettingOptions
 {
+    /// <summary>Configured field sunsetting rules evaluated during query execution and schema inspection.</summary>
     public List<FieldSunsettingRule> Rules { get; init; } = [];
 }
 

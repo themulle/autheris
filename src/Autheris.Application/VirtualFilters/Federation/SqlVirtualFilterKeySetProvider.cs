@@ -22,8 +22,8 @@ using Microsoft.Extensions.Options;
 /// <item>The complete definition runs in SQL (<see cref="StructuredFilterKeyQueryBuilder"/>), values and tenant bound
 /// as parameters; every table with a tenant column is restricted to the caller's tenant, a table without one is
 /// refused when <c>DataSources:RequireTenantColumn</c> is on and it is not exempt.</item>
-/// <item>At most <c>MaxAuthorizedKeys + 1</c> rows are read; one more than the maximum denies with
-/// <c>VF_KEY_SET_TOO_LARGE</c> (never truncated).</item>
+/// <item>At most <c>effectiveMax + 1</c> rows are read (<c>effectiveMax = min(filter.KeySetMaxKeys ?? MaxAuthorizedKeys, MaxAuthorizedKeys)</c>);
+/// one more than the maximum denies with <c>VF_KEY_SET_TOO_LARGE</c> (never truncated).</item>
 /// <item>The governed read connection of the data source (<c>DataSources:Connections</c>), a read-only transaction on
 /// PostgreSQL and the key query timeout; source errors deny with <c>VIRTUAL_FILTER_SOURCE_UNAVAILABLE</c> without
 /// the database message (attached as inner exception only).</item>
@@ -58,6 +58,12 @@ public sealed class SqlVirtualFilterKeySetProvider : IVirtualFilterKeySetProvide
 
     private VirtualFilterFederationOptions Federation => _options.Value.VirtualFilters?.Federation ?? new VirtualFilterFederationOptions();
 
+    /// <summary>Returns the effective maximum authorized keys for <paramref name="filter"/>, clamped to <see cref="VirtualFilterFederationOptions.MaxAuthorizedKeys"/>.</summary>
+    internal static int EffectiveMaxAuthorizedKeys(VirtualFilter filter, VirtualFilterFederationOptions federation) =>
+        filter.KeySetMaxKeys is { } policyMax
+            ? Math.Min(policyMax, federation.MaxAuthorizedKeys)
+            : federation.MaxAuthorizedKeys;
+
     public async ValueTask<VirtualFilterKeySet> GetAsync(
         VirtualFilter filter,
         IReadOnlyList<VirtualFilterKeyType> keyTypes,
@@ -69,6 +75,7 @@ public sealed class SqlVirtualFilterKeySetProvider : IVirtualFilterKeySetProvide
         EnsureSupported(filter, keyTypes, tenant);
 
         var federation = Federation;
+        var effectiveMax = EffectiveMaxAuthorizedKeys(filter, federation);
         var cacheKey = string.Join(':',
             "vfkeys",
             tenant.Value,
@@ -80,13 +87,13 @@ public sealed class SqlVirtualFilterKeySetProvider : IVirtualFilterKeySetProvide
         var set = await _cache.GetOrLoadAsync(
             cacheKey,
             RowPolicyParameterBinder.ComputeEffectiveKeySetMaxAge(filter, _options.Value),
-            loadCt => LoadAsync(filter, keyTypes, tenant, federation, loadCt),
+            loadCt => LoadAsync(filter, keyTypes, tenant, federation, effectiveMax, loadCt),
             ct,
             TimeSpan.FromSeconds(federation.KeyQueryTimeoutSeconds)).ConfigureAwait(false);
 
-        if (set.Count > federation.MaxAuthorizedKeys)
+        if (set.Count > effectiveMax)
         {
-            throw TooLarge(filter, federation.MaxAuthorizedKeys);
+            throw TooLarge(filter, effectiveMax);
         }
 
         return set;
@@ -132,6 +139,7 @@ public sealed class SqlVirtualFilterKeySetProvider : IVirtualFilterKeySetProvide
         IReadOnlyList<VirtualFilterKeyType> keyTypes,
         TenantId tenant,
         VirtualFilterFederationOptions federation,
+        int effectiveMax,
         CancellationToken ct)
     {
         List<object?[]> rows;
@@ -149,7 +157,7 @@ public sealed class SqlVirtualFilterKeySetProvider : IVirtualFilterKeySetProvide
                 throw Unsupported(filter, "the dialect of its data source connection does not match the catalog");
             }
 
-            var query = StructuredFilterKeyQueryBuilder.Build(filter, dialect, tenantColumns, tenant.Value, federation.MaxAuthorizedKeys + 1);
+            var query = StructuredFilterKeyQueryBuilder.Build(filter, dialect, tenantColumns, tenant.Value, effectiveMax + 1);
             rows = await ReadAsync(connection, dialect, query, keyTypes.Count, tenant, federation.KeyQueryTimeoutSeconds, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not GatewaySecurityException)
@@ -160,9 +168,9 @@ public sealed class SqlVirtualFilterKeySetProvider : IVirtualFilterKeySetProvide
                 $"The key source of the Virtual Filter '{filter.Name}' is unavailable.", VirtualFilterErrorCodes.SourceUnavailable, ex);
         }
 
-        if (rows.Count > federation.MaxAuthorizedKeys)
+        if (rows.Count > effectiveMax)
         {
-            throw TooLarge(filter, federation.MaxAuthorizedKeys);
+            throw TooLarge(filter, effectiveMax);
         }
 
         var set = VirtualFilterKeySet.Create(keyTypes, rows);

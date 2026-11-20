@@ -163,7 +163,7 @@ public sealed class ModuleConfigurationTests
         var config = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["Gateway:Webhooks:Enabled"] = "true",
+                ["Gateway:Webhooks:DefaultTimeoutSeconds"] = "5",
                 ["Gateway:CdcStream:RetentionHours"] = "72",
                 ["Gateway:PostgreSqlCdc:Enabled"] = "true",
                 ["Gateway:MssqlChangeTracking:Enabled"] = "true",

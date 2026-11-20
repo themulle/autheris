@@ -89,7 +89,6 @@ public static class GatewaySections
     public const string CatalogSearch = "Gateway:Catalog:Search";
     public const string Dbt = "Gateway:Dbt";
     public const string Plugins = "Gateway:Plugins";
-    public const string Extensibility = "Gateway:Extensibility";
     public const string Webhooks = "Gateway:Webhooks";
     public const string Events = "Gateway:Events";
     public const string Lineage = "Gateway:Lineage";

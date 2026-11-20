@@ -154,6 +154,7 @@ public static partial class VirtualFilterEndpoints
         parameters = f.Parameters.Select(p => new { name = p.Name, type = p.Type.ToString(), is_list = p.IsList, max_values = p.MaxValues }),
         evaluation_mode = f.EvaluationMode.ToString(),
         key_set_max_age_seconds = f.KeySetMaxAge?.TotalSeconds,
+        key_set_max_keys = f.KeySetMaxKeys,
         managed_by = f.ManagedBy,
         definition_hash = f.ComputeDefinitionHash(),
         status = f.Status.ToString(),
@@ -261,6 +262,7 @@ public static partial class VirtualFilterEndpoints
         [JsonPropertyName("parameters")] public List<ParameterBody>? Parameters { get; set; }
         [JsonPropertyName("evaluation_mode")] public string? EvaluationMode { get; set; }
         [JsonPropertyName("key_set_max_age_seconds")] public double? KeySetMaxAgeSeconds { get; set; }
+        [JsonPropertyName("key_set_max_keys")] public int? KeySetMaxKeys { get; set; }
 
         public VirtualFilter ToModel(string name, TenantId tenant)
         {
@@ -274,6 +276,7 @@ public static partial class VirtualFilterEndpoints
                 ValidFromColumn = ValidFrom, ValidToColumn = ValidTo, Supersedes = Supersedes ?? [],
                 Parameters = parameters, EvaluationMode = mode,
                 KeySetMaxAge = KeySetMaxAgeSeconds is { } sec ? TimeSpan.FromSeconds(sec) : null,
+                KeySetMaxKeys = KeySetMaxKeys,
                 Sql = Sql,
                 Structured = Sql != null ? (From == null ? null : new StructuredFilterDefinition()) : new StructuredFilterDefinition
                 {
