@@ -50,14 +50,14 @@ public class OpenMetadataIntegrationTests : IClassFixture<OpenMetadataIntegratio
     }
 
     [Fact]
-    public async Task Webhook_WithoutSignature_ReturnsBadRequest()
+    public async Task Webhook_WithoutSignature_ReturnsUnauthorized()
     {
         var client = _factory.CreateClient();
         var content = new StringContent("{\"eventType\":\"entityCreated\",\"entityType\":\"table\"}", Encoding.UTF8, "application/json");
 
         var response = await client.PostAsync("/api/webhooks/openmetadata", content);
 
-        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
     }
 
     [Fact]

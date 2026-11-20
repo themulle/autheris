@@ -49,9 +49,8 @@ public sealed class OpenMetadataWebhookCollisionExt16Tests
 
         var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var payload = $"{{\"id\":\"{Guid.NewGuid()}\",\"timestamp\":{nowMs},\"eventType\":\"entityUpdated\",\"entityType\":\"table\",\"entityFullyQualifiedName\":\"{db2.FullyQualifiedName}\"}}";
-        var signature = "sha256=" + Convert.ToHexStringLower(HMACSHA256.HashData(Encoding.UTF8.GetBytes(Secret), Encoding.UTF8.GetBytes(payload)));
 
-        var result = await service.HandleWebhookEventAsync(payload, signature);
+        var result = await service.HandleVerifiedAsync(payload);
 
         result.ShouldBeTrue();
         await metadataRepo.DidNotReceive().UpsertTableMetadataAsync(Arg.Any<Autheris.Domain.Model.TableMetadata>(), Arg.Any<CancellationToken>());

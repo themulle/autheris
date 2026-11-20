@@ -7,12 +7,10 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Endpoints;
 using Autheris.Application.Catalog.OpenMetadata;
-using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Application.Catalog.Semantic;
 using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Shouldly;
@@ -44,12 +42,11 @@ public sealed class WebhookPreAuthBufferingTests
         }
     }
 
-    private sealed class FakeOmSyncService : IOpenMetadataSyncService
+    private sealed class FakeOmWebhookHandler : IOpenMetadataWebhookHandler
     {
         public bool HandleCalled { get; private set; }
-        public Task<OpenMetadataSyncResult> SyncPermissionsAsync(bool dryRun = false, TenantId? restrictToTenant = null, CancellationToken ct = default) =>
-            Task.FromResult(new OpenMetadataSyncResult(0, 0, 0, [], [], true));
-        public Task<bool> HandleWebhookEventAsync(string eventPayload, string? signatureHeader = null, CancellationToken ct = default)
+
+        public Task<bool> HandleVerifiedAsync(string payload, CancellationToken ct)
         {
             HandleCalled = true;
             return Task.FromResult(true);
@@ -59,11 +56,20 @@ public sealed class WebhookPreAuthBufferingTests
     private sealed class FakeDbtWebhookReceiver : IDbtCloudWebhookHandler
     {
         public bool ProcessCalled { get; private set; }
+
         public Task<DbtWebhookProcessingResult> HandleVerifiedAsync(string payload, CancellationToken ct)
         {
             ProcessCalled = true;
             return Task.FromResult(new DbtWebhookProcessingResult(true, "Processed", "job_run.completed", 1L));
         }
+    }
+
+    private static DefaultHttpContext CreateOmContext(FakeOmWebhookHandler handler)
+    {
+        var services = new ServiceCollection();
+        services.AddScoped<IOpenMetadataWebhookHandler>(_ => handler);
+        services.AddSingleton<IOptions<GatewayOptions>>(Options.Create(new GatewayOptions()));
+        return new DefaultHttpContext { RequestServices = services.BuildServiceProvider().CreateScope().ServiceProvider };
     }
 
     private static DefaultHttpContext CreateDbtContext(FakeDbtWebhookReceiver handler)
@@ -77,35 +83,35 @@ public sealed class WebhookPreAuthBufferingTests
     [Fact]
     public async Task OpenMetadata_MissingSignature_RejectsBeforeBufferingBody()
     {
-        var syncService = new FakeOmSyncService();
-        var context = new DefaultHttpContext();
+        var handler = new FakeOmWebhookHandler();
+        var context = CreateOmContext(handler);
         var stream = new TrackingStream(Encoding.UTF8.GetBytes("{\"test\":\"data\"}"));
         context.Request.Body = stream;
         context.Request.ContentLength = stream.Length;
 
-        var result = await WebhookEndpoints.HandleOpenMetadataWebhookAsync(context, syncService);
+        var result = await WebhookEndpoints.HandleOpenMetadataWebhookAsync(context);
 
         var problem = result.ShouldBeAssignableTo<IStatusCodeHttpResult>()!;
-        problem.StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
+        problem.StatusCode.ShouldBe(StatusCodes.Status401Unauthorized);
         stream.WasRead.ShouldBeFalse();
-        syncService.HandleCalled.ShouldBeFalse();
+        handler.HandleCalled.ShouldBeFalse();
     }
 
     [Fact]
     public async Task OpenMetadata_BodyExceeds2Mb_ReturnsPayloadTooLarge()
     {
-        var syncService = new FakeOmSyncService();
-        var context = new DefaultHttpContext();
+        var handler = new FakeOmWebhookHandler();
+        var context = CreateOmContext(handler);
         context.Request.Headers["X-OpenMetadata-Signature"] = "sha256=abcdef";
         var oversized = new byte[2 * 1024 * 1024 + 1024];
         var stream = new TrackingStream(oversized);
         context.Request.Body = stream;
 
-        var result = await WebhookEndpoints.HandleOpenMetadataWebhookAsync(context, syncService);
+        var result = await WebhookEndpoints.HandleOpenMetadataWebhookAsync(context);
 
         var problem = result.ShouldBeAssignableTo<IStatusCodeHttpResult>()!;
         problem.StatusCode.ShouldBe(StatusCodes.Status413PayloadTooLarge);
-        syncService.HandleCalled.ShouldBeFalse();
+        handler.HandleCalled.ShouldBeFalse();
     }
 
     [Fact]

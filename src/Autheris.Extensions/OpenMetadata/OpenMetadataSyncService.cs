@@ -593,9 +593,9 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService, 
                ClassificationMetadata.IsTableSensitive(metadata);
     }
 
-    public async Task<bool> HandleVerifiedAsync(string eventPayload, CancellationToken ct = default)
+    public async Task<bool> HandleVerifiedAsync(string payload, CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(eventPayload) || eventPayload.Length > 2 * 1024 * 1024 || Encoding.UTF8.GetByteCount(eventPayload) > 2 * 1024 * 1024)
+        if (string.IsNullOrWhiteSpace(payload) || payload.Length > 2 * 1024 * 1024 || Encoding.UTF8.GetByteCount(payload) > 2 * 1024 * 1024)
         {
             _logger.LogWarning("Rejecting OpenMetadata webhook: empty payload or payload exceeds maximum allowed size (2 MB).");
             return false;
@@ -606,7 +606,7 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService, 
         OpenMetadataWebhookEvent? webhookEvent;
         try
         {
-            webhookEvent = JsonSerializer.Deserialize<OpenMetadataWebhookEvent>(eventPayload, JsonOptions);
+            webhookEvent = JsonSerializer.Deserialize<OpenMetadataWebhookEvent>(payload, JsonOptions);
         }
         catch (Exception ex)
         {
@@ -657,6 +657,13 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService, 
                 try
                 {
                     var count = await _clusterState.IncrementAsync($"om:dedup:{webhookEvent.Id.Value}", 1, TimeSpan.FromMinutes(15), ct).ConfigureAwait(false);
+                    if (count is null)
+                    {
+                        ProcessedWebhookEvents.TryRemove(webhookEvent.Id.Value, out _);
+                        _logger.LogWarning("Rejecting OpenMetadata webhook: the shared replay store is unavailable.");
+                        return false;
+                    }
+
                     if (count > 1)
                     {
                         _logger.LogWarning("Rejecting cluster OpenMetadata webhook: event {EventId} has already been processed (replay detected).", webhookEvent.Id.Value);

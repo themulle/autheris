@@ -280,39 +280,12 @@ public sealed class OpenMetadataSyncServiceTests
     }
 
     [Fact]
-    public void VerifyWebhookSignature_ValidAndInvalidSignatures()
-    {
-        var secret = "my-om-secret";
-        var payload = "{\"eventType\":\"entityUpdated\",\"entityType\":\"table\"}";
-
-        var hashBytes = HMACSHA256.HashData(Encoding.UTF8.GetBytes(secret), Encoding.UTF8.GetBytes(payload));
-        var validHex = Convert.ToHexStringLower(hashBytes);
-
-        // Valid signature without prefix
-        OpenMetadataSyncService.VerifyWebhookSignature(payload, validHex, secret).ShouldBeTrue();
-
-        // Valid signature with sha256= prefix
-        OpenMetadataSyncService.VerifyWebhookSignature(payload, $"sha256={validHex}", secret).ShouldBeTrue();
-
-        // Tampered payload
-        OpenMetadataSyncService.VerifyWebhookSignature(payload + " ", validHex, secret).ShouldBeFalse();
-
-        // Tampered secret
-        OpenMetadataSyncService.VerifyWebhookSignature(payload, validHex, "wrong-secret").ShouldBeFalse();
-
-        // Invalid signature format
-        OpenMetadataSyncService.VerifyWebhookSignature(payload, "invalid_sig", secret).ShouldBeFalse();
-    }
-
-    [Fact]
-    public async Task HandleWebhookEventAsync_ProcessesTableUpdate()
+    public async Task HandleVerifiedAsync_ProcessesTableUpdate()
     {
         var options = CreateOptions("webhook-secret-123");
         var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var eventId = Guid.NewGuid();
         var payload = $"{{\"id\":\"{eventId}\",\"timestamp\":{nowMs},\"eventType\":\"entityUpdated\",\"entityType\":\"table\",\"entityFullyQualifiedName\":\"service.db.schema.products\"}}";
-
-        var hash = Convert.ToHexStringLower(HMACSHA256.HashData(Encoding.UTF8.GetBytes("webhook-secret-123"), Encoding.UTF8.GetBytes(payload)));
 
         var table = new OpenMetadataTable
         {
@@ -337,7 +310,7 @@ public sealed class OpenMetadataSyncServiceTests
             Options.Create(options),
             NullLogger<OpenMetadataSyncService>.Instance);
 
-        var success = await syncService.HandleWebhookEventAsync(payload, $"sha256={hash}");
+        var success = await syncService.HandleVerifiedAsync(payload);
 
         success.ShouldBeTrue();
         await _metadataRepo.Received().UpsertTableMetadataAsync(Arg.Is<TableMetadata>(t => t.Identifier.TableName == "products"), Arg.Any<CancellationToken>());
@@ -345,13 +318,11 @@ public sealed class OpenMetadataSyncServiceTests
     }
 
     [Fact]
-    public async Task HandleWebhookEventAsync_RejectsReplayAttack_WhenTimestampExceedsWindow()
+    public async Task HandleVerifiedAsync_RejectsReplayAttack_WhenTimestampExceedsWindow()
     {
         var options = CreateOptions("webhook-secret-123");
         var staleTimestamp = DateTimeOffset.UtcNow.AddMinutes(-10).ToUnixTimeMilliseconds();
         var payload = $"{{\"id\":\"{Guid.NewGuid()}\",\"eventType\":\"entityUpdated\",\"entityType\":\"table\",\"entityFullyQualifiedName\":\"service.db.schema.products\",\"timestamp\":{staleTimestamp}}}";
-
-        var hash = Convert.ToHexStringLower(HMACSHA256.HashData(Encoding.UTF8.GetBytes("webhook-secret-123"), Encoding.UTF8.GetBytes(payload)));
 
         var syncService = new OpenMetadataSyncService(
             _client,
@@ -361,7 +332,7 @@ public sealed class OpenMetadataSyncServiceTests
             Options.Create(options),
             NullLogger<OpenMetadataSyncService>.Instance);
 
-        var success = await syncService.HandleWebhookEventAsync(payload, $"sha256={hash}");
+        var success = await syncService.HandleVerifiedAsync(payload);
 
         // Stale timestamp outside 5-minute replay window must be rejected
         success.ShouldBeFalse();
@@ -369,14 +340,12 @@ public sealed class OpenMetadataSyncServiceTests
     }
 
     [Fact]
-    public async Task HandleWebhookEventAsync_DeduplicatesEvents_WhenDuplicateEventIdReceived()
+    public async Task HandleVerifiedAsync_DeduplicatesEvents_WhenDuplicateEventIdReceived()
     {
         var options = CreateOptions("webhook-secret-123");
         var eventId = Guid.NewGuid();
         var validTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var payload = $"{{\"id\":\"{eventId}\",\"eventType\":\"entityUpdated\",\"entityType\":\"table\",\"entityFullyQualifiedName\":\"service.db.schema.dedup_table\",\"timestamp\":{validTimestamp}}}";
-
-        var hash = Convert.ToHexStringLower(HMACSHA256.HashData(Encoding.UTF8.GetBytes("webhook-secret-123"), Encoding.UTF8.GetBytes(payload)));
 
         var table = new OpenMetadataTable
         {
@@ -397,12 +366,12 @@ public sealed class OpenMetadataSyncServiceTests
             NullLogger<OpenMetadataSyncService>.Instance);
 
         // First delivery: processes successfully
-        var firstResult = await syncService.HandleWebhookEventAsync(payload, $"sha256={hash}");
+        var firstResult = await syncService.HandleVerifiedAsync(payload);
         firstResult.ShouldBeTrue();
 
         // Duplicate delivery with same event ID: rejected (replay protection) without re-invoking repo
         _metadataRepo.ClearReceivedCalls();
-        var duplicateResult = await syncService.HandleWebhookEventAsync(payload, $"sha256={hash}");
+        var duplicateResult = await syncService.HandleVerifiedAsync(payload);
         duplicateResult.ShouldBeFalse();
         await _metadataRepo.DidNotReceiveWithAnyArgs().UpsertTableMetadataAsync(default!, default);
     }
@@ -503,22 +472,5 @@ public sealed class OpenMetadataSyncServiceTests
         await syncService.SyncPermissionsAsync(dryRun: false);
 
         createdConsents.ShouldNotContain(c => c.GranteeSid == new Sid("S-1-5-21-ALICE-SID"));
-    }
-
-    [Fact]
-    [Trait("Category", "Security")]
-    public async Task Literal_bypassed_signature_is_rejected_when_bypass_off()
-    {
-        var options = CreateOptions(bypassSignature: false);
-        var syncService = new OpenMetadataSyncService(
-            _client,
-            _metadataRepo,
-            _consentRepo,
-            _epochRepo,
-            Options.Create(options),
-            NullLogger<OpenMetadataSyncService>.Instance);
-
-        var result = await syncService.HandleWebhookEventAsync("{}", "bypassed", CancellationToken.None);
-        result.ShouldBeFalse();
     }
 }

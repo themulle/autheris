@@ -15,6 +15,7 @@ using Autheris.Domain.Model;
 using Autheris.GraphQL.Types;
 using HotChocolate;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using NSubstitute;
 using Shouldly;
 using Xunit;
@@ -32,16 +33,23 @@ public sealed class SyncDataCatalogAuthorizationTests
         return accessor;
     }
 
+    private static ServiceProvider ProviderFor(IDataCatalogSyncService catalogSync) =>
+        new ServiceCollection()
+            .AddSingleton<IDataCatalogClient>(new StubCatalogClient())
+            .AddSingleton(catalogSync)
+            .BuildServiceProvider();
+
     [Fact]
     public async Task SyncDataCatalog_ForwardAuthClusterAdmin_IsForbidden()
     {
         var catalogSync = Substitute.For<IDataCatalogSyncService>();
+        await using var sp = ProviderFor(catalogSync);
         var auditWriter = Substitute.For<IAuditWriter>();
         var accessor = Accessor("ForwardAuth", "tenant-a", "ClusterAdmin");
 
         var ex = await Should.ThrowAsync<GraphQLException>(() => new Mutation().SyncDataCatalogAsync(
             dryRun: false,
-            catalogSyncService: catalogSync,
+            serviceProvider: sp,
             httpContextAccessor: accessor,
             auditWriter: auditWriter));
 
@@ -53,12 +61,13 @@ public sealed class SyncDataCatalogAuthorizationTests
     public async Task SyncDataCatalog_DeveloperAdmin_IsForbidden()
     {
         var catalogSync = Substitute.For<IDataCatalogSyncService>();
+        await using var sp = ProviderFor(catalogSync);
         var auditWriter = Substitute.For<IAuditWriter>();
         var accessor = Accessor("Bearer", "tenant-a", "DeveloperAdmin");
 
         var ex = await Should.ThrowAsync<GraphQLException>(() => new Mutation().SyncDataCatalogAsync(
             dryRun: false,
-            catalogSyncService: catalogSync,
+            serviceProvider: sp,
             httpContextAccessor: accessor,
             auditWriter: auditWriter));
 
@@ -72,13 +81,14 @@ public sealed class SyncDataCatalogAuthorizationTests
         var catalogSync = Substitute.For<IDataCatalogSyncService>();
         catalogSync.SyncCatalogAsync(Arg.Any<bool>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(new CatalogSyncResult(1, 2, 0, 0, [], [], true)));
+        await using var sp = ProviderFor(catalogSync);
 
         var auditWriter = Substitute.For<IAuditWriter>();
         var accessor = Accessor("Bearer", "tenant-a", "GovernanceAdmin");
 
         var payload = await new Mutation().SyncDataCatalogAsync(
             dryRun: false,
-            catalogSyncService: catalogSync,
+            serviceProvider: sp,
             httpContextAccessor: accessor,
             auditWriter: auditWriter);
 
@@ -92,13 +102,14 @@ public sealed class SyncDataCatalogAuthorizationTests
         var catalogSync = Substitute.For<IDataCatalogSyncService>();
         catalogSync.SyncCatalogAsync(Arg.Any<bool>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(new CatalogSyncResult(3, 10, 2, 1, [], [], true)));
+        await using var sp = ProviderFor(catalogSync);
 
         var auditWriter = Substitute.For<IAuditWriter>();
         var accessor = Accessor("Bearer", "tenant-a", "GovernanceAdmin");
 
         var payload = await new Mutation().SyncDataCatalogAsync(
             dryRun: false,
-            catalogSyncService: catalogSync,
+            serviceProvider: sp,
             httpContextAccessor: accessor,
             auditWriter: auditWriter);
 
@@ -115,6 +126,7 @@ public sealed class SyncDataCatalogAuthorizationTests
     public async Task SyncDataCatalog_AuditFailure_FailsClosedBeforeSync()
     {
         var catalogSync = Substitute.For<IDataCatalogSyncService>();
+        await using var sp = ProviderFor(catalogSync);
         var auditWriter = Substitute.For<IAuditWriter>();
         auditWriter.RecordRequiredAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>())
             .Returns<Task>(_ => throw new InvalidOperationException("Audit store unavailable"));
@@ -123,10 +135,19 @@ public sealed class SyncDataCatalogAuthorizationTests
 
         await Should.ThrowAsync<InvalidOperationException>(() => new Mutation().SyncDataCatalogAsync(
             dryRun: false,
-            catalogSyncService: catalogSync,
+            serviceProvider: sp,
             httpContextAccessor: accessor,
             auditWriter: auditWriter));
 
         await catalogSync.DidNotReceiveWithAnyArgs().SyncCatalogAsync(default, default, default);
+    }
+
+    private sealed class StubCatalogClient : IDataCatalogClient
+    {
+        public DataCatalogProviderType ProviderType => DataCatalogProviderType.OpenMetadata;
+        public Task<IReadOnlyList<CatalogTableAsset>> GetTablesAsync(string? filter = null, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<CatalogTableAsset>>([]);
+        public Task<CatalogTableAsset?> GetTableAsync(TableIdentifier table, CancellationToken ct = default) =>
+            Task.FromResult<CatalogTableAsset?>(null);
     }
 }

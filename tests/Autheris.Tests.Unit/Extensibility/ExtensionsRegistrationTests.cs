@@ -11,6 +11,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Extensions;
 using Autheris.Application.Catalog.Interfaces;
+using Autheris.Application.Catalog.OpenMetadata;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Lineage;
 using Autheris.Application.Security;

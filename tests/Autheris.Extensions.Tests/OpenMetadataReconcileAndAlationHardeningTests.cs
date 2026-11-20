@@ -644,12 +644,8 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
         optIn.Upserted.ShouldHaveSingleItem().Table.IsActive.ShouldBeTrue();
     }
 
-    private static string SignedTableEvent(string fqn, string secret, out string signature)
-    {
-        var payload = $"{{\"id\":\"{Guid.NewGuid()}\",\"timestamp\":{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()},\"eventType\":\"entityUpdated\",\"entityType\":\"table\",\"entityFullyQualifiedName\":\"{fqn}\"}}";
-        signature = "sha256=" + Convert.ToHexStringLower(HMACSHA256.HashData(Encoding.UTF8.GetBytes(secret), Encoding.UTF8.GetBytes(payload)));
-        return payload;
-    }
+    private static string TableEvent(string fqn) =>
+        $"{{\"id\":\"{Guid.NewGuid()}\",\"timestamp\":{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()},\"eventType\":\"entityUpdated\",\"entityType\":\"table\",\"entityFullyQualifiedName\":\"{fqn}\"}}";
 
     [Fact]
     public async Task EX06_Webhook_TableOutsideServiceFilter_IsIgnored()
@@ -660,8 +656,8 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
         f.Client.GetTableByFqnAsync(foreign.FullyQualifiedName, Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<OpenMetadataTable?>(foreign));
 
-        var payload = SignedTableEvent(foreign.FullyQualifiedName, secret, out var signature);
-        var ok = await f.Service.HandleWebhookEventAsync(payload, signature);
+        var payload = TableEvent(foreign.FullyQualifiedName);
+        var ok = await f.Service.HandleVerifiedAsync(payload);
 
         ok.ShouldBeTrue();
         f.Upserted.ShouldBeEmpty();
@@ -676,8 +672,8 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
         f.Client.GetTableByFqnAsync(orders.FullyQualifiedName, Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<OpenMetadataTable?>(orders));
 
-        var payload = SignedTableEvent(orders.FullyQualifiedName, secret, out var signature);
-        var ok = await f.Service.HandleWebhookEventAsync(payload, signature);
+        var payload = TableEvent(orders.FullyQualifiedName);
+        var ok = await f.Service.HandleVerifiedAsync(payload);
 
         ok.ShouldBeTrue();
         var meta = f.Upserted.ShouldHaveSingleItem();
@@ -711,8 +707,8 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
         f.Client.GetTableByFqnAsync(orders.FullyQualifiedName, Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<OpenMetadataTable?>(orders));
 
-        var payload = SignedTableEvent(orders.FullyQualifiedName, secret, out var signature);
-        (await f.Service.HandleWebhookEventAsync(payload, signature)).ShouldBeTrue();
+        var payload = TableEvent(orders.FullyQualifiedName);
+        (await f.Service.HandleVerifiedAsync(payload)).ShouldBeTrue();
 
         f.Upserted.ShouldHaveSingleItem().Table.SourceName.ShouldBe("sales_readonly_conn");
     }

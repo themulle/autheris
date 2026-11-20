@@ -358,18 +358,53 @@ public sealed partial class ModuleBoundaryArchitectureTests
 
     [Fact]
     [Trait("Category", "Security")]
+    public void OpenMetadata_webhook_handler_referenced_only_by_core_webhook_endpoint()
+    {
+        var allowedCore = new[]
+        {
+            "src/Autheris.Application/Catalog/OpenMetadata/IOpenMetadataWebhookHandler.cs",
+            "src/Autheris.Api/Endpoints/WebhookEndpoints.cs",
+            "src/Autheris.Api/Hosting/ModuleSecurityGuards.cs",
+            "src/Autheris.Extensions/OpenMetadata/OpenMetadataServiceCollectionExtensions.cs",
+            "src/Autheris.Extensions/OpenMetadata/OpenMetadataSyncService.cs",
+        };
+
+        var violations = new List<string>();
+        foreach (var file in RepositoryScan.ProductionFiles.Where(f => f.Text.Contains("IOpenMetadataWebhookHandler", StringComparison.Ordinal)))
+        {
+            if (!allowedCore.Contains(file.RelativePath, StringComparer.Ordinal))
+            {
+                violations.Add(file.RelativePath);
+            }
+        }
+
+        violations.ShouldBeEmpty("Only the core webhook route (and the module guard) may reference IOpenMetadataWebhookHandler:\n" + string.Join("\n", violations));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
     public void Signature_verifier_uses_fixed_time_compare()
     {
-        var verifier = RepositoryScan.ProductionFiles
+        var dbtVerifier = RepositoryScan.ProductionFiles
             .Single(f => f.RelativePath == "src/Autheris.Application/Catalog/Semantic/DbtCloudWebhookSignature.cs");
-        verifier.Text.ShouldContain("CryptographicOperations.FixedTimeEquals");
-        verifier.Text.ShouldNotContain("SequenceEqual");
-        verifier.Text.ShouldNotContain("string.Equals");
-        verifier.Text.ShouldNotContain("== computed");
-        verifier.Text.ShouldNotContain("ILogger");
+        dbtVerifier.Text.ShouldContain("CryptographicOperations.FixedTimeEquals");
+        dbtVerifier.Text.ShouldNotContain("SequenceEqual");
+        dbtVerifier.Text.ShouldNotContain("string.Equals");
+        dbtVerifier.Text.ShouldNotContain("== computed");
+        dbtVerifier.Text.ShouldNotContain("ILogger");
 
         typeof(Autheris.Application.Catalog.Semantic.DbtCloudWebhookSignature).IsAbstract.ShouldBeTrue("The verifier must be a static class.");
         typeof(Autheris.Application.Catalog.Semantic.DbtCloudWebhookSignature).IsSealed.ShouldBeTrue();
+
+        var omVerifier = RepositoryScan.ProductionFiles
+            .Single(f => f.RelativePath == "src/Autheris.Application/Catalog/OpenMetadata/OpenMetadataWebhookSignature.cs");
+        omVerifier.Text.ShouldContain("CryptographicOperations.FixedTimeEquals");
+        omVerifier.Text.ShouldNotContain("SequenceEqual");
+        omVerifier.Text.ShouldNotContain("string.Equals");
+        omVerifier.Text.ShouldNotContain("== computed");
+
+        typeof(Autheris.Application.Catalog.OpenMetadata.OpenMetadataWebhookSignature).IsAbstract.ShouldBeTrue("The verifier must be a static class.");
+        typeof(Autheris.Application.Catalog.OpenMetadata.OpenMetadataWebhookSignature).IsSealed.ShouldBeTrue();
 
         var webhooks = RepositoryScan.ProductionFiles.Single(f => f.RelativePath == "src/Autheris.Api/Endpoints/WebhookEndpoints.cs");
         webhooks.Text.ShouldNotContain("DBT_WEBHOOK_SECRET");

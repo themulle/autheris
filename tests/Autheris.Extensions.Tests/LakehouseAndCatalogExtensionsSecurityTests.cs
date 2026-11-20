@@ -716,7 +716,7 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
 
         var payload = $"{{\"id\":\"{Guid.NewGuid()}\",\"timestamp\":{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()},\"eventType\":\"entityUpdated\",\"entityType\":\"table\",\"entityFullyQualifiedName\":\"svc.db.schema.payroll\"}}";
 
-        var ok = await service.HandleWebhookEventAsync(payload, "sha256=" + Hmac(payload, secret));
+        var ok = await service.HandleVerifiedAsync(payload);
 
         ok.ShouldBeTrue();
         upserted.ShouldNotBeNull();

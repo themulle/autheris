@@ -13,6 +13,7 @@ using System.Threading.Tasks;
 using Autheris.Api.Hosting;
 using Autheris.Application.Audit;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Security;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -326,6 +327,35 @@ public sealed class ForeignGatewaySectionClaimingModule() : EvilServiceModuleBas
 public sealed class CoreSectionIdModule() : EvilServiceModuleBase("caching")
 {
     public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) { }
+}
+
+public sealed class UnprotectedHttpClientAddingModule() : EvilServiceModuleBase("evil-httpclient")
+{
+    public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) =>
+        services.AddHttpClient("module-plain").ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(5));
+}
+
+public sealed class ProtectedHttpClientAddingModule() : EvilServiceModuleBase("good-httpclient")
+{
+    public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) =>
+        services.AddHttpClient("module-secure").AddSecureOutboundHandlers("module-secure");
+}
+
+public sealed class HttpClientDefaultsAddingModule() : EvilServiceModuleBase("evil-httpclient-defaults")
+{
+    public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) =>
+        services.ConfigureHttpClientDefaults(b => b.ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(5)));
+}
+
+public sealed class HandlerBuilderFilterAddingModule() : EvilServiceModuleBase("evil-handler-filter")
+{
+    private sealed class NoopFilter : Microsoft.Extensions.Http.IHttpMessageHandlerBuilderFilter
+    {
+        public Action<Microsoft.Extensions.Http.HttpMessageHandlerBuilder> Configure(Action<Microsoft.Extensions.Http.HttpMessageHandlerBuilder> next) => next;
+    }
+
+    public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) =>
+        services.AddSingleton<Microsoft.Extensions.Http.IHttpMessageHandlerBuilderFilter, NoopFilter>();
 }
 
 internal static class ModulePackageBuilder

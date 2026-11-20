@@ -230,6 +230,7 @@ public sealed class ModuleLoader
 
         if (enabledIds.Count == 0)
         {
+            ModuleSecurityGuards.VerifyFinalModuleOwnedPorts(services, []);
             return new ModuleLoadResult([]);
         }
 
@@ -431,7 +432,8 @@ public sealed class ModuleLoader
 
             var scopedConfig = BuildScopedModuleConfiguration(moduleId, moduleInstance.ConfigurationSections, configuration);
             var protectedSnapshot = ModuleSecurityGuards.CaptureProtectedServicesSnapshot(services);
-            var webhookHandlersBefore = ModuleSecurityGuards.CaptureDbtCloudWebhookHandlers(services);
+            var ownedPortsBefore = ModuleSecurityGuards.CaptureModuleOwnedPortDescriptors(services);
+            var httpClientSnapshot = ModuleHttpClientGuard.CaptureClientConfiguration(services);
 
             try
             {
@@ -443,14 +445,15 @@ public sealed class ModuleLoader
             }
 
             ModuleSecurityGuards.VerifyProtectedServicesUnchanged(moduleId, services, protectedSnapshot);
-            ModuleSecurityGuards.VerifyDbtCloudWebhookHandler(moduleId, services, webhookHandlersBefore);
+            ModuleSecurityGuards.VerifyModuleOwnedPorts(moduleId, services, ownedPortsBefore);
+            ModuleHttpClientGuard.VerifyModuleClientsUseSsrfHandler(moduleId, services, httpClientSnapshot);
 
             _logger.LogInformation("Loaded signed module '{ModuleId}' v{Version} (keyId: {KeyId}).", moduleId, manifest.Version, manifest.KeyId);
             _logger.LogInformation("ModuleLoaded: Id '{ModuleId}', Version '{Version}', KeyId '{KeyId}', Signed '{Signed}'", manifest.Id, manifest.Version, manifest.KeyId, true);
             loadedModules.Add(new LoadedModuleDescriptor(moduleId, manifest, moduleInstance, alc));
         }
 
-        ModuleSecurityGuards.VerifyFinalDbtCloudWebhookHandler(services, loadedModules.Select(m => m.Id).ToList());
+        ModuleSecurityGuards.VerifyFinalModuleOwnedPorts(services, loadedModules.Select(m => m.Id).ToList());
         services.AddSingleton(new ModuleLoadResult(loadedModules));
         return new ModuleLoadResult(loadedModules);
     }
@@ -838,7 +841,8 @@ public sealed class ModuleLoader
 
             var scopedConfig = BuildScopedModuleConfiguration(moduleId, moduleInstance.ConfigurationSections, configuration);
             var protectedSnapshot = ModuleSecurityGuards.CaptureProtectedServicesSnapshot(services);
-            var webhookHandlersBefore = ModuleSecurityGuards.CaptureDbtCloudWebhookHandlers(services);
+            var ownedPortsBefore = ModuleSecurityGuards.CaptureModuleOwnedPortDescriptors(services);
+            var httpClientSnapshot = ModuleHttpClientGuard.CaptureClientConfiguration(services);
 
             try
             {
@@ -850,7 +854,8 @@ public sealed class ModuleLoader
             }
 
             ModuleSecurityGuards.VerifyProtectedServicesUnchanged(moduleId, services, protectedSnapshot);
-            ModuleSecurityGuards.VerifyDbtCloudWebhookHandler(moduleId, services, webhookHandlersBefore);
+            ModuleSecurityGuards.VerifyModuleOwnedPorts(moduleId, services, ownedPortsBefore);
+            ModuleHttpClientGuard.VerifyModuleClientsUseSsrfHandler(moduleId, services, httpClientSnapshot);
 
             _logger.LogWarning("Module '{ModuleId}' loaded from workspace path (unsigned)", moduleId);
             _logger.LogInformation("ModuleLoaded: Id '{ModuleId}', Version '{Version}', KeyId '{KeyId}', Signed '{Signed}'", manifest.Id, manifest.Version, manifest.KeyId, false);
@@ -858,7 +863,7 @@ public sealed class ModuleLoader
             loadedModules.Add(new LoadedModuleDescriptor(moduleId, manifest, moduleInstance, alc));
         }
 
-        ModuleSecurityGuards.VerifyFinalDbtCloudWebhookHandler(services, loadedModules.Select(m => m.Id).ToList());
+        ModuleSecurityGuards.VerifyFinalModuleOwnedPorts(services, loadedModules.Select(m => m.Id).ToList());
         result = new ModuleLoadResult(loadedModules);
         services.AddSingleton(result);
         return true;

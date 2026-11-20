@@ -31,7 +31,6 @@ public sealed class OpenMetadataWebhookRetryExt12Tests
 
         var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var payload = $"{{\"id\":\"{Guid.NewGuid()}\",\"timestamp\":{nowMs},\"eventType\":\"entityUpdated\",\"entityType\":\"table\",\"entityFullyQualifiedName\":\"service.db.schema.retry_t\"}}";
-        var signature = "sha256=" + Convert.ToHexStringLower(HMACSHA256.HashData(Encoding.UTF8.GetBytes(Secret), Encoding.UTF8.GetBytes(payload)));
 
         var table = new OpenMetadataTable
         {
@@ -51,9 +50,9 @@ public sealed class OpenMetadataWebhookRetryExt12Tests
             client, metadataRepo, Substitute.For<IConsentRepository>(), epochRepo,
             Options.Create(options), NullLogger<OpenMetadataSyncService>.Instance);
 
-        await Should.ThrowAsync<HttpRequestException>(() => service.HandleWebhookEventAsync(payload, signature));
+        await Should.ThrowAsync<HttpRequestException>(() => service.HandleVerifiedAsync(payload));
 
-        var retried = await service.HandleWebhookEventAsync(payload, signature);
+        var retried = await service.HandleVerifiedAsync(payload);
 
         retried.ShouldBeTrue();
         calls.ShouldBe(2);

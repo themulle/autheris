@@ -258,7 +258,8 @@ public sealed partial class Mutation
         }
 
         // The catalog client is owned by a module; resolve the sync service only after authentication, role and tenant passed.
-        if (!IsServiceRegistered<IDataCatalogClient>(serviceProvider))
+        if (!IsServiceRegistered<IDataCatalogClient>(serviceProvider) ||
+            !IsServiceRegistered<IDataCatalogSyncService>(serviceProvider))
         {
             throw UnavailableError("The data catalog is not available.");
         }

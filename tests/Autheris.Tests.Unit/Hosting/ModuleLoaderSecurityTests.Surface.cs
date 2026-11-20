@@ -151,4 +151,24 @@ public sealed partial class ModuleLoaderSecurityTests
     [Trait("SecurityCondition", "SEC-50-12")]
     public void Module_id_colliding_with_core_section_is_rejected() =>
         AssertModuleRejected("caching", typeof(CoreSectionIdModule), "Gateway:Caching");
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Module_httpclient_without_ssrf_handler_fails_startup()
+    {
+        AssertModuleRejected("evil-httpclient", typeof(UnprotectedHttpClientAddingModule), "SSRF");
+        AssertModuleRejected("evil-httpclient-defaults", typeof(HttpClientDefaultsAddingModule), "HttpClient");
+        AssertModuleRejected("evil-handler-filter", typeof(HandlerBuilderFilterAddingModule), "IHttpMessageHandlerBuilderFilter");
+
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        CreateSignedModuleForEntryType(key, "good-httpclient", typeof(ProtectedHttpClientAddingModule));
+
+        var services = new ServiceCollection();
+        services.AddAuthorization();
+        var config = BuildConfig("good-httpclient");
+        var env = new FakeHostEnvironment { EnvironmentName = Environments.Production };
+
+        var loader = new ModuleLoader(publicKeyOverride: key, isDirectoryWritableOverride: _ => false);
+        loader.LoadAndConfigureServices(services, config, env).ShouldNotBeNull();
+    }
 }

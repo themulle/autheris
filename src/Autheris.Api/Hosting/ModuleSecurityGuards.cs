@@ -203,73 +203,125 @@ internal static class ModuleSecurityGuards
         }
     }
 
-    /// <summary>Assembly that may implement <see cref="IDbtCloudWebhookHandler"/>.</summary>
-    internal const string DbtCloudWebhookHandlerAssembly = "Autheris.Modules.Dbt";
+    /// <summary>Module-owned core port mapped to the only module id and assembly allowed to register it.</summary>
+    internal sealed record ModuleOwnedPort(Type ServiceType, string ModuleId, string AssemblyName);
 
-    /// <summary>Module id that may register <see cref="IDbtCloudWebhookHandler"/>.</summary>
-    internal const string DbtCloudWebhookHandlerModuleId = "dbt";
+    internal static readonly IReadOnlyList<ModuleOwnedPort> ModuleOwnedPorts =
+    [
+        new(typeof(IDbtCloudWebhookHandler), "dbt", "Autheris.Modules.Dbt"),
+    ];
+
+    internal static List<ServiceDescriptor> CaptureModuleOwnedPortDescriptors(IServiceCollection services)
+    {
+        var ownedTypes = ModuleOwnedPorts.Select(p => p.ServiceType).ToHashSet();
+        return services.Where(d => ownedTypes.Contains(d.ServiceType)).ToList();
+    }
 
     internal static List<ServiceDescriptor> CaptureDbtCloudWebhookHandlers(IServiceCollection services) =>
         services.Where(d => d.ServiceType == typeof(IDbtCloudWebhookHandler)).ToList();
 
-    /// <summary>
-    /// The core webhook route trusts <see cref="IDbtCloudWebhookHandler"/> with verified payloads only, so at most one
-    /// descriptor may exist, its implementation type must live in the dbt module assembly, and only module id
-    /// <c>dbt</c> may add it.
-    /// </summary>
     internal static void VerifyDbtCloudWebhookHandler(
         string moduleId,
         IServiceCollection services,
-        IReadOnlyCollection<ServiceDescriptor>? handlersBefore = null)
+        IReadOnlyCollection<ServiceDescriptor>? handlersBefore = null) =>
+        VerifyModuleOwnedPorts(moduleId, services, handlersBefore);
+
+    internal static void VerifyFinalDbtCloudWebhookHandler(IServiceCollection services, IReadOnlyCollection<string> loadedModuleIds) =>
+        VerifyFinalModuleOwnedPorts(services, loadedModuleIds);
+
+    /// <summary>
+    /// Enforces exclusive module ownership of core ports: at most one descriptor, non-null <c>ImplementationType</c>
+    /// declared in the owning assembly (factory and instance descriptors fail), and only the owning module may add, remove,
+    /// or replace it.
+    /// </summary>
+    internal static void VerifyModuleOwnedPorts(
+        string moduleId,
+        IServiceCollection services,
+        IReadOnlyCollection<ServiceDescriptor>? beforeSnapshot = null)
     {
-        var handlers = CaptureDbtCloudWebhookHandlers(services);
-        if (!string.Equals(moduleId, DbtCloudWebhookHandlerModuleId, StringComparison.Ordinal) &&
-            handlers.Any(d => handlersBefore is null || !handlersBefore.Contains(d)))
+        foreach (var port in ModuleOwnedPorts)
         {
-            throw new ModuleLoadException(
-                moduleId,
-                $"Module '{moduleId}' registered '{typeof(IDbtCloudWebhookHandler).FullName}', which only module '{DbtCloudWebhookHandlerModuleId}' may do.");
-        }
+            var current = services.Where(d => d.ServiceType == port.ServiceType).ToList();
+            var previous = beforeSnapshot?.Where(d => d.ServiceType == port.ServiceType).ToList() ?? [];
 
-        if (handlers.Count > 1)
-        {
-            throw new ModuleLoadException(
-                moduleId,
-                $"Module '{moduleId}' registered more than one '{typeof(IDbtCloudWebhookHandler).FullName}'.");
-        }
+            if (!string.Equals(moduleId, port.ModuleId, StringComparison.Ordinal))
+            {
+                if (beforeSnapshot is null)
+                {
+                    if (current.Count > 0)
+                    {
+                        throw new ModuleLoadException(
+                            moduleId,
+                            $"Module '{moduleId}' registered '{port.ServiceType.FullName}', which only module '{port.ModuleId}' may do.");
+                    }
+                }
+                else if (current.Count != previous.Count ||
+                         current.Where((d, idx) => !ReferenceEquals(d, previous[idx])).Any())
+                {
+                    throw new ModuleLoadException(
+                        moduleId,
+                        $"Module '{moduleId}' modified '{port.ServiceType.FullName}', which only module '{port.ModuleId}' may do.");
+                }
 
-        if (handlers.Count == 1 &&
-            !string.Equals(
-                handlers[0].ImplementationType?.Assembly.GetName().Name,
-                DbtCloudWebhookHandlerAssembly,
-                StringComparison.Ordinal))
-        {
-            throw new ModuleLoadException(
-                moduleId,
-                $"Module '{moduleId}' registered '{typeof(IDbtCloudWebhookHandler).FullName}' with an implementation outside '{DbtCloudWebhookHandlerAssembly}'.");
+                continue;
+            }
+
+            if (current.Count > 1)
+            {
+                throw new ModuleLoadException(
+                    moduleId,
+                    $"Module '{moduleId}' registered more than one '{port.ServiceType.FullName}'.");
+            }
+
+            if (current.Count == 1)
+            {
+                var implAssembly = current[0].ImplementationType?.Assembly.GetName().Name;
+                if (!string.Equals(implAssembly, port.AssemblyName, StringComparison.Ordinal))
+                {
+                    throw new ModuleLoadException(
+                        moduleId,
+                        $"Module '{moduleId}' registered '{port.ServiceType.FullName}' with an implementation outside '{port.AssemblyName}'.");
+                }
+            }
         }
     }
 
     /// <summary>
-    /// Final whole-collection check after the module loop: a module that kept its <see cref="IServiceCollection"/> and added the
-    /// handler after <c>ConfigureServices</c> returned is caught here. At most one handler, implemented in the dbt assembly, and
-    /// only when module <c>dbt</c> actually loaded.
+    /// Final whole-collection check after the module loop: catches late modifications and ensures any registered port
+    /// belongs to a module that actually loaded.
     /// </summary>
-    internal static void VerifyFinalDbtCloudWebhookHandler(IServiceCollection services, IReadOnlyCollection<string> loadedModuleIds)
+    internal static void VerifyFinalModuleOwnedPorts(IServiceCollection services, IReadOnlyCollection<string> loadedModuleIds)
     {
-        var handlers = CaptureDbtCloudWebhookHandlers(services);
-        if (handlers.Count == 0)
+        foreach (var port in ModuleOwnedPorts)
         {
-            return;
-        }
+            var current = services.Where(d => d.ServiceType == port.ServiceType).ToList();
+            if (current.Count == 0)
+            {
+                continue;
+            }
 
-        var dbtLoaded = loadedModuleIds.Contains(DbtCloudWebhookHandlerModuleId, StringComparer.Ordinal);
-        if (!dbtLoaded)
-        {
-            throw new ModuleLoadException("host", $"'{typeof(IDbtCloudWebhookHandler).FullName}' is registered but module '{DbtCloudWebhookHandlerModuleId}' did not load.");
-        }
+            if (!loadedModuleIds.Contains(port.ModuleId, StringComparer.Ordinal))
+            {
+                throw new ModuleLoadException(
+                    "host",
+                    $"'{port.ServiceType.FullName}' is registered but module '{port.ModuleId}' did not load.");
+            }
 
-        VerifyDbtCloudWebhookHandler(DbtCloudWebhookHandlerModuleId, services, handlers);
+            if (current.Count > 1)
+            {
+                throw new ModuleLoadException(
+                    port.ModuleId,
+                    $"Module '{port.ModuleId}' registered more than one '{port.ServiceType.FullName}'.");
+            }
+
+            var implAssembly = current[0].ImplementationType?.Assembly.GetName().Name;
+            if (!string.Equals(implAssembly, port.AssemblyName, StringComparison.Ordinal))
+            {
+                throw new ModuleLoadException(
+                    port.ModuleId,
+                    $"Module '{port.ModuleId}' registered '{port.ServiceType.FullName}' with an implementation outside '{port.AssemblyName}'.");
+            }
+        }
     }
 
     private static bool IsProtectedNamespace(string? ns)
