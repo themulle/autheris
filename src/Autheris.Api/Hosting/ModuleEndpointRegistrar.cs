@@ -190,6 +190,33 @@ public sealed class ModuleEndpointRegistrar : IModuleEndpointRegistrar
                         $"Endpoint '{endpoint.DisplayName}' in module '{taggedModuleId}' is missing required audit policy metadata.");
                 }
 
+                if (endpoint.Metadata.GetMetadata<AuditExemption>() is not null)
+                {
+                    throw new ModuleLoadException(
+                        taggedModuleId,
+                        $"Endpoint '{endpoint.DisplayName}' in module '{taggedModuleId}' carries an audit exemption, which is reserved for the host.");
+                }
+
+                foreach (var audit in endpoint.Metadata.GetOrderedMetadata<AuditPolicy>())
+                {
+                    if (audit.Level == AuditLevel.Delegated)
+                    {
+                        throw new ModuleLoadException(
+                            taggedModuleId,
+                            $"Endpoint '{endpoint.DisplayName}' in module '{taggedModuleId}' uses delegated audit, which is reserved for the host.");
+                    }
+                }
+
+                foreach (var limit in endpoint.Metadata.GetOrderedMetadata<IRequestSizeLimitMetadata>())
+                {
+                    if (limit.MaxRequestBodySize is not { } maxBytes || maxBytes <= 0 || maxBytes > MaxModuleBodyLimitBytes)
+                    {
+                        throw new ModuleLoadException(
+                            taggedModuleId,
+                            $"Endpoint '{endpoint.DisplayName}' in module '{taggedModuleId}' declares a request body limit outside 1 byte to {MaxModuleBodyLimitBytes} bytes.");
+                    }
+                }
+
                 if (endpoint.Metadata.GetMetadata<IngressTransportMetadata>() is null)
                 {
                     throw new ModuleLoadException(
@@ -199,6 +226,9 @@ public sealed class ModuleEndpointRegistrar : IModuleEndpointRegistrar
             }
         }
     }
+
+    /// <summary>Largest request body a module endpoint may accept (100 MiB).</summary>
+    internal const long MaxModuleBodyLimitBytes = 100L * 1024 * 1024;
 
     private static void VerifyAddedEndpointOwnership(Endpoint endpoint, string moduleId)
     {
@@ -349,7 +379,11 @@ public sealed class ModuleEndpointRegistrar : IModuleEndpointRegistrar
         {
             state.Tenant = EndpointSecurity.GetRequestTenant(httpContext);
         }
-        catch (Exception ex) when (ex is System.Security.SecurityException or Autheris.Domain.Exceptions.TenantUnresolvedException)
+        catch (Autheris.Domain.Exceptions.GatewayUnauthorizedException)
+        {
+            return Results.StatusCode(StatusCodes.Status401Unauthorized);
+        }
+        catch (Exception ex) when (ex is System.Security.SecurityException or Autheris.Domain.Exceptions.GatewaySecurityException)
         {
             return Results.StatusCode(StatusCodes.Status403Forbidden);
         }
@@ -379,7 +413,7 @@ public sealed class ModuleEndpointRegistrar : IModuleEndpointRegistrar
         {
             return EndpointSecurity.GetRequestTenant(httpContext);
         }
-        catch (Exception ex) when (ex is System.Security.SecurityException or Autheris.Domain.Exceptions.TenantUnresolvedException)
+        catch (Exception ex) when (ex is System.Security.SecurityException or Autheris.Domain.Exceptions.GatewaySecurityException)
         {
             return null;
         }

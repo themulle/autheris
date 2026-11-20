@@ -66,7 +66,7 @@ public static partial class GatewayGovernanceServiceExtensions
     private static void AddGovernanceStateAndStores(IServiceCollection services, GatewayOptions gatewayOptions)
     {
         // the durable CDC webhook subscription store is a view of the governance repository (only when the feature is on).
-        var cdcWebhooksEnabled = CdcWebhooksFeature.IsEnabled(services);
+        var cdcWebhooksEnabled = CdcWebhookStoreFeature.IsEnabled(services);
 
         // one state directory (Gateway:State:StateDirectory) for the gateway state files.
         services.AddOptions<StateOptions>().BindConfiguration(StateOptions.SectionName).ValidateOnStart();

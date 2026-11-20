@@ -488,6 +488,7 @@ public sealed class OutboundEgressAllowlistHardeningTests
         services.AddSingleton(Options.Create(options));
         services.AddGatewayInfrastructure(options);
         Autheris.Modules.Lakehouse.LakehouseServiceCollectionExtensions.AddLakehouseIntegration(services, options);
+        Autheris.Modules.Lineage.LineageServiceCollectionExtensions.AddLineageModule(services, new ConfigurationBuilder().Build());
         return services.BuildServiceProvider();
     }
 

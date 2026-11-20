@@ -6,9 +6,9 @@ using Xunit;
 namespace Autheris.Tests.Architecture;
 
 /// <summary>
-/// Issue #447 (SEC-ATR-04, SEC-ATR-13): <c>/api/v1/cdc/events</c> and <c>/api/v1/cdc/streams/{id}/resync</c> are exempt from the ingress
-/// stamping because they read no source: an event is pushed by the caller, a resync restarts a stream consumer. This proves the claim
-/// structurally: the services behind both routes (and the route classes) depend on no choke-point or source-reader type, so adding one
+/// Issue #447 (SEC-ATR-04, SEC-ATR-13): <c>/modules/events/v1/cdc/events</c> and <c>/modules/events/v1/cdc/streams/{id}/resync</c> read no source:
+/// the events module routes are stamped by the module registrar, and an event is pushed by the caller, a resync restarts a stream consumer. This proves the claim
+/// structurally: the services behind both routes (and the route classes, now in the events module assembly) depend on no choke-point or source-reader type, so adding one
 /// (which would read rows or row-derived data) fails here and the route must then be stamped and gated instead.
 /// </summary>
 [Trait("Category", "Security")]
@@ -37,7 +37,7 @@ public sealed class CdcRoutesReachNoSourceReaderTests
     [InlineData("Autheris.Api.Endpoints.CdcStreamAdminEndpoints")]
     public void SEC_ATR_04_CdcRouteClasses_TakeNoSourceReader(string routeClass)
     {
-        var type = typeof(Autheris.Api.Endpoints.ChangeDetectionEndpoints).Assembly.GetType(routeClass, throwOnError: true)!;
+        var type = typeof(Autheris.Modules.Events.EventsModule).Assembly.GetType(routeClass, throwOnError: true)!;
         const BindingFlags all = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance | BindingFlags.DeclaredOnly;
         var parameters = type.GetMethods(all).SelectMany(m => m.GetParameters()).Select(p => p.ParameterType);
         var closures = type.GetNestedTypes(all).SelectMany(n => n.GetFields(all)).Select(f => f.FieldType);

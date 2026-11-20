@@ -30,6 +30,8 @@ public sealed partial class AuditDetailsBuilder
         "passwd",
         "pwd",
         "apikey",
+        "signing",
+        "kek",
         "key",
         "cookie",
         "authorization",

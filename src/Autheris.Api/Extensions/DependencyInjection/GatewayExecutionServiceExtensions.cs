@@ -23,6 +23,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Extensions;
+using Autheris.Infrastructure.Streaming.Producers;
 using Autheris.GraphQL.Subscriptions;
 using Autheris.Infrastructure.Connectors;
 using Autheris.Domain.Diagnostics;
@@ -122,6 +123,7 @@ public static class GatewayExecutionServiceExtensions
 
         // Connectors to foreign systems (Autheris.Extensions)
         services.AddGatewayExtensions(gatewayOptions);
+        services.AddCdcSourceIntegration(gatewayOptions);
 
         // Realtime Event Subscriptions & In-Stream RLS (P5, F-CDC-03)
         services.AddAutherisStreaming();
@@ -134,21 +136,15 @@ public static class GatewayExecutionServiceExtensions
             services.AddHostedService(sp => sp.GetRequiredService<PostgreSqlLogicalReplicationService>());
         }
 
-        // F-EVT-01: CloudEvents v1.0 Outbound Webhook Subscriptions
-        // Enabled by default (G-2); while disabled nothing is registered (no store, no delivery service, no secret protector).
-        services.AddSingleton<IValidateOptions<Autheris.Domain.Options.CdcWebhooksOptions>, Autheris.Application.Events.Services.CdcWebhooksOptionsValidator>();
-        services.AddOptions<Autheris.Domain.Options.CdcWebhooksOptions>()
-            .BindConfiguration(Autheris.Domain.Options.CdcWebhooksOptions.SectionName)
-            .ValidateOnStart();
-        var cdcWebhooksEnabled = CdcWebhooksFeature.IsEnabled(services);
-        if (cdcWebhooksEnabled)
+        // F-EVT-01: CloudEvents v1.0 outbound webhook subscriptions. The secret protector is a host service: it is always registered
+        // and fails closed (WebhookSecretUnavailableException, never plaintext) when the key is not provisioned. The subscription
+        // endpoints, the options and the delivery service belong to the events module; this block keeps only the host ports.
+        services.AddSingleton<Autheris.Application.Webhooks.IWebhookSecretProtector, Autheris.Infrastructure.Security.KeyVaultWebhookSecretProtector>();
+        if (CdcWebhookStoreFeature.IsEnabled(services))
         {
             // The durable subscription store is registered with the governance repositories (AddAutherisGovernance).
-            services.AddSingleton<Autheris.Application.Webhooks.IWebhookSecretProtector, Autheris.Infrastructure.Security.KeyVaultWebhookSecretProtector>();
             services.AddSingleton<ICloudEventTransformer, CloudEventTransformer>();
             Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddSingleton(services, TimeProvider.System);
-            services.AddHostedService<Autheris.Application.Streaming.Services.CdcWebhookDeliveryService>();
-            services.AddHostedService<Autheris.Api.Hosting.CdcWebhookStartupCheck>();
         }
 
         // Incremental Delivery (@defer & @stream) (F-PERF-12)

@@ -34,13 +34,16 @@ public class IntegrationGapAEndpointMetadataTests : IClassFixture<IntegrationGap
     {
         protected override void ConfigureHostConfiguration(IConfigurationBuilder config)
         {
-            config.AddInMemoryCollection(new Dictionary<string, string?>
+            var settings = new Dictionary<string, string?>
             {
                 ["Gateway:Authentication:EnableTestAuthHandler"] = "true",
                 ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
                 ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.Create("IntegrationGapAEndpointMetadataTests"),
                 ["Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit"] = "500",
-            });
+            };
+            // The CDC ingestion route (and its body limit) belongs to the events module.
+            EventsWorkspaceTestSettings.Apply((k, v) => settings[k] = v);
+            config.AddInMemoryCollection(settings);
         }
     }
 
@@ -175,7 +178,7 @@ public class IntegrationGapAEndpointMetadataTests : IClassFixture<IntegrationGap
     [InlineData("/api/extensions/dbt/validate-contract", 100 * Mb)]
     [InlineData("/api/extensions/dbt/run-results", 50 * Mb)]
     [InlineData("/api/extensions/dbt/webhooks/dbt-cloud", 2 * Mb)]
-    [InlineData("/api/v1/cdc/events", 10 * Mb)]
+    [InlineData("/modules/events/v1/cdc/events", 10 * Mb)]
     [InlineData("/api/governance/catalog/ingest-openapi", 20 * Mb)]
     public void GAP02_LargeBodyRoutes_DeclareRequestSizeLimitAboveGlobalKestrelLimit(string rawPattern, long expectedBytes)
     {
