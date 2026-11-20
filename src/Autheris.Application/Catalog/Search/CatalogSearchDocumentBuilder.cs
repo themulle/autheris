@@ -24,47 +24,32 @@ internal static class CatalogSearchDocumentBuilder
     {
         ArgumentNullException.ThrowIfNull(t);
         var sb = new StringBuilder(512);
-
         void Append(string? text, bool scrub = true)
         {
-            if (string.IsNullOrWhiteSpace(text))
-            {
-                return;
-            }
-
-            sb.Append(scrub ? SecretScrubber.Redact(text) : text).Append(' ');
+            if (!string.IsNullOrWhiteSpace(text))
+                sb.Append(scrub ? SecretScrubber.Redact(text) : text).Append(' ');
         }
 
         Append($"{t.Identifier.Domain} {t.Identifier.Schema} {t.Identifier.TableName}", scrub: false);
         Append(t.Table.DisplayName);
         Append(t.Table.Description);
         Append(t.Table.LongDescription);
-
         foreach (var (_, entry) in t.Table.Texts.Entries)
         {
             Append(entry.DisplayName);
             Append(entry.Description);
             Append(entry.LongDescription);
         }
-
         foreach (var c in t.Columns)
         {
-            if (c.DiscoveryHidden)
-            {
-                continue;
-            }
-
+            if (c.DiscoveryHidden) continue;
             Append(c.ColumnName, scrub: false);
             if (hiddenTextColumns is null || !hiddenTextColumns.Contains(c.ColumnName))
             {
                 Append(c.DisplayName);
-                foreach (var (_, colEntry) in c.Texts.Entries)
-                {
-                    Append(colEntry.DisplayName);
-                }
+                foreach (var (_, colEntry) in c.Texts.Entries) Append(colEntry.DisplayName);
             }
         }
-
         return sb.ToString().Trim();
     }
 
