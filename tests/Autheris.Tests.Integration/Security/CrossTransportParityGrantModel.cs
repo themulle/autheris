@@ -38,6 +38,13 @@ internal sealed partial class CrossTransportParityGrantModelRows
         ["ssn"] = ssn
     };
 
+    private static IReadOnlyDictionary<string, ColumnAccessLevel> AllCols(ColumnAccessLevel level) => new Dictionary<string, ColumnAccessLevel>
+    {
+        ["id"] = level,
+        ["region"] = level,
+        ["ssn"] = level
+    };
+
     internal static Guid GrantId(int n) => new($"00000000-0000-0000-0000-0000000030{n:00}");
 
     private static readonly TableIdentifier GrantOrdersId = new("default", "main", "orders");
@@ -92,7 +99,7 @@ internal sealed partial class CrossTransportParityGrantModelRows
                     GroupGrant(1, GroupA, now, [SegmentEntry("gold", UncoveredPolicy.Deny)]),
                     GroupGrant(2, GroupB, now, [SegmentEntry("silver", UncoveredPolicy.Deny)])
                 ], [], VirtualFilterSnapshot.Empty, false, false,
-                new(false, GrantIds: [], ColumnState: Cols(ColumnAccessLevel.Deny),
+                new(false, GrantIds: [], ColumnState: AllCols(ColumnAccessLevel.Deny),
                     PredicateParameterValues: [],
                     ReasonCodes: [RowScopeCompiler.NoContributingGrantCode]), plain),
 
