@@ -17,17 +17,6 @@ namespace Autheris.Tests.Integration.Governance.Contract;
 /// </summary>
 public abstract class FunctionalRightContract : GovernanceContractBase
 {
-    private const string Realm = "realm-1";
-    private static readonly DateTimeOffset Now = new(2026, 10, 23, 8, 0, 0, TimeSpan.Zero);
-
-    private IFunctionalRightRepository Repo => Store.FunctionalRights;
-
-    private static string Group(string prefix = "grp") => prefix + "-" + Guid.NewGuid().ToString("N")[..8];
-
-    private static FunctionalRightMapping Mapping(
-        TenantId tenant, string groupOrRole, FunctionalRight right, string approvedBy, string createdBy = "creator", string realm = Realm, DateTimeOffset? createdAt = null) =>
-        new(tenant, realm, groupOrRole, right, approvedBy, Now, "Standard", createdBy, createdAt ?? Now);
-
     [RequiresContainerRuntimeFact]
     [Trait("Category", "Security")]
     public override async Task Reads_never_return_other_tenant_rows()
@@ -240,6 +229,86 @@ public abstract class FunctionalRightContract : GovernanceContractBase
 
         approved.ShouldContain(m => m.GroupOrRole == group);
     }
+
+    [RequiresContainerRuntimeFact]
+    public async Task CreateMapping_PendingProposal_PersistsNullApproval()
+    {
+        if (!Store.IsAvailable) return;
+        var group = Group();
+        await Repo.CreateMappingAsync(Mapping(Store.TenantA, group, FunctionalRight.DataExport, approvedBy: null));
+
+        var read = (await Repo.GetMappingAsync(Store.TenantA, Realm, group, FunctionalRight.DataExport)).ShouldNotBeNull();
+        read.ApprovedBy.ShouldBeNull();
+        read.ApprovedAt.ShouldBeNull();
+        read.CreatedBy.ShouldBe("creator");
+
+        var listed = (await Repo.GetMappingsAsync(Store.TenantA, Realm)).ShouldHaveSingleItem();
+        listed.ApprovedBy.ShouldBeNull();
+        listed.ApprovedAt.ShouldBeNull();
+    }
+
+    [RequiresContainerRuntimeFact]
+    [Trait("Category", "Security")]
+    public async Task ApprovedMappings_PendingProposal_Excluded()
+    {
+        if (!Store.IsAvailable) return;
+        var group = Group();
+        await Repo.CreateMappingAsync(Mapping(Store.TenantA, group, FunctionalRight.DataExport, approvedBy: null));
+        await Repo.CreateMappingAsync(Mapping(Store.TenantA, group, FunctionalRight.SecurityAdmin, approvedBy: null));
+        await Repo.CreateMappingAsync(Mapping(Store.TenantA, group, FunctionalRight.Consumer, approvedBy: "approver"));
+
+        var approved = await Repo.GetApprovedMappingsForGroupsAndRolesAsync(Store.TenantA, Realm, [group]);
+
+        approved.ShouldNotContain(m => m.FunctionalRight == FunctionalRight.DataExport);
+        approved.ShouldNotContain(m => m.FunctionalRight == FunctionalRight.SecurityAdmin);
+        approved.ShouldContain(m => m.FunctionalRight == FunctionalRight.Consumer);
+    }
+
+    [RequiresContainerRuntimeFact]
+    public async Task ApproveMapping_PendingProposal_BecomesEffective()
+    {
+        if (!Store.IsAvailable) return;
+        var group = Group();
+        await Repo.CreateMappingAsync(Mapping(Store.TenantA, group, FunctionalRight.SecurityAdmin, approvedBy: null, createdBy: "creator"));
+
+        (await Repo.GetApprovedMappingsForGroupsAndRolesAsync(Store.TenantA, Realm, [group])).ShouldBeEmpty();
+
+        await Repo.ApproveMappingAsync(Store.TenantA, Realm, group, FunctionalRight.SecurityAdmin, "approver");
+
+        var read = (await Repo.GetMappingAsync(Store.TenantA, Realm, group, FunctionalRight.SecurityAdmin)).ShouldNotBeNull();
+        read.ApprovedBy.ShouldBe("approver");
+        read.ApprovedAt.ShouldNotBeNull();
+        var approved = await Repo.GetApprovedMappingsForGroupsAndRolesAsync(Store.TenantA, Realm, [group]);
+        approved.ShouldContain(m => m.FunctionalRight == FunctionalRight.SecurityAdmin && m.ApprovedBy == "approver");
+    }
+
+    [RequiresContainerRuntimeFact]
+    [Trait("Category", "Security")]
+    public async Task CreateMapping_ReproposalOverApproved_ResetsApproval()
+    {
+        if (!Store.IsAvailable) return;
+        var group = Group();
+        await Repo.CreateMappingAsync(Mapping(Store.TenantA, group, FunctionalRight.SecurityAdmin, approvedBy: "approver", createdBy: "creator"));
+        (await Repo.GetApprovedMappingsForGroupsAndRolesAsync(Store.TenantA, Realm, [group])).ShouldHaveSingleItem();
+
+        await Repo.CreateMappingAsync(Mapping(Store.TenantA, group, FunctionalRight.SecurityAdmin, approvedBy: null, createdBy: "creator-2"));
+
+        var read = (await Repo.GetMappingAsync(Store.TenantA, Realm, group, FunctionalRight.SecurityAdmin)).ShouldNotBeNull();
+        read.ApprovedBy.ShouldBeNull();
+        read.ApprovedAt.ShouldBeNull();
+        (await Repo.GetApprovedMappingsForGroupsAndRolesAsync(Store.TenantA, Realm, [group])).ShouldBeEmpty();
+    }
+
+    private const string Realm = "realm-1";
+    private static readonly DateTimeOffset Now = new(2026, 10, 23, 8, 0, 0, TimeSpan.Zero);
+
+    private IFunctionalRightRepository Repo => Store.FunctionalRights;
+
+    private static string Group(string prefix = "grp") => prefix + "-" + Guid.NewGuid().ToString("N")[..8];
+
+    private static FunctionalRightMapping Mapping(
+        TenantId tenant, string groupOrRole, FunctionalRight right, string? approvedBy, string createdBy = "creator", string realm = Realm, DateTimeOffset? createdAt = null) =>
+        new(tenant, realm, groupOrRole, right, approvedBy, approvedBy is null ? null : Now, "Standard", createdBy, createdAt ?? Now);
 }
 
 [Collection(GovernancePostgresCollection.Name)]

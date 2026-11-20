@@ -89,11 +89,11 @@ src/Autheris.Domain/Model/AccessProfile.cs|1
 src/Autheris.Domain/Model/AccessProfileAssignment.cs|1
 src/Autheris.Domain/Model/GovernanceModels.cs|3
 src/Autheris.Domain/Model/VirtualFilterModels.cs|2
-src/Autheris.Extensions/Dbt/DbtHealthCircuitBreaker.cs|3
-src/Autheris.Extensions/Dbt/DbtMetadataIngestionService.cs|4
-src/Autheris.Extensions/Dbt/DbtWebhookReceiver.cs|3
+modules/Autheris.Modules.Dbt/DbtHealthCircuitBreaker.cs|3
+modules/Autheris.Modules.Dbt/DbtMetadataIngestionService.cs|4
+modules/Autheris.Modules.Dbt/DbtWebhookReceiver.cs|3
+modules/Autheris.Modules.OpenMetadata/OpenMetadataSyncService.cs|8
 src/Autheris.Extensions/Lineage/OpenJevClient.cs|2
-src/Autheris.Extensions/OpenMetadata/OpenMetadataSyncService.cs|8
 src/Autheris.GraphQL/Federation/SubgraphSecurityValidator.cs|1
 src/Autheris.GraphQL/Mcp/CatalogGraphQlMap.cs|2
 src/Autheris.GraphQL/Subscriptions/CdcSubscriptionGovernor.cs|2

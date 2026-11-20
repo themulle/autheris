@@ -86,4 +86,22 @@ public sealed class GroupingSetsEmissionTests
     {
         Assert.Throws<AstBuildException>(() => Generate("SELECT dept, SUM(amount) FROM orders GROUP BY AUTO", TargetSqlDialect.PostgreSql));
     }
+
+    [Theory]
+    [InlineData(TargetSqlDialect.Databricks)]
+    [InlineData(TargetSqlDialect.DuckDb)]
+    public void GroupByAll_IsEmittedForSupportedDialects(TargetSqlDialect dialect)
+    {
+        Assert.Contains("GROUP BY ALL", Generate("SELECT dept, COUNT(id) FROM orders GROUP BY ALL", dialect));
+    }
+
+    [Theory]
+    [InlineData(TargetSqlDialect.PostgreSql)]
+    [InlineData(TargetSqlDialect.SqlServer)]
+    [InlineData(TargetSqlDialect.Oracle)]
+    [InlineData(TargetSqlDialect.Ansi)]
+    public void GroupByAll_WithoutSupport_IsRejected(TargetSqlDialect dialect)
+    {
+        Assert.Throws<AstBuildException>(() => Generate("SELECT dept, COUNT(id) FROM orders GROUP BY ALL", dialect));
+    }
 }

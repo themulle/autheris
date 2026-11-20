@@ -100,7 +100,7 @@ public sealed class DbtOptions
     public Dictionary<string, string> DatabaseMappings { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Issue #393 (part b): the dbt governance import (<c>POST /api/extensions/dbt/governance</c>) may write table data owners, who then
+    /// Issue #393 (part b): the dbt governance import (<c>POST /modules/dbt/governance</c>) may write table data owners, who then
     /// act as consent approvers. false (default) rejects any payload that carries <c>owner</c> / <c>owners</c>. Configuration only,
     /// never a request parameter; the manifest sync never writes owners.
     /// </summary>

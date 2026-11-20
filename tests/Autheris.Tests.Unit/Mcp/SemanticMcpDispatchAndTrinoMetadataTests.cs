@@ -11,7 +11,7 @@ using Autheris.Application.Analytics;
 using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.DataSources.Interfaces;
 using Autheris.Application.Catalog.Semantic;
-using Autheris.Extensions.Dbt;
+using Autheris.Modules.Dbt;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Lineage;
 using Autheris.Application.Mcp.Interfaces;

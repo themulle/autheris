@@ -55,6 +55,10 @@ public sealed partial class SemanticManifestValidator
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
     }
 
+    /// <summary>Validator with the production policy parser and default options, for callers without a DI-provided instance.</summary>
+    public static SemanticManifestValidator CreateDefault() =>
+        new(Autheris.Application.Policy.Lint.PolicyParserSetup.CreateParser(), Options.Create(new SemanticOptions()));
+
     /// <param name="manifest">The parsed manifest.</param>
     /// <param name="baseTables">Resolved base table per model name; needed only for models whose metrics carry a filter template.</param>
     public SemanticManifestValidationResult Validate(DbtSemanticManifest manifest, IReadOnlyDictionary<string, TableMetadata> baseTables)

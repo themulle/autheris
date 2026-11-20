@@ -52,8 +52,9 @@ public sealed class CatalogTablePersistedProjection
         "Table.SourceType", "Table.SourceName", "Table.SchemaName", "Table.TableName", "Table.DisplayName", "Table.Description",
         "Table.LongDescription", "Table.Texts", "Table.DocumentationSource", "Table.Sensitivity", "Table.RequiresFourEyes", "Table.IsActive",
         "Table.DataSourceType", "Table.HttpEndpoint", "Table.PluginName", "Table.MinGroupSize", "Table.NonPersonal", "Table.RequiredFilterColumns",
-        "Table.DbtUniqueId", "Table.ObjectKind",
+        "Table.DbtUniqueId", "Table.ObjectKind", "Table.MetricViewCountMeasure",
         "TableColumn.ColumnName", "TableColumn.DisplayName", "TableColumn.DataType", "TableColumn.Collation", "TableColumn.LengthSemantics",
+        "TableColumn.Role",
         "TableColumn.Description", "TableColumn.LongDescription", "TableColumn.Texts", "TableColumn.DocumentationSource",
         "TableColumn.Meta",
         "MaskingRule.RuleType", "MaskingRule.PatternOrFormat", "MaskingRule.Replacement", "MaskingRule.HmacKeyId",
@@ -78,12 +79,14 @@ public sealed class CatalogTablePersistedProjection
         ["TABLES.doc_source"] = "table.doc_source", ["TABLES.required_filter_columns_json"] = "table.required_filter_columns",
         ["TABLES.texts_json"] = "table.texts", ["TABLES.min_group_size"] = "table.min_group_size", ["TABLES.non_personal"] = "table.non_personal",
         ["TABLES.dbt_unique_id"] = "table.dbt_unique_id", ["TABLES.object_kind"] = "table.object_kind",
+        ["TABLES.metric_view_count_measure"] = "table.metric_view_count_measure",
         ["TABLE_COLUMNS.id"] = "(surrogate id)", ["TABLE_COLUMNS.table_id"] = "(foreign key)", ["TABLE_COLUMNS.column_name"] = "column[name]",
         ["TABLE_COLUMNS.data_type"] = "column.data_type",
         ["TABLE_COLUMNS.description"] = "column.description", ["TABLE_COLUMNS.long_description"] = "column.long_description",
         ["TABLE_COLUMNS.doc_source"] = "column.doc_source", ["TABLE_COLUMNS.meta_json"] = "column.meta", ["TABLE_COLUMNS.display_name"] = "column.display_name",
         ["TABLE_COLUMNS.texts_json"] = "column.texts", ["TABLE_COLUMNS.collation"] = "column.collation",
-        ["TABLE_COLUMNS.length_semantics"] = "column.length_semantics", ["TABLE_COLUMNS.ordinal"] = "(order of columns is not compared)"
+        ["TABLE_COLUMNS.length_semantics"] = "column.length_semantics", ["TABLE_COLUMNS.column_role"] = "column.role",
+        ["TABLE_COLUMNS.ordinal"] = "(order of columns is not compared)"
     };
 
     private static readonly HashSet<string> AdditiveTableFields = new(StringComparer.Ordinal)
@@ -128,7 +131,15 @@ public sealed class CatalogTablePersistedProjection
         values["table.min_group_size"] = table.MinGroupSize?.ToString(CultureInfo.InvariantCulture);
         values["table.non_personal"] = Flag(table.NonPersonal);
         values["table.dbt_unique_id"] = table.DbtUniqueId;
-        values["table.object_kind"] = table.ObjectKind == DiscoveryObjectKind.View ? "view" : "table";
+        values["table.object_kind"] = table.ObjectKind switch
+        {
+            DiscoveryObjectKind.Table => "table",
+            DiscoveryObjectKind.View => "view",
+            DiscoveryObjectKind.MetricView => "metric_view",
+            DiscoveryObjectKind.Procedure => "procedure",
+            _ => throw new ArgumentOutOfRangeException(nameof(metadata), table.ObjectKind, "Unknown DiscoveryObjectKind.")
+        };
+        values["table.metric_view_count_measure"] = table.MetricViewCountMeasure;
         values["table.required_filter_columns"] = table.RequiredFilterColumns.IsDefault
             ? string.Empty
             : string.Join(ListSeparator, table.RequiredFilterColumns);
@@ -169,6 +180,7 @@ public sealed class CatalogTablePersistedProjection
             values[prefix + ".data_type"] = column.DataType;
             values[prefix + ".collation"] = column.Collation;
             values[prefix + ".length_semantics"] = column.LengthSemantics;
+            values[prefix + ".role"] = column.Role?.ToWireName();
             values[prefix + ".display_name"] = column.DisplayName;
             values[prefix + ".description"] = column.Description;
             values[prefix + ".long_description"] = column.LongDescription;

@@ -68,7 +68,14 @@ public static class CatalogGovernanceRatchet
             ExpectedRows = inTable.ExpectedRows ?? exTable.ExpectedRows,
             DiscoveryHidden = exTable.DiscoveryHidden || inTable.DiscoveryHidden,
             SamplesDisabled = exTable.SamplesDisabled || inTable.SamplesDisabled,
-            ObjectKind = inTable.ObjectKind == DiscoveryObjectKind.View ? DiscoveryObjectKind.View : exTable.ObjectKind
+            ObjectKind = inTable.ObjectKind switch
+            {
+                DiscoveryObjectKind.View or DiscoveryObjectKind.MetricView => inTable.ObjectKind,
+                DiscoveryObjectKind.Table => exTable.ObjectKind,
+                DiscoveryObjectKind.Procedure => DiscoveryObjectKind.Procedure,
+                _ => throw new ArgumentOutOfRangeException(nameof(incoming), inTable.ObjectKind, "Unknown DiscoveryObjectKind.")
+            },
+            MetricViewCountMeasure = !string.IsNullOrWhiteSpace(inTable.MetricViewCountMeasure) ? inTable.MetricViewCountMeasure : exTable.MetricViewCountMeasure
         };
 
         var existingColumns = new Dictionary<string, TableColumn>(StringComparer.OrdinalIgnoreCase);
@@ -102,7 +109,8 @@ public static class CatalogGovernanceRatchet
                 Texts = col.Texts is { IsEmpty: false } ? col.Texts : (exCol?.Texts ?? LocalizedTexts.Empty),
                 DocumentationSource = col.DocumentationSource ?? exCol?.DocumentationSource,
                 Meta = col.Meta is { Count: > 0 } ? col.Meta : (exCol?.Meta ?? col.Meta),
-                DiscoveryHidden = (exCol?.DiscoveryHidden == true) || col.DiscoveryHidden
+                DiscoveryHidden = (exCol?.DiscoveryHidden == true) || col.DiscoveryHidden,
+                Role = col.Role ?? exCol?.Role
             });
         }
 

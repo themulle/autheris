@@ -17,7 +17,7 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Domain.Security;
-using Autheris.Extensions.Dbt;
+using Autheris.Modules.Dbt;
 using Autheris.Infrastructure.Persistence;
 using Autheris.Infrastructure.Security;
 using Microsoft.AspNetCore.Http;

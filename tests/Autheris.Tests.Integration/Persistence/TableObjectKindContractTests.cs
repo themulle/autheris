@@ -29,6 +29,7 @@ public abstract class TableObjectKindContractBase
     protected abstract DbConnection OpenRaw(string connectionString);
     protected abstract Task MigrateAsync(string connectionString, int? stepVersionCap);
     protected abstract void AssertObjectKindCheckConstraint(DbException ex);
+    protected abstract void AssertColumnRoleCheckConstraint(DbException ex);
 
     private static TableMetadata Metadata(Guid id, DiscoveryObjectKind kind) => new()
     {
@@ -95,6 +96,23 @@ public abstract class TableObjectKindContractBase
 
             await governance.UpsertTableMetadataAsync(Metadata(id, DiscoveryObjectKind.Table));
             (await StoredAsync(governance)).ShouldBe(DiscoveryObjectKind.Table);
+
+            var mv = new TableMetadata
+            {
+                Table = new Table { Id = id, DisplayName = "sales_mv", TableName = "ord_896", SchemaName = "sales", SourceType = "Databricks", SourceName = "kind_896", Description = "mv", ObjectKind = DiscoveryObjectKind.MetricView, MetricViewCountMeasure = "revenue" },
+                Identifier = new TableIdentifier("kind_896", "sales", "ord_896"),
+                Columns =
+                [
+                    new TableColumn { ColumnName = "region", DataType = "string", Role = MetricViewColumnRole.Dimension },
+                    new TableColumn { ColumnName = "revenue", DataType = "decimal", Role = MetricViewColumnRole.Measure }
+                ]
+            };
+            await governance.UpsertTableMetadataAsync(mv);
+            var stored = (await governance.GetTableMetadataAsync(new TableIdentifier("kind_896", "sales", "ord_896")))!;
+            stored.Table.ObjectKind.ShouldBe(DiscoveryObjectKind.MetricView);
+            stored.Table.MetricViewCountMeasure.ShouldBe("revenue");
+            stored.Columns.Single(c => c.ColumnName == "region").Role.ShouldBe(MetricViewColumnRole.Dimension);
+            stored.Columns.Single(c => c.ColumnName == "revenue").Role.ShouldBe(MetricViewColumnRole.Measure);
         }
         finally
         {
@@ -120,6 +138,11 @@ public abstract class TableObjectKindContractBase
             var act = () => ExecAsync(raw, $"INSERT INTO TABLES (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, object_kind) VALUES ('{badId}', 'Test', 'kind_896', 'sales', 'bad', 'bad', 'NORMAL', 0, 1, 'procedure')");
             var ex = await Should.ThrowAsync<DbException>(act);
             AssertObjectKindCheckConstraint(ex);
+
+            var badColId = Guid.NewGuid().ToString("D");
+            var badRole = () => ExecAsync(raw, $"INSERT INTO TABLE_COLUMNS (id, table_id, column_name, data_type, ordinal, column_role) VALUES ('{badColId}', 'missing', 'x', 'varchar', 0, 'invalid_role')");
+            var colEx = await Should.ThrowAsync<DbException>(badRole);
+            AssertColumnRoleCheckConstraint(colEx);
         }
         finally
         {
@@ -174,6 +197,12 @@ public sealed class PostgreSqlTableObjectKindContractTests : TableObjectKindCont
         var pg = ex.ShouldBeOfType<PostgresException>();
         pg.ConstraintName.ShouldBe("ck_tables_object_kind");
     }
+
+    protected override void AssertColumnRoleCheckConstraint(DbException ex)
+    {
+        var pg = ex.ShouldBeOfType<PostgresException>();
+        pg.ConstraintName.ShouldBe("ck_table_columns_column_role");
+    }
 }
 
 public sealed class SqlServerTableObjectKindContractTests : TableObjectKindContractBase
@@ -221,6 +250,12 @@ public sealed class SqlServerTableObjectKindContractTests : TableObjectKindContr
     {
         var sqlEx = ex.ShouldBeOfType<SqlException>();
         sqlEx.Message.ShouldContain("CK_TABLES_object_kind");
+    }
+
+    protected override void AssertColumnRoleCheckConstraint(DbException ex)
+    {
+        var sqlEx = ex.ShouldBeOfType<SqlException>();
+        sqlEx.Message.ShouldContain("CK_TABLE_COLUMNS_column_role");
     }
 }
 

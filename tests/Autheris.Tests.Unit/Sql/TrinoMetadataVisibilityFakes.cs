@@ -42,7 +42,7 @@ internal static class TrinoMetadataVisibilityFakes
     }
 
     private static DiscoveryObject ToDiscoveryObject(TableMetadata table) => new(
-        SemanticVirtualTables.IsVirtualTable(table) ? DiscoveryObjectKind.View : DiscoveryObjectKind.Table,
+        SemanticVirtualTables.IsVirtualTable(table) ? DiscoveryObjectKind.View : table.Table.ObjectKind,
         table.Identifier.Domain,
         table.Identifier.Schema,
         table.Identifier.TableName,
@@ -61,8 +61,9 @@ internal static class TrinoMetadataVisibilityFakes
                 c.Description,
                 false,
                 false,
-                DiscoveryColumnState.Clear,
-                null))
+                c.DiscoveryHidden ? DiscoveryColumnState.NoAccess : DiscoveryColumnState.Clear,
+                null,
+                Role: c.Role))
             .ToList(),
         null,
         false,

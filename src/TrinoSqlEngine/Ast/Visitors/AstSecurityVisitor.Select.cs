@@ -107,8 +107,26 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
             }
         }
 
-        var body = (QueryBody)Visit(node.Body);
+        bool prevAllowMetricView = _allowMetricViewRootQuery;
+        _allowMetricViewRootQuery = isRootRead && node.With is null && node.Body is QuerySpecification;
+        QueryBody body;
+        try
+        {
+            body = (QueryBody)Visit(node.Body);
+        }
+        finally
+        {
+            _allowMetricViewRootQuery = prevAllowMetricView;
+        }
         var orderBy = node.OrderBy != null ? (OrderByClause)Visit(node.OrderBy) : null;
+        if (isRootRead &&
+            body is QuerySpecification mvQs &&
+            mvQs.From is NamedTableSource mvFrom &&
+            !IsCte(mvFrom.Name) &&
+            _typed.Catalog.Resolve(mvFrom.Name) is { IsMetricView: true } mvEntry)
+        {
+            EnsureNoMaskedColumnsInMetricViewOrderBy(mvEntry, mvQs.Projections, orderBy);
+        }
         var pagination = node.Pagination != null ? (PaginationClause)Visit(node.Pagination) : null;
 
         if (isRootRead && _options.EnforcedMaxRows > 0 && !_rootLimitHandled)
@@ -154,6 +172,9 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
 
     public override SqlNode VisitQuerySpecification(QuerySpecification node)
     {
+        bool allowMetricView = _allowMetricViewRootQuery;
+        _allowMetricViewRootQuery = false;
+
         // The table and derived-source lists are computed once per visit and consumed by every guard below, before the recursion into
         // the children: nested specifications refill the same fields, so nothing may read them after base.VisitQuerySpecification.
         PrepareSpecSources(node);
@@ -200,6 +221,15 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
 
         // after the mask guards, so a masked or unknown column keeps its own answer and no type is disclosed.
         EnsureAggregateTypesValid(node);
+
+        if (allowMetricView &&
+            node.From is NamedTableSource mvSource &&
+            !IsCte(mvSource.Name) &&
+            _typed.Catalog.Resolve(mvSource.Name) is { IsMetricView: true } mvEntry)
+        {
+            return RewriteDirectMetricView(node, mvSource, mvEntry, maskedScope);
+        }
+
         if (!maskedScope)
             return base.VisitQuerySpecification(node);
 

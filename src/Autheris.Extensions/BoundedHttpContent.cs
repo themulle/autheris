@@ -35,38 +35,10 @@ public static class BoundedHttpContent
         return Encoding.UTF8.GetString(((MemoryStream)stream).GetBuffer(), 0, (int)stream.Length);
     }
 
-    public static async Task<MemoryStream> ReadBoundedStreamAsync(
+    public static Task<MemoryStream> ReadBoundedStreamAsync(
         HttpResponseMessage response,
         string clientName,
         long maxBytes = DefaultMaxResponseBytes,
-        CancellationToken ct = default)
-    {
-        ArgumentNullException.ThrowIfNull(response);
-
-        var declaredLength = response.Content.Headers.ContentLength;
-        if (declaredLength.HasValue && declaredLength.Value > maxBytes)
-        {
-            throw new InvalidOperationException(
-                $"{clientName} response size ({declaredLength.Value} bytes) exceeds maximum allowed limit of {maxBytes} bytes.");
-        }
-
-        await using var source = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
-        var buffer = new MemoryStream();
-        var chunk = new byte[81920];
-        int read;
-        while ((read = await source.ReadAsync(chunk.AsMemory(0, chunk.Length), ct).ConfigureAwait(false)) > 0)
-        {
-            if (buffer.Length + read > maxBytes)
-            {
-                await buffer.DisposeAsync().ConfigureAwait(false);
-                throw new InvalidOperationException(
-                    $"{clientName} response exceeds maximum allowed limit of {maxBytes} bytes.");
-            }
-
-            buffer.Write(chunk, 0, read);
-        }
-
-        buffer.Position = 0;
-        return buffer;
-    }
+        CancellationToken ct = default) =>
+        Autheris.Application.Security.BoundedHttpContentReader.ReadBoundedStreamAsync(response, clientName, maxBytes, ct);
 }

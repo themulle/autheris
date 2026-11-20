@@ -7458,6 +7458,14 @@
           "ValueType": "null"
         }
       ]
+    },
+    {
+      "Id": "fn-measure-001",
+      "Group": "functions",
+      "Sql": "SELECT a, MEASURE(b) FROM t GROUP BY a",
+      "Outcome": "ok",
+      "Expected": "SELECT `a`, MEASURE(`b`) FROM `t` GROUP BY `a`",
+      "Parameters": []
     }
   ]
 }

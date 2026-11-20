@@ -172,8 +172,10 @@ public static class ApiProblems
         return new FixedProblemResult(status, body);
     }
 
-    private sealed class FixedProblemResult(int status, byte[] body) : IResult
+    private sealed class FixedProblemResult(int status, byte[] body) : IResult, IStatusCodeHttpResult
     {
+        int? IStatusCodeHttpResult.StatusCode => status;
+
         public Task ExecuteAsync(HttpContext httpContext)
         {
             httpContext.Response.StatusCode = status;

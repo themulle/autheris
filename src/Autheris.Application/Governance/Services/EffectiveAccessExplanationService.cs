@@ -91,16 +91,27 @@ public sealed class EffectiveAccessExplanationService(
             .Where(c => c.TenantId == tenantId)
             .ToList();
 
-        var decision = resolutionService.ResolveAccess(
-            userSid.Value,
-            groupSids,
-            roles,
-            table,
-            activeConsents,
-            metadata.Dialect,
-            allUserSids,
-            callerScopes
-        );
+        var decision = (activeConsents.Any(static c => c.IsPatternGrant) || metadata.Table.ObjectKind == DiscoveryObjectKind.MetricView)
+            ? resolutionService.ResolveAccess(
+                userSid.Value,
+                groupSids,
+                roles,
+                table,
+                activeConsents,
+                metadata.Dialect,
+                allUserSids,
+                callerScopes,
+                metadata)
+            : resolutionService.ResolveAccess(
+                userSid.Value,
+                groupSids,
+                roles,
+                table,
+                activeConsents,
+                metadata.Dialect,
+                allUserSids,
+                callerScopes
+            );
 
         if (!decision.IsAllowed)
         {

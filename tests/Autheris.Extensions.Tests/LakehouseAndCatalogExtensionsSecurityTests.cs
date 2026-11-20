@@ -28,11 +28,11 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Extensions.DataCatalog;
-using Autheris.Extensions.Dbt;
+using Autheris.Modules.Dbt;
 using Autheris.Extensions.Lakehouse.Interfaces;
 using Autheris.Extensions.Lakehouse.Services;
-using Autheris.Extensions.OpenMetadata;
 using Autheris.Extensions.Tests.TestSupport;
+using Autheris.Modules.OpenMetadata;
 using Autheris.Tests.Common.Fakes;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Hosting;
@@ -677,7 +677,7 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
         var service = new OpenMetadataSyncService(client, repo, new RecordingConsentRepository(), new InMemoryPolicyEpochRepository(),
             options, NullLogger<OpenMetadataSyncService>.Instance, clusterState: new InMemoryClusterStateProvider());
         var payload = $"{{\"id\":\"{Guid.NewGuid()}\",\"timestamp\":{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()},\"eventType\":\"entityUpdated\",\"entityType\":\"table\",\"entityFullyQualifiedName\":\"svc.db.schema.payroll\"}}";
-        var outcome = await service.HandleWebhookEventAsync(payload, "sha256=" + Hmac(payload, secret));
+        var outcome = await service.HandleVerifiedAsync(payload);
 
         outcome.ShouldBe(OpenMetadataWebhookOutcome.Processed);
         repo.Upserted.ShouldNotBeNull();
@@ -699,8 +699,8 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
         var noTimestamp = $"{{\"eventId\":\"evt_{Guid.NewGuid():N}\",\"eventType\":\"job_run.completed\"}}";
         var noEventId = $"{{\"eventType\":\"job_run.completed\",\"timestamp\":\"{DateTimeOffset.UtcNow:O}\"}}";
 
-        (await receiver.ProcessWebhookAsync(noTimestamp, "sha256=" + Hmac(noTimestamp, secret))).Success.ShouldBeFalse();
-        (await receiver.ProcessWebhookAsync(noEventId, "sha256=" + Hmac(noEventId, secret))).Success.ShouldBeFalse();
+        (await receiver.HandleVerifiedAsync(noTimestamp)).Success.ShouldBeFalse();
+        (await receiver.HandleVerifiedAsync(noEventId)).Success.ShouldBeFalse();
     }
 
     // ------------------------------------------------------------------ Low findings

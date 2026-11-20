@@ -50,6 +50,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
     private readonly Stack<SecurityScope> _securityScopes = new();
     private int _subqueryDepth = 0;
     private bool _rootLimitHandled = false;
+    private bool _allowMetricViewRootQuery = false;
 
     /// <param name="options">The switches the typed compile path derives from the request (never from the caller's text).</param>
     /// <param name="typedPolicy">

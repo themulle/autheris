@@ -1,5 +1,4 @@
-using Autheris.Application.Catalog.OpenMetadata;
-using Autheris.Extensions.OpenMetadata;
+using Autheris.Modules.OpenMetadata;
 
 namespace Autheris.Extensions.Tests.TestSupport;
 

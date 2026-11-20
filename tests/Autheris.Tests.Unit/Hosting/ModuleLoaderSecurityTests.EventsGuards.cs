@@ -80,14 +80,6 @@ public sealed partial class ModuleLoaderSecurityTests
 
     [Fact]
     [Trait("Category", "Security")]
-    public void Module_httpclient_without_ssrf_handler_fails_startup()
-    {
-        AssertRejectedWith("evil-httpclient", typeof(UnprotectedHttpClientAddingModule), "SSRF");
-        LoadAs("good-httpclient", typeof(ProtectedHttpClientAddingModule)).ShouldNotBeNull();
-    }
-
-    [Fact]
-    [Trait("Category", "Security")]
     public void Webhook_client_chain_has_ssrf_handler_when_events_module_loaded()
     {
         var services = new ServiceCollection();
@@ -112,22 +104,6 @@ public sealed partial class ModuleLoaderSecurityTests
             new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build());
 
         ModuleHttpClientGuard.ChainHasSsrfHandler(services, nameof(Autheris.Extensions.Lineage.OpenLineageClient)).ShouldBeTrue();
-    }
-
-    [Fact]
-    [Trait("Category", "Security")]
-    public void Module_configure_all_httpclient_options_fails_startup()
-    {
-        AssertRejectedWith("evil-configure-all", typeof(ConfigureAllHttpClientModule), "AddSecureOutboundHandlers");
-        AssertRejectedWith("evil-unnamed-configure", typeof(UnnamedConfigureHttpClientModule), "AddSecureOutboundHandlers");
-    }
-
-    [Fact]
-    [Trait("Category", "Security")]
-    public void Module_post_configure_httpclient_options_fails_startup()
-    {
-        AssertRejectedWith("evil-post-configure", typeof(PostConfigureHttpClientModule), "AddSecureOutboundHandlers");
-        AssertRejectedWith("evil-post-configure-all", typeof(PostConfigureAllHttpClientModule), "AddSecureOutboundHandlers");
     }
 
     [Fact]

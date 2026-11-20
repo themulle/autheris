@@ -21,7 +21,7 @@ using Microsoft.Extensions.Options;
 
 public sealed class DataCatalogSyncService : IDataCatalogSyncService
 {
-    private readonly IDataCatalogClient _client;
+    private readonly IDataCatalogClient? _client;
     private readonly ITableMetadataRepository _metadataRepo;
     private readonly IEpochValidationService _epochService;
     private readonly IOptions<GatewayOptions> _options;
@@ -37,9 +37,20 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
         IAuditWriter auditWriter,
         ILogger<DataCatalogSyncService> logger,
         Autheris.Application.Catalog.ICatalogWriteScopeFactory? catalogWriteScopeFactory = null)
+        : this(metadataRepo, epochService, options, auditWriter, logger, catalogWriteScopeFactory)
+    {
+        _client = client ?? throw new ArgumentNullException(nameof(client));
+    }
+
+    public DataCatalogSyncService(
+        ITableMetadataRepository metadataRepo,
+        IEpochValidationService epochService,
+        IOptions<GatewayOptions> options,
+        IAuditWriter auditWriter,
+        ILogger<DataCatalogSyncService> logger,
+        Autheris.Application.Catalog.ICatalogWriteScopeFactory? catalogWriteScopeFactory = null)
     {
         _catalogWriteScopes = catalogWriteScopeFactory;
-        _client = client ?? throw new ArgumentNullException(nameof(client));
         _metadataRepo = metadataRepo ?? throw new ArgumentNullException(nameof(metadataRepo));
         _epochService = epochService ?? throw new ArgumentNullException(nameof(epochService));
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -49,7 +60,7 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
 
     public async Task<CatalogSyncResult> SyncCatalogAsync(bool dryRun = false, TenantId? restrictToTenant = null, CancellationToken ct = default)
     {
-        var client = _client;
+        var client = _client ?? throw new InvalidOperationException("No data catalog client is registered. Enable the 'openmetadata' module.");
         await using var catalogWriteScope = Autheris.Application.Catalog.CatalogWriteScopeFactoryExtensions.BeginOrNoop(_catalogWriteScopes, "data-catalog-sync");
         _logger.LogInformation("Starting data catalog sync from provider {Provider} (DryRun: {DryRun})...", client.ProviderType, dryRun);
 
@@ -301,7 +312,8 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
 
     public async Task<TableMetadata?> EnrichOrReferenceTableAsync(TableIdentifier table, CancellationToken ct = default)
     {
-        var asset = await _client.GetTableAsync(table, ct).ConfigureAwait(false);
+        var client = _client ?? throw new InvalidOperationException("No data catalog client is registered. Enable the 'openmetadata' module.");
+        var asset = await client.GetTableAsync(table, ct).ConfigureAwait(false);
         if (asset == null) return null;
 
         var existing = await _metadataRepo.GetTableMetadataAsync(table, ct).ConfigureAwait(false);
