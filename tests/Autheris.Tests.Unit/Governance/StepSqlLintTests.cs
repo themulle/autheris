@@ -201,7 +201,8 @@ public sealed class StepSqlLintTests
                 (28, "data_products"),
                 (29, "drop_role_grantee"),
                 (30, "table_object_kind"),
-                (31, "access_profile_items")
+                (31, "access_profile_items"),
+                (32, "functional_right_mapping_pending_approval")
             ]);
         }
     }

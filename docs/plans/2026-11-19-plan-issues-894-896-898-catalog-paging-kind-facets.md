@@ -112,3 +112,7 @@ GitHub Actions integration:
 - `CatalogFacetsSecurityIntegrationTests`: `Facets_Anonymous_Is401`, `Facets_ReadOnlyToken_Allowed`, `Facets_ForeignTenantObjectsNeverCounted`, `Facets_RouteNotShadowedByObjectId`, `Facets_RateLimited`.
 - `CatalogObjectsCursorSecurityIntegrationTests`: `Cursor_ReplayAcrossCallers_Is400`, `Cursor_ReplayAcrossTenants_Is400`, `Cursor_PagesOverLargeCatalog_NoHiddenObjectLeak`.
 - `GovernanceObjectKindMigrationIntegrationTests` (PostgreSQL and SQL Server containers): `Step_IsIdempotent`, `Step_CheckConstraintRejectsOtherKinds`, `Step_ExistingRowsReadTable`.
+
+## Changelog
+
+- 2026-11-19: #896 step renumbered from `0029` to `0030_table_object_kind` at merge (PR #904), because `0029_drop_role_grantee` (#900) merged first. Decision 11 above names the number that was planned at the time.
