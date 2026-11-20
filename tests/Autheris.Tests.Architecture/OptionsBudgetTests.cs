@@ -25,7 +25,7 @@ public sealed partial class OptionsBudgetTests(ITestOutputHelper output)
     // Raised by 1 (948 to 949) for issue #889: IdentityRealmConfigOptions gains ReadOnlyScopes (List<string>?) so GenericOidc realms
     // honour read-only token scopes with the same per-realm override surface as EntraIdAuthOptions.
     private const int CeilingSettableProperties = 941;
-    private const int CeilingEnabledFlags = 69;
+    private const int CeilingEnabledFlags = 68;
     private const int CeilingUndocumentedProperties = 460;
 
     [GeneratedRegex(@"\bclass\s+(\w+Options)\b")]

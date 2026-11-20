@@ -655,7 +655,7 @@ Protects against IP spoofing behind load balancers (K8s Ingress, F5, Envoy, NGIN
 
 ### 2.10 `OpenMetadata` (Governance Catalog Synchronization & Webhooks)
 
-Automatic synchronization of schema metadata, classification tags (`PII.*`) and ownership from OpenMetadata.
+Automatic synchronization of schema metadata, classification tags (`PII.*`) and ownership from OpenMetadata via the `openmetadata` runtime module (`Gateway:Modules:Enabled`). Without the `openmetadata` module, any configuration under `Gateway:OpenMetadata` (or `Gateway:Catalog:Enabled: true`) fails startup, `/api/webhooks/openmetadata` returns `404` before reading headers or the body, and `syncOpenMetadata` / `syncDataCatalog` return `UNAVAILABLE`.
 
 | Property | Type | Range | Default | Description |
 | :--- | :--- | :--- | :--- | :--- |
@@ -695,9 +695,9 @@ Automatic synchronization of schema metadata, classification tags (`PII.*`) and 
 
 > [!IMPORTANT]
 > **Webhook replay protection (`/api/webhooks/openmetadata`)**:
-> - Incoming webhooks require a valid HMAC-SHA256 signature in the `X-OpenMetadata-Signature` header (verified via `FixedTimeEquals`).
-> - Webhook payloads must contain the fields `id` (unique GUID/ID) and `timestamp` (Unix milliseconds).
-> - Requests with missing fields, already processed IDs (deduplication) or timestamps outside the 5-minute sliding time window are rejected fail-closed with `HTTP 401/400`.
+> - Configure OpenMetadata webhook subscriptions with `authType: bearer` and `secretKey` matching `Gateway:OpenMetadata:WebhookSecret`.
+> - Incoming webhooks require a valid HMAC-SHA256 signature in the `X-OpenMetadata-Signature` header (fallback `X-OM-Signature`), verified via `CryptographicOperations.FixedTimeEquals`. Missing/invalid signatures or a blank `WebhookSecret` return `HTTP 401` before body parsing; without the `openmetadata` module, the route returns `HTTP 404` before reading headers or body.
+> - Verified webhook payloads must contain `id` (unique GUID/ID) and `timestamp` (Unix milliseconds). Payloads missing required fields, already processed IDs (deduplication), or timestamps outside the 5-minute sliding window are rejected fail-closed (`HTTP 400`).
 
 ---
 
@@ -803,7 +803,7 @@ For quick PoCs, integration tests, external webhook systems or third-party conne
 | :--- | :--- | :--- | :--- | :--- |
 | `danger_allow_anonymous_access` | `bool` | `false` | **CRITICAL** | Allows GraphQL queries without any authentication (anonymous user). |
 | `danger_bypass_consent_checks` | `bool` | `false` | **CRITICAL** | Bypasses the zero-trust consent check (`ALLOW` for all tables). |
-| `danger_bypass_webhook_signature_validation` | `bool` | `false` | **CRITICAL** | Allows unsigned webhook calls (e.g. OpenMetadata without HMAC verification). |
+| `danger_bypass_webhook_signature_validation` | `bool` | `false` | **CRITICAL** | Skips HMAC digest verification for incoming webhooks while still requiring a non-empty signature header (`X-OpenMetadata-Signature` / `X-OM-Signature`). |
 | `danger_allow_untrusted_certificates` | `bool` | `false` | **CRITICAL** | Accepts self-signed or expired SSL/TLS certificates on outgoing HTTP calls. |
 | `danger_allow_anonymous_webhooks` | `bool` | `false` | **CRITICAL** | Accepts incoming webhook payloads without an auth token or secret. |
 | `warn_allow_all_cors_origins` | `bool` | `false` | **WARN** | Sets `Access-Control-Allow-Origin: *` and disables the CSRF preflight. |
@@ -1089,7 +1089,7 @@ Identity realms are read from `Authentication:Realms` once at start and register
 | Everybody else | consent path: tables and columns allowed by the caller's active consents | same |
 | No principal, unauthenticated, invalid tenant claim | nothing | nothing |
 
-**Semantic metric catalog.** The in-memory semantic catalog (dbt semantic manifest, `GET /api/extensions/dbt/metrics`, metric queries) is partitioned per tenant. A tenant sees only its own partition; the default tenant is the partition of principals without tenant claim. `GET /api/extensions/dbt/metrics` and `GET /api/v1/analytics/metrics` return the full metric definition (filter template, type parameters, meta) only to `GovernanceAdmin` and `DbtAdmin`; everybody else gets name, type, label, description and unit.
+**Semantic metric catalog.** The in-memory semantic catalog (dbt semantic manifest, `GET /modules/dbt/metrics`, metric queries) is partitioned per tenant. A tenant sees only its own partition; the default tenant is the partition of principals without tenant claim. `GET /modules/dbt/metrics` and `GET /api/v1/analytics/metrics` return the full metric definition (filter template, type parameters, meta) only to `GovernanceAdmin` and `DbtAdmin`; everybody else gets name, type, label, description and unit.
 
 The tenant signal of the tenant administrator view is derived from consent records and is not a hard tenant boundary; a dedicated tenant-owner attribute for tables is a separate topic.
 
@@ -1104,7 +1104,7 @@ The tenant signal of the tenant administrator view is derived from consent recor
 - `sample_rows(synthetic: true)` needs the administrator view or an active table consent.
 - Search recall is reduced for column-restricted callers.
 - Known limitation: the tenant-scoped administrator sees only the tables on which its tenant holds a consent plus `Gateway:Catalog:SharedTables`.
-- The semantic manifest import (`POST /api/extensions/dbt/semantic-manifest`) writes into the tenant of the caller's token, or the default tenant for a principal without tenant claim.
+- The semantic manifest import (`POST /modules/dbt/semantic-manifest`) writes into the tenant of the caller's token, or the default tenant for a principal without tenant claim.
 
 ---
 
@@ -1112,7 +1112,7 @@ The tenant signal of the tenant administrator view is derived from consent recor
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `Gateway:Dbt:ImportDataOwners` | bool | `false` | Allows `POST /api/extensions/dbt/governance` to write table data owners (`owner` / `owners` per table item). Data owners act as consent approvers, so the switch is explicit configuration and never a request parameter. |
+| `Gateway:Dbt:ImportDataOwners` | bool | `false` | Allows `POST /modules/dbt/governance` to write table data owners (`owner` / `owners` per table item). Data owners act as consent approvers, so the switch is explicit configuration and never a request parameter. |
 
 With the default `false`, a payload that carries `owner`, `owners`, `group` or `groups` is rejected as a whole (`dbt_owner_import_disabled`); nothing is written. With `true`, the caller must additionally hold the `GovernanceAdmin` role (re-checked in the import service; `DbtAdmin` alone is rejected), and the write repository and the audit repository must be registered. The manifest sync (`/sync`) never writes owners. See the dbt module documentation for the payload and its limits.
 
@@ -1153,7 +1153,8 @@ Gateway__GraphQL__EnableBananaCakePop=false
 Gateway__GraphQL__TrustedOrigins__0=https://bi.corp.local
 Gateway__GraphQL__TrustedOrigins__1=https://portal.corp.local
 
-# OpenMetadata
+# OpenMetadata (runtime module)
+Gateway__Modules__Enabled__0=openmetadata
 Gateway__OpenMetadata__Enabled=true
 Gateway__OpenMetadata__ServerUrl=https://openmetadata.corp.local/api/v1
 Gateway__OpenMetadata__AuthToken=eyJhbGciOi...

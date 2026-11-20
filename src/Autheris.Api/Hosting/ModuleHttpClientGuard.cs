@@ -18,15 +18,36 @@ using Microsoft.Extensions.Options;
 internal static class ModuleHttpClientGuard
 {
     internal static List<ServiceDescriptor> CaptureClientConfiguration(IServiceCollection services) =>
-        services.Where(IsClientConfiguration).ToList();
+        services.Where(d => IsClientConfiguration(d) || d.ServiceType == typeof(IHttpMessageHandlerBuilderFilter)).ToList();
 
     internal static void VerifyModuleClientsUseSsrfHandler(
         string moduleId,
         IServiceCollection services,
         List<ServiceDescriptor> beforeSnapshot)
     {
+        var removedBuilderFilter = beforeSnapshot.FirstOrDefault(
+            d => d.ServiceType == typeof(IHttpMessageHandlerBuilderFilter) && !services.Contains(d));
+        if (removedBuilderFilter is not null)
+        {
+            throw new ModuleLoadException(
+                moduleId,
+                $"Module '{moduleId}' attempted to remove protected host service '{nameof(IHttpMessageHandlerBuilderFilter)}'.");
+        }
+
+        var addedBuilderFilter = services.FirstOrDefault(
+            d => d.ServiceType == typeof(IHttpMessageHandlerBuilderFilter) &&
+                 !beforeSnapshot.Contains(d) &&
+                 d.ImplementationType?.Assembly != typeof(IHttpMessageHandlerBuilderFilter).Assembly);
+        if (addedBuilderFilter is not null)
+        {
+            throw new ModuleLoadException(
+                moduleId,
+                $"Module '{moduleId}' registered a custom '{nameof(IHttpMessageHandlerBuilderFilter)}', which is not allowed.");
+        }
+
         var added = services.Where(d => IsClientConfiguration(d) && !beforeSnapshot.Contains(d)).ToList();
 
+        // A client configuration the check cannot verify (ConfigureAll, unnamed Configure, or any PostConfigure) is refused.
         foreach (var descriptor in added)
         {
             if (descriptor.ServiceType.GetGenericTypeDefinition() == typeof(IPostConfigureOptions<>))

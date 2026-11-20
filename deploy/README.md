@@ -56,7 +56,7 @@ Vollständige, reproduzierbare Last- und Latenz-Benchmark-Umgebung für das Proj
 7. **`azurite`**: Offizieller Microsoft Azure Storage Emulator (`mcr.microsoft.com/azure-storage/azurite`) zur Bereitstellung von Azure Blob Storage / ADLS Gen2 für den Lakehouse-Konnektor.
 8. **`mock-extensions`**: Schlanker Mock-Container (< 20 MB RAM) für alle externen Enterprise-Systeme aus `gql_extensions`:
    - **OpenMetadata Catalog Governance**: **OpenMetadata** (REST v1 & Realtime-Webhooks) sowie automatisierte DSGVO Art. 9 Tag-Erkennung.
-   - **dbt Integration**: Streaming-Auslieferung von `manifest.json`, Model Contract Enforcement & Breaking-Change CI Gate (`/api/extensions/dbt/validate-contract`), Governance Proposal Lifecycle und Exposures Publishing (`/api/extensions/dbt/exposures`).
+   - **dbt Integration**: Streaming-Auslieferung von `manifest.json`, Model Contract Enforcement & Breaking-Change CI Gate (`/modules/dbt/validate-contract`), Governance Proposal Lifecycle und Exposures Publishing (`/modules/dbt/exposures`).
 9. **`reverse-proxy`**: Nginx ForwardAuth Gateway auf Host-Port 8082. Injiziert `X-Forwarded-Secret` und leitet Benutzeridentitäten (`X-Forwarded-User`, `X-Forwarded-Roles`, `X-Forwarded-Groups`) unter echten Netzwerkbedingungen an das Gateway weiter.
 10. **`load-generator`**: k6-Container mit parametrisierbarem Lastprofil (Ramp-up → Steady State → Ramp-down) und dynamischem Query-Mix (PostgreSQL + SQL Server + Apache Iceberg Lakehouse).
 11. **`prometheus` & `grafana`**: Automatisches Scraping von Gateway-Metriken (`/metrics`) und vorkonfiguriertes Grafana-Dashboard (`http://localhost:3000`).

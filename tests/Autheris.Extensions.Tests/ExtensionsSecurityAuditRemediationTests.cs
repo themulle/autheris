@@ -13,7 +13,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Extensions.DataCatalog;
-using Autheris.Extensions.Dbt;
+using Autheris.Modules.Dbt;
 using Autheris.Extensions.Lakehouse.Services;
 using Autheris.Application.OData;
 using Microsoft.Extensions.Logging.Abstractions;

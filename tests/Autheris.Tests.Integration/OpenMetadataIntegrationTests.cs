@@ -4,7 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Autheris.Application.Catalog.OpenMetadata;
-using Autheris.Extensions.OpenMetadata;
+using Autheris.Modules.OpenMetadata;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
@@ -14,6 +14,7 @@ using Shouldly;
 using Xunit;
 using Autheris.Tests.Common.Hosting;
 using Autheris.Tests.Integration.Governance;
+using Autheris.Tests.Integration.Modules;
 
 namespace Autheris.Tests.Integration;
 
@@ -34,30 +35,32 @@ public class OpenMetadataIntegrationTests : IClassFixture<OpenMetadataIntegratio
 
         protected override void ConfigureHostConfiguration(IConfigurationBuilder config)
         {
-            config.AddInMemoryCollection(new Dictionary<string, string?>
+            var settings = new Dictionary<string, string?>
             {
                 ["Gateway:Authentication:EnableTestAuthHandler"] = "true",
                 ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
                 ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.Create("OpenMetadataIntegrationTests"),
                 ["Gateway:OpenMetadata:WebhookSecret"] = "test-webhook-secret-999",
-            });
+            };
+            OpenMetadataWorkspaceTestSettings.Apply((k, v) => settings[k] = v);
+            config.AddInMemoryCollection(settings);
         }
 
         protected override void ConfigureHostServices(IServiceCollection services)
         {
-            services.AddSingleton<IOpenMetadataClient>(MockOmClient);
+            services.ReplaceModuleService<IOpenMetadataClient>(MockOmClient);
         }
     }
 
     [Fact]
-    public async Task Webhook_WithoutSignature_ReturnsBadRequest()
+    public async Task Webhook_WithoutSignature_ReturnsUnauthorized()
     {
         var client = _factory.CreateClient();
         var content = new StringContent("{\"eventType\":\"entityCreated\",\"entityType\":\"table\"}", Encoding.UTF8, "application/json");
 
         var response = await client.PostAsync("/api/webhooks/openmetadata", content);
 
-        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
     }
 
     [Fact]

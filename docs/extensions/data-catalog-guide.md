@@ -1,12 +1,12 @@
 # Enterprise Data Catalog Integration Guide
 
-This guide describes how to connect external data catalog systems to **Autheris** via `Autheris.Extensions`.
+This guide describes how to connect OpenMetadata to **Autheris** via the `openmetadata` runtime module (`Autheris.Modules.OpenMetadata`).
 
 ---
 
 ## 1. Overview & Operating Mode
 
-The `DataCatalog` and `OpenMetadata` modules synchronize metadata, owners, glossary terms, and sensitivity classifications from OpenMetadata into the local governance store (`Mirror Mode` via `DataCatalogSyncBackgroundService` / `OpenMetadataSyncService`).
+The core `DataCatalog` orchestrator and the `openmetadata` runtime module (`Gateway:Modules:Enabled`) synchronize metadata, owners, glossary terms, and sensitivity classifications from OpenMetadata into the local governance store (`Mirror Mode` via `DataCatalogSyncBackgroundService` / `OpenMetadataSyncBackgroundService` and `OpenMetadataSyncService`). Without the `openmetadata` module, configuring `Gateway:OpenMetadata` or `Gateway:Catalog:Enabled=true` fails startup, `/api/webhooks/openmetadata` returns `404`, and `syncOpenMetadata` / `syncDataCatalog` return `UNAVAILABLE`.
 
 ```mermaid
 flowchart LR
@@ -35,6 +35,9 @@ Configuration is located in `appsettings.json` under `Gateway:Catalog` and `Gate
 ```json
 {
   "Gateway": {
+    "Modules": {
+      "Enabled": [ "openmetadata" ]
+    },
     "Catalog": {
       "Enabled": true,
       "Provider": "OpenMetadata",
@@ -43,11 +46,16 @@ Configuration is located in `appsettings.json` under `Gateway:Catalog` and `Gate
     "OpenMetadata": {
       "Enabled": true,
       "ServerUrl": "https://openmetadata.corp.internal/api/v1",
-      "AuthToken": "${OPENMETADATA_JWT}"
+      "AuthToken": "${OPENMETADATA_JWT}",
+      "WebhookSecret": "${OPENMETADATA_WEBHOOK_SECRET}"
     }
   }
 }
 ```
+
+### Webhook Subscription Configuration
+
+Configure OpenMetadata webhook subscriptions to send `POST /api/webhooks/openmetadata` with `authType: bearer` and `secretKey` set to `Gateway:OpenMetadata:WebhookSecret`. OpenMetadata computes an HMAC-SHA256 signature and delivers it in `X-OpenMetadata-Signature` (or `X-OM-Signature`). Without the `openmetadata` module, the route answers `404` before reading headers or body; missing or invalid signatures (or a blank `WebhookSecret`) return `401`; malformed payloads after signature verification return `400`.
 
 ---
 

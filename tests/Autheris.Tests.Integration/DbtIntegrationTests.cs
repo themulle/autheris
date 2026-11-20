@@ -62,6 +62,7 @@ public class DbtIntegrationTests : IClassFixture<DbtIntegrationTests.HostFixture
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseEnvironment("Development");
+            DbtWorkspaceTestSettings.Apply((k, v) => builder.UseSetting(k, v));
             base.ConfigureWebHost(builder);
         }
 
@@ -82,7 +83,7 @@ public class DbtIntegrationTests : IClassFixture<DbtIntegrationTests.HostFixture
         var client = _factory.CreateClient();
         var content = new StringContent(SampleDbtManifest, Encoding.UTF8, "application/json");
 
-        var response = await client.PostAsync("/api/extensions/dbt/sync", content);
+        var response = await client.PostAsync("/modules/dbt/sync", content);
         response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
     }
 
@@ -96,7 +97,7 @@ public class DbtIntegrationTests : IClassFixture<DbtIntegrationTests.HostFixture
         // The catalog is shared by the tests of this class: a model of its own keeps its PII proposal from being "already pending".
         var ownManifest = SampleDbtManifest.Replace("monthly_revenue", "monthly_revenue_ingest", StringComparison.Ordinal);
         var content = new StringContent(ownManifest, Encoding.UTF8, "application/json");
-        var response = await client.PostAsync("/api/extensions/dbt/sync", content);
+        var response = await client.PostAsync("/modules/dbt/sync", content);
 
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
         var body = await response.Content.ReadAsStringAsync();
@@ -112,7 +113,7 @@ public class DbtIntegrationTests : IClassFixture<DbtIntegrationTests.HostFixture
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-USER-1");
         client.DefaultRequestHeaders.Add("X-Test-Roles", "ClusterAdmin");
 
-        var response = await client.GetAsync("/api/extensions/dbt/exposures");
+        var response = await client.GetAsync("/modules/dbt/exposures");
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
         var yaml = await response.Content.ReadAsStringAsync();
         yaml.ShouldContain("version: 2");
@@ -121,9 +122,9 @@ public class DbtIntegrationTests : IClassFixture<DbtIntegrationTests.HostFixture
     }
 
     [Theory]
-    [InlineData("/api/extensions/dbt/sync")]
-    [InlineData("/api/extensions/dbt/run-results")]
-    [InlineData("/api/extensions/dbt/health/reset")]
+    [InlineData("/modules/dbt/sync")]
+    [InlineData("/modules/dbt/run-results")]
+    [InlineData("/modules/dbt/health/reset")]
     public async Task DbtGlobalMutationEndpoints_DataOwnerWithoutAdminRole_ReturnsForbidden(string path)
     {
         // Review E-7: a DataOwner must not change global dbt metadata or quarantine state.
@@ -137,9 +138,9 @@ public class DbtIntegrationTests : IClassFixture<DbtIntegrationTests.HostFixture
     }
 
     [Theory]
-    [InlineData("/api/extensions/dbt/exposures")]
-    [InlineData("/api/extensions/dbt/proposals")]
-    [InlineData("/api/extensions/dbt/health")]
+    [InlineData("/modules/dbt/exposures")]
+    [InlineData("/modules/dbt/proposals")]
+    [InlineData("/modules/dbt/health")]
     public async Task DbtGlobalReadEndpoints_DataOwnerWithoutAdminRole_ReturnsForbidden(string path)
     {
         // Review E-7 (rest): the read endpoints expose global dbt state and are not open to a plain DataOwner either.
@@ -159,7 +160,7 @@ public class DbtIntegrationTests : IClassFixture<DbtIntegrationTests.HostFixture
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-USER-1");
         client.DefaultRequestHeaders.Add("X-Test-Roles", "Viewer");
 
-        var response = await client.GetAsync("/api/extensions/dbt/exposures");
+        var response = await client.GetAsync("/modules/dbt/exposures");
         response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
     }
 
@@ -172,11 +173,11 @@ public class DbtIntegrationTests : IClassFixture<DbtIntegrationTests.HostFixture
 
         // 1. Sync manifest to generate proposal
         var content = new StringContent(SampleDbtManifest, Encoding.UTF8, "application/json");
-        var syncResponse = await client.PostAsync("/api/extensions/dbt/sync", content);
+        var syncResponse = await client.PostAsync("/modules/dbt/sync", content);
         syncResponse.StatusCode.ShouldBe(HttpStatusCode.OK);
 
         // 2. Fetch pending proposals
-        var proposalsResponse = await client.GetAsync("/api/extensions/dbt/proposals");
+        var proposalsResponse = await client.GetAsync("/modules/dbt/proposals");
         proposalsResponse.StatusCode.ShouldBe(HttpStatusCode.OK);
         var proposalsJson = await proposalsResponse.Content.ReadAsStringAsync();
         proposalsJson.ShouldContain("contact_email");
@@ -187,7 +188,7 @@ public class DbtIntegrationTests : IClassFixture<DbtIntegrationTests.HostFixture
         var proposalId = firstProposal.GetProperty("id").GetString();
 
         // 3. R-EXT-1: approving a proposal for a table that is not in the catalog has no effect -> 409, still pending
-        var conflictResponse = await client.PostAsync($"/api/extensions/dbt/proposals/{proposalId}/approve", null);
+        var conflictResponse = await client.PostAsync($"/modules/dbt/proposals/{proposalId}/approve", null);
         conflictResponse.StatusCode.ShouldBe(HttpStatusCode.Conflict);
 
         // 4. Register the table, then the approval applies the masking rule
@@ -211,7 +212,7 @@ public class DbtIntegrationTests : IClassFixture<DbtIntegrationTests.HostFixture
             });
         }
 
-        var approveResponse = await client.PostAsync($"/api/extensions/dbt/proposals/{proposalId}/approve", null);
+        var approveResponse = await client.PostAsync($"/modules/dbt/proposals/{proposalId}/approve", null);
         approveResponse.StatusCode.ShouldBe(HttpStatusCode.OK);
         var approveBody = await approveResponse.Content.ReadAsStringAsync();
         approveBody.ShouldContain("\"status\":1"); // DbtProposalStatus.Approved
@@ -224,7 +225,7 @@ public class DbtIntegrationTests : IClassFixture<DbtIntegrationTests.HostFixture
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-ADMIN-SID");
 
         var content = new StringContent(SampleDbtManifest, Encoding.UTF8, "application/json");
-        var response = await client.PostAsync("/api/extensions/dbt/validate-contract", content);
+        var response = await client.PostAsync("/modules/dbt/validate-contract", content);
 
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
         var body = await response.Content.ReadAsStringAsync();
@@ -260,26 +261,26 @@ public class DbtIntegrationTests : IClassFixture<DbtIntegrationTests.HostFixture
 
         // 0. Sync manifest so that models and test target mappings are registered
         var syncContent = new StringContent(SampleDbtManifest, Encoding.UTF8, "application/json");
-        var syncResponse = await client.PostAsync("/api/extensions/dbt/sync", syncContent);
+        var syncResponse = await client.PostAsync("/modules/dbt/sync", syncContent);
         syncResponse.StatusCode.ShouldBe(HttpStatusCode.OK);
 
         // 1. Post run_results.json
         var content = new StringContent(sampleRunResults, Encoding.UTF8, "application/json");
-        var postResponse = await client.PostAsync("/api/extensions/dbt/run-results", content);
+        var postResponse = await client.PostAsync("/modules/dbt/run-results", content);
         postResponse.StatusCode.ShouldBe(HttpStatusCode.OK);
 
         // 2. Query health for monthly_revenue
-        var healthResponse = await client.GetAsync("/api/extensions/dbt/health?table=monthly_revenue");
+        var healthResponse = await client.GetAsync("/modules/dbt/health?table=monthly_revenue");
         healthResponse.StatusCode.ShouldBe(HttpStatusCode.OK);
         var healthBody = await healthResponse.Content.ReadAsStringAsync();
         healthBody.ShouldContain("\"status\":2"); // Quarantined
 
         // 3. Reset health
-        var resetResponse = await client.PostAsync("/api/extensions/dbt/health/reset?table=monthly_revenue", null);
+        var resetResponse = await client.PostAsync("/modules/dbt/health/reset?table=monthly_revenue", null);
         resetResponse.StatusCode.ShouldBe(HttpStatusCode.OK);
 
         // 4. Verify healthy again
-        var recheckResponse = await client.GetAsync("/api/extensions/dbt/health?table=monthly_revenue");
+        var recheckResponse = await client.GetAsync("/modules/dbt/health?table=monthly_revenue");
         recheckResponse.StatusCode.ShouldBe(HttpStatusCode.OK);
         var recheckBody = await recheckResponse.Content.ReadAsStringAsync();
         recheckBody.ShouldContain("\"status\":0"); // Healthy
@@ -308,7 +309,7 @@ public class DbtIntegrationTests : IClassFixture<DbtIntegrationTests.HostFixture
           }
         }
         """;
-        var syncResponse = await client.PostAsync("/api/extensions/dbt/sync", new StringContent(sampleManifest, Encoding.UTF8, "application/json"));
+        var syncResponse = await client.PostAsync("/modules/dbt/sync", new StringContent(sampleManifest, Encoding.UTF8, "application/json"));
         syncResponse.StatusCode.ShouldBe(HttpStatusCode.OK);
 
         // 1. Post failing run_results for finance_table_1
@@ -327,7 +328,7 @@ public class DbtIntegrationTests : IClassFixture<DbtIntegrationTests.HostFixture
         """;
 
         var content = new StringContent(sampleRunResults, Encoding.UTF8, "application/json");
-        var postResponse = await client.PostAsync("/api/extensions/dbt/run-results", content);
+        var postResponse = await client.PostAsync("/modules/dbt/run-results", content);
         postResponse.StatusCode.ShouldBe(HttpStatusCode.OK);
 
         // 2. Query quarantined table via GraphQL
@@ -343,7 +344,7 @@ public class DbtIntegrationTests : IClassFixture<DbtIntegrationTests.HostFixture
         body.ShouldContain("Quarantined");
 
         // 3. Reset health
-        var resetResponse = await client.PostAsync("/api/extensions/dbt/health/reset?table=finance_table_1", null);
+        var resetResponse = await client.PostAsync("/modules/dbt/health/reset?table=finance_table_1", null);
         resetResponse.StatusCode.ShouldBe(HttpStatusCode.OK);
 
         // 4. Query again - should no longer be blocked by TABLE_IN_QUARANTINE
@@ -367,7 +368,7 @@ public class DbtIntegrationTests : IClassFixture<DbtIntegrationTests.HostFixture
         """;
 
         var content = new StringContent(sampleRunResults, Encoding.UTF8, "application/json");
-        var postResponse = await client.PostAsync("/api/extensions/dbt/run-results", content);
+        var postResponse = await client.PostAsync("/modules/dbt/run-results", content);
         postResponse.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
     }
 }

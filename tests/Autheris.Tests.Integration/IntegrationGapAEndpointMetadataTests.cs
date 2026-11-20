@@ -41,8 +41,7 @@ public class IntegrationGapAEndpointMetadataTests : IClassFixture<IntegrationGap
                 ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.Create("IntegrationGapAEndpointMetadataTests"),
                 ["Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit"] = "500",
             };
-            // The CDC ingestion route (and its body limit) belongs to the events module.
-            EventsWorkspaceTestSettings.Apply((k, v) => settings[k] = v);
+            MultiModuleWorkspaceTestSettings.Apply((k, v) => settings[k] = v, "dbt", "events");
             config.AddInMemoryCollection(settings);
         }
     }
@@ -71,7 +70,7 @@ public class IntegrationGapAEndpointMetadataTests : IClassFixture<IntegrationGap
     [InlineData("GET", "/odata/v4/$swagger")]
     [InlineData("GET", "/docs")]
     [InlineData("POST", "/api/webhooks/openmetadata")]
-    [InlineData("POST", "/api/extensions/dbt/webhooks/dbt-cloud")]
+    [InlineData("POST", "/api/webhooks/dbt-cloud")]
     public void GAP01_PreviouslyAnonymousRoutes_AllowAnonymous(string method, string rawPattern)
     {
         var endpoint = FindEndpoint(GetRouteEndpoints(), method, rawPattern);
@@ -86,7 +85,7 @@ public class IntegrationGapAEndpointMetadataTests : IClassFixture<IntegrationGap
     [InlineData("POST", "/api/v1/sql")]
     [InlineData("GET", "/api/auth/login")]
     [InlineData("GET", "/odata/v4/$openapi")]
-    [InlineData("POST", "/api/extensions/dbt/sync")]
+    [InlineData("POST", "/modules/dbt/sync")]
     public void GAP01_ProtectedRoutes_DoNotAllowAnonymous(string method, string rawPattern)
     {
         var endpoint = FindEndpoint(GetRouteEndpoints(), method, rawPattern);
@@ -174,10 +173,10 @@ public class IntegrationGapAEndpointMetadataTests : IClassFixture<IntegrationGap
     }
 
     [Theory]
-    [InlineData("/api/extensions/dbt/sync", 100 * Mb)]
-    [InlineData("/api/extensions/dbt/validate-contract", 100 * Mb)]
-    [InlineData("/api/extensions/dbt/run-results", 50 * Mb)]
-    [InlineData("/api/extensions/dbt/webhooks/dbt-cloud", 2 * Mb)]
+    [InlineData("/modules/dbt/sync", 100 * Mb)]
+    [InlineData("/modules/dbt/validate-contract", 100 * Mb)]
+    [InlineData("/modules/dbt/run-results", 50 * Mb)]
+    [InlineData("/api/webhooks/dbt-cloud", 2 * Mb)]
     [InlineData("/modules/events/v1/cdc/events", 10 * Mb)]
     [InlineData("/api/governance/catalog/ingest-openapi", 20 * Mb)]
     public void GAP02_LargeBodyRoutes_DeclareRequestSizeLimitAboveGlobalKestrelLimit(string rawPattern, long expectedBytes)

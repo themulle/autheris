@@ -19,7 +19,7 @@ public class IndividualGrantPolicyArchitectureTests
     {
         ["Autheris.Application/Identity/Attributes/AttributeValidatingConsentRepository.cs"] =
             "Decorator of IConsentRepository (REQ-GOV-129): validates caller attribute row filters and forwards unchanged; it neither creates nor extends a validity window.",
-        ["Autheris.Extensions/OpenMetadata/OpenMetadataSyncService.cs"] =
+        ["Autheris.Modules.OpenMetadata/OpenMetadataSyncService.cs"] =
             "System reconcile of consents derived from OpenMetadata rules; short validity refreshed on each run and covered by the read-time clamp.",
         ["Autheris.Application/Policy/RowScopes/PatternCoverageMonitor.cs"] =
             "Submits pending consent request items for newly discovered object owners under an existing approved pattern grant; never activates a grant or extends its validity window.",
@@ -28,38 +28,46 @@ public class IndividualGrantPolicyArchitectureTests
     [Fact]
     public void SEC_SC_20_EveryGrantWriter_ConsultsTheGrantPolicy_OrIsAllowlisted()
     {
-        var src = Path.Combine(FindRepositoryRoot(), "src");
+        var repoRoot = FindRepositoryRoot();
+        var src = Path.Combine(repoRoot, "src");
+        var modules = Path.Combine(repoRoot, "modules");
         var offenders = new List<string>();
         var seenAllowlisted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var file in EnumerateSources(src))
+        var scanRoots = Directory.Exists(modules) ? new[] { src, modules } : new[] { src };
+        foreach (var scanRoot in scanRoots)
         {
-            var rel = Path.GetRelativePath(src, file).Replace('\\', '/');
-            if (rel.Contains("/Persistence/", StringComparison.Ordinal) || rel.EndsWith("IGovernanceRepository.cs", StringComparison.Ordinal))
+            foreach (var file in EnumerateSources(scanRoot))
             {
-                continue; // repository implementations and contracts
-            }
-
-            var text = File.ReadAllText(file);
-            var matches = GrantWriter.Matches(text);
-            if (matches.Count == 0)
-            {
-                continue;
-            }
-
-            if (Allowlist.ContainsKey(rel))
-            {
-                seenAllowlisted.Add(rel);
-                continue;
-            }
-
-            // Per call site: the enclosing method (or, for an expression-bodied member, the statement) must itself consult the policy.
-            foreach (Match m in matches)
-            {
-                var scope = EnclosingMethodText(text, m.Index);
-                if (!ConsultsPolicy.IsMatch(scope))
+                var rel = Path.GetRelativePath(scanRoot, file).Replace('\\', '/');
+                if (rel.Contains(".Tests/", StringComparison.Ordinal) ||
+                    rel.Contains("/Persistence/", StringComparison.Ordinal) ||
+                    rel.EndsWith("IGovernanceRepository.cs", StringComparison.Ordinal))
                 {
-                    var line = text.AsSpan(0, m.Index).Count('\n') + 1;
-                    offenders.Add($"{rel}:{line} {m.Value.Trim('.', '(')}");
+                    continue; // test projects, repository implementations and contracts
+                }
+
+                var text = File.ReadAllText(file);
+                var matches = GrantWriter.Matches(text);
+                if (matches.Count == 0)
+                {
+                    continue;
+                }
+
+                if (Allowlist.ContainsKey(rel))
+                {
+                    seenAllowlisted.Add(rel);
+                    continue;
+                }
+
+                // Per call site: the enclosing method (or, for an expression-bodied member, the statement) must itself consult the policy.
+                foreach (Match m in matches)
+                {
+                    var scope = EnclosingMethodText(text, m.Index);
+                    if (!ConsultsPolicy.IsMatch(scope))
+                    {
+                        var line = text.AsSpan(0, m.Index).Count('\n') + 1;
+                        offenders.Add($"{rel}:{line} {m.Value.Trim('.', '(')}");
+                    }
                 }
             }
         }

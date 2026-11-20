@@ -29,7 +29,10 @@ public partial class SecurityRegressionTraceabilityTests
             a.ConstructorArguments[0].Value as string == "Category" &&
             a.ConstructorArguments[1].Value as string == "Security");
 
-    private static string TestsPath(string relative) => Path.Combine(RepositoryFiles.Root, "tests", relative);
+    private static string TestsPath(string relative) =>
+        relative.StartsWith("modules/", StringComparison.Ordinal)
+            ? Path.Combine(RepositoryFiles.Root, relative)
+            : Path.Combine(RepositoryFiles.Root, "tests", relative);
 
     /// <summary>Every legacy SEC/SQ/SQL/SR15 ID of the test sources has a catalog row, and a Compiler row has an AST-path test.</summary>
     [Fact]

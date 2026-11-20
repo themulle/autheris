@@ -1,6 +1,6 @@
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
-using Autheris.Extensions.Dbt;
+using Autheris.Modules.Dbt;
 using Shouldly;
 using Xunit;
 

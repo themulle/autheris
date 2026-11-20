@@ -177,7 +177,7 @@ def test_dbt():
 
     # 2. dbt Contract Validation Gate
     status, _, body = http_req(
-        f"{MOCK_URL}/api/extensions/dbt/validate-contract",
+        f"{MOCK_URL}/modules/dbt/validate-contract",
         method="POST",
         data=manifest,
         expect_status=200
@@ -187,7 +187,7 @@ def test_dbt():
 
     # 3. dbt Manifest Lineage & Proposal Ingestion
     status, _, body = http_req(
-        f"{MOCK_URL}/api/extensions/dbt/sync",
+        f"{MOCK_URL}/modules/dbt/sync",
         method="POST",
         data=manifest,
         expect_status=200
@@ -197,7 +197,7 @@ def test_dbt():
 
     # 4. dbt Proposals Endpoint
     status, _, body = http_req(
-        f"{MOCK_URL}/api/extensions/dbt/proposals",
+        f"{MOCK_URL}/modules/dbt/proposals",
         method="GET",
         expect_status=200
     )
@@ -206,7 +206,7 @@ def test_dbt():
 
     # 5. dbt Proposal Approval Lifecycle
     status, _, app_res = http_req(
-        f"{MOCK_URL}/api/extensions/dbt/proposals/prop-1001/approve",
+        f"{MOCK_URL}/modules/dbt/proposals/prop-1001/approve",
         method="POST",
         data={},
         expect_status=200
@@ -216,7 +216,7 @@ def test_dbt():
 
     # 6. dbt Exposure Publishing
     status, _, exposures_yaml = http_req(
-        f"{MOCK_URL}/api/extensions/dbt/exposures",
+        f"{MOCK_URL}/modules/dbt/exposures",
         method="GET",
         expect_status=200
     )

@@ -1,0 +1,51 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <RestorePackagesWithLockFile>false</RestorePackagesWithLockFile>
+    <RestoreLockedMode>false</RestoreLockedMode>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="10.1.1" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="11.0.0" />
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" Version="11.0.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.12.0" />
+    <PackageReference Include="NSubstitute" Version="6.2.0" />
+    <PackageReference Include="Shouldly" Version="4.3.0" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="Autheris.Tests" />
+    <Using Include="Autheris.Tests.Unit.Dbt" />
+    <Using Include="Autheris.Tests.Unit.TestSupport" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\tests\Autheris.Tests.Unit\TestDoubles\NullAuditLogRepository.cs" Link="TestDoubles\NullAuditLogRepository.cs" />
+    <Compile Include="..\..\tests\Autheris.Tests.Unit\Dbt\SemanticImportGovernanceHelper.cs" Link="TestSupport\SemanticImportGovernanceHelper.cs" />
+    <Compile Include="..\..\tests\Autheris.Tests.Unit\Dbt\SemanticCatalogTestKit.cs" Link="TestSupport\SemanticCatalogTestKit.cs" />
+    <Compile Include="..\..\tests\Autheris.Tests.Unit\TestSupport\CatalogVisibilityTestFactory.cs" Link="TestSupport\CatalogVisibilityTestFactory.cs" />
+    <Compile Include="..\..\tests\Autheris.Extensions.Tests\CatalogRepositoryStubExtensions.cs" Link="TestSupport\CatalogRepositoryStubExtensions.cs" />
+    <Compile Include="..\..\tests\Autheris.Tests.Unit\Dbt\DbtSyncTestExtensions.cs" Link="TestSupport\DbtSyncTestExtensions.cs" />
+    <ProjectReference Include="..\Autheris.Modules.Dbt\Autheris.Modules.Dbt.csproj" />
+    <ProjectReference Include="..\..\src\Autheris.Api\Autheris.Api.csproj" />
+    <ProjectReference Include="..\..\src\Autheris.Application\Autheris.Application.csproj" />
+    <ProjectReference Include="..\..\src\Autheris.Domain\Autheris.Domain.csproj" />
+    <ProjectReference Include="..\..\src\Autheris.Infrastructure\Autheris.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\Autheris.Modules.Abstractions\Autheris.Modules.Abstractions.csproj" />
+    <ProjectReference Include="..\..\tests\Autheris.Tests.Common\Autheris.Tests.Common.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="Fixtures\*.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>

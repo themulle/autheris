@@ -16,7 +16,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Domain.Security;
-using Autheris.Extensions.Dbt;
+using Autheris.Modules.Dbt;
 using Autheris.Infrastructure.Persistence;
 using Autheris.Tests.Unit.TestDoubles;
 using Microsoft.Extensions.Logging.Abstractions;
