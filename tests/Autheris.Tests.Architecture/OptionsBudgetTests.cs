@@ -37,6 +37,17 @@ public sealed partial class OptionsBudgetTests(ITestOutputHelper output)
     [GeneratedRegex(@"^\s*public\s+(?:required\s+)?(?:virtual\s+)?([\w<>\[\]?,.\s]+?)\s+(\w+)\s*\{\s*get;\s*(?:set|init);\s*\}")]
     private static partial Regex SettableProperty();
 
+    [GeneratedRegex(@"\brecord\s+(\w+)\s*\(")]
+    private static partial Regex PositionalRecordDeclaration();
+
+    private static readonly HashSet<string> LegacyPositionalRecordsInDomainOptions = new(StringComparer.Ordinal)
+    {
+        "GoldenQueryDefinition",
+        "ResourceGroupTierConfigOptions",
+        "EffectiveDataSourceProfile",
+        "DevFeatures",
+    };
+
     internal sealed record Surface(int Classes, int Properties, int EnabledFlags, int Undocumented);
 
     private static readonly Lazy<Surface> Measured = new(Measure);
@@ -97,6 +108,41 @@ public sealed partial class OptionsBudgetTests(ITestOutputHelper output)
         surface.Undocumented.ShouldBe(1);
         surface.Classes.ShouldBe(1);
         surface.EnabledFlags.ShouldBe(1);
+    }
+
+    /// <summary>
+    /// WP-SIMPL-32 A3.3 anti-gaming rule: merged and nested option types must stay <c>class</c> with settable
+    /// properties (what the scanner counts) rather than positional <c>record</c> types whose parameters would
+    /// bypass the class/property ratchets.
+    /// </summary>
+    [Fact]
+    public void No_new_positional_records_in_domain_options()
+    {
+        var unexpected = new List<string>();
+        foreach (var file in RepositoryScan.ProductionFiles)
+        {
+            if (!file.RelativePath.StartsWith("src/Autheris.Domain/Options/", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            foreach (var line in Regex.Split(file.Text, "\r\n|\r|\n"))
+            {
+                if (ProgramRatchetTests.IsCommentLine(line))
+                {
+                    continue;
+                }
+
+                var m = PositionalRecordDeclaration().Match(line);
+                if (m.Success && !LegacyPositionalRecordsInDomainOptions.Contains(m.Groups[1].Value))
+                {
+                    unexpected.Add($"{file.RelativePath}: {m.Groups[1].Value}");
+                }
+            }
+        }
+
+        unexpected.ShouldBeEmpty(
+            $"Positional records in src/Autheris.Domain/Options/ bypass the OptionsBudgetTests scanner; use a class with settable properties instead: {string.Join(", ", unexpected)}");
     }
 
     private void Check(string what, int actual, int ceiling, int target)

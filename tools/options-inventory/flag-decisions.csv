@@ -1,0 +1,97 @@
+class,property,default,security,decision,reason,owning_pr,file
+ColdPathTimingOptions,Enabled,,False,keep opt-in,Operational and test warmup timing seam (A7.3),PR 5,src/Autheris.Api/Hosting/Warmup/ColdPathTimingOptions.cs
+StartupWarmupOptions,Enabled,true,False,keep opt-in,Operational and test startup warmup kill switch (A7.3),PR 5,src/Autheris.Api/Hosting/Warmup/StartupWarmupOptions.cs
+StartupWarmupStepOptions,Enabled,true,False,keep opt-in,Operational per-step warmup kill switch (A7.3),PR 5,src/Autheris.Api/Hosting/Warmup/StartupWarmupOptions.cs
+OpenMetadataPolicy,Enabled,true,False,module,OpenMetadata module policy switch; module presence replaces flag,PR 2,src/Autheris.Application/Catalog/OpenMetadata/OpenMetadataModels.cs
+ReadPathSwitches,BulkStreamEnabled,,False,keep opt-in,PLAN-SEC-115 operational read-path kill switch,PR 4,src/Autheris.Application/Mcp/Services/ReadPathSwitches.cs
+ReadPathSwitches,QueryAnalysisEnabled,,False,keep opt-in,PLAN-SEC-115 operational read-path kill switch,PR 4,src/Autheris.Application/Mcp/Services/ReadPathSwitches.cs
+ReadPathSwitches,RestDataEndpointEnabled,,False,keep opt-in,PLAN-SEC-115 operational read-path kill switch,PR 4,src/Autheris.Application/Mcp/Services/ReadPathSwitches.cs
+AggregationOptions,Enabled,true,False,delete,Default-on analytics aggregation switch; candidate for removal or unconditional,PR 2,src/Autheris.Domain/Options/AnalyticsOptions.cs
+AnalyticsPrivacyOptions,AllowCatalogLowering,,False,keep opt-in,SEC-SIMPL-32 privacy relaxation guard,PR 2,src/Autheris.Domain/Options/AnalyticsOptions.cs
+AnalyticsPrivacyOptions,AllowDisabled,,False,keep opt-in,SEC-SIMPL-32 privacy relaxation guard,PR 2,src/Autheris.Domain/Options/AnalyticsOptions.cs
+AnalyticsPrivacyOptions,AllowSourceDeclaredLowering,,False,keep opt-in,SEC-SIMPL-32 privacy relaxation guard,PR 2,src/Autheris.Domain/Options/AnalyticsOptions.cs
+DataSourceProfileOptions,AllowCeilingRelaxation,false,False,keep opt-in,SEC-SIMPL-32 opt-in safety ceiling relaxation guard,PR 5,src/Autheris.Domain/Options/DataSources/DataSourceProfileOptions.cs
+DataSourceSafetyCeilingsOptions,AllowGlobalCeilingRelaxation,false,False,keep opt-in,SEC-SIMPL-32 opt-in global safety ceiling relaxation guard,PR 5,src/Autheris.Domain/Options/DataSources/DataSourceSafetyCeilingsOptions.cs
+DemoDataSwitch,Enabled,,False,delete,Demo data toggle; delete or replace with Dev preset,PR 5,src/Autheris.Domain/Options/DemoDataSwitch.cs
+ExtensibilityOptions,Enabled,true,False,unconditional,Default-on core feature; remove flag and make unconditional,PR 1,src/Autheris.Domain/Options/ExtensibilityPipelineOptions.cs
+FederationOptions,Enabled,false,False,keep opt-in,R13 default-off opt-in switch of kept feature,PR 5,src/Autheris.Domain/Options/FederationOptions.cs
+GatewayOptions,AllowDevelopmentInContainer,false,False,keep opt-in,SEC-SIMPL-32 / SEC C-04 container Development opt-in guard,PR 5,src/Autheris.Domain/Options/GatewayOptions.cs
+GatewayOptions,AllowInsecureWarnFlagsInProduction,false,False,keep opt-in,SEC-SIMPL-32 production insecure warn-flag opt-in guard,PR 5,src/Autheris.Domain/Options/GatewayOptions.cs
+GovernanceQueryAnalysisOptions,Enabled,true,False,unconditional,Default-on core governance analysis; remove flag and make unconditional,PR 1,src/Autheris.Domain/Options/GovernanceOptions.cs
+IndividualGrantOptions,AllowCustomerPrivileged,,False,keep opt-in,SEC-SIMPL-32 individual grant privilege guard,PR 1,src/Autheris.Domain/Options/IndividualGrantOptions.cs
+IndividualGrantOptions,AllowCustomerUnmasked,,False,keep opt-in,SEC-SIMPL-32 individual grant unmasked data guard,PR 1,src/Autheris.Domain/Options/IndividualGrantOptions.cs
+DataCatalogOptions,AllowAuthenticatedCatalogDiscovery,false,True,keep opt-in,SEC-SIMPL-32 / R13 default-off authenticated catalog discovery,PR 2,src/Autheris.Domain/Options/Integrations/DataCatalogOptions.cs
+DataCatalogOptions,Enabled,false,False,keep opt-in,R13 default-off opt-in switch of kept feature,PR 2,src/Autheris.Domain/Options/Integrations/DataCatalogOptions.cs
+DbtOptions,Enabled,true,False,module,dbt module option; module presence replaces flag in PR 6,PR 6,src/Autheris.Domain/Options/Integrations/DataCatalogOptions.cs
+OpenMetadataOptions,Enabled,,False,module,OpenMetadata module option; module presence replaces flag in PR 6,PR 6,src/Autheris.Domain/Options/Integrations/OpenMetadataOptions.cs
+OtlpOptions,AllowInsecureTransport,,False,keep opt-in,SEC-SIMPL-32 TLS transport downgrade guard,PR 5,src/Autheris.Domain/Options/Observability/TelemetryOptions.cs
+PropagationOptions,Enabled,true,False,unconditional,Default-on telemetry propagation; remove flag and make unconditional,PR 5,src/Autheris.Domain/Options/Observability/TelemetryOptions.cs
+RedactionOptions,AllowStatementText,,False,keep opt-in,SEC-SIMPL-32 statement text redaction opt-in guard,PR 5,src/Autheris.Domain/Options/Observability/TelemetryOptions.cs
+TelemetryOptions,Enabled,true,False,unconditional,Default-on telemetry; remove flag and make unconditional,PR 5,src/Autheris.Domain/Options/Observability/TelemetryOptions.cs
+AuthPluginOptions,AllowAuthorizationHooks,true,True,keep opt-in,SEC-SIMPL-32 auth plugin capability guard,PR 3,src/Autheris.Domain/Options/Plugins/AuthPluginOptions.cs
+AuthPluginOptions,AllowRoleEnrichment,true,True,keep opt-in,SEC-SIMPL-32 auth plugin capability guard,PR 3,src/Autheris.Domain/Options/Plugins/AuthPluginOptions.cs
+AuthPluginOptions,Enabled,true,True,keep opt-in,SEC-SIMPL-32 security-named auth plugin toggle,PR 3,src/Autheris.Domain/Options/Plugins/AuthPluginOptions.cs
+AppScopedTrustedDocumentsOptions,Enabled,,False,keep opt-in,SEC-SIMPL-32 / R13 trusted documents security control,PR 4,src/Autheris.Domain/Options/Protocols/AppScopedTrustedDocumentsOptions.cs
+CustomQueryPollerOptions,Enabled,false,False,keep opt-in,R13 default-off opt-in switch of kept feature,PR 5,src/Autheris.Domain/Options/Protocols/CustomQueryPollerOptions.cs
+SoftDeleteDefinition,Enabled,true,False,unconditional,Default-on soft-delete behavior; remove flag and make unconditional,PR 5,src/Autheris.Domain/Options/Protocols/CustomQueryPollerOptions.cs
+GoldenQueryOptions,Enabled,true,False,unconditional,Default-on golden query support; remove flag and make unconditional,PR 4,src/Autheris.Domain/Options/Protocols/GraphQlOptions.cs
+GraphQLAggregationOptions,Enabled,true,False,unconditional,Default-on GraphQL aggregation; remove flag and make unconditional,PR 4,src/Autheris.Domain/Options/Protocols/GraphQlOptions.cs
+GraphQLMetricsOptions,Enabled,true,False,unconditional,Default-on GraphQL metrics; remove flag and make unconditional,PR 4,src/Autheris.Domain/Options/Protocols/GraphQlOptions.cs
+GraphQLSlowListReportOptions,Enabled,false,False,keep opt-in,R13 default-off opt-in switch of kept feature,PR 4,src/Autheris.Domain/Options/Protocols/GraphQlOptions.cs
+GraphQLSubscriptionOptions,Enabled,false,False,keep opt-in,R13 default-off opt-in switch of kept feature,PR 4,src/Autheris.Domain/Options/Protocols/GraphQlOptions.cs
+IncrementalDeliveryOptions,Enabled,true,False,unconditional,Default-on incremental delivery; remove flag and make unconditional,PR 4,src/Autheris.Domain/Options/Protocols/GraphQlOptions.cs
+McpOptions,Enabled,false,False,keep opt-in,R13 default-off opt-in switch of kept feature,PR 4,src/Autheris.Domain/Options/Protocols/McpOptions.cs
+ArrowExportOptions,Enabled,true,False,unconditional,Default-on Arrow export; remove flag and make unconditional,PR 4,src/Autheris.Domain/Options/Protocols/ODataOptions.cs
+ODataOptions,Enabled,true,False,keep opt-in,Operational kill switch for OData protocol (A7.3),PR 4,src/Autheris.Domain/Options/Protocols/ODataOptions.cs
+ParquetEgressOptions,Enabled,true,False,unconditional,Default-on Parquet egress; remove flag and make unconditional,PR 4,src/Autheris.Domain/Options/Protocols/ODataOptions.cs
+CoLocationOptions,Enabled,false,False,keep opt-in,R13 default-off opt-in switch of kept feature,PR 4,src/Autheris.Domain/Options/Protocols/RestApiOptions.cs
+CrossSourceOptions,AllowNonEquiJoins,false,False,keep opt-in,SEC-SIMPL-32 default-off non-equi join guard,PR 4,src/Autheris.Domain/Options/Protocols/RestApiOptions.cs
+CrossSourceOptions,Enabled,false,False,keep opt-in,R13 default-off opt-in switch of kept feature,PR 4,src/Autheris.Domain/Options/Protocols/RestApiOptions.cs
+DynamicKeySetOptions,Enabled,true,False,unconditional,Default-on dynamic keyset paging; remove flag and make unconditional,PR 4,src/Autheris.Domain/Options/Protocols/RestApiOptions.cs
+PredicatePushdownOptions,Enabled,true,False,unconditional,Default-on predicate pushdown; remove flag and make unconditional,PR 4,src/Autheris.Domain/Options/Protocols/RestApiOptions.cs
+ProcedureEndpointsOptions,Enabled,false,False,keep opt-in,OD-18 / WP-SIMPL-39 / R13 opt-in switch of kept feature,PR 4,src/Autheris.Domain/Options/Protocols/RestApiOptions.cs
+RestDataEndpointOptions,Enabled,true,False,keep opt-in,SEC-115 / A7.3 operational kill switch,PR 4,src/Autheris.Domain/Options/Protocols/RestApiOptions.cs
+SqlEndpointsOptions,Enabled,true,False,keep opt-in,A7.3 operational kill switch for SQL endpoints,PR 4,src/Autheris.Domain/Options/Protocols/RestApiOptions.cs
+WebSqlCostOptions,Enabled,true,False,unconditional,Default-on WebSql cost estimation; remove flag and make unconditional,PR 4,src/Autheris.Domain/Options/Protocols/RestApiOptions.cs
+WebSqlOptions,AllowDml,false,False,keep opt-in,OD-3 / OD-26 / R13 default-off write switch,PR 4,src/Autheris.Domain/Options/Protocols/RestApiOptions.cs
+WebSqlOptions,AllowRecursiveCte,false,False,keep opt-in,SEC-SIMPL-32 default-off recursive CTE guard,PR 4,src/Autheris.Domain/Options/Protocols/RestApiOptions.cs
+WebSqlOptions,Enabled,false,False,keep opt-in,R13 / WP-SIMPL-38 default-off opt-in switch,PR 4,src/Autheris.Domain/Options/Protocols/RestApiOptions.cs
+WebSqlPagingOptions,Enabled,true,False,unconditional,Default-on WebSql paging; remove flag and make unconditional,PR 4,src/Autheris.Domain/Options/Protocols/RestApiOptions.cs
+MssqlChangeTrackingOptions,AllowNonSnapshotRead,false,False,module,CDC module option; moves with StreamingCdcOptions in PR 6,PR 6,src/Autheris.Domain/Options/Protocols/StreamingCdcOptions.cs
+MssqlChangeTrackingOptions,Enabled,false,False,module,CDC module option; module presence replaces flag in PR 6,PR 6,src/Autheris.Domain/Options/Protocols/StreamingCdcOptions.cs
+PostgreSqlCdcOptions,Enabled,false,False,module,CDC module option; module presence replaces flag in PR 6,PR 6,src/Autheris.Domain/Options/Protocols/StreamingCdcOptions.cs
+SystemMetricsOptions,Enabled,true,False,keep opt-in,Operational and test seam kill switch (A7.3),PR 5,src/Autheris.Domain/Options/Resilience/DegradedModeOptions.cs
+ResourceGroupsOptions,Enabled,true,False,unconditional,Default-on resource groups; remove flag and make unconditional,PR 4,src/Autheris.Domain/Options/Resilience/QueryGovernorOptions.cs
+AuditOptions,VerifyHashChainEnabled,true,False,keep opt-in,SEC-SIMPL-32 audit hash chain verification guard,PR 1,src/Autheris.Domain/Options/Security/AuditLoggingOptions.cs
+AuditRetentionOptions,Enabled,true,False,keep opt-in,SEC-SIMPL-32 audit retention guard,PR 1,src/Autheris.Domain/Options/Security/AuditLoggingOptions.cs
+LoggingOptions,AllowStatementText,true,False,keep opt-in,SEC-SIMPL-32 audit statement text logging guard,PR 1,src/Autheris.Domain/Options/Security/AuditLoggingOptions.cs
+IdentityRealmConfigOptions,AllowPrivilegedSubjectRoles,,False,keep opt-in,SEC-SIMPL-32 workload privileged subject role guard,PR 3,src/Autheris.Domain/Options/Security/IdentityRealmsOptions.cs
+ScimMassChangeProtectionOptions,Enabled,true,False,keep opt-in,SEC-SIMPL-32 SCIM mass change protection guard,PR 3,src/Autheris.Domain/Options/Security/IdentityRealmsOptions.cs
+ScimRealmSecretOptions,AllowUpnCorrelation,,False,keep opt-in,SEC-SIMPL-32 SCIM UPN correlation guard,PR 3,src/Autheris.Domain/Options/Security/IdentityRealmsOptions.cs
+AdfsAuthOptions,Enabled,false,True,keep opt-in,R13 / SEC-SIMPL-32 default-off auth scheme switch,PR 3,src/Autheris.Domain/Options/Security/JwtOptions.cs
+BasicAuthOptions,Enabled,false,True,keep opt-in,R13 / SEC-SIMPL-32 default-off auth scheme switch,PR 3,src/Autheris.Domain/Options/Security/JwtOptions.cs
+BasicAuthSessionOptions,Enabled,false,True,keep opt-in,R13 / SEC-SIMPL-32 default-off auth session switch,PR 3,src/Autheris.Domain/Options/Security/JwtOptions.cs
+EntraIdAuthOptions,Enabled,false,True,keep opt-in,R13 / SEC-SIMPL-32 default-off auth scheme switch,PR 3,src/Autheris.Domain/Options/Security/JwtOptions.cs
+EntraIdAuthOptions,SelfServiceEnabled,true,True,keep opt-in,SEC-SIMPL-32 EntraId self-service security switch,PR 3,src/Autheris.Domain/Options/Security/JwtOptions.cs
+ForwardAuthOptions,Enabled,false,True,keep opt-in,R13 / SEC-SIMPL-32 default-off auth scheme switch,PR 3,src/Autheris.Domain/Options/Security/JwtOptions.cs
+HitLStepUpOptions,Enabled,true,False,keep opt-in,SEC-SIMPL-32 HitL step-up security control,PR 3,src/Autheris.Domain/Options/Security/JwtOptions.cs
+OutboundEgressOptions,AllowSystemProxy,,False,keep opt-in,SEC-SIMPL-32 outbound egress system proxy guard,PR 3,src/Autheris.Domain/Options/Security/OutboundEgressOptions.cs
+ReverseProxyOptions,Enabled,true,False,keep opt-in,SEC-SIMPL-32 reverse proxy security control,PR 3,src/Autheris.Domain/Options/Security/OutboundEgressOptions.cs
+RestrictedScopeOptions,Enabled,true,False,keep opt-in,SEC-SIMPL-32 restricted scope security control,PR 3,src/Autheris.Domain/Options/Security/RestrictedScopeOptions.cs
+CallerAttributeOptions,Enabled,,False,keep opt-in,SEC-SIMPL-32 / R13 RLS caller attribute control,PR 3,src/Autheris.Domain/Options/Security/RlsOptions.cs
+DataSourceConnectionOptions,AllowKeySetImport,false,False,keep opt-in,SEC-SIMPL-32 default-off keyset import guard,PR 5,src/Autheris.Domain/Options/Storage/DatabaseOptions.cs
+DuckDbOlapOptions,Enabled,,False,keep opt-in,R13 / test-pinned OLAP engine toggle,PR 5,src/Autheris.Domain/Options/Storage/DistributedCacheOptions.cs
+LakehouseOptions,Enabled,false,False,module,Lakehouse module option; module presence replaces flag in PR 6,PR 6,src/Autheris.Domain/Options/Storage/DistributedCacheOptions.cs
+GovernanceMigrationOptions,AllowNewerSchema,,False,keep opt-in,SEC-SIMPL-32 governance DB schema version guard,PR 5,src/Autheris.Domain/Options/Storage/GovernancePersistenceOptions.cs
+EpochValidationOptions,PipelinedMGetEnabled,true,False,keep opt-in,SEC-SIMPL-32 revocation epoch validation control,PR 5,src/Autheris.Domain/Options/Storage/RedisOptions.cs
+RedisOptions,Enabled,false,False,keep opt-in,R13 default-off opt-in switch of kept feature,PR 5,src/Autheris.Domain/Options/Storage/RedisOptions.cs
+TableCacheEncryptionOptions,Enabled,true,False,keep opt-in,SEC-SIMPL-32 table cache encryption control,PR 5,src/Autheris.Domain/Options/TableCache/TableCacheEncryptionOptions.cs
+TableCacheOptions,Enabled,false,False,keep opt-in,R13 default-off opt-in switch of kept feature,PR 5,src/Autheris.Domain/Options/TableCache/TableCacheOptions.cs
+AsyncJobOptions,Enabled,true,False,unconditional,Default-on async jobs; remove flag and make unconditional,PR 3,src/Autheris.Domain/Options/Tenancy/MultiTenancyOptions.cs
+SchemaContractsOptions,Enabled,false,False,keep opt-in,R13 default-off opt-in switch of kept feature,PR 3,src/Autheris.Domain/Options/Tenancy/MultiTenancyOptions.cs
+TenantRegistryOptions,Enabled,true,False,keep opt-in,SEC-SIMPL-32 tenant registry security control,PR 3,src/Autheris.Domain/Options/Tenancy/MultiTenancyOptions.cs
+VirtualFilterFederationOptions,PushdownEnabled,true,False,unconditional,Default-on virtual filter pushdown; remove flag and make unconditional,PR 5,src/Autheris.Domain/Options/VirtualFilterFederationOptions.cs
+WebhooksOptions,Enabled,true,False,unconditional,Default-on webhooks; remove flag and make unconditional,PR 1,src/Autheris.Domain/Options/WebhooksOptions.cs
+AstBuilderOptions,AllowInlineFunctionDefinitions,false,False,keep opt-in,SEC-SIMPL-32 SQL AST inline function guard,PR 4,src/TrinoSqlEngine/Ast/Builder/AstBuilderOptions.cs
+AstSecurityVisitorOptions,AllowRecursiveCte,,False,keep opt-in,SEC-SIMPL-32 SQL AST recursive CTE guard,PR 4,src/TrinoSqlEngine/Ast/Visitors/AstSecurityVisitorOptions.cs
+SqlTokenSecurityOptions,AllowTrailingStatementTerminator,,False,keep opt-in,SEC-SIMPL-32 SQL token security guard,PR 4,src/TrinoSqlEngine/SqlTokenSecurityOptions.cs
