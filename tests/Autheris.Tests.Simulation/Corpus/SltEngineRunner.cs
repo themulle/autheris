@@ -90,7 +90,7 @@ public sealed class SltEngineRunner(SltScenario scenario, DbConnection connectio
             using var cmd = connection.CreateCommand();
             cmd.CommandTimeout = executeTimeoutSeconds;
             _binder.Bind(cmd, compiled, new Dictionary<string, object?>());
-            NameParametersForSqlite(cmd);
+            AdaptPostgreSqlForSqlite(cmd);
             return new SltEngineRows(SltReference.Read(cmd, executeTimeoutSeconds));
         }
         catch (Exception ex) when (ex is SecurityException or GovernedSqlException)
@@ -112,16 +112,142 @@ public sealed class SltEngineRunner(SltScenario scenario, DbConnection connectio
     }
 
     /// <summary>
-    /// The PostgreSQL binder adds positional parameters with an empty name (Npgsql, markers <c>$1..$n</c>); SQLite refuses an unnamed
-    /// parameter, so the harness names them <c>1..n</c> in ordinal order, which Microsoft.Data.Sqlite resolves to the <c>$n</c> markers.
+    /// Adapts a PostgreSQL-bound command for the SQLite execution harness: names positional parameters (<c>1..n</c> for <c>$1..$n</c>)
+    /// and rewrites unquoted <c>CROSS JOIN</c> to comma joins so SQLite's query planner can reorder multi-way joins instead of forcing
+    /// left-to-right Cartesian order.
     /// </summary>
-    private static void NameParametersForSqlite(DbCommand cmd)
+    internal static void AdaptPostgreSqlForSqlite(DbCommand cmd)
     {
         for (var i = 0; i < cmd.Parameters.Count; i++)
         {
             cmd.Parameters[i].ParameterName = (i + 1).ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
+
+        cmd.CommandText = ReplaceUnquotedCrossJoin(cmd.CommandText);
     }
+
+    internal static string ReplaceUnquotedCrossJoin(string sql)
+    {
+        if (!sql.Contains("CROSS", StringComparison.OrdinalIgnoreCase))
+        {
+            return sql;
+        }
+
+        var sb = new System.Text.StringBuilder(sql.Length);
+        var inSingleQuote = false;
+        var inDoubleQuote = false;
+        var i = 0;
+        while (i < sql.Length)
+        {
+            var c = sql[i];
+            if (inSingleQuote)
+            {
+                sb.Append(c);
+                if (c == '\'' && i + 1 < sql.Length && sql[i + 1] == '\'')
+                {
+                    sb.Append('\'');
+                    i += 2;
+                    continue;
+                }
+
+                if (c == '\'')
+                {
+                    inSingleQuote = false;
+                }
+
+                i++;
+                continue;
+            }
+
+            if (inDoubleQuote)
+            {
+                sb.Append(c);
+                if (c == '"' && i + 1 < sql.Length && sql[i + 1] == '"')
+                {
+                    sb.Append('"');
+                    i += 2;
+                    continue;
+                }
+
+                if (c == '"')
+                {
+                    inDoubleQuote = false;
+                }
+
+                i++;
+                continue;
+            }
+
+            if (c == '\'')
+            {
+                inSingleQuote = true;
+                sb.Append(c);
+                i++;
+                continue;
+            }
+
+            if (c == '"')
+            {
+                inDoubleQuote = true;
+                sb.Append(c);
+                i++;
+                continue;
+            }
+
+            if (TryMatchCrossJoin(sql, i, out var nextIndex))
+            {
+                sb.Append(',');
+                i = nextIndex;
+                continue;
+            }
+
+            sb.Append(c);
+            i++;
+        }
+
+        return sb.ToString();
+    }
+
+    private static bool TryMatchCrossJoin(string sql, int index, out int nextIndex)
+    {
+        nextIndex = index;
+        if (index > 0 && IsIdentChar(sql[index - 1]))
+        {
+            return false;
+        }
+
+        if (index + 5 > sql.Length || !sql.AsSpan(index, 5).Equals("CROSS", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var pos = index + 5;
+        if (pos >= sql.Length || !char.IsWhiteSpace(sql[pos]))
+        {
+            return false;
+        }
+
+        while (pos < sql.Length && char.IsWhiteSpace(sql[pos]))
+        {
+            pos++;
+        }
+
+        if (pos + 4 > sql.Length || !sql.AsSpan(pos, 4).Equals("JOIN", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var end = pos + 4;
+        if (end < sql.Length && IsIdentChar(sql[end]))
+        {
+            return false;
+        }
+
+        nextIndex = end;
+        return true;
+    }
+
+    private static bool IsIdentChar(char c) => char.IsLetterOrDigit(c) || c == '_';
 
     private CompileRequest Request()
     {
