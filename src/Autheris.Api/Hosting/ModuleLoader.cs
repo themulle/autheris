@@ -431,6 +431,7 @@ public sealed class ModuleLoader
 
             var scopedConfig = BuildScopedModuleConfiguration(moduleId, moduleInstance.ConfigurationSections, configuration);
             var protectedSnapshot = ModuleSecurityGuards.CaptureProtectedServicesSnapshot(services);
+            var httpClientSnapshot = ModuleHttpClientGuard.CaptureClientConfiguration(services);
 
             try
             {
@@ -441,7 +442,8 @@ public sealed class ModuleLoader
                 throw new ModuleLoadException(moduleId, $"ConfigureServices failed: {ex.Message}", ex);
             }
 
-            ModuleSecurityGuards.VerifyProtectedServicesUnchanged(moduleId, services, protectedSnapshot);
+            ModuleSecurityGuards.VerifyProtectedServicesUnchanged(moduleId, services, protectedSnapshot, moduleInstance.GetType().Assembly);
+            ModuleHttpClientGuard.VerifyModuleClientsUseSsrfHandler(moduleId, services, httpClientSnapshot);
 
             _logger.LogInformation("Loaded signed module '{ModuleId}' v{Version} (keyId: {KeyId}).", moduleId, manifest.Version, manifest.KeyId);
             _logger.LogInformation("ModuleLoaded: Id '{ModuleId}', Version '{Version}', KeyId '{KeyId}', Signed '{Signed}'", manifest.Id, manifest.Version, manifest.KeyId, true);
@@ -537,7 +539,7 @@ public sealed class ModuleLoader
         return bool.TryParse(raw, out var parsed) && parsed;
     }
 
-    private static List<string> ReadEnabledModuleIds(IConfiguration configuration)
+    internal static List<string> ReadEnabledModuleIds(IConfiguration configuration)
     {
         var list = new List<string>();
         var section = configuration.GetSection(EnabledConfigKey);
@@ -667,7 +669,7 @@ public sealed class ModuleLoader
         return false;
     }
 
-    private static IConfiguration BuildScopedModuleConfiguration(
+    internal static IConfiguration BuildScopedModuleConfiguration(
         string moduleId,
         IReadOnlyList<string> declaredSections,
         IConfiguration rootConfiguration)
@@ -835,6 +837,7 @@ public sealed class ModuleLoader
 
             var scopedConfig = BuildScopedModuleConfiguration(moduleId, moduleInstance.ConfigurationSections, configuration);
             var protectedSnapshot = ModuleSecurityGuards.CaptureProtectedServicesSnapshot(services);
+            var httpClientSnapshot = ModuleHttpClientGuard.CaptureClientConfiguration(services);
 
             try
             {
@@ -845,7 +848,8 @@ public sealed class ModuleLoader
                 throw new ModuleLoadException(moduleId, $"ConfigureServices failed: {ex.Message}", ex);
             }
 
-            ModuleSecurityGuards.VerifyProtectedServicesUnchanged(moduleId, services, protectedSnapshot);
+            ModuleSecurityGuards.VerifyProtectedServicesUnchanged(moduleId, services, protectedSnapshot, moduleInstance.GetType().Assembly);
+            ModuleHttpClientGuard.VerifyModuleClientsUseSsrfHandler(moduleId, services, httpClientSnapshot);
 
             _logger.LogWarning("Module '{ModuleId}' loaded from workspace path (unsigned)", moduleId);
             _logger.LogInformation("ModuleLoaded: Id '{ModuleId}', Version '{Version}', KeyId '{KeyId}', Signed '{Signed}'", manifest.Id, manifest.Version, manifest.KeyId, false);

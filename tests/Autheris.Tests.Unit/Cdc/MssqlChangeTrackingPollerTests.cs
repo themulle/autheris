@@ -11,7 +11,7 @@ using Autheris.Application.Streaming;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
-using Autheris.Extensions.Cdc;
+using Autheris.Infrastructure.Streaming.Producers;
 using Shouldly;
 using Xunit;
 using static CdcProducerHarness;

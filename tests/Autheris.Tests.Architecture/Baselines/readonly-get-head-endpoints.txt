@@ -48,8 +48,8 @@
 /api/v1/catalog/objects/facets|GET|no side effect: counts caller-visible catalog objects per domain and schema
 /api/v1/catalog/objects/{id}|GET|no side effect: reads external catalog object metadata by id or identifier
 /api/v1/catalog/search|GET|no side effect: searches catalog metadata
-/api/v1/cdc/streams|GET|no side effect: lists CDC streams
-/api/v1/cdc/subscriptions|GET|no side effect: lists CDC webhook subscriptions
+/modules/events/v1/cdc/streams|GET|no side effect: lists CDC streams
+/modules/events/v1/cdc/subscriptions|GET|no side effect: lists CDC webhook subscriptions
 /api/v1/consent/events|GET|no side effect: reads tenant consent event feed page
 /api/v1/consent/grant-records/keys|GET|no side effect: returns ECDSA P-256 public verification keys as JWKS
 /api/v1/consent/grant-records/proof|GET|no side effect: evaluates cryptographic grant proof chain state

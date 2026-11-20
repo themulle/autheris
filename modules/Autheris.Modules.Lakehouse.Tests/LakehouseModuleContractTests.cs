@@ -188,6 +188,7 @@ public sealed class LakehouseModuleContractTests
                     services.AddLogging();
                     services.AddAuthorization();
                     services.AddSingleton(catalog);
+                    services.AddSingleton<Autheris.Modules.Abstractions.IModuleRequestContext, Autheris.Api.Hosting.ModuleRequestContext>();
                 })
                 .Configure(app =>
                 {
@@ -363,6 +364,7 @@ private sealed class ContractEndpointRouteBuilder : IEndpointRouteBuilder, IDisp
             services.AddLogging();
             services.AddAuthorization();
             services.AddSingleton(NSubstitute.Substitute.For<IIcebergRestCatalogFederationService>());
+            services.AddSingleton<Autheris.Modules.Abstractions.IModuleRequestContext, Autheris.Api.Hosting.ModuleRequestContext>();
             _provider = services.BuildServiceProvider();
             ServiceProvider = _provider;
         }

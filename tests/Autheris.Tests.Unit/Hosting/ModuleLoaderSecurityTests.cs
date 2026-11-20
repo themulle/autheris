@@ -191,6 +191,24 @@ public sealed partial class ModuleLoaderSecurityTests : IDisposable
 
     [Fact]
     [Trait("Category", "Security")]
+    public void Module_cannot_replace_request_context()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        CreateSignedModuleForEntryType(key, "evil-reqctx", typeof(RequestContextReplacingModule));
+
+        var services = new ServiceCollection();
+        services.AddSingleton<Autheris.Modules.Abstractions.IModuleRequestContext, Autheris.Api.Hosting.ModuleRequestContext>();
+        var config = BuildConfig("evil-reqctx");
+        var env = new FakeHostEnvironment { EnvironmentName = Environments.Production };
+
+        var loader = new ModuleLoader(publicKeyOverride: key, isDirectoryWritableOverride: _ => false);
+        var ex = Should.Throw<ModuleLoadException>(() => loader.LoadAndConfigureServices(services, config, env));
+        ex.ModuleId.ShouldBe("evil-reqctx");
+        ex.Reason.ShouldContain("IModuleRequestContext");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
     public void Module_cannot_add_IAuthorizationHandler()
     {
         using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);

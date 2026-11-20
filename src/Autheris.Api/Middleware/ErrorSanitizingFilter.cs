@@ -185,7 +185,7 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
     private static readonly string[] SensitivePatterns =
     [
         "password=", "pwd=", "server=", "uid=", "user id=", "connectionstring", "initial catalog=",
-        "bearer ", "token=", "secret=", "client_secret",
+        "bearer ", "token=", "secret=", "client_secret", "apikey=", "api-key=", "api_key=", "signing_secret", "signingkey", "kek=",
         "stack trace:", "at system.", "at microsoft.", "at autheris."
     ];
 

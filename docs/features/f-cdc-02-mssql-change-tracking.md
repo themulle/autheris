@@ -1,6 +1,6 @@
 # F-CDC-02: Native MSSQL Change Tracking Ingestion Provider
 
-**Components:** [`IMssqlChangeTrackingPoller.cs`](../../src/Autheris.Application/Streaming/Interfaces/IMssqlChangeTrackingPoller.cs), [`MssqlChangeTrackingPoller.cs`](../../src/Autheris.Extensions/Cdc/MssqlChangeTrackingPoller.cs), `MssqlChangeTrackingHostedService.cs`, [`IMssqlWatermarkStore.cs`](../../src/Autheris.Application/Streaming/Interfaces/IMssqlWatermarkStore.cs), [`GovernanceDbMssqlWatermarkStore.cs`](../../src/Autheris.Infrastructure/Streaming/GovernanceDbMssqlWatermarkStore.cs), [`StreamRlsPolicyEnforcer.cs`](../../src/Autheris.Application/Streaming/Services/StreamRlsPolicyEnforcer.cs)
+**Components:** [`IMssqlChangeTrackingPoller.cs`](../../src/Autheris.Application/Streaming/Interfaces/IMssqlChangeTrackingPoller.cs), [`MssqlChangeTrackingPoller.cs`](../../src/Autheris.Infrastructure/Streaming/Producers/MssqlChangeTrackingPoller.cs), `MssqlChangeTrackingHostedService.cs`, [`IMssqlWatermarkStore.cs`](../../src/Autheris.Application/Streaming/Interfaces/IMssqlWatermarkStore.cs), [`GovernanceDbMssqlWatermarkStore.cs`](../../src/Autheris.Infrastructure/Streaming/GovernanceDbMssqlWatermarkStore.cs), [`StreamRlsPolicyEnforcer.cs`](../../src/Autheris.Application/Streaming/Services/StreamRlsPolicyEnforcer.cs)
 
 ---
 
