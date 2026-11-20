@@ -44,23 +44,25 @@ public sealed class WebhookPreAuthBufferingTests
     private sealed class FakeOmSyncService : IOpenMetadataSyncService
     {
         public bool HandleCalled { get; private set; }
+        public OpenMetadataWebhookOutcome Outcome { get; set; } = OpenMetadataWebhookOutcome.Processed;
         public Task<OpenMetadataSyncResult> SyncPermissionsAsync(bool dryRun = false, TenantId? restrictToTenant = null, CancellationToken ct = default) =>
             Task.FromResult(new OpenMetadataSyncResult(0, 0, 0, [], [], true));
-        public Task<bool> HandleWebhookEventAsync(string eventPayload, string? signatureHeader = null, CancellationToken ct = default)
+        public Task<OpenMetadataWebhookOutcome> HandleWebhookEventAsync(string eventPayload, string? signatureHeader = null, CancellationToken ct = default)
         {
             HandleCalled = true;
-            return Task.FromResult(true);
+            return Task.FromResult(Outcome);
         }
     }
 
     private sealed class FakeDbtWebhookReceiver : IDbtWebhookReceiver
     {
         public bool ProcessCalled { get; private set; }
+        public DbtWebhookProcessingResult Result { get; set; } = new(true, "Processed", "job_run.completed", 1L);
         public bool ValidateSignature(string payload, string? signatureHeader, string secret) => true;
         public Task<DbtWebhookProcessingResult> ProcessWebhookAsync(string payload, string? signatureHeader, CancellationToken ct = default)
         {
             ProcessCalled = true;
-            return Task.FromResult(new DbtWebhookProcessingResult(true, "Processed", "job_run.completed", 1L));
+            return Task.FromResult(Result);
         }
     }
 
@@ -130,5 +132,87 @@ public sealed class WebhookPreAuthBufferingTests
         var problem = result.ShouldBeAssignableTo<IStatusCodeHttpResult>()!;
         problem.StatusCode.ShouldBe(StatusCodes.Status413PayloadTooLarge);
         receiver.ProcessCalled.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task OpenMetadata_StoreUnavailable_ReturnsServiceUnavailable()
+    {
+        var syncService = new FakeOmSyncService { Outcome = OpenMetadataWebhookOutcome.Unavailable };
+        var context = new DefaultHttpContext();
+        context.Request.Headers["X-OpenMetadata-Signature"] = "sha256=abcdef";
+        var bodyBytes = Encoding.UTF8.GetBytes("{\"id\":\"00000000-0000-0000-0000-000000000001\"}");
+        context.Request.Body = new MemoryStream(bodyBytes);
+        context.Request.ContentLength = bodyBytes.Length;
+
+        var result = await WebhookEndpoints.HandleOpenMetadataWebhookAsync(context, syncService);
+
+        var status = result.ShouldBeAssignableTo<IStatusCodeHttpResult>()!;
+        status.StatusCode.ShouldBe(StatusCodes.Status503ServiceUnavailable);
+        var problem = result.ShouldBeAssignableTo<IValueHttpResult>()!;
+        var details = problem.Value.ShouldBeOfType<Microsoft.AspNetCore.Mvc.ProblemDetails>();
+        details.Detail.ShouldBe("The webhook replay store is unavailable.");
+        syncService.HandleCalled.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task OpenMetadata_Rejected_ReturnsBadRequest()
+    {
+        var syncService = new FakeOmSyncService { Outcome = OpenMetadataWebhookOutcome.Rejected };
+        var context = new DefaultHttpContext();
+        context.Request.Headers["X-OpenMetadata-Signature"] = "sha256=abcdef";
+        var bodyBytes = Encoding.UTF8.GetBytes("{\"id\":\"00000000-0000-0000-0000-000000000001\"}");
+        context.Request.Body = new MemoryStream(bodyBytes);
+        context.Request.ContentLength = bodyBytes.Length;
+
+        var result = await WebhookEndpoints.HandleOpenMetadataWebhookAsync(context, syncService);
+
+        var status = result.ShouldBeAssignableTo<IStatusCodeHttpResult>()!;
+        status.StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
+        syncService.HandleCalled.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Dbt_StoreUnavailable_ReturnsServiceUnavailable()
+    {
+        var receiver = new FakeDbtWebhookReceiver
+        {
+            Result = new DbtWebhookProcessingResult(false, "Webhook deduplication unavailable.", StoreUnavailable: true)
+        };
+        var context = new DefaultHttpContext();
+        context.Request.Headers["X-Dbt-Signature"] = "sha256=abcdef";
+        var bodyBytes = Encoding.UTF8.GetBytes("{\"eventId\":\"evt_1\"}");
+        context.Request.Body = new MemoryStream(bodyBytes);
+        context.Request.ContentLength = bodyBytes.Length;
+
+        var result = await DbtEndpoints.HandleDbtCloudWebhookAsync(context, receiver);
+
+        var status = result.ShouldBeAssignableTo<IStatusCodeHttpResult>()!;
+        status.StatusCode.ShouldBe(StatusCodes.Status503ServiceUnavailable);
+        var valueResult = result.ShouldBeAssignableTo<IValueHttpResult>()!;
+        var payload = valueResult.Value.ShouldBeOfType<DbtWebhookProcessingResult>();
+        payload.Success.ShouldBeFalse();
+        payload.StoreUnavailable.ShouldBeTrue();
+        payload.Message.ShouldBe("Webhook deduplication unavailable.");
+        receiver.ProcessCalled.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Dbt_Rejected_ReturnsUnauthorized()
+    {
+        var receiver = new FakeDbtWebhookReceiver
+        {
+            Result = new DbtWebhookProcessingResult(false, "Invalid or missing HMAC signature.")
+        };
+        var context = new DefaultHttpContext();
+        context.Request.Headers["X-Dbt-Signature"] = "sha256=abcdef";
+        var bodyBytes = Encoding.UTF8.GetBytes("{\"eventId\":\"evt_1\"}");
+        context.Request.Body = new MemoryStream(bodyBytes);
+        context.Request.ContentLength = bodyBytes.Length;
+
+        var result = await DbtEndpoints.HandleDbtCloudWebhookAsync(context, receiver);
+
+        var status = result.ShouldBeAssignableTo<IStatusCodeHttpResult>()!;
+        status.StatusCode.ShouldBe(StatusCodes.Status401Unauthorized);
+        receiver.ProcessCalled.ShouldBeTrue();
     }
 }
