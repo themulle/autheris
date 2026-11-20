@@ -443,19 +443,6 @@ public abstract class CatalogKeyDefinitionContractTestsBase
     }
 
     [Fact]
-    public async Task SetRowFilterEvaluation_ReReadWithoutFurtherWrite_ReturnsFreshSettings()
-    {
-        if (!Available) return;
-        var id = NewId();
-        await Repo.UpsertTableMetadataAsync(Meta(id, replace: true, pk: ["a"]));
-        (await Repo.GetTableMetadataAsync(id))!.RowFilterEvaluation.ShouldBeNull();
-
-        await Repo.SetRowFilterEvaluationAsync(id, new RowFilterEvaluationSettings(RowFilterEvaluationStrategy.KeySetCache, 60, 5), new Sid("S-1-5-21-admin"));
-
-        (await Repo.GetTableMetadataAsync(id))!.RowFilterEvaluation.ShouldNotBeNull();
-    }
-
-    [Fact]
     public async Task ReplaceTableKeyDefinition_UnknownTable_ReturnsNull()
     {
         if (!Available) return;

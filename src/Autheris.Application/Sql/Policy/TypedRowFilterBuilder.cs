@@ -7,7 +7,6 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Autheris.Application.Identity.Attributes;
 using Autheris.Application.Services;
-using Autheris.Application.Sql.Policy.RowFilterKeySets;
 using Autheris.Domain.Model;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Nodes;

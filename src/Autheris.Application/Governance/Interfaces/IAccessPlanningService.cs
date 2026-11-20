@@ -41,26 +41,6 @@ public interface IAccessPlanningService
         CancellationToken ct = default);
 
     /// <summary>
-    /// Issue #107: plans a change of the row filter key-set cache settings of one rule or one object. Validated against the current caps; no state
-    /// mutation. Confirmation uses <see cref="ConfirmPlanAsync"/> (TOTP), the change itself <see cref="ApplyRowFilterEvaluationAsync"/>.
-    /// </summary>
-    Task<AdminPlanRowFilterEvaluationResult> PlanRowFilterEvaluationAsync(
-        AdminPlanRowFilterEvaluationRequest request,
-        string adminSid,
-        string? tenantId = null,
-        CancellationToken ct = default);
-
-    /// <summary>
-    /// Issue #107: applies a confirmed row filter evaluation plan. Rejects plans of another kind, validates again against the current caps and
-    /// rejects the plan when the stored settings changed since planning.
-    /// </summary>
-    Task<AdminApplyRowFilterEvaluationResult> ApplyRowFilterEvaluationAsync(
-        AdminApplyAccessRequest request,
-        string adminSid,
-        TenantId tenantId,
-        CancellationToken ct = default);
-
-    /// <summary>
     /// Plans a mutating MCP administrator operation (two-phase confirmation, ADR-03) without executing it. The plan binds the operation
     /// (tool name) and the SHA-256 digest of its canonical arguments; <paramref name="target"/> is the human-readable object the
     /// confirming administrator sees in the plan. Confirmation uses <see cref="ConfirmPlanAsync"/> (TOTP) like an access plan.

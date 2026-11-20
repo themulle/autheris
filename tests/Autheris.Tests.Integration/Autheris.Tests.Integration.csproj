@@ -35,7 +35,6 @@
     <ProjectReference Include="..\Autheris.Tests.Common\Autheris.Tests.Common.csproj" />
     <Compile Include="..\Autheris.Tests.Unit\AccessProfiles\TestAssign.cs" Link="TestAssign.cs" />
     <Compile Include="..\Autheris.Tests.Unit\ConsentRequests\ConsentDecisionStatusGuardContractBase.cs" Link="ConsentDecisionStatusGuardContractBase.cs" />
-    <Compile Include="..\Autheris.Tests.Unit\Governance\RowFilterEvaluationRepositoryContractTestsBase.cs" Link="RowFilterEvaluationRepositoryContractTestsBase.cs" />
     <Compile Include="..\Autheris.Tests.Unit\Governance\CatalogSettingsRepositoryContractTestsBase.cs" Link="CatalogSettingsRepositoryContractTestsBase.cs" />
     <Compile Include="..\Autheris.Tests.Unit\Dbt\DbtSyncTestExtensions.cs" Link="DbtSyncTestExtensions.cs" />
     <Compile Include="..\Autheris.Tests.Unit\Governance\ConsentDescriptionRepositoryContractBase.cs" Link="ConsentDescriptionRepositoryContractBase.cs" />
@@ -60,7 +59,6 @@
     <Compile Include="..\Autheris.Tests.Unit\TestSupport\CatalogRepositoryStubExtensions.cs" Link="Catalog\CatalogRepositoryStubExtensions.cs" />
     <Compile Include="..\Autheris.Tests.Unit\Identity\Attributes\CallerAttributeTestSupport.cs" Link="Identity\CallerAttributeTestSupport.cs" />
     <Compile Include="..\Autheris.Tests.Unit\TestDoubles\AuditWriterTestServices.cs" Link="TestDoubles\AuditWriterTestServices.cs" />
-    <Compile Include="..\Autheris.Tests.Unit\Sql\Policy\TestCorrelatedPredicateBuilder.cs" Link="Sql\Policy\TestCorrelatedPredicateBuilder.cs" />
     <Compile Include="..\Autheris.Tests.Unit\TestSupport\DefaultTenantCaller.cs" Link="DefaultTenantCaller.cs" />
     <Compile Include="..\Autheris.Tests.Unit\Masking\MaskSemanticsCorpus.cs" Link="Masking\MaskSemanticsCorpus.cs" />
     <Compile Include="..\Autheris.Tests.Unit\GraphQL\TypedTreeRowPolicy.cs" Link="GraphQL\TypedTreeRowPolicy.cs" />

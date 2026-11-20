@@ -10,7 +10,6 @@ using System.Threading;
 using Autheris.Application.Common;
 using Autheris.Application.Sql.Internal;
 using Autheris.Application.Sql.Policy;
-using Autheris.Application.Sql.Policy.RowFilterKeySets;
 using Autheris.Domain.Common;
 using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Model;
@@ -125,46 +124,16 @@ public sealed partial class GovernedSqlRewriter
             bindPageOffset: bindPageOffset, pageOffset: pageOffset, maxOffset: maxOffset);
     }
 
-    private CompiledSql CompileStatement(string rawSql, CompileRequest request, bool mayRetry, CancellationToken ct)
+    private CompiledSql CompileStatement(string rawSql, CompileRequest request, CancellationToken ct)
     {
         try
         {
             return _sqlEngine.Compile(rawSql.AsMemory(), request, ct);
         }
-        catch (Exception ex) when (ex is SecurityException or TrinoSqlEngine.Ast.Builder.AstBuildException
-                                   && !(mayRetry && ex is SqlLimitExceededException limit && IsRetryableLimit(limit.Kind)))
+        catch (Exception ex) when (ex is SecurityException or TrinoSqlEngine.Ast.Builder.AstBuildException)
         {
-            // A retryable limit of a statement with substituted key sets is handled by the caller without logging.
             _logger?.Warning(ex, "WebSQL statement rejected by the SQL compiler.");
             throw;
-        }
-    }
-
-    private static bool IsRetryableLimit(SqlLimitKind kind) => kind is SqlLimitKind.BindParameters or SqlLimitKind.PolicyExpansionFactor;
-
-    private static void RecordRetryMetrics(RowFilterKeySetReport report, TargetSqlDialect dialect)
-    {
-        foreach (var o in report.Outcomes)
-        {
-            if (o.Reason is KeySetFallbackReason.BindLimitRetry or KeySetFallbackReason.ExpansionLimitRetry)
-            {
-                GatewayDiagnostics.RowFilterKeySetFallbacks.Add(
-                    1,
-                    new KeyValuePair<string, object?>("dialect", dialect.ToString()),
-                    new KeyValuePair<string, object?>("outcome", "Fallback"),
-                    new KeyValuePair<string, object?>("reason", o.Reason.ToString()));
-            }
-        }
-    }
-
-    /// <summary>One Debug line per site after the compiled SQL line. Counts are allowed here; never values or hashes.</summary>
-    private void LogKeySets(RowFilterKeySetReport report)
-    {
-        foreach (var o in report.Outcomes)
-        {
-            _logger?.LogDebug(
-                "GovernedSqlExecutionService: Row-filter key set site {Table} outcome={Outcome} reason={Reason} keys={Keys} padded={Padded} ageSeconds={Age}",
-                o.Table, o.Outcome, o.Reason, o.KeyCount, o.PaddedCount, o.AgeSeconds);
         }
     }
 

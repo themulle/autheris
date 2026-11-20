@@ -77,13 +77,6 @@ public sealed class DataSourceConnectionOptions
     [Range(0, 86400)] public int LoginFailureCooldownSeconds { get; init; } = 300;
 
     /// <summary>
-    /// Issue #107: operator attestation that the dependent tables of correlated row filters are not filtered per user
-    /// at this source (no source-native per-user RLS). The key-set cache key query runs with a tenant-only session; without this flag
-    /// every correlated filter of the data source falls back to <c>EXISTS</c> (reason <c>SourceNotEligible</c>). Default false.
-    /// </summary>
-    public bool KeySetCacheAllowed { get; init; }
-
-    /// <summary>
     /// Issue #124: operator/data-owner consent allowing dynamic key-set pushdown filters
     /// to be imported and executed against this target data source during cross-source WebSQL joins. Default false (fail closed).
     /// </summary>
@@ -155,7 +148,6 @@ public sealed class DataSourceConnectionOptions
             ServerName = ServerName,
             ReadUncommitted = false,
             LoginFailureCooldownSeconds = LoginFailureCooldownSeconds,
-            KeySetCacheAllowed = KeySetCacheAllowed,
             AllowKeySetImport = AllowKeySetImport,
             CallerAttributeLookupAllowed = CallerAttributeLookupAllowed,
             CallerAttributeSharedLoginAcknowledged = CallerAttributeSharedLoginAcknowledged,

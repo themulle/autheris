@@ -27,13 +27,13 @@ public sealed class McpToolAnnotationsTests
 {
     private static readonly string[] OverwritingTools =
     [
-        McpAdminTools.ApplyAccess, McpAdminTools.ApplyRowFilterEvaluation, McpAdminTools.SetDatasetState,
+        McpAdminTools.ApplyAccess, McpAdminTools.SetDatasetState,
         McpAdminTools.SetDatasetCatalog, McpDocTools.DepositDocumentation,
     ];
 
     private static readonly string[] AddingTools =
     [
-        McpAdminTools.PlanAccess, McpAdminTools.PlanRowFilterEvaluation, McpAdminTools.RegisterDatasource,
+        McpAdminTools.PlanAccess, McpAdminTools.RegisterDatasource,
     ];
 
     private static readonly string[] WritesForWritableSession =

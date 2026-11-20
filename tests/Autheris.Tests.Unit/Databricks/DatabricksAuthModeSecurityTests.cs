@@ -126,8 +126,7 @@ public sealed class DatabricksAuthModeSecurityTests
                 Provider = c.Provider,
                 CommandTimeoutSeconds = c.CommandTimeoutSeconds,
                 Databricks = c.Databricks,
-                EnforcementMode = enforcementMode,
-                KeySetCacheAllowed = false
+                EnforcementMode = enforcementMode
             };
         });
 
