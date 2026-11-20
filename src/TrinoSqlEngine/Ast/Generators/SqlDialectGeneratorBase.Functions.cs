@@ -279,11 +279,19 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
     /// <summary>Wunsch 4: the dialect supports <c>GROUP BY DISTINCT</c>.</summary>
     protected virtual bool SupportsGroupByDistinct => false;
 
+    /// <summary>The dialect supports <c>GROUP BY ALL</c>.</summary>
+    protected virtual bool SupportsGroupByAll => false;
+
     protected virtual void GenerateGroupBy(GroupByClause groupBy, ref ValueStringBuilder builder, SqlEmitterContext context)
     {
         builder.Append(" GROUP BY ");
         if (groupBy.IsAll)
         {
+            if (!SupportsGroupByAll)
+            {
+                throw new TrinoSqlEngine.Ast.Builder.AstBuildException($"SQL construct GROUP BY ALL is not supported for {TargetDialect}.");
+            }
+
             builder.Append("ALL");
             return;
         }

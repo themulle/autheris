@@ -695,10 +695,10 @@ public sealed partial class GovernedSqlExecutor
                     TimeSpan.FromSeconds(commandTimeout),
                     async () =>
                     {
-                        await using (var reader = await command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct).ConfigureAwait(false))
+                        await using (var rawReader = await command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct).ConfigureAwait(false))
                         {
+                            var (reader, maskArray) = WrapMetricViewGroupSizeReader(rawReader, rewrite, compiled.OutputColumnMasks, compiled.Dialect);
                             var columns = SqlResultColumns.Describe(reader);
-                            var maskArray = compiled.OutputColumnMasks;
                             if (maskArray.IsDefault || (reader.FieldCount > 0 && maskArray.Length != reader.FieldCount))
                             {
                                 throw new GovernedSqlException(GovernedSqlErrorCodes.CompilerInvariant, compiled.Dialect);

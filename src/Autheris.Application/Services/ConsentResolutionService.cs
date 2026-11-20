@@ -155,7 +155,8 @@ public sealed class ConsentResolutionService : IConsentResolutionService
             }
         }
 
-        if (tableMetadata != null && applicable.Any(c => c.IsPatternGrant))
+        bool isMetricView = tableMetadata?.Table.ObjectKind == DiscoveryObjectKind.MetricView;
+        if (tableMetadata != null && (isMetricView || applicable.Any(c => c.IsPatternGrant)))
         {
             foreach (var col in tableMetadata.Columns)
             {
@@ -179,6 +180,12 @@ public sealed class ConsentResolutionService : IConsentResolutionService
             }
 
             var metaCol = tableMetadata?.GetColumn(column);
+            if (isMetricView && (metaCol is null || metaCol.DiscoveryHidden || metaCol.Role is null))
+            {
+                columnAccess[column] = ColumnAccessLevel.Deny;
+                continue;
+            }
+
             if (metaCol?.DiscoveryHidden == true && !hasConcreteUnconstrainedAllow)
             {
                 bool hasConcreteColumnAllow = aConsents.Any(c =>
@@ -194,7 +201,8 @@ public sealed class ConsentResolutionService : IConsentResolutionService
                 }
             }
 
-            var level = ResolveColumnLevel(column, unconstrainedConsents, rowConstrainedGroups, callerScopes);
+            bool requireExplicitRule = isMetricView && metaCol?.Role == MetricViewColumnRole.Measure;
+            var level = ResolveColumnLevel(column, unconstrainedConsents, rowConstrainedGroups, callerScopes, requireExplicitRule);
 
             if (maskedOnlyColumns.Contains(column) && level == ColumnAccessLevel.Clear)
             {
@@ -207,7 +215,7 @@ public sealed class ConsentResolutionService : IConsentResolutionService
             {
                 bool hasConcreteOrExplicitClear = aConsents.Any(c =>
                     !c.IsPatternGrant
-                        ? GetConsentColumnLevel(c, column, callerScopes) == ColumnAccessLevel.Clear
+                        ? GetConsentColumnLevel(c, column, callerScopes, requireExplicitRule) == ColumnAccessLevel.Clear
                         : c.ColumnRules.Any(r =>
                             string.Equals(r.ColumnName, column, StringComparison.OrdinalIgnoreCase) &&
                             r.AccessLevel == ColumnAccessLevel.Clear &&
@@ -228,7 +236,7 @@ public sealed class ConsentResolutionService : IConsentResolutionService
         // the same union semantics yield Clear for an unmentioned column, i.e. every row of the result is visible through
         // at least one allow consent without column rules. Previously a single row-constrained consent without column
         // rules released every unmentioned column for the rows of all other consents.
-        bool hasUnconstrainedColumnAllow =
+        bool hasUnconstrainedColumnAllow = !isMetricView &&
             ResolveColumnLevel(column: null, unconstrainedConsents, rowConstrainedGroups, callerScopes) == ColumnAccessLevel.Clear;
 
         // WP-X0l: the same inputs that produced the text, for the typed row policy (and for the decision cache).
@@ -550,12 +558,13 @@ public sealed class ConsentResolutionService : IConsentResolutionService
         string? column,
         IReadOnlyList<Consent> unconstrainedConsents,
         IReadOnlyList<List<Consent>> rowConstrainedGroups,
-        IReadOnlySet<string>? callerScopes = null)
+        IReadOnlySet<string>? callerScopes = null,
+        bool requireExplicitRule = false)
     {
         if (unconstrainedConsents.Count > 0)
         {
             // Rows outside every row filter are visible only through the unconstrained consents.
-            var maxLevel = unconstrainedConsents.Max(c => GetConsentColumnLevel(c, column, callerScopes));
+            var maxLevel = unconstrainedConsents.Max(c => GetConsentColumnLevel(c, column, callerScopes, requireExplicitRule));
             return maxLevel is ColumnAccessLevel.Deny or ColumnAccessLevel.Mask or ColumnAccessLevel.Clear
                 ? maxLevel
                 : ColumnAccessLevel.Deny;
@@ -569,7 +578,7 @@ public sealed class ConsentResolutionService : IConsentResolutionService
         var result = ColumnAccessLevel.Clear;
         foreach (var group in rowConstrainedGroups)
         {
-            var rawGroupLevel = group.Max(c => GetConsentColumnLevel(c, column, callerScopes));
+            var rawGroupLevel = group.Max(c => GetConsentColumnLevel(c, column, callerScopes, requireExplicitRule));
             var groupLevel = rawGroupLevel is ColumnAccessLevel.Deny or ColumnAccessLevel.Mask or ColumnAccessLevel.Clear
                 ? rawGroupLevel
                 : ColumnAccessLevel.Deny;
@@ -600,11 +609,15 @@ public sealed class ConsentResolutionService : IConsentResolutionService
     internal static bool IsScopeSpecific(ConsentColumnRule rule)
         => rule.ApplicableScopes != null && rule.ApplicableScopes.Count > 0;
 
-    private static ColumnAccessLevel GetConsentColumnLevel(Consent consent, string? column, IReadOnlySet<string>? callerScopes = null)
+    private static ColumnAccessLevel GetConsentColumnLevel(
+        Consent consent,
+        string? column,
+        IReadOnlySet<string>? callerScopes = null,
+        bool requireExplicitRule = false)
     {
         if (consent.ColumnRules.Count == 0)
         {
-            return ColumnAccessLevel.Clear;
+            return requireExplicitRule ? ColumnAccessLevel.Deny : ColumnAccessLevel.Clear;
         }
 
         if (column == null)
@@ -618,7 +631,7 @@ public sealed class ConsentResolutionService : IConsentResolutionService
 
         if (matchingRules.Count == 0)
         {
-            return consent.IsPatternGrant && consent.ColumnSetMode == ColumnSetMode.AllNonHidden
+            return !requireExplicitRule && consent.IsPatternGrant && consent.ColumnSetMode == ColumnSetMode.AllNonHidden
                 ? ColumnAccessLevel.Clear
                 : ColumnAccessLevel.Deny;
         }

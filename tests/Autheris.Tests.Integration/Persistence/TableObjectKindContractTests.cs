@@ -97,7 +97,7 @@ public abstract class TableObjectKindContractBase
 
             var mv = new TableMetadata
             {
-                Table = new Table { Id = id, DisplayName = "sales_mv", TableName = "ord_896", SchemaName = "sales", SourceType = "Databricks", SourceName = "kind_896", Description = "mv", ObjectKind = DiscoveryObjectKind.MetricView },
+                Table = new Table { Id = id, DisplayName = "sales_mv", TableName = "ord_896", SchemaName = "sales", SourceType = "Databricks", SourceName = "kind_896", Description = "mv", ObjectKind = DiscoveryObjectKind.MetricView, MetricViewCountMeasure = "revenue" },
                 Identifier = new TableIdentifier("kind_896", "sales", "ord_896"),
                 Columns =
                 [
@@ -108,6 +108,7 @@ public abstract class TableObjectKindContractBase
             await governance.UpsertTableMetadataAsync(mv);
             var stored = (await governance.GetTableMetadataAsync(new TableIdentifier("kind_896", "sales", "ord_896")))!;
             stored.Table.ObjectKind.ShouldBe(DiscoveryObjectKind.MetricView);
+            stored.Table.MetricViewCountMeasure.ShouldBe("revenue");
             stored.Columns.Single(c => c.ColumnName == "region").Role.ShouldBe(MetricViewColumnRole.Dimension);
             stored.Columns.Single(c => c.ColumnName == "revenue").Role.ShouldBe(MetricViewColumnRole.Measure);
         }

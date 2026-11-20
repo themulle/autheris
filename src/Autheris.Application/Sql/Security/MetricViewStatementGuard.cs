@@ -3,6 +3,8 @@ namespace Autheris.Application.Sql.Security;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Antlr4.Runtime.Tree;
+using Autheris.Application.Sql.Policy;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -13,13 +15,15 @@ using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Nodes;
 using TrinoSqlEngine.Ast.Security;
 using TrinoSqlEngine.Governance;
+using TrinoSqlEngine.Parsing;
 
 public sealed record MetricViewGuardResult(
     string? AugmentedSql,
     string? HiddenCountColumnAlias,
-    int EffectiveMinGroupSize)
+    int EffectiveMinGroupSize,
+    string? InternalCountMeasureColumn = null)
 {
-    public static readonly MetricViewGuardResult None = new(null, null, 0);
+    public static readonly MetricViewGuardResult None = new(null, null, 0, null);
 }
 
 /// <summary>
@@ -60,15 +64,16 @@ public static class MetricViewStatementGuard
 
         var metricViews = tables.Values.Where(static t => t.Table.ObjectKind == DiscoveryObjectKind.MetricView).ToList();
 
+        SqlBaseParser.SingleStatementContext tree;
         SqlStatement statement;
         try
         {
-            var (tree, _) = ParserEngine.Parse(sql.AsMemory(), SqlTokenSecurityOptions.Strict);
+            (tree, _) = ParserEngine.Parse(sql.AsMemory(), ClientSqlTokenPolicy.Analysis);
             statement = new SqlAstBuilder(new AstBuilderOptions()).BuildStatement(tree);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            if (metricViews.Count > 0)
+            if (metricViews.Count > 0 || sql.Contains("measure", StringComparison.OrdinalIgnoreCase))
             {
                 throw Refuse();
             }
@@ -118,7 +123,7 @@ public static class MetricViewStatementGuard
         // D-MV-7: row policy and tenant predicate columns must be exposed dimensions.
         ValidatePredicatesOnDimensions(mv, decision, columnsByName);
 
-        // D-MV-8: minimum group size requires a declared measure column.
+        // D-MV-8: minimum group size requires a declared exposed non-masked measure column.
         int minGroupSize = mv.EffectiveMinGroupSize ?? 0;
         string? countMeasure = null;
         if (minGroupSize > 1)
@@ -126,7 +131,8 @@ public static class MetricViewStatementGuard
             if (string.IsNullOrWhiteSpace(mv.Table.MetricViewCountMeasure) ||
                 !columnsByName.TryGetValue(mv.Table.MetricViewCountMeasure, out var countCol) ||
                 countCol.Role != MetricViewColumnRole.Measure ||
-                countCol.DiscoveryHidden)
+                countCol.DiscoveryHidden ||
+                decision.GetEffectiveColumnAccess(countCol.ColumnName, mv) == ColumnAccessLevel.Mask)
             {
                 throw Refuse();
             }
@@ -146,14 +152,14 @@ public static class MetricViewStatementGuard
 
             foreach (var expr in spec.GroupBy.GroupingExpressions)
             {
-                ValidateDimensionOnlyExpression(expr, columnsByName);
+                ValidateDimensionOnlyExpression(expr, columnsByName, decision, mv);
                 CollectColumnNames(expr, groupedColumns);
             }
         }
 
         if (spec.Where is not null)
         {
-            ValidateDimensionOnlyExpression(spec.Where, columnsByName);
+            ValidateDimensionOnlyExpression(spec.Where, columnsByName, decision, mv);
         }
 
         if (spec.Projections.Count == 0)
@@ -179,26 +185,31 @@ public static class MetricViewStatementGuard
                 selectAliases.Add(colItem.Alias.Value);
             }
 
-            ValidateSelectExpression(colItem.Expression, columnsByName, groupByAll, groupedColumns, spec.GroupBy);
+            ValidateSelectExpression(colItem.Expression, columnsByName, decision, mv, groupByAll, groupedColumns, spec.GroupBy);
+        }
+
+        if (countMeasure is not null && selectAliases.Contains(HiddenCountAlias))
+        {
+            throw Refuse();
         }
 
         if (spec.Having is not null)
         {
-            ValidateHavingOrOrderExpression(spec.Having, columnsByName, selectAliases, allowAliases: false);
+            ValidateHavingOrOrderExpression(spec.Having, columnsByName, decision, mv, selectAliases, allowAliases: false);
         }
 
         if (select.OrderBy?.Elements is { Count: > 0 } orderElements)
         {
             foreach (var order in orderElements)
             {
-                ValidateHavingOrOrderExpression(order.Expression, columnsByName, selectAliases, allowAliases: true);
+                ValidateHavingOrOrderExpression(order.Expression, columnsByName, decision, mv, selectAliases, allowAliases: true);
             }
         }
 
         if (countMeasure is not null)
         {
-            var augmented = InjectHiddenCountMeasure(sql, countMeasure, HiddenCountAlias);
-            return new MetricViewGuardResult(augmented, HiddenCountAlias, minGroupSize);
+            var augmented = InjectHiddenCountMeasure(sql, tree, countMeasure, HiddenCountAlias);
+            return new MetricViewGuardResult(augmented, HiddenCountAlias, minGroupSize, countMeasure);
         }
 
         return MetricViewGuardResult.None;
@@ -247,20 +258,32 @@ public static class MetricViewStatementGuard
         !col.DiscoveryHidden &&
         col.Role == MetricViewColumnRole.Dimension;
 
+    private static bool IsExposedClearDimension(
+        string columnName,
+        IReadOnlyDictionary<string, TableColumn> columnsByName,
+        TableAccessDecision decision,
+        TableMetadata mv) =>
+        columnsByName.TryGetValue(columnName, out var col) &&
+        !col.DiscoveryHidden &&
+        col.Role == MetricViewColumnRole.Dimension &&
+        decision.GetEffectiveColumnAccess(col.ColumnName, mv) == ColumnAccessLevel.Clear;
+
     private static void ValidateSelectExpression(
         Expression expr,
         IReadOnlyDictionary<string, TableColumn> columnsByName,
+        TableAccessDecision decision,
+        TableMetadata mv,
         bool groupByAll,
         IReadOnlySet<string> groupedColumns,
         GroupByClause? groupBy)
     {
         if (ContainsMeasureCall(expr))
         {
-            ValidateMeasureExpression(expr, columnsByName);
+            ValidateMeasureExpression(expr, columnsByName, decision, mv);
             return;
         }
 
-        ValidateDimensionOnlyExpression(expr, columnsByName);
+        ValidateDimensionOnlyExpression(expr, columnsByName, decision, mv);
 
         if (!groupByAll)
         {
@@ -273,51 +296,61 @@ public static class MetricViewStatementGuard
         }
     }
 
-    private static void ValidateMeasureExpression(Expression expr, IReadOnlyDictionary<string, TableColumn> columnsByName)
+    private static void ValidateMeasureExpression(
+        Expression expr,
+        IReadOnlyDictionary<string, TableColumn> columnsByName,
+        TableAccessDecision decision,
+        TableMetadata mv)
     {
         switch (expr)
         {
             case FunctionCallExpression fn when IsMeasureFunction(fn):
-                ValidateMeasureCall(fn, columnsByName);
+                ValidateMeasureCall(fn, columnsByName, decision, mv);
                 return;
             case CastExpression cast:
-                ValidateMeasureExpression(cast.Operand, columnsByName);
+                ValidateMeasureExpression(cast.Operand, columnsByName, decision, mv);
                 return;
             case ParenthesizedExpression paren:
-                ValidateMeasureExpression(paren.Expression, columnsByName);
+                ValidateMeasureExpression(paren.Expression, columnsByName, decision, mv);
                 return;
             case BinaryExpression { Operator: BinaryOperator.Add or BinaryOperator.Subtract or BinaryOperator.Multiply or BinaryOperator.Divide } bin:
-                ValidateMeasureOperand(bin.Left, columnsByName);
-                ValidateMeasureOperand(bin.Right, columnsByName);
+                ValidateMeasureOperand(bin.Left, columnsByName, decision, mv);
+                ValidateMeasureOperand(bin.Right, columnsByName, decision, mv);
                 return;
             case UnaryExpression { Operator: UnaryOperator.Negate } un:
-                ValidateMeasureExpression(un.Operand, columnsByName);
+                ValidateMeasureExpression(un.Operand, columnsByName, decision, mv);
                 return;
             default:
                 throw Refuse();
         }
     }
 
-    private static void ValidateMeasureOperand(Expression expr, IReadOnlyDictionary<string, TableColumn> columnsByName)
+    private static void ValidateMeasureOperand(
+        Expression expr,
+        IReadOnlyDictionary<string, TableColumn> columnsByName,
+        TableAccessDecision decision,
+        TableMetadata mv)
     {
         if (expr is LiteralExpression)
         {
             return;
         }
 
-        ValidateMeasureExpression(expr, columnsByName);
+        ValidateMeasureExpression(expr, columnsByName, decision, mv);
     }
 
     private static void ValidateHavingOrOrderExpression(
         Expression expr,
         IReadOnlyDictionary<string, TableColumn> columnsByName,
+        TableAccessDecision decision,
+        TableMetadata mv,
         IReadOnlySet<string> selectAliases,
         bool allowAliases)
     {
         switch (expr)
         {
             case FunctionCallExpression fn when IsMeasureFunction(fn):
-                ValidateMeasureCall(fn, columnsByName);
+                ValidateMeasureCall(fn, columnsByName, decision, mv);
                 return;
             case ColumnReference colRef:
                 var name = colRef.Name.Parts[^1].Value;
@@ -326,7 +359,7 @@ public static class MetricViewStatementGuard
                     return;
                 }
 
-                if (!IsExposedDimension(name, columnsByName))
+                if (!IsExposedClearDimension(name, columnsByName, decision, mv))
                 {
                     throw Refuse();
                 }
@@ -335,29 +368,33 @@ public static class MetricViewStatementGuard
             case LiteralExpression or ParameterReference or NamedBindMarkerExpression:
                 return;
             case ParenthesizedExpression p:
-                ValidateHavingOrOrderExpression(p.Expression, columnsByName, selectAliases, allowAliases);
+                ValidateHavingOrOrderExpression(p.Expression, columnsByName, decision, mv, selectAliases, allowAliases);
                 return;
             case CastExpression c:
-                ValidateHavingOrOrderExpression(c.Operand, columnsByName, selectAliases, allowAliases);
+                ValidateHavingOrOrderExpression(c.Operand, columnsByName, decision, mv, selectAliases, allowAliases);
                 return;
             case BinaryExpression b:
-                ValidateHavingOrOrderExpression(b.Left, columnsByName, selectAliases, allowAliases);
-                ValidateHavingOrOrderExpression(b.Right, columnsByName, selectAliases, allowAliases);
+                ValidateHavingOrOrderExpression(b.Left, columnsByName, decision, mv, selectAliases, allowAliases);
+                ValidateHavingOrOrderExpression(b.Right, columnsByName, decision, mv, selectAliases, allowAliases);
                 return;
             case UnaryExpression u:
-                ValidateHavingOrOrderExpression(u.Operand, columnsByName, selectAliases, allowAliases);
+                ValidateHavingOrOrderExpression(u.Operand, columnsByName, decision, mv, selectAliases, allowAliases);
                 return;
             case BetweenExpression bw:
-                ValidateHavingOrOrderExpression(bw.Operand, columnsByName, selectAliases, allowAliases);
-                ValidateHavingOrOrderExpression(bw.Lower, columnsByName, selectAliases, allowAliases);
-                ValidateHavingOrOrderExpression(bw.Upper, columnsByName, selectAliases, allowAliases);
+                ValidateHavingOrOrderExpression(bw.Operand, columnsByName, decision, mv, selectAliases, allowAliases);
+                ValidateHavingOrOrderExpression(bw.Lower, columnsByName, decision, mv, selectAliases, allowAliases);
+                ValidateHavingOrOrderExpression(bw.Upper, columnsByName, decision, mv, selectAliases, allowAliases);
                 return;
             default:
                 throw Refuse();
         }
     }
 
-    private static void ValidateDimensionOnlyExpression(Expression expr, IReadOnlyDictionary<string, TableColumn> columnsByName)
+    private static void ValidateDimensionOnlyExpression(
+        Expression expr,
+        IReadOnlyDictionary<string, TableColumn> columnsByName,
+        TableAccessDecision decision,
+        TableMetadata mv)
     {
         if (ContainsMeasureCall(expr))
         {
@@ -368,14 +405,18 @@ public static class MetricViewStatementGuard
         CollectColumnNames(expr, referenced);
         foreach (var col in referenced)
         {
-            if (!IsExposedDimension(col, columnsByName))
+            if (!IsExposedClearDimension(col, columnsByName, decision, mv))
             {
                 throw Refuse();
             }
         }
     }
 
-    private static void ValidateMeasureCall(FunctionCallExpression fn, IReadOnlyDictionary<string, TableColumn> columnsByName)
+    private static void ValidateMeasureCall(
+        FunctionCallExpression fn,
+        IReadOnlyDictionary<string, TableColumn> columnsByName,
+        TableAccessDecision decision,
+        TableMetadata mv)
     {
         if (fn.Window is not null || fn.Filter is not null || fn.Distinct || fn.IsStar || fn.Arguments.Count != 1)
         {
@@ -388,7 +429,10 @@ public static class MetricViewStatementGuard
         }
 
         var name = colRef.Name.Parts[^1].Value;
-        if (!columnsByName.TryGetValue(name, out var col) || col.DiscoveryHidden || col.Role != MetricViewColumnRole.Measure)
+        if (!columnsByName.TryGetValue(name, out var col) ||
+            col.DiscoveryHidden ||
+            col.Role != MetricViewColumnRole.Measure ||
+            decision.GetEffectiveColumnAccess(col.ColumnName, mv) != ColumnAccessLevel.Clear)
         {
             throw Refuse();
         }
@@ -442,33 +486,46 @@ public static class MetricViewStatementGuard
         });
     }
 
-    private static string InjectHiddenCountMeasure(string sql, string countMeasure, string alias)
+    private static string InjectHiddenCountMeasure(
+        string sql,
+        SqlBaseParser.SingleStatementContext tree,
+        string countMeasure,
+        string alias)
     {
-        var span = sql.AsSpan();
-        bool inSingle = false, inDouble = false, inBacktick = false;
-        int depth = 0;
-
-        for (int i = 0; i <= span.Length - 4; i++)
+        var querySpec = FindFirstQuerySpecification(tree);
+        var selectItems = querySpec?.selectItem();
+        if (selectItems is null || selectItems.Length == 0 || selectItems[^1].Stop is not { } lastStop)
         {
-            char ch = span[i];
-            if (ch == '\'' && !inDouble && !inBacktick) { inSingle = !inSingle; continue; }
-            if (ch == '"' && !inSingle && !inBacktick) { inDouble = !inDouble; continue; }
-            if (ch == '`' && !inSingle && !inDouble) { inBacktick = !inBacktick; continue; }
-            if (inSingle || inDouble || inBacktick) continue;
+            throw Refuse();
+        }
 
-            if (ch == '(') { depth++; continue; }
-            if (ch == ')') { depth = Math.Max(0, depth - 1); continue; }
+        int insertPos = lastStop.StopIndex + 1;
+        if (insertPos < 0 || insertPos > sql.Length)
+        {
+            throw Refuse();
+        }
 
-            if (depth == 0 &&
-                (i == 0 || char.IsWhiteSpace(span[i - 1])) &&
-                span.Slice(i, 4).Equals("FROM", StringComparison.OrdinalIgnoreCase) &&
-                (i + 4 == span.Length || char.IsWhiteSpace(span[i + 4])))
+        var quotedMeasure = SqlIdentifierHelper.QuoteIdentifier(countMeasure);
+        return string.Concat(sql.AsSpan(0, insertPos), $", MEASURE({quotedMeasure}) AS {alias} ", sql.AsSpan(insertPos));
+    }
+
+    private static SqlBaseParser.QuerySpecificationContext? FindFirstQuerySpecification(IParseTree node)
+    {
+        if (node is SqlBaseParser.QuerySpecificationContext qs)
+        {
+            return qs;
+        }
+
+        for (int i = 0; i < node.ChildCount; i++)
+        {
+            var found = FindFirstQuerySpecification(node.GetChild(i));
+            if (found is not null)
             {
-                return string.Concat(span[..i], $", MEASURE({countMeasure}) AS {alias} ", span[i..]);
+                return found;
             }
         }
 
-        return sql;
+        return null;
     }
 
     private static WebSqlPolicyException Refuse() =>

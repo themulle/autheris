@@ -1,5 +1,6 @@
 {
   "ops": [
+    { "op": "addColumn", "table": "TABLES", "column": { "name": "metric_view_count_measure", "type": "NVARCHAR", "family": "string", "nullable": true } },
     { "op": "addColumn", "table": "TABLE_COLUMNS", "column": { "name": "column_role", "type": "NVARCHAR", "family": "string", "nullable": true } }
   ]
 }

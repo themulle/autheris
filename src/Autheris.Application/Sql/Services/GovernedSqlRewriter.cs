@@ -802,7 +802,8 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
                 Metadata = decidedTableMetadata,
                 ConnectionKey = connectionKey,
                 KeySetStatement = new RowFilterKeySetStatement(isRead, rawSql.Length, CompileRequestFactory.DefaultMaxExpansionFactor, disabled),
-                WritePermit = writePermit
+                WritePermit = writePermit,
+                MetricViewInternalCountColumn = mvGuard.InternalCountMeasureColumn
             };
 
         var assembly = await policyFactory.CreateAssemblyAsync(PolicyInput(disabled: false), ct).ConfigureAwait(false);

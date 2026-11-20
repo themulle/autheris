@@ -178,4 +178,27 @@ internal static class DbtObjectKindResolver
 
         return null;
     }
+
+    internal static bool TryResolveColumnRoles(
+        DbtModelDefinition model,
+        DiscoveryObjectKind tableKind,
+        ICollection<string>? warnings,
+        out Dictionary<string, MetricViewColumnRole?> resolvedRoles)
+    {
+        resolvedRoles = new Dictionary<string, MetricViewColumnRole?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (_, col) in model.Columns)
+        {
+            if (!TryResolveColumnRole(col, tableKind, model.Name, warnings, out var role))
+            {
+                return false;
+            }
+
+            resolvedRoles[col.Name] = role;
+        }
+
+        return true;
+    }
+
+    internal static bool HasExplicitColumnRole(DbtColumnDefinition column) =>
+        ReadMeta(column.Meta, ColumnRoleMetaKey, "column_role") is not null;
 }

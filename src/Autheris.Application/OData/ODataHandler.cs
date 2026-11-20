@@ -454,6 +454,19 @@ public sealed partial class ODataHandler(
 
         try
         {
+            var tableMeta = await _metadataRepo.GetTableMetadataAsync(table, ct).ConfigureAwait(false);
+            if (tableMeta != null && !IsExposableObjectKind(tableMeta.Table.ObjectKind))
+            {
+                _logger.LogWarning("OData query for {Table} refused: object kind {ObjectKind} is not queryable over OData.", table, tableMeta.Table.ObjectKind);
+                var message = _verboseErrors ? $"Dataset '{table}' is not queryable over OData." : GenericDenied;
+                return new ODataQueryResult(
+                    Success: false,
+                    StatusCode: 403,
+                    Payload: ODataResponseFormatter.FormatErrorResponse("ACCESS_DENIED", message),
+                    ErrorCode: "ACCESS_DENIED",
+                    ErrorMessage: message);
+            }
+
             // O5 / 4a.3 / 2.1: $count is the total under the same row filter and $filter, counted by the data source in the same statement
             // context; a source that cannot count answers 501, never the number of rows on the page.
             var page = await _executionService.ExecuteTablePageAsync(

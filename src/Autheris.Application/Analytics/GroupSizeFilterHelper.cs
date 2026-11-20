@@ -51,7 +51,13 @@ public static class GroupSizeFilterHelper
     private static bool TryReadGroupCount(IReadOnlyDictionary<string, object?> row, string columnName, out long count)
     {
         count = 0;
-        if (!row.TryGetValue(columnName, out var raw) || raw is null || raw == DBNull.Value)
+        return row.TryGetValue(columnName, out var raw) && TryParseGroupCountValue(raw, out count);
+    }
+
+    internal static bool TryParseGroupCountValue(object? raw, out long count)
+    {
+        count = 0;
+        if (raw is null || raw == DBNull.Value)
         {
             return false;
         }

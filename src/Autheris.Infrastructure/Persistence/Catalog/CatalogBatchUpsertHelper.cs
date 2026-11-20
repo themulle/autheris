@@ -513,6 +513,7 @@ internal static class CatalogBatchUpsertHelper
             DiscoveryObjectKind.MetricView => "metric_view",
             _ => throw new ArgumentOutOfRangeException(nameof(metadata), metadata.Table.ObjectKind, "Unsupported DiscoveryObjectKind for persistence.")
         });
+        upsertCmd.AddBound("@metricViewCountMeasure", (object?)metadata.Table.MetricViewCountMeasure ?? DBNull.Value);
         await upsertCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 

@@ -25,6 +25,8 @@ public sealed class MetricViewMigration0031Tests
             step.Sql.ShouldContain("measure");
 
             var shape = GovernanceSchemaShapeLoader.LoadAt(engine, 31, steps.ToDictionary(s => s.Version, s => s.ShapeDelta));
+            var tablesTable = shape.Tables.Single(t => string.Equals(t.Name, "TABLES", StringComparison.OrdinalIgnoreCase));
+            tablesTable.Columns.Single(c => c.Name == "metric_view_count_measure").Nullable.ShouldBeTrue();
             var columnsTable = shape.Tables.Single(t => string.Equals(t.Name, "TABLE_COLUMNS", StringComparison.OrdinalIgnoreCase));
             columnsTable.Columns.Single(c => c.Name == "column_role").Nullable.ShouldBeTrue();
         }
@@ -55,7 +57,7 @@ public sealed class MetricViewMigration0031Tests
             ("http_endpoint_json", typeof(string)), ("plugin_name", typeof(string)), ("description", typeof(string)),
             ("long_description", typeof(string)), ("doc_source", typeof(string)), ("required_filter_columns_json", typeof(string)),
             ("texts_json", typeof(string)), ("min_group_size", typeof(int)), ("non_personal", typeof(int)), ("dbt_unique_id", typeof(string)),
-            ("object_kind", typeof(string))
+            ("object_kind", typeof(string)), ("metric_view_count_measure", typeof(string))
         ];
         foreach (var (name, type) in columns) table.Columns.Add(name, type);
 
@@ -71,12 +73,15 @@ public sealed class MetricViewMigration0031Tests
         row["is_active"] = 1;
         row["data_source_type"] = 0;
         row["object_kind"] = "metric_view";
+        row["metric_view_count_measure"] = "row_count";
         table.Rows.Add(row);
 
         using var reader = table.CreateDataReader();
         reader.Read().ShouldBeTrue();
 
-        CatalogRowHydrator.ReadTableEntity(reader).ObjectKind.ShouldBe(DiscoveryObjectKind.MetricView);
+        var entity = CatalogRowHydrator.ReadTableEntity(reader);
+        entity.ObjectKind.ShouldBe(DiscoveryObjectKind.MetricView);
+        entity.MetricViewCountMeasure.ShouldBe("row_count");
     }
 
     private static string FindRepoRoot()

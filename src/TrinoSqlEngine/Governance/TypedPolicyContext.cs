@@ -152,7 +152,7 @@ public sealed class TypedPolicyContext
         // so the concatenation identifies the same state as the former digest of the serialized parts did.
         string maskPart = masks is null ? "-" : AstReflection.Fingerprint(masks);
         string perCellPart = PerCellColumns.GetPolicy(id)?.Fingerprint ?? "-";
-        return string.Concat(AstReflection.FingerprintMemoized(entry), applies ? "|1|" : "|0|", predicate, "|", maskPart, "|", perCellPart);
+        return string.Concat(AstReflection.FingerprintMemoized(entry), entry.IsMetricView ? "|mv1|" : "|mv0|", applies ? "1|" : "0|", predicate, "|", maskPart, "|", perCellPart);
     }
 
     /// <summary>
@@ -287,6 +287,7 @@ public sealed class TypedPolicyContext
         return new TableCoverageRequirement(id.ToString(), id.Schema, id.Table, root, tenant, masked, id.Catalog, columns,
             entry.TenantColumn, policyColumns,
             ColumnTypesOf(entry),
-            perCellCoverage);
+            perCellCoverage,
+            IsMetricView: entry.IsMetricView);
     }
 }

@@ -19,7 +19,7 @@ public static class CatalogDiscoveryProjection
             Domain: obj.Domain,
             Schema: obj.Schema,
             Table: obj.Name,
-            SourceType: obj.Kind.ToString().ToLowerInvariant(),
+            SourceType: obj.Kind.ToWireName(),
             Sensitivity: obj.Sensitivity,
             Description: obj.Description,
             IsActive: true,
@@ -45,7 +45,8 @@ public static class CatalogDiscoveryProjection
             IsPrimaryKey: primaryKeys.Contains(c.Name), IsPiiIndicator: c.Pii,
             DisplayName: obj.HiddenTextColumns.Contains(c.Name) ? null : (c.DisplayName ?? c.Name),
             Description: obj.HiddenTextColumns.Contains(c.Name) ? null : c.Description,
-            Classifications: c.Classifications, ClearRequestable: c.ClearRequestable)).ToList();
+            Classifications: c.Classifications, ClearRequestable: c.ClearRequestable,
+            Role: c.Role?.ToWireName())).ToList();
 
         return new CatalogDatasetDetail(
             DatasetId: $"{obj.Domain}.{obj.Schema}.{obj.Name}",
@@ -64,7 +65,8 @@ public static class CatalogDiscoveryProjection
             // Issue #390 contract: parallel to PrimaryKeys, null unless a column is descending.
             PrimaryKeyDirections: KeyDirections.AnyDescending(shape.PrimaryKeyDirections) ? KeyDirections.ToWire(shape.PrimaryKeyDirections) : null,
             RequiredFilterColumns: shape.RequiredFilterColumns.Count == 0 ? null : shape.RequiredFilterColumns,
-            RequiredFilterColumnGroups: shape.RequiredFilterColumnGroups.Count == 0 ? null : shape.RequiredFilterColumnGroups);
+            RequiredFilterColumnGroups: shape.RequiredFilterColumnGroups.Count == 0 ? null : shape.RequiredFilterColumnGroups,
+            Kind: obj.Kind.ToWireName());
     }
 
     public static CatalogSearchHit ToSearchHit(DiscoveryObject obj, string? effectiveMode, string? language) =>

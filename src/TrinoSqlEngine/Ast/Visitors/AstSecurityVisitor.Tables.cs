@@ -59,6 +59,10 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         var typed = _typed;
         var entry = typed.Catalog.Resolve(node.Name)
             ?? throw new SecurityException("A table reference could not be resolved against the catalog.");
+        if (entry.IsMetricView)
+        {
+            throw new SecurityException("A metric view may only be queried as a single top-level FROM source.");
+        }
         var tid = entry.Identity;
         var scope = CurrentScope;
         typed.RecordDependency(node.Name, entry);

@@ -37,7 +37,7 @@ public partial class GovernanceRepository
 
     internal static class CatalogSql
     {
-        public const string SelectTableEntitySql = @"SELECT id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json, min_group_size, non_personal, dbt_unique_id, object_kind
+        public const string SelectTableEntitySql = @"SELECT id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json, min_group_size, non_personal, dbt_unique_id, object_kind, metric_view_count_measure
 FROM TABLES
 WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)";
 
@@ -48,7 +48,7 @@ WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema
        data_source_type, http_endpoint_json, plugin_name,
        description, long_description, doc_source,
        required_filter_columns_json, texts_json,
-       min_group_size, non_personal, dbt_unique_id, object_kind
+       min_group_size, non_personal, dbt_unique_id, object_kind, metric_view_count_measure
 FROM TABLES
 WHERE is_active = 1";
 
@@ -57,7 +57,7 @@ WHERE is_active = 1";
        data_source_type, http_endpoint_json, plugin_name,
        description, long_description, doc_source,
        required_filter_columns_json, texts_json,
-       min_group_size, non_personal, dbt_unique_id, object_kind
+       min_group_size, non_personal, dbt_unique_id, object_kind, metric_view_count_measure
 FROM TABLES
 WHERE ";
 
@@ -66,7 +66,7 @@ WHERE ";
        data_source_type, http_endpoint_json, plugin_name,
        description, long_description, doc_source,
        required_filter_columns_json, texts_json,
-       min_group_size, non_personal, dbt_unique_id, object_kind
+       min_group_size, non_personal, dbt_unique_id, object_kind, metric_view_count_measure
 FROM TABLES WITH (UPDLOCK, ROWLOCK)
 WHERE ";
 
@@ -124,8 +124,8 @@ INNER JOIN TABLES t ON c.table_id = t.id
 WHERE t.is_active = 1
 ORDER BY c.table_id, c.ordinal, c.column_name";
 
-        public const string UpsertTableSqlPg = @"INSERT INTO TABLES (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json, min_group_size, non_personal, dbt_unique_id, object_kind)
-VALUES (@id, @sourceType, @domain, @schema, @tableName, @displayName, @sensitivity, @fourEyes, @active, @dst, @httpJson, @plugin, @desc, @longDesc, @docSource, @requiredFilterColumnsJson, @textsJson, @minGroupSize, @nonPersonal, @dbtUniqueId, @objectKind)
+        public const string UpsertTableSqlPg = @"INSERT INTO TABLES (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json, min_group_size, non_personal, dbt_unique_id, object_kind, metric_view_count_measure)
+VALUES (@id, @sourceType, @domain, @schema, @tableName, @displayName, @sensitivity, @fourEyes, @active, @dst, @httpJson, @plugin, @desc, @longDesc, @docSource, @requiredFilterColumnsJson, @textsJson, @minGroupSize, @nonPersonal, @dbtUniqueId, @objectKind, @metricViewCountMeasure)
 ON CONFLICT (id) DO UPDATE SET
     source_type = EXCLUDED.source_type,
     source_name = EXCLUDED.source_name,
@@ -145,7 +145,7 @@ ON CONFLICT (id) DO UPDATE SET
     texts_json = EXCLUDED.texts_json,
     min_group_size = EXCLUDED.min_group_size,
     non_personal = EXCLUDED.non_personal,
-    dbt_unique_id = COALESCE(EXCLUDED.dbt_unique_id, TABLES.dbt_unique_id), object_kind = EXCLUDED.object_kind";
+    dbt_unique_id = COALESCE(EXCLUDED.dbt_unique_id, TABLES.dbt_unique_id), object_kind = EXCLUDED.object_kind, metric_view_count_measure = EXCLUDED.metric_view_count_measure";
 
         public const string UpsertTableSqlSs = @"MERGE dbo.TABLES WITH (HOLDLOCK) AS t
 USING (SELECT @id AS id) AS s
@@ -169,9 +169,9 @@ WHEN MATCHED THEN UPDATE SET
     texts_json = @textsJson,
     min_group_size = @minGroupSize,
     non_personal = @nonPersonal,
-    dbt_unique_id = COALESCE(@dbtUniqueId, t.dbt_unique_id), object_kind = @objectKind
-WHEN NOT MATCHED THEN INSERT (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json, min_group_size, non_personal, dbt_unique_id, object_kind)
-    VALUES (@id, @sourceType, @domain, @schema, @tableName, @displayName, @sensitivity, @fourEyes, @active, @dst, @httpJson, @plugin, @desc, @longDesc, @docSource, @requiredFilterColumnsJson, @textsJson, @minGroupSize, @nonPersonal, @dbtUniqueId, @objectKind);";
+    dbt_unique_id = COALESCE(@dbtUniqueId, t.dbt_unique_id), object_kind = @objectKind, metric_view_count_measure = @metricViewCountMeasure
+WHEN NOT MATCHED THEN INSERT (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json, min_group_size, non_personal, dbt_unique_id, object_kind, metric_view_count_measure)
+    VALUES (@id, @sourceType, @domain, @schema, @tableName, @displayName, @sensitivity, @fourEyes, @active, @dst, @httpJson, @plugin, @desc, @longDesc, @docSource, @requiredFilterColumnsJson, @textsJson, @minGroupSize, @nonPersonal, @dbtUniqueId, @objectKind, @metricViewCountMeasure);";
 
         public const string InsertColumnSqlPg = @"INSERT INTO TABLE_COLUMNS (id, table_id, column_name, data_type, description, long_description, doc_source, meta_json, display_name, texts_json, ""collation"", length_semantics, column_role, ordinal)
 VALUES (@id, @tableId, @columnName, @dataType, @description, @longDescription, @docSource, @metaJson, @displayName, @textsJson, @collation, @lengthSemantics, @columnRole,

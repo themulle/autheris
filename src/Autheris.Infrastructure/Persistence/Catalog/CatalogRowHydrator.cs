@@ -81,7 +81,8 @@ internal static partial class CatalogRowHydrator
             MinGroupSize = minGroupSize,
             NonPersonal = nonPersonal,
             DbtUniqueId = reader.FieldCount > o + 19 && !reader.IsDBNull(o + 19) ? reader.GetString(o + 19) : null,
-            ObjectKind = ParseObjectKind(reader, o + 20)
+            ObjectKind = ParseObjectKind(reader, o + 20),
+            MetricViewCountMeasure = reader.FieldCount > o + 21 && !reader.IsDBNull(o + 21) ? reader.GetString(o + 21) : null
         };
     }
 
@@ -673,7 +674,9 @@ internal static partial class CatalogRowHydrator
             !string.Equals(existing.Sensitivity, incoming.Sensitivity, StringComparison.OrdinalIgnoreCase) ||
             existing.RequiresFourEyes != incoming.RequiresFourEyes ||
             existing.IsActive != incoming.IsActive ||
-            existing.DataSourceType != incoming.DataSourceType;
+            existing.DataSourceType != incoming.DataSourceType ||
+            existing.ObjectKind != incoming.ObjectKind ||
+            !string.Equals(existing.MetricViewCountMeasure, incoming.MetricViewCountMeasure, StringComparison.Ordinal);
 
         var canOverwriteDesc = !string.IsNullOrWhiteSpace(incoming.Description) &&
                                (string.IsNullOrWhiteSpace(existing.Description) || ShouldOverwriteDocumentation(precedence, existing.DocumentationSource, incoming.DocumentationSource));

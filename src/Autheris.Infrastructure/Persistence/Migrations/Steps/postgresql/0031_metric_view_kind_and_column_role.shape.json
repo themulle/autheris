@@ -1,5 +1,6 @@
 {
   "ops": [
+    { "op": "addColumn", "table": "tables", "column": { "name": "metric_view_count_measure", "type": "CHARACTER VARYING(128)", "family": "string", "nullable": true } },
     { "op": "addColumn", "table": "table_columns", "column": { "name": "column_role", "type": "CHARACTER VARYING(16)", "family": "string", "nullable": true } }
   ]
 }

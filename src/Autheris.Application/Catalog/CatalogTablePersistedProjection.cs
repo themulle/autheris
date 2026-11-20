@@ -52,7 +52,7 @@ public sealed class CatalogTablePersistedProjection
         "Table.SourceType", "Table.SourceName", "Table.SchemaName", "Table.TableName", "Table.DisplayName", "Table.Description",
         "Table.LongDescription", "Table.Texts", "Table.DocumentationSource", "Table.Sensitivity", "Table.RequiresFourEyes", "Table.IsActive",
         "Table.DataSourceType", "Table.HttpEndpoint", "Table.PluginName", "Table.MinGroupSize", "Table.NonPersonal", "Table.RequiredFilterColumns",
-        "Table.DbtUniqueId", "Table.ObjectKind",
+        "Table.DbtUniqueId", "Table.ObjectKind", "Table.MetricViewCountMeasure",
         "TableColumn.ColumnName", "TableColumn.DisplayName", "TableColumn.DataType", "TableColumn.Collation", "TableColumn.LengthSemantics",
         "TableColumn.Role",
         "TableColumn.Description", "TableColumn.LongDescription", "TableColumn.Texts", "TableColumn.DocumentationSource",
@@ -79,6 +79,7 @@ public sealed class CatalogTablePersistedProjection
         ["TABLES.doc_source"] = "table.doc_source", ["TABLES.required_filter_columns_json"] = "table.required_filter_columns",
         ["TABLES.texts_json"] = "table.texts", ["TABLES.min_group_size"] = "table.min_group_size", ["TABLES.non_personal"] = "table.non_personal",
         ["TABLES.dbt_unique_id"] = "table.dbt_unique_id", ["TABLES.object_kind"] = "table.object_kind",
+        ["TABLES.metric_view_count_measure"] = "table.metric_view_count_measure",
         ["TABLE_COLUMNS.id"] = "(surrogate id)", ["TABLE_COLUMNS.table_id"] = "(foreign key)", ["TABLE_COLUMNS.column_name"] = "column[name]",
         ["TABLE_COLUMNS.data_type"] = "column.data_type",
         ["TABLE_COLUMNS.description"] = "column.description", ["TABLE_COLUMNS.long_description"] = "column.long_description",
@@ -138,6 +139,7 @@ public sealed class CatalogTablePersistedProjection
             DiscoveryObjectKind.Procedure => "procedure",
             _ => throw new ArgumentOutOfRangeException(nameof(metadata), table.ObjectKind, "Unknown DiscoveryObjectKind.")
         };
+        values["table.metric_view_count_measure"] = table.MetricViewCountMeasure;
         values["table.required_filter_columns"] = table.RequiredFilterColumns.IsDefault
             ? string.Empty
             : string.Join(ListSeparator, table.RequiredFilterColumns);
@@ -429,7 +431,7 @@ public sealed class CatalogTablePersistedProjection
             ["MaskingRule.Id"] = surrogate, ["MaskingRule.TableColumnId"] = surrogate,
             ["Table.EnforcementMode"] = notWritten, ["Table.PhysicalDatabaseName"] = notWritten, ["Table.Location"] = notWritten,
             ["Table.RlsExpression"] = notWritten, ["Table.SmallGroupStrategy"] = notWritten, ["Table.RequiredFilterColumnGroups"] = notWritten,
-            ["Table.ExpectedRows"] = notWritten, ["Table.MetricViewCountMeasure"] = notWritten, ["Table.Tags"] = overlay,
+            ["Table.ExpectedRows"] = notWritten, ["Table.Tags"] = overlay,
             ["Table.DiscoveryHidden"] = overlay, ["Table.SamplesDisabled"] = overlay,
             ["Table.IsDelegatedSource"] = derived, ["Table.IsHighlySensitive"] = derived, ["Table.Dialect"] = derived,
             ["TableColumn.Name"] = derived, ["TableColumn.Semantics"] = derived, ["TableColumn.WriteProtected"] = notWritten,
