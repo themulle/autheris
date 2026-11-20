@@ -1,6 +1,7 @@
 # WP-SIMPL-06 / WP-SIMPL-12: deleted options from src. Format: Namespace.Type.Property.
 Autheris.Domain.Model.EnvoyFilterExportOptions.PathPrefixes
 Autheris.Domain.Model.OpenApiDocumentOptions.IncludeGovernanceMetadata
+Autheris.Domain.Options.AggregationOptions.Enabled
 Autheris.Domain.Options.AlationOptions.AllowPlaintextApiTokenInDevelopment
 Autheris.Domain.Options.AlationOptions.ApiToken
 Autheris.Domain.Options.AlationOptions.BaseUrl
@@ -31,6 +32,7 @@ Autheris.Domain.Options.DatabricksOboOptions.AllowLongRunning
 Autheris.Domain.Options.ExtensibilityOptions.BreakGlassAllowedRoles
 Autheris.Domain.Options.ExtensibilityOptions.BreakGlassHeaderName
 Autheris.Domain.Options.ExtensibilityOptions.EnableBreakGlass
+Autheris.Domain.Options.ExtensibilityOptions.Enabled
 Autheris.Domain.Options.ExtensibilityOptions.JustificationHeaderName
 Autheris.Domain.Options.ExtensibilityOptions.RequireJustificationForBreakGlass
 Autheris.Domain.Options.ExtensibilityOptions.RequireRoleForBreakGlass
@@ -40,8 +42,11 @@ Autheris.Domain.Options.FinOpsOptions.ScopeMonthlyBudgets
 Autheris.Domain.Options.GarnetOptions.DisableConsole
 Autheris.Domain.Options.GatewayOptions.Backstage
 Autheris.Domain.Options.GatewayOptions.CustomQueryPoller
+Autheris.Domain.Options.GatewayOptions.Extensibility
 Autheris.Domain.Options.GatewayOptions.Itsm
 Autheris.Domain.Options.GovernanceDbOptions.EnableOutboxProcessor
+Autheris.Domain.Options.GovernanceOptions.QueryAnalysis
+Autheris.Domain.Options.GovernanceQueryAnalysisOptions.Enabled
 Autheris.Domain.Options.HitLStepUpOptions.AutoCreateItsmTicket
 Autheris.Domain.Options.HitLStepUpOptions.PreferredItsmSystem
 Autheris.Domain.Options.IndividualGrantOptions.BreakGlassMaxHours
@@ -75,3 +80,4 @@ Autheris.Domain.Options.QueryCostOptions.NestedDepthFactor
 Autheris.Domain.Options.RebacOptions.OpenFgaApiUrl
 Autheris.Domain.Options.RebacOptions.OpenFgaStoreId
 Autheris.Domain.Options.TableCache.TableCacheTargetOptions.CronExpression
+Autheris.Domain.Options.WebhooksOptions.Enabled

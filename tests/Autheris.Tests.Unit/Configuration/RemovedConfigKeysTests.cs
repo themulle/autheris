@@ -73,6 +73,18 @@ public sealed class RemovedConfigKeysTests
     [InlineData("Gateway:CatalogSearch:Enabled", "true")]
     [InlineData("Gateway:CatalogSearch:Enabled", "false")]
     [InlineData("Gateway:CatalogSearch:Enabled", "")]
+    [InlineData("Gateway:Extensibility:Enabled", "true")]
+    [InlineData("Gateway:Extensibility:Enabled", "false")]
+    [InlineData("Gateway:Extensibility:Enabled", "")]
+    [InlineData("Gateway:Governance:QueryAnalysis:Enabled", "true")]
+    [InlineData("Gateway:Governance:QueryAnalysis:Enabled", "false")]
+    [InlineData("Gateway:Governance:QueryAnalysis:Enabled", "")]
+    [InlineData("Gateway:Webhooks:Enabled", "true")]
+    [InlineData("Gateway:Webhooks:Enabled", "false")]
+    [InlineData("Gateway:Webhooks:Enabled", "")]
+    [InlineData("Analytics:Aggregation:Enabled", "true")]
+    [InlineData("Analytics:Aggregation:Enabled", "false")]
+    [InlineData("Analytics:Aggregation:Enabled", "")]
     public void Every_removed_key_fails_startup(string key, string value)
     {
         var configuration = Config(key, value);
@@ -268,5 +280,36 @@ public sealed class RemovedConfigKeysTests
         var configuration = Config("Gateway:CatalogSearch:Enabled", value);
         var ex = Should.Throw<InvalidOperationException>(() => UnknownGatewayKeyGuard.ThrowIfUnknownKeys(configuration));
         ex.Message.ShouldContain("CatalogSearch:Enabled (removed;");
+    }
+
+    [Theory]
+    [InlineData("Gateway:Extensibility:Enabled", "true", "Extensibility:Enabled (removed;")]
+    [InlineData("Gateway:Extensibility:Enabled", "false", "Extensibility:Enabled (removed;")]
+    [InlineData("Gateway:Extensibility:Enabled", "", "Extensibility:Enabled (removed;")]
+    [InlineData("Gateway:Governance:QueryAnalysis:Enabled", "true", "Governance:QueryAnalysis:Enabled (removed;")]
+    [InlineData("Gateway:Governance:QueryAnalysis:Enabled", "false", "Governance:QueryAnalysis:Enabled (removed;")]
+    [InlineData("Gateway:Governance:QueryAnalysis:Enabled", "", "Governance:QueryAnalysis:Enabled (removed;")]
+    [InlineData("Gateway:Webhooks:Enabled", "true", "Webhooks:Enabled (removed;")]
+    [InlineData("Gateway:Webhooks:Enabled", "false", "Webhooks:Enabled (removed;")]
+    [InlineData("Gateway:Webhooks:Enabled", "", "Webhooks:Enabled (removed;")]
+    public void Removed_governance_audit_switches_fail_with_replacement_message_for_any_value(string key, string value, string expectedMessage)
+    {
+        var configuration = Config(key, value);
+        var ex = Should.Throw<InvalidOperationException>(() => UnknownGatewayKeyGuard.ThrowIfUnknownKeys(configuration));
+        ex.Message.ShouldContain(expectedMessage);
+    }
+
+    [Theory]
+    [InlineData("Analytics:Aggregation:Enabled", "true")]
+    [InlineData("Analytics:Aggregation:Enabled", "false")]
+    [InlineData("Analytics:Aggregation:Enabled", "")]
+    [InlineData("Gateway:Analytics:Aggregation:Enabled", "true")]
+    [InlineData("Gateway:Analytics:Aggregation:Enabled", "false")]
+    [InlineData("Gateway:Analytics:Aggregation:Enabled", "")]
+    public void Removed_catalog_aggregation_switch_fails_with_replacement_message_for_any_value(string key, string value)
+    {
+        var configuration = Config(key, value);
+        var ex = Should.Throw<InvalidOperationException>(() => UnknownGatewayKeyGuard.ThrowIfUnknownKeys(configuration));
+        ex.Message.ShouldContain("Analytics:Aggregation:Enabled (removed;");
     }
 }

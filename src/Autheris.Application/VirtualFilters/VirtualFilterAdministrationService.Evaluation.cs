@@ -13,6 +13,12 @@ public sealed partial class VirtualFilterAdministrationService
     private async Task<VirtualFilter> ValidateDefinitionAsync(VirtualFilter filter, CancellationToken ct)
     {
         filter.Validate();
+        if (filter.KeySetMaxKeys is { } maxKeys && maxKeys > _federation.MaxAuthorizedKeys)
+        {
+            throw new ArgumentException(
+                $"key_set_max_keys ({maxKeys}) cannot exceed MaxAuthorizedKeys ({_federation.MaxAuthorizedKeys}).",
+                nameof(filter));
+        }
         RowPolicyParameterBinder.ValidateFilterDeclarations(filter);
         if (filter.Sql == null && filter.Structured == null)
         {

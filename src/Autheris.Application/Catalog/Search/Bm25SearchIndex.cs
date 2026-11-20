@@ -94,8 +94,9 @@ public sealed class Bm25SearchIndex
     // Distinct indexed tokens ordered by (length, ordinal): partial matches prefer the tokens closest to the whole word.
     // The table-level vocabulary excludes tokens that occur only in column fields, so a caller with hidden columns
     // never gets an expansion (or a cap slot) taken by hidden column text.
-    private readonly string[] _vocabulary;
-    private readonly string[] _tableLevelVocabulary;
+    // Computed lazily on first unrestricted search so ApplyDelta stays O(changed tables).
+    private string[]? _vocabulary;
+    private string[]? _tableLevelVocabulary;
 
     /// <summary>Single-field convenience: the whole text is indexed as the short description.</summary>
     public Bm25SearchIndex(IEnumerable<(TableIdentifier TableId, string Content)> source)
@@ -157,8 +158,6 @@ public sealed class Bm25SearchIndex
         _tableLevelTermCountDeltas = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         _activeDocCount = baseTableToIndex.Count;
         _totalFieldLengths = totalFieldLengths;
-        _vocabulary = BuildVocabulary(termDocCounts);
-        _tableLevelVocabulary = BuildVocabulary(tableLevelTermCounts);
     }
 
     private Bm25SearchIndex(
@@ -185,8 +184,30 @@ public sealed class Bm25SearchIndex
         _activeDocCount = activeDocCount;
         _totalFieldLengths = totalFieldLengths;
         _weights = weights;
-        _vocabulary = BuildVocabulary(baseTermDocCounts, termDocCountDeltas);
-        _tableLevelVocabulary = BuildVocabulary(baseTableLevelTermCounts, tableLevelTermCountDeltas);
+    }
+
+    private string[] GetVocabulary()
+    {
+        var cached = Volatile.Read(ref _vocabulary);
+        if (cached is not null)
+        {
+            return cached;
+        }
+
+        var built = BuildVocabulary(_baseTermDocCounts, _termDocCountDeltas);
+        return Interlocked.CompareExchange(ref _vocabulary, built, null) ?? built;
+    }
+
+    private string[] GetTableLevelVocabulary()
+    {
+        var cached = Volatile.Read(ref _tableLevelVocabulary);
+        if (cached is not null)
+        {
+            return cached;
+        }
+
+        var built = BuildVocabulary(_baseTableLevelTermCounts, _tableLevelTermCountDeltas);
+        return Interlocked.CompareExchange(ref _tableLevelVocabulary, built, null) ?? built;
     }
 
     public int ActiveDocumentCount => _activeDocCount;
@@ -535,8 +556,8 @@ public sealed class Bm25SearchIndex
             }
 
             int GlobalDf(string t) => _baseTermDocCounts.GetValueOrDefault(t) + _termDocCountDeltas.GetValueOrDefault(t);
-            fullStats = new CorpusStats(visible.Count, GlobalDf, _vocabulary);
-            tableLevelStats = new CorpusStats(visible.Count, GlobalDf, _tableLevelVocabulary);
+            fullStats = new CorpusStats(visible.Count, GlobalDf, GetVocabulary());
+            tableLevelStats = new CorpusStats(visible.Count, GlobalDf, GetTableLevelVocabulary());
         }
         else
         {

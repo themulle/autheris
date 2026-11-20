@@ -44,25 +44,6 @@ public sealed class WebhookEventBridgeHostedServiceTests
     }
 
     [Fact]
-    public async Task Idles_when_webhooks_disabled()
-    {
-        var bus = new InMemoryGatewayEventBus(NullLogger<InMemoryGatewayEventBus>.Instance);
-        var dispatcher = Substitute.For<IWebhookDispatcherService>();
-        var options = Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions
-        {
-            Webhooks = new Autheris.Domain.Options.WebhooksOptions { Enabled = false }
-        });
-        var bridge = new WebhookEventBridgeHostedService(bus, dispatcher, NullLogger<WebhookEventBridgeHostedService>.Instance, options);
-        await bridge.StartAsync(CancellationToken.None);
-
-        await bus.PublishAsync(NewEvent("ev-idle"));
-        await bus.DrainAsync();
-
-        await dispatcher.DidNotReceiveWithAnyArgs().DispatchEventAsync(default!, default);
-        await bridge.StopAsync(CancellationToken.None);
-    }
-
-    [Fact]
     public async Task Publish_DispatcherFailure_IsContainedAndLoggedWithoutMessage()
     {
         var bus = new InMemoryGatewayEventBus(NullLogger<InMemoryGatewayEventBus>.Instance);

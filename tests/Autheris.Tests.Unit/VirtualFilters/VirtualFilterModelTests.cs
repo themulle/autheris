@@ -175,4 +175,34 @@ public sealed class VirtualFilterModelTests
         // D-9: the key columns are the filter's; a second, unvalidated list on the binding must not exist.
         typeof(FilterBinding).GetProperty("CompositeKeys").ShouldBeNull();
     }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void KeySetMaxKeys_MustBeAtLeastOne(int maxKeys)
+    {
+        var filter = DavidFilter() with { EvaluationMode = RowPolicyEvaluationMode.KeySet, KeySetMaxKeys = maxKeys };
+        Should.Throw<ArgumentException>(() => filter.Validate());
+    }
+
+    [Fact]
+    public void KeySetMaxKeys_IsOnlyValidInKeySetMode()
+    {
+        var live = DavidFilter() with { EvaluationMode = RowPolicyEvaluationMode.Live, KeySetMaxKeys = 100 };
+        Should.Throw<ArgumentException>(() => live.Validate());
+
+        var keySet = DavidFilter() with { EvaluationMode = RowPolicyEvaluationMode.KeySet, KeySetMaxKeys = 100 };
+        Should.NotThrow(() => keySet.Validate());
+    }
+
+    [Fact]
+    public void DefinitionHash_ChangesWithKeySetMaxKeys()
+    {
+        var baseKeySet = DavidFilter() with { EvaluationMode = RowPolicyEvaluationMode.KeySet };
+        var with100 = baseKeySet with { KeySetMaxKeys = 100 };
+        var with200 = baseKeySet with { KeySetMaxKeys = 200 };
+
+        with100.ComputeDefinitionHash().ShouldNotBe(baseKeySet.ComputeDefinitionHash());
+        with200.ComputeDefinitionHash().ShouldNotBe(with100.ComputeDefinitionHash());
+    }
 }

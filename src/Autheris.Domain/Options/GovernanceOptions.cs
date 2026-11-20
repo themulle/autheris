@@ -8,11 +8,6 @@ public sealed class GovernanceOptions
     public const string SectionName = "Gateway:Governance";
 
     /// <summary>
-    /// Configuration for static query analysis (<c>Gateway:Governance:QueryAnalysis</c>).
-    /// </summary>
-    public GovernanceQueryAnalysisOptions QueryAnalysis { get; init; } = new();
-
-    /// <summary>
     /// Configuration for the external consent REST API (<c>Gateway:Governance:ExternalApi</c>).
     /// </summary>
     public ExternalApiSettings ExternalApi { get; init; } = new();
@@ -50,18 +45,4 @@ public sealed class ExternalApiRateLimitSettings
     /// Maximum cryptographic grant-proof inspection requests per minute allowed per authenticated principal SID.
     /// </summary>
     public int ProofPerMinute { get; init; } = 120;
-}
-
-/// <summary>
-/// Issue #240: Switches and configuration for the query analysis endpoint (<c>Gateway:Governance:QueryAnalysis</c>).
-/// </summary>
-public sealed class GovernanceQueryAnalysisOptions
-{
-    public const string SectionName = "Gateway:Governance:QueryAnalysis";
-
-    /// <summary>
-    /// When true (default), the <c>POST /api/v1/governance/queries/analyze</c> endpoint is mapped and operational.
-    /// When false, the endpoint is not mapped, returning HTTP 404 Not Found.
-    /// </summary>
-    public bool Enabled { get; init; } = true;
 }

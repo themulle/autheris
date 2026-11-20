@@ -18,17 +18,27 @@ public sealed class CatalogSearchOptions
     public CatalogEmbeddingProvider EmbeddingProvider { get; set; } = CatalogEmbeddingProvider.None;
 
     // LocalOnnx Settings
+    /// <summary>Filesystem path to the local ONNX embedding model file.</summary>
     public string? ModelPath { get; set; }
+
+    /// <summary>Filesystem path to the tokenizer vocabulary/config file for the local ONNX model.</summary>
     public string? TokenizerPath { get; set; }
+
+    /// <summary>Expected hex-encoded SHA-256 digest used to verify the local ONNX model file.</summary>
     public string? ModelSha256 { get; set; }
 
     // Ollama Settings
     /// <summary>Ollama base URL. Loopback addresses are refused; private hosts need <c>Gateway:Egress</c> trusted hosts or networks plus <c>CatalogEmbeddings</c> in <c>TrustedIntegrations</c>.</summary>
     public string? OllamaEndpoint { get; set; }
+
+    /// <summary>Name of the Ollama embedding model to invoke.</summary>
     public string? OllamaModelName { get; set; }
+
+    /// <summary>When true, permits plain HTTP connections to the configured Ollama endpoint (development/testing only).</summary>
     public bool OllamaInsecureAllowHttp { get; set; } = false;
 
     // Ranking & Search Settings
+    /// <summary>Minimum interval in seconds between incremental catalog search index refreshes.</summary>
     public int RefreshSeconds { get; set; } = 15;
 
     /// <summary>RRF-Glättungskonstante k (Standard: 60 gemäß Cormack et al.).</summary>

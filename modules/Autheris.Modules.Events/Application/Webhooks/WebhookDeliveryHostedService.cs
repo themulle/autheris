@@ -73,14 +73,6 @@ public sealed class WebhookDeliveryHostedService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // The module registers this worker unconditionally (it cannot see Gateway:Webhooks while registering), so it reads both
-        // feature flags at run time and stays idle while neither configured webhooks nor CDC webhooks are enabled.
-        if (!Webhooks.Enabled && _cdcWebhooks?.Value.Enabled != true)
-        {
-            _logger.LogDebug("Webhook delivery worker idle: Gateway:Webhooks and Gateway:Events:CdcWebhooks are disabled.");
-            return;
-        }
-
         var workers = Webhooks.EffectiveDeliveryWorkers;
         var node = $"{Environment.MachineName}:{Guid.NewGuid():N}";
         var tasks = new Task[workers];
