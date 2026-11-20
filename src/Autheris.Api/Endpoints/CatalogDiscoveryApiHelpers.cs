@@ -104,13 +104,13 @@ internal static class CatalogDiscoveryApiHelpers
         try
         {
             var context = createContext(httpContext, null);
-            var datasets = await discoveryService.ListDatasetsAsync(context, ct).ConfigureAwait(false);
-            var domains = datasets
-                .GroupBy(d => d.Domain, StringComparer.OrdinalIgnoreCase)
-                .Select(g => new { domain = g.Key, tableCount = g.Count() })
-                .OrderByDescending(d => d.tableCount)
+            var facets = await discoveryService.ListFacetsAsync(context, ct).ConfigureAwait(false);
+            var domains = facets.Domains
+                .Select(static d => new { domain = d.Domain, tableCount = d.Count })
+                .OrderByDescending(static d => d.tableCount)
+                .ThenBy(static d => d.domain, StringComparer.OrdinalIgnoreCase)
                 .ToList();
-            return Results.Ok(new { totalTables = datasets.Count, totalDomains = domains.Count, domains });
+            return Results.Ok(new { totalTables = facets.TotalCount, totalDomains = domains.Count, domains });
         }
         catch (DiscoveryStatusException ex)
         {

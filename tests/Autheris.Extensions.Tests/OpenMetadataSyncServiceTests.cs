@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Catalog.OpenMetadata;
+using Autheris.Application.State;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -303,11 +304,12 @@ public sealed class OpenMetadataSyncServiceTests
             _consentRepo,
             _epochRepo,
             Options.Create(options),
-            NullLogger<OpenMetadataSyncService>.Instance);
+            NullLogger<OpenMetadataSyncService>.Instance,
+            clusterState: new InMemoryClusterStateProvider());
 
-        var success = await syncService.HandleWebhookEventAsync(payload, $"sha256={hash}");
+        var outcome = await syncService.HandleWebhookEventAsync(payload, $"sha256={hash}");
 
-        success.ShouldBeTrue();
+        outcome.ShouldBe(OpenMetadataWebhookOutcome.Processed);
         _metadataRepo.UpsertedTables.ShouldContain(t => t.Identifier.TableName == "products");
         _epochRepo.IncrementCalls.ShouldBe(1);
     }
@@ -327,12 +329,13 @@ public sealed class OpenMetadataSyncServiceTests
             _consentRepo,
             _epochRepo,
             Options.Create(options),
-            NullLogger<OpenMetadataSyncService>.Instance);
+            NullLogger<OpenMetadataSyncService>.Instance,
+            clusterState: new InMemoryClusterStateProvider());
 
-        var success = await syncService.HandleWebhookEventAsync(payload, $"sha256={hash}");
+        var outcome = await syncService.HandleWebhookEventAsync(payload, $"sha256={hash}");
 
         // Stale timestamp outside 5-minute replay window must be rejected
-        success.ShouldBeFalse();
+        outcome.ShouldBe(OpenMetadataWebhookOutcome.Rejected);
         _metadataRepo.UpsertCalls.ShouldBe(0);
     }
 
@@ -361,16 +364,17 @@ public sealed class OpenMetadataSyncServiceTests
             _consentRepo,
             _epochRepo,
             Options.Create(options),
-            NullLogger<OpenMetadataSyncService>.Instance);
+            NullLogger<OpenMetadataSyncService>.Instance,
+            clusterState: new InMemoryClusterStateProvider());
 
         // First delivery: processes successfully
         var firstResult = await syncService.HandleWebhookEventAsync(payload, $"sha256={hash}");
-        firstResult.ShouldBeTrue();
+        firstResult.ShouldBe(OpenMetadataWebhookOutcome.Processed);
         var callsAfterFirst = _metadataRepo.UpsertCalls;
 
         // Duplicate delivery with same event ID: rejected (replay protection) without re-invoking repo
         var duplicateResult = await syncService.HandleWebhookEventAsync(payload, $"sha256={hash}");
-        duplicateResult.ShouldBeFalse();
+        duplicateResult.ShouldBe(OpenMetadataWebhookOutcome.Rejected);
         _metadataRepo.UpsertCalls.ShouldBe(callsAfterFirst);
     }
 
@@ -473,9 +477,10 @@ public sealed class OpenMetadataSyncServiceTests
             _consentRepo,
             _epochRepo,
             Options.Create(options),
-            NullLogger<OpenMetadataSyncService>.Instance);
+            NullLogger<OpenMetadataSyncService>.Instance,
+            clusterState: new InMemoryClusterStateProvider());
 
         var result = await syncService.HandleWebhookEventAsync("{}", "bypassed", CancellationToken.None);
-        result.ShouldBeFalse();
+        result.ShouldBe(OpenMetadataWebhookOutcome.Rejected);
     }
 }

@@ -29,7 +29,7 @@ internal static class GovernanceStoreFactory
     internal static string GrantSigningKeyPem => TestGrantSigningKeyPem.Value;
 
     internal static IGrantWriter CreateGrantWriter(IGovernanceSqlDialect dialect) =>
-        new GrantWriter(new GrantRecordSqlCore(dialect), TestGrantSigner.Value);
+        new GrantWriter(new GovernanceRepository.GrantRecordStore(dialect), TestGrantSigner.Value);
 
     public static PostgreSqlGovernanceRepository CreatePostgreSql(
         IEpochValidationService epochValidationService,

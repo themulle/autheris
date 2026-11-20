@@ -1,15 +1,20 @@
 using System.Data.Common;
+using System.Globalization;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using static Autheris.Infrastructure.Persistence.Migrations.Shape.SchemaCatalogReaderSupport;
 
 namespace Autheris.Infrastructure.Persistence.Migrations.Shape;
 
 /// <summary>SQL Server catalog reader on <c>sys.tables</c>, <c>sys.columns</c> and <c>sys.indexes</c>; the schema is <c>dbo</c>. Names are bound parameters.</summary>
-internal sealed class SqlServerSchemaCatalogReader : IGovernanceSchemaCatalogReader
+internal sealed class SqlServerSchemaCatalogReader(ILogger? logger = null) : IGovernanceSchemaCatalogReader
 {
+    private readonly ILogger _logger = logger ?? NullLogger.Instance;
+
     public async Task<IReadOnlyList<string>> ListTablesAsync(DbConnection connection, CancellationToken ct, DbTransaction? transaction = null)
     {
         var session = new CatalogSession(connection, transaction);
-        var rows = await RowsAsync(
+        var rows = await ReadWithRetryAsync(
             session,
             "SELECT t.name FROM sys.tables t WHERE t.schema_id = SCHEMA_ID(N'dbo') AND LOWER(t.name) <> @migrations ORDER BY t.name",
             1,
@@ -24,7 +29,7 @@ internal sealed class SqlServerSchemaCatalogReader : IGovernanceSchemaCatalogRea
         var tables = new List<SchemaTable>();
         foreach (var requested in tableNames)
         {
-            var exists = await RowsAsync(
+            var exists = await ReadWithRetryAsync(
                 session,
                 "SELECT t.name, t.object_id FROM sys.tables t WHERE t.schema_id = SCHEMA_ID(N'dbo') AND t.name = @n",
                 2,
@@ -36,9 +41,9 @@ internal sealed class SqlServerSchemaCatalogReader : IGovernanceSchemaCatalogRea
             }
 
             var name = Str(exists[0][0]);
-            var objectId = Convert.ToInt32(exists[0][1], System.Globalization.CultureInfo.InvariantCulture);
+            var objectId = Convert.ToInt32(exists[0][1], CultureInfo.InvariantCulture);
 
-            var columnRows = await RowsAsync(
+            var columnRows = await ReadWithRetryAsync(
                 session,
                 "SELECT c.name, TYPE_NAME(c.system_type_id), c.is_nullable FROM sys.columns c WHERE c.object_id = @o ORDER BY c.column_id",
                 3,
@@ -46,7 +51,7 @@ internal sealed class SqlServerSchemaCatalogReader : IGovernanceSchemaCatalogRea
                 ("@o", objectId)).ConfigureAwait(false);
             var columns = columnRows.Select(r => new SchemaColumn(Str(r[0]), Str(r[1]).ToUpperInvariant(), Family(Str(r[1])), Bool(r[2]))).ToArray();
 
-            var keyRows = await RowsAsync(
+            var keyRows = await ReadWithRetryAsync(
                 session,
                 "SELECT c.name FROM sys.indexes i JOIN sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id " +
                 "JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id " +
@@ -55,7 +60,7 @@ internal sealed class SqlServerSchemaCatalogReader : IGovernanceSchemaCatalogRea
                 ct,
                 ("@o", objectId)).ConfigureAwait(false);
 
-            var indexRows = await RowsAsync(
+            var indexRows = await ReadWithRetryAsync(
                 session,
                 "SELECT i.name, i.is_unique, c.name, ic.key_ordinal FROM sys.indexes i JOIN sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id " +
                 "JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id " +
@@ -73,6 +78,38 @@ internal sealed class SqlServerSchemaCatalogReader : IGovernanceSchemaCatalogRea
         }
 
         return new GovernanceSchemaShape("sqlserver", tables);
+    }
+
+    private Task<List<object?[]>> ReadWithRetryAsync(
+        CatalogSession session,
+        string sql,
+        int columns,
+        CancellationToken ct,
+        params (string Name, object Value)[] parameters) =>
+        ShapeReadRetryPolicy.RunAsync(
+            token => RowsAsync(session, sql, columns, token, parameters),
+            token => IsTransactionUsableAsync(session, token),
+            _logger,
+            sql,
+            ct);
+
+    private static async Task<bool> IsTransactionUsableAsync(CatalogSession session, CancellationToken ct)
+    {
+        if (session.Transaction is null)
+        {
+            return true;
+        }
+
+        try
+        {
+            await using var cmd = Command(session, "SELECT XACT_STATE()");
+            var state = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+            return state is not null and not DBNull && Convert.ToInt32(state, CultureInfo.InvariantCulture) == 1;
+        }
+        catch (Exception ex) when (ex is DbException or InvalidOperationException && !ct.IsCancellationRequested)
+        {
+            return false;
+        }
     }
 
     internal static string Family(string typeName) => typeName.ToLowerInvariant() switch

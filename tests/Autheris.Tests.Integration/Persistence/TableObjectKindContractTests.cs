@@ -28,6 +28,7 @@ public abstract class TableObjectKindContractBase
     protected abstract IGovernanceRepository CreateRepository(string connectionString);
     protected abstract DbConnection OpenRaw(string connectionString);
     protected abstract Task MigrateAsync(string connectionString, int? stepVersionCap);
+    protected abstract void AssertObjectKindCheckConstraint(DbException ex);
 
     private static TableMetadata Metadata(Guid id, DiscoveryObjectKind kind) => new()
     {
@@ -115,8 +116,10 @@ public abstract class TableObjectKindContractBase
         {
             await MigrateAsync(cs, null);
             await using var raw = OpenRaw(cs);
-            var act = () => ExecAsync(raw, "INSERT INTO TABLES (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, object_kind) VALUES ('t896b', 'Test', 'kind_896', 'sales', 'bad', 'bad', 'NORMAL', 0, 1, 'procedure')");
-            await Should.ThrowAsync<DbException>(act);
+            var badId = Guid.NewGuid().ToString("D");
+            var act = () => ExecAsync(raw, $"INSERT INTO TABLES (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, object_kind) VALUES ('{badId}', 'Test', 'kind_896', 'sales', 'bad', 'bad', 'NORMAL', 0, 1, 'procedure')");
+            var ex = await Should.ThrowAsync<DbException>(act);
+            AssertObjectKindCheckConstraint(ex);
         }
         finally
         {
@@ -165,6 +168,12 @@ public sealed class PostgreSqlTableObjectKindContractTests : TableObjectKindCont
         using var repository = GovernanceSchemaTestSupport.UnmigratedPostgreSql(options);
         await new PostgreSqlGovernanceMigrationRunner(repository, options) { StepVersionCapOverride = stepVersionCap }.RunAsync();
     }
+
+    protected override void AssertObjectKindCheckConstraint(DbException ex)
+    {
+        var pg = ex.ShouldBeOfType<PostgresException>();
+        pg.ConstraintName.ShouldBe("ck_tables_object_kind");
+    }
 }
 
 public sealed class SqlServerTableObjectKindContractTests : TableObjectKindContractBase
@@ -206,6 +215,12 @@ public sealed class SqlServerTableObjectKindContractTests : TableObjectKindContr
         var options = GovernanceSchemaTestSupport.SqlServerOptions(connectionString, GovernanceMigrationMode.Apply);
         using var repository = GovernanceSchemaTestSupport.UnmigratedSqlServer(options);
         await new SqlServerGovernanceMigrationRunner(repository, options) { StepVersionCapOverride = stepVersionCap }.RunAsync();
+    }
+
+    protected override void AssertObjectKindCheckConstraint(DbException ex)
+    {
+        var sqlEx = ex.ShouldBeOfType<SqlException>();
+        sqlEx.Message.ShouldContain("CK_TABLES_object_kind");
     }
 }
 

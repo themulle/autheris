@@ -13,6 +13,7 @@ using Autheris.Tests.Common;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
 using Shouldly;
 using Xunit;
@@ -308,6 +309,96 @@ public sealed class DatabricksStatementExecutionContractTests
         polls.ShouldBe(2);
         result.StatementId.ShouldBe(StatementId);
         result.Rows.Select(r => string.Join('|', r.Select(c => c ?? "<null>"))).ShouldBe(["1|a", "2|b", "3|<null>", "4|d"]);
+        var post = handler.Requests.Single(r => r.Method == HttpMethod.Post && r.Uri.AbsolutePath == "/api/2.0/sql/statements/");
+        using var postDoc = JsonDocument.Parse(post.Body);
+        postDoc.RootElement.GetProperty("on_wait_timeout").GetString().ShouldBe("CONTINUE");
+        postDoc.RootElement.GetProperty("wait_timeout").GetString().ShouldBe("28s");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Continues_past_50s_until_succeeded_and_reads_typed_columns()
+    {
+        var time = new ContractPollTimeProvider();
+        int polls = 0;
+
+        const string typedManifest =
+            "{\"column_count\":3,\"columns\":[" +
+            "{\"name\":\"id\",\"type_name\":\"INT\",\"position\":0}," +
+            "{\"name\":\"amount\",\"type_name\":\"DECIMAL\",\"type_precision\":18,\"type_scale\":2,\"position\":1}," +
+            "{\"name\":\"ordered_on\",\"type_name\":\"DATE\",\"position\":2}" +
+            "]}";
+        const string typedSucceeded =
+            "{\"statement_id\":\"" + StatementId + "\",\"status\":{\"state\":\"SUCCEEDED\"}," +
+            "\"manifest\":{\"format\":\"JSON_ARRAY\",\"truncated\":false,\"schema\":" + typedManifest + "}," +
+            "\"result\":{\"chunk_index\":0,\"row_offset\":0,\"data_array\":[[\"7\",\"123.45\",\"2026-10-11\"]]}}";
+
+        var handler = new ContractDatabricksHandler(r =>
+        {
+            if (r.Uri.AbsolutePath == "/oidc/v1/token")
+            {
+                return TokenOk();
+            }
+
+            if (r.Method == HttpMethod.Post && r.Uri.AbsolutePath == "/api/2.0/sql/statements/")
+            {
+                return Ok(State(StatementId, "RUNNING"));
+            }
+
+            if (r.Method == HttpMethod.Get && r.Uri.AbsolutePath == $"/api/2.0/sql/statements/{StatementId}")
+            {
+                // 12 * 5s = 60s (> 50s API wait cap, < 120s command timeout)
+                return ++polls < 12 ? Ok(State(StatementId, "RUNNING")) : Ok(typedSucceeded);
+            }
+
+            return Json(HttpStatusCode.NotFound, "{}");
+        });
+
+        var options = CreateOptions(commandTimeoutSeconds: 120, pollIntervalMs: 5000);
+        var client = CreateClient(handler, options, timeProvider: time);
+        var request = new DatabricksStatementRequest(
+            "SELECT id, amount, ordered_on FROM orders",
+            ImmutableArray<DatabricksParameter>.Empty,
+            "main",
+            "default",
+            TimeSpan.FromSeconds(50));
+
+        var executeTask = client.ExecuteAsync(request, CancellationToken.None);
+        for (int i = 0; i < 12 && !executeTask.IsCompleted; i++)
+        {
+            (await time.DelayEntered.WaitAsync(TimeSpan.FromSeconds(5))).ShouldBeTrue();
+            time.Advance(TimeSpan.FromSeconds(5));
+        }
+
+        var result = await executeTask.WaitAsync(TimeSpan.FromSeconds(5));
+        polls.ShouldBe(12);
+        result.Columns[0].ShouldBe(new DatabricksColumn("id", "INT", null, null));
+        result.Columns[1].ShouldBe(new DatabricksColumn("amount", "DECIMAL", 18, 2));
+        result.Columns[2].ShouldBe(new DatabricksColumn("ordered_on", "DATE", null, null));
+
+        var post = handler.Requests.Single(r => r.Method == HttpMethod.Post && r.Uri.AbsolutePath == "/api/2.0/sql/statements/");
+        using (var postDoc = JsonDocument.Parse(post.Body))
+        {
+            postDoc.RootElement.GetProperty("wait_timeout").GetString().ShouldBe("50s");
+            postDoc.RootElement.GetProperty("on_wait_timeout").GetString().ShouldBe("CONTINUE");
+        }
+
+        // Verify typed ADO.NET facade output against the typed manifest.
+        polls = 0;
+        var facadeOptions = CreateOptions(commandTimeoutSeconds: 120, pollIntervalMs: 10);
+        var facadeClient = CreateClient(handler, facadeOptions);
+        await using var conn = new DatabricksDbConnection(facadeClient, facadeOptions.DataSources.Connections["dbx"].Databricks!, "dbx");
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT id, amount, ordered_on FROM orders";
+        await using var reader = await cmd.ExecuteReaderAsync();
+        reader.GetFieldType(0).ShouldBe(typeof(int));
+        reader.GetFieldType(1).ShouldBe(typeof(decimal));
+        reader.GetFieldType(2).ShouldBe(typeof(DateTime));
+        (await reader.ReadAsync()).ShouldBeTrue();
+        reader.GetInt32(0).ShouldBe(7);
+        reader.GetDecimal(1).ShouldBe(123.45m);
+        reader.GetDateTime(2).ShouldBe(new DateTime(2026, 10, 11, 0, 0, 0, DateTimeKind.Unspecified));
     }
 
     [Fact]
@@ -386,5 +477,21 @@ public sealed class DatabricksStatementExecutionContractTests
 
         timeoutEx.Code.ShouldBe(DatabricksErrorCodes.Timeout);
         cancelCalled.ShouldBeTrue();
+    }
+
+    private sealed class ContractPollTimeProvider : FakeTimeProvider
+    {
+        public SemaphoreSlim DelayEntered { get; } = new(0);
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            var timer = base.CreateTimer(callback, state, dueTime, period);
+            if (dueTime == TimeSpan.FromSeconds(5))
+            {
+                DelayEntered.Release();
+            }
+
+            return timer;
+        }
     }
 }

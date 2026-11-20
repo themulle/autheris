@@ -4,11 +4,14 @@ using Autheris.Tests.Common;
 using System.Reflection;
 using Autheris.Api.Extensions;
 using Autheris.Api.Extensions.DependencyInjection;
+using Autheris.Application.Catalog.Discovery;
 using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Catalog.Services;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Mcp.Services;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Policy.Pdp;
+using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Tests.Unit.Catalog;
 using Autheris.Domain.Interfaces;
@@ -19,6 +22,7 @@ using HotChocolate.Execution;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -28,7 +32,7 @@ using Xunit;
 /// <summary>#138 INC-1 P3: the composition root hands the one <see cref="ICatalogVisibilityService"/> to every discovery consumer.</summary>
 public sealed class CatalogVisibilityCompositionTests
 {
-    private static ServiceProvider Build()
+    private static ServiceProvider Build(params System.Type[] omittedServices)
     {
         var services = new ServiceCollection();
         IHostEnvironment env = new TestHostEnvironment(Environments.Development);
@@ -47,6 +51,11 @@ public sealed class CatalogVisibilityCompositionTests
         services.AddAutherisExecution(options, env);
         services.AddAutherisCatalog();
         services.AddAutherisMcp(options);
+        foreach (var omitted in omittedServices)
+        {
+            services.RemoveAll(omitted);
+        }
+
         return services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
     }
 
@@ -104,5 +113,25 @@ public sealed class CatalogVisibilityCompositionTests
         var operation = result.ExpectOperationResult();
         (operation.Errors ?? []).ShouldBeEmpty(operation.Errors?.FirstOrDefault()?.Message);
         result.ToJson().ShouldContain("orders");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task WebSqlStatementManager_WithoutDiscovery_FailsAtComposition()
+    {
+        await using (var withoutDiscovery = Build(typeof(IDiscoveryService)))
+        {
+            Should.Throw<System.InvalidOperationException>(() =>
+                withoutDiscovery.GetRequiredService<IWebSqlStatementManager>());
+        }
+
+        await using (var withoutPdp = Build(typeof(IAccessDecisionPoint)))
+        {
+            Should.Throw<System.InvalidOperationException>(() =>
+                withoutPdp.GetRequiredService<IWebSqlStatementManager>());
+        }
+
+        await using var complete = Build();
+        complete.GetRequiredService<IWebSqlStatementManager>().ShouldBeOfType<Autheris.Application.Sql.Services.WebSqlStatementManager>();
     }
 }

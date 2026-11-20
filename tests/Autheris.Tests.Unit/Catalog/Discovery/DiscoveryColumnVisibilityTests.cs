@@ -346,6 +346,7 @@ public sealed class DiscoveryColumnVisibilityTests
     private sealed class DetailCatalogDiscoveryService(CatalogDatasetDetail? detail) : ICatalogDiscoveryService
     {
         public Task<IReadOnlyList<CatalogDatasetSummary>> ListDatasetsAsync(RequestContext context, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<DiscoveryFacets> ListFacetsAsync(RequestContext context, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<CatalogDatasetDetail?> GetDatasetDetailAsync(TableIdentifier table, RequestContext context, CancellationToken ct = default) => Task.FromResult(detail);
         public Task<IReadOnlyList<CatalogDatasetSummary>> SearchCatalogAsync(string query, string? domain, RequestContext context, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<IReadOnlyList<CatalogSearchHit>> SearchCatalogDetailedAsync(CatalogSearchQuery query, RequestContext context, CancellationToken ct = default) => throw new NotSupportedException();

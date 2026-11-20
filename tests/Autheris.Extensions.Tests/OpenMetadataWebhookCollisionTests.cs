@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Catalog.OpenMetadata;
+using Autheris.Application.State;
 using Autheris.Domain.Options;
 using Autheris.Extensions.OpenMetadata;
 using Autheris.Extensions.Tests.TestSupport;
@@ -43,7 +44,8 @@ public sealed class OpenMetadataWebhookCollisionTests
         };
         var service = new OpenMetadataSyncService(
             client, metadataRepo, new RecordingConsentRepository(), epochRepo,
-            Options.Create(options), NullLogger<OpenMetadataSyncService>.Instance);
+            Options.Create(options), NullLogger<OpenMetadataSyncService>.Instance,
+            clusterState: new InMemoryClusterStateProvider());
 
         var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var payload = $"{{\"id\":\"{Guid.NewGuid()}\",\"timestamp\":{nowMs},\"eventType\":\"entityUpdated\",\"entityType\":\"table\",\"entityFullyQualifiedName\":\"{db2.FullyQualifiedName}\"}}";
@@ -51,7 +53,7 @@ public sealed class OpenMetadataWebhookCollisionTests
 
         var result = await service.HandleWebhookEventAsync(payload, signature);
 
-        result.ShouldBeTrue();
+        result.ShouldBe(OpenMetadataWebhookOutcome.Processed);
         metadataRepo.UpsertCalls.ShouldBe(0);
         epochRepo.IncrementCalls.ShouldBe(0);
     }

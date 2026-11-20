@@ -33,33 +33,98 @@ public static partial class TrinoMetadataQueryHandler
         ClaimsPrincipal user,
         TenantId tenantId,
         ITableMetadataRepository metadataRepository,
-        TrinoMetadataVisibility? visibility,
+        TrinoMetadataVisibility visibility,
+        int? rowLimit,
         CancellationToken ct)
     {
         // The grammar is checked before any data is read; an unsupported shape never gets further than this line.
         var query = TrinoJdbcMetadataShapes.Parse(match);
-        if (visibility == null)
-        {
-            throw TrinoJdbcMetadataShapes.NotSupported();
-        }
+        var pushdown = TrinoJdbcMetadataShapes.PushdownKeys(query);
 
         var sw = Stopwatch.StartNew();
         var discovered = await LoadVisibleObjectsAsync(visibility, user, tenantId, ct).ConfigureAwait(false);
-        var entries = await BuildEntriesAsync(visibility, user, tenantId, metadataRepository, discovered, ct).ConfigureAwait(false);
+        var filtered = FilterDiscovered(discovered, pushdown);
+        var entries = await BuildEntriesAsync(visibility, user, tenantId, metadataRepository, filtered, ct).ConfigureAwait(false);
 
-        var (columns, rows) = TrinoJdbcMetadataShapes.Execute(query, entries);
-        return new GovernedSqlResult(rawSql, columns, rows, rows.Count, sw.ElapsedMilliseconds);
+        var (columns, rows) = TrinoJdbcMetadataShapes.Execute(query, entries, rowLimit);
+        return BuildResult(rawSql, columns, rows, sw.ElapsedMilliseconds, rowLimit);
+    }
+
+    private static Dictionary<string, DiscoveryObject> FilterDiscovered(
+        Dictionary<string, DiscoveryObject> discovered,
+        TrinoJdbcPushdownKeys pushdown)
+    {
+        if (pushdown.Catalogs is null && pushdown.Schemas is null && pushdown.Tables is null)
+        {
+            return discovered;
+        }
+
+        var filtered = new Dictionary<string, DiscoveryObject>(StringComparer.Ordinal);
+        foreach (var (key, item) in discovered)
+        {
+            if (pushdown.Matches(item))
+            {
+                filtered[key] = item;
+            }
+        }
+
+        return filtered;
+    }
+
+    private static GovernedSqlResult BuildResult(
+        string rawSql,
+        IReadOnlyList<string> columns,
+        IReadOnlyList<IReadOnlyDictionary<string, object?>> rows,
+        long elapsedMs,
+        int? rowLimit)
+    {
+        if (rowLimit is >= 0 and var limit && rows.Count > limit)
+        {
+            var capped = rows.Take(limit).ToList();
+            return new GovernedSqlResult(rawSql, columns, capped, capped.Count, elapsedMs, Truncated: true);
+        }
+
+        return new GovernedSqlResult(rawSql, columns, rows, rows.Count, elapsedMs);
     }
 
     private static string VisibleKey(string domain, string schema, string name) =>
         string.Concat(domain.ToUpperInvariant(), "\u0001", schema.ToUpperInvariant(), "\u0001", name.ToUpperInvariant());
 
-    /// <summary>The caller's visible tables and views from discovery (procedures excluded), keyed by identifier.</summary>
+    private static bool MatchesOrdinal(DiscoveryObject discovery, TableMetadata metadata) =>
+        string.Equals(discovery.Domain, metadata.Identifier.Domain, StringComparison.Ordinal) &&
+        string.Equals(discovery.Schema, metadata.Identifier.Schema, StringComparison.Ordinal) &&
+        string.Equals(discovery.Name, metadata.Identifier.TableName, StringComparison.Ordinal);
+
+    private static (Dictionary<string, TableMetadata> ByKey, HashSet<string> Ambiguous) IndexActiveMetadata(
+        IReadOnlyList<TableMetadata> activeTables)
+    {
+        var byKey = new Dictionary<string, TableMetadata>(activeTables.Count, StringComparer.Ordinal);
+        var ambiguous = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var table in activeTables)
+        {
+            var key = VisibleKey(table.Identifier.Domain, table.Identifier.Schema, table.Identifier.TableName);
+            if (ambiguous.Contains(key))
+            {
+                continue;
+            }
+
+            if (!byKey.TryAdd(key, table))
+            {
+                byKey.Remove(key);
+                ambiguous.Add(key);
+            }
+        }
+
+        return (byKey, ambiguous);
+    }
+
+    /// <summary>The caller's visible tables and views from discovery (procedures excluded), keyed by identifier; ambiguous case collisions are omitted.</summary>
     private static async Task<Dictionary<string, DiscoveryObject>> LoadVisibleObjectsAsync(
         TrinoMetadataVisibility visibility, ClaimsPrincipal user, TenantId tenantId, CancellationToken ct)
     {
         var caller = new CatalogCaller(user, tenantId, CatalogChannel.Rest);
         var result = new Dictionary<string, DiscoveryObject>(StringComparer.Ordinal);
+        var ambiguous = new HashSet<string>(StringComparer.Ordinal);
         var after = 0;
         for (var page = 0; page < MaxDiscoveryPages; page++)
         {
@@ -67,9 +132,21 @@ public static partial class TrinoMetadataQueryHandler
             var items = await visibility.Discovery.ListAsync(query, caller, ct).ConfigureAwait(false);
             foreach (var item in items.Items)
             {
-                if (item.Kind != DiscoveryObjectKind.Procedure)
+                if (item.Kind == DiscoveryObjectKind.Procedure)
                 {
-                    result.TryAdd(VisibleKey(item.Domain, item.Schema, item.Name), item);
+                    continue;
+                }
+
+                var key = VisibleKey(item.Domain, item.Schema, item.Name);
+                if (ambiguous.Contains(key))
+                {
+                    continue;
+                }
+
+                if (!result.TryAdd(key, item))
+                {
+                    result.Remove(key);
+                    ambiguous.Add(key);
                 }
             }
 
@@ -105,42 +182,27 @@ public static partial class TrinoMetadataQueryHandler
 
         var activeTables = await CatalogTablePageReader.ReadAllAsync(
             metadataRepository, new CatalogTableQuery(IncludeInactive: false), static t => t.Table.IsActive, ct: ct).ConfigureAwait(false);
-        var metadataByKey = new Dictionary<string, TableMetadata>(StringComparer.Ordinal);
-        foreach (var table in activeTables)
-        {
-            metadataByKey.TryAdd(VisibleKey(table.Identifier.Domain, table.Identifier.Schema, table.Identifier.TableName), table);
-        }
+        var (metadataByKey, ambiguousMetadata) = IndexActiveMetadata(activeTables);
 
         var decideKeys = new List<string>();
         var decideTables = new List<TableMetadata>();
-        foreach (var key in discovered.Keys)
+        foreach (var (key, item) in discovered)
         {
-            if (metadataByKey.TryGetValue(key, out var meta))
+            if (ambiguousMetadata.Contains(key))
+            {
+                continue;
+            }
+
+            if (metadataByKey.TryGetValue(key, out var meta) && MatchesOrdinal(item, meta))
             {
                 decideKeys.Add(key);
                 decideTables.Add(meta);
             }
         }
 
-        IReadOnlyList<TableAccessDecision>? decisions = null;
-        if (decideTables.Count > 0)
-        {
-            try
-            {
-                var subject = SecurityPrincipalContext.FromPrincipal(user, tenantId);
-                var answer = await visibility.DecisionPoint.DecideManyAsync(
-                    subject, decideTables, AccessOperation.Discover, AccessTransport.Trino, ct).ConfigureAwait(false);
-                decisions = answer is { } list && list.Count == decideTables.Count ? list : null;
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception)
-            {
-                decisions = null;
-            }
-        }
+        IReadOnlyList<TableAccessDecision>? decisions = decideTables.Count > 0
+            ? await TryDecideManyAsync(visibility.DecisionPoint, user, tenantId, decideTables, ct).ConfigureAwait(false)
+            : null;
 
         var decisionByKey = new Dictionary<string, (TableAccessDecision Decision, TableMetadata Meta)>(StringComparer.Ordinal);
         if (decisions != null)
@@ -156,6 +218,11 @@ public static partial class TrinoMetadataQueryHandler
 
         foreach (var (key, item) in discovered)
         {
+            if (ambiguousMetadata.Contains(key))
+            {
+                continue;
+            }
+
             if (decisionByKey.TryGetValue(key, out var found) && found.Decision.IsAllowed)
             {
                 var allowed = item.Columns
@@ -171,5 +238,29 @@ public static partial class TrinoMetadataQueryHandler
         }
 
         return entries;
+    }
+
+    private static async Task<IReadOnlyList<TableAccessDecision>?> TryDecideManyAsync(
+        IAccessDecisionPoint decisionPoint,
+        ClaimsPrincipal user,
+        TenantId tenantId,
+        IReadOnlyList<TableMetadata> tables,
+        CancellationToken ct)
+    {
+        try
+        {
+            var subject = SecurityPrincipalContext.FromPrincipal(user, tenantId);
+            var answer = await decisionPoint.DecideManyAsync(
+                subject, tables, AccessOperation.Discover, AccessTransport.Trino, ct).ConfigureAwait(false);
+            return answer is { } list && list.Count == tables.Count ? list : null;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
     }
 }

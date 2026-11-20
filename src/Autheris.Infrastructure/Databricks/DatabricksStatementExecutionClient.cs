@@ -68,13 +68,14 @@ public sealed partial class DatabricksStatementExecutionClient(
         ValidateRequest(request);
         var token = await _credentialProvider.AcquireTokenAsync(settings.Databricks, request.Delegation, ct).ConfigureAwait(false);
 
-        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        deadline.CancelAfter(TimeSpan.FromSeconds(settings.CommandTimeoutSeconds));
+        using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(settings.CommandTimeoutSeconds), _time);
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
         string? statementId = null;
+        bool terminal = false;
         try
         {
             var db = settings.Databricks;
-            using var firstDoc = await SendAsync(db, token, HttpMethod.Post, "/api/2.0/sql/statements/", BuildBody(request, db), request.Delegation, deadline.Token).ConfigureAwait(false);
+            using var firstDoc = await SendAsync(db, token, HttpMethod.Post, "/api/2.0/sql/statements/", BuildBody(request, db, settings.CommandTimeoutSeconds), request.Delegation, deadline.Token).ConfigureAwait(false);
             statementId = ReadStatementId(firstDoc.RootElement);
             var current = firstDoc;
 
@@ -94,6 +95,7 @@ public sealed partial class DatabricksStatementExecutionClient(
                     current = polled;
                 }
 
+                terminal = IsTerminalState(ReadState(current.RootElement));
                 return await ReadResultAsync(db, token, statementId, current.RootElement, request.Delegation, deadline.Token).ConfigureAwait(false);
             }
             finally
@@ -103,17 +105,30 @@ public sealed partial class DatabricksStatementExecutionClient(
         }
         catch (OperationCanceledException) when (statementId is not null)
         {
-            await TryCancelAsync(settings.Databricks, token, statementId, request.Delegation).ConfigureAwait(false);
+            if (!terminal)
+            {
+                await TryCancelAsync(settings.Databricks, token, statementId, request.Delegation).ConfigureAwait(false);
+            }
+
             if (ct.IsCancellationRequested)
             {
                 throw;
             }
 
-            throw new DatabricksProviderException(DatabricksErrorCodes.Timeout, "The Databricks statement exceeded the command timeout and was cancelled.");
+            throw new DatabricksProviderException(
+                DatabricksErrorCodes.Timeout,
+                terminal
+                    ? "The Databricks statement exceeded the command timeout."
+                    : "The Databricks statement exceeded the command timeout and was cancelled.");
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
             throw new DatabricksProviderException(DatabricksErrorCodes.Timeout, "The Databricks statement exceeded the command timeout.");
+        }
+        catch (Exception) when (statementId is not null && !terminal)
+        {
+            await TryCancelAsync(settings.Databricks, token, statementId, request.Delegation).ConfigureAwait(false);
+            throw;
         }
     }
 
@@ -310,9 +325,9 @@ public sealed partial class DatabricksStatementExecutionClient(
 
     // ---- request / response mapping ----
 
-    private static string BuildBody(DatabricksStatementRequest request, DatabricksDataSourceOptions db)
+    private static string BuildBody(DatabricksStatementRequest request, DatabricksDataSourceOptions db, int commandTimeoutSeconds)
     {
-        var wait = request.WaitTimeout < MinWait ? MinWait : request.WaitTimeout > MaxWait ? MaxWait : request.WaitTimeout;
+        var waitTimeout = FormatWaitTimeout(request.WaitTimeout, commandTimeoutSeconds);
         using var stream = new MemoryStream();
         using (var w = new Utf8JsonWriter(stream))
         {
@@ -343,8 +358,8 @@ public sealed partial class DatabricksStatementExecutionClient(
             }
 
             w.WriteEndArray();
-            w.WriteString("wait_timeout", $"{(int)wait.TotalSeconds}s");
-            w.WriteString("on_wait_timeout", "CANCEL");
+            w.WriteString("wait_timeout", waitTimeout);
+            w.WriteString("on_wait_timeout", "CONTINUE");
             w.WriteString("disposition", "INLINE");
             w.WriteString("format", "JSON_ARRAY");
             w.WriteNumber("byte_limit", db.ByteLimit);
@@ -385,6 +400,20 @@ public sealed partial class DatabricksStatementExecutionClient(
         return Encoding.UTF8.GetString(stream.ToArray());
     }
 
+    private static string FormatWaitTimeout(TimeSpan requestedWait, int commandTimeoutSeconds)
+    {
+        var commandCap = TimeSpan.FromSeconds(Math.Max(0, commandTimeoutSeconds - 2));
+        var candidate = requestedWait < commandCap ? requestedWait : commandCap;
+        if (candidate > MaxWait)
+        {
+            candidate = MaxWait;
+        }
+
+        return candidate < MinWait
+            ? "0s"
+            : $"{((int)candidate.TotalSeconds).ToString(CultureInfo.InvariantCulture)}s";
+    }
+
     private static string ReadStatementId(JsonElement root)
     {
         if (root.ValueKind != JsonValueKind.Object ||
@@ -409,6 +438,8 @@ public sealed partial class DatabricksStatementExecutionClient(
     }
 
     private static bool IsInProgress(JsonElement root) => ReadState(root) is "PENDING" or "RUNNING";
+
+    private static bool IsTerminalState(string state) => state is "SUCCEEDED" or "FAILED" or "CANCELED" or "CLOSED";
 
     private async Task<DatabricksStatementResult> ReadResultAsync(DatabricksDataSourceOptions db, string token, string statementId, JsonElement root, DelegationContext? delegation, CancellationToken ct)
     {
@@ -509,7 +540,9 @@ public sealed partial class DatabricksStatementExecutionClient(
             {
                 var name = col.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String ? n.GetString()! : string.Empty;
                 var type = col.TryGetProperty("type_name", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString()! : "STRING";
-                builder.Add(new DatabricksColumn(name, type));
+                int? precision = col.TryGetProperty("type_precision", out var p) && p.ValueKind == JsonValueKind.Number && p.TryGetInt32(out var pv) ? pv : null;
+                int? scale = col.TryGetProperty("type_scale", out var s) && s.ValueKind == JsonValueKind.Number && s.TryGetInt32(out var sv) ? sv : null;
+                builder.Add(new DatabricksColumn(name, type, precision, scale));
             }
         }
 

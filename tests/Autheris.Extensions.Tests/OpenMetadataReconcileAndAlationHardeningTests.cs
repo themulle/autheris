@@ -17,6 +17,7 @@ using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Catalog.Models;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Catalog.OpenMetadata;
+using Autheris.Application.State;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -129,7 +130,7 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
         var options = Options.Create(new GatewayOptions { OpenMetadata = omOptions });
         return new OmFixture
         {
-            Service = new OpenMetadataSyncService(client, metadataRepo, consentRepo, epochRepo, options, NullLogger<OpenMetadataSyncService>.Instance),
+            Service = new OpenMetadataSyncService(client, metadataRepo, consentRepo, epochRepo, options, NullLogger<OpenMetadataSyncService>.Instance, clusterState: new InMemoryClusterStateProvider()),
             Client = client,
             ConsentRepo = consentRepo,
             MetadataRepo = metadataRepo.Inner
@@ -617,9 +618,9 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
         f.Client.Tables = [foreign];
 
         var payload = SignedTableEvent(foreign.FullyQualifiedName, secret, out var signature);
-        var ok = await f.Service.HandleWebhookEventAsync(payload, signature);
+        var outcome = await f.Service.HandleWebhookEventAsync(payload, signature);
 
-        ok.ShouldBeTrue();
+        outcome.ShouldBe(OpenMetadataWebhookOutcome.Processed);
         f.Upserted.ShouldBeEmpty();
     }
 
@@ -632,9 +633,9 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
         f.Client.Tables = [orders];
 
         var payload = SignedTableEvent(orders.FullyQualifiedName, secret, out var signature);
-        var ok = await f.Service.HandleWebhookEventAsync(payload, signature);
+        var outcome = await f.Service.HandleWebhookEventAsync(payload, signature);
 
-        ok.ShouldBeTrue();
+        outcome.ShouldBe(OpenMetadataWebhookOutcome.Processed);
         var meta = f.Upserted.ShouldHaveSingleItem();
         meta.Identifier.ShouldBe(OrdersId);
         meta.Table.IsActive.ShouldBeFalse();
@@ -666,7 +667,7 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
         f.Client.Tables = [orders];
 
         var payload = SignedTableEvent(orders.FullyQualifiedName, secret, out var signature);
-        (await f.Service.HandleWebhookEventAsync(payload, signature)).ShouldBeTrue();
+        (await f.Service.HandleWebhookEventAsync(payload, signature)).ShouldBe(OpenMetadataWebhookOutcome.Processed);
 
         f.Upserted.ShouldHaveSingleItem().Table.SourceName.ShouldBe("sales_readonly_conn");
     }

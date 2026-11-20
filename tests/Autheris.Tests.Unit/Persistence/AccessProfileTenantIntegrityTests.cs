@@ -15,15 +15,13 @@ public sealed class AccessProfileTenantIntegrityTests
     {
         var columns = new[]
         {
-            "profile_id", "tenant_id", "name", "masking_mode",
-            "target_tables", "row_scope", "justification", "created_by",
-            "created_at", "valid_to"
+            "profile_id", "tenant_id", "name", "row_scope",
+            "justification", "created_by", "created_at", "valid_to"
         };
         var row = new object?[]
         {
-            "p1", tenantColumn, "name", "Strict",
-            null, null, null, null,
-            "2026-01-01T00:00:00+00:00", null
+            "p1", tenantColumn, "name", null,
+            null, null, "2026-01-01T00:00:00+00:00", null
         };
         var reader = new StubDbDataReader(columns, [row]);
         reader.Read().ShouldBeTrue();
@@ -36,13 +34,13 @@ public sealed class AccessProfileTenantIntegrityTests
         var store = new AccessProfileStore(AccessProfileDialect.PostgreSql, (_, _) => throw new InvalidOperationException("not used"));
 
         using var bad = ReaderFor("bad tenant!");
-        var ex = Should.Throw<AccessProfileTenantIntegrityException>(() => store.ReadProfile(bad, 0));
+        var ex = Should.Throw<AccessProfileTenantIntegrityException>(() => store.ReadProfileRow(bad, 0));
 
         ex.ErrorCode.ShouldBe("ACCESS_PROFILE_TENANT_INVALID");
         ex.Message.ShouldNotContain("bad tenant!");
         ex.InnerException.ShouldBeNull();
 
         using var good = ReaderFor("tenant-a");
-        store.ReadProfile(good, 0).TenantId.ShouldBe(new TenantId("tenant-a"));
+        store.ReadProfileRow(good, 0).TenantId.ShouldBe(new TenantId("tenant-a"));
     }
 }

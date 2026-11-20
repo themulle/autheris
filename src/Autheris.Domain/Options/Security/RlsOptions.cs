@@ -20,7 +20,8 @@ public sealed class VirtualFilterOptions
     public int GenerationCheckSeconds { get; init; } = 5;
 
     /// <summary>
-    /// When enabled, manual changes to virtual filters and access profiles require four-eyes approval by a distinct approver.
+    /// When enabled, manual changes to structured virtual filters and access profiles require four-eyes approval by a distinct approver.
+    /// Stage-2 SQL virtual filters (sql) always start PendingApproval and require four-eyes approval by a distinct owner or delegate of every referenced table (or sync-path activation), even when RequireApproval is false.
     /// </summary>
     public bool RequireApproval { get; init; } = false;
 

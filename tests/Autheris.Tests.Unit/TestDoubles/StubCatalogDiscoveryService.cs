@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Catalog.Discovery;
 using Autheris.Application.Catalog.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -14,6 +15,9 @@ internal sealed class StubCatalogDiscoveryService : ICatalogDiscoveryService
     public List<DatasourceRegistrationRequest> RegisterCalls { get; } = [];
 
     public Task<IReadOnlyList<CatalogDatasetSummary>> ListDatasetsAsync(RequestContext context, CancellationToken ct = default)
+        => throw new NotSupportedException();
+
+    public Task<DiscoveryFacets> ListFacetsAsync(RequestContext context, CancellationToken ct = default)
         => throw new NotSupportedException();
 
     public Task<CatalogDatasetDetail?> GetDatasetDetailAsync(TableIdentifier table, RequestContext context, CancellationToken ct = default)

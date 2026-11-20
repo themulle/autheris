@@ -25,5 +25,6 @@ public sealed record DbtWebhookProcessingResult(
     bool Success,
     string Message,
     string? EventType = null,
-    long? RunId = null
+    long? RunId = null,
+    bool StoreUnavailable = false
 );
