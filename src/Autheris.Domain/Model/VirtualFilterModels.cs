@@ -12,6 +12,14 @@ public enum FilterApprovalStatus
     Rejected = 2
 }
 
+/// <summary>Why a virtual filter requires four-eyes approval instead of activating immediately.</summary>
+public enum VirtualFilterApprovalReason
+{
+    None = 0,
+    RequireApprovalOption = 1,
+    SqlDefinitionNeedsOwnerApproval = 2
+}
+
 /// <summary>What an object in a profile's scope that no binding covers means for the grantee.</summary>
 public enum UncoveredPolicy
 {

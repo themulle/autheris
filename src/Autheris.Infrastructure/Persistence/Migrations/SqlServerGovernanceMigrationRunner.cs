@@ -29,9 +29,10 @@ public sealed class SqlServerGovernanceMigrationRunner : GovernanceMigrationRunn
         .. SqlMigrationStep.LoadEmbedded("sqlserver").Select(step => step.ToMigrationStep())
     ];
 
-    private static readonly GovernanceSchemaShapeVerifier Verifier = new("sqlserver", new SqlServerSchemaCatalogReader());
+    private static readonly GovernanceSchemaShapeVerifier DefaultVerifier = new("sqlserver", new SqlServerSchemaCatalogReader());
 
     private readonly GovernanceRepository _repository;
+    private readonly GovernanceSchemaShapeVerifier _verifier;
 
     public SqlServerGovernanceMigrationRunner(
         GovernanceRepository repository,
@@ -42,6 +43,9 @@ public sealed class SqlServerGovernanceMigrationRunner : GovernanceMigrationRunn
     {
         ArgumentNullException.ThrowIfNull(repository);
         _repository = repository;
+        _verifier = logger is null
+            ? DefaultVerifier
+            : new("sqlserver", new SqlServerSchemaCatalogReader(logger));
         IsProduction = environment is not null && Microsoft.Extensions.Hosting.HostEnvironmentEnvExtensions.IsProduction(environment);
     }
 
@@ -69,7 +73,7 @@ public sealed class SqlServerGovernanceMigrationRunner : GovernanceMigrationRunn
 
     public override IReadOnlyList<MigrationStep> Steps => Catalogue;
 
-    internal override GovernanceSchemaShapeVerifier ShapeVerifier => Verifier;
+    internal override GovernanceSchemaShapeVerifier ShapeVerifier => _verifier;
 
     protected override string EngineDisplayName => "SQL Server";
 

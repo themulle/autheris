@@ -9,13 +9,16 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Catalog;
+using Autheris.Application.Catalog.Discovery;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Policy.Pdp;
 using Autheris.Application.Services;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Security;
 
 /// <summary>
 /// Handles Trino wire-protocol metadata introspection queries (<c>SHOW CATALOGS</c>, <c>SHOW SCHEMAS</c>,
@@ -51,45 +54,9 @@ public static partial class TrinoMetadataQueryHandler
         RegexOptions.IgnoreCase | RegexOptions.Compiled,
         RegexTimeout);
 
-    public static Task<GovernedSqlResult?> TryExecuteAsync(
-        string? rawSql,
-        ClaimsPrincipal user,
-        TenantId tenantId,
-        ITableMetadataRepository? metadataRepository,
-        IConsentRepository? consentRepository = null,
-        CancellationToken ct = default)
-        => TryExecuteAsync(rawSql, user, tenantId, metadataRepository, consentRepository, gatewayOptions: null, ct);
-
-    /// <summary>Same as above with the deployment options (tenancy mode and shared tables) for the catalog visibility rule.</summary>
-    public static Task<GovernedSqlResult?> TryExecuteAsync(
-        string? rawSql,
-        ClaimsPrincipal user,
-        TenantId tenantId,
-        ITableMetadataRepository? metadataRepository,
-        IConsentRepository? consentRepository,
-        GatewayOptions? gatewayOptions,
-        CancellationToken ct = default)
-        => TryExecuteAsync(rawSql, user, tenantId, metadataRepository, consentRepository, gatewayOptions, consentResolver: null, ct);
-
     /// <summary>
-    /// Same as above with the data-path consent resolver for <c>information_schema.columns</c>
-    /// (<c>null</c> = a default <see cref="ConsentResolutionService"/>).
-    /// </summary>
-    public static Task<GovernedSqlResult?> TryExecuteAsync(
-        string? rawSql,
-        ClaimsPrincipal user,
-        TenantId tenantId,
-        ITableMetadataRepository? metadataRepository,
-        IConsentRepository? consentRepository,
-        GatewayOptions? gatewayOptions,
-        IConsentResolutionService? consentResolver,
-        CancellationToken ct = default)
-        => TryExecuteAsync(rawSql, user, tenantId, metadataRepository, consentRepository, gatewayOptions, consentResolver, visibility: null, ct);
-
-    /// <summary>
-    /// Same as above with the discovery visible set and the decision point. With <paramref name="visibility"/> every listing
-    /// (<c>SHOW</c>, <c>information_schema</c>, <c>system.jdbc</c>) is limited to the objects discovery returns for the caller;
-    /// without it a <c>system.jdbc</c> statement fails closed.
+    /// Executes a Trino wire-protocol metadata query against the caller's visible catalog objects and decision point.
+    /// Every listing (<c>SHOW</c>, <c>information_schema</c>, <c>system.jdbc</c>) intersects with <paramref name="visibility"/>.
     /// </summary>
     public static async Task<GovernedSqlResult?> TryExecuteAsync(
         string? rawSql,
@@ -99,15 +66,19 @@ public static partial class TrinoMetadataQueryHandler
         IConsentRepository? consentRepository,
         GatewayOptions? gatewayOptions,
         IConsentResolutionService? consentResolver,
-        TrinoMetadataVisibility? visibility,
+        TrinoMetadataVisibility visibility,
+        int? rowLimit = null,
         CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(user);
+        ArgumentNullException.ThrowIfNull(visibility);
+        ArgumentNullException.ThrowIfNull(visibility.Discovery);
+        ArgumentNullException.ThrowIfNull(visibility.DecisionPoint);
+
         if (string.IsNullOrWhiteSpace(rawSql) || metadataRepository == null)
         {
             return null;
         }
-
-        ArgumentNullException.ThrowIfNull(user);
 
         var normalized = NormalizeSql(rawSql);
         if (string.IsNullOrWhiteSpace(normalized))
@@ -127,7 +98,7 @@ public static partial class TrinoMetadataQueryHandler
             var jdbcMatch = TrinoJdbcMetadataShapes.JdbcStatementRegex.Match(normalized);
             if (jdbcMatch.Success)
             {
-                return await ExecuteJdbcAsync(rawSql, jdbcMatch, user, tenantId, metadataRepository, visibility, ct).ConfigureAwait(false);
+                return await ExecuteJdbcAsync(rawSql, jdbcMatch, user, tenantId, metadataRepository, visibility, rowLimit, ct).ConfigureAwait(false);
             }
 
             // A metadata relation outside the handler grammar is refused here; it must never reach a source.
@@ -151,13 +122,19 @@ public static partial class TrinoMetadataQueryHandler
             catalogQuery,
             static t => t.Table.IsActive,
             ct: ct).ConfigureAwait(false);
+        var (_, ambiguousMetadata) = IndexActiveMetadata(activeTables);
         var visibleTables = await CatalogVisibility.VisibleTablesAsync(activeTables, user, tenantId, consentRepository, contract: null, Autheris.Application.Tenancy.TenantResolver.EffectiveDefaultOf(gatewayOptions?.Tenancy), gatewayOptions?.Catalog.SharedTables, ct).ConfigureAwait(false);
 
-        if (visibility != null)
-        {
-            var discovered = await LoadVisibleObjectsAsync(visibility, user, tenantId, ct).ConfigureAwait(false);
-            visibleTables = visibleTables.Where(t => discovered.ContainsKey(VisibleKey(t.Identifier.Domain, t.Identifier.Schema, t.Identifier.TableName))).ToList();
-        }
+        var discovered = await LoadVisibleObjectsAsync(visibility, user, tenantId, ct).ConfigureAwait(false);
+        visibleTables = visibleTables
+            .Where(t =>
+            {
+                var key = VisibleKey(t.Identifier.Domain, t.Identifier.Schema, t.Identifier.TableName);
+                return !ambiguousMetadata.Contains(key) &&
+                    discovered.TryGetValue(key, out var item) &&
+                    MatchesOrdinal(item, t);
+            })
+            .ToList();
 
         if (showCatalogsMatch.Success)
         {
@@ -174,7 +151,7 @@ public static partial class TrinoMetadataQueryHandler
                 .Select(c => (IReadOnlyDictionary<string, object?>)new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase) { ["Catalog"] = c })
                 .ToList();
 
-            return new GovernedSqlResult(rawSql, ["Catalog"], rows, rows.Count, sw.ElapsedMilliseconds);
+            return BuildResult(rawSql, ["Catalog"], rows, sw.ElapsedMilliseconds, rowLimit);
         }
 
         if (showSchemasMatch.Success)
@@ -198,7 +175,7 @@ public static partial class TrinoMetadataQueryHandler
                 .Select(s => (IReadOnlyDictionary<string, object?>)new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase) { ["Schema"] = s })
                 .ToList();
 
-            return new GovernedSqlResult(rawSql, ["Schema"], rows, rows.Count, sw.ElapsedMilliseconds);
+            return BuildResult(rawSql, ["Schema"], rows, sw.ElapsedMilliseconds, rowLimit);
         }
 
         if (showTablesMatch.Success)
@@ -235,7 +212,7 @@ public static partial class TrinoMetadataQueryHandler
                 .Select(t => (IReadOnlyDictionary<string, object?>)new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase) { ["Table"] = t })
                 .ToList();
 
-            return new GovernedSqlResult(rawSql, ["Table"], rows, rows.Count, sw.ElapsedMilliseconds);
+            return BuildResult(rawSql, ["Table"], rows, sw.ElapsedMilliseconds, rowLimit);
         }
 
         var viewName = infoSchemaMatch.Groups[1].Value.ToLowerInvariant();
@@ -261,7 +238,7 @@ public static partial class TrinoMetadataQueryHandler
                 })
                 .ToList();
 
-            return new GovernedSqlResult(rawSql, ["catalog_name", "schema_name"], rows, rows.Count, sw.ElapsedMilliseconds);
+            return BuildResult(rawSql, ["catalog_name", "schema_name"], rows, sw.ElapsedMilliseconds, rowLimit);
         }
 
         if (viewName == "tables")
@@ -286,7 +263,7 @@ public static partial class TrinoMetadataQueryHandler
                 })
                 .ToList();
 
-            return new GovernedSqlResult(rawSql, ["table_catalog", "table_schema", "table_name", "table_type"], rows, rows.Count, sw.ElapsedMilliseconds);
+            return BuildResult(rawSql, ["table_catalog", "table_schema", "table_name", "table_type"], rows, sw.ElapsedMilliseconds, rowLimit);
         }
 
         // information_schema.columns
@@ -304,39 +281,64 @@ public static partial class TrinoMetadataQueryHandler
         // roles), not only for consents issued directly to the user. The subject set is gathered exactly like
         // CatalogVisibility does and loaded in one batch call for all tables (no per-table query).
         var columnSubjects = columnTables.Count > 0 ? await LoadColumnSubjectsAsync(user, tenantId, consentRepository, ct).ConfigureAwait(false) : null;
+        var decisions = columnTables.Count > 0
+            ? await TryDecideManyAsync(visibility.DecisionPoint, user, tenantId, columnTables, ct).ConfigureAwait(false)
+            : null;
         var resolver = consentResolver ?? new ConsentResolutionService();
         var callerScopes = CatalogColumnAccessResolver.ForResolver(Autheris.Domain.Security.TokenAccessScope.GetScopeSet(user.Claims));
 
-        foreach (var table in columnTables)
+        if (columnTables.Count > 0 && decisions != null)
         {
-            var deniedColumns = columnSubjects != null
-                ? ResolveDeniedColumns(table, columnSubjects, resolver, callerScopes)
-                : null;
-
-            int pos = 1;
-            for (int i = 0; i < table.Columns.Count; i++)
+            for (var tIdx = 0; tIdx < columnTables.Count; tIdx++)
             {
-                var col = table.Columns[i];
-                if (deniedColumns != null && deniedColumns.Contains(col.ColumnName))
+                var table = columnTables[tIdx];
+                var decision = decisions[tIdx];
+                if (decision is null || !decision.IsAllowed)
                 {
                     continue;
                 }
 
-                colRows.Add(new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+                var key = VisibleKey(table.Identifier.Domain, table.Identifier.Schema, table.Identifier.TableName);
+                if (!discovered.TryGetValue(key, out var discoveryObj))
                 {
-                    ["table_catalog"] = table.Identifier.Domain,
-                    ["table_schema"] = table.Identifier.Schema,
-                    ["table_name"] = table.Identifier.TableName,
-                    ["column_name"] = col.ColumnName,
-                    ["ordinal_position"] = pos++,
-                    ["is_nullable"] = "YES",
-                    ["data_type"] = string.IsNullOrWhiteSpace(col.DataType) ? "varchar" : col.DataType
-                });
+                    continue;
+                }
+
+                var visibleDiscoveryCols = DiscoveryColumnVisibility.VisibleColumns(discoveryObj)
+                    .Select(static c => c.Name)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                var deniedColumns = columnSubjects != null
+                    ? ResolveDeniedColumns(table, columnSubjects, resolver, callerScopes)
+                    : null;
+
+                int pos = 1;
+                for (int i = 0; i < table.Columns.Count; i++)
+                {
+                    var col = table.Columns[i];
+                    if ((deniedColumns != null && deniedColumns.Contains(col.ColumnName)) ||
+                        !visibleDiscoveryCols.Contains(col.ColumnName) ||
+                        decision.GetEffectiveColumnAccess(col.ColumnName, table) == ColumnAccessLevel.Deny)
+                    {
+                        continue;
+                    }
+
+                    colRows.Add(new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["table_catalog"] = table.Identifier.Domain,
+                        ["table_schema"] = table.Identifier.Schema,
+                        ["table_name"] = table.Identifier.TableName,
+                        ["column_name"] = col.ColumnName,
+                        ["ordinal_position"] = pos++,
+                        ["is_nullable"] = "YES",
+                        ["data_type"] = string.IsNullOrWhiteSpace(col.DataType) ? "varchar" : col.DataType
+                    });
+                }
             }
         }
 
         string[] colNames = ["table_catalog", "table_schema", "table_name", "column_name", "ordinal_position", "is_nullable", "data_type"];
-        return new GovernedSqlResult(rawSql, colNames, colRows, colRows.Count, sw.ElapsedMilliseconds);
+        return BuildResult(rawSql, colNames, colRows, sw.ElapsedMilliseconds, rowLimit);
     }
 
     /// <summary>The caller's consent subjects and their active consents grouped by table (input of the column filter).</summary>

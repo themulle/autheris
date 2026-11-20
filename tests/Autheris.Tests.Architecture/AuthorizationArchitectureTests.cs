@@ -110,11 +110,46 @@ public sealed class AuthorizationArchitectureTests
             .Where(f => f.Text.Contains("EvaluatedByPdp = true", StringComparison.Ordinal))
             .Select(f => f.RelativePath)
             .Where(path => !path.StartsWith("src/Autheris.Application/Policy/Pdp/", StringComparison.Ordinal))
-            // Federated execution builds an unconstrained allow for tables it resolved itself, to run the masked-column guardrails; it is never handed on as a caller decision.
-            .Where(path => path != "src/Autheris.Application/Sql/Services/FederatedDuckDbExecutionService.cs")
             .ToList();
 
         offenders.ShouldBeEmpty("Only the access decision point may mark a decision as evaluated by the PDP.");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Architecture_ProductDefinerProvenance_IsStampedOnlyByTheDefinerPath()
+    {
+        const string expectedFile = "src/Autheris.Application/Sql/Services/FederatedDuckDbExecutionService.cs";
+
+        var stampedFiles = RepositoryScan.ProductionFiles
+            .Where(f => System.Text.RegularExpressions.Regex.IsMatch(
+                f.Text,
+                @"\bEvaluatedAsProductDefiner\s*=\s*true\b",
+                System.Text.RegularExpressions.RegexOptions.CultureInvariant))
+            .Select(f => f.RelativePath)
+            .ToList();
+
+        var pdpOffenders = stampedFiles
+            .Where(path => path.StartsWith("src/Autheris.Application/Policy/Pdp/", StringComparison.Ordinal))
+            .ToList();
+        pdpOffenders.ShouldBeEmpty("The PDP must never mark a decision with product definer provenance.");
+
+        stampedFiles.ShouldBe(
+            [expectedFile],
+            "Only the product definer execution path may stamp EvaluatedAsProductDefiner = true.");
+
+        var dualStampOffenders = RepositoryScan.ProductionFiles
+            .Where(f => System.Text.RegularExpressions.Regex.IsMatch(
+                            f.Text,
+                            @"\bEvaluatedByPdp\s*=\s*true\b",
+                            System.Text.RegularExpressions.RegexOptions.CultureInvariant)
+                     && System.Text.RegularExpressions.Regex.IsMatch(
+                            f.Text,
+                            @"\bEvaluatedAsProductDefiner\s*=\s*true\b",
+                            System.Text.RegularExpressions.RegexOptions.CultureInvariant))
+            .Select(f => f.RelativePath)
+            .ToList();
+        dualStampOffenders.ShouldBeEmpty("A production file must never stamp both EvaluatedByPdp and EvaluatedAsProductDefiner.");
     }
 
     [Fact]

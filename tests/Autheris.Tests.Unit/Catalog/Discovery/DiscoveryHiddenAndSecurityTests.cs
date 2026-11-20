@@ -183,6 +183,44 @@ public sealed class DiscoveryHiddenAndSecurityTests
         (await discovery.GetAsync(table.Identifier, user)).ShouldBeNull();
     }
 
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task KeysetAndFacets_Anonymous_RepoFailure_AndAuditFailure_FailClosed()
+    {
+        var table = DiscoveryTestBuilder.MakeTable("sales", "orders");
+        var repo = new FakeDiscoveryTableRepository { ThrowOnSettingsRead = true };
+        repo.Tables.Add(table);
+        var audit = new FakeAuditWriter();
+        var discovery = DiscoveryTestBuilder.CreateService(tables: repo, audit: audit);
+
+        var anonEx1 = await Should.ThrowAsync<DiscoveryStatusException>(async () =>
+            await discovery.ListKeysetAsync(new DiscoveryKeysetQuery(), DiscoveryTestBuilder.Caller(DiscoveryTestBuilder.Anonymous())));
+        anonEx1.Kind.ShouldBe(DiscoveryFailureKind.Unauthenticated);
+
+        var anonEx2 = await Should.ThrowAsync<DiscoveryStatusException>(async () =>
+            await discovery.FacetsAsync(null, DiscoveryTestBuilder.Caller(DiscoveryTestBuilder.Anonymous())));
+        anonEx2.Kind.ShouldBe(DiscoveryFailureKind.Unauthenticated);
+
+        var user = DiscoveryTestBuilder.Caller(DiscoveryTestBuilder.User("S-1", "tenant-a"));
+        repo.FailWith = new InvalidOperationException("connection string leaked here");
+        var repoFailKeyset = await discovery.ListKeysetAsync(new DiscoveryKeysetQuery(), user);
+        repoFailKeyset.Items.ShouldBeEmpty();
+        repoFailKeyset.TotalCount.ShouldBe(0);
+        repoFailKeyset.NextKey.ShouldBeNull();
+        var repoFailFacets = await discovery.FacetsAsync(null, user);
+        repoFailFacets.TotalCount.ShouldBe(0);
+        repoFailFacets.Domains.ShouldBeEmpty();
+
+        repo.FailWith = null;
+        audit.FailWithUnavailable = true;
+        var auditFailKeyset = await discovery.ListKeysetAsync(new DiscoveryKeysetQuery(), user);
+        auditFailKeyset.Items.ShouldBeEmpty();
+        auditFailKeyset.NextKey.ShouldBeNull();
+        var auditFailFacets = await discovery.FacetsAsync(null, user);
+        auditFailFacets.TotalCount.ShouldBe(0);
+        auditFailFacets.Domains.ShouldBeEmpty();
+    }
+
     private sealed class DummyExecutionService : IGatewayExecutionService
     {
         public Task<(IReadOnlyList<IReadOnlyDictionary<string, object?>> Rows, TableAccessDecision Decision)> ExecuteTableQueryAsync(ClaimsPrincipal? principal, TableIdentifier table, int? first = null, int? after = null, CancellationToken ct = default) => throw new NotSupportedException();

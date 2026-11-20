@@ -157,6 +157,7 @@ public static partial class VirtualFilterEndpoints
         managed_by = f.ManagedBy,
         definition_hash = f.ComputeDefinitionHash(),
         status = f.Status.ToString(),
+        approval_reason = VirtualFilterAdministrationService.FormatApprovalReason(VirtualFilterAdministrationService.PendingApprovalReason(f)),
         pending_deletion = f.PendingDeletion,
         has_draft = f.Draft != null,
         draft_hash = f.Draft?.ComputeDefinitionHash(),

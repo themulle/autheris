@@ -24,6 +24,13 @@ public static class TokenAccessScope
         "http://schemas.microsoft.com/identity/claims/scope"
     ];
 
+    private static readonly string[] OidcScopeClaimTypes =
+    [
+        "scp",
+        "http://schemas.microsoft.com/identity/claims/scope",
+        "scope"
+    ];
+
     public static bool IsReadOnly(this ClaimsPrincipal? principal) =>
         principal?.HasClaim(c => c.Type == ClaimType && c.Value == ReadOnlyValue && c.Issuer == Issuer) == true;
 
@@ -53,11 +60,40 @@ public static class TokenAccessScope
     public static IReadOnlyList<string> GetScopes(ClaimsPrincipal? principal) =>
         principal == null
             ? Array.Empty<string>()
-            : ScopeClaimTypes
-                .SelectMany(principal.FindAll)
-                .SelectMany(c => c.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-                .Distinct(StringComparer.Ordinal)
+            : SplitScopeClaims(principal, ScopeClaimTypes).Distinct(StringComparer.Ordinal).ToList();
+
+    /// <summary>
+    /// Token scopes across <c>scp</c>, its JwtBearer-mapped URI, and RFC 9068 <c>scope</c> (space-separated,
+    /// deduplicated by bare name case-insensitively). Retains all scopes including <see cref="WriteScope"/>.
+    /// </summary>
+    public static IReadOnlyList<string> GetTokenScopes(ClaimsPrincipal? principal) =>
+        principal == null
+            ? Array.Empty<string>()
+            : SplitScopeClaims(principal, OidcScopeClaimTypes)
+                .DistinctBy(ScopeNames.ToBareName, StringComparer.OrdinalIgnoreCase)
                 .ToList();
+
+    private static IEnumerable<string> SplitScopeClaims(ClaimsPrincipal principal, string[] claimTypes) =>
+        claimTypes
+            .SelectMany(principal.FindAll)
+            .SelectMany(c => c.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+
+    /// <summary>
+    /// Compares a configured scope (which may use the full form <c>api://app/Agent.Read</c>) against a token scope
+    /// by bare name (case-insensitive).
+    /// </summary>
+    public static bool IsSameScope(string configured, string tokenScope)
+    {
+        if (string.IsNullOrWhiteSpace(configured) || string.IsNullOrWhiteSpace(tokenScope))
+        {
+            return false;
+        }
+
+        var configuredBare = ScopeNames.ToBareName(configured.Trim());
+        var tokenBare = ScopeNames.ToBareName(tokenScope.Trim());
+        return configuredBare.Length > 0
+            && string.Equals(configuredBare, tokenBare, StringComparison.OrdinalIgnoreCase);
+    }
 
     public static IReadOnlySet<string> GetScopeSet(ClaimsPrincipal? principal)
     {

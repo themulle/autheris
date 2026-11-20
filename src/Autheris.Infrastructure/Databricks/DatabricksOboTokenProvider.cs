@@ -242,6 +242,22 @@ public sealed class DatabricksOboTokenProvider : IDatabricksCredentialProvider, 
                 "Auth.Obo.ClientId is required for OAuthObo mode.");
         }
 
+#pragma warning disable CS0618
+        if (!string.IsNullOrWhiteSpace(obo.ClientCertificateRef))
+        {
+            throw new DatabricksProviderException(
+                DatabricksErrorCodes.Configuration,
+                "Databricks OBO client certificate assertions are not supported; configure Auth.Obo.ClientSecretRef instead.");
+        }
+#pragma warning restore CS0618
+
+        if (!DatabricksOboAuthority.TryNormalize(obo.Authority, obo.TenantId, out var tokenEndpoint, out var authorityError))
+        {
+            throw new DatabricksProviderException(
+                DatabricksErrorCodes.Configuration,
+                $"Databricks OBO authority is invalid: {authorityError}");
+        }
+
         // Zero fallback policy! Missing caller token MUST fail closed.
         if (string.IsNullOrWhiteSpace(context?.CallerToken))
         {
@@ -269,6 +285,13 @@ public sealed class DatabricksOboTokenProvider : IDatabricksCredentialProvider, 
                 "Databricks OBO authentication failed: caller token assertion is expired.");
         }
 
+        if (string.IsNullOrWhiteSpace(obo.ClientSecretRef))
+        {
+            throw new DatabricksProviderException(
+                DatabricksErrorCodes.Configuration,
+                "Databricks OBO client secret could not be resolved.");
+        }
+
         // Partition cache by SHA-256 hash of caller assertion
         var assertionHash = HashAssertion(rawToken);
         var tenant = context?.TenantId?.Value;
@@ -278,22 +301,12 @@ public sealed class DatabricksOboTokenProvider : IDatabricksCredentialProvider, 
         }
 
         var secret = SecretReferenceResolver.Resolve(_secrets, obo.ClientSecretRef, _environment, allowPlaintextInDevelopment: false, _logger, "Databricks OBO client secret");
-        if (string.IsNullOrWhiteSpace(secret) && string.IsNullOrWhiteSpace(obo.ClientCertificateRef))
+        if (string.IsNullOrWhiteSpace(secret))
         {
             throw new DatabricksProviderException(
                 DatabricksErrorCodes.Configuration,
-                "Databricks OBO client credentials (secret or certificate) could not be resolved.");
+                "Databricks OBO client secret could not be resolved.");
         }
-
-        string authority = obo.Authority ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(authority))
-        {
-            var oboTenant = !string.IsNullOrWhiteSpace(obo.TenantId) ? obo.TenantId : "common";
-            authority = $"https://login.microsoftonline.com/{oboTenant}";
-        }
-
-        authority = authority.TrimEnd('/');
-        var tokenEndpoint = new Uri($"{authority}/oauth2/v2.0/token");
 
         var scopes = !string.IsNullOrWhiteSpace(obo.Scopes)
             ? obo.Scopes
@@ -303,7 +316,7 @@ public sealed class DatabricksOboTokenProvider : IDatabricksCredentialProvider, 
         {
             ["grant_type"] = "urn:ietf:params:oauth:grant-type:jwt-bearer",
             ["client_id"] = obo.ClientId,
-            ["client_secret"] = secret ?? string.Empty,
+            ["client_secret"] = secret,
             ["assertion"] = rawToken,
             ["scope"] = scopes,
             ["requested_token_use"] = "on_behalf_of"

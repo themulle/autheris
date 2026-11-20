@@ -147,6 +147,7 @@ public partial class GovernanceRepository : IGovernanceRepository, IConsentDescr
         _environment = environment;
         _grantWriter = grantWriter;
         _ready = environment == null;
+        _cdcCore = CreateCdcCore(dialect);
         InitializeAuditFields(options, auditAnchorStore, secretProvider, environment, callerContextProvider);
     }
 
