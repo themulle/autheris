@@ -35,10 +35,6 @@ public static partial class GatewayGovernanceServiceExtensions
 {
     private static void AddCatalogAndRowFilterAdministration(IServiceCollection services)
     {
-        // Issue #107: admin surface of the row filter key-set cache settings and the startup validation of its global options
-        // (runs with the GatewayOptions ValidateOnStart).
-        services.AddSingleton<IRowFilterEvaluationAdminService, RowFilterEvaluationAdminService>();
-
         // Issue #111: the only writer of dataset tags and discovery flags (REST, manifest and MCP admin tool).
         services.AddSingleton<IDatasetTagImportService, DatasetTagImportService>();
         services.AddSingleton<Autheris.Application.Catalog.Discovery.IDiscoveryArtifactStore>(sp => new DiscoveryArtifactStore(sp.GetRequiredService<Autheris.Application.Common.Interfaces.IGovernanceRepository>()));
@@ -50,26 +46,6 @@ public static partial class GatewayGovernanceServiceExtensions
             sp.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<GatewayOptions>>(),
             sp.GetService<TimeProvider>(),
             sp.GetService<Autheris.Application.Common.Interfaces.IEventBus>()));
-        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<GatewayOptions>, Autheris.Application.Policy.RowFilterKeySetCacheOptionsValidator>();
-        // Issue #107: the row-filter key-set cache runtime. The cache size and concurrency are read once (a size change needs a restart,
-        // 16); every other option is read per statement by the stage through IOptionsMonitor.
-        services.AddSingleton<TrinoSqlEngine.Governance.IPolicyKeyQueryCompiler>(sp =>
-            sp.GetRequiredService<TrinoSqlEngine.ISqlEngine>() as TrinoSqlEngine.Governance.IPolicyKeyQueryCompiler ?? new TrinoSqlEngine.Governance.PolicyKeyQueryCompiler());
-        services.AddSingleton(sp =>
-        {
-            var keySets = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>().Value.RowFilters.KeySetCache;
-            var cache = new Autheris.Application.Sql.Policy.RowFilterKeySets.RowFilterKeySetCache(
-                keySets.SizeLimitBytes, keySets.MaxConcurrentKeyQueries, sp.GetService<TimeProvider>(),
-                sp.GetService<Microsoft.Extensions.Logging.ILogger<Autheris.Application.Sql.Policy.RowFilterKeySets.RowFilterKeySetCache>>());
-            Autheris.Domain.Diagnostics.GatewayDiagnostics.Meter.CreateObservableGauge(
-                "autheris.rowfilter.keyset.cache.size_bytes", () => cache.CurrentEstimatedSize, "By", "Estimated bytes of the row-filter key-set cache");
-            return cache;
-        });
-        services.AddSingleton<Autheris.Application.Sql.Policy.RowFilterKeySets.RowFilterKeySetLoader>();
-        services.AddSingleton<Autheris.Application.Sql.Policy.RowFilterKeySets.IRowFilterKeySetLoader>(sp =>
-            sp.GetRequiredService<Autheris.Application.Sql.Policy.RowFilterKeySets.RowFilterKeySetLoader>());
-        services.AddSingleton<Autheris.Application.Sql.Policy.RowFilterKeySets.IRowFilterKeySetStage, Autheris.Application.Sql.Policy.RowFilterKeySets.RowFilterKeySetStage>();
-        services.AddHostedService<Autheris.Application.Sql.Policy.RowFilterKeySets.RowFilterKeySetStartupReporter>();
         services.AddSingleton<Autheris.Application.Audit.AuditGroupCommitOptions>();
         services.AddSingleton<Autheris.Application.Audit.AuditGroupCommitSink>();
     }

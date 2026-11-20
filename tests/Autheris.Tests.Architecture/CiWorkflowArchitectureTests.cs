@@ -286,7 +286,6 @@ public sealed partial class CiWorkflowArchitectureTests
             "Autheris.Tests.Integration.AstCompilerOracleExecutionTests",
             "Autheris.Tests.Integration.AstCompilerOracleDmlExecutionTests",
             "Autheris.Tests.Integration.OracleIntegrationTests",
-            "Autheris.Tests.Integration.RowFilterKeySetOracleTests",
         ];
         foreach (var oracleClass in expectedOracle)
         {

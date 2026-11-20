@@ -76,14 +76,13 @@ public sealed class TreeSecuredSourceBuilder(
             new HashSet<TableIdentity>(),
             GovernedSubqueryStrategy.Correlated)
         {
-            Metadata = new Dictionary<TableIdentity, TableMetadata> { [identity] = metadata },
-            KeySetStatement = null   // C6: no key-set stage on the tree (the EXISTS path stays byte-identical).
+            Metadata = new Dictionary<TableIdentity, TableMetadata> { [identity] = metadata }
         };
 
-        var assembly = await policyFactory.CreateAssemblyAsync(input, ct).ConfigureAwait(false);
+        var builtPolicy = await policyFactory.CreateAsync(input, ct).ConfigureAwait(false);
 
         // C5/C6: masks stay in the tree's outer projection; the secured source applies tenant and policy only.
-        var policy = assembly.Policy with { Masks = TreeNoMasks.Instance, TablesWithMaskedColumns = FrozenSet<string>.Empty };
+        var policy = builtPolicy with { Masks = TreeNoMasks.Instance, TablesWithMaskedColumns = FrozenSet<string>.Empty };
         var request = CompileRequestFactory.Create(
             policy, target, new WebSqlOptions(), isDml: false, enforcedMaxRows: 0, SqlFunctionAllowlists.Build(target, null));
 

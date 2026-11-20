@@ -50,10 +50,6 @@ public sealed class CatalogMutatingWritersBumpChangeVersionTests
         replaceKeys.ShouldContain("IncrementTableEpochInternalAsync");
         replaceKeys.ShouldContain("SetTableEpochChangeVersionInternalAsync");
 
-        var setRowFilter = ExtractMethod(catalogSource, "SetRowFilterEvaluationAsync");
-        setRowFilter.ShouldContain("IncrementTableEpochInternalAsync");
-        setRowFilter.ShouldContain("SetTableEpochChangeVersionInternalAsync");
-
         var createRelation = ExtractMethod(relationsSource, "CreateRelationAsync");
         createRelation.ShouldContain("BumpRelationTableEpochsInternalAsync");
         createRelation.ShouldContain("RecordDeferredRelationEpochTables");

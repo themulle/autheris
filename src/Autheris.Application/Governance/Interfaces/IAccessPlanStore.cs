@@ -11,9 +11,6 @@ public enum AccessPlanKind
     /// <summary>Access grants (grant records); the default of every plan stored before issue #107.</summary>
     Access = 0,
 
-    /// <summary>Row filter key-set cache settings of one rule or one object.</summary>
-    RowFilterEvaluation = 1,
-
     /// <summary>
     /// A mutating MCP administrator operation (dataset state, dataset catalog settings, datasource registration), bound to the tool
     /// and a digest of its arguments (<see cref="AdminOperationPlan"/>).
@@ -28,20 +25,8 @@ public enum AccessPlanKind
 public sealed record AdminOperationPlan(string Operation, string ArgumentsDigest);
 
 /// <summary>
-/// The change of a <see cref="AccessPlanKind.RowFilterEvaluation"/> plan. <paramref name="Before"/> is the stored setting at planning time;
-/// apply rejects the plan when the stored setting differs then (optimistic concurrency). <paramref name="RowFilterId"/> is set for the rule
-/// level, <paramref name="Table"/> is the target table (<c>domain.schema.table</c>) of both levels.
-/// </summary>
-public sealed record RowFilterEvaluationPlan(
-    Guid? RowFilterId,
-    string Table,
-    RowFilterEvaluationSettings Before,
-    RowFilterEvaluationSettings After);
-
-/// <summary>
 /// A pending access plan as persisted by an <see cref="IAccessPlanStore"/>. Only a SHA-256 hash of the confirmation
-/// token is stored, never the token itself. <see cref="PlanKind"/> separates access plans from row filter evaluation plans
-/// (<see cref="RowFilterEvaluation"/> is set only for the latter; their <see cref="Request"/> carries no grants).
+/// token is stored, never the token itself.
 /// <see cref="AdminOperation"/> is set only for <see cref="AccessPlanKind.AdminOperation"/> plans.
 /// </summary>
 public sealed record StoredAccessPlan(
@@ -51,7 +36,6 @@ public sealed record StoredAccessPlan(
     string? ConfirmedTokenHash = null,
     string? TenantId = null,
     AccessPlanKind PlanKind = AccessPlanKind.Access,
-    RowFilterEvaluationPlan? RowFilterEvaluation = null,
     AdminOperationPlan? AdminOperation = null);
 
 /// <summary>

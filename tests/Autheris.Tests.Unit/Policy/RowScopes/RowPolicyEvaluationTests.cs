@@ -229,10 +229,6 @@ public sealed class RowPolicyEvaluationTests
 
         var options = new GatewayOptions
         {
-            RowFilters = new RowFilterOptions
-            {
-                KeySetCache = new RowFilterKeySetCacheOptions { MaxDuration = TimeSpan.FromMinutes(15) }
-            },
             VirtualFilters = new VirtualFilterOptions
             {
                 Federation = new VirtualFilterFederationOptions { KeyCacheTtlSeconds = 45 }
@@ -241,7 +237,7 @@ public sealed class RowPolicyEvaluationTests
 
         RowPolicyParameterBinder.ComputeEffectiveKeySetMaxAge(
             baseFilter with { KeySetMaxAge = TimeSpan.FromHours(5) },
-            options).ShouldBe(TimeSpan.FromMinutes(15));
+            options).ShouldBe(TimeSpan.FromHours(1));
 
         RowPolicyParameterBinder.ComputeEffectiveKeySetMaxAge(
             baseFilter with { KeySetMaxAge = TimeSpan.FromMinutes(5) },

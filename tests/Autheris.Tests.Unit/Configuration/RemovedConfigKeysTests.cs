@@ -82,6 +82,13 @@ public sealed class RemovedConfigKeysTests
     [InlineData("Gateway:Webhooks:Enabled", "true")]
     [InlineData("Gateway:Webhooks:Enabled", "false")]
     [InlineData("Gateway:Webhooks:Enabled", "")]
+    [InlineData("Gateway:RowFilters:KeySetCache", "true")]
+    [InlineData("Gateway:RowFilters:KeySetCache", "false")]
+    [InlineData("Gateway:RowFilters:KeySetCache", "")]
+    [InlineData("Gateway:RowFilters:KeySetCache:DefaultStrategy", "KeySetCache")]
+    [InlineData("Gateway:RowFilters:KeySetCache:MaxKeys", "2000")]
+    [InlineData("Gateway:DataSources:Connections:default:KeySetCacheAllowed", "true")]
+    [InlineData("Gateway:DataSources:Connections:default:KeySetCacheAllowed", "false")]
     public void Every_removed_key_fails_startup(string key, string value)
     {
         var configuration = Config(key, value);
