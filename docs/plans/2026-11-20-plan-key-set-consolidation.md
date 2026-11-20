@@ -43,3 +43,4 @@ Last step on `main`: `0031_access_profile_items`. Reserved: `0032` (#922, PR #93
 
 ## 8. Changelog
 - 2026-11-20: plan created after the owner decision to extend the row policy model and remove the consent row filter key-set model completely.
+- 2026-11-20 (WP-KS-0 verified): `rg` across `src/` and `tests/` confirms `RowFilterKeySetStage` is only wired in `GovernancePolicyFactory` (`_keySetStage`) and `GatewayGovernanceServiceExtensions.Catalog.cs`, and `CorrelatedFilterSiteRegistry.Register` has zero callers in `src/` (its sole caller is the test helper `TestCorrelatedPredicateBuilder` in `Autheris.Tests.Unit`). Because step `0024_drop_superseded_governance_columns` dropped the correlated consent filter columns, no consent row filter can register a site or reach the key-set stage in production. Existing unit tests (`RowFilterKeySetStageTests`, `CorrelatedKeySetSubstitutionTests`, `GovernancePolicyFactoryKeySetTests`) pass (88/88).

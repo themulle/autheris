@@ -133,6 +133,9 @@ public sealed record VirtualFilter
     /// <summary>Optional maximum cache age when <see cref="EvaluationMode"/> is <see cref="RowPolicyEvaluationMode.KeySet"/>.</summary>
     public TimeSpan? KeySetMaxAge { get; init; }
 
+    /// <summary>Optional per-policy maximum number of authorized keys when <see cref="EvaluationMode"/> is <see cref="RowPolicyEvaluationMode.KeySet"/> (clamped to <c>MaxAuthorizedKeys</c>).</summary>
+    public int? KeySetMaxKeys { get; init; }
+
     public ManagedBy? ManagedBy { get; init; }
     public string? UpdatedBy { get; init; }
     public DateTimeOffset UpdatedAt { get; init; } = DateTimeOffset.UtcNow;
@@ -165,6 +168,13 @@ public sealed record VirtualFilter
 
         if (KeySetMaxAge is { } maxAge && maxAge <= TimeSpan.Zero)
             throw new ArgumentException("key_set_max_age must be positive.", nameof(KeySetMaxAge));
+        if (KeySetMaxKeys is { } maxKeys)
+        {
+            if (maxKeys < 1)
+                throw new ArgumentException("key_set_max_keys must be at least 1.", nameof(KeySetMaxKeys));
+            if (EvaluationMode != RowPolicyEvaluationMode.KeySet)
+                throw new ArgumentException("key_set_max_keys is only valid when evaluation_mode is KeySet.", nameof(KeySetMaxKeys));
+        }
         var paramNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var param in Parameters)
         {
@@ -258,13 +268,17 @@ public sealed record VirtualFilter
           .Append("valid_from=").Append(ValidFromColumn).Append('\n')
           .Append("valid_to=").Append(ValidToColumn).Append('\n')
           .Append("supersedes=").AppendJoin(',', Supersedes.OrderBy(s => s, StringComparer.Ordinal));
-        if (Parameters.Count > 0 || EvaluationMode != RowPolicyEvaluationMode.Live || KeySetMaxAge != null)
+        if (Parameters.Count > 0 || EvaluationMode != RowPolicyEvaluationMode.Live || KeySetMaxAge != null || KeySetMaxKeys != null)
         {
             sb.Append('\n').Append("params=").AppendJoin(',', Parameters
                     .OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
                     .Select(p => $"{p.Name}:{p.Type}:{p.IsList}:{p.MaxValues}"))
               .Append('\n').Append("mode=").Append(EvaluationMode)
               .Append('\n').Append("max_age=").Append(KeySetMaxAge?.Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty);
+            if (KeySetMaxKeys is { } maxKeys)
+            {
+                sb.Append('\n').Append("max_keys=").Append(maxKeys.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            }
         }
         return VirtualFilterNames.Sha256(sb.ToString());
     }
