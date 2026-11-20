@@ -70,6 +70,12 @@ public record TableAccessDecision(
     internal bool EvaluatedByPdp { get; init; }
 
     /// <summary>
+    /// Set only by the product definer execution path after resolving product-owned base tables.
+    /// A decision with this marker is never trusted by aggregation as a pre-evaluated PDP decision.
+    /// </summary>
+    internal bool EvaluatedAsProductDefiner { get; init; }
+
+    /// <summary>
     /// Populated by the unified policy decision point for DML write operations (INSERT / UPDATE / DELETE).
     /// </summary>
     public TableWriteDecision? WriteGrant { get; init; }

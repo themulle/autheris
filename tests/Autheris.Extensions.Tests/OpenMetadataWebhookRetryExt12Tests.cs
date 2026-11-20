@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Catalog.OpenMetadata;
+using Autheris.Application.State;
 using Autheris.Domain.Options;
 using Autheris.Extensions.OpenMetadata;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -49,13 +50,14 @@ public sealed class OpenMetadataWebhookRetryExt12Tests
 
         var service = new OpenMetadataSyncService(
             client, metadataRepo, Substitute.For<IConsentRepository>(), epochRepo,
-            Options.Create(options), NullLogger<OpenMetadataSyncService>.Instance);
+            Options.Create(options), NullLogger<OpenMetadataSyncService>.Instance,
+            clusterState: new InMemoryClusterStateProvider());
 
         await Should.ThrowAsync<HttpRequestException>(() => service.HandleWebhookEventAsync(payload, signature));
 
         var retried = await service.HandleWebhookEventAsync(payload, signature);
 
-        retried.ShouldBeTrue();
+        retried.ShouldBe(OpenMetadataWebhookOutcome.Processed);
         calls.ShouldBe(2);
         await epochRepo.Received(1).IncrementTableEpochAsync(Arg.Any<Autheris.Domain.Common.TableIdentifier>(), Arg.Any<CancellationToken>());
     }

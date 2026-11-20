@@ -39,6 +39,21 @@ internal sealed record TrinoJdbcQuery(
     IReadOnlyList<TrinoJdbcOrderKey> OrderBy);
 
 /// <summary>
+/// Equality and <c>IN</c> filters extracted for catalog, schema and table axes so discovery results can be pruned before
+/// loading catalog metadata and deciding access. <c>LIKE</c> predicates are never pushed down.
+/// </summary>
+internal sealed record TrinoJdbcPushdownKeys(
+    IReadOnlySet<string>? Catalogs,
+    IReadOnlySet<string>? Schemas,
+    IReadOnlySet<string>? Tables)
+{
+    public bool Matches(DiscoveryObject item) =>
+        (Catalogs is null || Catalogs.Contains(item.Domain)) &&
+        (Schemas is null || Schemas.Contains(item.Schema)) &&
+        (Tables is null || Tables.Contains(item.Name));
+}
+
+/// <summary>
 /// The grammar and the in-memory evaluation of the Trino <c>system.jdbc</c> metadata views. A statement outside the grammar
 /// (any <c>OR</c>, function, join, <c>UNION</c>, subquery, aggregate, <c>LIMIT</c>, unknown view or schema) is rejected with
 /// a fixed <see cref="NotSupportedException"/> and is never forwarded to a source.
@@ -340,9 +355,71 @@ internal static class TrinoJdbcMetadataShapes
         return new TrinoJdbcQuery(view, projection, conditions, order);
     }
 
-    /// <summary>Evaluates the query over the visible entries; filtering happens before ordering.</summary>
+    /// <summary>
+    /// Extracts conjunctive equality and <c>IN</c> sets per catalog, schema and table column from <paramref name="query"/>.
+    /// <c>LIKE</c> and <c>IS NULL</c> predicates are never pushed down.
+    /// </summary>
+    internal static TrinoJdbcPushdownKeys PushdownKeys(TrinoJdbcQuery query)
+    {
+        var (catalogCol, schemaCol, tableCol) = query.View switch
+        {
+            TrinoJdbcView.Catalogs => (0, -1, -1),
+            TrinoJdbcView.Schemas => (1, 0, -1),
+            TrinoJdbcView.Tables or TrinoJdbcView.Columns => (0, 1, 2),
+            _ => (-1, -1, -1)
+        };
+
+        HashSet<string>? catalogs = null;
+        HashSet<string>? schemas = null;
+        HashSet<string>? tables = null;
+
+        foreach (var condition in query.Conditions)
+        {
+            if (condition.Operator is not (TrinoJdbcOperator.Eq or TrinoJdbcOperator.In))
+            {
+                continue;
+            }
+
+            if (condition.Column == catalogCol)
+            {
+                IntersectValues(ref catalogs, condition.Values);
+            }
+            else if (condition.Column == schemaCol)
+            {
+                IntersectValues(ref schemas, condition.Values);
+            }
+            else if (condition.Column == tableCol)
+            {
+                IntersectValues(ref tables, condition.Values);
+            }
+        }
+
+        // system.jdbc.schemas synthesizes an information_schema row for every visible catalog,
+        // so filtering discovery by schema when information_schema is requested would drop catalogs.
+        if (query.View == TrinoJdbcView.Schemas && schemas is not null && schemas.Contains("information_schema"))
+        {
+            schemas = null;
+        }
+
+        return new TrinoJdbcPushdownKeys(catalogs, schemas, tables);
+    }
+
+    private static void IntersectValues(ref HashSet<string>? current, string[] values)
+    {
+        var next = new HashSet<string>(values, StringComparer.OrdinalIgnoreCase);
+        if (current is null)
+        {
+            current = next;
+        }
+        else
+        {
+            current.IntersectWith(next);
+        }
+    }
+
+    /// <summary>Evaluates the query over the visible entries; filtering happens before ordering and optional unordered row capping.</summary>
     internal static (string[] Columns, List<IReadOnlyDictionary<string, object?>> Rows) Execute(
-        TrinoJdbcQuery query, IReadOnlyList<TrinoJdbcEntry> entries)
+        TrinoJdbcQuery query, IReadOnlyList<TrinoJdbcEntry> entries, int? rowLimit = null)
     {
         var names = ColumnNames(query.View);
         var source = BuildRows(query.View, entries);
@@ -358,7 +435,13 @@ internal static class TrinoJdbcMetadataShapes
                 : (key.Descending ? ordered.ThenByDescending(r => r[key.Column], ValueComparer.Instance) : ordered.ThenBy(r => r[key.Column], ValueComparer.Instance));
         }
 
-        var result = (ordered ?? rows).ToList();
+        IEnumerable<object?[]> selected = ordered ?? rows;
+        if (query.OrderBy.Count == 0 && rowLimit is >= 0 and var limit)
+        {
+            selected = selected.Take((int)Math.Min(int.MaxValue, (long)limit + 1));
+        }
+
+        var result = selected.ToList();
 
         var outputNames = query.Projection.Select(i => names[i]).ToArray();
         var outputRows = new List<IReadOnlyDictionary<string, object?>>(result.Count);
@@ -377,82 +460,77 @@ internal static class TrinoJdbcMetadataShapes
     }
 
     internal static List<object?[]> BuildForTest(TrinoJdbcView view, IReadOnlyList<TrinoJdbcEntry> entries) =>
-        BuildRows(view, entries);
+        BuildRows(view, entries).ToList();
 
-    private static List<object?[]> BuildRows(TrinoJdbcView view, IReadOnlyList<TrinoJdbcEntry> entries)
+    private static IEnumerable<object?[]> BuildRows(TrinoJdbcView view, IReadOnlyList<TrinoJdbcEntry> entries)
     {
-        var rows = new List<object?[]>();
-        var tables = entries.Where(e => e.Object.Kind != DiscoveryObjectKind.Procedure).ToList();
-        switch (view)
+        var tables = entries.Where(static e => e.Object.Kind != DiscoveryObjectKind.Procedure);
+        return view switch
         {
-            case TrinoJdbcView.Catalogs:
-                foreach (var catalog in tables.Select(t => t.Object.Domain).Append("system")
-                             .Where(d => !string.IsNullOrWhiteSpace(d)).Distinct(StringComparer.OrdinalIgnoreCase))
-                {
-                    rows.Add([catalog]);
-                }
-
-                break;
-            case TrinoJdbcView.Schemas:
-                var pairs = tables
-                    .SelectMany(t => new[] { (t.Object.Domain, t.Object.Schema), (t.Object.Domain, "information_schema") })
-                    .Where(p => !string.IsNullOrWhiteSpace(p.Domain) && !string.IsNullOrWhiteSpace(p.Item2))
-                    .Distinct(PairComparer.Instance);
-                foreach (var (domain, schema) in pairs)
-                {
-                    rows.Add([schema, domain]);
-                }
-
-                break;
-            case TrinoJdbcView.TableTypes:
-                rows.Add(["TABLE"]);
-                rows.Add(["VIEW"]);
-                break;
-            case TrinoJdbcView.Tables:
-                foreach (var e in tables)
-                {
-                    var o = e.Object;
-                    var tableType = o.Kind switch
-                    {
-                        DiscoveryObjectKind.Table => "TABLE",
-                        DiscoveryObjectKind.View or DiscoveryObjectKind.MetricView => "VIEW",
-                        _ => throw new ArgumentOutOfRangeException(nameof(entries), o.Kind, "Unsupported DiscoveryObjectKind for JDBC TABLES.")
-                    };
-                    rows.Add([
-                        o.Domain, o.Schema, o.Name, tableType,
-                        e.Accessible ? AccessGranted : AccessNotAccessible, null, null, null, null, null
-                    ]);
-                }
-
-                break;
-            default:
-                foreach (var e in tables.Where(x => x.Accessible))
-                {
-                    var o = e.Object;
-                    var ordinal = 1;
-                    foreach (var column in o.Columns)
-                    {
-                        if (!Autheris.Application.Catalog.Discovery.DiscoveryColumnVisibility.IsVisible(column.State) || !e.AllowedColumns.Contains(column.Name))
-                        {
-                            continue;
-                        }
-
-                        rows.Add(ColumnRow(o, column, ordinal++));
-                    }
-                }
-
-                break;
-        }
-
-        // Canonical ordering (catalog, schema, name, ordinal) is the fixed tiebreak of every later ORDER BY.
-        var keys = view switch
-        {
-            TrinoJdbcView.Schemas => new[] { 1, 0 },
-            TrinoJdbcView.Tables => new[] { 0, 1, 2 },
-            TrinoJdbcView.Columns => new[] { 0, 1, 2, 16 },
-            _ => new[] { 0 }
+            TrinoJdbcView.Catalogs => BuildCatalogRows(tables),
+            TrinoJdbcView.Schemas => BuildSchemaRows(tables),
+            TrinoJdbcView.TableTypes => [["TABLE"], ["VIEW"]],
+            TrinoJdbcView.Tables => BuildTableRows(tables),
+            _ => BuildColumnRows(tables)
         };
-        return rows.Order(new RowComparer(keys)).ToList();
+    }
+
+    private static IEnumerable<object?[]> BuildCatalogRows(IEnumerable<TrinoJdbcEntry> tables) =>
+        tables.Select(static t => t.Object.Domain)
+            .Append("system")
+            .Where(static d => !string.IsNullOrWhiteSpace(d))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static d => d, StringComparer.OrdinalIgnoreCase)
+            .Select(static catalog => new object?[] { catalog });
+
+    private static IEnumerable<object?[]> BuildSchemaRows(IEnumerable<TrinoJdbcEntry> tables) =>
+        tables.SelectMany(static t => new[] { (t.Object.Domain, t.Object.Schema), (t.Object.Domain, "information_schema") })
+            .Where(static p => !string.IsNullOrWhiteSpace(p.Domain) && !string.IsNullOrWhiteSpace(p.Item2))
+            .Distinct(PairComparer.Instance)
+            .OrderBy(static p => p.Domain, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(static p => p.Item2, StringComparer.OrdinalIgnoreCase)
+            .Select(static p => new object?[] { p.Item2, p.Domain });
+
+    private static IEnumerable<TrinoJdbcEntry> OrderEntries(IEnumerable<TrinoJdbcEntry> tables) =>
+        tables.OrderBy(static e => e.Object.Domain, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(static e => e.Object.Schema, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(static e => e.Object.Name, StringComparer.OrdinalIgnoreCase);
+
+    private static IEnumerable<object?[]> BuildTableRows(IEnumerable<TrinoJdbcEntry> tables)
+    {
+        foreach (var e in OrderEntries(tables))
+        {
+            var o = e.Object;
+            var tableType = o.Kind switch
+            {
+                DiscoveryObjectKind.Table => "TABLE",
+                DiscoveryObjectKind.View or DiscoveryObjectKind.MetricView => "VIEW",
+                _ => throw new ArgumentOutOfRangeException(nameof(tables), o.Kind, "Unsupported DiscoveryObjectKind for JDBC TABLES.")
+            };
+            yield return
+            [
+                o.Domain, o.Schema, o.Name, tableType,
+                e.Accessible ? AccessGranted : AccessNotAccessible, null, null, null, null, null
+            ];
+        }
+    }
+
+    private static IEnumerable<object?[]> BuildColumnRows(IEnumerable<TrinoJdbcEntry> tables)
+    {
+        foreach (var e in OrderEntries(tables.Where(static x => x.Accessible)))
+        {
+            var o = e.Object;
+            var ordinal = 1;
+            foreach (var column in o.Columns)
+            {
+                if (!Autheris.Application.Catalog.Discovery.DiscoveryColumnVisibility.IsVisible(column.State) || !e.AllowedColumns.Contains(column.Name))
+                {
+                    continue;
+                }
+
+                yield return ColumnRow(o, column, ordinal++);
+            }
+        }
     }
 
     private static object?[] ColumnRow(DiscoveryObject o, DiscoveryColumn column, int ordinal)
@@ -771,23 +849,6 @@ internal static class TrinoJdbcMetadataShapes
             }
 
             return StringComparer.OrdinalIgnoreCase.Compare(x.ToString(), y.ToString());
-        }
-    }
-
-    private sealed class RowComparer(int[] keys) : IComparer<object?[]>
-    {
-        public int Compare(object?[]? x, object?[]? y)
-        {
-            foreach (var key in keys)
-            {
-                var c = ValueComparer.Instance.Compare(x![key], y![key]);
-                if (c != 0)
-                {
-                    return c;
-                }
-            }
-
-            return 0;
         }
     }
 }

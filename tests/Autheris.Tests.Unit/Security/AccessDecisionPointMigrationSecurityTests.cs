@@ -293,6 +293,29 @@ public sealed class AccessDecisionPointMigrationSecurityTests
         trusted.IsAllowed.ShouldBeTrue();
     }
 
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task PreEvaluatedDecision_WithDefinerProvenance_IsReEvaluated()
+    {
+        var pdpCalls = 0;
+        var denyingPdp = AccessDecisionPointStubs.Returning(r =>
+        {
+            pdpCalls++;
+            return TableAccessDecision.Denied(r.Object.Identifier, "Denied by PDP.");
+        });
+        var definerDecision = Allowed() with { EvaluatedAsProductDefiner = true };
+        var query = new AggregationQuery(Orders, PreEvaluatedDecision: definerDecision, BypassTableConsent: true);
+
+        definerDecision.EvaluatedAsProductDefiner.ShouldBeTrue();
+        definerDecision.EvaluatedByPdp.ShouldBeFalse();
+
+        var resolved = await InvokeAggregationDecisionAsync(denyingPdp, query);
+
+        resolved.IsAllowed.ShouldBeFalse();
+        resolved.EvaluatedAsProductDefiner.ShouldBeFalse();
+        pdpCalls.ShouldBe(1);
+    }
+
     private sealed class CapturingLogger : ILogger
     {
         public List<string> Messages { get; } = [];

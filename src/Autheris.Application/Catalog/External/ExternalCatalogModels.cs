@@ -147,6 +147,19 @@ public sealed record ExternalCatalogPageDto(
     string? NextCursor,
     int TotalCount);
 
+public sealed record ExternalCatalogSchemaFacetDto(
+    string Schema,
+    int Count);
+
+public sealed record ExternalCatalogDomainFacetDto(
+    string Domain,
+    int Count,
+    IReadOnlyList<ExternalCatalogSchemaFacetDto> Schemas);
+
+public sealed record ExternalCatalogFacetsDto(
+    int TotalCount,
+    IReadOnlyList<ExternalCatalogDomainFacetDto> Domains);
+
 public sealed record ExternalCatalogChangeDto(
     string ObjectId,
     string Kind,
@@ -160,7 +173,8 @@ public sealed record ExternalCatalogChangesResponseDto(
 public sealed record ExternalCatalogError(
     int StatusCode,
     string Code,
-    string Detail);
+    string Detail,
+    int? RetryAfterSeconds = null);
 
 public sealed record ExternalCatalogResult<T>(
     T? Value,
@@ -173,6 +187,6 @@ public static class ExternalCatalogResult
 {
     public static ExternalCatalogResult<T> Ok<T>(T value) => new(value, null);
 
-    public static ExternalCatalogResult<T> Fail<T>(int statusCode, string code, string detail) =>
-        new(default, new ExternalCatalogError(statusCode, code, detail));
+    public static ExternalCatalogResult<T> Fail<T>(int statusCode, string code, string detail, int? retryAfterSeconds = null) =>
+        new(default, new ExternalCatalogError(statusCode, code, detail, retryAfterSeconds));
 }

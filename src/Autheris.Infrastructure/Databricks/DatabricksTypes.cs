@@ -16,7 +16,7 @@ public sealed record DatabricksStatementRequest(
     IReadOnlyDictionary<string, string>? QueryTags = null,
     Autheris.Domain.Connectors.DelegationContext? Delegation = null);
 
-public readonly record struct DatabricksColumn(string Name, string TypeName);
+public readonly record struct DatabricksColumn(string Name, string TypeName, int? Precision = null, int? Scale = null);
 
 /// <summary>Inline JSON_ARRAY result: every cell is the textual value or null.</summary>
 public sealed record DatabricksStatementResult(

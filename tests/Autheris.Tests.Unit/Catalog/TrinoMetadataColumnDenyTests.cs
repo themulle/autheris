@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Sql.Services;
+using Autheris.Tests.Unit.Sql;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using NSubstitute;
@@ -55,7 +56,7 @@ public sealed class TrinoMetadataColumnDenyTests
     private static async Task<string[]> ColumnsAsync(IConsentRepository consents, params TableMetadata[] tables)
     {
         var result = await TrinoMetadataQueryHandler.TryExecuteAsync(
-            "SELECT * FROM information_schema.columns", Caller(), Tenant, Wp0.Tables(tables), consents, Wp0.Options());
+            "SELECT * FROM information_schema.columns", Caller(), Tenant, Wp0.Tables(tables), consents, Wp0.Options(), null, TrinoMetadataVisibilityFakes.AllowAll(tables));
         result.ShouldNotBeNull();
         return result.Rows.Select(r => r["column_name"]?.ToString() ?? string.Empty).ToArray();
     }
@@ -130,7 +131,7 @@ public sealed class TrinoMetadataColumnDenyTests
         // Table-wide grant without explicit measure rule: only dimensions are visible.
         var tableWideConsents = Repository(Grant(mv.Identifier, GranteeType.User, UserSid));
         var tablesRes = await TrinoMetadataQueryHandler.TryExecuteAsync(
-            "SELECT * FROM information_schema.tables", Caller(), Tenant, Wp0.Tables(mv), tableWideConsents, Wp0.Options());
+            "SELECT * FROM information_schema.tables", Caller(), Tenant, Wp0.Tables(mv), tableWideConsents, Wp0.Options(), null, TrinoMetadataVisibilityFakes.AllowAll(mv));
         tablesRes.ShouldNotBeNull();
         tablesRes.Rows.ShouldHaveSingleItem()["table_type"].ShouldBe("VIEW");
 

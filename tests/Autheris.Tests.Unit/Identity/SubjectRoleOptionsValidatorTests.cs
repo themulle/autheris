@@ -6,6 +6,7 @@ using System.Linq;
 using Autheris.Application.Identity.Validators;
 using Autheris.Domain.Identity;
 using Autheris.Domain.Options.Security;
+using Autheris.Tests.Common;
 using Shouldly;
 using Xunit;
 
@@ -153,5 +154,32 @@ public sealed class SubjectRoleOptionsValidatorTests
 
         result.Failed.ShouldBeTrue();
         result.FailureMessage.ShouldNotContain("secret:subject:value");
+    }
+
+    [Fact]
+    public void Startup_GenericOidcEmptyReadOnlyScopes_WarnsAndSucceeds()
+    {
+        var logger = new CapturingLogger<SubjectRoleOptionsValidator>();
+        var validator = new SubjectRoleOptionsValidator(logger);
+
+        var options = Options(r =>
+        {
+            r.SubjectRoles = [];
+            r.ReadOnlyScopes = [];
+        });
+
+        validator.Validate(null, options).Succeeded.ShouldBeTrue();
+        logger.Warnings.ShouldContain(w => w.Contains("ReadOnlyScopes", StringComparison.Ordinal) && w.Contains("workload", StringComparison.Ordinal));
+
+        var noWarnLogger = new CapturingLogger<SubjectRoleOptionsValidator>();
+        var noWarnValidator = new SubjectRoleOptionsValidator(noWarnLogger);
+        noWarnValidator.Validate(null, Options(r => r.ReadOnlyScopes = null)).Succeeded.ShouldBeTrue();
+        noWarnValidator.Validate(null, Options(r =>
+        {
+            r.Kind = IdentityRealmKind.EntraWorkforce;
+            r.SubjectRoles = [];
+            r.ReadOnlyScopes = [];
+        })).Succeeded.ShouldBeTrue();
+        noWarnLogger.Warnings.ShouldBeEmpty();
     }
 }

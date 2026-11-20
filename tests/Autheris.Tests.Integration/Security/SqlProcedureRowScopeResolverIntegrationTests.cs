@@ -60,9 +60,11 @@ public sealed class SqlProcedureRowScopeResolverIntegrationTests : IAsyncLifetim
             CREATE UNIQUE INDEX ux_state_code ON main.crane_state (client_id, code);
             CREATE UNIQUE INDEX ux_state_expr ON main.crane_state (id, lower(code));
             CREATE TABLE main.client (client_id bigint NOT NULL, region text NOT NULL);
+            CREATE TABLE main.crane_nullable (id bigint PRIMARY KEY, group_id bigint NOT NULL, flag bigint, tenant_id text NOT NULL);
             INSERT INTO main.crane VALUES ('100', 1, 1, 'tenant-a'), ('200', 2, NULL, 'tenant-a'), ('300', 3, NULL, 'tenant-b');
             INSERT INTO main.crane_state VALUES (1, 1, 'A', 'tenant-a'), (2, 1, 'B', 'tenant-a'), (3, 2, 'A', 'tenant-a');
             INSERT INTO main.client VALUES (1, 'CH'), (2, 'DE'), (1, 'AT');
+            INSERT INTO main.crane_nullable VALUES (1, 10, 1, 'tenant-a'), (2, 10, NULL, 'tenant-a'), (3, 20, 1, 'tenant-a'), (4, 30, NULL, 'tenant-a');
             """;
         await cmd.ExecuteNonQueryAsync();
     }
@@ -184,5 +186,43 @@ public sealed class SqlProcedureRowScopeResolverIntegrationTests : IAsyncLifetim
 
         allowed.ShouldContain(RowScopeKeys.Normalize([1L])!);
         allowed.ShouldContain(RowScopeKeys.Normalize([2L])!);
+    }
+
+    [RequiresContainerRuntimeFact]
+    [Trait("Category", "Security")]
+    public async Task ExistsRowFilter_IsEvaluated()
+    {
+        if (!_available) return;
+
+        var table = Table("crane", "serial_number", "client_id", "is_delivered", "tenant_id");
+        const string existsFilter = "EXISTS (SELECT 1 FROM main.client r WHERE r.client_id = autheris_target.client_id AND r.region = 'DE')";
+        var allowed = await Resolver().GetAllowedKeysAsync(
+            Definition(), table, Decision(table, existsFilter), ["serial_number"],
+            [["100"], ["200"], ["300"]], Caller, CancellationToken.None);
+
+        allowed.ShouldBe(new[] { RowScopeKeys.Normalize(["200"])! });
+    }
+
+    [RequiresContainerRuntimeFact]
+    [Trait("Category", "Security")]
+    public async Task RowFilterEvaluatingToNull_KeyRejected()
+    {
+        if (!_available) return;
+
+        var crane = Table("crane", "serial_number", "client_id", "is_delivered", "tenant_id");
+        var craneAllowed = await Resolver().GetAllowedKeysAsync(
+            Definition(), crane, Decision(crane, "\"autheris_target\".\"is_delivered\" = 1"), ["serial_number"],
+            [["100"], ["200"]], Caller, CancellationToken.None);
+
+        // '200' has is_delivered IS NULL so the comparison evaluates to UNKNOWN and is rejected fail-closed.
+        craneAllowed.ShouldBe(new[] { RowScopeKeys.Normalize(["100"])! });
+
+        var nullable = Table("crane_nullable", "id", "group_id", "flag", "tenant_id");
+        var groupAllowed = await Resolver().GetAllowedKeysAsync(
+            Definition(), nullable, Decision(nullable, "\"autheris_target\".\"flag\" = 1"), ["group_id"],
+            [[10L], [20L], [30L]], Caller, CancellationToken.None);
+
+        // group_id 10 has one passing row and one NULL (UNKNOWN) row; key closure rejects group 10 and keeps only group 20.
+        groupAllowed.ShouldBe(new[] { RowScopeKeys.Normalize([20L])! });
     }
 }

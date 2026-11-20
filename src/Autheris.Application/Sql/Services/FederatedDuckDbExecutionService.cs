@@ -637,7 +637,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
                 throw new InvalidOperationException($"The tenant column '{tenantColumn}' of {resolved.Target.FullName} is not a plain identifier; the query is refused (fail-closed).");
             }
 
-            var decision = TableAccessDecision.Allowed(resolved.Metadata.Identifier, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true) with { EvaluatedByPdp = true };
+            var decision = TableAccessDecision.Allowed(resolved.Metadata.Identifier, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true) with { EvaluatedAsProductDefiner = true };
             GovernedSqlExecutionService.EnforceMaskedColumnGuardrails(resolved.Target, resolved.Metadata, decision, metadata);
             decisions[decisionKey] = decision;
         }

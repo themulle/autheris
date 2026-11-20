@@ -44,6 +44,39 @@ public sealed record DiscoveryPage(
     int TotalCount,
     bool HasNextPage);
 
+public sealed record DiscoveryKeysetQuery(
+    string? Domain = null,
+    string? Schema = null,
+    DiscoveryObjectKind? Kind = null,
+    string? Tag = null,
+    string? Sensitivity = null,
+    string? Search = null,
+    string? Language = null,
+    DiscoveryAccessState? Access = null,
+    string? AfterKey = null,
+    int First = 50,
+    DiscoverySurface Surface = DiscoverySurface.Rest,
+    Func<TableMetadata, bool>? MetadataPredicate = null,
+    Func<DiscoveryObject, bool>? ProjectedPredicate = null,
+    bool CountTotal = true,
+    IReadOnlyList<string>? AppliedFilterNames = null);
+
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Naming", "CA1720:Identifier contains type name", Justification = "Catalog discovery keyset item contract uses Object for the projected discovery object.")]
+public sealed record DiscoveryKeysetItem(
+    DiscoveryObject Object,
+    TableMetadata Table);
+
+public sealed record DiscoveryKeysetPage(
+    IReadOnlyList<DiscoveryKeysetItem> Items,
+    int? TotalCount,
+    string? NextKey);
+
+public sealed record DiscoverySchemaFacet(string Schema, int Count);
+
+public sealed record DiscoveryDomainFacet(string Domain, int Count, IReadOnlyList<DiscoverySchemaFacet> Schemas);
+
+public sealed record DiscoveryFacets(int TotalCount, IReadOnlyList<DiscoveryDomainFacet> Domains);
+
 public enum DiscoveryFailureKind
 {
     Unauthenticated = 0,
@@ -74,6 +107,8 @@ public sealed class DiscoveryStatusException : Exception
 public interface IDiscoveryService
 {
     ValueTask<DiscoveryPage> ListAsync(DiscoveryQuery query, CatalogCaller caller, CancellationToken ct = default);
+    ValueTask<DiscoveryKeysetPage> ListKeysetAsync(DiscoveryKeysetQuery query, CatalogCaller caller, CancellationToken ct = default);
+    ValueTask<DiscoveryFacets> FacetsAsync(DiscoveryAccessState? access, CatalogCaller caller, CancellationToken ct = default);
     ValueTask<DiscoveryObject?> GetAsync(TableIdentifier id, CatalogCaller caller, CancellationToken ct = default);
     ValueTask<IReadOnlyList<DiscoveryObject>> SearchAsync(string text, DiscoverySearchOptions options, CatalogCaller caller, CancellationToken ct = default);
 }

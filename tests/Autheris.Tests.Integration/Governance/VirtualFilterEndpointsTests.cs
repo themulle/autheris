@@ -27,7 +27,7 @@ using Xunit;
 /// Virtual filters, phase 2: administration API. FilterAdmin writes, FilterSync applies the file repository state,
 /// GovernanceAdmin and SecurityAuditor read; everybody stays within their tenant (decision 3).
 /// </summary>
-public sealed class VirtualFilterEndpointsTests : IDisposable
+public sealed partial class VirtualFilterEndpointsTests : IDisposable
 {
     private const string Tenant = "tenant_lwe";
 

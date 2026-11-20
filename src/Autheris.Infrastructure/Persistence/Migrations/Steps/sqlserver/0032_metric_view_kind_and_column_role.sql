@@ -1,4 +1,4 @@
--- Governance schema step 0031 (SQL Server): add 'metric_view' to dbo.TABLES.object_kind, dbo.TABLES.metric_view_count_measure, and dbo.TABLE_COLUMNS.column_role ('dimension' or 'measure'). Forward-only and idempotent.
+-- Governance schema step 0032 (SQL Server): add 'metric_view' to dbo.TABLES.object_kind, dbo.TABLES.metric_view_count_measure, and dbo.TABLE_COLUMNS.column_role ('dimension' or 'measure'). Forward-only and idempotent.
 IF OBJECT_ID(N'dbo.CK_TABLES_object_kind', N'C') IS NOT NULL ALTER TABLE dbo.TABLES DROP CONSTRAINT CK_TABLES_object_kind;
 -- batch
 ALTER TABLE dbo.TABLES ADD CONSTRAINT CK_TABLES_object_kind CHECK (object_kind IN (N'table', N'view', N'metric_view'));

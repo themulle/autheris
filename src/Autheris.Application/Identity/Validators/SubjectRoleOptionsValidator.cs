@@ -7,13 +7,14 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Identity;
 using Autheris.Domain.Options.Security;
 using Autheris.Domain.Security;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
 /// Startup validation of workload subject mappings and static JWKS sources. Every violation fails startup: no entry is dropped silently,
 /// a privileged mapping needs an explicit opt-in, and messages carry the realm id and entry index only (never a subject or key material).
 /// </summary>
-public sealed class SubjectRoleOptionsValidator : IValidateOptions<IdentityRealmsOptions>
+public sealed class SubjectRoleOptionsValidator(ILogger<SubjectRoleOptionsValidator>? logger = null) : IValidateOptions<IdentityRealmsOptions>
 {
     public ValidateOptionsResult Validate(string? name, IdentityRealmsOptions options)
     {
@@ -31,8 +32,15 @@ public sealed class SubjectRoleOptionsValidator : IValidateOptions<IdentityRealm
         return failures.Count == 0 ? ValidateOptionsResult.Success : ValidateOptionsResult.Fail(failures);
     }
 
-    private static void ValidateRealm(string realmId, IdentityRealmConfigOptions config, List<string> failures)
+    private void ValidateRealm(string realmId, IdentityRealmConfigOptions config, List<string> failures)
     {
+        if (config.Kind == IdentityRealmKind.GenericOidc && config.ReadOnlyScopes is { Count: 0 })
+        {
+            logger?.LogWarning(
+                "Authentication:Realms:Realms:{RealmId}:ReadOnlyScopes is configured as an empty list; scope-based read-only token marking is disabled for this realm.",
+                realmId);
+        }
+
         var prefix = $"Authentication:Realms:Realms:{realmId}";
         var subjectRoles = config.SubjectRoles ?? [];
 
