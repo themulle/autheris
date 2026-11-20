@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.10.1] - 2026-11-20
+
+### Added
+- Databricks Metric Views governed read access (#916, #920): `DataObjectKind.MetricView`, governance migration step `0033_metric_view_kind_and_column_role`, dbt ingestion support, `MEASURE()` aggregate / `GROUP BY` / `WHERE` pushdown guards, and discovery / OData / GraphQL / MCP visibility.
+- Functional right mapping four-eyes pending approval support (#922, #939): nullable `approved_by` / `approved_at` with governance migration step `0032_functional_right_mapping_pending_approval` and cross-engine contract tests.
+- Access profile items governance migration step `0031_access_profile_items` (#937).
+- Databricks typed query results and long-statement execution polling (#925, #938).
+- Catalog object paging and `kind` facets (#894, #898, #934).
+- Extracted runtime-loaded signed modules `Autheris.Modules.Events`, `Autheris.Modules.Lineage` (#941), `Autheris.Modules.Dbt`, and `Autheris.Modules.OpenMetadata` (#942).
+- `WP-SIMPL-32 PR 0` configuration flag decision matrix and `OptionsAuditTests` (#947), `S34b_UncoveredDenyOnly` grant-model parity row (#946), and Issue `#443` latest-per-parent CTE parity/security/benchmark tests (#948).
+
+### Changed
+- Enforced final `WP-SIMPL-23` test, mock, sleep, naming, and ceiling ratchets (#940) and updated master-plan / audit documentation (#943, #949).
+- Trino protocol metadata follow-ups (#887, #929) and security test inventory scanner literal/comment masking (#909, #930).
+
+### Fixed
+- SQL Server governance migration step batch error attribution and retry (#849, #926), product definer provenance (#891, #927), `GenericOidc` realm token read-only scopes (#889, #928), CDC reset watermark lock order (#915, #931), SQL Server procedure row-scope aggregate handling (#921, #932), OpenMetadata webhook replay fail-closed guard (#918, #933), virtual filter require-approval SQL filter handling (#923, #935), and Databricks OBO certificate and authority handling (#924, #936).
+
 ## [1.9.0] - 2026-11-19
 
 ### Added
