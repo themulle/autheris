@@ -72,9 +72,9 @@ public static class GatewayCatalogServiceExtensions
 
         services.TryAddScoped<ICatalogVisibilityService>(sp =>
             new CatalogVisibilityService(
-                sp.GetService<ITableMetadataRepository>(),
-                sp.GetService<IConsentRepository>(),
-                sp.GetService<IOptions<GatewayOptions>>(),
+                sp.GetRequiredService<ITableMetadataRepository>(),
+                sp.GetRequiredService<IConsentRepository>(),
+                sp.GetRequiredService<IOptions<GatewayOptions>>(),
                 sp.GetService<ILogger<CatalogVisibilityService>>(),
                 sp.GetService<Autheris.Application.DataSources.IIngressTransportContext>(),
                 sp.GetService<Autheris.Application.DataSources.IDataSourceOptionsResolver>(),

@@ -87,6 +87,27 @@ public sealed class CatalogSnapshotProvider : ICatalogSnapshotProvider, IDisposa
         {
             await RefreshAsync(ct).ConfigureAwait(false);
         }
+        else
+        {
+            var current = Volatile.Read(ref _currentSnapshot);
+            try
+            {
+                var dbVersion = await _versionProvider.GetCatalogVersionAsync(ct).ConfigureAwait(false);
+                if (dbVersion.StructureVersion > current.Version.StructureVersion ||
+                    dbVersion.ContentVersion > current.Version.ContentVersion)
+                {
+                    await RefreshAsync(ct).ConfigureAwait(false);
+                }
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogDebug(ex, "Version probe during GetSnapshotAsync failed; serving current snapshot.");
+            }
+        }
 
         if (!Volatile.Read(ref _initialized))
         {
