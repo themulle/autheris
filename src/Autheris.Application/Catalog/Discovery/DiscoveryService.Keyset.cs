@@ -34,6 +34,9 @@ public sealed partial class DiscoveryService
         try
         {
             var scopeKey = BuildScopeMemoKey(sid, caller);
+            var searchText = string.IsNullOrWhiteSpace(query.Search) ? null : query.Search.Trim();
+            var orderByRelevance = query.OrderByRelevance && searchText is not null;
+
             var candidates = await LoadPreFilteredTablesAsync(
                 caller,
                 sid,
@@ -43,20 +46,34 @@ public sealed partial class DiscoveryService
                 query.Kind,
                 query.Tag,
                 query.Sensitivity,
-                query.Search,
+                searchText,
+                query.Mode,
+                query.Language,
+                orderByRelevance,
                 query.Access,
                 query.MetadataPredicate,
                 ct).ConfigureAwait(false);
 
-            candidates.Sort(static (a, b) => CompareTableKeys(a.Identifier.ToString(), b.Identifier.ToString()));
-
             var first = Math.Clamp(query.First <= 0 ? 50 : query.First, 1, MaxPageSize);
-            var startIndex = string.IsNullOrEmpty(query.AfterKey)
-                ? 0
-                : FindFirstIndexAfter(candidates, query.AfterKey);
+            int startIndex;
+            if (orderByRelevance)
+            {
+                startIndex = 0;
+                if (!string.IsNullOrEmpty(query.AfterKey))
+                {
+                    var foundIdx = candidates.FindIndex(t => string.Equals(t.Identifier.ToString(), query.AfterKey, StringComparison.OrdinalIgnoreCase));
+                    startIndex = foundIdx >= 0 ? foundIdx + 1 : candidates.Count;
+                }
+            }
+            else
+            {
+                candidates.Sort(static (a, b) => CompareTableKeys(a.Identifier.ToString(), b.Identifier.ToString()));
+                startIndex = string.IsNullOrEmpty(query.AfterKey)
+                    ? 0
+                    : FindFirstIndexAfter(candidates, query.AfterKey);
+            }
 
-            var searchText = string.IsNullOrWhiteSpace(query.Search) ? null : query.Search.Trim();
-            var hasPostFilter = searchText is not null || query.ProjectedPredicate is not null;
+            var hasPostFilter = query.ProjectedPredicate is not null;
 
             List<DiscoveryKeysetItem> pageItems;
             int? totalCount;
@@ -152,6 +169,9 @@ public sealed partial class DiscoveryService
         string? tag,
         string? sensitivity,
         string? search,
+        string? mode,
+        string? language,
+        bool orderByRelevance,
         DiscoveryAccessState? access,
         Func<TableMetadata, bool>? metadataPredicate,
         CancellationToken ct)
@@ -196,11 +216,6 @@ public sealed partial class DiscoveryService
                 continue;
             }
 
-            if (trimmedSearch is not null && !MatchesNonHiddenText(table, trimmedSearch))
-            {
-                continue;
-            }
-
             matched.Add(table);
         }
 
@@ -208,6 +223,12 @@ public sealed partial class DiscoveryService
         {
             var view = await LoadAccessViewAsync(caller, sid, scopeKey, matched, wantedAccess, ct).ConfigureAwait(false);
             matched = matched.FindAll(t => view.StateOf(t.Identifier) == wantedAccess);
+        }
+
+        if (trimmedSearch is not null)
+        {
+            matched = await FilterAndRankBySearchAsync(
+                caller, sid, scopeKey, matched, trimmedSearch, trimmedDomain, mode, language, orderByRelevance, ct).ConfigureAwait(false);
         }
 
         return matched;

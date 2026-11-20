@@ -350,7 +350,7 @@ internal sealed class ExternalCatalogTestHarness : IAsyncDisposable
             pageSize,
             accessStatus,
             q,
-            CancellationToken.None);
+            ct: CancellationToken.None);
         return await ExecuteResultAsync(ctx, result);
     }
 
@@ -359,7 +359,8 @@ internal sealed class ExternalCatalogTestHarness : IAsyncDisposable
     public async Task<ExecutedCatalogResponse> GetFacetsAsync(
         ClaimsPrincipal caller,
         string? accessStatus = null,
-        string? ifNoneMatch = null)
+        string? ifNoneMatch = null,
+        string? q = null)
     {
         if (!(await AuthorizeAsync(caller, GatewayPolicies.CatalogRead)).Succeeded)
         {
@@ -372,7 +373,8 @@ internal sealed class ExternalCatalogTestHarness : IAsyncDisposable
             ctx,
             reader,
             accessStatus,
-            CancellationToken.None);
+            q: q,
+            ct: CancellationToken.None);
         return await ExecuteResultAsync(ctx, result);
     }
 

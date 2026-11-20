@@ -59,7 +59,9 @@ public sealed record DiscoveryKeysetQuery(
     Func<TableMetadata, bool>? MetadataPredicate = null,
     Func<DiscoveryObject, bool>? ProjectedPredicate = null,
     bool CountTotal = true,
-    IReadOnlyList<string>? AppliedFilterNames = null);
+    IReadOnlyList<string>? AppliedFilterNames = null,
+    string? Mode = null,
+    bool OrderByRelevance = false);
 
 [System.Diagnostics.CodeAnalysis.SuppressMessage("Naming", "CA1720:Identifier contains type name", Justification = "Catalog discovery keyset item contract uses Object for the projected discovery object.")]
 public sealed record DiscoveryKeysetItem(
@@ -109,6 +111,17 @@ public interface IDiscoveryService
     ValueTask<DiscoveryPage> ListAsync(DiscoveryQuery query, CatalogCaller caller, CancellationToken ct = default);
     ValueTask<DiscoveryKeysetPage> ListKeysetAsync(DiscoveryKeysetQuery query, CatalogCaller caller, CancellationToken ct = default);
     ValueTask<DiscoveryFacets> FacetsAsync(DiscoveryAccessState? access, CatalogCaller caller, CancellationToken ct = default);
+
+    ValueTask<DiscoveryFacets> FacetsAsync(
+        DiscoveryAccessState? access,
+        string? search,
+        string? mode,
+        string? language,
+        CatalogCaller caller,
+        CancellationToken ct = default)
+        => string.IsNullOrWhiteSpace(search)
+            ? FacetsAsync(access, caller, ct)
+            : throw new NotSupportedException("Search-filtered facets are not supported by this discovery service.");
     ValueTask<DiscoveryObject?> GetAsync(TableIdentifier id, CatalogCaller caller, CancellationToken ct = default);
     ValueTask<IReadOnlyList<DiscoveryObject>> SearchAsync(string text, DiscoverySearchOptions options, CatalogCaller caller, CancellationToken ct = default);
 }

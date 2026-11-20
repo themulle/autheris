@@ -13,8 +13,17 @@ using Autheris.Domain.Model;
 
 public sealed partial class DiscoveryService
 {
+    public ValueTask<DiscoveryFacets> FacetsAsync(
+        DiscoveryAccessState? access,
+        CatalogCaller caller,
+        CancellationToken ct = default)
+        => FacetsAsync(access, search: null, mode: null, language: null, caller, ct);
+
     public async ValueTask<DiscoveryFacets> FacetsAsync(
         DiscoveryAccessState? access,
+        string? search,
+        string? mode,
+        string? language,
         CatalogCaller caller,
         CancellationToken ct = default)
     {
@@ -42,7 +51,10 @@ public sealed partial class DiscoveryService
                 kind: null,
                 tag: null,
                 sensitivity: null,
-                search: null,
+                search: search,
+                mode: mode,
+                language: language,
+                orderByRelevance: false,
                 access: access,
                 metadataPredicate: null,
                 ct: ct).ConfigureAwait(false);
