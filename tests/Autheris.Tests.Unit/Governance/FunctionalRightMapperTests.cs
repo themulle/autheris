@@ -520,4 +520,44 @@ public sealed class FunctionalRightMapperTests
                 e.Decision == "ALLOW"),
             Arg.Any<CancellationToken>());
     }
+
+    [Fact]
+    public async Task ProposeMapping_PassesNullApprovalToRepository()
+    {
+        var tenantId = new TenantId("tenant-1");
+        var realmId = "workforce-entra";
+        var groupOrRole = "engineers";
+        var right = FunctionalRight.SecurityAdmin;
+
+        var workforceRealm = new IdentityRealm(
+            realmId,
+            IdentityRealmKind.EntraWorkforce,
+            new TenantBindingSpecification(TenantBindingKind.Fixed, tenantId.Value),
+            RealmGroupSource.Resolver,
+            RealmProvisioningMode.Scim,
+            issuers: ["https://sts.windows.net/test"]);
+
+        _realmRegistry.GetRealm(realmId).Returns(workforceRealm);
+
+        FunctionalRightMapping? captured = null;
+        await _repository.CreateMappingAsync(
+            Arg.Do<FunctionalRightMapping>(m => captured = m),
+            Arg.Any<CancellationToken>());
+
+        var proposed = await _sut.ProposeMappingAsync(
+            tenantId, realmId, groupOrRole, right, RecertClass.Privileged, "user-alice");
+
+        captured.ShouldNotBeNull();
+        captured.TenantId.ShouldBe(tenantId);
+        captured.RealmId.ShouldBe(realmId);
+        captured.GroupOrRole.ShouldBe(groupOrRole);
+        captured.FunctionalRight.ShouldBe(right);
+        captured.ApprovedBy.ShouldBeNull();
+        captured.ApprovedAt.ShouldBeNull();
+        captured.RecertClass.ShouldBe(RecertClass.Privileged.ToString());
+        captured.CreatedBy.ShouldBe("user-alice");
+
+        proposed.ApprovedBy.ShouldBeNull();
+        proposed.ApprovedAt.ShouldBeNull();
+    }
 }

@@ -5,11 +5,16 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Shouldly;
 using Xunit;
 
 internal static partial class TestInventoryScanner
 {
+    private static readonly CSharpParseOptions ScannerParseOptions =
+        CSharpParseOptions.Default.WithPreprocessorSymbols("AUTHERIS_TEST_AUTH");
+
     [GeneratedRegex(@"^\s*namespace\s+([A-Za-z0-9_.]+)\s*[;{]", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
     internal static partial Regex NamespaceRegex();
 
@@ -41,10 +46,16 @@ internal static partial class TestInventoryScanner
 
     public static void ExtractFromSource(string source, HashSet<string> allTests, HashSet<string> securityTests)
     {
-        var nsMatch = NamespaceRegex().Match(source);
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(allTests);
+        ArgumentNullException.ThrowIfNull(securityTests);
+
+        var masked = MaskLiteralsAndComments(source);
+
+        var nsMatch = NamespaceRegex().Match(masked);
         var ns = nsMatch.Success ? nsMatch.Groups[1].Value : "Global";
 
-        var typeMatches = TypeDeclRegex().Matches(source)
+        var typeMatches = TypeDeclRegex().Matches(masked)
             .Where(m => !string.Equals(m.Groups[1].Value, "HostFixture", StringComparison.Ordinal))
             .ToList();
         if (typeMatches.Count == 0)
@@ -63,18 +74,15 @@ internal static partial class TestInventoryScanner
             int bodyEnd = i + 1 < typeMatches.Count ? typeMatches[i + 1].Index : source.Length;
 
             int prefixStart = i > 0 ? typeMatches[i - 1].Index + typeMatches[i - 1].Length : 0;
-            int windowStart = Math.Max(prefixStart, classStart - 600);
-            var classAttrWindow = source.Substring(windowStart, classStart - windowStart);
-            int lastSep = Math.Max(classAttrWindow.LastIndexOf('}'), classAttrWindow.LastIndexOf(';'));
-            if (lastSep >= 0)
-            {
-                classAttrWindow = classAttrWindow[(lastSep + 1)..];
-            }
+            int lastSep = FindLastSeparator(masked.AsSpan(prefixStart, classStart - prefixStart), includeOpenBrace: true);
+            int classAttrStart = lastSep >= 0 ? prefixStart + lastSep + 1 : prefixStart;
+            var rawClassAttrWindow = source.AsSpan(classAttrStart, classStart - classAttrStart);
+            var maskedClassAttrWindow = masked.AsSpan(classAttrStart, classStart - classAttrStart);
 
-            bool ownClassIsSecurity = SecurityTraitRegex().IsMatch(classAttrWindow);
+            bool ownClassIsSecurity = HasSecurityTrait(rawClassAttrWindow, maskedClassAttrWindow);
             if (classStart > outerClassEnd)
             {
-                outerClassEnd = FindTypeBodyEnd(source, tMatch.Index + tMatch.Length);
+                outerClassEnd = FindTypeBodyEnd(masked, tMatch.Index + tMatch.Length);
                 outerClassIsSecurity = ownClassIsSecurity;
             }
 
@@ -86,8 +94,9 @@ internal static partial class TestInventoryScanner
                 continue;
             }
 
-            var classBody = source.Substring(bodyStart, bodyEnd - bodyStart);
-            var methodMatches = MethodDeclRegex().Matches(classBody);
+            var rawClassBody = source.AsSpan(bodyStart, bodyEnd - bodyStart);
+            var maskedClassBody = masked.Substring(bodyStart, bodyEnd - bodyStart);
+            var methodMatches = MethodDeclRegex().Matches(maskedClassBody);
             foreach (Match mMatch in methodMatches)
             {
                 var methodName = mMatch.Groups[1].Value;
@@ -96,29 +105,158 @@ internal static partial class TestInventoryScanner
                     continue;
                 }
 
-                int mWindowStart = Math.Max(0, mMatch.Index - 600);
-                var attrWindow = classBody.Substring(mWindowStart, mMatch.Index - mWindowStart);
-                int lastMethodSep = Math.Max(
-                    attrWindow.LastIndexOf('}'),
-                    Math.Max(attrWindow.LastIndexOf(';'), attrWindow.LastIndexOf('{')));
-                if (lastMethodSep >= 0)
-                {
-                    attrWindow = attrWindow[(lastMethodSep + 1)..];
-                }
+                int lastMethodSep = FindLastSeparator(maskedClassBody.AsSpan(0, mMatch.Index), includeOpenBrace: true);
+                int attrStart = lastMethodSep >= 0 ? lastMethodSep + 1 : 0;
+                var rawAttrWindow = rawClassBody.Slice(attrStart, mMatch.Index - attrStart);
+                var maskedAttrWindow = maskedClassBody.AsSpan(attrStart, mMatch.Index - attrStart);
 
-                if (!FactAttrRegex().IsMatch(attrWindow))
+                if (!FactAttrRegex().IsMatch(maskedAttrWindow))
                 {
                     continue;
                 }
 
                 var fqn = $"{ns}.{className}.{methodName}";
                 allTests.Add(fqn);
-                if (classIsSecurity || SecurityTraitRegex().IsMatch(attrWindow))
+                if (classIsSecurity || HasSecurityTrait(rawAttrWindow, maskedAttrWindow))
                 {
                     securityTests.Add(fqn);
                 }
             }
         }
+    }
+
+    internal static string MaskLiteralsAndComments(string source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        if (source.Length == 0)
+        {
+            return source;
+        }
+
+        var buffer = source.ToCharArray();
+        foreach (var token in SyntaxFactory.ParseTokens(source, options: ScannerParseOptions))
+        {
+            MaskTriviaList(buffer, token.LeadingTrivia);
+            if (IsLiteralToMask(token.Kind()))
+            {
+                MaskSpan(buffer, token.SpanStart, token.Span.Length);
+            }
+
+            MaskTriviaList(buffer, token.TrailingTrivia);
+        }
+
+        return new string(buffer);
+    }
+
+    private static void MaskTriviaList(char[] buffer, SyntaxTriviaList triviaList)
+    {
+        foreach (var trivia in triviaList)
+        {
+            if (IsCommentOrDirectiveMessageTrivia(trivia.Kind()))
+            {
+                MaskSpan(buffer, trivia.SpanStart, trivia.Span.Length);
+                continue;
+            }
+
+            if (trivia.HasStructure && !trivia.IsKind(SyntaxKind.DisabledTextTrivia))
+            {
+                var structure = trivia.GetStructure();
+                if (structure is not null)
+                {
+                    foreach (var nested in structure.DescendantTrivia(descendIntoTrivia: true))
+                    {
+                        if (IsCommentOrDirectiveMessageTrivia(nested.Kind()))
+                        {
+                            MaskSpan(buffer, nested.SpanStart, nested.Span.Length);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private static bool IsCommentOrDirectiveMessageTrivia(SyntaxKind kind) => kind is
+        SyntaxKind.SingleLineCommentTrivia or
+        SyntaxKind.MultiLineCommentTrivia or
+        SyntaxKind.SingleLineDocumentationCommentTrivia or
+        SyntaxKind.MultiLineDocumentationCommentTrivia or
+        SyntaxKind.PreprocessingMessageTrivia;
+
+    private static bool IsLiteralToMask(SyntaxKind kind) => kind is
+        SyntaxKind.StringLiteralToken or
+        SyntaxKind.Utf8StringLiteralToken or
+        SyntaxKind.SingleLineRawStringLiteralToken or
+        SyntaxKind.MultiLineRawStringLiteralToken or
+        SyntaxKind.Utf8SingleLineRawStringLiteralToken or
+        SyntaxKind.Utf8MultiLineRawStringLiteralToken or
+        SyntaxKind.CharacterLiteralToken or
+        SyntaxKind.InterpolatedStringToken or
+        SyntaxKind.InterpolatedStringTextToken;
+
+    private static void MaskSpan(char[] buffer, int start, int length)
+    {
+        int end = Math.Min(buffer.Length, start + length);
+        for (int i = Math.Max(0, start); i < end; i++)
+        {
+            if (buffer[i] is not ('\r' or '\n'))
+            {
+                buffer[i] = ' ';
+            }
+        }
+    }
+
+    private static int FindLastSeparator(ReadOnlySpan<char> maskedWindow, bool includeOpenBrace)
+    {
+        int parenDepth = 0;
+        int bracketDepth = 0;
+        int lastSep = -1;
+
+        for (int i = 0; i < maskedWindow.Length; i++)
+        {
+            switch (maskedWindow[i])
+            {
+                case '(':
+                    parenDepth++;
+                    break;
+                case ')':
+                    if (parenDepth > 0)
+                    {
+                        parenDepth--;
+                    }
+                    break;
+                case '[':
+                    bracketDepth++;
+                    break;
+                case ']':
+                    if (bracketDepth > 0)
+                    {
+                        bracketDepth--;
+                    }
+                    break;
+                case '}' when parenDepth == 0 && bracketDepth == 0:
+                case ';' when parenDepth == 0 && bracketDepth == 0:
+                    lastSep = i;
+                    break;
+                case '{' when includeOpenBrace && parenDepth == 0 && bracketDepth == 0:
+                    lastSep = i;
+                    break;
+            }
+        }
+
+        return lastSep;
+    }
+
+    private static bool HasSecurityTrait(ReadOnlySpan<char> rawWindow, ReadOnlySpan<char> maskedWindow)
+    {
+        foreach (var match in SecurityTraitRegex().EnumerateMatches(rawWindow))
+        {
+            if ((uint)match.Index < (uint)maskedWindow.Length && maskedWindow[match.Index] == '[')
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public static Dictionary<string, (string NewIdOrReason, string Category)> LoadCoverageMap(string root)
