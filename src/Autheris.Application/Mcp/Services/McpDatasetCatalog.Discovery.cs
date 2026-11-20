@@ -27,6 +27,7 @@ public sealed partial class McpDatasetCatalog
         bool? overview,
         string? format,
         DiscoveryAccessState? access,
+        TableIdentifier? graphQlTarget,
         CancellationToken ct)
     {
         var negotiatedLanguage = _languageNegotiator?.NegotiateLanguage(
@@ -37,6 +38,12 @@ public sealed partial class McpDatasetCatalog
             principal,
             McpCatalogVisibility.SafeTenantId(principal),
             CatalogChannel.Mcp);
+
+        if (graphQlTarget is { } target)
+        {
+            return await ListSingleGraphQlDatasetWithDiscoveryAsync(
+                target, domain, search, tag, negotiatedLanguage, language, offset, limit, overview, format, access, caller, ct).ConfigureAwait(false);
+        }
 
         if (overview == true)
         {
@@ -485,4 +492,195 @@ public sealed partial class McpDatasetCatalog
 
         return false;
     }
+
+    private async Task<McpDatasetList> ListSingleGraphQlDatasetWithDiscoveryAsync(
+        TableIdentifier target,
+        string? domain,
+        string? search,
+        string? tag,
+        string? negotiatedLanguage,
+        string? requestedLanguage,
+        int? offset,
+        int? limit,
+        bool? overview,
+        string? format,
+        DiscoveryAccessState? access,
+        CatalogCaller caller,
+        CancellationToken ct)
+    {
+        if (!string.IsNullOrWhiteSpace(domain) && !string.Equals(target.Domain, domain.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            return EmptyDatasetList(offset, limit, negotiatedLanguage ?? requestedLanguage, overview);
+        }
+
+        DiscoveryObject? match;
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var page = await _discoveryService!.ListAsync(
+                new DiscoveryQuery(target.Domain, target.Schema, search, tag, negotiatedLanguage, First: 100, After: 0, DiscoverySurface.Mcp, access, IncludeProcedures: false),
+                caller,
+                ct).ConfigureAwait(false);
+            match = page.Items.FirstOrDefault(o =>
+                o.Kind != DiscoveryObjectKind.Procedure &&
+                string.Equals(o.Domain, target.Domain, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(o.Schema, target.Schema, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(o.Name, target.TableName, StringComparison.OrdinalIgnoreCase));
+        }
+        else
+        {
+            match = await _discoveryService!.GetAsync(target, caller, ct).ConfigureAwait(false);
+            if (match != null)
+            {
+                if (match.Kind == DiscoveryObjectKind.Procedure ||
+                    (access is { } wanted && match.Access != wanted) ||
+                    (!string.IsNullOrWhiteSpace(tag) && !match.Tags.Any(t => string.Equals(t, tag.Trim(), StringComparison.OrdinalIgnoreCase))))
+                {
+                    match = null;
+                }
+            }
+        }
+
+        if (match is null)
+        {
+            return EmptyDatasetList(offset, limit, negotiatedLanguage ?? requestedLanguage, overview);
+        }
+
+        if (overview == true)
+        {
+            return new McpDatasetList(
+                Datasets: [],
+                Total: 1,
+                Truncated: false,
+                Guidance: _hints.OverviewGuidance(1, 1),
+                Endpoints: null,
+                Offset: 0,
+                Limit: 0,
+                NextOffset: null,
+                Language: negotiatedLanguage,
+                RequestedLanguage: requestedLanguage,
+                Domains: [new McpDomainCount(match.Domain, 1)]);
+        }
+
+        var effectiveOffset = Math.Max(0, offset ?? 0);
+        var effectiveLimit = Math.Clamp(limit ?? 50, 1, MaxListedDatasets);
+        var items = effectiveOffset == 0
+            ? new List<McpDatasetSummary> { await BuildDiscoverySummaryAsync(match, ct).ConfigureAwait(false) }
+            : [];
+        return BuildDiscoveryListResult(items, total: 1, effectiveOffset, effectiveLimit, format, negotiatedLanguage, requestedLanguage);
+    }
+
+    private McpDatasetList EmptyDatasetList(int? offset, int? limit, string? language, bool? overview)
+    {
+        var negotiatedLanguage = _languageNegotiator?.NegotiateLanguage(
+            language,
+            _localizationOptions?.Value.SupportedLanguages,
+            _localizationOptions?.Value.DefaultLanguage);
+
+        if (overview == true)
+        {
+            return new McpDatasetList(
+                Datasets: [],
+                Total: 0,
+                Truncated: false,
+                Guidance: _hints.OverviewGuidance(0, 0),
+                Endpoints: null,
+                Offset: 0,
+                Limit: 0,
+                NextOffset: null,
+                Language: negotiatedLanguage,
+                RequestedLanguage: language,
+                Domains: []);
+        }
+
+        var effectiveOffset = Math.Max(0, offset ?? 0);
+        var effectiveLimit = Math.Clamp(limit ?? 50, 1, MaxListedDatasets);
+        return BuildDiscoveryListResult([], total: 0, effectiveOffset, effectiveLimit, format: null, negotiatedLanguage, language);
+    }
+
+    private async Task<string> ResolveDescribeTargetAsync(string? dataset, string? graphQlField, CancellationToken ct)
+    {
+        bool hasDataset = !string.IsNullOrWhiteSpace(dataset);
+        bool hasGraphQlField = !string.IsNullOrWhiteSpace(graphQlField);
+        if (hasDataset && hasGraphQlField)
+        {
+            throw new ArgumentException("Specify either 'dataset' or 'graphQlField', not both.");
+        }
+
+        if (hasDataset)
+        {
+            return dataset!;
+        }
+
+        if (!hasGraphQlField)
+        {
+            throw new ArgumentException("Either 'dataset' or 'graphQlField' is required.");
+        }
+
+        var resolved = graphQlMap is null ? null : await graphQlMap.ResolveRootFieldAsync(graphQlField!, ct).ConfigureAwait(false);
+        return resolved is { } id
+            ? DatasetId(id)
+            : throw new TableNotFoundException(new TableIdentifier("_", "_", "_"));
+    }
+
+    private async Task<EffectiveTableAccessDto> DescribeMyAccessCoreAsync(
+        ClaimsPrincipal principal,
+        string? dataset,
+        string? graphQlField,
+        CancellationToken ct)
+    {
+        bool hasDataset = !string.IsNullOrWhiteSpace(dataset);
+        bool hasGraphQlField = !string.IsNullOrWhiteSpace(graphQlField);
+        if (hasDataset && hasGraphQlField)
+        {
+            throw new ArgumentException("Specify either 'dataset' or 'graphQlField', not both.");
+        }
+
+        if (hasDataset)
+        {
+            if (!TryParseDatasetId(dataset!, out var tableId))
+            {
+                throw new ArgumentException($"Invalid dataset format: '{dataset}'. Expected 'domain.schema.table' or 'domain.table'.", nameof(dataset));
+            }
+
+            return await explanationService!.ExplainMyAccessAsync(principal, tableId, ct).ConfigureAwait(false);
+        }
+
+        if (!hasGraphQlField)
+        {
+            throw new ArgumentException("Invalid dataset format: ''. Expected 'domain.schema.table' or 'domain.table'.", nameof(dataset));
+        }
+
+        var resolved = graphQlMap is null ? null : await graphQlMap.ResolveRootFieldAsync(graphQlField!, ct).ConfigureAwait(false);
+        if (resolved is not { } targetId)
+        {
+            return NotFoundAccessDto(graphQlField!);
+        }
+
+        var dto = await explanationService!.ExplainMyAccessAsync(principal, targetId, ct).ConfigureAwait(false);
+        if (string.Equals(dto.Decision, "DENIED", StringComparison.OrdinalIgnoreCase) &&
+            dto.AllowedColumns.Count == 0 &&
+            dto.MaskedColumns.Count == 0 &&
+            dto.DeniedColumns.Count == 0 &&
+            dto.ActiveRowFilters.Count == 0)
+        {
+            return dto with { Table = graphQlField! };
+        }
+
+        return dto;
+    }
+
+    private static EffectiveTableAccessDto NotFoundAccessDto(string tableLabel) => new(
+        tableLabel,
+        "DENIED",
+        Array.Empty<string>(),
+        Array.Empty<string>(),
+        Array.Empty<string>(),
+        Array.Empty<string>(),
+        Autheris.Application.Governance.Services.EffectiveAccessExplanationService.TableNotFoundMessage,
+        null);
+
+    private static bool SameTable(TableIdentifier a, TableIdentifier b) =>
+        string.Equals(a.Domain, b.Domain, StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(a.Schema, b.Schema, StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(a.TableName, b.TableName, StringComparison.OrdinalIgnoreCase);
 }

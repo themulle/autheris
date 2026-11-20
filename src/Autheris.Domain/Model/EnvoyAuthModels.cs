@@ -152,13 +152,30 @@ public sealed record EnvoyHeader
 /// </summary>
 public sealed record EnvoyFilterExportOptions
 {
+    /// <summary>Kubernetes namespace where the Istio mesh resources are deployed.</summary>
     public string MeshNamespace { get; init; } = "istio-system";
+
+    /// <summary>Name of the generated EnvoyFilter or WasmPlugin resource.</summary>
     public string FilterName { get; init; } = "autheris-ext-authz";
+
+    /// <summary>Cluster-local DNS hostname of the Autheris external authorization service.</summary>
     public string ServiceHost { get; init; } = "autheris-gateway.autheris.svc.cluster.local";
+
+    /// <summary>TCP port on <see cref="ServiceHost"/> serving the Envoy authorization endpoint.</summary>
     public int ServicePort { get; init; } = 8080;
+
+    /// <summary>HTTP path for the Envoy external authorization check endpoint.</summary>
     public string AuthzPath { get; init; } = "/api/v1/envoy/check";
+
+    /// <summary>Request timeout in milliseconds for Envoy external authorization calls.</summary>
     public int TimeoutMs { get; init; } = 250;
+
+    /// <summary>When true, Envoy permits requests if the authorization service is unreachable (fail-open).</summary>
     public bool FailOpen { get; init; } = false;
+
+    /// <summary>OCI image tag for the exported Envoy WasmPlugin resource.</summary>
     public string WasmPluginTag { get; init; } = "v1.0.0";
+
+    /// <summary>Optional full OCI image URL overriding the default WasmPlugin image location.</summary>
     public string? WasmPluginUrl { get; init; }
 }

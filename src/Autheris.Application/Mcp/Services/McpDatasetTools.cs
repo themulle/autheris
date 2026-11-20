@@ -216,7 +216,8 @@ public static class McpDatasetTools
                 "limit": { "type": "integer", "minimum": 1, "maximum": 100, "description": "Optional maximum datasets to return per page (default 50, max 100)." },
                 "language": { "type": "string", "description": "Optional BCP 47 language tag (e.g. 'de', 'en') or Accept-Language range for localized dataset titles and descriptions." },
                 "overview": { "type": "boolean", "description": "When true, returns an aggregated summary of business domains and table counts without paginating individual datasets (optimal for large catalogs in <200 tokens)." },
-                "format": { "type": "string", "enum": ["full", "compact"], "description": "Output format: 'full' (default) or 'compact': each dataset as id, display name (only when it differs from the table name), first sentence of the description, sensitivity and access status; no GraphQL field, column count, tags, size or access paths." }
+                "format": { "type": "string", "enum": ["full", "compact"], "description": "Output format: 'full' (default) or 'compact': each dataset as id, display name (only when it differs from the table name), first sentence of the description, sensitivity and access status; no GraphQL field, column count, tags, size or access paths." },
+                "graphQlField": { "type": "string", "description": "Optional exact GraphQL root query field (case-sensitive, e.g. 'sales_public_orders'); returns zero or one dataset." }
               }
             }
             """,
@@ -228,9 +229,9 @@ public static class McpDatasetTools
             InputJsonSchema: """
             {
               "type": "object",
-              "required": ["dataset"],
               "properties": {
-                "dataset": { "type": "string", "description": "Dataset id as returned by list_datasets (domain.schema.table)." },
+                "dataset": { "type": "string", "description": "Dataset id as returned by list_datasets (domain.schema.table); alternative to graphQlField." },
+                "graphQlField": { "type": "string", "description": "Exact GraphQL root query field as returned by list_datasets (case-sensitive); alternative to dataset." },
                 "brief": { "type": "boolean", "description": "When true, returns column signatures only (name, type, access, primaryKey on key columns) plus the primary key order, indexes and required filter columns; no column descriptions, classifications, value profiles, GraphQL block or example queries." },
                 "language": { "type": "string", "description": "Optional BCP 47 language tag (e.g. 'de', 'en') or Accept-Language range for localized dataset and column descriptions." },
                 "include": { "type": "array", "items": { "type": "string", "enum": ["columns", "keys", "indexes", "relations", "examples", "graphql", "access", "longDescription"] }, "description": "Optional sections to return; sections not listed are omitted (default: all, without column long descriptions). Add longDescription together with columns to receive the long description of each returned column." },
@@ -282,9 +283,9 @@ public static class McpDatasetTools
             InputJsonSchema: """
             {
               "type": "object",
-              "required": ["dataset"],
               "properties": {
-                "dataset": { "type": "string", "description": "Dataset id as returned by list_datasets (domain.schema.table)." }
+                "dataset": { "type": "string", "description": "Dataset id as returned by list_datasets (domain.schema.table); alternative to graphQlField." },
+                "graphQlField": { "type": "string", "description": "Exact GraphQL root query field as returned by list_datasets (case-sensitive); alternative to dataset." }
               }
             }
             """,

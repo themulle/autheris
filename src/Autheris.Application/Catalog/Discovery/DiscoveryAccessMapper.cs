@@ -33,7 +33,8 @@ public static class DiscoveryAccessMapper
         TableAccessDecision? deleteDecision = null,
         IReadOnlyDictionary<string, DataClassification>? classificationDefinitions = null,
         IReadOnlyDictionary<string, IReadOnlyList<ColumnClassification>>? repoColumnClassifications = null,
-        string? tenantId = null)
+        string? tenantId = null,
+        bool hideMaskedTextForRestrictedScopes = false)
     {
         ArgumentNullException.ThrowIfNull(table);
         ArgumentNullException.ThrowIfNull(decision);
@@ -50,7 +51,9 @@ public static class DiscoveryAccessMapper
         foreach (var col in visibleCols)
         {
             var (colState, clearInSomeRows) = MapColumnState(table, decision, col.ColumnName);
-            bool hideText = colState != DiscoveryColumnState.Clear && decision.IsCatalogTextHidden(col.ColumnName);
+            bool hideText = colState != DiscoveryColumnState.Clear &&
+                (decision.IsCatalogTextHidden(col.ColumnName, table) ||
+                 (hideMaskedTextForRestrictedScopes && decision.ScopeClearance is not null));
             IReadOnlyList<ColumnClassification>? overrideRows = null;
             repoColumnClassifications?.TryGetValue(col.ColumnName, out overrideRows);
             var (pii, clearSep, classifications, clearRequestable) = ResolveColumnClassifications(

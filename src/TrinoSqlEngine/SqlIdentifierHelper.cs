@@ -9,23 +9,64 @@ using Antlr4.Runtime.Tree;
 public static class SqlIdentifierHelper
 {
     /// <summary>
-    /// Normalizes an identifier by stripping enclosing double quotes, backticks, or square brackets.
-    /// Note: does not unescape doubled characters and does not perform case folding.
+    /// Normalizes an identifier by stripping enclosing double quotes, backticks, or square brackets
+    /// and unescaping doubled quote characters (<c>""</c> -&gt; <c>"</c>, <c>``</c> -&gt; <c>`</c>).
+    /// Does not perform case folding.
     /// </summary>
     public static string NormalizeIdentifier(string id)
     {
-        if (string.IsNullOrWhiteSpace(id)) return string.Empty;
-        id = id.Trim();
+        return ParseIdentifier(id).Value;
+    }
+
+    /// <summary>
+    /// Parses a raw SQL identifier token into a typed <see cref="Ast.Nodes.SqlIdentifier"/>,
+    /// stripping enclosing quotes and unescaping doubled quote characters.
+    /// </summary>
+    public static Ast.Nodes.SqlIdentifier ParseIdentifier(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return new Ast.Nodes.SqlIdentifier(string.Empty, false);
+        string id = raw.Trim();
         if (id.Length >= 2)
         {
-            if ((id[0] == '"' && id[^1] == '"') ||
-                (id[0] == '`' && id[^1] == '`') ||
-                (id[0] == '[' && id[^1] == ']'))
+            char first = id[0];
+            char last = id[^1];
+            if (first == '"' && last == '"')
             {
-                return id[1..^1];
+                return new Ast.Nodes.SqlIdentifier(id[1..^1].Replace("\"\"", "\"", StringComparison.Ordinal), true);
+            }
+
+            if (first == '`' && last == '`')
+            {
+                return new Ast.Nodes.SqlIdentifier(id[1..^1].Replace("``", "`", StringComparison.Ordinal), true);
+            }
+
+            if (first == '[' && last == ']')
+            {
+                return new Ast.Nodes.SqlIdentifier(id[1..^1], true);
             }
         }
-        return id;
+
+        return new Ast.Nodes.SqlIdentifier(id, false);
+    }
+
+    /// <summary>
+    /// Builds a typed <see cref="Ast.Nodes.SqlQualifiedName"/> from an ANTLR <c>qualifiedName</c> context.
+    /// </summary>
+    public static Ast.Nodes.SqlQualifiedName ToQualifiedName(SqlBaseParser.QualifiedNameContext context)
+    {
+        var ids = context.identifier();
+        if (ids == null || ids.Length == 0)
+        {
+            return new Ast.Nodes.SqlQualifiedName(new[] { ParseIdentifier(context.GetText()) });
+        }
+
+        var parts = new Ast.Nodes.SqlIdentifier[ids.Length];
+        for (int i = 0; i < ids.Length; i++)
+        {
+            parts[i] = ParseIdentifier(ids[i].GetText());
+        }
+
+        return new Ast.Nodes.SqlQualifiedName(parts);
     }
 
     /// <summary>

@@ -8,9 +8,16 @@ public sealed class AuthenticationOptions
 {
     [Required] public string Domain { get; init; } = "CORP.LOCAL";
     [Required] public string ServicePrincipalName { get; init; } = "HTTP/gql-gateway.corp.local";
+
+    /// <summary>When true, rejects non-Kerberos authentication schemes when Kerberos is enabled.</summary>
     public bool RequireKerberosOnly { get; init; } = true;
+
+    /// <summary>Enables Windows Negotiate/Kerberos authentication.</summary>
     public bool EnableKerberos { get; init; } = false;
+
     public bool IsKerberosConfigured => EnableKerberos;
+
+    /// <summary>Enables the synthetic test authentication handler (non-Production test hosts only).</summary>
     public bool EnableTestAuthHandler { get; init; }
 
     /// <summary>
@@ -35,9 +42,16 @@ public sealed class AuthenticationOptions
     /// </summary>
     public int MaxGroupSidsPerCaller { get; init; } = 1024;
 
+    /// <summary>HTTP Basic authentication settings (<c>Gateway:Authentication:BasicAuth</c>).</summary>
     public BasicAuthOptions BasicAuth { get; init; } = new();
+
+    /// <summary>Microsoft Entra ID OIDC/JWT authentication settings (<c>Gateway:Authentication:EntraId</c>).</summary>
     public EntraIdAuthOptions EntraId { get; init; } = new();
+
+    /// <summary>Active Directory Federation Services (AD FS) OIDC/JWT settings (<c>Gateway:Authentication:Adfs</c>).</summary>
     public AdfsAuthOptions Adfs { get; init; } = new();
+
+    /// <summary>Upstream reverse-proxy ForwardAuth header authentication settings (<c>Gateway:Authentication:ForwardAuth</c>).</summary>
     public ForwardAuthOptions ForwardAuth { get; init; } = new();
 }
 
@@ -65,17 +79,40 @@ public sealed class ForwardAuthOptions
     /// <summary>Gateway:Authentication:ForwardAuth:GroupSource. Default <see cref="ForwardAuthGroupSource.Resolver"/>.</summary>
     public ForwardAuthGroupSource GroupSource { get; init; } = ForwardAuthGroupSource.Resolver;
 
+    /// <summary>Enables upstream reverse-proxy header authentication.</summary>
     public bool Enabled { get; init; } = false;
+
+    /// <summary>HTTP header carrying the authenticated user identifier.</summary>
     public string UserHeader { get; init; } = "X-Forwarded-User";
+
+    /// <summary>HTTP header carrying the authenticated user email address.</summary>
     public string EmailHeader { get; init; } = "X-Forwarded-Email";
+
+    /// <summary>HTTP header carrying the comma-delimited group memberships or SIDs.</summary>
     public string GroupsHeader { get; init; } = "X-Forwarded-Groups";
+
+    /// <summary>HTTP header carrying the comma-delimited gateway role names.</summary>
     public string RolesHeader { get; init; } = "X-Forwarded-Roles";
+
+    /// <summary>HTTP header carrying the asserted tenant identifier.</summary>
     public string TenantHeader { get; init; } = "X-Forwarded-Tenant";
+
+    /// <summary>Key Vault secret reference for the shared HMAC/secret authenticating the upstream proxy.</summary>
     public string? SharedSecretKeyVaultRef { get; init; }
+
+    /// <summary>Plain shared secret authenticating the upstream proxy (prefer <see cref="SharedSecretKeyVaultRef"/>).</summary>
     public string? SharedSecret { get; init; }
+
+    /// <summary>HTTP header carrying the shared secret presented by the upstream proxy.</summary>
     public string SharedSecretHeader { get; init; } = "X-Forwarded-Secret";
+
+    /// <summary>When true, rejects ForwardAuth requests whose peer IP is not in <see cref="TrustedProxies"/> or <see cref="TrustedNetworks"/>.</summary>
     public bool RequireTrustedProxy { get; init; } = true;
+
+    /// <summary>Explicitly trusted upstream proxy IP addresses.</summary>
     public List<string> TrustedProxies { get; init; } = [];
+
+    /// <summary>Trusted upstream proxy CIDR network ranges.</summary>
     public List<string> TrustedNetworks { get; init; } = [];
 
     /// <summary>
@@ -139,8 +176,13 @@ public sealed class ForwardAuthOptions
 
 public sealed class BasicAuthOptions
 {
+    /// <summary>Enables HTTP Basic authentication.</summary>
     public bool Enabled { get; init; } = false;
+
+    /// <summary>HTTP Basic authentication realm returned in <c>WWW-Authenticate</c> challenges.</summary>
     public string Realm { get; init; } = "Autheris";
+
+    /// <summary>Configured static Basic authentication user accounts.</summary>
     public List<BasicAuthUserConfig> Users { get; init; } = [];
 
     /// <summary>RR-L2-03: Minimum PBKDF2-SHA256 iterations enforced at startup outside Development (OWASP 2023: 600 000; floor 210 000).</summary>
@@ -186,6 +228,7 @@ public sealed class BasicAuthSessionOptions
     /// <summary>Authentication scheme (and identity authentication type) of the session cookie.</summary>
     public const string SchemeName = "BasicSession";
 
+    /// <summary>Enables encrypted cookie sessions after a successful HTTP Basic login.</summary>
     public bool Enabled { get; init; } = false;
 
     /// <summary>
@@ -230,14 +273,30 @@ public sealed class BasicAuthUserConfig
 
 public sealed class EntraIdAuthOptions
 {
+    /// <summary>Enables Microsoft Entra ID JWT bearer authentication.</summary>
     public bool Enabled { get; init; } = false;
+
+    /// <summary>Entra ID cloud instance base URL.</summary>
     public string Instance { get; init; } = "https://login.microsoftonline.com/";
+
+    /// <summary>Microsoft Entra ID directory (tenant) GUID or domain.</summary>
     public string TenantId { get; init; } = string.Empty;
+
+    /// <summary>Application (client) ID registered in Entra ID.</summary>
     public string ClientId { get; init; } = string.Empty;
+
+    /// <summary>Expected JWT audience (<c>aud</c>) URI or client ID.</summary>
     public string Audience { get; init; } = string.Empty;
+
+    /// <summary>Optional explicit OIDC metadata endpoint URL overriding <see cref="Authority"/>.</summary>
     public string MetadataAddress { get; init; } = string.Empty;
+
     public string Authority => string.IsNullOrWhiteSpace(TenantId) ? Instance : $"{Instance.TrimEnd('/')}/{TenantId.Trim('/')}";
+
+    /// <summary>Requires HTTPS when fetching OIDC discovery metadata and signing keys.</summary>
     public bool RequireHttpsMetadata { get; init; } = true;
+
+    /// <summary>JWT claim name from which Entra ID application or directory roles are read.</summary>
     public string RolesClaimType { get; init; } = "roles";
 
     /// <summary>
@@ -291,11 +350,22 @@ public enum AppOnlyTokenAccess
 
 public sealed class AdfsAuthOptions
 {
+    /// <summary>Enables AD FS JWT bearer authentication.</summary>
     public bool Enabled { get; init; } = false;
+
+    /// <summary>AD FS OIDC authority base URL.</summary>
     public string Authority { get; init; } = string.Empty;
+
+    /// <summary>Optional explicit OIDC metadata endpoint URL overriding <see cref="Authority"/>.</summary>
     public string MetadataAddress { get; init; } = string.Empty;
+
+    /// <summary>Expected JWT audience (<c>aud</c>) URI or client ID.</summary>
     public string Audience { get; init; } = string.Empty;
+
+    /// <summary>Requires HTTPS when fetching AD FS OIDC discovery metadata and signing keys.</summary>
     public bool RequireHttpsMetadata { get; init; } = true;
+
+    /// <summary>JWT claim name from which AD FS roles are read.</summary>
     public string RolesClaimType { get; init; } = "role";
 
     /// <summary>
@@ -339,11 +409,21 @@ public sealed class TotpOptions
     public bool EncryptSecretsAtRest { get; init; } = false;
 }
 
+/// <summary>Human-in-the-loop (HitL) step-up approval settings (<c>Gateway:HitLStepUp</c>).</summary>
 public sealed class HitLStepUpOptions
 {
+    /// <summary>Enables HitL step-up approval enforcement for high-sensitivity operations.</summary>
     public bool Enabled { get; init; } = true;
+
+    /// <summary>Maximum time in seconds to wait for an interactive step-up approval before timing out.</summary>
     public int ApprovalTimeoutSeconds { get; init; } = 15;
+
+    /// <summary>Requires the step-up approver to be a different principal than the requester.</summary>
     public bool RequireDifferentApprover { get; init; } = true;
+
+    /// <summary>Requires TOTP two-factor verification during HitL step-up approval.</summary>
     public bool RequireTotp2Fa { get; init; } = true;
+
+    /// <summary>When true, denies step-up approvals if the cluster state store is partitioned or unreachable.</summary>
     public bool FailClosedOnClusterPartition { get; init; } = false;
 }

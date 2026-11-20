@@ -27,7 +27,7 @@ public sealed class CatalogMutatingWritersBumpChangeVersionTests
         var batchSource = File.ReadAllText(Path.Combine(root, "src/Autheris.Infrastructure/Persistence/Catalog/CatalogBatchUpsertHelper.cs"));
 
         var bumpIdx = batchSource.IndexOf("BumpCatalogVersionInternalAsync", StringComparison.Ordinal);
-        var incIdx = batchSource.IndexOf("IncrementTableEpochInternalAsync(conn, tx, chunk[i].Identifier, ct, changeVersion)", StringComparison.Ordinal);
+        var incIdx = batchSource.IndexOf("IncrementTableEpochsBatchAsync(repo, conn, tx, epochRows, changeVersion, ct)", StringComparison.Ordinal);
 
         bumpIdx.ShouldBeGreaterThan(0);
         incIdx.ShouldBeGreaterThan(bumpIdx);

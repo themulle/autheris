@@ -57,6 +57,8 @@ public sealed class DateAddQuarterAndConcatPrecedenceTests
 
     [Theory]
     [InlineData(TargetSqlDialect.PostgreSql, "(\"qty\" * 2) || \"name\"")]
+    [InlineData(TargetSqlDialect.Oracle, "(\"QTY\" * 2) || \"NAME\"")]
+    [InlineData(TargetSqlDialect.Databricks, "(`qty` * 2) || `name`")]
     [InlineData(TargetSqlDialect.SqlServer, "([qty] * 2) + [name]")]
     [Trait("Category", "Security")]
     public void Concat_WithArithmeticLeftChild_ParenthesizesChild(TargetSqlDialect dialect, string expected)

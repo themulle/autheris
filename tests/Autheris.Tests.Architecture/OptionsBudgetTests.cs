@@ -26,7 +26,7 @@ public sealed partial class OptionsBudgetTests(ITestOutputHelper output)
     // honour read-only token scopes with the same per-realm override surface as EntraIdAuthOptions.
     private const int CeilingSettableProperties = 936;
     private const int CeilingEnabledFlags = 64;
-    private const int CeilingUndocumentedProperties = 393;
+    private const int CeilingUndocumentedProperties = 313;
 
     [GeneratedRegex(@"\bclass\s+(\w+Options)\b")]
     private static partial Regex OptionsClassDeclaration();
