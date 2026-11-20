@@ -13,6 +13,7 @@ using Autheris.Api.Middleware;
 using Autheris.Domain.Options;
 using Autheris.Domain.Security;
 using Autheris.GraphQL.Interceptors;
+using Autheris.Modules.Events;
 using Autheris.Modules.Lakehouse;
 using HotChocolate.Execution;
 using Microsoft.AspNetCore.Builder;
@@ -116,10 +117,14 @@ public sealed class ReadOnlyTokenGetRouteTests
         using var bootstrapLoggerFactory = LoggerFactory.Create(_ => { });
         builder.Services.AddGatewayModules(builder.Configuration, builder.Environment, gatewayOptions, bootstrapLoggerFactory);
 
+        // The events module services are registered so the module handlers bind their services (the module itself is mapped below).
+        builder.Services.AddEventsModule(builder.Configuration);
+
         using var app = builder.Build();
         app.UseGatewayPipeline(gatewayOptions);
         app.MapGatewayEndpoints(gatewayOptions);
         new LakehouseModule().MapEndpoints(new ModuleEndpointRegistrar(app, "lakehouse"));
+        new EventsModule().MapEndpoints(new ModuleEndpointRegistrar(app, "events"));
 
         return ((IEndpointRouteBuilder)app).DataSources
             .SelectMany(ds => ds.Endpoints)

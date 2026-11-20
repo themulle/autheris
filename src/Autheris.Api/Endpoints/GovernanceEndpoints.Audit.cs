@@ -15,7 +15,6 @@ using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Governance.Paging;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Compliance;
-using Autheris.Application.Lineage;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -297,14 +296,6 @@ public static partial class GovernanceEndpoints
             CancellationToken ct) => ExportGdprPdfAsync(domain, schema, table, subjectSid, timeWindowDays, gdprService, pdfExporter, context, ct))
           .RequireAuthorization()
           .WithAudit(AuditLevel.Full, AuditEventTypes.AuditExport);
-
-        // OpenLineage Lineage Push Trigger
-        app.MapPost("/api/lineage/openlineage/sync", (
-            IOpenLineageClient openLineageClient,
-            HttpContext context,
-            CancellationToken ct) => SyncOpenLineageAsync(openLineageClient, context, ct))
-          .RequireAuthorization()
-          .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
     }
 
     internal static async Task<IResult> ExportGdprPdfAsync(
@@ -383,42 +374,5 @@ public static partial class GovernanceEndpoints
         }
 
         return Results.File(exportResult.DocumentBytes, exportResult.ContentType, exportResult.FileName);
-    }
-
-    internal static async Task<IResult> SyncOpenLineageAsync(
-        IOpenLineageClient openLineageClient,
-        HttpContext context,
-        CancellationToken ct)
-    {
-        // EP-03: Restrict to GovernanceAdmin only
-        if (!GatewayPolicies.HasRole(context.User, GatewayRole.GovernanceAdmin))
-        {
-            return Results.StatusCode(StatusCodes.Status403Forbidden);
-        }
-
-        TenantId tenantId;
-        try
-        {
-            tenantId = EndpointSecurity.GetRequestTenant(context);
-        }
-        catch (System.Security.SecurityException)
-        {
-            return Results.StatusCode(StatusCodes.Status403Forbidden);
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return Results.StatusCode(StatusCodes.Status401Unauthorized);
-        }
-        catch (ArgumentException)
-        {
-            return Results.StatusCode(StatusCodes.Status403Forbidden);
-        }
-
-        var success = await openLineageClient.PushLineageGraphAsync(tenantId, ct);
-        if (success)
-        {
-            return Results.Ok(new { message = "OpenLineage sync completed successfully." });
-        }
-        return Results.StatusCode(StatusCodes.Status502BadGateway);
     }
 }
