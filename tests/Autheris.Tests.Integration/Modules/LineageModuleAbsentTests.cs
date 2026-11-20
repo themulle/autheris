@@ -2,9 +2,11 @@ namespace Autheris.Tests.Integration.Modules;
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Threading.Tasks;
+using Autheris.Api.Hosting;
 using Autheris.Application.Compliance;
 using Autheris.Application.Lineage;
 using Autheris.Tests.Common.Hosting;
@@ -65,6 +67,9 @@ public sealed class LineageModuleAbsentTests : IClassFixture<LineageModuleAbsent
         ownerDenied.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
 
         using var modAdmin = Admin(_withModule);
+        using var modSync = await modAdmin.PostAsync("/modules/lineage/openlineage/sync", content: null);
+        modSync.StatusCode.ShouldBe(HttpStatusCode.BadGateway);
+
         using var legacy = await modAdmin.PostAsync("/api/lineage/openlineage/sync", content: null);
         legacy.StatusCode.ShouldBe(HttpStatusCode.NotFound);
     }
@@ -117,7 +122,13 @@ public sealed class LineageModuleAbsentTests : IClassFixture<LineageModuleAbsent
         scope.ServiceProvider.GetService<IOpenLineageClient>().ShouldBeNull();
 
         using var moduleScope = _withModule.Services.CreateScope();
-        moduleScope.ServiceProvider.GetService<IOpenLineageClient>().ShouldNotBeNull();
+        var lineageDescriptor = moduleScope.ServiceProvider
+            .GetRequiredService<ModuleLoadResult>()
+            .Modules
+            .First(m => string.Equals(m.Instance.Id, "lineage", StringComparison.OrdinalIgnoreCase));
+        var moduleOpenLineageInterface = lineageDescriptor.Instance.GetType().Assembly
+            .GetType("Autheris.Application.Lineage.IOpenLineageClient", throwOnError: true)!;
+        moduleScope.ServiceProvider.GetService(moduleOpenLineageInterface).ShouldNotBeNull();
     }
 
     public sealed class AbsentHost : IntegrationHost<AbsentHost>
