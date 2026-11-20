@@ -48,7 +48,6 @@ public static class GatewayConfigurationSchema
         ("Gateway:Telemetry", typeof(TelemetryOptions)),
         ("Gateway:Subscriptions", typeof(RevocationWatchOptions)),
         ("Gateway:Audit:Retention", typeof(AuditRetentionOptions)),
-        ("Gateway:RowFilters:KeySetCache", typeof(RowFilterKeySetCacheOptions)),
         ("Gateway:State", typeof(StateOptions)),
         ("Gateway:TableCache", typeof(TableCacheOptions)),
         ("Gateway:AsyncJobs", typeof(AsyncJobOptions)),

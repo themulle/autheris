@@ -275,26 +275,6 @@ public sealed class DatabricksStartupValidationTests
     }
 
     [Fact]
-    public void DelegatedEnforcement_WithKeySetCacheAllowed_RejectedAtStartup()
-    {
-        var options = Options(DatabricksAuthMode.OAuthObo, extra: conns =>
-        {
-            var c = conns["dbx"];
-            conns["dbx"] = new DataSourceConnectionOptions
-            {
-                Provider = c.Provider,
-                CommandTimeoutSeconds = c.CommandTimeoutSeconds,
-                Databricks = c.Databricks,
-                EnforcementMode = EnforcementMode.Delegated,
-                KeySetCacheAllowed = true
-            };
-        });
-
-        Should.Throw<ValidationException>(() => GatewayStartupValidator.ValidateDatabricks(options, Env("Production")))
-            .Message.ShouldContain("KeySetCacheAllowed must be false");
-    }
-
-    [Fact]
     public void DelegatedEnforcement_WithoutOAuthObo_RejectedAtStartup()
     {
         var options = Options(DatabricksAuthMode.OAuthM2M, extra: conns =>
@@ -305,8 +285,7 @@ public sealed class DatabricksStartupValidationTests
                 Provider = c.Provider,
                 CommandTimeoutSeconds = c.CommandTimeoutSeconds,
                 Databricks = c.Databricks,
-                EnforcementMode = EnforcementMode.Delegated,
-                KeySetCacheAllowed = false
+                EnforcementMode = EnforcementMode.Delegated
             };
         });
 

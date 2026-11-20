@@ -229,12 +229,6 @@ public sealed class ErrorBodyMigrationEndpointTests
         AssertGovernedProblem(r, 400, "GOVERNANCE_PLAN_INVALID");
     }
 
-    [Fact]
-    public async Task Migrated_Error_Bodies_Do_Not_Echo_Exception_Or_Input_RowFilter_DatasetNotFound()
-    {
-        AssertGovernedProblem(await ExecAsync(GovernanceEndpoints.DatasetNotFound()), 404, "RESOURCE_NOT_FOUND");
-    }
-
     private sealed class StubDeclarativeConsentApplyService : IDeclarativeConsentApplyService
     {
         public static readonly StubDeclarativeConsentApplyService Instance = new();

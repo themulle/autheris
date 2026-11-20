@@ -260,7 +260,6 @@ public sealed class SqlEndpointsOptions
     /// <c>-- @datasource</c> (dbt database) must be <c>WebSql.DefaultDataSourceName</c> or listed in <c>WebSql.AllowedDataSources</c>.
     /// </summary>
     public bool AutoSyncFromDbt { get; init; } = true;
-    public int MaxQueryTimeoutSeconds { get; init; } = 60;
 
     /// <summary>F-SQL-02: Governed stored procedure endpoints (disabled by default).</summary>
     public ProcedureEndpointsOptions Procedures { get; init; } = new();

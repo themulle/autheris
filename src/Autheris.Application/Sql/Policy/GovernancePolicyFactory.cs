@@ -11,7 +11,6 @@ using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Sql.Catalog;
 using Autheris.Application.Sql.Masking;
-using Autheris.Application.Sql.Policy.RowFilterKeySets;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -40,12 +39,6 @@ public sealed record GovernedPolicyInput(
     public string ConnectionKey { get; init; } = DataSourceName;
 
     /// <summary>
-    /// Issue #107 (D-WPC-1): statement context of the key-set stage. <c>null</c> (any other caller) means the stage is not invoked and the
-    /// assembly is byte-identical to the one without the feature (AC-8).
-    /// </summary>
-    public RowFilterKeySetStatement? KeySetStatement { get; init; }
-
-    /// <summary>
     /// Governed DML write permit produced by the access decision point when compiling a write statement.
     /// </summary>
     public DmlWritePermit? WritePermit { get; init; }
@@ -58,13 +51,6 @@ public sealed record GovernedPolicyInput(
 }
 
 /// <summary>
-/// D-WPC-1 /<paramref name="IsRead"/> is <c>metadata.StatementType == Select</c> (the same classification as <c>isDml</c>),
-/// <paramref name="UserSqlLength"/> the length of the user statement, <paramref name="MaxExpansionFactor"/> the normalized factor of the compile
-/// request, <paramref name="Disabled"/>true on the one retry of 15 (every site stays<c>EXISTS</c>).
-/// </summary>
-public sealed record RowFilterKeySetStatement(bool IsRead, int UserSqlLength, int MaxExpansionFactor, bool Disabled);
-
-/// <summary>
 /// WP-X0l: assembles the typed <see cref="GovernancePolicy"/> of one statement from its access decisions and the verified catalog
 /// . Fail closed per table: a table is part of the policy's catalog only when its decision is allowed, its row
 /// filter and masks exist as typed policies, and the string and typed forms agree. Every other table is unknown to the compiler, which
@@ -75,25 +61,14 @@ public sealed record RowFilterKeySetStatement(bool IsRead, int UserSqlLength, in
 public sealed class GovernancePolicyFactory(
     IGovernedCatalogProvider catalogs,
     ITableMetadataRepository tables,
-    IOptions<GatewayOptions> options,
-    IRowFilterKeySetStage? keySetStage = null)
+    IOptions<GatewayOptions> options)
 {
-    private readonly IRowFilterKeySetStage? _keySetStage = keySetStage;
     private readonly IGovernedCatalogProvider _catalogs = catalogs ?? throw new ArgumentNullException(nameof(catalogs));
     private readonly ITableMetadataRepository _tables = tables ?? throw new ArgumentNullException(nameof(tables));
     private readonly IOptions<GatewayOptions> _options = options ?? throw new ArgumentNullException(nameof(options));
 
     /// <exception cref="SecurityException">The decisions carry row policies of different target dialects (a gateway defect).</exception>
-    public async ValueTask<GovernancePolicy> CreateAsync(GovernedPolicyInput input, CancellationToken ct) =>
-        (await CreateAssemblyAsync(input, ct).ConfigureAwait(false)).Policy;
-
-    /// <summary>
-    /// The policy plus the key-set diagnostics of the statement (issue #107, A-2). After the admission loop the key-set stage may replace correlated
-    /// <c>EXISTS</c> sites of the admitted predicates by cached key sets; only the compiler input (<c>rowPredicates</c>) changes, never a decision,
-    /// recipe or cache (04 a, -10 c). The policy catalog's dependents are computed from the final predicates.
-    /// </summary>
-    /// <exception cref="SecurityException">The decisions carry row policies of different target dialects (a gateway defect).</exception>
-    public async ValueTask<GovernedPolicyAssembly> CreateAssemblyAsync(GovernedPolicyInput input, CancellationToken ct)
+    public async ValueTask<GovernancePolicy> CreateAsync(GovernedPolicyInput input, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(input.Decisions);
@@ -199,31 +174,9 @@ public sealed class GovernancePolicyFactory(
             }
         }
 
-        var keySets = new RowFilterKeySetReport();
-        IReadOnlyDictionary<TableIdentity, PolicyPredicate?> finalPredicates = rowPredicates;
-        if (_keySetStage is not null && input.KeySetStatement is { } statement && dialect is { } keySetDialect && HasRegisteredSite(rowPredicates))
+        return new GovernancePolicy
         {
-            var context = await BuildKeySetContextAsync(input, statement, keySetDialect, catalog, admitted, dependents, rowPredicates, records, ct).ConfigureAwait(false);
-            if (statement.IsRead)
-            {
-                finalPredicates = await _keySetStage.ApplyAsync(context, rowPredicates, keySets, ct).ConfigureAwait(false);
-            }
-            else
-            {
-                // D-WPC-2 / no epoch read, cache lookup or key query for a write or unknown statement type.
-                _keySetStage.ReportSkipped(context, rowPredicates, keySets, KeySetFallbackReason.WriteStatement);
-            }
-
-            if (!ReferenceEquals(finalPredicates, rowPredicates))
-            {
-                // A fully substituted policy no longer reads its dependent tables: they stop being resolvable for the compiler (A-2).
-                dependents = ReadTables(catalog, finalPredicates, admitted);
-            }
-        }
-
-        var policyResult = new GovernancePolicy
-        {
-            RowFilters = new DecisionRowPolicyProvider(finalPredicates, dialect),
+            RowFilters = new DecisionRowPolicyProvider(rowPredicates, dialect),
             Masks = new DecisionColumnMaskProvider(masks),
             PerCellColumns = new DecisionPerCellColumnProvider(perCellPolicies),
             Catalog = new AdmittedTableCatalog(catalog, admitted, dependents),
@@ -233,109 +186,6 @@ public sealed class GovernancePolicyFactory(
             SubqueryStrategy = input.SubqueryStrategy,
             Write = input.WritePermit
         };
-
-        return new GovernedPolicyAssembly(policyResult, keySets);
-    }
-
-    /// <summary>True when any predicate holds a registered correlated site; without one the key-set stage has nothing to do and no governance record is read for it.</summary>
-    private static bool HasRegisteredSite(IReadOnlyDictionary<TableIdentity, PolicyPredicate?> predicates)
-    {
-        foreach (var predicate in predicates.Values)
-        {
-            if (predicate is not null && CorrelatedKeySetSubstitution.Scan(predicate) is { Eligible.Count: > 0 } or { Excluded.Count: > 0 })
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /// <summary>The tables read by the given predicates of admitted tables (resolvable subquery tables of the final policy).</summary>
-    private static HashSet<TableIdentity> ReadTables(ITableCatalog catalog, IReadOnlyDictionary<TableIdentity, PolicyPredicate?> predicates, IReadOnlySet<TableIdentity> admitted)
-    {
-        var result = new HashSet<TableIdentity>();
-        foreach (var (identity, predicate) in predicates)
-        {
-            if (!admitted.Contains(identity) || predicate is null)
-            {
-                continue;
-            }
-
-            foreach (var name in PolicySubqueryTables.Names(predicate))
-            {
-                if (catalog.Resolve(name) is { } entry)
-                {
-                    result.Add(entry.Identity);
-                }
-            }
-        }
-
-        return result;
-    }
-
-    /// <summary>
-    /// The stage input (A-2, C-8): the catalog still resolves the dependents (the key query reads them), the governance identifiers per table are the
-    /// target and every admittable dependent record (the epoch keys, A-6, A-13).
-    /// </summary>
-    private async ValueTask<RowFilterKeySetContext> BuildKeySetContextAsync(
-        GovernedPolicyInput input,
-        RowFilterKeySetStatement statement,
-        TargetSqlDialect dialect,
-        ITableCatalog catalog,
-        IReadOnlySet<TableIdentity> admitted,
-        IReadOnlySet<TableIdentity> dependents,
-        Dictionary<TableIdentity, PolicyPredicate?> rowPredicates,
-        Dictionary<TableIdentifier, GovernanceRecord> records,
-        CancellationToken ct)
-    {
-        // The dependent scan only feeds the epoch keys of a read statement against an opted-in data source; the stage stops before them otherwise.
-        bool needDependents = statement.IsRead
-            && _options.Value.DataSources?.Connections is { } connections
-            && connections.TryGetValue(input.ConnectionKey, out var connection)
-            && connection.KeySetCacheAllowed;
-        var identifiers = new Dictionary<TableIdentity, IReadOnlyList<TableIdentifier>>();
-        var metadata = new Dictionary<TableIdentity, TableMetadata?>();
-        foreach (var (identity, predicate) in rowPredicates)
-        {
-            if (input.Metadata is { } all && all.TryGetValue(identity, out var m))
-            {
-                metadata[identity] = m;
-            }
-
-            var ids = new List<TableIdentifier> { input.Decisions[identity].Table };
-            if (predicate is not null && needDependents)
-            {
-                foreach (var name in PolicySubqueryTables.Names(predicate))
-                {
-                    foreach (var candidate in PolicySubqueryTables.Candidates(name, input.DataSourceName))
-                    {
-                        var record = await LoadRecordAsync(records, candidate, ct).ConfigureAwait(false);
-                        if (record.Metadata is { } dependent
-                            && string.Equals(dependent.Table.SourceName, input.DataSourceName, StringComparison.OrdinalIgnoreCase)
-                            && !ids.Contains(candidate))
-                        {
-                            ids.Add(candidate);
-                        }
-                    }
-                }
-            }
-
-            identifiers[identity] = ids;
-        }
-
-        return new RowFilterKeySetContext(
-            input.DataSourceName,
-            input.Tenant,
-            dialect,
-            new AdmittedTableCatalog(catalog, admitted, dependents),
-            new TenantBinding(RowPolicyFactory.TenantParameterName, input.Tenant.Value, SqlParameterType.String),
-            metadata,
-            identifiers,
-            statement.Disabled,
-            statement.IsRead,
-            statement.UserSqlLength,
-            statement.MaxExpansionFactor);
     }
 
     /// <summary>
