@@ -1,6 +1,5 @@
 namespace Autheris.Tests.Integration.Governance;
 
-using Autheris.Tests.Unit.Catalog;
 using Autheris.Tests.Unit.TestDoubles;
 using System;
 using System.Collections.Generic;
@@ -28,7 +27,7 @@ using Xunit;
 /// Virtual filters, phase 2: administration API. FilterAdmin writes, FilterSync applies the file repository state,
 /// GovernanceAdmin and SecurityAuditor read; everybody stays within their tenant (decision 3).
 /// </summary>
-public sealed class VirtualFilterEndpointsTests : IDisposable
+public sealed partial class VirtualFilterEndpointsTests : IDisposable
 {
     private const string Tenant = "tenant_lwe";
 
@@ -345,43 +344,6 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
         var stored = snapshot.Filters.ShouldHaveSingleItem();
         stored.Status.ShouldBe(FilterApprovalStatus.Active);
         stored.ApprovedBy.ShouldBe(new Sid("S-1-5-21-SUPERVISOR"));
-    }
-
-    [Fact]
-    public async Task PutSqlFilter_RequireApprovalFalse_ReturnsPendingWithReason()
-    {
-        var catalog = Substitute.For<ITableMetadataRepository>();
-        catalog.StubTables([
-            Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.Table("conf", "client", "client_id", "crane_serial_number"),
-            Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.Table("md", "crane", "serial_number", "is_delivered")
-        ]);
-        var options = Options.Create(new GatewayOptions { VirtualFilters = new VirtualFilterOptions { RequireApproval = false } });
-        var service = new VirtualFilterAdministrationService(_repository, Substitute.For<IAuditLogRepository>(), options, catalog: catalog);
-
-        var sqlBody = new
-        {
-            source = "lwetem_prod",
-            sql = "from conf.client client join md.crane crane on crane.serial_number = client.crane_serial_number where crane.is_delivered is null and target.client_id = client.client_id"
-        };
-        var putContext = Context(Tenant, sqlBody, "GovernanceAdmin");
-        var putStatus = await StatusAsync(await VirtualFilterEndpoints.PutFilterAsync("active_cranes_sql", putContext, service), putContext);
-
-        putStatus.ShouldBe(StatusCodes.Status200OK);
-        putContext.Response.Body.Position = 0;
-        using (var putDoc = await JsonDocument.ParseAsync(putContext.Response.Body))
-        {
-            putDoc.RootElement.GetProperty("status").GetString().ShouldBe("PendingApproval");
-            putDoc.RootElement.GetProperty("approval_reason").GetString().ShouldBe("sql_definition_needs_owner_approval");
-        }
-
-        var listContext = Context(Tenant, null, "GovernanceAdmin");
-        var listStatus = await StatusAsync(await VirtualFilterEndpoints.ListAsync(listContext, service), listContext);
-        listStatus.ShouldBe(StatusCodes.Status200OK);
-        listContext.Response.Body.Position = 0;
-        using var listDoc = await JsonDocument.ParseAsync(listContext.Response.Body);
-        var listed = listDoc.RootElement.GetProperty("filters").EnumerateArray().Single(f => f.GetProperty("name").GetString() == "active_cranes_sql");
-        listed.GetProperty("status").GetString().ShouldBe("PendingApproval");
-        listed.GetProperty("approval_reason").GetString().ShouldBe("sql_definition_needs_owner_approval");
     }
 
     [Fact]
