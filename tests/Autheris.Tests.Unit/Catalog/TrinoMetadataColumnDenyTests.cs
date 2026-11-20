@@ -107,4 +107,38 @@ public sealed class TrinoMetadataColumnDenyTests
 
         columns.ShouldBe(["id", "email"]);
     }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task MetricView_InformationSchemaTablesReportsView_AndColumnsHidesUnconsentedMeasures()
+    {
+        var baseTable = Wp0.Table("analytics", "sales_mv", columns: ["region", "revenue", "internal_col"]);
+        var mv = baseTable with
+        {
+            Table = baseTable.Table with
+            {
+                SourceType = "Databricks",
+                ObjectKind = DiscoveryObjectKind.MetricView
+            },
+            Columns =
+            [
+                new TableColumn { ColumnName = "region", DataType = "string", Role = MetricViewColumnRole.Dimension },
+                new TableColumn { ColumnName = "revenue", DataType = "decimal(18,2)", Role = MetricViewColumnRole.Measure },
+                new TableColumn { ColumnName = "internal_col", DataType = "string", DiscoveryHidden = true, Role = null }
+            ]
+        };
+
+        // Table-wide grant without explicit measure rule: only dimensions are visible.
+        var tableWideConsents = Repository(Grant(mv.Identifier, GranteeType.User, UserSid));
+        var tablesRes = await TrinoMetadataQueryHandler.TryExecuteAsync(
+            "SELECT * FROM information_schema.tables", Caller(), Tenant, Wp0.Tables(mv), tableWideConsents, Wp0.Options(), null, TrinoMetadataVisibilityFakes.AllowAll(mv));
+        tablesRes.ShouldNotBeNull();
+        tablesRes.Rows.ShouldHaveSingleItem()["table_type"].ShouldBe("VIEW");
+
+        (await ColumnsAsync(tableWideConsents, mv)).ShouldBe(["region"]);
+
+        // Explicit measure Clear exposes the consented measure, while unconsented internal_col stays hidden.
+        var explicitConsents = Repository(Grant(mv.Identifier, GranteeType.User, UserSid, ("region", ColumnAccessLevel.Clear), ("revenue", ColumnAccessLevel.Clear)));
+        (await ColumnsAsync(explicitConsents, mv)).ShouldBe(["region", "revenue"]);
+    }
 }

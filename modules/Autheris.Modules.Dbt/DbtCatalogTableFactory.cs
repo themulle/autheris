@@ -72,6 +72,14 @@ internal static partial class DbtCatalogTableFactory
             }
         }
 
+        var objectKind = DiscoveryObjectKind.Table;
+        string? countMeasure = null;
+        if (applyObjectKind && !DbtObjectKindResolver.TryResolveForIngestion(model, warnings, out objectKind, out countMeasure))
+        {
+            reason = DbtSyncSkipReasons.Ineligible;
+            return false;
+        }
+
         var table = new Table
         {
             Id = Guid.NewGuid(),
@@ -86,12 +94,19 @@ internal static partial class DbtCatalogTableFactory
             RequiresFourEyes = false,
             IsActive = options.Dbt.ActivateNewTables,
             DataSourceType = DataSourceType.Sql,
-            ObjectKind = applyObjectKind ? DbtObjectKindResolver.Resolve(model, warnings) : DiscoveryObjectKind.Table
+            ObjectKind = objectKind,
+            MetricViewCountMeasure = countMeasure
         };
 
         var columns = new List<TableColumn>(model.Columns.Count);
         foreach (var (_, column) in model.Columns)
         {
+            if (!DbtObjectKindResolver.TryResolveColumnRole(column, objectKind, model.Name, warnings, out var role))
+            {
+                reason = DbtSyncSkipReasons.Ineligible;
+                return false;
+            }
+
             columns.Add(new TableColumn
             {
                 Id = Guid.NewGuid(),
@@ -99,6 +114,8 @@ internal static partial class DbtCatalogTableFactory
                 ColumnName = column.Name,
                 DataType = string.IsNullOrWhiteSpace(column.DataType) ? "string" : column.DataType.Trim(),
                 Description = column.Description,
+                DiscoveryHidden = objectKind == DiscoveryObjectKind.MetricView && role is null,
+                Role = role,
                 Meta = column.Meta.Count > 0 ? new Dictionary<string, string>(column.Meta, StringComparer.OrdinalIgnoreCase) : new Dictionary<string, string>()
             });
         }

@@ -337,7 +337,8 @@ querySpecification
     ;
 
 groupBy
-    : setQuantifier? groupingElement (',' groupingElement)*
+    : ALL                                                    #groupByAll
+    | setQuantifier? groupingElement (',' groupingElement)*  #groupByElements
     ;
 
 groupingElement

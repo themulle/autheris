@@ -568,7 +568,8 @@ public sealed partial class ExternalCatalogReader(
                 ClearInSomeRows: vc.ClearInSomeRows,
                 Statistics: vc.Statistics,
                 Classifications: exposeClassifications ? vc.Classifications : [],
-                ClearRequestable: exposeClassifications ? vc.ClearRequestable : []));
+                ClearRequestable: exposeClassifications ? vc.ClearRequestable : [],
+                Role: vc.Role?.ToWireName()));
         }
 
         // A person never receives the appended hidden columns: they carry no caller state, so they stay hidden.
@@ -721,9 +722,11 @@ public sealed partial class ExternalCatalogReader(
 
     private static string KindName(DiscoveryObjectKind kind) => kind switch
     {
+        DiscoveryObjectKind.Table => "table",
         DiscoveryObjectKind.View => "view",
         DiscoveryObjectKind.Procedure => "procedure",
-        _ => "table"
+        DiscoveryObjectKind.MetricView => "metric_view",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown DiscoveryObjectKind.")
     };
 
     private static string NormalizeChangeKind(string kind) =>

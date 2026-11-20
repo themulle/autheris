@@ -559,6 +559,14 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
             {
                 if (existingMeta != null)
                 {
+                    if (!DbtObjectKindResolver.TryResolveForIngestion(model, warnings, out var resolvedKind, out var resolvedCountMeasure) ||
+                        !DbtObjectKindResolver.TryResolveColumnRoles(model, resolvedKind, warnings, out var resolvedRoles))
+                    {
+                        rejectedModels.Add(model.Name);
+                        creation.RejectedIds.Add(model.UniqueId);
+                        continue;
+                    }
+
                     // EXT-05: Ratchet governance properties rather than overwrite
                     var reqCols = DbtManifestRatchet.MergeRequiredFilterColumns(
                         existingMeta.Identifier,
@@ -597,42 +605,27 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                         ct,
                         dryRun: dryRun).ConfigureAwait(false);
 
-                    var updatedTableObj = new Table
+                    var targetKind = caller.IsClusterAdmin ? resolvedKind : existingMeta.Table.ObjectKind;
+                    var updatedTableObj = existingMeta.Table with
                     {
-                        Id = existingMeta.Table.Id,
-                        SourceType = existingMeta.Table.SourceType,
-                        SourceName = existingMeta.Table.SourceName,
-                        SchemaName = existingMeta.Table.SchemaName,
-                        TableName = existingMeta.Table.TableName,
                         DisplayName = string.IsNullOrWhiteSpace(existingMeta.Table.DisplayName) && IsAliased(model) ? model.Name : existingMeta.Table.DisplayName,
                         DbtUniqueId = model.UniqueId,
                         Description = model.Description ?? existingMeta.Table.Description,
                         LongDescription = model.Meta.GetValueOrDefault("long_description") ?? existingMeta.Table.LongDescription,
-                        Sensitivity = existingMeta.Table.Sensitivity,
-                        RequiresFourEyes = existingMeta.Table.RequiresFourEyes,
-                        IsActive = existingMeta.Table.IsActive,
-                        DataSourceType = existingMeta.Table.DataSourceType,
-                        PhysicalDatabaseName = existingMeta.Table.PhysicalDatabaseName,
-                        Location = existingMeta.Table.Location,
-                        HttpEndpoint = existingMeta.Table.HttpEndpoint,
-                        PluginName = existingMeta.Table.PluginName,
-                        Tags = existingMeta.Table.Tags,
-                        RlsExpression = existingMeta.Table.RlsExpression,
                         MinGroupSize = newMinGroupSize,
                         NonPersonal = newNonPersonal,
-                        SmallGroupStrategy = existingMeta.Table.SmallGroupStrategy,
                         RequiredFilterColumns = reqCols,
                         RequiredFilterColumnGroups = reqGroups,
-                        ExpectedRows = existingMeta.Table.ExpectedRows,
-                        ObjectKind = caller.IsClusterAdmin ? DbtObjectKindResolver.Resolve(model, warnings) : existingMeta.Table.ObjectKind
+                        ObjectKind = targetKind,
+                        MetricViewCountMeasure = targetKind == DiscoveryObjectKind.MetricView
+                            ? (caller.IsClusterAdmin ? resolvedCountMeasure ?? existingMeta.Table.MetricViewCountMeasure : existingMeta.Table.MetricViewCountMeasure)
+                            : null
                     };
 
-                    var updatedColumns = new List<TableColumn>();
+                    var updatedColumns = new List<TableColumn>(existingMeta.Columns.Count);
                     foreach (var c in existingMeta.Columns)
                     {
                         var matchingCol = model.Columns.TryGetValue(c.ColumnName, out var dCol) ? dCol : null;
-                        var colDesc = matchingCol?.Description ?? c.Description;
-                        var colLongDesc = matchingCol?.Meta.GetValueOrDefault("long_description") ?? c.LongDescription;
                         var colMeta = DbtManifestRatchet.MergeColumnMeta(
                             existingMeta.Identifier,
                             c.ColumnName,
@@ -641,16 +634,28 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                             suppressedRelaxations,
                             _logger);
 
-                        updatedColumns.Add(new TableColumn
+                        var nextRole = c.Role;
+                        var nextHidden = c.DiscoveryHidden;
+                        if (matchingCol is not null && resolvedRoles.TryGetValue(matchingCol.Name, out var incomingRole))
                         {
-                            Id = c.Id,
-                            TableId = c.TableId,
-                            ColumnName = c.ColumnName,
-                            DataType = c.DataType,
-                            Description = colDesc,
-                            LongDescription = colLongDesc,
-                            Meta = colMeta
-                        });
+                            if (targetKind == DiscoveryObjectKind.MetricView)
+                            {
+                                nextRole = incomingRole ?? (DbtObjectKindResolver.HasExplicitColumnRole(matchingCol) ? null : c.Role);
+                                nextHidden = c.DiscoveryHidden || nextRole is null;
+                            }
+                            else
+                            {
+                                nextRole = null;
+                            }
+                        }
+
+                        updatedColumns.Add(CloneUpdatedColumn(
+                            c,
+                            matchingCol?.Description ?? c.Description,
+                            matchingCol?.Meta.GetValueOrDefault("long_description") ?? c.LongDescription,
+                            colMeta,
+                            nextRole,
+                            nextHidden));
                     }
 
                     // A copy of a loaded table keeps every persisted governance field (classifications, mask overrides, keys, ...).
@@ -1310,34 +1315,14 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                     rejections.Add($"Table '{tableId}': {relaxedGroup} requires the dbt proposal workflow.");
                 }
 
-                var updatedTable = new Table
+                var updatedTable = existingMeta.Table with
                 {
-                    Id = existingMeta.Table.Id,
-                    SourceType = existingMeta.Table.SourceType,
-                    SourceName = existingMeta.Table.SourceName,
-                    SchemaName = existingMeta.Table.SchemaName,
-                    TableName = existingMeta.Table.TableName,
-                    DisplayName = existingMeta.Table.DisplayName,
                     Description = description,
                     LongDescription = reviewJson ?? existingMeta.Table.LongDescription,
                     DocumentationSource = origin ?? existingMeta.Table.DocumentationSource,
                     Sensitivity = sensitivity,
-                    RequiresFourEyes = existingMeta.Table.RequiresFourEyes,
-                    IsActive = existingMeta.Table.IsActive,
-                    DataSourceType = existingMeta.Table.DataSourceType,
-                    PhysicalDatabaseName = existingMeta.Table.PhysicalDatabaseName,
-                    Location = existingMeta.Table.Location,
-                    HttpEndpoint = existingMeta.Table.HttpEndpoint,
-                    PluginName = existingMeta.Table.PluginName,
-                    Tags = existingMeta.Table.Tags,
-                    RlsExpression = existingMeta.Table.RlsExpression,
-                    MinGroupSize = existingMeta.Table.MinGroupSize,
-                    NonPersonal = existingMeta.Table.NonPersonal,
-                    SmallGroupStrategy = existingMeta.Table.SmallGroupStrategy,
                     RequiredFilterColumns = reqCols,
-                    RequiredFilterColumnGroups = reqGroups,
-                    ExpectedRows = existingMeta.Table.ExpectedRows,
-                    ObjectKind = existingMeta.Table.ObjectKind
+                    RequiredFilterColumnGroups = reqGroups
                 };
 
                 var updatedCols = new List<TableColumn>();
@@ -1518,16 +1503,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                         RejectRuleRemoval(updatedMaskingRules, tableId, col.ColumnName);
                     }
 
-                    var updatedCol = new TableColumn
-                    {
-                        Id = col.Id,
-                        TableId = col.TableId,
-                        ColumnName = col.ColumnName,
-                        DataType = col.DataType,
-                        Description = colDesc,
-                        LongDescription = col.LongDescription,
-                        Meta = colMeta
-                    };
+                    var updatedCol = CloneUpdatedColumn(col, colDesc, col.LongDescription, colMeta, col.Role, col.DiscoveryHidden);
                     updatedCols.Add(updatedCol);
                     if (newlyFlagged)
                     {
@@ -1733,4 +1709,30 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
     {
         return _proposalRepository.GetPendingProposalsAsync(table, ct);
     }
+
+    private static TableColumn CloneUpdatedColumn(
+        TableColumn source,
+        string? description,
+        string? longDescription,
+        IReadOnlyDictionary<string, string> meta,
+        MetricViewColumnRole? role,
+        bool discoveryHidden) =>
+        new()
+        {
+            Id = source.Id,
+            TableId = source.TableId,
+            ColumnName = source.ColumnName,
+            DisplayName = source.DisplayName,
+            DataType = source.DataType,
+            Collation = source.Collation,
+            LengthSemantics = source.LengthSemantics,
+            WriteProtected = source.WriteProtected,
+            DiscoveryHidden = discoveryHidden,
+            Role = role,
+            Description = description,
+            LongDescription = longDescription,
+            Texts = source.Texts,
+            DocumentationSource = source.DocumentationSource,
+            Meta = meta
+        };
 }

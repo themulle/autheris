@@ -13,9 +13,89 @@ using Autheris.Domain.Model;
 internal static class DbtObjectKindResolver
 {
     internal const string MetaKey = "autheris.object_kind";
+    internal const string ColumnRoleMetaKey = "autheris.column_role";
+    internal const string CountMeasureMetaKey = "autheris.count_measure";
     private const int MaxRawLength = 16;
     private const int MaxEchoLength = 64;
     private const int MaxMetaJsonLength = 4096;
+
+    internal static bool TryResolveForIngestion(
+        DbtModelDefinition model,
+        ICollection<string>? warnings,
+        out DiscoveryObjectKind kind,
+        out string? countMeasure)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        countMeasure = null;
+
+        var raw = ReadMeta(model.Meta, MetaKey, "object_kind");
+        var isSource = string.Equals(model.Materialization, "source", StringComparison.OrdinalIgnoreCase);
+
+        if (!isSource)
+        {
+            if (raw is not null && raw.AsSpan().Trim().Equals("metric_view", StringComparison.OrdinalIgnoreCase))
+            {
+                AddWarning(warnings, $"Model '{DbtIdentifierSanitizer.ForLog(model.Name)}': {MetaKey} 'metric_view' is only permitted on dbt sources.");
+                kind = DiscoveryObjectKind.Table;
+                return false;
+            }
+
+            kind = string.Equals(model.Materialization, "view", StringComparison.OrdinalIgnoreCase)
+                ? DiscoveryObjectKind.View
+                : DiscoveryObjectKind.Table;
+            return true;
+        }
+
+        kind = raw is null ? DiscoveryObjectKind.Table : Parse(raw, model.Name, warnings);
+        if (kind == DiscoveryObjectKind.MetricView)
+        {
+            var rawCountMeasure = ReadMeta(model.Meta, CountMeasureMetaKey, "count_measure");
+            if (!string.IsNullOrWhiteSpace(rawCountMeasure))
+            {
+                countMeasure = rawCountMeasure.Trim();
+            }
+        }
+
+        return true;
+    }
+
+    internal static bool TryResolveColumnRole(
+        DbtColumnDefinition column,
+        DiscoveryObjectKind tableKind,
+        string tableName,
+        ICollection<string>? warnings,
+        out MetricViewColumnRole? role)
+    {
+        ArgumentNullException.ThrowIfNull(column);
+        role = null;
+        var raw = ReadMeta(column.Meta, ColumnRoleMetaKey, "column_role");
+        if (raw is null)
+        {
+            return true;
+        }
+
+        if (tableKind != DiscoveryObjectKind.MetricView)
+        {
+            AddWarning(warnings, $"Table '{DbtIdentifierSanitizer.ForLog(tableName)}': column '{DbtIdentifierSanitizer.ForLog(column.Name)}' declares {ColumnRoleMetaKey}, which is only permitted on metric_view objects.");
+            return false;
+        }
+
+        var trimmed = raw.AsSpan().Trim();
+        if (trimmed.Equals("dimension", StringComparison.OrdinalIgnoreCase))
+        {
+            role = MetricViewColumnRole.Dimension;
+            return true;
+        }
+
+        if (trimmed.Equals("measure", StringComparison.OrdinalIgnoreCase))
+        {
+            role = MetricViewColumnRole.Measure;
+            return true;
+        }
+
+        AddWarning(warnings, $"Metric view '{DbtIdentifierSanitizer.ForLog(tableName)}': column '{DbtIdentifierSanitizer.ForLog(column.Name)}' has unknown {ColumnRoleMetaKey} '{DbtIdentifierSanitizer.ForLog(raw.Length > MaxEchoLength ? raw[..MaxEchoLength] : raw)}', left unexposed.");
+        return true;
+    }
 
     internal static DiscoveryObjectKind Resolve(DbtModelDefinition model, ICollection<string>? warnings)
     {
@@ -30,7 +110,7 @@ internal static class DbtObjectKindResolver
             return DiscoveryObjectKind.Table;
         }
 
-        var raw = ReadMeta(model.Meta);
+        var raw = ReadMeta(model.Meta, MetaKey, "object_kind");
         if (raw is null)
         {
             return DiscoveryObjectKind.Table;
@@ -49,24 +129,32 @@ internal static class DbtObjectKindResolver
                 return DiscoveryObjectKind.View;
             }
 
+            if (trimmed.Equals("metric_view", StringComparison.OrdinalIgnoreCase))
+            {
+                return DiscoveryObjectKind.MetricView;
+            }
+
             if (trimmed.Equals("table", StringComparison.OrdinalIgnoreCase))
             {
                 return DiscoveryObjectKind.Table;
             }
         }
 
-        var message = $"Table '{DbtIdentifierSanitizer.ForLog(name)}': unknown {MetaKey} '{DbtIdentifierSanitizer.ForLog(raw.Length > MaxEchoLength ? raw[..MaxEchoLength] : raw)}', registered as table.";
+        AddWarning(warnings, $"Table '{DbtIdentifierSanitizer.ForLog(name)}': unknown {MetaKey} '{DbtIdentifierSanitizer.ForLog(raw.Length > MaxEchoLength ? raw[..MaxEchoLength] : raw)}', registered as table.");
+        return DiscoveryObjectKind.Table;
+    }
+
+    private static void AddWarning(ICollection<string>? warnings, string message)
+    {
         if (warnings is not null && !warnings.Contains(message))
         {
             warnings.Add(message);
         }
-
-        return DiscoveryObjectKind.Table;
     }
 
-    private static string? ReadMeta(IReadOnlyDictionary<string, string> meta)
+    private static string? ReadMeta(IReadOnlyDictionary<string, string> meta, string flatKey, string jsonProperty)
     {
-        if (meta.TryGetValue(MetaKey, out var flat))
+        if (meta.TryGetValue(flatKey, out var flat))
         {
             return flat;
         }
@@ -77,7 +165,7 @@ internal static class DbtObjectKindResolver
             {
                 using var doc = JsonDocument.Parse(json);
                 if (doc.RootElement.ValueKind == JsonValueKind.Object &&
-                    doc.RootElement.TryGetProperty("object_kind", out var prop))
+                    doc.RootElement.TryGetProperty(jsonProperty, out var prop))
                 {
                     return prop.ValueKind == JsonValueKind.String ? prop.GetString() : null;
                 }
@@ -90,4 +178,27 @@ internal static class DbtObjectKindResolver
 
         return null;
     }
+
+    internal static bool TryResolveColumnRoles(
+        DbtModelDefinition model,
+        DiscoveryObjectKind tableKind,
+        ICollection<string>? warnings,
+        out Dictionary<string, MetricViewColumnRole?> resolvedRoles)
+    {
+        resolvedRoles = new Dictionary<string, MetricViewColumnRole?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (_, col) in model.Columns)
+        {
+            if (!TryResolveColumnRole(col, tableKind, model.Name, warnings, out var role))
+            {
+                return false;
+            }
+
+            resolvedRoles[col.Name] = role;
+        }
+
+        return true;
+    }
+
+    internal static bool HasExplicitColumnRole(DbtColumnDefinition column) =>
+        ReadMeta(column.Meta, ColumnRoleMetaKey, "column_role") is not null;
 }

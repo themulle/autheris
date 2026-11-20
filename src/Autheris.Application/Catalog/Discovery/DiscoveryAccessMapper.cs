@@ -90,7 +90,8 @@ public static class DiscoveryAccessMapper
                 WriteProtected: col.WriteProtected,
                 Classifications: classifications,
                 ClearRequestable: clearRequestable,
-                LongDescription: hideText ? null : colLongDescription));
+                LongDescription: hideText ? null : colLongDescription,
+                Role: col.Role));
             if (hideText)
             {
                 (hiddenTextColumns ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase)).Add(col.ColumnName);

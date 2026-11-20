@@ -169,7 +169,7 @@ public sealed partial class McpDatasetCatalog
             graphQl?.QueryField,
             Tags: obj.Tags,
             AccessStatus: status,
-            Kind: obj.Kind.ToString().ToLowerInvariant(),
+            Kind: obj.Kind.ToWireName(),
             Size: null,
             DocumentCount: obj.DocumentCount > 0 ? obj.DocumentCount : null);
     }
@@ -294,7 +294,7 @@ public sealed partial class McpDatasetCatalog
                 AccessStatus: accessStatus,
                 Indexes: null,
                 View: SummaryView,
-                Kind: obj.Kind.ToString().ToLowerInvariant(),
+                Kind: obj.Kind.ToWireName(),
                 Language: negotiatedLanguage,
                 RequestedLanguage: language)
             {
@@ -318,7 +318,7 @@ public sealed partial class McpDatasetCatalog
                 if (brief)
                 {
                     // Issue #799: a column signature only (name, type, key flag, access).
-                    return new McpDatasetColumn(c.Name, c.DataType, Description: null, c.Pii, primaryKeys.Contains(c.Name), Access: access);
+                    return new McpDatasetColumn(c.Name, c.DataType, Description: null, c.Pii, primaryKeys.Contains(c.Name), Access: access, Role: c.Role?.ToWireName());
                 }
 
                 graphQlColumns.TryGetValue(c.Name, out var field);
@@ -344,7 +344,8 @@ public sealed partial class McpDatasetCatalog
                     Access: access,
                     DisplayName: obj.HiddenTextColumns.Contains(c.Name) ? null : DiscoveryTextSanitizer.SanitizeText(c.DisplayName, DiscoveryTextSanitizer.MaxDisplayNameRunes),
                     Classifications: c.Classifications, ClearRequestable: c.ClearRequestable,
-                    LongDescription: obj.HiddenTextColumns.Contains(c.Name) ? null : c.LongDescription)
+                    LongDescription: obj.HiddenTextColumns.Contains(c.Name) ? null : c.LongDescription,
+                    Role: c.Role?.ToWireName())
                 {
                     Documents = linked.ColumnDocuments.TryGetValue(c.Name, out var columnDocs) ? columnDocs : null
                 };
@@ -384,7 +385,7 @@ public sealed partial class McpDatasetCatalog
             AccessStatus: accessStatus,
             Indexes: shape.Indexes,
             View: brief ? BriefView : null,
-            Kind: obj.Kind.ToString().ToLowerInvariant(),
+            Kind: obj.Kind.ToWireName(),
             RequiredFilterColumns: shape.RequiredFilterColumns.Count == 0 ? null : shape.RequiredFilterColumns,
             RequiredFilterColumnGroups: shape.RequiredFilterColumnGroups.Count == 0 ? null : shape.RequiredFilterColumnGroups,
             Language: negotiatedLanguage,

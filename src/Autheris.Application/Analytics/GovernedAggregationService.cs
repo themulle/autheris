@@ -221,7 +221,7 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
         {
             foreach (var bucket in rawBuckets)
             {
-                if (bucket.Count >= effectiveMinGroupSize)
+                if (GroupSizeFilterHelper.MeetsMinGroupSize(bucket.Count, effectiveMinGroupSize))
                 {
                     survivingBuckets.Add(bucket);
                 }

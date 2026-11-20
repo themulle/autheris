@@ -24,7 +24,9 @@ internal sealed record GovernedRewrite(
     IReadOnlyList<Autheris.Domain.Model.WebSqlIndexHint>? IndexHints = null,
     long? WriteMaxRowsPerStatement = null,
     IReadOnlyList<Autheris.Domain.Interfaces.MaskedColumnAuditEntry>? MaskedColumnsAudit = null,
-    IReadOnlyList<Autheris.Domain.Interfaces.GrantClassificationAuditEntry>? GrantClassificationsAudit = null);
+    IReadOnlyList<Autheris.Domain.Interfaces.GrantClassificationAuditEntry>? GrantClassificationsAudit = null,
+    string? MetricViewHiddenCountAlias = null,
+    int MetricViewMinGroupSize = 0);
 
 /// <summary>
 /// Collects the DML classification during governance so that executed AND rejected DML can be audited.

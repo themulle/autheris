@@ -47,7 +47,7 @@ internal static class CatalogColumnAccessResolver
         IReadOnlySet<string>? callerScopes)
     {
         var resolvedScopes = ForResolver(callerScopes);
-        var decision = tenantConsents.Any(static c => c.IsPatternGrant)
+        var decision = (tenantConsents.Any(static c => c.IsPatternGrant) || table.Table.ObjectKind == DiscoveryObjectKind.MetricView)
             ? resolver.ResolveAccess(
                 userSid, groupSids, roles, table.Identifier, tenantConsents, table.Dialect, allUserSids: null, resolvedScopes, table)
             : resolver.ResolveAccess(
