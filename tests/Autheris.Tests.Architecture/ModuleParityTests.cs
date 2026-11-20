@@ -213,6 +213,7 @@ public sealed class ModuleParityTests
         "Autheris.Modules.OpenMetadata.Tests.OpenMetadataWebhookTests.Buffer_is_bounded",
         "Autheris.Modules.OpenMetadata.Tests.OpenMetadataWebhookTests.Replayed_event_is_rejected",
         "Autheris.Modules.OpenMetadata.Tests.OpenMetadataWebhookTests.Cluster_dedup_unavailable_rejects_webhook",
+        "Autheris.Modules.OpenMetadata.Tests.OpenMetadataModuleContractTests.OpenMetadata_module_maps_no_routes",
         "Autheris.Modules.OpenMetadata.Tests.OpenMetadataModuleContractTests.OpenMetadata_module_registers_ports_with_implementation_types",
         "Autheris.Modules.OpenMetadata.Tests.OpenMetadataModuleContractTests.OpenMetadata_http_client_uses_secure_outbound_handlers",
         "Autheris.Modules.OpenMetadata.Tests.OpenMetadataModuleContractTests.OpenMetadata_module_registers_no_hosted_service",

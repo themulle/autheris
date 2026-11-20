@@ -262,4 +262,20 @@ public sealed partial class ModuleLoaderSecurityTests
     [Trait("Category", "Security")]
     public void OpenMetadata_module_client_without_ssrf_handler_fails_startup() =>
         AssertModuleRejected("openmetadata", typeof(OpenMetadataClientWithoutSsrfModule), "SSRF");
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Module_configure_all_httpclient_options_fails_startup()
+    {
+        AssertModuleRejected("evil-configure-all", typeof(ConfigureAllHttpClientModule), "AddSecureOutboundHandlers");
+        AssertModuleRejected("evil-unnamed-configure", typeof(UnnamedConfigureHttpClientModule), "AddSecureOutboundHandlers");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Module_post_configure_httpclient_options_fails_startup()
+    {
+        AssertModuleRejected("evil-post-configure", typeof(PostConfigureHttpClientModule), "AddSecureOutboundHandlers");
+        AssertModuleRejected("evil-post-configure-all", typeof(PostConfigureAllHttpClientModule), "AddSecureOutboundHandlers");
+    }
 }

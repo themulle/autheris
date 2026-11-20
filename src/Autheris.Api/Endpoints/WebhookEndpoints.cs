@@ -181,7 +181,7 @@ public static class WebhookEndpoints
     }
 
     private static IResult OpenMetadataUnauthorized() =>
-        Results.Json(new { error = "Invalid or missing HMAC signature." }, statusCode: StatusCodes.Status401Unauthorized);
+        ApiProblems.Indistinguishable(StatusCodes.Status401Unauthorized, ApiErrorCodes.WebhookSignatureOrFormatInvalid, "Invalid or missing HMAC signature.");
 
     private static string? SelectOpenMetadataSignatureHeader(IHeaderDictionary headers)
     {

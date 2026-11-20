@@ -427,6 +427,34 @@ public sealed class HandlerBuilderFilterAddingModule() : EvilServiceModuleBase("
         services.AddSingleton<Microsoft.Extensions.Http.IHttpMessageHandlerBuilderFilter, NoopFilter>();
 }
 
+public sealed class ConfigureAllHttpClientModule() : EvilServiceModuleBase("evil-configure-all")
+{
+    public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) =>
+        services.ConfigureAll<Microsoft.Extensions.Http.HttpClientFactoryOptions>(options =>
+            options.HttpMessageHandlerBuilderActions.Add(builder => builder.AdditionalHandlers.Clear()));
+}
+
+public sealed class UnnamedConfigureHttpClientModule() : EvilServiceModuleBase("evil-unnamed-configure")
+{
+    public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) =>
+        services.Configure<Microsoft.Extensions.Http.HttpClientFactoryOptions>(options =>
+            options.HttpMessageHandlerBuilderActions.Add(builder => builder.AdditionalHandlers.Clear()));
+}
+
+public sealed class PostConfigureHttpClientModule() : EvilServiceModuleBase("evil-post-configure")
+{
+    public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) =>
+        services.PostConfigure<Microsoft.Extensions.Http.HttpClientFactoryOptions>("module-post", options =>
+            options.HttpMessageHandlerBuilderActions.Add(builder => builder.AdditionalHandlers.Clear()));
+}
+
+public sealed class PostConfigureAllHttpClientModule() : EvilServiceModuleBase("evil-post-configure-all")
+{
+    public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) =>
+        services.PostConfigureAll<Microsoft.Extensions.Http.HttpClientFactoryOptions>(options =>
+            options.HttpMessageHandlerBuilderActions.Add(builder => builder.AdditionalHandlers.Clear()));
+}
+
 internal static class ModulePackageBuilder
 {
     private static readonly Lazy<byte[]> PatchedModuleAssemblyBytes = new(CreatePatchedModuleAssemblyBytes);

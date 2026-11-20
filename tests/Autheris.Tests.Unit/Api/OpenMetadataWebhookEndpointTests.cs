@@ -10,6 +10,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Endpoints;
+using Autheris.Api.Errors;
 using Autheris.Api.Extensions;
 using Autheris.Application.Catalog.OpenMetadata;
 using Autheris.Domain.Audit;
@@ -67,7 +68,9 @@ public sealed class OpenMetadataWebhookEndpointTests
         b.Status.ShouldBe(StatusCodes.Status401Unauthorized);
         i.Body.ShouldBe(m.Body);
         b.Body.ShouldBe(m.Body);
-        JsonDocument.Parse(m.Body).RootElement.GetProperty("error").GetString().ShouldBe("Invalid or missing HMAC signature.");
+        var doc = JsonDocument.Parse(m.Body).RootElement;
+        doc.GetProperty("detail").GetString().ShouldBe("Invalid or missing HMAC signature.");
+        doc.GetProperty("code").GetString().ShouldBe(ApiErrorCodes.WebhookSignatureOrFormatInvalid);
     }
 
     [Fact]

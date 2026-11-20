@@ -1,6 +1,7 @@
 namespace Autheris.Application.Security;
 
 using System;
+using System.Buffers;
 using System.IO;
 using System.Net.Http;
 using System.Text;
@@ -63,21 +64,32 @@ public static class BoundedHttpContentReader
 
         await using var source = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
         var buffer = new MemoryStream();
-        var chunk = new byte[81920];
-        int read;
-        while ((read = await source.ReadAsync(chunk.AsMemory(0, chunk.Length), ct).ConfigureAwait(false)) > 0)
+        var chunk = ArrayPool<byte>.Shared.Rent(81920);
+        try
         {
-            if (buffer.Length + read > maxBytes)
+            int read;
+            while ((read = await source.ReadAsync(chunk.AsMemory(), ct).ConfigureAwait(false)) > 0)
             {
-                await buffer.DisposeAsync().ConfigureAwait(false);
-                throw new InvalidOperationException(
-                    $"{clientName} response exceeds maximum allowed limit of {maxBytes} bytes.");
+                if (buffer.Length + read > maxBytes)
+                {
+                    throw new InvalidOperationException(
+                        $"{clientName} response exceeds maximum allowed limit of {maxBytes} bytes.");
+                }
+
+                buffer.Write(chunk, 0, read);
             }
 
-            buffer.Write(chunk, 0, read);
+            buffer.Position = 0;
+            return buffer;
         }
-
-        buffer.Position = 0;
-        return buffer;
+        catch
+        {
+            await buffer.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(chunk);
+        }
     }
 }

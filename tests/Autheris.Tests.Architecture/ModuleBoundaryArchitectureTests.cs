@@ -307,6 +307,7 @@ public sealed partial class ModuleBoundaryArchitectureTests
         {
             typeof(Autheris.Modules.Lakehouse.LakehouseModule).Assembly,
             typeof(Autheris.Modules.Dbt.DbtModule).Assembly,
+            typeof(Autheris.Modules.OpenMetadata.OpenMetadataModule).Assembly,
         };
         moduleAssemblies
             .SelectMany(a => a.GetTypes())

@@ -26,6 +26,7 @@ using Shouldly;
 public sealed class OpenMetadataModuleContractTests
 {
     [Fact]
+    [Trait("Category", "Security")]
     public void OpenMetadata_module_maps_no_routes()
     {
         var module = new OpenMetadataModule();

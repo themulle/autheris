@@ -670,6 +670,11 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService, 
                         return false;
                     }
                 }
+                catch (OperationCanceledException)
+                {
+                    ProcessedWebhookEvents.TryRemove(webhookEvent.Id.Value, out _);
+                    throw;
+                }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     // Fail closed: without the shared replay store another node could accept the same event again.
