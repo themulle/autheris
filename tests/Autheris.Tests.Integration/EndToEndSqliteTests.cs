@@ -65,7 +65,7 @@ public sealed class EndToEndSqliteTests : IClassFixture<EndToEndSqliteTests.Fixt
             {
                 b.UseEnvironment("Development");
                 b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-                DbtWorkspaceTestSettings.Apply((k, v) => b.UseSetting(k, v));
+                MultiModuleWorkspaceTestSettings.Apply((k, v) => b.UseSetting(k, v), "dbt", "events");
                 b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "1000");
                 b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
                 b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("Fixture"));
@@ -329,7 +329,7 @@ public sealed class EndToEndSqliteTests : IClassFixture<EndToEndSqliteTests.Fixt
     [Theory]
     [InlineData("GET", "/modules/dbt/exposures")]
     [InlineData("GET", "/api/governance/sunsetting/rules")]
-    [InlineData("GET", "/api/v1/cdc/subscriptions")]
+    [InlineData("GET", "/modules/events/v1/cdc/subscriptions")]
     public async Task RoleProtectedEndpoints_RejectPlainReader_AcceptAdmin(string method, string path)
     {
         var plain = await Client(roles: "Reader").SendAsync(new HttpRequestMessage(new HttpMethod(method), path));

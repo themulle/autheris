@@ -32,9 +32,8 @@ public static class GatewayConfigurationSchema
         ("Gateway:Catalog", typeof(CatalogDiscoveryOptions)),
         ("Gateway:Catalog", typeof(CatalogLocalizationOptions)),
         ("Gateway:CatalogSearch", typeof(CatalogSearchOptions)),
-        ("Gateway:CdcWebhooks", typeof(CdcWebhooksOptions)),
         ("Gateway:DataSources:Configuration", typeof(DataSourceConfigurationOptions)),
-        ("Gateway:Events", typeof(EventBusOptions)),
+        ("Gateway:EventBus", typeof(EventBusOptions)),
         ("Gateway:ExtensibilityPipeline", typeof(ExtensibilityPipelineOptions)),
         ("Gateway:GdprReport", typeof(GdprReportOptions)),
         ("Gateway:Governance:AccessPlanning", typeof(AccessPlanOptions)),
@@ -109,15 +108,27 @@ public static class GatewayConfigurationSchema
             [GatewaySections.Lakehouse] = "lakehouse",
             [GatewaySections.Dbt] = "dbt",
             [GatewaySections.OpenMetadata] = "openmetadata",
-            [GatewaySections.CdcStream] = "cdc",
-            [GatewaySections.PostgreSqlCdc] = "cdc",
-            [GatewaySections.MssqlChangeTracking] = "cdc",
+            [GatewaySections.Events] = "events",
+            [GatewaySections.Lineage] = "lineage",
             [Root + ":AiGateway"] = "ai-gateway",
             [Root + ":SemanticLayer"] = "semantic-layer",
             [Root + ":DataQuality"] = "data-quality",
             [Root + ":AsyncExport"] = "async-export",
             [Root + ":CatalogSync"] = "catalog-sync",
             [Root + ":Scim"] = "scim",
+        };
+
+    /// <summary>
+    /// The module sections whose absence fails startup in the host.
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> EnforcedModuleSections { get; } =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            [GatewaySections.Lakehouse] = "lakehouse",
+            [GatewaySections.Dbt] = "dbt",
+            [GatewaySections.OpenMetadata] = "openmetadata",
+            [GatewaySections.Events] = "events",
+            [GatewaySections.Lineage] = "lineage",
         };
 
     /// <summary>

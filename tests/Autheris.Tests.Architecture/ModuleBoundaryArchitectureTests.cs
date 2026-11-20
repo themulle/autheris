@@ -33,6 +33,8 @@ public sealed partial class ModuleBoundaryArchitectureTests
         "SqliteConnection",
         "DuckDBConnection",
         "DatabricksStatementClient",
+        // Governance store type: modules resolve the core ports (ICdcStreamStore, IWebhookOutbox, ...) and never see the store itself.
+        "GovernanceRepository",
     ];
 
     [GeneratedRegex(@"<ProjectReference\s+Include\s*=\s*""([^""]+)""", RegexOptions.IgnoreCase)]
@@ -308,6 +310,8 @@ public sealed partial class ModuleBoundaryArchitectureTests
             typeof(Autheris.Modules.Lakehouse.LakehouseModule).Assembly,
             typeof(Autheris.Modules.Dbt.DbtModule).Assembly,
             typeof(Autheris.Modules.OpenMetadata.OpenMetadataModule).Assembly,
+            typeof(Autheris.Modules.Events.EventsModule).Assembly,
+            typeof(Autheris.Modules.Lineage.LineageModule).Assembly
         };
         moduleAssemblies
             .SelectMany(a => a.GetTypes())

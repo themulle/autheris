@@ -39,7 +39,9 @@ Autheris.Tests.Architecture->Autheris.GraphQL
 Autheris.Tests.Architecture->Autheris.Infrastructure
 Autheris.Tests.Architecture->Autheris.Modules.Abstractions
 Autheris.Tests.Architecture->Autheris.Modules.Dbt
+Autheris.Tests.Architecture->Autheris.Modules.Events
 Autheris.Tests.Architecture->Autheris.Modules.Lakehouse
+Autheris.Tests.Architecture->Autheris.Modules.Lineage
 Autheris.Tests.Architecture->Autheris.Modules.OpenMetadata
 Autheris.Tests.Architecture->TrinoSqlEngine
 Autheris.Tests.Common->Autheris.Api
@@ -49,7 +51,9 @@ Autheris.Tests.Integration->Autheris.Api
 Autheris.Tests.Integration->Autheris.Extensions
 Autheris.Tests.Integration->Autheris.Modules.Abstractions
 Autheris.Tests.Integration->Autheris.Modules.Dbt
+Autheris.Tests.Integration->Autheris.Modules.Events
 Autheris.Tests.Integration->Autheris.Modules.Lakehouse
+Autheris.Tests.Integration->Autheris.Modules.Lineage
 Autheris.Tests.Integration->Autheris.Modules.OpenMetadata
 Autheris.Tests.Integration->Autheris.Tests.Common
 Autheris.Tests.Parity->Autheris.Api
@@ -70,7 +74,9 @@ Autheris.Tests.Unit->Autheris.Infrastructure
 Autheris.Tests.Unit->Autheris.ModuleSigner
 Autheris.Tests.Unit->Autheris.Modules.Abstractions
 Autheris.Tests.Unit->Autheris.Modules.Dbt
+Autheris.Tests.Unit->Autheris.Modules.Events
 Autheris.Tests.Unit->Autheris.Modules.Lakehouse
+Autheris.Tests.Unit->Autheris.Modules.Lineage
 Autheris.Tests.Unit->Autheris.Modules.OpenMetadata
 Autheris.Tests.Unit->Autheris.Tests.Common
 Autheris.Tests.Unit->TrinoSqlEngine

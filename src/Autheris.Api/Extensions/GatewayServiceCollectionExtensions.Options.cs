@@ -120,7 +120,7 @@ public static partial class GatewayServiceCollectionExtensions
         IConfiguration configuration,
         IHostEnvironment environment)
     {
-        Autheris.Api.Extensions.DependencyInjection.CdcWebhooksFeature.Capture(services, configuration);
+        Autheris.Api.Extensions.DependencyInjection.CdcWebhookStoreFeature.Capture(services, configuration);
         Autheris.Api.Extensions.DependencyInjection.GatewayStartupWarmupServiceExtensions.CaptureColdPathTiming(services, configuration);
 
         services.TryAddSingleton<IHostEnvironment>(environment);

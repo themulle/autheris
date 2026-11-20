@@ -15,7 +15,7 @@ using Autheris.Application.State;
 using Autheris.Application.Streaming.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
-using Autheris.Extensions.Cdc;
+using Autheris.Infrastructure.Streaming.Producers;
 using Autheris.Extensions.DataCatalog;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;

@@ -36,9 +36,6 @@ public sealed class DataCatalogOptions
     /// <summary>Issue #111: maximum number of catalog tags per dataset (all sources together). Valid range 1-256, default 32.</summary>
     public int MaxTagsPerDataset { get; init; } = 32;
 
-    public string OpenLineageEndpoint { get; init; } = string.Empty;
-    public string OpenLineageApiKey { get; init; } = string.Empty;
-
     /// <summary>
     /// Precedence order of documentation sources from highest to lowest priority.
     /// Sources with a lower rank cannot overwrite existing descriptions from higher-ranked sources.

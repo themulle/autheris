@@ -116,15 +116,14 @@ public class ArchitectureTests
     [Fact]
     public void CoreLayers_ShouldNotContainForeignSystemClients()
     {
-        // EXT-MOVE: HttpClient based connectors to foreign systems (catalogs, lineage export, AI triage,
-        // CDC sources) are implemented exclusively in Autheris.Extensions.
+        // EXT-MOVE: HttpClient based connectors to foreign systems (catalogs, lineage export, AI triage)
+        // are implemented exclusively in Autheris.Extensions.
         var connectorInterfaces = new[]
         {
             typeof(Autheris.Application.Catalog.Interfaces.IDataCatalogClient),
             typeof(Autheris.Application.Catalog.Interfaces.IDataCatalogSyncService),
             typeof(Autheris.Application.Lineage.IOpenLineageClient),
-            typeof(Autheris.Modules.OpenMetadata.IOpenMetadataClient),
-            typeof(Autheris.Application.Streaming.Interfaces.IMssqlChangeTrackingPoller)
+            typeof(Autheris.Modules.OpenMetadata.IOpenMetadataClient)
         };
 
         var coreAssemblies = new[]

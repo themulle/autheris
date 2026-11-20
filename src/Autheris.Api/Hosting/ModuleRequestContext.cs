@@ -1,6 +1,7 @@
 namespace Autheris.Api.Hosting;
 
 using System;
+using System.Collections.Generic;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
@@ -45,5 +46,6 @@ public sealed class ModuleRequestContext : IModuleRequestContext
     public IResult ServiceUnavailable(string detail, HttpContext? ctx = null) =>
         ApiProblems.ServiceUnavailable(ApiErrorCodes.ServiceUnavailable, detail, ctx);
 
-    public IResult Problem(int status, string code, string detail, HttpContext? ctx = null) => ApiProblems.Problem(status, code, detail, ctx);
+    public IResult Problem(int status, string code, string detail, HttpContext? ctx = null, IDictionary<string, object?>? extraExtensions = null) =>
+        ApiProblems.Problem(status, code, detail, ctx, extraExtensions: extraExtensions);
 }

@@ -226,8 +226,6 @@ public static class GatewayApplicationBuilderExtensions
         // 3. Modular Feature Endpoints (Route Groups)
         app.MapAuthEndpoints();
         app.MapWebhookEndpoints(gatewayOptions);
-        app.MapStreamingCdcEndpoints();
-        app.MapCdcStreamAdminEndpoints();
         app.MapGovernanceEndpoints();
         app.MapAuthorizationExplainEndpoints();
         app.MapEffectiveAccessEndpoints();

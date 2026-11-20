@@ -1,12 +1,10 @@
 namespace Autheris.Extensions;
 
 using System;
+using Autheris.Application.Catalog.OpenMetadata;
 using Autheris.Application.Security;
 using Autheris.Domain.Options;
-using Autheris.Application.Catalog.OpenMetadata;
-using Autheris.Extensions.Cdc;
 using Autheris.Extensions.DataCatalog;
-using Autheris.Extensions.Lineage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
@@ -38,8 +36,6 @@ public static class ExtensionsServiceCollectionExtensions
         }
 
         services.AddDataCatalogIntegration(gatewayOptions);
-        services.AddLineageExportIntegration(gatewayOptions);
-        services.AddCdcSourceIntegration(gatewayOptions);
 
         return services;
     }

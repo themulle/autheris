@@ -4,7 +4,7 @@ using System;
 using System.Collections.Generic;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
-using Autheris.Extensions.Cdc.CustomQuery;
+using Autheris.Infrastructure.Streaming.Producers.CustomQuery;
 using Shouldly;
 using Xunit;
 

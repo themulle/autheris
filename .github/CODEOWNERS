@@ -47,7 +47,6 @@ src/Autheris.Application/Catalog/  @themulle
 src/Autheris.Application/Catalog/OpenMetadata/  @themulle
 src/Autheris.Application/Lineage/  @themulle
 src/Autheris.Extensions/DataCatalog/  @themulle
-src/Autheris.Extensions/Lineage/  @themulle
 
 # Subsystem 9: Governance persistence
 # subsystem: governance | primary: @themulle | backup: vacant
@@ -133,7 +132,7 @@ src/Autheris.Domain/Model/  @themulle
 src/Autheris.Domain/Options/  @themulle
 src/Autheris.Domain/Options/Integrations/  @themulle
 src/Autheris.Domain/Plugins/  @themulle
-src/Autheris.Extensions/Cdc/  @themulle
+src/Autheris.Infrastructure/Streaming/Producers/  @themulle
 
 # Subsystem 14: Docs
 # subsystem: docs | primary: @themulle | backup: vacant
@@ -143,12 +142,16 @@ src/Autheris.Application/Docs/  @themulle
 
 # Modules
 # subsystem: modules | primary: @themulle | backup: vacant
-modules/Autheris.Modules.Lakehouse/        @themulle
-modules/Autheris.Modules.Lakehouse.Tests/  @themulle
-modules/Autheris.Modules.Dbt/              @themulle
-modules/Autheris.Modules.Dbt.Tests/        @themulle
-modules/Autheris.Modules.OpenMetadata/        @themulle
-modules/Autheris.Modules.OpenMetadata.Tests/  @themulle
+modules/Autheris.Modules.Dbt/               @themulle
+modules/Autheris.Modules.Dbt.Tests/         @themulle
+modules/Autheris.Modules.Events/            @themulle
+modules/Autheris.Modules.Events.Tests/      @themulle
+modules/Autheris.Modules.Lakehouse/         @themulle
+modules/Autheris.Modules.Lakehouse.Tests/   @themulle
+modules/Autheris.Modules.Lineage/           @themulle
+modules/Autheris.Modules.Lineage.Tests/     @themulle
+modules/Autheris.Modules.OpenMetadata/      @themulle
+modules/Autheris.Modules.OpenMetadata.Tests/ @themulle
 src/Autheris.Modules.Abstractions/        @themulle
 
 # Security (SEC-SIMPL-71)

@@ -28,6 +28,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Http;
 using Microsoft.Extensions.Hosting;
 
 internal sealed class FakeEndpointRouteBuilder : IEndpointRouteBuilder, IAsyncDisposable, IDisposable
@@ -336,14 +337,94 @@ public sealed class StartupFilterAddingModule() : EvilServiceModuleBase("evil-st
 
 public sealed class HostedServiceAddingModule() : EvilServiceModuleBase("evil-hosted")
 {
-    private sealed class NoopHostedService : Microsoft.Extensions.Hosting.IHostedService
+    // A hosted service declared in a host assembly: a module may only add hosted services from its own assembly.
+    public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) =>
+        services.AddSingleton<Microsoft.Extensions.Hosting.IHostedService, Autheris.Application.Streaming.Services.CdcStreamRetentionService>();
+}
+
+public sealed class OwnHostedServiceAddingModule() : EvilServiceModuleBase("own-hosted")
+{
+    private sealed class OwnHostedService : Microsoft.Extensions.Hosting.IHostedService
     {
         public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
         public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
     }
 
     public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) =>
-        services.AddSingleton<Microsoft.Extensions.Hosting.IHostedService, NoopHostedService>();
+        services.AddHostedService<OwnHostedService>();
+}
+
+public sealed class HostedServiceRemovingModule() : EvilServiceModuleBase("evil-hosted-remove")
+{
+    public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) =>
+        services.RemoveAll<Microsoft.Extensions.Hosting.IHostedService>();
+}
+
+public sealed class StreamEnforcerReplacingModule() : EvilServiceModuleBase("evil-enforcer")
+{
+    public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host)
+    {
+        services.RemoveAll<Autheris.Application.Streaming.Interfaces.IStreamRlsPolicyEnforcer>();
+        services.AddScoped(_ => NSubstitute.Substitute.For<Autheris.Application.Streaming.Interfaces.IStreamRlsPolicyEnforcer>());
+    }
+}
+
+public sealed class SecretProtectorReplacingModule() : EvilServiceModuleBase("evil-protector")
+{
+    public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host)
+    {
+        services.RemoveAll<Autheris.Application.Webhooks.IWebhookSecretProtector>();
+        services.AddSingleton(NSubstitute.Substitute.For<Autheris.Application.Webhooks.IWebhookSecretProtector>());
+    }
+}
+
+public sealed class KeyStoreReplacingModule() : EvilServiceModuleBase("evil-keystore")
+{
+    public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host)
+    {
+        services.RemoveAll<Autheris.Application.Streaming.Interfaces.ICdcStreamKeyStore>();
+        services.AddSingleton(NSubstitute.Substitute.For<Autheris.Application.Streaming.Interfaces.ICdcStreamKeyStore>());
+    }
+}
+
+public sealed class UnprotectedHttpClientAddingModule() : EvilServiceModuleBase("evil-httpclient")
+{
+    public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) =>
+        services.AddHttpClient("module-plain").ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(5));
+}
+
+public sealed class ProtectedHttpClientAddingModule() : EvilServiceModuleBase("good-httpclient")
+{
+    public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) =>
+        services.AddHttpClient("module-secure").AddSecureOutboundHandlers("module-secure");
+}
+
+public sealed class ConfigureAllHttpClientModule() : EvilServiceModuleBase("evil-configure-all")
+{
+    public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) =>
+        services.ConfigureAll<HttpClientFactoryOptions>(options =>
+            options.HttpMessageHandlerBuilderActions.Add(builder => builder.AdditionalHandlers.Clear()));
+}
+
+public sealed class UnnamedConfigureHttpClientModule() : EvilServiceModuleBase("evil-unnamed-configure")
+{
+    public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) =>
+        services.Configure<HttpClientFactoryOptions>(options =>
+            options.HttpMessageHandlerBuilderActions.Add(builder => builder.AdditionalHandlers.Clear()));
+}
+
+public sealed class PostConfigureHttpClientModule() : EvilServiceModuleBase("evil-post-configure")
+{
+    public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) =>
+        services.PostConfigure<HttpClientFactoryOptions>("module-post", options =>
+            options.HttpMessageHandlerBuilderActions.Add(builder => builder.AdditionalHandlers.Clear()));
+}
+
+public sealed class PostConfigureAllHttpClientModule() : EvilServiceModuleBase("evil-post-configure-all")
+{
+    public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) =>
+        services.PostConfigureAll<HttpClientFactoryOptions>(options =>
+            options.HttpMessageHandlerBuilderActions.Add(builder => builder.AdditionalHandlers.Clear()));
 }
 
 public sealed class AuthorizationOptionsConfiguringModule() : EvilServiceModuleBase("evil-authz-options")
@@ -398,18 +479,6 @@ public sealed class CoreSectionIdModule() : EvilServiceModuleBase("caching")
     public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) { }
 }
 
-public sealed class UnprotectedHttpClientAddingModule() : EvilServiceModuleBase("evil-httpclient")
-{
-    public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) =>
-        services.AddHttpClient("module-plain").ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(5));
-}
-
-public sealed class ProtectedHttpClientAddingModule() : EvilServiceModuleBase("good-httpclient")
-{
-    public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) =>
-        services.AddHttpClient("module-secure").AddSecureOutboundHandlers("module-secure");
-}
-
 public sealed class HttpClientDefaultsAddingModule() : EvilServiceModuleBase("evil-httpclient-defaults")
 {
     public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) =>
@@ -425,34 +494,6 @@ public sealed class HandlerBuilderFilterAddingModule() : EvilServiceModuleBase("
 
     public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) =>
         services.AddSingleton<Microsoft.Extensions.Http.IHttpMessageHandlerBuilderFilter, NoopFilter>();
-}
-
-public sealed class ConfigureAllHttpClientModule() : EvilServiceModuleBase("evil-configure-all")
-{
-    public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) =>
-        services.ConfigureAll<Microsoft.Extensions.Http.HttpClientFactoryOptions>(options =>
-            options.HttpMessageHandlerBuilderActions.Add(builder => builder.AdditionalHandlers.Clear()));
-}
-
-public sealed class UnnamedConfigureHttpClientModule() : EvilServiceModuleBase("evil-unnamed-configure")
-{
-    public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) =>
-        services.Configure<Microsoft.Extensions.Http.HttpClientFactoryOptions>(options =>
-            options.HttpMessageHandlerBuilderActions.Add(builder => builder.AdditionalHandlers.Clear()));
-}
-
-public sealed class PostConfigureHttpClientModule() : EvilServiceModuleBase("evil-post-configure")
-{
-    public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) =>
-        services.PostConfigure<Microsoft.Extensions.Http.HttpClientFactoryOptions>("module-post", options =>
-            options.HttpMessageHandlerBuilderActions.Add(builder => builder.AdditionalHandlers.Clear()));
-}
-
-public sealed class PostConfigureAllHttpClientModule() : EvilServiceModuleBase("evil-post-configure-all")
-{
-    public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) =>
-        services.PostConfigureAll<Microsoft.Extensions.Http.HttpClientFactoryOptions>(options =>
-            options.HttpMessageHandlerBuilderActions.Add(builder => builder.AdditionalHandlers.Clear()));
 }
 
 internal static class ModulePackageBuilder

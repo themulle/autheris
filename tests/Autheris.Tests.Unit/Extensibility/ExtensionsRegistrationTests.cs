@@ -13,16 +13,14 @@ using Autheris.Api.Extensions;
 using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Catalog.OpenMetadata;
 using Autheris.Application.Common.Interfaces;
-using Autheris.Application.Lineage;
 using Autheris.Application.Security;
 using Autheris.Application.Streaming.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Extensions;
-using Autheris.Extensions.Cdc;
+using Autheris.Infrastructure.Streaming.Producers;
 using Autheris.Extensions.DataCatalog;
-using Autheris.Extensions.Lineage;
 using Autheris.Modules.Abstractions;
 using Autheris.Modules.OpenMetadata;
 using Microsoft.Extensions.Configuration;
@@ -98,8 +96,7 @@ public sealed class ExtensionsRegistrationTests
 
         Type[] typeBasedServices =
         [
-            typeof(IDataCatalogSyncService),
-            typeof(IMssqlChangeTrackingPoller)
+            typeof(IDataCatalogSyncService)
         ];
 
         foreach (var serviceType in typeBasedServices)
@@ -110,11 +107,22 @@ public sealed class ExtensionsRegistrationTests
             descriptors[0].ImplementationType!.Assembly.ShouldBe(ExtensionsAssembly, serviceType.Name);
         }
 
-        services.Count(d => d.ServiceType == typeof(IOpenLineageClient)).ShouldBe(1);
+        services.Any(d => d.ServiceType.Name == "IOpenLineageClient").ShouldBeFalse();
+    }
 
-        var provider = services.BuildServiceProvider();
-        using var scope = provider.CreateScope();
-        scope.ServiceProvider.GetRequiredService<IOpenLineageClient>().ShouldBeOfType<OpenLineageClient>();
+    [Fact]
+    public void CdcSourceIntegration_IsIdempotent_AndPollerLivesInInfrastructure()
+    {
+        var options = new GatewayOptions { MssqlChangeTracking = new MssqlChangeTrackingOptions { Enabled = true } };
+        var services = new ServiceCollection();
+        services.AddCdcSourceIntegration(options);
+        services.AddCdcSourceIntegration(options);
+
+        var pollers = services.Where(d => d.ServiceType == typeof(IMssqlChangeTrackingPoller)).ToList();
+        pollers.Count.ShouldBe(1);
+        pollers[0].ImplementationType.ShouldBe(typeof(MssqlChangeTrackingPoller));
+        HostedServiceCount<CdcProducerService>(services).ShouldBe(1);
+        services.Count(d => d.ServiceType.Name == "CdcSourceIntegrationMarker").ShouldBe(1);
     }
 
     private sealed class StubModuleHostContext : IModuleHostContext
@@ -147,8 +155,7 @@ public sealed class ExtensionsRegistrationTests
 
         string[] clientNames =
         [
-            "IOpenMetadataClient",
-            nameof(OpenLineageClient)
+            "IOpenMetadataClient"
         ];
 
         foreach (var name in clientNames)

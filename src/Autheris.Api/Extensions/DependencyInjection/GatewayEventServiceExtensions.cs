@@ -26,27 +26,16 @@ public static class GatewayEventServiceExtensions
         services.AddSingleton<IGatewayEventBus>(sp => sp.GetRequiredService<InMemoryGatewayEventBus>());
         services.AddSingleton<IGatewayEventBusDrain>(sp => sp.GetRequiredService<InMemoryGatewayEventBus>());
 
-        // durable webhook outbox. The bridge enqueues configured-webhook rows; the delivery service (any node) drains
-        // with leases. CloudEvent (CDC) rows must be delivered even when the configured webhooks are disabled.
-        // Consent event webhooks also reuse WebhookDeliveryClient + WebhookRetryPolicy unconditionally.
+        // Consent event webhooks and the events module share WebhookDeliveryClient + WebhookRetryPolicy; the client keeps the SSRF
+        // handler chain and the egress allowlist of the Webhooks integration.
         services.AddSingleton(sp => new WebhookRetryPolicy(
             sp.GetRequiredService<IOptions<GatewayOptions>>().Value.Webhooks,
             sp.GetService<TimeProvider>() ?? TimeProvider.System));
         services.AddHttpClient<WebhookDeliveryClient>()
             .AddSecureOutboundHandlers(EgressIntegrations.Webhooks);
 
-        var cdcWebhooksEnabled = CdcWebhooksFeature.IsEnabled(services);
-        if (gatewayOptions.Webhooks.Enabled || cdcWebhooksEnabled)
-        {
-            services.AddSingleton<WebhookSubscriptionResolver>();
-            services.AddHostedService<WebhookDeliveryHostedService>();
-        }
-
-        if (gatewayOptions.Webhooks.Enabled)
-        {
-            services.AddSingleton<IWebhookDispatcherService, WebhookDispatcherService>();
-            services.AddHostedService<WebhookEventBridgeHostedService>();
-        }
+        // The webhook dispatcher, the event bridge and the delivery workers belong to the events module.
+        // Configured webhook subscriptions without that module fail startup (see AddGatewayModules).
 
         // 99 I1-C: governed CDC stream crypto, signal, tail hub, retention and the compatibility feed.
         services.AddAutherisCdcStream(gatewayOptions);

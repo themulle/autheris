@@ -34,30 +34,16 @@ public class IntegrationGapAEndpointMetadataTests : IClassFixture<IntegrationGap
     {
         protected override void ConfigureHostConfiguration(IConfigurationBuilder config)
         {
-            config.AddInMemoryCollection(new Dictionary<string, string?>
+            var settings = new Dictionary<string, string?>
             {
                 ["Gateway:Authentication:EnableTestAuthHandler"] = "true",
                 ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
                 ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.Create("IntegrationGapAEndpointMetadataTests"),
                 ["Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit"] = "500",
-                ["Gateway:Modules:Enabled:0"] = "dbt",
-                ["Gateway:Modules:AllowUnsignedInDevelopment"] = "true",
-                ["Gateway:Modules:WorkspacePath"] = DbtModuleWorkspacePath(),
-            });
+            };
+            MultiModuleWorkspaceTestSettings.Apply((k, v) => settings[k] = v, "dbt", "events");
+            config.AddInMemoryCollection(settings);
         }
-    }
-
-    private static string DbtModuleWorkspacePath()
-    {
-        var value = string.Empty;
-        DbtWorkspaceTestSettings.Apply((k, v) =>
-        {
-            if (k == "Gateway:Modules:WorkspacePath")
-            {
-                value = v;
-            }
-        });
-        return value;
     }
 
     private List<RouteEndpoint> GetRouteEndpoints()
@@ -191,7 +177,7 @@ public class IntegrationGapAEndpointMetadataTests : IClassFixture<IntegrationGap
     [InlineData("/modules/dbt/validate-contract", 100 * Mb)]
     [InlineData("/modules/dbt/run-results", 50 * Mb)]
     [InlineData("/api/webhooks/dbt-cloud", 2 * Mb)]
-    [InlineData("/api/v1/cdc/events", 10 * Mb)]
+    [InlineData("/modules/events/v1/cdc/events", 10 * Mb)]
     [InlineData("/api/governance/catalog/ingest-openapi", 20 * Mb)]
     public void GAP02_LargeBodyRoutes_DeclareRequestSizeLimitAboveGlobalKestrelLimit(string rawPattern, long expectedBytes)
     {

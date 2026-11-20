@@ -2,20 +2,32 @@ namespace Autheris.Tests.Integration.Modules;
 
 using System;
 using System.Collections;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Reflection.Emit;
+using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
+using System.Runtime.Loader;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 
 /// <summary>
-/// Replaces module-owned service registrations with a <see cref="DispatchProxy"/> bridge when integration tests
-/// supply a test double typed against the host <see cref="System.Runtime.Loader.AssemblyLoadContext.Default"/>
-/// copy of a module interface while the running endpoint resolves the copy inside the module's own
-/// <see cref="System.Runtime.Loader.AssemblyLoadContext"/>.
+/// Replaces module-owned service registrations with a cross-<see cref="AssemblyLoadContext"/> bridge when
+/// integration tests supply a test double typed against the host <see cref="AssemblyLoadContext.Default"/>
+/// copy of a module interface while the running endpoint resolves the copy inside the module's isolated
+/// <see cref="AssemblyLoadContext"/>.
 /// </summary>
+/// <remarks>
+/// <see cref="System.Reflection.DispatchProxy"/> emits types into a shared dynamic assembly bound to
+/// <see cref="AssemblyLoadContext.Default"/>; when the test assembly also references the module assembly,
+/// <see cref="System.Reflection.DispatchProxy"/> resolves the interface from <see cref="AssemblyLoadContext.Default"/>
+/// and fails with <see cref="InvalidCastException"/> against the module ALC copy. Emitting the proxy inside
+/// a child <see cref="AssemblyLoadContext"/> pinned to the target module assembly avoids this collision
+/// across any number of isolated module load contexts in the same process.
+/// </remarks>
 internal static class ModuleTestServiceBridge
 {
     public static IServiceCollection ReplaceModuleService<TService>(this IServiceCollection services, TService implementation)
@@ -62,28 +74,177 @@ internal static class ModuleTestServiceBridge
         return services;
     }
 
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1852:Seal internal types", Justification = "DispatchProxy requires an unsealed proxy type.")]
-    public class CrossAlcServiceProxy<TService> : DispatchProxy
+    private sealed class ProxyAssemblyLoadContext : AssemblyLoadContext
+    {
+        private readonly Assembly _moduleAssembly;
+        private readonly AssemblyLoadContext? _sourceAlc;
+        private readonly string? _moduleSimpleName;
+
+        public ProxyAssemblyLoadContext(Assembly moduleAssembly)
+            : base(name: $"CrossAlcProxy:{moduleAssembly.GetName().Name}", isCollectible: false)
+        {
+            _moduleAssembly = moduleAssembly;
+            _sourceAlc = GetLoadContext(moduleAssembly);
+            _moduleSimpleName = moduleAssembly.GetName().Name;
+        }
+
+        protected override Assembly? Load(AssemblyName assemblyName)
+        {
+            if (!string.IsNullOrEmpty(_moduleSimpleName) &&
+                string.Equals(assemblyName.Name, _moduleSimpleName, StringComparison.OrdinalIgnoreCase))
+            {
+                return _moduleAssembly;
+            }
+
+            if (_sourceAlc is not null && _sourceAlc != Default)
+            {
+                foreach (var asm in _sourceAlc.Assemblies)
+                {
+                    if (string.Equals(asm.GetName().Name, assemblyName.Name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return asm;
+                    }
+                }
+            }
+
+            return null;
+        }
+    }
+
+    private static class CrossAlcServiceProxy<TService>
         where TService : class
     {
-        private TService _inner = null!;
+        private sealed record ProxyMetadata(Type ProxyType, MethodInfo[] InterfaceMethods);
+
+        private static readonly ConditionalWeakTable<Assembly, ProxyAssemblyLoadContext> AlcByModuleAssembly = new();
+        private static readonly ConcurrentDictionary<Type, Lazy<ProxyMetadata>> ProxyCache = new();
+        private static readonly MethodInfo DispatcherInvokeMethod =
+            typeof(Func<int, object?[], object?>).GetMethod(nameof(Func<int, object?[], object?>.Invoke))!;
 
         internal static object CreateProxy(Type alcServiceType, TService implementation)
         {
-            var createMethod = typeof(DispatchProxy)
-                .GetMethods(BindingFlags.Public | BindingFlags.Static)
-                .Single(m => m.Name == nameof(DispatchProxy.Create) && m.GetGenericArguments().Length == 2 && m.GetParameters().Length == 0)
-                .MakeGenericMethod(alcServiceType, typeof(CrossAlcServiceProxy<TService>));
+            if (!alcServiceType.IsInterface)
+            {
+                throw new ArgumentException($"Cross-ALC bridge requires an interface type, got '{alcServiceType}'.", nameof(alcServiceType));
+            }
 
-            var proxy = (CrossAlcServiceProxy<TService>)createMethod.Invoke(null, null)!;
-            proxy._inner = implementation;
-            return proxy;
+            var metadata = ProxyCache.GetOrAdd(
+                alcServiceType,
+                static type => new Lazy<ProxyMetadata>(() => BuildProxyType(type))).Value;
+
+            Func<int, object?[], object?> dispatcher = (methodIndex, callArgs) =>
+                InvokeTarget(implementation, metadata.InterfaceMethods[methodIndex], callArgs);
+
+            return Activator.CreateInstance(metadata.ProxyType, dispatcher)!;
         }
 
-        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+        private static ProxyMetadata BuildProxyType(Type alcServiceType)
         {
-            ArgumentNullException.ThrowIfNull(targetMethod);
+            var interfaceMethods = new[] { alcServiceType }
+                .Concat(alcServiceType.GetInterfaces())
+                .SelectMany(static iface => iface.GetMethods(BindingFlags.Public | BindingFlags.Instance))
+                .Distinct()
+                .ToArray();
 
+            var proxyAlc = AlcByModuleAssembly.GetValue(
+                alcServiceType.Assembly,
+                static asm => new ProxyAssemblyLoadContext(asm));
+
+            using (proxyAlc.EnterContextualReflection())
+            {
+                var asmName = new AssemblyName($"CrossAlcProxy_{Guid.NewGuid():N}");
+                var asmBuilder = AssemblyBuilder.DefineDynamicAssembly(asmName, AssemblyBuilderAccess.Run);
+                var modBuilder = asmBuilder.DefineDynamicModule("Main");
+                var typeBuilder = modBuilder.DefineType(
+                    $"CrossAlcProxy_{alcServiceType.Name}_{Guid.NewGuid():N}",
+                    TypeAttributes.Public | TypeAttributes.Sealed | TypeAttributes.Class,
+                    typeof(object),
+                    [alcServiceType]);
+
+                var dispatcherField = typeBuilder.DefineField(
+                    "_dispatcher",
+                    typeof(Func<int, object?[], object?>),
+                    FieldAttributes.Private | FieldAttributes.InitOnly);
+
+                var ctorBuilder = typeBuilder.DefineConstructor(
+                    MethodAttributes.Public,
+                    CallingConventions.Standard,
+                    [typeof(Func<int, object?[], object?>)]);
+                var ctorIl = ctorBuilder.GetILGenerator();
+                ctorIl.Emit(OpCodes.Ldarg_0);
+                ctorIl.Emit(OpCodes.Call, typeof(object).GetConstructor(Type.EmptyTypes)!);
+                ctorIl.Emit(OpCodes.Ldarg_0);
+                ctorIl.Emit(OpCodes.Ldarg_1);
+                ctorIl.Emit(OpCodes.Stfld, dispatcherField);
+                ctorIl.Emit(OpCodes.Ret);
+
+                for (int methodIndex = 0; methodIndex < interfaceMethods.Length; methodIndex++)
+                {
+                    EmitMethod(typeBuilder, dispatcherField, interfaceMethods[methodIndex], methodIndex);
+                }
+
+                var proxyType = typeBuilder.CreateType()!;
+                return new ProxyMetadata(proxyType, interfaceMethods);
+            }
+        }
+
+        private static void EmitMethod(TypeBuilder typeBuilder, FieldBuilder dispatcherField, MethodInfo method, int methodIndex)
+        {
+            if (method.IsGenericMethodDefinition)
+            {
+                throw new NotSupportedException($"Generic interface methods are not supported by CrossAlcServiceProxy: '{method}'.");
+            }
+
+            var parameters = method.GetParameters();
+            var paramTypes = parameters.Select(static p => p.ParameterType).ToArray();
+            var methodBuilder = typeBuilder.DefineMethod(
+                method.Name,
+                MethodAttributes.Public | MethodAttributes.Virtual | MethodAttributes.Final | MethodAttributes.HideBySig | MethodAttributes.NewSlot,
+                method.ReturnType,
+                paramTypes);
+
+            var il = methodBuilder.GetILGenerator();
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldfld, dispatcherField);
+            il.Emit(OpCodes.Ldc_I4, methodIndex);
+            il.Emit(OpCodes.Ldc_I4, parameters.Length);
+            il.Emit(OpCodes.Newarr, typeof(object));
+
+            for (int pIndex = 0; pIndex < parameters.Length; pIndex++)
+            {
+                il.Emit(OpCodes.Dup);
+                il.Emit(OpCodes.Ldc_I4, pIndex);
+                il.Emit(OpCodes.Ldarg, pIndex + 1);
+                var pType = parameters[pIndex].ParameterType;
+                if (pType.IsValueType)
+                {
+                    il.Emit(OpCodes.Box, pType);
+                }
+
+                il.Emit(OpCodes.Stelem_Ref);
+            }
+
+            il.Emit(OpCodes.Callvirt, DispatcherInvokeMethod);
+
+            if (method.ReturnType == typeof(void))
+            {
+                il.Emit(OpCodes.Pop);
+            }
+            else if (method.ReturnType.IsValueType)
+            {
+                il.Emit(OpCodes.Unbox_Any, method.ReturnType);
+            }
+            else
+            {
+                il.Emit(OpCodes.Castclass, method.ReturnType);
+            }
+
+            il.Emit(OpCodes.Ret);
+            typeBuilder.DefineMethodOverride(methodBuilder, method);
+        }
+
+        private static object? InvokeTarget(TService implementation, MethodInfo targetMethod, object?[] args)
+        {
             var targetMethodParams = targetMethod.GetParameters();
             var innerMethod = typeof(TService).GetMethods(BindingFlags.Public | BindingFlags.Instance)
                 .Single(m =>
@@ -94,13 +255,13 @@ internal static class ModuleTestServiceBridge
             var convertedArgs = new object?[innerParams.Length];
             for (int i = 0; i < innerParams.Length; i++)
             {
-                convertedArgs[i] = ConvertValue(args?[i], innerParams[i].ParameterType);
+                convertedArgs[i] = ConvertValue(args[i], innerParams[i].ParameterType);
             }
 
             object? result;
             try
             {
-                result = innerMethod.Invoke(_inner, convertedArgs);
+                result = innerMethod.Invoke(implementation, convertedArgs);
             }
             catch (TargetInvocationException ex) when (ex.InnerException is not null)
             {
