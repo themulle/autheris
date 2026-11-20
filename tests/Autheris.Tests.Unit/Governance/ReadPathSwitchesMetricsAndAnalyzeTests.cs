@@ -85,10 +85,7 @@ public sealed class ReadPathSwitchesMetricsAndAnalyzeTests
             })
             .Build();
 
-        var gatewayOptions = new GatewayOptions();
-        config.GetSection(GatewaySections.Gateway).Bind(gatewayOptions);
-
-        gatewayOptions.GraphQL.Metrics.Enabled.ShouldBeFalse();
+        Should.Throw<InvalidOperationException>(() => Autheris.Api.Configuration.UnknownGatewayKeyGuard.ThrowIfUnknownKeys(config));
     }
 
     [Fact]

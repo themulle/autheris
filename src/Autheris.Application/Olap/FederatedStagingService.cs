@@ -416,8 +416,7 @@ public sealed class FederatedStagingService : IFederatedStagingService
 
             bool isKeySetCandidate = req.KeySetPlan != null &&
                                      connector is not Autheris.Application.Products.ProductConnector &&
-                                     req.Metadata.Table.DataSourceType == DataSourceType.Sql &&
-                                     (_gatewayOptions.Value.WebSql?.CrossSource?.DynamicKeySet?.Enabled ?? true);
+                                     req.Metadata.Table.DataSourceType == DataSourceType.Sql;
 
             OlapTableSource? drivingSource = null;
             TableAccessDecision? drivingDecision = null;

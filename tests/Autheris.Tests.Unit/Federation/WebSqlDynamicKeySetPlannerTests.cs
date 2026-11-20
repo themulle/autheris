@@ -181,27 +181,6 @@ public sealed class WebSqlDynamicKeySetPlannerTests
     }
 
     [Fact]
-    public void Plan_DisabledDynamicKeySet_ReturnsEmpty()
-    {
-        var customers = CreateTable("crm", "customers", DataSourceType.Sql, ["id", "status"], expectedRows: 10);
-        var orders = CreateTable("erp", "orders", DataSourceType.Sql, ["id", "customer_id"], expectedRows: 1000);
-
-        var sql = "SELECT * FROM crm.public.customers c JOIN erp.public.orders o ON c.id = o.customer_id WHERE c.status = 'A'";
-        var stmt = Parse(sql);
-
-        var resolvedCustomers = new ResolvedSourceTable(Target("crm", "public", "customers", "c"), customers.Identifier, customers, "crm");
-        var resolvedOrders = new ResolvedSourceTable(Target("erp", "public", "orders", "o"), orders.Identifier, orders, "erp");
-
-        var tables = new[] { resolvedCustomers, resolvedOrders };
-        var decisions = tables.ToDictionary(t => t.ResolvedIdentifier, t => AllowAll(t.Metadata));
-        var options = new CrossSourceOptions { DynamicKeySet = new DynamicKeySetOptions { Enabled = false } };
-
-        var plans = DynamicKeySetPlanner.Plan(stmt, tables, decisions, options);
-
-        plans.ShouldBeEmpty();
-    }
-
-    [Fact]
     public void KeyBatcher_ExtractDistinctKeys_FiltersNullsAndPreservesOrdinalUniqueness()
     {
         var rows = new List<IReadOnlyDictionary<string, object?>>

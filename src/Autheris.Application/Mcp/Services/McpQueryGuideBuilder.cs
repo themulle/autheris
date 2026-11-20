@@ -29,15 +29,8 @@ internal static class McpQueryGuideBuilder
         AppendOrdering(sb);
         AppendFilterOperators(sb);
 
-        if (gql.Aggregation.Enabled)
-        {
-            AppendAggregationAndTimeBuckets(sb, gql);
-        }
-
-        if (gql.Metrics.Enabled)
-        {
-            AppendMetrics(sb);
-        }
+        AppendAggregationAndTimeBuckets(sb, gql);
+        AppendMetrics(sb);
 
         if (gql.Subscriptions.Enabled)
         {

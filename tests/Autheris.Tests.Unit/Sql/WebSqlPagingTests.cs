@@ -106,7 +106,6 @@ public sealed class WebSqlPagingTests
                 DefaultDataSourceName = "crm",
                 Paging = paging ?? new WebSqlPagingOptions
                 {
-                    Enabled = true,
                     MaxOffset = 10_000,
                     TokenLifetimeMinutes = 15
                 }
@@ -345,7 +344,6 @@ public sealed class WebSqlPagingTests
     {
         var (service, _, _) = CreatePipeline(new WebSqlPagingOptions
         {
-            Enabled = true,
             MaxOffset = 100,
             TokenLifetimeMinutes = 15
         }, fakeRows: 100);
@@ -431,12 +429,10 @@ public sealed class WebSqlPagingTests
     {
         var options = new WebSqlPagingOptions
         {
-            Enabled = true,
             MaxOffset = 10_000,
             TokenLifetimeMinutes = 15
         };
 
-        options.Enabled.ShouldBeTrue();
         options.MaxOffset.ShouldBe(10_000);
         options.TokenLifetimeMinutes.ShouldBe(15);
     }

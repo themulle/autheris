@@ -234,14 +234,6 @@ public sealed class GoldenQueryStoreReadTests
     }
 
     [Fact]
-    public async Task Disabled_service_serves_nothing()
-    {
-        var fixture = new Fixture(enabled: false) { Rows = [Row("orders", "dbt-1", "orders { id }")] };
-
-        (await fixture.Service.GetGoldenQueriesAsync(GoldenQueryReadContext.AllVisible(TenantA), null, null, CancellationToken.None)).ShouldBeEmpty();
-    }
-
-    [Fact]
     [Trait("Category", "Security")]
     public async Task Unresolvable_or_reserved_tenant_reads_no_stored_entries()
     {
@@ -281,7 +273,7 @@ public sealed class GoldenQueryStoreReadTests
 
     private sealed class Fixture
     {
-        public Fixture(IReadOnlyList<GoldenQueryDefinition>? configured = null, int maxResults = 20, bool enabled = true)
+        public Fixture(IReadOnlyList<GoldenQueryDefinition>? configured = null, int maxResults = 20)
         {
             Repository = Substitute.For<IGoldenQueryRepository>();
             Repository.GetForTenantAsync(Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
@@ -295,7 +287,6 @@ public sealed class GoldenQueryStoreReadTests
             {
                 GoldenQueries = new GoldenQueryOptions
                 {
-                    Enabled = enabled,
                     MaxResultsPerRequest = maxResults,
                     InitialQueries = configured?.ToList() ?? []
                 }

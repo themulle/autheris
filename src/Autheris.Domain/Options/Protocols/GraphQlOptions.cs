@@ -4,18 +4,28 @@ namespace Autheris.Domain.Options;
 
 public sealed class GraphQLOptions
 {
+    /// <summary>HTTP route path where the GraphQL endpoint is mapped.</summary>
     public string EndpointPath { get; init; } = "/graphql";
+
     [Range(1, 25)] public int MaxAllowedExecutionDepth { get; init; } = 6;
     [Range(100, 10000)] public int MaxAllowedComplexity { get; init; } = 500;
+
+    /// <summary>Enables GraphQL schema introspection queries (prohibited outside Development without explicit opt-in).</summary>
     public bool EnableIntrospection { get; init; }
+
+    /// <summary>When true, rejects ad-hoc GraphQL queries and only executes trusted persisted documents.</summary>
     public bool PersistedQueriesOnly { get; init; }
 
     /// <summary>
-    /// SEC H-08: Directory containing the trusted GraphQL documents (*.graphql / *.gql) that are allowed
+    /// Directory containing the trusted GraphQL documents (*.graphql / *.gql) that are allowed
     /// when PersistedQueriesOnly is true. Required when PersistedQueriesOnly is enabled (fail-fast at startup).
     /// </summary>
     public string TrustedDocumentsDirectory { get; init; } = string.Empty;
+
+    /// <summary>Enables the Banana Cake Pop GraphQL IDE endpoint.</summary>
     public bool EnableBananaCakePop { get; init; }
+
+    /// <summary>HTTP route path where Banana Cake Pop is served when enabled.</summary>
     public string BananaCakePopPath { get; init; } = "/ui/bcp";
     [Range(100, 100000)] public int MaxResponseRows { get; init; } = 5000;
     [Range(1048576, 104857600)] public long MaxResponseBytes { get; init; } = 10485760;
@@ -48,9 +58,6 @@ public sealed class GraphQLOptions
     /// <summary>Issue #279: GraphQL subscription switch (<c>Gateway:GraphQL:Subscriptions</c>).</summary>
     public GraphQLSubscriptionOptions Subscriptions { get; init; } = new();
 
-    /// <summary>Issue #240: GraphQL metrics options (<c>Gateway:GraphQL:Metrics</c>).</summary>
-    public GraphQLMetricsOptions Metrics { get; init; } = new();
-
     /// <summary>Issue #281: runtime-managed, app-scoped trusted documents (<c>Gateway:GraphQL:AppScopedTrustedDocuments</c>).</summary>
     public AppScopedTrustedDocumentsOptions AppScopedTrustedDocuments { get; init; } = new();
 
@@ -59,7 +66,11 @@ public sealed class GraphQLOptions
 
     /// <summary>Issue #254: ERP table GraphQL schema partitioning mode.</summary>
     public GraphQlSchemaPartitioningMode SchemaPartitioning { get; init; } = GraphQlSchemaPartitioningMode.None;
+
+    /// <summary>Domains permitted in partitioned GraphQL schemas when <see cref="SchemaPartitioning"/> is active.</summary>
     public List<string> PartitionAllowedDomains { get; init; } = [];
+
+    /// <summary>Consent scopes permitted in partitioned GraphQL schemas when <see cref="SchemaPartitioning"/> is active.</summary>
     public List<string> PartitionAllowedConsentScopes { get; init; } = [];
 }
 
@@ -77,30 +88,21 @@ public enum GraphQlSchemaPartitioningMode
     ByPermissionTier = 2
 }
 
-/// <summary>Issue #240: switches for GraphQL metrics read path (queryMetrics).</summary>
-public sealed class GraphQLMetricsOptions
-{
-    /// <summary>Enable the queryMetrics GraphQL root field. Default true.</summary>
-    public bool Enabled { get; init; } = true;
-}
-
 /// <summary>Issue #443: options for slow-list reporting in GraphQL response extensions (<c>Gateway:GraphQL:SlowLists</c>).</summary>
 public sealed class GraphQLSlowListReportOptions
 {
+    /// <summary>Enables slow-list diagnostic reporting in GraphQL response extensions.</summary>
     public bool Enabled { get; init; } = false;
     [Range(50, 600000)] public int ThresholdMs { get; init; } = 1000;
     [Range(1, 5)] public int MaxEntries { get; init; } = 3;
 }
 
-/// <summary>#112: switches and bounds of the typed GraphQL aggregation surface.</summary>
+/// <summary>#112: bounds of the typed GraphQL aggregation surface.</summary>
 public sealed class GraphQLAggregationOptions
 {
     public const int MinFieldsPerOperation = 1;
     public const int DefaultMaxFieldsPerOperation = 3;
     public const int MaxFieldsPerOperationUpperBound = 10;
-
-    /// <summary>Generate the typed aggregate fields (restart or catalog change required).</summary>
-    public bool Enabled { get; init; } = true;
 
     /// <summary>
     /// Upper bound for aliased <c>T_aggregate</c> and <c>queryMetrics</c>fields in one operation. Out of range (1..10) is a
@@ -115,16 +117,23 @@ public sealed class GraphQLAggregationOptions
 /// </summary>
 public sealed class IncrementalDeliveryOptions
 {
-    public bool Enabled { get; init; } = true;
+    /// <summary>Maximum execution time in milliseconds for deferred GraphQL fragments.</summary>
     public int MaxDeferredExecutionTimeMs { get; init; } = 30000;
+
+    /// <summary>Maximum concurrent incremental delivery streams permitted per client.</summary>
     public int MaxConcurrentStreamsPerClient { get; init; } = 10;
+
+    /// <summary>Maximum number of incremental chunks emitted per GraphQL response stream.</summary>
     public int MaxIncrementalChunks { get; init; } = 100;
 }
 
+/// <summary>Golden query catalog and MCP discovery options (<c>Gateway:GoldenQueries</c>).</summary>
 public sealed class GoldenQueryOptions
 {
-    public bool Enabled { get; init; } = true;
+    /// <summary>Maximum number of golden query matches returned per MCP search request.</summary>
     public int MaxResultsPerRequest { get; init; } = 20;
+
+    /// <summary>Seeded golden query definitions registered at startup.</summary>
     public List<GoldenQueryDefinition> InitialQueries { get; init; } = [];
 }
 

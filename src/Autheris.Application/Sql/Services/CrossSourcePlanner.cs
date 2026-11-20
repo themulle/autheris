@@ -185,7 +185,6 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
 
         // Issue #122: AST Conjunct Splitting and Single-Table Classification
         Dictionary<TableIdentifier, List<SingleTableConjunct>>? conjunctsByTable = null;
-        if (options.PredicatePushdown.Enabled || options.DynamicKeySet.Enabled)
         {
             var conjuncts = SqlConjunctSplitter.Split(statement);
             var classification = SingleTableConjunctClassifier.Classify(conjuncts, tables);
@@ -196,7 +195,7 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
 
         // Issue #124: Dynamic Key-Set Planning & Dependency Ordering
         IReadOnlyList<KeySetJoinPlan>? keySetPlans = null;
-        if (options.DynamicKeySet.Enabled && tables.Count > 1)
+        if (tables.Count > 1)
         {
             var decisionDict = new Dictionary<TableIdentifier, TableAccessDecision>();
             for (int idx = 0; idx < tables.Count; idx++)
@@ -410,8 +409,7 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
 
             TableFilterClause? pushdownFilter = null;
             PushedParameterAudit? paramAudit = null;
-            if (options.PredicatePushdown.Enabled &&
-                conjunctsByTable != null &&
+            if (conjunctsByTable != null &&
                 conjunctsByTable.TryGetValue(identifier, out var tableConjuncts))
             {
                 var pushableConjuncts = new List<SingleTableConjunct>();
@@ -450,7 +448,7 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
                     }
                 }
             }
-            else if (options.PredicatePushdown.Enabled && parameters != null && t.Metadata.Table.DataSourceType == DataSourceType.Sql)
+            else if (parameters != null && t.Metadata.Table.DataSourceType == DataSourceType.Sql)
             {
                 pushdownFilter = Autheris.Application.Sql.Federation.Optimization.PushedClauseBuilder.BuildPushdown(statement, t.Target, t.Metadata, dec, parameters, plannedTables, out paramAudit);
             }

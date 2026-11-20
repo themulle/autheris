@@ -13,6 +13,7 @@ using Autheris.Api.Extensions.DependencyInjection;
 using Autheris.Api.Extensions.DependencyInjection.StartupChecks;
 using Autheris.Application.Audit;
 using Autheris.Application.Common;
+using Microsoft.Extensions.Configuration;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Common.Quota;
 using Autheris.Application.DataSources;
@@ -62,7 +63,7 @@ public sealed class WebSqlCostQuotaTests
             WebSql = new WebSqlOptions
             {
                 Enabled = true,
-                Cost = new WebSqlCostOptions { Enabled = true, MaxStatementCost = maxStatementCost, ExecutionSecondCost = 10 }
+                Cost = new WebSqlCostOptions { MaxStatementCost = maxStatementCost, ExecutionSecondCost = 10 }
             },
             RateLimiting = new RateLimitingOptions
             {
@@ -472,17 +473,14 @@ public sealed class WebSqlCostQuotaTests
     [Trait("Category", "Security")]
     public void CostDisabled_FailsStartOutsideDevelopment()
     {
-        var options = new GatewayOptions
-        {
-            WebSql = new WebSqlOptions
+        var config = new Microsoft.Extensions.Configuration.ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                Cost = new WebSqlCostOptions { Enabled = false }
-            }
-        };
+                ["Gateway:WebSql:Cost:Enabled"] = "false"
+            })
+            .Build();
 
-        IHostEnvironment env = new TestHostEnvironment("Production");
-
-        var ex = Assert.Throws<System.ComponentModel.DataAnnotations.ValidationException>(() => GatewayStartupValidator.ValidateStartup(options, env));
-        ex.Message.Should().Contain("WebSql:Cost:Enabled must not be false outside Development");
+        var ex = Assert.Throws<InvalidOperationException>(() => Autheris.Api.Configuration.UnknownGatewayKeyGuard.ThrowIfUnknownKeys(config));
+        ex.Message.Should().Contain("WebSql:Cost:Enabled (removed;");
     }
 }

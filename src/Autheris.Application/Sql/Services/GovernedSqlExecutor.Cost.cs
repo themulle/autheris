@@ -71,7 +71,7 @@ public sealed partial class GovernedSqlExecutor
             return request.Admission;
         }
 
-        if (_costQuota == null || !(_options.Value.WebSql?.Cost?.Enabled ?? true))
+        if (_costQuota == null)
         {
             return null;
         }

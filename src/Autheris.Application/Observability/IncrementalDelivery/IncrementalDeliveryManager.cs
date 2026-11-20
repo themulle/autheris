@@ -39,7 +39,7 @@ public sealed class IncrementalDeliveryManager : IIncrementalDeliveryManager
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    public bool IsEnabled => _options.Value.IncrementalDelivery.Enabled;
+    public bool IsEnabled => true;
     public int MaxChunks => _options.Value.IncrementalDelivery.MaxIncrementalChunks;
 
     public bool TryAcquireStreamSlot(string clientKey)
