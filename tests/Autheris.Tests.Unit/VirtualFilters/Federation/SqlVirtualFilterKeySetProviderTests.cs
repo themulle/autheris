@@ -61,6 +61,32 @@ public sealed class SqlVirtualFilterKeySetProviderTests
         }
     }
 
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData(4, 10, true)]
+    [InlineData(5, 10, false)]
+    [InlineData(10, 4, true)]
+    public async Task Get_PolicyKeySetMaxKeys_ClampedToGlobalMax_AndExceedingLimitFailsClosed(int policyMax, int globalMax, bool overflows)
+    {
+        // 5 distinct keys in DB; effectiveMax = min(policyMax, globalMax).
+        var filter = Filter("many_keys", "auth", "many", "m", "k") with
+        {
+            EvaluationMode = RowPolicyEvaluationMode.KeySet,
+            KeySetMaxKeys = policyMax
+        };
+        var provider = _db.Provider(_db.Options(maxKeys: globalMax));
+
+        if (overflows)
+        {
+            (await Should.ThrowAsync<GatewaySecurityException>(() => provider.GetAsync(filter, IntegerKey, TenantA).AsTask()))
+                .ErrorCode.ShouldBe("VF_KEY_SET_TOO_LARGE");
+        }
+        else
+        {
+            Values(await provider.GetAsync(filter, IntegerKey, TenantA)).ShouldBe([1L, 2L, 3L, 4L, 5L]);
+        }
+    }
+
     [Fact]
     public async Task Get_SqlDefinition_ThrowsKeySourceUnsupported()
     {

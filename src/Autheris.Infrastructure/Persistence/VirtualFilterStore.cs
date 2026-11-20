@@ -24,7 +24,8 @@ internal static class VirtualFilterStore
         string? Sql = null, List<string>? SqlTargetColumns = null,
         FilterApprovalStatus? Status = null, string? CreatedBy = null, string? ApprovedBy = null, DateTimeOffset? ApprovedAt = null,
         FilterDto? Draft = null, bool PendingDeletion = false, string? DeletionRequestedBy = null,
-        List<ParameterDto>? Parameters = null, RowPolicyEvaluationMode? EvaluationMode = null, TimeSpan? KeySetMaxAge = null);
+        List<ParameterDto>? Parameters = null, RowPolicyEvaluationMode? EvaluationMode = null, TimeSpan? KeySetMaxAge = null,
+        int? KeySetMaxKeys = null);
     private sealed record BindingDto(
         string Filter, string? Target, FilterObjectKinds ObjectKinds, string? TimeColumn, Dictionary<string, string>? ColumnMap,
         VirtualFilterExecutionStrategy? Strategy = null, PushdownParameterFormat? PushdownFormat = null,
@@ -105,6 +106,9 @@ internal static class VirtualFilterStore
             object keySetMaxAgeSeconds = filter.KeySetMaxAge is { } age
                 ? (int)Math.Ceiling(age.TotalSeconds)
                 : DBNull.Value;
+            object keySetMaxKeys = filter.KeySetMaxKeys is { } maxKeys
+                ? maxKeys
+                : DBNull.Value;
             await ExecuteAsync(connection, tx, sqlServer ? @"
                 MERGE VIRTUAL_FILTERS WITH (HOLDLOCK) AS t
                 USING (SELECT @tenant AS tenant_id, @name AS name) AS s ON t.tenant_id = s.tenant_id AND t.name = s.name
@@ -112,18 +116,18 @@ internal static class VirtualFilterStore
                     source = @source, definition_json = @json, definition_hash = @hash,
                     managed_path = @path, managed_commit = @commit, updated_by = @by, updated_at = @at,
                     parameters_json = @parametersJson, evaluation_mode = @evalMode, key_set_max_age_seconds = @keySetMaxAgeSec,
-                    status = @status, approved_by_sid = @approvedBySid, approved_at = @approvedAt
-                WHEN NOT MATCHED THEN INSERT (id, tenant_id, name, source, definition_json, definition_hash, managed_path, managed_commit, updated_by, updated_at, parameters_json, evaluation_mode, key_set_max_age_seconds, status, approved_by_sid, approved_at)
-                    VALUES (@id, @tenant, @name, @source, @json, @hash, @path, @commit, @by, @at, @parametersJson, @evalMode, @keySetMaxAgeSec, @status, @approvedBySid, @approvedAt);" : @"
-                INSERT INTO VIRTUAL_FILTERS (id, tenant_id, name, source, definition_json, definition_hash, managed_path, managed_commit, updated_by, updated_at, parameters_json, evaluation_mode, key_set_max_age_seconds, status, approved_by_sid, approved_at)
-                VALUES (@id, @tenant, @name, @source, @json, @hash, @path, @commit, @by, @at, @parametersJson, @evalMode, @keySetMaxAgeSec, @status, @approvedBySid, @approvedAt)
+                    key_set_max_keys = @keySetMaxKeys, status = @status, approved_by_sid = @approvedBySid, approved_at = @approvedAt
+                WHEN NOT MATCHED THEN INSERT (id, tenant_id, name, source, definition_json, definition_hash, managed_path, managed_commit, updated_by, updated_at, parameters_json, evaluation_mode, key_set_max_age_seconds, key_set_max_keys, status, approved_by_sid, approved_at)
+                    VALUES (@id, @tenant, @name, @source, @json, @hash, @path, @commit, @by, @at, @parametersJson, @evalMode, @keySetMaxAgeSec, @keySetMaxKeys, @status, @approvedBySid, @approvedAt);" : @"
+                INSERT INTO VIRTUAL_FILTERS (id, tenant_id, name, source, definition_json, definition_hash, managed_path, managed_commit, updated_by, updated_at, parameters_json, evaluation_mode, key_set_max_age_seconds, key_set_max_keys, status, approved_by_sid, approved_at)
+                VALUES (@id, @tenant, @name, @source, @json, @hash, @path, @commit, @by, @at, @parametersJson, @evalMode, @keySetMaxAgeSec, @keySetMaxKeys, @status, @approvedBySid, @approvedAt)
                 ON CONFLICT (tenant_id, name) DO UPDATE SET
                     source = excluded.source, definition_json = excluded.definition_json, definition_hash = excluded.definition_hash,
                     managed_path = excluded.managed_path, managed_commit = excluded.managed_commit,
                     updated_by = excluded.updated_by, updated_at = excluded.updated_at,
                     parameters_json = excluded.parameters_json, evaluation_mode = excluded.evaluation_mode,
-                    key_set_max_age_seconds = excluded.key_set_max_age_seconds, status = excluded.status,
-                    approved_by_sid = excluded.approved_by_sid, approved_at = excluded.approved_at;",
+                    key_set_max_age_seconds = excluded.key_set_max_age_seconds, key_set_max_keys = excluded.key_set_max_keys,
+                    status = excluded.status, approved_by_sid = excluded.approved_by_sid, approved_at = excluded.approved_at;",
                 [
                     ("@id", filter.Id.ToString()),
                     ("@tenant", filter.TenantId.Value),
@@ -138,6 +142,7 @@ internal static class VirtualFilterStore
                     ("@parametersJson", parametersJson),
                     ("@evalMode", filter.EvaluationMode.ToString()),
                     ("@keySetMaxAgeSec", keySetMaxAgeSeconds),
+                    ("@keySetMaxKeys", keySetMaxKeys),
                     ("@status", filter.Status.ToString()),
                     ("@approvedBySid", filter.ApprovedBySid),
                     ("@approvedAt", new Stamp(filter.ApprovedAt))
@@ -250,7 +255,8 @@ internal static class VirtualFilterStore
         filter.DeletionRequestedBy?.Value,
         filter.Parameters.Count == 0 ? null : filter.Parameters.Select(p => new ParameterDto(p.Name, p.Type, p.IsList, p.MaxValues)).ToList(),
         filter.EvaluationMode == RowPolicyEvaluationMode.Live ? null : filter.EvaluationMode,
-        filter.KeySetMaxAge);
+        filter.KeySetMaxAge,
+        filter.KeySetMaxKeys);
 
     private static ProfileDto ProfileToDto(VirtualFilterAccessProfile profile) => new(
         profile.GranteeType,
@@ -302,7 +308,8 @@ internal static class VirtualFilterStore
         DeletionRequestedBy = string.IsNullOrWhiteSpace(dto.DeletionRequestedBy) ? (Sid?)null : new Sid(dto.DeletionRequestedBy!),
         Parameters = (dto.Parameters ?? []).Select(p => new RowPolicyParameter(p.Name, p.Type, p.IsList, p.MaxValues)).ToList(),
         EvaluationMode = dto.EvaluationMode ?? RowPolicyEvaluationMode.Live,
-        KeySetMaxAge = dto.KeySetMaxAge
+        KeySetMaxAge = dto.KeySetMaxAge,
+        KeySetMaxKeys = dto.KeySetMaxKeys
     };
 
     private static VirtualFilterAccessProfile DtoToProfile(ProfileDto dto, Guid id, TenantId tenantId, string name) => new()
