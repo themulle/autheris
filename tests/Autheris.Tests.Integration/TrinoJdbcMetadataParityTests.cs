@@ -60,4 +60,41 @@ public sealed class TrinoJdbcMetadataParityTests : IClassFixture<RowFilterChanne
             : new List<string>();
         actual.ShouldBe(expected);
     }
+
+    [Fact]
+    public async Task Security_TrinoJdbcColumns_FilterBySchemaAndTable_MatchesDiscoveryColumns()
+    {
+        var discovery = await _fixture.Client().GetAsync("/api/v1/catalog/objects?pageSize=200");
+        discovery.StatusCode.ShouldBe(HttpStatusCode.OK);
+        using var page = JsonDocument.Parse(await discovery.Content.ReadAsStringAsync());
+        var items = page.RootElement.GetProperty("items").EnumerateArray()
+            .Where(i => !string.Equals(i.GetProperty("kind").GetString(), "procedure", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        items.Count.ShouldBeGreaterThanOrEqualTo(2);
+
+        var air1 = items.Single(i => string.Equals(i.GetProperty("name").GetString(), "air1", StringComparison.OrdinalIgnoreCase));
+        var expectedColumns = air1.GetProperty("columns").EnumerateArray()
+            .Select(c => c.GetProperty("name").GetString()!)
+            .ToList();
+        expectedColumns.ShouldNotBeEmpty();
+
+        var client = _fixture.Client();
+        client.DefaultRequestHeaders.Add("X-Trino-User", "test-user");
+        client.DefaultRequestHeaders.Add("X-Trino-Wait-Timeout", "30s");
+        var response = await client.PostAsync(
+            "/v1/statement",
+            new StringContent(
+                "SELECT TABLE_CAT, TABLE_SCHEM, TABLE_NAME, COLUMN_NAME, ORDINAL_POSITION FROM system.jdbc.columns WHERE TABLE_SCHEM = 'main' AND TABLE_NAME = 'air1' ORDER BY ORDINAL_POSITION",
+                Encoding.UTF8,
+                "text/plain"));
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var root = doc.RootElement;
+        root.GetProperty("stats").GetProperty("state").GetString().ShouldBe("FINISHED", root.ToString());
+
+        var rows = root.GetProperty("data").EnumerateArray().ToList();
+        rows.Select(r => $"{r[0].GetString()}.{r[1].GetString()}.{r[2].GetString()}").Distinct().ShouldBe(["default.main.air1"]);
+        rows.Select(r => r[3].GetString()!).ToList().ShouldBe(expectedColumns);
+        rows.Select(r => r[4].GetInt32()).ToList().ShouldBe(Enumerable.Range(1, expectedColumns.Count).ToList());
+    }
 }

@@ -374,14 +374,26 @@ public static class GatewayStartupValidator
                     throw new ValidationException($"Databricks data source '{name}': Auth.Obo.Scopes (token-exchange audience) is required.");
                 }
 
-                if (string.IsNullOrWhiteSpace(obo.ClientSecretRef) && string.IsNullOrWhiteSpace(obo.ClientCertificateRef))
+#pragma warning disable CS0618
+                if (!string.IsNullOrWhiteSpace(obo.ClientCertificateRef))
                 {
-                    throw new ValidationException($"Databricks data source '{name}': Auth.Obo requires either ClientSecretRef or ClientCertificateRef.");
+                    throw new ValidationException($"Databricks data source '{name}': Auth.Obo.ClientCertificateRef is not supported; configure Auth.Obo.ClientSecretRef instead.");
+                }
+#pragma warning restore CS0618
+
+                if (string.IsNullOrWhiteSpace(obo.ClientSecretRef))
+                {
+                    throw new ValidationException($"Databricks data source '{name}': Auth.Obo.ClientSecretRef is required for OAuthObo mode.");
                 }
 
-                if (!string.IsNullOrWhiteSpace(obo.ClientSecretRef) && !SecretReferenceResolver.IsReference(obo.ClientSecretRef))
+                if (!SecretReferenceResolver.IsReference(obo.ClientSecretRef))
                 {
                     throw new ValidationException($"Databricks data source '{name}': Auth.Obo.ClientSecretRef must be a secret reference (e.g. 'kv://', 'vault:'), inline secrets are prohibited (SEC-SIMPL-95).");
+                }
+
+                if (!DatabricksOboAuthority.TryNormalize(obo.Authority, obo.TenantId, out _, out var authorityError))
+                {
+                    throw new ValidationException($"Databricks data source '{name}': Auth.Obo.Authority {authorityError}");
                 }
             }
             else

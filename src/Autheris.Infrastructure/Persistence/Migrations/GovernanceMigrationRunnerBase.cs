@@ -535,21 +535,31 @@ public abstract class GovernanceMigrationRunnerBase : IGovernanceMigrationRunner
             "Check that the migration login has DDL rights (GovernanceDb:MigrationConnectionString) and see the operations runbook.");
     }
 
+    internal readonly record struct SqlFailureInfo(int Number, int LineNumber);
+
     /// <summary>SQLSTATE or driver error number only; never the exception message (it can carry row values).</summary>
     internal static string DescribeFailure(Exception failure) => failure switch
     {
         DbException db when !string.IsNullOrEmpty(db.SqlState) => "SQLSTATE " + SanitizeLabel(db.SqlState),
-        Microsoft.Data.SqlClient.SqlException sql => "error " + sql.Number.ToString(CultureInfo.InvariantCulture) + DescribeLine(sql) + DescribeBatch(failure),
+        Microsoft.Data.SqlClient.SqlException sql => DescribeFailure(new SqlFailureInfo(sql.Number, sql.LineNumber), failure),
         DbException db => "database error " + db.ErrorCode.ToString(CultureInfo.InvariantCulture),
         _ => failure.GetType().Name
     };
 
-    private static string DescribeLine(Microsoft.Data.SqlClient.SqlException failure) =>
-        failure.LineNumber > 0 ? ", line " + failure.LineNumber.ToString(CultureInfo.InvariantCulture) : string.Empty;
+    internal static string DescribeFailure(SqlFailureInfo info, Exception? annotatedSource = null) =>
+        "error " + info.Number.ToString(CultureInfo.InvariantCulture) + DescribeLine(info.LineNumber) + DescribeBatch(annotatedSource);
+
+    private static string DescribeLine(int lineNumber) =>
+        lineNumber > 0 ? ", line " + lineNumber.ToString(CultureInfo.InvariantCulture) : string.Empty;
 
     /// <summary>Phase, batch number and the first characters of the failing statement; the statements are static migration or catalog text with bound parameters.</summary>
-    private static string DescribeBatch(Exception failure)
+    private static string DescribeBatch(Exception? failure)
     {
+        if (failure is null)
+        {
+            return string.Empty;
+        }
+
         var text = failure.Data[SqlMigrationStep.FailedPhaseDataKey] is string phase ? ", phase " + SanitizeLabel(phase) : string.Empty;
         if (failure.Data[SqlMigrationStep.FailedBatchDataKey] is int batch)
         {

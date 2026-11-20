@@ -196,6 +196,7 @@ public sealed partial class VirtualFilterAdministrationService
         ValidateSupersedes(snapshot.Filters.Where(f => f.TenantId == filter.TenantId && f.Name != filter.Name).Append(filter).ToList());
 
         bool needsApproval = !actor.IsSync && (_options.RequireApproval || filter.Sql != null);
+        var approvalReason = ApprovalReason(filter, _options, actor);
         if (needsApproval)
         {
             if (existing != null && existing.Status == FilterApprovalStatus.Active)
@@ -224,7 +225,7 @@ public sealed partial class VirtualFilterAdministrationService
 
                 await ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [toStore] }, snapshot.Generation, ct).ConfigureAwait(false);
                 await AuditAsync(filter.TenantId, actor, "VIRTUAL_FILTER_PENDING_APPROVAL",
-                    $"virtual_filter:{filter.Name}", new { name = filter.Name, status = "DraftPendingApproval", before = existing.ComputeDefinitionHash(), draft = draft.ComputeDefinitionHash() }, ct).ConfigureAwait(false);
+                    $"virtual_filter:{filter.Name}", new { name = filter.Name, status = "DraftPendingApproval", reason = FormatApprovalReason(approvalReason), before = existing.ComputeDefinitionHash(), draft = draft.ComputeDefinitionHash() }, ct).ConfigureAwait(false);
                 return toStore;
             }
 
@@ -246,7 +247,7 @@ public sealed partial class VirtualFilterAdministrationService
             await ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [pending] }, snapshot.Generation, ct).ConfigureAwait(false);
             var action = existing == null ? "VIRTUAL_FILTER_CREATED" : "VIRTUAL_FILTER_UPDATED";
             await AuditAsync(filter.TenantId, actor, "VIRTUAL_FILTER_PENDING_APPROVAL",
-                $"virtual_filter:{filter.Name}", new { name = filter.Name, status = pending.Status.ToString(), before = existing?.ComputeDefinitionHash(), after = filter.ComputeDefinitionHash() }, ct).ConfigureAwait(false);
+                $"virtual_filter:{filter.Name}", new { name = filter.Name, status = pending.Status.ToString(), reason = FormatApprovalReason(approvalReason), before = existing?.ComputeDefinitionHash(), after = filter.ComputeDefinitionHash() }, ct).ConfigureAwait(false);
             return pending;
         }
 
@@ -270,6 +271,47 @@ public sealed partial class VirtualFilterAdministrationService
             $"virtual_filter:{filter.Name}", new { name = filter.Name, status = direct.Status.ToString(), before = existing?.ComputeDefinitionHash(), after = filter.ComputeDefinitionHash() }, ct).ConfigureAwait(false);
         return direct;
     }
+
+    internal static VirtualFilterApprovalReason ApprovalReason(
+        VirtualFilter filter,
+        VirtualFilterOptions options,
+        VirtualFilterActor actor)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(actor);
+
+        if (actor.IsSync) return VirtualFilterApprovalReason.None;
+        if (filter.Sql != null) return VirtualFilterApprovalReason.SqlDefinitionNeedsOwnerApproval;
+        if (options.RequireApproval) return VirtualFilterApprovalReason.RequireApprovalOption;
+        return VirtualFilterApprovalReason.None;
+    }
+
+    /// <summary>Derives why a stored filter is awaiting approval (drafts take precedence over the active version).</summary>
+    public static VirtualFilterApprovalReason PendingApprovalReason(VirtualFilter filter)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+
+        var pending = filter.Draft is { Status: FilterApprovalStatus.PendingApproval } draft
+            ? draft
+            : filter.Status == FilterApprovalStatus.PendingApproval
+                ? filter
+                : null;
+
+        return pending is null
+            ? VirtualFilterApprovalReason.None
+            : pending.Sql != null
+                ? VirtualFilterApprovalReason.SqlDefinitionNeedsOwnerApproval
+                : VirtualFilterApprovalReason.RequireApprovalOption;
+    }
+
+    public static string FormatApprovalReason(VirtualFilterApprovalReason reason) => reason switch
+    {
+        VirtualFilterApprovalReason.None => "none",
+        VirtualFilterApprovalReason.RequireApprovalOption => "require_approval_option",
+        VirtualFilterApprovalReason.SqlDefinitionNeedsOwnerApproval => "sql_definition_needs_owner_approval",
+        _ => throw new ArgumentOutOfRangeException(nameof(reason), reason, "Unknown virtual filter approval reason.")
+    };
 
     /// <summary>
     /// VF-05: the hash an approval compares: the definition hash for a deletion, the draft hash for a pending draft, else the definition hash.

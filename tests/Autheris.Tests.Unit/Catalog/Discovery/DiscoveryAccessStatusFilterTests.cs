@@ -359,6 +359,34 @@ public sealed class DiscoveryAccessStatusFilterTests
         }
     }
 
+    [Fact]
+    public async Task Keyset_AccessStatusFilter_MatchesListAsyncAcrossAllStatesAndPages()
+    {
+        var f = Create(8, grantedIndexes: [0, 3, 7], pendingIndex: 1, expiredIndex: 2);
+        var caller = CallerOf(Caller);
+
+        foreach (var state in Enum.GetValues<DiscoveryAccessState>())
+        {
+            var baseline = await f.Service.ListAsync(new DiscoveryQuery(First: 200, Access: state), caller);
+            var expectedNames = baseline.Items.Select(static o => o.Name).ToList();
+
+            var collected = new List<string>();
+            string? afterKey = null;
+            do
+            {
+                var page = await f.Service.ListKeysetAsync(
+                    new DiscoveryKeysetQuery(First: 1, AfterKey: afterKey, Access: state, CountTotal: true),
+                    caller);
+                page.TotalCount.ShouldBe(expectedNames.Count);
+                collected.AddRange(page.Items.Select(static i => i.Object.Name));
+                afterKey = page.NextKey;
+            }
+            while (afterKey is not null);
+
+            collected.Order(StringComparer.Ordinal).ShouldBe(expectedNames.Order(StringComparer.Ordinal), $"state {state}");
+        }
+    }
+
     private const string GroupSid = "S-1-5-21-1000-2000-3000-5001";
 
     private static Consent Grant(

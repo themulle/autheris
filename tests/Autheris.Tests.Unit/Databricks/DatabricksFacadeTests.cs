@@ -6,6 +6,7 @@ using System.Data.Common;
 using System.Net;
 using System.Text.Json;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Sql;
 using Autheris.Application.Sql.Catalog;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Databricks;
@@ -122,7 +123,9 @@ public sealed class DatabricksFacadeTests
         parameters[2].GetProperty("type").GetString().ShouldBe("BIGINT");
         parameters[3].GetProperty("value").ValueKind.ShouldBe(JsonValueKind.Null);
         (await reader.ReadAsync()).ShouldBeTrue();
-        reader.GetString(0).ShouldBe("1");
+        reader.GetFieldType(0).ShouldBe(typeof(int));
+        reader.GetInt32(0).ShouldBe(1);
+        reader.GetFieldType(1).ShouldBe(typeof(string));
         reader.GetString(1).ShouldBe("a");
         (await reader.ReadAsync()).ShouldBeFalse();
     }
@@ -190,5 +193,94 @@ public sealed class DatabricksFacadeTests
 
         var ex = await Should.ThrowAsync<DatabricksProviderException>(() => command.ExecuteReaderAsync());
         ex.Message.ShouldNotContain("secret-detail");
+    }
+
+    [Fact]
+    public async Task Reader_ReportsTypedFieldTypes()
+    {
+        var manifestColumns = string.Join(",", new[]
+        {
+            "{\"name\":\"flag\",\"type_name\":\"BOOLEAN\",\"position\":0}",
+            "{\"name\":\"tiny\",\"type_name\":\"BYTE\",\"position\":1}",
+            "{\"name\":\"small\",\"type_name\":\"SHORT\",\"position\":2}",
+            "{\"name\":\"num\",\"type_name\":\"INT\",\"position\":3}",
+            "{\"name\":\"big\",\"type_name\":\"LONG\",\"position\":4}",
+            "{\"name\":\"flt\",\"type_name\":\"FLOAT\",\"position\":5}",
+            "{\"name\":\"dbl\",\"type_name\":\"DOUBLE\",\"position\":6}",
+            "{\"name\":\"dec18\",\"type_name\":\"DECIMAL\",\"type_precision\":18,\"type_scale\":2,\"position\":7}",
+            "{\"name\":\"dec38\",\"type_name\":\"DECIMAL\",\"type_precision\":38,\"type_scale\":6,\"position\":8}",
+            "{\"name\":\"d\",\"type_name\":\"DATE\",\"position\":9}",
+            "{\"name\":\"ts\",\"type_name\":\"TIMESTAMP\",\"position\":10}",
+            "{\"name\":\"ntz\",\"type_name\":\"TIMESTAMP_NTZ\",\"position\":11}",
+            "{\"name\":\"txt\",\"type_name\":\"STRING\",\"position\":12}"
+        });
+        var rowsJson = "[" +
+                       "[\"true\",\"12\",\"345\",\"42\",\"9000000000\",\"1.5\",\"2.25\",\"123.45\",\"123456789012345678901234567890.123456\",\"2026-10-11\",\"2026-10-11T12:30:45.123Z\",\"2026-10-11T12:30:45.123\",\"ok\"]," +
+                       "[null,null,null,null,null,null,null,null,null,null,null,null,null]" +
+                       "]";
+        var json = "{\"statement_id\":\"" + StatementId + "\",\"status\":{\"state\":\"SUCCEEDED\"}," +
+                   "\"manifest\":{\"format\":\"JSON_ARRAY\",\"truncated\":false,\"schema\":{\"column_count\":13,\"columns\":[" + manifestColumns + "]}}," +
+                   "\"result\":{\"chunk_index\":0,\"row_offset\":0,\"data_array\":" + rowsJson + "}}";
+        var (connection, _) = Facade(r => IsStatementPost(r) ? Ok(json) : null);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT * FROM typed_table";
+
+        await using var reader = await command.ExecuteReaderAsync();
+
+        reader.GetFieldType(0).ShouldBe(typeof(bool));
+        reader.GetFieldType(1).ShouldBe(typeof(sbyte));
+        reader.GetFieldType(2).ShouldBe(typeof(short));
+        reader.GetFieldType(3).ShouldBe(typeof(int));
+        reader.GetFieldType(4).ShouldBe(typeof(long));
+        reader.GetFieldType(5).ShouldBe(typeof(float));
+        reader.GetFieldType(6).ShouldBe(typeof(double));
+        reader.GetFieldType(7).ShouldBe(typeof(decimal));
+        reader.GetFieldType(8).ShouldBe(typeof(string));
+        reader.GetFieldType(9).ShouldBe(typeof(DateTime));
+        reader.GetFieldType(10).ShouldBe(typeof(DateTimeOffset));
+        reader.GetFieldType(11).ShouldBe(typeof(DateTime));
+        reader.GetFieldType(12).ShouldBe(typeof(string));
+
+        var described = SqlResultColumns.Describe(reader);
+        TrinoColumnTypes.Map(described[7], []).Name.ShouldBe("decimal(18,2)");
+        TrinoColumnTypes.Map(described[9], []).Name.ShouldBe("date");
+        TrinoColumnTypes.Map(described[10], []).Name.ShouldBe("timestamp(3) with time zone");
+        TrinoColumnTypes.Map(described[11], []).Name.ShouldBe("timestamp(3)");
+
+        (await reader.ReadAsync()).ShouldBeTrue();
+        reader.GetBoolean(0).ShouldBeTrue();
+        reader.GetValue(1).ShouldBe((sbyte)12);
+        reader.GetInt16(2).ShouldBe((short)345);
+        reader.GetInt32(3).ShouldBe(42);
+        reader.GetInt64(4).ShouldBe(9_000_000_000L);
+        reader.GetFloat(5).ShouldBe(1.5f);
+        reader.GetDouble(6).ShouldBe(2.25d);
+        reader.GetDecimal(7).ShouldBe(123.45m);
+        reader.GetString(8).ShouldBe("123456789012345678901234567890.123456");
+        reader.GetDateTime(9).ShouldBe(new DateTime(2026, 10, 11, 0, 0, 0, DateTimeKind.Unspecified));
+        ((DateTimeOffset)reader.GetValue(10)).ShouldBe(new DateTimeOffset(2026, 10, 11, 12, 30, 45, 123, TimeSpan.Zero));
+        reader.GetDateTime(11).ShouldBe(new DateTime(2026, 10, 11, 12, 30, 45, 123, DateTimeKind.Unspecified));
+        reader.GetString(12).ShouldBe("ok");
+
+        (await reader.ReadAsync()).ShouldBeTrue();
+        for (var i = 0; i < 13; i++)
+        {
+            reader.IsDBNull(i).ShouldBeTrue();
+            reader.GetValue(i).ShouldBe(DBNull.Value);
+        }
+
+        (await reader.ReadAsync()).ShouldBeFalse();
+
+        // ExecuteScalar returns typed scalar too
+        var scalarJson = "{\"statement_id\":\"" + StatementId + "\",\"status\":{\"state\":\"SUCCEEDED\"}," +
+                         "\"manifest\":{\"format\":\"JSON_ARRAY\",\"truncated\":false,\"schema\":{\"column_count\":1,\"columns\":[{\"name\":\"total\",\"type_name\":\"DECIMAL\",\"type_precision\":18,\"type_scale\":2,\"position\":0}]}}," +
+                         "\"result\":{\"chunk_index\":0,\"row_offset\":0,\"data_array\":[[\"123.45\"]]}}";
+        var (scalarConn, _) = Facade(r => IsStatementPost(r) ? Ok(scalarJson) : null);
+        await scalarConn.OpenAsync();
+        await using var scalarCmd = scalarConn.CreateCommand();
+        scalarCmd.CommandText = "SELECT SUM(amount) FROM t";
+        var scalar = await scalarCmd.ExecuteScalarAsync();
+        scalar.ShouldBeOfType<decimal>().ShouldBe(123.45m);
     }
 }
