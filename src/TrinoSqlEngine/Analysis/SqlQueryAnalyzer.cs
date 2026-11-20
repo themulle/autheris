@@ -11,8 +11,14 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
     private bool _isMerge;
     private readonly List<TableAccessTarget> _referencedTables = new();
     private readonly List<string> _projectedColumns = new();
+    private readonly record struct TableAccessDedupeKey(
+        string? Catalog,
+        string? Schema,
+        string TableName,
+        string? Alias);
+
     private readonly List<string> _writtenColumns = new();
-    private readonly HashSet<string> _seenTableKeys = new(StringComparer.Ordinal);
+    private readonly HashSet<TableAccessDedupeKey> _seenTableKeys = new();
     private readonly List<JoinColumnReference> _joinColumnReferences = new();
     private readonly List<FilterColumnReference> _filterColumnReferences = new();
     private readonly List<FilterColumnReference> _windowColumnReferences = new();
@@ -206,7 +212,7 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
     // SEC C-01: collect called function names (lower-case, qualified as written).
     public override void EnterFunctionCall(SqlBaseParser.FunctionCallContext context)
     {
-        string name = SqlIdentifierHelper.NormalizeQualifiedName(context.qualifiedName()).ToLowerInvariant();
+        string name = SqlIdentifierHelper.ToQualifiedName(context.qualifiedName()).NormalizedName.ToLowerInvariant();
         if (name.Length > 0 && _seenFunctionCalls.Add(name))
         {
             _functionCalls.Add(name);
@@ -227,7 +233,7 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
     // SEC H-14: table functions, WITH SESSION and WITH FUNCTION are surfaced for policy decisions.
     public override void EnterTableFunctionInvocation(SqlBaseParser.TableFunctionInvocationContext context)
     {
-        _tableFunctionCalls.Add(SqlIdentifierHelper.NormalizeQualifiedName(context.tableFunctionCall().qualifiedName()).ToLowerInvariant());
+        _tableFunctionCalls.Add(SqlIdentifierHelper.ToQualifiedName(context.tableFunctionCall().qualifiedName()).NormalizedName.ToLowerInvariant());
         RecordJoin();
         RecordCrossJoin(new CrossJoinTarget(null, null, true));
     }
@@ -677,15 +683,16 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
     {
         if (qualifiedNameContext == null) return;
 
-        string normalizedFullName = SqlIdentifierHelper.NormalizeQualifiedName(qualifiedNameContext);
+        var qualifiedName = SqlIdentifierHelper.ToQualifiedName(qualifiedNameContext);
+        string normalizedFullName = qualifiedName.NormalizedName;
         if (string.IsNullOrWhiteSpace(normalizedFullName)) return;
 
-        var ids = qualifiedNameContext.identifier();
+        var parts = qualifiedName.Parts;
 
         // SEC C-02: Skip only single-part names that resolve to a CTE in the current scope.
-        if (ids != null && ids.Length == 1)
+        if (parts.Count == 1)
         {
-            string key = SqlIdentifierHelper.FoldIdentifierForScope(ids[0].GetText());
+            string key = SqlIdentifierHelper.FoldIdentifierForScope(parts[0]);
             if (_cteScopeStack.Peek().Contains(key))
             {
                 if (_cteStack.Count > 0)
@@ -706,62 +713,39 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
             }
         }
 
-        string? alias = null;
-        if (aliasedRelation?.identifier() != null)
-        {
-            alias = SqlIdentifierHelper.NormalizeIdentifier(aliasedRelation.identifier().GetText());
-        }
+        Ast.Nodes.SqlIdentifier? aliasId = aliasedRelation?.identifier() != null
+            ? SqlIdentifierHelper.ParseIdentifier(aliasedRelation.identifier().GetText())
+            : null;
+        string? alias = aliasId?.Value;
 
-        string? catalog = null;
-        string? schema = null;
-        string tableName;
-        bool schemaQuoted = false;
-        bool tableNameQuoted = false;
-        if (ids != null && ids.Length >= 4)
+        if (parts.Count >= 4)
         {
             throw new Antlr4.Runtime.Misc.ParseCanceledException($"Four-part table names ('{normalizedFullName}') are not permitted.");
         }
 
-        if (ids != null && ids.Length == 3)
-        {
-            catalog = SqlIdentifierHelper.NormalizeIdentifier(ids[0].GetText());
-            schema = SqlIdentifierHelper.NormalizeIdentifier(ids[1].GetText());
-            tableName = SqlIdentifierHelper.NormalizeIdentifier(ids[2].GetText());
-            schemaQuoted = IsQuotedIdentifier(ids[1].GetText());
-            tableNameQuoted = IsQuotedIdentifier(ids[2].GetText());
-        }
-        else if (ids != null && ids.Length == 2)
-        {
-            schema = SqlIdentifierHelper.NormalizeIdentifier(ids[0].GetText());
-            tableName = SqlIdentifierHelper.NormalizeIdentifier(ids[1].GetText());
-            schemaQuoted = IsQuotedIdentifier(ids[0].GetText());
-            tableNameQuoted = IsQuotedIdentifier(ids[1].GetText());
-        }
-        else if (ids != null && ids.Length == 1)
-        {
-            tableName = SqlIdentifierHelper.NormalizeIdentifier(ids[0].GetText());
-            tableNameQuoted = IsQuotedIdentifier(ids[0].GetText());
-        }
-        else
-        {
-            tableName = normalizedFullName;
-        }
+        Ast.Nodes.SqlIdentifier? catalogPart = parts.Count == 3 ? parts[0] : null;
+        Ast.Nodes.SqlIdentifier? schemaPart = parts.Count >= 2 ? parts[^2] : null;
+        Ast.Nodes.SqlIdentifier tablePart = parts[^1];
 
-        // RR-L5-02: dedupe on folded identifiers (quoted = exact case, unquoted = lower case) with ordinal comparison,
-        // so that "Orders" and orders (two different PostgreSQL tables) are reported as two distinct targets.
-        string dedupeKey = ids != null && ids.Length > 0
-            ? string.Join(".", Array.ConvertAll(ids, i => SqlIdentifierHelper.FoldIdentifierForScope(i.GetText()))) + "->" + (alias ?? "")
-            : $"{normalizedFullName}->{alias ?? ""}";
+        // RR-L5-02: dedupe on typed folded parts (quoted = exact case, unquoted = lower case) with ordinal comparison,
+        // so that "Orders" and orders (two different PostgreSQL tables) and "a.b" vs a.b are reported as distinct targets.
+        var dedupeKey = new TableAccessDedupeKey(
+            catalogPart is not null ? SqlIdentifierHelper.FoldIdentifierForScope(catalogPart) : null,
+            schemaPart is not null ? SqlIdentifierHelper.FoldIdentifierForScope(schemaPart) : null,
+            SqlIdentifierHelper.FoldIdentifierForScope(tablePart),
+            alias);
         if (_seenTableKeys.Add(dedupeKey))
         {
             _referencedTables.Add(new TableAccessTarget(
-                Catalog: catalog,
-                Schema: schema,
-                TableName: tableName,
+                Catalog: catalogPart?.Value,
+                Schema: schemaPart?.Value,
+                TableName: tablePart.Value,
                 Alias: alias,
                 FullName: normalizedFullName,
-                SchemaQuoted: schemaQuoted,
-                TableNameQuoted: tableNameQuoted));
+                SchemaQuoted: schemaPart?.IsQuoted ?? false,
+                TableNameQuoted: tablePart.IsQuoted,
+                CatalogQuoted: catalogPart?.IsQuoted ?? false,
+                QualifiedName: qualifiedName));
         }
     }
 
@@ -809,7 +793,7 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
 
         if (ctx is SqlBaseParser.TableNameContext tbl && tbl.qualifiedName() != null)
         {
-            return SqlIdentifierHelper.NormalizeQualifiedName(tbl.qualifiedName());
+            return SqlIdentifierHelper.ToQualifiedName(tbl.qualifiedName()).NormalizedName;
         }
 
         if (ctx is SqlBaseParser.AliasedRelationContext aliased)
@@ -840,14 +824,5 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
         var refs = new List<FilterColumnReference>();
         ExtractFilterColumnReferences(ctx, refs);
         return refs.Count == 0;
-    }
-
-    private static bool IsQuotedIdentifier(string rawIdentifier)
-    {
-        var id = rawIdentifier.Trim();
-        return id.Length >= 2 &&
-               ((id[0] == '"' && id[^1] == '"') ||
-                (id[0] == '`' && id[^1] == '`') ||
-                (id[0] == '[' && id[^1] == ']'));
     }
 }
