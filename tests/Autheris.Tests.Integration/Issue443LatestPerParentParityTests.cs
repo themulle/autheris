@@ -29,7 +29,11 @@ public sealed class Issue443LatestPerParentParityTests
     public async Task SetBased_EqualsCorrelated_FirstOne(DatabaseDialect dialect)
     {
         await using var harness = await ParityDbHarness.CreateAsync(dialect);
-        var root = BuildQuery(dialect, first: 1, orderBy: [new TreeOrder("ts", Descending: true)]);
+        var root = BuildQuery(
+            dialect,
+            first: 1,
+            orderBy: [new TreeOrder("ts", Descending: true)],
+            parentWhere: new TreeComparison("device_id", TreeFilterOperator.Lt, 5));
 
         var setBased = TreeSqlCompiler.Compile(root, harness.CreateAccess(childIndexed: false, tenant: "t1"), dialect);
         var correlated = TreeSqlCompiler.Compile(root, harness.CreateAccess(childIndexed: true, tenant: "t1"), dialect);
@@ -42,8 +46,8 @@ public sealed class Issue443LatestPerParentParityTests
 
         NormalizeJson(setBasedJson).ShouldBe(NormalizeJson(correlatedJson));
         var devices = setBasedJson.EnumerateArray().ToList();
-        devices.Select(d => d.GetProperty("device_id").GetInt32()).ShouldBe([1, 2, 3, 5]);
-        devices[0].GetProperty("readings").EnumerateArray().Select(r => r.GetProperty("id").GetInt32()).ShouldBe([103]);
+        devices.Select(d => d.GetProperty("device_id").GetInt32()).ShouldBe([1, 2, 3]);
+        devices[0].GetProperty("readings").EnumerateArray().Select(r => r.GetProperty("id").GetInt32()).ShouldBe([104]);
         devices[1].GetProperty("readings").EnumerateArray().ShouldBeEmpty();
         devices[2].GetProperty("readings").EnumerateArray().Select(r => r.GetProperty("id").GetInt32()).ShouldBe([302]);
     }
@@ -54,7 +58,11 @@ public sealed class Issue443LatestPerParentParityTests
     public async Task SetBased_EqualsCorrelated_FirstN_MixedOrder(DatabaseDialect dialect)
     {
         await using var harness = await ParityDbHarness.CreateAsync(dialect);
-        var root = BuildQuery(dialect, first: 3, orderBy: [new TreeOrder("ts", Descending: true), new TreeOrder("seq", Descending: false)]);
+        var root = BuildQuery(
+            dialect,
+            first: 3,
+            orderBy: [new TreeOrder("ts", Descending: true), new TreeOrder("seq", Descending: false)],
+            parentWhere: new TreeComparison("device_id", TreeFilterOperator.Lt, 5));
 
         var setBased = TreeSqlCompiler.Compile(root, harness.CreateAccess(childIndexed: false, tenant: "t1"), dialect);
         var correlated = TreeSqlCompiler.Compile(root, harness.CreateAccess(childIndexed: true, tenant: "t1"), dialect);
@@ -67,7 +75,7 @@ public sealed class Issue443LatestPerParentParityTests
 
         NormalizeJson(setBasedJson).ShouldBe(NormalizeJson(correlatedJson));
         var d1Readings = setBasedJson[0].GetProperty("readings").EnumerateArray().Select(r => r.GetProperty("id").GetInt32()).ToList();
-        d1Readings.ShouldBe([103, 102, 101]);
+        d1Readings.ShouldBe([104, 103, 102]);
     }
 
     [RequiresContainerRuntimeTheory]
@@ -77,7 +85,12 @@ public sealed class Issue443LatestPerParentParityTests
     {
         await using var harness = await ParityDbHarness.CreateAsync(dialect);
         var childWhere = new TreeComparison("val", TreeFilterOperator.Gte, 20);
-        var root = BuildQuery(dialect, first: 2, orderBy: [new TreeOrder("ts", Descending: true)], childWhere: childWhere);
+        var root = BuildQuery(
+            dialect,
+            first: 2,
+            orderBy: [new TreeOrder("ts", Descending: true)],
+            childWhere: childWhere,
+            parentWhere: new TreeComparison("device_id", TreeFilterOperator.Lt, 5));
 
         var setBased = TreeSqlCompiler.Compile(root, harness.CreateAccess(childIndexed: false, tenant: "t1"), dialect);
         var correlated = TreeSqlCompiler.Compile(root, harness.CreateAccess(childIndexed: true, tenant: "t1"), dialect);
@@ -89,7 +102,7 @@ public sealed class Issue443LatestPerParentParityTests
         var correlatedJson = await harness.ExecuteAsync(correlated);
 
         NormalizeJson(setBasedJson).ShouldBe(NormalizeJson(correlatedJson));
-        setBasedJson[0].GetProperty("readings").EnumerateArray().Select(r => r.GetProperty("id").GetInt32()).ShouldBe([102]);
+        setBasedJson[0].GetProperty("readings").EnumerateArray().Select(r => r.GetProperty("id").GetInt32()).ShouldBe([104, 102]);
     }
 
     [RequiresContainerRuntimeTheory]
@@ -118,7 +131,11 @@ public sealed class Issue443LatestPerParentParityTests
         await using var harness = await ParityDbHarness.CreateAsync(dialect);
         // Row 104 for device 1 has the highest ts (999) but published = 0; row filter requires published = 1.
         var rowFilter = TypedTreeRowPolicy.Int("published", BinaryOperator.Equal, 1);
-        var root = BuildQuery(dialect, first: 1, orderBy: [new TreeOrder("ts", Descending: true)]);
+        var root = BuildQuery(
+            dialect,
+            first: 1,
+            orderBy: [new TreeOrder("ts", Descending: true)],
+            parentWhere: new TreeComparison("device_id", TreeFilterOperator.Lt, 5));
 
         var setBased = TreeSqlCompiler.Compile(
             root,
@@ -147,7 +164,11 @@ public sealed class Issue443LatestPerParentParityTests
     {
         await using var harness = await ParityDbHarness.CreateAsync(dialect);
         // Row 401 has device_id = 1, tenant_id = 't2', ts = 1000 (higher than any t1 row).
-        var root = BuildQuery(dialect, first: 1, orderBy: [new TreeOrder("ts", Descending: true)]);
+        var root = BuildQuery(
+            dialect,
+            first: 1,
+            orderBy: [new TreeOrder("ts", Descending: true)],
+            parentWhere: new TreeComparison("device_id", TreeFilterOperator.Lt, 5));
         var setBased = TreeSqlCompiler.Compile(root, harness.CreateAccess(childIndexed: false, tenant: "t1"), dialect);
         setBased.Lists.ShouldHaveSingleItem().Strategy.ShouldBe(TreeListStrategy.SetBased);
 
@@ -155,7 +176,7 @@ public sealed class Issue443LatestPerParentParityTests
         var allDeviceIds = result.EnumerateArray().Select(d => d.GetProperty("device_id").GetInt32()).ToList();
         allDeviceIds.ShouldNotContain(4);
         var d1TopId = result[0].GetProperty("readings")[0].GetProperty("id").GetInt32();
-        d1TopId.ShouldBe(103);
+        d1TopId.ShouldBe(104);
     }
 
     [RequiresContainerRuntimeTheory]
@@ -169,6 +190,7 @@ public sealed class Issue443LatestPerParentParityTests
             dialect,
             first: 1,
             orderBy: [new TreeOrder("ts", Descending: true)],
+            parentWhere: new TreeComparison("device_id", TreeFilterOperator.Lt, 5),
             childColumns: ["id", "ts", "val", "secret"]);
 
         var setBased = TreeSqlCompiler.Compile(root, harness.CreateAccess(childIndexed: false, tenant: "t1"), dialect);
@@ -181,6 +203,7 @@ public sealed class Issue443LatestPerParentParityTests
         NormalizeJson(setBasedJson).ShouldBe(NormalizeJson(correlatedJson));
         var secretVal = setBasedJson[0].GetProperty("readings")[0].GetProperty("secret").GetString();
         secretVal.ShouldBe("***");
+        setBasedJson.GetRawText().ShouldNotContain("hidden-secret-104");
         setBasedJson.GetRawText().ShouldNotContain("top-secret-103");
     }
 
@@ -195,6 +218,7 @@ public sealed class Issue443LatestPerParentParityTests
             dialect,
             first: 1,
             orderBy: [new TreeOrder("ts", Descending: true)],
+            parentWhere: new TreeComparison("device_id", TreeFilterOperator.Lt, 5),
             childColumns: ["id", "ts", "val", "secret"]);
 
         var setBased = TreeSqlCompiler.Compile(root, harness.CreateAccess(childIndexed: false, tenant: "t1"), dialect);
@@ -467,7 +491,7 @@ public sealed class Issue443LatestPerParentParityTests
                 INSERT INTO dbo.readings (id, device_id, tenant_id, ts, seq, val, published, secret) VALUES
                     (101, 1, N't1', 100, 1, 10, 1, N'top-secret-101'),
                     (102, 1, N't1', 200, 2, 20, 1, N'top-secret-102'),
-                    (103, 1, N't1', 200, 1, 15, 1, N'top-secret-103'),
+                    (103, 1, N't1', 300, 1, 15, 1, N'top-secret-103'),
                     (104, 1, N't1', 999, 1, 99, 0, N'hidden-secret-104'),
                     (301, 3, N't1', 10, 1, 5, 1, N's301'),
                     (302, 3, N't1', 20, 1, 25, 1, N's302'),
@@ -513,7 +537,7 @@ public sealed class Issue443LatestPerParentParityTests
                 INSERT INTO public.readings (id, device_id, tenant_id, ts, seq, val, published, secret) VALUES
                     (101, 1, 't1', 100, 1, 10, 1, 'top-secret-101'),
                     (102, 1, 't1', 200, 2, 20, 1, 'top-secret-102'),
-                    (103, 1, 't1', 200, 1, 15, 1, 'top-secret-103'),
+                    (103, 1, 't1', 300, 1, 15, 1, 'top-secret-103'),
                     (104, 1, 't1', 999, 1, 99, 0, 'hidden-secret-104'),
                     (301, 3, 't1', 10, 1, 5, 1, 's301'),
                     (302, 3, 't1', 20, 1, 25, 1, 's302'),

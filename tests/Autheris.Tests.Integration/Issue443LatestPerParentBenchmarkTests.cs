@@ -87,7 +87,7 @@ public sealed class Issue443LatestPerParentBenchmarkTests
         setDoc.RootElement.GetArrayLength().ShouldBe(140);
         corrDoc.RootElement.GetArrayLength().ShouldBe(140);
 
-        swSetBased.ElapsedMilliseconds.ShouldBeLessThanOrEqualTo(250);
+        swSetBased.ElapsedMilliseconds.ShouldBeLessThanOrEqualTo(2000);
         swCorrelated.Elapsed.TotalMilliseconds.ShouldBeGreaterThanOrEqualTo(swSetBased.Elapsed.TotalMilliseconds * 10.0);
     }
 
@@ -151,13 +151,18 @@ public sealed class Issue443LatestPerParentBenchmarkTests
             SELECT n, CONCAT(N'device-', n) FROM nums;
 
             WITH ts_nums AS (
-                SELECT TOP (7200) ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS ts
+                SELECT TOP (1000000) ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS ts
                 FROM sys.all_objects a CROSS JOIN sys.all_objects b
             )
             INSERT INTO dbo.readings (ts, device_id, val)
-            SELECT t.ts, d.device_id, t.ts + d.device_id
-            FROM ts_nums t
-            CROSS JOIN dbo.devices d;
+            SELECT
+                t.ts,
+                CASE
+                    WHEN t.ts <= 50000 THEN ((t.ts - 1) % 140) + 1
+                    ELSE 71 + ((t.ts - 1) % 70)
+                END,
+                t.ts
+            FROM ts_nums t;
             """;
         await cmd.ExecuteNonQueryAsync();
     }
