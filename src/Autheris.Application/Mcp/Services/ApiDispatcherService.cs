@@ -40,6 +40,7 @@ public sealed class ApiDispatcherService : IApiDispatcherService
     private readonly ILogger<ApiDispatcherService>? _logger;
     private readonly TenantId? _catalogOwner;
     private readonly IReadPathSwitches? _switches;
+    private readonly GraphQLOptions _graphQlOptions;
 
     // 115 A-5: what each branch reaches. Without switches (direct construction) everything is allowed, as before.
     private bool DataBranchAllowed => _switches is null || (_switches.RestDataEndpointEnabled && _switches.IsGroupEnabled(McpToolGroup.Query));
@@ -57,6 +58,7 @@ public sealed class ApiDispatcherService : IApiDispatcherService
         IReadPathSwitches? switches = null)
     {
         _switches = switches;
+        _graphQlOptions = gatewayOptions?.Value.GraphQL ?? new GraphQLOptions();
         _catalogOwner = TenantResolver.EffectiveDefaultOf(gatewayOptions?.Value.Tenancy);
         _dataQueryService = dataQueryService;
         _catalogDiscoveryService = catalogDiscoveryService;
@@ -331,6 +333,9 @@ public sealed class ApiDispatcherService : IApiDispatcherService
         }
         return Task.FromResult(sb.ToString());
     }
+
+    public Task<string> GetQueryGuideDocumentationAsync(CancellationToken ct = default) =>
+        Task.FromResult(McpQueryGuideBuilder.Build(_switches, _graphQlOptions));
 
     private static object BuildEndpointDescription(string endpoint, string method, bool dataBranchAllowed)
     {

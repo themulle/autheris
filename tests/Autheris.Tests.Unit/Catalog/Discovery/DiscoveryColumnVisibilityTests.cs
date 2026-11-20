@@ -372,6 +372,7 @@ public sealed class DiscoveryColumnVisibilityTests
         public Task<string> GetOpenApiJsonAsync(CancellationToken ct = default) => throw new NotSupportedException();
         public Task<string> GetEndpointsDocumentationAsync(CancellationToken ct = default) => throw new NotSupportedException();
         public Task<string> GetMcpToolsDocumentationAsync(CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<string> GetQueryGuideDocumentationAsync(CancellationToken ct = default) => throw new NotSupportedException();
     }
 
     private sealed class UnusedLineageGraphStore : ILineageGraphStore
