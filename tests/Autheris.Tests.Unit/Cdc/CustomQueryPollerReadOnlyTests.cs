@@ -17,8 +17,8 @@ using Autheris.Application.Streaming.Validation;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
-using Autheris.Extensions.Cdc;
-using Autheris.Extensions.Cdc.CustomQuery;
+using Autheris.Infrastructure.Streaming.Producers;
+using Autheris.Infrastructure.Streaming.Producers.CustomQuery;
 using Autheris.Infrastructure.Streaming;
 using Autheris.Tests.Common;
 using Autheris.Tests.Common.Fakes;
@@ -91,6 +91,24 @@ public sealed class CustomQueryPollerReadOnlyTests
             gatewayOptions: gatewayOptions,
             validator: validator ?? new CustomQueryPollerValidator(FastSqlEngine.Default),
             tableMetadataRepository: metadataRepository);
+    }
+
+    [Theory]
+    [InlineData("DELETE FROM customers WHERE id > @p_wm_id")]
+    [InlineData("UPDATE customers SET name = NULL WHERE id > @p_wm_id")]
+    public async Task Streaming_producers_move_keeps_read_only_poller_guard(string query)
+    {
+        typeof(CustomQueryPollerService).Namespace.ShouldBe("Autheris.Infrastructure.Streaming.Producers.CustomQuery");
+
+        var poller = ValidPoller("src", query);
+        var monitor = new MutableOptionsMonitor<CustomQueryPollerOptions>(new CustomQueryPollerOptions { Enabled = true, Pollers = [poller] });
+        var gateway = CreateGatewayMonitor("src", "PostgreSql", "Host=localhost");
+        var factory = new StubDataSourceFactory(_ => throw new InvalidOperationException("must not be called"));
+
+        using var service = CreateService(monitor, factory, gateway);
+
+        await Should.ThrowAsync<GovernedCdcConfigurationException>(() => service.PollStreamBatchAsync(poller, fencingToken: 1));
+        factory.CallCount.ShouldBe(0);
     }
 
     [Theory]

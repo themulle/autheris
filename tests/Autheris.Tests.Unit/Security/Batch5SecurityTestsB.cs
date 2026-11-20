@@ -689,6 +689,7 @@ public sealed class Batch5SecurityTestsB : IDisposable
 
         var services = new ServiceCollection();
         services.AddLogging();
+        services.AddSingleton<Autheris.Modules.Abstractions.IModuleRequestContext, Autheris.Api.Hosting.ModuleRequestContext>();
         services.AddSingleton(Options.Create(options));
         services.AddSingleton(store);
         services.AddSingleton(protector);

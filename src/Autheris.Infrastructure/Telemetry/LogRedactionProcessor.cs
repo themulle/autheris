@@ -121,6 +121,11 @@ public sealed class LogRedactionProcessor : BaseProcessor<LogRecord>
                key.Contains("token", StringComparison.OrdinalIgnoreCase) ||
                key.Contains("password", StringComparison.OrdinalIgnoreCase) ||
                key.Contains("secret", StringComparison.OrdinalIgnoreCase) ||
+               key.Contains("apikey", StringComparison.OrdinalIgnoreCase) ||
+               key.Contains("api-key", StringComparison.OrdinalIgnoreCase) ||
+               key.Contains("api_key", StringComparison.OrdinalIgnoreCase) ||
+               key.Contains("signing", StringComparison.OrdinalIgnoreCase) ||
+               key.Contains("kek", StringComparison.OrdinalIgnoreCase) ||
                key.Contains("authorization", StringComparison.OrdinalIgnoreCase) ||
                key.Contains("cookie", StringComparison.OrdinalIgnoreCase) ||
                key.Contains("header", StringComparison.OrdinalIgnoreCase) ||

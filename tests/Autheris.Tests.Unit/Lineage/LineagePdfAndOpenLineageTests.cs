@@ -17,6 +17,7 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Extensions.Lineage;
 using Autheris.Infrastructure.Lineage;
+using Autheris.Modules.Lineage.Domain;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -92,13 +93,10 @@ public class LineagePdfAndOpenLineageTests
 
         var httpClient = new HttpClient(mockHandler);
         var graphStore = Substitute.For<ILineageGraphStore>();
-        var options = Options.Create(new GatewayOptions
+        var options = Options.Create(new LineageModuleOptions
         {
-            Catalog = new DataCatalogOptions
-            {
-                OpenLineageEndpoint = "https://openlineage.internal/api/v1/lineage",
-                OpenLineageApiKey = "api-token-test"
-            }
+            OpenLineageEndpoint = "https://openlineage.internal/api/v1/lineage",
+            OpenLineageApiKey = "api-token-test"
         });
 
         var client = new OpenLineageClient(httpClient, graphStore, options, NullLogger<OpenLineageClient>.Instance);
