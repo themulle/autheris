@@ -50,10 +50,10 @@ public static class DatabricksOboAuthority
         }
 
         var raw = authority.Trim();
-        if (raw.IndexOfAny(['?', '#', '@', '\\']) >= 0 || HasWhitespaceOrControl(raw))
+        if (raw.IndexOfAny(['?', '#', '@', '\\', '%']) >= 0 || HasWhitespaceOrControl(raw))
         {
             tokenEndpoint = null;
-            error = "must not contain whitespace, backslashes, userinfo, query parameters, or fragments.";
+            error = "must not contain whitespace, percent-encoding, backslashes, userinfo, query parameters, or fragments.";
             return false;
         }
 
@@ -102,16 +102,36 @@ public static class DatabricksOboAuthority
             return false;
         }
 
-        // uri.AbsolutePath always begins with '/'. Require exactly one non-empty tenant segment.
-        var path = uri.AbsolutePath;
-        if (path.Length <= 1)
+        // Extract the raw path directly from normalizedInput so dot-segment collapsing or percent-decoding cannot hide traversal.
+        var schemeSep = normalizedInput.IndexOf("://", StringComparison.Ordinal);
+        var pathStart = schemeSep >= 0 ? normalizedInput.IndexOf("/", schemeSep + 3, StringComparison.Ordinal) : -1;
+        if (pathStart < 0)
         {
             tokenEndpoint = null;
             error = "must include a single tenant path segment.";
             return false;
         }
 
-        var segments = path[1..].Split('/');
+        var rawPath = normalizedInput[pathStart..];
+        if (rawPath.Contains("/./", StringComparison.Ordinal) ||
+            rawPath.Contains("/../", StringComparison.Ordinal) ||
+            rawPath.EndsWith("/.", StringComparison.Ordinal) ||
+            rawPath.EndsWith("/..", StringComparison.Ordinal) ||
+            !string.Equals(rawPath, uri.AbsolutePath, StringComparison.Ordinal))
+        {
+            tokenEndpoint = null;
+            error = "must contain a normalized single tenant path segment without dot-segments or path rewriting.";
+            return false;
+        }
+
+        if (rawPath.Length <= 1)
+        {
+            tokenEndpoint = null;
+            error = "must include a single tenant path segment.";
+            return false;
+        }
+
+        var segments = rawPath[1..].Split('/');
         if (segments.Length != 1 || !IsValidTenantSegment(segments[0]))
         {
             tokenEndpoint = null;

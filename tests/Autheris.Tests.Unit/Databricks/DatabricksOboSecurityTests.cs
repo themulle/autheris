@@ -380,6 +380,7 @@ public sealed class DatabricksOboSecurityTests
     [InlineData("https://evil.example/t", null)]
     [InlineData("http://login.microsoftonline.com/t", null)]
     [InlineData("https://login.microsoftonline.com/t?x=1", null)]
+    [InlineData("https://login.microsoftonline.com/a/%2e%2e/t", null)]
     [InlineData(null, "t/../../evil")]
     [Trait("Category", "Security")]
     public async Task Obo_UntrustedAuthority_NoHttpRequestSent(string? authority, string? tenantId)
