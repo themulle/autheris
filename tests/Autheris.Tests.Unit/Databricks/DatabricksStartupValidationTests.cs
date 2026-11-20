@@ -155,7 +155,123 @@ public sealed class DatabricksStartupValidationTests
         };
 
         Should.Throw<ValidationException>(() => GatewayStartupValidator.ValidateDatabricks(broken, Env("Production")))
-            .Message.ShouldContain("ClientSecretRef or ClientCertificateRef");
+            .Message.ShouldContain("Auth.Obo.ClientSecretRef is required");
+    }
+
+    [Theory]
+    [InlineData("http://login.microsoftonline.com/t", null)]
+    [InlineData("https://evil.example/t", null)]
+    [InlineData("https://login.microsoftonline.com/t?x=1", null)]
+    [InlineData("https://login.microsoftonline.com/t/extra", null)]
+    [InlineData(null, "t/../../evil")]
+    [Trait("Category", "Security")]
+    public void Obo_UntrustedAuthority_FailsStartup(string? authority, string? tenantId)
+    {
+        var options = Options(DatabricksAuthMode.OAuthObo, extra: conns =>
+        {
+            var c = conns["dbx"];
+            conns["dbx"] = new DataSourceConnectionOptions
+            {
+                Provider = c.Provider,
+                CommandTimeoutSeconds = c.CommandTimeoutSeconds,
+                Databricks = new DatabricksDataSourceOptions
+                {
+                    Host = c.Databricks!.Host,
+                    WarehouseId = c.Databricks.WarehouseId,
+                    Auth = new DatabricksAuthOptions
+                    {
+                        Mode = DatabricksAuthMode.OAuthObo,
+                        Obo = new DatabricksOboOptions
+                        {
+                            TenantId = tenantId,
+                            ClientId = "obo-id",
+                            ClientSecretRef = "kv://dbx-obo-secret",
+                            Authority = authority,
+                            Scopes = "2ff814a6-3304-4ab8-85cb-cd0e6f879c1d/.default"
+                        }
+                    }
+                }
+            };
+        });
+
+        var ex = Should.Throw<ValidationException>(() => GatewayStartupValidator.ValidateDatabricks(options, Env("Production")));
+        ex.Message.ShouldContain("Auth.Obo.Authority");
+    }
+
+    [Theory]
+    [InlineData("kv://dbx-obo-cert", null)]
+    [InlineData("kv://dbx-obo-cert", "kv://dbx-obo-secret")]
+    [Trait("Category", "Security")]
+    public void Obo_ClientCertificateRef_FailsStartup(string certRef, string? secretRef)
+    {
+        var options = Options(DatabricksAuthMode.OAuthObo, extra: conns =>
+        {
+            var c = conns["dbx"];
+            conns["dbx"] = new DataSourceConnectionOptions
+            {
+                Provider = c.Provider,
+                CommandTimeoutSeconds = c.CommandTimeoutSeconds,
+                Databricks = new DatabricksDataSourceOptions
+                {
+                    Host = c.Databricks!.Host,
+                    WarehouseId = c.Databricks.WarehouseId,
+                    Auth = new DatabricksAuthOptions
+                    {
+                        Mode = DatabricksAuthMode.OAuthObo,
+                        Obo = new DatabricksOboOptions
+                        {
+                            TenantId = "tenant-123",
+                            ClientId = "obo-id",
+                            ClientSecretRef = secretRef,
+#pragma warning disable CS0618
+                            ClientCertificateRef = certRef,
+#pragma warning restore CS0618
+                            Scopes = "2ff814a6-3304-4ab8-85cb-cd0e6f879c1d/.default"
+                        }
+                    }
+                }
+            };
+        });
+
+        var ex = Should.Throw<ValidationException>(() => GatewayStartupValidator.ValidateDatabricks(options, Env("Production")));
+        ex.Message.ShouldContain("ClientCertificateRef");
+    }
+
+    [Theory]
+    [InlineData("Production", null)]
+    [InlineData("Production", "")]
+    [InlineData("Development", "   ")]
+    [Trait("Category", "Security")]
+    public void Obo_MissingClientSecretRef_FailsStartup(string envName, string? secretRef)
+    {
+        var options = Options(DatabricksAuthMode.OAuthObo, extra: conns =>
+        {
+            var c = conns["dbx"];
+            conns["dbx"] = new DataSourceConnectionOptions
+            {
+                Provider = c.Provider,
+                CommandTimeoutSeconds = c.CommandTimeoutSeconds,
+                Databricks = new DatabricksDataSourceOptions
+                {
+                    Host = c.Databricks!.Host,
+                    WarehouseId = c.Databricks.WarehouseId,
+                    Auth = new DatabricksAuthOptions
+                    {
+                        Mode = DatabricksAuthMode.OAuthObo,
+                        Obo = new DatabricksOboOptions
+                        {
+                            TenantId = "tenant-123",
+                            ClientId = "obo-id",
+                            ClientSecretRef = secretRef,
+                            Scopes = "2ff814a6-3304-4ab8-85cb-cd0e6f879c1d/.default"
+                        }
+                    }
+                }
+            };
+        });
+
+        var ex = Should.Throw<ValidationException>(() => GatewayStartupValidator.ValidateDatabricks(options, Env(envName)));
+        ex.Message.ShouldContain("ClientSecretRef");
     }
 
     [Fact]
