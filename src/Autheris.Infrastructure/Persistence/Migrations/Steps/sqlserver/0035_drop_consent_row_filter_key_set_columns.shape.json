@@ -1,0 +1,7 @@
+{
+  "ops": [
+    { "op": "dropColumn", "table": "CONSENT_ROW_FILTERS", "name": "key_set_strategy" },
+    { "op": "dropColumn", "table": "CONSENT_ROW_FILTERS", "name": "key_set_duration_seconds" },
+    { "op": "dropColumn", "table": "CONSENT_ROW_FILTERS", "name": "key_set_max_keys" }
+  ]
+}

@@ -150,6 +150,34 @@ public sealed class ReadOnlyReadSessionTests
     }
 
     [Fact]
+    public async Task Select_runs_in_rolled_back_transaction_on_sql_server()
+    {
+        var (executor, backend) = CreateExecutor("SqlServer");
+        var compiled = CompiledSelect(TargetSqlDialect.SqlServer, "SELECT [id] FROM [orders]");
+
+        await executor.ExecuteRewrittenAsync(
+            new GovernedSqlQueryRequest("SELECT id FROM orders"),
+            Caller(),
+            new TenantId(Tenant),
+            new GovernedRewrite(compiled, [], DataSource),
+            new DmlAuditContext(),
+            new Dictionary<string, object?>(),
+            static (_, _, _) => Task.CompletedTask,
+            CancellationToken.None);
+
+        var rental = backend.Rentals.ShouldHaveSingleItem();
+        rental.Commands.Count.ShouldBe(2);
+        rental.Commands[0].Sql.ShouldContain("sys.sp_set_session_context");
+        rental.Commands[0].HasTransaction.ShouldBeTrue();
+        rental.Commands[1].Sql.ShouldBe("SELECT [id] FROM [orders]");
+        rental.Commands[1].HasTransaction.ShouldBeTrue();
+
+        rental.RollbackHappenedBeforeConnectionClose.ShouldBeTrue();
+        rental.Transactions.ShouldHaveSingleItem().CommitCount.ShouldBe(0);
+        rental.Transactions[0].RollbackCount.ShouldBe(1);
+    }
+
+    [Fact]
     public async Task Select_runs_in_read_only_transaction_on_oracle()
     {
         var (executor, backend) = CreateExecutor("Oracle");

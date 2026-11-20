@@ -83,7 +83,6 @@ EpochValidationOptions,PipelinedMGetEnabled,true,False,keep opt-in,SEC-SIMPL-32 
 RedisOptions,Enabled,false,False,keep opt-in,R13 default-off opt-in switch of kept feature,PR 5,src/Autheris.Domain/Options/Storage/RedisOptions.cs
 TableCacheEncryptionOptions,Enabled,true,False,keep opt-in,SEC-SIMPL-32 table cache encryption control,PR 5,src/Autheris.Domain/Options/TableCache/TableCacheEncryptionOptions.cs
 TableCacheOptions,Enabled,false,False,keep opt-in,R13 default-off opt-in switch of kept feature,PR 5,src/Autheris.Domain/Options/TableCache/TableCacheOptions.cs
-AsyncJobOptions,Enabled,true,False,unconditional,Default-on async jobs; remove flag and make unconditional,PR 3,src/Autheris.Domain/Options/Tenancy/MultiTenancyOptions.cs
 SchemaContractsOptions,Enabled,false,False,keep opt-in,R13 default-off opt-in switch of kept feature,PR 3,src/Autheris.Domain/Options/Tenancy/MultiTenancyOptions.cs
 TenantRegistryOptions,Enabled,true,False,keep opt-in,SEC-SIMPL-32 tenant registry security control,PR 3,src/Autheris.Domain/Options/Tenancy/MultiTenancyOptions.cs
 VirtualFilterFederationOptions,PushdownEnabled,true,False,unconditional,Default-on virtual filter pushdown; remove flag and make unconditional,PR 5,src/Autheris.Domain/Options/VirtualFilterFederationOptions.cs

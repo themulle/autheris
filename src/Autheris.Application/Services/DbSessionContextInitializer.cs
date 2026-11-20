@@ -104,7 +104,24 @@ public sealed class DbSessionContextInitializer : IDbSessionContextInitializer
 
         if (dialect == DatabaseDialect.SqlServer)
         {
-            // SQL Server relies on read-only login / privilege isolation (no SET TRANSACTION READ ONLY).
+            if (accessMode == AccessMode.ReadOnly)
+            {
+                // SQL Server has no SET TRANSACTION READ ONLY; wrap user reads in an explicit transaction
+                // (rolled back unconditionally by the caller before the connection returns to the pool)
+                // alongside read-only login / privilege isolation.
+                var tx = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
+                try
+                {
+                    await ExecuteSqlServerInitAsync(connection, tx, tenantId, userSid, purpose, ct).ConfigureAwait(false);
+                    return tx;
+                }
+                catch
+                {
+                    await RollbackAndDisposeQuietlyAsync(tx).ConfigureAwait(false);
+                    throw;
+                }
+            }
+
             await ExecuteSqlServerInitAsync(connection, tx: null, tenantId, userSid, purpose, ct).ConfigureAwait(false);
             return null;
         }

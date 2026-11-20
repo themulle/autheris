@@ -6,15 +6,27 @@ public sealed class RateLimitingOptions
 {
     [Required] public PreAuthIpRateLimitOptions PreAuthIpRateLimit { get; init; } = new();
     [Required] public PostAuthSidRateLimitOptions PostAuthSidRateLimit { get; init; } = new();
+
+    /// <summary>Per-role, per-scope and per-API-key client tier rate limit overrides (<c>Gateway:RateLimiting:ClientTiers</c>).</summary>
     public ClientTierOptions ClientTiers { get; init; } = new();
 }
 
+/// <summary>Client tier rate limit definitions and mappings.</summary>
 public sealed class ClientTierOptions
 {
+    /// <summary>Named rate limit tier overrides keyed by tier name.</summary>
     public Dictionary<string, ClientTierLimitOverride> TierLimits { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Mapping from gateway role names to client rate-limit tier names.</summary>
     public Dictionary<string, string> RoleTierMappings { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Mapping from API key identifiers to client rate-limit tier names.</summary>
     public Dictionary<string, string> ApiKeys { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Mapping from OAuth scope names to client rate-limit tier names.</summary>
     public Dictionary<string, string> ScopeTierMappings { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Direct rate-limit overrides keyed by OAuth scope name.</summary>
     public Dictionary<string, ClientTierLimitOverride> ScopeLimits { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
@@ -35,6 +47,8 @@ public sealed class PreAuthIpRateLimitOptions
 {
     [Range(1, 100000)] public int PermitLimit { get; init; } = 100;
     [Range(1, 3600)] public int WindowSeconds { get; init; } = 60;
+
+    /// <summary>Maximum number of queued pre-auth requests permitted when the IP bucket is exhausted.</summary>
     public int QueueLimit { get; init; }
 
     /// <summary>
