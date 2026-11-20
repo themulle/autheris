@@ -377,7 +377,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
             }
         }
 
-        var pendingModelUpdates = new List<(TableMetadata Metadata, IReadOnlyList<string> Tags, IReadOnlyList<IReadOnlyDictionary<string, object?>>? SyntheticSamples)>();
+        var pendingModelUpdates = new List<PendingModelUpdate>();
         var pendingGoldenQueries = new List<(TableMetadata Metadata, DbtGoldenQueryMeta Meta)>();
         foreach (var model in models)
         {
@@ -412,9 +412,12 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                 continue;
             }
 
+            var createdInThisRun = false;
             if (existingMeta == null && !metadataUnavailable && _gatewayOptions?.Value is { } gatewayValue)
             {
+                var createdCountBefore = creation.Created.Count;
                 existingMeta = await TryRegisterMissingTableAsync(model, tableId, gatewayValue, dryRun, creation, warnings, caller.IsClusterAdmin, ct).ConfigureAwait(false);
+                createdInThisRun = creation.Created.Count > createdCountBefore;
             }
 
             if (existingMeta != null)
@@ -674,7 +677,20 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
 
                     if (!dryRun)
                     {
-                        pendingModelUpdates.Add((updatedMetadata, model.Tags, model.SyntheticSamples));
+                        var upsertMetadata = !IsTableMetadataUnchanged(existingMeta, updatedMetadata);
+                        var syncClassifications = createdInThisRun || upsertMetadata;
+                        var importTags = createdInThisRun || model.Tags.Count > 0 || existingMeta.CatalogTags.Count > 0;
+                        var hasSyntheticSamples = model.SyntheticSamples is { Count: > 0 };
+                        if (upsertMetadata || syncClassifications || importTags || hasSyntheticSamples)
+                        {
+                            pendingModelUpdates.Add(new PendingModelUpdate(
+                                updatedMetadata,
+                                model.Tags,
+                                model.SyntheticSamples,
+                                upsertMetadata,
+                                syncClassifications,
+                                importTags));
+                        }
                         if (model.GoldenQueries is { } goldenMeta)
                         {
                             pendingGoldenQueries.Add((updatedMetadata, goldenMeta));
