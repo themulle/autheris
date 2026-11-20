@@ -113,6 +113,33 @@ public interface ITableMetadataRepository : Autheris.Application.Catalog.ICatalo
     }
 
     /// <summary>
+    /// Inserts <paramref name="metadata"/> only when no table with the same identifier exists yet.
+    /// When the table already exists, returns the persisted entry unchanged with
+    /// <see cref="Autheris.Application.Catalog.CatalogUpsertKind.Unchanged"/> without overwriting any existing columns,
+    /// sensitivity, activation state, masking rules, or consents.
+    /// </summary>
+    async Task<Autheris.Application.Catalog.CatalogTableUpsertResult> InsertTableMetadataIfAbsentAsync(
+        TableMetadata metadata,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(metadata);
+        var existing = await GetTableMetadataAsync(metadata.Identifier, ct).ConfigureAwait(false);
+        if (existing is not null)
+        {
+            return new Autheris.Application.Catalog.CatalogTableUpsertResult(
+                existing,
+                Autheris.Application.Catalog.CatalogUpsertKind.Unchanged,
+                Autheris.Application.Catalog.CatalogWriteClassification.Unchanged);
+        }
+
+        var stored = await UpsertTableMetadataAsync(metadata, ct).ConfigureAwait(false);
+        return new Autheris.Application.Catalog.CatalogTableUpsertResult(
+            stored,
+            Autheris.Application.Catalog.CatalogUpsertKind.Created,
+            Autheris.Application.Catalog.CatalogWriteClassification.Additive);
+    }
+
+    /// <summary>
     /// Validates and upserts a batch of table metadata entries using parameter-budget chunking, deterministic lock ordering,
     /// per-chunk transactions, persisted-state change classification, and transient conflict retries.
     /// </summary>
@@ -735,5 +762,40 @@ public static class TableMetadataRepositoryExtensions
         }
 
         return fallback;
+    }
+
+    /// <summary>
+    /// Calls <see cref="ITableMetadataRepository.InsertTableMetadataIfAbsentAsync"/> and falls back to
+    /// <see cref="ITableMetadataRepository.GetTableMetadataAsync"/> + <see cref="ITableMetadataRepository.UpsertTableMetadataAsync"/>
+    /// only when an unconfigured mock returns <see langword="null"/>.
+    /// </summary>
+    public static async Task<Autheris.Application.Catalog.CatalogTableUpsertResult> InsertTableMetadataIfAbsentWithFallbackAsync(
+        this ITableMetadataRepository repository,
+        TableMetadata metadata,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(repository);
+        ArgumentNullException.ThrowIfNull(metadata);
+
+        var result = await repository.InsertTableMetadataIfAbsentAsync(metadata, ct).ConfigureAwait(false);
+        if (result is not null)
+        {
+            return result;
+        }
+
+        var existing = await repository.GetTableMetadataAsync(metadata.Identifier, ct).ConfigureAwait(false);
+        if (existing is not null)
+        {
+            return new Autheris.Application.Catalog.CatalogTableUpsertResult(
+                existing,
+                Autheris.Application.Catalog.CatalogUpsertKind.Unchanged,
+                Autheris.Application.Catalog.CatalogWriteClassification.Unchanged);
+        }
+
+        var stored = await repository.UpsertTableMetadataAsync(metadata, ct).ConfigureAwait(false);
+        return new Autheris.Application.Catalog.CatalogTableUpsertResult(
+            stored,
+            Autheris.Application.Catalog.CatalogUpsertKind.Created,
+            Autheris.Application.Catalog.CatalogWriteClassification.Additive);
     }
 }

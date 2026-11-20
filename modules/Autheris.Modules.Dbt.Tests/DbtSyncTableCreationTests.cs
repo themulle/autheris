@@ -256,6 +256,51 @@ public sealed class DbtSyncTableCreationTests
     }
 
     [Fact]
+    [Trait("Category", "Security")]
+    public async Task Sec282_5_ConcurrentInsertWinnerPreserved_InsertIfAbsentUnchangedDoesNotOverwrite()
+    {
+        var h = new Harness(Options());
+        var id = new TableIdentifier("warehouse", "public", "orders");
+        var concurrentWinner = new TableMetadata
+        {
+            Identifier = id,
+            Table = new Table
+            {
+                Id = Guid.NewGuid(),
+                SourceName = "warehouse",
+                SchemaName = "public",
+                TableName = "orders",
+                Sensitivity = "HIGH",
+                IsActive = true
+            },
+            Columns = [new TableColumn { ColumnName = "id", DataType = "int" }]
+        };
+
+        // Initial GetTableMetadataAsync returns null (not yet present), then InsertTableMetadataIfAbsentAsync
+        // sees a concurrent writer won the race and returns Unchanged with the existing entry.
+        h.Repo.InsertTableMetadataIfAbsentAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                h.Store[id.ToString()] = concurrentWinner;
+                return new Autheris.Application.Catalog.CatalogTableUpsertResult(
+                    concurrentWinner,
+                    Autheris.Application.Catalog.CatalogUpsertKind.Unchanged,
+                    Autheris.Application.Catalog.CatalogWriteClassification.Unchanged);
+            });
+
+        var result = await Sync(h.Service, Manifest(Model()));
+
+        result.CreatedTables.ShouldBeEmpty();
+        result.SkippedItems.ShouldBeEmpty();
+        await h.Repo.Received(1).InsertTableMetadataIfAbsentAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>());
+        await h.Repo.DidNotReceive().UpsertTableMetadataAsync(
+            Arg.Is<TableMetadata>(m => !m.Table.IsActive || m.Table.Sensitivity != "HIGH"),
+            Arg.Any<CancellationToken>());
+        h.Store[id.ToString()].Table.IsActive.ShouldBeTrue();
+        h.Store[id.ToString()].Table.Sensitivity.ShouldBe("HIGH");
+    }
+
+    [Fact]
     public async Task Sync_SecondRun_CreatesNothingAndKeepsIsActiveAndSensitivity()
     {
         var h = new Harness(Options());

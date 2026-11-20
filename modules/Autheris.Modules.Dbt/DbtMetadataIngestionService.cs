@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Text.Json;
 using Autheris.Application.Audit;
+using Autheris.Application.Catalog;
 using Autheris.Application.Catalog.Services;
 using Autheris.Application.Catalog.Semantic;
 using Autheris.Application.Common.Interfaces;
@@ -855,27 +856,25 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
 
         try
         {
-            // last read before the write; an entry that appeared meanwhile keeps its governance fields.
-            var current = await _metadataRepository.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
-            if (current != null)
+            var upsertResult = await _metadataRepository.InsertTableMetadataIfAbsentWithFallbackAsync(built, ct).ConfigureAwait(false);
+            if (upsertResult.Kind != CatalogUpsertKind.Created)
             {
-                if (OwnsEntry(current.Table, model))
+                if (OwnsEntry(upsertResult.Metadata.Table, model))
                 {
-                    return current;
+                    return upsertResult.Metadata;
                 }
 
                 RejectCollision(run, model, warnings);
                 return null;
             }
 
-            var persisted = await _metadataRepository.UpsertTableMetadataAsync(built, ct).ConfigureAwait(false);
             run.Created.Add(displayName);
             if (options.Dbt.ActivateNewTables)
             {
                 warnings.Add($"Table '{displayName}': registered active without masks or consents (Dbt:ActivateNewTables is enabled).");
             }
 
-            return persisted ?? built;
+            return upsertResult.Metadata ?? built;
         }
         catch (TableMetadataUnavailableException)
         {

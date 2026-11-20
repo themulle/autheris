@@ -272,6 +272,23 @@ public sealed class Issues236And237GovernanceHotfixTests
         rowCount.ShouldBe(1010);
     }
 
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Gql16_CountResultRows_JsonDocument_CountsNestedRows()
+    {
+        using var doc = System.Text.Json.JsonDocument.Parse("""
+            {
+              "customers": [
+                { "id": 1, "orders": [ { "id": 10 }, { "id": 11 } ] },
+                { "id": 2, "orders": [ { "id": 12 } ] }
+              ]
+            }
+            """);
+
+        var rowCount = CostAndQuotaMiddleware.CountResultRows(doc);
+        rowCount.ShouldBe(5);
+    }
+
     // =========================================================================
     // Issue #237 WP-237-4: Query Analysis rowsPerRequest, requests & secondsAtCurrentBucket
     // =========================================================================
