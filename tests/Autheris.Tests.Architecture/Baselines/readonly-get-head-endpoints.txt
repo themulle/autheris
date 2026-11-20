@@ -34,7 +34,6 @@
 /api/v1/catalog/datasets/{*datasetId}|GET|no side effect: reads catalog dataset metadata
 /api/v1/catalog/datasets/{dataset}/sample-rows|GET|no side effect: reads governed sample rows for dataset
 /api/v1/catalog/datasets/{id}/catalog-settings|GET|no side effect: reads dataset catalog settings
-/api/v1/catalog/datasets/{id}/row-filter-strategy|GET|no side effect: reads dataset row filter strategy
 /api/v1/catalog/datasets/{id}/samples|GET|no side effect: reads uploaded non-sensitive discovery sample rows
 /api/v1/catalog/datasets|GET|no side effect: lists catalog datasets
 /api/v1/catalog/datasources|GET|no side effect: lists catalog datasources
@@ -76,7 +75,6 @@
 /api/v1/governance/contracts|GET|no side effect: lists data contracts
 /api/v1/governance/effective-filters|GET|no side effect: reads effective row filters
 /api/v1/governance/grants|GET|no side effect: lists governance grants
-/api/v1/governance/row-filters/{id}/evaluation|GET|no side effect: previews row filter evaluation
 /api/v1/governance/virtual-filters/sync/status|GET|no side effect: reads virtual filter sync status
 /api/v1/governance/virtual-filters|GET|no side effect: lists virtual filters
 /api/v1/jobs/{jobId}/result|GET|no side effect: streams completed async query job result

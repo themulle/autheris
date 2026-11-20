@@ -162,3 +162,8 @@ Step `0031_access_profile_items` moves the masking mode and the target tables of
 - Individual `Allow` policies (`User`, `ServicePrincipal`) with a `Clear` column rule or on a sensitive table are refused with `400 INDIVIDUAL_GRANT_REQUIRES_FOUR_EYES`, because a manifest carries no approvals.
 
 Details and an example manifest: [F-GOV-15, Apply Semantics](../features/f-gov-15-declarative-consents-scopes.md#apply-semantics).
+
+### Removal of consent row filter key-set cache (`Gateway:RowFilters:KeySetCache`)
+
+- `Gateway:RowFilters:KeySetCache` (and `Gateway:DataSources:Connections:*:KeySetCacheAllowed`) was removed as part of key-set consolidation onto row policies (`VirtualFilter.EvaluationMode = KeySet`, `KeySetMaxAge`, `KeySetMaxKeys`, and `Gateway:VirtualFilters:Federation:*`). Setting any key under `Gateway:RowFilters:KeySetCache` fails startup.
+- `Gateway:SqlEndpoints:MaxQueryTimeoutSeconds` was removed (unconsumed; SQL endpoints execute via `GovernedSqlExecutionService` using `Gateway:WebSql:ExecutionTimeoutSeconds`).

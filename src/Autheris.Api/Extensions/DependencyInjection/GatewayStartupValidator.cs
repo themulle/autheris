@@ -251,11 +251,6 @@ public static class GatewayStartupValidator
             // Issue #238: EnforcementMode cross-validation
             if (connection.EnforcementMode is EnforcementMode.Delegated or EnforcementMode.DelegatedDefenceInDepth)
             {
-                if (connection.KeySetCacheAllowed)
-                {
-                    throw new ValidationException($"Security violation (SEC-RF107-01 / SEC-OBO238-04): Databricks data source '{name}' has EnforcementMode = '{connection.EnforcementMode}', but KeySetCacheAllowed is true. KeySetCacheAllowed must be false for delegated enforcement to prevent cross-user tenant cache pollution.");
-                }
-
                 if (db.Auth.Mode != DatabricksAuthMode.OAuthObo)
                 {
                     throw new ValidationException($"Security violation (SEC-SIMPL-96 / SEC-OBO238-04): Databricks data source '{name}' has EnforcementMode = '{connection.EnforcementMode}', but Auth.Mode is '{db.Auth.Mode}'. Delegated enforcement requires Auth.Mode = OAuthObo.");

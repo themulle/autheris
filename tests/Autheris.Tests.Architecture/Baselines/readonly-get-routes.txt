@@ -19,7 +19,6 @@ src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs|/api/governance/principals
 src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs|/datasets
 src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs|/datasets/{*datasetId}
 src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs|/datasets/{id}/catalog-settings
-src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs|/datasets/{id}/row-filter-strategy
 src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs|/datasets/{id}/samples
 src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs|/datasources
 src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs|/domains
@@ -64,7 +63,6 @@ src/Autheris.Api/Endpoints/GovernanceEndpoints.Audit.cs|/api/governance/gdpr/exp
 src/Autheris.Api/Endpoints/GovernanceEndpoints.Audit.cs|/api/governance/sunsetting/rules
 src/Autheris.Api/Endpoints/GovernanceEndpoints.Audit.cs|/api/v1/governance/audit
 src/Autheris.Api/Endpoints/GovernanceEndpoints.Audit.cs|/api/v1/governance/grants
-src/Autheris.Api/Endpoints/GovernanceEndpoints.RowFilterEvaluation.cs|/api/v1/governance/row-filters/{id}/evaluation
 src/Autheris.Api/Endpoints/GovernanceEndpoints.cs|/api/v1/profiles
 src/Autheris.Api/Endpoints/GovernanceEndpoints.cs|/api/v1/profiles/{id}
 src/Autheris.Api/Endpoints/GovernancePlanEndpoints.cs|/api/governance/plans/{planId}

@@ -149,14 +149,6 @@ public interface ITableMetadataRepository : Autheris.Application.Catalog.ICatalo
         => Task.FromResult(new Autheris.Application.Catalog.CatalogVersion(1, 1));
 
     /// <summary>
-    /// Issue #107: upserts the object-level row filter evaluation settings (null deletes the row) in TABLE_ROW_FILTER_STRATEGIES and bumps
-    /// the table epoch, in one transaction. Returns null when the table is unknown.
-    /// </summary>
-    Task<RowFilterEvaluationChange?> SetRowFilterEvaluationAsync(
-        TableIdentifier table, RowFilterEvaluationSettings? settings, Sid actor, CancellationToken ct = default)
-        => throw new NotSupportedException($"{GetType().Name} does not implement row filter evaluation settings.");
-
-    /// <summary>
     /// Issue #111: the persisted catalog tags and discovery settings of an active table, or null when the table is
     /// unknown or inactive. <paramref name="strict"/> (admin read mode) throws on any store error instead of degrading to the secure value.
     /// </summary>
@@ -426,18 +418,6 @@ public interface IConsentApprovalRepository
     /// </summary>
     Task ActivateConsentForAutoApproveAsync(Guid requestId, CancellationToken ct = default)
         => ActivateConsentAsync(requestId, ct);
-    /// <summary>Issue #107: one row filter with its consent effect, tenant and target table; null when it does not exist.</summary>
-    Task<(ConsentRowFilter Filter, ConsentEffect Effect, TenantId Tenant, TableIdentifier Table)?> GetRowFilterAsync(
-        Guid rowFilterId, CancellationToken ct = default)
-        => throw new NotSupportedException($"{GetType().Name} does not implement row filter lookup.");
-
-    /// <summary>
-    /// Issue #107: in one transaction reads the before settings, updates the three key-set columns and bumps POLICY_EPOCHS of the consent's
-    /// target table; then <c>InvalidateEpochAsync</c>. Null when the filter does not exist or its consent belongs to another tenant.
-    /// </summary>
-    Task<RowFilterEvaluationChange?> UpdateRowFilterEvaluationAsync(
-        Guid rowFilterId, TenantId tenant, RowFilterEvaluationSettings settings, CancellationToken ct = default)
-        => throw new NotSupportedException($"{GetType().Name} does not implement row filter evaluation updates.");
 
     Task ActivateConsentAsync(Guid requestId, CancellationToken ct = default);
     Task DeleteConsentRequestAsync(Guid requestId, CancellationToken ct = default);

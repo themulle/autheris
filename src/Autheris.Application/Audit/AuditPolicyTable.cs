@@ -148,8 +148,6 @@ public static class AuditPolicyTable
         [AuditEventTypes.CatalogDiscoveryArtifactsChanged] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.QueryAnalysisEvaluated] = AuditFailurePolicy.BestEffort,
         [AuditEventTypes.McpOutputInjectionSuspected] = AuditFailurePolicy.BestEffort,
-        [AuditEventTypes.RowFilterEvaluationChanged] = AuditFailurePolicy.FailClosed,
-        [AuditEventTypes.TableRowFilterStrategyChanged] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.CallerAttributeDefinitionPending] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.CallerAttributeDefinitionApplied] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.CallerAttributeDefinitionRejected] = AuditFailurePolicy.FailClosed,

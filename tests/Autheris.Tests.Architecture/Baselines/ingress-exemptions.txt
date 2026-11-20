@@ -103,7 +103,6 @@ route /api/v1/governance/contracts/apply | governance, consent, ReBAC, FinOps or
 route /api/v1/governance/effective-filters | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/governance/grants | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/governance/queries/analyze | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
-route /api/v1/governance/row-filters/{id}/evaluation | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/governance/virtual-filters | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/governance/virtual-filters/{name} | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/governance/virtual-filters/{name}/approve | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point

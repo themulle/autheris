@@ -143,7 +143,7 @@ public static partial class RowPolicyParameterBinder
     public static TimeSpan ComputeEffectiveKeySetMaxAge(VirtualFilter filter, GatewayOptions? options)
     {
         ArgumentNullException.ThrowIfNull(filter);
-        var cacheMax = options?.RowFilters?.KeySetCache?.MaxDuration ?? TimeSpan.FromHours(1);
+        var cacheMax = TimeSpan.FromHours(1);
         var requested = filter.KeySetMaxAge ?? TimeSpan.FromSeconds((options?.VirtualFilters?.Federation ?? new VirtualFilterFederationOptions()).KeyCacheTtlSeconds);
         return requested <= TimeSpan.Zero ? throw Invalid($"key_set_max_age of '{filter.Name}' must be positive.") : (requested <= cacheMax ? requested : cacheMax);
     }

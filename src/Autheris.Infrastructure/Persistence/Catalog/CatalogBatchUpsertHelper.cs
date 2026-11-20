@@ -645,7 +645,6 @@ internal static class CatalogBatchUpsertHelper
         var tables = await SelectChunkTablesAsync(repo, conn, null, chunk, lockForUpdate: false, ct).ConfigureAwait(false);
         var loadedIds = tables.Values.Select(e => e.Id).ToList();
         var details = await LoadChunkDetailsAsync(repo, conn, null, loadedIds, ct).ConfigureAwait(false);
-        var rowFilters = await RowFilterEvaluationStore.ReadBatchObjectAsync(conn, null, repo.KeyDialect, ct).ConfigureAwait(false);
 
         Dictionary<Guid, long>? epochs = null;
         try
@@ -682,8 +681,6 @@ internal static class CatalogBatchUpsertHelper
                     conn, null, repo.KeyDialect, incoming.Identifier, entity.Id, cols, ct,
                     repo.KeyTableProbe, details.Keys is not null && details.Keys.TryGetValue(entity.Id, out var kr) ? kr : null).ConfigureAwait(false);
 
-                rowFilters.TryGetValue(entity.Id, out var rowFilterEval);
-
                 var structural = new TableMetadata
                 {
                     Identifier = incoming.Identifier,
@@ -693,8 +690,7 @@ internal static class CatalogBatchUpsertHelper
                     ColumnClassifications = ClassificationsOf(details, entity.Id),
                     PrimaryKeyColumns = pkCols,
                     PrimaryKeyDirections = pkDirs,
-                    Indexes = indexes,
-                    RowFilterEvaluation = rowFilterEval
+                    Indexes = indexes
                 };
                 structural.ValidateRequiredFilterColumns();
 

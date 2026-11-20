@@ -56,7 +56,6 @@ public class AccessPlanningService : IAccessPlanningService
     private readonly TimeProvider _time;
     private readonly bool _allowDemoDirectory;
     private readonly IGrantPolicy _grantPolicy;
-    private readonly IRowFilterEvaluationAdminService? _rowFilterEvaluationAdmin;
 
     private IReadOnlyList<DateTimeOffset?> EnsureGrantsAllowed(
         AdminPlanAccessRequest request,
@@ -145,10 +144,8 @@ public class AccessPlanningService : IAccessPlanningService
         TimeProvider? timeProvider = null,
         IAccessPlanStore? accessPlanStore = null,
         IClusterStateTopology? clusterTopology = null,
-        IGrantPolicy? grantPolicy = null,
-        IRowFilterEvaluationAdminService? rowFilterEvaluationAdmin = null)
+        IGrantPolicy? grantPolicy = null)
     {
-        _rowFilterEvaluationAdmin = rowFilterEvaluationAdmin;
         _grantPolicy = grantPolicy ?? new GrantPolicy();
         _audit = auditWriter ?? throw new ArgumentNullException(nameof(auditWriter));
         _tableRepo = tableMetadataRepository ?? new NullTableMetadataRepository();
@@ -382,182 +379,6 @@ public class AccessPlanningService : IAccessPlanningService
         }
 
         return new AdminApplyAccessResult(true, request.PlanId, consents.Count, "Access applied successfully as grant records.");
-    }
-
-    // ---- Issue #107: row filter evaluation plans ----
-
-    private IRowFilterEvaluationAdminService RowFilterAdmin
-        => _rowFilterEvaluationAdmin ?? throw new SecurityException("Row filter evaluation administration is not available.");
-
-    // Fixed text: neither the id nor the existence of a rule of another tenant is revealed.
-    private const string RowFilterNotFound = "The row filter or dataset was not found.";
-
-    public async Task<AdminPlanRowFilterEvaluationResult> PlanRowFilterEvaluationAsync(
-        AdminPlanRowFilterEvaluationRequest request,
-        string adminSid,
-        string? tenantId = null,
-        CancellationToken ct = default)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-        ArgumentException.ThrowIfNullOrWhiteSpace(adminSid);
-        var admin = RowFilterAdmin;
-
-        var hasRule = !string.IsNullOrWhiteSpace(request.RowFilterId);
-        var hasDataset = !string.IsNullOrWhiteSpace(request.DatasetId);
-        if (hasRule == hasDataset)
-        {
-            throw new ArgumentException("Exactly one of rowFilterId (rule level) or datasetId (object level) is required.");
-        }
-
-        if (!RowFilterEvaluationInput.TryCreate(request.Strategy, request.DurationSeconds, request.MaxKeys, out var settings, out var inputError))
-        {
-            throw new ArgumentException(inputError);
-        }
-
-        var tenant = NormalizeTenant(tenantId);
-        Guid? ruleId = null;
-        RowFilterEvaluationPreview preview;
-        RowFilterEvaluationSettings after;
-        if (hasRule)
-        {
-            if (!Guid.TryParseExact(request.RowFilterId, "D", out var parsedRule))
-            {
-                throw new ArgumentException("rowFilterId must be a GUID.");
-            }
-
-            if (tenant is null)
-            {
-                throw new SecurityException("A tenant context is required to change a rule level setting.");
-            }
-
-            ruleId = parsedRule;
-            after = settings;
-            preview = await admin.ValidateRuleAsync(parsedRule, new TenantId(tenant), settings, ct).ConfigureAwait(false)
-                ?? throw new SecurityException(RowFilterNotFound);
-        }
-        else
-        {
-            var table = await DatasetIdResolver.ResolveActiveAsync(request.DatasetId, _tableRepo, ct).ConfigureAwait(false)
-                ?? throw new SecurityException(RowFilterNotFound);
-            after = settings;
-            preview = await admin.ValidateObjectAsync(table, settings, ct).ConfigureAwait(false)
-                ?? throw new SecurityException(RowFilterNotFound);
-        }
-
-        var now = _time.GetUtcNow();
-        var planId = $"plan_{Guid.NewGuid():N}";
-        var planTtl = TimeSpan.FromMinutes(_planOptions.PlanTtlMinutes);
-        var expiresAt = now.Add(planTtl);
-        var level = hasRule ? "rule" : "object";
-        var tableText = preview.Table.ToString();
-        var warnings = new List<string>();
-        if (after.Strategy == RowFilterEvaluationStrategy.KeySetCache)
-        {
-            warnings.Add("KeySetCache evaluates the correlated filter from a cached key set: changes of the dependent data become visible after at most the configured duration.");
-        }
-
-        // The generic plan fields describe the change for the shared store and GetPlanAsync; they carry no grants.
-        var diffs = new List<AccessPlanDiffItem>();
-        AddDiff(diffs, level, "strategy", RowFilterEvaluationInput.Format(preview.Before.Strategy), RowFilterEvaluationInput.Format(after.Strategy));
-        AddDiff(diffs, level, "durationSeconds", preview.Before.DurationSeconds?.ToString(CultureInfo.InvariantCulture), after.DurationSeconds?.ToString(CultureInfo.InvariantCulture));
-        AddDiff(diffs, level, "maxKeys", preview.Before.MaxKeys?.ToString(CultureInfo.InvariantCulture), after.MaxKeys?.ToString(CultureInfo.InvariantCulture));
-        var stored = new StoredAccessPlan(
-            new AdminPlanAccessResult(planId, tableText, diffs, warnings, expiresAt),
-            new AdminPlanAccessRequest(tableText, [], request.Reason ?? string.Empty),
-            adminSid,
-            TenantId: tenant,
-            PlanKind: AccessPlanKind.RowFilterEvaluation,
-            RowFilterEvaluation: new RowFilterEvaluationPlan(ruleId, tableText, preview.Before, after));
-
-        if (!await _store.TrySavePlanAsync(stored, planTtl, _planOptions.MaxPendingPlansPerAdmin, ct).ConfigureAwait(false))
-        {
-            throw new SecurityException(
-                $"Too many pending access plans for this administrator (limit {_planOptions.MaxPendingPlansPerAdmin}). Apply or wait for existing plans to expire.");
-        }
-
-        return new AdminPlanRowFilterEvaluationResult(
-            planId, level, ruleId?.ToString("D"), tableText, ToDto(preview.Before), ToDto(after), warnings, expiresAt);
-    }
-
-    public async Task<AdminApplyRowFilterEvaluationResult> ApplyRowFilterEvaluationAsync(
-        AdminApplyAccessRequest request,
-        string adminSid,
-        TenantId tenantId,
-        CancellationToken ct = default)
-    {
-        var admin = RowFilterAdmin;
-        var callerTenant = tenantId.Value;
-
-        // Validation against the CURRENT caps and the optimistic concurrency check happen before the token is consumed.
-        var stored = await ConsumeConfirmedPlanAsync(request, adminSid, callerTenant, AccessPlanKind.RowFilterEvaluation, async (plan, token) =>
-        {
-            var change = plan.RowFilterEvaluation ?? throw new SecurityException("The plan carries no row filter evaluation change.");
-            RowFilterEvaluationPreview? current;
-            if (change.RowFilterId is { } ruleId)
-            {
-                current = await admin.ValidateRuleAsync(ruleId, tenantId, change.After, token).ConfigureAwait(false);
-            }
-            else
-            {
-                current = await admin.ValidateObjectAsync(ParseStoredTable(change.Table), change.After, token).ConfigureAwait(false);
-            }
-
-            if (current is null)
-            {
-                throw new SecurityException(RowFilterNotFound);
-            }
-
-            if (current.Before != change.Before)
-            {
-                throw new SecurityException("The stored settings changed since the plan was created; create a new plan.");
-            }
-        }, ct).ConfigureAwait(false);
-
-        var applied = stored.RowFilterEvaluation!;
-        var actor = new Sid(adminSid);
-        RowFilterEvaluationChange? result;
-        string level;
-        if (applied.RowFilterId is { } id)
-        {
-            level = "rule";
-            result = await admin.SetRuleAsync(id, tenantId, applied.After, actor, ct).ConfigureAwait(false);
-        }
-        else
-        {
-            level = "object";
-            var settings = applied.After == RowFilterEvaluationSettings.Inherit ? null : applied.After;
-            result = await admin.SetObjectAsync(ParseStoredTable(applied.Table), settings, actor, tenantId, ct).ConfigureAwait(false);
-        }
-
-        if (result is null)
-        {
-            throw new SecurityException(RowFilterNotFound);
-        }
-
-        // Residual admin-vs-admin race (the check before the write is not transactional): detectable afterwards, logged without values.
-        if (result.Before != applied.Before)
-        {
-            _logger.LogWarning(
-                "Row filter evaluation plan {PlanId} was applied over settings that changed between the check and the write (level {Level}).",
-                request.PlanId, level);
-        }
-
-        return new AdminApplyRowFilterEvaluationResult(
-            true, request.PlanId, level, applied.Table, result.NewEpoch, "Row filter evaluation settings applied successfully.");
-    }
-
-    private static TableIdentifier ParseStoredTable(string table)
-        => TableIdentifier.TryParse(table, out var parsed) ? parsed : throw new SecurityException(RowFilterNotFound);
-
-    private static RowFilterEvaluationSettingsDto ToDto(RowFilterEvaluationSettings s)
-        => new(RowFilterEvaluationInput.Format(s.Strategy), s.DurationSeconds, s.MaxKeys);
-
-    private static void AddDiff(List<AccessPlanDiffItem> diffs, string level, string setting, string? before, string? after)
-    {
-        if (!string.Equals(before, after, StringComparison.Ordinal))
-        {
-            diffs.Add(new AccessPlanDiffItem(level, setting, before ?? "inherit", after ?? "inherit", false));
-        }
     }
 
     /// <summary>

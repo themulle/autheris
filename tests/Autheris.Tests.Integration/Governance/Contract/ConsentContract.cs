@@ -222,13 +222,6 @@ public abstract class ConsentContract : GovernanceContractBase
         Consent[] loaded = [consentA];
         await Store.ConsentDescriptions.LoadDescriptionsAsync(loaded);
         loaded[0].Description.Should().BeNull();
-
-        var filterId = consentA.RowFilters[0].Id;
-        var filterChange = await Store.ConsentApprovals.UpdateRowFilterEvaluationAsync(
-            filterId,
-            Store.TenantB,
-            new RowFilterEvaluationSettings(RowFilterEvaluationStrategy.KeySetCache, 30, 1000));
-        filterChange.Should().BeNull();
     }
 
     [RequiresContainerRuntimeFact]

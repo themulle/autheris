@@ -292,9 +292,6 @@ internal static class CatalogDeltaQueryHelper
             corruptedTableIds.UnionWith(chunkCorrupt);
         }
 
-        var rowFilterStrategies = await RowFilterEvaluationStore.ReadBatchObjectByIdsAsync(
-            conn, null, repo.KeyDialect, loadedIds, ct).ConfigureAwait(false);
-
         return await repo.AssembleTableMetadataListAsync(
             conn,
             activeTables,
@@ -303,8 +300,7 @@ internal static class CatalogDeltaQueryHelper
             corruptedTableIds,
             epochs,
             tryGetCached: null,
-            ct,
-            rowFilterStrategies).ConfigureAwait(false);
+            ct).ConfigureAwait(false);
     }
 
     internal static async Task StampDeferredChangeVersionsAsync(

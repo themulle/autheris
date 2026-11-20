@@ -36,20 +36,6 @@ internal sealed class StubAccessPlanningService : IAccessPlanningService
         CancellationToken ct = default)
         => OnApplyAccess is not null ? OnApplyAccess(request, adminSid, tenantId, caller) : throw new NotSupportedException();
 
-    public Task<AdminPlanRowFilterEvaluationResult> PlanRowFilterEvaluationAsync(
-        AdminPlanRowFilterEvaluationRequest request,
-        string adminSid,
-        string? tenantId = null,
-        CancellationToken ct = default)
-        => throw new NotSupportedException();
-
-    public Task<AdminApplyRowFilterEvaluationResult> ApplyRowFilterEvaluationAsync(
-        AdminApplyAccessRequest request,
-        string adminSid,
-        TenantId tenantId,
-        CancellationToken ct = default)
-        => throw new NotSupportedException();
-
     public Task<AdminPlanAccessResult> PlanAdminOperationAsync(
         string operation,
         string target,

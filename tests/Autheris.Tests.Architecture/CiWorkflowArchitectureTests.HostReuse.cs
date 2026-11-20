@@ -21,7 +21,6 @@ public sealed partial class CiWorkflowArchitectureTests
 
         string[] migratedSix =
         [
-            "tests/Autheris.Tests.Integration/RowFilterEvaluationEndpointAuthTests.cs",
             "tests/Autheris.Tests.Integration/DefaultTenantIngressHttpTests.cs",
             "tests/Autheris.Tests.Integration/GovernedWebSqlIntegrationTests.cs",
             "tests/Autheris.Tests.Integration/Issue341GraphQlInternalErrorTests.cs",

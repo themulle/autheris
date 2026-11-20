@@ -13,7 +13,6 @@ using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Services;
 using Autheris.Application.Sql.Policy;
-using Autheris.Application.Sql.Policy.RowFilterKeySets;
 using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Common;
 using Autheris.Domain.Diagnostics;
@@ -151,11 +150,9 @@ public sealed class CallerAttributeSecurityTests : IDisposable
         var filter = new VirtualFilter { TenantId = Tenant, Name = "f", Source = "lwetem_prod", Sql = "from conf.client client where target.client_id = client.client_id and client.dept = {{caller.dept}}" };
         var typed = SqlFilterCompiler.CompileTyped(filter, DatabaseDialect.PostgreSql, new FastSqlEngine());
         typed.Expression.ShouldBeOfType<ExistsExpression>();
-        CorrelatedFilterSiteRegistry.TryGet((ExistsExpression)typed.Expression, out _).ShouldBeFalse();
 
         var bound = CallerAttributeBinder.Bind(typed, new CallerAttributeSet(new Dictionary<string, CallerAttributeResult> { ["dept"] = Raw("D1") }), CallerAttributePadding.Default);
         bound.Expression.ShouldBeOfType<ExistsExpression>();
-        CorrelatedFilterSiteRegistry.TryGet((ExistsExpression)bound.Expression, out _).ShouldBeFalse();
 
         var consent = new TypedRowFilterBuilder().BuildCombined(
             [new Consent { TenantId = Autheris.Tests.Common.TestTenants.Default, Effect = ConsentEffect.Allow, RowFilters = [new ConsentRowFilter { ColumnName = "c", Operator = "IN", ValueSource = "USER_ATTRIBUTE", UserAttribute = "dept" }] }], [],

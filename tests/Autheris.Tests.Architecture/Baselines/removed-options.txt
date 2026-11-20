@@ -79,5 +79,6 @@ Autheris.Domain.Options.QueryCostOptions.CostPerRowReturned
 Autheris.Domain.Options.QueryCostOptions.NestedDepthFactor
 Autheris.Domain.Options.RebacOptions.OpenFgaApiUrl
 Autheris.Domain.Options.RebacOptions.OpenFgaStoreId
+Autheris.Domain.Options.SqlEndpointsOptions.MaxQueryTimeoutSeconds
 Autheris.Domain.Options.TableCache.TableCacheTargetOptions.CronExpression
 Autheris.Domain.Options.WebhooksOptions.Enabled

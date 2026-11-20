@@ -79,10 +79,10 @@ public static class McpToolAnnotations
             McpDocTools.SearchDocs, McpDocTools.LookupErrorCode, McpDocTools.GetProcedure,
             McpDocTools.ListDocTopics, McpDocTools.ListApplications, McpDocTools.ReadDocument);
 
-        Add(Effect.Adds, McpDatasetTools.RequestAccess, McpAdminTools.PlanAccess, McpAdminTools.PlanRowFilterEvaluation, McpAdminTools.RegisterDatasource);
+        Add(Effect.Adds, McpDatasetTools.RequestAccess, McpAdminTools.PlanAccess, McpAdminTools.RegisterDatasource);
 
         Add(Effect.Overwrites,
-            McpAdminTools.ApplyAccess, McpAdminTools.ApplyRowFilterEvaluation, McpAdminTools.SetDatasetState,
+            McpAdminTools.ApplyAccess, McpAdminTools.SetDatasetState,
             McpAdminTools.SetDatasetCatalog, McpDocTools.DepositDocumentation);
 
         // invoke_api reaches the same governed SQL path through POST /api/v1/statement.
