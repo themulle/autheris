@@ -7,6 +7,7 @@ Autheris.Domain.Options.AlationOptions.ApiToken
 Autheris.Domain.Options.AlationOptions.BaseUrl
 Autheris.Domain.Options.AlationOptions.CustomFieldIdPii
 Autheris.Domain.Options.AlationOptions.DataSourceToDomainMap
+Autheris.Domain.Options.AsyncJobOptions.Enabled
 Autheris.Domain.Options.AuditOptions.CatalogReadMode
 Autheris.Domain.Options.AuditOptions.CatalogSummaryWindowSeconds
 Autheris.Domain.Options.AuditOptions.ElasticsearchSinkUrl

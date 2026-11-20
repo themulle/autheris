@@ -24,9 +24,9 @@ public sealed partial class OptionsBudgetTests(ITestOutputHelper output)
     // StaticJwksSource) are not *Options classes and add no counted class. No existing property could be removed in exchange.
     // Raised by 1 (948 to 949) for issue #889: IdentityRealmConfigOptions gains ReadOnlyScopes (List<string>?) so GenericOidc realms
     // honour read-only token scopes with the same per-realm override surface as EntraIdAuthOptions.
-    private const int CeilingSettableProperties = 936;
-    private const int CeilingEnabledFlags = 64;
-    private const int CeilingUndocumentedProperties = 313;
+    private const int CeilingSettableProperties = 935;
+    private const int CeilingEnabledFlags = 63;
+    private const int CeilingUndocumentedProperties = 287;
 
     [GeneratedRegex(@"\bclass\s+(\w+Options)\b")]
     private static partial Regex OptionsClassDeclaration();

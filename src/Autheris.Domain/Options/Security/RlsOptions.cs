@@ -74,13 +74,27 @@ public sealed class RowFilterKeySetCacheOptions
     public static readonly TimeSpan MinDuration = TimeSpan.FromSeconds(1);
     public static readonly TimeSpan DurationCeiling = TimeSpan.FromHours(24);
 
+    /// <summary>Default SQL evaluation strategy used for correlated row-filter subqueries.</summary>
     public RowFilterEvaluationStrategy DefaultStrategy { get; init; } = RowFilterEvaluationStrategy.Exists;
+
+    /// <summary>Default cache duration for resolved row-filter key sets.</summary>
     public TimeSpan DefaultDuration { get; init; } = TimeSpan.FromMinutes(5);
+
+    /// <summary>Upper bound on the cache duration for resolved row-filter key sets.</summary>
     public TimeSpan MaxDuration { get; init; } = TimeSpan.FromHours(1);
+
+    /// <summary>Maximum number of distinct keys cached per row-filter key set.</summary>
     public int MaxKeys { get; init; } = 2000;
+
+    /// <summary>Maximum total memory in bytes allocated to the row-filter key-set cache.</summary>
     public long SizeLimitBytes { get; init; } = 64L * 1024 * 1024;
+
+    /// <summary>Execution timeout for individual row-filter key-set queries.</summary>
     public TimeSpan KeyQueryTimeout { get; init; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>Number of SQL bind parameter slots reserved for non-key-set query predicates.</summary>
     public int BindParameterReserve { get; init; } = 256;
+
     /// <summary>concurrent key query loads per node.</summary>
     public int MaxConcurrentKeyQueries { get; init; } = 4;
 }
@@ -94,6 +108,7 @@ public sealed class CallerAttributeOptions
     public const int MaxValuesHardCapCeiling = 1000;
     public const int TtlCeilingSeconds = 300;
 
+    /// <summary>Enables dynamic caller attribute resolution for <c>USER_ATTRIBUTE</c> consents and <c>{{caller.*}}</c> placeholders.</summary>
     public bool Enabled { get; init; }
 
     [Range(1, MaxValuesHardCapCeiling)] public int MaxValuesHardCap { get; init; } = 200;

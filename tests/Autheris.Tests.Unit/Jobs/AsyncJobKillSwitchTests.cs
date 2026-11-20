@@ -102,15 +102,28 @@ public sealed class AsyncJobKillSwitchTests
             Task.CompletedTask;
     }
 
+    private sealed class StubDisabledAsyncJobsSwitches : IReadPathSwitches
+    {
+        public bool RestDataEndpointEnabled => true;
+        public bool BulkStreamEnabled => true;
+        public bool QueryAnalysisEnabled => true;
+        public bool ProceduresEnabled => false;
+        public bool AsyncJobsEnabled => false;
+        public bool IsGroupEnabled(McpToolGroup group) => true;
+        public bool IsToolEnabled(string toolName) => false;
+        public string? DisabledReason(string toolName) => "Disabled";
+        public bool IsResourceEnabled(string resourceUri) => true;
+        public bool IsPromptEnabled(string promptName) => true;
+        public void RecordDropped(string toolName) { }
+    }
+
     [Fact]
     [Trait("Category", "Security")]
     public async Task Disabled_switch_returns_404_for_job_routes()
     {
-        new AsyncJobOptions().Enabled.ShouldBeTrue();
         ReadPathSwitches.From(new GatewayOptions()).AsyncJobsEnabled.ShouldBeTrue();
 
-        var offOptions = new GatewayOptions { AsyncJobs = new AsyncJobOptions { Enabled = false } };
-        var offSwitches = ReadPathSwitches.From(offOptions);
+        var offSwitches = new StubDisabledAsyncJobsSwitches();
         offSwitches.AsyncJobsEnabled.ShouldBeFalse();
 
         // 1. Startup gate prevents mapping job endpoints at all
@@ -125,20 +138,17 @@ public sealed class AsyncJobKillSwitchTests
         }
         startupRoutes.DataSources.SelectMany(d => d.Endpoints).ShouldBeEmpty();
 
-        // 2. Even when job routes are mapped, live switch toggle via IOptionsMonitor / IReadPathSwitches returns 404 for every job route
-        var monitor = new MutableMonitor<AsyncJobOptions>(new AsyncJobOptions { Enabled = true });
+        // 2. Even when job routes are mapped, disabled IReadPathSwitches returns 404 for every job route
         var liveServices = new ServiceCollection();
         liveServices.AddLogging();
         liveServices.AddSingleton<IAsyncQueryJobManager>(new NoopJobManager());
-        liveServices.AddSingleton<IOptionsMonitor<AsyncJobOptions>>(monitor);
+        liveServices.AddSingleton<IReadPathSwitches>(offSwitches);
         var provider = liveServices.BuildServiceProvider();
 
         var routes = new RouteBuilder(provider);
         routes.MapAsyncJobEndpoints();
         var endpoints = routes.DataSources.SelectMany(d => d.Endpoints).OfType<RouteEndpoint>().ToList();
         endpoints.Count.ShouldBe(4);
-
-        monitor.Set(new AsyncJobOptions { Enabled = false });
 
         foreach (var endpoint in endpoints)
         {
@@ -166,7 +176,7 @@ public sealed class AsyncJobKillSwitchTests
         Directory.CreateDirectory(scratchDir);
         try
         {
-            var disabledJobOpts = Options.Create(new AsyncJobOptions { Enabled = false, ScratchDirectory = scratchDir });
+            var disabledJobOpts = Options.Create(new AsyncJobOptions { ScratchDirectory = scratchDir });
             var gatewayOpts = Options.Create(new GatewayOptions { AsyncJobs = disabledJobOpts.Value });
             var trackingSql = new TrackingSqlExecutionService();
 
@@ -186,7 +196,7 @@ public sealed class AsyncJobKillSwitchTests
                 DataSourceTransportFlags.WebSql);
             queue.Enqueue(queuedItem);
 
-            var switchesOff = ReadPathSwitches.From(gatewayOpts.Value);
+            var switchesOff = new StubDisabledAsyncJobsSwitches();
             var worker = new AsyncQueryJobBackgroundWorker(
                 new NoopJobManager(),
                 queue,

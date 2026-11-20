@@ -35,7 +35,8 @@ public static class UnknownGatewayKeyGuard
         (GatewayConfigurationSchema.Root + ":Governance:QueryAnalysis:Enabled", "Governance:QueryAnalysis:Enabled (removed; the static query analysis endpoint is always mapped)"),
         (GatewayConfigurationSchema.Root + ":Webhooks:Enabled", "Webhooks:Enabled (removed; webhook delivery and dispatch are always active)"),
         ("Analytics:Aggregation:Enabled", "Analytics:Aggregation:Enabled (removed; governed aggregation is always active)"),
-        (GatewayConfigurationSchema.Root + ":Analytics:Aggregation:Enabled", "Analytics:Aggregation:Enabled (removed; governed aggregation is always active)")
+        (GatewayConfigurationSchema.Root + ":Analytics:Aggregation:Enabled", "Analytics:Aggregation:Enabled (removed; governed aggregation is always active)"),
+        (GatewayConfigurationSchema.Root + ":AsyncJobs:Enabled", "AsyncJobs:Enabled (removed; asynchronous query jobs are always active)")
     ];
 
     private static readonly (string Key, string Message)[] RemovedEventBusKeys =
