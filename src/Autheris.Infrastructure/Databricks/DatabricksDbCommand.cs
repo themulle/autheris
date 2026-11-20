@@ -78,41 +78,49 @@ public sealed class DatabricksDbCommand : DbCommand, Autheris.Application.Usage.
     {
         var result = await RunAsync(cancellationToken).ConfigureAwait(false);
         var table = new DataTable { Locale = CultureInfo.InvariantCulture };
-        var schema = new List<(string Name, DatabricksColumn Column, Type ClrType)>(result.Columns.Length);
-        var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var column in result.Columns)
+        try
         {
-            var name = column.Name;
-            for (var i = 1; !used.Add(name); i++)
+            var schema = new List<(string Name, DatabricksColumn Column, Type ClrType)>(result.Columns.Length);
+            var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var column in result.Columns)
             {
-                name = $"{column.Name}_{i.ToString(CultureInfo.InvariantCulture)}";
+                var name = column.Name;
+                for (var i = 1; !used.Add(name); i++)
+                {
+                    name = $"{column.Name}_{i.ToString(CultureInfo.InvariantCulture)}";
+                }
+
+                var clrType = DatabricksTypeMap.ResolveClrType(column.TypeName, column.Precision);
+                var dataCol = table.Columns.Add(name, clrType);
+                if (clrType == typeof(DateTime))
+                {
+                    dataCol.DateTimeMode = DataSetDateTime.Unspecified;
+                }
+
+                schema.Add((name, column, clrType));
             }
 
-            var clrType = DatabricksTypeMap.ResolveClrType(column.TypeName, column.Precision);
-            var dataCol = table.Columns.Add(name, clrType);
-            if (clrType == typeof(DateTime))
+            foreach (var row in result.Rows)
             {
-                dataCol.DateTimeMode = DataSetDateTime.Unspecified;
+                var values = new object[table.Columns.Count];
+                for (var i = 0; i < values.Length; i++)
+                {
+                    var col = result.Columns[i];
+                    values[i] = i < row.Length
+                        ? DatabricksTypeMap.ParseCell(row[i], col.TypeName, col.Precision)
+                        : DBNull.Value;
+                }
+
+                table.Rows.Add(values);
             }
 
-            schema.Add((name, column, clrType));
+            return new DatabricksDataReader(table, schema);
         }
-
-        foreach (var row in result.Rows)
+        catch
         {
-            var values = new object[table.Columns.Count];
-            for (var i = 0; i < values.Length; i++)
-            {
-                var col = result.Columns[i];
-                values[i] = i < row.Length
-                    ? DatabricksTypeMap.ParseCell(row[i], col.TypeName, col.Precision)
-                    : DBNull.Value;
-            }
-
-            table.Rows.Add(values);
+            table.Dispose();
+            throw;
         }
-
-        return new DatabricksDataReader(table, schema);
     }
 
     private async Task<DatabricksStatementResult> RunAsync(CancellationToken cancellationToken)

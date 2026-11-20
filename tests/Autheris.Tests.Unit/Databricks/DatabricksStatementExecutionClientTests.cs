@@ -698,22 +698,6 @@ public sealed class DatabricksStatementExecutionClientTests
         result.Columns[2].ShouldBe(new DatabricksColumn("id", "INT", null, null));
     }
 
-    private sealed class PollTrackingTimeProvider : FakeTimeProvider
-    {
-        public SemaphoreSlim DelayEntered { get; } = new(0);
-
-        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
-        {
-            var timer = base.CreateTimer(callback, state, dueTime, period);
-            if (dueTime == TimeSpan.FromSeconds(5))
-            {
-                DelayEntered.Release();
-            }
-
-            return timer;
-        }
-    }
-
     [Fact]
     public async Task ErrorAndLogText_NeverContainToken()
     {
@@ -751,5 +735,21 @@ public sealed class DatabricksStatementExecutionClientTests
     public void Options_EnumDefaultsToOAuthM2M()
     {
         new DatabricksAuthOptions().Mode.ShouldBe(DatabricksAuthMode.OAuthM2M);
+    }
+
+    private sealed class PollTrackingTimeProvider : FakeTimeProvider
+    {
+        public SemaphoreSlim DelayEntered { get; } = new(0);
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            var timer = base.CreateTimer(callback, state, dueTime, period);
+            if (dueTime == TimeSpan.FromSeconds(5))
+            {
+                DelayEntered.Release();
+            }
+
+            return timer;
+        }
     }
 }
