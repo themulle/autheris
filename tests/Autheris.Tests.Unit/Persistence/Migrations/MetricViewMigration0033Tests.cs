@@ -10,15 +10,15 @@ using Xunit;
 namespace Autheris.Tests.Unit.Persistence.Migrations;
 
 [Trait("Category", "Security")]
-public sealed class MetricViewMigration0032Tests
+public sealed class MetricViewMigration0033Tests
 {
     [Fact]
-    public void Migration0032_ExistsPassesStepSqlLintAndAddsNullableColumnRole()
+    public void Migration0033_ExistsPassesStepSqlLintAndAddsNullableColumnRole()
     {
         foreach (var engine in new[] { "postgresql", "sqlserver" })
         {
             var steps = SqlMigrationStep.LoadEmbedded(engine);
-            var step = steps.Single(s => s.Version == 32 && s.Name == "metric_view_kind_and_column_role");
+            var step = steps.Single(s => s.Version == 33 && s.Name == "metric_view_kind_and_column_role");
             StepSqlLint.Validate(step.Sql, step.GuardSql, step.Phase3Marker).ShouldBeEmpty();
             step.Sql.ShouldContain("metric_view");
             step.Sql.ShouldContain("column_role");
@@ -39,7 +39,7 @@ public sealed class MetricViewMigration0032Tests
                 Regex.IsMatch(line, @"\bALTER\s+(?!TABLE\b)", RegexOptions.IgnoreCase).ShouldBeFalse($"Invalid ALTER target in: {line}");
             }
 
-            var shape = GovernanceSchemaShapeLoader.LoadAt(engine, 32, steps.ToDictionary(s => s.Version, s => s.ShapeDelta));
+            var shape = GovernanceSchemaShapeLoader.LoadAt(engine, 33, steps.ToDictionary(s => s.Version, s => s.ShapeDelta));
             var tablesTable = shape.Tables.Single(t => string.Equals(t.Name, "TABLES", StringComparison.OrdinalIgnoreCase));
             tablesTable.Columns.Single(c => c.Name == "metric_view_count_measure").Nullable.ShouldBeTrue();
             var columnsTable = shape.Tables.Single(t => string.Equals(t.Name, "TABLE_COLUMNS", StringComparison.OrdinalIgnoreCase));
@@ -48,14 +48,14 @@ public sealed class MetricViewMigration0032Tests
     }
 
     [Fact]
-    public void Migration0032_ChecksumMatchesGoldenFile()
+    public void Migration0033_ChecksumMatchesGoldenFile()
     {
         var repoRoot = FindRepoRoot();
         foreach (var engine in new[] { "postgresql", "sqlserver" })
         {
-            var step = SqlMigrationStep.LoadEmbedded(engine).Single(s => s.Version == 32 && s.Name == "metric_view_kind_and_column_role");
+            var step = SqlMigrationStep.LoadEmbedded(engine).Single(s => s.Version == 33 && s.Name == "metric_view_kind_and_column_role");
             var checksumsPath = Path.Combine(repoRoot, "tests", "Autheris.Tests.Architecture", "Golden", "GovernanceSteps", $"checksums.{engine}.txt");
-            var line = File.ReadAllLines(checksumsPath).Single(l => l.StartsWith("0032 metric_view_kind_and_column_role ", StringComparison.Ordinal));
+            var line = File.ReadAllLines(checksumsPath).Single(l => l.StartsWith("0033 metric_view_kind_and_column_role ", StringComparison.Ordinal));
             step.Checksum.ShouldBe(line.Split(' ', StringSplitOptions.RemoveEmptyEntries)[2]);
         }
     }

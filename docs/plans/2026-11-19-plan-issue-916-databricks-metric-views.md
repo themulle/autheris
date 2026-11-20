@@ -58,6 +58,7 @@ Phase 2 (solution architect), 2026-11-19. Input: the Phase 1 PRD [`2026-11-19-pr
 
 - The next free governance step on `main` is `0031`. It is **reserved for WP-SIMPL-52b** (profile items migration, see the handover doc section 4).
 - #916 therefore takes **`0032_metric_view_kind_and_column_role`** (PostgreSQL and SQL Server). If WP-SIMPL-52b has not merged when WP-MV-1 is ready, WP-MV-1 waits. The DDL queue runs strictly one at a time, and the step catalogue must be gap-free. Whichever branch merges second renumbers its step pair, both checksum goldens, `StepSqlLintTests` and its step tests.
+- Note 2026-11-19 (default taken, Q-922-1): the bug fix #922 ([plan](2026-11-19-plan-issue-922-functional-right-proposal-nullable-approval.md)) goes ahead of #916 and takes `0032`. #916 then takes **`0033`**, unless the owner keeps this reservation. Related Databricks provider fixes that should land before WP-MV-6: #924 ([plan](2026-11-19-plan-issue-924-databricks-obo-certificate-and-authority.md)) and #925 ([plan](2026-11-19-plan-issue-925-databricks-typed-results-and-long-statements.md)).
 - Step content:
   - drop and recreate the `object_kind` CHECK with `'metric_view'` added (`ck_tables_object_kind` on PostgreSQL, `CK_TABLES_object_kind` on SQL Server; take the exact names from the 0030 SQL);
   - add `TABLE_COLUMNS.column_role` with its CHECK.

@@ -1,0 +1,6 @@
+{
+  "ops": [
+    { "op": "alterColumn", "table": "FUNCTIONAL_RIGHT_MAPPINGS", "column": { "name": "approved_by", "type": "NVARCHAR", "family": "string", "nullable": true } },
+    { "op": "alterColumn", "table": "FUNCTIONAL_RIGHT_MAPPINGS", "column": { "name": "approved_at", "type": "NVARCHAR", "family": "string", "nullable": true } }
+  ]
+}
