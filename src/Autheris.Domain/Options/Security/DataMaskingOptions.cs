@@ -2,9 +2,13 @@ using System.ComponentModel.DataAnnotations;
 
 namespace Autheris.Domain.Options;
 
+/// <summary>Deterministic pseudonymization and data masking configuration (<c>Gateway:DataMasking</c>).</summary>
 public sealed class DataMaskingOptions
 {
+    /// <summary>Identifier of the active HMAC key version embedded in pseudonymized values.</summary>
     public string HmacKeyId { get; init; } = "key-2026-q1";
+
+    /// <summary>Key Vault secret reference for the HMAC-SHA256 pseudonymization key.</summary>
     public string HmacSecretKeyVaultRef { get; init; } = "DEV_INSECURE_TEST_KEY_ONLY";
 
     /// <summary>

@@ -45,16 +45,29 @@ public sealed class TenantRegistryOptions
 /// </summary>
 public sealed class SchemaContractsOptions
 {
+    /// <summary>Enables dynamic tag-based schema contract projection.</summary>
     public bool Enabled { get; init; } = false;
+
+    /// <summary>Name of the default schema contract applied when a caller specifies none.</summary>
     public string DefaultContract { get; init; } = "default";
+
+    /// <summary>Named schema contract definitions keyed by contract identifier.</summary>
     public Dictionary<string, SchemaContractDefinitionOptions> Contracts { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
+/// <summary>Definition of a single schema contract projection.</summary>
 public sealed class SchemaContractDefinitionOptions
 {
+    /// <summary>Schema tags explicitly included in this contract view.</summary>
     public List<string> IncludedTags { get; init; } = [];
+
+    /// <summary>Schema tags excluded from this contract view.</summary>
     public List<string> ExcludedTags { get; init; } = [];
+
+    /// <summary>When true, excludes fields marked <c>@inaccessible</c> from this contract view.</summary>
     public bool ExcludeInaccessible { get; init; } = true;
+
+    /// <summary>Optional allowlist of table names exposed by this contract.</summary>
     public List<string> AllowedTables { get; init; } = [];
 }
 
@@ -63,9 +76,6 @@ public sealed class AsyncJobOptions
 {
     /// <summary>Configuration section the options are bound from (standalone and through <see cref="GatewayOptions.AsyncJobs"/>).</summary>
     public const string SectionName = "Gateway:AsyncJobs";
-
-    /// <summary>Enables or disables asynchronous query job endpoints, background dequeuing, and MCP async tools.</summary>
-    public bool Enabled { get; init; } = true;
 
     /// <summary>Maximum number of jobs this node executes in parallel.</summary>
     public int MaxConcurrentJobs { get; init; } = 4;

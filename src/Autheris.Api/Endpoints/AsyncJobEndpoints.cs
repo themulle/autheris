@@ -119,38 +119,8 @@ public static class AsyncJobEndpoints
 
     private static bool IsAsyncJobsEnabled(HttpContext httpContext)
     {
-        var sp = httpContext.RequestServices;
-        if (sp is null)
-        {
-            return true;
-        }
-
-        var switches = sp.GetService<IReadPathSwitches>();
-        if (switches is not null && !switches.AsyncJobsEnabled)
-        {
-            return false;
-        }
-
-        var jobMonitor = sp.GetService<IOptionsMonitor<AsyncJobOptions>>();
-        if (jobMonitor is not null)
-        {
-            return jobMonitor.CurrentValue.Enabled;
-        }
-
-        var gatewayMonitor = sp.GetService<IOptionsMonitor<GatewayOptions>>();
-        if (gatewayMonitor is not null)
-        {
-            return gatewayMonitor.CurrentValue.AsyncJobs.Enabled;
-        }
-
-        var jobOptions = sp.GetService<IOptions<AsyncJobOptions>>();
-        if (jobOptions is not null)
-        {
-            return jobOptions.Value.Enabled;
-        }
-
-        var gatewayOptions = sp.GetService<IOptions<GatewayOptions>>();
-        return gatewayOptions?.Value.AsyncJobs.Enabled ?? true;
+        var switches = httpContext.RequestServices?.GetService<IReadPathSwitches>();
+        return switches?.AsyncJobsEnabled ?? true;
     }
 
     internal static async Task<IResult> SubmitJobHandler(

@@ -61,6 +61,7 @@ public sealed class CallerAttributeOptions
     public const int MaxValuesHardCapCeiling = 1000;
     public const int TtlCeilingSeconds = 300;
 
+    /// <summary>Enables dynamic caller attribute resolution for <c>USER_ATTRIBUTE</c> consents and <c>{{caller.*}}</c> placeholders.</summary>
     public bool Enabled { get; init; }
 
     [Range(1, MaxValuesHardCapCeiling)] public int MaxValuesHardCap { get; init; } = 200;
