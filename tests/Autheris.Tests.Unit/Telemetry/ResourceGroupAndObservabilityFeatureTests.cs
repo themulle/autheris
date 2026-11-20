@@ -40,7 +40,6 @@ public sealed class ResourceGroupAndObservabilityFeatureTests
         {
             ResourceGroups = new ResourceGroupsOptions
             {
-                Enabled = true,
                 Interactive = new ResourceGroupTierConfigOptions(MaxConcurrency: 2, MaxQueueDepth: 5, TimeoutSeconds: 1)
             }
         });
@@ -72,7 +71,6 @@ public sealed class ResourceGroupAndObservabilityFeatureTests
         {
             ResourceGroups = new ResourceGroupsOptions
             {
-                Enabled = true,
                 AutonomousAgents = new ResourceGroupTierConfigOptions(MaxConcurrency: 1, MaxQueueDepth: 1, TimeoutSeconds: 10)
             }
         });
@@ -114,7 +112,6 @@ public sealed class ResourceGroupAndObservabilityFeatureTests
         {
             ResourceGroups = new ResourceGroupsOptions
             {
-                Enabled = true,
                 BulkAnalytics = new ResourceGroupTierConfigOptions(MaxConcurrency: 1, MaxQueueDepth: 5, TimeoutSeconds: 1)
             }
         });
@@ -147,7 +144,7 @@ public sealed class ResourceGroupAndObservabilityFeatureTests
     {
         var options = Options.Create(new GatewayOptions
         {
-            ResourceGroups = new ResourceGroupsOptions { Enabled = true }
+            ResourceGroups = new ResourceGroupsOptions()
         });
         using var manager = new ResourceGroupManager(options, NullLogger<ResourceGroupManager>.Instance);
 
@@ -180,7 +177,6 @@ public sealed class ResourceGroupAndObservabilityFeatureTests
         {
             ResourceGroups = new ResourceGroupsOptions
             {
-                Enabled = true,
                 Interactive = new ResourceGroupTierConfigOptions(MaxConcurrency: 1, MaxQueueDepth: 0, TimeoutSeconds: 1)
             }
         });
@@ -360,7 +356,7 @@ public sealed class ResourceGroupAndObservabilityFeatureTests
     {
         var options = Options.Create(new GatewayOptions
         {
-            ResourceGroups = new ResourceGroupsOptions { Enabled = true }
+            ResourceGroups = new ResourceGroupsOptions()
         });
         using var manager = new ResourceGroupManager(options, NullLogger<ResourceGroupManager>.Instance);
 
@@ -386,7 +382,7 @@ public sealed class ResourceGroupAndObservabilityFeatureTests
     {
         var options = Options.Create(new GatewayOptions
         {
-            ResourceGroups = new ResourceGroupsOptions { Enabled = true }
+            ResourceGroups = new ResourceGroupsOptions()
         });
         using var manager = new ResourceGroupManager(options, NullLogger<ResourceGroupManager>.Instance);
 
@@ -411,7 +407,7 @@ public sealed class ResourceGroupAndObservabilityFeatureTests
     {
         var options = Options.Create(new GatewayOptions
         {
-            ResourceGroups = new ResourceGroupsOptions { Enabled = true }
+            ResourceGroups = new ResourceGroupsOptions()
         });
         using var manager = new ResourceGroupManager(options, NullLogger<ResourceGroupManager>.Instance);
 
@@ -501,7 +497,6 @@ public sealed class ResourceGroupAndObservabilityFeatureTests
         {
             ResourceGroups = new ResourceGroupsOptions
             {
-                Enabled = true,
                 Interactive = new ResourceGroupTierConfigOptions(MaxConcurrency: 1, MaxQueueDepth: 10, TimeoutSeconds: 2)
             }
         });
@@ -539,7 +534,6 @@ public sealed class ResourceGroupAndObservabilityFeatureTests
         {
             ResourceGroups = new ResourceGroupsOptions
             {
-                Enabled = true,
                 Interactive = new ResourceGroupTierConfigOptions(MaxConcurrency: 1, MaxQueueDepth: 1, TimeoutSeconds: 30)
             }
         });

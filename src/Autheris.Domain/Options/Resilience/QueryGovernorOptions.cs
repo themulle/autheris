@@ -2,11 +2,16 @@ using System.ComponentModel.DataAnnotations;
 
 namespace Autheris.Domain.Options;
 
+/// <summary>Workload isolation resource group concurrency and queue limits (<c>Gateway:ResourceGroups</c>).</summary>
 public sealed class ResourceGroupsOptions
 {
-    public bool Enabled { get; init; } = true;
+    /// <summary>Concurrency and queue limits for interactive caller queries.</summary>
     public ResourceGroupTierConfigOptions Interactive { get; init; } = new(50, 20, 5);
+
+    /// <summary>Concurrency and queue limits for autonomous agent queries.</summary>
     public ResourceGroupTierConfigOptions AutonomousAgents { get; init; } = new(10, 50, 15);
+
+    /// <summary>Concurrency and queue limits for bulk analytics queries.</summary>
     public ResourceGroupTierConfigOptions BulkAnalytics { get; init; } = new(5, 100, 60);
 
     /// <summary>

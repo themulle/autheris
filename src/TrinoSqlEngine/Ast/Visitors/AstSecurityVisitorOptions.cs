@@ -19,6 +19,7 @@ internal interface IMaskedColumnLookup
 /// </summary>
 internal sealed record AstSecurityVisitorOptions
 {
+    /// <summary>Lookup for determining whether a column carries a masking rule.</summary>
     public required IMaskedColumnLookup MaskedColumns { get; init; }
 
     /// <summary>Names of the cataloged columns of a table (normalized name), or null when the table is not in the catalog.</summary>
@@ -30,24 +31,43 @@ internal sealed record AstSecurityVisitorOptions
     /// </summary>
     public Func<string, string, string?>? ColumnDataType { get; init; }
 
+    /// <summary>Normalized names of tables that contain at least one masked column.</summary>
     public IReadOnlySet<string> TablesWithMaskedColumns { get; init; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Clamps or injects a row cap on the root read (0 = disabled).</summary>
     public long EnforcedMaxRows { get; init; }
 
+    /// <summary>Normalized names of tables subject to an active consent row filter.</summary>
     public IReadOnlySet<string> TablesWithConsentRowFilter { get; init; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Optional DML write permit authorizing INSERT/UPDATE/DELETE compilation.</summary>
     public DmlWritePermit? WritePermit { get; init; }
 
     /// <summary>Gateway-owned parameter names allowed as a SQL Server LIKE pattern (<see cref="CompileRequest.GatewayLikePatternParameters"/>).</summary>
     public IReadOnlySet<string> GatewayLikePatternParameters { get; init; } = FrozenSet<string>.Empty;
 
+    /// <summary>Rejects queries that reference masked columns inside WHERE/HAVING/ON/ORDER BY predicates.</summary>
     public bool RejectMaskedColumnsInPredicates { get; init; } = true;
+
+    /// <summary>Rejects DML statements that target or read masked columns.</summary>
     public bool RejectMaskedColumnsInDml { get; init; } = true;
+
+    /// <summary>Rejects UPDATE/DELETE statements without a WHERE clause.</summary>
     public bool RejectUnfilteredDml { get; init; } = true;
+
+    /// <summary>Requires INSERT statements to explicitly supply the tenant isolation column.</summary>
     public bool RequireTenantColumnInInsert { get; init; } = true;
+
+    /// <summary>Rejects UPDATE statements that attempt to modify the tenant isolation column.</summary>
     public bool DisallowTenantColumnModificationInUpdate { get; init; } = true;
+
+    /// <summary>Rejects DML statements that attempt to assign policy-managed columns.</summary>
     public bool RejectPolicyColumnAssignment { get; init; } = true;
+
+    /// <summary>Rejects INSERT statements targeting tables with active consent row filters.</summary>
     public bool RejectConsentFilteredInsert { get; init; } = true;
+
+    /// <summary>Rejects whole-row table references inside DML statements.</summary>
     public bool RejectWholeRowReferencesInDml { get; init; } = true;
 
     /// <summary>
@@ -62,6 +82,8 @@ internal sealed record AstSecurityVisitorOptions
     /// projections (SR-L-24). Mirrors <see cref="RejectWholeRowReferencesInDml"/>.
     /// </summary>
     public bool RejectWholeRowReferencesInSelect { get; init; } = true;
+
+    /// <summary>Enforces WITH CHECK OPTION semantics on DML writes against row-filtered tables.</summary>
     public bool EnforceWithCheckOption { get; init; } = true;
 
     /// <summary>Issue #277: a<c>WITH RECURSIVE</c> compiles only when true. Default false; DML rejects it regardless.</summary>

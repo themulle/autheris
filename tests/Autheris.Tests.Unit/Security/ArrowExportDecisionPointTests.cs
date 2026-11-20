@@ -63,7 +63,7 @@ public sealed class ArrowExportDecisionPointTests
         services.AddSingleton(PdpTestDoubles.AnyTable());
         services.AddSingleton<ISqlEngine>(new FastSqlEngine());
         services.AddLogging();
-        services.AddSingleton(Options.Create(new GatewayOptions { Arrow = new ArrowExportOptions { Enabled = true, MaxExportRows = 1000, BatchSize = 1000 } }));
+        services.AddSingleton(Options.Create(new GatewayOptions { Arrow = new ArrowExportOptions { MaxExportRows = 1000, BatchSize = 1000 } }));
         return new Setup(services.BuildServiceProvider(), pdp, requests);
     }
 

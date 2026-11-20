@@ -266,10 +266,7 @@ public static class GatewayApplicationBuilderExtensions
         app.MapSubjectLifecycleEndpoints();
         app.MapFunctionalRightEndpoints();
         app.MapRecertificationEndpoints();
-        if (gatewayOptions.Arrow.Enabled)
-        {
-            app.MapArrowExportEndpoints();
-        }
+        app.MapArrowExportEndpoints();
         if (gatewayOptions.DuckDbOlap.Enabled)
         {
             app.MapDuckDbOlapEndpoints();
