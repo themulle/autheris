@@ -18,7 +18,7 @@ namespace Autheris.Tests.Integration.Governance.Contract;
 /// Streams are keyed by source and table, not by tenant: the isolation cases separate rows by stream id. Offsets are dense and immutable;
 /// safety rests on the fenced watermark upsert and the head-offset compare-and-swap, which the append and purge cases pin.
 /// </summary>
-public abstract class CdcStreamsContract : GovernanceContractBase
+public abstract partial class CdcStreamsContract : GovernanceContractBase
 {
     private const string Source = "mssql_ct";
     private static readonly DateTimeOffset T0 = DateTimeOffset.FromUnixTimeMilliseconds(1_760_000_000_000);
