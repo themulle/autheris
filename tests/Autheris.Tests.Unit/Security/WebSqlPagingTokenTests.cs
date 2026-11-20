@@ -46,7 +46,6 @@ public sealed class WebSqlPagingTokenTests
             {
                 Paging = new WebSqlPagingOptions
                 {
-                    Enabled = true,
                     MaxOffset = 10_000,
                     TokenLifetimeMinutes = 15
                 }

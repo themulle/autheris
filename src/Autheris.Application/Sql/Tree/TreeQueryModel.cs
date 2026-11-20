@@ -105,6 +105,8 @@ public sealed record TreeListPlan(
 internal sealed class TreeCompileOptions
 {
     public static readonly TreeCompileOptions Default = new();
+
+    /// <summary>Maximum number of rows permitted for set-based tree compilation.</summary>
     public int MaxSetBasedRows { get; init; } = 100_000;
     /// <summary>Test-only fault injection: response key for which set-based compile throws.</summary>
     public string? FailSetBasedFor { get; init; }

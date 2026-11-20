@@ -48,7 +48,7 @@ public sealed class GoldenQueryService : IGoldenQueryService
             _logger.LogWarning("GOLDEN_QUERY_STORE_UNCACHED: no catalog version provider is available; stored golden queries are read on every call.");
         }
         var goldenOpts = options?.Value.GoldenQueries ?? new GoldenQueryOptions();
-        _enabled = goldenOpts.Enabled;
+        _enabled = true;
         _maxResults = goldenOpts.MaxResultsPerRequest > 0 ? goldenOpts.MaxResultsPerRequest : 20;
 
         InitializeQueries(goldenOpts.InitialQueries, demoData?.Enabled ?? true);

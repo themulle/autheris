@@ -80,30 +80,11 @@ public sealed class McpQueryGuideTests
     }
 
     [Fact]
-    public void Build_WhenAggregationDisabled_OmitsAggregateAndTimeBucketSections()
-    {
-        var switches = SwitchesFrom();
-        var gql = new GraphQLOptions { Aggregation = new GraphQLAggregationOptions { Enabled = false } };
-
-        var guide = McpQueryGuideBuilder.Build(switches, gql);
-
-        guide.ShouldNotContain("_aggregate");
-        guide.ShouldNotContain("timeBuckets");
-        guide.ShouldNotContain("AggregateFn");
-        guide.ShouldNotContain("COUNT_DISTINCT");
-        guide.ShouldNotContain("MaxAggregateRowBudget");
-        // Core paging/filter/order sections remain present
-        guide.ShouldContain("Connection(");
-        guide.ShouldContain("Filter Operators");
-    }
-
-    [Fact]
     public void Build_WhenMetricsDisabledAndSubscriptionsEnabled_ReflectsActiveSwitches()
     {
         var switches = SwitchesFrom();
         var gql = new GraphQLOptions
         {
-            Metrics = new GraphQLMetricsOptions { Enabled = false },
             Subscriptions = new GraphQLSubscriptionOptions { Enabled = true },
             EnableIntrospection = true,
             PersistedQueriesOnly = true
@@ -111,7 +92,7 @@ public sealed class McpQueryGuideTests
 
         var guide = McpQueryGuideBuilder.Build(switches, gql);
 
-        guide.ShouldNotContain("queryMetrics");
+        guide.ShouldContain("queryMetrics");
         guide.ShouldContain("GraphQL Subscriptions");
         guide.ShouldContain("Schema Introspection:** Enabled");
         guide.ShouldContain("Persisted Queries Only:** Enabled");

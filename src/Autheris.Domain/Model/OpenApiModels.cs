@@ -8,9 +8,16 @@ using System.Collections.Generic;
 /// </summary>
 public sealed record OpenApiDocumentOptions
 {
+    /// <summary>OpenAPI document title.</summary>
     public string Title { get; init; } = "Autheris OData v4 Enterprise API";
+
+    /// <summary>OpenAPI document version string.</summary>
     public string Version { get; init; } = "v1";
+
+    /// <summary>OpenAPI document description.</summary>
     public string Description { get; init; } = "High-performance OData v4 and Zero-Trust data exposure generated dynamically from table metadata and catalog contracts.";
+
+    /// <summary>Base server URL advertised in the generated OpenAPI document.</summary>
     public string ServerUrl { get; init; } = "/odata/v4";
 
     /// <summary>

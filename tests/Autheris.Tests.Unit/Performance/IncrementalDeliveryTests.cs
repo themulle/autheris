@@ -26,7 +26,6 @@ public sealed class IncrementalDeliveryTests
         {
             IncrementalDelivery = new IncrementalDeliveryOptions
             {
-                Enabled = true,
                 MaxDeferredExecutionTimeMs = 500, // 500ms for fast unit test
                 MaxConcurrentStreamsPerClient = 2,
                 MaxIncrementalChunks = 5
