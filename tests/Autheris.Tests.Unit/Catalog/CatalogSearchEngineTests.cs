@@ -134,6 +134,38 @@ public sealed class CatalogSearchEngineTests
         hits.ShouldAllBe(h => h.Domain == "finance");
     }
 
+    [Fact]
+    public async Task ApplyDelta_SingleTableUpdate_CostIsIndependentOfCatalogSize()
+    {
+        var smallTables = Enumerable.Range(0, 500)
+            .Select(i => CreateTable("sales", $"small_t_{i:D5}", $"Description for small table {i}"))
+            .ToList();
+        var largeTables = Enumerable.Range(0, 10_000)
+            .Select(i => CreateTable("sales", $"large_t_{i:D5}", $"Description for large table {i} with distinct token tok{i}"))
+            .ToList();
+
+        var smallEngine = new CatalogSearchEngine(_embedder, _options, NullLogger<CatalogSearchEngine>.Instance);
+        await smallEngine.RebuildIndexAsync(smallTables);
+
+        var largeEngine = new CatalogSearchEngine(_embedder, _options, NullLogger<CatalogSearchEngine>.Instance);
+        await largeEngine.RebuildIndexAsync(largeTables);
+
+        // Warm up JIT for ApplyDeltaAsync on the small engine.
+        var smallUpdate = smallTables[10] with { Table = smallTables[10].Table with { Description = "warmed small delta" } };
+        await smallEngine.ApplyDeltaAsync([smallUpdate], []);
+
+        var largeUpdate = largeTables[5_000] with { Table = largeTables[5_000].Table with { Description = "updated large delta" } };
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        await largeEngine.ApplyDeltaAsync([largeUpdate], []);
+        sw.Stop();
+
+        sw.ElapsedMilliseconds.ShouldBeLessThan(100);
+        largeEngine.IndexedTableCount.ShouldBe(10_000);
+
+        var hits = largeEngine.Search(new CatalogSearchQuery("updated large delta"), _ => true);
+        hits.ShouldContain(h => h.TableIdentifier == largeUpdate.Identifier);
+    }
+
     private static TableMetadata CreateTable(string domain, string tableName, string description) =>
         new()
         {
