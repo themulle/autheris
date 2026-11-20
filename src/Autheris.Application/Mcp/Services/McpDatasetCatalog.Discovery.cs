@@ -223,7 +223,8 @@ public sealed partial class McpDatasetCatalog
             AccessStatus: status,
             Kind: obj.Kind.ToWireName(),
             Size: null,
-            DocumentCount: obj.DocumentCount > 0 ? obj.DocumentCount : null);
+            DocumentCount: obj.DocumentCount > 0 ? obj.DocumentCount : null,
+            SqlName: obj.Kind == DiscoveryObjectKind.Procedure ? null : SqlNameOf(id, options?.Value));
     }
 
     private async Task<McpDatasetSummary> BuildProcedureSummaryAsync(ClaimsPrincipal principal, string procId, RegisteredProcedure proc, CancellationToken ct)
@@ -348,7 +349,8 @@ public sealed partial class McpDatasetCatalog
                 View: SummaryView,
                 Kind: obj.Kind.ToWireName(),
                 Language: negotiatedLanguage,
-                RequestedLanguage: language)
+                RequestedLanguage: language,
+                SqlName: obj.Kind == DiscoveryObjectKind.Procedure ? null : SqlNameOf(id, options?.Value))
             {
                 Documents = linked.Documents,
                 Applications = linked.Applications,
@@ -397,7 +399,8 @@ public sealed partial class McpDatasetCatalog
                     DisplayName: obj.HiddenTextColumns.Contains(c.Name) ? null : DiscoveryTextSanitizer.SanitizeText(c.DisplayName, DiscoveryTextSanitizer.MaxDisplayNameRunes),
                     Classifications: c.Classifications, ClearRequestable: c.ClearRequestable,
                     LongDescription: obj.HiddenTextColumns.Contains(c.Name) ? null : c.LongDescription,
-                    Role: c.Role?.ToWireName())
+                    Role: c.Role?.ToWireName(),
+                    SqlName: c.Name)
                 {
                     Documents = linked.ColumnDocuments.TryGetValue(c.Name, out var columnDocs) ? columnDocs : null
                 };
@@ -442,7 +445,8 @@ public sealed partial class McpDatasetCatalog
             RequiredFilterColumnGroups: shape.RequiredFilterColumnGroups.Count == 0 ? null : shape.RequiredFilterColumnGroups,
             Language: negotiatedLanguage,
             RequestedLanguage: language,
-            PrimaryKeyOrder: Autheris.Application.DataSources.Services.DatasetKeyProjection.KeyOrder(shape.PrimaryKeyColumns, shape.PrimaryKeyDirections))
+            PrimaryKeyOrder: Autheris.Application.DataSources.Services.DatasetKeyProjection.KeyOrder(shape.PrimaryKeyColumns, shape.PrimaryKeyDirections),
+            SqlName: obj.Kind == DiscoveryObjectKind.Procedure ? null : SqlNameOf(id, options?.Value))
         {
             Documents = linked.Documents,
             Applications = linked.Applications,
@@ -597,13 +601,20 @@ public sealed partial class McpDatasetCatalog
         return BuildDiscoveryListResult([], total: 0, effectiveOffset, effectiveLimit, format: null, negotiatedLanguage, language);
     }
 
-    private async Task<string> ResolveDescribeTargetAsync(string? dataset, string? graphQlField, CancellationToken ct)
+    private async Task<string> ResolveDescribeTargetAsync(string? dataset, string? graphQlField, string? sqlName, CancellationToken ct)
     {
         bool hasDataset = !string.IsNullOrWhiteSpace(dataset);
         bool hasGraphQlField = !string.IsNullOrWhiteSpace(graphQlField);
-        if (hasDataset && hasGraphQlField)
+        bool hasSqlName = !string.IsNullOrWhiteSpace(sqlName);
+        int provided = (hasDataset ? 1 : 0) + (hasGraphQlField ? 1 : 0) + (hasSqlName ? 1 : 0);
+        if (provided > 1)
         {
-            throw new ArgumentException("Specify either 'dataset' or 'graphQlField', not both.");
+            throw new ArgumentException("Specify only one of 'dataset', 'graphQlField', or 'sqlName'.");
+        }
+
+        if (provided == 0)
+        {
+            throw new ArgumentException("One of 'dataset', 'graphQlField', or 'sqlName' is required.");
         }
 
         if (hasDataset)
@@ -611,9 +622,9 @@ public sealed partial class McpDatasetCatalog
             return dataset!;
         }
 
-        if (!hasGraphQlField)
+        if (hasSqlName)
         {
-            throw new ArgumentException("Either 'dataset' or 'graphQlField' is required.");
+            return sqlName!;
         }
 
         var resolved = graphQlMap is null ? null : await graphQlMap.ResolveRootFieldAsync(graphQlField!, ct).ConfigureAwait(false);
@@ -626,28 +637,32 @@ public sealed partial class McpDatasetCatalog
         ClaimsPrincipal principal,
         string? dataset,
         string? graphQlField,
+        string? sqlName,
         CancellationToken ct)
     {
         bool hasDataset = !string.IsNullOrWhiteSpace(dataset);
         bool hasGraphQlField = !string.IsNullOrWhiteSpace(graphQlField);
-        if (hasDataset && hasGraphQlField)
+        bool hasSqlName = !string.IsNullOrWhiteSpace(sqlName);
+        int provided = (hasDataset ? 1 : 0) + (hasGraphQlField ? 1 : 0) + (hasSqlName ? 1 : 0);
+        if (provided > 1)
         {
-            throw new ArgumentException("Specify either 'dataset' or 'graphQlField', not both.");
+            throw new ArgumentException("Specify only one of 'dataset', 'graphQlField', or 'sqlName'.");
         }
 
-        if (hasDataset)
+        if (provided == 0)
         {
-            if (!TryParseDatasetId(dataset!, out var tableId))
+            throw new ArgumentException("Invalid dataset format: ''. Expected 'domain.schema.table' or 'domain.table'.", nameof(dataset));
+        }
+
+        if (hasDataset || hasSqlName)
+        {
+            var raw = hasDataset ? dataset! : sqlName!;
+            if (!TryParseDatasetId(raw, out var tableId))
             {
-                throw new ArgumentException($"Invalid dataset format: '{dataset}'. Expected 'domain.schema.table' or 'domain.table'.", nameof(dataset));
+                throw new ArgumentException($"Invalid dataset format: '{raw}'. Expected 'domain.schema.table' or 'domain.table'.", hasDataset ? nameof(dataset) : nameof(sqlName));
             }
 
             return await explanationService!.ExplainMyAccessAsync(principal, tableId, ct).ConfigureAwait(false);
-        }
-
-        if (!hasGraphQlField)
-        {
-            throw new ArgumentException("Invalid dataset format: ''. Expected 'domain.schema.table' or 'domain.table'.", nameof(dataset));
         }
 
         var resolved = graphQlMap is null ? null : await graphQlMap.ResolveRootFieldAsync(graphQlField!, ct).ConfigureAwait(false);
@@ -683,4 +698,94 @@ public sealed partial class McpDatasetCatalog
         string.Equals(a.Domain, b.Domain, StringComparison.OrdinalIgnoreCase) &&
         string.Equals(a.Schema, b.Schema, StringComparison.OrdinalIgnoreCase) &&
         string.Equals(a.TableName, b.TableName, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Three-part SQL name (<c>catalog.schema.table</c>) as WebSQL accepts it, preserving the exact spelling/casing
+    /// from <see cref="Autheris.Application.Sql.Services.SqlDataSourceResolver"/> for the catalog part and from the table metadata for schema and table.
+    /// </summary>
+    public static string SqlNameOf(TableIdentifier id, Autheris.Domain.Options.GatewayOptions? gatewayOptions = null)
+    {
+        var catalog = gatewayOptions?.WebSql is { } webSql &&
+            Autheris.Application.Sql.Services.SqlDataSourceResolver.TryResolveGloballyAllowedDataSource(webSql, id.Domain, out var resolved)
+            ? resolved
+            : id.Domain;
+        return $"{catalog}.{id.Schema}.{id.TableName}";
+    }
+
+    /// <summary>The non-GraphQL ways to read one dataset.</summary>
+    private IReadOnlyList<McpAccessPath> DatasetAccess(TableIdentifier id)
+    {
+        var o = options?.Value ?? new Autheris.Domain.Options.GatewayOptions();
+        var paths = new List<McpAccessPath>();
+
+        if (o.OData.Enabled)
+        {
+            paths.Add(new("OData v4", "GET", $"/odata/v4/{id.Domain}/{id.Schema}/{id.TableName}",
+                "OData query options $select, $filter, $orderby, $top, $skip. JSON with OData annotations."));
+            paths.Add(new("OpenAPI (REST)", "GET", $"/odata/v4/{id.Domain}/openapi.json",
+                "OpenAPI 3.1 description of the REST routes of this domain."));
+        }
+
+        if (_hints.Tool(SampleRows))
+        {
+            paths.Add(new("MCP sample_rows", "MCP", SampleRows, "A few rows of this dataset, for a first look."));
+        }
+
+        paths.Add(new("Arrow IPC export", "POST", "/api/v1/export/arrow",
+            $"Body {{\"table\": \"{id.Domain}.{id.Schema}.{id.TableName}\"}}: columnar bulk export (application/vnd.apache.arrow.stream)."));
+
+        return paths;
+    }
+
+    /// <summary>All enabled protocols of the gateway, GraphQL first.</summary>
+    private IReadOnlyList<McpAccessPath> Endpoints()
+    {
+        var o = options?.Value ?? new Autheris.Domain.Options.GatewayOptions();
+        var endpoints = new List<McpAccessPath>
+        {
+            new("GraphQL", "POST", GraphQlEndpoint,
+                _hints.GraphQlEndpointDescription(),
+                Preferred: true)
+        };
+
+        if (o.OData.Enabled)
+        {
+            endpoints.Add(new("OData v4", "GET", "/odata/v4",
+                "Service document; /odata/v4/$metadata is the CSDL schema, /odata/v4/{domain}/{schema}/{table} the entity sets."));
+            endpoints.Add(new("OpenAPI (REST)", "GET", "/api/v1/openapi/index", "Index of the OpenAPI 3.1 documents per domain."));
+        }
+
+        if (o.WebSql.Enabled)
+        {
+            endpoints.Add(new("WebSQL", "POST", "/api/v1/sql",
+                "Body {\"sql\", \"parameters\", \"dataSource\"}: governed SQL in Trino syntax with 3-part names (<catalog>.<schema>.<table>) or 2-part names (<schema>.<table>)."));
+            endpoints.Add(new("Trino Protocol", "POST", "/v1/statement",
+                "Standard Trino REST Client protocol: query in body, X-Trino-Wait-Timeout for sync/async execution, absolute nextUri continuation, DELETE nextUri cancels."));
+        }
+
+        if (o.SqlEndpoints.Enabled)
+        {
+            endpoints.Add(new("Saved SQL queries", "GET", "/api/v1/queries", "Lists the curated SQL endpoints; call one with GET or POST /api/v1/queries/{name}."));
+        }
+
+        if (o.SqlEndpoints.Procedures.Enabled)
+        {
+            endpoints.Add(new("Stored procedures", "GET", "/api/v1/procedures", "Lists the published procedures; call one with GET or POST /api/v1/procedures/{name}."));
+        }
+
+        if (o.DuckDbOlap.Enabled)
+        {
+            endpoints.Add(new("DuckDB OLAP", "POST", "/api/v1/olap/query",
+                "Body {\"sql\", \"tableNames\", \"limit\"}: analytical SQL across several datasets."));
+        }
+
+        endpoints.Add(new("Arrow IPC export", "POST", "/api/v1/export/arrow", "Columnar bulk export of one dataset."));
+
+        if (o.Lakehouse.Enabled)
+        {
+            endpoints.Add(new("Iceberg REST Catalog", "GET", "/modules/lakehouse/iceberg/v1/{prefix}/namespaces", "Apache Iceberg REST Catalog protocol endpoint."));
+        }
+
+        return endpoints;
+    }
 }

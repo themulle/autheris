@@ -230,8 +230,9 @@ public static class McpDatasetTools
             {
               "type": "object",
               "properties": {
-                "dataset": { "type": "string", "description": "Dataset id as returned by list_datasets (domain.schema.table); alternative to graphQlField." },
-                "graphQlField": { "type": "string", "description": "Exact GraphQL root query field as returned by list_datasets (case-sensitive); alternative to dataset." },
+                "dataset": { "type": "string", "description": "Dataset id as returned by list_datasets (domain.schema.table); alternative to graphQlField and sqlName." },
+                "graphQlField": { "type": "string", "description": "Exact GraphQL root query field as returned by list_datasets (case-sensitive); alternative to dataset and sqlName." },
+                "sqlName": { "type": "string", "description": "Exact three-part SQL name as returned by list_datasets (catalog.schema.table); alternative to dataset and graphQlField." },
                 "brief": { "type": "boolean", "description": "When true, returns column signatures only (name, type, access, primaryKey on key columns) plus the primary key order, indexes and required filter columns; no column descriptions, classifications, value profiles, GraphQL block or example queries." },
                 "language": { "type": "string", "description": "Optional BCP 47 language tag (e.g. 'de', 'en') or Accept-Language range for localized dataset and column descriptions." },
                 "include": { "type": "array", "items": { "type": "string", "enum": ["columns", "keys", "indexes", "relations", "examples", "graphql", "access", "longDescription"] }, "description": "Optional sections to return; sections not listed are omitted (default: all, without column long descriptions). Add longDescription together with columns to receive the long description of each returned column." },
@@ -284,8 +285,9 @@ public static class McpDatasetTools
             {
               "type": "object",
               "properties": {
-                "dataset": { "type": "string", "description": "Dataset id as returned by list_datasets (domain.schema.table); alternative to graphQlField." },
-                "graphQlField": { "type": "string", "description": "Exact GraphQL root query field as returned by list_datasets (case-sensitive); alternative to dataset." }
+                "dataset": { "type": "string", "description": "Dataset id as returned by list_datasets (domain.schema.table); alternative to graphQlField and sqlName." },
+                "graphQlField": { "type": "string", "description": "Exact GraphQL root query field as returned by list_datasets (case-sensitive); alternative to dataset and sqlName." },
+                "sqlName": { "type": "string", "description": "Exact three-part SQL name as returned by list_datasets (catalog.schema.table); alternative to dataset and graphQlField." }
               }
             }
             """,

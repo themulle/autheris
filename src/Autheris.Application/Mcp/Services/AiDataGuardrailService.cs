@@ -282,16 +282,24 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         {
             bool hasDataset = McpDatasetTools.TryGetStringArgument(request.ArgumentsJson, "dataset", out var dsArg) && !string.IsNullOrWhiteSpace(dsArg);
             bool hasGraphQlField = McpDatasetTools.TryGetStringArgument(request.ArgumentsJson, "graphQlField", out var gqlArg) && !string.IsNullOrWhiteSpace(gqlArg);
-            if (hasDataset && hasGraphQlField)
+            bool hasSqlName = McpDatasetTools.TryGetStringArgument(request.ArgumentsJson, "sqlName", out var sqlArg) && !string.IsNullOrWhiteSpace(sqlArg);
+            int provided = (hasDataset ? 1 : 0) + (hasGraphQlField ? 1 : 0) + (hasSqlName ? 1 : 0);
+            if (provided > 1)
             {
-                return new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: $"Invalid arguments for tool '{tool.Name}': specify either 'dataset' or 'graphQlField', not both.");
+                return new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: $"Invalid arguments for tool '{tool.Name}': specify only one of 'dataset', 'graphQlField', or 'sqlName'.");
             }
-            if (!hasDataset && !hasGraphQlField)
+            if (provided == 0)
             {
-                return new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: $"Missing or invalid required argument 'dataset' or 'graphQlField' for tool '{tool.Name}'.");
+                return new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: $"Missing or invalid required argument 'dataset', 'graphQlField', or 'sqlName' for tool '{tool.Name}'.");
             }
 
-            if (hasGraphQlField)
+            if (hasSqlName)
+            {
+                resolvedTables = McpDatasetCatalog.TryParseDatasetId(sqlArg, out var sqlTableId)
+                    ? [sqlTableId]
+                    : null;
+            }
+            else if (hasGraphQlField)
             {
                 var target = _graphQlCatalogMap is null
                     ? null

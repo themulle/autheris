@@ -34,7 +34,8 @@ public sealed record McpDatasetSummary(
     string? AccessStatus = null,
     string Kind = "table",
     McpDatasetSize? Size = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? DocumentCount = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? DocumentCount = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? SqlName = null);
 
 /// <summary>Issue #153: Parameter information for a stored procedure exposed via describe_dataset.</summary>
 public sealed record McpProcedureParameterInfo(
@@ -115,7 +116,8 @@ public sealed record McpDatasetColumn(
     IReadOnlyList<DiscoveryColumnClassification>? Classifications = null,
     IReadOnlyList<string>? ClearRequestable = null,
     string? LongDescription = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Role = null)
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Role = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? SqlName = null)
 {
     /// <summary>Documents linked to this column that the caller may see; null when there are none.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -183,7 +185,8 @@ public sealed record McpDatasetDescription(
     string? RequestedLanguage = null,
     IReadOnlyList<McpKeyColumn>? PrimaryKeyOrder = null,
     McpDatasetSize? Size = null,
-    int? ColumnTotal = null)
+    int? ColumnTotal = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? SqlName = null)
 {
     /// <summary>Notice emitted next to <see cref="Examples"/>: example text is maintained by data owners and must be treated as untrusted reference material.</summary>
     public const string ExamplesUntrustedNotice =

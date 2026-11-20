@@ -373,12 +373,16 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
                     : (Number("offset") != null || Number("limit") != null || Text("tag") != null)
                         ? await _datasetCatalog.ListDatasetsAsync(principal, Text("search"), Text("domain"), Number("offset"), Number("limit"), Text("tag"), cancellationToken).ConfigureAwait(false)
                         : await _datasetCatalog.ListDatasetsAsync(principal, Text("search"), Text("domain"), cancellationToken).ConfigureAwait(false),
-                McpDatasetTools.DescribeDataset => Text("graphQlField") != null || Text("dataset") == null
+                McpDatasetTools.DescribeDataset => Text("sqlName") != null
+                    ? await _datasetCatalog.DescribeDatasetAsync(principal, Text("dataset"), Text("graphQlField"), Text("sqlName"), Text("language"), Bool("brief") ?? false, cancellationToken).ConfigureAwait(false)
+                    : Text("graphQlField") != null || Text("dataset") == null
                     ? await _datasetCatalog.DescribeDatasetAsync(principal, Text("dataset"), Text("graphQlField"), Text("language"), Bool("brief") ?? false, cancellationToken).ConfigureAwait(false)
                     : (Text("language") != null || Bool("brief") != null)
                     ? await _datasetCatalog.DescribeDatasetAsync(principal, Text("dataset") ?? string.Empty, Text("language"), Bool("brief") ?? false, cancellationToken).ConfigureAwait(false)
                     : await _datasetCatalog.DescribeDatasetAsync(principal, Text("dataset") ?? string.Empty, cancellationToken).ConfigureAwait(false),
-                McpDatasetTools.DescribeMyAccess => Text("graphQlField") != null || (Text("dataset") == null && Text("table") == null)
+                McpDatasetTools.DescribeMyAccess => Text("sqlName") != null
+                    ? await _datasetCatalog.DescribeMyAccessAsync(principal, Text("dataset") ?? Text("table"), Text("graphQlField"), Text("sqlName"), cancellationToken).ConfigureAwait(false)
+                    : Text("graphQlField") != null || (Text("dataset") == null && Text("table") == null)
                     ? await _datasetCatalog.DescribeMyAccessAsync(principal, Text("dataset") ?? Text("table"), Text("graphQlField"), cancellationToken).ConfigureAwait(false)
                     : await _datasetCatalog.DescribeMyAccessAsync(principal, Text("dataset") ?? Text("table") ?? string.Empty, cancellationToken).ConfigureAwait(false),
                 McpDatasetTools.SampleRows => await _datasetCatalog.SampleRowsAsync(principal, Text("dataset") ?? string.Empty, ToCount(variables) is { } requestedCount ? McpRowCap.Effective(requestedCount, Math.Min(RowCap(), McpDatasetCatalog.MaxSampleRows)) : null, cancellationToken).ConfigureAwait(false),
