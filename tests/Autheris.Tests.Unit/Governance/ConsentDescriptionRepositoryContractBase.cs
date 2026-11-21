@@ -137,6 +137,14 @@ public abstract class ConsentDescriptionRepositoryContractBase : IAsyncLifetime
         await Should.ThrowAsync<DbException>(() => cmd.ExecuteNonQueryAsync());
     }
 
+    private static Autheris.Domain.Security.ConsentRevocationAuthority CallerAuthority(Sid actor, TenantId tenant) =>
+        Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(new System.Security.Claims.ClaimsPrincipal(
+            new System.Security.Claims.ClaimsIdentity(
+            [
+                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, actor.Value),
+                new System.Security.Claims.Claim("tenant_id", tenant.Value)
+            ], "test")));
+
     [Fact]
     public async Task Replace_DescriptionUpdate_ChangesOnlyTheDescription()
     {
@@ -144,7 +152,7 @@ public abstract class ConsentDescriptionRepositoryContractBase : IAsyncLifetime
         var (table, tableId) = await SeedTableAsync();
         var consent = await Repo.CreateConsentAsync(NewConsent(tableId, table, GranteeType.User, "before"));
 
-        await Desc.ReplaceConsentsAsync([], [], Admin, "desc", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null), null, [new ConsentDescriptionUpdate(consent.Id, Tenant, "after")], CancellationToken.None);
+        await Desc.ReplaceConsentsAsync([], [], Admin, "desc", CallerAuthority(Admin, Tenant), null, [new ConsentDescriptionUpdate(consent.Id, Tenant, "after")], CancellationToken.None);
 
         var loaded = (await Repo.GetConsentByIdAsync(consent.Id))!;
         (await DescriptionOfAsync(consent.Id)).ShouldBe("after");
@@ -152,7 +160,7 @@ public abstract class ConsentDescriptionRepositoryContractBase : IAsyncLifetime
         loaded.ValidTo.ShouldBe(consent.ValidTo);
         loaded.Effect.ShouldBe(consent.Effect);
 
-        await Desc.ReplaceConsentsAsync([], [], Admin, "desc", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null), null, [new ConsentDescriptionUpdate(consent.Id, Tenant, null)], CancellationToken.None);
+        await Desc.ReplaceConsentsAsync([], [], Admin, "desc", CallerAuthority(Admin, Tenant), null, [new ConsentDescriptionUpdate(consent.Id, Tenant, null)], CancellationToken.None);
         (await DescriptionOfAsync(consent.Id)).ShouldBeNull();
     }
 
@@ -164,9 +172,9 @@ public abstract class ConsentDescriptionRepositoryContractBase : IAsyncLifetime
         if (!Available) return;
         var (table, tableId) = await SeedTableAsync();
         var consent = await Repo.CreateConsentAsync(NewConsent(tableId, table, GranteeType.User, "before"));
-        await Repo.RevokeConsentAsync(consent.Id, Alice, "revoked in between", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null));
+        await Repo.RevokeConsentAsync(consent.Id, Alice, "revoked in between", CallerAuthority(Alice, Tenant));
 
-        await Desc.ReplaceConsentsAsync([], [], Admin, "desc", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null), null, [new ConsentDescriptionUpdate(consent.Id, Tenant, "after")], CancellationToken.None);
+        await Desc.ReplaceConsentsAsync([], [], Admin, "desc", CallerAuthority(Admin, Tenant), null, [new ConsentDescriptionUpdate(consent.Id, Tenant, "after")], CancellationToken.None);
 
         var loaded = (await Repo.GetConsentByIdAsync(consent.Id))!;
         loaded.IsRevoked.ShouldBeTrue();
@@ -181,7 +189,7 @@ public abstract class ConsentDescriptionRepositoryContractBase : IAsyncLifetime
         var (table, tableId) = await SeedTableAsync();
         var consent = await Repo.CreateConsentAsync(NewConsent(tableId, table, GranteeType.User, "before"));
 
-        await Desc.ReplaceConsentsAsync([], [], Admin, "desc", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null), null, [new ConsentDescriptionUpdate(consent.Id, new TenantId("tenant-other"), "after")], CancellationToken.None);
+        await Desc.ReplaceConsentsAsync([], [], Admin, "desc", CallerAuthority(Admin, Tenant), null, [new ConsentDescriptionUpdate(consent.Id, new TenantId("tenant-other"), "after")], CancellationToken.None);
 
         (await DescriptionOfAsync(consent.Id)).ShouldBe("before");
     }

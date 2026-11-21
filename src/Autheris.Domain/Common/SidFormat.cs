@@ -13,16 +13,28 @@ public static class SidFormat
     /// True for <c>S-1-{authority 1-2 digits}(-{subauthority 1-10 digits}){1,15}</c>, ASCII digits only, at most
     /// <see cref="MaxLength"/> characters. A linear scan without a regular expression, so no input can cause backtracking.
     /// </summary>
-    public static bool IsCanonical(string? value)
+    public static bool IsCanonical(string? value) =>
+        IsCanonicalCore(value, allowLowerCasePrefix: false);
+
+    /// <summary>
+    /// Case-insensitive Windows SID form check used only for SID equality normalization (<c>S-1-...</c> / <c>s-1-...</c>).
+    /// </summary>
+    public static bool IsCanonicalIgnoreCase(string? value) =>
+        IsCanonicalCore(value, allowLowerCasePrefix: true);
+
+    private static bool IsCanonicalCore(string? value, bool allowLowerCasePrefix)
     {
-        if (value is null || value.Length > MaxLength || !value.StartsWith("S-1-", StringComparison.Ordinal))
+        var prefixMatch = value is not null
+            && value.Length <= MaxLength
+            && value.StartsWith("S-1-", allowLowerCasePrefix ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+        if (!prefixMatch)
         {
             return false;
         }
 
         var segments = 0;
         var digits = 0;
-        for (var i = 4; i <= value.Length; i++)
+        for (var i = 4; i <= value!.Length; i++)
         {
             if (i == value.Length || value[i] == '-')
             {

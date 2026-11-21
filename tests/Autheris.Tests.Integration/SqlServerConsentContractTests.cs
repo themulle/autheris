@@ -58,8 +58,14 @@ public sealed class SqlServerConsentContractTests : IAsyncLifetime
 
         await using var repo = NewRepository();
 
+        var adminAuth = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(new System.Security.Claims.ClaimsPrincipal(
+            new System.Security.Claims.ClaimsIdentity(
+            [
+                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, "S-1-5-21-ADMIN"),
+                new System.Security.Claims.Claim("tenant_id", "tenant-a")
+            ], "test")));
         await Should.ThrowAsync<KeyNotFoundException>(() =>
-            repo.RevokeConsentAsync(Guid.NewGuid(), new Sid("S-1-5-21-ADMIN"), "test", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null)));
+            repo.RevokeConsentAsync(Guid.NewGuid(), new Sid("S-1-5-21-ADMIN"), "test", adminAuth));
     }
 
     [Fact]
@@ -182,11 +188,16 @@ public sealed class SqlServerConsentContractTests : IAsyncLifetime
         var (table, tableId) = await CreateRevokeTableAsync(repo);
         var consent = await repo.CreateConsentAsync(UserConsent(table, tableId, "S-1-5-21-ALICE", "tenant-a"));
 
-        var none = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null);
+        var malloryAuth = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(new System.Security.Claims.ClaimsPrincipal(
+            new System.Security.Claims.ClaimsIdentity(
+            [
+                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, "S-1-5-21-MALLORY"),
+                new System.Security.Claims.Claim("tenant_id", "tenant-a")
+            ], "test")));
         await Should.ThrowAsync<Autheris.Domain.Exceptions.ConsentRevocationForbiddenException>(() =>
-            repo.RevokeConsentAsync(consent.Id, new Sid("S-1-5-21-MALLORY"), "nope", none));
+            repo.RevokeConsentAsync(consent.Id, new Sid("S-1-5-21-MALLORY"), "nope", malloryAuth));
         await Should.ThrowAsync<Autheris.Domain.Exceptions.ConsentRevocationForbiddenException>(() =>
-            repo.ReplaceConsentsAsync([consent.Id], [], new Sid("S-1-5-21-MALLORY"), "nope", none));
+            repo.ReplaceConsentsAsync([consent.Id], [], new Sid("S-1-5-21-MALLORY"), "nope", malloryAuth));
 
         (await repo.GetConsentByIdAsync(consent.Id))!.IsRevoked.ShouldBeFalse();
     }
@@ -204,7 +215,13 @@ public sealed class SqlServerConsentContractTests : IAsyncLifetime
         var mine = await repo.CreateConsentAsync(UserConsent(table, tableId, alice.Value, "tenant-a"));
         var foreign = await repo.CreateConsentAsync(UserConsent(table, tableId, alice.Value, "tenant-b"));
 
-        await repo.ReplaceConsentsAsync([mine.Id], [], alice, "self revoke of tenant-a only", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null));
+        var aliceAuth = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(new System.Security.Claims.ClaimsPrincipal(
+            new System.Security.Claims.ClaimsIdentity(
+            [
+                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, alice.Value),
+                new System.Security.Claims.Claim("tenant_id", "tenant-a")
+            ], "test")));
+        await repo.ReplaceConsentsAsync([mine.Id], [], alice, "self revoke of tenant-a only", aliceAuth);
 
         (await repo.GetConsentByIdAsync(mine.Id))!.IsRevoked.ShouldBeTrue();
         (await repo.GetConsentByIdAsync(foreign.Id))!.IsRevoked.ShouldBeFalse();

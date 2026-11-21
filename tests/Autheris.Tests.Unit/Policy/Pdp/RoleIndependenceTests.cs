@@ -124,7 +124,7 @@ public sealed class RoleIndependenceTests
         var consents = new List<Consent>();
 
         Should.Throw<ArgumentException>(() => Autheris.Infrastructure.Persistence.ConsentSqlCore.ReadSubjectConsentRows(
-            reader, new TableIdentifier("d", "s", "t"), now, new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "x" }, new HashSet<Guid>(), consents));
+            reader, new TableIdentifier("d", "s", "t"), now, new HashSet<Sid> { new Sid("x") }, new HashSet<Guid>(), consents));
         consents.ShouldBeEmpty();
     }
 

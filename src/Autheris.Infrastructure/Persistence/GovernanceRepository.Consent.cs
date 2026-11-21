@@ -51,18 +51,20 @@ public partial class GovernanceRepository
         public const string SelectRequestsByRequesterBaseSql = @"SELECT r.id, r.table_id, r.requester_sid, r.requested_grantee_type, r.requested_grantee_ref,
                                        r.business_justification, r.status, r.requested_at, r.requested_valid_to,
                                        t.source_name, t.schema_name, t.table_name, r.context_json, r.requested_write_rules_json,
-                                       r.version, r.workflow_mode, r.external_system_id, r.external_reference, r.requested_valid_from, r.updated_at, r.request_kind, r.profile_id
+                                       r.version, r.workflow_mode, r.external_system_id, r.external_reference, r.requested_valid_from, r.updated_at, r.request_kind, r.profile_id, r.tenant_id
                                 FROM CONSENT_REQUESTS r
                                 LEFT JOIN TABLES t ON r.table_id = t.id
-                                WHERE r.requester_sid = @reqSid";
+                                WHERE r.requester_sid = @reqSid
+                                  AND r.tenant_id = @tenantId";
 
         public const string SelectPendingRequestsForApproverSql = @"SELECT r.id, r.table_id, r.requester_sid, r.requested_grantee_type, r.requested_grantee_ref,
                                    r.business_justification, r.status, r.requested_at, r.requested_valid_to,
                                    t.source_name, t.schema_name, t.table_name, r.context_json, r.requested_write_rules_json,
-                                   r.version, r.workflow_mode, r.external_system_id, r.external_reference, r.requested_valid_from, r.updated_at, r.request_kind, r.profile_id
+                                   r.version, r.workflow_mode, r.external_system_id, r.external_reference, r.requested_valid_from, r.updated_at, r.request_kind, r.profile_id, r.tenant_id
                             FROM CONSENT_REQUESTS r
                             LEFT JOIN TABLES t ON r.table_id = t.id
                             WHERE r.status IN ('PENDING', 'PENDING_SECOND_APPROVAL')
+                              AND r.tenant_id = @tenantId
                               AND (r.table_id IN (
                                   SELECT tow.table_id
                                   FROM TABLE_OWNERS tow
@@ -148,7 +150,7 @@ public partial class GovernanceRepository
         CancellationToken ct)
     {
         var subjectEnumerated = subjects.ToList();
-        var subjectSet = subjectEnumerated.Select(s => s.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var subjectSet = subjectEnumerated.ToHashSet();
         if (subjectSet.Count == 0) return Array.Empty<Consent>();
         var normalized = ConsentSubjectFilter.DistinctNormalized(subjectEnumerated);
 
@@ -211,7 +213,7 @@ public partial class GovernanceRepository
     {
         var effectiveAt = atTime ?? TimeProvider.System.GetUtcNow();
         var subjectEnumerated = subjects.ToList();
-        var subjectSet = subjectEnumerated.Select(s => s.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var subjectSet = subjectEnumerated.ToHashSet();
         if (subjectSet.Count == 0) return Array.Empty<Consent>();
 
         var normalized = ConsentSubjectFilter.DistinctNormalized(subjectEnumerated);
@@ -543,16 +545,18 @@ public partial class GovernanceRepository
         return await ConsentSqlCore.ReadConsentRequestAsync(conn, null, ConsentSql.SelectConsentRequestByIdSql, requestId, loadSteps: true, ct).ConfigureAwait(false);
     }
 
-    public async Task<IReadOnlyList<ConsentRequest>> GetRequestsByRequesterSidAsync(Sid requesterSid, string? status = null, CancellationToken ct = default)
+    public async Task<IReadOnlyList<ConsentRequest>> GetRequestsByRequesterSidAsync(Sid requesterSid, TenantId tenantId, string? status = null, CancellationToken ct = default)
     {
+        var validTenant = TenantScope.RequireTenant(tenantId, nameof(GovernanceTable.ConsentRequests));
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        return await ConsentSqlCore.GetRequestsByRequesterSidAsync(conn, ConsentSql.SelectRequestsByRequesterBaseSql, requesterSid, status, ct).ConfigureAwait(false);
+        return await ConsentSqlCore.GetRequestsByRequesterSidAsync(conn, ConsentSql.SelectRequestsByRequesterBaseSql, requesterSid, validTenant, status, ct).ConfigureAwait(false);
     }
 
-    public async Task<IReadOnlyList<ConsentRequest>> GetPendingRequestsForApproverAsync(Sid approverSid, CancellationToken ct = default)
+    public async Task<IReadOnlyList<ConsentRequest>> GetPendingRequestsForApproverAsync(Sid approverSid, TenantId tenantId, CancellationToken ct = default)
     {
+        var validTenant = TenantScope.RequireTenant(tenantId, nameof(GovernanceTable.ConsentRequests));
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        return await ConsentSqlCore.GetPendingRequestsForApproverAsync(conn, ConsentSql.SelectPendingRequestsForApproverSql, approverSid, TimeProvider.System.GetUtcNow(), ct).ConfigureAwait(false);
+        return await ConsentSqlCore.GetPendingRequestsForApproverAsync(conn, ConsentSql.SelectPendingRequestsForApproverSql, approverSid, validTenant, TimeProvider.System.GetUtcNow(), ct).ConfigureAwait(false);
     }
 
     public Task<ConsentRequest> ApproveConsentRequestStepAsync(Guid requestId, Sid approverSid, CancellationToken ct = default) => ApproveConsentRequestStepAsync(requestId, approverSid, false, ct);

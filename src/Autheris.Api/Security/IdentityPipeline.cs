@@ -57,6 +57,16 @@ public sealed class IdentityPipeline : IIdentityPipeline
         ]),
         StringComparer.OrdinalIgnoreCase);
 
+    private static readonly HashSet<string> UntrustedWindowsSidClaimTypes = new(
+        [
+            ClaimTypes.PrimarySid,
+            "primarysid",
+            "http://schemas.microsoft.com/ws/2008/06/identity/claims/primarysid",
+            "objectSid",
+            "onprem_sid"
+        ],
+        StringComparer.OrdinalIgnoreCase);
+
     // A principal without a registered realm or tenant default gets no default tenant (unit tests and tooling).
     private static readonly TenancyOptions NoDefaultTenancy = new();
 
@@ -125,8 +135,34 @@ public sealed class IdentityPipeline : IIdentityPipeline
 
     private async ValueTask<ClaimsPrincipal> RunAsync(ClaimsPrincipal raw, string scheme, X509Certificate2? clientCert, CancellationToken ct)
     {
+        var rawIssuer = raw.FindFirst("iss")?.Value;
+        var rawAuthType = (raw.Identity as ClaimsIdentity)?.AuthenticationType;
+        IdentityRealm? realm = ResolveScimRealm(raw, scheme)
+            ?? (!string.IsNullOrWhiteSpace(rawIssuer) ? _realmRegistry?.ResolveRealmByIssuer(rawIssuer) : null)
+            ?? _realmRegistry?.ResolveRealmForScheme(rawIssuer, rawAuthType)
+            ?? _realmRegistry?.GetDefaultRealm();
+        var realmId = realm?.RealmId ?? "workforce-entra";
+
+        // Test host only (compile-gated): a TestAuth principal is not an identity-provider token, so its tenant and SID claims stand.
+#if AUTHERIS_TEST_AUTH
+        var tenantByClaims = string.Equals(rawAuthType, TestAuthHandler.SchemeName, StringComparison.Ordinal);
+#else
+        const bool tenantByClaims = false;
+#endif
+
+        if (IsPrivilegedSubject(raw))
+        {
+            PrivilegedRejected.Add(1, new KeyValuePair<string, object?>("scheme", FixedScheme(scheme)));
+            _logger.LogWarning("Authentication rejected: privileged subject (scheme {Scheme}).", FixedScheme(scheme));
+            return Unauthenticated();
+        }
+
+        // Non-AD/external/OIDC realms must never accept inbound Windows SID claims (e.g. primarysid, objectSid, onprem_sid) from the token.
+        var stripUntrustedWindowsSids = realm != null && IsNonWindowsRealm(realm) && !tenantByClaims && !IsScimScheme(scheme);
+        var normalizationInput = stripUntrustedWindowsSids ? StripInboundWindowsSidClaims(raw) : raw;
+
         // The group resolver reads the provider claims of the normalized principal; the emitted identity never carries them.
-        var normalized = ClaimsNormalizer.Normalize(raw, clientCert);
+        var normalized = ClaimsNormalizer.Normalize(normalizationInput, clientCert);
 
         if (IsPrivilegedSubject(normalized))
         {
@@ -137,19 +173,6 @@ public sealed class IdentityPipeline : IIdentityPipeline
 
         var identity = Collapse(normalized);
 
-        var issuer = identity.FindFirst("iss")?.Value;
-        IdentityRealm? realm = ResolveScimRealm(raw, scheme)
-            ?? (!string.IsNullOrWhiteSpace(issuer) ? _realmRegistry?.ResolveRealmByIssuer(issuer) : null)
-            ?? _realmRegistry?.ResolveRealmForScheme(issuer, identity.AuthenticationType)
-            ?? _realmRegistry?.GetDefaultRealm();
-        var realmId = realm?.RealmId ?? "workforce-entra";
-
-        // Test host only (compile-gated): a TestAuth principal is not an identity-provider token, so its tenant claims are the tenant statement.
-#if AUTHERIS_TEST_AUTH
-        var tenantByClaims = identity.AuthenticationType == TestAuthHandler.SchemeName;
-#else
-        const bool tenantByClaims = false;
-#endif
         if (realm != null && !tenantByClaims)
         {
             // An unregistered fallback id is not stamped: the tenant resolver treats a non-blank realm claim as an authoritative realm.
@@ -193,6 +216,12 @@ public sealed class IdentityPipeline : IIdentityPipeline
         if (degradedReason is null && realm is { GroupSource: RealmGroupSource.Resolver } && !IsScimScheme(scheme))
         {
             degradedReason = await AddRolesAndRightsAsync(identity, normalized, realm, realmId, resolution.Tenant, groups, ct).ConfigureAwait(false);
+        }
+
+        if (stripUntrustedWindowsSids && clientCert is null && !BindNonWindowsUserSid(identity, realm!, realmId))
+        {
+            _logger.LogWarning("Authentication rejected: missing required user key claim for realm {RealmId}.", realmId);
+            return Unauthenticated();
         }
 
         var degraded = degradedReason is not null;
@@ -337,10 +366,7 @@ public sealed class IdentityPipeline : IIdentityPipeline
         }
 
         // GOV-08: without a user key there is nothing to resolve; an empty key would share one cache entry between all such callers.
-        var userKey = identity.FindFirst("oid")?.Value
-            ?? identity.FindFirst("sub")?.Value
-            ?? normalized.GetUserSid()?.Value
-            ?? string.Empty;
+        var userKey = RealmUserKeyResolver.Resolve(identity, realm) ?? string.Empty;
         if (string.IsNullOrWhiteSpace(userKey))
         {
             return "no user key";
@@ -499,6 +525,53 @@ public sealed class IdentityPipeline : IIdentityPipeline
 
     private static string FixedScheme(string scheme) =>
         scheme is "Bearer" or "BearerAdfs" or "Basic" or "BasicSession" or "ForwardAuth" or "Negotiate" or "Scim" or "WebSocket" ? scheme : "other";
+
+    private static bool IsNonWindowsRealm(IdentityRealm realm) =>
+        realm.Kind is IdentityRealmKind.GenericOidc
+            or IdentityRealmKind.Customer
+            or IdentityRealmKind.Pat
+            or IdentityRealmKind.EntraExternalId
+            or IdentityRealmKind.AzureAdB2C;
+
+    private static ClaimsPrincipal StripInboundWindowsSidClaims(ClaimsPrincipal raw)
+    {
+        var hasUntrustedSid = raw.Claims.Any(static c => UntrustedWindowsSidClaimTypes.Contains(c.Type));
+        if (!hasUntrustedSid)
+        {
+            return raw;
+        }
+
+        var clone = raw.Clone();
+        foreach (var source in clone.Identities)
+        {
+            var toRemove = source.Claims
+                .Where(static c => UntrustedWindowsSidClaimTypes.Contains(c.Type))
+                .ToList();
+            foreach (var claim in toRemove)
+            {
+                source.RemoveClaim(claim);
+            }
+        }
+
+        return clone;
+    }
+
+    private static bool BindNonWindowsUserSid(ClaimsIdentity identity, IdentityRealm realm, string realmId)
+    {
+        foreach (var existing in identity.FindAll(ClaimTypes.PrimarySid).ToList())
+        {
+            identity.RemoveClaim(existing);
+        }
+
+        var userKey = RealmUserKeyResolver.Resolve(identity, realm);
+        if (string.IsNullOrWhiteSpace(userKey))
+        {
+            return false;
+        }
+
+        identity.AddClaim(IdentityClaimIssuers.CreatePrimarySidClaim($"{realmId}|{userKey}"));
+        return true;
+    }
 
     private static ClaimsPrincipal Unauthenticated() => new(new ClaimsIdentity());
 }

@@ -34,21 +34,29 @@ public class DomainAndModelEdgeCasesTests
     [Fact]
     public void Sid_CaseInsensitivity_AndHashCodes_WorkConsistently()
     {
-        var sidUpper = new Sid("S-1-5-21-ABCDEF");
-        var sidLower = new Sid("s-1-5-21-abcdef");
-        var sidMixed = new Sid("S-1-5-21-AbCdEf");
+        var sidUpper = new Sid("S-1-5-21-1000-2000-500");
+        var sidLower = new Sid("s-1-5-21-1000-2000-500");
+        var guidUpper = new Sid("A1B2C3D4-0000-0000-0000-000000000001");
+        var guidLower = new Sid("a1b2c3d4-0000-0000-0000-000000000001");
 
         sidUpper.Equals(sidLower).ShouldBeTrue();
-        sidUpper.Equals(sidMixed).ShouldBeTrue();
+        guidUpper.Equals(guidLower).ShouldBeTrue();
         (sidUpper == sidLower).ShouldBeTrue();
-        (sidUpper != sidMixed).ShouldBeFalse();
+        (guidUpper == guidLower).ShouldBeTrue();
 
         sidUpper.GetHashCode().ShouldBe(sidLower.GetHashCode());
-        sidUpper.GetHashCode().ShouldBe(sidMixed.GetHashCode());
+        guidUpper.GetHashCode().ShouldBe(guidLower.GetHashCode());
 
-        var set = new HashSet<Sid> { sidUpper };
+        var set = new HashSet<Sid> { sidUpper, guidUpper };
         set.Contains(sidLower).ShouldBeTrue();
-        set.Contains(sidMixed).ShouldBeTrue();
+        set.Contains(guidLower).ShouldBeTrue();
+
+        // Non-SID, non-GUID OIDC subjects remain case-sensitive so "Alice" and "alice" never collide.
+        var mixedUpper = new Sid("Alice");
+        var mixedLower = new Sid("alice");
+        mixedUpper.Equals(mixedLower).ShouldBeFalse();
+        (mixedUpper != mixedLower).ShouldBeTrue();
+        new HashSet<Sid> { mixedUpper }.Contains(mixedLower).ShouldBeFalse();
     }
 
     [Fact]
@@ -57,11 +65,11 @@ public class DomainAndModelEdgeCasesTests
         var emptySid = new Sid(string.Empty);
         emptySid.Value.ShouldBe(string.Empty);
         emptySid.ToString().ShouldBe(string.Empty);
-        emptySid.GetHashCode().ShouldBe(StringComparer.OrdinalIgnoreCase.GetHashCode(string.Empty));
+        emptySid.GetHashCode().ShouldBe(StringComparer.Ordinal.GetHashCode(string.Empty));
 
         var defaultSid = default(Sid);
         defaultSid.Value.ShouldBeNull();
-        defaultSid.GetHashCode().ShouldBe(StringComparer.OrdinalIgnoreCase.GetHashCode(string.Empty));
+        defaultSid.GetHashCode().ShouldBe(StringComparer.Ordinal.GetHashCode(string.Empty));
         defaultSid.Equals(emptySid).ShouldBeFalse();
     }
 

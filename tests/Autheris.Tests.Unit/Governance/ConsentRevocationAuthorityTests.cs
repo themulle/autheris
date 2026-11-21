@@ -74,6 +74,8 @@ public sealed class ConsentRevocationAuthorityTests
         unbound.Scope.ShouldBe(ConsentRevocationScope.GranteeOrApproverOnly);
         unbound.AllowsAdminForTenant(TenantA).ShouldBeFalse();
         unbound.AllowsAdminForTenant(TenantB).ShouldBeFalse();
+        unbound.CanAccessTenant(TenantA).ShouldBeFalse();
+        unbound.CanAccessTenant(TenantB).ShouldBeFalse();
     }
 
     [Fact]
@@ -91,6 +93,8 @@ public sealed class ConsentRevocationAuthorityTests
         authority.AllowsAdminForTenant(TenantA).ShouldBeFalse();
         authority.AllowsAdminForTenant(TenantB).ShouldBeFalse();
         authority.AllowsAdminForTenant(new TenantId("default")).ShouldBeFalse();
+        authority.CanAccessTenant(TenantA).ShouldBeFalse();
+        authority.CanAccessTenant(TenantB).ShouldBeFalse();
     }
 
     [Fact]
@@ -226,14 +230,52 @@ public sealed class ConsentRevocationAuthorityTests
             CreatedBySid = Actor
         };
 
+        var actorInTenantA = ConsentRevocationAuthority.FromPrincipal(PrincipalWith(claims:
+        [
+            new Claim(ClaimTypes.PrimarySid, Actor.Value),
+            new Claim("tenant_id", TenantA.Value)
+        ]));
         var ex = await Should.ThrowAsync<ConsentRevocationForbiddenException>(() =>
-            repo.ReplaceConsentsAsync([ownedId, deniedId], [newConsent], Actor, "manifest", ConsentRevocationAuthority.FromPrincipal(null)));
+            repo.ReplaceConsentsAsync([ownedId, deniedId], [newConsent], Actor, "manifest", actorInTenantA));
 
         ex.Message.ShouldNotContain(Actor.Value);
         ex.Message.ShouldNotContain("Secrets");
         conn.Commands.ShouldNotContain(c => c.CommandText.Contains("INSERT INTO CONSENTS", StringComparison.OrdinalIgnoreCase));
         conn.Commands.ShouldNotContain(c => c.CommandText.Contains("ROLE_MEMBERS", StringComparison.OrdinalIgnoreCase));
         recordedAudits.ShouldContain(a => a.EventType == AuditEventTypes.ConsentDenied && a.Decision == "DENY" && a.TenantId == TenantA);
+    }
+
+    [Fact]
+    public async Task FromPrincipal_NullOrUnauthenticatedOrTenantless_DeniesAllTenants()
+    {
+        var fromNull = ConsentRevocationAuthority.FromPrincipal(null);
+        fromNull.CanAccessTenant(TenantA).ShouldBeFalse();
+        fromNull.CanAccessTenant(TenantB).ShouldBeFalse();
+        fromNull.AllowsAdminForTenant(TenantA).ShouldBeFalse();
+        fromNull.TryCheckTenantAccess(TenantA.Value, out _, out _).ShouldBeFalse();
+
+        var unauthenticated = ConsentRevocationAuthority.FromPrincipal(new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.PrimarySid, Actor.Value), new Claim("tenant_id", TenantA.Value)])));
+        unauthenticated.CanAccessTenant(TenantA).ShouldBeFalse();
+        unauthenticated.AllowsAdminForTenant(TenantA).ShouldBeFalse();
+
+        var tenantless = ConsentRevocationAuthority.FromPrincipal(PrincipalWith(claims:
+        [
+            new Claim(ClaimTypes.PrimarySid, Actor.Value),
+            new Claim(ClaimTypes.Role, "Consumer")
+        ]));
+        tenantless.CanAccessTenant(TenantA).ShouldBeFalse();
+        tenantless.CanAccessTenant(TenantB).ShouldBeFalse();
+        tenantless.AllowsAdminForTenant(TenantA).ShouldBeFalse();
+
+        using var conn = DialectKit.PostgreSql.NewConnection();
+        await using var repo = CreateRepo(conn);
+        var consentId = Guid.NewGuid();
+        conn.EnqueueReader(RevokeTargetRows(("Sales", "Crm", "Orders", TenantA.Value, "User", Actor.Value, 0)));
+
+        await Should.ThrowAsync<KeyNotFoundException>(() =>
+            repo.RevokeConsentAsync(consentId, Actor, "revoke", fromNull, CancellationToken.None));
+        conn.Commands.ShouldNotContain(c => c.CommandText.Contains("UPDATE CONSENTS", StringComparison.OrdinalIgnoreCase));
     }
 
     private static DataTable RevokeTargetRows(params (string Source, string Schema, string Table, string TenantId, string GranteeType, string GranteeSid, int IsRevoked)[] entries)

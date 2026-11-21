@@ -130,7 +130,13 @@ public sealed class PostgreSqlConsentRevocationAndWithdrawTests : IDisposable
     {
         await EnsureTableAsync();
 
-        await Should.ThrowAsync<KeyNotFoundException>(() => _repo.RevokeConsentAsync(Guid.NewGuid(), Admin, "missing", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null)));
+        var adminAuth = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(new System.Security.Claims.ClaimsPrincipal(
+            new System.Security.Claims.ClaimsIdentity(
+            [
+                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, Admin.Value),
+                new System.Security.Claims.Claim("tenant_id", Tenant.Value)
+            ], "test")));
+        await Should.ThrowAsync<KeyNotFoundException>(() => _repo.RevokeConsentAsync(Guid.NewGuid(), Admin, "missing", adminAuth));
     }
 
     [Fact]

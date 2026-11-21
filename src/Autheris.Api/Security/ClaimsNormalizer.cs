@@ -62,18 +62,25 @@ public static class ClaimsNormalizer
             var userSid = clonedPrincipal.GetUserSid();
             if (userSid != null)
             {
-                identity.AddClaim(new Claim(ClaimTypes.PrimarySid, userSid.Value.Value));
+                identity.AddClaim(new Claim(ClaimTypes.PrimarySid, userSid.Value.Value, ClaimValueTypes.String, IdentityClaimIssuers.SynthesizedPrimarySid));
             }
         }
 
         if (identity.FindFirst(ClaimTypes.NameIdentifier) == null)
         {
-            var subVal = identity.FindFirst("sub")?.Value
-                ?? identity.FindFirst("oid")?.Value
-                ?? identity.FindFirst(ClaimTypes.PrimarySid)?.Value;
-            if (!string.IsNullOrWhiteSpace(subVal))
+            var explicitSub = identity.FindFirst("sub")?.Value;
+            if (!string.IsNullOrWhiteSpace(explicitSub))
             {
-                identity.AddClaim(new Claim(ClaimTypes.NameIdentifier, subVal));
+                identity.AddClaim(new Claim(ClaimTypes.NameIdentifier, explicitSub));
+            }
+            else
+            {
+                var fallbackSub = identity.FindFirst("oid")?.Value
+                    ?? identity.FindFirst(ClaimTypes.PrimarySid)?.Value;
+                if (!string.IsNullOrWhiteSpace(fallbackSub))
+                {
+                    identity.AddClaim(new Claim(ClaimTypes.NameIdentifier, fallbackSub, ClaimValueTypes.String, IdentityClaimIssuers.FallbackNameIdentifier));
+                }
             }
         }
 

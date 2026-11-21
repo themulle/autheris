@@ -168,8 +168,14 @@ public sealed class ConsentReplaceRepositoryTests : IDisposable
         await EnsureTableAsync();
         var old = await _repo.CreateConsentAsync(UserConsent("S-1-5-21-Alice"));
 
+        var strangerAuth = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(new System.Security.Claims.ClaimsPrincipal(
+            new System.Security.Claims.ClaimsIdentity(
+            [
+                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, "S-1-5-21-STRANGER"),
+                new System.Security.Claims.Claim("tenant_id", TenantA.Value)
+            ], "test")));
         await Should.ThrowAsync<Autheris.Domain.Exceptions.ConsentRevocationForbiddenException>(() =>
-            _repo.ReplaceConsentsAsync([old.Id], [UserConsent("S-1-5-21-Bob")], new Sid("S-1-5-21-STRANGER"), "x", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null)));
+            _repo.ReplaceConsentsAsync([old.Id], [UserConsent("S-1-5-21-Bob")], new Sid("S-1-5-21-STRANGER"), "x", strangerAuth));
 
         (await _repo.GetConsentByIdAsync(old.Id))!.IsRevoked.ShouldBeFalse();
         (await _repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-Bob")], _table, DateTimeOffset.UtcNow, TenantA)).ShouldBeEmpty();
@@ -259,7 +265,13 @@ public sealed class ConsentReplaceRepositoryTests : IDisposable
         var alice = await _repo.CreateConsentAsync(UserConsent("S-1-5-21-Alice"));
         await _repo.CreateConsentAsync(UserConsent("S-1-5-21-Bob"));
         var role = await _repo.CreateConsentAsync(GroupConsent("Analyst", TenantA));
-        await _repo.RevokeConsentAsync(alice.Id, new Sid("S-1-5-21-Alice"), "self", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null));
+        var aliceAuth = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(new System.Security.Claims.ClaimsPrincipal(
+            new System.Security.Claims.ClaimsIdentity(
+            [
+                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, "S-1-5-21-Alice"),
+                new System.Security.Claims.Claim("tenant_id", TenantA.Value)
+            ], "test")));
+        await _repo.RevokeConsentAsync(alice.Id, new Sid("S-1-5-21-Alice"), "self", aliceAuth);
         var tenant = new Autheris.Application.Governance.Paging.ConsentPageQuery(TenantA, Table: _table);
 
         (await _repo.GetConsentPageAsync(tenant with { GranteeType = GranteeType.Group })).Items.Select(c => c.Id).ShouldBe([role.Id]);

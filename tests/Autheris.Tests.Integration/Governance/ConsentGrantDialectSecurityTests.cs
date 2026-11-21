@@ -61,9 +61,14 @@ public sealed class ConsentGrantDialectSecurityTests : IDisposable
         var epochBefore = await _repo.GetTableEpochAsync(_table);
         var auditBefore = (await _repo.GetAuditLogEntriesAsync(100)).Count(e => e.EventType == "CONSENT_REVOKED");
 
-        var none = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null);
-        await Should.ThrowAsync<Autheris.Domain.Exceptions.ConsentRevocationForbiddenException>(() => _repo.RevokeConsentAsync(consent.Id, new Sid("S-1-5-21-MALLORY"), "nope", none));
-        await Should.ThrowAsync<Autheris.Domain.Exceptions.ConsentRevocationForbiddenException>(() => _repo.ReplaceConsentsAsync([consent.Id], [], new Sid("S-1-5-21-MALLORY"), "nope", none));
+        var mallory = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(new System.Security.Claims.ClaimsPrincipal(
+            new System.Security.Claims.ClaimsIdentity(
+            [
+                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, "S-1-5-21-MALLORY"),
+                new System.Security.Claims.Claim("tenant_id", TenantA.Value)
+            ], "test")));
+        await Should.ThrowAsync<Autheris.Domain.Exceptions.ConsentRevocationForbiddenException>(() => _repo.RevokeConsentAsync(consent.Id, new Sid("S-1-5-21-MALLORY"), "nope", mallory));
+        await Should.ThrowAsync<Autheris.Domain.Exceptions.ConsentRevocationForbiddenException>(() => _repo.ReplaceConsentsAsync([consent.Id], [], new Sid("S-1-5-21-MALLORY"), "nope", mallory));
 
         (await _repo.GetConsentByIdAsync(consent.Id))!.IsRevoked.ShouldBeFalse();
         (await _repo.GetTableEpochAsync(_table)).ShouldBe(epochBefore);
@@ -103,7 +108,13 @@ public sealed class ConsentGrantDialectSecurityTests : IDisposable
         await EnsureTableAsync();
         var consent = await _repo.CreateConsentAsync(UserConsent("S-1-5-21-Alice", TenantA));
 
-        await _repo.RevokeConsentAsync(consent.Id, new Sid("S-1-5-21-Alice"), "self", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null));
+        var aliceAuth = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(new System.Security.Claims.ClaimsPrincipal(
+            new System.Security.Claims.ClaimsIdentity(
+            [
+                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, "S-1-5-21-Alice"),
+                new System.Security.Claims.Claim("tenant_id", TenantA.Value)
+            ], "test")));
+        await _repo.RevokeConsentAsync(consent.Id, new Sid("S-1-5-21-Alice"), "self", aliceAuth);
 
         (await _repo.GetConsentByIdAsync(consent.Id))!.IsRevoked.ShouldBeTrue();
         (await _repo.GetAuditLogEntriesAsync(100)).ShouldContain(e => e.EventType == "CONSENT_REVOKED" && e.Decision == "REVOKED");
