@@ -55,6 +55,14 @@ public sealed partial class DiscoveryService
                     indexCandidates.Add(meta);
                 }
             }
+            foreach (var table in candidates)
+            {
+                if (!_searchEngine.ContainsTable(table.Identifier) &&
+                    DiscoveryVisibleTextMatcher.MatchesNonHiddenTextTerms(table, searchText))
+                {
+                    indexCandidates.Add(table);
+                }
+            }
 
             var restrictedScores = new Dictionary<TableIdentifier, int>();
             var verified = await KeepCallerVisibleMatchesAsync(

@@ -73,6 +73,7 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
 
     public bool IsIndexReady => Volatile.Read(ref _currentSnapshot) != null;
     public int IndexedTableCount => Volatile.Read(ref _currentSnapshot)?.MetadataMap.Count ?? 0;
+    public bool ContainsTable(TableIdentifier id) => Volatile.Read(ref _currentSnapshot)?.MetadataMap.ContainsKey(id) == true;
     public DateTimeOffset? LastIndexedAt => Volatile.Read(ref _currentSnapshot)?.CreatedAt;
     public int CachedDocumentEmbeddingCount => _documentEmbeddingCache.Count;
 

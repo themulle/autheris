@@ -11,6 +11,7 @@ using Autheris.Api.Endpoints;
 using Autheris.Application.Catalog.Discovery;
 using Autheris.Application.Catalog.External;
 using Autheris.Application.Catalog.Interfaces;
+using Autheris.Application.Catalog.Search;
 using Autheris.Application.Catalog.Services;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Mcp.Services;
@@ -83,7 +84,7 @@ public sealed class ExternalCatalogOneSearchTests
                 return hits.Where(h => pred(h.TableIdentifier)).ToList();
             });
 
-        var opts = Options.Create(new GatewayOptions { Tenancy = TenancyShape.Multi.Options() });
+        var opts = Options.Create(new GatewayOptions());
         var discovery = new DiscoveryService(
             tables,
             FakeAccessDecisionPoint.AllowAll(),
@@ -209,5 +210,114 @@ public sealed class ExternalCatalogOneSearchTests
 
         var res = await mcp.ListDatasetsAsync(User(), search: "crane", domain: null);
         res.Datasets.ShouldHaveSingleItem().Id.ShouldBe("default.dbo.mcp_cranes");
+    }
+
+    [Theory]
+    [InlineData("ready-empty")]
+    [InlineData("indexed-mcp-cranes")]
+    [InlineData("indexed-other-table")]
+    [InlineData("not-ready")]
+    public async Task McpListDatasets_ExactMcpE2eSetup_FindsMcpCranesAcrossSearchEngineStates(string state)
+    {
+        var cranesId = new TableIdentifier("default", "main", "mcp_cranes");
+        var cranes = new TableMetadata
+        {
+            Identifier = cranesId,
+            OwnerTenantId = new TenantId("tenant_mcp"),
+            Table = new Table
+            {
+                Id = Guid.NewGuid(),
+                DisplayName = "mcp_cranes",
+                TableName = "mcp_cranes",
+                SchemaName = "main",
+                SourceType = "PostgreSql",
+                SourceName = "default",
+                Description = "Crane fleet",
+                IsActive = true
+            },
+            Columns =
+            [
+                new TableColumn { ColumnName = "id", DataType = "integer", Description = "Key" },
+                new TableColumn { ColumnName = "serial_number", DataType = "varchar", Description = "Serial number" },
+                new TableColumn { ColumnName = "crane_type", DataType = "varchar", Description = "Crane type" },
+                new TableColumn { ColumnName = "tonnage", DataType = "integer", Description = "Lifting capacity in t" },
+                new TableColumn { ColumnName = "owner_email", DataType = "varchar", Description = "Owner contact" }
+            ]
+        }.WithPii("owner_email");
+
+        var tables = new FakeDiscoveryTableRepository();
+        tables.Tables.Add(cranes);
+
+        var consents = new FakeDiscoveryConsentRepository();
+        consents.Active.Add(new Consent
+        {
+            TableId = cranes.Table.Id,
+            TableIdentifier = cranesId,
+            TenantId = new TenantId("tenant_mcp"),
+            Effect = ConsentEffect.Allow,
+            GranteeType = GranteeType.User,
+            GranteeSid = new Sid("S-1-5-MCP-E2E-USER"),
+            ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
+            ValidTo = DateTimeOffset.UtcNow.AddDays(1),
+            ColumnRules =
+            [
+                new ConsentColumnRule { ColumnName = "id", AccessLevel = ColumnAccessLevel.Clear },
+                new ConsentColumnRule { ColumnName = "serial_number", AccessLevel = ColumnAccessLevel.Clear },
+                new ConsentColumnRule { ColumnName = "crane_type", AccessLevel = ColumnAccessLevel.Clear },
+                new ConsentColumnRule { ColumnName = "tonnage", AccessLevel = ColumnAccessLevel.Clear }
+            ]
+        });
+
+        var engine = new CatalogSearchEngine(
+            Substitute.For<ILocalEmbeddingGenerator>(),
+            Options.Create(new CatalogSearchOptions()),
+            NullLogger<CatalogSearchEngine>.Instance);
+
+        if (state == "ready-empty")
+        {
+            await engine.RebuildIndexAsync([], CancellationToken.None);
+        }
+        else if (state == "indexed-mcp-cranes")
+        {
+            await engine.RebuildIndexAsync([cranes], CancellationToken.None);
+        }
+        else if (state == "indexed-other-table")
+        {
+            var other = DiscoveryTestBuilder.MakeTable("other", "unrelated_table", ownerTenantId: "tenant_mcp");
+            await engine.RebuildIndexAsync([other], CancellationToken.None);
+        }
+
+        var opts = Options.Create(new GatewayOptions());
+        var discovery = new DiscoveryService(
+            tables,
+            FakeAccessDecisionPoint.AllowAll(),
+            consents,
+            new FakeDiscoveryApprovalRepository(),
+            new FakeDiscoveryOwnershipRepository(),
+            new FakeDiscoveryArtifactStore(),
+            new FakeAuditWriter(),
+            opts,
+            Options.Create(new CatalogDiscoveryOptions()),
+            logger: NullLogger<DiscoveryService>.Instance,
+            searchEngine: engine);
+
+        var mcp = new McpDatasetCatalog(
+            tables,
+            consents,
+            Substitute.For<IGatewayExecutionService>(),
+            options: opts,
+            discoveryService: discovery);
+
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+        [
+            new Claim(ClaimTypes.NameIdentifier, "S-1-5-MCP-E2E-USER"),
+            new Claim("sid", "S-1-5-MCP-E2E-USER"),
+            new Claim("tid", "tenant_mcp"),
+            new Claim("tenant_id", "tenant_mcp"),
+            new Claim(ClaimTypes.Role, "Reader")
+        ], "Test"));
+
+        var res = await mcp.ListDatasetsAsync(principal, search: "crane", domain: null);
+        res.Datasets.Select(d => d.Id).ShouldBe(["default.main.mcp_cranes"], res.Guidance);
     }
 }

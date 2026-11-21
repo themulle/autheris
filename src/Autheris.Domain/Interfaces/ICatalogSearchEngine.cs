@@ -83,6 +83,9 @@ public interface ICatalogSearchEngine
     /// <summary>Anzahl aktuell im Snapshot indizierter Tabellen.</summary>
     int IndexedTableCount { get; }
 
+    /// <summary>Returns whether the current search snapshot contains the specified table.</summary>
+    bool ContainsTable(TableIdentifier id) => true;
+
     /// <summary>Zeitpunkt des letzten erfolgreichen Index-Builds.</summary>
     DateTimeOffset? LastIndexedAt { get; }
 
