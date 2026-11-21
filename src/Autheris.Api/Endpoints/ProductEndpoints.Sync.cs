@@ -35,7 +35,7 @@ public static partial class ProductEndpoints
         app.MapPost("/api/v1/products/sync/webhook/{tenant}", (string tenant, HttpContext context, ProductSyncWebhookService service) => WebhookAsync(tenant, context, service))
             .AllowAnonymous()
             .WithRequestBodyLimit(ProductSyncWebhookService.MaxBodyBytes)
-            .WithAudit(AuditLevel.Full, AuditEventTypes.ProductSyncWebhookReceived);
+            .WithAudit(AuditLevel.Delegated, AuditEventTypes.ProductSyncWebhookReceived);
     }
 
     internal sealed record SyncFileBody(string? Path, string? Content, bool Symlink = false);

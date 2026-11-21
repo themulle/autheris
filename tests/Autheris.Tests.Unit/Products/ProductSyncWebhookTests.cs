@@ -1,10 +1,22 @@
+using System.Net;
 using System.Text;
+using Autheris.Api.Endpoints;
+using Autheris.Api.Middleware;
+using Autheris.Application.Audit;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Products;
 using Autheris.Application.Products.Sync;
 using Autheris.Application.State;
 using Autheris.Domain.Audit;
+using Autheris.Domain.Model;
+using Autheris.Domain.Options;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
+using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -60,7 +72,7 @@ public sealed class ProductSyncWebhookTests
         (await _webhook.HandleAsync(TenantA, invalidJson, new ProductSyncWebhookDelivery(Now(), "d-1", null))).ShouldBe(ProductSyncWebhookStatus.Unauthorized);
         (await _webhook.HandleAsync(TenantA, invalidJson, new ProductSyncWebhookDelivery(Now(), "d-1", "sha256=zz"))).ShouldBe(ProductSyncWebhookStatus.Unauthorized);
         (await _webhook.HandleAsync(TenantA, invalidJson, Signed(SecretA, Now(), invalidJson))).ShouldBe(ProductSyncWebhookStatus.BadRequest, "only a verified body is parsed");
-        _audit.Entries.ShouldContain(e => e.EventType == AuditEventTypes.ProductSyncWebhookRejected);
+        _audit.Entries.ShouldContain(e => e.EventType == AuditEventTypes.ProductSyncWebhookRejected && !string.IsNullOrWhiteSpace(e.ActorSid.Value));
         _audit.Entries.ShouldNotContain(e => e.EventType == AuditEventTypes.ProductSyncWebhookReceived);
     }
 
@@ -101,7 +113,9 @@ public sealed class ProductSyncWebhookTests
         var body = Body("""{"tenant":"tenant-b","after":"0123456789abcdef"}""");
 
         (await _webhook.HandleAsync(TenantA, body, Signed(SecretA, Now(), body))).ShouldBe(ProductSyncWebhookStatus.Accepted);
-        _audit.Entries.Single(e => e.EventType == AuditEventTypes.ProductSyncWebhookReceived).TenantId.ShouldBe(TenantA);
+        var received = _audit.Entries.Single(e => e.EventType == AuditEventTypes.ProductSyncWebhookReceived);
+        received.TenantId.ShouldBe(TenantA);
+        received.ActorSid.Value.ShouldNotBeNullOrWhiteSpace();
         (await _webhook.HandleAsync(TenantB, body, Signed(SecretA, Now(), body, "d-2"))).ShouldBe(ProductSyncWebhookStatus.Unauthorized, "the payload cannot move a delivery signed for tenant a to tenant b");
     }
 
@@ -364,6 +378,113 @@ public sealed class ProductSyncWebhookTests
 
         var wide = new ProductSyncService(_h.Service, _h.Store, _h.Audit) { ScanPageSize = 2, ScanMaxPages = 2 };
         (await wide.PlanAsync(Request())).Applied.ShouldBeFalse("a scan that reaches the end of the list is complete");
+    }
+
+    [Fact]
+    public async Task Webhook_HttpPipeline_WithStrictAuditSchema_AcceptsSignedDeliveries_AndDelegatesSuccessAudit()
+    {
+        var recorded = new List<AuditLogEntry>();
+        var strictRepo = Substitute.For<IAuditLogRepository>();
+        strictRepo.RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>())
+            .Returns(ci =>
+            {
+                var entry = ci.Arg<AuditLogEntry>();
+                if (string.IsNullOrWhiteSpace(entry.ActorSid.Value))
+                {
+                    throw new InvalidOperationException("null value in column \"actor_sid\" violates not-null constraint");
+                }
+                if (string.IsNullOrWhiteSpace(entry.TenantId.Value))
+                {
+                    throw new InvalidOperationException("null value in column \"tenant_id\" violates not-null constraint");
+                }
+
+                recorded.Add(entry);
+                return Task.CompletedTask;
+            });
+
+        var secrets = new FakeSecrets(new Dictionary<string, byte[]> { [ProductSyncWebhookService.SecretRef(TenantA)] = SecretA });
+        var webhook = new ProductSyncWebhookService(
+            secrets,
+            new InMemoryClusterStateProvider(_time),
+            new AuditWriter(strictRepo, NullLogger<AuditWriter>.Instance),
+            _time);
+
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Services.AddRouting();
+        builder.Services.AddAuthentication();
+        builder.Services.AddAuthorization();
+        builder.Services.AddProblemDetails();
+        builder.Services.AddExceptionHandler<GatewayExceptionHandler>();
+        builder.Services.AddScoped<AuditContext>();
+        builder.Services.Configure<GatewayOptions>(_ => { });
+        builder.Services.AddSingleton<IAuditWriter>(new AuditWriter(strictRepo, NullLogger<AuditWriter>.Instance));
+        builder.Services.AddSingleton(webhook);
+        builder.Services.AddSingleton(_ => (DataProductService)null!);
+        builder.Services.AddSingleton(_ => (DataSourceOwnerService)null!);
+        builder.Services.AddSingleton(_ => (ProductDiscoveryService)null!);
+        builder.Services.AddSingleton(_ => (ProductSyncService)null!);
+
+        await using var app = builder.Build();
+        app.UseExceptionHandler();
+        app.UseMiddleware<EdgeHeaderStrippingMiddleware>();
+        app.UseRouting();
+        app.UseMiddleware<AccessAuditMiddleware>();
+        app.UseAuthentication();
+        app.UseAuthorization();
+        app.MapProductEndpoints();
+        await app.StartAsync();
+
+        using var client = app.GetTestClient();
+        var bodyText = """{"after":"0123456789abcdef"}""";
+        var bodyBytes = Encoding.UTF8.GetBytes(bodyText);
+        var ts = Now();
+        var sig = ProductSyncWebhookService.Sign(SecretA, ts, bodyBytes);
+
+        using var autherisReq = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/products/sync/webhook/{TenantA.Value}")
+        {
+            Content = new StringContent(bodyText, Encoding.UTF8, "application/json")
+        };
+        autherisReq.Headers.Add("X-Autheris-Timestamp", ts);
+        autherisReq.Headers.Add("X-Autheris-Delivery", "deliv-1");
+        autherisReq.Headers.Add("X-Autheris-Signature-256", sig);
+        (await client.SendAsync(autherisReq)).StatusCode.ShouldBe(HttpStatusCode.Accepted);
+
+        using var replayReq = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/products/sync/webhook/{TenantA.Value}")
+        {
+            Content = new StringContent(bodyText, Encoding.UTF8, "application/json")
+        };
+        replayReq.Headers.Add("X-Autheris-Timestamp", ts);
+        replayReq.Headers.Add("X-Autheris-Delivery", "deliv-1");
+        replayReq.Headers.Add("X-Autheris-Signature-256", sig);
+        (await client.SendAsync(replayReq)).StatusCode.ShouldBe(HttpStatusCode.Conflict);
+
+        using var webhookReq = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/products/sync/webhook/{TenantA.Value}")
+        {
+            Content = new StringContent(bodyText, Encoding.UTF8, "application/json")
+        };
+        webhookReq.Headers.Add("X-Webhook-Timestamp", ts);
+        webhookReq.Headers.Add("X-Webhook-Delivery", "deliv-2");
+        webhookReq.Headers.Add("X-Webhook-Signature-256", sig);
+        (await client.SendAsync(webhookReq)).StatusCode.ShouldBe(HttpStatusCode.Accepted);
+
+        using var badSigReq = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/products/sync/webhook/{TenantA.Value}")
+        {
+            Content = new StringContent(bodyText, Encoding.UTF8, "application/json")
+        };
+        badSigReq.Headers.Add("X-Autheris-Timestamp", ts);
+        badSigReq.Headers.Add("X-Autheris-Delivery", "deliv-bad");
+        badSigReq.Headers.Add("X-Autheris-Signature-256", "sha256=" + new string('0', 64));
+        (await client.SendAsync(badSigReq)).StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+
+        var acceptedEntries = recorded.Where(e => e.EventType == AuditEventTypes.ProductSyncWebhookReceived).ToList();
+        acceptedEntries.Count.ShouldBe(2);
+        acceptedEntries.ShouldAllBe(e => e.TenantId == TenantA && e.Decision == "ALLOW" && !string.IsNullOrWhiteSpace(e.ActorSid.Value));
+
+        var rejectedEntries = recorded.Where(e => e.EventType == AuditEventTypes.ProductSyncWebhookRejected).ToList();
+        rejectedEntries.ShouldContain(e => e.TenantId == TenantA && e.Decision == "DENY" && !string.IsNullOrWhiteSpace(e.ActorSid.Value));
+
+        await app.StopAsync();
     }
 }
 

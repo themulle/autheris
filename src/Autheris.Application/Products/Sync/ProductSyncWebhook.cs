@@ -37,6 +37,7 @@ public sealed class ProductSyncWebhookService(
     internal const string RejectionKeyPrefix = "products:sync:webhook-rejected:";
     internal const int RejectionAuditWindowSeconds = 60;
     private const int MaxDeliveryIdLength = 100;
+    private static readonly Sid WebhookActorSid = new("system:product-sync-webhook");
 
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
 
@@ -101,6 +102,7 @@ public sealed class ProductSyncWebhookService(
         {
             EventType = AuditEventTypes.ProductSyncWebhookReceived,
             TenantId = tenant,
+            ActorSid = WebhookActorSid,
             TargetTable = "products.sync",
             Decision = "ALLOW",
             DetailsJson = JsonSerializer.Serialize(new { delivery = delivery.DeliveryId, commit }),
@@ -271,6 +273,7 @@ public sealed class ProductSyncWebhookService(
             {
                 EventType = AuditEventTypes.ProductSyncWebhookRejected,
                 TenantId = known ? tenant : TenantId.Platform,
+                ActorSid = WebhookActorSid,
                 TargetTable = "products.sync",
                 Decision = "DENY",
                 DetailsJson = JsonSerializer.Serialize(new { reason, suppressedPreviousWindow = suppressed, tenantKnown = known }),
