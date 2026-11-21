@@ -548,7 +548,8 @@ public sealed partial class AiDataGuardrailService
             result = result.Replace("\\u002B", "+", StringComparison.OrdinalIgnoreCase);
         }
 
-        if (EmailRegex.IsMatch(result)) { result = EmailRegex.Replace(result, "$1***@$2"); wasModified = true; }
+        var emailScrubbed = EmailRegex.Replace(result, "$1***@$2");
+        if (!ReferenceEquals(emailScrubbed, result) && emailScrubbed != result) { result = emailScrubbed; wasModified = true; }
         var ibanScrubbed = IbanRegex.Replace(result, m => IsValidIban(m.Value) ? "**** **** **** 1234" : m.Value);
         if (!ReferenceEquals(ibanScrubbed, result) && ibanScrubbed != result) { result = ibanScrubbed; wasModified = true; }
         if (GdprArt9Regex.IsMatch(result)) { result = GdprArt9Regex.Replace(result, @"""$1"":""[REDACTED-GDPR-ART9]"""); wasModified = true; }

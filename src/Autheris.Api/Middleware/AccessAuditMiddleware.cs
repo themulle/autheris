@@ -5,6 +5,8 @@ using System.IO;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Api.Extensions;
+using Autheris.Api.Security;
 using Autheris.Application.Audit;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Audit;
@@ -286,10 +288,11 @@ public sealed class AccessAuditMiddleware
         }
     }
 
-    private static string ResolveChannel(string path, HttpContext context)
+    private string ResolveChannel(string path, HttpContext context)
     {
-        if (path.StartsWith("/graphql", StringComparison.OrdinalIgnoreCase)) return "GraphQL";
-        if (path.StartsWith("/mcp", StringComparison.OrdinalIgnoreCase)) return "MCP";
+        if (context.Request.Path.StartsWithSegments(GatewayApplicationBuilderExtensions.ResolveGraphQlPath(_options.Value), StringComparison.OrdinalIgnoreCase))
+            return "GraphQL";
+        if (McpPathResolver.IsMcpRequest(context.Request.Path, _options.Value)) return "MCP";
         if (path.StartsWith("/odata", StringComparison.OrdinalIgnoreCase)) return "OData";
         if (path.StartsWith("/api/v1/websql", StringComparison.OrdinalIgnoreCase) || path.StartsWith("/api/v1/sql", StringComparison.OrdinalIgnoreCase)) return "WebSQL";
         if (path.StartsWith("/api/v1/lakehouse", StringComparison.OrdinalIgnoreCase)) return "Iceberg";

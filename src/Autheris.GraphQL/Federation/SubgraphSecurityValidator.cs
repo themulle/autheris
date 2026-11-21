@@ -2,6 +2,8 @@ namespace Autheris.GraphQL.Federation;
 
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
@@ -16,12 +18,26 @@ using Autheris.Application.State;
 /// </summary>
 public static class SubgraphSecurityValidator
 {
+    private const int MaxCachedNonces = 10_000;
     private static readonly ConcurrentDictionary<string, DateTimeOffset> SeenNonces = new(StringComparer.Ordinal);
+    private static readonly ConcurrentQueue<(string Key, DateTimeOffset ExpiresAt)> NonceOrder = new();
+    private static readonly object PruneGate = new();
+    private static long _lastFullSweepTimestamp;
+
+    internal static int CachedNonceCount => SeenNonces.Count;
 
     /// <summary>
     /// Clears the internal replay cache (primarily for unit tests and diagnostics).
     /// </summary>
-    public static void ResetReplayCache() => SeenNonces.Clear();
+    public static void ResetReplayCache()
+    {
+        lock (PruneGate)
+        {
+            SeenNonces.Clear();
+            while (NonceOrder.TryDequeue(out _)) { }
+            _lastFullSweepTimestamp = 0;
+        }
+    }
 
     public static bool ValidateSignature(
         string? tenant,
@@ -39,12 +55,12 @@ public static class SubgraphSecurityValidator
         string? bodySha256 = null)
     {
         var drift = maxDrift ?? TimeSpan.FromSeconds(60);
-        if (!VerifyCore(tenant, userSid, timestampStr, nonce, signature, signingKey, drift, subgraph, roles, method, path, version, bodySha256, out var now))
+        if (!VerifyCore(tenant, userSid, timestampStr, nonce, signature, signingKey, drift, subgraph, roles, method, path, version, bodySha256, out var now, out var messageTime))
         {
             return false;
         }
 
-        return TryRegisterNonceLocal(tenant!, nonce!, now);
+        return TryRegisterNonceLocal(tenant!, nonce!, now, messageTime, drift);
     }
 
     /// <summary>
@@ -71,12 +87,12 @@ public static class SubgraphSecurityValidator
         CancellationToken ct = default)
     {
         var drift = maxDrift ?? TimeSpan.FromSeconds(60);
-        if (!VerifyCore(tenant, userSid, timestampStr, nonce, signature, signingKey, drift, subgraph, roles, method, path, version, bodySha256, out var now))
+        if (!VerifyCore(tenant, userSid, timestampStr, nonce, signature, signingKey, drift, subgraph, roles, method, path, version, bodySha256, out var now, out var messageTime))
         {
             return false;
         }
 
-        if (!TryRegisterNonceLocal(tenant!, nonce!, now))
+        if (!TryRegisterNonceLocal(tenant!, nonce!, now, messageTime, drift))
         {
             return false;
         }
@@ -117,9 +133,10 @@ public static class SubgraphSecurityValidator
     private static bool VerifyCore(
         string? tenant, string? userSid, string? timestampStr, string? nonce, string? signature, string signingKey,
         TimeSpan drift, string? subgraph, string? roles, string? method, string? path,
-        string? version, string? bodySha256, out DateTimeOffset now)
+        string? version, string? bodySha256, out DateTimeOffset now, out DateTimeOffset messageTime)
     {
         now = DateTimeOffset.UtcNow;
+        messageTime = default;
 
         // Disallow 4-field signature downgrade; target subgraph must be specified
         if (string.IsNullOrWhiteSpace(tenant) ||
@@ -143,7 +160,7 @@ public static class SubgraphSecurityValidator
             return false;
         }
 
-        var messageTime = DateTimeOffset.FromUnixTimeSeconds(timestamp);
+        messageTime = DateTimeOffset.FromUnixTimeSeconds(timestamp);
         if (now - messageTime > drift || messageTime - now > drift)
         {
             return false;
@@ -164,27 +181,75 @@ public static class SubgraphSecurityValidator
             Encoding.UTF8.GetBytes(expectedSignature));
     }
 
-    private static bool TryRegisterNonceLocal(string tenant, string nonce, DateTimeOffset now)
+    private static bool TryRegisterNonceLocal(string tenant, string nonce, DateTimeOffset now, DateTimeOffset messageTime, TimeSpan drift)
     {
-        // Nonce replay defense within time-drift window
+        var effectiveDrift = drift > TimeSpan.Zero ? drift : TimeSpan.Zero;
+        var expiresAt = (messageTime > now ? messageTime : now) + effectiveDrift;
         var replayKey = $"{tenant}:{nonce}";
-        if (!SeenNonces.TryAdd(replayKey, now))
+
+        if (SeenNonces.TryGetValue(replayKey, out var existingExpiry))
+        {
+            if (existingExpiry >= now)
+            {
+                return false;
+            }
+
+            if (!SeenNonces.TryUpdate(replayKey, expiresAt, existingExpiry))
+            {
+                return false;
+            }
+        }
+        else if (!SeenNonces.TryAdd(replayKey, expiresAt))
         {
             return false;
         }
 
-        if (SeenNonces.Count > 10_000)
+        NonceOrder.Enqueue((replayKey, expiresAt));
+        PruneExpiredOrOverflow(now);
+        return true;
+    }
+
+    private static void PruneExpiredOrOverflow(DateTimeOffset now)
+    {
+        if (!Monitor.TryEnter(PruneGate))
         {
-            var cutoff = now - TimeSpan.FromMinutes(10);
-            foreach (var kvp in SeenNonces)
+            return;
+        }
+
+        try
+        {
+            for (int i = 0; i < 16 && NonceOrder.TryPeek(out var head) && head.ExpiresAt < now; i++)
             {
-                if (kvp.Value < cutoff)
+                if (NonceOrder.TryDequeue(out var popped))
                 {
-                    SeenNonces.TryRemove(kvp.Key, out _);
+                    SeenNonces.TryRemove(new KeyValuePair<string, DateTimeOffset>(popped.Key, popped.ExpiresAt));
+                }
+            }
+
+            if (SeenNonces.Count > MaxCachedNonces)
+            {
+                long stamp = Stopwatch.GetTimestamp();
+                if (_lastFullSweepTimestamp == 0 || Stopwatch.GetElapsedTime(_lastFullSweepTimestamp, stamp) >= TimeSpan.FromSeconds(1))
+                {
+                    _lastFullSweepTimestamp = stamp;
+                    foreach (var kvp in SeenNonces)
+                    {
+                        if (kvp.Value < now)
+                        {
+                            SeenNonces.TryRemove(new KeyValuePair<string, DateTimeOffset>(kvp.Key, kvp.Value));
+                        }
+                    }
+                }
+
+                while (SeenNonces.Count > MaxCachedNonces && NonceOrder.TryDequeue(out var oldest))
+                {
+                    SeenNonces.TryRemove(new KeyValuePair<string, DateTimeOffset>(oldest.Key, oldest.ExpiresAt));
                 }
             }
         }
-
-        return true;
+        finally
+        {
+            Monitor.Exit(PruneGate);
+        }
     }
 }

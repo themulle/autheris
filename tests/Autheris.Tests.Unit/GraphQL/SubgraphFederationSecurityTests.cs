@@ -620,6 +620,45 @@ public sealed class SubgraphFederationSecurityTests
             Autheris.Api.Extensions.GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, prodEnv))
             .Message.ShouldContain("Federation:SigningKey");
     }
+
+    [Fact]
+    public async Task ValidateSignature_PrunesExpiredNoncesByMaxDrift_AndBoundsReplayCacheCapacity()
+    {
+        SubgraphSecurityValidator.ResetReplayCache();
+        try
+        {
+            var bodySha = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+            var ts1 = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
+            var payload1 = FederationContextSignature.BuildCanonicalV2("tenant_drift", "user_1", ts1, "nonce_drift_1", "products", "", "POST", "/graphql", bodySha);
+            var sig1 = FederationContextSignature.Sign(payload1, Secret);
+
+            var shortDrift = TimeSpan.FromMilliseconds(1500);
+            SubgraphSecurityValidator.ValidateSignature("tenant_drift", "user_1", ts1, "nonce_drift_1", sig1, Secret, shortDrift, "products", "", "POST", "/graphql", "v2", bodySha).ShouldBeTrue();
+            SubgraphSecurityValidator.CachedNonceCount.ShouldBe(1);
+
+            await Task.Delay(1650);
+
+            var ts2 = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
+            var payload2 = FederationContextSignature.BuildCanonicalV2("tenant_drift", "user_1", ts2, "nonce_drift_2", "products", "", "POST", "/graphql", bodySha);
+            var sig2 = FederationContextSignature.Sign(payload2, Secret);
+            SubgraphSecurityValidator.ValidateSignature("tenant_drift", "user_1", ts2, "nonce_drift_2", sig2, Secret, TimeSpan.FromSeconds(60), "products", "", "POST", "/graphql", "v2", bodySha).ShouldBeTrue();
+            SubgraphSecurityValidator.CachedNonceCount.ShouldBe(1);
+
+            for (int i = 0; i < 10_250; i++)
+            {
+                var nonce = "nonce_cap_" + i;
+                var p = FederationContextSignature.BuildCanonicalV2("tenant_cap", "user_1", ts2, nonce, "products", "", "POST", "/graphql", bodySha);
+                var s = FederationContextSignature.Sign(p, Secret);
+                SubgraphSecurityValidator.ValidateSignature("tenant_cap", "user_1", ts2, nonce, s, Secret, TimeSpan.FromSeconds(60), "products", "", "POST", "/graphql", "v2", bodySha).ShouldBeTrue();
+            }
+
+            SubgraphSecurityValidator.CachedNonceCount.ShouldBeLessThanOrEqualTo(10_000);
+        }
+        finally
+        {
+            SubgraphSecurityValidator.ResetReplayCache();
+        }
+    }
 }
 
 [Trait("Category", "Security")]
