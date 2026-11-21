@@ -150,7 +150,8 @@ public sealed class FederatedSubtreeColumnDecisionTests
         var b = Meta("pg", "items", null, "id", "secret");
         var s = Build("SELECT o.id FROM pg.public.orders o JOIN pg.public.items i ON o.id = i.id", (a, Open(a)), (b, Constrained(b, ColumnAccessLevel.Deny)));
         var (tree, _) = Engine.Parse(s.Sql.AsMemory());
-        var statement = new SqlAstBuilder().BuildStatement(tree);
+        var options = new AstBuilderOptions { AllowedFunctions = TrinoSqlEngine.SqlFunctionAllowlists.WithDateTranslation(TrinoSqlEngine.SqlFunctionAllowlists.DuckDb) };
+        var statement = new SqlAstBuilder(options).BuildStatement(tree);
 
         SubtreeGraphPartitioner.Partition(statement, s.Tables, 5).Subtrees.Count.ShouldBe(1);
         var result = SubtreeGraphPartitioner.Partition(statement, s.Tables, 5, t => SubtreeCompiler.IsPushdownEligible(t, s.Decisions[t.Metadata.Identifier]));
@@ -168,7 +169,8 @@ public sealed class FederatedSubtreeColumnDecisionTests
         var (rootMeta, otherMeta) = ineligibleIsRoot ? (a, b) : (b, a);
         var s = Build("SELECT o.id FROM pg.public.orders o JOIN pg.public.items i ON o.id = i.id", (a, ineligibleIsRoot ? Constrained(a, ColumnAccessLevel.Mask) : Open(a)), (b, ineligibleIsRoot ? Open(b) : Constrained(b, ColumnAccessLevel.Mask)));
         var (tree, _) = Engine.Parse(s.Sql.AsMemory());
-        var subtree = SubtreeGraphPartitioner.Partition(new SqlAstBuilder().BuildStatement(tree), s.Tables, 5).Subtrees.Single();
+        var options = new AstBuilderOptions { AllowedFunctions = TrinoSqlEngine.SqlFunctionAllowlists.WithDateTranslation(TrinoSqlEngine.SqlFunctionAllowlists.DuckDb) };
+        var subtree = SubtreeGraphPartitioner.Partition(new SqlAstBuilder(options).BuildStatement(tree), s.Tables, 5).Subtrees.Single();
 
         var ex = Should.Throw<GatewaySecurityException>(() => SubtreeCompiler.Compile(
             subtree, s.Decisions, new CrossSourceOptions { Enabled = true }, Engine, PlannerTestIdentity.User, PlannerTestIdentity.Tenant));

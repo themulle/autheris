@@ -212,7 +212,10 @@ public sealed class FederatedVirtualFilterPointLookupTests
         var metadata = Engine.Analyze(sql.AsMemory());
         var tables = metadata.ReferencedTables.Select(t => new ResolvedSourceTable(t, table.Identifier, table, table.Identifier.Domain)).ToList();
         var (tree, _) = Engine.Parse(sql.AsMemory());
-        return (tables, new SqlAstBuilder().BuildStatement(tree));
+        return (tables, new SqlAstBuilder(new AstBuilderOptions
+        {
+            AllowedFunctions = TrinoSqlEngine.SqlFunctionAllowlists.WithDateTranslation(TrinoSqlEngine.SqlFunctionAllowlists.DuckDb)
+        }).BuildStatement(tree));
     }
 
     private static async Task<VirtualFilterTablePlan> PlanAsync(

@@ -228,7 +228,7 @@ public sealed class SqlOperatorChainDepthTests
         Assert.Contains("[Region] =", compiled.Sql, StringComparison.Ordinal);
         Assert.Contains("[TenantId] =", compiled.Sql, StringComparison.Ordinal);
 
-        Assert.Throws<SecurityException>(() =>
+        Assert.Throws<MaskedColumnPredicateException>(() =>
             env.Compile("SELECT Id FROM dbo.Orders WHERE Id = 1 OR Id = 2 OR Id = 3 OR Id = 4 OR Email = 'a@b.c'"));
     }
 
@@ -250,7 +250,7 @@ public sealed class SqlOperatorChainDepthTests
         sb.Append(" OR Email IS NULL");
         string sql = sb.ToString();
 
-        var ex = Assert.Throws<SecurityException>(() => env.Compile(sql));
+        var ex = Assert.Throws<MaskedColumnPredicateException>(() => env.Compile(sql));
         Assert.Contains("Email", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 

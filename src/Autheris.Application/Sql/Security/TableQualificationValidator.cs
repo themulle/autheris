@@ -45,7 +45,11 @@ public sealed class TableQualificationValidator : SqlAstRewriter
     {
         ArgumentNullException.ThrowIfNull(rawSql);
         var (tree, _) = FastSqlEngine.Default.Parse(rawSql.AsMemory());
-        var statement = new SqlAstBuilder().BuildStatement(tree);
+        var statement = new SqlAstBuilder(new AstBuilderOptions
+        {
+            EnforceFunctionPolicy = true,
+            AllowedFunctions = SqlDialectMapper.AllSafeDialectFunctions
+        }).BuildStatement(tree);
         Validate(statement, authorizedCatalogs);
     }
 

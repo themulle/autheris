@@ -105,7 +105,7 @@ internal static class ParityData
 
     public static EngineOutcome Ids(IEnumerable<long> ids) => new EngineOutcome.Rows([.. ids.Select(i => new object?[] { i })]);
 
-    public static EngineOutcome Refused(Exception ex) => new EngineOutcome.Rejected(RejectionStage.Compile, ex.GetType().Name, GateRunner.IsGoverned(ex) || ex is InvalidOperationException);
+    public static EngineOutcome Refused(Exception ex) => new EngineOutcome.Rejected(RejectionStage.Compile, GateRunner.RejectionReason(ex), GateRunner.IsGoverned(ex) || ex is InvalidOperationException);
 
     public static EngineOutcome DatabaseError(Exception ex) => new EngineOutcome.Rejected(RejectionStage.Execute, ex.GetType().Name, false);
 }

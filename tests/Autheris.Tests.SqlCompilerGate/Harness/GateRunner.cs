@@ -106,7 +106,7 @@ public sealed class GateRunner(GateDatabase database, PolicyScenario scenario)
         }
         catch (Exception ex)
         {
-            return new EngineOutcome.Rejected(RejectionStage.Compile, ex.GetType().Name, IsGoverned(ex));
+            return new EngineOutcome.Rejected(RejectionStage.Compile, RejectionReason(ex), IsGoverned(ex));
         }
 
         return await ExecuteAsync(statement, async (conn, token) =>
@@ -133,7 +133,7 @@ public sealed class GateRunner(GateDatabase database, PolicyScenario scenario)
             }
             catch (Exception ex) when (ex is SecurityException or GovernedSqlException)
             {
-                return new EngineOutcome.Rejected(RejectionStage.Compile, ex.GetType().Name, true);
+                return new EngineOutcome.Rejected(RejectionStage.Compile, RejectionReason(ex), true);
             }
 
             return await RunCommandAsync(cmd, statement, token);
@@ -207,6 +207,9 @@ public sealed class GateRunner(GateDatabase database, PolicyScenario scenario)
             }
         }
     }
+
+    internal static string RejectionReason(Exception ex) =>
+        ex is MaskedColumnPredicateException ? nameof(SecurityException) : ex.GetType().Name;
 
     /// <summary>A typed, expected governance refusal (as opposed to an unexpected exception type, which is an AST defect).</summary>
     public static bool IsGoverned(Exception ex) =>
