@@ -11,14 +11,15 @@ using Microsoft.Extensions.Caching.Distributed;
 using StackExchange.Redis;
 
 /// <summary>
-/// Shared <see cref="IWriteBudgetStore"/> backed by either <see cref="IDistributedCache"/> or Redis <see cref="IConnectionMultiplexer"/>.
+/// Shared <see cref="IWriteBudgetStore"/> backed by Redis <see cref="IConnectionMultiplexer"/> (atomic Lua scripts),
+/// with an <see cref="IDistributedCache"/> single-process fallback constructor for unit tests.
 /// Fails closed on backing-store errors when Redis is used.
 /// </summary>
 public sealed class DistributedCacheWriteBudgetStore : IWriteBudgetStore
 {
     private const int StripeCount = 64;
 
-    private static readonly LuaScript AcquireStatementLua = LuaScript.Prepare(@"
+    private const string AcquireStatementScript = @"
         local stmtKey = KEYS[1]
         local rowsKey = KEYS[2]
         local maxStmts = tonumber(ARGV[1])
@@ -41,9 +42,9 @@ public sealed class DistributedCacheWriteBudgetStore : IWriteBudgetStore
         end
 
         return { 1, maxRows - usedRows }
-    ");
+    ";
 
-    private static readonly LuaScript RecordRowsLua = LuaScript.Prepare(@"
+    private const string RecordRowsScript = @"
         local rowsKey = KEYS[1]
         local affected = tonumber(ARGV[1])
         local maxRows = tonumber(ARGV[2])
@@ -62,7 +63,7 @@ public sealed class DistributedCacheWriteBudgetStore : IWriteBudgetStore
         end
 
         return 1
-    ");
+    ";
 
     private readonly IDistributedCache? _distributedCache;
     private readonly IDatabase? _redisDb;
@@ -115,18 +116,14 @@ public sealed class DistributedCacheWriteBudgetStore : IWriteBudgetStore
 
         if (_redisDb is not null)
         {
-            var res = (RedisResult[]?)await AcquireStatementLua.EvaluateAsync(
-                _redisDb,
-                new
-                {
-                    KEYS = new RedisKey[] { (RedisKey)stmtKey, (RedisKey)rowsKey },
-                    ARGV = new RedisValue[]
-                    {
-                        (RedisValue)limit.StatementsPerMinute,
-                        (RedisValue)limit.RowsPerHour,
-                        (RedisValue)120
-                    }
-                }).ConfigureAwait(false);
+            var res = (RedisResult[]?)await _redisDb.ScriptEvaluateAsync(
+                AcquireStatementScript,
+                [(RedisKey)stmtKey, (RedisKey)rowsKey],
+                [
+                    (RedisValue)limit.StatementsPerMinute,
+                    (RedisValue)limit.RowsPerHour,
+                    (RedisValue)120
+                ]).ConfigureAwait(false);
 
             if (res is { Length: >= 2 })
             {
@@ -200,18 +197,14 @@ public sealed class DistributedCacheWriteBudgetStore : IWriteBudgetStore
 
         if (_redisDb is not null)
         {
-            var res = (long)await RecordRowsLua.EvaluateAsync(
-                _redisDb,
-                new
-                {
-                    KEYS = new RedisKey[] { (RedisKey)rowsKey },
-                    ARGV = new RedisValue[]
-                    {
-                        (RedisValue)affectedRows,
-                        (RedisValue)rowsPerHourLimit,
-                        (RedisValue)7200
-                    }
-                }).ConfigureAwait(false);
+            var res = (long)await _redisDb.ScriptEvaluateAsync(
+                RecordRowsScript,
+                [(RedisKey)rowsKey],
+                [
+                    (RedisValue)affectedRows,
+                    (RedisValue)rowsPerHourLimit,
+                    (RedisValue)7200
+                ]).ConfigureAwait(false);
             return res == 1;
         }
 

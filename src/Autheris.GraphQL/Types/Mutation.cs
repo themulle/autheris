@@ -37,10 +37,12 @@ public sealed class ConsentRequestPayload
 
 public sealed partial class Mutation
 {
-    private static Sid GetAuthenticatedUserSid(IHttpContextAccessor httpContextAccessor)
+    private static Sid GetAuthenticatedUserSid(
+        IHttpContextAccessor? httpContextAccessor,
+        HotChocolate.Resolvers.IResolverContext? resolverContext = null)
     {
-        var httpContext = httpContextAccessor?.HttpContext;
-        if (httpContext?.User?.Identity?.IsAuthenticated != true)
+        var principal = Autheris.GraphQL.Security.GraphQlCallerPrincipal.Resolve(resolverContext, httpContextAccessor);
+        if (principal.Identity?.IsAuthenticated != true)
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("UNAUTHORIZED")
@@ -48,7 +50,7 @@ public sealed partial class Mutation
                 .Build());
         }
 
-        var userSid = httpContext.User.GetUserSid();
+        var userSid = principal.GetUserSid();
         if (userSid == null)
         {
             throw new GraphQLException(ErrorBuilder.New()
@@ -60,18 +62,8 @@ public sealed partial class Mutation
         return userSid.Value;
     }
 
-    private static TenantId GetContextTenantId(IHttpContextAccessor? httpContextAccessor)
-    {
-        TenantId contextTenant = default; // DT-A-3: no sentinel; unset means "no context tenant" (ResolveTenantId falls back to the claim)
-        if (httpContextAccessor?.HttpContext?.Items.TryGetValue(SecurityPrincipalContext.ItemKey, out var secObj) == true && secObj is SecurityPrincipalContext secCtx)
-        {
-            contextTenant = secCtx.ResolvedTenant ?? default;
-        }
-        else if (httpContextAccessor?.HttpContext?.Items.TryGetValue("TenantId", out var tidObj) == true && tidObj is TenantId tid)
-        {
-            contextTenant = tid;
-        }
-
-        return contextTenant;
-    }
+    private static TenantId GetContextTenantId(
+        IHttpContextAccessor? httpContextAccessor,
+        HotChocolate.Resolvers.IResolverContext? resolverContext = null) =>
+        Autheris.GraphQL.Security.GraphQlCallerPrincipal.ResolveContextTenantId(resolverContext, httpContextAccessor);
 }

@@ -23,10 +23,11 @@ public sealed partial class Mutation
         [Service] IHttpContextAccessor httpContextAccessor = default!,
         [Service] Autheris.Application.Common.Interfaces.IAuditLogRepository auditLog = default!,
         [Service] Autheris.Application.Audit.IAuditWriter? auditWriter = null,
+        HotChocolate.Resolvers.IResolverContext? resolverContext = null,
         CancellationToken ct = default)
     {
-        var principal = httpContextAccessor?.HttpContext?.User;
-        if (principal?.Identity?.IsAuthenticated != true)
+        var principal = Autheris.GraphQL.Security.GraphQlCallerPrincipal.Resolve(resolverContext, httpContextAccessor);
+        if (principal.Identity?.IsAuthenticated != true)
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("UNAUTHORIZED")
@@ -93,10 +94,11 @@ public sealed partial class Mutation
         bool dryRun = false,
         [Service] IServiceProvider serviceProvider = default!,
         [Service] IHttpContextAccessor httpContextAccessor = default!,
+        HotChocolate.Resolvers.IResolverContext? resolverContext = null,
         CancellationToken ct = default)
     {
-        var principal = httpContextAccessor?.HttpContext?.User;
-        if (principal?.Identity?.IsAuthenticated != true)
+        var principal = Autheris.GraphQL.Security.GraphQlCallerPrincipal.Resolve(resolverContext, httpContextAccessor);
+        if (principal.Identity?.IsAuthenticated != true)
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("UNAUTHORIZED")
@@ -105,9 +107,8 @@ public sealed partial class Mutation
         }
 
         // SR-L-23: only the canonical ClusterAdmin (claims-based, never ForwardAuth) or a GovernanceAdmin may synchronise.
-        var roles = principal.FindAll(ClaimTypes.Role).Select(r => r.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var isClusterAdmin = Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
-        if (!isClusterAdmin && !roles.Contains("GovernanceAdmin"))
+        if (!isClusterAdmin && !Autheris.GraphQL.Security.GraphQlCallerPrincipal.HasGatewayRole(principal, Autheris.Domain.Security.GatewayRole.GovernanceAdmin))
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("FORBIDDEN")
@@ -170,10 +171,11 @@ public sealed partial class Mutation
         [Service] Autheris.Application.Audit.IAuditWriter? auditWriter = null,
         [Service] Autheris.Application.Common.Interfaces.IAuditLogRepository? auditLog = null,
         [Service] ILogger<Mutation>? logger = null,
+        HotChocolate.Resolvers.IResolverContext? resolverContext = null,
         CancellationToken ct = default)
     {
-        var principal = httpContextAccessor?.HttpContext?.User;
-        if (principal?.Identity?.IsAuthenticated != true)
+        var principal = Autheris.GraphQL.Security.GraphQlCallerPrincipal.Resolve(resolverContext, httpContextAccessor);
+        if (principal.Identity?.IsAuthenticated != true)
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("UNAUTHORIZED")
@@ -181,9 +183,8 @@ public sealed partial class Mutation
                 .Build());
         }
 
-        var roles = principal.FindAll(ClaimTypes.Role).Select(r => r.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var isClusterAdmin = Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
-        if (!isClusterAdmin && !roles.Contains("GovernanceAdmin"))
+        if (!isClusterAdmin && !Autheris.GraphQL.Security.GraphQlCallerPrincipal.HasGatewayRole(principal, Autheris.Domain.Security.GatewayRole.GovernanceAdmin))
         {
             TenantId denyTenant;
             try

@@ -66,9 +66,10 @@ public sealed class RedisClusterStateProvider : IDistributedClusterStateProvider
     private const string AcquireLeaseScript = @"
 if redis.call('EXISTS', KEYS[1]) == 1 then return -1 end
 if redis.call('EXISTS', KEYS[2]) == 0 then redis.call('SET', KEYS[2], ARGV[3]) end
-local f = redis.call('INCR', KEYS[2])
-redis.call('SET', KEYS[1], ARGV[1] .. ':' .. f, 'PX', ARGV[2])
-return f
+redis.call('INCR', KEYS[2])
+local f_str = redis.call('GET', KEYS[2])
+redis.call('SET', KEYS[1], ARGV[1] .. ':' .. f_str, 'PX', ARGV[2])
+return f_str
 ";
 
     private const string ExtendLeaseScript = @"
@@ -366,7 +367,7 @@ end
             var ttlMs = (long)ttl.TotalMilliseconds;
 
             var result = await db.ScriptEvaluateAsync(AcquireLeaseScript, [leaseKey, fenceKey], [owner, ttlMs, _time.GetUtcNow().ToUnixTimeMilliseconds() * 1000]).ConfigureAwait(false);
-            var fence = (long)result;
+            var fence = long.Parse(result.ToString()!, System.Globalization.CultureInfo.InvariantCulture);
             if (fence < 0)
             {
                 return null;
