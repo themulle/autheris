@@ -73,7 +73,9 @@ public static class GatewayPolicies
     /// respecting role hierarchy (e.g. ClusterAdmin implies GovernanceAdmin/DataSteward).
     /// </summary>
     public static bool HasRole(ClaimsPrincipal? principal, GatewayRole role, string? tenantId = null)
-        => Evaluator.HasRole(principal, role, tenantId);
+        => role == GatewayRole.ClusterAdmin && string.IsNullOrEmpty(tenantId)
+            ? ClusterAdminPolicy.IsCanonicalClusterAdmin(principal)
+            : Evaluator.HasRole(principal, role, tenantId);
 
     /// <summary>
     /// K-K10: Checks if principal satisfies any of the strongly-typed GatewayRoles.
@@ -233,7 +235,9 @@ public static class GatewayPolicies
     {
         options.AddPolicy(name, policy => policy
             .RequireAuthenticatedUser()
-            .RequireAssertion(ctx => HasAnyRole(ctx.User, roles)));
+            .RequireAssertion(ctx => string.Equals(name, ClusterAdmin, StringComparison.Ordinal)
+                ? ClusterAdminPolicy.IsCanonicalClusterAdmin(ctx.User)
+                : HasAnyRole(ctx.User, roles)));
     }
 
     /// <summary>

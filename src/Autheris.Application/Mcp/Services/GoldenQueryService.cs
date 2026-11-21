@@ -81,12 +81,6 @@ public sealed class GoldenQueryService : IGoldenQueryService
     }
 
     public ValueTask<IReadOnlyList<GoldenQuery>> GetGoldenQueriesAsync(
-        string? domain = null,
-        string? tableName = null,
-        CancellationToken ct = default) =>
-        GetGoldenQueriesAsync(domain, tableName, null, ct);
-
-    public ValueTask<IReadOnlyList<GoldenQuery>> GetGoldenQueriesAsync(
         string? domain,
         string? tableName,
         Func<GoldenQuery, bool>? visible,

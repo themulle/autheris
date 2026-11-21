@@ -30,9 +30,7 @@ using Autheris.Domain.Options;
 using Autheris.Infrastructure.Connectors;
 using Autheris.Infrastructure.Persistence;
 using Autheris.Tests.Unit.TestDoubles;
-using HotChocolate.Execution;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -66,7 +64,7 @@ public sealed partial class AdvisoryRegressionTests
             Options.Create(new GatewayOptions()), null,
             provider, ingestion, UnusedSearch, NullLogger<CatalogDiscoveryService>.Instance);
 
-    private static Autheris.Domain.Model.RequestContext Ctx() => new(TenantA, new Sid("admin"), Roles: ["GovernanceAdmin"]);
+    private static RequestContext Ctx() => new(TenantA, new Sid("admin"), Roles: ["GovernanceAdmin"]);
 
     private static TableMetadata Table(string owner, string name = "orders", string source = "src_b") => new()
     {
@@ -351,6 +349,184 @@ public sealed partial class AdvisoryRegressionTests
         }
     }
 
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Ghsa_3fhv_363w_regression()
+    {
+        var ordersId = new TableIdentifier("sales", "dbo", "orders");
+        var hiddenId = new TableIdentifier("hr", "dbo", "salaries");
+
+        var orders = new TableMetadata
+        {
+            Identifier = ordersId,
+            Table = new Table { Id = Guid.NewGuid(), SourceName = "sales", SchemaName = "dbo", TableName = "orders", DisplayName = "Orders", IsActive = true },
+            Columns =
+            [
+                new TableColumn { ColumnName = "id", DataType = "int", DiscoveryHidden = false, Description = "Order ID" },
+                new TableColumn { ColumnName = "secret_note", DataType = "varchar", DiscoveryHidden = true, Description = "Internal note" }
+            ]
+        };
+        var salaries = new TableMetadata
+        {
+            Identifier = hiddenId,
+            Table = new Table { Id = Guid.NewGuid(), SourceName = "hr", SchemaName = "dbo", TableName = "salaries", DisplayName = "Salaries", IsActive = true },
+            Columns = [new TableColumn { ColumnName = "salary", DataType = "int" }]
+        };
+
+        var repo = Substitute.For<ITableMetadataRepository>();
+        repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([orders, salaries]));
+        Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeSingleReadsFromCatalog(repo);
+
+        var consents = Substitute.For<IConsentRepository>();
+        consents.GetAllActiveConsentsForSubjectsAsync(
+                Arg.Any<IEnumerable<Sid>>(), Arg.Any<IEnumerable<string>?>(), Arg.Any<DateTimeOffset?>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<Consent>>([new Consent { TableIdentifier = ordersId, Effect = ConsentEffect.Allow, TenantId = TenantA }]));
+
+        var golden = new Autheris.Application.Mcp.Services.GoldenQueryService(
+            Options.Create(new GatewayOptions()),
+            NullLogger<Autheris.Application.Mcp.Services.GoldenQueryService>.Instance);
+        golden.RegisterGoldenQuery(new GoldenQuery("gq-safe", "sales", "orders", "Safe", "", "query { orders { id } }"));
+        golden.RegisterGoldenQuery(new GoldenQuery("gq-hidden-col", "sales", "orders", "HiddenCol", "", "query { orders { id secret_note } }"));
+        golden.RegisterGoldenQuery(new GoldenQuery("gq-hidden-rel", "sales", "orders", "HiddenRel", "", "query { orders { id salaries { salary } } }"));
+
+        var map = Substitute.For<Autheris.Application.Mcp.Interfaces.IGraphQlCatalogMap>();
+        map.GetTableAsync(ordersId, Arg.Any<CancellationToken>())
+            .Returns(new GraphQlTableMapping(
+                ordersId,
+                "orders",
+                "Orders",
+                "OrdersFilter",
+                "OrdersOrderBy",
+                [new GraphQlColumnMapping("id", "id", "Int"), new GraphQlColumnMapping("secret_note", "secret_note", "String")],
+                [new GraphQlRelationMapping("salaries", hiddenId, true)]));
+
+        var compiler = new Autheris.Application.Mcp.Services.SemanticMcpCompiler(
+            repo,
+            NullLogger<Autheris.Application.Mcp.Services.SemanticMcpCompiler>.Instance,
+            golden,
+            consents,
+            graphQlCatalogMap: map);
+
+        var caller = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-USER"), new Claim("tenant_id", "tenant-a")], "Bearer"));
+
+        var compiled = await compiler.CompileToolAsync("query_orders", ordersId);
+        compiled.InputJsonSchema.ShouldContain("\"id\"");
+        compiled.InputJsonSchema.ShouldNotContain("secret_note");
+
+        var examples = await compiler.ReadSemanticResourceAsync(caller, "examples://sales/orders");
+        examples.ShouldNotBeNull();
+        examples!.Text.ShouldContain("Safe");
+        examples.Text.ShouldNotContain("secret_note");
+        examples.Text.ShouldNotContain("salaries");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Ghsa_6cm8_cfcm_regression()
+    {
+        var tables = new Autheris.Tests.Unit.Catalog.Discovery.FakeDiscoveryTableRepository();
+        var orders = Autheris.Tests.Unit.Catalog.Discovery.DiscoveryTestBuilder.MakeTable(
+            "sales",
+            "orders",
+            ownerTenantId: "tenant-a",
+            columns: [("id", false, false), ("ssn", true, false)]);
+        tables.Tables.Add(orders);
+
+        var store = new Autheris.Tests.Unit.Catalog.Discovery.FakeDiscoveryArtifactStore();
+        store.Artifacts[orders.Table.Id] = new DiscoveryArtifacts(
+            orders.Table.Id,
+            "tenant-a",
+            SamplesJson: """[{"id":1,"ssn":"CANARY-PII-999"}]""",
+            StatisticsJson: null,
+            ContentSha256: "sha",
+            UploadedBy: "S-UP",
+            UploadedAt: DateTimeOffset.UtcNow,
+            SchemaVersion: 1);
+
+        var pdp = new Autheris.Tests.Unit.Catalog.Discovery.FakeAccessDecisionPoint(req => TableAccessDecision.Allowed(
+            req.Object.Identifier,
+            new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["id"] = ColumnAccessLevel.Clear,
+                ["ssn"] = ColumnAccessLevel.Mask
+            }));
+
+        var normalUser = Autheris.Tests.Unit.Catalog.Discovery.DiscoveryTestBuilder.User("S-1-5-21-NORMAL", "tenant-a");
+
+        var withPdp = new Autheris.Application.Catalog.Discovery.DiscoveryArtifactService(
+            tables,
+            store,
+            new Autheris.Tests.Unit.Catalog.Discovery.FakeDiscoveryOwnershipRepository(),
+            new Autheris.Tests.Unit.Catalog.Discovery.FakeAuditWriter(),
+            new Autheris.Application.Security.GatewayRoleEvaluator(),
+            Options.Create(new GatewayOptions { Tenancy = Autheris.Tests.Common.TenancyShapeExtensions.Options(Autheris.Tests.Common.TenancyShape.Multi) }),
+            Options.Create(new CatalogDiscoveryOptions()),
+            decisionPoint: pdp);
+        var samples = await withPdp.GetSamplesAsync(normalUser, orders.Identifier.ToString());
+        samples.Payload!.Available.ShouldBeTrue();
+        samples.Payload.Samples[0].ContainsKey("id").ShouldBeTrue();
+        samples.Payload.Samples[0].ContainsKey("ssn").ShouldBeFalse();
+
+        var withoutPdp = new Autheris.Application.Catalog.Discovery.DiscoveryArtifactService(
+            tables,
+            store,
+            new Autheris.Tests.Unit.Catalog.Discovery.FakeDiscoveryOwnershipRepository(),
+            new Autheris.Tests.Unit.Catalog.Discovery.FakeAuditWriter(),
+            new Autheris.Application.Security.GatewayRoleEvaluator(),
+            Options.Create(new GatewayOptions { Tenancy = Autheris.Tests.Common.TenancyShapeExtensions.Options(Autheris.Tests.Common.TenancyShape.Multi) }),
+            Options.Create(new CatalogDiscoveryOptions()));
+        var failClosed = await withoutPdp.GetSamplesAsync(normalUser, orders.Identifier.ToString());
+        failClosed.Payload!.Available.ShouldBeFalse();
+        failClosed.Payload.Samples.ShouldBeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Ghsa_vxp8_mf72_regression()
+    {
+        // 1. IdentityPipeline strips ClusterAdmin resolved by IRoleResolver for ForwardAuth principals.
+        var realm = new Autheris.Domain.Identity.IdentityRealm(
+            "forward-realm",
+            Autheris.Domain.Identity.IdentityRealmKind.ForwardAuth,
+            new Autheris.Domain.Identity.TenantBindingSpecification(Autheris.Domain.Identity.TenantBindingKind.Fixed, FixedTenantId: TenantA),
+            groupSource: Autheris.Domain.Identity.RealmGroupSource.Resolver);
+        var resolver = Substitute.For<Autheris.Application.Identity.IRoleResolver>();
+        TestIdentityPipeline.StubResolution(
+            resolver,
+            new Autheris.Domain.Identity.RoleResolution(
+                new HashSet<string>(),
+                new HashSet<string>(["ClusterAdmin", "GovernanceAdmin"], StringComparer.OrdinalIgnoreCase),
+                new Dictionary<string, string>(),
+                DateTimeOffset.UtcNow,
+                DateTimeOffset.UtcNow.AddMinutes(5),
+                "test"));
+        var pipeline = TestIdentityPipeline.Create(new FakeIdentityRealmRegistry(realm), resolver);
+
+        var rawFwd = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, "alice"), new Claim("oid", "alice-oid")], "ForwardAuth"));
+        var processed = await pipeline.ProcessAsync(rawFwd, "ForwardAuth", null, CancellationToken.None);
+        processed.FindAll(ClaimTypes.Role).Select(c => c.Value).ShouldNotContain("ClusterAdmin");
+        processed.FindAll(ClaimTypes.Role).Select(c => c.Value).ShouldContain("GovernanceAdmin");
+        Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(processed).ShouldBeFalse();
+
+        // 2. EndpointSecurity.IsClusterAdmin, GatewayPolicies.HasRole(ClusterAdmin), and cross-tenant GrantRecords reject ForwardAuth ClusterAdmin.
+        var forgedFwd = new ClaimsPrincipal(new ClaimsIdentity(
+        [
+            new Claim(ClaimTypes.PrimarySid, "S-1-5-21-FWD"),
+            new Claim("tenant_id", "tenant-a"),
+            new Claim(ClaimTypes.Role, "ClusterAdmin")
+        ], "ForwardAuth"));
+        EndpointSecurity.IsClusterAdmin(forgedFwd).ShouldBeFalse();
+        Autheris.Api.Security.GatewayPolicies.HasRole(forgedFwd, Autheris.Domain.Security.GatewayRole.ClusterAdmin).ShouldBeFalse();
+
+        var ctx = new DefaultHttpContext { User = forgedFwd };
+        var result = await ConsentWorkflowAdminEndpoints.ExportGrantRecordAsync(
+            Guid.NewGuid(),
+            ctx,
+            Substitute.For<Autheris.Application.Governance.Grants.Records.IGrantRecordExportService>(),
+            tenantId: "tenant-b");
+        ((IStatusCodeHttpResult)result).StatusCode.ShouldBe(StatusCodes.Status403Forbidden);
+    }
+
     private sealed class MutableTableRepo : ITableMetadataRepository
     {
         public IReadOnlyList<TableMetadata> Tables { get; set; } = [];
@@ -364,120 +540,5 @@ public sealed partial class AdvisoryRegressionTests
             TableIdentifier table, IReadOnlyList<string> primaryKey, IReadOnlyList<TableIndexDefinition> indexes,
             IReadOnlyList<KeyColumnDirection>? primaryKeyDirections = null, CancellationToken ct = default)
             => throw new NotSupportedException();
-    }
-
-    [Fact]
-    [Trait("Category", "Security")]
-    public async Task Ghsa_xwpx_93pp_regression()
-    {
-        var httpIdentity = new ClaimsIdentity(
-        [
-            new Claim(ClaimTypes.PrimarySid, "S-1-5-21-HTTP"),
-            new Claim(ClaimTypes.Role, "GovernanceAdmin"),
-            new Claim(ClaimTypes.GroupSid, "S-1-5-21-1-2-3-400", ClaimValueTypes.String, Autheris.Domain.Common.IdentityClaimIssuers.Pipeline),
-            new Claim("tenant_id", "tenant-a")
-        ], "Bearer");
-        var httpUser = new ClaimsPrincipal(httpIdentity);
-
-        var mcpAppPrincipal = new ClaimsPrincipal(new ClaimsIdentity(
-        [
-            new Claim(ClaimTypes.PrimarySid, "S-1-5-21-MCP-APP"),
-            new Claim("idtyp", "app"),
-            new Claim("tenant_id", "tenant-a")
-        ], "McpAuth"));
-
-        var aggregation = Substitute.For<Autheris.Application.Analytics.IGovernedAggregationService>();
-        aggregation.ExecuteAggregationAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<Autheris.Application.Analytics.AggregationQuery>(), Arg.Any<CancellationToken>())
-            .Returns(_ => Autheris.Tests.Unit.GraphQL.TypedAggregateTestHost.Result([], 2));
-
-        var metrics = Substitute.For<Autheris.Application.Analytics.ISemanticMetricQueryService>();
-        metrics.QueryMetricsAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<Autheris.Application.Analytics.MetricQueryRequest>(), Arg.Any<CancellationToken>())
-            .Returns(_ => new Autheris.Application.Analytics.MetricQueryResult(
-                ["revenue"], "v1", [],
-                new Autheris.Application.Analytics.AggregationGroupRow(new Dictionary<string, object?>(), 1, new Dictionary<string, object?>()),
-                new Autheris.Application.Analytics.AggregationMetadata(5, SmallGroupStrategy.Suppress, false, 0, 0, false, false),
-                new Dictionary<string, Autheris.Application.Catalog.Semantic.MetricDefinitionSummary>()));
-
-        var approvalRepo = Substitute.For<IConsentApprovalRepository>();
-        approvalRepo.GetRequestsByRequesterSidAsync(Arg.Any<Sid>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<ConsentRequest>>([]));
-
-        var catalogClient = Substitute.For<IDataCatalogClient>();
-        var catalogSync = Substitute.For<Autheris.Application.Catalog.Interfaces.IDataCatalogSyncService>();
-
-        var table = Autheris.Tests.Unit.GraphQL.TypedAggregateTestHost.DefaultTable();
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        metadataRepo.StubAllTables([table]);
-        var relationRepo = Substitute.For<ITableRelationRepository>();
-        relationRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns([]);
-
-        var accessor = Substitute.For<IHttpContextAccessor>();
-        var httpContext = new DefaultHttpContext { User = httpUser };
-        httpContext.Items["TenantId"] = new TenantId("tenant-a");
-
-        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
-        services.AddSingleton(metadataRepo);
-        services.AddSingleton(relationRepo);
-        services.AddSingleton(Substitute.For<Autheris.Application.Sql.Tree.IGovernedTreeQueryService>());
-        services.AddSingleton(aggregation);
-        services.AddSingleton(metrics);
-        services.AddSingleton(approvalRepo);
-        services.AddSingleton(catalogClient);
-        services.AddSingleton(catalogSync);
-        services.AddSingleton(accessor);
-        services.AddSingleton(Options.Create(new GatewayOptions()));
-        services.AddSingleton(Options.Create(new AnalyticsOptions()));
-
-        var sp = services.BuildServiceProvider();
-        httpContext.RequestServices = sp;
-        accessor.HttpContext.Returns(httpContext);
-
-        var executor = await services
-            .AddGraphQLServer()
-            .AddQueryType<Autheris.GraphQL.Types.Query>()
-            .AddMutationType<Autheris.GraphQL.Types.Mutation>()
-            .AddTypeModule(_ => new Autheris.GraphQL.Catalog.CatalogGraphQlTypeModule(metadataRepo, relationRepo, null, null, null, true))
-            .UseRequest<Autheris.GraphQL.Catalog.CatalogOperationCleanupMiddleware>()
-            .UseDefaultPipeline()
-            .BuildRequestExecutorAsync();
-
-        // 1. Aggregate resolver uses GlobalState ClaimsPrincipal (app-only, zero groups), not HttpContext.User.
-        var aggRes = await executor.ExecuteAsync(HotChocolate.Execution.OperationRequestBuilder.New()
-            .SetDocument("{ sales_dbo_orders_aggregate(aggregates: [{ fn: COUNT, alias: \"n\" }]) { count } }")
-            .AddGlobalState(nameof(ClaimsPrincipal), mcpAppPrincipal)
-            .Build());
-        Autheris.Tests.Unit.GraphQL.TypedAggregateTestHost.Errors(aggRes).ShouldBeEmpty();
-        await aggregation.Received(1).ExecuteAggregationAsync(
-            Arg.Is<ClaimsPrincipal>(p => p.GetUserSid() == new Sid("S-1-5-21-MCP-APP") && p.GetGroupSids().Count == 0),
-            Arg.Any<Autheris.Application.Analytics.AggregationQuery>(),
-            Arg.Any<CancellationToken>());
-
-        // 2. Metric resolver uses GlobalState ClaimsPrincipal, not HttpContext.User.
-        var metRes = await executor.ExecuteAsync(HotChocolate.Execution.OperationRequestBuilder.New()
-            .SetDocument("{ queryMetrics(metrics: [\"revenue\"]) { count } }")
-            .AddGlobalState(nameof(ClaimsPrincipal), mcpAppPrincipal)
-            .Build());
-        Autheris.Tests.Unit.GraphQL.TypedAggregateTestHost.Errors(metRes).ShouldBeEmpty();
-        await metrics.Received(1).QueryMetricsAsync(
-            Arg.Is<ClaimsPrincipal>(p => p.GetUserSid() == new Sid("S-1-5-21-MCP-APP") && p.GetGroupSids().Count == 0),
-            Arg.Any<Autheris.Application.Analytics.MetricQueryRequest>(),
-            Arg.Any<CancellationToken>());
-
-        // 3. Query.* resolver uses GlobalState ClaimsPrincipal SID rather than HTTP caller's SID.
-        var reqRes = await executor.ExecuteAsync(HotChocolate.Execution.OperationRequestBuilder.New()
-            .SetDocument("{ myAccessRequests { requesterSid } }")
-            .AddGlobalState(nameof(ClaimsPrincipal), mcpAppPrincipal)
-            .Build());
-        Autheris.Tests.Unit.GraphQL.TypedAggregateTestHost.Errors(reqRes).ShouldBeEmpty();
-        await approvalRepo.Received(1).GetRequestsByRequesterSidAsync(new Sid("S-1-5-21-MCP-APP"), null, Arg.Any<CancellationToken>());
-        await approvalRepo.DidNotReceive().GetRequestsByRequesterSidAsync(new Sid("S-1-5-21-HTTP"), Arg.Any<string?>(), Arg.Any<CancellationToken>());
-
-        // 4. Mutation.* resolver rejects non-admin GlobalState principal despite HttpContext.User holding GovernanceAdmin.
-        var mutRes = await executor.ExecuteAsync(HotChocolate.Execution.OperationRequestBuilder.New()
-            .SetDocument("mutation { syncDataCatalog { success } }")
-            .AddGlobalState(nameof(ClaimsPrincipal), mcpAppPrincipal)
-            .Build());
-        Autheris.Tests.Unit.GraphQL.TypedAggregateTestHost.Errors(mutRes).ShouldContain(e => e.Code == "FORBIDDEN");
-        await catalogSync.DidNotReceiveWithAnyArgs().SyncCatalogAsync(default, default, default);
     }
 }

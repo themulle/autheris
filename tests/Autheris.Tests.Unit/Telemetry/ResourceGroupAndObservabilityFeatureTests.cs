@@ -246,10 +246,11 @@ public sealed class ResourceGroupAndObservabilityFeatureTests
         var options = Options.Create(new GatewayOptions());
         var service = new GoldenQueryService(options, NullLogger<GoldenQueryService>.Instance);
 
-        var allQueries = await service.GetGoldenQueriesAsync();
+        var ctx = Autheris.Application.Mcp.Interfaces.GoldenQueryReadContext.AllVisible(null);
+        var allQueries = await service.GetGoldenQueriesAsync(ctx, null, null, CancellationToken.None);
         Assert.True(allQueries.Count >= 2);
 
-        var customerQueries = await service.GetGoldenQueriesAsync(domain: "finance", tableName: "customers");
+        var customerQueries = await service.GetGoldenQueriesAsync(ctx, domain: "finance", tableName: "customers", CancellationToken.None);
         Assert.NotEmpty(customerQueries);
         Assert.All(customerQueries, q =>
         {
@@ -268,7 +269,7 @@ public sealed class ResourceGroupAndObservabilityFeatureTests
             QueryText: "query { leads(status: \"HOT\") { id score } }"
         ));
 
-        var crmQueries = await service.GetGoldenQueriesAsync(domain: "crm", tableName: "leads");
+        var crmQueries = await service.GetGoldenQueriesAsync(ctx, domain: "crm", tableName: "leads", CancellationToken.None);
         var leadQuery = Assert.Single(crmQueries);
         Assert.Equal("custom_query_1", leadQuery.Id);
     }

@@ -150,18 +150,18 @@ public sealed class McpSemanticResourceSecurityTests
     public async Task ResourceRead_RendersSingleTableOnly()
     {
         var golden = Substitute.For<IGoldenQueryService>();
-        golden.GetGoldenQueriesAsync(Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+        golden.GetGoldenQueriesAsync(Arg.Any<GoldenQueryReadContext>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
             .Returns(ValueTask.FromResult<IReadOnlyList<GoldenQuery>>([new GoldenQuery("g1", "sales", "orders", "Orders", "d", "query { x }")]));
         var compiler = Compiler([Table(Orders), Table(Payroll)], VisibleOnly(Orders, Payroll), golden);
 
         var item = await compiler.ReadSemanticResourceAsync(User(), "examples://sales/orders");
 
         item.ShouldNotBeNull();
-        await golden.Received(1).GetGoldenQueriesAsync(Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
-        await golden.Received(1).GetGoldenQueriesAsync("sales", "orders", Arg.Any<CancellationToken>());
+        await golden.Received(1).GetGoldenQueriesAsync(Arg.Any<GoldenQueryReadContext>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
+        await golden.Received(1).GetGoldenQueriesAsync(Arg.Any<GoldenQueryReadContext>(), "sales", "orders", Arg.Any<CancellationToken>());
 
         await compiler.ReadSemanticResourceAsync(User(), "glossary://hr/payroll");
-        await golden.Received(1).GetGoldenQueriesAsync(Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
+        await golden.Received(1).GetGoldenQueriesAsync(Arg.Any<GoldenQueryReadContext>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
     }
 
     [Theory]

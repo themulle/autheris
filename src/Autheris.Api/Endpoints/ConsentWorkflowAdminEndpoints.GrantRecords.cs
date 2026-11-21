@@ -91,7 +91,7 @@ public static partial class ConsentWorkflowAdminEndpoints
             return false;
         }
 
-        if (parsedTenant != callerTenant && !EndpointSecurity.IsClusterAdmin(context.User))
+        if (parsedTenant != callerTenant && !EndpointSecurity.IsCanonicalClusterAdmin(context.User))
         {
             errorResult = ApiProblems.Forbidden(
                 ApiErrorCodes.CrossTenantAccessForbidden,
