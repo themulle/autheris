@@ -125,11 +125,6 @@ public sealed class GoldenQueryCallerView
     private IEnumerable<(string Domain, string Table)>? Referenced(GoldenQuery query)
     {
         var ownerKey = Key(query.Domain, query.TableName);
-        // Configured entries are administrator-authored and may use any shape; they keep the identifier match of the read context.
-        if (!query.FromStore)
-        {
-            return [];
-        }
 
         DocumentNode document;
         try
@@ -138,13 +133,14 @@ public sealed class GoldenQueryCallerView
         }
         catch (Exception ex) when (ex is SyntaxException or ArgumentException or InvalidOperationException)
         {
-            return null;
+            // Configured entries may be administrator-authored SQL or non-GraphQL text; stored entries fail closed.
+            return query.FromStore ? null : [];
         }
 
         if (!_mappings.TryGetValue(ownerKey, out var owner))
         {
-            // Without a mapping of the owner no relation can be resolved: only a flat selection of the owner's own fields may be served.
-            return IsFlatQuery(document) ? [] : null;
+            // Without a mapping of the owner no relation can be resolved: stored entries only allow flat selections.
+            return !query.FromStore || IsFlatQuery(document) ? [] : null;
         }
 
         var reached = new Dictionary<(string, string), (string Domain, string Table)>();
@@ -152,17 +148,27 @@ public sealed class GoldenQueryCallerView
         {
             if (definition is not OperationDefinitionNode { Operation: OperationType.Query } operation)
             {
-                return null;
+                return query.FromStore ? null : [];
             }
 
             foreach (var selection in operation.SelectionSet.Selections)
             {
                 if (selection is not FieldNode root ||
                     !(string.Equals(root.Name.Value, owner.QueryField, StringComparison.OrdinalIgnoreCase) ||
-                      string.Equals(root.Name.Value, query.TableName, StringComparison.OrdinalIgnoreCase)) ||
-                    !Walk(ownerKey, root.SelectionSet, 1, reached))
+                      string.Equals(root.Name.Value, query.TableName, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return query.FromStore ? null : [];
+                }
+
+                var outcome = Walk(ownerKey, root.SelectionSet, 1, reached);
+                if (outcome == WalkOutcome.PolicyDenied)
                 {
                     return null;
+                }
+
+                if (outcome == WalkOutcome.Unresolved)
+                {
+                    return query.FromStore ? null : [];
                 }
             }
         }
@@ -192,7 +198,14 @@ public sealed class GoldenQueryCallerView
         return true;
     }
 
-    private bool Walk(
+    private enum WalkOutcome
+    {
+        Ok,
+        Unresolved,
+        PolicyDenied
+    }
+
+    private WalkOutcome Walk(
         (string, string) datasetKey,
         SelectionSetNode? set,
         int depth,
@@ -200,12 +213,12 @@ public sealed class GoldenQueryCallerView
     {
         if (set is null)
         {
-            return true;
+            return WalkOutcome.Ok;
         }
 
         if (depth > MaxDepth || !_mappings.TryGetValue(datasetKey, out var mapping))
         {
-            return false;
+            return WalkOutcome.Unresolved;
         }
 
         _hidden.TryGetValue(datasetKey, out var hiddenIds);
@@ -213,7 +226,7 @@ public sealed class GoldenQueryCallerView
         {
             if (selection is not FieldNode field)
             {
-                return false;
+                return WalkOutcome.Unresolved;
             }
 
             var name = field.Name.Value;
@@ -229,7 +242,7 @@ public sealed class GoldenQueryCallerView
             {
                 if (hiddenIds is not null && (hiddenIds.Contains(name) || hiddenIds.Contains(column.ColumnName) || hiddenIds.Contains(column.Field)))
                 {
-                    return false;
+                    return WalkOutcome.PolicyDenied;
                 }
 
                 continue;
@@ -238,23 +251,29 @@ public sealed class GoldenQueryCallerView
             var relation = mapping.Relations.FirstOrDefault(r => string.Equals(r.Field, name, StringComparison.OrdinalIgnoreCase));
             if (relation is null)
             {
-                return false;
+                return WalkOutcome.Unresolved;
             }
 
             var targetKey = Key(relation.Target.Domain, relation.Target.TableName);
-            if (!_visible.Contains(targetKey) || !_mappings.ContainsKey(targetKey))
+            if (!_visible.Contains(targetKey))
             {
-                return false;
+                return WalkOutcome.PolicyDenied;
+            }
+
+            if (!_mappings.ContainsKey(targetKey))
+            {
+                return WalkOutcome.Unresolved;
             }
 
             reached[targetKey] = (relation.Target.Domain, relation.Target.TableName);
-            if (!Walk(targetKey, field.SelectionSet, depth + 1, reached))
+            var childOutcome = Walk(targetKey, field.SelectionSet, depth + 1, reached);
+            if (childOutcome != WalkOutcome.Ok)
             {
-                return false;
+                return childOutcome;
             }
         }
 
-        return true;
+        return WalkOutcome.Ok;
     }
 
     private static (string, string) Key(string domain, string table) => (domain.ToLowerInvariant(), table.ToLowerInvariant());

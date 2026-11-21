@@ -25,7 +25,9 @@ public sealed class SemanticMcpCompiler(
     IConsentRepository? consentRepo = null,
     IOptions<GatewayOptions>? options = null,
     IReadPathSwitches? switches = null,
-    Autheris.Application.Catalog.Interfaces.ICatalogVisibilityService? catalogVisibility = null) : ISemanticMcpCompiler
+    Autheris.Application.Catalog.Interfaces.ICatalogVisibilityService? catalogVisibility = null,
+    IGraphQlCatalogMap? graphQlCatalogMap = null,
+    Autheris.Application.Policy.Pdp.IAccessDecisionPoint? decisionPoint = null) : ISemanticMcpCompiler
 {
     private const int DefaultPageSize = 100;
     private const int MaxPageSize = 100;
@@ -71,8 +73,9 @@ public sealed class SemanticMcpCompiler(
 
         if (meta?.Columns != null && meta.Columns.Count > 0)
         {
+            var visibleCols = VisibleColumns(meta);
             var colDict = new Dictionary<string, object>();
-            foreach (var col in meta.Columns)
+            foreach (var col in visibleCols)
             {
                 var desc = !string.IsNullOrWhiteSpace(col.Description)
                     ? col.Description
@@ -153,7 +156,7 @@ public sealed class SemanticMcpCompiler(
                 }
             }
 
-            if (await RenderExamplesAsync(t, ct).ConfigureAwait(false) is { } examples)
+            if (await RenderExamplesAsync(t, visible, principal, ct).ConfigureAwait(false) is { } examples)
             {
                 resources.Add(examples);
             }
@@ -259,6 +262,19 @@ public sealed class SemanticMcpCompiler(
         }
 
         var visible = await VisibleTablesAsync(candidates, principal, ct).ConfigureAwait(false);
+        IReadOnlyList<TableMetadata>? allVisibleForExamples = null;
+        if (kind == SemanticUriKind.Examples && visible.Count > 0)
+        {
+            var allActive = await Autheris.Application.Catalog.CatalogTablePageReader.ReadAllAsync(
+                _metadataRepo,
+                new Autheris.Application.Catalog.CatalogTableQuery(
+                    IncludeInactive: false,
+                    Limit: Autheris.Application.Catalog.CatalogTableQuery.MaxLimit),
+                static x => x.Table.IsActive,
+                ct: ct).ConfigureAwait(false);
+            allVisibleForExamples = await VisibleTablesAsync(allActive, principal, ct).ConfigureAwait(false);
+        }
+
         foreach (var t in visible.OrderBy(t => t.Identifier.ToString(), StringComparer.Ordinal))
         {
             switch (kind)
@@ -266,7 +282,7 @@ public sealed class SemanticMcpCompiler(
                 case SemanticUriKind.Glossary:
                     return RenderGlossary(t);
                 case SemanticUriKind.Examples:
-                    return await RenderExamplesAsync(t, ct).ConfigureAwait(false);
+                    return await RenderExamplesAsync(t, allVisibleForExamples ?? visible, principal, ct).ConfigureAwait(false);
                 default:
                     var col = VisibleColumns(t).FirstOrDefault(c => string.Equals(c.ColumnName, column, StringComparison.OrdinalIgnoreCase));
                     if (col != null && RenderColumnDocs(t, col) is { } doc)
@@ -362,6 +378,11 @@ public sealed class SemanticMcpCompiler(
 
     private static List<TableColumn> VisibleColumns(TableMetadata t) => t.Columns.Where(col =>
     {
+        if (col.DiscoveryHidden)
+        {
+            return false;
+        }
+
         if (t.ColumnMaskingRules != null &&
             t.ColumnMaskingRules.TryGetValue(col.ColumnName, out var rule) &&
             string.Equals(rule.RuleType, "DENY", StringComparison.OrdinalIgnoreCase))
@@ -471,8 +492,12 @@ public sealed class SemanticMcpCompiler(
             Text: sb.ToString().TrimEnd());
     }
 
-    /// <summary>Golden queries / few-shot examples of one table (examples://{domain}/{table}); loaded only when this table is rendered.</summary>
-    private async Task<McpResourceItem?> RenderExamplesAsync(TableMetadata t, CancellationToken ct)
+    /// <summary>Golden queries / few-shot examples of one table (examples://{domain}/{table}); loaded only when this table is rendered and filtered via caller visibility.</summary>
+    private async Task<McpResourceItem?> RenderExamplesAsync(
+        TableMetadata t,
+        IReadOnlyList<TableMetadata> allVisibleTables,
+        System.Security.Claims.ClaimsPrincipal? principal,
+        CancellationToken ct)
     {
         if (_goldenQueryService == null)
         {
@@ -481,7 +506,95 @@ public sealed class SemanticMcpCompiler(
 
         var domain = t.Identifier.Domain;
         var table = t.Identifier.TableName;
-        var goldens = await _goldenQueryService.GetGoldenQueriesAsync(domain, table, ct).ConfigureAwait(false);
+        IReadOnlyList<GoldenQuery> goldens;
+
+        if (_options?.Value.IsMcpAuthBypassed == true)
+        {
+            var bypassTenant = principal is null ? (TenantId?)null : McpCatalogVisibility.TryTenantId(principal);
+            goldens = await _goldenQueryService.GetGoldenQueriesAsync(
+                GoldenQueryReadContext.AllVisible(bypassTenant), domain, table, ct).ConfigureAwait(false);
+        }
+        else if (principal is null || _consentRepo is null)
+        {
+            return null;
+        }
+        else
+        {
+            var hiddenByTable = new Dictionary<TableIdentifier, IReadOnlySet<string>>();
+            foreach (var vt in allVisibleTables)
+            {
+                var hidden = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var col in vt.Columns)
+                {
+                    if (col.DiscoveryHidden ||
+                        (vt.ColumnMaskingRules != null &&
+                         vt.ColumnMaskingRules.TryGetValue(col.ColumnName, out var rule) &&
+                         string.Equals(rule.RuleType, "DENY", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        hidden.Add(col.ColumnName);
+                    }
+                }
+
+                if (hidden.Count > 0)
+                {
+                    hiddenByTable[vt.Identifier] = hidden;
+                }
+            }
+
+            if (decisionPoint is not null && allVisibleTables.Count > 0)
+            {
+                try
+                {
+                    var decisions = await decisionPoint.DecideManyAsync(
+                        Autheris.Domain.Security.SecurityPrincipalContext.FromPrincipal(principal, McpCatalogVisibility.TryTenantId(principal)),
+                        allVisibleTables,
+                        Autheris.Application.Policy.Pdp.AccessOperation.Discover,
+                        Autheris.Application.Policy.Pdp.AccessTransport.Mcp,
+                        ct).ConfigureAwait(false);
+                    foreach (var d in decisions ?? [])
+                    {
+                        if (d is null) continue;
+                        if (!hiddenByTable.TryGetValue(d.Table, out var existing))
+                        {
+                            existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                        }
+
+                        var mergedHidden = new HashSet<string>(existing, StringComparer.OrdinalIgnoreCase);
+                        foreach (var col in d.HiddenCatalogTextColumns ?? new HashSet<string>())
+                        {
+                            if (d.IsCatalogTextHidden(col)) mergedHidden.Add(col);
+                        }
+
+                        foreach (var (col, level) in d.ColumnAccess)
+                        {
+                            if (level == Autheris.Domain.Interfaces.ColumnAccessLevel.Deny) mergedHidden.Add(col);
+                        }
+
+                        if (mergedHidden.Count > 0)
+                        {
+                            hiddenByTable[d.Table] = mergedHidden;
+                        }
+                    }
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException and not OperationCanceledException)
+                {
+                    return null;
+                }
+            }
+
+            var visibleSet = allVisibleTables.Select(vt => vt.Identifier).ToHashSet();
+            var view = await GoldenQueryCallerView.BuildAsync(
+                [new GoldenQueryCallerView.Seed(domain, table, t.Identifier)],
+                graphQlCatalogMap,
+                (targets, _) => Task.FromResult<IReadOnlySet<TableIdentifier>>(targets.Where(visibleSet.Contains).ToHashSet()),
+                (id, _, _, _, _) => Task.FromResult<IReadOnlySet<string>?>(id is { } ident && hiddenByTable.TryGetValue(ident, out var h)
+                    ? h
+                    : new HashSet<string>(StringComparer.OrdinalIgnoreCase)),
+                ct).ConfigureAwait(false);
+            goldens = await _goldenQueryService.GetGoldenQueriesAsync(
+                view.ToContext(McpCatalogVisibility.TryTenantId(principal)), domain, table, ct).ConfigureAwait(false);
+        }
+
         if (goldens.Count == 0)
         {
             return null;

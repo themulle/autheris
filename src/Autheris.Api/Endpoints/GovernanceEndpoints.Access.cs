@@ -99,8 +99,7 @@ public static partial class GovernanceEndpoints
         CancellationToken ct)
     {
         var isPrivileged = GatewayPolicies.HasAnyRole(context.User, [GatewayRole.ClusterAdmin, GatewayRole.TenantAdmin, GatewayRole.GovernanceAdmin])
-            || context.User.IsInRole("SecurityAdmin")
-            || context.User.IsInRole("ClusterAdmin");
+            || context.User.IsInRole("SecurityAdmin");
         if (!isPrivileged)
         {
             return Results.StatusCode(StatusCodes.Status403Forbidden);
@@ -435,8 +434,7 @@ public static partial class GovernanceEndpoints
         CancellationToken ct)
     {
         var isPrivileged = GatewayPolicies.HasAnyRole(context.User, [GatewayRole.ClusterAdmin, GatewayRole.TenantAdmin, GatewayRole.GovernanceAdmin, GatewayRole.SecurityAuditor])
-            || context.User.IsInRole("SecurityAdmin")
-            || context.User.IsInRole("ClusterAdmin");
+            || context.User.IsInRole("SecurityAdmin");
         if (!isPrivileged)
         {
             return Results.StatusCode(StatusCodes.Status403Forbidden);
@@ -454,8 +452,7 @@ public static partial class GovernanceEndpoints
         CancellationToken ct)
     {
         var isPrivileged = GatewayPolicies.HasAnyRole(context.User, [GatewayRole.ClusterAdmin, GatewayRole.TenantAdmin, GatewayRole.GovernanceAdmin, GatewayRole.SecurityAuditor])
-            || context.User.IsInRole("SecurityAdmin")
-            || context.User.IsInRole("ClusterAdmin");
+            || context.User.IsInRole("SecurityAdmin");
         if (!isPrivileged)
         {
             return Results.StatusCode(StatusCodes.Status403Forbidden);
@@ -609,8 +606,7 @@ public static partial class GovernanceEndpoints
         CancellationToken ct)
     {
         var isPrivileged = GatewayPolicies.HasAnyRole(context.User, [GatewayRole.ClusterAdmin, GatewayRole.TenantAdmin, GatewayRole.GovernanceAdmin])
-            || context.User.IsInRole("SecurityAdmin")
-            || context.User.IsInRole("ClusterAdmin");
+            || context.User.IsInRole("SecurityAdmin");
         if (!isPrivileged)
         {
             return Results.StatusCode(StatusCodes.Status403Forbidden);
