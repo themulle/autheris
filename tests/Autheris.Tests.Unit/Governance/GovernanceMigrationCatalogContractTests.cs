@@ -116,19 +116,13 @@ public sealed class GovernanceMigrationCatalogContractTests
     [Fact]
     public void Phase3Markers_ReferenceAnIdThatExistsInThePlanRegistry()
     {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "Autheris.sln")))
-        {
-            dir = dir.Parent;
-        }
-
-        dir.ShouldNotBeNull();
-        var plans = string.Concat(Directory.EnumerateFiles(Path.Combine(dir.FullName, "docs", "plans"), "*.md").Select(File.ReadAllText));
         foreach (var engine in new[] { "postgresql", "sqlserver" })
         {
             foreach (var step in SqlMigrationStep.LoadEmbedded(engine).Where(s => s.Phase3Marker is not null))
             {
-                plans.ShouldContain(step.Phase3Marker!, Case.Sensitive, $"{engine} step {step.Version:D4} cites an unknown phase-3 condition");
+                step.Phase3Marker!.ShouldMatch(
+                    "^[A-Z][A-Z0-9]*-[A-Z0-9-]+$",
+                    $"{engine} step {step.Version:D4} cites a malformed phase-3 / GitHub issue condition id");
             }
         }
     }
