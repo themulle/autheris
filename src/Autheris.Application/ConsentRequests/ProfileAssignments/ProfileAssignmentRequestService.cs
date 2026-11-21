@@ -575,31 +575,17 @@ public sealed class ProfileAssignmentRequestService(
             j = $"Access profile assignment for '{profile.Name}'.";
         }
 
-        j = j.Trim();
-        if (j.Length < 5 || j.Length > 2000)
-        {
-            throw new ConsentRequestException("VALIDATION_ERROR", "Justification must be between 5 and 2000 characters.");
-        }
-
-        return j;
+        return ConsentSubmissionPipeline.ValidateJustification(j);
     }
 
-    private DateTimeOffset ResolveRequestedValidTo(ProfileAssignmentSubmission submission, DateTimeOffset now)
-    {
-        try
-        {
-            return _validityPolicy.ResolveRequestedValidTo(
-                now,
-                submission.RequestedValidFrom,
-                submission.RequestedValidTo,
-                submission.RequestedDuration == null && submission.RequestedValidTo == null ? submission.DurationDays : null,
-                submission.RequestedDuration);
-        }
-        catch (GrantValidityException ex)
-        {
-            throw new ConsentRequestException(ex.ErrorCode, ex.Message);
-        }
-    }
+    private DateTimeOffset ResolveRequestedValidTo(ProfileAssignmentSubmission submission, DateTimeOffset now) =>
+        ConsentSubmissionPipeline.ResolveRequestedValidTo(
+            _validityPolicy,
+            now,
+            submission.RequestedValidFrom,
+            submission.RequestedValidTo,
+            submission.DurationDays,
+            submission.RequestedDuration);
 
     private async Task<IReadOnlyList<TableMetadata>> LoadTenantTablesAsync(TenantId tenantId, CancellationToken ct)
     {
@@ -705,24 +691,16 @@ public sealed class ProfileAssignmentRequestService(
         DateTimeOffset validTo,
         CancellationToken ct)
     {
-        if (_workflowRouter is null)
-        {
-            return (ConsentWorkflowMode.Internal, null, validTo);
-        }
-
-        var resolution = await _workflowRouter.ResolveForTablesAsync(tenantId, tables, ct).ConfigureAwait(false);
-        var maxEnd = GrantTimeMath.AddSaturating(validFrom, GrantTimeMath.DaysToSpan(Math.Max(1, resolution.MaxDurationDays)));
-        if (validTo > maxEnd)
-        {
-            if (submission.RequestedValidTo.HasValue || submission.RequestedDuration is not null || submission.DurationDays > 0)
-            {
-                throw new ConsentRequestException("VALIDITY_EXCEEDS_MAXIMUM", $"Requested duration exceeds route maximum of {resolution.MaxDurationDays} days.");
-            }
-
-            validTo = maxEnd;
-        }
-
-        return (resolution.Mode, resolution.Mode == ConsentWorkflowMode.External ? resolution.ExternalSystemId : null, validTo);
+        var hasExplicitDuration = submission.RequestedValidTo.HasValue || submission.RequestedDuration is not null || submission.DurationDays > 0;
+        return await ConsentSubmissionPipeline.ResolveWorkflowRouteAsync(
+            tenantId,
+            tables,
+            validFrom,
+            validTo,
+            hasExplicitDuration,
+            _workflowRouter,
+            workflowConfigRepository: null,
+            ct).ConfigureAwait(false);
     }
 
     private async Task<List<ProfileAssignmentItemRow>> BuildInternalItemRowsAsync(
