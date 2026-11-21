@@ -141,7 +141,10 @@ public sealed class WebSqlCoLocatedDataSourcesSecurityTests
     public void T_SEC_DATA132_04_PostCompileAstAssertion_ExtraneousTableBlocked()
     {
         var (tree, _) = FastSqlEngine.Default.Parse("SELECT o.id, u.secret FROM DB_Sales.dbo.Orders o JOIN master.dbo.syslogins u ON o.user_id = u.id".AsMemory());
-        var statement = new SqlAstBuilder().BuildStatement(tree);
+        var statement = new SqlAstBuilder(new AstBuilderOptions
+        {
+            AllowedFunctions = TrinoSqlEngine.SqlFunctionAllowlists.WithDateTranslation(TrinoSqlEngine.SqlFunctionAllowlists.SqlServer)
+        }).BuildStatement(tree);
 
         var authorizedTargets = new List<(string? Database, string? Schema, string Table)>
         {

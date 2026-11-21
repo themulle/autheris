@@ -72,7 +72,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
 
                 if (isMasked)
                 {
-                    throw new SecurityException($"Masked column '{colName}' of table '{normalizedTableName}' must not be referenced in {clause}.");
+                    throw new MaskedColumnPredicateException($"Masked column '{colName}' of table '{normalizedTableName}' must not be referenced in {clause}.");
                 }
 
                 if (_options.RejectWholeRowReferencesInDml &&
@@ -103,7 +103,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
                     }
                     if (isMasked)
                     {
-                        throw new SecurityException($"Masked column '{colName}' of table '{normalizedTableName}' must not be referenced in {clause}.");
+                        throw new MaskedColumnPredicateException($"Masked column '{colName}' of table '{normalizedTableName}' must not be referenced in {clause}.");
                     }
                 }
             }
@@ -208,7 +208,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
                             continue;
                     }
 
-                    throw new SecurityException($"Masked column '{colName}' of '{sourceName}' must not be referenced in {clause}.");
+                    throw new MaskedColumnPredicateException($"Masked column '{colName}' of '{sourceName}' must not be referenced in {clause}.");
                 }
             }
             else if (node is UsingJoinCondition usingCond)
@@ -219,7 +219,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
                     {
                         if (maskedCols.Contains(col.Value))
                         {
-                            throw new SecurityException($"Masked column '{col.Value}' of '{sourceName}' must not be referenced in {clause}.");
+                            throw new MaskedColumnPredicateException($"Masked column '{col.Value}' of '{sourceName}' must not be referenced in {clause}.");
                         }
                     }
                 }

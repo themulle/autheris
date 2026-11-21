@@ -60,8 +60,8 @@ public class RecursiveCteMaskTrackingTests
     public void MaskedValueAtAnyMemberPosition_MarksThatOutputColumn(string head)
     {
         // the masked output column is never usable in a filter, a sort or an aggregate; the clear one still is
-        Assert.Throws<SecurityException>(() => Compile(head + "SELECT n FROM r WHERE s = 'x'"));
-        Assert.Throws<SecurityException>(() => Compile(head + "SELECT n FROM r ORDER BY s"));
+        Assert.Throws<MaskedColumnPredicateException>(() => Compile(head + "SELECT n FROM r WHERE s = 'x'"));
+        Assert.Throws<MaskedColumnPredicateException>(() => Compile(head + "SELECT n FROM r ORDER BY s"));
         Assert.Throws<MaskedAggregationException>(() => Compile(head + "SELECT max(s) FROM r"));
         Assert.NotNull(Compile(head + "SELECT n FROM r WHERE n = 1"));
         Assert.NotNull(Compile(head + "SELECT max(n) FROM r"));
@@ -72,9 +72,9 @@ public class RecursiveCteMaskTrackingTests
     {
         const string Head = "WITH RECURSIVE r (a, b, c, d, e, f) AS (SELECT 1, 'x', 'x', 'x', 1, 'x' UNION ALL SELECT o.* FROM orders o CROSS JOIN r WHERE o.id < 3) ";
 
-        Assert.Throws<SecurityException>(() => Compile(Head + "SELECT a FROM r WHERE a = 1"));
-        Assert.Throws<SecurityException>(() => Compile(Head + "SELECT a FROM r WHERE d = 'x'"));
-        Assert.Throws<SecurityException>(() => Compile(Head + "SELECT a FROM r ORDER BY e"));
+        Assert.Throws<MaskedColumnPredicateException>(() => Compile(Head + "SELECT a FROM r WHERE a = 1"));
+        Assert.Throws<MaskedColumnPredicateException>(() => Compile(Head + "SELECT a FROM r WHERE d = 'x'"));
+        Assert.Throws<MaskedColumnPredicateException>(() => Compile(Head + "SELECT a FROM r ORDER BY e"));
         Assert.Throws<MaskedAggregationException>(() => Compile(Head + "SELECT max(a) FROM r"));
         Assert.Throws<MaskedAggregationException>(() => Compile(Head + "SELECT count(f) FROM r"));
     }
@@ -93,7 +93,7 @@ public class RecursiveCteMaskTrackingTests
     {
         const string Head = "WITH RECURSIVE r AS (SELECT id AS n, email AS s FROM orders UNION ALL SELECT n, s FROM r WHERE n < 3) ";
 
-        Assert.Throws<SecurityException>(() => Compile(Head + "SELECT n FROM r WHERE s = 'x'"));
+        Assert.Throws<MaskedColumnPredicateException>(() => Compile(Head + "SELECT n FROM r WHERE s = 'x'"));
         Assert.NotNull(Compile(Head + "SELECT n FROM r WHERE n = 1"));
     }
 
@@ -102,7 +102,7 @@ public class RecursiveCteMaskTrackingTests
     {
         const string Head = "WITH RECURSIVE r AS (SELECT id, email FROM orders UNION ALL SELECT id, email FROM r WHERE id < 3) ";
 
-        Assert.Throws<SecurityException>(() => Compile(Head + "SELECT id FROM r WHERE email = 'x'"));
+        Assert.Throws<MaskedColumnPredicateException>(() => Compile(Head + "SELECT id FROM r WHERE email = 'x'"));
         Assert.NotNull(Compile(Head + "SELECT id FROM r WHERE id = 1"));
     }
 

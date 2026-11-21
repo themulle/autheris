@@ -30,7 +30,10 @@ public sealed class VirtualFilterPointLookupExtractorTests
                 : new ResolvedSourceTable(t, Erp.Identifier, Erp, "erp"))
             .ToList();
         var (tree, _) = Engine.Parse(sql.AsMemory());
-        var statement = new SqlAstBuilder().BuildStatement(tree);
+        var statement = new SqlAstBuilder(new AstBuilderOptions
+        {
+            AllowedFunctions = TrinoSqlEngine.SqlFunctionAllowlists.WithDateTranslation(TrinoSqlEngine.SqlFunctionAllowlists.DuckDb)
+        }).BuildStatement(tree);
         var lookup = VirtualFilterPointLookupExtractor.Extract(statement, tables, Crm.Identifier);
         return lookup?.ToDictionary(kv => kv.Key, kv => kv.Value.Select(v => v.Value.ToString()!).ToArray(), System.StringComparer.OrdinalIgnoreCase);
     }

@@ -14,7 +14,11 @@ public sealed class SqleDateAddAmountTests
     private void Build(string sql)
     {
         var (tree, _) = _engine.Parse(sql.AsMemory(), SqlTokenSecurityOptions.None);
-        new SqlAstBuilder(new AstBuilderOptions { TranslateTrinoDateFunctions = true }).BuildStatement(tree);
+        new SqlAstBuilder(new AstBuilderOptions
+        {
+            TranslateTrinoDateFunctions = true,
+            AllowedFunctions = SqlFunctionAllowlists.WithDateTranslation(SqlFunctionAllowlists.DuckDb)
+        }).BuildStatement(tree);
     }
 
     [Theory]

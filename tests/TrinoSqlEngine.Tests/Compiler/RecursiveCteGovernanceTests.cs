@@ -448,8 +448,8 @@ public class RecursiveCteGovernanceTests
 
         foreach (string head in new[] { MaskedInRecursiveMember, MaskedInAnchor, MaskedCarried, MaskedRenamed })
         {
-            Assert.Throws<SecurityException>(() => Compile(head + "SELECT n FROM r WHERE s = 'x'", dialect));
-            Assert.Throws<SecurityException>(() => Compile(head + "SELECT n FROM r ORDER BY s", dialect));
+            Assert.Throws<MaskedColumnPredicateException>(() => Compile(head + "SELECT n FROM r WHERE s = 'x'", dialect));
+            Assert.Throws<MaskedColumnPredicateException>(() => Compile(head + "SELECT n FROM r ORDER BY s", dialect));
             Assert.Throws<MaskedAggregationException>(() => Compile(head + "SELECT max(s) FROM r", dialect));
             Assert.Throws<MaskedAggregationException>(() => Compile(head + "SELECT n, count(s) FROM r GROUP BY n", dialect));
         }

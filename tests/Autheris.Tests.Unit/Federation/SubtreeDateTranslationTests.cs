@@ -47,7 +47,11 @@ public sealed class SubtreeDateTranslationTests
             new(metadata.ReferencedTables[1], items.Identifier, items, "tsql")
         };
         var (tree, _) = Engine.Parse(sql.AsMemory());
-        var subtree = SubtreeGraphPartitioner.Partition(new SqlAstBuilder().BuildStatement(tree), tables, maxTablesPerSubtree: 12).Subtrees.Single();
+        var subtree = SubtreeGraphPartitioner.Partition(new SqlAstBuilder(new AstBuilderOptions
+        {
+            EnforceFunctionPolicy = true,
+            AllowedFunctions = SqlFunctionAllowlists.WithDateTranslation(SqlFunctionAllowlists.DuckDb)
+        }).BuildStatement(tree), tables, maxTablesPerSubtree: 12).Subtrees.Single();
         var decisions = tables.ToDictionary(t => t.Metadata.Identifier, t => TableAccessDecision.Allowed(
             t.Metadata.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true));
         return SubtreeCompiler.Compile(subtree, decisions, new CrossSourceOptions { Enabled = true }, Engine, PlannerTestIdentity.User, new TenantId("t-1"));

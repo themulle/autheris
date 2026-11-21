@@ -168,7 +168,11 @@ public class DatabricksGeneratorTests
     [Fact]
     public void TranslatedDateFunctions_AreBound()
     {
-        var stmt = new TrinoSqlEngine.Ast.Builder.SqlAstBuilder(new TrinoSqlEngine.Ast.Builder.AstBuilderOptions { TranslateTrinoDateFunctions = true })
+        var stmt = new TrinoSqlEngine.Ast.Builder.SqlAstBuilder(new TrinoSqlEngine.Ast.Builder.AstBuilderOptions
+        {
+            TranslateTrinoDateFunctions = true,
+            AllowedFunctions = SqlFunctionAllowlists.WithDateTranslation(SqlFunctionAllowlists.Databricks)
+        })
             .BuildStatement(new FastSqlEngine().Parse("SELECT date_add('day', 3, d) AS a, date_trunc('month', d) AS t, now() AS n FROM t".AsMemory(), SqlTokenSecurityOptions.None).Tree);
         var c = SqlDialectGeneratorFactory.GetGenerator(TargetSqlDialect.Databricks).Generate(stmt, ParameterSource.Empty, CancellationToken.None);
         Assert.Contains("TIMESTAMPADD(DAY, :p1, `d`)", c.Sql);

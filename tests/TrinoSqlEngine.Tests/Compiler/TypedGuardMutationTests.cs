@@ -140,7 +140,7 @@ public class TypedGuardMutationTests
     public void ASelectWhereWithAMaskedColumnAnywhere_IsRejected(string where)
     {
         MaskEmail();
-        string message = Rejected<SecurityException>($"SELECT id FROM orders WHERE {where}");
+        string message = Rejected<MaskedColumnPredicateException>($"SELECT id FROM orders WHERE {where}");
         Assert.Contains("email", message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("must not be referenced in WHERE", message, StringComparison.Ordinal);
     }
@@ -149,15 +149,15 @@ public class TypedGuardMutationTests
     public void SelectPredicates_NameTheirClause()
     {
         MaskEmail();
-        Assert.EndsWith("in HAVING.", Rejected<SecurityException>("SELECT id FROM orders GROUP BY id HAVING max(email) > 'a'"), StringComparison.Ordinal);
-        Assert.EndsWith("in ORDER BY.", Rejected<SecurityException>("SELECT id FROM orders ORDER BY email"), StringComparison.Ordinal);
-        Assert.EndsWith("in ORDER BY.", Rejected<SecurityException>("SELECT id FROM orders UNION SELECT id FROM orders ORDER BY email"), StringComparison.Ordinal);
-        Assert.EndsWith("in JOIN condition.", Rejected<SecurityException>("SELECT o.id FROM orders o JOIN entitlements e ON o.email = e.id"), StringComparison.Ordinal);
-        Assert.EndsWith("in JOIN condition.", Rejected<SecurityException>("SELECT o.id FROM orders o JOIN entitlements e USING (email)"), StringComparison.Ordinal);
-        Assert.EndsWith("in JOIN condition.", Rejected<SecurityException>("SELECT o.id FROM orders o JOIN entitlements e ON o.id = e.id JOIN lookup l ON l.code = o.email"), StringComparison.Ordinal);
-        Assert.EndsWith("in WHERE.", Rejected<SecurityException>("SELECT id FROM (SELECT id FROM orders WHERE email = 'x') s"), StringComparison.Ordinal);
-        Assert.EndsWith("in WHERE.", Rejected<SecurityException>("SELECT id FROM orders WHERE email = 'x' UNION SELECT id FROM entitlements"), StringComparison.Ordinal);
-        Assert.EndsWith("in WHERE.", Rejected<SecurityException>("SELECT id FROM entitlements UNION SELECT id FROM orders WHERE email = 'x'"), StringComparison.Ordinal);
+        Assert.EndsWith("in HAVING.", Rejected<MaskedColumnPredicateException>("SELECT id FROM orders GROUP BY id HAVING max(email) > 'a'"), StringComparison.Ordinal);
+        Assert.EndsWith("in ORDER BY.", Rejected<MaskedColumnPredicateException>("SELECT id FROM orders ORDER BY email"), StringComparison.Ordinal);
+        Assert.EndsWith("in ORDER BY.", Rejected<MaskedColumnPredicateException>("SELECT id FROM orders UNION SELECT id FROM orders ORDER BY email"), StringComparison.Ordinal);
+        Assert.EndsWith("in JOIN condition.", Rejected<MaskedColumnPredicateException>("SELECT o.id FROM orders o JOIN entitlements e ON o.email = e.id"), StringComparison.Ordinal);
+        Assert.EndsWith("in JOIN condition.", Rejected<MaskedColumnPredicateException>("SELECT o.id FROM orders o JOIN entitlements e USING (email)"), StringComparison.Ordinal);
+        Assert.EndsWith("in JOIN condition.", Rejected<MaskedColumnPredicateException>("SELECT o.id FROM orders o JOIN entitlements e ON o.id = e.id JOIN lookup l ON l.code = o.email"), StringComparison.Ordinal);
+        Assert.EndsWith("in WHERE.", Rejected<MaskedColumnPredicateException>("SELECT id FROM (SELECT id FROM orders WHERE email = 'x') s"), StringComparison.Ordinal);
+        Assert.EndsWith("in WHERE.", Rejected<MaskedColumnPredicateException>("SELECT id FROM orders WHERE email = 'x' UNION SELECT id FROM entitlements"), StringComparison.Ordinal);
+        Assert.EndsWith("in WHERE.", Rejected<MaskedColumnPredicateException>("SELECT id FROM entitlements UNION SELECT id FROM orders WHERE email = 'x'"), StringComparison.Ordinal);
         Assert.Equal(SqlStatementClass.Select, Compile("SELECT id FROM orders WHERE id = 1 ORDER BY id").StatementClass);
     }
 
@@ -177,8 +177,8 @@ public class TypedGuardMutationTests
     {
         _masks.Masks[(Entitlements, "orderid")] = new MaskSpec(MaskKind.Nullify, new MaskArguments(), FrozenDictionary<string, PolicyValue>.Empty);
         _maskedTables = new HashSet<string> { "Entitlements" };
-        Assert.Contains("orderid", Rejected<SecurityException>("SELECT id FROM orders WHERE orderid = 1"), StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("orderid", Rejected<SecurityException>("SELECT o.id FROM orders o JOIN lookup l USING (orderid)"), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("orderid", Rejected<MaskedColumnPredicateException>("SELECT id FROM orders WHERE orderid = 1"), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("orderid", Rejected<MaskedColumnPredicateException>("SELECT o.id FROM orders o JOIN lookup l USING (orderid)"), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

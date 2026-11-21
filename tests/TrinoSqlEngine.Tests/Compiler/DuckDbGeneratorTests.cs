@@ -154,7 +154,11 @@ public class DuckDbGeneratorTests
     [Fact]
     public void TranslatedDateFunctions_AreBound_NoQuotedIntervals()
     {
-        var stmt = new TrinoSqlEngine.Ast.Builder.SqlAstBuilder(new TrinoSqlEngine.Ast.Builder.AstBuilderOptions { TranslateTrinoDateFunctions = true })
+        var stmt = new TrinoSqlEngine.Ast.Builder.SqlAstBuilder(new TrinoSqlEngine.Ast.Builder.AstBuilderOptions
+        {
+            TranslateTrinoDateFunctions = true,
+            AllowedFunctions = SqlFunctionAllowlists.WithDateTranslation(SqlFunctionAllowlists.DuckDb)
+        })
             .BuildStatement(new FastSqlEngine().Parse("SELECT date_add('day', 3, d) AS a, date_trunc('month', d) AS t, d + INTERVAL '2' DAY AS i FROM t".AsMemory(), SqlTokenSecurityOptions.None).Tree);
         var c = SqlDialectGeneratorFactory.GetGenerator(TargetSqlDialect.DuckDb)
             .Generate(stmt, ParameterSource.Empty, CancellationToken.None);

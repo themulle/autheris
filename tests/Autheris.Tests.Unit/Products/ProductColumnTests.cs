@@ -20,7 +20,10 @@ public sealed class ProductColumnTests
     private static SqlStatement Parse(string sql)
     {
         var (tree, _) = FastSqlEngine.Default.Parse(sql.AsMemory());
-        return new SqlAstBuilder().BuildStatement(tree);
+        return new SqlAstBuilder(new AstBuilderOptions
+        {
+            AllowedFunctions = SqlFunctionAllowlists.WithDateTranslation(SqlFunctionAllowlists.DuckDb)
+        }).BuildStatement(tree);
     }
 
     private static IReadOnlyList<DataProductColumn> Classify(string sql, IReadOnlyList<DataProductColumn>? previous = null)
