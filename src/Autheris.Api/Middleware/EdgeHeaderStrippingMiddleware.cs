@@ -1,6 +1,7 @@
 namespace Autheris.Api.Middleware;
 
 using System;
+using System.Collections.Frozen;
 using System.Linq;
 using System.Threading.Tasks;
 using Autheris.Api.Security;
@@ -9,22 +10,38 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// SEC C-1 Edge Stripping: Strips any client-supplied <c>x-autheris-*</c> headers from untrusted clients
-/// and strips <c>X-Forwarded-*</c>headers when the connection has no remote IP address. In <c>Direct</c> mode it also removes every
-/// configured ForwardAuth header (identity and secret) so no identity header can reach a direct credential.
+/// SEC C-1 Edge Stripping: Strips untrusted client-supplied <c>x-autheris-*</c> headers from untrusted clients
+/// (while allowing explicit inbound client/webhook headers such as <c>X-Autheris-Timestamp</c>,
+/// <c>X-Autheris-Delivery</c>, <c>X-Autheris-Signature-256</c>, and <c>X-Autheris-App</c>),
+/// and strips <c>X-Forwarded-*</c> headers when the connection has no remote IP address. In <c>Direct</c> mode it also
+/// removes every configured ForwardAuth header (identity and secret) so no identity header can reach a direct credential.
 /// </summary>
 public sealed class EdgeHeaderStrippingMiddleware
 {
+    private static readonly FrozenSet<string> AllowedInboundHeaders = FrozenSet.ToFrozenSet(
+    [
+        "X-Autheris-Timestamp",
+        "X-Autheris-Delivery",
+        "X-Autheris-Signature-256",
+        AppScopedTrustedDocumentsOptions.DefaultHeaderName
+    ], StringComparer.OrdinalIgnoreCase);
+
     private readonly RequestDelegate _next;
     private readonly string[] _directModeHeaders;
+    private readonly string? _appScopedHeaderName;
 
     public EdgeHeaderStrippingMiddleware(RequestDelegate next, IOptions<GatewayOptions> options)
     {
         _next = next ?? throw new ArgumentNullException(nameof(next));
-        var auth = options?.Value.Authentication ?? new AuthenticationOptions();
+        var gatewayOptions = options?.Value;
+        var auth = gatewayOptions?.Authentication ?? new AuthenticationOptions();
         _directModeHeaders = auth.EffectiveMode == AuthenticationMode.Direct
             ? [.. auth.ForwardAuth.IdentityHeaderNames.Append(auth.ForwardAuth.SharedSecretHeader).Where(h => !string.IsNullOrWhiteSpace(h)).Distinct(StringComparer.OrdinalIgnoreCase)]
             : [];
+        var appScoped = gatewayOptions?.GraphQL?.AppScopedTrustedDocuments;
+        _appScopedHeaderName = appScoped is { Enabled: true } && !string.IsNullOrWhiteSpace(appScoped.HeaderName)
+            ? appScoped.HeaderName
+            : null;
     }
 
     public Task InvokeAsync(HttpContext context)
@@ -32,7 +49,9 @@ public sealed class EdgeHeaderStrippingMiddleware
         ArgumentNullException.ThrowIfNull(context);
 
         var headersToRemove = context.Request.Headers.Keys
-            .Where(k => k.StartsWith("x-autheris-", StringComparison.OrdinalIgnoreCase))
+            .Where(k => k.StartsWith("x-autheris-", StringComparison.OrdinalIgnoreCase) &&
+                        !AllowedInboundHeaders.Contains(k) &&
+                        (_appScopedHeaderName is null || !string.Equals(k, _appScopedHeaderName, StringComparison.OrdinalIgnoreCase)))
             .ToList();
         foreach (var h in headersToRemove)
         {

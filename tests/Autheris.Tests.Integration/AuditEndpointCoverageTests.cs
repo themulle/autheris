@@ -72,6 +72,9 @@ public class AuditEndpointCoverageTests : IClassFixture<AuditEndpointCoverageTes
         ["POST /api/v1/catalog/datasources/{id}/test"] =
             "DatasourceTestingService writes DATASOURCE_TEST_REQUESTED and DATASOURCE_TESTED fail-closed around the probe; " +
             "denials, failures and exceptions are finalized by AccessAuditMiddleware.",
+        ["POST /api/v1/products/sync/webhook/{tenant}"] =
+            "ProductSyncWebhookService writes the PRODUCT_SYNC_WEBHOOK_RECEIVED record fail-closed on accepted deliveries with the route-bound tenant; " +
+            "rejections, failures and exceptions are finalized by AccessAuditMiddleware.",
         ["POST /api/admin/tokens/revoke"] =
             "TokenRevocationEndpoints writes the TOKEN_REVOKED record itself after revocation; " +
             "403/401/errors are finalized by AccessAuditMiddleware.",
