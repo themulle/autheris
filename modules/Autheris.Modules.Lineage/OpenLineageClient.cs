@@ -11,6 +11,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Lineage;
 using Autheris.Application.Security;
 using Autheris.Domain.Common;
@@ -36,6 +37,8 @@ public sealed class OpenLineageClient : IOpenLineageClient
     private readonly IOptions<GatewayOptions>? _gatewayOptions;
     private readonly ILogger<OpenLineageClient> _logger;
     private readonly TimeProvider _timeProvider;
+    private readonly IHostEnvironment? _environment;
+    private readonly IKeyVaultSecretProvider? _secretProvider;
     private readonly bool _isDevelopment;
     private readonly bool _hasConfiguredEndpoint;
     private readonly Uri? _endpoint;
@@ -47,14 +50,17 @@ public sealed class OpenLineageClient : IOpenLineageClient
         ILogger<OpenLineageClient> logger,
         IOptions<GatewayOptions>? gatewayOptions = null,
         IHostEnvironment? environment = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IKeyVaultSecretProvider? secretProvider = null)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _graphStore = graphStore ?? throw new ArgumentNullException(nameof(graphStore));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _gatewayOptions = gatewayOptions;
+        _environment = environment;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _secretProvider = secretProvider;
         _isDevelopment = environment?.IsDevelopment() == true;
 
         var rawEndpoint = _options.Value.OpenLineageEndpoint;
@@ -147,12 +153,22 @@ public sealed class OpenLineageClient : IOpenLineageClient
             Content = new StringContent(json, Encoding.UTF8, "application/json")
         };
 
-        var apiKey = _options.Value.OpenLineageApiKey;
+        var rawApiKey = _options.Value.OpenLineageApiKey;
         var canSendBearer = string.Equals(_endpoint.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
             || (_isDevelopment && IsLoopbackHost(_endpoint));
-        if (!string.IsNullOrWhiteSpace(apiKey) && canSendBearer)
+        if (!string.IsNullOrWhiteSpace(rawApiKey) && canSendBearer)
         {
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+            var resolvedApiKey = SecretReferenceResolver.Resolve(
+                _secretProvider,
+                rawApiKey,
+                _environment,
+                allowPlaintextInDevelopment: true,
+                logger: _logger,
+                secretDescription: "OpenLineage API key");
+            if (!string.IsNullOrWhiteSpace(resolvedApiKey))
+            {
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", resolvedApiKey);
+            }
         }
 
         try

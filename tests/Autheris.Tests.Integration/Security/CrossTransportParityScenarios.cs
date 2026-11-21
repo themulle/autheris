@@ -438,6 +438,10 @@ internal sealed partial class CrossTransportParityHarness
 
     private sealed class StubIcebergReader : IIcebergMetadataReader
     {
+        public ValueTask<string> ResolveMetadataLocationAsync(string tableOrMetadataLocation, CancellationToken cancellationToken = default)
+            => ValueTask.FromResult(tableOrMetadataLocation.EndsWith(".metadata.json", StringComparison.OrdinalIgnoreCase)
+                ? tableOrMetadataLocation
+                : $"{tableOrMetadataLocation.TrimEnd('/')}/metadata/v1.metadata.json");
         public ValueTask<IcebergTableMetadata> LoadTableMetadataAsync(string metadataLocation, CancellationToken cancellationToken = default)
             => ValueTask.FromResult(new IcebergTableMetadata("uuid", 2, metadataLocation, 1, 0, 1, new IcebergSchema(1, []), new IcebergPartitionSpec(0, []), []));
         public ValueTask<IReadOnlyList<IcebergDataFile>> LoadDataFilesAsync(IcebergTableMetadata metadata, CancellationToken cancellationToken = default)

@@ -5,9 +5,14 @@ namespace Autheris.Extensions.Lakehouse.Services;
 
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Security;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Model;
 using Autheris.Extensions.Lakehouse.Interfaces;
 using Microsoft.Extensions.Logging;
@@ -38,20 +43,162 @@ public sealed class IcebergMetadataReader : IIcebergMetadataReader
         _options = options;
     }
 
+    public async ValueTask<string> ResolveMetadataLocationAsync(
+        string tableOrMetadataLocation,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tableOrMetadataLocation);
+        LakehouseLocationGuard.EnsureNoTraversal(tableOrMetadataLocation, tableOrMetadataLocation);
+
+        if (IsExplicitMetadataFileLocation(tableOrMetadataLocation))
+        {
+            return tableOrMetadataLocation;
+        }
+
+        var trimmed = tableOrMetadataLocation.TrimEnd('/');
+        var metadataDir = trimmed.EndsWith("/metadata", StringComparison.OrdinalIgnoreCase) ||
+                          string.Equals(trimmed, "metadata", StringComparison.OrdinalIgnoreCase)
+            ? trimmed
+            : $"{trimmed}/metadata";
+
+        var versionHintPath = $"{metadataDir}/version-hint.text";
+        long? hintedVersion = null;
+        if (await _storageProvider.ExistsAsync(versionHintPath, cancellationToken).ConfigureAwait(false))
+        {
+            var hintText = (await _storageProvider.ReadTextAsync(versionHintPath, cancellationToken).ConfigureAwait(false)).Trim();
+            if (string.IsNullOrWhiteSpace(hintText))
+            {
+                throw new InvalidDataException($"Iceberg version hint file '{versionHintPath}' is empty.");
+            }
+
+            LakehouseLocationGuard.EnsureNoTraversal(hintText, versionHintPath);
+            if (hintText.Contains('/', StringComparison.Ordinal) || hintText.Contains('\\', StringComparison.Ordinal) ||
+                hintText.Contains("://", StringComparison.Ordinal) ||
+                hintText.Contains('?', StringComparison.Ordinal) || hintText.Contains('#', StringComparison.Ordinal) || hintText.Contains('%', StringComparison.Ordinal))
+            {
+                throw new SecurityException($"Invalid Iceberg version hint in '{versionHintPath}'.");
+            }
+
+            var numericSpan = hintText.StartsWith("v", StringComparison.OrdinalIgnoreCase) ? hintText.AsSpan(1) : hintText.AsSpan();
+            if (long.TryParse(numericSpan, NumberStyles.None, CultureInfo.InvariantCulture, out var parsedVersion))
+            {
+                hintedVersion = parsedVersion;
+                var directCandidate = $"{metadataDir}/v{parsedVersion}.metadata.json";
+                if (await _storageProvider.ExistsAsync(directCandidate, cancellationToken).ConfigureAwait(false))
+                {
+                    return directCandidate;
+                }
+            }
+            else if (IsExplicitMetadataFileLocation(hintText))
+            {
+                var directFileCandidate = $"{metadataDir}/{hintText}";
+                if (await _storageProvider.ExistsAsync(directFileCandidate, cancellationToken).ConfigureAwait(false))
+                {
+                    return directFileCandidate;
+                }
+
+                throw new FileNotFoundException(
+                    $"Iceberg metadata file referenced by '{versionHintPath}' was not found at '{directFileCandidate}'.",
+                    directFileCandidate);
+            }
+            else
+            {
+                throw new InvalidDataException($"Iceberg version hint in '{versionHintPath}' is not a valid version number or metadata filename.");
+            }
+        }
+
+        var listed = await _storageProvider.ListAsync(metadataDir, cancellationToken).ConfigureAwait(false);
+        var candidates = new List<(string Location, long Version, string FileName)>();
+        if (listed is not null)
+        {
+            foreach (var item in listed)
+            {
+                if (string.IsNullOrWhiteSpace(item))
+                {
+                    continue;
+                }
+
+                LakehouseLocationGuard.EnsureNoTraversal(item, tableOrMetadataLocation);
+                var fileName = ExtractMetadataFileName(item);
+                if (!IsExplicitMetadataFileLocation(fileName))
+                {
+                    continue;
+                }
+
+                var version = ParseMetadataFileVersion(fileName);
+                if (hintedVersion.HasValue && version != hintedVersion.Value)
+                {
+                    continue;
+                }
+
+                candidates.Add((item, version, fileName));
+            }
+        }
+
+        if (candidates.Count == 0)
+        {
+            throw new FileNotFoundException($"No Iceberg metadata file found under '{metadataDir}'.", metadataDir);
+        }
+
+        return candidates
+            .OrderByDescending(c => c.Version)
+            .ThenByDescending(c => c.FileName, StringComparer.Ordinal)
+            .First()
+            .Location;
+    }
+
+    internal static bool IsExplicitMetadataFileLocation(string location) =>
+        location.EndsWith(".metadata.json", StringComparison.OrdinalIgnoreCase);
+
+    private static string ExtractMetadataFileName(string location)
+    {
+        var trimmed = location.TrimEnd('/');
+        var lastSlash = trimmed.LastIndexOfAny(['/', '\\']);
+        return lastSlash >= 0 ? trimmed[(lastSlash + 1)..] : trimmed;
+    }
+
+    private static long ParseMetadataFileVersion(string fileName)
+    {
+        if (!fileName.EndsWith(".metadata.json", StringComparison.OrdinalIgnoreCase))
+        {
+            return -1;
+        }
+
+        var stem = fileName.AsSpan(0, fileName.Length - ".metadata.json".Length);
+        if ((stem.StartsWith("v", StringComparison.OrdinalIgnoreCase)) &&
+            long.TryParse(stem[1..], NumberStyles.None, CultureInfo.InvariantCulture, out var vVersion))
+        {
+            return vVersion;
+        }
+
+        var dashIndex = stem.IndexOf('-');
+        if (dashIndex > 0 &&
+            long.TryParse(stem[..dashIndex], NumberStyles.None, CultureInfo.InvariantCulture, out var seqVersion))
+        {
+            return seqVersion;
+        }
+
+        return -1;
+    }
+
     public async ValueTask<IcebergTableMetadata> LoadTableMetadataAsync(
         string metadataLocation,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(metadataLocation);
 
-        var cacheKey = $"iceberg:meta:{metadataLocation}";
+        var resolvedLocation = IsExplicitMetadataFileLocation(metadataLocation)
+            ? metadataLocation
+            : await ResolveMetadataLocationAsync(metadataLocation, cancellationToken).ConfigureAwait(false);
+
+        var cacheKey = $"iceberg:meta:{resolvedLocation}";
         if (_memoryCache != null && _memoryCache.TryGetValue(cacheKey, out IcebergTableMetadata? cachedMeta) && cachedMeta != null)
         {
-            _logger.LogDebug("Cache hit for Iceberg table metadata: {Location}", metadataLocation);
+            _logger.LogDebug("Cache hit for Iceberg table metadata: {Location}", LogSanitizer.Sanitize(resolvedLocation));
             return cachedMeta;
         }
 
-        var jsonText = await _storageProvider.ReadTextAsync(metadataLocation, cancellationToken).ConfigureAwait(false);
+        var jsonText = await _storageProvider.ReadTextAsync(resolvedLocation, cancellationToken).ConfigureAwait(false);
         using var doc = JsonDocument.Parse(jsonText);
         var root = doc.RootElement;
 
@@ -125,7 +272,7 @@ public sealed class IcebergMetadataReader : IIcebergMetadataReader
         var partitionSpec = new IcebergPartitionSpec(0, partitionFields);
 
         _logger.LogInformation("Loaded Iceberg table {TableUuid} (Format: v{FormatVersion}, CurrentSnapshotId: {SnapshotId}, Columns: {ColCount}).",
-            tableUuid, formatVersion, currentSnapshotId, schemaFields.Count);
+            LogSanitizer.Sanitize(tableUuid), formatVersion, currentSnapshotId, schemaFields.Count);
 
         var result = new IcebergTableMetadata(
             tableUuid,
@@ -204,7 +351,7 @@ public sealed class IcebergMetadataReader : IIcebergMetadataReader
         // Check if manifest list exists
         if (!await _storageProvider.ExistsAsync(currentSnap.ManifestListLocation, cancellationToken).ConfigureAwait(false))
         {
-            _logger.LogWarning("Iceberg manifest list '{Location}' not found in storage.", currentSnap.ManifestListLocation);
+            _logger.LogWarning("Iceberg manifest list '{Location}' not found in storage.", LogSanitizer.Sanitize(currentSnap.ManifestListLocation));
             return dataFiles;
         }
 

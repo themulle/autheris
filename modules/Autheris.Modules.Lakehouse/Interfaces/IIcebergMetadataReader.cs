@@ -12,6 +12,13 @@ using Autheris.Domain.Model;
 public interface IIcebergMetadataReader
 {
     /// <summary>
+    /// Resolves a table root directory or explicit metadata file path to the latest Iceberg metadata file location.
+    /// </summary>
+    ValueTask<string> ResolveMetadataLocationAsync(
+        string tableOrMetadataLocation,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Loads and parses the root table metadata (e.g. v2.metadata.json).
     /// </summary>
     ValueTask<IcebergTableMetadata> LoadTableMetadataAsync(

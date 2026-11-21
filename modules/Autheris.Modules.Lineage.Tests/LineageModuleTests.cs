@@ -278,11 +278,12 @@ public sealed class LineageModuleTests
             Options.Create(new LineageModuleOptions
             {
                 OpenLineageEndpoint = "https://openlineage.example.com/api/v1/lineage",
-                OpenLineageApiKey = secretKey
+                OpenLineageApiKey = "kv://openlineage-api-key"
             }),
             logger,
             Options.Create(new GatewayOptions()),
-            new StubHostEnvironment(Environments.Production));
+            new StubHostEnvironment(Environments.Production),
+            secretProvider: new StubKeyVaultSecretProvider(secretKey));
 
         await client.PushLineageEventAsync(new OpenLineageRunEvent(
             "COMPLETE",
@@ -414,6 +415,11 @@ public sealed class LineageModuleTests
         }
 
         return dir?.FullName ?? throw new InvalidOperationException("Repository root not found.");
+    }
+
+    private sealed class StubKeyVaultSecretProvider(string resolvedSecret) : IKeyVaultSecretProvider
+    {
+        public byte[] GetSecretBytes(string secretRef) => System.Text.Encoding.UTF8.GetBytes(resolvedSecret);
     }
 
     private sealed class StubHostEnvironment(string environmentName) : IHostEnvironment

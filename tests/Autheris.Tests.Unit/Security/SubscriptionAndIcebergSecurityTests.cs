@@ -343,8 +343,18 @@ public sealed class SubscriptionAndIcebergSecurityTests : IDisposable
             options,
             new Autheris.Application.Services.ConsentResolutionService(),
             consentRepo);
+        var reader = Substitute.For<IIcebergMetadataReader>();
+        reader.ResolveMetadataLocationAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(ci => new ValueTask<string>($"{ci.Arg<string>().TrimEnd('/')}/metadata/v1.metadata.json"));
+        reader.LoadTableMetadataAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(ci => new ValueTask<Autheris.Modules.Lakehouse.Models.IcebergTableMetadata>(
+                new Autheris.Modules.Lakehouse.Models.IcebergTableMetadata(
+                    "uuid", 2, ci.Arg<string>(), 1, 0, 1,
+                    new Autheris.Modules.Lakehouse.Models.IcebergSchema(0, []),
+                    new Autheris.Modules.Lakehouse.Models.IcebergPartitionSpec(0, []), [])));
+
         var svc = new IcebergRestCatalogFederationService(
-            Substitute.For<IIcebergMetadataReader>(), metaRepo, options,
+            reader, metaRepo, options,
             NullLogger<IcebergRestCatalogFederationService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance,
             adp, consentRepo: consentRepo);
         return svc;

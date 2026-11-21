@@ -99,8 +99,18 @@ public sealed class Issue143ScopeBlindPathTests
             recording,
             repo,
             restrictedScopes: RestrictedScopePolicy.Default);
+        var reader = Substitute.For<IIcebergMetadataReader>();
+        reader.ResolveMetadataLocationAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(ci => new ValueTask<string>($"{ci.Arg<string>().TrimEnd('/')}/metadata/v1.metadata.json"));
+        reader.LoadTableMetadataAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(ci => new ValueTask<Autheris.Modules.Lakehouse.Models.IcebergTableMetadata>(
+                new Autheris.Modules.Lakehouse.Models.IcebergTableMetadata(
+                    "uuid", 2, ci.Arg<string>(), 1, 0, 1,
+                    new Autheris.Modules.Lakehouse.Models.IcebergSchema(0, []),
+                    new Autheris.Modules.Lakehouse.Models.IcebergPartitionSpec(0, []), [])));
+
         return new IcebergRestCatalogFederationService(
-            Substitute.For<IIcebergMetadataReader>(), metadataRepo,
+            reader, metadataRepo,
             options,
             NullLogger<IcebergRestCatalogFederationService>.Instance,
             global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance,
