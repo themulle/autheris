@@ -102,6 +102,8 @@ public sealed class SeparationOfDutiesService(
             return SodDecision.Deny(SodViolationKind.SelfApproval, "Separation of duties violated: a member of the requested target group cannot approve the request.");
 
         if (groupStore is null) return SodDecision.Allow();
+        if (string.IsNullOrWhiteSpace(tenantId.Value))
+            return SodDecision.Deny(SodViolationKind.SelfApproval, "Separation of duties violated: tenant context is required for group membership verification; denied fail-closed.");
 
         var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         if (lookupKeys is { Count: > 0 })

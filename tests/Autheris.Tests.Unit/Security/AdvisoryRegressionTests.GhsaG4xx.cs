@@ -316,6 +316,8 @@ public sealed partial class AdvisoryRegressionTests
         await Should.ThrowAsync<SecurityException>(() => service.PlanAccessAsync(planReq, adminSid, "tenant-a"));
 
         effectiveResult = new EffectiveScimGroupsResult(new HashSet<string>(), false, false);
+        await Should.ThrowAsync<SecurityException>(() => service.PlanAccessAsync(planReq, adminSid, null));
+        (await service.PlanAccessAsync(planReq, adminSid, null, Wave2Principal(adminSid))).PlanId.ShouldNotBeNullOrWhiteSpace();
         var plan = await service.PlanAccessAsync(planReq, adminSid, "tenant-a");
         var confirmed = await service.ConfirmPlanAsync(plan.PlanId, totp.GenerateTotpCode(seed), adminSid);
 

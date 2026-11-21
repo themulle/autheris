@@ -29,6 +29,7 @@ using Autheris.Domain.Events;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Tenancy;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -238,7 +239,13 @@ public class AccessPlanningService : IAccessPlanningService
         }
 
         var now = _time.GetUtcNow();
-        var planTenant = new TenantId(NormalizeTenant(tenantId) ?? "default");
+        var normalizedTenant = NormalizeTenant(tenantId);
+        var claimTenant = caller is not null && normalizedTenant is null
+            ? TenantClaimReader.Read(caller)
+            : default;
+        var planTenant = normalizedTenant is not null
+            ? new TenantId(normalizedTenant)
+            : claimTenant.Kind == ClaimTenantKind.Valid ? claimTenant.Tenant : default;
         var actorSid = new Sid(adminSid);
 
         // every individual (user) principal needs a mandatory, class-bounded validUntil already at planning time.
