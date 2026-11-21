@@ -465,6 +465,10 @@ public sealed partial class AdvisoryRegressionTests
         (await cache.GetAsync("scim-realm", $"role:e0:{maxUserKey}")).ShouldNotBeNull();
         (await cache.GetAsync("scim-realm", $"scim:e0:{maxUserKey}")).ShouldNotBeNull();
 
+        var overlongPrefixedKey = $"role:e1:{new string('k', IdentityGroupsChangedChannel.MaxKeyLength + 1)}";
+        await cache.SetAsync("scim-realm", overlongPrefixedKey, resolvedRoles);
+        (await cache.GetAsync("scim-realm", overlongPrefixedKey)).ShouldBeNull();
+
         await roleResolver.ResolveRolesAsync(new ResolvedIdentity("role:admin", null, null, null, TenantA, "nonscim-realm", []));
         (await cache.GetAsync("nonscim-realm", "role:role:admin")).ShouldNotBeNull();
         cache.Invalidate("nonscim-realm", "role:admin");

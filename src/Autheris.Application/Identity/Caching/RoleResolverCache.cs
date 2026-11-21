@@ -29,9 +29,23 @@ public sealed class RoleResolverCache : IRoleResolverCache
         _hmacKey = hmacKey ?? RandomNumberGenerator.GetBytes(32);
     }
 
-    private static bool IsWithinBounds(string realmId, string userKey) =>
-        !string.IsNullOrEmpty(realmId) && !string.IsNullOrEmpty(userKey)
-        && realmId.Length <= IdentityGroupsChangedChannel.MaxKeyLength && userKey.Length <= MaxCacheKeyLength;
+    private static bool IsWithinBounds(string realmId, string userKey)
+    {
+        if (string.IsNullOrEmpty(realmId) || string.IsNullOrEmpty(userKey)
+            || realmId.Length > IdentityGroupsChangedChannel.MaxKeyLength
+            || userKey.Length > MaxCacheKeyLength)
+        {
+            return false;
+        }
+
+        if (TryStripEpochPrefix(userKey, out var unwrapped))
+        {
+            return unwrapped.Length > 0 && unwrapped.Length <= IdentityGroupsChangedChannel.MaxKeyLength;
+        }
+
+        var rawLength = userKey.StartsWith("role:", StringComparison.Ordinal) ? userKey.Length - 5 : userKey.Length;
+        return rawLength > 0 && rawLength <= IdentityGroupsChangedChannel.MaxKeyLength;
+    }
 
     public ValueTask<RoleResolution?> GetAsync(string realmId, string userKey, CancellationToken ct = default)
     {
@@ -93,22 +107,18 @@ public sealed class RoleResolverCache : IRoleResolverCache
         }
     }
 
-    private static bool IsEpochCacheKeyForUser(string cachedKey, string userKey)
+    private static bool IsEpochCacheKeyForUser(string cachedKey, string userKey) =>
+        TryStripEpochPrefix(cachedKey, out var unwrapped) && unwrapped.Equals(userKey.AsSpan(), StringComparison.Ordinal);
+
+    private static bool TryStripEpochPrefix(string key, out ReadOnlySpan<char> unwrapped)
     {
-        ReadOnlySpan<char> rest;
-        if (cachedKey.StartsWith("role:e", StringComparison.Ordinal))
-        {
-            rest = cachedKey.AsSpan(6);
-        }
-        else if (cachedKey.StartsWith("scim:e", StringComparison.Ordinal))
-        {
-            rest = cachedKey.AsSpan(6);
-        }
-        else
+        unwrapped = default;
+        if (!key.StartsWith("role:e", StringComparison.Ordinal) && !key.StartsWith("scim:e", StringComparison.Ordinal))
         {
             return false;
         }
 
+        var rest = key.AsSpan(6);
         var colonIdx = rest.IndexOf(':');
         if (colonIdx <= 0)
         {
@@ -123,7 +133,8 @@ public sealed class RoleResolverCache : IRoleResolverCache
             }
         }
 
-        return rest[(colonIdx + 1)..].Equals(userKey.AsSpan(), StringComparison.Ordinal);
+        unwrapped = rest[(colonIdx + 1)..];
+        return true;
     }
 
     public void InvalidateAll()
