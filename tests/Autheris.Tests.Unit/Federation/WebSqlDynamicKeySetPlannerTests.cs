@@ -54,7 +54,10 @@ public sealed class WebSqlDynamicKeySetPlannerTests
     private static SqlStatement Parse(string sql)
     {
         var (tree, _) = Engine.Parse(sql.AsMemory());
-        return new SqlAstBuilder().BuildStatement(tree);
+        return new SqlAstBuilder(new AstBuilderOptions
+        {
+            AllowedFunctions = TrinoSqlEngine.SqlFunctionAllowlists.WithDateTranslation(TrinoSqlEngine.SqlFunctionAllowlists.DuckDb)
+        }).BuildStatement(tree);
     }
 
     private static TableAccessDecision AllowAll(TableMetadata meta) =>

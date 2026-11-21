@@ -26,7 +26,10 @@ public sealed class SqlConjunctSplitterChainTests
 
         var engine = new FastSqlEngine();
         var (tree, _) = engine.Parse(sb.ToString().AsMemory(), SqlTokenSecurityOptions.Strict);
-        var select = (SelectStatement)new SqlAstBuilder().BuildStatement(tree);
+        var select = (SelectStatement)new SqlAstBuilder(new AstBuilderOptions
+        {
+            AllowedFunctions = TrinoSqlEngine.SqlFunctionAllowlists.WithDateTranslation(TrinoSqlEngine.SqlFunctionAllowlists.DuckDb)
+        }).BuildStatement(tree);
         var where = ((QuerySpecification)select.Body).Where!;
 
         Exception? failure = null;

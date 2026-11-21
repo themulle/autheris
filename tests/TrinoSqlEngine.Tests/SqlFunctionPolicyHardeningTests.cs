@@ -45,7 +45,10 @@ public sealed class SqlFunctionPolicyHardeningTests
     [InlineData("SELECT lpad(status, length(status) * 100, 'x') FROM orders")]
     public void ResourceExhaustion_UnboundedOrOversizedRepeatLength_IsRejected(string sql)
     {
-        Assert.Throws<AstBuildException>(() => Build(sql));
+        var allowed = new HashSet<string>(SqlFunctionAllowlists.SqlServer, StringComparer.OrdinalIgnoreCase);
+        allowed.UnionWith(SqlFunctionAllowlists.PostgreSql);
+        var options = new AstBuilderOptions { AllowedFunctions = allowed };
+        Assert.Throws<AstBuildException>(() => Build(sql, options));
     }
 
     [Theory]
@@ -54,7 +57,10 @@ public sealed class SqlFunctionPolicyHardeningTests
     [InlineData("SELECT replicate('x', 10) FROM orders")]
     public void ResourceExhaustion_BoundedRepeatLength_IsAccepted(string sql)
     {
-        Build(sql);
+        var allowed = new HashSet<string>(SqlFunctionAllowlists.SqlServer, StringComparer.OrdinalIgnoreCase);
+        allowed.UnionWith(SqlFunctionAllowlists.PostgreSql);
+        var options = new AstBuilderOptions { AllowedFunctions = allowed };
+        Build(sql, options);
     }
 
     [Fact]
@@ -100,5 +106,21 @@ public sealed class SqlFunctionPolicyHardeningTests
     {
         var options = new AstBuilderOptions { AllowedFunctions = SqlFunctionAllowlists.DuckDb };
         Assert.Throws<SecurityException>(() => Build("SELECT custom_udf(id) FROM orders", options));
+    }
+
+    [Theory]
+    [InlineData("SELECT lower(status) FROM orders")]
+    [InlineData("SELECT count(id) FROM orders")]
+    [InlineData("SELECT current_date FROM orders")]
+    [InlineData("SELECT current_timestamp FROM orders")]
+    [InlineData("SELECT substring(status, 1, 2) FROM orders")]
+    [InlineData("SELECT trim(status) FROM orders")]
+    [InlineData("SELECT position('a' IN status) FROM orders")]
+    public void FailClosedPolicy_NullAllowlistWithEnforcePolicy_RejectsAllFunctionsAndSpecialForms(string sql)
+    {
+        var defaultOptions = new AstBuilderOptions();
+        Assert.True(defaultOptions.EnforceFunctionPolicy);
+        Assert.Null(defaultOptions.AllowedFunctions);
+        Assert.Throws<SecurityException>(() => Build(sql, defaultOptions));
     }
 }

@@ -1204,7 +1204,8 @@ public sealed partial class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
     private void EnsureFunctionAllowed(string name)
     {
         if (_options.EnforceFunctionPolicy &&
-            !SqlFunctionPolicy.IsFunctionAllowed(name, _options.AllowedFunctions, _options.AdditionalDeniedFunctions))
+            (_options.AllowedFunctions is null ||
+             !SqlFunctionPolicy.IsFunctionAllowed(name, _options.AllowedFunctions, _options.AdditionalDeniedFunctions)))
         {
             throw new SecurityException($"Function '{name}' is not permitted by the SQL function policy.");
         }

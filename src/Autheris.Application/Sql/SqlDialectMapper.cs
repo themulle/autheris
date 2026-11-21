@@ -1,6 +1,7 @@
 namespace Autheris.Application.Sql;
 
 using System;
+using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Linq;
 using Autheris.Domain.Common;
@@ -9,6 +10,30 @@ using TrinoSqlEngine.Ast.Capabilities;
 
 public static class SqlDialectMapper
 {
+    /// <summary>
+    /// Union of curated safe function allowlists across supported SQL dialects plus Trino date-translation helpers,
+    /// used only by dialect-agnostic AST parsers (never bypassing <see cref="SqlFunctionPolicy.IsDeniedByDefault"/>).
+    /// </summary>
+    internal static IReadOnlySet<string> AllSafeDialectFunctions { get; } = BuildAllSafeDialectFunctions();
+
+    private static IReadOnlySet<string> BuildAllSafeDialectFunctions()
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var target in new[]
+        {
+            TargetSqlDialect.PostgreSql,
+            TargetSqlDialect.SqlServer,
+            TargetSqlDialect.Oracle,
+            TargetSqlDialect.Databricks,
+            TargetSqlDialect.DuckDb,
+            TargetSqlDialect.Ansi
+        })
+        {
+            set.UnionWith(SqlFunctionAllowlists.WithDateTranslation(SqlFunctionAllowlists.GetDefault(target)));
+        }
+
+        return set.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+    }
     public static bool TryToTargetDialect(DatabaseDialect dialect, out TargetSqlDialect target)
     {
         switch (dialect)

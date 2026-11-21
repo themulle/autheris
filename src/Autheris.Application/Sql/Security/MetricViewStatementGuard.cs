@@ -69,7 +69,15 @@ public static class MetricViewStatementGuard
         try
         {
             (tree, _) = ParserEngine.Parse(sql.AsMemory(), ClientSqlTokenPolicy.Analysis);
-            statement = new SqlAstBuilder(new AstBuilderOptions()).BuildStatement(tree);
+            var targetDialect = SqlDialectMapper.TryToTargetDialect(dialect, out var mapped)
+                ? mapped
+                : TargetSqlDialect.DuckDb;
+            statement = new SqlAstBuilder(new AstBuilderOptions
+            {
+                EnforceFunctionPolicy = true,
+                AllowedFunctions = SqlFunctionAllowlists.WithDateTranslation(
+                    SqlFunctionAllowlists.Build(targetDialect, ["measure"]))
+            }).BuildStatement(tree);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -230,7 +238,11 @@ public static class MetricViewStatementGuard
             try
             {
                 var (tree, _) = ParserEngine.Parse($"SELECT 1 FROM t WHERE {decision.CombinedRowFilterSql}".AsMemory(), SqlTokenSecurityOptions.Strict);
-                var stmt = (SelectStatement)new SqlAstBuilder(new AstBuilderOptions()).BuildStatement(tree);
+                var stmt = (SelectStatement)new SqlAstBuilder(new AstBuilderOptions
+                {
+                    EnforceFunctionPolicy = true,
+                    AllowedFunctions = SqlFunctionAllowlists.BuildForPolicy(TargetSqlDialect.Databricks, null)
+                }).BuildStatement(tree);
                 var where = ((QuerySpecification)stmt.Body).Where!;
                 var referenced = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 CollectColumnNames(where, referenced);

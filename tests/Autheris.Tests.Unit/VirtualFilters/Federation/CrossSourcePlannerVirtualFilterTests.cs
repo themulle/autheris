@@ -123,7 +123,10 @@ public sealed class CrossSourcePlannerVirtualFilterTests
     {
         var (metadata, tables, decisions) = Setup(Join);
         var (tree, _) = Engine.Parse(Join.AsMemory());
-        var statement = new SqlAstBuilder().BuildStatement(tree);
+        var statement = new SqlAstBuilder(new AstBuilderOptions
+        {
+            AllowedFunctions = TrinoSqlEngine.SqlFunctionAllowlists.WithDateTranslation(TrinoSqlEngine.SqlFunctionAllowlists.DuckDb)
+        }).BuildStatement(tree);
 
         // The raw SQL is deliberately different (and invalid for these tables); the supplied statement wins.
         var plan = new CrossSourcePlanner(Engine).Plan(

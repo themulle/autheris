@@ -465,7 +465,6 @@ public sealed class FederatedStagingService : IFederatedStagingService
                     keySetApplied = true;
                     var batches = distinctKeys.Count == 0 ? [Array.Empty<object>()] : KeyBatcher.CreateBatches(distinctKeys, batchSize);
                     var combinedRows = new List<IReadOnlyDictionary<string, object?>>();
-                    var seenRowKeys = new HashSet<string>(StringComparer.Ordinal);
 
                     foreach (var batch in batches)
                     {
@@ -503,17 +502,12 @@ public sealed class FederatedStagingService : IFederatedStagingService
                         if (batchResult.RlsPushdownExecuted) rlsPushedDown = true;
                         if (batchResult.InDbMaskingExecuted) inDbMaskingExecuted = true;
 
-                        // Gateway Ordinal Deduplication
                         foreach (var row in batchResult.Rows)
                         {
-                            var fingerprint = ComputeRowFingerprint(row, req.Metadata.PrimaryKeyColumns);
-                            if (seenRowKeys.Add(fingerprint))
+                            combinedRows.Add(row);
+                            if (combinedRows.Count > budget.MaxStagedRowsPerTable)
                             {
-                                combinedRows.Add(row);
-                                if (combinedRows.Count > budget.MaxStagedRowsPerTable)
-                                {
-                                    throw new GatewaySecurityException($"Table '{req.Metadata.Identifier}' exceeds maximum allowed staging rows ({budget.MaxStagedRowsPerTable}).", "ROW_LIMIT_EXCEEDED");
-                                }
+                                throw new GatewaySecurityException($"Table '{req.Metadata.Identifier}' exceeds maximum allowed staging rows ({budget.MaxStagedRowsPerTable}).", "ROW_LIMIT_EXCEEDED");
                             }
                         }
                     }
@@ -709,18 +703,6 @@ public sealed class FederatedStagingService : IFederatedStagingService
         }
 
         return stagedSources;
-    }
-
-    private static string ComputeRowFingerprint(
-        IReadOnlyDictionary<string, object?> row,
-        IReadOnlyList<string> primaryKeyColumns)
-    {
-        if (primaryKeyColumns.Count > 0 && primaryKeyColumns.All(row.ContainsKey))
-        {
-            return string.Join("\0", primaryKeyColumns.Select(c => $"{c}:{row[c]}"));
-        }
-
-        return string.Join("\0", row.OrderBy(kv => kv.Key, StringComparer.Ordinal).Select(kv => $"{kv.Key}:{kv.Value}"));
     }
 
     private void EnsureNoArgumentConflict(Dictionary<string, object?> sessionArgs, string name, TableMetadata metadata)
