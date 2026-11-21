@@ -66,7 +66,10 @@ public sealed class WebSqlFilterPushdownSecurityTests
     private static SqlStatement Parse(string sql)
     {
         var (tree, _) = Engine.Parse(sql.AsMemory());
-        return new SqlAstBuilder().BuildStatement(tree);
+        return new SqlAstBuilder(new AstBuilderOptions
+        {
+            AllowedFunctions = SqlFunctionAllowlists.WithDateTranslation(SqlFunctionAllowlists.DuckDb)
+        }).BuildStatement(tree);
     }
 
     private static SingleTableConjunct CreateSingleTableConjunct(string sql, TableMetadata meta, params string[] columns)

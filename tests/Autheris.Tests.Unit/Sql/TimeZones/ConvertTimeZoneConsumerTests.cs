@@ -83,8 +83,9 @@ public sealed class ConvertTimeZoneConsumerTests
     public void BC_130_4_ThePlannerValidatesAfterTheStatementIsBuiltAndBeforeTheRewrite()
     {
         string source = File.ReadAllText(Path.Combine(Root(), "src/Autheris.Application/Sql/Services/CrossSourcePlanner.cs"));
-        int built = source.IndexOf("statement = new SqlAstBuilder().BuildStatement(tree);", StringComparison.Ordinal);
-        int closed = source.IndexOf('}', built);
+        int built = source.IndexOf("statement = new SqlAstBuilder(", StringComparison.Ordinal);
+        int endStmt = source.IndexOf(".BuildStatement(tree);", built, StringComparison.Ordinal);
+        int closed = source.IndexOf('}', endStmt);
         int validated = source.IndexOf("TimeZoneConversion.ValidateFederated(", StringComparison.Ordinal);
         int rewritten = source.IndexOf("new FederationAstRewriter(", StringComparison.Ordinal);
         built.ShouldBeGreaterThan(0);

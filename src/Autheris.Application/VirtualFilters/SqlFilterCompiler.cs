@@ -213,7 +213,7 @@ public static partial class SqlFilterCompiler
         }
 
         var (tree, _) = FastSqlEngine.Default.Parse(Statement(fragment).AsMemory(), null, CancellationToken.None);
-        var astBuilder = new TrinoSqlEngine.Ast.Builder.SqlAstBuilder();
+        var astBuilder = new TrinoSqlEngine.Ast.Builder.SqlAstBuilder(BuilderOptions());
         var ast = astBuilder.BuildStatement(tree);
         if (ast is not SelectStatement select || select.Body is not QuerySpecification spec)
         {
@@ -439,7 +439,7 @@ public static partial class SqlFilterCompiler
         if (tenanted.Count > 0)
         {
             var (tree, _) = FastSqlEngine.Default.Parse(Statement(fragment).AsMemory(), null, CancellationToken.None);
-            var ast = new TrinoSqlEngine.Ast.Builder.SqlAstBuilder().BuildStatement(tree);
+            var ast = new TrinoSqlEngine.Ast.Builder.SqlAstBuilder(BuilderOptions()).BuildStatement(tree);
             if (ast is not SelectStatement { Body: QuerySpecification { Where: not null } spec })
             {
                 throw new InvalidOperationException($"The virtual filter '{filter.Name}' did not compile to a correlated subquery.");

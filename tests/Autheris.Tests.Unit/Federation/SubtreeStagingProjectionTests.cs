@@ -35,7 +35,10 @@ public sealed class SubtreeStagingProjectionTests
     private static SourceSubtree PartitionPg(string sql)
     {
         var (tree, _) = Engine.Parse(sql.AsMemory());
-        var stmt = new SqlAstBuilder().BuildStatement(tree);
+        var stmt = new SqlAstBuilder(new AstBuilderOptions
+        {
+            AllowedFunctions = SqlFunctionAllowlists.WithDateTranslation(SqlFunctionAllowlists.DuckDb)
+        }).BuildStatement(tree);
         var metadata = Engine.Analyze(sql.AsMemory());
         var a = Table("pg", "public", "a", "id", "k");
         var b = Table("pg", "public", "b", "id", "a_id", "created_at");

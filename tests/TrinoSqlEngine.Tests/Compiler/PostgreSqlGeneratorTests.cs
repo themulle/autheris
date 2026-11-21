@@ -97,7 +97,11 @@ public class PostgreSqlGeneratorTests
     [Fact]
     public void TranslatedDateFunctions_AreBound_WithReviewedUnitFragments()
     {
-        var stmt = new TrinoSqlEngine.Ast.Builder.SqlAstBuilder(new TrinoSqlEngine.Ast.Builder.AstBuilderOptions { TranslateTrinoDateFunctions = true })
+        var stmt = new TrinoSqlEngine.Ast.Builder.SqlAstBuilder(new TrinoSqlEngine.Ast.Builder.AstBuilderOptions
+        {
+            TranslateTrinoDateFunctions = true,
+            AllowedFunctions = SqlFunctionAllowlists.WithDateTranslation(SqlFunctionAllowlists.PostgreSql)
+        })
             .BuildStatement(new FastSqlEngine().Parse("SELECT date_add('day', 3, d) AS a, date_trunc('month', d) AS t, d + INTERVAL '2' DAY AS i FROM t".AsMemory(), SqlTokenSecurityOptions.None).Tree);
         var c = SqlDialectGeneratorFactory.GetGenerator(TargetSqlDialect.PostgreSql).Generate(stmt, ParameterSource.Empty, CancellationToken.None);
         Assert.Contains("CAST($1 AS bigint) * INTERVAL '1 day'", c.Sql);

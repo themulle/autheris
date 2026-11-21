@@ -81,7 +81,10 @@ public sealed class VirtualFilterStrategyMatrixTests
         var (tree, _) = Engine.Parse(sql.AsMemory());
         var decision = Unrestricted(table).WithMandatoryPredicate("EXISTS (SELECT 1 FROM vf)", pairs.Select(p => p.Filter.Name).Distinct().ToList(), pairs);
         var planner = new VirtualFilterFederationPlanner(keys, Options.Create(new GatewayOptions { VirtualFilters = new VirtualFilterOptions { Federation = options ?? new() } }));
-        var plans = await planner.PlanAsync(new SqlAstBuilder().BuildStatement(tree), tables, new Dictionary<TableIdentifier, TableAccessDecision> { [table.Identifier] = decision }, Tenant, CancellationToken.None);
+        var plans = await planner.PlanAsync(new SqlAstBuilder(new AstBuilderOptions
+        {
+            AllowedFunctions = TrinoSqlEngine.SqlFunctionAllowlists.WithDateTranslation(TrinoSqlEngine.SqlFunctionAllowlists.DuckDb)
+        }).BuildStatement(tree), tables, new Dictionary<TableIdentifier, TableAccessDecision> { [table.Identifier] = decision }, Tenant, CancellationToken.None);
         return plans.ShouldHaveSingleItem().Value;
     }
 
