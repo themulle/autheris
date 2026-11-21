@@ -209,7 +209,7 @@ public sealed class GateRunner(GateDatabase database, PolicyScenario scenario)
     }
 
     internal static string RejectionReason(Exception ex) =>
-        ex is SecurityException ? nameof(SecurityException) : ex.GetType().Name;
+        ex is MaskedColumnPredicateException ? nameof(SecurityException) : ex.GetType().Name;
 
     /// <summary>A typed, expected governance refusal (as opposed to an unexpected exception type, which is an AST defect).</summary>
     public static bool IsGoverned(Exception ex) =>
