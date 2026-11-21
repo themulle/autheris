@@ -3,11 +3,16 @@ namespace Autheris.Tests.Unit.Governance;
 
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Security.Claims;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Api.Endpoints;
+using Autheris.Application.ConsentRequests;
 using Autheris.Application.Governance.Analysis;
+using Autheris.Application.Governance.Grants;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Mcp.Services;
 using Autheris.Domain.Audit;
@@ -16,6 +21,8 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using FluentAssertions;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using NSubstitute;
 using Xunit;
@@ -600,6 +607,88 @@ public sealed class QueryAnalysisAndValueProfilingTests
         result.ValidationReport.Diagnostics.Should().ContainSingle(d =>
             d.Code == QueryDiagnosticCodes.ReferencedTablesMismatch &&
             d.QueryName == "sp_orders_only_declared");
+    }
+
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData("FORBIDDEN", null, StatusCodes.Status403Forbidden, "ACCESS_DENIED", "You are not permitted to submit this consent request.")]
+    [InlineData("RATE_LIMIT_EXCEEDED", 42, StatusCodes.Status429TooManyRequests, "RATE_LIMIT_EXCEEDED", "Consent request rate limit exceeded. Please retry later.")]
+    [InlineData("VALIDITY_EXCEEDS_MAXIMUM", null, StatusCodes.Status400BadRequest, "VALIDITY_EXCEEDS_MAXIMUM", "Bundled consent request failed validation.")]
+    public async Task HandleSubmitBundledConsentAsync_ConsentRequestException_ReturnsSafeFixedDetailWithoutLeakingExceptionMessage(
+        string exceptionCode,
+        int? retryAfterSeconds,
+        int expectedStatusCode,
+        string expectedResponseCode,
+        string expectedDetail)
+    {
+        const string secretMessage = "SENSITIVE_INTERNAL_REASON_DO_NOT_LEAK";
+        var ex = new ConsentRequestException(exceptionCode, secretMessage, retryAfterSeconds);
+        await AssertBundledConsentErrorResponseAsync(ex, expectedStatusCode, expectedResponseCode, expectedDetail, secretMessage, retryAfterSeconds);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task HandleSubmitBundledConsentAsync_GrantPolicyViolationException_ReturnsSafeFixedDetailWithoutLeakingExceptionMessage()
+    {
+        const string secretMessage = "SENSITIVE_GRANT_POLICY_REASON_DO_NOT_LEAK";
+        var ex = new GrantPolicyViolationException(GrantDecision.Deny(GrantErrorCodes.ExceedsMaximum, secretMessage));
+        await AssertBundledConsentErrorResponseAsync(
+            ex,
+            StatusCodes.Status400BadRequest,
+            GrantErrorCodes.ExceedsMaximum,
+            "Bundled consent request violates grant policy.",
+            secretMessage,
+            expectedRetryAfterSeconds: null);
+    }
+
+    private static async Task AssertBundledConsentErrorResponseAsync(
+        Exception exceptionToThrow,
+        int expectedStatusCode,
+        string expectedResponseCode,
+        string expectedDetail,
+        string secretMessage,
+        int? expectedRetryAfterSeconds)
+    {
+        var httpContext = new DefaultHttpContext
+        {
+            RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider(),
+            User = CreatePrincipal("user-1")
+        };
+        httpContext.Response.Body = new MemoryStream();
+
+        var request = new SubmitBundledConsentHttpRequest(
+            Items: [new RequestableConsentItem("sales.public.orders", null, "READ", "Analytics")],
+            Purpose: "Valid purpose");
+
+        var result = await QueryAnalysisAndProfilingEndpoints.HandleSubmitBundledConsentAsync(
+            request,
+            httpContext,
+            new ThrowingBundledConsentService(exceptionToThrow),
+            CancellationToken.None);
+
+        await result.ExecuteAsync(httpContext);
+        httpContext.Response.StatusCode.Should().Be(expectedStatusCode);
+        if (expectedRetryAfterSeconds is { } retryAfter)
+        {
+            httpContext.Response.Headers.RetryAfter.ToString().Should().Be(retryAfter.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        }
+
+        httpContext.Response.Body.Position = 0;
+        using var reader = new StreamReader(httpContext.Response.Body);
+        var body = await reader.ReadToEndAsync();
+        body.Should().NotContain(secretMessage);
+
+        using var doc = JsonDocument.Parse(body);
+        doc.RootElement.GetProperty("code").GetString().Should().Be(expectedResponseCode);
+        doc.RootElement.GetProperty("detail").GetString().Should().Be(expectedDetail);
+    }
+
+    private sealed class ThrowingBundledConsentService(Exception exceptionToThrow) : IBundledConsentRequestService
+    {
+        public Task<BundledConsentRequestResult> SubmitBundledRequestAsync(
+            ClaimsPrincipal requester,
+            BundledConsentRequest request,
+            CancellationToken ct = default) => Task.FromException<BundledConsentRequestResult>(exceptionToThrow);
     }
 
 }

@@ -194,7 +194,7 @@ public static class QueryAnalysisAndProfilingEndpoints
             SafeErrorResults.LogFailure(httpContext, ex, ex.Code);
             if (string.Equals(ex.Code, "FORBIDDEN", StringComparison.OrdinalIgnoreCase))
             {
-                return SafeErrorResults.Problem(StatusCodes.Status403Forbidden, "FORBIDDEN", ex.Message, httpContext);
+                return SafeErrorResults.Problem(StatusCodes.Status403Forbidden, "FORBIDDEN", "You are not permitted to submit this consent request.", httpContext);
             }
 
             if (string.Equals(ex.Code, "RATE_LIMIT_EXCEEDED", StringComparison.OrdinalIgnoreCase))
@@ -204,15 +204,15 @@ public static class QueryAnalysisAndProfilingEndpoints
                     httpContext.Response.Headers.RetryAfter = retryAfter.ToString(System.Globalization.CultureInfo.InvariantCulture);
                 }
 
-                return SafeErrorResults.Problem(StatusCodes.Status429TooManyRequests, "RATE_LIMIT_EXCEEDED", ex.Message, httpContext);
+                return SafeErrorResults.Problem(StatusCodes.Status429TooManyRequests, "RATE_LIMIT_EXCEEDED", "Consent request rate limit exceeded. Please retry later.", httpContext);
             }
 
-            return SafeErrorResults.BadRequest(ex.Code, ex.Message, httpContext);
+            return SafeErrorResults.BadRequest(ex.Code, "Bundled consent request failed validation.", httpContext);
         }
         catch (GrantPolicyViolationException ex)
         {
             SafeErrorResults.LogFailure(httpContext, ex, ex.ErrorCode);
-            return SafeErrorResults.BadRequest(ex.ErrorCode, ex.Message, httpContext);
+            return SafeErrorResults.BadRequest(ex.ErrorCode, "Bundled consent request violates grant policy.", httpContext);
         }
     }
 
