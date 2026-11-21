@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.10.2] - 2026-11-21
+
+### Added
+- In-process local ONNX multilingual catalog embeddings (`#628`, `#986`) for cross-language and semantic catalog search without external embedding APIs.
+- Unified catalog search (`#978`, `#984`): `/api/v1/catalog/objects`, facets, and MCP `list_datasets` share `DiscoveryService` + `CatalogSearchEngine` with per-caller visible-text verification and unindexed-candidate fallback.
+- Explicit `sqlName` field on MCP datasets and columns (`#710`, `#981`) and `graphQlField` lookup support across `describe_dataset`, `describe_my_access`, and `list_datasets` (`#678`, `#682`, `#964`).
+- Per-policy `key_set_max_keys` on virtual filters (`WP-KS-1`, `#955`) and `SetDiscoveryAsync` / catalog batch upsert scale harness (`#672`, `#673`, `#960`).
+
+### Changed
+- Catalog scalability optimizations: incremental snapshot & BM25 delta updates (`#675`, `#676`, `#959`), dbt manifest resync unchanged-table skipping (`#674`, `#958`), snapshot & paged discovery reads (`#677`, `#681`, `#965`), and GraphQL catalog schema build optimization for 1k–50k tables (`#679`, `#979`).
+- Configuration surface simplification (`WP-SIMPL-32 PR 1–4b`: `#954`, `#961`, `#966`, `#972`, `#982`, `#983`), removal of legacy consent row filter key-set model (`WP-KS-2`/`3`: `#963`, `#975`), and declared-indexes-only dbt verification (`#459`, `#976`).
+- Documented installing signed `Autheris-modules-<version>.tar.gz` release archives into the core image (`#977`).
+
+### Fixed
+- `Autheris.ModuleSigner` mixed-case entry assembly and type resolution (`#977`, `#985`), enabling signed release module archive packaging (`Autheris-modules-<version>.tar.gz`).
+- Security & hardening fixes: AD FS realm token read-only scopes (`#945`, `#952`), discovery artifacts restricted-scope withholding (`#707`, `#957`), retention startup validation & usage pseudonymization (`REQ-SEC-271`, `#956`), atomic catalog insert-if-absent & GraphQL LOWs (`SEC-282-5`, `#962`), query analysis target scope (`#492`, `#971`), DML hardening (`#505`, `#973`), integration test hardening (`#503`, `#974`), parameterized cache filters (`#491`, `#980`), simulation SQLite planner & error classification (`#950`, `#953`), and resource/rate-limiting fixes (`#479`, `#485`, `#571`, `#713`).
+
 ## [1.10.1] - 2026-11-20
 
 ### Added

@@ -167,3 +167,13 @@ Details and an example manifest: [F-GOV-15, Apply Semantics](../features/f-gov-1
 
 - `Gateway:RowFilters:KeySetCache` (and `Gateway:DataSources:Connections:*:KeySetCacheAllowed`) was removed as part of key-set consolidation onto row policies (`VirtualFilter.EvaluationMode = KeySet`, `KeySetMaxAge`, `KeySetMaxKeys`, and `Gateway:VirtualFilters:Federation:*`). Setting any key under `Gateway:RowFilters:KeySetCache` fails startup.
 - `Gateway:SqlEndpoints:MaxQueryTimeoutSeconds` was removed (unconsumed; SQL endpoints execute via `GovernedSqlExecutionService` using `Gateway:WebSql:ExecutionTimeoutSeconds`).
+
+## 5. Installing Signed Release Modules into the Core Image
+
+Release tags publish a signed module archive `Autheris-modules-<version>.tar.gz` alongside the container images (containing `lakehouse`, `dbt`, `openmetadata`, `events`, and `lineage`).
+
+To run optional modules on top of the core image without switching to `autheris-full`:
+
+1. Extract `Autheris-modules-<version>.tar.gz` into the module root directory configured by `Gateway:Modules:Path` (default `/app/modules`), preserving the per-module subdirectories, `module.manifest.json`, and signature files.
+2. Enable the required module IDs explicitly in `Gateway:Modules:Enabled` (for example `["dbt", "openmetadata"]`); files on disk never activate a module unless listed in `Gateway:Modules:Enabled`.
+3. In production (`ASPNETCORE_ENVIRONMENT=Production`), keep `Gateway:Modules:AllowUnsignedInDevelopment` set to `false` (default) and `Gateway:Modules:WorkspacePath` unset so only release-signed manifests are loaded.
