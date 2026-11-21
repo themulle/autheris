@@ -166,6 +166,7 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
             long counter = Interlocked.Increment(ref _statementCounter);
             string statementId = $"{DateTime.UtcNow:yyyyMMdd_HHmmss}_{counter:00000}_{RandomNumberGenerator.GetHexString(32, lowercase: true)}";
             sessionCts = new CancellationTokenSource();
+            var sessionToken = sessionCts.Token;
             var sw = Stopwatch.StartNew();
 
             var sources = new SourceHolder();
@@ -190,7 +191,7 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
                     var decisionPoint = scope.ServiceProvider.GetRequiredService<Autheris.Application.Policy.Pdp.IAccessDecisionPoint>();
                     var visibility = new TrinoMetadataVisibility(discovery, decisionPoint);
                     metadataResult = await TrinoMetadataQueryHandler.TryExecuteAsync(
-                        request.Sql, user, tenantId, metadataRepo, consentRepo, _gatewayOptions, consentResolver, visibility, metadataRowLimit, sessionCts.Token).ConfigureAwait(false);
+                        request.Sql, user, tenantId, metadataRepo, consentRepo, _gatewayOptions, consentResolver, visibility, metadataRowLimit, sessionToken).ConfigureAwait(false);
                 }
                 if (metadataResult != null)
                 {
@@ -222,7 +223,7 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
                 var sqlService = scope.ServiceProvider.GetRequiredService<IGovernedSqlExecutionService>();
                 try
                 {
-                    return await sqlService.ExecuteQueryBufferedAsync(request, user, tenantId, sessionCts.Token).ConfigureAwait(false);
+                    return await sqlService.ExecuteQueryBufferedAsync(request, user, tenantId, sessionToken).ConfigureAwait(false);
                 }
                 finally
                 {
@@ -241,7 +242,7 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
                         catch { }
                     }
                 }
-            }, sessionCts.Token);
+            }, sessionToken);
 
             var session = new StatementSession(statementId, tenantId, userSid, DateTimeOffset.UtcNow, sw, sessionCts, executionTask, ingress, sources);
             CommitSession(reservationKey, session);

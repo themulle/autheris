@@ -4,7 +4,6 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Data.Common;
-using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using DuckDB.NET.Data;
@@ -22,28 +21,32 @@ public sealed class DuckDbConnectionPool : IDisposable
     private readonly string? _attachSql;
     private readonly int _maxIdleReaders;
     private readonly TimeSpan _idleTimeout;
+    private readonly TimeProvider _timeProvider;
     private readonly SemaphoreSlim _writerLock = new(1, 1);
     private readonly SemaphoreSlim _readerSemaphore;
     private readonly ConcurrentDictionary<DbConnection, byte> _leasedReaders = new(ReferenceEqualityComparer.Instance);
     private readonly object _idleLock = new();
     private readonly List<(DuckDBConnection Conn, long ReturnedTimestamp)> _idleReaders = [];
-    private bool _disposed;
+    private int _disposed;
 
     public DuckDbConnectionPool(
         string connectionString,
         string? attachSql = null,
         int maxConcurrentReaders = 16,
         int maxIdleReaders = 8,
-        TimeSpan? idleTimeout = null)
+        TimeSpan? idleTimeout = null,
+        TimeProvider? timeProvider = null)
     {
         _connectionString = connectionString ?? throw new ArgumentNullException(nameof(connectionString));
         _attachSql = attachSql;
         int effectiveMaxReaders = Math.Max(1, maxConcurrentReaders);
         _maxIdleReaders = Math.Clamp(maxIdleReaders, 0, effectiveMaxReaders);
         _idleTimeout = idleTimeout is { } t && t > TimeSpan.Zero ? t : DefaultIdleTimeout;
+        _timeProvider = timeProvider ?? TimeProvider.System;
         _readerSemaphore = new SemaphoreSlim(effectiveMaxReaders, effectiveMaxReaders);
     }
 
+    private bool IsDisposed => Volatile.Read(ref _disposed) != 0;
     internal int IdleCount { get { lock (_idleLock) return _idleReaders.Count; } }
     internal int LeasedCount => _leasedReaders.Count;
     internal int AvailableReaderSlots => _readerSemaphore.CurrentCount;
@@ -93,7 +96,7 @@ public sealed class DuckDbConnectionPool : IDisposable
         }
         finally
         {
-            if (!handedOff && !_disposed)
+            if (!handedOff && !IsDisposed)
             {
                 try { _readerSemaphore.Release(); } catch (ObjectDisposedException) { }
             }
@@ -105,57 +108,60 @@ public sealed class DuckDbConnectionPool : IDisposable
         ArgumentNullException.ThrowIfNull(conn);
         bool wasLeased = _leasedReaders.TryRemove(conn, out _);
 
-        if (wasLeased && !_disposed)
+        try
         {
-            try { _readerSemaphore.Release(); } catch (ObjectDisposedException) { }
-        }
-
-        if (_disposed || !wasLeased || conn is not DuckDBConnection duckConn || conn.State != System.Data.ConnectionState.Open || _maxIdleReaders == 0)
-        {
-            conn.Dispose();
-            return;
-        }
-
-        List<DuckDBConnection>? expired = null;
-        bool added = false;
-        long now = Stopwatch.GetTimestamp();
-
-        lock (_idleLock)
-        {
-            if (!_disposed)
+            if (IsDisposed || !wasLeased || conn is not DuckDBConnection duckConn || conn.State != System.Data.ConnectionState.Open || _maxIdleReaders == 0)
             {
-                expired = CollectExpiredLocked(now);
-                if (_idleReaders.Count < _maxIdleReaders)
+                conn.Dispose();
+                return;
+            }
+
+            List<DuckDBConnection>? expired = null;
+            bool added = false;
+
+            lock (_idleLock)
+            {
+                if (!IsDisposed)
                 {
-                    _idleReaders.Add((duckConn, now));
-                    added = true;
+                    long now = _timeProvider.GetTimestamp();
+                    expired = CollectExpiredLocked(now);
+                    if (_idleReaders.Count < _maxIdleReaders)
+                    {
+                        _idleReaders.Add((duckConn, now));
+                        added = true;
+                    }
                 }
             }
-        }
 
-        DisposeAll(expired);
-        if (!added)
+            DisposeAll(expired);
+            if (!added)
+            {
+                duckConn.Dispose();
+            }
+        }
+        finally
         {
-            duckConn.Dispose();
+            if (wasLeased && !IsDisposed)
+            {
+                try { _readerSemaphore.Release(); } catch (ObjectDisposedException) { }
+            }
         }
     }
 
     internal void TrimIdle()
     {
         List<DuckDBConnection>? expired;
-        long now = Stopwatch.GetTimestamp();
-        lock (_idleLock) expired = CollectExpiredLocked(now);
+        lock (_idleLock) expired = CollectExpiredLocked(_timeProvider.GetTimestamp());
         DisposeAll(expired);
     }
 
     private bool TryTakeValidIdleReader(out DuckDBConnection? conn)
     {
         List<DuckDBConnection>? expired;
-        long now = Stopwatch.GetTimestamp();
         conn = null;
         lock (_idleLock)
         {
-            expired = CollectExpiredLocked(now);
+            expired = CollectExpiredLocked(_timeProvider.GetTimestamp());
             if (_idleReaders.Count > 0)
             {
                 int last = _idleReaders.Count - 1;
@@ -172,7 +178,7 @@ public sealed class DuckDbConnectionPool : IDisposable
         List<DuckDBConnection>? expired = null;
         int removeCount = 0;
         while (removeCount < _idleReaders.Count &&
-               Stopwatch.GetElapsedTime(_idleReaders[removeCount].ReturnedTimestamp, now) >= _idleTimeout)
+               _timeProvider.GetElapsedTime(_idleReaders[removeCount].ReturnedTimestamp, now) >= _idleTimeout)
         {
             (expired ??= []).Add(_idleReaders[removeCount].Conn);
             removeCount++;
@@ -189,15 +195,14 @@ public sealed class DuckDbConnectionPool : IDisposable
 
     public async Task<IDisposable> AcquireWriterLockAsync(CancellationToken ct = default)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        ThrowIfDisposed();
         await _writerLock.WaitAsync(ct).ConfigureAwait(false);
         return new WriterReleaser(_writerLock);
     }
 
     public void Dispose()
     {
-        if (_disposed) return;
-        _disposed = true;
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         List<DuckDBConnection> toDispose;
         lock (_idleLock)
         {
@@ -209,7 +214,7 @@ public sealed class DuckDbConnectionPool : IDisposable
         _readerSemaphore.Dispose();
     }
 
-    private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_disposed, this);
+    private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(IsDisposed, this);
 
     private sealed class WriterReleaser(SemaphoreSlim sem) : IDisposable
     {

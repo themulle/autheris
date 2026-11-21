@@ -64,13 +64,19 @@ public static class SqlEngineAsyncExtensions
 {
     public static Task<(SqlBaseParser.SingleStatementContext Tree, CommonTokenStream Tokens)> ParseAsync(
         this ISqlEngine engine, ReadOnlyMemory<char> sql, SqlTokenSecurityOptions? tokenOptions = null, CancellationToken cancellationToken = default) =>
-        engine is IAsyncSqlEngine a ? a.ParseAsync(sql, tokenOptions, cancellationToken) : Task.FromResult(engine.Parse(sql, tokenOptions, cancellationToken));
+        AsAsync(engine) is { } a ? a.ParseAsync(sql, tokenOptions, cancellationToken) : Task.FromResult(engine.Parse(sql, tokenOptions, cancellationToken));
 
     public static Task<(SqlBaseParser.StandaloneExpressionContext Tree, CommonTokenStream Tokens)> ParseExpressionAsync(
         this ISqlEngine engine, ReadOnlyMemory<char> sql, SqlTokenSecurityOptions? tokenOptions = null, CancellationToken cancellationToken = default) =>
-        engine is IAsyncSqlEngine a ? a.ParseExpressionAsync(sql, tokenOptions, cancellationToken) : Task.FromResult(engine.ParseExpression(sql, tokenOptions, cancellationToken));
+        AsAsync(engine) is { } a ? a.ParseExpressionAsync(sql, tokenOptions, cancellationToken) : Task.FromResult(engine.ParseExpression(sql, tokenOptions, cancellationToken));
 
     public static Task<SqlQueryMetadata> AnalyzeAsync(
         this ISqlEngine engine, ReadOnlyMemory<char> sql, SqlTokenSecurityOptions? tokenOptions = null, CancellationToken cancellationToken = default) =>
-        engine is IAsyncSqlEngine a ? a.AnalyzeAsync(sql, tokenOptions, cancellationToken) : Task.FromResult(engine.Analyze(sql, tokenOptions, cancellationToken));
+        AsAsync(engine) is { } a ? a.AnalyzeAsync(sql, tokenOptions, cancellationToken) : Task.FromResult(engine.Analyze(sql, tokenOptions, cancellationToken));
+
+    private static IAsyncSqlEngine? AsAsync(ISqlEngine engine)
+    {
+        ArgumentNullException.ThrowIfNull(engine);
+        return engine as IAsyncSqlEngine;
+    }
 }

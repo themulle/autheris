@@ -230,30 +230,6 @@ public sealed partial class FastSqlEngine : ISqlEngine, IAsyncSqlEngine, Governa
             cancellationToken);
     }
 
-    public Task<(SqlBaseParser.SingleStatementContext Tree, CommonTokenStream Tokens)> ParseAsync(
-        ReadOnlyMemory<char> sql,
-        SqlTokenSecurityOptions? tokenOptions = null,
-        CancellationToken cancellationToken = default)
-    {
-        var effectiveOptions = PrepareParse(sql, StatementRule, "SQL query", tokenOptions);
-        return RunWithParseBudgetAsync(
-            cancellation => ParseOnCurrentThread(sql, effectiveOptions, cancellation, StatementRule, static parser => parser.singleStatement()),
-            sql.Length,
-            cancellationToken);
-    }
-
-    public Task<(SqlBaseParser.StandaloneExpressionContext Tree, CommonTokenStream Tokens)> ParseExpressionAsync(
-        ReadOnlyMemory<char> sql,
-        SqlTokenSecurityOptions? tokenOptions = null,
-        CancellationToken cancellationToken = default)
-    {
-        var effectiveOptions = PrepareParse(sql, ExpressionRule, "SQL expression", tokenOptions);
-        return RunWithParseBudgetAsync(
-            cancellation => ParseOnCurrentThread(sql, effectiveOptions, cancellation, ExpressionRule, static parser => parser.standaloneExpression()),
-            sql.Length,
-            cancellationToken);
-    }
-
     private SqlTokenSecurityOptions PrepareParse(
         ReadOnlyMemory<char> sql,
         int ruleKind,
@@ -381,77 +357,6 @@ public sealed partial class FastSqlEngine : ISqlEngine, IAsyncSqlEngine, Governa
         completed.Dispose();
         failure?.Throw();
         return result!;
-    }
-
-    private async Task<TResult> RunWithParseBudgetAsync<TResult>(Func<ParseCancellation, TResult> work, int sqlLength, CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-
-        TimeSpan budget = ParseTimeout;
-        long startTimestamp = Stopwatch.GetTimestamp();
-        SemaphoreSlim limiter = ParseConcurrencyLimiter ?? SharedParseConcurrencyLimiter;
-
-        if (!await limiter.WaitAsync(RemainingMilliseconds(budget, startTimestamp), cancellationToken).ConfigureAwait(false))
-        {
-            throw RejectedParse("all concurrent parser slots are in use and none became free within the parse time budget.");
-        }
-
-        var cancellation = new ParseCancellation();
-        if (InlineParseMaxLength > 0 && sqlLength <= InlineParseMaxLength && RuntimeHelpers.TryEnsureSufficientExecutionStack())
-        {
-            try
-            {
-                if (budget > TimeSpan.Zero)
-                {
-                    cancellation.TightenDeadline(budget - Stopwatch.GetElapsedTime(startTimestamp), $"SQL parsing exceeded the time budget of {budget.TotalMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture)} ms.");
-                }
-                return work(cancellation);
-            }
-            finally
-            {
-                limiter.Release();
-            }
-        }
-
-        var tcs = new TaskCompletionSource<TResult>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var item = new ParseWork(
-            () =>
-            {
-                try { tcs.TrySetResult(work(cancellation)); }
-                catch (Exception ex) { tcs.TrySetException(ex); }
-                finally { limiter.Release(); }
-            },
-            onCanceledWhileQueued: () => limiter.Release());
-
-        var pool = ParseWorkerPool.ForStackSize(_parseThreadStackSize);
-        bool queued;
-        try { queued = pool.TrySubmit(item, RemainingMilliseconds(budget, startTimestamp), cancellationToken); }
-        catch { limiter.Release(); throw; }
-        if (!queued) { limiter.Release(); throw RejectedParse("the parser queue stayed full within the parse time budget."); }
-
-        try
-        {
-            if (budget > TimeSpan.Zero)
-            {
-                var remaining = budget - Stopwatch.GetElapsedTime(startTimestamp);
-                return await tcs.Task.WaitAsync(remaining < TimeSpan.Zero ? TimeSpan.Zero : remaining, cancellationToken).ConfigureAwait(false);
-            }
-            return await tcs.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            cancellation.Cancel();
-            pool.Abandon(item);
-            throw;
-        }
-        catch (TimeoutException) when (budget > TimeSpan.Zero)
-        {
-            cancellation.Cancel();
-            pool.Abandon(item);
-            throw new ParseCanceledException(
-                $"SQL parsing exceeded the time budget of {budget.TotalMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture)} ms.",
-                new TimeoutException("SQL parsing exceeded the configured time budget."));
-        }
     }
 
     private static ParseCanceledException RejectedParse(string reason) =>
@@ -980,14 +885,5 @@ public sealed partial class FastSqlEngine : ISqlEngine, IAsyncSqlEngine, Governa
         var (tree, _) = Parse(sql, tokenOptions, cancellationToken);
         var analyzer = new Analysis.SqlQueryAnalyzer();
         return analyzer.Analyze(tree);
-    }
-
-    public async Task<Analysis.SqlQueryMetadata> AnalyzeAsync(
-        ReadOnlyMemory<char> sql,
-        SqlTokenSecurityOptions? tokenOptions = null,
-        CancellationToken cancellationToken = default)
-    {
-        var (tree, _) = await ParseAsync(sql, tokenOptions, cancellationToken).ConfigureAwait(false);
-        return new Analysis.SqlQueryAnalyzer().Analyze(tree);
     }
 }

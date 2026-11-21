@@ -72,7 +72,7 @@ public sealed partial class QueryAnalysisService
             var analyzer = new SqlQueryAnalyzer();
             metadata = analyzer.Analyze(tree);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
         {
             outcome.Diagnostics.Add(new QueryValidationDiagnostic(
                 QueryDiagnosticCodes.SyntaxError,

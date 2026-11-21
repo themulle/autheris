@@ -4,6 +4,7 @@ using System.Data.Common;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Infrastructure.Caching.TableCache.Storage;
+using Microsoft.Extensions.Time.Testing;
 using Shouldly;
 using Xunit;
 
@@ -48,11 +49,13 @@ public sealed class DuckDbConnectionPoolTests
     [Fact]
     public async Task ReturnReader_CapsIdleReadersAndTrimIdleExpiresOldConnections()
     {
+        var time = new FakeTimeProvider();
         using var pool = new DuckDbConnectionPool(
             "DataSource=:memory:",
             maxConcurrentReaders: 4,
             maxIdleReaders: 2,
-            idleTimeout: TimeSpan.FromMilliseconds(80));
+            idleTimeout: TimeSpan.FromMinutes(5),
+            timeProvider: time);
 
         var leased = new List<DbConnection>(4);
         for (int i = 0; i < 4; i++)
@@ -67,7 +70,7 @@ public sealed class DuckDbConnectionPoolTests
 
         pool.IdleCount.ShouldBe(2);
 
-        await Task.Delay(130);
+        time.Advance(TimeSpan.FromMinutes(6));
         pool.TrimIdle();
         pool.IdleCount.ShouldBe(0);
     }

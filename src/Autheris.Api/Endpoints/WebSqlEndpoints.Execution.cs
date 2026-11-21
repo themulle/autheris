@@ -128,9 +128,7 @@ public static partial class WebSqlEndpoints
         {
             try
             {
-                bodyDto = string.IsNullOrWhiteSpace(rawBody)
-                    ? null
-                    : JsonSerializer.Deserialize<WebSqlRequestDto>(rawBody, JsonOptions);
+                bodyDto = JsonSerializer.Deserialize<WebSqlRequestDto>(rawBody!, JsonOptions);
 
                 sql = bodyDto?.Sql;
                 parameters = bodyDto?.Parameters;
