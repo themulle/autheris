@@ -83,13 +83,6 @@ public sealed class ReadOnlyOperationMiddleware
             .Where(o => string.IsNullOrEmpty(operationName) || string.Equals(o.Name?.Value, operationName, StringComparison.Ordinal))
             .Any(o => o.Operation == type);
 
-    private static ClaimsPrincipal? ResolvePrincipal(RequestContext context)
-    {
-        if (context.ContextData.TryGetValue(nameof(ClaimsPrincipal), out var value) && value is ClaimsPrincipal principal)
-        {
-            return principal;
-        }
-
-        return context.RequestServices.GetService<IHttpContextAccessor>()?.HttpContext?.User;
-    }
+    private static ClaimsPrincipal? ResolvePrincipal(RequestContext context) =>
+        Autheris.GraphQL.Security.GraphQlCallerPrincipal.ResolveOrNull(context);
 }

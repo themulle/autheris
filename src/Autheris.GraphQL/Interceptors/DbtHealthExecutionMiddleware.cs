@@ -66,7 +66,7 @@ public sealed class DbtHealthExecutionMiddleware
             httpContext = accessor?.HttpContext;
         }
 
-        var principal = httpContext?.User ?? (context.ContextData.TryGetValue("ClaimsPrincipal", out var cpObj) && cpObj is System.Security.Claims.ClaimsPrincipal cp ? cp : null);
+        var principal = Autheris.GraphQL.Security.GraphQlCallerPrincipal.ResolveOrNull(context, httpContext);
 
         // GQL-12: Do not disclose dbt quarantine status before authentication
         if (principal == null || principal.Identity?.IsAuthenticated != true)
@@ -111,7 +111,7 @@ public sealed class DbtHealthExecutionMiddleware
             if (health.Status == DbtModelHealthStatus.Quarantined || health.Status == DbtModelHealthStatus.Degraded)
             {
                 var targetTable = await ResolveTargetTableAsync(tableRepo, tableId, modelName, context.RequestAborted).ConfigureAwait(false);
-                bool isGlobalAdmin = principal.IsInRole("GovernanceAdmin") ||
+                bool isGlobalAdmin = Autheris.GraphQL.Security.GraphQlCallerPrincipal.HasGatewayRole(principal, Autheris.Domain.Security.GatewayRole.GovernanceAdmin, tenant.Value) ||
                                      Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
                 bool isTableOwner = false;
                 if (!isGlobalAdmin && ownershipRepo != null && principal.GetUserSid() is { } userSid)

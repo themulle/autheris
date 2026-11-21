@@ -144,10 +144,9 @@ internal static class ConnectionGraphQlTypes
     {
         var treeService = ctx.Service<IGovernedTreeQueryService>();
         var cursorEncoder = ctx.Service<IKeysetCursorEncoder>();
-        var httpContext = ctx.Service<IHttpContextAccessor>()?.HttpContext;
-        var principal = (ctx.ContextData.TryGetValue(nameof(ClaimsPrincipal), out var cp) && cp is ClaimsPrincipal p)
-            ? p
-            : httpContext?.User;
+        var accessor = ctx.Service<IHttpContextAccessor>();
+        var httpContext = Autheris.GraphQL.Security.GraphQlCallerPrincipal.HasSessionPrincipalOverride(ctx) ? null : accessor?.HttpContext;
+        var principal = Autheris.GraphQL.Security.GraphQlCallerPrincipal.Resolve(ctx, accessor);
 
         if (principal?.Identity?.IsAuthenticated != true ||
             principal.GetUserSid() is not { } userSid ||
