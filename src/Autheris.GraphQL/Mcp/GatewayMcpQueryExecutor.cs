@@ -205,10 +205,8 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
             return await ExecuteQueryDataCatalogAsync(tool, principal, sessionContext, variables, cancellationToken).ConfigureAwait(false);
         }
 
-        // Standard GraphQL execution via HotChocolate IRequestExecutor
-        // Hinweis (SEC M-17): Die Resolver lesen den Principal derzeit aus IHttpContextAccessor (HTTP-Aufrufer der MCP-Session),
-        // nicht aus dem GlobalState "ClaimsPrincipal". Die hier aufgebaute MCP-Identität wirkt daher nur für Komponenten,
-        // die den GlobalState auswerten; Resolver-Umstellung ist als Folgearbeit dokumentiert.
+        // Standard GraphQL execution via HotChocolate IRequestExecutor.
+        // All GraphQL resolvers and execution middlewares resolve the session ClaimsPrincipal from global state.
         if (!string.IsNullOrWhiteSpace(tool.TargetGraphQLOperation))
         {
             if (principal.IsReadOnly())
@@ -268,7 +266,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
                         return await EnrichWithProvenanceAsync(tool, json, cancellationToken).ConfigureAwait(false);
                     }
 
-                    // SEC M-17: GraphQL-Fehler (bereits durch den Error-Filter maskiert) strukturiert an den Agenten durchreichen.
+                    // GraphQL errors (masked by the error filter) are returned cleanly to the caller.
                     _logger.LogWarning("GraphQL execution returned {ErrorCount} error(s) for MCP tool '{ToolName}'.", op.Errors.Count, tool.Name);
                     return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.ExecutionFailed, "GraphQL execution returned errors.", json);
                 }

@@ -821,10 +821,9 @@ public sealed partial class CatalogGraphQlTypeModule : ITypeModule, IDisposable,
         CatalogSchemaModel schema)
     {
         var treeService = ctx.Service<IGovernedTreeQueryService>();
-        var httpContext = ctx.Service<IHttpContextAccessor>()?.HttpContext;
-        var principal = (ctx.ContextData.TryGetValue(nameof(ClaimsPrincipal), out var cp) && cp is ClaimsPrincipal p)
-            ? p
-            : httpContext?.User ?? new ClaimsPrincipal();
+        var accessor = ctx.Service<IHttpContextAccessor>();
+        var httpContext = Autheris.GraphQL.Security.GraphQlCallerPrincipal.HasSessionPrincipalOverride(ctx) ? null : accessor?.HttpContext;
+        var principal = Autheris.GraphQL.Security.GraphQlCallerPrincipal.Resolve(ctx, accessor);
 
         IReadOnlyDictionary<string, string[]>? headers = null;
         if (httpContext?.Request?.Headers is { Count: > 0 } reqHeaders)

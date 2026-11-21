@@ -113,16 +113,6 @@ public sealed class SubgraphFieldMaskingTypeInterceptor : TypeInterceptor
         };
     }
 
-    private static ClaimsPrincipal? ResolvePrincipal(IResolverContext context)
-    {
-        if (context.ContextData.TryGetValue(nameof(ClaimsPrincipal), out var cpObj) && cpObj is ClaimsPrincipal cp)
-        {
-            return cp;
-        }
-        if (context.ContextData.TryGetValue("ClaimsPrincipal", out var cpStrObj) && cpStrObj is ClaimsPrincipal cpStr)
-        {
-            return cpStr;
-        }
-        return context.Services.GetService<IHttpContextAccessor>()?.HttpContext?.User;
-    }
+    private static ClaimsPrincipal? ResolvePrincipal(IResolverContext context) =>
+        Autheris.GraphQL.Security.GraphQlCallerPrincipal.Resolve(context);
 }
