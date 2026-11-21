@@ -285,7 +285,7 @@ public sealed class SecurityTraitCoverageTests
 [Trait("Category", "Security")]
 public sealed class SecurityTestInventoryTests
 {
-    private const string InventoryRelativePath = "docs/plans/simplification/security-test-inventory.txt";
+    private const string InventoryRelativePath = "tests/Autheris.Tests.Architecture/Baselines/security-test-inventory.txt";
 
     [Fact]
     public void Inventory_file_matches_discovered_tests()

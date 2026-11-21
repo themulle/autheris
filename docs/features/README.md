@@ -8,7 +8,7 @@ Every feature document includes an architectural overview, configuration options
 > **Documentation Standard for Contributors:**
 > - Individual feature documentation resides in `docs/features/` using the naming scheme `f-<category>-<number>-<slug>.md`.
 > - Register feature documents in the index table below.
-> - Feature documents describe the working state, architecture, and usage. Do not include transient development progress, WIP notes, or task checklists (those belong in [`docs/plans/`](../plans/)). See [`AGENTS.md`](../../AGENTS.md).
+> - Feature documents describe the working state, architecture, and usage. Do not include transient development progress, WIP notes, or task checklists (those belong in GitHub Issues). See [`AGENTS.md`](../../AGENTS.md).
 
 | Feature ID | Title | Documentation |
 | :--- | :--- | :--- |

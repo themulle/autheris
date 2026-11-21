@@ -8,7 +8,7 @@ This document governs all AI agents, assistant models (Antigravity, Claude, Copi
 
 * **Universal Implementation Standard:** English is the **sole standard language** across the entire Autheris repository for:
   - All source code, unit/integration tests, docstrings, and inline code comments.
-  - All documentation in `docs/` and planning files in `docs/plans/`.
+  - All documentation in `docs/`, GitHub Issues, implementation plans, and PR descriptions.
   - The root [`README.md`](README.md) and competitive comparisons in `docs/comparisons/`.
   - All git commit messages, PR descriptions, and inter-agent communication.
 * **Alignment with Root README:** The canonical [README.md](README.md) is written in English. All supporting documentation and code must consistently adhere to English.
@@ -30,44 +30,39 @@ This document governs all AI agents, assistant models (Antigravity, Claude, Copi
   - **No sprint or task checklists:** Checklists (`- [ ]`, `- [x]`) and task breakdowns do not belong in system documentation.
   - **No implementation plans or roadmaps:** Documents titled `*implementation-plan*`, `*roadmap*`, or `*backlog*` must NEVER be placed in `docs/` (e.g. not in `docs/architecture/` or `docs/features/`).
   - **No personal/agent work logs:** Discussion of what an agent did today, what needs to be fixed tomorrow, or internal handoff notes.
-* **Where does development progress belong?**
-  - **EXCLUSIVELY in `docs/plans/`!** Every status update, roadmap, task checklist, and progress note must live in [`docs/plans/`](docs/plans/) and be anchored in [`docs/plans/00-master-plan-overview.md`](docs/plans/00-master-plan-overview.md).
+* **Where do development progress, plans, and work instructions belong?**
+  - **EXCLUSIVELY in GitHub Issues (`gh issue`)!** Every requirement, implementation plan, task checklist, code-review instruction, and progress note must live on its GitHub Issue — **never** in `docs/` and **never** as new files in `docs/plans/` (which is retired).
 
 ---
 
-## 3. 📁 Requirements & Planning Location (`docs/plans/`)
+## 3. 🎯 GitHub-Issue-First Planning & Multi-Agent Coordination Protocol
 
-All new requirements, architectural designs, technical proposals, and implementation roadmaps **MUST be placed in `docs/plans/`**.
+All new requirements, architectural designs, implementation details, and operational work instructions (including **code reviews**, audits, and follow-up tasks) **MUST be handled exclusively via GitHub Issues** (`gh issue`).
 
-### Standardized Naming Convention
-* **Requirements / PRDs:** `docs/plans/YYYY-MM-DD-req-<topic>.md`
-* **Architecture Concepts & Designs:** `docs/plans/YYYY-MM-DD-concept-<topic>.md`
-* **Implementation Plans & Roadmaps:** `docs/plans/YYYY-MM-DD-plan-<topic>.md`
+### Mandatory Rules:
+1. **No New Files in `docs/plans/`:**
+   - Do not create or update planning/PRD/roadmap files in `docs/plans/`.
+   - Store requirements, architectural designs, security conditions, and implementation plans directly inside the corresponding **GitHub Issue** (in the issue body or as a structured `## Implementation Details` comment/attachment).
+2. **Work Instructions as Issues:**
+   - GitHub Issues are not limited to features or bugs; they may also be direct work instructions for an agent (for example, a **Code Review** of a PR/branch, a security check, or an operational task).
+3. **Multi-Agent Claiming & Coordination Across Machines:**
+   - Multiple agents may run on different machines in parallel. Every agent **MUST** coordinate through GitHub Issues before starting work:
+     1. **Check availability:** Inspect `gh issue view <n> --json state,labels,comments` and confirm the issue does **not** already carry the `in-progress` label or an active claim comment.
+     2. **Claim immediately:** Mark the issue as actively worked on before starting implementation or review:
+        - Add the `in-progress` label: `gh issue edit <n> --add-label "in-progress"`
+        - Post a claim comment naming the machine/host, agent role, branch (if any), and UTC timestamp.
+     3. **Update / Handover:** Post meaningful blockers or handover notes as issue comments. If releasing an unfinished issue for another agent to pick up, remove `in-progress` (`gh issue edit <n> --remove-label "in-progress"`).
+     4. **Complete & Close:** Once the PR is merged (or the work-instruction/code-review issue is completed and findings are posted on the issue), remove `in-progress` and close the issue (`gh issue close <n>`) referencing the PR/commit.
 
 ---
 
-## 4. 🎯 Origin Plan Protocol ("Ursprungsplan")
+## 4. 📋 Issue Lifecycle Statuses
 
-The central origin/master plan for the entire project is:
-👉 **[`docs/plans/00-master-plan-overview.md`](docs/plans/00-master-plan-overview.md)**
-
-### Mandatory Workflow for All Agents:
-
-1. **Consult the Origin Plan First:**
-   Before beginning any work, analyze `docs/plans/00-master-plan-overview.md` to identify active tracks, architectural boundaries, and dependencies.
-2. **Refine & Build on the Origin Plan:**
-   Agents must never create isolated, disconnected plans. Any new requirement or feature stream must be registered in `00-master-plan-overview.md`.
-3. **Continuous Plan Refinement:**
-   When an agent refines an existing concept (e.g., breaking down a concept into execution steps, designing schema models, or writing test specifications), the agent must:
-   * Update the specific detailed plan file in `docs/plans/`.
-   * Update the status, checklist, and notes in the origin plan (`00-master-plan-overview.md`).
-4. **Lifecycle & Status Transitions:**
-   Track statuses in the origin plan table:
-   * `PROPOSED` 📝
-   * `IN PROGRESS` 🚀
-   * `UNDER REVIEW` 🔍
-   * `COMPLETED & VERIFIED` ✅
-   * `DEPRECATED / ARCHIVED` 📦
+Track issue progress directly via GitHub Issue state, labels, and comments:
+* Open (unclaimed) — ready to be picked up
+* `in-progress` label + claim comment — actively worked on by an agent
+* PR open / under review — linked PR awaiting CI & Phase 5 review
+* Closed — merged & verified (or review/work instruction completed)
 
 ---
 
@@ -88,7 +83,7 @@ The central origin/master plan for the entire project is:
   4. **Security, Zero-Trust & Fail-Closed Behavior**: RLS pushdown, Casbin rules, and error handling.
 * **Separation of Concerns Reminder:**
   - Feature documents in `docs/features/` describe **how the feature works and how to use it**.
-  - Feature documents **MUST NOT contain development progress, WIP notes, sprint roadmaps, or task checklists** (those belong in `docs/plans/`).
+  - Feature documents **MUST NOT contain development progress, WIP notes, sprint roadmaps, or task checklists** (those belong in GitHub Issues).
 
 ---
 
@@ -102,26 +97,26 @@ flowchart LR
     P2 --> P3["3. Security Expert<br/>(Audit & Threat Hardening)"]
     P3 --> P4["4. Developer(s)<br/>(Strict TDD Red-Green-Refactor)"]
     P4 --> P5["5. Code Reviewer<br/>(Inspection & Quality Gate)"]
-    P5 --> T["Tracker update<br/>(docs/plans/, commit, push)"]
+    P5 --> T["GitHub Issue update<br/>(close / unclaim, commit, push)"]
 ```
 
 1. **Phase 1: Product Management (`product-manager`)**
-   - Qualifies incoming requests, deduplicates against [`docs/features/`](docs/features/), benchmarks with web/industry best practices (OWASP, RFCs).
-   - Gatekeeper role: Rejects/warns on anti-patterns with safe alternatives. Enriches valid requests into PRDs in `docs/plans/YYYY-MM-DD-req-*.md`.
+   - Qualifies incoming requests, deduplicates against [`docs/features/`](docs/features/) and open GitHub Issues, benchmarks with web/industry best practices (OWASP, RFCs).
+   - Gatekeeper role: Rejects/warns on anti-patterns with safe alternatives. Creates or enriches the **GitHub Issue** with structured requirements and acceptance criteria.
 2. **Phase 2: Architectural Implementation Plan (`csharp-architect`)**
-   - Designs architecture, interfaces, and concrete step-by-step implementation plan in `docs/plans/YYYY-MM-DD-plan-*.md`.
+   - Designs architecture, interfaces, and concrete step-by-step implementation details directly in the **GitHub Issue** (body or `## Implementation Details` comment) — never in `docs/plans/`.
    - Splits into parallel developer streams if applicable.
 3. **Phase 3: Security & Compliance Review (`csharp-security-expert`)**
-   - Audits plan against Zero-Trust, Fail-Closed, Casbin ABAC, and HMAC audit requirements. Expands plan with security test criteria.
+   - Audits the plan against Zero-Trust, Fail-Closed, and HMAC audit requirements. Appends binding `SEC-*` conditions and security test criteria to the GitHub Issue.
 4. **Phase 4: Test-Driven Development (`csharp-tdd-developer`, Junior Execution on Gemini 4 Hydrogen)**
-   - Runs in a **Senior (`Orchestrator (Argon)`) + Junior (`Gemini 4 Hydrogen`)** pairing: the Senior Orchestrator/PM pre-analyzes the implementation plan and supplies a self-contained, context-rich work package brief (target files/lines, signatures, binding `SEC-*` conditions, unit `--filter`, and integration test pointers).
+   - Runs in a **Senior (`Orchestrator (Argon)`) + Junior (`Gemini 4 Hydrogen`)** pairing: the Senior Orchestrator/PM claims the GitHub Issue (`in-progress` label + claim comment), supplies a self-contained work package brief from the issue's implementation details (target files/lines, signatures, binding `SEC-*` conditions, unit `--filter`, and integration test pointers).
    - Strictly applies Red-Green-Refactor with xUnit, Shouldly/FluentAssertions, and NSubstitute inside an isolated worktree.
    - **Local CPU/RAM Constraint:** Runs **only** filtered local unit tests (`dotnet test tests/Autheris.Tests.Unit/Autheris.Tests.Unit.csproj --filter <TestClass> -m:2 -nodeReuse:false`) and touched architecture ratchet tests locally.
    - **Proactive Integration Test Adaptation (Compile-Only Locally):** Inspects and updates any affected tests in `tests/Autheris.Tests.Integration` or `tests/Autheris.Tests.Parity` and verifies `tests/Autheris.Tests.Integration/Autheris.Tests.Integration.csproj` compiles cleanly without executing integration tests locally.
 5. **Phase 5: Code Review & Quality Gate (`csharp-code-reviewer`)**
-   - Audits code quality, C# 13 idioms, allocation efficiency, binding security test coverage, and proactive integration test updates. Loops back to Hydrogen developers if issues arise.
-6. **After Phase 5: Tracker update & GitHub Actions Verification (no documentation phase)**
-   - Updates the progress tracker and `docs/plans/00-master-plan-overview.md`, commits and pushes the branch, cleans the worktree, and verifies the full unit suite and all integration/parity suites on **GitHub Actions**. No feature documentation is written as part of the lifecycle.
+   - Audits code quality, C# idioms, allocation efficiency, binding security test coverage, and proactive integration test updates. Loops back to Hydrogen developers if issues arise.
+6. **After Phase 5: Issue Update, PR Merge & GitHub Actions Verification (no documentation phase)**
+   - Commits and pushes the branch, cleans the worktree, verifies the full unit suite and all integration/parity suites on **GitHub Actions**, merges the PR, removes `in-progress`, and closes the GitHub Issue with the PR/commit reference. No feature documentation is written as part of the lifecycle.
 
 ---
 
