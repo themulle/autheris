@@ -363,4 +363,136 @@ public sealed partial class AdvisoryRegressionTests
             IReadOnlyList<KeyColumnDirection>? primaryKeyDirections = null, CancellationToken ct = default)
             => throw new NotSupportedException();
     }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Ghsa_5fqm_mpc4_regression()
+    {
+        var ordersId = new TableIdentifier("sales", "dbo", "orders");
+        var orders = new TableMetadata
+        {
+            Identifier = ordersId,
+            Table = new Table { Id = Guid.NewGuid(), SourceName = "sales", SchemaName = "dbo", TableName = "orders", IsActive = true },
+            Columns = [new TableColumn { ColumnName = "id", DataType = "int" }]
+        };
+        var tables = Substitute.For<ITableMetadataRepository>();
+        tables.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([orders]));
+        Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeSingleReadsFromCatalog(tables);
+
+        var consents = Substitute.For<IConsentRepository>();
+        consents.GetAllActiveConsentsForSubjectsAsync(
+                Arg.Any<IEnumerable<Sid>>(), Arg.Any<IEnumerable<string>?>(), Arg.Any<DateTimeOffset?>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<Consent>>([]));
+
+        var created = new List<ConsentRequest>();
+        var approvals = Substitute.For<IConsentApprovalRepository>();
+        approvals.CreateConsentRequestAsync(Arg.Any<ConsentRequest>(), Arg.Any<CancellationToken>())
+            .Returns(ci =>
+            {
+                var r = ci.Arg<ConsentRequest>();
+                created.Add(r);
+                return Task.FromResult(r);
+            });
+
+        var extSystemId = Guid.NewGuid();
+        var router = Substitute.For<Autheris.Application.ConsentRequests.Routing.IConsentWorkflowRouter>();
+        router.ResolveForTableAsync(TenantA, ordersId, Arg.Any<CancellationToken>())
+            .Returns(new Autheris.Application.ConsentRequests.Routing.ConsentWorkflowRouteResolution(
+                ConsentWorkflowMode.External, extSystemId, MaxDurationDays: 30, RequestTimeoutDays: 14, ExpiryNoticeLeadHours: 24, RequireResolvableApprover: false, WorkflowRouteScopeKind.DataSource));
+
+        var fixedNow = new DateTimeOffset(2026, 11, 21, 12, 0, 0, TimeSpan.Zero);
+        var clock = new Autheris.Tests.Common.TestClock(fixedNow);
+        var limiter = Substitute.For<IRateLimiterService>();
+        limiter.CheckPostAuthSidAsync(Arg.Any<string>(), Arg.Any<Autheris.Domain.Options.PostAuthSidRateLimitOptions>(), Arg.Any<CancellationToken>())
+            .Returns(new Autheris.Domain.Model.CostQuotaResult { Allowed = true, RemainingTokens = 10 });
+
+        var svc = new Autheris.Application.Governance.Analysis.BundledConsentRequestService(
+            tables,
+            consents,
+            new InMemoryAuditLogRepository(),
+            approvals,
+            gatewayOptions: Options.Create(new GatewayOptions()),
+            workflowRouter: router,
+            rateLimiter: limiter,
+            timeProvider: clock);
+
+        var personUser = new ClaimsPrincipal(new ClaimsIdentity(
+        [
+            new Claim(ClaimTypes.PrimarySid, "S-1-5-21-USER"),
+            new Claim(ClaimTypes.Email, "user@example.com"),
+            new Claim("tenant_id", "tenant-a")
+        ], "Bearer"));
+
+        // 1. External workflow routing and 30-day route duration cap are enforced on default and explicit durations.
+        var clamped = await svc.SubmitBundledRequestAsync(
+            personUser,
+            new Autheris.Application.Governance.Analysis.BundledConsentRequest(
+                [new Autheris.Application.Governance.Analysis.RequestableConsentItem("sales.dbo.orders", null, "READ", null)],
+                Purpose: "Analytics query need",
+                ConsumerReference: "PR-1"));
+        clamped.Tickets.ShouldHaveSingleItem().Status.ShouldBe("PENDING_EXTERNAL_APPROVAL");
+        created.ShouldHaveSingleItem();
+        created[0].WorkflowMode.ShouldBe(ConsentWorkflowMode.External);
+        created[0].ExternalSystemId.ShouldBe(extSystemId);
+        created[0].Status.ShouldBe("PENDING_EXTERNAL_APPROVAL");
+        created[0].RequestedValidTo.ShouldBe(fixedNow.AddDays(30));
+        created[0].RequesterIdentifiers.ShouldNotBeNull();
+        created[0].RequesterIdentifiers.ShouldContain("S-1-5-21-USER");
+        created[0].RequesterIdentifiers.ShouldContain("user@example.com");
+
+        var overCapEx = await Should.ThrowAsync<Autheris.Application.ConsentRequests.ConsentRequestException>(() => svc.SubmitBundledRequestAsync(
+            personUser,
+            new Autheris.Application.Governance.Analysis.BundledConsentRequest(
+                [new Autheris.Application.Governance.Analysis.RequestableConsentItem("sales.dbo.orders", null, "READ", null)],
+                Purpose: "Analytics query need",
+                RequestedUntilUtc: fixedNow.AddDays(60))));
+        overCapEx.Code.ShouldBe("VALIDITY_EXCEEDS_MAXIMUM");
+
+        // 2. App-only tokens, short justifications, disabled self-service, and rate-limit exhaustion are rejected before creation.
+        var appOnly = new ClaimsPrincipal(new ClaimsIdentity(
+        [
+            new Claim(ClaimTypes.PrimarySid, "S-1-5-21-APP"),
+            new Claim("idtyp", "app"),
+            new Claim("tenant_id", "tenant-a")
+        ], "Bearer"));
+        (await Should.ThrowAsync<Autheris.Application.ConsentRequests.ConsentRequestException>(() => svc.SubmitBundledRequestAsync(
+            appOnly,
+            new Autheris.Application.Governance.Analysis.BundledConsentRequest(
+                [new Autheris.Application.Governance.Analysis.RequestableConsentItem("sales.dbo.orders", null, "READ", null)],
+                Purpose: "Analytics query need"))))
+            .Code.ShouldBe("FORBIDDEN");
+
+        (await Should.ThrowAsync<Autheris.Application.ConsentRequests.ConsentRequestException>(() => svc.SubmitBundledRequestAsync(
+            personUser,
+            new Autheris.Application.Governance.Analysis.BundledConsentRequest(
+                [new Autheris.Application.Governance.Analysis.RequestableConsentItem("sales.dbo.orders", null, "READ", null)],
+                Purpose: "ab"))))
+            .Code.ShouldBe("VALIDATION_ERROR");
+
+        var disabledSvc = new Autheris.Application.Governance.Analysis.BundledConsentRequestService(
+            tables,
+            consents,
+            new InMemoryAuditLogRepository(),
+            approvals,
+            gatewayOptions: Options.Create(new GatewayOptions
+            {
+                Authentication = new AuthenticationOptions { EntraId = new EntraIdOptions { SelfServiceEnabled = false } }
+            }));
+        (await Should.ThrowAsync<Autheris.Application.ConsentRequests.ConsentRequestException>(() => disabledSvc.SubmitBundledRequestAsync(
+            personUser,
+            new Autheris.Application.Governance.Analysis.BundledConsentRequest(
+                [new Autheris.Application.Governance.Analysis.RequestableConsentItem("sales.dbo.orders", null, "READ", null)],
+                Purpose: "Analytics query need"))))
+            .Code.ShouldBe("FORBIDDEN");
+
+        limiter.CheckPostAuthSidAsync(Arg.Any<string>(), Arg.Any<Autheris.Domain.Options.PostAuthSidRateLimitOptions>(), Arg.Any<CancellationToken>())
+            .Returns(new Autheris.Domain.Model.CostQuotaResult { Allowed = false, RetryAfterSeconds = 42 });
+        var rlEx = await Should.ThrowAsync<Autheris.Application.ConsentRequests.ConsentRequestException>(() => svc.SubmitBundledRequestAsync(
+            personUser,
+            new Autheris.Application.Governance.Analysis.BundledConsentRequest(
+                [new Autheris.Application.Governance.Analysis.RequestableConsentItem("sales.dbo.orders", null, "READ", null)],
+                Purpose: "Analytics query need")));
+        rlEx.Code.ShouldBe("RATE_LIMIT_EXCEEDED");
+        rlEx.RetryAfterSeconds.ShouldBe(42);
+    }
 }
