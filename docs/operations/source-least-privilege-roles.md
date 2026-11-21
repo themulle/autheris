@@ -1,6 +1,6 @@
 # Least-Privilege Source Database Roles
 
-Grant per governed object, never per database or catalog. The data login below is read-only. Writes use a separate login configured as `WriteConnection` ([WP-SIMPL-45](../plans/simplification/WP-SIMPL-45-governed-write-access.md), OD-25/OD-26) that holds only the privileges listed by `GET /api/v1/admin/datasources/{name}/required-write-privileges` (column-level `INSERT`/`UPDATE` on tables with active write grants, `DELETE` only where a delete grant exists); it never holds catalog privileges either.
+Grant per governed object, never per database or catalog. The data login below is read-only. Writes use a separate login configured as `WriteConnection` (WP-SIMPL-45, OD-25/OD-26) that holds only the privileges listed by `GET /api/v1/admin/datasources/{name}/required-write-privileges` (column-level `INSERT`/`UPDATE` on tables with active write grants, `DELETE` only where a delete grant exists); it never holds catalog privileges either.
 
 ## PostgreSQL
 

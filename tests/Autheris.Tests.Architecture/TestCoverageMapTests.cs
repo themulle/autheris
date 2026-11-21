@@ -261,7 +261,7 @@ internal static partial class TestInventoryScanner
 
     public static Dictionary<string, (string NewIdOrReason, string Category)> LoadCoverageMap(string root)
     {
-        var mapPath = Path.Combine(root, "docs", "plans", "2026-11-05-test-coverage-map.csv");
+        var mapPath = Path.Combine(root, "tests", "Autheris.Tests.Architecture", "Baselines", "test-coverage-map.csv");
         var result = new Dictionary<string, (string NewIdOrReason, string Category)>(StringComparer.Ordinal);
         if (!File.Exists(mapPath))
         {
@@ -327,7 +327,7 @@ internal static partial class TestInventoryScanner
 public sealed partial class TestCoverageMapTests
 {
     private const string BaselineRelativePath = "tests/Autheris.Tests.Architecture/Baselines/security-tests-base.txt";
-    private const string CoverageMapRelativePath = "docs/plans/2026-11-05-test-coverage-map.csv";
+    private const string CoverageMapRelativePath = "tests/Autheris.Tests.Architecture/Baselines/test-coverage-map.csv";
 
     [GeneratedRegex(@"WP-SIMPL-\d+", RegexOptions.CultureInvariant)]
     private static partial Regex DeletingWpRegex();
