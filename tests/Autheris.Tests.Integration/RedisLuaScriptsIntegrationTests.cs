@@ -5,6 +5,7 @@ namespace Autheris.Tests.Integration;
 using System;
 using System.Threading.Tasks;
 using Autheris.Api.Security;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy.WriteGrants;
 using Autheris.Application.State;
 using Autheris.Domain.Common;
@@ -162,7 +163,7 @@ public sealed class RedisLuaScriptsIntegrationTests
         var revocation = new RedisTokenRevocationService(mux, opts, NullLogger<RedisTokenRevocationService>.Instance, clock);
         await revocation.RevokeAsync("jti-long", clock.GetUtcNow().AddMinutes(60));
         await revocation.RevokeAsync("jti-long", clock.GetUtcNow().AddMinutes(2));
-        var revTtl = await db.KeyTimeToLiveAsync(revocation.BuildKey("jti-long"));
+        var revTtl = await db.KeyTimeToLiveAsync(revocation.BuildKey(TokenRevocationKeys.Normalize("jti-long")));
         revTtl.ShouldNotBeNull();
         revTtl!.Value.TotalMinutes.ShouldBeGreaterThan(30);
 
