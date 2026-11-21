@@ -260,16 +260,10 @@ jobs:
           echo "HOST_VERSION=$HOST_VERSION" >> "$GITHUB_ENV"
           echo "RELEASE_TAG=$RELEASE_TAG" >> "$GITHUB_ENV"
 
-      - name: Build ModuleSigner and pack signed modules
-        env:
-          AUTHERIS_MODULE_SIGNING_KEY_PEM: ${{ secrets.AUTHERIS_MODULE_SIGNING_KEY_PEM }}
+      - name: Publish ModuleSigner and Modules
         run: |
-          if [ -z "${AUTHERIS_MODULE_SIGNING_KEY_PEM:-}" ]; then
-            echo "Error: AUTHERIS_MODULE_SIGNING_KEY_PEM secret is required in module-release environment." >&2
-            exit 1
-          fi
-          dotnet build tools/Autheris.ModuleSigner/Autheris.ModuleSigner.csproj -c Release --no-restore
           mkdir -p dist/modules artifacts
+          dotnet publish tools/Autheris.ModuleSigner/Autheris.ModuleSigner.csproj -c Release --no-restore -o ./dist/tools/module-signer
           for csproj in modules/*/*.csproj; do
             case "$csproj" in
               *.Tests.csproj) continue ;;
@@ -279,7 +273,22 @@ jobs:
             module_id="$(printf '%s' "$short_name" | tr '[:upper:]' '[:lower:]')"
             module_out="dist/modules/${module_id}"
             dotnet publish "$csproj" -c Release --no-restore -p:Version="$VERSION" -o "$module_out"
-            dotnet run --project tools/Autheris.ModuleSigner/Autheris.ModuleSigner.csproj -c Release --no-build -- \
+            # Keep only Linux x64/arm64 runtimes if a module ever ships private native assets, before signing the manifest.
+            find "$module_out/runtimes" -mindepth 1 -maxdepth 1 ! -name linux-x64 ! -name linux-arm64 -exec rm -rf {} + 2>/dev/null || true
+          done
+
+      - name: Sign and Archive Modules
+        env:
+          AUTHERIS_MODULE_SIGNING_KEY_PEM: ${{ secrets.AUTHERIS_MODULE_SIGNING_KEY_PEM }}
+        run: |
+          if [ -z "${AUTHERIS_MODULE_SIGNING_KEY_PEM:-}" ]; then
+            echo "Error: AUTHERIS_MODULE_SIGNING_KEY_PEM secret is required in module-release environment." >&2
+            exit 1
+          fi
+          for module_out in dist/modules/*; do
+            [ -d "$module_out" ] || continue
+            module_id="$(basename "$module_out")"
+            dotnet ./dist/tools/module-signer/Autheris.ModuleSigner.dll \
               --dir "$module_out" \
               --id "$module_id" \
               --version "$HOST_VERSION" \
