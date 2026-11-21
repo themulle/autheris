@@ -11,7 +11,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.ConsentRequests.Events;
 using Autheris.Application.ConsentRequests.Routing;
-using Autheris.Application.Governance.ConsentRequests;
 using Autheris.Application.Governance.Grants;
 using Autheris.Application.Identity.Attributes;
 using Autheris.Application.Common.Interfaces;
@@ -93,23 +92,19 @@ public sealed class ConsentRequestService : IConsentRequestService
         ArgumentNullException.ThrowIfNull(command);
 
         var principal = command.Principal;
-        EnsurePersonSubject(principal);
-
-        if (_gatewayOptions?.Value.Authentication.EntraId.SelfServiceEnabled == false)
-        {
-            throw new ConsentRequestException("FORBIDDEN", "Self-service access requests are disabled.");
-        }
+        ConsentSubmissionPipeline.EnsurePersonSubject(principal, _subjectResolver);
+        ConsentSubmissionPipeline.EnsureSelfServiceEnabled(_gatewayOptions?.Value);
 
         if (_rateLimiter is not null && _gatewayOptions is not null)
         {
-            var limitTenant = ResolveTenantId(principal, command.ContextTenant, ClusterAdminPolicy.IsCanonicalClusterAdmin(principal));
-            var retryAfter = await Autheris.Application.Catalog.Discovery.DiscoveryCallerGate.CheckAccessRequestRateAsync(
-                limitTenant, command.UserSid, _discoveryOptions?.Value.Discovery ?? new Autheris.Application.Catalog.Services.CatalogDiscoverySettings(),
-                _gatewayOptions.Value, _rateLimiter, ct).ConfigureAwait(false);
-            if (retryAfter is { } wait)
-            {
-                throw new ConsentRequestException("RATE_LIMIT_EXCEEDED", "Access request rate limit exceeded.", wait);
-            }
+            var rateLimitTenant = ResolveTenantId(principal, command.ContextTenant, ClusterAdminPolicy.IsCanonicalClusterAdmin(principal));
+            await ConsentSubmissionPipeline.CheckAccessRequestRateAsync(
+                rateLimitTenant,
+                command.UserSid,
+                _rateLimiter,
+                _gatewayOptions.Value,
+                _discoveryOptions?.Value,
+                ct).ConfigureAwait(false);
         }
 
         // #341: caller text; a blank component or one with a dot or line break is a client error, not a constructor fault.
@@ -118,32 +113,19 @@ public sealed class ConsentRequestService : IConsentRequestService
             throw Invalid("Domain, Schema and TableName must be valid, non-empty values.");
         }
 
-        var justification = command.Justification;
-        if (string.IsNullOrWhiteSpace(justification) || justification.Trim().Length < MinJustificationLength)
-        {
-            throw Invalid("A justification of at least 5 characters is required.");
-        }
-
-        if (justification.Length > MaxJustificationLength)
-        {
-            throw Invalid("The justification must not exceed 2000 characters.");
-        }
+        var justification = ConsentSubmissionPipeline.ValidateJustification(
+            command.Justification,
+            MinJustificationLength,
+            MaxJustificationLength);
 
         var now = _timeProvider.GetUtcNow();
-        DateTimeOffset resolvedValidTo;
-        try
-        {
-            resolvedValidTo = _grantValidityPolicy.ResolveRequestedValidTo(
-                now,
-                command.RequestedValidFrom,
-                command.RequestedValidTo,
-                command.RequestedDuration == null && command.RequestedValidTo == null ? command.DurationDays : null,
-                command.RequestedDuration);
-        }
-        catch (GrantValidityException ex)
-        {
-            throw new ConsentRequestException(ex.ErrorCode, ex.Message);
-        }
+        var resolvedValidTo = ConsentSubmissionPipeline.ResolveRequestedValidTo(
+            _grantValidityPolicy,
+            now,
+            command.RequestedValidFrom,
+            command.RequestedValidTo,
+            command.DurationDays,
+            command.RequestedDuration);
 
         var durationDays = Math.Max(1, (int)Math.Ceiling((resolvedValidTo - (command.RequestedValidFrom ?? now)).TotalDays));
 
@@ -198,34 +180,17 @@ public sealed class ConsentRequestService : IConsentRequestService
         var validatedWriteRules = WriteRuleWorkflowHelper.ValidateRequestedWriteRules(
             meta, command.RequestedWriteRules, tableId, tenantId, _policyDependencyIndex);
 
-        ConsentWorkflowMode workflowMode;
-        Guid? externalSystemId;
-        if (_workflowRouter != null)
-        {
-            var resolution = await _workflowRouter.ResolveForTableAsync(tenantId, tableId, ct).ConfigureAwait(false);
-            workflowMode = resolution.Mode;
-            externalSystemId = workflowMode == ConsentWorkflowMode.External ? resolution.ExternalSystemId : null;
-            var routeMaxEnd = GrantTimeMath.AddSaturating(command.RequestedValidFrom ?? now, GrantTimeMath.DaysToSpan(Math.Max(1, resolution.MaxDurationDays)));
-            if (resolvedValidTo > routeMaxEnd)
-            {
-                if (command.RequestedValidTo.HasValue || command.RequestedDuration is not null || command.DurationDays > 0)
-                {
-                    throw new ConsentRequestException(
-                        "VALIDITY_EXCEEDS_MAXIMUM",
-                        $"Requested grant duration exceeds the configured route maximum of {resolution.MaxDurationDays} days.");
-                }
-
-                resolvedValidTo = routeMaxEnd;
-            }
-        }
-        else
-        {
-            var route = _workflowConfigRepository != null
-                ? await _workflowConfigRepository.ResolveWorkflowRouteAsync(tenantId, tableId, ct).ConfigureAwait(false)
-                : null;
-            workflowMode = route?.Mode ?? ConsentWorkflowMode.Internal;
-            externalSystemId = workflowMode == ConsentWorkflowMode.External ? route?.ExternalSystemId : null;
-        }
+        var hasExplicitDuration = command.RequestedValidTo.HasValue || command.RequestedDuration is not null || command.DurationDays > 0;
+        var (workflowMode, externalSystemId, effectiveRouteValidTo) = await ConsentSubmissionPipeline.ResolveWorkflowRouteAsync(
+            tenantId,
+            [tableId],
+            command.RequestedValidFrom ?? now,
+            resolvedValidTo,
+            hasExplicitDuration,
+            _workflowRouter,
+            _workflowConfigRepository,
+            ct).ConfigureAwait(false);
+        resolvedValidTo = effectiveRouteValidTo;
 
         // a user request is an individual grant; its duration is bounded by the class of the table (fail closed).
         var grantDecision = _grantPolicy.Evaluate(new GrantRequest(
@@ -378,7 +343,7 @@ public sealed class ConsentRequestService : IConsentRequestService
 
     /// <summary>All identifiers (SID, object id, UPN, e-mail, ...) a principal is known by.</summary>
     public static List<string> ExtractPrincipalIdentifiers(ClaimsPrincipal? principal, string? fallbackSid = null) =>
-        [.. SeparationOfDutiesService.CollectSubjectIdentifiers(principal, fallbackSid)];
+        ConsentSubmissionPipeline.ExtractRequesterIdentifiers(principal, fallbackSid);
 
     private static ConsentRequestException Invalid(string message) => new("VALIDATION_ERROR", message);
 
@@ -476,37 +441,6 @@ public sealed class ConsentRequestService : IConsentRequestService
         return true;
     }
 
-    private void EnsurePersonSubject(ClaimsPrincipal? principal)
-    {
-        if (principal == null || principal.Identity?.IsAuthenticated != true)
-        {
-            throw new ConsentRequestException("FORBIDDEN", "Authenticated principal is required.");
-        }
-
-        if (string.Equals(principal.FindFirst("idtyp")?.Value, "app", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new ConsentRequestException("FORBIDDEN", "Machine tokens (idtyp=app) cannot execute self-service access requests.");
-        }
-
-        if (principal.FindFirst(ClaimTypes.AuthenticationMethod)?.Value is "x509" or "Certificate"
-            || principal.FindFirst("auth_method")?.Value is "mTLS" or "cert" or "certificate")
-        {
-            throw new ConsentRequestException("FORBIDDEN", "Certificate subjects cannot execute self-service access requests.");
-        }
-
-        if (principal.HasClaim(c => c.Type == "roles" && c.Value == "AppRole")
-            && !principal.HasClaim(c => c.Type == "scp" || c.Type == "http://schemas.microsoft.com/identity/claims/scope"))
-        {
-            throw new ConsentRequestException("FORBIDDEN", "Application tokens cannot execute self-service access requests.");
-        }
-
-        if (_subjectResolver != null)
-        {
-            var subject = _subjectResolver.ResolveSubject(principal);
-            if (subject.Provider == IdentityProviderType.ClientCertificate || subject.Type != SubjectType.User)
-            {
-                throw new ConsentRequestException("FORBIDDEN", "Self-service access requests require a person subject.");
-            }
-        }
-    }
+    private void EnsurePersonSubject(ClaimsPrincipal? principal) =>
+        ConsentSubmissionPipeline.EnsurePersonSubject(principal, _subjectResolver);
 }

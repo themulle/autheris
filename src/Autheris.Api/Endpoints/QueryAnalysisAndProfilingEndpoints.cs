@@ -7,7 +7,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Endpoints.Support;
 using Autheris.Api.Extensions;
+using Autheris.Application.ConsentRequests;
 using Autheris.Application.Governance.Analysis;
+using Autheris.Application.Governance.Grants;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Domain.Audit;
 using Microsoft.AspNetCore.Builder;
@@ -186,6 +188,31 @@ public static class QueryAnalysisAndProfilingEndpoints
         {
             SafeErrorResults.LogFailure(httpContext, ex, "FORBIDDEN");
             return SafeErrorResults.Problem(StatusCodes.Status403Forbidden, "FORBIDDEN", "Access denied by governance policy.", httpContext);
+        }
+        catch (ConsentRequestException ex)
+        {
+            SafeErrorResults.LogFailure(httpContext, ex, ex.Code);
+            if (string.Equals(ex.Code, "FORBIDDEN", StringComparison.OrdinalIgnoreCase))
+            {
+                return SafeErrorResults.Problem(StatusCodes.Status403Forbidden, "FORBIDDEN", "You are not permitted to submit this consent request.", httpContext);
+            }
+
+            if (string.Equals(ex.Code, "RATE_LIMIT_EXCEEDED", StringComparison.OrdinalIgnoreCase))
+            {
+                if (ex.RetryAfterSeconds is { } retryAfter && !httpContext.Response.HasStarted)
+                {
+                    httpContext.Response.Headers.RetryAfter = retryAfter.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                }
+
+                return SafeErrorResults.Problem(StatusCodes.Status429TooManyRequests, "RATE_LIMIT_EXCEEDED", "Consent request rate limit exceeded. Please retry later.", httpContext);
+            }
+
+            return SafeErrorResults.BadRequest(ex.Code, "Bundled consent request failed validation.", httpContext);
+        }
+        catch (GrantPolicyViolationException ex)
+        {
+            SafeErrorResults.LogFailure(httpContext, ex, ex.ErrorCode);
+            return SafeErrorResults.BadRequest(ex.ErrorCode, "Bundled consent request violates grant policy.", httpContext);
         }
     }
 
