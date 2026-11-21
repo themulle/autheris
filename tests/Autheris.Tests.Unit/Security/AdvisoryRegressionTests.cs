@@ -351,90 +351,180 @@ public sealed partial class AdvisoryRegressionTests
 
     [Fact]
     [Trait("Category", "Security")]
-    public async Task Ghsa_62qg_cw52_regression()
+    public async Task Ghsa_3fhv_363w_regression()
     {
-        var clock = new Microsoft.Extensions.Time.Testing.FakeTimeProvider(new DateTimeOffset(2026, 11, 21, 12, 0, 0, TimeSpan.Zero));
-        var db = Substitute.For<StackExchange.Redis.IDatabase>();
-        var mux = Substitute.For<StackExchange.Redis.IConnectionMultiplexer>();
-        mux.GetDatabase(Arg.Any<int>(), Arg.Any<object?>()).Returns(db);
+        var ordersId = new TableIdentifier("sales", "dbo", "orders");
+        var hiddenId = new TableIdentifier("hr", "dbo", "salaries");
 
-        db.ScriptEvaluateAsync(
-                Arg.Any<string>(),
-                Arg.Any<StackExchange.Redis.RedisKey[]?>(),
-                Arg.Any<StackExchange.Redis.RedisValue[]?>(),
-                Arg.Any<StackExchange.Redis.CommandFlags>())
-            .Returns(ci =>
-            {
-                var script = ci.ArgAt<string>(0);
-                var keys = ci.ArgAt<StackExchange.Redis.RedisKey[]?>(1);
-                var values = ci.ArgAt<StackExchange.Redis.RedisValue[]?>(2);
-                keys.ShouldNotBeNull();
-                values.ShouldNotBeNull();
-                keys!.Length.ShouldBeGreaterThan(0);
-                values!.Length.ShouldBeGreaterThan(0);
+        var orders = new TableMetadata
+        {
+            Identifier = ordersId,
+            Table = new Table { Id = Guid.NewGuid(), SourceName = "sales", SchemaName = "dbo", TableName = "orders", DisplayName = "Orders", IsActive = true },
+            Columns =
+            [
+                new TableColumn { ColumnName = "id", DataType = "int", DiscoveryHidden = false, Description = "Order ID" },
+                new TableColumn { ColumnName = "secret_note", DataType = "varchar", DiscoveryHidden = true, Description = "Internal note" }
+            ]
+        };
+        var salaries = new TableMetadata
+        {
+            Identifier = hiddenId,
+            Table = new Table { Id = Guid.NewGuid(), SourceName = "hr", SchemaName = "dbo", TableName = "salaries", DisplayName = "Salaries", IsActive = true },
+            Columns = [new TableColumn { ColumnName = "salary", DataType = "int" }]
+        };
 
-                if (script.Contains("requested_cost", StringComparison.Ordinal) || script.Contains("reserved_cost", StringComparison.Ordinal))
-                {
-                    return Task.FromResult(StackExchange.Redis.RedisResult.Create(new StackExchange.Redis.RedisValue[] { 1L, 90L, 0L }));
-                }
+        var repo = Substitute.For<ITableMetadataRepository>();
+        repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([orders, salaries]));
+        Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeSingleReadsFromCatalog(repo);
 
-                if (script.Contains("PostAuthSid", StringComparison.Ordinal) || script.Contains("wait_seconds", StringComparison.Ordinal))
-                {
-                    script.ShouldContain("math.max(last_refill, now_ms)");
-                    return Task.FromResult(StackExchange.Redis.RedisResult.Create(new StackExchange.Redis.RedisValue[] { 1L, 0L }));
-                }
+        var consents = Substitute.For<IConsentRepository>();
+        consents.GetAllActiveConsentsForSubjectsAsync(
+                Arg.Any<IEnumerable<Sid>>(), Arg.Any<IEnumerable<string>?>(), Arg.Any<DateTimeOffset?>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<Consent>>([new Consent { TableIdentifier = ordersId, Effect = ConsentEffect.Allow, TenantId = TenantA }]));
 
-                if (script.Contains("maxStmts", StringComparison.Ordinal))
-                {
-                    keys.Length.ShouldBe(2);
-                    values.Length.ShouldBe(3);
-                    return Task.FromResult(StackExchange.Redis.RedisResult.Create(new StackExchange.Redis.RedisValue[] { 1L, 100L }));
-                }
-
-                if (script.Contains("INCRBY", StringComparison.Ordinal))
-                {
-                    keys.Length.ShouldBe(1);
-                    values.Length.ShouldBe(3);
-                    return Task.FromResult(StackExchange.Redis.RedisResult.Create(1L));
-                }
-
-                return Task.FromResult(StackExchange.Redis.RedisResult.Create(new StackExchange.Redis.RedisValue[] { 1L, 60L }));
-            });
-
-        var limiter = new Autheris.Infrastructure.RateLimiting.RedisRateLimiterService(
-            mux,
+        var golden = new Autheris.Application.Mcp.Services.GoldenQueryService(
             Options.Create(new GatewayOptions()),
-            NullLogger<Autheris.Infrastructure.RateLimiting.RedisRateLimiterService>.Instance,
-            clock);
+            NullLogger<Autheris.Application.Mcp.Services.GoldenQueryService>.Instance);
+        golden.RegisterGoldenQuery(new GoldenQuery("gq-safe", "sales", "orders", "Safe", "", "query { orders { id } }"));
+        golden.RegisterGoldenQuery(new GoldenQuery("gq-hidden-col", "sales", "orders", "HiddenCol", "", "query { orders { id secret_note } }"));
+        golden.RegisterGoldenQuery(new GoldenQuery("gq-hidden-rel", "sales", "orders", "HiddenRel", "", "query { orders { id salaries { salary } } }"));
 
-        (await limiter.CheckPreAuthIpAsync("203.0.113.10", new PreAuthIpRateLimitOptions { PermitLimit = 5, WindowSeconds = 60 })).Allowed.ShouldBeTrue();
-        (await limiter.CheckPostAuthSidAsync("S-1-5-21-1", new PostAuthSidRateLimitOptions { TokenBucketCapacity = 10, TokensPerSecond = 2 })).Allowed.ShouldBeTrue();
-        var policy = new ClientQuotaPolicy(ClientTier.Standard, 100, 10, 100, 10.0, true);
-        (await limiter.CheckCostQuotaAsync("user:t:s", 10, policy)).Allowed.ShouldBeTrue();
-        (await limiter.SettleCostQuotaAsync("user:t:s", 10, 5, policy)).Allowed.ShouldBeTrue();
+        var map = Substitute.For<Autheris.Application.Mcp.Interfaces.IGraphQlCatalogMap>();
+        map.GetTableAsync(ordersId, Arg.Any<CancellationToken>())
+            .Returns(new GraphQlTableMapping(
+                ordersId,
+                "orders",
+                "Orders",
+                "OrdersFilter",
+                "OrdersOrderBy",
+                [new GraphQlColumnMapping("id", "id", "Int"), new GraphQlColumnMapping("secret_note", "secret_note", "String")],
+                [new GraphQlRelationMapping("salaries", hiddenId, true)]));
 
-        await db.Received(4).ScriptEvaluateAsync(
-            Arg.Any<string>(),
-            Arg.Is<StackExchange.Redis.RedisKey[]?>(k => k != null && k.Length == 1),
-            Arg.Is<StackExchange.Redis.RedisValue[]?>(v => v != null && v.Length >= 1),
-            Arg.Any<StackExchange.Redis.CommandFlags>());
+        var compiler = new Autheris.Application.Mcp.Services.SemanticMcpCompiler(
+            repo,
+            NullLogger<Autheris.Application.Mcp.Services.SemanticMcpCompiler>.Instance,
+            golden,
+            consents,
+            graphQlCatalogMap: map);
 
-        var budgetStore = new Autheris.Infrastructure.RateLimiting.DistributedCacheWriteBudgetStore(mux, clock);
-        var limit = new Autheris.Application.Policy.WriteGrants.WriteBudgetLimit(5, 100, 10, 50);
-        (await budgetStore.TryAcquireStatementAsync(TenantA, "S-1-5-21-1", limit)).Allowed.ShouldBeTrue();
-        (await budgetStore.TryRecordAffectedRowsAsync(TenantA, "S-1-5-21-1", 4, 100)).ShouldBeTrue();
+        var caller = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-USER"), new Claim("tenant_id", "tenant-a")], "Bearer"));
 
-        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
-        var distCache = Substitute.For<Microsoft.Extensions.Caching.Distributed.IDistributedCache>();
-        Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddSingleton(services, distCache);
-        var storageOptions = new GatewayOptions { Caching = new CachingOptions { Redis = new RedisOptions { Enabled = true, Configuration = "localhost:6379" } } };
-        Autheris.Api.Extensions.DependencyInjection.GatewayStorageServiceExtensions.AddAutherisStorage(services, storageOptions);
-        services.Last(d => d.ServiceType == typeof(Autheris.Application.Policy.WriteGrants.IWriteBudgetStore)).ShouldNotBeNull();
-        Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddSingleton(services, mux);
-        using var sp = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(services);
-        var resolvedBudget = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<Autheris.Application.Policy.WriteGrants.IWriteBudgetStore>(sp);
-        (await resolvedBudget.TryAcquireStatementAsync(TenantA, "S-1-5-21-2", limit)).Allowed.ShouldBeTrue();
-        _ = distCache.DidNotReceiveWithAnyArgs().GetAsync(default!, default);
+        var compiled = await compiler.CompileToolAsync("query_orders", ordersId);
+        compiled.InputJsonSchema.ShouldContain("\"id\"");
+        compiled.InputJsonSchema.ShouldNotContain("secret_note");
+
+        var examples = await compiler.ReadSemanticResourceAsync(caller, "examples://sales/orders");
+        examples.ShouldNotBeNull();
+        examples!.Text.ShouldContain("Safe");
+        examples.Text.ShouldNotContain("secret_note");
+        examples.Text.ShouldNotContain("salaries");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Ghsa_6cm8_cfcm_regression()
+    {
+        var tables = new Autheris.Tests.Unit.Catalog.Discovery.FakeDiscoveryTableRepository();
+        var orders = Autheris.Tests.Unit.Catalog.Discovery.DiscoveryTestBuilder.MakeTable(
+            "sales",
+            "orders",
+            ownerTenantId: "tenant-a",
+            columns: [("id", false, false), ("ssn", true, false)]);
+        tables.Tables.Add(orders);
+
+        var store = new Autheris.Tests.Unit.Catalog.Discovery.FakeDiscoveryArtifactStore();
+        store.Artifacts[orders.Table.Id] = new DiscoveryArtifacts(
+            orders.Table.Id,
+            "tenant-a",
+            SamplesJson: """[{"id":1,"ssn":"CANARY-PII-999"}]""",
+            StatisticsJson: null,
+            ContentSha256: "sha",
+            UploadedBy: "S-UP",
+            UploadedAt: DateTimeOffset.UtcNow,
+            SchemaVersion: 1);
+
+        var pdp = new Autheris.Tests.Unit.Catalog.Discovery.FakeAccessDecisionPoint(req => TableAccessDecision.Allowed(
+            req.Object.Identifier,
+            new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["id"] = ColumnAccessLevel.Clear,
+                ["ssn"] = ColumnAccessLevel.Mask
+            }));
+
+        var normalUser = Autheris.Tests.Unit.Catalog.Discovery.DiscoveryTestBuilder.User("S-1-5-21-NORMAL", "tenant-a");
+
+        var withPdp = new Autheris.Application.Catalog.Discovery.DiscoveryArtifactService(
+            tables,
+            store,
+            new Autheris.Tests.Unit.Catalog.Discovery.FakeDiscoveryOwnershipRepository(),
+            new Autheris.Tests.Unit.Catalog.Discovery.FakeAuditWriter(),
+            new Autheris.Application.Security.GatewayRoleEvaluator(),
+            Options.Create(new GatewayOptions { Tenancy = Autheris.Tests.Common.TenancyShapeExtensions.Options(Autheris.Tests.Common.TenancyShape.Multi) }),
+            Options.Create(new CatalogDiscoveryOptions()),
+            decisionPoint: pdp);
+        var samples = await withPdp.GetSamplesAsync(normalUser, orders.Identifier.ToString());
+        samples.Payload!.Available.ShouldBeTrue();
+        samples.Payload.Samples[0].ContainsKey("id").ShouldBeTrue();
+        samples.Payload.Samples[0].ContainsKey("ssn").ShouldBeFalse();
+
+        var withoutPdp = new Autheris.Application.Catalog.Discovery.DiscoveryArtifactService(
+            tables,
+            store,
+            new Autheris.Tests.Unit.Catalog.Discovery.FakeDiscoveryOwnershipRepository(),
+            new Autheris.Tests.Unit.Catalog.Discovery.FakeAuditWriter(),
+            new Autheris.Application.Security.GatewayRoleEvaluator(),
+            Options.Create(new GatewayOptions { Tenancy = Autheris.Tests.Common.TenancyShapeExtensions.Options(Autheris.Tests.Common.TenancyShape.Multi) }),
+            Options.Create(new CatalogDiscoveryOptions()));
+        var failClosed = await withoutPdp.GetSamplesAsync(normalUser, orders.Identifier.ToString());
+        failClosed.Payload!.Available.ShouldBeFalse();
+        failClosed.Payload.Samples.ShouldBeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Ghsa_vxp8_mf72_regression()
+    {
+        // 1. IdentityPipeline strips ClusterAdmin resolved by IRoleResolver for ForwardAuth principals.
+        var realm = new Autheris.Domain.Identity.IdentityRealm(
+            "forward-realm",
+            Autheris.Domain.Identity.IdentityRealmKind.ForwardAuth,
+            new Autheris.Domain.Identity.TenantBindingSpecification(Autheris.Domain.Identity.TenantBindingKind.Fixed, FixedTenantId: TenantA),
+            groupSource: Autheris.Domain.Identity.RealmGroupSource.Resolver);
+        var resolver = Substitute.For<Autheris.Application.Identity.IRoleResolver>();
+        TestIdentityPipeline.StubResolution(
+            resolver,
+            new Autheris.Domain.Identity.RoleResolution(
+                new HashSet<string>(),
+                new HashSet<string>(["ClusterAdmin", "GovernanceAdmin"], StringComparer.OrdinalIgnoreCase),
+                new Dictionary<string, string>(),
+                DateTimeOffset.UtcNow,
+                DateTimeOffset.UtcNow.AddMinutes(5),
+                "test"));
+        var pipeline = TestIdentityPipeline.Create(new FakeIdentityRealmRegistry(realm), resolver);
+
+        var rawFwd = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, "alice"), new Claim("oid", "alice-oid")], "ForwardAuth"));
+        var processed = await pipeline.ProcessAsync(rawFwd, "ForwardAuth", null, CancellationToken.None);
+        processed.FindAll(ClaimTypes.Role).Select(c => c.Value).ShouldNotContain("ClusterAdmin");
+        processed.FindAll(ClaimTypes.Role).Select(c => c.Value).ShouldContain("GovernanceAdmin");
+        Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(processed).ShouldBeFalse();
+
+        // 2. EndpointSecurity.IsClusterAdmin, GatewayPolicies.HasRole(ClusterAdmin), and cross-tenant GrantRecords reject ForwardAuth ClusterAdmin.
+        var forgedFwd = new ClaimsPrincipal(new ClaimsIdentity(
+        [
+            new Claim(ClaimTypes.PrimarySid, "S-1-5-21-FWD"),
+            new Claim("tenant_id", "tenant-a"),
+            new Claim(ClaimTypes.Role, "ClusterAdmin")
+        ], "ForwardAuth"));
+        EndpointSecurity.IsClusterAdmin(forgedFwd).ShouldBeFalse();
+        Autheris.Api.Security.GatewayPolicies.HasRole(forgedFwd, Autheris.Domain.Security.GatewayRole.ClusterAdmin).ShouldBeFalse();
+
+        var ctx = new DefaultHttpContext { User = forgedFwd };
+        var result = await ConsentWorkflowAdminEndpoints.ExportGrantRecordAsync(
+            Guid.NewGuid(),
+            ctx,
+            Substitute.For<Autheris.Application.Governance.Grants.Records.IGrantRecordExportService>(),
+            tenantId: "tenant-b");
+        ((IStatusCodeHttpResult)result).StatusCode.ShouldBe(StatusCodes.Status403Forbidden);
     }
 
     private sealed class MutableTableRepo : ITableMetadataRepository

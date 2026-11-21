@@ -124,7 +124,7 @@ public static class DiscoveryAccessMapper
 
         var samplesAvailable = !table.Table.SamplesDisabled
             && HasSamples(artifacts?.SamplesJson)
-            && (decision.ScopeClearance is null || mappedCols.Any(static c => c.State == DiscoveryColumnState.Clear));
+            && mappedCols.Any(static c => c.State == DiscoveryColumnState.Clear);
         var writeState = MapWriteState(table, visibleCols, insertDecision, updateDecision, deleteDecision);
 
         return new DiscoveryObject(

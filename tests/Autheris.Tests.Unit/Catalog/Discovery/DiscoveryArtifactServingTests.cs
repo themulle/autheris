@@ -99,6 +99,7 @@ public sealed class DiscoveryArtifactServingTests
             SchemaVersion: 1);
 
         var audit = new FakeAuditWriter();
+        var allowAllPdp = FakeAccessDecisionPoint.AllowAll();
         var service = new DiscoveryArtifactService(
             tables,
             store,
@@ -106,7 +107,8 @@ public sealed class DiscoveryArtifactServingTests
             audit,
             new GatewayRoleEvaluator(),
             Options.Create(new GatewayOptions { Tenancy = TenancyShape.Multi.Options() }),
-            Options.Create(new CatalogDiscoveryOptions { Discovery = new CatalogDiscoverySettings { MaxSampleRows = 2 } }));
+            Options.Create(new CatalogDiscoveryOptions { Discovery = new CatalogDiscoverySettings { MaxSampleRows = 2 } }),
+            decisionPoint: allowAllPdp);
 
         var caller = DiscoveryTestBuilder.User("S-USER", "tenant-a");
         var res = await service.GetSamplesAsync(caller, orders.Identifier.ToString());
@@ -145,6 +147,7 @@ public sealed class DiscoveryArtifactServingTests
                 t.Table.Id, t.OwnerTenantId!, """[{"id":1}]""", null, "sha", "up", DateTimeOffset.UtcNow, 1);
         }
 
+        var allowAllPdp = FakeAccessDecisionPoint.AllowAll();
         var service = new DiscoveryArtifactService(
             tables,
             store,
@@ -152,7 +155,8 @@ public sealed class DiscoveryArtifactServingTests
             new FakeAuditWriter(),
             new GatewayRoleEvaluator(),
             Options.Create(new GatewayOptions { Tenancy = TenancyShape.Multi.Options() }),
-            Options.Create(new CatalogDiscoveryOptions()));
+            Options.Create(new CatalogDiscoveryOptions()),
+            decisionPoint: allowAllPdp);
 
         var caller = DiscoveryTestBuilder.User("S-USER", "tenant-a");
 
@@ -545,12 +549,15 @@ public sealed class DiscoveryArtifactServingTests
         gqlSamplesJson.ShouldNotContain("DENIED_SAMPLE_VAL");
         gqlSamplesJson.ShouldContain("CLEARED_SAMPLE_VAL");
 
-        // 6. Unrestricted caller still receives full value-bearing artifacts
+        // 6. Unrestricted caller receives their PDP-cleared columns (including Clear ssn) while denied columns remain stripped
         var normalUser = DiscoveryTestBuilder.User("S-USER", "tenant-a");
         var normalObj = await discovery.GetAsync(orders.Identifier, DiscoveryTestBuilder.Caller(normalUser));
         normalObj!.Columns.Single(c => c.Name == "ssn").Statistics!.TopValues.ShouldBe([canaryTop]);
         var normalSamples = await artifactService.GetSamplesAsync(normalUser, orders.Identifier.ToString());
-        normalSamples.Payload!.Samples[0].ContainsKey("ssn").ShouldBeTrue();
+        normalSamples.Payload!.Available.ShouldBeTrue();
+        normalSamples.Payload.Samples[0].ContainsKey("id").ShouldBeTrue();
+        normalSamples.Payload.Samples[0].ContainsKey("ssn").ShouldBeTrue();
+        normalSamples.Payload.Samples[0].ContainsKey("denied_col").ShouldBeFalse();
     }
 
     [Fact]
@@ -622,7 +629,7 @@ public sealed class DiscoveryArtifactServingTests
         resWithPdp.Payload!.Available.ShouldBeFalse();
         resWithPdp.Payload.Samples.ShouldBeEmpty();
 
-        // Fail-closed when IAccessDecisionPoint is not provided for a restricted-scope caller
+        // Fail-closed when IAccessDecisionPoint is not provided (for any caller)
         var withoutPdp = new DiscoveryArtifactService(
             tables,
             capturingStore,
@@ -634,6 +641,14 @@ public sealed class DiscoveryArtifactServingTests
         var resWithoutPdp = await withoutPdp.GetSamplesAsync(restrictedUser, secrets.Identifier.ToString());
         resWithoutPdp.Payload!.Available.ShouldBeFalse();
         resWithoutPdp.Payload.Samples.ShouldBeEmpty();
+
+        var normalUser = DiscoveryTestBuilder.User("S-NORMAL", "tenant-a");
+        var normalWithPdp = await withPdp.GetSamplesAsync(normalUser, secrets.Identifier.ToString());
+        normalWithPdp.Payload!.Available.ShouldBeFalse();
+        normalWithPdp.Payload.Samples.ShouldBeEmpty();
+        var normalWithoutPdp = await withoutPdp.GetSamplesAsync(normalUser, secrets.Identifier.ToString());
+        normalWithoutPdp.Payload!.Available.ShouldBeFalse();
+        normalWithoutPdp.Payload.Samples.ShouldBeEmpty();
     }
 
     private sealed class InMemoryDbtTableRepo(Dictionary<TableIdentifier, TableMetadata> store) : ITableMetadataRepository

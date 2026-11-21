@@ -178,7 +178,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
         var tenantId = new TenantId(sessionContext.TenantId);
         var roles = sessionContext.Roles ?? [];
         bool isGovAdmin = roles.Contains("GovernanceAdmin", StringComparer.OrdinalIgnoreCase);
-        bool isClusterAdmin = roles.Contains("ClusterAdmin", StringComparer.OrdinalIgnoreCase);
+        bool isClusterAdmin = roles.Any(Autheris.Domain.Security.ClusterAdminPolicy.IsClusterAdminRole);
         var requestContext = RequestContext.FromCaller(
             new CallerSecurityContext(
                 UserSid: new Sid(!string.IsNullOrWhiteSpace(sessionContext.UserSid) ? sessionContext.UserSid : sessionContext.ServicePrincipalId),
