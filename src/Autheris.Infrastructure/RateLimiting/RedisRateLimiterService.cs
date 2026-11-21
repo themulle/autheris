@@ -42,7 +42,7 @@ public sealed class RedisRateLimiterService : IRateLimiterService
         else
             local elapsed_sec = math.max(0, (now_ms - last_refill) / 1000.0)
             tokens = math.min(capacity, tokens + (elapsed_sec * refill_rate))
-            last_refill = now_ms
+            last_refill = math.max(last_refill, now_ms)
         end
 
         local allowed = 0
@@ -131,11 +131,6 @@ public sealed class RedisRateLimiterService : IRateLimiterService
         return { 1, math.floor(tokens), 0 }
     ";
 
-    private static readonly LuaScript PreparedPreAuthIpScript = LuaScript.Prepare(PreAuthIpScript);
-    private static readonly LuaScript PreparedPostAuthSidScript = LuaScript.Prepare(PostAuthSidScript);
-    private static readonly LuaScript PreparedCostTokenBucketScript = LuaScript.Prepare(CostTokenBucketScript);
-    private static readonly LuaScript PreparedCostTokenBucketSettleScript = LuaScript.Prepare(CostTokenBucketSettleScript);
-
     private readonly TimeProvider _timeProvider;
 
     public RedisRateLimiterService(
@@ -172,9 +167,10 @@ public sealed class RedisRateLimiterService : IRateLimiterService
         {
             var sanitizedIp = ip.Replace("{", "_", StringComparison.Ordinal).Replace("}", "_", StringComparison.Ordinal);
             var key = (RedisKey)$"{_prefix}ratelimit:ip:{sanitizedIp}";
-            var res = (RedisResult[]?)await PreparedPreAuthIpScript.EvaluateAsync(
-                _db,
-                new { KEYS = new RedisKey[] { key }, ARGV = new RedisValue[] { (RedisValue)options.WindowSeconds } }
+            var res = (RedisResult[]?)await _db.ScriptEvaluateAsync(
+                PreAuthIpScript,
+                [key],
+                [(RedisValue)options.WindowSeconds]
             ).ConfigureAwait(false);
 
             if (res != null && res.Length >= 2)
@@ -221,19 +217,15 @@ public sealed class RedisRateLimiterService : IRateLimiterService
             var nowMs = _timeProvider.GetUtcNow().ToUnixTimeMilliseconds();
             var ttlSeconds = 600; // 10 minutes idle expiry
 
-            var res = (RedisResult[]?)await PreparedPostAuthSidScript.EvaluateAsync(
-                _db,
-                new
-                {
-                    KEYS = new RedisKey[] { key },
-                    ARGV = new RedisValue[]
-                    {
-                        (RedisValue)options.TokenBucketCapacity,
-                        (RedisValue)options.TokensPerSecond,
-                        (RedisValue)nowMs,
-                        (RedisValue)ttlSeconds
-                    }
-                }
+            var res = (RedisResult[]?)await _db.ScriptEvaluateAsync(
+                PostAuthSidScript,
+                [key],
+                [
+                    (RedisValue)options.TokenBucketCapacity,
+                    (RedisValue)options.TokensPerSecond,
+                    (RedisValue)nowMs,
+                    (RedisValue)ttlSeconds
+                ]
             ).ConfigureAwait(false);
 
             if (res != null && res.Length >= 2)
@@ -283,20 +275,16 @@ public sealed class RedisRateLimiterService : IRateLimiterService
             var nowMs = _timeProvider.GetUtcNow().ToUnixTimeMilliseconds();
             var ttlSeconds = 600;
 
-            var res = (RedisResult[]?)await PreparedCostTokenBucketScript.EvaluateAsync(
-                _db,
-                new
-                {
-                    KEYS = new RedisKey[] { redisKey },
-                    ARGV = new RedisValue[]
-                    {
-                        (RedisValue)requestedCost,
-                        (RedisValue)policy.MaxTokensCapacity,
-                        (RedisValue)policy.TokenRefillRatePerSecond,
-                        (RedisValue)nowMs,
-                        (RedisValue)ttlSeconds
-                    }
-                }
+            var res = (RedisResult[]?)await _db.ScriptEvaluateAsync(
+                CostTokenBucketScript,
+                [redisKey],
+                [
+                    (RedisValue)requestedCost,
+                    (RedisValue)policy.MaxTokensCapacity,
+                    (RedisValue)policy.TokenRefillRatePerSecond,
+                    (RedisValue)nowMs,
+                    (RedisValue)ttlSeconds
+                ]
             ).ConfigureAwait(false);
 
             if (res != null && res.Length >= 3)
@@ -342,21 +330,17 @@ public sealed class RedisRateLimiterService : IRateLimiterService
             var nowMs = _timeProvider.GetUtcNow().ToUnixTimeMilliseconds();
             var ttlSeconds = 600;
 
-            var res = (RedisResult[]?)await PreparedCostTokenBucketSettleScript.EvaluateAsync(
-                _db,
-                new
-                {
-                    KEYS = new RedisKey[] { redisKey },
-                    ARGV = new RedisValue[]
-                    {
-                        (RedisValue)reservedCost,
-                        (RedisValue)actualCost,
-                        (RedisValue)policy.MaxTokensCapacity,
-                        (RedisValue)policy.TokenRefillRatePerSecond,
-                        (RedisValue)nowMs,
-                        (RedisValue)ttlSeconds
-                    }
-                }
+            var res = (RedisResult[]?)await _db.ScriptEvaluateAsync(
+                CostTokenBucketSettleScript,
+                [redisKey],
+                [
+                    (RedisValue)reservedCost,
+                    (RedisValue)actualCost,
+                    (RedisValue)policy.MaxTokensCapacity,
+                    (RedisValue)policy.TokenRefillRatePerSecond,
+                    (RedisValue)nowMs,
+                    (RedisValue)ttlSeconds
+                ]
             ).ConfigureAwait(false);
 
             if (res != null && res.Length >= 3)
