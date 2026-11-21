@@ -67,13 +67,14 @@ public sealed class RedisLuaScriptsIntegrationTests
         var sidOpts = new PostAuthSidRateLimitOptions { TokenBucketCapacity = 2, TokensPerSecond = 1 };
         (await limiter.CheckPostAuthSidAsync("S-1-5-21-99", sidOpts)).Allowed.ShouldBeTrue();
 
-        var skewClock = new FakeTimeProvider(new DateTimeOffset(2026, 11, 21, 12, 0, 10, TimeSpan.Zero));
-        var skewLimiter = new RedisRateLimiterService(mux, RedisOptions(prefix), NullLogger<RedisRateLimiterService>.Instance, skewClock);
-        (await skewLimiter.CheckPostAuthSidAsync("S-1-5-21-skew", new PostAuthSidRateLimitOptions { TokenBucketCapacity = 10, TokensPerSecond = 1 })).Allowed.ShouldBeTrue();
+        var aheadClock = new FakeTimeProvider(new DateTimeOffset(2026, 11, 21, 12, 0, 10, TimeSpan.Zero));
+        var aheadLimiter = new RedisRateLimiterService(mux, RedisOptions(prefix), NullLogger<RedisRateLimiterService>.Instance, aheadClock);
+        (await aheadLimiter.CheckPostAuthSidAsync("S-1-5-21-skew", new PostAuthSidRateLimitOptions { TokenBucketCapacity = 10, TokensPerSecond = 1 })).Allowed.ShouldBeTrue();
 
-        // Simulate lagging node clock (5 seconds earlier); last_refill must remain at t+10s, not rewind to t+5s
-        skewClock.SetUtcNow(new DateTimeOffset(2026, 11, 21, 12, 0, 5, TimeSpan.Zero));
-        (await skewLimiter.CheckPostAuthSidAsync("S-1-5-21-skew", new PostAuthSidRateLimitOptions { TokenBucketCapacity = 10, TokensPerSecond = 1 })).Allowed.ShouldBeTrue();
+        // Simulate lagging replica clock (5 seconds earlier); last_refill must remain at t+10s, not rewind to t+5s
+        var laggingClock = new FakeTimeProvider(new DateTimeOffset(2026, 11, 21, 12, 0, 5, TimeSpan.Zero));
+        var laggingLimiter = new RedisRateLimiterService(mux, RedisOptions(prefix), NullLogger<RedisRateLimiterService>.Instance, laggingClock);
+        (await laggingLimiter.CheckPostAuthSidAsync("S-1-5-21-skew", new PostAuthSidRateLimitOptions { TokenBucketCapacity = 10, TokensPerSecond = 1 })).Allowed.ShouldBeTrue();
 
         var storedLastRefill = (long)await db.HashGetAsync($"{prefix}ratelimit:sid:S-1-5-21-skew", "last_refill");
         storedLastRefill.ShouldBe(new DateTimeOffset(2026, 11, 21, 12, 0, 10, TimeSpan.Zero).ToUnixTimeMilliseconds());
