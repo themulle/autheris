@@ -7,6 +7,7 @@ Autheris.Domain.Options.AlationOptions.ApiToken
 Autheris.Domain.Options.AlationOptions.BaseUrl
 Autheris.Domain.Options.AlationOptions.CustomFieldIdPii
 Autheris.Domain.Options.AlationOptions.DataSourceToDomainMap
+Autheris.Domain.Options.ArrowExportOptions.Enabled
 Autheris.Domain.Options.AsyncJobOptions.Enabled
 Autheris.Domain.Options.AuditOptions.CatalogReadMode
 Autheris.Domain.Options.AuditOptions.CatalogSummaryWindowSeconds
@@ -77,6 +78,7 @@ Autheris.Domain.Options.Observability.MetricsOptions.DataSourceCardinalityLimit
 Autheris.Domain.Options.Observability.MetricsOptions.DefaultCardinalityLimit
 Autheris.Domain.Options.Observability.MetricsOptions.TenantCardinalityLimit
 Autheris.Domain.Options.Observability.RedactionOptions.AttributeValueLengthLimit
+Autheris.Domain.Options.ParquetEgressOptions.Enabled
 Autheris.Domain.Options.PredicatePushdownOptions.Enabled
 Autheris.Domain.Options.PurviewOptions.ClientId
 Autheris.Domain.Options.PurviewOptions.ClientSecret
@@ -87,6 +89,7 @@ Autheris.Domain.Options.QueryCostOptions.CostPerRowReturned
 Autheris.Domain.Options.QueryCostOptions.NestedDepthFactor
 Autheris.Domain.Options.RebacOptions.OpenFgaApiUrl
 Autheris.Domain.Options.RebacOptions.OpenFgaStoreId
+Autheris.Domain.Options.ResourceGroupsOptions.Enabled
 Autheris.Domain.Options.SqlEndpointsOptions.MaxQueryTimeoutSeconds
 Autheris.Domain.Options.TableCache.TableCacheTargetOptions.CronExpression
 Autheris.Domain.Options.WebSqlCostOptions.Enabled

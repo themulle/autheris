@@ -32,7 +32,10 @@
           { "name": "cursor", "in": "query", "description": "Opaque HMAC-authenticated keyset cursor returned as nextCursor on the previous page (at most 512 characters). Bound to all active query filters, tenant and caller scope; passing a malformed, stale-version or mismatched cursor returns 400 INVALID_CURSOR.", "schema": { "type": "string", "maxLength": 512 } },
           { "name": "pageSize", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 200 } },
           { "name": "accessStatus", "in": "query", "description": "Only objects with this callerState.access, applied before totalCount and nextCursor. User callers only (an app-only caller gets 400). The value is case-insensitive; the MCP names GRANTED, PENDING, EXPIRED and REQUEST_ACCESS are accepted as aliases of granted, requested, expired and none. An empty or unknown value is rejected with 400.", "schema": { "type": "string", "enum": ["granted", "requested", "expired", "none"] } },
-          { "name": "q", "in": "query", "description": "Text query over names, descriptions and the column names the caller may see (never values), applied before totalCount and nextCursor and combinable with accessStatus and the other filters. Trimmed, at most 256 characters (longer: 400). User callers only (an app-only caller gets 400). A nextCursor is bound to q and accessStatus: reusing it with another q or accessStatus gives 400.", "schema": { "type": "string", "maxLength": 256 } },
+          { "name": "q", "in": "query", "description": "Catalog search query (multi-term, BM25/hybrid index when ready) over names, descriptions and the column names the caller may see (never values), applied before totalCount and nextCursor and combinable with accessStatus and the other filters. Trimmed, at most 256 characters (longer: 400). User callers only (an app-only caller gets 400). A nextCursor is bound to q, mode, sort, language and accessStatus.", "schema": { "type": "string", "maxLength": 256 } },
+          { "name": "mode", "in": "query", "description": "Optional search mode when q is set (hybrid, keyword, semantic).", "schema": { "type": "string", "enum": ["hybrid", "keyword", "semantic"] } },
+          { "name": "sort", "in": "query", "description": "Result ordering: id (default, deterministic object id) or relevance (when q is set).", "schema": { "type": "string", "enum": ["id", "relevance"] } },
+          { "name": "language", "in": "query", "description": "Optional BCP 47 language tag for search matching and localized descriptions.", "schema": { "type": "string" } },
           { "name": "If-None-Match", "in": "header", "schema": { "type": "string" } }
         ],
         "responses": {
@@ -55,6 +58,9 @@
         "summary": "Count caller-visible catalog objects grouped by domain and schema",
         "parameters": [
           { "name": "accessStatus", "in": "query", "description": "Only objects with this callerState.access. User callers only (an app-only caller gets 400). Case-insensitive (granted, requested, expired, none and MCP aliases GRANTED, PENDING, EXPIRED, REQUEST_ACCESS).", "schema": { "type": "string", "enum": ["granted", "requested", "expired", "none"] } },
+          { "name": "q", "in": "query", "description": "Optional catalog search query so facet counts match the filtered list. User callers only.", "schema": { "type": "string", "maxLength": 256 } },
+          { "name": "mode", "in": "query", "description": "Optional search mode when q is set (hybrid, keyword, semantic).", "schema": { "type": "string", "enum": ["hybrid", "keyword", "semantic"] } },
+          { "name": "language", "in": "query", "description": "Optional BCP 47 language tag for search matching.", "schema": { "type": "string" } },
           { "name": "If-None-Match", "in": "header", "schema": { "type": "string" } }
         ],
         "responses": {

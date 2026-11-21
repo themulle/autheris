@@ -90,7 +90,10 @@ public sealed record ExternalCatalogListQuery(
     string? Cursor = null,
     int PageSize = 50,
     string? AccessStatus = null,
-    string? Q = null);
+    string? Q = null,
+    string? Mode = null,
+    string? Sort = null,
+    string? Language = null);
 
 public sealed record ExternalCatalogOwnerDto(
     string DisplayName,

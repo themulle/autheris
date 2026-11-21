@@ -230,7 +230,7 @@ public sealed class HitlStepUpAndArrowSerializationFeatureTests
     {
         var options = Options.Create(new GatewayOptions
         {
-            ParquetEgress = new ParquetEgressOptions { Enabled = true, MaxRowsPerFile = 50000 }
+            ParquetEgress = new ParquetEgressOptions { MaxRowsPerFile = 50000 }
         });
 
         var service = new ParquetExportService(options, NullLogger<ParquetExportService>.Instance);
@@ -275,7 +275,7 @@ public sealed class HitlStepUpAndArrowSerializationFeatureTests
     {
         var options = Options.Create(new GatewayOptions
         {
-            ParquetEgress = new ParquetEgressOptions { Enabled = true, MaxRowsPerFile = 10000, FlattenNestedStructures = true }
+            ParquetEgress = new ParquetEgressOptions { MaxRowsPerFile = 10000, FlattenNestedStructures = true }
         });
 
         var service = new ParquetExportService(options, NullLogger<ParquetExportService>.Instance);
@@ -420,7 +420,7 @@ public sealed class HitlStepUpAndArrowSerializationFeatureTests
     {
         var options = Options.Create(new GatewayOptions
         {
-            ParquetEgress = new ParquetEgressOptions { Enabled = true, MaxRowsPerFile = 50 }
+            ParquetEgress = new ParquetEgressOptions { MaxRowsPerFile = 50 }
         });
 
         var service = new ParquetExportService(options, NullLogger<ParquetExportService>.Instance);

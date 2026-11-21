@@ -44,7 +44,10 @@ public static class UnknownGatewayKeyGuard
         (GatewayConfigurationSchema.Root + ":WebSql:Paging:Enabled", "WebSql:Paging:Enabled (removed; WebSQL paging is always active)"),
         (GatewayConfigurationSchema.Root + ":WebSql:Cost:Enabled", "WebSql:Cost:Enabled (removed; WebSQL cost estimation is always active)"),
         (GatewayConfigurationSchema.Root + ":WebSql:CrossSource:DynamicKeySet:Enabled", "WebSql:CrossSource:DynamicKeySet:Enabled (removed; dynamic key-set planning is always active)"),
-        (GatewayConfigurationSchema.Root + ":WebSql:CrossSource:PredicatePushdown:Enabled", "WebSql:CrossSource:PredicatePushdown:Enabled (removed; predicate pushdown is always active)")
+        (GatewayConfigurationSchema.Root + ":WebSql:CrossSource:PredicatePushdown:Enabled", "WebSql:CrossSource:PredicatePushdown:Enabled (removed; predicate pushdown is always active)"),
+        (GatewayConfigurationSchema.Root + ":Arrow:Enabled", "Arrow:Enabled (removed; Arrow IPC export is always active)"),
+        (GatewayConfigurationSchema.Root + ":ParquetEgress:Enabled", "ParquetEgress:Enabled (removed; Parquet egress is always active)"),
+        (GatewayConfigurationSchema.Root + ":ResourceGroups:Enabled", "ResourceGroups:Enabled (removed; resource groups are always active)")
     ];
 
     private static readonly (string Key, string Message)[] RemovedEventBusKeys =

@@ -158,12 +158,6 @@ public sealed partial class DiscoveryService : IDiscoveryService
                 filtered = filtered.Where(t => t.CatalogTags.Any(tg => string.Equals(tg, tag, StringComparison.OrdinalIgnoreCase)));
             }
 
-            if (!string.IsNullOrWhiteSpace(query.Search))
-            {
-                var q = query.Search.Trim();
-                filtered = filtered.Where(t => MatchesNonHiddenText(t, q));
-            }
-
             var matchedTables = filtered.ToList();
 
             // Issue #798: the access filter narrows the matched set before the total and the page are taken. It runs before the
@@ -177,9 +171,8 @@ public sealed partial class DiscoveryService : IDiscoveryService
             if (!string.IsNullOrWhiteSpace(query.Search))
             {
                 var searchText = query.Search.Trim();
-                matchedTables = await KeepCallerVisibleMatchesAsync(
-                    caller, sid, scopeKey, matchedTables, query.Language,
-                    (table, projected) => DiscoveryVisibleTextMatcher.ContainsQuery(table, projected, searchText), ct).ConfigureAwait(false);
+                matchedTables = await FilterAndRankBySearchAsync(
+                    caller, sid, scopeKey, matchedTables, searchText, query.Domain, mode: null, query.Language, orderByRelevance: false, ct).ConfigureAwait(false);
             }
 
             var eligibleProcedures = query.IncludeProcedures

@@ -30,7 +30,6 @@ public sealed class ReadPathInventoryTests
         {
             RestApi = new RestApiOptions { DataEndpoint = new RestDataEndpointOptions { Enabled = false } },
             OData = new ODataOptions { Enabled = false },
-            Arrow = new ArrowExportOptions { Enabled = false },
             DuckDbOlap = new DuckDbOlapOptions { Enabled = false },
             Mcp = new McpOptions
             {
@@ -44,7 +43,7 @@ public sealed class ReadPathInventoryTests
 
         line.ShouldContain("rest_data=off");
         line.ShouldContain("odata=off");
-        line.ShouldContain("arrow=off");
+        line.ShouldContain("arrow=on");
         line.ShouldContain("duckdb_olap=off");
         line.ShouldContain("mcp=on(catalog=on,query=off,api=on,access=on,disabled_tools=2)");
     }

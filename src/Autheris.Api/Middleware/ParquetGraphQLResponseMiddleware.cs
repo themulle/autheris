@@ -73,22 +73,6 @@ public sealed class ParquetGraphQLResponseMiddleware
                 return;
             }
 
-            if (!_options.ParquetEgress.Enabled)
-            {
-                if (accept.HasJsonAlternative)
-                {
-                    await _next(context);
-                    return;
-                }
-
-                await ParquetResponseWriter.WriteNotAcceptableAsync(
-                    context,
-                    "Parquet output is disabled in the gateway configuration.",
-                    SupportedOnOtherRoutes,
-                    context.RequestAborted);
-                return;
-            }
-
             await HandleGraphQLAsync(context);
             return;
         }

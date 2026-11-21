@@ -33,7 +33,6 @@ public sealed class ArrowExportSecurityTests
         {
             Arrow = new ArrowExportOptions
             {
-                Enabled = true,
                 MaxExportRows = maxRows,
                 BatchSize = 1000
             }

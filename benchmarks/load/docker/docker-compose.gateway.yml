@@ -108,7 +108,6 @@ services:
       Gateway__GovernanceDb__Provider: "PostgreSql"
       Gateway__GovernanceDb__SeedDemoData: "true"
       Gateway__GovernanceDb__ConnectionString: "Host=${DB_HOST:-10.0.1.10};Port=5432;Database=governance;Username=postgres;Password=${BENCH_DB_PASSWORD:?run scripts via lib_secrets.sh};Pooling=true;Maximum Pool Size=20"
-      Gateway__ResourceGroups__Enabled: "false"
       Gateway__Insecure__warn_disable_rate_limiting: "true"
       Gateway__RateLimiting__PreAuthIpRateLimit__PermitLimit: "100000"
       Gateway__RateLimiting__PostAuthSidRateLimit__TokenBucketCapacity: "100000"

@@ -157,23 +157,48 @@ public static class ModuleSignerCli
             throw new InvalidOperationException("Module directory must not be a symbolic link.");
         }
 
+        var manifestFiles = CollectManifestFiles(fullDir);
+        if (manifestFiles.Count == 0)
+        {
+            throw new InvalidOperationException("Module directory contains no files to sign.");
+        }
+
         string pascalId = ToPascalModuleName(id);
-        string resolvedEntryAssembly = string.IsNullOrWhiteSpace(entryAssembly)
-            ? $"Autheris.Modules.{pascalId}.dll"
-            : entryAssembly.Trim();
+        string resolvedEntryAssembly;
+        if (string.IsNullOrWhiteSpace(entryAssembly))
+        {
+            string defaultEntryAssembly = $"Autheris.Modules.{pascalId}.dll";
+            var topLevelMatches = manifestFiles
+                .Where(f => !f.Path.Contains('/', StringComparison.Ordinal) &&
+                            !f.Path.Contains('\\', StringComparison.Ordinal) &&
+                            string.Equals(f.Path, defaultEntryAssembly, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            resolvedEntryAssembly = topLevelMatches.Count == 1
+                ? topLevelMatches[0].Path
+                : defaultEntryAssembly;
+        }
+        else
+        {
+            resolvedEntryAssembly = entryAssembly.Trim();
+        }
+
+        string actualName = pascalId;
+        const string assemblyPrefix = "Autheris.Modules.";
+        const string assemblySuffix = ".dll";
+        if (resolvedEntryAssembly.StartsWith(assemblyPrefix, StringComparison.OrdinalIgnoreCase) &&
+            resolvedEntryAssembly.EndsWith(assemblySuffix, StringComparison.OrdinalIgnoreCase) &&
+            resolvedEntryAssembly.Length > assemblyPrefix.Length + assemblySuffix.Length)
+        {
+            actualName = resolvedEntryAssembly[assemblyPrefix.Length..^assemblySuffix.Length];
+        }
+
         string resolvedEntryType = string.IsNullOrWhiteSpace(entryType)
-            ? $"Autheris.Modules.{pascalId}.{pascalId}Module"
+            ? $"Autheris.Modules.{actualName}.{actualName}Module"
             : entryType.Trim();
 
         if (!ModuleManifest.IsValidRelativeManifestPath(resolvedEntryAssembly))
         {
             throw new ArgumentException("Invalid entry assembly relative path.", nameof(entryAssembly));
-        }
-
-        var manifestFiles = CollectManifestFiles(fullDir);
-        if (manifestFiles.Count == 0)
-        {
-            throw new InvalidOperationException("Module directory contains no files to sign.");
         }
 
         if (!manifestFiles.Any(f => string.Equals(f.Path, resolvedEntryAssembly, StringComparison.Ordinal)))

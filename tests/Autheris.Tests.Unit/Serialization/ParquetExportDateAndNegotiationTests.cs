@@ -21,7 +21,7 @@ public class ParquetExportDateAndNegotiationTests
     {
         var options = Options.Create(new GatewayOptions
         {
-            ParquetEgress = new ParquetEgressOptions { Enabled = true, MaxRowsPerFile = 50000 }
+            ParquetEgress = new ParquetEgressOptions { MaxRowsPerFile = 50000 }
         });
         return new ParquetExportService(options, NullLogger<ParquetExportService>.Instance);
     }

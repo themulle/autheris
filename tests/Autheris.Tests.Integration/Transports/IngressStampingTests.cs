@@ -67,7 +67,6 @@ public sealed class IngressStampingTests : IClassFixture<IngressStampingTests.Fi
                 builder.UseSetting("Gateway:WebSql:Enabled", "true");
                 builder.UseSetting("Gateway:OData:Enabled", "true");
                 builder.UseSetting("Gateway:Mcp:Enabled", "true");
-                builder.UseSetting("Gateway:Arrow:Enabled", "true");
                 builder.UseSetting("Gateway:DuckDbOlap:Enabled", "true");
                 builder.ConfigureServices(services =>
                 {

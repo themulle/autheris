@@ -121,6 +121,15 @@ public sealed class RemovedConfigKeysTests
     [InlineData("Gateway:WebSql:CrossSource:PredicatePushdown:Enabled", "true")]
     [InlineData("Gateway:WebSql:CrossSource:PredicatePushdown:Enabled", "false")]
     [InlineData("Gateway:WebSql:CrossSource:PredicatePushdown:Enabled", "")]
+    [InlineData("Gateway:Arrow:Enabled", "true")]
+    [InlineData("Gateway:Arrow:Enabled", "false")]
+    [InlineData("Gateway:Arrow:Enabled", "")]
+    [InlineData("Gateway:ParquetEgress:Enabled", "true")]
+    [InlineData("Gateway:ParquetEgress:Enabled", "false")]
+    [InlineData("Gateway:ParquetEgress:Enabled", "")]
+    [InlineData("Gateway:ResourceGroups:Enabled", "true")]
+    [InlineData("Gateway:ResourceGroups:Enabled", "false")]
+    [InlineData("Gateway:ResourceGroups:Enabled", "")]
     public void Every_removed_key_fails_startup(string key, string value)
     {
         var configuration = Config(key, value);
@@ -386,6 +395,23 @@ public sealed class RemovedConfigKeysTests
     [InlineData("Gateway:WebSql:CrossSource:PredicatePushdown:Enabled", "false", "WebSql:CrossSource:PredicatePushdown:Enabled (removed;")]
     [InlineData("Gateway:WebSql:CrossSource:PredicatePushdown:Enabled", "", "WebSql:CrossSource:PredicatePushdown:Enabled (removed;")]
     public void Removed_query_sql_switches_fail_with_replacement_message_for_any_value(string key, string value, string expectedMessage)
+    {
+        var configuration = Config(key, value);
+        var ex = Should.Throw<InvalidOperationException>(() => UnknownGatewayKeyGuard.ThrowIfUnknownKeys(configuration));
+        ex.Message.ShouldContain(expectedMessage);
+    }
+
+    [Theory]
+    [InlineData("Gateway:Arrow:Enabled", "true", "Arrow:Enabled (removed;")]
+    [InlineData("Gateway:Arrow:Enabled", "false", "Arrow:Enabled (removed;")]
+    [InlineData("Gateway:Arrow:Enabled", "", "Arrow:Enabled (removed;")]
+    [InlineData("Gateway:ParquetEgress:Enabled", "true", "ParquetEgress:Enabled (removed;")]
+    [InlineData("Gateway:ParquetEgress:Enabled", "false", "ParquetEgress:Enabled (removed;")]
+    [InlineData("Gateway:ParquetEgress:Enabled", "", "ParquetEgress:Enabled (removed;")]
+    [InlineData("Gateway:ResourceGroups:Enabled", "true", "ResourceGroups:Enabled (removed;")]
+    [InlineData("Gateway:ResourceGroups:Enabled", "false", "ResourceGroups:Enabled (removed;")]
+    [InlineData("Gateway:ResourceGroups:Enabled", "", "ResourceGroups:Enabled (removed;")]
+    public void Removed_query_sql_part2_switches_fail_with_replacement_message_for_any_value(string key, string value, string expectedMessage)
     {
         var configuration = Config(key, value);
         var ex = Should.Throw<InvalidOperationException>(() => UnknownGatewayKeyGuard.ThrowIfUnknownKeys(configuration));

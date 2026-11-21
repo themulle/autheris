@@ -71,10 +71,6 @@ public sealed partial class ParquetExportService : IParquetExportService
         ArgumentNullException.ThrowIfNull(rows);
 
         var egressOptions = _options.Value.ParquetEgress;
-        if (!egressOptions.Enabled)
-        {
-            throw new InvalidOperationException("Parquet egress export is disabled in gateway configuration.");
-        }
 
         // VULN-02: Path Traversal & CRLF-Injection defense in table and file name
         var tableName = request.Table.TableName;

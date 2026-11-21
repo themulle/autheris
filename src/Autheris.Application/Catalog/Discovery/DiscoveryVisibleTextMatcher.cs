@@ -56,7 +56,90 @@ internal static class DiscoveryVisibleTextMatcher
 
     /// <summary>Shared visibility verifier for listing text filters: unrestricted objects keep their metadata match; restricted ones require a visible-field match.</summary>
     public static bool MatchesVisibleSearch(TableMetadata table, DiscoveryObject projected, string query) =>
-        !IsRestricted(table, projected) || ContainsQuery(table, projected, query);
+        !IsRestricted(table, projected) || ContainsQuery(table, projected, query) || MatchesAnyTerm(table, projected, query);
+
+    /// <summary>Term-based match over non-hidden table and column text, using the same tokenizer as the catalog search index.</summary>
+    public static bool MatchesNonHiddenTextTerms(TableMetadata table, string query) =>
+        NonHiddenTermMatchCount(table, query) > 0 || ContainsNonHiddenText(table, query);
+
+    /// <summary>The number of query terms that match non-hidden table/column text.</summary>
+    public static int NonHiddenTermMatchCount(TableMetadata table, string query)
+    {
+        var terms = SmartSchemaTokenizer.Tokenize(query, expandAbbreviations: false);
+        if (terms.Length == 0)
+        {
+            return ContainsNonHiddenText(table, query) ? 1 : 0;
+        }
+
+        var text = new StringBuilder();
+        foreach (var field in NonHiddenFields(table))
+        {
+            text.Append(field).Append(' ');
+        }
+
+        return CountMatchingTerms(terms, SmartSchemaTokenizer.Tokenize(text.ToString(), expandAbbreviations: true));
+    }
+
+    private static bool ContainsNonHiddenText(TableMetadata table, string query)
+    {
+        foreach (var field in NonHiddenFields(table))
+        {
+            if (field.Contains(query, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static IEnumerable<string> NonHiddenFields(TableMetadata table)
+    {
+        if (!string.IsNullOrWhiteSpace(table.Identifier.TableName)) yield return table.Identifier.TableName;
+        if (!string.IsNullOrWhiteSpace(table.Identifier.Domain)) yield return table.Identifier.Domain;
+        if (!string.IsNullOrWhiteSpace(table.Identifier.Schema)) yield return table.Identifier.Schema;
+        if (!string.IsNullOrWhiteSpace(table.Table.Description)) yield return table.Table.Description;
+        if (table.Table.Texts.Entries.Count > 0)
+        {
+            foreach (var entry in table.Table.Texts.Entries.Values)
+            {
+                if (!string.IsNullOrWhiteSpace(entry.Description)) yield return entry.Description;
+            }
+        }
+
+        foreach (var col in table.Columns)
+        {
+            if (col.DiscoveryHidden) continue;
+            if (!string.IsNullOrWhiteSpace(col.ColumnName)) yield return col.ColumnName;
+            if (!string.IsNullOrWhiteSpace(col.Description)) yield return col.Description;
+            if (col.Texts.Entries.Count > 0)
+            {
+                foreach (var entry in col.Texts.Entries.Values)
+                {
+                    if (!string.IsNullOrWhiteSpace(entry.Description)) yield return entry.Description;
+                }
+            }
+        }
+    }
+
+    private static int CountMatchingTerms(string[] terms, string[] tokens)
+    {
+        var count = 0;
+        foreach (var term in terms)
+        {
+            foreach (var token in tokens)
+            {
+                if (token.Contains(term, StringComparison.Ordinal) ||
+                    (token.Length >= MinContainedTokenLength && term.Contains(token, StringComparison.Ordinal)))
+                {
+                    count++;
+                    break;
+                }
+            }
+        }
+
+        return count;
+    }
 
     /// <summary>At least one query term matches a token of the caller-visible text, with the same tokenization the index uses.</summary>
     public static bool MatchesAnyTerm(TableMetadata table, DiscoveryObject projected, string query) =>

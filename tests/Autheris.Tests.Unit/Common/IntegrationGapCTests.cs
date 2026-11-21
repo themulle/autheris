@@ -54,7 +54,6 @@ public sealed class IntegrationGapCTests
         {
             ResourceGroups = new ResourceGroupsOptions
             {
-                Enabled = true,
                 Interactive = new ResourceGroupTierConfigOptions(maxConcurrency, maxQueueDepth, timeoutSeconds),
                 MaxConcurrentPerTenantPercent = perTenantPercent,
                 MaxConcurrentPerTenant = perTenantAbsolute
@@ -306,7 +305,6 @@ public sealed class IntegrationGapCTests
         {
             ResourceGroups = new ResourceGroupsOptions
             {
-                Enabled = true,
                 Interactive = new ResourceGroupTierConfigOptions(MaxConcurrency: 2, MaxQueueDepth: 0, TimeoutSeconds: 1)
             }
         });

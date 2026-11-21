@@ -19,7 +19,6 @@ public sealed class ResourceGroupMiddleware
     private readonly RequestDelegate _next;
     private readonly IResourceGroupManager _resourceGroupManager;
     private readonly ILogger<ResourceGroupMiddleware> _logger;
-    private readonly bool _enabled;
     private readonly PersistentConnectionLimiter _connectionLimiter;
 
     public ResourceGroupMiddleware(
@@ -32,18 +31,11 @@ public sealed class ResourceGroupMiddleware
         _next = next;
         _resourceGroupManager = resourceGroupManager;
         _logger = logger;
-        _enabled = options.Value.ResourceGroups?.Enabled ?? true;
         _connectionLimiter = connectionLimiter ?? new PersistentConnectionLimiter(options.Value.ResourceGroups);
     }
 
     public async Task InvokeAsync(HttpContext context)
     {
-        if (!_enabled)
-        {
-            await _next(context);
-            return;
-        }
-
         var path = context.Request.Path;
 
         // Skip system, metrics, and health endpoints so observability is never starved

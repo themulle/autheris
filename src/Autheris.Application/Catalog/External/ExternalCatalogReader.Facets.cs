@@ -17,12 +17,39 @@ public sealed partial class ExternalCatalogReader
         TenantId tenantId,
         string? accessStatus = null,
         CancellationToken ct = default)
+        => await GetFacetsAsync(user, tenantId, accessStatus, q: null, mode: null, language: null, ct).ConfigureAwait(false);
+
+    public async Task<ExternalCatalogResult<ExternalCatalogFacetsDto>> GetFacetsAsync(
+        ClaimsPrincipal user,
+        TenantId tenantId,
+        string? accessStatus,
+        string? q,
+        string? mode = null,
+        string? language = null,
+        CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(user);
 
         if (!CatalogAccessStatus.TryParseFilter(accessStatus, out var accessFilter))
         {
             return ExternalCatalogResult.Fail<ExternalCatalogFacetsDto>(400, "INVALID_QUERY", InvalidAccessStatusMessage);
+        }
+
+        var searchText = string.IsNullOrWhiteSpace(q) ? null : q.Trim();
+        if (searchText is not null && searchText.Length > MaxSearchTextLength)
+        {
+            return ExternalCatalogResult.Fail<ExternalCatalogFacetsDto>(
+                400,
+                "INVALID_QUERY",
+                $"The q filter exceeds the maximum length of {MaxSearchTextLength} characters.");
+        }
+
+        if (!TryParseSearchMode(mode, out var normalizedMode))
+        {
+            return ExternalCatalogResult.Fail<ExternalCatalogFacetsDto>(
+                400,
+                "INVALID_QUERY",
+                "Invalid search mode. Allowed values: hybrid, keyword, semantic.");
         }
 
         bool isServicePrincipal = IsAppOnlyPrincipal(user);
@@ -34,6 +61,14 @@ public sealed partial class ExternalCatalogReader
                     400,
                     "INVALID_QUERY",
                     "The accessStatus filter applies to user callers only.");
+            }
+
+            if (searchText is not null)
+            {
+                return ExternalCatalogResult.Fail<ExternalCatalogFacetsDto>(
+                    400,
+                    "INVALID_QUERY",
+                    "The q filter applies to user callers only.");
             }
 
             var allTables = await CatalogTablePageReader.ReadAllAsync(
@@ -53,7 +88,10 @@ public sealed partial class ExternalCatalogReader
         try
         {
             var caller = new CatalogCaller(user, tenantId, CatalogChannel.Rest);
-            var facets = await _discoveryService.FacetsAsync(accessFilter, caller, ct).ConfigureAwait(false);
+            var normalizedLang = string.IsNullOrWhiteSpace(language) ? null : language.Trim();
+            var facets = searchText is null
+                ? await _discoveryService.FacetsAsync(accessFilter, caller, ct).ConfigureAwait(false)
+                : await _discoveryService.FacetsAsync(accessFilter, searchText, normalizedMode, normalizedLang, caller, ct).ConfigureAwait(false);
             return ExternalCatalogResult.Ok(ToFacetsDto(facets));
         }
         catch (DiscoveryStatusException ex)

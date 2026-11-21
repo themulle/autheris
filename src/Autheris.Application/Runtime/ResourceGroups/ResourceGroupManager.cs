@@ -14,14 +14,12 @@ public sealed class ResourceGroupManager : IResourceGroupManager, IDisposable
 {
     private readonly ILogger<ResourceGroupManager> _logger;
     private readonly Dictionary<ResourceGroupTier, TierState> _tiers;
-    private readonly bool _enabled;
     private bool _disposed;
 
     public ResourceGroupManager(IOptions<GatewayOptions> options, ILogger<ResourceGroupManager> logger)
     {
         _logger = logger;
         var rgOpts = options.Value.ResourceGroups ?? new ResourceGroupsOptions();
-        _enabled = rgOpts.Enabled;
 
         // SEC H-07: in addition to the global tier limit every tenant gets only a share of the tier.
         var tenantPercent = Math.Clamp(rgOpts.MaxConcurrentPerTenantPercent, 1, 100);
@@ -58,11 +56,6 @@ public sealed class ResourceGroupManager : IResourceGroupManager, IDisposable
         string tenantId,
         CancellationToken cancellationToken = default)
     {
-        if (!_enabled)
-        {
-            return ResourceGroupLeaseResult.Acquired(tier, EmptyLease.Instance);
-        }
-
         if (!_tiers.TryGetValue(tier, out var state))
         {
             state = _tiers[ResourceGroupTier.Interactive];

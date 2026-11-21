@@ -456,46 +456,9 @@ public sealed partial class McpDatasetCatalog
 
     private static string MapDiscoveryAccessStatus(DiscoveryAccessState state) => CatalogAccessStatus.Of(state);
 
-    private static bool Matches(TableMetadata table, string search)
-    {
-        var id = table.Identifier;
-        if (id.TableName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
-            id.Domain.Contains(search, StringComparison.OrdinalIgnoreCase) ||
-            id.Schema.Contains(search, StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        if (search.Contains('.', StringComparison.Ordinal) && DatasetId(id).Contains(search, StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        if (table.Table.Description != null && table.Table.Description.Contains(search, StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        if (table.Table.Texts.Entries.Count > 0 && table.Table.Texts.Entries.Values.Any(e => e.Description?.Contains(search, StringComparison.OrdinalIgnoreCase) == true))
-        {
-            return true;
-        }
-
-        if (table.Columns.Count > 0)
-        {
-            foreach (var c in table.Columns)
-            {
-                if (c.ColumnName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
-                    (c.Description?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                    (c.Texts.Entries.Count > 0 && c.Texts.Entries.Values.Any(e => e.Description?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false)))
-                {
-                    return true;
-                }
-            }
-        }
-
-        return false;
-    }
+    private static bool Matches(TableMetadata table, string search) =>
+        (search.Contains('.', StringComparison.Ordinal) && DatasetId(table.Identifier).Contains(search, StringComparison.OrdinalIgnoreCase)) ||
+        DiscoveryVisibleTextMatcher.MatchesNonHiddenTextTerms(table, search);
 
     private async Task<McpDatasetList> ListSingleGraphQlDatasetWithDiscoveryAsync(
         TableIdentifier target,
@@ -731,11 +694,8 @@ public sealed partial class McpDatasetCatalog
             paths.Add(new("MCP sample_rows", "MCP", SampleRows, "A few rows of this dataset, for a first look."));
         }
 
-        if (o.Arrow.Enabled)
-        {
-            paths.Add(new("Arrow IPC export", "POST", "/api/v1/export/arrow",
-                $"Body {{\"table\": \"{id.Domain}.{id.Schema}.{id.TableName}\"}}: columnar bulk export (application/vnd.apache.arrow.stream)."));
-        }
+        paths.Add(new("Arrow IPC export", "POST", "/api/v1/export/arrow",
+            $"Body {{\"table\": \"{id.Domain}.{id.Schema}.{id.TableName}\"}}: columnar bulk export (application/vnd.apache.arrow.stream)."));
 
         return paths;
     }
@@ -782,10 +742,7 @@ public sealed partial class McpDatasetCatalog
                 "Body {\"sql\", \"tableNames\", \"limit\"}: analytical SQL across several datasets."));
         }
 
-        if (o.Arrow.Enabled)
-        {
-            endpoints.Add(new("Arrow IPC export", "POST", "/api/v1/export/arrow", "Columnar bulk export of one dataset."));
-        }
+        endpoints.Add(new("Arrow IPC export", "POST", "/api/v1/export/arrow", "Columnar bulk export of one dataset."));
 
         if (o.Lakehouse.Enabled)
         {
