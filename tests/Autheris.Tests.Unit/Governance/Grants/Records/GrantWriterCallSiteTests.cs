@@ -157,8 +157,14 @@ public sealed class GrantWriterCallSiteTests
         };
 
         await Should.ThrowAsync<GrantRecordUnavailableException>(() => repo.CreateConsentAsync(consent));
+        var adminAuthority = ConsentRevocationAuthority.FromPrincipal(new System.Security.Claims.ClaimsPrincipal(
+            new System.Security.Claims.ClaimsIdentity(
+            [
+                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, "S-1-5-21-ADMIN"),
+                new System.Security.Claims.Claim("tenant_id", Tenant.Value)
+            ], "test")));
         await Should.ThrowAsync<GrantRecordUnavailableException>(() => repo.RevokeConsentAsync(
-            consent.Id, new Sid("S-1-5-21-ADMIN"), "revoke", ConsentRevocationAuthority.FromPrincipal(null)));
+            consent.Id, new Sid("S-1-5-21-ADMIN"), "revoke", adminAuthority));
         await Should.ThrowAsync<GrantRecordUnavailableException>(() => repo.RevokeSystemConsentAsync(
             consent.Id, Guid.NewGuid(), new Sid("system:sync"), "sync-revoke"));
     }

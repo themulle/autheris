@@ -217,11 +217,11 @@ public sealed class EffectPreviewTests
 
     private sealed class PendingApprovalRepo(ConsentRequest pending) : IConsentApprovalRepository
     {
-        public Task<IReadOnlyList<ConsentRequest>> GetPendingRequestsForApproverAsync(Sid approverSid, CancellationToken ct = default) =>
+        public Task<IReadOnlyList<ConsentRequest>> GetPendingRequestsForApproverAsync(Sid approverSid, TenantId tenantId, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<ConsentRequest>>([pending]);
         public Task<ConsentRequest> CreateConsentRequestAsync(ConsentRequest request, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<ConsentRequest?> GetConsentRequestAsync(Guid requestId, CancellationToken ct = default) => Task.FromResult<ConsentRequest?>(pending);
-        public Task<IReadOnlyList<ConsentRequest>> GetRequestsByRequesterSidAsync(Sid requesterSid, string? status = null, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<ConsentRequest>>([]);
+        public Task<IReadOnlyList<ConsentRequest>> GetRequestsByRequesterSidAsync(Sid requesterSid, TenantId tenantId, string? status = null, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<ConsentRequest>>([]);
         public Task<ConsentRequest> ApproveConsentRequestStepAsync(Guid requestId, Sid approverSid, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<ConsentRequest> RejectConsentRequestAsync(Guid requestId, Sid approverSid, string reason, CancellationToken ct = default) => throw new NotSupportedException();
         public Task ActivateConsentAsync(Guid requestId, CancellationToken ct = default) => Task.CompletedTask;

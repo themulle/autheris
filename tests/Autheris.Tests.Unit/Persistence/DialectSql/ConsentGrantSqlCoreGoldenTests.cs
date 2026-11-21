@@ -67,10 +67,12 @@ public sealed class ConsentGrantSqlCoreGoldenTests
     }
 
     [Theory]
-    [InlineData("User", "s-1-5-21-admin", 0, true, false)]
-    [InlineData("User", "S-1-5-21-OTHER", 1, false, true)]
-    [InlineData("Group", "S-1-5-21-ADMIN", 0, false, false)]
-    public async Task ReadRevokeTarget_MapsTheLockedRow_WithoutDecidingAnything(string granteeType, string granteeSid, int isRevoked, bool expectSelf, bool expectAlreadyRevoked)
+    [InlineData("User", "s-1-5-21-1000-2000-3000-500", "S-1-5-21-1000-2000-3000-500", 0, true, false)]
+    [InlineData("User", "s-1-5-21-admin", "S-1-5-21-ADMIN", 0, false, false)]
+    [InlineData("User", "S-1-5-21-OTHER", "S-1-5-21-ADMIN", 1, false, true)]
+    [InlineData("Group", "S-1-5-21-ADMIN", "S-1-5-21-ADMIN", 0, false, false)]
+    public async Task ReadRevokeTarget_MapsTheLockedRow_WithoutDecidingAnything(
+        string granteeType, string granteeSid, string actorSid, int isRevoked, bool expectSelf, bool expectAlreadyRevoked)
     {
         using var conn = DialectKit.PostgreSql.NewConnection();
         await using var tx = await conn.BeginTransactionAsync();
@@ -87,7 +89,7 @@ public sealed class ConsentGrantSqlCoreGoldenTests
         rows.Rows.Add("Sales", "Crm", "Orders", "not-a-valid-tenant!", granteeType, granteeSid, isRevoked);
         conn.EnqueueReader(rows);
 
-        var target = await ConsentGrantSqlCore.ReadRevokeTargetAsync(conn, tx, PostgreSqlGovernanceRepository.ConsentGrantSql.RevokeTarget, Guid.NewGuid(), Actor, CancellationToken.None);
+        var target = await ConsentGrantSqlCore.ReadRevokeTargetAsync(conn, tx, PostgreSqlGovernanceRepository.ConsentGrantSql.RevokeTarget, Guid.NewGuid(), new Sid(actorSid), CancellationToken.None);
 
         target.ShouldNotBeNull();
         target.Value.Table.ShouldBe(Table);

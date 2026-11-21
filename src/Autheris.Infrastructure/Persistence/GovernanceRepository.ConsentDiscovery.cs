@@ -15,7 +15,7 @@ public partial class GovernanceRepository
         Sid userSid, TenantId tenantId, DateTimeOffset since, CancellationToken ct = default)
     {
         TenantScope.RequireTenant(tenantId, nameof(GovernanceTable.Consents));
-        const string sql = @"SELECT DISTINCT t.source_name, t.schema_name, t.table_name
+        const string sql = @"SELECT DISTINCT t.source_name, t.schema_name, t.table_name, c.grantee_sid
                                FROM CONSENTS c
                                JOIN TABLES t ON c.table_id = t.id
                                WHERE c.tenant_id = @tenantId
@@ -38,6 +38,11 @@ public partial class GovernanceRepository
         await using var reader = await ExecuteReaderAsync(cmd, "Consent.GetRecentlyExpiredTableIds", ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
+            if (reader.IsDBNull(3) || new Sid(reader.GetString(3)) != userSid)
+            {
+                continue;
+            }
+
             result.Add(new TableIdentifier(reader.GetString(0), reader.GetString(1), reader.GetString(2)));
         }
         return result;

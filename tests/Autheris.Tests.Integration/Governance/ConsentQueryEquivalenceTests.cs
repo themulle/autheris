@@ -64,15 +64,23 @@ public sealed class ConsentQueryEquivalenceTests : IDisposable
                     ? Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(
                         new System.Security.Claims.ClaimsPrincipal(
                             new System.Security.Claims.ClaimsIdentity([new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Role, "ClusterAdmin")], "test")))
-                    : Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null);
+                    : Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(
+                        new System.Security.Claims.ClaimsPrincipal(
+                            new System.Security.Claims.ClaimsIdentity(
+                            [
+                                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, sid),
+                                new System.Security.Claims.Claim("tenant_id", tenant.Value)
+                            ], "test")));
                 await _repo.RevokeConsentAsync(c.Id, new Sid(sid ?? "S-1-5-21-SYSTEM"), "test", auth);
             }
 
             _seeded.Add(c);
         }
 
-        // users in mixed case, group, alias SID
+        // users in mixed case, canonical SIDs, GUIDs, group, alias SID
         await Add(_tableId, _table, TenantA, GranteeType.User, "S-1-5-21-Alice", ConsentEffect.Allow, -1, 10);
+        await Add(_tableId, _table, TenantA, GranteeType.User, "S-1-5-21-1000-1000-1", ConsentEffect.Allow, -1, 10);
+        await Add(_tableId, _table, TenantA, GranteeType.User, "a1b2c3d4-0000-0000-0000-000000000001", ConsentEffect.Allow, -1, 10);
         await Add(_tableId, _table, TenantA, GranteeType.User, "s-1-5-21-bob", ConsentEffect.Allow, -1, 10);
         await Add(_tableId, _table, TenantA, GranteeType.Group, "S-1-5-21-GROUP-1", ConsentEffect.Allow, -1, 10);
         await Add(_tableId, _table, TenantA, GranteeType.User, "alias:alice@corp", ConsentEffect.Allow, -1, 10);
@@ -86,12 +94,12 @@ public sealed class ConsentQueryEquivalenceTests : IDisposable
 
     private static HashSet<Guid> OracleForTable(IEnumerable<Consent> all, Guid tableId, IEnumerable<string> subjects, TenantId? tenant)
     {
-        var set = subjects.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var set = subjects.Select(s => new Sid(s)).ToHashSet();
         return all
             .Where(c => c.TableId == tableId && (tenant == null || c.TenantId == tenant))
             .Where(c => Now < c.ValidTo)
             .Where(c => !(Now < c.ValidFrom && c.Effect != ConsentEffect.Deny))
-            .Where(c => c.GranteeSid != null && set.Contains(c.GranteeSid.Value.Value))
+            .Where(c => c.GranteeSid != null && set.Contains(c.GranteeSid.Value))
             .Select(c => c.Id)
             .ToHashSet();
     }
@@ -100,7 +108,8 @@ public sealed class ConsentQueryEquivalenceTests : IDisposable
     [
         [new[] { "S-1-5-21-Alice" }],
         [new[] { "s-1-5-21-ALICE" }],
-        [new[] { "S-1-5-21-BOB", "S-1-5-21-group-1" }],
+        [new[] { "s-1-5-21-1000-1000-1", "A1B2C3D4-0000-0000-0000-000000000001" }],
+        [new[] { "s-1-5-21-bob", "S-1-5-21-GROUP-1" }],
         [new[] { "ALIAS:ALICE@CORP" }],
         [new[] { "S-1-5-21-Nobody" }],
         [new[] { "S-1-5-21-Carol" }],
@@ -161,7 +170,7 @@ public sealed class ConsentQueryEquivalenceTests : IDisposable
     public async Task SubjectQuery_ManySubjects_AreChunkedAndStillExact()
     {
         await SeedAsync();
-        var sids = Enumerable.Range(0, 5000).Select(i => new Sid($"S-1-5-21-X{i}")).Append(new Sid("S-1-5-21-ALICE")).ToArray();
+        var sids = Enumerable.Range(0, 5000).Select(i => new Sid($"S-1-5-21-X{i}")).Append(new Sid("S-1-5-21-Alice")).ToArray();
 
         var result = await _repo.GetActiveConsentsForSubjectsAsync(sids, _table, Now, TenantA);
 
@@ -174,11 +183,11 @@ public sealed class ConsentQueryEquivalenceTests : IDisposable
         await SeedAsync();
 
         var result = await _repo.GetAllActiveConsentsForSubjectsAsync(
-            [new Sid("s-1-5-21-alice"), new Sid("S-1-5-21-GROUP-1")], ["Analyst"], Now, TenantA);
+            [new Sid("S-1-5-21-Alice"), new Sid("S-1-5-21-GROUP-1")], ["Analyst"], Now, TenantA);
 
         var expected = _seeded
             .Where(c => c.TenantId == TenantA && !IsRevoked(c) && Now >= c.ValidFrom && Now < c.ValidTo)
-            .Where(c => c.GranteeSid != null && new[] { "S-1-5-21-ALICE", "S-1-5-21-GROUP-1" }.Contains(c.GranteeSid.Value.Value, StringComparer.OrdinalIgnoreCase))
+            .Where(c => c.GranteeSid != null && new[] { new Sid("S-1-5-21-Alice"), new Sid("S-1-5-21-GROUP-1") }.Contains(c.GranteeSid.Value))
             .Select(c => c.Id).ToHashSet();
         result.Select(c => c.Id).ToHashSet().ShouldBe(expected, ignoreOrder: true);
     }

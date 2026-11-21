@@ -110,13 +110,21 @@ public abstract class ConsentRevokeUnificationContractTestsBase : IAsyncLifetime
     private async Task<List<AuditLogEntry>> AuditAsync(string eventType) =>
         (await Repo.GetAuditLogEntriesAsync(2000)).Where(e => e.EventType == eventType && e.TargetTable == _table.ToString()).ToList();
 
+    private static Autheris.Domain.Security.ConsentRevocationAuthority TenantAuthority(Sid actor, TenantId tenant) =>
+        Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(new System.Security.Claims.ClaimsPrincipal(
+            new System.Security.Claims.ClaimsIdentity(
+            [
+                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, actor.Value),
+                new System.Security.Claims.Claim("tenant_id", tenant.Value)
+            ], "test")));
+
     private Task InvokeAsync(string entry, Guid id, Sid actor)
     {
-        var none = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null);
+        var caller = TenantAuthority(actor, TenantA);
         return entry switch
         {
-            "RevokeConsentAsync" => Repo.RevokeConsentAsync(id, actor, "r", none),
-            "ReplaceConsentsAsync" => Repo.ReplaceConsentsAsync([id], [], actor, "r", none),
+            "RevokeConsentAsync" => Repo.RevokeConsentAsync(id, actor, "r", caller),
+            "ReplaceConsentsAsync" => Repo.ReplaceConsentsAsync([id], [], actor, "r", caller),
             _ => Repo.RevokeSystemConsentAsync(id, SyncMarker, actor, "r")
         };
     }
@@ -169,9 +177,9 @@ public abstract class ConsentRevokeUnificationContractTestsBase : IAsyncLifetime
 
         var before = (await Repo.GetAuditLogEntriesAsync(2000)).Count(e => e.EventType == AuditEventTypes.ConsentTenantIntegrityRefused);
 
-        var none = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null);
-        await Should.ThrowAsync<KeyNotFoundException>(() => Repo.RevokeConsentAsync(Guid.NewGuid(), Admin, "r", none));
-        await Should.ThrowAsync<KeyNotFoundException>(() => Repo.ReplaceConsentsAsync([Guid.NewGuid()], [], Admin, "r", none));
+        var caller = TenantAuthority(Admin, TenantA);
+        await Should.ThrowAsync<KeyNotFoundException>(() => Repo.RevokeConsentAsync(Guid.NewGuid(), Admin, "r", caller));
+        await Should.ThrowAsync<KeyNotFoundException>(() => Repo.ReplaceConsentsAsync([Guid.NewGuid()], [], Admin, "r", caller));
 
         (await Repo.GetAuditLogEntriesAsync(2000)).Count(e => e.EventType == AuditEventTypes.ConsentTenantIntegrityRefused).ShouldBe(before);
     }

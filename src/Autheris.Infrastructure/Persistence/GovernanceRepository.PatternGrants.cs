@@ -214,7 +214,7 @@ public partial class GovernanceRepository
             string? domain,
             TenantId? tenantId,
             DateTimeOffset atTime,
-            HashSet<string>? subjectSet,
+            HashSet<Sid>? subjectSet,
             HashSet<Guid> seen,
             List<Consent> consents,
             CancellationToken ct)
@@ -257,7 +257,7 @@ public partial class GovernanceRepository
                 var granteeType = GranteeTypeParsing.ParseStored(reader.GetString(4));
                 var granteeSidStr = reader.IsDBNull(5) ? null : reader.GetString(5);
 
-                if (subjectSet != null && (granteeSidStr == null || !subjectSet.Contains(granteeSidStr)))
+                if (subjectSet != null && (granteeSidStr == null || !subjectSet.Contains(new Sid(granteeSidStr))))
                 {
                     continue;
                 }

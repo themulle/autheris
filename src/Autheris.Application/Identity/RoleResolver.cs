@@ -199,11 +199,11 @@ public sealed class RoleResolver : IRoleResolver
     {
         if (realm.Provisioning != RealmProvisioningMode.Scim || _scimProvisioningStore is null)
         {
-            return identity.UserKey;
+            return $"role:{identity.UserKey}";
         }
 
         var syncState = await _scimProvisioningStore.GetRealmSyncStateAsync(identity.TenantId, realm.Id, ct).ConfigureAwait(false);
         var epoch = syncState?.DeprovisionEpoch ?? 0;
-        return $"e{epoch}:{identity.UserKey}";
+        return $"role:e{epoch}:{identity.UserKey}";
     }
 }

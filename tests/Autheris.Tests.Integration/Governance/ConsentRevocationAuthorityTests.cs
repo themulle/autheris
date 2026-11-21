@@ -155,7 +155,7 @@ public sealed class ConsentRevocationAuthorityTests : IDisposable
         var consent = await _repo.CreateConsentAsync(UserConsent(Alice.Value, TenantA));
 
         await Should.ThrowAsync<ConsentRevocationForbiddenException>(() =>
-            _repo.RevokeConsentAsync(consent.Id, Bob, "stale db role", ConsentRevocationAuthority.FromPrincipal(null)));
+            _repo.RevokeConsentAsync(consent.Id, Bob, "stale db role", ConsentRevocationAuthority.FromPrincipal(PrincipalWith(Bob.Value, "Consumer", TenantA.Value))));
 
         (await _repo.GetConsentByIdAsync(consent.Id))!.IsRevoked.ShouldBeFalse();
     }
@@ -184,7 +184,7 @@ public sealed class ConsentRevocationAuthorityTests : IDisposable
         await SeedOwnerAsync(Owner);
         var consent = await _repo.CreateConsentAsync(UserConsent(Alice.Value, TenantA));
 
-        await _repo.RevokeConsentAsync(consent.Id, Owner, "owner revoke", ConsentRevocationAuthority.FromPrincipal(null));
+        await _repo.RevokeConsentAsync(consent.Id, Owner, "owner revoke", ConsentRevocationAuthority.FromPrincipal(PrincipalWith(Owner.Value, "Consumer", TenantA.Value)));
 
         (await _repo.GetConsentByIdAsync(consent.Id))!.IsRevoked.ShouldBeTrue();
     }
@@ -196,8 +196,8 @@ public sealed class ConsentRevocationAuthorityTests : IDisposable
         var userConsent = await _repo.CreateConsentAsync(UserConsent(Alice.Value, TenantA, GranteeType.User));
         var spConsent = await _repo.CreateConsentAsync(UserConsent(Bob.Value, TenantA, GranteeType.ServicePrincipal));
 
-        await _repo.RevokeConsentAsync(userConsent.Id, Alice, "self revoke user", ConsentRevocationAuthority.FromPrincipal(null));
-        await _repo.RevokeConsentAsync(spConsent.Id, Bob, "self revoke sp", ConsentRevocationAuthority.FromPrincipal(null));
+        await _repo.RevokeConsentAsync(userConsent.Id, Alice, "self revoke user", ConsentRevocationAuthority.FromPrincipal(PrincipalWith(Alice.Value, "Consumer", TenantA.Value)));
+        await _repo.RevokeConsentAsync(spConsent.Id, Bob, "self revoke sp", ConsentRevocationAuthority.FromPrincipal(PrincipalWith(Bob.Value, "Consumer", TenantA.Value)));
 
         (await _repo.GetConsentByIdAsync(userConsent.Id))!.IsRevoked.ShouldBeTrue();
         (await _repo.GetConsentByIdAsync(spConsent.Id))!.IsRevoked.ShouldBeTrue();
@@ -241,7 +241,7 @@ public sealed class ConsentRevocationAuthorityTests : IDisposable
         var replacement = UserConsent("S-1-5-21-CARL", TenantA);
 
         await Should.ThrowAsync<ConsentRevocationForbiddenException>(() =>
-            _repo.ReplaceConsentsAsync([owned.Id, other.Id], [replacement], Alice, "partial", ConsentRevocationAuthority.FromPrincipal(null)));
+            _repo.ReplaceConsentsAsync([owned.Id, other.Id], [replacement], Alice, "partial", ConsentRevocationAuthority.FromPrincipal(PrincipalWith(Alice.Value, "Consumer", TenantA.Value))));
 
         (await _repo.GetConsentByIdAsync(owned.Id))!.IsRevoked.ShouldBeFalse();
         (await _repo.GetConsentByIdAsync(other.Id))!.IsRevoked.ShouldBeFalse();
@@ -269,7 +269,7 @@ public sealed class ConsentRevocationAuthorityTests : IDisposable
         var consent = await _repo.CreateConsentAsync(UserConsent(Alice.Value, TenantA));
 
         var ex = await Should.ThrowAsync<ConsentRevocationForbiddenException>(() =>
-            _repo.RevokeConsentAsync(consent.Id, Bob, "denied", ConsentRevocationAuthority.FromPrincipal(null)));
+            _repo.RevokeConsentAsync(consent.Id, Bob, "denied", ConsentRevocationAuthority.FromPrincipal(PrincipalWith(Bob.Value, "Consumer", TenantA.Value))));
 
         ex.Message.ShouldNotContain(Bob.Value);
         ex.Message.ShouldNotContain(_table.TableName);

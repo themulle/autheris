@@ -95,7 +95,7 @@ public sealed class ScimIdentityCorrelator(
         var candidateKeys = new List<(int Tier, string KeyName, IReadOnlyList<ScimUser> Matches)>(4);
         var presentKeys = new List<string>(4);
 
-        var objectSids = CollectDistinctValues(normalized, ObjectSidClaimTypes, normalizeLower: false);
+        var objectSids = CollectDistinctValues(normalized, ObjectSidClaimTypes, normalizeLower: false, skipSynthesizedPrimarySid: true);
         if (objectSids.Count > 1 || objectSids.Any(s => !SidFormat.IsCanonical(s)))
         {
             presentKeys.Add("objectSid");
@@ -252,7 +252,7 @@ public sealed class ScimIdentityCorrelator(
         return new CorrelationResult(CorrelationStatus.Ambiguous);
     }
 
-    private static List<string> CollectDistinctValues(ClaimsPrincipal principal, string[] claimTypes, bool normalizeLower)
+    private static List<string> CollectDistinctValues(ClaimsPrincipal principal, string[] claimTypes, bool normalizeLower, bool skipSynthesizedPrimarySid = false)
     {
         var values = new List<string>();
         var seen = new HashSet<string>(normalizeLower ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
@@ -260,6 +260,13 @@ public sealed class ScimIdentityCorrelator(
         {
             foreach (var claim in principal.FindAll(type))
             {
+                if (skipSynthesizedPrimarySid
+                    && string.Equals(claim.Type, ClaimTypes.PrimarySid, StringComparison.Ordinal)
+                    && string.Equals(claim.Issuer, IdentityClaimIssuers.SynthesizedPrimarySid, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
                 var trimmed = claim.Value?.Trim();
                 if (string.IsNullOrEmpty(trimmed))
                 {

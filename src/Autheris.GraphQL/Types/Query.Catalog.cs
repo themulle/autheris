@@ -249,7 +249,7 @@ public sealed partial class Query
             {
                 try
                 {
-                    pendingRequests = await approvalRepository.GetRequestsByRequesterSidAsync(userSid, "PENDING", ct).ConfigureAwait(false);
+                    pendingRequests = await approvalRepository.GetRequestsByRequesterSidAsync(userSid, tenantId, "PENDING", ct).ConfigureAwait(false);
                 }
                 catch
                 {
