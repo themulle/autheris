@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.10.3] - 2026-11-21
+
+### Changed
+- Excluded transitive host native runtime assets (`runtime;native`) from module project references so signed modules reuse the host's native libraries (`libduckdb`, `libonnxruntime`) instead of bundling multi-platform copies (#989).
+- Retired completed `docs/plans/` documents and moved planning/coordination to GitHub Issues (#990).
+
+### Fixed
+- Packaged and signed all 5 release modules (`lakehouse`, `dbt`, `openmetadata`, `events`, `lineage`) into the `autheris-full` container image and trimmed non-Linux module runtimes in release archives (#989).
+- Regenerated `Autheris.Tests.Simulation` NuGet lockfile for `Simulation nightly` (#988, #991).
+
 ## [1.10.2] - 2026-11-21
 
 ### Added

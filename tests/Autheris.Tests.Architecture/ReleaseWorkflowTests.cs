@@ -240,7 +240,12 @@ public sealed class ReleaseWorkflowTests
             }
         }
 
-        referencing.ShouldBeGreaterThanOrEqualTo(3);
+        referencing.ShouldBe(2);
+
+        var dockerJobs = JobBlocks(ReadRepoFile(".github/workflows/docker-publish.yml")).ToDictionary(j => j.Name, j => j.Block);
+        dockerJobs.TryGetValue("module-e2e-branch", out var branchE2eBlock).ShouldBeTrue();
+        branchE2eBlock!.ShouldNotContain($"secrets.{SigningKeySecret}");
+        branchE2eBlock.ShouldNotContain("environment: module-release");
 
         // No other workflow, script or composite action may read the signing key.
         foreach (var path in Directory.EnumerateFiles(Path.Combine(RepositoryScan.RepoRoot, ".github"), "*", SearchOption.AllDirectories))
@@ -257,6 +262,55 @@ public sealed class ReleaseWorkflowTests
         // Only tag, dispatch or main-bound triggers: no pull_request_target and no fork-reachable trigger carries the secret.
         ReadRepoFile(".github/workflows/release.yml").ShouldNotContain("pull_request_target");
         ReadRepoFile(".github/workflows/docker-publish.yml").ShouldNotContain("pull_request_target");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Ghsa_ff36_36r5_regression()
+    {
+        string[] workflows = ["docker-publish.yml", "release.yml"];
+        var secretSteps = 0;
+
+        foreach (var workflow in workflows)
+        {
+            var content = ReadRepoFile(".github/workflows/" + workflow);
+            foreach (var (jobName, jobBlock) in JobBlocks(content))
+            {
+                foreach (var stepBlock in StepBlocks(jobBlock))
+                {
+                    if (!stepBlock.Contains($"secrets.{SigningKeySecret}", StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    secretSteps++;
+                    stepBlock.Contains("Autheris.ModuleSigner.dll", StringComparison.Ordinal).ShouldBeTrue(
+                        $"{workflow} job '{jobName}' must execute only the prebuilt signer DLL inside steps with the signing secret");
+                    stepBlock.ShouldNotContain("dotnet build");
+                    stepBlock.ShouldNotContain("dotnet publish");
+                    stepBlock.ShouldNotContain("dotnet restore");
+                    stepBlock.ShouldNotContain("dotnet test");
+                    stepBlock.ShouldNotContain("dotnet run");
+                }
+            }
+        }
+
+        secretSteps.ShouldBe(2);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Docker_publish_and_release_package_all_modules_and_trim_runtimes()
+    {
+        var dockerPublish = ReadRepoFile(".github/workflows/docker-publish.yml");
+        dockerPublish.ShouldNotContain("modules/Autheris.Modules.Lakehouse/Autheris.Modules.Lakehouse.csproj");
+        Regex.Count(dockerPublish, Regex.Escape("for csproj in modules/*/*.csproj; do"))
+            .ShouldBe(2, "Both build-and-push and module-e2e-branch in docker-publish.yml must package all non-test modules");
+        dockerPublish.ShouldContain("! -name linux-x64");
+
+        var releaseWorkflow = ReadRepoFile(".github/workflows/release.yml");
+        releaseWorkflow.ShouldContain("for csproj in modules/*/*.csproj; do");
+        releaseWorkflow.ShouldContain("! -name linux-x64 ! -name linux-arm64");
     }
 
     private static string ReadRepoFile(string relativePath) =>
@@ -280,6 +334,23 @@ public sealed class ReleaseWorkflowTests
             var begin = matches[i].Index;
             var end = i + 1 < matches.Count ? matches[i + 1].Index : workflow.Length - jobsStart;
             yield return (matches[i].Groups[1].Value, workflow.Substring(jobsStart + begin, end - begin));
+        }
+    }
+
+    private static IEnumerable<string> StepBlocks(string jobBlock)
+    {
+        var stepsStart = jobBlock.IndexOf("\n    steps:\n", StringComparison.Ordinal);
+        if (stepsStart < 0)
+        {
+            yield break;
+        }
+
+        var matches = Regex.Matches(jobBlock[stepsStart..], @"(?m)^      - (?:name|uses|run):");
+        for (var i = 0; i < matches.Count; i++)
+        {
+            var begin = matches[i].Index;
+            var end = i + 1 < matches.Count ? matches[i + 1].Index : jobBlock.Length - stepsStart;
+            yield return jobBlock.Substring(stepsStart + begin, end - begin);
         }
     }
 }
