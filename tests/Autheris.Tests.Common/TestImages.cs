@@ -15,4 +15,6 @@ public static class TestImages
     public const string Spark = "apache/spark:4.0.0-python3@sha256:9e2f63442ba1a672ea70d780d56da28f42ce515d0be18840569a3054cc6d2314";
 
     public const string Ryuk = "testcontainers/ryuk:0.14.0@sha256:7c1a8a9a47c780ed0f983770a662f80deb115d95cce3e2daa3d12115b8cd28f0";
+
+    public const string Redis = "redis:7-alpine@sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe";
 }
