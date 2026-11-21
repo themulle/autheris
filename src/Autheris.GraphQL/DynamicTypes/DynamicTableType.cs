@@ -87,12 +87,7 @@ public sealed class DynamicTableType : ObjectType
 
                     if (rule.IsHmac)
                     {
-                        var httpContext = ctx.Service<Microsoft.AspNetCore.Http.IHttpContextAccessor>()?.HttpContext;
-                        var principal = (ctx.ContextData.TryGetValue(nameof(System.Security.Claims.ClaimsPrincipal), out var cp) && cp is System.Security.Claims.ClaimsPrincipal p)
-                            ? p
-                            : (ctx.ScopedContextData.TryGetValue(nameof(System.Security.Claims.ClaimsPrincipal), out var scp) && scp is System.Security.Claims.ClaimsPrincipal sp)
-                                ? sp
-                                : httpContext?.User ?? new System.Security.Claims.ClaimsPrincipal();
+                        var principal = Autheris.GraphQL.Security.GraphQlCallerPrincipal.Resolve(ctx);
                         var tenant = principal.GetTenantId().Value;
                         string? defaultKeyId = null;
                         try

@@ -181,4 +181,75 @@ public sealed class AuthSchemeSelectionTests
         Select(Options(mode), "/scim/v2/realm-1/Groups", ("X-Forwarded-User", "alice")).ShouldBe(GatewayAuthSchemes.Scim);
         Select(Options(mode), "/scim/v2/realm-1/ServiceProviderConfig", ("Authorization", "Basic dTpw")).ShouldBe(GatewayAuthSchemes.Scim);
     }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task EdgeHeaderStripping_StripsInternalHeaders_PreservesWebhookAndAppHeaders()
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Headers["X-Autheris-Transport"] = "GraphQL";
+        context.Request.Headers["X-Autheris-Domain"] = "internal";
+        context.Request.Headers["X-Autheris-Principal"] = "admin";
+        context.Request.Headers["X-Autheris-Tenant"] = "tenant-b";
+        context.Request.Headers["X-Autheris-Decision"] = "allowed";
+        context.Request.Headers["X-Autheris-Roles"] = "ClusterAdmin";
+        context.Request.Headers["X-Autheris-Groups"] = "S-1-5-32-544";
+        context.Request.Headers["X-Autheris-Signature"] = "forged";
+        context.Request.Headers["X-Autheris-Nonce"] = "nonce-1";
+        context.Request.Headers["X-Autheris-Timestamp"] = "1700000000";
+        context.Request.Headers["X-Autheris-Delivery"] = "deliv-1";
+        context.Request.Headers["X-Autheris-Signature-256"] = "sha256=abcd";
+        context.Request.Headers["X-Autheris-App"] = "shop/1";
+
+        var middleware = new EdgeHeaderStrippingMiddleware(_ => Task.CompletedTask, Microsoft.Extensions.Options.Options.Create(Options(AuthenticationMode.Upstream)));
+        await middleware.InvokeAsync(context);
+
+        context.Request.Headers.ContainsKey("X-Autheris-Transport").ShouldBeFalse();
+        context.Request.Headers.ContainsKey("X-Autheris-Domain").ShouldBeFalse();
+        context.Request.Headers.ContainsKey("X-Autheris-Principal").ShouldBeFalse();
+        context.Request.Headers.ContainsKey("X-Autheris-Tenant").ShouldBeFalse();
+        context.Request.Headers.ContainsKey("X-Autheris-Decision").ShouldBeFalse();
+        context.Request.Headers.ContainsKey("X-Autheris-Roles").ShouldBeFalse();
+        context.Request.Headers.ContainsKey("X-Autheris-Groups").ShouldBeFalse();
+        context.Request.Headers.ContainsKey("X-Autheris-Signature").ShouldBeFalse();
+        context.Request.Headers.ContainsKey("X-Autheris-Nonce").ShouldBeFalse();
+
+        context.Request.Headers["X-Autheris-Timestamp"].ToString().ShouldBe("1700000000");
+        context.Request.Headers["X-Autheris-Delivery"].ToString().ShouldBe("deliv-1");
+        context.Request.Headers["X-Autheris-Signature-256"].ToString().ShouldBe("sha256=abcd");
+        context.Request.Headers["X-Autheris-App"].ToString().ShouldBe("shop/1");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void ProductWebhookHeaderReader_AcceptsSingleFamily_RejectsMixedOrMultiValued()
+    {
+        var autherisCtx = new DefaultHttpContext();
+        autherisCtx.Request.Headers["X-Autheris-Timestamp"] = "1700000000";
+        autherisCtx.Request.Headers["X-Autheris-Delivery"] = "d-1";
+        autherisCtx.Request.Headers["X-Autheris-Signature-256"] = "sha256=aaa";
+        Autheris.Api.Endpoints.ProductEndpoints.TryReadWebhookDelivery(autherisCtx.Request.Headers, out var d1).ShouldBeTrue();
+        d1.DeliveryId.ShouldBe("d-1");
+        d1.Signature.ShouldBe("sha256=aaa");
+
+        var webhookCtx = new DefaultHttpContext();
+        webhookCtx.Request.Headers["X-Webhook-Timestamp"] = "1700000001";
+        webhookCtx.Request.Headers["X-Webhook-Delivery"] = "d-2";
+        webhookCtx.Request.Headers["X-Webhook-Signature-256"] = "sha256=bbb";
+        Autheris.Api.Endpoints.ProductEndpoints.TryReadWebhookDelivery(webhookCtx.Request.Headers, out var d2).ShouldBeTrue();
+        d2.DeliveryId.ShouldBe("d-2");
+        d2.Signature.ShouldBe("sha256=bbb");
+
+        var mixedCtx = new DefaultHttpContext();
+        mixedCtx.Request.Headers["X-Autheris-Timestamp"] = "1700000000";
+        mixedCtx.Request.Headers["X-Webhook-Delivery"] = "d-2";
+        mixedCtx.Request.Headers["X-Webhook-Signature-256"] = "sha256=bbb";
+        Autheris.Api.Endpoints.ProductEndpoints.TryReadWebhookDelivery(mixedCtx.Request.Headers, out _).ShouldBeFalse();
+
+        var multiCtx = new DefaultHttpContext();
+        multiCtx.Request.Headers["X-Autheris-Timestamp"] = "1700000000";
+        multiCtx.Request.Headers["X-Autheris-Delivery"] = "d-1";
+        multiCtx.Request.Headers["X-Autheris-Signature-256"] = new Microsoft.Extensions.Primitives.StringValues(["sha256=aaa", "sha256=bbb"]);
+        Autheris.Api.Endpoints.ProductEndpoints.TryReadWebhookDelivery(multiCtx.Request.Headers, out _).ShouldBeFalse();
+    }
 }
