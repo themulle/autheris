@@ -299,7 +299,7 @@ public sealed class CostAndQuotaMiddleware
         var tableMetadataLookup = CatalogGraphQlTypeModule.CurrentLookup;
         var visibleColumnsLookup = await ResolveVisibleColumnsLookupAsync(
                 services,
-                httpContext?.User,
+                Autheris.GraphQL.Security.GraphQlCallerPrincipal.ResolveOrNull(context, httpContext),
                 doc,
                 tableMetadataLookup,
                 context.RequestAborted)
@@ -425,7 +425,7 @@ public sealed class CostAndQuotaMiddleware
 
         // Zero Unauthenticated Allocation
         // Unauthenticated requests, requests with invalid tokens, or rejected requests MUST NEVER touch rate limiter buckets.
-        var principal = httpContext.User ?? (context.ContextData.TryGetValue("ClaimsPrincipal", out var cpObj) && cpObj is System.Security.Claims.ClaimsPrincipal cp ? cp : null);
+        var principal = Autheris.GraphQL.Security.GraphQlCallerPrincipal.ResolveOrNull(context, httpContext);
         string? apiKey = httpContext.Request.Headers.TryGetValue("X-API-Key", out var ak) ? ak.ToString() : null;
         string? clientIp = httpContext.Connection.RemoteIpAddress?.ToString();
 
@@ -455,7 +455,7 @@ public sealed class CostAndQuotaMiddleware
         var tableMetadataLookup = CatalogGraphQlTypeModule.CurrentLookup;
         var visibleColumnsLookup = await ResolveVisibleColumnsLookupAsync(
                 services,
-                httpContext.User,
+                principal,
                 doc,
                 tableMetadataLookup,
                 context.RequestAborted)

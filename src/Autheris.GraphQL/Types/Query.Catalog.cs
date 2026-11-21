@@ -32,7 +32,8 @@ public sealed partial class Query
         [Service] IGatewayExecutionService executionService = default!,
         [Service] IHttpContextAccessor httpContextAccessor = default!,
         [Service] IOptions<GatewayOptions>? gatewayOptions = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        HotChocolate.Resolvers.IResolverContext? resolverContext = null)
     {
         // SR-M-17: bound the offset like the tree path does (GraphQL.MaxAllowedOffset).
         var maxOffset = gatewayOptions?.Value?.GraphQL?.MaxAllowedOffset >= 0
@@ -46,8 +47,10 @@ public sealed partial class Query
                 .Build());
         }
 
-        var httpContext = httpContextAccessor?.HttpContext;
-        var principal = httpContext?.User ?? new ClaimsPrincipal();
+        var httpContext = Autheris.GraphQL.Security.GraphQlCallerPrincipal.HasSessionPrincipalOverride(resolverContext)
+            ? null
+            : httpContextAccessor?.HttpContext;
+        var principal = Autheris.GraphQL.Security.GraphQlCallerPrincipal.Resolve(resolverContext, httpContextAccessor);
         IReadOnlyDictionary<string, string[]>? headers = null;
         if (httpContext?.Request?.Headers is { Count: > 0 } reqHeaders)
         {
@@ -128,10 +131,13 @@ public sealed partial class Query
         [Service] IDiscoveryService? discoveryService = null,
         [Service] IClassificationRepository? classificationRepository = null,
         [Service] IConsentResolutionService? consentResolution = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        HotChocolate.Resolvers.IResolverContext? resolverContext = null)
     {
-        var httpContext = httpContextAccessor?.HttpContext;
-        var principal = httpContext?.User;
+        var httpContext = Autheris.GraphQL.Security.GraphQlCallerPrincipal.HasSessionPrincipalOverride(resolverContext)
+            ? null
+            : httpContextAccessor?.HttpContext;
+        var principal = Autheris.GraphQL.Security.GraphQlCallerPrincipal.Resolve(resolverContext, httpContextAccessor);
 
         var acceptLanguage = httpContext?.Request?.Headers.AcceptLanguage.ToString();
         var requestedLang = !string.IsNullOrWhiteSpace(language) ? language : (!string.IsNullOrWhiteSpace(acceptLanguage) ? acceptLanguage : null);
@@ -278,15 +284,18 @@ public sealed partial class Query
         [Service] IHttpContextAccessor httpContextAccessor = default!,
         [Service] Autheris.Application.Catalog.Localization.ILanguageNegotiator? languageNegotiator = null,
         [Service] IOptions<Autheris.Domain.Options.CatalogLocalizationOptions>? localizationOptions = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        HotChocolate.Resolvers.IResolverContext? resolverContext = null)
     {
         if (!TableIdentifier.TryCreate(domain, schema, name, out var tableId))
         {
             throw InvalidTableArgument();
         }
 
-        var httpContext = httpContextAccessor?.HttpContext;
-        var principal = httpContext?.User;
+        var httpContext = Autheris.GraphQL.Security.GraphQlCallerPrincipal.HasSessionPrincipalOverride(resolverContext)
+            ? null
+            : httpContextAccessor?.HttpContext;
+        var principal = Autheris.GraphQL.Security.GraphQlCallerPrincipal.Resolve(resolverContext, httpContextAccessor);
         if (principal?.Identity?.IsAuthenticated != true || principal.GetUserSid() == null)
         {
             throw new GraphQLException(ErrorBuilder.New()
@@ -336,15 +345,15 @@ public sealed partial class Query
         int? limit = null,
         [Service] IDiscoveryArtifactService? artifactService = null,
         [Service] IHttpContextAccessor httpContextAccessor = default!,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        HotChocolate.Resolvers.IResolverContext? resolverContext = null)
     {
         if (!TableIdentifier.TryCreate(domain, schema, name, out var tableId))
         {
             throw InvalidTableArgument();
         }
 
-        var httpContext = httpContextAccessor?.HttpContext;
-        var principal = httpContext?.User;
+        var principal = Autheris.GraphQL.Security.GraphQlCallerPrincipal.Resolve(resolverContext, httpContextAccessor);
         if (principal?.Identity?.IsAuthenticated != true || principal.GetUserSid() == null)
         {
             throw new GraphQLException(ErrorBuilder.New()
@@ -615,9 +624,10 @@ public sealed partial class Query
         [Service] IHttpContextAccessor httpContextAccessor = null!,
         [Service] IConsentRepository? consentRepository = null,
         [Service] IDataOwnershipRepository? ownershipRepository = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        HotChocolate.Resolvers.IResolverContext? resolverContext = null)
     {
-        var callerContext = GetCallerSecurityContext(httpContextAccessor, "Authentication is required for consumer analyses.");
+        var callerContext = GetCallerSecurityContext(httpContextAccessor, "Authentication is required for consumer analyses.", resolverContext);
 
         if (!TableIdentifier.TryCreate(domain, schema, tableName, out var tableId))
         {

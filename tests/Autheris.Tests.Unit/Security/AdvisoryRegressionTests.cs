@@ -363,4 +363,118 @@ public sealed partial class AdvisoryRegressionTests
             IReadOnlyList<KeyColumnDirection>? primaryKeyDirections = null, CancellationToken ct = default)
             => throw new NotSupportedException();
     }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Ghsa_xwpx_93pp_regression()
+    {
+        var httpIdentity = new ClaimsIdentity(
+        [
+            new Claim(ClaimTypes.PrimarySid, "S-1-5-21-HTTP"),
+            new Claim(ClaimTypes.Role, "GovernanceAdmin"),
+            new Claim(ClaimTypes.GroupSid, "S-1-5-21-1-2-3-400", ClaimValueTypes.String, Autheris.Domain.Security.IdentityClaimIssuers.Pipeline),
+            new Claim("tenant_id", "tenant-a")
+        ], "Bearer");
+        var httpUser = new ClaimsPrincipal(httpIdentity);
+
+        var mcpAppPrincipal = new ClaimsPrincipal(new ClaimsIdentity(
+        [
+            new Claim(ClaimTypes.PrimarySid, "S-1-5-21-MCP-APP"),
+            new Claim("idtyp", "app"),
+            new Claim("tenant_id", "tenant-a")
+        ], "McpAuth"));
+
+        var aggregation = Substitute.For<Autheris.Application.Analytics.IGovernedAggregationService>();
+        aggregation.ExecuteAggregationAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<Autheris.Application.Analytics.AggregationQuery>(), Arg.Any<CancellationToken>())
+            .Returns(_ => Autheris.Tests.Unit.GraphQL.TypedAggregateTestHost.Result([], 2));
+
+        var metrics = Substitute.For<Autheris.Application.Analytics.ISemanticMetricQueryService>();
+        metrics.QueryMetricsAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<Autheris.Application.Analytics.MetricQueryRequest>(), Arg.Any<CancellationToken>())
+            .Returns(_ => new Autheris.Application.Analytics.MetricQueryResult(
+                ["revenue"], "v1", [],
+                new Autheris.Application.Analytics.AggregationGroupRow(new Dictionary<string, object?>(), 1, new Dictionary<string, object?>()),
+                new Autheris.Application.Analytics.AggregationMetadata(5, Autheris.Application.Analytics.SmallGroupStrategy.Suppress, false, 0, 0, false, false),
+                new Dictionary<string, Autheris.Application.Catalog.Semantic.MetricDefinitionSummary>()));
+
+        var approvalRepo = Substitute.For<IConsentApprovalRepository>();
+        approvalRepo.GetRequestsByRequesterSidAsync(Arg.Any<Sid>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<ConsentRequest>>([]));
+
+        var catalogClient = Substitute.For<IDataCatalogClient>();
+        var catalogSync = Substitute.For<Autheris.Application.Catalog.Interfaces.IDataCatalogSyncService>();
+
+        var table = Autheris.Tests.Unit.GraphQL.TypedAggregateTestHost.DefaultTable();
+        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        metadataRepo.StubAllTables([table]);
+        var relationRepo = Substitute.For<ITableRelationRepository>();
+        relationRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns([]);
+
+        var accessor = Substitute.For<IHttpContextAccessor>();
+        var httpContext = new DefaultHttpContext { User = httpUser };
+        httpContext.Items["TenantId"] = new TenantId("tenant-a");
+
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        services.AddSingleton(metadataRepo);
+        services.AddSingleton(relationRepo);
+        services.AddSingleton(Substitute.For<Autheris.Application.Sql.Tree.IGovernedTreeQueryService>());
+        services.AddSingleton(aggregation);
+        services.AddSingleton(metrics);
+        services.AddSingleton(approvalRepo);
+        services.AddSingleton(catalogClient);
+        services.AddSingleton(catalogSync);
+        services.AddSingleton(accessor);
+        services.AddSingleton(Options.Create(new GatewayOptions()));
+        services.AddSingleton(Options.Create(new AnalyticsOptions()));
+
+        var sp = services.BuildServiceProvider();
+        httpContext.RequestServices = sp;
+        accessor.HttpContext.Returns(httpContext);
+
+        var executor = await HotChocolate.Execution.RequestExecutorBuilderExtensions.BuildRequestExecutorAsync(
+            GraphQLRequestExecutorBuilderExtensions.AddGraphQLServer(services)
+                .AddQueryType<Autheris.GraphQL.Types.Query>()
+                .AddMutationType<Autheris.GraphQL.Types.Mutation>()
+                .AddTypeModule(_ => new Autheris.GraphQL.Catalog.CatalogGraphQlTypeModule(metadataRepo, relationRepo, null, null, null, true))
+                .UseRequest<Autheris.GraphQL.Catalog.CatalogOperationCleanupMiddleware>()
+                .UseDefaultPipeline());
+
+        // 1. Aggregate resolver uses GlobalState ClaimsPrincipal (app-only, zero groups), not HttpContext.User.
+        var aggRes = await executor.ExecuteAsync(HotChocolate.Execution.OperationRequestBuilder.New()
+            .SetDocument("{ sales_dbo_orders_aggregate(aggregates: [{ fn: COUNT, alias: \"n\" }]) { count } }")
+            .AddGlobalState(nameof(ClaimsPrincipal), mcpAppPrincipal)
+            .Build());
+        Autheris.Tests.Unit.GraphQL.TypedAggregateTestHost.Errors(aggRes).ShouldBeEmpty();
+        await aggregation.Received(1).ExecuteAggregationAsync(
+            Arg.Is<ClaimsPrincipal>(p => p.GetUserSid() == new Sid("S-1-5-21-MCP-APP") && p.GetGroupSids().Count == 0),
+            Arg.Any<Autheris.Application.Analytics.AggregationQuery>(),
+            Arg.Any<CancellationToken>());
+
+        // 2. Metric resolver uses GlobalState ClaimsPrincipal, not HttpContext.User.
+        var metRes = await executor.ExecuteAsync(HotChocolate.Execution.OperationRequestBuilder.New()
+            .SetDocument("{ queryMetrics(metrics: [\"revenue\"]) { count } }")
+            .AddGlobalState(nameof(ClaimsPrincipal), mcpAppPrincipal)
+            .Build());
+        Autheris.Tests.Unit.GraphQL.TypedAggregateTestHost.Errors(metRes).ShouldBeEmpty();
+        await metrics.Received(1).QueryMetricsAsync(
+            Arg.Is<ClaimsPrincipal>(p => p.GetUserSid() == new Sid("S-1-5-21-MCP-APP") && p.GetGroupSids().Count == 0),
+            Arg.Any<Autheris.Application.Analytics.MetricQueryRequest>(),
+            Arg.Any<CancellationToken>());
+
+        // 3. Query.* resolver uses GlobalState ClaimsPrincipal SID rather than HTTP caller's SID.
+        var reqRes = await executor.ExecuteAsync(HotChocolate.Execution.OperationRequestBuilder.New()
+            .SetDocument("{ myAccessRequests { requesterSid } }")
+            .AddGlobalState(nameof(ClaimsPrincipal), mcpAppPrincipal)
+            .Build());
+        Autheris.Tests.Unit.GraphQL.TypedAggregateTestHost.Errors(reqRes).ShouldBeEmpty();
+        await approvalRepo.Received(1).GetRequestsByRequesterSidAsync(new Sid("S-1-5-21-MCP-APP"), null, Arg.Any<CancellationToken>());
+        await approvalRepo.DidNotReceive().GetRequestsByRequesterSidAsync(new Sid("S-1-5-21-HTTP"), Arg.Any<string?>(), Arg.Any<CancellationToken>());
+
+        // 4. Mutation.* resolver rejects non-admin GlobalState principal despite HttpContext.User holding GovernanceAdmin.
+        var mutRes = await executor.ExecuteAsync(HotChocolate.Execution.OperationRequestBuilder.New()
+            .SetDocument("mutation { syncDataCatalog { success } }")
+            .AddGlobalState(nameof(ClaimsPrincipal), mcpAppPrincipal)
+            .Build());
+        Autheris.Tests.Unit.GraphQL.TypedAggregateTestHost.Errors(mutRes).ShouldContain(e => e.Code == "FORBIDDEN");
+        await catalogSync.DidNotReceiveWithAnyArgs().SyncCatalogAsync(default, default, default);
+    }
 }

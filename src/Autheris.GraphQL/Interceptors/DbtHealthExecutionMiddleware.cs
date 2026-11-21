@@ -66,7 +66,7 @@ public sealed class DbtHealthExecutionMiddleware
             httpContext = accessor?.HttpContext;
         }
 
-        var principal = httpContext?.User ?? (context.ContextData.TryGetValue("ClaimsPrincipal", out var cpObj) && cpObj is System.Security.Claims.ClaimsPrincipal cp ? cp : null);
+        var principal = Autheris.GraphQL.Security.GraphQlCallerPrincipal.ResolveOrNull(context, httpContext);
 
         // GQL-12: Do not disclose dbt quarantine status before authentication
         if (principal == null || principal.Identity?.IsAuthenticated != true)

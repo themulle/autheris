@@ -32,9 +32,11 @@ public sealed partial class Mutation
     /// decision services are resolved from the request services with<c>GetRequiredService</c>; a missing registration
     /// (or missing request services) fails the call and never falls back to a permissive default.
     /// </summary>
-    private static T RequireDecisionService<T>(IHttpContextAccessor? httpContextAccessor) where T : notnull
+    private static T RequireDecisionService<T>(
+        IHttpContextAccessor? httpContextAccessor,
+        HotChocolate.Resolvers.IResolverContext? resolverContext = null) where T : notnull
     {
-        var services = httpContextAccessor?.HttpContext?.RequestServices
+        var services = Autheris.GraphQL.Security.GraphQlCallerPrincipal.ResolveServices(resolverContext, httpContextAccessor)
             ?? throw new InvalidOperationException("Request services are unavailable; the consent decision is refused (fail closed).");
         return Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<T>(services);
     }
@@ -45,21 +47,26 @@ public sealed partial class Mutation
     /// <c>DECISION_NOT_PERMITTED</c> before any repository access. The denial is audited per principal and minute; an audit failure never
     /// changes the answer (the recorder does not throw and is optional by design: only the guard is a hard dependency).
     /// </summary>
-    private static async Task EnsureDecisionPermittedAsync(IHttpContextAccessor? httpContextAccessor, CancellationToken ct)
+    private static async Task EnsureDecisionPermittedAsync(
+        IHttpContextAccessor? httpContextAccessor,
+        CancellationToken ct,
+        HotChocolate.Resolvers.IResolverContext? resolverContext = null)
     {
-        var guard = RequireDecisionService<IConsentDecisionGuard>(httpContextAccessor);
-        var principal = httpContextAccessor!.HttpContext!.User;
+        var guard = RequireDecisionService<IConsentDecisionGuard>(httpContextAccessor, resolverContext);
+        var principal = Autheris.GraphQL.Security.GraphQlCallerPrincipal.Resolve(resolverContext, httpContextAccessor);
         var verdict = guard.Evaluate(principal);
         if (verdict.Allowed)
         {
             return;
         }
 
-        var recorder = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetService<IConsentDecisionDenialRecorder>(
-            httpContextAccessor.HttpContext.RequestServices);
+        var services = Autheris.GraphQL.Security.GraphQlCallerPrincipal.ResolveServices(resolverContext, httpContextAccessor);
+        var recorder = services is not null
+            ? Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetService<IConsentDecisionDenialRecorder>(services)
+            : null;
         if (recorder != null)
         {
-            await recorder.RecordAsync(principal, verdict.ReasonClass, GetContextTenantId(httpContextAccessor), ct).ConfigureAwait(false);
+            await recorder.RecordAsync(principal, verdict.ReasonClass, GetContextTenantId(httpContextAccessor, resolverContext), ct).ConfigureAwait(false);
         }
 
         throw new GraphQLException(ErrorBuilder.New()
@@ -73,11 +80,12 @@ public sealed partial class Mutation
         IConsentApprovalRepository approvalRepository,
         ITableMetadataRepository? metadataRepository,
         IDataOwnershipRepository ownershipRepository,
-        TenantId fallbackTenantId)
+        TenantId fallbackTenantId,
+        HotChocolate.Resolvers.IResolverContext? resolverContext = null)
     {
-        var decisionGuard = RequireDecisionService<IConsentDecisionGuard>(httpContextAccessor);
-        var grantPolicy = RequireDecisionService<IGrantPolicy>(httpContextAccessor);
-        var services = httpContextAccessor!.HttpContext!.RequestServices;
+        var decisionGuard = RequireDecisionService<IConsentDecisionGuard>(httpContextAccessor, resolverContext);
+        var grantPolicy = RequireDecisionService<IGrantPolicy>(httpContextAccessor, resolverContext);
+        var services = Autheris.GraphQL.Security.GraphQlCallerPrincipal.ResolveServices(resolverContext, httpContextAccessor)!;
 
         var registeredPipeline = services.GetService<IConsentDecisionPipeline>();
         if (registeredPipeline != null
@@ -131,10 +139,14 @@ public sealed partial class Mutation
             .Build());
     }
 
-    internal static void EnsureReviewScope(IHttpContextAccessor? httpContextAccessor, ClaimsPrincipal? principal)
+    internal static void EnsureReviewScope(
+        IHttpContextAccessor? httpContextAccessor,
+        ClaimsPrincipal? principal,
+        HotChocolate.Resolvers.IResolverContext? resolverContext = null)
     {
-        var gatewayOptions = httpContextAccessor?.HttpContext?.RequestServices != null
-            ? Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>>(httpContextAccessor.HttpContext.RequestServices)?.Value
+        var services = Autheris.GraphQL.Security.GraphQlCallerPrincipal.ResolveServices(resolverContext, httpContextAccessor);
+        var gatewayOptions = services != null
+            ? Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>>(services)?.Value
             : null;
         var entraId = gatewayOptions?.Authentication?.EntraId;
         if (entraId != null && (!entraId.SelfServiceEnabled || entraId.AccessReviewScopes is { Count: 0 }))
@@ -160,12 +172,16 @@ public sealed partial class Mutation
         }
     }
 
-    private static string? ValidateOptionalConsentDescription(IHttpContextAccessor? httpContextAccessor, string? description)
+    private static string? ValidateOptionalConsentDescription(
+        IHttpContextAccessor? httpContextAccessor,
+        string? description,
+        HotChocolate.Resolvers.IResolverContext? resolverContext = null)
     {
         if (description is null) return null;
 
-        var textOptions = httpContextAccessor?.HttpContext?.RequestServices != null
-            ? Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetService<Microsoft.Extensions.Options.IOptions<GovernanceTextOptions>>(httpContextAccessor.HttpContext.RequestServices)
+        var services = Autheris.GraphQL.Security.GraphQlCallerPrincipal.ResolveServices(resolverContext, httpContextAccessor);
+        var textOptions = services != null
+            ? Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetService<Microsoft.Extensions.Options.IOptions<GovernanceTextOptions>>(services)
             : null;
         var defaultOptions = new GovernanceTextOptions();
         var maxLength = textOptions?.Value?.ConsentDescriptionMaxLength ?? defaultOptions.ConsentDescriptionMaxLength;
@@ -199,14 +215,15 @@ public sealed partial class Mutation
         [Service] IDataOwnershipRepository ownershipRepository,
         [Service] IHttpContextAccessor httpContextAccessor,
         [Service] IOptions<GovernanceTextOptions>? textOptions = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        HotChocolate.Resolvers.IResolverContext? resolverContext = null)
     {
-        await EnsureDecisionPermittedAsync(httpContextAccessor, ct).ConfigureAwait(false);
-        var actorSid = GetAuthenticatedUserSid(httpContextAccessor);
-        var principal = httpContextAccessor!.HttpContext!.User;
+        await EnsureDecisionPermittedAsync(httpContextAccessor, ct, resolverContext).ConfigureAwait(false);
+        var actorSid = GetAuthenticatedUserSid(httpContextAccessor, resolverContext);
+        var principal = Autheris.GraphQL.Security.GraphQlCallerPrincipal.Resolve(resolverContext, httpContextAccessor);
 
         var isCrossTenantAdmin = Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
-        var tenantId = ResolveMutationTenantId(httpContextAccessor, principal, isCrossTenantAdmin);
+        var tenantId = ResolveMutationTenantId(httpContextAccessor, principal, isCrossTenantAdmin, resolverContext);
 
         var consent = await consentRepository.GetConsentByIdAsync(consentId, ct).ConfigureAwait(false);
         if (consent == null
@@ -216,7 +233,8 @@ public sealed partial class Mutation
             throw ConsentNotFound();
         }
 
-        var isAdmin = isCrossTenantAdmin || principal.IsInRole("GovernanceAdmin");
+        var isAdmin = isCrossTenantAdmin ||
+            Autheris.GraphQL.Security.GraphQlCallerPrincipal.HasGatewayRole(principal, Autheris.Domain.Security.GatewayRole.GovernanceAdmin, tenantId.Value);
         if (!isAdmin)
         {
             bool permitted;
@@ -297,11 +315,15 @@ public sealed partial class Mutation
     /// ClusterAdmin's X-Tenant-ID). The token claim only serves as a cross-check: a different claim tenant is forbidden,
     /// except for canonical ClusterAdmins. Without a context tenant the claim tenant applies.
     /// </summary>
-    internal static TenantId ResolveMutationTenantId(IHttpContextAccessor? httpContextAccessor, ClaimsPrincipal? principal, bool isCrossTenantAdmin)
+    internal static TenantId ResolveMutationTenantId(
+        IHttpContextAccessor? httpContextAccessor,
+        ClaimsPrincipal? principal,
+        bool isCrossTenantAdmin,
+        HotChocolate.Resolvers.IResolverContext? resolverContext = null)
     {
         try
         {
-            return ConsentRequestService.ResolveTenantId(principal, GetContextTenantId(httpContextAccessor), isCrossTenantAdmin);
+            return ConsentRequestService.ResolveTenantId(principal, GetContextTenantId(httpContextAccessor, resolverContext), isCrossTenantAdmin);
         }
         catch (ConsentRequestException ex)
         {
@@ -388,17 +410,18 @@ public sealed partial class Mutation
         bool? requestWriteOnly = null,
         List<string>? clearColumns = null,
         [Service] IDiscoveryAccessRequestService? discoveryAccessRequests = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        HotChocolate.Resolvers.IResolverContext? resolverContext = null)
     {
-        var userSid = GetAuthenticatedUserSid(httpContextAccessor);
-        var principal = httpContextAccessor?.HttpContext?.User;
+        var userSid = GetAuthenticatedUserSid(httpContextAccessor, resolverContext);
+        var principal = Autheris.GraphQL.Security.GraphQlCallerPrincipal.Resolve(resolverContext, httpContextAccessor);
 
         try
         {
             if (discoveryAccessRequests is not null && (writeRules is not { Count: > 0 }) && requestWriteOnly is null)
             {
                 var tenant = ConsentRequestService.ResolveTenantId(
-                    principal, GetContextTenantId(httpContextAccessor), ClusterAdminPolicy.IsCanonicalClusterAdmin(principal));
+                    principal, GetContextTenantId(httpContextAccessor, resolverContext), ClusterAdminPolicy.IsCanonicalClusterAdmin(principal));
                 var accessResult = await discoveryAccessRequests.RequestAsync(
                     new DiscoveryAccessRequest(domain, schema, tableName, justification, durationDays, null, clearColumns, idempotencyKey, context),
                     new CatalogCaller(principal, tenant, CatalogChannel.GraphQl),
@@ -414,7 +437,7 @@ public sealed partial class Mutation
             var result = await consentRequestService.SubmitAsync(
                 new ConsentRequestSubmission(
                     domain, schema, tableName, justification, durationDays, idempotencyKey,
-                    userSid, principal, GetContextTenantId(httpContextAccessor), context,
+                    userSid, principal, GetContextTenantId(httpContextAccessor, resolverContext), context,
                     ConsentWriteRuleWorkflow.ToWriteRules(writeRules), requestWriteOnly),
                 ct);
 
@@ -445,10 +468,11 @@ public sealed partial class Mutation
         Guid requestId,
         [Service] IConsentRequestService consentRequestService = default!,
         [Service] IHttpContextAccessor httpContextAccessor = default!,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        HotChocolate.Resolvers.IResolverContext? resolverContext = null)
     {
-        var principal = httpContextAccessor?.HttpContext?.User;
-        if (principal == null || principal.Identity?.IsAuthenticated != true)
+        var principal = Autheris.GraphQL.Security.GraphQlCallerPrincipal.Resolve(resolverContext, httpContextAccessor);
+        if (principal.Identity?.IsAuthenticated != true)
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("UNAUTHORIZED")
@@ -519,18 +543,19 @@ public sealed partial class Mutation
         ColumnMaskingInput? columnMasking = null,
         string? description = null,
         List<ConsentWriteRuleInput>? writeRules = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        HotChocolate.Resolvers.IResolverContext? resolverContext = null)
     {
-        await EnsureDecisionPermittedAsync(httpContextAccessor, ct).ConfigureAwait(false);
-        _ = RequireDecisionService<IGrantPolicy>(httpContextAccessor);
+        await EnsureDecisionPermittedAsync(httpContextAccessor, ct, resolverContext).ConfigureAwait(false);
+        _ = RequireDecisionService<IGrantPolicy>(httpContextAccessor, resolverContext);
 
-        var approverSid = GetAuthenticatedUserSid(httpContextAccessor);
-        var principal = httpContextAccessor.HttpContext?.User;
-        EnsureReviewScope(httpContextAccessor, principal);
+        var approverSid = GetAuthenticatedUserSid(httpContextAccessor, resolverContext);
+        var principal = Autheris.GraphQL.Security.GraphQlCallerPrincipal.Resolve(resolverContext, httpContextAccessor);
+        EnsureReviewScope(httpContextAccessor, principal, resolverContext);
 
-        string? validatedDescription = ValidateOptionalConsentDescription(httpContextAccessor, description);
+        string? validatedDescription = ValidateOptionalConsentDescription(httpContextAccessor, description, resolverContext);
         bool isCrossTenantAdmin = ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
-        var tenantId = ResolveMutationTenantId(httpContextAccessor, principal, isCrossTenantAdmin);
+        var tenantId = ResolveMutationTenantId(httpContextAccessor, principal, isCrossTenantAdmin, resolverContext);
 
         string rowFilterJson = rowFilter == null ? string.Empty : System.Text.Json.JsonSerializer.Serialize(rowFilter);
         string columnMaskingJson = columnMasking?.Rules is { Count: > 0 }
@@ -555,7 +580,7 @@ public sealed partial class Mutation
             return existing;
         }
 
-        var pipeline = ResolveDecisionPipeline(httpContextAccessor, approvalRepository, metadataRepository, ownershipRepository, tenantId);
+        var pipeline = ResolveDecisionPipeline(httpContextAccessor, approvalRepository, metadataRepository, ownershipRepository, tenantId, resolverContext);
         ConsentDecisionResult decisionResult;
         try
         {
@@ -614,15 +639,16 @@ public sealed partial class Mutation
         [Service] IDataOwnershipRepository ownershipRepository = default!,
         [Service] IHttpContextAccessor httpContextAccessor = default!,
         [Service] IIdempotencyStore idempotencyStore = default!,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        HotChocolate.Resolvers.IResolverContext? resolverContext = null)
     {
-        await EnsureDecisionPermittedAsync(httpContextAccessor, ct).ConfigureAwait(false);
-        _ = RequireDecisionService<IGrantPolicy>(httpContextAccessor); // composition fail-fast: both decision resolvers need the same services
+        await EnsureDecisionPermittedAsync(httpContextAccessor, ct, resolverContext).ConfigureAwait(false);
+        _ = RequireDecisionService<IGrantPolicy>(httpContextAccessor, resolverContext); // composition fail-fast: both decision resolvers need the same services
 
-        var principal = httpContextAccessor.HttpContext?.User;
-        EnsureReviewScope(httpContextAccessor, principal);
+        var principal = Autheris.GraphQL.Security.GraphQlCallerPrincipal.Resolve(resolverContext, httpContextAccessor);
+        EnsureReviewScope(httpContextAccessor, principal, resolverContext);
 
-        var approverSid = GetAuthenticatedUserSid(httpContextAccessor);
+        var approverSid = GetAuthenticatedUserSid(httpContextAccessor, resolverContext);
 
         if (string.IsNullOrWhiteSpace(reason) || reason.Trim().Length < 3)
         {
@@ -641,7 +667,7 @@ public sealed partial class Mutation
         }
 
         bool isCrossTenantAdmin = ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
-        var tenantId = ResolveMutationTenantId(httpContextAccessor, principal, isCrossTenantAdmin);
+        var tenantId = ResolveMutationTenantId(httpContextAccessor, principal, isCrossTenantAdmin, resolverContext);
         var rejectFingerprint = IdempotencyFingerprint(tenantId.Value, requestId, reason.Trim());
         var existing = await TryGetIdempotentAsync(approverSid, "RejectConsentRequest", idempotencyKey, rejectFingerprint, idempotencyStore, ct);
         if (existing != null)
@@ -649,7 +675,7 @@ public sealed partial class Mutation
             return existing;
         }
 
-        var pipeline = ResolveDecisionPipeline(httpContextAccessor, approvalRepository, approvalRepository as ITableMetadataRepository, ownershipRepository, tenantId);
+        var pipeline = ResolveDecisionPipeline(httpContextAccessor, approvalRepository, approvalRepository as ITableMetadataRepository, ownershipRepository, tenantId, resolverContext);
         ConsentDecisionResult decisionResult;
         try
         {
@@ -696,9 +722,10 @@ public sealed partial class Mutation
         [Service] IConsentRepository consentRepository = default!,
         [Service] IDataOwnershipRepository ownershipRepository = default!,
         [Service] IHttpContextAccessor httpContextAccessor = default!,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        HotChocolate.Resolvers.IResolverContext? resolverContext = null)
     {
-        var revokerSid = GetAuthenticatedUserSid(httpContextAccessor);
+        var revokerSid = GetAuthenticatedUserSid(httpContextAccessor, resolverContext);
 
         if (string.IsNullOrWhiteSpace(reason) || reason.Trim().Length < 3)
         {
@@ -725,9 +752,9 @@ public sealed partial class Mutation
                 .Build());
         }
 
-        var principal = httpContextAccessor?.HttpContext?.User;
+        var principal = Autheris.GraphQL.Security.GraphQlCallerPrincipal.Resolve(resolverContext, httpContextAccessor);
         bool isCrossTenantAdmin = ClusterAdminPolicy.IsCanonicalClusterAdmin(principal); // RR-L2-01: single cross-tenant definition
-        var tenantId = ResolveMutationTenantId(httpContextAccessor, principal, isCrossTenantAdmin);
+        var tenantId = ResolveMutationTenantId(httpContextAccessor, principal, isCrossTenantAdmin, resolverContext);
 
         if (consent.TenantId != tenantId && !isCrossTenantAdmin)
         {

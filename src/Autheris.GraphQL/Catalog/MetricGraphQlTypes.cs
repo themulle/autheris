@@ -127,7 +127,7 @@ internal static class MetricGraphQlTypes
 
     internal static async Task<MetricResultDto> ResolveAsync(IResolverContext ctx)
     {
-        var principal = ctx.Service<IHttpContextAccessor>()?.HttpContext?.User ?? new ClaimsPrincipal();
+        var principal = Autheris.GraphQL.Security.GraphQlCallerPrincipal.Resolve(ctx);
         if (principal.Identity?.IsAuthenticated != true)
         {
             throw AggregateErrors.Create("UNAUTHORIZED", AggregateErrors.UnauthorizedMessage);

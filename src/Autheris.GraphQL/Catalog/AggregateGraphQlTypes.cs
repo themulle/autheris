@@ -188,7 +188,7 @@ internal static class AggregateGraphQlTypes
 
     internal static async Task<AggregateResultDto> ResolveAsync(IResolverContext ctx, CatalogTableType table)
     {
-        var principal = ctx.Service<IHttpContextAccessor>()?.HttpContext?.User ?? new ClaimsPrincipal();
+        var principal = Autheris.GraphQL.Security.GraphQlCallerPrincipal.Resolve(ctx);
         if (principal.Identity?.IsAuthenticated != true)
         {
             throw AggregateErrors.Create("UNAUTHORIZED", AggregateErrors.UnauthorizedMessage);
