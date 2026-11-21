@@ -33,7 +33,7 @@ public sealed partial class DiscoveryService
             return candidates;
         }
 
-        if (_searchEngine?.IsIndexReady == true)
+        if (_searchEngine?.IsIndexReady == true && _searchEngine.IndexedTableCount > 0)
         {
             var candidateById = candidates.ToDictionary(static t => t.Identifier);
             var hits = await _searchEngine.SearchAsync(

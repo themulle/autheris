@@ -174,4 +174,40 @@ public sealed class ExternalCatalogOneSearchTests
         var res = await mcp.ListDatasetsAsync(User(), search: "auftrag kunde", domain: null);
         res.Datasets.ShouldHaveSingleItem().Id.ShouldBe("sales.dbo.auftrags_position");
     }
+
+    [Fact]
+    public async Task McpListDatasets_WhenSearchIndexIsReadyButEmpty_FallsBackToVisibleTextMatching()
+    {
+        var tables = new FakeDiscoveryTableRepository();
+        tables.Tables.Add(DiscoveryTestBuilder.MakeTable("default", "mcp_cranes", ownerTenantId: Tenant));
+
+        var emptyReadyIndex = Substitute.For<ICatalogSearchEngine>();
+        emptyReadyIndex.IsIndexReady.Returns(true);
+        emptyReadyIndex.IndexedTableCount.Returns(0);
+
+        var opts = Options.Create(new GatewayOptions { Tenancy = TenancyShape.Multi.Options() });
+        var consents = new FakeDiscoveryConsentRepository();
+        var discovery = new DiscoveryService(
+            tables,
+            FakeAccessDecisionPoint.AllowAll(),
+            consents,
+            new FakeDiscoveryApprovalRepository(),
+            new FakeDiscoveryOwnershipRepository(),
+            new FakeDiscoveryArtifactStore(),
+            new FakeAuditWriter(),
+            opts,
+            Options.Create(new CatalogDiscoveryOptions()),
+            logger: NullLogger<DiscoveryService>.Instance,
+            searchEngine: emptyReadyIndex);
+
+        var mcp = new McpDatasetCatalog(
+            tables,
+            consents,
+            Substitute.For<IGatewayExecutionService>(),
+            options: opts,
+            discoveryService: discovery);
+
+        var res = await mcp.ListDatasetsAsync(User(), search: "crane", domain: null);
+        res.Datasets.ShouldHaveSingleItem().Id.ShouldBe("default.dbo.mcp_cranes");
+    }
 }
