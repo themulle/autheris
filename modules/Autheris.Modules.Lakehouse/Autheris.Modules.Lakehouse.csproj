@@ -16,15 +16,15 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Autheris.Modules.Abstractions\Autheris.Modules.Abstractions.csproj">
       <Private>false</Private>
-      <ExcludeAssets>runtime</ExcludeAssets>
+      <ExcludeAssets>runtime;native</ExcludeAssets>
     </ProjectReference>
     <ProjectReference Include="..\..\src\Autheris.Domain\Autheris.Domain.csproj">
       <Private>false</Private>
-      <ExcludeAssets>runtime</ExcludeAssets>
+      <ExcludeAssets>runtime;native</ExcludeAssets>
     </ProjectReference>
     <ProjectReference Include="..\..\src\Autheris.Application\Autheris.Application.csproj">
       <Private>false</Private>
-      <ExcludeAssets>runtime</ExcludeAssets>
+      <ExcludeAssets>runtime;native</ExcludeAssets>
     </ProjectReference>
   </ItemGroup>
 

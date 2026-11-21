@@ -104,7 +104,19 @@ RUN_ENV=(
   -e Gateway__GovernanceDb__ConnectionString="$PG_CONN"
   -e Gateway__Modules__Path=/app/modules
   -e Gateway__Modules__Enabled__0=lakehouse
+  -e Gateway__Modules__Enabled__1=dbt
+  -e Gateway__Modules__Enabled__2=openmetadata
+  -e Gateway__Modules__Enabled__3=events
+  -e Gateway__Modules__Enabled__4=lineage
 )
+
+echo "Checking all 5 signed module manifests exist inside container image..."
+docker run --rm --entrypoint sh "$IMAGE_REF_LOWER" -c '
+  set -eu
+  for m in lakehouse dbt openmetadata events lineage; do
+    [ -f "/app/modules/$m/module.json" ] || { echo "Missing /app/modules/$m/module.json" >&2; exit 1; }
+  done
+'
 
 echo "Applying governance schema migrations (one-off job)..."
 if ! docker run --name "$MIGRATE_NAME" "${RUN_ENV[@]}" "$IMAGE_REF_LOWER" --migrate-governance; then
@@ -135,6 +147,27 @@ module_code="$(curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/mod
 if [ "$module_code" != "401" ]; then
   dump_logs "$APP_NAME"
   echo "Error: Expected HTTP 401 on /modules/lakehouse/iceberg/v1/tenant-a/namespaces, got $module_code" >&2
+  exit 1
+fi
+
+dbt_code="$(curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/modules/dbt/proposals)"
+if [ "$dbt_code" != "401" ]; then
+  dump_logs "$APP_NAME"
+  echo "Error: Expected HTTP 401 on /modules/dbt/proposals, got $dbt_code" >&2
+  exit 1
+fi
+
+events_code="$(curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/modules/events/v1/cdc/subscriptions)"
+if [ "$events_code" != "401" ]; then
+  dump_logs "$APP_NAME"
+  echo "Error: Expected HTTP 401 on /modules/events/v1/cdc/subscriptions, got $events_code" >&2
+  exit 1
+fi
+
+lineage_code="$(curl -sS -X POST -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/modules/lineage/openlineage/sync)"
+if [ "$lineage_code" != "401" ]; then
+  dump_logs "$APP_NAME"
+  echo "Error: Expected HTTP 401 on POST /modules/lineage/openlineage/sync, got $lineage_code" >&2
   exit 1
 fi
 
