@@ -465,18 +465,6 @@ public sealed partial class ModuleBoundaryArchitectureTests
             .ImplementationType.ShouldBe(typeof(ModuleRequestContext));
     }
 
-    private sealed class TestHostEnvironment : Microsoft.Extensions.Hosting.IHostEnvironment
-    {
-        public string EnvironmentName { get; set; } = "Production";
-
-        public string ApplicationName { get; set; } = "Autheris.Tests";
-
-        public string ContentRootPath { get; set; } = AppContext.BaseDirectory;
-
-        public Microsoft.Extensions.FileProviders.IFileProvider ContentRootFileProvider { get; set; } =
-            new Microsoft.Extensions.FileProviders.NullFileProvider();
-    }
-
     [Fact]
     [Trait("Category", "Security")]
     public void Module_project_references_exclude_runtime_and_native_assets()
@@ -517,6 +505,18 @@ public sealed partial class ModuleBoundaryArchitectureTests
 
         violations.ShouldBeEmpty(
             "Every module ProjectReference must set <Private>false</Private> and <ExcludeAssets>runtime;native</ExcludeAssets> so host native libraries are not duplicated into module bundles.");
+    }
+
+    private sealed class TestHostEnvironment : Microsoft.Extensions.Hosting.IHostEnvironment
+    {
+        public string EnvironmentName { get; set; } = "Production";
+
+        public string ApplicationName { get; set; } = "Autheris.Tests";
+
+        public string ContentRootPath { get; set; } = AppContext.BaseDirectory;
+
+        public Microsoft.Extensions.FileProviders.IFileProvider ContentRootFileProvider { get; set; } =
+            new Microsoft.Extensions.FileProviders.NullFileProvider();
     }
 
     private static List<string> ExtractProjectReferences(string csprojContent) =>

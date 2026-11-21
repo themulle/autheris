@@ -94,42 +94,50 @@ jobs:
             -p:Version="$VERSION" \
             -o ./dist/publish
 
-      - name: Prepare and Sign Modules
+      - name: Publish ModuleSigner and Modules
+        run: |
+          mkdir -p dist/modules
+          dotnet publish tools/Autheris.ModuleSigner/Autheris.ModuleSigner.csproj -c Release --no-restore -o ./dist/tools/module-signer
+          for csproj in modules/*/*.csproj; do
+            case "$csproj" in
+              *.Tests.csproj) continue ;;
+            esac
+            proj_name="$(basename "$csproj" .csproj)"
+            short_name="${proj_name#Autheris.Modules.}"
+            module_id="$(printf '%s' "$short_name" | tr '[:upper:]' '[:lower:]')"
+            module_out="./dist/modules/${module_id}"
+            dotnet publish "$csproj" \
+              -c Release \
+              --no-restore \
+              -p:Version="$VERSION" \
+              -o "$module_out"
+            # If a module ever ships private native assets, keep only the image platform's runtime (linux-x64).
+            find "$module_out/runtimes" -mindepth 1 -maxdepth 1 ! -name linux-x64 -exec rm -rf {} + 2>/dev/null || true
+            find "$module_out" -type f -size +64M -print >&2
+          done
+
+      - name: Sign Modules
         env:
           AUTHERIS_MODULE_SIGNING_KEY_PEM: ${{ secrets.AUTHERIS_MODULE_SIGNING_KEY_PEM }}
         run: |
-          mkdir -p dist/modules
           if [[ "${GITHUB_REF:-}" == refs/tags/v* ]] && [ -z "${AUTHERIS_MODULE_SIGNING_KEY_PEM:-}" ]; then
             echo "Error: AUTHERIS_MODULE_SIGNING_KEY_PEM is required for tagged container releases." >&2
             exit 1
           fi
           if [ -n "${AUTHERIS_MODULE_SIGNING_KEY_PEM:-}" ]; then
             HOST_VERSION="${VERSION%%+*}"
-            dotnet build tools/Autheris.ModuleSigner/Autheris.ModuleSigner.csproj -c Release --no-restore
-            # The full image flavor verifies every module offline with this tool against the embedded release public key.
-            dotnet publish tools/Autheris.ModuleSigner/Autheris.ModuleSigner.csproj -c Release --no-restore -o ./dist/tools/module-signer
-            for csproj in modules/*/*.csproj; do
-              case "$csproj" in
-                *.Tests.csproj) continue ;;
-              esac
-              proj_name="$(basename "$csproj" .csproj)"
-              short_name="${proj_name#Autheris.Modules.}"
-              module_id="$(printf '%s' "$short_name" | tr '[:upper:]' '[:lower:]')"
-              module_out="./dist/modules/${module_id}"
-              dotnet publish "$csproj" \
-                -c Release \
-                --no-restore \
-                -p:Version="$VERSION" \
-                -o "$module_out"
-              # If a module ever ships private native assets, keep only the image platform's runtime (linux-x64).
-              find "$module_out/runtimes" -mindepth 1 -maxdepth 1 ! -name linux-x64 -exec rm -rf {} + 2>/dev/null || true
-              find "$module_out" -type f -size +64M -print >&2
-              dotnet run --project tools/Autheris.ModuleSigner/Autheris.ModuleSigner.csproj -c Release --no-build -- \
+            for module_out in ./dist/modules/*; do
+              [ -d "$module_out" ] || continue
+              module_id="$(basename "$module_out")"
+              dotnet ./dist/tools/module-signer/Autheris.ModuleSigner.dll \
                 --dir "$module_out" \
                 --id "$module_id" \
                 --version "$HOST_VERSION" \
                 --host-version "$HOST_VERSION"
             done
+          else
+            rm -rf dist/modules
+            mkdir -p dist/modules
           fi
 
       - name: Verify TestAuthHandler is Excluded from Publish Output (SC-04)
@@ -417,13 +425,12 @@ jobs:
           IMAGE_REF: ghcr.io/${{ github.repository }}-full@${{ needs.build-and-push.outputs.image_digest_full }}
         run: bash .github/scripts/module-e2e.sh
 
-  # Branch verification of the signed module container e2e: manual dispatch on a non-main ref builds the full image locally (no push,
-  # no tags, no release) and runs the same script as the published-image job. The job reads the module signing key, so it runs in the
-  # protected module-release environment (required reviewers).
+  # Branch verification of the module container e2e: manual dispatch on a non-main ref generates an ephemeral ECDSA P-256 test
+  # keypair, builds the full image locally (no push, no tags, no release, and no access to the release signing key), and runs the
+  # same e2e route verification script as the published-image job.
   module-e2e-branch:
     name: Verify Signed Module Container Routes (E2E, branch build)
     if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
-    environment: module-release
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -442,19 +449,21 @@ jobs:
       - name: Restore with Locked Mode
         run: dotnet restore Autheris.sln --locked-mode
 
-      - name: Publish Autheris and sign all modules
-        env:
-          AUTHERIS_MODULE_SIGNING_KEY_PEM: ${{ secrets.AUTHERIS_MODULE_SIGNING_KEY_PEM }}
+      - name: Generate ephemeral E2E module signing keypair
         run: |
-          if [ -z "${AUTHERIS_MODULE_SIGNING_KEY_PEM:-}" ]; then
-            echo "Error: AUTHERIS_MODULE_SIGNING_KEY_PEM is required." >&2
-            exit 1
-          fi
+          openssl ecparam -name prime256v1 -genkey -noout -out "$RUNNER_TEMP/e2e-module-key.pem"
+          openssl ec -in "$RUNNER_TEMP/e2e-module-key.pem" -pubout -out src/Autheris.Api/Hosting/Keys/module-release-pub.pem
+
+      - name: Publish Autheris, ModuleSigner and Modules
+        run: |
           VERSION="0.0.0-dev"
-          dotnet publish src/Autheris.Api/Autheris.Api.csproj -c Release --no-restore \
-            -p:AutherisIncludeTestAuth=false -p:Version="$VERSION" -o ./dist/publish
+          dotnet publish src/Autheris.Api/Autheris.Api.csproj \
+            -c Release \
+            --no-restore \
+            -p:AutherisIncludeTestAuth=false \
+            -p:Version="$VERSION" \
+            -o ./dist/publish
           mkdir -p dist/modules
-          dotnet build tools/Autheris.ModuleSigner/Autheris.ModuleSigner.csproj -c Release --no-restore
           dotnet publish tools/Autheris.ModuleSigner/Autheris.ModuleSigner.csproj -c Release --no-restore -o ./dist/tools/module-signer
           for csproj in modules/*/*.csproj; do
             case "$csproj" in
@@ -472,8 +481,21 @@ jobs:
             # If a module ever ships private native assets, keep only the image platform's runtime (linux-x64).
             find "$module_out/runtimes" -mindepth 1 -maxdepth 1 ! -name linux-x64 -exec rm -rf {} + 2>/dev/null || true
             find "$module_out" -type f -size +64M -print >&2
-            dotnet run --project tools/Autheris.ModuleSigner/Autheris.ModuleSigner.csproj -c Release --no-build -- \
-              --dir "$module_out" --id "$module_id" --version "$VERSION" --host-version "$VERSION"
+          done
+
+      - name: Sign Modules with ephemeral E2E key
+        run: |
+          VERSION="0.0.0-dev"
+          export AUTHERIS_MODULE_SIGNING_KEY_PEM="$(cat "$RUNNER_TEMP/e2e-module-key.pem")"
+          rm -f "$RUNNER_TEMP/e2e-module-key.pem"
+          for module_out in ./dist/modules/*; do
+            [ -d "$module_out" ] || continue
+            module_id="$(basename "$module_out")"
+            dotnet ./dist/tools/module-signer/Autheris.ModuleSigner.dll \
+              --dir "$module_out" \
+              --id "$module_id" \
+              --version "$VERSION" \
+              --host-version "$VERSION"
           done
 
       - name: Build local image
