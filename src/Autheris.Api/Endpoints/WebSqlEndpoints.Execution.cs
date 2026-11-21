@@ -105,16 +105,11 @@ public static partial class WebSqlEndpoints
             return;
         }
 
-        // Content Length validation
-        var maxBodySizeFeature = httpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>();
-        if (maxBodySizeFeature != null && !maxBodySizeFeature.IsReadOnly)
+        var (rawBody, bodyError) = await EndpointSecurity.TryReadBodyAsync(
+            httpContext.Request, 2 * 1024 * 1024, "Request body exceeds maximum size limit (2 MB).", ct).ConfigureAwait(false);
+        if (bodyError != null)
         {
-            maxBodySizeFeature.MaxRequestBodySize = 2 * 1024 * 1024;
-        }
-
-        if (httpContext.Request.ContentLength > 2 * 1024 * 1024)
-        {
-            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, "Request body exceeds maximum size limit (2 MB).", ct);
+            await bodyError.ExecuteAsync(httpContext).ConfigureAwait(false);
             return;
         }
 
@@ -127,17 +122,15 @@ public static partial class WebSqlEndpoints
         if (contentType.Contains("text/plain", StringComparison.OrdinalIgnoreCase) ||
             contentType.Contains("application/sql", StringComparison.OrdinalIgnoreCase))
         {
-            using var reader = new StreamReader(httpContext.Request.Body);
-            sql = await reader.ReadToEndAsync(ct);
+            sql = rawBody;
         }
         else
         {
             try
             {
-                bodyDto = await JsonSerializer.DeserializeAsync<WebSqlRequestDto>(
-                    httpContext.Request.Body,
-                    JsonOptions,
-                    ct);
+                bodyDto = string.IsNullOrWhiteSpace(rawBody)
+                    ? null
+                    : JsonSerializer.Deserialize<WebSqlRequestDto>(rawBody, JsonOptions);
 
                 sql = bodyDto?.Sql;
                 parameters = bodyDto?.Parameters;

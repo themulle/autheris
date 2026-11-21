@@ -15,6 +15,7 @@ using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Microsoft.Extensions.Logging;
+using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Builder;
 using TrinoSqlEngine.Ast.Nodes;
 
@@ -144,7 +145,7 @@ public sealed partial class DataProductService
         SqlStatement statement;
         try
         {
-            var (tree, _) = _sqlEngine.Parse(definition.AsMemory(), null, ct);
+            var (tree, _) = await _sqlEngine.ParseAsync(definition.AsMemory(), null, ct).ConfigureAwait(false);
             statement = new SqlAstBuilder().BuildStatement(tree);
         }
         catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))

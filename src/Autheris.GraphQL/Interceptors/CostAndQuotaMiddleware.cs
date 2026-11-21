@@ -492,17 +492,7 @@ public sealed class CostAndQuotaMiddleware
 
         if (admission.Outcome == QueryCostOutcome.OverCost)
         {
-            var usageRecorder = services?.GetService<IUsageRecorder>();
-            if (usageRecorder != null)
-            {
-                var tableId = ExtractTableFromDocument(doc);
-                var tenantId = principal.GetTenantId();
-                var userSid = principal.GetUserSid() ?? new Sid(principal?.Identity?.Name ?? "anonymous");
-                usageRecorder.Record(
-                    new UsageFact(tableId, string.Empty, UsageOutcome.DenyCost, 0, false, calculatedCost, Array.Empty<GrantRef>(), default),
-                    tenantId,
-                    userSid);
-            }
+            TryRecordQuotaDenialUsage(services, httpContext, principal, doc, UsageOutcome.DenyCost, calculatedCost);
 
             var error = ErrorBuilder.New()
                 .SetMessage($"The query cost ({calculatedCost}) exceeds the limit of {admission.MaxAllowedCost}. Nested list fields require 'first' (e.g. first: 10) or lower pagination limits to bound query cost within budget.")
@@ -518,17 +508,7 @@ public sealed class CostAndQuotaMiddleware
 
         if (admission.Outcome == QueryCostOutcome.QuotaExhausted)
         {
-            var usageRecorder = services?.GetService<IUsageRecorder>();
-            if (usageRecorder != null)
-            {
-                var tableId = ExtractTableFromDocument(doc);
-                var tenantId = principal.GetTenantId();
-                var userSid = principal.GetUserSid() ?? new Sid(principal?.Identity?.Name ?? "anonymous");
-                usageRecorder.Record(
-                    new UsageFact(tableId, string.Empty, UsageOutcome.DenyRateLimit, 0, false, calculatedCost, Array.Empty<GrantRef>(), default),
-                    tenantId,
-                    userSid);
-            }
+            TryRecordQuotaDenialUsage(services, httpContext, principal, doc, UsageOutcome.DenyRateLimit, calculatedCost);
 
             var errorBuilder = ErrorBuilder.New()
                 .SetMessage("Rate limit exceeded. Wait until the next time window.")
@@ -959,6 +939,34 @@ public sealed class CostAndQuotaMiddleware
             }
         }
         return count;
+    }
+
+    private static void TryRecordQuotaDenialUsage(
+        IServiceProvider? services,
+        HttpContext httpContext,
+        ClaimsPrincipal? principal,
+        DocumentNode? doc,
+        UsageOutcome outcome,
+        int calculatedCost)
+    {
+        if (services?.GetService<IUsageRecorder>() is not { } usageRecorder) return;
+
+        TenantId? tenantId = httpContext.Items.TryGetValue(Autheris.Domain.Security.SecurityPrincipalContext.TenantIdItemKey, out var tObj) && tObj is TenantId rt && rt.Value is not null
+            ? rt
+            : Autheris.Domain.Tenancy.TenantClaimReader.Read(principal) is { Kind: Autheris.Domain.Tenancy.ClaimTenantKind.Valid } claim
+                ? claim.Tenant
+                : (TenantId?)null;
+
+        if (tenantId is not { Value: not null } validTenant)
+        {
+            UsageDiagnostics.UnattributedCounter.Add(1);
+            return;
+        }
+
+        usageRecorder.Record(
+            new UsageFact(ExtractTableFromDocument(doc), string.Empty, outcome, 0, false, calculatedCost, Array.Empty<GrantRef>(), default),
+            validTenant,
+            principal.GetUserSid() ?? new Sid(principal?.Identity?.Name ?? "anonymous"));
     }
 
     private static TableIdentifier ExtractTableFromDocument(DocumentNode? doc)

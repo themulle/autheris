@@ -67,7 +67,7 @@ public sealed partial class QueryAnalysisService
         try
         {
             var normalizedSql = SqlParameterExtractor.NormalizeForAst(trimmed);
-            var (tree, _) = FastSqlEngine.Default.Parse(normalizedSql.AsMemory());
+            var (tree, _) = await FastSqlEngine.Default.ParseAsync(normalizedSql.AsMemory(), null, ct).ConfigureAwait(false);
             parsedStatement = new SqlAstBuilder().BuildStatement(tree);
             var analyzer = new SqlQueryAnalyzer();
             metadata = analyzer.Analyze(tree);

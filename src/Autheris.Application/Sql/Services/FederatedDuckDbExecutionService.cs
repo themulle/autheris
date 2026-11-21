@@ -279,7 +279,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         }
 
         var sqlForAnalysis = GovernedSqlExecutionService.NormalizeClientParameters(rawSql, null, out _);
-        var metadata = _sqlEngine.Analyze(sqlForAnalysis.AsMemory(), AnalysisTokenOptions, ct);
+        var metadata = await _sqlEngine.AnalyzeAsync(sqlForAnalysis.AsMemory(), AnalysisTokenOptions, ct).ConfigureAwait(false);
 
         if (metadata.StatementType is SqlStatementType.Insert or SqlStatementType.Update or SqlStatementType.Delete)
         {
@@ -349,7 +349,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         GovernedSqlExecutionService.EnsureClientParameterNames(request.Parameters);
 
         var sqlForAnalysis = GovernedSqlExecutionService.NormalizeClientParameters(request.Sql, request.Parameters, out _);
-        var metadata = _sqlEngine.Analyze(sqlForAnalysis.AsMemory(), AnalysisTokenOptions, ct);
+        var metadata = await _sqlEngine.AnalyzeAsync(sqlForAnalysis.AsMemory(), AnalysisTokenOptions, ct).ConfigureAwait(false);
 
         Autheris.Application.Common.Quota.QueryCostAdmission? admission = null;
         bool isMeteredTransport = SqlTransports.IsCostMetered(request.Transport);

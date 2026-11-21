@@ -298,7 +298,7 @@ public sealed partial class GovernedSqlExecutor
 
         if (request.NextToken != null || request.Page != null)
         {
-            var meta = FastSqlEngine.Default.Analyze(sqlForRewrite.AsMemory());
+            var meta = await FastSqlEngine.Default.AnalyzeAsync(sqlForRewrite.AsMemory(), null, ct).ConfigureAwait(false);
             if (meta.StatementType != SqlStatementType.Select)
             {
                 throw new SqlPagingUnsupportedException();
@@ -380,7 +380,7 @@ public sealed partial class GovernedSqlExecutor
                     .WithField("error", reason);
                 try
                 {
-                    var meta = FastSqlEngine.Default.Analyze(request.Sql.AsMemory());
+                    var meta = await FastSqlEngine.Default.AnalyzeAsync(request.Sql.AsMemory(), null, CancellationToken.None).ConfigureAwait(false);
                     deniedDetails.WithField("estimatedCost", CalculateEstimatedCost(request, meta));
                 }
                 catch { }

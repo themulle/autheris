@@ -37,6 +37,9 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
     private readonly int _maxSessionsPerUser;
     private readonly int _maxTotalSessions;
     private readonly ConcurrentDictionary<string, StatementSession> _sessions = new(StringComparer.Ordinal);
+    private readonly object _capacityLock = new();
+    private readonly Dictionary<(TenantId Tenant, string UserSid), int> _inFlightUserReservations = new();
+    private int _inFlightGlobalReservations;
     private readonly Timer? _cleanupTimer;
     private long _statementCounter;
     private bool _disposed;
@@ -105,203 +108,159 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
             throw new ArgumentException("Owner Sid must not be null or whitespace.", nameof(owner));
         }
 
-        PurgeExpiredSessions();
         string userSid = owner.Value;
+        var reservationKey = (tenantId, userSid);
+        ReserveCapacity(reservationKey);
+        bool committed = false;
+        CancellationTokenSource? sessionCts = null;
 
-        int activeUserCount = 0;
-        List<StatementSession>? userCompletedSessions = null;
-        int totalUserSessions = 0;
-
-        foreach (var s in _sessions.Values)
+        try
         {
-            if (s.UserSid == userSid && s.TenantId == tenantId)
+            if (!request.PlannedTableRead && request.Admission == null)
             {
-                totalUserSessions++;
-                if (!s.ExecutionTask.IsCompleted)
+                using var admitScope = _scopeFactory.CreateScope();
+                var costQuota = admitScope.ServiceProvider.GetService<Autheris.Application.Common.Quota.IQueryCostQuota>();
+                var sqlEngine = admitScope.ServiceProvider.GetService<ISqlEngine>();
+                if (costQuota != null && sqlEngine != null)
                 {
-                    activeUserCount++;
-                }
-                else
-                {
-                    userCompletedSessions ??= new();
-                    userCompletedSessions.Add(s);
-                }
-            }
-        }
+                    var meta = await sqlEngine.AnalyzeAsync(request.Sql.AsMemory(), null, ct).ConfigureAwait(false);
+                    var rowLimit = request.RowLimit ?? SqlRowLimit.For(_gatewayOptions?.WebSql ?? new WebSqlOptions());
+                    var costOpts = _gatewayOptions?.QueryCost ?? new QueryCostOptions();
+                    var analysisOpts = new Autheris.Application.Governance.Analysis.QueryAnalysisOptions();
+                    var webSqlCost = _gatewayOptions?.WebSql?.Cost ?? new WebSqlCostOptions();
 
-        if (activeUserCount >= _maxSessionsPerUser)
-        {
-            throw new Autheris.Domain.Exceptions.GatewayThrottledException(
-                $"User '{userSid}' has reached the limit of {_maxSessionsPerUser} concurrent active statements. Wait for existing statements to complete.",
-                retryAfterSeconds: 5);
-        }
+                    int cEst = Autheris.Application.Sql.Cost.SqlStatementCostEstimator.EstimateCost(
+                        meta,
+                        rowLimit,
+                        costOpts,
+                        analysisOpts,
+                        webSqlCost,
+                        pageOffset: request.PageOffset ?? 0,
+                        isPaged: request.IsPaged,
+                        maxAffectedRows: _gatewayOptions?.WebSql?.MaxAffectedRows ?? 1000);
 
-        if (totalUserSessions >= _maxSessionsPerUser && userCompletedSessions != null)
-        {
-            var toEvict = userCompletedSessions.OrderBy(s => s.CreatedAt).Take(totalUserSessions - _maxSessionsPerUser + 1);
-            foreach (var old in toEvict)
-            {
-                if (_sessions.TryRemove(old.StatementId, out var removed))
-                {
-                    try { removed.Cts.Dispose(); } catch { }
-                }
-            }
-        }
+                    var admission = await costQuota.AdmitAsync(
+                        new Autheris.Application.Common.Quota.QueryCostRequest(
+                            Principal: user,
+                            ApiKey: null,
+                            ClientIp: null,
+                            EstimatedCost: cEst,
+                            TransportMaxCost: webSqlCost.MaxStatementCost,
+                            CapByTierMaxCostPerQuery: false),
+                        ct).ConfigureAwait(false);
 
-        if (_sessions.Count >= _maxTotalSessions)
-        {
-            var globalCompleted = _sessions.Values
-                .Where(s => s.ExecutionTask.IsCompleted)
-                .OrderBy(s => s.CreatedAt)
-                .Take(Math.Max(1, _sessions.Count - _maxTotalSessions + 1))
-                .ToList();
-
-            foreach (var old in globalCompleted)
-            {
-                if (_sessions.TryRemove(old.StatementId, out var removed))
-                {
-                    try { removed.Cts.Dispose(); } catch { }
-                }
-            }
-
-            if (_sessions.Count >= _maxTotalSessions)
-            {
-                throw new Autheris.Domain.Exceptions.GatewayThrottledException(
-                    "Global statement session capacity exceeded. Please retry later.",
-                    retryAfterSeconds: 5);
-            }
-        }
-
-        long counter = Interlocked.Increment(ref _statementCounter);
-        string statementId = $"{DateTime.UtcNow:yyyyMMdd_HHmmss}_{counter:00000}_{RandomNumberGenerator.GetHexString(32, lowercase: true)}";
-        var sessionCts = new CancellationTokenSource();
-        var sw = Stopwatch.StartNew();
-
-        if (!request.PlannedTableRead && request.Admission == null)
-        {
-            using var admitScope = _scopeFactory.CreateScope();
-            var costQuota = admitScope.ServiceProvider.GetService<Autheris.Application.Common.Quota.IQueryCostQuota>();
-            var sqlEngine = admitScope.ServiceProvider.GetService<ISqlEngine>();
-            if (costQuota != null && sqlEngine != null)
-            {
-                var meta = sqlEngine.Analyze(request.Sql.AsMemory());
-                var rowLimit = request.RowLimit ?? SqlRowLimit.For(_gatewayOptions?.WebSql ?? new WebSqlOptions());
-                var costOpts = _gatewayOptions?.QueryCost ?? new QueryCostOptions();
-                var analysisOpts = new Autheris.Application.Governance.Analysis.QueryAnalysisOptions();
-                var webSqlCost = _gatewayOptions?.WebSql?.Cost ?? new WebSqlCostOptions();
-
-                int cEst = Autheris.Application.Sql.Cost.SqlStatementCostEstimator.EstimateCost(
-                    meta,
-                    rowLimit,
-                    costOpts,
-                    analysisOpts,
-                    webSqlCost,
-                    pageOffset: request.PageOffset ?? 0,
-                    isPaged: request.IsPaged,
-                    maxAffectedRows: _gatewayOptions?.WebSql?.MaxAffectedRows ?? 1000);
-
-                var admission = await costQuota.AdmitAsync(
-                    new Autheris.Application.Common.Quota.QueryCostRequest(
-                        Principal: user,
-                        ApiKey: null,
-                        ClientIp: null,
-                        EstimatedCost: cEst,
-                        TransportMaxCost: webSqlCost.MaxStatementCost,
-                        CapByTierMaxCostPerQuery: false),
-                    ct).ConfigureAwait(false);
-
-                if (admission.Outcome == Autheris.Application.Common.Quota.QueryCostOutcome.OverCost)
-                {
-                    throw new SqlCostExceededException(cEst, admission.MaxAllowedCost);
-                }
-                if (admission.Outcome == Autheris.Application.Common.Quota.QueryCostOutcome.QuotaExhausted)
-                {
-                    throw new SqlQuotaExhaustedException(admission.RetryAfterSeconds);
-                }
-
-                request = request with { Admission = admission };
-            }
-        }
-
-        var sources = new SourceHolder();
-        var executionTask = Task.Run(async () =>
-        {
-            using var scope = _scopeFactory.CreateScope();
-            // Issue #447: the background scope carries the ingress of the submitting request. An unstamped submit
-            // (None) leaves the scope unset, which the transport gate denies.
-            if (ingress != DataSourceTransportFlags.None)
-            {
-                scope.ServiceProvider.GetService<IIngressTransportContext>()?.Set(ingress);
-            }
-
-            GovernedSqlResult? metadataResult = null;
-            var metadataRowLimit = (int)Math.Min(int.MaxValue, (request.RowLimit ?? SqlRowLimit.For(_gatewayOptions?.WebSql ?? new WebSqlOptions())).Effective(null));
-            if (string.Equals(request.Transport, SqlTransports.Trino, StringComparison.Ordinal))
-            {
-                var metadataRepo = scope.ServiceProvider.GetService<ITableMetadataRepository>();
-                var consentRepo = scope.ServiceProvider.GetService<IConsentRepository>();
-                var consentResolver = scope.ServiceProvider.GetService<IConsentResolutionService>();
-                var discovery = scope.ServiceProvider.GetRequiredService<Autheris.Application.Catalog.Discovery.IDiscoveryService>();
-                var decisionPoint = scope.ServiceProvider.GetRequiredService<Autheris.Application.Policy.Pdp.IAccessDecisionPoint>();
-                var visibility = new TrinoMetadataVisibility(discovery, decisionPoint);
-                metadataResult = await TrinoMetadataQueryHandler.TryExecuteAsync(
-                    request.Sql, user, tenantId, metadataRepo, consentRepo, _gatewayOptions, consentResolver, visibility, metadataRowLimit, sessionCts.Token).ConfigureAwait(false);
-            }
-            if (metadataResult != null)
-            {
-                if (request.Admission != null)
-                {
-                    try
+                    if (admission.Outcome == Autheris.Application.Common.Quota.QueryCostOutcome.OverCost)
                     {
-                        var costQuota = scope.ServiceProvider.GetService<Autheris.Application.Common.Quota.IQueryCostQuota>();
-                        if (costQuota != null)
-                        {
-                            await costQuota.SettleAsync(request.Admission, 1, CancellationToken.None).ConfigureAwait(false);
-                        }
+                        throw new SqlCostExceededException(cEst, admission.MaxAllowedCost);
                     }
-                    catch { }
-                }
-                if (metadataResult.Rows.Count > metadataRowLimit)
-                {
-                    metadataResult = metadataResult with
+                    if (admission.Outcome == Autheris.Application.Common.Quota.QueryCostOutcome.QuotaExhausted)
                     {
-                        Rows = metadataResult.Rows.Take(metadataRowLimit).ToList(),
-                        RowCount = metadataRowLimit,
-                        Truncated = true
-                    };
-                }
-
-                return metadataResult;
-            }
-
-            var sqlService = scope.ServiceProvider.GetRequiredService<IGovernedSqlExecutionService>();
-            try
-            {
-                return await sqlService.ExecuteQueryBufferedAsync(request, user, tenantId, sessionCts.Token).ConfigureAwait(false);
-            }
-            finally
-            {
-                // Issue #447: the sources the choke points checked, kept to re-check later pages.
-                sources.Names = scope.ServiceProvider.GetService<IDataSourceTransportGate>()?.CheckedSources ?? [];
-                if (request.Admission != null)
-                {
-                    try
-                    {
-                        var costQuota = scope.ServiceProvider.GetService<Autheris.Application.Common.Quota.IQueryCostQuota>();
-                        if (costQuota != null)
-                        {
-                            await costQuota.SettleAsync(request.Admission, 1, CancellationToken.None).ConfigureAwait(false);
-                        }
+                        throw new SqlQuotaExhaustedException(admission.RetryAfterSeconds);
                     }
-                    catch { }
+
+                    request = request with { Admission = admission };
                 }
             }
-        }, sessionCts.Token);
 
-        var session = new StatementSession(statementId, tenantId, userSid, DateTimeOffset.UtcNow, sw, sessionCts, executionTask, ingress, sources);
-        _sessions[statementId] = session;
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed), this);
+            long counter = Interlocked.Increment(ref _statementCounter);
+            string statementId = $"{DateTime.UtcNow:yyyyMMdd_HHmmss}_{counter:00000}_{RandomNumberGenerator.GetHexString(32, lowercase: true)}";
+            sessionCts = new CancellationTokenSource();
+            var sw = Stopwatch.StartNew();
 
-        return await WaitForSessionAsync(session, waitTimeout, ct).ConfigureAwait(false);
+            var sources = new SourceHolder();
+            var executionTask = Task.Run(async () =>
+            {
+                using var scope = _scopeFactory.CreateScope();
+                // Issue #447: the background scope carries the ingress of the submitting request. An unstamped submit
+                // (None) leaves the scope unset, which the transport gate denies.
+                if (ingress != DataSourceTransportFlags.None)
+                {
+                    scope.ServiceProvider.GetService<IIngressTransportContext>()?.Set(ingress);
+                }
+
+                GovernedSqlResult? metadataResult = null;
+                var metadataRowLimit = (int)Math.Min(int.MaxValue, (request.RowLimit ?? SqlRowLimit.For(_gatewayOptions?.WebSql ?? new WebSqlOptions())).Effective(null));
+                if (string.Equals(request.Transport, SqlTransports.Trino, StringComparison.Ordinal))
+                {
+                    var metadataRepo = scope.ServiceProvider.GetService<ITableMetadataRepository>();
+                    var consentRepo = scope.ServiceProvider.GetService<IConsentRepository>();
+                    var consentResolver = scope.ServiceProvider.GetService<IConsentResolutionService>();
+                    var discovery = scope.ServiceProvider.GetRequiredService<Autheris.Application.Catalog.Discovery.IDiscoveryService>();
+                    var decisionPoint = scope.ServiceProvider.GetRequiredService<Autheris.Application.Policy.Pdp.IAccessDecisionPoint>();
+                    var visibility = new TrinoMetadataVisibility(discovery, decisionPoint);
+                    metadataResult = await TrinoMetadataQueryHandler.TryExecuteAsync(
+                        request.Sql, user, tenantId, metadataRepo, consentRepo, _gatewayOptions, consentResolver, visibility, metadataRowLimit, sessionCts.Token).ConfigureAwait(false);
+                }
+                if (metadataResult != null)
+                {
+                    if (request.Admission != null)
+                    {
+                        try
+                        {
+                            var costQuota = scope.ServiceProvider.GetService<Autheris.Application.Common.Quota.IQueryCostQuota>();
+                            if (costQuota != null)
+                            {
+                                await costQuota.SettleAsync(request.Admission, 1, CancellationToken.None).ConfigureAwait(false);
+                            }
+                        }
+                        catch { }
+                    }
+                    if (metadataResult.Rows.Count > metadataRowLimit)
+                    {
+                        metadataResult = metadataResult with
+                        {
+                            Rows = metadataResult.Rows.Take(metadataRowLimit).ToList(),
+                            RowCount = metadataRowLimit,
+                            Truncated = true
+                        };
+                    }
+
+                    return metadataResult;
+                }
+
+                var sqlService = scope.ServiceProvider.GetRequiredService<IGovernedSqlExecutionService>();
+                try
+                {
+                    return await sqlService.ExecuteQueryBufferedAsync(request, user, tenantId, sessionCts.Token).ConfigureAwait(false);
+                }
+                finally
+                {
+                    // Issue #447: the sources the choke points checked, kept to re-check later pages.
+                    sources.Names = scope.ServiceProvider.GetService<IDataSourceTransportGate>()?.CheckedSources ?? [];
+                    if (request.Admission != null)
+                    {
+                        try
+                        {
+                            var costQuota = scope.ServiceProvider.GetService<Autheris.Application.Common.Quota.IQueryCostQuota>();
+                            if (costQuota != null)
+                            {
+                                await costQuota.SettleAsync(request.Admission, 1, CancellationToken.None).ConfigureAwait(false);
+                            }
+                        }
+                        catch { }
+                    }
+                }
+            }, sessionCts.Token);
+
+            var session = new StatementSession(statementId, tenantId, userSid, DateTimeOffset.UtcNow, sw, sessionCts, executionTask, ingress, sources);
+            CommitSession(reservationKey, session);
+            committed = true;
+
+            return await WaitForSessionAsync(session, waitTimeout, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (!committed)
+            {
+                ReleaseReservation(reservationKey);
+                if (sessionCts != null)
+                {
+                    try { sessionCts.Cancel(); } catch { }
+                    try { sessionCts.Dispose(); } catch { }
+                }
+            }
+        }
     }
 
     public async Task<StatementExecutionStatus> GetStatusOrWaitAsync(
@@ -553,9 +512,108 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
         }
     }
 
+    private void ReserveCapacity((TenantId Tenant, string UserSid) key)
+    {
+        lock (_capacityLock)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            PurgeExpiredSessionsCore();
+
+            int userReserved = _inFlightUserReservations.GetValueOrDefault(key);
+            int activeUserCount = userReserved;
+            List<StatementSession>? userCompletedSessions = null;
+            int totalUserSessions = userReserved;
+
+            foreach (var s in _sessions.Values)
+            {
+                if (s.UserSid == key.UserSid && s.TenantId == key.Tenant)
+                {
+                    totalUserSessions++;
+                    if (!s.ExecutionTask.IsCompleted) activeUserCount++;
+                    else (userCompletedSessions ??= new()).Add(s);
+                }
+            }
+
+            if (activeUserCount >= _maxSessionsPerUser)
+            {
+                throw new Autheris.Domain.Exceptions.GatewayThrottledException(
+                    $"User '{key.UserSid}' has reached the limit of {_maxSessionsPerUser} concurrent active statements. Wait for existing statements to complete.",
+                    retryAfterSeconds: 5);
+            }
+
+            if (totalUserSessions >= _maxSessionsPerUser && userCompletedSessions != null)
+            {
+                foreach (var old in userCompletedSessions.OrderBy(s => s.CreatedAt).Take(totalUserSessions - _maxSessionsPerUser + 1))
+                {
+                    if (_sessions.TryRemove(old.StatementId, out var removed))
+                    {
+                        try { removed.Cts.Dispose(); } catch { }
+                    }
+                }
+            }
+
+            if (_sessions.Count + _inFlightGlobalReservations >= _maxTotalSessions)
+            {
+                var globalCompleted = _sessions.Values
+                    .Where(s => s.ExecutionTask.IsCompleted)
+                    .OrderBy(s => s.CreatedAt)
+                    .Take(Math.Max(1, _sessions.Count + _inFlightGlobalReservations - _maxTotalSessions + 1))
+                    .ToList();
+
+                foreach (var old in globalCompleted)
+                {
+                    if (_sessions.TryRemove(old.StatementId, out var removed))
+                    {
+                        try { removed.Cts.Dispose(); } catch { }
+                    }
+                }
+
+                if (_sessions.Count + _inFlightGlobalReservations >= _maxTotalSessions)
+                {
+                    throw new Autheris.Domain.Exceptions.GatewayThrottledException(
+                        "Global statement session capacity exceeded. Please retry later.",
+                        retryAfterSeconds: 5);
+                }
+            }
+
+            _inFlightUserReservations[key] = userReserved + 1;
+            _inFlightGlobalReservations++;
+        }
+    }
+
+    private void ReleaseReservation((TenantId Tenant, string UserSid) key)
+    {
+        lock (_capacityLock) { ReleaseReservationCore(key); }
+    }
+
+    private void ReleaseReservationCore((TenantId Tenant, string UserSid) key)
+    {
+        if (_inFlightUserReservations.TryGetValue(key, out int count))
+        {
+            if (count <= 1) _inFlightUserReservations.Remove(key);
+            else _inFlightUserReservations[key] = count - 1;
+        }
+        if (_inFlightGlobalReservations > 0) _inFlightGlobalReservations--;
+    }
+
+    private void CommitSession((TenantId Tenant, string UserSid) key, StatementSession session)
+    {
+        lock (_capacityLock)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            ReleaseReservationCore(key);
+            _sessions[session.StatementId] = session;
+        }
+    }
+
     private void CleanupExpiredSessions(object? state) => PurgeExpiredSessions();
 
     private void PurgeExpiredSessions()
+    {
+        lock (_capacityLock) { PurgeExpiredSessionsCore(); }
+    }
+
+    private void PurgeExpiredSessionsCore()
     {
         var cutoff = DateTimeOffset.UtcNow - _retentionPeriod;
         foreach (var (id, session) in _sessions)
@@ -569,8 +627,11 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
 
     public void Dispose()
     {
-        if (_disposed) return;
-        _disposed = true;
+        lock (_capacityLock)
+        {
+            if (_disposed) return;
+            _disposed = true;
+        }
         _cleanupTimer?.Dispose();
         foreach (var (_, session) in _sessions)
         {
