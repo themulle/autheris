@@ -97,9 +97,11 @@ public static partial class ProductEndpoints
             return ApiProblems.PayloadTooLarge("The webhook body is too large.", context);
         }
 
-        var headers = context.Request.Headers;
-        var delivery = new ProductSyncWebhookDelivery(
-            headers["X-Autheris-Timestamp"].ToString(), headers["X-Autheris-Delivery"].ToString(), headers["X-Autheris-Signature-256"].ToString());
+        if (!TryReadWebhookDelivery(context.Request.Headers, out var delivery))
+        {
+            return Results.Unauthorized();
+        }
+
         var status = await service.HandleAsync(tenantId, body, delivery, context.RequestAborted).ConfigureAwait(false);
         return status switch
         {
@@ -110,5 +112,55 @@ public static partial class ProductEndpoints
             ProductSyncWebhookStatus.Unavailable => ApiProblems.ServiceUnavailable(detail: "The webhook replay store is unavailable.", httpContext: context),
             _ => Results.Unauthorized()
         };
+    }
+
+    internal static bool TryReadWebhookDelivery(IHeaderDictionary headers, out ProductSyncWebhookDelivery delivery)
+    {
+        var hasAutheris = TryReadHeaderTuple(
+            headers,
+            "X-Autheris-Timestamp",
+            "X-Autheris-Delivery",
+            "X-Autheris-Signature-256",
+            out var autherisTuple,
+            out var autherisPresent);
+        var hasWebhook = TryReadHeaderTuple(
+            headers,
+            "X-Webhook-Timestamp",
+            "X-Webhook-Delivery",
+            "X-Webhook-Signature-256",
+            out var webhookTuple,
+            out var webhookPresent);
+
+        if (!hasAutheris || !hasWebhook || (autherisPresent && webhookPresent))
+        {
+            delivery = default!;
+            return false;
+        }
+
+        delivery = webhookPresent ? webhookTuple : autherisTuple;
+        return true;
+    }
+
+    private static bool TryReadHeaderTuple(
+        IHeaderDictionary headers,
+        string timestampHeader,
+        string deliveryHeader,
+        string signatureHeader,
+        out ProductSyncWebhookDelivery delivery,
+        out bool anyPresent)
+    {
+        var ts = headers[timestampHeader];
+        var id = headers[deliveryHeader];
+        var sig = headers[signatureHeader];
+        anyPresent = ts.Count > 0 || id.Count > 0 || sig.Count > 0;
+
+        if (ts.Count > 1 || id.Count > 1 || sig.Count > 1)
+        {
+            delivery = default!;
+            return false;
+        }
+
+        delivery = new ProductSyncWebhookDelivery(ts.ToString(), id.ToString(), sig.ToString());
+        return true;
     }
 }
