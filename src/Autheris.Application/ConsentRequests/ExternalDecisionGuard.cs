@@ -6,6 +6,7 @@ using System.Linq;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Governance.ConsentRequests;
 using Autheris.Application.Identity;
 using Autheris.Domain.Common;
 using Autheris.Domain.Identity;
@@ -31,8 +32,10 @@ public interface IExternalDecisionGuard
 public sealed class ExternalDecisionGuard(
     IScimUserStore? userStore = null,
     IScimGroupStore? groupStore = null,
-    IIdentityRealmRegistry? realmRegistry = null) : IExternalDecisionGuard
+    IIdentityRealmRegistry? realmRegistry = null,
+    ISeparationOfDutiesService? separationOfDutiesService = null) : IExternalDecisionGuard
 {
+    private readonly ISeparationOfDutiesService _sod = separationOfDutiesService ?? new SeparationOfDutiesService(groupStore, realmRegistry);
     public async Task<IReadOnlyList<Sid>> ValidateAsync(
         ConsentDecisionCommand command,
         ConsentRequest request,
@@ -78,8 +81,14 @@ public sealed class ExternalDecisionGuard(
 
         var requireResolvable = route?.RequireResolvableApprover ?? true;
         var realmId = realmRegistry?.GetDefaultRealm()?.Id ?? "default";
-        var requesterIds = CollectRequesterIdentifiers(request);
-        var priorApproverIds = CollectPriorApproverIdentifiers(request);
+        if (request.RequestedGranteeType == GranteeType.Group &&
+            SeparationOfDutiesService.IsDegradedGroupOrRoleResolution(command.Principal))
+        {
+            throw new ConsentDecisionException(
+                ConsentDecisionErrorCodes.SelfApprovalForbidden,
+                "Separation of duties violated: group or role resolution is degraded; denied fail-closed.",
+                statusCode: 403);
+        }
 
         var resolvedSids = new List<Sid>(assertedApprovers.Count);
         var seenInPayload = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -140,33 +149,27 @@ public sealed class ExternalDecisionGuard(
 
             var effectiveSid = new Sid(effectiveSidValue);
 
-            if (allIds.Any(id => requesterIds.Contains(id)))
+            var sod = await _sod.CheckConsentApprovalAsync(
+                request.TenantId,
+                request,
+                principal: null,
+                effectiveSid,
+                additionalActorIdentifiers: allIds,
+                checkPriorApprovers: true,
+                groupLookupKeys: [scimUser?.UserKey ?? effectiveSid.Value],
+                ct: ct).ConfigureAwait(false);
+            if (!sod.Allowed)
             {
                 throw new ConsentDecisionException(
-                    ConsentDecisionErrorCodes.SelfApprovalForbidden,
-                    "Separation of duties violated: the requester cannot decide their own consent request.",
-                    statusCode: 403);
+                    sod.Kind == SodViolationKind.SameApprover
+                        ? ConsentDecisionErrorCodes.FourEyesSameApprover
+                        : ConsentDecisionErrorCodes.SelfApprovalForbidden,
+                    sod.Reason,
+                    statusCode: sod.Kind == SodViolationKind.SameApprover ? 409 : 403);
             }
 
-            if (request.RequestedGranteeType == GranteeType.Group)
-            {
-                await EnsureNotMemberOfRequestedGroupAsync(
-                    request.TenantId,
-                    realmId,
-                    request.RequestedGranteeRef,
-                    scimUser?.UserKey ?? effectiveSid.Value,
-                    ct).ConfigureAwait(false);
-            }
-
-            if (allIds.Any(id => priorApproverIds.Contains(id)))
-            {
-                throw new ConsentDecisionException(
-                    ConsentDecisionErrorCodes.FourEyesSameApprover,
-                    "Four-eyes principle violated: this approver has already approved this request.",
-                    statusCode: 409);
-            }
-
-            if (allIds.Any(id => seenInPayload.Contains(id)))
+            var normIds = SeparationOfDutiesService.CollectSubjectIdentifiers(null, effectiveSid.Value, allIds);
+            if (normIds.Overlaps(seenInPayload))
             {
                 throw new ConsentDecisionException(
                     ConsentDecisionErrorCodes.FourEyesSameApprover,
@@ -174,11 +177,7 @@ public sealed class ExternalDecisionGuard(
                     statusCode: 409);
             }
 
-            foreach (var id in allIds)
-            {
-                seenInPayload.Add(id);
-            }
-
+            seenInPayload.UnionWith(normIds);
             resolvedSids.Add(effectiveSid);
         }
 
@@ -284,45 +283,6 @@ public sealed class ExternalDecisionGuard(
         return null;
     }
 
-    private async Task EnsureNotMemberOfRequestedGroupAsync(
-        TenantId tenantId,
-        string realmId,
-        string requestedGroupRef,
-        string userKey,
-        CancellationToken ct)
-    {
-        if (groupStore == null || string.IsNullOrWhiteSpace(requestedGroupRef) || string.IsNullOrWhiteSpace(userKey))
-        {
-            return;
-        }
-
-        var effective = await groupStore.GetEffectiveGroupSidsForUserAsync(tenantId, realmId, userKey, ct: ct).ConfigureAwait(false);
-        if (effective.MaxDepthExceeded)
-        {
-            throw new ConsentDecisionException(
-                ConsentDecisionErrorCodes.SelfApprovalForbidden,
-                "Effective group membership depth exceeded during self-approval verification; denied (fail closed).",
-                statusCode: 403);
-        }
-
-        if (effective.GroupObjectSids.Contains(requestedGroupRef))
-        {
-            throw new ConsentDecisionException(
-                ConsentDecisionErrorCodes.SelfApprovalForbidden,
-                "Separation of duties violated: a member of the requested target group cannot approve the request.",
-                statusCode: 403);
-        }
-
-        var directGroups = await groupStore.GetGroupMembershipsForUserAsync(tenantId, realmId, userKey, ct).ConfigureAwait(false);
-        if (directGroups.Any(g => string.Equals(g, requestedGroupRef, StringComparison.OrdinalIgnoreCase)))
-        {
-            throw new ConsentDecisionException(
-                ConsentDecisionErrorCodes.SelfApprovalForbidden,
-                "Separation of duties violated: a member of the requested target group cannot approve the request.",
-                statusCode: 403);
-        }
-    }
-
     private static List<string> CollectAssertedIdentifiers(AssertedApprover asserted)
     {
         var list = new List<string>(3);
@@ -342,48 +302,6 @@ public sealed class ExternalDecisionGuard(
         AddIfSet(asserted.Subject);
         AddIfSet(asserted.Email);
         return list;
-    }
-
-    private static HashSet<string> CollectRequesterIdentifiers(ConsentRequest request)
-    {
-        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        AddNonEmpty(set, request.RequesterSid.Value);
-        AddNormalized(set, request.RequesterSid.Value);
-        if (request.RequesterIdentifiers != null)
-        {
-            foreach (var id in request.RequesterIdentifiers)
-            {
-                AddNonEmpty(set, id);
-                AddNormalized(set, id);
-            }
-        }
-
-        return set;
-    }
-
-    private static HashSet<string> CollectPriorApproverIdentifiers(ConsentRequest request)
-    {
-        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        if (request.ApprovalSteps != null)
-        {
-            foreach (var step in request.ApprovalSteps.Where(s => string.Equals(s.Decision, "APPROVED", StringComparison.OrdinalIgnoreCase)))
-            {
-                AddNonEmpty(set, step.ApproverSid.Value);
-                AddNormalized(set, step.ApproverSid.Value);
-            }
-        }
-
-        return set;
-    }
-
-    private static void AddNormalized(HashSet<string> set, string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value)) return;
-        var idx = value.LastIndexOf(':', StringComparison.Ordinal);
-        if (idx >= 0 && idx + 1 < value.Length)
-        {
-            AddNonEmpty(set, value[(idx + 1)..]);
-        }
     }
 
     private static void AddNonEmpty(HashSet<string> set, string? value)

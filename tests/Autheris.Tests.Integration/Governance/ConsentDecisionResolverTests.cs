@@ -220,9 +220,9 @@ public sealed class ConsentDecisionResolverTests : IDisposable
         _ => throw new ArgumentOutOfRangeException(nameof(shape))
     };
 
-    private async Task<string> EnsureDelegateAsync(string delegateSid)
+    private async Task<string> EnsureDelegateAsync(string delegateSid, TableIdentifier? table = null)
     {
-        var owners = await _repository.GetDataOwnersForTableAsync(Table);
+        var owners = await _repository.GetDataOwnersForTableAsync(table ?? Table);
         var primary = owners.First(o => o.AdSid == OwnerSid);
         await _repository.DelegateDataOwnershipAsync(new DataOwnerDelegation
         {
@@ -241,8 +241,10 @@ public sealed class ConsentDecisionResolverTests : IDisposable
     public async Task W3_W11_W12_InteractivePrincipals_OwnerDelegateAndAdmin_CanApprove(string shape)
     {
         using var services = DecisionServices.Build();
-        var delegateSid = await EnsureDelegateAsync("S-1-5-21-DELEGATE-W3");
-        await EnsureTableOwnerAsync("S-1-5-21-ADMIN-W3", Table);
+        var regularTable = await NewTableAsync(fourEyes: false);
+        await EnsureTableOwnerAsync(OwnerSid, regularTable);
+        var delegateSid = await EnsureDelegateAsync("S-1-5-21-DELEGATE-W3", regularTable);
+        await EnsureTableOwnerAsync("S-1-5-21-ADMIN-W3", regularTable);
 
         foreach (var principal in new[]
         {
@@ -251,7 +253,7 @@ public sealed class ConsentDecisionResolverTests : IDisposable
             Interactive(shape, "S-1-5-21-ADMIN-W3", "GovernanceAdmin"),
         })
         {
-            var req = await NewRequestAsync();
+            var req = await NewRequestAsync(regularTable);
             var result = await ApproveAsync(req.Id, principal, services);
             result.Status.ShouldBe("APPROVED");
         }
@@ -282,7 +284,9 @@ public sealed class ConsentDecisionResolverTests : IDisposable
     public async Task W11_AzpOnlyAndIdtypAppTokensWithoutScope_AreDenied_ButTheDelegatedTokenWithScopeIsAllowed()
     {
         using var services = DecisionServices.Build();
-        var req = await NewRequestAsync();
+        var regularTable = await NewTableAsync(fourEyes: false);
+        await EnsureTableOwnerAsync(OwnerSid, regularTable);
+        var req = await NewRequestAsync(regularTable);
 
         await ShouldBeDeniedAsync(() => ApproveAsync(req.Id, DecisionPrincipals.AzpOnly(OwnerSid, "GovernanceAdmin"), services), "DECISION_NOT_PERMITTED");
         await ShouldBeDeniedAsync(() => ApproveAsync(req.Id, DecisionPrincipals.AppOnlyIdtyp(OwnerSid, "GovernanceAdmin"), services), "DECISION_NOT_PERMITTED");
@@ -298,7 +302,9 @@ public sealed class ConsentDecisionResolverTests : IDisposable
     {
         var logs = new CapturingLoggerProvider();
         using var services = DecisionServices.Build(logs: logs);
-        var req = await NewRequestAsync();
+        var regularTable = await NewTableAsync(fourEyes: false);
+        await EnsureTableOwnerAsync(OwnerSid, regularTable);
+        var req = await NewRequestAsync(regularTable);
         var approval = Substitute.For<IConsentApprovalRepository>();
         approval.GetConsentRequestAsync(req.Id, Arg.Any<CancellationToken>()).Returns(req);
         approval.ExecuteAtomicApprovalWithConsentAsync(
@@ -486,7 +492,9 @@ public sealed class ConsentDecisionResolverTests : IDisposable
     public async Task W5_ThreeYearGrant_IsApprovedForRegularData_UnderTheConfiguredMaximum()
     {
         using var services = DecisionServices.Build();
-        var req = await NewRequestAsync(validDays: 3 * 365);
+        var regularTable = await NewTableAsync(fourEyes: false);
+        await EnsureTableOwnerAsync(OwnerSid, regularTable);
+        var req = await NewRequestAsync(regularTable, validDays: 3 * 365);
 
         (await ApproveAsync(req.Id, DecisionPrincipals.Basic(OwnerSid), services)).Status.ShouldBe("APPROVED");
     }
@@ -506,7 +514,9 @@ public sealed class ConsentDecisionResolverTests : IDisposable
     public async Task W5_ValidRequest_ApprovesAsBefore_AndCreatesTheConsent()
     {
         using var services = DecisionServices.Build();
-        var req = await NewRequestAsync(validDays: 7);
+        var regularTable = await NewTableAsync(fourEyes: false);
+        await EnsureTableOwnerAsync(OwnerSid, regularTable);
+        var req = await NewRequestAsync(regularTable, validDays: 7);
 
         var result = await ApproveAsync(req.Id, DecisionPrincipals.Basic(OwnerSid), services);
 

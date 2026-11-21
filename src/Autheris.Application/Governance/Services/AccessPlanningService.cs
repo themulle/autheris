@@ -15,17 +15,21 @@ using System.Threading.Tasks;
 using Autheris.Application.Audit;
 using Autheris.Domain.Audit;
 using Autheris.Application.Events;
+using Autheris.Application.Governance.ConsentRequests;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Governance.Grants;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Identity;
 using Autheris.Application.Policy;
 using Autheris.Application.Security;
 using Autheris.Application.Security.Totp.Interfaces;
 using Autheris.Application.State;
 using Autheris.Domain.Common;
 using Autheris.Domain.Events;
+using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Tenancy;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -56,23 +60,38 @@ public class AccessPlanningService : IAccessPlanningService
     private readonly TimeProvider _time;
     private readonly bool _allowDemoDirectory;
     private readonly IGrantPolicy _grantPolicy;
+    private readonly ISeparationOfDutiesService _separationOfDuties;
 
-    private IReadOnlyList<DateTimeOffset?> EnsureGrantsAllowed(
+    private async Task<IReadOnlyList<DateTimeOffset?>> EnsureGrantsAllowedAsync(
+        TenantId tenantId,
+        ClaimsPrincipal? caller,
+        Sid actorSid,
         AdminPlanAccessRequest request,
         TableMetadata? meta,
         IReadOnlyList<AccessPlanDiffItem> diffs,
         DateTimeOffset now,
         HashSet<string> actorIdentifiers,
-        bool rejectFourEyes)
+        bool rejectFourEyes,
+        CancellationToken ct)
     {
         var maxValidTo = new List<DateTimeOffset?>(request.Grants.Count);
         foreach (var grant in request.Grants)
         {
-            // an administrator never grants access to themselves (any identifier form, group or role they hold).
+            var hasParsedGrantee = AccessGrantRecords.TryParseGrantee(grant.Principal, out var granteeType, out var granteeId);
             if (ActorIdentifiers.IsActorSubject(actorIdentifiers, grant.Principal) ||
-                (AccessGrantRecords.TryParseGrantee(grant.Principal, out _, out var granteeId) && ActorIdentifiers.IsActorSubject(actorIdentifiers, granteeId)))
+                (hasParsedGrantee && ActorIdentifiers.IsActorSubject(actorIdentifiers, granteeId)))
             {
                 throw new SecurityException("Self-grant is not allowed: an administrator cannot grant access to themselves.");
+            }
+
+            if (hasParsedGrantee && granteeType == GranteeType.Group)
+            {
+                var sod = await _separationOfDuties.CheckGroupMembershipAsync(
+                    tenantId, caller, actorSid, null, null, granteeId, ct).ConfigureAwait(false);
+                if (!sod.Allowed)
+                {
+                    throw new SecurityException($"Self-grant is not allowed: {sod.Reason}");
+                }
             }
 
             var clearPii = diffs.Any(d => d.IsPii
@@ -144,9 +163,13 @@ public class AccessPlanningService : IAccessPlanningService
         TimeProvider? timeProvider = null,
         IAccessPlanStore? accessPlanStore = null,
         IClusterStateTopology? clusterTopology = null,
-        IGrantPolicy? grantPolicy = null)
+        IGrantPolicy? grantPolicy = null,
+        IScimGroupStore? groupStore = null,
+        IIdentityRealmRegistry? realmRegistry = null,
+        ISeparationOfDutiesService? separationOfDutiesService = null)
     {
         _grantPolicy = grantPolicy ?? new GrantPolicy();
+        _separationOfDuties = separationOfDutiesService ?? new SeparationOfDutiesService(groupStore, realmRegistry);
         _audit = auditWriter ?? throw new ArgumentNullException(nameof(auditWriter));
         _tableRepo = tableMetadataRepository ?? new NullTableMetadataRepository();
         _consentRepository = consentRepository;
@@ -216,9 +239,19 @@ public class AccessPlanningService : IAccessPlanningService
         }
 
         var now = _time.GetUtcNow();
+        var normalizedTenant = NormalizeTenant(tenantId);
+        var claimTenant = caller is not null && normalizedTenant is null
+            ? TenantClaimReader.Read(caller)
+            : default;
+        var planTenant = normalizedTenant is not null
+            ? new TenantId(normalizedTenant)
+            : claimTenant.Kind == ClaimTenantKind.Valid ? claimTenant.Tenant : default;
+        var actorSid = new Sid(adminSid);
 
         // every individual (user) principal needs a mandatory, class-bounded validUntil already at planning time.
-        EnsureGrantsAllowed(request, meta, diffs, now, ActorIdentifiers.Collect(caller, new Sid(adminSid), null), rejectFourEyes: false);
+        await EnsureGrantsAllowedAsync(
+            planTenant, caller, actorSid, request, meta, diffs, now,
+            ActorIdentifiers.Collect(caller, actorSid, null), rejectFourEyes: false, ct).ConfigureAwait(false);
 
         var planId = $"plan_{Guid.NewGuid():N}";
         var planTtl = TimeSpan.FromMinutes(_planOptions.PlanTtlMinutes);
@@ -333,7 +366,10 @@ public class AccessPlanningService : IAccessPlanningService
         // re-evaluated at apply time (the plan may have been stored with a validUntil that has meanwhile lapsed).
         var applyMeta = await _tableRepo.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
         var now = _time.GetUtcNow();
-        var maxValidTo = EnsureGrantsAllowed(stored.Request, applyMeta, stored.Result.Diffs, now, ActorIdentifiers.Collect(caller, new Sid(adminSid), null), rejectFourEyes: true);
+        var actorSid = new Sid(adminSid);
+        var maxValidTo = await EnsureGrantsAllowedAsync(
+            tenantId, caller, actorSid, stored.Request, applyMeta, stored.Result.Diffs, now,
+            ActorIdentifiers.Collect(caller, actorSid, null), rejectFourEyes: true, ct).ConfigureAwait(false);
         if (applyMeta is null)
         {
             throw new SecurityException($"Table '{stored.Request.DatasetId}' does not exist; a grant record needs a registered table.");

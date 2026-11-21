@@ -80,6 +80,7 @@ public static partial class GatewayGovernanceServiceExtensions
             .ValidateOnStart();
         services.AddSingleton<Autheris.Application.Governance.Grants.IGrantValidityPolicy, Autheris.Application.Governance.Grants.GrantValidityPolicy>();
         services.AddSingleton<Autheris.Application.ConsentRequests.Routing.IConsentWorkflowRouter, Autheris.Application.ConsentRequests.Routing.ConsentWorkflowRouter>();
+        services.AddSingleton<Autheris.Application.Governance.ConsentRequests.ISeparationOfDutiesService, Autheris.Application.Governance.ConsentRequests.SeparationOfDutiesService>();
         services.AddSingleton<Autheris.Application.ConsentRequests.IExternalDecisionGuard, Autheris.Application.ConsentRequests.ExternalDecisionGuard>();
         services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationHandler, ExternalSystemRequirementHandler>();
         services.AddScoped<Autheris.Application.ConsentRequests.IConsentDecisionPipeline, Autheris.Application.ConsentRequests.ConsentDecisionPipeline>();

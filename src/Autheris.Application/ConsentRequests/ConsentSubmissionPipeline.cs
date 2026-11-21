@@ -10,6 +10,7 @@ using Autheris.Application.Catalog.Discovery;
 using Autheris.Application.Catalog.Services;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.ConsentRequests.Routing;
+using Autheris.Application.Governance.ConsentRequests;
 using Autheris.Application.Governance.Grants;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -223,36 +224,6 @@ public static class ConsentSubmissionPipeline
         return resolvedValidTo;
     }
 
-    public static List<string> ExtractRequesterIdentifiers(ClaimsPrincipal? principal, string? fallbackSid = null)
-    {
-        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        if (!string.IsNullOrWhiteSpace(fallbackSid))
-        {
-            set.Add(fallbackSid.Trim());
-        }
-
-        if (principal != null)
-        {
-            foreach (var claim in principal.Claims)
-            {
-                if (claim.Type is ClaimTypes.PrimarySid
-                                or ClaimTypes.NameIdentifier
-                                or "objectSid"
-                                or "onprem_sid"
-                                or "oid"
-                                or "sub"
-                                or ClaimTypes.Upn
-                                or ClaimTypes.Email
-                                or ClaimTypes.Name)
-                {
-                    if (!string.IsNullOrWhiteSpace(claim.Value))
-                    {
-                        set.Add(claim.Value.Trim());
-                    }
-                }
-            }
-        }
-
-        return set.ToList();
-    }
+    public static List<string> ExtractRequesterIdentifiers(ClaimsPrincipal? principal, string? fallbackSid = null) =>
+        [.. SeparationOfDutiesService.CollectSubjectIdentifiers(principal, fallbackSid)];
 }

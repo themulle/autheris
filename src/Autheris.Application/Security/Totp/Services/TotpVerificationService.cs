@@ -112,9 +112,6 @@ public sealed class TotpVerificationService : ITotpVerificationService
             return false;
         }
 
-        // Successful verification clears the reserved attempts.
-        await ResetFailuresAsync(failureKey, ct).ConfigureAwait(false);
-
         // Replay key: totp:consumed:{userSid}:{epochStep}
         var replayKey = $"totp:consumed:{normalizedSid}:{matchedStep}";
 
@@ -170,6 +167,7 @@ public sealed class TotpVerificationService : ITotpVerificationService
             lock (_failureLock)
             {
                 var now = DateTimeOffset.UtcNow;
+                PurgeExpiredLocalFailures(now);
                 int count;
                 if (_localFailures.TryGetValue(failureKey, out var entry) && entry.WindowEnd > now)
                 {
@@ -216,6 +214,27 @@ public sealed class TotpVerificationService : ITotpVerificationService
             catch (ClusterStateUnavailableException)
             {
                 // Counter expires with its window.
+            }
+        }
+    }
+
+    private void PurgeExpiredLocalFailures(DateTimeOffset now)
+    {
+        List<string>? expired = null;
+        foreach (var kv in _localFailures)
+        {
+            if (kv.Value.WindowEnd <= now)
+            {
+                expired ??= [];
+                expired.Add(kv.Key);
+            }
+        }
+
+        if (expired != null)
+        {
+            foreach (var key in expired)
+            {
+                _localFailures.Remove(key);
             }
         }
     }

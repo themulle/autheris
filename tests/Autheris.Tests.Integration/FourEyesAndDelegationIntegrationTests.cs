@@ -310,7 +310,24 @@ public class FourEyesAndDelegationIntegrationTests : IClassFixture<FourEyesAndDe
             }}"
         });
         var appBody = await appResponse.Content.ReadAsStringAsync();
-        appBody.ShouldContain("APPROVED");
+        appBody.ShouldContain("PENDING_SECOND_APPROVAL");
+
+        var ownerClient = CreateClient(new Sid("S-1-5-21-DATAOWNER-APPROVER"));
+        var app2Response = await ownerClient.PostAsJsonAsync("/graphql", new
+        {
+            query = $@"mutation {{
+                approveConsentRequest(
+                    requestId: ""{requestId}"",
+                    idempotencyKey: ""key-vacation-app-2""
+                ) {{
+                    requestId
+                    status
+                    message
+                }}
+            }}"
+        });
+        var app2Body = await app2Response.Content.ReadAsStringAsync();
+        app2Body.ShouldContain("APPROVED");
 
         // 3. Requester queries table -> Access ALLOWED!
         var queryResponse = await requesterClient.PostAsJsonAsync("/graphql", new
