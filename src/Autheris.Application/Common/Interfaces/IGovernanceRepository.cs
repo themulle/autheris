@@ -447,7 +447,9 @@ public interface IConsentApprovalRepository
         Sid effectiveApproverSid,
         bool requireSecondApprover,
         CancellationToken ct = default)
-        => ApproveExternalConsentRequestStepAsync(requestId, attribution, effectiveApproverSid, ct);
+        => requireSecondApprover
+            ? throw new NotSupportedException($"{GetType().Name} does not support enforcing a second approver on external approval steps.")
+            : ApproveExternalConsentRequestStepAsync(requestId, attribution, effectiveApproverSid, ct);
 
     Task<Consent> ExecuteExternalAtomicApprovalWithConsentAsync(
         Guid requestId,

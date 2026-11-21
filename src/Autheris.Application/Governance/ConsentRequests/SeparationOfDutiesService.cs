@@ -44,9 +44,10 @@ public sealed class SeparationOfDutiesService(
     private static readonly string[] ExtraSubjectClaimTypes =
     [
         ClaimTypes.PrimarySid, ClaimTypes.NameIdentifier, "objectSid", "onprem_sid",
-        "oid", "sub", ClaimTypes.Upn, ClaimTypes.Email, "email", ClaimTypes.Name,
-        "appid", "azp", "client_id"
+        "oid", "sub", ClaimTypes.Upn, ClaimTypes.Email, "email", ClaimTypes.Name
     ];
+
+    private static readonly string[] AppIdClaimTypes = ["appid", "azp", "client_id"];
 
     public async Task<SodDecision> CheckConsentApprovalAsync(
         TenantId tenantId, ConsentRequest request, ClaimsPrincipal? principal, Sid approverSid,
@@ -57,9 +58,15 @@ public sealed class SeparationOfDutiesService(
         if (actorIds.Overlaps(CollectRequesterIdentifiers(request.RequesterSid, request.RequesterIdentifiers)))
             return SodDecision.Deny(SodViolationKind.SelfApproval, "Separation of duties violated: The requester cannot approve their own consent request.");
 
-        if (request.RequestedGranteeType is GranteeType.User or GranteeType.ServicePrincipal &&
-            AnyOverlap(actorIds, request.RequestedGranteeRef))
+        if (request.RequestedGranteeType == GranteeType.User && AnyOverlap(actorIds, request.RequestedGranteeRef))
             return SodDecision.Deny(SodViolationKind.SelfApproval, "Separation of duties violated: The requested grantee cannot approve their own consent request.");
+
+        if (request.RequestedGranteeType == GranteeType.ServicePrincipal)
+        {
+            var spIds = CollectServicePrincipalIdentifiers(principal, approverSid.Value, additionalActorIdentifiers);
+            if (AnyOverlap(spIds, request.RequestedGranteeRef))
+                return SodDecision.Deny(SodViolationKind.SelfApproval, "Separation of duties violated: The requested grantee cannot approve their own consent request.");
+        }
 
         if (request.RequestedGranteeType == GranteeType.Group)
         {
@@ -82,7 +89,8 @@ public sealed class SeparationOfDutiesService(
         AddIdentifierForms(targetForms, targetGroupRef);
         if (targetForms.Count == 0) return SodDecision.Allow();
 
-        if (IsDegradedGroupOrRoleResolution(principal))
+        if (IsDegradedGroupOrRoleResolution(principal) ||
+            callerContext?.GroupResolutionStatus == GroupResolutionStatus.Degraded)
             return SodDecision.Deny(SodViolationKind.SelfApproval, "Separation of duties violated: group or role resolution is degraded; denied fail-closed.");
 
         var directSids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -98,12 +106,12 @@ public sealed class SeparationOfDutiesService(
         var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         if (lookupKeys is { Count: > 0 })
         {
-            foreach (var k in lookupKeys) if (!string.IsNullOrWhiteSpace(k)) keys.Add(k.Trim());
+            foreach (var k in lookupKeys) AddLookupKey(keys, k);
         }
         else
         {
-            if (!string.IsNullOrWhiteSpace(actorSid.Value)) keys.Add(actorSid.Value.Trim());
-            if (!string.IsNullOrWhiteSpace(callerContext?.UserSid.Value)) keys.Add(callerContext.UserSid.Value.Trim());
+            AddLookupKey(keys, actorSid.Value);
+            if (callerContext is not null) AddLookupKey(keys, callerContext.UserSid.Value);
         }
 
         var realmId = realmRegistry?.GetDefaultRealm()?.Id ?? "default";
@@ -147,20 +155,39 @@ public sealed class SeparationOfDutiesService(
         return ids;
     }
 
-    public static HashSet<string> CollectActorIdentifiers(ClaimsPrincipal? principal, Sid actorSid, SecurityPrincipalContext? callerContext)
+    public static HashSet<string> CollectServicePrincipalIdentifiers(
+        ClaimsPrincipal? principal, string? fallbackSid = null, IEnumerable<string>? additional = null)
     {
-        var ids = CollectSubjectIdentifiers(principal, actorSid.Value);
+        var ids = CollectSubjectIdentifiers(principal, fallbackSid, additional);
         if (principal is not null)
         {
-            foreach (var g in principal.GetGroupSids()) AddIdentifierForms(ids, g.Value);
-            foreach (var r in principal.GetUserRoles()) AddIdentifierForms(ids, r);
+            foreach (var claim in principal.Claims)
+                if (AppIdClaimTypes.Contains(claim.Type, StringComparer.OrdinalIgnoreCase)) AddIdentifierForms(ids, claim.Value);
+        }
+
+        return ids;
+    }
+
+    public static HashSet<string> CollectActorIdentifiers(ClaimsPrincipal? principal, Sid actorSid, SecurityPrincipalContext? callerContext)
+    {
+        var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        AddIdentifierForms(ids, actorSid.Value, includeLocalAccountForms: true);
+        if (principal is not null)
+        {
+            foreach (var id in principal.GetUserIdentifiers()) AddIdentifierForms(ids, id, includeLocalAccountForms: true);
+            foreach (var claim in principal.Claims)
+                if (ExtraSubjectClaimTypes.Contains(claim.Type, StringComparer.OrdinalIgnoreCase) ||
+                    AppIdClaimTypes.Contains(claim.Type, StringComparer.OrdinalIgnoreCase))
+                    AddIdentifierForms(ids, claim.Value, includeLocalAccountForms: true);
+            foreach (var g in principal.GetGroupSids()) AddIdentifierForms(ids, g.Value, includeLocalAccountForms: true);
+            foreach (var r in principal.GetUserRoles()) AddIdentifierForms(ids, r, includeLocalAccountForms: true);
         }
 
         if (callerContext is not null)
         {
-            AddIdentifierForms(ids, callerContext.UserSid.Value);
-            foreach (var g in callerContext.GroupSids) AddIdentifierForms(ids, g.Value);
-            foreach (var r in callerContext.TenantRoles.Concat(callerContext.ClusterRoles)) AddIdentifierForms(ids, r);
+            AddIdentifierForms(ids, callerContext.UserSid.Value, includeLocalAccountForms: true);
+            foreach (var g in callerContext.GroupSids) AddIdentifierForms(ids, g.Value, includeLocalAccountForms: true);
+            foreach (var r in callerContext.TenantRoles.Concat(callerContext.ClusterRoles)) AddIdentifierForms(ids, r, includeLocalAccountForms: true);
         }
 
         return ids;
@@ -215,28 +242,38 @@ public sealed class SeparationOfDutiesService(
         return left.Count > 0 && AnyOverlap(left, b);
     }
 
-    public static bool AnyOverlap(IReadOnlySet<string> left, string? right)
+    public static bool AnyOverlap(IReadOnlySet<string> left, string? right, bool includeLocalAccountForms = false)
     {
         if (left.Count == 0 || string.IsNullOrWhiteSpace(right)) return false;
         var forms = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        AddIdentifierForms(forms, right);
+        AddIdentifierForms(forms, right, includeLocalAccountForms);
         return forms.Overlaps(left);
     }
 
-    public static void AddIdentifierForms(ISet<string> target, string? value)
+    public static void AddIdentifierForms(ISet<string> target, string? value, bool includeLocalAccountForms = false)
     {
         if (string.IsNullOrWhiteSpace(value)) return;
         var v = value.Trim();
-        AddSingleForm(target, v);
+        AddSingleForm(target, v, includeLocalAccountForms);
         var colon = v.LastIndexOf(':', StringComparison.Ordinal);
-        if (colon >= 0 && colon + 1 < v.Length) AddSingleForm(target, v[(colon + 1)..]);
+        if (colon >= 0 && colon + 1 < v.Length) AddSingleForm(target, v[(colon + 1)..], includeLocalAccountForms);
     }
 
-    private static void AddSingleForm(ISet<string> target, string v)
+    private static void AddLookupKey(ISet<string> keys, string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return;
+        var v = raw.Trim();
+        keys.Add(v);
+        var colon = v.LastIndexOf(':', StringComparison.Ordinal);
+        if (colon >= 0 && colon + 1 < v.Length) keys.Add(v[(colon + 1)..].Trim());
+    }
+
+    private static void AddSingleForm(ISet<string> target, string v, bool includeLocalAccountForms)
     {
         v = v.Trim();
         if (v.Length == 0) return;
         target.Add(v);
+        if (!includeLocalAccountForms) return;
         var slash = v.LastIndexOf('\\', StringComparison.Ordinal);
         if (slash >= 0 && slash < v.Length - 1) target.Add(v[(slash + 1)..]);
         var at = v.IndexOf('@', StringComparison.Ordinal);

@@ -144,12 +144,20 @@ public partial class GovernanceRepository : IConsentWorkflowConfigRepository, IC
 
             var approvers = attribution.EffectiveApprovers;
             int stepNumber = state.NextStepNumber;
-            if (ConsentApprovalPolicy.RequiresFourEyesApproval(state.RequiresFourEyes, state.Sensitivity) && stepNumber < 2 && approvers.Count >= 2)
+            if (approvers.Count > 1)
             {
-                var firstSid = new Sid(string.IsNullOrWhiteSpace(approvers[0].ResolvedSid) ? approvers[0].Subject : approvers[0].ResolvedSid!);
-                await EnsureApproverIsNotRequesterAsync(req, firstSid, ct).ConfigureAwait(false);
-                await ConsentSqlCore.InsertApprovedStepAsync(conn, tx, Guid.NewGuid(), requestId, stepNumber, firstSid, attribution.DecidedAt, ct).ConfigureAwait(false);
-                stepNumber++;
+                for (int i = 0; i < approvers.Count - 1; i++)
+                {
+                    var priorSid = new Sid(string.IsNullOrWhiteSpace(approvers[i].ResolvedSid) ? approvers[i].Subject : approvers[i].ResolvedSid!);
+                    if (string.Equals(priorSid.Value, step.ApproverSid.Value, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    await EnsureApproverIsNotRequesterAsync(req, priorSid, ct).ConfigureAwait(false);
+                    await ConsentSqlCore.InsertApprovedStepAsync(conn, tx, Guid.NewGuid(), requestId, stepNumber, priorSid, attribution.DecidedAt, ct).ConfigureAwait(false);
+                    stepNumber++;
+                }
             }
 
             string newStatus = ConsentApprovalPolicy.StatusAfterApproval(state.RequiresFourEyes, stepNumber, ConsentWorkflowMode.External, state.Sensitivity);

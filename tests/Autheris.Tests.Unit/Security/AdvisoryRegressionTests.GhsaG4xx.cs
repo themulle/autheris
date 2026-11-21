@@ -56,44 +56,20 @@ public sealed partial class AdvisoryRegressionTests
     [InlineData("case_08_profile_assignment_four_eyes_and_admin_sod")]
     [InlineData("case_09_totp_replay_lockout_and_local_purge")]
     [InlineData("case_10_totp_secret_durable_redis_and_reenroll_requires_current_code")]
-    public async Task Ghsa_g4xx_ghq4_regression(string bullet)
+    public Task Ghsa_g4xx_ghq4_regression(string bullet) => bullet switch
     {
-        switch (bullet)
-        {
-            case "case_01_consent_requester_and_user_sp_grantee_sod":
-                await AssertConsentRequesterAndGranteeSodAsync();
-                break;
-            case "case_02_external_guard_user_sp_grantee_and_alias_sod":
-                await AssertExternalGuardUserSpSodAsync();
-                break;
-            case "case_03_group_grantee_and_degraded_fail_closed_consent_and_external":
-                await AssertGroupAndDegradedFailClosedConsentAndExternalAsync();
-                break;
-            case "case_04_access_planning_group_and_degraded_sod":
-                await AssertAccessPlanningGroupAndDegradedSodAsync();
-                break;
-            case "case_05_recertification_alias_and_group_fail_closed_sod":
-                await AssertRecertificationSodAsync();
-                break;
-            case "case_06_grant_policy_normalized_approver_dedup":
-                AssertGrantPolicyNormalizedApproverDedup();
-                break;
-            case "case_07_four_eyes_required_internal_and_external_consent_pipeline":
-                await AssertConsentPipelineFourEyesAsync();
-                break;
-            case "case_08_profile_assignment_four_eyes_and_admin_sod":
-                await AssertProfileAssignmentFourEyesAndAdminSodAsync();
-                break;
-            case "case_09_totp_replay_lockout_and_local_purge":
-                await AssertTotpReplayLockoutAndLocalPurgeAsync();
-                break;
-            case "case_10_totp_secret_durable_redis_and_reenroll_requires_current_code":
-                await AssertTotpSecretDurabilityAndReenrollAsync();
-                break;
-            default:
-                throw new ArgumentOutOfRangeException(nameof(bullet), bullet, null);
-        }
-    }
+        "case_01_consent_requester_and_user_sp_grantee_sod" => AssertConsentRequesterAndGranteeSodAsync(),
+        "case_02_external_guard_user_sp_grantee_and_alias_sod" => AssertExternalGuardUserSpSodAsync(),
+        "case_03_group_grantee_and_degraded_fail_closed_consent_and_external" => AssertGroupAndDegradedFailClosedConsentAndExternalAsync(),
+        "case_04_access_planning_group_and_degraded_sod" => AssertAccessPlanningGroupAndDegradedSodAsync(),
+        "case_05_recertification_alias_and_group_fail_closed_sod" => AssertRecertificationSodAsync(),
+        "case_06_grant_policy_normalized_approver_dedup" => Task.Run(AssertGrantPolicyNormalizedApproverDedup),
+        "case_07_four_eyes_required_internal_and_external_consent_pipeline" => AssertConsentPipelineFourEyesAsync(),
+        "case_08_profile_assignment_four_eyes_and_admin_sod" => AssertProfileAssignmentFourEyesAndAdminSodAsync(),
+        "case_09_totp_replay_lockout_and_local_purge" => AssertTotpReplayLockoutAndLocalPurgeAsync(),
+        "case_10_totp_secret_durable_redis_and_reenroll_requires_current_code" => AssertTotpSecretDurabilityAndReenrollAsync(),
+        _ => throw new ArgumentOutOfRangeException(nameof(bullet), bullet, null)
+    };
 
     private static ClaimsPrincipal Wave2Principal(
         string sid,
@@ -163,28 +139,41 @@ public sealed partial class AdvisoryRegressionTests
         repo.Tables[meta.Identifier] = meta;
         var pipeline = repo.CreatePipeline();
 
-        var reqByAlias = Wave2Request("S-1-5-21-REQ", GranteeType.User, "S-1-5-21-REQ", requesterIdentifiers: ["CORP\\alice"]);
-        repo.Requests[reqByAlias.Id] = reqByAlias;
+        var spaUserA = Wave2Principal("S-1-5-21-USER-A", upn: "alice@tenantA.local",
+            extraClaims: [new Claim("appid", "portal-spa"), new Claim("azp", "portal-spa"), new Claim("client_id", "portal-spa")]);
+        var extractedA = ConsentRequestService.ExtractPrincipalIdentifiers(spaUserA, "S-1-5-21-USER-A");
+        extractedA.ShouldNotContain("portal-spa");
+        extractedA.ShouldNotContain("alice");
 
-        var aliasEx = await Should.ThrowAsync<ConsentDecisionException>(() => pipeline.DecideAsync(new ConsentDecisionCommand(
-            reqByAlias.Id, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal,
-            Wave2Principal("S-1-5-21-APPROVER", upn: "alice@corp.local", role: "GovernanceAdmin"))));
-        aliasEx.ErrorCode.ShouldBe(ConsentDecisionErrorCodes.SelfApprovalForbidden);
+        var reqSvc = new ConsentRequestService(repo.MetadataRepo, repo.ApprovalRepo);
+        var reqA = Wave2Request("S-1-5-21-USER-A", GranteeType.User, "S-1-5-21-USER-A", requesterIdentifiers: extractedA.ToArray());
+        repo.Requests[reqA.Id] = reqA;
+
+        var spaUserB = Wave2Principal("S-1-5-21-USER-B", upn: "alice@tenantB.local", role: "GovernanceAdmin",
+            extraClaims: [new Claim("appid", "portal-spa"), new Claim("azp", "portal-spa"), new Claim("client_id", "portal-spa")]);
+        var wEx = await Should.ThrowAsync<ConsentRequestException>(() => reqSvc.WithdrawAsync(reqA.Id, spaUserB));
+        wEx.Code.ShouldBe("FORBIDDEN");
+
+        var approvedByUserB = await pipeline.DecideAsync(new ConsentDecisionCommand(reqA.Id, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, spaUserB));
+        approvedByUserB.Request.Status.ShouldBe("PENDING_SECOND_APPROVAL");
+
+        var sameFullUpnEx = await Should.ThrowAsync<ConsentDecisionException>(() => pipeline.DecideAsync(new ConsentDecisionCommand(
+            reqA.Id, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal,
+            Wave2Principal("S-1-5-21-USER-C", upn: "ALICE@TENANTA.LOCAL", role: "GovernanceAdmin"))));
+        sameFullUpnEx.ErrorCode.ShouldBe(ConsentDecisionErrorCodes.SelfApprovalForbidden);
 
         var userTargetReq = Wave2Request("S-1-5-21-REQ-OTHER", GranteeType.User, "S-1-5-21-GRANTEE-USER");
         repo.Requests[userTargetReq.Id] = userTargetReq;
-        var userEx = await Should.ThrowAsync<ConsentDecisionException>(() => pipeline.DecideAsync(new ConsentDecisionCommand(
+        (await Should.ThrowAsync<ConsentDecisionException>(() => pipeline.DecideAsync(new ConsentDecisionCommand(
             userTargetReq.Id, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal,
-            Wave2Principal("S-1-5-21-GRANTEE-USER", role: "GovernanceAdmin"))));
-        userEx.ErrorCode.ShouldBe(ConsentDecisionErrorCodes.SelfApprovalForbidden);
+            Wave2Principal("S-1-5-21-GRANTEE-USER", role: "GovernanceAdmin"))))).ErrorCode.ShouldBe(ConsentDecisionErrorCodes.SelfApprovalForbidden);
 
         var spTargetReq = Wave2Request("S-1-5-21-REQ-OTHER", GranteeType.ServicePrincipal, "sp-client-42");
         repo.Requests[spTargetReq.Id] = spTargetReq;
-        var spEx = await Should.ThrowAsync<ConsentDecisionException>(() => pipeline.DecideAsync(new ConsentDecisionCommand(
+        (await Should.ThrowAsync<ConsentDecisionException>(() => pipeline.DecideAsync(new ConsentDecisionCommand(
             spTargetReq.Id, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal,
-            Wave2Principal("S-1-5-21-CLUSTER", role: "ClusterAdmin",
-                extraClaims: [new Claim("appid", "sp-client-42")]))));
-        spEx.ErrorCode.ShouldBe(ConsentDecisionErrorCodes.SelfApprovalForbidden);
+            Wave2Principal("S-1-5-21-CLUSTER", role: "ClusterAdmin", extraClaims: [new Claim("appid", "sp-client-42")])))))
+            .ErrorCode.ShouldBe(ConsentDecisionErrorCodes.SelfApprovalForbidden);
     }
 
     private static async Task AssertExternalGuardUserSpSodAsync()
@@ -196,7 +185,7 @@ public sealed partial class AdvisoryRegressionTests
 
         foreach (var (gType, gRef, subject) in new[]
         {
-            (GranteeType.User, "bob@corp.local", "CORP\\bob"),
+            (GranteeType.User, "bob@corp.local", "user:BOB@corp.local"),
             (GranteeType.ServicePrincipal, "sp-worker-9", "sp:sp-worker-9")
         })
         {
@@ -268,6 +257,17 @@ public sealed partial class AdvisoryRegressionTests
                 ExternalAttribution: new ExternalDecisionAttribution(sysId, "EXT-3", "APPROVED", new AssertedApprover("S-1-5-21-EXT", ResolvedSid: "S-1-5-21-EXT"), DateTimeOffset.UtcNow)),
             extReqDegraded, route, system));
         degradedExtEx.ErrorCode.ShouldBe(ConsentDecisionErrorCodes.SelfApprovalForbidden);
+
+        var ctxDegraded = new Autheris.Domain.Security.SecurityPrincipalContext
+        {
+            UserSid = new Sid("S-1-5-21-APP"),
+            GroupSids = new HashSet<Sid>(),
+            TenantRoles = new HashSet<string>(),
+            ClusterRoles = new HashSet<string>(),
+            AuthenticationScheme = "Test"
+        };
+        var sodSvc = new SeparationOfDutiesService();
+        (await sodSvc.CheckGroupMembershipAsync(TenantA, null, new Sid("S-1-5-21-APP"), ctxDegraded, null, targetGroup)).Allowed.ShouldBeFalse();
     }
 
     private static async Task AssertAccessPlanningGroupAndDegradedSodAsync()
@@ -326,15 +326,17 @@ public sealed partial class AdvisoryRegressionTests
 
     private static async Task AssertRecertificationSodAsync()
     {
-        const string reviewer = "alice";
+        const string reviewer = "alice@corp.local";
         var campaign = new RecertificationCampaign(TenantA.Value, "c1", "Q4", RecertClass.Standard, RecertCampaignStatus.Active, DateTimeOffset.UtcNow.AddDays(7), DateTimeOffset.UtcNow.AddDays(-1));
-        var itemAlias = new RecertificationItem(TenantA.Value, "c1", "i1", "Grant", "g1", "CORP\\alice", reviewer, RecertDecision.Pending);
+        var itemAlias = new RecertificationItem(TenantA.Value, "c1", "i1", "Grant", "g1", "user:ALICE@corp.local", reviewer, RecertDecision.Pending);
+        var itemOtherDomain = new RecertificationItem(TenantA.Value, "c1", "i3", "Grant", "g3", "alice@other.local", reviewer, RecertDecision.Pending);
         var itemGroup = new RecertificationItem(TenantA.Value, "c1", "i2", "Grant", "g2", "group:S-1-5-21-REC-GRP", reviewer, RecertDecision.Pending);
 
         var repo = Wave2Proxy<IRecertificationRepository>.Create((m, args) => m.Name switch
         {
             "GetCampaignByIdAsync" => Task.FromResult<RecertificationCampaign?>(campaign),
-            "GetItemByIdAsync" => Task.FromResult<RecertificationItem?>((string)args![2]! == "i1" ? itemAlias : itemGroup),
+            "GetItemByIdAsync" => Task.FromResult<RecertificationItem?>((string)args![2]! switch { "i1" => itemAlias, "i3" => itemOtherDomain, _ => itemGroup }),
+            "TryUpdateItemDecisionAsync" => Task.FromResult(true),
             _ => throw new NotSupportedException(m.Name)
         });
 
@@ -350,6 +352,9 @@ public sealed partial class AdvisoryRegressionTests
 
         scimResult = new EffectiveScimGroupsResult(new HashSet<string>(), MaxDepthExceeded: false, HasNonCanonicalSid: true);
         await Should.ThrowAsync<SecurityException>(() => service.CertifyItemAsync(TenantA, "c1", "i2", reviewer));
+
+        scimResult = new EffectiveScimGroupsResult(new HashSet<string>(), MaxDepthExceeded: false, HasNonCanonicalSid: false);
+        await service.CertifyItemAsync(TenantA, "c1", "i3", reviewer);
     }
 
     private static void AssertGrantPolicyNormalizedApproverDedup()
@@ -359,19 +364,19 @@ public sealed partial class AdvisoryRegressionTests
 
         var dupApprovers = policy.Evaluate(new GrantRequest(
             GranteeType.User, "grantee-1", GrantKind.Consent, now.AddDays(10), now, GrantSensitivity.Sensitive,
-            Requester: "requester-1", Approvers: ["CORP\\bob", "bob"], Justification: "Valid"));
+            Requester: "requester@corp.com", Approvers: ["user:bob@corp.com", "BOB@CORP.COM"], Justification: "Valid"));
         dupApprovers.Allowed.ShouldBeFalse();
         dupApprovers.ErrorCode.ShouldBe(GrantErrorCodes.FourEyesRequired);
 
         var reqAliasApprover = policy.Evaluate(new GrantRequest(
             GranteeType.User, "grantee-1", GrantKind.Consent, now.AddDays(10), now, GrantSensitivity.Sensitive,
-            Requester: "requester-1", Approvers: ["CORP\\requester-1", "bob"], Justification: "Valid"));
+            Requester: "requester@corp.com", Approvers: ["user:requester@corp.com", "bob@corp.com"], Justification: "Valid"));
         reqAliasApprover.Allowed.ShouldBeFalse();
         reqAliasApprover.ErrorCode.ShouldBe(GrantErrorCodes.FourEyesRequired);
 
         var distinctTwo = policy.Evaluate(new GrantRequest(
             GranteeType.User, "grantee-1", GrantKind.Consent, now.AddDays(10), now, GrantSensitivity.Sensitive,
-            Requester: "requester-1", Approvers: ["bob", "carol"], Justification: "Valid"));
+            Requester: "requester@corp.com", Approvers: ["bob@corp.com", "carol@corp.com"], Justification: "Valid"));
         distinctTwo.Allowed.ShouldBeTrue();
     }
 
@@ -381,6 +386,26 @@ public sealed partial class AdvisoryRegressionTests
         var meta = Wave2PiiTable(highlySensitive: false);
         repo.Tables[meta.Identifier] = meta;
         var pipeline = repo.CreatePipeline();
+
+        IConsentApprovalRepository defaultIfaceRepo = new Autheris.Tests.Unit.ConsentRequests.InMemoryConsentStore(
+            EcdsaGrantRecordSigner.CreateEphemeral("w2"), TimeProvider.System);
+        await Should.ThrowAsync<NotSupportedException>(() => defaultIfaceRepo.ApproveExternalConsentRequestStepAsync(
+            Guid.NewGuid(),
+            new ExternalDecisionAttribution(Guid.NewGuid(), "EXT-DEF", "APPROVED", new AssertedApprover("a", ResolvedSid: "a"), DateTimeOffset.UtcNow),
+            new Sid("a"),
+            requireSecondApprover: true));
+
+        var missingMetaReq = new ConsentRequest
+        {
+            Id = Guid.NewGuid(), TenantId = TenantA, TableId = Guid.NewGuid(),
+            TableIdentifier = new TableIdentifier("sales", "dbo", "missing_meta"),
+            RequesterSid = new Sid("S-1-5-21-REQ"), RequestedGranteeType = GranteeType.User, RequestedGranteeRef = "S-1-5-21-REQ",
+            BusinessJustification = "Valid", RequestedValidTo = DateTimeOffset.UtcNow.AddDays(10), Status = "PENDING"
+        };
+        repo.Requests[missingMetaReq.Id] = missingMetaReq;
+        (await pipeline.DecideAsync(new ConsentDecisionCommand(
+            missingMetaReq.Id, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, Wave2Principal("S-1-5-21-OWN1"))))
+            .Request.Status.ShouldBe("PENDING_SECOND_APPROVAL");
 
         var clearCtx = RequestedClearCodec.Merge(null, [new RequestedClearItem("PII", ["email"])]);
         var internalReq = Wave2Request("S-1-5-21-REQ", GranteeType.User, "S-1-5-21-REQ", contextJson: clearCtx);
@@ -459,6 +484,37 @@ public sealed partial class AdvisoryRegressionTests
             updatedExt, new Sid("S-1-5-21-EXT2"), [new Sid("S-1-5-21-EXT2")]);
         extStep2.Request.Status.ShouldBe("APPROVED");
         h.Consents.Count.ShouldBe(2);
+
+        var reqExtDual = h.SeedPendingRequest("S-1-5-21-REQ", GranteeType.User, "S-1-5-21-GRANTEE3", MaskingPolicyMode.Default, external: true);
+        var dualResult = await h.Service.DecideAsync(
+            new ConsentDecisionCommand(reqExtDual.Id, ConsentDecisionKind.Approve, ConsentDecisionChannel.External, null,
+                ExternalAttribution: new ExternalDecisionAttribution(Guid.NewGuid(), "EXT-DUAL", "APPROVED",
+                    new AssertedApprover("S-1-5-21-EXT1", ResolvedSid: "S-1-5-21-EXT1"), DateTimeOffset.UtcNow,
+                    AdditionalApprovers: [new AssertedApprover("S-1-5-21-EXT2", ResolvedSid: "S-1-5-21-EXT2")])),
+            reqExtDual, new Sid("S-1-5-21-EXT2"), [new Sid("S-1-5-21-EXT1"), new Sid("S-1-5-21-EXT2")]);
+        dualResult.Request.Status.ShouldBe("APPROVED");
+        h.Requests.Single(r => r.Id == reqExtDual.Id).ApprovalSteps.Select(s => s.ApproverSid.Value)
+            .ShouldBe(["S-1-5-21-EXT1", "S-1-5-21-EXT2"]);
+
+        var reqMulti = h.SeedPendingRequest("S-1-5-21-REQ", GranteeType.User, "S-1-5-21-GRANTEE4", MaskingPolicyMode.Default, external: false, multiItem: true);
+        await h.Service.DecideAsync(
+            new ConsentDecisionCommand(reqMulti.Id, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, Wave2Principal("S-1-5-21-OWN1")),
+            reqMulti, new Sid("S-1-5-21-OWN1"), []);
+        var reqMultiAfter1 = h.Requests.Single(r => r.Id == reqMulti.Id);
+        reqMultiAfter1.Status.ShouldBe("PENDING");
+
+        var afterReject2 = await h.Service.DecideAsync(
+            new ConsentDecisionCommand(reqMulti.Id, ConsentDecisionKind.Reject, ConsentDecisionChannel.Internal, Wave2Principal("S-1-5-21-PUBOWN"), Reason: "Deny public table"),
+            reqMultiAfter1, new Sid("S-1-5-21-PUBOWN"), []);
+        afterReject2.Request.Status.ShouldBe("PENDING_SECOND_APPROVAL");
+        h.Consents.Count.ShouldBe(3);
+
+        var reqMultiAfter2 = h.Requests.Single(r => r.Id == reqMulti.Id);
+        var multiFinal = await h.Service.DecideAsync(
+            new ConsentDecisionCommand(reqMulti.Id, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, Wave2Principal("S-1-5-21-OWN3")),
+            reqMultiAfter2, new Sid("S-1-5-21-OWN3"), []);
+        multiFinal.Request.Status.ShouldBe("APPROVED");
+        h.Consents.Count.ShouldBe(4);
     }
 
     private static async Task AssertTotpReplayLockoutAndLocalPurgeAsync()
@@ -568,15 +624,33 @@ public sealed partial class AdvisoryRegressionTests
         protected override object? Invoke(MethodInfo? targetMethod, object?[]? args) => _handler(targetMethod!, args);
     }
 
-    private sealed class Wave2ConsentRepo(IScimGroupStore? scimGroups = null)
+    private sealed class Wave2ConsentRepo
     {
         public Dictionary<Guid, ConsentRequest> Requests { get; } = new();
         public Dictionary<TableIdentifier, TableMetadata> Tables { get; } = new();
         public Guid ExternalSystemId { get; } = Guid.NewGuid();
 
+        public IConsentApprovalRepository ApprovalRepo { get; }
+        public ITableMetadataRepository MetadataRepo { get; }
+
         public ConsentDecisionPipeline CreatePipeline()
         {
-            var approvals = Wave2Proxy<IConsentApprovalRepository>.Create((m, args) => m.Name switch
+            return new ConsentDecisionPipeline(
+                ApprovalRepo, MetadataRepo, _owners, new ConsentDecisionGuard(new IdentitySubjectResolver()),
+                new GrantPolicy(), GrantValidityPolicy.CreateDefault(),
+                new ExternalDecisionGuard(groupStore: _scimGroups),
+                workflowConfigRepository: _workflow, groupStore: _scimGroups,
+                classificationRepository: new Autheris.Tests.Unit.Governance.Classification.TestInMemoryClassificationStore(TenantA.Value));
+        }
+
+        private readonly IDataOwnershipRepository _owners;
+        private readonly IConsentWorkflowConfigRepository _workflow;
+        private readonly IScimGroupStore? _scimGroups;
+
+        public Wave2ConsentRepo(IScimGroupStore? scimGroups = null)
+        {
+            _scimGroups = scimGroups;
+            ApprovalRepo = Wave2Proxy<IConsentApprovalRepository>.Create((m, args) => m.Name switch
             {
                 "GetConsentRequestAsync" => Task.FromResult(Requests.TryGetValue((Guid)args![0]!, out var r) ? r : null),
                 "ApproveConsentRequestStepAsync" => ApproveStepAsync((Guid)args![0]!, (Sid)args[1]!, args.Length >= 4 && (bool)args[2]!, isExternal: false),
@@ -585,24 +659,17 @@ public sealed partial class AdvisoryRegressionTests
                 "ExecuteExternalAtomicApprovalWithConsentAsync" => CompleteAsync((Guid)args![0]!, (ApprovalStep)args[2]!, (Consent)args[3]!),
                 _ => throw new NotSupportedException(m.Name)
             });
-            var metaRepo = Wave2Proxy<ITableMetadataRepository>.Create((m, args) => m.Name == "GetTableMetadataAsync"
+            MetadataRepo = Wave2Proxy<ITableMetadataRepository>.Create((m, args) => m.Name == "GetTableMetadataAsync"
                 ? Task.FromResult(Tables.TryGetValue((TableIdentifier)args![0]!, out var tm) ? tm : null)
                 : throw new NotSupportedException(m.Name));
-            var owners = Wave2Proxy<IDataOwnershipRepository>.Create((m, _) => m.Name == "IsAuthorizedApproverForTableAsync"
+            _owners = Wave2Proxy<IDataOwnershipRepository>.Create((m, _) => m.Name == "IsAuthorizedApproverForTableAsync"
                 ? Task.FromResult(true) : Task.FromResult<IReadOnlyList<DataOwner>>([]));
-            var workflow = Wave2Proxy<IConsentWorkflowConfigRepository>.Create((m, args) => m.Name switch
+            _workflow = Wave2Proxy<IConsentWorkflowConfigRepository>.Create((m, args) => m.Name switch
             {
                 "ResolveWorkflowRouteAsync" => Task.FromResult<ConsentWorkflowRoute?>(new ConsentWorkflowRoute(TenantA.Value, WorkflowRouteScopeKind.Tenant, TenantA.Value, ConsentWorkflowMode.External, ExternalSystemId, 90, 30, 72, false, "admin", DateTimeOffset.UtcNow)),
                 "GetExternalWorkflowSystemAsync" => Task.FromResult<ExternalWorkflowSystem?>(new ExternalWorkflowSystem(ExternalSystemId, TenantA.Value, "snow", "svc", "https://sn.local", "sec", true, "admin", DateTimeOffset.UtcNow, null)),
                 _ => throw new NotSupportedException(m.Name)
             });
-
-            return new ConsentDecisionPipeline(
-                approvals, metaRepo, owners, new ConsentDecisionGuard(new IdentitySubjectResolver()),
-                new GrantPolicy(), GrantValidityPolicy.CreateDefault(),
-                new ExternalDecisionGuard(groupStore: scimGroups),
-                workflowConfigRepository: workflow, groupStore: scimGroups,
-                classificationRepository: new Autheris.Tests.Unit.Governance.Classification.TestInMemoryClassificationStore(TenantA.Value));
         }
 
         private Task<ConsentRequest> ApproveStepAsync(Guid id, Sid approver, bool requireSecond, bool isExternal)
@@ -631,12 +698,20 @@ public sealed partial class AdvisoryRegressionTests
         public Wave2ProfileHarness()
         {
             var table = Wave2PiiTable(highlySensitive: false);
+            var pubTable = new TableMetadata
+            {
+                Identifier = new TableIdentifier("sales", "dbo", "orders_pub"),
+                Table = new Table { Id = Guid.NewGuid(), SourceName = "sales", SchemaName = "dbo", TableName = "orders_pub", Sensitivity = "LOW", IsActive = true },
+                Columns = [new TableColumn { Id = Guid.NewGuid(), ColumnName = "id", DataType = "INT" }]
+            };
             var profiles = Wave2Proxy<IAccessProfileRepository>.Create((_, _) => throw new NotSupportedException());
-            var meta = new InMemoryTableMetadataRepository().Add(table);
+            var meta = new InMemoryTableMetadataRepository().Add(table).Add(pubTable);
             var approvals = Wave2Proxy<IConsentApprovalRepository>.Create((_, _) => throw new NotSupportedException());
             var owners = new InMemoryDataOwnershipRepository()
                 .AssignOwner(table.Identifier, new DataOwner { Id = Guid.NewGuid(), AdSid = new Sid("S-1-5-21-OWN1"), DisplayName = "O1", Email = "o1@x", IsActive = true })
-                .AssignOwner(table.Identifier, new DataOwner { Id = Guid.NewGuid(), AdSid = new Sid("S-1-5-21-OWN2"), DisplayName = "O2", Email = "o2@x", IsActive = true });
+                .AssignOwner(table.Identifier, new DataOwner { Id = Guid.NewGuid(), AdSid = new Sid("S-1-5-21-OWN2"), DisplayName = "O2", Email = "o2@x", IsActive = true })
+                .AssignOwner(table.Identifier, new DataOwner { Id = Guid.NewGuid(), AdSid = new Sid("S-1-5-21-OWN3"), DisplayName = "O3", Email = "o3@x", IsActive = true })
+                .AssignOwner(pubTable.Identifier, new DataOwner { Id = Guid.NewGuid(), AdSid = new Sid("S-1-5-21-PUBOWN"), DisplayName = "PO", Email = "po@x", IsActive = true });
             var tx = new Wave2DbTx();
             var store = Wave2Proxy<IProfileAssignmentStore>.Create((m, args) => m.Name switch
             {
@@ -658,10 +733,13 @@ public sealed partial class AdvisoryRegressionTests
                 profiles, meta, approvals, owners, store, materializer, new GrantPolicy(), GrantValidityPolicy.CreateDefault());
         }
 
-        public ConsentRequest SeedPendingRequest(string requester, GranteeType gType, string gRef, MaskingPolicyMode mode, bool external)
+        public ConsentRequest SeedPendingRequest(string requester, GranteeType gType, string gRef, MaskingPolicyMode mode, bool external, bool multiItem = false)
         {
             var req = Wave2Request(requester, gType, gRef, external: external);
-            var snap = new ProfileAssignmentRequestContext(Guid.NewGuid(), "ProfilePii", mode, [], [new ProfileAssignmentSnapshotItem(0, "sales.dbo.orders", false, null, [])]);
+            var snapItems = multiItem
+                ? new[] { new ProfileAssignmentSnapshotItem(0, "sales.dbo.orders", false, null, []), new ProfileAssignmentSnapshotItem(1, "sales.dbo.orders_pub", false, null, []) }
+                : [new ProfileAssignmentSnapshotItem(0, "sales.dbo.orders", false, null, [])];
+            var snap = new ProfileAssignmentRequestContext(Guid.NewGuid(), "ProfilePii", mode, [], snapItems);
             req = new ConsentRequest
             {
                 Id = req.Id, TenantId = TenantA, TableId = req.TableId, TableIdentifier = req.TableIdentifier,
@@ -672,6 +750,7 @@ public sealed partial class AdvisoryRegressionTests
             };
             Requests.Add(req);
             _items.Add(new ProfileAssignmentItemRow(TenantA.Value, req.Id, 0, "sales.dbo.orders", "S-1-5-21-OWN1", "PENDING"));
+            if (multiItem) _items.Add(new ProfileAssignmentItemRow(TenantA.Value, req.Id, 1, "sales.dbo.orders_pub", "S-1-5-21-PUBOWN", "PENDING"));
             return req;
         }
 
@@ -709,8 +788,6 @@ public sealed partial class AdvisoryRegressionTests
             protected override DbConnection? DbConnection => null;
             public override void Commit() { }
             public override void Rollback() { }
-            public new Task CommitAsync(CancellationToken ct = default) => Task.CompletedTask;
-            public new Task RollbackAsync(CancellationToken ct = default) => Task.CompletedTask;
         }
     }
 }

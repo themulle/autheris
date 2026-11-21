@@ -384,9 +384,8 @@ public sealed partial class ConsentDecisionPipeline(
                     statusCode: 400);
             }
 
-            grantRequiresFourEyes = meta != null &&
-                (grantDecision.RequiresFourEyes ||
-                 string.Equals(grantDecision.ErrorCode, GrantErrorCodes.FourEyesRequired, StringComparison.Ordinal));
+            grantRequiresFourEyes = grantDecision.RequiresFourEyes ||
+                string.Equals(grantDecision.ErrorCode, GrantErrorCodes.FourEyesRequired, StringComparison.Ordinal);
         }
 
         bool stewardGate = clearPlan is { NeedsSteward: true };

@@ -78,6 +78,13 @@ public sealed partial class ProfileAssignmentRequestService
         {
             try
             {
+                for (int i = 0; i < externalApproverSids.Count - 1; i++)
+                {
+                    await _store.ApplyRequestStepAndStatusInTransactionAsync(
+                        tx.Transaction, req, newStatus: null, externalApproverSids[i], "APPROVED", command.ExternalAttribution?.ExternalReference, now, ct)
+                        .ConfigureAwait(false);
+                }
+
                 await _store.ApplyRequestStepAndStatusInTransactionAsync(
                     tx.Transaction, req, "APPROVED", externalApproverSids[^1], "APPROVED", command.ExternalAttribution?.ExternalReference, now, ct)
                     .ConfigureAwait(false);

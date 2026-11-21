@@ -1,6 +1,5 @@
 namespace Autheris.Application.Governance.Services;
 
-using System;
 using System.Collections.Generic;
 using System.Security.Claims;
 using Autheris.Application.Governance.ConsentRequests;
@@ -13,8 +12,8 @@ internal static class ActorIdentifiers
         SeparationOfDutiesService.CollectActorIdentifiers(caller, actorSid, callerContext);
 
     internal static bool IsActorSubject(HashSet<string> actorIdentifiers, string? granteeRef) =>
-        SeparationOfDutiesService.AnyOverlap(actorIdentifiers, granteeRef);
+        SeparationOfDutiesService.AnyOverlap(actorIdentifiers, granteeRef, includeLocalAccountForms: true);
 
     internal static void AddIdentifierForms(HashSet<string> set, string? value) =>
-        SeparationOfDutiesService.AddIdentifierForms(set, value);
+        SeparationOfDutiesService.AddIdentifierForms(set, value, includeLocalAccountForms: true);
 }
