@@ -82,6 +82,17 @@ public sealed class GrantEffectPreviewService(
             allTables = Array.Empty<TableMetadata>();
         }
 
+        if (allTables.Count == 0)
+        {
+            foreach (var entry in entries)
+            {
+                bool includesFuture = entry.RequestedItems.Any(static i => !string.IsNullOrWhiteSpace(i.Target) && i.Target.Contains('*', StringComparison.Ordinal));
+                results[entry.RequestId] = new GrantEffectPreviewResult(0, includesFuture, Array.Empty<RedundantGrantFlag>(), false, Array.Empty<string>());
+            }
+            await RecordBatchPreviewAuditAsync(actor, entries.Count, ct).ConfigureAwait(false);
+            return results;
+        }
+
         VirtualFilterSnapshot? snapshot = await LoadSnapshotAsync(ct).ConfigureAwait(false);
         var now = _time.GetUtcNow();
         var consentsByTenant = new Dictionary<TenantId, IReadOnlyList<Consent>>();

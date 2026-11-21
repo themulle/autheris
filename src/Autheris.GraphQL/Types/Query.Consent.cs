@@ -68,6 +68,7 @@ public sealed partial class Query
                 .Build());
         }
 
+        var tenantId = RequireCallerTenant(principal, "No valid tenant in the authentication token.");
         var (effectiveFirst, effectiveAfter) = ResolveBoundedPaging(first, after, gatewayOptions?.Value?.GraphQL);
         var userSid = principal.GetUserSid();
         if (userSid == null || effectiveFirst == 0)
@@ -75,7 +76,6 @@ public sealed partial class Query
             return Array.Empty<ConsentRequestDto>();
         }
 
-        var tenantId = RequireCallerTenant(principal, "No valid tenant in the authentication token.");
         var requests = await approvalRepository.GetRequestsByRequesterSidAsync(userSid.Value, tenantId, status, ct).ConfigureAwait(false);
         return requests
             .Skip(effectiveAfter)
@@ -117,6 +117,7 @@ public sealed partial class Query
                 .Build());
         }
 
+        var tenantId = RequireCallerTenant(principal, "No valid tenant in the authentication token.");
         var (effectiveFirst, effectiveAfter) = ResolveBoundedPaging(first, after, gatewayOptions?.Value?.GraphQL);
         var userSid = principal.GetUserSid();
         if (userSid == null || effectiveFirst == 0)
@@ -124,7 +125,6 @@ public sealed partial class Query
             return Array.Empty<ConsentRequestDto>();
         }
 
-        var tenantId = RequireCallerTenant(principal, "No valid tenant in the authentication token.");
         var requests = await approvalRepository.GetPendingRequestsForApproverAsync(userSid.Value, tenantId, ct).ConfigureAwait(false);
         var paged = requests.Skip(effectiveAfter).Take(effectiveFirst).ToList();
         var previews = await Autheris.Application.ConsentRequests.ProfileAssignments.ApprovalEffectPreviewHelper
@@ -176,6 +176,7 @@ public sealed partial class Query
                 .Build());
         }
 
+        var tenantId = RequireCallerTenant(principal, "No valid tenant in the authentication token.");
         var (effectiveFirst, effectiveAfter) = ResolveBoundedPaging(first, after, gatewayOptions?.Value?.GraphQL);
         var userSid = principal.GetUserSid();
         if (userSid == null || effectiveFirst == 0)
@@ -186,7 +187,6 @@ public sealed partial class Query
         var groupSids = principal.GetGroupSids();
         var allSubjects = groupSids.Append(userSid.Value).ToList();
         var roles = principal.GetUserRoles();
-        var tenantId = principal.GetTenantId();
         var now = DateTimeOffset.UtcNow;
 
         IReadOnlyList<Consent> consents;

@@ -13,6 +13,7 @@ using Shouldly;
 using Xunit;
 
 /// <summary>VF-09: the federation context signature covers the query string.</summary>
+[Collection("SubgraphReplayCache")]
 [Trait("Category", "Security")]
 public sealed class SubgraphQuerySignatureVf09Tests
 {

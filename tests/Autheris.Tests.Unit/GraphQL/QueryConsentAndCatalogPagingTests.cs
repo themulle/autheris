@@ -158,10 +158,10 @@ public sealed class QueryConsentAndCatalogPagingTests
         public Task<ConsentClassificationAccess> UpsertConsentClassificationAccessAsync(ConsentClassificationAccess entry, CancellationToken ct = default) => throw new NotSupportedException();
     }
 
-    private sealed class FixedVisibilityService(IReadOnlyList<TableMetadata> tables) : ICatalogVisibilityService
+    private sealed class FixedVisibilityService(IReadOnlyList<TableMetadata> tables, CallerScope scope = CallerScope.Tenant) : ICatalogVisibilityService
     {
         public ValueTask<CatalogVisibleSet> GetVisibleAsync(CatalogCaller caller, Autheris.Application.Governance.Contracts.SchemaContractDefinition? contract = null, CancellationToken ct = default) =>
-            ValueTask.FromResult(new CatalogVisibleSet(tables, CallerScope.Tenant, isAdminView: false));
+            ValueTask.FromResult(new CatalogVisibleSet(tables, scope, isAdminView: false));
         public ValueTask<CatalogVisibleRow?> FindVisibleAsync(CatalogCaller caller, TableIdentifier table, CancellationToken ct = default) =>
             ValueTask.FromResult<CatalogVisibleRow?>(null);
         public ValueTask<IReadOnlySet<TableIdentifier>> FilterVisibleAsync(CatalogCaller caller, IReadOnlyCollection<TableIdentifier> candidates, CancellationToken ct = default) =>
@@ -264,5 +264,84 @@ public sealed class QueryConsentAndCatalogPagingTests
         catalog[0].TableName.ShouldBe("tbl_003");
         catalog[1].TableName.ShouldBe("tbl_004");
         classificationRepo.ColumnClassificationLookups.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task GetCatalogAsync_SearchDoesNotLeakInaccessibleColumnNames()
+    {
+        var user = AuthenticatedUser();
+        var accessor = AccessorFor(user);
+        var employeesId = new TableIdentifier("sales", "dbo", "employees");
+        var table = new TableMetadata
+        {
+            Identifier = employeesId,
+            OwnerTenantId = TenantA.Value,
+            CatalogView = CatalogView.Granted,
+            Table = new Table
+            {
+                Id = Guid.NewGuid(),
+                SourceName = "sales",
+                SchemaName = "dbo",
+                TableName = "employees",
+                DataSourceType = DataSourceType.HttpDeclarative,
+                IsActive = true
+            },
+            Columns =
+            [
+                new TableColumn { Id = Guid.NewGuid(), ColumnName = "public_id", DataType = "int" },
+                new TableColumn { Id = Guid.NewGuid(), ColumnName = "secret_salary", DataType = "decimal" }
+            ]
+        };
+
+        var consent = new Consent
+        {
+            Id = Guid.NewGuid(),
+            TableIdentifier = employeesId,
+            TenantId = TenantA,
+            Effect = ConsentEffect.Allow,
+            GranteeType = GranteeType.User,
+            GranteeSid = new Sid("S-USER-1"),
+            ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
+            ValidTo = DateTimeOffset.UtcNow.AddDays(7),
+            ColumnRules = [new ConsentColumnRule { ColumnName = "public_id", AccessLevel = ColumnAccessLevel.Clear }]
+        };
+
+        var tables = new[] { table };
+        var query = new Query();
+        var tableRepo = new CountingTableMetadataRepository(tables);
+        var consentRepo = new CountingConsentRepository([consent]);
+        var approvalRepo = new CountingApprovalRepository([], []);
+        var visibility = new FixedVisibilityService(tables, CallerScope.Subject);
+        var resolution = new ConsentResolutionService();
+
+        (await query.GetCatalogAsync(
+            search: "secret_salary",
+            metadataRepository: tableRepo,
+            consentRepository: consentRepo,
+            approvalRepository: approvalRepo,
+            httpContextAccessor: accessor,
+            visibilityService: visibility,
+            consentResolution: resolution)).ShouldBeEmpty();
+
+        (await query.GetCatalogAsync(
+            search: "secret_salary",
+            metadataRepository: tableRepo,
+            consentRepository: consentRepo,
+            approvalRepository: approvalRepo,
+            httpContextAccessor: accessor,
+            visibilityService: visibility,
+            consentResolution: null)).ShouldBeEmpty();
+
+        var allowed = await query.GetCatalogAsync(
+            search: "public_id",
+            metadataRepository: tableRepo,
+            consentRepository: consentRepo,
+            approvalRepository: approvalRepo,
+            httpContextAccessor: accessor,
+            visibilityService: visibility,
+            consentResolution: resolution);
+
+        allowed.Count.ShouldBe(1);
+        allowed[0].TableName.ShouldBe("employees");
     }
 }

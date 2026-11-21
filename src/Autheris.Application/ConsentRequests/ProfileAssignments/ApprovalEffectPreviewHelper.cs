@@ -75,38 +75,50 @@ public static class ApprovalEffectPreviewHelper
             return dtos;
         }
 
-        var entries = new List<GrantEffectPreviewBatchEntry>(requests.Count);
-        TenantId actorTenant = default;
+        var groups = new Dictionary<TenantId, List<GrantEffectPreviewBatchEntry>>();
         foreach (var request in requests)
         {
-            if (!IsPendingStatus(request.Status)) continue;
-            var requestedItems = BuildRequestedItems(request);
-            if (requestedItems.Count == 0) continue;
-            if (actorTenant.Value is null) actorTenant = request.TenantId;
-            entries.Add(new GrantEffectPreviewBatchEntry(request.Id, BuildSubjectContext(request), requestedItems));
-        }
-
-        if (entries.Count == 0)
-        {
-            return dtos;
-        }
-
-        try
-        {
-            var actorContext = BuildContext(actorSid, actorTenant, GranteeType.User);
-            var batch = await effectPreview.PreviewBatchAsync(actorContext, entries, ct).ConfigureAwait(false);
-            foreach (var (id, preview) in batch)
+            if (request is null || !IsPendingStatus(request.Status)) continue;
+            try
             {
-                dtos[id] = preview is null ? null : ToDto(preview);
+                var requestedItems = BuildRequestedItems(request);
+                if (requestedItems.Count == 0) continue;
+                if (!groups.TryGetValue(request.TenantId, out var list))
+                {
+                    list = new List<GrantEffectPreviewBatchEntry>();
+                    groups[request.TenantId] = list;
+                }
+                list.Add(new GrantEffectPreviewBatchEntry(request.Id, BuildSubjectContext(request), requestedItems));
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                // Approval preview is strictly non-blocking: skip malformed requests rather than aborting batch.
             }
         }
-        catch (OperationCanceledException)
+
+        foreach (var (actorTenant, entries) in groups)
         {
-            throw;
-        }
-        catch (Exception)
-        {
-            // Approval preview is strictly non-blocking: return empty map rather than failing request retrieval.
+            try
+            {
+                var actorContext = BuildContext(actorSid, actorTenant, GranteeType.User);
+                var batch = await effectPreview.PreviewBatchAsync(actorContext, entries, ct).ConfigureAwait(false);
+                foreach (var (id, preview) in batch)
+                {
+                    dtos[id] = preview is null ? null : ToDto(preview);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                // Approval preview is strictly non-blocking: return partial map rather than failing request retrieval.
+            }
         }
 
         return dtos;
