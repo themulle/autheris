@@ -503,9 +503,8 @@ public class GovernanceSecurityTests : IDisposable
             RequestedValidTo = DateTimeOffset.UtcNow.AddDays(7)
         });
 
-        var accessor = CreateAccessor(delegateSid);
-        var result = await _mutation.ApproveConsentRequestAsync(req.Id, "key-del-app", _repository, accessor);
-        result.Status.ShouldBe("APPROVED");
+        (await _mutation.ApproveConsentRequestAsync(req.Id, "key-del-app", _repository, CreateAccessor(delegateSid))).Status.ShouldBe("PENDING_SECOND_APPROVAL");
+        (await _mutation.ApproveConsentRequestAsync(req.Id, "key-del-app-2", _repository, CreateAccessor(directOwnerSid))).Status.ShouldBe("APPROVED");
     }
 
     [Fact]

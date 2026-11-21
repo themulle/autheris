@@ -102,7 +102,8 @@ public sealed partial class Mutation
             ?? new ExternalDecisionGuard(
                 services.GetService<IScimUserStore>(),
                 services.GetService<IScimGroupStore>(),
-                services.GetService<Autheris.Application.Identity.IIdentityRealmRegistry>());
+                services.GetService<Autheris.Application.Identity.IIdentityRealmRegistry>(),
+                services.GetService<ISeparationOfDutiesService>());
 
         return new ConsentDecisionPipeline(
             approvalRepository,
@@ -119,7 +120,8 @@ public sealed partial class Mutation
             services.GetService<IOptions<GatewayOptions>>(),
             services.GetService<IOptions<GovernanceTextOptions>>(),
             services.GetService<TimeProvider>(),
-            fallbackTenantId);
+            fallbackTenantId,
+            separationOfDutiesService: services.GetService<ISeparationOfDutiesService>());
     }
 
     private static GraphQLException ToDecisionGraphQLException(ConsentDecisionException ex)

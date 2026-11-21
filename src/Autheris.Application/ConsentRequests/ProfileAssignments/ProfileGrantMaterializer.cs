@@ -428,23 +428,7 @@ public sealed class ProfileGrantMaterializer(
             HashSet<int>? allowedSet = null;
             if (approvedItemNos != null)
             {
-                if (approvedItemNos.Count == 0)
-                {
-                    throw new ConsentDecisionException("VALIDATION_ERROR", "At least one profile item must be approved.", statusCode: 400);
-                }
-
-                var validSet = context.Items.Select(i => i.ItemNo).ToHashSet();
-                foreach (var no in approvedItemNos)
-                {
-                    if (!validSet.Contains(no))
-                    {
-                        throw new ConsentDecisionException(
-                            ConsentDecisionErrorCodes.DecisionExceedsRequest,
-                            $"Approved item index {no} is outside the requested profile items.",
-                            statusCode: 422);
-                    }
-                }
-
+                ValidateApprovedItemNos(context, approvedItemNos);
                 allowedSet = approvedItemNos.ToHashSet();
             }
 
@@ -482,6 +466,36 @@ public sealed class ProfileGrantMaterializer(
         }
 
         return results;
+    }
+
+    internal static void ValidateExternalNarrowing(
+        ProfileAssignmentRequestContext context,
+        IReadOnlyList<TableMetadata> tenantTables,
+        IReadOnlyList<int>? approvedItemNos,
+        IReadOnlyList<string>? approvedClearColumns)
+    {
+        if (approvedItemNos != null) ValidateApprovedItemNos(context, approvedItemNos);
+        BuildApprovedClearColumnFilter(context.MaskingMode, approvedClearColumns, tenantTables, context.Items);
+    }
+
+    private static void ValidateApprovedItemNos(ProfileAssignmentRequestContext context, IReadOnlyList<int> approvedItemNos)
+    {
+        if (approvedItemNos.Count == 0)
+        {
+            throw new ConsentDecisionException("VALIDATION_ERROR", "At least one profile item must be approved.", statusCode: 400);
+        }
+
+        var validSet = context.Items.Select(i => i.ItemNo).ToHashSet();
+        foreach (var no in approvedItemNos)
+        {
+            if (!validSet.Contains(no))
+            {
+                throw new ConsentDecisionException(
+                    ConsentDecisionErrorCodes.DecisionExceedsRequest,
+                    $"Approved item index {no} is outside the requested profile items.",
+                    statusCode: 422);
+            }
+        }
     }
 
     private static HashSet<string>? BuildApprovedClearColumnFilter(

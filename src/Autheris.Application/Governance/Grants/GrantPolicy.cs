@@ -2,6 +2,7 @@ namespace Autheris.Application.Governance.Grants;
 
 using System;
 using System.Linq;
+using Autheris.Application.Governance.ConsentRequests;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Options;
@@ -74,7 +75,7 @@ public sealed class GrantPolicy(IOptions<IndividualGrantOptions>? options = null
         if (r.Kind == GrantKind.Renewal)
         {
             if (string.IsNullOrWhiteSpace(r.Renewer) ||
-                string.Equals(r.Renewer.Trim(), r.GranteeRef?.Trim(), StringComparison.OrdinalIgnoreCase))
+                SeparationOfDutiesService.IdentifiersOverlap(r.Renewer, r.GranteeRef))
             {
                 return GrantDecision.Deny(GrantErrorCodes.RenewalByGrantee, "A grant must be renewed by an owner or delegate, never by the grantee.", cls, maxValidTo);
             }
@@ -116,13 +117,7 @@ public sealed class GrantPolicy(IOptions<IndividualGrantOptions>? options = null
         // classes, approver != requester != grantee.
         if (fourEyes && r.Approvers is not null)
         {
-            var distinct = r.Approvers
-                .Where(a => !string.IsNullOrWhiteSpace(a))
-                .Select(a => a.Trim())
-                .Where(a => !string.Equals(a, r.Requester?.Trim(), StringComparison.OrdinalIgnoreCase)
-                         && !string.Equals(a, r.GranteeRef?.Trim(), StringComparison.OrdinalIgnoreCase))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .Count();
+            var distinct = SeparationOfDutiesService.CountDistinctIndependentApprovers(r.Approvers, r.Requester, r.GranteeRef);
             var needed = cls is GrantClass.ServicePrincipal ? 1 : 2;
 
             if (distinct < needed)

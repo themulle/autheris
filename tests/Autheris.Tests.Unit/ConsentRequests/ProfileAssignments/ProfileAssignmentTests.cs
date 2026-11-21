@@ -164,10 +164,16 @@ public sealed class ProfileAssignmentTests
         widenColsEx.StatusCode.ShouldBe(422);
         widenColsEx.ErrorCode.ShouldBe(ConsentDecisionErrorCodes.DecisionExceedsRequest);
 
+        var step1Ext = await fx.Pipeline.DecideAsync(new ConsentDecisionCommand(
+            sub.RequestId, ConsentDecisionKind.Approve, ConsentDecisionChannel.External, Principal: null,
+            ExternalAttribution: fx.ExternalAttribution(), ContextTenantId: Tenant));
+        step1Ext.Request.Status.ShouldBe("PENDING_EXTERNAL_APPROVAL");
+        fx.Consents.ShouldBeEmpty();
+
         var approved = await fx.Pipeline.DecideAsync(new ConsentDecisionCommand(
             sub.RequestId, ConsentDecisionKind.Approve, ConsentDecisionChannel.External, Principal: null,
             ApprovedValidTo: FixedNow.AddDays(10),
-            ExternalAttribution: fx.ExternalAttribution(), ContextTenantId: Tenant,
+            ExternalAttribution: fx.ExternalAttribution(OwnerB), ContextTenantId: Tenant,
             ApprovedProfileItems: [0], ApprovedClearColumns: ["id", "total"]));
         approved.Request.Status.ShouldBe("APPROVED");
         fx.Consents.Count.ShouldBe(1);
@@ -197,8 +203,13 @@ public sealed class ProfileAssignmentTests
         var extReq = fx.Requests.Single(r => r.Id != sub.RequestId);
         extReq.RequestKind.ShouldBe(ConsentRequestKind.ProfileAssignment);
 
-        await fx.Pipeline.DecideAsync(new ConsentDecisionCommand(
+        var step1Ext = await fx.Pipeline.DecideAsync(new ConsentDecisionCommand(
             extReq.Id, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, fx.ApproverPrincipal(OwnerC), ContextTenantId: Tenant));
+        step1Ext.Request.Status.ShouldBe("PENDING_SECOND_APPROVAL");
+
+        var step2Ext = await fx.Pipeline.DecideAsync(new ConsentDecisionCommand(
+            extReq.Id, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, fx.ApproverPrincipal(OwnerB, isGovAdmin: true), ContextTenantId: Tenant));
+        step2Ext.Request.Status.ShouldBe("APPROVED");
 
         var refreshedPattern = fx.Consents.Single(c => c.Id == patternConsent.Id);
         refreshedPattern.ApprovingOwners.ShouldContain(OwnerC.Value);
@@ -395,11 +406,15 @@ public sealed class ProfileAssignmentTests
             return new(new ClaimsIdentity(claims, "test"));
         }
 
-        public ClaimsPrincipal ApproverPrincipal(Sid sid) => new(new ClaimsIdentity(
-            [new Claim("tid", Tenant.Value), new Claim(ClaimTypes.PrimarySid, sid.Value), new Claim("scp", "data.access.review")], "test"));
+        public ClaimsPrincipal ApproverPrincipal(Sid sid, bool isGovAdmin = false)
+        {
+            var claims = new List<Claim> { new("tid", Tenant.Value), new(ClaimTypes.PrimarySid, sid.Value), new("scp", "data.access.review") };
+            if (isGovAdmin) claims.Add(new Claim(ClaimTypes.Role, "GovernanceAdmin"));
+            return new(new ClaimsIdentity(claims, "test"));
+        }
 
-        public ExternalDecisionAttribution ExternalAttribution() =>
-            new(ExternalSystemId, "EXT-REF-1", "APPROVE", new AssertedApprover(OwnerA.Value, ResolvedSid: OwnerA.Value), FixedNow);
+        public ExternalDecisionAttribution ExternalAttribution(Sid? approver = null) =>
+            new(ExternalSystemId, $"EXT-REF-{(approver ?? OwnerA).Value}", "APPROVE", new AssertedApprover((approver ?? OwnerA).Value, ResolvedSid: (approver ?? OwnerA).Value), FixedNow);
 
         public Task<IReadOnlyList<AccessProfile>> GetProfilesForSubjectAsync(TenantId tenantId, string subject, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<AccessProfile>>([]);
         public Task<IReadOnlyList<AccessProfile>> GetAllProfilesAsync(TenantId tenantId, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<AccessProfile>>(Profiles.Values.ToList());

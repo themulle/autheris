@@ -5895,6 +5895,7 @@ Autheris.Tests.Unit.Security.AdvisoryRegressionTests.Ghsa_7ccv_5qwm_regression
 Autheris.Tests.Unit.Security.AdvisoryRegressionTests.Ghsa_7pjw_hvff_regression
 Autheris.Tests.Unit.Security.AdvisoryRegressionTests.Ghsa_9229_wvm9_regression
 Autheris.Tests.Unit.Security.AdvisoryRegressionTests.Ghsa_92vp_pp52_regression
+Autheris.Tests.Unit.Security.AdvisoryRegressionTests.Ghsa_g4xx_ghq4_regression
 Autheris.Tests.Unit.Security.AdvisoryRegressionTests.Ghsa_jcf8_55h3_regression
 Autheris.Tests.Unit.Security.AdvisoryRegressionTests.Ghsa_jw88_3c96_regression
 Autheris.Tests.Unit.Security.AdvisoryRegressionTests.Ghsa_p234_gqh2_regression
