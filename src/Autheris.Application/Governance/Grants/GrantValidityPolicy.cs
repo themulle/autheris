@@ -289,12 +289,23 @@ public sealed class GrantValidityPolicy : IGrantValidityPolicy
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        var effectiveStart = request.RequestedValidFrom is { } requestedFrom && requestedFrom > now
+            ? requestedFrom
+            : now;
+
         if (request.RequestedValidTo <= now)
         {
             throw new GrantValidityException(
                 RequestValidityElapsedCode,
                 "The requested validity window has already elapsed and can no longer be approved.",
                 statusCode: 409);
+        }
+
+        if (request.RequestedValidTo <= effectiveStart)
+        {
+            throw new GrantValidityException(
+                "VALIDATION_ERROR",
+                "The requested validity end must lie after the requested validity start.");
         }
 
         var maxAllowed = GrantTimeMath.AddSaturating(now, MaxDuration);
@@ -305,6 +316,13 @@ public sealed class GrantValidityPolicy : IGrantValidityPolicy
                 throw new GrantValidityException(
                     GrantErrorCodes.ExpiryInPast,
                     "The approved validity end must lie in the future.");
+            }
+
+            if (approverValidTo.Value <= effectiveStart)
+            {
+                throw new GrantValidityException(
+                    GrantErrorCodes.ExpiryInPast,
+                    "The approved validity end must lie after the requested validity start.");
             }
 
             if (approverValidTo.Value > request.RequestedValidTo)

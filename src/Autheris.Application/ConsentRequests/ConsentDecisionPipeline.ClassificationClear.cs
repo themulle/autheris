@@ -176,14 +176,14 @@ public sealed partial class ConsentDecisionPipeline
     }
 
     private static List<ConsentClassificationAccess> BuildClearAccess(
-        ConsentRequest req, Guid consentId, ClearApprovalPlan plan, Sid approver, DateTimeOffset now, DateTimeOffset grantValidTo, int defaultMaxClearDays) =>
+        ConsentRequest req, Guid consentId, ClearApprovalPlan plan, Sid approver, DateTimeOffset validFrom, DateTimeOffset now, DateTimeOffset grantValidTo, int defaultMaxClearDays) =>
         plan.Items.Select(item => new ConsentClassificationAccess
         {
             TenantId = req.TenantId.Value,
             ConsentId = consentId,
             Code = item.Classification,
             AccessLevel = ColumnAccessLevel.Clear,
-            ValidUntil = ClassificationClearPolicy.CapValidity(grantValidTo, now, plan.Catalog.Definitions[item.Classification], defaultMaxClearDays),
+            ValidUntil = ClassificationClearPolicy.CapValidity(grantValidTo, validFrom, plan.Catalog.Definitions[item.Classification], defaultMaxClearDays),
             ApprovedBySid = approver.Value,
             ApprovedAt = now
         }).ToList();

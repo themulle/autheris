@@ -113,4 +113,25 @@ public sealed class DatabricksTokenCacheBoundTests
         cache.TryGet("dbx2", "tenant-a", DatabricksAuthMode.Pat, "p1", null, DateTimeOffset.UtcNow, out var tokC).ShouldBeTrue();
         tokC.ShouldBe("tok-c");
     }
+
+    [Fact]
+    public async Task Set_WhenReplacingExistingKey_PreservesLiveTrackingKeyForEvict()
+    {
+        var fakeTime = new FakeTimeProvider(InitialTime);
+        using var cache = new DatabricksTokenCache(maxEntries: 50, timeProvider: fakeTime);
+
+        cache.Set("adb.corp.net", "tenant-a", DatabricksAuthMode.OAuthM2M, "client-1", "hash-1", "token-v1", InitialTime.AddMinutes(30));
+        cache.Set("adb.corp.net", "tenant-a", DatabricksAuthMode.OAuthM2M, "client-1", "hash-1", "token-v2", InitialTime.AddHours(1));
+
+        // Allow MemoryCache's background PostEvictionCallback for the replaced entry to execute.
+        await Task.Delay(100);
+
+        cache.TryGet("adb.corp.net", "tenant-a", DatabricksAuthMode.OAuthM2M, "client-1", "hash-1", fakeTime.GetUtcNow(), out var liveToken).ShouldBeTrue();
+        liveToken.ShouldBe("token-v2");
+
+        cache.Evict("adb.corp.net", "tenant-a");
+
+        cache.TryGet("adb.corp.net", "tenant-a", DatabricksAuthMode.OAuthM2M, "client-1", "hash-1", fakeTime.GetUtcNow(), out _).ShouldBeFalse();
+        cache.EntryCount.ShouldBe(0);
+    }
 }

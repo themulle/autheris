@@ -29,6 +29,7 @@ using Autheris.Domain.Events;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Security;
 using Autheris.Domain.Tenancy;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -347,7 +348,15 @@ public class AccessPlanningService : IAccessPlanningService
             throw new SecurityException("A tenant is required to apply an access plan.");
         }
 
-        var stored = await ConsumeConfirmedPlanAsync(request, adminSid, tenantId.Value, AccessPlanKind.Access, (plan, token) =>
+        var consentRepository = _consentRepository
+            ?? throw new SecurityException("Access plans are applied as grant records; no grant store is available.");
+
+        var actorSid = new Sid(adminSid);
+        TableIdentifier tableId = default;
+        IReadOnlyList<Consent> consents = [];
+        DateTimeOffset now = default;
+
+        var stored = await ConsumeConfirmedPlanAsync(request, adminSid, tenantId.Value, AccessPlanKind.Access, async (plan, innerCt) =>
         {
             foreach (var grant in plan.Request.Grants)
             {
@@ -356,33 +365,38 @@ public class AccessPlanningService : IAccessPlanningService
                     throw new SecurityException($"Invalid principal '{grant.Principal}' in access plan.");
                 }
             }
-            return Task.CompletedTask;
+
+            tableId = ParseTableIdentifier(plan.Request.DatasetId);
+
+            // Re-evaluated at apply time before consuming the confirmation token so stale or invalid plans do not burn it.
+            var applyMeta = await _tableRepo.GetTableMetadataAsync(tableId, innerCt).ConfigureAwait(false);
+            now = _time.GetUtcNow();
+            var maxValidTo = await EnsureGrantsAllowedAsync(
+                tenantId, caller, actorSid, plan.Request, applyMeta, plan.Result.Diffs, now,
+                ActorIdentifiers.Collect(caller, actorSid, null), rejectFourEyes: true, innerCt).ConfigureAwait(false);
+            if (applyMeta is null)
+            {
+                throw new SecurityException($"Table '{plan.Request.DatasetId}' does not exist; a grant record needs a registered table.");
+            }
+
+            consents = AccessGrantRecords.Build(plan.Request.Grants, applyMeta, tableId, tenantId, adminSid, now, maxValidTo);
+            foreach (var consent in consents)
+            {
+                consent.Validate();
+            }
         }, ct).ConfigureAwait(false);
 
-        var consentRepository = _consentRepository
-            ?? throw new SecurityException("Access plans are applied as grant records; no grant store is available.");
-        var tableId = ParseTableIdentifier(stored.Request.DatasetId);
-
-        // re-evaluated at apply time (the plan may have been stored with a validUntil that has meanwhile lapsed).
-        var applyMeta = await _tableRepo.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
-        var now = _time.GetUtcNow();
-        var actorSid = new Sid(adminSid);
-        var maxValidTo = await EnsureGrantsAllowedAsync(
-            tenantId, caller, actorSid, stored.Request, applyMeta, stored.Result.Diffs, now,
-            ActorIdentifiers.Collect(caller, actorSid, null), rejectFourEyes: true, ct).ConfigureAwait(false);
-        if (applyMeta is null)
+        var auditEntry = new AuditLogEntry
         {
-            throw new SecurityException($"Table '{stored.Request.DatasetId}' does not exist; a grant record needs a registered table.");
-        }
-
-        // the caller's tenant strictly scopes the grant records and audit; no Domain or default fallback.
-        var effectiveTenantId = tenantId.Value;
-        var consents = AccessGrantRecords.Build(stored.Request.Grants, applyMeta, tableId, new TenantId(effectiveTenantId), adminSid, now, maxValidTo);
-
-        // Write-ahead: the required record exists before the grant records are written.
-        await RecordAdminAuditAsync(
-            AuditEventTypes.AdminApplyAccess, new TenantId(effectiveTenantId), adminSid, stored.Request.DatasetId,
-            new
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            OccurredAt = now,
+            EventType = AuditEventTypes.AdminApplyAccess,
+            ActorSid = actorSid,
+            TargetTable = stored.Request.DatasetId,
+            Decision = "ALLOW",
+            TraceId = stored.Request.DatasetId,
+            DetailsJson = JsonSerializer.Serialize(new
             {
                 channel = "mcp",
                 planId = request.PlanId,
@@ -390,14 +404,19 @@ public class AccessPlanningService : IAccessPlanningService
                 reason = stored.Request.Reason,
                 appliedGrantCount = consents.Count,
                 wormSignature = Guid.NewGuid().ToString("N")
-            }, ct).ConfigureAwait(false);
+            })
+        };
 
-        foreach (var consent in consents)
-        {
-            await consentRepository.CreateConsentAsync(consent, ct).ConfigureAwait(false);
-        }
+        await consentRepository.ReplaceConsentsAsync(
+            [],
+            consents,
+            actorSid,
+            $"Access plan '{request.PlanId}' applied.",
+            ConsentRevocationAuthority.FromPrincipal(caller),
+            [auditEntry],
+            ct).ConfigureAwait(false);
 
-        if (_policyEpochRepo != null)
+        if (_policyEpochRepo != null && !ReferenceEquals(_policyEpochRepo, consentRepository))
         {
             await _policyEpochRepo.IncrementTableEpochAsync(tableId, ct).ConfigureAwait(false);
         }
@@ -410,7 +429,7 @@ public class AccessPlanningService : IAccessPlanningService
                 DatasetId: stored.Request.DatasetId,
                 ApproverSid: adminSid,
                 AppliedGrantCount: consents.Count,
-                Timestamp: DateTimeOffset.UtcNow,
+                Timestamp: _time.GetUtcNow(),
                 TenantId: NormalizeTenant(tenantId) ?? stored.TenantId), ct).ConfigureAwait(false);
         }
 

@@ -232,6 +232,34 @@ public sealed class CustomQueryPollerServiceTests
         updatedDesc!.HeadOffset.ShouldBe(desc.HeadOffset);
     }
 
+    [Fact]
+    public async Task PollStreamBatchAsync_UnspecifiedDateTime_TreatsValueAsUtc()
+    {
+        var poller = SamplePoller();
+        var monitor = new StaticOptionsMonitor<CustomQueryPollerOptions>(new CustomQueryPollerOptions { Enabled = true, Pollers = [poller] });
+
+        var unspecifiedDt = new DateTime(2026, 10, 19, 6, 0, 0, DateTimeKind.Unspecified);
+        var utcDt = new DateTime(2026, 10, 19, 6, 0, 0, DateTimeKind.Utc);
+        var rows = new List<Dictionary<string, object?>>
+        {
+            new() { ["id"] = 1L, ["name"] = "Alice", ["updated_at"] = unspecifiedDt }
+        };
+
+        var conn = new FakeDbConnection(rows);
+        var factory = new StubDataSourceConnectionFactory(_ => conn);
+        var service = new CustomQueryPollerService(monitor, _streamStore, _builder, factory, _signal, _clusterState, NullLogger<CustomQueryPollerService>.Instance, _crypto, _codec, gatewayOptions: _gatewayOpt);
+
+        var count = await service.PollStreamBatchAsync(poller, fencingToken: 1);
+
+        count.ShouldBe(1);
+        var desc = await _streamStore.EnsureStreamAsync("query_poller", TableIdentifier.Parse(poller.Table));
+        var vectorRecord = await _streamStore.GetWatermarkVectorAsync(desc.Id);
+        vectorRecord.ShouldNotBeNull();
+        var stored = vectorRecord!.Vector.GetValue("updated_at");
+        stored.ShouldBe(new DateTimeOffset(utcDt).ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+        DateTimeOffset.Parse(stored!, System.Globalization.CultureInfo.InvariantCulture).Offset.ShouldBe(TimeSpan.Zero);
+    }
+
     private sealed class TestCustomQueryPollerService : CustomQueryPollerService
     {
         public TestCustomQueryPollerService(

@@ -2,6 +2,8 @@ namespace Autheris.Infrastructure.Databricks;
 
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Threading;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Internal;
@@ -15,7 +17,8 @@ using Microsoft.Extensions.Options;
 public sealed class DatabricksTokenCache : IDisposable
 {
     private readonly MemoryCache _cache;
-    private readonly ConcurrentDictionary<(string DataSource, string TenantId), ConcurrentDictionary<string, byte>> _keysBySourceTenant = new();
+    private readonly ConcurrentDictionary<(string DataSource, string TenantId), ConcurrentDictionary<string, long>> _keysBySourceTenant = new();
+    private long _entrySequence;
     private readonly int _maxEntries;
     private readonly TimeProvider _timeProvider;
     private bool _disposed;
@@ -68,8 +71,9 @@ public sealed class DatabricksTokenCache : IDisposable
         var key = BuildKey(dataSourceName, tenantId, mode, principalId, callerHash);
         var group = (dataSourceName.ToLowerInvariant(), tenantId ?? "-");
 
-        var sourceKeys = _keysBySourceTenant.GetOrAdd(group, _ => new ConcurrentDictionary<string, byte>(StringComparer.Ordinal));
-        sourceKeys.TryAdd(key, 0);
+        var sourceKeys = _keysBySourceTenant.GetOrAdd(group, _ => new ConcurrentDictionary<string, long>(StringComparer.Ordinal));
+        var entrySeq = Interlocked.Increment(ref _entrySequence);
+        sourceKeys[key] = entrySeq;
 
         var entryOptions = new MemoryCacheEntryOptions
         {
@@ -79,18 +83,23 @@ public sealed class DatabricksTokenCache : IDisposable
 
         entryOptions.RegisterPostEvictionCallback((evictedKey, value, reason, state) =>
         {
-            if (state is (string ds, string tid, string kStr))
+            if (reason == EvictionReason.Replaced)
+            {
+                return;
+            }
+
+            if (state is (string ds, string tid, string kStr, long seq))
             {
                 if (_keysBySourceTenant.TryGetValue((ds, tid), out var set))
                 {
-                    set.TryRemove(kStr, out _);
+                    set.TryRemove(new KeyValuePair<string, long>(kStr, seq));
                     if (set.IsEmpty)
                     {
-                        _keysBySourceTenant.TryRemove((ds, tid), out _);
+                        _keysBySourceTenant.TryRemove(new KeyValuePair<(string DataSource, string TenantId), ConcurrentDictionary<string, long>>((ds, tid), set));
                     }
                 }
             }
-        }, (group.Item1, group.Item2, key));
+        }, (group.Item1, group.Item2, key, entrySeq));
 
         _cache.Set(key, token, entryOptions);
     }

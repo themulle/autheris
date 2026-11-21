@@ -457,35 +457,46 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
             Priority = CacheItemPriority.Low
         };
 
-        cacheEntryOptions.RegisterPostEvictionCallback((evictedKey, _, _, _) =>
+        var entrySeq = Interlocked.Increment(ref _keySequence);
+
+        cacheEntryOptions.RegisterPostEvictionCallback((evictedKey, _, reason, _) =>
         {
+            if (reason == EvictionReason.Replaced)
+            {
+                return;
+            }
+
             lock (_syncLock)
             {
                 if (_tableCacheKeys.TryGetValue(tableKey, out var currentKeys))
                 {
-                    currentKeys.TryRemove((string)evictedKey, out _);
+                    currentKeys.TryRemove(new KeyValuePair<string, long>((string)evictedKey, entrySeq));
                     if (currentKeys.IsEmpty)
                     {
-                        _tableCacheKeys.TryRemove(tableKey, out _);
+                        _tableCacheKeys.TryRemove(new KeyValuePair<string, ConcurrentDictionary<string, long>>(tableKey, currentKeys));
                     }
                 }
             }
         });
 
-        const int maxTrackedKeysPerTable = 5000;
-        var keys = _tableCacheKeys.GetOrAdd(tableKey, _ => new ConcurrentDictionary<string, long>(StringComparer.Ordinal));
-        if (keys.Count >= maxTrackedKeysPerTable)
+        lock (_syncLock)
         {
-            // Evict oldest 20% tracked keys from L1 to prevent memory exhaustion (FIFO/LRU)
-            var keysToRemove = keys.OrderBy(kv => kv.Value).Take(maxTrackedKeysPerTable / 5).Select(kv => kv.Key).ToList();
-            foreach (var k in keysToRemove)
+            const int maxTrackedKeysPerTable = 5000;
+            var keys = _tableCacheKeys.GetOrAdd(tableKey, _ => new ConcurrentDictionary<string, long>(StringComparer.Ordinal));
+            if (keys.Count >= maxTrackedKeysPerTable)
             {
-                keys.TryRemove(k, out _);
-                _memoryCache.Remove(k);
+                // Evict oldest 20% tracked keys from L1 to prevent memory exhaustion (FIFO/LRU)
+                var keysToRemove = keys.OrderBy(kv => kv.Value).Take(maxTrackedKeysPerTable / 5).Select(kv => kv.Key).ToList();
+                foreach (var k in keysToRemove)
+                {
+                    keys.TryRemove(k, out _);
+                    _memoryCache.Remove(k);
+                }
             }
+
+            keys[cacheKey] = entrySeq;
         }
 
-        keys[cacheKey] = Interlocked.Increment(ref _keySequence);
         _memoryCache.Set(cacheKey, envelope, cacheEntryOptions);
     }
 
