@@ -1,6 +1,7 @@
 namespace Autheris.Extensions.Lakehouse.Services;
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -47,6 +48,12 @@ public sealed class CompositeLakehouseStorageProvider : ILakehouseStorageProvide
     {
         var provider = SelectProvider(location);
         return provider.ExistsAsync(location, cancellationToken);
+    }
+
+    public ValueTask<IReadOnlyList<string>> ListAsync(string prefixLocation, CancellationToken cancellationToken = default)
+    {
+        var provider = SelectProvider(prefixLocation);
+        return provider.ListAsync(prefixLocation, cancellationToken);
     }
 
     private ILakehouseStorageProvider SelectProvider(string location)

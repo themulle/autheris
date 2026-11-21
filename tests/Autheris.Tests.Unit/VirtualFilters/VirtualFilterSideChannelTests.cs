@@ -102,7 +102,7 @@ public sealed class VirtualFilterSideChannelTests
             consents,
             mandatoryFilters: new FixedOutcome(Outcome(outcome)));
         var service = new IcebergRestCatalogFederationService(
-            Substitute.For<IIcebergMetadataReader>(), metadata, options, NullLogger<IcebergRestCatalogFederationService>.Instance,
+            new StubIcebergReader(), metadata, options, NullLogger<IcebergRestCatalogFederationService>.Instance,
             global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance,
             adp, consentRepo: consents);
         var analyst = Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(
@@ -116,5 +116,23 @@ public sealed class VirtualFilterSideChannelTests
         {
             await Should.ThrowAsync<SecurityException>(() => service.LoadTableAsync("tenant-1", "raw", "orders", analyst).AsTask());
         }
+    }
+
+    private sealed class StubIcebergReader : IIcebergMetadataReader
+    {
+        public ValueTask<string> ResolveMetadataLocationAsync(string tableOrMetadataLocation, CancellationToken cancellationToken = default)
+            => ValueTask.FromResult($"{tableOrMetadataLocation.TrimEnd('/')}/metadata/v1.metadata.json");
+
+        public ValueTask<Autheris.Modules.Lakehouse.Models.IcebergTableMetadata> LoadTableMetadataAsync(string metadataLocation, CancellationToken cancellationToken = default)
+            => ValueTask.FromResult(new Autheris.Modules.Lakehouse.Models.IcebergTableMetadata(
+                "uuid", 2, metadataLocation, 1, 0, 1,
+                new Autheris.Modules.Lakehouse.Models.IcebergSchema(0, []),
+                new Autheris.Modules.Lakehouse.Models.IcebergPartitionSpec(0, []), []));
+
+        public ValueTask<IReadOnlyList<Autheris.Modules.Lakehouse.Models.IcebergDataFile>> LoadDataFilesAsync(Autheris.Modules.Lakehouse.Models.IcebergTableMetadata metadata, CancellationToken cancellationToken = default)
+            => ValueTask.FromResult<IReadOnlyList<Autheris.Modules.Lakehouse.Models.IcebergDataFile>>([]);
+
+        public ValueTask<IReadOnlyList<Autheris.Modules.Lakehouse.Models.IcebergDataFile>> LoadDataFilesAsync(Autheris.Modules.Lakehouse.Models.IcebergTableMetadata metadata, string configuredTableLocation, CancellationToken cancellationToken = default)
+            => ValueTask.FromResult<IReadOnlyList<Autheris.Modules.Lakehouse.Models.IcebergDataFile>>([]);
     }
 }

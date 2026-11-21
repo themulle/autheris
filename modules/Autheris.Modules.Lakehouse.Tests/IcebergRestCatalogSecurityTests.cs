@@ -17,6 +17,7 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Extensions.Lakehouse.Interfaces;
 using Autheris.Extensions.Lakehouse.Services;
+using Autheris.Modules.Lakehouse.Models;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -64,6 +65,13 @@ public sealed class IcebergRestCatalogSecurityTests
         IConsentRepository? consentRepo = null,
         Autheris.Application.Policy.Pdp.IAccessDecisionPoint? accessDecisionPoint = null)
     {
+        _metadataReader.ResolveMetadataLocationAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(ci => new ValueTask<string>($"{ci.Arg<string>().TrimEnd('/')}/metadata/v1.metadata.json"));
+        _metadataReader.LoadTableMetadataAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(ci => new ValueTask<IcebergTableMetadata>(new IcebergTableMetadata(
+                "test-uuid", 2, ci.Arg<string>(), 1, 0, 1,
+                new IcebergSchema(0, []), new IcebergPartitionSpec(0, []), [])));
+
         var opt = options ?? _options;
         var adp = accessDecisionPoint ?? new Autheris.Application.Policy.Pdp.AccessDecisionPoint(
             opt,

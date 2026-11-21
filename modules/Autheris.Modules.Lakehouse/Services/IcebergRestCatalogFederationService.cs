@@ -222,9 +222,16 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
         LakehouseLocationGuard.EnsureNoTraversal(location, location);
 
         var config = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var metadataLocation = location.EndsWith(".metadata.json", StringComparison.OrdinalIgnoreCase)
+        var metadataLocation = IcebergMetadataReader.IsExplicitMetadataFileLocation(location)
             ? location
-            : $"{location.TrimEnd('/')}/metadata/v2.metadata.json";
+            : await _metadataReader.ResolveMetadataLocationAsync(location, ct).ConfigureAwait(false);
+
+        if (string.IsNullOrWhiteSpace(metadataLocation))
+        {
+            throw new InvalidOperationException($"Iceberg metadata location could not be resolved for '{location}'.");
+        }
+
+        LakehouseLocationGuard.EnsureNoTraversal(metadataLocation, location);
 
         var filteredMetadata = await LoadDeclaredColumnMetadataAsync(tableMeta, metadataLocation, ct).ConfigureAwait(false);
 
@@ -349,22 +356,15 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
             DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { reason })
         }, ct);
 
-    private async ValueTask<IcebergTableMetadata?> LoadDeclaredColumnMetadataAsync(
+    private async ValueTask<IcebergTableMetadata> LoadDeclaredColumnMetadataAsync(
         TableMetadata tableMeta,
         string metadataLocation,
         CancellationToken ct)
     {
-        IcebergTableMetadata? loadedMetadata = null;
-        try
-        {
-            loadedMetadata = await _metadataReader.LoadTableMetadataAsync(metadataLocation, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not SecurityException and not OperationCanceledException)
-        {
-            loadedMetadata = null;
-        }
+        var loadedMetadata = await _metadataReader.LoadTableMetadataAsync(metadataLocation, ct).ConfigureAwait(false)
+            ?? throw new InvalidOperationException($"Iceberg table metadata could not be loaded from '{metadataLocation}'.");
 
-        if (loadedMetadata?.CurrentSchema?.Fields == null)
+        if (loadedMetadata.CurrentSchema?.Fields == null)
         {
             return loadedMetadata;
         }
